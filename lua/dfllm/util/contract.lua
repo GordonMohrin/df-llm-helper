@@ -62,6 +62,7 @@ C.EVENTS = {
   -- drink_low (drink = days; block: still, brew, unvalidated, plants, barrels, brewer; auto: brew, office, barrels,
   -- gather) and manager_office (unvalidated orders older than orders.unval_days, with the reason)
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
+  PAUSED_BY_DF = {cls = 'A', by = 'arbiter'},     -- FR-94: the game stood paused by DF (a load, a popup) for resume.wake_min minutes
   -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z');
   -- BUG-037 d.park: the days a project blocked for good stood before it was parked (msg: its bp.cancel command)
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},
@@ -204,6 +205,7 @@ C.VERBS = {
   ['tempo.lower']  = {mod = 'arbiter'},
   ['pause']        = {mod = 'arbiter'},
   ['unpause']      = {mod = 'arbiter'},
+  ['resume']       = {mod = 'arbiter'},       -- FR-94: releases a pause DF set (pause:df, pause:popup) with the pause key
   ['trade.want']   = {mod = 'trade'},
   ['trade.retry']  = {mod = 'trade', modes = {PEACE = true}},   -- a second trade in the same visit (Run 10 y418)
   ['squad.sortie'] = {mod = 'military', approve = true,
@@ -237,6 +239,7 @@ C.VERB_BY = {audit = {follow = true, test = true}}
 -- act.lua functions (§5) and the modules allowed to call them ('*' = any module).
 C.ACT = {
   set_paused = {'arbiter'}, timestream = {'arbiter'}, setting = {'arbiter'},
+  press_pause = {'arbiter'},                          -- FR-94: the pause key to the main DF viewscreen (verb `resume`)
   overlay = {'arbiter'}, dismiss_popup = {'arbiter'},
   view_to = {'arbiter'}, view_window = {'arbiter'},   -- FR-88: the camera (viewport) like a click on a report
   civ_alert = {'siege'}, alert_burrows = {'siege'},

@@ -214,7 +214,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
                       ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM),
-                      ("breach", BREACH_LIM)):
+                      ("breach", BREACH_LIM), ("resume", RESUME_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -244,7 +244,9 @@ CONFINE_LIM: dict = {"max_days": (0, 365), "harmless_size": (0, 5000000), "lone_
 POPUPS_LIM: dict = {"other": "bool", "other_s": (5, 600), "log_s": (60, 86400)}
 # M3 (BUG-114): siege.lua breach_stuck: ticks of a BREACH whose failed bridges stay down before it falls back to SIEGE (0 = off)
 BREACH_LIM: dict = {"stuck_ticks": (0, 4032000)}
-REFLEX_EXTRA = ("confine", "popups", "breach")
+# FR-94 (Run 14 note 100): arbiter.lua resume_cfg: real minutes a pause by DF may stand before the wake PAUSED_BY_DF (0 = no wake)
+RESUME_LIM: dict = {"wake_min": (0, 240)}
+REFLEX_EXTRA = ("confine", "popups", "breach", "resume")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)

@@ -224,6 +224,7 @@ Every function returns `ok, res_or_err`, never raises, writes one line to `comma
 | `dismiss_popup(kind)` | whitelisted kind string | close the popup | arbiter |
 | `view_to(x, y, z)` → `ok, 'x,y,z'` | three integers (FR-88, Run 14 note 95) | the camera like a click on a report's "zoom to": `dfhack.gui.revealInDwarfmodeMap(pos, true)` centres the main viewport on the tile and sets the level (the call the trade sheet uses); only a view: no pause, no unit or building is touched, no zoom change. The caller (`lua/dfllm/viewlib.lua`) judged the tile: revealed (snapshot.tile), on the map. The verb `view` (§13) | arbiter |
 | `view_window(wx, wy, wz)` → `ok, 'wx,wy,wz'` | three integers (FR-88) | the player's viewport back: the scroll position DF keeps in `df.global.window_x/y/z`, as read before the first `view` of a series (a DF without it: `ok` false) | arbiter |
+| `press_pause()` → `ok, 'running'\|'paused'` | none (FR-94, Run 14 note 100) | the player's Space on the main screen: `gui.simulateInput(dfhack.gui.getDFViewscreen(true), 'D_PAUSE')`, sent only while `pause_state` is true (the key toggles); the result is the state read right after the key; no `pause_state` write [live-untested] | arbiter |
 | `civ_alert(on)` | bool | gui/civ-alert `sound_alarm()`/`clear_alarm()` (civ-alert.lua:27,36) | siege |
 | `alert_burrows(names)` | array of burrow names | set the civ-alert burrow list to exactly these (civ-alert.lua:40,45) | siege |
 | `squad_create(name, opts)` → `ok, squad_id` | `opts = {assignment_id?, leader?}` (live L2) | squads screen "create squad": `dfhack.military.makeSquad` (Lua API.txt:1973) on a vacant MILITIA_COMMANDER/CAPTAIN assignment, else on a new MILITIA_CAPTAIN assignment (the screen adds one per squad), + nickname; with `leader` the leader is seated at once (`squad_leader`) | military |
@@ -883,6 +884,7 @@ The fort-specific geometry, written by templates (bp `manifest` fragments) and m
 | SIEGE_STATUS | C | siege | vis, worn, on_station, deaths, captures; BUG-052: off (str ≤ 60: why soldiers are off their station, `equip 5, far 2`) |
 | SEASON | C | kern | year, season |
 | PROJECT_STAGE | C | runner | **proj** (str), stage (str), pct |
+| PAUSED_BY_DF | A | arbiter | **by** (str `df`\|`popup`), **min** (int: real minutes the pause stood), popup (str ≤ 100: the text of the popup that stands), deny (1: it carries a threat or curse word, `resume` refuses it) — FR-94 (Run 14 note 100): once per pause when DF's pause stood `reflex.json` `resume.wake_min` (5, 0 = off) minutes; msg `PAUSED_BY_DF for N min: dfllm cmd resume` |
 | POPUP_GONE | C | arbiter | **n** (popups gone), text (str ≤ 200: the front popup as last seen), kind (str: the arbiter's class of that text, e.g. `death`, absent when it has none) — FR-87 (Run 14 y707): a popup left the screen and the kernel did not dismiss it (`act.dismiss_popup` counts its own); once per text and `popups.log_s` (900 s); the player's click looks the same, `dfllm doctor` shows the count |
 | MODE | C | kern | **from** (str), **to** (str), why (str) |
 | GATE | C | gate | **bridge** (str), state (str: up, down, moving, unknown, blocked, rebuilt), units (int[]: `blocked`, who holds it; once per wanted state, BUG-027) |
@@ -916,6 +918,7 @@ Python (`dfllm cmd`, `plan apply`, follow) validates every inbox document with `
 | `tempo.lower` | arbiter | any | `{fps:int 10-1000, ttl_s:int 1-3600}` (never above the mode value; lowers the vanilla FPS cap too, FR-51) | |
 | `pause` | arbiter | any | `{ttl_s:int 1-600, why?:str}` | |
 | `unpause` | arbiter | any | `{}`: releases **only the inbox hold** (`owners.pause == 'inbox'`). A pause owned by `gordon`, `df` or `popup` is never released through the inbox, whatever `by` says; Gordon unpauses in the game | |
+| `resume` | arbiter | any | `{why?}` (FR-94, Run 14 note 100): releases a pause DF set (`owners.pause` `df` after a load or restart, `popup`) with `act.press_pause`; refused when not paused, in `gordon`/`inbox` state, while any open popup has a word of `arbiter.DENY` or is a threat notice (the popup stays), and within 60 real seconds of the last use (a key that did not take counts). Every open popup of unknown kind is read, dismissed (`act.dismiss_popup`) and named in the reply first; the reply `data` = `{was: "pause:df", now: "running"\|"pause:df", popups?: [text]}` | |
 | `trade.want` | trade | any | `{want?:[token], sell?:[token]}`; `cloth`/`thread` = any kind, `cloth:plant`, `cloth:silk`, `cloth:yarn` (and `thread:…`) = material flag THREAD_PLANT, SILK, YARN; other cloth/thread subs are refused. Run 11: `<kind>:metal` (`armor:metal`, `weapon:metal`, `bar:metal`, ...) = an item of a metal material (flag IS_METAL), never leather, wood or a training weapon. care.mood_wants' `buy` tokens go before these (capped at the units the moods miss) | `{want, sell}` |
 | `trade.retry` | trade | PEACE | `{civ?:str, want?:[token], sell?:[token]}` (Run 10 y418): a second trade in the same visit; the caravan (from `civ`, else the first) stands AtDepot with `time_remaining` ≥ `START_MIN` (300 = 3,000 ticks); refused while a trade-screen phase runs or another caravan's visit holds trade. The lists replace the wants like `trade.want`; the visit is reset (traded, tries, the sale haul, a pending retry, the ledger flag) and begins again at the next step | `{civ, left (ticks), want, sell}` |
 | `squad.sortie` | military | ALERT, SIEGE, BREACH, RECOVERY | `{squad:'A'|'B'|'C', target:str (killbox id) or pos, approve:true, gate?:bridge}` | M3 (BUG-113): a position with a visible hostile within `sortie.kill_near` (5) tiles is a kill order on it (else a station order, turned into a kill order when the squad arrives beside a hostile); the sortie is tracked (SORTIE go, arrived, dead, done, abort + why) and, against a lone harmless intruder, kept against the posture while the squad is worn ≥ `sortie.worn`; a killbox id the manifest lacks falls back to a kill order on the one hostile in sight (more than one: refused, give a position); a target on another walk group is refused with the groups named. With `gate` (an outer manifest bridge, Gordon 2026-10-16) siege runs a sortie through it, SIEGE only: refused while an intake wave, another sortie or a rescue runs, an inner/the outer bridge is not up, a hostile is in the intake area or past B1, a dangerous one is in sight, civilians are in the area, the squad's worn < `sortie.worn`, or its combat value < the visible hostiles within `sortie.near` tiles of the target × `sortie.foe_cv` (the reply names both: `cv 30 vs ~2 hostiles x 10 = 20, worn 100%`); the target must be a position outside the intake area and zones Z3/Z4. Phases: gather (bailey; B1 down, up again once all are there), open (O1 down), out (kill order on the hostiles near the target, else a move there), recall (losses ≥ `sortie.losses`: WAVE_FAIL, no target left, `max_ticks`, a danger, a hostile past B1), close (O1 up once all are back in the bailey, or at once with a hostile within `gate.force_near` of O1 or after `max_ticks`: WAVE_FAIL left_outside), home (released, B1 down until they are in, then up), done; SORTIE (B) per phase |
@@ -1083,7 +1086,7 @@ Each item names the WP that must adapt its code; WP0 changed the contract, `cont
 Generated by `python -m dfpilot.schema --write-appendix docs/v2/CONTRACTS.md`; `tests/test_schema.py` fails if this block is stale. The digest covers every schema and registry in `schema.py`, so any contract change shows up here.
 
 <!-- BEGIN GENERATED SCHEMAS -->
-Contract digest: `e90cc2e1b528e11a31dc1fa78fe93747682b4e76a001c0c99de84412d6b4d4fa`
+Contract digest: `dd6d371004eda891bf284ba5acb0d2e11cdf4022e391fe66f4a8d41599c17d8b`
 
 DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.schema --json-schema <kind>` with kind in heartbeat, phases, bp, restore, lock, allowlist, quicksave, persist.marker, persist.projects, persist.plan, persist.phase, persist.mode, persist.drill, persist.kern, persist.burrows. Per-type event `d` (§12) and per-verb `args` are checked by `validate()`; the envelopes leave them open. Compact JSON, keys sorted.
 
@@ -1099,7 +1102,7 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 
 **inbox**
 ```json
-{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","trade.want","trade.retry","squad.sortie","lever","inspect","selftest","module.enable","tombs.repair","ack","order.add","jobs.release","perimeter.record","bridge.rebuild","appoint","squad.create","squad.leader","squad.add","squad.uniform","zone.place","view"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
+{"$defs":{"id":{"pattern":"^[A-Za-z0-9_-]{1,40}$","type":"string"}},"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"args":{"additionalProperties":{},"type":"object"},"by":{"enum":["llm","gordon","cli","follow","supervise","test"],"type":"string"},"id":{"$ref":"#/$defs/id"},"ts":{"minimum":0,"type":"integer"},"verb":{"enum":["plan.reload","bp.place","bp.cancel","drill","snapshot","audit","popcap.lower","tempo.lower","pause","unpause","resume","trade.want","trade.retry","squad.sortie","lever","inspect","selftest","module.enable","tombs.repair","ack","order.add","jobs.release","perimeter.record","bridge.rebuild","appoint","squad.create","squad.leader","squad.add","squad.uniform","zone.place","view"],"type":"string"}},"required":["id","verb","args","by"],"title":"inbox","type":"object"}
 ```
 
 **outbox**
@@ -1170,6 +1173,11 @@ DESIGN §6 formats and the inbox verb args. Other kinds: `python -m dfpilot.sche
 **inbox.args.unpause**
 ```json
 {"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"title":"inbox.args.unpause","type":"object"}
+```
+
+**inbox.args.resume**
+```json
+{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"why":{"maxLength":200,"type":"string"}},"title":"inbox.args.resume","type":"object"}
 ```
 
 **inbox.args.trade.want**
