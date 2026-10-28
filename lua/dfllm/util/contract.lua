@@ -87,6 +87,7 @@ C.EVENTS = {
   ORDER_BAD = {cls = 'A', by = 'economy'}, DEPOT_MISSING = {cls = 'A', by = 'trade'},
   CUTOFF = {cls = 'A', by = 'seal'}, PERIMETER_BROKEN = {cls = 'A', by = 'seal'},
   SEAL_LEAK = {cls = 'A', by = 'seal'}, REFUGE_FAIL = {cls = 'A', by = 'seal'},
+  REFUGE_STOCK = {cls = 'A', by = 'seal'},        -- BUG-107: a potential refuge under its food/drink floor
   -- BUG-010: autolabor found enabled in legacy mode (the Run 9 crash engine); baseline set it to monitor
   AUTOLABOR_LEGACY = {cls = 'A', by = 'baseline'},
   -- FR-64: >= 2 citizens died of dehydration or starvation within a month (the A twin of DEATH_CLUSTER)
@@ -381,7 +382,7 @@ C.STATE_SPEC = obj({
                -- BUG-043: why readiness' last audit request was refused; what the last audit's snapshot covered
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}, {why = str(80), cov = str(40)}),
                fail = arr(str(24), 0, 8)},
-              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24),     -- FR-65
+              {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24), dref = NAT,     -- FR-65; BUG-110: drills refused for want of O1/B1
                route = str(60),            -- the last audit's first attacker-route finding (bypass, refuge)
                pd = NAT, pw = str(60),     -- FR-70: days the perimeter has been open (PEACE), and what is open
                office = str(200)}),        -- BUG-055: the vacant office (or squad leader post) R0 `office` names, with the fix

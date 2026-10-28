@@ -138,7 +138,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
     for k in doc:
         if k not in ("v", "about", "clock", "hold_quiet_days", "ack_timeout_s", "defaults", "refuge", "gate", "intake",
-                     "sortie", "predator_near", "lockdown_near", "stations", "perimeter") and k not in REFLEX_EXTRA:
+                     "sortie", "predator_near", "lockdown_near", "stations", "perimeter", "inner") and k not in REFLEX_EXTRA:
             errs.append(f"{name}: unknown key {k!r}")
     clock = doc.get("clock", {})
     if not isinstance(clock, dict):
@@ -163,7 +163,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         errs.append(f"{name}: refuge must be an object")
     else:
         for k, v in ref.items():
-            lim = {"bed_pct": (0, 100), "breach_days": (0, 60)}.get(k)
+            lim = {"bed_pct": (0, 100), "breach_days": (0, 60), "floor_pct": (0, 300), "floor_pop": (0, 1000),
+                   "supply_switch": (0, 100)}.get(k)
             if lim is None:
                 errs.append(f"{name}: refuge.{k}: unknown key")
             elif not is_int(v, *lim):
@@ -177,6 +178,10 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
                 errs.append(f"{name}: defaults.{t}: not an interrupt type ({', '.join(schema.INTERRUPTS)})")
             elif not isinstance(acts, list) or any(a not in REFLEX_ACTIONS for a in acts):
                 errs.append(f"{name}: defaults.{t}: a list of {', '.join(REFLEX_ACTIONS)} expected")
+    # BUG-108: the interrupt types whose unacked default is skipped at threat 0 (an inner cause); [] = the old rule
+    inner = doc.get("inner", [])
+    if not isinstance(inner, list) or any(t not in schema.INTERRUPTS for t in inner):
+        errs.append(f"{name}: inner: a list of interrupt types ({', '.join(schema.INTERRUPTS)}) expected")
     # BUG-027: gate.force_near (tiles; 0 = never raise onto a unit), gate.manual (bridge names or building ids that
     # get no automatic pull)
     gate = doc.get("gate", {})

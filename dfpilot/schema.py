@@ -543,8 +543,14 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # burrow was refused because the citizens it held went thirsty or hungry there
     # BUG-049 (Run 13 y525: the citizens found the refuge occupied): hostile = how many hostiles stand in the refused
     # burrow, at = where the first one stands
+    # BUG-107 (Run 14 note 78): sup = the supply counts of the pick and the others ("Innen+ food 40/30, drink 40/30; Kern+
+    # food 1/30, drink 0/30"), set when the pick holds the food and drink but lacks the area (level FED) or no burrow is fed
     "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa "
-                                                "fix:s dry:f hostile:i at:p")),
+                                                "fix:s dry:f hostile:i at:p sup:s")),
+    # BUG-107: a potential refuge (Kern+, the refuge) holds less food or drink than refuge.floor_pct % of the siege need;
+    # short = food | drink | food+drink, fneed/dneed = the floor in units, cmd = the existing command that builds the store
+    "REFUGE_STOCK": ("A", "seal", _d("burrow:s short:s food:i fneed:i drink:i dneed:i pct:i cit:i",
+                                     "total_f:i total_d:i cmd:s also:s")),
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),
@@ -854,7 +860,7 @@ STATE = Obj(
                       # FR-65: ways in without door or bridge (-1 unknown), the first of them, why no auto drill;
                       # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
                       # FR-70: pd = game days the perimeter has been open in PEACE (open_perimeter), pw = what is open
-                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24),
+                      opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24), "dref": NAT,
                            "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60),
                            # BUG-055: the vacant office (or squad leader post) R0 `office` names, with its fix
                            "office": Str(maxbytes=200)}),
