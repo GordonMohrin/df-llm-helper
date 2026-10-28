@@ -31,7 +31,7 @@
   "ls": {"rw": "r", "args": ["", "*"]},
   "nestboxes": {"rw": "w", "args": ["burrow *"]},
   "overlay": {"rw": "r", "args": ["list", "list *"]},
-  "pop-control": {"rw": "w", "args": ["", "status", "set wave-size *", "set max-pop 55"]},
+  "pop-control": {"rw": "w", "args": ["", "status", "set wave-size *", "set max-pop 55", "set max-pop 100"]},
   "preserve-rooms": {"rw": "w", "args": ["", "status", "now", "enable *", "disable *"]},
   "preserve-tombs": {"rw": "w", "args": ["", "status", "now"]},
   "prioritize": {"rw": "w", "args": ["", "-j", "-a defaults", "-aq defaults", "-a -q defaults", "-a *", "-d *", "-aq *", "-aq -n * CustomReaction"]},

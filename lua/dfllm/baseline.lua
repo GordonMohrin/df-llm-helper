@@ -43,7 +43,7 @@ M.DEFAULTS = {
   autochop = {max = 150, min = 60},
   autobutcher = {all = {2, 1, 2, 1}, races = {CAT = {0, 0, 1, 1}}},
   tailor = {materials = {'silk', 'cloth', 'yarn'}},
-  popcap = {max_pop = 55, wave = 8},
+  popcap = {max_pop = 100, wave = 8},
   labormanager = {mode = 'monitor', fallback = 'monitor', ab_to = 'modern', ab_days = 168,
                   balance = 'balanced', unmanaged = {}},   -- live L1: MINE unmanaged left 1 miner (economy.labor)
   seedwatch = {target = 12, always = {}},

@@ -19,9 +19,9 @@ import luahost  # noqa: E402
 def test_decisions_file_holds_the_design_defaults_and_gordons_answers():
     assert F.load_decisions() == S.DECISIONS
     assert S.parse_decisions(F.DECISIONS_PATH.read_text(encoding="utf-8")) == S.DECISIONS
-    assert F.pending() == [d for d in S.DECISIONS if d != "D-14"]   # D-14 answered by Gordon 2026-10-15 (= default)
+    assert F.pending() == [d for d in S.DECISIONS if d not in ("D-01", "D-14")]   # D-14 answered 2026-10-15 (= default), D-01 answered B 2026-10-24
     assert F.decision_errors() == []
-    assert F.get_decision("D-12") == "15/20" and F.decisions.get("D-01") == "A"
+    assert F.get_decision("D-12") == "15/20" and F.decisions.get("D-01") == "B"
     assert F.decisions.all() == S.DECISIONS
     with pytest.raises(KeyError):
         F.get_decision("D-99")
@@ -181,7 +181,7 @@ def test_safety_natives_cannot_be_disabled(line):
 
 
 def test_owned_match_exemptions():
-    assert F.owned_match("pop-control set max-pop 55".split()) is None      # R0 cap, baseline.lua:198
+    assert F.owned_match("pop-control set max-pop 100".split()) is None      # R0 cap, baseline.lua:198
     assert F.owned_match("control-panel enable timestream".split()) is None  # baseline, D-11
     assert F.owned_match("enable burrow".split()) is None                    # the burrow plugin itself
     assert F.owned_match("overlay list".split()) is None

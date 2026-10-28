@@ -37,7 +37,8 @@ local function world(opts)
   local persist = {}
   if opts.drill then persist.drill = drill_rec(opts.drill, opts.drill_pass) end
   local W = X.world{units = units, persist = persist, manifest = opts.manifest, tiefe = opts.tiefe}
-  for k, v in pairs(opts.decisions or {}) do W.K.cfg.decisions[k] = v end
+  W.K.cfg.decisions['D-01'] = 'A'            -- the fixtures below test the level logic with the pre-2026-10-24 caps and option A;
+  for k, v in pairs(opts.decisions or {}) do W.K.cfg.decisions[k] = v end   -- the shipped values (D-01 = B, caps 100) are pinned by the first test
   if opts.plan then W.set_plan(opts.plan) end
   local snap = X.snapshot()
   local runner = X.runner('P5')            -- live L6: military creates squads only in a known phase
@@ -47,6 +48,7 @@ local function world(opts)
   if opts.seal then extra[#extra + 1] = opts.seal end
   for _, m in ipairs(opts.extra or {}) do extra[#extra + 1] = m end
   X.load(W, {'military', 'readiness'}, extra, {'sense', 'gate'})
+  X.mod('readiness').CAPS = {[0] = 55, [1] = 55, [2] = 75, [3] = 250}
   return W
 end
 
@@ -69,6 +71,12 @@ end
 local function has(list, v) for _, x in ipairs(list) do if x == v then return true end end return false end
 
 ---------------------------------------------------------------- R0 / R1
+T.test('shipped values (Gordon 2026-10-24, D-01 = B): R0..R2 cap 100 (R2 ceiling still siege trigger - 5), R3 250', function()
+  local R = require('dfllm.readiness')
+  T.eq(R.CAPS, {[0] = 100, [1] = 100, [2] = 100, [3] = 250})
+  T.eq(R.SIEGE_TRIGGER - 5, 75)
+end)
+
 T.test('R0 at boot: max-pop 55 through act.popcap once, POPCAP event, audit is the first blocker', function()
   local W = world()
   day(W, 2)

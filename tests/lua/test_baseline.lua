@@ -36,7 +36,7 @@ T.test('full apply on boot: native list, settings, labormanager monitor, crops, 
     'enable buildingplan', 'enable logistics', 'enable preserve-rooms', 'enable burrow',
     'prioritize -aq defaults', 'autochop target 150 60', 'autobutcher target 2 1 2 1 all',
     'autobutcher target 0 0 1 1 CAT', 'tailor materials silk cloth yarn', 'tailor confiscate false',
-    'pop-control set wave-size 8', 'pop-control set max-pop 55', 'autolabor mode monitor', 'enable autolabor',
+    'pop-control set wave-size 8', 'pop-control set max-pop 100', 'autolabor mode monitor', 'enable autolabor',
     'seedwatch clear', 'seedwatch MUSHROOM_HELMET_PLUMP 0', 'ban-cooking booze honey milk oil tallow',
     'burial -c'}) do
     T.ok(F.has(r, want), 'missing: ' .. want)
@@ -242,7 +242,7 @@ T.test('readiness loaded: max-pop is left to readiness, wave size stays', functi
   drain(W)
   local r = F.runs(W)
   T.ok(F.has(r, 'pop-control set wave-size 8'))
-  T.ok(not F.has(r, 'pop-control set max-pop 55'))
+  T.ok(not F.has(r, 'pop-control set max-pop 100'))
 end)
 
 T.test('decisions: D-11 rejected, D-06 on', function()
@@ -394,7 +394,7 @@ T.test('seedwatch: only farmed crops at 12, never a cook-excluded plant; economy
   T.eq(F.bad_runs(W), {})
   W.clear()
   W.run(33600, {skip = 100})              -- monthly: nothing changed except max-pop (readiness absent)
-  T.eq(F.runs(W), {'pop-control set max-pop 55'})
+  T.eq(F.runs(W), {'pop-control set max-pop 100'})
   df.global.world.buildings.other.FARM_PLOT[0].plant_id[2] = 2
   W.clear()
   W.run(33600, {skip = 100})

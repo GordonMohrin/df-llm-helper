@@ -297,7 +297,7 @@ function C.persist_key(k)
 end
 
 C.DECISIONS = {
-  ['D-01'] = 'A', ['D-02'] = 'unchanged', ['D-03'] = 'rule', ['D-04'] = 'off', ['D-05'] = 'off',
+  ['D-01'] = 'B', ['D-02'] = 'unchanged', ['D-03'] = 'rule', ['D-04'] = 'off', ['D-05'] = 'off',
   ['D-06'] = 'off', ['D-07'] = 'unchanged', ['D-08'] = 'dropped', ['D-09'] = 'no', ['D-10'] = 'off',
   ['D-11'] = 'accepted', ['D-12'] = '15/20', ['D-13'] = 'no', ['D-14'] = 'down',
 }

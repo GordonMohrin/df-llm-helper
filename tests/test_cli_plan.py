@@ -162,7 +162,7 @@ def test_propose_from_phases(save, base):
     applied = plan.applied_builds(save, state)
     assert {("hospital", None), ("bedrooms", None), ("tavern", None), ("workshops", None)} <= applied
     assert ("fortcore", 2) in applied                     # proj 'fortcore' at s2.build (no bp file)
-    assert doc["policy"] == {"option": "A", "pop_ceiling": 55, "beauty": "used_rooms"}
+    assert doc["policy"] == {"option": "B", "pop_ceiling": 55, "beauty": "used_rooms"}   # D-01 = B (Gordon 2026-10-24)
     assert doc["military"]["squads"] == {"melee": 2, "xbow": 1} and doc["military"]["pct"] == 15
     assert errs_of(doc, state)[0] == []
 

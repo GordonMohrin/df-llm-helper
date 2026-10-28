@@ -222,7 +222,7 @@ def test_findings_carry_lines_and_contract_shape():
 def test_partial_and_allowlisted_act_run_pass():
     assert rules("K.act.run('autochop', 'target', n, m)\nK.act.run('seedwatch', name, 12)\n"
                  "K.act.run('uniform-unstick', '--all', '--drop', '--free')\n"
-                 "K.act.run('pop-control', 'set', 'max-pop', '55')\n"            # R0 cap (baseline)
+                 "K.act.run('pop-control', 'set', 'max-pop', '100')\n"            # R0 cap (baseline)
                  "K.act.run('control-panel', 'enable', 'timestream')") == []     # baseline, D-11
 
 

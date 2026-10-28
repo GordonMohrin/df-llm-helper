@@ -184,7 +184,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 | REFUGE_FAIL / REFUGE_STOCK / BURROW_SHRUNK | REFUGE_STOCK (BUG-107): Kern+ or the refuge holds less food/drink than `refuge.floor_pct` % of the siege need (`d.food`/`d.fneed`, `d.cmd`, the fort's own stock `d.total_f`/`d.total_d`): send `d.cmd` (stockroom in Kern+, `refuge_drink`) when the fort's stock covers it, else make food and drink first. BURROW_SHRUNK (BUG-096, FR-80): Kern+ or the refuge lost more than `burrow.guard.shrink_pct` (30) % of its tiles between two daily readings, or is gone (`d.was`/`d.now`, `cause` `load` = the first reading after a boot, `rid` != `id` = made again, `crit` = well/refuge/hospital among the lost tiles): the kernel paints them again from its last good reading in PEACE/RECOVERY (`fix` repair, at most `repair_per_day` 2000 a day; `wait` = in a fight; `ask` = tile set unknown, DECISION_NEEDED `burrow_gone`: paint it in the burrows screen; `off`); read `status` (`burrows`), tell the player; a well or the refuge among the lost tiles is R0 `burrow_lost`. REFUGE_FAIL: the civ alert refused a burrow: an entrance reaches it without a door/hatch/bridge (`open to N entrances x,y,z ...`) or a hostile stands in it (BUG-018; BUG-049: the text, `d.hostile` and `d.at` say how many and where; the alert leaves a refuge a hostile enters at once), or it lacks drink/food (beds only rank; BUG-107: a burrow with its food and drink but too little area or beds (level FED) beats one without, `d.sup` has the counts, and a siege leaves a depleted Kern+/Innen+ for it, REFUGE_SWITCH `supply`: `beds 18<23 (25% of 90 citizens)`; `Tiefe+: no drink`: a dry refuge holds only a breached or open fort, 7 days: its drink store `refuge_drink` (FR-69) or a well/cistern there); the fallback is `Innen+`, the refuge or the dead end `Tiefe+` without counts (BREACH level, 7 days), or none (`flee`: alert off, citizens flee on their own). `inspect refuge` (`open`, `hint`); tell the player; close the named entrances with the line's `seal at=...` (BUG-031: the tiles beside a door that leaves them open; `dfllm cmd bp.place` tpl seal, or `at=last`; `at=refuge` adds the hatch at the refuge's stair head); the next plan puts the refuge pieces first (beds: `refuge_beds`, §8 refuge gate) |
 
 ## 8. Readiness gate (only readiness raises max-pop)
-- **R0:** cap 55 (pop-control `max-pop 55`, `wave-size 8`).
+- **R0:** cap 100 since Gordon's D-01 = B answer, 2026-10-24 (pop-control `max-pop 100`, `wave-size 8`).
 - **R1 sealed:** worst-case audit passes (all bridges lowered, doors open, trap hall removed: no
   edge→Z3 path; refuge reachable without Z2/Z3; civilian path ≠ attacker path; caverns sealed);
   Kern+ and Tiefe+ (with drink) exist; 2 levers per bridge.
@@ -213,7 +213,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
   way into the hall's trap-free end: `dfllm audit` names the tile where the route enters the hall.
 
 ## 9. Decisions (the player's answers in `config/decisions.yaml`; defaults until they answer)
-D-01 cap option A (≤ 75) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful
+D-01 cap: B answered 2026-10-24 (100) | D-02 difficulty unchanged | D-03 idle rule (> 40 % for 3 days, useful
 backlog only) | D-04 work-now off | D-05 agitation-rebalance off | D-06 tailor confiscate and
 cleanowned off | D-07 visitor cap, weather, baby caps unchanged | D-08 caravan `flags1.left` edit
 dropped (use `fix/stuck-merchants`) | D-09 never cook plump helmets, not even in a famine |

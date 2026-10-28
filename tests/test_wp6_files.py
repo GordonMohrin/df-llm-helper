@@ -61,7 +61,7 @@ def test_drills_levels_and_caps(run):
     assert [(e["d"]["from"], e["d"]["to"]) for e in of(evs, "READY_CHANGE")] == [(0, 1), (1, 2), (2, 1), (1, 2)]
     assert of(evs, "READY_CHANGE")[2]["d"]["fail"] == ["redrill"], "a siege needs a new drill"
     assert [(e["d"]["cap"], e["d"]["why"]) for e in of(evs, "POPCAP")] == [
-        (55, "R0"), (75, "R2"), (60, "inbox"), (55, "R1"), (60, "inbox")]
+        (55, "plan"), (75, "R2"), (60, "inbox")]   # D-01 = B (Gordon 2026-10-24): the caps of R0/R1 are no longer the binding ones
     modes = [e["d"]["from"] + ">" + e["d"]["to"] for e in of(evs, "MODE")]
     assert modes == ["PEACE>DRILL", "DRILL>PEACE", "PEACE>SIEGE", "SIEGE>RECOVERY", "RECOVERY>PEACE",
                      "PEACE>DRILL", "DRILL>PEACE"]
@@ -76,7 +76,7 @@ def test_state_slots_validate_with_wp6_keys(run):
     rot = best["mil"].pop("rot")                                # FR-79: squad B is a militia squad: its rotation line
     assert list(rot) == ["B"] and rot["B"]["w"] == "9-11" and rot["B"]["z"] == 3 and rot["B"]["e"] > 0, rot
     assert best["mil"] == {"squads": 3, "soldiers": 8, "worn": 100, "cv": 13, "metal_pct": 0, "on_station": 0}
-    assert best["ready"]["lvl"] == 2 and best["ready"]["fail"] == ["option_a", "metal<20%"]
+    assert best["ready"]["lvl"] == 2 and best["ready"]["fail"] == ["metal<20%"]       # D-01 = B: option_a is gone
     assert best["ready"]["audit"]["ok"] == 1 and best["ready"]["audit"]["min_traps"] == 35
     assert 0 <= best["ready"]["drill_age"] <= 3000
     assert best["pop"] == {"cit": 50, "adults": 50, "soldiers": 8, "cap": 60, "gate_cap": 60}

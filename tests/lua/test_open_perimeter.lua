@@ -24,6 +24,7 @@ local function world(opts)
   function W.seal.replaced(K) return W.seal.rep end
   W.econ, W.snap = X.economy(), X.snapshot()
   X.load(W, {'military', 'readiness'}, {W.econ, W.snap, runner, W.seal}, {'sense', 'gate'})
+  X.mod('readiness').CAPS = {[0] = 55, [1] = 55, [2] = 75, [3] = 250}     -- fixtures use the pre-2026-10-24 caps (shipped: 100, see test_readiness)
   return W
 end
 
