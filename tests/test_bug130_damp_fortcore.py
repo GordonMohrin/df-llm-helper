@@ -192,3 +192,20 @@ def test_rules_say_what_counts_for_the_gates():
     rules = (ROOT / "RULES.md").read_text("utf-8")
     assert "BUG-130" in rules and "breach:damp" in rules
     assert len(rules.splitlines()) <= 300
+
+
+def test_an_applied_resite_is_never_drafted_again(save, monkeypatch):
+    # review: the re-site was applied (a new fortcore stage 1 digs elsewhere) but the parked one is not cancelled yet:
+    # propose must not draft a second fortcore stage 1 @S1, and check refuses one
+    _damp_core(save)
+    _damp_core(save, pid="y707s1b0", anchor=(10, 10, 130))
+    st = _state(save)
+    st["proj"].append(["y707s1b0", "s1.dig", 5, ""])
+    fort = _facts(save, monkeypatch, st)
+    assert fort["core"]["moved"]["proj"] == "y707s1b0"
+    doc = plan.propose(st, plan.load_phases(), None, decisions={}, applied=plan.applied_builds(save, st), fort=fort)
+    assert not [b for b in _builds(doc) if b["tpl"] == "fortcore" and b["site"] != "same"], _builds(doc)
+    assert f"bp.cancel proj={PID}" in doc["notes"]
+    doc["seasons"][0]["build"].append({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}})
+    errs, _ = plan.check(doc, st, decisions={}, banned=plan.BANNED, fort=fort)
+    assert any("second fortcore" in e for e in errs), errs

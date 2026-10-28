@@ -182,7 +182,8 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
         kb = (_kern_manifest(save_dir).get("bridges") or {})
         o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in kb.values())
     else:
-        o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values())             or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied)
+        o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values()) \
+            or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied)
     refuge = refuge_projects(save_dir, state, applied, skip=set(core["ids"]) if core else set())
     if core and not (core["resite"] and core["ok"] is not False):
         refuge["fortcore"] = False                  # nothing to anchor stage 3 on: the core's anchor is the damp one
@@ -713,7 +714,8 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
             out["seal"] = True
     out["drink_fit"], out["drink_why"] = _drink_site(save_dir, state, out)
     for row in (state or {}).get("proj") or []:
-        if isinstance(row, list) and len(row) >= 2 and row[0] == "fortcore" and str(row[1]).startswith("s3.")                 and "breach:" not in str(row[-1]):
+        if isinstance(row, list) and len(row) >= 2 and row[0] == "fortcore" and str(row[1]).startswith("s3.") \
+                and "breach:" not in str(row[-1]):
             out["stage3"] = True
     return out
 
@@ -1144,18 +1146,24 @@ def core_resite(save_dir: Path, state: dict | None, br: list[dict]) -> dict | No
         return None
     anchors = {tuple(b["anchor"]) for b in br}
     done = done_projects(save_dir)
-    at = []
+    at, moved = [], None
     for p in bp_files(save_dir):
         d = files.read_json(p)
-        if isinstance(d, dict) and d.get("tpl") == "fortcore" and tuple(d.get("anchor") or ()) in anchors \
-                and not (d.get("params") or {}).get("retrofit"):
+        if not isinstance(d, dict) or d.get("tpl") != "fortcore" or (d.get("params") or {}).get("retrofit"):
+            continue
+        if tuple(d.get("anchor") or ()) in anchors:
             at.append((p.stem, _stage_of(d.get("params")) or 1, p.stem in done))
+        elif (_stage_of(d.get("params")) or 1) == 1 and moved is None:
+            moved = {"proj": p.stem, "anchor": list(d.get("anchor") or [])}    # the re-site was applied already
     dug = sorted(pid for pid, st, dn in at if st == 1 and dn)
     out = {"br": br, "ids": sorted({pid for pid, _, dn in at if not dn} | {b["proj"] for b in br}),
            "stages": sorted({st for _, st, _ in at} | {b["stage"] for b in br}), "resite": not dug, "ok": None,
-           "why": "", "site": None}
+           "why": "", "site": None, "moved": moved}
     if dug:
         out["ok"], out["why"] = False, f"stage 1 {dug[0]} is dug there: its later stages cannot move"
+        return out
+    if moved:                                  # a fortcore stage 1 stands elsewhere: never draft another one
+        out["ok"], out["site"] = True, moved["anchor"]
         return out
     try:
         sites, _, _ = _cmd.free_sites(save_dir, "fortcore", {"stage": 1}, n=1)
@@ -1197,6 +1205,12 @@ def core_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[s
     head = _core_head(core)
     adds = sorted(new_builds(doc, prev), key=lambda t: (t[0], t[1]))
     errs, warn = [], []
+    mv = core.get("moved")
+    if mv:                                     # re-sited already: @same is the new anchor; a second stage 1 is not
+        errs += [f"{head}; seasons[{si}].build[{bi}] fortcore stage 1 would be a second fortcore: it was re-sited "
+                 f"to {mv['proj']} already (BUG-130): leave it out" for si, bi, b in adds if _resite(b)]
+        warn.append(f"{head}: re-sited to {mv['proj']}; free its tiles: dfllm cmd bp.cancel proj={core['ids'][0]}")
+        return errs, warn
     movable = core_movable(core)
     stopped = {b["stage"] for b in core["br"]}
     first = next((i for i, (_, _, b) in enumerate(adds) if _resite(b)), None)
@@ -1638,7 +1652,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         b0 = core["br"][0]
         where = f" at {_pos(b0['pos'])}" if b0.get("pos") else ""
         cancel = "; ".join(f"dfllm cmd bp.cancel proj={i}" for i in core["ids"][:3])
-        if core_movable(core):
+        if core.get("moved"):                    # the re-site was applied: never a second fortcore
+            core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where} was re-sited to "
+                         f"{core['moved']['proj']}; free its tiles: {cancel}")
+        elif core_movable(core):
             for k in core["stages"]:
                 done.discard(("fortcore", k))
             builds.append(copy.deepcopy(CORE_RESITE))

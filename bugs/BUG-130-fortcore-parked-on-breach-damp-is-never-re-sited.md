@@ -43,16 +43,19 @@ Module: `lua/dfllm/runner.lua` (breach, boot), `dfpilot/bp/sites.py` (fortcore r
   with 2 linked levers (readiness `check_levers`; a bridge replaced by wall + door is no gate, BUG-048). A wall + door closure clears
   `open_perimeter` only. The drill raises the bridges and is refused without them. So the closure keeps the fort shut, not ready: R1/R2 stay
   out of reach until a dry fortcore (or a later standalone gate) stands.
+- Review: once the re-site is applied (a fortcore stage 1 stands on another anchor) and the parked project is not cancelled yet,
+  `core_resite` sets `moved`: propose drafts no second fortcore (the note names `bp.cancel`), check refuses a new stage 1 @S1.
 - Fair play: no draining, no reveal: the ranking reads revealed tiles and the vanilla breach reports only; re-siting is a new designation.
 
 ## Tests
 - `tests/lua/test_runner_breaches.lua` (2, fail on dec5132): a damp stop lands in `manifest.breaches` with tile, kind, project, template and
   survives a reload; an older kernel's `br` record is taken over at boot.
-- `tests/test_bug130_damp_fortcore.py` (12, fail on dec5132): schema and CONTRACTS row; the ranking keeps away from a recorded breach, not
+- `tests/test_bug130_damp_fortcore.py` (13, fail on dec5132): schema and CONTRACTS row; the ranking keeps away from a recorded breach, not
   from one on a level the dig never reaches; no dry site raises; two damp stops on one level make it a wet layer (warm ones do not);
   `core_breaches` from manifest, state row and events, a cancelled project drops out; propose re-sites (stage 1 @S1 first, stages @same) and
   check accepts it; propose closes and holds the phase below P3 when no dry site is left, check warns with what counts; check refuses a
-  stage @same without the re-site; a parked stage 3 is no stage 3 under way and no O1; the core order note ignores a parked core; RULES.
+  stage @same without the re-site; a parked stage 3 is no stage 3 under way and no O1; the core order note ignores a parked core; RULES; an applied
+  re-site is never drafted again.
 
 ## Not built
 - A standalone lever-linked drawbridge on an existing dry entrance (a `gate` template with a manifest bridge role): it needs the inside
