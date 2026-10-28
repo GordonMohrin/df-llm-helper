@@ -202,3 +202,9 @@ Der PreToolUse-Hook steht in `dfpilot-public/.claude/settings.json`; die Spielse
 
 ## 92 Moods sind die häufigste Todesursache
 Run 14: 151 von 453 Bürgertoden = gescheiterte Strange Moods, 66x MOOD_CRITICAL. Das Loom fehlte zeitweise (Belagerung), Stoff lief erst mit einer Hilfsroutine. Wunsch: MOOD_RISK nennt den fehlenden Werkstatt-Typ als fertigen `bp.place`-Befehl; fehlende Mood-Werkstatt (Loom, Craftsdwarf, Jeweler …) = R0-Blocker `mood_ws`.
+
+## 93 Einheiten-Info lesend (`inspect what=unit key=<id|name>`)
+Run 14 y707: Gordon wollte wissen, wie es einem Zwerg geht (Stress, Stimmung, Gedanken, Wunden, Beruf, Charakter, Tötungen). dfpilot hat dafür keinen Befehl; ein ausserhalb des Hooks laufendes Werkzeug (df-advisor, ruft `dfhack-run lua`) musste einspringen. Wunsch: ein lesender `inspect`-Modus mit Stress-Stufe, letzten Gedanken, Wutanfall-/Mood-Status, Verwandlung/Fluch (siehe 84), Wunden, Job, Aufenthaltsort und Verwandten/Freunden; ausserdem im brief eine Liste "Stress-Stufe 0 (verzweifelt): N Einheiten" mit Namen. Fair-Play: nur Daten, die das Einheitenblatt in DF zeigt.
+
+## 94 Einzelner "harmloser" Eindringling hält das Fort 17+ Tage im BREACH
+y707 Sommer d44 bis d62+: ein Goblin (inv 39230, Grösse 6486, "harmless") läuft in Kern+, BREACH/DEFCON 1, Lockdown 18.5 von 10 Tagen ("past the limit"), Zivilalarm Innen+, Takt 29 t/s, ein Patient ausserhalb des Alarm-Burrows erstickt (PATIENTS_OUT). Das Ende-nach-confine.max_days greift nicht, weil der Feind "near" ist. Wunsch: (a) bei einem einzelnen als harmlos eingestuften Eindringling und mindestens 3 Tagen BREACH ein DECISION_NEEDED `kill_lone_intruder` mit fertigem `squad.sortie`-Befehl, (b) nach confine.max_days den Zivilalarm lösen, solange der Eindringling harmlos ist und die Soldaten an den Stationen stehen, (c) PATIENTS_OUT als Wake Klasse A mit Rezept (Rettung/Krankenhaus in Kern+).
