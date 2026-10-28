@@ -25,7 +25,9 @@
   shows `mood shops missing ...: dfllm cmd bp.place ...` and `care first: ...`; `dfllm bp preview workshops only=Quern`; a plan-less fort of 20+ at
   P0 gets `mood_ws` and the cloth/training orders; `bp sites hospital --fresh`: no anchor on 77,68; `inspect tombs` header free = `prov.free`.
 - **Skipped (refuted by the verifier):** BUG-126c coffin_material (it fires once the material really is gone), M1-BUG-103 residents (no resident
-  can be made in 53.16, code path reviewed), M6-TOOL_BLOCKED d.care (correctly absent while care first is not active), the tester's port-5000 incident.
+  can be made in 53.16, code path reviewed), M6-TOOL_BLOCKED d.care (correctly absent while care first is not active), M6-BUG-116 gap 3 (the
+  hospital's `dig_lost` is a map event), the tester's port-5000 incident. NEW5 (stair anchoring) was refuted as intended ranking but is built as
+  BUG-157 because the work order named it; ranking sites with many unknown tiles lower is not built.
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while

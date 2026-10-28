@@ -943,7 +943,8 @@ def status_text(save_dir: Path) -> str:
     else:
         # BUG-154 (live i4): the mood_ws command and the care-first line are short and say what to do next and what
         # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first
-        lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_sched(ctx, "care"))]             + curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
+        lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_sched(ctx, "care"))]
+        lines += curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
         s0 = (ctx.s.get("care") or {}).get("s0")
         if isinstance(s0, dict) and s0.get("n"):
             lines.append((4, f"desperate (stress 0): {s0['n']}" + (f" ids {','.join(str(i) for i in s0.get('ids') or [])}"
