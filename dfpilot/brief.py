@@ -517,7 +517,9 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
         srcs = ", ".join(f"{SRC_LABEL.get(k, k)} {v}" for k, v in sorted(src.items(), key=lambda kv: (-kv[1], kv[0])))
         care.append(f"stress {c['stressed_pct']}%" + (f" ({srcs})" if srcs and c["stressed_pct"] >= STRESS_SHOW else "")
                    + f" naked {c['naked']} ghosts {c['ghosts']} corpses {c['corpses_old']}"
-                   f" tombs {c['tombs_free']}" + (f" ({c['tombs_locked']} closed to citizens)" if c.get("tombs_locked") else "")
+                   # BUG-105: bodies on a tile nobody can path to (tree crowns): apart from the burial goal
+                   + (f" (+{c['corpses_unreach']} unreachable)" if c.get("corpses_unreach") else "")
+                   + f" tombs {c['tombs_free']}" + (f" ({c['tombs_locked']} closed to citizens)" if c.get("tombs_locked") else "")
                    + f" moods {c['moods']}")
         died = c.get("died")
         if died:                               # FR-64: citizen deaths of the last season by cause
@@ -531,6 +533,10 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
                        # FR-76 (Run 12 reclaim: the kernel only said "short coffins"): no Carpenters workshop, no coffin
                        + (" (no Carpenters workshop stands: see adopted fort)"
                           if "Carpenters" in ((s.get("adopt") or {}).get("miss") or []) and cf["short"] else ""))
+    # BUG-106: the hospital's gaps (the tokens; `inspect what=hospital` has the counts), a rank-4 line like the care line
+    gaps = (s.get("water") or {}).get("gaps") if isinstance(s.get("water"), dict) else None
+    if gaps:
+        care.append("hospital gaps: " + ", ".join(gaps) + " (dfllm cmd inspect '{\"what\":\"hospital\"}')")
     lb = s.get("labor")
     if lb:
         work.append(idle_clause(lb) + stale_note(s, "labor"))

@@ -859,7 +859,7 @@ function M.new(opts)
     end,
     inspect = function(args)
       local what = args.what
-      local by = ({tombs = 'care', water_sources = 'water'})[what]    -- module topics, as kern routes them
+      local by = ({tombs = 'care', water_sources = 'water', hospital = 'water'})[what]    -- module topics, as kern routes them
       if by then
         local okc, ok, msg, data = K.call(by, 'inspect', what, args.key)
         if not okc then return false, by .. ': ' .. tostring(ok) end

@@ -271,6 +271,8 @@ WATER_LIM: dict = {
     # the death-risk line of PATIENT_DYING and its cadence
     "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20),
     "carers_per_run": (0, 20), "carers_hold_days": (0, 400), "dying_thirst": _THIRST, "dying_every": _TICKS,
+    # BUG-104: a GiveWater job open (no worker) this many game days is 'stuck' in the patient_thirst / PATIENT_DYING cause
+    "give_stuck_days": (1, 400),
 }
 
 

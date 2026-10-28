@@ -1,5 +1,37 @@
 # CHANGELOG dfpilot
 
+## M1: care reports only about citizens, the thirst line names why no GiveWater job runs, bodies nobody can reach are their own class, and `inspect what=hospital` lists the gaps of the wound care (BUG-103, BUG-104, BUG-105, BUG-106, 2026-10-28, offline, live-untested)
+- **Why:** Run 14 notes 74, 79, 81, 90. A Fey wax worker of another civilization, 140 tiles away, raised MOOD_CRITICAL and a decision
+  (the census holds residents, sense.lua:127). Patients died of thirst behind "GiveWater added=0 ... water, buckets and caregivers
+  present": `added` is the caregivers the kernel put into the Orderlies detail, never a job (the kernel creates none), and the default
+  cause was a statement nobody tested. Five bodies in tree crowns kept `corpses_old` at 5 for 143 years. 52 bled out and 87 suffocated,
+  and no tool listed what a hospital lacked.
+- **What changed (care.lua, water.lua, reflex.lua, economy.lua, kern.lua, util/who.lua; bugs/BUG-103 .. BUG-106):** (1) BUG-103: the
+  mood check, the patients and caregivers of water, reflex's `confined_need` and economy's supply alarm and hungry count read citizens
+  only (`isCitizen`, the predicate of BUG-088); an older mood record of a non-citizen is dropped without a MOOD_END. (2) BUG-104:
+  patient_thirst and PATIENT_DYING carry a verdict and counts: `alert` (the civ alert holds the caregivers in a burrow the patient is
+  outside of), `noreach`, `unreadable`, `stuck` (GiveWater jobs open without a worker for `water.give_stuck_days`, new config key, 2),
+  `open`, `nojob` (the game posts none), `run`, with `jobs 0 open/0 running, 75 idle, 12 reach; buckets 86 free of 100`; the fields
+  `open`, `run`, `stuck`, `reach`, `idle`, `key` are new, `added` is documented as what it is. (3) BUG-105: a far body whose tile has no
+  walk group or is a tree crown is `corpse_unreachable`: not in `corpses_old`, not in the GHOSTS wake, `care.corpses_unreach` in the
+  state, `corpses 0 (+5 unreachable)` in status and brief, `unreach_n` in `inspect tombs`. (4) BUG-106: `inspect what=hospital` (and the
+  state's `water.gaps`, a brief line) lists the gaps of the wound care in a fixed vocabulary: `no_zone outside dry no_bed no_table
+  no_traction no_diag no_surgery no_bone no_suture no_dress no_splints no_thread no_cloth no_crutches no_plaster no_soap no_buckets
+  supply_unknown no_carers`, each with its counts, read from the zone, the location screen and the labors screen only.
+- **Safety:** the audit and the job census only read; the one new write is none. The unit filter changes who is reported, not what the
+  kernel does for citizens. A fort of 7 or 80, SIEGE, BREACH, a lockdown and an older kernel state (a mood record of a non-citizen, a
+  state without `gj`) are covered by tests; the job census is bounded (20,000 links, 60 remembered ids), the audit reads at most 200
+  tiles per zone for six zones, once per game day.
+- **Tests:** tests/lua/test_care_m1.lua (7), test_water_m1.lua (15), test_reflex_m1.lua (1), test_economy_m1.lua (1), tests/test_m1_care.py
+  (7). All fail on 32994bb. The base is already red on 13 tests (D-01 raised the pop cap to 100 in config/baseline.json only: test_baseline,
+  test_open_perimeter, test_readiness, test_wp8_kern and the pytest twins), none of them from this package.
+- **Live check:** at the next PATIENT_DYING or patient_thirst read the verdict (`key`) and the counts; for `nojob`/`open`/`stuck` dump, read
+  only, the GiveWater jobs of the job list (`job.flags`, `job.pos`, worker, general_refs) for a few days and the patient's `needs_healthcare`
+  and tile (bugs/BUG-104 "Not decided offline"). Run `dfllm cmd inspect '{"what":"hospital"}'` in a fort with a hospital: `supply_unknown`
+  means the location has none of the guessed supply fields (`contents.desired_splints` ... `count_<x>`, `need_more.<x>`; list the real
+  ones with `pairs`); `no_table` and `no_suture` show how a hospital without them treats a wounded dwarf. For note 81 read the walk group
+  and tiletype of the five branch tiles (`getWalkableGroup`, `getTileType`).
+
 ## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
 - **Why:** Run 14 note 73: a strange-mood dwarf stood at thirst 64,976/75,000 with `no free floor within 3 tiles of the workshop`. By-hand
   reads showed free floor; quickfort then skipped the three nearest tiles as occupied and took tiles 4-5 further out. The kernel's
