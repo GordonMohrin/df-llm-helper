@@ -2050,6 +2050,7 @@ end
 -- confined_need (CAD) and, with nothing dangerous near, the lockdown ends for him. Soldiers and children are looked at
 -- like the rest; the siege module's relax path (STRANDED) stays the rescue for the others
 local function need_step(K, h, now)
+  local WHO = require('dfllm.util.who')
   local hd = st.hold
   if not hd or not FAR_MODES[K.mode()] then return end
   if rt.nd_t and now >= rt.nd_t and now - rt.nd_t < M.NEED_EVERY then return end
@@ -2064,7 +2065,9 @@ local function need_step(K, h, now)
   for k = 1, math.min(#ids, M.NEED_SLICE) do
     local id = ids[(from + k - 1) % #ids + 1]
     local u = df.unit.find(id)
-    if u then
+    -- BUG-103: the census holds residents too; a resident or a merchant confined by nothing of ours is no case for
+    -- confined_need (and never a reason to end the lockdown)
+    if u and WHO.citizen(u) then
       local th = try(function() return u.counters2.thirst_timer end) or 0
       local hu = try(function() return u.counters2.hunger_timer end) or 0
       if th >= c.need_thirst or hu >= c.need_hunger then

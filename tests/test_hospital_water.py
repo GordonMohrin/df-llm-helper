@@ -88,7 +88,8 @@ def test_water_config_mirrors_water_lua_and_validates(tmp_path):
                             # BUG-054: the caregivers' scaling and the death-risk line
                             "carers_per_patient": 1, "carers_min": 2, "carers_max": 8, "carers_urgent": 2,
                             "carers_per_run": 2, "carers_hold_days": 14, "dying_thirst": 60000,
-                            "dying_every": 2400}   # audit I4: the file carries every first-pass key
+                            "dying_every": 2400,
+                            "give_stuck_days": 2}   # audit I4: the file carries every first-pass key; BUG-104
     assert fairplay.water_errors() == []
     p = tmp_path / "baseline.json"
     p.write_text(json.dumps({"v": 2, "water": {"patient_thirst": "high", "hosp_remove": 1, "remove_per_run": 99,

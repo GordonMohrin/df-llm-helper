@@ -99,6 +99,7 @@ local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspec
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
                       CANCEL_JOB = true}}
 M.OF = require('dfllm.orderfix')   -- B2: slab census, workshop job lists, the stale-order rules (a library, a field: no new local)
+M.citizen = require('dfllm.util.who').citizen    -- BUG-103: a citizen of the player (a field: economy sits at the 200-locals limit)
 local DAY = C.TICKS.DAY
 local EVERY = 1200
 local COAL = 7                       -- df.builtin_mats.COAL: charcoal and coke bars (fuel)
@@ -2802,7 +2803,7 @@ local function needs(K, a)
   for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
     local u = df.unit.find(id)
     local cn = u and u.counters2
-    if cn then
+    if cn and M.citizen(u) then                    -- BUG-103: the census also holds residents; the alarm counts citizens
       if (cn.thirst_timer or 0) >= a.thirst then thirsty = thirsty + 1 end
       if (cn.hunger_timer or 0) >= a.hunger then hungry = hungry + 1 end
     end
@@ -4597,7 +4598,7 @@ local function hungry_ids(K, lim)
   for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
     local u = df.unit.find(id)
     local cn = u and u.counters2
-    if cn and (cn.hunger_timer or 0) >= lim then r[#r + 1] = id end
+    if cn and M.citizen(u) and (cn.hunger_timer or 0) >= lim then r[#r + 1] = id end     -- BUG-103: citizens only
   end
   return r
 end

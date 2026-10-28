@@ -395,6 +395,7 @@ C.STATE_SPEC = obj({
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)}),
               died = obj(nil, nil, NAT), tombs_locked = NAT,
+              corpses_unreach = NAT,       -- BUG-105: citizen bodies on a tile nobody can path to (apart from corpses_old)
               -- FR-74: stressed citizens by source (ghosts, deaths, beds, drink, food, rooms, toppled), the population
               -- split and record (kids = children and babies, res = residents, peak, deaths and migrant waves in the last
               -- year, days since the last wave or -1) and the deaths of the last year by cause
@@ -476,7 +477,9 @@ C.STATE_SPEC = obj({
                src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)},
               -- BUG-036: hospital zones with tiles outside Kern+ and the refuge; BUG-040: a label per src ('well 19098
               -- in Kern+')
-              {hosp_out = NAT, src_l = arr(str(32), 0, 8)}),
+              {hosp_out = NAT, src_l = arr(str(32), 0, 8),
+               -- BUG-106: the tokens of the hospital's gaps (no_table, no_thread, ...), the first eight; inspect what=hospital
+               gaps = arr(str(16), 0, 8)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

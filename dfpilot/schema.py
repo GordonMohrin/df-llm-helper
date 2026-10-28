@@ -465,7 +465,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                                     "park:i parts:s")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
-    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i")),
+    # BUG-105: unreach = of the far bodies, those on a tile nobody can path to (corpse_unreachable, not in old)
+    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i unreach:i")),
     # BUG-062 (Run 14: 163, then 284 of 287 tomb zones closed to citizens): closed = zones found closed, free = of them
     # unassigned (usable: over a usable coffin), owned = held by a dead citizen, inactive = switched off; opened = what
     # care opened, left = usable ones still closed; again_free / again_owned = zones care opened that are closed again
@@ -492,8 +493,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # units (thirstiest first), n, the top thirst, the caregivers (carers, the want, idle ones, added this run), the
     # hospital (ok, dry, none), GiveWater/GiveFood jobs running (give: citizens giving now, run/open on the job list,
     # -1 unknown), free buckets, the cause
+    # BUG-104: stuck = GiveWater jobs open for water.give_stuck_days or more, reach = caregivers whose walk group reaches the
+    # thirstiest patient, key = the verdict (alert | noreach | unreadable | stuck | open | run | nojob)
     "PATIENT_DYING": ("A", "water", _d("units:ia n:i thirst:i carers:i want:i hosp:s",
-                                       "idle:i added:i give:i open:i run:i buckets:i why:s")),
+                                       "idle:i added:i give:i open:i run:i buckets:i why:s stuck:i reach:i key:s")),
     # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,
     # n of the patients lie outside the burrow the civ alert confines to (burrow; Kern+/Tiefe+ while it is silent):
     # units, all patients, mode, hosp_out = hospital zones outside Kern+ and the refuge
@@ -767,8 +770,8 @@ VERB_ARGS: dict[str, Obj] = {
                              "approve": Const(True)}, opt={"gate": BRIDGE}),
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
-                                          "perf", "mode", "plan", "tombs", "water_sources", "orders", "workload",
-                                          "trade", "reach", "entrances", "defense", "perimeter", "refuge",
+                                          "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
+                                          "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
                                           "offices"])},
                    opt={"key": Str(maxbytes=80), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
@@ -880,6 +883,9 @@ STATE = Obj(
                           "died": Obj(extra=NAT),
                           # BUG-062: tomb zones left closed to citizens by the last run (none counted as free tombs)
                           "tombs_locked": NAT,
+                          # BUG-105: citizen bodies on a tile nobody can path to (tree crown, no walk group), apart from
+                          # corpses_old (only when > 0)
+                          "corpses_unreach": NAT,
                           # FR-74: stressed citizens by source, deaths of the last year by cause, the population split
                           # and record (kids: children and babies; res: residents; waves/mig/dy: the last year; lastw:
                           # days since the last migrant wave, -1 none seen)
@@ -999,7 +1005,8 @@ STATE = Obj(
                            "buckets_free": NAT, "hosp": NAT, "src": Arr(Tup([NAT, NAT, NAT]), hi=8)},
                       # BUG-036: hospital zones with tiles outside Kern+ and the refuge (readiness R0 hospital_out);
                       # BUG-040: src_l = a label per src ('well 19098 in Kern+': kind, id, the burrow it is on)
-                      opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8)})})
+                      # BUG-106: gaps = the tokens of the hospital's gaps (no_table, no_thread, ...), the first eight
+                      opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})

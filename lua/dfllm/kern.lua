@@ -890,7 +890,7 @@ end
 local INSPECT = {state = true, modules = true, census = true, manifest = true, projects = true, persist = true,
                  perf = true, mode = true, plan = true}
 -- inspect topics a module answers itself: M.inspect(K, what, key) -> ok, msg, data (FR-27 tombs, FR-47 water)
-local INSPECT_BY = {tombs = 'care', water_sources = 'water'}
+local INSPECT_BY = {tombs = 'care', water_sources = 'water', hospital = 'water'}     -- BUG-106: hospital
 
 local function kern_verb(st, verb, args, cmd)
   local K = st.K

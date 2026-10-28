@@ -96,8 +96,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose", "PLAN_EXHAUSTED": "dfllm plan propo
         "HOSPITAL_REMOVED": "tell Gordon; dfllm cmd inspect '{\"what\":\"water_sources\"}'; next plan: water before "
                             "a hospital (plan check refuses one without it)",
         # BUG-054: a patient at thirst 60,000; the kernel scales the Orderlies detail itself, the line names the state
-        "PATIENT_DYING": "tell Gordon at once; dfllm cmd inspect '{\"what\":\"water_sources\"}' (hospital water, "
-                         "caregivers, GiveWater jobs); nothing by hand that the kernel does not do",
+        # BUG-104/106: the line names why no GiveWater job runs; what=hospital lists every gap of the wound care
+        "PATIENT_DYING": "tell Gordon at once; dfllm cmd inspect '{\"what\":\"hospital\"}' (gaps), then water_sources "
+                         "(hospital water, caregivers, GiveWater jobs); nothing by hand that the kernel does not do",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
         # BUG-063: thirst past 50,000: the dwarf and his workshop are named; material first, the drink nook is the kernel's
         "MOOD_CRITICAL": "tell Gordon (unit, workshop, thirst); dfllm brief; supply the missing class; never cancel the mood",

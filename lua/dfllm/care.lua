@@ -94,6 +94,7 @@ local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {},
            reports = {STRANGE_MOOD = true, MOOD_BUILDING_CLAIMED = true, BUILDING_TOPPLED_BY_GHOST = true,
                       BUILDING_DESTROYED_OR_TOPPLED = true, CITIZEN_TANTRUM = true, POSSESSED_TANTRUM = true}}
 local DAY = C.TICKS.DAY
+M.citizen = require('dfllm.util.who').citizen       -- BUG-103: a citizen of the player (the census also holds residents)
 -- Optional walk-group hook, proposed for CONTRACTS §7 (live L4): snapshot.reach(a, b) -> bool, i.e.
 -- dfhack.maps.canWalkBetween asked at call time (care may not read tiles itself, CONTRACTS §1.4). Feature-
 -- detected: while snapshot has no such function, only an item inside Kern+ counts as reachable (v1 counted
@@ -537,6 +538,14 @@ end
 
 local function mood_seen(K, c, r, p, u, kind)
   local sid, now = fmt(u.id), K.now().tick
+  -- BUG-103 (Run 14 note 74: MOOD_CRITICAL and DECISION_NEEDED for a Fey wax worker of another civilization, 'workshop none
+  -- claimed', far outside the fort): the census holds the fort's residents too (sense.lua), and a resident, a merchant or a
+  -- visitor is nobody this kernel serves: no workshop, materials, drink nook or decision. A record an older kernel kept for
+  -- such a unit goes without a MOOD_END (the unit's mood is not ours to end).
+  if not M.citizen(u) then
+    p.moods[sid], p.nook[sid] = nil, nil
+    return
+  end
   local child = is_child(u)
   local rec = p.moods[sid]
   if not rec then
@@ -1036,15 +1045,27 @@ end
 -- BUG-062: the unburied bodies no citizen can walk to (another walk group than the first three citizens: an old
 -- battlefield on the surface). Needs snapshot's reach hook (canWalkBetween); without it nothing is far. At most
 -- far_check bodies are asked per run (lowest unit id first). Returns the set and its size.
+-- BUG-105 (Run 14 note 81: five citizens dead 143 to 172 years lay on branch tiles in tree crowns, corpses_old 5 for ever):
+-- of the far bodies, the ones whose own tile nobody can stand on or path to (no walk group at all, or a tree crown: branch,
+-- trunk-top, twig) are a class of their own, `unr` (third and fourth value, a subset of the far set). A body in a walk group
+-- of its own on a floor stays corpse_far: a stair or a dug way connects it, so it counts as before.
+local CROWN = {BRANCH = true, TRUNK_BRANCH = true, TWIG = true}
+local function nowhere(K, pos)
+  local okg, g = K.call('snapshot', 'groups', {{x = pos.x, y = pos.y, z = pos.z}}, false)
+  if okg and type(g) == 'table' and g[1] == 0 then return true end
+  local okt, t = K.call('snapshot', 'tile', pos.x, pos.y, pos.z)
+  return okt and type(t) == 'table' and (CROWN[t.shape] == true or t.c == 'T')
+end
+
 local function far_bodies(K, c, r)
-  local far, n = {}, 0
+  local far, n, unr, nu = {}, 0, {}, 0
   local cu, anchors = K.census.u, {}
   for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
     if #anchors >= 3 then break end
     local pos = unit_pos(df.unit.find(id))
     if pos then anchors[#anchors + 1] = pos end
   end
-  if #anchors == 0 then return far, 0 end
+  if #anchors == 0 then return far, 0, unr, 0 end
   local ids = {}
   for uid in pairs(r.bodies) do ids[#ids + 1] = uid end
   table.sort(ids)
@@ -1056,10 +1077,13 @@ local function far_bodies(K, c, r)
       for _, a in ipairs(anchors) do
         if reach_ok(K, b.pos, a) then near = true; break end
       end
-      if not near then far[uid], n = true, n + 1 end
+      if not near then
+        far[uid], n = true, n + 1
+        if nowhere(K, b.pos) then unr[uid], nu = true, nu + 1 end
+      end
     end
   end
-  return far, n
+  return far, n, unr, nu
 end
 
 -- why one unburied citizen still lies around (before this run's repair)
@@ -1070,7 +1094,7 @@ local function body_causes(K, c, r, p, T, uid, now, nfree)
   if r.far and r.far[uid] then
     -- BUG-062 (Run 14 note 56: nine ghosts whose bodies lay in walk group 859 against the fort's 9): no coffin, zone
     -- or hauler helps a body nobody can walk to; it is its own cause, not no_coffin
-    add('corpse_far')
+    add(r.unr and r.unr[uid] and 'corpse_unreachable' or 'corpse_far')      -- BUG-105: a tile nobody can path to
   elseif #mine == 0 then
     add(nfree > 0 and 'no_zone' or ((T.nlocked or 0) > 0 and 'zone_locked' or 'no_coffin'))
   else
@@ -1353,7 +1377,7 @@ end
 
 local LEGEND = 'coffins: p pos, b built, occ body inside, bed in a Bedroom zone, oz other zones, z [zone, unit, open]; '
                .. 'causes: no_coffin no_zone coffin_taken zone_shared bedroom zone_owner unflagged unreachable '
-               .. 'in_stockpile undiscovered no_job zone_off zone_locked corpse_far'
+               .. 'in_stockpile undiscovered no_job zone_off zone_locked corpse_far corpse_unreachable'
 
 -- the inspect what=tombs document, built from the last run's plain index on request
 local function tomb_report(src)
@@ -1389,6 +1413,7 @@ local function tomb_report(src)
   -- why coffins are no free tombs (live data for who closes the zones and why none is free)
   out.locked = #free_zones(T, true)
   out.far_n = src.far_n or 0
+  out.unreach_n = src.unr_n or 0                       -- BUG-105: of them, on a tile nobody can path to
   if src.lock then out.lock = src.lock end
   local lks = M.lockstate()
   out.again = {free = lks.again_free, owned = lks.again_owned, by_entomb = lks.by_entomb, churn = lks.churn}
@@ -1463,7 +1488,7 @@ local function phase_tombs_run(K, c, r, p)
   local now = K.now().tick
   local T = tomb_index(K, r)
   index_units(T)
-  r.far, r.far_n = far_bodies(K, c, r)
+  r.far, r.far_n, r.unr, r.unr_n = far_bodies(K, c, r)
   local nfree = #free_zones(T)
   T.nlocked = #free_zones(T, true)
   local causes = {}
@@ -1482,7 +1507,8 @@ local function phase_tombs_run(K, c, r, p)
     lock_event(K, c, p, lk0, lk1, acts, count(r.bodies))
   end
   r.tomb_src = {T = T, bodies = r.bodies, causes = causes, acts = acts, now = now, repaired = repaired,
-                jobs = r.burial_jobs, loose_buried = r.loose_buried, lock = lk0, far = r.far, far_n = r.far_n}
+                jobs = r.burial_jobs, loose_buried = r.loose_buried, lock = lk0, far = r.far, far_n = r.far_n,
+                unr_n = r.unr_n}
   local moved = acts.removed + acts.freed + acts.opened + acts.assigned + acts.entombed
   if moved > 0 or acts.failed > 0 then
     K.log('info', 'tombs: removed %d, freed %d, opened %d, assigned %d, entomb %d, failed %d; %d burial jobs',
@@ -3256,10 +3282,12 @@ local function ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
   local hint = tally.no_body and '; slab for no_body' or ''
   -- BUG-062: a body in another walk group is no coffin problem; only a memorial slab can lay its ghost to rest
   if tally.corpse_far then hint = hint .. '; slab for corpse_far (another walk group, no coffin helps)' end
+  -- BUG-105: a body on a tile nobody can path to (tree crown, no walk group): only a slab lays its ghost to rest
+  if tally.corpse_unreachable then hint = hint .. '; slab for corpse_unreachable (no way to its tile)' end
   K.emit('GHOSTS', 'A', trunc(string.format('%d ghost(s), %d citizen(s) unburied > %d d: %s%s; inspect tombs, tombs.repair',
                                            #ghost_ids, #old_ids, c.corpse_old // DAY, table.concat(parts, ', '), hint), 200),
          {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes,
-          far = tally.corpse_far or 0})
+          far = tally.corpse_far or 0, unreach = tally.corpse_unreachable or nil})
 end
 
 ---------------------------------------------------------------- deaths (FR-64)
@@ -3535,13 +3563,17 @@ local function finish(K, c, r, p)
   local now = K.now().tick
   -- open citizen corpses: first seen -> age
   for sid in pairs(p.corpses) do if not r.open[sid] then p.corpses[sid] = nil end end
-  local open, old, old_ids = 0, 0, {}
+  local open, old, old_ids, unreach = 0, 0, {}, 0
   for sid in pairs(r.open) do
     p.corpses[sid] = p.corpses[sid] or now
     open = open + 1
-    if now - p.corpses[sid] >= c.corpse_old then
+    local uid = math.tointeger(tonumber(sid))
+    if r.unr and r.unr[uid] then
+      -- BUG-105: a body on a tile nobody can path to is no goal of the burial work (Z7) and no GHOSTS wake of its own
+      unreach = unreach + 1
+    elseif now - p.corpses[sid] >= c.corpse_old then
       old = old + 1
-      old_ids[#old_ids + 1] = math.tointeger(tonumber(sid))
+      old_ids[#old_ids + 1] = uid
     end
   end
   table.sort(old_ids)
@@ -3630,7 +3662,7 @@ local function finish(K, c, r, p)
   local prev = st.out or {}
   local a = r.acc
   st.out = {stressed_pct = r.have_units and (a.n > 0 and a.stressed * 100 // a.n or 0) or (prev.stressed_pct or 0),
-            naked = r.have_units and a.naked or (prev.naked or 0), ghosts = ghosts, corpses_old = old,
+            naked = r.have_units and a.naked or (prev.naked or 0), ghosts = ghosts, corpses_old = old, corpses_unreach = unreach,
             tombs_free = r.tombs_free or 0, tombs_locked = r.tombs_locked or 0, moods = count(p.moods),
             hosp_water = r.hosp_water or 0}
   -- FR-64: deaths still missing, a cluster that grew while its cadence held it back, the season's tally
@@ -3916,7 +3948,7 @@ local function fresh_tombs(K, c, p)
   buried_in_coffins(r)
   local T = tomb_index(K, r)
   index_units(T)
-  r.far, r.far_n = far_bodies(K, c, r)
+  r.far, r.far_n, r.unr, r.unr_n = far_bodies(K, c, r)
   local nfree = #free_zones(T)
   T.nlocked = #free_zones(T, true)
   local causes = {}
@@ -3932,7 +3964,7 @@ local function fresh_tombs(K, c, p)
           acts = old and old.acts or {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0},
           repaired = old and old.repaired or false, loose_buried = r.loose_buried, fresh = true,
           run_tick = old and old.now or -1, partial = #v > n and 1 or nil, lock = lock_scan(T, true), far = r.far,
-          far_n = r.far_n}
+          far_n = r.far_n, unr_n = r.unr_n}
 end
 
 -- inspect what=tombs (kern routes it here; FR-27): the last run's coffins and tomb zones, the unburied citizens
@@ -3952,6 +3984,7 @@ function M.inspect(K, what, key)
   if src.partial then d.partial = 1 end
   local msg = string.format('tombs: %d coffins, %d free, %d unburied, %d ghosts, %d burial jobs', d.coffins, d.free,
                             d.unburied_n, #d.ghosts, d.jobs)
+  if (d.unreach_n or 0) > 0 then msg = msg .. string.format(' (%d unreachable: tree crowns, no walk group)', d.unreach_n) end
   if d.fresh then msg = msg .. string.format(' (rebuilt now, last care run at tick %d)', d.run_tick) end
   local la = st.tomb_last
   if la then
@@ -3995,6 +4028,7 @@ function M.state(K)
   if not o then return {} end
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
+  if (o.corpses_unreach or 0) > 0 then care.corpses_unreach = o.corpses_unreach end     -- BUG-105: apart from corpses_old
   if (o.tombs_locked or 0) > 0 then care.tombs_locked = o.tombs_locked end      -- BUG-062: closed zones left
   if st.pop then                              -- FR-74: stress sources and the population diagnosis
     care.pop = {kids = st.pop.kids, res = st.pop.res, peak = st.pop.peak, dy = st.pop.dy, waves = st.pop.waves,
