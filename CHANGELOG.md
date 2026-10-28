@@ -1,10 +1,10 @@
 # CHANGELOG dfpilot
 
-## M2: the siege refuge by supplies, no lockdown without an enemy, a bridge replacement that closes the route, no drill without bridges (BUG-107, BUG-108, BUG-109, BUG-110, FR-83, 2026-10-28, offline, live-untested)
+## M2: the siege refuge by supplies, no lockdown without an enemy, a bridge replacement that closes the route, no drill without bridges (BUG-107, BUG-108, BUG-109, BUG-110, FR-92, 2026-10-28, offline, live-untested)
 - **Why:** Run 14 notes 78, 88, 76, 87. 37 citizens died in hours of a siege while the civ alert stood on a Kern+ with food 1 and no drink and a
   fed Innen+ failed the area; an unacked DEATHS_3PLUS started a lockdown at threat 0 (fourteen times in a year); a bridge replaced by wall +
   door left the ramp beside it open and R0 stayed; 320 drills ran without O1/B1, each calling everybody into Kern+.
-- **What changed (seal.lua, reflex.lua, drill.lua, readiness.lua; bugs/BUG-107 .. BUG-110, FR-83):**
+- **What changed (seal.lua, reflex.lua, drill.lua, readiness.lua; bugs/BUG-107 .. BUG-110, FR-92):**
   - **Refuge by supplies (BUG-107):** `choice.<mode>.want` is the default, not the pick (the note's reading is refuted); the real defects are a WET level that
     counts the drink only and takes the first burrow of the chain, no level for a fed burrow that lacks area or beds, a held burrow never left
     for supplies, a depleted pick that is the wanted burrow never reported. New level FED (food and drink held, area and beds waived) before

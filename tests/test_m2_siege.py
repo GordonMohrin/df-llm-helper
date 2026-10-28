@@ -1,4 +1,4 @@
-"""Package M2 (BUG-107 .. BUG-110, FR-83): the contracts, the config ranges, the wake hint, the status line and the documents
+"""Package M2 (BUG-107 .. BUG-110, FR-92): the contracts, the config ranges, the wake hint, the status line and the documents
 of the siege refuge by supplies, the lockdown without an enemy, the bridge replacement and the drill refusal.
 The behaviour itself is in tests/lua/test_m2_*.lua."""
 import json
@@ -104,7 +104,7 @@ def test_the_documents_name_the_four_bugs_and_the_fr():
     top = changelog.split("\n## ")[1]
     for n in (107, 108, 109, 110):
         assert f"BUG-{n}" in top
-    assert "FR-83" in top and len(re.findall(r"^\*\*FR-83\b", read("docs/feature-requests/README.md"), re.M)) == 1
+    assert "FR-92" in top and len(re.findall(r"^\*\*FR-92\b", read("docs/feature-requests/README.md"), re.M)) == 1
     rules = read("RULES.md")
     assert rules.count("\n") <= 300 and "REFUGE_STOCK" in rules and "BUG-108" in rules and "BUG-110" in rules
 
