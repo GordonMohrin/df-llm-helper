@@ -61,6 +61,7 @@ DF_EXE = "Dwarf Fortress.exe"
 DESKTOP = 1
 YEAR = schema.TICKS["YEAR"]
 MARKER_KEY = "dfllm"              # persist key of the site marker (CONTRACTS §10)
+ACTIVE_KEY = "dfllm.active"       # BUG-149: world data, the fort the kernel booted last ({save, fort}; kern.ACTIVE_KEY)
 BACKUP_META, BACKUP_TOOL = "dfllm-backup.json", "dfllm-supervise"
 NORESTART = "norestart.flag"
 # emitted by the year boundary or the save freeze itself: a reload onto that save does not undo anything of these
@@ -400,29 +401,79 @@ def folder_info(p: Path) -> dict:
     return {"size": size, "files": files, "newest": newest}
 
 
-def marker_of(p: Path) -> list | None:
-    """[save, adopted, fort] of the dfllm site marker in a save folder, or None. DFHack 53.16-r2 stores site data
-    as a JSON list of {k, s, ...} in dfhack-entity-<id>.dat (observed in saves on 2026-10-10; confirm in S9)."""
+def _dat_items(f: Path, key: str) -> list:
+    """The {k, s, ...} items of one DFHack data file whose k is `key` (DFHack 53.16-r2 stores persistent data as a JSON
+    list in dfhack-*.dat; observed in saves on 2026-10-10)."""
+    try:
+        raw = f.read_bytes()
+    except OSError:
+        return []
+    if key.encode() not in raw:
+        return []
+    try:
+        items = json.loads(raw.decode("utf-8", "replace"))
+    except ValueError:
+        return []
+    return [it for it in (items if isinstance(items, list) else []) if isinstance(it, dict) and it.get("k") == key]
+
+
+def _s_json(it: dict) -> dict | None:
+    try:
+        m = json.loads(it.get("s") or "")
+    except (ValueError, TypeError):
+        return None
+    return m if isinstance(m, dict) else None
+
+
+def markers_of(p: Path) -> tuple[str | None, list[list]]:
+    """(active runtime key or None, every dfllm site marker [save, adopted, fort] in the save folder). A world save keeps
+    the site data of every fort dfllm adopted in that world (BUG-149); the kernel names the fort it booted in the world
+    data key ACTIVE_KEY (read from whichever dfhack-*.dat DFHack keeps world data in)."""
+    out = []
     for f in sorted(p.glob("dfhack-entity-*.dat")):
-        try:
-            raw = f.read_bytes()
-        except OSError:
-            continue
-        if MARKER_KEY.encode() not in raw:
-            continue
-        try:
-            items = json.loads(raw.decode("utf-8", "replace"))
-        except ValueError:
-            continue
-        for it in items if isinstance(items, list) else []:
-            if isinstance(it, dict) and it.get("k") == MARKER_KEY:
-                try:
-                    m = json.loads(it.get("s") or "")
-                except ValueError:
-                    m = None
-                if isinstance(m, dict) and "adopted" in m:
-                    return [str(m.get("save", "")), m.get("adopted"), str(m.get("fort", ""))]
-    return None
+        for it in _dat_items(f, MARKER_KEY):
+            m = _s_json(it)
+            if m and "adopted" in m:
+                out.append([str(m.get("save", "")), m.get("adopted"), str(m.get("fort", ""))])
+    active = None
+    for f in sorted(p.glob("dfhack-*.dat")):
+        for it in _dat_items(f, ACTIVE_KEY):
+            a = _s_json(it)
+            if a and isinstance(a.get("save"), str) and a["save"]:
+                active = a["save"]
+    return active, out
+
+
+def resolve_markers(active: str | None, ms: list[list]) -> tuple[list | None, list[list]]:
+    """(the marker to show, the markers the folder may belong to): the active fort's marker when the kernel named it, the
+    only one, or for several without it ["?", None, "? (N forts: ...)"] and all of them (never the first by file order)."""
+    if not ms:
+        return None, []
+    hit = next((m for m in ms if active and m[0] == active), None)
+    if hit:
+        return hit, [hit]
+    if len(ms) == 1:
+        return ms[0], ms
+    names = ", ".join(sorted({m[2] or m[0] for m in ms}))
+    return ["?", None, f"? ({len(ms)} forts: {names})"[:80]], ms
+
+
+def marker_of(p: Path) -> list | None:
+    """[save, adopted, fort] of the dfllm site marker in a save folder, or None; see resolve_markers (BUG-149)."""
+    return resolve_markers(*markers_of(p))[0]
+
+
+def fort_ids(e: dict) -> set:
+    """{(save, adopted)} of every fort a scanned save may belong to (BUG-149: an ambiguous world save, all of them)."""
+    ms = e.get("markers")
+    if ms is None:
+        ms = [e["marker"]] if e.get("marker") else []
+    return {(m[0], m[1]) for m in ms if m and m[1] is not None}
+
+
+def same_fort(e: dict, ident) -> bool:
+    """True when the scanned save `e` may hold the fort `ident` ([save, adopted, ...])."""
+    return bool(ident) and (ident[0], ident[1]) in fort_ids(e)
 
 
 def scan_saves(saves: Path, cache: dict, now: float, partial: bool = False) -> list[dict]:
@@ -442,14 +493,17 @@ def scan_saves(saves: Path, cache: dict, now: float, partial: bool = False) -> l
             if partial:
                 fi = folder_info(d)
                 out.append({"name": d.name, "path": str(d), "mt": fi["newest"], "size": fi["size"], "files": fi["files"],
-                            "newest": fi["newest"], "marker": None, "ws": False, "wss": 0, "names": _names(d)})
+                            "newest": fi["newest"], "marker": None, "markers": [], "ws": False, "wss": 0, "names": _names(d)})
             continue
         c = cache.get(d.name)
-        if not c or c["wsm"] != ws.st_mtime or c["wss"] != ws.st_size or now - c["newest"] < 60 or "names" not in c:
-            c = {"wsm": ws.st_mtime, "wss": ws.st_size, **folder_info(d), "marker": marker_of(d), "names": _names(d)}
+        if not c or c["wsm"] != ws.st_mtime or c["wss"] != ws.st_size or now - c["newest"] < 60 or "names" not in c \
+                or "markers" not in c:
+            mk, ms = resolve_markers(*markers_of(d))
+            c = {"wsm": ws.st_mtime, "wss": ws.st_size, **folder_info(d), "marker": mk, "markers": ms, "names": _names(d)}
         cache[d.name] = c
         out.append({"name": d.name, "path": str(d), "mt": c["wsm"], "size": c["size"], "files": c["files"],
-                    "newest": c["newest"], "marker": c["marker"], "ws": True, "wss": c["wss"], "names": c["names"]})
+                    "newest": c["newest"], "marker": c["marker"], "markers": c["markers"], "ws": True, "wss": c["wss"],
+                    "names": c["names"]})
     names = {e["name"] for e in out if e["ws"]}
     for k in [k for k in cache if k not in names]:
         del cache[k]
@@ -484,9 +538,16 @@ def writing(saves: Path) -> tuple[int, float]:
     return n, newest
 
 
-def ident_of(saves: list, active: str | None) -> list | None:
+def ident_of(saves: list, active: str | None, key: str | None = None) -> list | None:
+    """[save, adopted] of the fort in the save folder `active`. BUG-149: in a folder of several forts the runtime key `key`
+    (the marker's save) picks the one; without it the fort is unknown (None)."""
     s = next((e for e in saves if e["name"] == active), None)
-    return s["marker"][:2] if s and s["marker"] else None
+    if not s or not s["marker"]:
+        return None
+    hit = next((m for m in s.get("markers") or [] if key and m[0] == key and m[1] is not None), None)
+    if hit:
+        return hit[:2]
+    return s["marker"][:2] if s["marker"][1] is not None else None
 
 
 def pick_save(saves: list, now: float, *, active: str | None, since: float | None, ident: list | None = None,
@@ -509,11 +570,11 @@ def pick_save(saves: list, now: float, *, active: str | None, since: float | Non
         return None, f"{s['name']} is still being written"
     if not s["marker"]:
         return None, f"newest save '{s['name']}' has no dfllm marker"
-    if ident and s["marker"][:2] != list(ident[:2]):
+    if ident and not same_fort(s, ident):
         return None, f"newest save '{s['name']}' belongs to another fort"
     if not (s["name"] == active or (since is not None and s["mt"] >= since - 5)):
         return None, f"newest save '{s['name']}' is not from the session of '{active}'"
-    same = [e["size"] for e in ok[1:] if e["marker"] and e["marker"][:2] == s["marker"][:2]][:3]
+    same = [e["size"] for e in ok[1:] if e["marker"] and fort_ids(e) & fort_ids(s)][:3]
     if same and s["size"] < sum(same) / len(same) * BROKEN_PCT / 100:
         return None, f"newest save '{s['name']}' looks broken ({s['size']} B)"
     if s["mt"] < last_mt:
@@ -1423,7 +1484,7 @@ def _crash(env, st, r, saves, name, amt, now, dry_run, alert, flush) -> None:
         alert("crash_blocked", "DF down, no automatic restart: " + "; ".join(b))
         return
     loaded = loaded_save(env.runtime, name)
-    s, why = pick_save(saves, now, active=loaded, since=amt, ident=ident_of(saves, loaded) or ident_of(saves, name),
+    s, why = pick_save(saves, now, active=loaded, since=amt, ident=ident_of(saves, loaded, name) or ident_of(saves, name, name),
                        last_mt=(st.get("last_loaded") or {}).get("mt", 0.0))
     if not s:
         alert("crash_nosave", "DF down, nothing to load: " + why)
@@ -1447,7 +1508,7 @@ def _degraded(env, st, r, saves, name, amt, hb, hb_age, is_busy, now, dry_run, a
         r["actions"].append("restart deferred: " + "; ".join(b))
         return
     loaded = loaded_save(env.runtime, name)
-    ident, last_mt = ident_of(saves, loaded) or ident_of(saves, name), (st.get("last_loaded") or {}).get("mt", 0.0)
+    ident, last_mt = ident_of(saves, loaded, name) or ident_of(saves, name, name), (st.get("last_loaded") or {}).get("mt", 0.0)
     s, _why = pick_save(saves, now, active=loaded, since=amt, ident=ident, is_busy=is_busy, last_mt=last_mt)
     floor = 0
     if not (s and now - s["mt"] <= FRESH_SAVE_S and amt is not None and s["mt"] >= amt - 5):

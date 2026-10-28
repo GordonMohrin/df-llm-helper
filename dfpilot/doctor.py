@@ -212,7 +212,30 @@ def _project_dir(env: dict, cwd: Path) -> Path:
     return cwd
 
 
-def hook_check(env: dict | None = None, cwd: Path | None = None, home: Path | None = None) -> tuple[str, str]:
+def _inactive_text(project: Path, repo: Path) -> str:
+    """BUG-152: the three ways a hook is missing: the repo itself lost the block, the session started in a parent folder of
+    the repo, or in any other folder."""
+    nothing = "so nothing blocks inline lua, dfhack-run lua -f or popup deletion"
+    try:
+        same, parent = project.resolve() == repo.resolve(), repo.resolve().is_relative_to(project.resolve())
+    except OSError:
+        same, parent = False, False
+    if same:
+        return (f"hook: not active in this session: the repo's own .claude/settings.json ({repo / '.claude' / 'settings.json'}) "
+                f"has no dfllm PreToolUse hook (removed?), {nothing}. Restore it: `git checkout .claude/settings.json` "
+                "or the hook block of QUICKSTART")
+    if parent:
+        return (f"hook: not active in this session: {project} has no .claude/settings.json with the dfllm PreToolUse hook "
+                f"(the repo's is {repo / '.claude' / 'settings.json'}); a session started in a parent folder never reads it, "
+                f"{nothing}. Start Claude Code inside the repo folder (QUICKSTART) or copy that hook block into the start "
+                "folder's .claude/settings.json")
+    return (f"hook: not active in this session: {project} has no .claude/settings.json with the dfllm PreToolUse hook, "
+            f"{nothing}. Start Claude Code inside the repo folder {repo} (QUICKSTART) or copy its hook block into the start "
+            "folder's .claude/settings.json")
+
+
+def hook_check(env: dict | None = None, cwd: Path | None = None, home: Path | None = None,
+               repo: Path | None = None) -> tuple[str, str]:
     """(state, text): state 'skip' (no Claude Code session in this shell), 'active', 'broken' (configured, but the hook module
     cannot be reached from the project folder: the hook command fails and Claude Code goes on) or 'inactive'."""
     env = os.environ if env is None else env
@@ -224,7 +247,7 @@ def hook_check(env: dict | None = None, cwd: Path | None = None, home: Path | No
     except (RuntimeError, KeyError, OSError):          # no home folder known: only the project's own settings count
         home = Path("/nonexistent-home")
     project = _project_dir(env, cwd)
-    repo = Path(__file__).resolve().parent.parent
+    repo = Path(repo) if repo is not None else Path(__file__).resolve().parent.parent
     found = []
     for f in _settings(project, home):
         try:
@@ -233,11 +256,7 @@ def hook_check(env: dict | None = None, cwd: Path | None = None, home: Path | No
             continue
         found += [(f, m, c) for m, c in _hook_entries(doc) if _covers_bash(m)]
     if not found:
-        return "inactive", (f"hook: not active in this session: {project} has no .claude/settings.json with the dfllm "
-                            f"PreToolUse hook (the repo's is {repo / '.claude' / 'settings.json'}); a session started "
-                            "in a parent folder never reads it, so nothing blocks inline lua, dfhack-run lua -f or "
-                            "popup deletion. Start Claude Code inside the repo folder (QUICKSTART) or copy that hook block "
-                            "into the start folder's .claude/settings.json")
+        return "inactive", _inactive_text(project, repo)
     for f, m, c in found:
         lead = re.match(r'\s*cd\s+"?([^"&;$]+?)"?\s*&&', c)          # a fixed `cd <dir> &&`; else the project folder
         root = Path(lead.group(1)) if lead else project

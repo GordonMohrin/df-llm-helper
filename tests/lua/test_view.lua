@@ -176,8 +176,8 @@ T.test('FR-88: the follow ends at once when the player moves the camera, and the
   T.eq(#cam_calls, 1, 'the camera stays where the player put it')
   settle()
   T.ok(H.read(W.sd .. '/kern.log'):find('ended: the player moved the camera', 1, true))
-  local r = view('m2', {})
-  T.ok(not r.ok and r.msg:find('no saved player position', 1, true), r.msg)
+  local r = view('m2', {})                                -- BUG-151: it says the camera is his
+  T.ok(r.ok and r.msg:find('it is his, nothing to restore', 1, true), r.msg)
   -- without a follow: the player moved the camera after a plain view; the bare view leaves it alone
   T.ok(view('m3', {target = 8}).ok)
   df.global.window_y = df.global.window_y + 20

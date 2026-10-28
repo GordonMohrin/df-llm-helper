@@ -1125,6 +1125,11 @@ local function impls(state)
     for _, zn in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
       if not before[zn.id] then
         ids[#ids + 1] = zn.id
+        -- BUG-148: quickfort leaves the allocation default 0 here; a zone drawn on the zones screen has -1
+        pcall(function()
+          if zn.site_realization_building_id == 0 then zn.site_realization_building_id = -1 end
+          if zn.site_realization_sul_id == 0 then zn.site_realization_sul_id = -1 end
+        end)
         if type(spec.pond) == 'boolean' then
           pcall(function()
             local f = zn.zone_settings.pond.flag

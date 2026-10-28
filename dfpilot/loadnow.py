@@ -50,7 +50,7 @@ def choose(saves: list, want: str | None, last_mt: float = 0.0) -> tuple[dict | 
             return None, f"'{want}' is not complete: {e['bad']}", []
         if not e["marker"]:
             return None, f"'{want}' has no dfllm marker: not a fort of ours (the player's own forts stay untouched)", []
-        newer = [x for x in ok if x["marker"] and x["marker"][:2] == e["marker"][:2] and x["mt"] > e["mt"]]
+        newer = [x for x in ok if x["marker"] and sv.fort_ids(x) & sv.fort_ids(e) and x["mt"] > e["mt"]]
         if newer:
             return None, (f"'{want}' is older than '{newer[0]['name']}' of the same fort: never an older save "
                           "(no save scumming); name the newer one or omit the name"), []
