@@ -225,6 +225,21 @@ local function burrow_named(name)
   return ok and b or nil
 end
 
+-- BUG-153 (live i4): the burrows the sounding civ alert holds the citizens in, read from the game
+-- (plotinfo.alerts.list[idx].burrows, as the alerts screen shows them): {{n = name, b = burrow}}; {} when unreadable.
+-- give_diag asks it when siege's list (runtime memory) is empty: after a reload or for an alert the player raised
+function M.alert_burrows(idx)
+  local out = {}
+  pcall(function()
+    local ids = {}
+    for _, id in ipairs(df.global.plotinfo.alerts.list[idx].burrows) do ids[id] = true end
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+      if ids[b.id] then out[#out + 1] = {n = tostring(b.name), b = b} end
+    end
+  end)
+  return out
+end
+
 local function on_burrow(b, x, y, z)
   if not b or not x then return false end
   local ok, yes = pcall(function() return dfhack.burrows.isAssignedTile(b, {x = x, y = y, z = z}) end)
@@ -1179,12 +1194,14 @@ function M.give_diag(K, c, r, sc, bfree, top)
   if okc and idx ~= nil and idx ~= 0 and top and top.x then
     local okn, names = K.call('siege', 'alert_names')
     names = okn and type(names) == 'table' and names or {}
-    local inside = #names == 0
-    for _, nm in ipairs(names) do
-      local b = type(nm) == 'string' and burrow_named(nm) or nil
-      if b and on_burrow(b, top.x, top.y, top.z) then inside = true end
+    local bs = {}
+    for _, nm in ipairs(names) do bs[#bs + 1] = {n = nm, b = type(nm) == 'string' and burrow_named(nm) or nil} end
+    if #bs == 0 then bs = M.alert_burrows(idx) end    -- BUG-153: siege's list is runtime only; the game's alert is not
+    local inside = #bs == 0
+    for _, e in ipairs(bs) do
+      if e.b and on_burrow(e.b, top.x, top.y, top.z) then inside = true end
     end
-    if not inside then alert = names[1] or '?' end
+    if not inside then alert = bs[1].n or '?' end
   end
   local jobs_t = ok_job and string.format('jobs %d open/%d running', gv.open, gv.run) or 'jobs unreadable'
   gv.jobs_t = jobs_t
@@ -1285,9 +1302,11 @@ end
 -- is not decided offline (bugs/BUG-106).
 M.GAPS_MAX = 16
 M.MEDIC = {{'diag', {'DIAGNOSE'}, {'DIAGNOSE'}}, {'surg', {'SURGERY'}, {'SURGERY'}},
-           {'bone', {'BONE_SETTING'}, {'SET_BONE'}}, {'suture', {'SUTURE'}, {'SUTURE'}},
+           {'bone', {'BONE_SETTING'}, {'SET_BONE'}}, {'suture', {'SUTURING', 'SUTURE'}, {'SUTURE'}},
            {'dress', {'DRESSING_WOUNDS', 'DRESS_WOUNDS'}, {'DRESS_WOUNDS', 'DRESSING_WOUNDS'}}}
-M.MEDIC_LABOR = {diag = 'DIAGNOSE', surg = 'SURGERY', bone = 'BONE_SETTING', suture = 'SUTURE', dress = 'DRESSING_WOUNDS'}
+-- BUG-153 (live i4): the labor names of df.unit_labor in DF 53.16 (18 DIAGNOSE .. 21 SUTURING, 22 DRESSING_WOUNDS); the
+-- skills (df.job_skill) are SET_BONE, SUTURE, DRESS_WOUNDS
+M.MEDIC_LABOR = {diag = 'DIAGNOSE', surg = 'SURGERY', bone = 'BONE_SETTING', suture = 'SUTURING', dress = 'DRESSING_WOUNDS'}
 M.SUPPLY = {{'splints', {'splints'}}, {'thread', {'thread'}}, {'cloth', {'cloth'}}, {'crutches', {'crutches'}},
             {'plaster', {'powder', 'plaster'}}, {'soap', {'soap'}}, {'buckets', {'buckets'}}}
 

@@ -522,15 +522,28 @@ def on_refuge(tpl: str, p: dict) -> bool:
     return tpl in rooms.REFUGE_LEVEL or (tpl == "cistern" and p.get("level") == "refuge")
 
 
+def civ_stair_tiles(m: dict) -> set[tuple[int, int, int]]:
+    """BUG-157 (live i4: hospital S1 and tombs on the stair at 77,68, tombs at its head 77,68,125, the refuge hatch tile):
+    every tile of the manifest's civilian stair columns (stairs.civ [x, y, z0, z1]); the refuge's hatch tile is the one
+    of them above the refuge level."""
+    out = set()
+    for c in (m.get("stairs") or {}).get("civ") or []:
+        if isinstance(c, (list, tuple)) and len(c) == 4 and all(isinstance(v, int) for v in c):
+            out |= {(c[0], c[1], z) for z in range(min(c[2], c[3]), max(c[2], c[3]) + 1)}
+    return out
+
+
 def _anchor_tiles(g: Graph, tpl: str, p: dict, manifest: dict) -> list[int]:
     """Room anchors: public Z4 floor; refuge_beds and a cistern with level=refuge: floor of the refuge room (no lever
-    tile)."""
+    tile). BUG-157: never a tile of a civilian stair column (the refuge's hatch tile among them): a room opens next to
+    the stair, its door never on the citizens' stair or where the seal puts the hatch."""
+    stair = civ_stair_tiles(manifest)
     if on_refuge(tpl, p):
         m = g.mask(refuge_rooms(manifest))
         levers = _lever_tiles(manifest)
-        return [i for i, c in enumerate(g.t) if m[i] and c in ".X" and g.pos(i) not in levers]
+        return [i for i, c in enumerate(g.t) if m[i] and c in ".X" and g.pos(i) not in levers and g.pos(i) not in stair]
     public = _public(g, manifest)
-    return [i for i, c in enumerate(g.t) if c in ".X" and public[i]]
+    return [i for i, c in enumerate(g.t) if c in ".X" and public[i] and g.pos(i) not in stair]
 
 
 class _At:

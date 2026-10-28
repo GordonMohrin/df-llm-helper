@@ -43,10 +43,11 @@ def test_at_takes_the_exact_anchor_or_names_the_nearest_valid_one(fort):
     a = plain[0]["anchor"]
     got = rank(snap, "bedrooms", {"n": 12}, manifest=man, at=a)
     assert got and all(s["anchor"] == a for s in got) and ", at " + ",".join(map(str, a)) in got[0]["why"]
+    sx, sy = man["stairs"]["civ"][0][:2]           # BUG-157: the civilians' stair is no anchor
     with pytest.raises(ValueError) as e:
-        rank(snap, "bedrooms", {"n": 12}, manifest=man, at=[a[0] + 1, a[1], a[2]])
+        rank(snap, "bedrooms", {"n": 12}, manifest=man, at=[sx, sy, a[2]])
     msg = str(e.value)
-    assert f"{a[0] + 1},{a[1]},{a[2]} is no valid anchor" in msg and "bp.place site=A" in msg, msg
+    assert f"{sx},{sy},{a[2]} is no valid anchor" in msg and "bp.place site=A" in msg, msg
 
 
 def test_without_near_nothing_changes(fort):

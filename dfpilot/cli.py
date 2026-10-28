@@ -94,8 +94,9 @@ def _templates_listing() -> list[str]:
 def _preview(save_dir: Path, tpl: str, params: dict, label: str | None) -> str:
     """bp.render.preview(tpl, params, site) (WP3) if present, else emit + the fallback renderer.
     With a label, at the site `bp.place site=<label>` would use now (the k-th free site)."""
-    from .cmd import BpUnavailable, _call_bp, emit_at, load_bp, place
+    from .cmd import BpUnavailable, _call_bp, emit_at, load_bp, place, translate_only
     doc = place(save_dir, tpl, params, label, "preview") if label else None
+    params = doc["params"] if doc and isinstance(doc.get("params"), dict) else translate_only(tpl, params)[0]   # BUG-155
     site = {"id": label, "anchor": doc["anchor"], "rot": doc["rot"]} if doc else _bp_site_origin()
     try:
         prev = load_bp("render").preview

@@ -3158,7 +3158,11 @@ function rows(K)
       elseif S.active and not S.active[P.id] then
         b = yd and string.format('no progress %d d: slot yielded', yd) or behind
       end
-    elseif pk[P.id] then b = 'parked: ' .. b end
+    elseif pk[P.id] then b = 'parked: ' .. b
+    elseif b == 'stalled' then                     -- BUG-154 (live i4): a stalled project is not halted and still paused
+      local pw = allowed(K, P, d) and paused(K, P, d)
+      if pw then b = 'stalled, paused: ' .. pw end
+    end
     out[#out + 1] = {P.id, trunc(st and st.label or 'done', 24), P.pct, trunc(b, 40)}
   end
   S.rows, S.npk = out, #last

@@ -1083,6 +1083,26 @@ def depth_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None,
     return "no shallower depth (" + "/".join(str(d) for d in EXPLORE_DEPTHS if d < cur) + ") has a free site either"
 
 
+def translate_only(tpl: str, params: dict | None) -> tuple[dict, tuple]:
+    """FR-76 `workshops only=<types>`: exactly these shops (the mandatory ones of a reclaim) as the template's own params
+    (skip = the other moodable types, add = the extra ones). Returns (a copy of params, the types named); BpError for an
+    unknown type. BUG-155: bp.place and bp preview share it."""
+    params = dict(params or {})
+    if tpl != "workshops" or not params.get("only"):
+        return params, ()
+    want = [t.strip() for t in str(params.pop("only")).split(",") if t.strip()]
+    mood, extra = _moodable(), _extra_shops()
+    bad = [t for t in want if t not in mood and t not in extra]
+    if bad:
+        raise BpError(f"workshops only={','.join(want)}: unknown types {bad}; known: {', '.join(mood + extra)}")
+    params["skip"] = ",".join(m for m in mood if m not in want)
+    if any(t in extra for t in want):
+        params["add"] = ",".join(t for t in want if t in extra)
+    else:
+        params.pop("add", None)
+    return params, tuple(want)
+
+
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
           same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
@@ -1092,19 +1112,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     (live L1b: the fortcore shops, earlier workshops projects). `need`: `add` types the kernel saw missing on the map
     (BUG-038: economy's fishery request; the fort manifest keeps a destroyed fishery), kept although the manifest
     lists them."""
-    params = dict(params or {})
-    if tpl == "workshops" and params.get("only"):          # FR-76: exactly these shops (the mandatory ones of a reclaim)
-        want = [t.strip() for t in str(params.pop("only")).split(",") if t.strip()]
-        mood, extra = _moodable(), _extra_shops()
-        bad = [t for t in want if t not in mood and t not in extra]
-        if bad:
-            raise BpError(f"workshops only={','.join(want)}: unknown types {bad}; known: {', '.join(mood + extra)}")
-        params["skip"] = ",".join(m for m in mood if m not in want)
-        if any(t in extra for t in want):
-            params["add"] = ",".join(t for t in want if t in extra)
-        else:
-            params.pop("add", None)
-        need = tuple(need) + tuple(want)                   # named by the caller: kept although the manifest lists them
+    params, want = translate_only(tpl, params)
+    need = tuple(need) + want                              # named by the caller: kept although the manifest lists them
     if tpl == "seal":                                      # absolute openings; at=last: the current open ways in
         params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap,
                                                         params.get("close") or "auto")
