@@ -52,10 +52,3 @@ def complete(entries: list) -> list:
     """The entries that may be loaded, in the order given (newest first)."""
     return [e for e in entries if not e.get("bad")]
 
-
-def skipped_before(entries: list, chosen: dict | None) -> list:
-    """The incomplete entries that are newer than the chosen save (or all incomplete ones without a choice): what the
-    answer names as 'not loaded'."""
-    if chosen is None:
-        return [e for e in entries if e.get("bad")]
-    return [e for e in entries if e.get("bad") and e.get("mt", 0.0) >= chosen.get("mt", 0.0)]
