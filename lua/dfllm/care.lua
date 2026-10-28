@@ -141,6 +141,7 @@ M.DEFAULTS = {
   curse_trig_win = 4800, s0_ids = 6,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
   coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
+  coffin_stale = 15 * DAY,                         -- BUG-126: a coffin project without progress this long (PEACE) is dropped
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
   death_thirst = 50000, death_hunger = 75000, death_reports = 400,
 }
@@ -1613,14 +1614,17 @@ end
 --     room) and, still unresolved coffin_wake ticks later with no tombs project pending, DECISION_NEEDED
 --     coffin_space naming the dig space wanted;
 --   * planned coffins wait for coffin items (buildingplan). ConstructCoffin is ordered (act.workorder, one-time, tag
---     dfllm:coffin) for the items still missing: the planned coffins that bring the free tombs up to want, minus
---     the free coffin items and the open coffin orders that can run (orderlib's material class, that material at
---     hand and its workshop standing). Material: non-economic hard stone (economy's census: free boulders minus
---     ores, flux, economic and soft stone; masons refuse soft stone such as chalk, mudstone, shale or claystone for
---     furniture) with a mason's workshop, else wood beyond coffin_wood_keep logs with a carpenter's workshop;
---     neither: DECISION_NEEDED coffin_material after coffin_wake, naming stone, logs and workshops;
---   * not in SIEGE/BREACH. State care.coffins and `inspect what=tombs` (prov) show want, short, stock, orders and
---     the pending project.
+--     dfllm:coffin) for the items still missing: the planned coffins AND the short ones (BUG-126) that bring the free
+--     tombs up to want, minus the free coffin items and the open coffin orders that can run (orderlib's material
+--     class, that material at hand and its workshop standing). Material: wood beyond coffin_wood_keep logs with a
+--     carpenter's workshop (material_category wood), then non-economic hard stone (economy's census: free boulders
+--     minus ores, flux, economic and soft stone; masons refuse soft stone such as chalk, mudstone, shale or
+--     claystone for furniture) with a mason's workshop (`material INORGANIC`: the game refuses stone as a
+--     material_category); neither: DECISION_NEEDED coffin_material after coffin_wake, naming stone, logs, workshops;
+--   * BUG-126: the provisioner's own tombs project that made no progress for coffin_stale ticks of PEACE is dropped
+--     (runner.coffins_drop, no undo: the planned coffins stay), a project the runner lost is forgotten;
+--   * not in SIEGE/BREACH. State care.coffins and `inspect what=tombs` (prov) show want, short, stock, orders (and
+--     the stuck ones), the pending project with its percent and idle days.
 local SEEDS_MAX, RECTS_MAX, PROBE_COST = 3, 4, 2
 
 local function key3(x, y, z) return (z * 4096 + y) * 4096 + x end
@@ -1719,7 +1723,8 @@ coffin_census = function(K, c, r, T)
   q.wood = q.census and (num(inv.wood) or 0) or 0
   q.stock = coffin_stock()
   q.order, q.stuck, q.order_by = coffin_orders(q)
-  -- coffin items still to make: the planned coffins that bring the free tombs up to want
+  -- coffin items still to make for the planned coffins (the reserve holds logs and boulders for exactly these; BUG-126:
+  -- coffin_order counts the short ones too, and writes q.items / q.make again when it orders)
   q.items = math.max(0, math.min(q.want - q.free - q.idle, q.planned))
   q.make = math.max(0, q.items - q.stock - q.order)
   return q
@@ -2242,17 +2247,24 @@ end
 local function coffin_order(K, c, r, p, q, cs)
   q.missing = 0
   local mode = K.mode()
-  if mode == 'SIEGE' or mode == 'BREACH' or not q.census then return end
+  if mode == 'SIEGE' or mode == 'BREACH' then return end
+  if not q.census then q.nocensus = true; return end          -- BUG-126: said in the view, not silent
   local can = false
   for _, o in ipairs(C.ACT.workorder or {}) do if o == 'care' then can = true end end
   if not can then return end
-  local items = math.max(0, math.min(q.want - q.free - q.idle, q.planned + (cs and cs.new or 0)))
+  -- BUG-126 (Run 14 note 103: short 10, stock 4, order 0 for three game years): the items are counted for the planned
+  -- coffins AND the short ones; before, only the planned ones (+ the rows placed this run), so a pending project that
+  -- never placed or built more left the short coffins without an order
+  -- (while no body waits, the spare reserve is made only for the rows placed in this run: no question about material
+  -- for coffins nobody needs yet)
+  local extra = q.open > 0 and q.short or (cs and cs.new or 0)
+  local items = math.max(0, math.min(q.want - q.free - q.idle, q.planned + extra))
   local make = math.min(c.coffin_batch, math.max(0, items - q.stock - q.order))
   q.items, q.make = items, make
   if make <= 0 then return end
-  -- the boulders and logs the open coffin orders will take are spoken for
-  local rock = q.masons and math.max(0, math.min(make, q.stone - q.order_by.rock)) or 0
-  local wood = q.carp and math.max(0, math.min(make - rock, q.wood - c.coffin_wood_keep - q.order_by.wood)) or 0
+  -- the boulders and logs the open coffin orders will take are spoken for; wood first (beyond the keep), then hard stone
+  local wood = q.carp and math.max(0, math.min(make, q.wood - c.coffin_wood_keep - q.order_by.wood)) or 0
+  local rock = q.masons and math.max(0, math.min(make - wood, q.stone - q.order_by.rock)) or 0
   q.missing = make - rock - wood
   local now = K.now().tick
   if now < (num(p.cof.oretry) or 0) then return end
@@ -2262,16 +2274,21 @@ local function coffin_order(K, c, r, p, q, cs)
     spec.job, spec.amount_total, spec.frequency, spec.tag = 'ConstructCoffin', n, 'OneTime', 'dfllm:coffin'
     local ok, id = K.act.workorder(spec)
     if ok then
+      p.cof.oerr = nil
       q.order, q.ordered = q.order + n, (q.ordered or 0) + n
       mats[#mats + 1] = mat
       K.log('info', 'coffins: order %s ConstructCoffin x%d in %s (stone %d, logs %d, %d coffins in stock)', tostring(id),
             n, mat, q.stone, q.wood, q.stock)
     else
       p.cof.oretry = now + DAY
+      p.cof.oerr = trunc(tostring(id), 80)                  -- BUG-126: shown by inspect, not only a retry in a day
+      K.log('warn', 'coffins: order ConstructCoffin x%d in %s refused: %s', n, mat, tostring(id))
     end
   end
-  order(rock, {material = 'INORGANIC'}, 'rock')
+  -- the game takes wood as a material_category; stone only as `material` (any rock, mat_type 0): material_category has
+  -- no stone bit ("Invalid material_category value for manager order: stone")
   order(wood, {material_category = {'wood'}}, 'wood')
+  order(rock, {material = 'INORGANIC'}, 'rock')
   if #mats > 0 then p.cof.mat = table.concat(mats, '+') end
 end
 
@@ -2308,11 +2325,44 @@ local function coffin_alarm(K, c, r, p, q)
   end
 end
 
+-- BUG-126 (Run 14 note 103: `proj cof272266509` for three game years, short 10, order 0): the provisioner's own project
+-- (p.cof.proj) is looked at once a run. Gone from the runner (done, pruned, cancelled): forgotten. Unchanged (stage, chunk,
+-- pct, blocked) for coffin_stale ticks of PEACE (a SIEGE or a frozen project does not count): dropped without an undo
+-- (runner.coffins_drop), because a project that waits for good holds back every new search (q.pend == 0) and every
+-- repair of empty tomb zones, and the short coffins never get a building. The planned coffins stay and are ordered.
+-- (The pct rises with every coffin built, so a project that builds slowly is not stale.)
+local function coffin_proj(K, c, r, p, q)
+  local pc = p.cof
+  q.stale = 0
+  if not pc.proj then pc.psig, pc.psince = nil, nil; return end
+  local ok, info = K.call('runner', 'coffins_state', pc.proj)
+  if not ok then return end                              -- no runner answer: leave it as it is
+  if type(info) ~= 'table' or info.done == 1 then pc.proj, pc.psig, pc.psince = nil, nil, nil; return end
+  local now = K.now().tick
+  -- progress is the stage, the chunk and the percent; the runner's own `stalled` mark is the symptom, not a change
+  local sig = string.format('%d:%d:%d', info.stage, info.chunk, info.pct)
+  if sig ~= pc.psig or K.mode() ~= 'PEACE' or pc.psince == nil then pc.psig, pc.psince = sig, now end
+  q.pct, q.stage = info.pct, info.label
+  q.stale = now - (num(pc.psince) or now)
+  if q.stale < c.coffin_stale then return end
+  local okd, dropped, why = K.call('runner', 'coffins_drop', pc.proj)
+  if okd and dropped == true then
+    pc.ndrop, pc.dropped = (num(pc.ndrop) or 0) + 1, now
+    K.log('warn', 'coffins: project %s made no progress for %d d (%s, %d%%): dropped, its planned coffins stay',
+          tostring(pc.proj), q.stale // DAY, tostring(info.label), info.pct)
+    pc.proj, pc.psig, pc.psince, pc.retry, pc.placed = nil, nil, nil, nil, nil
+    q.stale, q.pct, q.stage = 0, nil, nil
+  else
+    K.log('warn', 'coffins: project %s is stale but cannot be dropped: %s', tostring(pc.proj), tostring(why or dropped))
+  end
+end
+
 local function phase_coffins_run(K, c, r, p)
   local q = r.cof
   if not q then return true end
   if not q.checked then
     q.checked = true
+    coffin_proj(K, c, r, p, q)
     local okp, pend = K.call('runner', 'pending', 'tombs')
     q.pend = okp and type(pend) == 'number' and pend or 0
     if q.pend == 0 then p.cof.proj = nil end
@@ -2352,8 +2402,12 @@ local function coffin_view(K, q, p, cs)
              stuck = q.stuck, items = q.items, make = q.make, missing = q.missing or 0, stone = q.stone,
              wood = q.wood, masons = q.masons and 1 or 0, carpenters = q.carp and 1 or 0, pend = q.pend or 0,
              proj = pc.proj or '', pct = -1, site = pc.site or '', mat = pc.mat or '', why = q.why or '',
-             searched = num(pc.searched) or -1, found = num(pc.found) or 0, retry = num(pc.retry) or -1}
-  for _, row in ipairs(type(K.view().proj) == 'table' and K.view().proj or {}) do
+             searched = num(pc.searched) or -1, found = num(pc.found) or 0, retry = num(pc.retry) or -1,
+             stale = (q.stale or 0) // DAY, dropped = num(pc.ndrop) or 0, census = q.census and 1 or 0,
+             oerr = pc.oerr or ''}
+  -- BUG-126: the project as the runner reads it now (its rows list only eight); a project it no longer has is not shown
+  if q.pct then v.pct, v.stage = q.pct, q.stage end
+  for _, row in ipairs(q.pct == nil and type(K.view().proj) == 'table' and K.view().proj or {}) do
     if type(row) == 'table' and row[1] == v.proj then v.pct, v.stage = num(row[3]) or -1, tostring(row[2]) end
   end
   if cs then v.probes, v.seeds = cs.probes, cs.seeds end
@@ -4091,10 +4145,14 @@ function M.inspect(K, what, key)
     local prov = {}
     for k, x in pairs(v) do prov[k] = x end
     d.prov = prov
-    msg = msg .. string.format('; coffins want %d, short %d, stock %d, on order %d%s%s%s', v.want, v.short, v.stock,
-                               v.order, v.proj ~= '' and (', project ' .. v.proj) or '',
+    msg = msg .. string.format('; coffins want %d, short %d, stock %d, on order %d%s%s%s%s%s%s%s', v.want, v.short, v.stock,
+                               v.order, v.stuck > 0 and string.format(' (+%d stuck: no worker, shop or material)', v.stuck) or '',
+                               v.proj ~= '' and (', project ' .. v.proj) or '',
                                v.proj ~= '' and v.pct >= 0 and string.format(' %d%%', v.pct) or '',
-                               v.why ~= '' and (', no ' .. v.why) or '')
+                               v.proj ~= '' and v.stale > 0 and string.format(' (no progress %d d)', v.stale) or '',
+                               v.dropped > 0 and string.format(', %d stale project(s) dropped', v.dropped) or '',
+                               v.census == 0 and v.active == 1 and ', no item census yet: nothing ordered' or '',
+                               (v.oerr or '') ~= '' and (', order refused: ' .. v.oerr) or '') .. (v.why ~= '' and (', no ' .. v.why) or '')
   end
   return true, msg, d
 end
@@ -4150,6 +4208,9 @@ function M.state(K)
   local v = st.cof
   if v and v.active == 1 then                 -- FR-61: the coffin provisioner
     care.coffins = {want = v.want, short = v.short, stock = v.stock, order = v.order, proj = trunc(v.proj, 40)}
+    -- BUG-126: orders that cannot run, days the project has made no progress (only when > 0)
+    if v.stuck > 0 then care.coffins.stuck = v.stuck end
+    if v.proj ~= '' and v.stale > 0 then care.coffins.stale = v.stale end
   end
   if st.died and next(st.died) then          -- FR-64: citizen deaths of the last season by cause
     local died = json.object{}

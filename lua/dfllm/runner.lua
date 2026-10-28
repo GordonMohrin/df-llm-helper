@@ -4520,6 +4520,33 @@ function M.coffins(K, tiles, why, prio)
   return true, id
 end
 
+-- public (BUG-126, care's coffin provisioner): what became of the `tombs` project `id`: nil when it is not on the list
+-- (done and pruned, cancelled, unknown), else a table {done 0|1, stage (index), chunk, pct, blocked (reason or ''),
+-- label (stage name)}. Care compares two readings to tell a project that moves from one that waits for good.
+function M.coffins_state(K, id)
+  local P = type(id) == 'string' and find(id) or nil
+  if not P then return nil end
+  local d = doc(K, P.id)
+  local st = d and d.stages[P.stage + 1]
+  return {done = P.done == 1 and 1 or 0, stage = P.stage, chunk = P.chunk, pct = P.pct or 0, blocked = P.blocked or '',
+          label = trunc(st and st.label or 'done', 24)}
+end
+
+-- public (BUG-126): the stale `tombs` project `id` that care's coffin provisioner placed leaves the list, without an undo:
+-- the coffins it planned stay (buildingplan waits for their items, care orders them and `burial -c` zones them once
+-- built), only the project that never ends goes (it held back every new search and every empty-zone repair). Refused for
+-- a project of another template or one that is done. Returns ok, reason.
+function M.coffins_drop(K, id)
+  local P = type(id) == 'string' and find(id) or nil
+  if not P then return false, 'no project ' .. tostring(id) end
+  if P.tpl ~= 'tombs' then return false, P.id .. ' is no tombs project' end
+  if P.done == 1 then return false, P.id .. ' is already done' end
+  cancel(K, P, false)
+  rows(K)
+  save(K)
+  return true, 'dropped ' .. P.id
+end
+
 -- BUG-063 (care; Run 14 y484/y485/y558: strange-mood dwarves died of thirst at 63,000 - 75,000, a mood dwarf neither drinks
 -- nor eats while the job waits): a one-barrel drink-only stockpile `dfllm-mood` on one free floor tile beside the
 -- claimed workshop (quickfort `place`, a player's own stockpile; the haulers fill it from `take`), so a drink stands

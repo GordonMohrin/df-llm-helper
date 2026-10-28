@@ -48,9 +48,10 @@ def test_config_defaults():
     care = json.loads((ROOT / "config/baseline.json").read_text(encoding="utf-8"))["care"]
     assert care["coffins"] is True and care["coffin_reserve"] == 10
     assert {k: care[k] for k in ("coffin_batch", "coffin_scan_r", "coffin_min_side", "coffin_entrance_r",
-                                 "coffin_retry", "coffin_wood_keep", "coffin_wake", "coffin_prio")} == {
+                                 "coffin_retry", "coffin_wood_keep", "coffin_wake", "coffin_prio",
+                                 "coffin_stale")} == {
         "coffin_batch": 30, "coffin_scan_r": 16, "coffin_min_side": 4, "coffin_entrance_r": 10,
-        "coffin_retry": 3600, "coffin_wood_keep": 20, "coffin_wake": 2400, "coffin_prio": 3}
+        "coffin_retry": 3600, "coffin_wood_keep": 20, "coffin_wake": 2400, "coffin_prio": 3, "coffin_stale": 18000}
 
 
 # ---------------------------------------------------------------- status
@@ -73,6 +74,21 @@ def test_status_shows_the_provisioner(save):
     st["care"]["coffins"] = {"want": 9, "short": 0, "stock": 0, "order": 0, "proj": ""}
     (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
     assert "coffins want" not in brief.status_text(save), "enough free tombs and nothing open: no line"
+
+
+def test_status_shows_stuck_orders_and_the_idle_project(save):
+    # BUG-126/127: orders that cannot run and the days the project stands still are in the state and in the brief line
+    st = json.loads((save / "state.b.json").read_text("utf-8"))
+    st["care"]["coffins"] = {"want": 67, "short": 10, "stock": 4, "order": 0, "proj": "cof272266509", "stuck": 6, "stale": 12}
+    assert schema.validate("state", st) == []
+    (save / "state.b.json").write_text(files.dumps(st), encoding="utf-8")
+    out = brief.status_text(save)
+    assert "coffins want 67 short 10 stock 4 order 0 stuck 6 proj cof272266509 (idle 12d)" in out, out
+    bad = json.loads(json.dumps(st))
+    bad["care"]["coffins"]["stale"] = -1
+    assert schema.validate("state", bad) != []
+    bad["care"]["coffins"] = dict(st["care"]["coffins"], extra=1)
+    assert schema.validate("state", bad) != []
 
 
 # ---------------------------------------------------------------- the real kernel
