@@ -1,5 +1,40 @@
 # CHANGELOG dfpilot
 
+## M3: a lone harmless intruder is classified, killed or released, a sortie says what became of it, a bridge that never rises is given up on (BUG-111, BUG-112, BUG-113, BUG-114, FR-84, 2026-10-28, offline, live-untested)
+- **Why:** Run 14 (Trussroads) notes 77, 94, 96, 97: one goblin held the fort in SIEGE for 48 days and in BREACH for 17 to 26 days
+  (threat's quiet clock counts every invader on the map, BUG-065's confinement limit runs in PEACE/ALERT only, a cleared harmless unit
+  counts again inside Kern+); `squad.sortie` to its position set a station order that was spent on arrival and replaced by the BREACH
+  posture, with no result event; Gordon's own kill orders left the soldiers standing beside it (probably not a unit DF treats as an
+  enemy); bridge X25718 stayed down and lever 25729 was pulled every few seconds for weeks, with no wake saying why.
+- **What changed (sense, reflex, threat, military, siege, gate, brief, wake; bugs/BUG-111..114, FR-84):** (1) sense leaves an invader that
+  DF's flags mark as merchant, diplomat, invited visitor (never an uninvited one, an active invader or a marauder), restrained or child
+  out of the hostiles and names it (`census.h.benign`, `alarm.ben`, one kern.log line); an unconscious invader stays counted and is
+  marked `uc`. (2) In SIEGE/BREACH a lone harmless intruder has a clock (`reflex.lone_step`): after `confine.kill_hours` (24) the kernel
+  orders the best squad to kill one inside Kern+ (`military.kill_lone`), after `confine.ask_days` (3) DECISION_NEEDED
+  `kill_lone_intruder` carries the ready command and the state of that order, at `confine.max_days` (10) with the soldiers at their
+  stations (`confine.siege_release`) the unit is cleared (`far.ig`, also inside Kern+; `threat.assess` subtracts it from `inside`), the
+  lockdown ends and the mode falls back by its quiet clock; a group, an adult-sized goblin, a fort without soldiers keep the old behaviour.
+  (3) `squad.sortie` with a position and a hostile within `sortie.kill_near` (5) is a kill order, a station order that arrives beside one
+  becomes one; SORTIE (B, military may emit it) says go / arrived / dead / done / abort + why (worn, timeout, mode, gone,
+  not_attackable, order_dropped, more_hostiles); against a lone harmless target the BREACH posture does not take the squad back; soldiers
+  beside the target `idle_ticks` (1200) without a wound end it and clear the unit; a target on another walk group is refused with the
+  groups named; `no killbox` falls back to the one hostile in sight. (4) `gate.pull_cap` (15) pulls without effect give up for
+  `gate.giveup_wait` (7200, doubled) with a GATE_FAIL `no_effect` naming who stands on the footprint and what the pulls did, one test pull
+  per wait; a BREACH whose failed bridges stay down with nobody inside or near falls back to SIEGE after `breach.stuck_ticks` (2400,
+  SIEGE_START `bridge_stuck`); status/brief say `BREACH since 40.0 d: waiting for X25718 up: <reason>; quiet clock: ...`. (5) PATIENTS_OUT
+  is class A with a recipe (`wake.patients_hint`). New config keys in config/reflex.json with ranges in `fairplay` (`confine.ask_days`,
+  `kill_hours`, `siege_release`; `sortie.kill_near`, `idle_ticks`, `hold_ticks`; `breach.stuck_ticks`; `gate.pull_cap`,
+  `giveup_wait`); contracts: state `alarm.ben/ln`, `wave.ba/bw`, GATE_FAIL `pulls/wait/lever`, SORTIE `by = any`, PATIENTS_OUT class A.
+- **Tests:** tests/lua/test_m3_classify.lua, test_m3_lone.lua, test_m3_sortie.lua, test_m3_gate.lua, test_m3_breach.lua and
+  tests/test_m3_files.py (all fail on 32994bb except the controls named in the bug files); test_military.lua (two assertions follow the
+  new meaning of a position near a hostile and of an unknown killbox id), test_water.lua and test_hospital_water.py (PATIENTS_OUT is A).
+- **Live check:** at the next lone intruder read `dfllm status`: `not counted as hostile (id:why)` (BUG-111: dump `u.flags1/flags2`,
+  `counters.unconscious` of the id if the soldiers stand beside it anyway), `lone harmless intruder ... kernel kill order: ...`,
+  `dfllm events --type SORTIE` (does `arrived` come, does the target die, is it `not_attackable`), and in a BREACH the `BREACH since N d:
+  waiting for ...` line. For a bridge that stays down: the GATE_FAIL `no_effect` text (worker took the pulls or DF dropped every job)
+  and `units.isUnitInBox` / items on the footprint. Open: what unit 39230 was, why the real BREACH did not end with 0 visible (offline it
+  does after 2,400 quiet ticks), whether `body.wounds` grows when a soldier hits.
+
 ## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
 - **Why:** Run 14 note 73: a strange-mood dwarf stood at thirst 64,976/75,000 with `no free floor within 3 tiles of the workshop`. By-hand
   reads showed free floor; quickfort then skipped the three nearest tiles as occupied and took tiles 4-5 further out. The kernel's

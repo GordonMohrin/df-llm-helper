@@ -294,6 +294,13 @@ def alarm_items(ctx: Ctx) -> list[tuple[int, str]]:
                 out.append((3, f"recall: {al.get('rleft', al['rn'])} of {al['rn']} still outside {al.get('rto') or '?'}"
                             + (f" ({al['rstuck']} cannot come: RECALL stuck names them)" if al.get("rstuck") else "")
                             + (f", +{al['rnew']} more out since" if al.get("rnew") else "")))
+        if al.get("ln"):                       # M3 (BUG-112): the lone harmless intruder's clock in SIEGE/BREACH
+            ln = al["ln"]
+            out.append((2, f"lone harmless intruder x{ln['n']} for {ln['age'] / 1200:.1f} d"
+                        + (f", released in {ln['rel'] / 1200:.1f} d" if "rel" in ln else ", no release (confine.siege_release off)")
+                        + (f"; kernel kill order: {ln['kill']}" if ln.get("kill") else "")))
+        if al.get("ben"):                      # M3 (BUG-111): invaders by DF's flag that are no hostile to the player
+            out.append((3, "not counted as hostile (id:why): " + ", ".join(al["ben"])))
         if al.get("far"):                      # Run 11: invaders a lockdown expired far (they re-arm on approach)
             out.append((3, f"{al['far']} invaders far (lockdown expired; re-arm within lockdown_near)"))
         if al["unacked"]:
@@ -585,7 +592,9 @@ def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
         for key, r in sorted((m.get("rot") or {}).items()):        # FR-79: the militia rotation per squad
             extra.append(line_rot(key, r))
     wv = s.get("wave")
-    if wv:                                     # intake waves and the sortie through O1 (Gordon 2026-10-16)
+    if wv and wv.get("bw"):                    # M3 (BUG-114): why a BREACH has not ended
+        out.append(f"BREACH since {wv.get('ba', 0) / 1200:.1f} d: {wv['bw']}")
+    elif wv:                                   # intake waves and the sortie through O1 (Gordon 2026-10-16)
         out.append(f"intake {wv['ph']} (waves {wv['n']})" + (f": {wv['why']}" if wv.get("why") else "")
                    + (f", sortie {wv['so']}" if wv.get("so") else "")
                    # BUG-030: the deep defense (civilians in the refuge, squads at the core station)

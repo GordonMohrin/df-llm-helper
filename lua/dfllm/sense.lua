@@ -185,7 +185,7 @@ local function hscan_begin(K, now, armed)
   st.geo = g
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
            zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0, an = 0, rin = 0,
-           near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick,
+           near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick, nben = 0, benign = {},
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
@@ -348,6 +348,31 @@ local function predator(u, hs)
   return ok and yes == true
 end
 
+local function try_num(f) local ok, v = pcall(f); return ok and type(v) == 'number' and v or nil end
+
+-- M3 / BUG-111 (Run 14 y707 notes 94 and 96: an "invader" of size 6486 held the fort in BREACH for 26 days and the
+-- soldiers Gordon sent stood beside it doing nothing): the flags a player sees on the unit sheet. An invader that is a
+-- merchant, diplomat, visitor, restrained (bound) or a child is no hostile to the player; the first reason that applies
+-- is returned (nil: a hostile). An unconscious one stays counted (it wakes up) and is only marked (entry.uc).
+local function benign_why(u, U)
+  local function yes(f) local ok, v = pcall(f); return ok and v == true end
+  if yes(function() return u.flags1.merchant end) or (U.isMerchant and yes(function() return U.isMerchant(u) end)) then
+    return 'merchant'
+  end
+  if yes(function() return u.flags1.diplomat end) or (U.isDiplomat and yes(function() return U.isDiplomat(u) end)) then
+    return 'diplomat'
+  end
+  -- an invited visitor: the raw flag, and none of the flags an ambusher, a thief or a marauder carries (never a guess from an
+  -- API predicate: a real attacker must stay a hostile)
+  if yes(function() return u.flags2.visitor end) and not yes(function() return u.flags2.visitor_uninvited end)
+     and not yes(function() return u.flags1.active_invader end) and not yes(function() return u.flags1.marauder end) then
+    return 'visitor'
+  end
+  if yes(function() return u.flags2.restrained end) or yes(function() return u.flags1.chained end) then return 'restrained' end
+  if yes(function() return U.isChild(u) end) or yes(function() return U.isBaby(u) end) then return 'child' end
+end
+M.BENIGN_MAX = 10      -- census.h.benign: units left out of the hostiles, with the reason
+
 -- per unit: 1 call for an inactive (dead, gone) unit, 3-4 for ordinary ones; the full check only for
 -- hostile candidates. An inactive unit is never a hostile (the candidate path drops it too), it only counts
 -- as visible in the unit count.
@@ -394,6 +419,17 @@ local function consider(hs, u)
       -- census.g, the ghosts met here (sense is the one that walks the unit list)
       if #hs.ghosts < M.GHOST_MAX then hs.ghosts[#hs.ghosts + 1] = id end
       return 7
+    end
+  end
+  -- M3 (BUG-111): an invader DF does not treat as hostile (merchant, diplomat, visitor, restrained, child) is neither
+  -- counted nor listed; census.h.benign names it and the reason. A friend near a watched footprint is still reported.
+  if inv and not U.isUndead(u) and not U.isGreatDanger(u) then
+    local why = benign_why(u, U)
+    if why then
+      hs.nben = hs.nben + 1
+      if #hs.benign < M.BENIGN_MAX then hs.benign[#hs.benign + 1] = {id = id, why = why} end
+      if hs.watch then friend(hs, u, U) end
+      return 6
     end
   end
   local x, y, z = U.getPosition(u)
@@ -448,10 +484,10 @@ local function consider(hs, u)
     if dcit < 0 or d < dcit then dcit = d end
   end
   if dcit >= 0 then hs.near_cit = minpos(hs.near_cit, dcit) end
-  local zn = 0
+  local zn, ik = 0, false
   if hs.kb then
     P.x, P.y, P.z = x, y, z
-    if dfhack.burrows.isAssignedTile(hs.kb, P) then hs.inside, zn = hs.inside + 1, 2 end
+    if dfhack.burrows.isAssignedTile(hs.kb, P) then hs.inside, zn, ik = hs.inside + 1, 2, true end
   end
   if zn == 0 and in_boxes(g.zpast, x, y, z) then zn = 2 end
   if zn == 0 and in_boxes(g.zin, x, y, z) then zn = 1 end
@@ -474,11 +510,13 @@ local function consider(hs, u)
   local entry = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz,
                  k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
   if rin then entry.rf = 1 end
+  if ik then entry.ik = 1 end                      -- M3: inside Kern+ itself (zn 2 also covers zones Z3/Z4)
   if rf.bd then entry.bd, hs.bd = 1, hs.bd + 1 end
   if an then entry.an = 1 end
   -- BUG-065 (Run 14, a gremlin in the caves): the unit's own body size (cm3; a dwarf is 60000) and the large-predator
   -- flag go to the census, so reflex can tell a small harmless intruder from a dangerous one [size field: ? live]
   if rf.p then entry.pr = 1 end
+  if (try_num(function() return u.counters.unconscious end) or 0) > 0 then entry.uc = 1 end    -- M3: it wakes up
   local okz, sz = pcall(function() return u.body.size_info.size_cur end)
   if okz and math.type(sz) == 'integer' and sz >= 0 then entry.sz = sz end
   list[#list + 1] = entry
@@ -520,16 +558,24 @@ local function hscan_finish(K)
     st.units, st.count_tick = hs.units, hs.tick
     K.census.a = {tick = hs.tick, n = #hs.animals, list = hs.animals}
   end
+  -- M3 (BUG-111): once per unit, kern.log says which invaders are left out and why
+  st.ben_seen = st.ben_seen or {}
+  for _, b in ipairs(hs.benign) do
+    if not st.ben_seen[b.id] and st.ben_n < 50 then
+      st.ben_seen[b.id], st.ben_n = true, st.ben_n + 1
+      K.log('info', 'sense: unit %d is an invader by DF\'s flag but no hostile to the player: %s (not counted)', b.id, b.why)
+    end
+  end
   K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
                 rin = hs.rin,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
-                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an}
+                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign}
 end
 
 ---------------------------------------------------------------- module
 function M.init(K)
-  st = {cit_due = true, pub = nil}
+  st = {cit_due = true, pub = nil, ben_n = 0}
   pred_raw = {}                                  -- another save may bring other raws
 end
 

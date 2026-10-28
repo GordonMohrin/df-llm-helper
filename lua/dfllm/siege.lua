@@ -46,6 +46,12 @@ M.PERIOD, M.PERIOD_ARMED = 25, 10
 -- 2 (pull at T+540) nobody took O1's job for 200 ticks, gate cancelled it and pulled the backup lever, and O1
 -- was up at T+945. The timer pull therefore goes out at T+450 (worst case seen: about T+855).
 M.RAISE_BY, M.BREACH_AT, M.NEAR_RAISE = 450, 900, 10
+-- M3 (BUG-114, Run 14 y707 note 97: BREACH for 40 days, bridge X25718 down, "0 visible"): a BREACH whose bridges that are
+-- not up have all failed (GATE_FAIL), for `breach.stuck_ticks` (config/reflex.json, 0 = off), with nobody inside Kern+ and no
+-- hostile within STUCK_NEAR tiles of such a bridge, with the soldiers at their stations, falls back to SIEGE (SIEGE_START why
+-- bridge_stuck). The bridges are marked (st.stuck) so the SIEGE does not make a BREACH of them again until a hostile
+-- comes within STUCK_NEAR of one; the marks end with the episode.
+M.STUCK_TICKS, M.STUCK_NEAR = 2400, 30
 M.QUIET, M.ALERT_QUIET = 2400, 1200
 M.REC_INNER, M.REC_OUTER, M.REC_PEACE = 1200, 2400, 8400
 M.ALERT_CIV_ON, M.ALERT_CIV_OFF, M.ALERT_CIV_HOLD, M.ALERT_O1 = 30, 40, 600, 30
@@ -174,6 +180,10 @@ local function go(K, to, why, a, bridge)
     local txt = from == 'BREACH'
                 and 'siege again (%s): breach over, every gate up, no hostile inside; %d visible, %d invaders'
                 or 'siege (%s): %d visible, %d invaders'
+    if why == 'bridge_stuck' then            -- M3 (BUG-114)
+      txt = 'siege again (%s): no hostile inside Kern+ or near the bridges that stay down (' ..
+            table.concat(st.stuck_txt or {}, '; ') .. '); %d visible, %d invaders'
+    end
     K.emit('SIEGE_START', 'A', string.format(txt, why, vis, a and a.inv or 0),
            {vis = vis, inv = a and a.inv or 0, great = a and a.great or 0, why = why})
     wealth(K, 'siege')
@@ -688,7 +698,10 @@ local function failed_bridge(K, g)
   local now = K.now().tick
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
-      if gate_state(K, b) ~= 'up' and not wave_skip(b, now) then
+      local d0 = nb[b]
+      if st.stuck and st.stuck[b] and not (d0 and d0 >= 0 and d0 <= M.STUCK_NEAR) then
+        -- M3: a bridge that stayed down with nobody near: no BREACH for it again
+      elseif gate_state(K, b) ~= 'up' and not wave_skip(b, now) then
         local d = nb[b]
         local okw, wait = K.call('gate', 'waiting', b)
         -- BUG-028: a raise held for citizens it would cut off (no hostile within CUT_NEAR), or a rescue's bridge
@@ -705,6 +718,30 @@ local function destroyed_gate(K, g)
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do if gate_state(K, b) == 'destroyed' then return b end end
   end
+end
+
+-- M3 (BUG-114): the stuck-bridge fallback test; returns the list of {bridge, why} that stay down, or nil
+local function breach_stuck(K, g, a, now)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.breach) == 'table' and K.cfg.reflex.breach or {}
+  local lim = int(r.stuck_ticks)
+  if not lim or lim < 0 or lim > 4032000 then lim = M.STUCK_TICKS end
+  if lim == 0 or not a or not a.fresh or (a.inside or 0) > 0 or now - st.tb < lim then return nil end
+  if a.quiet then return nil end                         -- nobody in sight: the quiet clock ends the BREACH (RECOVERY) by itself
+  local ok, list = K.call('gate', 'not_up')
+  if not (ok and type(list) == 'table' and #list > 0) then return nil end
+  for _, x in ipairs(list) do
+    if not x.failed or now - (x.since or now) < lim or (x.d and x.d >= 0 and x.d <= M.STUCK_NEAR) then return nil end
+  end
+  for _, b in ipairs(g.all) do
+    local d = near_bridge(K, b)
+    if d >= 0 and d <= M.STUCK_NEAR and gate_state(K, b) ~= 'up' then return nil end
+  end
+  local okm, k = K.call('military', 'kpi')
+  if okm and type(k) == 'table' then
+    local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
+    if sol > 0 and on * 2 < sol then return nil end       -- soldiers exist and stand elsewhere: not yet
+  end
+  return list
 end
 
 local function decide(K, a, g, now)
@@ -733,7 +770,17 @@ local function decide(K, a, g, now)
     elseif quiet_for(a, now, M.QUIET) then go(K, 'RECOVERY', 'quiet', a) end
   elseif mode == 'BREACH' then
     if quiet_for(a, now, M.QUIET) then go(K, 'RECOVERY', 'quiet', a)
-    elseif breach_sealed(K, g, a, now) then go(K, 'SIEGE', 'sealed', a) end      -- BUG-028 (b)
+    elseif breach_sealed(K, g, a, now) then go(K, 'SIEGE', 'sealed', a)          -- BUG-028 (b)
+    else
+      local stuck = breach_stuck(K, g, a, now)
+      if stuck then
+        st.stuck = st.stuck or {}
+        for _, x in ipairs(stuck) do st.stuck[x.bridge] = now end
+        st.stuck_txt, dirty = {}, true
+        for i, x in ipairs(stuck) do if i <= 2 then st.stuck_txt[i] = x.bridge .. ': ' .. x.why:sub(1, 50) end end
+        go(K, 'SIEGE', 'bridge_stuck', a)
+      end
+    end
   elseif mode == 'RECOVERY' then
     if a and a.inside > 0 then go(K, 'BREACH', 'inside', a)
     elseif a and (a.inv > 0 or a.siege) then go(K, 'SIEGE', 'reentry', a)   -- same reach rule as entry
@@ -1121,9 +1168,9 @@ M.IK = {on = true, wave = 6, min_soldiers = 4, worn = 80, army_ratio = 4, cooldo
         stable = 600, losses = 1, muster = 1200, fight = 4800}
 M.IK_LIM = {wave = {1, 40}, min_soldiers = {1, 30}, worn = {0, 100}, army_ratio = {1, 50}, cooldown = {0, 33600},
             danger_dist = {0, 200}, stable = {0, 33600}, losses = {1, 30}, muster = {100, 33600}, fight = {300, 100800}}
-M.SO = {worn = 80, losses = 1, max_ticks = 2400, gather = 1200, foe_cv = 10, near = 10}
+M.SO = {worn = 80, losses = 1, max_ticks = 2400, gather = 1200, foe_cv = 10, near = 10, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800}
 M.SO_LIM = {worn = {0, 100}, losses = {1, 30}, max_ticks = {300, 33600}, gather = {100, 33600}, foe_cv = {0, 100},
-            near = {1, 50}}
+            near = {1, 50}, kill_near = {0, 50}, idle_ticks = {300, 33600}, hold_ticks = {300, 100800}}
 M.IK_OPEN_MAX, M.IK_BACK_MAX, M.IK_TRAPS_EVERY, M.SO_RETARGET = 2400, 1200, 600, 100
 M.IK_IDLE_TTL, M.IK_STRAY_EVERY = 300, 100     -- idle: the KPI and the stray check are read this often at most
 local IK_BUSY = {muster = true, open = true, fight = true, back = true, stray = true}
@@ -1148,6 +1195,8 @@ local function cfg_block(K, key, def, lim)
 end
 local function ik_cfg(K) return cfg_block(K, 'intake', M.IK, M.IK_LIM) end
 local function so_cfg(K) return cfg_block(K, 'sortie', M.SO, M.SO_LIM) end
+-- public (military, M3 BUG-113: the sortie to a position): config/reflex.json `sortie` with its defaults and limits
+function M.so_conf(K) return so_cfg(K) end
 
 -- BUG-030: the deep defense's reasons, in a fixed order ('destroyers,army,weak'), '' while it is off
 local DEEP_WHY = {'destroyers', 'army', 'weak'}
@@ -2105,9 +2154,37 @@ function M.alert_names(K)
 end
 
 -- state `wave` (Gordon 2026-10-16): the intake phase, the waves so far, the last refusal or wait, the sortie
+-- M3 (BUG-114, note 97 (c)): why a BREACH has not ended, in one sentence for the status: the bridges wanted up that are not
+-- (with the reason gate gives) and the state of the quiet clock; nil when it has nothing to say
+local function breach_text(K)
+  local now = K.now().tick
+  local parts = {}
+  local ok, list = K.call('gate', 'not_up')
+  if ok and type(list) == 'table' then
+    for i, x in ipairs(list) do
+      if i > 2 then parts[#parts + 1] = string.format('+%d more bridges', #list - 2); break end
+      parts[#parts + 1] = string.format('waiting for %s up: %s', x.bridge, x.why)
+    end
+  end
+  local a = assess(K)
+  local q
+  if not a then q = 'no census'
+  elseif not a.fresh then q = 'census not fresh'
+  elseif a.quiet then q = string.format('quiet %d of %d ticks', st.qs and now - st.qs or 0, M.QUIET)
+  elseif (a.inside or 0) > 0 then q = string.format('%d hostile%s inside Kern+', a.inside, a.inside == 1 and '' or 's')
+  elseif (a.inv or 0) > 0 then q = string.format('%d invader%s in sight', a.inv, a.inv == 1 and '' or 's')
+  else q = 'a danger near O1 or a great danger in reach' end
+  parts[#parts + 1] = 'quiet clock: ' .. q
+  return table.concat(parts, '; '):sub(1, 100)
+end
+
 function M.state(K)
   if not st then return {} end
   local ik, so = st.ik, st.so
+  if K.mode() == 'BREACH' then                      -- M3: the BREACH line of the status
+    local w = {ph = ik.ph, n = ik.n, ba = math.max(0, K.now().tick - st.tb), bw = breach_text(K)}
+    return {wave = w}
+  end
   if K.mode() ~= 'SIEGE' and ik.ph == 'idle' and not so then return {} end
   local w = {ph = ik.ph, n = ik.n}
   if ik.why then w.why = ik.why:sub(1, 40) end
@@ -2125,6 +2202,11 @@ function M.init(K)
         rq = int(p.rq) or 0, rl = now, civ = p.civ == true, b1low = p.b1low == true, ls = int(p.ls)}
   for b, why in pairs(type(p.req) == 'table' and p.req or {}) do
     if type(b) == 'string' then st.req[b] = tostring(why) end
+  end
+  if type(p.stuck) == 'table' then                       -- M3 (BUG-114): bridges marked stuck survive a reload
+    st.stuck = {}
+    for b, t in pairs(p.stuck) do if type(b) == 'string' and int(t) then st.stuck[b] = int(t) end end
+    if not next(st.stuck) then st.stuck = nil end
   end
   -- BUG-028: an open rescue survives a reload (the live session: after `dfllm reload` BREACH raised B1/B2 at once)
   local ps = type(p.str) == 'table' and p.str or {}
@@ -2226,6 +2308,7 @@ M.on = {
     if to == 'SIEGE' or to == 'DRILL' then st.t0, st.req = now, {} end
     if to == 'BREACH' then st.tb = now end
     st.str.bs = nil                              -- BUG-028 (b): the sealed clock starts again in every mode
+    if to ~= 'SIEGE' and to ~= 'BREACH' then st.stuck, st.stuck_txt = nil, nil end    -- M3: the episode is over
     if to == 'RECOVERY' then st.rq, st.rl, st.b1low = 0, now, false end
     if to == 'ALERT' then st.civ, st.far, st.civ_at = false, nil, nil end
     if (to == 'SIEGE' or to == 'BREACH') and not st.ep then

@@ -398,10 +398,11 @@ T.test('squad.sortie needs approval, runs only in combat modes, kills in a killb
   local r = W.inbox('squad.sortie', {squad = 'A', target = 'K1', approve = true})
   T.ok(r.ok, r.msg)
   T.eq(X.squad_of(W, 'A').orders[0].units, {201})
-  r = W.inbox('squad.sortie', {squad = 'B', target = {55, 30, Z}, approve = true})
+  r = W.inbox('squad.sortie', {squad = 'B', target = {58, 36, Z}, approve = true})     -- M3: > 5 tiles from the hostile
   T.ok(r.ok, r.msg)
-  T.eq(X.squad_of(W, 'B').orders[0].pos, {x = 55, y = 30, z = Z})
-  T.eq(W.inbox('squad.sortie', {squad = 'B', target = 'K9', approve = true}).ok, false)
+  T.eq(X.squad_of(W, 'B').orders[0].pos, {x = 58, y = 36, z = Z})
+  r = W.inbox('squad.sortie', {squad = 'B', target = 'K9', approve = true})     -- M3: the one hostile in sight is the target
+  T.ok(r.ok and r.msg:find('no killbox K9', 1, true) and r.msg:find('lone hostile 201', 1, true), r.msg)
   T.eq(W.inbox('squad.sortie', {squad = 'Q', target = 'K1', approve = true}).ok, false)
   -- the next posture change ends the sortie
   X.call(W, 'military', 'posture', 'B2_HOLD')

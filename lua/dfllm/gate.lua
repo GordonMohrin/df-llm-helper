@@ -127,6 +127,12 @@ M.LOST_EV, M.LOST_RACES = 6, 4   -- ... the newest losses and the destroyer race
 -- gate.noeffect_wait). LEVER_NOEFFECT (B) reports it once per lever (util/cadence, persisted m.gate.ne), and a bridge
 -- with a parked lever fails as GATE_FAIL `no_effect`. A pull that moved the bridge, or a mode change, clears the record.
 M.NE_MAX, M.NE_WAIT, M.NE_TIMES = 3, 1200, 8
+-- M3 (BUG-114, Run 14 y707 note 97: unmanaged bridge X25718 stayed down and lever 25729 was pulled every few seconds with
+-- new jobs for weeks): the parking above only slows the pulls (8x at most). A bridge whose pulls without effect add up
+-- to GU_CAP (config/reflex.json gate.pull_cap) in one mode gets no pull for GU_WAIT ticks (gate.giveup_wait, doubled per
+-- give-up up to 8x) and a GATE_FAIL (why no_effect) that names who stands on the footprint and what the pulls did
+-- (taken by a worker or dropped unclaimed); after the wait one test pull is made, a failed one gives up again.
+M.GU_CAP, M.GU_WAIT = 15, 7200
 
 local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
 local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit, only with a hostile at the gate
@@ -971,6 +977,64 @@ function M.ne_cfg(K)
   return n, w
 end
 
+-- M3 (BUG-114): config/reflex.json gate.pull_cap (3..100 pulls without effect in a mode before the give-up) and
+-- gate.giveup_wait (600..100800 ticks of the first give-up); bad values fall back to the defaults
+function M.gu_cfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+  local n, w = math.tointeger(r.pull_cap), math.tointeger(r.giveup_wait)
+  if not n or n < 3 or n > 100 then n = M.GU_CAP end
+  if not w or w < 600 or w > 100800 then w = M.GU_WAIT end
+  return n, w
+end
+
+-- M3 (BUG-114): what the unsuccessful pulls of bridge r did, for the GATE_FAIL and the status line: the units on or next to
+-- the footprint, then per lever how many pulls a worker took (else DF dropped every job unclaimed: no path to the lever,
+-- nobody may take it) and that the bridge did not move
+local function pull_story(r)
+  local parts = {}
+  if type(r.block) == 'table' and #r.block > 0 then parts[#parts + 1] = who(r.block, r.foot) end
+  local lids = {}
+  for lid in pairs(r.ne or {}) do lids[#lids + 1] = lid end
+  table.sort(lids)
+  for i, lid in ipairs(lids) do
+    if i > 2 then parts[#parts + 1] = string.format('+%d more levers', #lids - 2); break end
+    local e = r.ne[lid]
+    parts[#parts + 1] = e.w == 0 and string.format('lever %d: %d pulls, no worker took one (DF dropped every job: no path to the lever?)', lid, e.tot)
+                        or string.format('lever %d: %d pulls, %d taken by a worker, the bridge did not move (something on it or jammed?)',
+                                         lid, e.tot, e.w)
+  end
+  return table.concat(parts, '; ')
+end
+
+-- M3 (BUG-114): the give-up. Every linked lever is parked for the wait, GATE_FAIL (A) says why. Returns true (handled)
+function M.giveup(K, name, r, s, now, tot)
+  local _, gwait = M.gu_cfg(K)
+  local gu = r.gu or {n = 0}
+  gu.n = gu.n + 1
+  local w = gwait * math.min(1 << (gu.n - 1), 8)
+  gu.untl, gu.pulls = now + w, tot
+  r.gu = gu
+  r.park = r.park or {}
+  for _, lid in ipairs(r.levers or {}) do if r.linked[lid] then r.park[lid] = now + w end end
+  r.pm = K.mode()
+  local story = pull_story(r)
+  gu.story = story
+  K.log('warn', 'gate: %s: %d pulls without effect, no pull for %d ticks (give-up %d): %s', name, tot, w, gu.n, story)
+  local br = st.br[name]
+  if br then br.failed, dirty = true, true end
+  if K.mode() == 'DRILL' then return true end
+  r.fail_tick = now                                   -- (the waits are days apart: no extra cadence; this one names the reason)
+  local d = {bridge = name, want = br and br.want or 'up', why = FAIL_WHY.no_effect, pulls = tot, wait = w}
+  if type(r.block) == 'table' and #r.block > 0 then d.units, d.pos = ids_of(r.block), {r.block[1].x, r.block[1].y, r.block[1].z} end
+  local lids = {}
+  for lid in pairs(r.ne or {}) do lids[#lids + 1] = lid end
+  table.sort(lids)
+  if lids[1] then d.lever = lids[1] end
+  K.emit('GATE_FAIL', 'A', string.format('%s not up: %d pulls without effect, no pull for %d ticks; %s', name, tot, w,
+                                         story ~= '' and story or 'no unit near the footprint'):sub(1, 200), d)
+  return true
+end
+
 -- BUG-068: a pull of lever `lid` left the queue and bridge `name` still stands in `s`. NE_MAX in a row park the lever
 -- (NE_WAIT ticks, doubled per parking in a row up to NE_TIMES times), LEVER_NOEFFECT (B) once per lever (worker = how
 -- many of those pulls a worker took: 0 means DF dropped every job unclaimed, e.g. no path to the lever)
@@ -981,6 +1045,9 @@ function M.noeffect(K, name, r, lid, s, now, taken)
   r.ne[lid] = e
   e.n, e.tot = e.n + 1, e.tot + 1
   if taken then e.w = e.w + 1 end                        -- pulls a worker took (else DF dropped the job unclaimed)
+  local tot = 0
+  for _, x in pairs(r.ne) do tot = tot + x.tot end
+  if tot >= (M.gu_cfg(K)) and M.giveup(K, name, r, s, now, tot) then return end    -- M3: bounded
   if e.n < max then return end
   e.n, e.k = 0, math.min(e.k + 1, 30)
   if FAST_MODES[K.mode()] then wait = math.max(100, wait // 4) end        -- a fight: look again sooner
@@ -2060,6 +2127,34 @@ function M.lockdown(K)
     if (rt[name] or {}).job then info.pend = info.pend + 1 end
   end
   return info
+end
+
+-- M3 (BUG-114, siege's BREACH status line and its stuck-bridge fallback): the bridges wanted up that are not up, with the
+-- reason in a few words: {{bridge, why, since (tick the want began), failed (GATE_FAIL given), d (tiles from the nearest
+-- listed hostile to the footprint, -1 none)}}, sorted by name
+function M.not_up(K)
+  local out = {}
+  local h = K.census.h
+  for name, br in pairs(st.br) do
+    local r = rt[name]
+    if br.want == 'up' and r and r.last ~= 'up' and not st.gone[name] then
+      local why
+      if r.gu and r.park and K.now().tick < (r.gu.untl or 0) then
+        why = string.format('no effect: %d pulls, no pull for %d more ticks (%s)', r.gu.pulls or 0, r.gu.untl - K.now().tick,
+                            (r.gu.story or ''):sub(1, 60))
+      elseif r.stuck == 'blocked' and type(r.block) == 'table' and #r.block > 0 then
+        why = who(r.block, r.foot)
+      elseif r.stuck == 'no_effect' then why = 'every lever parked after pulls without effect'
+      elseif r.stuck then why = tostring(r.stuck)
+      elseif r.last == 'moving' or (r.job and r.job.taken) then why = 'a pull is under way'
+      elseif r.job then why = 'a pull is queued, no worker yet'
+      else why = 'no pull queued yet' end
+      out[#out + 1] = {bridge = name, why = why, since = br.since or K.now().tick, failed = br.failed == true,
+                       d = r.foot and list_dist(h, r.foot) or -1}
+    end
+  end
+  table.sort(out, function(a, b) return a.bridge < b.bridge end)
+  return out
 end
 
 -- public (BUG-027, siege): why a bridge wanted up is not up yet without having failed: 'blocked' (units on or next to

@@ -153,9 +153,11 @@ function M.assess(K)
   local geo = fort_geo(K)
   local an, far = animal_near(K), far_ids(K)
   local rel, wide, great_rel, great_wide, undead_rel, near, nfar, far_inv = 0, 0, 0, 0, 0, 0, 0, 0
+  local far_in = 0
   for _, e in ipairs(h.list or {}) do
     if far and far[e.id] and e.k ~= 'great' then
       nfar = nfar + 1
+      if e.ik == 1 then far_in = far_in + 1 end         -- M3: a cleared harmless intruder inside Kern+ (reflex ig)
       if e.k == 'inv' then far_inv = far_inv + 1 end
     else
       if counts(e, geo, M.REACH, an) then
@@ -184,6 +186,7 @@ function M.assess(K)
     end
     a.near_cit, a.near_o1 = nc, no
   end
+  a.inside = math.max(0, a.inside - far_in)    -- M3 (BUG-112): the cleared ones inside Kern+ do not make a BREACH
   a.inv = math.max(0, a.inv - far_inv)     -- Run 11: invaders whose lockdown expired far count again on approach
   local inv_armed = now < st.inv
   if great_rel > 0 then a.siege = 'great'

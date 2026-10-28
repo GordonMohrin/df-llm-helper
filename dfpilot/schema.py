@@ -438,7 +438,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # until half of them stood at their stations (-1 never)
     "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i sol0:i soldiers:i "
                                        "on_station:i on_t:i")),
-    "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s units:ia pos:p")),
+    # M3 (BUG-114): a give-up after gate.pull_cap pulls without effect adds pulls (how many), wait (no pull for this many
+    # ticks) and lever (the first lever pulled)
+    "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s units:ia pos:p pulls:i wait:i lever:i")),
     "BREACH": ("A", "siege", _d("why:s", "bridge:s")),
     "DEATHS_3PLUS": ("A", "care", _d(opt="n:i ids:ia causes:sa")),
     "DRILL_FAIL": ("A", "drill", _d(opt="streak:i fails:sa")),
@@ -497,7 +499,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,
     # n of the patients lie outside the burrow the civ alert confines to (burrow; Kern+/Tiefe+ while it is silent):
     # units, all patients, mode, hosp_out = hospital zones outside Kern+ and the refuge
-    "PATIENTS_OUT": ("B", "water", _d("n:i burrow:s", "patients:i units:ia mode:s hosp_out:i")),
+    "PATIENTS_OUT": ("A", "water", _d("n:i burrow:s", "patients:i units:ia mode:s hosp_out:i")),      # M3: class A since note 94
     # BUG-040 (Run 11 y453: the cisterns y450s0b0/y452s1b0 were done, their wells never wet): a manifest cistern whose
     # built well stood dry for water.cistern_dry_days, once per dry spell: room, project, well (id, pos), days, fill
     # (pond: bucket-fed with its pond zone; pond_removed: water removed that pond as a loop; pipe: its floodgate lever;
@@ -689,8 +691,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # O1 (phase gather, open, out, recall, close, done, abort, refused); why = the trigger or the refusal
     "INTAKE": ("B", "siege", _d("phase:s", "wave:i why:s inside:i size:i soldiers:i on_station:i worn:i lost:i "
                                            "killed:i traps:i armed:i ticks:i")),
-    "SORTIE": ("B", "siege", _d("phase:s", "squad:s why:s units:ia n:i cv:i foes:i est:i worn:i lost:i pos:p "
-                                           "ticks:i")),
+    # M3 (BUG-113): military reports the sortie to a position too (by any): phase go (the order: why kill or station),
+    # arrived, dead (why killed), done (why no_target: arrived and nobody within sortie.kill_near), abort (why: worn,
+    # timeout, mode, gone, not_attackable, order_dropped, more_hostiles, no_squad)
+    "SORTIE": ("B", "any", _d("phase:s", "squad:s why:s units:ia n:i cv:i foes:i est:i worn:i lost:i pos:p "
+                                         "ticks:i")),
     # BUG-032 (Run 11: a squad stationed next to B2 held its BREACH raise): military moved a squad station off a bridge
     # footprint and its ring (gate margin + stations.spread): why bridge (to the nearest revealed floor on the inner
     # side), chain (the next station of the posture's chain), none (nothing clear: kept), hold (soldiers at their
@@ -954,7 +959,15 @@ STATE = Obj(
                                                        "by": Obj(req={"id": NAT, "race": Str(maxbytes=24),
                                                                       "k": Str(maxbytes=8), "pos": Tup([NAT, NAT, NAT]),
                                                                       "dc": Int(-1), "de": Int(-1)},
-                                                                 opt={"hl": FLAG, "n": NAT, "sz": NAT})}),
+                                                                 opt={"hl": FLAG, "n": NAT, "sz": NAT}),
+                                                       # M3 (BUG-111/112): invaders left out of the hostiles
+                                                       # (`id:why`: merchant, diplomat, visitor, restrained, child) and
+                                                       # the lone harmless intruder's clock in SIEGE/BREACH (age ticks,
+                                                       # how many, ticks until the limit releases it, the kernel's own
+                                                       # kill order: running or why refused)
+                                                       "ben": Arr(Str(maxbytes=24), hi=5),
+                                                       "ln": Obj(req={"age": NAT, "n": NAT},
+                                                                 opt={"rel": NAT, "kill": Str(maxbytes=80)})}),
          # FR-55 lever latency (gate): last pull -> wanted state, in s and ticks (-1 never); pending own pulls
          "lever": Obj(req={"lat_s": Int(-1), "lat_t": Int(-1), "pend": NAT, "wait_s": NAT}),
          "alert": Obj(req={"want": Str(maxbytes=24), "burrow": Str(maxbytes=24), "tiles": NAT, "inside": NAT,
@@ -984,8 +997,10 @@ STATE = Obj(
                                                             "crit": Str(maxbytes=24)})}),
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
+         # M3 (BUG-114): in BREACH ba = ticks since it began, bw = what it waits for (bridges not up and why, quiet clock)
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),
-                                                                 "deep": Str(maxbytes=24)}),
+                                                                 "deep": Str(maxbytes=24), "ba": NAT,
+                                                                 "bw": Str(maxbytes=100)}),
          # BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s),
          # exports written and requests dropped this boot; the running (else the first waiting) export: id, purpose,
          # who asked, progress, why it waits ('busy trade', 'paced 3 min', 'not started 2 min')

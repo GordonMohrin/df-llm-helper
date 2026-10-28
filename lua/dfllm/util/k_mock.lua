@@ -165,6 +165,7 @@ function M.new(opts)
   function units.isOwnGroup(u) return um(u).citizen == true or um(u).own_group == true end
   function units.isMerchant(u) return um(u).merchant == true end
   function units.isVisitor(u) return um(u).visitor == true end
+  function units.isDiplomat(u) return um(u).diplomat == true end        -- M3: flags a player sees on the unit sheet
   function units.isAnimal(u) return um(u).animal == true end
   function units.isFortControlled(u) return units.isCitizen(u) or units.isTame(u) end
   function units.getStressCategory(u) return um(u).stress or 3 end
@@ -319,7 +320,11 @@ function M.new(opts)
     local u = {id = id, pos = view(m, {x = 'x', y = 'y', z = 'z'}),
                -- BUG-035: on_ground (spec lying), rider (spec carried: a baby carried, a snatched child), chained
                flags1 = view(m, {caged = 'caged', inactive = 'offmap', on_ground = 'lying', rider = 'carried',
-                                 chained = 'chained'}), flags2 = view(m, {killed = 'dead'}),
+                                 chained = 'chained', merchant = 'merchant', diplomat = 'diplomat', active_invader = 'active_invader',
+                                 marauder = 'marauder'}),
+               flags2 = view(m, {killed = 'dead', restrained = 'restrained', visitor = 'visitor',
+                                 visitor_uninvited = 'visitor_uninvited'}),
+               counters = setmetatable({}, {__index = function(_, k) return k == 'unconscious' and (m.unconscious or 0) or 0 end}),
                military = {squad_id = m.squad or -1, squad_position = -1}, civ_id = m.civ_id or -1,
                inventory = vec{}, status = {}, _m = m}
     units_by_id[id] = u
