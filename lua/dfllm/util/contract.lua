@@ -291,6 +291,7 @@ C.STATE_OWNERS = {
 -- Dynamic keys: 'bp.<project id>' (runner), 'm.<module>' (that module).
 C.PERSIST = {
   marker = {key = 'dfllm', owner = 'kern'},
+  -- the fort manifest (shape: schema.MANIFEST); BUG-130: `breaches` = {{pos, why, proj, tpl}} from the runner's m.runner dz
   manifest = {key = 'dfllm.manifest', owner = 'runner'},
   projects = {key = 'dfllm.projects', owner = 'runner'},
   plan = {key = 'dfllm.plan', owner = 'kern'},

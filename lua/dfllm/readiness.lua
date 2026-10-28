@@ -20,7 +20,8 @@
 -- lost tiles held a well or the refuge, seal.burrow_guard; the kernel paints them again), hospital_out (BUG-036, Run 11
 -- siege 9: a hospital
 -- zone with tiles outside Kern+ and the refuge by water's state hosp_out; its lying patients cannot walk to the refuge),
--- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
+-- no_outer, no_inner (no manifest bridge of that role; BUG-130: a wall + door is no gate, it clears open_perimeter
+-- only, and a fortcore parked on a breach is re-sited by plan propose, never counted), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
 -- lost:<B> (BUG-030 rebuild policy, BUG-048: a bridge the perimeter keeper replaces by a wall + door after
 -- perimeter.stop_after losses to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B> until the
 -- closure stands: the kernel queues it, no question), refuge_trust (BUG-049: seal.refuge_trust says the refuge is

@@ -1144,6 +1144,9 @@ MANIFEST = named("manifest", Obj(
          # Run 11: tiles where a dig broke into a cavern (the runner's BREACH_STOP cavern/cavern_lake and shaft check):
          # the explore ranking keeps every shaft above their levels
          "caverns": Arr(POS, hi=32),
+         # BUG-130: every breach stop (BREACH_STOP), one per project (the runner's m.runner dz, newest kept): its tile,
+         # kind, project and template; the fortcore ranking keeps a new fortcore away from them, plan propose re-sites
+         "breaches": Arr(Obj(req={"pos": POS, "why": Str(maxbytes=16)}, opt={"proj": ID, "tpl": Str(maxbytes=24)}), hi=32),
          "pit": POS, "depot": POS}))
 
 # ---------------------------------------------------------------- blueprint project

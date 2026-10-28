@@ -176,8 +176,17 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
         man = files.read_manifest(save_dir) or {}
     bridges = man.get("bridges") if isinstance(man.get("bridges"), dict) else {}
     rooms = man.get("rooms") if isinstance(man.get("rooms"), list) else []
-    return {"o1": any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values())
-            or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied),
+    core = core_resite(save_dir, state, core_breaches(save_dir, state))     # BUG-130: a fortcore stopped on a breach
+    if core:
+        # the parked anchor's fragments (stage 3: O1) never stood: only the kernel's manifest counts an outer bridge
+        kb = (_kern_manifest(save_dir).get("bridges") or {})
+        o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in kb.values())
+    else:
+        o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values())             or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied)
+    refuge = refuge_projects(save_dir, state, applied, skip=set(core["ids"]) if core else set())
+    if core and not (core["resite"] and core["ok"] is not False):
+        refuge["fortcore"] = False                  # nothing to anchor stage 3 on: the core's anchor is the damp one
+    return {"o1": o1, "core": core,
             "gallery": any(isinstance(r, dict) and r.get("tpl") == GALLERY for r in rooms)
             or any(t == GALLERY for t, _ in applied),
             "stockroom": any(isinstance(r, dict) and r.get("tpl") == STOCKROOM for r in rooms)
@@ -185,7 +194,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "social": social_rooms(applied, rooms),                 # FR-74: temple / tavern standing or under way
             "sieged": sieged(save_dir, state),
             "audit": audit_routes(save_dir, state),
-            "refuge": refuge_projects(save_dir, state, applied),
+            "refuge": refuge,
             "stone_dig": stone_digs(save_dir),
             "hosp": hospital_facts(save_dir, state, rooms),
             "metal": metal_facts(save_dir, man, applied),
@@ -662,7 +671,8 @@ def _drink_site(save_dir: Path, state: dict | None, f: dict) -> tuple[int | None
     return (n, None) if free else (0, f"refuge_drink: no free site for {n} barrels (taken by other projects)")
 
 
-def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | None = None) -> dict:
+def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | None = None,
+                    skip: set | frozenset = frozenset()) -> dict:
     """The refuge work already under way (Run 10): stage3 (a fortcore stage 3 project not done yet, or running in
     state.proj), beds (the `n` of refuge_beds projects not done yet), seal (a seal project not done yet), fortcore
     (any fortcore stage applied: stage 3 can reuse its anchor) and ents (open ways in the last entrance check names).
@@ -688,8 +698,8 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
            "bed_site": _bed_site(save_dir, state), "drink": 0, "drink_room": _drink_room(save_dir)}
     for p in bp_files(save_dir):
         doc = files.read_json(p)
-        if not isinstance(doc, dict) or not isinstance(doc.get("tpl"), str):
-            continue
+        if not isinstance(doc, dict) or not isinstance(doc.get("tpl"), str) or p.stem in skip:
+            continue                               # BUG-130: a fortcore stopped on a breach is not under way
         if p.stem in done:
             out["drink_room"] = out["drink_room"] or doc["tpl"] == REFUGE_DRINK    # FR-69: a store done
             continue
@@ -703,7 +713,7 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
             out["seal"] = True
     out["drink_fit"], out["drink_why"] = _drink_site(save_dir, state, out)
     for row in (state or {}).get("proj") or []:
-        if isinstance(row, list) and len(row) >= 2 and row[0] == "fortcore" and str(row[1]).startswith("s3."):
+        if isinstance(row, list) and len(row) >= 2 and row[0] == "fortcore" and str(row[1]).startswith("s3.")                 and "breach:" not in str(row[-1]):
             out["stage3"] = True
     return out
 
@@ -726,7 +736,7 @@ def _head_seal(b: dict, head: str) -> bool:
 
 
 def _refuge_fix(b: dict) -> bool:
-    return _refuge_stage(b) or b["tpl"] in ("seal", REFUGE_BEDS, REFUGE_DRINK)
+    return _refuge_stage(b) or _resite(b) or b["tpl"] in ("seal", REFUGE_BEDS, REFUGE_DRINK)
 
 
 def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
@@ -1068,6 +1078,148 @@ def _outer_gallery(doc: dict, s: dict, fort: dict) -> str | None:
             "(site S1, once fortcore stage 2 is dug)")
 
 
+# ---------------------------------------------------------------- BUG-130: a fortcore stopped on a breach
+# Run 9 (site96) and the Run 14 replay (site90, y707): "y707s0b1 (fortcore) blocked: breach:damp". The runner parks a project
+# stopped on a breach for good (BUG-037) and never retries it; without O1/B1 readiness kept R0 no_outer/no_inner, every drill
+# was refused (BUG-110) and R2 never came. The kernel records the breach tiles (manifest `breaches`), the fortcore ranking
+# keeps a new fortcore BREACH_R tiles away from them on its levels (bp.sites), and the plan re-sites or closes.
+CORE_RESITE = {"tpl": "fortcore", "site": "S1", "p": {"stage": 1}}
+_BREACH_RE = re.compile(r"breach:([a-z_]+)")
+
+
+def _resite(b: dict) -> bool:
+    """A fortcore stage 1 on a ranked or explicit site (not `same`): the start of a fortcore somewhere new."""
+    p = b.get("p", b.get("params")) or {}
+    return b["tpl"] == "fortcore" and b.get("site") != SAME and _stage_of(p) in (1, None) and not p.get("retrofit")
+
+
+def _kern_manifest(save_dir: Path) -> dict:
+    """The kernel's own fort manifest (manifest.json, else the cached `inspect manifest` reply), {} when none."""
+    m = files.read_manifest(save_dir) or files.read_json(Path(save_dir) / _cmd.MANIFEST_CACHE)
+    return m if isinstance(m, dict) and not schema.validate("manifest", m) else {}
+
+
+def core_breaches(save_dir: Path, state: dict | None = None) -> list[dict]:
+    """The fortcore projects a breach stopped: [{proj, stage, why, pos, anchor}], by id. A fortcore bp file (not
+    cancelled, no PROJECT_DONE) that the kernel's manifest `breaches` names, whose state.proj row says `breach:<why>`
+    (also `parked: breach:<why>`), or that a BREACH_STOP event names."""
+    done = done_projects(save_dir)
+    docs = {}
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if isinstance(d, dict) and d.get("tpl") == "fortcore" and p.stem not in done \
+                and not (d.get("params") or {}).get("retrofit"):
+            docs[p.stem] = d
+    if not docs:
+        return []
+    found: dict[str, dict] = {}
+    for b in _kern_manifest(save_dir).get("breaches") or []:
+        if isinstance(b, dict) and b.get("proj") in docs:
+            found[b["proj"]] = {"why": str(b.get("why") or "damp"), "pos": list(b["pos"])}
+    for row in (state or {}).get("proj") or []:
+        m = _BREACH_RE.search(str(row[-1])) if isinstance(row, list) and len(row) >= 4 else None
+        if m and row[0] in docs:
+            found.setdefault(row[0], {"why": m.group(1), "pos": None})
+    if set(docs) - set(found) or any(f["pos"] is None for f in found.values()):
+        for e in files.iter_events_rev(save_dir):           # newest first: the latest stop of each project
+            d = e.get("d") if isinstance(e.get("d"), dict) else {}
+            pid = d.get("proj")
+            if e.get("type") != "BREACH_STOP" or pid not in docs:
+                continue
+            pos = list(d["pos"]) if isinstance(d.get("pos"), list) else None
+            if pid not in found:
+                found[pid] = {"why": str(d.get("why") or "damp"), "pos": pos}
+            elif found[pid]["pos"] is None:
+                found[pid]["pos"] = pos
+    return [{"proj": pid, "stage": _stage_of(docs[pid].get("params")) or 1, "why": found[pid]["why"],
+             "pos": found[pid]["pos"], "anchor": list(docs[pid].get("anchor") or [])} for pid in sorted(found)]
+
+
+def core_resite(save_dir: Path, state: dict | None, br: list[dict]) -> dict | None:
+    """What a fortcore stopped on a breach leaves (None without one): {br, ids (every fortcore project on a stopped anchor
+    not done, and the stopped ones: what to cancel), stages (every fortcore stage applied on such an anchor), resite (no
+    stage 1 on it was dug: the whole fortcore may move), ok (the ranking finds a free fortcore site away from the recorded
+    breaches; False: none, `why` says why; None: not known), why, site}."""
+    if not br:
+        return None
+    anchors = {tuple(b["anchor"]) for b in br}
+    done = done_projects(save_dir)
+    at = []
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if isinstance(d, dict) and d.get("tpl") == "fortcore" and tuple(d.get("anchor") or ()) in anchors \
+                and not (d.get("params") or {}).get("retrofit"):
+            at.append((p.stem, _stage_of(d.get("params")) or 1, p.stem in done))
+    dug = sorted(pid for pid, st, dn in at if st == 1 and dn)
+    out = {"br": br, "ids": sorted({pid for pid, _, dn in at if not dn} | {b["proj"] for b in br}),
+           "stages": sorted({st for _, st, _ in at} | {b["stage"] for b in br}), "resite": not dug, "ok": None,
+           "why": "", "site": None}
+    if dug:
+        out["ok"], out["why"] = False, f"stage 1 {dug[0]} is dug there: its later stages cannot move"
+        return out
+    try:
+        sites, _, _ = _cmd.free_sites(save_dir, "fortcore", {"stage": 1}, n=1)
+        out["ok"] = bool(sites)
+        out["why"] = "" if sites else "no free fortcore site on the snapshot"
+        out["site"] = sites[0].get("anchor") if sites else None
+    except BpUnavailable as e:
+        out["why"] = str(e)
+    except BpError as e:
+        out["ok"], out["why"] = False, str(e)
+    return out
+
+
+def _core_head(core: dict) -> str:
+    b = core["br"][0]
+    pos = f" at {_pos(b['pos'])}" if b.get("pos") else ""
+    more = f" (+{len(core['br']) - 1})" if len(core["br"]) > 1 else ""
+    return f"fortcore: {b['proj']} (stage {b['stage']}) stopped on breach:{b['why']}{pos}{more} and is parked"
+
+
+def core_movable(core: dict | None) -> bool:
+    """The stopped fortcore may move: no stage 1 was dug on its anchor and a dry site exists (or is not known)."""
+    return bool(core) and core["resite"] and core["ok"] is not False
+
+
+CORE_GATES = ("only a manifest bridge of role outer (O1) or inner (B1) with 2 linked levers clears R0 no_outer/no_inner; "
+              "a wall + door clears open_perimeter only; the drill needs those bridges (refused without them)")
+
+
+def core_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
+    """BUG-130: a plan must not build on the anchor of a fortcore stopped on a breach. While the core may move
+    (core_movable), a new fortcore build @same needs a re-sited stage 1 (`_resite`) before it in plan order (ERROR); a plan
+    that re-sites nothing gets a warning naming the re-site. When it cannot move (no dry site, or stage 1 dug there and a
+    later stage stopped) a new fortcore build @same of a stopped stage (no dry site: any) is refused and the closure is a
+    warning that says what the gates need (CORE_GATES)."""
+    core = (fort or {}).get("core")
+    if not core:
+        return [], []
+    head = _core_head(core)
+    adds = sorted(new_builds(doc, prev), key=lambda t: (t[0], t[1]))
+    errs, warn = [], []
+    movable = core_movable(core)
+    stopped = {b["stage"] for b in core["br"]}
+    first = next((i for i, (_, _, b) in enumerate(adds) if _resite(b)), None)
+    for i, (si, bi, b) in enumerate(adds):
+        if b["tpl"] != "fortcore" or b.get("site") != SAME:
+            continue
+        st = _stage_of(b.get("p") or {})
+        if movable and (first is None or first > i):
+            errs.append(f"{head}; seasons[{si}].build[{bi}] fortcore stage {st} @same would build on it: re-site first, "
+                        f"add {_compact(CORE_RESITE)} before it (BUG-130; dfllm plan propose drafts it)")
+        elif not movable and (core["resite"] or st in stopped):
+            errs.append(f"{head}; seasons[{si}].build[{bi}] fortcore stage {st} @same would build on it and cannot "
+                        f"move ({core['why'][:100]}): leave it out")
+    if movable and first is None:
+        warn.append(f"{head}: re-site it, add {_compact(CORE_RESITE)} (its later stages @same; BUG-130: S1 keeps away "
+                    f"from the recorded breaches; then dfllm cmd bp.cancel proj={core['ids'][0]})")
+    elif not movable:
+        warn.append(f"fortcore: no dry site ({core['why'][:100]}): close the ways in by wall + door "
+                    f"({_compact(SEAL_LAST)}); readiness keeps R0 no_outer/no_inner and the drill stays refused: "
+                    + CORE_GATES)
+    return errs, warn
+
+
 def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str] | None = None,
           banned: list[str] | None = None, prev: dict | None = None,
           fort: dict | None = None) -> tuple[list[str], list[str]]:
@@ -1142,6 +1294,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     pe, pw_ = perimeter_gate(doc, s, fort or {}, prev)      # FR-70: no phase raise while the perimeter is open
     errs += pe
     warn += pw_
+    ce, cw = core_gate(doc, s, fort or {}, prev)            # BUG-130: nothing on a fortcore anchor stopped on a breach
+    errs += ce
+    warn += cw
     warn += drink_gate(doc, s, fort or {}, prev)            # FR-69: refuge_dry -> the refuge drink store
     he, hw_ = hospital_gate(doc, s, fort or {}, prev)       # BUG-034: no hospital without accepted water near it
     errs += he
@@ -1399,7 +1554,8 @@ def core_order_note(doc: dict, state: dict | None) -> str | None:
     s1.*) `plan check` cannot site them. The order is bp.place fortcore -> wait for s1.dig -> `bp sites <tpl> --fresh`
     -> plan propose / check. A line for the CLI, None when the draft has no such build or the core is dug."""
     core = next((r for r in (state or {}).get("proj") or []
-                 if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.")), None)
+                 if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.")
+                 and "breach:" not in str(r[-1])), None)      # BUG-130: a core parked on a breach digs nothing
     rooms = sorted({b["tpl"] for se in doc["seasons"] for b in se["build"] if b["tpl"] not in CORE_FREE_TPLS})
     if core is None or not rooms:
         return None
@@ -1473,10 +1629,40 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     # Run 10: the audit's bypass wall first (audit_gate refuses growth without it)
     if ((fort or {}).get("audit") or {}).get("open") and (info is None or "seal" in info):
         builds.append(copy.deepcopy(SEAL_AUDIT))
+    # BUG-130: a fortcore stopped on a breach (parked for good): re-site it (stage 1 @S1 away from the recorded breaches,
+    # its stages @same after it) or, when it cannot move, close the ways in by wall + door and, with no core at all,
+    # stay below P3 (no refuge can be built)
+    core = (fort or {}).get("core")
+    core_note, drop_core = "", None
+    if core and (info is None or "fortcore" in info):
+        b0 = core["br"][0]
+        where = f" at {_pos(b0['pos'])}" if b0.get("pos") else ""
+        cancel = "; ".join(f"dfllm cmd bp.cancel proj={i}" for i in core["ids"][:3])
+        if core_movable(core):
+            for k in core["stages"]:
+                done.discard(("fortcore", k))
+            builds.append(copy.deepcopy(CORE_RESITE))
+            builds += [{"tpl": "fortcore", "site": SAME, "p": {"stage": k}} for k in core["stages"] if k >= 2]
+            core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where}: re-sited to S1 away "
+                         f"from the recorded breaches (its stages @same); then {cancel}")
+        else:
+            drop_core = "all" if core["resite"] else {b["stage"] for b in core["br"]}
+            if core["resite"]:
+                below = max((p["id"] for p in plist if p["id"] < REFUGE_PHASE), default=cur)
+                target = max(cur, min(target, below))
+            seal_n = ((fort or {}).get("refuge") or {}).get("seal_n")
+            if seal_n != 0 and (info is None or SEAL in info):
+                builds.append(copy.deepcopy(SEAL_LAST))
+            core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where} and cannot move "
+                         f"({core['why'][:100]}): the ways in are closed by wall + door (seal at=last"
+                         + ("" if seal_n != 0 else ": nothing left to close") + "); readiness keeps "
+                         f"R0 no_outer/no_inner and the drill stays refused (only bridges of role outer/inner count)"
+                         + (f"; phase_target held at {target} (no refuge)" if core["resite"] else "") + f"; the parked: {cancel}")
     # Run 10: then the refuge (refuge_gate refuses P3+ without a separated one with beds); Run 11: from the fort's
     # start once the refuge burrow exists, before every other new build
     for b in refuge_drafts(s, fort or {}, done, early=target < REFUGE_PHASE):
-        if info is None or b["tpl"] in info:
+        if (info is None or b["tpl"] in info) and not (b["tpl"] == "fortcore" and any(   # BUG-130: re-site drafted it
+                _build_key(x) == _build_key(b) for x in builds)):
             builds.append(b)
     # DECISIONS 1: from P3 on fortcore stage 3 (O1, B2) comes before every other new build, also in a fort whose phase
     # list had it later (stage3_gate refuses the plan otherwise)
@@ -1520,6 +1706,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs:
                     libs.append(d["lib"])
+    if drop_core:                                # BUG-130: nothing on the stopped anchor
+        builds = [b for b in builds if b["tpl"] != "fortcore" or (drop_core != "all" and (
+            b.get("site") != SAME or _stage_of(b.get("p") or {}) not in drop_core))]
     builds.sort(key=lambda b: b["tpl"] != SEAL)  # Run 11 siege 8: seal first (the runner runs it first anyway)
     left_out = []
     if rb:                                       # the rebuild drafts only what the runner runs then
@@ -1553,6 +1742,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     }
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb else tp)   # rebuild: no explore
+    doc["notes"] += core_note
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     if stress and sdrafts and not rb:

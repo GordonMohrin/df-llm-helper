@@ -18,7 +18,9 @@ Fortcore: the anchor is a surface floor tile under open sky with floor in front 
 the footprint may hold a revealed open tile. Score: flat dry surface over the footprint, map margin, and water
 (live L3: the only water was a brook 90 tiles away and bedridden dwarves died of thirst): + up to 60 when a
 revealed body of water (>= 8 tiles: a brook, river or lake, not a puddle or a sump) is within WATER_NEAR (30)
-walking steps of the anchor, minus 1 per step beyond, -80 when no revealed water is reachable at all.
+walking steps of the anchor, minus 1 per step beyond, -80 when no revealed water is reachable at all. BUG-130: a
+fortcore's dig keeps BREACH_R tiles from every breach the kernel recorded (manifest `breaches`, `caverns`) on its levels
+(+-1) and out of a wet layer (damp/water stops of LAYER_MIN projects on one level); ValueError when nothing dry is left.
 Refuge beds (`rooms.refuge_beds`, Run 10): anchors on the floor of the fortcore refuge room (no lever tile), the
 dormitory dug into the rock beside it (footprint and wall ring rock or unknown: it opens no new way in). The refuge drink
 store (`rooms.refuge_drink`, FR-69) the same way; with no site the ValueError says why and names the largest smaller
@@ -227,6 +229,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     rects = explore_rects(p) if tpl in mine.BUILD else footprint(tpl, p)
     if tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
+        cands = _dry(cands, manifest)                      # BUG-130: never again into a recorded breach
     elif tpl in mine.BUILD:
         cands = _explore(snap, p, rects, bad, hid, mk, manifest, wet)
     else:
@@ -732,9 +735,65 @@ def _fortcore(snap, rects, bad, hid, mk, wet_above=None):
                         + water_bonus(steps)
                     near = f"water {steps} steps" if steps is not None else "no water reachable"
                     out.append({"anchor": [ax, ay, z], "rot": rot, "score": max(score, 0),
-                                "box": (ax - 6, ay - 6, z, ax + 6, ay + 6, z),
+                                "box": (ax - 6, ay - 6, z, ax + 6, ay + 6, z), "dig": box,
                                 "why": f"rot{rot}, {near}, {uneven} uneven and {water} water surface tiles, "
                                        f"{missing} levels below the snapshot"})
+    return out
+
+
+BREACH_R = 10               # BUG-130: tiles (x/y) a fortcore's dig keeps from a recorded breach on its levels (+-1)
+LAYER_MIN = 2               # BUG-130: damp/water breaches of this many projects on one level make it a wet layer (aquifer)
+
+
+def breach_points(manifest: dict | None) -> list[tuple[tuple[int, int, int], str]]:
+    """BUG-130: the tiles where a dig was stopped by a breach (manifest `breaches`: damp, water, warm, cavern seepage) and
+    the cavern breaches (manifest `caverns`), each with a short label for the reason line."""
+    out = []
+    for b in (manifest or {}).get("breaches") or []:
+        pos = b.get("pos") if isinstance(b, dict) else None
+        if isinstance(pos, (list, tuple)) and len(pos) == 3:
+            out.append((tuple(int(v) for v in pos), f"{b.get('why', 'breach')} {_pos(pos)}"
+                        + (f" {b['proj']}" if b.get("proj") else "")))
+    for q in (manifest or {}).get("caverns") or []:
+        if isinstance(q, (list, tuple)) and len(q) == 3:
+            out.append((tuple(int(v) for v in q), f"cavern {_pos(q)}"))
+    return out
+
+
+def _dry(cands: list, manifest: dict | None) -> list:
+    """BUG-130 (Run 9, Run 14 y707: the fortcore stopped as breach:damp and was never re-sited): the fortcore candidates
+    whose dig (the full box over all its levels, `dig`) stays more than BREACH_R tiles (x/y) away from every recorded
+    breach on a level from one above to one below it, and whose dig reaches no wet layer: a level with damp or water
+    breaches of LAYER_MIN projects (a light aquifer is a layer: a second stop on the same level shows it is no pocket).
+    ValueError ("no dry fortcore site") when candidates existed and every one comes too close: the caller drafts the
+    closure instead (plan propose)."""
+    pts = breach_points(manifest)
+    if not pts or not cands:
+        return cands
+    R = BREACH_R
+    wet: dict[int, int] = {}
+    for (_, _, z), lbl in pts:
+        if lbl.split()[0] in ("damp", "water"):
+            wet[z] = wet.get(z, 0) + 1
+    layers = {z: n for z, n in wet.items() if n >= LAYER_MIN}
+
+    def near(c):
+        x0, y0, z0, x1, y1, z1 = c["dig"]
+        lay = next((z for z in sorted(layers) if z0 <= z <= z1), None)
+        if lay is not None:
+            return f"wet level z{lay} ({layers[lay]} damp/water stops)"
+        return next((lbl for (x, y, z), lbl in pts
+                     if z0 - 1 <= z <= z1 + 1 and x0 - R <= x <= x1 + R and y0 - R <= y <= y1 + R), None)
+    out, hit = [], []
+    for c in cands:
+        lbl = near(c)
+        if lbl is None:
+            out.append(c)
+        elif lbl not in hit:
+            hit.append(lbl)
+    if not out:
+        raise ValueError(f"fortcore: no dry fortcore site: every site's dig lies within {R} tiles of a recorded breach "
+                         f"({'; '.join(hit[:3])}{' +more' if len(hit) > 3 else ''})")
     return out
 
 

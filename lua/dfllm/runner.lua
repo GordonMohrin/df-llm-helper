@@ -1091,6 +1091,54 @@ function note_cavern(K, pos, why)
   K.log('info', 'cavern at %d,%d,%d (%s): explore shafts stop above z%d', x, y, z, tostring(why), z)
 end
 
+-- BUG-130 (Run 9 site96, Run 14 replay y707 site90: the fortcore stopped as breach:damp, parked for good and never
+-- re-sited): every breach stop is remembered, one entry per project with its tile, kind and template, m.runner dz =
+-- {{pos, why, proj, tpl, t}, ...} (<= br_max, newest kept), mirrored into the fort manifest as `breaches` = {{pos, why,
+-- proj, tpl}, ...}: bp.sites keeps a new fortcore away from those tiles and `plan propose` re-sites a stopped fortcore.
+-- Module fields (runner.lua sits at Lua's limit of 200 locals).
+M.BR_MAX = 32
+function M.publish_breaches(K)
+  local man, list = K.manifest(), {}
+  for i, c in ipairs(S.rt.dz) do list[i] = {pos = {c.pos[1], c.pos[2], c.pos[3]}, why = c.why, proj = c.proj, tpl = c.tpl} end
+  man.breaches = list
+  K.persist.set('manifest', man)
+end
+
+function M.note_breach(K, id, tpl, why, pos)
+  local x, y, z = int(type(pos) == 'table' and pos[1]), int(type(pos) == 'table' and pos[2]),
+                  int(type(pos) == 'table' and pos[3])
+  if not (x and y and z) or type(id) ~= 'string' then return end
+  S.rt.dz = type(S.rt.dz) == 'table' and S.rt.dz or {}
+  for i, c in ipairs(S.rt.dz) do
+    if c.proj == id then table.remove(S.rt.dz, i); break end
+  end
+  table.insert(S.rt.dz, {pos = {x, y, z}, why = trunc(tostring(why or 'damp'), 16), proj = id,
+                         tpl = trunc(tostring(tpl or '?'), 24), t = now(K)})
+  while #S.rt.dz > M.BR_MAX do table.remove(S.rt.dz, 1) end
+  M.publish_breaches(K)
+  dirty()
+end
+
+-- at boot: m.runner dz kept, the breach records of an older kernel (m.runner br) of the projects still known taken over,
+-- and the manifest's `breaches` written again when it lost them
+function M.breach_boot(K, rt, pd)
+  if type(rt.dz) ~= 'table' then rt.dz = {} end
+  local have, tpl = {}, {}
+  for _, c in ipairs(rt.dz) do if type(c) == 'table' then have[c.proj] = true end end
+  for _, P in ipairs(pd.list) do tpl[P.id] = P.tpl end
+  local ids = {}
+  for id in pairs(rt.br) do ids[#ids + 1] = id end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local r = rt.br[id]
+    if not have[id] and tpl[id] and type(r) == 'table' and type(r.pos) == 'table' then
+      M.note_breach(K, id, tpl[id], r.why, r.pos)
+    end
+  end
+  local man = K.manifest().breaches
+  if #rt.dz > 0 and (type(man) ~= 'table' or #man ~= #rt.dz) then M.publish_breaches(K) end
+end
+
 -- the plug project: per piece (the lower one first: it is reached through the upper one) 'pN.free' (a hatch or door
 -- on it removed), 'pN.dig' (channel) and 'pN.wall' (a constructed wall); buildingplan waits for the material (no
 -- orders), like runner.repair
@@ -2058,6 +2106,7 @@ function breach(K, P, why, pos, src, ex)
   if was then dd.was, dd.n = was, n end
   if ex then dd.state, dd.n = trunc(ex.state, 40), n or 0 end
   S.rt.br[P.id] = {why = why, pos = dd.pos, t = now(K), c = now(K)}   -- the recheck looks there first
+  M.note_breach(K, P.id, P.tpl, why, dd.pos)                              -- BUG-130: manifest.breaches
   K.emit('BREACH_STOP', 'B', breach_msg(P.id, why, src, was, n, ex and ex.state), dd)
   K.flush()
   dirty()
@@ -2086,6 +2135,7 @@ end
 local function raise(K, P, b, kind, hit, was, cnt)
   set_blocked(K, P, 'breach:' .. kind)
   b.why, b.pos = kind, hit and {hit[1], hit[2], hit[3]} or b.pos
+  M.note_breach(K, P.id, P.tpl, kind, b.pos)                               -- BUG-130
   local dd = {proj = P.id, why = kind, src = 'recheck', was = was, n = cnt or 0}
   if hit then dd.pos = {hit[1], hit[2], hit[3]} end
   K.emit('BREACH_STOP', 'B', breach_msg(P.id, kind, 'recheck', was, cnt), dd)
@@ -4240,6 +4290,7 @@ function M.init(K)
     end
   end
   if #rt.cz > 0 and man_cav ~= #rt.cz then publish_caverns(K) end
+  M.breach_boot(K, rt, pd)                                           -- BUG-130: breach tiles of an older kernel
   -- 'dig_lost' is no safety stop (damp/warm/water are 'breach:*'): every boot retries such projects once
   for _, P in ipairs(pd.list) do
     if P.blocked == 'dig_lost' then
