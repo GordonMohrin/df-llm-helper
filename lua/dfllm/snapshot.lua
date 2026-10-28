@@ -478,6 +478,26 @@ function M.groups(K, pts, near)
   return out
 end
 
+-- occupied(K, pts): FR-90 (trash view: which loose items lie on a building or stockpile tile). pts = array of {x, y, z}; per
+-- point the tile's building occupancy value (tile_building_occ, 0 = none; a stockpile, workshop or planned building is > 0),
+-- -1 for a hidden or invalid tile or a fault (callers count -1 as open floor). At most M.CFG.group_pts points a call (the rest
+-- answer -1); hidden tiles are never read further.
+function M.occupied(K, pts)
+  local out, lim = {}, M.CFG.group_pts or 4000
+  for i, p in ipairs(type(pts) == 'table' and pts or {}) do
+    local v = -1
+    if i <= lim and type(p) == 'table' then
+      local x, y, z = int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])
+      if x and y and z then
+        local ok, des, oc = pcall(dfhack.maps.getTileFlags, x, y, z)
+        if ok and des and not des.hidden and oc then v = int(oc.building) or -1 end
+      end
+    end
+    out[i] = v
+  end
+  return out
+end
+
 -- outside_near(K, pts, r): open-sky test for the reflex module (FR-49/52: the fort's entrance doors, a predator on a
 -- roofed tile). pts = array of {x, y, z}; per point 1 when a revealed tile within r (Chebyshev xy, same z; r 0 = the
 -- tile itself) is under the open sky (designation.outside), 0 when none is, -1 for a bad point. Hidden tiles never

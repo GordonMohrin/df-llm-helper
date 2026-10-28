@@ -93,6 +93,7 @@ T.test('a menu that ignores every click: the third click dumps the screen the cl
 end)
 
 T.test('a run that finds its labels records no dump', function()
+  T.ok(LS.dump, 'the dump function exists')
   local D = F.new({saves = {{name = 'autosave 10'}, {name = 'autosave 1'}}})
   local run, _, ctx = start(D, spec('autosave 1'))
   T.eq(run.state, 'done', run.msg)

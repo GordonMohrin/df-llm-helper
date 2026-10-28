@@ -195,7 +195,7 @@ def test_zone_place_is_a_registered_verb_outside_fights_with_its_act_and_rules_r
     assert schema.ACT["zone_place"] == ["runner"]
     text = (ROOT / "RULES.md").read_text(encoding="utf-8")
     assert "`zone.place`" in text and "--near" in text
-    assert schema.ZONE_TYPES == ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting"]
+    assert schema.ZONE_TYPES == ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting", "dump"]
 
 
 @pytest.mark.skipif(not luahost.available(), reason="no Lua 5.3 for luahost")
@@ -222,7 +222,7 @@ def test_zone_cells_are_valid_quickfort_zone_cells(tmp_path):
 
 def test_zones_config_is_validated(tmp_path):
     cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
-    assert cfg["zones"] == {"max_tiles": 400}
+    assert cfg["zones"] == {"max_tiles": 400, "dump_path_gap": 2}
     assert fairplay.zones_errors() == []
     p = tmp_path / "baseline.json"
     p.write_text(json.dumps({"v": 2, "zones": {"max_tiles": 0, "side": 5}}), encoding="utf-8")

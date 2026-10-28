@@ -8,7 +8,7 @@
 -- separate Pit value, a pit is a Pond zone that is not kept filled.
 --
 -- Types (quickfort zone keys, dfpilot/bp/validate.py ZONE_KEYS, quickfort-user-guide #zone): pen n, pit p, pond p{pond=true},
--- sand s, clay c, fishing f, meeting m. One level per zone. Refused: a box that leaves the map or holds a tile that is not
+-- sand s, clay c, fishing f, meeting m, dump d (FR-90, Run 14 note 98: the garbage dump zone, zones > Dump). One level per zone. Refused: a box that leaves the map or holds a tile that is not
 -- revealed (a player cannot draw on an unexplored tile; fair play: never hidden tiles), a box over rock, open air or (for
 -- everything but fishing) water, a box over more than zones.max_tiles tiles (config/baseline.json "zones", default 400), a
 -- box that overlaps a conflicting zone (below), and any fight mode (kern: PEACE, ALERT, RECOVERY only).
@@ -16,6 +16,9 @@
 -- location_id); a room zone (bedroom, dining hall, barracks, dormitory, office, archery range, tomb, dungeon) for a pen, a
 -- pit or a pond; a pond or pit under a pen or a meeting area and the other way round. Sand, clay and fishing zones conflict
 -- with the same type and with locations only (zones may overlap otherwise, as in the game).
+-- FR-90: a dump zone also keeps away from everything people live or work in (room zones, pens, ponds, meeting areas, water
+-- sources, fishing areas: the same conflicts the other way round), from water (the box and a ring of one tile are dry) and
+-- from walking routes (no stair, ramp, door, hatch or bridge within zones.dump_path_gap tiles of the box, default 2).
 local Z = {}
 
 -- type -> quickfort key, properties, the df.civzone_type name (may differ between DF versions: looked up by name, a missing
@@ -28,12 +31,18 @@ Z.TYPES = {
   clay    = {key = 'c', props = '', zt = 'ClayCollection'},
   fishing = {key = 'f', props = '', zt = 'FishingArea', water = true},
   meeting = {key = 'm', props = '', zt = 'MeetingHall'},
+  -- the enum name differs between DF versions (Dump, GarbageDump): both count as a dump zone
+  dump    = {key = 'd', props = '', zt = 'Dump', zts = {Dump = true, GarbageDump = true}},
 }
-Z.ORDER = {'pen', 'pit', 'pond', 'sand', 'clay', 'fishing', 'meeting'}
+Z.ORDER = {'pen', 'pit', 'pond', 'sand', 'clay', 'fishing', 'meeting', 'dump'}
 Z.MAX_TILES = 400                                  -- zones.max_tiles
+Z.PATH_GAP = 2                                     -- zones.dump_path_gap: tiles a dump zone keeps from a stair, ramp, door, bridge
+Z.PATH = {['<'] = 'stair', ['>'] = 'stair', X = 'stair', r = 'ramp', v = 'ramp', ['+'] = 'door', ['='] = 'bridge', H = 'bridge'}
+Z.DUMP_BAD = {Pen = true, Pond = true, MeetingHall = true, WaterSource = true, FishingArea = true}
 Z.ROOMS = {Bedroom = true, DiningHall = true, Barracks = true, Dormitory = true, Office = true, ArcheryRange = true,
            Tomb = true, Dungeon = true}
 local ANIMAL = {pen = true, pit = true, pond = true}
+local PLACED = {pen = true, pit = true, pond = true, meeting = true}   -- the types a dump zone may not lie under
 local SOLID = {['#'] = true, S = true, C = true, F = true, T = true, ['_'] = true}
 local WATER = {w = true, ['~'] = true}
 
@@ -46,6 +55,17 @@ function Z.max_tiles(K)
   if n and n >= 1 and n <= 10000 then return n end
   return Z.MAX_TILES
 end
+
+-- zones.dump_path_gap: 0..8 tiles; another value keeps the default 2
+function Z.path_gap(K)
+  local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.zones
+  local n = type(c) == 'table' and int(c.dump_path_gap) or nil
+  if n and n >= 0 and n <= 8 then return n end
+  return Z.PATH_GAP
+end
+
+-- a civzone type name that is a dump zone (Dump or GarbageDump)
+function Z.is_dump(tn) return Z.TYPES.dump.zts[tn] == true end
 
 -- the cell text and the anchor of a normalised box: 'p{pond=true name=dfllm-pit}(4x3)', {x, y, z}
 function Z.cell(ty, box, name)
@@ -101,6 +121,35 @@ function Z.tiles_ok(ty, box, tile)
   return nil
 end
 
+-- FR-90: the placement rules of a dump zone beyond tiles_ok: no water in the ring of one tile around the box (the box itself is
+-- dry already), no walking route within `gap` tiles, no building on the box. `tile` is snapshot.tile; a hidden tile of the ring
+-- is skipped (nothing is read there). nil when the site is fine, else the first refusal text.
+function Z.dump_ok(box, tile, gap)
+  gap = gap or Z.PATH_GAP
+  for y = box.y0 - 1, box.y1 + 1 do
+    for x = box.x0 - 1, box.x1 + 1 do
+      local c = tile(x, y, box.z)
+      if type(c) == 'table' and (WATER[c.c] or c.c == '%' or (tonumber(c.flow) or 0) > 0) then
+        return string.format('tile %d,%d,%d is water in or beside the box: a dump zone keeps one dry tile from water', x, y, box.z)
+      end
+    end
+  end
+  for y = box.y0 - gap, box.y1 + gap do
+    for x = box.x0 - gap, box.x1 + gap do
+      local c = tile(x, y, box.z)
+      local kind = type(c) == 'table' and Z.PATH[c.c]
+      if kind then
+        return string.format('tile %d,%d,%d is a %s, a walking route within %d tile(s) of the box: put the dump zone away from paths',
+                             x, y, box.z, kind, gap)
+      end
+      if type(c) == 'table' and x >= box.x0 and x <= box.x1 and y >= box.y0 and y <= box.y1 and c.bld and c.bld ~= '' then
+        return string.format('tile %d,%d,%d holds a building (%s)', x, y, box.z, tostring(c.bld))
+      end
+    end
+  end
+  return nil
+end
+
 -- conflicts with the zones listed ({id, tname, loc, name, x0, y0, x1, y1, z, has = function(x, y) | nil}); the first text
 function Z.conflict(ty, box, zones)
   local t = Z.TYPES[ty]
@@ -121,7 +170,9 @@ function Z.conflict(ty, box, zones)
         local tn = zn.tname or '?'
         local why
         if zn.loc and zn.loc >= 0 then why = 'is a location (hospital, temple, tavern, library or guildhall)'
-        elseif tn == t.zt then why = 'has the same type'
+        elseif tn == t.zt or (t.zts and t.zts[tn]) then why = 'has the same type'
+        elseif ty == 'dump' and (Z.ROOMS[tn] or Z.DUMP_BAD[tn]) then why = 'is ' .. (Z.ROOMS[tn] and 'a room zone' or 'a ' .. tn .. ' zone')
+        elseif PLACED[ty] and Z.is_dump(tn) then why = 'is a dump zone'
         elseif ANIMAL[ty] and Z.ROOMS[tn] then why = 'is a room zone'
         elseif (ty == 'pit' or ty == 'pond') and (tn == 'Pen' or tn == 'MeetingHall') then why = 'is a ' .. tn .. ' zone'
         elseif ty == 'pen' and tn == 'Pond' then why = 'is a pit/pond zone'
@@ -178,6 +229,10 @@ function Z.verb(K, args, cmd)
   local bad = Z.tiles_ok(spec.type, spec.box, tile)
   if not reader then return false, 'zone.place: no tile reader (snapshot is not running): nothing is drawn on tiles nobody read' end
   if bad then return false, 'zone.place: ' .. bad end
+  if spec.type == 'dump' then                        -- FR-90: away from paths, not in or beside water
+    bad = Z.dump_ok(spec.box, tile, Z.path_gap(K))
+    if bad then return false, 'zone.place: ' .. bad end
+  end
   local clash = Z.conflict(spec.type, spec.box, Z.zones(spec.box.z))
   if clash then return false, 'zone.place: the box ' .. clash end
   local cell, pos = Z.cell(spec.type, spec.box, spec.name)

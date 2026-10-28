@@ -317,7 +317,7 @@
   "station_r": 3
  },
  "offices": {"blocker_days": 7},
- "zones": {"max_tiles": 400},
+ "zones": {"max_tiles": 400, "dump_path_gap": 2},
  "save": {"wait_s": 180, "max_wait_s": 600, "autosave_fresh_s": 300},
  "perf": {"quiet_s": 60, "carry_days": 28},
  "burrow": {"guard": {"on": true, "shrink_pct": 30, "repair_per_day": 2000, "settle_days": 14, "every_s": 120}},

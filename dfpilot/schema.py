@@ -392,7 +392,7 @@ TPL = named("tpl", Str(TPL_RE))
 BRIDGE = Str(BRIDGE_RE)
 SQUAD = AnyOf(NAT, Str(enum=["A", "B", "C"]))                  # BUG-055: a squad key or the game's squad id
 SQUAD_MODES = ["PEACE", "ALERT", "RECOVERY"]                   # the squads screen is not touched in a fight
-ZONE_TYPES = ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting"]    # FR-78: lua/dfllm/zonelib.lua Z.TYPES
+ZONE_TYPES = ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting", "dump"]    # FR-78: lua/dfllm/zonelib.lua Z.TYPES
 MODULE = named("module", Str(MODULE_RE))
 MODE = named("mode", Str(enum=MODES))
 PHASE = named("phase", Str(PHASE_RE))
@@ -651,7 +651,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MIGRANTS": ("B", "economy", _d(opt="n:i")),
     "PETITION": ("B", "care", _d(opt="kind:s")),
     "STOCK_LOW": ("B", "economy", _d("key:s", "days:i min:i")),
-    "CANCEL_LOOP": ("B", "economy", _d(opt="order:i job:s n:i")),
+    "CANCEL_LOOP": ("B", "economy", _d(opt="order:i job:s n:i why:s")),     # FR-90: why = no_zone/unreachable/no_free_tile/ok for a Dump item loop
     "LABOR_STARVED": ("B", "economy", _d("labor:s", "cycles:i to:s")),
     "WORK_DETAIL": ("B", "economy", _d("detail:s unit:i on:i", "n:i why:s")),
     "CAPTURE": ("B", "care", _d(opt="unit:i race:s")),
@@ -769,7 +769,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "orders", "workload",
                                           "trade", "reach", "entrances", "defense", "perimeter", "refuge",
-                                          "offices"])},
+                                          "offices", "items"])},
                    opt={"key": Str(maxbytes=80), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),

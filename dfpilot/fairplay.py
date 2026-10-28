@@ -547,8 +547,9 @@ def offices_errors(path: str | Path | None = None) -> list[str]:
 
 
 # FR-78 (lua/dfllm/zonelib.lua Z.MAX_TILES): config/baseline.json "zones": max_tiles = the tiles one zone.place box may
-# cover (a bad value keeps the default 400)
-ZONES_LIM: dict = {"max_tiles": (1, 10000)}
+# cover (a bad value keeps the default 400); FR-90 dump_path_gap = the tiles a dump zone keeps from a stair, ramp, door, bridge
+# (a bad value keeps the default 2)
+ZONES_LIM: dict = {"max_tiles": (1, 10000), "dump_path_gap": (0, 8)}
 
 
 def zones_errors(path: str | Path | None = None) -> list[str]:
