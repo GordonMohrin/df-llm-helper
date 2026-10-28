@@ -18,8 +18,8 @@ Module: `dfpilot/plan.py` (`level_cap`, `propose`, `minimal_plan`), `dfpilot/wak
 ## Fix
 - (a) `plan.raise_due`: the applied plan is the minimal one, at least `RAISE_QUIET_Y` (1) game year old, PEACE, no SIEGE_START/SIEGE_END/BREACH or MODE to
   SIEGE/BREACH in the last game year. Then `auto_plan` drafts `propose(upto=next phase)` (never a star phase; all builds propose drafts: refuge,
-  `seal at=audit`, fortcore stages, hospital, plus every `add {...}` repair the ERRORs name). ERRORs: the largest error-free subset of those builds in
-  draft order at the next phase, else the plain minimal plan; the full draft's ERRORs are `held` and the PLAN_AUTO line says `N ERROR held back: ...`.
+  `seal at=audit`, fortcore stages, hospital, plus every `add {...}` repair the ERRORs name). ERRORs: an error-free subset of those builds at the next phase
+  (drop the build whose removal leaves the fewest ERRORs, latest first, until none; builds that check only together stay), else the plain minimal plan; the full draft's ERRORs are `held` and the PLAN_AUTO line says `N ERROR held back: ...`.
   Follow (`_check_plan`) calls it after one quiet year under a minimal plan (else after the stale years as before), once per game year.
 - (b) `plan.R_CAPS = {0: 100, 1: 100, 2: 100, 3: 250}` (D-01 = B, the kernel's table; a test pins Python = Lua = baseline popcap.max_pop) and
   `R_CAPS_A = {0: 55, 1: 55, 2: 75}` for D-01 = A; `with_defaults(plan, phases, decisions)` gives a fort without a plan `option B, pop_ceiling 100`

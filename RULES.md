@@ -188,7 +188,7 @@ There is no arbitrary Lua. Every reply lands in `outbox/<id>.json`; `dfllm cmd` 
 - **R1 sealed:** worst-case audit passes (all bridges lowered, doors open, trap hall removed: no
   edge→Z3 path; refuge reachable without Z2/Z3; civilian path ≠ attacker path; caverns sealed);
   Kern+ and Tiefe+ (with drink) exist; 2 levers per bridge.
-- **R2 grow to ≤ 75:** R1 + drill passed ≤ 100,800 ticks ago (bridges up ≤ T+900, worn ≥ 90 %,
+- **R2 grow to ≤ 75 (D-01 = A; B: 100, BUG-132):** R1 + drill passed ≤ 100,800 ticks ago (bridges up ≤ T+900, worn ≥ 90 %,
   nobody outside at T+1,200, 0 double toggles) + soldiers ≥ 15 % of adults and ≥ 8 with combat
   value ≥ `cv_min` + ≥ 30 armed traps on every attacker path + food ≥ 60 days, drink ≥ 170 days.
 - **R3 ≥ 80:** only with D-01 = B and ≥ 20 % of soldiers in iron or steel.

@@ -1787,21 +1787,26 @@ def _fix_rounds(doc: dict, state, prev, fort, decisions, tp, season: int, ok) ->
 
 
 def _subset(cand: dict, state, prev, fort, decisions, tp) -> tuple[dict, list[str]] | None:
-    """BUG-132: the largest error-free subset of cand's new builds, taken greedily in draft order (each build is kept
-    when the plan with it still checks without ERROR); None when not even the plan without new builds checks."""
-    kept: list[tuple[int, dict]] = []
-    best = None
-    for si, _, b in new_builds(cand, prev):
-        trial = _with_new(cand, prev, kept + [(si, b)])
+    """BUG-132: a large error-free subset of cand's new builds: from all of them, drop the one build (latest first) whose
+    removal leaves the fewest ERRORs, until none is left (builds that only check together, like the audit seal and the
+    refuge piece, stay together); None when no single removal lowers the ERRORs any more (e.g. the raise itself)."""
+    keep = [(si, b) for si, _, b in new_builds(cand, prev)]
+    while True:
+        trial = _with_new(cand, prev, keep)
         te, tw = check(trial, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
         if not te:
-            kept.append((si, b))
-            best = (trial, tw)
-    if best is None:
-        trial = _with_new(cand, prev, [])
-        te, tw = check(trial, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
-        best = None if te else (trial, tw)
-    return best
+            return trial, tw
+        drop, least = None, len(te)
+        for i in reversed(range(len(keep))):
+            e2 = check(_with_new(cand, prev, keep[:i] + keep[i + 1:]), state, decisions=decisions, tpls=tp, prev=prev,
+                       fort=fort)[0]
+            if len(e2) < least:
+                drop, least = i, len(e2)
+                if not e2:
+                    break
+        if drop is None:
+            return None
+        del keep[drop]
 
 
 def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,

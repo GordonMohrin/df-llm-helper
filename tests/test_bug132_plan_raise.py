@@ -186,3 +186,30 @@ def test_follow_raises_the_minimal_plan_after_one_quiet_year(save, monkeypatch):
     c.t += 301
     f.poll()
     assert calls == ["follow"], "a breach in the last year: no raise"
+
+
+def test_a_raise_subset_keeps_builds_that_only_check_together(save, monkeypatch):
+    """Review of BUG-132: two builds the raise needs together (the refuge's fortcore stage needs the tombs here, like the
+    audit seal and the refuge piece of §8) must both stay when only a third build carries the ERROR; a one-at-a-time
+    greedy pass dropped the first of them."""
+    install_fake_bp(monkeypatch)
+    monkeypatch.setattr(plan, "load_phases", lambda path=None: phases())
+    put_minimal(save, 5)
+    at_year(save, 6)
+    real = plan.check
+
+    def fake_check(doc, st, **kw):
+        errs, warn = real(doc, st, **kw)
+        b = built(doc)
+        if "temple" in b:
+            errs = errs + ["stress: the temple site is under water (x)"]
+        if doc["phase_target"] > "P3" and ("fortcore" in b) != ("tombs" in b):
+            errs = errs + ["gate: fortcore and tombs only together"]
+        return errs, warn
+    monkeypatch.setattr(plan, "check", fake_check)
+    with FakeKern(save, lambda d: (True, "plan y6 loaded", {"year": 6})):
+        errs, msg = plan.apply_minimal(save, by="follow", wait_s=5)
+    assert errs == [] and "temple site is under water" in msg, msg
+    written = json.loads((save / "plan.json").read_text("utf-8"))
+    assert written["phase_target"] == "P4" and "temple" not in built(written)
+    assert {"fortcore", "tombs"} <= set(built(written)), built(written)

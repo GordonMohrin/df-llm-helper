@@ -5,7 +5,7 @@
   while nothing moved; and although Gordon answered D-01 = B with cap 100, `status` said `cap 55 gate 55` (plan.R_CAPS still 55, the kernel's no-plan
   default 55, and the R2 ceiling 75 would have lowered the cap again).
 - **What changed:** (1) plan.py `raise_due` (minimal plan >= 1 game year old, PEACE, no siege/breach in the last year), `next_phase` (never a star
-  phase), `auto_plan`: `propose(upto=next)` with every build it drafts and the `add {...}` repairs; ERRORs: the largest error-free subset in draft order,
+  phase), `auto_plan`: `propose(upto=next)` with every build it drafts and the `add {...}` repairs; ERRORs: an error-free subset (drop the build whose removal clears most, so builds needed together stay),
   else the plain minimal plan, and the full draft's ERRORs go into the message (`N ERROR held back: ...`); `minimal_plan`/`apply_minimal` use it.
   wake.py `_check_plan` calls it after one quiet year under a minimal plan (once per game year; else after `stale_apply_years` as before); PLAN_AUTO
   says `a quiet year` and the raise `Pn -> Pn+1`. (2) `R_CAPS = {0: 100, 1: 100, 2: 100, 3: 250}` (D-01 = B, = readiness.lua M.CAPS), `R_CAPS_A`
@@ -15,7 +15,7 @@
 - **Effective cap (D-01 = B):** min(readiness cap 100 at R0..R2 / 250 at R3, plan pop_ceiling, inbox popcap.lower, FR-70 hold); a falling ceiling
   holds at min(last cap, citizens), outside PEACE it never rises. A plan applied before this keeps 55 until the next apply.
 - **Contracts / config:** none (no event, verb or state key; the PLAN_AUTO text only).
-- **Tests (fail on dec5132):** tests/test_bug132_plan_raise.py (6), tests/lua/test_bug132_cap.lua (2).
+- **Tests (fail on dec5132):** tests/test_bug132_plan_raise.py (8), tests/lua/test_bug132_cap.lua (2).
 - **Live check:** on a fort whose plan.json is the minimal one and a game year old without a siege, `follow` (auto) wakes `PLAN_AUTO ... a quiet year
   ... Pn -> Pn+1`; plan.json shows phase_target one higher, `pop_ceiling` 100 and the next phase's builds; `status` shows `cap 100 gate 100` (or the
   current population while the demotion freeze or the FR-70 hold applies); a `plan check` ERROR appears as `ERROR held back` in the wake.
