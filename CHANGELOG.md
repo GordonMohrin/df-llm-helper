@@ -1,12 +1,12 @@
 # CHANGELOG dfpilot
 
-## M3: a lone harmless intruder is classified, killed or released, a sortie says what became of it, a bridge that never rises is given up on (BUG-111, BUG-112, BUG-113, BUG-114, FR-84, 2026-10-28, offline, live-untested)
+## M3: a lone harmless intruder is classified, killed or released, a sortie says what became of it, a bridge that never rises is given up on (BUG-111, BUG-112, BUG-113, BUG-114, FR-93, 2026-10-28, offline, live-untested)
 - **Why:** Run 14 (Trussroads) notes 77, 94, 96, 97: one goblin held the fort in SIEGE for 48 days and in BREACH for 17 to 26 days
   (threat's quiet clock counts every invader on the map, BUG-065's confinement limit runs in PEACE/ALERT only, a cleared harmless unit
   counts again inside Kern+); `squad.sortie` to its position set a station order that was spent on arrival and replaced by the BREACH
   posture, with no result event; Gordon's own kill orders left the soldiers standing beside it (probably not a unit DF treats as an
   enemy); bridge X25718 stayed down and lever 25729 was pulled every few seconds for weeks, with no wake saying why.
-- **What changed (sense, reflex, threat, military, siege, gate, brief, wake; bugs/BUG-111..114, FR-84):** (1) sense leaves an invader that
+- **What changed (sense, reflex, threat, military, siege, gate, brief, wake; bugs/BUG-111..114, FR-93):** (1) sense leaves an invader that
   DF's flags mark as merchant, diplomat, invited visitor (never an uninvited one, an active invader or a marauder), restrained or child
   out of the hostiles and names it (`census.h.benign`, `alarm.ben`, one kern.log line); an unconscious invader stays counted and is
   marked `uc`. (2) In SIEGE/BREACH a lone harmless intruder has a clock (`reflex.lone_step`): after `confine.kill_hours` (24) the kernel

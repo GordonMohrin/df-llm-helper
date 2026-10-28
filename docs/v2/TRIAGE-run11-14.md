@@ -134,7 +134,7 @@ lines). Everything is "offline, live-untested": each bug file names its live che
 ## Fourth pass, package M3 (2026-10-28, notes 77, 94, 96, 97)
 | Note | What | Where |
 |---|---|---|
-| 77 | lockdown 48+ days for a far harmless goblin; `squad.sortie` refused with "no killbox" | BUG-112 (SIEGE/BREACH clock of the lone harmless intruder), BUG-113 (`no killbox` falls back to the one hostile), FR-84 |
-| 94 | one harmless goblin holds BREACH 17+ days: question with a ready command, release at the limit, PATIENTS_OUT as a class-A wake | BUG-111, BUG-112 (`kill_lone_intruder`, `siege_release`), PATIENTS_OUT class A with a recipe, FR-84 |
-| 96 | `squad.sortie` to a position kills nothing; the soldiers stand beside a unit DF does not treat as an enemy | BUG-113 (kill order, SORTIE result events, kept against the posture, `not_attackable`, walk-group refusal), BUG-111 (classification by DF's flags), FR-84 |
-| 97 | BREACH never ends, bridge X25718 stays down, lever pulled for weeks | BUG-114 (`gate.pull_cap` give-up + GATE_FAIL reason, `breach.stuck_ticks` fallback, `BREACH since N d` line; why the real BREACH did not end with 0 visible stays open), FR-84 |
+| 77 | lockdown 48+ days for a far harmless goblin; `squad.sortie` refused with "no killbox" | BUG-112 (SIEGE/BREACH clock of the lone harmless intruder), BUG-113 (`no killbox` falls back to the one hostile), FR-93 |
+| 94 | one harmless goblin holds BREACH 17+ days: question with a ready command, release at the limit, PATIENTS_OUT as a class-A wake | BUG-111, BUG-112 (`kill_lone_intruder`, `siege_release`), PATIENTS_OUT class A with a recipe, FR-93 |
+| 96 | `squad.sortie` to a position kills nothing; the soldiers stand beside a unit DF does not treat as an enemy | BUG-113 (kill order, SORTIE result events, kept against the posture, `not_attackable`, walk-group refusal), BUG-111 (classification by DF's flags), FR-93 |
+| 97 | BREACH never ends, bridge X25718 stays down, lever pulled for weeks | BUG-114 (`gate.pull_cap` give-up + GATE_FAIL reason, `breach.stuck_ticks` fallback, `BREACH since N d` line; why the real BREACH did not end with 0 visible stays open), FR-93 |
