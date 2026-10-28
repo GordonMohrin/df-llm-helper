@@ -346,10 +346,10 @@ def curse_items(ctx: Ctx) -> list[tuple[int, str]]:
     if not isinstance(c, dict):
         return []
     ids = c.get("ids") or []
-    total = c["n"] + c["tf"]
+    total = (c.get("n") or 0) + (c.get("tf") or 0)
     txt = f"CURSED {total}" + (f" (ids {','.join(str(i) for i in ids)}" + (f" +{total - len(ids)}" if total > len(ids) else "") + ")"
                                if ids else "")
-    txt += f", {c['tf']} in were-form" if c["tf"] else ""
+    txt += f", {c['tf']} in were-form" if c.get("tf") else ""
     if "mo" in c:
         txt += f", next full moon ~d{c['mo']} (in {c.get('mi', '?')} d)"
     if c.get("dead"):

@@ -33,6 +33,19 @@ T.test('BUG-115: kern routes a report to a module by M.report_text, whatever its
   kern.stop()
 end)
 
+T.test('review M4: a curse report whose type another module lists is still routed to the module that names its text', function()
+  local W = H.world{tag = 'curse_route2'}
+  local got = {}
+  local m = {name = 'care', every = {ticks = 1000}, reports = {CARAVAN_ARRIVAL = true},
+             report_text = {'has been cursed'}, on = {REPORT = function(K, ev) got[#got + 1] = ev.type .. ':' .. ev.text end}}
+  local other = {name = 'economy', every = {ticks = 1000}, reports = {CANCEL_JOB = true}, on = {REPORT = function() end}}
+  H.boot(W, {modules = {m, other}})
+  reports(W, 1, 'CANCEL_JOB', 'Oddom Letmoscog, Miner has been cursed by Ok!')
+  H.frame(W, 1)
+  T.eq(got, {'CANCEL_JOB:Oddom Letmoscog, Miner has been cursed by Ok!'})
+  kern.stop()
+end)
+
 T.test('BUG-115: a curse or transformation popup is not cleared, not even by popups.other; "were" needs a letter after it', function()
   local W = H.world{tag = 'curse_popup', ms_per_frame = 100}
   local seen = {}

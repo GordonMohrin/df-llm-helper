@@ -1117,9 +1117,9 @@ local function report_event(st, id)
   local tname = df.announcement_type[rep.type]
   local wanted = tname and (st.report_any or st.report_types[tname])
   local low
-  if not wanted and #st.report_text > 0 then
+  if #st.report_text > 0 then            -- also for a type some module lists: the text may name another module's markers
     low = tostring(rep.text or ''):lower()
-    wanted = text_hit(st.report_text, low)
+    wanted = wanted or text_hit(st.report_text, low)
   end
   if not wanted then return nil end
   local p = rep.pos

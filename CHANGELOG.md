@@ -32,6 +32,10 @@
   questions (bugs/BUG-115 "Not decided offline"): `dfhack.units.isCitizen(u, true)`, `isDanger(u)` and `getRaceName(u)` of a
   were-form unit.
 
+- **Review fix (kern.lua):** a report of a type some module lists (e.g. CANCEL_JOB for runner) was routed by type only, so care never
+  saw a curse text of that type; the text is now matched for every report when a module names `report_text` (test in
+  tests/lua/test_curse_kern.lua). brief.py: the curse line reads `n`/`tf` with `.get` so a short state cannot break the brief.
+
 ## L1: the drink nook says why it is refused, judges a tile like quickfort, skips a tile quickfort refuses and widens for a critical mood (BUG-102, FR-82, 2026-10-23, offline, live-untested)
 - **Why:** Run 14 note 73: a strange-mood dwarf stood at thirst 64,976/75,000 with `no free floor within 3 tiles of the workshop`. By-hand
   reads showed free floor; quickfort then skipped the three nearest tiles as occupied and took tiles 4-5 further out. The kernel's
