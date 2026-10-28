@@ -267,6 +267,7 @@ C.ACT = {
   plant_gather = {'economy'}, plant_ungather = {'economy'}, work_detail_prune = {'economy'},
   item_flag = {'care', 'water', 'economy', 'military'}, zone_assign = {'care'},
   tomb_zone = {'care'}, medic = {'care'}, hospital_post = {'care'},
+  slab_place = {'care'},                           -- BUG-133: Build > Furniture > Slab with a ghost's engraved slab
   trade = {'trade'},
   run = {'baseline', 'economy', 'care', 'military', 'trade', 'arbiter', 'selftest', 'runner'},
 }

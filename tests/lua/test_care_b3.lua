@@ -161,11 +161,12 @@ T.test('BUG-062: the frees a body waits for come first, and zones about to be fr
   end}
   W.run(2)
   T.eq(#CW.tacts(W, 'assign'), 3, 'the three bodies got their zones in the first run, not after 40 frees')
-  T.eq(#CW.tacts(W, 'free'), 17, 'the rest of the budget of 20 acts frees more stale zones')
+  -- BUG-133: the three frees and assignments the bodies wait for run on the assignment budget, the 20 acts free 20 more
+  T.eq(#CW.tacts(W, 'free'), 23, 'the budget of 20 acts frees more stale zones')
   local d = inspect(W)
-  T.eq(d.prov.pending, 23, 'the 23 stale zones not freed yet are slots for the provisioner, not missing coffins')
+  T.eq(d.prov.pending, 17, 'the 17 stale zones not freed yet are slots for the provisioner, not missing coffins')
   CW.day(W)
-  T.eq(#CW.tacts(W, 'free'), 37, 'the next run frees 20 more (the last ones next time)')
+  T.eq(#CW.tacts(W, 'free'), 40, 'the next run frees the last 17')
 end)
 
 T.test('BUG-062: inspect names why coffins are no free tombs', function()

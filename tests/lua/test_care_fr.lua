@@ -241,7 +241,7 @@ T.test('repair modes: none in SIEGE or with tomb_repair off; tombs.repair forces
   local r = W.inbox('tombs.repair', {})
   T.ok(r.ok and r.msg:find('queued', 1, true), r.msg)
   CW.day(W)
-  T.eq(CW.tacts(W), {{'remove', 1}, {'assign', 3, 3}}, 'forced in SIEGE')
+  T.eq(CW.tacts(W), {{'assign', 3, 3}, {'remove', 1}}, 'forced in SIEGE (BUG-133: the assignment first)')
   T.eq(entombs(W), {'entomb --unit 3 --haul-now'}, 'the body lies inside Kern+')
   CW.day(W)
   T.eq(#CW.tacts(W), 2, 'the force is spent after one run')

@@ -29,15 +29,52 @@ function OF.memorial_type()
   return type(t) == 'table' and math.tointeger(t.Memorial) or 0
 end
 
+-- BUG-133: the items of the Slab buildings (buildings.other.SLAB, building.contained_items): {item id = true when the
+-- building stands built, false while it is planned (its build job holds the slab)}. Review: a planned building's slab is
+-- in its ConstructBuilding job (building.jobs[0].items: Buildings::constructWithItems attaches the items to the job,
+-- contained_items fills only when the building is finished), so the job items are read too, and a building with a
+-- construct job still standing is planned whatever its build stage says
+function OF.slab_buildings()
+  local r = {}
+  local cb = df.job_type and df.job_type.ConstructBuilding
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.SLAB) do
+      local planned = false
+      for _, j in ipairs(get(b, 'jobs') or {}) do
+        if cb == nil or get(j, 'job_type') == cb then
+          planned = true
+          for _, ref in ipairs(get(j, 'items') or {}) do
+            local id = math.tointeger(get(get(ref, 'item'), 'id'))
+            if id and r[id] == nil then r[id] = false end
+          end
+        end
+      end
+      local okb, done = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+      local stands = not planned and (not okb or done == true)
+      for _, ci in ipairs(get(b, 'contained_items') or {}) do
+        local id = math.tointeger(get(get(ci, 'item'), 'id'))
+        if id then r[id] = stands end
+      end
+    end
+  end)
+  return r
+end
+
 -- {blank = free blank slabs (not forbidden, in a job, built or carried off), busy = blank slabs a running job holds
 --  (its order must stay), held = the other blank slabs that are not free (built = of those, the ones standing as a
 --  building: no job takes them again), memorial = engraved memorials, other =
---  engraved otherwise, n = items read, topics = {hf id = true} of the memorials}; at most `limit` items are read
+--  engraved otherwise, n = items read, topics = {hf id = true} of the memorials}; at most `limit` items are read.
+-- BUG-133 (Run 14: every engraved memorial counted as a served ghost, none was ever placed): the memorials by state,
+-- each {hf id = item id}: placed (in a Slab building that stands, or built in), build (in a planned Slab building: its
+-- build job holds it), loose (anything else: on the ground, in a stockpile, hauled; care places it). A ghost is
+-- served only by a placed one or one in a build job.
 function OF.slabs(limit)
-  local r = {blank = 0, busy = 0, held = 0, built = 0, memorial = 0, other = 0, n = 0, topics = {}}
+  local r = {blank = 0, busy = 0, held = 0, built = 0, memorial = 0, other = 0, n = 0, topics = {}, placed = {},
+             build = {}, loose = {}}
   local ok, vec = pcall(function() return df.global.world.items.other.SLAB end)
   if not ok or vec == nil then return r end
   local blank, mem = OF.blank_type(), OF.memorial_type()
+  local inb = OF.slab_buildings()
   for _, it in ipairs(vec) do
     if r.n >= (limit or 2000) then break end
     r.n = r.n + 1
@@ -56,7 +93,14 @@ function OF.slabs(limit)
     elseif et == mem then
       r.memorial = r.memorial + 1
       local hf = math.tointeger(get(it, 'topic'))
-      if hf then r.topics[hf] = true end
+      if hf then
+        r.topics[hf] = true
+        local id = math.tointeger(get(it, 'id')) or -1
+        local b = inb[id]
+        if b == true or get(get(it, 'flags'), 'in_building') == true then r.placed[hf] = id
+        elseif b == false then r.build[hf] = r.build[hf] or id
+        elseif not r.loose[hf] then r.loose[hf] = id end
+      end
     else
       r.other = r.other + 1
     end

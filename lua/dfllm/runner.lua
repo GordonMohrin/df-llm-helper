@@ -2571,12 +2571,16 @@ end
 -- free stone is below what the rock orders and walls want (stock.rock < rock_need), a paused project in a dig stage
 -- digs on: its boulders become the seal's walls.
 -- The rebuild policy runs (PEACE/RECOVERY; the mode's class gating still holds) seal, tombs, supply, beds, repair, mood
--- and the depot; the rest pauses.
+-- and the depot; the rest pauses. BUG-133 (Run 14 y707: pop 8, the masons', carpenters' and craftsdwarfs' shops lost, the
+-- rebuild policy paused the workshops project while 41 ghosts waited for slabs and 69 bodies for coffins): a workshops
+-- project of Masons and/or Carpenters only (`tomb_shops`: every other moodable type skipped, nothing added; follow's
+-- why=slabs / why=mandatory placement) runs too while care reports ghosts, old bodies or short coffins.
 local SUPPLY = {farms = true, cistern = true, stockroom = true, refuge_drink = true}     -- FR-69: the refuge's store
 local BEDS = {bedrooms = true, refuge_beds = true}
 local FOOD_SHOPS = {Still = true, Kitchen = true, Butchers = true, Fishery = true}
 local SEAL_PAUSES = {work = true, beds = true, supply = true}
 local REBUILD_RUNS = {seal = true, tombs = true, supply = true, beds = true, repair = true, depot = true, mood = true}
+SEAL_PAUSES.tomb_shops = true                    -- BUG-133: the tomb shops are work for the seal and care first
 local PIECE_NAME = {d = 'door', H = 'hatch', Cw = 'wall', W = 'grate', G = 'grate', B = 'bars', h = 'channel',
                     p = 'gather', t = 'chop'}
 
@@ -2598,11 +2602,36 @@ local function food_shops(d)
   return true
 end
 
+-- BUG-133: a workshops project of the shops the dead need only (Masons: slabs and stone coffins, Carpenters: wood coffins)
+Q.TOMB_SHOPS = {Masons = true, Carpenters = true}
+function Q.tomb_shops(d)
+  local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
+  if #words(p.add) > 0 then return false end
+  local skip, n = {}, 0
+  for _, s in ipairs(words(p.skip)) do skip[s] = true end
+  for _, m in ipairs(M.MOODABLE) do
+    if not skip[m] then
+      if not Q.TOMB_SHOPS[m] then return false end
+      n = n + 1
+    end
+  end
+  return n > 0
+end
+
+-- BUG-133: what care reports for the dead (ghosts, bodies unburied too long, short coffins): the tomb shops are needed
+function Q.dead_need(K)
+  local cv = K.view().care
+  if type(cv) ~= 'table' then return false end
+  local cof = type(cv.coffins) == 'table' and cv.coffins or {}
+  return (int(cv.ghosts) or 0) > 0 or (int(cv.corpses_old) or 0) > 0 or (int(cof.short) or 0) > 0
+end
+
 local function kind_of(P, d)
   local t = P.tpl
   if SEALS[t] then return 'seal' end
   if t == 'tombs' or t == 'depot' or t == 'explore' then return t end   -- DECISIONS 4: the ore search never rests
   if SUPPLY[t] or (t == 'workshops' and food_shops(d)) then return 'supply' end
+  if t == 'workshops' and Q.tomb_shops(d) then return 'tomb_shops' end
   if BEDS[t] then return 'beds' end
   if t == 'repair' then
     local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
@@ -2908,7 +2937,7 @@ end
 -- The first live hospital project that is not halted leads. Its progress is watched like a seal's (state m.runner cf = {id,
 -- sig, t, st}): no stage, chunk or percent change for care_first.stuck_days latches st = 1, the others run again (kern.log
 -- warns once) until the hospital moves; the clock waits while the mode is not PEACE. Returns {id, why} or nil
-Q.CARE_PAUSES = {work = true, beds = true}
+Q.CARE_PAUSES = {work = true, beds = true, tomb_shops = true}
 function Q.care_lead(K, c, t)
   local cf = c.care
   local w = K.view().water
@@ -3028,7 +3057,11 @@ local function focus(K)
     dirty()
     K.log('info', 'rebuild over: pop %d >= %d: every project runs again', cit, c.off)
   end
-  if type(S.rt.rb) == 'table' then f.rb = {pop = cit or int(S.rt.rb.pop) or 0, lo = c.pop, hi = c.off} end
+  if type(S.rt.rb) == 'table' then
+    f.rb = {pop = cit or int(S.rt.rb.pop) or 0, lo = c.pop, hi = c.off}
+    local okd, dead = pcall(Q.dead_need, K)           -- BUG-133: the masons' and carpenters' shops for the dead
+    f.dead = okd and dead == true
+  end
   return f
 end
 
@@ -3139,7 +3172,7 @@ local function paused(K, P, d)
   if f.care and not f.care_stuck and f.care ~= P.id and m == 'PEACE' and Q.CARE_PAUSES[k] then
     return 'care ' .. f.care
   end
-  if f.rb and (m == 'PEACE' or m == 'RECOVERY') and not REBUILD_RUNS[k] then
+  if f.rb and (m == 'PEACE' or m == 'RECOVERY') and not REBUILD_RUNS[k] and not (k == 'tomb_shops' and f.dead) then
     return string.format('rebuild pop %d<%d', f.rb.pop, f.rb.lo)
   end
 end

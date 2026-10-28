@@ -343,4 +343,45 @@ T.test('rebuild is for a fallen fort: a new embark of 7 builds as before; a fort
   T.eq(why(W4, 'ws'), 'paused: rebuild pop 11<10', 'still on at 11 after the reload')
 end)
 
+T.test('BUG-133 (Run 14 y707: pop 8, the masons\' shop lost, 41 ghosts): in the rebuild a workshops project of Masons and ' ..
+       'Carpenters only runs while care reports ghosts, old bodies or short coffins; any other workshops project waits', function()
+  local function tomb_world(tag, g, old, short)
+    local W = world{tag = tag, census = {u = {cit = 2, adults = 2}}, phase = 'P4'}
+    runner.CFG.active = 10
+    function W.care(g2, old2, short2)
+      W.ctl.care = {stressed_pct = 0, naked = 0, ghosts = g2, corpses_old = old2, tombs_free = 0, moods = 0,
+                    coffins = {want = short2, short = short2, stock = 0, order = 0, proj = ''}}
+    end
+    W.care(g, old, short)
+    W.load({name = 'care', every = {ticks = 1200}, state = function() return {care = W.ctl.care} end})
+    local keep = {Masons = true, Carpenters = true}
+    local skip = {}
+    for _, m in ipairs(runner.MOODABLE) do if not keep[m] then skip[#skip + 1] = m end end
+    H.place(W, 'ws', H.dig_doc(1, {tpl = 'workshops', class = 'infra', params = {}, x = 10, label = 'dig'}))
+    H.place(W, 'ms', H.dig_doc(1, {tpl = 'workshops', class = 'infra', params = {skip = table.concat(skip, ',')}, x = 150,
+                                   label = 'dig'}))
+    skip[#skip + 1] = 'Carpenters'
+    H.place(W, 'mo', H.dig_doc(1, {tpl = 'workshops', class = 'infra', params = {skip = table.concat(skip, ',')}, x = 170,
+                                   label = 'dig'}))
+    H.place(W, 'mj', H.dig_doc(1, {tpl = 'workshops', class = 'infra', params = {skip = 'Masons'}, x = 190, label = 'dig'}))
+    W.state()
+    return W
+  end
+  local R = 'paused: rebuild pop 2<10'
+  local W = tomb_world('tombshops', 0, 0, 0)
+  H.runs(W, 1)
+  T.eq({why(W, 'ms'), why(W, 'mo'), why(W, 'mj'), why(W, 'ws')}, {R, R, R, R}, 'nothing for the dead: they wait like any work')
+  W.care(3, 0, 0)
+  W.state()
+  H.runs(W, 1)
+  T.eq({why(W, 'ms'), why(W, 'mo'), why(W, 'mj'), why(W, 'ws')}, {'', '', R, R},
+       'old code: every workshops project paused; now the masons\'/carpenters\' ones run for the ghosts')
+  local W2 = tomb_world('tombshops2', 0, 0, 4)
+  H.runs(W2, 1)
+  T.eq({why(W2, 'ms'), why(W2, 'mo'), why(W2, 'mj')}, {'', '', R}, 'short coffins need them too')
+  local W3 = tomb_world('tombshops3', 0, 2, 0)
+  H.runs(W3, 1)
+  T.eq(why(W3, 'ms'), '', 'and bodies unburied too long')
+end)
+
 T.done()

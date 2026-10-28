@@ -443,4 +443,44 @@ T.test('BUG-119: a vector that faults midway never raises out of the act; the or
   T.eq(n, 1, 'inserted once')
 end)
 
+T.test('BUG-133: slab_place = Build > Furniture > Slab with that slab chosen: a planned Slab building with the item; the ' ..
+       'forbid toggle cleared, a slab in a job, built in, carried or unreachable refused; care only', function()
+  local W = H.world{tag = 'slab'}
+  df.item_type = {SLAB = 55, BOULDER = 3, [55] = 'SLAB', [3] = 'BOULDER'}
+  df.building_type = df.building_type or {}
+  df.building_type.Slab = 40
+  local function slab(id, flags, t) return {id = id, flags = flags or {}, _pos = {12, 12, 5}, getType = function() return t or 55 end} end
+  W.items_by_id = {[5] = slab(5, {forbid = true}), [6] = slab(6, {in_job = true}), [7] = slab(7, {in_building = true}),
+                   [8] = slab(8, {in_inventory = true}), [9] = slab(9, {}, 3), [10] = slab(10)}
+  dfhack.items = dfhack.items or {}
+  dfhack.items.getPosition = function(it) return it._pos[1], it._pos[2], it._pos[3] end
+  rawset(_G, 'xyz2pos', function(x, y, z) return {x = x, y = y, z = z} end)
+  local walk = true
+  dfhack.maps = dfhack.maps or {}
+  dfhack.maps.canWalkBetween = function(a, b) return walk end
+  local made = {}
+  dfhack.buildings = dfhack.buildings or {}
+  dfhack.buildings.constructBuilding = function(spec)
+    if spec.x == 99 then return nil, 'cannot place' end
+    made[#made + 1] = {spec.type, spec.x, spec.y, spec.z, #spec.items, spec.items[1].id, spec.items[1].flags.forbid}
+    return {id = 700 + #made}
+  end
+  local env = mk('care')
+  T.eq({mk('economy').api.slab_place(5, 20, 20, 5)}, {false, 'not owner'})
+  T.eq({env.api.slab_place(5, 20, 21, 5)}, {true, 701})
+  T.eq(made, {{40, 20, 21, 5, 1, 5, false}}, 'one planned Slab building holding that slab; unforbidden first')
+  T.eq({env.api.slab_place(6, 20, 21, 5)}, {false, 'the slab is in job'})
+  T.eq({env.api.slab_place(7, 20, 21, 5)}, {false, 'the slab is in building'})
+  T.eq({env.api.slab_place(8, 20, 21, 5)}, {false, 'the slab is in inventory'})
+  T.eq({env.api.slab_place(9, 20, 21, 5)}, {false, 'not a slab'})
+  T.eq({env.api.slab_place(44, 20, 21, 5)}, {false, 'no item 44'})
+  walk = false
+  T.eq({env.api.slab_place(10, 20, 21, 5)}, {false, 'not reachable from the tile'})
+  walk = true
+  local ok, why = env.api.slab_place(10, 99, 21, 5)
+  T.eq(ok, false)
+  T.ok(why:find('the game refused the slab here: cannot place', 1, true), why)
+  T.eq(#made, 1)
+end)
+
 T.done()
