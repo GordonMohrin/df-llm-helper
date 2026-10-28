@@ -78,7 +78,7 @@ T.test('parse: the victim is the subject of a passive death phrase, as a whole w
   T.eq(DT.parse('Libash has been struck down by Urist.', keys), nil, 'named after the phrase only')
   T.eq(DT.parse('Uristen has been found dead, dehydrated.', keys), nil, 'whole words only')
   T.eq(DT.parse('Urist has been taken by a fey mood!', keys), nil, 'no death')
-  T.eq(DT.parse('\142sob Zuglar has drowned.', {'\142sob'}).cat, 'drowned', 'CP437 capital initial (translateName key)')
+  T.eq(DT.parse('\142sob Zuglar has drowned.', {('\142sob'):lower()}).cat, 'drowned', 'CP437 capital initial (translateName key)')
 end)
 
 T.test('window: same-cause groups need death_same; pending and unknown never form one', function()

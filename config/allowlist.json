@@ -47,7 +47,7 @@
   "digv", "digvx", "digl", "diglx", "digtype --hidden", "digtype -h",
   "fastdwarf", "caravan extend", "caravan happy", "caravan",
   "autodump", "autodump-destroy-here", "autodump-destroy-item", "gui/autodump",
-  "locate-ore", "prospect", "showmood", "cursecheck",
+  "locate-ore", "prospect", "showmood", "export-worldgen", "cursecheck",
   "reveal", "unreveal", "revflood", "revtoggle", "revforget", "nopause", "gui/reveal",
   "reveal-adv-map", "reveal-hidden-sites", "reveal-hidden-units",
   "createitem", "gui/create-item", "dig-now", "build-now", "fix/retrieve-units",
