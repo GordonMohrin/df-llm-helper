@@ -448,7 +448,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-115 (Run 14 y707: a curse, then 23 werecavies, no event): CURSED = a citizen was cursed by a god (the report "has been
     # cursed by <god>!", or the unit sheet showed it: ann "sheet"): n = cursed citizens alive now (were-form included), unit,
     # name, god, trig (the building he toppled or the tantrum before, from care's records), ann (the announcement type name of
-    # the report: the live data that tells which type DF uses), kind (were | vampire | ?), ids (<= curse_ids; the units of a
+    # the report: live 53.16 DEITY_CURSE / BODY_TRANSFORMATION, BUG-138; `syndrome` for a were-curse found by curse_year and its
+    # body-transformation syndrome, BUG-135), kind (were | vampire | ?), ids (<= curse_ids; the units of a
     # merged burst), more (further units in the burst), moon/mi (the next full moon: day of the year, days until).
     # TRANSFORM = a citizen changed form: dir beast | back, to (the form), n = were-form units now, cursed, bite = 1 for a unit
     # no curse report named (bitten); a beast also asks DECISION_NEEDED id curse_kill. CURSE_MOON = the full moon is
@@ -812,7 +813,8 @@ VERB_ARGS: dict[str, Obj] = {
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
                                           "offices", "curse", "unit", "items"])},
-                   opt={"key": Str(maxbytes=80), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
+                   # BUG-137: `key=39052` arrives as an int from the CLI (cmd.parse_kv); a unit id or a name
+                   opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
     "tombs.repair": Obj(),

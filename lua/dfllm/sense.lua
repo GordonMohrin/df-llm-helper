@@ -626,4 +626,14 @@ function M.recount(K, names)
   return K.census.u
 end
 
+-- public (BUG-134, live i2: a name lookup failed while paused after a load, before the first census): the ids of the
+-- fort's living citizens and residents now (getCitizens; no census written). Read-only
+function M.own_ids(K)
+  local out = {}
+  for _, u in ipairs(dfhack.units.getCitizens(false)) do
+    if not dfhack.units.isDead(u) then out[#out + 1] = u.id end
+  end
+  return out
+end
+
 return M

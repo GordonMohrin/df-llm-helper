@@ -69,7 +69,7 @@ local function unit(K, id)
   if u.flags1.inactive then return nil, 'unit ' .. id .. ' is not on the map' end
   if dfhack.units.isHidden(u) then return nil, 'unit ' .. id .. ' is hidden: the player cannot see it either' end
   local p = u.pos
-  local ok, name = pcall(dfhack.units.getReadableName, u)
+  local ok, name = pcall(function() return dfhack.df2utf(dfhack.units.getReadableName(u)) end)   -- BUG-137: CP437 -> UTF-8
   local t, why = place(K, p.x, p.y, p.z, 'unit', ok and name or ('unit ' .. id))
   if not t then return nil, 'unit ' .. id .. ': ' .. why end
   t.id = id

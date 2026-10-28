@@ -43,8 +43,26 @@ local function rd(f, default)
   return default
 end
 local function strip(s) return (tostring(s or ''):gsub('^%s+', ''):gsub('[%s%.!]+$', '')) end
-local function name_key(s) return (tostring(s or ''):lower():gsub('%s+', ' ')) end
-local function short(name) return strip((tostring(name or ''):match('^([^,]+)') or name)) end
+-- BUG-134 (live i2, 53.16: every curse record stayed 'n:<name>', no ids, no curse_kill, the dead never forgotten): the
+-- game's texts name a unit without its nickname ('Olon Gatizbomrek, Axe Lord has been cursed by Risen!') while
+-- getReadableName carries it ('Olon Gatizbomrek "Fondlewhipped", Axe Lord'). Names are compared without the quoted
+-- nickname (", `...', << >>), in UTF-8 (a text still in CP437 is converted first)
+local function utf(s)
+  s = tostring(s or '')
+  if utf8.len(s) then return s end
+  local ok, v = pcall(function() return dfhack.df2utf(s) end)
+  return ok and type(v) == 'string' and v or s
+end
+local function nonick(s)
+  s = utf(s):gsub('%s*"[^"]*"', ''):gsub("%s*`[^`']*'", ''):gsub('%s*\xC2\xAB.-\xC2\xBB', '')
+  return s
+end
+local function name_key(s) return (nonick(s):lower():gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', '')) end
+local function short(name)
+  local n = nonick(name)
+  return strip(n:match('^([^,]+)') or n)
+end
+M.name_key = function(s) return name_key(short(s)) end           -- for tests and readers: the key a name is matched by
 
 ---------------------------------------------------------------- the texts
 -- text -> {kind = 'cursed', who, god?, ctype} | {kind = 'transform', who, to, dir = 'beast' | 'back'} | nil
@@ -114,22 +132,50 @@ local function race_info(u)
   return r or nil
 end
 
--- what the sheet of a unit shows of a curse: {name, were, form, tf} or nil. unit.curse.name is read when the sheet shows it
--- (name_visible is not false); a hidden vampire stays hidden. tf = the unit's race is a were-form now
-function M.sheet(u)
-  local cur = rd(function() return u.curse end)
+-- a field read that fails is noted under its label (miss[label] = true): inspect lists it, the scan logs it once
+local function rdm(miss, label, f)
+  local ok, v = pcall(f)
+  if ok then return v end
+  if miss then miss[label] = true end
+  return nil
+end
+
+-- an active syndrome with a body transformation effect (a were-curse: the deity's or the bite's)
+local function were_syn(u)
+  local BT = df.creature_interaction_effect_type.BODY_TRANSFORMATION
+  for _, s in ipairs(u.syndromes.active) do
+    local syn = df.syndrome.find(s.type)
+    if syn then
+      for _, ce in ipairs(syn.ce) do
+        local ok, t = pcall(function() return ce:getType() end)
+        if ok and t == BT then return true end
+      end
+    end
+  end
+  return false
+end
+
+-- what the sheet of a unit shows of a curse: {name, were, vampire, form, tf, hid} or nil.
+-- BUG-135 (live i2: `unit.curse` does not exist in DF 53.16, "Cannot read field unit.curse: not found"; the old read was
+-- always nil and silent): the shown curse name is u.uwss_display_name_sing while u.uwss_use_display_name is true (a hidden
+-- vampire stays hidden); tf = the unit's race is a were-form now (the sheet says "Werecavy Planter"); hid = a were-curse
+-- the game keeps on the unit (curse_year >= 0 and an active body-transformation syndrome) before its first full moon:
+-- the deity's curse was announced, the bite was in the combat log (bugs/BUG-135 "Decided"). `miss` collects failed reads
+function M.sheet(u, miss)
   local cname = ''
-  if type(cur) == 'table' or type(cur) == 'userdata' then
-    local vis = rd(function() return cur.name_visible end)
-    local nm = rd(function() return cur.name end)
-    if vis ~= false and type(nm) == 'string' then cname = strip(nm) end      -- a string only: never the text of a struct
+  if rdm(miss, 'uwss_use_display_name', function() return u.uwss_use_display_name end) == true then
+    local nm = rdm(miss, 'uwss_display_name_sing', function() return u.uwss_display_name_sing end)
+    if type(nm) == 'string' then cname = strip(utf(nm)) end                -- a string only: never the text of a struct
   end
   local ri = race_info(u)
   local tf = ri and ri.were == true
-  if cname == '' and not tf then return nil end
+  local cy = num(rdm(miss, 'curse_year', function() return u.curse_year end))
+  local syn = cy ~= nil and cy >= 0 and rdm(miss, 'syndromes', function() return were_syn(u) end) == true
+  if cname == '' and not tf and not syn then return nil end
   local low = cname:lower()
-  return {name = trunc(cname, 24), were = tf or low:find('were', 1, true) ~= nil,
-          vampire = low:find('vampire', 1, true) ~= nil, form = ri and ri.name or '', tf = tf}
+  return {name = trunc(cname, 24), were = tf or syn or low:find('were', 1, true) ~= nil,
+          vampire = low:find('vampire', 1, true) ~= nil, form = ri and ri.were and ri.name or '', tf = tf,
+          hid = (cname == '' and not tf and syn) or nil}
 end
 
 ---------------------------------------------------------------- the record
@@ -166,7 +212,25 @@ local function ids_of(cur, limit)
   return ids, #list
 end
 
--- the citizens by name: lower case first name part -> unit id, false when two share it (no guess)
+-- only the fort's own (citizens, residents, its dead): a sheet the player could open
+local function ours(u)
+  local U = dfhack.units
+  return rd(function() return U.isCitizen(u, true) or U.isResident(u, true) or (U.isOwnGroup and U.isOwnGroup(u)) end, false) == true
+end
+
+-- the fort's living own units: the census, or (BUG-134: paused after a load, before sense's first census) sense's
+-- own_ids
+local function own_ids(K)
+  local cu = K.census.u
+  local ids = type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or nil
+  if ids and #ids > 0 then return ids end
+  local ok, r = K.call('sense', 'own_ids')        -- unit iteration belongs to sense (lint unit-iter)
+  return ok and type(r) == 'table' and r or {}
+end
+M.own_ids = own_ids
+
+-- the citizens by name (without the nickname, lower case, the part before the comma) -> unit id, false when two share it
+-- (no guess)
 local function index(K, p, cur, env)
   local now = K.now().tick
   local ix = S.idx
@@ -180,8 +244,7 @@ local function index(K, p, cur, env)
     local k = name_key(short(n))
     if map[k] == nil then map[k] = id elseif map[k] ~= id then map[k] = false end
   end
-  local cu = K.census.u
-  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do add(id) end
+  for _, id in ipairs(own_ids(K)) do add(id) end
   for k in pairs(cur.u) do add(num(k)) end
   S.idx = {t = now, map = map}
   return map
@@ -242,17 +305,36 @@ local function slot(cur, id, who)
   return key, r
 end
 
--- state `curse`: counts, the first ids (the transformed first) and the next full moon; nil when nobody is cursed
+-- state `curse`: counts, the first ids (the transformed first) and the next full moon; nil when nobody is cursed.
+-- BUG-136 (live i2: status said 'next full moon ~d77 (in 11 d)' at d101): the moon is computed when the state is
+-- published (M.view), from the phase kept here, not frozen at the time the view was built
 local function build_view(K, c, cur)
   local n, tfn = counts(cur)
   if n + tfn == 0 then S.view = nil; return end
-  local day, mi = M.moon(K.now().tick, c.curse_moon_cycles, cur.mt)
-  local view = {n = n, tf = tfn, ids = (ids_of(cur, c.curse_ids or 8)), mo = day, mi = mi}
+  local view = {n = n, tf = tfn, ids = (ids_of(cur, c.curse_ids or 8))}
   if cur.dead > 0 then view.dead = cur.dead end
-  S.view = view
+  S.view, S.vmoon = view, {cycles = c.curse_moon_cycles, mt = num(cur.mt)}
 end
 
 ---------------------------------------------------------------- reports
+-- BUG-138 (live i2: CURSED d.ann=POPUP: a BOX announcement shows as a popup and pauses the game before its report reaches
+-- kern): the announcement type of a popup's text: the type of a recent report with the same text, else the type DF 53.16
+-- uses for it (live: DEITY_CURSE for "has been cursed by", BODY_TRANSFORMATION for "has transformed into")
+M.LIVE_TYPES = {cursed = 'DEITY_CURSE', transform = 'BODY_TRANSFORMATION'}
+function M.popup_type(text)
+  local want = strip(utf(text))
+  local found = rd(function()
+    local reps = df.global.world.status.reports
+    for i = #reps - 1, math.max(0, #reps - 50), -1 do
+      local rep = reps[i]
+      if strip(utf(rep.text)) == want then return df.announcement_type[rep.type] end
+    end
+  end)
+  if type(found) == 'string' and found ~= '' then return found end
+  local rec = M.parse(text)
+  return rec and M.LIVE_TYPES[rec.kind] or 'POPUP'
+end
+
 function M.report(K, c, p, ev, env)
   local rec = M.parse(ev.text)
   if not rec then return false end
@@ -281,7 +363,9 @@ function M.report(K, c, p, ev, env)
     if changed then
       -- the first transformation of a wave sets the moon's phase (the same wave's later ones are no news)
       if beast and (not num(cur.mt) or now - cur.mt > YEAR / (c.curse_moon_cycles or 13) / 2) then cur.mt = now end
-      queue('TRANSFORM', {id = id, name = r.n, to = rec.to, dir = rec.dir, bite = fresh and beast, a = r.a, pos = ev.pos})
+      -- BUG-138: the type of THIS report (live 53.16: BODY_TRANSFORMATION), not the curse's (r.a, DEITY_CURSE)
+      queue('TRANSFORM', {id = id, name = r.n, to = rec.to, dir = rec.dir, bite = fresh and beast, a = trunc(ev.type or '', 24),
+                          pos = ev.pos})
     end
   end
   M.flush(K, c, p, env)
@@ -293,26 +377,33 @@ end
 -- called by care for every citizen of its run: the sheet's curse and form (a unit cursed before the boot, a change nobody
 -- announced, a transformation whose "back" text we never match). Queues like a report
 function M.look(K, c, p, u, env)
+  if rd(function() return dfhack.units.isDead(u) end, false) then return end    -- a dead were-form is no new curse
   local cur = M.cur(p)
   local key = tostring(u.id)
   local r = cur.u[key]
   local now = K.now().tick
   if not r then
-    local sh = M.sheet(u)
+    S.miss = S.miss or {}
+    local sh = M.sheet(u, S.miss)
+    for label in pairs(S.miss) do            -- BUG-135: a field this DF does not have is said once, not hidden
+      S.warned = S.warned or {}
+      if not S.warned[label] then S.warned[label] = true; K.log('warn', 'care curse: cannot read unit.%s', label) end
+    end
     if not sh then return end
     local name = trunc(short(env.nm(u)), 28)
     local nk = 'n:' .. name_key(name)
     local old = cur.u[nk]
     cur.u[nk] = nil
+    local src = sh.hid and 'syndrome' or 'sheet'
     if sh.vampire and not sh.were then
       r = {t = now, n = name, k = 'vampire', s = 'sheet', f = sh.name, tf = 0}
     else
-      r = {t = old and old.t or now, n = name, k = sh.were and 'were' or '?', s = old and old.s or 'sheet',
+      r = {t = old and old.t or now, n = name, k = sh.were and 'were' or '?', s = old and old.s or src,
            f = sh.form ~= '' and sh.form or sh.name, tf = 0, g = old and old.g, tr = old and old.tr, a = old and old.a}
     end
     cur.u[key] = r
     bound(c, cur)
-    if not old then queue('CURSED', {id = u.id, name = name, k = r.k, a = 'sheet'}) end
+    if not old then queue('CURSED', {id = u.id, name = name, k = r.k, a = src}) end
   end
   if r.k == 'vampire' then return end                    -- only a were-curse changes form
   local ri = race_info(u)
@@ -408,19 +499,29 @@ local function emit_transform(K, c, p, cur, list, more, env)
 end
 
 -- the player's decision (RULES section 1: citizens are never killed on the kernel's own word): once per set of were-form units
+-- BUG-134: a were-form unit known by name only (its id unresolved) is asked about too, by name
 function M.kill_question(K, c, p, cur, env)
-  local beasts = {}
+  local beasts, named = {}, {}
   for k, r in pairs(cur.u) do
     local id = num(k)
-    if r.tf == 1 and id then beasts[#beasts + 1] = id end
+    if r.tf == 1 and id then beasts[#beasts + 1] = id
+    elseif r.tf == 1 then named[#named + 1] = tostring(k) end
   end
   table.sort(beasts)
-  if #beasts == 0 then return end
+  table.sort(named)
+  if #beasts + #named == 0 then return end
+  local all = {}
+  for _, id in ipairs(beasts) do all[#all + 1] = id end
+  for _, k in ipairs(named) do all[#all + 1] = k end
   local T = K.now()
-  if not CAD.due(cur.ev.kill, T, beasts, {'k'}, {ticks = c.curse_every * 4, wall_s = c.wake_wall_s}) then return end
-  cur.ev.kill = CAD.mark(T, beasts, {'k'})
+  if not CAD.due(cur.ev.kill, T, all, {'k'}, {ticks = c.curse_every * 4, wall_s = c.wake_wall_s}) then return end
+  cur.ev.kill = CAD.mark(T, all, {'k'})
   local shown = {}
-  for i = 1, math.min(6, #beasts) do shown[i] = beasts[i] end
+  for i = 1, math.min(6, #all) do
+    local id = all[i]
+    shown[i] = math.type(id) == 'integer' and tostring(id) or (cur.u[id] and cur.u[id].n or tostring(id):sub(3))
+  end
+  beasts = all
   local q = string.format('%d were-form unit(s) in the fort (%s). A kill order only with your yes (squad.sortie, approve); '
                           .. 'otherwise they are kept apart in a locked room', #beasts, table.concat(shown, ','))
   env.emit(K, 'DECISION_NEEDED', trunc('curse_kill: ' .. q, 200), {id = 'curse_kill', q = trunc(q, 200), n = #beasts})
@@ -448,8 +549,12 @@ function M.flush(K, c, p, env)
 end
 
 ---------------------------------------------------------------- the daily pass
-local function forget(K, cur)
+-- the dead leave the list (counted in `dead`); BUG-134 (live i1: a popup "Urist McTest has been cursed" kept 'CURSED 1'
+-- for good): a record known by name only that no unit matched for one moon cycle expires (not counted as dead)
+local function forget(K, c, cur)
   local gone = 0
+  local now = K.now().tick
+  local cyc = YEAR / math.max(1, num(c.curse_moon_cycles) or 13)
   for k, r in pairs(cur.u) do
     local id = num(k)
     if id then
@@ -459,6 +564,9 @@ local function forget(K, cur)
         cur.dead = cur.dead + 1
         gone = gone + 1
       end
+    elseif now - (num(r.t) or now) > cyc then
+      cur.u[k] = nil
+      K.log('info', 'care curse: "%s" matched no unit for a moon cycle: dropped', tostring(r.n))
     end
   end
   return gone
@@ -490,16 +598,59 @@ function M.finish(K, c, p, env)
   for _, k in ipairs(named) do                -- a record kept by name: the unit may be known by now
     local r = cur.u[k]
     local id = resolve(K, p, cur, env, r.n)
-    if id and not cur.u[tostring(id)] then cur.u[k] = nil; cur.u[tostring(id)] = r end
+    if id then
+      cur.u[k] = nil
+      if not cur.u[tostring(id)] then cur.u[tostring(id)] = r end     -- a duplicate of a unit's record is dropped
+    end
   end
-  forget(K, cur)
+  forget(K, c, cur)
   M.flush(K, c, p, env)
-  pcall(moon_event, K, c, p, cur, env)
+  local okm, errm = pcall(moon_event, K, c, p, cur, env)
+  if not okm then K.log('warn', 'care curse moon: %s', tostring(errm)) end
   build_view(K, c, cur)
   K.persist.touch('m.care')
 end
 
-function M.view() return S.view end
+-- BUG-136 (live i2: care's full run came every 10-31 game days under pacing and demotion, so the d77 wave went unseen
+-- and CURSE_MOON never came; the 4-day window is shorter than the run): the daily pass on care's own `watch` clock
+-- (kern: never paced, never demoted, §3.2): the form of the known cursed, the citizens the game marks as were-cursed
+-- (curse_year set: M.sheet decides), then forget, the moon, the view. A few field reads per citizen.
+function M.watch(K, c, p, env)
+  local cur = M.cur(p)
+  local ids, seen = {}, {}
+  for k in pairs(cur.u) do
+    local id = num(k)
+    if id then ids[#ids + 1] = id; seen[id] = true end
+  end
+  for _, id in ipairs(own_ids(K)) do
+    if not seen[id] then
+      local u = df.unit.find(id)
+      local cy = u and num(rd(function() return u.curse_year end))
+      if cy and cy >= 0 then ids[#ids + 1] = id; seen[id] = true end
+    end
+  end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) then
+      local ok, err = pcall(M.look, K, c, p, u, env)
+      if not ok then K.log('warn', 'care curse watch %d: %s', id, tostring(err)) end
+    end
+  end
+  M.finish(K, c, p, env)
+end
+
+-- the state view with the moon of now (K given) or of the last build (no K: old callers)
+function M.view(K)
+  local v = S.view
+  if not v then return nil end
+  local out = {}
+  for k, x in pairs(v) do out[k] = x end
+  local vm = S.vmoon or {}
+  local ok, now = pcall(function() return K.now().tick end)
+  if ok and math.type(now) == 'integer' then out.mo, out.mi = M.moon(now, vm.cycles, vm.mt) end
+  return out
+end
 
 ---------------------------------------------------------------- inspect
 -- inspect what=curse: the whole list (bounded by curse_keep), the moon and the counts
@@ -507,30 +658,29 @@ function M.inspect_curse(K, c, p)
   local cur = M.cur(p)
   local n, tfn = counts(cur)
   local day, mi = M.moon(K.now().tick, c.curse_moon_cycles, cur.mt)
-  local list = {}
+  local list, un = {}, {}
   for k, r in pairs(cur.u) do
     local id = num(k)
     list[#list + 1] = {id = id, name = r.n, god = r.g, kind = r.k, form = r.f, tf = r.tf == 1 and 1 or 0, since = r.t, tt = r.tt,
                        src = r.s, trig = r.tr, ann = r.a}
+    if not id and #un < 8 then un[#un + 1] = trunc(r.n, 28) end     -- BUG-134: known by name only (no unit matched yet)
   end
+  table.sort(un)
   table.sort(list, function(a, b)
     if a.tf ~= b.tf then return a.tf > b.tf end
     return (a.since or 0) < (b.since or 0)
   end)
   while #list > 40 do table.remove(list) end
-  local msg = string.format('curse: %d cursed, %d in were-form, %d dead; full moon ~d%d in %d d%s', n, tfn, cur.dead, day, mi,
-                            num(cur.mt) and '' or ' (an estimate: no transformation seen yet)')
-  return true, msg, {cursed = n, transformed = tfn, dead = cur.dead, moon = day, mi = mi, calibrated = num(cur.mt) and 1 or 0,
-                     units = list}
+  local msg = string.format('curse: %d cursed, %d in were-form, %d dead; full moon ~d%d in %d d%s%s', n, tfn, cur.dead, day, mi,
+                            num(cur.mt) and '' or ' (an estimate: no transformation seen yet)',
+                            #un > 0 and string.format('; %d by name only (no unit matched): %s', #un, table.concat(un, ', ')) or '')
+  local d = {cursed = n, transformed = tfn, dead = cur.dead, moon = day, mi = mi, calibrated = num(cur.mt) and 1 or 0, units = list}
+  if #un > 0 then d.unresolved = un end
+  return true, trunc(msg, 300), d
 end
 
 ---------------------------------------------------------------- inspect what=unit (FR-83): what the unit sheet shows
--- only the fort's own (citizens, residents, its dead): a sheet the player could open
-local function ours(u)
-  local U = dfhack.units
-  return rd(function() return U.isCitizen(u, true) or U.isResident(u, true) or (U.isOwnGroup and U.isOwnGroup(u)) end, false) == true
-end
-
+-- by id, or by name (BUG-134/137: without the nickname, with it typed or not; the first name alone when one unit has it)
 local function find_unit(K, p, key, env)
   local id = num(key)
   if id then
@@ -539,12 +689,17 @@ local function find_unit(K, p, key, env)
     return u, id
   end
   local k = name_key(short(key))
-  local hits = {}
-  local cu = K.census.u
-  for _, uid in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+  local single = not k:find(' ', 1, true)
+  local hits, firsts = {}, {}
+  for _, uid in ipairs(own_ids(K)) do
     local u = df.unit.find(uid)
-    if u and name_key(short(env.nm(u))) == k then hits[#hits + 1] = uid end
+    if u then
+      local nk = name_key(short(env.nm(u)))
+      if nk == k then hits[#hits + 1] = uid
+      elseif single and (nk:match('^(%S+)') or '') == k then firsts[#firsts + 1] = uid end
+    end
   end
+  if #hits == 0 then hits = firsts end
   if #hits == 1 then return df.unit.find(hits[1]), hits[1] end
   return nil, nil, hits
 end
@@ -558,7 +713,38 @@ local function name_of(hfid)
 end
 
 local LINKS = {SPOUSE = 'spouse', MOTHER = 'mother', FATHER = 'father', CHILD = 'child', LOVER = 'lover',
-           COMPANION = 'companion'}
+           COMPANION = 'companion', DECEASED_SPOUSE = 'late spouse'}
+
+-- BUG-137 (live i2: 'unread':['thoughts','wounds'] for every living unit): the emotions are a 0-based DF vector (newest
+-- last); an emotion without a thought (-1) names its emotion type
+local function thoughts_of(u)
+  local out, seen = {}, {}
+  local list = u.status.current_soul.personality.emotions
+  for i = #list - 1, 0, -1 do
+    local e = list[i]
+    local th = num(rd(function() return e.thought end))
+    local nm = th and th >= 0 and df.unit_thought_type[th] or nil
+    if not nm then nm = rd(function() return df.emotion_type[e.type] end) end
+    if nm and not seen[nm] then
+      seen[nm] = true
+      out[#out + 1] = tostring(nm)
+      if #out >= 6 then break end
+    end
+  end
+  return out
+end
+
+-- BUG-137: unit_wound has no `bleeding`; a wound bleeds when one of its parts does (wd.parts[j].bleeding)
+local function wounds_of(u)
+  local list = u.body.wounds
+  local bleeding = 0
+  for _, wd in ipairs(list) do
+    for _, pt in ipairs(wd.parts) do
+      if (num(pt.bleeding) or 0) > 0 then bleeding = bleeding + 1; break end
+    end
+  end
+  return {n = #list, bleed = bleeding}
+end
 
 function M.inspect_unit(K, c, p, key, env)
   if key == nil or tostring(key) == '' then return false, 'inspect what=unit needs key=<unit id or name>' end
@@ -584,45 +770,26 @@ function M.inspect_unit(K, c, p, key, env)
   local cat = get('cat', function() return dfhack.units.getStressCategory(u) end, nil)
   if math.type(stress) == 'integer' then d.stress = stress end
   if math.type(cat) == 'integer' then d.cat = cat; d.level = M.STRESS[cat] end
-  local mood = rd(function() return df.mood_type[u.mood] end)
+  local mood = rd(function() return u.mood >= 0 and df.mood_type[u.mood] or nil end)     -- BUG-137: -1 is no mood
   if mood then d.mood = mood end
   for k, t in pairs(env.tantrum or {}) do
     if name_key(short(k)) == name_key(short(d.name)) then d.tantrum_ago = math.max(0, K.now().tick - t) end
   end
-  -- the last thoughts, newest first
-  local th = get('thoughts', function()
-    local out, seen = {}, {}
-    local list = u.status.current_soul.personality.emotions
-    for i = #list, 1, -1 do
-      local e = list[i]
-      local nm = df.unit_thought_type[e.thought]
-      if nm and not seen[nm] then
-        seen[nm] = true
-        out[#out + 1] = nm
-        if #out >= 6 then break end
-      end
-    end
-    return out
-  end, nil)
+  local th = get('thoughts', function() return thoughts_of(u) end, nil)      -- the last thoughts, newest first
   if th then d.thoughts = th end
   -- curse and form (the sheet's own words)
-  local sh = M.sheet(u)
+  local smiss = {}
+  local sh = M.sheet(u, smiss)
+  for label in pairs(smiss) do miss[#miss + 1] = label end
   local cur = M.cur(p)
   local rec = cur.u[tostring(id)]
   if sh or rec then
-    d.curse = {name = sh and sh.name or nil, form = sh and sh.form or (rec and rec.f) or nil, were = (sh and sh.were) and 1 or nil,
-               tf = (sh and sh.tf or (rec and rec.tf == 1)) and 1 or 0, god = rec and rec.g or nil, since = rec and rec.t or nil,
-               trig = rec and rec.tr or nil}
+    d.curse = {name = sh and sh.name ~= '' and sh.name or nil, form = sh and sh.form ~= '' and sh.form or (rec and rec.f) or nil,
+               were = ((sh and sh.were) or (rec and rec.k == 'were')) and 1 or nil,
+               tf = ((sh and sh.tf) or (rec and rec.tf == 1)) and 1 or 0, god = rec and rec.g or nil,
+               since = rec and rec.t or nil, trig = rec and rec.tr or nil}
   end
-  -- wounds
-  local w = get('wounds', function()
-    local list = u.body.wounds
-    local bleeding = 0
-    for _, wd in ipairs(list) do
-      if (num(wd.bleeding) or 0) > 0 then bleeding = bleeding + 1 end
-    end
-    return {n = #list, bleed = bleeding}
-  end, nil)
+  local w = get('wounds', function() return wounds_of(u) end, nil)
   if w then d.wound = w end
   local bc, bm = rd(function() return num(u.body.blood_count) end), rd(function() return num(u.body.blood_max) end)
   if bc and bm and bm > 0 then d.blood_pct = bc * 100 // bm end
@@ -647,7 +814,8 @@ function M.inspect_unit(K, c, p, key, env)
   end, nil)
   if fam then d.rel = fam end
   if #miss > 0 then d.unread = miss end
-  local msg = string.format('unit %d %s: %s%s%s, job %s%s', id, d.name, d.level and ('stress ' .. d.level .. ' (' .. tostring(d.cat) .. ')') or 'stress ?',
+  local msg = string.format('unit %d %s%s: %s%s%s, job %s%s', id, d.name, d.dead == 1 and ', DEAD' or '',
+                            d.level and ('stress ' .. d.level .. ' (' .. tostring(d.cat) .. ')') or 'stress ?',
                             d.mood and (', mood ' .. d.mood) or '', d.curse and (d.curse.tf == 1 and ', WERE-FORM' or ', cursed') or '',
                             d.job, d.wound and (', wounds ' .. d.wound.n) or '')
   return true, trunc(msg, 200), d

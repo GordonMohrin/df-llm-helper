@@ -213,7 +213,7 @@ def _danger(f: dict, s: dict, fight: bool) -> list[Step]:
                         _txt(f"{n} cursed citizen{'s' if n != 1 else ''}" + (f", {tf} in were-form now" if tf else "")
                              + (f", next full moon in {cur['mi']} d" if isinstance(cur.get("mi"), int) else "")
                              + ": lock them in one room before the moon (the brief has the recipe)"),
-                        _txt(f"{n} cursed citizens" + (f" ({tf} transformed)" if tf else "")
+                        _txt(f"{n} cursed citizen{'s' if n != 1 else ''}" + (f" ({tf} transformed)" if tf else "")
                              + (f", full moon in {cur['mi']} days" if isinstance(cur.get("mi"), int) else "")
                              + "; they turn on the next full moon and bite."), show, fight))
     return out

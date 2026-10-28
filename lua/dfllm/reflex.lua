@@ -1622,6 +1622,7 @@ end
 
 local function record(K, n, etype, msg, u)
   local now = K.now()
+  for _, r in ipairs(st.irq) do if r.n == n then return end end     -- BUG-139: one record (and one default) per event
   st.irq[#st.irq + 1] = {n = n, type = etype, tick = now.tick, wall = now.wall, ms = now.ms,
                          msg = tostring(msg):sub(1, 200), done = 0, u = int(u)}
   while #st.irq > M.KEEP do table.remove(st.irq, 1) end
