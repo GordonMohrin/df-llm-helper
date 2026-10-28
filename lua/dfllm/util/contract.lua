@@ -392,7 +392,8 @@ C.STATE_SPEC = obj({
               {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24), dref = NAT,     -- FR-65; BUG-110: drills refused for want of O1/B1
                route = str(60),            -- the last audit's first attacker-route finding (bypass, refuge)
                pd = NAT, pw = str(60),     -- FR-70: days the perimeter has been open (PEACE), and what is open
-               office = str(200)}),        -- BUG-055: the vacant office (or squad leader post) R0 `office` names, with the fix
+               office = str(200),          -- BUG-055: the vacant office (or squad leader post) R0 `office` names, with the fix
+               mws = str(200)}),           -- BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
@@ -433,6 +434,8 @@ C.STATE_SPEC = obj({
   -- stuck 1 = it built nothing for stuck_days, days) and the rebuild policy (citizens, its bounds, projects paused)
   sched = obj(nil, {seal = obj({proj = str(nil, nil, 'id'), n = NAT, paused = NAT}, {more = NAT, stuck = FLAG, days = NAT}),
                     rb = obj({pop = NAT, lo = NAT, paused = NAT}, {hi = NAT}),
+                    -- BUG-116: care first (the hospital project that leads, projects it pauses, why, stuck 1 + days)
+                    care = obj({proj = str(nil, nil, 'id'), paused = NAT}, {why = str(24), stuck = FLAG, days = NAT}),
                     -- BUG-037: projects waiting for a slot and the slot holders (id, template, days without own
                     -- progress); no run ended for d days (the run in hand: task i of n, its label, slices, age in days);
                     -- parked projects (blocked for good past runner queue.park_days)

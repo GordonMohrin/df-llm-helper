@@ -850,4 +850,85 @@ T.test('BUG-055 (Run 14 y577: the chief medical dwarf office stood vacant for go
   T.ok(not has(ready(W).fail, 'office') or since == nil, 'the squad trouble is old enough only after 7 days')
 end)
 
+
+---------------------------------------------------------------- BUG-117: R0 mood_ws
+T.test('BUG-117 (Run 14 note 92, 151 of 453 citizen deaths were failed moods): a moodable workshop type missing for ' ..
+       'offices.mood_ws_days (7) game days in a fort of mood_ws_pop (20) citizens is the R0 blocker mood_ws with the ' ..
+       'ready bp.place command; a shop that stands, fewer days, 19 citizens, 0 days and economy without an answer are none',
+       function()
+  local W = world{n = 50}
+  local miss, queued = {'Loom'}, {}
+  W.econ.mood_shops = function(K) return {missing = miss, queued = queued} end
+  day(W)
+  T.ok(not has(ready(W).fail, 'mood_ws'), 'the first look only starts the clock')
+  day(W, 5)
+  T.ok(not has(ready(W).fail, 'mood_ws'), '5 days: the plan is still building the shops')
+  day(W, 3)
+  local r = ready(W)
+  T.ok(has(r.fail, 'mood_ws'), 'mood_ws is an R0 blocker after 7 days')
+  T.eq(r.mws:gsub('missing %d+ days', 'missing N days'),
+       'mood shops missing N days: Loom; ' ..
+       'dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"Loom"}}')
+  T.ok(#r.mws <= 200)
+  W.ms = W.ms + 600000                         -- a new blocker wakes after a game month and UNREADY_NEWS_S
+  day(W, 28)
+  W.ms = W.ms + 600000
+  day(W, 2)
+  local u = unready(W)
+  T.ok(#u >= 1, 'SIEGE_UNREADY names it')
+  T.ok(u[#u].d.mws and u[#u].d.mws:find('missing', 1, true), 'the event carries d.mws')
+  T.ok(has(u[#u].d.fails, 'mood_ws') and u[#u].msg:find('"only":"Loom"', 1, true), u[#u].msg)
+  -- several types: the command takes the first three, a queued project is named instead of asked again
+  miss = {'Loom', 'Jewelers', 'Tanners', 'Mechanics', 'Bowyers'}
+  queued = {Jewelers = {id = 'c1a147c261d9', pct = 40}}
+  day(W, 8)
+  r = ready(W)
+  T.ok(r.mws:find('Loom,Jewelers,Tanners +2', 1, true) and r.mws:find('"only":"Loom,Tanners,Mechanics"', 1, true)
+       and r.mws:find('queued Jewelers c1a147c261d9 40%', 1, true), r.mws)
+  T.ok(#r.mws <= 200)
+  -- a shop built: its clock goes; the others keep theirs
+  miss, queued = {'Loom'}, {}
+  day(W)
+  T.ok(has(ready(W).fail, 'mood_ws'))
+  miss = {}
+  day(W)
+  T.ok(not has(ready(W).fail, 'mood_ws') and ready(W).mws == nil, 'built: the blocker goes')
+  miss = {'Loom'}
+  day(W, 2)
+  T.ok(not has(ready(W).fail, 'mood_ws'), 'lost again: the 7 days start again')
+  -- the knobs
+  day(W, 7)
+  T.ok(has(ready(W).fail, 'mood_ws'))
+  W.K.cfg.baseline.offices = {mood_ws_days = 0}
+  day(W)
+  T.ok(not has(ready(W).fail, 'mood_ws'), 'mood_ws_days 0: never')
+  W.K.cfg.baseline.offices = {mood_ws_days = 'x', mood_ws_pop = 'y'}
+  day(W, 8)
+  T.ok(has(ready(W).fail, 'mood_ws'), 'bad values keep the defaults (7 days, 20 citizens)')
+  W.K.cfg.baseline.offices = {mood_ws_pop = 60}
+  day(W)
+  T.ok(not has(ready(W).fail, 'mood_ws'), '50 citizens < mood_ws_pop 60')
+  W.K.cfg.baseline.offices = nil
+  W.econ.mood_shops = function(K) return nil end                  -- before mood_from_phase, or the buildings unreadable
+  day(W, 10)
+  T.ok(not has(ready(W).fail, 'mood_ws'), 'economy answers nil: no blocker')
+end)
+
+T.test('BUG-117: a fort without a dwarf that can have a mood (0 or 19 citizens) never gets mood_ws; 20 do', function()
+  for _, n in ipairs({0, 7, 19}) do
+    local W = world{n = n}
+    W.econ.mood_shops = function(K) return {missing = {'Loom', 'Jewelers'}, queued = {}} end
+    day(W, 20)
+    T.ok(not has(ready(W).fail, 'mood_ws'), n .. ' citizens: no blocker')
+  end
+  local W = world{n = 20}
+  W.econ.mood_shops = function(K) return {missing = {'Loom'}, queued = {}} end
+  day(W, 10)
+  T.ok(has(ready(W).fail, 'mood_ws'), '20 citizens: the blocker')
+  -- an old kernel state (no mws record) and a reload keep the clock of the saved record
+  local persisted = W.K.persist.get('m.readiness')
+  T.ok(type(persisted.mws) == 'table' and persisted.mws.Loom ~= nil, 'the first-missed tick is persisted')
+end)
+
+
 T.done()

@@ -277,8 +277,16 @@ T.test('census: dead citizens remains are no bone; only true armor fills body/he
   T.eq(eco_warns(W), {})
 end)
 
+-- BUG-117: cloth.floor (20) has its own test below; the target rule is tested without it
+local function NOFLOOR()
+  local cl = {}
+  for k, v in pairs(F.cfg().economy.cloth) do cl[k] = v end
+  cl.floor = 0
+  return {cloth = cl}
+end
+
 T.test('cloth: target = max(mood stock, naked x 3); weave per thread kind, thread from plants, fiber crops in autofarm', function()
-  local W, ctl = world{care = true, phase = 'P1', naked = 4, shops = {'Loom', 'Farmers'}, setup = function(W)
+  local W, ctl = world{care = true, phase = 'P1', naked = 4, shops = {'Loom', 'Farmers'}, eco = NOFLOOR(), setup = function(W)
     for _ = 1, 5 do F.item(W, 'THREAD', {mat_type = 419, mat_index = 71}) end
     for _ = 1, 2 do F.item(W, 'THREAD', {mat_type = 419, mat_index = 72}) end
     F.item(W, 'THREAD', {mat_type = 419, mat_index = 72, flags = {spider_web = true}})   -- an uncollected web
@@ -306,7 +314,7 @@ T.test('cloth: target = max(mood stock, naked x 3); weave per thread kind, threa
   T.eq({n, st}, {2, 1}, 'one change each way; the default read once a boot')
   T.eq(eco_warns(W), {})
   -- autofarm's own default from its status: never "raised" below it, restored to it
-  local W2, ctl2 = world{care = true, phase = 'P1', naked = 4, shops = {'Loom', 'Farmers'}, setup = function(W)
+  local W2, ctl2 = world{care = true, phase = 'P1', naked = 4, shops = {'Loom', 'Farmers'}, eco = NOFLOOR(), setup = function(W)
     F.item(W, 'SEEDS', {mat_type = 419, mat_index = 70, stack_size = 4})
     W.act_result('run', function(cmd, a1)
       if cmd == 'autofarm' and a1 == 'status' then return true, 'Running.\nDefault: 120\nGRASS_TAIL_PIG: 120' end
@@ -602,5 +610,88 @@ T.test('Run 11: metal gear marked for melting with no ore and no bar: charcoal f
   days(W2, 1)
   T.eq(order(W2, 'dfllm:charcoal'), nil)
 end)
+
+
+-- BUG-117 (Run 14 note 80: a miner died in a fey mood waiting for cloth, 643 free cloth and a loom in stock a day later; the
+-- game session added a private MOOD_CLOTH_WATCH): the kernel itself keeps economy.cloth.floor (20) free cloth from
+-- cloth.from_phase on, weaving what the thread allows (the floor is for the orders: fiber crops follow the target only)
+T.test('BUG-117: cloth below economy.cloth.floor (20) is woven although the mood stock (10) is met; floor 0, P0 and a missing loom: no order',
+       function()
+  local function mk(opts)
+    return world{care = true, phase = opts.phase or 'P1', shops = opts.shops or {'Loom'}, eco = opts.eco, setup = function(W)
+      for _ = 1, 12 do F.item(W, 'CLOTH', {}) end
+      for _ = 1, 30 do F.item(W, 'THREAD', {mat_type = 419, mat_index = 71}) end
+      F.item(W, 'SEEDS', {mat_type = 419, mat_index = 70, stack_size = 4})
+    end}
+  end
+  local W = mk{}
+  days(W, 2)
+  local o = order(W, 'dfllm:cloth')
+  T.ok(o, 'a weave order although 12 cloth meet the mood stock of 10')
+  T.eq({o.job, o.material_category, o.amount_total}, {'WeaveCloth', {'plant'}, 8}, '20 - 12 cloth')
+  T.ok(not F.has(F.runs(W), 'autofarm threshold 100 GRASS_TAIL_PIG'), 'the floor does not raise the fiber crops')
+  local cl = {}
+  for k, v in pairs(F.cfg().economy.cloth) do cl[k] = v end
+  cl.floor = 0
+  local W0 = mk{eco = {cloth = cl}}
+  days(W0, 2)
+  T.eq(order(W0, 'dfllm:cloth'), nil, 'floor 0: as before')
+  local Wp = mk{phase = 'P0'}
+  days(Wp, 2)
+  T.eq(order(Wp, 'dfllm:cloth'), nil, 'before cloth.from_phase')
+  local Wn = mk{shops = {'Farmers'}}
+  days(Wn, 2)
+  T.eq(order(Wn, 'dfllm:cloth'), nil, 'no loom: no weave order (the loom is readiness mood_ws)')
+  T.eq(eco_warns(W), {})
+end)
+
+
+
+-- FR-89 (Run 14 note 82, "drills only with wooden weapons, build enough"): squads on the training policy (military.training_need:
+-- {raw id = positions}) get the training weapons they lack ordered at the carpenters: need + economy.training.spare, at most
+-- training.max_jobs per order, from wood, only in a fort that has a carpenter's shop, from from_phase on; none without the policy
+T.test('FR-89: training weapons the positions lack are ordered at the carpenters, bounded; none without the policy', function()
+  local need = {ITEM_WEAPON_AXE_TRAINING = 7, ITEM_WEAPON_SPEAR_TRAINING = 2}
+  local W, ctl = world{phase = 'P1', wood = 100, shops = {'Carpenters'}, setup = function(W)
+    W.subdefs[5] = {id = 'ITEM_WEAPON_AXE_TRAINING', skill_melee = df.job_skill.AXE, skill_ranged = -1}
+    W.subdefs[6] = {id = 'ITEM_WEAPON_SPEAR_TRAINING', skill_melee = df.job_skill.SPEAR, skill_ranged = -1}
+    for _ = 1, 3 do F.item(W, 'WEAPON', {subtype = 5}) end                         -- 3 training axes stand
+    F.item(W, 'WEAPON', {subtype = 5, flags = {trader = true}})                     -- a merchant's: no stock
+    W.load({name = 'military', every = {ticks = 3600}, training_need = function() return need end})
+  end}
+  days(W, 2)
+  local axe, spear = order(W, 'dfllm:train_axe'), order(W, 'dfllm:train_spear')
+  T.ok(axe and spear, 'both raws are ordered')
+  T.eq({axe.job, axe.item_subtype, axe.material_category, axe.amount_total}, {'MakeWeapon', 'ITEM_WEAPON_AXE_TRAINING', {'wood'}, 5},
+       '7 wanted + 2 spare - 3 standing = 6, at most max_jobs 5')
+  T.eq({spear.item_subtype, spear.amount_total}, {'ITEM_WEAPON_SPEAR_TRAINING', 4}, '2 + 2 spare, none standing')
+  T.eq(eco_warns(W), {})
+  -- no policy: nothing
+  local W2 = world{phase = 'P1', wood = 100, shops = {'Carpenters'}, setup = function(W)
+    W.load({name = 'military', every = {ticks = 3600}, training_need = function() return {} end})
+  end}
+  days(W2, 2)
+  T.eq(order(W2, 'dfllm:train_axe'), nil)
+  -- no carpenter's shop, or before from_phase: nothing
+  local W3 = world{phase = 'P1', wood = 100, setup = function(W)
+    W.load({name = 'military', every = {ticks = 3600}, training_need = function() return need end})
+  end}
+  days(W3, 2)
+  T.eq(order(W3, 'dfllm:train_axe'), nil, 'no carpenters')
+  local W4 = world{phase = 'P0', wood = 100, shops = {'Carpenters'}, setup = function(W)
+    W.load({name = 'military', every = {ticks = 3600}, training_need = function() return need end})
+  end}
+  days(W4, 2)
+  T.eq(order(W4, 'dfllm:train_axe'), nil, 'before P1')
+  -- enough stand: no order
+  local W5 = world{phase = 'P1', wood = 100, shops = {'Carpenters'}, setup = function(W)
+    W.subdefs[5] = {id = 'ITEM_WEAPON_AXE_TRAINING', skill_melee = df.job_skill.AXE, skill_ranged = -1}
+    for _ = 1, 9 do F.item(W, 'WEAPON', {subtype = 5}) end
+    W.load({name = 'military', every = {ticks = 3600}, training_need = function() return {ITEM_WEAPON_AXE_TRAINING = 7} end})
+  end}
+  days(W5, 2)
+  T.eq(order(W5, 'dfllm:train_axe'), nil, '9 stand for 7 + 2 spare')
+end)
+
 
 T.done()

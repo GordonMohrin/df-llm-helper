@@ -878,6 +878,7 @@ local function weapon_kind(sub)
     if d then
       local js, k = df.job_skill, 'melee'
       if (int(d.skill_ranged) or -1) >= 0 then k = 'ranged'
+      elseif tostring(d.id):find('_TRAINING$') then k = 'melee'        -- FR-89: a wooden training weapon is no work tool
       elseif d.skill_melee == js.MINING then k = 'pick'
       elseif d.skill_melee == js.AXE then k = 'axe' end
       c = {k = k, token = d.id}
@@ -886,6 +887,8 @@ local function weapon_kind(sub)
   end
   return c or nil
 end
+
+M.weapon_kind = weapon_kind                  -- (module field: tests read it; no new local)
 
 -- weapon spec subtypes of a position (-1 = individual choice)
 local function weapon_specs(p)
@@ -1057,7 +1060,8 @@ local function weapon_plan(g, n)
     for _, it in ipairs(df.global.world.items.other.WEAPON) do
       local w = free_item(it) and weapon_kind(it:getSubtype())
       if w then
-        if w.k == 'melee' then stock[w.token] = (stock[w.token] or 0) + 1
+        if w.k == 'melee' then
+          if not tostring(w.token):find('_TRAINING$') then stock[w.token] = (stock[w.token] or 0) + 1 end   -- review: no wooden spare
         elseif w.k == 'axe' or w.k == 'pick' then tool_tok[w.k] = tool_tok[w.k] or w.token end
       end
     end
@@ -1108,6 +1112,64 @@ local function nw_has(e, pos)
   return false
 end
 
+-- FR-89 (Run 14 note 82, Gordon 26.10.: "drills only with wooden weapons, build enough"): the vanilla training raws by
+-- weapon class (df.job_skill name). Hammer, mace, pick, whip, dagger, pike and the ranged classes have none (vanilla)
+M.TRAINING = {AXE = 'ITEM_WEAPON_AXE_TRAINING', SWORD = 'ITEM_WEAPON_SWORD_SHORT_TRAINING',
+              SPEAR = 'ITEM_WEAPON_SPEAR_TRAINING'}
+
+-- the weapon class of a squad member's position: 'TRAINING' (a training weapon is the spec already), the skill of the
+-- weapon the position's spec names (df.job_skill name), else his best weapon skill (the class an individual choice
+-- would take), nil without any
+function M.weapon_class(m)
+  for _, sub in ipairs(weapon_specs(m.p)) do
+    if sub >= 0 then
+      local d = try(function() return dfhack.items.getSubtypeDef(df.item_type.WEAPON, sub) end)
+      if d then
+        if tostring(d.id):find('_TRAINING$') then return 'TRAINING' end
+        local sk = int(d.skill_melee)
+        if sk and sk >= 0 and df.job_skill[sk] then return df.job_skill[sk] end
+      end
+    end
+  end
+  local top, name = 0, nil
+  for _, sk in ipairs(M.WEAPON_SKILLS) do
+    local lv = try(function() return dfhack.units.getNominalSkill(m.unit, df.job_skill[sk]) end)
+    if type(lv) == 'number' and lv > top then top, name = lv, sk end
+  end
+  return name
+end
+
+-- the squads screen's weapon slot of the positions `only` (a set of 0-based positions, nil = all) to the training weapon
+-- of their class, one act call per weapon (the same act as every uniform kind); positions with a class that has no training
+-- raw stay as they are. Returns set = positions changed, held = positions that carried a training weapon already, left =
+-- {{pos, cls}} unchanged, counts = {AXE = n, ...}, fail = the act's refusal
+function M.train_apply(K, s, only)
+  local by, order, held, left, counts, set, fail = {}, {}, 0, {}, {}, {}, nil
+  for _, m in ipairs(members(s)) do
+    if not only or only[m.pos] then
+      local cls = M.weapon_class(m)
+      local tok = cls and M.TRAINING[cls]
+      if cls == 'TRAINING' then held = held + 1
+      elseif tok then
+        if not by[tok] then by[tok] = {}; order[#order + 1] = tok end
+        table.insert(by[tok], m.pos)
+        counts[cls] = (counts[cls] or 0) + 1
+      else left[#left + 1] = {pos = m.pos, cls = cls or 'none'} end
+    end
+  end
+  for _, tok in ipairs(order) do
+    local ok, res = K.act.squad_uniform(s.id, {mode = 'replace', positions = by[tok],
+                                               items = {{cat = 'weapon', type = 'WEAPON', subtype = tok, mat = 'any'}}})
+    if ok then
+      for _, p in ipairs(by[tok]) do set[#set + 1] = p end
+    else
+      fail = tostring(res)
+    end
+  end
+  table.sort(set)
+  return {set = set, held = held, left = left, counts = counts, fail = fail}
+end
+
 -- melee positions get a weapon spec: while guarded every occupied position without one or with an individual-choice
 -- spec gets an explicit subtype (weapon_plan); while the tools are safe the positions dfllm left without one get
 -- individual choice again
@@ -1115,11 +1177,34 @@ local function ensure_weapons(K, k, s)
   local e = st.sq[k]
   if not e or e.kind == 'xbow' or not retry_ok(K, 'wpn' .. k) then return end
   local g = rt.wguard
+  -- FR-89: a squad on the training policy gives every occupied position the training weapon of its class (a vacant position
+  -- keeps the kit's individual-choice spec, so a recruit's metal weapon is changed here); the classes without one go on below
+  -- review: the policy is a PEACE/DRILL one. In any other mode (ALERT, SIEGE, BREACH, RECOVERY) the positions that carry a
+  -- training weapon get individual choice (or a planned real weapon while guarded) back below, and the wooden ones are put on
+  -- again once PEACE returns: a squad never meets an army with wooden weapons
+  local mode = K.mode()
+  local trn = e.tr == 1 and (mode == 'PEACE' or mode == 'DRILL')
+  if trn then
+    local tr = M.train_apply(K, s, nil)
+    for _, p in ipairs(tr.set) do nw_set(e, p, false) end
+    if #tr.set > 0 then
+      K.log('info', 'military: squad %s: %d positions changed to the training weapon of their class', k, #tr.set)
+    end
+    if tr.fail then                                   -- the act refused (e.g. a world without the training raws): not every upkeep
+      backoff(K, 'wpn' .. k)
+      if not rt.no_train then rt.no_train = {} end
+      if rt.no_train[k] ~= tr.fail then
+        rt.no_train[k] = tr.fail
+        K.log('warn', 'military: squad %s: training weapons refused: %s', k, tr.fail)
+      end
+    end
+  end
   local need, marked = {}, {}
   for _, m in ipairs(members(s)) do
     local ws = weapon_specs(m.p)
     local bad = #ws == 0 and (g ~= nil or nw_has(e, m.pos))
     if g and not bad then for _, sub in ipairs(ws) do if sub < 0 then bad = true end end end
+    if e.tr == 1 and not trn and not bad and M.weapon_class(m) == 'TRAINING' then bad = true end     -- review: see above
     if bad then need[#need + 1] = m.pos; marked[m.pos] = true end
   end
   -- BUG-023: tool specs beyond the spare tools are re-planned, the soldiers without that tool in hand first
@@ -1187,6 +1272,8 @@ local function ensure_uniform(K, k, s, want)
     rt.mats[k] = rt.mats[k] or best_mats(math.max(1, want or 1))
     local base = M.UNIFORM[e.kind] or M.UNIFORM.melee
     local guarded = rt.wguard ~= nil and e.kind ~= 'xbow'
+    local trn = e.tr == 1 and e.kind ~= 'xbow'        -- FR-89: the training policy: ensure_weapons picks the weapons too
+    guarded = guarded or trn
     if guarded then                                   -- ensure_weapons picks the weapons (live L6)
       local b = {}
       for key, v in pairs(base) do b[key] = v end
@@ -2425,6 +2512,7 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
   local e = key and st.sq[key]
   if not s or not e then return false, 'squad ' .. tostring(args.squad) .. ' is not one of A, B, C (squad.create name A|B|C first)' end
   local kind = args.kind or e.kind
+  if kind == 'training' then return M.uniform_training(K, s, key, e) end
   local base = M.UNIFORM[kind]
   if not base then return false, 'no uniform kind ' .. tostring(kind) end
   local guarded = rt.wguard ~= nil and kind ~= 'xbow'
@@ -2440,8 +2528,70 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
     for _, m in ipairs(members(s)) do nw_set(e, m.pos, true) end
   end
   e.uni, dirty = 1, true                  -- (the squad keeps its kind: military's own plan names it)
+  if e.tr then e.tr = nil end             -- FR-89: a metal kind ends the training policy
   rt.kpi = nil
   return true, string.format('squad %s: %s uniform on %s positions', key, kind, tostring(res)), {squad = s.id}
+end
+
+-- FR-89: `squad.uniform kind=training`: the weapon slot of every position to the training weapon of its class (M.train_apply),
+-- armor and shield stay; the squad keeps the policy (state tr) so recruits and the militia rotation get the same; the positions
+-- without a training variant (hammer, mace, pick, ...) are listed in the answer and in kern.log. Refused when no position
+-- could take one
+function M.uniform_training(K, s, key, e)
+  if e.kind == 'xbow' then
+    return false, string.format('squad.uniform: squad %s is a crossbow squad: no training crossbow exists (vanilla)', key)
+  end
+  local tr = M.train_apply(K, s, nil)
+  local function list(items)
+    local out = {}
+    for i, x in ipairs(items) do
+      if i > 8 then out[#out + 1] = string.format('+%d', #items - 8); break end
+      out[#out + 1] = string.format('%d %s', x.pos, x.cls)
+    end
+    return table.concat(out, ', ')
+  end
+  if #tr.set == 0 and tr.held == 0 then
+    if tr.fail then return false, 'squad.uniform: ' .. tr.fail end
+    return false, string.format('squad.uniform: no position has a training variant: %s',
+                                #tr.left > 0 and list(tr.left) or 'the squad has no soldiers')
+  end
+  e.tr, dirty = 1, true
+  rt.kpi = nil
+  local parts = {}
+  for _, cls in ipairs({'AXE', 'SWORD', 'SPEAR'}) do
+    if tr.counts[cls] then parts[#parts + 1] = string.format('%s %d', cls:lower(), tr.counts[cls]) end
+  end
+  local msg = string.format('squad %s: training weapons on %d positions (%s)%s', key, #tr.set, table.concat(parts, ', '),
+                            tr.held > 0 and string.format(', %d had one already', tr.held) or '')
+  if #tr.left > 0 then
+    msg = msg .. string.format('; unchanged (no training variant): %s', list(tr.left))
+    K.log('warn', 'military: squad %s: %d positions keep their weapon (no training variant): %s', key, #tr.left, list(tr.left))
+  end
+  if tr.fail then msg = msg .. '; refused for some: ' .. tr.fail end
+  return true, msg:sub(1, 400), {squad = s.id, set = #tr.set, left = #tr.left}
+end
+
+-- FR-89: the training weapons the squads on the training policy wear or are about to: {raw id = positions}. Economy orders
+-- the missing ones (plan_training); positions that carry a metal weapon (no variant) count for nothing. Read-only
+function M.training_need(K)
+  local out = {}
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and e.tr == 1 and squad(e.id)
+    if s then
+      for _, m in ipairs(members(s)) do
+        local cls = M.weapon_class(m)
+        local tok = cls ~= 'TRAINING' and cls and M.TRAINING[cls] or nil
+        if cls == 'TRAINING' then
+          for _, sub in ipairs(weapon_specs(m.p)) do
+            local d = sub >= 0 and try(function() return dfhack.items.getSubtypeDef(df.item_type.WEAPON, sub) end)
+            if d and tostring(d.id):find('_TRAINING$') then out[d.id] = (out[d.id] or 0) + 1 end
+          end
+        elseif tok then out[tok] = (out[tok] or 0) + 1 end
+      end
+    end
+  end
+  return out
 end
 
 -- BUG-055 (Run 11 note 25): the militia posts as the squads see them, for `inspect offices` and the DECISION text:
@@ -2980,7 +3130,7 @@ function M.init(K)
         for _, p in ipairs(e.nw) do if int(p) then nw = nw or {}; nw[#nw + 1] = int(p) end end
       end
       st.sq[sp.key] = {id = int(e.id), kind = sp.kind, uni = int(e.uni) == 1 and 1 or 0,
-                       auto = int(e.auto) == 1 and 1 or nil, nw = nw}
+                       auto = int(e.auto) == 1 and 1 or nil, nw = nw, tr = int(e.tr) == 1 and 1 or nil}
     end
   end
   -- FR-79: rot[key] = {c = absolute month of the last window close whose members were credited, e = of the last one whose

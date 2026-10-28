@@ -298,7 +298,10 @@ M.DEFAULTS = {
              spec = {job = 'CustomReaction', reaction = 'TAN_A_HIDE',
                      item_conditions = {{condition = 'AtLeast', value = 1, flags = {'unrotten'},
                                          reaction_product = 'TAN_MAT'}}}},
-  cloth = {from_phase = 'P1', per_naked = 3, max_jobs = 10, loom = {'workshop:Loom'},
+  -- BUG-117 (Run 14 note 80: a miner died in a fey mood waiting for cloth, the game session added a private watch): `floor`
+  -- = free cloth the kernel itself keeps from from_phase on, whatever the mood stock target says (0 = off); it moves the weave
+  -- orders only, the fiber crops follow the target
+  cloth = {from_phase = 'P1', per_naked = 3, max_jobs = 10, floor = 20, loom = {'workshop:Loom'},
            weave = {{kind = 'plant', tag = 'dfllm:cloth'}, {kind = 'silk', tag = 'dfllm:cloth_silk'},
                     {kind = 'yarn', tag = 'dfllm:cloth_yarn'}},
            thread = {tag = 'dfllm:thread', ws = {'workshop:Farmers'},
@@ -352,6 +355,10 @@ M.DEFAULTS = {
              wood = {job = 'MakeAmmo', sub = 'ITEM_AMMO_BOLTS', ws = {'workshop:Craftsdwarfs', 'workshop:Bowyers'}},
              bone = {job = 'MakeAmmo', sub = 'ITEM_AMMO_BOLTS', ws = {'workshop:Craftsdwarfs'}}},
           }},
+  -- FR-89 (Run 14 note 82, Gordon: "drills only with wooden weapons, build enough"): squads on the training policy
+  -- (military.training_need) get the training weapons they lack made at the carpenters from wood: need + `spare`, at most
+  -- `max_jobs` per order; on = false never orders them
+  training = {on = true, from_phase = 'P1', spare = 2, max_jobs = 5, tag = 'dfllm:train', ws = {'workshop:Carpenters'}},
   idle = {
     -- live L4: `combine all -q` took 16-28 ms and demoted economy x8 every few days: weekly now. Without stone
     -- the fort had nothing to sell (the dwarven caravan failed on 'ratio'): wooden crafts once logs pass wood_min
@@ -1738,6 +1745,9 @@ local function plan_cloth(K, c, r)
   r.targets.cloth = want
   local deficit = want - have(r, 'cloth')
   r.fiber_on = deficit > 0
+  -- BUG-117: the floor of free cloth (from from_phase on) lifts the weave orders below, not the fiber crops
+  local fl = phase_ok(K, Cc.from_phase) and math.tointeger(Cc.floor) or 0
+  local orders_deficit = math.max(deficit, math.max(0, (fl or 0) - have(r, 'cloth')))
   -- BUG-024: spider webs are no thread; a CollectWebs hint only for webs on the citizens' walk group
   local thread, webs, near = r.inv.thread or 0, r.inv.webs or 0, r.inv.webs_near or 0
   st.cloth = {deficit = math.max(0, deficit), thread = thread, webs = webs, near = near}
@@ -1747,6 +1757,7 @@ local function plan_cloth(K, c, r)
           'them (WEAVER labor, webs not forbidden)', deficit, near, wp and string.format(' (e.g. %d,%d,%d)', wp[1], wp[2], wp[3]) or '')
   end
   if r.day then st.web_hint = (deficit > 0 and thread == 0 and near > 0) and near or nil end
+  deficit = orders_deficit
   if deficit <= 0 then return end
   if ws_any(r.f, Cc.loom) then
     for _, w in ipairs(Cc.weave or {}) do
@@ -1770,6 +1781,49 @@ local function plan_cloth(K, c, r)
       r.route.cloth = (r.route.cloth or '') == '' and 'thread' or r.route.cloth .. '+thread'
     end
   end
+end
+
+-- FR-89: the weapons of each wanted training raw in the fort (carried ones too, merchants' goods not): {raw id = n}.
+-- One pass over the weapon vector, on the daily run only and only while a squad is on the training policy
+function M.training_have(need)
+  local out = {}
+  pcall(function()
+    for _, it in ipairs(df.global.world.items.other.WEAPON) do
+      if not it.flags.trader then
+        local d = dfhack.items.getSubtypeDef(df.item_type.WEAPON, subtype(it))
+        if d and need[d.id] then out[d.id] = (out[d.id] or 0) + 1 end
+      end
+    end
+  end)
+  return out
+end
+
+function M.plan_training(K, c, r)
+  local tc = c.training
+  if type(tc) ~= 'table' or tc.on == false or not phase_ok(K, tc.from_phase) then st.train = nil; return end
+  local ok, need = K.call('military', 'training_need')
+  if not (ok and type(need) == 'table' and next(need) ~= nil) then st.train = nil; return end
+  local ids = {}
+  for id in pairs(need) do ids[#ids + 1] = id end
+  table.sort(ids)
+  local key = table.concat(ids, ',')
+  if r.day or st.train_have == nil or st.train_key ~= key then st.train_have, st.train_key = M.training_have(need), key end
+  local short = 0
+  for _, id in ipairs(ids) do
+    local n = math.tointeger(need[id]) or 0
+    local miss = n + (tc.spare or 0) - (st.train_have[id] or 0)
+    local name = id:match('^ITEM_WEAPON_(.-)_TRAINING$')
+    if miss > 0 and name then
+      short = short + miss
+      local tag = (tc.tag or 'dfllm:train') .. '_' .. name:lower()
+      if ws_any(r.f, tc.ws) and not open(r, tag) then
+        local k = math.min(miss, tc.max_jobs or 5, left(c, r, 'wood'))
+        add(r, {tag = tag, spec = wood_spec(c, r, {job = 'MakeWeapon', item_subtype = id, material_category = {'wood'}}),
+                n = k, uses = {wood = 1}, why = 'training weapons'})
+      end
+    end
+  end
+  st.train = {short = short}
 end
 
 local function fuel_cond(r)
@@ -2540,6 +2594,43 @@ function M.offices(K)
     if a.days ~= b.days then return a.days > b.days end
     return a.code < b.code
   end)
+  return out
+end
+
+-- BUG-117 (Run 14 note 92: 151 of 453 citizen deaths were failed strange moods, the Loom was missing for a while): the 12
+-- moodable workshop types a strange mood can claim (runner.MOODABLE, dfpilot/bp/rooms.py MOODABLE_TYPES; tests mirror them)
+-- and the ones missing on the map now. A built Magma Forge stands for the Metalsmith's Forge and a built Magma Glass
+-- Furnace for the Glass Furnace (a mood claims either). nil from `mood_from_phase` on only (before it the plan builds
+-- the shops itself) or when the buildings are unreadable. queued[type] = the pending `workshops` project that lists the
+-- type ({id, stage, pct, halted}; M.fishery_proj, read-only). Read by readiness (R0 `mood_ws`) and care (MOOD_RISK fix)
+M.MOOD_SHOPS = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge', 'Bowyers', 'Clothiers',
+                'Leatherworks', 'Tanners', 'Loom', 'GlassFurnace', 'Mechanics'}
+M.MOOD_ALT = {MetalsmithsForge = 'MagmaForge', GlassFurnace = 'MagmaGlassFurnace'}
+function M.mood_shops(K)
+  local c = M.conf(K)
+  if not phase_ok(K, c.mood_from_phase or 'P1') then return nil end
+  local have = {}
+  local ok1 = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local n = df.workshop_type[b.type]
+      if n and built(b) then have[n] = true end
+    end
+  end)
+  local ok2 = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.FURNACE_ANY) do
+      local n = df.furnace_type[b.type]
+      if n and built(b) then have[n] = true end
+    end
+  end)
+  if not (ok1 and ok2) then return nil end
+  local out = {missing = {}, queued = {}}
+  for _, t in ipairs(M.MOOD_SHOPS) do
+    if not have[t] and not (M.MOOD_ALT[t] and have[M.MOOD_ALT[t]]) then
+      out.missing[#out.missing + 1] = t
+      local q = M.fishery_proj(K, {'workshop:' .. t})
+      if q then out.queued[t] = q end
+    end
+  end
   return out
 end
 
@@ -3540,6 +3631,40 @@ function M.td_event(d, dg)
   if size() > 1000 and d.hint then d.hint = d.hint:sub(1, 80) end
 end
 
+-- BUG-116 (Run 14 note 89: the miners found no pick, 109 picks lay in chests, the hospital's dig stood at 0 %): one sentence
+-- for the player in the game's words, from the diagnosis' blocker keys and the counts (TOOL_BLOCKED d.tell, <= 200 bytes).
+-- Nothing here is done by the kernel: no verb moves or unforbids a tool for a member (fair play)
+function M.tool_tell(spec, kind, c)
+  local keys = {}
+  for _, k in ipairs(c.keys or {}) do keys[k] = true end
+  local t
+  if keys.labor then
+    t = string.format('turn on the %s labor of the %s detail members (work details screen): they lack it',
+                      tostring(spec.labor), spec.name)
+  elseif keys.tool2 then
+    t = string.format('members of %s hold a second tool labor (one tool labor per dwarf): turn the other off', spec.name)
+  elseif c.forb > 0 and c.free == 0 then
+    t = string.format('the %d %ss are forbidden: unforbid them (the items screen, flag forbid) or put them in a free chest',
+                      c.forb, kind)
+  elseif c.res > 0 and c.free - c.res <= 0 then
+    t = string.format('the %d %ss are reserved by squad uniforms: take the %s off the squad\'s equipment (squads screen) or '
+                      .. 'have more made', c.res, kind, kind)
+  elseif c.bins > 0 and c.free - c.bins <= 0 then
+    t = string.format('the %d %ss lie in chests: dwarves need the %s unforbidden or in a free chest of a tool stockpile '
+                      .. 'they can reach (unforbid it, or empty the chest)', c.bins, kind, kind)
+  elseif keys.off_group then
+    t = string.format('the free %ss lie on another walk group than the dwarves: carry them over or make a tool stockpile '
+                      .. 'near the mines', kind)
+  elseif keys.jobs then                        -- (review: the diagnosis' key for members cut off by walk group or burrows)
+    t = string.format('the alert/burrow keeps the %s members from the %ss: lift the civilian alert or widen the burrow', spec.name,
+                      kind)
+  else
+    t = string.format('free %ss exist but DF hands none out: check the %s detail, the squads screen and forbid flags',
+                      kind, spec.name)
+  end
+  return t:sub(1, 200)
+end
+
 local function tool_check(K, tc, r, spec, cur, jc, fixed)
   local p, kind = r.p, spec.tool
   local inv = r.inv or {}
@@ -3657,6 +3782,13 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
                  jobs = open, days = days, free = free, bins = bins, reserved = res, why = table.concat(toks, ','),
                  who = table.concat(names, ', '), hint = hint:sub(1, 200)}
       if pos then d.pos = pos end
+      d.tell = M.tool_tell(spec, kind, {keys = dg and dg.keys, forb = forb, free = free, res = res, bins = bins})
+      -- BUG-116: care first leads and the tool is what its dig waits for
+      local okc, cf = K.call('runner', 'care_first')
+      if okc and type(cf) == 'table' and cf.proj and kind == 'pick' then
+        d.care = string.format('the hospital project %s (%s) leads and needs the miners\' %ss',
+                               tostring(cf.proj):sub(1, 24), tostring(cf.why or '?'):sub(1, 24), kind):sub(1, 100)
+      end
       if eqn > 0 then d.eq, d.eq_days = eqn, eqd or 0 end
       if forb > 0 then d.forb = forb end
       local ptxt = M.pile_text(r.p)
@@ -6478,7 +6610,7 @@ function T.plan(K, c, r)
                   glass = need_n(r.p, 'glass', r.now) + (r.glass_cut or 0) > 0}
   local list = {{1.5, plan_supply}, {2, function() plan_containers(K, c, r, 'barrels') end},
                 {urgent.leather and 1 or 4, plan_leather}, {urgent.cloth and 1 or 3.5, plan_cloth},
-                {2.9, M.plan_picks},
+                {2.9, M.plan_picks}, {3.4, M.plan_training},
                 {urgent.bars and 1 or 3, plan_metal}, {urgent.bars and 1.1 or 3.1, plan_steel}, {3.2, plan_gear},
                 {3.25, M.metal_plan}, {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
   table.sort(list, function(a, b) return a[1] < b[1] end)

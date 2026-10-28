@@ -384,4 +384,58 @@ T.test('BUG-078: engrave_order makes one EngraveSlab order for the figure as aut
   T.eq(#mo.all, n, 'nothing was added')
 end)
 
+
+-- BUG-119 (Run 14 note 75): "order.add EngraveSlab fails for 7 of 8 ghosts: manager_order has no such field ... act.lua:1497:
+-- Cannot write field job_material_ca..." The note blamed the scan of the foreign orders. That text is the answer of the
+-- WRITE block (BUG-090: material_category.stone); the scan reads in a pcall per order. These tests pin the scan: a foreign
+-- order whose specdata faults on a read, a vector that faults midway, and the shape of the message.
+local function order_env(tag)
+  H.world{tag = tag}
+  df.job_type = {EngraveSlab = 77, [77] = 'EngraveSlab', WeaveCloth = 12, [12] = 'WeaveCloth'}
+  df.workquota_frequency_type = {OneTime = 0}
+  df.historical_figure = {find = function(id) return id >= 6000 and id < 7000 and {id = id} or nil end}
+  local mo = df.global.world.manager_orders
+  local wrote = {}
+  df.manager_order = {new = function() return dfhack_order(wrote) end}
+  return mo, mk('economy')
+end
+
+T.test('BUG-119: a foreign order whose specdata faults on a read does not stop a memorial order', function()
+  local mo, env = order_env('eng2')
+  -- the live fort had 204 orders, 136 stuck: a union read raises DFHack-style on an order of another job
+  local function foreign(id, jt, hf)
+    return setmetatable({id = id, job_type = jt, amount_left = 3}, {__index = function(t, k)
+      if k == 'specdata' then
+        return setmetatable({}, {__index = function(_, f)
+          if f == 'hist_figure_id' then error('Cannot write field job_material_category.stone: not found.') end
+        end})
+      end
+    end})
+  end
+  mo.all:insert('#', foreign(1, 12, nil))
+  mo.all:insert('#', {id = 2, job_type = 77, amount_left = 1, specdata = {hist_figure_id = 6001}})
+  mo.all:insert('#', foreign(3, 77, nil))             -- an EngraveSlab order whose figure cannot be read: not the same
+  mo.next_id = nil
+  mo.manager_order_next_id = 4
+  local ok, id = env.api.engrave_order(6732)
+  T.eq({ok, id}, {true, 4}, 'made for the figure of note 75: ' .. tostring(id))
+  T.eq({env.api.engrave_order(6001)}, {true, 'already'}, 'an order of the figure still stands')
+  T.eq({env.api.engrave_order(6732)}, {true, 'already'}, 'and the new one counts')
+  T.eq(#env.fails, 0)
+end)
+
+T.test('BUG-119: a vector that faults midway never raises out of the act; the order is made', function()
+  local mo, env = order_env('eng3')
+  local real = mo.all
+  local n = 0
+  mo.all = setmetatable({}, {__index = function(_, k)
+    if type(k) == 'number' and k >= 1 then error('vector read fault') end
+    return real[k]
+  end, __len = function() return 3 end})
+  mo.all.insert = function(_, where, o) n = n + 1 end
+  local ok, made, res = pcall(env.api.engrave_order, 6487)
+  T.eq({ok, made}, {true, true}, 'the order is made although the scan faulted: ' .. tostring(res))
+  T.eq(n, 1, 'inserted once')
+end)
+
 T.done()

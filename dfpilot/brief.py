@@ -246,6 +246,9 @@ def line_unready(ctx: Ctx) -> str:
     if "office" in fails:                      # BUG-055 (Run 14 y577): a vacant office the kernel could not fill
         office = r.get("office") if isinstance(r.get("office"), str) else ""
         nxt.append(office or "a vacant office or squads without a leader: dfllm cmd inspect what=offices")
+    if "mood_ws" in fails:                     # BUG-117 (Run 14 note 92): a strange mood needs every moodable shop
+        mws = r.get("mws") if isinstance(r.get("mws"), str) else ""
+        nxt.append(mws or "moodable workshops missing: dfllm cmd bp.place workshops (p.only=<type>)")
     lost = [f.split(":", 1)[1] for f in fails if f.startswith("lost:")]
     if lost:                                   # BUG-048: the keeper replaces it by wall + door (no question any more)
         nxt.append(f"{','.join(lost)} lost to building destroyers: the kernel replaces it by wall + door in quiet PEACE "
@@ -773,6 +776,14 @@ def line_sched(ctx: Ctx) -> str:
             out.append(f"seal stuck {se.get('days', 0)} d: {what}, others run (SEAL_STUCK)")
         else:
             out.append(f"seal open: {what}, " + ("others paused" if se.get("paused") else "runs first"))
+    ca = sc.get("care")
+    if isinstance(ca, dict):                   # BUG-116 (Run 14 note 89): the hospital leads the runner's slots
+        if ca.get("stuck"):
+            out.append(f"care stuck {ca.get('days', 0)} d: {ca.get('proj')} made no progress ({ca.get('why', '?')}), "
+                       "others run (check TOOL_BLOCKED, inspect projects)")
+        else:
+            out.append(f"care first: {ca.get('proj')} ({ca.get('why', '?')}) " +
+                       (f"runs first, {ca['paused']} paused" if ca.get("paused") else "runs first"))
     rb = sc.get("rb")
     if isinstance(rb, dict):
         tail = ", ".join(x for x in (f"{rb['paused']} paused" if rb.get("paused") else "",

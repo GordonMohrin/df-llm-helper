@@ -310,4 +310,50 @@ T.test('BUG-053: the tool list prefers tools on the citizens\' walk group (8 lis
   T.eq(near, 3, 'the three tools on the citizens\' group are listed although twelve far ones came first')
 end)
 
+
+---------------------------------------------------------------- BUG-116 (Run 14 note 89): TOOL_BLOCKED tells the player what to do
+-- Run 14 y586: the miners found no pick (109 picks in chests) and the hospital's dig stood at 0 %. TOOL_BLOCKED was class A
+-- already, but its d named causes in the kernel's words only. d.tell is one sentence for the player in the game's words;
+-- d.care names the hospital project that waits for the tool while care first leads.
+T.test('BUG-116: TOOL_BLOCKED carries d.tell, the player\'s instruction, for forbidden picks, picks in chests and the rest',
+       function()
+  -- 109 picks in chests: nothing forbidden, nothing loose
+  local W = world{miners = {1, 2, 3, 4, 5, 6}, picks = 12, pick_pos = {30, 40, 5}, dig = 14}
+  for id, it in pairs(W.items_by_id) do if it.getType and it.getType() == df.item_type.WEAPON then it._cont = {id = 77} end end
+  days(W, 4)
+  local ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.tell, 'the 12 picks lie in chests: dwarves need the pick unforbidden or in a free chest of a tool stockpile ' ..
+                     'they can reach (unforbid it, or empty the chest)')
+  T.ok(#ev[1].d.tell <= 200)
+  -- every pick forbidden
+  local W2 = world{miners = {1, 2, 3, 4, 5, 6}, forb_picks = 5, pick_pos = {30, 40, 5}, dig = 14}
+  days(W2, 4)
+  local e2 = W2.find_events('TOOL_BLOCKED')
+  T.ok(#e2 >= 1, 'forbidden picks')
+  T.eq(e2[1].d.tell, 'the 5 picks are forbidden: unforbid them (the items screen, flag forbid) or put them in a free chest')
+  -- the Mining labor missing on the members: the player turns it on
+  local W3 = world{miners = {1, 2, 3, 4, 5, 6}, picks = 16, pick_pos = {157, 57, 139}, held = {1}, dig = 14}
+  for _, id in ipairs({1, 2, 3, 4, 5, 6}) do W3.unit(id).status.labors.MINE = nil end
+  days(W3, 4)
+  local e3 = W3.find_events('TOOL_BLOCKED')
+  T.eq(e3[1].d.tell, 'turn on the MINE labor of the Miners detail members (work details screen): they lack it')
+end)
+
+T.test('review: tool_tell speaks for the diagnosis key `jobs` (members cut off by walk group or burrows), not a key that never exists',
+       function()
+  local W = world{miners = {1, 2, 3}, picks = 4, pick_pos = {30, 40, 5}, dig = 14}
+  local tell = W.mods.economy.M.tool_tell({name = 'Miners', labor = 'MINE'}, 'pick', {keys = {'jobs'}, forb = 0, free = 4, res = 0, bins = 0})
+  T.ok(tell:find('alert/burrow', 1, true), tell)
+end)
+
+T.test('BUG-116: with care first leading, TOOL_BLOCKED names the hospital project that needs the miners', function()
+  local W = world{miners = {1, 2, 3, 4, 5, 6}, picks = 12, pick_pos = {30, 40, 5}, dig = 14}
+  W.mods.runner.M.care_first = function(K) return {proj = 'c1a147c261', why = 'hospital_out 1'} end
+  days(W, 4)
+  local ev = W.find_events('TOOL_BLOCKED')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.care, "the hospital project c1a147c261 (hospital_out 1) leads and needs the miners' picks")
+end)
+
 T.done()

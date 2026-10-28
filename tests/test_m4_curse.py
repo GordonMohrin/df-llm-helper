@@ -204,5 +204,4 @@ def test_the_documents_carry_the_package():
     assert "BUG-115" in readme
     frs = (ROOT / "docs/feature-requests/README.md").read_text("utf-8")
     assert "**FR-83" in frs and "**FR-84" in frs
-    assert "BUG-115" in (ROOT / "CHANGELOG.md").read_text("utf-8").split("\n## ", 2)[1] or "BUG-115" in \
-        (ROOT / "CHANGELOG.md").read_text("utf-8")[:6000]
+    assert any("BUG-115" in e for e in (ROOT / "CHANGELOG.md").read_text("utf-8").split("\n## ")[1:]), "one entry names BUG-115"

@@ -104,7 +104,7 @@ def test_office_and_squad_verbs_are_registered_outside_fights_only():
 
 def test_offices_config_is_validated(tmp_path):
     cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
-    assert cfg["offices"] == {"blocker_days": 7}
+    assert cfg["offices"] == {"blocker_days": 7, "mood_ws_days": 7, "mood_ws_pop": 20}   # BUG-117 adds the last two
     assert fairplay.offices_errors() == []
     p = tmp_path / "baseline.json"
     p.write_text(json.dumps({"v": 2, "offices": {"blocker_days": 500, "days": 3}}), encoding="utf-8")

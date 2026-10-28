@@ -33,7 +33,7 @@ MATERIAL = {"b": "bed", "f": "cabinet", "h": "chest", "t": "table", "c": "chair"
             "Tl": "lever", "Tw": "weapon_trap", "Ts": "stonefall_trap", "Tc": "cage_trap", "R": "traction_bench",
             "l": "well", "r": "weapon_rack", "a": "armor_stand", "~a": "offering_place", "D": "trade_depot",
             "Cw": "wall", "CF": "fortification", "p": "farm_plot", "g": "drawbridge", "H": "hatch", "W": "grate",
-            "G": "grate", "B": "bars", "~b": "bars"}
+            "G": "grate", "B": "bars", "~b": "bars", "k": "workshop"}
 
 
 def list_templates() -> list[dict]:

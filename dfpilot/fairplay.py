@@ -330,6 +330,9 @@ def water_errors(path: str | Path | None = None) -> list[str]:
 RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d": (0, 400), "drink_d": (0, 400),
                                    "wall": "bool", "wall_days": (0, 60)},
                     "rebuild": {"pop": (0, 250), "off": (0, 250)},
+                    # BUG-116: care first (runner.lua Q.care_lead): the hospital project leads while hospital_out is set or
+                    # `patients` patients lie in the fort; stuck_days without progress lifts the pause
+                    "care_first": {"on": "bool", "stuck_days": (1, 60), "patients": (1, 250)},
                     "queue": {"yield_days": (1, 60), "park_days": (1, 400)},
                     # BUG-066 / FR-76: the manifest follows the standing workshops (runner.lua Q.sync)
                     "reclaim": {"on": "bool", "gone_scans": (1, 10), "min_ws": (1, 50), "ask_days": (1, 60)}}
@@ -539,8 +542,10 @@ def military_errors(path: str | Path | None = None) -> list[str]:
 
 
 # BUG-055 (lua/dfllm/readiness.lua M.OFFICES): config/baseline.json "offices": blocker_days = the days a vacant office
-# (manager, chief medical dwarf) or squads without a leader may stand before readiness R0 `office` names them (0 = never)
-OFFICES_LIM: dict = {"blocker_days": (0, 400)}
+# (manager, chief medical dwarf) or squads without a leader may stand before readiness R0 `office` names them (0 = never).
+# BUG-117 (readiness.lua M.MWS): mood_ws_days = the days a moodable workshop type may be missing before R0 `mood_ws` names
+# it (0 = never), mood_ws_pop = the citizens from which it counts
+OFFICES_LIM: dict = {"blocker_days": (0, 400), "mood_ws_days": (0, 400), "mood_ws_pop": (0, 250)}
 
 
 def offices_errors(path: str | Path | None = None) -> list[str]:
@@ -787,6 +792,10 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      "standing": {"amount": (1, 200), "request_days": (1, 112), "from_phase": "phase"},
                      "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
                      "barrels": {"brew_wait": (0, 200)},
+                     # BUG-117: free cloth the kernel keeps itself (0 = off); the part's other keys: the mirror test
+                     "cloth": {"floor": (0, 500)},
+                     # FR-89: training weapons for the squads on the training policy (the part's other keys: the mirror test)
+                     "training": {"on": "bool", "spare": (0, 50), "max_jobs": (1, 20), "from_phase": "phase"},
                      # BUG-058: the running season's slots at once, autofarm 'auto' | 'off' | 'keep' and its food-day lines
                      "farms": {"per_day": (1, 200), "now_max": (1, 200), "autofarm": ["auto", "off", "keep"],
                                "af_off_days": (0, 400), "af_on_days": (0, 400), "af_hold_days": (1, 112),

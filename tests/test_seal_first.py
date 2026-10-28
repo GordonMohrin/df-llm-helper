@@ -80,8 +80,9 @@ def test_runner_config_validates(tmp_path):
     cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
     assert cfg["runner"] == {"seal_first": {"on": True, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": True,
                                             "wall_days": 2},
-                             "rebuild": {"pop": 10, "off": 12}, "queue": {"yield_days": 7, "park_days": 30},
-                             "reclaim": {"on": True, "gone_scans": 2, "min_ws": 3, "ask_days": 3}}
+                             "rebuild": {"pop": 10, "off": 12}, "care_first": {"on": True, "stuck_days": 10, "patients": 1},
+                             "queue": {"yield_days": 7, "park_days": 30},
+                             "reclaim": {"on": True, "gone_scans": 2, "min_ws": 3, "ask_days": 3}}   # BUG-116 adds care_first
     assert fairplay.runner_errors() == []
     p = tmp_path / "baseline.json"
     p.write_text(json.dumps({"v": 2, "runner": {"seal_first": {"on": 1, "stuck_days": 0, "wait": 2},
