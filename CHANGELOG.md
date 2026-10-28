@@ -23,6 +23,29 @@
 - **Not decided offline:** whether the map-wide piece on site90 is a kept seal without tiles (dropped) or a running one (named with
   `bp.cancel`); old kept boxes have no clusters (`kp`), only seals finished after this change do.
 
+## A fortcore stopped on breach:damp is re-sited away from the recorded breaches, or the ways in are closed (BUG-130, 2026-10-28; offline, live-untested)
+- **Why:** Run 9 (site96, P0 the whole run) and the Run 14 replay (site90 y707: `y707s0b1 (fortcore) blocked: breach:damp`, 6 PROJECT_BLOCKED):
+  the fortcore's dig met aquifer seepage, the runner parked it for good (BUG-037) and nothing re-sited it. Without O1/B1 readiness kept R0
+  `no_outer`/`no_inner` (420/312 SIEGE_UNREADY), every drill was refused (664 DRILL_RESULT `raised -1`, BUG-110), R2 and the military goals were
+  impossible. The ranking knew only snapshot marks (FR-76 left the damp memory open) and `plan propose` drafted stages 2/3 `@same` on the damp anchor.
+- **What changed:** (1) runner.lua: every breach stop is kept per project (m.runner `dz`: tile, kind, project, template, <= 32) and mirrored into the
+  manifest as `breaches`; the older `br` records are taken over at boot (module fields `note_breach`, `publish_breaches`, `breach_boot`).
+  (2) bp/sites.py: a fortcore candidate whose dig comes within `BREACH_R` 10 tiles of a recorded breach (or cavern) on its levels (+-1), or reaches a
+  level with damp/water stops of 2 projects (a wet layer), is dropped; none left: `no dry fortcore site`. (3) plan.py: `fort.core`
+  (`core_breaches`, `core_resite`); propose re-sites (fortcore stage 1 @S1 first, the old anchor's stages @same, note with the `bp.cancel` of the
+  old project) or, when it cannot move, drafts `seal at=last`, leaves the anchor's stages out and holds phase_target below P3; `plan check`
+  (`core_gate`) refuses a fortcore build @same on the stopped anchor without the re-site before it, warns with what counts; a stopped stage 3 is no
+  stage 3 under way, the parked O1 fragment no `o1`, the core order line skips a stopped core.
+- **What counts (documented in RULES §8, CONTRACTS `breaches?`, readiness.lua):** only a manifest bridge of role outer/inner with 2 linked levers
+  clears `no_outer`/`no_inner`; a wall + door clears `open_perimeter` only; the drill needs those bridges. A fort with no dry site stays shut, not ready.
+- **Contracts:** schema MANIFEST `breaches`, contract.lua note, CONTRACTS manifest row and appendix; RULES §8 row edited in place (300 lines).
+- **Tests (all fail on dec5132):** tests/lua/test_runner_breaches.lua (2), tests/test_bug130_damp_fortcore.py (12).
+- **Live check:** on site90 after `dfhack-run dfllm reload`: `dfllm cmd inspect what=manifest` shows `breaches` with `y707s0b1` damp and its tile
+  (taken over from the old record); `dfllm bp sites fortcore --fresh` offers no site within 10 tiles of it; `dfllm plan propose` drafts
+  `fortcore@S1 stage 1` first and names `dfllm cmd bp.cancel proj=y707s0b1`; `dfllm plan check` is OK with it and refuses a draft with only
+  `fortcore@same`; after apply the new stage 1 digs, and with O1/B1 standing `ready.fail` loses `no_outer`/`no_inner` and the drill runs.
+- **Not decided offline:** `BREACH_R` 10 and `LAYER_MIN` 2 are guesses (an aquifer's extent is hidden); a standalone lever-linked drawbridge on a dry
+  entrance (a `gate` template) is not built, so the no-dry-site closure keeps no_outer/no_inner red on purpose.
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while
