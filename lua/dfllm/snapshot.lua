@@ -402,6 +402,35 @@ function M.units_at(K, x0, y0, x1, y1, z)
   return out
 end
 
+-- FR-88 (the verb view): the visible living units whose name contains `query` (case-insensitive, plain text; the name as the
+-- unit sheet shows it, profession included), at most `max` (default 4) in the first return, the count of all matches in the
+-- second: {{id, name, x, y, z}} sorted by id. Hidden units and units on hidden tiles never count (the player cannot see them
+-- either). One pass over the active units, at the verb's call only.
+function M.find_units(K, query, max)
+  local q = tostring(query or ''):lower()
+  max = int(max) or 4
+  local out, total = {}, 0
+  if q == '' then return out, 0 end
+  local getTileFlags = dfhack.maps.getTileFlags
+  for _, u in ipairs(df.global.world.units.active) do
+    if not dfhack.units.isDead(u) and not dfhack.units.isHidden(u) then
+      local ok, name = pcall(dfhack.units.getReadableName, u)
+      name = ok and tostring(dfhack.df2utf and dfhack.df2utf(name) or name) or ''
+      if name:lower():find(q, 1, true) then
+        local p = u.pos
+        local des = getTileFlags(p.x, p.y, p.z)
+        if des and not des.hidden then
+          total = total + 1
+          out[#out + 1] = {id = u.id, name = name, x = p.x, y = p.y, z = p.z}
+        end
+      end
+    end
+  end
+  table.sort(out, function(a, b) return a.id < b.id end)
+  while #out > max do out[#out] = nil end
+  return out, total
+end
+
 -- walk-group query (iter2, care's mood reach): may a walker standing at a reach b? Both are revealed
 -- positions {x, y, z} the caller already knows (the moody dwarf, an item on a revealed tile). It is DF's own
 -- job-feasibility test (dfhack.maps.canWalkBetween, Lua API.txt; the same question act.link_lever asks for

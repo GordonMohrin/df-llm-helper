@@ -22,6 +22,7 @@
 --     cap holds at clock.trade_cap (default 100; timestream above it goes off), never above the captured original.
 local json = require('dfllm.util.json')
 local fio = require('dfllm.io')
+local VL = require('dfllm.viewlib')     -- FR-88: the verb `view` (the camera)
 
 local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs = {}}
 
@@ -555,6 +556,36 @@ local function other_popup(K)
   return 'other', text
 end
 
+-- FR-87 (Run 14 y707: a private routine.lua deleted the curse popup before anyone read it; the fair-play hook was not active
+-- in that session): a popup that leaves the screen while the kernel did not dismiss it (act.dismiss_popup counts its own) is
+-- logged once per text and period (popups.log_s) with the POPUP_GONE event (C). The player's click looks the same: the line
+-- is evidence for `dfllm doctor`, not an accusation. st.pw = the last reading {n, text, erased}.
+local function popup_watch(K)
+  local n = popup_count()
+  local erased = require('dfllm.act').popups_erased or 0
+  local pw = st.pw
+  st.pw = {n = n, text = n > 0 and front_text() or (pw and pw.text), erased = erased}   -- no popup: nothing to read (the last text stays for the log line)
+  if not pw or n >= pw.n then return end
+  local gone = (pw.n - n) - (erased - pw.erased)
+  if gone <= 0 then return end
+  local text = tostring(pw.text or ''):sub(1, 120)
+  local key, now = text:sub(1, 80), K.now().ms
+  st.pv = st.pv or {}
+  local t = st.pv[key]
+  if t ~= nil and now >= t and now - t < popup_cfg(K).log_s * 1000 then return end
+  if t == nil then                                         -- bounded: texts carry names (forget all past M.PU_MAX)
+    st.pv_n = (st.pv_n or 0) + 1
+    if st.pv_n > M.PU_MAX then st.pv, st.pv_n = {}, 1 end
+  end
+  st.pv[key] = now
+  local kind = pw.text and M.classify(pw.text) or nil
+  K.log('info', 'popup vanished without a kernel dismiss (%d): "%s"', gone, key)
+  local d = {n = gone, text = text}
+  if kind then d.kind = kind end
+  K.emit('POPUP_GONE', 'C', string.format('%d popup%s gone without a kernel dismiss: "%s"', gone, gone == 1 and '' or 's',
+                                          text:sub(1, 100)), d)
+end
+
 -- FR-36: hand a threat (or depot) popup to the reflex module once per popup, before anything dismisses it. Without
 -- the module: the clock is held here and ARRIVAL emitted (fail-open). Runs whoever holds the pause: the reflexes
 -- that need no ticks (doors, alert, clock) take effect at once.
@@ -650,8 +681,15 @@ function M.init(K)
 end
 
 function M.step(K)
+  local okw, errw = pcall(popup_watch, K)                  -- FR-87: evidence only, never a fault of the clock owner
+  if not okw then K.log('warn', 'popup watch: %s', tostring(errw)) end
   track_pause(K)
   M.apply(K)
+  local okv, errv = pcall(VL.step, K, st)                  -- FR-88: keep a followed camera going
+  if not okv then
+    st.view = nil
+    K.log('warn', 'view step: %s', tostring(errv))
+  end
 end
 
 function M.on.MODE(K, ev) M.apply(K) end
@@ -726,6 +764,9 @@ M.verbs.pause = function(K, args, cmd)
   end
   return true, string.format('paused for %d s', ttl)
 end
+
+-- FR-88 (Run 14 note 95): the camera; the arbiter hosts it because it owns what the player sees of the clock (lua/dfllm/viewlib.lua)
+M.verbs.view = function(K, args, cmd) return VL.verb(K, st, args, cmd) end
 
 -- CONTRACTS §13 (R6): `by` is a label, so the inbox releases only its own hold; a pause owned by
 -- gordon, df (a save loaded paused) or a popup is released in the game, whatever `by` says

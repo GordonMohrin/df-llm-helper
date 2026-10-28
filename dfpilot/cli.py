@@ -15,7 +15,7 @@ from . import paths
 
 
 def _parser() -> argparse.ArgumentParser:
-    from . import alarm, brief, cmd, doctor, events, plan, save, wake
+    from . import alarm, brief, cmd, doctor, events, guide, plan, save, wake
     ap = argparse.ArgumentParser(prog="dfllm", description="dfpilot v2 (files only; DF calls only in save and supervise)")
     ap.add_argument("--runtime", help="runtime root (default <DF>/dfllm-runtime or $DFLLM_RUNTIME)")
     ap.add_argument("--save", help="save folder (default: ACTIVE, else the newest)")
@@ -28,6 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_parser(sub)
     cmd.add_parser(sub)
     alarm.add_parsers(sub)
+    guide.add_parser(sub)
     p = sub.add_parser("bp", help="blueprints: list | preview <tpl> | sites <tpl>")
     p.add_argument("action", choices=["list", "preview", "sites"])
     p.add_argument("tpl", nargs="?")
@@ -306,6 +307,9 @@ def main(argv: list[str] | None = None) -> int:
     if c == "brief":
         from .brief import run_brief
         return run_brief(args, save_dir)
+    if c == "next":
+        from .guide import run
+        return run(args, save_dir)
     if c == "events":
         from .events import run
         return run(args, save_dir)

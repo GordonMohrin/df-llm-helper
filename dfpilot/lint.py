@@ -1526,7 +1526,8 @@ def main(argv: list[str] | None = None) -> int:
         errs = (fairplay.decision_errors() + fairplay.reflex_errors() + fairplay.water_errors() + fairplay.runner_errors()
                 + fairplay.economy_errors() + fairplay.snapshot_errors() + fairplay.care_errors()
                 + fairplay.military_errors() + fairplay.offices_errors() + fairplay.zones_errors()
-                + fairplay.save_errors() + fairplay.perf_errors() + fairplay.burrow_errors())
+                + fairplay.save_errors() + fairplay.perf_errors() + fairplay.burrow_errors()
+                + fairplay.plan_errors() + fairplay.view_errors())
         try:
             fairplay.allowlist()
         except Exception as e:                               # noqa: BLE001 - report any invalid file

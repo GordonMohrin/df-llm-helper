@@ -596,6 +596,72 @@ def zones_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# FR-86 (dfpilot/plan.py stale_years): config/baseline.json "plan": stale_apply_years = the years without a `plan apply` after
+# which `follow` applies a minimal plan itself (0 = never). plan.py keeps its default for a value of another type or out of
+# range; lint --config refuses it.
+PLAN_LIM: dict = {"stale_apply_years": (0, 20)}
+
+
+def plan_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "plan" part of config/baseline.json (FR-86): unknown keys and values plan.py ignores
+    (another type, out of range). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("plan", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: plan must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = PLAN_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: plan.{k}: unknown key")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: plan.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
+
+# FR-88 (lua/dfllm/viewlib.lua V.cfg): config/baseline.json "view": on = the verb `view` works (false refuses it),
+# default_ttl_s / max_ttl_s = the follow time when ttl_s is left out / its ceiling. viewlib keeps its default for a value of
+# another type or out of range; lint --config refuses it.
+VIEW_LIM: dict = {"on": "bool", "default_ttl_s": (1, 3600), "max_ttl_s": (1, 3600)}
+
+
+def view_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "view" part of config/baseline.json (FR-88): unknown keys, values viewlib ignores (another
+    type, out of range), a default_ttl_s above max_ttl_s. A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("view", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: view must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = VIEW_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: view.{k}: unknown key")
+        elif lim == "bool":
+            if not isinstance(v, bool):
+                errs.append(f"{name}: view.{k}: true or false expected, got {v!r}")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: view.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    d, m = sec.get("default_ttl_s"), sec.get("max_ttl_s")
+    if all(isinstance(x, int) and not isinstance(x, bool) for x in (d, m)) and d > m:
+        errs.append(f"{name}: view.default_ttl_s {d} > max_ttl_s {m} (the default is cut to the maximum)")
+    return errs
+
+
 # BUG-069 (dfpilot/save.py limits()): config/baseline.json "save": the wait for a quicksave folder when DF shows no sign of
 # writing, the longest wait while it writes save/current, and the age below which a verified autosave counts as the save.
 # save.py keeps its default for a value of another type or out of range; lint --config refuses it.

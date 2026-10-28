@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import csv
+import json
+import os
+import re
 import statistics
 import time
 from pathlib import Path
@@ -162,6 +165,104 @@ def snap_queue(state: dict | None) -> tuple[str | None, bool]:
     return line, old >= SNAP_STARVE_S and (wait.startswith("busy") or wait.endswith(" min"))
 
 
+# FR-87 (Run 14: the fair-play hook lives in <repo>/.claude/settings.json; the game session started in the parent folder, so
+# Claude Code never read it and a private routine.lua ran every round, deleting popups): is the PreToolUse hook active in
+# THIS session? Read-only: the settings files Claude Code reads for a session started in `project` (its .claude/settings.json
+# and settings.local.json, the user's ~/.claude/settings.json), a hook entry whose command runs `dfpilot.hook` for Bash, and
+# the hook module reachable from the project folder. Outside a Claude Code session the check is skipped.
+SESSION_ENV = ("CLAUDECODE", "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_ENTRYPOINT")
+HOOK_MODULE = "dfpilot.hook"
+
+
+def _settings(project: Path, home: Path) -> list[Path]:
+    return [project / ".claude" / "settings.json", project / ".claude" / "settings.local.json",
+            home / ".claude" / "settings.json"]
+
+
+def _hook_entries(doc) -> list[tuple[str, str]]:
+    """(matcher, command) of every PreToolUse hook in a settings document that runs the dfpilot hook."""
+    out = []
+    pre = ((doc or {}).get("hooks") or {}).get("PreToolUse") if isinstance(doc, dict) else None
+    for ent in pre if isinstance(pre, list) else []:
+        if not isinstance(ent, dict):
+            continue
+        for h in ent.get("hooks") if isinstance(ent.get("hooks"), list) else []:
+            cmd = h.get("command") if isinstance(h, dict) else None
+            if isinstance(cmd, str) and HOOK_MODULE in cmd:
+                out.append((str(ent.get("matcher") or ""), cmd))
+    return out
+
+
+def _covers_bash(matcher: str) -> bool:
+    try:
+        return matcher in ("", "*") or re.fullmatch(matcher, "Bash") is not None
+    except re.error:
+        return False
+
+
+def _project_dir(env: dict, cwd: Path) -> Path:
+    """The folder the session started in: CLAUDE_PROJECT_DIR when the shell has it, else the nearest folder from the cwd up
+    that holds a .claude folder (the shell may have walked down into the repo), else the cwd itself."""
+    p = env.get("CLAUDE_PROJECT_DIR")
+    if p:
+        return Path(p)
+    for d in [cwd, *list(cwd.parents)[:6]]:
+        if (d / ".claude").is_dir():
+            return d
+    return cwd
+
+
+def hook_check(env: dict | None = None, cwd: Path | None = None, home: Path | None = None) -> tuple[str, str]:
+    """(state, text): state 'skip' (no Claude Code session in this shell), 'active', 'broken' (configured, but the hook module
+    cannot be reached from the project folder: the hook command fails and Claude Code goes on) or 'inactive'."""
+    env = os.environ if env is None else env
+    if not any(env.get(k) for k in SESSION_ENV):
+        return "skip", "hook: not checked (this shell is not a Claude Code session)"
+    cwd = Path(cwd) if cwd is not None else Path.cwd()
+    try:
+        home = Path(home) if home is not None else Path.home()
+    except (RuntimeError, KeyError, OSError):          # no home folder known: only the project's own settings count
+        home = Path("/nonexistent-home")
+    project = _project_dir(env, cwd)
+    repo = Path(__file__).resolve().parent.parent
+    found = []
+    for f in _settings(project, home):
+        try:
+            doc = json.loads(f.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        found += [(f, m, c) for m, c in _hook_entries(doc) if _covers_bash(m)]
+    if not found:
+        return "inactive", (f"hook: not active in this session: {project} has no .claude/settings.json with the dfllm "
+                            f"PreToolUse hook (the repo's is {repo / '.claude' / 'settings.json'}); a session started "
+                            "in a parent folder never reads it, so nothing blocks inline lua, dfhack-run lua -f or "
+                            "popup deletion. Start Claude Code inside the repo folder (QUICKSTART) or copy that hook block "
+                            "into the start folder's .claude/settings.json")
+    for f, m, c in found:
+        lead = re.match(r'\s*cd\s+"?([^"&;$]+?)"?\s*&&', c)          # a fixed `cd <dir> &&`; else the project folder
+        root = Path(lead.group(1)) if lead else project
+        if (root / "dfpilot" / "hook.py").is_file():
+            return "active", f"hook: active (Bash is covered by {f}; the hook module is in {root})"
+    f, m, c = found[0]
+    return "broken", (f"hook: configured in {f} but `{HOOK_MODULE}` cannot be reached from {project} (no dfpilot/hook.py "
+                      "there or in the folder of its `cd`): the command would fail and Claude Code would go on without the "
+                      "check")
+
+
+def popup_gone_line(save_dir: Path, now_tick: int | None) -> str | None:
+    """FR-87: the kernel's POPUP_GONE events (a popup left the screen and the kernel did not dismiss it) of the last game
+    week: '3 popups vanished without a kernel dismiss in 7 days (last: "..."); the player's click looks the same'."""
+    evs = files.tail_events(Path(save_dir), 0, limit=300, types={"POPUP_GONE"})
+    if isinstance(now_tick, int):
+        evs = [e for e in evs if isinstance(e.get("tick"), int) and 0 <= now_tick - e["tick"] <= 7 * 1200]
+    if not evs:
+        return None
+    n = sum(e["d"].get("n", 1) if isinstance(e.get("d"), dict) and isinstance(e["d"].get("n"), int) else 1 for e in evs)
+    last = (evs[-1].get("d") or {}).get("text") or evs[-1].get("msg", "")
+    return (f"{n} popup{'s' if n != 1 else ''} vanished without a kernel dismiss in the last 7 game days (last: "
+            f"\"{str(last)[:80]}\"); the player's click looks the same, a private script's delete too (kern.log 'popup vanished')")
+
+
 def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
     """(report lines, problems)."""
     d = Path(save_dir)
@@ -212,6 +313,12 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
     off = files.follow_off(d)
     if off:                                    # FR-29: a silent follow is not "all is well"
         (bad if active == d.name else out).append(off + ("" if active == d.name else " (DF not running this save)"))
+    hstate, htext = hook_check()               # FR-87: the fair-play hook of this session
+    (bad if hstate in ("inactive", "broken") else out).append(htext)
+    t = (state or {}).get("t") or {}
+    gone = popup_gone_line(d, t.get("abs", t["y"] * 403200 + t["tick"]) if t else None)
+    if gone:
+        out.append(gone)
     od = (state or {}).get("orders")
     if od and od.get("bad"):                   # FR-39: DF 53.16 crashes on make-item orders without a subtype
         bad.append(f"{od['bad']} manager order(s) of MakeArmor/Pants/Shoes/Gloves/Helm/Weapon/Ammo/Shield type without "

@@ -1658,6 +1658,143 @@ def apply(save_dir: Path, doc: dict, by: str = "llm", wait_s: float = 5.0, dry_r
     return [], f"plan.json y{doc['year']} + {len(docs)} bp{note}; " + fmt_reply(cid, "plan.reload", reply, save_dir)
 
 
+# ---------------------------------------------------------------- stale plan, review note, minimal plan (FR-86)
+STALE_DEF = 2                             # config/baseline.json plan.stale_apply_years (years without an apply; 0 = off)
+STALE_SHOW = 1                            # status line 1 says PLAN STALE once the plan is more than this many years old
+MINIMAL_TAG = "MINIMAL plan (FR-86)"      # plan.notes starts with it: the plan follow applied after stale_apply_years
+MINIMAL_TPLS = (HOSPITAL, REFUGE_BEDS, REFUGE_DRINK)
+FIX_ROUNDS = 4                            # check -> add the repairs its ERRORs name -> check, at most this often
+NOTE_TOKENS = 60                          # the YEAR_REVIEW wake line carries at most this much of the review note
+
+
+def stale_years() -> int:
+    """config/baseline.json plan.stale_apply_years: after this many years without a `plan apply` follow applies a minimal
+    plan (0 = never); a missing or bad value (`lint --config` reports it) keeps the default."""
+    doc = files.read_json(paths.config_dir() / "baseline.json", retry=False)
+    sec = doc.get("plan") if isinstance(doc, dict) else None
+    v = sec.get("stale_apply_years") if isinstance(sec, dict) else None
+    from .fairplay import PLAN_LIM
+    lo, hi = PLAN_LIM["stale_apply_years"]
+    return v if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi else STALE_DEF
+
+
+def is_minimal(plan: dict | None) -> bool:
+    return bool(plan) and str(plan.get("notes") or "").startswith(MINIMAL_TAG)
+
+
+def _build_errors(b: dict) -> list[str]:
+    errs: list[str] = []
+    schema.BUILD.errors(b, "$", errs)
+    return errs
+
+
+def fixes_of(errs: list[str]) -> list[dict]:
+    """The builds the ERROR lines of `check` ask for: every `add {json}` in them, in order, without duplicates. These
+    are the repairs the YEAR_REVIEW note quotes and the minimal plan applies."""
+    dec, out = json.JSONDecoder(), []
+    for e in errs:
+        i = 0
+        while True:
+            i = e.find("add {", i)
+            if i < 0:
+                break
+            try:
+                obj, end = dec.raw_decode(e, i + 4)
+            except ValueError:
+                i += 5
+                continue
+            i = end
+            if isinstance(obj, dict) and isinstance(obj.get("tpl"), str) and isinstance(obj.get("site"), str) \
+                    and not _build_errors(obj) and obj not in out:
+                out.append(obj)
+    return out
+
+
+def minimal_ok(b: dict) -> bool:
+    """FR-86: what a minimal plan may build: seal, tombs, the hospital, food and drink, the refuge (never a ★ phase)."""
+    return build_kind(b) in ("seal", "tombs", "supply") or b["tpl"] in MINIMAL_TPLS or _refuge_stage(b)
+
+
+def minimal_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,
+                 decisions: dict | None = None, tpls: list[str] | None = None) -> tuple[dict, list[str], list[str]]:
+    """(plan, errors, warnings) of the smallest plan that keeps the fort supplied and safe when nobody approves one: the
+    draft of `propose`, cut to the NEW builds that minimal_ok allows (applied builds keep their ids), phase_target = the
+    current phase (no star phase, no phase raise), the order libraries of the plan it replaces; then up to FIX_ROUNDS times `check`, and every repair
+    its ERRORs name (fixes_of) that minimal_ok allows is added to the current season, ahead of the other new builds.
+    Errors left after that are returned: the caller applies nothing."""
+    s = state or {}
+    prev = applied_plan(save_dir)
+    fort = fort_facts(save_dir, state)
+    doc = propose(state, phases if phases is not None else load_phases(), prev, decisions=decisions, tinfo=tinfo,
+                  applied=applied_builds(save_dir, state), fort=fort)
+    doc["phase_target"] = s.get("phase") or "P0"
+    doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
+    drop = {(si, bi) for si, bi, b in new_builds(doc, prev) if not minimal_ok(b)}
+    for si, se in enumerate(doc["seasons"]):
+        se["build"] = [b for bi, b in enumerate(se["build"]) if (si, bi) not in drop]
+    same = bool(prev) and prev.get("year") == doc["year"]
+    season = (s.get("t") or {}).get("season", 0)
+    errs: list[str] = []
+    warn: list[str] = []
+    tp = tpls if tpls is not None else templates()
+    for _ in range(FIX_ROUNDS + 1):
+        errs, warn = check(doc, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
+        have = [(b["tpl"], b["site"], b.get("p") or {}) for se in doc["seasons"] for b in se["build"]]
+        add = [fx for fx in fixes_of(errs) if minimal_ok(fx) and (fx["tpl"], fx["site"], fx.get("p") or {}) not in have]
+        if not errs or not add:
+            break
+        base = len(prev["seasons"][season]["build"]) if same else 0
+        for k, fx in enumerate(add):
+            doc["seasons"][season]["build"].insert(base + k, fx)
+    n = sum(len(se["build"]) for se in doc["seasons"]) - (sum(len(se["build"]) for se in prev["seasons"]) if same else 0)
+    doc["notes"] = (f"{MINIMAL_TAG}: follow applied it after {stale_years()} years without a plan apply; {n} new build"
+                    f"{'s' if n != 1 else ''}, only seal, tombs, hospital, food/drink and refuge, phase_target "
+                    f"{doc['phase_target']} (no star phase). Replace it: dfllm plan propose y.json")
+    return doc, errs, warn
+
+
+def apply_minimal(save_dir: Path, by: str = "follow", wait_s: float = 5.0) -> tuple[list[str], str]:
+    """Build and apply the minimal plan (follow's FR-86 fallback). (errors, message); nothing is written on errors."""
+    state = files.read_state(save_dir)
+    if state is None:
+        return ["no valid state: nothing to plan from"], "not applied"
+    doc, errs, _ = minimal_plan(save_dir, state)
+    if errs:
+        return errs, "not applied"
+    return apply(save_dir, doc, by=by, wait_s=wait_s)
+
+
+def review_note(save_dir: Path, state: dict | None = None) -> str:
+    """The YEAR_REVIEW wake line's note (FR-86): 'PLAN STALE y503->y708; propose: 2 ERROR; fix: add {...}'. It drafts the
+    year's plan the way `plan propose` does and names the repairs its ERROR lines ask for, ready to paste into a season.
+    '' when nothing is stale or wrong, or when anything fails (a wake line never waits on this)."""
+    try:
+        state = state if state is not None else files.read_state(save_dir)
+        s = state or {}
+        year = (s.get("t") or {}).get("y")
+        prev = applied_plan(save_dir)
+        parts = []
+        if isinstance(year, int) and prev and year - prev["year"] > STALE_SHOW:
+            parts.append(f"PLAN STALE y{prev['year']}->y{year}")
+        elif isinstance(year, int) and not prev:
+            parts.append("NO PLAN yet")
+        fort = fort_facts(save_dir, state)
+        doc = propose(state, load_phases(), prev, applied=applied_builds(save_dir, state), fort=fort)
+        errs, _ = check(doc, state, tpls=templates(), prev=prev, fort=fort)
+        if errs:
+            fx = fixes_of(errs)
+            parts.append(f"propose: {len(errs)} ERROR" + ("" if len(errs) == 1 else "s")
+                         + (": fix add " + _compact(fx[0]) if fx else f": {errs[0][:80]}"))
+        return _clip_note("; ".join(parts))
+    except Exception:                                      # noqa: BLE001 - a note is a courtesy, never a failure
+        return ""
+
+
+def _clip_note(text: str) -> str:
+    from .events import clip
+    return clip(text, NOTE_TOKENS)
+
+
 # ---------------------------------------------------------------- CLI
 def _draft(save_dir: Path) -> Path:
     return Path(save_dir) / "plan.draft.json"

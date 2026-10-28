@@ -1,5 +1,34 @@
 # CHANGELOG dfpilot
 
+## M5: guidance for a weaker model and for the player: `dfllm next`, the stale-plan alarm and the minimal plan, the hook check, the camera verb (FR-85, FR-86, FR-87, FR-88, 2026-10-28, offline, live-untested)
+- **Why:** Run 14 Trussroads (post-mortem `docs/v2/POSTMORTEM-run14-trussroads-y708.md`, notes 85, 86, 91, 95): a session read `inspect` 635
+  times and never knew what to do; the year plan of y503 stood in y708 (190 YEAR_REVIEW wakes, 67 `plan propose`, no `plan apply`) and the
+  fort built nothing for 180 years; the fair-play hook lives in the repo's `.claude/settings.json` and the session started in the parent
+  folder, so a private `routine.lua` ran every round and deleted popups, the curse popup among them; the player could not make the camera
+  show him a goblin or a dwarf.
+- **What changed:** (FR-85, `dfpilot/guide.py`, `cli.py`) `python -m dfpilot next`: the one most urgent action as a ready command line, at
+  most 4 lines (`NEXT`, `WHY`, `TELL PLAYER`, `SHOW`), a fixed priority (dead kernel, unacknowledged interrupts, danger or a curse, dying
+  patients, MOOD_CRITICAL, the year plan, the R0 blockers seal / audit / hospital_out / refuge, then `NEXT: nothing`), computed from the
+  state, `plan.json`, `alarm.txt` and the newest events only; the same command 3 times in 30 minutes is not offered again (`.next.json`).
+  (FR-86, `brief.py`, `plan.py`, `wake.py`, `fairplay.py`, `config/baseline.json`) status line 1 and the brief say `PLAN STALE: applied y503,
+  now y708` (also `PLAN NONE`, `PLAN MINIMAL`); the YEAR_REVIEW wake line carries the review note with the `add {json}` repairs of the draft's
+  ERRORs; after `plan.stale_apply_years` (2, 0 = off) years without an apply `follow` applies a minimal plan (seal, tombs, hospital, food and
+  drink, refuge; the current phase, no star) once a game year in PEACE and wakes PLAN_AUTO; `.follow.json` keeps its marks across a restart.
+  (FR-87, `doctor.py`, `arbiter.lua`, `act.lua`, QUICKSTART) `dfllm doctor` says `hook: not active in this session` (or `cannot be reached`)
+  as a problem; QUICKSTART demands the start in the repo folder; the arbiter logs a popup that left without the kernel's dismiss
+  (POPUP_GONE, class C, once per text and period) and doctor counts them. (FR-88, `viewlib.lua`, `arbiter.lua`, `act.lua`, `snapshot.lua`,
+  `schema.py`, `contract.lua`, `wake.py`) the verb `view {target?, follow?, ttl_s?, why?}`: the camera on a unit (id or name), a position, a
+  building or a project, optionally following until `ttl_s` or until the player moves the camera; only discovered tiles, not in a fight
+  unless `by` gordon, no pause, no change to any unit; wake lines carry a ready `show: dfllm cmd view target=...`. Contracts: verb `view`,
+  acts `view_to` / `view_window`, event POPUP_GONE, config keys `plan.stale_apply_years`, `view.{on,default_ttl_s,max_ttl_s}`;
+  `CONTRACTS.md` appendix regenerated; RULES.md edited in place (300 lines).
+- **Live check:** (1) `python -m dfpilot next` in a quiet fort: `NEXT: nothing`; with an interrupt open: `NEXT: dfllm ack`. (2) `status`
+  line 1 in a fort whose plan is older than a year; after 2 years `PLAN_AUTO` (or AUTO_FAIL with the ERRORs) from `follow`. (3) In the game
+  session `echo $CLAUDE_PROJECT_DIR; pwd` and `dfllm doctor` from a session started in the parent folder: `hook: not active`; delete an
+  unknown popup by hand: kern.log `popup vanished without a kernel dismiss`. (4) `dfllm cmd view target=<a citizen's id>` in PEACE: the
+  map centres on him and takes his level; `follow=true ttl_s=60` follows; scrolling the map ends it; `dfllm cmd view` returns to the old
+  place; the same in ALERT is refused. The open questions of the four requests are listed in `docs/feature-requests/README.md` (FR-85 .. FR-88).
+
 ## M4: curses and transformations are seen: CURSED, TRANSFORM, CURSE_MOON, the unit sheet and the desperate list (BUG-115, FR-83, FR-84, 2026-10-28, offline, live-untested)
 - **Why:** Run 14 y707 (note 84, post-mortem): a miner toppled a statue in a tantrum, "has been cursed by Ok!", became a werecavy,
   and 23 dwarves followed (pop 54 -> 10). care listened to the toppled-building reports only, kern delivers a report by its

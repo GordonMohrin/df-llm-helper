@@ -529,7 +529,31 @@ local function impls(state)
     -- live L6: the embark intro is never erased (arbiter; tools/embark clicks its Okay): erasing it left
     -- Perplexrooms a fort where nobody ever took a job. A SELECT key did not close popups either.
     popups:erase(0)
+    A.popups_erased = (A.popups_erased or 0) + 1       -- FR-87: the arbiter tells a popup we closed from one that vanished
     return true, kind
+  end
+
+  -- FR-88 (Run 14 note 95): the camera, like a click on a report's "zoom to": dfhack.gui.revealInDwarfmodeMap centres the
+  -- main viewport on a tile and sets the level (Lua API.txt:1220; the same call the trade sheet uses). Only a view: no pause,
+  -- no unit or building is touched. The caller (viewlib) judged the tile: revealed, on the map.
+  function I.view_to(x, y, z)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'view_to needs three integers' end
+    local ok, err = pcall(dfhack.gui.revealInDwarfmodeMap, xyz2pos(x, y, z), true)
+    if not ok then return false, tostring(err) end
+    return true, string.format('%d,%d,%d', x, y, z)
+  end
+
+  -- the player's viewport back: the scroll position DF keeps in df.global.window_x/y/z (what he had before the first view)
+  function I.view_window(wx, wy, wz)
+    wx, wy, wz = int(wx), int(wy), int(wz)
+    if not (wx and wy and wz) then return false, 'view_window needs three integers' end
+    local ok, err = pcall(function()
+      local g = df.global
+      g.window_x, g.window_y, g.window_z = wx, wy, wz
+    end)
+    if not ok then return false, 'this DF has no window position to restore: ' .. tostring(err) end
+    return true, string.format('%d,%d,%d', wx, wy, wz)
   end
 
   -- gui/civ-alert public API (civ-alert.lua:21-50)
