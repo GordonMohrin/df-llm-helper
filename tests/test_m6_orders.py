@@ -166,10 +166,11 @@ def save(tmp_path, monkeypatch):
 def test_status_names_the_missing_mood_shops_and_the_command(save):
     mws = 'mood shops missing 9 days: Loom; dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"Loom"}}'
     _r0_state(save, open=0, ents=None, fail=["mood_ws"], audit={"ok": 1, "age": 9000, "min_traps": 35}, mws=mws)
-    line = brief.status_text(save).splitlines()[1]
-    assert line.startswith("SIEGE UNREADY (R0): mood_ws") and f"next: {mws}" in line, line
+    lines = brief.status_text(save).splitlines()        # BUG-154: the command is its own line under the UNREADY line
+    assert lines[1].startswith("SIEGE UNREADY (R0): mood_ws") and lines[2] == mws, lines
     _r0_state(save, open=0, ents=None, fail=["mood_ws"], audit={"ok": 1, "age": 9000, "min_traps": 35})
-    assert "moodable workshops missing: dfllm cmd bp.place workshops" in brief.status_text(save).splitlines()[1]
+    assert "moodable workshops missing: dfllm cmd bp.place workshops" in brief.status_text(save).splitlines()[2]
+    assert f"next: {mws}" not in brief.status_text(save)
 
 
 def _sched(save, care):

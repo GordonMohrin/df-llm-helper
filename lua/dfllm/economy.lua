@@ -513,10 +513,26 @@ end
 
 local function decision(K, id) return tostring((K.cfg.decisions or {})[id] or C.DECISIONS[id] or '') end
 
-local function phase_ok(K, from)
+local function phase_ok(K, from) return M.phase_ok(K, from) end
+
+-- BUG-156 (live i4 y717: pop 52, PLAN NONE, phase P0 for good): the P1 features (mood shops, the mood stock, the cloth
+-- floor, training weapons, leather, standing orders) wait for the plan's phase P1, which a fort without an applied plan
+-- (persist plan.plan null) never reaches: its P0 deliverables are never built. Such a fort of offices.mood_ws_pop
+-- citizens or more counts as P1 for them; the later phases (metal P2, glass P3) stay gated
+function M.planless(K)
+  local pp = K.persist.get('plan')
+  local doc = type(pp) == 'table' and pp.plan or nil
+  if type(doc) == 'table' and doc ~= json.null then return false end
+  local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.offices
+  local pop = type(c) == 'table' and math.tointeger(c.mood_ws_pop) or 20
+  local cu = K.census and K.census.u
+  return (type(cu) == 'table' and math.tointeger(cu.cit) or 0) >= math.max(pop, 1)
+end
+function M.phase_ok(K, from)
   if from == nil then return true end
   local ph = (K.view() or {}).phase
-  return type(ph) == 'string' and ph >= from
+  if type(ph) ~= 'string' then return false end
+  return ph >= from or (from <= 'P1' and M.planless(K))
 end
 
 -- persist m.economy; maps are re-tagged as objects (a decoded empty map is an array, json.lua:104)

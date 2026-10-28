@@ -47,7 +47,7 @@ local function world(opts)
   df.civzone_type.WaterSource, df.civzone_type[10] = 10, 'WaterSource'
   df.job_type.Rest, df.job_type[77] = 77, 'Rest'
   df.unit_labor = {FEED_WATER_CIVILIANS = FEED, MINE = MINE_L, CUTWOOD = 42, HUNT = 43, DIAGNOSE = 50, SURGERY = 51,
-                   BONE_SETTING = 52, SUTURE = 53, DRESSING_WOUNDS = 54}
+                   BONE_SETTING = 52, SUTURING = 53, DRESSING_WOUNDS = 54}   -- DF 53.16 names (BUG-153)
   local ids = {}
   for i = 1, n do
     ids[i] = i
@@ -296,7 +296,7 @@ T.test('BUG-106: note 90 (Run 14): a hospital with no table, no traction bench, 
   local by = {}
   for _, g in ipairs(r.data.gaps) do by[g.tok] = g.txt; T.ok(#g.txt <= 70, g.txt) end
   T.eq(by.no_table, 'no table in the zone (surgery, suturing)')
-  T.eq(by.no_suture, 'no adult citizen has the SUTURE labor on')
+  T.eq(by.no_suture, 'no adult citizen has the SUTURING labor on')
   T.eq(by.no_thread, 'the location asks for 0: nobody brings any, fort 0')
   T.eq(by.no_cloth, 'asks 5, holds 0, fort 12')
   T.eq({r.data.doctors.diag.on, r.data.doctors.diag.skilled, r.data.doctors.suture.on}, {1, 1, 0})
@@ -366,4 +366,30 @@ T.test('BUG-106: before the first water run the inspect says so (no error)', fun
   T.ok(r.ok, r.msg)
   T.eq(r.msg, 'hospital: no water run finished yet')
 end)
+---------------------------------------------------------------- BUG-153 (live i4, y717)
+T.test('BUG-153: DF 53.16 names the labor SUTURING (df.unit_labor 21, no SUTURE): a citizen with it on is a suturer, ' ..
+       'no no_suture gap', function()
+  local W = audit_world{doctors = ALL_DOC, skilled = {1}, fort_thread = 50, fort_cloth = 50}
+  day(W)
+  local r = W.inbox('inspect', {what = 'hospital'})
+  T.ok(r.ok, r.msg)
+  T.eq(r.data.doctors.suture, {on = 1, skilled = 1})
+  for _, g in ipairs(r.data.gaps) do T.ok(g.tok ~= 'no_suture', g.txt) end
+end)
+
+T.test('BUG-153: the civ alert sounds but siege holds no list (a reload, a player-raised alert): the alert burrows ' ..
+       'come from the game (plotinfo.alerts.list[civ_alert_idx].burrows), the patient outside Kern+ is named', function()
+  local W = world{patients = {{id = 5, thirst = 41000, care = true, pos = {150, 50, 5}}}, carers = {1, 2, 3},
+                  setup = function(W)
+    df.global.plotinfo.alerts.civ_alert_idx = 1
+    W.load({name = 'siege', every = {ticks = 1000}, alert_names = function() return {} end})
+    local kern = W.burrow('Kern+', {0, 0, 0, 99, 99, 20})
+    df.global.plotinfo.alerts.list:insert('#', {burrows = kmock.vec{kern.id}})
+  end}
+  day(W)
+  local e = wake(W)
+  T.eq(e.d.key, 'alert')
+  T.ok(e.msg:find('the civ alert holds the caregivers in Kern+', 1, true), e.msg)
+end)
+
 T.done()

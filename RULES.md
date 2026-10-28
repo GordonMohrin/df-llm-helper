@@ -111,7 +111,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
   (phase_target, seasons[].build, military, supply, trade), `plan check`, `plan apply`. One review
   approves 4 season plans. To edit, propose into a file outside `dfllm-runtime/` (the hook blocks
   edits there): `plan propose y.json`, edit, `plan check y.json`, `plan apply y.json`.
-- **New building:** `bp sites <tpl>`, pick S1-S3, `dfllm cmd bp.place '{"tpl":…,"site":"S1"}'`. ≤ 5 turns per building.
+- **New building:** `bp sites <tpl>` (never anchored on the civilians' stair or the refuge hatch, BUG-157), pick S1-S3, `dfllm cmd bp.place '{"tpl":…,"site":"S1"}'`. ≤ 5 turns per building.
 - **Without you** the kernel keeps safety and supply running and finishes the approved plan; it never starts a ★ item.
 
 ## 6. Inbox verbs (closed set; `dfllm cmd <verb> '<json>'`)
@@ -279,7 +279,7 @@ FPS cap 30; no Lua quicksaves (only `dfllm save`, verified); DF autosave yearly.
 | Phase | Deliverables |
 |---|---|
 | P0 | baseline; probe stair (damp → stop); fortcore stage 1; farms (own template, soil sites) |
-| P1 | dining, office (manager: chair + office zone), all 12 moodable workshops (`workshops`) + still + kitchen, mood stock goals |
+| P1 | dining, office (manager: chair + office zone), all 12 moodable workshops (`workshops`) + still + kitchen, mood stock goals (BUG-156: a fort without a plan of >= `offices.mood_ws_pop` citizens gets the P1 mood features at P0 too) |
 | P2 | killing field, gallery, B1, barracks (fortcore stage 2), captive pit (`captives`), squad A |
 | P3 | fortcore stage 3 (O1, B2, the refuge) first (DECISIONS 1), smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |

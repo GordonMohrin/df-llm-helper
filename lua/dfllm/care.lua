@@ -1727,7 +1727,12 @@ coffin_census = function(K, c, r, T)
     if r.far and r.far[uid] then far = far + 1               -- BUG-062: no coffin helps a body nobody can walk to
     elseif not good_zone(T, uid) then open = open + 1 end
   end
-  local q = {bodies = bodies, open = open, far = far, want = open + (num(c.coffin_reserve) or 0), free = r.tombs_free or 0,
+  -- BUG-158 (live i4: prov.free 20 while the rebuilt view showed 0 free): the zones care freed this run that DF handed
+  -- out again last run (lock churn) are freed only to be re-given; as many of this run's frees count as taken
+  local src = r.tomb_src or {}
+  local regive = math.min(num((src.acts or {}).freed) or 0, num((src.lock or {}).churn) or 0)
+  local q = {bodies = bodies, open = open, far = far, want = open + (num(c.coffin_reserve) or 0),
+             free = math.max(0, (r.tombs_free or 0) - regive), regive = regive,
              planned = 0, idle = 0, core = (K.manifest().zones or {}).Z4 ~= nil}
   for _, e in ipairs(T.coffins) do
     if not e.bed and e.other == 0 and e.occ == nil then
@@ -2431,7 +2436,7 @@ end
 local function coffin_view(K, q, p, cs)
   local pc = p.cof
   local v = {active = q.active and 1 or 0, own = q.own and 1 or 0, want = q.want, bodies = q.bodies, open = q.open,
-             far = q.far or 0, pending = q.pending or 0, free = q.free,
+             far = q.far or 0, pending = q.pending or 0, free = q.free, regive = q.regive or 0,
              planned = q.planned, idle = q.idle, slots = q.slots, short = q.short, stock = q.stock, order = q.order,
              stuck = q.stuck, items = q.items, make = q.make, missing = q.missing or 0, stone = q.stone,
              wood = q.wood, masons = q.masons and 1 or 0, carpenters = q.carp and 1 or 0, pend = q.pend or 0,
@@ -4407,6 +4412,9 @@ function M.inspect(K, what, key)
   if v then                                   -- FR-61: the coffin provisioner
     local prov = {}
     for k, x in pairs(v) do prov[k] = x end
+    -- BUG-158: the header's free tombs (the view rebuilt now or the last run's) and prov.free agree; free_run is what
+    -- the provisioner counted at its run (without the frees DF re-gives)
+    prov.free, prov.free_run = d.free, v.free
     d.prov = prov
     msg = msg .. string.format('; coffins want %d, short %d, stock %d, on order %d%s%s%s%s%s%s%s', v.want, v.short, v.stock,
                                v.order, v.stuck > 0 and string.format(' (+%d stuck: no worker, shop or material)', v.stuck) or '',

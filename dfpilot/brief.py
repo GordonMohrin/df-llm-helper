@@ -213,9 +213,20 @@ R0_FORTCORE = ("no_outer", "no_inner", "bridge:", "levers:", "no_kern", "no_refu
 WALL_RE = re.compile(r"\bwall -?\d+,-?\d+,-?\d+ (floor|ramp)\b")    # bp.topo.choke's wall in an audit finding
 
 
-def line_unready(ctx: Ctx) -> str:
+def line_r0_cmd(ctx: Ctx) -> str:
+    """BUG-154 (live i4): the R0 blocker mood_ws with its ready command ('mood shops missing 7 days: Loom; dfllm cmd
+    bp.place ...'), its own short status line: inside the UNREADY line the status clip cut it off. '' otherwise."""
+    r = unready_r0(ctx)
+    if r is None or "mood_ws" not in (r.get("fail") or []):
+        return ""
+    mws = r.get("mws") if isinstance(r.get("mws"), str) else ""
+    return mws or "moodable workshops missing: dfllm cmd bp.place workshops (p.only=<type>)"
+
+
+def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     """FR-65: 'SIEGE UNREADY (R0): <blockers> | <n> ways in without door or bridge: x,y,z kind ... | traps N |
-    next: ...' (DESIGN §5.4 lists the blockers)."""
+    next: ...' (DESIGN §5.4 lists the blockers). cmds=False (status): without the mood_ws command, which status shows
+    as its own line (line_r0_cmd)."""
     r = unready_r0(ctx)
     if r is None:
         return ""
@@ -283,9 +294,8 @@ def line_unready(ctx: Ctx) -> str:
     if "office" in fails:                      # BUG-055 (Run 14 y577): a vacant office the kernel could not fill
         office = r.get("office") if isinstance(r.get("office"), str) else ""
         nxt.append(office or "a vacant office or squads without a leader: dfllm cmd inspect what=offices")
-    if "mood_ws" in fails:                     # BUG-117 (Run 14 note 92): a strange mood needs every moodable shop
-        mws = r.get("mws") if isinstance(r.get("mws"), str) else ""
-        nxt.append(mws or "moodable workshops missing: dfllm cmd bp.place workshops (p.only=<type>)")
+    if "mood_ws" in fails and cmds:            # BUG-117 (Run 14 note 92): a strange mood needs every moodable shop
+        nxt.append(line_r0_cmd(ctx))
     lost = [f.split(":", 1)[1] for f in fails if f.startswith("lost:")]
     if lost:                                   # BUG-048: the keeper replaces it by wall + door (no question any more)
         nxt.append(f"{','.join(lost)} lost to building destroyers: the kernel replaces it by wall + door in quiet PEACE "
@@ -827,17 +837,18 @@ def line_proj(ctx: Ctx, n: int = 3) -> str:
     return "proj " + ", ".join(items) + (f" +{len(pr) - n}" if len(pr) > n else "")
 
 
-def line_sched(ctx: Ctx) -> str:
+def line_sched(ctx: Ctx, part: str = "all") -> str:
     """Run 11 siege 8 (state sched, runner): 'seal open: 3 pieces (c1a147c261), others paused' while an open seal or plug
     pauses the housing/work projects (`runs first` when it pauses none now, e.g. outside PEACE), 'seal stuck 3 d: ...,
     others run (SEAL_STUCK)' once it built nothing for seal_first.stuck_days; 'rebuild: pop 2 < 10, only
-    seal/tombs/food/beds (4 paused, ends at 12)' while the rebuild policy holds."""
+    seal/tombs/food/beds (4 paused, ends at 12)' while the rebuild policy holds. BUG-154: part 'care' = the care-first
+    part alone (short; status keeps it at rank 1), 'rest' = all but it."""
     sc = ctx.s.get("sched")
     if not isinstance(sc, dict):
         return ""
     out = []
     se = sc.get("seal")
-    if isinstance(se, dict):
+    if isinstance(se, dict) and part != "care":
         n = se.get("n", 0)
         more = f" +{se['more']} seal{'s' if se['more'] != 1 else ''}" if se.get("more") else ""
         what = f"{n} piece{'s' if n != 1 else ''} ({se.get('proj')}{more})"
@@ -846,7 +857,7 @@ def line_sched(ctx: Ctx) -> str:
         else:
             out.append(f"seal open: {what}, " + ("others paused" if se.get("paused") else "runs first"))
     ca = sc.get("care")
-    if isinstance(ca, dict):                   # BUG-116 (Run 14 note 89): the hospital leads the runner's slots
+    if isinstance(ca, dict) and part != "rest":   # BUG-116 (Run 14 note 89): the hospital leads the runner's slots
         if ca.get("stuck"):
             out.append(f"care stuck {ca.get('days', 0)} d: {ca.get('proj')} made no progress ({ca.get('why', '?')}), "
                        "others run (check TOOL_BLOCKED, inspect projects)")
@@ -854,12 +865,13 @@ def line_sched(ctx: Ctx) -> str:
             out.append(f"care first: {ca.get('proj')} ({ca.get('why', '?')}) " +
                        (f"runs first, {ca['paused']} paused" if ca.get("paused") else "runs first"))
     rb = sc.get("rb")
-    if isinstance(rb, dict):
+    if isinstance(rb, dict) and part != "care":
         tail = ", ".join(x for x in (f"{rb['paused']} paused" if rb.get("paused") else "",
                                      f"ends at {rb['hi']}" if rb.get("hi") else "") if x)
         out.append(f"rebuild: pop {rb.get('pop')} < {rb.get('lo')}, only seal/tombs/food/beds" + (f" ({tail})" if tail
                                                                                                   else ""))
-    out += sched_queue(sc)
+    if part != "care":
+        out += sched_queue(sc)
     return _join(out)
 
 
@@ -961,13 +973,16 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append((1, _no_state(ctx)))
     else:
-        lines += [(2, line_unready(ctx))] + curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
+        # BUG-154 (live i4): the mood_ws command and the care-first line are short and say what to do next and what
+        # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first
+        lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_sched(ctx, "care"))]
+        lines += curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
         s0 = (ctx.s.get("care") or {}).get("s0")
         if isinstance(s0, dict) and s0.get("n"):
             lines.append((4, f"desperate (stress 0): {s0['n']}" + (f" ids {','.join(str(i) for i in s0.get('ids') or [])}"
                                                                    if s0.get("ids") else "")))
         core, extra = def_parts(ctx)
-        lines += [(3, _join(core)), (3, line_burrow(ctx)), (3, line_sched(ctx)), (4, line_proj(ctx)), (4, line_kern(ctx)),
+        lines += [(3, _join(core)), (3, line_burrow(ctx)), (3, line_sched(ctx, "rest")), (4, line_proj(ctx)), (4, line_kern(ctx)),
                   (4, line_snap(ctx)),
                   (5, _join(extra))]                                 # J3: the army's detail is the first line to go
     return fit_ranked(lines, STATUS_TOKENS)

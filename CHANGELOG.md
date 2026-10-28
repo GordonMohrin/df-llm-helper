@@ -198,6 +198,34 @@
   after 15 cancelled pulls; with B1 replaced the BREACH line no longer waits for B1; inspect defense / STATION_MOVED `wall` for b2 48,40,127 and
   military kpi on_station > 0 at the stations; kern.log and DECISION_NEEDED texts with `1.0 days`; status `dangerous (large predator)` and
   `not counted as hostile` during a lockdown; brief `refuge data N d old` vanishes after the urgent audit (inspect reach age < 2 x audit_every).
+## Live test i4 (care): labor names of DF 53.16, status keeps care first and the mood_ws command, plan-less P1 mood features, sites off the civilian stair, true free tombs (BUG-153..158, 2026-10-28; offline, live-untested)
+- **Why:** live test i4 (E:/DF-test4, region2-site90 Trussroads y717-y719), confirmed by the verifier: `inspect hospital` reported `no_suture`
+  while 46-48 citizens had SUTURING on (the labor is SUTURING in 53.16, the code looked up SUTURE); `dfllm status` never showed `care first` nor the
+  R0 `mood_ws` command (`... only=Loom`), the clip cut the UNREADY line first; stalled paused projects said only `stalled`; `bp preview workshops
+  only=Quern` was refused; a plan-less fort of 52 stayed at P0, so no mood shops, cloth floor or training ran; `inspect tombs` said `0 free` next to
+  `prov.free 20`; `bp sites` anchored hospital and tombs on the civilians' stair, tombs at the refuge's hatch tile.
+- **What changed:** water.lua labor names `SUTURING` (lookup and gap text), `M.alert_burrows` (the sounding alert's burrows from
+  `plotinfo.alerts.list[civ_alert_idx]` when siege names none: `alert` fires after a reload or for a player's alert); orderlib `EngraveSlab =
+  'DETAIL'` (BUG-153). brief.py: status shows the mood_ws command (`line_r0_cmd`) and the care-first line at rank 1, the UNREADY line keeps its
+  rank 2 without the command, the other sched parts rank 3; runner.lua rows `stalled, paused: care <id>` (BUG-154). cmd.py `translate_only`, shared
+  by `bp.place` and `bp preview` (BUG-155). economy.lua `M.planless` / `M.phase_ok`: a fort without an applied plan and >= `offices.mood_ws_pop`
+  citizens counts as P1 for the P1 features, P2/P3 stay gated (BUG-156). sites.py `civ_stair_tiles`: no room anchor on a `stairs.civ` column
+  (the refuge hatch tile among them); rooms open one step from it (BUG-157). care.lua: the provisioner's free tombs leave out this run's frees
+  that DF re-gave last run (`prov.regive`), `inspect tombs` `prov.free` = the header's count, `prov.free_run` the provisioner's (BUG-158).
+- **Safety / fair play:** reads only (labor and alert vectors the screens show); no new verb, event or config key; the P1 features a plan-less
+  fort now gets are the ones a planned fort gets at P1.
+- **Contracts:** CONTRACTS `inspect` row (`prov.free`, `free_run`, `regive`); no schema change (appendix regenerated, unchanged); RULES rows P1
+  (BUG-156) and New building (BUG-157) edited in place.
+- **Tests (each new one fails on main 2c0ffa3):** tests/lua/test_care_live_i4.lua (4), tests/lua/test_water_m1.lua (+2, fake enum now SUTURING),
+  tests/test_care_live_i4.py (3), tests/bp/test_bp_sites_civ_stair.py (8); tests/test_m6_orders.py and tests/bp/test_bp_sites_near.py follow the new
+  status layout and the stair exclusion.
+- **Live check:** `dfllm cmd inspect '{"what":"hospital"}'`: no `no_suture` with suturers; `dfllm status` at R0 with mood_ws and a leading hospital
+  shows `mood shops missing ...: dfllm cmd bp.place ...` and `care first: ...`; `dfllm bp preview workshops only=Quern`; a plan-less fort of 20+ at
+  P0 gets `mood_ws` and the cloth/training orders; `bp sites hospital --fresh`: no anchor on 77,68; `inspect tombs` header free = `prov.free`.
+- **Skipped (refuted by the verifier):** BUG-126c coffin_material (it fires once the material really is gone), M1-BUG-103 residents (no resident
+  can be made in 53.16, code path reviewed), M6-TOOL_BLOCKED d.care (correctly absent while care first is not active), M6-BUG-116 gap 3 (the
+  hospital's `dig_lost` is a map event), the tester's port-5000 incident. NEW5 (stair anchoring) was refuted as intended ranking but is built as
+  BUG-157 because the work order named it; ranking sites with many unknown tiles lower is not built.
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while

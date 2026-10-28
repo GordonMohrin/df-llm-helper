@@ -111,8 +111,9 @@ local FORGE_LABOR = {MakeWeapon = 'FORGE_WEAPON', MakeAmmo = 'FORGE_WEAPON', Mak
                      MakeArmor = 'FORGE_ARMOR', MakeHelm = 'FORGE_ARMOR', MakePants = 'FORGE_ARMOR',
                      MakeGloves = 'FORGE_ARMOR', MakeShoes = 'FORGE_ARMOR', MakeShield = 'FORGE_ARMOR'}
 local CRAFT_LABOR = {rock = 'STONE_CRAFT', wood = 'WOOD_CRAFT', bone = 'BONE_CARVE'}
--- jobs whose labor is not the workshop's (DFHack autolabor joblabormapper.cpp: CollectSand is item hauling)
-O.JOB_LABOR = {CollectSand = 'HAUL_ITEM', SpinThread = 'SPINNER', ShearCreature = 'SHEARER', EngraveSlab = 'ENGRAVER'}
+-- jobs whose labor is not the workshop's (DFHack autolabor joblabormapper.cpp: CollectSand is item hauling; BUG-153: a
+-- slab is engraved with the engraving labor DETAIL, df.unit_labor of DF 53.16 has no ENGRAVER)
+O.JOB_LABOR = {CollectSand = 'HAUL_ITEM', SpinThread = 'SPINNER', ShearCreature = 'SHEARER', EngraveSlab = 'DETAIL'}
 
 -- workshop keys an order may run in (nil = unknown: not checked), material class
 function O.workshops(job, mc)
