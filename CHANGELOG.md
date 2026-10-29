@@ -1,5 +1,26 @@
 # CHANGELOG dfpilot
 
+## FR-95 live test 1 fixes: flooded shaft level unseen, observe smoothing, aqshaft S1 place, floor top level (BUG-191..194, 2026-10-29; offline, live-untested)
+- **Why:** FR-95 live test 1 on i4 (kernel b805745): shaft c1a1858c02562d7101 (56,56 top 129) had z128 designated, yielded its slot
+  (BUG-037, `no progress 139 d: slot yielded`), the miners dug z128 and it filled to 7/7; the level was never opened, so no AQ_HEAVY and no
+  plug for 139+ days (BUG-191). A damp tile that lost() found in a project already in observe mode never joined `r.pts`, so nothing was
+  smoothed around it (BUG-192). The documented `bp.place {"tpl":"aqshaft","site":"S1","p":{x,y,top}}` was refused by `bp.sites.rank`
+  (BUG-193). `dig_step` counted a top level on a floor as opened while its `j` job was pending (BUG-194).
+- **What changed:** (1) aqshaft.lua: `A.work` opens a designated level whose centre is dug (no wall, no pending dig) read-only before the
+  measure/hold return, so `check_level` samples it and stops/plugs a heavy aquifer in every pass; new `A.holds` (a level designated, open,
+  sealing or watched); runner `second()` never yields such a shaft's slot (like a seal), and it gets the measure pass while it waits in
+  pass 1 (BUG-191). (2) runner `Q.aq_lost` always calls `M.AQ.observe(.., 'cancel')` (AQ_OBSERVE still once per record) (BUG-192).
+  (3) cmd.py `own_anchor` + `place`: a template with `anchor_of_params` and its column in p skips the ranking for an S label; the
+  `A<x>_<y>_<z>_<rot>` form is unchanged (BUG-193). (4) `dig_step` requires `v.dig == ''` before a level counts as opened (BUG-194).
+- **Safety:** no new verb, event, config key, state field or RULES row; no contract change. The measure-pass check designates nothing.
+  Risk: an aqshaft with a designated level the miners never reach now holds its slot until they dig it (as a seal does).
+- **Tests (each fails on 9da84d6):** tests/lua/test_bug191_194_aqshaft.lua, tests/test_bug193_aqshaft_place.py.
+- **Live check:** (a) i4: an aqshaft level designated while the miners work elsewhere: the row never says `slot yielded`; once it is dug
+  `m.runner aq.<id>.levels.<z>.opened` is set and samples grow, water >= 4/7 gives AQ_HEAVY (A) and CAVERN_PLUG. (b) An observing project
+  with a second damp cancel: both tiles in `aq.<id>.pts`, kern.log `observe: N walls beside the damp tile ... smoothed` for the second.
+  (c) `dfllm cmd bp.place '{"tpl":"aqshaft","site":"S1","p":{"x":X,"y":Y,"top":Z}}'` is accepted with anchor [X,Y,Z]. (d) An aqshaft on a
+  floor tile designates l1 only after its down stair is dug. Still unproven live: smoothing efficacy in observe mode on stone.
+
 ## Live round 2 fixes: brief/status lines, seal duplicate, audit wait, locale decimals (BUG-159..161, 2026-10-29; offline, live-untested)
 - **Why:** live test round 2 and its skeptic confirmed on i1: the default brief never showed a TIMELINE_RESET of the last year (it lived only in
   the digest, which `fit()` trims first; NEW7, round 1 had skipped it as "not reproduced"); status clipped the hospital.retire hint off the R0

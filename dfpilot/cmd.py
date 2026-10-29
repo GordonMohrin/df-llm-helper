@@ -1158,6 +1158,13 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     m = _LABEL.fullmatch(str(label))
     if not m:
         raise BpError(f"site {label!r}: use S1..S{RANK_N} (S1 = best free site of `dfllm bp sites {tpl}`) or '{SAME}'")
+    col = own_anchor(tpl, params)
+    if col:     # BUG-193 (live i4): aqshaft p.x/p.y/p.top name the column; bp.sites.rank has no ranking for it
+        doc = emit_at(tpl, params, {"id": label, "anchor": col, "rot": 0}, label, bp_id)
+        hit = occ.clash(doc)
+        if hit:
+            raise BpError(f"{tpl}@{col} overlaps project(s) {', '.join(hit[:4])}")
+        return doc
     k = int(m.group(1))
     try:
         sites, snap_id = ranking(save_dir, tpl, params, snap)
@@ -1205,6 +1212,21 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     raise BpError(f"site {label}: only {free} free site(s) for {tpl}{fmt_params(params)} on snapshot {snap_id} "
                   f"({ranked} ranked{'; ' + why if why else ''}); try `dfllm bp sites {tpl} --fresh`"
                   + (f"; {hint}" if hint else ""))
+
+
+def own_anchor(tpl: str, params: dict | None) -> list[int] | None:
+    """BUG-193: the anchor a template takes from its own params (bp.emit `anchor_of_params`, FR-95 aqshaft p.x/p.y/p.top),
+    None when it has none or the params leave it to the site; BpError on bad params (e.g. only some of x, y, top)."""
+    try:
+        em = load_bp("emit")
+        build = em.TEMPLATES[tpl][0]
+    except (BpUnavailable, AttributeError, KeyError, TypeError):
+        return None
+    own = getattr(build, "anchor_of_params", None)
+    if own is None:
+        return None
+    col = _call_bp(f"bp.emit({tpl})", lambda: own(em.check_params(tpl, dict(params or {}))))
+    return [int(c) for c in col] if col else None
 
 
 def _free_scan(tpl: str, params: dict | None, sites: list, occ: "Occupancy", n: int, out: list, taken: list,

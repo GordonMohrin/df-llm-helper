@@ -2051,7 +2051,8 @@ function Q.aq_lost(K, P, R, ci, ch, t, why)
   if M.CFG.damp_dig or not M.AQ.CFG.on or P.tpl == 'plug' then return false end
   local obs = M.AQ.observing(S.rt, P.id)
   if not (why == 'damp' or (obs and (why == nil or why == 'unknown'))) then return false end
-  if not obs and not M.AQ.observe(Q.aqx(K), P, {t[1], t[2], t[3]}, 'cancel') then return false end
+  -- BUG-192 (live i4): an observing project adds the tile too (A.tick smooths around r.pts; AQ_OBSERVE only when new)
+  if not M.AQ.observe(Q.aqx(K), P, {t[1], t[2], t[3]}, 'cancel') then return false end
   R.aqr = obj(R.aqr)
   local sk = tostring(ci)
   if (int(R.aqr[sk]) or 0) >= M.AQ.CFG.redig then return false end
@@ -4396,6 +4397,7 @@ local function begin_run(K)
   -- idleness (R.ps), holding one is
   local function second(P, R)
     if SEALS[P.tpl] and c.on and not f.stk[P.id] then return false end
+    if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return false end        -- BUG-191: an open aquifer level
     if S.care_id == P.id and P.blocked ~= 'stalled' then return false end         -- BUG-116: the hospital never yields
     if P.blocked == 'stalled' or (SEALS[P.tpl] and f.stk[P.id]) then return true end
     return type(R) == 'table' and R.si == P.stage and t - (int(R.ps) or t) >= c.yield
@@ -4427,7 +4429,9 @@ local function begin_run(K)
         else
           local R = R_of(K, P)
           if not ok and not why then Q.froze(K, P, d, R) end        -- BUG-045: the mode froze it (an alert)
-          if ok and pass == 2 and extra < M.CFG.meas_extra and (R.mt == nil or t - R.mt >= M.CFG.meas_every) then
+          -- BUG-191: an aqshaft with an open level waiting for a slot is measured too (its heavy watch reads only)
+          if ok and (pass == 2 or (P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id))) and extra < M.CFG.meas_extra
+             and (R.mt == nil or t - R.mt >= M.CFG.meas_every) then
             extra, R.mt = extra + 1, t
             tasks[#tasks + 1] = {k = 'work', id = P.id, meas = true}
           end

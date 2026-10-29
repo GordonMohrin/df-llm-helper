@@ -53,6 +53,8 @@ local function flow_of(v)
   return 0
 end
 local function cell1(k) return {[0] = {[0] = {[0] = k}}} end
+-- a dug centre tile: no wall left and no dig job pending on it (BUG-194: a top level on a floor waits for its `j`)
+local function dug(v) return type(v) == 'table' and v.c ~= '#' and v.c ~= 'S' and (v.dig or '') == '' end
 
 -- the aqshaft record of P (made on first use from the document's params)
 function A.shaft(X, P, d)
@@ -224,6 +226,7 @@ local function dig_step(X, P, d, r, z, L)
     end
     return 'done'
   end
+  if not dug(v) then return 'done' end               -- BUG-194: the dig job on the floor is still pending
   L.opened = X.now()
   X.moved(P)
   if not aquifer_here(X, r, z, L, v) then
@@ -344,12 +347,25 @@ function A.work(X, P, d, meas, hold)
   local z = r.top - P.stage
   if r.cur_z ~= z then r.cur_z = z; X.dirty() end
   local L = level(r, z)
+  -- BUG-191 (live i4: z128 dug while the shaft waited without a slot, 7/7 water, no AQ_HEAVY for 139 days): a designated
+  -- level the miners dug is open in every pass, read-only (nothing designated), so its flow is sampled below
+  if L.state == 'dig' and L.des and not L.opened and dug(X.tile(r.x, r.y, z)) then L.opened = X.now(); X.dirty() end
   if check_level(X, P, d, r, z, L) then return 'done' end
   if meas or hold then return 'done' end
   if L.state == 'dig' then return dig_step(X, P, d, r, z, L)
   elseif L.state == 'seal' then return A.seal_step(X, P, d, r, z, L)
   elseif L.state == 'watch' then return watch_step(X, P, d, r, z, L) end
   return 'done'
+end
+
+-- BUG-191 (live i4: the shaft yielded its slot with z128 designated, then dug and flooded unseen): a shaft with a level
+-- designated, open, sealing or watched keeps its runner slot (like a seal) and is measured while it waits for one
+function A.holds(rt, id)
+  local r = type(rt) == 'table' and type(rt.aq) == 'table' and rt.aq[id] or nil
+  if type(r) ~= 'table' or r.k ~= 'shaft' or r.heavy or r.done == 1 or type(r.levels) ~= 'table' then return false end
+  local L = r.levels[tostring(r.cur_z)]
+  if type(L) ~= 'table' then return false end
+  return L.state == 'seal' or L.state == 'watch' or (L.state == 'dig' and (L.des or L.opened) ~= nil)
 end
 
 -- a damp report at pos for an aqshaft: that level is an aquifer level (sealed even without a revealed aquifer wall)

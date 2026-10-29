@@ -206,6 +206,10 @@ Related: FR-xx, BUG-xx
 | [BUG-186](BUG-186-tool-detail-skips-almost-everyone-as-doctor.md) | fixed (offline, live-untested) | high | live round 2: SUTURING/DRESSING_WOUNDS are on by default in DF 53.16, the tool details skipped 29 of 30 candidates as doctors | lua/dfllm/economy.lua |
 | [BUG-187](BUG-187-long-term-patient-blocks-the-tool-detail.md) | fixed (offline, live-untested) | high | live i4 round 2: a resting patient held a Miners seat for 1313 days and TOOL_BLOCKED blamed `jobs` | lua/dfllm/economy.lua |
 | [BUG-188](BUG-188-tool-pile-site-search-runs-out-of-reads-at-a-rock-shaft.md) | fixed (offline, live-untested) | medium | live i4 round 2: `tool pile: no site: the 300 tile reads are spent` at a rock-shaft dig job, next try after 28 days | lua/dfllm/economy.lua |
+| [BUG-191](BUG-191-flooded-aqshaft-level-never-noticed-after-slot-yield.md) | fixed (offline, live-untested) | high | FR-95 live 1: a dug, flooded aqshaft level was never noticed after the shaft yielded its slot (no AQ_HEAVY, no plug) | lua/dfllm/aqshaft.lua |
+| [BUG-192](BUG-192-observe-mode-misses-damp-tiles-found-by-lost.md) | fixed (offline, live-untested) | medium | FR-95 live 1: a damp tile lost() found in an observing project never joined pts, so nothing was smoothed around it | lua/dfllm/runner.lua |
+| [BUG-193](BUG-193-aqshaft-place-with-column-in-p-refused.md) | fixed (offline, live-untested) | medium | FR-95 live 1: `bp.place aqshaft site=S1 p={x,y,top}` refused by bp.sites.rank (no ranking) | dfpilot/cmd.py |
+| [BUG-194](BUG-194-aqshaft-top-level-on-floor-opened-while-dig-pending.md) | fixed (offline, live-untested) | low | FR-95 live 1: an aqshaft top level on a floor counted as opened while its dig job was pending | lua/dfllm/aqshaft.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
