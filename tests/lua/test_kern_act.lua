@@ -878,6 +878,49 @@ T.test('BUG-231 ws_task [live-untested]: workshop sheet > add task: one job with
   T.eq(#env.fails, 8)
 end)
 
+T.test('BUG-284 mood_task [live-untested]: Loom sheet > add task > collect webs: one CollectWebs job with an undisturbed ' ..
+       'web filter on a built Loom; care only; refusals', function()
+  local W = H.world{tag = 'moodtask'}
+  local vec = kmock.vec
+  df.building_type = {Workshop = 1, Furnace = 2}
+  df.workshop_type = {Carpenters = 0, Loom = 1, [0] = 'Carpenters', [1] = 'Loom'}
+  df.job_type = {CollectWebs = 41}
+  df.item_type = {THREAD = 7}
+  df.general_ref_type = {BUILDING_HOLDER = 1}
+  local function shop(id, sub, stage)
+    local b = W.add_building{id = id}
+    b.jobs, b.centerx, b.centery, b.z, b.stage = vec{}, 10, 11, 5, stage or 1
+    b.getType = function() return 1 end
+    b.getSubtype = function() return sub end
+    b.getBuildStage = function(self) return self.stage end
+    b.getMaxBuildStage = function() return 1 end
+    return b
+  end
+  local loom = shop(80, 1)
+  shop(81, 0)
+  local items, refs, linked = {}, {}, 0
+  df.job = {new = function()
+    return {id = 990 + linked, material_category = {}, job_items = {elements = vec{}}, delete = function() end}
+  end}
+  df.job_item = {new = function() local it = {flags1 = {}, flags2 = {}}; items[#items + 1] = it; return it end}
+  dfhack.job = {addGeneralRef = function(j, t, id) refs[#refs + 1] = {t, id} end,
+                linkIntoWorld = function() linked = linked + 1 end}
+  local env = mk()
+  env.who_v = 'economy'
+  T.eq({env.api.mood_task(80, 'CollectWebs')}, {false, 'not owner'})
+  env.who_v = 'care'
+  T.eq({env.api.mood_task(80, 'CollectWebs')}, {true, 990})
+  local j = loom.jobs[0]
+  T.eq({j.job_type, j.pos.x, j.pos.y, j.pos.z, linked}, {41, 10, 11, 5, 1})
+  T.eq({items[1].item_type, items[1].quantity, items[1].flags1.undisturbed, #j.job_items.elements}, {7, 1, true, 1})
+  T.eq(refs, {{1, 80}})
+  T.eq({env.api.mood_task(80, 'CollectWebs')}, {false, 'a CollectWebs task is queued there already'})
+  T.eq({env.api.mood_task(81, 'CollectWebs')}, {false, 'building 81 is no Loom'})
+  T.eq({env.api.mood_task(80, 'WeaveCloth')}, {false, 'not a mood task: WeaveCloth'})
+  shop(82, 1, 0)
+  T.eq({env.api.mood_task(82, 'CollectWebs')}, {false, 'workshop not built'})
+end)
+
 T.test('through the kernel: act lines in commands.log with the module, ACT_FAIL once per 1,200 ticks', function()
   local W = H.world{tag = 'kact'}
   local rd = {name = 'readiness', every = {ticks = 100}}

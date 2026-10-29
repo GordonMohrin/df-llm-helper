@@ -34,6 +34,8 @@ A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = t
 A.WS_TASK = {ConstructThrone = {wood = true, rock = true}, ConstructTable = {wood = true, rock = true},
              ConstructDoor = {wood = true, rock = true}, ConstructBed = {wood = true}, ConstructBlocks = {rock = true}}
 A.WS_TASK_MAX = 10
+-- BUG-284: the mood tasks act.mood_task adds and the shop that offers each
+A.MOOD_TASK = {CollectWebs = 'Loom'}
 
 -- Used when config/allowlist.json (WP4) is missing: read-only status queries only.
 A.BUILTIN_ALLOWLIST = {v = 2, builtin = true, blocked = {}, armok_exceptions = {}, commands = {
@@ -1246,6 +1248,50 @@ local function impls(state)
       -- the item vector DF's job picker searches (logs / boulders, as its own tasks); an old build without it: ANY
       pcall(function() it.vector_id = df.job_item_vector_id[mat == 'wood' and 'WOOD' or 'BOULDER'] end)
       local list = j.job_items.elements or j.job_items   -- DF 50+: a struct holding the vector
+      list:insert('#', it)
+    end)
+    if not okm then
+      pcall(function() j:delete() end)
+      return false, 'job item could not be set'
+    end
+    dfhack.job.addGeneralRef(j, df.general_ref_type.BUILDING_HOLDER, b.id)
+    b.jobs:insert('#', j)
+    dfhack.job.linkIntoWorld(j, true)
+    return true, j.id
+  end
+
+  -- BUG-284 (Run 15 Drillchamber y376: a Possessed mood needed silk, the fort had no thread, webs were never collected): the
+  -- Loom sheet > "add task" > "Collect webs", which needs no manager: ONE CollectWebs job on the built Loom `bld_id` with
+  -- DF's own web filter (a THREAD item that is still an undisturbed web), linked into the world for DF's job picker. A weaver
+  -- walks to a web, collects its thread and brings it back. Refused: another job, not a Loom, unbuilt, a CollectWebs job
+  -- already queued there, a full queue. Returns ok, job id. [live-untested: the job item fields]
+  function I.mood_task(bld_id, job)
+    local want = A.MOOD_TASK[job]
+    if not want then return false, 'not a mood task: ' .. tostring(job) end
+    local b = df.building.find(int(bld_id) or -1)
+    if not b then return false, 'no building ' .. tostring(bld_id) end
+    local okt, isws = pcall(function()
+      return b:getType() == df.building_type.Workshop and df.workshop_type[b:getSubtype()] == want
+    end)
+    if not (okt and isws) then return false, string.format('building %d is no %s', b.id, want) end
+    local okb, done = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+    if okb and not done then return false, 'workshop not built' end
+    local jt = df.job_type[job]
+    if jt == nil then return false, 'unknown job type ' .. job end
+    for _, j in ipairs(b.jobs) do
+      if j.job_type == jt then return false, 'a ' .. job .. ' task is queued there already' end
+    end
+    if #b.jobs >= A.WS_TASK_MAX then return false, 'the workshop queue is full' end
+    local j = df.job:new()
+    j.job_type = jt
+    j.pos = xyz2pos(b.centerx, b.centery, b.z)
+    local okm = pcall(function()
+      j.mat_type, j.mat_index = -1, -1
+      local it = df.job_item:new()
+      it.item_type, it.item_subtype, it.mat_type, it.mat_index, it.quantity = df.item_type.THREAD, -1, -1, -1, 1
+      it.flags1.undisturbed = true                        -- a web nobody collected yet
+      pcall(function() it.vector_id = df.job_item_vector_id.THREAD end)
+      local list = j.job_items.elements or j.job_items
       list:insert('#', it)
     end)
     if not okm then

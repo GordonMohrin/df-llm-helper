@@ -327,7 +327,10 @@ def _mood(f: dict, s: dict, fight: bool) -> list[Step]:
         who = d.get("name") or f"unit {unit}"
         ws = d.get("ws") or "workshop"
         pos = _pos(d.get("pos"))
-        why = (f"{who} ({unit}) in a mood at the {ws}{' ' + pos if pos else ''}, thirst {d.get('thirst', '?')}"
+        # BUG-282: a MOOD_CRITICAL of the mood's own clock carries the days left instead of the thirst
+        left = d.get("left")
+        clock = f"{left} d left" if isinstance(left, int) and left >= 0 else f"thirst {d.get('thirst', '?')}"
+        why = (f"{who} ({unit}) in a mood at the {ws}{' ' + pos if pos else ''}, {clock}"
                + (f", missing {', '.join(d['missing'][:3])}" if d.get("missing") else "") + ": supply the missing class")
         return [Step("mood", "dfllm brief", _txt(why),
                      _txt(f"{who} is in a strange mood and may die: {d.get('why', 'material or drink missing')}."),

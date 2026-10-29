@@ -294,6 +294,10 @@ Related: FR-xx, BUG-xx
 | [BUG-279](BUG-279-migrant-waves-only-from-the-arrival-report.md) | fixed (offline, live-untested; missed reports open) | low | Run 15 Earthboat: brief '0 waves' while the fort grew 7 -> 21; waves only from the arrival report | lua/dfllm/care.lua |
 | [BUG-280](BUG-280-audit-refuge-fail-before-fortcore-stage-3.md) | fixed (offline, live-untested) | low | Run 15 Inkintense: audit 'fail: refuge: none' before fortcore stage 3 brings the refuge | dfpilot/bp/topo.py, dfpilot/bp/validate.py |
 | [BUG-281](BUG-281-cutoff-cause-not-found-between-two-groups-in-a-famine.md) | open (cause not verified offline) | medium | Run 15 Inkintense: CUTOFF 'cause not found' between groups 4899/4898 in the famine | lua/dfllm/seal.lua |
+| [BUG-282](BUG-282-mood-critical-only-on-thirst-and-hunger.md) | fixed (offline, live-untested) | critical | Run 15: MOOD_CRITICAL only on thirst/hunger; DF's mood timer kills first | care.lua, mood.lua |
+| [BUG-283](BUG-283-mood-workshop-placed-as-a-plain-workshops-room-at-prio-4.md) | fixed (offline, live-untested) | high | Run 15: the mood's shop placed as a plain 12-shop room at prio 4, 27 days late | care.lua, runner.lua, wake.py |
+| [BUG-284](BUG-284-mood-materials-not-supplied-by-the-kernel.md) | fixed (offline, live-untested) | high | Run 15: no chain shops, no web collection, mood needs not first in the plan | care.lua, act.lua, plan.py |
+| [BUG-285](BUG-285-status-and-brief-name-no-open-mood.md) | fixed (offline, live-untested) | medium | Run 15: status and brief name no open mood, its needs or its days left | care.lua, brief.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -158,6 +158,33 @@
   below hunger 50,000. After the next migrant wave `dfllm brief` counts it (with or without `dfllm events --type MIGRANTS`). `dfllm
   audit` with fortcore stage 1/2 only: no 'fail: refuge: none'. BUG-281: at the next 'cause not found' read the walk groups along the
   line from d.upos to d.at (read only) to find the tile that splits them.
+## Run 15 strange moods as an emergency: DF's mood timer, the mood's shops first, webs, the MOOD line (BUG-282..285, 2026-10-29; offline, live-untested)
+- **Why:** four strange moods failed in three forts within ~3 game years (read-only kern.log/events.jsonl). Drillchamber: fey
+  glassmaker 26535 needed glass, the Glass Furnace came 30 days late (care's plain `workshops` request became a 12-shop room at
+  prio 4, BUG-283), he went insane 54,481 ticks after the claim and died of thirst; Possessed carpenter 26396 needed silk and plant
+  cloth, the fort had neither and no thread, berserk and killed at thirst 13,991. Neither got a MOOD_CRITICAL; Guildcleans' Udil
+  26415 (gems) and Alath 20997 (leather, plant cloth) got it only at hunger 60,300 / thirst 50,370. Root cause `care.lua:633`
+  (64df679): `crit = th >= mood_crit or hu >= mood_crit_hunger`, while DF ends a mood by `unit.job.mood_timeout` (~50,000 ticks
+  from the claim) whatever the thirst (BUG-282); the kernel supplied no material itself (BUG-284) and status named no mood (BUG-285).
+- **What changed:** (1) new library `lua/dfllm/mood.lua` (care's, no module): DF's timer (else claim + `care.mood_timer`, `est`),
+  the reasons workshop / material / waiting / timer, the days-left steps 20/10/5/2, the chain shops, the MOOD line. care
+  `M.mood_emergency` on every mood check: MOOD_CRITICAL (A) with d.why/reasons/left/lsrc/need/ask/webs/slots, again per step
+  (BUG-282). (2) `M.mood_shop_ask`: one `PROJECT_REQUEST workshops why=mood types=[...]` of only the missing shops (his skill's,
+  then the chain), follow places them at prio 1 (`auto:mood`); runner `M.mood_types`: such a project is kind `mood` (never paused)
+  and sorts with the hospital (BUG-283). (3) act `mood_task(bld_id, 'CollectWebs')` (care, the Loom's "collect webs" task, no
+  manager) while silk is short and webs lie near; chain shops Loom/Tanners/Butchers/GlassFurnace/Jewelers; the moods' trade tokens
+  in state `mood[].buy`, `plan propose` puts them first in trade.want (BUG-284). (4) state `mood` (care): `MOOD <name> <kind>
+  needs <items>: <have/missing>, <days left>`; status and brief show it under the clock line; guide/wake name the days left
+  (BUG-285). Config `care.mood_crit_nows/wait/left/timer/crit_every/crit_wall_s/act_every` (baseline.json, fairplay limits);
+  contracts: ACT mood_task, EVENT MOOD_CRITICAL fields, state `mood`, runner.mood_types; RULES §7 row edited in place (284 lines).
+- **Tests (each fails on 64df679):** tests/lua/test_mood_emergency.lua (8), tests/lua/test_kern_act.lua (mood_task),
+  tests/test_bug282_285_moods.py (9); updated: tests/lua/test_care_b3.lua (the thirst test filters why=thirst).
+- **Live check:** at the next strange mood: `dfllm status` line 2 `MOOD <name> <kind> needs ...: have k/n; missing ...,
+  N d left`; `dfllm events --type MOOD_CRITICAL` within a day if a shop or material is missing, `d.lsrc` = `timer` (if `est`,
+  `unit.job.mood_timeout` is unreadable: read it read-only once and fix `MD.timer`), again at 20/10/5/2 days; events
+  `PROJECT_REQUEST why=mood types=[...]`, cli.log `auto:mood` prio 1, no `paused:` for that project; with webs near and a silk
+  slot kern.log `collect webs queued at Loom <id>` and the Loom sheet's task (if DF cancels it, read its job_items read-only).
+  Compare the claim-to-insanity ticks with `d.left`.
 
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders

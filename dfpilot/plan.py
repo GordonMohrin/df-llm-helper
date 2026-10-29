@@ -1674,7 +1674,21 @@ def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls, 
         want = ["pick"] + [t for t in want if t != "pick"]
         if not _bar_want(want):
             want.insert(1, "bar:iron")
+    mood = mood_buys(s)                                  # BUG-284: an open strange mood's short materials come first
+    if mood:
+        want = mood + [t for t in want if t not in mood]
     trade["want"] = want[:40]
+
+
+def mood_buys(s: dict | None) -> list[str]:
+    """BUG-284 (Run 15: four strange moods failed for glass, gems, silk/plant cloth and leather): the trade tokens of the open
+    moods' short needs (state `mood[].buy`, care), fewest days left first, without duplicates."""
+    out: list[str] = []
+    for m in (s or {}).get("mood") or []:
+        for t in (m.get("buy") or []) if isinstance(m, dict) else []:
+            if isinstance(t, str) and t and t not in out:
+                out.append(t)
+    return out
 
 
 def explore_room(save_dir: Path, sites: list, params: dict) -> int | None:

@@ -71,6 +71,8 @@ C.EVENTS = {
   GHOSTS = {cls = 'A', by = 'care'}, HOSPITAL_DRY = {cls = 'A', by = 'water'}, MOOD_RISK = {cls = 'A', by = 'care'},
   -- BUG-063: a strange-mood dwarf's thirst (hunger) passed mood_crit (mood_crit_hunger): the dwarf, his workshop, the nook
   -- (BUG-102: d.nook says 'no nook within N: <counts>' when none; FR-82: past that bar the search widens 3 -> 6 -> 9)
+  -- BUG-282: also (whatever the thirst) a mood without a workshop, with a material none in the fort, still waiting, or near
+  -- DF's insanity line (d.why workshop | material | waiting | timer, d.left days, d.ask the shops the kernel requested, d.webs)
   MOOD_CRITICAL = {cls = 'A', by = 'care'},
   -- BUG-034: the zones of a hospital without accepted water were removed while a patient was over water.patient_thirst
   HOSPITAL_REMOVED = {cls = 'A', by = 'water'},
@@ -268,6 +270,7 @@ C.ACT = {
   tool_pile = {'economy'},                         -- BUG-053: a weapons stockpile for the miners' picks near the mines
   zone_place = {'runner', 'economy'},              -- FR-78: the verb zone.place (zonelib); BUG-232: the manager's office zone
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
+  mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   door_forbid = {'reflex'},
   burrow_tiles = {'seal'},
@@ -296,7 +299,7 @@ C.STATE_OWNERS = {
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
   ['stock.dwhy'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy',
-  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
+  ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
@@ -439,6 +442,9 @@ C.STATE_SPEC = obj({
   -- BUG-115: cursed citizens alive (n), of them in were-form now (tf), the first ids (the transformed first), the next full
   -- moon (mo = day of the year, 1-based; mi = whole days until it) and the cursed who died (dead)
   curse = obj({n = NAT, tf = NAT}, {ids = arr(NAT, 0, 8), mo = int(1, 400), mi = NAT, dead = NAT}),
+  -- BUG-285: the open strange moods, fewest days left first: unit, the line 'MOOD <name> <kind> needs <items>: <have/missing>,
+  -- <days left>', days left (-1 unknown), the first emergency reason, the trade tokens of the short needs (plan propose)
+  mood = arr(obj({u = NAT, t = str(200)}, {left = int(-1), why = str(16), buy = arr(str(24), 0, 6)}), 0, 4),
   -- FR-77: why the adults have no job (rest/hurt/mood/free), adults counted, soldiers, projects the kernel holds back
   labor = obj({starving = NAT, idle = PCT}, {n = NAT, sold = NAT, held = NAT, why = obj(nil, nil, NAT)}),
   -- BUG-071: keys published from the last known values (key -> age in game ticks)

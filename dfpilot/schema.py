@@ -79,6 +79,7 @@ ACT = {
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
     "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
     "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager
+    "mood_task": ["care"],                         # BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
@@ -108,7 +109,7 @@ STATE_OWNERS = {
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy",
-    "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "labor.*": "economy", "orders.*": "economy",
+    "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "mood": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
     "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water", "stale.*": "kern",
@@ -537,7 +538,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # K3 (BUG-100): slots = one text per open slot of the mood job, 'blocks(metal) x2: none in the fort [0/0/0 of 225]' (slot, count,
     # blocker: none in the fort | none free | none reachable | enough exist; [in the fort/free/reachable of every item of the type])
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa fix:s")),
-    "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s")),
+    # BUG-282: why = thirst | hunger (the bars above) or, whatever the thirst, workshop | material | waiting | timer (reasons =
+    # all of them); left = days to DF's insanity line (-1 unknown; lsrc timer | est), need = the shop type his skill lacks, ask =
+    # the shops the kernel requested itself (PROJECT_REQUEST workshops why=mood), webs = its collect-webs task
+    "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s "
+                                                    "reasons:sa left:i lsrc:s need:s ask:s webs:s slots:sa")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),
@@ -993,6 +998,11 @@ STATE = Obj(
          # full moon (mo = day of the year, 1-based; mi = whole days until it), the cursed who died (dead)
          "curse": Obj(req={"n": NAT, "tf": NAT},
                       opt={"ids": Arr(NAT, hi=8), "mo": Int(1, 400), "mi": NAT, "dead": NAT}),
+         # BUG-285: the open strange moods, fewest days left first: unit, the line 'MOOD <name> <kind> needs <items>:
+         # <have/missing>, <days left>', days left (-1 unknown), the first emergency reason, the trade tokens of the short
+         # needs (plan propose puts them first in trade.want)
+         "mood": Arr(Obj(req={"u": NAT, "t": Str(maxbytes=200)},
+                         opt={"left": Int(-1), "why": Str(maxbytes=16), "buy": Arr(Str(maxbytes=24), hi=6)}), hi=4),
          # FR-77: why the adults have no job (the daily scan's own-state classes rest/hurt/mood/free), the adults counted
          # (soldiers apart), the soldiers, the projects the kernel holds back by a rule (seal first, rebuild, slot queue)
          "labor": Obj(req={"starving": NAT, "idle": PCT},
