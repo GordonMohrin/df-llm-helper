@@ -54,7 +54,7 @@ def test_status_names_the_drink_cause_and_the_manager_office(save):
     out = brief.status_text(save)
     assert "drink 32d!" in out
     assert "drink: 70 brews wait for validation: manager office 18631 has no chair, no table" in out, out
-    assert "orders: 112 unvalidated, oldest 18 d: manager office 18631 has no chair, no table" in out, out
+    assert "manager: 112 orders unvalidated for 18 days: manager office 18631 has no chair, no table" in out, out   # BUG-233
     st = json.loads((save / "state.b.json").read_text("utf-8"))
     st["stock"]["dwhy"] = "x" * 81
     assert schema.validate("state", st) != []
@@ -62,7 +62,7 @@ def test_status_names_the_drink_cause_and_the_manager_office(save):
 
 def test_status_worst_case_with_the_drink_lines(save):
     put_state(save, stock={"dwhy": "d" * 80}, orders={"n": 999, "bad": 99, "stuck": 99, "unval": 999, "uval_d": 999,
-                                                      "mgr": "m" * 80})
+                                                      "mgr": "m" * 80, "byp": "b" * 80})
     from dfpilot.events import est_tokens
     assert est_tokens(brief.status_text(save)) <= brief.STATUS_TOKENS
 

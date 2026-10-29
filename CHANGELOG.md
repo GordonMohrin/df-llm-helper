@@ -1,5 +1,34 @@
 # CHANGELOG dfpilot
 
+## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
+- **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
+  (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders
+  made. No door: the seal stuck (perimeter open 427 d), workshops, tombs and farms hung, a strange mood failed (BUG-231). The office was a
+  late P1 build after dining and its zone stage stood behind its furniture (BUG-232). Status said only `orders: 13 unvalidated, oldest 58 d:
+  the manager has no office zone`; the decision text and RULES §7 told the AI player to add the task at a workshop by hand (BUG-233).
+- **What changed:** (1) new act `ws_task(bld_id, job, mat)` (economy): the workshop sheet's "add task", which needs no manager; one
+  ConstructThrone/Table/Door/Bed/Blocks job with a log (Carpenter's) or a non-economic boulder (Mason's) [live-untested job item fields].
+  economy `M.mgr_bypass` (daily after the validation watch): orders unvalidated, the manager absent or the office short of its chair/table
+  for `orders.bypass_days` (5, 0 = off) -> the office's chair and table and the doors, beds and blocks the planned buildings wait for are
+  added as tasks (wood first, else stone), deduped against the jobs queued at the shops, at most `orders.bypass_max` (4) a day and
+  `orders.bypass_open` (8) queued; kern.log + MANAGER_BYPASS (B); no shop: PROJECT_REQUEST workshops why=manager (follow places it)
+  (BUG-231). (2) plans/year1.json: office is a P0 deliverable after fortcore stage 1 (not P1); the office template digs, zones, then builds;
+  `zone.place type=office`; with no Office zone at all economy zones a built chair (+ its table) outside every room zone (`office.zone`,
+  act.zone_place now economy's too), act.manager_office assigns it (BUG-232). (3) state `orders.byp`; the reason `no office (chair+table
+  needed)`; status/brief `manager: N orders unvalidated for D days: <why> -> <what the kernel does>`; the decision fix text, the wake hint
+  of DECISION_NEEDED manager_office and RULES §7 (edited in place, 300 lines) name the kernel's tasks, no click (BUG-233). Contracts:
+  ACT ws_task, zone_place owners, EVENT MANAGER_BYPASS, state orders.byp, ZONE_TYPES office; appendix regenerated.
+- **Tests (each fails on 6dc0f19):** tests/lua/test_manager_bypass.lua (4), tests/lua/test_kern_act.lua (ws_task),
+  tests/test_bug231_233_manager.py (6), tests/test_cli_wake.py (P0 starter: office after the core), tests/test_bug042.py (the line);
+  updated pins: test_zone_place.lua, test_a4_health.py, test_economy_drink.lua, test_economy_orders.lua, runner_dump.lua (P0 needs the
+  office), golden office.*.
+- **Live check:** in Guildcleans (orders held 5+ days): kern.log `manager orders held N d (no office (chair+table needed)): workshop tasks
+  chair (wood) at <id>, table (wood) at <id>`, `dfllm events --type MANAGER_BYPASS`, the Carpenter's sheet lists the two tasks, a carpenter
+  makes them, the office project builds, `inspect what=orders` shows valid orders again, doors follow. `dfllm status`: `manager: 22 orders
+  unvalidated for D days: no office (chair+table needed) -> kernel adds workshop tasks: chair, table, door x3`. If the shop shows no task
+  or it is cancelled at once, read that job's job_items (item_type, mat_type, flags2) read-only. A fresh embark: cli.log `auto:starter ...
+  placing office` right after fortcore stage 1, its Office zone right after its dig.
+
 ## Live round 4 station fallback and the release without stations (BUG-214, BUG-215, 2026-10-29; offline, live-untested)
 - **Why:** live round 4 on E:/DF-test4 (Trussroads) and its skeptic: with B2 raised the BREACH chain b2, core, z4, melee failed entry by
   entry (b2 a wall, core on walk group 0, melee on 1507 behind B2, the soldiers on 1): no station order (kpi off nost 8, on_station 0 of 8

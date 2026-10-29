@@ -23,7 +23,7 @@ end
 T.test('FR-78: the cell text per type: quickfort zone keys, the pit has no pond property, a pond has, the name goes in', function()
   local box = {x0 = 10, y0 = 20, x1 = 13, y1 = 22, z = 5}
   local want = {pen = 'n(4x3)', pit = 'p(4x3)', pond = 'p{pond=true}(4x3)', sand = 's(4x3)', clay = 'c(4x3)',
-                fishing = 'f(4x3)', meeting = 'm(4x3)', dump = 'd(4x3)'}
+                fishing = 'f(4x3)', meeting = 'm(4x3)', dump = 'd(4x3)', office = 'o(4x3)'}   -- BUG-232: office
   for _, ty in ipairs(Z.ORDER) do
     local cell, pos = Z.cell(ty, box)
     T.eq(cell, want[ty], ty)
@@ -31,13 +31,13 @@ T.test('FR-78: the cell text per type: quickfort zone keys, the pit has no pond 
   end
   T.eq((Z.cell('pond', box, 'ward-pond')), 'p{pond=true name=ward-pond}(4x3)')
   T.eq((Z.cell('pen', box, 'pasture')), 'n{name=pasture}(4x3)')
-  T.eq(#Z.ORDER, 8)
+  T.eq(#Z.ORDER, 9)
   T.ok(#Z.cell('pond', {x0 = 0, y0 = 0, x1 = 19, y1 = 19, z = 0}, string.rep('n', 24)) <= 64, 'a cell stays under the 64 characters')
 end)
 
 T.test('FR-78: spec refusals: type, bbox shape and order, one level, size, name', function()
   local function bad(args) local s, why = Z.spec(args, 400); T.eq(s, nil); return why end
-  T.ok(bad({type = 'garden', bbox = {1, 1, 1, 2, 2, 1}}):find('type must be one of pen, pit, pond, sand, clay, fishing, meeting, dump', 1, true))
+  T.ok(bad({type = 'garden', bbox = {1, 1, 1, 2, 2, 1}}):find('type must be one of pen, pit, pond, sand, clay, fishing, meeting, dump, office', 1, true))
   T.ok(bad({type = 'pen'}):find('bbox must be', 1, true))
   T.ok(bad({type = 'pen', bbox = {1, 1, 1, 2, 2}}):find('bbox must be', 1, true))
   T.ok(bad({type = 'pen', bbox = {1, 1, 1, 2, 2, 'x'}}):find('six integers', 1, true))

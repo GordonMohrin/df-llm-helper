@@ -178,6 +178,8 @@ C.EVENTS = {
   MATERIAL_SHORT = {cls = 'B', by = 'economy'},
   -- BUG-042: the manager's office lacked its chair/table (he validates nothing without them); what economy placed
   MANAGER_OFFICE = {cls = 'B', by = 'economy'},
+  -- BUG-231: manager orders held past orders.bypass_days: the items added as workshop tasks (act.ws_task)
+  MANAGER_BYPASS = {cls = 'B', by = 'economy'},
   -- BUG-032: military moved a squad station off a bridge footprint and its ring (bridge, chain, none, hold)
   STATION_MOVED = {cls = 'B', by = 'military'},
   -- FR-79: the members of a militia squad were swapped for the next cohort at the close of its window (counts only)
@@ -261,7 +263,8 @@ C.ACT = {
   hospital_remove = {'water'},                     -- BUG-034: a dry hospital's zones; BUG-131: hospital.retire
   sand_zone = {'economy'}, fish_zone = {'economy'},
   tool_pile = {'economy'},                         -- BUG-053: a weapons stockpile for the miners' picks near the mines
-  zone_place = {'runner'},                         -- FR-78: the verb zone.place (zonelib)
+  zone_place = {'runner', 'economy'},              -- FR-78: the verb zone.place (zonelib); BUG-232: the manager's office zone
+  ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   door_forbid = {'reflex'},
   burrow_tiles = {'seal'},
@@ -440,7 +443,8 @@ C.STATE_SPEC = obj({
   -- BUG-042: unvalidated live orders, the days the oldest waits, why the manager validates nothing (past unval_days)
   -- BUG-059: of the stuck orders, how many miss a workshop (and which, the most missed first) and how many a worker
   orders = obj({n = NAT, bad = NAT, stuck = NAT}, {unval = NAT, uval_d = NAT, mgr = str(80), stuck_ws = NAT,
-                                                   stuck_lab = NAT, ws = str(60), jam = str(80)}),
+                                                   stuck_lab = NAT, ws = str(60), jam = str(80),
+                                                   byp = str(80)}),   -- BUG-233: the kernel's workshop tasks (M.mgr_bypass)
   threat = obj({vis = NAT, armed = FLAG}),
   -- BUG-066 / FR-76 (runner): workshops that stand, adopted into the manifest (new) and pruned from it (gone); standing
   -- stockpiles, wells, beds, doors (counts); rec = a reclaimed fort (>= runner.reclaim.min_ws adopted at the first

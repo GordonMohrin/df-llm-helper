@@ -245,6 +245,9 @@ Related: FR-xx, BUG-xx
 | [BUG-228](BUG-228-embark-injector-leaves-tracking-on-off.md) | fixed (offline, live-untested) | medium | Run 15 embark: DF ignores the injected mouse while enabler.tracking_on is 0 (cause of BUG-020) | tools/embark |
 | [BUG-229](BUG-229-embark-scan-misses-water-mountain-rectangles-and-old-site-tiles.md) | fixed (offline, live-untested) | medium | Run 15 embark: scan passes all-water/mountain rectangles; old sites by world_site.pos | tools/embark |
 | [BUG-230](BUG-230-title-loader-same-named-worlds-and-no-scroll.md) | fixed (offline, live-untested) | medium | Run 15: title-screen loader cannot tell same-named worlds apart, never scrolls a list | tools/embark |
+| [BUG-231](BUG-231-manager-orders-unvalidated-office-deadlock.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: no office zone, 22 orders unvalidated ~330 days, the office waits for its own chair and table | economy, act |
+| [BUG-232](BUG-232-office-built-too-late-zone-after-furniture.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the office is a late P1 build and its zone waits behind its furniture | plans, bp/rooms, economy, zonelib |
+| [BUG-233](BUG-233-status-hides-the-manager-deadlock.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: status hides the manager deadlock, RULES/decision ask for a click at a workshop | brief, wake, economy, RULES |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

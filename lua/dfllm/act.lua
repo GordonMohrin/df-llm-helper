@@ -30,6 +30,10 @@ A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DO
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
                ConstructTable = true, ConstructThrone = true, ConstructArmorStand = true, ConstructWeaponRack = true,
                ConstructHatchCover = true, ConstructGrate = true, ConstructFloodgate = true}
+-- BUG-231: the workshop tasks act.ws_task adds (the Carpenter's 'wood' / the Mason's 'rock' variant), and DF's queue limit
+A.WS_TASK = {ConstructThrone = {wood = true, rock = true}, ConstructTable = {wood = true, rock = true},
+             ConstructDoor = {wood = true, rock = true}, ConstructBed = {wood = true}, ConstructBlocks = {rock = true}}
+A.WS_TASK_MAX = 10
 
 -- Used when config/allowlist.json (WP4) is missing: read-only status queries only.
 A.BUILTIN_ALLOWLIST = {v = 2, builtin = true, blocked = {}, armok_exceptions = {}, commands = {
@@ -1202,6 +1206,52 @@ local function impls(state)
     if not free then return false, 'no free office zone' end
     if not dfhack.buildings.setOwner(free, m) then return false, 'setOwner refused' end
     return true, 'assigned'
+  end
+
+  -- BUG-231 (live Guildcleans y373: 22 manager orders unvalidated for ~330 days, the office project waited for the very
+  -- chair and table those orders make): workshop sheet > "add task" > e.g. "construct wooden chair". A player adds such a
+  -- task without the manager: ONE job of `job` on the built Carpenter's (mat 'wood') or Mason's (mat 'rock') workshop
+  -- `bld_id`, with the input the task asks for (a log; a non-economic boulder; DF's own job item filter), linked into the
+  -- world for DF's job picker. Refused: an unknown job, the wrong shop for the material, an unbuilt shop, a full queue
+  -- (DF lists at most A.WS_TASK_MAX tasks per shop). Returns ok, job id. [live-untested: the job item fields]
+  function I.ws_task(bld_id, job, mat)
+    local spec = A.WS_TASK[job]
+    if not spec then return false, 'not a workshop task: ' .. tostring(job) end
+    if mat ~= 'wood' and mat ~= 'rock' then return false, 'mat must be wood or rock' end
+    if not spec[mat] then return false, string.format('%s has no %s variant', job, mat) end
+    local b = df.building.find(int(bld_id) or -1)
+    if not b then return false, 'no building ' .. tostring(bld_id) end
+    local want = mat == 'wood' and 'Carpenters' or 'Masons'
+    local okt, isws = pcall(function()
+      return b:getType() == df.building_type.Workshop and df.workshop_type[b:getSubtype()] == want
+    end)
+    if not (okt and isws) then return false, string.format('building %d is no %s workshop', b.id, want) end
+    local okb, done = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+    if okb and not done then return false, 'workshop not built' end
+    if #b.jobs >= A.WS_TASK_MAX then return false, 'the workshop queue is full' end
+    local jt = df.job_type[job]
+    if jt == nil then return false, 'unknown job type ' .. job end
+    local j = df.job:new()
+    j.job_type = jt
+    j.pos = xyz2pos(b.centerx, b.centery, b.z)
+    local okm = pcall(function()
+      j.mat_type, j.mat_index = -1, -1
+      if mat == 'wood' then j.material_category.wood = true end
+      local it = df.job_item:new()
+      it.item_type = mat == 'wood' and df.item_type.WOOD or df.item_type.BOULDER
+      it.item_subtype, it.mat_type, it.mat_index, it.quantity = -1, mat == 'wood' and -1 or 0, -1, 1
+      if mat == 'rock' then it.flags2.non_economic = true end
+      local list = j.job_items.elements or j.job_items   -- DF 50+: a struct holding the vector
+      list:insert('#', it)
+    end)
+    if not okm then
+      pcall(function() j:delete() end)
+      return false, 'job item could not be set'
+    end
+    dfhack.job.addGeneralRef(j, df.general_ref_type.BUILDING_HOLDER, b.id)
+    b.jobs:insert('#', j)
+    dfhack.job.linkIntoWorld(j, true)
+    return true, j.id
   end
 
   -- lever.lua:4 leverPullJob(lever, priority) returns nothing: the new job is found on lever.jobs

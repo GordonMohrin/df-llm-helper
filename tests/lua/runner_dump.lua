@@ -28,6 +28,8 @@ local r = H.place(W, 'cfc1', golden[1])
 assert(r.ok, r.msg)
 r = H.place(W, 'cfarm', load('tests/bp/golden/farms.json')[1])   -- P0 also needs farms (year1.json)
 assert(r.ok, r.msg)
+r = H.place(W, 'coff', H.doc{x = 120, y = 130, tpl = 'office', params = {role = 'manager'}})   -- BUG-232: and the office
+assert(r.ok, r.msg)
 H.place(W, 'cdig', H.dig_doc(3, {x = 10, y = 150, tpl = 'tombs', class = 'living', params = {n = 4}}))
 H.runs(W, 1)
 snap('bp', W.K.persist.get('bp.cfc1'))

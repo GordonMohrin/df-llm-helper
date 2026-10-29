@@ -829,6 +829,55 @@ T.test('link_lever [S3, live L2]: one LinkBuildingToTrigger job with two free re
   T.eq({env.api.link_lever(56, 60)}, {false, 'needs 2 free reachable mechanisms, 1 found'})
 end)
 
+T.test('BUG-231 ws_task [live-untested]: workshop sheet > add task: one job with a log or a non-economic boulder on the '
+       .. 'right built shop; refusals', function()
+  local W = H.world{tag = 'wstask'}
+  local vec = kmock.vec
+  df.building_type = {Workshop = 1, Furnace = 2}
+  df.workshop_type = {Carpenters = 0, Masons = 1, [0] = 'Carpenters', [1] = 'Masons'}
+  df.job_type = {ConstructThrone = 31, ConstructBed = 32, ConstructBlocks = 33, ConstructTable = 34, ConstructDoor = 35}
+  df.item_type = {WOOD = 5, BOULDER = 6}
+  df.general_ref_type = {BUILDING_HOLDER = 1}
+  local function shop(id, sub, stage)
+    local b = W.add_building{id = id}
+    b.jobs, b.centerx, b.centery, b.z, b.stage = vec{}, 10, 11, 5, stage or 1
+    b.getType = function() return 1 end
+    b.getSubtype = function() return sub end
+    b.getBuildStage = function(self) return self.stage end
+    b.getMaxBuildStage = function() return 1 end
+    return b
+  end
+  local carp, mason = shop(70, 0), shop(71, 1)
+  local items, refs, linked = {}, {}, 0
+  df.job = {new = function()
+    return {id = 880 + linked, material_category = {}, job_items = {elements = vec{}}, delete = function() end}
+  end}
+  df.job_item = {new = function() local it = {flags2 = {}}; items[#items + 1] = it; return it end}
+  dfhack.job = {addGeneralRef = function(j, t, id) refs[#refs + 1] = {t, id} end,
+                linkIntoWorld = function() linked = linked + 1 end}
+  local env = mk()
+  env.who_v = 'runner'
+  T.eq({env.api.ws_task(70, 'ConstructThrone', 'wood')}, {false, 'not owner'})
+  env.who_v = 'economy'
+  T.eq({env.api.ws_task(70, 'ConstructThrone', 'wood')}, {true, 880})
+  local j = carp.jobs[0]
+  T.eq({j.job_type, j.pos.x, j.pos.y, j.pos.z, j.material_category.wood, linked}, {31, 10, 11, 5, true, 1})
+  T.eq({items[1].item_type, items[1].mat_type, items[1].quantity, #j.job_items.elements}, {5, -1, 1, 1})
+  T.eq(refs, {{1, 70}})
+  T.eq({env.api.ws_task(71, 'ConstructTable', 'rock')}, {true, 881})
+  T.eq({items[2].item_type, items[2].mat_type, items[2].flags2.non_economic}, {6, 0, true})
+  T.eq({env.api.ws_task(70, 'ConstructTable', 'rock')}, {false, 'building 70 is no Masons workshop'})
+  T.eq({env.api.ws_task(71, 'ConstructBed', 'rock')}, {false, 'ConstructBed has no rock variant'})
+  T.eq({env.api.ws_task(70, 'MakeCrafts', 'wood')}, {false, 'not a workshop task: MakeCrafts'})
+  T.eq({env.api.ws_task(70, 'ConstructDoor', 'metal')}, {false, 'mat must be wood or rock'})
+  T.eq({env.api.ws_task(99, 'ConstructDoor', 'wood')}, {false, 'no building 99'})
+  shop(72, 0, 0)
+  T.eq({env.api.ws_task(72, 'ConstructDoor', 'wood')}, {false, 'workshop not built'})
+  for _ = 1, 9 do carp.jobs:insert('#', {}) end
+  T.eq({env.api.ws_task(70, 'ConstructDoor', 'wood')}, {false, 'the workshop queue is full'})
+  T.eq(#env.fails, 8)
+end)
+
 T.test('through the kernel: act lines in commands.log with the module, ACT_FAIL once per 1,200 ticks', function()
   local W = H.world{tag = 'kact'}
   local rd = {name = 'readiness', every = {ticks = 100}}

@@ -286,6 +286,11 @@ def office(p: dict) -> Plan:
     box = _box(P, 3, 3)
     P.stage("build", "build", orders=1).tile(0, box[1] + 1, 0, "c").tile(1, box[1] + 1, 0, "t")
     _finish(P, p, box, "o", f"assigned_unit={role} name=Office")
+    # BUG-232 (live Guildcleans y373: the zone stage waited behind the chair and table the unvalidated orders never made):
+    # the office zone comes right after the dig, before the door and the furniture
+    zone = next(s for s in P.stages if s.label == "zone")
+    P.stages.remove(zone)
+    P.stages.insert(1, zone)
     return P
 
 

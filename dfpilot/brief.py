@@ -645,6 +645,14 @@ def mandatory_fix(miss: list) -> str:
     return "dfllm cmd bp.place tpl=workshops site=S1 only=" + ",".join(miss)
 
 
+def manager_line(od: dict) -> str:
+    """BUG-233 (live Guildcleans y373): 'manager: N orders unvalidated for D days: <why> -> <what the kernel does>' (state
+    orders.unval/uval_d/mgr/byp). The kernel's own fix comes after the arrow, so nobody is told to click a workshop."""
+    head = (f"manager: {od.get('unval', 0)} orders unvalidated for {od.get('uval_d', 0)} days: {od['mgr']}"
+            if od.get("mgr") else "manager: orders held")
+    return head + (f" -> {od['byp']}" if od.get("byp") else "")
+
+
 def adopt_line(s: dict) -> str:
     """FR-76 (state adopt, runner): what stands in the fort the kernel adopted (a reclaimed one has workshops no project of
     ours built), the manifest repairs (BUG-066: workshops gone from it) and the mandatory workshops it lacks, with the fix."""
@@ -725,9 +733,10 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
     if ad:
         fort.append(ad)
     od = s.get("orders")
-    if isinstance(od, dict) and od.get("mgr"):
-        # BUG-042: orders wait for the manager: how many, how long, why (the office's chair/table, ...)
-        fort.append(f"orders: {od.get('unval', 0)} unvalidated, oldest {od.get('uval_d', 0)} d: {od['mgr']}")
+    if isinstance(od, dict) and (od.get("mgr") or od.get("byp")):
+        # BUG-042: orders wait for the manager: how many, how long, why (the office's chair/table, ...); BUG-233 (live
+        # Guildcleans: 22 orders unvalidated ~330 days, nobody saw why the doors never came): and what the kernel does
+        fort.append(manager_line(od))
     c = s.get("care")
     if c:
         # FR-74: the sources of a high stress; BUG-062: tomb zones left closed to citizens

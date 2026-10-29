@@ -513,7 +513,8 @@ def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch
     c.t += 11
     f.poll()
     assert len(out) == 1 and "PLAN_EXHAUSTED" in out[0]   # the LLM still reviews the choice
-    # the next PLAN_EXHAUSTED (fortcore stage 1 applied) takes the next deliverable: farms
+    # the next PLAN_EXHAUSTED (fortcore stage 1 applied) takes the next deliverable: BUG-232 (live Guildcleans y373: no
+    # office before pop 20, the manager validated nothing for ~330 days) the manager's office, before the farms
     for p in (save / "inbox").glob("*.json"):
         p.unlink()
     c.t += TOMBS_COOLDOWN
@@ -521,7 +522,7 @@ def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch
     f.poll()
     (snap2,) = inbox_docs(save)
     assert snap2["verb"] == "snapshot"
-    assert f.jobs["starter"]["tpl"] == "farms"
+    assert f.jobs["starter"]["tpl"] == "office"
 
 
 def test_follow_plan_exhausted_p1_starts_the_workshops_deliverable(save, monkeypatch):
@@ -552,10 +553,10 @@ def test_follow_plan_exhausted_p1_starts_the_workshops_deliverable(save, monkeyp
     for p in (save / "inbox").glob("*.json"):
         p.unlink()
     f.jobs.pop("starter", None)
-    (save / "bp" / "c901.json").unlink()            # office missing again: that one is started, not workshops
+    (save / "bp" / "c900.json").unlink()            # dining missing again: that one is started, not workshops
     append_events(save, [ev(8814, "PLAN_EXHAUSTED", "plan exhausted in P1", {"phase": "P1", "year": 281})])
     f.poll()
-    assert f.jobs["starter"]["tpl"] == "office"
+    assert f.jobs["starter"]["tpl"] == "dining"
 
 
 def test_follow_plan_exhausted_p0_adds_the_missing_butcher(save, monkeypatch):
@@ -567,6 +568,7 @@ def test_follow_plan_exhausted_p0_adds_the_missing_butcher(save, monkeypatch):
     files.write_json_atomic(save / "bp" / "c900.json", {"v": 2, "tpl": "fortcore", "params": {"stage": 1}, "manifest": {
         "v": 2, "workshops": [{"type": t, "pos": [i, 0, 0]} for i, t in enumerate(["Carpenters", "Still"])]}})
     files.write_json_atomic(save / "bp" / "c901.json", {"v": 2, "tpl": "farms", "params": {}})
+    files.write_json_atomic(save / "bp" / "c902.json", {"v": 2, "tpl": "office", "params": {}})   # BUG-232: a P0 build
     st = files.read_state(save)
     monkeypatch.setattr(files, "read_state", lambda d: dict(st or {}, proj=[]))
     c = Clock()

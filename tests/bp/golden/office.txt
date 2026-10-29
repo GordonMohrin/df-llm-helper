@@ -1,5 +1,5 @@
 office {'role': 'manager', 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
-  living: dig(4), build(3), zone(1), burrow(2)
+  living: dig(4), zone(1), build(3), burrow(2)
   materials: {'chair': 1, 'door': 1, 'table': 1}
 z100  (x 68..72, y 69..75)
 #####

@@ -335,7 +335,7 @@ T.test('Run 11/BUG-042: an unvalidated order with an available manager names why
   days(W, 4)
   local ev = W.find_events('ORDER_STUCK')
   T.eq(#ev, 1)
-  T.eq(ev[1].d.why, 'unvalidated: the manager has no office zone')
+  T.eq(ev[1].d.why, 'unvalidated: no office (chair+table needed)')          -- BUG-233: was 'the manager has no office zone'
   local dn = W.find_events('DECISION_NEEDED')
   T.eq(#dn, 1)
   T.eq(dn[1].d.id, 'manager_office', 'none validated with a manager at hand: the office question as before')

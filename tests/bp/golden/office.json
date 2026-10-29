@@ -98,6 +98,29 @@
         0,
         0,
         0,
+        "o{assigned_unit=manager name=Office}(3x3)"
+       ]
+      ],
+      "pos": [
+       69,
+       72,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "zone",
+    "mode": "zone",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
         "d"
        ],
        [
@@ -124,29 +147,6 @@
     "label": "build",
     "mode": "build",
     "orders": 1
-   },
-   {
-    "chunks": [
-     {
-      "cells": [
-       [
-        0,
-        0,
-        0,
-        "o{assigned_unit=manager name=Office}(3x3)"
-       ]
-      ],
-      "pos": [
-       69,
-       72,
-       100
-      ]
-     }
-    ],
-    "defense": 0,
-    "label": "zone",
-    "mode": "zone",
-    "orders": 0
    },
    {
     "chunks": [

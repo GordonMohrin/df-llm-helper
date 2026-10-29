@@ -16,7 +16,7 @@ not wake; the follower acts on two of them without the LLM:
                                   (BUG-038: the kernel asks only while none stands); why=mandatory (runner, FR-76:
                                   a reclaimed fort lacks Carpenters, Masons, Craftsdwarfs, Still or Kitchen) -> only
                                   the missing types of d.types, at prio 1; why=slabs (economy, BUG-133: ghosts
-                                  and no mason's workshop, d.types [Masons]) -> the same
+                                  and no mason's workshop, d.types [Masons]) -> the same; why=manager (BUG-231)
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
@@ -259,6 +259,8 @@ def next_hint(etype: str, e: dict) -> str:
         return OFFICE_HINT
     if etype == "SIEGE_UNREADY" and "mood_ws" in (d.get("fails") or []):
         return MOOD_WS_HINT
+    if etype == "DECISION_NEEDED" and d.get("id") == "manager_office":
+        return MANAGER_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
         return rebuild_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "intruder_sortie":
@@ -346,6 +348,11 @@ HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accept
                      "Tiefe+ has none (bp sites hospital names the water), then remove the old zones: status names the "
                      "blocking zone and its dfllm cmd hospital.retire (BUG-131)")
 
+
+# BUG-233 (live Guildcleans y373): the manager validates nothing; nothing here asks for a click at a workshop (the kernel
+# adds chair, table, doors, beds and blocks as workshop tasks itself after orders.bypass_days, MANAGER_BYPASS)
+MANAGER_HINT = ("tell Gordon once; the kernel adds the office's chair and table (and the doors, beds, blocks projects wait "
+                "for) as workshop tasks itself (MANAGER_BYPASS); no office zone: dfllm cmd bp.place tpl=office site=S1")
 
 # BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant for good; Run 11 note 25: squads without a leader):
 # readiness R0 office; the line's msg carries the exact command
@@ -629,11 +636,13 @@ class Follower:
                 from .cmd import _moodable
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
-            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") in ("mandatory", "slabs", "busy"):
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") in ("mandatory", "slabs", "busy",
+                                                                                         "manager"):
                 # FR-76 (Run 12 Trussroads, reclaimed: no carpenter, no craftsdwarf, no kitchen): the types the runner
                 # saw missing on the map, whatever the fort manifest lists (kept by `need`, BUG-066). BUG-133: economy's
                 # why=slabs (ghosts wait for memorial slabs, no mason's workshop stands) the same way: the Masons alone.
                 # BUG-224: why=busy (one Carpenters/Masons holds the waiting jobs, idle workers stand): one more of it
+                # BUG-231: why=manager (the held manager orders' items go to a Carpenters/Masons as tasks; none stands)
                 from .cmd import _extra_shops, _moodable
                 mood, extra = _moodable(), set(_extra_shops())
                 want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]

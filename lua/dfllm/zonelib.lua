@@ -33,8 +33,10 @@ Z.TYPES = {
   meeting = {key = 'm', props = '', zt = 'MeetingHall'},
   -- the enum name differs between DF versions (Dump, GarbageDump): both count as a dump zone
   dump    = {key = 'd', props = '', zt = 'Dump', zts = {Dump = true, GarbageDump = true}},
+  -- BUG-232: an office (zones > Office) over a chair and its table; act.manager_office gives an unowned one to the manager
+  office  = {key = 'o', props = '', zt = 'Office'},
 }
-Z.ORDER = {'pen', 'pit', 'pond', 'sand', 'clay', 'fishing', 'meeting', 'dump'}
+Z.ORDER = {'pen', 'pit', 'pond', 'sand', 'clay', 'fishing', 'meeting', 'dump', 'office'}
 Z.MAX_TILES = 400                                  -- zones.max_tiles
 Z.PATH_GAP = 2                                     -- zones.dump_path_gap: tiles a dump zone keeps from a stair, ramp, door, bridge
 Z.PATH = {['<'] = 'stair', ['>'] = 'stair', X = 'stair', r = 'ramp', v = 'ramp', ['+'] = 'door', ['='] = 'bridge', H = 'bridge'}

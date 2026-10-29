@@ -77,7 +77,8 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
-    "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner"],
+    "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
+    "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex"],
@@ -395,7 +396,7 @@ TPL = named("tpl", Str(TPL_RE))
 BRIDGE = Str(BRIDGE_RE)
 SQUAD = AnyOf(NAT, Str(enum=["A", "B", "C"]))                  # BUG-055: a squad key or the game's squad id
 SQUAD_MODES = ["PEACE", "ALERT", "RECOVERY"]                   # the squads screen is not touched in a fight
-ZONE_TYPES = ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting", "dump"]    # FR-78: lua/dfllm/zonelib.lua Z.TYPES
+ZONE_TYPES = ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting", "dump", "office"]    # FR-78: zonelib Z.TYPES (BUG-232)
 MODULE = named("module", Str(MODULE_RE))
 MODE = named("mode", Str(enum=MODES))
 PHASE = named("phase", Str(PHASE_RE))
@@ -776,6 +777,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),
+    # BUG-231: manager orders held past orders.bypass_days: the workshop tasks the kernel added ('chair (wood) at 412')
+    "MANAGER_BYPASS": ("B", "economy", _d("days:i n:i tasks:s", "why:s")),
     # BUG-052: off = why soldiers are off their station ('equip 5, far 2': equip, hurt, level, far, nost)
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i off:s")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
@@ -990,7 +993,9 @@ STATE = Obj(
          "orders": Obj(req={"n": NAT, "bad": NAT, "stuck": NAT},
                        # BUG-059: of the stuck orders, how many miss a workshop (which, most missed first), a worker
                        opt={"unval": NAT, "uval_d": NAT, "mgr": Str(maxbytes=80), "stuck_ws": NAT, "stuck_lab": NAT,
-                            "ws": Str(maxbytes=60), "jam": Str(maxbytes=80)}),
+                            "ws": Str(maxbytes=60), "jam": Str(maxbytes=80),
+                            # BUG-233: what the kernel does about held manager orders (M.mgr_bypass)
+                            "byp": Str(maxbytes=80)}),
          "threat": Obj(req={"vis": NAT, "armed": FLAG}),
          # BUG-066 / FR-76 (runner): workshops that stand, adopted into the manifest (new) and pruned from it (gone);
          # standing stockpiles, wells, beds, doors (counts); rec = a reclaimed fort (>= runner.reclaim.min_ws adopted at

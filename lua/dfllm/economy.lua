@@ -386,12 +386,17 @@ M.DEFAULTS = {
   -- BUG-042 (Run 11, y471: the manager's office held no chair and no table; 112 of 446 orders, the brew orders among
   -- them, waited unvalidated while 334 older ones were validated): an order unvalidated for unval_days with a manager
   -- who could validate is DECISION_NEEDED manager_office with the reason (M.unval_watch), and the manager's office gets
-  -- its chair and table (M.office_check: `office`)
-  orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2},
+  -- its chair and table (M.office_check: `office`). BUG-231 (live Guildcleans y373: 22 orders unvalidated ~330 days, the
+  -- office's chair and table were among them): orders unvalidated (or the office short of its chair/table) for
+  -- bypass_days (0 = off) make the kernel add the items as workshop tasks (M.mgr_bypass: at most bypass_max a day,
+  -- bypass_open such tasks queued at once)
+  orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2,
+            bypass_days = 5, bypass_max = 4, bypass_open = 8},
   -- BUG-042: the manager's Office zone needs a chair (and a table: the live fix was both) to validate work orders; a
   -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
-  -- item) at most every retry_days; zones larger than max_tiles are searched only that far
-  office = {table = true, retry_days = 7, max_tiles = 400},
+  -- item) at most every retry_days; zones larger than max_tiles are searched only that far. BUG-232: `zone` = with no
+  -- Office zone at all, one is drawn over a built chair (and its table) that stands outside every room zone
+  office = {table = true, retry_days = 7, max_tiles = 400, zone = true},
   -- BUG-061 (Run 13 y523: 31 EngraveSlab orders, "Needs unengraved slab", filled the masons' slots with jobs that
   -- cancelled at once; doors, coffins, tables and blocks waited ten game years; autoslab.cpp queues one EngraveSlab order
   -- per ghost every 1289 ticks and no ConstructSlab): at most `max_orders` EngraveSlab orders stand, never more than
@@ -2764,8 +2769,10 @@ local function validation_watch(K, p, c)
     local oko, err = pcall(M.office_check, K, c, p)
     if not oko then K.log('warn', 'office check: %s', tostring(err)) end
   end
-  if M.manager_watch(K, p, c) then p.uv, st.unval = nil, nil; return end   -- Run 11: injured, in a mood, gone
-  M.unval_watch(K, p, c)
+  if M.manager_watch(K, p, c) then p.uv, st.unval = nil, nil      -- Run 11: injured, in a mood, gone
+  else M.unval_watch(K, p, c) end
+  local okb, err = pcall(M.mgr_bypass, K, p, c)        -- BUG-231: the items the validation holds back, as workshop tasks
+  if not okb then K.log('warn', 'manager bypass: %s', tostring(err)) end
 end
 
 -- BUG-204: why act.manager_office cannot help now ('no manager', 'no free office zone'), or nil (it has one, or a free
@@ -2853,8 +2860,11 @@ function M.office_check(K, c, p)
   if type(mg) ~= 'table' or not mg.unit then return end           -- no manager (appoint) or gone (manager_watch)
   local rec = M.office_of(K, mg.unit)
   if not rec then
-    st.office = {why = 'the manager has no office zone', fix = 'an Office zone with a chair and a table for him ' ..
-                 '(bp.place office)'}
+    -- BUG-233: the reason the status line shows ('manager: N orders unvalidated for D days: no office ...')
+    st.office = {why = 'no office (chair+table needed)', fix = 'an Office zone with a chair and a table for him ' ..
+                 '(bp.place office; the kernel adds chair and table as workshop tasks)', none = true}
+    local okz, zerr = pcall(M.office_zone, K, c, p)
+    if not okz then K.log('warn', 'office zone: %s', tostring(zerr)) end
     return
   end
   local o = type(p.office) == 'table' and p.office or nil
@@ -2874,8 +2884,9 @@ function M.office_check(K, c, p)
   if #miss == 0 then                                  -- placed: buildingplan waits for the items and a builder
     local inv, none = K.census.i or {}, {}
     for _, kind in ipairs(nob) do if (math.tointeger(inv[kind .. 's']) or 0) == 0 then none[#none + 1] = kind end end
-    st.office.fix = #none > 0 and string.format('not built: no free %s; add it at a workshop by hand (its order waits ' ..
-                                                'for him too)', table.concat(none, ', no '))
+    -- BUG-233: no 'by hand' (a player without clicks cannot): the kernel adds the task itself (M.mgr_bypass)
+    st.office.fix = #none > 0 and string.format('not built: no free %s; the kernel adds it as a workshop task',
+                                                table.concat(none, ', no '))
                     or 'not built yet (buildingplan waits for a builder)'
     return
   end
@@ -5545,6 +5556,215 @@ function M.piece_route(c, r, e, n)
   return nil, string.format('no material for %s: %s', e.kind, table.concat(why, ', '))
 end
 
+---------------------------------------------------------------- the manager's orders as workshop tasks (BUG-231)
+-- Live Guildcleans (y373, pop 20): the manager had no office zone, so DF's manager validated none of the 22 work orders
+-- (doors, blocks, food) for ~330 days; the office project waited for a chair and a table that only those orders made.
+-- No door: the seal stuck, the perimeter stood open 427 days, workshops, tombs and farms hung, a strange mood failed.
+-- A player breaks this cycle at the workshop: "add task" needs no manager. M.mgr_bypass (daily, from validation_watch):
+-- orders unvalidated, or the manager's office short of its chair/table, for orders.bypass_days -> the office's chair and
+-- table and the doors, beds and blocks the planned buildings wait for (T.jmat's classes, st.jneed) are added as tasks
+-- at a built Carpenter's workshop (wood) or else a Mason's (rock) through act.ws_task: the jobs of that type already
+-- queued at the shops count (deduped), at most bypass_max a day and bypass_open queued at once, each kern.log'd and
+-- MANAGER_BYPASS (B); no such shop stands: PROJECT_REQUEST workshops why=manager (a workshop is built without an order).
+-- item class (T.jmat's label, M.PIECE_INV) -> {job, wood, rock (the variants), inv (census key of free items)}
+M.BYPASS = {chair = {job = 'ConstructThrone', wood = true, rock = true, inv = 'chairs'},
+            table = {job = 'ConstructTable', wood = true, rock = true, inv = 'tables'},
+            door = {job = 'ConstructDoor', wood = true, rock = true, inv = 'doors'},
+            bed = {job = 'ConstructBed', wood = true},
+            blocks = {job = 'ConstructBlocks', rock = true, inv = 'blocks_free'}}
+M.BYPASS_ORDER = {'chair', 'table', 'door', 'bed', 'blocks'}
+
+-- the item classes the planned buildings wait for with none free or forbidden in the fort ({label = n}), from T.jmat
+function M.jneed(jb)
+  if type(jb) ~= 'table' or type(jb.mq) ~= 'table' then return nil end
+  local out = {}
+  for _, q in ipairs(jb.mq) do
+    if M.BYPASS[q.label] and (q.free or 0) == 0 and (q.forb or 0) == 0 then
+      out[q.label] = (out[q.label] or 0) + (q.n or 0)
+    end
+  end
+  return out
+end
+
+-- the built Carpenter's and Mason's workshops ({Carpenters = {b...}, Masons = {...}}) and the jobs queued at them by type
+function M.bypass_shops()
+  local shops, jobs = {Carpenters = {}, Masons = {}}, {}
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local n = df.workshop_type[b.type]
+      if shops[n] and built(b) then
+        local list = shops[n]
+        list[#list + 1] = b
+        for _, j in ipairs(b.jobs or {}) do jobs[j.job_type] = (jobs[j.job_type] or 0) + 1 end
+      end
+    end
+  end)
+  return shops, jobs
+end
+
+-- what the bypass adds now: {{kind, n}} in M.BYPASS_ORDER, free items subtracted
+function M.bypass_want(K, c)
+  local inv, want = K.census.i or {}, {}
+  local o = st.office
+  if type(o) == 'table' and o.why then                 -- the office: a chair and (office.table) a table
+    local rec
+    local mg = M.manager_state(K)
+    if type(mg) == 'table' and mg.unit then rec = M.office_of(K, mg.unit) end
+    want.chair = (not rec or rec.chair == 0) and 1 or 0
+    want.table = ((c.office or {}).table ~= false and (not rec or rec.table == 0)) and 1 or 0
+  end
+  local cap = ((c.pieces or {}).max_n) or 6
+  for kind, n in pairs(type(st.jneed) == 'table' and st.jneed or {}) do
+    want[kind] = math.max(want[kind] or 0, math.min(n, cap))
+  end
+  local out = {}
+  for _, kind in ipairs(M.BYPASS_ORDER) do
+    local e = M.BYPASS[kind]
+    local n = (want[kind] or 0) - (e.inv and (math.tointeger(inv[e.inv]) or 0) or 0)
+    if n > 0 then out[#out + 1] = {kind = kind, n = n} end
+  end
+  return out
+end
+
+-- the days the validation holds the fort: the oldest unvalidated order (st.unval) or the absent manager (p.mabs), and the
+-- office short of its chair/table (p.boff, since first seen)
+function M.bypass_days(K, p)
+  local now = K.now().tick
+  if type(st.office) == 'table' and st.office.why then p.boff = math.tointeger(p.boff) or now else p.boff = nil end
+  local d = type(st.unval) == 'table' and (math.tointeger(st.unval.d) or 0) or 0
+  if type(p.mabs) == 'table' and math.tointeger(p.mabs.since) then d = math.max(d, (now - p.mabs.since) // DAY) end
+  if p.boff then d = math.max(d, (now - p.boff) // DAY) end
+  return d
+end
+
+function M.mgr_bypass(K, p, c)
+  local oc = c.orders or M.DEFAULTS.orders
+  local lim = math.tointeger(oc.bypass_days) or 5
+  local days = M.bypass_days(K, p)
+  if lim <= 0 or days < lim then
+    if st.byp then K.log('info', 'manager bypass over: the manager validates again or the office stands') end
+    st.byp = nil
+    return
+  end
+  local want = M.bypass_want(K, c)
+  if #want == 0 then st.byp = nil; return end
+  local shops, queued = M.bypass_shops()
+  local r = M.view_run(K)
+  local wood = M.wood_left(c, r, true)
+  local rock = stone_free(c, r)
+  local budget, open_n = math.tointeger(oc.bypass_max) or 4, 0
+  for _, e in pairs(M.BYPASS) do
+    local jt = df.job_type[e.job]
+    if jt ~= nil then open_n = open_n + (queued[jt] or 0) end
+  end
+  local room = math.max(0, (math.tointeger(oc.bypass_open) or 8) - open_n)
+  local added, names, noshop, nomat = {}, {}, nil, false
+  for _, w in ipairs(want) do
+    local e = M.BYPASS[w.kind]
+    local jt = df.job_type[e.job]
+    local k = math.min(w.n - (jt ~= nil and (queued[jt] or 0) or 0), budget, room)
+    names[#names + 1] = w.n > 1 and string.format('%s x%d', w.kind, w.n) or w.kind
+    for _ = 1, math.max(0, k) do
+      local mat = (e.wood and #shops.Carpenters > 0 and wood > 0) and 'wood'
+                  or (e.rock and #shops.Masons > 0 and rock > 0) and 'rock' or nil
+      if not mat then                                  -- no shop for the material the fort has (no logs: the masons)
+        if e.wood and #shops.Carpenters == 0 and (wood > 0 or not e.rock or rock <= 0) then noshop = noshop or 'Carpenters'
+        elseif e.rock and #shops.Masons == 0 then noshop = noshop or 'Masons'
+        else nomat = true end
+        break
+      end
+      local list = mat == 'wood' and shops.Carpenters or shops.Masons
+      table.sort(list, function(a, b) return #(a.jobs or {}) < #(b.jobs or {}) end)
+      local ok = K.act.ws_task(list[1].id, e.job, mat)
+      if not ok then break end
+      if mat == 'wood' then wood = wood - 1 else rock = rock - 1 end
+      budget, room = budget - 1, room - 1
+      added[#added + 1] = string.format('%s (%s) at %d', w.kind, mat, list[1].id)
+    end
+  end
+  local what = table.concat(names, ', ')
+  st.byp = ((nomat and #added == 0 and 'workshop tasks wait for logs or stone: ' or 'kernel adds workshop tasks: ')
+            .. what):sub(1, 80)
+  local why = type(st.office) == 'table' and st.office.why or (type(st.unval) == 'table' and st.unval.why) or 'unvalidated'
+  if #added > 0 then
+    local msg = string.format('manager orders held %d d (%s): workshop tasks %s', days, why, table.concat(added, ', '))
+    K.log('warn', '%s', msg)
+    K.emit('MANAGER_BYPASS', 'B', msg:sub(1, 200), {days = days, n = #added, tasks = table.concat(added, ', '):sub(1, 120),
+                                                    why = tostring(why):sub(1, 80)})
+    K.persist.touch('m.economy')
+  end
+  if noshop then M.bypass_shop(K, p, noshop, what) end
+end
+
+-- no Carpenter's (or Mason's) workshop for the bypass: PROJECT_REQUEST workshops why=manager types {t}, at most every
+-- 7 days, never while a workshops project builds one (M.ws_queued) or runner's mandatory request asks for it
+function M.bypass_shop(K, p, t, what)
+  st.byp = ('no ' .. t .. ': workshop requested for ' .. what):sub(1, 80)
+  local now = K.now().tick
+  if now - (math.tointeger(p.byp_req) or -7 * DAY) < 7 * DAY then return end
+  if M.ws_queued(K, t) then return end
+  local okm, mand = K.call('runner', 'req_types', 'wsm')
+  if okm and type(mand) == 'table' then for _, x in ipairs(mand) do if x == t then return end end end
+  p.byp_req = now
+  K.log('warn', 'manager bypass: no %s workshop for %s: requested', t, what)
+  K.emit('PROJECT_REQUEST', 'B', string.format('workshops: no %s workshop for the tasks the manager holds back (%s)', t,
+                                               what):sub(1, 200), {tpl = 'workshops', n = 1, why = 'manager', types = {t}})
+end
+
+-- BUG-232: with no Office zone at all (none of his, none free), an Office zone over a built chair (and the built table
+-- beside it) that stands outside every room zone: zones > Office over those tiles (act.zone_place, zonelib's checks);
+-- act.manager_office then gives it to him. At most every office.retry_days; outside a fight.
+function M.office_zone(K, c, p)
+  local oc = c.office or M.DEFAULTS.office
+  if oc.zone == false or M.office_none(K) ~= 'no free office zone' then return end
+  local mode = K.mode()
+  if mode ~= 'PEACE' and mode ~= 'ALERT' and mode ~= 'RECOVERY' then return end
+  local now = K.now().tick
+  if now - (math.tointeger(p.ozone) or -1e9) < (oc.retry_days or 7) * DAY then return end
+  local Z = require('dfllm.zonelib')
+  local function tile(x, y, z)
+    local okt, t = K.call('snapshot', 'tile', x, y, z)
+    return okt and t or nil
+  end
+  local function at(b) return b.x1 or b.centerx, b.y1 or b.centery, b.z end
+  for _, ch in ipairs(df.global.world.buildings.other.CHAIR) do
+    local x, y, z = at(ch)
+    if built(ch) and x then
+      local box = {x0 = x, y0 = y, x1 = x, y1 = y, z = z}
+      for _, tb in ipairs(df.global.world.buildings.other.TABLE) do
+        local tx, ty, tz = at(tb)
+        if built(tb) and tz == z and tx and math.max(math.abs(tx - x), math.abs(ty - y)) == 1 then
+          box = {x0 = math.min(x, tx), y0 = math.min(y, ty), x1 = math.max(x, tx), y1 = math.max(y, ty), z = z}
+          break
+        end
+      end
+      local zones, inroom = Z.zones(z), false
+      for _, zn in ipairs(zones) do
+        if Z.ROOMS[zn.tname or ''] and zn.x0 <= box.x1 and zn.x1 >= box.x0 and zn.y0 <= box.y1 and zn.y1 >= box.y0 then
+          inroom = true
+          break
+        end
+      end
+      if not inroom and not Z.tiles_ok('office', box, tile) and not Z.conflict('office', box, zones) then
+        p.ozone = now
+        local cell, pos = Z.cell('office', box, 'Office')
+        local okz, res = K.act.zone_place({cell = cell, pos = pos, box = box, ztype = 'Office'})
+        local zid = okz and type(res) == 'table' and type(res.ids) == 'table' and res.ids[1] or nil
+        local where = string.format('%d,%d-%d,%d z%d', box.x0, box.y0, box.x1, box.y1, z)
+        if not zid then
+          K.log('warn', 'manager office: no Office zone could be drawn at %s: %s', where, tostring(res))
+          return
+        end
+        K.log('warn', 'manager has no office: Office zone %s drawn over the chair at %s', tostring(zid), where)
+        K.emit('MANAGER_OFFICE', 'B', string.format('no office zone: Office zone %s drawn over the chair at %s',
+                                                    tostring(zid), where),
+               {zone = math.tointeger(zid) or 0, why = 'no office zone', placed = ('office zone at ' .. where):sub(1, 80)})
+        return
+      end
+    end
+  end
+end
+
 -- buildingplan's global material settings (its planner overlay; plugin function getGlobalSettings), the plugin's
 -- defaults when it does not answer: blocks, boulders and logs on, bars off
 function M.bp_settings()
@@ -5687,6 +5907,7 @@ end
 -- the material the fort has; walls switch buildingplan's material on when that is all there is; the rest is short
 function T.jmake(K, c, r)
   local jb, pc = r.jb, c.pieces
+  st.jneed = M.jneed(jb)                              -- BUG-231: what the planned buildings wait for (M.mgr_bypass)
   if not jb or type(pc) ~= 'table' then return true end
   local short, walls, s = {}, 0, nil
   for _, q in ipairs(jb.mq or {}) do
@@ -9410,6 +9631,8 @@ function M.state(K)
     r.orders.unval, r.orders.uval_d = math.max(0, uv.n or 0), math.max(0, uv.d or 0)
     if uv.why then r.orders.mgr = tostring(uv.why):sub(1, 80) end
   end
+  -- BUG-233: what the kernel does about it (M.mgr_bypass: the workshop tasks, or the workshop it asked for)
+  if r.orders and st.byp then r.orders.byp = tostring(st.byp):sub(1, 80) end
   return r
 end
 

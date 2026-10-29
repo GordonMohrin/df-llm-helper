@@ -160,7 +160,7 @@ T.test('BUG-042 live replay: an office without chair and table gets them placed;
   T.ok(dn[1].msg:find('brews among them', 1, true) and dn[1].msg:find('manager office 18631 has no chair, no table', 1,
        true), dn[1].msg)
   T.ok(dn[1].d.q:find('chair at 128,73,141', 1, true) and dn[1].d.q:find('placed', 1, true), dn[1].d.q)
-  T.ok(dn[1].d.q:find('not built: no free chair, no table; add it at a workshop by hand', 1, true), dn[1].d.q)
+  T.ok(dn[1].d.q:find('not built: no free chair, no table; the kernel adds it as a workshop task', 1, true), dn[1].d.q)
   local s = W.state()
   T.eq(s.orders.mgr, 'manager office 18631 has no chair, no table')
   T.ok(s.orders.unval >= 2 and s.orders.uval_d >= 2, s.orders.unval)
@@ -224,7 +224,7 @@ T.test('BUG-042: an office with a chair and a table is left alone; a planned cha
   T.eq(#ctl3.repairs, 0)
   local d3 = decisions(W3, 'manager_office')
   T.eq(#d3, 1)
-  T.ok(d3[1].msg:find('the manager has no office zone', 1, true), d3[1].msg)
+  T.ok(d3[1].msg:find('no office (chair+table needed)', 1, true), d3[1].msg)          -- BUG-233: was 'no office zone'
   T.ok(d3[1].d.q:find('an Office zone with a chair and a table for him', 1, true), d3[1].d.q)
 end)
 
