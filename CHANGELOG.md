@@ -15,7 +15,9 @@
 - **Tests (fail on abc2f95):** tests/lua/test_bug286_287_sheet.lua (3 of 4; the fourth guards the player's own sheet).
 - **Live check:** after the next kernel trade kern.log `trade: closed dwarfmode/ViewSheets/UNIT/Overview, left open after the kernel's
   own trade screen`, and the next caravan trades without `blocked`. No such line but a block again: the sheet comes later or from
-  elsewhere; DECISION_NEEDED `trade_screen` names it after 3 tries. Uncertain: which DF 53.16 path draws the unit sheet.
+  elsewhere; DECISION_NEEDED `trade_screen` names it after 3 tries. Uncertain: which DF 53.16 path draws the unit sheet; review
+  found the timing against the "left by our close" reading (blocks 12-36 min after the close, the sheet cleared without a reload,
+  every block in the x56 window layout after the relaunch, BUG-286 Review), so BUG-287's question may be what catches it live.
 ## Run 15b crush: the drill lowers its bridges before PEACE, a quiet window for every lowering (BUG-251..254, 2026-10-29; offline, live-untested)
 - **Why:** Run 15b Earthboat y374 summer d74: soldier 24165 died crushed by B1 going down after an automatic drill (#1057
   BRIDGE_CRUSH, #1058 DEATH 'last seen 1 tile from it'); kern.log: PEACE 150981959, 18 'B1 down still waits for citizen', the pull
