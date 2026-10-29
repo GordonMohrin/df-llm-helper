@@ -76,7 +76,7 @@ T.test('FR-90: zones.dump_path_gap: 0 allows a stair beside the box, a bad value
 end)
 
 T.test('FR-90: a dump zone does not overlap rooms, pens, ponds, meeting areas, locations or another dump zone; others not over it', function()
-  local W = zworld()
+  local W = zworld{tiles = {['141,101,7'] = {c = '.', dig = '', bld = '', sand = true}}}   -- BUG-303: a sand zone needs a sand floor
   df.civzone_type = df.civzone_type or {}
   for _, n in ipairs({'Barracks', 'Pen', 'Dump', 'MeetingHall'}) do df.civzone_type[n] = n end
   F.building(W, 'ACTIVITY_ZONE', {id = 1, type = 'Barracks', x1 = 100, y1 = 100, x2 = 110, y2 = 105, z = 7, location_id = -1})

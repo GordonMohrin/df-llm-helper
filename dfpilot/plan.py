@@ -120,6 +120,49 @@ def _has_term(text: str, term: str) -> bool:
     return re.search(r"(?<![\w-])" + re.escape(term.lower()) + r"(?![\w-])", text.lower()) is not None
 
 
+# BUG-304 (Run 15d Drillchamber y376/y378: `plan propose` put the mood need `cloth:plant` and `plant` into trade.want and
+# the BUG-242 note, then `plan check` said `ERROR fair play: $.trade.want[0] mentions 'plant'`): the blocked words name
+# DFHack commands (config/allowlist.json "blocked": `plant` creates plants). A trade token is no command: the plan's own
+# trade.want/sell tokens that the schema accepts (TOKEN: kind[:sub], cloth/thread subs plant, silk, yarn) are not read
+# as one, nor is a run of them in the notes (`gem,cloth:plant,plant`, a `kind:sub` token alone); a word in prose still is.
+_TRADE_PATH = re.compile(r"\$\.trade\.(?:want|sell)\[\d+\]")
+_TOKEN_RUN = re.compile(r"(?<![\w:-])[a-z_]+(?::[a-z_]+)?(?:,[a-z_]+(?::[a-z_]+)?)*(?![\w:-])")
+
+
+def trade_tokens(doc: dict) -> set[str]:
+    """The plan's trade.want/sell entries that are valid trade tokens (schema TOKEN), BUG-304."""
+    tr = doc.get("trade") if isinstance(doc, dict) else None
+    tr = tr if isinstance(tr, dict) else {}
+    out: set[str] = set()
+    for k in ("want", "sell"):
+        for t in tr.get(k) or []:
+            if isinstance(t, str) and re.fullmatch(schema.TOKEN_RE, t) and schema._fibre_sub(t) is None:
+                out.add(t)
+    return out
+
+
+def _no_trade_tokens(text: str, tokens: set[str]) -> str:
+    """The notes text without the runs of the plan's own trade tokens (a list, or a kind:sub token), BUG-304."""
+    def drop(m):
+        items = m.group(0).split(",")
+        listed = len(items) > 1 or ":" in items[0]
+        return " " if listed and all(i in tokens for i in items) else m.group(0)
+    return _TOKEN_RUN.sub(drop, text) if tokens else text
+
+
+def fair_play_hits(doc: dict, terms) -> list[tuple[str, str]]:
+    """(path, term) of every plan string that mentions a blocked term; the plan's trade tokens are no command (BUG-304)."""
+    tokens = trade_tokens(doc)
+    hits = []
+    for p, text in _strings(doc):
+        if _TRADE_PATH.fullmatch(p) and text in tokens:
+            continue
+        if p.endswith("notes"):
+            text = _no_trade_tokens(text, tokens)
+        hits += [(p, term) for term in terms if _has_term(text, term)]
+    return hits
+
+
 def _strings(v, path="$"):
     if isinstance(v, str):
         yield path, v
@@ -1578,10 +1621,8 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
                 warn.append(f"seasons[{si}].orders: {lib} imported twice")
             seen_libs.add(lib)
     terms = banned if banned is not None else _banned_terms()
-    for p, text in _strings(doc):
-        for term in terms:
-            if _has_term(text, term):
-                (warn if p.endswith("notes") else errs).append(f"fair play: {p} mentions {term!r}")
+    for p, term in fair_play_hits(doc, terms):                   # BUG-304: the plan's trade tokens are no command
+        (warn if p.endswith("notes") else errs).append(f"fair play: {p} mentions {term!r}")
     return errs, warn
 
 

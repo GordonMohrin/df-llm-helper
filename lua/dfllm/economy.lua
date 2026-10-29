@@ -2541,6 +2541,10 @@ local function cancel(K, ev)
     while #st.bcancel > 40 do table.remove(st.bcancel, 1) end
   end
   local key = job:lower()
+  if key == 'collect sand' then                  -- BUG-303: DF does not count the sand zone (the abort series)
+    local oks, errs = pcall(M.sand_cancel, K, c, why, ev.tick)
+    if not oks then K.log('warn', 'sand cancel: %s', tostring(errs)) end
+  end
   st.cancels[key] = (st.cancels[key] or 0) + 1
   local n = st.cancels[key]
   if key == 'dump item' then st.dump = {n = n, why = wk, day = day} end   -- FR-90: the game's own words, for inspect items trash
@@ -5512,8 +5516,51 @@ end
 -- blocker appears after report_days (util/cadence); economy.route('gems'|'glass') names the chain for MOOD_RISK.
 -- Module fields, not locals: the main chunk is at Lua's 200-local limit.
 M.GLASS_WHY = {no_sand = 'no sand revealed (a sand zone needs a revealed sand floor)',
-               no_bags = 'no bags (spare cloth/leather + its shop)', no_fuel = 'no fuel (wood furnace + wood, or magma)'}
-M.GLASS_SHORT = {no_sand = 'no sand revealed', no_bags = 'no bags', no_fuel = 'no fuel'}
+               no_bags = 'no bags (spare cloth/leather + its shop)', no_fuel = 'no fuel (wood furnace + wood, or magma)',
+               sand_invalid = 'sand zone invalid ("Need valid, active sand collection zone"): needs a bare sand floor, no grass'}
+M.GLASS_SHORT = {no_sand = 'no sand revealed', no_bags = 'no bags', no_fuel = 'no fuel', sand_invalid = 'sand zone invalid'}
+
+-- BUG-303 (Run 15d Drillchamber y375-y378: economy's 1x1 zone 18035 at 70,83,144 and the player's 3x3 zone 18173 lay on
+-- floors of a sand layer that DF does not count; the gamelog gathered 1,233 "Collect sand: Need valid, active sand collection
+-- zone" cancels, about one a day, so no CANCEL_LOOP (5 a day) came, the order stayed ("Need" is no "Needs ..." reason) and
+-- glass_plan saw a zone (M.sand_zones() > 0) and went on ordering CollectSand: no GLASS_BLOCKED, the mood route was dead).
+-- The cancels with DF's words are counted as one abort series in p.sand_bad {n, first, last} (a gap of more than
+-- glass.sand_abort_days, default 7, starts a new series). From glass.sand_abort cancels (default 3) the zones count as
+-- invalid: blocker sand_invalid (GLASS_BLOCKED once per series, at once: p.sand_rep = the series reported) and glass_sand paints a
+-- new zone on a bare sand floor outside every sand zone; a painted zone ends the series.
+M.SAND_BAD = 'sand collection zone'
+function M.sand_cancel(K, c, why, tick)
+  if not tostring(why or ''):lower():find(M.SAND_BAD, 1, true) then return end
+  local G = type(c.glass) == 'table' and c.glass or {}
+  local p = pstate(K)
+  local now = math.tointeger(tick) or K.now().tick
+  local s = p.sand_bad
+  if type(s) ~= 'table' or now - (math.tointeger(s.last) or now) > (G.sand_abort_days or 7) * DAY then
+    s = {n = 0, first = now}
+  end
+  s.n, s.last = (math.tointeger(s.n) or 0) + 1, now
+  p.sand_bad = s
+  K.persist.touch('m.economy')
+end
+
+-- the abort series when it counts (>= sand_abort cancels, the last within sand_abort_days), else nil (an old one is dropped)
+function M.sand_series(c, p, now)
+  local G, s = c.glass, p.sand_bad
+  if type(s) ~= 'table' then return nil end
+  if now - (math.tointeger(s.last) or 0) > (G.sand_abort_days or 7) * DAY then p.sand_bad = nil; return nil end
+  return (math.tointeger(s.n) or 0) >= (G.sand_abort or 3) and s or nil
+end
+
+-- is x, y, z inside a sand collection zone (its rectangle)? A tile of a zone DF refuses is no new site.
+function M.in_sand_zone(x, y, z)
+  local hit = false
+  pcall(function()
+    for _, zn in ipairs(df.global.world.buildings.other.ZONE_SAND_COLLECTION) do
+      if zn.z == z and x >= zn.x1 and x <= (zn.x2 or zn.x1) and y >= zn.y1 and y <= (zn.y2 or zn.y1) then hit = true; break end
+    end
+  end)
+  return hit
+end
 
 -- the mood reserve's gems target (config/baseline.json reserve.targets.gems, care holds that many)
 function M.gem_reserve(K)
@@ -5557,7 +5604,9 @@ function M.glass_sand(K, c, r, g)
   for _, t in ipairs(ok and type(s) == 'table' and type(s.tiles) == 'table' and s.tiles or {}) do
     local x, y, z = int(t[1]), int(t[2]), int(t[3])
     local okt, v = K.call('snapshot', 'tile', x, y, z)
-    if x and y and z and okt and type(v) == 'table' and v.c == '.' and not far(K, x, y, z) and #cand < 8 then
+    -- BUG-303: the tile reader still calls it a bare sand floor (grass may have grown since the export), outside the zones
+    if x and y and z and okt and type(v) == 'table' and v.c == '.' and v.sand ~= false and not M.in_sand_zone(x, y, z)
+       and not far(K, x, y, z) and #cand < 8 then
       cand[#cand + 1] = {x, y, z}
     end
   end
@@ -5570,6 +5619,7 @@ function M.glass_sand(K, c, r, g)
         tries, r.cmds = tries + 1, r.cmds + 1
         if K.act.sand_zone(pos) then
           p.sand_t, p.sand_at, g.zone = r.now, pos, 'painted'
+          p.sand_bad = nil                       -- BUG-303: a new zone ends the abort series
           K.log('info', 'glass: sand collection zone dfllm-sand at %d,%d,%d', pos[1], pos[2], pos[3])
           return
         end
@@ -5616,13 +5666,17 @@ function M.glass_report(K, c, r, g)
   local G, p = c.glass, r.p
   if #g.block == 0 then p.glass_rep = CAD.quiet(p.glass_rep); return end
   local T = K.now()
-  if not CAD.due(p.glass_rep, T, {}, g.block, {ticks = (G.report_days or 28) * DAY, wall_s = CAD.WALL_S}) then return end
+  local series = g.series and p.sand_rep ~= g.series   -- BUG-303: each sand abort series is reported once, at once
+  if not series and not CAD.due(p.glass_rep, T, {}, g.block, {ticks = (G.report_days or 28) * DAY, wall_s = CAD.WALL_S}) then
+    return
+  end
+  if g.series then p.sand_rep = g.series end
   p.glass_rep = CAD.mark(T, {}, g.block)
   local parts = {}
   for _, b in ipairs(g.block) do parts[#parts + 1] = M.GLASS_WHY[b] or b end
   K.emit('GLASS_BLOCKED', 'B', string.format('glass for moods (%d raw, %d cut) blocked: %s', g.raw, g.cut,
                                              table.concat(parts, '; ')):sub(1, 200),
-         {why = {table.unpack(g.block)}, raw = g.raw, cut = g.cut})
+         {why = {table.unpack(g.block)}, raw = g.raw, cut = g.cut, aborts = g.aborts})
 end
 
 function M.glass_plan(K, c, r)
@@ -5649,7 +5703,14 @@ function M.glass_plan(K, c, r)
   local raw_short = math.max(0, raw - (inv.glass or 0) - (r.s.live[G.make.tag] or 0))
   local sand_short = math.max(0, raw_short - (inv.sand or 0) - (r.s.live[G.sand.tag] or 0))
   if sand_short > 0 then
-    if M.sand_zones() > 0 then g.zone = 'zone' else M.glass_sand(K, c, r, g) end
+    local bad = M.sand_series(c, p, now)           -- BUG-303: DF refuses the sand zones: a new one, and the blocker
+    if M.sand_zones() > 0 and not bad then g.zone = 'zone'
+    else
+      if bad then
+        g.block[#g.block + 1], g.series, g.aborts = 'sand_invalid', bad.first, math.tointeger(bad.n)
+      end
+      M.glass_sand(K, c, r, g)
+    end
     if (inv.bags or 0) == 0 then M.glass_bags(K, c, r, g, sand_short) end
   end
   local fuel = mx

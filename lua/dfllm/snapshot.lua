@@ -99,6 +99,7 @@ local function tt_info(tt)
     r.ice = mat == 'FROZEN_LIQUID'               -- Run 11: frozen water (winter ice) is no water to fish or fill from
     r.shape = shape                              -- BUG-102: the tiletype shape name (care's nook judges it like place.lua)
     r.soilmat = SOIL_MAT[mat] == true            -- FR-95: soil of any shape (a soil wall cannot be smoothed)
+    r.bare = mat == 'SOIL' and shape == 'FLOOR'  -- BUG-303: bare soil floor (no grass, no plant): what DF collects sand from
   end)
   tt_cache[tt] = r
   return r
@@ -262,7 +263,8 @@ end
 
 ---------------------------------------------------------------- public tile query (§7)
 -- nil (hidden or invalid) or {c = legend char, dig = pending designation or '', bld = building type
--- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or '', flow, magma, cav, ice, aq, soilmat}
+-- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or '', flow, magma, cav, ice, aq, soilmat,
+-- sand}
 function M.tile(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return nil end
@@ -281,10 +283,13 @@ function M.tile(K, x, y, z)
   -- ice: frozen water (tiletype material FROZEN_LIQUID; Run 11, economy's fishing zone). BUG-102 (care's drink nook judges a
   -- tile the way quickfort's place mode does, place.lua:29-43): shape = the tiletype shape name ('FLOOR', 'BRANCH', ...),
   -- plant = 'shrub' | 'sapling' | false, occ = the building occupancy value (tile_building_occ: 1 Planned counts there)
-  -- FR-95: aq = the aquifer flag of this revealed tile (M.revealed_aquifer), soilmat = a soil tile of any shape
+  -- FR-95: aq = the aquifer flag of this revealed tile (M.revealed_aquifer), soilmat = a soil tile of any shape;
+  -- BUG-303: sand = a bare floor of a sand layer (M.is_sand: what a sand collection zone needs; zonelib checks it)
+  local oks, sand = pcall(M.is_sand, x, y, z, des)
   return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true,
           cav = des.feature_global == true, ice = info.ice == true, shape = info.shape, plant = plant or false,
-          occ = oc and int(oc.building) or 0, aq = M.revealed_aquifer(des) == true, soilmat = info.soilmat == true}
+          occ = oc and int(oc.building) or 0, aq = M.revealed_aquifer(des) == true, soilmat = info.soilmat == true,
+          sand = oks and sand == true}
 end
 
 -- BUG-058 (economy's farm plots; Run 13 y513: surface crops on a plot on z149 made no PlantSeeds job): does the plot tile
@@ -1259,9 +1264,14 @@ end
 -- floor at x, y, z (designation des, already checked not hidden) of a sand layer? The tile sheet names its material
 -- ("yellow sand"); the layer material is DFHack's tile-material GetLayerMat (geology layer of the tile's biome),
 -- sand = inorganic flag SOIL_SAND. Cached per map block column, biome index and layer index. A field: tests replace it.
+-- BUG-303 (Run 15d Drillchamber: zones 18035 and 18173 on z144 "sand" floors, 1,233 cancels "Collect sand: Need valid,
+-- active sand collection zone"): the layer alone is not enough. A grass-grown floor (tiletype material GRASS_*, which the
+-- soil marks count) or a plant tile of a sand layer is no sand tile; only a bare soil floor (tiletype material SOIL) is.
 M.SAND_MAX = 32                   -- sand floors kept (newest export first) and probed per export
 function M.is_sand(x, y, z, des)
   if not tilemat then return false end
+  local okt, tt = pcall(dfhack.maps.getTileType, x, y, z)
+  if not okt or tt == nil or not tt_info(tt).bare then return false end
   local key = string.format('%d,%d,%s,%s', x // 16, y // 16, tostring(des.biome), tostring(des.geolayer_index))
   local v = sand_cache[key]
   if v == nil then

@@ -38,6 +38,29 @@
   which deliverable holds Drillchamber next (the status line names it), and whether the farm plot of Inkintense counts as
   built (getBuildStage of a farm plot).
 
+## Run 15d glass: sand zones only on bare sand floors, the "Need valid, active sand collection zone" series is seen, trade tokens are no command (BUG-303, BUG-304, 2026-10-29; offline, live-untested)
+- **Why:** Run 15d Drillchamber (runs/run-15d-drillchamber/FR-BUGS.md 'Runde 2/3'): economy's sand zone 18035 at 70,83,144 and the
+  player's 3x3 zone 18173 beside it got `Collect sand: Need valid, active sand collection zone` cancels 653 -> 884 -> 1,233 (gamelog)
+  with no GLASS_BLOCKED and no CANCEL_LOOP (about one a day); the glass route of three strange moods was dead (BUG-303). `plan check`
+  called the trade token `cloth:plant` that `plan propose` itself wrote an ERROR (`$.trade.want[0] mentions 'plant'`), so the
+  player took plant cloth, the missing mood good, out of the plan (BUG-304).
+- **What changed:** snapshot M.is_sand counts a bare soil floor (tiletype material SOIL) of a SOIL_SAND layer only, never a grass
+  or plant tile of it (root cause: the layer alone was asked, and the grass materials count as soil); snapshot.tile `sand`.
+  zone.place type=sand is refused without a bare sand floor in the box and names up to 3 sand floors seen. economy counts the
+  cancels with DF's words as an abort series (`p.sand_bad`; `glass.sand_abort` 3, `glass.sand_abort_days` 7): blocker
+  `sand_invalid`, GLASS_BLOCKED once per series at once (`d.aborts`), no CollectSand into the refused zones, a new zone on a bare
+  sand floor outside them (the series ends). plan.py `fair_play_hits`: the plan's own valid trade tokens (and their runs in the
+  notes) are no command; the word in prose or a build parameter is flagged as before. Schema GLASS_BLOCKED `aborts:i`, CONTRACTS
+  (GLASS_BLOCKED, snapshot.tile, zone.place) and the appendix regenerated.
+- **Tests (fail on 9ef2ccb):** tests/lua/test_snapshot.lua, test_zone_place.lua, test_economy_glass.lua (BUG-303);
+  tests/test_bug303_304_glass.py (BUG-304).
+- **Live check:** Drillchamber: GLASS_BLOCKED `sand zone invalid` (d.aborts >= 3) within a few game days, then kern.log `glass: sand
+  collection zone dfllm-sand at ...` on a new tile; the gamelog count of `Need valid, active sand collection zone` stops growing and
+  CollectSand fills a bag. A second GLASS_BLOCKED series means grass was not the cause: read the new tile's sheet by hand. `zone.place
+  type=sand` over 71,82-73,84 z144 is refused with `sand floors seen`. `dfllm plan propose` + `plan check` with `cloth:plant` in the
+  running trade.want: no fair-play line. Uncertain: that grass is DF's reason (the tiletype of the zone tiles was not readable
+  offline); if no bare sand floor is revealed, the blockers say `sand zone invalid` + `no sand revealed` and the player must dig into
+  the sand layer.
 ## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
 - **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
   player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no

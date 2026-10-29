@@ -11,7 +11,8 @@
 -- sand s, clay c, fishing f, meeting m, dump d (FR-90, Run 14 note 98: the garbage dump zone, zones > Dump). One level per zone. Refused: a box that leaves the map or holds a tile that is not
 -- revealed (a player cannot draw on an unexplored tile; fair play: never hidden tiles), a box over rock, open air or (for
 -- everything but fishing) water, a box over more than zones.max_tiles tiles (config/baseline.json "zones", default 400), a
--- box that overlaps a conflicting zone (below), and any fight mode (kern: PEACE, ALERT, RECOVERY only).
+-- box that overlaps a conflicting zone (below), a sand box without a bare sand floor (BUG-303, Z.sand_ok), and any fight
+-- mode (kern: PEACE, ALERT, RECOVERY only).
 -- Conflicts: a zone of the same type; any zone that is a location (hospital, temple, tavern, library, guildhall: it has a
 -- location_id); a room zone (bedroom, dining hall, barracks, dormitory, office, archery range, tomb, dungeon) for a pen, a
 -- pit or a pond; a pond or pit under a pen or a meeting area and the other way round. Sand, clay and fishing zones conflict
@@ -152,6 +153,33 @@ function Z.dump_ok(box, tile, gap)
   return nil
 end
 
+-- BUG-303 (Run 15d Drillchamber: zone 18173, 3x3 on z144, drawn on floors of a sand layer that DF does not count, and
+-- 1,233 cancels "Collect sand: Need valid, active sand collection zone" followed): a sand zone needs at least one bare sand
+-- floor (snapshot.tile `sand`, snapshot.is_sand: a bare soil floor of a SOIL_SAND layer; grass, plants, stone and other soils
+-- do not count). nil when the box holds one, else the refusal text naming up to Z.SAND_HINT sand floors the exports saw
+-- (`seen`, snapshot.sand tiles) that the tile reader still calls sand, as the place for a box that works.
+Z.SAND_HINT = 3
+function Z.sand_ok(box, tile, seen)
+  for y = box.y0, box.y1 do
+    for x = box.x0, box.x1 do
+      local c = tile(x, y, box.z)
+      if type(c) == 'table' and c.sand == true then return nil end
+    end
+  end
+  local alt = {}
+  for _, t in ipairs(type(seen) == 'table' and seen or {}) do
+    local x, y, z = int(t[1]), int(t[2]), int(t[3])
+    local inside = z == box.z and x and y and x >= box.x0 and x <= box.x1 and y >= box.y0 and y <= box.y1
+    if x and y and z and not inside and #alt < Z.SAND_HINT then
+      local c = tile(x, y, z)
+      if type(c) == 'table' and c.sand == true then alt[#alt + 1] = string.format('%d,%d,%d', x, y, z) end
+    end
+  end
+  return 'no bare sand floor in the box (grass, plants, stone, other soils are no sand tile): ' ..
+         (#alt > 0 and ('sand floors seen: ' .. table.concat(alt, ' '))
+          or 'no sand floor seen (snapshot sand marks): dig into a sand layer, then export')
+end
+
 -- conflicts with the zones listed ({id, tname, loc, name, x0, y0, x1, y1, z, has = function(x, y) | nil}); the first text
 function Z.conflict(ty, box, zones)
   local t = Z.TYPES[ty]
@@ -237,6 +265,11 @@ function Z.verb(K, args, cmd)
   end
   local clash = Z.conflict(spec.type, spec.box, Z.zones(spec.box.z))
   if clash then return false, 'zone.place: the box ' .. clash end
+  if spec.type == 'sand' then                        -- BUG-303: DF collects sand from a bare sand floor only
+    local oks, seen = K.call('snapshot', 'sand')
+    bad = Z.sand_ok(spec.box, tile, oks and type(seen) == 'table' and seen.tiles or nil)
+    if bad then return false, 'zone.place: ' .. bad end
+  end
   local cell, pos = Z.cell(spec.type, spec.box, spec.name)
   local t = Z.TYPES[spec.type]
   local okz, res = K.act.zone_place({cell = cell, pos = pos, box = spec.box, pond = t.pond, ztype = t.zt})
