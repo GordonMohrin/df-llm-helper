@@ -39,7 +39,10 @@ local function world(opts)
   local function key(x, y, z) return x .. ',' .. y .. ',' .. z end
   W.load({name = 'snapshot', every = {ticks = 100},
           sand = function(K) return ctl.sand end,
-          tile = function(K, x, y, z) if ctl.hidden[key(x, y, z)] then return nil end return {c = '.', dig = '', bld = ''} end,
+          tile = function(K, x, y, z)
+            if ctl.hidden[key(x, y, z)] then return nil end
+            return {c = '.', dig = '', bld = '', sand = not (ctl.nosand or {})[key(x, y, z)]}   -- BUG-303: tile().sand
+          end,
           far = function(K, x, y, z) return ctl.far[key(x, y, z)] == true end,
           outside_near = function(K, pts, r)
             local out = {}
@@ -202,6 +205,56 @@ T.test('Run 11: a magma glass furnace needs no fuel; before any export of this b
   T.eq(#orders(W, 'dfllm:glass_fuel'), 0)
   days(W, 2)
   T.eq(#ctl.exports, 1, 'once per boot')
+end)
+
+-- BUG-303 (Run 15d Drillchamber y375-y378: zones 18035 at 70,83,144 and 18173 at 71-73,82-84 z144; the gamelog gathered
+-- 1,233 "Collect sand: Need valid, active sand collection zone" cancels, about one a day: no CANCEL_LOOP, no GLASS_BLOCKED,
+-- glass_plan saw a zone and kept ordering CollectSand): the cancels with DF's words make an abort series; from 3 the zones
+-- count as invalid: GLASS_BLOCKED sand_invalid once per series, a new zone on a bare sand floor outside the old zones (a
+-- floor the tile reader no longer calls sand, e.g. grass grew, is skipped)
+T.test('BUG-303: "Need valid, active sand collection zone" cancels: sand_invalid once per series, a new zone elsewhere', function()
+  local W, ctl = world{wants = {{cls = 'glass', n = 2, glass = 'raw', unit = 1}}, furnaces = {'MagmaGlassFurnace'},
+                       sand = {tick = 100, tiles = {{70, 83, 144}, {72, 83, 144}, {52, 109, 144}, {53, 109, 144}}},
+                       setup = function(W, ctl)
+                         F.building(W, 'ZONE_SAND_COLLECTION', {id = 18035, name = 'dfllm-sand', x1 = 70, y1 = 83, x2 = 70,
+                                                                 y2 = 83, z = 144})
+                         F.building(W, 'ZONE_SAND_COLLECTION', {id = 18173, name = 'dfllm-sand2', x1 = 71, y1 = 82, x2 = 73,
+                                                                 y2 = 84, z = 144})
+                         bag(W, false); bag(W, false)
+                       end}
+  ctl.nosand = {['52,109,144'] = true}                                          -- grass grew over it since the export
+  days(W, 1)
+  T.eq(#orders(W, 'dfllm:sand'), 1, 'a zone stands: CollectSand is ordered (DF has not refused yet)')
+  T.eq(events(W, 'GLASS_BLOCKED'), {})
+  local function cancel(why)
+    W.event('REPORT', {type = 'CANCEL_JOB', text = 'Zasit Tishisbomrek, Bowyer cancels Collect sand: ' .. why .. '.'})
+  end
+  cancel('Interrupted by a trader')                                             -- not DF's verdict on the zone
+  cancel('Need valid, active sand collection zone')
+  cancel('Need valid, active sand collection zone')
+  days(W, 1)
+  T.eq(events(W, 'GLASS_BLOCKED'), {}, 'two cancels are no series yet')
+  T.eq(W.find_acts('sand_zone'), {})
+  cancel('Need valid, active sand collection zone')
+  days(W, 1)
+  local gb = events(W, 'GLASS_BLOCKED')
+  T.eq(#gb, 1, 'the third cancel: the zones count as invalid')
+  T.eq({gb[1].d.why, gb[1].d.aborts}, {{'sand_invalid'}, 3})
+  T.ok(gb[1].msg:find('sand zone invalid', 1, true) and #gb[1].msg <= 200, gb[1].msg)
+  local z = W.find_acts('sand_zone')
+  T.eq(#z, 1, 'a new zone')
+  T.eq({z[1].args[1][1], z[1].args[1][2], z[1].args[1][3]}, {53, 109, 144},
+       'not on the old zones (70,83 and 72,83), not on 52,109 (no bare sand floor any more)')
+  -- the new zone ended the series: no new report, the chain goes on
+  days(W, 2)
+  T.eq(#events(W, 'GLASS_BLOCKED'), 1)
+  T.eq(route(W, 'glass'):find('sand zone invalid', 1, true), nil, route(W, 'glass'))
+  -- the next series (DF refuses the new zone too) is reported again, once
+  for _ = 1, 4 do cancel('Need valid, active sand collection zone') end
+  days(W, 30)
+  gb = events(W, 'GLASS_BLOCKED')
+  T.eq(#gb, 2, 'a new abort series: one more report')
+  T.eq(gb[2].d.why[1], 'sand_invalid')
 end)
 
 T.done()

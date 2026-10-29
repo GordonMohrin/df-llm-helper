@@ -774,8 +774,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MILITIA_ROTATED": ("B", "military", _d("squad:s out:i into:i", "size:i eligible:i lo:i hi:i win:s left:i worn:i edge:i")),
     # Run 11: economy's glass chain for strange moods is blocked: why = no_sand (no revealed sand floor), no_bags (no
     # spare cloth/leather or shop for ConstructBag), no_fuel (no charcoal and no wood furnace or wood, no magma glass
-    # furnace); raw/cut = the raw and cut glass wanted; once per set of blockers (util/cadence)
-    "GLASS_BLOCKED": ("B", "economy", _d("why:sa", "raw:i cut:i")),
+    # furnace); raw/cut = the raw and cut glass wanted; once per set of blockers (util/cadence). BUG-303: sand_invalid = DF
+    # refuses the sand zones ("Need valid, active sand collection zone" cancels, aborts = their count in the series); once
+    # per abort series
+    "GLASS_BLOCKED": ("B", "economy", _d("why:sa", "raw:i cut:i aborts:i")),
     # Run 11 (Kilrudrabed y432: 1 boulder, ~110 orders 'no rock'): pieces planned buildings wait for that nothing in the
     # fort can make (pieces 'door x1, wall x2'; why = the reasons 'no rock, no logs'; rock = free stone, logs, n = the
     # pieces); once per set of kinds and reasons (util/cadence)

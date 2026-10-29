@@ -330,6 +330,31 @@ T.test('Run 11: sand marks: revealed sand floors only, kept for snapshot.sand ac
   T.eq(select(2, W.K.call('snapshot', 'sand')).tiles, {{1, 0, Z}, {2, 0, Z}, {2, 1, Z}, {8, 1, Z}})
 end)
 
+-- BUG-303 (Run 15d Drillchamber: zones 18035/18173 on z144 floors of a sand layer, 1,233 cancels "Collect sand: Need valid,
+-- active sand collection zone"): the real M.is_sand counts a bare soil floor of a sand layer only, never a grass-grown floor
+-- or a plant tile of the same layer; tile() carries the verdict as `sand` (zonelib refuses a sand zone without one)
+T.test('BUG-303: is_sand: bare soil floors of a sand layer only (grass and shrubs are no sand tiles); tile().sand', function()
+  local dir = (os.getenv('TEMP') or '.'):gsub('\\', '/') .. '/dfllm-lua-tests/test_snapshot'
+  luahost.mkdir_recursive(dir .. '/dfllm-runtime/mock/snap')
+  local layer = 0
+  package.loaded['tile-material'] = {GetLayerMat = function(x, y, z)
+    layer = layer + 1
+    return {inorganic = {flags = {SOIL_SAND = true}}}            -- the whole block lies on a sand layer
+  end}
+  local W = world{dfpath = dir, rows = {'#sGhss..s#', '#GGs?sss.#'}}
+  package.loaded['tile-material'] = nil
+  W.inbox('snapshot', {purpose = 'audit', bbox = {0, 0, Z, 9, 1, Z}}, {id = 'c61', by = 'cli'})
+  for _ = 1, 10 do W.frame(0, true) end
+  T.ok(written(W, 'c61'), 'written')
+  T.eq(select(2, W.K.call('snapshot', 'sand')).tiles, {{1, 0, Z}, {4, 0, Z}, {5, 0, Z}, {8, 0, Z}, {3, 1, Z}, {6, 1, Z},
+       {7, 1, Z}}, 'the grass floors 2,0 1,1 2,1 and the shrub 3,0 lie on the sand layer but are no sand tiles (5,1: the manifest bridge)')
+  local function t(x, y) local _, r = W.K.call('snapshot', 'tile', x, y, Z); return r end
+  T.eq({t(1, 0).sand, t(2, 0).sand, t(3, 0).sand, t(6, 0).sand, t(8, 0).sand, t(0, 0).sand},
+       {true, false, false, false, true, false}, 'grass, shrub, a stone floor and a wall are no sand tiles')
+  T.eq(t(4, 1), nil, 'hidden: nothing')
+  T.ok(layer > 0)
+end)
+
 -- BUG-058 (economy's farm plots): is the plot tile underground (true), on the surface (false), or unknown (nil)?
 T.test('plot_under(): open sky is the surface, subterranean underground, roofed and not subterranean/hidden/no tile unknown',
        function()

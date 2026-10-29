@@ -145,6 +145,7 @@ local function zworld(opts)
     if t == false then return nil end
     return t or {c = '.', dig = '', bld = ''}
   end
+  function snap.sand(K) return {tick = W.sand_seen and 100 or -1, tiles = W.sand_seen or {}} end   -- BUG-303
   local runner = {name = 'runner', every = {ticks = 600}, verbs = {}}
   runner.verbs['zone.place'] = function(K, args, cmd) return Z.verb(K, args, cmd) end
   W.created = {}
@@ -209,6 +210,28 @@ T.test('FR-78: zone.place refusals: modes, hidden/rock/water tiles, size, confli
   refused({type = 'pen', bbox = {200, 200, 5, 202, 201, 5}}, '6 tiles: a zone holds at most 4')
   cfg.zones = {max_tiles = 'many'}
   T.ok(W.inbox('zone.place', {type = 'pen', bbox = {200, 200, 5, 202, 201, 5}}).ok, 'a bad value keeps the default 400')
+end)
+
+-- BUG-303 (Run 15d Drillchamber: `zone.place {"type":"sand","bbox":[71,82,144,73,84,144]}` -> ok, zone 18173, then the
+-- gamelog's "Collect sand: Need valid, active sand collection zone" went on 884 -> 1233): a sand box needs a bare sand floor
+-- (snapshot.tile sand); the refusal names sand floors the exports saw that still are sand, outside the box
+T.test('BUG-303: zone.place type=sand: refused without a bare sand floor in the box, names the sand floors seen', function()
+  local W = zworld{tiles = {['30,30,5'] = {c = '.', sand = true}, ['31,30,5'] = {c = '.', sand = true},
+                            ['32,30,5'] = {c = '.', sand = false}, ['71,82,144'] = {c = '.', sand = false}}}
+  W.sand_seen = {{71, 82, 144}, {32, 30, 5}, {30, 30, 5}, {31, 30, 5}, {40, 40, 5}}   -- 32,30 and 40,40 are no sand now
+  local r = W.inbox('zone.place', {type = 'sand', bbox = {71, 82, 144, 73, 84, 144}, name = 'dfllm-sand2'})
+  T.ok(not r.ok, 'the Drillchamber box: grass/plain floors of a sand layer, no sand tile')
+  T.ok(r.msg:find('no bare sand floor in the box', 1, true), r.msg)
+  T.ok(r.msg:find('sand floors seen: 30,30,5 31,30,5', 1, true), r.msg)
+  T.eq(#W.created, 0)
+  r = W.inbox('zone.place', {type = 'sand', bbox = {31, 29, 5, 33, 31, 5}})
+  T.ok(r.ok, 'one sand floor in the box is enough: ' .. tostring(r.msg))
+  T.eq(W.created[1].ztype, 'SandCollection')
+  W.sand_seen = {}
+  r = W.inbox('zone.place', {type = 'sand', bbox = {50, 50, 5, 51, 51, 5}})
+  T.ok(not r.ok and r.msg:find('no sand floor seen', 1, true), r.msg)
+  T.ok(W.inbox('zone.place', {type = 'clay', bbox = {50, 50, 5, 51, 51, 5}}).ok, 'other types do not ask for sand')
+  T.ok(#r.msg < 200, #r.msg)
 end)
 
 T.test('FR-78: no tile reader: nothing is drawn on tiles nobody read', function()
