@@ -282,6 +282,50 @@ def popup_gone_line(save_dir: Path, now_tick: int | None) -> str | None:
             f"\"{str(last)[:80]}\"); the player's click looks the same, a private script's delete too (kern.log 'popup vanished')")
 
 
+def df_up(df: Path | None = None) -> bool | None:
+    """BUG-209: does a Dwarf Fortress process run from this DF folder (the runtime root's parent, <DF>/dfllm-runtime)?
+    True / False / None (unknown: tasklist failed or no process image could be read). Several DF copies may run on one
+    machine (one per port), so the process image path must lie in this folder. No DF call: tasklist and the image name."""
+    import subprocess
+    from .supervise import DF_EXE, NO_WINDOW, _win
+    df = Path(df) if df is not None else paths.runtime_root().parent
+    if not (df / DF_EXE).is_file():
+        return False
+    try:
+        r = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {DF_EXE}", "/FO", "CSV", "/NH"], capture_output=True,
+                           timeout=15, creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = (r.stdout or b"").decode("utf-8", "replace")
+    pids = [int(m.group(1)) for m in re.finditer(r'^"Dwarf Fortress\.exe","(\d+)"', out, re.M | re.I)]
+    unknown = False
+    for pid in pids:
+        try:
+            img = _win().image(pid)
+        except (OSError, AttributeError, ValueError):
+            img = ""
+        if not img:
+            unknown = True
+        elif os.path.normcase(os.path.abspath(os.path.dirname(img))) == os.path.normcase(os.path.abspath(df)):
+            return True
+    return None if unknown else False
+
+
+ADOPT_CMD = "dfhack-run dfllm adopt"
+
+
+def no_active_line(d: Path, up: bool | None) -> tuple[str, bool]:
+    """BUG-209 (live round 3, new embark Earthboat: doctor said 'verdict: OK' on the folder of an earlier fort while DF ran
+    a save nobody adopted): (line, is a problem) when <runtime>/ACTIVE is missing."""
+    if up:
+        return (f"ACTIVE missing: the loaded save is not adopted (or kern is idle): {ADOPT_CMD} (a new embark), then "
+                f"dfhack-run dfllm selftest full; the numbers below are from '{d.name}', the newest folder, not the "
+                "loaded fort"), True
+    return ("ACTIVE missing: no dfllm fort is loaded (" + ("DF does not run from " + str(paths.runtime_root().parent)
+            if up is False else "DF process state unknown") + f"); the numbers below are from '{d.name}', the newest "
+            "folder"), False
+
+
 def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
     """(report lines, problems)."""
     d = Path(save_dir)
@@ -294,6 +338,9 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
                + (f" | state seq {info['seq']} slot {info['slot']}" if state else " | no valid state"))
     if active == d.name and (age is None or age > HB_MAX_S):
         bad.append(f"heartbeat {fmt_age(age)} old (> {HB_MAX_S}s): DF hung or kern stopped")
+    if active is None:                         # BUG-209: no ACTIVE while DF runs = the loaded save is not adopted
+        line, problem = no_active_line(d, df_up())
+        (bad if problem else out).append(line)
     if state is None and info.get("errors"):
         bad.append("state unreadable: " + "; ".join(f"{k}: {v}" for k, v in info["errors"].items())[:200])
     s = perf_summary(read_perf(d))

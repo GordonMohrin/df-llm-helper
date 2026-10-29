@@ -807,33 +807,45 @@ class Follower:
         self._request_place("tombs", "tombs", params, "S1", now)
 
     def _request_place(self, key: str, tpl: str, params: dict, site: str, now: float, prio: int | None = None,
-                       need: list | None = None) -> None:
+                       need: list | None = None) -> bool:
+        """True when the snapshot for the placement was requested (False: cooldown, or the request failed)."""
         job = self.jobs.get(key)
         if job and now - job.get("since", 0) < (AUTO_TIMEOUT_S if not job.get("placed") else TOMBS_COOLDOWN_S):
-            return
+            return False
         try:
             cid = self._send("snapshot", {"purpose": "sites"}, f"{tpl} snapshot", now)
         except Exception as e:                 # noqa: BLE001
-            return self._fail(f"{tpl} snapshot", e, now)
+            self._fail(f"{tpl} snapshot", e, now)
+            return False
         self.jobs[key] = {"snap": cid, "since": now, "params": params, "tpl": tpl, "site": site}
         if prio is not None:
             self.jobs[key]["prio"] = prio
         if need:
             self.jobs[key]["need"] = list(need)
+        return True
 
     def _request_seal(self, now: float) -> None:
         """Run 10: the audit named the bypass for months and nobody walled it. In PEACE, the walls of the newest audit
-        that no seal project builds yet (cmd.audit_routes) get the seal at=audit (cmd.place resolves the tiles)."""
-        from .cmd import audit_routes
+        that no seal project builds yet (cmd.audit_routes) get the seal at=audit (cmd.place resolves the tiles).
+        BUG-211 (live round 3, Earthboat): never while the audit says the fort has no trap hall (fortcore stage 2: every
+        way in is a 'bypass' then, the walls are room doors off the core corridor), never on a fortcore tile (audit_routes
+        leaves those out), and the cli.log line only when a placement starts, once per walls set in AUTO_TIMEOUT_S."""
+        from .cmd import audit_routes, no_trap_hall
         st = files.read_state(self.dir) or {}
         if st.get("mode") != "PEACE":
             return                             # builders outside in a fight: the next monthly audit asks again
         a = audit_routes(self.dir, st)
-        if not a["open"]:
+        if not a["open"] or no_trap_hall(a.get("fails") or []):
             return
-        files.log_cli(self.dir, "follow", "auto:seal", {"walls": a["open"]},
-                      f"audit names {a['routes'][0]}: placing the seal at=audit")
-        self._request_place("seal", "seal", {"at": "audit"}, "S1", now)
+        prev = self.jobs.get("seal") if isinstance(self.jobs.get("seal"), dict) else {}
+        if not self._request_place("seal", "seal", {"at": "audit"}, "S1", now):
+            return                             # cooldown: the placement of this audit runs already, no log line
+        key = ";".join(sorted(a["open"]))
+        logged = prev.get("logged") if prev.get("walls") == key and isinstance(prev.get("logged"), (int, float)) else None
+        self.jobs["seal"].update(walls=key, logged=logged if logged is not None and now - logged < AUTO_TIMEOUT_S else now)
+        if self.jobs["seal"]["logged"] == now:
+            files.log_cli(self.dir, "follow", "auto:seal", {"walls": a["open"]},
+                          f"audit names {a['routes'][0]}: placing the seal at=audit")
 
     def _request_starter(self, d: dict, now: float) -> None:
         """PLAN_EXHAUSTED in an auto phase: place the phase's first proj deliverable that has no project yet."""
@@ -1069,7 +1081,7 @@ def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
     if timeout is None:                        # BUG-160: adapt to the fort's size and say so
         timeout, big = audit_timeout(save_dir)
         if args.snap is None:
-            print(f"audit: waiting up to {timeout:g} s for the fresh snapshot (largest snapshot on disk "
+            print(f"audit: waiting up to {int(round(timeout))} s for the fresh snapshot (largest snapshot on disk "
                   f"{big // 1024} KB; --timeout sets it)")
     try:
         if sid is None:

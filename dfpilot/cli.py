@@ -300,6 +300,12 @@ def main(argv: list[str] | None = None) -> int:
     except paths.NoSave as e:
         if c == "bp" and (args.action == "list" or (args.action == "preview" and not args.site)):
             return run_bp(args, None)                  # the templates need no fort (e.g. before adopt)
+        if c == "next":                                # BUG-209: no runtime folder yet, DF runs here: a new embark
+            from .doctor import df_up
+            from .guide import adopt_step
+            if df_up():
+                print(adopt_step().text())
+                return 0
         print(f"dfllm: {e}")
         return 2
     if c == "status":

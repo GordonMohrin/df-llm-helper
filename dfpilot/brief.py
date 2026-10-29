@@ -9,6 +9,7 @@ from . import files, paths, schema
 from .events import SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, fmt_tick, fmt_ticks
 
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
+PROJ_STATUS_TOKENS = 32               # BUG-212: the status proj line (rank 1, never dropped) is clipped to this
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60}
 SRC_LABEL = {"beds": "no beds", "drink": "no drink", "food": "no food", "toppled": "toppled buildings"}   # FR-74
 POP_QUIET_MIN = 10                        # FR-74: "no migrant wave in a year" is shown in the status from this many citizens
@@ -45,6 +46,8 @@ class Ctx:
         self.state, self.info = files.read_state_ex(self.dir)
         self.hb, self.hb_age = files.read_heartbeat(self.dir)
         self.active = paths.active_save() == self.save
+        # BUG-209: the folder came from paths._last_save (no ACTIVE): the newest folder, maybe an earlier fort
+        self.fallback = not self.active and paths.fell_back() and paths._last_save() == self.save
         plan = files.read_json(self.dir / "plan.json")
         self.plan = plan if isinstance(plan, dict) and not schema.validate("plan", plan) else None
         self.inbox = files.pending_inbox(self.dir)
@@ -114,7 +117,8 @@ def line_head(ctx: Ctx) -> str:
     since = ctx.mode_since()
     mode = s.get("mode") or (ctx.hb or {}).get("mode") or "?"
     run = "paused" if t.get("paused") else "run"
-    df = "" if ctx.active else " (not ACTIVE)"
+    df = "" if ctx.active else (" (fallback: newest folder, not ACTIVE)" if getattr(ctx, "fallback", False)
+                                else " (not ACTIVE)")
     own = s.get("owners") or {}
     hold = (f" pause:{own['pause']}" if own.get("pause") else "") + (" tempo:inbox" if own.get("tempo") == "inbox" else "")
     al = s.get("alarm")
@@ -251,7 +255,8 @@ def line_reset(ctx: Ctx) -> str:
 def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     """FR-65: 'SIEGE UNREADY (R0): <blockers> | <n> ways in without door or bridge: x,y,z kind ... | traps N |
     next: ...' (DESIGN §5.4 lists the blockers). cmds=False (status): without the mood_ws command and the hospital.retire
-    hint, which status shows as their own lines (line_r0_cmd, line_hosp_retire)."""
+    hint, which status shows as their own lines (line_r0_cmd, line_hosp_retire), and with only the first next: hint
+    (BUG-212; brief keeps them all)."""
     r = unready_r0(ctx)
     if r is None:
         return ""
@@ -280,7 +285,13 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     if why:                                    # BUG-043 (Run 11 y479): the audit box over the tile cap, for weeks
         out.append(f"audit snapshot refused: {why}")
     nxt = []
-    if WALL_RE.search(route):
+    hall = True
+    if WALL_RE.search(route) and getattr(ctx, "dir", None):
+        from .cmd import audit_fails, no_trap_hall
+        hall = not no_trap_hall(audit_fails(ctx.dir))
+    if WALL_RE.search(route) and not hall:     # BUG-211: no trap hall yet: the 'bypass' is a room door off the corridor
+        out.append("no trap hall yet: the bypass waits for fortcore stage 2 (plan), no seal at=audit before it")
+    elif WALL_RE.search(route):
         nxt.append("wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal p.at=audit)")
     elif route:
         nxt.append("no wall tile on that route: dfllm cmd inspect what=entrances")
@@ -329,8 +340,8 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     if lost:                                   # BUG-048: the keeper replaces it by wall + door (no question any more)
         nxt.append(f"{','.join(lost)} lost to building destroyers: the kernel replaces it by wall + door in quiet PEACE "
                    f"(dfllm cmd inspect what=defense; dfllm cmd bridge.rebuild only on Gordon's word)")
-    if nxt:
-        out.append("next: " + "; ".join(nxt))
+    if nxt:                                    # BUG-212 (live round 3: six next: commands in a 700-char status line 2)
+        out.append("next: " + ("; ".join(nxt) if cmds else nxt[0]))
     return _join(out)
 
 
@@ -858,8 +869,12 @@ def line_burrow(ctx: Ctx) -> str:
     return txt
 
 
-def line_proj(ctx: Ctx, n: int = 3) -> str:
+def line_proj(ctx: Ctx, n: int = 3, blocked_first: bool = False) -> str:
+    """'proj <id> <stage> <pct>% [BLOCKED:<why>], ...' of the first n projects; blocked_first (status, BUG-212): the
+    blocked ones lead, so the short status line still names what stands still."""
     pr = ctx.s.get("proj") or []
+    if blocked_first:
+        pr = sorted(pr, key=lambda r: not (len(r) > 3 and r[3]))
     if not pr:
         return "proj none" if "proj" in ctx.s else ""
     items = [f"{i} {st} {pct}%" + (f" BLOCKED:{b}" if b else "") for i, st, pct, b in pr[:n]]
@@ -1003,7 +1018,8 @@ def status_text(save_dir: Path) -> str:
         lines.append((1, _no_state(ctx)))
     else:
         # BUG-154 (live i4): the mood_ws command and the care-first line are short and say what to do next and what
-        # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first
+        # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first.
+        # BUG-212 (live round 3): PLAYBOOK 9.3 reads the proj line: rank 1 too, its first two projects (brief has three)
         lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_hosp_retire(ctx)),
                   (1, line_sched(ctx, "care"))]
         lines += curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
@@ -1012,7 +1028,9 @@ def status_text(save_dir: Path) -> str:
             lines.append((4, f"desperate (stress 0): {s0['n']}" + (f" ids {','.join(str(i) for i in s0.get('ids') or [])}"
                                                                    if s0.get("ids") else "")))
         core, extra = def_parts(ctx)
-        lines += [(3, _join(core)), (3, line_burrow(ctx)), (3, line_sched(ctx, "rest")), (4, line_proj(ctx)), (4, line_kern(ctx)),
+        lines += [(3, _join(core)), (3, line_burrow(ctx)), (3, line_sched(ctx, "rest")),
+                  (1, clip(line_proj(ctx, 2, blocked_first=True), PROJ_STATUS_TOKENS)),
+                  (4, line_kern(ctx)),
                   (4, line_snap(ctx)),
                   (5, _join(extra))]                                 # J3: the army's detail is the first line to go
     return fit_ranked(lines, STATUS_TOKENS)

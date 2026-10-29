@@ -4,7 +4,8 @@ The game session read `inspect` 635 times and never knew what to do. `next` is a
 `brief` already read (state, plan.json, alarm.txt, the newest class-A events): no live call, no new file but its own
 repeat memory. A fixed priority, the first step that applies wins:
 
-    dead       the kernel does not run (no state, not the ACTIVE save, or its heartbeat is old): nothing else can be trusted
+    dead       the kernel does not run (no state, not the ACTIVE save, or its heartbeat is old): nothing else can be trusted;
+               no ACTIVE while DF runs here (a new embark, BUG-209)                  -> dfhack-run dfllm adopt
     interrupt  unacknowledged interrupts (state alarm.unacked)                     -> dfllm ack
     danger     a fight mode, a visible hostile, or cursed citizens (BUG-115)         -> dfllm wait ...; tell the player
     dying      patients near the thirst death line (PATIENT_DYING)                   -> dfllm cmd inspect water_sources
@@ -30,7 +31,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import files
+from . import files, paths
 from .events import DAY
 
 REPEAT_MAX = 3                  # the same command this many times in REPEAT_WINDOW_S is not offered a 4th time
@@ -45,6 +46,7 @@ HEARTBEAT_DEAD_S = 600          # an ACTIVE save whose heartbeat is older than t
 WAIT = "dfllm wait --until-interrupt --timeout 15"
 PLAN_CMD = "dfllm plan propose y.json"
 SEAL_CMD = "dfllm cmd bp.place tpl=seal site=S1 at=last"
+ADOPT_CMD = "dfhack-run dfllm adopt"     # BUG-209: a new embark (no ACTIVE while DF runs here)
 HOSPITAL_CMD = "dfllm cmd bp.place tpl=hospital site=S1"
 TELL_MAX = 150                  # bytes of the TELL PLAYER and WHY lines
 STATE_FILE = ".next.json"
@@ -85,6 +87,9 @@ def gather(save_dir: Path) -> dict:
     f = {"state": ctx.state, "plan": ctx.plan, "hb_age": ctx.hb_age, "active": ctx.active, "a": ctx.a, "b": ctx.b,
          "now": ctx.now_tick(), "alarm": alarm.read_alarm(Path(save_dir), files.tick_cap(Path(save_dir))), "draft": None, "hosp_proj": False,
          "seal_proj": bool((s.get("sched") or {}).get("seal"))}
+    if paths.active_save() is None:            # BUG-209: is DF running a save nobody adopted?
+        from .doctor import df_up
+        f["no_active"], f["df_up"] = True, df_up()
     draft = Path(save_dir) / "plan.draft.json"
     doc = files.read_json(draft, retry=False) if draft.exists() else None
     if isinstance(doc, dict) and isinstance(doc.get("year"), int):
@@ -165,7 +170,17 @@ def candidates(f: dict) -> list[Step]:
     return out
 
 
+def adopt_step() -> Step:
+    """BUG-209 (live round 3, new embark Earthboat): DF runs and no ACTIVE file names a fort: the loaded save is not adopted
+    (or the kernel is idle); every number status shows belongs to the newest folder, an earlier fort."""
+    return Step("dead", ADOPT_CMD, "ACTIVE missing while DF runs: the loaded fort is not adopted (a new embark?); then "
+                "dfhack-run dfllm selftest full and dfllm next again",
+                "a new fort is loaded: I adopt it for the kernel first.")
+
+
 def _dead(f: dict) -> Step | None:
+    if f.get("no_active") and f.get("df_up"):
+        return adopt_step()
     if f.get("state") is None:
         return Step("dead", "dfllm doctor", "no valid state file: the kernel is not running or DF is closed",
                     "no readable game state: is DF running with the fort loaded?")

@@ -224,6 +224,11 @@ Related: FR-xx, BUG-xx
 | [BUG-206](BUG-206-fortcore-stage-1-still-and-fishery-not-seen-as-pending.md) | fixed (offline, live-untested) | medium | live round 3: a pending fortcore stage 1 that builds the Still and the Fishery did not count: fishery request and an A drink_low wake | lua/dfllm/economy.lua |
 | [BUG-207](BUG-207-inspect-unit-by-nickname.md) | fixed (offline, live-untested) | low | Live 3: inspect what=unit found no unit by the nickname its sheet shows; the bare last name was a key | lua/dfllm/curse.lua |
 | [BUG-208](BUG-208-curse-kill-grown-set-inside-gate.md) | fixed (offline, live-untested) | medium | Live 3: a set of were-forms grown inside the 2400-tick kill gate never got its curse_kill | lua/dfllm/curse.lua |
+| [BUG-209](BUG-209-unadopted-save-looks-ok-in-doctor-status-next.md) | fixed (offline, live-untested) | medium | live 3: an unadopted save looks OK in doctor/status/next (no ACTIVE, the newest folder of an earlier fort) | dfpilot/doctor.py |
+| [BUG-210](BUG-210-seal-at-last-uses-a-stale-siege-unready.md) | fixed (offline, live-untested) | medium | live 3: seal at=last walls the tile of a stale SIEGE_UNREADY instead of the state's ways in | dfpilot/cmd.py |
+| [BUG-211](BUG-211-follow-seals-audit-bypass-before-the-trap-hall.md) | fixed (offline, live-untested) | medium | live 3: follow seals the audit bypass before the trap hall, on fortcore tiles, logging it every audit | dfpilot/wake.py |
+| [BUG-212](BUG-212-status-drops-proj-and-lists-six-next-hints.md) | fixed (offline, live-untested) | low | live 3: status drops the proj line and lists six next: hints | dfpilot/brief.py |
+| [BUG-213](BUG-213-audit-wait-printed-as-a-float.md) | fixed (offline, live-untested) | low | live 3: dfllm audit prints its wait as a float | dfpilot/wake.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
