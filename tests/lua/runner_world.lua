@@ -8,7 +8,9 @@ local json = require('dfllm.util.json')
 
 local H = {}
 local SCRIPT = (arg and arg[0] or 'lua'):match('([^/\\]+)%.lua$') or 'lua'
-H.RESULT = {d = '.', h = '_', u = '<', j = '>', i = 'X', r = 'r', s = 'S', F = 'F'}
+H.RESULT = {d = '.', h = '_', u = '<', j = '>', i = 'X', r = 'r', s = 'S', F = 'F', n = '_'}   -- FR-98: n = remove construction
+-- FR-98: constructed stairs keep their shape (W.tile().cons marks a construction 'n' removes); other constructions are walls
+H.CONS = {Cx = 'X', Cd = '>', Cu = '<'}
 
 local function wipe(dir)
   for _, n in ipairs(luahost.listdir(dir)) do
@@ -54,6 +56,7 @@ function H.cells(p, fn)
 end
 
 local MINE = {d = true, h = true, u = true, j = true, i = true, r = true}
+H.CONS_C = {['>'] = true, X = true, ['<'] = true}
 local function on_map(x, y, z) return dfhack.maps.isValidTilePos(x, y, z) end
 local function on_edge(x, y, z)
   return not (on_map(x - 1, y, z) and on_map(x + 1, y, z) and on_map(x, y - 1, z) and on_map(x, y + 1, z))
@@ -65,6 +68,7 @@ end
 -- Run 11: a channel also takes a stair or a floor (quickfort do_channel: down stairs, floors); W.no_channel refuses one
 local CHANNEL = {['#'] = true, S = true, ['.'] = true, ['>'] = true, X = true, ['<'] = true}
 local function diggable(W, t, key, x, y, z)
+  if key == 'n' then return not t.hidden and (t.c == 'C' or t.cons == true) end   -- FR-98: quickfort do_remove_construction
   if key == 'h' then
     return not on_edge(x, y, z) and not (W.no_channel or {})[x .. ',' .. y .. ',' .. z] and (t.hidden or CHANNEL[t.c] == true)
   end
@@ -79,8 +83,9 @@ local function building(W, x, y, z, key)
   local id = df.global.building_next_id
   df.global.building_next_id = id + 1
   local cons = key:sub(1, 1) == 'C'
-  W.add_building{id = id, _t = cons and df.building_type.Construction or df.building_type.Bed, _st = 0,
-                 _pos = {x, y, z}, _key = key,
+  local hatch = key == 'H'                         -- FR-98: a hatch cover (over a stair)
+  W.add_building{id = id, _t = cons and df.building_type.Construction or hatch and df.building_type.Hatch or df.building_type.Bed,
+                 _st = 0, _pos = {x, y, z}, _key = key, _bld = hatch and 'Hatch' or nil, _under = hatch and W.tile(x, y, z).c or nil,
                  getType = function(self) return self._t end,
                  getBuildStage = function(self) return self._st end,
                  getMaxBuildStage = function() return 1 end}
@@ -169,7 +174,8 @@ function H.fake_qf(W, p)
           if b and b._under then W.tile(tx, ty, z).c = b._under end   -- Run 11: a removed hatch leaves its stair
           if id then W.buildings[id] = nil; W.bld_at[k] = nil; W.undone = W.undone + 1 end
         elseif W.unsuitable[k] or W.bld_at[k] or not (W.tile(tx, ty, z).c == '.'
-               or (key:sub(1, 1) == 'C' and (W.tile(tx, ty, z).c == '_' or W.tile(tx, ty, z).c == 'v')))
+               or (key:sub(1, 1) == 'C' and (W.tile(tx, ty, z).c == '_' or W.tile(tx, ty, z).c == 'v'))
+               or (key == 'H' and H.CONS_C[W.tile(tx, ty, z).c]))     -- FR-98: a hatch over a stair
                or (key == 'd' and not door_wall_beside(W, tx, ty, z)) then
           st.build_unsuitable = st.build_unsuitable + 1
         elseif not p.dry_run then
@@ -197,7 +203,7 @@ function H.world(opts)
   W.map, W.unsuitable, W.bld_at, W.qf, W.orders, W.applied, W.undone = {}, {}, {}, {}, {}, {}, 0
   W.soil = {}
   df.global.building_next_id = opts.next_id or 1
-  df.building_type = kmock.enum{'Chair', 'Bed', 'Table', 'Door', 'Construction', 'Trap', 'Workshop'}
+  df.building_type = kmock.enum{'Chair', 'Bed', 'Table', 'Door', 'Construction', 'Trap', 'Workshop', 'Hatch'}
   function W.tile(x, y, z)
     local k = x .. ',' .. y .. ',' .. z
     local t = W.map[k]
@@ -277,7 +283,7 @@ function H.dig(W, n)
   table.sort(keys)
   for i = 1, math.min(n or #keys, #keys) do
     local t = W.map[keys[i]]
-    t.c, t.dig, t.hidden = H.RESULT[t.dig] or '.', '', nil
+    t.c, t.dig, t.hidden, t.cons = H.RESULT[t.dig] or '.', '', nil, nil
   end
   return math.min(n or #keys, #keys)
 end
@@ -288,7 +294,11 @@ function H.build(W)
     if b._t == df.building_type.Construction then
       W.buildings[id] = nil
       W.bld_at[table.concat(b._pos, ',')] = nil
-      W.tile(b._pos[1], b._pos[2], b._pos[3]).c = 'C'
+      local t = W.tile(b._pos[1], b._pos[2], b._pos[3])
+      t.c, t.cons = H.CONS[b._key] or 'C', H.CONS[b._key] ~= nil or nil
+    elseif b._key == 'H' and b._st == 0 then             -- FR-98: a built hatch reads '+' (the stair under it kept)
+      b._st = 1
+      W.tile(b._pos[1], b._pos[2], b._pos[3]).c = '+'
     else
       b._st = 1
     end

@@ -486,6 +486,26 @@ def mood_items(ctx: Ctx, n: int = 2) -> list[tuple[int, str]]:
     return [(1, str(m["t"])) for m in ms[:n] if isinstance(m, dict) and m.get("t")]
 
 
+SWEEP_RUN = ("open", "muster", "kill", "recall", "close")
+
+
+def line_cavern(ctx: Ctx) -> str:
+    """FR-98 (G16): the cavern sweep in one line (state cav): 'caverns: sweep kill (killed 2, lost 0): ...; 3 beasts in sight at
+    1 plugged shaft'. Nothing while it is off and no beast is in sight."""
+    c = ctx.s.get("cav")
+    if not isinstance(c, dict):
+        return ""
+    st, n, acc = c.get("st"), c.get("n") or 0, c.get("acc") or 0
+    if st == "off" and not n:
+        return ""
+    txt = f"caverns: sweep {st}"
+    if st in SWEEP_RUN or c.get("k") or c.get("l"):
+        txt += f" (killed {c.get('k') or 0}, lost {c.get('l') or 0})"
+    if c.get("why"):
+        txt += f": {c['why']}"
+    return txt + f"; {n} beast{'s' if n != 1 else ''} in sight at {acc} plugged shaft{'s' if acc != 1 else ''}"
+
+
 def line_stress0(ctx: Ctx) -> str:
     """FR-83 (note 93): 'stress level 0 (desperate): 4 units: 12 Urist, 40 Kel ...'; the names the unit sheets show."""
     s0 = (ctx.s.get("care") or {}).get("s0")
@@ -1090,7 +1110,7 @@ def status_text(save_dir: Path) -> str:
         # BUG-212 (live round 3): PLAYBOOK 9.3 reads the proj line: rank 1 too, its first two projects (brief has three)
         lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_hosp_retire(ctx)),
                   (1, line_sched(ctx, "care"))]
-        lines += curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
+        lines += curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx) + [(3, line_cavern(ctx))]   # FR-98
         s0 = (ctx.s.get("care") or {}).get("s0")
         if isinstance(s0, dict) and s0.get("n"):
             lines.append((4, f"desperate (stress 0): {s0['n']}" + (f" ids {','.join(str(i) for i in s0.get('ids') or [])}"
@@ -1237,7 +1257,7 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
         head[1:1] = [t for _, t in mood_items(ctx, 4)]  # BUG-285: the open strange moods under the clock line
         head += [x for x in (line_unready(ctx), _join(t for _, t in curse_items(ctx)), line_alarm(ctx), line_pop(ctx),
-                             line_supply(ctx), line_stress0(ctx), line_stress(ctx), _join(core),
+                             line_supply(ctx), line_cavern(ctx), line_stress0(ctx), line_stress(ctx), _join(core),
                              _traps.status_line(ctx.s), line_burrow(ctx),                          # FR-96
                              line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx), _join(extra)) if x]
     sections = [head]

@@ -1534,4 +1534,57 @@ M.verbs.snapshot = function(K, args, cmd)
   return true, 'queued snapshot ' .. id .. (note and (' (' .. note .. ')') or ''), d
 end
 
+-- FR-98 (cavern.lua, the cavern sweep): the wild dangers the player sees inside box {x0, y0, z0, x1, y1, z1}: {{id, x, y,
+-- z}, ...} by id, and how many of them are great dangers (megabeast, forgotten beast, titan, demon) or building destroyers.
+-- census.h leaves out the units of a sealed cavern (another walk group), so the sweep asks here. Fair play: isVisible and
+-- not hidden only; caged, chained, citizens, residents, tame and fort animals, merchants, visitors and diplomats are no target.
+function M.cave_units(K, box)
+  if type(box) ~= 'table' or #box ~= 6 then return {}, 0 end
+  local U = dfhack.units
+  local function caste_flag(u, f)
+    local ok, v = pcall(function() return df.creature_raw.find(u.race).caste[u.caste].flags[f] == true end)
+    return ok and v == true
+  end
+  local out, great = {}, 0
+  for _, u in ipairs(df.global.world.units.active) do
+    local ok, hit, g = pcall(function()
+      if not U.isActive(u) or U.isDead(u) or not U.isVisible(u) or U.isHidden(u) then return false end
+      if u.flags1.caged or u.flags1.chained then return false end
+      if U.isCitizen(u, true) or U.isResident(u, true) or U.isTame(u) or U.isFortControlled(u) then return false end
+      if (U.isMerchant and U.isMerchant(u)) or (U.isVisitor and U.isVisitor(u)) or (U.isDiplomat and U.isDiplomat(u)) then
+        return false
+      end
+      local x, y, z = U.getPosition(u)
+      if not x or x < box[1] or x > box[4] or y < box[2] or y > box[5] or z < box[3] or z > box[6] then return false end
+      local gd = U.isGreatDanger(u) or caste_flag(u, 'BUILDINGDESTROYER')
+      if not (gd or U.isDanger(u) or U.isUndead(u) or caste_flag(u, 'LARGE_PREDATOR')) then return false end
+      return {id = u.id, x = x, y = y, z = z}, gd
+    end)
+    if ok and hit then
+      out[#out + 1] = hit
+      if g then great = great + 1 end
+    end
+  end
+  table.sort(out, function(p, q) return p.id < q.id end)
+  return out, great
+end
+
+-- FR-98 review (cavern.lua's recall): the living citizens inside box {x0, y0, z0, x1, y1, z1} or in the shaft column
+-- col {x, y, z_top} below its top (from z0 on): their ids, sorted. The player always sees his own citizens (units screen).
+function M.cave_citizens(K, box, col)
+  if type(box) ~= 'table' or #box ~= 6 or type(col) ~= 'table' then return {} end
+  local U, out = dfhack.units, {}
+  for _, u in ipairs(df.global.world.units.active) do
+    local ok, hit = pcall(function()
+      if not U.isCitizen(u) or U.isDead(u) then return false end
+      local x, y, z = U.getPosition(u)
+      if not x or z >= col[3] or z < box[3] then return false end
+      return (x == col[1] and y == col[2]) or (x >= box[1] and x <= box[4] and y >= box[2] and y <= box[5] and z <= box[6])
+    end)
+    if ok and hit then out[#out + 1] = u.id end
+  end
+  table.sort(out)
+  return out
+end
+
 return M

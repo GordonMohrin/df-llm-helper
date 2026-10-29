@@ -215,6 +215,49 @@
   for part of a lane no longer shrinks the way's manifest entry (lane tiles merge as a union in Python and runner.lua; Z2 is
   still replaced whole); plan apply names a left-out traps build `traps@S1` (`N traps left out: nothing to trap`), not seal;
   CONTRACTS rows for module, state and manifest `traps` and the merge rule. Tests: +2 pytest, +2 Lua.
+## The military clears the caverns: the P6 cavern sweep (FR-98, FR-99, Gordon's goal G16, 2026-10-29; offline, live-untested)
+- **Why:** G16 asks for dead cavern beasts while the caverns stay sealed until the fort is ready. The kernel could only seal
+  them: CAVERN_PLUG walls an explore shaft that broke into a cavern, military.lua has kill and sortie orders, but nothing opened
+  a plug, sent a squad down and walled it again. The goal stayed red; a session could only do it by hand (no verb, not fair to
+  script).
+- **What changed:** (1) new module `lua/dfllm/cavern.lua` (WP6, every 100 ticks, last in `contract.MODULES`): wait (once a day:
+  plan `caverns.sweep`, phase >= P6, PEACE, no lockdown or hostile in sight, a rest after the last sweep, a plugged shaft, R1,
+  squad A >= 3 and worn >= 80 %, a visible cavern beast, no great danger) -> open -> muster (hatch forbidden, held station
+  order) -> kill (hatch open, held kill orders on the visible beasts, renewed) -> recall (nobody is walled in) -> close (hatch
+  forbidden, squad released, the shaft walled again); SIEGE/BREACH/RECOVERY/a drill release the squad to the kernel's defense
+  at once (why `siege`). (2) runner module fields: `cav_sealed`, `cav_state`, `proj_state`, `sweep_open` (project `unplug`:
+  quickfort dig `n` on the plug walls, `Cd` + hatch `H` on the top, then `n` + `Cx` below; record st `sweep`), `sweep_close`
+  (a `plug`: per tile lower first, remove building, `n`, `Cw`; a pending removal is undone), `swept`; `cavern_open` counts a
+  `sweep` record as open once no sweep runs on it; deliverable `sweep` (CHECK -> `cavern.cleared`). (3) `snapshot.cave_units`
+  (visible wild dangers in a box; census.h leaves a sealed cavern out). (4) `act.door_forbid` also takes hatch covers (owner
+  cavern too). (5) plan: key `caverns: {sweep}` (schema), P6 deliverable `sweep` in `plans/year1.json`, `plan propose` drafts
+  and keeps it, `plan check` refuses it before P6 and warns (R0, worn, no plugged shaft, P6+ without it while beasts are in
+  sight). (6) state `cav`, status/brief line `caverns: sweep <phase> (killed k, lost l): <why>; n beasts in sight at a plugged
+  shafts`, `inspect what=cavern`, wake hint CAVERN_SWEEP_END. Contracts: MODULES cavern, EVENTS CAVERN_SWEEP_START (B) /
+  _STEP (C) / _END (A), ACT door_forbid, STATE_OWNERS `cav.*`, state `cav`, plan `caverns`, DELIVER_KEYS `sweep`, inspect
+  `cavern`; appendix regenerated. RULES §7 (CAVERN_PLUG row), §10 (caverns), §11 (P6) edited in place (300 lines). FR-98,
+  FR-99 in docs/feature-requests/README.md; design note docs/v2/FR-fr-caverns-G16.md.
+- **Tests (each fails on 64df679):** tests/lua/test_fr98_cavern.lua (8: the whole sweep, losses with a soldier below, SIEGE
+  in the kill and in the open, a blocked unplug and a failed plug, the gates incl. hidden/tame/great units, a lost sweep,
+  state/inspect), tests/lua/test_fr98_cavern_runner.lua (7: cav_sealed, unplug stages top first, cavern_open while sweeping,
+  the close below the hatch + CAVERN_PLUG done, a half-done unplug, an untaken removal undone, the P6 deliverable),
+  tests/test_fr98_caverns.py (6); updated pins: test_kern_misc.lua (module list), test_reflex.lua (door_forbid owners);
+  runner_world.lua learns quickfort `n`, constructed stairs and hatch covers.
+- **Review fixes:** the recall also waits for other citizens in the cavern box or the shaft column (new
+  `snapshot.cave_citizens`; a hauler after the corpses is not walled in); a close before the muster forbids a hatch the
+  unplug built already (a siege while the lower wall is gone); a clean sweep keeps the P6 deliverable met when new beasts
+  come later (`cavern.cleared`); the phase gate compares numbers (P10 > P6). 4 more tests in test_fr98_cavern.lua (each
+  fails on c43431f).
+- **Live check:** in a P6 fort with a plugged shaft (`dfllm events --type CAVERN_PLUG` done) and a beast in sight below:
+  `dfllm cmd inspect what=cavern` (shafts, beasts, the first gate), status `caverns: sweep wait: <gate>`. With the plan key on
+  and the gates green: CAVERN_SWEEP_START, `inspect projects` shows `us<tick>` (unplug): uncertain whether quickfort `n`
+  designates the plug walls (the tile shows a dig designation), whether a miner reaches the lower wall from the rebuilt top,
+  and whether the hatch cover stands on the constructed down stair; read kern.log `cavern sweep` lines and the u* stage
+  labels. Then the hatch sheet shows forbidden at muster and free at kill, squad A's orders on the squads screen, DEATH events
+  of the beasts, CAVERN_SWEEP_STEP recall/close, a `pl<tick>` plug (watch whether a miner removes the stair below the
+  forbidden hatch; if not, the plug gives up the lower wall after plug_wait and walls the top in PEACE) and CAVERN_PLUG done,
+  and CAVERN_SWEEP_END (killed, lost, sealed 1). A citizen left in the cavern holds the recall (STEP `... other citizen still
+  below`). If a siege comes during the sweep: the squad leaves at once and END says siege.
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders
