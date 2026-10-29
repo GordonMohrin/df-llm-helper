@@ -265,6 +265,10 @@ Related: FR-xx, BUG-xx
 | [BUG-248](BUG-248-deep-soil-embark-without-hard-stone.md) | fixed (offline, live-untested) | medium | Run 15: deep-soil embarks without hard stone; stone accepted without a plan | tools/embark |
 | [BUG-249](BUG-249-curse-check-greps-older-forts-in-the-gamelog.md) | fixed (offline, live-untested) | low | Run 15: curse check greps an older fort's lines in the same gamelog | dfpilot/cli.py |
 | [BUG-250](BUG-250-embark-tools-missing-here-save-as-scan-summary.md) | fixed (offline, live-untested) | medium | Run 15c/15d: no embark --here, no save-as, no best compromise or brook distance | tools/embark |
+| [BUG-282](BUG-282-mood-critical-only-on-thirst-and-hunger.md) | fixed (offline, live-untested) | critical | Run 15: MOOD_CRITICAL only on thirst/hunger; DF's mood timer kills first | care.lua, mood.lua |
+| [BUG-283](BUG-283-mood-workshop-placed-as-a-plain-workshops-room-at-prio-4.md) | fixed (offline, live-untested) | high | Run 15: the mood's shop placed as a plain 12-shop room at prio 4, 27 days late | care.lua, runner.lua, wake.py |
+| [BUG-284](BUG-284-mood-materials-not-supplied-by-the-kernel.md) | fixed (offline, live-untested) | high | Run 15: no chain shops, no web collection, mood needs not first in the plan | care.lua, act.lua, plan.py |
+| [BUG-285](BUG-285-status-and-brief-name-no-open-mood.md) | fixed (offline, live-untested) | medium | Run 15: status and brief name no open mood, its needs or its days left | care.lua, brief.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

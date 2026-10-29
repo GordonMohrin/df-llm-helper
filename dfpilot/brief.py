@@ -476,6 +476,16 @@ def curse_items(ctx: Ctx) -> list[tuple[int, str]]:
     return [(2, txt)]
 
 
+def mood_items(ctx: Ctx, n: int = 2) -> list[tuple[int, str]]:
+    """BUG-285 (Run 15: four strange moods failed in three forts, status never named one): the kernel's line per open strange
+    mood, state `mood` (care, fewest days left first): 'MOOD <name> <kind> needs <items>: <have/missing>, <days left>'. Rank 1:
+    status keeps them; the first n."""
+    ms = ctx.s.get("mood")
+    if not isinstance(ms, list):
+        return []
+    return [(1, str(m["t"])) for m in ms[:n] if isinstance(m, dict) and m.get("t")]
+
+
 def line_stress0(ctx: Ctx) -> str:
     """FR-83 (note 93): 'stress level 0 (desperate): 4 units: 12 Urist, 40 Kel ...'; the names the unit sheets show."""
     s0 = (ctx.s.get("care") or {}).get("s0")
@@ -1031,6 +1041,7 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append((1, _no_state(ctx)))
     else:
+        lines[1:1] = mood_items(ctx)             # BUG-285: a strange mood is an emergency: the top line under the clock
         # BUG-154 (live i4): the mood_ws command and the care-first line are short and say what to do next and what
         # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first.
         # BUG-212 (live round 3): PLAYBOOK 9.3 reads the proj line: rank 1 too, its first two projects (brief has three)
@@ -1181,6 +1192,7 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         head.append(_no_state(ctx))
     else:
         core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
+        head[1:1] = [t for _, t in mood_items(ctx, 4)]  # BUG-285: the open strange moods under the clock line
         head += [x for x in (line_unready(ctx), _join(t for _, t in curse_items(ctx)), line_alarm(ctx), line_pop(ctx),
                              line_supply(ctx), line_stress0(ctx), line_stress(ctx), _join(core), line_burrow(ctx),
                              line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx), _join(extra)) if x]

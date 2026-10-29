@@ -99,6 +99,7 @@ local M = {name = 'care', every = {ticks = 1200}, on = {}, verbs = {},
            report_text = CU.TEXTS}
 local DAY = C.TICKS.DAY
 M.citizen = require('dfllm.util.who').citizen       -- BUG-103: a citizen of the player (the census also holds residents)
+M.MD = require('dfllm.mood')       -- library (BUG-282..285): a mood's emergency rules (a field: the chunk is at 200 locals)
 -- Optional walk-group hook, proposed for CONTRACTS §7 (live L4): snapshot.reach(a, b) -> bool, i.e.
 -- dfhack.maps.canWalkBetween asked at call time (care may not read tiles itself, CONTRACTS §1.4). Feature-
 -- detected: while snapshot has no such function, only an item inside Kern+ counts as reachable (v1 counted
@@ -130,6 +131,13 @@ M.DEFAULTS = {
   -- BUG-102 / FR-82: the nook search radius (3), the widest a critical mood may widen it to in steps (3 -> 6 -> 9; rmax <= r:
   -- never), the tiles read in full per step, the nooks queued per unit and game day (quickfort may refuse a tile)
   mood_nook_r = 3, mood_nook_rmax = 9, mood_nook_step = 3, mood_nook_probes = 40, mood_nook_tries = 4,
+  -- BUG-282 (Run 15: four moods failed, three without a MOOD_CRITICAL): a mood is an emergency (MOOD_CRITICAL, dfllm.mood)
+  -- without a claimed workshop for mood_crit_nows ticks, with a material none in the fort, still waiting mood_crit_wait days
+  -- after the mood began, or within mood_crit_left days of DF's insanity line (mood_timer ticks from the claim when DF's own
+  -- timer is unreadable); said again at each step of days left (20, 10, 5, 2), at least mood_crit_every ticks and
+  -- mood_crit_wall_s seconds apart. BUG-283/284: the kernel's own steps for the mood (shops, webs) every mood_act_every ticks
+  mood_crit_nows = 1200, mood_crit_wait = 5, mood_crit_left = 10, mood_timer = 50000, mood_crit_every = 600,
+  mood_crit_wall_s = 30, mood_act_every = 2400,
   -- BUG-064: one BUILDING_TOPPLED per culprit per topple_every ticks; gate asks for a culprit near a vanished bridge
   -- within topple_win ticks and topple_r tiles
   topple_every = 2400, topple_win = 4800, topple_r = 6,
@@ -593,6 +601,122 @@ local function uname(u)
   return ok and type(n) == 'string' and trunc(n, 40) or ''
 end
 
+-- BUG-282/283: an ended mood (done, failed, dead, no citizen) leaves the status line and the runner's mood shop types
+function M.mood_gone(K, sid)
+  if st.mview then st.mview[sid] = nil end
+  K.call('runner', 'mood_types', sid, {})
+end
+
+-- BUG-283 (Run 15 Drillchamber y375: the glassmaker's Glass Furnace came 30 days late; care's request was a plain
+-- `workshops` placement, all missing shops in one dug room at prio 4, while 'pending workshops' held back any other): the
+-- shops a mood needs, as ONE request of only those types (PROJECT_REQUEST workshops why=mood types; follow places them at
+-- prio 1, runner.mood_types makes such a project run first and never pause). runner.mood_types names the types no project
+-- that builds only mood shops covers yet; again after mood_act_every while uncovered. Returns the asked types ('' none).
+function M.mood_shop_ask(K, c, rec, sid, types)
+  local okr, left = K.call('runner', 'mood_types', sid, types)
+  local ask = (okr and type(left) == 'table') and left or types
+  if #ask == 0 then rec.wsq = nil; return '' end
+  local now = K.now().tick
+  local key = table.concat(ask, ',')
+  if rec.wsq == key and now - (math.tointeger(rec.wsq_t) or -1e12) < c.mood_act_every then return key end
+  rec.wsq, rec.wsq_t = key, now
+  K.emit('PROJECT_REQUEST', 'B', trunc(string.format('workshops for a strange mood (unit %s), first: %s', sid, key), 200),
+         {tpl = 'workshops', n = #ask, why = 'mood', types = ask})
+  K.log('warn', 'mood unit %s: workshops requested at prio 1 (only these): %s', sid, key)
+  return key
+end
+
+-- BUG-284 (Run 15 Drillchamber y376: a Possessed carpenter needed silk and plant cloth, the fort had neither and no thread):
+-- silk comes from spider webs a weaver collects at a Loom (the Loom sheet's "Collect webs" task, no manager). While a cloth or
+-- thread slot is short (silk or any kind) and webs lie on the citizens' walk group (economy census webs_near), one CollectWebs
+-- task at a built Loom (act.mood_task) every mood_act_every ticks; no Loom: the chain asks for it. Returns the text for the line.
+M.WEB_KINDS = {'(silk)', 'cloth x', 'thread x'}
+function M.mood_webs(K, c, rec, sid, miss)
+  local want = false
+  for _, cls in ipairs(miss) do if cls == 'cloth' or cls == 'thread' then want = true end end
+  if not want then return nil end
+  local names = {}
+  for _, e in ipairs(type(rec.sl) == 'table' and rec.sl or {}) do names[#names + 1] = tostring(e.t or '') end
+  for _, n in ipairs(type(rec.nosrc) == 'table' and rec.nosrc or {}) do names[#names + 1] = tostring(n) end
+  local silky = #names == 0
+  for _, n in ipairs(names) do
+    for _, k in ipairs(M.WEB_KINDS) do if n:find(k, 1, true) and not n:find(BK_HAVE, 1, true) then silky = true end end
+  end
+  local inv = type(K.census.i) == 'table' and K.census.i or {}
+  if not silky or (math.tointeger(inv.webs_near) or 0) <= 0 then return nil end
+  local now = K.now().tick
+  if now - (math.tointeger(rec.webs_t) or -1e12) < c.mood_act_every then return rec.webs_why end
+  rec.webs_t = now
+  local loom
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      if b.type == df.workshop_type.Loom then
+        local okb, done = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+        if not okb or done then loom = b; break end
+      end
+    end
+  end)
+  if not loom then rec.webs_why = 'webs: no Loom (requested)'; return rec.webs_why end
+  local ok, res = K.act.mood_task(loom.id, 'CollectWebs')
+  rec.webs_why = ok and string.format('collect webs queued at Loom %d', loom.id)
+                 or ('collect webs refused: ' .. trunc(tostring(res), 40))
+  K.log(ok and 'info' or 'warn', 'mood unit %s: %s (%d webs near)', sid, rec.webs_why, math.tointeger(inv.webs_near) or 0)
+  return rec.webs_why
+end
+
+-- BUG-282 (Run 15: Drillchamber's glassmaker went insane 54,481 ticks after his claim at thirst well below 50,000, the
+-- Possessed carpenter at thirst 13,991; Guildcleans' two got MOOD_CRITICAL only at hunger 60,000 / thirst 50,000, 44 days in):
+-- MOOD_CRITICAL keyed on thirst and hunger alone (mood_seen `crit`) never sees DF's own clock, unit.job.mood_timeout, which
+-- ends the mood ~50,000 ticks after the claim whatever the thirst. A mood is an emergency (dfllm.mood MD.reasons) without a
+-- claimed workshop (or with his shop type missing on the map), with a material none in the fort, still waiting
+-- mood_crit_wait days, or within mood_crit_left days of insanity. MOOD_CRITICAL (A) names what is missing, what the kernel
+-- did and the days left; again at each step of days left (20, 10, 5, 2: news for util/cadence). Every frame of the mood
+-- check the kernel acts itself (shops first, webs) and keeps the status line (st.mview, state `mood`).
+function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
+  local MD, sid, T = M.MD, fmt(u.id), K.now()
+  local now = T.tick
+  if ws and not rec.claim then rec.claim = now end
+  local left, lsrc = MD.left(u, rec, now, c)
+  local skill = (not ws) and best_skill(u) or nil
+  local okm, ms = K.call('economy', 'mood_shops')
+  local typed = okm and type(ms) == 'table' and type(ms.missing) == 'table'
+  rec.typed = typed or nil
+  local missing = typed and MD.missing_set(ms) or {}
+  local want = ws or M.SKILL_WS[skill or '']
+  local shop = (not ws and want and missing[want]) and want or nil
+  local miss = still_missing(job, rec)
+  local types = MD.chain(miss, missing, rec.glass)
+  if shop then table.insert(types, 1, shop) end
+  local ask = typed and M.mood_shop_ask(K, c, rec, sid, types) or ''   -- (an empty list clears the runner's mark)
+  local webs = M.mood_webs(K, c, rec, sid, miss)
+  local name = MD.short_name(uname(u))
+  local line = MD.line{name = name, unit = u.id, kind = kind, sl = open_slots(job, rec), miss = miss, ws = ws, shop = shop,
+                       left = left, src = lsrc}
+  local reasons = MD.reasons(c, {now = now, ws = ws, shop = shop, left = left, nosrc = rec.nosrc, since = rec.since,
+                                 unres_since = type(rec.unres) == 'table' and math.tointeger(rec.unres.since) or nil})
+  local days = left and left // DAY or nil
+  st.mview = st.mview or {}
+  st.mview[sid] = {u = u.id, t = line, left = days or -1, why = reasons[1], buy = rec.buy}
+  if #reasons == 0 then return end
+  local toks = {}
+  for i, w in ipairs(reasons) do toks[i] = w end
+  toks[#toks + 1] = MD.step(days) or 'unknown'
+  if not CAD.due(rec.mc, T, {sid}, toks, {ticks = c.mood_crit_every, wall_s = c.mood_crit_wall_s}) then return end
+  rec.mc = CAD.mark(T, {sid}, toks)
+  local did = {}
+  if ask ~= '' then did[#did + 1] = 'kernel asked ' .. ask .. ' first' end
+  if webs then did[#did + 1] = webs end
+  local msg = string.format('[unit %d %s] %s', u.id, table.concat(reasons, ','), line)
+  if #did > 0 then msg = msg .. '; ' .. table.concat(did, '; ') end
+  local sl = open_slots(job, rec) or {}
+  local slt = {}
+  for i = 1, math.min(3, #sl) do slt[i] = trunc(sl[i].t, 60) end
+  K.emit('MOOD_CRITICAL', 'A', trunc(msg, 200),
+         {unit = u.id, why = reasons[1], reasons = reasons, kind = kind, name = name, ws = ws, missing = miss,
+          left = days or -1, lsrc = lsrc, need = shop, ask = ask ~= '' and trunc(ask, 80) or nil,
+          webs = webs and trunc(webs, 80) or nil, slots = #slt > 0 and slt or nil})
+end
+
 local function mood_seen(K, c, r, p, u, kind)
   local sid, now = fmt(u.id), K.now().tick
   -- BUG-103 (Run 14 note 74: MOOD_CRITICAL and DECISION_NEEDED for a Fey wax worker of another civilization, 'workshop none
@@ -600,6 +724,7 @@ local function mood_seen(K, c, r, p, u, kind)
   -- visitor is nobody this kernel serves: no workshop, materials, drink nook or decision. A record an older kernel kept for
   -- such a unit goes without a MOOD_END (the unit's mood is not ours to end).
   if not M.citizen(u) then
+    if p.moods[sid] then M.mood_gone(K, sid) end
     p.moods[sid], p.nook[sid] = nil, nil
     return
   end
@@ -685,6 +810,9 @@ local function mood_seen(K, c, r, p, u, kind)
               nook = nook ~= '' and trunc(nook, 80) or nil})
     end
   end
+  -- BUG-282: the mood's own emergency (workshop, material, waiting, DF's timer), whatever the thirst
+  local oke, erre = pcall(M.mood_emergency, K, c, p, u, rec, kind, job, ws)
+  if not oke then K.log('warn', 'care mood emergency %s: %s', sid, tostring(erre)) end
   if not ws and (not job or R.is_mood_job(job)) then   -- no workshop claimed yet (a mood job without a holder too)
     if rec.nojob < 0 then rec.nojob = now end
     if rec.ws == 0 and now - rec.nojob >= c.mood_nojob_ticks then
@@ -702,8 +830,10 @@ local function mood_seen(K, c, r, p, u, kind)
              {id = 'mood_workshop', q = (fix and string.format('unit %d (%s) has no workshop: %s', u.id, skill, fix) or
                                          string.format('unit %d needs a workshop for %s now (workshops template or one shop)',
                                                        u.id, skill)):sub(1, 200)})
+      -- BUG-283: with economy's view of the shops the typed request of M.mood_emergency asks (only the missing types,
+      -- prio 1); without it the plain workshops placement as before
       local okp, pend = K.call('runner', 'pending', 'workshops')
-      if not (okp and type(pend) == 'number' and pend > 0) then
+      if not rec.typed and not (okp and type(pend) == 'number' and pend > 0) then
         K.emit('PROJECT_REQUEST', 'B', string.format('workshops for a strange mood (unit %d, %s)', u.id, skill),
                {tpl = 'workshops', n = 1, why = 'mood'})
       end
@@ -774,6 +904,7 @@ local function phase_units(K, c, r, p)
         local ok = (alive and not M.FAILED[mood]) and 1 or 0
         p.moods[sid] = nil
         p.nook[sid] = nil
+        M.mood_gone(K, sid)                -- BUG-282/283: no status line, no mood shop types for an ended mood
         -- FR-64: a death after a failed mood (insane) or during the mood is a mood death (dfllm.deaths)
         p.mend[sid] = {t = K.now().tick, kind = rec.kind, ok = ok, alive = alive and 1 or 0}
         K.emit('MOOD_END', 'B', string.format('mood (%s) unit %s %s', rec.kind, sid, ok == 1 and 'done' or 'failed'),
@@ -3227,6 +3358,15 @@ local function mood_report(K, c, r, p)
       end
       local slots = blocked
       for _, e in ipairs(fetch) do slots[#slots + 1] = e end
+      -- BUG-284: the trade tokens of this mood's short needs (state `mood`: plan propose puts them first in trade.want)
+      local buys, bseen = {}, {}
+      for _, w in ipairs(wants) do
+        if w.unit == int(m.sid) and w.buy ~= '' and not bseen[w.buy] and #buys < 6 then
+          bseen[w.buy] = true
+          buys[#buys + 1] = w.buy
+        end
+      end
+      rec.buy = #buys > 0 and buys or nil
       if #labels == 0 then
         if rec.unres then K.log('info', 'mood unit %s: every material is available now', m.sid) end
         rec.unres, rec.missing, rec.checked, rec.nosrc, rec.glass, rec.sl = nil, {}, rec.checked or now, nil, nil, nil
@@ -4547,7 +4687,8 @@ function M.state(K)
   -- (only while the curse is on, as the watch; persist read only until the first build)
   local cc = M.conf(K)
   local cv = cc.curse and CU.view(K, cc, not CU.built() and pstate(K) or nil) or nil
-  if not o then return {curse = cv} end
+  local mv = M.mood_view()                    -- BUG-285: the open moods' lines, from the mood check (not the full run)
+  if not o then return {curse = cv, mood = mv} end
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
   if (o.corpses_unreach or 0) > 0 then care.corpses_unreach = o.corpses_unreach end     -- BUG-105: apart from corpses_old
@@ -4586,7 +4727,26 @@ function M.state(K)
     for k, n in pairs(st.died) do died[k] = n end
     care.died = died
   end
-  return {care = care, stock = {hosp_water = o.hosp_water}, curse = cv}
+  return {care = care, stock = {hosp_water = o.hosp_water}, curse = cv, mood = mv}
+end
+
+-- BUG-285 (state `mood`): the open moods, fewest days left first, at most 4: {u, t = 'MOOD <name> <kind> needs <items>:
+-- <have/missing>, <days left>', left (days, -1 unknown), why (the first emergency reason), buy (trade tokens)}; nil when none
+function M.mood_view()
+  local list = {}
+  for _, v in pairs(st.mview or {}) do list[#list + 1] = v end
+  if #list == 0 then return nil end
+  table.sort(list, function(a, b)
+    local la, lb = a.left >= 0 and a.left or 1e9, b.left >= 0 and b.left or 1e9
+    if la ~= lb then return la < lb end
+    return a.u < b.u
+  end)
+  local out = {}
+  for i = 1, math.min(4, #list) do
+    local v = list[i]
+    out[i] = {u = v.u, t = trunc(v.t, 200), left = v.left, why = v.why, buy = v.buy}
+  end
+  return out
 end
 
 local function deep(t)

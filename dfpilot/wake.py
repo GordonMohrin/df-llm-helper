@@ -18,7 +18,8 @@ not wake; the follower acts on two of them without the LLM:
                                   (BUG-038: the kernel asks only while none stands); why=mandatory (runner, FR-76:
                                   a reclaimed fort lacks Carpenters, Masons, Craftsdwarfs, Still or Kitchen) -> only
                                   the missing types of d.types, at prio 1; why=slabs (economy, BUG-133: ghosts
-                                  and no mason's workshop, d.types [Masons]) -> the same; why=manager (BUG-231)
+                                  and no mason's workshop, d.types [Masons]) -> the same; why=manager (BUG-231);
+                                  why=mood with d.types (BUG-283: the shops a strange mood and its materials need) -> the same
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
@@ -123,7 +124,10 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
                          "(hospital water, caregivers, GiveWater jobs); nothing by hand that the kernel does not do",
         "MOOD_RISK": "dfllm brief; supply the missing class (never cancel the mood)",
         # BUG-063: thirst past 50,000: the dwarf and his workshop are named; material first, the drink nook is the kernel's
-        "MOOD_CRITICAL": "tell Gordon (unit, workshop, thirst); dfllm brief; supply the missing class; never cancel the mood",
+        # BUG-282: also without a workshop, a material none in the fort, still waiting or near DF's insanity line (d.left
+        # days); the kernel already asked for the shops (d.ask) and collect webs (d.webs)
+        "MOOD_CRITICAL": "tell Gordon (unit, what is missing, days left); dfllm brief (MOOD line); supply the missing class "
+                         "(trade.want, dig, butcher); never cancel the mood",
         # FR-64: >= 2 citizens dehydrated or starved within a month: access, not supply, as a rule
         "DEATHS_PREVENTABLE": "dfllm cmd inspect '{\"what\":\"reach\"}', then refuge; patients: water_sources",
         # BUG-015: a lockdown door that does not hold its forbidden flag (the kernel tries it once more itself)
@@ -170,7 +174,8 @@ TOMBS_COOLDOWN_S = 600
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery", "farmers",
               "mandatory", "slabs",           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
-              "busy")                         # BUG-224: busy = one more Carpenters/Masons beside a full one
+              "busy",                         # BUG-224: busy = one more Carpenters/Masons beside a full one
+              "mood")                         # BUG-283: the shops a strange mood waits for (care's typed request)
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -710,8 +715,11 @@ class Follower:
                 from .cmd import _moodable
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
-            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") in ("mandatory", "slabs", "busy",
-                                                                                         "manager"):
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and (
+                    d.get("why") in ("mandatory", "slabs", "busy", "manager")
+                    or (d.get("why") == "mood" and d.get("types"))):
+                # BUG-283 (Run 15 Drillchamber: the glass furnace a fey mood waited for came 30 days late in a plain
+                # 12-shop placement at prio 4): why=mood with types = only the shops the mood and its materials need, prio 1
                 # FR-76 (Run 12 Trussroads, reclaimed: no carpenter, no craftsdwarf, no kitchen): the types the runner
                 # saw missing on the map, whatever the fort manifest lists (kept by `need`, BUG-066). BUG-133: economy's
                 # why=slabs (ghosts wait for memorial slabs, no mason's workshop stands) the same way: the Masons alone.
@@ -724,6 +732,10 @@ class Follower:
                     params = {"skip": ",".join(x for x in mood if x not in want)}
                     if any(x in extra for x in want):
                         params["add"] = ",".join(x for x in want if x in extra)
+                    prev = self.jobs.get("mood")
+                    if d["why"] == "mood" and isinstance(prev, dict) and prev.get("placed") and \
+                            set(prev.get("need") or []) != set(want):
+                        self.jobs.pop("mood")          # BUG-283: another set of mood shops is no repeat (no cooldown)
                     self._request_place(d["why"], "workshops", params, "S1", now, prio=1, need=want)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 # live L1: a strange mood needs a shop; BUG-042: economy's tannery request names the Tanners the map

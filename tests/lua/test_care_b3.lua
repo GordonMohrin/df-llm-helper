@@ -311,17 +311,23 @@ end)
 T.test('BUG-063: thirst past 50,000 is MOOD_CRITICAL (A): the dwarf and the workshop named, once per cadence', function()
   local W = world{cit = 6}
   moody(W, 2, 'Fey', 20000, 0)
+  -- BUG-282: the bone is none in the fort, so a 'material' MOOD_CRITICAL comes too; this test is about the thirst bar
+  local function thirsty()
+    local r = {}
+    for _, e in ipairs(W.find_events('MOOD_CRITICAL')) do if e.d.why == 'thirst' then r[#r + 1] = e end end
+    return r
+  end
   W.run(1)
-  T.eq(W.find_events('MOOD_CRITICAL'), {})
+  T.eq(thirsty(), {})
   W.unit(2).counters2.thirst_timer = 50500
   W.run(450, {skip = 50})
-  local c = W.find_events('MOOD_CRITICAL')
+  local c = thirsty()
   T.eq(#c, 1)
   T.eq(c[1].cls, 'A')
   T.eq({c[1].d.unit, c[1].d.why, c[1].d.kind, c[1].d.ws, c[1].d.thirst, c[1].d.pos}, {2, 'thirst', 'Fey', 'Craftsdwarfs', 50500, {22, 22, 5}})
   T.ok(c[1].msg:find('Unit 2', 1, true) and c[1].msg:find('workshop Craftsdwarfs at 22,22,5', 1, true), c[1].msg)
   W.run(900, {skip = 100})
-  T.eq(#W.find_events('MOOD_CRITICAL'), 1, 'the same cause is not repeated within the cadence')
+  T.eq(#thirsty(), 1, 'the same cause is not repeated within the cadence')
 end)
 
 local function nook_world(o)

@@ -394,6 +394,11 @@ CARE_LIM: dict = {
     "mood_nook": "bool", "mood_take": "pile", "mood_nook_retry": _TICKS,
     "mood_nook_r": (1, 12), "mood_nook_rmax": (0, 12), "mood_nook_step": (1, 6), "mood_nook_probes": (1, 200),
     "mood_nook_tries": (1, 12),
+    # BUG-282..284: MOOD_CRITICAL without a workshop after mood_crit_nows ticks, still waiting after mood_crit_wait days, within
+    # mood_crit_left days of insanity (mood_timer ticks from the claim when DF's timer is unreadable), repeats at least
+    # mood_crit_every ticks and mood_crit_wall_s s apart; the kernel's shop request / webs task every mood_act_every ticks
+    "mood_crit_nows": _TICKS, "mood_crit_wait": (1, 60), "mood_crit_left": (1, 60), "mood_timer": (1200, 200000),
+    "mood_crit_every": _TICKS, "mood_crit_wall_s": (0, 3600), "mood_act_every": _TICKS,
     "topple_every": _TICKS, "topple_win": _TICKS, "topple_r": (0, 50),
     "stress_high": (1, 100), "stress_days": (1, 400), "stress_every": _TICKS,
     # BUG-115 / FR-83: curses and transformations (lua/dfllm/curse.lua)

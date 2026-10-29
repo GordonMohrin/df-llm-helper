@@ -2758,8 +2758,11 @@ local function sorted()
   local r = {}
   for _, P in ipairs(S.pd.list) do if P.done ~= 1 then r[#r + 1] = P end end
   local care = S.care_id                        -- BUG-116: the hospital that runs first, after the seals
+  -- BUG-283: a workshops project with a shop a strange mood waits for runs with the hospital, before the rest
+  local mood = S.mood_ids or {}                 -- (M.mood_types marks them while care's mood check runs)
   table.sort(r, function(a, b)
-    local sa, sb = SEALS[a.tpl] and 0 or care == a.id and 1 or 2, SEALS[b.tpl] and 0 or care == b.id and 1 or 2
+    local sa = SEALS[a.tpl] and 0 or (care == a.id or mood[a.id]) and 1 or 2
+    local sb = SEALS[b.tpl] and 0 or (care == b.id or mood[b.id]) and 1 or 2
     if sa ~= sb then return sa < sb end
     if a.prio ~= b.prio then return a.prio < b.prio end
     if a.created ~= b.created then return a.created < b.created end
@@ -2850,6 +2853,7 @@ local function kind_of(P, d)
     return (p.peace == 1 and p.cl ~= 1) and 'defense' or 'repair'     -- BUG-081: a closure is a repair, not a bridge
   end
   if t == 'mood_drink' then return 'mood' end                         -- BUG-081: a drink for a mood dwarf, never paused
+  if t == 'workshops' and Q.mood_shop(d) then return 'mood' end       -- BUG-283: a shop a strange mood waits for
   if t == 'aqshaft' then return 'aq' end              -- FR-95: an open aquifer level is never paused by seal or care first
   return P.class == 'defense' and 'defense' or 'work'
 end
@@ -4980,6 +4984,52 @@ function M.pending_types(K, tpl)
     end
   end
   return out, all, n
+end
+
+-- BUG-283 (Run 15 Drillchamber y375: the Glass Furnace a fey glassmaker waited for stood in a 12-shop `workshops` project at
+-- prio 4 that took 27 days; the mood failed 54,481 ticks after the claim): the workshop types open strange moods wait for,
+-- per unit (care's mood check calls M.mood_types every few hundred ticks). A workshops project that builds one of them is
+-- kind 'mood' (never paused by seal first, care first or the rebuild policy) and sorts with the hospital before the rest.
+Q.MOODWS = {}                                    -- unit id (string) -> {type = true}
+function Q.mood_shop(d)
+  if not next(Q.MOODWS) then return false end
+  local m = type(d) == 'table' and type(d.manifest) == 'table' and d.manifest.workshops
+  for _, w in ipairs(type(m) == 'table' and m or {}) do
+    local t = type(w) == 'table' and w.type
+    if type(t) == 'string' then
+      for _, set in pairs(Q.MOODWS) do if set[t] then return true end end
+    end
+  end
+  return false
+end
+
+-- public (BUG-283, care): the mood of unit `sid` waits for `types` (an empty list: the mood ended). Marks the live workshops
+-- projects that build one of the types (S.mood_ids, read by sorted()) and returns the types no live project of mood shops
+-- only (every type of it a wanted one) builds yet: those care asks follow for (PROJECT_REQUEST workshops why=mood).
+function M.mood_types(K, sid, types)
+  sid = tostring(sid or '')
+  local set, list = {}, {}
+  for _, t in ipairs(type(types) == 'table' and types or {}) do
+    if type(t) == 'string' and not set[t] then set[t] = true; list[#list + 1] = t end
+  end
+  Q.MOODWS[sid] = next(set) and set or nil
+  local ids, own = {}, {}
+  for _, P in ipairs(S.pd and S.pd.list or {}) do
+    if P.tpl == 'workshops' and Q.live(K, P) then
+      local d = doc(K, P.id)
+      if Q.mood_shop(d) then
+        ids[P.id] = true
+        local m = type(d) == 'table' and type(d.manifest) == 'table' and d.manifest.workshops or {}
+        local only = #m > 0
+        for _, w in ipairs(m) do if not (type(w) == 'table' and set[w.type]) then only = false end end
+        if only then for _, w in ipairs(m) do own[w.type] = true end end
+      end
+    end
+  end
+  S.mood_ids = ids
+  local out = {}
+  for _, t in ipairs(list) do if not own[t] then out[#out + 1] = t end end
+  return out
 end
 
 -- BUG-181: the types of list no pending project of tpl builds (all of them while none is pending)
