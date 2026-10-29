@@ -2854,6 +2854,67 @@ local function kind_of(P, d)
   return P.class == 'defense' and 'defense' or 'work'
 end
 
+-- BUG-273 (Run 15 Drillchamber y372: the seal's door 102,124,144 waited for buildingplan 'door x1 (0 free, 3 ordered)', the
+-- door orders for a Carpenter's workshop that stood in the paused workshops project; 37 orders 'workshop missing', SEAL_STUCK
+-- after 20 days, food 27 d, 9 of 14 idle). A workshops project that builds a Carpenter's or a Mason's workshop is the seal's
+-- enabler and is never paused by it while the lead seal has an open door or hatch whose building waits for its item
+-- (economy.build_state who = buildingplan) and neither shop stands built (the workshop list; unreadable: no claim).
+-- Once a run per focus (f.dn: the piece, or false)
+Q.DOOR_SHOPS = {'Carpenters', 'Masons'}
+function Q.door_shop(d)
+  local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
+  local want = {}
+  for _, a in ipairs(words(p.add)) do want[a] = true end
+  local skip = {}
+  for _, s in ipairs(words(p.skip)) do skip[s] = true end
+  for _, m in ipairs(M.MOODABLE) do if not skip[m] then want[m] = true end end
+  for _, s in ipairs(Q.DOOR_SHOPS) do if want[s] then return true end end
+  return false
+end
+function Q.door_need(K, f)
+  if f.dn ~= nil then return f.dn end
+  f.dn = false
+  local have = {}
+  local okh = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      if built(b) then have[df.workshop_type[b.type] or ''] = true end
+    end
+  end)
+  if not okh then return false end
+  for _, s in ipairs(Q.DOOR_SHOPS) do if have[s] then return false end end
+  for _, nm in ipairs(f.names or {}) do
+    local kind, x, y, z = nm:match('^(%a+) (%-?%d+),(%-?%d+),(%-?%d+)$')
+    if kind == 'door' or kind == 'hatch' then
+      local ok, bs = K.call('economy', 'build_state', tonumber(x), tonumber(y), tonumber(z))
+      if ok and type(bs) == 'table' and bs.who == 'buildingplan' then f.dn = nm; return nm end
+    end
+  end
+  return false
+end
+
+-- BUG-275 (same fort: food 27 d, drink 20 d, no kitchen, no still while the seal paused farms and food shops): food and
+-- drink projects run beside an open seal while food or drink days are below seal_first.supply_d (60), not only in an
+-- emergency (food_d / drink_d 30)
+Q.SUPPLY_D = 60
+function Q.low_supply(K, c)
+  local st = K.view().stock
+  if type(st) ~= 'table' then return nil end
+  local fd, dd = int(st.food_d), int(st.drink_d)
+  if fd and fd < c.supply_d then return string.format('food %d d < %d', fd, c.supply_d) end
+  if dd and dd < c.supply_d then return string.format('drink %d d < %d', dd, c.supply_d) end
+end
+
+-- BUG-276 (Run 15 Guildcleans y375: a new opening 109,94,130 open 5 days, its door unsuitable and walled, while the open
+-- perimeter held max-pop at 35): the seal names that it holds the pop cap (readiness.ceiling why open_perimeter), in the
+-- seal-first kern.log line and SEAL_STUCK. Nil while the cap is not held
+function Q.perim_hold(K)
+  local rv = K.view().ready
+  if type(rv) ~= 'table' or not int(rv.pd) then return nil end
+  local ok, cap, why = K.call('readiness', 'ceiling', int(rv.lvl) or 0)
+  if not (ok and why == 'open_perimeter' and int(cap)) then return nil end
+  return string.format('pop cap %d held by the open perimeter (%d d: %s)', int(cap), int(rv.pd), trunc(rv.pw or '?', 40))
+end
+
 -- config/baseline.json "runner" over M.CFG (a value of another type or out of range keeps the default)
 local function nat(v, lo, hi, d) return (math.type(v) == 'integer' and v >= lo and v <= hi) and v or d end
 local function conf(K)
@@ -2878,6 +2939,7 @@ local function conf(K)
   if type(cf.on) == 'boolean' then r.care.on = cf.on end
   if type(sf.on) == 'boolean' then r.on = sf.on end
   if type(sf.wall) == 'boolean' then r.wall = sf.wall end
+  r.supply_d = nat(sf.supply_d, 0, 400, Q.SUPPLY_D)                          -- BUG-275
   r.off = math.max(r.off, r.pop)
   return r
 end
@@ -3055,9 +3117,21 @@ function Q.wait_why(K, P, d)
     out[#out + 1] = string.format('%s at %d,%d,%d: %s enabled for %d of %d citizens%s', job[1], t[1], t[2], t[3], job[3],
                                   n, #cits, n == 0 and ': nobody takes it' or '')
   end
+  local cls                                 -- BUG-274: the cause in one word (SEAL_STUCK d.why)
   if st.mode == 'build' then
-    local w = Q.piece_why(K, t)             -- BUG-044: the building and its job, who suspends it
+    local w, bs = Q.piece_why(K, t)         -- BUG-044: the building and its job, who suspends it
     if w then out[#out + 1] = w end
+    cls = Q.cls_of(bs)
+    if cls == 'no builder' and (int(bs.items) or 0) > 0 then
+      out[#out + 1] = plural(int(bs.items), 'item') .. ' attached'
+    end
+  end
+  local okc, civ = pcall(function() return df.global.plotinfo.alerts.civ_alert_idx end)
+  local okh, hold = K.call('reflex', 'holding')
+  if (okc and (int(civ) or 0) ~= 0) or (okh and type(hold) == 'string' and hold ~= '') then
+    out[#out + 1] = (okc and (int(civ) or 0) ~= 0) and 'civil alert on: the citizens keep to its burrow'
+                    or ('lockdown: ' .. trunc(hold, 40))
+    cls = 'confined'
   end
   if #cits > 0 then
     local pts = {}
@@ -3097,10 +3171,21 @@ function Q.wait_why(K, P, d)
                                       PIECE_NAME[t[4]] or t[4], t[1], t[2], t[3],
                                       #tl > 0 and table.concat(tl, ',', 1, math.min(#tl, 4)) or 'none',
                                       table.concat(cl, ',', 1, math.min(#cl, 4)))
+        cls = 'unreachable'
       end
     end
   end
-  return #out > 0 and table.concat(out, '; ') or nil
+  return #out > 0 and table.concat(out, '; ') or nil, cls
+end
+
+-- BUG-274: economy.build_state's answer in one word: no item (buildingplan waits for it), suspended (suspendmanager, DF),
+-- no builder (a job nobody has taken), building (a builder at it), not placed; nil when unknown
+function Q.cls_of(bs)
+  if type(bs) ~= 'table' then return nil end
+  if bs.none then return 'not placed' end
+  if not int(bs.job) then return nil end
+  if bs.susp then return bs.who == 'buildingplan' and 'no item' or 'suspended' end
+  return bs.work and 'building' or 'no builder'
 end
 
 -- BUG-081 (integration audit I2): seal's wall + door for a lost bridge (runner.repair opts.closure, params.cl = 1) is a
@@ -3117,13 +3202,17 @@ local function stuck_event(K, P, d, n, names, ticks, r)
   local label = trunc(st and st.label or 'done', 24)
   local days = ticks // DAY
   local _, mat = M.remake_why(K, P, d)
-  local okw, wait = pcall(Q.wait_why, K, P, d)
+  local okw, wait, cls = pcall(Q.wait_why, K, P, d)
   wait = okw and type(wait) == 'string' and trunc(wait, 160) or nil
-  local msg = string.format('%s (%s) built nothing for %s at %s: %s open%s%s%s%s; %s', P.id,
+  cls = okw and type(cls) == 'string' and cls or nil
+  r.why = cls                                   -- BUG-274: Q.stuck_replace reads it
+  local ph = Q.ph                               -- BUG-276: the pop cap this seal holds (focus)
+  ph = P.tpl == 'seal' and ph or nil
+  local msg = string.format('%s (%s) built nothing for %s at %s: %s open%s%s%s%s%s%s; %s', P.id,
                             P.tpl, plural(days, 'day'), label, plural(n, 'piece'),
                             #names > 0 and (' (' .. table.concat(names, ', ') .. ')') or '',
                             P.blocked ~= '' and ('; ' .. P.blocked) or '', mat and ('; ' .. mat) or '',
-                            wait and ('; ' .. wait) or '',
+                            cls and ('; cause: ' .. cls) or '', wait and ('; ' .. wait) or '', ph and ('; ' .. ph) or '',
                             P.tpl == 'repair' and 'the lost bridge stays open' or 'the other projects run again')
   K.log('warn', 'seal first: %s', msg)
   local T = K.now()
@@ -3134,6 +3223,8 @@ local function stuck_event(K, P, d, n, names, ticks, r)
   if mat then dd.mat = trunc(mat, 80) end
   if P.blocked ~= '' then dd.blocked = trunc(P.blocked, 24) end
   if wait then dd.wait = wait end
+  if cls then dd.why = cls end                  -- BUG-274
+  if ph then dd.hold = trunc(ph, 100) end       -- BUG-276
   K.emit('SEAL_STUCK', 'A', trunc(msg, 200), dd)
   K.flush()
 end
@@ -3206,6 +3297,10 @@ end
 local function focus(K)
   local c, t = conf(K), now(K)
   local f = {c = c, n = 0, more = 0, stuck = {}, stk = {}, emerg = emergency(K, c), rock = rock_short(K)}
+  f.low = not f.emerg and Q.low_supply(K, c) or nil                       -- BUG-275
+  local okp, ph = pcall(Q.perim_hold, K)                                  -- BUG-276
+  Q.ph = okp and ph or nil
+  f.ph = Q.ph
   -- BUG-116: care first. Own pcall: a fault costs only this rule, never the seal-first count
   S.care_id = nil
   local okc, cl = pcall(Q.care_lead, K, c, t)
@@ -3286,7 +3381,62 @@ end
 -- (seal.opening_ways, at most wall_age old) shows the citizens another way: the opening has a door or a bridge on it, or
 -- another opening has one; else the door stays and kern.log says why, once. SEAL_WALLED (B) once per piece. One piece a
 -- run (one quickfort call). A fault here is logged and costs this fallback only, never the seal-first count (own pcall)
+-- BUG-274 (Run 15 Earthboat y373-y375: the refuge hatch 55,82,133 open 619 days, 'job 8095 not suspended, no builder has
+-- taken it', 9 idle; nothing placed it again): a door or hatch of a stuck seal (or closure) whose job nobody takes
+-- (SEAL_STUCK why 'no builder', still so by economy.build_state) 2 x stuck_days after its clock stopped is removed (quickfort
+-- undo, the player's remove building) and placed again (the chunk applied again: a fresh building and job), once per piece
+-- (r.rp), one a run, in PEACE without a lockdown. kern.log names it; an unremovable one stays (kern.log once)
+Q.REPLACE = {d = 'door', H = 'hatch'}
+function Q.stuck_replace(K, c)
+  if not c.on or K.mode() ~= 'PEACE' then return end
+  local okh, hold = K.call('reflex', 'holding')
+  if okh and type(hold) == 'string' and hold ~= '' then return end
+  local t = now(K)
+  for _, P in ipairs(sorted()) do
+    local r = (P.tpl == 'seal' or P.tpl == 'repair') and (P.blocked == '' or P.blocked == 'stalled') and S.rt.sf[P.id]
+    local d = type(r) == 'table' and r.st == 1 and r.why == 'no builder' and t - r.t >= 2 * c.stuck and doc(K, P.id)
+    if d and P.tpl == 'repair' and not Q.closure(P, d) then d = nil end
+    local st = d and d.stages[P.stage + 1]
+    if st and st.mode == 'build' and P.chunk >= #st.chunks and t - (int(r.rpt) or -DAY) >= DAY then
+      r.rpt = t
+      r.rp = type(r.rp) == 'table' and r.rp or {}
+      dirty()
+      for _, ch in ipairs(st.chunks) do
+        for _, cell in ipairs(ch.cells) do
+          local tl = {}
+          cell_tiles(ch, cell, tl)
+          local tile, what = tl[1], Q.REPLACE[cell[4]]
+          local at = tile and tkey(tile[1], tile[2], tile[3])
+          if what and not r.rp[at] and qf_room() and not piece_built(K, tile) then
+            local why, bs = Q.piece_why(K, tile)
+            if Q.cls_of(bs) == 'no builder' and int(bs.id) then
+              r.rp[at] = 1
+              qf(K, {mode = 'build', data = {[0] = {[0] = {[0] = cell[4]}}}, pos = {tile[1], tile[2], tile[3]},
+                     command = 'undo'})
+              local okf, b2 = pcall(dfhack.buildings.findAtTile, tile[1], tile[2], tile[3])
+              if okf and b2 and not is_construction(b2) then
+                K.log('warn', 'seal first: %s: %s %s stays: quickfort undo did not remove it (%s)', P.id, what, at, why)
+                return
+              end
+              local R = R_of(K, P)
+              local keep = {}
+              for _, id in ipairs(R.b) do if df.building.find(id) then keep[#keep + 1] = id end end
+              R.b, R.uns, R.ra, P.chunk = keep, (int(R.uns) or 0) + 1, 1, 0
+              K.log('warn', 'seal first: %s: %s %s open %d days, its job taken by no builder (%s): removed and placed ' ..
+                    'again (once)', P.id, what, at, (t - r.t) // DAY, trunc(why, 100))
+              r.st, r.t, r.ev, r.why = 0, t, CAD.quiet(r.ev), nil       -- a fresh start: the stuck clock again
+              return
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
 function Q.stuck_walls(K, c)
+  local okr, er = pcall(Q.stuck_replace, K, c)                 -- BUG-274: own pcall
+  if not okr then K.log('error', 'seal re-place failed: %s', trunc(er, 160)) end
   if not (c.on and c.wall) or K.mode() ~= 'PEACE' then return end
   local okh, hold = K.call('reflex', 'holding')            -- a lockdown holds the doors: citizens may be coming in
   if okh and type(hold) == 'string' and hold ~= '' then return end
@@ -3379,9 +3529,13 @@ local function paused(K, P, d)
   local f = S.focus
   if not f or SEALS[P.tpl] then return nil end
   local k, m = kind_of(P, d), K.mode()
-  if f.lead and f.c.on and m == 'PEACE' and SEAL_PAUSES[k] and not (k == 'supply' and f.emerg) then
+  if f.lead and f.c.on and m == 'PEACE' and SEAL_PAUSES[k] and not (k == 'supply' and (f.emerg or f.low)) then
     local st = d and d.stages[P.stage + 1]
-    if not (f.rock and st and st.mode == 'dig') then return 'seal ' .. f.lead end
+    local en = P.tpl == 'workshops' and Q.door_shop(d) and Q.door_need(K, f)     -- BUG-273: the seal's enabler runs
+    if en then
+      f.en = f.en or {}
+      if not f.en[P.id] then f.en[P.id] = en; f.en[#f.en + 1] = P.id end
+    elseif not (f.rock and st and st.mode == 'dig') then return 'seal ' .. f.lead end
   end
   -- BUG-116: care first (the hospital leads, the work and housing projects wait; never the hospital itself)
   if f.care and not f.care_stuck and f.care ~= P.id and m == 'PEACE' and Q.CARE_PAUSES[k] then
@@ -3407,7 +3561,11 @@ local function note_pause(K, pz)
     if why:sub(1, 5) == 'seal ' then
       head = string.format('seal first: %s with %s open%s runs first', f.lead, plural(f.n, 'piece'),
                            #f.names > 0 and (' (' .. table.concat(f.names, ', ') .. ')') or '')
-      if f.emerg then head = head .. ' (' .. f.emerg .. ': food/drink projects go on)' end
+      if f.emerg or f.low then head = head .. ' (' .. (f.emerg or f.low) .. ': food/drink projects go on)' end
+      if f.en and #f.en > 0 then                  -- BUG-273
+        head = string.format('%s (%s workshops go on: Carpenter\'s/Mason\'s for %s)', head, f.en[1], f.en[f.en[1]])
+      end
+      if f.ph then head = head .. ' (' .. f.ph .. ')' end                     -- BUG-276
     elseif why:sub(1, 5) == 'care ' then
       head = string.format('care first: %s with %s runs first', f.care, f.care_why or '?')
     elseif f.rb and why:sub(1, 8) == 'rebuild ' then

@@ -252,6 +252,10 @@ Related: FR-xx, BUG-xx
 | [BUG-235](BUG-235-rescue-never-lowers-outer-bridges-in-peace.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the rescue never lowered an outer bridge and demanded a sealed outside even in quiet PEACE | lua/dfllm/siege.lua, lua/dfllm/gate.lua, lua/dfllm/drill.lua |
 | [BUG-236](BUG-236-player-lever-down-silently-overridden.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the player's lever down was accepted and then silently overridden | lua/dfllm/gate.lua |
 | [BUG-237](BUG-237-gate-cycles-up-down-with-drills-that-cannot-pass.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: B1 cycled up/down with automatic drills that could not pass (O1 without a lever) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-273](BUG-273-seal-first-pauses-the-shop-that-makes-its-door.md) | fixed (offline, live-untested) | high | Run 15 Drillchamber: seal first paused the workshops project whose Carpenter's would make the seal's own door (deadlock) | lua/dfllm/runner.lua |
+| [BUG-274](BUG-274-seal-stuck-names-no-cause-and-never-replaces-the-piece.md) | mitigated (offline, live-untested): cause named, root cause open | high | Run 15 Earthboat: refuge hatch open 619 days, 'no builder has taken it', no cause named, never placed again | lua/dfllm/runner.lua |
+| [BUG-275](BUG-275-seal-first-pauses-food-projects-above-emergency.md) | fixed (offline, live-untested) | medium | Run 15 Drillchamber: seal first paused farms and food shops until food or drink fell below 30 days (food 27 d, drink 20 d later) | lua/dfllm/runner.lua |
+| [BUG-276](BUG-276-seal-does-not-say-it-holds-the-pop-cap.md) | mitigated (offline, live-untested): named, no priority raise | low | Run 15 Guildcleans: an opening walled after an unsuitable door held max-pop at 35 for days; the seal never said so | lua/dfllm/runner.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

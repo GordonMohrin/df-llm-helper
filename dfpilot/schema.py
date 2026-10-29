@@ -649,8 +649,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # the other projects; pieces = the first 6 open ones ('door x,y,z'), n = all open, mat = why economy cannot make
     # them, blocked = the project's block (build_lost ...); BUG-041: wait = why the first open piece waits, as far as the
     # kernel can tell ('FellTree at x,y,z: Wood cutting enabled for 0 of 26 citizens: nobody takes it', 'no citizen
-    # reaches wall x,y,z or a tile beside it (walk groups 5018; citizens 7827)')
-    "SEAL_STUCK": ("A", "runner", _d("proj:s", "tpl:s stage:s days:i n:i pieces:sa mat:s blocked:s wait:s")),
+    # reaches wall x,y,z or a tile beside it (walk groups 5018; citizens 7827)'); BUG-274: why = the cause in one word
+    # (unreachable, confined, no item, suspended, no builder, building, not placed); BUG-276: hold = the pop cap the
+    # open perimeter holds ('pop cap 35 held by the open perimeter (5 d: 1 way in)')
+    "SEAL_STUCK": ("A", "runner", _d("proj:s", "tpl:s stage:s days:i n:i pieces:sa mat:s blocked:s wait:s why:s hold:s")),
     # BUG-044 (Run 11 y483-y497, the seal door 115,73,143): a seal door still not built seal_first.wall_days after
     # SEAL_STUCK was replaced by a constructed wall on its tile (PEACE; the citizens keep another way: seal.opening_ways):
     # at = 'x,y,z', was = the piece (door), days = days it stood stuck, why = the SEAL_STUCK wait (the job and who
