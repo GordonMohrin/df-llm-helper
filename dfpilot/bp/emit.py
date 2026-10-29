@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from . import aquifer, defense, fortcore, mine, rooms
+from . import aquifer, defense, fortcore, grand, mine, rooms
 from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
@@ -25,7 +25,9 @@ TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress co
                 for n, f in defense.BUILD.items()},
              **{n: (f, dict(mine.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0]) for n, f in mine.BUILD.items()},
              **{n: (f, dict(aquifer.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0])
-                for n, f in aquifer.BUILD.items()}}         # FR-95: the aquifer pass
+                for n, f in aquifer.BUILD.items()},          # FR-95: the aquifer pass
+             **{n: (f, dict(grand.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0])
+                for n, f in grand.BUILD.items()}}           # FR-102/103: large rooms, the deep core
 ATTACHED = dict(defense.ATTACHED)     # tpl -> the template whose tiles it is built against (cmd occupancy)
 FREE = frozenset(defense.FREE)        # templates that build only on existing open tiles (no occupancy clash)
 _BURROW_RE = r"^[A-Za-z0-9_+-]{0,20}$"
@@ -35,7 +37,7 @@ MATERIAL = {"b": "bed", "f": "cabinet", "h": "chest", "t": "table", "c": "chair"
             "Tl": "lever", "Tw": "weapon_trap", "Ts": "stonefall_trap", "Tc": "cage_trap", "R": "traction_bench",
             "l": "well", "r": "weapon_rack", "a": "armor_stand", "~a": "offering_place", "D": "trade_depot",
             "Cw": "wall", "CF": "fortification", "p": "farm_plot", "g": "drawbridge", "H": "hatch", "W": "grate",
-            "G": "grate", "B": "bars", "~b": "bars", "k": "workshop"}
+            "G": "grate", "B": "bars", "~b": "bars", "k": "workshop", "s": "statue"}
 
 
 def list_templates() -> list[dict]:
@@ -103,7 +105,7 @@ def emit(tpl: str, params: dict | None = None, site=None) -> dict:
         raise ValueError(f"{tpl}: site {anchor} rot {rot} puts tiles outside the map (min x,y,z = {lo})")
     man = transform_manifest(plan.manifest, X)
     # the room joins the civilian core: later rooms may open from it (a refuge-level room stays out of Z4)
-    if tpl in rooms.BUILD and tpl not in rooms.REFUGE_LEVEL:
+    if (tpl in rooms.BUILD and tpl not in rooms.REFUGE_LEVEL) or (tpl in grand.ROOMS and plan.dug()):
         man.setdefault("zones", {}).setdefault("Z4", []).append(X.bbox(dug_bbox(plan)))
     prefix = f"{tpl[:8]}{anchor[0]}_{anchor[1]}_{anchor[2]}r{rot}"      # two rooms may share an anchor
     if plan.rooms:

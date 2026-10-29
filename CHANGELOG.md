@@ -1,5 +1,38 @@
 # CHANGELOG dfpilot
 
+## G15 large rooms and the deep core: room tiers with a beauty stage, a deep anchor search, a staged move (FR-102, FR-103, 2026-10-29; offline, live-untested)
+- **Why:** Gordon's goal G15 (runs/GOALS-VORLAGE.md: beautiful, large rooms, a good layout, later a move into a large fortress
+  deeper in the mountain; G12 pop 100 and G17 well-being lean on it). The room templates had one small size each, beauty
+  (DESIGN §5.7) was designed but no template smoothed or engraved anything, fortcore anchors once and no plan moved the fort.
+- **What changed:** (1) `dfpilot/bp/grand.py`: `suites`, `grand_dining`, `grand_tavern`, `grand_temple` in sizes large/grand
+  (bigger rooms, cabinets, statues in grand, tiers = room-value targets); `stage` 1 builds (class living), `stage` 2 (class
+  beauty: the runner's PEACE + R1 + policy gate) smooths then engraves only that used room and its walls; emit adds Z4 only
+  for a stage that digs; quickfort `s` counts as statue in `materials`; suites and grand_temple are private for the ranking
+  (FR-102). (2) `deepcore`: a stair shaft from a public core floor behind a vestibule door to a second core (hub, dorm, six
+  shops, store room) in three stages, dig / furnish / move (deep piles, dormitory and dining zones, Kern+ over shaft and
+  rooms); `dfpilot/bp/deep.py` ranks it on revealed tiles only (no cavern/damp/warm/aquifer/breach level for the shaft, 3
+  levels of rock above a cavern, no soil, off the refuge level, 2 tiles clear of the refuge and the civilian stairs);
+  `bp sites deepcore depth=N` uses it; `sites._private` counts the deep dorm (FR-103). (3) `plans/year1.json` P7 (star phase)
+  lists every stage; `dfpilot/relocate.py` `gate` drafts one stage at a time: stage k needs stage k-1 done and its params
+  (`@same`), R1 (deep core R2), no open seal, no drink/food emergency; deep stage 1 at an explicit anchor on the deepest
+  level a finished explore shaft tunnelled without a breach; a deep stage k >= 2 waits for the next plan year; the notes say
+  `FR-102/103: ...`. `fort_facts['grand']`. (4) status (rank 4) and brief: `rooms: suites large st1 ok, ..., deep core z14
+  st2/3 30% (next move)`. (5) runner.lua KEEP_BOX: the five templates keep their box for the audit snapshot. RULES §10
+  Beauty row and §11 P7 row edited in place (300 lines); design note docs/v2/FR-fr-rooms-relocate-G15.md. Not built: the
+  old core is not sealed or emptied (no verb removes a pile or zone: the player's step), no room value is read, no furniture
+  quality filter, the daily cavern check/plug stays explore's (the deep dig has the generic BREACH_STOP).
+- **Tests (each fails on 64df679):** tests/bp/test_bp_grand.py (46: both stages validate in 4 rotations and both sizes, beauty
+  rects, sizes/tiers, private rooms, deepcore stages, ranking + audit on the 32-level fort, caverns/aquifer/breach/soil/open
+  space), tests/test_fr102_103_rooms.py (9: P7 deliverables, gate order, no banned term in the notes, readiness/seal/emergency holds, explicit deep
+  anchor, params carried, next plan year, facts on a save folder, rooms line, status/brief), tests/lua/test_fr102_rooms.lua
+  (3: beauty waits for R1, smooth then engrave, policy none; kept boxes); goldens for the five templates;
+  test_bp_emit.test_list_templates (28 templates).
+- **Live check:** at P7 with R2: `dfllm plan propose` prints suites/grand_dining/grand_tavern/grand_temple@S1 st1 and, once an
+  explore shaft is done, `deepcore@A<x>_<y>_<z>_<r> st1` with `FR-102/103: deepcore st1 at ...: ... known dry`; `plan check`
+  places them; `dfllm bp preview` of each. After suites st1: `suites@same st2`; in PEACE the engravers smooth and then engrave
+  (kern.log quickfort lines), never in ALERT. Deep core: st1 digs (a damp/cavern stop is a BREACH_STOP), st2 the next plan
+  year, st3: the stockpile list shows dfllm-deep-*, the burrow screen Kern+ on the deep level, `dfllm brief` `rooms:` line.
+
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders

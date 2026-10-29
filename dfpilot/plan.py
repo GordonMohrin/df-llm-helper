@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-from . import cmd as _cmd, files, paths, schema
+from . import cmd as _cmd, files, paths, relocate as _reloc, schema
 from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files, fmt_reply,
                   fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy, place, rank_sites, refuge_stair,
                   refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
@@ -209,7 +209,16 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
+            "grand": _grand_facts(save_dir, state),                  # FR-102/103: large rooms, the deep core
             "seals": open_seals(save_dir, state)}
+
+
+def _grand_facts(save_dir: Path, state: dict | None) -> dict:
+    """FR-102/103 (relocate.facts): the staged rooms and the deep core's site; {} when they cannot be read."""
+    try:
+        return _reloc.facts(save_dir, state)
+    except Exception:                                   # noqa: BLE001 - a broken bp package must not stop plan check
+        return {}
 
 
 def _food_shops_missing(save_dir: Path) -> list[str] | None:
@@ -2074,10 +2083,18 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     hw = hospital_water(s, fort)
     held, cistern = None, False
     lib_top = next((p["id"] for p in plist if p["id"] > cur), cur)     # BUG-198: order libraries up to the next phase
+    gnotes: list[str] = []
+    ewhy0 = emergency(s)
     for p in plist:
         if cur <= p["id"] <= target:
             for d in p["deliver"]:
-                if d["k"] == "proj":
+                if d["k"] == "proj" and d["tpl"] in _reloc.STAGED:     # FR-102/103: one stage at a time, readiness kept
+                    b, gn = _reloc.gate(d, fort or {}, s, year, ewhy0)
+                    if gn and gn not in gnotes:
+                        gnotes.append(gn)
+                    if b is not None and _build_key(b) not in done and all(_build_key(x) != _build_key(b) for x in builds):
+                        builds.append(b)
+                elif d["k"] == "proj":
                     b = {"tpl": d["tpl"], "site": "S1"}
                     if "stage" in d and (staged is None or d["tpl"] in staged):
                         b["p"] = {"stage": d["stage"]}
@@ -2175,6 +2192,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     if stress and sdrafts and not rb:
         doc["notes"] += f"; stress {stress['pct']} % ({stress['src']}): " + " and ".join(sdrafts) + "@S1 drafted (FR-74)"
+    if gnotes and not rb and fresh is None:
+        doc["notes"] += "; FR-102/103: " + "; ".join(n[:120] for n in sorted(gnotes, key=lambda n: not n.startswith("deep"))[:3])
     if rb:
         doc["notes"] += (f"; rebuild (pop {rb['pop']} < {rb['lo']}, until {rb['hi']}): only seal/tombs/food/beds drafted"
                          + (f" (left out: {', '.join(sorted(set(left_out)))})" if left_out else "")

@@ -24,4 +24,11 @@
  {"id": "P6", "title": "Y2: iron/steel kits, 300 bolts, traps (fortcore stage 4), R2 cap raise", "approve": true,
   "deliver": [{"k": "orders", "lib": "library/military"}, {"k": "proj", "tpl": "fortcore", "stage": 4},
               {"k": "metal", "pct": 80}, {"k": "bolts", "n": 300}, {"k": "ready", "lvl": 2}]},
- {"id": "P7", "title": "beauty in used rooms only; R3 only with D-01 = B", "approve": true, "deliver": []}]}
+ {"id": "P7", "title": "large rooms + beauty (used only); deep core, staged move; R3 only with D-01 = B",
+  "approve": true,
+  "deliver": [{"k": "proj", "tpl": "suites", "stage": 1}, {"k": "proj", "tpl": "grand_dining", "stage": 1},
+              {"k": "proj", "tpl": "grand_tavern", "stage": 1}, {"k": "proj", "tpl": "grand_temple", "stage": 1},
+              {"k": "proj", "tpl": "suites", "stage": 2}, {"k": "proj", "tpl": "grand_dining", "stage": 2},
+              {"k": "proj", "tpl": "grand_tavern", "stage": 2}, {"k": "proj", "tpl": "grand_temple", "stage": 2},
+              {"k": "proj", "tpl": "deepcore", "stage": 1}, {"k": "proj", "tpl": "deepcore", "stage": 2},
+              {"k": "proj", "tpl": "deepcore", "stage": 3}]}]}

@@ -74,7 +74,7 @@ USE = {"dining": "used", "bedrooms": "used", "tombs": "used", "temple": "used", 
        "guildhall": "used", "barracks": "used"}
 # rooms nobody should walk through: sites.rank opens no new room from their tiles behind a door
 NO_THROUGH = frozenset({"bedrooms", "tombs", "hospital", "temple", "office", "captives", "hall", "guildhall",
-                        "barracks", "refuge_beds"})
+                        "barracks", "refuge_beds", "suites", "grand_temple"})      # FR-102: bp/grand.py
 
 
 def _box(P: Plan, W: int, H: int, door: bool = True):

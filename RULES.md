@@ -266,7 +266,7 @@ unclaimed reachable PlantSeeds / GatherPlants jobs, the farmers and plant gather
 autofarm thresholds, fishers, the fishing zone (safe water, never cavern or ice), a fishery for raw fish (asked again after a siege destroyed it) and meals follow the citizens (economy; `food_low` wakes below 30 days).
 **Happiness:** dining hall → own bedrooms (≥ 500) → general temple (≥ 2,000 on petition) → tavern →
 library. 0 naked. Stress KPI: share with category ≤ 1.
-**Beauty:** only `used` rooms, only in PEACE with R1 green; artifacts and masterworks on pedestals.
+**Beauty:** only `used` rooms (the large rooms' stage 2, class beauty), only in PEACE with R1 green; artifacts and masterworks on pedestals. The old core's piles and zones after a deep-core move: ask the player (no verb removes them).
 **Water and caverns (FR-95):** an aquifer is passed only by `aqshaft` (per level: dig, seal at once (stone smoothed, soil walled), watch a day); a damp report elsewhere starts observe mode (dig on with the damp marker, walls beside it smoothed; stop only on visible water >= 4/7 or rising in our own tiles: AQ_HEAVY); rooms stay off the manifest's `aquifer_levels` and the level below them; a dig that
 breaks into a cavern (lake) is plugged by the kernel (CAVERN_PLUG); planned breaches via a 2-wall airlock; caverns stay sealed.
 **Trade:** depot in the bailey, O1 down only while no hostile is visible; ratio ≥ 1.5. Goods come
@@ -285,7 +285,7 @@ FPS cap 30; no Lua quicksaves (only `dfllm save`, verified); DF autosave yearly.
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |
 | P5 | gallery, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d (the refuge of stage 3 comes with P3 and before any phase_target P3+: §8 refuge gate) |
 | P6 ★ (Y2) | military orders, trap hall armed (fortcore stage 4), metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |
-| P7 ★ | beauty in used rooms; R3 only with D-01 = B |
+| P7 ★ | FR-102/103 (G15): `suites`, `grand_dining`, `grand_tavern`, `grand_temple` (st1 build, st2 beauty: smooth + engrave), `deepcore` st1 dig, st2 furnish, st3 move (piles, dorm, Kern+), one stage at a time with R1 (deep core R2, a known dry level, one stage a plan year); R3 only with D-01 = B |
 ★ = entered only when your plan's `phase_target` reaches it.
 
 ## 12. Token budget

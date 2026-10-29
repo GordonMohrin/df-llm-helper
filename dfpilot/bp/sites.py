@@ -224,6 +224,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl != "fortcore" and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
+    if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
+        from . import deep
+        return deep.rank(snap, p, manifest, n=n, near=near, within=within, at=at)
     marks = [tuple(q) for k in MARKS for q in snap.get("marks", {}).get(k, [])]
     bad = _Pref(snap, lambda c: c not in GOOD)
     hid = _Pref(snap, lambda c: c == "?")
@@ -480,7 +483,7 @@ def _keep_out(m: dict) -> list[tuple]:
 
 
 def _private(r: dict) -> bool:
-    if r["tpl"] == "fortcore":
+    if r["tpl"] in ("fortcore", "deepcore"):              # FR-103: the deep core's dorm too
         return r["id"].rsplit("_", 1)[-1] in ("dorm", "refuse", "refuge")
     return r["tpl"] in NO_THROUGH
 

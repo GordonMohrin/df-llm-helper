@@ -1,0 +1,276 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "living",
+  "manifest": {
+   "rooms": [
+    {
+     "bbox": [
+      66,
+      72,
+      100,
+      74,
+      80,
+      100
+     ],
+     "id": "grand_te70_70_100r0",
+     "tier": 2000,
+     "tpl": "grand_temple",
+     "use": "used"
+    }
+   ],
+   "v": 2,
+   "zones": {
+    "Z4": [
+     [
+      66,
+      71,
+      100,
+      74,
+      80,
+      100
+     ]
+    ]
+   }
+  },
+  "materials": {
+   "door": 1,
+   "offering_place": 1,
+   "statue": 2
+  },
+  "params": {
+   "burrow": "Kern+",
+   "size": "large",
+   "stage": 1,
+   "tier": 0
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        4,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        4,
+        0,
+        "d(9x1)"
+       ]
+      ],
+      "pos": [
+       66,
+       71,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        2,
+        0,
+        "d(9x1)"
+       ],
+       [
+        0,
+        3,
+        0,
+        "d(9x1)"
+       ]
+      ],
+      "pos": [
+       66,
+       76,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "d(9x1)"
+       ]
+      ],
+      "pos": [
+       66,
+       80,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        3,
+        0,
+        0,
+        "d"
+       ],
+       [
+        0,
+        8,
+        0,
+        "s"
+       ],
+       [
+        6,
+        8,
+        0,
+        "s"
+       ],
+       [
+        3,
+        9,
+        0,
+        "~a"
+       ]
+      ],
+      "pos": [
+       67,
+       71,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 1
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "m{location=temple name=GrandTemple allow=residents}(9x9)"
+       ]
+      ],
+      "pos": [
+       66,
+       72,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "zone",
+    "mode": "zone",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        4,
+        0,
+        0,
+        "a{name=Kern+ create=true}(1x1)"
+       ],
+       [
+        0,
+        1,
+        0,
+        "a{name=Kern+ create=true}(9x4)"
+       ]
+      ],
+      "pos": [
+       66,
+       71,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "a{name=Kern+ create=true}(9x4)"
+       ]
+      ],
+      "pos": [
+       66,
+       76,
+       100
+      ]
+     },
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "a{name=Kern+ create=true}(9x1)"
+       ]
+      ],
+      "pos": [
+       66,
+       80,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "burrow",
+    "mode": "burrow",
+    "orders": 0
+   }
+  ],
+  "tpl": "grand_temple",
+  "v": 2
+ }
+]
