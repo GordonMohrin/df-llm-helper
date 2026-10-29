@@ -357,4 +357,72 @@ T.test('the Load button of the main menu is used when there is no Continue', fun
   T.eq(D.loaded, 'autosave 1')
 end)
 
+---------------------------------------------------------------- BUG-230: header lists, same-named worlds, scrolling
+-- Run 15 (i2): two worlds of the same name could not be told apart by their rows, and a list was never scrolled
+T.test('BUG-230 pure: shown text, world index by folder or unique name, rows counted past same names', function()
+  T.eq(LS.shown('Zilirr' .. string.char(130) .. 'th'), 'Zilirr?th', 'CP437 accents read as ? like the screen')
+  local t = {worlds = {{folder = 'region2', world = 'Zilirr?th'}, {folder = 'region3', world = 'Oldworld'},
+                       {folder = 'region5', world = 'Zilirr?th'}},
+             saves = {{folder = 'autosave 1', world = 'Zilirr?th'}, {folder = 'autosave 3', world = 'Oldworld'}}}
+  T.eq(LS.world_index(t, 'region5'), 3, 'the folder of a world entry')
+  T.eq(LS.world_index(t, 'autosave 3'), 2, 'the only world of that name')
+  T.eq(LS.world_index(t, 'x', 'region2'), 1, '--world-folder')
+  local i, why, name, hits = LS.world_index(t, 'autosave 1')
+  T.eq({i, name, hits}, {nil, 'Zilirr?th', {1, 3}})
+  T.ok(why:find('2 worlds are named', 1, true) and why:find('region2, region5', 1, true), why)
+  T.eq(LS.world_index(t, 'nope'), nil)
+  local v = V.from_lines({'  Select a world', '', '   Zilirr?th', '', '   Oldworld', '', '   Zilirr?th'})
+  local lab = function(e) return e.world end
+  local m = LS.list_row(v, t.worlds, 3, 0, lab)
+  T.eq(m.y, 6, 'entry 3 is the second row named Zilirr?th')
+  T.eq(LS.list_row(v, t.worlds, 1, 0, lab).y, 2)
+  local m2, sc, why2 = LS.list_row(V.from_lines({'   Oldworld', '   Zilirr?th'}), t.worlds, 1, 1, lab)
+  T.eq({m2, sc}, {nil, 0}, 'above the visible rows: scroll up to it')
+  T.ok(why2:find('above', 1, true), why2)
+  m2, sc = LS.list_row(V.from_lines({'   Zilirr?th', '   Oldworld'}), t.worlds, 3, 0, lab)
+  T.eq({m2, sc}, {nil, 2}, 'below the visible rows: scroll down to it')
+end)
+
+local WORLDS = {
+  {name = 'Zilirr?th', folder = 'region2', saves = {{name = 'autosave 1'}, {name = 'region2-spr'}}},
+  {name = 'Oldworld', folder = 'region3', saves = {{name = 'autosave 3'}}},
+  {name = 'Zilirr?th', folder = 'region5', saves = {{name = 'autosave 2'}}}}
+
+T.test('BUG-230: two worlds of one name: the first is opened, its list lacks the save, Esc, the second loads', function()
+  local D = F.new({worlds = WORLDS})
+  local run, _, ctx = start(D, spec('autosave 2'))
+  T.eq(run.state, 'done', run.msg .. '\n' .. table.concat(run.log, '\n'))
+  T.eq({D.loaded, D.chosen_world}, {'autosave 2', 3})
+  T.eq(texts(ctx), {'main:Continue playing', 'world:Zilirr?th', 'back:Esc', 'world:Zilirr?th', 'game:autosave 2'})
+  T.eq(ctx.results.clicks[4].ty, 14, 'the third row of the world list (the second Zilirr?th)')
+end)
+
+T.test('BUG-230: --world-folder opens that world at once; the save of a unique world name needs no guess', function()
+  local D = F.new({worlds = WORLDS})
+  local run, _, ctx = start(D, spec('autosave 2', {world_folder = 'region5'}))
+  T.eq(run.state, 'done', run.msg)
+  T.eq(texts(ctx), {'main:Continue playing', 'world:Zilirr?th', 'game:autosave 2'})
+  D = F.new({worlds = WORLDS})
+  run, _, ctx = start(D, spec('autosave 3'))
+  T.eq(run.state, 'done', run.msg)
+  T.eq({D.loaded, D.chosen_world}, {'autosave 3', 2})
+end)
+
+T.test('BUG-230: entries below the visible rows are scrolled to (world list and game list)', function()
+  local worlds = {}
+  for i = 1, 6 do
+    local saves = {}
+    for j = 1, 5 do saves[j] = {name = 'w' .. i .. 'save' .. j} end
+    worlds[i] = {name = 'World' .. i, folder = 'region' .. i, saves = saves}
+  end
+  local D = F.new({worlds = worlds, rows = 3})
+  local run, _, ctx = start(D, spec('w6save5'))
+  T.eq(run.state, 'done', run.msg .. '\n' .. table.concat(run.log, '\n'))
+  T.eq({D.loaded, D.chosen_world}, {'w6save5', 6})
+  T.eq(#ctx.results.scrolls, 2)
+  T.eq({ctx.results.scrolls[1].which, ctx.results.scrolls[1].to}, {'world', 5})
+  T.eq({ctx.results.scrolls[2].which, ctx.results.scrolls[2].to}, {'game', 4})
+  T.eq({D.scroll_world, D.scroll_game}, {3, 2}, 'clamped by DF, the row is still found')
+end)
+
 T.done()

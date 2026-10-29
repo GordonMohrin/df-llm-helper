@@ -17,13 +17,21 @@ local function install(D, fields)
   local ctl = {writes = {}, stock = {}, fields = fields}
   local function titleish()
     return D.screen == 'title' or D.screen == 'savelist' or D.screen == 'loadpopup' or D.screen == 'loadsave'
+      or D.screen == 'worldlist' or D.screen == 'gamelist'
   end
+  -- ctl.fields[k] may be a function (a field that follows the fake's state); ctl.writable[k](v) takes a write
   local scr = setmetatable({}, {
     __index = function(_, k)
-      if ctl.fields[k] ~= nil then return ctl.fields[k] end
+      local f = ctl.fields[k]
+      if type(f) == 'function' then return f() end
+      if f ~= nil then return f end
       error('Field ' .. k .. ' not found', 2)
     end,
-    __newindex = function(_, k) ctl.writes[#ctl.writes + 1] = k; error('the title screen must not be written: ' .. k) end})
+    __newindex = function(_, k, v)
+      ctl.writes[#ctl.writes + 1] = k
+      if ctl.writable and ctl.writable[k] then return ctl.writable[k](v) end
+      error('the title screen must not be written: ' .. k)
+    end})
   local gps = {tile_pixel_x = D.tpx, tile_pixel_y = D.tpy, mouse_x = 0, mouse_y = 0, precise_mouse_x = 0, precise_mouse_y = 0}
   _G.df = {global = {gps = gps},
     viewscreen_titlest = {is_instance = function(_, s) return s == scr and titleish() end},
@@ -145,6 +153,65 @@ T.test('entry load: a title screen the fake cannot read as titlest still runs by
   local st = json.decode(slurp(OUT .. '/status.json'))
   T.eq(st.state, 'done', st.msg)
   T.eq(st.results.title.old_field, false)
+end)
+
+-- BUG-230: the header vectors as DFHack shows them (0-based, #), filename_noext/world_name strings, the two
+-- scroll fields the only writable ones
+local function vec(list) return setmetatable({}, {__index = function(_, i) return list[i + 1] end,
+  __len = function() return #list end}) end
+
+T.test('BUG-230 entry: the header lists are read; only the scroll fields are written; same-named worlds load', function()
+  local worlds = {
+    {name = 'Zilirr?th', folder = 'region2', saves = {{name = 'autosave 1'}}},
+    {name = 'Zilirr?th', folder = 'region5', saves = {{name = 'g1'}, {name = 'g2'}, {name = 'g3'}, {name = 'g4'},
+      {name = 'autosave 2'}}}}
+  local D = F.new({worlds = worlds, rows = 3})
+  local function hdr(list) local out = {} for i, e in ipairs(list) do out[i] = e end return vec(out) end
+  local fields = {selected = 0, mode = 0,
+    savegame_header_world = function()
+      local t = {}
+      for i, w in ipairs(worlds) do t[i] = {filename_noext = w.folder, world_name = w.name} end
+      return hdr(t)
+    end,
+    savegame_header = function()
+      local t = {}
+      for _, w in ipairs(worlds) do
+        for _, sv in ipairs(w.saves) do t[#t + 1] = {filename_noext = sv.name, world_name = w.name} end
+      end
+      return hdr(t)
+    end,
+    savegame_header_game = function()
+      local t = {}
+      if D.screen == 'gamelist' then
+        for _, sv in ipairs(worlds[D.world].saves) do t[#t + 1] = {filename_noext = sv.name, world_name = worlds[D.world].name} end
+      end
+      return hdr(t)
+    end,
+    scroll_position_world_choice = function() return D.scroll_world end,
+    scroll_position_game_choice = function() return D.scroll_game end}
+  local cmd, pump, ctl = install(D, fields)
+  ctl.writable = {scroll_position_world_choice = function(n) D.w_api.scroll('world', n) end,
+    scroll_position_game_choice = function(n) D.w_api.scroll('game', n) end}
+  capture_print(function() cmd('load', 'autosave 2', '--no-stock') end)
+  pump()
+  local st = json.decode(slurp(OUT .. '/status.json'))
+  T.eq(st.state, 'done', st.msg .. ' / ' .. table.concat(st.log or {}, ' | '))
+  T.eq({D.loaded, D.chosen_world}, {'autosave 2', 2})
+  T.eq(ctl.writes, {'scroll_position_game_choice'}, 'only the game list was scrolled')
+  T.eq(#st.results.title.worlds, 2)
+  T.eq(st.results.title.worlds[2].folder, 'region5')
+  -- --world-folder reaches the spec
+  D = F.new({worlds = worlds, rows = 3})
+  cmd, pump, ctl = install(D, fields)
+  ctl.writable = {scroll_position_world_choice = function(n) D.w_api.scroll('world', n) end,
+    scroll_position_game_choice = function(n) D.w_api.scroll('game', n) end}
+  capture_print(function() cmd('load', 'autosave 2', '--no-stock', '--world-folder', 'region5') end)
+  pump()
+  st = json.decode(slurp(OUT .. '/status.json'))
+  T.eq(st.state, 'done', st.msg)
+  local kinds = {}
+  for _, c in ipairs(st.results.clicks) do kinds[#kinds + 1] = c.kind end
+  T.eq(kinds, {'main', 'world', 'game'}, 'straight to the second world')
 end)
 
 -- remove the files written above

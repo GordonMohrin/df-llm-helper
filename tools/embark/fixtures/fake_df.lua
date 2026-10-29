@@ -40,7 +40,10 @@ function F.new(opt)
     prep_frames = opt.prep_frames or 40, load_frames = opt.load_frames or 40, follow = opt.follow ~= false,
     ignore = opt.ignore or {}, pressed = {}, saves = opt.saves, flow = opt.flow or 'list', skip = opt.skip or {},
     old_field = opt.old_field == true, continue_label = opt.continue_label or 'Continue playing', loaded = nil,
-    chosen = nil, stock_calls = {}, other_text = opt.other_text}
+    chosen = nil, stock_calls = {}, other_text = opt.other_text, tracking = opt.tracking,
+    -- BUG-230: opt.worlds = {{name=, folder=, saves={{name=, fort=?}, ...}}, ...}: Continue opens the world list,
+    -- a world row opens its game list, a game row loads; opt.rows rows are visible per list (scroll positions)
+    worlds = opt.worlds, rows = opt.rows or 3, scroll_world = 0, scroll_game = 0, world = nil}
 
   for i = 1, 7 do D.units[i] = {picks = 10, lv = {}} end
 
@@ -49,7 +52,8 @@ function F.new(opt)
   --   rect_min = zoom + k + floor((mouse px - centre px) / 16)
   function D.rect()
     local m, r = D.emb_min, D.region
-    if D.screen == 'placing' and not D.popup and D.follow then
+    -- BUG-228: opt.tracking() false (live: enabler.tracking_on 0) = DF ignores the written mouse
+    if D.screen == 'placing' and not D.popup and D.follow and D.tracks() then
       local cx, cy = D.w * D.tpx // 2, D.h * D.tpy // 2
       m = {D.zoom[1] + D.k[1] + (D.mouse[3] - cx) // 16, D.zoom[2] + D.k[2] + (D.mouse[4] - cy) // 16}
       r = {m[1] // 16, m[2] // 16}
@@ -57,6 +61,8 @@ function F.new(opt)
     if not m then return nil, nil, r end
     return m, {m[1] + 3, m[2] + 3}, r
   end
+
+  function D.tracks() return D.tracking == nil or D.tracking() == true end
 
   local function site()
     local _, _, r = D.rect()
@@ -68,7 +74,26 @@ function F.new(opt)
     local s, b = D.screen, {}
     local function add(x, y, t, fn) b[#b + 1] = {x, y, t, fn} end
     local function go(to) return function() D.screen = to; D.frames = 0 end end
-    if s == 'title' then
+    if s == 'title' and D.worlds then
+      add(60, 18, D.continue_label, go('worldlist'))
+      add(60, 22, 'Start new game in existing world', go('worlds'))
+    elseif s == 'worldlist' then
+      add(50, 6, 'Select a world')
+      for r = 1, D.rows do
+        local i = D.scroll_world + r
+        local wd = D.worlds[i]
+        if wd then add(30, 8 + 2 * r, wd.name, function() D.world = i; D.scroll_game = 0; go('gamelist')() end) end
+      end
+      add(100, 44, 'Back', go('title'))
+    elseif s == 'gamelist' then
+      add(50, 6, 'Select a game to continue')
+      local saves = D.worlds[D.world].saves
+      for r = 1, D.rows do
+        local sv = saves[D.scroll_game + r]
+        if sv then add(30, 8 + 2 * r, sv.name, function() D.chosen = sv.name; D.chosen_world = D.world; go('loadsave')() end) end
+      end
+      add(100, 44, 'Back', go('worldlist'))
+    elseif s == 'title' then
       if D.saves then
         add(60, 18, D.continue_label, go(D.flow == 'direct' and 'loadsave' or 'savelist'))
       end
@@ -102,12 +127,15 @@ function F.new(opt)
       else add(10, 62, 'Click on the map to embark!  Right click to abort.') end
       add(40, 64, 'Abort', function() D.screen = 'title' end)  -- the bottom Abort leaves the embark screen
       add(120, 64, 'Embark', function() if D.screen == 'local' then D.screen = 'placing' end end)
+      if D.refused and s == 'placing' then   -- BUG-229: DF's refusal after a click (site.refuse), no popup
+        for i, l in ipairs(D.refused) do add(55, 25 + i, l) end
+      end
       if D.popup then
         for i, l in ipairs(site().popup or {}) do add(55, 25 + i, l) end
         add(60, 30, 'Confirm', function() D.popup = false; D.screen = 'preparing'; D.frames = 0 end)
         add(80, 30, 'Abort', function() D.popup = false end)
       end
-      if D.rect() and s == 'placing' and not D.popup then  -- live L0: the popup hides the panel
+      if D.rect() and s == 'placing' and not D.popup and D.tracks() then  -- live L0: the popup hides the panel
         local lines = {}
         for _, l in ipairs(site().panel or GOOD) do lines[#lines + 1] = l end
         for _, l in ipairs(site().neighbors or {}) do lines[#lines + 1] = l end
@@ -159,6 +187,7 @@ function F.new(opt)
 
   local FOCUS = {title = 'title/Default', worlds = 'title/Default', gametype = 'choose_game_type',
     savelist = 'title/Default', loadpopup = 'title/Default', loadpopup_danger = 'title/Default',
+    worldlist = 'title/Default', gamelist = 'title/Default',
     loadsave = 'title/Default',
     loading = 'adopt_region', preparing = 'choose_start_site', fort = 'dwarfmode/Default', loading_fort = 'loadgame',
     prep_default = 'setupdwarfgame/Default', prep_dwarves = 'setupdwarfgame/Dwarves',
@@ -183,8 +212,22 @@ function F.new(opt)
         return {selected = D.selected, points = D.points, units = D.units}
       end,
       title = function()  -- the viewscreen_titlest fields (embark.lua reads them with pcall); only with saved games
-        if not D.saves or FOCUS[D.screen] ~= 'title/Default' then return nil end
-        return {old_field = D.old_field, selected = 0, selected_r = -1, mode = 0}
+        if not (D.saves or D.worlds) or FOCUS[D.screen] ~= 'title/Default' then return nil end
+        local t = {old_field = D.old_field, selected = 0, selected_r = -1, mode = 0}
+        if D.worlds then   -- BUG-230: the header lists (folder = filename_noext)
+          t.worlds, t.saves, t.scroll_world, t.scroll_game = {}, {}, D.scroll_world, D.scroll_game
+          for _, wd in ipairs(D.worlds) do
+            t.worlds[#t.worlds + 1] = {folder = wd.folder, world = wd.name}
+            for _, sv in ipairs(wd.saves) do t.saves[#t.saves + 1] = {folder = sv.name, world = wd.name, fort = sv.fort} end
+          end
+          if D.world and D.screen == 'gamelist' then
+            t.games = {}
+            for _, sv in ipairs(D.worlds[D.world].saves) do
+              t.games[#t.games + 1] = {folder = sv.name, world = D.worlds[D.world].name, fort = sv.fort}
+            end
+          end
+        end
+        return t
       end,
     }
   end
@@ -208,9 +251,11 @@ function F.new(opt)
       elseif D.screen == 'placing' and not D.popup then
         local m, _, r = D.rect()
         if not D.follow then m = {D.zoom[1] + D.k[1], D.zoom[2] + D.k[2]}; r = {m[1] // 16, m[2] // 16} end
+        if site().refuse then D.refused = site().refuse return end
         D.emb_min, D.region, D.popup = m, r, true
       end
     else
+      D.refused = nil
       if D.screen == 'placing' and not D.popup then D.screen = 'local'
       elseif D.screen == 'local' then D.screen = 'world' end
     end
@@ -218,11 +263,19 @@ function F.new(opt)
 
   D.env = {now = function() return D.ms end, mouse = function(tx, ty, px, py) D.mouse = {tx, ty, px, py} end,
     sim = function(keys)
+      if keys == 'LEAVESCREEN' and D.screen == 'gamelist' then D.screen = 'worldlist' return end   -- BUG-230
       if type(keys) == 'table' and keys._MOUSE_L then click('L') elseif type(keys) == 'table' and keys._MOUSE_R then click('R') end
     end,
     tile_px = function() return D.tpx, D.tpy end, win = function() return D.w, D.h end}
   D.w_api = {camera = function(which, x, y) if which == 'world' then D.cent = {x, y} else D.zoom = {x, y} end end,
     select_unit = function(i) D.selected = i end,
+    scroll = function(which, n)   -- BUG-230: DF clamps the scroll so the last rows stay filled
+      local list = which == 'world' and D.worlds or (D.world and D.worlds[D.world].saves) or {}
+      local v = math.max(0, math.min(n, #list - D.rows))
+      if which == 'world' then D.scroll_world = v else D.scroll_game = v end
+      D.scrolls = (D.scrolls or 0) + 1
+      return true
+    end,
     -- DFHack's stock load-save: works only where the old field exists (DFHack before 53.16-r3)
     stock_load = function(save)
       D.stock_calls[#D.stock_calls + 1] = save

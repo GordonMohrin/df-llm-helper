@@ -35,7 +35,24 @@ P.POPUPS = {
   {'selected a large area', 'large'}, {'largest possible area', 'largest'},
   {'very difficult to survive', 'hard'}, {'difficult to find resources', 'few_resources'},
   {'very unpleasant environs', 'unpleasant'}, {'wildlife might be very dangerous', 'wildlife'},
+  -- BUG-229: DF's own refusal of a rectangle that lies entirely on water or mountains (the site finder ignores it)
+  {'cannot embark entirely on water or mountains', 'water_mountain'},
   {'cannot embark', 'cannot'}, {'must embark on map', 'cannot'}}
+-- BUG-229: the biome line of the panel (exact DF 53.16 captions, lowercase) -> terrain: DF refuses a rectangle
+-- that is entirely 'mountain' or 'water' ("Cannot embark entirely on water or mountains.")
+P.BIOMES = {mountain = 'mountain', mountains = 'mountain', glacier = 'land', tundra = 'land', taiga = 'land',
+  badlands = 'land', ['rocky wasteland'] = 'land', ['sand desert'] = 'land', ['mangrove swamp'] = 'land'}
+for _, c in ipairs({'arctic', 'temperate', 'tropical'}) do P.BIOMES[c .. ' ocean'] = 'water' end
+for _, c in ipairs({'temperate', 'tropical'}) do
+  for _, k in ipairs({'freshwater', 'brackish', 'saltwater'}) do P.BIOMES[c .. ' ' .. k .. ' lake'] = 'water' end
+  for _, k in ipairs({'freshwater swamp', 'saltwater swamp', 'freshwater marsh', 'saltwater marsh', 'grassland',
+                      'savanna', 'shrubland', 'conifer forest', 'coniferous forest', 'broadleaf forest'}) do
+    P.BIOMES[c .. ' ' .. k] = 'land'
+  end
+end
+for _, k in ipairs({'tropical dry broadleaf forest', 'tropical dry brdlf forest', 'tropical moist broadleaf forest'}) do
+  P.BIOMES[k] = 'land'
+end
 P.FINDER = {{'match found!', 'match'}, {'partial match.', 'partial'}, {'no match.', 'none'}, {'searching', 'searching'}}
 P.METALS = {iron = 1, copper = 1, tin = 1, silver = 1, gold = 1, zinc = 1, lead = 1, nickel = 1,
   bismuth = 1, platinum = 1, aluminum = 1}
@@ -102,6 +119,7 @@ function P.parse(view)
     elseif P.AQUIFER[t] then rec.aquifer = P.AQUIFER[t]; rec.read = rec.read + 1
     elseif t == 'flux stone layer' then rec.flux = true; rec.read = rec.read + 1
     elseif t == 'ice' then rec.ice = true
+    elseif P.BIOMES[t] and not rec.biome then rec.biome, rec.terrain = t, P.BIOMES[t]   -- BUG-229 (not a read fact)
     elseif t:sub(1, 10) == 'neighbors:' then rec.neighbors_shown = true  -- section header (exe 53.16)
     elseif P.SURR[t] and not rec.surroundings then rec.surroundings = t  -- unlabelled fallback
     elseif metal_list(t) then rec.metals = metal_list(t)
@@ -143,6 +161,12 @@ function P.parse(view)
     for _, f in ipairs(P.FINDER) do
       if not rec.finder and p.norm:find(f[1], 1, true) then rec.finder = f[2] end
     end
+  end
+  if seen.water_mountain and seen.cannot then   -- one refusal, named by its own id (BUG-229)
+    for i = #rec.warnings, 1, -1 do
+      if rec.warnings[i] == 'cannot' then table.remove(rec.warnings, i) end
+    end
+    seen.cannot = nil
   end
   if seen.light_aquifer and not rec.aquifer then rec.aquifer = 'light' end
   if seen.heavy_aquifer then rec.aquifer = 'heavy' end

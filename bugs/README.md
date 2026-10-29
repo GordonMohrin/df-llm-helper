@@ -40,7 +40,7 @@ Related: FR-xx, BUG-xx
 | [BUG-017](BUG-017-mood-risk-false-missing.md) | fixed (offline, live-untested) | low | MOOD_RISK reports missing materials although the mood dwarf already holds every item | lua/dfllm/care.lua |
 | [BUG-018](BUG-018-refuge-audit-ignores-entrances.md) | fixed (offline, live-untested) | high | the refuge audit passes a burrow that contains the entrances and main halls (50 -> 1 in the first real siege) | lua/dfllm/seal.lua, siege.lua |
 | [BUG-019](BUG-019-breach-refuge-refused-for-supplies.md) | fixed (offline, live-untested) | high | during a breach the only reachable emergency burrow is refused for missing supplies | lua/dfllm/seal.lua, siege.lua |
-| [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | mitigated (fails early; cause open) | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
+| [BUG-020](BUG-020-embark-rectangle-ignores-injected-mouse.md) | fixed (cause: BUG-228, offline, live-untested) | medium | `embark.py scan` cannot place the rectangle: it ignores the held/injected mouse | tools/embark |
 | [BUG-021](BUG-021-cutoff-false-positive-group-renumber.md) | fixed (offline, live-untested) | low | CUTOFF fires while everybody reaches everything (group ids renumber during construction) | care / seal |
 | [BUG-022](BUG-022-fortcore-stage2-build-lost-no-retry.md) | fixed (offline, live-untested) | high | fortcore stage 2 ends `build_lost` for good: B1 and the traps are never built | lua/dfllm/runner.lua |
 | [BUG-023](BUG-023-woodcutters-do-not-fetch-the-axe.md) | mitigated in 47d98c4 (offline, live-untested): TOOL_BLOCKED, labor repair; pickup trigger on (Gordon's yes 2026-10-16) | high | woodcutters never fetch the axe from the bin: no FellTree job ever runs, no logs for a year (workaround: put the axe into their hand) | lua/dfllm/economy.lua |
@@ -229,6 +229,9 @@ Related: FR-xx, BUG-xx
 | [BUG-211](BUG-211-follow-seals-audit-bypass-before-the-trap-hall.md) | fixed (offline, live-untested) | medium | live 3: follow seals the audit bypass before the trap hall, on fortcore tiles, logging it every audit | dfpilot/wake.py |
 | [BUG-212](BUG-212-status-drops-proj-and-lists-six-next-hints.md) | fixed (offline, live-untested) | low | live 3: status drops the proj line and lists six next: hints | dfpilot/brief.py |
 | [BUG-213](BUG-213-audit-wait-printed-as-a-float.md) | fixed (offline, live-untested) | low | live 3: dfllm audit prints its wait as a float | dfpilot/wake.py |
+| [BUG-228](BUG-228-embark-injector-leaves-tracking-on-off.md) | fixed (offline, live-untested) | medium | Run 15 embark: DF ignores the injected mouse while enabler.tracking_on is 0 (cause of BUG-020) | tools/embark |
+| [BUG-229](BUG-229-embark-scan-misses-water-mountain-rectangles-and-old-site-tiles.md) | fixed (offline, live-untested) | medium | Run 15 embark: scan passes all-water/mountain rectangles; old sites by world_site.pos | tools/embark |
+| [BUG-230](BUG-230-title-loader-same-named-worlds-and-no-scroll.md) | fixed (offline, live-untested) | medium | Run 15: title-screen loader cannot tell same-named worlds apart, never scrolls a list | tools/embark |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -26,7 +26,14 @@ Proven live: `newgame`, `scan` (about 12 s per site, about 20 s with `--tiles`) 
 - **BUG-020 (2026-10-15, DF restarted and its window moved):** the rectangle stayed at one place
   whatever pixel was held. `local.place` now fails early with `rectangle does not follow the mouse:
   held A and B, rectangle stays at X` once two confirmed misses that should land on different tiles
-  show the same rectangle (it no longer learns a k from them); the cause is still open.
+  show the same rectangle (it no longer learns a k from them).
+- **BUG-228 (cause of BUG-020, Run 15 embark on i2, 2026-10-29):** `enabler.tracking_on` drops to 0 (likely a mouse-leave on
+  the window); at 0 DF ignores the injected mouse, the rectangle sticks and the panel stays empty. The mouse injector sets
+  `tracking_on = 1` in its render and logic frames while it is shown and restores the old value on dismiss (and in
+  `W.release_all`). Never permanently: without the injector DF then takes the cached OS cursor and the rectangle jumps.
+- **BUG-229:** the DF site finder ignores "Cannot embark entirely on water or mountains." (a no-aquifer match can be such a
+  rectangle). `scan` reads that refusal (on the panel, or instead of the popup after the click) and the panel's biome line;
+  criterion `terrain` rejects the refusal and a rectangle whose 16 read tiles (`--tiles`) are all mountain/lake/ocean.
 - **Prepare carefully:** skill and dwarf rows ignore simulated clicks with or without focus, with the
   injector and with raw `enabler.mouse_lbut` flags; keys do nothing there except Esc (menu). Buttons
   (Embark!, Go back, menu items) work. Fallback used: Esc → Return to title → `newgame` → `embark …
@@ -57,10 +64,12 @@ loading). Each step below is marked
 
 **Writes**, UI state only, all in `embark.lua` table `W`:
 - mouse position `gps.mouse_x/y`, `precise_mouse_x/y`, which simulated clicks need
-  (Lua API.txt:4208-4212);
+  (Lua API.txt:4208-4212), and while the mouse injector is shown `enabler.tracking_on = 1` (restored on dismiss; BUG-228);
 - simulated input `gui.simulateInput(native screen, keys)` (gui.lua:58), i.e. left/right clicks;
 - camera centre `region_cent_x/y` (world map) and `zoom_cent_x/y` (local map). This equals
   scrolling the map and changes nothing in the world;
+- the scroll position of the title screen's world and game lists (`scroll_position_world_choice` /
+  `_game_choice`, = scrolling the list with the wheel; BUG-230, load mode only);
 - list selection `selected_u` on "Prepare carefully", only as a fallback when a click on the dwarf
   row is ignored. DFHack's own `startdwarf` overlay does the same (startdwarf.lua:48);
 - K2: DFHack's own stock `load-save` through `W.stock_load` (RULES 1.2 allows it), only at the title screen and only where the
@@ -175,7 +184,8 @@ and the run goes on; the final `status.json` lists them under `warnings`.
 | Criterion | Source on screen | pass / warn / fail |
 |---|---|---|
 | panel | any recognised panel line | fail if nothing readable |
-| old_sites | rectangle world tile vs `old_sites` | fail < 10 tiles |
+| old_sites | rectangle world tile (`emb_min // 16`) vs `old_sites` (`g // 16` when an entry gives its global tile `g` = world_site.global_min, else `w`; never world_site.pos, BUG-229) | fail < `old_site_min` tiles |
+| terrain | the biome line ("Mountain", "... Lake", "... Ocean") and DF's refusal "Cannot embark entirely on water or mountains." | the refusal or all 16 tiles mountain/water fail, all read tiles (fewer than 16) or the one hovered tile warn, else pass (BUG-229) |
 | dark_fortress | `dark_fortresses_seen`, Neighbors "Nearest site:" of goblins, popup "invaded very early" | fail < 10 tiles, goblins nearer than `goblin_min_rank`, or popup; pass with parsed Neighbors entries and no near goblins; else unknown |
 | evil, savagery | "Surroundings:" (Serene/Mirthful/Calm/Wilderness pass), popups "evil area"/"savage area" | evil or high savagery fail |
 | trees | "Trees:" | Heavily Forested/Woodland pass, Sparse warn, else fail |
@@ -249,11 +259,20 @@ save" and "DFHack does not answer yet"); a player or the orchestrator can run it
 python tools/embark/embark.py load "autosave 1"                  # stock load-save first where it can work, then the clicks
 python tools/embark/embark.py load "autosave 1" --no-stock       # clicks only (what supervise sends; it tried the stock script)
 python tools/embark/embark.py load "autosave 1" --entry Ostlysh  # the text to click in the list when it shows no folder name
+python tools/embark/embark.py load "autosave 2" --world-folder region5   # BUG-230: which of two same-named worlds
 ```
+**BUG-230 (Run 15, i2):** two worlds of the same name could not be told apart by their rows, and an entry below the visible part
+of a list was never reached. The run reads the header lists behind the rows (`savegame_header_world`, `savegame_header_game`,
+`savegame_header`: `filename_noext` = the folder, `world_name`, `fort_name`) and their scroll positions. The save's own entry is
+found by its folder; its row is the n-th row with that label, n counted from the scroll position like DF's list (rows show
+entries scroll+1, scroll+2, ...). A world list entry is the one whose folder is the save, else `--world-folder`, else the only
+world named like the save's world; with several same-named worlds the first is opened, and when its game list lacks the save
+the run presses Esc and opens the next one; none left fails naming the folders. An entry outside the visible rows is brought
+to the top by setting the list's scroll position (DF may clamp it; the row is found again). `results.scrolls` logs each scroll.
 It is the `load` mode of the same runner (`embark.lua run <spec>` with `{"v":2,"id":"load…","mode":"load","save":…}`; `embark.lua
 load <save> [--entry T] [--no-stock]` writes the spec itself). **Fair play:** it reads the text buffer and clicks visible text, only
 on the title family of screens (main menu, list of saved games, a confirming popup); on a fort, a map, an embark screen or any
-screen it does not know it clicks nothing; no title screen field is written, no save file is touched, and the list entry must show
+screen it does not know it clicks nothing; no title screen field is written but the two list scroll positions (BUG-230), no save file is touched, and the list entry must show
 the folder name as a whole token (`autosave 1` is not `autosave 10`, `region2` not `region2-spr-0050`), else the run fails and says
 what it saw. A popup that talks of delete, erase, overwrite, abandon or retire stops the run (the player's decision).
 
@@ -263,7 +282,8 @@ what it saw. A popup that talks of delete, erase, overwrite, abandon or retire s
 | `load.drive` | per screen: main menu → click "Continue …" (else "Load …"); the list → click the entry named; a popup → click Okay/Yes/Load/…; loading → wait; again when the screen did not change (`tries`, `stale`, `settle_ms` in `ui.json` `load`) | loading or the fort, after a click of ours |
 
 `status.json` `results` of a load run: `screen` and `rows` (the last screen as cells), `title` (the title screen fields read: both
-names, `old_field`, `selected`, `selected_r`, `mode`), `clicks` (kind, text, tile and pixel of every click: the first live use is
+names, `old_field`, `selected`, `selected_r`, `mode`, the header lists `worlds`/`games`/`saves` (<= 60 each) and `scroll_world`/
+`scroll_game`), `scrolls`, `clicks` (kind, text, tile and pixel of every click: the first live use is
 calibrated from these), `outcome`, `stock`. `embark.py load` prints them; supervise copies them into `supervise.log`.
 **Not decided offline (first live use):** the exact labels of the 53.16-r3 menu and list, whether the list shows the folder name
 (else `--entry`), whether one click is enough (the run clicks again when the screen did not change), whether an entry loads at once

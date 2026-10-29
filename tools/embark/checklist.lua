@@ -16,7 +16,8 @@ C.DEFAULT = {
   -- layer in the upper levels, so the site is refused unless `stone` is accepted with a reason
   stone_fail_soil = {'deep', 'very_deep', 'extremely_deep'},
   sizes = {{3, 3}, {4, 4}},
-  fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot'},
+  fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot',
+    'water_mountain'},
   warn_popups = {'light_aquifer', 'dead_civ', 'narrow', 'smallest', 'large', 'very_large', 'largest', 'hard',
     'few_resources', 'unpleasant', 'wildlife'},
 }
@@ -39,9 +40,18 @@ C.ACCEPTABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'wate
   'ore', 'temperature', 'size'}
 C.ACCEPTABLE_SET = set(C.ACCEPTABLE)
 -- warning popups judged by their own criterion, not by 'popup' ("difficult to obtain stone" is the stone rule)
-C.POPUP_OWNER = {no_stone = 'stone'}
+C.POPUP_OWNER = {no_stone = 'stone', water_mountain = 'terrain'}
 
 local function cheb(a, b) return math.max(math.abs(a[1] - b[1]), math.abs(a[2] - b[2])) end
+
+-- BUG-229: the world tile of an old site. `g` = its global embark tile (world_site.global_min_x/y, or the
+-- rectangle's embark_pos_min the embark showed) wins: world tile = g // 16, the same as ctx.world (emb_min // 16).
+-- world_site.pos was up to 2 tiles off live (Questmetal: pos 4,10, global_min 6,12 -> world tile 6,12); `w` is the
+-- hand-entered world tile and is used only without `g`.
+function C.site_world(s)
+  if type(s.g) == 'table' and s.g[1] and s.g[2] then return {s.g[1] // 16, s.g[2] // 16} end
+  return s.w
+end
 
 function C.rules(over)
   local r = {}
@@ -54,7 +64,7 @@ end
 local function nearest(w, sites)
   local best, name
   for _, s in ipairs(sites or {}) do
-    local d = cheb(w, s.w)
+    local d = cheb(w, C.site_world(s))
     if not best or d < best then best, name = d, s.name end
   end
   return best, name
@@ -143,6 +153,18 @@ function C.evaluate(rec, rules, ctx)
         (layers and (', ' .. layers) or '') .. ')')
   elseif layers then put('stone', 'pass', 'stone layers ' .. layers)
   else put('stone', 'unknown', 'soil depth not shown') end
+  -- BUG-229: DF refuses a rectangle entirely on water or mountains; the site finder's matches can be such rectangles
+  local tl = rec.tiles
+  if pop.water_mountain then put('terrain', 'fail', 'popup: cannot embark entirely on water or mountains')
+  elseif tl and (tl.terrain or 0) > 0 then
+    if tl.mw == tl.terrain and tl.terrain >= 16 then
+      put('terrain', 'fail', 'all ' .. tl.terrain .. ' tiles are mountain or water (DF refuses the embark)')
+    elseif tl.mw == tl.terrain then
+      put('terrain', 'warn', 'all ' .. tl.terrain .. ' read tiles are mountain or water (' .. tl.n .. ' of 16 read)')
+    else put('terrain', 'pass', (tl.terrain - tl.mw) .. ' of ' .. tl.terrain .. ' read tiles are land') end
+  elseif rec.terrain == 'mountain' or rec.terrain == 'water' then
+    put('terrain', 'warn', 'the hovered tile is ' .. rec.terrain .. ' (' .. tostring(rec.biome) .. '); scan --tiles')
+  elseif rec.terrain then put('terrain', 'pass', tostring(rec.biome)) end
   if rec.ice then put('temperature', 'fail', 'ice')
   else tiered('temperature', rec.temperature, rules.temperature_ok, rules.temperature_warn) end
   if ctx.size then

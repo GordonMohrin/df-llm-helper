@@ -1,7 +1,7 @@
 -- tools/embark/embark.lua: in-game embark helper, run BEFORE `dfllm adopt` (no kernel yet).
 --   dfhack-run lua -f <repo>/tools/embark/embark.lua <cmd> [args]
 --   state | check | screen [name] | click <text> [occ] | key <KEY> | run <spec.json> | status | stop
---   load <save folder> [--entry TEXT] [--no-stock]   K2: load a saved fort from the title screen (loadsave.lua)
+--   load <save folder> [--entry TEXT] [--no-stock] [--world-folder F]   K2: load a saved fort (loadsave.lua)
 -- Fair play: reads only what the vanilla embark screens show (text buffer, focus strings,
 -- the selected rectangle, points/picks left). Writes only UI state, all in W below: mouse
 -- position, simulated input, camera centre, list selection. No world data, no hidden tiles,
@@ -102,8 +102,29 @@ local function source()
         if ok then return tonumber(val) or tostring(val) end
         return nil
       end
+      -- BUG-230: the header lists behind the list rows (folder = filename_noext, as DF names the save folder) and
+      -- their scroll positions; loadsave.lua finds the save's row by its folder, not by the (shared) world name
+      local function headers(name)
+        local ok, vec = pcall(function() return scr[name] end)
+        if not ok or vec == nil then return nil end
+        local okn, n = pcall(function() return #vec end)
+        if not okn then return nil end
+        local out = {}
+        for i = 0, math.min(n, 60) - 1 do   -- bounded: status.json carries the lists
+          local okh, h = pcall(function() return vec[i] end)
+          local function f(k)
+            local okf, val = pcall(function() return h[k] end)
+            return (okh and okf and type(val) == 'string') and val or nil
+          end
+          out[#out + 1] = {folder = f('filename_noext'), world = f('world_name'), fort = f('fort_name')}
+        end
+        return out
+      end
       return {old_field = field('sel_menu_line') ~= nil, sel_menu_line = field('sel_menu_line'),
-        selected = field('selected'), selected_r = field('selected_r'), mode = field('mode')}
+        selected = field('selected'), selected_r = field('selected_r'), mode = field('mode'),
+        worlds = headers('savegame_header_world'), games = headers('savegame_header_game'),
+        saves = headers('savegame_header'), scroll_world = field('scroll_position_world_choice'),
+        scroll_game = field('scroll_position_game_choice')}
     end,
     prep = function()
       if not df.viewscreen_setupdwarfgamest:is_instance(scr) then return nil end
@@ -135,6 +156,31 @@ local W = {}
 --   logic. It changes nothing but where DF believes the mouse is, i.e. the UI state "mouse over
 --   the window at (x, y)"; it is shown only while the local map is used and dismissed before any
 --   screen-changing click (Confirm) and at the end of every run.
+-- BUG-228 (= the cause of BUG-020, Run 15 embark on i2): DF ignores a written mouse while
+-- enabler.tracking_on is 0 (it drops to 0, likely on a mouse-leave of the window): the rectangle sticks and
+-- the panel stays empty. The injector therefore sets tracking_on = 1 while it is shown (render and logic
+-- frames) and gives the old value back when it is dismissed. Never permanently: without the injector DF then
+-- uses the cached OS cursor and the rectangle jumps ("rectangle moved before the click").
+-- W.track(true) remembers the value before the injector, W.track(false) restores it (no field: no-op).
+local function tracking(v)   -- read (v nil) or write enabler.tracking_on; nil when the field does not exist
+  local e = df.global.enabler
+  if not e then return nil end
+  if v == nil then
+    local ok, val = pcall(function() return e.tracking_on end)
+    return ok and val or nil
+  end
+  return (pcall(function() e.tracking_on = v end))
+end
+function W.track(on)
+  if on then
+    if W.track_old == nil then W.track_old = tracking() or false end
+    tracking(1)
+  elseif W.track_old ~= nil then
+    local old = W.track_old
+    W.track_old = nil
+    if old ~= false then tracking(old) end
+  end
+end
 local Inj  -- class built on first use (the offline fake DF has no gui.Screen/defclass)
 local function inj_class()
   if Inj or not (rawget(_G, 'defclass') and gui.Screen) then return Inj end
@@ -142,6 +188,7 @@ local function inj_class()
   Inj.ATTRS{focus_path = 'dfllm-embark/mouse'}
   function Inj:render()
     local p = self.pos
+    W.track(true)
     if p then
       local g = df.global.gps
       df.global.enabler.mouse_focus = true
@@ -152,6 +199,7 @@ local function inj_class()
   function Inj:onIdle()
     local parent = self._native and self._native.parent
     if not (parent and df.viewscreen_choose_start_sitest:is_instance(parent)) then self:dismiss() return end
+    W.track(true)
     parent:logic()
   end
   function Inj:onInput(keys)
@@ -161,6 +209,7 @@ local function inj_class()
   function Inj:onDismiss()
     if rawget(_G, 'dfllm_embark_inj') == self then _G.dfllm_embark_inj = nil end
     df.global.enabler.mouse_focus = false
+    W.track(false)
   end
   return Inj
 end
@@ -195,6 +244,7 @@ end
 function W.unfocus() if not inj() then set_focus(false) end end
 function W.release_all()
   W.inject(false)
+  W.track(false)   -- BUG-228: an injector that vanished without onDismiss still gives tracking_on back
   set_focus(false)
 end
 function W.claim() set_focus(true) end
@@ -208,6 +258,16 @@ function W.stock_load(save)
   if not ok then return false, tostring(out) end
   if cr ~= nil and cr ~= 0 then return false, tostring(out or cr) end
   return true, tostring(out or '')
+end
+-- BUG-230: = scrolling a title-screen list with the wheel (the scroll position of the world or game list); only on
+-- viewscreen_titlest, only the two scroll fields; true when written
+function W.scroll(which, n)
+  local scr = native()
+  local okc, cls = pcall(function() return df.viewscreen_titlest end)
+  if not (okc and cls and cls:is_instance(scr)) then return false end
+  local key = ({world = 'scroll_position_world_choice', game = 'scroll_position_game_choice'})[which]
+  if not key or type(n) ~= 'number' or n < 0 then return false end
+  return (pcall(function() scr[key] = math.floor(n) end))
 end
 function W.camera(which, x, y)  -- = scrolling the map; changes nothing in the world
   local scr = native()
@@ -309,17 +369,19 @@ elseif cmd == 'key' then
   W.sim(args[2])
   print('sent ' .. tostring(args[2]))
 elseif cmd == 'load' then
-  -- K2: load <save folder> [--entry TEXT] [--no-stock]; the same run as `run` with a spec of mode load (embark.py load
+  -- K2: load <save folder> [--entry TEXT] [--no-stock] [--world-folder FOLDER]; the same run as `run` with a spec of mode load (embark.py load
   -- and `dfpilot supervise` write the spec file and use `run`)
-  local save, entry, stock = args[2], nil, true
-  if not save or save == '' or save:sub(1, 2) == '--' then qerror('usage: load <save folder> [--entry TEXT] [--no-stock]') end
+  local save, entry, stock, world_folder = args[2], nil, true, nil
+  if not save or save == '' or save:sub(1, 2) == '--' then qerror('usage: load <save folder> [--entry TEXT] [--no-stock] [--world-folder FOLDER]') end
   local i = 3
   while args[i] do
     if args[i] == '--entry' then entry = args[i + 1]; i = i + 2
     elseif args[i] == '--no-stock' then stock = false; i = i + 1
+    elseif args[i] == '--world-folder' then world_folder = args[i + 1]; i = i + 2   -- BUG-230
     else qerror('load: unknown argument ' .. tostring(args[i])) end
   end
-  start({v = 2, id = 'load' .. os.time(), mode = 'load', save = save, entry = entry, stock = stock})
+  start({v = 2, id = 'load' .. os.time(), mode = 'load', save = save, entry = entry, stock = stock,
+    world_folder = world_folder})
 elseif cmd == 'run' then
   local spec = read_json(args[2] or '')
   if not spec then qerror('cannot read spec ' .. tostring(args[2])) end

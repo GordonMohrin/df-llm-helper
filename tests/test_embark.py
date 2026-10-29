@@ -279,6 +279,53 @@ def test_main_scan_makes_one_dfhack_call(tmp_path, monkeypatch):
     assert cmd[0].endswith("dfhack-run.exe") and cmd[1:3] == ["lua", "-f"] and cmd[3].endswith("tools/embark/embark.lua")
 
 
+# ---------------------------------------------------------------- live 4 (BUG-228..230)
+def test_bug228_injector_restores_tracking_on():
+    """BUG-228 (cause of BUG-020): the injector sets enabler.tracking_on while shown and gives it back."""
+    src = (EMB / "embark.lua").read_text(encoding="utf-8")
+    assert "tracking_on" in src and "W.track(true)" in src and "W.track(false)" in src
+    rel = src[src.index("function W.release_all()"):]
+    assert "W.track(false)" in rel[:rel.index("end")], "release_all restores tracking_on"
+
+
+def test_bug229_rules_refuse_water_mountain_and_take_old_sites_by_global_tile():
+    r = load(EMB / "rules.json")
+    assert "water_mountain" in r["fail_popups"]
+    assert "global_min" in r["old_site_g_note"] and "world_site.pos" in r["old_site_g_note"]
+    for s in r["old_sites"]:
+        assert "w" in s or "g" in s
+        if "g" in s and "w" in s:
+            assert [s["g"][0] // 16, s["g"][1] // 16] == s["w"], s["name"]
+    # DF refuses such a rectangle: no waiver and no FR-08 accept for it
+    assert "terrain" not in drv.WAIVABLE and "terrain" not in drv.ACCEPTABLE
+
+
+def test_bug230_load_world_folder_reaches_the_spec_and_the_summary_shows_the_lists(tmp_path, monkeypatch):
+    s = drv.make_spec("load", save="autosave 2", world_folder=" region5 ", now=7)
+    assert s["world_folder"] == "region5"
+    assert "world_folder" not in drv.make_spec("load", save="autosave 2", now=7)
+    for bad in ("a/b", "a\\b", ".."):
+        with pytest.raises(ValueError):
+            drv.make_spec("load", save="autosave 2", world_folder=bad)
+    calls = []
+    monkeypatch.setenv("DFLLM_DF", str(tmp_path))
+    monkeypatch.setattr(drv, "call", lambda args, df=None, timeout=60: calls.append(args) or "started")
+    assert drv.main(["load", "autosave 2", "--world-folder", "region5", "--no-wait"]) == 0
+    spec = json.loads(Path(calls[0][1]).read_text(encoding="utf-8"))
+    assert spec["world_folder"] == "region5"
+    doc = {"id": "load5", "state": "failed", "step": "load.drive", "i": 2, "n": 2,
+           "msg": 'load.drive: 2 worlds are named "Zilirr?th" (folders region2, region5)',
+           "results": {"title": {"old_field": False, "selected": 0, "scroll_world": 0,
+                                 "worlds": [{"folder": "region2", "world": "Zilirr?th"},
+                                            {"folder": "region5", "world": "Zilirr?th"}]},
+                       "scrolls": [{"which": "game", "to": 4, "idx": 5}],
+                       "clicks": [{"n": 1, "kind": "main", "text": "Continue playing"}]}}
+    text = "\n".join(drv.summarize(doc))
+    assert "worlds: 1:region2=Zilirr?th, 2:region5=Zilirr?th" in text
+    assert "scrolled the game list to 4 (entry 5)" in text
+    assert '"scroll_world": 0' in text and "region5" not in text.split("title screen fields:")[1].split("\n")[0]
+
+
 # ---------------------------------------------------------------- Lua side (also run by test_luahost)
 @pytest.mark.skipif(not luahost.available(), reason="lua53.dll not found")
 def test_lua_embark_suite():

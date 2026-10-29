@@ -482,6 +482,84 @@ T.test('BUG-020: a rectangle that stays put for two different held pixels fails 
   T.ok(w and (w[1] ~= 0 or w[2] ~= 0), 'one k from the first miss')
 end)
 
+---------------------------------------------------------------- BUG-229
+local function item_of(r, id)
+  for _, it in ipairs(r.items) do if it.id == id then return it end end
+  return nil
+end
+
+T.test('BUG-229: the refusal "Cannot embark entirely on water or mountains." and the biome line are read', function()
+  local pad = string.rep(' ', 40)
+  local r = P.parse(V.from_lines({pad .. 'Mountain', pad .. 'Temperature: Cold', '',
+    '      Cannot embark entirely on water or mountains.'}, {focus = {'choose_start_site'}}))
+  T.eq(r.warnings, {'water_mountain'}, 'one refusal, by its own id')
+  T.eq({r.biome, r.terrain}, {'mountain', 'mountain'})
+  T.eq(P.parse(V.from_lines({pad .. 'Temperate Freshwater Lake'})).terrain, 'water')
+  T.eq(P.parse(V.from_lines({pad .. 'Tropical Ocean'})).terrain, 'water')
+  T.eq(P.parse(fixture('site_good_panel')).terrain, 'land')
+  T.eq(P.parse(V.from_lines({pad .. 'The Mountain of Doom'})).terrain, nil, 'a region name is no biome')
+  T.eq(P.parse(V.from_lines({'  Cannot embark on another site.'})).warnings, {'cannot'})
+end)
+
+T.test('BUG-229: checklist terrain: the refusal and an all-mountain/water rectangle reject; a mixed one passes', function()
+  local good = P.parse(fixture('site_good_panel'))
+  local ctx = {world = {8, 30}, size = {4, 4}}
+  local rules = {dark_fortresses_seen = far_df}
+  local function with(fn) local r = json.decode(json.encode(good)) fn(r) return C.evaluate(r, rules, ctx) end
+  local r = with(function(x) x.warnings[#x.warnings + 1] = 'water_mountain' end)
+  T.eq({item_of(r, 'terrain').res, r.verdict}, {'fail', 'reject'})
+  T.eq(item_of(r, 'popup'), nil, 'judged by terrain, not twice as a popup')
+  r = with(function(x) x.tiles = {n = 16, water = 0, wood = 0, terrain = 16, mw = 16} end)
+  T.eq({item_of(r, 'terrain').res, r.verdict}, {'fail', 'reject'})
+  T.ok(item_of(r, 'terrain').why:find('DF refuses', 1, true))
+  r = with(function(x) x.tiles = {n = 9, water = 0, wood = 0, terrain = 9, mw = 9} end)
+  T.eq(item_of(r, 'terrain').res, 'warn', 'all read tiles, but not all 16')
+  r = with(function(x) x.tiles = {n = 16, water = 0, wood = 0, terrain = 16, mw = 15} end)
+  T.eq(item_of(r, 'terrain').res, 'pass')
+  r = with(function(x) x.terrain, x.biome = 'mountain', 'mountain' end)
+  T.eq(item_of(r, 'terrain').res, 'warn', 'one hovered mountain tile: read --tiles')
+  T.eq(item_of(C.evaluate(good, rules, ctx), 'terrain').res, 'pass')
+  T.ok(not C.ACCEPTABLE_SET.terrain and not C.WAIVABLE_SET.terrain, 'DF refuses: never accepted')
+  -- merge_tiles counts the tiles by terrain
+  local m = S.merge_tiles(json.decode(json.encode(good)), {{rivers = {}, terrain = 'mountain'}, {rivers = {}, terrain = 'water'},
+    {rivers = {}}})
+  T.eq({m.tiles.terrain, m.tiles.mw}, {2, 2})
+end)
+
+T.test('BUG-229: scan flags an all-mountain rectangle (refusal on the panel or after the click) and goes on', function()
+  local rules = {}
+  for k, v in pairs(RULES) do rules[k] = v end
+  rules.dark_fortresses_seen = far_df
+  local D = F.new({screen = 'world', sites = {
+    ['8,30'] = {panel = {'Mountain', 'Temperature: Cold', 'Trees: None', 'Surroundings: Calm', 'Cannot embark entirely',
+      'on water or mountains.'}},
+    ['9,30'] = {panel = {'Mountain', 'Temperature: Cold', 'Trees: None', 'Surroundings: Calm'},
+      refuse = {'Cannot embark entirely on water or mountains.'}}}})
+  local run, _, ctx = start(D, {v = 2, id = 's9', mode = 'scan', cands = {{8, 30}, {9, 30}, {12, 4}}}, rules)
+  T.eq(run.state, 'done', run.msg .. ' / ' .. table.concat(run.log, ' | '))
+  T.eq(#ctx.results, 3)
+  for i = 1, 2 do
+    local r = ctx.results[i]
+    T.eq(r.verdict, 'reject', i)
+    T.ok(has(r.fails, 'terrain'), 'terrain fails ' .. i)
+  end
+  T.eq(ctx.results[3].verdict, 'ok', 'the next candidate is read as before')
+  T.eq(D.pressed.Confirm, nil, 'nothing confirmed')
+end)
+
+T.test('BUG-229: an old site given by its global tile (global_min) counts at g // 16, not at a stale w', function()
+  local good = P.parse(fixture('site_good_panel'))
+  local rules = {dark_fortresses_seen = far_df, old_site_min = 2,
+    old_sites = {{name = 'Questmetal', w = {4, 10}, g = {6 * 16 + 3, 12 * 16 + 5}}}}
+  local r = C.evaluate(good, rules, {world = {6, 12}, size = {4, 4}})
+  T.eq(item_of(r, 'old_sites').res, 'fail', item_of(r, 'old_sites').why)
+  T.ok(item_of(r, 'old_sites').why:find('at 0', 1, true), item_of(r, 'old_sites').why)
+  rules.old_sites = {{name = 'Questmetal', w = {4, 10}}}
+  T.eq(item_of(C.evaluate(good, rules, {world = {6, 12}, size = {4, 4}}), 'old_sites').res, 'pass', 'w alone as before')
+  T.eq(C.site_world({g = {100, 33}}), {6, 2})
+  T.eq(C.site_world({w = {3, 4}}), {3, 4})
+end)
+
 T.test('runner: wait results spend no tries; the timeout still ends them', function()
   local t, k = 0, 0
   local env = {capture = function() return V.from_lines({}) end, now = function() return t end,

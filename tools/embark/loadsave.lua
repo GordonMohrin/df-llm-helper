@@ -9,7 +9,7 @@
 -- Fair play (binding): it only reads the text buffer (view.lua) and clicks visible text, and only on the title
 -- family of screens: the main menu (Continue / Load game), the list of saved games, a confirmation popup. On a
 -- fort, a map, a loading screen or any other screen it clicks nothing. It never edits the game: no field of the
--- title screen is written, no save file is touched, no other save is chosen than the one named (the list entry
+-- title screen is written but the scroll positions of its two lists (BUG-230, = the mouse wheel), no save file is touched, no other save is chosen than the one named (the list entry
 -- must show the folder name as a whole token, `autosave 1` is not `autosave 10`, `region2` not `region2-spr-0050`).
 --
 -- Not decided offline (the first live use decides, the run logs the rows it saw and the pixel it clicked in
@@ -104,6 +104,142 @@ end
 
 -- what the screen looks like, for the runner's "no progress" count
 function L.signature(v) return table.concat(v.focus or {}, '|') .. '#' .. L.brief(v, 4000) end
+
+-- ---------------------------------------------------------------- BUG-230: the header lists of the title screen
+-- Run 15 (i2): two worlds of the same name could not be told apart by their row text, and a save below the visible
+-- part of a list was never reached. viewscreen_titlest holds the lists behind the rows (read only, embark.lua
+-- source().title): `worlds` = savegame_header_world, `games` = savegame_header_game, `saves` = savegame_header,
+-- each entry {folder = filename_noext, world = world_name, fort = fort_name}, and the lists' scroll positions
+-- `scroll_world` / `scroll_game` (scroll_position_world_choice / _game_choice). DF's list shows entry
+-- scroll + 1, scroll + 2, ... top down, so the n-th row that shows a label is the n-th entry from `scroll` on with
+-- that label: the save's own entry is found by its folder, its row by counting same-labelled entries above it.
+-- A target above or below the visible rows is brought to the top by setting the scroll position (= scrolling the
+-- list with the wheel; w.scroll). Nothing else of the title screen is written.
+
+-- header text (CP437 bytes) as the screen shows it (view.lua: accents read as '?')
+function L.shown(s)
+  return (tostring(s or ''):gsub('.', function(c) return V.char(c:byte()) end))
+end
+
+local function same(a, b) return a ~= nil and b ~= nil and L.norm(L.shown(a)) == L.norm(L.shown(b)) end
+
+-- 1-based index of the entry whose folder is `folder`, else nil
+function L.index_of(list, folder)
+  for i, e in ipairs(list or {}) do
+    if same(e.folder, folder) then return i end
+  end
+  return nil
+end
+
+-- the world list entry to open for `save`: the entry of that folder; else (spec.world_folder) the world entry of
+-- that folder; else the only world entry named like the save's world (title.saves). nil and why when the save is
+-- unknown or two worlds share the name (the folders are named so the player can pass --world-folder).
+function L.world_index(title, save, world_folder)
+  local worlds = title and title.worlds
+  if not worlds or #worlds == 0 then return nil, 'no world list' end
+  if world_folder then
+    local i = L.index_of(worlds, world_folder)
+    if i then return i end
+    return nil, 'no world with the folder "' .. tostring(world_folder) .. '"'
+  end
+  local i = L.index_of(worlds, save)
+  if i then return i end
+  local si = L.index_of(title.saves, save)
+  local wname = si and title.saves[si].world
+  if not wname then return nil, '"' .. tostring(save) .. '" is in no header of the title screen' end
+  local hits, folders = {}, {}
+  for j, e in ipairs(worlds) do
+    if same(e.world, wname) then hits[#hits + 1] = j; folders[#folders + 1] = tostring(e.folder) end
+  end
+  if #hits == 1 then return hits[1] end
+  if #hits == 0 then return nil, 'no world named "' .. L.shown(wname) .. '" in the world list' end
+  return nil, #hits .. ' worlds are named "' .. L.shown(wname) .. '" (folders ' .. table.concat(folders, ', ') ..
+    ')', wname, hits
+end
+
+-- where to click entry `idx` of `list` (labels by `label(e)`): the match on the screen ({x, y, len}) or
+-- nil, the scroll position that brings the entry to the top (or nil when scrolling cannot help), and why
+function L.list_row(v, list, idx, scroll, label)
+  scroll = tonumber(scroll) or 0
+  local text = label(list[idx])
+  if not text or text == '' then return nil, nil, 'entry ' .. idx .. ' has no label' end
+  if idx - 1 < scroll then return nil, idx - 1, 'entry ' .. idx .. ' is above the visible rows (scroll ' .. scroll .. ')' end
+  local k = 1
+  for j = scroll + 1, idx - 1 do
+    if same(label(list[j]), text) then k = k + 1 end
+  end
+  local m = L.find_all(v, L.shown(text))
+  if m[k] then return m[k], nil, nil end
+  if scroll ~= idx - 1 then
+    return nil, idx - 1, 'entry ' .. idx .. ' "' .. L.shown(text) .. '" is not among the visible rows (scroll ' .. scroll .. ')'
+  end
+  return nil, nil, 'entry ' .. idx .. ' "' .. L.shown(text) .. '" is not on the screen at scroll ' .. scroll
+end
+
+-- the list step for the header lists: {which = 'game'|'world', m = match | nil, scroll = n | nil, why, idx, text}
+-- or nil when the title screen gives no header lists for this save (the text-only path then decides)
+-- tried = {[world index] = true}: same-named worlds already opened whose game list did not hold the save;
+-- opened = a world row was clicked by this run. Then a game list without the save answers {which = 'back'} (Esc,
+-- back to the world list) and the next same-named world is opened.
+local function game_pick(v, t, spec, gi)
+  local target, save = t.games[gi], spec.save
+  local ways = {
+    {spec.entry, function(e) return e == target and spec.entry or e.folder end},
+    {save, function(e) return e.folder end},
+    {target.fort, function(e) return e.fort end}}
+  local first
+  for _, w in ipairs(ways) do
+    if w[1] and w[1] ~= '' and #L.find_all(v, L.shown(w[1])) > 0 then
+      local m, sc, why = L.list_row(v, t.games, gi, t.scroll_game, w[2])
+      local pick = {which = 'game', m = m, scroll = sc, why = why, idx = gi, text = w[1]}
+      if m then return pick end
+      first = first or pick
+    end
+  end
+  return first   -- nil: no label of the save is on the screen (maybe not the game list)
+end
+
+local function world_pick(v, t, spec, tried)
+  if type(t.worlds) ~= 'table' or #t.worlds == 0 then return nil end
+  local wi, why, wname, hits = L.world_index(t, spec.save, spec.world_folder)
+  for _, h in ipairs(hits or {}) do   -- same-named worlds: the first one not opened yet
+    if not tried[h] then wi = h break end
+  end
+  if not wi then   -- a refusal only on the world list itself (the name is shown)
+    if wname and #L.find_all(v, L.shown(wname)) > 0 then
+      return {which = 'world', refuse = true, why = why .. (hits and (', none holds "' .. tostring(spec.save) ..
+        '"; name one with --world-folder') or '')}
+    end
+    return nil
+  end
+  local name = t.worlds[wi].world
+  local listed = false   -- the world list is shown when a row shows the name of one of its entries
+  for _, e in ipairs(t.worlds) do
+    if e.world and #L.find_all(v, L.shown(e.world)) > 0 then listed = true break end
+  end
+  if not listed then return nil end
+  local m, sc, why2 = L.list_row(v, t.worlds, wi, t.scroll_world, function(e) return e.world end)
+  return {which = 'world', m = m, scroll = sc, why = why2, idx = wi, text = name}
+end
+
+function L.header_pick(v, spec, tried, opened)
+  local t = v.title
+  if type(t) ~= 'table' or (type(t.games) ~= 'table' and type(t.worlds) ~= 'table') then return nil end
+  tried = tried or {}
+  local gi = L.index_of(t.games, spec.save)
+  local gp = gi and game_pick(v, t, spec, gi)
+  if gp then return gp end
+  if opened and not gi and type(t.games) == 'table' and #t.games > 0 then
+    return {which = 'back', why = 'the game list of this world does not hold "' .. tostring(spec.save) .. '"'}
+  end
+  local wp = world_pick(v, t, spec, tried)
+  if wp then return wp end
+  if gi then   -- the save's row is not visible: scroll the game list to it
+    local m, sc, why = L.list_row(v, t.games, gi, t.scroll_game, function(e) return e.folder end)
+    return {which = 'game', m = m, scroll = sc, why = why, idx = gi, text = spec.save}
+  end
+  return nil
+end
 
 -- ---------------------------------------------------------------- the screens
 -- text that only the main menu shows (title.new is proven live: 'Start new game in existing world')
@@ -239,7 +375,7 @@ local function drive_step(spec, name, c)
     settle_ms = c.settle_ms or 2500, stale = c.stale or 4, progress = L.signature,
     act = function(ui, v, ctx, w, mem)
       local r = results(ctx)
-      local s, why = L.screen(v, name)
+      local s, why, kind = L.screen(v, name)
       r.screen, r.rows = s, L.brief(v)
       if v.title then r.title = v.title end   -- viewscreen_titlest fields as read now (does `selected` follow the hover?)
       if s ~= 'other' then mem.unk = 0 end
@@ -257,7 +393,41 @@ local function drive_step(spec, name, c)
           return 'fail', 'the title menu has no Continue or Load entry; rows: ' .. L.brief(v)
         end
         return click(ui, ctx, mem, {x = cell.x, y = cell.y, len = #cell.text}, cell.text, 'main', v)
-      elseif s == 'list' then
+      end
+      -- BUG-230: the header lists decide which row is the save (same-named worlds) and scroll to it
+      mem.tried = mem.tried or {}
+      local hp = (s == 'list' or (s == 'other' and kind == 'title'))
+        and L.header_pick(v, spec, mem.tried, mem.cur_world ~= nil) or nil
+      if hp and hp.which == 'back' then
+        mem.tried[mem.cur_world], mem.cur_world = true, nil
+        ui:key('LEAVESCREEN')   -- Esc: back to the world list (a vanilla key)
+        local r2 = results(ctx)
+        r2.clicks[#r2.clicks + 1] = {kind = 'back', text = 'Esc', n = (mem.clicks or 0)}
+        return nil, hp.why .. ': back to the world list'
+      end
+      if hp and hp.refuse then
+        dump_once(ctx, v, hp.why)
+        return 'fail', hp.why .. '; rows: ' .. L.brief(v)
+      elseif hp and hp.m then
+        mem.unk = 0
+        mem.hl = (mem.hl or 0) + 1
+        if hp.which == 'game' and mem.hl % 2 == 0 then   -- the entry only selected: a Load button (as below)
+          local b = L.confirm_button(v)
+          if b then return click(ui, ctx, mem, {x = b.x, y = b.y, len = #b.text}, b.text, 'confirm', v) end
+        end
+        if hp.which == 'world' then mem.cur_world = hp.idx end
+        return click(ui, ctx, mem, hp.m, v.lines[hp.m.y + 1]:sub(hp.m.x + 1, hp.m.x + hp.m.len), hp.which, v)
+      elseif hp and hp.scroll and w and w.scroll then
+        mem.unk = 0
+        mem.scrolls = (mem.scrolls or 0) + 1
+        if mem.scrolls > 4 then return 'fail', 'the ' .. hp.which .. ' list does not scroll: ' .. tostring(hp.why) end
+        w.scroll(hp.which, hp.scroll)
+        local r2 = results(ctx)
+        r2.scrolls = r2.scrolls or {}
+        r2.scrolls[#r2.scrolls + 1] = {which = hp.which, to = hp.scroll, idx = hp.idx}
+        return nil, 'scrolled the ' .. hp.which .. ' list to ' .. hp.scroll .. ' (' .. tostring(hp.why) .. ')'
+      end
+      if s == 'list' then
         mem.list = (mem.list or 0) + 1
         -- the first visit clicks the entry; if the screen is still the list afterwards, a confirming button
         -- (an entry that only selects, a Load button) on even visits, the entry again otherwise

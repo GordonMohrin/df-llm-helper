@@ -1,5 +1,5 @@
 # BUG-020 `embark.py scan` cannot place the rectangle: it stays where DF put it, the mouse injector has no effect
-Status: mitigated (fix proposal 1: fails early and clearly; the root cause is open)
+Status: fixed (cause found in BUG-228, offline, live-untested; fix proposal 1 stays as the early failure)
 Severity: medium (a new fort cannot be started without Gordon's hand; scan/embark are the only fair-play path)
 Found: 2026-10-15 20:40, DF 53.16 restarted on virtual desktop 1, window resized to client 1716x1000 (the calibration), dfpilot main 95fe16d + local trade fix
 Module: `tools/embark/embark.lua` (`W.inject`, `Inj`), `tools/embark/steps.lua` (`S.place`)
@@ -39,3 +39,8 @@ Related: `tools/embark/README.md` (Live L0 findings), `docs/v2/POSTMORTEM-run9-t
   try the L0 state (window never moved after start) and a real OS mouse move over the window (SetCursorPos).
 - Live check: `embark.py scan 12,6` in the broken state must stop after a few tries with `rectangle does not follow the mouse` naming
   two pixels; in the L0 state it must still place the rectangle.
+
+## Cause (Run 15 embark on i2, 2026-10-29): BUG-228
+`df.global.enabler.tracking_on` had dropped to 0 (likely a mouse-leave on the window, which also fits the restart and the
+MoveWindow resize here); at 0 DF ignores the written mouse. The mouse injector now sets `tracking_on = 1` while it is shown and
+restores the old value when it is dismissed: `bugs/BUG-228-embark-injector-leaves-tracking-on-off.md`.
