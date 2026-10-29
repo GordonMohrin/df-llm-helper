@@ -1325,7 +1325,7 @@ function M.quiet_wait(K, name, r, br, sc, now)
   for _, e in ipairs(sc.list or {}) do
     if not M.at_station(e) then
       if e.d <= M.MARGIN_DOWN then
-        r.qd, r.qref = nil, nil
+        r.qd, r.qref = now, nil                         -- the ring is busy now: the quiet clock restarts
         if not r.qnote then                             -- kern.log once per want: who keeps the corridor busy
           r.qnote = true
           K.log('info', 'gate: %s down waits for %d quiet ticks: %s %d %d tiles from it', name, M.QUIET_DOWN, e.k, e.id, e.d)
@@ -1774,7 +1774,7 @@ local function control(K, name, spec, now)
         elseif dir == 'down' and w0 then
           local e = M.approach(br, sc, prev, wid)     -- BUG-251: someone walks toward it while the pull is being done
           if e then
-            stale, r.qd = 'approach', nil
+            stale, r.qd = 'approach', now
             K.log('info', 'gate: %s down pull cancelled: %s %d %d tiles from it and walking toward it', name, e.k, e.id, e.d)
           end
         end
@@ -1857,7 +1857,7 @@ local function control(K, name, spec, now)
   if not hd and #hold > 0 then
     r.block_since = r.block_since or now
     note_hold(K, name, spec.fp, w, hold, now)
-    r.stuck, r.qd = 'blocked', nil
+    r.stuck, r.qd = 'blocked', now
     return s
   end
   unblock(r, now)

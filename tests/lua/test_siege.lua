@@ -821,7 +821,7 @@ add{name = 'footprint in PEACE after an ALERT: O1 is not lowered onto a citizen'
     local o1 = S.pulls(W, 'O1')
     T.eq(#o1, 2)
     T.ok(S.mode_tick(W, 'ALERT>PEACE') < W.t_start + 2600, 'PEACE came while the citizen was on O1')
-    between(rel(W, o1[2].tick), 2600, 2630, 'O1 lowered after the citizen left')
+    between(rel(W, o1[2].tick), 2650, 2680, 'O1 lowered after the citizen left')   -- BUG-251: + QUIET_DOWN after he left
   end}
 
 add{name = 'an insane citizen (berserk) inside Kern+ is no hostile: no ALERT, no BREACH',
