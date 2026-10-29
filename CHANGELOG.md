@@ -91,6 +91,37 @@
   4 drafted') and check has no 'only 0 free site(s)' ERROR; after `cmd trade.want` with food/seeds the draft keeps them;
   with drink < 30 d the cistern, farms and a Still/Kitchen workshops sit in the current season right after seal/refuge;
   the draft line shows `fortcore@same st3 (refuge)`.
+## Run 15 embark tools: world folder, intro, one-hold placement and hover scan, hard stone, gamelog, --here, save-as (BUG-245..250, 2026-10-29; offline, live-untested)
+- **Why:** the Run 15 players (15c Inkintense, 15d Drillchamber, Guildcleans, Earthboat) worked around the embark tools by hand:
+  `newgame` took the first of three same-named worlds (BUG-245); `--play-now` left the "A Dwarven Outpost" popup open
+  (BUG-246); on i4 `local.place` ran the held pixel to -7083,-9104 and aborted at 34/180 with 0 panels (BUG-247); deep-soil
+  forts accepted `stone` and later had no hard stone for levers, mechanisms and moods (BUG-248); the PLAYBOOK curse grep
+  found an older fort's werecavy lines in the same gamelog (BUG-249); after a hand placement the gate and accept.log were
+  bypassed, saving under a new name needed PostMessage scripts, and 14 rectangles were compared by hand (BUG-250).
+- **What changed:** (1) `embark.py newgame --world-folder F [--portable|--appdata]`: `title.world` clicks the one
+  "Portable Folder: F" / "Folder: F" row, checked against `region_choice` when DFHack shows it (BUG-245). (2) `fort.intro`
+  knows "Strike the earth" / "Dwarven Outpost" / "expedition has arrived", looks for 40 polls and re-clicks Okay up to 3 times
+  (BUG-246). (3) `local.place` holds one fixed pixel and moves only the camera; k is measured once from a confirmed miss
+  (|k| <= `local_k_max` 48) and the second confirmed miss fails naming `--hover`; new `scan --hover` reads 16 hovered panels per
+  site without a rectangle; rows keep the hovered tiles as `parts` (BUG-247). (4) rules.json `hard_stone_levels` 6 and
+  `soil_levels`: `stone` also fails above the estimate; waiving or accepting `stone` needs `--explore-first TEXT` (embark.py and
+  the gate; warnings and accept.log carry the plan) (BUG-248). (5) `dfllm gamelog [--since-embark] [--marker T] [--grep RE |
+  --curse] [--tail N]` reads `<DF>/gamelog.txt` after the last embark line, no fort runtime needed (BUG-249). (6) `embark
+  --here` gates the rectangle on the screen (popup open) on the newest results' reads inside it and confirms it; `save-as
+  NAME` (Esc posted to this DF's window only while the run waits for a closed menu, STRING_A per character, SELECT, verified by
+  `getSavePath`, no overwrite); the scan summary shows `brook=` per row and a `best compromise` embark line (BUG-250).
+- **Safety:** reads only visible UI state plus `region_choice` and `getSavePath` (read only); writes only the camera, mouse,
+  simulated keys and clicks as before. No verb, event, config key or RULES row; no contract change. The BUG-020 test now pins
+  the new rule (the held pixel stays in the window, no k from a rectangle that does not follow); `tests/test_embark.py` passes
+  `--explore-first` with `--accept stone`. PLAYBOOK step 2 (dwarf-fortress-v2) should switch to `dfllm gamelog --since-embark
+  --curse`; not part of this repo.
+- **Tests (each fails on 6dc0f19):** tests/lua/test_embark_fix6.lua (12), tests/test_bug245_250_embark_tools.py (8).
+- **Live check:** `newgame --world-folder region1 --portable` prints the clicked folder row and the fort lands in
+  `<DF>/save/region1`; `--play-now` ends `fort.intro: intro popup (...) closed by Okay`; on i4 `scan 9,7` holds one pixel and
+  either places or fails within 8 tries, `scan 9,7 --hover` gives a row with 16 tiles; a deep-soil `stone` fail names "about 8
+  levels"; `python -m dfpilot gamelog --since-embark --curse` on E:/DF-test2 lists no line before this fort's embark;
+  `embark --here --play-now` on a hand-placed rectangle after a hover scan embarks with a gate verdict; `save-as r15x-test`
+  ends `saved as .../save/r15x-test`.
 
 ## Live round 4 station fallback and the release without stations (BUG-214, BUG-215, 2026-10-29; offline, live-untested)
 - **Why:** live round 4 on E:/DF-test4 (Trussroads) and its skeptic: with B2 raised the BREACH chain b2, core, z4, melee failed entry by

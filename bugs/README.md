@@ -259,6 +259,12 @@ Related: FR-xx, BUG-xx
 | [BUG-242](BUG-242-propose-overwrites-the-running-trade-want.md) | fixed (offline, live-untested) | medium | Run 15: propose overwrites the running cmd trade.want (food, seeds) | dfpilot/plan |
 | [BUG-243](BUG-243-propose-water-and-food-not-first-in-an-emergency.md) | fixed (offline, live-untested) | high | Run 15: cistern drafted in seasons[2] at drink 0 d; no farm or food shop in the draft | dfpilot/plan |
 | [BUG-244](BUG-244-draft-summary-without-stage-and-early-gallery-warning.md) | fixed (offline, live-untested) | low | Run 15: draft summary fortcore@same without stage; gallery_o1 warning before stage 2 is dug | dfpilot/plan |
+| [BUG-245](BUG-245-newgame-picks-the-first-of-same-named-worlds.md) | fixed (offline, live-untested) | medium | Run 15c/15d: embark newgame picks the first of several same-named worlds | tools/embark |
+| [BUG-246](BUG-246-play-now-leaves-the-intro-popup-open.md) | fixed (offline, live-untested) | low | Run 15c: embark --play-now leaves the intro popup open | tools/embark |
+| [BUG-247](BUG-247-embark-place-loop-runs-the-held-pixel-out-of-the-window.md) | fixed (offline, live-untested) | medium | Run 15d: local.place runs the held pixel out of the window; no scan by hover | tools/embark |
+| [BUG-248](BUG-248-deep-soil-embark-without-hard-stone.md) | fixed (offline, live-untested) | medium | Run 15: deep-soil embarks without hard stone; stone accepted without a plan | tools/embark |
+| [BUG-249](BUG-249-curse-check-greps-older-forts-in-the-gamelog.md) | fixed (offline, live-untested) | low | Run 15: curse check greps an older fort's lines in the same gamelog | dfpilot/cli.py |
+| [BUG-250](BUG-250-embark-tools-missing-here-save-as-scan-summary.md) | fixed (offline, live-untested) | medium | Run 15c/15d: no embark --here, no save-as, no best compromise or brook distance | tools/embark |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

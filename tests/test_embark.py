@@ -260,7 +260,7 @@ def test_main_embark_passes_named_waivers_only(tmp_path, monkeypatch):
             drv.main(["embark", "7,23", "--no-wait", *bad])
     assert len(calls) == 1
     assert drv.main(["embark", "7,23", "--accept", "ore", "--accept", "stone", "--reason", "known trade-off",
-                     "--no-wait"]) == 0
+                     "--explore-first", "explore shaft to stone in spring", "--no-wait"]) == 0   # BUG-248
     spec = json.loads(Path(calls[1][1]).read_text(encoding="utf-8"))
     assert spec["accept"] == [{"id": "ore", "why": "known trade-off"}, {"id": "stone", "why": "known trade-off"}]
     log = (tmp_path / "dfllm-runtime" / "embark" / "accept.log").read_text(encoding="utf-8").splitlines()

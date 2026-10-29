@@ -34,6 +34,15 @@ Proven live: `newgame`, `scan` (about 12 s per site, about 20 s with `--tiles`) 
 - **BUG-229:** the DF site finder ignores "Cannot embark entirely on water or mountains." (a no-aquifer match can be such a
   rectangle). `scan` reads that refusal (on the panel, or instead of the popup after the click) and the panel's biome line;
   criterion `terrain` rejects the refusal and a rectangle whose 16 read tiles (`--tiles`) are all mountain/lake/ocean.
+- **Run 15 player reports (BUG-245..250, offline fixes, live-untested):** `newgame --world-folder F [--portable|--appdata]`
+  clicks the row "Portable Folder: F" / "Folder: F" of one of several same-named worlds (BUG-245); the intro popup is also
+  "A Dwarven Outpost ..." and comes a few polls after the fort: `fort.intro` looks for it about 10 s and clicks Okay
+  (BUG-246); `local.place` holds ONE fixed pixel and moves only the camera, measures the offset once and fails at the
+  second confirmed miss (it ran the held pixel to -7083,-9104 on i4), and `scan --hover` reads 16 hovered panels per site
+  without any rectangle (BUG-247); `stone` also fails when the soil estimate exceeds `hard_stone_levels` and may be waived
+  or accepted only with `--explore-first TEXT` (BUG-248); `embark --here` gates the hand-placed rectangle (popup open)
+  on earlier reads, `save-as NAME` saves under a new name, the scan summary shows the brook distance and the best
+  compromise (BUG-250). `dfllm gamelog --since-embark --curse` is the curse check of this fort only (BUG-249).
 - **Prepare carefully:** skill and dwarf rows ignore simulated clicks with or without focus, with the
   injector and with raw `enabler.mouse_lbut` flags; keys do nothing there except Esc (menu). Buttons
   (Embark!, Go back, menu items) work. Fallback used: Esc → Return to title → `newgame` → `embark …
@@ -102,7 +111,7 @@ Gordon's own history.
 | `input.lua` | click = hover (mouse held) → one press → hold, played over frames |
 | `runner.lua` | steps: wait → act → settle → check; tries, stale progress, timeouts, `wait` results that spend no try, `status.json` |
 | `loadsave.lua` | K2: load a saved fort from the title screen by clicks (§9); pure text functions + the two steps of mode `load` |
-| `steps.lua` | the procedure (§4) and run specs (`newgame`, `scan`, `embark`, `prep`) |
+| `steps.lua` | the procedure (§4) and run specs (`newgame`, `scan`, `embark`, `here`, `prep`, `saveas`) |
 | `embark.py` | Python driver: writes a spec, ONE `dfhack-run` call, then only reads `status.json` |
 | `ui.json` | calibration (§5); `rules.json` checklist thresholds; `loadout.json` skills and buys |
 | `fixtures/` | synthetic screen dumps and `fake_df.lua` for the offline tests |
@@ -123,12 +132,26 @@ Preconditions:
 
 ```
 python tools/embark/embark.py newgame [--world Zilirr]     # title -> world map
+python tools/embark/embark.py newgame --world-folder region1 --portable   # BUG-245: one of several same-named worlds
 python tools/embark/embark.py scan 26,10 18,9,6,6 7,23     # read and rank sites, embark nowhere
+python tools/embark/embark.py scan 9,7 10,6 --hover        # BUG-247: 16 hovered panels per site, no rectangle
 python tools/embark/embark.py embark 7,23,6,6              # read -> gate -> confirm -> prepare -> Embark!
 python tools/embark/embark.py embark 7,23,6,6 --waive dark_fortress   # one criterion checked by eye
 python tools/embark/embark.py embark 7,23,6,6 --accept ore --reason "copper/tin listed, iron by trade"   # FR-08
+python tools/embark/embark.py embark 7,23 --accept stone --reason "deep soil" --explore-first "shaft to stone in spring"
+python tools/embark/embark.py embark --here --play-now     # BUG-250: the rectangle placed by hand, popup open
+python tools/embark/embark.py save-as r15d-drillchamber    # BUG-250: Esc menu > Save and continue playing as NAME
 python tools/embark/embark.py state | check | screen NAME | status | stop
 ```
+**BUG-250 tools.** `embark --here` takes the rectangle on the screen with its Confirm popup open (placed by hand when
+`local.place` fails), gates it on the panels earlier runs read (the newest `result-*.json`: hovered tiles inside the
+rectangle and a read of exactly this rectangle; the popup's sentences are merged in; "N of 16 tiles were hovered" is a
+warning) and then confirms it like `embark` (accept.log site `here`). `save-as NAME` waits for the Esc menu (it posts one
+Esc key to this DF's window, found by its executable folder, when the menu is closed; `--no-post`: press Esc yourself),
+clicks "Save and continue playing" once, erases the old name (STRING_A000), types NAME key by key (STRING_A<code>; the
+field must show it), SELECT, and ends when `dfhack.getSavePath()` names the new folder; an existing folder is refused.
+The scan summary appends to each row `brook=in (kind)` or `brook=N tiles at x,y (tag)` (nearest hovered tile with water)
+and, when no rectangle is `ok`, a line `best compromise: <tag> ... : embark WX,WY,LX,LY --accept ... --reason TEXT`.
 `WX,WY` is the world tile, optional `LX,LY` (0-15) the local tile of the rectangle's top-left
 corner (default `6,6`, the tile centre; v1 lesson: edges pick up neighbour geology). Then in the
 fort: `dfhack-run dfllm adopt`.
@@ -155,12 +178,13 @@ savage, necromancer, early invasion). The reason is required; `embark.py` append
 | Step | UI action | Done when | Live |
 |---|---|---|---|
 | title.new | click "Start new game in existing world" | text gone | run4-6 |
-| title.world | click the world name (ASCII part; accents read as `?`) | game type shown | run4-6 |
+| title.world | click the world name (ASCII part; accents read as `?`); with `--world-folder` the one row "Portable Folder: F" / "Folder: F" (BUG-245; several rows of that folder fail unless `--portable`/`--appdata`; checked against `region_choice` when DFHack shows it) | game type shown | run4-6 |
 | title.fortress | click "Fortress" | "Select a game type" gone | run4-6 |
 | title.load | wait (up to 10 min) | world map or "Skip tutorial" | run4-6 |
 | title.tutorial / title.okay | click "Skip tutorial", then "Okay" (optional) | popups gone | run4-6 |
 | world.goto | right-click until zoomed out; camera to the tile; click the map | `region_pos` = tile; else learn the offset and retry | run4-6 |
-| local.place | click the "Embark" button; camera; click the local map | `embark_pos_min` = target; else learn k = rect - camera and retry; the same rectangle for two different holds fails (`rectangle does not follow the mouse`, BUG-020) | run4-6 |
+| local.place | click the "Embark" button; hold ONE fixed pixel (probed cursor over the map, else the centre tile), camera at target - k - floor((P - C) / 16) | `embark_pos_min` = target; a miss confirmed on two checks measures k once (beyond ±`local_k_max` = no follow); the second confirmed miss fails (`rectangle does not follow the mouse ... --hover`, BUG-020/BUG-247) | run4-6 |
+| local.embark, site.hover.N, site.hover.read (`scan --hover`) | "Embark" button; per tile camera so the fixed pixel hovers it (`hover_k`), the panel read twice alike; merge the 16 tiles (no rectangle, no size) | 16 panels (a tile not read is skipped) | untested |
 | site.read | ONE capture with the Confirm popup open: popup sentences, panel, Neighbors section and the rectangle; fail unless the rectangle is still the target; evaluate §5.1; save `capture/<id>-site-<tag>.txt` | read | run4-6 (probe.sh) |
 | site.abort (scan only) | click the popup's Abort (the one next to Confirm; the bottom-bar Abort leaves the embark) | popup gone | run4-6 |
 | site.gate (embark only) | refuse any fail not named in `accept` (with a reason); refuse any unknown criterion not named in `waive`/`accept` | verdict | untested |
@@ -171,6 +195,9 @@ savage, necromancer, early invasion). The reason is required; `embark.py` append
 | prep.buy.* | click the item row `add` times | each click must lower `points_remaining` | untested |
 | prep.buy (rest) | buy `rest` items until a click no longer lowers the points | points 0 | untested |
 | prep.embark | click "Embark!" once; on "Are you sure?" click "Go back" and fail (unless `allow_unspent`: "I am ready!" once) | `dwarfmode` (≤ 10 min) | untested |
+| fort.intro | in the fort, look for "Strike the earth" / "Dwarven Outpost" / "expedition has arrived" for `intro_polls` (40) polls; click Okay, again after 12 polls, at most 3 times (BUG-246) | popup gone, or none shown | L6 |
+| site.here (`embark --here`) | Confirm popup open: read the rectangle, merge the earlier reads inside it and the popup | gate as `embark` (BUG-250) | untested |
+| fort.menu, fort.menu.wait, fort.save, fort.save.name, fort.save.done (`save-as`) | Esc menu (posted by embark.py), "Save and continue playing" once, STRING_A000 x48, STRING_A<code> per char, SELECT | `getSavePath()` ends in /NAME, menu gone (BUG-250) | untested |
 
 Without the popup the placing rectangle follows the mouse (v1 needed `hold.lua` for that), so the
 site is read while the popup is open, and `embark` confirms that same rectangle without closing the
@@ -194,7 +221,7 @@ and the run goes on; the final `status.json` lists them under `warnings`.
 | flux | "Flux stone layer" | missing warn |
 | ore | a line of metal names, if DF shows one | iron pass, bronze only / no iron warn, not shown skip |
 | soil | "Little soil"/"Some soil" … "Extremely deep soil" | little/some pass, deeper or none warn |
-| stone | the soil depth | deep, very deep or extremely deep soil warn: no stone layer in the upper levels, with a light aquifer the first stone lies below the water (live L6, Laborkings: no boulders for a year); skip when soil is not shown |
+| stone | the soil depth | deep, very deep or extremely deep soil, or more than `hard_stone_levels` (6) estimated soil levels (`soil_levels`; BUG-248), fail: no stone layer in the upper levels, with a light aquifer the first stone lies below the water (live L6, Laborkings: no boulders for a year); unknown when soil is not shown. Waive/accept only with `--explore-first TEXT` (BUG-248) |
 | temperature | "Temperature:", "Ice" | Temperate pass, Warm/Cold warn, else fail |
 | size | rectangle | 3x3 or 4x4 pass (DF default is 4x4; size is not changed by these steps) |
 | popup | other warning sentences | `fail_popups` fail, `warn_popups` warn |

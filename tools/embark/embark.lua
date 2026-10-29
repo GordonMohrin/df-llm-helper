@@ -120,11 +120,33 @@ local function source()
         end
         return out
       end
+      -- BUG-245: the worlds of "Start new game in existing world" (region_choice: full_path, is_portable; Run 15c/15d
+      -- read them live), so newgame --world-folder can check the folder it clicks exists in that kind
+      local function regions()
+        local ok, vec = pcall(function() return scr.region_choice end)
+        if not ok or vec == nil then return nil end
+        local okn, n = pcall(function() return #vec end)
+        if not okn then return nil end
+        local out = {}
+        for i = 0, math.min(n, 60) - 1 do
+          local okp, path = pcall(function() return vec[i].full_path end)
+          local okq, port = pcall(function() return vec[i].is_portable end)
+          local portable = nil
+          if okq and port ~= nil then portable = (port == true or port == 1) end
+          out[#out + 1] = {path = okp and type(path) == 'string' and path or nil, portable = portable}
+        end
+        return out
+      end
       return {old_field = field('sel_menu_line') ~= nil, sel_menu_line = field('sel_menu_line'),
         selected = field('selected'), selected_r = field('selected_r'), mode = field('mode'),
         worlds = headers('savegame_header_world'), games = headers('savegame_header_game'),
         saves = headers('savegame_header'), scroll_world = field('scroll_position_world_choice'),
-        scroll_game = field('scroll_position_game_choice')}
+        scroll_game = field('scroll_position_game_choice'), regions = regions()}
+    end,
+    -- BUG-250 (save-as): the current save folder, as DFHack names it (read only)
+    save_path = function()
+      local ok, p = pcall(dfhack.getSavePath)
+      return ok and type(p) == 'string' and p or nil
     end,
     prep = function()
       if not df.viewscreen_setupdwarfgamest:is_instance(scr) then return nil end

@@ -83,6 +83,7 @@ function V.capture(src)
   v.cs = src.cs and src.cs() or nil
   v.prep = src.prep and src.prep() or nil
   v.title = src.title and src.title() or nil   -- viewscreen_titlest fields (loadsave.lua); nil off the title screen
+  v.save_path = src.save_path and src.save_path() or nil   -- dfhack.getSavePath() (save-as, BUG-250)
   return v
 end
 
