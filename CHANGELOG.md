@@ -1,5 +1,32 @@
 # CHANGELOG dfpilot
 
+## Run 15 hospital water: the water scan finishes, sees the brook, a flooded pit and the aquifer, aqshaft columns ranked (BUG-288..292, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 round 2, hospital/refuge water failed in every fort. Inkintense: `inspect water_sources` said 'scan queued for the
+  next water run' twice a season apart (the scan got a slice only in a step without a run, and with the paced slices 30 s apart every
+  step began a new run: it moved only while the game stood; no hospital zone: scanned only on an inspect; BUG-288); the flooded
+  captives pit 77,57,130 (>= 4/7 under the open ramp top 77,57,131) was no candidate (BUG-290); `cistern water=aquifer` said 'no
+  aquifer level known' beside that seepage (BUG-291); `bp sites aqshaft` ranked nothing and the columns tried by hand touched the
+  fortcore's real tiles (8-neighbour rule; no bounding box; BUG-292). Drillchamber: the box 64,43,136-124,103,142 missed the brook
+  141,67,143 the citizens drank from (BUG-289).
+- **What changed:** water.lua (1) the scan in hand gets a slice in every step; at most `ws_read_max` 90,000 tiles in `ws_slices` 18
+  read slices and `ws_body_slices` 4 body slices; a fort without accepted water scans weekly; `inspect` says when the last scan
+  finished (m.water ws_last) and how far the running one is; state `water.wst`. (2) boxes round every citizen and the remembered
+  bodies (m.water wb), a lattice survey of the map's surface levels (`snapshot.liquids` lattice, `snapshot.map_size`,
+  `snapshot.surface_z`) and boxes round its hits, all in the read budget, revealed tiles only; the three largest bodies stay listed;
+  water beyond 30 tiles with a bank: 'zone it ..., then the hospital within 30 tiles of it'; state `water.wsc` (the best way at any
+  distance), quoted by `bp sites hospital`. (3) a well spot: open space or a ramp top right above the water beside a reachable floor.
+  (4) a revealed aquifer tile beside the water marks its level (m.water aqz, `runner.aq_seen` -> manifest aquifer_levels, M.aq_level).
+  sites.py (5) `bp sites aqshaft` ranks columns (public Z4 floor; rock or unknown below with rock on its 4 sides; off keep-out boxes
+  and cavern/warm levels; +40 through a known aquifer level); cmd.py: an aqshaft clashes only orthogonally. Config keys in
+  fairplay.WATER_LIM; contracts: state water.wst/wsc, appendix regenerated; RULES rows 172/270 edited in place (300 lines).
+- **Tests (each fails on 05dc764):** tests/lua/test_bug288_291_water_scan.lua (7), tests/bp/test_bug292_aqshaft_sites.py (4); updated:
+  tests/test_bug193_aqshaft_place.py (S1 without a column now places the best one), tests/bp/test_bp_aqshaft.py (comment).
+- **Live check:** Inkintense: kern.log `water sources: ... N with a well spot (N slices, M tiles read, K boxes)` within minutes,
+  `water sources: aquifer level z130`, `inspect water_sources` body 77,57,130 with pit [77,57,131], `scan last finished at tick`; then
+  `bp sites cistern water=aquifer --fresh` and `bp sites aqshaft depth=6 --fresh` rank sites. Drillchamber: a body near 141,67,143 with
+  a bank, `survey`/`seeds` in the answer, state water.wsc names it. Uncertain: whether DF keeps the aquifer flag on a channelled pit's
+  walls; whether the surface level of the reference column and the map centre meets the brook on a sloped map; the per-slice cost of
+  5,000 tile reads in DF (kern.log KERNEL_SLOW for water).
 ## Run 15b crush: the drill lowers its bridges before PEACE, a quiet window for every lowering (BUG-251..254, 2026-10-29; offline, live-untested)
 - **Why:** Run 15b Earthboat y374 summer d74: soldier 24165 died crushed by B1 going down after an automatic drill (#1057
   BRIDGE_CRUSH, #1058 DEATH 'last seen 1 tile from it'); kern.log: PEACE 150981959, 18 'B1 down still waits for citizen', the pull

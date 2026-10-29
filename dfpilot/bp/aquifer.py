@@ -12,7 +12,8 @@ heavy aquifer: stopped for good (breach:heavy_aquifer) and plugged (CAVERN_PLUG)
 Params: x, y, top = the shaft column (absolute; -1: the site anchor), dry_levels, depth (levels at most), mode = auto (seal
 per wall: stone smoothed, soil walled) | stone | soil (every wall that way) | all (seal every level, damp or not).
 Fair play: nothing here reads the map; the player (or the orchestrator) names the column, a revealed tile the miners
-reach (`bp sites` does not rank shafts). The kernel reads the aquifer flag of revealed tiles only (DECISIONS 2026-10-28).
+reach, or `bp sites aqshaft` ranks the columns on the revealed snapshot (BUG-292: public Z4 floor, rock with rock on its
+4 sides below). The kernel reads the aquifer flag of revealed tiles only (DECISIONS 2026-10-28).
 """
 from __future__ import annotations
 

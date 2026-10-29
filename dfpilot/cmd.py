@@ -244,6 +244,8 @@ def water_ctx(save_dir: Path, tpl: str, state: dict | None = None) -> dict | Non
     lbl = w.get("src_l")                       # the first ones (water.lua SRC_LBL), in src order
     if isinstance(lbl, list):
         out["lbl"] = [str(x) for x in lbl[:len(src)]]
+    if isinstance(w.get("wsc"), str) and w["wsc"]:   # BUG-289/290: the best way to water the kernel's scan found
+        out["cand"] = w["wsc"]
     ref = ((s.get("alert") or {}).get("ref") or {}) if isinstance(s.get("alert"), dict) else {}
     if isinstance(ref, dict) and isinstance(ref.get("box"), list):
         man = files.read_manifest(save_dir) or {}
@@ -339,6 +341,10 @@ def footprint(doc: dict) -> set[tuple[int, int, int]]:
 # live L4: follow placed three tombs (one coffin each) whose anchor lay in the refuge cistern's basin (the
 # anchor exemption below); filled, the basin would flood them. Water templates' tiles never serve as a corridor.
 WET_TPLS = ("cistern",)
+# BUG-292 (Run 15 Inkintense: bp.place aqshaft refused at every Kern+ column, 'overlaps project(s) y372s0b0'): the fortcore's
+# tiles (not a bbox) touched the 1-tile column only diagonally at most columns; a lined shaft seals its 4 orthogonal walls
+# (lua/dfllm/aqshaft.lua), so it keeps one rock tile to other projects orthogonally, a diagonal neighbour is allowed
+ORTH_TPLS = ("aqshaft",)
 
 
 def free_template(tpl: str) -> bool:
@@ -409,10 +415,13 @@ class Occupancy:
         for t, _, fp, _ in self.meta.values():
             if t in skip:
                 corr |= fp
+        orth = str(doc.get("tpl")) in ORTH_TPLS
         for x, y, z in mine:
             near_anchor = z == az and abs(x - ax) <= 1 and abs(y - ay) <= 1
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
+                    if orth and dx and dy:           # BUG-292: a shaft's seal is its 4 orthogonal walls
+                        continue
                     o = self.owner.get((x + dx, y + dy, z))
                     if (dx or dy) and near_anchor and not (o and o[1] in WET_TPLS):
                         continue

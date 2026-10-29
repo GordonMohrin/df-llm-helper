@@ -29,8 +29,8 @@ def test_aqshaft_s1_with_the_column_in_p_is_placed_without_a_ranking(save):
 def test_aqshaft_column_path_keeps_the_checks(save):
     with pytest.raises(cmd.BpError, match="together"):
         cmd.place(save, "aqshaft", {"x": 200}, "S1", "aq1")              # only some of x, y, top
-    with pytest.raises(cmd.BpError):
-        cmd.place(save, "aqshaft", {}, "S1", "aq1")                     # no column: still no ranking for a shaft
+    ranked = cmd.place(save, "aqshaft", {}, "S1", "aq1")                # BUG-292: no column: the best ranked one
+    assert (ranked["tpl"], ranked["site"], ranked["rot"]) == ("aqshaft", "S1", 0)
     cmd.emit_bp(save, "aqshaft", {"x": 200, "y": 200, "top": 90}, "S1", "aq1")
     with pytest.raises(cmd.BpError, match="overlaps"):
         cmd.place(save, "aqshaft", {"x": 200, "y": 200, "top": 90}, "S1", "aq3")

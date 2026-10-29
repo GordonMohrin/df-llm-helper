@@ -298,6 +298,11 @@ Related: FR-xx, BUG-xx
 | [BUG-283](BUG-283-mood-workshop-placed-as-a-plain-workshops-room-at-prio-4.md) | fixed (offline, live-untested) | high | Run 15: the mood's shop placed as a plain 12-shop room at prio 4, 27 days late | care.lua, runner.lua, wake.py |
 | [BUG-284](BUG-284-mood-materials-not-supplied-by-the-kernel.md) | fixed (offline, live-untested) | high | Run 15: no chain shops, no web collection, mood needs not first in the plan | care.lua, act.lua, plan.py |
 | [BUG-285](BUG-285-status-and-brief-name-no-open-mood.md) | fixed (offline, live-untested) | medium | Run 15: status and brief name no open mood, its needs or its days left | care.lua, brief.py |
+| [BUG-288](BUG-288-water-scan-never-finishes-while-the-game-runs.md) | fixed (offline, live-untested) | high | Run 15 Inkintense: the water scan never finished while the game ran ('scan queued') | water.lua |
+| [BUG-289](BUG-289-water-scan-box-misses-the-brook.md) | fixed (offline, live-untested) | high | Run 15 Drillchamber: the water scan's box missed the brook the fort drinks from | water.lua, snapshot.lua, sites.py |
+| [BUG-290](BUG-290-flooded-pit-not-a-well-spot.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: a flooded pit open above the water was no well spot | water.lua |
+| [BUG-291](BUG-291-aquifer-level-not-learnt-from-seepage.md) | fixed (offline, live-untested) | high | Run 15 Inkintense: no aquifer level learnt from revealed seepage (cistern water=aquifer) | water.lua, runner.lua |
+| [BUG-292](BUG-292-aqshaft-not-ranked-and-refused-everywhere.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: `bp sites aqshaft` ranked nothing, hand-picked columns refused | sites.py, cmd.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

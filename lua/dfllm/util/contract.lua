@@ -538,7 +538,9 @@ C.STATE_SPEC = obj({
                gaps = arr(str(16), 0, 8),
                -- BUG-131: the first blocking hospital zone outside the core: id, centre, ok 1 = a finished hospital inside
                -- (hospital.retire needs no approve), pat = patients lying in it
-               hout = obj({z = NAT, at = {t = 'tup', items = {NAT, NAT, NAT}}, ok = FLAG}, {pat = NAT})}),
+               hout = obj({z = NAT, at = {t = 'tup', items = {NAT, NAT, NAT}}, ok = FLAG}, {pat = NAT}),
+               -- BUG-288/289/290: the tick the water scan last finished, the best way to water it found (any distance)
+               wst = NAT, wsc = str(96)}),
   -- FR-96/97 (traps.lua, daily): armed (n) of the manifest's trap tiles (m); built, ways trapped / listed, full cage traps,
   -- free cages, listed tiles without a trap (lost; lh: some in the hall), the last cage order
   traps = obj({n = NAT, m = NAT}, {b = NAT, w = NAT, wn = NAT, f = NAT, c = NAT, l = NAT, lh = FLAG, ord = str(40)}),
