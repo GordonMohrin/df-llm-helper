@@ -48,12 +48,33 @@ end
 
 -- ticks left until insanity and their source: 'timer' (DF's field, > 0), 'est' (the claim + mood_timer), nil (no claim yet;
 -- DF starts the clock at the claim). rec.claim = the tick care first saw the claimed workshop
+-- BUG-307 (Run 15 Earthboat y382: the MOOD line said '41 d left' from DF's timer while the Secretive bowyer stood at thirst 53,516,
+-- ~18 days from death): a moody dwarf neither drinks nor eats, so thirst and hunger rise one a tick to the death line (care's
+-- 'dies at 75000'). The ticks left are the nearest of the mood clock and the two body clocks; src 'thirst'/'hunger' then.
+MD.DIE = 75000
+function MD.body(u)
+  local th, hu
+  pcall(function() th = int(u.counters2.thirst_timer) end)
+  pcall(function() hu = int(u.counters2.hunger_timer) end)
+  return th, hu
+end
 function MD.left(u, rec, now, c)
+  local left, src
   local t = MD.timer(u)
-  if t and t > 0 then return t, 'timer' end
-  local claim = int(rec and rec.claim)
-  if claim then return math.max(0, claim + (int(c and c.mood_timer) or MD.TIMER) - now), 'est' end
-  return nil, nil
+  if t and t > 0 then left, src = t, 'timer'
+  else
+    local claim = int(rec and rec.claim)
+    if claim then left, src = math.max(0, claim + (int(c and c.mood_timer) or MD.TIMER) - now), 'est' end
+  end
+  local th, hu = MD.body(u)
+  local die = int(c and c.mood_die) or MD.DIE
+  for _, b in ipairs({{th, 'thirst'}, {hu, 'hunger'}}) do
+    if b[1] and b[1] > 0 then
+      local l = math.max(0, die - b[1])
+      if left == nil or l < left then left, src = l, b[2] end
+    end
+  end
+  return left, src
 end
 
 -- the step token of `days` left: 'd20' .. 'd2' (the smallest step it is within), 'far' above the first, nil = unknown
@@ -149,6 +170,9 @@ function MD.left_text(left, src)
   if not left then return 'time unknown (DF starts it at the claim)' end
   local d = left // DAY
   if src == 'timer' then return string.format('%d d left', d) end
+  if src == 'thirst' or src == 'hunger' then                       -- BUG-307: '17 d left (thirst 53516)'
+    return string.format('%d d left (%s %d)', d, src, math.max(0, MD.DIE - left))
+  end
   return string.format('~%d d left (est. from the claim)', d)
 end
 

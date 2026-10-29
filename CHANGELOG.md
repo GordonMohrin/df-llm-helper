@@ -1,5 +1,26 @@
 # CHANGELOG dfpilot
 
+## Run 15 moods 2: the mood nook never waits for a slot, days left from thirst, DF's webs cancels seen, leather from trade, butcher.mark names the animal (BUG-306..309, 2026-10-29; offline, live-untested)
+- **Why:** Earthboat y382 (runs/run-15b-earthboat/FR-BUGS.md Runde 2): MOOD_CRITICAL thirst 53,516, the drink nook `queued behind
+  c1a1884b90c4405401 +1` for ~3.6 days (kern.log 154252539 -> 154256899; the player's seal cancel came after it, so the slot queue held
+  it, not seal first) (BUG-306), and the MOOD line said `41 d left` (DF's mood timer) with thirst death ~18 days away (BUG-307).
+  Drillchamber y377 (Runde 3): the silk mood's CollectWebs task was queued 5 ticks after the claim, not late, but DF cancelled all of
+  them (gamelog 23x `Needs undisturbed thread`) and care queued it 25 times blind (BUG-308); y376 a leather mood could only be served by
+  slaughtering a breeding pair and `butcher.mark` answered `26280` (a stray dog) (BUG-309).
+- **What changed:** runner.lua: a mood project (mood_drink, a shop a mood waits for) sorts with the hospital, takes a slot beside
+  `active` (`mood_slots` 2), never yields, joins the run in hand when queued mid-run (`Q.join_run`); the nook is allowed in ALERT/
+  RECOVERY. mood.lua: `MD.left` is the nearest of the mood timer and thirst/hunger to 75,000 (lsrc `thirst`/`hunger`, `N d left
+  (thirst T)`). economy.lua: `cancels_of` (every cancel per job kind with DF's words); care.lua mood_webs counts DF's cancels of its
+  task, says `collect webs cancelled by DF xN (...); buy silk: trade.want cloth:silk`, and from 3 retries only every 3 x
+  mood_act_every. economy.lua: leather short of the mood stock (net of hides) is a trade want `leather`; `butcher.mark` takes `sex`
+  and names id, species and sex. Schema (butcher.mark sex, MOOD_CRITICAL lsrc), CONTRACTS appendix, RULES rows. Not built: husbandry,
+  a bone route, DF's reason for the webs cancel.
+- **Tests (fail on 9ef2ccb):** tests/lua/test_bug306_309_moods.lua (6), tests/lua/test_economy_food_run15.lua (BUG-308 cancels_of,
+  BUG-309); test_mood_emergency.lua and test_economy_chains.lua follow the new days-left and leather want.
+- **Live check:** an `mdr` project is done within one runner run and never shows `queued behind`; a mood at thirst T shows
+  `(75000 - T) / 1200 d left (thirst T)`; after DF cancels a webs task kern.log `collect webs cancelled by DF x1`, then read the Loom's
+  CollectWebs job_items and the nearest web's flags read-only; `butcher.mark` reply `26281 DOG male`; the trade wants list `leather`
+  while leather + hides < 10.
 ## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
 - **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
   player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no

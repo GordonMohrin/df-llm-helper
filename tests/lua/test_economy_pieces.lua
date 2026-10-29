@@ -358,6 +358,13 @@ local function pick_world(opts)
   end}
 end
 
+-- BUG-309: the mood stock's leather is a trade want too (none in these forts); the pick tests read the rest
+local function wants(W)
+  local out = {}
+  for _, e in ipairs(select(2, W.K.call('economy', 'trade_wants'))) do if e.buy ~= 'leather' then out[#out + 1] = e end end
+  return out
+end
+
 T.test('Run 11: picks below the Miners\' demand, an iron bar, a forge and fuel: one pick is forged', function()
   local W = pick_world{picks = 1, bars = {IRON = 1}, fuel = true, shops = {'MetalsmithsForge'}}
   days(W, 2)
@@ -365,7 +372,7 @@ T.test('Run 11: picks below the Miners\' demand, an iron bar, a forge and fuel: 
   T.eq(#o, 1)
   T.eq({o[1].job, o[1].item_subtype, o[1].material, o[1].amount_total}, {'MakeWeapon', 'ITEM_WEAPON_PICK',
                                                                           'INORGANIC:IRON', 1})
-  T.eq(select(2, W.K.call('economy', 'trade_wants')), {}, 'the forge makes it: no trade want')
+  T.eq(wants(W), {}, 'the forge makes it: no trade want')
   local s = W.state().stock
   T.eq({s.picks, s.pick_want}, {1, 2})
 end)
@@ -374,12 +381,12 @@ T.test('Run 11: picks short and no bar: economy.trade_wants asks the caravans fo
   local W = pick_world{picks = 1, shops = {'MetalsmithsForge'}}
   days(W, 2)
   T.eq(orders(W, 'dfllm:pick'), {})
-  local tw = select(2, W.K.call('economy', 'trade_wants'))
+  local tw = wants(W)
   T.eq({#tw, tw[1].buy, tw[1].n}, {1, 'pick', 1})
   T.ok(tw[1].why:find('1 picks < 2', 1, true), tw[1].why)
   local W2 = pick_world{picks = 3}
   days(W2, 2)
-  T.eq(select(2, W2.K.call('economy', 'trade_wants')), {})
+  T.eq(wants(W2), {})
 end)
 
 T.done()

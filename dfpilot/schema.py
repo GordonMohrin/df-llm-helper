@@ -544,7 +544,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # blocker: none in the fort | none free | none reachable | enough exist; [in the fort/free/reachable of every item of the type])
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa fix:s")),
     # BUG-282: why = thirst | hunger (the bars above) or, whatever the thirst, workshop | material | waiting | timer (reasons =
-    # all of them); left = days to DF's insanity line (-1 unknown; lsrc timer | est), need = the shop type his skill lacks, ask =
+    # all of them); left = days to the nearest death line (-1 unknown; lsrc timer | est | thirst | hunger, BUG-307), need = the shop type his skill lacks, ask =
     # the shops the kernel requested itself (PROJECT_REQUEST workshops why=mood), webs = its collect-webs task
     "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s "
                                                     "reasons:sa left:i lsrc:s need:s ask:s webs:s slots:sa")),
@@ -894,7 +894,8 @@ VERB_ARGS: dict[str, Obj] = {
     "jobs.release": Obj(opt={"all": Bool(), "preventblocking": Bool()}),
     # BUG-260 (Run 15 Inkintense famine: breeding pairs the famine slaughter keeps were marked by hand): the animal sheet's
     # slaughter toggle for n tame animals (pets, war and hunting animals never; one pair per race stays unless keep_pairs false)
-    "butcher.mark": Obj(opt={"n": Int(1, 20), "race": AnyOf(NAT, Str(r"^[A-Z0-9_]{1,40}$")), "keep_pairs": Bool()}),
+    "butcher.mark": Obj(opt={"n": Int(1, 20), "race": AnyOf(NAT, Str(r"^[A-Z0-9_]{1,40}$")), "keep_pairs": Bool(),
+                             "sex": Str(r"^(male|female)$")}),          # BUG-309: sex filter
     "perimeter.record": Obj(),
     # BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild: rebuild that bridge anyway
     "bridge.rebuild": Obj(req={"bridge": BRIDGE}),

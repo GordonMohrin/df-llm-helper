@@ -312,6 +312,10 @@ Related: FR-xx, BUG-xx
 | [BUG-297](BUG-297-no-farm-site-after-the-soil-rule-and-no-farm-draft.md) | fixed (offline, live-untested) | high | Run 15c: no farm site after the soil rule (soil marks capped), no farm drafted | sites.py, rooms.py, snapshot.lua, plan.py |
 | [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
+| [BUG-306](BUG-306-mood-drink-nook-queued-behind-the-slot-holders.md) | fixed (offline, live-untested) | high | Run 15b: the mood drink nook waits behind the slot holders (a hanging seal) | runner.lua |
+| [BUG-307](BUG-307-mood-days-left-from-the-mood-timer-only.md) | fixed (offline, live-untested) | high | Run 15b: MOOD line days left from the mood timer only, not thirst/hunger | mood.lua |
+| [BUG-308](BUG-308-collect-webs-cancelled-by-df-queued-again-blind.md) | fixed (offline, live-untested) | high | Run 15d: collect webs cancelled by DF every time, queued again blind | care.lua, economy.lua |
+| [BUG-309](BUG-309-leather-mood-costs-a-breeding-pair-butcher-reply.md) | fixed (offline, live-untested) | medium | Run 15d: a leather mood costs a breeding pair; butcher.mark names no species or sex | economy.lua, schema.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

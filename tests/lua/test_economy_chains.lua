@@ -564,7 +564,17 @@ T.test('Run 11: metal short (no ore, no bars, worn 15 %): trade_wants asks for p
   -- old code: trade_wants {} (no Miners detail short), no crafts order, no stock.mshort
   local W = world{phase = 'P3', per = {A = 5}, wood = 100, shops = {'MetalsmithsForge', 'Craftsdwarfs'}, furnaces = {'Smelter'}}
   days(W, 2)
-  local tw = select(2, W.K.call('economy', 'trade_wants'))
+  -- BUG-309: the mood stock's leather (10, none in the fort) is asked too; the metal wants are the rest
+  local function no_leather(list)
+    local out = {}
+    for _, e in ipairs(list) do if e.buy ~= 'leather' then out[#out + 1] = e end end
+    return out
+  end
+  local all = select(2, W.K.call('economy', 'trade_wants'))
+  local lw = all[#all]
+  T.eq({lw.buy, lw.n, lw.metal}, {'leather', 10, nil})
+  T.ok(lw.why:find('< mood stock 10', 1, true), lw.why)
+  local tw = no_leather(all)
   local buy, n = {}, {}
   for _, e in ipairs(tw) do buy[#buy + 1] = e.buy; n[e.buy] = e.n; T.eq(e.metal, 1, e.buy) end
   T.eq(buy, {'pick', 'axe', 'bar:iron', 'bar:steel', 'armor:metal', 'weapon:metal', 'helm:metal', 'shield', 'pants:metal',
@@ -582,12 +592,12 @@ T.test('Run 11: metal short (no ore, no bars, worn 15 %): trade_wants asks for p
   -- iron ore found: smelting is the route, the caravans are not asked any more
   F.item(W, 'BOULDER', {mat_type = 0, mat_index = 62})                           -- hematite
   days(W, 1)
-  T.eq(select(2, W.K.call('economy', 'trade_wants')), {})
+  T.eq(no_leather(select(2, W.K.call('economy', 'trade_wants'))), {})
   T.eq(W.state().stock.mshort, 0)
   -- no soldiers wanted: not short
   local W2 = world{phase = 'P3', per = {}, wood = 100, shops = {'MetalsmithsForge'}}
   days(W2, 2)
-  T.eq({select(2, W2.K.call('economy', 'trade_wants')), W2.state().stock.mshort}, {{}, 0})
+  T.eq({no_leather(select(2, W2.K.call('economy', 'trade_wants'))), W2.state().stock.mshort}, {{}, 0})
   T.eq(eco_warns(W), {})
 end)
 
