@@ -157,7 +157,7 @@ function F.install(W)
   g.game = {main_interface = {trade = {open = false, choosing_merchant = false, stillunloading = 0, havetalker = 0,
                                         good = {[0] = vec{}, [1] = vec{}}, goodflag = {[0] = vec{}, [1] = vec{}}},
                               view_sheets = {open = false, active_id = -1}}}
-  g.gps = {mouse_x = -1, mouse_y = -1}
+  g.gps = {mouse_x = -1, mouse_y = -1, precise_mouse_x = -1, precise_mouse_y = -1, tile_pixel_x = 10, tile_pixel_y = 15}
   W.focus = {'dwarfmode/Default'}
   W.rows = F.blank_rows()
   W.broker = nil

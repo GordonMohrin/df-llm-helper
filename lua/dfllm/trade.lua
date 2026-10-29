@@ -113,6 +113,7 @@ M.CFG = {
   -- the kernel's own and is closed with Esc (at most LEFT_TRIES times, then it counts as the player's)
   SETTLE_MS = 3000, LEFT_TRIES = 4,
   BUSY_ASK = 3,         -- BUG-287: ui_busy tries of one visit before DECISION_NEEDED trade_screen (once per visit)
+  MIS_MAX = 2,          -- BUG-305: Trade clicks of one attempt that opened another screen (a unit sheet) before it ends 'misclick'
   READS = 1000,         -- screen tiles read per frame (CONTRACTS §3.2: <= 2,000 tiles per slice)
   REPLY_ROWS = 12,      -- top interface rows read for the merchant reply [live-untested: position]
   TOTAL_ROWS = 8,       -- bottom rows read for the "Value:" totals (v1 live J263: row 58 of 60)
@@ -1528,7 +1529,7 @@ local function step_open(K, cars)
   local ui, fl = trade_ui(), focus_list()
   if f.opened and ui.open and on_trade(fl) then
     if ui.choosing_merchant then return finish(K, false, 'several_caravans') end
-    f.stable = nil
+    f.stable, f.aim = nil, nil
     return set_phase(K, 'READY')
   end
   if f.tries >= M.CFG.OPEN_TRIES then return finish(K, false, 'open') end
@@ -1545,12 +1546,27 @@ local function step_open(K, cars)
       if f.tries >= M.CFG.OPEN_TRIES then return finish(K, false, 'no_button') end
       return
     end
-    act_trade(K, 'open', {depot = f.depot, x = b.x, y = b.y})
+    local okc = act_trade(K, 'open', {depot = f.depot, x = b.x, y = b.y})
     if f.missing then return finish(K, false, 'act_missing') end
+    if okc then f.aim = {x = b.x, y = b.y} end      -- BUG-305: the screen after this click is checked on the next run
     return
+  end
+  -- BUG-305: the Trade click opened another screen (live: a unit sheet, the click went to the map): say so; the sheet is
+  -- ours and closed below (OWN.watch); after MIS_MAX such clicks the attempt ends, the kernel never keeps clicking the map
+  if f.aim and OWN.leftover(fl) and not on_sheet(fl) and not on_trade(fl) then
+    local a, fc = f.aim, table.concat(fl, '|'):sub(1, 80)
+    f.aim, f.mis = nil, (f.mis or 0) + 1
+    K.log('warn', 'trade: the Trade click at %d,%d opened %s instead of the trade screen (%d of %d)', a.x, a.y, fc, f.mis,
+          M.CFG.MIS_MAX)
+    if f.mis >= M.CFG.MIS_MAX then
+      OWN.watch(K)
+      f.opened = false
+      return finish(K, false, 'misclick')
+    end
   end
   if on_map(fl) then
     OWN.take(K)                                  -- BUG-286: from here every sheet on top is ours until the map settles
+    f.aim = nil                                  -- BUG-305: a click that left the map is no misclick of the next sheet
     act_trade(K, 'open', {depot = f.depot})
     f.tries, f.opened, f.click_ms = f.tries + 1, true, K.now().ms
     if f.missing then return finish(K, false, 'act_missing') end

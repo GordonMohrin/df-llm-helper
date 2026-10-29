@@ -196,9 +196,26 @@ function A.install_trade(I, gui, int)
     local s = tr_row(y, x - 1, x + #word)
     return s:sub(2, #word + 1) == word and not s:sub(1, 1):match('[A-Za-z]') and not s:sub(-1):match('[A-Za-z]')
   end
-  local function tr_click(x, y)             -- a mouse click at a UI tile (v1 handel.lua:700-703)
-    df.global.gps.mouse_x, df.global.gps.mouse_y = x, y
-    gui.simulateInput(dfhack.gui.getDFViewscreen(true), '_MOUSE_L')
+  -- a mouse click at a UI tile (v1 handel.lua:700-703), like a player's real click: BUG-305 (Run 15, the Trade click
+  -- opened a unit sheet after the DF window was relaunched/resized) DF takes a click the interface layer does not catch to
+  -- the map at precise_mouse_x/y (Lua API.txt "simulateInput"), which held the cached OS cursor over the map. Both mice now
+  -- point at the target tile's centre pixel (tile size from gps; unknown size: no click), and the mouse and
+  -- enabler.tracking_on are given back afterwards (gui.simulateInput sets tracking_on = 1 and never restores it;
+  -- left at 1, DF follows the cached cursor, BUG-228). Returns true, or false, why.
+  local function tr_click(x, y)
+    local g, en = df.global.gps, df.global.enabler
+    local okt, tpx, tpy = pcall(function() return g.tile_pixel_x, g.tile_pixel_y end)
+    tpx, tpy = okt and int(tpx), okt and int(tpy)
+    if not (tpx and tpy and tpx > 0 and tpy > 0) then return false, 'no interface tile size: no click' end
+    local old = {g.mouse_x, g.mouse_y, g.precise_mouse_x, g.precise_mouse_y}
+    local okr, track = pcall(function() return en.tracking_on end)
+    g.mouse_x, g.mouse_y = x, y
+    g.precise_mouse_x, g.precise_mouse_y = x * tpx + tpx // 2, y * tpy + tpy // 2
+    local ok, err = pcall(gui.simulateInput, dfhack.gui.getDFViewscreen(true), '_MOUSE_L')
+    g.mouse_x, g.mouse_y, g.precise_mouse_x, g.precise_mouse_y = old[1], old[2], old[3], old[4]
+    if okr and track ~= nil then pcall(function() en.tracking_on = track end) end
+    if not ok then error(err, 0) end
+    return true
   end
   -- text of the DFHack dialog on top: DialogWindow is centred on the window (gui/dialogs.lua:62-75)
   -- and confirm wraps its message at 45 columns (confirm.lua:142), so rows h/2-8..h/2+8 and columns
@@ -293,7 +310,8 @@ function A.install_trade(I, gui, int)
       if not tr_label(x, y, 'Trade') or after:match('^ ?depot') or after:match('^ ?goods') then
         return false, string.format('no Trade button label at %d,%d', x, y)
       end
-      tr_click(x + 2, y)
+      local ok, why = tr_click(x + 2, y)
+      if not ok then return false, why end
       return true, 'clicked'
     end
     if not tr_has('^dwarfmode/Default') then return false, 'busy: ' .. table.concat(tr_focus(), '|') end
@@ -354,7 +372,8 @@ function A.install_trade(I, gui, int)
     for y = y1, y2 do
       local s = tr_row(y, x1, x2):find('Trade', 1, true)
       if s and tr_label(x1 + s - 1, y, 'Trade') then
-        tr_click(x1 + s + 1, y)
+        local okc, whyc = tr_click(x1 + s + 1, y)
+        if not okc then return false, whyc end
         return true, 'clicked'
       end
     end
