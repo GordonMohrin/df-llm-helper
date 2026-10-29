@@ -1,5 +1,20 @@
 # CHANGELOG dfpilot
 
+## Run 15c surface farm: bp.emit places it, fewer plots when trees cut the block (BUG-316, 2026-10-29; offline, live-untested)
+- **Why:** Inkintense y377 (food 21 d), live: `bp sites farms plots=1 surface=1` ranked 2 sites, but `cmd bp.place tpl=farms
+  site=S1 plots=1 surface=1` and `plan check` failed with `[92, 87, 133]: bp.emit(farms): min() iterable argument is empty`;
+  at the default plots=2/4 trees cut every 11-wide block by the entrance (0 ranked) and nothing tried fewer plots. Root cause
+  emit.py:111: every room template joined Z4 by the bbox of its dug tiles, a surface farm digs none.
+- **What changed:** emit: Z4 only for a template that digs; render.as_built: a document set without a dig stage builds on
+  standing floor (the preview had `build p ... on '#'`); cmd.place: a surface farm at S<k> without a free site for its plots
+  falls back to plots-1 .. 1, `note: BUG-316: ... placed plots=k` (dfllm cmd, cli.log `bp:note`, plan check line), the
+  document's params carry the plots; `bp sites farms surface=1` prints `BUG-316: fewer plots fit, plots=k` and those sites;
+  plan.farm_facts `plots`, food_draft `farms@S1 p.surface=1 p.plots=k`.
+- **Tests (4 of 5 fail on 9ef2ccb):** tests/test_bug316_surface_farm_emit.py.
+- **Live check:** Inkintense `bp sites farms surface=1` -> `fewer plots fit, plots=1`, S1 92,87,133 rot1; `cmd bp.place
+  tpl=farms site=S1 plots=1 surface=1` queues the project. Offline on a copy of the live save folder: plan check `farms@S1 ->
+  y377s0b3 at [92, 87, 133] rot1`. Uncertain: one 35-tile plot for 50 citizens is still short; the surface farm's kernel side
+  (BUG-297) is live-untested.
 ## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
 - **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
   player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no

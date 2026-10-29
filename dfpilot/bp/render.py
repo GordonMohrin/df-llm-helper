@@ -245,6 +245,16 @@ def as_built(docs, base=None, pad: int = 2) -> World:
         w = World(docs_bbox(docs, pad), surface=a[2] if fort else None)
         if not fort:
             w.set(*a, ".")
+        if not any(st["mode"] == "dig" for d in docs for st in d["stages"]):
+            # BUG-316: a document that digs nothing (farms p.surface) builds on floor that stands already: the
+            # synthetic rock world gets that floor (soil under farm plots), else every cell is an error on '#'
+            for d in docs:
+                for _st, key, _props, x0, y0, x1, y1, z in cell_rects(d):
+                    for y in range(y0, y1 + 1):
+                        for x in range(x0, x1 + 1):
+                            w.set(x, y, z, ".")
+                            if key == "p":
+                                w.soil.add((x, y, z))
     for d in docs:
         w.apply(d)
     return w

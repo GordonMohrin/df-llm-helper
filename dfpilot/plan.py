@@ -16,9 +16,10 @@ import re
 from pathlib import Path
 
 from . import cmd as _cmd, files, paths, relocate as _reloc, schema, traps as _traps
-from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files, fmt_reply,
-                  fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy, place, rank_sites, refuge_stair,
-                  refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
+from .cmd import (PLACE_NOTES, SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files,
+                  fewer_plots_sites, fmt_reply, fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy,
+                  place, rank_sites, refuge_stair, refuge_open, seal_openings, send, sites_snapshot, template_info,
+                  template_names, water_near, write_bp)
 from .cmd import SealClosed
 
 R_CAPS = {0: 100, 1: 100, 2: 100, 3: 250}  # D-01 = B (Gordon 2026-10-24): readiness.lua M.CAPS, baseline popcap.max_pop
@@ -241,7 +242,7 @@ def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
         doc = files.read_json(p)
         if isinstance(doc, dict) and doc.get("tpl") == "farms" and p.stem not in done and "parked" not in rows.get(p.stem, ""):
             open_ = True
-    site = None
+    site, plots = None, None
     if sites_snapshot(save_dir) is not None:
         site = "none"
         for kind, prm in (("room", {}), ("surface", {"surface": 1})):
@@ -249,10 +250,14 @@ def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
                 free, _, _ = free_sites(save_dir, "farms", prm, n=1)
             except (BpError, BpUnavailable):
                 free = []
+            if not free and kind == "surface":       # BUG-316: trees cut the default block, fewer plots may fit
+                fewer = fewer_plots_sites(save_dir, "farms", prm, n=1)
+                plots = fewer[0] if fewer else None
+                free = fewer[1] if fewer else []
             if free:
                 site = kind
                 break
-    return {"open": open_, "site": site}
+    return {"open": open_, "site": site, **({"plots": plots} if plots else {})}
 
 
 def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | None) -> tuple[dict | None, str]:
@@ -274,10 +279,15 @@ def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | Non
     if site == "surface" and (s or {}).get("mode") != "PEACE":      # citizen safety: plots by the door only in PEACE
         return None, (f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): only a surface farm site, drafted in PEACE only "
                       f"(mode {(s or {}).get('mode')})")
-    b ={"tpl": "farms", "site": "S1", **({"p": {"surface": 1}} if site == "surface" else {})}
-    return b, (f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): farms@S1" + (" p.surface=1 (no room site on soil: plots on the "
-                                                                         "soil floor by the entrance)" if site == "surface"
-                                                                         else "") + " drafted")
+    # BUG-316: fort.farms.plots = the fewer plots that have a surface site (trees cut the default block)
+    plots = ff.get("plots") if site == "surface" and _nat(ff.get("plots")) else None
+    b = {"tpl": "farms", "site": "S1",
+         **({"p": {"surface": 1, **({"plots": plots} if plots else {})}} if site == "surface" else {})}
+    why = ""
+    if site == "surface":
+        why = (f" p.surface=1{f' p.plots={plots}' if plots else ''} (no room site on soil: plots on the soil floor by the "
+               "entrance" + (f", BUG-316: trees or buildings leave room for {plots} plot(s) only" if plots else "") + ")")
+    return b, f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): farms@S1{why} drafted"
 
 
 def _food_shops_missing(save_dir: Path) -> list[str] | None:
@@ -2475,7 +2485,8 @@ def place_all(save_dir: Path, doc: dict, prev: dict | None,
             occ.add(d)
             placed[b["tpl"]] = {"anchor": d["anchor"], "rot": d["rot"]}
             docs.append(d)
-            lines.append(f"s{si} {b['tpl']}@{b['site']} -> {bid} at {d['anchor']} rot{d['rot']}")
+            lines.append(f"s{si} {b['tpl']}@{b['site']} -> {bid} at {d['anchor']} rot{d['rot']}"
+                         + (f" ({PLACE_NOTES[bid]})" if PLACE_NOTES.get(bid) else ""))     # BUG-316: fewer farm plots
     return docs, len(old), lines
 
 

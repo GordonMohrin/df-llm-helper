@@ -106,8 +106,9 @@ def emit(tpl: str, params: dict | None = None, site=None) -> dict:
     if min(lo) < 0:
         raise ValueError(f"{tpl}: site {anchor} rot {rot} puts tiles outside the map (min x,y,z = {lo})")
     man = transform_manifest(plan.manifest, X)
-    # the room joins the civilian core: later rooms may open from it (a refuge-level room stays out of Z4)
-    if (tpl in rooms.BUILD and tpl not in rooms.REFUGE_LEVEL) or (tpl in grand.ROOMS and plan.dug()):
+    # the room joins the civilian core: later rooms may open from it (a refuge-level room stays out of Z4). BUG-316: a
+    # room that digs nothing (farms p.surface, plots on the soil floor by the entrance) opens no rock and joins no core
+    if plan.dug() and ((tpl in rooms.BUILD and tpl not in rooms.REFUGE_LEVEL) or tpl in grand.ROOMS):
         man.setdefault("zones", {}).setdefault("Z4", []).append(X.bbox(dug_bbox(plan)))
     prefix = f"{tpl[:8]}{anchor[0]}_{anchor[1]}_{anchor[2]}r{rot}"      # two rooms may share an anchor
     if plan.rooms:

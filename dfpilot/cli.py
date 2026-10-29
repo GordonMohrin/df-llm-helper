@@ -186,7 +186,7 @@ def _wait_snapshot(save_dir: Path, cid: str, timeout: float) -> dict | None:
 def run_bp(args, save_dir: Path | None) -> int:
     """save_dir None (no fort yet): only `list` and `preview` without --site get here."""
     from . import files
-    from .cmd import BpError, BpUnavailable, fmt_params, free_sites, parse_kv, send
+    from .cmd import BpError, BpUnavailable, fewer_plots_sites, fmt_params, free_sites, parse_kv, send
     try:
         if args.action == "list":
             for line in _templates_listing():
@@ -212,6 +212,13 @@ def run_bp(args, save_dir: Path | None) -> int:
         where = _where(args)
         held: list = []
         sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap, where=where, taken=held)
+        fewer = None if sites else fewer_plots_sites(save_dir, args.tpl, params, snap, where=where)
+        if fewer:                                          # BUG-316: trees cut the larger surface farm block
+            k = fewer[0]
+            print(f"no free site for {args.tpl}{fmt_params(params)} on snapshot {snap_id} ({ranked} ranked); BUG-316: "
+                  f"fewer plots fit, plots={k}:")
+            params = {**params, "plots": k}
+            sites, snap_id, ranked = fewer[1:]
         if where:
             print(f"free sites for {args.tpl}{fmt_params(params)} {_where_text(where)} on snapshot {snap_id} ({ranked} "
                   f"ranked; place by the label: dfllm cmd bp.place tpl={args.tpl} site=<label>{fmt_params(params)} --by llm):")

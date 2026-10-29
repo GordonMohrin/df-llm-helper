@@ -1228,8 +1228,62 @@ def translate_only(tpl: str, params: dict | None) -> tuple[dict, tuple]:
     return params, tuple(want)
 
 
+PLACE_NOTES: dict[str, str] = {}     # bp id -> BUG-316: the fewer farm plots place() fell back to (dfllm cmd, plan)
+
+
+def fewer_plots(tpl: str, params: dict | None) -> list[int]:
+    """BUG-316 (Run 15c Inkintense: trees cut every 11x7 / 11x15 surface block, `bp sites farms surface=1` ranked 0 at
+    the default plots=2 and 2 sites at plots=1): farms p.surface with plots > 1 -> the smaller plot counts to fall back
+    to, largest first; [] for anything else."""
+    if tpl != "farms" or not (params or {}).get("surface"):
+        return []
+    try:
+        n = load_bp("emit").check_params(tpl, dict(params or {}))["plots"]
+    except (BpUnavailable, AttributeError, KeyError, TypeError, ValueError):
+        return []
+    return list(range(int(n) - 1, 0, -1))
+
+
+def fewer_plots_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict | None = None, n: int = 3,
+                      where: dict | None = None) -> tuple[int, list[dict], str, int] | None:
+    """BUG-316: (plots, free sites, snapshot id, ranked) at the largest smaller plot count that has a free surface farm
+    site (free_sites at plots - 1 .. 1), None when none has one or `params` is no surface farm."""
+    for k in fewer_plots(tpl, params):
+        try:
+            out, snap_id, ranked = free_sites(save_dir, tpl, {**(params or {}), "plots": k}, snap, n=n, where=where)
+        except (BpError, BpUnavailable, ValueError):
+            continue
+        if out:
+            return k, out, snap_id, ranked
+    return None
+
+
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
           same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
+    """_place; BUG-316: a surface farm (farms p.surface) at a ranked label S<k> that finds no free site for its plots
+    falls back to fewer plots (down to 1); PLACE_NOTES[bp_id] says so, the document's params carry the plots placed."""
+    PLACE_NOTES.pop(bp_id, None)
+    try:
+        return _place(save_dir, tpl, params, label, bp_id, occ, same, snap, need)
+    except BpError as e:
+        steps = fewer_plots(tpl, params) if _LABEL.fullmatch(str(label)) else []
+        if not steps:
+            raise
+        first = e
+    tried = f"plots={steps[0]}" + (f"..{steps[-1]}" if len(steps) > 1 else "")
+    for k in steps:
+        try:
+            doc = _place(save_dir, tpl, {**(params or {}), "plots": k}, label, bp_id, occ, same, snap, need)
+        except BpError:
+            continue
+        PLACE_NOTES[bp_id] = (f"BUG-316: no free surface farm site for plots={steps[0] + 1} (trees, buildings or the "
+                              f"way in cut the larger block): placed plots={k}")
+        return doc
+    raise BpError(f"{first}; BUG-316: no smaller surface farm ({tried}) has a free site either")
+
+
+def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
+           same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
     'same' = the anchor/rot of this template's last placement (`same`, else bp/.placed-<tpl>.json);
     'S<k>' = the k-th ranked site whose footprint is free, so S1 is always the best free site.
@@ -1584,6 +1638,8 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
     files.log_cli(save_dir, by, f"verb:{verb}", args, f"sent {cmd_id}")
     if verb == "bp.place" and not repair:
         log_seal(save_dir, doc, by)
+        if PLACE_NOTES.get(cmd_id):                        # BUG-316: the fewer farm plots placed
+            files.log_cli(save_dir, by, "bp:note", {"proj": cmd_id}, PLACE_NOTES[cmd_id])
     reply = files.read_outbox(save_dir, cmd_id, timeout_s=wait_s) if wait_s > 0 else None
     if reply is not None:
         files.log_cli(save_dir, by, f"reply:{verb}", {"id": cmd_id}, ("ok " if reply.get("ok") else "ERR ")
@@ -1640,6 +1696,8 @@ def run(args, save_dir: Path) -> int:
             print(f"  seal {ln}")
         for ln in SEAL_NOTES.get(cmd_id, []):
             print(f"  seal note: {ln}")
+    if args.verb == "bp.place" and PLACE_NOTES.get(cmd_id) and (reply is None or reply.get("ok")):
+        print(f"  note: {PLACE_NOTES[cmd_id]}")
     if reply is None:
         return EXIT_NOREPLY if args.wait > 0 else EXIT_OK
     return EXIT_OK if reply.get("ok") else EXIT_REFUSED
