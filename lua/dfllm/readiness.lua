@@ -427,13 +427,18 @@ local function evaluate(K, why)
         -- FR-69 (Run 11 y477: 1199 drinks in one Kern+ pile, none in Tiefe+): the fix is the refuge drink store
         -- (bp refuge_drink, plan propose drafts it); one that stands (seal sees its pile there) waits for barrels
         local sto = type(rd.store) == 'table' and (int(rd.store.tiles) or 0) > 0 and rd.store or nil
+        -- BUG-321 (Run 15c Inkintense y377: 'plan its drink store' while plan y377 had queued it): a store project under
+        -- way (runner.pending refuge_drink) is named instead of asking for one
+        local okp, np = K.call('runner', 'pending', 'refuge_drink')
+        np = okp and int(np) or 0
+        local fix = sto and string.format('its drink store (%d tiles) waits for barrels', sto.tiles)
+                    or np > 0 and string.format('its drink store is under way (%d project%s)', np, np == 1 and '' or 's')
+                    or 'plan its drink store (bp sites refuge_drink)'
         rt.rdry = cut(string.format('%s has no drink (drink %d<%d, %s%s): %s',
                                     tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
                                     nw == 0 and ('no well in ' .. tostring(rd.name))
                                     or (nw == 1 and 'its 1 well is dry' or string.format('its %d wells are dry', nw)),
-                                    where and ('; ' .. where) or '',
-                                    sto and string.format('its drink store (%d tiles) waits for barrels', sto.tiles)
-                                    or 'plan its drink store (bp sites refuge_drink)'), 200)
+                                    where and ('; ' .. where) or '', fix), 200)
       end
     end
   end

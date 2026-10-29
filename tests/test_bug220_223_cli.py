@@ -164,8 +164,8 @@ def test_refuge_beds_without_a_site_wait_for_stage_3_at_p3_plus(save):
                                    "refuge_beds yet): apply, wait for s3.dig, propose again"], (errs, warn)
     under = {"refuge": dict(fort["refuge"], stage3=True)}              # stage 3 under way, none in this plan
     assert gate(copy.deepcopy(prev), under)[0] == []
-    errs, _ = gate(copy.deepcopy(prev), fort)                          # no stage 3 anywhere: the beds stay an ERROR
-    assert any(e.startswith("refuge: Tiefe+ has 0 beds < 8") for e in errs), errs
+    errs, warn = gate(copy.deepcopy(prev), fort)                       # no stage 3 anywhere and no site: BUG-321
+    assert errs == [] and any(w.startswith("refuge: Tiefe+ has 0 beds < 8; no free site") for w in warn), (errs, warn)
     errs, _ = gate(doc, {"refuge": dict(fort["refuge"], bed_site=True)})   # a site exists: refuge_beds is asked
     assert any('"tpl":"refuge_beds"' in e for e in errs), errs
 

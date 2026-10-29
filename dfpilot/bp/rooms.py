@@ -392,11 +392,14 @@ def refuge_beds(p: dict) -> Plan:
     # nothing in the plans could add beds there (rooms stay off the refuge level). The room is dug from a refuge floor
     # tile into rock (sites.rank: the footprint and its wall ring rock or unknown, nothing open beside it), so it opens
     # no way in: its only opening is the doorway into the refuge. Bed rows alternate with aisle rows, the centre
-    # column is the aisle from the door: every bed has a free tile beside it.
+    # column is the aisle from the doorway: every bed has a free tile beside it. BUG-320 (Run 15b Earthboat y384: the
+    # project y384s1b2 waited months for its door, buildingplan 'waits for door x1 (1 free, 5 ordered)', its beds never
+    # placed): no door, like the drink store. The doorway opens into the refuge only (the room is dug into rock), so a
+    # door closes nothing the refuge's own hatch and doors do not; it was one more item the refuge waited for.
     P = Plan("refuge_beds", "living")
     n, cols = p["n"], len(REFUGE_BED_COLS)
     rows = -(-n // cols)
-    box = _box(P, 7, 2 * rows - 1)
+    box = _box(P, 7, 2 * rows - 1, door=False)
     u0, v0, u1, v1 = box
     b = P.stage("build", "build", orders=1)
     for i in range(n):

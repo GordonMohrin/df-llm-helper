@@ -29,8 +29,9 @@ PLACE_CHARS = set("afunyrswebhlzSgpdc")
 BURROW_KEYS = {"a", "e"}
 EXTENT_MODES = {"place", "zone", "burrow"}     # every cell must carry an explicit extent
 # manifest rooms without the closure check (see _rooms); FR-69: the refuge drink store has no door (its doorway opens
-# into the refuge room; sites.rank keeps rock or unknown all round its footprint, so the doorway is its only opening)
-OPEN_ROOMS = ("bedrooms", "gallery_o1", "refuge_drink")
+# into the refuge room; sites.rank keeps rock or unknown all round its footprint, so the doorway is its only opening);
+# BUG-320: the refuge dormitory the same way
+OPEN_ROOMS = ("bedrooms", "gallery_o1", "refuge_drink", "refuge_beds")
 # BUG-032 (Run 11: the squads at fortcore's stations.b2, one tile behind B2, held its BREACH raise): a squad station
 # lies more than STATION_CLEAR tiles (Chebyshev, same z) from every bridge footprint: gate's MARGIN (lua/dfllm/gate.lua,
 # every pull waits for the units on or next to the footprint) + the spread of a squad around its station point

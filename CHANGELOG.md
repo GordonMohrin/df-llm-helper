@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Run 15b/c refuge: rooms dig off the refuge's own rooms, beds without a door, no bed ERROR without a site (BUG-319..321, 2026-10-29; offline, live-untested)
+- **Why:** Earthboat y385 (P5, pop 83): plan y385 was not applicable, `ERROR Tiefe+ has 16 beds < 21 ... add refuge_beds n=3`, no
+  site even after `bp sites refuge_beds --fresh`, `bp.place refuge_drink` found none either: refuge rooms anchored only on the
+  fortcore refuge room (sites.py:576) and all its four walls held rooms (BUG-319); y384s1b2 waited months for the door of its doorway
+  (rooms.py:399, BUG-320); refuge_gate turned the shortage into an ERROR at P3+ although no build could give it (plan.py:941), and
+  _bed_site counted ranked sites taken by projects (BUG-321). Inkintense y377: R0 refuge_dry said `plan its drink store` while the
+  plan held it (readiness.lua:436).
+- **What changed:** sites.refuge_ext: refuge-level rooms (refuge_beds, refuge_drink) on the refuge level are anchors too, ranked
+  after the refuge room's own (REFUGE_EXT_PEN 20, `why` names BUG-319); refuge_beds builds no door (validate OPEN_ROOMS, golden
+  regenerated); refuge_gate: no free bed site -> warning with the next step, the plan applies; _bed_site uses free_sites; readiness:
+  a refuge_drink project under way (runner.pending) -> `its drink store is under way (N project)`.
+- **Tests (fail on 1d17c7e):** tests/bp/test_bug319_320_refuge_rooms.py, tests/test_bug321_refuge_bed_gate.py, tests/lua/test_readiness.lua
+  (BUG-321); tests/test_bug220_223_cli.py's no-stage-3 case is now the warning.
+- **Live check:** offline on the live Earthboat folder (read-only): refuge_beds n=3 ranks S1 50,78,132 rot1, S2 54,76,132, S3 53,88,132;
+  refuge_drink n=12 ranks S1 50,78,132 (before: none). Live: plan check y385 shows the bed line as a warning or drafts the beds, `plan
+  apply` applies; new refuge_beds wait for no door; Inkintense SIEGE_UNREADY names the store under way. Uncertain: a dormitory dug off
+  another one is reached through its beds (walkable in DF); y384s1b2 keeps its old door (bp.cancel it).
 ## Run 15c surface farm: bp.emit places it, fewer plots when trees cut the block (BUG-316, 2026-10-29; offline, live-untested)
 - **Why:** Inkintense y377 (food 21 d), live: `bp sites farms plots=1 surface=1` ranked 2 sites, but `cmd bp.place tpl=farms
   site=S1 plots=1 surface=1` and `plan check` failed with `[92, 87, 133]: bp.emit(farms): min() iterable argument is empty`;

@@ -313,6 +313,9 @@ Related: FR-xx, BUG-xx
 | [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
+| [BUG-319](BUG-319-refuge-rooms-only-off-the-refuge-room.md) | fixed (offline, live-untested) | high | Run 15b: refuge beds and drink store find no site once the refuge room's walls are taken | sites.py |
+| [BUG-320](BUG-320-refuge-beds-wait-for-a-door.md) | fixed (offline, live-untested) | medium | Run 15b: a refuge_beds project waits months for the door of its doorway | rooms.py, validate.py |
+| [BUG-321](BUG-321-refuge-bed-error-blocks-the-year-plan.md) | fixed (offline, live-untested) | high | Run 15b/c: plan check's refuge bed ERROR without a site blocks the year plan; refuge_dry asks for a store already planned | plan.py, readiness.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

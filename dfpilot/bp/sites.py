@@ -23,7 +23,8 @@ fortcore's dig keeps BREACH_R tiles from every breach the kernel recorded (manif
 (+-1) and out of a wet layer (damp/water stops of LAYER_MIN projects on one level); ValueError when nothing dry is left.
 Refuge beds (`rooms.refuge_beds`, Run 10): anchors on the floor of the fortcore refuge room (no lever tile), the
 dormitory dug into the rock beside it (footprint and wall ring rock or unknown: it opens no new way in). The refuge drink
-store (`rooms.refuge_drink`, FR-69) the same way; with no site the ValueError says why and names the largest smaller
+store (`rooms.refuge_drink`, FR-69) the same way; BUG-319: also from the floor of those refuge-level rooms (the refuge grows
+when the refuge room's walls are taken), ranked after the refuge room's own anchors; with no site the ValueError says why and names the largest smaller
 store that has one (Run 11's Tiefe+ is a cramped 212-tile shaft).
 Cistern (`rooms.cistern`): a dry cistern ranks like any room; with a `path` (the pipe to a brook or river) only
 anchors whose pipe ends at a valid intake count: shaft column B and breach tile G on revealed bank floor, the
@@ -546,6 +547,24 @@ def refuge_rooms(m: dict) -> list[list[int]]:
     return out or [[*ref["anchor"], *ref["anchor"]]]
 
 
+# BUG-319 (Run 15b Earthboat y385: three refuge_beds rooms and the drink store took every wall of the 7x9 refuge room;
+# `bp sites refuge_beds --fresh` found none, plan check's bed ERROR stopped the year plan): the refuge grows from its own
+# rooms too. A refuge-level room (refuge_beds, refuge_drink) lies in the refuge burrow and opens only into the refuge, so
+# a new one dug off its floor (footprint and wall ring rock or unknown) adds no way in either. Such anchors rank after the
+# refuge room's own (REFUGE_EXT_PEN)
+REFUGE_EXT_PEN = 20
+
+
+def refuge_ext(m: dict) -> list[list[int]]:
+    """BUG-319: bboxes of the manifest's refuge-level rooms (rooms.REFUGE_LEVEL templates) on the refuge anchor's level."""
+    ref = m.get("refuge")
+    if not ref:
+        return []
+    zr = ref["anchor"][2]
+    return [r["bbox"] for r in m.get("rooms", []) if isinstance(r, dict) and r.get("tpl") in rooms.REFUGE_LEVEL
+            and isinstance(r.get("bbox"), list) and len(r["bbox"]) == 6 and r["bbox"][2] <= zr <= r["bbox"][5]]
+
+
 def _lever_tiles(m: dict) -> set[tuple[int, int, int]]:
     return {tuple(p) for b in m.get("bridges", {}).values() for p in b.get("levers", [])}
 
@@ -568,12 +587,12 @@ def civ_stair_tiles(m: dict) -> set[tuple[int, int, int]]:
 
 
 def _anchor_tiles(g: Graph, tpl: str, p: dict, manifest: dict) -> list[int]:
-    """Room anchors: public Z4 floor; refuge_beds and a cistern with level=refuge: floor of the refuge room (no lever
-    tile). BUG-157: never a tile of a civilian stair column (the refuge's hatch tile among them): a room opens next to
+    """Room anchors: public Z4 floor; refuge_beds and a cistern with level=refuge: floor of the refuge room or (BUG-319)
+    of a refuge-level room dug off it (no lever tile). BUG-157: never a tile of a civilian stair column (the refuge's hatch tile among them): a room opens next to
     the stair, its door never on the citizens' stair or where the seal puts the hatch."""
     stair = civ_stair_tiles(manifest)
     if on_refuge(tpl, p):
-        m = g.mask(refuge_rooms(manifest))
+        m = g.mask(refuge_rooms(manifest) + refuge_ext(manifest))     # BUG-319: and off its own rooms
         levers = _lever_tiles(manifest)
         return [i for i, c in enumerate(g.t) if m[i] and c in ".X" and g.pos(i) not in levers and g.pos(i) not in stair]
     public = _public(g, manifest)
@@ -688,6 +707,7 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
     cis = rooms.cistern_layout(p) if tpl == "cistern" else None
     intake = bool(cis and cis["intake"])
     refuge_level = on_refuge(tpl, p)
+    own = g.mask(refuge_rooms(manifest)) if refuge_level else None      # BUG-319: anchors off it rank after
     core_rects = footprint("cistern", {**p, "path": ""}) if intake else rects
     at = _At(snap)
     if farm:
@@ -724,6 +744,9 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
             steps = min(steps_of.get(i, 99), 99)
             score = 1000 - 5 * steps - unknown // 10
             why = f"rot{rot}, {steps} steps to a stair, {unknown} unknown tiles"
+            if own is not None and not own[i]:
+                score -= REFUGE_EXT_PEN
+                why += ", dug off a refuge-level room (BUG-319)"
             if intake:
                 why += f", pipe {len(cis['pipe'])} tiles to the water"
                 box = core

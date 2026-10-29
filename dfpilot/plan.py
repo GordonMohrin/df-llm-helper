@@ -699,8 +699,9 @@ def _seal_at(save_dir: Path, at: str) -> list[str] | None:
 
 
 def _bed_site(save_dir: Path, state: dict | None) -> bool | None:
-    """Whether refuge_beds has a site now (a fortcore refuge room in the manifest and room on the snapshot) while the
-    refuge is short of beds; None when it is not short or nothing is known (no snapshot, no bp package)."""
+    """Whether refuge_beds has a free site now (a fortcore refuge room in the manifest, room on the snapshot and, BUG-321,
+    not taken by a placed project: what `bp.place site=S1` resolves) while the refuge is short of beds; None when it is
+    not short or nothing is known (no snapshot, no bp package)."""
     r = ((state or {}).get("alert") or {}).get("ref")
     if not isinstance(r, dict) or not r.get("ex") or r.get("need", 0) <= r.get("beds", 0):
         return None
@@ -708,7 +709,7 @@ def _bed_site(save_dir: Path, state: dict | None) -> bool | None:
         return None
     n = min(max(2, r["need"] - r["beds"]), REFUGE_BEDS_MAX)
     try:
-        sites, _ = rank_sites(save_dir, REFUGE_BEDS, {"n": n})
+        sites, _, _ = free_sites(save_dir, REFUGE_BEDS, {"n": n}, n=1)
     except BpUnavailable:
         return None
     except BpError:
@@ -937,6 +938,14 @@ def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
             # stage 3 this plan (or a project under way) builds is dug; check's blueprint step then refused that build
             warn.append(text.split("; ")[0] + "; beds follow fortcore stage 3 (no refuge room takes refuge_beds yet): "
                         "apply, wait for s3.dig, propose again")
+        elif f.get("bed_site") is False and season is None:
+            # BUG-321 (Run 15b Earthboat y385: 'Tiefe+ has 16 beds < 21', no free site even after bp sites --fresh, so
+            # plan y385 was 'not applied' and y384 stayed): no build of this plan can give the beds, so the ERROR only
+            # stopped the year plan. A warning with the next step; the beds come from the next plan
+            run = f" (+{f['beds']} under way)" if f.get("beds") else ""
+            warn.append(text.split("; ")[0] + run + "; no free site takes refuge_beds now: the plan may be applied; "
+                        "next: dfllm bp sites refuge_beds --fresh once the refuge rooms under way are dug (new ones dig "
+                        "off them, BUG-319), or bp.place refuge_beds at an anchor A<x>_<y>_<z>")
         else:
             need(text, season)
     return errs, warn
