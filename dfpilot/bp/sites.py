@@ -337,8 +337,8 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
     near = water.get("near") or WATER_NEAR
     rw = refuge_water(water)
     if not src:
-        raise ValueError(f"{tpl}: no accepted water in the fort (state water.src is empty: no well over water, no Water "
-                         "Source zone on water >= 4/7): a hospital without it is worse than none (BUG-034); water first "
+        raise ValueError(f"{tpl}: no accepted water in the fort (state water.src is empty: no well over water, no water "
+                         "zone on water >= 4/7): a hospital without it is worse than none (BUG-034); water first "
                          "(dfllm cmd inspect '{\"what\":\"water_sources\"}')" + rw)
     out, best = [], None
     for c in cands:
@@ -356,7 +356,7 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
         raise ValueError(f"{tpl}: no site within {near} tiles of accepted water (nearest: {src_label(water, i)}; the "
                          f"nearest candidate {_pos(c['anchor'])} rot{c['rot']} is {d} tiles from it){rw}: dig the core "
                          f"toward that water (bp.place at an explicit anchor A<x>_<y>_<z> within {near} tiles of it) or "
-                         "bring water nearer (a Water Source zone on deep water, a piped cistern: python -m "
+                         "bring water nearer (a water zone on deep water, a piped cistern: python -m "
                          "dfpilot.bp.sites cistern)")
     return out
 

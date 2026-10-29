@@ -17,7 +17,10 @@ and no fortcore applied, planned or parked: only fortcore stage 1 (added when th
 phase_target = the current phase, order libraries of the current phase only, and the note "apply, wait for s1.dig, propose
 again". `plan propose` runs the same placement dry run as check (`_dry_place`) and prints its ERROR and placement lines.
 core_order_note needs `s1.dig` and, given fort facts, also speaks when there is no core and no Z4. The note reads "a well or a
-water zone on deep water".
+water zone on deep water". Review: the other texts that reach the notes say so too (hospital_water's `why`, the stress causes
+"no cause named", bp/sites.py's hospital refusals), and in the fresh-fort case the notes name no stone dig, cistern or temple
+that was left out and end with the fresh-fort line (offline on a copy of Earthboat the first fix still gave `warn fair play:
+$.notes mentions 'source'`).
 
 ## Tests
 `tests/test_bug195_198_plan_place.py` (`test_propose_prints_the_placement_dry_run`, `test_a_fresh_fort_drafts_only_the_core_first`,

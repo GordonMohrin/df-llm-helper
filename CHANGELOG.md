@@ -15,12 +15,14 @@
   blocker and `dfllm cmd bp.cancel proj=<id>` (BUG-195). (4) `fort_facts` z4/core_any; propose on a fort without both drafts
   only fortcore stage 1 and seal at the current phase ("apply, wait for s1.dig, propose again"); `plan propose` runs check's
   placement dry run (`_dry_place`) and prints it; core_order_note needs `s1.dig` and speaks without a core; note text
-  "a well or a water zone" (BUG-197). (5) propose takes order libraries only from phases <= current + 1 (BUG-198).
+  "a well or a water zone", also in hospital_water's why, the stress causes and bp/sites.py's hospital refusals;
+  a fresh-fort draft notes nothing it left out and ends with "apply, wait for s1.dig, propose again" (BUG-197). (5) propose takes order libraries only from phases <= current + 1 (BUG-198).
 - **Safety:** no new verb, event, config key, state field or RULES row; no contract change. Placement stays stricter than the
   game: overlaps and touches away from another room's anchor still clash. Risk: a later core stage may now re-designate a tile
   a seal walled on its own stage-1 corridor (a dig on a constructed wall does nothing). The economy.lua half of F6 (stage gate
   on plan imports, made-again order to the front, sw carried) is not in this package.
-- **Tests (each fails on bd27973):** tests/test_bug195_198_plan_place.py; tests/test_hospital_water.py expects the new note text.
+- **Tests (each fails on bd27973):** tests/test_bug195_198_plan_place.py; tests/test_hospital_water.py and
+  tests/test_stress_pop.py expect the new texts.
 - **Live check:** (a) Trussroads (port 5000): `python -m dfpilot plan propose <scratch>/p.json`, then `python -m dfpilot plan check
   <scratch>/p.json`: check OK with fortcore@same stage 2 in the placement lines, or propose printed `fortcore stage 2 @same left
   out: ... dfllm cmd bp.cancel proj=<id>`; never a propose without ERROR that check rejects. (b) Earthboat (port 5002): the same

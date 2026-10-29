@@ -139,7 +139,8 @@ def test_a_fresh_fort_drafts_only_the_core_first(save):
     built = [b for se in doc["seasons"] for b in se["build"]]
     assert built and all(b["tpl"] in ("fortcore", "seal") for b in built), built
     assert {"tpl": "fortcore", "site": "S1", "p": {"stage": 1}} in built
-    assert doc["phase_target"] == "P0" and "apply, wait for s1.dig, propose again" in doc["notes"]
+    assert doc["phase_target"] == "P0" and doc["notes"].endswith("apply, wait for s1.dig, propose again")
+    assert "a stone dig" not in doc["notes"] and "in its place" not in doc["notes"]    # review: nothing left out is noted
     # with a Z4 floor (or a fortcore project) the draft is the usual one
     full = plan.propose(s, plan.load_phases(), None, decisions={}, applied=set(), fort={"z4": True})
     assert any(b["tpl"] not in ("fortcore", "seal") for se in full["seasons"] for b in se["build"])
@@ -156,8 +157,18 @@ def test_core_order_note_needs_the_dig_and_speaks_without_a_core():
 
 def test_the_hospital_water_note_has_no_blocked_word():
     import inspect
+    from pathlib import Path
     src = inspect.getsource(plan.propose)
     assert "Water Source" not in src
+    # review: the held hospital's `why` (hospital_water) and the stress causes go into the notes as well (live
+    # Earthboat after the first fix still: 'warn fair play: $.notes mentions 'source'')
+    allow = json.loads((Path(__file__).resolve().parents[1] / "config" / "allowlist.json").read_text("utf-8"))
+    terms = set(plan.BANNED) | {t for t in allow.get("blocked", []) if isinstance(t, str) and t}
+    assert "source" in terms
+    why = plan.hospital_water({"water": {"src": []}}, {})["why"]
+    hi = plan.stress_high({"care": {"stressed_pct": 99, "src": {}}, "pop": {"cit": 99}})
+    for text in (why, hi["src"]):
+        assert not [t for t in terms if plan._has_term(text, t)], text
 
 
 # ---------------------------------------------------------------- BUG-198: order libraries

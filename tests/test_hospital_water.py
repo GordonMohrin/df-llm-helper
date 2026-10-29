@@ -112,7 +112,7 @@ def test_check_refuses_a_hospital_without_accepted_water(base):
     d = with_hospital(doc)
     errs, _ = check(d, s, fort={"hosp": {"cistern": False, "site": None}})
     assert hosp_errs(errs) == [
-        "hospital (seasons[2]): no accepted water in the fort (a well over water or a Water Source zone on water >= 4/7: "
+        "hospital (seasons[2]): no accepted water in the fort (a well over water or a water zone on water >= 4/7: "
         "state water.src is empty): its patients would die of thirst (BUG-034); remove it and add "
         '{"tpl":"cistern","site":"S1"} first (dfllm bp sites cistern), or zone deep water as Water Source (dfllm cmd '
         "inspect '{\"what\":\"water_sources\"}'); plan propose drafts the hospital again once the state's water.src "

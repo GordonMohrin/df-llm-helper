@@ -275,7 +275,7 @@ def hospital_water(s: dict | None, fort: dict | None = None) -> dict | None:
     site = hosp.get("site")
     if not src:
         return {"ok": False, "src": None, "d": None, "site": site,
-                "why": "no accepted water in the fort (a well over water or a Water Source zone on water >= 4/7: "
+                "why": "no accepted water in the fort (a well over water or a water zone on water >= 4/7: "
                        "state water.src is empty)"}
     if not site and hosp.get("why"):
         return {"ok": False, "src": src[0], "d": None, "site": None, "why": str(hosp["why"])}
@@ -480,7 +480,7 @@ def stress_high(s: dict | None) -> dict | None:
         return None
     src = care.get("src") if isinstance(care.get("src"), dict) else {}
     parts = [f"{k} {v}" for k, v in sorted(src.items(), key=lambda kv: (-kv[1], kv[0]))]
-    return {"pct": pct, "src": ", ".join(parts) or "no source named", "ghosts": care.get("ghosts") or 0}
+    return {"pct": pct, "src": ", ".join(parts) or "no cause named", "ghosts": care.get("ghosts") or 0}
 
 
 def social_rooms(applied: set, rooms: list) -> list[str]:
@@ -1948,6 +1948,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
             keep.append({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}})
         fresh = sorted({b["tpl"] for b in builds if b not in keep})
         builds, target = keep, cur
+        stone, held, sdrafts = None, None, []   # review: no note for a stone dig, cistern or temple left out here
         libs = list(dict.fromkeys(d["lib"] for p in plist if p["id"] == cur for d in p["deliver"] if d["k"] == "orders"))
     left_out = []
     if rb:                                       # the rebuild drafts only what the runner runs then
@@ -1982,10 +1983,6 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp)  # rebuild: no explore
     doc["notes"] += core_note
-    if fresh is not None:
-        doc["notes"] += (f"; BUG-197: no fortcore and no Z4 core floor yet: only fortcore stage 1"
-                         + (" and seal" if any(b["tpl"] == SEAL for b in builds) else "") + f" drafted, phase_target {cur}"
-                         + (f" (left out: {', '.join(fresh)})" if fresh else "") + "; apply, wait for s1.dig, propose again")
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     if stress and sdrafts and not rb:
@@ -2007,6 +2004,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                             "first (a well or a water zone on deep water: dfllm cmd inspect water_sources)"
                             if fill.get("ok") is False else "; water first (a cistern, a well or a water zone on deep "
                             "water: dfllm cmd inspect water_sources)"))     # BUG-197: no blocked word in the notes
+    if fresh is not None:                        # BUG-197: the last words of the notes say what comes next
+        doc["notes"] += (f"; BUG-197: no fortcore and no Z4 core floor yet: only fortcore stage 1"
+                         + (" and seal" if any(b["tpl"] == SEAL for b in builds) else "") + f" drafted, phase_target {cur}"
+                         + (f" (left out: {', '.join(fresh)})" if fresh else "") + "; apply, wait for s1.dig, propose again")
     return doc
 
 

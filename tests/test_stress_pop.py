@@ -46,7 +46,7 @@ def test_stress_high_reads_the_state(base):
     assert plan.stress_high(s) == {"pct": 52, "src": "deaths 30, ghosts 12, beds 2", "ghosts": 9}
     assert plan.stress_high(stressed(state, 29)) is None                # under care.stress_high (30)
     assert plan.stress_high(stressed(state, 80, cit=6)) is None         # a fort of 6 gets no temple
-    assert plan.stress_high(stressed(state, 40, src={}))["src"] == "no source named"
+    assert plan.stress_high(stressed(state, 40, src={}))["src"] == "no cause named"
     assert plan.stress_high(None) is None and plan.stress_high({}) is None
 
 
