@@ -1149,7 +1149,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
         # BUG-163: a later stage at the explicit anchor of this template's earlier stage (plan propose names a re-sited
         # fortcore's anchor so) overlaps its own earlier stages, as `same` does
         st = params.get("stage") if isinstance(params, dict) else None
-        own = tpl if isinstance(st, int) and not isinstance(st, bool) and st >= 2             and stage_anchor(save_dir, tpl, [x, y, z]) else None
+        own = tpl if isinstance(st, int) and not isinstance(st, bool) and st >= 2 \
+            and stage_anchor(save_dir, tpl, [x, y, z]) else None
         hit = occ.clash(doc, ignore_tpl=own)
         if hit:
             raise BpError(f"{tpl}{label} overlaps project(s) {', '.join(hit[:4])}")

@@ -1118,13 +1118,15 @@ def core_breaches(save_dir: Path, state: dict | None = None) -> list[dict]:
             docs[p.stem] = d
     # BUG-162 (live i3: bp/ holds no files, manifest.breaches has y707s0b1 fortcore damp): a fortcore row of the kernel's
     # manifest without a bp file counts too (stage from its state.proj label s<N>, else 1; anchor unknown), unless it
-    # was cancelled (bp/.cancelled/<id>.json, cmd.retire) or is done; `plan check` ranks against that row anyway
+    # was cancelled (bp/.cancelled/<id>.json, cmd.retire) or is done; `plan check` ranks against that row anyway. A row
+    # whose bp file exists (e.g. a retrofit, which the loop above leaves out) is not such a row
     rows = [b for b in _kern_manifest(save_dir).get("breaches") or [] if isinstance(b, dict)]
+    have = {p.stem for p in bp_files(save_dir)}
     labels = {r[0]: str(r[1]) for r in (state or {}).get("proj") or []
               if isinstance(r, list) and len(r) >= 2 and isinstance(r[0], str)}
     for b in rows:
         pid = b.get("proj")
-        if b.get("tpl") == "fortcore" and isinstance(pid, str) and pid not in docs and pid not in done \
+        if b.get("tpl") == "fortcore" and isinstance(pid, str) and pid not in have and pid not in done \
                 and not (Path(save_dir) / "bp" / ".cancelled" / f"{pid}.json").is_file():
             m = re.match(r"s(\d+)\.", labels.get(pid, ""))
             docs[pid] = {"tpl": "fortcore", "params": {"stage": int(m.group(1)) if m else 1}, "anchor": []}

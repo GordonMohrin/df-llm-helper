@@ -200,3 +200,15 @@ def test_a_lone_stage_3_gets_the_cores_stage_2_first(save):
     cores = _cores(doc)
     assert ("same", 2) in cores and ("same", 3) in cores
     assert cores.index(("same", 2)) < cores.index(("same", 3))
+
+
+def test_a_manifest_breach_of_a_retrofit_fortcore_is_no_stopped_core(save):
+    # review: the manifest-only path (BUG-162) must not pick up a retrofit fortcore, whose bp file exists
+    _no_bp(save)
+    _core(save, PID, 1, A)
+    p = save / "bp" / f"{PID}.json"
+    doc = json.loads(p.read_text("utf-8"))
+    doc["params"] = {"stage": 1, "retrofit": 1}
+    p.write_text(json.dumps(doc), "utf-8")
+    _manifest(save)
+    assert plan.core_breaches(save, _state(save)) == []
