@@ -313,6 +313,7 @@ Related: FR-xx, BUG-xx
 | [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
+| [BUG-317](BUG-317-bridge-only-fort-gets-no-trap-lane.md) | fixed (offline, live-untested) | medium | Run 15b: a fort entered over its drawbridges only gets no trap lane ('0 door(s)', traps 0, no traps draft) | bp/traps.py, traps.py, plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
