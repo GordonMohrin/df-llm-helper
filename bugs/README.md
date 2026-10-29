@@ -210,6 +210,10 @@ Related: FR-xx, BUG-xx
 | [BUG-192](BUG-192-observe-mode-misses-damp-tiles-found-by-lost.md) | fixed (offline, live-untested) | medium | FR-95 live 1: a damp tile lost() found in an observing project never joined pts, so nothing was smoothed around it | lua/dfllm/runner.lua |
 | [BUG-193](BUG-193-aqshaft-place-with-column-in-p-refused.md) | fixed (offline, live-untested) | medium | FR-95 live 1: `bp.place aqshaft site=S1 p={x,y,top}` refused by bp.sites.rank (no ranking) | dfpilot/cmd.py |
 | [BUG-194](BUG-194-aqshaft-top-level-on-floor-opened-while-dig-pending.md) | fixed (offline, live-untested) | low | FR-95 live 1: an aqshaft top level on a floor counted as opened while its dig job was pending | lua/dfllm/aqshaft.lua |
+| [BUG-195](BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md) | fixed (offline, live-untested) | high | live round 3: `plan propose` drafted fortcore@same stage 2 that `plan check` refused (overlaps refuge_beds y721s3b2, a seal wall on its own tiles) | dfpilot/plan.py |
+| [BUG-196](BUG-196-anchor-exemption-one-sided.md) | fixed (offline, live-untested) | high | live round 3: a room that opened off the fortcore corridor blocked the core's later stage (one-sided anchor exemption) | dfpilot/cmd.py |
+| [BUG-197](BUG-197-fresh-fort-propose-and-check-disagree.md) | fixed (offline, live-untested) | high | live round 3 Earthboat: on a fresh fort propose drafted rooms check could never site, without the placement dry run | dfpilot/plan.py |
+| [BUG-198](BUG-198-propose-order-libraries-above-next-phase.md) | fixed (offline, live-untested) | medium | live round 3 Earthboat: propose imported order libraries of phases far above the current one | dfpilot/plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

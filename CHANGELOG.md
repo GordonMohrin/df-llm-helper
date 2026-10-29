@@ -1,5 +1,33 @@
 # CHANGELOG dfpilot
 
+## Live round 3 plan fixes: propose = check, core stages placeable, fresh fort, order libraries (BUG-195..198, 2026-10-29; offline, live-untested)
+- **Why:** live round 3 and its skeptic: on Trussroads `plan propose` drafted fortcore@same stage 2 that `plan check` refused
+  (`overlaps project(s) y721s3b2`, a refuge_beds room of the y721 minimal plan) (BUG-195). On the fresh fort Earthboat propose
+  printed no ERROR while check rejected the draft: rooms with no Z4 floor (`room sites need the fort manifest with zones.Z4`),
+  later `fortcore@same [100, 82, 140] overlaps c1a185e68ea2802c02, c1a185ed14e27ebd07` (a workshops room off the stage-1
+  corridor, a seal wall on a stage-1 tile) (BUG-196, BUG-197); core_order_note said "not dug yet" for s1.build and the hospital
+  note tripped the fair-play word 'source' (BUG-197); propose took P3 order libraries for a P0 fort (BUG-198).
+- **What changed:** (1) cmd.py `Occupancy` keeps tpl/anchor/footprint/cells per project; `own_cells`; `place` for same (and the
+  A label of an own later stage) checks the footprint minus the tiles the core's placed stages dig (BUG-195). (2) `clash`: the
+  anchor exemption holds both ways: a touched tile beside project P's anchor is no clash when P's anchor lies on the new
+  document's tiles or its own stages' (not for WET_TPLS) (BUG-196). (3) plan.py `fit_core` (propose CLI, auto_plan): dry-places
+  each new fortcore stage >= 2 @same; a blocked one and its later stages are left out with a line and a note naming the
+  blocker and `dfllm cmd bp.cancel proj=<id>` (BUG-195). (4) `fort_facts` z4/core_any; propose on a fort without both drafts
+  only fortcore stage 1 and seal at the current phase ("apply, wait for s1.dig, propose again"); `plan propose` runs check's
+  placement dry run (`_dry_place`) and prints it; core_order_note needs `s1.dig` and speaks without a core; note text
+  "a well or a water zone" (BUG-197). (5) propose takes order libraries only from phases <= current + 1 (BUG-198).
+- **Safety:** no new verb, event, config key, state field or RULES row; no contract change. Placement stays stricter than the
+  game: overlaps and touches away from another room's anchor still clash. Risk: a later core stage may now re-designate a tile
+  a seal walled on its own stage-1 corridor (a dig on a constructed wall does nothing). The economy.lua half of F6 (stage gate
+  on plan imports, made-again order to the front, sw carried) is not in this package.
+- **Tests (each fails on bd27973):** tests/test_bug195_198_plan_place.py; tests/test_hospital_water.py expects the new note text.
+- **Live check:** (a) Trussroads (port 5000): `python -m dfpilot plan propose <scratch>/p.json`, then `python -m dfpilot plan check
+  <scratch>/p.json`: check OK with fortcore@same stage 2 in the placement lines, or propose printed `fortcore stage 2 @same left
+  out: ... dfllm cmd bp.cancel proj=<id>`; never a propose without ERROR that check rejects. (b) Earthboat (port 5002): the same
+  two commands no longer name c1a185e68ea2802c02 / c1a185ed14e27ebd07 for fortcore@same. (c) A new embark before the first apply:
+  propose drafts only fortcore@S1 stage 1 (+ seal), target P0, notes end "apply, wait for s1.dig, propose again", check OK; while
+  stage 1 shows s1.build in `dfllm status` no "is not dug yet" line. (d) A P0 fort: propose's `orders` lists P0/P1 libraries only.
+
 ## FR-95 live test 1 fixes: flooded shaft level unseen, observe smoothing, aqshaft S1 place, floor top level (BUG-191..194, 2026-10-29; offline, live-untested)
 - **Why:** FR-95 live test 1 on i4 (kernel b805745): shaft c1a1858c02562d7101 (56,56 top 129) had z128 designated, yielded its slot
   (BUG-037, `no progress 139 d: slot yielded`), the miners dug z128 and it filled to 7/7; the level was never opened, so no AQ_HEAVY and no

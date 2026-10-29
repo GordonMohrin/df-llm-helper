@@ -363,15 +363,31 @@ class Occupancy:
     (same z, 8-neighbourhood: one rock tile stays between them), except next to its own anchor, where a
     room opens from an existing corridor (bp/rooms.py: the anchor is a walkable tile, (0,1) the doorway).
     A WET_TPLS project (cistern basin, pipe) is no corridor: its tiles clash next to the anchor too, and
-    an anchor on one of them clashes."""
+    an anchor on one of them clashes. BUG-196: the exemption holds both ways: a project whose anchor lies on the new
+    document's tiles (or on its own earlier stages') opened off them, so its tiles next to that anchor do not block it."""
 
     def __init__(self):
         self.owner: dict[tuple[int, int, int], tuple[str, str]] = {}      # tile -> (bp id, tpl)
+        self.meta: dict[str, tuple[str, tuple | None, set, set]] = {}     # bp id -> (tpl, anchor, footprint, bp cells)
 
     def add(self, doc: dict, cells: set | None = None) -> None:
         tag = (str(doc.get("id")), str(doc.get("tpl")))
-        for c in (footprint(doc) if cells is None else cells):
+        fp = footprint(doc) if cells is None else set(cells)
+        for c in fp:
             self.owner.setdefault(c, tag)
+        an = doc.get("anchor")
+        self.meta[tag[0]] = (tag[1], tuple(an) if isinstance(an, list) and len(an) == 3 else None, fp,
+                             bp_cells(doc) if cells is None else set(cells))
+
+    def own_cells(self, tpl: str, anchor) -> set:
+        """BUG-195: the tiles the placed projects of `tpl` at `anchor` dig or build (their own earlier or later stages,
+        not the reserved rest): a later stage that emits them again never clashes over them."""
+        an = tuple(anchor or ())
+        out: set = set()
+        for t, a, _, cells in self.meta.values():
+            if t == tpl and a == an:
+                out |= cells
+        return out
 
     def clash(self, doc: dict, cells: set | None = None, ignore_tpl=None) -> list[str]:
         """Ids of the projects this document would overlap or touch (ignore_tpl: a template name or several whose
@@ -388,16 +404,30 @@ class Occupancy:
         a = self.owner.get((ax, ay, az))
         if a and a[1] in WET_TPLS and a[1] not in skip:
             hit.add(a[0])
-        for x, y, z in (footprint(doc) if cells is None else cells):
+        mine = footprint(doc) if cells is None else cells
+        corr = set(mine)                     # BUG-196: the corridor other rooms may have opened off
+        for t, _, fp, _ in self.meta.values():
+            if t in skip:
+                corr |= fp
+        for x, y, z in mine:
             near_anchor = z == az and abs(x - ax) <= 1 and abs(y - ay) <= 1
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
                     o = self.owner.get((x + dx, y + dy, z))
                     if (dx or dy) and near_anchor and not (o and o[1] in WET_TPLS):
                         continue
-                    if o and o[1] not in skip:
+                    if o and o[1] not in skip and not ((dx or dy) and self._opened_off(o, (x + dx, y + dy, z), corr)):
                         hit.add(o[0])
         return sorted(hit)
+
+    def _opened_off(self, o: tuple, tile: tuple, corr: set) -> bool:
+        """BUG-196: the touched tile of project o lies next to o's anchor and that anchor is on `corr`: o is a room that
+        opened off this corridor (as clash exempts the new document's own anchor). A WET_TPLS project never is."""
+        m = self.meta.get(o[0])
+        if not m or m[1] is None or o[1] in WET_TPLS:
+            return False
+        ox, oy, oz = m[1]
+        return tile[2] == oz and abs(tile[0] - ox) <= 1 and abs(tile[1] - oy) <= 1 and m[1] in corr
 
 
 def bp_files(save_dir: Path) -> list[Path]:
@@ -1138,7 +1168,8 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
         if not isinstance(s, dict) or not isinstance(s.get("anchor"), list):
             raise BpError(f"site 'same': {tpl} was never placed from this save folder")
         doc = emit_at(tpl, params, {"id": SAME, "anchor": s["anchor"], "rot": s.get("rot", 0)}, SAME, bp_id)
-        hit = occ.clash(doc, ignore_tpl=tpl)
+        # BUG-195: tiles its own placed stages dig already (a seal wall, a room's doorway on them) are not new ground
+        hit = occ.clash(doc, cells=footprint(doc) - occ.own_cells(tpl, doc["anchor"]), ignore_tpl=tpl)
         if hit:
             raise BpError(f"{tpl}@same {doc['anchor']} overlaps project(s) {', '.join(hit[:4])}")
         return doc
@@ -1151,7 +1182,7 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
         st = params.get("stage") if isinstance(params, dict) else None
         own = tpl if isinstance(st, int) and not isinstance(st, bool) and st >= 2 \
             and stage_anchor(save_dir, tpl, [x, y, z]) else None
-        hit = occ.clash(doc, ignore_tpl=own)
+        hit = occ.clash(doc, cells=footprint(doc) - occ.own_cells(tpl, doc["anchor"]) if own else None, ignore_tpl=own)
         if hit:
             raise BpError(f"{tpl}{label} overlaps project(s) {', '.join(hit[:4])}")
         return doc

@@ -186,7 +186,7 @@ def test_propose_holds_the_hospital_back_and_drafts_the_cistern(base):
     d = plan.propose(s, phases, None, decisions={}, tinfo=t2, applied=set(), fort=fort)
     built = [b for se in d["seasons"] for b in se["build"]]
     assert HOSP not in built and CIS not in built
-    assert "water first (a cistern or a Water Source zone on deep water" in d["notes"]
+    assert "water first (a cistern, a well or a water zone on deep water" in d["notes"]      # BUG-197 wording
     # water near the hospital's site: drafted as before, no cistern
     ok = watered(state, src=[(25, 20, 5)], ok=1)
     d = plan.propose(ok, phases, None, decisions={}, tinfo=tinfo, applied=set(),

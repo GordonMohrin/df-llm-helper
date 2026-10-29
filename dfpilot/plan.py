@@ -203,6 +203,8 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "hosp": hospital_facts(save_dir, state, rooms),
             "metal": metal_facts(save_dir, man, applied),
             "aqshaft": any(t == AQSHAFT for t, _ in applied),       # FR-95: an aquifer shaft placed (any state)
+            "z4": bool((man.get("zones") or {}).get("Z4")) if isinstance(man.get("zones"), dict) else False,  # BUG-197
+            "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "seals": open_seals(save_dir, state)}
 
 
@@ -1668,19 +1670,69 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     return f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
 
 
+_OVERLAP_RE = re.compile(r"overlaps project\(s\) ([\w, ]+)")
+
+
+def fit_core(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
+    """BUG-195 (live y728: propose drafted fortcore@same stage 2, `plan check` refused it: 'overlaps project(s) y721s3b2'):
+    dry-place every new fortcore stage >= 2 @same the way place_all does (the bp files but this plan's new ones, the
+    anchor of bp/.placed-fortcore.json). A stage another project blocks is left out with its later stages @same, and a
+    line (also in the notes) names the blocker and its bp.cancel. Nothing is checked when stage 1 is new in this plan
+    (its anchor is known at apply time only) or bp is not available. Returns the lines."""
+    new = new_builds(doc, prev)
+    core = [(si, b) for si, _, b in new if b["tpl"] == "fortcore" and b.get("site") == SAME
+            and (_stage_of(b.get("p") or {}) or 1) >= 2 and not (b.get("p") or {}).get("retrofit")]
+    if not core or any(b["tpl"] == "fortcore" and b.get("site") != SAME for _, _, b in new):
+        return []
+    try:
+        occ = occupancy(save_dir, skip={bp_id(doc["year"], si, bi) for si, bi, _ in new})
+    except Exception:                                     # noqa: BLE001 - a dry run is a courtesy (check repeats it)
+        return []
+    out, cut = [], None
+    for si, b in sorted(core, key=lambda x: _stage_of(x[1]["p"])):
+        st = _stage_of(b["p"])
+        if cut is None:
+            try:
+                place(save_dir, "fortcore", b.get("p") or {}, SAME, "fit-core", occ=occ)
+                continue
+            except BpUnavailable:
+                return out
+            except BpError as e:
+                m = _OVERLAP_RE.search(str(e))
+                if not m:
+                    continue                              # e.g. never placed: check names it
+                ids = [i.strip() for i in m.group(1).split(",") if i.strip()]
+                cut = st
+                why = (f"fortcore stage {st} @same left out: its tiles touch or overlap {', '.join(ids)}; free them: "
+                       + "; ".join(f"dfllm cmd bp.cancel proj={i}" for i in ids[:3]))
+        doc["seasons"][si]["build"].remove(b)
+        out.append(why if st == cut else f"fortcore stage {st} @same left out with stage {cut}")
+    if out:
+        doc["notes"] += "; BUG-195: " + "; ".join(out)
+    return out
+
+
 CORE_FREE_TPLS = ("fortcore", "seal", "explore", "plug", "repair", "captives", "barracks")   # not sited on the Z4 floor
 
 
-def core_order_note(doc: dict, state: dict | None) -> str | None:
+def core_order_note(doc: dict, state: dict | None, fort: dict | None = None) -> str | None:
     """BUG-067 (note 41: after bp.place(fortcore) the drafts for farms, dining and office @S1 found '0 free sites'): room
     builds open from the dug public Z4 floor of the fortcore, so while its stage 1 is still digging (state.proj label
-    s1.*) `plan check` cannot site them. The order is bp.place fortcore -> wait for s1.dig -> `bp sites <tpl> --fresh`
-    -> plan propose / check. A line for the CLI, None when the draft has no such build or the core is dug."""
+    s1.dig) `plan check` cannot site them. The order is bp.place fortcore -> wait for s1.dig -> `bp sites <tpl> --fresh`
+    -> plan propose / check. A line for the CLI, None when the draft has no such build or the core is dug. BUG-197:
+    only the label s1.dig means "not dug yet" (s1.build and later are past the dig); with fort facts of a fort with no
+    fortcore project and no Z4 floor the line names that order too."""
     core = next((r for r in (state or {}).get("proj") or []
-                 if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.")
+                 if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.dig")
                  and "breach:" not in str(r[-1])), None)      # BUG-130: a core parked on a breach digs nothing
     rooms = sorted({b["tpl"] for se in doc["seasons"] for b in se["build"] if b["tpl"] not in CORE_FREE_TPLS})
-    if core is None or not rooms:
+    if not rooms:
+        return None
+    if core is None:
+        f = fort or {}
+        if f.get("z4") is False and not f.get("core_any"):
+            return (f"order: no fortcore project and no Z4 core floor yet; {', '.join(rooms)} open from its dug Z4 floor, "
+                    "so no site exists for them: apply fortcore stage 1 (and seal) alone, wait for s1.dig, propose again")
         return None
     return (f"order: fortcore stage 1 ({core[0]}: {core[1]} {core[2]}%) is not dug yet; {', '.join(rooms)} open from its "
             f"dug Z4 floor, so `plan check` finds no site for them until s1.dig is done and `dfllm bp sites <tpl> --fresh` "
@@ -1860,6 +1912,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     # BUG-034: the hospital only with accepted water near its site; else the cistern in its place (once), noted
     hw = hospital_water(s, fort)
     held, cistern = None, False
+    lib_top = next((p["id"] for p in plist if p["id"] > cur), cur)     # BUG-198: order libraries up to the next phase
     for p in plist:
         if cur <= p["id"] <= target:
             for d in p["deliver"]:
@@ -1877,7 +1930,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                                 cistern = True
                             continue
                         builds.append(b)
-                elif d["k"] == "orders" and d["lib"] not in libs:
+                elif d["k"] == "orders" and d["lib"] not in libs and p["id"] <= lib_top:
                     libs.append(d["lib"])
     if applied is not None:                      # BUG-164: no stage 3 @same without the core's stage 2 (known applied)
         core_gaps(builds, done)
@@ -1885,6 +1938,17 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         builds = [b for b in builds if b["tpl"] != "fortcore" or (drop_core != "all" and (
             b.get("site") != SAME or _stage_of(b.get("p") or {}) not in drop_core))]
     builds.sort(key=lambda b: b["tpl"] != SEAL)  # Run 11 siege 8: seal first (the runner runs it first anyway)
+    fresh = None
+    if (fort or {}).get("z4") is False and not (fort or {}).get("core_any") and not core \
+            and not any(t == "fortcore" for t, _ in done):
+        # BUG-197 (live Earthboat): no fortcore and no Z4 floor yet: every room build fails its site ranking, so
+        # year 1 is the core's stage 1 (and a seal) only, at the current phase
+        keep = [b for b in builds if b["tpl"] == SEAL or (b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) == 1)]
+        if not any(b["tpl"] == "fortcore" for b in keep) and (info is None or "fortcore" in info):
+            keep.append({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}})
+        fresh = sorted({b["tpl"] for b in builds if b not in keep})
+        builds, target = keep, cur
+        libs = list(dict.fromkeys(d["lib"] for p in plist if p["id"] == cur for d in p["deliver"] if d["k"] == "orders"))
     left_out = []
     if rb:                                       # the rebuild drafts only what the runner runs then
         left_out = [b["tpl"] for b in builds if build_kind(b) not in REBUILD_KINDS]
@@ -1916,8 +1980,12 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
     }
     tp = None if info is None else set(info)
-    draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb else tp)   # rebuild: no explore
+    draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp)  # rebuild: no explore
     doc["notes"] += core_note
+    if fresh is not None:
+        doc["notes"] += (f"; BUG-197: no fortcore and no Z4 core floor yet: only fortcore stage 1"
+                         + (" and seal" if any(b["tpl"] == SEAL for b in builds) else "") + f" drafted, phase_target {cur}"
+                         + (f" (left out: {', '.join(fresh)})" if fresh else "") + "; apply, wait for s1.dig, propose again")
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     if stress and sdrafts and not rb:
@@ -1936,9 +2004,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["notes"] += (f"; hospital held back (BUG-034): {held['why']}"
                          + ("; cistern@S1 in its place" if cistern else "; the cistern under way or standing must hold "
                             "water first" if under else f"; no cistern either (BUG-040: {fill.get('why')}): water "
-                            "first (a Water Source zone on deep water: dfllm cmd inspect water_sources)"
-                            if fill.get("ok") is False else "; water first (a cistern or a Water Source zone on deep "
-                            "water: dfllm cmd inspect water_sources)"))
+                            "first (a well or a water zone on deep water: dfllm cmd inspect water_sources)"
+                            if fill.get("ok") is False else "; water first (a cistern, a well or a water zone on deep "
+                            "water: dfllm cmd inspect water_sources)"))     # BUG-197: no blocked word in the notes
     return doc
 
 
@@ -2188,6 +2256,7 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     season = (s.get("t") or {}).get("season", 0)
     tp = tpls if tpls is not None else templates()
     doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort)
+    fit_core(save_dir, doc, prev)                             # BUG-195: never a core stage another project blocks
     doc["phase_target"] = cur
     doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
     doc = _with_new(doc, prev, [(si, b) for si, _, b in new_builds(doc, prev) if minimal_ok(b)])
@@ -2196,6 +2265,7 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     nxt = next_phase(ph, cur) if raise_due(save_dir, state, prev) else None
     if nxt:
         cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt)
+        fit_core(save_dir, cand, prev)
         if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
             cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
             best = (cand, cwarn) if not cerrs else _subset(cand, state, prev, fort, decisions, tp)
@@ -2295,6 +2365,24 @@ def _print_check(errs: list[str], warn: list[str]) -> None:
         print(f"warn {w}")
 
 
+def _dry_place(save_dir: Path, doc: dict, prev: dict | None, errs: list[str], warn: list[str]) -> list[str]:
+    """plan check's placement dry run (what apply would emit), shared by propose (BUG-197): only when check found no
+    ERROR; a BpError becomes an ERROR, an unavailable bp package a warning. Returns the placement lines."""
+    if errs:
+        return []
+    left: list[str] = []
+    try:
+        _, _, lines = place_all(save_dir, doc, prev, left)
+    except BpUnavailable as e:
+        warn.append(f"placement not checked: {e}")
+        return []
+    except BpError as e:
+        errs.append(f"blueprint: {e}")
+        return []
+    warn.extend(left)
+    return lines
+
+
 def run(args, save_dir: Path) -> int:
     path = Path(args.file) if args.file else _draft(save_dir)
     prev = applied_plan(save_dir)
@@ -2304,15 +2392,19 @@ def run(args, save_dir: Path) -> int:
         fort = fort_facts(save_dir, state)
         doc = propose(state, phases, prev, applied=applied_builds(save_dir, state), fort=fort)
         fit = fit_explore(save_dir, doc, prev)                # Run 10: the ore search fits the known levels
+        cfit = fit_core(save_dir, doc, prev)                  # BUG-195: a later core stage another project blocks
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
-        if fit:
-            print(f"  {fit}")
-        order = core_order_note(doc, state)
+        for ln in ([fit] if fit else []) + cfit:
+            print(f"  {ln}")
+        order = core_order_note(doc, state, fort)
         if order:
             print(f"  {order}")
         errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort)
+        lines = _dry_place(save_dir, doc, prev, errs, warn)  # BUG-197: the same placement dry run as check
         _print_check(errs, warn)
+        for ln in lines[:16]:
+            print(f"  {ln}")
         print("edit the draft, then: dfllm plan check; dfllm plan apply" + ("" if phases else
               " (no valid plans/year1.json: builds empty)"))
         return 0
@@ -2322,21 +2414,13 @@ def run(args, save_dir: Path) -> int:
         return 2
     if args.action == "check":
         state = files.read_state(save_dir)
-        errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
-        lines: list[str] = []
-        if not errs:
-            left: list[str] = []
-            try:
-                _, _, lines = place_all(save_dir, doc, prev, left)        # dry run: what apply would emit
-                warn.extend(left)
-            except BpUnavailable as e:
-                warn.append(f"placement not checked: {e}")
-            except BpError as e:
-                errs.append(f"blueprint: {e}")
+        fort = fort_facts(save_dir, state)
+        errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort)
+        lines = _dry_place(save_dir, doc, prev, errs, warn)
         _print_check(errs, warn)
         for ln in lines[:16]:
             print(f"  {ln}")
-        order = core_order_note(doc, state) if errs else None      # BUG-067: why a room build may have found no site
+        order = core_order_note(doc, state, fort) if errs else None   # BUG-067: why a room build may have found no site
         if order:
             print(f"  {order}")
         print(f"plan {'OK' if not errs else 'REJECTED'}: {path}" + (f" ({_summary(doc)})" if not errs else ""))
