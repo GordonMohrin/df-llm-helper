@@ -229,6 +229,8 @@ Related: FR-xx, BUG-xx
 | [BUG-211](BUG-211-follow-seals-audit-bypass-before-the-trap-hall.md) | fixed (offline, live-untested) | medium | live 3: follow seals the audit bypass before the trap hall, on fortcore tiles, logging it every audit | dfpilot/wake.py |
 | [BUG-212](BUG-212-status-drops-proj-and-lists-six-next-hints.md) | fixed (offline, live-untested) | low | live 3: status drops the proj line and lists six next: hints | dfpilot/brief.py |
 | [BUG-213](BUG-213-audit-wait-printed-as-a-float.md) | fixed (offline, live-untested) | low | live 3: dfllm audit prints its wait as a float | dfpilot/wake.py |
+| [BUG-217](BUG-217-memorial-request-never-fires-under-care-pacing.md) | fixed (offline, live-untested) | medium | live 4: the memorial request never fires, care's searches come further apart than the episode window | lua/dfllm/care.lua |
+| [BUG-218](BUG-218-stressor-list-counts-none-and-positive-emotions.md) | fixed (offline, live-untested) | low | live 4: the weekly stressor list counts 'None' and emotions that lower stress | lua/dfllm/care.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

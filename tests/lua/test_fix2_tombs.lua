@@ -159,4 +159,39 @@ T.test('BUG-180: no site at all for mem_req_days (3): PROJECT_REQUEST tombs why=
   T.eq(#mem_requests(W2), 0)
 end)
 
+-- BUG-217 (live 4: the searches for slab 2991783 came 30771 and 28366 ticks apart under care's pacing; each one began
+-- a new episode, so no request in 49 game days): the clock jumps 24 days between the care runs
+local function far_day(W)
+  local g = df.global
+  g.cur_year_tick = g.cur_year_tick + 24 * 1200
+  CW.day(W)
+end
+
+T.test('BUG-217: memorial searches far apart (> 2 x coffin_retry) for the same slab keep one episode: the request comes',
+       function()
+  local W = mworld{floor = {}, care = {tomb_margin = 0}}
+  CW.day(W)
+  local since = W.K.persist.get('m.care').mem_nosite.since
+  for _ = 1, 3 do far_day(W) end
+  local ns = W.K.persist.get('m.care').mem_nosite
+  T.eq(ns.since, since, 'old code: since = now on every search')
+  T.eq(ns.sid, tostring(W.slab.id))
+  T.ok(#mem_requests(W) >= 1, 'old code: no request ever (live: 0 in 59000 ticks)')
+end)
+
+T.test('BUG-217: no loose memorial slab left: the episode ends, a later slab starts afresh', function()
+  local W = mworld{floor = {}, care = {tomb_margin = 0}}
+  CW.day(W)
+  local s1 = W.K.persist.get('m.care').mem_nosite.since
+  W.slab.topic = 9999                                         -- no longer the ghost's memorial
+  far_day(W)
+  T.eq(W.K.persist.get('m.care').mem_nosite, nil, 'old code: the stale episode stayed')
+  local s2 = memorial(W, 7007)
+  far_day(W)
+  local ns = W.K.persist.get('m.care').mem_nosite
+  T.eq(ns.sid, tostring(s2.id))
+  T.ok(ns.since >= s1 + 48 * 1200, 'a new episode: ' .. tostring(ns.since))
+  T.eq(#mem_requests(W), 0, 'not on the new slab\'s first day')
+end)
+
 T.done()

@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Live round 4 care fixes: memorial request under care pacing, stressor list (BUG-217, BUG-218, 2026-10-29; offline, live-untested)
+- **Why:** live round 4 and its skeptic. On Trussroads (E:/DF-test4) slab 2991783 waited for a site three times, 28000-31000
+  ticks apart, and no PROJECT_REQUEST why=memorial came in 49 game days: each search began a new episode because care's runs
+  are further apart than the 2 x coffin_retry window (BUG-217, follows BUG-180). On Earthboat the weekly stressor line was led
+  by 'None=361 ... SatisfiedAtWork=21' (BUG-218, the care part of BUG-205's re-check).
+- **What changed:** (1) care `MEM.place`: `p.mem_nosite` records the slab id `sid`; a failed search for the same slab keeps
+  `since` however far apart the runs are; `phase_memorials_run` clears `p.mem_nosite` when no loose memorial slab (or no
+  ghost) is left (BUG-217). (2) care `M.stressor(e)`: an emotion counts as a stressor when its type's divider is > 0 (DF adds
+  strength / divider to the stress); `thoughts()` skips 'None' and non-stressor emotions, unreadable types count as before
+  (BUG-218).
+- **Safety:** no new verb, event, config key or RULES row; no contract change. `m.care.mem_nosite` gains the field `sid`
+  (an old record without it falls back to the time window). care.lua gains no top-level local (`M.stressor` is a module field).
+- **Tests (each fails on 5e9e719):** tests/lua/test_fix2_tombs.lua (2 x BUG-217), tests/lua/test_care.lua (BUG-218).
+- **Live check:** (a) a loose memorial slab with no site: after mem_req_days game days of 'memorial: slab ... waits' lines,
+  however far apart, one PROJECT_REQUEST tpl=tombs why=memorial; `m.care.mem_nosite` keeps one `since` and its `sid`. (b) After a
+  game week 'top stressors this week' lists no 'None' and no positive thought (SatisfiedAtWork).
+
 ## Live round 3 plan fixes: propose = check, core stages placeable, fresh fort, order libraries (BUG-195..198, 2026-10-29; offline, live-untested)
 - **Why:** live round 3 and its skeptic: on Trussroads `plan propose` drafted fortcore@same stage 2 that `plan check` refused
   (`overlaps project(s) y721s3b2`, a refuge_beds room of the y721 minimal plan) (BUG-195). On the fresh fort Earthboat propose
