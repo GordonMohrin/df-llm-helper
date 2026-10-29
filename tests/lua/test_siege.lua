@@ -675,22 +675,42 @@ add{name = 'BUG-027: a tame animal on B1 holds the raise like a citizen (census.
     T.eq(gate_blocked(W, 'B1')[1].msg, 'B1 up waits: animal 400 on the footprint')
   end}
 
-add{name = 'BUG-027: with a hostile at the gate (<= force_near 3 tiles) the SIEGE raise goes ahead onto a soldier ' ..
-           'on B1, and GATE_FORCED (A) names him',
+add{name = 'BUG-310 (Earthboat y379 #3723: two citizens crushed by a forced B2 raise): with a hostile at the gate ' ..
+           '(<= force_near 3 tiles) a soldier ON B1 still holds the raise (old: raised onto him); once he steps next to ' ..
+           'it the forced raise goes ahead and GATE_FORCED (A) names him next to it',
   units = function()
     local r = units(S.army(6, 51, 37))
     r[5].pos = {51, 40, Z}
     return r
   end,
-  run = 300,
+  at = {{300, mv(5, 51, 41)}},
+  run = 700,
   check = function(W)
     local b1 = S.pulls(W, 'B1')
     T.eq(#b1, 1)
+    T.ok(rel(W, b1[1].tick) >= 300, 'not pulled while he stood on it: ' .. tostring(rel(W, b1[1].tick)))
     local f = evs(W, 'GATE_FORCED')
     T.eq(#f, 1)
-    T.eq({f[1].d.bridge, f[1].d.units, f[1].d.hostile, f[1].d.job}, {'B1', {5}, 2, b1[1].job})
-    T.ok(f[1].msg:find('B1 raised onto soldier 5 on the footprint (squad 1): a hostile 2 tiles from it (force_near 3)',
-                       1, true), f[1].msg)
+    T.eq({f[1].d.bridge, f[1].d.units, f[1].d.job}, {'B1', {5}, b1[1].job})
+    T.ok(f[1].msg:find('B1 raised with soldier 5 next to it', 1, true), f[1].msg)
+    T.ok(f[1].msg:find('(force_near 3)', 1, true), f[1].msg)
+    T.eq(S.bstate(W, 'B1'), 'up')
+  end}
+
+add{name = 'BUG-310: a pending forced raise is cancelled the frame a citizen steps ON B1 (old: it went on), queued ' ..
+           'again once he left; B1 never moved while he stood on it',
+  units = function() return units(S.army(6, 51, 37)) end,
+  lever_cfg = {[21] = {worker = 30, pull = 300}, [22] = {worker = 30, pull = 300}},
+  at = {{60, mv(1, 51, 40)}, {400, mv(1, 60, 70)}},
+  run = 1200,
+  check = function(W)
+    local b1 = S.pulls(W, 'B1')
+    T.ok(#b1 >= 2, 'queued, cancelled, queued again: ' .. #b1)
+    local c = S.acts(W, 'cancel_own_lever_job')
+    T.ok(#c >= 1 and c[1].args[1] == b1[1].job, 'the first pull cancelled')
+    between(rel(W, c[1].tick), 60, 100, 'cancelled within a gate pass')
+    for _, f in ipairs(S.flips(W, 'B1')) do T.ok(rel(W, f.tick) >= 400, 'no move while he stood on it') end
+    T.eq(S.bstate(W, 'B1'), 'up')
   end}
 
 add{name = 'BUG-027: force_near 0 (config/reflex.json gate) never raises onto a unit, not even with a hostile at the gate',

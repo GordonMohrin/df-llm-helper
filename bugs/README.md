@@ -322,6 +322,9 @@ Related: FR-xx, BUG-xx
 | [BUG-307](BUG-307-mood-days-left-from-the-mood-timer-only.md) | fixed (offline, live-untested) | high | Run 15b: MOOD line days left from the mood timer only, not thirst/hunger | mood.lua |
 | [BUG-308](BUG-308-collect-webs-cancelled-by-df-queued-again-blind.md) | fixed (offline, live-untested) | high | Run 15d: collect webs cancelled by DF every time, queued again blind | care.lua, economy.lua |
 | [BUG-309](BUG-309-leather-mood-costs-a-breeding-pair-butcher-reply.md) | fixed (offline, live-untested) | medium | Run 15d: a leather mood costs a breeding pair; butcher.mark names no species or sex | economy.lua, schema.py |
+| [BUG-310](BUG-310-forced-raise-goes-ahead-with-a-unit-on-the-bridge.md) | fixed (offline, live-untested) | critical | Run 15b: a forced raise went ahead with units on the bridge | gate.lua |
+| [BUG-311](BUG-311-raise-pull-not-cancelled-for-a-unit-walking-onto-the-bridge.md) | fixed (offline, live-untested) | high | Run 15b: a raise pull was not cancelled for a unit walking toward the bridge | gate.lua |
+| [BUG-312](BUG-312-automatic-drill-with-a-dry-refuge.md) | fixed (offline, live-untested) | medium | Run 15d: automatic drills with a dry refuge and kern burrow | drill.lua, seal.lua |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
