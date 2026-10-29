@@ -6,11 +6,11 @@
   (BUG-173b -> BUG-207). A third were-form whose TRANSFORM went out 830 ticks after the curse_kill for two got no curse_kill for ~180 game
   days: the question was tried only at a TRANSFORM emit and the 2400-tick gate refused it (BUG-174c -> BUG-208).
 - **What changed:** (1) curse.lua `unit_keys`: with `u.name.nickname` set, the keys `nickname + last` and the nickname alone; the sheet key
-  is dropped when it is only the last name; `find_unit` also matches the sheet name typed with its quotes (BUG-207). (2) `M.finish` (care's
+  is dropped for the player's lookup when it is only the last name (the report index keeps it); `find_unit` also matches the sheet name typed with its quotes (BUG-207). (2) `M.finish` (care's
   run end and the daily watch) calls `M.kill_question` when a were-form is known and no TRANSFORM is queued; `CAD.due` keeps it to one
   question per set and per 2400 ticks (BUG-208).
 - **Safety:** no new verb, event, config key, state field or RULES row; no contract change. A kill is still only a question.
-- **Tests (each fails on bd27973):** tests/lua/test_bug207_208_curse.lua.
+- **Tests:** tests/lua/test_bug207_208_curse.lua (four fail on bd27973; two guards).
 - **Live check:** (a) a citizen with a nickname (set on the unit sheet): `python -m dfpilot cmd inspect '{"what":"unit","key":"<Nick>"}'`
   and key `"<Nick> <Last>"` return `ok unit <id>`; key `"<Real first> <Last>"` still does. (b) two units transform (one wave), a third
   within 2400 ticks of the first curse_kill: `python -m dfpilot events` shows its TRANSFORM, then within a game day after the gate opens a

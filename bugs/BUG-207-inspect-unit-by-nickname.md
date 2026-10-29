@@ -12,12 +12,14 @@ relatives) and added the real first + last name; no key held the nickname.
 
 ## Fix
 `unit_keys` adds `nickname + last name` and the nickname alone when `u.name.nickname` is set, and drops the sheet key when
-it is only the last name (the sheet name began with the nickname). `find_unit` also matches the sheet name typed with its
+it is only the last name (the sheet name began with the nickname) for the player's lookup (`find_unit`); the report index
+keeps it, so a report that names him as the sheet does ("`Blinky' Imeshakrul, ...") still resolves (a key two units share
+maps to false there). `find_unit` also matches the sheet name typed with its
 quotes ("`Blinky' Imeshakrul"). The single-word rule then finds 'Blinky' too; the report index (`index`) learns the
 nickname keys as well.
 
 ## Tests
-`tests/lua/test_bug207_208_curse.lua` BUG-207 (three tests), fail on bd27973.
+`tests/lua/test_bug207_208_curse.lua` BUG-207 (four tests): three fail on bd27973, the fourth (report by the sheet name resolves) is a guard.
 
 ## Live check
 A citizen with a nickname set: `python -m dfpilot cmd inspect '{"what":"unit","key":"<Nick>"}'` and key

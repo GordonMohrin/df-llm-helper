@@ -69,8 +69,9 @@ M.name_key = function(s) return name_key(short(s)) end           -- for tests an
 -- and its real first and last name (u.name.first_name + the last name alone, translateName only_last_name)
 -- BUG-207 (live 3: key 'Blinky' and 'Blinky Imeshakrul' -> 'no such citizen' for "`Blinky' Imeshakrul"): the nickname
 -- the sheet shows is a key too (nickname + last name, the nickname alone); a sheet key that is only the last name (the
--- sheet name began with the nickname) is dropped, it is shared by the relatives
-local function unit_keys(u, env)
+-- sheet name began with the nickname) is dropped for the player's lookup (`lookup`), it is shared by the relatives; the
+-- report index keeps it (a report may name him as the sheet does; a key two units share maps to false there, no guess)
+local function unit_keys(u, env, lookup)
   local keys = {}
   local function add(k) if k ~= '' then for _, x in ipairs(keys) do if x == k then return end end keys[#keys + 1] = k end end
   local n = env.nm(u)
@@ -80,7 +81,7 @@ local function unit_keys(u, env)
   nick = type(nick) == 'string' and nick or ''
   if n ~= '' then
     local k = name_key(short(n))
-    if not (nick ~= '' and last ~= '' and k == name_key(last)) then add(k) end
+    if not (lookup and nick ~= '' and last ~= '' and k == name_key(last)) then add(k) end
   end
   local first = rd(function() return strip(utf(u.name.first_name)) end, '')
   if type(first) == 'string' and first ~= '' then
@@ -837,7 +838,7 @@ local function find_unit(K, p, key, env)
     local u = df.unit.find(uid)
     if u then
       local hit, first = false, false
-      for _, nk in ipairs(unit_keys(u, env)) do        -- BUG-173: the sheet name and the real first + last name
+      for _, nk in ipairs(unit_keys(u, env, true)) do  -- BUG-173: the sheet name and the real first + last name
         if nk == k or nk == kq then hit = true
         elseif single and (nk:match('^(%S+)') or '') == k then first = true end
       end

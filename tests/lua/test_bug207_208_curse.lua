@@ -1,6 +1,7 @@
 -- Live test round 3 of the curse package (fresh fort and i-instances, kernel bd27973): BUG-207 (inspect what=unit by the
 -- nickname the sheet shows; the bare last name no longer a key), BUG-208 (a set of were-forms that grew inside the
--- 2400-tick kill gate got no curse_kill). Every test here fails on bd27973.
+-- 2400-tick kill gate got no curse_kill). Four tests fail on bd27973; two are guards (a report naming the unit as the sheet
+-- does still resolves; an unchanged set is asked once).
 local T = require('testlib')
 local CW = require('care_world')
 
@@ -65,7 +66,7 @@ T.test('BUG-207: the bare last name is no key of a nicknamed unit (his relatives
   local W = world()
   blinky(W)
   local CU = require('dfllm.curse')
-  local keys = CU.unit_keys(W.unit(3), W.mods.care.M.curse_env())
+  local keys = CU.unit_keys(W.unit(3), W.mods.care.M.curse_env(), true)
   T.eq(keys, {'astesh imeshakrul', 'blinky imeshakrul', 'blinky'}, 'live: the keys were imeshakrul and astesh imeshakrul')
   T.ok(not W.inbox('inspect', {what = 'unit', key = 'Imeshakrul'}).ok, 'the family name names no single citizen')
 end)
@@ -76,6 +77,15 @@ T.test('BUG-207: a report naming the unit by nickname + last name resolves to hi
   W.event('REPORT', {type = ANY, text = 'Blinky Imeshakrul, Peasant has been cursed by Risen!'})
   W.run(3)
   T.eq(W.find_events('CURSED')[1].d.unit, 3)
+end)
+
+T.test('BUG-207 review: a report naming the unit as the sheet does ("`Blinky\' Imeshakrul") still resolves to him', function()
+  local W = world()
+  blinky(W)
+  W.event('REPORT', {type = ANY, text = "`Blinky' Imeshakrul, Peasant has been cursed by Risen!"})
+  W.run(3)
+  local ev = W.find_events('CURSED')[1]
+  T.eq(ev and ev.d.unit, 3, 'the report index keeps the sheet key (a shared one maps to false, no guess)')
 end)
 
 ---------------------------------------------------------------- BUG-208
