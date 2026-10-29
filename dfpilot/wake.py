@@ -175,6 +175,7 @@ HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
+WAIVE_COOLDOWN_S = 3600                         # BUG-300: one phase.waive farms per hour of follow at most
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery", "farmers",
               "mandatory", "slabs",           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
@@ -601,6 +602,9 @@ class Follower:
             t = jobs.get(key)
             if isinstance(t, dict) and (t.get("placed") or fresh(t)):
                 out[key] = t
+        w = jobs.get("waive")                  # BUG-300 review: the phase.waive cooldown survives a follow restart
+        if isinstance(w, dict) and now - (w.get("since") or 0) < WAIVE_COOLDOWN_S:
+            out["waive"] = w
         if out != jobs:
             files.log_cli(self.dir, "follow", "resume", {}, f"dropped stale jobs {sorted(jobs)}")
         return out
@@ -1069,9 +1073,39 @@ class Follower:
             cid = self._send("bp.place", args, tpl, now, snap=snap, need=need)
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped
             self.jobs.pop(key, None)
-            return self._fail(tpl, e, now)
+            self._fail(tpl, e, now)
+            if tpl == "farms" and isinstance(e, BpError):
+                self._waive_farms(str(e), now)
+            return
         job.update(placed=cid, since=now, prev=prev if isinstance(prev, dict) else None)
         files.log_cli(self.dir, "follow", f"auto:{key}", args, f"placed {cid}")
+
+
+    def _waive_farms(self, err: str, now: float) -> None:
+        """BUG-300 (Run 15 Drillchamber: phase P0 for six game years, plans at P5; `farms` found 'only 0 free site(s)'
+        at every PLAN_EXHAUSTED starter and farms request): when the farms placement finds no free site and the sites
+        snapshot has neither a farms room site nor a surface one (plan.farm_site 'none'), the current phase's
+        deliverable farms is waived in the kernel (phase.waive, why names the count), once per WAIVE_COOLDOWN_S."""
+        if "only 0 free site(s) for farms" not in err:
+            return
+        from .plan import farm_site, load_phases
+        st = files.read_state(self.dir) or {}
+        ph = next((x for x in (load_phases() or {}).get("phases", []) if x.get("id") == st.get("phase")), None)
+        if ph is None or not any(d.get("k") == "proj" and d.get("tpl") == "farms" and "stage" not in d
+                                 for d in ph.get("deliver") or []):
+            return
+        last = self.jobs.get("waive")
+        if isinstance(last, dict) and now - (last.get("since") or 0) < WAIVE_COOLDOWN_S:
+            return
+        if farm_site(self.dir) != "none":
+            return
+        self.jobs["waive"] = {"since": now}
+        try:
+            self._send("phase.waive", {"tpl": "farms", "why": "bp sites farms: 0 room and 0 surface sites"}, None, now)
+        except Exception as e:                 # noqa: BLE001
+            return self._fail("phase.waive farms", e, now)
+        files.log_cli(self.dir, "follow", "auto:waive", {"tpl": "farms", "phase": st.get("phase")},
+                      f"no farm site at all: deliverable farms of {st.get('phase')} waived")
 
 
 class AuditError(RuntimeError):

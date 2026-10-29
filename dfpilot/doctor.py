@@ -398,6 +398,10 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
                    + (f" ms_max {k['ms_max']}" if "ms_max" in k else ""))
         if k.get("disabled"):
             bad.append(f"disabled modules: {','.join(k['disabled'])}")
+        from .brief import line_phase
+        ph = line_phase(state, hint=True)      # BUG-301: the deliverable that holds the phase, and how to waive it
+        if ph:
+            out.append(ph)
         sq, starving = snap_queue(state)           # BUG-033
         if sq:
             out.append(sq)

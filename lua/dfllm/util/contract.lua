@@ -217,6 +217,7 @@ C.VERBS = {
   ['plan.reload']  = {mod = 'kern'},
   ['bp.place']     = {mod = 'runner'},
   ['bp.cancel']    = {mod = 'runner'},
+  ['phase.waive']  = {mod = 'runner'},       -- BUG-300: a deliverable of the current phase that cannot be made
   ['drill']        = {mod = 'drill', modes = {PEACE = true}},
   ['snapshot']     = {mod = 'snapshot'},
   ['audit']        = {mod = 'readiness'},
@@ -297,7 +298,7 @@ C.ACT = {
 C.STATE_OWNERS = {
   ['v'] = 'kern', ['seq'] = 'kern', ['ev'] = 'kern', ['t.*'] = 'kern', ['mode'] = 'kern',
   ['save'] = 'kern', ['k.*'] = 'kern',
-  ['phase'] = 'runner', ['proj'] = 'runner', ['sched.*'] = 'runner', ['adopt.*'] = 'runner',
+  ['phase'] = 'runner', ['phw.*'] = 'runner', ['proj'] = 'runner', ['sched.*'] = 'runner', ['adopt.*'] = 'runner',
   ['pop.cit'] = 'sense', ['pop.adults'] = 'sense', ['pop.soldiers'] = 'sense',
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['pop.hold'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
@@ -467,6 +468,8 @@ C.STATE_SPEC = obj({
   -- BUG-066 / FR-76 (runner): workshops that stand, adopted into the manifest (new) and pruned from it (gone); standing
   -- stockpiles, wells, beds, doors (counts); rec = a reclaimed fort (>= runner.reclaim.min_ws adopted at the first
   -- scan); miss = the mandatory workshops of a reclaimed fort that nothing builds yet
+  -- BUG-301: what holds the phase (the deliverables not met, up to 4) and the waived ones ('farms: why', BUG-300)
+  phw = obj(nil, {wait = arr(str(40), 0, 4), waived = arr(str(100), 0, 4)}),
   adopt = obj({ws = NAT, new = NAT}, {gone = NAT, stock = NAT, wells = NAT, beds = NAT, doors = NAT, rec = FLAG,
                                       miss = arr(str(24), 0, 8)}),
   proj = arr({t = 'tup', items = {str(nil, nil, 'id'), str(24), PCT, str(40)}}, 0, 8),

@@ -230,7 +230,8 @@ def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
     had been applied once, and `bp sites farms --fresh` ranked 0): while state.stock.food_d is below FOOD_DRAFT_D,
     {open: a farms project neither done nor parked (state.proj) stands, site: 'room' (a farms room site is free), 'surface'
     (only a surface farm site on soil floor, p.surface = 1), 'none', or None (no snapshot or no bp package)}; None
-    otherwise (not looked up)."""
+    otherwise (not looked up: the site ranking renders the template, plan apply must stay free of it). BUG-302: propose
+    leaves out the farms builds no site can take (farm_site_fix)."""
     fd = ((state or {}).get("stock") or {}).get("food_d")
     if not _nat(fd) or fd >= FOOD_DRAFT_D:
         return None
@@ -242,22 +243,64 @@ def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
         doc = files.read_json(p)
         if isinstance(doc, dict) and doc.get("tpl") == "farms" and p.stem not in done and "parked" not in rows.get(p.stem, ""):
             open_ = True
-    site, plots = None, None
-    if sites_snapshot(save_dir) is not None:
-        site = "none"
-        for kind, prm in (("room", {}), ("surface", {"surface": 1})):
-            try:
-                free, _, _ = free_sites(save_dir, "farms", prm, n=1)
-            except (BpError, BpUnavailable):
-                free = []
-            if not free and kind == "surface":       # BUG-316: trees cut the default block, fewer plots may fit
-                fewer = fewer_plots_sites(save_dir, "farms", prm, n=1)
-                plots = fewer[0] if fewer else None
-                free = fewer[1] if fewer else []
-            if free:
-                site = kind
-                break
+    site, plots = farm_site_plots(save_dir)
     return {"open": open_, "site": site, **({"plots": plots} if plots else {})}
+
+
+def farm_site_plots(save_dir: Path) -> tuple[str | None, int | None]:
+    """BUG-297/300/316: (kind, plots): kind 'room' / 'surface' / 'none' as farm_site; plots = the fewer plots that fit
+    when the default surface block does not (BUG-316: trees cut it), else None."""
+    if sites_snapshot(save_dir) is None:
+        return None, None
+    for kind, prm in (("room", {}), ("surface", {"surface": 1})):
+        try:
+            free, _, _ = free_sites(save_dir, "farms", prm, n=1)
+        except (BpError, BpUnavailable):
+            free = []
+        plots = None
+        if not free and kind == "surface":
+            fewer = fewer_plots_sites(save_dir, "farms", prm, n=1)
+            plots = fewer[0] if fewer else None
+            free = fewer[1] if fewer else []
+        if free:
+            return kind, plots
+    return "none", None
+
+
+def farm_site(save_dir: Path) -> str | None:
+    """BUG-297/300: 'room' (a farms room site is free on the newest sites snapshot), 'surface' (only a surface site on
+    soil floor, p.surface = 1), 'none' (neither), None (no sites snapshot: unknown)."""
+    if sites_snapshot(save_dir) is None:
+        return None
+    for kind, prm in (("room", {}), ("surface", {"surface": 1})):
+        try:
+            free, _, _ = free_sites(save_dir, "farms", prm, n=1)
+        except (BpError, BpUnavailable):
+            free = []
+        if free:
+            return kind
+    return "none"
+
+
+def farm_site_fix(builds: list, s: dict | None, fort: dict | None) -> tuple[list, str]:
+    """BUG-302: the farms builds of a draft against the fort's farm site (fort.farms.site): 'none' leaves them out (the
+    phase deliverable farms is waived, phase.waive), 'surface' gives them p.surface = 1 (in PEACE only; else left out),
+    unknown or 'room' keeps them. Returns (builds, note)."""
+    ff = (fort or {}).get("farms")
+    site = ff.get("site") if isinstance(ff, dict) else None
+    farms = [b for b in builds if b.get("tpl") == "farms" and not (b.get("p") or {}).get("surface")]
+    if not farms or site not in ("none", "surface"):
+        return builds, ""
+    if site == "surface" and (s or {}).get("mode") == "PEACE":
+        for b in farms:
+            b["p"] = {**(b.get("p") or {}), "surface": 1}
+        return builds, "; BUG-302: farms@S1 p.surface=1 (no farms room site on soil, a surface site is free)"
+    keep = [b for b in builds if not any(b is f for f in farms)]
+    if site == "surface":
+        return keep, (f"; BUG-302: farms left out: only a surface farm site, drafted in PEACE only "
+                      f"(mode {(s or {}).get('mode')})")
+    return keep, ("; BUG-302: farms left out: no farm site (bp sites farms: 0 room, 0 surface sites); the P0 deliverable "
+                  "is waived (phase.waive farms, follow sends it); food: trade.want food, seeds; fishing; butcher.mark")
 
 
 def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | None) -> tuple[dict | None, str]:
@@ -2277,6 +2320,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     if fdb:
         k = next((i for i, b in enumerate(front) if b["tpl"] not in (CISTERN["tpl"], AQWELL)), len(front))
         front.insert(k, fdb)
+    # BUG-302: a farms build of the phase list or the emergency drafts that no farm site can take is left out
+    builds, fsn = farm_site_fix(builds, s, fort)
+    front, fsn2 = farm_site_fix(front, s, fort)
+    fsnote = fsn or fsn2
     builds.sort(key=lambda b: b["tpl"] != SEAL)  # Run 11 siege 8: seal first (the runner runs it first anyway)
     if front:
         k = 0
@@ -2336,6 +2383,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     doc["notes"] += core_note
     if fnote and (fdb is None or any(b is fdb for b in builds)):
         doc["notes"] += fnote
+    if fsnote:
+        doc["notes"] += fsnote
     if tb and any(b is tb for b in builds):
         doc["notes"] += tnote
     # FR-99: the cavern sweep comes with the phase that delivers it (P6), or stays on once a plan had it
