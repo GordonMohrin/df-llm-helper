@@ -45,6 +45,15 @@ local function world(o)
     return {c = c or '.', dig = '', bld = c == 'L' and 'passable' or ''}
   end
   function snap.far(K, x, y, z) return y < 25 end
+  W.grp, W.greads = o.grp, 0                     -- BUG-170: walk group of a tile (default: one group, 1)
+  function snap.groups(K, pts)
+    local out = {}
+    for i, p in ipairs(pts) do
+      W.greads = W.greads + 1
+      out[i] = W.grp and W.grp(p[1] or p.x, p[2] or p.y, p[3] or p.z) or 1
+    end
+    return out
+  end
   package.loaded['dfllm.reflex'] = nil
   X.load(W, {'military'}, {X.runner('P5'), snap, require('dfllm.reflex')})
   -- military staffs A, B (melee) and C (crossbows), 8 soldiers, in PEACE (the army out of sight for that frame): a
@@ -296,6 +305,75 @@ T.test('BUG-142 (live i3: stations.b2 48,40,127 was a stone wall, the soldiers s
   breach(W2)
   T.eq(orders_of(W2, 'A'), 'station@51,63,10')
   T.eq(#evs(W2, 'STATION_MOVED'), 0)
+end)
+
+---------------------------------------------------------------- BUG-170: a station the squad cannot walk to
+T.test('BUG-170 dfllm.stations: relocate takes only a floor on the walk group o.group (-1 unknown never refuses)',
+       function()
+  local m = manifest()
+  local brs = SL.bridges(m)
+  local tile = function() return {c = '.', bld = ''} end
+  local p = {x = 51, y = 70, z = Z}
+  local grp = function(_, y) return y >= 66 and 2 or (y == 65 and -1 or 1) end
+  T.eq(SL.relocate(m, brs, p, {}, {clear = 2, ring = 2, tile = tile}), p, 'old: the station itself')
+  T.eq(SL.relocate(m, brs, p, {}, {clear = 2, ring = 2, tile = tile, group = 1, group_of = grp}),
+       {x = 51, y = 65, z = Z}, 'group 2 refused, the unknown 65 counts')
+  T.eq(SL.relocate(m, brs, p, {}, {clear = 2, ring = 2, tile = tile, group = 3, group_of = grp, R = 3}), nil,
+       'no tile of group 3 within the radius')
+end)
+
+-- live i3 (y722, BUG-142 retest): B2 stays raised; stations.b2 moved to 47,41,127, a floor on walk group 2157 behind B2,
+-- core on the same group; all 8 soldiers on group 6, on_station 0 of 8 through ALERT, BREACH and SIEGE, so siege_release
+-- (M3-release) and the bridge_stuck fallback (M3-breach-stuck) never came. Here: everything from y 50 on is group 2, the
+-- soldiers stand pinned in Z3 (group 1).
+local function pinned_world(tag, grp)
+  local W = world{grp = grp, tag = tag}
+  for _, key in ipairs({'A', 'B', 'C'}) do
+    local s = X.squad_of(W, key)
+    for _, p in ipairs(s and s.positions or {}) do
+      local u = p.occupant >= 0 and W.unit(W.hfs[p.occupant].unit_id)
+      if u then W.move(u.id, 51, 44, Z); u._m.pinned = true end
+    end
+  end
+  return W
+end
+
+T.test('BUG-170 (live i3 BUG-142/NEW1): a station on another walk group than its squad is skipped like a wall: ' ..
+       'b2 and core (and the core level) lie behind the raised B2, so BREACH stations the squads at melee; ' ..
+       'STATION_MOVED unreachable names both groups', function()
+  local W = pinned_world('st170', function(_, y) return y >= 50 and 2 or 1 end)
+  breach(W)
+  T.eq({orders_of(W, 'A'), orders_of(W, 'C')}, {'station@51,44,10', 'station@51,44,10'},
+       'old code: station@51,63,10 on group 2, no soldier can walk there')
+  local mv = evs(W, 'STATION_MOVED', 'unreachable')
+  T.eq(#mv, 1, 'once per station and outcome')
+  T.eq({mv[1].d.first, mv[1].d.station, mv[1].d.from, mv[1].d.to, mv[1].d.grp, mv[1].d.home},
+       {'b2', 'melee', {51, 63, Z}, {51, 44, Z}, 2, 1})
+  T.ok(mv[1].msg:find('station b2 51,63,10 lies on walk group 2, the soldiers on 1 (no way there): moved to melee ' ..
+                      '51,44,10', 1, true), mv[1].msg)
+  T.eq(X.call(W, 'military', 'station_for', 'CORE'), {51, 44, Z}, 'siege\'s core station too (every fort squad)')
+end)
+
+T.test('BUG-170: an unreachable station moves to the nearest floor on the squad\'s group when one lies within ' ..
+       'reach; groups are re-read after GROUP_TTL (a lowered bridge renumbers them)', function()
+  local cut = true
+  local W = pinned_world('st170b', function(_, y) return (cut and y >= 62) and 2 or 1 end)
+  breach(W)
+  T.eq(orders_of(W, 'A'), 'station@47,61,10', 'the nearest group-1 floor clear of B2 (Chebyshev ring 2, then Euclid)')
+  local mv = evs(W, 'STATION_MOVED', 'unreachable')
+  T.ok(#mv == 1 and mv[1].d.station == 'b2' and mv[1].msg:find('moved to 47,61,10', 1, true),
+       mv[1] and mv[1].msg or 'no STATION_MOVED unreachable')
+  cut = false                                      -- one walk group again
+  run(W, 7000)                                     -- past GROUP_TTL and RELOC_TTL
+  T.eq(orders_of(W, 'A'), 'station@51,63,10', 'back at stations.b2 once it can be reached')
+end)
+
+T.test('BUG-170 review: the sortie\'s gathering point (safe_pos) ignores the walk group: the bailey lies beyond the ' ..
+       'raised B1 by design (siege lowers B1 for the gather)', function()
+  local W = pinned_world('st170c', function(_, y) return y < 40 and 3 or 1 end)
+  T.eq(X.call(W, 'military', 'safe_pos', {51, 11, Z}, 'bailey'), {51, 13, Z},
+       'old (BUG-170 first cut): 51,11,10 kept, no group-1 floor near O1')
+  T.eq(#evs(W, 'STATION_MOVED', 'unreachable'), 0)
 end)
 
 T.done()

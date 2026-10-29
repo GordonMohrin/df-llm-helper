@@ -1823,11 +1823,16 @@ end
 local function reloc(K, man, brs, p, blk, clear, o)
   local now = now_tick(K)
   if rt.reloc_man ~= man then rt.reloc, rt.reloc_man = {}, man end
-  local key = string.format('%s|%d|%s', pstr(p), clear, o.tag or '')
+  local key = string.format('%s|%d|%s|%s', pstr(p), clear, o.tag or '', tostring(o.group or '-'))
   local c = rt.reloc[key]
-  if c and now >= c.t and now - c.t < M.RELOC_TTL then return c.q or nil end
+  if c and now >= c.t and now - c.t < M.RELOC_TTL and not (c.q and M.off_group(K, c.q, o.group)) then
+    return c.q or nil
+  end
   local q = SL.relocate(man, brs, p, blk, {clear = clear, need_by = o.need_by, side = o.side, ring = clear,
-                                           tile = tile_reader(K)})
+                                           tile = tile_reader(K), group = o.group or nil,
+                                           group_of = o.group and function(x, y, z)
+                                             return M.group_at(K, {x = x, y = y, z = z})
+                                           end or nil})
   q = q and geom.pos(q.x, q.y, q.z) or nil
   rt.reloc[key] = {t = now, q = q or false}
   return q
@@ -1850,6 +1855,82 @@ function M.no_floor(K, p)
   return v or nil
 end
 
+-- BUG-170 (live i3: B2 stays raised, stations.b2 48,40,127 moved to 47,41,127, a floor on walk group 2157 behind it; all
+-- 8 soldiers stood on group 6, on_station 0 of 8 through ALERT, BREACH and SIEGE): a station must lie on the walk group
+-- of the squad that goes there (DF's own connectivity, dfhack.maps.getWalkableGroup through snapshot.groups; a hidden
+-- tile answers -1 = unknown, never evidence). Groups are renumbered when a bridge moves: cached M.GROUP_TTL ticks only.
+M.GROUP_TTL = 100
+function M.group_at(K, p)
+  local now = now_tick(K)
+  rt.grp = rt.grp or {}
+  local key = pstr(p)
+  local c = rt.grp[key]
+  if c and now >= c.t and now - c.t < M.GROUP_TTL then return c.g end
+  local ok, out = K.call('snapshot', 'groups', {{p.x, p.y, p.z}})
+  local g = ok and type(out) == 'table' and int(out[1]) or -1
+  rt.grp[key] = {t = now, g = g}
+  return g
+end
+
+-- true when tile p lies on a known walk group other than `group` (0 = none: no way there either)
+function M.off_group(K, p, group)
+  if not group then return false end
+  local g = M.group_at(K, p)
+  return g >= 0 and g ~= group
+end
+
+-- the main walk group of squad s (the group most of its living members stand on), of every fort squad without s,
+-- else of the citizens; nil unknown (no snapshot, every answer hidden or 0). Cached per tick.
+function M.home_group(K, s)
+  local now = now_tick(K)
+  local key = s and s.id or 'all'
+  rt.home = (rt.home and rt.home.t == now) and rt.home or {t = now}
+  if rt.home[key] ~= nil then return rt.home[key] or nil end
+  local pts = {}
+  local function add(u)
+    local ok, x, y, z = pcall(function() return int(u.pos.x), int(u.pos.y), int(u.pos.z) end)
+    if ok and x and y and z and x >= 0 then pts[#pts + 1] = {x, y, z} end
+  end
+  local sqs = {}
+  if s then
+    sqs[1] = s
+  else
+    for _, sp in ipairs(M.SQUADS) do
+      local e = st.sq[sp.key]
+      local q = e and squad(e.id)
+      if q then sqs[#sqs + 1] = q end
+    end
+  end
+  for _, q in ipairs(sqs) do for _, m in ipairs(members(q)) do add(m.unit) end end
+  local function major(list)
+    if #list == 0 then return nil end
+    local ok, out = K.call('snapshot', 'groups', list)
+    if not ok or type(out) ~= 'table' then return nil end
+    local n, best = {}, nil
+    for _, g in ipairs(out) do
+      g = int(g)
+      if g and g > 0 then
+        n[g] = (n[g] or 0) + 1
+        if not best or n[g] > n[best] or (n[g] == n[best] and g < best) then best = g end
+      end
+    end
+    return best
+  end
+  local g = major(pts)
+  if not g then
+    pts = {}
+    local cu = K.census and K.census.u
+    for i, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+      if i > 60 then break end
+      local u = df.unit.find(id)
+      if u then add(u) end
+    end
+    g = major(pts)
+  end
+  rt.home[key] = g or false
+  return g
+end
+
 -- the station of a chain: the first entry that lies clear of every bridge footprint (o.need_by: a stricter clearance
 -- for a bridge; o.side: an inner side it must lie on), else moved to the nearest revealed floor on the inner side of
 -- the footprints that hold it, else the next entry (alt entries only after one failed; o.all: every entry).
@@ -1858,6 +1939,7 @@ local function pick(K, man, stations, chain, o)
   o = o or {}
   local clear = clearance(K)
   local brs = SL.bridges(man)
+  if o.group == nil then o.group = M.home_group(K, o.sq) or false end   -- BUG-170
   local r, failed = {}, o.all == true
   for _, ent in ipairs(chain) do
     local alt = type(ent) == 'table' and ent.alt
@@ -1868,8 +1950,10 @@ local function pick(K, man, stations, chain, o)
         local blk = SL.blockers(brs, p, clear, o.need_by)
         local inside = not o.side or o.side(p.x, p.y, p.z)
         local wall = not seek and M.no_floor(K, p)               -- BUG-142: a revealed wall is no station
-        if #blk == 0 and inside and not seek and not wall then r.pos, r.name = p, name; return r end
+        local away = not seek and not wall and M.off_group(K, p, o.group) and M.group_at(K, p)   -- BUG-170
+        if #blk == 0 and inside and not seek and not wall and not away then r.pos, r.name = p, name; return r end
         if wall and r.first.name == name then r.first.wall = wall end
+        if away and r.first.name == name then r.first.away, r.first.home = away, o.group end
         local q = reloc(K, man, brs, p, blk, clear, o)
         if q then r.pos, r.name, r.from = q, name, (not seek) and p or nil; r.blk = r.blk or blk[1]; return r end
         r.blk = r.blk or blk[1] or (not inside and {name = o.bridge or '?', d = -1}) or nil
@@ -1907,6 +1991,12 @@ local function note_pick(K, r)
     txt = string.format('station %s %s is no floor (%s): %s', f.name, pstr(f.pos), f.wall,
                         to and string.format('moved to %s%s', r.name ~= f.name and (r.name .. ' ') or '', pstr(to))
                         or 'no revealed floor near it and no other station of its chain: no station order')
+  elseif f.away and not b then                   -- BUG-170: no way there from the squad's walk group
+    why = 'unreachable'
+    txt = string.format('station %s %s lies on walk group %d, the soldiers on %d (no way there): %s', f.name,
+                        pstr(f.pos), f.away, f.home or -1,
+                        to and string.format('moved to %s%s', r.name ~= f.name and (r.name .. ' ') or '', pstr(to))
+                        or 'no reachable floor near it and no other station of its chain: kept')
   elseif to and r.name == f.name then
     why = 'bridge'
     txt = string.format('station %s %s lies%s: moved to %s (the nearest revealed floor on its inner side)', f.name,
@@ -1923,15 +2013,16 @@ local function note_pick(K, r)
   local d = {why = why, station = r.name or f.name, first = f.name, from = geom.arr(f.pos)}
   if to then d.to = geom.arr(to) end
   if b then d.bridge, d.d = b.name, b.d end
+  if f.away then d.grp, d.home = f.away, f.home end
   K.emit('STATION_MOVED', 'B', txt:sub(1, 200), d)
   K.log(why == 'bridge' and 'info' or 'warn', 'military: %s', txt)
 end
 
 -- the station of posture P for squad kind `kind` (first melee): pos or nil, and the chain's first entry
-local function posture_station(K, man, stations, P, kind, first_melee)
+local function posture_station(K, man, stations, P, kind, first_melee, sq)
   local which, chain = station_of(K, man, P, kind, first_melee, stations)
   if not chain then return which, nil, nil end
-  local r = pick(K, man, stations, chain)
+  local r = pick(K, man, stations, chain, {sq = sq})
   note_pick(K, r)
   local src = r.first and (r.first.name .. '@' .. pstr(r.first.pos)) or nil
   -- BUG-142: never the first entry's position when it is a wall (the squad would scatter)
@@ -1959,7 +2050,7 @@ local function apply_squad(K, k, force)
   if so and so.keep then return true end             -- M3 (BUG-113): a sortie against a lone harmless intruder is kept until sortie_pass ends it
   local man = K.manifest()
   local stations = type(man.stations) == 'table' and man.stations or {}
-  local which, pos, src = posture_station(K, man, stations, st.posture, e.kind, k == first_melee_key())
+  local which, pos, src = posture_station(K, man, stations, st.posture, e.kind, k == first_melee_key(), s)
   local ov = rt.over[k]                               -- BUG-032: re-stationed off a bridge it held (restation)
   if ov then
     if ov.P == st.posture and ov.src == src then pos = ov.pos else rt.over[k] = nil end
@@ -2738,7 +2829,9 @@ function M.safe_pos(K, pos, name)
   local p = posp(pos)
   if not p then return nil end
   local man = K.manifest()
-  local r = pick(K, man, type(man.stations) == 'table' and man.stations or {}, {{name = name or 'pos', pos = p}})
+  -- BUG-170: no walk-group test here: the sortie gathers in the bailey beyond a raised B1 that siege lowers itself
+  local r = pick(K, man, type(man.stations) == 'table' and man.stations or {}, {{name = name or 'pos', pos = p}},
+                 {group = false})
   note_pick(K, r)
   local q = r.pos or p
   return {q.x, q.y, q.z}
@@ -2782,7 +2875,7 @@ local function restation_one(K, man, stations, bname, fp, q, clear, margin)
   end
   for _, n in ipairs({'core', 'b2', 'z4'}) do chain[#chain + 1] = n end
   local r = pick(K, man, stations, chain, {need_by = {[bname] = need}, side = side, all = true, bridge = bname,
-                                           tag = bname .. ':' .. need})
+                                           tag = bname .. ':' .. need, sq = squad(q.sid)})
   local label = key and string.format('squad %d (%s)', q.sid, key) or string.format('squad %d', q.sid)
   local head = string.format('%s holds the raise of %s: soldier %d %d tile%s from its footprint, %d from the squad\'s '
                              .. 'station %s', label, bname, q.ids[1], q.d, q.d == 1 and '' or 's', q.o, pstr(q.p))
@@ -2800,7 +2893,8 @@ local function restation_one(K, man, stations, bname, fp, q, clear, margin)
     return false
   end
   if key then
-    local _, _, src = posture_station(K, man, stations, st.posture, st.sq[key].kind, key == first_melee_key())
+    local _, _, src = posture_station(K, man, stations, st.posture, st.sq[key].kind, key == first_melee_key(),
+                                      squad(st.sq[key].id))
     rt.over[key] = {P = st.posture, src = src, pos = r.pos, bridge = bname}
     apply_squad(K, key, true)
   elseif not K.act.squad_order(q.sid, {kind = 'station', pos = r.pos}) then

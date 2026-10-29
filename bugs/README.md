@@ -188,6 +188,7 @@ Related: FR-xx, BUG-xx
 | [BUG-167](BUG-167-transform-ack-default-applies-after-the-wave-is-over.md) | fixed (offline, live-untested) | medium | live i2: the TRANSFORM ack default clamped the clock for a unit back in dwarf form; now it asks care's curse view | lua/dfllm/reflex.lua, care.lua |
 | [BUG-168](BUG-168-reflex-record-checks-for-a-duplicate-twice.md) | fixed (offline) | low | live i2: reflex record() held the duplicate check twice (merge artifact) | lua/dfllm/reflex.lua |
 | [BUG-169](BUG-169-kernel-kill-order-targets-far-intruders-and-the-sortie-end-names-one.md) | fixed (offline, live-untested) | high | live i3: the kernel's lone-intruder kill order also took a unit 149 tiles out (the squad marched out in a BREACH); the sortie end named only the last target | lua/dfllm/reflex.lua, military.lua, dfpilot/schema.py |
+| [BUG-170](BUG-170-squad-station-on-another-walk-group-than-its-soldiers.md) | fixed (offline, live-untested) | high | live i3: the wall station b2 moved to a floor behind the raised B2 (walk group 2157, soldiers on 6), on_station 0 of 8 | lua/dfllm/military.lua, lua/dfllm/stations.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
