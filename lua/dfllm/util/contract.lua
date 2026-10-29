@@ -231,6 +231,7 @@ C.VERBS = {
   ['ack']          = {mod = 'reflex'},
   ['order.add']    = {mod = 'economy'},
   ['jobs.release'] = {mod = 'economy'},
+  ['butcher.mark'] = {mod = 'economy'},     -- BUG-260: the animal sheet's slaughter toggle for n tame animals
   ['perimeter.record'] = {mod = 'seal'},
   -- BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild (rebuild that bridge anyway)
   ['bridge.rebuild'] = {mod = 'seal'},

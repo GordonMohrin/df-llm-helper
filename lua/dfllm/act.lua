@@ -1020,6 +1020,8 @@ local function impls(state)
     if U.isDead(u) or U.isCitizen(u, true) then return false, 'not a living animal' end
     if not U.isTame(u) or not U.isFortControlled(u) then return false, 'not a tame fort animal' end
     if U.isPet and U.isPet(u) then return false, 'a pet' end
+    -- BUG-260 (verb butcher.mark): a trained war or hunting animal is never marked (the sheet would allow it)
+    if on and ((U.isWar and U.isWar(u)) or (U.isHunter and U.isHunter(u))) then return false, 'a war or hunting animal' end
     if on then
       if u.flags2.slaughter then return true, 'already' end
       u.flags3.marked_for_gelding = false

@@ -867,6 +867,9 @@ VERB_ARGS: dict[str, Obj] = {
                                     if "hf" in a and a["job"] != "EngraveSlab" else None),
                          "item-definition jobs need item_subtype (FR-39); EngraveSlab needs hf (BUG-078)"),
     "jobs.release": Obj(opt={"all": Bool(), "preventblocking": Bool()}),
+    # BUG-260 (Run 15 Inkintense famine: breeding pairs the famine slaughter keeps were marked by hand): the animal sheet's
+    # slaughter toggle for n tame animals (pets, war and hunting animals never; one pair per race stays unless keep_pairs false)
+    "butcher.mark": Obj(opt={"n": Int(1, 20), "race": AnyOf(NAT, Str(r"^[A-Z0-9_]{1,40}$")), "keep_pairs": Bool()}),
     "perimeter.record": Obj(),
     # BUG-030 rebuild policy: the player's answer to DECISION_NEEDED bridge_rebuild: rebuild that bridge anyway
     "bridge.rebuild": Obj(req={"bridge": BRIDGE}),
@@ -902,6 +905,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "tombs.repair": ("care", None, False),
     "ack": ("reflex", None, False),
     "order.add": ("economy", None, False), "jobs.release": ("economy", None, False),
+    "butcher.mark": ("economy", None, False),          # BUG-260
     "perimeter.record": ("seal", None, False), "bridge.rebuild": ("seal", None, False),
     # BUG-055: office appointments any time; the squads screen only outside a fight
     "appoint": ("economy", None, False),

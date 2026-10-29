@@ -97,14 +97,15 @@ T.test('FR-17: every empty season slot gets a crop that grows then and there (un
   days(W, 1)
   T.eq({under.plant_id[1], under.plant_id[2], under.plant_id[3]}, {0, 0, 0}, 'plump helmets all year')
   T.eq(surf.plant_id[0], 2, 'spring: carrots (seeds in stock, grows in spring)')
-  T.eq(surf.plant_id[2], 1, 'autumn: the plot\'s own strawberries')
+  -- BUG-256: no strawberry seed: autumn stays empty (old: the plot's own strawberries without a seed)
+  T.eq(surf.plant_id[2], -1, 'autumn: no crop with seeds grows then')
   T.eq(surf.plant_id[3], -1, 'winter: no surface crop grows')
   T.eq({empty.plant_id[0], empty.plant_id[3]}, {-1, -1})
   local ci = W.K.census.i
   -- BUG-058: the slot of the running season (spring) was filled at once by T.slotnow; the daily fill counts the other 9
   T.eq({ci.farm_plots, ci.farm_empty}, {3, 9}, 'counted before the daily fill')
   days(W, 1)
-  T.eq(W.K.census.i.farm_empty, 5, 'the empty plot (4) and winter on the surface plot (1)')
+  T.eq(W.K.census.i.farm_empty, 6, 'the empty plot (4), autumn and winter on the surface plot (2)')
 end)
 
 T.test('FR-23: seeds in a forbidden bag are unusable; bag and seeds are unforbidden on known reachable tiles', function()

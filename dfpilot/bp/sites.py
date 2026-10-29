@@ -669,6 +669,11 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
                 box = core
             if farm:
                 s = sum(soil.count(*_rot_rect(r[:4], ax, ay, rot), az + r[4]) or 0 for r in plots)
+                # BUG-257 (Run 15 Inkintense/Drillchamber: farms on 'soil 0/70' sites, build_lost 'missing p' for 8
+                # seasons): quickfort builds farm plots only on soil or mud, so with the soil known (the snapshot's soil
+                # marks) a site needs soil under half its plot tiles; unknown soil stays a warning (plan check)
+                if soil_pts and 2 * s < area:
+                    continue
                 score += 10 * s - 25 * (top - az)
                 why += f", soil {s}/{area} plot tiles" if soil_pts else ", soil unknown"
                 why += f", {top - az} levels below the top of Z4"

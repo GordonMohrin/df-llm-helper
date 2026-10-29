@@ -269,6 +269,12 @@ Related: FR-xx, BUG-xx
 | [BUG-252](BUG-252-pending-pull-ignores-unknown-census.md) | fixed (offline, live-untested) | high | Run 15b Earthboat: a pending pull went ahead while the census was unknown | lua/dfllm/gate.lua |
 | [BUG-253](BUG-253-no-warning-when-a-unit-steps-on-a-moving-bridge.md) | fixed (offline, live-untested) | medium | Run 15b Earthboat: no warning when a unit stepped onto a moving bridge (GATE_CRUSH_RISK) | lua/dfllm/gate.lua |
 | [BUG-254](BUG-254-status-says-drill-never-after-an-automatic-drill.md) | fixed (offline, live-untested) | low | Run 15b Earthboat: status said 'drill never' right after an automatic drill had run | dfpilot/brief.py |
+| [BUG-255](BUG-255-no-still-in-year-one-kernel-only-asks.md) | fixed (offline, live-untested) | high | Run 15 Inkintense/Drillchamber: year 1 without a Still, drink_low only asks | economy |
+| [BUG-256](BUG-256-seedless-crop-holds-farm-slots-famine.md) | fixed (offline, live-untested) | high | Run 15 Inkintense: a seedless crop held the farm slot through a famine; seedless fallback; no extra plot | economy |
+| [BUG-257](BUG-257-farms-build-lost-on-stone-retried-eight-seasons.md) | fixed (offline, live-untested) | high | Run 15: farms build_lost 'missing p' on soil 0/70 sites, re-dug for 8 seasons | bp/sites, runner, economy |
+| [BUG-258](BUG-258-food-low-options-unusable.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: food_low offers a fishing zone without water and bolts without a crossbow | economy |
+| [BUG-259](BUG-259-thirst-alarm-noise-while-dwarves-drink-water.md) | fixed (offline, live-untested) | medium | Run 15 Drillchamber: thirst DECISION every 7 days with 0 thirsty, no plants asked for | economy |
+| [BUG-260](BUG-260-no-butcher-verb-breeding-pairs-marked-by-hand.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: no butcher verb, breeding pairs marked for slaughter by hand | economy, act, schema |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
