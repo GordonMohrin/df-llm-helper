@@ -233,6 +233,7 @@ Related: FR-xx, BUG-xx
 | [BUG-215](BUG-215-release-waits-for-stations-that-do-not-exist.md) | fixed (offline, live-untested) | high | live 4: siege_release and breach_stuck wait for soldiers at stations that do not exist (nost 8 of 8) | lua/dfllm/stations.lua, lua/dfllm/reflex.lua, lua/dfllm/siege.lua |
 | [BUG-217](BUG-217-memorial-request-never-fires-under-care-pacing.md) | fixed (offline, live-untested) | medium | live 4: the memorial request never fires, care's searches come further apart than the episode window | lua/dfllm/care.lua |
 | [BUG-218](BUG-218-stressor-list-counts-none-and-positive-emotions.md) | fixed (offline, live-untested) | low | live 4: the weekly stressor list counts 'None' and emotions that lower stress | lua/dfllm/care.lua |
+| [BUG-219](BUG-219-observe-leaves-seeping-tile-walls-rough.md) | fixed (offline, live-untested) | medium | live 4: observe mode leaves the aquifer walls of later dug, seeping tiles rough | lua/dfllm/aqshaft.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
