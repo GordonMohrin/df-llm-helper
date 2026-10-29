@@ -113,6 +113,12 @@ def test_live_trade_reads_the_cmd_after_the_last_apply(save):
     _cli(save, int(applied) + 30, "verb:trade.want", {"want": ["bad token!"]}, "sent c4")
     _cli(save, int(applied) + 31, "reply:trade.want", {"id": "c4"}, "ERR want/sell must be token lists")
     assert plan.live_trade(save)["want"] == ["food", "seeds", "cloth"]
+    # review: a trade.retry with lists overrides like trade.want; a refused one (no caravan) does not
+    _cli(save, int(applied) + 40, "verb:trade.retry", {"want": ["gem"]}, "sent c5")
+    _cli(save, int(applied) + 41, "reply:trade.retry", {"id": "c5"}, "ERR no caravan at the depot")
+    assert plan.live_trade(save)["want"] == ["food", "seeds", "cloth"]
+    _cli(save, int(applied) + 50, "verb:trade.retry", {"want": ["anvil"]}, "sent c6")
+    assert plan.live_trade(save) == {"want": ["anvil"], "sell": ["crafts"]}
 
 
 def test_propose_keeps_the_running_trade_want(base):

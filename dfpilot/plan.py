@@ -1920,7 +1920,8 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
 
 def live_trade(save_dir: Path) -> dict | None:
     """BUG-242 (Run 15 Inkintense y373: Gordon's `cmd trade.want ... food, seeds` for food_low; the draft set the default
-    bar:iron, anvil, cloth and the apply would have dropped it): the wants the kernel trades by now. A `trade.want` sent
+    bar:iron, anvil, cloth and the apply would have dropped it): the wants the kernel trades by now. A `trade.want` (or
+    a `trade.retry` with lists) sent
     after the last plan apply (plan.json's time: the plan.reload ends the override, trade.lua) is the running list:
     {want?, sell?} of such cli.log lines whose reply was no ERR (a later one replaces the lists it names). None without
     one."""
@@ -1938,13 +1939,14 @@ def live_trade(save_dir: Path) -> dict | None:
         f = ln.split("\t")
         if len(f) < 5 or not f[0].isdigit():
             continue
-        if f[2] == "reply:trade.want" and f[4].startswith("ERR"):
+        if f[2] in ("reply:trade.want", "reply:trade.retry") and f[4].startswith("ERR"):
             try:
                 bad.add(json.loads(f[3]).get("id"))
             except (ValueError, AttributeError):
                 pass
             continue
-        if f[2] != "verb:trade.want" or int(f[0]) < since:
+        # review: trade.retry's lists override the wants the same way (trade.lua override)
+        if f[2] not in ("verb:trade.want", "verb:trade.retry") or int(f[0]) < since:
             continue
         try:
             args = json.loads(f[3])

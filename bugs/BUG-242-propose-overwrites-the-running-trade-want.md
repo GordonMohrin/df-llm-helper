@@ -14,7 +14,8 @@ draft would have replaced it by the old list. The player added the tokens to the
 reload ends the override) and merges their `want` / `sell` lists in order, as the override does; a line whose reply was ERR is
 skipped. `propose(..., live=...)` starts `trade` from them (the CLI and follow's `auto_plan` pass it); the metal, leather and pick
 goals still put their tokens in front. The notes say "BUG-242: trade.want kept from the running cmd trade.want: ...".
-The state has no trade.want key, so the kernel's list itself is not read (no new state field).
+The state has no trade.want key, so the kernel's list itself is not read (no new state field). Review: a `trade.retry` with
+lists overrides the wants the same way (trade.lua), so its lines count too (a refused one, ERR, does not).
 
 ## Tests
 `tests/test_bug241_244_plan_propose.py`: `test_live_trade_reads_the_cmd_after_the_last_apply`,
