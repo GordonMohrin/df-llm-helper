@@ -176,13 +176,13 @@ T.test('a lost lever of a bridge seen whole counts; a bridge that never had its 
   T.ok(ready(Wn).fail[1] ~= 'open_perimeter', T.show(ready(Wn).fail))
 end)
 
-T.test('the signal survives a reload (the days keep counting) and outside PEACE it keeps its last answer', function()
+T.test('the signal survives a reload (the days keep counting) and outside PEACE it is not started anew; its ways in ' ..
+       'follow the entrance check (BUG-322)', function()
   local W = world{entrances = LEAKY}
   day(W, 4)
   local pd = ready(W).pd
   T.ok(pd >= 3)
-  W.K.set_mode('ALERT', 'test')                   -- gates are up, ways are "open" by design: no news
-  W.seal.x = SEALED
+  W.K.set_mode('ALERT', 'test')                   -- gates are up: the ways in stay as the entrance check reads them
   day(W, 3)
   T.ok(ready(W).pd >= pd + 2, 'still counted in ALERT: ' .. tostring(ready(W).pd))
   -- a reload (persist m.readiness) keeps the days
@@ -193,6 +193,9 @@ T.test('the signal survives a reload (the days keep counting) and outside PEACE 
   W.load(require('dfllm.readiness'))
   day(W)
   T.ok(ready(W).pd >= pd2, 'the days survive a reload: ' .. tostring(ready(W).pd) .. ' vs ' .. pd2)
+  W.seal.x = SEALED
+  day(W)
+  T.eq(ready(W).pd, nil, 'closed in ALERT: gone (BUG-322)')
   W.K.set_mode('PEACE', 'test')
   day(W)
   T.eq(ready(W).pd, nil, 'closed in PEACE: gone')

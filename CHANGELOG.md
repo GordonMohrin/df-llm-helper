@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Run 15 perimeter: one source for the ways in, a sapling way in gets its piece (BUG-322, BUG-323, 2026-10-29; offline, live-untested)
+- **Why:** Earthboat y385 (SIEGE): status `PERIMETER OPEN 46 days: 2 ways in` beside `ways in: all with a door or bridge`, and
+  `seal at=last` `nothing to close`; state `ready.open 0, pd 47, pw "2 ways in"`: readiness kept the PEACE text for the whole siege
+  (readiness.lua:529-536, BUG-322). Inkintense y376-y377: ways in on the open surface kept coming back (sapling/shrub/floor on the
+  same tiles), `seal at=last` dropped `79,85,133 sapling: left out, no single neighbouring tile closes its route`, so R0 never cleared
+  (cmd.py:1073-1090, BUG-323).
+- **What changed:** readiness: outside PEACE the open-perimeter signal is never started and keeps lost bridges/levers, but its ways
+  in are the entrance check's of now (`M.perim_now`); nothing left open ends it (pd, phold). cmd.seal_openings: a sapling no
+  neighbour closes gets its piece on the sapling itself (`x,y,z floor`, quickfort builds on SAPLING tiles, build.lua
+  is_valid_tile_generic / is_valid_tile_has_space), with a note; a neighbour that closes it stays first.
+- **Tests (fail on 1d17c7e):** tests/lua/test_bug322_perimeter_one_source.lua (2 of 2), tests/bp/test_bug323_sapling_seal.py (1 of
+  2; the shrub guard passes on both); tests/lua/test_open_perimeter.lua: the reload test closes in ALERT now.
+- **Live check:** Earthboat after a kernel reload, still in SIEGE: no `PERIMETER OPEN` line beside `ways in: all with a door or
+  bridge`. Inkintense: the next `seal at=last` with a sapling way in notes `the piece goes on the sapling` and queues it. Uncertain:
+  whether DF's builder takes a sapling tile as quickfort places it (a stuck door is walled by the runner), and whether growing tree
+  crowns create new roofed openings on the surface.
+
 ## Run 15c surface farm: bp.emit places it, fewer plots when trees cut the block (BUG-316, 2026-10-29; offline, live-untested)
 - **Why:** Inkintense y377 (food 21 d), live: `bp sites farms plots=1 surface=1` ranked 2 sites, but `cmd bp.place tpl=farms
   site=S1 plots=1 surface=1` and `plan check` failed with `[92, 87, 133]: bp.emit(farms): min() iterable argument is empty`;

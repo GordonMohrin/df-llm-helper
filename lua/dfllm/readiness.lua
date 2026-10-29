@@ -35,7 +35,8 @@
 -- the SIEGE_UNREADY wake repeats every perimeter.escalate_every days (and 5 real minutes) instead of monthly, with the
 -- days counted; a fort of perimeter.hold_pop citizens or more holds max-pop where it stands (the cap never rises while
 -- the perimeter is open). state ready.pd = the days, ready.pw = what is open. Outside PEACE the signal keeps its last
--- answer (a lockdown's open gates are no news). A bridge seal replaced by a wall + door is no lost bridge.
+-- answer for bridges and levers (a lockdown's open gates are no news) and never starts; its ways in follow the entrance
+-- check (BUG-322, M.perim_now). A bridge seal replaced by a wall + door is no lost bridge.
 -- FR-65 siege readiness gate: while R0 fails in PEACE, SIEGE_UNREADY (A) names the blockers, the ways in without a
 -- door or bridge (seal.entrance_doors) and the trap count of the last audit; first at once (2 days after a load),
 -- then again after a game month and 30 real minutes, or 10 when it got worse (util/cadence).
@@ -391,6 +392,19 @@ local function open_perimeter(K, man)
   return #why > 0 and cut(table.concat(why, '; '), 60) or nil
 end
 
+-- BUG-322 (Run 15b Earthboat y385, SIEGE: status 'PERIMETER OPEN 46 days: 2 ways in' beside 'ways in: all with a door or
+-- bridge', `seal at=last` 'nothing to close'): the open-perimeter text `pw` with its ways-in part replaced by the entrance
+-- check's count `open` (>= 0); the other parts (bridges lost, levers lost) stay. nil when nothing is left open.
+function M.perim_now(pw, open)
+  local parts = {}
+  if open > 0 then parts[1] = string.format('%d way%s in', open, open == 1 and '' or 's') end
+  for p in tostring(pw or ''):gmatch('[^;]+') do
+    p = p:gsub('^%s+', ''):gsub('%s+$', '')
+    if p ~= '' and p ~= '?' and not p:match('^%d+ ways? in$') then parts[#parts + 1] = p end
+  end
+  return #parts > 0 and cut(table.concat(parts, '; '), 60) or nil
+end
+
 local function evaluate(K, why)
   local now = K.now().tick
   local man = K.manifest()
@@ -530,6 +544,11 @@ local function evaluate(K, why)
     rt.pw = open_perimeter(K, man)
     if rt.pw and not st.pt then st.pt, dirty = now, true
     elseif not rt.pw and st.pt then st.pt, st.phold, dirty = nil, nil, true end
+  elseif st.pt and (rt.open or -1) >= 0 then
+    -- BUG-322: outside PEACE the ways in are the entrance check's of now (the one source of status, SIEGE_UNREADY and
+    -- seal at=last), lost bridges and levers keep their last answer; nothing left open ends the signal
+    rt.pw = M.perim_now(st.pw, rt.open)
+    if not rt.pw then st.pt, st.phold, dirty = nil, nil, true end
   end
   rt.pd = st.pt and math.max(0, (now - st.pt) // 1200) or nil     -- game days (TICKS.DAY)
   if st.pt then
