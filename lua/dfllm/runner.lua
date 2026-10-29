@@ -144,7 +144,8 @@ M.MOODABLE = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsFo
               'Clothiers', 'Leatherworks', 'Tanners', 'Loom', 'GlassFurnace', 'Mechanics'}
 -- deliverable kind -> module that makes it measurable; an absent module skips the deliverable
 local OWNER = {baseline = 'baseline', squads = 'military', metal = 'military', drill = 'readiness',
-               ready = 'readiness', stock = 'economy', orders = 'economy', bolts = 'economy', trade = 'trade'}
+               ready = 'readiness', stock = 'economy', orders = 'economy', bolts = 'economy', trade = 'trade',
+               kit = 'military'}                                                         -- FR-100
 local PLAN_DRIVEN = {proj = true, workshops = true}
 
 local S = {}   -- module state, rebuilt by init (persist docs + caches)
@@ -3543,6 +3544,12 @@ local CHECK = {
   ready = function(K, dv) local v = K.view().ready; return v ~= nil and (v.lvl or 0) >= dv.lvl end,
   metal = function(K, dv) local v = K.view().mil; return v ~= nil and (v.metal_pct or 0) >= dv.pct end,
   bolts = function(K, dv) local v = K.census.i; return v ~= nil and (v.bolts or 0) >= dv.n end,
+  -- FR-100 (G18): soldiers fully equipped (armor + a weapon in hand, state mil.kit) >= pct % of the soldiers, and some
+  kit = function(K, dv)
+    local v = K.view().mil
+    local t = type(v) == 'table' and v.kit
+    return type(t) == 'table' and (t.n or 0) > 0 and 100 * (t.full or 0) >= (dv.pct or 100) * t.n
+  end,
   workshops = function(K, dv)
     local have = {}
     for _, w in ipairs(K.manifest().workshops or {}) do have[w.type] = true end

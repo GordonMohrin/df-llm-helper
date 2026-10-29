@@ -125,7 +125,7 @@ helper is experimental; procedure and fair-play limits: `tools/embark/README.md`
 | `audit` | `bp.topo.audit` result | sent by `follow` or `dfllm audit` (they compute it), never `dfllm cmd audit` |
 | `popcap.lower` / `tempo.lower` | `{cap}` / `{fps, ttl_s}` | lower only (tempo never above the mode value) |
 | `appoint` | `{code, unit}` | nobles screen: a vacant offered office (`inspect what=offices`; a squad member only for MILITIA_*; economy fills MANAGER, BOOKKEEPER, BROKER, CHIEF_MEDICAL_DWARF itself) |
-| `squad.create` `{name, leader?, assignment?}`, `squad.leader` `{squad, unit}`, `squad.add` `{squad, unit}`, `squad.uniform` `{squad, kind?}` | squad = A, B, C or the game's id | squads screen, PEACE/ALERT/RECOVERY only; a squad named A, B or C is adopted by military; `squad.add` needs a leader; `squad.uniform` = the kind's metal set for A/B/C |
+| `squad.create` `{name, leader?, assignment?}`, `squad.leader` `{squad, unit}`, `squad.add` `{squad, unit}`, `squad.uniform` `{squad, kind?}` | squad = A, B, C or the game's id | squads screen, PEACE/ALERT/RECOVERY only; a squad named A, B or C is adopted by military; `squad.add` needs a leader; `squad.uniform` = the kind's metal set for A/B/C (`melee` also ends the wooden training default for that squad, `training` sets it again; FR-100) |
 | `pause` / `unpause` / `resume` | `{ttl_s ≤ 600, why?}` / `{}` / `{why?}` | rarely; `unpause` releases only an inbox pause. `resume` (FR-94) releases a pause DF set (`status` pause:df after a load or restart, pause:popup) with the player's pause key; once per 60 s, refused in any other state and while a popup with a threat or curse word (arbiter.DENY) is open; the reply names the old reason, the new state and every popup it read and dismissed. The player's own pause stays his |
 | `trade.want` | `{want?, sell?}` | tokens like `bar:iron`, `anvil`, `cloth` (any), `cloth:plant`/`silk`/`yarn` (also `thread:`), `armor:metal` (`:metal` = a metal material) |
 | `trade.retry` | `{civ?, want?, sell?}` | PEACE; a second trade in the same visit: caravan at the depot, ≥ 3,000 ticks left |
@@ -249,7 +249,7 @@ the lever tiles (`Hebel+`) while pulls are pending; until threat 0 for 2 days, o
 size, traps and the field allow it, B1 lets them into the killing field, rises, O1 lets up to 6 hostiles into bailey and
 trap hall, rises, the field is cleared, the squads go back; INTAKE (B) per phase, WAVE_FAIL (A) when it goes wrong.
 **Military:** squads A, B melee, C crossbows, ≤ 10 each; stations > 2 tiles from every bridge (BUG-032); in a siege a melee squad below half is refilled from healthy core civilians, never the refuge; melee squads fill only to the armor+weapon+shield sets (≥ 2; the siege refill to 5 goes beyond; metal short: the rest to C); Constant training, never Off duty;
-Replace clothing + full metal + shield; KPI is worn %, never "assigned". Kill orders only inside
+Replace clothing + full metal + shield (an empty slot is refit to any material after 7 d, FR-100); KPI is worn % and `gear: N/M soldiers fully equipped`, never "assigned"; melee squads spar with wooden training weapons (FR-100/101), real ones in every alert. Kill orders only inside
 manifest kill boxes, never into shafts or stairs. No civilian reserve squads.
 **Captives:** haul inside at once, then a pit zone; comrades free caged invaders.
 **Economy:** natives first (orders library, labormanager monitor, suspendmanager, buildingplan,
@@ -284,7 +284,7 @@ FPS cap 30; no Lua quicksaves (only `dfllm save`, verified); DF autosave yearly.
 | P3 | fortcore stage 3 (O1, B2, the refuge) first (DECISIONS 1), smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |
 | P5 | gallery, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d (the refuge of stage 3 comes with P3 and before any phase_target P3+: §8 refuge gate) |
-| P6 ★ (Y2) | military orders, trap hall armed (fortcore stage 4), metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |
+| P6 ★ (Y2) | military orders, trap hall armed (fortcore stage 4), metal ≥ 80 %, ≥ 300 bolts, R2 cap raise, `kit` ≥ 80 % of the soldiers fully equipped (FR-100) |
 | P7 ★ | beauty in used rooms; R3 only with D-01 = B |
 ★ = entered only when your plan's `phase_target` reaches it.
 

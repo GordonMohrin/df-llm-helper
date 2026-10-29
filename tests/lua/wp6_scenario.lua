@@ -36,6 +36,9 @@ mods[#mods + 1] = X.runner('P5')
 local ok, msg = H.boot(W, {repo = REPO, modules = mods})
 assert(ok, msg)
 local K = kern.K()
+-- FR-100: the repo config puts the melee squads on training weapons (a re-spec through the real act with df.squad_uniform_spec,
+-- not faked here); this scenario pins the pre-FR-100 files (tests/test_wp6_files.py), so the policy stays off
+K.cfg.baseline.military.training = {on = false}
 local function run(n, at) S.run(W, n, {at = at, frame = function(dt) H.frame(W, dt) end}) end
 local function expect(mode) assert(K.mode() == mode, 'expected ' .. mode .. ', got ' .. K.mode()) end
 local AUDIT = {snap = 'snap1', ok = true, fails = json.array{}, min_traps = 35, bypass = false, refuge_sep = true,

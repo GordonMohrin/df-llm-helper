@@ -23,5 +23,5 @@
               {"k": "stock", "key": "food_d", "min": 60}, {"k": "bolts", "n": 100}]},
  {"id": "P6", "title": "Y2: iron/steel kits, 300 bolts, traps (fortcore stage 4), R2 cap raise", "approve": true,
   "deliver": [{"k": "orders", "lib": "library/military"}, {"k": "proj", "tpl": "fortcore", "stage": 4},
-              {"k": "metal", "pct": 80}, {"k": "bolts", "n": 300}, {"k": "ready", "lvl": 2}]},
+              {"k": "metal", "pct": 80}, {"k": "bolts", "n": 300}, {"k": "ready", "lvl": 2}, {"k": "kit", "pct": 80}]},
  {"id": "P7", "title": "beauty in used rooms only; R3 only with D-01 = B", "approve": true, "deliver": []}]}

@@ -17,9 +17,13 @@ X.CAT_TYPE = {body = 'ARMOR', head = 'HELM', pants = 'PANTS', gloves = 'GLOVES',
 X.ROUTINES = {'Off duty', 'Staggered training', 'Constant training', 'Ready'}
 -- weapon raws (itemdefs.weapons; skills as df.job_skill names, resolved in install): index = subtype
 X.WEAPONS = {{'ITEM_WEAPON_AXE_BATTLE', 'AXE'}, {'ITEM_WEAPON_PICK', 'MINING'}, {'ITEM_WEAPON_SPEAR', 'SPEAR'},
-             {'ITEM_WEAPON_SWORD_SHORT', 'SWORD'}, {'ITEM_WEAPON_MACE', 'MACE'}, {'ITEM_WEAPON_CROSSBOW', 'HAMMER', 'CROSSBOW'}}
+             {'ITEM_WEAPON_SWORD_SHORT', 'SWORD'}, {'ITEM_WEAPON_MACE', 'MACE'}, {'ITEM_WEAPON_CROSSBOW', 'HAMMER', 'CROSSBOW'},
+             -- FR-89/FR-100: the vanilla training raws (wooden, the skill of their class) and a war hammer (no training raw)
+             {'ITEM_WEAPON_AXE_TRAINING', 'AXE'}, {'ITEM_WEAPON_SWORD_SHORT_TRAINING', 'SWORD'},
+             {'ITEM_WEAPON_SPEAR_TRAINING', 'SPEAR'}, {'ITEM_WEAPON_HAMMER_WAR', 'HAMMER'}}
 X.WIDX = {}
 for i, w in ipairs(X.WEAPONS) do X.WIDX[w[1]] = i - 1 end
+X.MAT_CLASS = {metal = 1, leather = 2}       -- df.entity_material_category Armor / Leather in this world (install)
 
 ---------------------------------------------------------------- units
 -- a citizen inside Kern+ (S.KERN): i-th of a grid; extra = spec overrides
@@ -89,7 +93,9 @@ function X.set_uniform(s, spec)
       for _, it in ipairs(spec.items or {}) do p.equipment.uniform[it.cat] = vec{} end   -- only the named categories
       for _, it in ipairs(spec.items or {}) do
         p.equipment.uniform[it.cat]:insert('#', {item_type = it.type, subtype = it.subtype, item = -1, assigned = vec{},
-                                                 item_subtype = X.WIDX[it.subtype] or -1})
+                                                 item_subtype = X.WIDX[it.subtype] or -1,
+                                                 -- act.lua MAT_CLASS: metal = Armor, leather = Leather, any = -1
+                                                 material_class = X.MAT_CLASS[it.mat] or -1, mat = it.mat})
       end
     end
   end
@@ -194,6 +200,16 @@ end
 ---------------------------------------------------------------- install
 function X.install(W, opts)
   opts = opts or {}
+  -- FR-100/101: the kernel puts every melee squad on wooden training weapons by default (military.training.on) and gives
+  -- the classes without a training raw the fallback's. The WP6 worlds predate it and keep the old behaviour (off, no
+  -- fallback) unless opts.training (a military.training table, or true for the shipped defaults). A world that loads the
+  -- repo's config later (kern_world H.boot) gets the shipped defaults
+  if opts.training ~= true and W.K and type(W.K.cfg) == 'table' then
+    W.K.cfg.baseline = W.K.cfg.baseline or {v = 2}
+    local b = W.K.cfg.baseline
+    b.military = b.military or {}
+    b.military.training = type(opts.training) == 'table' and opts.training or {on = false, fallback = 'none'}
+  end
   local g = df.global
   W.squads, W.hfs, W.items_by_id = {}, {}, W.items_by_id or {}
   W.squad_seq, W.item_seq = 300, 9000
@@ -221,6 +237,7 @@ function X.install(W, opts)
                                      'InMouth', 'Pet', 'SewnInto', 'Strapped'}
   df.item_type = kmock.enum{'BAR', 'BOULDER', 'WEAPON', 'ARMOR', 'SHOES', 'SHIELD', 'HELM', 'GLOVES', 'PANTS', 'AMMO',
                             'QUIVER'}
+  df.entity_material_category = {Armor = X.MAT_CLASS.metal, Leather = X.MAT_CLASS.leather}
   df.caravan_state = {T_trade_state = kmock.enum{'None', 'Approaching', 'AtDepot', 'Leaving', 'Stuck'}}
   local U = dfhack.units
   U.getNominalSkill = function(u, sk) return (u._m.skills or {})[df.job_skill[sk]] or 0 end
@@ -236,6 +253,12 @@ function X.install(W, opts)
     return {id = w[1], skill_melee = df.job_skill[w[2]], skill_ranged = w[3] and df.job_skill[w[3]] or -1}
   end
   dfhack.military.getSquadName = function(id) local s = W.squads[id]; return s and s.alias or ('Squad ' .. id) end
+  -- the weapon raws as the real act.squad_uniform resolves a subtype token (world.raws.itemdefs.weapons: id, subtype)
+  local wdefs = {}
+  for i, w in ipairs(X.WEAPONS) do wdefs[i] = {id = w[1], subtype = i - 1} end
+  g.world.raws = g.world.raws or {}
+  g.world.raws.itemdefs = g.world.raws.itemdefs or {}
+  g.world.raws.itemdefs.weapons = vec(wdefs)
   for _, u in ipairs(g.world.units.active) do X.decorate(W, u) end
   -- act fakes (the real act.lua implements these with dfhack.military, CONTRACTS §5)
   W.act_result('squad_create', function(name, o)

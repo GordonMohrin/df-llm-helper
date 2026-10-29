@@ -1032,6 +1032,9 @@ STATE = Obj(
                          # Run 11: the melee squads follow the gear (military.gear_fill): sets, melee filled to, melee
                          # wanted, crossbow positions added while metal is short
                          "cap": Obj(req={"sets": NAT, "melee": NAT, "want": NAT, "xbow": NAT}),
+                         # FR-100 (G18): n soldiers, full = armor + a weapon, armor = every armor slot worn, weapon = a
+                         # weapon in hand, wood = a training weapon in hand, tr = squads on the training policy
+                         "kit": Obj(req={"n": NAT, "full": NAT, "armor": NAT, "weapon": NAT, "wood": NAT, "tr": NAT}),
                          # FR-79: the militia rotation per squad key: w = window months, on = 1 inside the window, n = members
                          # now, z = squad target, e = eligible citizens, lo/hi = windows served by the eligible, nx = game days
                          # to the next close (0 = the turnover is due), rt = turnovers done, mv = members swapped in all, why =
@@ -1138,18 +1141,20 @@ PLAN = named("plan", Obj(
          "seasons": Arr(Obj(req={"build": Arr(BUILD, hi=20)},
                             opt={"orders": Obj(req={"import": LIBS}), "notes": Str(maxbytes=500)}), 4, 4)},
     opt={"military": Obj(req={"pct": Int(0, 50), "squads": Obj(req={"melee": Int(0, 4), "xbow": Int(0, 2)}),
-                              "cv_min": Int(0, 200)}),
+                              "cv_min": Int(0, 200)},
+                         # FR-100 (G18): the melee squads spar with wooden training weapons (military.training.on)
+                         opt={"training": Bool()}),
          "supply": Obj(req={"drink_d": NAT, "food_d": NAT, "mood_stock": NAT}),
          "orders": Obj(req={"import": LIBS}),
          "trade": Obj(req={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
          "notes": Str(maxbytes=2000)}))
-PLAN_DEFAULTS = {"military": {"pct": 15, "squads": {"melee": 2, "xbow": 1}, "cv_min": 12},
+PLAN_DEFAULTS = {"military": {"pct": 15, "squads": {"melee": 2, "xbow": 1}, "cv_min": 12, "training": True},
                  "supply": {"drink_d": 170, "food_d": 60, "mood_stock": 10},
                  "orders": {"import": []}, "trade": {"want": [], "sell": []}, "notes": ""}
 
 DELIVER_KEYS = {"baseline": [], "proj": ["tpl"], "squads": ["n"], "drill": [], "workshops": ["types"],
                 "stock": ["key", "min"], "orders": ["lib"], "trade": ["n"], "ready": ["lvl"],
-                "metal": ["pct"], "bolts": ["n"]}
+                "metal": ["pct"], "bolts": ["n"], "kit": ["pct"]}   # FR-100: kit = soldiers fully equipped %
 
 
 def _deliver_check(d):
