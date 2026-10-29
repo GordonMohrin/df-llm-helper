@@ -61,6 +61,21 @@
   running trade.want: no fair-play line. Uncertain: that grass is DF's reason (the tiletype of the zone tiles was not readable
   offline); if no bare sand floor is revealed, the blockers say `sand zone invalid` + `no sand revealed` and the player must dig into
   the sand layer.
+## Run 15 trade click: the Trade click names its tile with both mice, gives the mouse back and checks what it opened (BUG-305, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 review of fix8: the depot sheet's Trade button stood at x80, then x56 after the relaunch (~1793277607), later x145
+  (window resized); a unit sheet then blocked caravans (BUG-286/287) and Earthboat sent seven label-verified clicks at 82,15 that never
+  opened the trade screen. The x came from the live screen; the click did not: act wrote only `gps.mouse_x/y`, while DF takes a click
+  the interface does not catch to the map at `precise_mouse_x/y` (the cached OS cursor), and `gui.simulateInput` leaves
+  `enabler.tracking_on` at 1 (DF then follows that cursor, BUG-228). Nothing checked what the click opened.
+- **What changed:** act.lua `tr_click` (depot sheet Trade, trade screen Trade): mouse and precise mouse on the target tile (centre pixel
+  from `gps.tile_pixel_x/y`; unknown size = no click), afterwards the mouse fields and `tracking_on` written back. trade.lua `step_open`:
+  the screen after a sheet click is checked; another sheet is logged `the Trade click at X,Y opened <focus> instead of the trade
+  screen`, closed as the kernel's own (BUG-286), and after `MIS_MAX` 2 the attempt ends `misclick` (no retry, no click series).
+- **Tests (fail on 9ef2ccb):** tests/lua/test_bug305_trade_click.lua (5 of 5).
+- **Live check:** after a relaunch/resize the next caravan opens with one `open ... x:N` followed by `mark`/`offer` in the same second,
+  no `ViewSheets/UNIT` afterwards, no `opened ... instead of the trade screen` in kern.log. That line or CARAVAN `failed: misclick`:
+  DF still routes the click elsewhere; compare the named focus and `gps.tile_pixel_x/y` with the window size.
+
 ## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
 - **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
   player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no

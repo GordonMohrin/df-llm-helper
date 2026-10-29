@@ -15,7 +15,7 @@ local function env()
   local d = W.add_building{id = 50, _depot = true, centerx = 22, centery = 22, z = 10}
   d.trade_flags = {trader_requested = false, anyone_can_trade = false}
   W.add_building{id = 51}
-  df.global.gps = {mouse_x = -1, mouse_y = -1}
+  df.global.gps = {mouse_x = -1, mouse_y = -1, precise_mouse_x = -1, precise_mouse_y = -1, tile_pixel_x = 10, tile_pixel_y = 15}
   local t = {open = false, choosing_merchant = false, good = {[0] = kmock.vec{}, [1] = kmock.vec{}},
              goodflag = {[0] = kmock.vec{}, [1] = kmock.vec{}}}
   df.global.game = {main_interface = {trade = t, view_sheets = {open = false, active_id = -1}}}

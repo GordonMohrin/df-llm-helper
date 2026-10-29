@@ -317,6 +317,7 @@ Related: FR-xx, BUG-xx
 | [BUG-302](BUG-302-plan-propose-drafts-farms-with-0-farm-sites.md) | fixed (offline, live-untested) | medium | Run 15d: plan propose drafts farms@S1 with 0 farm sites | plan.py |
 | [BUG-303](BUG-303-sand-zone-on-floors-df-does-not-count.md) | fixed (offline, live-untested) | high | Run 15d: sand zones on floors DF does not count (grass on a sand layer), abort series unseen | snapshot.lua, economy.lua, zonelib.lua |
 | [BUG-304](BUG-304-plan-fair-play-flags-trade-token-plant.md) | fixed (offline, live-untested) | medium | Run 15d: plan check calls the trade token `cloth:plant` a fair-play ERROR | plan.py |
+| [BUG-305](BUG-305-trade-click-lands-on-the-map-after-a-window-resize.md) | fixed (offline, live-untested) | high | Run 15: the kernel's Trade click can land on the map (a unit sheet) after a window relaunch/resize | act.lua, trade.lua |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
