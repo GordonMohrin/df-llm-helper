@@ -100,6 +100,19 @@ def test_next_waits_when_the_applied_plan_builds_the_refuge(save, monkeypatch):
     assert guide.decide(guide.gather(save)).cmd == guide.PLAN_CMD     # both done and the fail stays: propose again
 
 
+def test_next_ignores_cancelled_and_old_core_projects(save, monkeypatch):
+    monkeypatch.setattr(guide, "_hospital_project", lambda save_dir: False)
+    put_state(save, ready=READY(fail=["no_inner"], open=0, audit={"ok": 1, "age": 100, "min_traps": 40}))
+    _plan_with(save, {"tpl": "fortcore", "site": "same", "p": {"stage": 3}})
+    (save / "bp" / ".cancelled").mkdir(parents=True, exist_ok=True)
+    files.write_json_atomic(save / "bp" / ".cancelled" / "y3s1b1.json", {"tpl": "fortcore", "params": {"stage": 3}})
+    # the fort's own (stalled) fortcore stage 1 of an earlier year: no new core, no refuge fix under way
+    files.write_json_atomic(save / "bp" / "y1s0b1.json", {"tpl": "fortcore", "params": {"stage": 1}, "anchor": [1, 2, 3]})
+    f = guide.gather(save)
+    assert f["refuge_proj"] == [], f["refuge_proj"]
+    assert guide.decide(f).cmd == guide.PLAN_CMD
+
+
 def test_next_proposes_when_the_refuge_plan_is_from_an_earlier_year(save, monkeypatch):
     monkeypatch.setattr(guide, "_hospital_project", lambda save_dir: False)
     put_state(save, ready=READY(fail=["refuge_dry"], open=0, audit={"ok": 1, "age": 100, "min_traps": 40}))

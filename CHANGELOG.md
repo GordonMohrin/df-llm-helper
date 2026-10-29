@@ -9,7 +9,8 @@
 - **What changed:** (1) brief `line_unready(cmds=False)`: the 'no trap hall yet' note and `next: <first hint>` follow the blocker list,
   before PERIMETER, ways in, traps and route; brief keeps its order (BUG-220). (2) guide `gather` `refuge_proj` (`_refuge_project`,
   `_refuge_build`): this year's applied plan builds and open bp projects that fix a refuge fail (fortcore stage 3 or a new core, refuge_beds,
-  refuge_drink, a seal not at=audit) and a running fortcore s3 row; `_r0` then waits and the idle WHY names them (BUG-221). (3) plan
+  refuge_drink, a seal not at=audit; not cancelled, not stopped on a breach; an older bp file not as a first fortcore stage 1) and a
+  running fortcore s3 row; `_r0` then waits and the idle WHY names them (BUG-221). (3) plan
   `refuge_gate`: missing beds with no bed site while stage 3 is planned or under way are a warning at any phase ('beds follow fortcore
   stage 3 ...: apply, wait for s3.dig, propose again') (BUG-222). (4) plan `fit_explore_kept` (propose CLI): a kept, not done explore whose
   shaft reaches a manifest.caverns level gets a line and a note with its `bp.cancel` (BUG-223).

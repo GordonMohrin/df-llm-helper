@@ -126,21 +126,29 @@ def _refuge_build(b: dict) -> bool:
 def _refuge_project(save_dir: Path, s: dict, plan: dict | None) -> list[str]:
     """BUG-221 (live round 4: NEXT said `plan propose` right after the apply that holds fortcore stage 3 and the refuge
     beds and drink): the ids of the refuge fixes under way: this year's applied plan builds and bp projects with no
-    PROJECT_DONE, and a running fortcore s3.* row of state.proj (not stopped on a breach). [] when none or unreadable."""
-    from .plan import bp_files, bp_id, done_projects
+    PROJECT_DONE, and a running fortcore s3.* row of state.proj (not stopped on a breach). Cancelled projects
+    (bp/.cancelled) and fortcore projects a breach stopped (core_breaches) do not count; an older bp file counts only as
+    stage 3, refuge_beds/drink or a seal (the fort's first fortcore stage 1 is no new core). [] when none or unreadable."""
+    from .plan import _resite, bp_files, bp_id, core_breaches, done_projects
     out: list[str] = []
     try:
         done = done_projects(save_dir)
+        canc = Path(save_dir) / "bp" / ".cancelled"
+        stopped = {c["proj"] for c in core_breaches(save_dir, s) if isinstance(c, dict)}
+
+        def gone(pid: str) -> bool:
+            return pid in done or pid in stopped or (canc / f"{pid}.json").is_file()
         year = (s.get("t") or {}).get("y")
         if isinstance(plan, dict) and isinstance(year, int) and plan.get("year") == year:
             for si, se in enumerate(plan.get("seasons") or []):
                 for bi, b in enumerate((se or {}).get("build") or []):
                     pid = bp_id(plan["year"], si, bi)
-                    if isinstance(b, dict) and pid not in done and _refuge_build(b):
+                    if isinstance(b, dict) and not gone(pid) and _refuge_build(b):
                         out.append(pid)
         for p in bp_files(save_dir):
             doc = files.read_json(p, retry=False)
-            if p.stem not in done and p.stem not in out and isinstance(doc, dict) and _refuge_build(doc):
+            if not gone(p.stem) and p.stem not in out and isinstance(doc, dict) and _refuge_build(doc) \
+                    and not _resite(doc):
                 out.append(p.stem)
     except Exception:                                   # noqa: BLE001 - unreadable plan/bp files: assume none (propose)
         return []
