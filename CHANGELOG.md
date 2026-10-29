@@ -113,6 +113,26 @@
   `dfllm:mech`, then LEVER 'link B2' and status without levers:B2; no Mechanic's workshop: why=gear [Mechanics]. Guildcleans: inspect
   workload stone.soil true, inspect trade want `stone`/`gem`/`mechanism`. Gear: why=gear [Leatherworks, Tanners]. inspect workload
   idle_why.hurt = only wounded/bled dwarves; read-only for a former 'hurt' id: wounds, blood_count/blood_max, health.flags.
+## Run 15 seal first: the seal's enabler runs, food below 60 days, a named cause and one re-place, the held pop cap (BUG-273..276, 2026-10-29; offline, live-untested)
+- **Why:** Drillchamber y372: seal first paused the workshops project whose Carpenter's would make the door the seal waited for
+  ('door x1 (0 free, 3 ordered)', 37 orders 'workshop missing'), and the farms; 20 days later SEAL_STUCK, food 27 d, drink 20 d,
+  9 of 14 idle, the player cancelled the seal (BUG-273, BUG-275). Earthboat y373-y375: the refuge hatch 55,82,133 open 619 days,
+  'job 8095 not suspended, no builder has taken it', no cause class, nothing placed it again (BUG-274). Guildcleans y375: an opening
+  walled after an unsuitable door held max-pop at 35 (perimeter.hold_pop) and the seal never said so (BUG-276).
+- **What changed:** runner: (1) a workshops project that builds a Carpenter's or Mason's is not paused by the seal while the lead
+  seal's door/hatch waits for its item (economy.build_state buildingplan) and neither shop stands; kern.log names it (BUG-273).
+  (2) food/drink projects run beside a seal below `seal_first.supply_d` (60) days (BUG-275). (3) SEAL_STUCK `d.why` (unreachable,
+  confined, no item, suspended, no builder, building, not placed), `N items attached` in the wait; a door/hatch whose job no builder
+  takes is removed (quickfort undo) and placed again once, 2 x stuck_days after the clock stopped, PEACE, no lockdown; the clock
+  restarts (BUG-274). (4) the seal-first line and SEAL_STUCK `d.hold` name `pop cap N held by the open perimeter (D d: ...)` from
+  `readiness.ceiling` (BUG-276). Not built: a raised job priority for the piece, hatch -> wall + door, fortcore/mood requests as
+  enablers. Contracts: SEAL_STUCK why, hold; appendix regenerated; RULES §7 SEAL_STUCK row edited in place.
+- **Tests (each fails on 2b9c009):** tests/lua/test_runner_seal_fix6.lua (5).
+- **Live check:** Drillchamber-like fort without Carpenter's/Mason's and a new seal with a door: kern.log `seal first: ... runs
+  first (<id> workshops go on: Carpenter's/Mason's for door x,y,z)`, the workshops row not `paused: seal`. Food 30-59 d: farms not
+  paused, `(food N d < 60: ...)`. Earthboat: SEAL_STUCK d.why for the refuge hatch; 6 days on kern.log `hatch 55,82,133 open N days,
+  its job taken by no builder ...: removed and placed again (once)`; if the fresh job is not taken either, read-only: the job's item
+  position and walk group, the builders' burrows and labors. Guildcleans: `pop cap N held by the open perimeter` in kern.log/SEAL_STUCK.
 
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders

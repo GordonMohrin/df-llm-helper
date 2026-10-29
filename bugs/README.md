@@ -285,6 +285,10 @@ Related: FR-xx, BUG-xx
 | [BUG-269](BUG-269-soil-fort-moods-miss-stone-and-gems.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: strange moods without stone or gems in a deep-soil fort | economy, trade |
 | [BUG-270](BUG-270-gear-misses-leatherworks-no-request.md) | fixed (offline, live-untested) | medium | Run 15 Earthboat: gear 'no leatherworks' and no workshop requested | economy, wake |
 | [BUG-271](BUG-271-hurt-counts-hungry-sleepy-dwarves.md) | fixed (offline, live-untested) | low | Run 15 Earthboat: inspect workload 'hurt 14' counts dwarves without a wound | economy |
+| [BUG-273](BUG-273-seal-first-pauses-the-shop-that-makes-its-door.md) | fixed (offline, live-untested) | high | Run 15 Drillchamber: seal first paused the workshops project whose Carpenter's would make the seal's own door (deadlock) | lua/dfllm/runner.lua |
+| [BUG-274](BUG-274-seal-stuck-names-no-cause-and-never-replaces-the-piece.md) | mitigated (offline, live-untested): cause named, root cause open | high | Run 15 Earthboat: refuge hatch open 619 days, 'no builder has taken it', no cause named, never placed again | lua/dfllm/runner.lua |
+| [BUG-275](BUG-275-seal-first-pauses-food-projects-above-emergency.md) | fixed (offline, live-untested) | medium | Run 15 Drillchamber: seal first paused farms and food shops until food or drink fell below 30 days (food 27 d, drink 20 d later) | lua/dfllm/runner.lua |
+| [BUG-276](BUG-276-seal-does-not-say-it-holds-the-pop-cap.md) | mitigated (offline, live-untested): named, no priority raise | low | Run 15 Guildcleans: an opening walled after an unsuitable door held max-pop at 35 for days; the seal never said so | lua/dfllm/runner.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
