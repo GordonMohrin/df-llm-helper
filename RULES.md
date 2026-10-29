@@ -258,7 +258,7 @@ postings, not idle %. Idle > 40 % for 3 days → useful backlog only, never fill
 **Moods:** all 12 moodable workshop types in P1; stock ≥ 10 cloth, leather, bone, shell, gems, bars
 from P1; never cancel a mood job. No ore: `plan propose` drafts `explore` each season (`plan check` refuses metal unplanned, and soldiers with no metal route at all). No gems: green glass from revealed sand.
 **Labor:** labormanager monitor; economy staffs the Miners (dig backlog, 2-4), Woodcutters (logs) and
-Hunters (famine and `food_low`; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather), Fisherdwarves (3 beside a fishing zone with raw fish) and, with
+Hunters (famine and `food_low`; 1 for a short bone/shell/leather mood stock, 2 after a mood missed leather), Fisherdwarves (3 beside a fishing zone with raw fish; both keep their detail in drills and alerts, off only in a real siege, back when it ends: BUG-326) and, with
 unclaimed reachable PlantSeeds / GatherPlants jobs, the farmers and plant gatherers (BUG-057, `economy.cover`; at `food_low` 4 gatherers, off again at 60 food days; BUG-038; BUG-042: also below 60 drink days while the brewable plants are short) itself; you never change work details.
 **Dead:** one 1x1 tomb per coffin, free tombs ≥ open corpses + 6; autoslab, burial, preserve-tombs.
 **Rebuild (Run 11):** below `rebuild.pop` (10) citizens in a fallen fort (past P1 or once ≥ 12) only seal, plug, tombs, food/drink, beds, wall repairs and the depot run in PEACE/RECOVERY until 12 (`status` `rebuild: pop N < 10, ...`); `plan propose` drafts only those (no phase raise), `plan check` warns on the rest.

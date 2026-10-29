@@ -1,5 +1,21 @@
 # CHANGELOG dfpilot
 
+## Run 15c hunters and fishers: no drill below 60 food days or while food falls, they keep their detail outside a real siege (BUG-326, 2026-10-29; offline, live-untested)
+- **Why:** Inkintense y376-y377 (runs/run-15c-inkintense/FR-BUGS.md 'Runde 3'): an automatic drill at food 35-42 d (#1714) and
+  one at 31 -> 24 d (#1883) took both hunters and all fishers off (#1717-#1721, #1887-#1890); BUG-294 held only below 30 days.
+  Seven short ALERTs took them off again (#1769-#1772) and the SIEGE of two lone goblins took the hunters (#1583/#1584) in a fort
+  that lives on fish and game. Root cause drill.lua:420 (30 days, no trend), economy.lua hunt_want/fish_want (reason `mode` in
+  every mode but PEACE/RECOVERY) and the tools at-once removal for it.
+- **What changed:** drill: `SUPPLY_MIN` 60 food/drink days, plus `supply: food falls N d` while the stock is lower than 7 days
+  ago and below `SUPPLY_FALL` 120 (daily samples persisted in `m.drill` `sh`). economy: hunters and fishers keep their detail in
+  DRILL, ALERT and RECOVERY (`hold`); only a real siege (SIEGE/BREACH, not reflex's lone harmless picture) takes them off at once
+  and they return as soon as it ends or turns out harmless (`p.drill_off`, WORK_DETAIL `drill over`); only a siege rushes the
+  tools run. RULES Labor row.
+- **Tests (fail on 1d17c7e):** tests/lua/test_fix13_hunters.lua (4), updated test_economy_chains.lua, test_economy_food.lua,
+  test_fix10_economy.lua.
+- **Live check:** Inkintense status `drill never (auto: supply: food NN d)` below 60 d; no `mode ALERT`/`mode DRILL` WORK_DETAIL
+  off lines; a real SIEGE shows `mode SIEGE` off and `drill over` back at SIEGE>RECOVERY. Uncertain: whether two goblins are
+  the lone harmless picture (probably not by size, so they still go off in such a siege, but now come back at RECOVERY).
 ## Run 15c surface farm: bp.emit places it, fewer plots when trees cut the block (BUG-316, 2026-10-29; offline, live-untested)
 - **Why:** Inkintense y377 (food 21 d), live: `bp sites farms plots=1 surface=1` ranked 2 sites, but `cmd bp.place tpl=farms
   site=S1 plots=1 surface=1` and `plan check` failed with `[92, 87, 133]: bp.emit(farms): min() iterable argument is empty`;

@@ -15,3 +15,5 @@ No automatic drill while economy.alarm() is set (thirst, hunger, drink or food d
 
 ## Live check
 in a fort below 30 food days: `dfllm status` shows `supply: food N d` as the drill hold and no MODE PEACE>DRILL `auto:` event until food is back.
+
+BUG-326 raised SUPPLY_MIN to 60 days and added the falling trend (below 120 days).

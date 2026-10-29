@@ -1691,17 +1691,30 @@ end
 
 -- hunters wanted: famine or (Run 11) the food_low pre-alarm (PEACE or RECOVERY only), else (PEACE, from
 -- mood_from_phase or an open need, not paused for want of game) one while leather, bone or shell is short of its
--- target, `need` while one of them has an open need. Hunters roam outside the walls: in ALERT, SIEGE, BREACH or a
--- DRILL ("nobody outside at T+1,200") they are wanted nowhere, and tools() takes them off the detail at once (reason
--- 'mode'), not after shrink_days.
+-- target, `need` while one of them has an open need. Hunters roam outside the walls: in a real siege tools() takes
+-- them off the detail at once (reason 'siege'), not after shrink_days (BUG-326 below).
+-- BUG-326 (Run 15c Inkintense: a drill at food 42 d took both hunters and all three fishers off, #1717-#1721, every
+-- one of seven short ALERTs took them off again, #1769-#1772, and a SIEGE of two lone goblins took the hunters, #1583):
+-- the hunters and fishers keep their detail in every mode (DRILL, ALERT, RECOVERY: 'hold', the members stay, none join;
+-- the civil alert keeps them in Kern+ anyway). Only a real siege (SIEGE or BREACH, not reflex's lone harmless picture)
+-- takes them off at once ('siege'); they go back on the detail as soon as that ends (M.mode_restore).
 local HUNT_MODES = {PEACE = true, RECOVERY = true}
+M.HUNT_OFF = {SIEGE = true, BREACH = true}
+function M.hunt_siege(K)
+  if not M.HUNT_OFF[K.mode()] then return false end
+  local ok, ids = K.call('reflex', 'lone_ids')
+  return not (ok and type(ids) == 'table' and #ids > 0)
+end
 local function hunt_want(K, c, r)
   local spec = hunters_spec(c)
   if not spec then return 0, 'none' end
   local mode = K.mode()
-  if not HUNT_MODES[mode] then return 0, 'mode' end
+  if not HUNT_MODES[mode] then
+    if M.hunt_siege(K) then return 0, 'siege' end
+    return st.hunters or 0, 'hold'
+  end
   if r.p.famine or r.p.food_pre then return spec.famine or 0, r.p.famine and 'famine' or 'food low' end
-  if mode ~= 'PEACE' then return 0, 'mode' end
+  if mode ~= 'PEACE' then return st.hunters or 0, 'hold' end
   local short, needed = false, false
   for _, key in ipairs(spec.mood_keys or {}) do
     local tgt = r.targets[key] or target(K, c, r, key)
@@ -1732,14 +1745,17 @@ end
 
 -- fishers wanted (live L5): one per spec.per citizens, at most spec.max, while food is below food.want_days or in
 -- a famine, only with a fishing zone, only in PEACE (in RECOVERY only in a famine): fishers stand at the water
--- outside the walls, like hunters, and tools() takes them off at once in any other mode
+-- outside the walls, like hunters: other modes hold the members, a real siege takes them off at once (BUG-326)
 local function fish_want(K, c, r)
   local spec
   for _, d in ipairs((c.tools or {}).details or {}) do if d.fish then spec = d end end
   if not spec then return 0, 'none' end
   st.fishzone = fishing_zone()
   local mode = K.mode()
-  if not HUNT_MODES[mode] or (mode ~= 'PEACE' and not r.p.famine) then return 0, 'mode' end
+  if not HUNT_MODES[mode] or (mode ~= 'PEACE' and not r.p.famine) then                -- BUG-326
+    if M.hunt_siege(K) then return 0, 'siege' end
+    return st.fishers or 0, 'hold'
+  end
   if not st.fishzone then return 0, 'no zone' end
   local fc = c.food or {}
   local d = (r.days or {}).food_d or 9999
@@ -2578,13 +2594,14 @@ end
 -- leaving PEACE while hunters (or fishers) are out: the next run (tool details) within rush_ticks takes them off
 -- the detail, not up to a day later (drills check "nobody outside" at T+1,200)
 M.on.MODE = function(K, ev)
-  -- BUG-295: back in PEACE after a drill: the hunters and fishers the drill took off return at once (not in RECOVERY:
-  -- a drill that ended in a siege keeps them in until the fort is quiet again; p.drill_off waits for that PEACE)
-  if type(ev) == 'table' and ev.to == 'PEACE' and ev.from ~= ev.to then
+  -- BUG-295, BUG-326: the hunters and fishers a real siege took off return as soon as the mode is no SIEGE or BREACH
+  -- any more (RECOVERY too: the siege is over; p.drill_off)
+  if type(ev) == 'table' and ev.from ~= ev.to and not M.HUNT_OFF[ev.to] then
     local okd, nd = pcall(M.drill_restore, K)
     if not okd then K.log('warn', 'drill restore of the tool details: %s', tostring(nd)) end
   end
-  if type(ev) ~= 'table' or ev.to == 'PEACE' or ((st.hunters or 0) == 0 and (st.fishers or 0) == 0) then return end
+  -- BUG-326: only a siege takes them off, so only a siege rushes the next tools run
+  if type(ev) ~= 'table' or not M.HUNT_OFF[ev.to] or ((st.hunters or 0) == 0 and (st.fishers or 0) == 0) then return end
   st.rush = true
   local rt = M.conf(K).rush_ticks or 100
   if (M.every.ticks or EVERY) > rt then M.every = {ticks = rt} end
@@ -4258,8 +4275,8 @@ local function tools(K, c, p, inv, engine, r)
         ps.low = ps.low or now
         -- hunters outside the walls while the fort leaves PEACE: off the detail now (siege reflex, drills); every
         -- member then, also the player's
-        local at_once = r ~= nil and ((spec.ranged ~= nil and r.hunt_why == 'mode') or
-                                      (spec.fish ~= nil and r.fish_why == 'mode'))
+        local at_once = r ~= nil and ((spec.ranged ~= nil and r.hunt_why == 'siege') or     -- BUG-326: a real siege only
+                                      (spec.fish ~= nil and r.fish_why == 'siege'))
         if at_once or now - ps.low >= (tc.shrink_days or 3) * DAY then
           local out, stay = {}, {}
           -- BUG-128: a member who holds the tool, has DF's work tool pair or joined less than keep_days ago stays
@@ -4285,7 +4302,7 @@ local function tools(K, c, p, inv, engine, r)
           while #stay + #out > tgt and #out > 0 do
             local u = table.remove(out)
             if not set(spec, u.id, false, why, tgt) then out[#out + 1] = u; break end
-            if at_once and K.mode() == 'DRILL' then M.drill_off_add(p, spec.name, u.id) end   -- BUG-295
+            if at_once then M.drill_off_add(p, spec.name, u.id) end   -- BUG-295, BUG-326: back when the siege ends
             mine[u.id] = nil
           end
           cur = stay
@@ -7445,7 +7462,7 @@ function M.food_block(K, c, r, inv)
         put('xbow', string.format("hunt: no crossbow, no Bowyer's workshop (%d bolts)", bolts))
       else put('xbow', string.format('hunt: no crossbow (%d bolts)', bolts)) end
     elseif st.no_ammo or (inv.bolts_free or 0) == 0 then put('hunt', 'hunt: no bolts')
-    elseif h.why == 'mode' then put('hunt', 'hunt: not in ' .. tostring(K.mode())) end
+    elseif h.why == 'siege' or h.why == 'hold' then put('hunt', 'hunt: not in ' .. tostring(K.mode())) end
   end
   local fs = st.food or {}
   if (fs.need or 0) > (fs.tiles or 0) then
@@ -7529,6 +7546,10 @@ function T.plan(K, c, r)
   for _, key in ipairs({'bone', 'shell'}) do r.targets[key] = target(K, c, r, key) end
   r.gear = gear_pre(K, c, r, 0)
   r.targets.leather = target(K, c, r, 'leather') + (phase_ok(K, c.leather.from_phase) and r.gear.leather or 0)
+  -- BUG-326: a SIEGE or BREACH of reflex's lone harmless picture is no real siege: who it took off goes back now
+  if type(r.p.drill_off) == 'table' and next(r.p.drill_off) and M.HUNT_OFF[K.mode()] and not M.hunt_siege(K) then
+    pcall(M.drill_restore, K)
+  end
   r.hunt, r.hunt_why = hunt_want(K, c, r)
   st.hunt = {n = r.hunt, why = r.hunt_why}          -- M.route (care's MOOD_RISK names the leather route)
   r.fish, r.fish_why = fish_want(K, c, r)
@@ -9935,7 +9956,7 @@ function M.route(K, key, via)
     elseif st.no_ammo then parts[#parts + 1] = 'hunt: no bolts'
     elseif hn > 0 then parts[#parts + 1] = string.format('hunt: %d hunter%s', hn, hn == 1 and '' or 's')
     elseif h.why == 'no game' then parts[#parts + 1] = 'hunt paused (no game)'
-    elseif h.why == 'mode' then parts[#parts + 1] = 'hunt: not in ' .. tostring(K.mode())
+    elseif h.why == 'siege' or h.why == 'hold' then parts[#parts + 1] = 'hunt: not in ' .. tostring(K.mode())
     else parts[#parts + 1] = 'hunt' end
     parts[#parts + 1] = 'butcher'
     parts[#parts + 1] = 'trade.want leather'

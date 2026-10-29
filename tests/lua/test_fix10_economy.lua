@@ -47,38 +47,26 @@ local function hw(opts)
 end
 
 T.test('BUG-295 (Inkintense #1408/#1409, #1492/#1493: the drill took both hunters off, back 30,000+ ticks later in a ' ..
-       'famine): the members a DRILL took off return when the mode is PEACE again, WORK_DETAIL why "drill over"', function()
+       'famine), BUG-326: a drill keeps them; the members a siege took off return as soon as it ends, WORK_DETAIL why ' ..
+       '"drill over"', function()
   local W, ctl = hw{food = 1}
   days(W, 2)
   T.eq(#ctl.wds.Hunters.assigned_units, 2, 'famine in PEACE: two hunters')
   W.K.set_mode('DRILL', 'test')
   W.run(150, {skip = 50}); settle(W)
-  T.eq(#ctl.wds.Hunters.assigned_units, 0, 'off at once in the drill (nobody outside at T+1,200)')
+  T.eq(#ctl.wds.Hunters.assigned_units, 2, 'BUG-326: the drill keeps them (the civil alert holds them in Kern+)')
+  T.eq(W.K.persist.get('m.economy').drill_off, nil)
+  W.K.set_mode('SIEGE', 'a siege during the drill')
+  W.run(150, {skip = 50}); settle(W)
+  T.eq(#ctl.wds.Hunters.assigned_units, 0, 'off at once in a real siege')
   local p = W.K.persist.get('m.economy')
   T.eq(#p.drill_off.Hunters, 2)
-  W.K.set_mode('PEACE', 'drill done')
-  T.eq(#ctl.wds.Hunters.assigned_units, 2, 'old code: back only with a later full run')
+  W.K.set_mode('RECOVERY', 'siege over')
+  T.eq(#ctl.wds.Hunters.assigned_units, 2, 'back as soon as the siege ends')
   local back = 0
   for _, e in ipairs(W.find_events('WORK_DETAIL')) do if e.d.why == 'drill over' and e.d.on == 1 then back = back + 1 end end
   T.eq(back, 2)
   T.eq(W.K.persist.get('m.economy').drill_off, nil)
-  -- an ALERT takes them off as before and keeps no drill list (they come back by the usual tools pass)
-  W.K.set_mode('ALERT', 'test')
-  W.run(150, {skip = 50}); settle(W)
-  T.eq(#ctl.wds.Hunters.assigned_units, 0)
-  T.eq(W.K.persist.get('m.economy').drill_off, nil)
-  -- review: a drill that ends in RECOVERY (a siege came) keeps the list until the fort is in PEACE again
-  W.K.set_mode('PEACE', 'test')
-  days(W, 2)
-  T.eq(#ctl.wds.Hunters.assigned_units, 2)
-  W.K.set_mode('DRILL', 'test')
-  W.run(150, {skip = 50}); settle(W)
-  T.eq(#W.K.persist.get('m.economy').drill_off.Hunters, 2)
-  W.K.set_mode('SIEGE', 'a siege during the drill')
-  W.K.set_mode('RECOVERY', 'siege over')
-  T.eq(#W.K.persist.get('m.economy').drill_off.Hunters, 2, 'no restore in RECOVERY')
-  W.K.set_mode('PEACE', 'quiet')
-  T.eq(W.K.persist.get('m.economy').drill_off, nil, 'restored in PEACE')
 end)
 
 ---------------------------------------------------------------- BUG-296 a ramp top over the water

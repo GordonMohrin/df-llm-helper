@@ -15,3 +15,5 @@ The members a DRILL takes off (p.drill_off per detail) go back on their detail a
 
 ## Live check
 after the next drill: `dfllm events --type WORK_DETAIL` shows `Hunters + ... (drill over, back from the drill)` at the DRILL>PEACE tick; the gear line keeps `+ N hunters`.
+
+Superseded in part by BUG-326: a drill and an alert no longer take hunters or fishers off; only a real siege does, and the list is restored as soon as the siege ends (RECOVERY too).

@@ -313,6 +313,7 @@ Related: FR-xx, BUG-xx
 | [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
+| [BUG-326](BUG-326-drills-and-alerts-empty-hunters-and-fishers.md) | fixed (offline, live-untested) | high | Run 15c: drills at 30-42 food days and every alert empty the hunters and fishers | drill.lua, economy.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
