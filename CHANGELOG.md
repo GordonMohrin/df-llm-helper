@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Live test round 2 i3: squad stations on the soldiers' walk group (BUG-170, 2026-10-29; offline, live-untested)
+- **Why:** live i3 (Trussroads y722, BUG-142 retest, skeptic NEW1): the wall station b2 48,40,127 was moved to 47,41,127, a floor on walk group
+  2157 behind the raised B2; all 8 soldiers stood on group 6, on_station 0 of 8 through ALERT, BREACH and SIEGE, so siege_release (M3-release)
+  and the bridge_stuck fallback (M3-breach-stuck) could not fire without a teleport.
+- **What changed:** military `pick()` takes the main walk group of the squad (`M.home_group`: most living members' group via snapshot.groups;
+  every fort squad's, else the citizens' without a squad); a station on another known group is skipped like a wall: the nearest revealed floor
+  on that group (`stations.relocate` `o.group`/`o.group_of`), else the next chain entry. STATION_MOVED `why unreachable` (+ `grp`, `home`).
+  Group reads cached 100 ticks (`M.GROUP_TTL`), the relocation cache keyed by the group and re-checked. The b2-first chain while B2 is up
+  is kept; with the squad outside the core it now falls through to melee.
+- **Contracts:** schema STATION_MOVED fields `grp`, `home`; CONTRACTS §7 posture row and the STATION_MOVED row; appendix regenerated. No RULES row.
+- **Tests:** tests/lua/test_stations.lua BUG-170 (three, each fails on b805745).
+- **Live check (i3, DFHACK_PORT 5002, B2 26040 raised):** after `dfllm reload` read `dfllm events --type STATION_MOVED`: b2 48,40,127 ->
+  `why unreachable` (or wall then unreachable) naming group ~2157 and the soldiers' 6, `to` 55,42,130 (melee) or another tile on group 6;
+  the squad 105 move order equals that tile; military kpi on_station reaches 8 of 8 within a day of ALERT; then the M3-release (lone harmless
+  intruder cleared at max_days in SIEGE, LOCKDOWN_END cause=limit) and M3-breach-stuck (MODE BREACH>SIEGE bridge_stuck) runs without a
+  teleport; lower B2 and check that after ~100 ticks the b2 station is taken again once its group equals the soldiers'.
+
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every
   4th call and after any other command (FR-85-88a, NEW2); `inspect what=items key=trash` said `ok` while 1056 marked items got no dump job and

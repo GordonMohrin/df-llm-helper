@@ -196,7 +196,8 @@ end
 
 -- the nearest revealed plain floor to p that lies clear of every bridge (o.clear, o.need_by) and on the inner side of
 -- each footprint in blk (and of o.side when given); nil none. o.tile(x, y, z) -> snapshot.tile's answer (nil hidden),
--- o.ring = the inner side's search ring, o.R = the search radius (SEARCH_R)
+-- o.ring = the inner side's search ring, o.R = the search radius (SEARCH_R); BUG-170: with o.group and
+-- o.group_of(x, y, z) -> walk group (-1 unknown) only a tile on that walk group counts
 function S.relocate(man, brs, p, blk, o)
   local sides = {}
   for _, b in ipairs(blk) do sides[#sides + 1] = (S.side(man, b.fp, p, o.ring or o.clear)) end
@@ -210,7 +211,13 @@ function S.relocate(man, brs, p, blk, o)
     end
     for _, f in ipairs(sides) do if not f(x, y, z) then return false end end
     if on_stair(cols, x, y, z) then return false end
-    return S.floor(o.tile(x, y, z))
+    if not S.floor(o.tile(x, y, z)) then return false end
+    -- BUG-170: on the walk group of the squad that goes there (o.group; o.group_of -> -1 unknown never refuses)
+    if o.group and o.group_of then
+      local g = o.group_of(x, y, z)
+      if type(g) == 'number' and g >= 0 and g ~= o.group then return false end
+    end
+    return true
   end
   return S.nearest(p, o.R or S.SEARCH_R, ok)
 end
