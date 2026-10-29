@@ -710,7 +710,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AQ_PASS_DONE": ("B", "runner", _d("proj:s", "top:i bot:i lv:ia n:i")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i task:s")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
-    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i")),
+    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i")),
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),
@@ -771,6 +771,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-068: lever `lever` of `bridge` was pulled `pulls` times without the bridge moving (it stays `state`); no pull
     # for `wait` ticks; worker = how many of those pulls a worker took (0: DF dropped every job unclaimed)
     "LEVER_NOEFFECT": ("B", "gate", _d("bridge:s lever:i", "pulls:i state:s wait:i worker:i")),
+    # BUG-253: a unit stood on the footprint of a bridge while it moved (to = up|down; pull = the tick our pull was queued,
+    # -1 a foreign one); once per move, the death itself is BRIDGE_CRUSH
+    "GATE_CRUSH_RISK": ("B", "gate", _d("bridge:s unit:i", "k:s to:s pull:i pos:p")),
     # BUG-121 (Run 14 note 101): boot found the game clock (tick_neu) before the last tick the runtime folder saw (tick_alt): an
     # older save was loaded. n_alt = the last event number of the discarded timeline (numbers continue after it); readers drop
     # events before this marker whose tick is later than tick_neu. BUG-165: kind clock (the above) | foreign (the save's

@@ -1,5 +1,30 @@
 # CHANGELOG dfpilot
 
+## Run 15b crush: the drill lowers its bridges before PEACE, a quiet window for every lowering (BUG-251..254, 2026-10-29; offline, live-untested)
+- **Why:** Run 15b Earthboat y374 summer d74: soldier 24165 died crushed by B1 going down after an automatic drill (#1057
+  BRIDGE_CRUSH, #1058 DEATH 'last seen 1 tile from it'); kern.log: PEACE 150981959, 18 'B1 down still waits for citizen', the pull
+  150984669, 'B1 moving' 150985009, the crush 150985484. `drill.finish` set PEACE and left the lowering to it, so the alert ended and
+  the crowd walked home over B1; the lowering only waited for the 1-tile margin in a busy corridor (BUG-251). The pending path ignored an
+  unknown census (BUG-252); nothing reported the unit stepping onto the moving bridge (BUG-253); status said `drill never (auto: retry
+  wait)` right after the drill (BUG-254).
+- **What changed:** (1) drill: a restore phase after the T+1,200 measurement: the mode stays DRILL (alert, stations, siege FPS cap),
+  `gate.drill_end` wants O1/B1 down (those PEACE wants down), siege's DRILL raise is refused for them, PEACE once they are down or after
+  `RESTORE_MAX` 1,200 ticks; DRILL_RESULT then, with `d.restore` and `d.why`; a bridge not up at T+900 with no pull under way is dropped
+  (`gate.drill_skip`); persisted across a reload. (2) gate: a quiet window for every lowering but siege's rescue/intake/sortie: nobody
+  within `MARGIN_DOWN` 3 tiles (a soldier at his own station excepted), 50 quiet ticks after the last step seen nearby, `QUIET_MAX` 2,400
+  then only the 1-tile margin; a taken lowering pull is cancelled when someone within 3 tiles walks toward the footprint. (3) the
+  pending path cancels on an unknown census (no give-up count). (4) GATE_CRUSH_RISK (B): a unit on a moving bridge, once per move.
+  (5) status/brief drill line: ` [last auto drill 2d ago failed]` when the newest DRILL_RESULT failed after the last pass. Contracts:
+  EVENT GATE_CRUSH_RISK, DRILL_RESULT why/restore; appendix regenerated. arbiter.lua unchanged (it caps by mode; the restore stays DRILL).
+- **Tests (each fails on 2b9c009):** tests/lua/test_drill_restore.lua (6), tests/lua/test_gate_crush.lua (6), tests/test_fix6_crush.py
+  (4); updated pins: test_drill.lua, test_drill_a3.lua, test_drill_home.lua (PEACE after the restore), test_siege.lua (three lowering
+  windows widened by the quiet look).
+- **Live check:** after the next automatic drill: kern.log `gate: drill over: B1, O1 wanted down before PEACE`, GATE B1/O1 down while MODE
+  is DRILL, then DRILL>PEACE 'drill done' and DRILL_RESULT d.restore >= 0; with traffic at B1 `B1 down waits for 50 quiet ticks: <unit>`;
+  `dfllm events --type GATE_CRUSH_RISK`; status `[last auto drill Nd ago failed]` after a failed one. Uncertain: whether soldiers stay on
+  their station tiles while the restore waits (else RESTORE_MAX ends it), and why the crush came 475 ticks after 'B1 moving' (detection
+  lag or a re-pull: compare GATE_CRUSH_RISK with BRIDGE_CRUSH next time).
+
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders

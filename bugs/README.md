@@ -265,6 +265,10 @@ Related: FR-xx, BUG-xx
 | [BUG-248](BUG-248-deep-soil-embark-without-hard-stone.md) | fixed (offline, live-untested) | medium | Run 15: deep-soil embarks without hard stone; stone accepted without a plan | tools/embark |
 | [BUG-249](BUG-249-curse-check-greps-older-forts-in-the-gamelog.md) | fixed (offline, live-untested) | low | Run 15: curse check greps an older fort's lines in the same gamelog | dfpilot/cli.py |
 | [BUG-250](BUG-250-embark-tools-missing-here-save-as-scan-summary.md) | fixed (offline, live-untested) | medium | Run 15c/15d: no embark --here, no save-as, no best compromise or brook distance | tools/embark |
+| [BUG-251](BUG-251-drill-end-lowers-bridges-onto-the-crowd.md) | fixed (offline, live-untested) | critical | Run 15b Earthboat: the drill's end lowered B1 in PEACE onto the crowd walking home (soldier crushed) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-252](BUG-252-pending-pull-ignores-unknown-census.md) | fixed (offline, live-untested) | high | Run 15b Earthboat: a pending pull went ahead while the census was unknown | lua/dfllm/gate.lua |
+| [BUG-253](BUG-253-no-warning-when-a-unit-steps-on-a-moving-bridge.md) | fixed (offline, live-untested) | medium | Run 15b Earthboat: no warning when a unit stepped onto a moving bridge (GATE_CRUSH_RISK) | lua/dfllm/gate.lua |
+| [BUG-254](BUG-254-status-says-drill-never-after-an-automatic-drill.md) | fixed (offline, live-untested) | low | Run 15b Earthboat: status said 'drill never' right after an automatic drill had run | dfpilot/brief.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

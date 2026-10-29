@@ -39,7 +39,8 @@ local function plan(ceiling)
 end
 
 ---------------------------------------------------------------- pass / fail
-T.test('drill pass: DRILL, real pulls, READY_STATION, KPIs at T+1,200, PEACE lowers the bridges', function()
+T.test('drill pass: DRILL, real pulls, READY_STATION, KPIs at T+1,200, the bridges lowered still in DRILL (BUG-251), ' ..
+       'then PEACE', function()
   local W = world()
   local ok, msg = start(W)
   T.ok(ok, msg)
@@ -52,19 +53,26 @@ T.test('drill pass: DRILL, real pulls, READY_STATION, KPIs at T+1,200, PEACE low
   T.eq(Cq.orders[0].pos, {x = 51, y = 28, z = Z + 1}, 'crossbows in the gallery')
   T.eq(df.global.plotinfo.alerts.civ_alert_idx, 1, 'civ alert on (Kern+)')
   X.run(W, 1300)
+  T.eq(W.K.mode(), 'DRILL', 'BUG-251: measured, the restore lowers the bridges first')
+  X.run(W, 400)
   T.eq(W.K.mode(), 'PEACE')
   local r = W.find_events('DRILL_RESULT')
   T.eq(#r, 1)
   T.eq(r[1].d.pass, 1, r[1].msg)
   T.ok(r[1].d.raised >= 0 and r[1].d.raised <= 900, 'raised ' .. r[1].d.raised)
-  T.eq({r[1].d.worn, r[1].d.outside, r[1].d.dbl}, {100, 0, 0})
-  T.ok(r[1].tick - t0 >= 1200 and r[1].tick - t0 <= 1225)
+  T.eq({r[1].d.worn, r[1].d.outside, r[1].d.dbl, r[1].d.why}, {100, 0, 0, 'test'})
+  local mt = results(W).last[1].tick
+  T.ok(mt - t0 >= 1200 and mt - t0 <= 1225, 'measured at T+1,200')
+  T.ok(r[1].d.restore >= 0 and r[1].tick == mt + r[1].d.restore, r[1].msg)
+  local peace = W.find_events('MODE')[#W.find_events('MODE')]
+  T.eq({peace.d.to, peace.d.why}, {'PEACE', 'drill done'})
   T.eq(#W.find_events('DRILL_FAIL'), 0)
   for _, b in ipairs({'O1', 'B1'}) do
     local f = S.flips(W, b)
     T.eq(#f, 2, b .. ': one raise, one lower')
     T.eq({f[1].to, f[2].to}, {'up', 'down'})
-    T.ok(f[2].tick >= r[1].tick, 'lowered after the measurement')
+    T.ok(f[2].tick >= mt, 'lowered after the measurement')
+    T.ok(f[2].tick <= peace.tick, 'BUG-251: down before PEACE ends the alert (old: lowered in PEACE)')
   end
   T.eq(#S.flips(W, 'B2'), 0, 'the core seal stays down in a drill')
   X.run(W, 600)
@@ -86,7 +94,7 @@ end)
 T.test('no gear: worn < 90 fails; the 2nd failure in a row emits DRILL_FAIL (A)', function()
   local W = world{equip = false}
   start(W)
-  X.run(W, 1300)
+  X.run(W, 1700)
   local r = W.find_events('DRILL_RESULT')
   T.eq(r[1].d.pass, 0)
   T.eq(r[1].d.worn, 0)
@@ -94,7 +102,7 @@ T.test('no gear: worn < 90 fails; the 2nd failure in a row emits DRILL_FAIL (A)'
   T.eq(#W.find_events('DRILL_FAIL'), 0, 'first failure: digest only')
   X.run(W, 600)
   start(W)
-  X.run(W, 1300)
+  X.run(W, 1700)
   local f = W.find_events('DRILL_FAIL')
   T.eq(#f, 1)
   T.eq(f[1].cls, 'A')
@@ -102,7 +110,7 @@ T.test('no gear: worn < 90 fails; the 2nd failure in a row emits DRILL_FAIL (A)'
   X.equip_all(W)
   X.run(W, 600)
   start(W)
-  X.run(W, 1300)
+  X.run(W, 1700)
   T.eq(results(W).streak_fail, 0, 'a pass resets the streak')
   invariants(W)
 end)
@@ -110,7 +118,7 @@ end)
 T.test('a bridge that is not up by T+1,200 fails the drill; no GATE_FAIL or BREACH in a drill', function()
   local W = world{lever_cfg = {[11] = {}, [12] = {}}}      -- O1 levers never get a worker
   start(W)
-  X.run(W, 1300)
+  X.run(W, 1700)
   local e = results(W).last[1]
   T.eq(e.pass, 0)
   T.eq(e.raised, -1)
@@ -152,7 +160,7 @@ T.test('refused outside PEACE, while running; inbox drill only in PEACE (merchan
   T.eq(W.K.mode(), 'DRILL')
   T.eq(W.inbox('drill', {}).ok, false, 'kern: drill only in PEACE')
   T.eq({start(W)}, {false, 'a drill is running'})
-  X.run(W, 1300)
+  X.run(W, 1700)
   T.eq(results(W).last[1].pass, 1)
   T.eq(W.K.mode(), 'PEACE')
 end)
@@ -179,10 +187,11 @@ T.test('reload mid-drill: the drill continues from persist and measures at T+1,2
   W.mods.drill = nil
   package.loaded['dfllm.drill'] = nil
   W.load(require('dfllm.drill'))
-  X.run(W, 700)
+  X.run(W, 1100)
   local r = W.find_events('DRILL_RESULT')
   T.eq(#r, 1)
-  T.ok(r[1].tick - t0 >= 1200 and r[1].tick - t0 <= 1225)
+  local mt = results(W).last[1].tick
+  T.ok(mt - t0 >= 1200 and mt - t0 <= 1225)
   T.eq(W.K.mode(), 'PEACE')
 end)
 
@@ -212,7 +221,7 @@ T.test('automatic drills: P5, settle, soldiers, bridges; first, yearly, keep R2,
   X.run(W, 1200)
   T.eq(W.K.mode(), 'DRILL')
   T.ok(W.find_events('MODE')[#W.find_events('MODE')].d.why:find('auto: first'))
-  X.run(W, 1300)
+  X.run(W, 1700)
   T.eq(results(W).last[1].pass, 1)
   now = K.now().tick
   T.eq(M.due(K, now + 100000), nil, 'plan ceiling 55: yearly only')
@@ -247,7 +256,7 @@ local function drills(W)
   for _, e in ipairs(W.find_events('MODE')) do
     if e.d.to == 'DRILL' then starts[#starts + 1] = {tick = e.tick, why = e.d.why} end
   end
-  for _, e in ipairs(W.find_events('DRILL_RESULT')) do res[#res + 1] = {tick = e.tick, pass = e.d.pass} end
+  for _, e in ipairs(results(W).last) do res[#res + 1] = {tick = e.tick, pass = e.pass} end   -- measured (BUG-251)
   return starts, res
 end
 
@@ -260,7 +269,7 @@ T.test('4 failed drills in a row: exactly one DRILL_FAIL; retries back off (mont
   local f = W.find_events('DRILL_FAIL')
   T.eq(#f, 1, 'only on the 2nd consecutive failure')
   T.eq(f[1].d.streak, 2)
-  T.eq(f[1].tick, res[2].tick)
+  T.eq(f[1].tick, W.find_events('DRILL_RESULT')[2].tick, 'with the 2nd DRILL_RESULT')
   T.eq(results(W).streak_fail, 4)
   local want = {33600, 67200, 100800}
   for i = 1, 3 do
@@ -363,7 +372,7 @@ T.test('FR-65 drill.hold: why no automatic drill starts; readiness publishes it 
   X.run(W, 700)
   T.eq(W.K.mode(), 'DRILL')
   T.eq(X.call(W, 'drill', 'hold'), 'running')
-  X.run(W, 1300)
+  X.run(W, 1700)
   T.eq(results(W).last[1].pass, 1, T.show(results(W).last[1].fails))
   T.eq(X.call(W, 'drill', 'hold'), 'just drilled', '5 days after a start')
   X.run(W, 6000)

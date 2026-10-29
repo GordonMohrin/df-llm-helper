@@ -352,7 +352,7 @@ add{name = 'RECOVERY: 2,400 quiet ticks; B1 down at +1,200, O1 at +2,400; PEACE 
     between(rel(W, tr), 3400, 3460, 'RECOVERY after 2,400 quiet ticks')
     local b1, o1 = S.pulls(W, 'B1'), S.pulls(W, 'O1')
     T.eq({#b1, #o1}, {2, 2})
-    between(b1[2].tick - tr, 1200, 1240, 'B1 lowered')
+    between(b1[2].tick - tr, 1200, 1270, 'B1 lowered')     -- BUG-251: + one look at the soldier 4 tiles from B1
     between(o1[2].tick - tr, 2400, 2440, 'O1 lowered')
     T.eq(#S.pulls(W, 'B2'), 0)
     local off = alert_acts(W, false)
@@ -787,7 +787,7 @@ add{name = 'footprint after a DRILL: B1 is not lowered while a citizen stands on
 
 add{name = 'footprint: our pending lowering pull is cancelled when a citizen steps on; re-queued later',
   lever_cfg = {[21] = {worker = 150}, [22] = {worker = 150}},
-  at = {{100, function(W) W.K.call('drill', 'start') end}, {1350, mv(1, 51, 40)}, {1800, mv(1, 60, 70)}},
+  at = {{100, function(W) W.K.call('drill', 'start') end}, {1420, mv(1, 51, 40)}, {1800, mv(1, 60, 70)}},   -- BUG-251: queued ~1,360
   run = 2400, modes = {'PEACE>DRILL', 'DRILL>PEACE'},
   check = function(W)
     local b1 = S.pulls(W, 'B1')
@@ -795,7 +795,7 @@ add{name = 'footprint: our pending lowering pull is cancelled when a citizen ste
     local c = S.acts(W, 'cancel_own_lever_job')
     T.eq(#c, 1)
     T.eq(c[1].args[1], b1[2].job)
-    between(rel(W, c[1].tick), 1350, 1380, 'cancelled within one gate pass')
+    between(rel(W, c[1].tick), 1420, 1450, 'cancelled within one gate pass')
     T.ok(rel(W, b1[3].tick) >= 1800, 'new pull after the citizen left')
     T.eq(#S.flips(W, 'B1'), 2)
     T.eq(S.bstate(W, 'B1'), 'down')
@@ -808,7 +808,7 @@ add{name = 'footprint in RECOVERY: B1 stays up while a citizen stands on it; ale
   check = function(W)
     local b1 = S.pulls(W, 'B1')
     T.eq(#b1, 2)
-    between(rel(W, b1[2].tick), 6000, 6030, 'B1 lowered after the citizen left')
+    between(rel(W, b1[2].tick), 6000, 6060, 'B1 lowered after the citizen left')   -- BUG-251: + the quiet look
     T.ok(alert_acts(W, false)[1].tick >= b1[2].tick, 'alert held until B1 is down')
     T.eq(W.state().bridges, {O1 = 'down', B1 = 'down', B2 = 'down'})
   end}
@@ -821,7 +821,7 @@ add{name = 'footprint in PEACE after an ALERT: O1 is not lowered onto a citizen'
     local o1 = S.pulls(W, 'O1')
     T.eq(#o1, 2)
     T.ok(S.mode_tick(W, 'ALERT>PEACE') < W.t_start + 2600, 'PEACE came while the citizen was on O1')
-    between(rel(W, o1[2].tick), 2600, 2630, 'O1 lowered after the citizen left')
+    between(rel(W, o1[2].tick), 2650, 2680, 'O1 lowered after the citizen left')   -- BUG-251: + QUIET_DOWN after he left
   end}
 
 add{name = 'an insane citizen (berserk) inside Kern+ is no hostile: no ALERT, no BREACH',

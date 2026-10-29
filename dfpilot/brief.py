@@ -554,6 +554,48 @@ def stale_note(s: dict, key: str) -> str:
     return f" (last known {fmt_ticks(age)} ago)" if isinstance(age, int) else ""
 
 
+DRILL_SCAN = 20000                        # BUG-254: events read back at most to find the newest DRILL_RESULT (status)
+
+
+def last_drill(ctx) -> dict | None:
+    """BUG-254 (Run 15b Earthboat: status said 'drill never (auto: retry wait)' right after an automatic drill whose end
+    lowered B1 onto a soldier): the newest DRILL_RESULT of the last game year, from the B digest (brief) or one bounded
+    backwards scan of the event log (status); None when there is none or no log."""
+    if hasattr(ctx, "_last_drill"):
+        return ctx._last_drill
+    found = next((e for e in reversed(getattr(ctx, "b", None) or []) if e.get("type") == "DRILL_RESULT"), None)
+    d = getattr(ctx, "dir", None)
+    if found is None and d is not None and not getattr(ctx, "full", True):
+        now = ctx.now_tick()
+        lo = now - YEAR if isinstance(now, int) else None
+        hi = now + files.TICK_SLACK if isinstance(now, int) else None
+        for i, e in enumerate(files.iter_events_rev(d, 0, lo, hi)):
+            if e.get("type") == "DRILL_RESULT":
+                found = e
+                break
+            if i >= DRILL_SCAN:
+                break
+    try:
+        ctx._last_drill = found
+    except AttributeError:
+        pass
+    return found
+
+
+def drill_note(ctx, r: dict) -> str:
+    """BUG-254: ' [last auto drill 3d ago failed]' when the newest drill failed after the last pass (drill_age), else ''."""
+    e = last_drill(ctx)
+    now = ctx.now_tick() if hasattr(ctx, "now_tick") else None
+    if not e or not isinstance(now, int) or not isinstance(e.get("tick"), int) or _d(e).get("pass") == 1:
+        return ""
+    age = max(0, now - e["tick"])
+    if 0 <= r.get("drill_age", -1) <= age:
+        return ""
+    kind = "auto " if str(_d(e).get("why") or "").startswith("auto") else ""
+    low = ", bridges not down in time" if _d(e).get("restore") == -1 else ""
+    return f" [last {kind}drill {fmt_ticks(age)} ago failed{low}]"
+
+
 def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
     """Ranked parts of the pop line (I1: status ranks them apart, so the long pop trend and the readiness summary go before
     the lockdown line does; the brief joins them): pop (1), the pop trend (3), the readiness summary (3)."""
@@ -582,6 +624,7 @@ def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
                 drill += f" ({how[2:]})"
         if r.get("dref"):                      # BUG-110: drills refused for want of O1/B1 (counted once a game day)
             drill += f" [{r['dref']} refused: build fortcore stage 2/3 first]"
+        drill += drill_note(ctx, r)            # BUG-254: a failed drill since the last pass (or ever) is named
         audit = (f"audit {'ok' if a['ok'] else 'FAIL'} {fmt_ticks(a['age'])}" if a["age"] >= 0
                  else "audit never (run dfllm audit)")
         if a.get("cov"):                       # BUG-043: what its snapshot covered (margin, shafts, pieces out)

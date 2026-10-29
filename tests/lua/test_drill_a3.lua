@@ -47,7 +47,7 @@ T.test('BUG-051: merchants on the map no longer hold a drill (a manual start, ho
   local ok, msg = start(W)
   T.ok(ok, 'a manual drill with merchants at the depot: ' .. tostring(msg))
   T.eq(W.K.mode(), 'DRILL')
-  X.run(W, 1300)
+  X.run(W, 1700)                                    -- BUG-251: measured at T+1,200, PEACE once the bridges are down
   T.eq(W.K.mode(), 'PEACE')
   no_caravans()
   local W2 = world{auto = true}

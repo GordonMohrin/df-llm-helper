@@ -85,6 +85,14 @@ M.NO_WORKER = 200          -- ticks our queued pull may wait without a worker
 -- had just stepped off; fortcore's melee station stands 2 tiles from B1 and its soldiers would hold B1 down for a
 -- whole drill with a wider margin.
 M.MARGIN = 1
+-- BUG-251 (Run 15b Earthboat y374: soldier 24165 died crushed by B1 going down after an automatic drill; 18 'B1 down still
+-- waits' lines, the pull queued the moment the 1-tile margin was clear, the bridge moved 340 ticks later and he stood 1 tile
+-- from it): a lowering that is not siege's (rescue, intake, sortie: BUG-028, never held up by a busy corridor) waits for a
+-- quiet window: nobody within MARGIN_DOWN tiles for QUIET_DOWN ticks (a soldier standing at his own squad station there does
+-- not count: fortcore's melee station is 2 tiles from B1), and a taken pull is cancelled when a unit within MARGIN_DOWN
+-- tiles walks toward the footprint. After QUIET_MAX ticks without such a window only the 1-tile margin holds it (logged).
+M.MARGIN_DOWN, M.QUIET_DOWN, M.QUIET_MAX = 3, 50, 2400
+M.QUIET_LOOK = 25         -- BUG-251: a unit near the footprint is 'standing still' after this many ticks on one tile
 M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with a visible hostile this close (cfg)
 -- BUG-027: while one of our pulls is pending gate re-checks it every frame (M.PENDING); the census pass (every FAST
 -- ticks) keeps the units within SCAN_R tiles of the footprint, and the frames in between re-read only their positions
@@ -932,6 +940,25 @@ local function squad_note(id, fp, e)
   return ok and s or nil
 end
 
+-- BUG-251: a soldier (scan entry e) standing within STATION_NEAR tiles of a station order of his own squad (the quiet
+-- window of a lowering does not wait for him; the 1-tile margin still does)
+function M.at_station(e)
+  if type(e) ~= 'table' or e.k ~= 'soldier' then return false end
+  local ok, r = pcall(function()
+    local u = df.unit.find(e.id)
+    local sid = u and u.military.squad_id
+    local sq = math.type(sid) == 'integer' and sid >= 0 and df.squad and df.squad.find(sid)
+    if not sq then return false end
+    for _, o in ipairs(sq.orders) do
+      local okp, x, y, z = pcall(function() return o.pos.x, o.pos.y, o.pos.z end)
+      if okp and type(x) == 'number' and x >= 0 and z == e.z
+         and math.max(math.abs(e.x - x), math.abs(e.y - y)) <= M.STATION_NEAR then return true end
+    end
+    return false
+  end)
+  return ok and r == true
+end
+
 -- "soldier 26535 on the footprint (squad 3 stationed on the bridge at ...), citizen 26099 next to it, +2 more"
 local function who(list, fp)
   local parts = {}
@@ -1023,21 +1050,30 @@ M.FLIP_COOL = 1200
 -- why an automatic 'up' of `name` is refused now (PEACE without a lockdown: a lever hold, or a too recent 'down'), or nil
 function M.up_refusal(K, name, why, now)
   why = tostring(why or '?')
-  if K.mode() ~= 'PEACE' or why:find('^lever:') then return nil end
+  if why:find('^lever:') then return nil end
   local txt
-  local h = M.held_down(K, name, now)
-  if lock_why(K) then
-    if h then M.hold_end(K, name, 'lockdown') end
-    return nil
-  end
-  if h then
-    txt = string.format('%s up (%s) refused: held down by the player\'s lever (%s) for %d more ticks; a threat ends the hold',
-                        name, why, tostring(h.by), h.u - now)
-  else
+  if K.mode() == 'DRILL' then
+    -- BUG-251: the drill is over and wants its bridges down before PEACE (or a bridge not up by T+900 stays down): siege's
+    -- DRILL raise is refused; a lockdown is never held
     local br = st.br[name]
-    if not (br and br.want == 'down') or now - (br.since or now) >= M.FLIP_COOL then return nil end
-    txt = string.format('%s up (%s) refused: wanted down (%s) only %d ticks ago; no up/down cycling within %d ticks',
-                        name, why, tostring(br.why), now - br.since, M.FLIP_COOL)
+    if lock_why(K) or not (br and br.want == 'down' and br.why == 'drill_end') then return nil end
+    txt = string.format('%s up (%s) refused: the drill wants it down (drill_end)', name, why)
+  elseif K.mode() ~= 'PEACE' then return nil
+  else
+    local h = M.held_down(K, name, now)
+    if lock_why(K) then
+      if h then M.hold_end(K, name, 'lockdown') end
+      return nil
+    end
+    if h then
+      txt = string.format('%s up (%s) refused: held down by the player\'s lever (%s) for %d more ticks; a threat ends the hold',
+                          name, why, tostring(h.by), h.u - now)
+    else
+      local br = st.br[name]
+      if not (br and br.want == 'down') or now - (br.since or now) >= M.FLIP_COOL then return nil end
+      txt = string.format('%s up (%s) refused: wanted down (%s) only %d ticks ago; no up/down cycling within %d ticks',
+                          name, why, tostring(br.why), now - br.since, M.FLIP_COOL)
+    end
   end
   local r = runtime(name)
   if not r.ur_log or now - r.ur_log >= M.FLIP_COOL or r.ur_txt ~= txt:sub(1, 30) then
@@ -1215,7 +1251,9 @@ local function down_guard(K, name, why)
   local roles = SIEGE_DOWN[w]
   local role = type(spec) == 'table' and spec.role or nil
   local own = roles ~= nil and role ~= nil and roles[role] == true and (w == 'rescue' or m == 'SIEGE')
-  if FAST_MODES[m] and not own then return 'down refused in ' .. m end
+  -- BUG-251: the drill's end lowers its outer/inner bridges while the alert still holds everybody inside (hostile guard holds)
+  local dend = w == 'drill_end' and m == 'DRILL' and GATE_ROLES[role] == true
+  if FAST_MODES[m] and not own and not dend then return 'down refused in ' .. m end
   if lock_why(K) and not own then return 'down refused: lockdown' end
   if own and w ~= 'rescue' then return airlock(K, name, role) end
   local h = K.census.h
@@ -1261,8 +1299,66 @@ local function set_want(name, w, why, deadline, now)
   r.bad, r.nw, r.block_since, r.lat0, r.nw_out = {}, 0, nil, nil, nil
   r.block, r.block_ev, r.hold_log, r.forced_ev, r.hold_seen = nil, nil, nil, nil, nil
   r.held_sum, r.fail_at, r.switch, r.want_ms = nil, nil, nil, nil
+  r.qd, r.qw, r.qlog, r.qnote, r.qref = nil, nil, nil, nil, nil   -- BUG-251: the quiet window of a lowering
   dirty = true
   return true
+end
+
+-- BUG-251: does the lowering of `name` (want br) still wait for its quiet window? A unit within MARGIN_DOWN tiles (the
+-- 1-tile margin is checked before) that is not a soldier at his own station holds it. The units within SCAN_R tiles are
+-- compared with a reference look (r.qref) at least QUIET_LOOK ticks old: one that stood on another tile then moves, and the ring
+-- must then stay clear QUIET_DOWN ticks after the last step seen; nobody near, or only units standing still beyond
+-- MARGIN_DOWN for QUIET_LOOK ticks, is quiet (a unit that walks in later cancels the taken pull: M.approach). Siege's lowerings
+-- (rescue, intake, sortie) never wait for it; after QUIET_MAX ticks of waiting it gives up (kern.log once).
+function M.quiet_wait(K, name, r, br, sc, now)
+  if not br or SIEGE_DOWN[br.why] or not sc then return false end
+  r.qw = r.qw or now
+  if now - r.qw >= M.QUIET_MAX then
+    if not r.qlog then
+      r.qlog = true
+      K.log('info', 'gate: %s down: no %d quiet ticks within %d tiles in %d ticks; only the %d-tile margin holds it now',
+            name, M.QUIET_DOWN, M.MARGIN_DOWN, M.QUIET_MAX, M.MARGIN)
+    end
+    return false
+  end
+  local ref, cur, near = r.qref, {}, false
+  for _, e in ipairs(sc.list or {}) do
+    if not M.at_station(e) then
+      if e.d <= M.MARGIN_DOWN then
+        r.qd, r.qref = now, nil                         -- the ring is busy now: the quiet clock restarts
+        if not r.qnote then                             -- kern.log once per want: who keeps the corridor busy
+          r.qnote = true
+          K.log('info', 'gate: %s down waits for %d quiet ticks: %s %d %d tiles from it', name, M.QUIET_DOWN, e.k, e.id, e.d)
+        end
+        return true
+      end
+      near, cur[e.id] = true, e.x .. ',' .. e.y .. ',' .. e.z
+    end
+  end
+  if not near then r.qref = nil; return r.qd ~= nil and now - r.qd < M.QUIET_DOWN end
+  if not ref then r.qref = {t = now, p = cur}; return true end
+  for id, p in pairs(cur) do
+    if ref.p[id] ~= nil and ref.p[id] ~= p then           -- he moved: the quiet clock starts again
+      r.qd, r.qref = now, {t = now, p = cur}
+      return true
+    end
+  end
+  for id, p in pairs(cur) do if ref.p[id] == nil then ref.p[id] = p end end     -- a newcomer: from here on
+  if now - ref.t < M.QUIET_LOOK then return true end      -- not looked long enough yet
+  return r.qd ~= nil and now - r.qd < M.QUIET_DOWN
+end
+
+-- BUG-251: the first unit (not the job's worker, not a soldier at his station) within MARGIN_DOWN tiles of the footprint
+-- that came closer since the previous scan `prev` (or was not in it): a taken lowering pull is cancelled for it
+function M.approach(br, sc, prev, wid)
+  if not br or SIEGE_DOWN[br.why] or not sc then return nil end
+  local before = {}
+  for _, e in ipairs(prev and prev.list or {}) do before[e.id] = e.d end
+  for _, e in ipairs(within(sc, M.MARGIN_DOWN)) do
+    local d0 = before[e.id]
+    if e.id ~= wid and (d0 == nil or e.d < d0) and not M.at_station(e) then return e end
+  end
+  return nil
 end
 
 -- BUG-027 lever burrow check: a mode change renews an 'up' epoch without set_want; the failures of the old epoch (the
@@ -1314,6 +1410,23 @@ local function mv_open(K, name, r, s, now, fp, prev, cur)
   mv_prune(now)
   if s == 'moving' then r.mv = m else m.t1 = now end
   return m
+end
+
+-- BUG-253: a unit on the footprint of a bridge that is moving now (raising flings, lowering crushes): GATE_CRUSH_RISK (B),
+-- once per move record m, naming the first such unit (the death itself stays BRIDGE_CRUSH, A)
+function M.crush_risk(K, name, m, sc, fp)
+  if m.risk then return end
+  for _, e in ipairs(sc.list or {}) do
+    if e.d == 0 then
+      m.risk = e.id
+      local txt = string.format('%s moving %s with %s %d on the footprint at %d,%d,%d', name, tostring(m.to), e.k, e.id,
+                                e.x, e.y, e.z)
+      K.emit('GATE_CRUSH_RISK', 'B', txt:sub(1, 200), {bridge = name, unit = e.id, k = e.k, to = tostring(m.to),
+                                                        pull = m.pull, pos = {e.x, e.y, e.z}})
+      K.log('warn', 'gate: %s', txt)
+      return
+    end
+  end
 end
 
 local function observe(K, name, r, s, now, fp, prev, cur)
@@ -1613,7 +1726,10 @@ local function control(K, name, spec, now)
     if s == x.before then M.noeffect(K, name, r, x.lid, s, now, x.taken) else M.ne_clear(r, x.lid) end
   end
   observe(K, name, r, s, now, spec.fp, prev, sc)
-  if r.mv and sc then mv_note(r.mv, sc.list, now) end       -- who stands near it while it moves
+  if r.mv and sc then                                         -- who stands near it while it moves
+    mv_note(r.mv, sc.list, now)
+    M.crush_risk(K, name, r.mv, sc, spec.fp)
+  end
   -- 1. our own queued pull
   if r.job then
     local lv = df.building.find(r.job.lever)
@@ -1653,6 +1769,14 @@ local function control(K, name, spec, now)
           stale = 'blocked'
           r.block_since = r.block_since or now
           note_hold(K, name, spec.fp, dir, hold, now)
+        elseif hold.unknown then
+          stale = 'census'                            -- BUG-252: nobody can say who stands there: no pull goes ahead
+        elseif dir == 'down' and w0 then
+          local e = M.approach(br, sc, prev, wid)     -- BUG-251: someone walks toward it while the pull is being done
+          if e then
+            stale, r.qd = 'approach', now
+            K.log('info', 'gate: %s down pull cancelled: %s %d %d tiles from it and walking toward it', name, e.k, e.id, e.d)
+          end
         end
       end
       -- BUG-027: the deadline passed with this pull under way: once to another linked lever (check_fail asks)
@@ -1733,10 +1857,12 @@ local function control(K, name, spec, now)
   if not hd and #hold > 0 then
     r.block_since = r.block_since or now
     note_hold(K, name, spec.fp, w, hold, now)
-    r.stuck = 'blocked'
+    r.stuck, r.qd = 'blocked', now
     return s
   end
   unblock(r, now)
+  -- BUG-251: a lowering waits for its quiet window (nobody within MARGIN_DOWN tiles for QUIET_DOWN ticks)
+  if w == 'down' and M.quiet_wait(K, name, r, br, sc, now) then r.stuck = 'quiet'; return s end
   local lid, why = pick(K, r, now)
   if not lid then
     if why == 'parked' then r.stuck = 'no_effect'; return s end      -- BUG-068: every linked lever is parked
@@ -2615,6 +2741,37 @@ function M.release(K, name)
   K.log('info', 'gate: %s rescue want released, now %s', name, nb and (nb.want .. ' (' .. nb.why .. ')') or 'no want')
   flush(K)
   return true
+end
+
+-- public (BUG-251, drill): the drill measured; in DRILL (the alert still holds everybody inside, the squads at their
+-- stations) want every standing outer/inner manifest bridge down whose PEACE want is down (D-14 up keeps the peace gates
+-- up: those are left alone). Returns the sorted names wanted down now; siege's DRILL raise is refused for them (up_refusal).
+function M.drill_end(K)
+  local out = {}
+  if K.mode() ~= 'DRILL' then return out end
+  local man, now = K.manifest(), K.now().tick
+  for _, name in ipairs(bridge_names(man)) do
+    local role = man.bridges[name].role
+    if GATE_ROLES[role] and not st.gone[name] and peace_want(K, name, role, now) == 'down' then
+      local ok, msg = M.want(K, name, 'down', 'drill_end')
+      if ok then out[#out + 1] = name
+      else K.log('info', 'gate: drill over: %s not lowered before PEACE: %s', name, tostring(msg)) end
+    end
+  end
+  if #out > 0 then K.log('info', 'gate: drill over: %s wanted down before PEACE', table.concat(out, ', ')) end
+  return out
+end
+
+-- public (BUG-251, drill): bridge `name` is not up at the drill's T+900 and no pull of it is under way (not moving, no
+-- worker took one): its raise is dropped (want down 'drill_end': a queued pull is cancelled), so it never rises late while
+-- the soldiers walk. Returns true when dropped.
+function M.drill_skip(K, name)
+  local r = rt[name]
+  if K.mode() ~= 'DRILL' or not r or r.last ~= 'down' or (r.job and r.job.taken)
+     or K.now().tick < (r.settle or 0) then return false end      -- (a pull just done: it may start to move now)
+  local ok = M.want(K, name, 'down', 'drill_end')
+  if ok then K.log('info', 'gate: %s not up by the drill\'s T+900: no late raise', name) end
+  return ok == true
 end
 
 -- public (BUG-237, drill): how many linked levers manifest bridge `name` has (0: no pull can move it)
