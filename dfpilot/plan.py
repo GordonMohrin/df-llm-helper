@@ -2340,8 +2340,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                 elif d["k"] == "orders" and d["lib"] not in libs and p["id"] <= lib_top:
                     libs.append(d["lib"])
     tb, tnote = _traps.draft(fort, target, builds, prev, year, info, rb)   # FR-96: trap lanes at the ways in (P5+)
-    if tb:
-        builds.append(tb)
+    builds += tb                                 # BUG-317: and at=bridges for the bridge ways
     if applied is not None:                      # BUG-164: no stage 3 @same without the core's stage 2 (known applied)
         core_gaps(builds, done)
     if drop_core:                                # BUG-130: nothing on the stopped anchor
@@ -2426,7 +2425,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["notes"] += fnote
     if fsnote:
         doc["notes"] += fsnote
-    if tb and any(b is tb for b in builds):
+    if any(b is t for t in tb for b in builds):
         doc["notes"] += tnote
     # FR-99: the cavern sweep comes with the phase that delivers it (P6), or stays on once a plan had it
     if sweep_due(plist, target) or (((prev or {}).get("caverns") or {}).get("sweep") is True):

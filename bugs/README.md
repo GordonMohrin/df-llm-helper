@@ -329,6 +329,7 @@ Related: FR-xx, BUG-xx
 | [BUG-314](BUG-314-bp-cancel-leaves-the-projects-df-jobs.md) | fixed (offline, live-untested) | high | Run 15 Earthboat: bp.cancel left the hatch and its DF job 8095, the next seal adopted it; a plain cancel now removes its unbuilt pieces | runner |
 | [BUG-315](BUG-315-order-queue-grows-without-a-cap.md) | mitigated (offline, live-untested): prune and cap; repeat cause a hypothesis | high | Run 15 Drillchamber: 194 orders, 73 stuck, gear made again every day; daily prune of stuck duplicates, a cap, mood orders on top | economy |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
+| [BUG-317](BUG-317-bridge-only-fort-gets-no-trap-lane.md) | fixed (offline, live-untested) | medium | Run 15b: a fort entered over its drawbridges only gets no trap lane ('0 door(s)', traps 0, no traps draft) | bp/traps.py, traps.py, plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

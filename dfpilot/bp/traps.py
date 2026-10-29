@@ -10,9 +10,12 @@ Template `traps` (absolute tiles like `seal`; the CLI fills them in, dfpilot/tra
        straight out from the door; a way whose tiles are all trapped (or planned by a traps project under way) is left
        out;
      'hall': the tiles of a finished fortcore stage 4 that show no trap on the newest snapshot (stone-fall, restock);
-     resolved: 'x,y,z:dx,dy dx,dy;...' (a way and the offsets of its lane tiles on its level) and
+     'bridges' (BUG-317): one stone-fall lane in the attack corridor behind every outer and inner bridge of the
+       manifest (bridge_ways), for a fort whose ways in are bridges only;
+     resolved: 'x,y,z:dx,dy dx,dy;...' (a way and the offsets of its lane tiles on its level),
+       'bx,y,z:dx,dy ...' (a bridge way: its footprint centre, offsets up to OFF_BRIDGE) and
        'hall:x,y,z x,y,z' (absolute hall tiles).
-  kind = cage (default, ways) | stone; the hall is stone only (DOCTRINE: no cage traps on the main path, the comrades free
+  kind = cage (default, ways) | stone; the hall and the bridge lanes are stone only (DOCTRINE: no cage traps on the main path, the comrades free
        the caged; topo.audit fails `cage trap on the main path`).
   depth = 1..3 (tiles straight out from the door).
 Safety (citizens): the lanes lie OUTSIDE a door the arrival lockdown forbids (reflex door_forbid), never on the door, on a
@@ -29,10 +32,14 @@ from .primitives import Plan, rot_uv
 
 KINDS = {"cage": "Tc", "stone": "Ts"}
 HALL = "hall"
+BRIDGES = "bridges"
 WAYS = ("", "ways")
 TRAP_MAX = 16          # trap tiles per project (one build stage, one manager order per piece)
 WAY_MAX = 6            # ways per project
 OFF_MAX = 4            # a lane tile lies at most this far (Chebyshev) from its way
+OFF_BRIDGE = 16        # BUG-317: a bridge lane tile lies at most this far from the footprint centre (O1 -> the hall)
+BRIDGE_LANE = 8        # BUG-317: lane tiles per bridge (two bridges fill one project's TRAP_MAX)
+LANE_ROLES = ("outer", "inner")   # BUG-317: the bridges in front of the attack corridor (not B2, the core's own)
 AT_MAX = 200           # bp.emit check_params: a string param holds at most 200 characters
 PARAMS = {"traps": {"at": ("", None, None), "kind": ("cage", None, None), "depth": (1, 1, 3)}}
 PASS_IN = frozenset(topo.PASS) - {"+"}
@@ -66,26 +73,29 @@ def parse_at(text) -> list[dict]:
         if not sep or not rest.strip():
             raise ValueError(f"traps.at: {part!r} names no tiles (at=ways and at=hall are filled in by dfllm cmd and plan "
                              "apply from the newest snapshot)")
-        if head.strip().lower() == HALL:
+        head = head.strip()
+        bridge = head[:1].lower() == "b"                  # BUG-317: 'bx,y,z:...' a bridge way (its footprint centre)
+        if head.lower() == HALL:
             tiles = [_xyz(t, "hall tile") for t in rest.split()]
             way = None
         else:
-            way = _xyz(head.strip(), "way")
+            way = _xyz(head[1:] if bridge else head, "way")
+            lim = OFF_BRIDGE if bridge else OFF_MAX
             tiles = []
             for t in rest.split():
                 try:
                     dx, dy = (int(c) for c in t.split(","))
                 except ValueError:
-                    raise ValueError(f"traps.at: bad offset {t!r} of way {head.strip()} (want dx,dy)") from None
-                if (dx, dy) == (0, 0) or max(abs(dx), abs(dy)) > OFF_MAX:
-                    raise ValueError(f"traps.at: offset {t} of way {head.strip()}: not on the door, at most {OFF_MAX} away")
+                    raise ValueError(f"traps.at: bad offset {t!r} of way {head} (want dx,dy)") from None
+                if (dx, dy) == (0, 0) or max(abs(dx), abs(dy)) > lim:
+                    raise ValueError(f"traps.at: offset {t} of way {head}: not on the door, at most {lim} away")
                 tiles.append([way[0] + dx, way[1] + dy, way[2]])
         for t in tiles:
             if tuple(t) in seen:
                 raise ValueError("traps.at: tile %d,%d,%d named twice" % tuple(t))
             seen.add(tuple(t))
         n += len(tiles)
-        out.append({"way": way, "tiles": tiles})
+        out.append({"way": way, "tiles": tiles, **({"bridge": True} if bridge and way else {})})
     if sum(1 for p in out if p["way"]) > WAY_MAX:
         raise ValueError(f"traps.at: more than {WAY_MAX} ways; split them over several traps projects")
     if n > TRAP_MAX:
@@ -108,7 +118,7 @@ def format_at(parts: list[dict]) -> str:
             txt = "hall:" + " ".join("%d,%d,%d" % tuple(t) for t in tiles)
         else:
             w = p["way"]
-            txt = "%d,%d,%d:" % tuple(w) + " ".join("%d,%d" % (t[0] - w[0], t[1] - w[1]) for t in p["tiles"])
+            txt = ("b" if p.get("bridge") else "") + "%d,%d,%d:" % tuple(w) +" ".join("%d,%d" % (t[0] - w[0], t[1] - w[1]) for t in p["tiles"])
         nw2 = nw + (1 if p.get("way") is not None else 0)
         if len(";".join(out + [txt])) > AT_MAX or n + len(p["tiles"]) > TRAP_MAX or nw2 > WAY_MAX:
             continue
@@ -124,16 +134,19 @@ def pieces(p: dict, anchor=None) -> list[dict]:
     if kind not in KINDS:
         raise ValueError(f"traps.kind: {kind!r} not one of {sorted(KINDS)}")
     at = str(p.get("at", "") or "")
-    if at.strip().lower() in WAYS + (HALL,):
+    if at.strip().lower() in WAYS + (HALL, BRIDGES):
         if at.strip() == "" and anchor is not None:
             return [{"pos": list(anchor), "key": KINDS[kind], "way": None}]
-        raise ValueError(f"traps.at={at or 'ways'}: filled in by dfllm cmd bp.place and plan apply from the newest "
+        raise ValueError(f"traps.at={at.strip() or 'ways'}: filled in by dfllm cmd bp.place and plan apply from the newest "
                          "snapshot; name tiles here")
     out = []
     for part in parse_at(at):
         if part["way"] is None and kind == "cage":
             raise ValueError("traps: no cage traps in the trap hall (the main path: comrades free the caged, DOCTRINE); "
                              "kind=stone")
+        if part.get("bridge") and kind == "cage":
+            raise ValueError("traps: no cage traps behind a bridge (the attack corridor is the main path: comrades free "
+                             "the caged, DOCTRINE); kind=stone")
         for t in part["tiles"]:
             out.append({"pos": t, "key": KINDS[kind], "way": part["way"], "hall": part["way"] is None})
     if not out:
@@ -189,7 +202,7 @@ def preview_tiles(p: dict) -> dict:
             for t in part["tiles"]:
                 out[tuple(t)] = "."
             if part["way"]:
-                out[tuple(part["way"])] = "+"
+                out[tuple(part["way"])] = "=" if part.get("bridge") else "+"
     except ValueError:
         pass
     return out
@@ -290,5 +303,106 @@ def ways_in(snap: dict, manifest: dict | None, depth: int = 1, covered=frozenset
             trapped = False
         want.sort(key=lambda p: (p[2], p[1], p[0]))
         res.append({"way": list(way), "tiles": want, "trapped": trapped and bool(lane), "partial": partial,
+                    "lane": len(lane)})
+    return res
+
+
+def _centre(fp) -> list[int]:
+    return [(fp[0] + fp[3]) // 2, (fp[1] + fp[4]) // 2, fp[2]]
+
+
+def bridge_ways(snap: dict, manifest: dict | None, covered=frozenset()) -> list[dict]:
+    """BUG-317 (Run 15 Earthboat y383-385: 'no way in left to trap (0 door(s) ...)', traps 0 and no traps draft in a fort
+    entered over its drawbridges O1/B1 only): one lane per outer or inner manifest bridge whose footprint stands on the
+    snapshot (`=`/`H`, not `replaced`), in the attack corridor behind it: walking out from the footprint on its level
+    (8-connected, doors, hatches and bridges closed) through the tiles the outside does not reach and the fort's interior
+    does not reach (Z1 bailey, Z2 hall, killboxes, the passages between them), the nearest BRIDGE_LANE tiles of the Z2
+    hall, a killbox or a passage. Never on or beside a bridge footprint, never in Z1 (the depot and the wagon route: wagons
+    stop at the depot) or beside it (the bailey exit stays free, as fortcore stage 4 keeps it), never in Z3/Z4, a room, a
+    station, a stair, the refuge or on an edge tile, never in the outside (the approach in front of O1 is the wagon road).
+    A tile in two lanes belongs to the nearer bridge (outer first on a tie). Tiles that show a trap (`^`), lie in the hall's
+    own entry Z2 (at=hall restocks them) or in `covered` hold their lane slot but are not wanted again.
+    [{way (the footprint centre), bridge (name), tiles (still to trap), trapped, partial (no corridor tile at all),
+    lane}], outer bridges first."""
+    m = manifest or {}
+    br = {n: b for n, b in (m.get("bridges") or {}).items()
+          if isinstance(b, dict) and b.get("role") in LANE_ROLES and (snap.get("bridges") or {}).get(n) != "replaced"}
+    if not br:
+        return []
+    g = topo.Graph(snap, closed="+=H")
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    raw = "".join("".join(snap["rows"][f"z{z}"]) for z in range(z0, z1 + 1))
+    src = topo.sources(g, m)
+    out_seen = g.bfs(src)[0] if src else bytearray(g.N)
+    zones = m.get("zones") or {}
+    attack = g.mask(list(zones.get("Z2") or []) + [k["bbox"] for k in m.get("killboxes") or []])
+    bailey = g.mask(zones.get("Z1") or [])
+    fps = g.mask([b["fp"] for b in (m.get("bridges") or {}).values() if isinstance(b, dict) and b.get("fp")])
+    # the fort's own geometry minus the attack corridor's zones: no lane tile there and (but Z1) no walking through it
+    rest = {**m, "zones": {k: v for k, v in zones.items() if k not in ("Z1", "Z2")}, "killboxes": [], "bridges": {}}
+    own = g.mask(topo.fort_boxes(rest))
+    inner_src = [i for i in g.nodes_in(own) if not out_seen[i]]
+    in_seen = g.bfs(inner_src, climb=False)[0] if inner_src else bytearray(g.N)
+    hall = {tuple(t[:3]) for e in m.get("traps") or [] if isinstance(e, dict) and e.get("id") == "Z2"
+            for t in e.get("tiles") or []}
+    edge = {tuple(p) for p in m.get("edge", [])}
+    W, H = g.W, g.H
+
+    def near(i, mask) -> bool:
+        x, y = i % W, (i // W) % H
+        return any(0 <= x + dx < W and 0 <= y + dy < H and mask[i + dy * W + dx] for dx, dy in N8)
+
+    def walkable(i) -> bool:
+        return bool(g.walk[i]) and not out_seen[i] and not in_seen[i] and not own[i] and not fps[i]
+    dist: dict[str, dict[int, int]] = {}
+    order = sorted(br, key=lambda n: (LANE_ROLES.index(br[n]["role"]), n))
+    for n in order:
+        fp = br[n]["fp"]
+        c = _centre(fp)
+        ci = g.idx(c)
+        if ci is None or raw[ci] not in "=H":
+            continue
+        seen: dict[int, int] = {}
+        dq = []
+        for y in range(fp[1], fp[4] + 1):
+            for x in range(fp[0], fp[3] + 1):
+                i = g.idx((x, y, fp[2]))
+                if i is not None:
+                    dq.append(i)
+        start = set(dq)
+        k = 0
+        while k < len(dq):
+            i = dq[k]
+            k += 1
+            x, y = i % W, (i // W) % H
+            for dx, dy in N8:
+                if not (0 <= x + dx < W and 0 <= y + dy < H):
+                    continue
+                j = i + dy * W + dx
+                if j in seen or j in start or not walkable(j):
+                    continue
+                p = g.pos(j)
+                if max(abs(p[0] - c[0]), abs(p[1] - c[1])) > OFF_BRIDGE:
+                    continue
+                seen[j] = seen.get(i, 0) + 1
+                dq.append(j)
+        dist[n] = seen
+    res = []
+    for n in order:
+        if n not in dist:
+            continue
+        c = _centre(br[n]["fp"])
+
+        def ok(j) -> bool:
+            return raw[j] in ".^" and not bailey[j] and not near(j, bailey) and not near(j, fps) \
+                and g.pos(j) not in edge
+        mine = [j for j, d in dist[n].items() if ok(j) and all(
+            d < dist[o].get(j, 1 << 30) or (d == dist[o].get(j) and order.index(n) < order.index(o))
+            for o in dist if o != n)]
+        mine.sort(key=lambda j: (dist[n][j], g.pos(j)[1], g.pos(j)[0]))
+        lane = mine[:BRIDGE_LANE]
+        want = [list(g.pos(j)) for j in lane if raw[j] != "^" and g.pos(j) not in hall and g.pos(j) not in covered]
+        want.sort(key=lambda p: (p[2], p[1], p[0]))
+        res.append({"way": c, "bridge": n, "tiles": want, "trapped": bool(lane) and not want, "partial": not lane,
                     "lane": len(lane)})
     return res

@@ -37,8 +37,10 @@ it was built:
   order.
 
 ## Limits (deliberate or unproven)
-- **Ways checked.** Only doors on the same z level count. A hatch at a stair head and a bridge as a side entrance get no
-  lane. O1 is the main path: the hall and the killing field cover it.
+- **Ways checked.** Only doors on the same z level count for `at=ways`. A hatch at a stair head gets no lane. BUG-317
+  (Earthboat, bridges only: `0 door(s)`, traps 0): `at=bridges` lays a stone-fall lane of 8 tiles behind each outer and
+  inner bridge (O1: the hall past the bailey exit; B1: the killing field K1), off Z1 and the bridge rings; plan propose
+  drafts it from P5 beside `at=ways`.
 - **Kind and size.** One kind per project. At most 6 ways and 16 tiles per project, and `at` fits in 200 characters
   (whole lanes only). The next `traps at=ways` takes the rest.
 - **Mechanisms.** No mechanism orders of its own. Each placed project's quickfort orders cover them, and economy's

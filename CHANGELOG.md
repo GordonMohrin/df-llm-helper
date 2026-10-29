@@ -1,5 +1,19 @@
 # CHANGELOG dfpilot
 
+## Run 15b bridge traps: a stone-fall lane behind the drawbridges of a fort without a door way in (BUG-317, 2026-10-29; offline, live-untested)
+- **Why:** Earthboat (entered over O1/B1 only) y383-385: `bp sites traps` -> `no way in left to trap (0 door(s) ...)`, `traps 0`,
+  plan propose never drafted traps in P5 (G14 red). Root cause dfpilot/bp/traps.py:247 `ways_in` reads door tiles only;
+  dfpilot/traps.py:148/159 draft and gate read the door lanes only.
+- **What changed:** `bp.traps.bridge_ways`: per outer/inner manifest bridge the nearest 8 tiles of the attack corridor behind it
+  (Z2 hall past the bailey exit for O1, the killbox K1 for B1), never in or beside Z1 (depot, wagon route), never beside a bridge
+  footprint, never in the outside, Z3/Z4, rooms, stations, stairs or edge tiles; tiles already trapped, in Z2's entry, in a
+  traps project or a placed fortcore stage 4 hold their slot. Template `traps at=bridges` (resolved `bx,y,z:dx,dy ...`, stone only,
+  way entries `T<x>_<y>_<z>`); `at=ways` with nothing left names the bridge ways; `traps.facts` `bridges/bopen/bways`; plan propose
+  drafts `traps@S1 at=bridges` from P5 (beside `at=ways`), plan check warns without it.
+- **Tests (9, all fail on 1d17c7e):** tests/test_bug317_bridge_traps.py.
+- **Live check:** Earthboat `dfllm cmd bp.place '{"tpl":"traps","site":"S1","p":{"at":"bridges"}}'` queues 16 stone-fall traps
+  (offline on the live save copy: 8 in the hall from 82,82,138, 8 in K1 from 68,79,138), then `status` `traps N/16 ways w/2`;
+  `plan propose` drafts `traps@S1 at=bridges` (offline y385 s0). Uncertain: haulers in the 1-wide hall, wagons staying in the bailey.
 ## Run 15c surface farm: bp.emit places it, fewer plots when trees cut the block (BUG-316, 2026-10-29; offline, live-untested)
 - **Why:** Inkintense y377 (food 21 d), live: `bp sites farms plots=1 surface=1` ranked 2 sites, but `cmd bp.place tpl=farms
   site=S1 plots=1 surface=1` and `plan check` failed with `[92, 87, 133]: bp.emit(farms): min() iterable argument is empty`;
