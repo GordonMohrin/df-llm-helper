@@ -291,6 +291,27 @@ T.test('fish_zone: a side x side dfllm-fish zone (quickfort zone key f) centred 
   T.eq(calls[#calls].data[0][0][0], 'f{name=dfllm-fish}(7x7)', 'side capped at 7')
 end)
 
+-- BUG-324 (Run 15: found water never zoned): the zones screen's Water Source zone, 1x1 dfllm-water on the water and with
+-- `up` on the open tile above it (water only)
+T.test('water_zone: a 1x1 dfllm-water zone (quickfort zone key w) on the water, up one level too', function()
+  local W = H.world{tag = 'wz'}
+  local calls = {}
+  local n = 1
+  W.scripts['quickfort'] = {apply_blueprint = function(p)
+    calls[#calls + 1] = p
+    return {zone_designated = {label = 'Zones designated', value = n}}
+  end}
+  local env = mk('water')
+  T.eq({env.api.water_zone({40, 40, 4}, true)}, {true, 2})
+  T.eq({calls[1].mode, calls[1].pos, calls[2].pos}, {'zone', {x = 40, y = 40, z = 4}, {x = 40, y = 40, z = 5}})
+  T.eq(calls[1].data[0][0][0], 'w{name=dfllm-water}')
+  T.eq({env.api.water_zone({20, 20, 5}, false)}, {true, 1})
+  T.eq((mk('economy').api.water_zone({20, 20, 5})), false, 'not owner')
+  T.eq((env.api.water_zone({20, 20})), false, 'bad position')
+  n = 0
+  T.eq({env.api.water_zone({21, 20, 5})}, {false, 'quickfort designated no zone there'})
+end)
+
 -- BUG-053 (Run 11/12: 16 and 100 free picks lay loose for 1081 and 144 days): the stockpiles screen's Weapons pile, a
 -- w x h pile named dfllm-tools through quickfort place mode (economy only)
 T.test('tool_pile: a w x h dfllm-tools weapons stockpile (quickfort place key p) at the position; economy only', function()

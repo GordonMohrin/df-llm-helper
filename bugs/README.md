@@ -313,6 +313,8 @@ Related: FR-xx, BUG-xx
 | [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
+| [BUG-324](BUG-324-found-water-never-becomes-accepted-water.md) | fixed (offline, live-untested) | high | Run 15: water the scan found never becomes accepted water: no hospital, no GiveWater source | water.lua, act.lua |
+| [BUG-325](BUG-325-water-scan-reach-from-one-citizen.md) | fixed (offline, live-untested) | medium | Run 15: the water scan asks the walk from one citizen, one in another walk group hides every well spot | water.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

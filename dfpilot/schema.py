@@ -79,6 +79,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
+    "water_zone": ["water"],                       # BUG-324: a Water Source zone on the water the scan found reachable
     "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
     "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager
     "mood_task": ["care"],                         # BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)

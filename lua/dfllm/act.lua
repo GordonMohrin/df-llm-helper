@@ -1091,6 +1091,26 @@ local function impls(state)
     return true, n
   end
 
+  -- zones screen > add zone > Water Source (BUG-324, Run 15 Inkintense/Earthboat: the water scan found deep water with a
+  -- reachable bank or a reachable floor beside the open tile above it, nobody zoned it, so no water was accepted and the
+  -- hospital waited for years): a 1x1 Water Source zone named dfllm-water on the water tile pos, quickfort zone mode
+  -- (internal/quickfort/zone.lua key `w`), and with `up` the open tile right above it too (the carrier's floor stands one
+  -- level higher, as for fish_zone). The caller (water) picks revealed, deep, non-cavern water whose bank its scan found on
+  -- the citizens' walk group (act reads no tiles). Returns ok, zones designated (0 = quickfort skipped every tile: refused).
+  function I.water_zone(pos, up)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    local n = 0
+    for _, zz in ipairs(up == true and {z, z + 1} or {z}) do
+      local ok, stats = I.quickfort({mode = 'zone', data = {[0] = {[0] = {[0] = 'w{name=dfllm-water}'}}}, pos = {x, y, zz}})
+      if not ok then return false, stats end
+      n = n + (type(stats) == 'table' and int(stats.zone_designated) or 1)
+    end
+    if n == 0 then return false, 'quickfort designated no zone there' end
+    return true, n
+  end
+
   -- stockpiles screen > add stockpile > Weapons (BUG-053, Run 11/12: 16 and 100 free picks lay loose for 1081 and 144 days; the
   -- only weapon pile the kernel builds, fortcore's melt pile, refuses picks and axes on purpose): a w x h stockpile named
   -- dfllm-tools with its top-left tile at pos, quickfort place mode key `p`. The caller picks revealed, plain, unbuilt floor on

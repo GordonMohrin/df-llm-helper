@@ -114,6 +114,11 @@ M.DEFAULTS = {
   dying_thirst = 60000, dying_every = 2 * DAY,
   -- BUG-104: a GiveWater job that stood open (no worker) this many days is "stuck" in the cause text
   give_stuck_days = 2,
+  -- BUG-325: the scan asks the walk from up to ws_from citizens (the nearest the reference); a tile is reachable from any
+  ws_from = 3,
+  -- BUG-324: while no water is accepted, the kernel zones the scan's best reachable, safe water as a Water Source (wz false:
+  -- off), at most one zone every wz_every and wz_max spots within wz_forget (a spot tried is not tried again before)
+  wz = true, wz_every = 2 * DAY, wz_max = 4, wz_forget = 28 * DAY,
 }
 M.SRC_MAX = 8                                -- accepted sources in the state (water.src), nearest first
 M.SRC_LBL = 4                                -- BUG-040: labels of the first ones (water.src_l: 'well 19098 in Kern+')
@@ -796,6 +801,38 @@ local function clamp_box(b, X, Y, Z)
 end
 local function in_box(b, x, y, z) return x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] end
 
+-- BUG-325 (Run 15 Earthboat: two scans of the same 1490 tiles in 12 bodies said '12 with a well spot' and '0 with a well
+-- spot' a few days apart): the scan asked snapshot.reach from ONE citizen, the one nearest the reference; when he stood in
+-- another walk group (the sealed refuge, a stranded woodcutter, a dwarf on a tree) every bank and well spot read
+-- unreachable. Now up to `n` origins, the citizens nearest the reference on distinct tiles; a tile counts as reachable when
+-- any of them reaches it (M.reach_any: true / false, nil = unknown: no origin)
+function M.origins(home, ref, n)
+  local l, seen = {}, {}
+  for _, h in ipairs(home or {}) do
+    local k = k3(h.x, h.y, h.z)
+    if not seen[k] then
+      seen[k] = true
+      l[#l + 1] = {h = h, d = dist_box(h.x, h.y, h.z, ref)}
+    end
+  end
+  table.sort(l, function(a, b)
+    if a.d ~= b.d then return a.d < b.d end
+    return k3(a.h.x, a.h.y, a.h.z) < k3(b.h.x, b.h.y, b.h.z)
+  end)
+  local out = {}
+  for i = 1, math.min(math.max(1, n or 1), #l) do out[i] = {x = l[i].h.x, y = l[i].h.y, z = l[i].h.z} end
+  return out
+end
+
+function M.reach_any(K, froms, to)
+  if #(froms or {}) == 0 then return nil end
+  for _, f in ipairs(froms) do
+    local ok, yes = K.call('snapshot', 'reach', f, to)
+    if not ok or yes ~= false then return true end
+  end
+  return false
+end
+
 -- the scan of the hospital's surroundings (else the citizens'); BUG-289: plus every citizen's, the bodies the last scans
 -- found (p.wb), the map's surface levels (survey) and what the survey meets; BUG-288: within ws_read_max tiles, the
 -- hospital's or the median's box first
@@ -859,12 +896,9 @@ local function new_scan(K, c, r, p)
       if M.box_n(cb) <= left then boxes[#boxes + 1], left = cb, left - M.box_n(cb) else cut = cut + 1 end
     end
   end
-  local from, fd                                     -- walk origin: the citizen nearest the reference
-  for _, h in ipairs(r.home) do
-    local d = dist_box(h.x, h.y, h.z, ref)
-    if not fd or d < fd then from, fd = h, d end
-  end
-  return {boxes = boxes, bi = 1, tiles = {}, n = 0, ref = ref, from = from, stage = #survey > 0 and 'survey' or 'read',
+  local froms = M.origins(r.home, ref, c.ws_from)   -- BUG-325: walk origins, the citizens nearest the reference
+  return {boxes = boxes, bi = 1, tiles = {}, n = 0, ref = ref, from = froms[1], froms = froms,
+          stage = #survey > 0 and 'survey' or 'read',
           sources = r.sources, bk = 0, out = {}, survey = survey, si = 1, X = X, Y = Y, Z = Z, cut = cut,
           seed_left = #survey > 0 and c.ws_seed_max or 0, seeds = 0, hits = {}, aqz = {}, reads = 0, slices = 0,
           quota = math.max(c.ws_tiles, (c.ws_read_max + c.ws_slices - 1) // c.ws_slices)}
@@ -1014,11 +1048,11 @@ local function scan_body(K, c, sc, body)
   end
   local checks = 0
   local function reachable(x, y, zz)
-    if not sc.from then return true end
+    local froms = sc.froms or (sc.from and {sc.from}) or {}
+    if #froms == 0 then return true end
     if checks >= c.ws_reach then return nil end
     checks = checks + 1
-    local ok, yes = K.call('snapshot', 'reach', sc.from, {x = x, y = y, z = zz or z})
-    return not ok or yes ~= false
+    return M.reach_any(K, froms, {x = x, y = y, z = zz or z})
   end
   if c.pit_well and res.well == -1 and res.zone == -1 then
     for i = 1, math.min(16, #body.tiles) do
@@ -1057,7 +1091,7 @@ local function scan_body(K, c, sc, body)
         local tt = read(x, y)
         if tt and STAND[tt.c] and not M.deep_tile(tt, c) then
           local yes = reachable(x, y)
-          if yes then res.bank, res.reach = {x, y, z}, 1; return res end
+          if yes then res.bank, res.reach, res.wt = {x, y, z}, 1, {t[1], t[2], z}; return res end   -- wt: its water tile
           if yes == nil then return res end
         elseif tt and DIGGABLE[tt.c] then
           walls[#walls + 1] = {x, y, key, x, y}
@@ -1122,6 +1156,108 @@ function M.way_text(w)
   end
   return trunc(string.format('water %d,%d,%d (%d/7): dig %d wall(s) from %d,%d,%d', b.at[1], b.at[2], b.at[3], b.max,
                              b.dig.n, b.dig.from[1], b.dig.from[2], b.dig.from[3]), 96)
+end
+
+---------------------------------------------------------------- BUG-324: found water becomes accepted water
+-- Run 15 Inkintense (y376-377: the scan found 7/7 water at 88,102,132 under an open tile with a reachable floor beside it,
+-- 'hospital still needs accepted water', no hospital for 4 years) and Earthboat (y384-385: the river's 7/7 water under its
+-- ramp tops, a dry well 17700, '1 GiveWater job open, none taken by 53 idle', patients at thirst 37,348): the scan only
+-- wrote a recipe; nothing ever zoned the water, so water.src stayed empty, bp sites hospital refused every site and the
+-- game had no water source for GiveWater. Now, while no water is accepted, the kernel paints a 1x1 Water Source zone
+-- dfllm-water (act.water_zone, the zones screen) on the scan's best water: a body with a reachable bank on its own level
+-- (the water tile beside it), else a well spot (the water under the open tile, the zone on both levels: the carrier's
+-- floor is one level up, as for fishing, BUG-296). Safe only: never cavern water, never a bank on the attack path
+-- (manifest Z1/Z2, killboxes), never in BREACH; outside PEACE/RECOVERY only a bank known to be roofed (snapshot
+-- outside_near); a roofed bank first, then the nearest. The next water run reads the zone over deep water as accepted
+-- (zone_wet), water.src carries it, bp sites hospital ranks by it. At most one zone every wz_every, wz_max spots within
+-- wz_forget, a spot tried (or already inside a zone) not again.
+function M.on_attack_path(K, q)
+  local ok, man = pcall(K.manifest)
+  man = ok and type(man) == 'table' and man or {}
+  local function inb(b)
+    return type(b) == 'table' and #b >= 6 and q[1] >= b[1] and q[1] <= b[4] and q[2] >= b[2] and q[2] <= b[5]
+           and q[3] >= b[3] and q[3] <= b[6]
+  end
+  for _, k in ipairs({'Z1', 'Z2'}) do
+    for _, b in ipairs(type(man.zones) == 'table' and type(man.zones[k]) == 'table' and man.zones[k] or {}) do
+      if inb(b) then return true end
+    end
+  end
+  for _, kb in ipairs(type(man.killboxes) == 'table' and man.killboxes or {}) do
+    if type(kb) == 'table' and inb(kb.bbox) then return true end
+  end
+  return false
+end
+
+-- the candidates of the last scan: {wt = the water tile, up = the carrier's floor one level higher, stand, b}, nearest first
+function M.zone_cands(ws)
+  local out = {}
+  for _, b in ipairs(ws and ws.bodies or {}) do
+    if b.cavern ~= 1 and b.zone == -1 and b.well == -1 then
+      if b.bank and b.wt then out[#out + 1] = {wt = b.wt, stand = b.bank, up = false, b = b} end
+      if b.pit and b.stand then
+        out[#out + 1] = {wt = {b.pit[1], b.pit[2], b.pit[3] - 1}, stand = b.stand, up = true, b = b}
+      end
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.b.d ~= b.b.d then return a.b.d < b.b.d end
+    if a.up ~= b.up then return not a.up end
+    return k3(a.wt[1], a.wt[2], a.wt[3]) < k3(b.wt[1], b.wt[2], b.wt[3])
+  end)
+  return out
+end
+
+-- one run: nil, or {at, up, ok, txt} when a zone was painted (or refused) now
+function M.zone_found(K, c, r, p, now)
+  if c.wz == false or not M.can('water_zone') or not st.ws then return nil end
+  local mode = K.mode()
+  if mode == 'BREACH' then return nil end
+  p.wzt = json.array(type(p.wzt) == 'table' and p.wzt or {})
+  local keep = json.array{}
+  for _, e in ipairs(p.wzt) do                          -- {key, tick}: the spots tried, forgotten after wz_forget
+    if type(e) == 'table' and math.tointeger(e[2]) and now - e[2] < c.wz_forget then keep[#keep + 1] = e end
+  end
+  p.wzt = keep
+  if #keep >= c.wz_max or now - (math.tointeger(p.wz_t) or -c.wz_every) < c.wz_every then return nil end
+  local tried = {}
+  for _, e in ipairs(keep) do tried[e[1]] = true end
+  local function zoned(t)                               -- already inside a Water Source zone (one that reads dry)
+    for _, s in ipairs(r.sources) do
+      local bx = s.kind == 'zone' and s.box
+      if bx and bx.z == t[3] and t[1] >= bx.x1 and t[1] <= bx.x2 and t[2] >= bx.y1 and t[2] <= bx.y2 then return true end
+    end
+    return false
+  end
+  local free = mode == 'PEACE' or mode == 'RECOVERY'
+  local best
+  for _, cd in ipairs(M.zone_cands(st.ws)) do
+    local key = k3(cd.wt[1], cd.wt[2], cd.wt[3])
+    if not tried[key] and not zoned(cd.wt) and not M.on_attack_path(K, cd.stand) and not M.on_attack_path(K, cd.wt) then
+      local oko, sky = K.call('snapshot', 'outside_near', {cd.stand}, 0)
+      cd.inside = oko and type(sky) == 'table' and sky[1] == 0
+      if cd.inside then best = cd; break end
+      if free and not best then best = cd end
+    end
+  end
+  if not best then return nil end
+  local w, s = best.wt, best.stand
+  local key = k3(w[1], w[2], w[3])
+  p.wzt[#p.wzt + 1] = json.array{key, now}
+  p.wz_t = now
+  local ok, n = K.act.water_zone({w[1], w[2], w[3]}, best.up)
+  local where = string.format('%d,%d,%d (%d/7%s; carrier floor %d,%d,%d%s)', w[1], w[2], w[3], best.b.max,
+                              best.up and ', open above' or '', s[1], s[2], s[3], best.inside and ', roofed' or '')
+  local out = {at = w, up = best.up, ok = ok and 1 or 0}
+  if ok then
+    out.txt = 'Water Source zone dfllm-water painted at ' .. where .. ': accepted after the next water run'
+    K.log('info', 'water: %s (no accepted water; %s)', out.txt, mode)
+  else
+    out.txt = trunc(string.format('Water Source zone at %d,%d,%d refused: %s', w[1], w[2], w[3], tostring(n)), 100)
+    K.log('warn', 'water: %s', out.txt)
+  end
+  p.wz = {at = json.array{w[1], w[2], w[3]}, up = best.up and 1 or 0, t = now, ok = out.ok}
+  return out
 end
 
 local function scan_done(K, c, sc, p)
@@ -1541,6 +1677,8 @@ local function plural(n, one, many) return string.format('%d %s', n, n == 1 and 
 function M.give_diag(K, c, r, sc, bfree, top)
   local gv = {carers = #r.carers, idle = r.carers_idle, key = 'unreadable'}
   local ok_job = sc ~= nil and sc.read ~= false
+  local wet_any = false
+  for _, s in ipairs(r.sources or {}) do if s.wet then wet_any = true end end
   gv.open, gv.run, gv.stuck = ok_job and sc.w_open or nil, ok_job and sc.w_run or nil, ok_job and sc.stuck or nil
   -- the caregivers' reach to the thirstiest patient
   if top and top.x and #r.cpos > 0 then
@@ -1577,6 +1715,13 @@ function M.give_diag(K, c, r, sc, bfree, top)
     gv.key, gv.reason = 'noreach', string.format('no caregiver reaches the patient (0 of %d)', #r.cpos)
   elseif not ok_job then
     gv.key, gv.reason = 'unreadable', 'the GiveWater jobs cannot be read'
+  elseif not wet_any and gv.run == 0 then
+    -- BUG-324 (Earthboat y385: '1 GiveWater job open, none taken by 53 idle'): idle carers were never the cause; the game
+    -- takes the water for GiveWater from a well or a Water Source zone, and none was accepted
+    gv.key = 'nowater'
+    gv.reason = string.format('no accepted water (no well over water, no Water Source zone): %s', gv.open > 0
+                              and plural(gv.open, 'GiveWater job', 'GiveWater jobs') .. ' open without a source'
+                              or 'no GiveWater job without a source')
   elseif gv.stuck > 0 then
     gv.key, gv.reason = 'stuck', string.format('%s open %d+ days', plural(gv.stuck, 'GiveWater job', 'GiveWater jobs'),
                                                c.give_stuck_days)
@@ -2068,11 +2213,12 @@ function M.dry_well(K, c, r)
         local what = bl.why == 'rock' and 'rock below' or (bl.why == 'hidden' and 'a hidden tile below'
                      or string.format('%d/7', bl.flow or 0))
         local best
-        for _, b in ipairs(st.ws and st.ws.bodies or {}) do
-          if b.cavern ~= 1 and b.bank and (not best or b.d < best.d) then best = b end
+        for _, b in ipairs(st.ws and st.ws.bodies or {}) do      -- BUG-324: a well spot's floor is a bank one level up
+          if b.cavern ~= 1 and (b.bank or b.stand) and (not best or b.d < best.d) then best = b end
         end
+        local bk = best and (best.bank or best.stand)
         local fill = best and string.format('fill source: the water at %d,%d,%d (bank %d,%d,%d)', best.at[1], best.at[2],
-                                            best.at[3], best.bank[1], best.bank[2], best.bank[3])
+                                            best.at[3], bk[1], bk[2], bk[3])
                      or 'no water a carrier reaches to fill it'
         return string.format('dry well %d at %d,%d,%d (%s): only buckets fill its sump; %s', s.id, s.x, s.y, s.z, what,
                              fill)
@@ -2138,6 +2284,7 @@ local function finish(K, c, r, p)
     if s.kind == 'well' then wells = wells + 1 end
     if s.wet then wet = wet + 1 end
   end
+  local wz = wet == 0 and M.zone_found(K, c, r, p, now) or nil      -- BUG-324: zone the water the scan found
   -- buckets: the hospital's own wish, at least buckets_min, one more per patient
   local want = c.buckets_min
   for _, h in ipairs(r.hosp) do if h.want and h.want > want then want = h.want end end
@@ -2174,6 +2321,7 @@ local function finish(K, c, r, p)
     if cis then cause[#cause + 1] = cis.txt end
   end
   if wet == 0 then cause[#cause + 1] = 'no accepted water at all' end
+  if wz then cause[#cause + 1] = wz.txt end                             -- BUG-324: what the kernel did about it
   -- BUG-263/264/266: why there is none: the source the hospital was placed by dropped out, a well fed by its own pond, a
   -- plain well over a dry sump (fortcore stage 1: only buckets fill it), a well that waits for its chain or rope
   local extra, dwell = {}, nil
@@ -2557,7 +2705,7 @@ function M.inspect(K, what, key)
           nboxes = #w.boxes, tiles = w.tiles,
           levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm, refuge = ref, last = last,
           run = run, slices = w.slices, reads = w.reads, survey = w.survey, seeds = w.seeds, cut = w.cut, aq = w.aq,
-          serr = w.serr, way = M.way_text(M.best_way(w)),
+          serr = w.serr, way = M.way_text(M.best_way(w)), wz = ps.wz,
           carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil, chain = st.chain,
           note = 'sources [kind, id, x, y, z, accepted, depth under a well (-1 unknown), burrow]; refuge: its bbox, d = '
                  .. 'its nearest tile to the nearest accepted source (-1 none); bank: stand there and fill or zone the '
@@ -2570,7 +2718,9 @@ function M.inspect(K, what, key)
                  .. '(BUG-290): a well spot, the open tile right above the water (stand: the reachable floor beside it); '
                  .. 'last/run (BUG-288): the last finished scan and the running one (slices, at most max); survey/seeds '
                  .. '(BUG-289): the surface levels surveyed and the boxes round what they met; aq (BUG-291): levels with a '
-                 .. 'revealed aquifer tile beside the water; way: the best way to water at any distance'}
+                 .. 'revealed aquifer tile beside the water; way: the best way to water at any distance; wz (BUG-324): the '
+                 .. 'Water Source zone dfllm-water the kernel painted last (at = the water tile, up 1 = also the tile above, t, '
+                 .. 'ok); wt: a bank\'s water tile'}
 end
 
 -- inspect what=hospital (kern routes it here; BUG-106): the audit of the last water run (a game day old at most): the gaps in a

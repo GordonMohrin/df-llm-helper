@@ -366,7 +366,9 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
                          "zone on water >= 4/7; a well fed only by its own pond is none): a hospital without it is worse "
                          "than none (BUG-034); water first (dfllm cmd inspect '{\"what\":\"water_sources\"}'; no brook: "
                          "dfllm bp sites cistern water=aquifer on a known aquifer level)" + rw
-                         + (f"; the water scan found: {water['cand']}" if water.get("cand") else ""))
+                         + (f"; the water scan found: {water['cand']} (BUG-324: the kernel zones it as Water Source "
+                            "dfllm-water itself while none is accepted; the sites follow a game day later)"
+                            if water.get("cand") else ""))
     out, best = [], None
     for c in cands:
         zb = zone_box(tpl, p, c["anchor"], c["rot"])

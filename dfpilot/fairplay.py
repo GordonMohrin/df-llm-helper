@@ -299,6 +299,8 @@ WATER_LIM: dict = {
     "ws_read_max": (1000, 400000), "ws_slices": (1, 200), "ws_body_slices": (1, 50), "ws_cit": (0, 60), "ws_mem": (0, 32),
     "ws_mem_r": (0, 60), "ws_survey_levels": (0, 6), "ws_lattice": (2, 8), "ws_survey_max": (0, 200000),
     "ws_seed_r": (0, 60), "ws_seed_max": (0, 100000), "pit_well": "bool",
+    # BUG-325: walk origins of the scan; BUG-324: the kernel's Water Source zone on found water (on/off, cadence, spots)
+    "ws_from": (1, 10), "wz": "bool", "wz_every": _TICKS, "wz_max": (0, 32), "wz_forget": _TICKS,
 }
 
 
