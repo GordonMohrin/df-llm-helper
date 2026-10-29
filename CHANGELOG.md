@@ -1,5 +1,24 @@
 # CHANGELOG dfpilot
 
+## Run 15 gate crush: a forced raise never with a unit on the bridge, raise pulls cancelled for walkers, no auto drill with a dry refuge (BUG-310..312, 2026-10-29; offline, live-untested)
+- **Why:** Run 15b Earthboat lost three dwarves to B2 in BREACH/RECOVERY, not in a drill: y379 GATE_FORCED #3723 `B2 raised onto
+  citizen 26600 next to it` (the pull's own worker), the forced pull pending 490 ticks, then #3751/#3757 two citizens crushed: the
+  force passed every unit within the margin, on the footprint too (BUG-310); y376 #2182 soldier 26588 walked onto B2 on his way to his
+  station while an unforced raise was being pulled, a cancel that existed only for lowerings (BUG-311). Run 15d Drillchamber: every
+  automatic drill (#2318/#2484/#2621) started with REFUGE_FAIL `Kern+: drink 0<38 (3 wells, none wet)`, STRANDED held B1/O1 and the
+  drill failed (BUG-312).
+- **What changed:** gate.lua `holders`: a forced raise is held by any unit ON the footprint (queue path and every frame of a pending
+  pull: cancel), only units next to it are passed; GATE_FORCED `<B> raised with <units> next to it`, once per job when the worker is
+  known, without him; an unknown census holds a forced raise too. The BUG-251 approach cancel (a unit within 3 tiles walking toward the
+  footprint) covers taken raise pulls (not forced ones). drill.lua `dry_hold`: no automatic drill while readiness says refuge_dry or
+  seal's audit finds the kern burrow dry (`seal.refuge_drink(K, 'kern')`); ready.dhold `refuge dry` / `Kern+ dry`. RULES §7 and
+  CONTRACTS rows GATE_FORCED (no schema change).
+- **Tests (fail on 9ef2ccb):** tests/lua/test_siege.lua `BUG-310` x2 (the old BUG-027 forced-onto-a-soldier scenario rewritten),
+  tests/lua/test_gate_crush.lua `BUG-311`, tests/lua/test_fix11_drill_dry.lua x2.
+- **Live check:** next SIEGE/BREACH raise with a hostile at the gate: GATE_FORCED reads `raised with ... next to it`, kern.log
+  `waits for ... on the footprint` while one stands on it, no BRIDGE_CRUSH `last seen on it`; kern.log `up pull cancelled ... walking
+  toward it` at a busy B2; Drillchamber status `drill never (auto: refuge dry)`. Uncertain: a unit stepping on during the move after the
+  lever was pulled cannot be stopped (GATE_CRUSH_RISK names it); raises in a busy corridor may now wait longer (watch GATE_FAIL slow).
 ## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
 - **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
   player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no

@@ -3758,12 +3758,13 @@ end
 -- public (Run 11, readiness: siege 8's Tiefe+ had no drink): the refuge burrow's drink by the last audit: {name,
 -- exists, drink (units: drink items, FR-59), need (citizens x drink_per_cit), wells (built wells on it), wet (drink >= need
 -- or a wet well, BUG-073: the SIEGE level's drink rule)}; nil before the first audit. FR-69: store = its drink store (drink_store:
--- {n, tiles, drink, at}; nil none)
-function M.refuge_drink(K)
+-- {n, tiles, drink, at}; nil none). BUG-312: which = 'kern' answers the same for the kern burrow (drill's alert burrow)
+function M.refuge_drink(K, which)
   local au = mem and mem.audit and mem.audit.burrows
   if not au then return nil end
-  local _, refuge = burrow_names(K)
-  local a = au[refuge]
+  local kern, refuge = burrow_names(K)
+  if which == 'kern' then refuge = kern end
+  local a = refuge and au[refuge]
   if not a then return nil end
   return {name = refuge, exists = a.exists == true, drink = int(a.drink) or 0, need = int(a.dneed) or 0,
           wells = int(a.wells) or 0, wet = a.wet == true,

@@ -181,6 +181,23 @@ T.test('BUG-251: a taken lowering pull is cancelled when a unit within 3 tiles w
   T.eq(#W.find_events('GATE_FAIL'), 0)
 end)
 
+T.test('BUG-311 (Earthboat y376 #2182, RECOVERY: a soldier walked onto B2 while it rose): a taken raise pull is ' ..
+       'cancelled when a unit within 3 tiles walks toward the footprint; queued again, raised while he stands still', function()
+  local W = fort{units = {S.cit(12, 40, 18, Z)}}                           -- 3 tiles south of B1, standing
+  run(W, 100)
+  T.eq(select(2, W.K.call('gate', 'want', 'B1', 'up', 'lever:test')), true)
+  run(W, 600, function() local j = job(W, 'B1'); return j and j._worker ~= nil end)
+  T.ok(job(W, 'B1') and job(W, 'B1')._worker, 'the pull is taken')
+  local jid = job(W, 'B1').id
+  W.move(12, 40, 17, Z)                                                    -- 2 tiles, walking toward B1
+  run(W, 18)
+  T.ok(job(W, 'B1') == nil or job(W, 'B1').id ~= jid, 'cancelled (old: done, B1 rose with him walking onto it)')
+  T.ok(logged(W, 'gate: B1 up pull cancelled: citizen 12 2 tiles from it and walking toward it'), 'kern.log')
+  T.eq(up(W, 'B1'), false)
+  run(W, 400)
+  T.eq({up(W, 'B1'), pulls(W, 'B1', 'up')}, {true, 2}, 'queued again, raised while he stands still')
+end)
+
 T.test('BUG-252: an unknown census while our pull is pending cancels it (old: only the queue path waited for it); ' ..
        'no give-up count, no GATE_FAIL; with the census back the bridge comes down', function()
   local W = fort{up = {B1 = true}}

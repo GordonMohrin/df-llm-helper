@@ -11,7 +11,10 @@
 -- footprint, and queued again once it is clear. A bridge is never raised onto a unit only because the wait was long
 -- (the old SIEGE/BREACH rule raised after 300 ticks and ignored the margin and the pending check: the Run 10 deaths);
 -- only a raise in SIEGE/BREACH with a visible hostile within force_near tiles of the footprint (config/reflex.json
--- `gate.force_near`, default 3, 0 = never) goes ahead, and GATE_FORCED (A) names the units. Bridges named in
+-- `gate.force_near`, default 3, 0 = never) goes ahead past units NEXT TO the footprint, and GATE_FORCED (A) names them.
+-- BUG-310 (Run 15b Earthboat y379, GATE_FORCED #3723 then two citizens crushed by B2): a forced raise is never pulled,
+-- and its pending pull is cancelled the frame a unit stands ON the footprint (d 0); the job's worker at his lever is
+-- not named. Bridges named in
 -- `gate.manual` (manifest names or building ids) get no automatic pull at all (a stop-gap; the inbox `lever` still
 -- works). A held 'up' reaches GATE_FAIL (blocked) at its deadline with the units and their squad stations named.
 -- Our own job without a worker for 200 ticks is cancelled (act.cancel_own_lever_job, the UI
@@ -1203,16 +1206,23 @@ local function hostile_dist(K, name, fp)
 end
 
 -- BUG-027: who holds a pull of `name` toward `dir` now: {units within MARGIN} (empty = clear), and the force: a raise
--- in SIEGE/BREACH with a visible hostile within force_near tiles goes ahead anyway (returns the holders and the
--- hostile's distance). An unknown census (hold.unknown) holds every unforced pull.
+-- in SIEGE/BREACH with a visible hostile within force_near tiles goes ahead past the units next to the footprint
+-- (returns the holders, the hostile's distance and the units beside it). BUG-310: a unit ON the footprint holds a forced
+-- raise too ('next to' is not 'on'). An unknown census (hold.unknown) holds every pull, forced or not.
 local function holders(K, name, fp, sc, dir)
   local hold = within(sc, M.MARGIN)
+  if not sc then hold.unknown = true end
   if dir == 'up' and FORCE_MODES[K.mode()] then
     local fn = gcfg(K)
     local d = fn > 0 and hostile_dist(K, name, fp) or -1
-    if d >= 0 and d <= fn then return hold, d end
+    if d >= 0 and d <= fn then
+      local on, beside = {unknown = hold.unknown}, {}
+      for _, e in ipairs(hold) do
+        if e.d == 0 then on[#on + 1] = e else beside[#beside + 1] = e end
+      end
+      return on, d, beside
+    end
   end
-  if not sc then hold.unknown = true end
   return hold, nil
 end
 
@@ -1499,13 +1509,13 @@ local function note_hold(K, name, fp, w, hold, now)
   end
 end
 
--- BUG-027: a raise forced by a hostile at the gate goes ahead with units on or next to the footprint: GATE_FORCED (A)
--- names them, once per pull
+-- BUG-027: a raise forced by a hostile at the gate goes ahead with units next to the footprint (BUG-310: never with one
+-- on it): GATE_FORCED (A) names them, once per pull, when the pull's worker is known (he is not named)
 local function forced_event(K, name, fp, hold, hd, job)
   local r = runtime(name)
   if #hold == 0 or r.forced_ev == job then return end
   r.forced_ev = job
-  local txt = string.format('%s raised onto %s: a hostile %d tiles from it (force_near %d)', name, who(hold, fp), hd,
+  local txt = string.format('%s raised with %s: a hostile %d tiles from it (force_near %d)', name, who(hold, fp), hd,
                             (gcfg(K)))
   K.emit('GATE_FORCED', 'A', cut(txt, 200), {bridge = name, units = ids_of(hold), hostile = hd,
                                              pos = {hold[1].x, hold[1].y, hold[1].z}, job = job})
@@ -1755,27 +1765,36 @@ local function control(K, name, spec, now)
       -- lever moves the bridge when the puller finishes the job, so a unit on or next to the footprint cancels our
       -- pending pull in every mode and both ways (live L4: the margin); only a forced raise goes on (GATE_FORCED)
       if not stale then
-        local hold, hd = holders(K, name, spec.fp, sc, dir)
+        local hold, hd, beside = holders(K, name, spec.fp, sc, dir)
         -- BUG-141 (live i3: lever 25729 two tiles from X25718's footprint): the job's own worker has to stand at the
         -- lever; next to the footprint (not on it) he holds nothing, else we cancel our own pull for ever
         local wid = (w0 and unit_id(w0)) or r.job.wid
         if wid and #hold > 0 then
-          local keep = {}
+          local keep = {unknown = hold.unknown}
           for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 then keep[#keep + 1] = e end end
           if #keep < #hold then hold = keep end
         end
-        if hd then forced_event(K, name, spec.fp, hold, hd, r.job.id)
-        elseif #hold > 0 then
+        if #hold > 0 then                             -- BUG-310: a unit on the footprint cancels a forced raise too
           stale = 'blocked'
           r.block_since = r.block_since or now
           note_hold(K, name, spec.fp, dir, hold, now)
         elseif hold.unknown then
           stale = 'census'                            -- BUG-252: nobody can say who stands there: no pull goes ahead
-        elseif dir == 'down' and w0 then
-          local e = M.approach(br, sc, prev, wid)     -- BUG-251: someone walks toward it while the pull is being done
+        elseif hd then
+          if w0 then                                  -- BUG-310: named once the worker is known, without him
+            local b = {}
+            for _, e in ipairs(beside) do if e.id ~= wid then b[#b + 1] = e end end
+            forced_event(K, name, spec.fp, b, hd, r.job.id)
+          end
+        elseif w0 then
+          -- BUG-251: someone walks toward it while the pull is being done; BUG-311 (Earthboat y376 #2182, RECOVERY: soldier
+          -- 26588 on his way to his station walked onto B2 while it rose): a raise too (not a forced one)
+          local e = M.approach(br, sc, prev, wid)
           if e then
-            stale, r.qd = 'approach', now
-            K.log('info', 'gate: %s down pull cancelled: %s %d %d tiles from it and walking toward it', name, e.k, e.id, e.d)
+            stale = 'approach'
+            if dir == 'down' then r.qd = now end
+            K.log('info', 'gate: %s %s pull cancelled: %s %d %d tiles from it and walking toward it', name, dir, e.k, e.id,
+                  e.d)
           end
         end
       end
@@ -1853,8 +1872,8 @@ local function control(K, name, spec, now)
   -- visible hostile within force_near tiles of it (never because the wait was long)
   local hold, hd = holders(K, name, spec.fp, sc, w)
   -- no census yet (the first frame after a boot): wait silently, the pull is still to do (reflex's alert waits for it)
-  if not hd and hold.unknown then r.stuck = 'census'; return s end
-  if not hd and #hold > 0 then
+  if hold.unknown then r.stuck = 'census'; return s end
+  if #hold > 0 then                                -- BUG-310: forced or not, never onto a unit on the footprint
     r.block_since = r.block_since or now
     note_hold(K, name, spec.fp, w, hold, now)
     r.stuck, r.qd = 'blocked', now
@@ -1879,7 +1898,6 @@ local function control(K, name, spec, now)
   if not (r.lat0 and r.lat0.want == w) then r.lat0 = {tick = now, ms = K.now().ms, want = w} end
   st.kpi.pulls, dirty = st.kpi.pulls + 1, true
   K.emit('LEVER', 'C', 'pull ' .. name .. ' ' .. w, {bridge = name, lever = lid, job = job})
-  if hd then forced_event(K, name, spec.fp, hold, hd, job) end
   return s
 end
 

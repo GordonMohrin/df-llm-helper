@@ -429,6 +429,20 @@ function M.supply_hold(K)
   return nil
 end
 
+-- BUG-312 (Run 15d Drillchamber y376-y378: every automatic drill 'auto: retry' failed, REFUGE_FAIL 'Kern+: drink 0<38 (3 wells,
+-- none wet)' at its start, STRANDED held B1/O1 down, GATE_CRUSH_RISK #2664 at its end): no automatic drill while readiness
+-- says refuge_dry or the drill's own alert burrow (the kern burrow) holds less drink than it needs and no wet well (seal's
+-- audit): the drill would confine the citizens away from their drink. The player's `drill` stays his choice.
+function M.dry_hold(K)
+  local okr, rd = K.call('readiness', 'refuge_dry')
+  if okr and type(rd) == 'string' and rd ~= '' then return 'refuge dry' end
+  local okk, kd = K.call('seal', 'refuge_drink', 'kern')
+  if okk and type(kd) == 'table' and kd.exists == true and kd.wet == false then
+    return cut(string.format('%s dry', tostring(kd.name)), 24)
+  end
+  return nil
+end
+
 -- why an automatic drill is due now (1st value), else why it is held (2nd value, <= 24 chars; FR-65 status)
 local function check(K, now)
   if st.t0 or st.rs then return nil, 'running' end
@@ -437,6 +451,8 @@ local function check(K, now)
   if now - rt.boot < M.SETTLE then return nil, 'settling' end
   local sup = M.supply_hold(K)                              -- BUG-294
   if sup then return nil, sup end
+  local dry = M.dry_hold(K)                                 -- BUG-312
+  if dry then return nil, dry end
   if st.try and now - st.try < M.RETRY_ABORT then          -- 5 days after the last start (finished or aborted)
     local newest = rec.last[#rec.last]
     return nil, (newest and newest.tick >= st.try) and 'just drilled' or 'aborted'
