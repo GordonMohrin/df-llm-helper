@@ -31,7 +31,9 @@ water W behind G (`water=bed`: one level below the bank, a brook; `bank`: at ban
 tile rock or unknown with a rock ring (no revealed open tile within 1), nothing open or wet right above a pipe
 tile (a pressurized pipe must not rise into anything). `level=refuge` puts the well room on the refuge level
 (anchors in the fortcore refuge room). `plan_cistern` routes such a pipe on a snapshot (`python -m
-dfpilot.bp.sites cistern --save <folder>` prints the params and the bp.place command).
+dfpilot.bp.sites cistern --save <folder>` prints the params and the bp.place command). `water=aquifer` (BUG-262, no path):
+the basin one level below the well room lies on a known aquifer level (manifest aquifer_levels, damp marks), the room level
+and the one above it are dry, no heavy aquifer was recorded there (`aquifer_well`); damp marks do not reject it.
 Explore (`mine.explore`, Run 10: no ore for years): public Z4 anchors like a room, never on or below the refuge level;
 its footprint ring per level (all round below the anchor level) must be rock or unknown, levels below the snapshot are
 unknown; the shaft must not reach a level in `p.avoid`, one with a revealed cavern, damp or warm mark, or (Run 11) the
@@ -224,7 +226,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl != "fortcore" and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
-    marks = [tuple(q) for k in MARKS for q in snap.get("marks", {}).get(k, [])]
+    aqwell = tpl == "cistern" and p.get("water") == "aquifer"     # BUG-262: damp is what its basin looks for
+    marks = [tuple(q) for k in MARKS if not (aqwell and k == "damp") for q in snap.get("marks", {}).get(k, [])]
     bad = _Pref(snap, lambda c: c not in GOOD)
     hid = _Pref(snap, lambda c: c == "?")
     mk = _Pref(snap, points=marks)
@@ -239,7 +242,10 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
         if not cands and tpl == "refuge_drink":
             raise ValueError(_no_store(snap, p, manifest, bad, hid, mk, wet))
-    cands = aquifer_ok(cands, tpl, p, rects, manifest)      # FR-95: the levels the kernel saw damp or wet
+    if aqwell:
+        cands = aquifer_well(cands, snap, manifest)         # BUG-262: the basin on an aquifer level, the room dry
+    else:
+        cands = aquifer_ok(cands, tpl, p, rects, manifest)  # FR-95: the levels the kernel saw damp or wet
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
     if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
@@ -337,9 +343,12 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
     near = water.get("near") or WATER_NEAR
     rw = refuge_water(water)
     if not src:
+        # BUG-262/263: a well fed only by its own pond is no accepted water (water.lua M.loops, the same state); without a
+        # brook an aquifer level is one (a cistern with p.water aquifer)
         raise ValueError(f"{tpl}: no accepted water in the fort (state water.src is empty: no well over water, no water "
-                         "zone on water >= 4/7): a hospital without it is worse than none (BUG-034); water first "
-                         "(dfllm cmd inspect '{\"what\":\"water_sources\"}')" + rw)
+                         "zone on water >= 4/7; a well fed only by its own pond is none): a hospital without it is worse "
+                         "than none (BUG-034); water first (dfllm cmd inspect '{\"what\":\"water_sources\"}'; no brook: "
+                         "dfllm bp sites cistern water=aquifer on a known aquifer level)" + rw)
     out, best = [], None
     for c in cands:
         zb = zone_box(tpl, p, c["anchor"], c["rot"])
@@ -615,6 +624,39 @@ def aquifer_ok(cands: list, tpl: str, p: dict, rects: dict, manifest: dict | Non
         z0, z1 = c["box"][2], c["box"][5]
         if not any(z0 <= z <= z1 + 1 for z in aq):
             out.append(c)
+    return out
+
+
+HEAVY_WHY = ("heavy_aquifer", "water")      # BUG-262: breach stops that show a heavy aquifer (visible water, not damp)
+
+
+def aquifer_well(cands: list, snap: dict, manifest: dict | None) -> list:
+    """BUG-262 (Run 15 Inkintense, Guildcleans: no brook, a light aquifer, 'hospital held back (BUG-034)' for good): the
+    sites of a cistern with p.water = aquifer, whose basin (one level below the well room) is dug into an aquifer level so
+    the aquifer seeps into it under the well. The aquifer levels are the manifest's `aquifer_levels` and the levels of the
+    snapshot's damp marks (revealed tiles only). A site counts when its basin level is one of them, its room level and the
+    level above the room are none (no drip into the room), and no heavy aquifer was recorded on the basin level (a breach
+    stop with visible water: manifest `breaches` why heavy_aquifer/water). ValueError with the reason when none is left."""
+    aq = aquifer_levels(manifest)
+    for q in (snap.get("marks") or {}).get("damp", []):
+        if isinstance(q, (list, tuple)) and len(q) == 3:
+            aq.add(int(q[2]))
+    if not aq:
+        raise ValueError("cistern water=aquifer: no aquifer level known (no manifest aquifer_levels, no damp mark on the "
+                         "snapshot): an aqshaft or a dig that met damp stone shows one first")
+    heavy = {int(b["pos"][2]) for b in (manifest or {}).get("breaches") or []
+             if isinstance(b, dict) and b.get("why") in HEAVY_WHY and isinstance(b.get("pos"), (list, tuple))
+             and len(b["pos"]) == 3}
+    out = []
+    for c in cands:
+        z = c["anchor"][2]
+        if z - 1 in aq and z not in aq and z + 1 not in aq and z - 1 not in heavy:
+            out.append({**c, "why": c["why"] + f", basin on aquifer level z{z - 1}"})
+    if not out:
+        lv = ",".join(f"z{z}" for z in sorted(aq))
+        hv = f"; heavy (refused): {','.join(f'z{z}' for z in sorted(heavy))}" if heavy else ""
+        raise ValueError(f"cistern water=aquifer: no site with its basin on an aquifer level ({lv}) under a dry room level"
+                         f"{hv}: the room level must lie right above an aquifer level and be dry itself")
     return out
 
 

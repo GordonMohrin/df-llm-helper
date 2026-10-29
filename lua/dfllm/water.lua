@@ -83,7 +83,9 @@ M.DEFAULTS = {
   alarm_every = 7 * DAY, hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
   deep = 4, zone_below = false, gate_every = 28 * DAY, wake_wall_s = 600,
-  ws_dz = 3, ws_tiles = 1500, ws_every = 7 * DAY, ws_bodies = 12, ws_dig = 8, ws_reach = 6, ws_reads = 400,
+  -- BUG-265 (Run 15 Earthboat: 6 bodies 10-29 tiles from the hospital, all reach 0): ws_dig 8 -> 16 walls (ws_reads still
+  -- caps the tile reads per body)
+  ws_dz = 3, ws_tiles = 1500, ws_every = 7 * DAY, ws_bodies = 12, ws_dig = 16, ws_reach = 6, ws_reads = 400,
   -- BUG-034: a dry hospital's zones go once a patient is over patient_thirst (DF's "thirsty" mark is ~25,000-50,000;
   -- dehydration kills at ~75,000); hosp_remove false keeps them (report only, as before)
   patient_thirst = 25000, hosp_remove = true, remove_per_run = 8,
@@ -342,7 +344,8 @@ local function phase_sites(K, c, r)
     local wet, info = false, nil
     if done then wet, info = M.well_wet(K, w.x1, w.y1, w.z, c.shaft) end
     r.sources[#r.sources + 1] = {kind = 'well', id = w.id, x = w.x1, y = w.y1, z = w.z, wet = wet,
-                                 built = done, below = info}                  -- BUG-031: what the shaft ends on
+                                 built = done, below = info,                  -- BUG-031: what the shaft ends on
+                                 chain = not done and M.chain_wait(w) or nil} -- BUG-264: its job waits for a chain
   end
   local locs = hospital_locations()
   r.locs_total = 0
@@ -496,12 +499,69 @@ local function pond_loops(K, c, r, p)
           p.prm = type(p.prm) == 'table' and p.prm or json.array{}
           p.prm[#p.prm + 1] = json.array{pd.id, (pd.x1 + pd.x2) // 2, (pd.y1 + pd.y2) // 2, pd.z, K.now().tick}
           while #p.prm > 8 do table.remove(p.prm, 1) end
+          M.loop_mark(p, s.id, pd.id)                        -- BUG-263: its water is a store, no source
         end
         break
       end
     end
   end
   return n
+end
+
+---------------------------------------------------------------- BUG-263: a well fed only by its own pond
+-- Run 15 Drillchamber y373: status said 'src 1 (well 17813 at 91,70,136 in Tiefe+)', bp sites hospital placed the
+-- hospital beside it, then pond_loops removed pond zone 17822 ('the wet well 17813 beside it was its water source (a
+-- loop)'), the well ran dry and HOSPITAL_DRY said 'no accepted water on the map' 13 days after the placement. The
+-- acceptance (any water down the shaft) and the loop rule (pond_loops) disagreed in time. Now one predicate: a wet well
+-- with a Pond zone within pond_near while no wet Water Source zone exists (the very case pond_loops calls a loop), or
+-- one whose pond pond_loops removed (p.lw: well id -> {pond}; forgotten once the well reads dry), holds a store the
+-- carriers poured from itself, no source: it is not accepted (s.wet false, s.loop = the pond id, s.water true). The
+-- state's water.src (what bp sites hospital ranks by), served(), the gate and the removal all read s.wet; the refuge's
+-- drink (refuge_ok, wet_wells: a store is drink for a siege) and CISTERN_DRY read s.water (the water that is there).
+function M.loop_mark(p, wid, pond)
+  p.lw = json.object(type(p.lw) == 'table' and p.lw or {})
+  local k = fmt(wid)
+  if type(p.lw[k]) ~= 'table' then p.lw[k] = {pond = pond} end
+end
+
+function M.loops(K, c, r, p)
+  p.lw = json.object(type(p.lw) == 'table' and p.lw or {})
+  local zone_wet = false
+  for _, s in ipairs(r.sources) do if s.kind == 'zone' and s.wet then zone_wet = true end end
+  local n = 0
+  for _, s in ipairs(r.sources) do
+    s.water = s.wet
+    if s.kind == 'well' then
+      local k = fmt(s.id)
+      if not s.wet then
+        p.lw[k] = nil                                         -- dry: a refill from elsewhere is judged anew
+      else
+        local pond
+        for _, pd in ipairs(zone_wet and {} or r.ponds) do
+          if dist_box(s.x, s.y, s.z, {x1 = pd.x1, y1 = pd.y1, x2 = pd.x2, y2 = pd.y2, z = pd.z}) <= c.pond_near then
+            pond = pd.id
+          end
+        end
+        if pond then M.loop_mark(p, s.id, pond) end
+        local rec = p.lw[k]
+        if type(rec) == 'table' then
+          s.wet, s.loop, n = false, math.tointeger(rec.pond) or pond or -1, n + 1
+        end
+      end
+    end
+  end
+  return n
+end
+
+-- the loop wells of the last run as one cause ('well 17813 at 91,70,136 is fed only by its own pond 17822 (a loop, no
+-- outside supply)'), nil without one
+function M.loop_cause(r)
+  for _, s in ipairs(r.sources) do
+    if s.loop then
+      return string.format('well %d at %d,%d,%d is fed only by its own pond %d (a loop, no outside supply)', s.id, s.x, s.y,
+                           s.z, s.loop)
+    end
+  end
 end
 
 ---------------------------------------------------------------- water sources (FR-47)
@@ -528,9 +588,20 @@ has_liquids = function(K)
 end
 
 emit_gate = function(K, c, a)
-  local fix = M.recipe(c, a.cis)
-  K.emit('HOSPITAL_DRY', 'A', trunc(string.format('%s without accepted water, %d patient(s): %s',
-                                                  a.planned and 'planned hospital' or 'hospital', a.patients, fix), 200),
+  -- BUG-266: the first alarm waited for the scan: the dry well's fill source comes from it
+  if a.dw and st.src then
+    local new = M.dry_well(K, c, {sources = st.src})
+    local i, j = a.why:find(a.dw, 1, true)
+    if new and i then
+      a.why = a.why:sub(1, i - 1) .. new .. a.why:sub(j + 1)
+      if a.lost == a.dw then a.lost = new end
+    end
+  end
+  local fix = M.recipe(c, a.cis, K)
+  -- BUG-263: the first reason why there is none (a dropped source, a loop well, a dry sump) before the recipe
+  K.emit('HOSPITAL_DRY', 'A', trunc(string.format('%s without accepted water, %d patient(s)%s: %s',
+                                                  a.planned and 'planned hospital' or 'hospital', a.patients,
+                                                  a.lost and (' (' .. a.lost .. ')') or '', fix), 200),
          {why = trunc(a.why, 200), patients = a.patients, zone = a.zone, near = c.near, recipe = trunc(fix, 200),
           cistern = a.cis and trunc(a.cis.txt, 120) or nil})
 end
@@ -542,14 +613,21 @@ local function removes(c) return c.hosp_remove ~= false and M.can('hospital_remo
 -- else a cistern; deleting the hospital zone lets the patients fetch their own drink meanwhile. BUG-031: with a
 -- cistern room standing (`cis`, cistern_state), not "a cistern" but what that one lacks. BUG-034: the kernel deletes
 -- the zones itself once a patient is over patient_thirst, so the tail says when instead of asking for it
-function M.recipe(c, cis)
+-- BUG-262 (Run 15 Inkintense, Guildcleans: no brook, a light aquifer, 'hospital held back' for good): with an aquifer level
+-- known (manifest aquifer_levels) and nothing better, an aquifer well (a cistern with p.water aquifer: its basin dug into
+-- the aquifer level, the walls kept rough, no pond). BUG-265 (Run 15 Earthboat: 6 bodies 10-29 tiles away, reach 0): a body
+-- within `near` without a bank or a dig gets a piped cistern to it instead of "a cistern"
+function M.recipe(c, cis, K)
   local ws = st.ws
   local tail = removes(c) and string.format('; until then the kernel removes it at thirst %d', c.patient_thirst)
                or '; until then delete the hospital zone'
+  local aqz = K and M.aq_level(K)
+  local aq = aqz and string.format('an aquifer well (dfllm bp sites cistern water=aquifer: its basin on aquifer level z%d)',
+                                   aqz) or nil
   if not ws then
     if cis then return cis.fix .. tail end
     return string.format('a well over water or a Water Source zone on water >= %d/7 within %d tiles (inspect '
-                         .. 'water_sources)%s', c.deep, c.near, tail)
+                         .. 'water_sources)%s%s', c.deep, c.near, aq and (', or ' .. aq) or '', tail)
   end
   local best, cav
   for _, b in ipairs(ws.bodies or {}) do
@@ -571,10 +649,19 @@ function M.recipe(c, cis)
                          best.at[2], best.at[3], tail)
   end
   if cis then return cis.fix .. tail end
+  local far                                    -- BUG-265: the nearest body without a bank or a dig
+  for _, b in ipairs(ws.bodies or {}) do
+    if b.cavern ~= 1 and b.d <= c.near and (not far or b.d < far.d) then far = b end
+  end
+  if far then
+    return string.format('the water at %d,%d,%d (%d/7, %d tiles) has no bank and no dig within %d walls: a cistern piped '
+                         .. 'to it (python -m dfpilot.bp.sites cistern --near %d,%d,%d)%s%s', far.at[1], far.at[2], far.at[3],
+                         far.max, far.d, c.ws_dig, far.at[1], far.at[2], far.at[3], aq and (', or ' .. aq) or '', tail)
+  end
   local ctxt = cav and string.format(' (the cavern water at %d,%d,%d is none: caverns stay sealed)', cav.at[1], cav.at[2],
                                      cav.at[3]) or ''
-  return string.format('no reachable water >= %d/7 within %d tiles%s: a cistern (bp sites cistern)%s', c.deep, c.near,
-                       ctxt, tail)
+  return string.format('no reachable water >= %d/7 within %d tiles%s: %s%s', c.deep, c.near, ctxt,
+                       aq or 'a cistern (bp sites cistern)', tail)
 end
 
 -- BUG-031 (Run 11: a cistern stood since y426 and HOSPITAL_DRY said "no reachable water >= 4/7 within 30 tiles: a
@@ -620,6 +707,10 @@ local function cistern_state(K, c, r, h)
   elseif not w.built then
     out.txt = string.format('cistern %s: its well %d at %d,%d,%d is not built%s', id, w.id, w.x, w.y, w.z, far)
     out.fix = out.txt .. ': finish it'
+  elseif w.loop then                          -- BUG-263: water from its own pond only
+    out.txt = string.format('cistern %s: its well %d at %d,%d,%d is fed only by its own pond %d (a loop)%s', id, w.id, w.x,
+                            w.y, w.z, w.loop, far)
+    out.fix = out.txt .. ': a source outside (a Water Source zone on a brook, its pipe, or water=aquifer)'
   elseif not w.wet then
     local bl = w.below or {}
     local p = bl.at or {w.x, w.y, w.z - 1}
@@ -923,7 +1014,7 @@ local function src_list(r)
       lbl[i] = trunc(string.format('%s %d', s.kind, s.id) .. (s.inn and (' in ' .. s.inn) or ''), 32)
     end
   end
-  return out, lbl
+  return out, lbl, l[1] and l[1].s or nil
 end
 
 ---------------------------------------------------------------- BUG-040: cisterns that stay dry
@@ -947,7 +1038,7 @@ local function cistern_dry(K, c, r, p, now)
       end
       local rec = p.cdry[rm.id]
       if well then seen[rm.id] = true end
-      if well and well.wet then
+      if well and (well.wet or well.water) then              -- BUG-263: a loop well holds water all the same
         if type(rec) == 'table' and rec.said then
           K.log('info', 'water: cistern %s: its well %d holds water again', rm.id, well.id)
         end
@@ -1538,10 +1629,215 @@ function M.hosp_sort(K, r, ho)
   return ho
 end
 
+---------------------------------------------------------------- BUG-264: a well that waits for its chain or rope
+-- Run 15 Earthboat y372-y375: the hospital's well 49,90,135 stood at 47 % for a year, "job 6483 suspended by buildingplan:
+-- waits for chain x1": 0 bars, 0 cloth, 244 thread, quickfort's "Make cloth rope" order waited for a Clothier's shop and
+-- cloth no Loom wove; nobody asked for either. Now, per run, a well under construction whose job wants a chain (item type
+-- CHAIN: a metal chain or a cloth rope) none is attached for gets a route, at most every CHAIN_EVERY for its acts:
+--   metal  free bars of a hard metal (ITEMS_HARD) and a Metalsmith's forge: a MakeChain order of that metal (dfllm:chain);
+--   cloth  free cloth: a MakeChain order of cloth (a rope) at the Clothier's shop, or PROJECT_REQUEST workshops why=well
+--          types [Clothiers] without one;
+--   thread thread but no cloth: PROJECT_REQUEST workshops why=well for the Loom (economy's cloth floor weaves) and Clothiers;
+--   forge  hard-metal bars but no forge (and no cloth or thread): PROJECT_REQUEST workshops why=well [MetalsmithsForge];
+--   trade  none of it: buy rope or a chain (the text says trade.want chain; the kernel adds no want).
+-- A live MakeChain order (anyone's) is never doubled. The route is in HOSPITAL_DRY's cause, kern.log and inspect
+-- water_sources (chain). Reads the well's job (job_items, attached items), bars, manager orders, workshop types.
+M.CHAIN_EVERY = 14 * DAY
+
+function M.chain_wait(w)
+  local ok, yes = pcall(function()
+    local CH = df.item_type and df.item_type.CHAIN
+    local j = CH ~= nil and w.jobs and w.jobs[0]
+    if not j then return false end
+    local att = {}
+    for _, ref in ipairs(j.items) do
+      local idx = math.tointeger(ref.job_item_idx)
+      if idx then att[idx] = (att[idx] or 0) + 1 end
+    end
+    for i, ji in ipairs(j.job_items.elements or j.job_items) do      -- DF 50+: a struct holding the vector
+      if ji.item_type == CH and (math.tointeger(ji.quantity) or 1) > (att[i] or 0) then return true end
+    end
+    return false
+  end)
+  return ok and yes == true
+end
+
+-- the workshop types standing (buildings.other.WORKSHOP_ANY, the type the building sheet shows): name -> true
+function M.shops()
+  local out = {}
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local okt, t = pcall(function() return b:getSubtype() end)
+      local name = okt and df.workshop_type[t]
+      if type(name) == 'string' then out[name] = true end
+    end
+  end)
+  return out
+end
+
+-- the hard metal (ITEMS_HARD: a forge makes chains of it) with the most free bars: token, count (nil, 0 without)
+function M.chain_metal()
+  local by, best, bn = {}, nil, 0
+  pcall(function()
+    for _, it in ipairs(df.global.world.items.other.BAR) do
+      local f = it.flags
+      if not (f.forbid or f.in_job or f.removed or f.garbage_collect or f.trader) then
+        local mi = dfhack.matinfo.decode(it)
+        local fl = mi and mi.material and mi.material.flags
+        if fl and fl.IS_METAL and fl.ITEMS_HARD then
+          local tok = mi:getToken()
+          by[tok] = (by[tok] or 0) + 1
+          if by[tok] > bn then best, bn = tok, by[tok] end
+        end
+      end
+    end
+  end)
+  return best, bn
+end
+
+-- a live MakeChain manager order (anyone's: quickfort's "Make cloth rope" too): its id or nil
+function M.chain_order()
+  local id
+  pcall(function()
+    local jt = df.job_type.MakeChain
+    for _, o in ipairs(df.global.world.manager_orders.all) do
+      if jt ~= nil and o.job_type == jt and (o.amount_left or 0) > 0 then id = o.id; return end
+    end
+  end)
+  return id
+end
+
+function M.chain(K, c, r, p, now)
+  local wells = {}
+  for _, s in ipairs(r.sources) do if s.kind == 'well' and s.chain then wells[#wells + 1] = s end end
+  if #wells == 0 then st.chain, p.chain_t = nil, nil; return nil end
+  local ci = type(K.census.i) == 'table' and K.census.i or {}
+  local cloth, thread = math.tointeger(ci.cloth) or 0, math.tointeger(ci.thread) or 0
+  local shops = M.shops()
+  local tok, bars = M.chain_metal()
+  local route, need, spec = 'trade', {}, nil
+  if tok and shops.MetalsmithsForge then
+    route, spec = 'metal', {job = 'MakeChain', material = tok}
+  elseif cloth > 0 then
+    route = 'cloth'
+    if shops.Clothiers then spec = {job = 'MakeChain', material_category = {'cloth'}} else need = {'Clothiers'} end
+  elseif thread > 0 then
+    route = 'thread'
+    for _, t in ipairs({'Loom', 'Clothiers'}) do if not shops[t] then need[#need + 1] = t end end
+  elseif tok then
+    route, need = 'forge', {'MetalsmithsForge'}
+  end
+  local due = now - (math.tointeger(p.chain_t) or -M.CHAIN_EVERY) >= M.CHAIN_EVERY
+  local live = M.chain_order()
+  local done = live and 'on order' or nil
+  if due and spec and not live and M.can('workorder') then
+    spec.tag, spec.amount_total, spec.frequency = 'dfllm:chain', #wells, 'OneTime'
+    local ok, id = K.act.workorder(spec)
+    if ok then done = 'ordered'; p.chain_o = id end
+  end
+  if due and #need > 0 then
+    local okp, pend = K.call('runner', 'pending', 'workshops')
+    if not (okp and type(pend) == 'number' and pend > 0) then
+      K.emit('PROJECT_REQUEST', 'B', trunc(string.format('workshops: %s for the rope/chain of well %d (%s)',
+                                                          table.concat(need, ', '), wells[1].id, route), 200),
+             {tpl = 'workshops', n = 1, why = 'well', types = need})
+      done = 'requested'
+    end
+  end
+  if due then p.chain_t = now end
+  local w = wells[1]
+  local how = ({metal = string.format('a chain of %s (%d bars)', tostring(tok), bars),
+                cloth = string.format('a cloth rope (%d cloth)%s', cloth, #need > 0 and ', no Clothiers' or ''),
+                thread = string.format('a rope: thread %d, no cloth: %s', thread, #need > 0 and table.concat(need, '+')
+                                       or 'weave cloth'),
+                forge = string.format('a chain: %d bars, no Metalsmith\'s forge', bars),
+                trade = 'no metal, cloth or thread: buy rope or a chain (trade.want chain)'})[route]
+  local txt = trunc(string.format('well %d at %d,%d,%d waits for a chain: %s%s', w.id, w.x, w.y, w.z, how,
+                                  done and (', ' .. done) or ''), 120)
+  if not st.chain or st.chain.route ~= route then K.log('warn', 'water: %s', txt) end
+  st.chain = {n = #wells, well = w.id, route = route, need = need, txt = txt, order = live or p.chain_o}
+  return st.chain
+end
+
+---------------------------------------------------------------- BUG-263/266: why no water is accepted
+-- the source the last accepted water was (p.slast) and why it dropped out, while nothing is accepted now
+function M.dropped(r, p)
+  local ls = type(p.slast) == 'table' and p.slast or nil
+  if not ls then return nil end
+  for _, s in ipairs(r.sources) do if s.wet then return nil end end
+  local why = 'gone'
+  for _, s in ipairs(r.sources) do
+    if s.kind == ls.k and s.id == ls.id then
+      why = s.loop and string.format('fed only by its own pond %d: a loop', s.loop) or 'dry now'
+    end
+  end
+  local at = type(ls.at) == 'table' and string.format('%d,%d,%d', math.tointeger(ls.at[1]) or -1,
+                                                      math.tointeger(ls.at[2]) or -1, math.tointeger(ls.at[3]) or -1) or '?'
+  return string.format('the accepted %s %d at %s dropped out (%s)', tostring(ls.k), math.tointeger(ls.id) or -1, at, why)
+end
+
+-- BUG-266 (Run 15 Drillchamber y372: 'Kern+ refused: drink 0<17 (1 well, none wet)', well 17718 not accepted): fortcore
+-- stage 1 builds its well over a 2-tile sump that only bucket carriers fill (its pond zone); no water check. The first
+-- built, dry well outside a cistern room, what its shaft ends on and where a carrier could fill its sump from (the
+-- scan's nearest body with a reachable bank), nil without one
+function M.dry_well(K, c, r)
+  local boxes = {}
+  for _, rm in ipairs(K.manifest().rooms or {}) do
+    if rm.tpl == 'cistern' and type(rm.bbox) == 'table' then boxes[#boxes + 1] = rm.bbox end
+  end
+  for _, s in ipairs(r.sources) do
+    if s.kind == 'well' and s.built and not s.water then
+      local inc = false
+      for _, b in ipairs(boxes) do
+        if s.z == b[3] and s.x >= (b[1] or 0) and s.x <= (b[4] or -1) and s.y >= (b[2] or 0) and s.y <= (b[5] or -1) then
+          inc = true
+        end
+      end
+      if not inc then
+        local bl = s.below or {}
+        local what = bl.why == 'rock' and 'rock below' or (bl.why == 'hidden' and 'a hidden tile below'
+                     or string.format('%d/7', bl.flow or 0))
+        local best
+        for _, b in ipairs(st.ws and st.ws.bodies or {}) do
+          if b.cavern ~= 1 and b.bank and (not best or b.d < best.d) then best = b end
+        end
+        local fill = best and string.format('fill source: the water at %d,%d,%d (bank %d,%d,%d)', best.at[1], best.at[2],
+                                            best.at[3], best.bank[1], best.bank[2], best.bank[3])
+                     or 'no water a carrier reaches to fill it'
+        return string.format('dry well %d at %d,%d,%d (%s): only buckets fill its sump; %s', s.id, s.x, s.y, s.z, what,
+                             fill)
+      end
+    end
+  end
+end
+
+function M.dry_causes(K, c, r, p)
+  local out = {}
+  local d = M.dropped(r, p)
+  if d then out[#out + 1] = d end
+  local lc = M.loop_cause(r)
+  if lc and not (d and d:find('a loop', 1, true)) then out[#out + 1] = lc end
+  local dw = M.dry_well(K, c, r)
+  if dw then out[#out + 1] = dw end
+  if st.chain then out[#out + 1] = st.chain.txt end
+  return out, dw
+end
+
+-- BUG-262: the highest level the kernel saw damp or wet (manifest aquifer_levels), nil without one
+function M.aq_level(K)
+  local best
+  local ok, man = pcall(K.manifest)
+  for _, z in ipairs(ok and type(man) == 'table' and type(man.aquifer_levels) == 'table' and man.aquifer_levels or {}) do
+    if math.tointeger(z) and (not best or z > best) then best = z end
+  end
+  return best
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   local T = K.now()
   pond_loops(K, c, r, p)
+  M.loops(K, c, r, p)                                   -- BUG-263: a well fed only by its own pond is no accepted source
   local hosp_ok, best_h, dry_h = #r.hosp > 0, nil, nil
   for _, h in ipairs(r.hosp) do
     local ok, b = served(K, c, r, h)
@@ -1559,7 +1855,7 @@ local function finish(K, c, r, p)
     s.inn = on_burrow(kern, s.x, s.y, s.z) and kname or (on_burrow(refuge, s.x, s.y, s.z) and rname or nil)
     if s.kind == 'well' and on_burrow(refuge, s.x, s.y, s.z) then
       rwells = rwells + 1
-      if s.wet then rwet, refuge_ok = rwet + 1, true end
+      if s.water then rwet, refuge_ok = rwet + 1, true end         -- BUG-263: a stored drink counts for the refuge
     end
   end
   local wells, wet = 0, 0
@@ -1572,6 +1868,7 @@ local function finish(K, c, r, p)
   for _, h in ipairs(r.hosp) do if h.want and h.want > want then want = h.want end end
   want = math.min(c.buckets_max, want + c.bucket_per_patient * #r.patients)
   local fixed, ordered, missing = supply_buckets(K, c, r, p, want)
+  M.chain(K, c, r, p, now)                              -- BUG-264: a well that waits for its chain or rope
   -- BUG-054: caregivers scale with the patients (before the cause text: it names what was added)
   local over_alarm = false
   for _, pt in ipairs(r.patients) do if pt.thirst > c.thirst_alarm then over_alarm = true end end
@@ -1602,6 +1899,11 @@ local function finish(K, c, r, p)
     if cis then cause[#cause + 1] = cis.txt end
   end
   if wet == 0 then cause[#cause + 1] = 'no accepted water at all' end
+  -- BUG-263/264/266: why there is none: the source the hospital was placed by dropped out, a well fed by its own pond, a
+  -- plain well over a dry sump (fortcore stage 1: only buckets fill it), a well that waits for its chain or rope
+  local extra, dwell = {}, nil
+  if dry or wet == 0 then extra, dwell = M.dry_causes(K, c, r, p) end
+  for _, e in ipairs(extra) do cause[#cause + 1] = e end
   if r.free + fixed == 0 then              -- BUG-104: in counts (a bucket that holds water or is forbidden is no free one)
     cause[#cause + 1] = string.format('no free bucket (%d in the fort, %d hold water, %d forbidden)', r.buckets, r.full,
                                       #r.forbidden)
@@ -1750,7 +2052,9 @@ local function finish(K, c, r, p)
       p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks = now, T.wall, pids, toks
       local h = r.hosp[1]
       local a = {planned = planned, patients = #r.patients, zone = h and h.id or -1,
-                 why = planned and 'no accepted water on the map' or why, cis = cis}
+                 why = planned and ('no accepted water on the map' .. (#extra > 0 and (': ' .. table.concat(extra, ', '))
+                                                                       or '')) or why, cis = cis, lost = extra[1],
+                 dw = dwell}
       if not st.ws and has_liquids(K) then
         st.gate_pending, st.ws_want = a, true             -- the first one waits for the scan's recipe (a few frames)
       else
@@ -1807,7 +2111,10 @@ local function finish(K, c, r, p)
     end
     hosp_ok = hosp_ok and nh > 0
   end
-  local srcs, slbl = src_list(r)
+  local srcs, slbl, s1 = src_list(r)
+  -- BUG-263: the nearest accepted source is remembered until another one is accepted: when none is left, HOSPITAL_DRY
+  -- names the one the hospital was placed by and why it dropped out (M.dry_causes)
+  if s1 then p.slast = {k = s1.kind, id = s1.id, at = json.array{s1.x, s1.y, s1.z}, t = now} end
   local out = {patients = #r.patients, thirsty = thirsty, thirst_max = tmax, wells = wells, wet = wet,
                hosp_ok = hosp_ok and 1 or 0, refuge_ok = refuge_ok and 1 or 0, buckets = r.buckets,
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
@@ -1940,7 +2247,7 @@ function M.inspect(K, what, key)
   if not st.ws then
     return true, 'water_sources: scan queued for the next water run',
            {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm, refuge = ref,
-            carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil}
+            carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil, chain = st.chain}
   end
   local w = st.ws
   local reach = 0
@@ -1949,7 +2256,7 @@ function M.inspect(K, what, key)
                              reach, #srcs),
          {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = w.boxes, tiles = w.tiles,
           levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm, refuge = ref,
-          carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil,
+          carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil, chain = st.chain,
           note = 'sources [kind, id, x, y, z, accepted, depth under a well (-1 unknown), burrow]; refuge: its bbox, d = '
                  .. 'its nearest tile to the nearest accepted source (-1 none); bank: stand there and fill or zone the '
                  .. 'water; dig: opening '
@@ -2033,7 +2340,7 @@ function M.wet_wells(K, name)
   for _, s in ipairs(st.src) do
     if s.kind == 'well' and s.built and on_burrow(b, s.x, s.y, s.z) then
       n = n + 1
-      if s.wet then wet = wet + 1 end
+      if s.water or (s.water == nil and s.wet) then wet = wet + 1 end      -- BUG-263: the water that is there
     end
   end
   return wet, n

@@ -139,7 +139,11 @@ def _stage1(P: Plan, p: dict, zc: int, zr: int) -> None:
     d.rect(-5, 34, 5, 40, zc)                            # stores
     d.rect(7, 35, 11, 39, zc)                            # refuse/corpses (behind a door, away from the dorm)
     d.tile(*CIV, zc, "i")
-    d.tile(-2, 43, zc, "h").tile(-1, 43, zc, "h")        # well spot: well + pond hole over a 2-tile sump
+    # well spot: well + pond hole over a 2-tile sump. BUG-266 (Run 15 Drillchamber y372: well 17718 dry, 'Kern+ refused:
+    # drink 0<17'): no water check here; only bucket carriers fill the sump (its pond zone) from water they reach, and a
+    # well fed only by its own pond is no accepted source (water.lua M.loops); HOSPITAL_DRY names the dry well and its
+    # fill source (water.lua M.dry_well)
+    d.tile(-2, 43, zc, "h").tile(-1, 43, zc, "h")
     b = P.stage("s1.build", "build", orders=1)
     b.ent(-2, 10, 2, 14, ZE, "D")                        # trade depot in the bailey
     for key, name, u, v in WORKSHOPS:
