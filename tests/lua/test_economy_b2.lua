@@ -808,6 +808,11 @@ T.test('BUG-181: a pending workshops project that does NOT build the Masons (ski
                    setup = function(W) wsproj(W, 'wsu', nil) end}
   days(W2, 2)
   T.eq(#slabreq(W2), 0, 'a project of unknown types may build them')
+  -- review: a parked project (runner.pending 0: build_lost, breach) that lists the Masons builds nothing: still asked
+  local W3 = world{ghosts = 1, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 0},
+                   setup = function(W) wsproj(W, 'wsp', {'Masons'}) end}
+  days(W3, 2)
+  T.eq(#slabreq(W3), 1, 'a parked project holds nothing back (as before BUG-181)')
 end)
 
 T.test('BUG-182: a standing ConstructSlab order nobody can work (no Masons) still says "no Masons" in kern.log and ' ..

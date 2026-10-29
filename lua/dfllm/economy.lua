@@ -5821,10 +5821,19 @@ end
 
 -- BUG-181: the id of the pending workshops project that builds workshop type t (its doc's manifest lists it, as
 -- M.fishery_proj), 'unknown' when a pending workshops project's doc lists no workshop at all (it may build anything:
--- held back as before), else nil
+-- held back as before), else nil. Only live projects count (runner.pending_types, else runner.pending > 0): a parked one
+-- (build_lost, breach) builds nothing and held no request back before BUG-181 either
 function M.ws_queued(K, t)
+  local okt, set, all = K.call('runner', 'pending_types', 'workshops')
+  if okt and type(set) == 'table' then
+    if not (set[t] or all) then return nil end
+  else
+    local okp, pend = K.call('runner', 'pending', 'workshops')
+    if not (okp and type(pend) == 'number' and pend > 0) then return nil end
+  end
   local q = M.fishery_proj(K, {'workshop:' .. t})
   if q then return q.id end
+  if okt and type(set) == 'table' then return set[t] and 'pending' or 'unknown' end
   local pd = K.persist.get('projects')
   for _, P in ipairs(type(pd) == 'table' and type(pd.list) == 'table' and pd.list or {}) do
     local id = type(P) == 'table' and P.tpl == 'workshops' and P.done ~= 1 and tostring(P.id or '')

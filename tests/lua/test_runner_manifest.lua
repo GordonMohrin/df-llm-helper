@@ -154,7 +154,12 @@ T.test('FR-76: a reclaimed fort without a Carpenters and Craftsdwarfs workshop g
   W.ms = W.ms + 900 * 1000
   H.runs(W, 2 * 7)
   T.eq(#W.find_events('PROJECT_REQUEST'), 3)
+  -- review: one of them built meanwhile (the set only shrank): the backoff goes on, no fresh req_cool round
   shop('Carpenters', 21, 5, 10)
+  W.ms = W.ms + 900 * 1000
+  H.runs(W, 2 * 10)
+  T.eq(W.state().adopt.miss, {'Craftsdwarfs'})
+  T.eq(#W.find_events('PROJECT_REQUEST'), 3, 'a shrunk set is no new request')
   shop('Craftsdwarfs', 25, 5, 10)
   H.runs(W, 4)
   T.eq(W.state().adopt.miss, nil, 'built by the request: nothing missing any more')

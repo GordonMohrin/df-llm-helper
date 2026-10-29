@@ -2687,7 +2687,8 @@ function MEM.place(K, c, r, p, g, now, mem, G)
   local site, L = MEM.pick(K, G)
   if not site and fresh then site, L, G = MEM.widen(K, c, r, G) end
   if not site then
-    local since = ns and num(ns.since) or now
+    -- review: a record left from an older episode (no failed search for 2 x coffin_retry) starts a new one
+    local since = ns and now - (num(ns.t) or 0) <= 2 * (num(c.coffin_retry) or 3600) and num(ns.since) or now
     mem.why, p.mem_nosite = G.why, {t = now, since = since, why = trunc(G.why, 200)}
     K.log('warn', 'memorial: slab %s of ghost unit %d waits: %s', sid, g.uid, G.why)
     if MEM.request(K, c, p, p.mem_nosite, now, G.why) then mem.req = now end

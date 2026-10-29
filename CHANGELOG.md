@@ -29,6 +29,9 @@
   ConstructSlab order 55 standing and no Masons: kern.log `slabs: no ConstructSlab for 1 ghosts ...: no Masons` once; inspect orders slabs.why
   `no Masons`. (e) Ghost and no blank slab: one `EngraveSlab: ... removed` warn per cadence episode, the rest at debug. (f) Follow off, mandatory
   shops missing: the `reclaimed fort without ...` warn / PROJECT_REQUEST at most every 15 real minutes, then 30, 60, 120.
+- **Review:** `M.ws_queued` counts only live projects (runner `pending_types`, else `pending` > 0), so a parked workshops project that lists
+  the Masons no longer holds the slab request back. `M.req_due` treats a set that only shrank as the same request, so the backoff goes on. A
+  memorial `since` older than 2 x coffin_retry starts a new episode. Each has a new test.
 
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every

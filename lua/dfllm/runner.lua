@@ -4914,7 +4914,8 @@ function M.uncovered(K, tpl, list)
 end
 
 -- BUG-184 (live i4: 'reclaimed fort without Masons, Still, Kitchen' and its PROJECT_REQUEST every 9-10k ticks, about a
--- minute at 145 ticks/s, with follow off): whether request key may go out for ids now. A changed set waits req_cool;
+-- minute at 145 ticks/s, with follow off): whether request key may go out for ids now. A set with a new type waits
+-- req_cool (a set that only lost types, one of them built meanwhile, counts as the same);
 -- the k-th repeat of the same set waits req_cool * 2^(k-1) ticks AND req_wall_s * 2^(k-1) wall seconds (k <= req_backoff).
 -- Records the request when due. S.rt.req[key]: {t, w, k, ids} (an old plain tick counts as k 1)
 function M.req_due(K, key, ids)
@@ -4924,7 +4925,10 @@ function M.req_due(K, key, ids)
   local k, same = 0, false
   if type(rec) == 'table' then
     k = int(rec.k) or 1
-    same = table.concat(type(rec.ids) == 'table' and rec.ids or {}, ',') == table.concat(ids, ',')
+    local was = {}
+    for _, v in ipairs(type(rec.ids) == 'table' and rec.ids or {}) do was[v] = true end
+    same = #ids > 0                                    -- no new type (a built one dropped out): the backoff goes on
+    for _, v in ipairs(ids) do if not was[v] then same = false end end
     if not same or k < 1 then
       if (T0.tick or 0) - (int(rec.t) or 0) < M.CFG.req_cool then return false end
     else
