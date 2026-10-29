@@ -2806,7 +2806,9 @@ function M.safe_pos(K, pos, name)
   local p = posp(pos)
   if not p then return nil end
   local man = K.manifest()
-  local r = pick(K, man, type(man.stations) == 'table' and man.stations or {}, {{name = name or 'pos', pos = p}})
+  -- BUG-170: no walk-group test here: the sortie gathers in the bailey beyond a raised B1 that siege lowers itself
+  local r = pick(K, man, type(man.stations) == 'table' and man.stations or {}, {{name = name or 'pos', pos = p}},
+                 {group = false})
   note_pick(K, r)
   local q = r.pos or p
   return {q.x, q.y, q.z}

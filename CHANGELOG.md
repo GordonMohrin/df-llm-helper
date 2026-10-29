@@ -9,8 +9,9 @@
   on that group (`stations.relocate` `o.group`/`o.group_of`), else the next chain entry. STATION_MOVED `why unreachable` (+ `grp`, `home`).
   Group reads cached 100 ticks (`M.GROUP_TTL`), the relocation cache keyed by the group and re-checked. The b2-first chain while B2 is up
   is kept; with the squad outside the core it now falls through to melee.
+  Review: `military.safe_pos` (the sortie's bailey gathering point beyond the raised B1) skips the walk-group test.
 - **Contracts:** schema STATION_MOVED fields `grp`, `home`; CONTRACTS §7 posture row and the STATION_MOVED row; appendix regenerated. No RULES row.
-- **Tests:** tests/lua/test_stations.lua BUG-170 (three, each fails on b805745).
+- **Tests:** tests/lua/test_stations.lua BUG-170 (three, each fails on b805745; a fourth for safe_pos).
 - **Live check (i3, DFHACK_PORT 5002, B2 26040 raised):** after `dfllm reload` read `dfllm events --type STATION_MOVED`: b2 48,40,127 ->
   `why unreachable` (or wall then unreachable) naming group ~2157 and the soldiers' 6, `to` 55,42,130 (melee) or another tile on group 6;
   the squad 105 move order equals that tile; military kpi on_station reaches 8 of 8 within a day of ALERT; then the M3-release (lone harmless

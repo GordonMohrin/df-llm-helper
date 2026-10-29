@@ -368,4 +368,12 @@ T.test('BUG-170: an unreachable station moves to the nearest floor on the squad\
   T.eq(orders_of(W, 'A'), 'station@51,63,10', 'back at stations.b2 once it can be reached')
 end)
 
+T.test('BUG-170 review: the sortie\'s gathering point (safe_pos) ignores the walk group: the bailey lies beyond the ' ..
+       'raised B1 by design (siege lowers B1 for the gather)', function()
+  local W = pinned_world('st170c', function(_, y) return y < 40 and 3 or 1 end)
+  T.eq(X.call(W, 'military', 'safe_pos', {51, 11, Z}, 'bailey'), {51, 13, Z},
+       'old (BUG-170 first cut): 51,11,10 kept, no group-1 floor near O1')
+  T.eq(#evs(W, 'STATION_MOVED', 'unreachable'), 0)
+end)
+
 T.done()
