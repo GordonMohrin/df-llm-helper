@@ -210,6 +210,11 @@ Related: FR-xx, BUG-xx
 | [BUG-192](BUG-192-observe-mode-misses-damp-tiles-found-by-lost.md) | fixed (offline, live-untested) | medium | FR-95 live 1: a damp tile lost() found in an observing project never joined pts, so nothing was smoothed around it | lua/dfllm/runner.lua |
 | [BUG-193](BUG-193-aqshaft-place-with-column-in-p-refused.md) | fixed (offline, live-untested) | medium | FR-95 live 1: `bp.place aqshaft site=S1 p={x,y,top}` refused by bp.sites.rank (no ranking) | dfpilot/cmd.py |
 | [BUG-194](BUG-194-aqshaft-top-level-on-floor-opened-while-dig-pending.md) | fixed (offline, live-untested) | low | FR-95 live 1: an aqshaft top level on a floor counted as opened while its dig job was pending | lua/dfllm/aqshaft.lua |
+| [BUG-209](BUG-209-unadopted-save-looks-ok-in-doctor-status-next.md) | fixed (offline, live-untested) | medium | live 3: an unadopted save looks OK in doctor/status/next (no ACTIVE, the newest folder of an earlier fort) | dfpilot/doctor.py |
+| [BUG-210](BUG-210-seal-at-last-uses-a-stale-siege-unready.md) | fixed (offline, live-untested) | medium | live 3: seal at=last walls the tile of a stale SIEGE_UNREADY instead of the state's ways in | dfpilot/cmd.py |
+| [BUG-211](BUG-211-follow-seals-audit-bypass-before-the-trap-hall.md) | fixed (offline, live-untested) | medium | live 3: follow seals the audit bypass before the trap hall, on fortcore tiles, logging it every audit | dfpilot/wake.py |
+| [BUG-212](BUG-212-status-drops-proj-and-lists-six-next-hints.md) | fixed (offline, live-untested) | low | live 3: status drops the proj line and lists six next: hints | dfpilot/brief.py |
+| [BUG-213](BUG-213-audit-wait-printed-as-a-float.md) | fixed (offline, live-untested) | low | live 3: dfllm audit prints its wait as a float | dfpilot/wake.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

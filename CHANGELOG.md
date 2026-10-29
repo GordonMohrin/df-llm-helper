@@ -1,5 +1,34 @@
 # CHANGELOG dfpilot
 
+## Live round 3 CLI fixes: unadopted save, stale seal entrances, audit seal before the trap hall, status lines (BUG-209..213, 2026-10-29; offline, live-untested)
+- **Why:** live round 3 on i-test3 (fresh fort "Earthboat" from embark) and its skeptic: before `dfllm adopt`, doctor said `verdict: OK` and
+  status showed an earlier fort's folder (ACTIVE missing, paths fell back to the newest folder), `next` said `dfllm doctor` (BUG-209);
+  `seal at=last` walled 94,79,140 from a SIEGE_UNREADY 34 days old while the state named other tiles (BUG-210); follow's auto seal at=audit
+  walled 54,80,138 (a fortcore corridor tile) for a "bypass" in a fort without a trap hall and logged `auto:seal` six times (BUG-211); status
+  dropped the proj line and showed six `next:` hints (BUG-212); `dfllm audit` printed its wait as a float (BUG-213).
+- **What changed:** (1) doctor.py `df_up` (a DF process whose image lies in the runtime root's parent; tasklist + image path) and a problem
+  line 'ACTIVE missing: the loaded save is not adopted ...: dfhack-run dfllm adopt'; paths.py `fell_back`; status line 1 `(fallback: newest
+  folder, not ACTIVE)`; guide.py `adopt_step`: `next` answers `dfhack-run dfllm adopt` when no ACTIVE exists and DF runs here, cli.py also
+  with no runtime folder (BUG-209). (2) cmd.py `entrance_reading`: the newer of SIEGE_UNREADY and state.ready (state wins once readiness
+  checked, `open >= 0`, and it is not older; a same-reading prefix keeps the event's longer list); last_entrances and current_openings use it
+  (BUG-210). (3) cmd.py `NO_HALL`, `audit_fails`, `no_trap_hall`, `core_cells`; audit_routes returns `fails` and `core` and keeps fortcore
+  footprint walls out of `open`; seal_openings notes them as closed; wake.py `_request_seal` stops while the audit has no trap hall and logs
+  after `_request_place` (which now returns whether it requested), once per walls set; the status UNREADY line says 'no trap hall yet' instead
+  of 'wall it' (BUG-211). (4) brief.py: status proj rank 1, blocked first, two projects, clipped to 32 tokens; `line_unready(cmds=False)` keeps
+  the first `next:` hint (BUG-212). (5) wake.py run_audit prints `int(round(timeout))` (BUG-213).
+- **Safety:** no Lua, verb, event, config key, state field or RULES row; no contract change. doctor/next run one tasklist only when ACTIVE is
+  missing. Risk: the seal at=audit for a real bypass waits until the audit no longer reports 'no Z2 trap hall' (fortcore stage 2 placed).
+- **Tests (each fails on bd27973):** tests/test_bug209_213_cli.py; test_cli_status, test_hospital_sites and test_perimeter_escalation read the
+  further next: hints in the brief now.
+- **Live check:** (a) BUG-209: on a new embark before `dfhack-run dfllm adopt`: `python -m dfpilot doctor` lists 'ACTIVE missing: the loaded
+  save is not adopted' and a verdict with problems; `python -m dfpilot status` line 1 has `(fallback: newest folder, not ACTIVE)`;
+  `python -m dfpilot next` prints `NEXT: dfhack-run dfllm adopt`; after adopt all three are normal. With DF closed doctor only notes it.
+  (b) BUG-210: after a SIEGE_UNREADY, once status names other `ways in` tiles, `dfllm cmd bp.place tpl=seal site=S1 at=last` names the
+  status tiles (read the reply and `bp/<id>.json` params.at). (c) BUG-211: fort without fortcore stage 2: `dfllm audit`, follow running:
+  no new seal bp file, no `auto:seal` in cli.log, status UNREADY line says 'no trap hall yet'; `dfllm cmd bp.place tpl=seal site=S1 at=audit`
+  on a wall on a fortcore tile notes 'left out (a fortcore tile, the fort's own way)'. (d) BUG-212: at R0 with several blockers `status` has one
+  `next:` in its UNREADY line and a `proj` line, `brief` has them all. (e) BUG-213: `python -m dfpilot audit` prints a whole number of seconds.
+
 ## FR-95 live test 1 fixes: flooded shaft level unseen, observe smoothing, aqshaft S1 place, floor top level (BUG-191..194, 2026-10-29; offline, live-untested)
 - **Why:** FR-95 live test 1 on i4 (kernel b805745): shaft c1a1858c02562d7101 (56,56 top 129) had z128 designated, yielded its slot
   (BUG-037, `no progress 139 d: slot yielded`), the miners dug z128 and it filled to 7/7; the level was never opened, so no AQ_HEAVY and no

@@ -467,17 +467,33 @@ SEAL_REFUGE = ("refuge",)    # BUG-031/Run 11: the refuge's own pieces (the hatc
 AUDIT_WALL = re.compile(r"\bwall (\d+),(\d+),(\d+) (floor|ramp)\b")    # bp.topo.choke in an audit fail
 
 
+def entrance_reading(save_dir: Path, state: dict | None = None, unready: dict | None = None) -> tuple[list[str], int]:
+    """(['x,y,z kind', ...], tick) of the newest entrance check. BUG-210 (live round 3, Earthboat: the seal went to
+    94,79,140 shrub from a SIEGE_UNREADY 34 days old while the state's ready.ents named other tiles): the newer of the
+    newest SIEGE_UNREADY `ents` (up to 6, monthly by cadence) and the state's ready (every readiness run, up to 3).
+    The state wins once readiness has checked the ways in (ready.open >= 0) and its tick is not older than the event;
+    when its ents begin the event's list, it is the same reading and the event's longer list is kept."""
+    st = state if state is not None else (files.read_state(save_dir) or {})
+    if unready is None:
+        for e in files.iter_events_rev(save_dir):
+            if e.get("type") == "SIEGE_UNREADY" and isinstance((e.get("d") or {}).get("ents"), list):
+                unready = e
+                break
+    ev = [x for x in ((unready or {}).get("d") or {}).get("ents") or [] if isinstance(x, str)] if unready else []
+    r = st.get("ready") if isinstance(st.get("ready"), dict) else {}
+    sents = [x for x in (r.get("ents") or []) if isinstance(x, str)]
+    checked = isinstance(r.get("open"), int) and not isinstance(r.get("open"), bool) and r["open"] >= 0
+    if unready and not (checked and _state_tick(st) >= _tick(unready)):
+        return ev, _tick(unready)
+    if unready and sents and ev[:len(sents)] == sents:
+        return ev, _tick(unready)
+    return (sents if checked or not unready else ev), _state_tick(st)
+
+
 def last_entrances(save_dir: Path) -> list[str]:
-    """'x,y,z kind' of the open ways in of the last entrance check: the newest SIEGE_UNREADY (up to 6), else the
-    state's ready.ents (up to 3)."""
-    for e in files.iter_events_rev(save_dir):
-        if e.get("type") == "SIEGE_UNREADY":
-            ents = (e.get("d") or {}).get("ents")
-            if isinstance(ents, list) and ents:
-                return [x for x in ents if isinstance(x, str)]
-            break
-    st = files.read_state(save_dir) or {}
-    return [x for x in ((st.get("ready") or {}).get("ents") or []) if isinstance(x, str)]
+    """'x,y,z kind' of the open ways in of the last entrance check (entrance_reading: the newer of the newest
+    SIEGE_UNREADY and the state's ready.ents)."""
+    return entrance_reading(save_dir)[0]
 
 
 def last_audit_walls(save_dir: Path) -> list[str]:
@@ -496,6 +512,27 @@ def last_audit_walls(save_dir: Path) -> list[str]:
                         out.append(t)
             return out
     return []
+
+
+NO_HALL = "manifest: no Z2 trap hall"      # bp.topo.audit: the fort has no trap hall yet (fortcore stage 2)
+
+
+def audit_fails(save_dir: Path) -> list[str]:
+    """The newest audit's findings (AUDIT `fails`, or SIEGE_UNREADY `afails` if newer); [] without either."""
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        key = {"AUDIT": "fails", "SIEGE_UNREADY": "afails"}.get(e.get("type"))
+        fails = d.get(key) if key else None
+        if isinstance(fails, list):
+            return [str(f) for f in fails]
+    return []
+
+
+def no_trap_hall(fails: list[str]) -> bool:
+    """BUG-211 (live round 3, Earthboat: follow walled 54,80,138 and asked three times for 55,84,138, all 'bypass skips
+    the hall' in a fort that had no trap hall yet): without a trap hall every way to the core is a 'bypass'; the walls the
+    audit names are room doors off the core corridor, not gaps. The trap hall comes with fortcore stage 2."""
+    return any(str(f).startswith(NO_HALL) for f in fails)
 
 
 ROUTE_FAILS = ("bypass:", "refuge: on the attack path")    # bp.topo.audit's attacker-route findings (Run 10)
@@ -548,7 +585,8 @@ def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
     """The newest audit's attacker routes (Run 10: `bypass: wall x,y,z floor -> X` stood for months and the trap hall
     stayed unused): {found (an audit event was read), tick, routes (the bypass / refuge-on-the-attack-path findings),
     walls ('x,y,z kind wall', bp.topo.choke), open (the walls no seal project builds: none names the tile, or the one
-    that does finished before this audit and the audit still names it), pending {wall: seal project id}}.
+    that does finished before this audit and the audit still names it), pending {wall: seal project id}, core {wall:
+    fortcore project id} (BUG-211: walls on a fortcore tile, never placed), fails (the audit's findings)}.
     Source: the newest AUDIT event (or SIEGE_UNREADY `afails`, if newer); without either, the state's ready.route."""
     audit, done = None, {}
     for e in files.iter_events_rev(save_dir):
@@ -575,14 +613,31 @@ def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
             if w not in walls:
                 walls.append(w)
     seals = seal_projects(save_dir) if walls else {}
-    pending, open_ = {}, []
+    core = core_cells(save_dir) if walls else set()
+    pending, open_, on_core = {}, [], {}
     for w in walls:
         pid = seals.get(_wall_pos(w))
         if pid is not None and (pid not in done or done[pid] > tick):
             pending[w] = pid
+        elif _wall_pos(w) in core:             # BUG-211: never wall a tile of the fortcore (its corridor, later stages)
+            on_core[w] = core[_wall_pos(w)]
         else:
             open_.append(w)
-    return {"found": found, "tick": tick, "routes": routes, "walls": walls, "open": open_, "pending": pending}
+    return {"found": found, "tick": tick, "routes": routes, "walls": walls, "open": open_, "pending": pending,
+            "core": on_core, "fails": fails}
+
+
+def core_cells(save_dir: Path) -> dict[tuple[int, int, int], str]:
+    """{tile: fortcore project id} over the footprint of every fortcore project in <save>/bp, its later stages
+    included (cmd.footprint). BUG-211 (live round 3, Earthboat: follow's seal at=audit put a wall on 54,80,138, a
+    stage-1 corridor tile that stage 3 emits again): an audit wall there would cut the fort's own way."""
+    out: dict = {}
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == "fortcore" and not schema.validate("bp", doc):
+            for c in footprint(doc):
+                out.setdefault(c, p.stem)
+    return out
 
 
 # Run 11 (Kilrudrabed): `seal at=last|all` placed the same door 125,103,144 on every repetition and never the new
@@ -724,8 +779,8 @@ def current_openings(save_dir: Path, state: dict | None = None) -> list[dict]:
     - the newest SEAL_LEAK, unless a newer SEAL event read the fort sealed: its first leak tile with the building or
       shape there (`open` for an open route without a roofed tile, pos = the citizen's tile); piece wall on a floor,
       since walk groups pass doors and only a wall (or a raised bridge) ends a SEAL_LEAK (RULES §7);
-    - the ways in without door or bridge of the last entrance check: the newest SIEGE_UNREADY `ents` (up to 6), else
-      the state's ready.ents (up to 3);
+    - the ways in without door or bridge of the last entrance check: the newer of the newest SIEGE_UNREADY `ents` (up
+      to 6) and the state's ready.ents (up to 3; entrance_reading, BUG-210);
     - the tiles a current REFUGE_FAIL names (refuge_open: its `fix`, else its `open`)."""
     dmod = load_bp("defense")
     st = state if state is not None else (files.read_state(save_dir) or {})
@@ -763,13 +818,11 @@ def current_openings(save_dir: Path, state: dict | None = None) -> list[dict]:
             floor = kind in dmod.FLOORISH_KINDS or kind in dmod.SHRUB_KINDS
             add("%d,%d,%d %s" % (pos + (kind or "?",)), "leak", _tick(leak), "wall" if floor else "")
     if unready:
-        for x in unready["d"]["ents"]:
-            if isinstance(x, str):
-                add(x, "ents", _tick(unready))
+        ents, etick = entrance_reading(save_dir, st, unready)
     else:
-        for x in ((st.get("ready") or {}).get("ents") or []):
-            if isinstance(x, str):
-                add(x, "ents", _state_tick(st))
+        ents, etick = [x for x in ((st.get("ready") or {}).get("ents") or []) if isinstance(x, str)], _state_tick(st)
+    for x in ents:                             # BUG-210: the newer of SIEGE_UNREADY and the state's ready.ents
+        add(x, "ents", etick)
     burrow, _, rtick, fix = refuge_open(save_dir, st)
     for x in fix:
         add(x, f"refuge {burrow}", rtick)
@@ -836,7 +889,8 @@ def _geo_try(fn, notes: list[str], label: str, *a):
 # kind (a tile not on the snapshot, a failed search, no tile that closes the route) is a gap in what we know
 CLOSED_NOTES = ("(closed)", "(closed, or no floor/ramp/stair)", "left out, sealed by", "builds its piece",
                 "a seal under way closes its route", "(a seal project builds them)",
-                "no stair found (not dug)", "is not revealed: look at the tile", "hatch moved to")
+                "no stair found (not dug)", "is not revealed: look at the tile", "hatch moved to",
+                "(a fortcore tile, the fort's own way)")
 
 
 def _all_closed(notes: list[str], key: str, entries: list) -> bool:
@@ -897,6 +951,9 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
             raise BpError(str(e)) from e
         entries = [{"pos": tuple(o["pos"]), "kind": o["kind"], "piece": o["piece"], "src": "at", "tick": -1,
                     "of": o["of"], "of_kind": o["of_kind"], "nodoor": o["nodoor"]} for o in ops]
+    if routes and routes["core"]:                          # BUG-211: the fort's own corridor is no bypass to wall
+        notes.append("left out (a fortcore tile, the fort's own way): " + ", ".join(
+            f"{w.rsplit(' ', 2)[0]} ({pid})" for w, pid in routes["core"].items()))
     if routes and routes["pending"]:                       # a seal project builds them already: never twice
         notes.append("left out (a seal project builds them): " + ", ".join(
             f"{w.rsplit(' ', 2)[0]} ({pid})" for w, pid in routes["pending"].items()))

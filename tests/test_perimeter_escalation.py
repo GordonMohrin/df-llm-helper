@@ -103,7 +103,8 @@ def test_status_counts_the_days(save):
     line = out.splitlines()[1]
     assert line.startswith("SIEGE UNREADY (R0): open_perimeter | PERIMETER OPEN 12 days: 2 ways in | 2 ways in without "
                            "door or bridge"), line
-    assert "close the open ways in" in line and "open perimeter: seal first" in line
+    assert "close the open ways in" in line and "open perimeter: seal first" not in line      # BUG-212: the first hint
+    assert "open perimeter: seal first" in brief.brief_text(save)
     assert est_tokens(out) <= brief.STATUS_TOKENS
     _state(save, pd=1, pw="bridges lost: O1", open=0, ents=None)
     assert "PERIMETER OPEN 1 day: bridges lost: O1" in brief.status_text(save)

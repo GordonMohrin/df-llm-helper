@@ -61,6 +61,12 @@ def _last_save() -> str | None:
     return best
 
 
+def fell_back(save: str | None = None) -> bool:
+    """BUG-209: the save folder comes from _last_save (no argument, override, DFLLM_SAVE or ACTIVE names one): status and
+    doctor then show the newest folder, which may be an earlier fort while DF runs a save nobody adopted."""
+    return not (save or _over["save"] or os.environ.get("DFLLM_SAVE") or active_save())
+
+
 def save_name(save: str | None = None) -> str:
     name = save or _over["save"] or os.environ.get("DFLLM_SAVE") or active_save() or _last_save()
     if not name:

@@ -261,7 +261,7 @@ def test_status_names_the_refuge_place_and_its_nearest_water(save, capsys):
     assert ("the refuge has no drink (Tiefe+ 126-128,56-77 z129-136; no accepted water in it; nearest accepted water: "
             "well 19098 at 137,77,143 in Kern+, 9 tiles)") in out, out
     assert ("the hospital lies outside Kern+/Tiefe+: Tiefe+ has no accepted water near it, so plan it inside Kern+ next "
-            "to well 19098 at 137,77,143 in Kern+") in out, out
+            "to well 19098 at 137,77,143 in Kern+") in brief.brief_text(save)    # BUG-212: status keeps the first hint
     assert "hospital none src 1 (well 19098 at 137,77,143 in Kern+)" in out, out
     # an older kernel (no alert.ref box): the old lines
     assert brief.refuge_place({"alert": {"ref": {"ex": 1, "sep": 1, "beds": 1, "need": 1}}}) == ("", False, "")
