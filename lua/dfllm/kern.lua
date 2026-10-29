@@ -1190,7 +1190,7 @@ local function note_paced(st, e)
   e.paced_n = e.paced_n + 1
   if e.paced_n == 1 then
     st.log_as('kern', 'info', string.format('%s paced: over its share of %s ms/s (debt %d ms); runs and slices wait',
-                                            e.name, tostring(e.share), round(e.debt)))
+                                            e.name, NUM.num(e.share), round(e.debt)))
   end
 end
 
@@ -1202,7 +1202,7 @@ local function note_floor(st, e, cont)
   e.floor_log = t
   st.log_as('kern', 'warn', string.format('%s waited %d s for a slice%s (debt %d ms over its share of %s ms/s): one slice '
                                           .. 'anyway (pacing floor, %d so far)', e.name, sched.PACE.floor_ms // 1000,
-                                          cont and ' with its run in hand' or '', round(e.debt), tostring(e.share),
+                                          cont and ' with its run in hand' or '', round(e.debt), NUM.num(e.share),
                                           e.floor_n or 0))
 end
 

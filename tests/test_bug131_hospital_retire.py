@@ -42,19 +42,20 @@ def test_the_verb_and_the_state_key_are_in_the_registry():
 
 
 def test_status_names_the_blocking_zone_and_the_retire_command(save):
+    # BUG-159: the hint is its own rank-1 status line after the R0 line (status clipped it off the R0 line live)
     put(save, {"z": 24422, "at": [88, 28, 129], "ok": 0, "pat": 0})
-    line = brief.status_text(save).splitlines()[1]
-    assert line.startswith("SIEGE UNREADY (R0): hospital_out"), line
-    assert ("zone 24422 at 88,28,129 blocks it: once the hospital inside has a bed, "
-            "dfllm cmd hospital.retire zone=24422 (sooner only on Gordon's word: approve=true)") in line, line
+    lines = brief.status_text(save).splitlines()
+    assert lines[1].startswith("SIEGE UNREADY (R0): hospital_out"), lines[1]
+    assert ("hospital_out: zone 24422 at 88,28,129 blocks it: once the hospital inside has a bed, "
+            "dfllm cmd hospital.retire zone=24422 (sooner only on Gordon's word: approve=true)") in lines, lines
     put(save, {"z": 24422, "at": [88, 28, 129], "ok": 1, "pat": 2})
-    line = brief.status_text(save).splitlines()[1]
-    assert ("zone 24422 at 88,28,129 blocks it: 2 patients lie in it; once they are up: "
-            "dfllm cmd hospital.retire zone=24422") in line, line
+    lines = brief.status_text(save).splitlines()
+    assert ("hospital_out: zone 24422 at 88,28,129 blocks it: 2 patients lie in it; once they are up: "
+            "dfllm cmd hospital.retire zone=24422") in lines, lines
     # an older kernel without hout: the old text alone
     put(save, None)
-    line = brief.status_text(save).splitlines()[1]
-    assert "hospital.retire" not in line and "then remove the old zones" in line, line
+    text = brief.status_text(save)
+    assert "hospital.retire" not in text and "then remove the old zones" in text.splitlines()[1], text
 
 
 def test_next_names_the_retire_command_while_the_new_hospital_is_under_way(save, monkeypatch):

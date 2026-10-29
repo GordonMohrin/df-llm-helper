@@ -175,7 +175,9 @@ PRUNE_EVERY_S = 60
 PLAN_CHECK_EVERY_S = 300                       # FR-86: how often follow looks at the age of the applied plan
 PLAN_AUTO_KEYS = ("first_y", "tried_y", "applied_y")
 AUDIT_PREFIX = "aud"                           # snapshot ids of `dfllm audit` (it audits them itself, follow does not)
-AUDIT_SNAP_S = 60                              # `dfllm audit`: seconds to wait for its fresh snapshot
+AUDIT_SNAP_S = 180                             # `dfllm audit`: least seconds to wait for its fresh snapshot (BUG-160)
+AUDIT_SNAP_BPS = 8000                          # BUG-160: snapshot bytes the kernel scans per second (live: 323k tiles in 40 s)
+AUDIT_SNAP_NOTE_S = 30                         # BUG-160: one progress line after this long without the snapshot
 ERR_EVERY_S = 60                               # stderr 'poll error' at most once per minute
 
 
@@ -1035,6 +1037,19 @@ def _snap_file(save_dir: Path, sid: str, events: bool = False) -> tuple[str, dic
     return None
 
 
+def audit_timeout(save_dir: Path) -> tuple[float, int]:
+    """BUG-160 (live round 2, i1: a 323k-tile audit came 70 s after the request, the old fixed 60 s gave up first):
+    (seconds, bytes) - the wait for a fresh audit snapshot adapts to the fort: the largest snapshot on disk scanned three
+    times over (its own export plus a running readiness export it queues behind) plus a minute, at least AUDIT_SNAP_S."""
+    big = 0
+    for p in files.snap_paths(save_dir):
+        try:
+            big = max(big, p.stat().st_size)
+        except OSError:
+            pass
+    return max(float(AUDIT_SNAP_S), 60.0 + 3.0 * big / AUDIT_SNAP_BPS), big
+
+
 def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
               clock: Callable[[], float] = time.monotonic) -> int:
     """`dfllm audit [--snap ID]`: what follow does on an audit snapshot, once and now. Without --snap it requests a
@@ -1046,10 +1061,16 @@ def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
     if sid is not None and not re.fullmatch(schema.ID_RE, sid):
         print(f"audit: bad snapshot id {sid!r} (expected {schema.ID_RE})")
         return EXIT_BAD
+    timeout = args.timeout
+    if timeout is None:                        # BUG-160: adapt to the fort's size and say so
+        timeout, big = audit_timeout(save_dir)
+        if args.snap is None:
+            print(f"audit: waiting up to {timeout:g} s for the fresh snapshot (largest snapshot on disk "
+                  f"{big // 1024} KB; --timeout sets it)")
     try:
         if sid is None:
             sid = files.new_cmd_id(prefix=AUDIT_PREFIX)
-            _, reply = send(save_dir, "snapshot", {"purpose": "audit"}, by="cli", wait_s=min(10.0, args.timeout),
+            _, reply = send(save_dir, "snapshot", {"purpose": "audit"}, by="cli", wait_s=min(10.0, timeout),
                             cmd_id=sid)
             if reply is None:
                 print(fmt_reply(sid, "snapshot", None, save_dir))
@@ -1057,14 +1078,18 @@ def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,
             if not reply.get("ok"):
                 print(f"audit: snapshot refused: {reply.get('msg', '')}")
                 return EXIT_REFUSED
-        t0, found = clock(), None
+        t0, found, noted = clock(), None, False
         while True:
             found = _snap_file(save_dir, sid, events=args.snap is not None)
-            if found is not None or args.snap is not None or clock() - t0 >= args.timeout:
+            if found is not None or args.snap is not None or clock() - t0 >= timeout:
                 break
+            if not noted and clock() - t0 >= AUDIT_SNAP_NOTE_S:
+                noted = True                   # BUG-160: a big fort scans long or queues behind a readiness export
+                print(f"audit: still waiting for {sid} after {AUDIT_SNAP_NOTE_S} s (the kernel scans it in slices, "
+                      "behind a running snapshot export if one is under way)")
             sleep(0.5)
         if found is None:
-            later = f" within {args.timeout:g} s; try again later: dfllm audit --snap {sid}"
+            later = f" within {timeout:g} s; try again later: dfllm audit --snap {sid}"
             print(f"audit: no snapshot {sid}" + (later if args.snap is None else " (dfllm events --type SNAPSHOT_READY)"))
             return EXIT_NOREPLY if args.snap is None else EXIT_BAD
         rel, snap = found
@@ -1115,7 +1140,9 @@ def add_audit_parser(sub) -> None:
                                    "bp.topo.audit and send the result (readiness R0/R1). Works with follow --no-auto "
                                    "and without follow.")
     p.add_argument("--snap", help="audit this audit snapshot of the running boot instead of a fresh one")
-    p.add_argument("--timeout", type=float, default=AUDIT_SNAP_S, help="seconds to wait for the fresh snapshot")
+    p.add_argument("--timeout", type=float, default=None,
+                   help=f"seconds to wait for the fresh snapshot (default: by the fort's snapshot size, at least "
+                        f"{AUDIT_SNAP_S})")
     p.add_argument("--wait", type=float, default=10.0, help="seconds to wait for each kernel reply")
 
 

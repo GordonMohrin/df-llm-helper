@@ -1,5 +1,30 @@
 # CHANGELOG dfpilot
 
+## Live round 2 fixes: brief/status lines, seal duplicate, audit wait, locale decimals (BUG-159..161, 2026-10-29; offline, live-untested)
+- **Why:** live test round 2 and its skeptic confirmed on i1: the default brief never showed a TIMELINE_RESET of the last year (it lived only in
+  the digest, which `fit()` trims first; NEW7, round 1 had skipped it as "not reproduced"); status clipped the hospital.retire hint off the R0
+  line, and the line advised "plan it inside Tiefe+" while a finished hospital inside existed (BUG-131b); `plan check` called seal at=audit and
+  seal at=refuge a duplicate (NEW2); `dfllm audit` gave up after a fixed 60 s on a 323k-tile fort whose snapshot came after 70 s (NEW3). On i3:
+  `dfhack-run dfllm status` printed `load x8,89` (LC_NUMERIC), outside the files BUG-143's rule checked (NEW5).
+- **What changed:** (1) brief.py: `Ctx.reset` (the newest TIMELINE_RESET of the window) and the head line `line_reset` right after the clock
+  line; status `line_hosp_retire` (`hospital_out: zone Z at x,y,z blocks it: ...`, rank 1), `line_unready(cmds=False)` drops the hint; with
+  `water.hout.ok == 1` the R0 line says "a finished hospital inside exists, retire the old zones" (BUG-159). (2) plan.py: the duplicate key is
+  `(tpl, site, params)`; wake.py: `audit_timeout` = max(180 s, 60 + 3 x largest snapshot bytes / 8000), `--timeout` default None (adaptive),
+  `dfllm audit` prints the wait it uses and one "still waiting" line after 30 s (BUG-160). (3) dfllm.lua: the load via `NUM.dec(.., 2)`, the
+  shares via the new `util/num.num`; kern.lua's two pacing log lines use `NUM.num(e.share)`; the pytest rule covers every file under `lua/` and
+  flags `tostring(<division>)`, `tostring(..share)` and a division concatenated with `..` (BUG-161).
+- **Safety:** text and a CLI wait only; no new verb, event, config key, state field or RULES row. No contract change.
+- **Tests (each fails on b805745):** tests/test_bug159_161_live2.py, tests/lua/test_bug161_num.lua; tests/test_bug131_hospital_retire.py expects
+  the hint on its own status line.
+- **Live check:** (a) i1: emit a fake TIMELINE_RESET at the current tick (`K().emit('TIMELINE_RESET','B',msg,{n_alt=0,tick_alt=T,tick_neu=T})`),
+  then the default `dfllm brief`: line 2 reads `TIMELINE RESET <date>: older save loaded (tick T -> T); events up to #0 ...`. (b) With an outside
+  hospital zone that holds a lying patient (or the injected state of the skeptic: water.hout {z, at, ok 1, pat 1}, ready.fail hospital_out):
+  `dfllm status` has the line `hospital_out: zone Z at x,y,z blocks it: 1 patient lies in it; once they are up: dfllm cmd hospital.retire zone=Z`,
+  the R0 line no longer says "plan it inside". (c) `dfllm plan check` on a draft with seal at=audit and seal at=refuge in one season: no
+  `duplicate seal@S1`. (d) `dfllm audit` (no `--snap`) on Trussroads: `waiting up to N s` with N > 180, maybe one `still waiting` line, then
+  `audit stored, readiness R..`. (e) i3 (German locale): `dfhack-run dfllm status` reads `load x8.89`; kern.log `paced: over its share of N ms/s`
+  has no comma.
+
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every
   4th call and after any other command (FR-85-88a, NEW2); `inspect what=items key=trash` said `ok` while 1056 marked items got no dump job and

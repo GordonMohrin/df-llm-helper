@@ -51,6 +51,7 @@ class Ctx:
         self.decisions: dict[str, dict] = {}   # id -> newest DECISION_NEEDED
         self.a, self.b, self.cmds = [], [], []  # ascending after the scan
         self.mode_ev: dict | None = None
+        self.reset: dict | None = None         # BUG-159: the newest TIMELINE_RESET of the window (beyond LIMITS too)
         self.full = full
         self._scan(full)
 
@@ -68,6 +69,8 @@ class Ctx:
                 if self.mode_ev is not None and self.a:
                     break
                 continue
+            if t == files.TIMELINE_RESET and self.reset is None:
+                self.reset = e
             if t == "DECISION_NEEDED":
                 did = _d(e).get("id")
                 if isinstance(did, str) and did not in self.decisions:
@@ -223,10 +226,32 @@ def line_r0_cmd(ctx: Ctx) -> str:
     return mws or "moodable workshops missing: dfllm cmd bp.place workshops (p.only=<type>)"
 
 
+def line_hosp_retire(ctx: Ctx) -> str:
+    """BUG-159 (live round 2, i1): status clipped the long R0 line before its last 'next:' item, so the blocking hospital
+    zone and the hospital.retire command never showed. Status gives them this short line of their own."""
+    r = unready_r0(ctx)
+    if r is None or "hospital_out" not in (r.get("fail") or []):
+        return ""
+    hz = hospital_retire_hint(ctx.s)
+    return f"hospital_out: {hz}" if hz else ""
+
+
+def line_reset(ctx: Ctx) -> str:
+    """BUG-159 (live round 2, i1): a TIMELINE_RESET of the last year lived only in the digest, the section the brief
+    trims first, so the default brief never named it. This head line survives the trim."""
+    e = getattr(ctx, "reset", None)
+    if not isinstance(e, dict):
+        return ""
+    d = _d(e)
+    return (f"TIMELINE RESET {fmt_tick(e.get('tick'))}: older save loaded (tick {d.get('tick_alt', '?')} -> "
+            f"{d.get('tick_neu', e.get('tick'))}); events up to #{d.get('n_alt', '?')} belong to the discarded timeline "
+            "and are dropped")
+
+
 def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     """FR-65: 'SIEGE UNREADY (R0): <blockers> | <n> ways in without door or bridge: x,y,z kind ... | traps N |
-    next: ...' (DESIGN §5.4 lists the blockers). cmds=False (status): without the mood_ws command, which status shows
-    as its own line (line_r0_cmd)."""
+    next: ...' (DESIGN §5.4 lists the blockers). cmds=False (status): without the mood_ws command and the hospital.retire
+    hint, which status shows as their own lines (line_r0_cmd, line_hosp_retire)."""
     r = unready_r0(ctx)
     if r is None:
         return ""
@@ -276,14 +301,18 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
         nxt.append("the refuge has no drink" + (f" ({where})" if where else "")
                    + ": its drink store (tpl refuge_drink, FR-69; plan) or a well/cistern there")
     if "hospital_out" in fails:                # BUG-036: lying patients cannot walk to the refuge in a breach
-        if far:                                # BUG-040 (Run 11 y453): Tiefe+ has no accepted water: Kern+ next to it
+        w = ctx.s.get("water") if isinstance(ctx.s.get("water"), dict) else {}
+        hout = w.get("hout")
+        if isinstance(hout, dict) and hout.get("ok") == 1:   # BUG-159: a finished hospital inside exists: no new one
+            nxt.append("the hospital lies outside Kern+/Tiefe+: a finished hospital inside exists, retire the old zones")
+        elif far:                                # BUG-040 (Run 11 y453): Tiefe+ has no accepted water: Kern+ next to it
             nxt.append("the hospital lies outside Kern+/Tiefe+: Tiefe+ has no accepted water near it, so plan it inside "
                        f"Kern+ next to {lbl or 'accepted water'} (dfllm bp sites hospital), then remove the old zones")
         else:
             nxt.append("the hospital lies outside Kern+/Tiefe+: plan it inside Tiefe+ next to accepted water (a cistern "
                        "there first), then remove the old zones")
         hz = hospital_retire_hint(ctx.s)       # BUG-131: the zone that blocks and the verb that retires it
-        if hz:
+        if hz and cmds:                        # BUG-159: status shows it as its own rank-1 line (line_hosp_retire)
             nxt.append(hz)
     if "burrow_lost" in fails:                 # BUG-096 (Run 14 note 70): Kern+ or the refuge lost a well or the refuge
         bg = (ctx.s.get("alert") or {}).get("bg")
@@ -975,7 +1004,8 @@ def status_text(save_dir: Path) -> str:
     else:
         # BUG-154 (live i4): the mood_ws command and the care-first line are short and say what to do next and what
         # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first
-        lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_sched(ctx, "care"))]
+        lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_hosp_retire(ctx)),
+                  (1, line_sched(ctx, "care"))]
         lines += curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx)
         s0 = (ctx.s.get("care") or {}).get("s0")
         if isinstance(s0, dict) and s0.get("n"):
@@ -1103,6 +1133,9 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         return "\n".join(["# brief " + t[0]] + t[1:])
     ctx = Ctx(save_dir)
     head = [f"# brief {line_head(ctx)}"]
+    rs = line_reset(ctx)                           # BUG-159: the marker must survive the trim of the digest
+    if rs:
+        head.append(rs)
     guard = line_guard(save_dir)                   # FR-68
     if guard:
         head.append(guard)

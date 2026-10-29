@@ -65,13 +65,17 @@ elseif cmd == 'status' then
                       s.boots or 0, s.frame))
   print(string.format('  kernel %d ms/s (budget %d)  %d ticks/s  max gap %d ms  frame faults %d  dropped events %d',
                       s.ms_s, s.budget or 25, s.tps, s.gap_max_ms, s.kern_faults, s.dropped))
+  -- BUG-161 (live round 2, i3: 'load x8,89'): DF's LC_NUMERIC is the player's locale; NUM writes a '.'
+  local NUM = require('dfllm.util.num')
   if s.load then
-    print(string.format('  fort size: %d units, %d items, load x%.2f', s.load.units, s.load.items, s.load.f_pct / 100))
+    print(string.format('  fort size: %d units, %d items, load x%s', s.load.units, s.load.items,
+                        NUM.dec(s.load.f_pct / 100, 2)))
   end
   for _, m in ipairs(s.modules) do
     print(string.format('  %-10s %s  x%d  %d ms  %d faults%s', m.name, m.disabled and 'DISABLED' or 'ok',
                         m.factor, m.ms, m.faults,
-                        (m.paced or 0) > 0 and string.format('  paced %d (share %s ms/s)', m.paced, tostring(m.share)) or ''))
+                        (m.paced or 0) > 0 and string.format('  paced %d (share %s ms/s)', m.paced, NUM.num(m.share))
+                        or ''))
   end
   print('  runtime: ' .. tostring(s.runtime))
 elseif cmd == 'selftest' then

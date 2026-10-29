@@ -25,4 +25,16 @@ function M.dec(x, n)
   return string.format('%s%d.%0' .. n .. 'd', sign, mi // p, mi % p)
 end
 
+-- BUG-161 (live round 2, i3: 'share %s' with tostring of a float): the drop-in for tostring(number) in text: an
+-- integral value without a point (num(3) = '3', num(3.0) = '3'), else dec(x, n) without trailing zeros
+-- (num(2.5) = '2.5', num(0.125, 2) = '0.13'); a non-number is tostring'ed
+function M.num(x, n)
+  if type(x) ~= 'number' then return tostring(x) end
+  local i = math.tointeger(x)
+  if i then return string.format('%d', i) end
+  local s = M.dec(x, n or 2)
+  if s:find('.', 1, true) then s = s:gsub('0+$', ''):gsub('%.$', '') end
+  return s
+end
+
 return M

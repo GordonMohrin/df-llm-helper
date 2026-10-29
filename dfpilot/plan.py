@@ -1355,9 +1355,11 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
                 errs.append(f"{where}: unknown template {b['tpl']!r}")
             if not re.fullmatch(r"S[1-9]", b["site"]) and b["site"] != SAME:
                 warn.append(f"{where}: site {b['site']!r} is not a `bp sites` label (S1-S3) or '{SAME}'")
-            if (b["tpl"], b["site"]) in pairs:
+            # BUG-160 (live round 2): the params belong to the key: seal at=audit and seal at=refuge are two builds
+            key = (b["tpl"], b["site"], json.dumps(b.get("p") or {}, sort_keys=True))
+            if key in pairs:
                 warn.append(f"{where}: duplicate {b['tpl']}@{b['site']} in one season")
-            pairs.add((b["tpl"], b["site"]))
+            pairs.add(key)
         for lib in (se.get("orders") or {}).get("import", []):
             if lib in seen_libs:
                 warn.append(f"seasons[{si}].orders: {lib} imported twice")
