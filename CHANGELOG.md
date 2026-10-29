@@ -1,5 +1,29 @@
 # CHANGELOG dfpilot
 
+## Live test i3 fixes: fortcore re-site drafts every stage, per-anchor stages, manifest-only breaches (BUG-162..164, 2026-10-29; offline, live-untested)
+- **Why:** live test round 2 on instance i3 (region2-site90 Trussroads y722-723) left BUG-130 partial. With bp/ empty and manifest.breaches naming
+  fortcore y707s0b1 (damp), propose drafted a plain fortcore@S1 that `plan check` rejected ("no dry fortcore site", NEW4). The re-site drafted
+  stage 1 @S1 + @same stage 3 only (the stopped anchor's stages), after the re-site was applied no stage of the moved core was drafted, and after
+  the bp.cancel a lone stage 3 @same, because stage 2 of an older core at 122,68,132 counted as done (NEW3).
+- **What changed:** (1) plan.core_breaches: a manifest `breaches` row of tpl fortcore without a bp file is a stopped core (stage from the
+  state.proj label, anchor unknown) unless done or cancelled (bp/.cancelled); FR-95's AQ_OBSERVE still clears it; with no dry site propose takes the
+  BUG-130 closure as check would (BUG-162). (2) Re-site: every fortcore stage leaves `done`; stage 1 @S1 plus every needed stage @same (`core_need`:
+  the stopped anchor's stages and the phase deliverables up to the target). Applied re-site (`core.moved` with rot and stages): the missing stages
+  at the moved core's explicit anchor `A<x>_<y>_<z>_<rot>`; `cmd.place` lets a stage >= 2 at an explicit anchor overlap its own template's
+  earlier stages there; check accepts `A..` labels and counts duplicates per stage; why texts cut at a word boundary (BUG-163). (3)
+  `core_anchor` (placed record, else the newest stage 1); applied_builds counts fortcore stages on that anchor only; `core_gaps` inserts a missing
+  stage 2..k-1 before a drafted stage k (BUG-164).
+- **Safety:** planner and site resolution only (Python); no kernel change, no new verb, event, config key or RULES row. FR-95 observe mode
+  (runner.lua M.drop_breach, AQ_OBSERVE) keeps a resumed core out of the re-site.
+- **Tests (fail on b805745 except the pins named in the bug files):** tests/test_bug162_164_fortcore_resite.py; tests/test_bug130_damp_fortcore.py
+  (cancel via cmd.retire; an applied re-site may draft explicit-anchor stages, never a second stage 1).
+- **Live check:** (a) i3 as it is (bp/ empty, manifest.breaches y707s0b1): `dfllm plan propose` drafts seal@S1 at=last, no fortcore,
+  phase_target P2, note "BUG-130 ... cannot move"; `dfllm plan check` on it: no fortcore ERROR. (b) The fake runtime with the Run-14 bp files and
+  only the damp breach (dry site S1): propose drafts fortcore@S1 stage 1, @same 2, @same 3; check OK, no "duplicate fortcore@same" warning. (c)
+  After that re-site is applied (y722s2b0 stage 1 at 70,82,132, y707s0b1/b3 not cancelled yet): propose drafts fortcore@A70_82_132_1 stages 2 and
+  3 and the bp.cancel line; `plan check` lists both at [70,82,132] rot1; `plan apply --dry-run` emits them without an "overlaps" error. (d) After
+  `dfllm cmd bp.cancel proj=y707s0b1` and `proj=y707s0b3`: propose drafts fortcore@same stage 2 before stage 3 (not stage 3 alone), check OK.
+
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every
   4th call and after any other command (FR-85-88a, NEW2); `inspect what=items key=trash` said `ok` while 1056 marked items got no dump job and

@@ -177,6 +177,9 @@ Related: FR-xx, BUG-xx
 | [BUG-156](BUG-156-p1-mood-features-never-run-in-a-plan-less-fort.md) | fixed (offline, live-untested) | high | live i4: a plan-less fort stays at P0, so mood shops, mood stock, cloth floor and training (all P1) never run | lua/dfllm/economy.lua |
 | [BUG-157](BUG-157-bp-sites-anchor-rooms-on-the-civilian-stair-and-the-refuge-hatch-tile.md) | fixed (offline, live-untested) | medium | live i4: `bp sites` anchors hospital, tombs and workshops on the civilians' stair column, tombs at the refuge's hatch tile | dfpilot/bp/sites.py |
 | [BUG-158](BUG-158-coffin-provisioner-counts-zones-df-re-gives-as-free-and-inspect-tombs-header-disagrees.md) | fixed (offline, live-untested) | medium | live i4: `inspect tombs` `0 free` vs `prov.free 20`; the provisioner counts zones it freed and DF re-gives as free | lua/dfllm/care.lua |
+| [BUG-162](BUG-162-core-breaches-ignores-a-manifest-breach-without-a-bp-file.md) | fixed (offline, live-untested) | high | live i3: a manifest breach of a fortcore without a bp file is ignored; propose drafts a fortcore@S1 that `plan check` rejects (no dry site) | dfpilot/plan.py |
+| [BUG-163](BUG-163-fortcore-resite-drafts-only-the-stopped-anchors-stages.md) | fixed (offline, live-untested) | high | live i3: the fortcore re-site drafts only the stopped anchor's stages (no stage 2); a moved core never gets its stages 2 and 3 | dfpilot/plan.py, dfpilot/cmd.py |
+| [BUG-164](BUG-164-applied-builds-count-fortcore-stages-of-another-anchor.md) | fixed (offline, live-untested) | medium | live i3: applied_builds counts fortcore stage 2 of an older core at another anchor; the new core gets a lone stage 3 | dfpilot/plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

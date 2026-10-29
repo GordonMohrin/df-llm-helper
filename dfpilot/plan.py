@@ -1116,11 +1116,23 @@ def core_breaches(save_dir: Path, state: dict | None = None) -> list[dict]:
         if isinstance(d, dict) and d.get("tpl") == "fortcore" and p.stem not in done \
                 and not (d.get("params") or {}).get("retrofit"):
             docs[p.stem] = d
+    # BUG-162 (live i3: bp/ holds no files, manifest.breaches has y707s0b1 fortcore damp): a fortcore row of the kernel's
+    # manifest without a bp file counts too (stage from its state.proj label s<N>, else 1; anchor unknown), unless it
+    # was cancelled (bp/.cancelled/<id>.json, cmd.retire) or is done; `plan check` ranks against that row anyway
+    rows = [b for b in _kern_manifest(save_dir).get("breaches") or [] if isinstance(b, dict)]
+    labels = {r[0]: str(r[1]) for r in (state or {}).get("proj") or []
+              if isinstance(r, list) and len(r) >= 2 and isinstance(r[0], str)}
+    for b in rows:
+        pid = b.get("proj")
+        if b.get("tpl") == "fortcore" and isinstance(pid, str) and pid not in docs and pid not in done \
+                and not (Path(save_dir) / "bp" / ".cancelled" / f"{pid}.json").is_file():
+            m = re.match(r"s(\d+)\.", labels.get(pid, ""))
+            docs[pid] = {"tpl": "fortcore", "params": {"stage": int(m.group(1)) if m else 1}, "anchor": []}
     if not docs:
         return []
     found: dict[str, dict] = {}
-    for b in _kern_manifest(save_dir).get("breaches") or []:
-        if isinstance(b, dict) and b.get("proj") in docs:
+    for b in rows:
+        if b.get("proj") in docs:
             found[b["proj"]] = {"why": str(b.get("why") or "damp"), "pos": list(b["pos"])}
     for row in (state or {}).get("proj") or []:
         m = _BREACH_RE.search(str(row[-1])) if isinstance(row, list) and len(row) >= 4 else None
@@ -1164,17 +1176,23 @@ def core_resite(save_dir: Path, state: dict | None, br: list[dict]) -> dict | No
     breaches; False: none, `why` says why; None: not known), why, site}."""
     if not br:
         return None
-    anchors = {tuple(b["anchor"]) for b in br}
+    anchors = {tuple(b["anchor"]) for b in br if b["anchor"]}      # BUG-162: a manifest-only row has no anchor
     done = done_projects(save_dir)
-    at, moved = [], None
+    at, moved, rest = [], None, []
+    cur = core_anchor(save_dir)
     for p in bp_files(save_dir):
         d = files.read_json(p)
         if not isinstance(d, dict) or d.get("tpl") != "fortcore" or (d.get("params") or {}).get("retrofit"):
             continue
-        if tuple(d.get("anchor") or ()) in anchors:
-            at.append((p.stem, _stage_of(d.get("params")) or 1, p.stem in done))
-        elif (_stage_of(d.get("params")) or 1) == 1 and moved is None:
-            moved = {"proj": p.stem, "anchor": list(d.get("anchor") or [])}    # the re-site was applied already
+        a, st = list(d.get("anchor") or []), _stage_of(d.get("params")) or 1
+        if tuple(a) in anchors:
+            at.append((p.stem, st, p.stem in done))
+            continue
+        rest.append((a, st))
+        if st == 1 and (moved is None or a == cur):         # the re-site was applied already (the current core first)
+            moved = {"proj": p.stem, "anchor": a, "rot": d.get("rot", 0)}
+    if moved:   # BUG-163: the stages that stand on the moved anchor (its missing later stages are drafted there)
+        moved["stages"] = sorted({st for a, st in rest if a == moved["anchor"]})
     dug = sorted(pid for pid, st, dn in at if st == 1 and dn)
     out = {"br": br, "ids": sorted({pid for pid, _, dn in at if not dn} | {b["proj"] for b in br}),
            "stages": sorted({st for _, st, _ in at} | {b["stage"] for b in br}), "resite": not dug, "ok": None,
@@ -1202,6 +1220,37 @@ def _core_head(core: dict) -> str:
     pos = f" at {_pos(b['pos'])}" if b.get("pos") else ""
     more = f" (+{len(core['br']) - 1})" if len(core["br"]) > 1 else ""
     return f"fortcore: {b['proj']} (stage {b['stage']}) stopped on breach:{b['why']}{pos}{more} and is parked"
+
+
+STAGES_MAX = 4                             # bp/fortcore.py STAGES
+
+
+def core_need(core: dict, plist: list[dict], target: str) -> list[int]:
+    """BUG-163: the later fortcore stages (>= 2) a re-sited core needs: those applied on the stopped anchor and the
+    fortcore deliverables of every phase up to `target` (not only the stopped anchor's stages)."""
+    want = {k for k in core.get("stages") or [] if isinstance(k, int) and k >= 2}
+    for p in plist:
+        if p["id"] <= target:
+            want |= {d["stage"] for d in p["deliver"] if d.get("k") == "proj" and d.get("tpl") == "fortcore"
+                     and isinstance(d.get("stage"), int) and d["stage"] >= 2}
+    return sorted(want)
+
+
+def core_gaps(builds: list[dict], done: set) -> None:
+    """BUG-164: a drafted fortcore stage k >= 3 on the core needs its stages 2..k-1: each one neither done (on the current
+    core's anchor) nor drafted is inserted before it, at the same site label."""
+    fc = [b for b in builds if b["tpl"] == "fortcore" and not (b.get("p") or {}).get("retrofit")
+          and (_stage_of(b.get("p") or {}) or 1) >= 2]
+    if not fc:
+        return
+    have = {_stage_of(b.get("p") or {}) or 1 for b in builds if b["tpl"] == "fortcore"}
+    top = max(_stage_of(b["p"]) for b in fc)
+    for j in range(2, top):
+        if ("fortcore", j) in done or j in have:
+            continue
+        nxt = next(i for i, b in enumerate(builds) if b in fc and _stage_of(b["p"]) > j)
+        builds.insert(nxt, {"tpl": "fortcore", "site": builds[nxt]["site"], "p": {"stage": j}})
+        have.add(j)
 
 
 def core_movable(core: dict | None) -> bool:
@@ -1243,12 +1292,12 @@ def core_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[s
                         f"add {_compact(CORE_RESITE)} before it (BUG-130; dfllm plan propose drafts it)")
         elif not movable and (core["resite"] or st in stopped):
             errs.append(f"{head}; seasons[{si}].build[{bi}] fortcore stage {st} @same would build on it and cannot "
-                        f"move ({core['why'][:100]}): leave it out")
+                        f"move ({_cut(core['why'])}): leave it out")
     if movable and first is None:
         warn.append(f"{head}: re-site it, add {_compact(CORE_RESITE)} (its later stages @same; BUG-130: S1 keeps away "
                     f"from the recorded breaches; then dfllm cmd bp.cancel proj={core['ids'][0]})")
     elif not movable:
-        warn.append(f"fortcore: no dry site ({core['why'][:100]}): close the ways in by wall + door "
+        warn.append(f"fortcore: no dry site ({_cut(core['why'])}): close the ways in by wall + door "
                     f"({_compact(SEAL_LAST)}); readiness keeps R0 no_outer/no_inner and the drill stays refused: "
                     + CORE_GATES)
     return errs, warn
@@ -1353,11 +1402,12 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
             where = f"seasons[{si}].build[{bi}]"
             if tpls is not None and b["tpl"] not in tpls:
                 errs.append(f"{where}: unknown template {b['tpl']!r}")
-            if not re.fullmatch(r"S[1-9]", b["site"]) and b["site"] != SAME:
+            if not re.fullmatch(r"S[1-9]|A\d+_\d+_\d+(?:_[0-3])?", b["site"]) and b["site"] != SAME:   # BUG-163
                 warn.append(f"{where}: site {b['site']!r} is not a `bp sites` label (S1-S3) or '{SAME}'")
-            if (b["tpl"], b["site"]) in pairs:
+            key = (b["tpl"], b["site"], _stage_of(b.get("p") or {}))     # BUG-163: stages 2 and 3 @same are no pair
+            if key in pairs:
                 warn.append(f"{where}: duplicate {b['tpl']}@{b['site']} in one season")
-            pairs.add((b["tpl"], b["site"]))
+            pairs.add(key)
         for lib in (se.get("orders") or {}).get("import", []):
             if lib in seen_libs:
                 warn.append(f"seasons[{si}].orders: {lib} imported twice")
@@ -1643,16 +1693,53 @@ def _stage_of(params) -> int | None:
     return st if isinstance(st, int) and not isinstance(st, bool) else None
 
 
+def core_anchor(save_dir: Path) -> list | None:
+    """BUG-164: the anchor of the current fortcore (what `same` resolves to): bp/.placed-fortcore.json when a fortcore
+    project (not a retrofit) stands there, else the newest fortcore stage 1 project's (file time, then id); None
+    without one."""
+    cores = []
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if isinstance(d, dict) and d.get("tpl") == "fortcore" and isinstance(d.get("anchor"), list) \
+                and not (d.get("params") or {}).get("retrofit"):
+            try:
+                mt = p.stat().st_mtime
+            except OSError:
+                mt = 0.0
+            cores.append((mt, p.stem, list(d["anchor"]), _stage_of(d.get("params")) or 1))
+    if not cores:
+        return None
+    pl = files.read_json(Path(save_dir) / "bp" / ".placed-fortcore.json")
+    if isinstance(pl, dict) and isinstance(pl.get("anchor"), list) and any(c[2] == list(pl["anchor"]) for c in cores):
+        return list(pl["anchor"])
+    one = sorted(c for c in cores if c[3] == 1)
+    return one[-1][2] if one else None
+
+
+def _cut(text: str, n: int = 100) -> str:
+    """BUG-163: text cut at a word boundary to at most n characters (an ellipsis marks the cut)."""
+    text = str(text)
+    if len(text) <= n:
+        return text
+    head = text[:n - 3].rsplit(" ", 1)[0].rstrip(" ,;:(")
+    return (head or text[:n - 3]) + "..."
+
+
 def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
     """(tpl, stage) of every blueprint project in <save>/bp (applied in any year, by plan, cmd or follow; done
     ones included) and of the running projects in state.proj. A proj id without a bp file that is a template
-    name (e.g. a fortcore project from adopt) counts with the stage of its label 's<N>.<mode>'."""
+    name (e.g. a fortcore project from adopt) counts with the stage of its label 's<N>.<mode>'. BUG-164: a fortcore
+    stage counts only on the current core's anchor (core_anchor): a stage of an older core elsewhere is not this one's."""
     out, ids = set(), set()
+    cur = core_anchor(save_dir)        # BUG-164: fortcore stages count on the current core's anchor only
     for p in bp_files(save_dir):
         doc = files.read_json(p)
         if isinstance(doc, dict) and isinstance(doc.get("tpl"), str):
-            out.add((doc["tpl"], _stage_of(doc.get("params"))))
             ids.add(p.stem)
+            if cur is not None and doc["tpl"] == "fortcore" and not (doc.get("params") or {}).get("retrofit") \
+                    and list(doc.get("anchor") or []) != cur:
+                continue
+            out.add((doc["tpl"], _stage_of(doc.get("params"))))
     for row in (state or {}).get("proj") or []:
         pid, label = (row + ["", ""])[:2] if isinstance(row, list) else ("", "")
         if not isinstance(pid, str) or pid in ids or not re.fullmatch(r"[a-z][a-z0-9_]{1,31}", pid):
@@ -1710,14 +1797,21 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         b0 = core["br"][0]
         where = f" at {_pos(b0['pos'])}" if b0.get("pos") else ""
         cancel = "; ".join(f"dfllm cmd bp.cancel proj={i}" for i in core["ids"][:3])
-        if core.get("moved"):                    # the re-site was applied: never a second fortcore
+        need = core_need(core, plist, target)
+        mv = core.get("moved")
+        if mv:                                   # the re-site was applied: never a second fortcore
+            # BUG-163: the later stages the moved core lacks, at its explicit anchor (`same` may still name the old one)
+            lack = [k for k in need if k not in (mv.get("stages") or [])]
+            label = _cmd.anchor_label(mv["anchor"], mv.get("rot", 0)) if len(mv.get("anchor") or []) == 3 else SAME
+            builds += [{"tpl": "fortcore", "site": label, "p": {"stage": k}} for k in lack]
             core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where} was re-sited to "
-                         f"{core['moved']['proj']}; free its tiles: {cancel}")
+                         f"{mv['proj']}" + (f" (stages {', '.join(map(str, lack))} drafted there @{label})" if lack
+                                            else "") + f"; free its tiles: {cancel}")
         elif core_movable(core):
-            for k in core["stages"]:
+            for k in range(1, STAGES_MAX + 1):     # BUG-163: the new core needs every stage, whatever stood elsewhere
                 done.discard(("fortcore", k))
             builds.append(copy.deepcopy(CORE_RESITE))
-            builds += [{"tpl": "fortcore", "site": SAME, "p": {"stage": k}} for k in core["stages"] if k >= 2]
+            builds += [{"tpl": "fortcore", "site": SAME, "p": {"stage": k}} for k in need]
             core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where}: re-sited to S1 away "
                          f"from the recorded breaches (its stages @same); then {cancel}")
         else:
@@ -1729,7 +1823,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
             if seal_n != 0 and (info is None or SEAL in info):
                 builds.append(copy.deepcopy(SEAL_LAST))
             core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where} and cannot move "
-                         f"({core['why'][:100]}): the ways in are closed by wall + door (seal at=last"
+                         f"({_cut(core['why'])}): the ways in are closed by wall + door (seal at=last"
                          + ("" if seal_n != 0 else ": nothing left to close") + "); readiness keeps "
                          f"R0 no_outer/no_inner and the drill stays refused (only bridges of role outer/inner count)"
                          + (f"; phase_target held at {target} (no refuge)" if core["resite"] else "") + f"; the parked: {cancel}")
@@ -1781,6 +1875,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs:
                     libs.append(d["lib"])
+    if applied is not None:                      # BUG-164: no stage 3 @same without the core's stage 2 (known applied)
+        core_gaps(builds, done)
     if drop_core:                                # BUG-130: nothing on the stopped anchor
         builds = [b for b in builds if b["tpl"] != "fortcore" or (drop_core != "all" and (
             b.get("site") != SAME or _stage_of(b.get("p") or {}) not in drop_core))]
