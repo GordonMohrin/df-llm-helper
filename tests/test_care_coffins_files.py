@@ -25,7 +25,7 @@ needs_lua = pytest.mark.skipif(not luahost.available(), reason="lua53.dll not fo
 
 # ---------------------------------------------------------------- contract tables and config
 def test_care_may_queue_work_orders():
-    assert schema.ACT["workorder"] == ["economy", "water", "care"]
+    assert schema.ACT["workorder"] == ["economy", "water", "care", "traps"]     # FR-96: traps orders cages
 
 
 def test_state_care_coffins_validates():

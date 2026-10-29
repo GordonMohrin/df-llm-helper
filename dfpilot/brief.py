@@ -5,7 +5,7 @@ import re
 import time
 from pathlib import Path
 
-from . import files, paths, schema
+from . import files, paths, schema, traps as _traps
 from .events import SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, fmt_tick, fmt_ticks
 
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
@@ -1096,7 +1096,7 @@ def status_text(save_dir: Path) -> str:
             lines.append((4, f"desperate (stress 0): {s0['n']}" + (f" ids {','.join(str(i) for i in s0.get('ids') or [])}"
                                                                    if s0.get("ids") else "")))
         core, extra = def_parts(ctx)
-        lines += [(3, _join(core)), (3, line_burrow(ctx)), (3, line_sched(ctx, "rest")),
+        lines += [(3, _join(core)), (3, _traps.status_line(ctx.s)), (3, line_burrow(ctx)), (3, line_sched(ctx, "rest")),
                   (1, clip(line_proj(ctx, 2, blocked_first=True), PROJ_STATUS_TOKENS)),
                   (4, line_kern(ctx)),
                   (4, line_snap(ctx)),
@@ -1237,7 +1237,8 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
         head[1:1] = [t for _, t in mood_items(ctx, 4)]  # BUG-285: the open strange moods under the clock line
         head += [x for x in (line_unready(ctx), _join(t for _, t in curse_items(ctx)), line_alarm(ctx), line_pop(ctx),
-                             line_supply(ctx), line_stress0(ctx), line_stress(ctx), _join(core), line_burrow(ctx),
+                             line_supply(ctx), line_stress0(ctx), line_stress(ctx), _join(core),
+                             _traps.status_line(ctx.s), line_burrow(ctx),                          # FR-96
                              line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx), _join(extra)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),

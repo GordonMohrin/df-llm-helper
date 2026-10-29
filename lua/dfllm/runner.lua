@@ -430,7 +430,24 @@ local function replace_by(dst, src, field, cap)
 end
 local MAPS = {bridges = true, stations = true, burrows = true}
 local LISTS = {zones = 50, stairs = 8}
-local BY = {killboxes = {'id', 20}, rooms = {'id', 200}, workshops = {'pos', 100}}
+local BY = {killboxes = {'id', 20}, rooms = {'id', 200}, workshops = {'pos', 100}, traps = {'id', 40}}   -- traps: FR-96
+
+-- FR-96: a way's lane (id T<x>_<y>_<z>) keeps its tiles when a later traps project re-arms part of it (the union of the
+-- tiles, same kind, <= 64); Z2 (fortcore stage 4's hall) and a kind change are replaced as a whole
+function Q.merge_traps(dst, src)
+  local old, add = {}, {}
+  for _, e in ipairs(type(dst) == 'table' and dst or {}) do if type(e) == 'table' then old[key_of(e.id)] = e end end
+  for _, e in ipairs(type(src) == 'table' and src or {}) do
+    local o = type(e) == 'table' and old[key_of(e.id)] or nil
+    if o and type(e.id) == 'string' and e.id:sub(1, 1) == 'T' and o.kind == e.kind and type(o.tiles) == 'table'
+        and type(e.tiles) == 'table' then
+      e = copy(e)
+      e.tiles = append_unique(o.tiles, e.tiles, 64)
+    end
+    add[#add + 1] = e
+  end
+  return replace_by(dst, add, 'id', 40)
+end
 
 -- maps replaced per key; id/pos lists replaced per entry; plain lists appended without duplicates
 function M.merge_manifest(dst, frag)
@@ -442,6 +459,7 @@ function M.merge_manifest(dst, frag)
     elseif LISTS[k] and type(v) == 'table' then
       dst[k] = obj(dst[k])
       for kk, list in pairs(v) do dst[k][kk] = append_unique(dst[k][kk], list, LISTS[k]) end
+    elseif k == 'traps' then dst[k] = Q.merge_traps(dst[k], v)
     elseif BY[k] then
       dst[k] = replace_by(dst[k], v, BY[k][1], BY[k][2])
       if k == 'workshops' and type(dst.gone) == 'table' then dst.gone = Q.ungone(dst.gone, v) end   -- BUG-066

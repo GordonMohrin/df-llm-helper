@@ -49,7 +49,7 @@ from __future__ import annotations
 import heapq
 from collections import deque
 
-from . import aquifer, defense, fortcore, mine, rooms, topo
+from . import aquifer, defense, fortcore, mine, rooms, topo, traps
 from .emit import TEMPLATES, check_params
 from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
@@ -224,6 +224,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
                          "e.g. the bottom of a fort stair) or site A<x>_<y>_<z>_0")
     if tpl in defense.BUILD:
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
+    if tpl in traps.BUILD:                                   # FR-96: absolute trap tiles, the site is the first one
+        return traps.site(snap, p, _At(snap))[:n]
     if tpl != "fortcore" and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     aqwell = tpl == "cistern" and p.get("water") == "aquifer"     # BUG-262: damp is what its basin looks for

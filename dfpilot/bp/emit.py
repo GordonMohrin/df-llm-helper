@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from . import aquifer, defense, fortcore, mine, rooms
+from . import aquifer, defense, fortcore, mine, rooms, traps
 from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
@@ -25,9 +25,11 @@ TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress co
                 for n, f in defense.BUILD.items()},
              **{n: (f, dict(mine.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0]) for n, f in mine.BUILD.items()},
              **{n: (f, dict(aquifer.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0])
-                for n, f in aquifer.BUILD.items()}}         # FR-95: the aquifer pass
+                for n, f in aquifer.BUILD.items()},         # FR-95: the aquifer pass
+             **{n: (f, dict(traps.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0])
+                for n, f in traps.BUILD.items()}}           # FR-96: trap lanes at the ways in, the hall re-armed
 ATTACHED = dict(defense.ATTACHED)     # tpl -> the template whose tiles it is built against (cmd occupancy)
-FREE = frozenset(defense.FREE)        # templates that build only on existing open tiles (no occupancy clash)
+FREE = frozenset(defense.FREE) | traps.FREE   # templates that build only on existing open tiles (no occupancy clash)
 _BURROW_RE = r"^[A-Za-z0-9_+-]{0,20}$"
 
 # build keys -> materials list names (quickfort build.lua:760-1000)
@@ -231,4 +233,6 @@ def materials(stages: list[dict]) -> dict:
         + out.get("cage_trap", 0)
     if mech:
         out["mechanism"] = mech     # 1 per trap/lever + 2 per lever->bridge link (linking is a UI job)
+    if out.get("cage_trap"):        # FR-96: a cage trap takes a cage too (quickfort build.lua Tc: 'wooden cage')
+        out["cage"] = out["cage_trap"]
     return dict(sorted(out.items()))

@@ -160,6 +160,17 @@ def merge_manifest(base: dict, frag: dict) -> dict:
     for k, v in frag.items():
         if k in ("bridges", "stations", "burrows"):
             out[k] = {**out.get(k, {}), **v}
+        elif k == "traps":       # FR-96: per id; a way's lane (T...) keeps its tiles when part of it is re-armed (union)
+            old = {e["id"]: e for e in out.get(k, [])}
+            new = []
+            for e in v:
+                o = old.get(e["id"])
+                if o and e["id"].startswith("T") and o.get("kind") == e.get("kind"):
+                    seen = [list(t) for t in o["tiles"]]
+                    e = {**e, "tiles": (seen + [list(t) for t in e["tiles"] if list(t) not in seen])[:64]}
+                new.append(e)
+            ids = {e["id"] for e in v}
+            out[k] = [e for e in out.get(k, []) if e["id"] not in ids] + new
         elif k in ("killboxes", "rooms"):
             ids = {e["id"] for e in v}
             out[k] = [e for e in out.get(k, []) if e["id"] not in ids] + list(v)
@@ -192,6 +203,9 @@ def transform_manifest(m: dict, X: Xform) -> dict:
             out[k] = {n: P(p) for n, p in v.items()}
         elif k == "killboxes":
             out[k] = [{"id": e["id"], "bbox": X.bbox(e["bbox"])} for e in v]
+        elif k == "traps":                                  # FR-96
+            out[k] = [{**e, "tiles": [P(t) for t in e["tiles"]], **({"way": P(e["way"])} if "way" in e else {})}
+                      for e in v]
         elif k == "edge":
             out[k] = [P(p) for p in v]
         elif k == "refuge":

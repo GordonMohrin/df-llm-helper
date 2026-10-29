@@ -57,6 +57,7 @@ MODULES = [
     ("seal", "WP7", False, {"ticks": 50}),
     ("economy", "WP8", False, {"ticks": 1200}), ("care", "WP8", False, {"ticks": 1200}),
     ("water", "WP8", False, {"ticks": 1200}),
+    ("traps", "WP8", False, {"ticks": 1200}),    # FR-96/97: trap upkeep (counts, cages for full cage traps)
     ("trade", "WP9", False, {"ticks": 100}), ("baseline", "WP8", False, {"ticks": 33600}),
     ("perf", "WP1", False, {"ms": 1000}), ("selftest", "WP1", False, {"ms": 60000}),
 ]
@@ -86,7 +87,7 @@ ACT = {
     "burrow_tiles": ["seal"],
     "popcap": ["readiness"],
     "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
-    "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care"],
+    "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care", "traps"],
     "order_suspend": ["economy"], "engrave_order": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "work_detail": ["economy", "water"], "order_material": ["economy"], "order_remove": ["economy"],
     "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
@@ -113,6 +114,7 @@ STATE_OWNERS = {
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
     "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water", "stale.*": "kern",
+    "traps.*": "traps",
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -1141,7 +1143,12 @@ STATE = Obj(
                       # finished hospital inside: hospital.retire needs no approve, pat = patients lying in it); a zone
                       # outside that is idle or superseded by a finished hospital inside is not counted in hosp_out
                       opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8),
-                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT})})})
+                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT})}),
+         # FR-96/97 (lua/dfllm/traps.lua, daily): armed traps on the manifest's trap tiles (n) of all listed (m); built (b),
+         # ways in with every lane tile trapped (w) of the ways listed (wn), cage traps holding a caught creature (f), free
+         # empty cages (c), listed tiles without a trap building (l; lh 1: some in the hall), the last cage order (ord)
+         "traps": Obj(req={"n": NAT, "m": NAT},
+                      opt={"b": NAT, "w": NAT, "wn": NAT, "f": NAT, "c": NAT, "l": NAT, "lh": FLAG, "ord": Str(maxbytes=40)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
@@ -1217,6 +1224,9 @@ MANIFEST = named("manifest", Obj(
          # BUG-130: every breach stop (BREACH_STOP), one per project (the runner's m.runner dz, newest kept): its tile,
          # kind, project and template; the fortcore ranking keeps a new fortcore away from them, plan propose re-sites
          "breaches": Arr(Obj(req={"pos": POS, "why": Str(maxbytes=16)}, opt={"proj": ID, "tpl": Str(maxbytes=24)}), hi=32),
+         # FR-96: trap lanes by id (T<x>_<y>_<z> = the way in, a door; Z2 = fortcore stage 4's hall): kind, its tiles
+         "traps": Arr(Obj(req={"id": ID, "kind": Str(enum=["cage", "stone"]), "tiles": Arr(POS, 1, 64)},
+                          opt={"way": POS}), hi=40),
          "pit": POS, "depot": POS}))
 
 # ---------------------------------------------------------------- blueprint project

@@ -169,7 +169,7 @@ def test_rooms_touch_the_anchor_row_only_through_the_doorway(tpl):
 
 def test_list_templates():
     names = [t["tpl"] for t in bp.list_templates()]
-    assert names == TPLS and len(names) == 23     # + aqshaft (FR-95), furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6), gallery_o1, seal, stockroom, refuge_beds, explore (Run 10), refuge_drink (FR-69)
+    assert names == TPLS and len(names) == 24     # + traps (FR-96), aqshaft (FR-95), furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6), gallery_o1, seal, stockroom, refuge_beds, explore (Run 10), refuge_drink (FR-69)
     assert all(t["about"] for t in bp.list_templates())
 
 

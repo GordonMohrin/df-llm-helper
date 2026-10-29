@@ -1204,6 +1204,9 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     if tpl == "seal":                                      # absolute openings; at=last: the current open ways in
         params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap,
                                                         params.get("close") or "auto")
+    if tpl == "traps":                                     # FR-96: at=ways|hall: the lanes / hall tiles still to trap
+        from . import traps as _traps
+        params["at"], SEAL_NOTES[bp_id] = _traps.expand(save_dir, params, snap)
     if tpl == "workshops" and "skip" not in params:
         miss = set(workshops_missing(save_dir))
         # BUG-042: a moodable type the kernel saw missing on the map (economy's tannery request) is built again
@@ -1354,6 +1357,10 @@ def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
     if tpl == "seal":                                      # as place(): at=last etc. become explicit openings
         params = {**(params or {}), "at": seal_openings(save_dir, (params or {}).get("at"), snap,
                                                         (params or {}).get("close") or "auto")[0]}
+    if tpl == "traps":                                     # FR-96: as place()
+        from . import traps as _traps
+        params = dict(params or {})
+        params["at"] = _traps.expand(save_dir, params, snap)[0]
     if where:
         sites, snap_id = rank_sites(save_dir, tpl, params, snap, n=RANK_N, where=where)
     else:
