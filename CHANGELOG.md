@@ -14,11 +14,15 @@
   another mode or `lever up` ends it; any want replacing a player's lever want is logged (BUG-236). (3) gate `M.up_refusal`: no
   automatic up within 1,200 ticks of a down in quiet PEACE; drill: no automatic drill while a gate bridge has no linked lever
   (`gate.linked`), a lever hold or a rescue runs, kern.log names it once (BUG-237). Contracts: STRANDED d `peace`, reflex
-  `gate.lever_hold_days`, `gate.want` up rule; appendix regenerated. RULES rows `lever` and STRANDED edited in place.
-- **Tests (each fails on 6dc0f19):** tests/lua/test_fix5_gate.lua (7 tests).
+  `gate.lever_hold_days`, `gate.want` up rule; appendix regenerated. RULES rows `lever` and STRANDED edited in place. (4) review:
+  gate's load drops a stale 'up' (rescue_end) want in PEACE (a save from before the fix kept B1 wanted up for good, BUG-234); a
+  lockdown raises an outer bridge a quiet-PEACE rescue holds down at once instead of waiting for siege's abort (BUG-235).
+- **Tests (each fails on 6dc0f19):** tests/lua/test_fix5_gate.lua (7 tests); review: the stale rescue_end test fails on 5b1d334, the
+  lockdown-during-PEACE-rescue test guards the threat path.
 - **Live check:** Guildcleans after the reload: no PEACE>DRILL while O1 is unlinked (status drill hold 'no lever:O1', kern.log 'automatic
   drills held' once); B1 down in PEACE, no 'pull B1 up' LEVER, no GATE_FAIL B1; a stranded group gets STRANDED rescue `peace` 1 and
-  done '... back to the mode default'; `dfllm cmd lever {"bridge":"B1","want":"down"}` replies '... held down 3 days' and B1 stays down.
+  done '... back to the mode default'; `dfllm cmd lever {"bridge":"B1","want":"down"}` replies '... held down 3 days' and B1 stays down;
+  at the load kern.log 'gate: B1 stale rescue_end up want dropped at the load (PEACE)' if the save still had it.
 ## Live round 4 station fallback and the release without stations (BUG-214, BUG-215, 2026-10-29; offline, live-untested)
 - **Why:** live round 4 on E:/DF-test4 (Trussroads) and its skeptic: with B2 raised the BREACH chain b2, core, z4, melee failed entry by
   entry (b2 a wall, core on walk group 0, melee on 1507 behind B2, the soldiers on 1): no station order (kpi off nost 8, on_station 0 of 8

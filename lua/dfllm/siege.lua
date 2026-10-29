@@ -2171,8 +2171,6 @@ function M.hold_alert(K)
   return 'pending ' .. tostring(burrow)
 end
 
--- public (BUG-028, gate): siege holds bridge `b` down: a raise that would cut citizens off from drink or food (c), or
--- a rescue's bridge (a); gate does not raise it on its own at a BREACH entry then
 -- public (BUG-235, drill): the bridges a STRANDED rescue holds down now (a copy), or nil
 function M.rescue(K)
   local r = st and st.str and st.str.rescue
@@ -2182,6 +2180,8 @@ function M.rescue(K)
   return l
 end
 
+-- public (BUG-028, gate): siege holds bridge `b` down: a raise that would cut citizens off from drink or food (c), or
+-- a rescue's bridge (a); gate does not raise it on its own at a BREACH entry then
 function M.held(K, b)
   return st ~= nil and st.str ~= nil and (st.str.hold[b] ~= nil or rescuing(b))
 end

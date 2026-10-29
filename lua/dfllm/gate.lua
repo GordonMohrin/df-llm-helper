@@ -1920,7 +1920,10 @@ local function manifest_pass(K, man, now)
   for _, name in ipairs(bridge_names(man)) do
     local role, br = man.bridges[name].role, st.br[name]
     local w, why
-    if br and br.want == 'down' and SIEGE_DOWN[br.why] then w = nil   -- BUG-028 rescue, intake, sortie: until they end
+    -- BUG-028 rescue, intake, sortie: until they end; BUG-235: a quiet-PEACE rescue of an outer bridge never outlasts
+    -- a lockdown (the lockdown raises it at once, siege's next step aborts the rescue)
+    if br and br.want == 'down' and SIEGE_DOWN[br.why] and not (lock and br.why == 'rescue' and GATE_ROLES[role]
+       and not SIEGE_DOWN.rescue[role]) then w = nil
     elseif lock and GATE_ROLES[role] then
       M.hold_end(K, name, 'lockdown')                                -- BUG-236: a threat ends the player's hold
       w, why = 'up', 'lockdown'
@@ -2045,6 +2048,16 @@ function M.init(K)
       for n, v in pairs(type(p.kpi.take) == 'table' and p.kpi.take or {}) do k.take[n] = int(v) end
       for _, f in ipairs(type(p.kpi.fails) == 'table' and p.kpi.fails or {}) do k.fails[#k.fails + 1] = f end
       st.kpi = k
+    end
+  end
+  -- BUG-234: a save from before the fix keeps the refused rescue's 'up' (rescue_end) want in PEACE for good (manifest_pass
+  -- resets only a lockdown's): dropped at the load, the PEACE default follows in the first pass
+  if K.mode() == 'PEACE' then
+    for name, br in pairs(st.br) do
+      if br.want == 'up' and br.why == 'rescue_end' then
+        st.br[name], dirty = nil, true
+        K.log('info', 'gate: %s stale rescue_end up want dropped at the load (PEACE): the PEACE default takes over', name)
+      end
     end
   end
   st.ex, st.winb, st.seen, st.gone, st.lost, st.hold = {}, {}, {}, {}, {}, {}

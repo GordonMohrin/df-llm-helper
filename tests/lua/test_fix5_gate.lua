@@ -20,7 +20,7 @@ local function fort(opts)
   for n, fp in pairs(FP) do
     man.bridges[n] = {role = ROLE[n], fp = fp, levers = {{LEVER[n][1], LEVER[n][2], Z}}}
   end
-  local W = SW.new{persist = {manifest = man}}
+  local W = SW.new{persist = {manifest = man, ['m.gate'] = opts.gate}}
   W.ms_per_frame = 100
   if opts.reflex then W.K.cfg.reflex = opts.reflex end
   SW.fill(W, Z, 0, 0, 63, 30, '#')
@@ -68,6 +68,7 @@ local function fort(opts)
   end)
   dfhack.job = {getWorker = function(j) return j._worker end}
   local mods = {S.military(), SW.fake('economy', {state = function() return {stock = {drink_d = 100, food_d = 100}} end})}
+  if opts.lock then mods[#mods + 1] = SW.fake('reflex', {holding = function(_, what) return what == 'gates' and opts.lock.v or nil end}) end
   package.loaded['dfllm.seal'] = nil
   mods[#mods + 1] = require('dfllm.seal')
   if opts.drill then
@@ -277,6 +278,37 @@ T.test('BUG-237: no automatic drill while an outer/inner bridge has no linked le
   local started
   for _, m in ipairs(S.modes(W)) do if m == 'PEACE>DRILL' then started = true end end
   T.ok(started, 'the drill ran: ' .. table.concat(S.modes(W), ' '))
+end)
+
+T.test('BUG-234 (review): a save from before the fix with B1 wanted up (rescue_end) in PEACE: the load drops it, B1 ' ..
+       'comes down by the PEACE default without any stranded citizen', function()
+  local W = fort{up = {B1 = true}, gate = {v = 2, br = {B1 = {want = 'up', why = 'rescue_end', since = 0}}}}
+  T.eq(W.K.mode(), 'PEACE')
+  T.ok(logged(W, 'gate: B1 stale rescue_end up want dropped at the load'), 'kern.log names it')
+  run(W, 600)
+  T.eq(up(W, 'B1'), false, 'old: the stale up want kept B1 up for good')
+  run(W, 2000)
+  T.eq(up(W, 'B1'), false, 'stays down')
+end)
+
+T.test('BUG-235 (review): a lockdown raises an outer bridge a quiet-PEACE rescue holds down; the rescue aborts',
+       function()
+  local lock = {}
+  local W = fort{up = {O1 = true}, units = {S.cit(11, 10, 15, Z)}, lock = lock}
+  W.K.cfg.decisions['D-14'] = 'up'
+  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 45000}
+  local n = 0
+  while n < 40 and up(W, 'O1') do run(W, 100); n = n + 1 end
+  T.eq(up(W, 'O1'), false, 'lowered for the rescue')
+  T.eq(W.K.mode(), 'PEACE')
+  lock.v = 'test lockdown'
+  W.move(11, 50, 18, Z)                                -- nobody on the footprint: the raise may go
+  run(W, 1200)
+  T.eq(up(W, 'O1'), true, 'the lockdown raised O1')
+  T.ok(logged(W, 'gate: O1 rescue want released, now up (lockdown)') or logged(W, 'O1 up'), 'by the lockdown')
+  local ab
+  for _, e in ipairs(evs(W, 'STRANDED')) do if e.d.phase == 'abort' then ab = e end end
+  T.ok(ab ~= nil and ab.d.peace == 1, ab and ab.msg or 'no abort')
 end)
 
 T.done()

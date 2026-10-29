@@ -25,3 +25,7 @@ unchanged. A rescue that outlives its episode into PEACE follows the PEACE rules
 ## Live check
 In PEACE with a stranded group: kern.log/events show STRANDED refused or rescue, but no 'pull B1 up' LEVER and no GATE_FAIL B1 in
 PEACE; `dfllm status` bridges B1 down within a day after a drill.
+
+Review (2026-10-29): a save from before the fix keeps gate's 'up' (rescue_end) want for B1 in PEACE for good (manifest_pass resets
+only a lockdown's want), so B1 would stay up after the reload with no stranded citizen. gate's load drops such a want in PEACE and
+names it in kern.log; the PEACE default takes over. Test: tests/lua/test_fix5_gate.lua 'BUG-234 (review)'.
