@@ -1,5 +1,31 @@
 # CHANGELOG dfpilot
 
+## Run 15 stuck builds: the refuge hatch moves off a walled-in stair level, bp.cancel removes its unbuilt pieces, the order queue is pruned and capped (BUG-313..315, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 round 2/3: the seal-first refuge hatch stood `not suspended, no builder has taken it; 1 item attached` for
+  hundreds of days in three forts (Earthboat 55,82,133 jobs 8095/146275/205434/282764, Drillchamber 89,72,137 jobs 10421/24715,
+  Inkintense 86,53,126), re-placing it did not help; every one sits on the up/down stair one level above the refuge, walls on all
+  8 sides of that level in the snapshots (BUG-313). Earthboat's `bp.cancel proj=y373s1b0` left the hatch and job 8095, the next
+  seal adopted it (Drillchamber y377 the same with 10421) (BUG-314). Drillchamber's queue held 192-194 orders, 73-95 stuck, gear
+  orders entered again every 1-2 days (28 x gear_gloves), and the mood's bag and charcoal waited 30 days behind them (BUG-315).
+- **What changed:** (1) cmd.refuge_stair / seal.refuge_stair: a head whose 8 neighbours on its level are revealed and none a tile
+  a builder stands on moves up the same stair to the first level with one (or a hatch already there): state `moved`, why `boxed`,
+  note `... hatch moved to x,y,z`; a hatch on the old head still counts, a hidden neighbour keeps the head. economy.build_state
+  names `walled in on its level` (`boxed`), runner's SEAL_STUCK why `boxed`, no BUG-274 re-place for it. (2) runner: a plain
+  `bp.cancel` removes the current stage's unbuilt buildings the project placed or adopted (one quickfort undo each, built ones
+  stay), then the project; the answer says how many. (3) economy: daily M.order_prune (stuck duplicates keep one; above
+  `orders.cap` 120 the longest stuck past `prune_days` 30; at most `prune_per_day` 30; never piece, mood-chain, coffin, slab,
+  care, drink/food or player orders; ORDER_STUCK kind `prune`); an own order at amount 0 whose job is out counts as open; mood
+  chain orders (sand, bag, charcoal, glass, thread, cloth, tanning) are made on top while a mood wants a material. Config
+  `orders.cap/prune_days/prune_per_day` (lint ranges). RULES rows SEAL_STUCK and bp.cancel edited in place.
+- **Tests (fail on 9ef2ccb):** tests/test_bug313_boxed_hatch.py (3 of 5; two guards), tests/lua/test_fix11_builders.lua (6).
+  Updated pins: tests/lua/test_seal_refuge.lua (its fixture shaft is walled in: hatch wanted on 6,6,9), tests/bp/test_bp_seal_run11.py
+  and tests/test_plan_seal_closed.py (fortcore's own shaft z3/z4 is walled in: the hatch goes on 50,65,5; the BFS still separates).
+- **Live check:** Earthboat: `bp.cancel` the stuck seal (answer `1 unbuilt piece(s) removed`, the hatch gone), `bp.place tpl=seal
+  site=S1 at=refuge` names `hatch moved to 55,82,135` and a builder takes it; Drillchamber `89,72,139`. Drillchamber kern.log
+  `order queue: N of 194 open orders removed`, `inspect orders` falling below ~150. Uncertain: that DF needs a standable tile beside
+  a building site on its level (inferred from three forts), and why the gear orders repeated (amount_left counting down while a
+  job is out is a hypothesis; the prune catches the duplicates either way).
+
 ## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
 - **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
   player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no

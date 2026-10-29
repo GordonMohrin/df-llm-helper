@@ -220,12 +220,12 @@ def test_at_refuge_puts_a_hatch_on_the_refuge_stair_head(tmp_path):
     and hatches closed, as seal's refuge flood counts them) the core no longer reaches the refuge."""
     from dfpilot.bp.topo import Graph
     save, snap = fortcore_save(tmp_path)
-    assert cmd.refuge_head(save) == "50,65,3 stair_updown"
+    assert cmd.refuge_head(save) == "50,65,5 stair_updown"   # BUG-313: z3/z4 walled in
     at, _ = cmd.seal_openings(save, "refuge")
-    assert at == "50,65,3 stair_updown"
+    assert at == "50,65,5 stair_updown"
     (pc,) = defense.seal_pieces({"at": at})
-    assert (pc["key"], pc["at"], pc["why"]) == ("H", [50, 65, 3], "50,65,3 stair_updown: hatch at 50,65,3")
-    doc = bp.emit("seal", {"at": at}, {"id": "S1", "anchor": [50, 65, 3], "rot": 0})
+    assert (pc["key"], pc["at"], pc["why"]) == ("H", [50, 65, 5], "50,65,5 stair_updown: hatch at 50,65,5")
+    doc = bp.emit("seal", {"at": at}, {"id": "S1", "anchor": [50, 65, 5], "rot": 0})
     core, refuge = (51, 65, 8), (52, 65, 2)                        # the core landing at ze, the refuge anchor
     g0 = Graph(snap, closed="+")
     assert g0.bfs([g0.idx(core)], climb=False)[0][g0.idx(refuge)]
@@ -256,7 +256,7 @@ def test_plan_facts_see_the_open_stair_head(tmp_path):
     from dfpilot import plan
     save, _ = fortcore_save(tmp_path)
     f = plan.refuge_projects(save, {})
-    assert (f["head"], f["head_open"], f["refuge_n"]) == ("50,65,3 stair_updown", True, 1)
-    seal_doc(save, "c8", "50,65,3 stair_updown")
+    assert (f["head"], f["head_open"], f["refuge_n"]) == ("50,65,5 stair_updown", True, 1)   # BUG-313
+    seal_doc(save, "c8", "50,65,5 stair_updown")
     f = plan.refuge_projects(save, {})
     assert (f["head_open"], f["refuge_n"], f["seal"]) == (False, 0, True)   # the hatch is under way

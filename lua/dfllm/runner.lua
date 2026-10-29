@@ -2293,6 +2293,7 @@ end
 -- walks R.undo = {s = stage, l = {chunk indices}, cancel = 0|1}; cancel walks back to stage 0
 local function undo(K, P)
   local R, d = R_of(K, P), doc(K, P.id)
+  if Q.remove_unbuilt(K, P, R) == 'yield' then return 'yield' end   -- BUG-314: a plain cancel's planned buildings
   local u = R.undo
   while u and d do
     if #u.l == 0 then
@@ -2733,10 +2734,66 @@ local function check_task(K, t)
   return 'done'
 end
 
+-- BUG-314 (Run 15 Earthboat y382: after `bp.cancel proj=y373s1b0` the refuge hatch's DF job 8095 stayed; the seal placed
+-- again adopted it (pre_occupied) and stood 'no builder' as before; Drillchamber y377 the same with job 10421): the cells
+-- of the project's current stage whose building it placed or adopted (R.b, R.c) is not built yet, as {x, y, z, cell text}
+-- for one quickfort undo each (the player's remove building on a planned one: its construction job goes with it). Built
+-- pieces stay; a building the project does not own is never touched
+function Q.unbuilt_cells(K, P, d, R)
+  local out = {}
+  local st = d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') or R.noid == 1 then return out end
+  local own = {}
+  for _, id in ipairs(R.b or {}) do own[id] = true end
+  for _, id in ipairs(R.c or {}) do own[id] = true end
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if not find then return out end
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      for _, t in ipairs(tl) do
+        local ok, b = pcall(find, t[1], t[2], t[3])
+        if ok and b and own[b.id] and not built(b) then
+          out[#out + 1] = {ch.pos[1] + cell[1], ch.pos[2] + cell[2], ch.pos[3] + cell[3], cell[4], b.id}
+          break
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- BUG-314: one queued removal of R.rm a call (quickfort undo of the cell); a piece built meanwhile stays. 'yield' while the
+-- quickfort budget of this slice is spent, else the number removed
+function Q.remove_unbuilt(K, P, R)
+  local n = 0
+  while type(R.rm) == 'table' and #R.rm > 0 do
+    if not qf_room() then dirty(); return 'yield' end
+    local c = table.remove(R.rm, 1)
+    local b = df.building.find(int(c[5]) or -1)
+    if b and not built(b) then
+      qf(K, {mode = 'build', data = {[0] = {[0] = {[0] = c[4]}}}, pos = {c[1], c[2], c[3]}, command = 'undo'})
+      n = n + 1
+    end
+    dirty()
+  end
+  R.rm = nil
+  if n > 0 then
+    K.log('info', '%s (%s) cancelled: %d unbuilt piece(s) removed with their construction jobs', P.id, P.tpl, n)
+  end
+  return n
+end
+
 local function cancel(K, P, with_undo)
   local R, d = R_of(K, P), doc(K, P.id)
   if not with_undo then
     if R.undo and d then return set_blocked(K, P, 'cancel') end   -- finish a breach undo, then remove
+    local rm = d and Q.unbuilt_cells(K, P, d, R) or {}             -- BUG-314: its planned buildings and their jobs go
+    if #rm > 0 then
+      R.rm = rm
+      return set_blocked(K, P, 'cancel')
+    end
     return remove(K, P)
   end
   if not d then return remove(K, P) end
@@ -3157,7 +3214,7 @@ function Q.wait_why(K, P, d)
     local w, bs = Q.piece_why(K, t)         -- BUG-044: the building and its job, who suspends it
     if w then out[#out + 1] = w end
     cls = Q.cls_of(bs)
-    if cls == 'no builder' and (int(bs.items) or 0) > 0 then
+    if (cls == 'no builder' or cls == 'boxed') and (int(bs.items) or 0) > 0 then
       out[#out + 1] = plural(int(bs.items), 'item') .. ' attached'
     end
   end
@@ -3214,12 +3271,14 @@ function Q.wait_why(K, P, d)
 end
 
 -- BUG-274: economy.build_state's answer in one word: no item (buildingplan waits for it), suspended (suspendmanager, DF),
--- no builder (a job nobody has taken), building (a builder at it), not placed; nil when unknown
+-- no builder (a job nobody has taken), boxed (BUG-313: nobody takes it, no tile beside it on its level to build from: the
+-- player cancels it, `seal at=refuge` puts the hatch one level up), building (a builder at it), not placed; nil unknown
 function Q.cls_of(bs)
   if type(bs) ~= 'table' then return nil end
   if bs.none then return 'not placed' end
   if not int(bs.job) then return nil end
   if bs.susp then return bs.who == 'buildingplan' and 'no item' or 'suspended' end
+  if not bs.work and bs.boxed then return 'boxed' end   -- BUG-313: walled in on its level, a re-place there is no help
   return bs.work and 'building' or 'no builder'
 end
 
@@ -5530,6 +5589,11 @@ M.verbs = {
     cancel(K, P, args.undo == true)
     rows(K)
     save(K)
+    local R = S.rt.p[P.id]
+    local nrm = not args.undo and type(R) == 'table' and type(R.rm) == 'table' and #R.rm or 0
+    if nrm > 0 then                                  -- BUG-314: the unbuilt pieces go first (their DF jobs with them)
+      return true, string.format('cancelling %s (%d unbuilt piece(s) removed first, their jobs with them)', P.id, nrm)
+    end
     return true, (args.undo and 'cancelling ' .. P.id .. ' (undo queued)' or 'cancelled ' .. P.id)
   end,
 }

@@ -44,10 +44,12 @@ def test_a_standing_hatch_is_a_closed_seal_not_an_error(tmp_path):
     left: list[str] = []
     docs, kept, lines = plan.place_all(save, PLAN, None, left)
     assert (docs, kept) == ([], 0)
-    assert lines == ["s0 seal@S1 left out: nothing to close (50,65,3: left out, the snapshot shows a door or hatch there "
-                     "(closed))"]
-    assert left == ["seasons[0].build[0] seal@S1: nothing to close (50,65,3: left out, the snapshot shows a door or "
-                    "hatch there (closed)); no blueprint is written"]
+    # BUG-313: fortcore's shaft z3/z4 is walled in, the hatch stands on the next level 50,65,5 (the note says why)
+    assert len(lines) == 1 and lines[0].startswith("s0 seal@S1 left out: nothing to close (refuge: the stair head 50,65,3 ")
+    assert "hatch moved to 50,65,5" in lines[0]
+    assert lines[0].endswith("50,65,5: left out, the snapshot shows a door or hatch there (closed))")
+    assert len(left) == 1 and left[0].startswith("seasons[0].build[0] seal@S1: nothing to close (refuge: the stair head")
+    assert left[0].endswith("50,65,5: left out, the snapshot shows a door or hatch there (closed)); no blueprint is written")
     assert not (save / "bp" / "y3s0b0.json").exists()
 
 
@@ -56,7 +58,7 @@ def test_an_open_refuge_head_is_still_emitted(tmp_path):
     left: list[str] = []
     docs, kept, lines = plan.place_all(save, PLAN, None, left)
     assert [d["tpl"] for d in docs] == ["seal"] and left == []
-    assert docs[0]["params"]["at"] == "50,65,3 stair_updown"
+    assert docs[0]["params"]["at"] == "50,65,5 stair_updown"   # BUG-313
 
 
 def test_a_gap_in_what_is_known_stays_an_error(tmp_path):

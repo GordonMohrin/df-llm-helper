@@ -312,6 +312,9 @@ Related: FR-xx, BUG-xx
 | [BUG-297](BUG-297-no-farm-site-after-the-soil-rule-and-no-farm-draft.md) | fixed (offline, live-untested) | high | Run 15c: no farm site after the soil rule (soil marks capped), no farm drafted | sites.py, rooms.py, snapshot.lua, plan.py |
 | [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
+| [BUG-313](BUG-313-refuge-hatch-walled-in-on-its-level-never-taken.md) | fixed (offline, live-untested) | high | Run 15: refuge hatches on a stair walled in on its level never taken; `seal at=refuge` and the trust check move the hatch up the stair, SEAL_STUCK why boxed | cmd, seal, economy, runner |
+| [BUG-314](BUG-314-bp-cancel-leaves-the-projects-df-jobs.md) | fixed (offline, live-untested) | high | Run 15 Earthboat: bp.cancel left the hatch and its DF job 8095, the next seal adopted it; a plain cancel now removes its unbuilt pieces | runner |
+| [BUG-315](BUG-315-order-queue-grows-without-a-cap.md) | mitigated (offline, live-untested): prune and cap; repeat cause a hypothesis | high | Run 15 Drillchamber: 194 orders, 73 stuck, gear made again every day; daily prune of stuck duplicates, a cap, mood orders on top | economy |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
