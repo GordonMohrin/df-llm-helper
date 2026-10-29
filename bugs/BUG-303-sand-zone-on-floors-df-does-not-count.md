@@ -15,8 +15,10 @@ CANCEL_LOOP in events.jsonl; three strange moods that wanted gems or glass died 
 1. `snapshot.lua` M.is_sand (Run 11) decided "sand" from the geology layer alone (`tile-material` GetLayerMat, SOIL_SAND), and
    the export asks it for every soil floor, where soil includes the grass materials (`SOIL_MAT` GRASS_LIGHT/DARK/DRY/DEAD, PLANT).
    A grass-grown or plant tile of a sand layer was marked sand. The snapshot of y378 lists 70,83 / 71,83 / 70,84 / 71,84 z144 as sand
-   marks on the surface level z144. DF collects sand from a sand tile; a floor whose tiletype material is grass is none (most likely
-   reason; the tiletype of those tiles could not be read offline).
+   marks on the surface level z144. DF collects sand from a sand tile; a floor whose tiletype material is grass is none. The DF wiki
+   (Sand, Grass) confirms it: grass growing over sand makes it unavailable for collection ("Need valid, active sand collection zone"
+   for a new job, "Sand vanished" for a running one); a paved road or a floor grate over bare sand stops regrowth. The tiletype of the
+   Drillchamber tiles could not be read offline.
 2. `zonelib.lua` Z.verb drew a sand zone on any revealed floor (only rock, air, water and conflicts were refused).
 3. `economy.lua` glass_plan: `M.sand_zones() > 0` meant "zone ok" for ever. The cancels came about one a day, below the 5-a-day
    CANCEL_LOOP; `Need valid ...` is no `Needs ...` reason, so needs_cancel never dropped the order; GLASS_BLOCKED knew only no_sand,
@@ -40,5 +42,6 @@ CANCEL_LOOP in events.jsonl; three strange moods that wanted gems or glass died 
 Drillchamber: within 3 game days after the update `dfllm events --type GLASS_BLOCKED` shows `sand zone invalid` with `d.aborts` >= 3,
 then kern.log `glass: sand collection zone dfllm-sand at x,y,z` on a new tile; the gamelog's `Need valid, active sand collection
 zone` count stops growing and a bag of sand appears (inspect orders: CollectSand runs). If the new zone fails too, a second
-GLASS_BLOCKED comes (a new series) and the root cause is not grass: read the tile sheet ("yellow sand"? grass?) of the new zone tile
-by hand and its `dfllm cmd inspect` tile. `zone.place type=sand` over 71,82-73,84 z144 must now be refused with `sand floors seen`.
+GLASS_BLOCKED comes (a new series). Within days of painting, grass is unlikely (the tile reader called it bare): read the tile sheet
+("yellow sand"? grass?) of the new zone tile by hand and its `dfllm cmd inspect` tile. Weeks later on an open-sky tile it can be
+grass regrowth (open: no road/grate over the zone tile; each series paints one more 1x1 zone, at most every request_days). `zone.place type=sand` over 71,82-73,84 z144 must now be refused with `sand floors seen`.
