@@ -252,6 +252,9 @@ Related: FR-xx, BUG-xx
 | [BUG-235](BUG-235-rescue-never-lowers-outer-bridges-in-peace.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the rescue never lowered an outer bridge and demanded a sealed outside even in quiet PEACE | lua/dfllm/siege.lua, lua/dfllm/gate.lua, lua/dfllm/drill.lua |
 | [BUG-236](BUG-236-player-lever-down-silently-overridden.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the player's lever down was accepted and then silently overridden | lua/dfllm/gate.lua |
 | [BUG-237](BUG-237-gate-cycles-up-down-with-drills-that-cannot-pass.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: B1 cycled up/down with automatic drills that could not pass (O1 without a lever) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-238](BUG-238-follow-two-processes-on-one-save.md) | fixed (offline, live-untested) | high | Run 15: two follow processes on one save audit every snapshot twice (AUTO_FAIL unknown snap) | dfpilot/wake |
+| [BUG-239](BUG-239-atomic-write-shared-tmp-name.md) | fixed (offline, live-untested) | low | Run 15: write_json_atomic shares one tmp name per file (WinError 2 on .follow.json) | dfpilot/files |
+| [BUG-240](BUG-240-follow-wake-limit-in-real-hours-only.md) | fixed (offline, live-untested) | high | Run 15: wake limit in real hours only; MOOD_RISK/YEAR_REVIEW held for a game year, nothing said | dfpilot/wake |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
