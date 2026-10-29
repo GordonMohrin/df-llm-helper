@@ -72,6 +72,9 @@ M.CFG = {
   -- shaft open to a cavern is plugged at once (a constructed wall on its two top stair tiles; the lower one is given
   -- up when a step of it waits plug_wait). Projects stopped as damp/water/cavern look again every `recheck`.
   lake_r = 12, lake_min = 30, plug_wait = DAY, recheck = DAY, cav_keep = 16,
+  -- BUG-129 (Run 14: a seal's walls far apart spanned the map as one audit box): boxes() names a project's tile
+  -- clusters (tiles within part_gap join) as parts, at most part_max of them
+  part_gap = {6, 6, 1}, part_max = 8,
   lake_r0 = 4,           -- BUG-033: the first wider box; lake_r only when the flood reaches its edge
   -- Run 11 (c1a14676 stood 'stalled' with its shaft open to a cavern lake): every explore shaft is looked at daily
   -- whatever its project's state, at most shaft_n per run, reading at most shaft_probe of its dug tiles for water
@@ -255,6 +258,7 @@ local function forget(id)
   for k in pairs(S.tiles) do if k:sub(1, #id + 1) == id .. '/' then S.tiles[k] = nil end end
   if S.own then S.own[id] = nil end                -- BUG-033: own_tiles cache
   S.bbox[id], S.meas[id] = nil, nil
+  if S.cl then S.cl[id] = nil end                   -- BUG-129: tile clusters
   if S.rt and S.rt.skip then S.rt.skip[id], S.rt.rty[id], S.rt.pb[id] = nil, nil, nil end   -- BUG-022 records
   if S.rt and S.rt.br then S.rt.br[id] = nil end    -- Run 11: the breach record (m.runner cav outlives the project)
   if S.rt and S.rt.dw then S.rt.dw[id] = nil end    -- Run 11: the seal doors planned as walls (door_walls)
@@ -1102,6 +1106,67 @@ function note_cavern(K, pos, why)
   K.log('info', 'cavern at %d,%d,%d (%s): explore shafts stop above z%d', x, y, z, tostring(why), z)
 end
 
+-- BUG-130 (Run 9 site96, Run 14 replay y707 site90: the fortcore stopped as breach:damp, parked for good and never
+-- re-sited): every breach stop is remembered, one entry per project with its tile, kind and template, m.runner dz =
+-- {{pos, why, proj, tpl, t}, ...} (<= br_max, newest kept), mirrored into the fort manifest as `breaches` = {{pos, why,
+-- proj, tpl}, ...}: bp.sites keeps a new fortcore away from those tiles and `plan propose` re-sites a stopped fortcore.
+-- Module fields (runner.lua sits at Lua's limit of 200 locals).
+M.BR_MAX = 32
+function M.publish_breaches(K)
+  local man, list = K.manifest(), {}
+  for i, c in ipairs(S.rt.dz) do list[i] = {pos = {c.pos[1], c.pos[2], c.pos[3]}, why = c.why, proj = c.proj, tpl = c.tpl} end
+  man.breaches = list
+  K.persist.set('manifest', man)
+end
+
+-- FR-95: a project that digs again (a breach:damp park resumed in observe mode) leaves `breaches`: plan propose does not
+-- re-site a fortcore that is digging (a later stop, heavy_aquifer, notes it again)
+function M.drop_breach(K, id)
+  if type(S.rt.dz) ~= 'table' then return end
+  for i = #S.rt.dz, 1, -1 do
+    if type(S.rt.dz[i]) == 'table' and S.rt.dz[i].proj == id then table.remove(S.rt.dz, i) end
+  end
+  M.publish_breaches(K)
+  dirty()
+end
+
+function M.note_breach(K, id, tpl, why, pos)
+  local x, y, z = int(type(pos) == 'table' and pos[1]), int(type(pos) == 'table' and pos[2]),
+                  int(type(pos) == 'table' and pos[3])
+  if not (x and y and z) or type(id) ~= 'string' then return end
+  S.rt.dz = type(S.rt.dz) == 'table' and S.rt.dz or {}
+  for i, c in ipairs(S.rt.dz) do
+    if c.proj == id then table.remove(S.rt.dz, i); break end
+  end
+  table.insert(S.rt.dz, {pos = {x, y, z}, why = trunc(tostring(why or 'damp'), 16), proj = id,
+                         tpl = trunc(tostring(tpl or '?'), 24), t = now(K)})
+  while #S.rt.dz > M.BR_MAX do table.remove(S.rt.dz, 1) end
+  M.publish_breaches(K)
+  dirty()
+end
+
+-- at boot: m.runner dz kept, the breach records of an older kernel (m.runner br) of the projects still known taken over,
+-- and the manifest's `breaches` written again when it lost them
+function M.breach_boot(K, rt, pd)
+  if type(rt.dz) ~= 'table' then rt.dz = {} end
+  local have, tpl = {}, {}
+  for _, c in ipairs(rt.dz) do if type(c) == 'table' then have[c.proj] = true end end
+  for _, P in ipairs(pd.list) do tpl[P.id] = P.tpl end
+  local ids = {}
+  for id in pairs(rt.br) do ids[#ids + 1] = id end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local r = rt.br[id]
+    -- FR-95: a project with an aquifer record (observe mode resumed it, or an aqshaft) is no stopped project to re-site
+    if not have[id] and tpl[id] and type(r) == 'table' and type(r.pos) == 'table'
+       and not (type(rt.aq) == 'table' and type(rt.aq[id]) == 'table') then
+      M.note_breach(K, id, tpl[id], r.why, r.pos)
+    end
+  end
+  local man = K.manifest().breaches
+  if #rt.dz > 0 and (type(man) ~= 'table' or #man ~= #rt.dz) then M.publish_breaches(K) end
+end
+
 -- the plug project: per piece (the lower one first: it is reached through the upper one) 'pN.free' (a hatch or door
 -- on it removed), 'pN.dig' (channel) and 'pN.wall' (a constructed wall); buildingplan waits for the material (no
 -- orders), like runner.repair
@@ -1816,6 +1881,23 @@ local KEEP_BOX = {cistern = true, bedrooms = true, tombs = true, hall = true, gu
 local function keep_box(P, d)
   S.rt.keep[P.id] = project_bbox(P.id, d)
   if KEEP_BOX[P.tpl] == 'kind' then S.rt.kk[P.id] = P.tpl end
+  S.rt.kp[P.id] = Q.tile_parts(P.id, d)                  -- BUG-129: the clusters of its tiles (nil: one)
+end
+
+-- BUG-129: the clusters of a project's tiles (all stages) when there are two or more, else nil (cached)
+function Q.tile_parts(id, d)
+  S.cl = S.cl or {}
+  local c = S.cl[id]
+  if c == nil then
+    local tl = {}
+    for si = 0, #d.stages - 1 do
+      for _, list in ipairs(stage_tiles(id, d, si)) do for _, t in ipairs(list) do tl[#tl + 1] = t end end
+    end
+    c = geom.clusters(tl, M.CFG.part_gap, M.CFG.part_max)
+    c = #c > 1 and c or false
+    S.cl[id] = c
+  end
+  return c or nil
 end
 
 -- FR-76 (Run 12 Trussroads: fortcore stage 2 "site: same" finished at once, its tiles already open in the old fort, with
@@ -1999,6 +2081,7 @@ function Q.aq_boot(K)
       if st and st.mode == 'dig' and M.AQ.observe(Q.aqx(K), P, type(b) == 'table' and b.pos or nil, 'resume') then
         P.blocked, P.since, P.chunk = '', now(K), 0
         S.rt.p[P.id] = nil
+        M.drop_breach(K, P.id)                     -- BUG-130's manifest.breaches: this core digs again, no re-site
         K.log('info', '%s (%s): breach:damp resumed in observe mode (FR-95)', P.id, P.tpl)
         dirty()
       end
@@ -2178,6 +2261,7 @@ function breach(K, P, why, pos, src, ex)
   if was then dd.was, dd.n = was, n end
   if ex then dd.state, dd.n = trunc(ex.state, 40), n or 0 end
   S.rt.br[P.id] = {why = why, pos = dd.pos, t = now(K), c = now(K)}   -- the recheck looks there first
+  M.note_breach(K, P.id, P.tpl, why, dd.pos)                              -- BUG-130: manifest.breaches
   K.emit('BREACH_STOP', 'B', breach_msg(P.id, why, src, was, n, ex and ex.state), dd)
   K.flush()
   dirty()
@@ -2206,6 +2290,7 @@ end
 local function raise(K, P, b, kind, hit, was, cnt)
   set_blocked(K, P, 'breach:' .. kind)
   b.why, b.pos = kind, hit and {hit[1], hit[2], hit[3]} or b.pos
+  M.note_breach(K, P.id, P.tpl, kind, b.pos)                               -- BUG-130
   local dd = {proj = P.id, why = kind, src = 'recheck', was = was, n = cnt or 0}
   if hit then dd.pos = {hit[1], hit[2], hit[3]} end
   K.emit('BREACH_STOP', 'B', breach_msg(P.id, kind, 'recheck', was, cnt), dd)
@@ -2620,12 +2705,16 @@ end
 -- free stone is below what the rock orders and walls want (stock.rock < rock_need), a paused project in a dig stage
 -- digs on: its boulders become the seal's walls.
 -- The rebuild policy runs (PEACE/RECOVERY; the mode's class gating still holds) seal, tombs, supply, beds, repair, mood
--- and the depot; the rest pauses.
+-- and the depot; the rest pauses. BUG-133 (Run 14 y707: pop 8, the masons', carpenters' and craftsdwarfs' shops lost, the
+-- rebuild policy paused the workshops project while 41 ghosts waited for slabs and 69 bodies for coffins): a workshops
+-- project of Masons and/or Carpenters only (`tomb_shops`: every other moodable type skipped, nothing added; follow's
+-- why=slabs / why=mandatory placement) runs too while care reports ghosts, old bodies or short coffins.
 local SUPPLY = {farms = true, cistern = true, stockroom = true, refuge_drink = true}     -- FR-69: the refuge's store
 local BEDS = {bedrooms = true, refuge_beds = true}
 local FOOD_SHOPS = {Still = true, Kitchen = true, Butchers = true, Fishery = true}
 local SEAL_PAUSES = {work = true, beds = true, supply = true}
 local REBUILD_RUNS = {seal = true, tombs = true, supply = true, beds = true, repair = true, depot = true, mood = true}
+SEAL_PAUSES.tomb_shops = true                    -- BUG-133: the tomb shops are work for the seal and care first
 local PIECE_NAME = {d = 'door', H = 'hatch', Cw = 'wall', W = 'grate', G = 'grate', B = 'bars', h = 'channel',
                     p = 'gather', t = 'chop'}
 
@@ -2647,11 +2736,36 @@ local function food_shops(d)
   return true
 end
 
+-- BUG-133: a workshops project of the shops the dead need only (Masons: slabs and stone coffins, Carpenters: wood coffins)
+Q.TOMB_SHOPS = {Masons = true, Carpenters = true}
+function Q.tomb_shops(d)
+  local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
+  if #words(p.add) > 0 then return false end
+  local skip, n = {}, 0
+  for _, s in ipairs(words(p.skip)) do skip[s] = true end
+  for _, m in ipairs(M.MOODABLE) do
+    if not skip[m] then
+      if not Q.TOMB_SHOPS[m] then return false end
+      n = n + 1
+    end
+  end
+  return n > 0
+end
+
+-- BUG-133: what care reports for the dead (ghosts, bodies unburied too long, short coffins): the tomb shops are needed
+function Q.dead_need(K)
+  local cv = K.view().care
+  if type(cv) ~= 'table' then return false end
+  local cof = type(cv.coffins) == 'table' and cv.coffins or {}
+  return (int(cv.ghosts) or 0) > 0 or (int(cv.corpses_old) or 0) > 0 or (int(cof.short) or 0) > 0
+end
+
 local function kind_of(P, d)
   local t = P.tpl
   if SEALS[t] then return 'seal' end
   if t == 'tombs' or t == 'depot' or t == 'explore' then return t end   -- DECISIONS 4: the ore search never rests
   if SUPPLY[t] or (t == 'workshops' and food_shops(d)) then return 'supply' end
+  if t == 'workshops' and Q.tomb_shops(d) then return 'tomb_shops' end
   if BEDS[t] then return 'beds' end
   if t == 'repair' then
     local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
@@ -2958,7 +3072,7 @@ end
 -- The first live hospital project that is not halted leads. Its progress is watched like a seal's (state m.runner cf = {id,
 -- sig, t, st}): no stage, chunk or percent change for care_first.stuck_days latches st = 1, the others run again (kern.log
 -- warns once) until the hospital moves; the clock waits while the mode is not PEACE. Returns {id, why} or nil
-Q.CARE_PAUSES = {work = true, beds = true}
+Q.CARE_PAUSES = {work = true, beds = true, tomb_shops = true}
 function Q.care_lead(K, c, t)
   local cf = c.care
   local w = K.view().water
@@ -3078,7 +3192,11 @@ local function focus(K)
     dirty()
     K.log('info', 'rebuild over: pop %d >= %d: every project runs again', cit, c.off)
   end
-  if type(S.rt.rb) == 'table' then f.rb = {pop = cit or int(S.rt.rb.pop) or 0, lo = c.pop, hi = c.off} end
+  if type(S.rt.rb) == 'table' then
+    f.rb = {pop = cit or int(S.rt.rb.pop) or 0, lo = c.pop, hi = c.off}
+    local okd, dead = pcall(Q.dead_need, K)           -- BUG-133: the masons' and carpenters' shops for the dead
+    f.dead = okd and dead == true
+  end
   return f
 end
 
@@ -3191,7 +3309,7 @@ local function paused(K, P, d)
   if f.care and not f.care_stuck and f.care ~= P.id and m == 'PEACE' and Q.CARE_PAUSES[k] then
     return 'care ' .. f.care
   end
-  if f.rb and (m == 'PEACE' or m == 'RECOVERY') and not REBUILD_RUNS[k] then
+  if f.rb and (m == 'PEACE' or m == 'RECOVERY') and not REBUILD_RUNS[k] and not (k == 'tomb_shops' and f.dead) then
     return string.format('rebuild pop %d<%d', f.rb.pop, f.rb.lo)
   end
 end
@@ -4348,6 +4466,7 @@ function M.init(K)
   rt.sw = obj(rt.sw)                                                 -- BUG-044: stuck seal doors replaced by walls
   rt.so = obj(rt.so)                                                 -- BUG-044: door/hatch order items per seal project
   rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
+  rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box
   rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
   rt.aq = obj(rt.aq)                                                 -- FR-95: aquifer shafts and observe mode
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
@@ -4366,6 +4485,7 @@ function M.init(K)
     end
   end
   if #rt.cz > 0 and man_cav ~= #rt.cz then publish_caverns(K) end
+  M.breach_boot(K, rt, pd)                                           -- BUG-130: breach tiles of an older kernel
   -- 'dig_lost' is no safety stop (damp/warm/water are 'breach:*'): every boot retries such projects once
   for _, P in ipairs(pd.list) do
     if P.blocked == 'dig_lost' then
@@ -4488,16 +4608,17 @@ function M.queue(K)
                        table.concat(names, ', ')), data
 end
 
--- public (live L2, BUG-043): the boxes of the projects the audit snapshot holds, named: {{b, id, tpl}}: the projects
--- not done yet and the kept boxes of finished ones (KEEP_BOX; a kept seal, plug, repair or explore by m.runner kk,
--- else the list's template or 'done'). snapshot's default audit box is made of them (an explore as a column part)
+-- public (live L2, BUG-043): the boxes of the projects the audit snapshot holds, named: {{b, id, tpl, parts?, done?}}:
+-- the projects not done yet and the kept boxes of finished ones (KEEP_BOX; a kept seal, plug, repair or explore by
+-- m.runner kk, else the list's template or 'done'; done = true). snapshot's default audit box is made of them (an
+-- explore as a column part). BUG-129: parts = the clusters of its tiles when they lie apart (m.runner kp for a kept one)
 function M.boxes(K)
   local r, tpl = {}, {}
   for _, P in ipairs(S.pd.list) do
     tpl[P.id] = P.tpl
     if P.done ~= 1 then
       local d = doc(K, P.id)
-      if d then r[#r + 1] = {b = project_bbox(P.id, d), id = P.id, tpl = P.tpl} end
+      if d then r[#r + 1] = {b = project_bbox(P.id, d), id = P.id, tpl = P.tpl, parts = Q.tile_parts(P.id, d)} end
     elseif KEEP_BOX[P.tpl] and not S.rt.keep[P.id] then   -- finished before the box was kept: its bp file
       local d = read_bp(K, P.id)
       if d and not check_doc(d, P.tpl) then keep_box(P, d); forget(P.id); dirty() end
@@ -4507,7 +4628,7 @@ function M.boxes(K)
   for id in pairs(S.rt.keep) do ids[#ids + 1] = id end
   table.sort(ids)
   for _, id in ipairs(ids) do
-    r[#r + 1] = {b = S.rt.keep[id], id = id, tpl = S.rt.kk[id] or tpl[id] or 'done'}
+    r[#r + 1] = {b = S.rt.keep[id], id = id, tpl = S.rt.kk[id] or tpl[id] or 'done', parts = S.rt.kp[id], done = true}
   end
   return r
 end

@@ -1089,12 +1089,15 @@ local function impls(state)
   -- the citizens' walk group near the mines (act reads no tiles) and restricts the pile to picks and axes afterwards
   -- (stockpiles import). The haulers fill it; nothing is moved by the kernel. Returns ok, stockpiles designated (0 =
   -- quickfort skipped the tiles: refused).
-  function I.tool_pile(pos, w, h)
+  function I.tool_pile(pos, w, h, take)
     local x, y, z = xyz(pos)
     x, y, z = int(x), int(y), int(z)
     if not (x and y and z) then return false, 'pos must be {x,y,z}' end
     w, h = math.max(1, math.min(int(w) or 3, 5)), math.max(1, math.min(int(h) or 2, 5))
-    local cell = string.format('p{name=dfllm-tools}(%dx%d)', w, h)
+    -- BUG-128: no bins (the stockpile sheet's bin count 0, quickfort `bins=0`); `take` = the stockpile the tools sit in
+    -- (the sheet's "take from" link, quickfort `take_from=<building id>`): DF does not re-haul stored items otherwise
+    local tk = int(take)
+    local cell = string.format('p{name=dfllm-tools bins=0%s}(%dx%d)', tk and tk >= 0 and (' take_from=' .. tk) or '', w, h)
     local ok, stats = I.quickfort({mode = 'place', data = {[0] = {[0] = {[0] = cell}}}, pos = {x, y, z}})
     if not ok then return false, stats end
     local n = type(stats) == 'table' and int(stats.place_designated) or nil
@@ -1701,6 +1704,35 @@ local function impls(state)
     end
     item.flags[flag] = on and true or false
     return true
+  end
+
+  -- BUG-133 (Run 14: ghosts 0 -> 49, no memorial ever placed): Build > Furniture > Slab with the engraved slab chosen in
+  -- the item list: one planned Slab building on the tile with exactly that item (dfhack.buildings.constructBuilding with
+  -- `items`, as buildingplan and quickfort make a planned building; the builder fetches the slab and builds it). The
+  -- item list offers only a slab the player could pick: a SLAB item on the ground (not in a job, a building, an inventory,
+  -- a merchant's or garbage); a forbidden one is unforbidden first, as its item sheet toggle does (the list shows
+  -- forbidden items too). A slab nobody can walk to from the tile is refused (the item list greys it out). The tile is
+  -- the game's to judge (constructBuilding refuses a wall, a building or an unsuitable tile). Returns ok, building id.
+  local SLAB_SKIP = {'in_job', 'in_building', 'in_inventory', 'trader', 'removed', 'garbage_collect', 'construction',
+                     'hostile', 'spider_web'}
+  function I.slab_place(item_id, x, y, z)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'x, y, z required' end
+    local it = df.item.find(int(item_id) or -1)
+    if not it then return false, 'no item ' .. tostring(item_id) end
+    if it:getType() ~= df.item_type.SLAB then return false, 'not a slab' end
+    for _, f in ipairs(SLAB_SKIP) do
+      local ok, on = pcall(function() return it.flags[f] end)
+      if ok and on == true then return false, 'the slab is ' .. f:gsub('_', ' ') end
+    end
+    local ix, iy, iz = dfhack.items.getPosition(it)
+    if not ix then return false, 'the slab has no position' end
+    local okw, walk = pcall(dfhack.maps.canWalkBetween, xyz2pos(ix, iy, iz), xyz2pos(x, y, z))
+    if not (okw and walk) then return false, 'not reachable from the tile' end
+    if it.flags.forbid then it.flags.forbid = false end
+    local b, err = dfhack.buildings.constructBuilding{type = df.building_type.Slab, x = x, y = y, z = z, items = {it}}
+    if not b then return false, 'the game refused the slab here: ' .. trim(tostring(err or 'no building'), 80) end
+    return true, b.id
   end
 
   -- assign a unit to a pit/pond zone exactly like DFHack's assign screen (plugins/zone.lua:960-968)

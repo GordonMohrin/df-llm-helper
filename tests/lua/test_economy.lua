@@ -636,6 +636,7 @@ T.test('tool details: miners follow the dig backlog (min 2, max 6 from pop 20), 
   days(W2, 1)
   T.eq(#members(ctl2, 'Miners'), 3, 'pop 22, 400/40 = 10 > max 6, but only 3 usable picks')
   local W3, ctl3 = tool_world{cit = 22, miners = {5}, backlog = 400, picks = 6}
+  W3.K.cfg.baseline.economy.tools.keep_days = 0          -- BUG-128's minimum stay off: the shrink order is tested
   days(W3, 1)
   T.eq(#members(ctl3, 'Miners'), 6, 'max 6')
   ctl3.backlog = 0
@@ -664,6 +665,7 @@ T.test('tool details: woodcutters by log stock, hunters only in a famine, one to
   T.eq(members(ctl, 'Woodcutters'), {1, 5, 9}, 'wood 30 < 60: two cutters besides the miner, best skill first')
   T.eq(members(ctl, 'Hunters'), {}, 'no famine: no hunters')
   local W2, ctl2 = tool_world{cit = 12, wood = 30}
+  W2.K.cfg.baseline.economy.tools.keep_days = 0          -- BUG-128's minimum stay off: the shrink order is tested
   days(W2, 1)
   T.eq(#members(ctl2, 'Woodcutters'), 2)
   for _ = 1, 200 do F.item(W2, 'WOOD', {}) end
@@ -700,6 +702,7 @@ T.test('tool details: shrinking keeps the best skill, also a noble member (live 
   local W, ctl = tool_world{cit = 22, backlog = 400, setup = function(W)
     dfhack.units.getNoblePositions = function(u) return u._m.noble and {{position = {code = 'BOOKKEEPER'}}} or nil end
   end}
+  W.K.cfg.baseline.economy.tools.keep_days = 0          -- BUG-128's minimum stay off: the shrink order is tested
   days(W, 1)
   T.eq(members(ctl, 'Miners'), {1, 5, 7}, 'three picks: the two skilled and the first unskilled one')
   W.unit(5)._m.noble = true                     -- skill 10, the best miner, appointed meanwhile

@@ -45,6 +45,7 @@ local function world(opts)
   end
   W.set_census('u', F.census_u(ids))
   W.load({name = 'runner', every = {ticks = 600}, dig_backlog = function() return 0 end,
+          pending = function(K, tpl) return (opts.pending or {})[tpl] or 0 end,
           state = function() return {phase = ctl.phase} end})
   W.load({name = 'care', every = {ticks = 1200},
           state = function() return {care = {stressed_pct = 0, naked = 0, ghosts = ctl.ghosts, corpses_old = 0,
@@ -173,8 +174,8 @@ T.test('BUG-061: 31 EngraveSlab orders and no unengraved slab: all removed (name
   T.eq(#ids_of('ConstructDoor'), 1, 'the door order stays')
   local cs = acts(W, 'workorder', 'dfllm:slab')
   T.eq(#cs, 1)
-  T.eq({cs[1].args[1].job, cs[1].args[1].amount_total, cs[1].args[1].material}, {'ConstructSlab', 5, 'INORGANIC'},
-       'min(restock_cap 5, max(6 ghosts, 31 orders))')
+  T.eq({cs[1].args[1].job, cs[1].args[1].amount_total, cs[1].args[1].material}, {'ConstructSlab', 6, 'INORGANIC'},
+       'BUG-133: cap min(6 ghosts, restock_cap 20), so min(6, max(6 ghosts, 31 orders))')
   T.ok(logged(W, 'EngraveSlab: 31 orders, 0 unengraved slabs (0 in jobs, 0 held), 6 ghosts'), 'the log line names the pass')
   T.ok(logged(W, 'orders 1,2,3,4,5,6,7,8,9,10,11,12 +19 removed, 0 kept'), 'and the orders')
   local ev = stuck(W, 'EngraveSlab')
@@ -696,6 +697,92 @@ T.test('BUG-078: order.add knows EngraveSlab: it needs the figure (hf), one slab
   T.eq(r.ok, true, r.msg)
   T.eq(engraved_for(), {6001})
   T.eq(#acts(W, 'workorder', 'dfllm:cmd'), 0, 'not through the workorder command (it knows no figure)')
+end)
+
+---------------------------------------------------------------- BUG-133 (Run 14 region2-site90: ghosts 0 -> 49)
+-- a Slab building holding the item: built (stands) or planned (its build job holds the slab)
+local function slab_building(W, it, built)
+  local b = F.building(W, 'SLAB', {_st = built and 1 or 0})
+  b.getBuildStage = function(self) return self._st end
+  b.getMaxBuildStage = function() return 1 end
+  b.contained_items = kmock.vec{{item = it, use_mode = 2}}
+  if built then it.flags.in_building = true else it.flags.in_job = true end
+  return b
+end
+
+T.test('BUG-133: OF.slabs tells the memorials apart: placed (a built Slab building), build (a planned one), loose', function()
+  world{setup = function(W)
+    F.item(W, 'SLAB', {engraving_type = 0, topic = 6001})
+    slab_building(W, F.item(W, 'SLAB', {engraving_type = 0, topic = 6002}), true)
+    slab_building(W, F.item(W, 'SLAB', {engraving_type = 0, topic = 6003}), false)
+    F.item(W, 'SLAB', {engraving_type = 0, topic = 6004, flags = {in_building = true}})      -- built in, no building read
+  end}
+  local s = require('dfllm.orderfix').slabs()
+  T.eq({s.memorial, s.loose[6001] ~= nil, s.placed[6002] ~= nil, s.build[6003] ~= nil, s.placed[6004] ~= nil},
+       {4, true, true, true, true})
+  T.eq({s.placed[6001], s.loose[6002], s.loose[6003]}, {nil, nil, nil})
+  T.ok(s.topics[6001] and s.topics[6002] and s.topics[6003], 'topics: every memorial, as before')
+end)
+
+T.test('BUG-133: restock_cap is min(ghosts, 20): 25 ghosts and no blank slab order 20, 8 ghosts 8 (old: 5)', function()
+  local W = world{ghosts = 25, boulders = 60}
+  days(W, 1)
+  local cs = acts(W, 'workorder', 'dfllm:slab')
+  T.eq(#cs, 1)
+  T.eq(cs[1].args[1].amount_total, 20)
+  local W2 = world{ghosts = 8, boulders = 60}
+  days(W2, 1)
+  T.eq(acts(W2, 'workorder', 'dfllm:slab')[1].args[1].amount_total, 8)
+end)
+
+T.test('BUG-133: a ghost with a memorial (loose, in a build job, placed) or an order wants no blank slab; only a placed ' ..
+       'or building one serves it, a loose one gets no second order', function()
+  local W, ctl = ghost_world{n = 4, slabs = {blank = 0}, setup = function(W)
+    F.item(W, 'SLAB', {engraving_type = 0, topic = 6001})                               -- loose
+    slab_building(W, F.item(W, 'SLAB', {engraving_type = 0, topic = 6002}), true)      -- placed
+    slab_building(W, F.item(W, 'SLAB', {engraving_type = 0, topic = 6003}), false)     -- in a build job
+  end}
+  gdays(W, ctl, 6)
+  T.eq(engraved_for(), {}, 'no order: ghost 4 waits for a blank slab first, 1-3 have their memorial')
+  local s = W.inbox('inspect', {what = 'orders'}).data.slabs
+  T.eq({s.served, s.loose, s.gneed}, {2, 1, 1})
+  local cs = acts(W, 'workorder', 'dfllm:slab')
+  T.eq(#cs, 1)
+  T.eq(cs[1].args[1].amount_total, 1, 'one blank slab: only ghost 4 wants one')
+end)
+
+local function slabreq(W)
+  local r = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.why == 'slabs' then r[#r + 1] = e end end
+  return r
+end
+
+T.test('BUG-133: no mason\'s workshop: kern.log says why (once), PROJECT_REQUEST workshops why=slabs types=[Masons], ' ..
+       'again only after request_days; none without ghosts or with the shop', function()
+  local W = world{ghosts = 3, boulders = 40, shops = {'Carpenters'}}
+  days(W, 1)
+  local ev = slabreq(W)
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.tpl, ev[1].d.why, ev[1].d.types, ev[1].d.n}, {'workshops', 'slabs', {'Masons'}, 1})
+  T.ok(logged(W, 'slabs: no ConstructSlab for 3 ghosts'), 'the reason in kern.log')
+  T.ok(logged(W, ': no Masons'))
+  days(W, 5)
+  local n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('slabs: no ConstructSlab', 1, true) then n = n + 1 end end
+  T.eq(n, 1, 'once per reason within the cadence window')
+  T.eq(#slabreq(W), 1, 'request_days 14')
+  days(W, 10)
+  T.eq(#slabreq(W), 2)
+  local W2 = world{ghosts = 0, boulders = 40, shops = {'Carpenters'}}
+  days(W2, 2)
+  T.eq(#slabreq(W2), 0, 'no ghost')
+  local W3 = world{ghosts = 3, boulders = 40}
+  days(W3, 2)
+  T.eq(#slabreq(W3), 0, 'the masons stand')
+  -- review: a workshops project already queued (paused by the rebuild policy) is not asked for again
+  local W4 = world{ghosts = 3, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 1}}
+  days(W4, 2)
+  T.eq(#slabreq(W4), 0, 'a workshops project is queued')
 end)
 
 T.done()

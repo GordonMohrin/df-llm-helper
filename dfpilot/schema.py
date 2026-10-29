@@ -91,6 +91,7 @@ ACT = {
     "work_detail_prune": ["economy"],
     "item_flag": ["care", "water", "economy", "military"],
     "zone_assign": ["care"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
+    "slab_place": ["care"],                        # BUG-133: Build > Furniture > Slab with a ghost's engraved slab
     "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
 }
@@ -485,7 +486,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
     # BUG-105: unreach = of the far bodies, those on a tile nobody can path to (corpse_unreachable, not in old)
-    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i unreach:i")),
+    # BUG-133: slabs = the memorial slab state of each listed unit (none | order | loose | build | placed | nohf), mem = the
+    # count per state over every ghost ("none 3, loose 1, placed 2")
+    "GHOSTS": ("A", "care", _d(opt="ghosts:i corpses:i old:i units:ia causes:sa far:i unreach:i slabs:sa mem:s")),
     # BUG-062 (Run 14: 163, then 284 of 287 tomb zones closed to citizens): closed = zones found closed, free = of them
     # unassigned (usable: over a usable coffin), owned = held by a dead citizen, inactive = switched off; opened = what
     # care opened, left = usable ones still closed; again_free / again_owned = zones care opened that are closed again
@@ -589,9 +592,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # tool2, alert, burrow, walk, jobs, pair, flag, pool, upair, fetch, pending, none), picks/units = compact records, civ =
     # the civ alert's burrows, ww = DF's work tool pairs
     # BUG-053: forbidden / off_group / owned (population level) join the keys; pile = the tool pile's state
+    # BUG-128: src = the stockpile the tools sit in, g = the guards that applied (kept members, skipped patients/doctors,
+    # a fresh request not pending, loose pairs as fetch, the stale cap, the pile's source)
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "
-                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s tell:s care:s")),
+                                                               "bk:s picks:sa units:sa civ:i ww:i pile:s tell:s care:s src:i g:s")),
     # BUG-027: a SIEGE/BREACH raise went ahead onto units on or next to the footprint (a hostile within force_near)
     "GATE_FORCED": ("A", "gate", _d("bridge:s", "units:ia hostile:i pos:p job:i")),
     # BUG-027: a unit died on or next to a bridge just pulled or moving (gate's move records, dfllm.deaths.bridge)
@@ -774,8 +779,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =
-    # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`)
-    "SNAPSHOT_READY": ("C", "snapshot", _d("id:s path:s", "purpose:s margin:s cols:i out:i first:s")),
+    # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`); BUG-129: regions =
+    # the parts of an audit box exported as the fort core plus far parts, drop/dropped = the far pieces it dropped (their
+    # tiles count as outside, no coverage fail)
+    "SNAPSHOT_READY": ("C", "snapshot", _d("id:s path:s",
+                                           "purpose:s margin:s cols:i out:i first:s regions:i drop:i dropped:s")),
     "CMD": ("C", "kern", _d("id:s verb:s ok:f")),
     "BOOT": ("C", "kern", _d(opt="save:s v:i boots:i")),
     "UNLOAD": ("C", "kern", _d()),
@@ -857,6 +865,10 @@ VERB_ARGS: dict[str, Obj] = {
     "view": Obj(opt={"target": VIEW_TARGET, "follow": Bool(), "ttl_s": Int(1, 3600), "why": Str(maxbytes=200)}),
     # FR-78 (Run 14 note 65): a civzone of `type` in `bbox` (one z level) through quickfort's zone mode
     "zone.place": Obj(req={"type": Str(enum=ZONE_TYPES), "bbox": BBOX}, opt={"name": Str(r"^[A-Za-z0-9_-]{1,24}$")}),
+    # BUG-131 (Run 14: an old zone outside the core kept R0 hospital_out red the whole run): the zones screen's remove for
+    # one hospital zone outside Kern+/Tiefe+; refused while a patient lies in it and, without approve:true (the player's
+    # word), while no finished hospital (a zone with a bed) stands inside
+    "hospital.retire": Obj(req={"zone": NAT}, opt={"approve": Bool()}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -880,6 +892,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "squad.add": ("military", SQUAD_MODES, False), "squad.uniform": ("military", SQUAD_MODES, False),
     "zone.place": ("runner", SQUAD_MODES, False),
     "view": ("arbiter", None, False),      # FR-88: modes are the verb's own rule (a fight needs by=gordon)
+    "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
@@ -1085,7 +1098,11 @@ STATE = Obj(
                       # BUG-036: hospital zones with tiles outside Kern+ and the refuge (readiness R0 hospital_out);
                       # BUG-040: src_l = a label per src ('well 19098 in Kern+': kind, id, the burrow it is on)
                       # BUG-106: gaps = the tokens of the hospital's gaps (no_table, no_thread, ...), the first eight
-                      opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8)})})
+                      # BUG-131: hout = the first blocking hospital zone outside the core (z id, at its centre, ok 1 = a
+                      # finished hospital inside: hospital.retire needs no approve, pat = patients lying in it); a zone
+                      # outside that is idle or superseded by a finished hospital inside is not counted in hosp_out
+                      opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8),
+                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT})})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
@@ -1158,6 +1175,9 @@ MANIFEST = named("manifest", Obj(
          # FR-95: levels (z) seen damp or wet on revealed tiles (aqshaft levels, observe mode's damp reports): bp sites
          # keeps rooms off them and off the level below them (shafts may pass)
          "aquifer_levels": Arr(INT, hi=64),
+         # BUG-130: every breach stop (BREACH_STOP), one per project (the runner's m.runner dz, newest kept): its tile,
+         # kind, project and template; the fortcore ranking keeps a new fortcore away from them, plan propose re-sites
+         "breaches": Arr(Obj(req={"pos": POS, "why": Str(maxbytes=16)}, opt={"proj": ID, "tpl": Str(maxbytes=24)}), hi=32),
          "pit": POS, "depot": POS}))
 
 # ---------------------------------------------------------------- blueprint project

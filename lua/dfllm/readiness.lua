@@ -1,6 +1,6 @@
 -- readiness (WP6): levels R0-R3 (DESIGN §5.4) and the ONLY max-pop writer (act.popcap ->
 -- `pop-control set max-pop N`, pop-control.lua:52-63). Growth is earned:
---   R0  cap 55
+--   R0  cap 100 (Gordon's D-01 = B, 2026-10-24; was 55; option A plans still say 55 through plan.policy.pop_ceiling)
 --   R1  "sealed": worst-case audit passes (inbox `audit` from bp.topo.audit), Kern+ and Tiefe+ exist,
 --       an outer and an inner bridge exist and every manifest bridge has 2 linked levers
 --   R2  R1 + a drill passed <= 100,800 ticks ago (and after the last siege), soldiers >= D-12 share
@@ -20,7 +20,8 @@
 -- lost tiles held a well or the refuge, seal.burrow_guard; the kernel paints them again), hospital_out (BUG-036, Run 11
 -- siege 9: a hospital
 -- zone with tiles outside Kern+ and the refuge by water's state hosp_out; its lying patients cannot walk to the refuge),
--- no_outer, no_inner (no manifest bridge of that role), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
+-- no_outer, no_inner (no manifest bridge of that role; BUG-130: a wall + door is no gate, it clears open_perimeter
+-- only, and a fortcore parked on a breach is re-sited by plan propose, never counted), bridge:<B> (gate does not know it), levers:<B> (< 2 linked),
 -- lost:<B> (BUG-030 rebuild policy, BUG-048: a bridge the perimeter keeper replaces by a wall + door after
 -- perimeter.stop_after losses to building destroyers, seal.lost_gates; it stands for bridge:<B> and levers:<B> until the
 -- closure stands: the kernel queues it, no question), refuge_trust (BUG-049: seal.refuge_trust says the refuge is
@@ -607,7 +608,8 @@ end
 -- readiness ceiling for a level and the binding limit
 function M.ceiling(K, lvl)
   local c, why = M.CAPS[lvl] or M.CAPS[0], 'R' .. lvl
-  if lvl == 2 then c = math.min(c, M.SIEGE_TRIGGER - 5) end
+  -- BUG-132: the siege-trigger ceiling of R2 never falls below the R1 cap (R0..R2 100: reaching R2 froze the cap at 75)
+  if lvl == 2 then c = math.max(math.min(M.CAPS[1] or c, c), math.min(c, M.SIEGE_TRIGGER - 5)) end
   local pc = plan_num(K, 'policy', 'pop_ceiling', nil)
   if pc and pc < c then c, why = pc, 'plan' end
   local ib = inbox_cap(K)
@@ -748,7 +750,10 @@ M.on['EV:SNAPSHOT_READY'] = function(K, ev)
   local list = rt.snaps
   list[#list + 1] = d.id
   rt.cov[d.id] = {margin = type(d.margin) == 'string' and d.margin or nil, cols = int(d.cols) or 0,
-                  out = int(d.out) or 0, first = type(d.first) == 'string' and d.first or nil}
+                  out = int(d.out) or 0, first = type(d.first) == 'string' and d.first or nil,
+                  -- BUG-129: a region box: its parts and the far pieces it dropped (their tiles count as outside)
+                  regions = int(d.regions) or 0, drop = int(d.drop) or 0,
+                  dropped = type(d.dropped) == 'string' and d.dropped or nil}
   while #list > M.SNAPS_KEPT do rt.cov[table.remove(list, 1)] = nil end
 end
 
@@ -764,14 +769,19 @@ local function take_snap(id)
   return false
 end
 
--- BUG-043: 'margin 8,8,1, 2 shafts' / 'out 3: explore y451s0b0' (state ready.audit.cov), '' for a full default box
+-- BUG-043: 'margin 8,8,1, 2 shafts' / 'out 3: explore y451s0b0' (state ready.audit.cov), '' for a full default box;
+-- BUG-129: 'drop 1: seal c1a14d660b9fb1de01' first, '7 regions'; a later item only when it fits whole
 local function cov_text(c)
   if type(c) ~= 'table' then return '' end
   local t = {}
   if (c.out or 0) > 0 then t[#t + 1] = string.format('out %d: %s', c.out, tostring(c.first)) end
+  if (c.drop or 0) > 0 then t[#t + 1] = string.format('drop %d: %s', c.drop, tostring(c.dropped)) end
   if c.margin then t[#t + 1] = 'margin ' .. c.margin end
   if (c.cols or 0) > 0 then t[#t + 1] = string.format('%d shaft%s', c.cols, c.cols == 1 and '' or 's') end
-  return cut(table.concat(t, ', '), 40)
+  if (c.regions or 0) > 0 then t[#t + 1] = string.format('%d region%s', c.regions, c.regions == 1 and '' or 's') end
+  local s = t[1] and cut(t[1], 40) or ''
+  for i = 2, #t do if #s + 2 + #t[i] <= 40 then s = s .. ', ' .. t[i] end end
+  return s
 end
 
 M.verbs.audit = function(K, args, cmd)

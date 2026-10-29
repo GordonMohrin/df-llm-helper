@@ -37,9 +37,133 @@
   (DFHack warmdamp overlay). Place `{"tpl":"aqshaft","site":"S1","p":{"x":50,"y":42,"top":127}}` and watch: one level designated at a time,
   `inspect` m.runner aq (levels, samples), smoothing jobs at priority 1 beside the stair, AQ_LEVEL_SEALED then AQ_PASS_DONE; a level that goes
   4/7 or keeps rising gives AQ_HEAVY and a CAVERN_PLUG. Read on revealed walls whether `aq` matches the two-drip icon.
+- **Merged with BUG-130 (review):** a fortcore parked at breach:damp that the boot resumes in observe mode leaves the manifest's
+  `breaches` (runner `drop_breach`; `breach_boot` skips a project with an `aq` record) and `plan.core_breaches` drops a core whose newest
+  BREACH_STOP/AQ_OBSERVE is AQ_OBSERVE, so `plan propose` does not re-site (a second fortcore) a core that digs again; a later stop
+  (heavy_aquifer, or the old stop after `redig`) counts again. Tests: tests/lua/test_runner_breaches.lua (1 new; its two BUG-130 tests run
+  the legacy stop with `aqshaft.CFG.on = false`), tests/test_fr95_aquifer.py (1 new).
 - **Not decided offline:** whether a smoothed aquifer wall really stops seeping in 53.16 (research: medium-high; Run 2 z130 stayed dry); whether
   DF accepts a constructed wall on a soil arm with 1-2/7 water; the exact fill speed of a light aquifer against the 300-tick samples (a light
   aquifer filling faster than the seal could read as rising: the rise needs 3 wet samples); the vanilla standing order's field.
+
+## Big forts are audited as regions instead of being refused (BUG-129, 2026-10-28, BUG-043 follow-up; offline, live-untested)
+- **Why:** Run 14 (region2-site90): `audit snapshot refused: bbox 190x192x45 = 1641600 tiles > 400000 at margin 0,0,0 (x 0-189 y 0-191 z 90-134;
+  stretched most by seal c1a14d660b9fb1de01 (+2 more) at z90 ...); file box ... > 1500000`; audit_old/audit_fail held readiness at R0 for ~190
+  game years. The fort's own geometry fits (298,908 tiles at 8,8,1); finished seals 26 levels down and a seal box over the whole map width
+  stretched the one default box, and the offered way out (`bp.cancel` of a finished seal) is refused by the runner.
+- **What changed:** (1) snapshot.lua `M.regions`: an audit box that fits at no margin as one box becomes the fort core (manifest geometry, first
+  margin step that drops nothing) plus every runner piece outside it as parts of its own (tile clusters, else its box, + `col_margin`), nearest
+  first (past `parts_max` a part joins the far part it grows least); a piece whose parts break `max_tiles` or `grid_max` is dropped and named (reply/SNAPSHOT_READY `N regions, drops N far
+  pieces: <first> (done; its tiles count as outside | bp.cancel <proj> if it can go)`, d `regions`/`drop`/`dropped`); only the core alone over
+  the cap is refused (`fort core ...`); a finished piece is never offered to `bp.cancel`. The cap (400,000) is unchanged. (2) runner.lua `boxes`:
+  `parts` (geom.clusters of the tiles, gap 6,6,1, at most 8; kept with the box in m.runner `kp`) and `done`. (3) bp/topo.py `sources`: besides a
+  walkable tile beside an unread tile on its level, a stair, ramp or cling leading up or down to one, a ramp top over one and a walkable tile
+  beside open space over one start attackers, so a region audit is as strict as one box over the fort (a dropped piece only adds fails).
+  (4) readiness: a dropped piece is no coverage fail; `ready.audit.cov` `drop N: <piece>` first. Contracts: schema SNAPSHOT_READY, CONTRACTS §7
+  (`snapshot.export`, `runner.boxes`), §9.10, §12 and appendix; RULES §8 row edited in place; DESIGN §5.4 row.
+- **Tests (fail on dec5132):** tests/lua/test_bug129_audit_regions.lua (5, a synthetic site90-size fort; the 5th, from the review, 30 shafts past `parts_max`), tests/lua/test_bug129_runner_parts.lua
+  (2), tests/lua/test_readiness.lua (1), tests/test_bug129_audit_regions.py (3).
+- **Live check:** on site90 run `dfllm audit`: the reply names `margin 8,8,1, N regions` (and any dropped piece) instead of the refusal; the
+  AUDIT event follows, `status` shows a fresh audit age. A bypass the new audit names from the core's lowest level is a real worst-case route
+  (a stair down to unread levels): the wall it names closes it. Watch the export time (kern.log `written T after the request`).
+- **Not decided offline:** whether the map-wide piece on site90 is a kept seal without tiles (dropped) or a running one (named with
+  `bp.cancel`); old kept boxes have no clusters (`kp`), only seals finished after this change do.
+
+## A fortcore stopped on breach:damp is re-sited away from the recorded breaches, or the ways in are closed (BUG-130, 2026-10-28; offline, live-untested)
+- **Why:** Run 9 (site96, P0 the whole run) and the Run 14 replay (site90 y707: `y707s0b1 (fortcore) blocked: breach:damp`, 6 PROJECT_BLOCKED):
+  the fortcore's dig met aquifer seepage, the runner parked it for good (BUG-037) and nothing re-sited it. Without O1/B1 readiness kept R0
+  `no_outer`/`no_inner` (420/312 SIEGE_UNREADY), every drill was refused (664 DRILL_RESULT `raised -1`, BUG-110), R2 and the military goals were
+  impossible. The ranking knew only snapshot marks (FR-76 left the damp memory open) and `plan propose` drafted stages 2/3 `@same` on the damp anchor.
+- **What changed:** (1) runner.lua: every breach stop is kept per project (m.runner `dz`: tile, kind, project, template, <= 32) and mirrored into the
+  manifest as `breaches`; the older `br` records are taken over at boot (module fields `note_breach`, `publish_breaches`, `breach_boot`).
+  (2) bp/sites.py: a fortcore candidate whose dig comes within `BREACH_R` 10 tiles of a recorded breach (or cavern) on its levels (+-1), or reaches a
+  level with damp/water stops of 2 projects (a wet layer), is dropped; none left: `no dry fortcore site`. (3) plan.py: `fort.core`
+  (`core_breaches`, `core_resite`); propose re-sites (fortcore stage 1 @S1 first, the old anchor's stages @same, note with the `bp.cancel` of the
+  old project) or, when it cannot move, drafts `seal at=last`, leaves the anchor's stages out and holds phase_target below P3; `plan check`
+  (`core_gate`) refuses a fortcore build @same on the stopped anchor without the re-site before it, warns with what counts; a stopped stage 3 is no
+  stage 3 under way, the parked O1 fragment no `o1`, the core order line skips a stopped core.
+- **What counts (documented in RULES §8, CONTRACTS `breaches?`, readiness.lua):** only a manifest bridge of role outer/inner with 2 linked levers
+  clears `no_outer`/`no_inner`; a wall + door clears `open_perimeter` only; the drill needs those bridges. A fort with no dry site stays shut, not ready.
+- **Contracts:** schema MANIFEST `breaches`, contract.lua note, CONTRACTS manifest row and appendix; RULES §8 row edited in place (300 lines).
+- **Tests (all fail on dec5132):** tests/lua/test_runner_breaches.lua (2), tests/test_bug130_damp_fortcore.py (12).
+- **Live check:** on site90 after `dfhack-run dfllm reload`: `dfllm cmd inspect what=manifest` shows `breaches` with `y707s0b1` damp and its tile
+  (taken over from the old record); `dfllm bp sites fortcore --fresh` offers no site within 10 tiles of it; `dfllm plan propose` drafts
+  `fortcore@S1 stage 1` first and names `dfllm cmd bp.cancel proj=y707s0b1`; `dfllm plan check` is OK with it and refuses a draft with only
+  `fortcore@same`; after apply the new stage 1 digs, and with O1/B1 standing `ready.fail` loses `no_outer`/`no_inner` and the drill runs.
+- **Not decided offline:** `BREACH_R` 10 and `LAYER_MIN` 2 are guesses (an aquifer's extent is hidden); a standalone lever-linked drawbridge on a dry
+  entrance (a `gate` template) is not built, so the no-dry-site closure keeps no_outer/no_inner red on purpose.
+## Stale hospital zones: `hospital_out` ignores idle or superseded zones outside the core, verb `hospital.retire` (BUG-131, 2026-10-28; offline, live-untested)
+- **Why:** Run 14 (site90): readiness R0 `hospital_out` stayed red the whole run because of an old hospital zone, 24422 at 88,28,129, outside
+  Kern+/Tiefe+ ("1 of 3 zones"). A hospital inside the core existed or was being built. The playbook does not let the session delete zones, so goal
+  G3 could never turn green.
+- **What changed:** (1) water.lua `M.hosp_sort`: a hospital zone outside the core no longer counts in `hosp_out` when it is idle or superseded.
+  Idle means no patient lies in it, no bed stands in it and its location holds no supply; unknown counts as present. Superseded means a finished
+  hospital (a zone wholly inside with a bed) exists and no patient lies in the old zone. `water.hospital_out()` returns `ign`, `fin` and `raw`, and
+  kern.log has a line when the ignored count changes. (2) New verb `hospital.retire {zone, approve?}` (water, PEACE): the zones screen remove
+  (`act.hospital_remove`) for one hospital zone outside the core. It is refused for a zone inside, an unknown zone, a zone with a patient lying in
+  it, and, without `approve:true` on the player's word, when no finished hospital stands inside. The reply names the zone, its centre and its
+  location: a location left with no zone is ignored by every count (BUG-056) and care moves its doctors' posts (BUG-077). The zone leaves
+  `hosp_out` at once. (3) State `water.hout {z, at, ok, pat?}`: `status`/`brief` add `zone Z at x,y,z blocks it: ... dfllm cmd hospital.retire
+  zone=Z` to the R0 line, `dfllm next` gives the command when a finished hospital stands inside, and the SIEGE_UNREADY hint points there.
+- **Safety:** removing a zone is a UI action (the zones screen) that BUG-034 already uses. It is never done by the kernel on its own (only the verb), never
+  for a zone where a patient lies, never outside PEACE. The location itself stays.
+- **Contracts:** schema `VERB_ARGS`/`VERBS` `hospital.retire`, state `water.hout`; contract.lua `C.VERBS`, `STATE_SPEC.water.hout`; CONTRACTS
+  appendix; RULES §6 (row `tombs.repair` / `hospital.retire`), §7 PATIENTS_OUT, §8 `hospital_out` in place (300 lines).
+- **Tests (fail on dec5132):** tests/lua/test_water.lua (3 new), tests/test_bug131_hospital_retire.py (5).
+- **Live check:** in PEACE, `dfllm status` with an old hospital zone outside the core. Either `hospital_out` is gone (kern.log `do not block
+  (BUG-131)`), or the R0 line names `zone N at x,y,z` and `dfllm cmd hospital.retire zone=N`. Send it (`approve=true` only on Gordon's word),
+  check the reply and DF's zones screen, then `ready.fail` without `hospital_out` after the next readiness run.
+- **Not decided offline:** a bed is what makes a hospital "finished"; a superseded zone with a patient lying in it still blocks (BUG-036);
+  whether `findAtTile` sees every bed of a live zone.
+## The automatic plan raises one phase after a quiet year; the pop ceiling follows D-01 = B (100) (BUG-132, 2026-10-28; offline, live-untested)
+- **Why:** goal audit of Run 14 site90: PLAN_AUTO (FR-86, y715) applied a minimal plan with phase_target P0, 0 builds and pop_ceiling 55, so G2 was green
+  while nothing moved; and although Gordon answered D-01 = B with cap 100, `status` said `cap 55 gate 55` (plan.R_CAPS still 55, the kernel's no-plan
+  default 55, and the R2 ceiling 75 would have lowered the cap again).
+- **What changed:** (1) plan.py `raise_due` (minimal plan >= 1 game year old, PEACE, no siege/breach in the last year), `next_phase` (never a star
+  phase), `auto_plan`: `propose(upto=next)` with every build it drafts and the `add {...}` repairs; ERRORs: an error-free subset (drop the build whose removal clears most, so builds needed together stay),
+  else the plain minimal plan, and the full draft's ERRORs go into the message (`N ERROR held back: ...`); `minimal_plan`/`apply_minimal` use it.
+  wake.py `_check_plan` calls it after one quiet year under a minimal plan (once per game year; else after `stale_apply_years` as before); PLAN_AUTO
+  says `a quiet year` and the raise `Pn -> Pn+1`. (2) `R_CAPS = {0: 100, 1: 100, 2: 100, 3: 250}` (D-01 = B, = readiness.lua M.CAPS), `R_CAPS_A`
+  55/55/75 for D-01 = A; kern.lua `with_defaults` takes the decisions (no plan: option B, ceiling 100; A: 55); readiness R2 ceiling never below the R1
+  cap. RULES §5 YEAR_REVIEW row and §8 R0 row edited in place. Tests that pinned the 55 ceiling under D-01 = B were updated (test_cli_plan,
+  test_wp6_files, test_wp6_kern.lua).
+- **Effective cap (D-01 = B):** min(readiness cap 100 at R0..R2 / 250 at R3, plan pop_ceiling, inbox popcap.lower, FR-70 hold); a falling ceiling
+  holds at min(last cap, citizens), outside PEACE it never rises. A plan applied before this keeps 55 until the next apply.
+- **Contracts / config:** none (no event, verb or state key; the PLAN_AUTO text only).
+- **Tests (fail on dec5132):** tests/test_bug132_plan_raise.py (8), tests/lua/test_bug132_cap.lua (2).
+- **Live check:** on a fort whose plan.json is the minimal one and a game year old without a siege, `follow` (auto) wakes `PLAN_AUTO ... a quiet year
+  ... Pn -> Pn+1`; plan.json shows phase_target one higher, `pop_ceiling` 100 and the next phase's builds; `status` shows `cap 100 gate 100` (or the
+  current population while the demotion freeze or the FR-70 hold applies); a `plan check` ERROR appears as `ERROR held back` in the wake.
+
+## Ghost care: care places the memorial slabs, the slab orders follow the ghosts, the tomb repair stops its free loop (BUG-133, 2026-10-28, Run 14; offline, live-untested)
+- **Why:** Run 14 region2-site90 (y502-y716): ghosts 0 -> 49. Nothing in the kernel ever placed a slab (autoslab only queues engrave orders) and
+  every engraved memorial counted as a served ghost; economy removed 47 EngraveSlab orders for want of a blank slab and ordered ConstructSlab
+  three times at `restock_cap` 5; `sb.why 'no Masons'` stood in `inspect orders` only while the rebuild policy paused the workshops project;
+  `tombs: freed 20, opened 0, assigned 0, entomb 0` 631 times (a coffin's second body was not seen, its zone freed as `elsewhere`, DF gave
+  it away again); `inspect tombs` said 20 ghosts for 28.
+- **What changed:** (1) act.lua `slab_place(item, x, y, z)` (care): Build > Furniture > Slab with that slab chosen (`constructBuilding{type =
+  Slab, items = {slab}}`), the forbid toggle cleared, a slab in a job, built in, carried or unreachable refused (lint: `canWalkBetween`
+  allowed in `slab_place`). (2) care.lua memorial phase: each ghost's slab state none/order/loose/build/placed/nohf; up to `care.memorials`
+  (2) loose memorials a run placed in PEACE/RECOVERY on the inner tile of a free roofed 3x3 near the crypt/core/citizens (the coffin
+  search's floor rules, never a way, door or stair), a refusal retried a day later, three times; GHOSTS `d.slabs`/`d.mem`, `inspect tombs`
+  ghosts `[unit, cause, slab]`, `mem`, `mem_why`, `ghosts_n` (every ghost, msg `+N more not listed`). (3) orderfix `OF.slabs` `placed`/`build`/
+  `loose`; economy: a ghost is served only by a placed or building memorial, a loose one gets no second order, ConstructSlab for the ghosts
+  without memorial and order capped at min(ghosts, `restock_cap` 20), the reason for no slab order in kern.log (cadence), PROJECT_REQUEST
+  workshops why=slabs types [Masons] while ghosts stand and no mason's shop does (follow places it like why=mandatory). (4) runner: in the
+  rebuild a workshops project of Masons/Carpenters only runs while care reports ghosts, old bodies or short coffins. (5) tomb_repair: several
+  bodies per coffin, never a free over an occupied coffin (`acts.kept_occ`), assignments first on `care.tomb_assign_per_run` (20).
+- **Contracts / config:** schema ACT `slab_place` (care) and contract.lua; GHOSTS `slabs:sa mem:s`; config `care.tomb_assign_per_run` 20,
+  `care.memorials` 2 (`fairplay.CARE_LIM`), `economy.slabs.restock_cap` 5 -> 20; CONTRACTS §5 row, §12 GHOSTS and PROJECT_REQUEST, inspect
+  tombs, config text and appendix; RULES §7 GHOSTS row (in place); bugs/BUG-133.
+- **Tests (each fails on dec5132):** tests/lua/test_care_ghosts.lua (8), test_economy_b2.lua (+4; BUG-061's cap 5 -> 6), test_runner_seal_first.lua
+  (+1), test_act_supply.lua (+1), test_care_b3.lua / test_care_fr.lua (the acts' new order), tests/test_bug133_ghosts.py (4).
+- **Live check:** `dfllm inspect what=tombs`: the ghost count matches the units screen, `memorials: ...` and each ghost's slab state; a loose
+  memorial turns `build` within a care run in PEACE (kern.log `memorial: slab ... placed at x,y,z`), `placed` once built, and its ghost leaves
+  the list; `inspect orders` slabs `gneed`/`served`/`loose`, `want` <= 20; without masons kern.log `slabs: no ConstructSlab ... no Masons` once and
+  PROJECT_REQUEST why=slabs, follow places the masons' shop and it runs in the rebuild; kern.log `tombs:` shows `assigned` > 0 while bodies wait,
+  TOMBS_LOCKED `churn` stays 0.
+- **Not decided offline:** whether 53.16's constructBuilding accepts an engraved memorial in `items` as the Build menu does (buildingplan and
+  quickfort make planned slabs that way; the real item list was not read).
 ## TIMELINE_RESET: a boot whose clock jumped back marks the discarded timeline; follow, events and brief drop it (BUG-121, 2026-10-28, note 101; offline, live-untested)
 - **Why:** Run 14 note 101: after the player loaded an older save, `events.jsonl` still held the events up to #29900 of the line he had left
   (ticks far ahead of the loaded clock) and `alarm.txt` its lockdown; `follow` replayed BREACH, INTRUDER and DEATHS_3PLUS of the abandoned line while
@@ -156,6 +280,21 @@
 - **Not decided offline:** why the live project's coffins were never built (buildingplan's state is not readable by the kernel); whether wood-first
   (as asked) or the old stone-first suits a hard-stone map better (`coffin_wood_keep` is the knob); whether 15 days is the right `coffin_stale` for a
   fort with one slow carpenter.
+## BUG-128: the miners hold no pick: tool detail churn guard, better candidates, honest TOOL_BLOCKED blockers, the stale cap, a linked tool pile (2026-10-28, offline, live-untested)
+- **Why:** Run 14 region2-site90 (and site84/97/98): the miners held no pick while 97-109 picks lay in the fort. The Miners rotated with every
+  TOOL_BLOCKED (`- basis 0` 23 times), new members were patients and doctors, "for N days" counted per detail, `pending` was the kernel's own
+  request of the same pass, `upair` fired for a pair with a loose pick outside the 4-pick sample, the stale count let the forge make picks without
+  end (222 free axes), and dfllm-tools stayed empty while the picks sat in a binned weapons pile.
+- **What changed:** economy.lua: a kernel-added Miners/Woodcutters member stays `tools.keep_days` (14) and while he holds the tool or has a DF
+  work tool pair; the target stays >= 1 while dig/FellTree jobs exist; no patient (needs healthcare, Rest) or doctor-labor unit joins, the
+  profession breaks a skill tie; TOOL_BLOCKED `days` = the oldest member without the tool; no `pending` for a request < 1 game day (`upd0`); a
+  pair with a loose tool is `fetch`; the stale count excludes at most stock - (members + 2) reachable tools (far ones all); a new dfllm-tools is
+  placed with `bins=0` and `take_from=` the stockpile the tools sit in (act.tool_pile `take`). TOOL_BLOCKED `d.src` (that stockpile) and `d.g`
+  (the guards that applied). Config `tools.keep_days` (0..400); RULES TOOL_BLOCKED row in place; CONTRACTS appendix. Tests:
+  tests/lua/test_economy_tools_b128.lua (8, each fails on f3f684b), test_act_supply.lua tool_pile.
+- **Live check:** `dfllm cmd inspect '{"what":"workload","key":"tools"}'` (blocked, stale, pile); WORK_DETAIL Miners shows no `-` within 14
+  days of a `+`; the next TOOL_BLOCKED carries `d.g`/`d.src`, kern.log `tools: Miners blocked` has no `pending` on the day of a request; after a
+  new pile: its `storage.max_bins` is 0 and `links.take_from_pile` holds `d.src`. An old dfllm-tools keeps its settings: link it by hand.
 
 ## M7: a garbage dump zone, a trash view and the reason a dump job cancels; loading the newest complete save at the title screen; the title-screen status (FR-90, FR-91, BUG-120, 2026-10-28, package M7, notes 98 and 99; offline, live-untested)
 - **Why:** Run 14 note 98: garbage had no verb (`zone.place` knew no dump zone) and "Dump item cancelled 5 times today" (y701, y703, y707) gave no

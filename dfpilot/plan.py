@@ -21,7 +21,8 @@ from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodabl
                   refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
 from .cmd import SealClosed
 
-R_CAPS = {0: 55, 1: 55, 2: 75, 3: 250}    # DESIGN §5.4; R3 (>= 80) only with D-01 = B
+R_CAPS = {0: 100, 1: 100, 2: 100, 3: 250}  # D-01 = B (Gordon 2026-10-24): readiness.lua M.CAPS, baseline popcap.max_pop
+R_CAPS_A = {0: 55, 1: 55, 2: 75}           # D-01 = A: DESIGN §5.4 (R2 = siege trigger 80 - 5; no R3)
 OPTION_A_MAX = 75
 SUPPLY_MIN = {"drink_d": 170, "food_d": 60, "mood_stock": 10}
 BUILDS_PER_SEASON = 3                     # runner runs <= 3 projects at once
@@ -93,9 +94,11 @@ def load_decisions() -> dict:
 
 
 def level_cap(lvl: int, d01: str) -> int:
-    if lvl >= 3 and d01 == "B":
-        return R_CAPS[3]
-    return R_CAPS[max(0, min(lvl, 2))]
+    """The readiness cap of a level under D-01. BUG-132: with B (Gordon's answer) R0..R2 are 100 like the kernel's
+    readiness caps (its R2 siege-trigger ceiling never falls below R1), R3 250; A keeps 55/55/75."""
+    if d01 == "B":
+        return R_CAPS[max(0, min(lvl, 3))]
+    return R_CAPS_A[max(0, min(lvl, 2))]
 
 
 def load_phases(path: Path | None = None) -> dict | None:
@@ -176,8 +179,18 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
         man = files.read_manifest(save_dir) or {}
     bridges = man.get("bridges") if isinstance(man.get("bridges"), dict) else {}
     rooms = man.get("rooms") if isinstance(man.get("rooms"), list) else []
-    return {"o1": any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values())
-            or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied),
+    core = core_resite(save_dir, state, core_breaches(save_dir, state))     # BUG-130: a fortcore stopped on a breach
+    if core:
+        # the parked anchor's fragments (stage 3: O1) never stood: only the kernel's manifest counts an outer bridge
+        kb = (_kern_manifest(save_dir).get("bridges") or {})
+        o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in kb.values())
+    else:
+        o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values()) \
+            or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied)
+    refuge = refuge_projects(save_dir, state, applied, skip=set(core["ids"]) if core else set())
+    if core and not (core["resite"] and core["ok"] is not False):
+        refuge["fortcore"] = False                  # nothing to anchor stage 3 on: the core's anchor is the damp one
+    return {"o1": o1, "core": core,
             "gallery": any(isinstance(r, dict) and r.get("tpl") == GALLERY for r in rooms)
             or any(t == GALLERY for t, _ in applied),
             "stockroom": any(isinstance(r, dict) and r.get("tpl") == STOCKROOM for r in rooms)
@@ -185,7 +198,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "social": social_rooms(applied, rooms),                 # FR-74: temple / tavern standing or under way
             "sieged": sieged(save_dir, state),
             "audit": audit_routes(save_dir, state),
-            "refuge": refuge_projects(save_dir, state, applied),
+            "refuge": refuge,
             "stone_dig": stone_digs(save_dir),
             "hosp": hospital_facts(save_dir, state, rooms),
             "metal": metal_facts(save_dir, man, applied),
@@ -663,7 +676,8 @@ def _drink_site(save_dir: Path, state: dict | None, f: dict) -> tuple[int | None
     return (n, None) if free else (0, f"refuge_drink: no free site for {n} barrels (taken by other projects)")
 
 
-def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | None = None) -> dict:
+def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | None = None,
+                    skip: set | frozenset = frozenset()) -> dict:
     """The refuge work already under way (Run 10): stage3 (a fortcore stage 3 project not done yet, or running in
     state.proj), beds (the `n` of refuge_beds projects not done yet), seal (a seal project not done yet), fortcore
     (any fortcore stage applied: stage 3 can reuse its anchor) and ents (open ways in the last entrance check names).
@@ -689,8 +703,8 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
            "bed_site": _bed_site(save_dir, state), "drink": 0, "drink_room": _drink_room(save_dir)}
     for p in bp_files(save_dir):
         doc = files.read_json(p)
-        if not isinstance(doc, dict) or not isinstance(doc.get("tpl"), str):
-            continue
+        if not isinstance(doc, dict) or not isinstance(doc.get("tpl"), str) or p.stem in skip:
+            continue                               # BUG-130: a fortcore stopped on a breach is not under way
         if p.stem in done:
             out["drink_room"] = out["drink_room"] or doc["tpl"] == REFUGE_DRINK    # FR-69: a store done
             continue
@@ -704,7 +718,8 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
             out["seal"] = True
     out["drink_fit"], out["drink_why"] = _drink_site(save_dir, state, out)
     for row in (state or {}).get("proj") or []:
-        if isinstance(row, list) and len(row) >= 2 and row[0] == "fortcore" and str(row[1]).startswith("s3."):
+        if isinstance(row, list) and len(row) >= 2 and row[0] == "fortcore" and str(row[1]).startswith("s3.") \
+                and "breach:" not in str(row[-1]):
             out["stage3"] = True
     return out
 
@@ -727,7 +742,7 @@ def _head_seal(b: dict, head: str) -> bool:
 
 
 def _refuge_fix(b: dict) -> bool:
-    return _refuge_stage(b) or b["tpl"] in ("seal", REFUGE_BEDS, REFUGE_DRINK)
+    return _refuge_stage(b) or _resite(b) or b["tpl"] in ("seal", REFUGE_BEDS, REFUGE_DRINK)
 
 
 def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
@@ -1069,6 +1084,176 @@ def _outer_gallery(doc: dict, s: dict, fort: dict) -> str | None:
             "(site S1, once fortcore stage 2 is dug)")
 
 
+# ---------------------------------------------------------------- BUG-130: a fortcore stopped on a breach
+# Run 9 (site96) and the Run 14 replay (site90, y707): "y707s0b1 (fortcore) blocked: breach:damp". The runner parks a project
+# stopped on a breach for good (BUG-037) and never retries it; without O1/B1 readiness kept R0 no_outer/no_inner, every drill
+# was refused (BUG-110) and R2 never came. The kernel records the breach tiles (manifest `breaches`), the fortcore ranking
+# keeps a new fortcore BREACH_R tiles away from them on its levels (bp.sites), and the plan re-sites or closes.
+CORE_RESITE = {"tpl": "fortcore", "site": "S1", "p": {"stage": 1}}
+_BREACH_RE = re.compile(r"breach:([a-z_]+)")
+
+
+def _resite(b: dict) -> bool:
+    """A fortcore stage 1 on a ranked or explicit site (not `same`): the start of a fortcore somewhere new."""
+    p = b.get("p", b.get("params")) or {}
+    return b["tpl"] == "fortcore" and b.get("site") != SAME and _stage_of(p) in (1, None) and not p.get("retrofit")
+
+
+def _kern_manifest(save_dir: Path) -> dict:
+    """The kernel's own fort manifest (manifest.json, else the cached `inspect manifest` reply), {} when none."""
+    m = files.read_manifest(save_dir) or files.read_json(Path(save_dir) / _cmd.MANIFEST_CACHE)
+    return m if isinstance(m, dict) and not schema.validate("manifest", m) else {}
+
+
+def core_breaches(save_dir: Path, state: dict | None = None) -> list[dict]:
+    """The fortcore projects a breach stopped: [{proj, stage, why, pos, anchor}], by id. A fortcore bp file (not
+    cancelled, no PROJECT_DONE) that the kernel's manifest `breaches` names, whose state.proj row says `breach:<why>`
+    (also `parked: breach:<why>`), or that a BREACH_STOP event names."""
+    done = done_projects(save_dir)
+    docs = {}
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if isinstance(d, dict) and d.get("tpl") == "fortcore" and p.stem not in done \
+                and not (d.get("params") or {}).get("retrofit"):
+            docs[p.stem] = d
+    if not docs:
+        return []
+    found: dict[str, dict] = {}
+    for b in _kern_manifest(save_dir).get("breaches") or []:
+        if isinstance(b, dict) and b.get("proj") in docs:
+            found[b["proj"]] = {"why": str(b.get("why") or "damp"), "pos": list(b["pos"])}
+    for row in (state or {}).get("proj") or []:
+        m = _BREACH_RE.search(str(row[-1])) if isinstance(row, list) and len(row) >= 4 else None
+        if m and row[0] in docs:
+            found.setdefault(row[0], {"why": m.group(1), "pos": None})
+    # FR-95: a core whose newest word is AQ_OBSERVE (observe mode resumed its breach:damp park) digs again: no re-site
+    open_ = set(docs)                                       # projects whose newest BREACH_STOP / AQ_OBSERVE is not seen yet
+    resumed: set[str] = set()
+    for e in files.iter_events_rev(save_dir):               # newest first: the latest stop of each project
+        if not open_ and all(f["pos"] is not None for f in found.values()):
+            break
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        pid = d.get("proj")
+        if e.get("type") not in ("BREACH_STOP", "AQ_OBSERVE") or pid not in docs:
+            continue
+        if e["type"] == "AQ_OBSERVE":
+            if pid in open_:
+                resumed.add(pid)
+                open_.discard(pid)
+            continue
+        open_.discard(pid)
+        if pid in resumed:
+            continue
+        pos = list(d["pos"]) if isinstance(d.get("pos"), list) else None
+        if pid not in found:
+            found[pid] = {"why": str(d.get("why") or "damp"), "pos": pos}
+        elif found[pid]["pos"] is None:
+            found[pid]["pos"] = pos
+    for pid in resumed:
+        row = next((r for r in (state or {}).get("proj") or [] if isinstance(r, list) and r and r[0] == pid), None)
+        if not (row and len(row) >= 4 and _BREACH_RE.search(str(row[-1]))):   # parked again (unknown kernel): a stop
+            found.pop(pid, None)
+    return [{"proj": pid, "stage": _stage_of(docs[pid].get("params")) or 1, "why": found[pid]["why"],
+             "pos": found[pid]["pos"], "anchor": list(docs[pid].get("anchor") or [])} for pid in sorted(found)]
+
+
+def core_resite(save_dir: Path, state: dict | None, br: list[dict]) -> dict | None:
+    """What a fortcore stopped on a breach leaves (None without one): {br, ids (every fortcore project on a stopped anchor
+    not done, and the stopped ones: what to cancel), stages (every fortcore stage applied on such an anchor), resite (no
+    stage 1 on it was dug: the whole fortcore may move), ok (the ranking finds a free fortcore site away from the recorded
+    breaches; False: none, `why` says why; None: not known), why, site}."""
+    if not br:
+        return None
+    anchors = {tuple(b["anchor"]) for b in br}
+    done = done_projects(save_dir)
+    at, moved = [], None
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if not isinstance(d, dict) or d.get("tpl") != "fortcore" or (d.get("params") or {}).get("retrofit"):
+            continue
+        if tuple(d.get("anchor") or ()) in anchors:
+            at.append((p.stem, _stage_of(d.get("params")) or 1, p.stem in done))
+        elif (_stage_of(d.get("params")) or 1) == 1 and moved is None:
+            moved = {"proj": p.stem, "anchor": list(d.get("anchor") or [])}    # the re-site was applied already
+    dug = sorted(pid for pid, st, dn in at if st == 1 and dn)
+    out = {"br": br, "ids": sorted({pid for pid, _, dn in at if not dn} | {b["proj"] for b in br}),
+           "stages": sorted({st for _, st, _ in at} | {b["stage"] for b in br}), "resite": not dug, "ok": None,
+           "why": "", "site": None, "moved": moved}
+    if dug:
+        out["ok"], out["why"] = False, f"stage 1 {dug[0]} is dug there: its later stages cannot move"
+        return out
+    if moved:                                  # a fortcore stage 1 stands elsewhere: never draft another one
+        out["ok"], out["site"] = True, moved["anchor"]
+        return out
+    try:
+        sites, _, _ = _cmd.free_sites(save_dir, "fortcore", {"stage": 1}, n=1)
+        out["ok"] = bool(sites)
+        out["why"] = "" if sites else "no free fortcore site on the snapshot"
+        out["site"] = sites[0].get("anchor") if sites else None
+    except BpUnavailable as e:
+        out["why"] = str(e)
+    except BpError as e:
+        out["ok"], out["why"] = False, str(e)
+    return out
+
+
+def _core_head(core: dict) -> str:
+    b = core["br"][0]
+    pos = f" at {_pos(b['pos'])}" if b.get("pos") else ""
+    more = f" (+{len(core['br']) - 1})" if len(core["br"]) > 1 else ""
+    return f"fortcore: {b['proj']} (stage {b['stage']}) stopped on breach:{b['why']}{pos}{more} and is parked"
+
+
+def core_movable(core: dict | None) -> bool:
+    """The stopped fortcore may move: no stage 1 was dug on its anchor and a dry site exists (or is not known)."""
+    return bool(core) and core["resite"] and core["ok"] is not False
+
+
+CORE_GATES = ("only a manifest bridge of role outer (O1) or inner (B1) with 2 linked levers clears R0 no_outer/no_inner; "
+              "a wall + door clears open_perimeter only; the drill needs those bridges (refused without them)")
+
+
+def core_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
+    """BUG-130: a plan must not build on the anchor of a fortcore stopped on a breach. While the core may move
+    (core_movable), a new fortcore build @same needs a re-sited stage 1 (`_resite`) before it in plan order (ERROR); a plan
+    that re-sites nothing gets a warning naming the re-site. When it cannot move (no dry site, or stage 1 dug there and a
+    later stage stopped) a new fortcore build @same of a stopped stage (no dry site: any) is refused and the closure is a
+    warning that says what the gates need (CORE_GATES)."""
+    core = (fort or {}).get("core")
+    if not core:
+        return [], []
+    head = _core_head(core)
+    adds = sorted(new_builds(doc, prev), key=lambda t: (t[0], t[1]))
+    errs, warn = [], []
+    mv = core.get("moved")
+    if mv:                                     # re-sited already: @same is the new anchor; a second stage 1 is not
+        errs += [f"{head}; seasons[{si}].build[{bi}] fortcore stage 1 would be a second fortcore: it was re-sited "
+                 f"to {mv['proj']} already (BUG-130): leave it out" for si, bi, b in adds if _resite(b)]
+        warn.append(f"{head}: re-sited to {mv['proj']}; free its tiles: dfllm cmd bp.cancel proj={core['ids'][0]}")
+        return errs, warn
+    movable = core_movable(core)
+    stopped = {b["stage"] for b in core["br"]}
+    first = next((i for i, (_, _, b) in enumerate(adds) if _resite(b)), None)
+    for i, (si, bi, b) in enumerate(adds):
+        if b["tpl"] != "fortcore" or b.get("site") != SAME:
+            continue
+        st = _stage_of(b.get("p") or {})
+        if movable and (first is None or first > i):
+            errs.append(f"{head}; seasons[{si}].build[{bi}] fortcore stage {st} @same would build on it: re-site first, "
+                        f"add {_compact(CORE_RESITE)} before it (BUG-130; dfllm plan propose drafts it)")
+        elif not movable and (core["resite"] or st in stopped):
+            errs.append(f"{head}; seasons[{si}].build[{bi}] fortcore stage {st} @same would build on it and cannot "
+                        f"move ({core['why'][:100]}): leave it out")
+    if movable and first is None:
+        warn.append(f"{head}: re-site it, add {_compact(CORE_RESITE)} (its later stages @same; BUG-130: S1 keeps away "
+                    f"from the recorded breaches; then dfllm cmd bp.cancel proj={core['ids'][0]})")
+    elif not movable:
+        warn.append(f"fortcore: no dry site ({core['why'][:100]}): close the ways in by wall + door "
+                    f"({_compact(SEAL_LAST)}); readiness keeps R0 no_outer/no_inner and the drill stays refused: "
+                    + CORE_GATES)
+    return errs, warn
+
+
 def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str] | None = None,
           banned: list[str] | None = None, prev: dict | None = None,
           fort: dict | None = None) -> tuple[list[str], list[str]]:
@@ -1143,6 +1328,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     pe, pw_ = perimeter_gate(doc, s, fort or {}, prev)      # FR-70: no phase raise while the perimeter is open
     errs += pe
     warn += pw_
+    ce, cw = core_gate(doc, s, fort or {}, prev)            # BUG-130: nothing on a fortcore anchor stopped on a breach
+    errs += ce
+    warn += cw
     warn += drink_gate(doc, s, fort or {}, prev)            # FR-69: refuge_dry -> the refuge drink store
     he, hw_ = hospital_gate(doc, s, fort or {}, prev)       # BUG-034: no hospital without accepted water near it
     errs += he
@@ -1435,7 +1623,8 @@ def core_order_note(doc: dict, state: dict | None) -> str | None:
     s1.*) `plan check` cannot site them. The order is bp.place fortcore -> wait for s1.dig -> `bp sites <tpl> --fresh`
     -> plan propose / check. A line for the CLI, None when the draft has no such build or the core is dug."""
     core = next((r for r in (state or {}).get("proj") or []
-                 if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.")), None)
+                 if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.")
+                 and "breach:" not in str(r[-1])), None)      # BUG-130: a core parked on a breach digs nothing
     rooms = sorted({b["tpl"] for se in doc["seasons"] for b in se["build"] if b["tpl"] not in CORE_FREE_TPLS})
     if core is None or not rooms:
         return None
@@ -1474,7 +1663,8 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
 
 
 def propose(state: dict | None, phases: dict | None, prev: dict | None, decisions: dict | None = None,
-            tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None) -> dict:
+            tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None,
+            upto: str | None = None) -> dict:
     """Draft plan: phase_target = last phase before the next ★ phase; builds = `proj` deliverables of the
     phases up to it (a template with a `stage` param gets p.stage; stage >= 2 reuses the anchor: site 'same').
     Deliverables in `applied` (applied_builds) or in the previous plan (any year) are not drafted again.
@@ -1496,6 +1686,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     for p in plist:
         if p["id"] <= cur:
             continue
+        if upto is not None and p["id"] > upto:     # BUG-132: the automatic plan raises one phase at a time
+            break
         if p["approve"]:
             star = p["id"]
             break
@@ -1509,10 +1701,43 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     # Run 10: the audit's bypass wall first (audit_gate refuses growth without it)
     if ((fort or {}).get("audit") or {}).get("open") and (info is None or "seal" in info):
         builds.append(copy.deepcopy(SEAL_AUDIT))
+    # BUG-130: a fortcore stopped on a breach (parked for good): re-site it (stage 1 @S1 away from the recorded breaches,
+    # its stages @same after it) or, when it cannot move, close the ways in by wall + door and, with no core at all,
+    # stay below P3 (no refuge can be built)
+    core = (fort or {}).get("core")
+    core_note, drop_core = "", None
+    if core and (info is None or "fortcore" in info):
+        b0 = core["br"][0]
+        where = f" at {_pos(b0['pos'])}" if b0.get("pos") else ""
+        cancel = "; ".join(f"dfllm cmd bp.cancel proj={i}" for i in core["ids"][:3])
+        if core.get("moved"):                    # the re-site was applied: never a second fortcore
+            core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where} was re-sited to "
+                         f"{core['moved']['proj']}; free its tiles: {cancel}")
+        elif core_movable(core):
+            for k in core["stages"]:
+                done.discard(("fortcore", k))
+            builds.append(copy.deepcopy(CORE_RESITE))
+            builds += [{"tpl": "fortcore", "site": SAME, "p": {"stage": k}} for k in core["stages"] if k >= 2]
+            core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where}: re-sited to S1 away "
+                         f"from the recorded breaches (its stages @same); then {cancel}")
+        else:
+            drop_core = "all" if core["resite"] else {b["stage"] for b in core["br"]}
+            if core["resite"]:
+                below = max((p["id"] for p in plist if p["id"] < REFUGE_PHASE), default=cur)
+                target = max(cur, min(target, below))
+            seal_n = ((fort or {}).get("refuge") or {}).get("seal_n")
+            if seal_n != 0 and (info is None or SEAL in info):
+                builds.append(copy.deepcopy(SEAL_LAST))
+            core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where} and cannot move "
+                         f"({core['why'][:100]}): the ways in are closed by wall + door (seal at=last"
+                         + ("" if seal_n != 0 else ": nothing left to close") + "); readiness keeps "
+                         f"R0 no_outer/no_inner and the drill stays refused (only bridges of role outer/inner count)"
+                         + (f"; phase_target held at {target} (no refuge)" if core["resite"] else "") + f"; the parked: {cancel}")
     # Run 10: then the refuge (refuge_gate refuses P3+ without a separated one with beds); Run 11: from the fort's
     # start once the refuge burrow exists, before every other new build
     for b in refuge_drafts(s, fort or {}, done, early=target < REFUGE_PHASE):
-        if info is None or b["tpl"] in info:
+        if (info is None or b["tpl"] in info) and not (b["tpl"] == "fortcore" and any(   # BUG-130: re-site drafted it
+                _build_key(x) == _build_key(b) for x in builds)):
             builds.append(b)
     # DECISIONS 1: from P3 on fortcore stage 3 (O1, B2) comes before every other new build, also in a fort whose phase
     # list had it later (stage3_gate refuses the plan otherwise)
@@ -1556,6 +1781,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs:
                     libs.append(d["lib"])
+    if drop_core:                                # BUG-130: nothing on the stopped anchor
+        builds = [b for b in builds if b["tpl"] != "fortcore" or (drop_core != "all" and (
+            b.get("site") != SAME or _stage_of(b.get("p") or {}) not in drop_core))]
     builds.sort(key=lambda b: b["tpl"] != SEAL)  # Run 11 siege 8: seal first (the runner runs it first anyway)
     left_out = []
     if rb:                                       # the rebuild drafts only what the runner runs then
@@ -1589,6 +1817,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     }
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb else tp)   # rebuild: no explore
+    doc["notes"] += core_note
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     if stress and sdrafts and not rb:
@@ -1760,53 +1989,159 @@ def minimal_ok(b: dict) -> bool:
     return build_kind(b) in ("seal", "tombs", "supply") or b["tpl"] in MINIMAL_TPLS or _refuge_stage(b)
 
 
-def minimal_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,
-                 decisions: dict | None = None, tpls: list[str] | None = None) -> tuple[dict, list[str], list[str]]:
-    """(plan, errors, warnings) of the smallest plan that keeps the fort supplied and safe when nobody approves one: the
-    draft of `propose`, cut to the NEW builds that minimal_ok allows (applied builds keep their ids), phase_target = the
-    current phase (no star phase, no phase raise), the order libraries of the plan it replaces; then up to FIX_ROUNDS times `check`, and every repair
-    its ERRORs name (fixes_of) that minimal_ok allows is added to the current season, ahead of the other new builds.
-    Errors left after that are returned: the caller applies nothing."""
+RAISE_QUIET_Y = 1                         # BUG-132: game years without a siege or breach before the minimal plan rises a phase
+
+
+def raise_due(save_dir: Path, state: dict | None, prev: dict | None) -> bool:
+    """BUG-132 (Run 14 site90: the minimal plan of y715 kept P0 with 0 builds, G2 green and nothing moved): the applied plan
+    is the minimal one (FR-86), it is RAISE_QUIET_Y game years old or more, the fort is in PEACE and no siege or breach
+    (SIEGE_START/SIEGE_END/BREACH, MODE to SIEGE/BREACH) was logged in the last game year. Then the next automatic plan
+    proposes the next phase."""
     s = state or {}
-    prev = applied_plan(save_dir)
-    fort = fort_facts(save_dir, state)
-    doc = propose(state, phases if phases is not None else load_phases(), prev, decisions=decisions, tinfo=tinfo,
-                  applied=applied_builds(save_dir, state), fort=fort)
-    doc["phase_target"] = s.get("phase") or "P0"
-    doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
-    drop = {(si, bi) for si, bi, b in new_builds(doc, prev) if not minimal_ok(b)}
-    for si, se in enumerate(doc["seasons"]):
-        se["build"] = [b for bi, b in enumerate(se["build"]) if (si, bi) not in drop]
+    year = (s.get("t") or {}).get("y")
+    if not is_minimal(prev) or not isinstance(year, int) or year - prev["year"] < RAISE_QUIET_Y or s.get("mode") != "PEACE":
+        return False
+    now = files.current_tick(save_dir)
+    if not isinstance(now, int):
+        return False
+    for e in files.iter_events_rev(save_dir, min_tick=now - schema.TICKS["YEAR"], max_tick=now):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") in SIEGE_EVENTS or (e.get("type") == "MODE" and d.get("to") in ("SIEGE", "BREACH")):
+            return False
+    return True
+
+
+def next_phase(phases: dict | None, cur: str) -> str | None:
+    """The phase after cur, None when there is none or it is a star phase (approve: never automatic)."""
+    later = sorted((p for p in (phases or {}).get("phases", []) if p["id"] > cur), key=lambda p: p["id"])
+    return later[0]["id"] if later and not later[0]["approve"] else None
+
+
+def _with_new(doc: dict, prev: dict | None, new: list[tuple[int, dict]]) -> dict:
+    """doc with its new builds replaced by `new` ((season, build), in order); the applied same-year builds stay."""
+    out = copy.deepcopy(doc)
     same = bool(prev) and prev.get("year") == doc["year"]
-    season = (s.get("t") or {}).get("season", 0)
+    for si, se in enumerate(out["seasons"]):
+        old = copy.deepcopy(prev["seasons"][si]["build"]) if same else []
+        se["build"] = old + [copy.deepcopy(b) for k, b in new if k == si]
+    return out
+
+
+def _fix_rounds(doc: dict, state, prev, fort, decisions, tp, season: int, ok) -> tuple[list[str], list[str]]:
+    """check, then add every repair its ERRORs name that ok() allows to the current season (ahead of the other new
+    builds), at most FIX_ROUNDS times. (errors, warnings) of the last check."""
+    same = bool(prev) and prev.get("year") == doc["year"]
     errs: list[str] = []
     warn: list[str] = []
-    tp = tpls if tpls is not None else templates()
     for _ in range(FIX_ROUNDS + 1):
         errs, warn = check(doc, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
         have = [(b["tpl"], b["site"], b.get("p") or {}) for se in doc["seasons"] for b in se["build"]]
-        add = [fx for fx in fixes_of(errs) if minimal_ok(fx) and (fx["tpl"], fx["site"], fx.get("p") or {}) not in have]
+        add = [fx for fx in fixes_of(errs) if ok(fx) and (fx["tpl"], fx["site"], fx.get("p") or {}) not in have]
         if not errs or not add:
             break
         base = len(prev["seasons"][season]["build"]) if same else 0
         for k, fx in enumerate(add):
             doc["seasons"][season]["build"].insert(base + k, fx)
+    return errs, warn
+
+
+def _subset(cand: dict, state, prev, fort, decisions, tp) -> tuple[dict, list[str]] | None:
+    """BUG-132: a large error-free subset of cand's new builds: from all of them, drop the one build (latest first) whose
+    removal leaves the fewest ERRORs, until none is left (builds that only check together, like the audit seal and the
+    refuge piece, stay together); None when no single removal lowers the ERRORs any more (e.g. the raise itself)."""
+    keep = [(si, b) for si, _, b in new_builds(cand, prev)]
+    while True:
+        trial = _with_new(cand, prev, keep)
+        te, tw = check(trial, state, decisions=decisions, tpls=tp, prev=prev, fort=fort)
+        if not te:
+            return trial, tw
+        drop, least = None, len(te)
+        for i in reversed(range(len(keep))):
+            e2 = check(_with_new(cand, prev, keep[:i] + keep[i + 1:]), state, decisions=decisions, tpls=tp, prev=prev,
+                       fort=fort)[0]
+            if len(e2) < least:
+                drop, least = i, len(e2)
+                if not e2:
+                    break
+        if drop is None:
+            return None
+        del keep[drop]
+
+
+def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,
+              decisions: dict | None = None, tpls: list[str] | None = None) -> dict:
+    """The plan follow applies itself (FR-86, BUG-132): {doc, errs, warn, held, raised}.
+    Minimal: the draft of `propose`, cut to the NEW builds that minimal_ok allows (applied builds keep their ids),
+    phase_target = the current phase, the order libraries of the plan it replaces; then up to FIX_ROUNDS times `check`,
+    and every repair its ERRORs name that minimal_ok allows goes into the current season, ahead of the other new builds.
+    Raise (raise_due: the applied plan is minimal and a quiet year passed): the draft of `propose` for the next phase only
+    (never a star phase; every build it drafts: the refuge, seal at=audit, hospital and fortcore stages first, and every
+    repair its ERRORs name). When that draft checks with ERRORs, the error-free subset at the next phase (_subset) is
+    taken, else the minimal plan; `held` = the ERRORs of the full draft the applied plan does not have (the wake names
+    them). errs = ERRORs of the plan returned (the caller applies nothing then); raised = (from, to) or None."""
+    s = state or {}
+    prev = applied_plan(save_dir)
+    fort = fort_facts(save_dir, state)
+    ph = phases if phases is not None else load_phases()
+    applied = applied_builds(save_dir, state)
+    cur = s.get("phase") or "P0"
+    season = (s.get("t") or {}).get("season", 0)
+    tp = tpls if tpls is not None else templates()
+    doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort)
+    doc["phase_target"] = cur
+    doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
+    doc = _with_new(doc, prev, [(si, b) for si, _, b in new_builds(doc, prev) if minimal_ok(b)])
+    errs, warn = _fix_rounds(doc, state, prev, fort, decisions, tp, season, minimal_ok)
+    out = {"doc": doc, "errs": errs, "warn": warn, "held": [], "raised": None}
+    nxt = next_phase(ph, cur) if raise_due(save_dir, state, prev) else None
+    if nxt:
+        cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt)
+        if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
+            cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
+            best = (cand, cwarn) if not cerrs else _subset(cand, state, prev, fort, decisions, tp)
+            if best is not None:
+                out.update(doc=best[0], errs=[], warn=best[1], raised=(cur, nxt))
+            if cerrs:
+                left = check(out["doc"], state, decisions=decisions, tpls=tp, prev=prev, fort=fort)[0]
+                out["held"] = [e for e in cerrs if e not in left]
+    doc = out["doc"]
+    same = bool(prev) and prev.get("year") == doc["year"]
     n = sum(len(se["build"]) for se in doc["seasons"]) - (sum(len(se["build"]) for se in prev["seasons"]) if same else 0)
+    if out["raised"]:
+        what = f"phase_target {out['raised'][0]} -> {out['raised'][1]} after a quiet year (no star phase)"
+    else:
+        what = f"only seal, tombs, hospital, food/drink and refuge, phase_target {doc['phase_target']} (no star phase)"
+    held = f"; {len(out['held'])} ERROR held back" if out["held"] else ""
     doc["notes"] = (f"{MINIMAL_TAG}: follow applied it after {stale_years()} years without a plan apply; {n} new build"
-                    f"{'s' if n != 1 else ''}, only seal, tombs, hospital, food/drink and refuge, phase_target "
-                    f"{doc['phase_target']} (no star phase). Replace it: dfllm plan propose y.json")
-    return doc, errs, warn
+                    f"{'s' if n != 1 else ''}, {what}{held}. Replace it: dfllm plan propose y.json")
+    return out
+
+
+def minimal_plan(save_dir: Path, state: dict | None, phases: dict | None = None, tinfo: dict | None = None,
+                 decisions: dict | None = None, tpls: list[str] | None = None) -> tuple[dict, list[str], list[str]]:
+    """(plan, errors, warnings) of the plan follow applies when nobody approves one (auto_plan): the minimal plan, or
+    after a quiet year under a minimal plan the next phase (BUG-132). Errors left: the caller applies nothing."""
+    r = auto_plan(save_dir, state, phases, tinfo=tinfo, decisions=decisions, tpls=tpls)
+    return r["doc"], r["errs"], r["warn"]
 
 
 def apply_minimal(save_dir: Path, by: str = "follow", wait_s: float = 5.0) -> tuple[list[str], str]:
-    """Build and apply the minimal plan (follow's FR-86 fallback). (errors, message); nothing is written on errors."""
+    """Build and apply the automatic plan (follow's FR-86 fallback, BUG-132 raise). (errors, message); nothing is
+    written on errors. The message names a raise and the ERRORs of a raise draft that were held back."""
     state = files.read_state(save_dir)
     if state is None:
         return ["no valid state: nothing to plan from"], "not applied"
-    doc, errs, _ = minimal_plan(save_dir, state)
+    r = auto_plan(save_dir, state)
+    if r["errs"]:
+        return r["errs"], "not applied"
+    errs, msg = apply(save_dir, r["doc"], by=by, wait_s=wait_s)
     if errs:
-        return errs, "not applied"
-    return apply(save_dir, doc, by=by, wait_s=wait_s)
+        return errs, msg
+    if r["raised"]:
+        msg = f"{r['raised'][0]} -> {r['raised'][1]}; " + msg
+    if r["held"]:
+        msg += f"; {len(r['held'])} ERROR held back: " + "; ".join(e[:120] for e in r["held"][:2])
+    return [], msg
 
 
 def review_note(save_dir: Path, state: dict | None = None) -> str:

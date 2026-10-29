@@ -139,3 +139,30 @@ def test_documents_carry_the_decisions():
     entry = log[log.index("FR-95"):][:6000]
     for part in ("Why", "What changed", "Live check"):
         assert part in entry
+
+
+# ---------------------------------------------------------------- merge with BUG-130 (the parked fortcore case)
+def test_a_core_resumed_in_observe_mode_is_no_stopped_core_for_the_re_site(tmp_path, monkeypatch):
+    """BUG-130 re-sites a fortcore parked at breach:damp; FR-95's boot resumes that core in observe mode (AQ_OBSERVE src
+    resume). A core whose newest word is AQ_OBSERVE digs again: no re-site, no second fortcore. A later stop counts."""
+    from cli_v2_helpers import append_events, ev
+    monkeypatch.setenv("DFLLM_CONFIG", str(tmp_path / "config"))
+    save = make_runtime(tmp_path)
+    try:
+        pid, damp = "y707s0b1", [87, 59, 5]
+        doc = json.loads((save / "bp" / "y3s0b0.json").read_text("utf-8"))
+        doc.update(id=pid, tpl="fortcore", site="S1", anchor=[48, 30, 130], rot=0, params={"stage": 1},
+                   manifest={"v": 2})
+        (save / "bp" / f"{pid}.json").write_text(json.dumps(doc), "utf-8")
+        files.write_json_atomic(save / "manifest.json", {"v": 2, "breaches": [
+            {"pos": damp, "why": "damp", "proj": pid, "tpl": "fortcore"}]})          # a manifest from before the boot
+        n0 = max([e["n"] for e in files.iter_events_rev(save)] or [0])
+        append_events(save, [ev(n0 + 1, "BREACH_STOP", "stop", {"proj": pid, "why": "damp", "pos": damp}),
+                             ev(n0 + 2, "AQ_OBSERVE", "observe", {"proj": pid, "tpl": "fortcore", "src": "resume"})])
+        st = copy.deepcopy(files.read_state(save))
+        st["proj"] = [[pid, "s1.dig", 0, ""]]
+        assert plan.core_breaches(save, st) == []
+        append_events(save, [ev(n0 + 3, "BREACH_STOP", "stop", {"proj": pid, "why": "heavy_aquifer", "pos": damp})])
+        assert [b["proj"] for b in plan.core_breaches(save, st)] == [pid]
+    finally:
+        reset_paths()

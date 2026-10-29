@@ -119,6 +119,8 @@ M.DEFAULTS = {
   stress_week = 8400,
   tomb_repair = true, tomb_acts_per_run = 20, entomb_per_run = 8, entomb_retry = 2400, entomb_tries = 3,
   tomb_open_per_run = 120, far_check = 60,         -- BUG-062: flag-only opens a run (own budget); bodies checked for another walk group
+  -- BUG-133: assignments a run (own budget, before removals and frees); the memorial slabs placed a run (0 = none)
+  tomb_assign_per_run = 20, memorials = 2,
   ghost_every = 8400, doctors = 4, posts_per_run = 4, mood_thirst = 30000, mood_hunger = 40000,
   mood_risk_every = 2400, wake_wall_s = 600,
   -- BUG-063: the drink nook from mood_act on, MOOD_CRITICAL from mood_crit (thirst) / mood_crit_hunger, the mood check every
@@ -797,7 +799,15 @@ local function corpse_seen(r, p, it)
   if f.in_building then                       -- interred (or held by another building): who lies where
     if math.type(uid) == 'integer' and uid >= 0 then
       local okh, h = pcall(dfhack.items.getHolderBuilding, it)        -- Lua API.txt:2047
-      if okh and h then r.interred[h.id], r.held_by[uid] = uid, h.id end
+      -- BUG-133 (Run 14: 'elsewhere' frees over coffins that held two bodies): a coffin can hold several bodies; occ is
+      -- the first one seen, inside[coffin] every one of them
+      if okh and h then
+        r.interred[h.id], r.held_by[uid] = r.interred[h.id] or uid, h.id
+        r.inside = r.inside or {}
+        local set = r.inside[h.id] or {}
+        set[uid] = true
+        r.inside[h.id] = set
+      end
     end
     return
   end
@@ -989,7 +999,7 @@ local function tomb_index(K, r)
     if rc then
       local x, y, z = rc.x1, rc.y1, rc.z
       local e = {id = cof.id, x = x, y = y, z = z, built = built(cof), zones = {}, occ = r.interred[cof.id],
-                 other = 0, bed = false}
+                 occs = r.inside and r.inside[cof.id] or {}, other = 0, bed = false}
       for _, bd in ipairs(T.beds) do if covers(bd, x, y, z) then e.bed = true end end
       local ok, zs = pcall(dfhack.buildings.findCivzonesAt, {x = x, y = y, z = z})   -- Lua API.txt:2488
       for _, zn in ipairs(ok and type(zs) == 'table' and zs or {}) do
@@ -1035,7 +1045,7 @@ end
 -- tomb zone over it, no Bedroom (FR-42) and no other zone on its tile
 local function usable(e, uid)
   if not e.built or e.bed or e.other > 0 then return false end
-  if e.occ ~= nil and e.occ ~= uid then return false end
+  if e.occ ~= nil and not (uid ~= nil and e.occs[uid]) then return false end      -- BUG-133: anybody else inside
   local n = 0
   for _, z in ipairs(e.zones) do if not z.drop then n = n + 1 end end
   return n == 1
@@ -1161,7 +1171,7 @@ local function body_causes(K, c, r, p, T, uid, now, nfree)
     local e = z.coffins[1]
     if not e or not e.built then add('no_coffin')
     else
-      if e.occ ~= nil and e.occ ~= uid then add('coffin_taken') end
+      if e.occ ~= nil and not e.occs[uid] then add('coffin_taken') end
       if #e.zones > 1 or e.other > 0 then add('zone_shared') end
       if e.bed then add('bedroom') end
       if b.pos and not reach_ok(K, b.pos, {x = e.x, y = e.y, z = e.z}) then add('unreachable') end
@@ -1255,7 +1265,7 @@ end
 
 -- the repair plan (marks on the index) and its acts; returns the act counts
 local function tomb_repair(K, c, r, p, T, now)
-  local acts = {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0}
+  local acts = {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0, kept_occ = 0}
   local mode = K.mode()
   local force = st.force_repair == true
   local zone_ok = force or (c.tomb_repair ~= false and mode ~= 'SIEGE' and mode ~= 'BREACH')
@@ -1269,7 +1279,7 @@ local function tomb_repair(K, c, r, p, T, now)
     for _, z in ipairs(e.zones) do if z.small then small[#small + 1] = z end end
     if #small > 1 then
       local keep
-      for _, z in ipairs(small) do if e.occ ~= nil and z.unit == e.occ then keep = z end end
+      for _, z in ipairs(small) do if e.occ ~= nil and e.occs[z.unit] then keep = z end end
       for _, z in ipairs(small) do if not keep and z.unit >= 0 and r.bodies[z.unit] then keep = z end end
       for _, z in ipairs(small) do if not keep and z.unit < 0 then keep = z end end
       keep = keep or small[1]
@@ -1293,7 +1303,7 @@ local function tomb_repair(K, c, r, p, T, now)
     local u = z.unit
     if not z.drop and u >= 0 and unit_dead(u) then
       local inside_here = false
-      for _, e in ipairs(z.coffins) do if e.occ == u then inside_here = true end end
+      for _, e in ipairs(z.coffins) do if e.occs[u] then inside_here = true end end
       if not inside_here then
         if r.held_by[u] and T.cof_by_id[r.held_by[u]] then z.free = 'elsewhere'
         elseif not r.bodies[u] then z.free = 'stale'
@@ -1301,6 +1311,14 @@ local function tomb_repair(K, c, r, p, T, now)
           local ok = false
           for _, e in ipairs(z.coffins) do if usable(e, u) then ok = true end end
           if not ok then z.free = 'bad' end
+        end
+      end
+      -- BUG-133 (Run 14: 'freed 20, opened 0, assigned 0, entomb 0' 631 times, '14046 freed re-given by DF'): a zone
+      -- over a coffin that holds a body is never freed; DF hands a free zone over an occupied coffin to the next dead,
+      -- who can never lie there, and the free came again every run
+      if z.free then
+        for _, e in ipairs(z.coffins) do
+          if e.occ ~= nil and z.free then z.free, acts.kept_occ = nil, acts.kept_occ + 1 end
         end
       end
     end
@@ -1329,12 +1347,14 @@ local function tomb_repair(K, c, r, p, T, now)
     if not z then break end
     z.assign = uid
   end
-  -- acts: removals, frees, assignments, then the remaining free zones opened to citizens
-  local budget = c.tomb_acts_per_run
+  -- acts: the assignments (and the frees of the zones they give) on their own budget first, then removals and frees,
+  -- then the remaining free zones opened to citizens
+  local budget = {g = c.tomb_acts_per_run, a = num(c.tomb_assign_per_run) or 20}
   st.bad_zone = st.bad_zone or {}
-  local function act(op, z, uid)
-    if budget <= 0 or (st.bad_zone[z.id] or 0) >= 3 then return false end
-    budget = budget - 1
+  local function act(op, z, uid, own)
+    local k = own or 'g'
+    if budget[k] <= 0 or (st.bad_zone[z.id] or 0) >= 3 then return false end
+    budget[k] = budget[k] - 1
     local ok = K.act.tomb_zone(op, z.id, uid)
     if not ok then
       st.bad_zone[z.id] = (st.bad_zone[z.id] or 0) + 1
@@ -1342,31 +1362,39 @@ local function tomb_repair(K, c, r, p, T, now)
     end
     return ok
   end
-  for _, z in ipairs(T.zones) do
-    if z.drop then
-      if act('remove', z) then acts.removed, z.gone = acts.removed + 1, true end
-    end
-  end
   local lk = M.lockstate()
   -- BUG-062: the frees an unburied body is waiting for come first, then the assignments, then the rest of the frees with
   -- what is left of the budget (160 stale owners freed 20 at a time used to take the whole budget before any body got
-  -- its zone)
-  local function release(z)
-    if act('free', z) then
+  -- its zone). BUG-133: the zones the bodies are given (their free first) on the assignment budget, before the removals
+  local function release(z, own)
+    if act('free', z, nil, own) then
       acts.freed, z.unit, z.closed = acts.freed + 1, -1, false
       lk.opened[z.id], lk.freed[z.id], lk.assigned[z.id] = now, now, nil
       acts.why = acts.why or {}
       acts.why[z.free] = (acts.why[z.free] or 0) + 1                 -- bad | stale | elsewhere
     end
   end
-  for _, z in ipairs(T.zones) do                              -- a body's own bad zone, and the zones the bodies are given
-    if z.free and (z.assign or z.free == 'bad') and not z.drop then release(z) end
+  local given = {}
+  for _, z in ipairs(T.zones) do if z.assign and not z.drop then given[z.assign] = true end end
+  for _, z in ipairs(T.zones) do                              -- the bad zone a body leaves for the one it is given
+    if z.free == 'bad' and not z.assign and not z.drop and given[z.unit] then release(z, 'a') end
+  end
+  for _, z in ipairs(T.zones) do                              -- the zones the bodies are given: freed, then assigned
+    if z.assign and not z.drop then
+      if z.free and z.unit >= 0 then release(z, 'a') end
+      if z.unit < 0 and act('assign', z, z.assign, 'a') then
+        acts.assigned, z.unit = acts.assigned + 1, z.assign
+        lk.assigned[z.id] = now
+      end
+    end
   end
   for _, z in ipairs(T.zones) do
-    if z.assign and not z.drop and z.unit < 0 and act('assign', z, z.assign) then
-      acts.assigned, z.unit = acts.assigned + 1, z.assign
-      lk.assigned[z.id] = now
+    if z.drop then
+      if act('remove', z) then acts.removed, z.gone = acts.removed + 1, true end
     end
+  end
+  for _, z in ipairs(T.zones) do                              -- a body's own bad zone
+    if z.free == 'bad' and not z.assign and not z.drop and z.unit >= 0 then release(z) end
   end
   for _, z in ipairs(T.zones) do
     if z.free and not z.assign and z.free ~= 'bad' and not z.drop then release(z) end
@@ -1436,7 +1464,8 @@ end
 
 local LEGEND = 'coffins: p pos, b built, occ body inside, bed in a Bedroom zone, oz other zones, z [zone, unit, open]; '
                .. 'causes: no_coffin no_zone coffin_taken zone_shared bedroom zone_owner unflagged unreachable '
-               .. 'in_stockpile undiscovered no_job zone_off zone_locked corpse_far corpse_unreachable'
+               .. 'in_stockpile undiscovered no_job zone_off zone_locked corpse_far corpse_unreachable; '
+               .. 'ghosts [unit, cause, slab: none order loose build placed nohf]'
 
 -- the inspect what=tombs document, built from the last run's plain index on request
 local function tomb_report(src)
@@ -1467,7 +1496,12 @@ local function tomb_report(src)
   while #unb > 30 do table.remove(unb) end
   local out = {tick = now, coffins = #T.coffins, zones = #T.zones, free = #free_zones(T), jobs = jobs,
                repaired = repaired and 1 or 0, acts = acts, list = list, loose = loose, unburied = unb,
-               ghosts = ghosts, unburied_n = unb_n, legend = LEGEND}
+               ghosts = ghosts, unburied_n = unb_n, legend = LEGEND, ghosts_n = src.ghosts_n or #ghosts}
+  if src.mem then                                       -- BUG-133: the memorial slab states and why one waits
+    out.mem = {}
+    for k, n in pairs(src.mem.n) do out.mem[k] = n end
+    if src.mem.why then out.mem_why = trunc(src.mem.why, 200) end
+  end
   -- BUG-062: the zone lock (closed counts of the last run, then the cumulative 'closed again' tally since boot) and
   -- why coffins are no free tombs (live data for who closes the zones and why none is free)
   out.locked = #free_zones(T, true)
@@ -2424,6 +2458,231 @@ local function phase_coffins(K, c, r, p)
   return res
 end
 
+---------------------------------------------------------------- memorial slabs (BUG-133, Run 14)
+-- Run 14 region2-site90 (y502-y716: ghosts 0 -> 49; economy removed 47 EngraveSlab orders for want of a blank slab, the
+-- three memorials that were engraved were never placed: nothing in the kernel placed a slab, and every engraved memorial
+-- counted as a served ghost). A ghost rests once its memorial slab (an engraved SLAB: engraving_type Memorial, topic = the
+-- ghost's historical figure) stands as a Slab building. Each care run reads every ghost's slab state (orderfix OF.slabs):
+--   none   no memorial and no EngraveSlab order for the figure (economy orders the blank slab and the engraving)
+--   order  an EngraveSlab order for the figure stands (the masons engrave it)
+--   loose  an engraved memorial lies about (care places it)
+--   build  it is in a planned Slab building (the build job holds it)
+--   placed it stands built: the ghost is served
+--   nohf   the unit has no historical figure (no slab can name it)
+-- In PEACE / RECOVERY up to `memorials` loose memorials a run are placed with act.slab_place (Build > Furniture > Slab with
+-- that slab chosen; the act unforbids it as its toggle does and refuses one nobody can walk to): on a free roofed floor
+-- tile at the inner part of a free 3x3 (all eight neighbours free floor: a slab never stands on a way, a door or a stair,
+-- and every way around it stays open), judged as the coffin search judges its floor (revealed floor, no designation,
+-- building, zone or stockpile, roofed, coffin_entrance_r from the entrances, the citizens' walk group; free_rects),
+-- nearest the crypt, else the core, else the citizens (coffin_seeds), coffin_scan_r tiles around on the seed's level.
+-- A refused placement is tried again a day later, three times. GHOSTS d (slabs, mem) and inspect tombs (ghosts, mem,
+-- mem_why) say it.
+local MEM = {TRIES = 3, SKIP = {'in_job', 'in_building', 'in_inventory', 'trader', 'removed', 'garbage_collect',
+                                'construction', 'hostile'}, STATES = {'none', 'order', 'loose', 'build', 'placed'}}
+MEM.OF = require('dfllm.orderfix')
+
+-- the fort's ghosts now: census.g (sense; fresh within two days) first, then the ghostly units of the death record
+function MEM.ghosts(K, p, now)
+  local ids, seen = {}, {}
+  local cg = K.census.g
+  local fresh = type(cg) == 'table' and type(cg.ids) == 'table' and now - (num(cg.tick) or -DAY * 3) < DAY * 2
+  for _, id in ipairs(fresh and cg.ids or {}) do
+    if not seen[id] then seen[id] = true; ids[#ids + 1] = id end
+  end
+  for _, id in ipairs(p.dead) do
+    local u = df.unit.find(id)
+    if not seen[id] and u and dfhack.units.isGhost(u) then seen[id] = true; ids[#ids + 1] = id end   -- Lua API.txt:1508
+  end
+  table.sort(ids)
+  return ids
+end
+
+-- the figures an open EngraveSlab order names (specdata is a union: read only on an EngraveSlab order, BUG-119)
+function MEM.orders()
+  local out = {}
+  local jt = df.job_type and df.job_type.EngraveSlab
+  if jt == nil then return out end
+  for _, o in ipairs(vec(function() return df.global.world.manager_orders.all end)) do
+    local ok, hf = pcall(function()
+      if o.job_type == jt and (num(o.amount_left) or 0) > 0 then return num(o.specdata.hist_figure_id) end
+    end)
+    if ok and hf then out[hf] = true end
+  end
+  return out
+end
+
+-- why a loose memorial cannot be chosen in the slab list now (nil: it can)
+function MEM.held(K, it)
+  if not it then return 'gone' end
+  for _, f in ipairs(MEM.SKIP) do
+    local ok, on = pcall(function() return it.flags[f] end)
+    if ok and on == true then return (f:gsub('_', ' ')) end
+  end
+  local x, y, z = item_pos(it)
+  if not revealed(K, x, y, z) then return 'on a tile not revealed' end
+end
+
+-- the free floor around the seeds (read once a run): {levels = {{seed, L}}, reads, why}
+function MEM.grid(K, c, r)
+  local T = r.tomb_src and r.tomb_src.T or {coffins = {}, zones = {}}
+  local cs = {ents = entrance_list(K), boxes = r.boxes, er = c.coffin_entrance_r}
+  local R = num(c.coffin_scan_r) or 16
+  local G, where = {levels = {}, reads = 0}, {}
+  for _, sd in ipairs(coffin_seeds(K, r, T)) do
+    where[#where + 1] = string.format('%s %d,%d,%d', sd.why, sd.x, sd.y, sd.z)
+    local L = {x0 = sd.x - R, y0 = sd.y - R, w = 2 * R + 1, h = 2 * R + 1, z = sd.z, g = {}}
+    local occ = occ_index({L.x0, L.y0, L.z, L.x0 + L.w - 1, L.y0 + L.h - 1, L.z}, {})
+    local nosky = false
+    for j = 0, L.h - 1 do
+      local y, row = L.y0 + j, {}
+      for i = 0, L.w - 1 do
+        local x = L.x0 + i
+        if not occ[key3(x, y, L.z)] and not near_entrance(cs, x, y, L.z) then
+          local ok, t = K.call('snapshot', 'tile', x, y, L.z)
+          G.reads = G.reads + 1
+          if not ok then G.why = 'no tile reader'; return G end
+          if type(t) == 'table' and t.c == '.' and (t.dig or '') == '' and (t.bld or '') == '' then row[#row + 1] = i end
+        end
+      end
+      if #row > 0 and not nosky then                    -- roofed floor only (one open-sky query per row)
+        local pts = {}
+        for k, i in ipairs(row) do pts[k] = {L.x0 + i, y, L.z} end
+        local ok, res = K.call('snapshot', 'outside_near', pts, 0)
+        if ok and type(res) == 'table' then
+          for k = 1, #row do if res[k] ~= 0 then row[k] = false end end
+        else nosky = true end
+      end
+      for _, i in ipairs(row) do if i then L.g[j * L.w + i] = true end end
+    end
+    G.levels[#G.levels + 1] = {seed = sd, L = L}
+  end
+  r.left = r.left - G.reads * PROBE_COST
+  G.why = string.format('no free 3x3 floor (roofed, outside zones and buildings, %d+ tiles from the entrances, reachable) '
+                        .. 'within %d of %s', c.coffin_entrance_r, R, #where > 0 and table.concat(where, '; ') or 'no seed')
+  return G
+end
+
+-- the tile nearest a seed whose eight neighbours are free floor too (the inner part of a free rectangle of 3x3 or more),
+-- on the citizens' walk group; nil when none
+function MEM.pick(K, G)
+  for _, lv in ipairs(G.levels) do
+    local L, sd, cand = lv.L, lv.seed, {}
+    for _, rc in ipairs(free_rects(L, 3)) do
+      for y = rc.y0 + 1, rc.y1 - 1 do
+        for x = rc.x0 + 1, rc.x1 - 1 do
+          local k = key3(x, y, L.z)
+          if not cand[k] then cand[k] = {(x - sd.x) * (x - sd.x) + (y - sd.y) * (y - sd.y), y, x} end
+        end
+      end
+    end
+    local list = {}
+    for _, v in pairs(cand) do list[#list + 1] = v end
+    table.sort(list, function(a, b)
+      for i = 1, 3 do if a[i] ~= b[i] then return a[i] < b[i] end end
+      return false
+    end)
+    for i, v in ipairs(list) do
+      if i > 8 then break end
+      local okf, far = K.call('snapshot', 'far', v[3], v[2], L.z)          -- unknown counts as near
+      if not (okf and far == true) then return {v[3], v[2], L.z}, L end
+    end
+  end
+end
+
+-- "none 3, loose 1, placed 2" (the states with ghosts in them)
+function MEM.text(n)
+  local parts = {}
+  for _, s in ipairs(MEM.STATES) do if (n[s] or 0) > 0 then parts[#parts + 1] = n[s] .. ' ' .. s end end
+  if (n.nohf or 0) > 0 then parts[#parts + 1] = n.nohf .. ' nohf' end
+  return table.concat(parts, ', ')
+end
+
+-- one loose memorial: placed, or why not (tries, a day apart)
+function MEM.place(K, c, r, p, g, now, mem, G)
+  local sid = fmt(g.item)
+  local rec = type(p.slabt[sid]) == 'table' and p.slabt[sid] or nil
+  local tries = rec and num(rec.n) or 0
+  local held = MEM.held(K, df.item.find(g.item))
+  if held then mem.why = mem.why or string.format('slab %s of unit %d: %s', sid, g.uid, held); return G, false end
+  if tries >= MEM.TRIES then
+    mem.why = mem.why or string.format('slab %s of unit %d: given up after %d tries (%s)', sid, g.uid, tries, tostring(rec.why))
+    return G, false
+  end
+  if rec and now - (num(rec.t) or 0) < DAY then return G, false end
+  -- a search that found no free 3x3 is not read again (up to 3 x 33 x 33 tiles) before coffin_retry ticks
+  local ns = type(p.mem_nosite) == 'table' and p.mem_nosite or nil
+  if not G and ns and now - (num(ns.t) or 0) < c.coffin_retry and now >= (num(ns.t) or 0) then
+    mem.why = tostring(ns.why)
+    return G, false, true
+  end
+  G = G or MEM.grid(K, c, r)
+  local site, L = MEM.pick(K, G)
+  if not site then
+    mem.why, p.mem_nosite = G.why, {t = now, why = trunc(G.why, 200)}
+    K.log('warn', 'memorial: slab %s of ghost unit %d waits: %s', sid, g.uid, G.why)
+    return G, false, true
+  end
+  p.mem_nosite = nil
+  local ok, res = K.act.slab_place(g.item, site[1], site[2], site[3])
+  if not ok then
+    p.slabt[sid] = {t = now, n = tries + 1, why = trunc(tostring(res), 60)}
+    mem.why = string.format('slab %s of unit %d refused at %d,%d,%d: %s', sid, g.uid, site[1], site[2], site[3],
+                            trunc(tostring(res), 60))
+    K.log('warn', 'memorial: %s (try %d of %d)', mem.why, tries + 1, MEM.TRIES)
+    return G, false
+  end
+  mem.by[g.uid], p.slabt[sid] = 'build', nil
+  L.g[(site[2] - L.y0) * L.w + (site[1] - L.x0)] = nil       -- taken: the next slab keeps its distance
+  K.log('info', 'memorial: slab %s of ghost unit %d placed at %d,%d,%d (building %s)', sid, g.uid, site[1], site[2], site[3],
+        tostring(res))
+  return G, true
+end
+
+local function phase_memorials_run(K, c, r, p)
+  local now = K.now().tick
+  local mem = {by = {}, n = {}}
+  for _, s in ipairs(MEM.STATES) do mem.n[s] = 0 end
+  r.mem = mem
+  local ids = MEM.ghosts(K, p, now)
+  if #ids == 0 then return end
+  local sl, ords, loose = MEM.OF.slabs(4000), MEM.orders(), {}
+  for _, id in ipairs(ids) do
+    local u = df.unit.find(id)
+    local hf = u and num(u.hist_figure_id) or -1
+    local s = 'none'
+    if hf < 0 then s = 'nohf'
+    elseif sl.placed[hf] then s = 'placed'
+    elseif sl.build[hf] then s = 'build'
+    elseif sl.loose[hf] then s = 'loose'; loose[#loose + 1] = {uid = id, item = sl.loose[hf]}
+    elseif ords[hf] then s = 'order' end
+    mem.by[id] = s
+  end
+  local mode, per = K.mode(), num(c.memorials) or 2
+  if #loose > 0 and per > 0 and (mode == 'PEACE' or mode == 'RECOVERY') then
+    p.slabt = json.object(type(p.slabt) == 'table' and p.slabt or {})
+    local live = {}
+    for _, g in ipairs(loose) do live[fmt(g.item)] = true end
+    for sid in pairs(p.slabt) do if not live[sid] then p.slabt[sid] = nil end end
+    local G, placed = nil, 0
+    for _, g in ipairs(loose) do
+      if placed >= per then break end
+      local ok, stop
+      G, ok, stop = MEM.place(K, c, r, p, g, now, mem, G)
+      if ok then placed = placed + 1 end
+      if stop then break end
+    end
+  end
+  for _, s in pairs(mem.by) do mem.n[s] = (mem.n[s] or 0) + 1 end
+end
+
+local function phase_memorials(K, c, r, p)
+  if c.memorials == false or c.memorials == 0 then r.mem = nil; return true end
+  local ok, err = pcall(phase_memorials_run, K, c, r, p)
+  if not ok then K.log('warn', 'care memorials: %s', tostring(err)) end
+  st.mem = r.mem
+  return true
+end
+
 ---------------------------------------------------------------- doctors and hospital posts (FR-48, Run 9)
 -- how many doctor labors a citizen has on; nil when the labors cannot be read (then care leaves the unit alone)
 local function medic_labors(u)
@@ -3282,8 +3541,8 @@ end
 -- needs after corpses and zones (citizen remains, coffins), the reserve after the needs (moods first)
 -- tombs after corpses and zones (bodies, interments), doctors after the units (moods, patients)
 -- coffins last: its space search reads tiles over several frames and must not hold up the moods
-local PHASES = {phase_units, phase_doctors, phase_corpses, phase_zones, phase_tombs, phase_captives, phase_barrels,
-                phase_needs, phase_reserve, phase_tools, phase_coffins}
+local PHASES = {phase_units, phase_doctors, phase_corpses, phase_zones, phase_tombs, phase_memorials, phase_captives,
+                phase_barrels, phase_needs, phase_reserve, phase_tools, phase_coffins}
 
 local function new_run(K, c, p)
   local cu = K.census.u
@@ -3370,12 +3629,14 @@ local function ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
     end
   end
   if #all == 0 then p.ghost = CAD.quiet(p.ghost); return end
-  local units, causes, tally, order = {}, {}, {}, {}
+  local units, causes, tally, order, slabs = {}, {}, {}, {}, {}
+  local mby = r.mem and r.mem.by or {}
   for i, id in ipairs(all) do
     local why = cause_of(r, id)
     if i <= 8 then
       units[i] = id
       causes[i] = trunc(string.format('%d:%s', id, why), 60)
+      slabs[i] = mby[id] or '-'                          -- BUG-133: the unit's memorial slab state ('-': no ghost)
     end
     for tok in why:gmatch('[^+]+') do
       if not tally[tok] then order[#order + 1] = tok end
@@ -3397,10 +3658,13 @@ local function ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
   if tally.corpse_far then hint = hint .. '; slab for corpse_far (another walk group, no coffin helps)' end
   -- BUG-105: a body on a tile nobody can path to (tree crown, no walk group): only a slab lays its ghost to rest
   if tally.corpse_unreachable then hint = hint .. '; slab for corpse_unreachable (no way to its tile)' end
+  local mtxt = r.mem and MEM.text(r.mem.n) or ''
+  if mtxt ~= '' then hint = hint .. '; slabs ' .. mtxt end
   K.emit('GHOSTS', 'A', trunc(string.format('%d ghost(s), %d citizen(s) unburied > %d d: %s%s; inspect tombs, tombs.repair',
                                            #ghost_ids, #old_ids, c.corpse_old // DAY, table.concat(parts, ', '), hint), 200),
          {ghosts = #ghost_ids, corpses = open, old = #old_ids, units = units, causes = causes,
-          far = tally.corpse_far or 0, unreach = tally.corpse_unreachable or nil})
+          far = tally.corpse_far or 0, unreach = tally.corpse_unreachable or nil, slabs = r.mem and slabs or nil,
+          mem = mtxt ~= '' and trunc(mtxt, 200) or nil})
 end
 
 ---------------------------------------------------------------- deaths (FR-64)
@@ -3693,27 +3957,10 @@ local function finish(K, c, r, p)
   -- BUG-062 (Run 14 note 52: the brief said 12 ghosts, a count over the unit list 30): the ghostly units themselves
   -- first (sense walks the unit list and publishes the fort's own ghosts in census.g, fresh within two days), then the
   -- death record's: the number is checked against the units that are ghostly, not only against the deaths care saw
-  local ghosts, ghost_ids, gseen = 0, {}, {}
   local known = {}
   for _, id in ipairs(p.dead) do known[id] = true end
-  local cg = K.census.g
-  local fresh = type(cg) == 'table' and type(cg.ids) == 'table' and now - (num(cg.tick) or -DAY * 3) < DAY * 2
-  for _, id in ipairs(fresh and cg.ids or {}) do
-    if not gseen[id] then
-      gseen[id] = true
-      ghosts = ghosts + 1
-      ghost_ids[#ghost_ids + 1] = id
-    end
-  end
-  for _, id in ipairs(p.dead) do
-    local u = df.unit.find(id)
-    if not gseen[id] and u and dfhack.units.isGhost(u) then              -- Lua API.txt:1508
-      gseen[id] = true
-      ghosts = ghosts + 1
-      ghost_ids[#ghost_ids + 1] = id
-    end
-  end
-  table.sort(ghost_ids)
+  local ghost_ids = MEM.ghosts(K, p, now)
+  local ghosts = #ghost_ids
   local unrecorded = 0
   for _, id in ipairs(ghost_ids) do
     if not known[id] then unrecorded = unrecorded + 1; remember_dead(p, id) end
@@ -3724,9 +3971,10 @@ local function finish(K, c, r, p)
   st.unrec = unrecorded
   ghost_alarm(K, c, r, p, ghost_ids, old_ids, open, now)
   if r.tomb_src then
-    local gl = {}
-    for i = 1, math.min(20, #ghost_ids) do gl[i] = {ghost_ids[i], cause_of(r, ghost_ids[i])} end
-    r.tomb_src.ghosts = gl
+    -- BUG-133: the list stays at 20, the count is every ghost; each with its memorial slab state
+    local gl, by = {}, r.mem and r.mem.by or {}
+    for i = 1, math.min(20, #ghost_ids) do gl[i] = {ghost_ids[i], cause_of(r, ghost_ids[i]), by[ghost_ids[i]] or '?'} end
+    r.tomb_src.ghosts, r.tomb_src.ghosts_n, r.tomb_src.mem = gl, #ghost_ids, r.mem
     st.tombs = r.tomb_src
   end
   st.doctors = r.doctors or st.doctors
@@ -4101,13 +4349,12 @@ local function fresh_tombs(K, c, p)
   local causes = {}
   for uid in pairs(r.bodies) do causes[uid] = body_causes(K, c, r, p, T, uid, now, nfree) end
   r.causes = causes
-  local gl = {}
-  for _, id in ipairs(p.dead) do
-    local u = df.unit.find(id)
-    if #gl < 20 and u and dfhack.units.isGhost(u) then gl[#gl + 1] = {id, cause_of(r, id)} end
-  end
+  local gl, ids = {}, MEM.ghosts(K, p, now)            -- BUG-133: every ghost counted, 20 listed
+  local by = st.mem and st.mem.by or {}
+  for i = 1, math.min(20, #ids) do gl[i] = {ids[i], cause_of(r, ids[i]), by[ids[i]] or '?'} end
   local old = st.tombs
-  return {T = T, bodies = r.bodies, causes = causes, now = now, jobs = burial_jobs(), ghosts = gl,
+  return {T = T, bodies = r.bodies, causes = causes, now = now, jobs = burial_jobs(), ghosts = gl, ghosts_n = #ids,
+          mem = st.mem,
           acts = old and old.acts or {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0},
           repaired = old and old.repaired or false, loose_buried = r.loose_buried, fresh = true,
           run_tick = old and old.now or -1, partial = #v > n and 1 or nil, lock = lock_scan(T, true), far = r.far,
@@ -4131,8 +4378,12 @@ function M.inspect(K, what, key)
   src.last = st.tomb_last
   local d = tomb_report(src)
   if src.partial then d.partial = 1 end
-  local msg = string.format('tombs: %d coffins, %d free, %d unburied, %d ghosts, %d burial jobs', d.coffins, d.free,
-                            d.unburied_n, #d.ghosts, d.jobs)
+  local msg = string.format('tombs: %d coffins, %d free, %d unburied, %d ghosts%s, %d burial jobs', d.coffins, d.free,
+                            d.unburied_n, d.ghosts_n, d.ghosts_n > #d.ghosts and
+                            string.format(' (+%d more not listed)', d.ghosts_n - #d.ghosts) or '', d.jobs)
+  if d.mem and MEM.text(d.mem) ~= '' then                -- BUG-133: the memorial slabs
+    msg = msg .. '; memorials: ' .. MEM.text(d.mem) .. (d.mem_why and ('; memorial: ' .. d.mem_why) or '')
+  end
   if (d.unreach_n or 0) > 0 then msg = msg .. string.format(' (%d unreachable: tree crowns, no walk group)', d.unreach_n) end
   if d.fresh then msg = msg .. string.format(' (rebuilt now, last care run at tick %d)', d.run_tick) end
   local la = st.tomb_last

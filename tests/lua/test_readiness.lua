@@ -931,4 +931,25 @@ T.test('BUG-117: a fort without a dwarf that can have a mood (0 or 19 citizens) 
 end)
 
 
+-- BUG-129 (Run 14, site90): a region export drops a far piece that does not fit (SNAPSHOT_READY drop/dropped); its
+-- tiles count as outside for the audit (the stricter side), so the audit counts; ready.audit.cov names the drop
+T.test('BUG-129: an audit of a region export that dropped a far piece counts; ready.audit.cov names it', function()
+  local W = world()
+  day(W)
+  function W.snap.export(K, o)
+    local d = {id = 'reg1', path = 'snap/reg1.json', purpose = 'audit', margin = '8,8,1', regions = 7, drop = 1,
+               dropped = 'seal c1a14d660b9fb1de01'}
+    K.emit('SNAPSHOT_READY', 'C', 'snapshot reg1', d)
+    return true, 'reg1'
+  end
+  local r = audit(W)
+  T.eq(r.ok, true, r.msg)
+  local ev = W.find_events('AUDIT')
+  T.eq(ev[#ev].d.ok, 1, 'a dropped far piece is no coverage fail')
+  W.state()
+  T.eq(ready(W).audit.cov, 'drop 1: seal c1a14d660b9fb1de01')
+  T.ok(not has(ready(W).fail, 'audit_fail'), T.show(ready(W).fail))
+end)
+
+
 T.done()

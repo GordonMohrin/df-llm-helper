@@ -738,8 +738,10 @@ class _Lint:
         if q in TILE_FNS or (v == "map" and q.endswith("world.map")) or q.startswith("df.map_block"):
             self.flags.add("tile_read")
             # live L2: the lever link screen offers only mechanisms the mechanic can reach (it warns
-            # need_accessible_mechanism); act.link_lever asks the walk groups the same question
-            reach = q == "dfhack.maps.canWalkBetween" and self.role == "act" and self.in_func("free_mechanisms")
+            # need_accessible_mechanism); act.link_lever asks the walk groups the same question. BUG-133: the slab list
+            # of Build > Furniture > Slab greys out a slab nobody can walk to; act.slab_place asks the same
+            reach = q == "dfhack.maps.canWalkBetween" and self.role == "act" and (self.in_func("free_mechanisms")
+                                                                                 or self.in_func("slab_place"))
             # FR-22/54: seal reads revealed tiles and walk groups for the reach/seal audits (units only by census id)
             if self.role not in ("sense", "snapshot", "seal") and not reach:
                 self.add(line, "tile-read")

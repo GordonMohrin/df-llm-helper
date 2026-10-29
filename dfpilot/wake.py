@@ -15,7 +15,8 @@ not wake; the follower acts on two of them without the LLM:
                                   type skipped) at prio 1, also while the fort manifest still lists a destroyed one
                                   (BUG-038: the kernel asks only while none stands); why=mandatory (runner, FR-76:
                                   a reclaimed fort lacks Carpenters, Masons, Craftsdwarfs, Still or Kitchen) -> only
-                                  the missing types of d.types, at prio 1
+                                  the missing types of d.types, at prio 1; why=slabs (economy, BUG-133: ghosts
+                                  and no mason's workshop, d.types [Masons]) -> the same
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
@@ -153,7 +154,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
                       "keep another way"}
 # FR-86: follow applied a minimal plan itself after plan.stale_apply_years years without a `plan apply`
 NEXT["PLAN_AUTO"] = ("tell Gordon (nobody approved a plan for years; follow applied the minimal one: seal, tombs, hospital, "
-                     "food/drink, refuge, no star phase); then dfllm plan propose y.json, plan check, plan apply replaces it")
+                     "food/drink, refuge, no star phase; after each quiet year one phase more, BUG-132; `ERROR held back` "
+                     "= what it left out: fix those); then dfllm plan propose y.json, plan check, plan apply replaces it")
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 CLICK_KEY = "needs_click"                      # supervise.CLICK_KEY (K2): the alarm for a save only a human can load now
@@ -164,7 +166,7 @@ AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery", "farmers",
-              "mandatory")                    # automatic placements (one each)
+              "mandatory", "slabs")           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -336,7 +338,8 @@ REFUGE_DRY_HINT = ("the refuge has no drink: next plan its drink store (tpl refu
 # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds outside the refuge): readiness R0 hospital_out;
 # BUG-040 (y453: Tiefe+ had no accepted water): then Kern+ next to the water
 HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accepted water inside Tiefe+, or in Kern+ when "
-                     "Tiefe+ has none (bp sites hospital names the water), then remove the old zones")
+                     "Tiefe+ has none (bp sites hospital names the water), then remove the old zones: status names the "
+                     "blocking zone and its dfllm cmd hospital.retire (BUG-131)")
 
 
 # BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant for good; Run 11 note 25: squads without a leader):
@@ -620,9 +623,10 @@ class Follower:
                 from .cmd import _moodable
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
-            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "mandatory":
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") in ("mandatory", "slabs"):
                 # FR-76 (Run 12 Trussroads, reclaimed: no carpenter, no craftsdwarf, no kitchen): the types the runner
-                # saw missing on the map, whatever the fort manifest lists (kept by `need`, BUG-066)
+                # saw missing on the map, whatever the fort manifest lists (kept by `need`, BUG-066). BUG-133: economy's
+                # why=slabs (ghosts wait for memorial slabs, no mason's workshop stands) the same way: the Masons alone
                 from .cmd import _extra_shops, _moodable
                 mood, extra = _moodable(), set(_extra_shops())
                 want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]
@@ -630,7 +634,7 @@ class Follower:
                     params = {"skip": ",".join(x for x in mood if x not in want)}
                     if any(x in extra for x in want):
                         params["add"] = ",".join(x for x in want if x in extra)
-                    self._request_place("mandatory", "workshops", params, "S1", now, prio=1, need=want)
+                    self._request_place(d["why"], "workshops", params, "S1", now, prio=1, need=want)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 # live L1: a strange mood needs a shop; BUG-042: economy's tannery request names the Tanners the map
                 # lacks, kept although the fort manifest lists a destroyed one (as the fishery, BUG-038)
@@ -743,7 +747,9 @@ class Follower:
                 ref = plan["year"]
             else:
                 ref = self.plan_auto.setdefault("first_y", year)
-            if year - ref < years or self.plan_auto.get("tried_y") == year:
+            # BUG-132: under the minimal plan a quiet game year is enough: the next automatic plan raises one phase
+            rise = year - ref < years and plan_mod.raise_due(self.dir, state, plan)
+            if (year - ref < years and not rise) or self.plan_auto.get("tried_y") == year:
                 return
             self.plan_auto["tried_y"] = year           # one try a game year, whatever comes out
             self.save_state()
@@ -752,7 +758,12 @@ class Follower:
                 self._fail("minimal plan", "; ".join(errs[:3]), now)
                 return
             self.plan_auto["applied_y"] = year
-            self._synth("PLAN_AUTO", f"no plan applied since y{ref}, now y{year}: follow applied the minimal plan ({msg})", now)
+            if rise:
+                self._synth("PLAN_AUTO", f"minimal plan y{ref}, a quiet year, now y{year}: follow applied the next "
+                                         f"automatic plan ({msg})", now)
+            else:
+                self._synth("PLAN_AUTO", f"no plan applied since y{ref}, now y{year}: follow applied the minimal plan "
+                                         f"({msg})", now)
         except Exception as ex:                        # noqa: BLE001 - the plan check must never stop the follower
             self._fail("minimal plan", f"{type(ex).__name__}: {ex}", now)
 

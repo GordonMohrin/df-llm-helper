@@ -106,6 +106,10 @@ decided:
     order of 53.12 ("mining designations ignore new warm/damp stone warnings") is not set: its field is not proven offline,
     and an unproven write is no UI action. Water >= 4/7 or a rising flow in our own tiles stops the dig for good
     (`breach:heavy_aquifer`, AQ_HEAVY, the shaft plugged). The old stop stays as a switch (`aqshaft.CFG.on`).
+    An aqshaft level's WATCH passes at flow <= 1 after a day; standing water <= 3/7 that has not risen for 3 days passes
+    too (the seal stopped the source; without a drain the shaft would wait for ever). Exception to decision 9: a project an
+    older kernel parked at `breach:damp` resumes at boot in observe mode (AQ_OBSERVE src resume) and leaves the manifest's
+    `breaches`, so BUG-130 re-sites only a fortcore whose stop is final.
 25. **The kernel may read the aquifer flag (`water_table`) of REVEALED tiles only**: what the vanilla drip icon and DFHack's
     warmdamp overlay show the player. Unrevealed tiles stay forbidden. The only reader is `snapshot.revealed_aquifer`, which
     checks `designation.hidden == false` before it looks at the flag (`snapshot.tile` `aq`); the lint rule hidden-read allows

@@ -61,7 +61,7 @@ def test_drills_levels_and_caps(run):
     assert [(e["d"]["from"], e["d"]["to"]) for e in of(evs, "READY_CHANGE")] == [(0, 1), (1, 2), (2, 1), (1, 2)]
     assert of(evs, "READY_CHANGE")[2]["d"]["fail"] == ["redrill"], "a siege needs a new drill"
     assert [(e["d"]["cap"], e["d"]["why"]) for e in of(evs, "POPCAP")] == [
-        (55, "plan"), (75, "R2"), (60, "inbox")]   # D-01 = B (Gordon 2026-10-24): the caps of R0/R1 are no longer the binding ones
+        (100, "R0"), (75, "plan"), (60, "inbox")]   # BUG-132: no plan yet = the D-01 = B ceiling 100; then the plan's 75 binds
     modes = [e["d"]["from"] + ">" + e["d"]["to"] for e in of(evs, "MODE")]
     assert modes == ["PEACE>DRILL", "DRILL>PEACE", "PEACE>SIEGE", "SIEGE>RECOVERY", "RECOVERY>PEACE",
                      "PEACE>DRILL", "DRILL>PEACE"]
