@@ -95,6 +95,20 @@ local function order_ids(mo)
   return out
 end
 
+T.test('BUG-203 (live Earthboat): the piece orders of every project go to the top of the work orders, not behind ' ..
+       'the imported library orders (old: only the seal orders)', function()
+  local W = world{tag = 'ptop'}
+  local mo = orders_world(W)
+  H.place(W, 'ws1', H.doc{tpl = 'workshops', class = 'infra', x = 30, params = {}})
+  H.runs(W, 1)
+  H.dig(W)
+  H.runs(W, 2)
+  T.eq(#W.orders, 1, 'the workshops orders')
+  local ids = order_ids(mo)
+  T.eq({ids[1], ids[#ids - 2], ids[#ids - 1], ids[#ids]}, {40, 31, 32, 33}, 'live: doors and beds at places 82-88 of 89')
+  T.ok(logged(W, 'info', '^ws1 .*: %d+ manager orders moved to the top of the work orders %(project first%)$'))
+end)
+
 T.test('Run 11 siege 8 replay: the seal placed behind three running projects runs first (old: queued 4th), its ' ..
        'orders go to the top of the work orders; the housing/work projects pause until it is done, defense runs on',
        function()

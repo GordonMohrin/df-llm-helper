@@ -1279,6 +1279,22 @@ function M.stage_ready(stage, f, cit)
   return false
 end
 
+-- BUG-202: whether library lib may be imported now: a library of a config stage only once that stage is ready (its
+-- workshops, citizens, stone), any other one at once; a held one is said in kern.log once per boot
+function M.lib_ready(K, c, lib, f, cit)
+  for _, s in ipairs(c.stages or {}) do
+    if s.lib == lib and not M.stage_ready(s, f or {}, cit) then
+      st.lib_held = st.lib_held or {}
+      if not st.lib_held[lib] then
+        st.lib_held[lib] = true
+        K.log('info', 'orders %s of the plan held until its stage is ready (config economy.stages)', tostring(lib))
+      end
+      return false
+    end
+  end
+  return true
+end
+
 local function ws_any(f, list)
   for _, w in ipairs(list or {}) do if f[w] then return true end end
   return false
@@ -2722,13 +2738,40 @@ local function validation_watch(K, p, c)
   local now = K.now().tick
   if K.act.manager_office and now - (p.office_t or -DAY) >= DAY then
     p.office_t = now
-    local okc, res = K.act.manager_office()
-    if okc and res == 'assigned' then K.log('warn', 'manager had no office: free Office zone assigned') end
+    -- BUG-204 (live Earthboat: ACT_FAIL 'no free office zone' x39, one every 4-10 game days): a fort without a free
+    -- Office zone is a state, not a failed action: said in kern.log once per 7 days and 10 min, the act is not tried
+    local why = M.office_none(K)
+    if why then
+      if CAD.due(p.office_none, K.now(), {}, {why}, {ticks = 7 * DAY, wall_s = CAD.WALL_S})
+         or CAD.elapsed(p.office_none, K.now(), 7 * DAY, CAD.WALL_S) then
+        p.office_none = CAD.mark(K.now(), {}, {why})
+        K.log('info', 'manager office: %s (the office template builds one: dfllm bp sites office; DF asks for it only ' ..
+              'above its population line)', why)
+      end
+    else
+      p.office_none = CAD.quiet(p.office_none)
+      local okc, res = K.act.manager_office()
+      if okc and res == 'assigned' then K.log('warn', 'manager had no office: free Office zone assigned') end
+    end
     local oko, err = pcall(M.office_check, K, c, p)
     if not oko then K.log('warn', 'office check: %s', tostring(err)) end
   end
   if M.manager_watch(K, p, c) then p.uv, st.unval = nil, nil; return end   -- Run 11: injured, in a mood, gone
   M.unval_watch(K, p, c)
+end
+
+-- BUG-204: why act.manager_office cannot help now ('no manager', 'no free office zone'), or nil (it has one, or a free
+-- zone exists, or the zones are unreadable: the act decides). Read-only, the same reads as the act.
+function M.office_none(K)
+  local ok, why = pcall(function()
+    local m = dfhack.units.getUnitByNobleRole('manager')
+    if not m or dfhack.units.isDead(m) then return 'no manager' end
+    for _, z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+      if z.type == df.civzone_type.Office and (z.assigned_unit_id == m.id or z.assigned_unit_id == -1) then return nil end
+    end
+    return 'no free office zone'
+  end)
+  return ok and why or nil
 end
 
 -- BUG-042: the Office zone assigned to unit `uid` and the chairs and tables standing in it: {zone, box = {x1, y1, x2,
@@ -4433,6 +4476,7 @@ function M.drink_low(K, c, r)
   if dd >= low then
     if p.drink_pre then p.drink_pre = nil; K.log('info', 'drink pre-alarm over: %d drink days', dd) end
     if type(p.drink_rep) == 'table' then p.drink_rep = CAD.quiet(p.drink_rep) end
+    if type(p.drink_note) == 'table' then p.drink_note = CAD.quiet(p.drink_note) end
     return
   end
   if dd < ((c.alarm or M.DEFAULTS.alarm).days or 10) then return end      -- the thirst wake speaks now
@@ -4445,6 +4489,18 @@ function M.drink_low(K, c, r)
   local ids, aids, head = M.food_head(bl, auto)
   local toks = {dd < 30 and 'below30' or 'below60'}
   for _, id in ipairs(ids) do toks[#toks + 1] = id end
+  -- BUG-206 (live Earthboat spr d43: DECISION_NEEDED drink_low 'no still' while the applied fortcore stage 1 built the
+  -- Still): no still but a pending project builds one, above the thirst alarm: a kern.log note (own cadence p.drink_note),
+  -- no wake; the episode's question is not used up, so it comes once the Still stands and drink is still low
+  local sq = ids[1] == 'still' and M.fishery_proj(K, {'workshop:Still'})
+  if sq then
+    if CAD.due(p.drink_note, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then
+      p.drink_note = CAD.mark(now, {}, toks)
+      K.log('warn', 'drink low: %d drink days, no still yet: project %s builds one (%s %s%%)%s', dd, sq.id,
+            tostring(sq.stage), tostring(sq.pct), sq.halted and (', halted: ' .. sq.halted) or '')
+    end
+    return
+  end
   if not CAD.due(p.drink_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
   p.drink_rep = CAD.mark(now, {}, toks)
   local parts, au = {}, {}
@@ -5044,10 +5100,13 @@ function T.days(K, c, r)
   -- BUG-177 (live i1: after a reload `stock` was bare for ~15 game days: demoted x8 and paced, economy's first daily run
   -- took ~40 game days and st.out came only in T.finish, after the kernel's 28-day carry ran out): the stock days are
   -- published as soon as they are known; T.finish completes the rest (labor, mood_miss)
-  if not st.out then
+  -- BUG-199: the boot's early stock (from the save's last run) is replaced by this live one; p.days_t dates it
+  if not st.out or st.out.boot then
     st.out = {drink_d = days.drink_d, food_d = days.food_d, meals = (r.inv or {}).meal_kinds, hungry = st.hungry_n or 0,
               mood_miss = {}, early = true}
   end
+  p.days_t, p.meals = now.tick, math.tointeger((r.inv or {}).meal_kinds)
+  if st.first then st.first = false; M.first_boost(K) end
   M.hungry_warn(K, c, r)
   local sup = K.plan.supply or {}
   stock_low(K, p, 'drink_d', days.drink_d, math.tointeger(sup.drink_d) or 170, true)
@@ -5881,12 +5940,18 @@ end
 
 -- BUG-038: the pending workshops project that builds a fishery (its doc's manifest lists one; the runner's project
 -- list and doc, read-only): {id, stage, pct, halted = P.blocked unless '' or 'stalled'} or nil. Only `workshops`
--- projects: fortcore stage 1 lists a fishery too, built long ago in a fort whose later stages still run
+-- projects and, BUG-206 (live Earthboat: the fishery request went out while fortcore stage 1, which builds one, was
+-- queued), a pending fortcore stage 1: every fortcore stage's doc lists stage 1's workshops, built long ago in a fort
+-- whose later stages still run
 function M.fishery_proj(K, ws)
   local pd = K.persist.get('projects')
   for _, P in ipairs(type(pd) == 'table' and type(pd.list) == 'table' and pd.list or {}) do
-    local id = type(P) == 'table' and P.tpl == 'workshops' and P.done ~= 1 and tostring(P.id or '')
+    local id = type(P) == 'table' and (P.tpl == 'workshops' or P.tpl == 'fortcore') and P.done ~= 1 and tostring(P.id or '')
     local d = id and id:match('^[%w_.%-]+$') and K.persist.get('bp.' .. id)
+    if id and P.tpl == 'fortcore' and type(d) == 'table' then
+      local pp = type(d.params) == 'table' and d.params or {}
+      if (math.tointeger(pp.stage) or 1) ~= 1 or (math.tointeger(pp.retrofit) or 0) ~= 0 then d = nil end
+    end
     local m = type(d) == 'table' and type(d.manifest) == 'table' and d.manifest.workshops
     for _, w in ipairs(type(m) == 'table' and m or {}) do
       if type(w) == 'table' and ('workshop:' .. tostring(w.type)) == (ws or M.FISHERY)[1] then
@@ -7034,9 +7099,14 @@ function T.imports(K, c, r)
     local want, seen = {}, {}
     local function addlib(lib) if not p.imported[lib] and not seen[lib] then seen[lib] = true; want[#want + 1] = lib end end
     for _, s in ipairs(c.stages or {}) do if M.stage_ready(s, r.f, p.cit) then addlib(s.lib) end end
-    for _, lib in ipairs((K.plan.orders or {}).import or {}) do addlib(lib) end
+    -- BUG-202 (live Earthboat: the plan's basic, rockstock and furnace libraries at P0 with 7 dwarves, 80-90 orders, the
+    -- project's doors and beds at places 82-88 of 89): a plan or season library is held by the gate of its config stage
     local season = type(K.plan.seasons) == 'table' and K.plan.seasons[K.now().season + 1]
-    for _, lib in ipairs(season and season.orders and season.orders.import or {}) do addlib(lib) end
+    for _, src in ipairs({(K.plan.orders or {}).import, season and season.orders and season.orders.import}) do
+      for _, lib in ipairs(type(src) == 'table' and src or {}) do
+        if M.lib_ready(K, c, lib, r.f, p.cit) then addlib(lib) end
+      end
+    end
     local own = {}
     for _, id in pairs(p.orders) do own[id] = true end
     local q = {}
@@ -7182,6 +7252,32 @@ function M.jam_scan(K, c, oq)
   if next(jam) then oq.ctx.jam = jam end
 end
 
+-- BUG-205: one ORDER_STUCK kind=workshop per missing shop type with its order count (d.n), when an order of
+-- that type was not told yet; again for that type with news (an order not told) after 7 days and 10 min (util/cadence,
+-- p.wsstuck[label]); counts as one report of report_per_day
+function M.ws_stuck(K, p, oq, oc)
+  if type(p.wsstuck) ~= 'table' then p.wsstuck = json.object{} end
+  local T0 = K.now()
+  local labels = {}
+  for label in pairs(oq.wsg) do labels[#labels + 1] = label end
+  table.sort(labels)
+  for label in pairs(p.wsstuck) do if not oq.wsg[label] then p.wsstuck[label] = nil end end
+  for _, label in ipairs(labels) do
+    local g = oq.wsg[label]
+    local rec = p.wsstuck[label]
+    if #g.new > 0 and oq.told < (oc.report_per_day or 3)
+       and (type(rec) ~= 'table' or CAD.elapsed(rec, T0, 7 * DAY, CAD.WALL_S)) then
+      oq.told = oq.told + 1
+      p.wsstuck[label] = {t = T0.tick, w = T0.wall}
+      for _, e in ipairs(g.new) do e.rec.told = 1 end
+      local e1 = g.new[1]
+      K.emit('ORDER_STUCK', 'B', string.format('%d order(s) cannot run for %d days: %s (order %d %s%s)', #g.ids, g.days,
+                                               e1.why, e1.id, e1.job, #g.ids > 1 and ', ...' or ''):sub(1, 200),
+             {order = e1.id, job = e1.job, why = e1.why, days = g.days, dropped = 0, kind = 'workshop', n = #g.ids})
+    end
+  end
+end
+
 -- FR-01 (daily): orders that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days;
 -- sliced: ORDER_SLICE orders per frame
 local ORDER_SLICE = 50
@@ -7193,7 +7289,7 @@ function T.ocheck(K, c, r)
     local ids = {}
     for _, o in ipairs(orders_all()) do if (o.amount_left or 0) > 0 then ids[#ids + 1] = o.id end end
     oq = {ids = ids, i = 1, ctx = order_ctx(K, c, r), seen = {}, stuck = 0, told = 0, steel = {}, steel_left = 0,
-          sws = 0, slab = 0, wsn = {}, stand = {}}
+          sws = 0, slab = 0, wsn = {}, stand = {}, wsg = {}}
     r.oq = oq
     -- FR-73: the standing cloth orders wait for thread and plants by design: no stuck report for them
     for tag, id in pairs(p.orders) do
@@ -7225,7 +7321,14 @@ function T.ocheck(K, c, r)
         oq.stuck = oq.stuck + 1
         if kind and kind.ws then oq.sws, oq.wsn[kind.ws] = oq.sws + 1, (oq.wsn[kind.ws] or 0) + 1 end
         if kind and kind.worker then oq.slab = oq.slab + 1 end
-        if rec.told ~= 1 and oq.told < (oc.report_per_day or 3) then
+        -- BUG-205 (live Earthboat: ORDER_STUCK x45 in 2 months, one per imported order whose workshop is missing): a
+        -- missing workshop is one event per shop type at the end of the pass (M.ws_stuck)
+        if kind and kind.ws then
+          local g = oq.wsg[kind.ws] or {ids = {}, new = {}, days = 0}
+          oq.wsg[kind.ws] = g
+          g.ids[#g.ids + 1], g.days = o.id, math.max(g.days, days)
+          if rec.told ~= 1 then g.new[#g.new + 1] = {rec = rec, id = o.id, job = rec.job, why = rec.why} end
+        elseif rec.told ~= 1 and oq.told < (oc.report_per_day or 3) then
           rec.told, oq.told = 1, oq.told + 1
           K.emit('ORDER_STUCK', 'B', string.format('order %d %s cannot run for %d days: %s', o.id, rec.job, days, rec.why),
                  {order = o.id, job = rec.job, why = rec.why, days = days, dropped = 0, kind = rec.kind})
@@ -7237,6 +7340,7 @@ function T.ocheck(K, c, r)
   r.cmds = r.cmds + 1                            -- a slice of its own (orders, labor holders)
   if oq.i <= #oq.ids then return false end
   for key in pairs(p.ostuck) do if not oq.seen[key] then p.ostuck[key] = nil end end
+  M.ws_stuck(K, p, oq, oc)
   local wl = {}
   for label, n in pairs(oq.wsn) do wl[#wl + 1] = {label, n} end
   table.sort(wl, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
@@ -7386,6 +7490,7 @@ end
 -- again only after util/cadence's window; while ghosts stand and no mason's workshop does, PROJECT_REQUEST workshops
 -- why=slabs types=[Masons] (follow places the masons' shop alone, the rebuild policy lets it run while ghosts wait) at
 -- most every food.request_days (p.slab_wsreq)
+M.SLAB_REQ = {wall_s = 900, backoff = 4}
 function M.slab_why(K, c, r, sb, ghosts, f)
   local p, now = r.p, r.now
   local T0 = K.now()
@@ -7396,16 +7501,33 @@ function M.slab_why(K, c, r, sb, ghosts, f)
             sb.gneed or ghosts, sb.blank, sb.memorial, sb.why)
     end
   else p.slab_why = CAD.quiet(p.slab_why) end
+  -- BUG-200 (live i4 round 3: PROJECT_REQUEST why=slabs types=[Masons] every 21-26 game days, ~3 real minutes, with
+  -- follow off): the request record is {t, w, k, n = ghosts}; the k-th unanswered repeat waits request_days * 2^(k-1)
+  -- game days AND 900 s * 2^(k-1) wall seconds (k <= 4); more ghosts start over at k 1; a standing Masons clears it
+  if f['workshop:Masons'] then p.slab_wsreq = nil end
   if ghosts <= 0 or f['workshop:Masons'] then return end
-  local every = ((c.food or {}).request_days or 14) * DAY
-  local last = math.tointeger(p.slab_wsreq)
-  if last and now - last < every and now >= last then return end
+  local rec = p.slab_wsreq
+  if math.type(rec) == 'integer' or math.type(rec) == 'float' then rec = {t = math.tointeger(rec), k = 1} end
+  if type(rec) ~= 'table' then rec = nil end
+  local k = rec and math.max(1, math.tointeger(rec.k) or 1) or 0
+  if rec and ghosts > (math.tointeger(rec.n) or ghosts) then k = 1; rec.k = 0 end   -- news: the base period only
+  if k > 0 then
+    local fx = 1 << (math.min(k, M.SLAB_REQ.backoff) - 1)
+    local every = ((c.food or {}).request_days or 14) * DAY * fx
+    local t = math.tointeger(rec.t) or 0
+    if now >= t and not CAD.elapsed(rec, T0, every, M.SLAB_REQ.wall_s * fx) then return end
+  end
   -- review: a workshops project already queued (paused by the rebuild policy, still digging) is not asked for again:
   -- follow would place a second masons' shop beside it. BUG-181 (live i4: a pending workshops project with skip=Masons
   -- held the request back): only one that builds the Masons (M.ws_queued)
   local q = M.ws_queued(K, 'Masons')
   if q then sb.asked = 'queued'; sb.queued = q; return end
-  p.slab_wsreq = now
+  -- BUG-200: runner's mandatory request (BUG-184, its own backoff) already asks for the Masons: not a second time
+  local okm, mand = K.call('runner', 'req_types', 'wsm')
+  if okm and type(mand) == 'table' then
+    for _, t in ipairs(mand) do if t == 'Masons' then sb.asked = 'mandatory'; return end end
+  end
+  p.slab_wsreq = {t = now, w = T0.wall, k = (rec and (math.tointeger(rec.k) or 1) or 0) + 1, n = ghosts}
   sb.asked = 1
   K.emit('PROJECT_REQUEST', 'B', string.format("workshops: no mason's workshop for the memorial slabs of %d ghost(s)", ghosts),
          {tpl = 'workshops', n = 1, why = 'slabs', types = {'Masons'}})
@@ -7633,6 +7755,7 @@ function T.stale(K, c, r)
         local rd = math.tointeger(rec.redo) or 0
         if ok_mat and rd < (math.tointeger(sc.redo_max) or M.DEFAULTS.stale.redo_max) then
           spec.tag = 'dfllm:redo_' .. tostring(e.id)
+          spec.top = true                    -- BUG-203: first in the work orders, not behind the queue it starved in
           r.cmds = r.cmds + 1
           local ok, nid = K.act.workorder(spec)
           if ok and K.act.order_remove(e.id) then
@@ -7642,7 +7765,10 @@ function T.stale(K, c, r)
             -- planner saw its tag gone and entered the same order a second time beside the made-again one
             if int(nid) then
               for tag, oid in pairs(p.orders) do if oid == e.id then p.orders[tag] = nid end end
-              p.ostale[tostring(nid)] = {left = e.left, since = r.now, redo = rd + 1}
+              -- BUG-201 (live Earthboat: 11x 're-entered in wood', 7x 'made again in stone' for the same doors): the new
+              -- order keeps the switch mark; one made in the other class is marked too, so it is never switched back
+              p.ostale[tostring(nid)] = {left = e.left, since = r.now, redo = rd + 1,
+                                         sw = (rec.sw == 1 or mc2 ~= e.mc) and 1 or nil}
             end
           end
         end
@@ -9059,6 +9185,40 @@ function M.supply(K)
   return out
 end
 
+-- BUG-199 (live round 3: after back-to-back reloads status had no stock line for ~21 game days; the item census runs
+-- before T.days, paced at 3 ms/s over 48.8k items): at boot the stock days of the save's last daily run (persisted
+-- p.prev / p.hist, p.days_t) are published at once (early, no labor) when that run is at most two days old (or of
+-- unknown age: a save from before this fix); an older value is left to the kernel's carry, which names its age.
+-- The first run after the boot holds a boost (util/sched BOOST.shares.economy) until T.days ran.
+M.FIRST_BOOST_MS = 20 * 60 * 1000
+function M.boot_out(K, p)
+  st.first, st.first_ms = true, K.now().ms
+  if st.out or type(p) ~= 'table' or type(p.prev) ~= 'table' then return end
+  local dr, fo = math.tointeger(p.prev.drink), math.tointeger(p.prev.food)
+  if not (dr and fo) or #p.hist.drink == 0 or #p.hist.food == 0 then return end
+  local at, now = math.tointeger(p.days_t), K.now().tick
+  if at and (at > now or now - at > 2 * DAY) then return end
+  st.out = {drink_d = M.days(dr, p.hist.drink), food_d = M.days(fo, p.hist.food), meals = math.tointeger(p.meals),
+            hungry = 0, mood_miss = {}, early = true, boot = true}
+end
+
+-- BUG-199: the first run since the boot asks for the boost each step until T.days published the stock days; at most
+-- M.FIRST_BOOST_MS real time (a run that never reaches T.days, faults: not boosted for good)
+function M.first_boost(K)
+  if type(K.boost) ~= 'function' then return end
+  local ms = K.now().ms
+  if st.first and st.first_ms and ms and ms - st.first_ms > M.FIRST_BOOST_MS then
+    st.first = false
+    K.log('warn', 'economy: the first run since the boot did not reach the stock days in %d min: boost dropped',
+          M.FIRST_BOOST_MS // 60000)
+  end
+  if st.first then K.boost('first run since the boot')
+  elseif st.first == false then
+    st.first = nil
+    if type(K.unboost) == 'function' then K.unboost() end
+  end
+end
+
 ---------------------------------------------------------------- module
 function M.init(K)
   st = {census = nil, run = nil, rate = {}, cancels = {}, looped = {}, backoff = {}, bars_by = {}, ores = {},
@@ -9067,13 +9227,14 @@ function M.init(K)
   rcache, pinfo, pidx, ecache, plugins = {}, {}, nil, {}, {}
   skip_mask, mask_check, mask_bad = make_skip_mask(), M.MASK_CHECK, nil
   M.every = {ticks = EVERY}
-  pstate(K)
+  M.boot_out(K, pstate(K))
   local ok, err = pcall(kitchen, K, M.conf(K), nil)
   if not ok then K.log('warn', 'kitchen exclusion: %s', tostring(err)) end
 end
 
 function M.step(K, budget, ctx)
   local c = M.conf(K)
+  M.first_boost(K)
   if not (ctx and ctx.cont) or not (st.census or st.run) then
     st.census, st.run = {acc = new_acc(c), ci = 1, idx = 0, errs = 0, start = K.now().tick}, nil
     st.census.acc.far = function(it)

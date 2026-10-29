@@ -50,6 +50,31 @@ T.test('FR-39: workorder refuses an item-definition job without item_subtype, se
                           amount_total = 4, tag = 'dfllm:t'}}, {true, 1})
 end)
 
+T.test('BUG-203: workorder top = true puts the new order first (made-again orders); top is no field of the order', function()
+  local W = H.world{tag = 'wotop'}
+  local mo = df.global.world.manager_orders
+  for id = 1, 3 do mo.all:insert('#', {id = id}) end
+  mo.manager_order_next_id = 4
+  local bodies = {}
+  W.on_command = function(cmd, a, out, cr)
+    if cmd == 'workorder' then
+      bodies[#bodies + 1] = a[1]
+      mo.all:insert('#', {id = mo.manager_order_next_id})
+      mo.manager_order_next_id = mo.manager_order_next_id + 1
+      return 'ok', 0
+    end
+    return out, cr
+  end
+  local env = mk('economy')
+  T.eq({env.api.workorder{job = 'ConstructDoor', amount_total = 1, tag = 'dfllm:redo_1', top = true}}, {true, 4})
+  local ids = {}
+  for i = 0, #mo.all - 1 do ids[#ids + 1] = mo.all[i].id end
+  T.eq(ids, {4, 1, 2, 3}, 'old: appended at the end')
+  T.ok(not tostring(bodies[1]):find('top', 1, true), bodies[1])
+  T.eq({env.api.workorder{job = 'ConstructDoor', amount_total = 1, tag = 'dfllm:x'}}, {true, 5})
+  T.eq(mo.all[#mo.all - 1].id, 5, 'without top: at the end as before')
+end)
+
 T.test('job_resume: only suspended ConstructBuilding jobs with the given ids', function()
   H.world{tag = 'jr'}
   df.job_type = {ConstructBuilding = 68, Dig = 1, [68] = 'ConstructBuilding', [1] = 'Dig'}

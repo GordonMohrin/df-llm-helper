@@ -29,6 +29,41 @@
   two commands no longer name c1a185e68ea2802c02 / c1a185ed14e27ebd07 for fortcore@same. (c) A new embark before the first apply:
   propose drafts only fortcore@S1 stage 1 (+ seal), target P0, notes end "apply, wait for s1.dig, propose again", check OK; while
   stage 1 shows s1.build in `dfllm status` no "is not dug yet" line. (d) A P0 fort: propose's `orders` lists P0/P1 libraries only.
+## Live round 3 economy fixes: stock after reloads, slab request backoff, stale orders, import gates, queue position, office/ORDER_STUCK spam, core Still/Fishery (BUG-199..206, 2026-10-29; offline, live-untested)
+- **Why:** live test round 3 (i1 Trussroads reloads, i4 follow off, the fresh fort Earthboat played from embark) and its skeptic confirmed:
+  after back-to-back reloads status had no stock line for ~21 game days (BUG-199); the slab request for a Masons came every 21-26 game days,
+  a few real minutes, without end (BUG-200); a stale door order flipped stone/wood 18 times (BUG-201); the plan's libraries were imported at
+  P0 with 7 dwarves past the stage gates, 80-90 orders (BUG-202), and the core's piece orders and every made-again order stood at the end
+  of that queue (BUG-203); ACT_FAIL `no free office zone` x39 (BUG-204); ORDER_STUCK once per order of a missing shop (x45) and an empty
+  weekly stressor line (BUG-205); a pending fortcore stage 1 that builds the Still and the Fishery did not count, so a fishery was requested
+  and drink_low woke the session (A) (BUG-206).
+- **What changed:** (1) economy `M.boot_out`: at init the stock days of the save's last daily run (`p.prev`/`p.hist`, `p.days_t` <= 2 days
+  or unknown) are published at once (early); the first run after a boot holds a boost (`util/sched` `BOOST.modules.economy`,
+  `shares.economy` 8 ms/s) until `T.days` ran, at most 20 real minutes (`M.FIRST_BOOST_MS`); kern: the carry window restarts at a boot (`rec.boot`), `stale` keeps the true age (BUG-199).
+  (2) `M.slab_why`: `p.slab_wsreq = {t, w, k, n}`, backoff `request_days * 2^(k-1)` and `900 s * 2^(k-1)` (k <= 4), more ghosts start over,
+  a Masons clears it, no slab request while runner's mandatory request names Masons (new runner `M.req_types`) (BUG-200). (3) `T.stale`: the
+  made-again record keeps `sw` (BUG-201). (4) `T.imports`: plan and season libraries of a config stage wait for its gate (`M.lib_ready`)
+  (BUG-202). (5) `act.workorder` `top = true` puts the new order first (made-again orders); runner moves every project's piece orders to the
+  top, a seal's first while one is open (BUG-203). (6) `M.office_none`: no Office zone (or no manager) is a kern.log state once per 7 days
+  and 10 min, the act is not tried (BUG-204). (7) ORDER_STUCK kind=workshop is one event per shop type with `d.n` (`M.ws_stuck`, again
+  with news after 7 days and 10 min); care logs the stressor line only when it has stressors (BUG-205). (8) `M.fishery_proj` accepts a
+  pending fortcore stage-1 project; `drink_low` with 'no still' and such a project is a kern.log note (own cadence `p.drink_note`), not DECISION_NEEDED; the episode's question is kept for when no project builds the Still any more (BUG-206).
+- **Safety:** no new verb, event, config key or RULES row; ORDER_STUCK keeps its fields (kind workshop now carries `n`). CONTRACTS §3.3.9
+  names economy in `BOOST.modules`. Risks: the boost shrinks the other modules' pool for economy's first run after a boot; topping every
+  project's orders can move a defense project's orders above older library orders by design.
+- **Tests (each fails on bd27973):** tests/lua/test_economy_b2.lua (BUG-199, 200 x2, 201, 203), test_kern_gaps.lua (BUG-199),
+  test_economy.lua (BUG-202), test_act_supply.lua and test_runner_seal_first.lua (BUG-203), test_runner_manifest.lua (req_types),
+  test_economy_drink.lua (BUG-204, 206), test_economy_orders.lua and test_care.lua (BUG-205), test_economy_fishing.lua (BUG-206).
+- **Live check:** (a) i1: `dfhack-run dfllm reload` twice within a minute, then `dfhack-run dfllm status` right after each: a `stock drink Nd
+  food Md` line every time; kern.log `economy boosted: first run since the boot`, later `economy boost ended (unboost; ...)`. (b) i4, follow
+  off, ghosts and no Masons: `python -m dfpilot events --type PROJECT_REQUEST` why=slabs after 14 d + 15 min, then 28 d + 30 min, 56 d + 60
+  min; `dfllm cmd inspect '{"what":"orders"}'` slabs.asked `mandatory` while runner's mandatory request names Masons. (c) Earthboat:
+  kern.log for one door order has at most one `re-entered in wood`; `orders library/basic of the plan held until its stage is ready` while
+  cit < 10; a project stage's kern.log `N manager orders moved to the top of the work orders (project first)` and the work orders screen
+  shows them first; no new ACT_FAIL `manager_office`, kern.log `manager office: no free office zone (...)` at most weekly; one ORDER_STUCK
+  `N order(s) cannot run ...: no Loom workshop` per shop type; no empty `top stressors this week:` line. (d) A new embark with fortcore stage 1
+  applied: no PROJECT_REQUEST why=fishery while the stage moves, and below drink.low_d before the Still stands kern.log
+  `drink low: N drink days, no still yet: project <id> builds one` and no DECISION_NEEDED drink_low.
 
 ## FR-95 live test 1 fixes: flooded shaft level unseen, observe smoothing, aqshaft S1 place, floor top level (BUG-191..194, 2026-10-29; offline, live-untested)
 - **Why:** FR-95 live test 1 on i4 (kernel b805745): shaft c1a1858c02562d7101 (56,56 top 129) had z128 designated, yielded its slot

@@ -710,7 +710,10 @@ function M.carry(st, doc)
       local v = part and part[leaf]
       if math.type(v) == 'integer' then
         rec.v[leaf], rec.at[leaf] = v, tick
-      elseif max > 0 and rec.v[leaf] ~= nil and rec.at[leaf] <= tick and tick - rec.at[leaf] <= max then
+      -- BUG-199 (live round 3: back-to-back reloads before economy's first daily run let the 28 days run out): the window
+      -- counts from the leaf's own tick or from this boot (rec.boot), whichever is later; `stale` keeps the true age
+      elseif max > 0 and rec.v[leaf] ~= nil and rec.at[leaf] <= tick
+             and tick - math.max(rec.at[leaf], math.tointeger(rec.boot) or 0) <= max then
         if not filled then
           local cp = {}
           for k, x in pairs(part or {}) do cp[k] = x end
@@ -1540,7 +1543,7 @@ function M.boot(opts)
     for top, leaves in pairs(M.CARRY) do
       local c = kp.carry[top]
       if type(c) == 'table' and math.type(c.at) == 'integer' and c.at <= st.now.tick and type(c.v) == 'table' then
-        local rec = {at = {}, v = {}}
+        local rec = {at = {}, v = {}, boot = st.now.tick}      -- BUG-199: the carry window restarts at a boot
         for _, leaf in ipairs(leaves) do
           local x = c.v[leaf]
           if math.type(x) == 'integer' and x >= 0 then rec.v[leaf], rec.at[leaf] = x, c.at end

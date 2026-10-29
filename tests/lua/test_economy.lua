@@ -28,6 +28,10 @@ end
 -- live L4: the daily run is a task list over frames (one DF command per frame); settle finishes a started run
 local function settle(W) for _ = 1, 40 do W.run(1) end end
 local function days(W, n) for _ = 1, n do W.run(1200, {skip = 100}); settle(W) end end
+local function logged_any(W, pat)
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(pat, 1, true) then return true end end
+  return false
+end
 local function count_acts(W, fn, arg1)
   local n = 0
   for _, a in ipairs(W.find_acts(fn)) do if arg1 == nil or a.args[1] == arg1 then n = n + 1 end end
@@ -327,8 +331,26 @@ T.test('plan.orders.import and season imports are honoured once', function()
   local W = world{cit = 7, plan = plan}
   days(W, 2)
   T.eq(count_acts(W, 'orders_import', 'library/glassstock'), 1)
+  -- BUG-202: furnace is the library of a config stage (a Smelter or a Wood Furnace): held until that stage is ready
+  T.eq(count_acts(W, 'orders_import', 'library/furnace'), 0, 'live Earthboat: imported at P0 without a furnace')
+  T.ok(logged_any(W, 'orders library/furnace of the plan held until its stage is ready'))
+  F.building(W, 'FURNACE_ANY', {type = df.furnace_type.Smelter})
+  days(W, 1)
   T.eq(count_acts(W, 'orders_import', 'library/furnace'), 1)
   T.eq(count_acts(W, 'orders_import'), 2)
+end)
+
+T.test('BUG-202 (live Earthboat): the plan library/basic waits for 10 citizens or migrants like the staged import', function()
+  local plan = {v = 2, year = 3, phase_target = 'P0', policy = {option = 'A', pop_ceiling = 55, beauty = 'none'},
+                seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
+                orders = {import = {'library/basic', 'library/rockstock'}}}
+  local W = world{cit = 7, plan = plan}
+  days(W, 2)
+  T.eq(count_acts(W, 'orders_import'), 0, '7 dwarves, no Masons: nothing imported (old: both at once)')
+  W.set_census('u', F.census_u({1, 2, 3, 4, 5, 6, 7, 11, 12, 13}))
+  days(W, 1)
+  T.eq(count_acts(W, 'orders_import', 'library/basic'), 1)
+  T.eq(count_acts(W, 'orders_import', 'library/rockstock'), 0)
 end)
 
 T.test('kitchen: PLUMP_HELMET plant and seed cook exclusions added once; D-09 yes lifts them in a famine', function()

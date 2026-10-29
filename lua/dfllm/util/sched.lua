@@ -46,7 +46,9 @@ S.SCALED = {economy = true, care = true}
 -- BUG-026: who may hold a boost, its pacing share (ms per real second) and how long it lasts without a renewal.
 -- BUG-033: snapshot holds one (never busy) while it exports for an inbox request (dfllm audit, bp sites --fresh,
 -- follow: a CLI waits for the file), at its own boost share
-S.BOOST = {share = 20, ttl_ms = 30000, modules = {trade = true, snapshot = true}, shares = {snapshot = 12}}
+-- BUG-199: economy holds one (never busy) through its first run after a boot, until the stock days are known
+S.BOOST = {share = 20, ttl_ms = 30000, modules = {trade = true, snapshot = true, economy = true},
+           shares = {snapshot = 12, economy = 8}}
 S.REPORT_MS = 6 * 3600 * 1000                         -- KERNEL_SLOW per module at most this often
 S.PROMOTE_RUNS = 3
 S.FLIPS_MAX = 4                                       -- quiet time for a promotion: promote_ms * 2^flips
