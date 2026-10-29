@@ -48,8 +48,10 @@ local function world(opts)
           pending = function(K, tpl) return (opts.pending or {})[tpl] or 0 end,
           state = function() return {phase = ctl.phase} end})
   W.load({name = 'care', every = {ticks = 1200},
-          state = function() return {care = {stressed_pct = 0, naked = 0, ghosts = ctl.ghosts, corpses_old = 0,
-                                             tombs_free = 0, moods = 0}} end})
+          state = function()
+            if ctl.nocare then return {} end            -- BUG-177: care's first run since the boot is not done
+            return {care = {stressed_pct = 0, naked = 0, ghosts = ctl.ghosts, corpses_old = 0, tombs_free = 0, moods = 0}}
+          end})
   for _ = 1, 8 do F.item(W, 'BARREL', {}) end
   F.item(W, 'DRINK', {stack_size = 2000})
   F.item(W, 'FOOD', {stack_size = 2000, subtype = 1})
@@ -783,6 +785,34 @@ T.test('BUG-133: no mason\'s workshop: kern.log says why (once), PROJECT_REQUEST
   local W4 = world{ghosts = 3, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 1}}
   days(W4, 2)
   T.eq(#slabreq(W4), 0, 'a workshops project is queued')
+end)
+
+---------------------------------------------------------------- BUG-177 (live round 2: state after a reload)
+T.test('BUG-177 (i4): care has not published since the boot: the slab pass counts the ghosts of a fresh census.g, and ' ..
+       'without one it orders nothing on a guessed 0 and says why', function()
+  local W, ctl = ghost_world{n = 2, slabs = {blank = 0}}
+  ctl.nocare = true
+  gdays(W, ctl, 2)
+  local cs = acts(W, 'workorder', 'dfllm:slab')
+  T.eq(#cs, 1, 'live: ghosts 0 from the missing view.care, restock cap 0')
+  T.eq(W.inbox('inspect', {what = 'orders'}).data.slabs.ghosts, 2)
+  local W2, c2 = ghost_world{n = 2, slabs = {blank = 0}}
+  c2.nocare = true
+  days(W2, 2)                                                   -- no census.g either
+  T.eq(#acts(W2, 'workorder', 'dfllm:slab'), 0)
+  T.ok(tostring(W2.inbox('inspect', {what = 'orders'}).data.slabs.why):find('ghost count unknown', 1, true))
+end)
+
+T.test('BUG-177 (i1): the stock days are published as soon as the first run since the boot computed them, not only ' ..
+       'after its last task', function()
+  local W, ctl = world{}
+  local full = ctl.E.TASKS.full
+  for i = #full, 1, -1 do if full[i] == 'finish' then table.remove(full, i) end end   -- a first run still in hand
+  days(W, 1)
+  local s = W.state()
+  T.ok(type(s.stock) == 'table' and math.type(s.stock.drink_d) == 'integer' and math.type(s.stock.food_d) == 'integer',
+       'live: "stock  hospital ok" for 15 game days (st.out came only in T.finish)')
+  T.eq(s.stale, nil, 'live values, not carried ones')
 end)
 
 T.done()

@@ -4970,6 +4970,13 @@ function T.days(K, c, r)
   r.days, st.days = days, days
   -- BUG-059 (Run 12 y503: 12 starved under 'food 41 d' with meals 0): the citizens past DF's "hungry" line, daily
   st.hungry_n = #hungry_ids(K, (c.starve or M.DEFAULTS.starve).hunger or 50000)
+  -- BUG-177 (live i1: after a reload `stock` was bare for ~15 game days: demoted x8 and paced, economy's first daily run
+  -- took ~40 game days and st.out came only in T.finish, after the kernel's 28-day carry ran out): the stock days are
+  -- published as soon as they are known; T.finish completes the rest (labor, mood_miss)
+  if not st.out then
+    st.out = {drink_d = days.drink_d, food_d = days.food_d, meals = (r.inv or {}).meal_kinds, hungry = st.hungry_n or 0,
+              mood_miss = {}, early = true}
+  end
   M.hungry_warn(K, c, r)
   local sup = K.plan.supply or {}
   stock_low(K, p, 'drink_d', days.drink_d, math.tointeger(sup.drink_d) or 170, true)
@@ -7162,6 +7169,20 @@ end
 --   * orders ConstructSlab first (slabs.restock_cap blank slabs at most) when ghosts or engrave orders want slabs and
 --     the stock and the open ConstructSlab orders do not cover them (note 56: autoslab ran, no blank slab for the new
 --     ghosts); state in st.slab (inspect orders).
+-- BUG-177 (live i4: after a reload view.care was nil for ~15k ticks and the slab pass read 0 ghosts, so the restock cap
+-- min(ghosts, restock_cap) was 0): the ghosts from care's published view, else from census.g while it is fresh (two
+-- days, as care's memorial pass reads it), else nil (unknown)
+M.slab_ghosts = function(K, now)
+  local care = (K.view() or {}).care
+  local g = type(care) == 'table' and math.tointeger(care.ghosts) or nil
+  if g then return math.max(0, g) end
+  local cg = K.census.g
+  if type(cg) == 'table' and type(cg.ids) == 'table' and now - (math.tointeger(cg.tick) or -DAY * 3) < DAY * 2 then
+    return #cg.ids
+  end
+  return nil
+end
+
 function M.slab_pass(K, c, r)
   local sc, OF = c.slabs, M.OF
   local jt = df.job_type.EngraveSlab
@@ -7181,8 +7202,9 @@ function M.slab_pass(K, c, r)
   end
   table.sort(eng)
   local sl = OF.slabs(sc.scan_max)
-  local care = (K.view() or {}).care
-  local ghosts = math.tointeger(type(care) == 'table' and care.ghosts or 0) or 0
+  local ghosts = M.slab_ghosts(K, now)
+  local gunk = ghosts == nil
+  ghosts = ghosts or 0
   local sb = {blank = sl.blank, busy = sl.busy, held = sl.held, built = sl.built, memorial = sl.memorial, engrave = #eng,
               cons = cons, ghosts = ghosts, removed = 0, ordered = 0, engraved = 0, unserved = 0}
   st.slab, st.slab_t = sb, now
@@ -7219,6 +7241,11 @@ function M.slab_pass(K, c, r)
     p.slab_ann = CAD.quiet(p.slab_ann)
   end
   M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
+  if gunk then                     -- BUG-177: no ghost count yet: no restock on a guessed 0, no request either
+    sb.why = 'ghost count unknown: care has not published since the boot and census.g is stale'
+    K.persist.touch('m.economy')
+    return
+  end
   -- ConstructSlab first. BUG-133 (Run 14: 41 ghosts, ConstructSlab x3, x1, x4 in 200 game years at restock_cap 5): the
   -- cap is min(ghosts, restock_cap 20), and the ghosts counted are the ones that still want a blank slab: no memorial
   -- (loose, in a build job or placed) and no EngraveSlab order (sb.gneed; every ghost while census.g is stale)
@@ -8941,9 +8968,10 @@ function M.state(K)
   if o then
     r.stock = {drink_d = o.drink_d, food_d = o.food_d, meals = o.meals}
     if (o.hungry or 0) > 0 then r.stock.hungry = o.hungry end              -- BUG-059
-    r.labor = {starving = o.starving, idle = math.max(0, math.min(100, o.idle))}
+    -- BUG-177: the early stock (T.days of the first run) has no labor yet: the kernel carries its last known values
+    if not o.early then r.labor = {starving = o.starving, idle = math.max(0, math.min(100, o.idle))} end
     local iw = st.idle_why     -- FR-77: why the adults have no job (the daily scan's own-state classes)
-    if iw then
+    if iw and r.labor then
       r.labor.n, r.labor.sold, r.labor.held = iw.n, iw.sold, iw.held
       r.labor.why = {rest = iw.why.rest, hurt = iw.why.hurt, mood = iw.why.mood, free = iw.why.free}
     end
