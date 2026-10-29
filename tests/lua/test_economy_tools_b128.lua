@@ -283,4 +283,87 @@ T.test('BUG-128: the dfllm-tools pile takes from the stockpile the tools sit in 
   T.ok(ev[1].d.g and ev[1].d.g:find('take from stockpile 77', 1, true), tostring(ev[1].d.g))
 end)
 
+---------------------------------------------------------------- 6. live test round 2 (i4 y723-y725)
+T.test('BUG-186 (live i4: SUTURING and DRESSING_WOUNDS are on for 48 of 53 citizens in DF 53.16, 33 were skipped as '
+       .. '"doc"): only DIAGNOSE/SURGERY/BONE_SETTING, a hospital job or the chief medical dwarf make a doctor', function()
+  local W, ctl = world{cit = 22, picks = 8, dig = 40, setup = function(Wx)
+    add_jobs({'Suture'})
+    for i = 1, 22 do
+      Wx.unit(i).status.labors.SUTURING, Wx.unit(i).status.labors.DRESSING_WOUNDS = true, true
+    end
+    Wx.unit(7).job.current_job = {id = 907, job_type = df.job_type.Suture}   -- sutures a patient right now
+  end}
+  days(W, 1)
+  T.eq(members(ctl, 'Miners'), {1, 2, 3, 5}, 'the default wound labors keep nobody out; the suturing 7 is skipped')
+  local E = W.mods.economy.M
+  local u = W.unit(9)
+  T.eq(E.tool_cand_skip(u, {tool = 'pick'}), nil)
+  u.status.labors.BONE_SETTING = true
+  T.eq(E.tool_cand_skip(u, {tool = 'pick'}), 'doc')
+  u.status.labors.BONE_SETTING = nil
+  u._noble = 'CHIEF_MEDICAL_DWARF'
+  T.eq(E.tool_cand_skip(u, {tool = 'pick'}), 'doc')
+end)
+
+T.test('BUG-187 (live i4 #33355: the lacking member was a patient, Rest; bk said "jobs"): the diagnosis names the '
+       .. 'patient, and a patient is no "jobs" blocker', function()
+  local W = world{cit = 4}
+  local E = W.mods.economy.M
+  local dg = {keys = {}, texts = {}, picks = {}, civ = 0,
+              units = {{id = 42435, lab = true, xl = {}, walk = 4, jobs = 0, pat = true}}}
+  E.td_blockers(dg, {name = 'Miners', labor = 'MINE', jobs = 'dig'}, 'pick', 1)
+  T.eq(dg.keys, {'patient'}, dg.whys)
+  T.ok(dg.why:find('patients', 1, true) and dg.why:find('42435', 1, true), dg.why)
+  T.ok(E.tool_tell({name = 'Miners', labor = 'MINE'}, 'pick', {keys = dg.keys, forb = 0, free = 1, res = 0, bins = 0})
+       :find('patient', 1, true))
+end)
+
+T.test('BUG-187 (live i4: Miners = a pick holder and a patient who lacked the pick 1313 days; #cur == target, nobody '
+       .. 'joined): the kernel takes its own long-term patient off after block_days and a healthy dwarf joins', function()
+  local W, ctl = world{cit = 12, picks = 1, dig = 14}
+  days(W, 1)
+  T.eq(members(ctl, 'Miners'), {5}, 'the best miner joins (one free pick: target 1)')
+  W.unit(5).health = {flags = {needs_healthcare = true}}
+  W.unit(5).job.current_job = {id = 905, job_type = df.job_type.Rest}
+  days(W, 2)
+  T.eq(members(ctl, 'Miners'), {5}, 'within block_days (3) he stays')
+  days(W, 3)
+  T.eq(members(ctl, 'Miners'), {7}, 'the patient off, the next best (7) in')
+  local off
+  for _, e in ipairs(W.find_events('WORK_DETAIL')) do if e.d.unit == 5 and e.d.on == 0 then off = e end end
+  T.ok(off and off.d.why == 'patient', off and off.d.why or 'no WORK_DETAIL - for 5')
+end)
+
+T.test('BUG-187: a player\'s long-term patient stays on the detail but does not count: a healthy dwarf joins, and '
+       .. 'TOOL_BLOCKED d.g says so', function()
+  local W, ctl = world{cit = 12, picks = 1, dig = 14, miners = {5}, setup = function(Wx)
+    Wx.unit(5).health = {flags = {needs_healthcare = true}}
+  end}
+  days(W, 6)
+  T.eq(members(ctl, 'Miners'), {5, 7}, 'the player\'s 5 stays, 7 joins')
+  days(W, 10)
+  T.eq(members(ctl, 'Miners'), {5, 7}, 'no flip-flop: 5 stays uncounted')
+  local ev = W.find_events('TOOL_BLOCKED')
+  T.ok(#ev > 0, 'member 7 lacks the pick too')
+  local g = ev[#ev].d.g
+  T.ok(g and g:find('patient members not counted 1', 1, true), tostring(g))
+end)
+
+T.test('BUG-188 (live i4: the first open dig job was a shaft in raw rock; 300 reads ran out at ring 7 of 12): the '
+       .. 'pile centre skips a job without floor beside it, and the budget covers the whole search square', function()
+  local W = world{cit = 4}
+  local E = W.mods.economy.M
+  local jc = {dig_pts = {{10, 10, 5}, {61, 40, 5}}}
+  T.eq(E.pile_center(W.K, {jobs = 'dig'}, jc, {}, nil), {61, 40, 5}, 'the shaft at 10,10,5 has no floor around it')
+  local cs = E.pile_centres(W.K, {jobs = 'dig'}, jc, {W.unit(1)}, {30, 40, 5})
+  T.eq(cs[1].by, 'job')
+  T.eq(cs[2].by, 'member')
+  T.eq(cs[#cs].by, 'tool')
+  -- the floor begins 10 tiles west of the centre: the ring-10 site needs about 420 reads
+  local site, why = E.pile_site(W.K, {pile_w = 3, pile_h = 2, pile_r = 12, pile_reads = 300}, {at = {30, 40, 5}})
+  T.ok(site ~= nil, tostring(why))
+  local _, why2 = E.pile_site(W.K, {pile_w = 3, pile_h = 2, pile_r = 12, pile_reads = 300}, {at = {10, 10, 5}, by = 'job'})
+  T.ok(tostring(why2):find('of job 10,10,5', 1, true), tostring(why2))
+end)
+
 T.done()

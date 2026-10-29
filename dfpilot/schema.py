@@ -595,6 +595,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-053: forbidden / off_group / owned (population level) join the keys; pile = the tool pile's state
     # BUG-128: src = the stockpile the tools sit in, g = the guards that applied (kept members, skipped patients/doctors,
     # a fresh request not pending, loose pairs as fetch, the stale cap, the pile's source)
+    # BUG-187: bk key patient (a member needs healthcare / rests: fetches no tool, takes no job), before jobs
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "
                                                                "bk:s picks:sa units:sa civ:i ww:i pile:s tell:s care:s src:i g:s")),

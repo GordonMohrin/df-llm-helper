@@ -42,7 +42,8 @@ end)
 local function econ_world(opts)
   local units, ids = {}, {}
   for i = 1, opts.cit do units[i] = {id = i, citizen = true}; ids[i] = i end
-  local persist = opts.plan and {plan = {v = 2, plan = {v = 2, year = 700, phase_target = 'P1'}, loaded = 1}} or nil
+  local persist = opts.persist or
+                  (opts.plan and {plan = {v = 2, plan = {v = 2, year = 700, phase_target = 'P1'}, loaded = 1}} or nil)
   local W = F.world{cfg = {baseline = F.cfg()}, units = units, persist = persist}
   for i = 1, opts.cit do W.unit(i).job = {current_job = {id = 900 + i}} end
   W.set_census('u', F.census_u(ids))
@@ -69,6 +70,26 @@ T.test('BUG-156: a plan-less fort of offices.mood_ws_pop citizens that stays at 
   local W3, E3 = econ_world{cit = 24, phase = 'P0', plan = true}
   T.eq(E3.planless(W3.K), false)
   T.eq(E3.mood_shops(W3.K), nil, 'an applied plan builds the shops by its phases')
+end)
+
+T.test('BUG-185 (live i4 y725: the kernel held an old y712 plan doc, phase_target P0, phase P0 for 92M ticks; brief ' ..
+       'said PLAN NONE, planless false): a persisted plan stuck at P0 counts as plan-less', function()
+  local YEAR = 403200
+  local function doc(pt, since)
+    return {plan = {v = 2, plan = {v = 2, year = 1, phase_target = pt}, loaded = 1},
+            phase = {v = 2, phase = 'P0', since = since, done = {}}}
+  end
+  -- k_mock starts in year 3: tick 3 * YEAR
+  local W, E = econ_world{cit = 24, phase = 'P0', persist = doc('P0', 3 * YEAR - 100)}
+  T.eq(E.planless(W.K), true, 'phase_target P0: the plan never aims at P1')
+  T.eq(E.phase_ok(W.K, 'P1'), true)
+  T.ok(type(E.mood_shops(W.K)) == 'table', 'the mood shops are known')
+  local W2, E2 = econ_world{cit = 24, phase = 'P0', persist = doc('P2', 0)}
+  T.eq(E2.planless(W2.K), true, 'phase_target P2 but P0 held for 3 years: stuck')
+  local W3, E3 = econ_world{cit = 24, phase = 'P0', persist = doc('P2', 3 * YEAR - 100)}
+  T.eq(E3.planless(W3.K), false, 'P0 since a few ticks under a P2 plan: the plan still leads')
+  local W4, E4 = econ_world{cit = 8, phase = 'P0', persist = doc('P0', 0)}
+  T.eq(E4.planless(W4.K), false, 'a small fort keeps the phase gate (offices.mood_ws_pop)')
 end)
 
 ---------------------------------------------------------------- BUG-154: a stalled project paused by care first

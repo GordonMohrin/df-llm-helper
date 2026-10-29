@@ -202,6 +202,10 @@ Related: FR-xx, BUG-xx
 | [BUG-182](BUG-182-no-masons-reason-hidden-by-a-standing-constructslab-order.md) | fixed (offline, live-untested) | low | live i4 round 2: a standing ConstructSlab order nobody can work hides the 'no Masons' reason | lua/dfllm/economy.lua |
 | [BUG-183](BUG-183-engraveslab-removed-warn-logged-every-economy-pass.md) | fixed (offline, live-untested) | low | live i4 round 2: the 'EngraveSlab ... removed' warn is written on every economy pass | lua/dfllm/economy.lua |
 | [BUG-184](BUG-184-runner-mandatory-workshops-request-repeats-every-minute.md) | fixed (offline, live-untested) | medium | live i4 round 2: the runner's 'reclaimed fort without ...' request repeats about every minute when nobody acts on it | lua/dfllm/runner.lua |
+| [BUG-185](BUG-185-planless-false-for-a-persisted-plan-stuck-at-p0.md) | fixed (offline, live-untested) | high | live i4 round 2: an old persisted plan stuck at P0 (phase_target P0, P0 for years) made `planless` false, so the P1 mood features stayed off | lua/dfllm/economy.lua |
+| [BUG-186](BUG-186-tool-detail-skips-almost-everyone-as-doctor.md) | fixed (offline, live-untested) | high | live round 2: SUTURING/DRESSING_WOUNDS are on by default in DF 53.16, the tool details skipped 29 of 30 candidates as doctors | lua/dfllm/economy.lua |
+| [BUG-187](BUG-187-long-term-patient-blocks-the-tool-detail.md) | fixed (offline, live-untested) | high | live i4 round 2: a resting patient held a Miners seat for 1313 days and TOOL_BLOCKED blamed `jobs` | lua/dfllm/economy.lua |
+| [BUG-188](BUG-188-tool-pile-site-search-runs-out-of-reads-at-a-rock-shaft.md) | fixed (offline, live-untested) | medium | live i4 round 2: `tool pile: no site: the 300 tile reads are spent` at a rock-shaft dig job, next try after 28 days | lua/dfllm/economy.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

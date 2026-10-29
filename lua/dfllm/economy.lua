@@ -519,10 +519,23 @@ local function phase_ok(K, from) return M.phase_ok(K, from) end
 -- floor, training weapons, leather, standing orders) wait for the plan's phase P1, which a fort without an applied plan
 -- (persist plan.plan null) never reaches: its P0 deliverables are never built. Such a fort of offices.mood_ws_pop
 -- citizens or more counts as P1 for them; the later phases (metal P2, glass P3) stay gated
+-- BUG-185 (live i4 y725: the kernel held an old y712 plan doc, phase_target P0, phase P0 since 92M ticks; brief said PLAN
+-- NONE): a persisted plan that never aims past P0 (phase_target <= P0) or whose phase has stayed at P0 for more than
+-- M.PLAN_STUCK_YEARS game years counts as no plan here, as brief.plan_flag's STALE rule (plan.STALE_SHOW = 1 year)
+M.PLAN_STUCK_YEARS = 1
+function M.plan_stuck(K, doc)
+  local pt = doc.phase_target
+  if type(pt) == 'string' and pt <= 'P0' then return 'target' end
+  local ph = K.persist.get('phase')
+  local since = type(ph) == 'table' and math.tointeger(ph.since) or nil
+  if type(ph) == 'table' and type(ph.phase) == 'string' and ph.phase <= 'P0' and since and
+     K.now().tick - since > M.PLAN_STUCK_YEARS * C.TICKS.YEAR then return 'stuck' end
+  return nil
+end
 function M.planless(K)
   local pp = K.persist.get('plan')
   local doc = type(pp) == 'table' and pp.plan or nil
-  if type(doc) == 'table' and doc ~= json.null then return false end
+  if type(doc) == 'table' and doc ~= json.null and not M.plan_stuck(K, doc) then return false end
   local c = type(K.cfg.baseline) == 'table' and K.cfg.baseline.offices
   local pop = type(c) == 'table' and math.tointeger(c.mood_ws_pop) or 20
   local cu = K.census and K.census.u
@@ -3175,7 +3188,13 @@ end
 
 -- BUG-128 (Run 14 region2-site90: the members rotated every TOOL_BLOCKED, the new ones were patients, the chief medical
 -- dwarf and a bone doctor). Module fields, not locals (the main chunk is at Lua's 200-local limit).
-M.DOC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING', 'SUTURING', 'DRESSING_WOUNDS'}
+-- BUG-186 (live i4 y725: DF 53.16 turns SUTURING and DRESSING_WOUNDS on for nearly every citizen, 33 of 41 adults were
+-- skipped as 'doc', 4 of them real doctors): only the doctor labors a player sets by hand count, plus a hospital job and
+-- the chief medical dwarf (DOC_JOBS, DOC_POS)
+M.DOC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
+M.DOC_JOBS = {'DiagnosePatient', 'Surgery', 'SetBone', 'Suture', 'DressWound', 'ApplyCast', 'PlaceInTraction',
+              'CleanPatient'}
+M.DOC_POS = 'CHIEF_MEDICAL_DWARF'
 M.TOOL_PROF = {Miners = 'MINER', Woodcutters = 'WOODCUTTER'}
 
 -- a patient: needs healthcare, or rests (the injured's job Rest)
@@ -3196,6 +3215,28 @@ function M.tool_cand_skip(u, spec)
     local ok, v = pcall(function() return u.status.labors[l] end)
     if ok and v == true then return 'doc' end
   end
+  local okj, jt = pcall(function() local j = u.job and u.job.current_job; return j and df.job_type[j.job_type] end)
+  if okj and type(jt) == 'string' then
+    for _, n in ipairs(M.DOC_JOBS) do if jt == n then return 'doc' end end
+  end
+  local okp, ps = pcall(dfhack.units.getNoblePositions, u)
+  if okp and type(ps) == 'table' then
+    for _, p in ipairs(ps) do
+      local okc, code = pcall(function() return p.position.code end)
+      if okc and code == M.DOC_POS then return 'doc' end
+    end
+  end
+end
+
+-- BUG-187 (live i4 y725: the patient 42435 lacked the pick for 1313 days, Rest, needs_healthcare; #cur == target, so
+-- nobody healthy joined): a member who is a patient (M.patient) and has lacked the tool for tools.block_days (rec.ms of
+-- p.tblk: the tick he was first seen without it) is a long-term patient. The kernel takes its own one off the detail, a
+-- player's one stays but does not count; either way a healthy candidate may join
+function M.tool_long_patient(u, spec, tc, rec, now)
+  if not spec.tool or not M.patient(u) or holds_tool(u, spec.tool) then return false end
+  local ms = type(rec) == 'table' and type(rec.ms) == 'table' and rec.ms or {}
+  local t = math.tointeger(ms[tostring(u.id)])
+  return t ~= nil and now - t >= (math.tointeger(tc.block_days) or 3) * DAY
 end
 
 -- the profession of the detail (MINER, WOODCUTTER): true when the unit has it
@@ -3621,7 +3662,14 @@ function M.td_blockers(dg, spec, kind, nwo)
   end
   local cut = where{U, function(r) return r.walk == 0 and #P > 0 end}
   if #cut > 0 then add('walk', string.format('no free %s on the walk group of %d', kind, #cut)) end
-  local nojob = where{U, function(r) return r.jobs == 0 end}
+  -- BUG-187 (live i4 #33355: the lacking member was a patient, Rest; bk said 'jobs'): a patient fetches no tool and takes
+  -- no job, whatever his walk group or burrows
+  local sick = where{U, function(r) return r.pat == true end}
+  if #sick > 0 then
+    add('patient', string.format('%d of %d are patients (needs healthcare / Rest): they fetch no %s and take no job (%d)',
+                                 #sick, nwo, kind, sick[1].id))
+  end
+  local nojob = where{U, function(r) return r.jobs == 0 and not r.pat end}
   if #nojob > 0 then
     add('jobs', string.format('%d can take none of the first %d open %s jobs (off their walk group or burrows)', #nojob,
                               dg.njobs or 0, JOB_NAME[spec.jobs] or tostring(spec.jobs)))
@@ -3723,6 +3771,9 @@ function M.tool_tell(spec, kind, c)
                       tostring(spec.labor), spec.name)
   elseif keys.tool2 then
     t = string.format('members of %s hold a second tool labor (one tool labor per dwarf): turn the other off', spec.name)
+  elseif keys.patient then                                                                    -- BUG-187
+    t = string.format('the %s member without a %s is a patient (hospital, Rest) and fetches none: take him off the detail '
+                      .. 'so a healthy dwarf joins', spec.name, kind)
   elseif c.forb > 0 and c.free == 0 then
     t = string.format('the %d %ss are forbidden: unforbid them (the items screen, flag forbid) or put them in a free chest',
                       c.forb, kind)
@@ -3775,6 +3826,8 @@ function M.tool_guards(spec, kind, dg, rec, stale, src, p)
   if kept then g[#g + 1] = string.format('kept %d (tool/pair/keep_days)', kept) end
   local sk = (st.tskip or {})[spec.name]
   if sk then g[#g + 1] = string.format('skipped pat %d doc %d', sk.pat or 0, sk.doc or 0) end
+  local np = (st.tpat or {})[spec.name]
+  if np then g[#g + 1] = string.format('patient members not counted %d', np) end          -- BUG-187
   local fresh = dg and dg.upwn or false
   for _, u in ipairs(dg and dg.units or {}) do if u.updn then fresh = true end end
   if fresh then g[#g + 1] = 'request < 1 day: not pending' end
@@ -3805,9 +3858,17 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
   st.tblk, st.tneed, st.tdiag, st.tstale = st.tblk or {}, st.tneed or {}, st.tdiag or {}, st.tstale or {}
   -- the members lack this tool while its jobs wait: T.forbid may unforbid that many forbidden ones
   st.tneed[kind] = #without > 0 and open > 0 and #without or nil
+  -- BUG-187: the player's long-term patients (not in cur) keep their first-seen tick, or they would count again
+  local pms = {}
+  for k in pairs((st.tpat_ids or {})[spec.name] or {}) do
+    local t = type(rec.ms) == 'table' and math.tointeger(rec.ms[k]) or nil
+    if t then pms[k] = t end
+  end
   if #without == 0 or open == 0 or free + forb == 0 then
     st.tblk[spec.name], st.tdiag[spec.name], st.tstale[kind] = nil, nil, nil
-    p.tblk[spec.name] = rec.ann and json.object{ann = CAD.quiet(rec.ann)} or nil
+    local keep = (rec.ann or next(pms)) and json.object{ann = rec.ann and CAD.quiet(rec.ann) or nil} or nil
+    if keep and next(pms) then keep.ms = json.object(pms) end
+    p.tblk[spec.name] = keep
     return
   end
   -- BUG-128 (Run 14: "for N days" counted from the detail's first block while the members rotated): the days of the
@@ -3820,6 +3881,7 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
     ms[k] = t
     if t < oldest then oldest = t end
   end
+  for k, t in pairs(pms) do ms[k] = ms[k] or t end
   rec.ms, rec.since = json.object(ms), nil
   local days = (r.now - oldest) // DAY
   local bins, res = inv['w_' .. kind .. '_bin'] or 0, inv['w_' .. kind .. '_res'] or 0
@@ -3873,8 +3935,9 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
     rec.stn, st.tstale[kind] = nil, nil
   end
   if tc.pile ~= false and days >= (tc.pile_days or 7) and pop.use > 0 and not memberside then
-    local at = M.pile_center(K, spec, jc, cur, pos)
-    st.tpile_req = at and {kind = kind, spec = spec.name, at = at, take = M.tool_src_pile(kind)} or nil
+    local take = M.tool_src_pile(kind)
+    local ats = M.pile_centres(K, spec, jc, cur, pos, take)                 -- BUG-188
+    st.tpile_req = #ats > 0 and {kind = kind, spec = spec.name, at = ats[1].at, ats = ats, take = take} or nil
   end
   local ptok = M.pile_text(r.p, true)
   if ptok then ctoks[#ctoks + 1] = ptok end
@@ -4029,14 +4092,22 @@ local function tools(K, c, p, inv, engine, r)
       local keep_ids = {}
       for _, id in ipairs(wd.assigned_units) do keep_ids[#keep_ids + 1] = id end
       local cur = {}
+      local trec, npat, pids = p.tblk[spec.name], 0, {}
       for _, id in ipairs(keep_ids) do
         local u = cit[id]
         local ok_u = u and dfhack.units.isAdult(u) and u.military.squad_id < 0 and not taken[id]
-        if ok_u then cur[#cur + 1] = u
+        local lpat = ok_u and M.tool_long_patient(u, spec, tc, trec, now)       -- BUG-187
+        if lpat then npat = npat + 1; pids[tostring(id)] = true end
+        if ok_u and not lpat then cur[#cur + 1] = u
         elseif mine[id] then
-          if set(spec, id, false, taken[id] and ('in ' .. taken[id]) or 'not eligible', tgt) then mine[id] = nil end
+          if set(spec, id, false, lpat and 'patient' or taken[id] and ('in ' .. taken[id]) or 'not eligible', tgt) then
+            mine[id] = nil
+            if lpat then npat, pids[tostring(id)] = npat - 1, nil end     -- off the detail: no longer a member
+          end
         end                                      -- the player's member that is not eligible stays and does not count
       end
+      st.tpat, st.tpat_ids = st.tpat or {}, st.tpat_ids or {}
+      st.tpat[spec.name], st.tpat_ids[spec.name] = npat > 0 and npat or nil, npat > 0 and pids or nil
       -- the tools the members can use: free (no holder, not reserved by a squad uniform) plus the ones they hold
       local has = {}                             -- members that hold the detail's tool (they stay first)
       if spec.tool then                         -- BUG-023: the demand before the tool cap (military keeps these tools)
@@ -8520,16 +8591,46 @@ end
 -- axes (stockpiles import, as baseline does for the melt pile). One attempt per `pile_every` days.
 
 -- where the detail works: the first open job on the citizens' walk group, else a member, else the first loose tool
-function M.pile_center(K, spec, jc, cur, pos)
+-- BUG-188 (live i4 y725: the first open dig job was a cavern-check shaft in raw rock at z122, no floor within 12 tiles;
+-- the members' area at 44,92,129 had a site): the centres in order, each {at, by}: open jobs with plain floor beside them
+-- (at most 2; a shaft in solid rock has none), the members, the stockpile the tools sit in (take), the first loose tool
+M.PILE_CENTRES, M.PILE_RETRY_DAYS = 4, 1
+function M.pile_open(K, p)
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      local ok, t = K.call('snapshot', 'tile', p[1] + dx, p[2] + dy, p[3])
+      if ok and type(t) == 'table' and t.c == '.' then return true end
+    end
+  end
+  return false
+end
+function M.pile_centres(K, spec, jc, cur, pos, take)
+  local out, seen, njob = {}, {}, 0
+  local function add(x, y, z, by)
+    local key = string.format('%d,%d,%d', x, y, z)
+    if #out < M.PILE_CENTRES and not seen[key] then seen[key] = true; out[#out + 1] = {at = {x, y, z}, by = by} end
+  end
   for _, p in ipairs(type(jc) == 'table' and jc[(spec.jobs or '') .. '_pts'] or {}) do
-    if not far(K, p[1], p[2], p[3]) then return {p[1], p[2], p[3]} end
+    if njob >= 2 then break end
+    if not far(K, p[1], p[2], p[3]) and M.pile_open(K, p) then njob = njob + 1; add(p[1], p[2], p[3], 'job') end
   end
   for _, u in ipairs(cur or {}) do
     local ok, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
     x, y, z = ok and math.tointeger(x), ok and math.tointeger(y), ok and math.tointeger(z)
-    if x and y and z then return {x, y, z} end
+    if x and y and z and not far(K, x, y, z) then add(x, y, z, 'member') end
   end
-  return pos and not far(K, pos[1], pos[2], pos[3]) and {pos[1], pos[2], pos[3]} or nil
+  if math.tointeger(take) then
+    pcall(function()
+      local b = df.building.find(take)
+      if b then add((b.x1 + b.x2) // 2, (b.y1 + b.y2) // 2, b.z, 'source pile') end
+    end)
+  end
+  if pos and not far(K, pos[1], pos[2], pos[3]) then add(pos[1], pos[2], pos[3], 'tool') end
+  return out
+end
+function M.pile_center(K, spec, jc, cur, pos)
+  local c = M.pile_centres(K, spec, jc, cur, pos)[1]
+  return c and c.at or nil
 end
 
 -- the ids of the stockpile buildings named dfllm-tools
@@ -8562,7 +8663,9 @@ end
 -- path, no building, no pending designation): its top-left tile, or nil and why; at most `pile_reads` tile reads
 function M.pile_site(K, tc, q)
   local w, h = tc.pile_w or 3, tc.pile_h or 2
-  local R, budget = tc.pile_r or 12, tc.pile_reads or 300
+  -- BUG-188 (live i4: 300 reads gave up at ring 7 of 12): the budget covers the whole (2R+w) x (2R+h) square
+  local R = tc.pile_r or 12
+  local budget = math.max(tc.pile_reads or 300, (2 * R + w) * (2 * R + h))
   local cx, cy, cz = q.at[1], q.at[2], q.at[3]
   local reads, seen = 0, {}
   local function floor_at(x, y)
@@ -8592,7 +8695,8 @@ function M.pile_site(K, tc, q)
       end
     end
   end
-  return nil, string.format('no %dx%d plain floor within %d tiles of %d,%d,%d', w, h, R, cx, cy, cz)
+  return nil, string.format('no %dx%d plain floor within %d tiles of %s%d,%d,%d', w, h, R, q.by and (q.by .. ' ') or '',
+                            cx, cy, cz)
 end
 
 -- the lacking members ask for the equipment update again at the next pass (the tools have a new home: tools.equip_update)
@@ -8630,8 +8734,17 @@ function T.toolpile(K, c, r)
     return true
   end
   if not q or tc.pile == false or type(K.act.tool_pile) ~= 'function' then return true end
-  if rec.t and r.now - rec.t < (tc.pile_every or 28) * DAY then return true end
-  local site, why = M.pile_site(K, tc, q)
+  -- BUG-188: a search that found no site is tried again after PILE_RETRY_DAYS, not after pile_every
+  local wait = rec.state == 'nosite' and M.PILE_RETRY_DAYS or (tc.pile_every or 28)
+  if rec.t and r.now - rec.t < wait * DAY then return true end
+  local site, why, c0
+  local whys = {}
+  for _, c in ipairs(type(q.ats) == 'table' and q.ats or {{at = q.at}}) do
+    local s, wy = M.pile_site(K, tc, {at = c.at, by = c.by})
+    if s then site, c0 = s, c; break end
+    whys[#whys + 1] = tostring(wy)
+  end
+  why = table.concat(whys, '; ')
   r.cmds = r.cmds + 1
   local out = {t = r.now}
   if site then
@@ -8640,15 +8753,22 @@ function T.toolpile(K, c, r)
       out.state, out.at, out.w, out.h, out.spec = 'placed', json.array(site), tc.pile_w or 3, tc.pile_h or 2, q.spec
       out.take = q.take                                -- BUG-128: the stockpile it takes from (quickfort take_from)
       M.pile_ask_again(q.spec)
-      K.log('info', 'tool pile: dfllm-tools %dx%d at %d,%d,%d for the %ss lying loose (%s lack them)', out.w, out.h, site[1],
-            site[2], site[3], q.kind, q.spec)
+      out.by = c0 and c0.by or nil
+      K.log('info', 'tool pile: dfllm-tools %dx%d at %d,%d,%d for the %ss lying loose (%s lack them; searched from %s %s)',
+            out.w, out.h, site[1], site[2], site[3], q.kind, q.spec, tostring(c0 and c0.by or 'centre'),
+            c0 and string.format('%d,%d,%d', c0.at[1], c0.at[2], c0.at[3]) or '?')
     else
       out.state, out.why = 'refused', tostring(n):sub(1, 60)
       K.log('warn', 'tool pile: dfllm-tools at %d,%d,%d refused: %s', site[1], site[2], site[3], tostring(n))
     end
   else
-    out.state, out.why = 'nosite', tostring(why):sub(1, 60)
-    K.log('warn', 'tool pile: no site: %s', tostring(why))
+    out.state, out.why = 'nosite', tostring(why):sub(1, 120)
+    -- a daily retry logs at debug only: warn once per pile_every while it keeps failing (the reason names the centres,
+    -- and a member centre moves every day, so comparing the text alone would warn daily)
+    local wt = rec.state == 'nosite' and math.tointeger(rec.wt) or nil
+    local warn = not wt or r.now - wt >= (tc.pile_every or 28) * DAY
+    out.wt = warn and r.now or wt
+    K.log(warn and 'warn' or 'debug', 'tool pile: no site: %s', tostring(why))
   end
   p.tpile = json.object(out)
   return true

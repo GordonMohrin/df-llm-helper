@@ -258,9 +258,54 @@ T.test('BUG-053: no revealed floor near the mines: no pile, the reason is kept a
   days(W, 10)
   FLOOR.x1 = 80
   T.eq(#ctl.piles, 0)
-  local n = 0
-  for _, l in ipairs(W.logs) do if tostring(l.msg):find('tool pile: no site', 1, true) then n = n + 1 end end
-  T.eq(n, 1)
+  local n, nd = 0, 0
+  for _, l in ipairs(W.logs) do
+    if tostring(l.msg):find('tool pile: no site', 1, true) then
+      if l.level == 'debug' then nd = nd + 1 else n = n + 1 end
+    end
+  end
+  T.eq(n, 1, 'logged once at warn')
+  T.ok(nd > 0, 'BUG-188: the daily retries of the same reason log at debug only')
+end)
+
+T.test('BUG-188 review: members that move every day (a new centre in the reason) still warn only once per pile_every',
+       function()
+  local W, ctl = world{miners = {1, 2, 3, 4, 5, 6}, picks = 20, dig = 14}
+  FLOOR.x1 = 41
+  for d = 1, 10 do
+    for i = 1, 6 do W.unit(i).pos = {x = 30 + d, y = 40 + i, z = 5} end
+    days(W, 1)
+  end
+  FLOOR.x1 = 80
+  T.eq(#ctl.piles, 0)
+  local n, whys = 0, {}
+  for _, l in ipairs(W.logs) do
+    local m = tostring(l.msg)
+    if m:find('tool pile: no site', 1, true) then
+      whys[m] = true
+      if l.level ~= 'debug' then n = n + 1 end
+    end
+  end
+  local nw = 0
+  for _ in pairs(whys) do nw = nw + 1 end
+  T.ok(nw > 1, 'the reason text changed as the members moved')
+  T.eq(n, 1, 'one warn line, the retries at debug')
+end)
+
+T.test('BUG-188 (live i4: a failed search waited pile_every 28 days): a search without a site is tried again the next '
+       .. 'day, and the reason names the centre searched', function()
+  local W, ctl = world{miners = {1, 2, 3, 4, 5, 6}, picks = 20, dig = 14}
+  FLOOR.x1 = 41
+  days(W, 9)
+  T.eq(#ctl.piles, 0)
+  local r = W.inbox('inspect', {what = 'workload', key = 'tools'})
+  T.ok(r.data.pile and r.data.pile:find('nosite', 1, true) and r.data.pile:find('tiles of %a+ %d'), tostring(r.data.pile))
+  FLOOR.x1 = 80
+  days(W, 2)
+  T.eq(#ctl.piles, 1, 'placed within two days once floor exists (not after 28)')
+  local line
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('tool pile: dfllm-tools 3x2', 1, true) then line = l.msg end end
+  T.ok(line and line:find('searched from ', 1, true), tostring(line))
 end)
 
 T.test('BUG-053: the stale count is fixed when the tools turn stale: picks made later are stock again (no endless picks)', function()
