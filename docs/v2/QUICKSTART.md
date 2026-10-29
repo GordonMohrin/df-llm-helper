@@ -43,7 +43,7 @@ Play Dwarf Fortress for me with dfpilot. DF 53.x (Steam) + DFHack are installed 
 | 2 | `python tools/migrate_v2.py --apply` | `-> ok` for both; `summary: ... applied` |
 | 2 (optional) | `python -m dfpilot lint` | `0 finding(s)` |
 | 3 (optional) | `dfhack-run dfllm selftest --mock` | `dfllm selftest: 1 pass, 0 fail` |
-| 3 | `dfhack-run dfllm adopt` | `dfllm: ...` with no error; then `dfhack-run dfllm status` lists 19 modules, none `DISABLED` |
+| 3 | `dfhack-run dfllm adopt` | `dfllm: ...` with no error; then `dfhack-run dfllm status` lists 20 modules, none `DISABLED` |
 | 3 | `dfhack-run dfllm selftest full` | `0 fail` |
 | 4 | `python -m dfpilot status` | `<save> y<year> <season> d<day> PEACE ... P0 ...` and a `kern ... ms/s` line |
 | 4 | `python -m dfpilot next` | `NEXT: <command>` + `WHY: ...` (+ `TELL PLAYER: ...`, `SHOW: dfllm cmd view target=...`), or `NEXT: nothing` when all is green |

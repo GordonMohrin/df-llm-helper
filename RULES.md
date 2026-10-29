@@ -283,7 +283,7 @@ FPS cap 30; no Lua quicksaves (only `dfllm save`, verified); DF autosave yearly.
 | P2 | killing field, gallery, B1, barracks (fortcore stage 2), captive pit (`captives`), squad A |
 | P3 | fortcore stage 3 (O1, B2, the refuge) first (DECISIONS 1), smelter + wood furnace (`furnaces`), hospital, orders basic + rockstock |
 | P4 | 1 caravan traded, bedrooms, tombs, tavern, temple |
-| P5 | gallery, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d (the refuge of stage 3 comes with P3 and before any phase_target P3+: §8 refuge gate) |
+| P5 | gallery, squads B and C, drill 1 passed, R1, drink ≥ 170 d, food ≥ 60 d (the refuge of stage 3 comes with P3 and before any phase_target P3+: §8 refuge gate); `traps at=ways` (FR-96: cage traps outside every door of a way in, drafted by `plan propose`; `at=hall` puts lost hall traps back; status `traps N/M`) |
 | P6 ★ (Y2) | military orders, trap hall armed (fortcore stage 4), metal ≥ 80 %, ≥ 300 bolts, R2 cap raise |
 | P7 ★ | beauty in used rooms; R3 only with D-01 = B |
 ★ = entered only when your plan's `phase_target` reaches it.

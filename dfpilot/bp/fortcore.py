@@ -255,6 +255,8 @@ def _manifest(stage: int, zc: int, zr: int) -> dict:
         m["stations"]["core"] = [CIV[0] + 2, CIV[1], zc]
         m["burrows"]["Tiefe+"] = {"role": "refuge"}
         m["refuge"] = {"anchor": [2, 45, zr], "burrow": "Tiefe+"}
+    if stage >= 4:      # FR-96: the hall's traps by tile (lua/dfllm/traps.lua counts them: status `traps N/M`)
+        m["traps"] = [{"id": "Z2", "kind": "stone", "tiles": [[u, v, ZE] for u, v in _trap_tiles(2) + _trap_tiles(3)]}]
     if bridges:
         m["bridges"] = {n: {"role": ROLE[n], "fp": [FP[n][0], FP[n][1], ZE, FP[n][2], FP[n][3], ZE],
                             "levers": [list(x) for x in LEVERS[n]]} for n in sorted(bridges)}

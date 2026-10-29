@@ -430,7 +430,7 @@ local function replace_by(dst, src, field, cap)
 end
 local MAPS = {bridges = true, stations = true, burrows = true}
 local LISTS = {zones = 50, stairs = 8}
-local BY = {killboxes = {'id', 20}, rooms = {'id', 200}, workshops = {'pos', 100}}
+local BY = {killboxes = {'id', 20}, rooms = {'id', 200}, workshops = {'pos', 100}, traps = {'id', 40}}   -- traps: FR-96
 
 -- maps replaced per key; id/pos lists replaced per entry; plain lists appended without duplicates
 function M.merge_manifest(dst, frag)

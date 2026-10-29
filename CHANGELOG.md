@@ -1,5 +1,29 @@
 # CHANGELOG dfpilot
 
+## G14 traps at every way in: cage-trap lanes outside the doors, the hall re-armed, trap upkeep `traps N/M` (FR-96, FR-97, 2026-10-29; offline, live-untested)
+- **Why:** goal G14 stood red in every Run 15 fort: the only traps were fortcore stage 4's 41 stone-fall traps in the Z2 hall
+  (fortcore.py `_stage4`, P6); a side way in (seal door, a door built in the perimeter) never got a trap, `traps N` counted only
+  the hall, and nothing looked at a trap again (a full cage trap, a destroyed trap).
+- **What changed:** (1) template `traps` (dfpilot/bp/traps.py, sited like seal): `at=ways` = a lane of cage traps on the outside
+  floor around every door between the outside and the fort (newest snapshot, doors/hatches/bridges closed; depth 1-3), `at=hall` =
+  the stone-fall tiles of a finished fortcore stage 4 the snapshot shows as floor; never on stairs, ramps, bridges, edge tiles or
+  the fort's own zones/rooms; no cage traps in the hall; manifest `traps` per way (id T<x>_<y>_<z>, merged per id in Python and
+  runner.lua), fortcore stage 4 writes id Z2; materials count a cage per cage trap. cmd.place/free_sites fill `at` in
+  (dfpilot/traps.py), SealClosed when nothing is left. (2) plan propose drafts `traps@S1 at=ways` from P5 while a way wants a lane
+  (once per plan year, not in the rebuild policy), plan check warns without it, build kind defense (FR-96). (3) kernel module
+  `traps` (lua/dfllm/traps.lua, daily): state `traps` {n armed of m listed, built, ways trapped, full cage traps, free cages, lost},
+  status/brief line `traps N/M ways w/wn ...`, MakeCage (wood, tag dfllm:traps) in PEACE when free cages are short, one live order;
+  mechanisms stay with the quickfort orders and economy (`traps.need`) (FR-97). Contracts: MODULES traps, ACT workorder += traps,
+  state traps, STATE_OWNERS traps.*, MANIFEST traps; appendix regenerated. RULES §11 P5 row edited in place (300 lines).
+- **Tests (each fails on 64df679):** tests/test_fr96_traps.py (21), tests/lua/test_traps.lua (6); updated pins: test_bp_emit
+  (24 templates), golden fortcore.json (Z2 entry), new goldens traps.*, test_kern_misc and test_kern_contract (20 modules),
+  test_care_coffins_files (workorder owners), README/QUICKSTART module count.
+- **Live check:** past P5 with a seal door: `dfllm plan propose` notes `FR-96: N way(s) in without a trap lane`, apply places
+  traps@S1 (`at=x,y,z:dx,dy ...` in cmd.log), cage traps outside the door, a mechanism + wooden cage order per trap, `inspect
+  manifest` lists `traps` T<x>_<y>_<z>; `dfllm status` shows `traps N/M ways w/wn`; after a capture `f` grows, kern.log `traps:
+  order <id> MakeCage xN (wood)`, care dumps the full cage and the trap is reloaded. A deconstructed hall trap: status `lost 1
+  (bp.place traps at=hall)`, then bp.place traps at=hall rebuilds it. Uncertain: the full/no-cage reads (contained_items
+  item_cagest, the caged unit's holder building). Design: docs/v2/FR-traps-G14.md.
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders

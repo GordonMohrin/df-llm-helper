@@ -43,6 +43,7 @@ C.MODULES = {
   {name = 'economy',   wp = 'WP8', every = {ticks = 1200}},
   {name = 'care',      wp = 'WP8', every = {ticks = 1200}},
   {name = 'water',     wp = 'WP8', every = {ticks = 1200}},
+  {name = 'traps',     wp = 'WP8', every = {ticks = 1200}},   -- FR-96/97: trap upkeep (counts, cages)
   {name = 'trade',     wp = 'WP9', every = {ticks = 100}},
   {name = 'baseline',  wp = 'WP8', every = {ticks = 33600}},
   {name = 'perf',      wp = 'WP1', every = {ms = 1000}},
@@ -270,7 +271,7 @@ C.ACT = {
   burrow_tiles = {'seal'},
   popcap = {'readiness'},
   quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
-  orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care'},
+  orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care', 'traps'},
   order_suspend = {'economy'}, engrave_order = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy', 'water'},
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
   plant_gather = {'economy'}, plant_ungather = {'economy'}, work_detail_prune = {'economy'},
@@ -298,6 +299,7 @@ C.STATE_OWNERS = {
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
   ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot', ['water.*'] = 'water', ['stale.*'] = 'kern',
+  ['traps.*'] = 'traps',
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -528,6 +530,9 @@ C.STATE_SPEC = obj({
                -- BUG-131: the first blocking hospital zone outside the core: id, centre, ok 1 = a finished hospital inside
                -- (hospital.retire needs no approve), pat = patients lying in it
                hout = obj({z = NAT, at = {t = 'tup', items = {NAT, NAT, NAT}}, ok = FLAG}, {pat = NAT})}),
+  -- FR-96/97 (traps.lua, daily): armed (n) of the manifest's trap tiles (m); built, ways trapped / listed, full cage traps,
+  -- free cages, listed tiles without a trap (lost; lh: some in the hall), the last cage order
+  traps = obj({n = NAT, m = NAT}, {b = NAT, w = NAT, wn = NAT, f = NAT, c = NAT, l = NAT, lh = FLAG, ord = str(40)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

@@ -160,7 +160,7 @@ def merge_manifest(base: dict, frag: dict) -> dict:
     for k, v in frag.items():
         if k in ("bridges", "stations", "burrows"):
             out[k] = {**out.get(k, {}), **v}
-        elif k in ("killboxes", "rooms"):
+        elif k in ("killboxes", "rooms", "traps"):          # FR-96: trap lanes per id (way, or Z2 for the hall)
             ids = {e["id"] for e in v}
             out[k] = [e for e in out.get(k, []) if e["id"] not in ids] + list(v)
         elif k == "workshops":
@@ -192,6 +192,9 @@ def transform_manifest(m: dict, X: Xform) -> dict:
             out[k] = {n: P(p) for n, p in v.items()}
         elif k == "killboxes":
             out[k] = [{"id": e["id"], "bbox": X.bbox(e["bbox"])} for e in v]
+        elif k == "traps":                                  # FR-96
+            out[k] = [{**e, "tiles": [P(t) for t in e["tiles"]], **({"way": P(e["way"])} if "way" in e else {})}
+                      for e in v]
         elif k == "edge":
             out[k] = [P(p) for p in v]
         elif k == "refuge":

@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-from . import cmd as _cmd, files, paths, schema
+from . import cmd as _cmd, files, paths, schema, traps as _traps
 from .cmd import (SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files, fmt_reply,
                   fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy, place, rank_sites, refuge_stair,
                   refuge_open, seal_openings, send, sites_snapshot, template_info, template_names, water_near, write_bp)
@@ -67,7 +67,7 @@ CISTERN = {"tpl": "cistern", "site": "S1"}    # bp/rooms.py: a well over real wa
 # runs seal projects first and, while one is open in PEACE, pauses the housing/work builds; below rebuild.pop citizens
 # it runs only seal, tombs, food/drink, beds and the depot (runner.lua kind_of; this mirrors it for the plan builds)
 SEAL = "seal"
-DEFENSE_TPLS = ("seal", "barracks", "captives", GALLERY)          # defense class: never paused (fortcore stage >= 2 too)
+DEFENSE_TPLS = ("seal", "barracks", "captives", GALLERY, "traps")  # defense class: never paused (fortcore stage >= 2 too)
 SUPPLY_TPLS = ("farms", "cistern", STOCKROOM, REFUGE_DRINK)        # food/water/drink (and a food/drink-only workshops)
 BEDS_TPLS = ("bedrooms", REFUGE_BEDS)
 FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
@@ -209,6 +209,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
+            "traps": _traps.facts(save_dir),                         # FR-96: doors on the ways in without a trap lane
             "seals": open_seals(save_dir, state)}
 
 
@@ -1428,6 +1429,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     warn += seal_gate(doc, s, fort or {}, prev)   # Run 11 siege 8: seal first; the rebuild policy
     warn += aquifer_gate(doc, s, fort or {})      # FR-95: a breach:damp park, a heavy aquifer, fortcore p.aquifer pass
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
+    warn += _traps.gate(doc, fort)                # FR-96: a way in without a trap lane from P5 on
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()
@@ -2093,6 +2095,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs and p["id"] <= lib_top:
                     libs.append(d["lib"])
+    tb, tnote = _traps.draft(fort, target, builds, prev, year, info, rb)   # FR-96: trap lanes at the ways in (P5+)
+    if tb:
+        builds.append(tb)
     if applied is not None:                      # BUG-164: no stage 3 @same without the core's stage 2 (known applied)
         core_gaps(builds, done)
     if drop_core:                                # BUG-130: nothing on the stopped anchor
@@ -2165,6 +2170,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
     doc["notes"] += core_note
+    if tb and any(b is tb for b in builds):
+        doc["notes"] += tnote
     if ewhy:
         em_t = [b["tpl"] for b in front if any(b is x for x in builds)]
         doc["notes"] += (f"; BUG-243: {ewhy} (< {EMERGENCY_D}): " + (", ".join(em_t) + "@S1 first" if em_t else

@@ -1,0 +1,65 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "defense",
+  "manifest": {
+   "traps": [
+    {
+     "id": "T70_70_100",
+     "kind": "cage",
+     "tiles": [
+      [
+       70,
+       70,
+       100
+      ]
+     ]
+    }
+   ],
+   "v": 2
+  },
+  "materials": {
+   "cage": 1,
+   "cage_trap": 1,
+   "mechanism": 1
+  },
+  "params": {
+   "at": "",
+   "depth": 1,
+   "kind": "cage"
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "Tc"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       100
+      ]
+     }
+    ],
+    "defense": 1,
+    "label": "traps.build",
+    "mode": "build",
+    "orders": 1
+   }
+  ],
+  "tpl": "traps",
+  "v": 2
+ }
+]
