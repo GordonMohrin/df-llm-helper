@@ -166,7 +166,8 @@ AUTO_TIMEOUT_S = 60
 TOMBS_COOLDOWN_S = 600
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery", "farmers",
-              "mandatory", "slabs")           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
+              "mandatory", "slabs",           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
+              "busy")                         # BUG-224: busy = one more Carpenters/Masons beside a full one
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -628,10 +629,11 @@ class Follower:
                 from .cmd import _moodable
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
-            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") in ("mandatory", "slabs"):
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") in ("mandatory", "slabs", "busy"):
                 # FR-76 (Run 12 Trussroads, reclaimed: no carpenter, no craftsdwarf, no kitchen): the types the runner
                 # saw missing on the map, whatever the fort manifest lists (kept by `need`, BUG-066). BUG-133: economy's
-                # why=slabs (ghosts wait for memorial slabs, no mason's workshop stands) the same way: the Masons alone
+                # why=slabs (ghosts wait for memorial slabs, no mason's workshop stands) the same way: the Masons alone.
+                # BUG-224: why=busy (one Carpenters/Masons holds the waiting jobs, idle workers stand): one more of it
                 from .cmd import _extra_shops, _moodable
                 mood, extra = _moodable(), set(_extra_shops())
                 want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]

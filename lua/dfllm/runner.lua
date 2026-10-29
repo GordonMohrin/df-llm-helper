@@ -2097,6 +2097,75 @@ function Q.aq_boot(K)
   end
 end
 
+-- BUG-226 (live i3 Earthboat: explores y380s0b0..s3b0 were placed at one plan apply with depth 12, z135-z123; the first
+-- broke into a cavern at z123 and the kernel noted it in manifest.caverns, then s2b0 started and broke into z123 again,
+-- BREACH_STOP, PROJECT_BLOCKED A): before an explore's dig stage designates its first chunk, the cavern levels the
+-- manifest knows are held against the stage's z-range. A level inside it cuts the shaft to stop one level above it
+-- (the chunks below dropped, the new bottom stair an up stair, params.depth = anchor z - cavern z - 1); when that leaves
+-- less than 2 levels the explore is blocked (why cavern_known) with one PROJECT_BLOCKED (A) naming bp.cancel.
+-- Returns nil (nothing known), 'cut' or 'park'.
+function Q.explore_cav(K, P, d, st)
+  if P.tpl ~= 'explore' or st.mode ~= 'dig' or P.chunk ~= 0 then return nil end
+  local man = K.manifest()
+  local cav = type(man) == 'table' and type(man.caverns) == 'table' and man.caverns or {}
+  local top, low
+  for _, ch in ipairs(st.chunks) do
+    for _, c in ipairs(ch.cells) do
+      local z = (int(ch.pos[3]) or 0) + (int(c[3]) or 0)
+      top, low = math.max(top or z, z), math.min(low or z, z)
+    end
+  end
+  local hit
+  for _, c in ipairs(top and cav or {}) do
+    local z = type(c) == 'table' and int(c[3]) or nil
+    if z and z >= low and z <= top and (hit == nil or z > hit) then hit = z end
+  end
+  if not hit then return nil end
+  local az = int(type(d.anchor) == 'table' and d.anchor[3]) or top
+  local depth = az - hit - 1
+  local label = trunc(st.label, 24)
+  if depth < 2 then
+    set_blocked(K, P, 'cavern_known')
+    S.rt.pb[P.id] = CAD.mark(K.now(), {P.id .. ':' .. label}, {P.blocked})    -- blocked_event: no second wake for it
+    local msg = string.format('%s (explore) blocked: cavern_known: cavern level z%d (manifest caverns) lies in its shaft '
+                              .. 'z%d-%d; cancel: dfllm cmd bp.cancel \'{"proj":"%s"}\'', P.id, hit, top, low, P.id)
+    K.log('warn', '%s', msg)
+    K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), {proj = P.id, tpl = P.tpl, stage = label, why = P.blocked, ticks = 0})
+    return 'park'
+  end
+  local chunks, bottom = {}, nil
+  for _, ch in ipairs(st.chunks) do
+    local cells = {}
+    for _, c in ipairs(ch.cells) do
+      local z = (int(ch.pos[3]) or 0) + (int(c[3]) or 0)
+      if z > hit then
+        local nc = {c[1], c[2], c[3], c[4]}
+        cells[#cells + 1] = nc
+        if tostring(c[4]):match('^[ij]') and (bottom == nil or z < bottom.z) then bottom = {z = z, c = nc} end
+      end
+    end
+    if #cells > 0 then
+      local n = copy(ch)
+      n.cells = cells
+      chunks[#chunks + 1] = n
+    end
+  end
+  if bottom and bottom.c[4]:sub(1, 1) == 'i' then bottom.c[4] = 'u' .. bottom.c[4]:sub(2) end
+  st.chunks = chunks
+  if type(d.params) == 'table' then d.params.depth = depth end
+  K.persist.set('bp.' .. P.id, d)
+  for k in pairs(S.tiles) do if k:sub(1, #P.id + 1) == P.id .. '/' then S.tiles[k] = nil end end
+  if S.own then S.own[P.id] = nil end
+  S.bbox[P.id], S.meas[P.id] = nil, nil
+  if S.cl then S.cl[P.id] = nil end
+  if S.xdoc then S.xdoc[P.id] = nil end
+  S.rt.xs[P.id] = nil                             -- the shaft record is noted again with the new bottom
+  dirty()
+  K.log('info', '%s (explore): cavern level z%d known (manifest caverns): the shaft stops at z%d (depth %d, was z%d)',
+        P.id, hit, hit + 1, depth, low)
+  return 'cut'
+end
+
 -- meas: measure-only pass of a stalled project without a slot (no orders, no applies); hold: a paused project (seal
 -- first, rebuild): measured, never ordered or applied (its next stage waits), its applied dig chunks watched
 local function work(K, P, meas, hold)
@@ -2156,6 +2225,7 @@ local function work(K, P, meas, hold)
     if P.chunk < #st.chunks then
       if hold then return hold_watch(K, P, d, st, R) end
       if not qf_room() then return 'yield' end
+      if Q.explore_cav(K, P, d, st) == 'park' then return 'done' end    -- BUG-226: a known cavern level in the shaft
       if not apply(K, P, st, R) then return 'done' end
       applied = true
     elseif applied and (st.mode == 'dig' or st.mode == 'build') then

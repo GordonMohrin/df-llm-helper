@@ -199,7 +199,8 @@ T.test('FR-01: an order without its workshop, input or worker is reported after 
   T.eq(#W.find_events('ORDER_STUCK'), 1, 'reported once')
 end)
 
-T.test('FR-01: the check is sliced (50 orders a frame); at most report_per_day ORDER_STUCK a day', function()
+T.test('FR-01: the check is sliced (50 orders a frame); BUG-225: 55 orders with the same missing input are one ' ..
+       'ORDER_STUCK with n 55 (old: report_per_day events a day, one per order)', function()
   local W = world{setup = function(W)
     for _ = 1, 55 do
       F.order(W, {job_type = df.job_type.PrepareMeal, amount_left = 1, material_category = {}, mat_type = -1})
@@ -209,9 +210,13 @@ T.test('FR-01: the check is sliced (50 orders a frame); at most report_per_day O
   days(W, 4)
   T.eq(W.state().orders.n, 55)
   T.eq(W.state().orders.stuck, 55)
-  T.eq(#W.find_events('ORDER_STUCK'), 3, 'report_per_day')
+  local ev = W.find_events('ORDER_STUCK')
+  T.eq(#ev, 1, 'live i3: 3 a day, one per order')
+  T.eq({ev[1].d.kind, ev[1].d.n, ev[1].d.order}, {'input', 55, 1})
+  T.ok(ev[1].msg:find('55 order(s) cannot run for', 1, true) and ev[1].msg:find('(order 1 PrepareMeal, 2, 3, ...)', 1, true),
+       ev[1].msg)
   days(W, 1)
-  T.eq(#W.find_events('ORDER_STUCK'), 6)
+  T.eq(#W.find_events('ORDER_STUCK'), 1, 'no news: quiet')
   for _ = 1, 60 do F.order(W, {job_type = df.job_type.PrepareMeal, amount_left = 1, _name = string.rep('x', 40)}) end
   local r = W.inbox('inspect', {what = 'orders'})
   T.ok(#require('dfllm.util.json').encode(r.data) <= 8192, 'within the 8 KB reply')
@@ -367,6 +372,44 @@ T.test('BUG-205 (live Earthboat: ORDER_STUCK x45 in 2 months, one per order of a
   local ev2 = W.find_events('ORDER_STUCK')
   T.eq(#ev2, 2)
   T.eq(ev2[2].d.n, 5)
+end)
+
+T.test('BUG-225 (live i3: 12x "no bars:INORGANIC:IRON" in a month): kind worker and input are one ORDER_STUCK per ' ..
+       'kind and reason with n and sample ids; a lone order keeps its old text; news again after 7 days and 10 min', function()
+  local W = world{setup = function(W)
+    add_jobs({'ProcessPlants'})
+    df.unit_labor.PROCESS_PLANT, df.unit_labor[7] = 7, 'PROCESS_PLANT'
+    for _ = 1, 4 do
+      F.order(W, {job_type = df.job_type.ProcessPlants, mat_type = -1, mat_index = -1, amount_left = 6,
+                  material_category = {}, _name = 'Process plants'})
+    end
+    F.workshop(W, 'Farmers')
+    F.workshop(W, 'Kitchen')
+    F.order(W, {job_type = df.job_type.PrepareMeal, amount_left = 1, material_category = {}, mat_type = -1})
+  end}
+  for i = 1, 6 do W.unit(i).status.labors = {[4] = true, [7] = false} end
+  days(W, 4)
+  local ev = W.find_events('ORDER_STUCK')
+  T.eq(#ev, 2, 'old: 5 events, one per order')
+  local by = {}
+  for _, e in ipairs(ev) do by[e.d.kind] = e end
+  T.eq({by.worker.d.n, by.worker.d.order}, {4, 1})
+  T.ok(by.worker.msg:find('4 order(s) cannot run for', 1, true)
+       and by.worker.msg:find('(order 1 ProcessPlants, 2, 3, ...)', 1, true), by.worker.msg)
+  T.ok(by.worker.d.why:find('no worker PROCESS_PLANT', 1, true), by.worker.d.why)
+  T.eq(by.input.d.n, 1)
+  T.ok(by.input.msg:find('^order 5 PrepareMeal cannot run for %d+ days: '), by.input.msg)
+  days(W, 10)
+  T.eq(#W.find_events('ORDER_STUCK'), 2, 'no news: quiet')
+  F.order(W, {job_type = df.job_type.ProcessPlants, mat_type = -1, mat_index = -1, amount_left = 2,
+              material_category = {}, _name = 'Process plants'})
+  days(W, 4)
+  T.eq(#W.find_events('ORDER_STUCK'), 2, 'a new order: the wall clock (10 min) holds it')
+  W.ms = W.ms + 700 * 1000
+  days(W, 1)
+  local ev2 = W.find_events('ORDER_STUCK')
+  T.eq(#ev2, 3)
+  T.eq({ev2[3].d.kind, ev2[3].d.n}, {'worker', 5})
 end)
 
 T.test("BUG-059: a missing Farmer's Workshop is told as a workshop (kind workshop), not as 'no Farmers'; a missing worker apart",

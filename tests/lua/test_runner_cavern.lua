@@ -310,4 +310,49 @@ T.test('damp_dig (light aquifer, live L6) keeps working: seepage <= seep_max dig
   T.eq(H.proj(W, 'c2').blocked, 'breach:cavern_lake')
 end)
 
+-- BUG-226 (live i3 Earthboat: four explores placed at one apply with depth 12; the second dug into the cavern level z123
+-- the first had found and the kernel had put into manifest.caverns): the runner holds a placed, not started explore
+-- against the cavern levels the manifest knows before its dig stage designates anything
+T.test('BUG-226: an explore whose shaft reaches a known cavern level is cut to stop one level above it before digging',
+       function()
+  local W = fresh{tag = 'cavcut'}
+  W.K.persist.set('manifest', {v = 2, caverns = {{70, 68, 95}, {10, 10, 60}}})
+  H.place(W, 'e1', explore_doc())
+  H.runs(W, 1)
+  T.eq(W.tile(AX, AY + 1, 95).dig, '', 'live: the shaft was designated down to z92, through the cavern level')
+  T.eq(W.tile(AX, AY + 1, 94).dig, '')
+  T.eq(W.tile(AX, AY + 1, 96).dig, 'u', 'the new bottom: an up stair one level above the cavern')
+  T.eq(W.tile(AX, AY + 1, 97).dig, 'i')
+  T.eq(W.tile(AX, AY + 1, 100).dig, 'j')
+  T.eq(W.tile(AX - 2, AY + 1, 96).dig, 'd', 'the side tunnel of z96 stays')
+  local d = W.K.persist.get('bp.e1')
+  T.eq(d.params.depth, 4)
+  T.eq(#d.stages[1].chunks, 5, 'z100..z96')
+  T.ok(logged(W, 'info', 'cavern level z95 known'), 'kern.log says so')
+  T.eq(#W.find_events('PROJECT_BLOCKED'), 0)
+  T.eq(H.proj(W, 'e1').blocked, '')
+end)
+
+T.test('BUG-226: a known cavern level right below the core leaves no shaft: blocked cavern_known, one PROJECT_BLOCKED ' ..
+       'naming bp.cancel, nothing designated; caverns outside the z-range change nothing', function()
+  local W = fresh{tag = 'cavpark'}
+  W.K.persist.set('manifest', {v = 2, caverns = {{70, 68, 99}}})
+  H.place(W, 'e1', explore_doc())
+  H.runs(W, 3)
+  T.eq(W.tile(AX, AY + 1, 100).dig, '', 'nothing designated')
+  T.eq(H.proj(W, 'e1').blocked, 'cavern_known')
+  local ev = W.find_events('PROJECT_BLOCKED')
+  T.eq(#ev, 1)
+  T.eq({ev[1].cls, ev[1].d.why, ev[1].d.proj}, {'A', 'cavern_known', 'e1'})
+  T.ok(ev[1].msg:find('cavern level z99', 1, true) and ev[1].msg:find('bp.cancel', 1, true), ev[1].msg)
+  H.runs(W, 4)
+  T.eq(#W.find_events('PROJECT_BLOCKED'), 1, 'no second wake for the same block')
+  local W2 = fresh{tag = 'cavfar'}
+  W2.K.persist.set('manifest', {v = 2, caverns = {{70, 68, 91}, {70, 68, 101}}})
+  H.place(W2, 'e1', explore_doc())
+  H.runs(W2, 1)
+  T.eq(W2.tile(AX, AY + 1, 92).dig, 'u', 'the full shaft')
+  T.eq(W2.K.persist.get('bp.e1').params.depth, 8)
+end)
+
 T.done()

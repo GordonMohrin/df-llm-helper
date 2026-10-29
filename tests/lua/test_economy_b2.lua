@@ -429,6 +429,86 @@ T.test('BUG-201 (live Earthboat): a stone door order re-entered in wood and then
   T.ok(#stuck(W, 'made again') >= 2, 'stale again: made again in its own class')
 end)
 
+-- BUG-224: the new order in the spec's material class (stone: mat_type 0), as the BUG-201 test
+local function classed_workorder(W)
+  W.act_result('workorder', function(spec)
+    local mo = df.global.world.manager_orders
+    local id = mo.manager_order_next_id
+    mo.manager_order_next_id = id + 1
+    mo.all:insert('#', {id = id, job_type = df.job_type[spec.job], reaction_name = '', amount_left = spec.amount_total,
+                        amount_total = spec.amount_total, item_subtype = -1, mat_index = -1, frequency = ONE,
+                        mat_type = spec.material == 'INORGANIC' and 0 or -1,
+                        material_category = spec.material_category and {wood = true} or {},
+                        item_conditions = kmock.vec{}, status = {validated = true}})
+    return true, id
+  end)
+end
+local function busy_req(W)
+  local r = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.why == 'busy' then r[#r + 1] = e end end
+  return r
+end
+
+T.test('BUG-224 (live i3: order 650 ConstructChest rock -> wood a day after it was made again in stone, then stone again): ' ..
+       'between wood_orders\' threshold and T.stale\'s the order is made again in its own class, no flip-flop', function()
+  local W = world{boulders = 17, wood = 80, setup = function(W) classed_workorder(W); doors(W, 1) end}
+  days(W, 2)
+  T.eq(#acts(W, 'order_material'), 1, 'wood_orders: 17 free boulders < 20, the stone door goes wood')
+  days(W, 40)
+  T.eq(#stuck(W, 'made again in stone'), 0, 'live: 17 >= 5 + 10 made it again in stone')
+  T.ok(#stuck(W, 'made again') >= 1, 'made again in wood')
+  T.eq(#acts(W, 'order_material'), 1, 'live: wood_orders switched the stone one back to wood')
+end)
+
+T.test('BUG-224: an order made again keeps its mark through a job in a shop (the record rebuilt) and wood_orders leaves ' ..
+       'it alone when logs come', function()
+  local W, ctl = world{boulders = 17, shops = {'Masons', 'Carpenters'}, setup = function(W)
+    classed_workorder(W); doors(W, 1)
+  end}
+  days(W, 11)
+  local again = acts(W, 'workorder', 'dfllm:redo_')
+  T.eq(#again, 1, 'no logs: made again in stone')
+  local nid = ids_of('ConstructDoor')[1]
+  T.ok(nid and nid ~= 1, 'the new order stands')
+  ctl.shops.Masons.jobs = kmock.vec{{job_type = df.job_type.ConstructDoor, order_id = nid, flags = {working = true}}}
+  days(W, 1)
+  ctl.shops.Masons.jobs = kmock.vec{}
+  for _ = 1, 80 do F.item(W, 'WOOD', {}) end
+  days(W, 4)
+  T.eq(#acts(W, 'order_material'), 0, 'live: rock -> wood for the made-again order')
+end)
+
+T.test('BUG-224: a stale wood order in a busy Carpenters shop is made again in wood, not stone; >= 3 waiting jobs and an ' ..
+       'idle carpenter ask for one more Carpenters (PROJECT_REQUEST why=busy), once per request_days', function()
+  local W, ctl = world{boulders = 40, wood = 80, setup = function(W)
+    order(W, {job = 'ConstructCoffin', cat = {wood = true}, left = 3})
+  end}
+  local jobs = {}
+  for i = 1, 4 do jobs[i] = {job_type = df.job_type.ConstructDoor, order_id = 90 + i, flags = {working = i == 1}} end
+  ctl.shops.Carpenters.jobs = kmock.vec(jobs)
+  W.unit(1).job.current_job = nil
+  days(W, 11)
+  local again = acts(W, 'workorder', 'dfllm:redo_')
+  T.eq(#again, 1)
+  T.eq({again[1].args[1].material, again[1].args[1].material_category}, {nil, {'wood'}}, 'live: made again in stone')
+  local ev = stuck(W, 'Carpenters: 1 shop, 4 jobs (1 working), none from this order')
+  T.eq(#ev, 1)
+  local pr = busy_req(W)
+  T.eq(#pr, 1)
+  T.eq({pr[1].d.tpl, pr[1].d.why, pr[1].d.types}, {'workshops', 'busy', {'Carpenters'}})
+  T.ok(pr[1].msg:find('one more Carpenters (1 shop, 3 jobs waiting, 1 idle carpenter)', 1, true), pr[1].msg)
+  days(W, 11)
+  T.eq(#busy_req(W), 1, 'not again within request_days')
+  -- every carpenter at work: no request, the class is kept all the same
+  local W2, c2 = world{boulders = 40, wood = 80, setup = function(W)
+    order(W, {job = 'ConstructCoffin', cat = {wood = true}, left = 3})
+  end}
+  c2.shops.Carpenters.jobs = kmock.vec(jobs)
+  days(W2, 11)
+  T.eq(#busy_req(W2), 0)
+  T.eq(acts(W2, 'workorder', 'dfllm:redo_')[1].args[1].material_category, {'wood'})
+end)
+
 T.test('BUG-060: the stale clock runs only in PEACE and RECOVERY', function()
   local W = world{boulders = 40, wood = 40, mode = 'SIEGE', setup = function(W) doors(W, 2) end}
   days(W, 15)

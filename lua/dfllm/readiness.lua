@@ -196,7 +196,11 @@ local function request_audit(K, force)
   if not force and st.audit_snap then
     local okp, pend = K.call('snapshot', 'pending', st.audit_snap)
     if okp and pend == true then
-      K.log('info', 'readiness: monthly audit waits for snapshot %s (still queued or exporting)', st.audit_snap)
+      -- BUG-227 (live i3: 18 such lines in 50 s for one snapshot, 76 in kern.log): once per snapshot id
+      if M.audit_wait_logged ~= st.audit_snap then
+        M.audit_wait_logged = st.audit_snap
+        K.log('info', 'readiness: monthly audit waits for snapshot %s (still queued or exporting)', st.audit_snap)
+      end
       return
     end
   end

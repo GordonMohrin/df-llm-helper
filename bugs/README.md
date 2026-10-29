@@ -238,6 +238,10 @@ Related: FR-xx, BUG-xx
 | [BUG-221](BUG-221-next-says-propose-right-after-the-refuge-plan-apply.md) | fixed (offline, live-untested) | medium | live 4: NEXT said plan propose right after the apply of a plan that builds the refuge | dfpilot/guide.py |
 | [BUG-222](BUG-222-refuge-gate-demands-beds-before-fortcore-stage-3.md) | fixed (offline, live-untested) | high | live 4: plan check demanded refuge_beds at P3+ that no site takes before fortcore stage 3 is dug | dfpilot/plan.py |
 | [BUG-223](BUG-223-kept-explore-shafts-dig-into-a-known-cavern.md) | fixed (offline, live-untested) | medium | live 4: kept explore shafts dug into a cavern level the kernel recorded after the apply | dfpilot/plan.py |
+| [BUG-224](BUG-224-made-again-order-flips-material-busy-shop.md) | fixed (offline, live-untested) | medium | live 4: a made-again order flips rock/wood; a busy shop changes the material class | lua/dfllm/economy.lua |
+| [BUG-225](BUG-225-order-stuck-input-one-event-per-order.md) | fixed (offline, live-untested) | low | live 4: ORDER_STUCK for a missing input or worker is one event per order | lua/dfllm/economy.lua |
+| [BUG-226](BUG-226-explore-digs-into-known-cavern-level.md) | fixed (offline, live-untested) | medium | live 4: a placed explore digs into a cavern level the kernel already knows | lua/dfllm/runner.lua |
+| [BUG-227](BUG-227-readiness-audit-wait-log-spam.md) | fixed (offline, live-untested) | low | live 4: kern.log spam: readiness monthly audit waits | lua/dfllm/readiness.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
