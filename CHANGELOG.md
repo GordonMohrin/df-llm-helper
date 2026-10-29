@@ -1,5 +1,23 @@
 # CHANGELOG dfpilot
 
+## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
+  player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no
+  act that opens a sheet (request_broker writes trade_flags, dismiss_popup erases the popup list); the last UI actions before the sheet
+  were the kernel's own trade open/mark/offer/close of the visit before (Inkintense 151318626, Drillchamber 151417331, Earthboat
+  153333217). The kernel never tracked which screens it opened, so a sheet DF left after the kernel's close counted as the player's for
+  ever (BUG-286); the player screen was named once as a class B event and the visit timed out unasked (BUG-287).
+- **What changed:** trade.lua: `OWN` ownership (persisted `m.trade.ui`) from the depot sheet the kernel opens until the map stood
+  `SETTLE_MS` 3 s after its close; a ViewSheets/Trade screen on top meanwhile is closed with act.trade `close` (LEAVESCREEN, the
+  player's Esc), at most `LEFT_TRIES` 4, also in OPEN before anything counts as `ui_busy`; any other screen ends the ownership, so a
+  player's screen is never touched. `finish(ui_busy)` counts tries per visit and asks DECISION_NEEDED `trade_screen` (screen, n, q)
+  once at `BUSY_ASK` 3. Schema DECISION_NEEDED `screen:s`, CONTRACTS appendix regenerated, RULES row DECISION_NEEDED.
+- **Tests (fail on abc2f95):** tests/lua/test_bug286_287_sheet.lua (3 of 4; the fourth guards the player's own sheet).
+- **Live check:** after the next kernel trade kern.log `trade: closed dwarfmode/ViewSheets/UNIT/Overview, left open after the kernel's
+  own trade screen`, and the next caravan trades without `blocked`. No such line but a block again: the sheet comes later or from
+  elsewhere; DECISION_NEEDED `trade_screen` names it after 3 tries. Uncertain: which DF 53.16 path draws the unit sheet; review
+  found the timing against the "left by our close" reading (blocks 12-36 min after the close, the sheet cleared without a reload,
+  every block in the x56 window layout after the relaunch, BUG-286 Review), so BUG-287's question may be what catches it live.
 ## Run 15b crush: the drill lowers its bridges before PEACE, a quiet window for every lowering (BUG-251..254, 2026-10-29; offline, live-untested)
 - **Why:** Run 15b Earthboat y374 summer d74: soldier 24165 died crushed by B1 going down after an automatic drill (#1057
   BRIDGE_CRUSH, #1058 DEATH 'last seen 1 tile from it'); kern.log: PEACE 150981959, 18 'B1 down still waits for citizen', the pull

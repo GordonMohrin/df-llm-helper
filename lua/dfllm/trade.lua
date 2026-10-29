@@ -108,6 +108,11 @@ M.CFG = {
   RUN_MS = 250,         -- BUG-026: most real ms one run adds to the module's own clock (PHASE_MS/TALK_MS/REPLY_MS)
   MAX_ADJUST = 4, MAX_REFUSE = 2, OPEN_TRIES = 8, MAX_DIALOGS = 3,
   SWEEP_MS = 3000,      -- real time to keep dismissing a confirm prompt of ours left on screen
+  -- BUG-286 (Run 15: a ViewSheets/UNIT/Overview stood after the kernel's own trade screen, three forts lost whole caravans):
+  -- from opening the depot sheet until the map has stood SETTLE_MS (real) after our close, a sheet or trade screen on top is
+  -- the kernel's own and is closed with Esc (at most LEFT_TRIES times, then it counts as the player's)
+  SETTLE_MS = 3000, LEFT_TRIES = 4,
+  BUSY_ASK = 3,         -- BUG-287: ui_busy tries of one visit before DECISION_NEEDED trade_screen (once per visit)
   READS = 1000,         -- screen tiles read per frame (CONTRACTS §3.2: <= 2,000 tiles per slice)
   REPLY_ROWS = 12,      -- top interface rows read for the merchant reply [live-untested: position]
   TOTAL_ROWS = 8,       -- bottom rows read for the "Value:" totals (v1 live J263: row 58 of 60)
@@ -1026,6 +1031,44 @@ end
 
 local function own_ui(fl) return focus_has(fl, '^dfhack/lua/MessageBox') or on_trade(fl) or on_sheet(fl) end
 
+-- BUG-286: what the kernel opened. st.ui = {cms (real ms of the last change), n (Esc sent for a leftover), closed (0|1),
+-- ems (ms of the last Esc)} from the depot sheet the kernel opens until the map has stood SETTLE_MS after its close.
+-- While it stands, any sheet or trade screen on top is a leftover of the kernel's own screens (DF 53.16 left a unit
+-- sheet behind them): it is closed like the player's Esc (act.trade close: LEAVESCREEN), never a screen opened later.
+local OWN = {}
+function OWN.take(K) st.ui, dirty = {cms = K.now().ms, n = 0, closed = 0, ems = -1}, true end
+function OWN.closed(K) if st.ui then st.ui.closed, st.ui.cms, dirty = 1, K.now().ms, true end end
+function OWN.leftover(fl)
+  return not focus_has(fl, '^dfhack/') and (focus_has(fl, '^dwarfmode/ViewSheets/') or focus_has(fl, '^dwarfmode/Trade'))
+end
+-- outside the UI phases (and in OPEN before a screen counts as the player's): true = a leftover of ours stands (closed now)
+function OWN.watch(K)
+  local u = st.ui
+  if not u then return false end
+  local now, fl = K.now().ms, focus_list()
+  if now < u.cms then u.cms, u.ems = now, -1 end                -- a restart began a new real-time clock
+  if on_map(fl) then
+    if u.closed == 0 then u.closed, u.cms, dirty = 1, now, true
+    elseif now - u.cms >= M.CFG.SETTLE_MS then st.ui, dirty = nil, true end
+    return false
+  end
+  if not OWN.leftover(fl) then
+    if not focus_has(fl, '^dfhack/') then st.ui, dirty = nil, true end   -- the player has his own screen up: it is his
+    return false
+  end
+  local fc = table.concat(fl, '|'):sub(1, 80)
+  if u.n >= M.CFG.LEFT_TRIES then
+    K.log('warn', "trade: %s stays open after %d Esc of the kernel: it counts as the player's screen now", fc, u.n)
+    st.ui, dirty = nil, true
+    return false
+  end
+  if now - u.ems < M.CFG.CLICK_MS then return true end
+  u.n, u.ems, u.closed, u.cms, dirty = u.n + 1, now, 1, now, true
+  K.act.trade('close', {clear = true})
+  K.log('info', "trade: closed %s, left open after the kernel's own trade screen (Esc %d)", fc, u.n)
+  return true
+end
+
 -- leave the trade screen / depot sheet we opened: act clears our selection (no "Cancel trade"
 -- prompt then), dismisses a confirm prompt of ours and leaves; anything left over is swept
 local function close_ui(K)
@@ -1034,6 +1077,7 @@ local function close_ui(K)
   local fl = focus_list()
   if f.prompt or on_trade(fl) or on_sheet(fl) then act_trade(K, 'close', {clear = true}) end
   f.opened, f.prompt = false, nil
+  OWN.closed(K)
   if own_ui(focus_list()) then rt.sweep = K.now().ms + M.CFG.SWEEP_MS end
 end
 
@@ -1129,6 +1173,25 @@ local function finish(K, ok, why, ratio)
       pcall(function() fc = table.concat(dfhack.gui.getCurFocus(true), '|') end)
       caravan_ev(K, 'blocked', ent, {why = why, focus = fc},
                  'trade with ' .. civ_name(ent) .. ' blocked: a player screen is open (' .. fc .. '); close it')
+    end
+    -- BUG-287 (Run 15: x7-x14 'blocked' log lines, then the caravan left untraded): after BUSY_ASK tries the player is asked
+    -- once per visit with the screen's name; only he closes his screen (the kernel never touches it)
+    if v then
+      v.busy, dirty = (v.busy or 0) + 1, true
+      if v.busy >= M.CFG.BUSY_ASK and (v.asked or 0) == 0 then
+        v.asked = 1
+        local fc = 'unknown'
+        pcall(function() fc = table.concat(dfhack.gui.getCurFocus(true), '|') end)
+        fc = fc:sub(1, 80)
+        local car = car_of(read_caravans(), ent)
+        local left = car and int(car.tr) * M.CFG.TR_TICKS or -1
+        K.emit('DECISION_NEEDED', 'A', string.format('trade with %s blocked %d times by the screen %s: close it in DF (Esc)',
+                                                     civ_name(ent), v.busy, fc):sub(1, 200),
+               {id = 'trade_screen', screen = fc, n = v.busy,
+                q = string.format('the screen %s stands over the map, so the kernel cannot open the trade with %s ' ..
+                                  '(%d ticks left): close it in DF (Esc); the kernel never closes a player screen',
+                                  fc, civ_name(ent), left):sub(1, 200)})
+      end
     end
   else
     -- BUG-026: which phase ran how long (a ui_timeout used to name nothing): real ms (ph_ms), ms on the module's own
@@ -1487,11 +1550,14 @@ local function step_open(K, cars)
     return
   end
   if on_map(fl) then
+    OWN.take(K)                                  -- BUG-286: from here every sheet on top is ours until the map settles
     act_trade(K, 'open', {depot = f.depot})
     f.tries, f.opened, f.click_ms = f.tries + 1, true, K.now().ms
     if f.missing then return finish(K, false, 'act_missing') end
     return
   end
+  -- BUG-286: a sheet or trade screen left from the kernel's own screens is not the player's: closed, no ui_busy
+  if OWN.watch(K) then f.opened = false; return end
   -- another screen is open (the player): never touch it; back to WAIT after PHASE_MS (own clock, BUG-026)
   if ph_age(f) > M.CFG.PHASE_MS then return finish(K, false, 'ui_busy') end
 end
@@ -1634,7 +1700,7 @@ local function step_result(K, sliced)
 end
 
 local function set_every()
-  local ms = (UI_PHASES[rt.phase] or rt.sweep) and M.CFG.UI_MS or nil
+  local ms = (UI_PHASES[rt.phase] or rt.sweep or st.ui) and M.CFG.UI_MS or nil
   if ms then
     if M.every.ms ~= ms then M.every = {ms = ms} end
   elseif M.every.ticks ~= M.CFG.IDLE_TICKS then
@@ -1644,7 +1710,7 @@ end
 
 ---------------------------------------------------------------- module
 local VISIT_KEYS = {'first', 'at', 'tries', 'traded', 'stuck', 'set', 'orig_r', 'orig_a', 'retry', 'ratio',
-                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered', 'dep'}
+                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered', 'dep', 'busy', 'asked'}
 local NEG_DEFAULT = {at = true, retry = true, stuck_since = true, dep = true}
 
 -- BUG-026: the kernel boost while this visit is on: begun (WAIT, a pending retry included) with the caravan at the
@@ -1693,6 +1759,7 @@ function M.init(K)
     end
     if type(p.ov) == 'table' then st.ov = {want = p.ov.want, sell = p.ov.sell, loaded = int(p.ov.loaded)} end
     if type(p.ledger) == 'table' then st.ledger = p.ledger end
+    if type(p.ui) == 'table' then st.ui = {cms = int(p.ui.cms), n = int(p.ui.n), closed = int(p.ui.closed), ems = -1} end
   end
   rt = {phase = 'IDLE', civ = {}, o1 = {}, clk = 0}
   pub, dirty, dcache = nil, false, nil
@@ -1716,6 +1783,7 @@ function M.step(K, budget, ctx)
     stuck_check(K, cars, now)
   end
   if rt.sweep and not UI_PHASES[rt.phase] then sweep(K) end
+  if st.ui and not UI_PHASES[rt.phase] then OWN.watch(K) end   -- BUG-286
   local r
   local ph = rt.phase
   if ph == 'IDLE' then maybe_begin(K, cars, now)

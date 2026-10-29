@@ -794,6 +794,8 @@ T.test('cadence: ticks while waiting, real-time while the screen is open', funct
   F.until_(W, function() return df.global.game.main_interface.trade.open end, 300)
   T.eq(M.every, {ms = 50})
   F.until_(W, function() return traded(W) end, 600)
+  T.eq(M.every, {ms = 50}, 'BUG-286: real-time until the map stood SETTLE_MS after the kernel closed its screens')
+  F.frames(W, 300)
   T.eq(M.every, {ticks = 100})
 end)
 
