@@ -19,6 +19,10 @@ local M = {name = 'runner', every = {ticks = 600},
            reports = {DIG_CANCEL_DAMP = true, DIG_CANCEL_WARM = true, CAVE_COLLAPSE = true,
                       FEATURE_DISCOVERY = true}}
 
+-- FR-95: the aquifer pass (tpl aqshaft, observe mode for damp reports): a library the runner hosts (a field, not a
+-- local: the main chunk is at Lua's 200-local limit)
+M.AQ = require('dfllm.aqshaft')
+
 local DAY = C.TICKS.DAY
 M.CFG = {
   active = 3,            -- projects worked on at once (DESIGN §4)
@@ -512,9 +516,14 @@ local function probe(K, t, seen, plug)
     if key == 'h' and not (v.c == '_' or v.c == 'v' or v.c == 'C') then return seen and 'lost' or 'skip' end
     return 'done'
   end
-  if HAZARD[v.c] == 'water' and M.CFG.damp_dig then
+  -- FR-95: a project in observe mode (S.aqo, set by measure_dig/hold_watch) digs on through shallow seepage too, unless
+  -- the flow in that tile rises (M.AQ.wet: then the stop below, made heavy_aquifer by breach)
+  if HAZARD[v.c] == 'water' and (M.CFG.damp_dig or S.aqo) then
     local depth = int(v.flow) or 7
-    if depth <= M.CFG.seep_max and not v.magma then return 'done' end
+    if depth <= M.CFG.seep_max and not v.magma then
+      if S.aqo and M.AQ.wet(Q.aqx(K), S.aqo, t, depth) then return 'breach', 'water' end
+      return 'done'
+    end
   end
   if HAZARD[v.c] then return 'breach', HAZARD[v.c] end
   if v.dig ~= nil and v.dig ~= '' then return 'pend', nil, true end
@@ -607,6 +616,7 @@ local function lost(K, P, d, R, ci, t)
     end
     why = 'damp'
   end
+  if Q.aq_lost(K, P, R, ci, ch, t, why) then return end                -- FR-95: observe mode, the damp marker
   if why then return breach(K, P, why == 'unknown' and 'damp' or why, {t[1], t[2], t[3]}, 'cancel') end
   if Q.redesignate(K, P, d, R, ci, 1) then return end         -- BUG-045: an alert took it: no count against dig_lost
   if (R.rl[sk] or 0) >= 1 or not qf_room() then
@@ -644,6 +654,7 @@ local function note_skipped(P, si, ci, list)
 end
 
 local function measure_dig(K, P, d, R)
+  S.aqo = M.AQ.observing(S.rt, P.id) and P or nil      -- FR-95: probe's seepage rule for a project in observe mode
   local tiles = stage_tiles(P.id, d, P.stage)
   local m = S.meas[P.id]
   if not m or m.si ~= P.stage then
@@ -1108,6 +1119,17 @@ function M.publish_breaches(K)
   K.persist.set('manifest', man)
 end
 
+-- FR-95: a project that digs again (a breach:damp park resumed in observe mode) leaves `breaches`: plan propose does not
+-- re-site a fortcore that is digging (a later stop, heavy_aquifer, notes it again)
+function M.drop_breach(K, id)
+  if type(S.rt.dz) ~= 'table' then return end
+  for i = #S.rt.dz, 1, -1 do
+    if type(S.rt.dz[i]) == 'table' and S.rt.dz[i].proj == id then table.remove(S.rt.dz, i) end
+  end
+  M.publish_breaches(K)
+  dirty()
+end
+
 function M.note_breach(K, id, tpl, why, pos)
   local x, y, z = int(type(pos) == 'table' and pos[1]), int(type(pos) == 'table' and pos[2]),
                   int(type(pos) == 'table' and pos[3])
@@ -1135,7 +1157,9 @@ function M.breach_boot(K, rt, pd)
   table.sort(ids)
   for _, id in ipairs(ids) do
     local r = rt.br[id]
-    if not have[id] and tpl[id] and type(r) == 'table' and type(r.pos) == 'table' then
+    -- FR-95: a project with an aquifer record (observe mode resumed it, or an aqshaft) is no stopped project to re-site
+    if not have[id] and tpl[id] and type(r) == 'table' and type(r.pos) == 'table'
+       and not (type(rt.aq) == 'table' and type(rt.aq[id]) == 'table') then
       M.note_breach(K, id, tpl[id], r.why, r.pos)
     end
   end
@@ -1200,11 +1224,11 @@ local function plug(K, P, d, why, pos, n, ex)
   dirty()
   local label = (why:gsub('_', ' '))
   local where = rec.pos and string.format(' at %d,%d,%d', rec.pos[1], rec.pos[2], rec.pos[3]) or ''
-  local sh = ex.sh or (P.tpl == 'explore' and d and shaft_of(K, P, d, rec.pos)) or nil
+  local sh = ex.sh or (Q.SHAFT[P.tpl] and d and shaft_of(K, P, d, rec.pos)) or nil      -- FR-95: aqshaft too
   local who = ex.state and string.format('%s (%s; shaft check)', P.id, ex.state) or P.id
   local st_d = ex.state and {state = trunc(ex.state, 40)} or nil
   if not sh then
-    local hint = P.tpl == 'explore' and 'no dug stair column reaches the fort' or ('no automatic plug for ' .. P.tpl)
+    local hint = Q.SHAFT[P.tpl] and 'no dug stair column reaches the fort' or ('no automatic plug for ' .. P.tpl)
     plug_emit(K, rec, 'none', string.format('%s (%s): %s%s; %s: wall the way in by hand (a constructed wall, '
                                             .. 'bp.place seal close=wall)', P.id, P.tpl, label, where, hint),
               {hint = trunc(hint, 60)})
@@ -1612,7 +1636,7 @@ local function apply(K, P, st, R)
   local p = {mode = st.mode, data = chunk_data(ch), pos = ch.pos}
   Q.doing(P, st, part and string.format('chunk %d/%d call %d/%d', P.chunk + 1, #st.chunks, part.k, part.n)
                   or string.format('chunk %d/%d', P.chunk + 1, #st.chunks))
-  if st.mode == 'dig' then p.priority = dprio(P) end
+  if st.mode == 'dig' then p.priority, p.marker = dprio(P), Q.aq_marker(P) end    -- FR-95: damp marker in observe mode
   local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0
   -- FR-22: seal remembers the closing cells (walls, doors, bridges) and takes a reach baseline before they are queued
   if st.mode == 'build' then K.call('seal', 'closing', P.id, P.tpl, P.class, ch) end
@@ -1852,7 +1876,7 @@ end
 local KEEP_BOX = {cistern = true, bedrooms = true, tombs = true, hall = true, guildhall = true, barracks = true,
                   temple = true, tavern = true, dining = true, hospital = true, office = true, workshops = true,
                   farms = true, furnaces = true, captives = true, refuge_drink = true,
-                  seal = 'kind', plug = 'kind', repair = 'kind', explore = 'kind'}
+                  seal = 'kind', plug = 'kind', repair = 'kind', explore = 'kind', aqshaft = 'kind'}
 
 local function keep_box(P, d)
   S.rt.keep[P.id] = project_bbox(P.id, d)
@@ -1946,6 +1970,7 @@ end
 -- on one of their revealed tiles stops it as the measure does (breach src 'tile'); no progress, no new chunk
 local function hold_watch(K, P, d, st, R)
   if st.mode ~= 'dig' or P.chunk == 0 then return 'done' end
+  S.aqo = M.AQ.observing(S.rt, P.id) and P or nil      -- FR-95
   local tiles = stage_tiles(P.id, d, P.stage)
   for ci = 1, math.min(P.chunk, #tiles) do
     if R.cd:sub(ci, ci) ~= '1' then
@@ -1963,11 +1988,113 @@ local function hold_watch(K, P, d, st, R)
   return 'done'
 end
 
+---------------------------------------------------------------- FR-95: the aquifer pass (lua/dfllm/aqshaft.lua)
+Q.SHAFT = {explore = true, aqshaft = true}      -- templates whose stair column the plug walls
+-- what aqshaft.lua may do through the runner (made per call: the closures are the runner's own helpers)
+function Q.aqx(K)
+  return {
+    rt = S.rt, now = function() return now(K) end, room = qf_room, dirty = dirty, flush = K.flush,
+    tile = function(x, y, z) return tile_at(K, x, y, z) end,
+    qf = function(p) return qf(K, p) end,
+    emit = function(t, c, m, dd) return K.emit(t, c, trunc(m, 200), dd) end,
+    log = function(...) return K.log(...) end,
+    moved = function(P) moved(K, R_of(K, P)) end,
+    block = function(P, why) set_blocked(K, P, why) end,
+    next = function(P, d) stage_done(K, P, d, d.stages[P.stage + 1], R_of(K, P)) end,
+    finish = function(P, d) finish(K, P, d) end,
+    plug = function(P, d, pos)
+      plug(K, P, d, 'heavy_aquifer', pos, 0)
+      local r = S.rt.cav[P.id]
+      return type(r) == 'table' and r.plug ~= '' and r.plug or nil
+    end,
+    level = function(z) Q.aq_level(K, z) end,
+    mat = function(n)
+      local ok, via, why = K.call('economy', 'mat_for', 'wall', n)
+      if not ok then return nil, 'no economy' end
+      return via, why
+    end,
+    own = function(id)
+      local P = find(id)
+      local d = P and P.done ~= 1 and doc(K, id)
+      return d and own_tiles(P, d) or nil
+    end,
+    live = function(id) local P = find(id); return P ~= nil and P.done ~= 1 end,
+  }
+end
+
+-- the manifest's `aquifer_levels` (levels seen damp or wet, revealed tiles only; bp sites keeps rooms off them and off
+-- the level below them; shafts may pass), m.runner aql (<= 64, sorted)
+function Q.aq_level(K, z)
+  z = int(z)
+  if not z then return end
+  S.rt.aql = type(S.rt.aql) == 'table' and S.rt.aql or {}
+  for _, v in ipairs(S.rt.aql) do if v == z then return end end
+  table.insert(S.rt.aql, z)
+  table.sort(S.rt.aql)
+  while #S.rt.aql > 64 do table.remove(S.rt.aql, 1) end
+  local man = K.manifest()
+  local list = {}
+  for i, v in ipairs(S.rt.aql) do list[i] = v end
+  man.aquifer_levels = list
+  K.persist.set('manifest', man)
+  dirty()
+end
+
+function Q.aq_marker(P) return (P.tpl == 'aqshaft' or M.AQ.observing(S.rt, P.id)) and {damp = true} or nil end
+
+-- lost(): a designation DF took. A damp cancel (or, in observe mode, one without a report the log search finds) is no
+-- park: the chunk is designated again with the damp marker, at most aqshaft redig times a chunk (then the old stop)
+function Q.aq_lost(K, P, R, ci, ch, t, why)
+  if M.CFG.damp_dig or not M.AQ.CFG.on or P.tpl == 'plug' then return false end
+  local obs = M.AQ.observing(S.rt, P.id)
+  if not (why == 'damp' or (obs and (why == nil or why == 'unknown'))) then return false end
+  if not obs and not M.AQ.observe(Q.aqx(K), P, {t[1], t[2], t[3]}, 'cancel') then return false end
+  R.aqr = obj(R.aqr)
+  local sk = tostring(ci)
+  if (int(R.aqr[sk]) or 0) >= M.AQ.CFG.redig then return false end
+  if not qf_room() then return true end
+  R.aqr[sk] = (int(R.aqr[sk]) or 0) + 1
+  qf(K, {mode = 'dig', data = chunk_data(ch), pos = ch.pos, priority = dprio(P), marker = {damp = true}})
+  K.log('warn', '%s chunk %d: damp stone at %d,%d,%d designated again with the damp marker (observe, %d/%d)', P.id, ci - 1,
+        t[1], t[2], t[3], R.aqr[sk], M.AQ.CFG.redig)
+  dirty()
+  return true
+end
+
+-- fortcore p.aquifer = pass: its digs wait for a passed aqshaft, then run in observe mode
+function Q.aq_wait(K, P, d)
+  local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
+  if P.tpl ~= 'fortcore' or p.aquifer ~= 'pass' then return nil end
+  if not M.AQ.passed(S.rt) then return 'aquifer: waits for an aqshaft pass' end
+  if not M.AQ.observing(S.rt, P.id) then M.AQ.observe(Q.aqx(K), P, nil, 'pass') end
+  return nil
+end
+
+-- boot: a project an older kernel parked at breach:damp (no cavern plug record) runs again in observe mode, its dig stage
+-- applied again (the stop undid it)
+function Q.aq_boot(K)
+  if not M.AQ.CFG.on then return end
+  for _, P in ipairs(S.pd.list) do
+    if P.done ~= 1 and P.blocked == 'breach:damp' and S.rt.cav[P.id] == nil and S.rt.aq[P.id] == nil then
+      local d, b = doc(K, P.id), S.rt.br[P.id]
+      local st = d and d.stages[P.stage + 1]
+      if st and st.mode == 'dig' and M.AQ.observe(Q.aqx(K), P, type(b) == 'table' and b.pos or nil, 'resume') then
+        P.blocked, P.since, P.chunk = '', now(K), 0
+        S.rt.p[P.id] = nil
+        M.drop_breach(K, P.id)                     -- BUG-130's manifest.breaches: this core digs again, no re-site
+        K.log('info', '%s (%s): breach:damp resumed in observe mode (FR-95)', P.id, P.tpl)
+        dirty()
+      end
+    end
+  end
+end
+
 -- meas: measure-only pass of a stalled project without a slot (no orders, no applies); hold: a paused project (seal
 -- first, rebuild): measured, never ordered or applied (its next stage waits), its applied dig chunks watched
 local function work(K, P, meas, hold)
   local d = doc(K, P.id)
   if not d then set_blocked(K, P, 'bp_missing'); return 'done' end
+  if P.tpl == 'aqshaft' then return M.AQ.work(Q.aqx(K), P, d, meas, hold) end    -- FR-95: the lined shaft
   local applied = false
   for _ = 1, 100000 do                       -- every pass applies, measures, advances or returns
     if P.stage >= #d.stages then finish(K, P, d); return 'done' end
@@ -2103,6 +2230,13 @@ function breach(K, P, why, pos, src, ex)
     local k, cnt = M.opened(K, P, d, pos)
     if k and RANK[k] > RANK[why] then why, was, n = k, why, cnt end
   end
+  -- FR-95: water in the own dug tiles of a project in observe mode (>= 4/7, or a rising flow) is a heavy aquifer
+  if why == 'water' and M.AQ.observing(S.rt, P.id) then
+    local v = pos and tile_at(K, pos[1], pos[2], pos[3])
+    local f = v and int(v.flow) or 7
+    M.AQ.heavy_obs(Q.aqx(K), P, pos, f, f >= M.AQ.CFG.heavy and 'flow' or 'rising')
+    why = 'heavy_aquifer'
+  end
   set_blocked(K, P, 'breach:' .. why)
   local st = d and d.stages[P.stage + 1]
   if st and st.mode == 'dig' then           -- undo the applied chunks of this dig stage, nearest first
@@ -2131,7 +2265,7 @@ function breach(K, P, why, pos, src, ex)
   K.emit('BREACH_STOP', 'B', breach_msg(P.id, why, src, was, n, ex and ex.state), dd)
   K.flush()
   dirty()
-  if CAVERN[why] and dd.pos and d then plug(K, P, d, why, dd.pos, n, ex) end
+  if (CAVERN[why] or why == 'heavy_aquifer') and dd.pos and d then plug(K, P, d, why, dd.pos, n, ex) end
   return true
 end
 
@@ -2638,6 +2772,7 @@ local function kind_of(P, d)
     return (p.peace == 1 and p.cl ~= 1) and 'defense' or 'repair'     -- BUG-081: a closure is a repair, not a bridge
   end
   if t == 'mood_drink' then return 'mood' end                         -- BUG-081: a drink for a mood dwarf, never paused
+  if t == 'aqshaft' then return 'aq' end              -- FR-95: an open aquifer level is never paused by seal or care first
   return P.class == 'defense' and 'defense' or 'work'
 end
 
@@ -3161,6 +3296,8 @@ end
 
 -- why the policy pauses this project now ('seal <id>', 'rebuild pop 2<10'), else nil; seals never pause
 local function paused(K, P, d)
+  local aw = Q.aq_wait(K, P, d)                  -- FR-95: a fortcore below the aquifer waits for the passed shaft
+  if aw then return aw end
   local f = S.focus
   if not f or SEALS[P.tpl] then return nil end
   local k, m = kind_of(P, d), K.mode()
@@ -3195,7 +3332,7 @@ local function note_pause(K, pz)
       if f.emerg then head = head .. ' (' .. f.emerg .. ': food/drink projects go on)' end
     elseif why:sub(1, 5) == 'care ' then
       head = string.format('care first: %s with %s runs first', f.care, f.care_why or '?')
-    elseif f.rb then
+    elseif f.rb and why:sub(1, 8) == 'rebuild ' then
       head = string.format('rebuild: pop %d < %d (until %d), only seal/tombs/food/beds', f.rb.pop, f.rb.lo, f.rb.hi)
     end
     parts[#parts + 1] = string.format('%s; paused: %s%s', head, table.concat(g, ', ', 1, math.min(#g, 8)),
@@ -4179,6 +4316,8 @@ local function end_run(K)
     elseif type(r) == 'table' and #(r.ids or {}) > 0 and not Q.parked(K, P, pt) then S.rt.park[id] = CAD.quiet(r); dirty() end
   end
   plug_watch(K)                              -- Run 11: the plug's wall (every mode); the check ran as its own task
+  local oka, erra = pcall(M.AQ.tick, Q.aqx(K))   -- FR-95: observe mode's smoothing beside the damp tiles
+  if not oka then K.log('error', 'aquifer tick failed: %s', trunc(erra, 160)) end
   local oks, err = pcall(Q.sync, K, t)       -- BUG-066 / FR-76: a fault here must not stop the run
   if not oks then K.log('error', 'manifest sync failed: %s', trunc(err, 160)) end
   phases(K)
@@ -4333,6 +4472,7 @@ function M.init(K)
   rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
   rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box
   rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
+  rt.aq = obj(rt.aq)                                                 -- FR-95: aquifer shafts and observe mode
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
   K.persist.set('m.runner', rt)
@@ -4360,6 +4500,8 @@ function M.init(K)
       S.dirty = true
     end
   end
+  local okb, errb = pcall(Q.aq_boot, K)           -- FR-95: breach:damp parks of an older kernel go on in observe mode
+  if not okb then K.log('error', 'aquifer resume failed: %s', trunc(errb, 160)) end
   save(K)
   local ph = K.persist.get('phase')
   S.phase = type(ph) == 'table' and ph.phase or nil
@@ -4699,7 +4841,7 @@ end
 function M.cavern_open(K)
   local n, list = 0, {}
   for _, r in pairs(S.rt and S.rt.cav or {}) do
-    if type(r) == 'table' and (r.st == 'open' or r.st == 'failed') then
+    if type(r) == 'table' and (r.st == 'open' or r.st == 'failed') and r.why ~= 'heavy_aquifer' then   -- FR-95
       n = n + 1
       if type(r.s0) == 'table' then list[#list + 1] = {r.s0[1], r.s0[2], r.s0[3], int(r.bot) or r.s0[3]} end
     end
@@ -4769,7 +4911,8 @@ M.on = {
     local pos = p and {int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])}
     if pos and not (pos[1] and pos[2] and pos[3]) then pos = nil end
     if not pos and ev.type == 'CAVE_COLLAPSE' then return end
-    -- light aquifer (damp_dig): lost() designates damp stone again, unless a cavern shows at the report (Run 11)
+    -- light aquifer (damp_dig): lost() designates damp stone again, unless a cavern shows at the report (Run 11);
+    -- FR-95: otherwise observe mode (aqshaft.observe) instead of a park, unless a cavern shows there
     if why == 'damp' and M.CFG.damp_dig and not pos then return end
     local r = (why == 'damp' or why == 'warm') and M.CFG.breach_r or M.CFG.cavern_r
     S.slice = {qf = 0, probes = 0, qf_max = M.CFG.undo_now}
@@ -4777,9 +4920,10 @@ M.on = {
       local d = P.done ~= 1 and P.tpl ~= 'plug' and doc(K, P.id)      -- the cavern plug is never stopped
       local st = d and d.stages[P.stage + 1]
       if st and st.mode == 'dig' and P.chunk > 0 and (not pos or near(pos, stage_tiles(P.id, d, P.stage).bbox, r)) then
-        if not (why == 'damp' and M.CFG.damp_dig and not CAVERN[(M.opened(K, P, d, pos))]) then
-          if breach(K, P, why, pos, 'report') then undo(K, P) end
-        end
+        local cav = why == 'damp' and CAVERN[(M.opened(K, P, d, pos))]
+        if why == 'damp' and not cav and (M.CFG.damp_dig or M.AQ.observe(Q.aqx(K), P, pos, 'report')) then
+          dirty()                                    -- no stop: damp_dig re-designates, observe mode digs on
+        elseif breach(K, P, why, pos, 'report') then undo(K, P) end
       end
     end
     rows(K)

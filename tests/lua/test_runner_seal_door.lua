@@ -37,6 +37,7 @@ local function why(W, id) local r = row(W, id); return r and r[4] end
 -- o: tag, census, cfg (baseline runner), bs (build_state answers by 'x,y,z'), ways (seal.opening_ways answer)
 local function world(o)
   for k, v in pairs(CFG0) do runner.CFG[k] = v end
+  require('dfllm.aqshaft').CFG.on = true
   local W = H.world{tag = o.tag, map_size = {16, 16, 160}, census = o.census, plan = o.plan,
                     cfg = o.cfg and {baseline = {v = 2, runner = o.cfg}} or nil}
   dfhack.buildings = dfhack.buildings or {}
@@ -388,6 +389,7 @@ end)
 T.test('BUG-045: a damp or warm cancel report near the stage is the stop\'s business: a frozen project does not designate ' ..
        'the damp stone again, it stops as before (BREACH_STOP damp)', function()
   local W = world{tag = 'damp'}
+  require('dfllm.aqshaft').CFG.on = false   -- FR-95: the legacy stop (observe off); test_aqshaft.lua: observe mode
   for y = 10, 13 do W.tile(10, y, 100).c = '#' end
   H.place(W, 'ex', shaft_doc())
   H.runs(W, 2)

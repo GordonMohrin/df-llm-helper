@@ -12,6 +12,7 @@ local CFG0 = {}
 for k, v in pairs(runner.CFG) do CFG0[k] = v end
 local function fresh(opts)
   for k, v in pairs(CFG0) do runner.CFG[k] = v end
+  require('dfllm.aqshaft').CFG.on = true
   local W = H.world(opts)
   W.load(runner)
   return W
@@ -179,6 +180,7 @@ end)
 
 T.test('seepage stays damp: water only in the own shaft, no cavern tile -> BREACH_STOP damp, no plug, also later', function()
   local W = fresh{tag = 'seep'}
+  require('dfllm.aqshaft').CFG.on = false   -- FR-95: the legacy stop (observe off); test_aqshaft.lua: observe mode
   H.place(W, 'e1', explore_doc())
   H.runs(W, 1)
   dug_to(W, 95)
@@ -211,6 +213,7 @@ end)
 
 T.test('recheck (the live Run 11 shaft): a damp stop from before, the lake beside its bottom now shows -> plugged', function()
   local W = fresh{tag = 'recheck'}
+  require('dfllm.aqshaft').CFG.on = false   -- FR-95: the legacy stop (observe off); test_aqshaft.lua: observe mode
   H.place(W, 'e1', explore_doc())
   H.runs(W, 1)
   dug_to(W, 95)

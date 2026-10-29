@@ -38,7 +38,11 @@ from .primitives import Plan
 
 STAGES = 4
 PARAMS = {"stage": (1, 1, STAGES), "depth": (3, 2, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16),
-          "retrofit": (0, 0, 2)}     # 1: only the lever rooms up to `stage`; 2: + the refuge levers (_lever_retrofit)
+          "retrofit": (0, 0, 2),     # 1: only the lever rooms up to `stage`; 2: + the refuge levers (_lever_retrofit)
+          # FR-95: '' (as before) | above (bp sites: the whole fort above the manifest's aquifer_levels) | pass (its deepest
+          # level at least one dry level below them; the runner digs it once an aqshaft passed, in observe mode)
+          "aquifer": ("", None, None)}
+AQUIFER = ("", "above", "pass")
 CLASS = {1: "infra", 2: "defense", 3: "defense", 4: "defense"}
 ZE, ZG = -2, -1
 # trap hall waypoints at ze (1 wide, 45 tiles, 8 bends; parallel runs keep one rock row between them)
@@ -92,6 +96,8 @@ def levels(p: dict) -> tuple[int, int]:
 
 
 def build(p: dict) -> Plan:
+    if p.get("aquifer", "") not in AQUIFER:
+        raise ValueError(f"fortcore.aquifer: {p['aquifer']!r} is not one of '', above, pass (FR-95)")
     stage = p["stage"]
     zc, zr = levels(p)
     if p.get("retrofit"):

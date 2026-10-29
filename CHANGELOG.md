@@ -25,6 +25,52 @@
   read right; view follow, scroll, bare view: "it is his"; doctor in the repo with `{}` settings names the repo's own file.
 - **Skipped:** NEW7 (brief trims the TIMELINE_RESET marker: not reproduced by the verifier), NEW6 (curse popup without a unit and the plural:
   the curse area).
+## FR-95: the aquifer pass: a lined shaft (`aqshaft`), observe mode instead of a damp park, the aquifer flag of revealed tiles (FR-95, 2026-10-28; offline, live-untested)
+- **Why:** Runs 2, 4, 6, 9 and 14 lost forts or their cores to aquifers. A damp report parked a dig at `breach:damp` for good (Run 14 site90: fortcore
+  y497s2b0 and y707s0b1, bedrooms, stockroom and tombs; DOCTRINE "stop, never re-designate"), and the one pass ever tried (Run 2 shaft S1) flooded
+  7/7 because the next level opened before the seal of the last was done. Research 2026-10-28 (DFHack 53.16 docs): a natural rough aquifer wall
+  feeds the open tiles beside and below it; a smoothed or constructed wall does not; light aquifers fill slowly and can be walled off.
+- **What changed:** (1) `lua/dfllm/aqshaft.lua` (a library the runner hosts): the aqshaft state machine per level DIG (damp marker) -> SEAL (stone:
+  the 4 orthogonal walls smoothed at priority 1 in one quickfort call; soil: a plus shape dug, constructed walls on its 4 arms) -> WATCH (the centre
+  tile's flow sampled for `watch` 1 day; next level at flow <= 1, or <= 3 and not rising after 3 days); dry levels need no seal; passed after
+  `dry_levels` dry levels below the last aquifer level (AQ_PASS_DONE) or at `depth`; heavy (>= 4/7 or 3 rising samples) -> `breach:heavy_aquifer`,
+  plug (CAVERN_PLUG why heavy_aquifer), AQ_HEAVY (A). m.runner `aq[proj] = {mode, cur_z, levels[z] = {state, opened, samples, seal_tiles,
+  material}, heavy}`. Observe mode: a damp report (REPORT, or lost() finding a damp cancel) starts AQ_OBSERVE instead of BREACH_STOP; the chunk is
+  designated again with quickfort `marker = {damp = true}` (at most `redig` 12 times a chunk, then the old stop), probe lets seepage <= seep_max pass
+  and samples it (rising -> heavy), breach() makes water >= 4/7 in its own tiles `heavy_aquifer`; at the end of each run the natural rough walls
+  beside each dug damp tile are smoothed (priority 1). Boot: a project an older kernel parked at breach:damp (no cavern record) resumes in observe
+  mode (AQ_OBSERVE src resume). (2) runner.lua: aqshaft projects are worked by aqshaft.work (never paused by seal or care first), kept boxes, the
+  plug walls aqshaft columns too, cavern_open skips heavy-aquifer plugs, fortcore `p.aquifer = pass` waits (`paused: aquifer: waits for an aqshaft
+  pass`) until a shaft passed and then digs in observe mode, manifest `aquifer_levels`. All new runner helpers are `Q.`/`M.` fields (200 locals).
+  (3) snapshot.lua: `revealed_aquifer(des)` (the aquifer flag of a revealed tile, nil for a hidden one, never read) and tile() `aq`, `soilmat`.
+  (4) lint.py: hidden-read allows `water_table` only inside snapshot's `revealed_aquifer` after its `hidden` check. (5) Python: template `aqshaft`
+  (`dfpilot/bp/aquifer.py`; p.x/p.y/p.top name the column, else the site anchor; `bp sites aqshaft` refuses: the player names it), fortcore param
+  `aquifer` ('' | above | pass), `bp.sites` keeps rooms off `aquifer_levels` and the level below them (shafts pass), `plan check` warns on a
+  breach:damp park (observe resume + the aqshaft command), a heavy aquifer and a fortcore pass without a shaft.
+- **Decisions (DECISIONS 24, 25, decided by the orchestrator on Gordon's behalf):** re-designating after a damp report is allowed with the lined
+  procedure (RULES §10, DOCTRINE §1 "observe and seal"); the damp acknowledgement is the DFHack dig tool's damp marker (the mining toolbar's damp
+  dig mode), not the vanilla standing order (its field is not proven offline); the kernel reads the aquifer flag of revealed tiles only.
+- **Contracts / docs:** schema + contract.lua AQ_OBSERVE, AQ_LEVEL_SEALED, AQ_SEEP, AQ_PASS_DONE (B), AQ_HEAVY (A); manifest `aquifer_levels`;
+  CONTRACTS rows and appendix; RULES §1.1, §7 (CAVERN_PLUG / AQ_HEAVY row), §10, §11 P0 edited in place; DOCTRINE, DESIGN, README, FR-95 (FR-14
+  marked built). Golden `tests/bp/golden/fortcore.json` regenerated (params gain `aquifer: ""`). Six legacy Lua tests of the old damp stop run
+  with `aqshaft.CFG.on = false`.
+- **Tests (every new one fails on dec5132):** tests/lua/test_aqshaft.lua (10: stone pass, soil walls, heavy by flow and by rising flow, a damp
+  report beside a shaft, observe digs on, observe heavy, the legacy switch, boot resume, fortcore pass), tests/lua/test_snapshot.lua (hidden
+  aquifer flag never read, soilmat), tests/bp/test_bp_aqshaft.py (5), tests/test_fr95_aquifer.py (6: lint, contracts, plan check, documents).
+- **Live check:** on the Run 14 copy (region2-site90): `dfllm boot`, then `dfllm events --type AQ_OBSERVE` lists y497s2b0 and y707s0b1 with src
+  resume and their rows dig again (kern.log `breach:damp resumed in observe mode`); in DF the re-designated tiles carry the damp-dig badge
+  (DFHack warmdamp overlay). Place `{"tpl":"aqshaft","site":"S1","p":{"x":50,"y":42,"top":127}}` and watch: one level designated at a time,
+  `inspect` m.runner aq (levels, samples), smoothing jobs at priority 1 beside the stair, AQ_LEVEL_SEALED then AQ_PASS_DONE; a level that goes
+  4/7 or keeps rising gives AQ_HEAVY and a CAVERN_PLUG. Read on revealed walls whether `aq` matches the two-drip icon.
+- **Merged with BUG-130 (review):** a fortcore parked at breach:damp that the boot resumes in observe mode leaves the manifest's
+  `breaches` (runner `drop_breach`; `breach_boot` skips a project with an `aq` record) and `plan.core_breaches` drops a core whose newest
+  BREACH_STOP/AQ_OBSERVE is AQ_OBSERVE, so `plan propose` does not re-site (a second fortcore) a core that digs again; a later stop
+  (heavy_aquifer, or the old stop after `redig`) counts again. Tests: tests/lua/test_runner_breaches.lua (1 new; its two BUG-130 tests run
+  the legacy stop with `aqshaft.CFG.on = false`), tests/test_fr95_aquifer.py (1 new).
+- **Not decided offline:** whether a smoothed aquifer wall really stops seeping in 53.16 (research: medium-high; Run 2 z130 stayed dry); whether
+  DF accepts a constructed wall on a soil arm with 1-2/7 water; the exact fill speed of a light aquifer against the 300-tick samples (a light
+  aquifer filling faster than the seal could read as rising: the rise needs 3 wet samples); the vanilla standing order's field.
+
 ## Big forts are audited as regions instead of being refused (BUG-129, 2026-10-28, BUG-043 follow-up; offline, live-untested)
 - **Why:** Run 14 (region2-site90): `audit snapshot refused: bbox 190x192x45 = 1641600 tiles > 400000 at margin 0,0,0 (x 0-189 y 0-191 z 90-134;
   stretched most by seal c1a14d660b9fb1de01 (+2 more) at z90 ...); file box ... > 1500000`; audit_old/audit_fail held readiness at R0 for ~190

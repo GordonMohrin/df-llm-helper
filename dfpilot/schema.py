@@ -638,6 +638,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # state when the daily shaft check found the opening (running, stalled, blocked:<why>, breach:<why>, cancel, done,
     # cancelled; Run 11 c1a14676)
     "CAVERN_PLUG": ("A", "runner", _d("phase:s proj:s", "plug:s why:s pos:p shaft:p z1:i walls:sa n:i hint:s state:s")),
+    # FR-95: a heavy aquifer: water >= 4/7 (why flow) or a rising flow (why rising) in our own dug tiles at level z; the
+    # dig stopped for good (breach:heavy_aquifer), a shaft plugged (plug = its plug project; CAVERN_PLUG why heavy_aquifer)
+    "AQ_HEAVY": ("A", "runner", _d("proj:s z:i", "flow:i why:s pos:p plug:s")),
     # Run 11 siege 8 (seal first): an open seal or plug built nothing for runner seal_first.stuck_days: it stops pausing
     # the other projects; pieces = the first 6 open ones ('door x,y,z'), n = all open, mat = why economy cannot make
     # them, blocked = the project's block (build_lost ...); BUG-041: wait = why the first open piece waits, as far as the
@@ -693,6 +696,14 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # the connected water tiles counted; src report|tile|cancel|recheck|check (the daily shaft check stopped an explore
     # that was still digging; state = its state then: running, stalled, blocked:<why>)
     "BREACH_STOP": ("B", "runner", _d(opt="proj:s why:s pos:p src:s was:s n:i state:s")),
+    # FR-95: observe mode began for a dig (a damp report: src report | cancel | resume (a breach:damp park of an older
+    # kernel) | pass (a fortcore below a passed shaft)); a shaft level sealed (how stone | soil | mixed, n walls, mat =
+    # economy's building material route for soil walls); seepage below the heavy limit; a shaft passed (lv = its aquifer
+    # levels, top/bot its levels)
+    "AQ_OBSERVE": ("B", "runner", _d("proj:s", "tpl:s pos:p z:i n:i src:s")),
+    "AQ_LEVEL_SEALED": ("B", "runner", _d("proj:s z:i", "how:s n:i flow:i mat:s")),
+    "AQ_SEEP": ("B", "runner", _d("proj:s z:i flow:i", "pos:p")),
+    "AQ_PASS_DONE": ("B", "runner", _d("proj:s", "top:i bot:i lv:ia n:i")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i task:s")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
     "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i")),
@@ -1167,6 +1178,9 @@ MANIFEST = named("manifest", Obj(
          # Run 11: tiles where a dig broke into a cavern (the runner's BREACH_STOP cavern/cavern_lake and shaft check):
          # the explore ranking keeps every shaft above their levels
          "caverns": Arr(POS, hi=32),
+         # FR-95: levels (z) seen damp or wet on revealed tiles (aqshaft levels, observe mode's damp reports): bp sites
+         # keeps rooms off them and off the level below them (shafts may pass)
+         "aquifer_levels": Arr(INT, hi=64),
          # BUG-130: every breach stop (BREACH_STOP), one per project (the runner's m.runner dz, newest kept): its tile,
          # kind, project and template; the fortcore ranking keeps a new fortcore away from them, plan propose re-sites
          "breaches": Arr(Obj(req={"pos": POS, "why": Str(maxbytes=16)}, opt={"proj": ID, "tpl": Str(maxbytes=24)}), hi=32),

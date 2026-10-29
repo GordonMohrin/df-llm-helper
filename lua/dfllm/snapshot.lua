@@ -3,7 +3,8 @@
 -- Fair play (§1.4, DESIGN §11.1): a tile counts only if revealed; designation.hidden -> '?' in an
 -- export and nil from tile(). Marks: soil (quickfort's farm rule, build.lua:65-81), cavern
 -- (designation.feature_global of revealed tiles, tile-material.lua:255) and sand (Run 11: a revealed soil floor of a
--- sand layer, see M.is_sand; economy's sand collection zone); never water_table or damp. Run 11: shrub and sapling
+-- sand layer, see M.is_sand; economy's sand collection zone); never damp, and the aquifer flag only of a revealed tile
+-- (FR-95: M.revealed_aquifer, tile() `aq`). Run 11: shrub and sapling
 -- marks (a seal piece cannot stand on a plant: the CLI gathers a shrub first and closes a sapling's route on a
 -- neighbour), the roofed ones first (the ways in of seal's entrance check are roofed tiles), then the open-sky ones up
 -- to marks_max; both lists are always written, so an empty list means none.
@@ -94,6 +95,7 @@ local function tt_info(tt)
     r.c, r.soil, r.plant = c, SOIL_MAT[mat] == true and SOIL_SHAPE[shape] == true, PLANT_SHAPE[shape] or false
     r.ice = mat == 'FROZEN_LIQUID'               -- Run 11: frozen water (winter ice) is no water to fish or fill from
     r.shape = shape                              -- BUG-102: the tiletype shape name (care's nook judges it like place.lua)
+    r.soilmat = SOIL_MAT[mat] == true            -- FR-95: soil of any shape (a soil wall cannot be smoothed)
   end)
   tt_cache[tt] = r
   return r
@@ -246,9 +248,18 @@ local function designation_jobs(now)
   return map
 end
 
+-- FR-95 (DECISIONS, decided by the orchestrator for Gordon 2026-10-28): the aquifer flag of a REVEALED tile, what the
+-- vanilla drip icon (and DFHack's warmdamp overlay) shows the player. A hidden tile, or flags without a hidden field,
+-- answer nil and the flag is never read; this is the kernel's only read of it (lint: hidden-read allows it only here,
+-- after the hidden check).
+function M.revealed_aquifer(des)
+  if des == nil or des.hidden ~= false then return nil end
+  return des.water_table == true
+end
+
 ---------------------------------------------------------------- public tile query (§7)
 -- nil (hidden or invalid) or {c = legend char, dig = pending designation or '', bld = building type
--- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or '', flow, magma, cav, ice}
+-- (Door, Bridge, Trap, Well, ...), 'passable'/'impassable' (other buildings) or '', flow, magma, cav, ice, aq, soilmat}
 function M.tile(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return nil end
@@ -267,9 +278,10 @@ function M.tile(K, x, y, z)
   -- ice: frozen water (tiletype material FROZEN_LIQUID; Run 11, economy's fishing zone). BUG-102 (care's drink nook judges a
   -- tile the way quickfort's place mode does, place.lua:29-43): shape = the tiletype shape name ('FLOOR', 'BRANCH', ...),
   -- plant = 'shrub' | 'sapling' | false, occ = the building occupancy value (tile_building_occ: 1 Planned counts there)
+  -- FR-95: aq = the aquifer flag of this revealed tile (M.revealed_aquifer), soilmat = a soil tile of any shape
   return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true,
           cav = des.feature_global == true, ice = info.ice == true, shape = info.shape, plant = plant or false,
-          occ = oc and int(oc.building) or 0}
+          occ = oc and int(oc.building) or 0, aq = M.revealed_aquifer(des) == true, soilmat = info.soilmat == true}
 end
 
 -- BUG-058 (economy's farm plots; Run 13 y513: surface crops on a plot on z149 made no PlantSeeds job): does the plot tile

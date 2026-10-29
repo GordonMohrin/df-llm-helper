@@ -4,7 +4,8 @@
 -- map chars: # rough wall, S smooth wall, C constructed wall, F fortification, T tree, . floor,
 -- s soil floor, _ open space, X up/down stair, r ramp, ? hidden floor, w water 2/7, ~ water 6/7,
 -- % magma, + door (Dynamic), = bridge (Dynamic), ^ weapon trap (Dynamic), B statue (Impassable),
--- d floor with a pending dig designation, m smoothing designation, h shrub, g sapling (Run 11: plant marks);
+-- d floor with a pending dig designation, m smoothing designation, h shrub, g sapling (Run 11: plant marks),
+-- o soil wall (FR-95);
 -- a space = no tile (off the map).
 local kmock = require('dfllm.util.k_mock')
 
@@ -15,9 +16,10 @@ local TT = {   -- tiletype id -> {shape, material, special}
   {'WALL', 'CONSTRUCTION', 'NORMAL'}, {'EMPTY', 'AIR', 'NONE'}, {'STAIR_UPDOWN', 'STONE', 'NORMAL'},
   {'FLOOR', 'SOIL', 'NORMAL'}, {'FORTIFICATION', 'STONE', 'NORMAL'}, {'WALL', 'TREE', 'NONE'},
   {'RAMP', 'STONE', 'NORMAL'}, {'SHRUB', 'PLANT', 'NONE'}, {'SAPLING', 'PLANT', 'NONE'},
+  {'WALL', 'SOIL', 'NORMAL'},                       -- FR-95: a soil wall (cannot be smoothed)
 }
 SW.TT = {floor = 1, wall = 2, smooth = 3, cwall = 4, open = 5, stair = 6, soil = 7, fort = 8, tree = 9, ramp = 10,
-         shrub = 11, sapling = 12}
+         shrub = 11, sapling = 12, soilwall = 13}
 
 local function enum(names) return kmock.enum(names) end
 
@@ -85,7 +87,7 @@ function SW.draw(W, z, rows, x0, y0)
         local tt = ({['#'] = T.wall, S = T.smooth, C = T.cwall, F = T.fort, T = T.tree, ['.'] = T.floor,
                      s = T.soil, _ = T.open, X = T.stair, r = T.ramp, ['?'] = T.floor, w = T.floor, ['~'] = T.floor,
                      ['%'] = T.open, ['+'] = T.floor, ['='] = T.floor, ['^'] = T.floor, B = T.floor,
-                     d = T.wall, m = T.wall, c = T.floor, h = T.shrub, g = T.sapling})[ch] or T.floor
+                     d = T.wall, m = T.wall, c = T.floor, h = T.shrub, g = T.sapling, o = T.soilwall})[ch] or T.floor
         if ch == '?' then des.hidden = true end
         if ch == 'w' then des.flow_size = 2 end
         if ch == '~' then des.flow_size = 6 end

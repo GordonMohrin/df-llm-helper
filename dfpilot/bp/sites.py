@@ -47,7 +47,7 @@ from __future__ import annotations
 import heapq
 from collections import deque
 
-from . import defense, fortcore, mine, rooms, topo
+from . import aquifer, defense, fortcore, mine, rooms, topo
 from .emit import TEMPLATES, check_params
 from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
@@ -217,6 +217,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     first; `at`: [x, y, z], only the sites anchored exactly there (the reason when there is none). Both apply to room,
     explore and fortcore sites; the defense builds have the one site the manifest fixes."""
     p = check_params(tpl, params)
+    if tpl in aquifer.BUILD:                                 # FR-95: the player names the column (a reachable tile)
+        raise ValueError(f"{tpl}: no ranking; name the shaft column: p.x, p.y, p.top (a revealed tile the miners reach, "
+                         "e.g. the bottom of a fort stair) or site A<x>_<y>_<z>_0")
     if tpl in defense.BUILD:
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl != "fortcore" and not ((manifest or {}).get("zones") or {}).get("Z4"):
@@ -236,6 +239,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
         if not cands and tpl == "refuge_drink":
             raise ValueError(_no_store(snap, p, manifest, bad, hid, mk, wet))
+    cands = aquifer_ok(cands, tpl, p, rects, manifest)      # FR-95: the levels the kernel saw damp or wet
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
     if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
@@ -583,6 +587,35 @@ def _rect_boxes(rects, ax, ay, az, rot):
         for r in lst:
             x0, y0, x1, y1 = _rot_rect(r, ax, ay, rot)
             yield (x0, y0, az + w, x1, y1, az + w)
+
+
+def aquifer_levels(manifest: dict | None) -> set[int]:
+    """FR-95: the manifest's `aquifer_levels` (levels the kernel saw damp or wet on revealed tiles)."""
+    return {int(z) for z in (manifest or {}).get("aquifer_levels") or [] if isinstance(z, int) and not isinstance(z, bool)}
+
+
+def aquifer_ok(cands: list, tpl: str, p: dict, rects: dict, manifest: dict | None) -> list:
+    """FR-95: rooms keep off the aquifer levels and off the level right below one (water drips from an aquifer ceiling;
+    one dry solid level stays between an aquifer and a room under it); shafts (explore) may pass. fortcore p.aquifer =
+    above: its deepest level above every aquifer level; = pass: its deepest level at least one dry level below them;
+    '' as before (not filtered)."""
+    aq = aquifer_levels(manifest)
+    if not aq or tpl in mine.BUILD:
+        return cands
+    if tpl == "fortcore":
+        mode = p.get("aquifer", "")
+        if not mode:
+            return cands
+        low = min(rects) if rects else 0
+        if mode == "above":
+            return [c for c in cands if c["anchor"][2] + low > max(aq)]
+        return [c for c in cands if c["anchor"][2] + low + 1 < min(aq)]
+    out = []
+    for c in cands:
+        z0, z1 = c["box"][2], c["box"][5]
+        if not any(z0 <= z <= z1 + 1 for z in aq):
+            out.append(c)
+    return out
 
 
 def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):

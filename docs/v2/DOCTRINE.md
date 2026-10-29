@@ -24,9 +24,16 @@ Sources: [W] dwarffortresswiki.org (v50+ namespace, fetched today); [D] the inst
 - Seeds: plump helmet plus surface crops. 1-2 breeding pairs (no extra cats).
 - Skills: 2 miners, 1 mason/engraver, 1 carpenter/woodcutter, 1 brewer/grower, 1 mechanic, 1 cook/doctor.
 
-**Light aquifer protocol:**
-- Dig a 1-tile probe stair. If tiles are reported damp, stop and never re-designate them.
-- Pass through with a sealed shaft only, or keep the fort above that layer.
+**Light aquifer protocol (FR-95; decided by the orchestrator for Gordon, 2026-10-28, DECISIONS 24/25):**
+- Dig a 1-tile probe stair. A damp report is observed, not a stop: the dig goes on with the damp marker (the DFHack dig tool's
+  damp dig mode) and the natural walls beside the damp tile are smoothed once it is dug; it stops only on visible water in our
+  own dug tiles (>= 4/7 or a rising flow: a heavy aquifer, stopped for good and plugged).
+- Pass through only with the lined shaft `aqshaft`: one level open at a time; each level is dug, sealed at once (stone: the 4
+  orthogonal walls smoothed, a smoothed wall is no aquifer source; soil: a plus shape dug and constructed walls on its 4 arms)
+  and its flow watched for a day before the next. Or keep the fort above that layer (fortcore `p.aquifer above`).
+- Rooms stay off the aquifer levels and keep one dry solid level between an aquifer and a room below it (water drips from an
+  aquifer ceiling; smoothing cannot fix a ceiling). A fortcore below a passed shaft takes `p.aquifer pass`.
+- The kernel reads the aquifer flag of revealed tiles only (what the vanilla drip icon shows); unrevealed tiles stay unknown.
 - Every breach of water or caverns goes through a 2-wall airlock with a pathcheck before and after.
 - A dig that breaks into a cavern or a cavern lake by accident (Run 11: an ore shaft into a lake, reported as damp) is
   closed at once with constructed walls on the shaft's top tiles (the kernel's `plug`, CAVERN_PLUG); doors and hatches

@@ -1,0 +1,488 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "infra",
+  "manifest": {
+   "v": 2
+  },
+  "materials": {},
+  "params": {
+   "depth": 20,
+   "dry_levels": 2,
+   "mode": "auto",
+   "top": -1,
+   "x": -1,
+   "y": -1
+  },
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "j"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l0.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       99
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l1.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       98
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l2.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       97
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l3.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       96
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l4.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       95
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l5.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       94
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l6.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       93
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l7.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       92
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l8.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       91
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l9.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       90
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l10.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       89
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l11.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       88
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l12.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       87
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l13.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       86
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l14.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       85
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l15.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       84
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l16.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       83
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l17.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       82
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l18.dig",
+    "mode": "dig",
+    "orders": 0
+   },
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "i"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       81
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "l19.dig",
+    "mode": "dig",
+    "orders": 0
+   }
+  ],
+  "tpl": "aqshaft",
+  "v": 2
+ }
+]

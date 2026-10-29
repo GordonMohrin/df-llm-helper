@@ -10,6 +10,7 @@ local CFG0 = {}
 for k, v in pairs(runner.CFG) do CFG0[k] = v end
 local function fresh(opts)
   for k, v in pairs(CFG0) do runner.CFG[k] = v end
+  require('dfllm.aqshaft').CFG.on = false   -- FR-95: the legacy damp stop (observe off); observe mode: test_aqshaft.lua
   local W = H.world(opts)
   W.load(runner)
   return W
@@ -42,6 +43,25 @@ T.test('an older kernel breach record (m.runner br) is taken over into manifest.
   local W2 = H.world{tag = 'br_old2', persist = persist}
   W2.load(runner)
   T.eq(W2.K.manifest().breaches, {{pos = {11, 11, 100}, why = 'damp', proj = 'c1', tpl = 'fortcore'}})
+end)
+
+T.test('FR-95 merge: a breach:damp park resumed in observe mode at boot leaves manifest.breaches (no re-site of a core '
+       .. 'that digs again)', function()
+  local W = fresh{tag = 'br_resume'}
+  H.place(W, 'y707s0b1', H.dig_doc(5))
+  H.place(W, 'c2', H.dig_doc(3))
+  H.runs(W, 1)
+  W.event('REPORT', {type = 'DIG_CANCEL_DAMP', text = 'Damp stone located', pos = {x = 12, y = 14, z = 100}})
+  W.frame(1)
+  T.eq(H.proj(W, 'y707s0b1').blocked, 'breach:damp')
+  T.eq(#W.K.manifest().breaches, 2)
+  require('dfllm.aqshaft').CFG.on = true          -- the FR-95 kernel boots on the parked fort
+  local W2 = H.world{tag = 'br_resume2', persist = H.reloaded(W)}
+  W2.load(runner)
+  T.eq(H.proj(W2, 'y707s0b1').blocked, '')
+  T.eq(W2.K.manifest().breaches, {})
+  T.eq(#W2.K.persist.get('m.runner').dz, 0)
+  require('dfllm.aqshaft').CFG.on = false
 end)
 
 T.done()
