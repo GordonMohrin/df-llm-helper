@@ -18,7 +18,7 @@ draft then failed check's `only 0 free site(s)`). `lua/dfllm/readiness.lua:436` 
 ## Fix
 refuge_gate: no free bed site and nothing in the plan -> a warning `refuge: Tiefe+ has 16 beds < 21 (+2 under way); no free site takes
 refuge_beds now: the plan may be applied; next: dfllm bp sites refuge_beds --fresh once the refuge rooms under way are dug (new ones dig
-off them, BUG-319), or bp.place refuge_beds at an anchor A<x>_<y>_<z>`. A free site keeps the ERROR that asks for the build. _bed_site
+off them, BUG-319), then bp.place tpl=refuge_beds site=S1`. A free site keeps the ERROR that asks for the build. _bed_site
 uses `free_sites(.., n=1)` (what bp.place S1 resolves). readiness: with no standing store, `runner.pending('refuge_drink')` > 0 ->
 `its drink store is under way (N project(s))` instead of `plan its drink store`.
 

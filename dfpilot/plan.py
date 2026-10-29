@@ -945,7 +945,7 @@ def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
             run = f" (+{f['beds']} under way)" if f.get("beds") else ""
             warn.append(text.split("; ")[0] + run + "; no free site takes refuge_beds now: the plan may be applied; "
                         "next: dfllm bp sites refuge_beds --fresh once the refuge rooms under way are dug (new ones dig "
-                        "off them, BUG-319), or bp.place refuge_beds at an anchor A<x>_<y>_<z>")
+                        "off them, BUG-319), then bp.place tpl=refuge_beds site=S1")
         else:
             need(text, season)
     return errs, warn
