@@ -16,7 +16,8 @@
   runner `Q.explore_cav` before an explore's first dig chunk: a manifest cavern level inside the shaft's z-range cuts the shaft
   one level above it (depth = anchor z - cavern z - 1), or blocks it `cavern_known` with one PROJECT_BLOCKED (A) when < 2
   levels remain (BUG-226). (4) readiness logs the audit wait once per snapshot id (BUG-227).
-- **Safety:** no new verb, event, config key, state field or RULES row; no contract change (PROJECT_REQUEST why/types and
+- **Safety:** no new verb, event, config key or RULES row (new kernel state only: m.economy `busyreq`, the busy
+  request's cadence per shop type); no contract change (PROJECT_REQUEST why/types and
   ORDER_STUCK kind already exist). Not in this package: care.lua's stressor count (BUG-205 part 2), plan.py re-fitting kept
   explores. Risk: a cut explore reaches less deep (the ore search goes on at the next plan); a busy request may place a second
   Carpenters/Masons the fort did not need when the waiting jobs are blocked by something the shop count does not see.

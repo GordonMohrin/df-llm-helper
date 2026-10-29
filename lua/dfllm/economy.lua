@@ -7709,9 +7709,10 @@ function M.busy_request(K, c, r, b)
   if not lab or wait < M.BUSY_WAIT * shops then return end
   local li = df.unit_labor and df.unit_labor[lab]
   local cu = K.census.u
-  local idle = 0
+  local idle, sold = 0, {}
+  for _, id in ipairs(type(cu) == 'table' and cu.soldier_ids or {}) do sold[id] = true end   -- as idle_pct: no soldiers
   for _, id in ipairs(li and type(cu) == 'table' and cu.ids or {}) do
-    local u = df.unit.find(id)
+    local u = not sold[id] and df.unit.find(id) or nil
     local okl, has = pcall(function() return u.status.labors[li] == true end)
     if u and okl and has and (u.job == nil or u.job.current_job == nil) then idle = idle + 1 end
   end
