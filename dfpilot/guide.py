@@ -102,9 +102,53 @@ def gather(save_dir: Path) -> dict:
         f["plan_mtime"] = plan_json.stat().st_mtime
     except OSError:
         f["plan_mtime"] = 0.0
-    if "hospital_out" in ((s.get("ready") or {}).get("fail") or []):
+    fails = [str(x) for x in ((s.get("ready") or {}).get("fail") or [])]
+    if "hospital_out" in fails:
         f["hosp_proj"] = _hospital_project(Path(save_dir))
+    if any(x.startswith(REFUGE_FAILS) for x in fails):
+        f["refuge_proj"] = _refuge_project(Path(save_dir), s, ctx.plan)
     return f
+
+
+def _refuge_build(b: dict) -> bool:
+    """BUG-221: a build or bp document that fixes an R0 refuge/fortcore fail: fortcore stage 3 (or a new core's stage 1),
+    refuge_beds, refuge_drink, a seal that closes the ways in or the refuge (not at=audit)."""
+    from .plan import REFUGE_BEDS, REFUGE_DRINK, _refuge_stage, _resite
+    tpl = b.get("tpl")
+    if not isinstance(tpl, str):
+        return False
+    if tpl == "seal":
+        p = b.get("p", b.get("params")) or {}
+        return str(p.get("at", "last") if isinstance(p, dict) else "last").strip().lower() != "audit"
+    return tpl in (REFUGE_BEDS, REFUGE_DRINK) or _refuge_stage(b) or _resite(b)
+
+
+def _refuge_project(save_dir: Path, s: dict, plan: dict | None) -> list[str]:
+    """BUG-221 (live round 4: NEXT said `plan propose` right after the apply that holds fortcore stage 3 and the refuge
+    beds and drink): the ids of the refuge fixes under way: this year's applied plan builds and bp projects with no
+    PROJECT_DONE, and a running fortcore s3.* row of state.proj (not stopped on a breach). [] when none or unreadable."""
+    from .plan import bp_files, bp_id, done_projects
+    out: list[str] = []
+    try:
+        done = done_projects(save_dir)
+        year = (s.get("t") or {}).get("y")
+        if isinstance(plan, dict) and isinstance(year, int) and plan.get("year") == year:
+            for si, se in enumerate(plan.get("seasons") or []):
+                for bi, b in enumerate((se or {}).get("build") or []):
+                    pid = bp_id(plan["year"], si, bi)
+                    if isinstance(b, dict) and pid not in done and _refuge_build(b):
+                        out.append(pid)
+        for p in bp_files(save_dir):
+            doc = files.read_json(p, retry=False)
+            if p.stem not in done and p.stem not in out and isinstance(doc, dict) and _refuge_build(doc):
+                out.append(p.stem)
+    except Exception:                                   # noqa: BLE001 - unreadable plan/bp files: assume none (propose)
+        return []
+    for row in s.get("proj") or []:
+        if isinstance(row, list) and len(row) >= 2 and row[0] == "fortcore" and str(row[1]).startswith("s3.") \
+                and "breach:" not in str(row[-1]) and "fortcore" not in out:
+            out.append("fortcore")
+    return out
 
 
 def _hospital_project(save_dir: Path) -> bool:
@@ -335,8 +379,13 @@ def _r0(f: dict, s: dict) -> list[Step]:
         out.append(Step("r0", None, "R0 hospital_out: a hospital project is under way; wait for it"))
     if any(x.startswith(REFUGE_FAILS) for x in fails):
         miss = [x for x in fails if x.startswith(REFUGE_FAILS)]
-        out.append(Step("r0", PLAN_CMD, _txt(f"R0 refuge/fortcore: {', '.join(miss[:4])}; the plan builds these pieces "
-                                            "(fortcore stage 3, refuge drink and beds)")))
+        ids = f.get("refuge_proj") or []
+        if ids:                                 # BUG-221: the applied plan (or a project) builds it: wait, no new propose
+            out.append(Step("r0", None, _txt(f"R0 refuge/fortcore: {', '.join(miss[:4])}; the applied plan builds it "
+                                             f"({', '.join(ids[:4])}{' +' + str(len(ids) - 4) if len(ids) > 4 else ''}); wait")))
+        else:
+            out.append(Step("r0", PLAN_CMD, _txt(f"R0 refuge/fortcore: {', '.join(miss[:4])}; the plan builds these pieces "
+                                                "(fortcore stage 3, refuge drink and beds)")))
     other = [x for x in fails if x not in ("audit", "audit_old", "open_perimeter", "hospital_out")
              and not x.startswith(REFUGE_FAILS)]
     if other:
@@ -364,7 +413,9 @@ def decide(f: dict, tried: tuple[str, ...] | list[str] = ()) -> Step:
     r = s.get("ready") if isinstance(s.get("ready"), dict) else {}
     waits = ""
     if r.get("lvl") == 0:
-        waits = f"; R0 waits on {','.join(str(x) for x in (r.get('fail') or [])[:4])} (a project is under way)"
+        ids = f.get("refuge_proj") or []      # BUG-221: name the refuge projects the applied plan builds
+        waits = (f"; R0 waits on {','.join(str(x) for x in (r.get('fail') or [])[:4])} ("
+                 + (f"the applied plan builds it: {', '.join(ids[:4])}; wait" if ids else "a project is under way") + ")")
     return Step("idle", None, _txt(f"green: {s.get('mode', '?')}"
                                    f"{' R' + str(r['lvl']) if 'lvl' in r else ''}, pop {(s.get('pop') or {}).get('cit', '?')}"
                                    f"{waits}; wait for the next wake line"))

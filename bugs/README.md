@@ -229,6 +229,10 @@ Related: FR-xx, BUG-xx
 | [BUG-211](BUG-211-follow-seals-audit-bypass-before-the-trap-hall.md) | fixed (offline, live-untested) | medium | live 3: follow seals the audit bypass before the trap hall, on fortcore tiles, logging it every audit | dfpilot/wake.py |
 | [BUG-212](BUG-212-status-drops-proj-and-lists-six-next-hints.md) | fixed (offline, live-untested) | low | live 3: status drops the proj line and lists six next: hints | dfpilot/brief.py |
 | [BUG-213](BUG-213-audit-wait-printed-as-a-float.md) | fixed (offline, live-untested) | low | live 3: dfllm audit prints its wait as a float | dfpilot/wake.py |
+| [BUG-220](BUG-220-status-clips-the-trap-hall-note-and-the-next-hint.md) | fixed (offline, live-untested) | medium | live 4: status clipped the UNREADY line's 'no trap hall yet' note and its one next: hint | dfpilot/brief.py |
+| [BUG-221](BUG-221-next-says-propose-right-after-the-refuge-plan-apply.md) | fixed (offline, live-untested) | medium | live 4: NEXT said plan propose right after the apply of a plan that builds the refuge | dfpilot/guide.py |
+| [BUG-222](BUG-222-refuge-gate-demands-beds-before-fortcore-stage-3.md) | fixed (offline, live-untested) | high | live 4: plan check demanded refuge_beds at P3+ that no site takes before fortcore stage 3 is dug | dfpilot/plan.py |
+| [BUG-223](BUG-223-kept-explore-shafts-dig-into-a-known-cavern.md) | fixed (offline, live-untested) | medium | live 4: kept explore shafts dug into a cavern level the kernel recorded after the apply | dfpilot/plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

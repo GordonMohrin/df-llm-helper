@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## Live round 4 CLI fixes: status decision first, NEXT waits for the applied refuge, beds after stage 3, kept explores vs caverns (BUG-220..223, 2026-10-29; offline, live-untested)
+- **Why:** live round 4 and its skeptic: on Trussroads `dfpilot status` clipped the UNREADY line to `... audit route: bypass: wall
+  75,65,131 ramp (+more) -~`, so neither 'no trap hall yet' nor the one `next:` hint showed (BUG-220, residual of BUG-211/212). On Earthboat
+  `next` said `dfllm plan propose` right after each apply of a plan that held fortcore stage 3, refuge_beds and refuge_drink (BUG-221); the
+  first propose at P5 demanded refuge_beds that no site takes before stage 3 is dug, and adding it failed the blueprint check (BUG-222);
+  the explores kept from the applied plan dug into the cavern level z123 the kernel had recorded after the first one (BUG-223).
+- **What changed:** (1) brief `line_unready(cmds=False)`: the 'no trap hall yet' note and `next: <first hint>` follow the blocker list,
+  before PERIMETER, ways in, traps and route; brief keeps its order (BUG-220). (2) guide `gather` `refuge_proj` (`_refuge_project`,
+  `_refuge_build`): this year's applied plan builds and open bp projects that fix a refuge fail (fortcore stage 3 or a new core, refuge_beds,
+  refuge_drink, a seal not at=audit) and a running fortcore s3 row; `_r0` then waits and the idle WHY names them (BUG-221). (3) plan
+  `refuge_gate`: missing beds with no bed site while stage 3 is planned or under way are a warning at any phase ('beds follow fortcore
+  stage 3 ...: apply, wait for s3.dig, propose again') (BUG-222). (4) plan `fit_explore_kept` (propose CLI): a kept, not done explore whose
+  shaft reaches a manifest.caverns level gets a line and a note with its `bp.cancel` (BUG-223).
+- **Safety:** no new verb, event, config key, state field or RULES row; no contract change. Risks: a refuge fix that never finishes keeps
+  NEXT waiting (the fail and the project ids stay visible in the idle WHY); the beds warning trusts fort.refuge.bed_site False. Not in this
+  package: the runner re-check of a placed explore against manifest.caverns before its dig (Lua).
+- **Tests (each fails on 5e9e719):** tests/test_bug220_223_cli.py; test_cli_status.py and test_perimeter_escalation.py read the new order.
+- **Live check:** (a) Trussroads (port 5000), bypass without trap hall: `python -m dfpilot status` line 3 starts `SIEGE UNREADY (R0):
+  <blockers> | no trap hall yet: ... | next: ...`. (b) Earthboat (port 5002): `plan apply` a plan with fortcore stage 3 / refuge_drink, then
+  `python -m dfpilot next`: `NEXT: nothing`, WHY `the applied plan builds it: y<Y>s<S>b<I>...; wait`. (c) A fort with fortcore stage 1
+  only: `plan propose` at P3+ prints the warning `beds follow fortcore stage 3`, no `ERROR refuge: ... beds`. (d) With an undug explore
+  and a cavern in manifest.caverns: `plan propose` prints `explore <id> ... reaches the known cavern level z<N> ...: dfllm cmd bp.cancel`.
+
 ## Live round 3 plan fixes: propose = check, core stages placeable, fresh fort, order libraries (BUG-195..198, 2026-10-29; offline, live-untested)
 - **Why:** live round 3 and its skeptic: on Trussroads `plan propose` drafted fortcore@same stage 2 that `plan check` refused
   (`overlaps project(s) y721s3b2`, a refuge_beds room of the y721 minimal plan) (BUG-195). On the fresh fort Earthboat propose

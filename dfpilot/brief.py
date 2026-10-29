@@ -289,8 +289,9 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     if WALL_RE.search(route) and getattr(ctx, "dir", None):
         from .cmd import audit_fails, no_trap_hall
         hall = not no_trap_hall(audit_fails(ctx.dir))
+    head = []                                  # BUG-220: status puts the decision parts right after the blockers
     if WALL_RE.search(route) and not hall:     # BUG-211: no trap hall yet: the 'bypass' is a room door off the corridor
-        out.append("no trap hall yet: the bypass waits for fortcore stage 2 (plan), no seal at=audit before it")
+        head.append("no trap hall yet: the bypass waits for fortcore stage 2 (plan), no seal at=audit before it")
     elif WALL_RE.search(route):
         nxt.append("wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal p.at=audit)")
     elif route:
@@ -341,8 +342,12 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
         nxt.append(f"{','.join(lost)} lost to building destroyers: the kernel replaces it by wall + door in quiet PEACE "
                    f"(dfllm cmd inspect what=defense; dfllm cmd bridge.rebuild only on Gordon's word)")
     if nxt:                                    # BUG-212 (live round 3: six next: commands in a 700-char status line 2)
-        out.append("next: " + ("; ".join(nxt) if cmds else nxt[0]))
-    return _join(out)
+        head.append("next: " + ("; ".join(nxt) if cmds else nxt[0]))
+    if cmds:                                   # brief: the details first, the decision at the end
+        return _join(out + head)
+    # BUG-220 (live round 4): status clips this rank-2 line from the end to 90/60 tokens, so the PERIMETER, ways-in, traps
+    # and route parts ate the note and the one command; they now follow the blocker list and the details are clipped
+    return _join(out[:1] + head + out[1:])
 
 
 QUIET_WHY = {"near": "a hostile is near", "inside": "a hostile inside Kern+", "great": "a great danger in reach",
