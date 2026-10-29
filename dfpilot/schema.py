@@ -471,8 +471,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # years, perimeter.stop_after
     # BUG-042: drink_low adds drink (days), block (still, brew, unvalidated, plants, barrels, brewer) and auto (brew,
     # office, barrels, gather); manager_office names why the manager validates nothing (orders older than unval_days)
+    # BUG-287: trade_screen = a player screen blocked the caravan's trade n times (trade.BUSY_ASK); screen = its focus
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1

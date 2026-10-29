@@ -298,6 +298,8 @@ Related: FR-xx, BUG-xx
 | [BUG-283](BUG-283-mood-workshop-placed-as-a-plain-workshops-room-at-prio-4.md) | fixed (offline, live-untested) | high | Run 15: the mood's shop placed as a plain 12-shop room at prio 4, 27 days late | care.lua, runner.lua, wake.py |
 | [BUG-284](BUG-284-mood-materials-not-supplied-by-the-kernel.md) | fixed (offline, live-untested) | high | Run 15: no chain shops, no web collection, mood needs not first in the plan | care.lua, act.lua, plan.py |
 | [BUG-285](BUG-285-status-and-brief-name-no-open-mood.md) | fixed (offline, live-untested) | medium | Run 15: status and brief name no open mood, its needs or its days left | care.lua, brief.py |
+| [BUG-286](BUG-286-unit-sheet-left-after-the-kernels-trade-screen-blocks-the-next-caravan.md) | fixed (offline, live-untested) | high | Run 15: a unit sheet left after the kernel's own trade screen blocks every later caravan as a player screen | trade.lua |
+| [BUG-287](BUG-287-player-screen-blocks-a-caravan-silently-until-it-leaves.md) | fixed (offline, live-untested) | medium | Run 15: a player screen blocks a caravan x7-x14 and nobody is asked | trade.lua, schema.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
