@@ -72,6 +72,23 @@ T.test('BUG-191: the designated level the miners dig and that floods is noticed:
   T.ok(rec(W, 'aq').levels['99'].opened)
 end)
 
+T.test('BUG-191: waiting for a slot behind a seal, the shaft is still measured and stops a heavy aquifer', function()
+  local W = fresh{tag = 'b191wait'}
+  stalled_shaft(W)
+  H.floor(W, 5, 5, 100, 5, 5)                        -- a seal comes first and takes the one slot
+  H.place(W, 'sl1', {v = 2, tpl = 'seal', site = 'S1', class = 'defense', params = {at = '5,5,100 floor'}, anchor = {5, 5, 100},
+                     rot = 0, stages = {{label = 'seal.build', mode = 'build', orders = 1, defense = 1,
+                                         chunks = {{pos = {5, 5, 100}, cells = {{0, 0, 0, 'd'}}}}}},
+                     manifest = {v = 2}, materials = {door = 1}})
+  H.runs(W, 1)
+  T.ok(row(W, 'aq')[4]:find('queued', 1, true), T.show(row(W, 'aq')))
+  local t = W.tile(AX, AY, 99)
+  t.c, t.dig, t.flow = '~', '', 7
+  for _ = 1, 6 do H.runs(W, 1) end                   -- 3 days: one measure pass (meas_every 2 days) at least
+  T.eq(H.proj(W, 'aq').blocked, 'breach:heavy_aquifer')
+  T.eq(#ev(W, 'AQ_HEAVY'), 1)
+end)
+
 -- a fake host for A.work (what runner's Q.aqx hands it)
 local function host(tiles)
   local X = {rt = {aq = {}}, ev = {}, qfn = 0, plugs = 0, t = 5000}
