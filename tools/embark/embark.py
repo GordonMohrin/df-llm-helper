@@ -291,6 +291,8 @@ def best_compromise(rows: list[dict]) -> str | None:
     w, b = r["world"], _box(r)
     cmd = f"embark {w[0]},{w[1]},{b[0] - 16 * w[0]},{b[1] - 16 * w[1]}"
     for u in r.get("unknown") or []:
+        if u == "size" and r.get("hover"):   # a hover row placed no rectangle; embark reads the size it places
+            continue
         cmd += f" --waive {u}"
     for f in r.get("fails") or []:
         cmd += f" --accept {f}"

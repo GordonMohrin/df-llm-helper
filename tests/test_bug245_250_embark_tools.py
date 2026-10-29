@@ -135,6 +135,9 @@ def test_bug250_summary_brook_distance_and_best_compromise():
     best = drv.best_compromise(rows)
     assert best.endswith("--accept stone --reason TEXT --explore-first TEXT"), best
     assert drv.best_compromise(rows + [{"tag": "ok", "verdict": "ok", "world": [1, 1], "emb": [16, 16]}]) is None
+    hov = {"tag": "h", "world": [9, 7], "emb": [150, 118], "hover": True, "verdict": "reject", "score": 50,
+           "fails": [], "warns": [], "unknown": ["size"], "rec": {}}
+    assert drv.best_compromise([hov]).endswith(": embark 9,7,6,6"), "a hover row needs no --waive size"
     assert drv.brook_text({"tag": "x", "emb": [0, 0], "rec": {}}, []) == " brook=none seen"
     assert drv.brook_text({"tag": "x"}, []) == ""
 
