@@ -11,7 +11,8 @@ local function setup(o)
   for _, u in ipairs(o.army or S.army(6, 150, 150)) do units[#units + 1] = u end
   local W = S.world{units = units, lever_cfg = {[11] = {}, [12] = {}}, cfg = o.cfg}
   W.mil = S.military()
-  if o.on_station then W.mil.kpi = function() return {squads = 3, soldiers = 8, worn = 95, cv = 13, metal_pct = 0, on_station = o.on_station} end end
+  if o.on_station then W.mil.kpi = function() return {squads = 3, soldiers = 8, worn = 95, cv = 13, metal_pct = 0, on_station = o.on_station,
+                                                     off = o.off, in_kern = o.in_kern} end end
   S.load(W, {W.mil})
   if o.cfg then W.K.cfg.reflex = o.cfg.reflex end
   return W
@@ -57,6 +58,16 @@ T.test('BUG-114: no fallback with a hostile inside, one near the bridge, soldier
   local W4 = setup{cfg = {reflex = {v = 2, breach = {stuck_ticks = 600}}}}
   S.run(W4, 3000)
   T.eq(W4.K.mode(), 'SIEGE', 'config shortens it')
+end)
+
+T.test('BUG-215 (live t4: on_station 0 of 8, off nost 8): no station order for the soldiers and the soldiers in ' ..
+       'Kern+: the stuck-bridge fallback comes; outside Kern+ it does not', function()
+  local W = setup{on_station = 0, off = {nost = 8}, in_kern = 8}
+  S.run(W, 6000)
+  T.eq(W.K.mode(), 'SIEGE', 'old code: BREACH (0 of 8 at their stations)')
+  local W2 = setup{on_station = 0, off = {nost = 8}, in_kern = 1}
+  S.run(W2, 6000)
+  T.eq(W2.K.mode(), 'BREACH')
 end)
 
 T.test('BUG-114: the stuck mark ends with a hostile near the bridge: BREACH again at once', function()

@@ -39,7 +39,8 @@ local function setup(opts)
   sol = {soldiers = 8, on_station = 7}
   local mil = S.military()
   mil.sortie_squad = function() return 'A', 6 end
-  mil.kpi = function() return {squads = 3, soldiers = sol.soldiers, worn = 95, cv = 13, metal_pct = 0, on_station = sol.on_station} end
+  mil.kpi = function() return {squads = 3, soldiers = sol.soldiers, worn = 95, cv = 13, metal_pct = 0, on_station = sol.on_station,
+                                off = sol.off, in_kern = sol.in_kern} end
   mil.kill_lone = function(K, ids, by) kills[#kills + 1] = {ids = ids, by = by, tick = K.now().tick}; return kill_answer[1], kill_answer[2] end
   W.mil = mil
   S.load(W, {mil, snap, require('dfllm.reflex'), require('dfllm.arbiter')})
@@ -154,6 +155,33 @@ T.test('BUG-112: soldiers off their stations: no release (the question still com
   T.eq(W3.K.mode(), 'BREACH', 'the soldiers are not at their stations: no release')
   T.eq(#events(W3, 'LOCKDOWN_END'), 0)
   T.ok(#decisions(W3, 'kill_lone_intruder') >= 1, 'the question still comes')
+end)
+
+-- BUG-215 (live t4: a wild gorlak about 70 tiles out held the BREACH 23,000+ ticks against max_days 10; on_station 0 of
+-- 8, kpi off {nost 8}: the squads had no station order, so the release waited for ever)
+T.test('BUG-215: no station order for the soldiers (off nost) and the soldiers in Kern+: released at max_days, the ' ..
+       'log line says so; standing outside Kern+ they are not', function()
+  local W = setup{tag = 'nost', cfg = CF}
+  raws()
+  sol.on_station, sol.off, sol.in_kern = 0, {nost = 8}, 8
+  goblin(W, 300, 61, 70, Z)
+  S.run(W, 9000)
+  T.eq(#events(W, 'LOCKDOWN_END'), 1, 'old code: never (0 of 8 at their stations)')
+  T.eq(events(W, 'LOCKDOWN_END')[1].d.cause, 'limit')
+  local hit, seen = false, {}
+  for _, l in ipairs(W.logs) do
+    local m = tostring(l.msg)
+    if m:find('cleared after', 1, true) then seen[#seen + 1] = m end
+    if m:find('in BREACH with the soldiers placed: no station order for 8 of 8, 8 in Kern+', 1, true) then hit = true end
+  end
+  T.ok(hit, 'the log names why: ' .. table.concat(seen, ' | '))
+  local W2 = setup{tag = 'nost_out', cfg = CF}
+  raws()
+  sol.on_station, sol.off, sol.in_kern = 0, {nost = 8}, 2
+  goblin(W2, 300, 61, 70, Z)
+  S.run(W2, 9000)
+  T.eq(#events(W2, 'LOCKDOWN_END'), 0, 'only 2 of 8 in Kern+: no release')
+  sol.off, sol.in_kern = nil, nil
 end)
 
 T.test('BUG-112: a fort without soldiers is never released by the rule; the question says no squad', function()

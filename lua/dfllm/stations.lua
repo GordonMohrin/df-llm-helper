@@ -222,6 +222,65 @@ function S.relocate(man, brs, p, blk, o)
   return S.nearest(p, o.R or S.SEARCH_R, ok)
 end
 
+-- BUG-214 (live t4: b2 a wall, core on walk group 0, melee on group 1507 behind the raised B2, the soldiers on 1: no
+-- station order at all): the nearest tile inside box {x0, y0, z0, x1, y1, z1} that S.relocate accepts (o as there;
+-- o.inside(x, y, z), when given, must hold too: the Kern+ burrow), the levels nearest to p.z first (ties: the lower
+-- one), on each level from p clamped into the box with a radius that covers it; at most o.cap (4000) probes. nil none
+function S.relocate_box(man, brs, box, p, o)
+  local b = S.fp(box)
+  if not b then return nil end
+  local zs = {}
+  for z = math.min(b[3], b[6]), math.max(b[3], b[6]) do zs[#zs + 1] = z end
+  table.sort(zs, function(a, c)
+    local da, dc = math.abs(a - p.z), math.abs(c - p.z)
+    if da ~= dc then return da < dc end
+    return a < c
+  end)
+  local x0, x1, y0, y1 = math.min(b[1], b[4]), math.max(b[1], b[4]), math.min(b[2], b[5]), math.max(b[2], b[5])
+  local cap, n = o.cap or 4000, 0
+  local q = {}
+  for k, v in pairs(o) do q[k] = v end
+  local side = o.side
+  q.side = function(x, y, z)
+    if x < x0 or x > x1 or y < y0 or y > y1 or n >= cap then return false end
+    n = n + 1
+    if side and not side(x, y, z) then return false end
+    return not o.inside or o.inside(x, y, z) == true
+  end
+  for _, z in ipairs(zs) do
+    local c = {x = math.max(x0, math.min(x1, p.x)), y = math.max(y0, math.min(y1, p.y)), z = z}
+    q.R = math.max(c.x - x0, x1 - c.x, c.y - y0, y1 - c.y)
+    local r = S.relocate(man, brs, c, {}, q)
+    if r then return r end
+    if n >= cap then return nil end
+  end
+  return nil
+end
+
+-- BUG-215 (live t4: a far harmless gorlak held the BREACH 23,000+ ticks, on_station 0 of 8 with off {nost 8}, so
+-- reflex's siege_release and siege's breach_stuck never came): are the soldiers where the posture wants them, by
+-- military.kpi k? true, why when half of the soldiers who have a reachable station stand on it ('at their stations'),
+-- or when none of them has one (off nost/unreach: 'no station order ...') and half of all soldiers stand in Kern+
+-- (k.in_kern; no march out: with no station the core is where they defend); false, why otherwise
+function S.stationed(k)
+  k = type(k) == 'table' and k or {}
+  local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
+  if sol <= 0 then return false, 'no soldiers' end
+  local off = type(k.off) == 'table' and k.off or {}
+  local none = math.min(sol, (int(off.nost) or 0) + (int(off.unreach) or 0))
+  if on * 2 >= sol then return true, 'at their stations' end
+  if none == 0 or on * 2 < sol - none then
+    return false, string.format('%d of %d at their stations%s', on, sol,
+                                none > 0 and string.format(' (%d without a reachable one)', none) or '')
+  end
+  local ink = int(k.in_kern)
+  if ink and ink * 2 < sol then
+    return false, string.format('no station order for %d of %d, only %d in Kern+', none, sol, ink)
+  end
+  return true, string.format('no station order for %d of %d%s', none, sol,
+                             ink and string.format(', %d in Kern+', ink) or '')
+end
+
 -- the centre of the biggest Z4 box (by its x/y area; the core level of a fortcore manifest), nil without one
 function S.z4_centre(man)
   local best, area

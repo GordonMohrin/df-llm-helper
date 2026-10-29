@@ -746,9 +746,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # side), chain (the next station of the posture's chain), none (nothing clear: kept), hold (soldiers at their
     # station held a raise: the squad re-stationed at once); station/first = chain entries, from/to positions, bridge
     # and d = the footprint that held it and its distance, squad/key/units for hold. BUG-142 why wall (no floor);
-    # BUG-170 why unreachable (the station on walk group grp, the squad's soldiers on home)
+    # BUG-170 why unreachable (the station on walk group grp, the squad's soldiers on home); BUG-214 why fallback (the
+    # whole chain failed: via wide = a floor on home within 3 * SEARCH_R of the first entry, kern = a Kern+ floor on
+    # home), tried = each failed entry and why ('b2 wall, core group 0, z4 none, melee group 1507')
     "STATION_MOVED": ("B", "military", _d("why:s", "station:s first:s from:p to:p bridge:s d:i squad:i key:s units:ia "
-                                                  "grp:i home:i")),
+                                                  "grp:i home:i via:s tried:s")),
     # FR-79 (note 67): the kernel swapped members of the militia squad `squad` (A, B, C) for the next cohort at the close of
     # its window: out/into = members swapped in this batch (at most military.rotation.per_day), size = the squad's target,
     # eligible = citizens who may sit in it, lo/hi = militia windows served by the eligible (counts, no names), win = the

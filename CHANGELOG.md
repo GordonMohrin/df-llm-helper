@@ -1,5 +1,24 @@
 # CHANGELOG dfpilot
 
+## Live round 4 station fallback and the release without stations (BUG-214, BUG-215, 2026-10-29; offline, live-untested)
+- **Why:** live round 4 on E:/DF-test4 (Trussroads) and its skeptic: with B2 raised the BREACH chain b2, core, z4, melee failed entry by
+  entry (b2 a wall, core on walk group 0, melee on 1507 behind B2, the soldiers on 1): no station order (kpi off nost 8, on_station 0 of 8
+  for 19+ days) or melee 'kept' where 5 of 8 soldiers could not walk, and the text said 'no other station of its chain' (BUG-214). A far
+  harmless gorlak then held the BREACH 23,000+ ticks: siege_release and breach_stuck wait for half the soldiers at their stations (BUG-215).
+- **What changed:** (1) military `pick()` records why each entry failed; with `o.fallback` (posture stations only) a chain that failed on
+  a wall or the walk group takes the nearest floor on the soldiers' group within 24 tiles of the first entry, else the nearest Kern+
+  floor on it (`M.kern_box` from `dfhack.burrows.listBlocks`, `M.kern_floor`, new `dfllm.stations.relocate_box`); STATION_MOVED `fallback`
+  with `via`/`home`/`tried`; `posture_station` never returns a wall or off-group first entry (no order instead), the texts name the failed
+  entries (BUG-214). (2) kpi `off.unreach` (station on another walk group) and `in_kern`; new pure `dfllm.stations.stationed(kpi)`:
+  half of those with a reachable station on it, or none of the rest has one and half of all soldiers stand in Kern+ (no march out); used
+  by reflex's lone-intruder release (the log line names why) and siege's breach_stuck (BUG-215). Contracts: STATION_MOVED d `via`, `tried`;
+  appendix regenerated.
+- **Tests (each fails on 5e9e719):** tests/lua/test_stations.lua (BUG-214 x3, BUG-215 stationed), tests/lua/test_m3_lone.lua and
+  tests/lua/test_m3_breach.lua (BUG-215).
+- **Live check:** on a fort with B2 raised and the squads outside the core force BREACH: `dfllm events --type STATION_MOVED` shows `fallback`
+  (via wide or kern) and `tried b2 wall, core group 0, ...`; the squads screen shows that station; status on_station rises to half or more.
+  With no station order at all and a lone harmless invader far out: after confine.max_days kern.log 'cleared after N days in BREACH with the
+  soldiers placed: no station order for 8 of 8, 8 in Kern+', LOCKDOWN_END limit; a stuck bridge BREACH falls back to SIEGE bridge_stuck.
 ## Live round 3 plan fixes: propose = check, core stages placeable, fresh fort, order libraries (BUG-195..198, 2026-10-29; offline, live-untested)
 - **Why:** live round 3 and its skeptic: on Trussroads `plan propose` drafted fortcore@same stage 2 that `plan check` refused
   (`overlaps project(s) y721s3b2`, a refuge_beds room of the y721 minimal plan) (BUG-195). On the fresh fort Earthboat propose

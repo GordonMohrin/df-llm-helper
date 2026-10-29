@@ -2161,11 +2161,12 @@ function M.ignore(K, id, why)
   return true
 end
 
+-- BUG-215 (live t4: on_station 0 of 8 with no station order, the release never came): dfllm.stations.stationed,
+-- 'no station order' with the soldiers in Kern+ counts too; true/false and the why for the log line
 local function soldiers_on_station(K)
   local ok, k = K.call('military', 'kpi')
-  if not (ok and type(k) == 'table') then return false end
-  local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
-  return sol > 0 and on * 2 >= sol
+  if not (ok and type(k) == 'table') then return false, 'no military module' end
+  return require('dfllm.stations').stationed(k)
 end
 
 local function lone_cmd(K, pic)
@@ -2236,7 +2237,9 @@ local function lone_step(K, h, now)
     end
   end
   -- the release: the lockdown limit holds in SIEGE/BREACH too, with the soldiers at their stations
-  if c.siege_release and c.max_days > 0 and age >= c.max_days * 1200 and soldiers_on_station(K) then
+  local okst, stw = false, nil
+  if c.siege_release and c.max_days > 0 and age >= c.max_days * 1200 then okst, stw = soldiers_on_station(K) end
+  if okst then
     -- BUG-145 (live i3: LOCKDOWN_END far listed 41875 twice, nfar 2): with a lockdown, release()'s far_mark names the
     -- units beyond lockdown_near itself; only the near (or unmeasured) ones go to hl_clear
     local near = {}
@@ -2251,8 +2254,9 @@ local function lone_step(K, h, now)
     if st.hold then release(K, now, 'limit', {near = near}) else hl_clear(K, now, {near = near}) end
     for _, id in ipairs(ig) do M.ignore(K, id, 'lone harmless intruder, ' .. mode .. ' limit') end
     st.lone, rt.lone, dirty = nil, nil, true
-    K.log('info', 'reflex: lone harmless intruder %s cleared after %s days in %s with the soldiers at their stations',
-          table.concat(ig, ','), NUM.dec(age / 1200), mode)
+    K.log('info', 'reflex: lone harmless intruder %s cleared after %s days in %s with the soldiers %s',
+          table.concat(ig, ','), NUM.dec(age / 1200), mode,
+          stw == 'at their stations' and stw or ('placed: ' .. tostring(stw)))
   end
 end
 

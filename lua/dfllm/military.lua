@@ -1828,7 +1828,7 @@ local function reloc(K, man, brs, p, blk, clear, o)
   if c and now >= c.t and now - c.t < M.RELOC_TTL and not (c.q and M.off_group(K, c.q, o.group)) then
     return c.q or nil
   end
-  local q = SL.relocate(man, brs, p, blk, {clear = clear, need_by = o.need_by, side = o.side, ring = clear,
+  local q = SL.relocate(man, brs, p, blk, {clear = clear, need_by = o.need_by, side = o.side, ring = clear, R = o.R,
                                            tile = tile_reader(K), group = o.group or nil,
                                            group_of = o.group and function(x, y, z)
                                              return M.group_at(K, {x = x, y = y, z = z})
@@ -1931,16 +1931,66 @@ function M.home_group(K, s)
   return g
 end
 
+-- BUG-214 (live t4): the x/y/z box of the Kern+ burrow (its map blocks, dfhack.burrows.listBlocks: the burrows screen's
+-- painting) and the burrow; nil without Kern+ or blocks. Cached per manifest for RELOC_TTL
+function M.kern_box(K, man)
+  local now = now_tick(K)
+  local c = rt.kbox
+  if c and c.man == man and now >= c.t and now - c.t < M.RELOC_TTL then return c.box or nil, c.b end
+  local home = core_home(K)
+  local box
+  local ok, blocks = pcall(function() return home.kern and dfhack.burrows.listBlocks(home.kern) end)
+  for _, blk in ipairs(ok and type(blocks) == 'table' and blocks or {}) do
+    local okp, x, y, z = pcall(function() return int(blk.map_pos.x), int(blk.map_pos.y), int(blk.map_pos.z) end)
+    if okp and x and y and z then
+      if not box then box = {x, y, z, x + 15, y + 15, z}
+      else
+        box = {math.min(box[1], x), math.min(box[2], y), math.min(box[3], z), math.max(box[4], x + 15),
+               math.max(box[5], y + 15), math.max(box[6], z)}
+      end
+    end
+  end
+  rt.kbox = {man = man, t = now, box = box or false, b = home.kern}
+  return box, home.kern
+end
+
+-- BUG-214: the last resort of a posture station: the nearest revealed floor on a Kern+ tile (the core the squads
+-- defend), on the squad's walk group (o.group) and clear of the bridges, to p; nil none. Cached like reloc
+function M.kern_floor(K, man, brs, p, clear, o)
+  local box, kb = M.kern_box(K, man)
+  if not box then return nil end
+  local now = now_tick(K)
+  if rt.reloc_man ~= man then rt.reloc, rt.reloc_man = {}, man end
+  local key = string.format('kern|%s|%d|%s', pstr(p), clear, tostring(o.group or '-'))
+  local c = rt.reloc[key]
+  if c and now >= c.t and now - c.t < M.RELOC_TTL and not (c.q and M.off_group(K, c.q, o.group)) then
+    return c.q or nil
+  end
+  local q = SL.relocate_box(man, brs, box, p, {clear = clear, ring = clear, tile = tile_reader(K), group = o.group or nil,
+                                               inside = function(x, y, z) return on_burrow(kb, x, y, z) end,
+                                               group_of = o.group and function(x, y, z)
+                                                 return M.group_at(K, {x = x, y = y, z = z})
+                                               end or nil})
+  q = q and geom.pos(q.x, q.y, q.z) or nil
+  rt.reloc[key] = {t = now, q = q or false}
+  return q
+end
+
 -- the station of a chain: the first entry that lies clear of every bridge footprint (o.need_by: a stricter clearance
 -- for a bridge; o.side: an inner side it must lie on), else moved to the nearest revealed floor on the inner side of
 -- the footprints that hold it, else the next entry (alt entries only after one failed; o.all: every entry).
--- Returns {pos, name, from (the entry's own position when it moved), first = {name, pos}, blk = the first holder}
+-- Returns {pos, name, from (the entry's own position when it moved), first = {name, pos}, blk = the first holder,
+-- tried = why each entry failed ('b2 wall', 'core group 0', 'z4 none', 'b1 bridge B1')}. BUG-214 (live t4: b2 a wall,
+-- core on walk group 0, melee on 1507 behind the raised B2, the soldiers on 1: no station order, or melee 'kept'
+-- where nobody could walk): with o.fallback, a chain that failed on a wall or the walk group takes the nearest floor on
+-- the squad's group within 3 * SEARCH_R of its first entry (via 'wide'), else the nearest Kern+ floor on it (via 'kern')
 local function pick(K, man, stations, chain, o)
   o = o or {}
   local clear = clearance(K)
   local brs = SL.bridges(man)
   if o.group == nil then o.group = M.home_group(K, o.sq) or false end   -- BUG-170
-  local r, failed = {}, o.all == true
+  local r, failed = {tried = {}, home = o.group or nil}, o.all == true
+  local hard = false                               -- an entry failed as a wall or on the walk group
   for _, ent in ipairs(chain) do
     local alt = type(ent) == 'table' and ent.alt
     if failed or not alt then
@@ -1957,9 +2007,21 @@ local function pick(K, man, stations, chain, o)
         local q = reloc(K, man, brs, p, blk, clear, o)
         if q then r.pos, r.name, r.from = q, name, (not seek) and p or nil; r.blk = r.blk or blk[1]; return r end
         r.blk = r.blk or blk[1] or (not inside and {name = o.bridge or '?', d = -1}) or nil
+        hard = hard or (wall and true) or (away and true) or false
+        r.tried[#r.tried + 1] = name .. ' ' .. ((wall and 'wall') or (away and ('group ' .. away))
+                                                  or (blk[1] and ('bridge ' .. blk[1].name)) or (not inside and 'outside')
+                                                  or 'none')
         failed = true
       end
     end
+  end
+  if o.fallback and hard and r.first then
+    local f = r.first
+    local q = reloc(K, man, brs, f.pos, {}, clear, {need_by = o.need_by, side = o.side, group = o.group,
+                                                    R = 3 * SL.SEARCH_R, tag = 'wide'})
+    if q then r.pos, r.name, r.from, r.via = q, f.name, f.pos, 'wide'; return r end
+    q = M.kern_floor(K, man, brs, f.pos, clear, o)
+    if q then r.pos, r.name, r.from, r.via = q, 'Kern+', f.pos, 'kern' end
   end
   return r
 end
@@ -1986,17 +2048,26 @@ local function note_pick(K, r)
   local clear, margin = clearance(K)
   local b = r.blk
   local why, txt
-  if f.wall and not b then                       -- BUG-142 (a bridge that holds it is named first, as before)
+  -- BUG-214 (live t4: 'no other station of its chain' although b2, core, z4 and melee had all failed): each failed
+  -- entry and why
+  local tried = table.concat(r.tried or {}, ', ')
+  local grp = r.home and string.format('walk group %d', r.home) or 'any walk group'
+  if r.via then                                  -- BUG-214: the whole chain failed, the fallback found a floor
+    why = 'fallback'
+    txt = string.format('no station of the chain %s %s is usable (%s): moved to %s', f.name, pstr(f.pos), tried,
+                        r.via == 'kern' and string.format('the nearest Kern+ floor on %s, %s', grp, pstr(to))
+                        or string.format('the nearest floor on %s within %d tiles, %s', grp, 3 * SL.SEARCH_R, pstr(to)))
+  elseif f.wall and not b then                   -- BUG-142 (a bridge that holds it is named first, as before)
     why = 'wall'
     txt = string.format('station %s %s is no floor (%s): %s', f.name, pstr(f.pos), f.wall,
                         to and string.format('moved to %s%s', r.name ~= f.name and (r.name .. ' ') or '', pstr(to))
-                        or 'no revealed floor near it and no other station of its chain: no station order')
+                        or string.format('no station order (chain: %s; no Kern+ floor on %s)', tried, grp))
   elseif f.away and not b then                   -- BUG-170: no way there from the squad's walk group
     why = 'unreachable'
     txt = string.format('station %s %s lies on walk group %d, the soldiers on %d (no way there): %s', f.name,
                         pstr(f.pos), f.away, f.home or -1,
                         to and string.format('moved to %s%s', r.name ~= f.name and (r.name .. ' ') or '', pstr(to))
-                        or 'no reachable floor near it and no other station of its chain: kept')
+                        or string.format('no station order (chain: %s; no Kern+ floor on %s)', tried, grp))
   elseif to and r.name == f.name then
     why = 'bridge'
     txt = string.format('station %s %s lies%s: moved to %s (the nearest revealed floor on its inner side)', f.name,
@@ -2014,6 +2085,8 @@ local function note_pick(K, r)
   if to then d.to = geom.arr(to) end
   if b then d.bridge, d.d = b.name, b.d end
   if f.away then d.grp, d.home = f.away, f.home end
+  if r.via then d.via, d.home = r.via, r.home end
+  if tried ~= '' and why ~= 'bridge' then d.tried = tried:sub(1, 80) end
   K.emit('STATION_MOVED', 'B', txt:sub(1, 200), d)
   K.log(why == 'bridge' and 'info' or 'warn', 'military: %s', txt)
 end
@@ -2022,11 +2095,12 @@ end
 local function posture_station(K, man, stations, P, kind, first_melee, sq)
   local which, chain = station_of(K, man, P, kind, first_melee, stations)
   if not chain then return which, nil, nil end
-  local r = pick(K, man, stations, chain, {sq = sq})
+  local r = pick(K, man, stations, chain, {sq = sq, fallback = true})
   note_pick(K, r)
   local src = r.first and (r.first.name .. '@' .. pstr(r.first.pos)) or nil
-  -- BUG-142: never the first entry's position when it is a wall (the squad would scatter)
-  return which, r.pos or (r.first and not r.first.wall and r.first.pos) or nil, src
+  -- BUG-142: never the first entry's position when it is a wall (the squad would scatter); BUG-214: nor when it lies
+  -- on another walk group (an order nobody of the squad can follow)
+  return which, r.pos or (r.first and not r.first.wall and not r.first.away and r.first.pos) or nil, src
 end
 
 -- is this squad off duty right now? FR-71: a militia squad (M.conf militia) is on duty only in its own window, an
@@ -3210,6 +3284,8 @@ local function compute(K)
   local man = K.manifest()
   local stations = type(man.stations) == 'table' and man.stations or {}
   local first = first_melee_key()
+  local home = core_home(K)                     -- BUG-215: how many soldiers stand in Kern+ (in_kern)
+  if home.kern then k.in_kern = 0 end
   for _, sp in ipairs(M.SQUADS) do
     local e = st.sq[sp.key]
     local s = e and squad(e.id)
@@ -3218,6 +3294,8 @@ local function compute(K)
       if #mem > 0 then k.squads = k.squads + 1 end
       local spos = rt.station[sp.key]
       local R = M.station_radius(#mem, conf.station_r)
+      -- BUG-215: a station on another walk group than the squad's: its soldiers off it are 'unreach', not 'far'
+      local unr = spos and #mem > 0 and M.off_group(K, spos, M.home_group(K, s)) or false
       -- the posture names a station for this squad and none was found (no manifest station): all of them are off it
       local want = false
       if not spos and #mem > 0 and st.posture then
@@ -3231,11 +3309,15 @@ local function compute(K)
         slots, worn, specs = slots + a, worn + b, specs + c
         cv = cv + M.cv(u)
         if iron_or_steel(u) then metal = metal + 1 end
+        if k.in_kern then
+          local up = try(function() return {x = u.pos.x, y = u.pos.y, z = u.pos.z} end)
+          if up and on_burrow(home.kern, up.x, up.y, up.z) then k.in_kern = k.in_kern + 1 end
+        end
         if spos then
           local up = try(function() return {x = u.pos.x, y = u.pos.y, z = u.pos.z} end)
           if up and up.z == spos.z and geom.dist(up, spos) <= R then k.on_station = k.on_station + 1
           elseif up then
-            local why = off_reason(u, up, spos)
+            local why = unr and 'unreach' or off_reason(u, up, spos)
             off[why] = (off[why] or 0) + 1
           end
         elseif want then

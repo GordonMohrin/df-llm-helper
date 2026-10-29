@@ -736,10 +736,11 @@ local function breach_stuck(K, g, a, now)
     local d = near_bridge(K, b)
     if d >= 0 and d <= M.STUCK_NEAR and gate_state(K, b) ~= 'up' then return nil end
   end
+  -- BUG-215: dfllm.stations.stationed (half at their stations, or no reachable station and the soldiers in Kern+)
   local okm, k = K.call('military', 'kpi')
   if okm and type(k) == 'table' then
-    local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
-    if sol > 0 and on * 2 < sol then return nil end       -- soldiers exist and stand elsewhere: not yet
+    local yes, why = require('dfllm.stations').stationed(k)
+    if not yes and why ~= 'no soldiers' then return nil end   -- soldiers exist and stand elsewhere: not yet
   end
   return list
 end

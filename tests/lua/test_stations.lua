@@ -376,4 +376,125 @@ T.test('BUG-170 review: the sortie\'s gathering point (safe_pos) ignores the wal
   T.eq(#evs(W, 'STATION_MOVED', 'unreachable'), 0)
 end)
 
+---------------------------------------------------------------- BUG-214 (live t4): the whole chain fails
+T.test('BUG-214 dfllm.stations: relocate_box takes the nearest accepted tile inside the box, its own level first, ' ..
+       'o.inside must hold, at most o.cap probes', function()
+  local m = manifest()
+  local brs = SL.bridges(m)
+  local tile = function() return {c = '.', bld = ''} end
+  local box = {40, 41, Z - 2, 80, 95, Z}
+  local grp = function(x, y, z) return (x >= 78 and y <= 48 and z == Z) and 1 or (z == Z - 1 and x == 41 and 1) or 2 end
+  T.eq(SL.relocate_box(m, brs, box, {x = 51, y = 63, z = Z}, {clear = 2, tile = tile, group = 1, group_of = grp}),
+       {x = 78, y = 48, z = Z}, 'the box\'s own level first')
+  T.eq(SL.relocate_box(m, brs, box, {x = 20, y = 63, z = Z - 1}, {clear = 2, tile = tile, group = 1, group_of = grp}),
+       {x = 41, y = 63, z = Z - 1}, 'p clamped into the box; its level first')
+  T.eq(SL.relocate_box(m, brs, box, {x = 51, y = 63, z = Z}, {clear = 2, tile = tile, group = 1, group_of = grp,
+                                                               inside = function(x) return x < 78 end}),
+       {x = 41, y = 63, z = Z - 1}, 'o.inside (the burrow) refuses x >= 78: the next level')
+  T.eq(SL.relocate_box(m, brs, box, {x = 51, y = 63, z = Z}, {clear = 2, tile = tile, group = 1, group_of = grp,
+                                                               cap = 50}), nil, 'the probe cap')
+  T.eq(SL.relocate_box(m, brs, nil, {x = 51, y = 63, z = Z}, {clear = 2, tile = tile}), nil)
+end)
+
+T.test('BUG-215 dfllm.stations: stationed(kpi): half at their stations, or no reachable station for the rest and ' ..
+       'half of the soldiers in Kern+', function()
+  local function s(k) return {SL.stationed(k)} end
+  T.eq(s{soldiers = 8, on_station = 4}, {true, 'at their stations'})
+  T.eq(s{soldiers = 8, on_station = 3, off = {far = 5}}, {false, '3 of 8 at their stations'})
+  T.eq(s{soldiers = 8, on_station = 0, off = {nost = 8}, in_kern = 8},
+       {true, 'no station order for 8 of 8, 8 in Kern+'}, 'old rule: false (live t4: 0 of 8, off nost 8)')
+  T.eq(s{soldiers = 8, on_station = 0, off = {unreach = 8}}, {true, 'no station order for 8 of 8'},
+       'unreachable stations count like none; no Kern+ burrow: no test')
+  T.eq(s{soldiers = 8, on_station = 0, off = {nost = 8}, in_kern = 3},
+       {false, 'no station order for 8 of 8, only 3 in Kern+'}, 'no march out: they must stand in the core')
+  T.eq(s{soldiers = 8, on_station = 1, off = {nost = 4, far = 3}, in_kern = 8},
+       {false, '1 of 8 at their stations (4 without a reachable one)'}, 'the rest have a station and are not there')
+  T.eq(s{soldiers = 8, on_station = 2, off = {nost = 4, far = 2}, in_kern = 8},
+       {true, 'no station order for 4 of 8, 8 in Kern+'})
+  T.eq(s{soldiers = 0, on_station = 0}, {false, 'no soldiers'})
+end)
+
+-- live t4 (E:/DF-test4, B2 raised): b2 a wall, core on walk group 0, melee on 1507 behind B2, the soldiers on group 1.
+-- Here: the soldiers stand pinned at sx, sy (group 1); melee 51,44 sits in a pocket of group 3.
+local function t4_world(tag, grp, sx, sy, kern_blocks)
+  local m = manifest{b2 = {51, 63, Z}, core = {60, 75, Z}}
+  local W = world{manifest = m, grp = grp, tag = tag, tiles = {['51,63,10'] = '#'}}
+  local real = dfhack.burrows.listBlocks
+  dfhack.burrows.listBlocks = function(b)                  -- the burrows screen's blocks of the burrow's bbox
+    if kern_blocks == false or not b or not b._bbox then return {} end
+    local r, bb = {}, b._bbox
+    for z = bb[3], bb[6] do
+      for by = bb[2] // 16, bb[5] // 16 do
+        for bx = bb[1] // 16, bb[4] // 16 do r[#r + 1] = {map_pos = {x = bx * 16, y = by * 16, z = z}} end
+      end
+    end
+    return r
+  end
+  W.restore = function() dfhack.burrows.listBlocks = real end
+  for _, key in ipairs({'A', 'B', 'C'}) do
+    local s = X.squad_of(W, key)
+    for _, p in ipairs(s and s.positions or {}) do
+      local u = p.occupant >= 0 and W.unit(W.hfs[p.occupant].unit_id)
+      if u then W.move(u.id, sx, sy, Z); u._m.pinned = true end
+    end
+  end
+  return W
+end
+
+T.test('BUG-214 (live t4: b2 a wall, core group 0, melee group 1507: no station order, then melee kept where nobody ' ..
+       'could walk): the whole chain fails -> the nearest floor on the soldiers\' group within 3 * SEARCH_R of b2; ' ..
+       'STATION_MOVED fallback names every failed entry', function()
+  -- y >= 50 behind B2: group 2 (core 60,75: 0); y < 41 outside B1: 4; the band 41-49 a pocket of group 3 (melee)
+  -- except x >= 60: group 1, where the soldiers stand
+  local W = t4_world('t4a', function(x, y)
+    if x == 60 and y == 75 then return 0 end
+    if y >= 50 then return 2 end
+    if y < 41 then return 4 end
+    return (x >= 60 and y >= 42) and 1 or 3
+  end, 65, 45)
+  breach(W)
+  T.eq({orders_of(W, 'A'), orders_of(W, 'C')}, {'station@60,49,10', 'station@60,49,10'},
+       'old code: no station order (b2 a wall, nothing within 8 tiles)')
+  local mv = {}
+  for _, e in ipairs(evs(W, 'STATION_MOVED', 'fallback')) do if e.d.first == 'b2' then mv[#mv + 1] = e end end
+  T.eq(#mv, 1)
+  T.eq({mv[1].d.station, mv[1].d.via, mv[1].d.home, mv[1].d.to, mv[1].d.tried},
+       {'b2', 'wide', 1, {60, 49, Z}, 'b2 wall, core group 0, z4 none, melee group 3'})
+  T.ok(mv[1].msg:find('no station of the chain b2 51,63,10 is usable (b2 wall, core group 0, z4 none, melee group 3): ' ..
+                      'moved to the nearest floor on walk group 1 within 24 tiles, 60,49,10', 1, true), mv[1].msg)
+  T.eq(#logs(W, 'no other station of its chain'), 0)
+  W.restore()
+end)
+
+T.test('BUG-214: nothing on the soldiers\' group within 24 tiles -> the nearest Kern+ floor on it; without one no ' ..
+       'station order (never the unreachable first entry), kpi off nost, and stationed() holds with the soldiers in ' ..
+       'Kern+ (BUG-215)', function()
+  local grp = function(x, y) return (x >= 78 and y >= 41 and y <= 48) and 1 or 2 end
+  local W = t4_world('t4b', grp, 79, 45)
+  W.tiles['51,63,10'] = nil                                -- b2 a floor, but on group 2: away
+  breach(W)
+  T.eq(orders_of(W, 'A'), 'station@78,48,10', 'old code: station@51,63,10 (kept on group 2)')
+  local mv = {}
+  for _, e in ipairs(evs(W, 'STATION_MOVED', 'fallback')) do if e.d.first == 'b2' then mv[#mv + 1] = e end end
+  T.ok(#mv == 1 and mv[1].d.via == 'kern' and mv[1].d.station == 'Kern+'
+       and mv[1].msg:find('the nearest Kern+ floor on walk group 1, 78,48,10', 1, true), mv[1] and mv[1].msg or 'none')
+  W.restore()
+  local W2 = t4_world('t4c', grp, 79, 45, false)           -- no Kern+ blocks: no floor anywhere on group 1
+  W2.tiles['51,63,10'] = nil
+  breach(W2)
+  T.ok(not orders_of(W2, 'A'):find('station@', 1, true), 'no station order; old code: station@51,63,10: ' ..
+       orders_of(W2, 'A'))
+  local un = {}
+  for _, e in ipairs(evs(W2, 'STATION_MOVED', 'unreachable')) do if e.d.first == 'b2' then un[#un + 1] = e end end
+  T.ok(#un == 1 and un[1].msg:find('(no way there): no station order (chain: b2 group 2, core group 2, z4 none, melee ' ..
+                                   'group 2; no Kern+ floor on walk group 1)', 1, true), un[1] and un[1].msg or 'none')
+  T.eq(un[1].d.tried, 'b2 group 2, core group 2, z4 none, melee group 2')
+  W2.K.call('military', 'posture', 'B2_HOLD', true)
+  run(W2, 1100)
+  local _, k = W2.K.call('military', 'kpi')
+  T.eq({k.soldiers, k.on_station, k.off and k.off.nost, k.in_kern}, {8, 0, 8, 8})
+  T.eq({SL.stationed(k)}, {true, 'no station order for 8 of 8, 8 in Kern+'})
+  W2.restore()
+end)
+
 T.done()

@@ -229,6 +229,8 @@ Related: FR-xx, BUG-xx
 | [BUG-211](BUG-211-follow-seals-audit-bypass-before-the-trap-hall.md) | fixed (offline, live-untested) | medium | live 3: follow seals the audit bypass before the trap hall, on fortcore tiles, logging it every audit | dfpilot/wake.py |
 | [BUG-212](BUG-212-status-drops-proj-and-lists-six-next-hints.md) | fixed (offline, live-untested) | low | live 3: status drops the proj line and lists six next: hints | dfpilot/brief.py |
 | [BUG-213](BUG-213-audit-wait-printed-as-a-float.md) | fixed (offline, live-untested) | low | live 3: dfllm audit prints its wait as a float | dfpilot/wake.py |
+| [BUG-214](BUG-214-whole-station-chain-fails-no-order-or-unreachable-kept.md) | fixed (offline, live-untested) | high | live 4: the whole station chain fails (b2 wall, core group 0, melee group 1507): no station order or an unreachable one kept | lua/dfllm/military.lua, lua/dfllm/stations.lua |
+| [BUG-215](BUG-215-release-waits-for-stations-that-do-not-exist.md) | fixed (offline, live-untested) | high | live 4: siege_release and breach_stuck wait for soldiers at stations that do not exist (nost 8 of 8) | lua/dfllm/stations.lua, lua/dfllm/reflex.lua, lua/dfllm/siege.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
