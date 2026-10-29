@@ -2773,6 +2773,8 @@ end
 local function allowed(K, P, d)
   if P.tpl == 'plug' then return true end
   local m = K.mode()
+  -- BUG-306: a mood drink nook (one stockpile tile beside the claimed workshop) is life support, as in PEACE in ALERT/RECOVERY
+  if P.tpl == 'mood_drink' and (m == 'ALERT' or m == 'RECOVERY') then return true end
   if P.tpl == 'repair' and d and type(d.params) == 'table' and d.params.peace == 1 then
     if m ~= 'PEACE' then return false end
     local ok, why = K.call('reflex', 'holding')
@@ -2790,10 +2792,10 @@ local function sorted()
   for _, P in ipairs(S.pd.list) do if P.done ~= 1 then r[#r + 1] = P end end
   local care = S.care_id                        -- BUG-116: the hospital that runs first, after the seals
   -- BUG-283: a workshops project with a shop a strange mood waits for runs with the hospital, before the rest
-  local mood = S.mood_ids or {}                 -- (M.mood_types marks them while care's mood check runs)
+  -- (M.mood_types marks them while care's mood check runs); BUG-306: the mood drink nook sorts with them
   table.sort(r, function(a, b)
-    local sa = SEALS[a.tpl] and 0 or (care == a.id or mood[a.id]) and 1 or 2
-    local sb = SEALS[b.tpl] and 0 or (care == b.id or mood[b.id]) and 1 or 2
+    local sa = SEALS[a.tpl] and 0 or (care == a.id or Q.mood_proj(a)) and 1 or 2
+    local sb = SEALS[b.tpl] and 0 or (care == b.id or Q.mood_proj(b)) and 1 or 2
     if sa ~= sb then return sa < sb end
     if a.prio ~= b.prio then return a.prio < b.prio end
     if a.created ~= b.created then return a.created < b.created end
@@ -4786,10 +4788,11 @@ local function begin_run(K)
     if SEALS[P.tpl] and c.on and not f.stk[P.id] then return false end
     if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return false end        -- BUG-191: an open aquifer level
     if S.care_id == P.id and P.blocked ~= 'stalled' then return false end         -- BUG-116: the hospital never yields
+    if Q.mood_proj(P) and P.blocked ~= 'stalled' then return false end             -- BUG-306: nor a mood project
     if P.blocked == 'stalled' or (SEALS[P.tpl] and f.stk[P.id]) then return true end
     return type(R) == 'table' and R.si == P.stage and t - (int(R.ps) or t) >= c.yield
   end
-  local extra, pz, held, slots, yielded, waiting = 0, {}, 0, {}, {}, 0
+  local extra, pz, held, slots, yielded, waiting, nm = 0, {}, 0, {}, {}, 0, 0
   for pass = 1, 2 do
     for _, P in ipairs(list) do
       local R0 = S.rt.p[P.id]
@@ -4808,8 +4811,9 @@ local function begin_run(K)
             tasks[#tasks + 1] = {k = 'work', id = P.id, hold = true}
           end
         end
-        if ok and n < M.CFG.active then
-          n = n + 1
+        local mood_slot = ok and Q.mood_proj(P) and nm < (int(M.CFG.mood_slots) or 2)    -- BUG-306: beside `active`
+        if ok and (n < M.CFG.active or mood_slot) then
+          if mood_slot then nm = nm + 1 else n = n + 1 end
           S.active[P.id] = true
           slots[#slots + 1] = P.id
           tasks[#tasks + 1] = {k = 'work', id = P.id}
@@ -5216,6 +5220,7 @@ function M.mooddrink(K, tile, take, why)
              stages = {{label = 'mood.drink', mode = 'place', orders = 0, defense = 0, chunks = abs_chunks({{x, y, z, cell}})}}}
   local ok, err = register(K, id, d, 1, 'mood_drink')
   if not ok then return false, err end
+  Q.join_run(K, id)                                  -- BUG-306: not after the run in hand
   save(K)
   K.log('info', 'mood drink nook %s queued at %d,%d,%d (%s)', id, x, y, z, trunc(why, 80))
   return true, id
@@ -5444,6 +5449,34 @@ function Q.mood_shop(d)
     end
   end
   return false
+end
+
+-- BUG-306 (Run 15 Earthboat y382: MOOD_CRITICAL, thirst 53,516, the drink nook mdr154252539 'BLOCKED:queued behind
+-- c1a1884b90c4405401 +1', the refuge seal that hung for weeks): a mood project (the drink nook, a shop a mood waits for) takes a
+-- slot of its own beyond `active` (at most mood_slots of them), never yields it and starts in the run in hand when it is queued
+-- while one runs: nothing else may hold the slots while a dwarf in a strange mood waits
+M.CFG.mood_slots = 2
+function Q.mood_proj(P)
+  return P ~= nil and (P.tpl == 'mood_drink' or (S.mood_ids or {})[P.id] == true)
+end
+-- a mood project queued while a run is in hand works in it (a task before the run's check/end), its slot beside `active`
+function Q.join_run(K, id)
+  local run, P = S.run, find(id)
+  if not (run and P and S.active) or S.active[id] then return false end
+  local nm = 0
+  for pid in pairs(S.active) do if Q.mood_proj(find(pid)) then nm = nm + 1 end end
+  if nm >= (int(M.CFG.mood_slots) or 2) then return false end
+  local at = #run.tasks + 1
+  for i = math.max(run.i, 1), #run.tasks do
+    local k = run.tasks[i].k
+    if k == 'check' or k == 'end' then at = i; break end
+  end
+  table.insert(run.tasks, at, {k = 'work', id = id})
+  S.active[id] = true
+  S.slots = S.slots or {}
+  S.slots[#S.slots + 1] = id
+  rows(K)
+  return true
 end
 
 -- public (BUG-283, care): the mood of unit `sid` waits for `types` (an empty list: the mood ended). Marks the live workshops

@@ -68,9 +68,10 @@ T.test('BUG-282: a mood without a workshop and with a material none in the fort 
   T.ok(d.reasons[1] == 'workshop' or d.reasons[1] == 'material', table.concat(d.reasons, ','))
   local all = table.concat(c[#c].d.reasons, ',')
   T.ok(all:find('workshop', 1, true) and all:find('material', 1, true), all)
-  T.eq(d.left, -1, 'no claim yet: DF has not started the clock')
+  -- no claim yet: DF has not started the clock; BUG-307: the body clock (thirst 2,000 to 75,000) is known all the same
+  T.eq({d.left, d.lsrc}, {(75000 - 2000) // DAY, 'thirst'})
   T.ok(c[1].msg:find('MOOD ', 1, true) and c[1].msg:find('no GlassFurnace', 1, true), c[1].msg)
-  T.ok(c[1].msg:find('time unknown', 1, true), c[1].msg)
+  T.ok(c[1].msg:find('d left (thirst 2000)', 1, true), c[1].msg)
   T.ok(#c[1].msg <= 200)
   T.eq(W.bad_vectors, {})
 end)

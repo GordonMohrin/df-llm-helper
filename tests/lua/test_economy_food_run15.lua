@@ -190,4 +190,47 @@ T.test('BUG-260: butcher.mark marks surplus tame animals (one pair per race kept
   T.eq(W.inbox('butcher.mark', {n = 0}).ok, false)
 end)
 
+T.test('BUG-309: butcher.mark names id, species and sex of each animal; sex filter', function()
+  local function A(id, race, female, extra)
+    local a = {id = id, race = race, female = female, adult = true, pet = false, slaughter = false, war = false}
+    for k, v in pairs(extra or {}) do a[k] = v end
+    return a
+  end
+  -- Drillchamber y376: 8 tame, the player's keep_pairs:false marked 26280, a stray dog, the reply said '26280'
+  local herd = {A(26280, 8, true), A(26281, 8, false), A(26282, 5, false, {adult = false})}
+  local W = world{setup = function(W)
+    W.set_census('a', {tick = 0, n = #herd, list = herd})
+    W.act_result('animal_slaughter', function(id, on) return true, 'marked' end)
+    df.global.world.raws.creatures = {all = {[5] = {creature_id = 'TURKEY'}, [8] = {creature_id = 'DOG'}}}
+  end}
+  settle(W)
+  local r = W.inbox('butcher.mark', {n = 1, keep_pairs = false, sex = 'male'})
+  T.eq(r.ok, true, r.msg)
+  T.ok(r.msg:find('1 marked for slaughter: 26281 DOG male', 1, true), 'old code: ' .. r.msg)
+  r = W.inbox('butcher.mark', {n = 3, keep_pairs = false})
+  T.ok(r.msg:find('26280 DOG female, 26281 DOG male, 26282 TURKEY male (young)', 1, true), r.msg)
+  T.eq(W.inbox('butcher.mark', {sex = 'm'}).ok, false, 'sex is male or female')
+end)
+
+T.test('BUG-308: economy counts DF\'s cancels of a job kind with its last words (cancels_of)', function()
+  local W = world{}
+  settle(W)
+  T.eq({select(2, W.K.call('economy', 'cancels_of', 'collect webs'))}, {0})
+  for _ = 1, 2 do
+    W.event('REPORT', {type = 'CANCEL_JOB', text = 'Ral, militia commander cancels Collect webs: Needs undisturbed thread.'})
+  end
+  W.run(1)
+  local _, n, why = W.K.call('economy', 'cancels_of', 'collect webs')
+  T.eq({n, why}, {2, 'Needs undisturbed thread'}, 'old code: no such function')
+  -- review: 60 other kinds cancelled first (a long session) must not hide the webs cancels from care
+  local W2 = world{}
+  settle(W2)
+  for i = 1, 61 do
+    W2.event('REPORT', {type = 'CANCEL_JOB', text = string.format('Ral cancels Job%02d: Interrupted by a cat.', i)})
+  end
+  W2.event('REPORT', {type = 'CANCEL_JOB', text = 'Ral cancels Collect webs: Needs undisturbed thread.'})
+  W2.run(1)
+  T.eq({select(2, W2.K.call('economy', 'cancels_of', 'collect webs'))}, {1, 'Needs undisturbed thread'}, 'a full table dropped the new kind')
+end)
+
 T.done()

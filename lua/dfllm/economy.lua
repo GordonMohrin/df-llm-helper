@@ -1778,10 +1778,24 @@ function M.tannery_request(K, c, r, L)
          {tpl = 'workshops', n = 1, why = 'tannery'})
 end
 
+-- BUG-309 / FR (Run 15 Drillchamber y376: Possessed moods needing leather, 0-1 leather, hunters 'nothing caught for 10 days',
+-- only breeding pairs, so each mood cost a pair through butcher.mark keep_pairs:false): leather short of the mood stock that
+-- the hides in the fort do not cover is asked of every caravan (economy.trade_wants `leather`), before a mood needs it.
+-- st.lwant = {buy, n, why} or nil (a module field: the main chunk is at 200 locals)
+function M.leather_trade(K, c, r)
+  st.lwant = nil
+  local tg = target(K, c, r, 'leather')
+  local short = tg - have(r, 'leather') - (r.inv.hides or 0)
+  if tg <= 0 or short <= 0 then return end
+  st.lwant = {buy = 'leather', n = math.min(short, 15),
+              why = string.format('leather %d + %d hides < mood stock %d', have(r, 'leather'), r.inv.hides or 0, tg)}
+end
+
 local function plan_leather(K, c, r)
   local L = c.leather
   local want = target(K, c, r, 'leather') + (phase_ok(K, L.from_phase) and r.gear.leather or 0)
   r.targets.leather = want
+  M.leather_trade(K, c, r)
   if have(r, 'leather') >= want or open(r, L.tag) then return end
   if not ws_any(r.f, L.ws) then return M.tannery_request(K, c, r, L) end
   if (r.inv.hides or 0) > 0 and (r.p.hides_days or 0) >= (L.after_days or 2) then
@@ -2520,6 +2534,33 @@ local function needs_cancel(K, c, oid, job, why)
          {order = oid, job = rec.job, why = 'cancel: ' .. rec.why, n = rec.n, dropped = 1})
 end
 
+-- BUG-308 (Run 15 Drillchamber y377: care queued 25 CollectWebs tasks for a silk mood, DF cancelled every one 'Needs undisturbed
+-- thread' (gamelog), and care never saw it): the cancels of each job kind since the load (lower-case DF job name, at most
+-- 60 kinds) with DF's last words. M.cancels_of(K, key) -> n, why (0 and nil when none)
+function M.cancel_note(key, why, tick)
+  st.call = st.call or {}
+  local r = st.call[key]
+  if not r then
+    st.call_n = (st.call_n or 0) + 1
+    if st.call_n > 60 then                      -- full: the kind cancelled longest ago makes room (a new kind is never lost)
+      local old, ot
+      for k, v in pairs(st.call) do
+        if ot == nil or (v.t or 0) < ot or ((v.t or 0) == ot and k < old) then old, ot = k, v.t or 0 end
+      end
+      if old then st.call[old] = nil end
+      st.call_n = st.call_n - 1
+    end
+    r = {n = 0}
+    st.call[key] = r
+  end
+  r.n, r.why, r.t = r.n + 1, why, tick
+end
+function M.cancels_of(K, key)
+  local r = (st.call or {})[tostring(key or ''):lower()]
+  if not r then return 0, nil end
+  return r.n, r.why
+end
+
 local function cancel(K, ev)
   local c = M.conf(K)
   local job, why = OL.cancel_parts(ev.text)
@@ -2545,6 +2586,7 @@ local function cancel(K, ev)
     local oks, errs = pcall(M.sand_cancel, K, c, why, ev.tick)
     if not oks then K.log('warn', 'sand cancel: %s', tostring(errs)) end
   end
+  M.cancel_note(key, wk, ev.tick)                 -- BUG-308: every cancel of a job kind since the load (care's webs)
   st.cancels[key] = (st.cancels[key] or 0) + 1
   local n = st.cancels[key]
   if key == 'dump item' then st.dump = {n = n, why = wk, day = day} end   -- FR-90: the game's own words, for inspect items trash
@@ -5453,7 +5495,7 @@ function T.slaughter(K, c, r)
 end
 
 -- BUG-260 (live Inkintense y373: famine, 4 tame animals of 2 races, each a breeding pair the famine slaughter keeps;
--- the game session marked turkey 26285 and duck 26450 by hand): butcher.mark {n?, race?, keep_pairs?} marks n (1..20,
+-- the game session marked turkey 26285 and duck 26450 by hand): butcher.mark {n?, race?, sex?, keep_pairs?} marks n (1..20,
 -- default 1) tame animals for slaughter with the animal sheet's toggle (act.animal_slaughter): pets, war and hunting
 -- animals never; one adult female and one adult male per race stay unless keep_pairs is false (the player's word);
 -- race = the creature id (TURKEY) or the census' race number. The reply names the ids and whether a Butcher's shop stands.
@@ -5469,11 +5511,15 @@ M.verbs['butcher.mark'] = function(K, args, cmd)
   if race ~= nil and not (math.tointeger(race) or (type(race) == 'string' and race:match('^[A-Z0-9_]+$'))) then
     return false, 'race must be a creature id (TURKEY) or a race number'
   end
+  -- BUG-309 (Run 15 Drillchamber y376: 'marked for slaughter: 26280' was a stray dog, the reply said nothing of it): sex filter
+  if args.sex ~= nil and args.sex ~= 'male' and args.sex ~= 'female' then return false, 'sex must be male or female' end
   local ca = K.census.a
-  local list = {}
+  local list, by = {}, {}
   for _, a in ipairs(type(ca) == 'table' and type(ca.list) == 'table' and ca.list or {}) do
-    if type(a) == 'table' and (race == nil or a.race == math.tointeger(race) or M.race_name(a.race) == race) then
+    if type(a) == 'table' and (race == nil or a.race == math.tointeger(race) or M.race_name(a.race) == race)
+       and (args.sex == nil or (args.sex == 'female') == (a.female == true)) then
       list[#list + 1] = a
+      if math.tointeger(a.id) then by[a.id] = a end
     end
   end
   local keep = args.keep_pairs == false and 0 or 1
@@ -5482,17 +5528,23 @@ M.verbs['butcher.mark'] = function(K, args, cmd)
     return false, string.format('no animal to mark (%d tame%s: pets, war/hunting animals, marked ones and %s stay)', #list,
                                 race and (' ' .. tostring(race)) or '', keep == 1 and 'one breeding pair per race' or 'none')
   end
-  local done = {}
+  local done, names, info = {}, {}, {}
   for i = 1, math.min(n, #pick) do
     local ok = K.act.animal_slaughter(pick[i], true)
-    if ok then done[#done + 1] = pick[i] end
+    if ok then
+      done[#done + 1] = pick[i]
+      local a = by[pick[i]] or {}
+      local e = {id = pick[i], race = M.race_name(a.race), sex = a.female and 'female' or 'male', adult = a.adult and 1 or 0}
+      info[#info + 1] = e
+      names[#names + 1] = string.format('%d %s %s%s', e.id, e.race, e.sex, a.adult and '' or ' (young)')
+    end
   end
   local ws = ws_any(M.facts_now(K, {p = pstate(K)}), (M.DEFAULTS.slaughter or {}).ws or {'workshop:Butchers'})
   K.log('warn', 'butcher.mark by %s: %d animals marked for slaughter (%s)%s', tostring(cmd and cmd.by), #done,
-        table.concat(done, ','), ws and '' or "; no Butcher's shop stands")
-  return #done > 0, string.format('%d marked for slaughter: %s%s', #done, table.concat(done, ','),
-                                  ws and '' or "; no Butcher's shop: nobody slaughters them yet"),
-         {ids = done, butcher = ws and 1 or 0}
+        table.concat(names, ', '), ws and '' or "; no Butcher's shop stands")
+  return #done > 0, string.format('%d marked for slaughter: %s%s', #done, table.concat(names, ', '),
+                                  ws and '' or "; no Butcher's shop: nobody slaughters them yet"):sub(1, 200),
+         {ids = done, butcher = ws and 1 or 0, animals = info}
 end
 
 ---------------------------------------------------------------- glass for strange moods (Run 11)
@@ -6530,6 +6582,8 @@ function M.trade_wants(K)
   for _, w in ipairs(st.fdwants or {}) do                    -- BUG-256, BUG-259: plants, drink, seeds
     if not by[w.buy] then r[#r + 1] = {buy = w.buy, n = w.n, why = w.why}; by[w.buy] = r[#r] end
   end
+  local lw = st.lwant                                        -- BUG-309: the mood stock's leather
+  if type(lw) == 'table' and not by[lw.buy] then r[#r + 1] = {buy = lw.buy, n = lw.n, why = lw.why}; by[lw.buy] = r[#r] end
   return r
 end
 

@@ -318,6 +318,10 @@ Related: FR-xx, BUG-xx
 | [BUG-303](BUG-303-sand-zone-on-floors-df-does-not-count.md) | fixed (offline, live-untested) | high | Run 15d: sand zones on floors DF does not count (grass on a sand layer), abort series unseen | snapshot.lua, economy.lua, zonelib.lua |
 | [BUG-304](BUG-304-plan-fair-play-flags-trade-token-plant.md) | fixed (offline, live-untested) | medium | Run 15d: plan check calls the trade token `cloth:plant` a fair-play ERROR | plan.py |
 | [BUG-305](BUG-305-trade-click-lands-on-the-map-after-a-window-resize.md) | fixed (offline, live-untested) | high | Run 15: the kernel's Trade click can land on the map (a unit sheet) after a window relaunch/resize | act.lua, trade.lua |
+| [BUG-306](BUG-306-mood-drink-nook-queued-behind-the-slot-holders.md) | fixed (offline, live-untested) | high | Run 15b: the mood drink nook waits behind the slot holders (a hanging seal) | runner.lua |
+| [BUG-307](BUG-307-mood-days-left-from-the-mood-timer-only.md) | fixed (offline, live-untested) | high | Run 15b: MOOD line days left from the mood timer only, not thirst/hunger | mood.lua |
+| [BUG-308](BUG-308-collect-webs-cancelled-by-df-queued-again-blind.md) | fixed (offline, live-untested) | high | Run 15d: collect webs cancelled by DF every time, queued again blind | care.lua, economy.lua |
+| [BUG-309](BUG-309-leather-mood-costs-a-breeding-pair-butcher-reply.md) | fixed (offline, live-untested) | medium | Run 15d: a leather mood costs a breeding pair; butcher.mark names no species or sex | economy.lua, schema.py |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water

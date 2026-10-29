@@ -631,6 +631,7 @@ end
 -- thread slot is short (silk or any kind) and webs lie on the citizens' walk group (economy census webs_near), one CollectWebs
 -- task at a built Loom (act.mood_task) every mood_act_every ticks; no Loom: the chain asks for it. Returns the text for the line.
 M.WEB_KINDS = {'(silk)', 'cloth x', 'thread x'}
+M.WEBS_FAIL = 3                   -- BUG-308: DF's cancels of the webs task before care stops queueing it blind
 function M.mood_webs(K, c, rec, sid, miss)
   local want = false
   for _, cls in ipairs(miss) do if cls == 'cloth' or cls == 'thread' then want = true end end
@@ -645,7 +646,21 @@ function M.mood_webs(K, c, rec, sid, miss)
   local inv = type(K.census.i) == 'table' and K.census.i or {}
   if not silky or (math.tointeger(inv.webs_near) or 0) <= 0 then return nil end
   local now = K.now().tick
-  if now - (math.tointeger(rec.webs_t) or -1e12) < c.mood_act_every then return rec.webs_why end
+  -- BUG-308: DF cancelled the task queued last time ('Needs undisturbed thread'): counted; after WEBS_FAIL of them the
+  -- kernel stops queueing it blind (again only after mood_act_every x WEBS_FAIL), names DF's words and the trade route
+  local okc, cn, cwhy = K.call('economy', 'cancels_of', 'collect webs')
+  cn = okc and math.tointeger(cn) or nil
+  if cn and rec.webs_c0 and cn < rec.webs_c0 then rec.webs_c0 = cn end      -- economy's count restarts at a load
+  if cn and rec.webs_c0 and cn > rec.webs_c0 then
+    rec.webs_fail, rec.webs_cwhy, rec.webs_c0 = (rec.webs_fail or 0) + 1, trunc(tostring(cwhy or '?'), 40), nil
+    rec.webs_why = string.format('collect webs cancelled by DF x%d (%s); buy silk: trade.want cloth:silk', rec.webs_fail,
+                                 rec.webs_cwhy)
+    K.log('warn', 'mood unit %s: %s', sid, rec.webs_why)
+  end
+  local fails = rec.webs_fail or 0
+  local nf = M.WEBS_FAIL
+  local wait = c.mood_act_every * (fails >= nf and nf or 1)
+  if now - (math.tointeger(rec.webs_t) or -1e12) < wait then return rec.webs_why end
   rec.webs_t = now
   local loom
   pcall(function()
@@ -658,8 +673,13 @@ function M.mood_webs(K, c, rec, sid, miss)
   end)
   if not loom then rec.webs_why = 'webs: no Loom (requested)'; return rec.webs_why end
   local ok, res = K.act.mood_task(loom.id, 'CollectWebs')
+  if ok and cn then rec.webs_c0 = cn end
   rec.webs_why = ok and string.format('collect webs queued at Loom %d', loom.id)
                  or ('collect webs refused: ' .. trunc(tostring(res), 40))
+  if fails > 0 then
+    rec.webs_why = string.format('collect webs cancelled by DF x%d (%s)%s; buy silk: trade.want cloth:silk', fails,
+                                 rec.webs_cwhy or '?', ok and ', queued again' or '')
+  end
   K.log(ok and 'info' or 'warn', 'mood unit %s: %s (%d webs near)', sid, rec.webs_why, math.tointeger(inv.webs_near) or 0)
   return rec.webs_why
 end
