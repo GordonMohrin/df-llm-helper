@@ -1125,6 +1125,15 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
             if c == "covered":
                 notes.append(f"{label}: left out, a seal under way closes its route")
                 continue
+            if c is None and kind == "sapling":
+                # BUG-323 (Run 15c y377: '79,85,133 sapling: left out, no single neighbouring tile closes its route',
+                # the way in stayed open; a sapling regrows on the open ground 2-3 times a year, so R0 never cleared):
+                # quickfort builds doors and walls on SAPLING tiles (build.lua is_valid_tile_generic and
+                # is_valid_tile_has_space): the piece goes on the sapling itself, read as floor
+                keep.append({"pos": e["pos"], "kind": "floor", "piece": e["piece"]})
+                notes.append(f"{label}: no neighbour closes its route, the piece goes on the sapling (quickfort builds "
+                             "on sapling tiles)")
+                continue
             if c is None:
                 if kind not in dmod.CLOSER_KINDS:
                     why = ("no single neighbouring tile closes its route on the snapshot; dfllm cmd inspect "

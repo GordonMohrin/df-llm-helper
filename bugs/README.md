@@ -333,6 +333,8 @@ Related: FR-xx, BUG-xx
 | [BUG-319](BUG-319-refuge-rooms-only-off-the-refuge-room.md) | fixed (offline, live-untested) | high | Run 15b: refuge beds and drink store find no site once the refuge room's walls are taken | sites.py |
 | [BUG-320](BUG-320-refuge-beds-wait-for-a-door.md) | fixed (offline, live-untested) | medium | Run 15b: a refuge_beds project waits months for the door of its doorway | rooms.py, validate.py |
 | [BUG-321](BUG-321-refuge-bed-error-blocks-the-year-plan.md) | fixed (offline, live-untested) | high | Run 15b/c: plan check's refuge bed ERROR without a site blocks the year plan; refuge_dry asks for a store already planned | plan.py, readiness.lua |
+| [BUG-322](BUG-322-perimeter-open-beside-all-ways-closed.md) | fixed (offline, live-untested) | medium | Run 15b: status PERIMETER OPEN 2 ways in beside 'all with a door or bridge' (stale text outside PEACE) | readiness.lua |
+| [BUG-323](BUG-323-sapling-opening-left-out-by-seal.md) | partly fixed (offline, live-untested): sapling case; open: floor ways in on the canopy rim (tree crowns read as roof) | medium | Run 15c: seal at=last left a sapling way in out when no neighbour closes it; ways in under tree crowns keep coming back, R0 open | cmd.py; open: seal.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
