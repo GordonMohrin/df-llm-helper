@@ -2305,7 +2305,7 @@ def place_all(save_dir: Path, doc: dict, prev: dict | None,
                 why = str(e).removeprefix("seal: ")
                 lines.append(f"s{si} {b['tpl']}@{b['site']} left out: {why}")
                 if left_out is not None:
-                    left_out.append(f"seasons[{si}].build[{bi}] seal@{b['site']}: {why}; no blueprint is written")
+                    left_out.append(f"seasons[{si}].build[{bi}] {b['tpl']}@{b['site']}: {why}; no blueprint is written")
                 continue
             occ.add(d)
             placed[b["tpl"]] = {"anchor": d["anchor"], "rot": d["rot"]}
@@ -2327,7 +2327,9 @@ def apply(save_dir: Path, doc: dict, by: str = "llm", wait_s: float = 5.0, dry_r
         docs, kept, _ = place_all(save_dir, doc, prev, left)      # emit everything first: all or nothing
     except (BpError, BpUnavailable) as e:
         return [f"blueprint: {e}"], "not applied"
-    note = (f" ({kept} kept)" if kept else "") + (f" ({len(left)} seal left out: nothing to close)" if left else "")
+    nseal = sum("] seal@" in x for x in left)       # FR-96: a traps build with no way left to trap is left out too
+    note = ((f" ({kept} kept)" if kept else "") + (f" ({nseal} seal left out: nothing to close)" if nseal else "")
+            + (f" ({len(left) - nseal} traps left out: nothing to trap)" if len(left) > nseal else ""))
     if dry_run:
         return [], f"dry run ok: {len(docs)} blueprint(s) would be written{note}"
     for d in docs:

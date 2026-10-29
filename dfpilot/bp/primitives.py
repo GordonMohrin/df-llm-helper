@@ -160,7 +160,18 @@ def merge_manifest(base: dict, frag: dict) -> dict:
     for k, v in frag.items():
         if k in ("bridges", "stations", "burrows"):
             out[k] = {**out.get(k, {}), **v}
-        elif k in ("killboxes", "rooms", "traps"):          # FR-96: trap lanes per id (way, or Z2 for the hall)
+        elif k == "traps":       # FR-96: per id; a way's lane (T...) keeps its tiles when part of it is re-armed (union)
+            old = {e["id"]: e for e in out.get(k, [])}
+            new = []
+            for e in v:
+                o = old.get(e["id"])
+                if o and e["id"].startswith("T") and o.get("kind") == e.get("kind"):
+                    seen = [list(t) for t in o["tiles"]]
+                    e = {**e, "tiles": (seen + [list(t) for t in e["tiles"] if list(t) not in seen])[:64]}
+                new.append(e)
+            ids = {e["id"] for e in v}
+            out[k] = [e for e in out.get(k, []) if e["id"] not in ids] + new
+        elif k in ("killboxes", "rooms"):
             ids = {e["id"] for e in v}
             out[k] = [e for e in out.get(k, []) if e["id"] not in ids] + list(v)
         elif k == "workshops":

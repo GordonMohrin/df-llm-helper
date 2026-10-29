@@ -5,7 +5,8 @@
 -- in, cage traps; or the hall's missing stone-fall traps) and fortcore stage 4. Their manifest fragments list every
 -- trap tile (`manifest.traps`: {id, kind, way?, tiles}; Z2 = the hall). Once a game day this module
 --   * reads the trap buildings (buildings.other.TRAP: type, built, the re-arm timeout ready_timeout, a cage in a cage
---     trap) and the citizens' census of caged units (a caged unit's cage held by a trap = a full cage trap);
+--     trap) and the census of caged units (a caged unit's cage held by a trap = a full cage trap; so is a trap whose
+--     cage holds any creature, a caught wild animal too: the cage's CONTAINS_UNIT ref);
 --   * publishes state `traps` {n armed of m listed, b built, w of wn ways with every lane tile trapped, f full cage traps,
 --     c free empty cages, l listed tiles without a trap building (lost; lh: in the hall), ord the last cage order};
 --     a fort whose hall predates the Z2 entry counts the built traps in the Z2 zones (snapshot.traps) as both;
@@ -37,14 +38,26 @@ local function built(b)
   return not ok or r == true             -- unknown (no stage API): count it
 end
 
-local function has_cage(b)
+-- a cage holding a creature (its CONTAINS_UNIT ref, Lua API dfhack.items.getGeneralRef): a caught wild animal too,
+-- which the census's caged list (hostiles, predators, undead) leaves out; unreadable: no
+local function holds_unit(it)
   local ok, r = pcall(function()
-    for _, ci in ipairs(b.contained_items) do
-      if df.item_cagest:is_instance(ci.item) then return true end
-    end
-    return false
+    return dfhack.items.getGeneralRef(it, df.general_ref_type.CONTAINS_UNIT) ~= nil
   end)
-  return not ok or r == true             -- unreadable: no reload asked for
+  return ok and r == true
+end
+M.holds_unit = holds_unit
+
+-- (a cage in the trap, that cage holds a creature)
+local function has_cage(b)
+  local ok, r, full = pcall(function()
+    for _, ci in ipairs(b.contained_items) do
+      if df.item_cagest:is_instance(ci.item) then return true, holds_unit(ci.item) end
+    end
+    return false, false
+  end)
+  if not ok then return true, false end  -- unreadable: no reload asked for
+  return r == true, full == true
 end
 
 -- the trap buildings: {['x,y,z'] = rec}, {[building id] = rec}; rec = {kind, built, armed, cage (cage traps)}
@@ -57,7 +70,10 @@ function M.read()
         local rt = 0
         pcall(function() rt = int(b.ready_timeout) or 0 end)
         local rec = {kind = k, built = built(b), armed = rt <= 0}
-        if k == 'cage' then rec.cage = has_cage(b) end
+        if k == 'cage' then
+          rec.cage, rec.full = has_cage(b)
+          rec.full = rec.full or nil
+        end
         idx[key(b.centerx, b.centery, b.z)] = rec
         ids[b.id] = rec
       end
@@ -92,7 +108,7 @@ function M.free_cages(busy)
     for _, it in ipairs(df.global.world.items.other.CAGE) do
       local f = it.flags
       if not (f.in_building or f.forbid or f.in_job or f.trader or f.removed or f.garbage_collect or f.dump
-              or busy[it.id]) then
+              or busy[it.id] or holds_unit(it)) then           -- a caged pet or catch in a stockpile is not free
         n = n + 1
       end
     end

@@ -24,6 +24,11 @@
   order <id> MakeCage xN (wood)`, care dumps the full cage and the trap is reloaded. A deconstructed hall trap: status `lost 1
   (bp.place traps at=hall)`, then bp.place traps at=hall rebuilds it. Uncertain: the full/no-cage reads (contained_items
   item_cagest, the caged unit's holder building). Design: docs/v2/FR-traps-G14.md.
+- **Review fixes:** a cage trap whose cage holds any creature (CONTAINS_UNIT ref: a caught wild animal the census `caged` list
+  leaves out) counts as full, and a cage holding a creature (caged pets in a stockpile) is no free cage; a later traps project
+  for part of a lane no longer shrinks the way's manifest entry (lane tiles merge as a union in Python and runner.lua; Z2 is
+  still replaced whole); plan apply names a left-out traps build `traps@S1` (`N traps left out: nothing to trap`), not seal;
+  CONTRACTS rows for module, state and manifest `traps` and the merge rule. Tests: +2 pytest, +2 Lua.
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders

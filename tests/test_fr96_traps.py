@@ -218,3 +218,26 @@ def test_status_and_brief_show_traps_n_of_m(save):
     assert line in brief.brief_text(save)
     assert "traps 38/44" in brief.status_text(save)
     assert traps.status_line({"traps": {"n": 3, "m": 3}}) == "traps 3/3" and traps.status_line({}) == ""
+
+
+def test_plan_apply_leaves_out_a_traps_build_with_nothing_left(fort):
+    """review: plan apply's place_all skips a traps build whose ways are all covered and names it as traps, not seal."""
+    cmd.write_bp(fort, cmd.place(fort, "traps", {"at": "ways"}, "S1", "c901"))
+    doc = {"year": 1, "seasons": [{"build": [copy.deepcopy(traps.TRAPS_WAYS)]}]}
+    left: list = []
+    docs, kept, lines = plan.place_all(fort, doc, None, left)
+    assert docs == [] and kept == 0 and "left out: traps at=ways: no way in left to trap" in lines[0]
+    assert len(left) == 1 and left[0].startswith("seasons[0].build[0] traps@S1: traps at=ways")
+
+
+def test_rearming_part_of_a_lane_keeps_the_rest_listed():
+    """review: a second traps project for the same way (one lost tile) must not shrink the way's manifest entry."""
+    from dfpilot.bp import primitives
+    a = {"traps": [{"id": "T4_2_0", "kind": "cage", "way": [4, 2, 0], "tiles": [[3, 1, 0], [4, 1, 0], [5, 1, 0]]},
+                   {"id": "Z2", "kind": "stone", "tiles": [[1, 1, 0], [2, 1, 0]]}]}
+    m = primitives.merge_manifest({"v": 2}, a)
+    m = primitives.merge_manifest(m, {"traps": [{"id": "T4_2_0", "kind": "cage", "way": [4, 2, 0], "tiles": [[4, 1, 0]]},
+                                                {"id": "Z2", "kind": "stone", "tiles": [[9, 9, 0]]}]})
+    by = {e["id"]: e for e in m["traps"]}
+    assert by["T4_2_0"]["tiles"] == [[3, 1, 0], [4, 1, 0], [5, 1, 0]] and by["Z2"]["tiles"] == [[9, 9, 0]]
+    assert schema.validate("manifest", m) == []

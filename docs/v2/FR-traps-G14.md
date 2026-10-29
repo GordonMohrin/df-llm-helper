@@ -48,7 +48,8 @@ it was built:
 - **Wagons.** The wagon path to the depot is not computed. Lanes stay off Z1 and the edge tiles, and side doors are not a
   wagon route.
 - **Detection guesses.** A cage trap counts as without a cage when no item in `contained_items` is an `item_cagest`. A
-  trap counts as full when a caged unit's cage is held by the trap building. Both are unproven live.
+  trap counts as full when a caged unit's cage is held by the trap building, or when the trap's cage holds any creature (its
+  CONTAINS_UNIT ref; a caught wild animal is in no census list). Both are unproven live.
 
 ## Live checks
 1. In a fort past P5 with a seal door, run `dfllm bp sites traps --fresh` and then `dfllm plan propose`. The notes

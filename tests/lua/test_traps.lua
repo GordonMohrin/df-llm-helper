@@ -115,6 +115,36 @@ T.test('a fort without listed traps publishes no traps key; need() counts the lo
   T.eq(select(2, W2.K.call('traps', 'need')), 7)
 end)
 
+T.test('a caught wild animal (not in the census caged list) makes its trap full; a caged pet is no free cage', function()
+  local W = world({man = {v = 2, traps = {{id = 'T30_30_5', kind = 'cage', way = {30, 30, 5}, tiles = {{30, 29, 5}}}}}})
+  df.general_ref_type = require('dfllm.util.k_mock').enum({'CONTAINS_UNIT'})
+  local saved = dfhack.items.getGeneralRef
+  dfhack.items.getGeneralRef = function(it, t)
+    return (t == df.general_ref_type.CONTAINS_UNIT and it._unit) and {unit_id = it._unit} or nil
+  end
+  local c = cage(W, {flags = {in_building = true}, _unit = 99})        -- a groundhog: no hostile, no census entry
+  c._holder = trap(W, 30, 29, 5, 'CageTrap', {items = {{item = c}}})
+  for _ = 1, 3 do cage(W, {_unit = 50}) end                            -- caged pets in the animal stockpile
+  W.load(fresh('traps'))
+  day(W)
+  local s = W.state().traps
+  dfhack.items.getGeneralRef = saved
+  T.eq({s.f, s.c, s.n}, {1, 0, 0})
+  T.eq(#W.find_acts('workorder'), 1, 'the full trap wants a cage')
+end)
+
+T.test('runner merge: re-arming part of a way keeps its lane tiles (union); Z2 is replaced whole', function()
+  local runner = require('dfllm.runner')
+  local m = {v = 2}
+  runner.merge_manifest(m, {traps = {{id = 'T30_30_5', kind = 'cage', way = {30, 30, 5}, tiles = {{30, 29, 5}, {29, 29, 5}}},
+                                     {id = 'Z2', kind = 'stone', tiles = {{11, 20, 5}}}}})
+  runner.merge_manifest(m, {traps = {{id = 'T30_30_5', kind = 'cage', way = {30, 30, 5}, tiles = {{29, 29, 5}, {31, 29, 5}}},
+                                     {id = 'Z2', kind = 'stone', tiles = {{12, 20, 5}}}}})
+  T.eq(#m.traps, 2)
+  T.eq(m.traps[1].tiles, {{30, 29, 5}, {29, 29, 5}, {31, 29, 5}})
+  T.eq(m.traps[2].tiles, {{12, 20, 5}})
+end)
+
 T.test('cage_need: full + without a cage + spare - free, capped by the batch', function()
   local M = fresh('traps')
   local c = {cage_spare = 2, cage_batch = 5}
