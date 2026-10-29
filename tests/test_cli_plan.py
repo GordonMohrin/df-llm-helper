@@ -562,6 +562,22 @@ def test_audit_gate_pending_seal_done_seal_and_no_wall(save, base):
     assert errs == [] and len(warn) == 1 and "no wall tile on the route" in warn[0]
 
 
+def test_audit_gate_and_propose_wait_for_the_trap_hall(save, base):
+    """BUG-211 (review): while the audit says 'manifest: no Z2 trap hall', its bypass walls are room doors off the core
+    corridor: plan check only warns (old code: refused a plan growing the fort, fortcore stage 2 included, without the
+    seal at=audit) and propose drafts no seal at=audit."""
+    from dfpilot import cmd
+    prev, state = base
+    _audit(save, [cmd.NO_HALL, BYPASS])
+    fort = plan.fort_facts(save, state)
+    assert fort["audit"]["open"] == ["100,127,122 floor wall"]
+    doc = copy.deepcopy(prev)                                             # phase_target P4 > the current P3
+    errs, warn = _gate(errs_of(doc, state, fort=fort, prev=prev))
+    assert errs == [] and len(warn) == 1 and "no trap hall yet" in warn[0], (errs, warn)
+    builds = [b for se in plan.propose(state, None, prev, decisions={}, fort=fort)["seasons"] for b in se["build"]]
+    assert SEAL not in builds
+
+
 def test_audit_routes_fall_back_to_the_state(save, base):
     """No AUDIT event left (rotated away): the state's ready.route (readiness publishes the finding) is the source."""
     from dfpilot import cmd

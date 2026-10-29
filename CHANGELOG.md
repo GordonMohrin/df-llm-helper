@@ -14,18 +14,19 @@
   (BUG-210). (3) cmd.py `NO_HALL`, `audit_fails`, `no_trap_hall`, `core_cells`; audit_routes returns `fails` and `core` and keeps fortcore
   footprint walls out of `open`; seal_openings notes them as closed; wake.py `_request_seal` stops while the audit has no trap hall and logs
   after `_request_place` (which now returns whether it requested), once per walls set; the status UNREADY line says 'no trap hall yet' instead
-  of 'wall it' (BUG-211). (4) brief.py: status proj rank 1, blocked first, two projects, clipped to 32 tokens; `line_unready(cmds=False)` keeps
+  of 'wall it'; plan.py `audit_gate` only warns and `propose` drafts no seal at=audit while the audit has no trap hall (review) (BUG-211). (4) brief.py: status proj rank 1, blocked first, two projects, clipped to 32 tokens; `line_unready(cmds=False)` keeps
   the first `next:` hint (BUG-212). (5) wake.py run_audit prints `int(round(timeout))` (BUG-213).
 - **Safety:** no Lua, verb, event, config key, state field or RULES row; no contract change. doctor/next run one tasklist only when ACTIVE is
   missing. Risk: the seal at=audit for a real bypass waits until the audit no longer reports 'no Z2 trap hall' (fortcore stage 2 placed).
 - **Tests (each fails on bd27973):** tests/test_bug209_213_cli.py; test_cli_status, test_hospital_sites and test_perimeter_escalation read the
-  further next: hints in the brief now.
+  further next: hints in the brief now; test_cli_plan `test_audit_gate_and_propose_wait_for_the_trap_hall` (review, fails on 66496c8).
 - **Live check:** (a) BUG-209: on a new embark before `dfhack-run dfllm adopt`: `python -m dfpilot doctor` lists 'ACTIVE missing: the loaded
   save is not adopted' and a verdict with problems; `python -m dfpilot status` line 1 has `(fallback: newest folder, not ACTIVE)`;
   `python -m dfpilot next` prints `NEXT: dfhack-run dfllm adopt`; after adopt all three are normal. With DF closed doctor only notes it.
   (b) BUG-210: after a SIEGE_UNREADY, once status names other `ways in` tiles, `dfllm cmd bp.place tpl=seal site=S1 at=last` names the
   status tiles (read the reply and `bp/<id>.json` params.at). (c) BUG-211: fort without fortcore stage 2: `dfllm audit`, follow running:
-  no new seal bp file, no `auto:seal` in cli.log, status UNREADY line says 'no trap hall yet'; `dfllm cmd bp.place tpl=seal site=S1 at=audit`
+  no new seal bp file, no `auto:seal` in cli.log, status UNREADY line says 'no trap hall yet', `dfllm plan check` of a plan with
+  fortcore stage 2 and no seal at=audit only warns 'no trap hall yet'; `dfllm cmd bp.place tpl=seal site=S1 at=audit`
   on a wall on a fortcore tile notes 'left out (a fortcore tile, the fort's own way)'. (d) BUG-212: at R0 with several blockers `status` has one
   `next:` in its UNREADY line and a `proj` line, `brief` has them all. (e) BUG-213: `python -m dfpilot audit` prints a whole number of seconds.
 

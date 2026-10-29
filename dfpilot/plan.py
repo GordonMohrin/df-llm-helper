@@ -1043,6 +1043,8 @@ def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[
     if not routes:
         return [], []
     route = routes[0] + (f" (+{len(routes) - 1} more)" if len(routes) > 1 else "")
+    if _cmd.no_trap_hall(a.get("fails") or []):     # BUG-211: no trap hall yet: the walls are room doors, no gaps
+        return [], [f"audit: {route}: no trap hall yet, the bypass waits for fortcore stage 2; no seal at=audit before it"]
     if not a.get("walls"):
         return [], [f"audit: {route}: no wall tile on the route (stairs, doors or bridges); look at it with dfllm cmd "
                     "inspect '{\"what\":\"entrances\"}' and close it; readiness stays R0 until then"]
@@ -1790,7 +1792,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     staged = None if info is None else {t for t, i in info.items() if "stage" in i["params"]}
     builds, libs = [], []
     # Run 10: the audit's bypass wall first (audit_gate refuses growth without it)
-    if ((fort or {}).get("audit") or {}).get("open") and (info is None or "seal" in info):
+    # BUG-211: not while the audit says the fort has no trap hall (the bypass walls are room doors off the core corridor)
+    aud = (fort or {}).get("audit") or {}
+    if aud.get("open") and not _cmd.no_trap_hall(aud.get("fails") or []) and (info is None or "seal" in info):
         builds.append(copy.deepcopy(SEAL_AUDIT))
     # BUG-130: a fortcore stopped on a breach (parked for good): re-site it (stage 1 @S1 away from the recorded breaches,
     # its stages @same after it) or, when it cannot move, close the ways in by wall + door and, with no core at all,
