@@ -252,6 +252,11 @@ Related: FR-xx, BUG-xx
 | [BUG-235](BUG-235-rescue-never-lowers-outer-bridges-in-peace.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the rescue never lowered an outer bridge and demanded a sealed outside even in quiet PEACE | lua/dfllm/siege.lua, lua/dfllm/gate.lua, lua/dfllm/drill.lua |
 | [BUG-236](BUG-236-player-lever-down-silently-overridden.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the player's lever down was accepted and then silently overridden | lua/dfllm/gate.lua |
 | [BUG-237](BUG-237-gate-cycles-up-down-with-drills-that-cannot-pass.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: B1 cycled up/down with automatic drills that could not pass (O1 without a lever) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-267](BUG-267-orders-wait-for-missing-workshops-nobody-asks.md) | fixed (offline, live-untested) | high | Run 15 Earthboat/Drillchamber: orders wait 344 days for a missing workshop, nobody asks for the shop | economy, wake |
+| [BUG-268](BUG-268-levers-never-linked-no-mechanisms-ordered.md) | fixed (offline, live-untested) | high | Run 15 Earthboat/Guildcleans: levers B2/O1 never linked, nobody counts or orders mechanisms | economy, trade |
+| [BUG-269](BUG-269-soil-fort-moods-miss-stone-and-gems.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: strange moods without stone or gems in a deep-soil fort | economy, trade |
+| [BUG-270](BUG-270-gear-misses-leatherworks-no-request.md) | fixed (offline, live-untested) | medium | Run 15 Earthboat: gear 'no leatherworks' and no workshop requested | economy, wake |
+| [BUG-271](BUG-271-hurt-counts-hungry-sleepy-dwarves.md) | fixed (offline, live-untested) | low | Run 15 Earthboat: inspect workload 'hurt 14' counts dwarves without a wound | economy |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

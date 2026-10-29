@@ -16,7 +16,8 @@ not wake; the follower acts on two of them without the LLM:
                                   (BUG-038: the kernel asks only while none stands); why=mandatory (runner, FR-76:
                                   a reclaimed fort lacks Carpenters, Masons, Craftsdwarfs, Still or Kitchen) -> only
                                   the missing types of d.types, at prio 1; why=slabs (economy, BUG-133: ghosts
-                                  and no mason's workshop, d.types [Masons]) -> the same; why=manager (BUG-231)
+                                  and no mason's workshop, d.types [Masons]) -> the same; why=manager (BUG-231),
+                                  why=missing (BUG-267), gear (BUG-270), well
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
@@ -637,12 +638,15 @@ class Follower:
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") in ("mandatory", "slabs", "busy",
-                                                                                         "manager"):
+                                                                                         "manager", "missing", "gear",
+                                                                                         "well"):
                 # FR-76 (Run 12 Trussroads, reclaimed: no carpenter, no craftsdwarf, no kitchen): the types the runner
                 # saw missing on the map, whatever the fort manifest lists (kept by `need`, BUG-066). BUG-133: economy's
                 # why=slabs (ghosts wait for memorial slabs, no mason's workshop stands) the same way: the Masons alone.
                 # BUG-224: why=busy (one Carpenters/Masons holds the waiting jobs, idle workers stand): one more of it
                 # BUG-231: why=manager (the held manager orders' items go to a Carpenters/Masons as tasks; none stands)
+                # BUG-267: why=missing (orders wait 14+ days for these shops); BUG-270: why=gear (Leatherworks, Tanners,
+                # Mechanics for gear and lever mechanisms); why=well (fix6-water: the hospital well's shop)
                 from .cmd import _extra_shops, _moodable
                 mood, extra = _moodable(), set(_extra_shops())
                 want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]
