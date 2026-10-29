@@ -145,8 +145,9 @@ def test_status_r0_is_loud_never_plain_peace(save):
     out = brief.status_text(save)
     lines = out.splitlines()
     assert "PEACE(29d) UNREADY P3" in lines[0] and lines[0].startswith("DEFCON 5 | region7")
-    assert lines[1] == ("SIEGE UNREADY (R0): audit,no_inner,no_outer | 2 ways in without door or bridge: "
-                        "55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit) | next: dfllm audit")
+    # BUG-220: in status the next: hint follows the blocker list (the clip cuts the details, not the command)
+    assert lines[1] == ("SIEGE UNREADY (R0): audit,no_inner,no_outer | next: dfllm audit | 2 ways in without door or "
+                        "bridge: 55,62,117 stair_updown, 61,55,117 floor | traps ? (no audit)")
     # BUG-212: status keeps the first next: hint, the brief's UNREADY line all of them
     assert ("next: dfllm audit; close the open ways in (dfllm cmd bp.place tpl=seal site=S1 at=last); build the "
             "missing fortcore pieces (plan)") in brief.brief_text(save)
@@ -476,9 +477,10 @@ def test_status_r0_names_the_audit_route_and_the_seal(save):
     _r0_state(save, open=0, ents=None, fail=["audit_fail", "bypass", "refuge_sep"],
               audit={"ok": 0, "age": 9000, "min_traps": 35}, route="bypass: wall 100,127,122 floor -> 139,128,117")
     line = brief.status_text(save).splitlines()[1]
+    assert line.startswith("SIEGE UNREADY (R0): audit_fail,bypass,refuge_sep | next: wall it: dfllm cmd bp.place "
+                           "tpl=seal site=S1 at=audit (or a plan build seal p.at=audit) | "), line    # BUG-220
     assert ("traps 35 (counted as if the bypass were walled) | audit route: bypass: wall 100,127,122 floor -> "
-            "139,128,117 | next: wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal "
-            "p.at=audit)") in line, line
+            "139,128,117") in line, line
     _r0_state(save, open=0, ents=None, fail=["bypass"], audit={"ok": 0, "age": 9000, "min_traps": 0},
               route="bypass: edge->Z3/Z4 avoids the trap hall (reaches 1,2,3)")
     line = brief.status_text(save).splitlines()[1]

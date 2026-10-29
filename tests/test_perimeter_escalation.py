@@ -101,8 +101,9 @@ def test_status_counts_the_days(save):
     _state(save)
     out = brief.status_text(save)
     line = out.splitlines()[1]
-    assert line.startswith("SIEGE UNREADY (R0): open_perimeter | PERIMETER OPEN 12 days: 2 ways in | 2 ways in without "
-                           "door or bridge"), line
+    assert line.startswith("SIEGE UNREADY (R0): open_perimeter | next: close the open ways in (dfllm cmd bp.place "
+                           "tpl=seal site=S1 at=last) | PERIMETER OPEN 12 days: 2 ways in | 2 ways in without "
+                           "door or bridge"), line                                  # BUG-220: the hint first
     assert "close the open ways in" in line and "open perimeter: seal first" not in line      # BUG-212: the first hint
     assert "open perimeter: seal first" in brief.brief_text(save)
     assert est_tokens(out) <= brief.STATUS_TOKENS

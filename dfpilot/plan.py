@@ -757,7 +757,8 @@ def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
     adds builds is refused, one that adds nothing only warned); a current REFUGE_FAIL naming open entrances
     (fort.refuge.open) needs the seal too; the fixes may not come in a later season than the plan's first other new
     build. No fix is asked that no build can give: a seal when `seal at=last` finds nothing to close (seal_n 0), and
-    below P3 refuge_beds without a site (bed_site False; fortcore stage 3 builds the refuge room): warnings."""
+    below P3 refuge_beds without a site (bed_site False; fortcore stage 3 builds the refuge room): warnings. BUG-222: at
+    any phase too while fortcore stage 3 is planned or under way (the beds follow its dig)."""
     pt = doc["phase_target"]
     late = pt >= REFUGE_PHASE
     want = f"phase_target {pt} (P3+) needs a separated refuge with beds for refuge.bed_pct of the citizens"
@@ -837,9 +838,15 @@ def refuge_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
         rooms = -(-left // REFUGE_BEDS_MAX)
         if rooms > 1:
             text += f" ({rooms} rooms of <= {REFUGE_BEDS_MAX})"
+        s3 = bool(f.get("stage3")) or first(_refuge_stage) is not None
         if not late and f.get("bed_site") is False and season is None:
             warn.append(text.split("; ")[0] + "; no refuge room takes refuge_beds yet (fortcore stage 3 builds it; "
                         "dfllm bp sites refuge_beds)")
+        elif f.get("bed_site") is False and season is None and s3:
+            # BUG-222 (live round 4 Earthboat): at P3+ the gate demanded refuge_beds that no site takes until the
+            # stage 3 this plan (or a project under way) builds is dug; check's blueprint step then refused that build
+            warn.append(text.split("; ")[0] + "; beds follow fortcore stage 3 (no refuge room takes refuge_beds yet): "
+                        "apply, wait for s3.dig, propose again")
         else:
             need(text, season)
     return errs, warn
@@ -1672,6 +1679,47 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     return f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
 
 
+def fit_explore_kept(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
+    """BUG-223 (live round 4 Earthboat: four explore shafts of depth 12 were placed at the first apply; the second propose
+    kept them, and y380s2b0 broke into the cavern level z123 the kernel had recorded in manifest.caverns after s0b0):
+    re-fit the explore builds kept from the applied same-year plan against the cavern levels in manifest.caverns. A kept
+    build is already a project (stable_ids: its p cannot change), so one that is not done and whose shaft (anchor z -
+    depth .. anchor z of its bp file) reaches such a level gets a line (also in the notes) with its bp.cancel. []
+    when nothing is kept, no cavern is known or bp files are unreadable."""
+    if not prev or prev.get("year") != doc["year"]:
+        return []
+    cav = sorted({int(q[2]) for q in (_kern_manifest(save_dir).get("caverns") or [])
+                  if isinstance(q, (list, tuple)) and len(q) == 3 and isinstance(q[2], (int, float))})
+    if not cav:
+        return []
+    try:
+        done = done_projects(save_dir)
+    except Exception:                                   # noqa: BLE001 - no event log: nothing counts as done
+        done = set()
+    lines, short = [], []
+    for si, se in enumerate(prev["seasons"]):
+        for bi, b in enumerate(se["build"]):
+            pid = bp_id(doc["year"], si, bi)
+            if b["tpl"] != EXPLORE or pid in done:
+                continue
+            bp = files.read_json(Path(save_dir) / "bp" / f"{pid}.json", retry=False)
+            a = bp.get("anchor") if isinstance(bp, dict) else None
+            if not (isinstance(a, list) and len(a) == 3 and isinstance(a[2], int)):
+                continue
+            p = bp.get("params") if isinstance(bp.get("params"), dict) else {}
+            d = p.get("depth") if isinstance(p.get("depth"), int) else EXPLORE_DEPTHS[0]
+            hit = [z for z in cav if a[2] - d <= z <= a[2]]
+            if hit:
+                lv = ",".join(f"z{z}" for z in hit)
+                lines.append(f"{EXPLORE} {pid} (depth {d} from z{a[2]}) reaches the known cavern level {lv} (manifest "
+                             f"caverns): dfllm cmd bp.cancel proj={pid}, then propose again (a new explore gets a depth "
+                             "above it)")
+                short.append(f"{EXPLORE} {pid} reaches the cavern level {lv}: dfllm cmd bp.cancel proj={pid}")
+    if short:
+        doc["notes"] += "; BUG-223: " + "; ".join(short[:3])
+    return lines
+
+
 _OVERLAP_RE = re.compile(r"overlaps project\(s\) ([\w, ]+)")
 
 
@@ -2397,10 +2445,11 @@ def run(args, save_dir: Path) -> int:
         fort = fort_facts(save_dir, state)
         doc = propose(state, phases, prev, applied=applied_builds(save_dir, state), fort=fort)
         fit = fit_explore(save_dir, doc, prev)                # Run 10: the ore search fits the known levels
+        kfit = fit_explore_kept(save_dir, doc, prev)          # BUG-223: kept shafts into a cavern level known now
         cfit = fit_core(save_dir, doc, prev)                  # BUG-195: a later core stage another project blocks
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
-        for ln in ([fit] if fit else []) + cfit:
+        for ln in ([fit] if fit else []) + kfit + cfit:
             print(f"  {ln}")
         order = core_order_note(doc, state, fort)
         if order:
