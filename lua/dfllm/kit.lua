@@ -120,7 +120,8 @@ function KIT.refit_plan(mems, stock)
     local empty, soft = {metal = {}, leather = {}}, {}
     for _, m in ipairs(mems) do
       local specs = m.p.equipment.uniform[c]
-      local sp = specs and (specs[0] or specs[1])
+      -- (#specs first: a DF vector raises on an index out of range, the empty categories of a fresh position)
+      local sp = specs and #specs > 0 and (specs[0] or specs[1]) or nil
       local mat = sp and KIT.spec_mat(sp)
       if sp and m.kit.empty[c] and empty[mat] then table.insert(empty[mat], m.pos)
       elseif sp and m.kit.soft[c] and mat == 'any' then soft[#soft + 1] = m.pos end

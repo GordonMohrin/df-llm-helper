@@ -213,6 +213,13 @@ T.test('FR-100 kit library: conf limits and the plan; refit_plan upgrades soft s
   local c = pos('leather', true, false)
   T.eq(KIT.refit_plan({c}, function() return {metal = 3, leather = 0, any = 3} end),
        {{cat = 'body', mat = 'any', positions = {0}}}, 'an empty leather slot takes the free metal')
+  -- review: a DF vector raises on an index out of range; a category without any spec is never indexed
+  local strict = setmetatable({}, {__len = function() return 0 end,
+                                   __index = function(_, i) error('index out of bounds ' .. tostring(i)) end})
+  local d = pos('any', false, false)
+  d.p.equipment.uniform.head = strict
+  d.kit.empty = {head = true}
+  T.eq(KIT.refit_plan({d}, function() return {metal = 3, leather = 0, any = 3} end), {}, 'no spec, no index')
 end)
 
 T.done()
