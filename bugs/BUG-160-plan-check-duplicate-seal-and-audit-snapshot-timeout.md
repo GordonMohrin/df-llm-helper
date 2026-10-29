@@ -11,8 +11,8 @@ Module: `dfpilot/plan.py` (`check`), `dfpilot/wake.py` (`audit_timeout`, `run_au
    export): `audit: no snapshot aud... within 60 s`.
 
 ## Fix
-1. The key is `(tpl, site, json.dumps(p, sort_keys=True))`; equal params still warn.
-2. `--timeout` defaults to `audit_timeout(save)`: `max(180, 60 + 3 * largest snapshot bytes / 8000)` (three scans of the fort: its own export
+1. The key is `(tpl, site, json.dumps(p, sort_keys=True, default=str))`; equal params still warn.
+2. `--timeout` defaults to `audit_timeout(save)`: `min(900, max(180, 60 + 3 * largest snapshot bytes / 16000))` (three scans of the fort: its own export
    and a readiness export it may queue behind). `dfllm audit` prints the wait it uses (`waiting up to N s ...; --timeout sets it`) and one
    `still waiting for ID after 30 s` line.
 

@@ -1,5 +1,5 @@
 -- BUG-161 (live round 2, i3: 'dfhack-run dfllm status' printed 'load x8,89'; tostring(share) of a float pacing share):
--- util.num.num is the locale-free drop-in for tostring(number) in text. tests/test_bug161_locale.py pins the source rule.
+-- util.num.num is the locale-free drop-in for tostring(number) in text. tests/test_bug159_161_live2.py pins the source rule.
 local T = require('testlib')
 
 local function german(fn)

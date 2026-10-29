@@ -176,7 +176,9 @@ PLAN_CHECK_EVERY_S = 300                       # FR-86: how often follow looks a
 PLAN_AUTO_KEYS = ("first_y", "tried_y", "applied_y")
 AUDIT_PREFIX = "aud"                           # snapshot ids of `dfllm audit` (it audits them itself, follow does not)
 AUDIT_SNAP_S = 180                             # `dfllm audit`: least seconds to wait for its fresh snapshot (BUG-160)
-AUDIT_SNAP_BPS = 8000                          # BUG-160: snapshot bytes the kernel scans per second (live: 323k tiles in 40 s)
+AUDIT_SNAP_BPS = 16000                         # BUG-160: snapshot bytes per second of scan, half the live rate (Trussroads:
+                                               # 1.4 MB snapshot, 323k tiles in 40 s = ~35 KB/s)
+AUDIT_SNAP_MAX_S = 900                         # BUG-160: never wait longer by default (a dead kernel)
 AUDIT_SNAP_NOTE_S = 30                         # BUG-160: one progress line after this long without the snapshot
 ERR_EVERY_S = 60                               # stderr 'poll error' at most once per minute
 
@@ -1040,14 +1042,15 @@ def _snap_file(save_dir: Path, sid: str, events: bool = False) -> tuple[str, dic
 def audit_timeout(save_dir: Path) -> tuple[float, int]:
     """BUG-160 (live round 2, i1: a 323k-tile audit came 70 s after the request, the old fixed 60 s gave up first):
     (seconds, bytes) - the wait for a fresh audit snapshot adapts to the fort: the largest snapshot on disk scanned three
-    times over (its own export plus a running readiness export it queues behind) plus a minute, at least AUDIT_SNAP_S."""
+    times over (its own export plus a running readiness export it queues behind) plus a minute, at least AUDIT_SNAP_S,
+    at most AUDIT_SNAP_MAX_S."""
     big = 0
     for p in files.snap_paths(save_dir):
         try:
             big = max(big, p.stat().st_size)
         except OSError:
             pass
-    return max(float(AUDIT_SNAP_S), 60.0 + 3.0 * big / AUDIT_SNAP_BPS), big
+    return min(float(AUDIT_SNAP_MAX_S), max(float(AUDIT_SNAP_S), 60.0 + 3.0 * big / AUDIT_SNAP_BPS)), big
 
 
 def run_audit(args, save_dir: Path, sleep: Callable[[float], None] = time.sleep,

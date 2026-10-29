@@ -110,6 +110,8 @@ def test_the_audit_wait_adapts_to_the_snapshot_size(save):
     (save / "snap" / "big.json").write_bytes(b" " * 800_000)                  # ~ a 323k-tile audit box
     t, big = wake.audit_timeout(save)
     assert big == 800_000 and t == pytest.approx(60 + 3 * 800_000 / wake.AUDIT_SNAP_BPS) and t > 180
+    (save / "snap" / "huge.json").write_bytes(b" " * 50_000_000)          # a dead kernel must not hang the CLI for hours
+    assert wake.audit_timeout(save)[0] == wake.AUDIT_SNAP_MAX_S
 
 
 def test_dfllm_audit_says_how_long_it_waits_and_that_it_still_waits(save, monkeypatch, capsys):

@@ -1356,7 +1356,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
             if not re.fullmatch(r"S[1-9]", b["site"]) and b["site"] != SAME:
                 warn.append(f"{where}: site {b['site']!r} is not a `bp sites` label (S1-S3) or '{SAME}'")
             # BUG-160 (live round 2): the params belong to the key: seal at=audit and seal at=refuge are two builds
-            key = (b["tpl"], b["site"], json.dumps(b.get("p") or {}, sort_keys=True))
+            key = (b["tpl"], b["site"], json.dumps(b.get("p") or {}, sort_keys=True, default=str))
             if key in pairs:
                 warn.append(f"{where}: duplicate {b['tpl']}@{b['site']} in one season")
             pairs.add(key)

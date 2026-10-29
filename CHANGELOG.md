@@ -9,7 +9,7 @@
 - **What changed:** (1) brief.py: `Ctx.reset` (the newest TIMELINE_RESET of the window) and the head line `line_reset` right after the clock
   line; status `line_hosp_retire` (`hospital_out: zone Z at x,y,z blocks it: ...`, rank 1), `line_unready(cmds=False)` drops the hint; with
   `water.hout.ok == 1` the R0 line says "a finished hospital inside exists, retire the old zones" (BUG-159). (2) plan.py: the duplicate key is
-  `(tpl, site, params)`; wake.py: `audit_timeout` = max(180 s, 60 + 3 x largest snapshot bytes / 8000), `--timeout` default None (adaptive),
+  `(tpl, site, params)`; wake.py: `audit_timeout` = min(900 s, max(180 s, 60 + 3 x largest snapshot bytes / 16000)), `--timeout` default None (adaptive),
   `dfllm audit` prints the wait it uses and one "still waiting" line after 30 s (BUG-160). (3) dfllm.lua: the load via `NUM.dec(.., 2)`, the
   shares via the new `util/num.num`; kern.lua's two pacing log lines use `NUM.num(e.share)`; the pytest rule covers every file under `lua/` and
   flags `tostring(<division>)`, `tostring(..share)` and a division concatenated with `..` (BUG-161).
