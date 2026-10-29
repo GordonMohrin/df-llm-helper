@@ -330,6 +330,9 @@ Related: FR-xx, BUG-xx
 | [BUG-315](BUG-315-order-queue-grows-without-a-cap.md) | mitigated (offline, live-untested): prune and cap; repeat cause a hypothesis | high | Run 15 Drillchamber: 194 orders, 73 stuck, gear made again every day; daily prune of stuck duplicates, a cap, mood orders on top | economy |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
 | [BUG-317](BUG-317-bridge-only-fort-gets-no-trap-lane.md) | fixed (offline, live-untested) | medium | Run 15b: a fort entered over its drawbridges only gets no trap lane ('0 door(s)', traps 0, no traps draft) | bp/traps.py, traps.py, plan.py |
+| [BUG-319](BUG-319-refuge-rooms-only-off-the-refuge-room.md) | fixed (offline, live-untested) | high | Run 15b: refuge beds and drink store find no site once the refuge room's walls are taken | sites.py |
+| [BUG-320](BUG-320-refuge-beds-wait-for-a-door.md) | fixed (offline, live-untested) | medium | Run 15b: a refuge_beds project waits months for the door of its doorway | rooms.py, validate.py |
+| [BUG-321](BUG-321-refuge-bed-error-blocks-the-year-plan.md) | fixed (offline, live-untested) | high | Run 15b/c: plan check's refuge bed ERROR without a site blocks the year plan; refuge_dry asks for a store already planned | plan.py, readiness.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

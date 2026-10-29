@@ -752,6 +752,33 @@ T.test('FR-69 (Run 11 y477: Tiefe+ drink 0 while 1199 drinks lay in one Kern+ st
   T.eq({lvl(W), has(ready(W).fail, 'refuge_dry'), R.refuge_dry(W.K)}, {1, false, nil})
 end)
 
+T.test('BUG-321 (Run 15c Inkintense y377: "plan its drink store" while plan y377 had the store queued): refuge_dry ' ..
+       'names a refuge_drink project under way (runner.pending) instead of asking for one', function()
+  local sf = seal_fake{tick = 1, sealed = 1, routes = 0, doors = {}, open = {}}
+  sf.rd = {name = 'Tiefe+', exists = true, drink = 21, need = 50, wells = 1, wet = true, wwet = 0,
+           box = {82, 50, 125, 90, 56, 125}}
+  function sf.refuge_drink(K) return sf.rd end
+  local wf = {name = 'water', every = {ticks = 1200}}
+  function wf.state(K)
+    return {water = {patients = 0, thirst_max = 0, hosp_ok = 1, refuge_ok = 0, buckets_free = 0, hosp = 0, src = {}}}
+  end
+  local W = world{seal = sf, extra = {wf}}
+  local pend = 0
+  function W.runner.pending(K, tpl) return tpl == 'refuge_drink' and pend or 0 end
+  W.state()
+  day(W)
+  audit(W)
+  local R = W.mods.readiness.M
+  T.eq(ready(W).fail, {'refuge_dry'})
+  T.ok(R.refuge_dry(W.K):find('plan its drink store (bp sites refuge_drink)', 1, true), R.refuge_dry(W.K))
+  pend = 1
+  day(W)
+  T.ok(R.refuge_dry(W.K):find('its drink store is under way (1 project)', 1, true),
+       'old code: plan its drink store; got ' .. tostring(R.refuge_dry(W.K)))
+  T.ok(not R.refuge_dry(W.K):find('plan its drink store', 1, true))
+  T.ok(#R.refuge_dry(W.K) <= 200)
+end)
+
 T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY and ready.route name it and the fix ' ..
        '(seal at=audit); a finding without a wall tile says so; a passed audit clears the route', function()
   local W = world{seal = seal_fake{tick = 1, sealed = 1, routes = 1, doors = {}, open = {}}}

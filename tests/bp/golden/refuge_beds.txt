@@ -1,10 +1,10 @@
 refuge_beds {'n': 8, 'burrow': 'Tiefe+'} anchor [70, 70, 100] rot 0
-  living: dig(4), build(9), zone(1), burrow(2)
-  materials: {'bed': 8, 'door': 1}
+  living: dig(4), build(8), zone(1), burrow(2)
+  materials: {'bed': 8}
 z100  (x 66..74, y 69..75)
 #########
 ####.####
-####+####
+####.####
 #bbb.bbb#
 #.......#
 #bb.....#
