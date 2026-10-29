@@ -15,6 +15,10 @@ C.DEFAULT = {
   -- (lesson 1: embark only where metal and a hard stone layer are within reach): soil this deep means no stone
   -- layer in the upper levels, so the site is refused unless `stone` is accepted with a reason
   stone_fail_soil = {'deep', 'very_deep', 'extremely_deep'},
+  -- BUG-248: hard stone must lie within hard_stone_levels levels (soil depth estimate per panel category)
+  hard_stone_levels = 6,
+  soil_levels = {none = 0, little = 1, shallow_sand = 2, shallow_clay = 2, some = 3, deep = 8, very_deep = 15,
+    extremely_deep = 25},
   sizes = {{3, 3}, {4, 4}},
   fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot',
     'water_mountain'},
@@ -41,6 +45,16 @@ C.ACCEPTABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'wate
 C.ACCEPTABLE_SET = set(C.ACCEPTABLE)
 -- warning popups judged by their own criterion, not by 'popup' ("difficult to obtain stone" is the stone rule)
 C.POPUP_OWNER = {no_stone = 'stone', water_mountain = 'terrain'}
+-- BUG-248 (Run 15 Guildcleans 'stone free 0', Earthboat 'no hard stone' for mechanisms): criteria a new fort may
+-- waive or accept only with an explore-first plan (steps.gate, embark.py --explore-first TEXT); value = why
+C.NEEDS_PLAN = {stone = 'no hard stone within reach means no levers, mechanisms or mood boulders'}
+
+-- BUG-248: the levels of soil above the first stone layer, estimated from the panel's soil depth
+-- (rules.soil_levels, rules.hard_stone_levels; calibrate live); nil = depth not shown
+function C.soil_levels(soil, rules)
+  local t = (rules and rules.soil_levels) or C.DEFAULT.soil_levels
+  return soil ~= nil and t[soil] or nil
+end
 
 local function cheb(a, b) return math.max(math.abs(a[1] - b[1]), math.abs(a[2] - b[2])) end
 
@@ -143,11 +157,15 @@ function C.evaluate(rec, rules, ctx)
   -- (boulders, blocks, mechanisms); the best tile of the rectangle counts (stone_soil, steps.merge_tiles)
   local soil = rec.stone_soil or rec.soil
   local layers = rec.layers and #rec.layers > 0 and table.concat(rec.layers, ', ') or nil
+  -- BUG-248: and the estimated soil levels above the stone must not exceed hard_stone_levels
+  local lv, maxlv = C.soil_levels(soil, rules), rules.hard_stone_levels
+  local too_deep = lv ~= nil and maxlv ~= nil and lv > maxlv
   if pop.no_stone then put('stone', 'fail', 'popup: difficult to obtain stone')
-  elseif soil ~= nil and set(rules.stone_fail_soil or rules.stone_warn_soil)[soil] then
+  elseif soil ~= nil and (set(rules.stone_fail_soil or rules.stone_warn_soil)[soil] or too_deep) then
     local aq = rec.aquifer == 'light' or rec.aquifer == 'varied'
     put('stone', 'fail', soil .. ' soil: no stone layer in the upper levels' ..
-        (aq and ', the first stone lies below the aquifer (Laborkings: no boulders)' or ' (boulders scarce)'))
+        (aq and ', the first stone lies below the aquifer (Laborkings: no boulders)' or ' (boulders scarce)') ..
+        (lv and maxlv and string.format('; about %d levels of soil, hard stone wanted within %d', lv, maxlv) or ''))
   elseif soil ~= nil then
     put('stone', 'pass', 'stone near the surface (' .. (soil == 'none' and 'no' or soil) .. ' soil' ..
         (layers and (', ' .. layers) or '') .. ')')

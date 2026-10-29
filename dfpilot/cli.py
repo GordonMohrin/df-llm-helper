@@ -49,7 +49,68 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("paths", nargs="*")
     p.add_argument("--cmd", help="check one command line")
     p.add_argument("--hook", action="store_true", help="read a PreToolUse hook payload from stdin")
+    p = sub.add_parser("gamelog", help="BUG-249: lines of <DF>/gamelog.txt, optionally only since this fort's embark")
+    p.add_argument("--since-embark", action="store_true",
+                   help="only lines after the last embark line (an older fort in the same gamelog is skipped)")
+    p.add_argument("--marker", action="append", default=[],
+                   help="text of the embark line (repeatable; default: " + ", ".join(GAMELOG_MARKERS) + ")")
+    p.add_argument("--grep", help="only lines matching this regular expression (case-insensitive)")
+    p.add_argument("--curse", action="store_true", help="the curse check: --grep '" + CURSE_RE + "'")
+    p.add_argument("--tail", type=int, default=40, help="print at most the N newest matching lines (default 40)")
     return ap
+
+
+# ---------------------------------------------------------------- gamelog (BUG-249)
+# Run 15 Guildcleans: the PLAYBOOK curse check (`tail -c 3000000 gamelog.txt | grep ...`) found three "transformed into a
+# werecavy" lines of the OLD fort (gamelog lines 93143-94588) before this fort's embark (line 94803). DF appends every
+# game of the install to one gamelog.txt, so the check reads only what follows the last embark line.
+GAMELOG_MARKERS = ("Strike the earth!", "*** STARTING NEW GAME ***")
+CURSE_RE = r"has been cursed|transformed into a were|vampire"
+
+
+def gamelog_since(lines: list[str], markers=GAMELOG_MARKERS) -> tuple[int, str | None]:
+    """0-based index of the first line after the LAST line holding a marker (case-insensitive), and that line;
+    (0, None) when no line holds one."""
+    low = [m.lower() for m in markers if m]
+    for i in range(len(lines) - 1, -1, -1):
+        s = lines[i].lower()
+        if any(m in s for m in low):
+            return i + 1, lines[i].strip()
+    return 0, None
+
+
+def run_gamelog(args) -> int:
+    import re
+    path = paths.df_dir() / "gamelog.txt"
+    try:
+        text = path.read_bytes().decode("cp437", errors="replace")   # DF writes CP437
+    except OSError as e:
+        print(f"gamelog: cannot read {path}: {e}")
+        return 2
+    lines = text.splitlines()
+    start, mark = 0, None
+    head = f"gamelog {path}: {len(lines)} lines"
+    if args.since_embark:
+        markers = tuple(args.marker) or GAMELOG_MARKERS
+        start, mark = gamelog_since(lines, markers)
+        if mark is None:
+            print(f"{head}; no embark line ({', '.join(markers)}) found: reading all of it (an older fort may be in it)")
+        else:
+            print(f"{head}; since the embark at line {start} (\"{mark[:80]}\"): {len(lines) - start} lines")
+    else:
+        print(head)
+    pat = CURSE_RE if args.curse else args.grep
+    try:
+        rx = re.compile(pat, re.I) if pat else None
+    except re.error as e:
+        print(f"gamelog: bad --grep {pat!r}: {e}")
+        return 2
+    hits = [(i + 1, lines[i]) for i in range(start, len(lines)) if rx is None or rx.search(lines[i])]
+    if rx is not None:
+        print(f"{len(hits)} line(s) match {pat!r}" + (" since the embark" if args.since_embark and mark else ""))
+    for n, s in hits[-max(0, args.tail):] if args.tail > 0 else []:
+        print(f"{n}: {s}")
+    return 0
 
 
 # ---------------------------------------------------------------- bp (WP3)
@@ -295,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_supervise(args)
     if c == "lint":
         return run_lint(args)
+    if c == "gamelog":                                 # BUG-249: needs no fort runtime, only the DF folder
+        return run_gamelog(args)
     try:
         save_dir = paths.save_dir()
     except paths.NoSave as e:

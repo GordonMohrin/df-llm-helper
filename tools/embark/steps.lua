@@ -3,6 +3,7 @@
 -- a right click, or a view-only write (camera centre, list selection) through `w`.
 -- live = where the pattern was proven: 'run4-6' (v1 scripts did the same thing live) or
 -- 'untested' (new in v2, never run in game). See README.md.
+local V = require('embark.view')
 local panel = require('embark.panel')
 local checklist = require('embark.checklist')
 local S = {}
@@ -85,7 +86,70 @@ local LATER = {
   ['title.fortress'] = {world = true, ['local'] = true, placing = true},
 }
 local function later(id, v) return LATER[id][v:kind()] == true end
-function S.newgame(world)
+
+-- BUG-245 (Run 15c/15d): "Start new game in existing world" lists same-named worlds (three "World: Zilirr?th"), each
+-- with a folder row below it ("Portable Folder: region1" = <DF>/save, "Folder: region1" = AppData). A tap on the name
+-- picks the topmost world. With --world-folder the run clicks the folder row instead: every row that shows
+-- "folder:" followed by the folder name as a whole word; `portable` true/false keeps only that kind.
+-- -> {{x, y, len, portable, text}} (x, y 0-based, len = the clicked text)
+function S.folder_rows(v, folder)
+  local out, want = {}, V.lower(tostring(folder or ''))
+  if want == '' then return out end
+  for y, line in ipairs(v.lines) do
+    local l, init = V.lower(line), 1
+    while true do
+      local s, e = l:find('folder:', init, true)
+      if not s then break end
+      local sp, name = l:sub(e + 1):match('^( *)([^ ]+)')
+      if name == want then
+        local pre = l:sub(1, s - 1)
+        local ps = pre:find('portable *$')
+        local x0 = ps or s
+        local x1 = e + #sp + #name
+        out[#out + 1] = {x = x0 - 1, y = y - 1, len = x1 - x0 + 1, portable = ps ~= nil, text = line:sub(x0, x1)}
+      end
+      init = e + 1
+    end
+  end
+  return out
+end
+
+-- the one folder row to click, else nil and why (none, or several and no --portable/--appdata to tell them apart)
+function S.pick_folder(v, folder, portable)
+  local rows, keep = S.folder_rows(v, folder), {}
+  for _, r in ipairs(rows) do
+    if portable == nil or r.portable == portable then keep[#keep + 1] = r end
+  end
+  if #keep == 1 then return keep[1] end
+  local kinds = {}
+  for _, r in ipairs(rows) do kinds[#kinds + 1] = r.portable and 'portable' or 'appdata' end
+  if #keep == 0 then
+    return nil, 'no row shows "' .. (portable and 'Portable ' or '') .. 'Folder: ' .. tostring(folder) .. '"' ..
+      (#rows > 0 and (' (rows: ' .. table.concat(kinds, ', ') .. ')') or '')
+  end
+  return nil, #keep .. ' rows show the folder "' .. tostring(folder) .. '" (' .. table.concat(kinds, ', ') ..
+    '): pass --portable or --appdata'
+end
+
+-- BUG-245: the title screen's region_choice (read only, embark.lua source().title.regions = {path, portable}) must
+-- hold the folder (of that kind) when DFHack shows it; nil = fine or not shown
+function S.region_check(title, folder, portable)
+  local regs = type(title) == 'table' and title.regions
+  if type(regs) ~= 'table' or #regs == 0 then return nil end
+  local seen = {}
+  for _, r in ipairs(regs) do
+    local p = tostring(r.path or ''):gsub('\\', '/'):gsub('/+$', '')
+    local name = p:match('([^/]+)$') or p
+    seen[#seen + 1] = name .. (r.portable == true and ' (portable)' or r.portable == false and ' (appdata)' or '')
+    if V.lower(name) == V.lower(tostring(folder)) and (portable == nil or r.portable == nil or r.portable == portable) then
+      return nil
+    end
+  end
+  return 'region_choice holds no world folder "' .. tostring(folder) .. '"' ..
+    (portable == true and ' (portable)' or portable == false and ' (appdata)' or '') .. ': ' .. table.concat(seen, ', ')
+end
+
+function S.newgame(world, folder, portable)
   local new = 'Start new game in existing world'
   return {
     {id = 'title.new', live = 'run4-6', timeout_ms = 30000,
@@ -96,9 +160,19 @@ function S.newgame(world)
      end,
      done = function(v) return not v:has(new) end},
     {id = 'title.world', live = 'run4-6', timeout_ms = 30000,
-     wait = function(v) return v:has(world) or later('title.world', v) end,
-     act = function(ui, v)
+     wait = function(v) return v:has(world) or (folder and #S.folder_rows(v, folder) > 0) or later('title.world', v) end,
+     act = function(ui, v, ctx)
        if later('title.world', v) then return 'skip', 'world already chosen' end
+       if folder then   -- BUG-245: the folder row, never the (shared) world name
+         local bad = S.region_check(v.title, folder, portable)
+         if bad then return 'fail', bad end
+         local r, why = S.pick_folder(v, folder, portable)
+         if not r then return 'fail', why end
+         ui:click_tile(r.x + r.len // 2, r.y)
+         ctx.results = ctx.results or {}
+         ctx.results.world_row = {text = V.trim(r.text), x = r.x, y = r.y, portable = r.portable}
+         return nil, 'clicked "' .. V.trim(r.text) .. '" (row ' .. r.y .. ')'
+       end
        tap(ui, v, world)
      end,
      done = function(v) return not v:has(world) or v:has('Fortress') end},
@@ -190,9 +264,39 @@ local function over_map(ui, r)
   local tpx, tpy = ui.env.tile_px()
   return r and r[1] >= 40 and r[2] >= 60 and r[1] < w * tpx - 420 and r[2] < h * tpy - 90
 end
+-- the mouse injector and the cursor probe, once per run: true, msg while one of them was queued
+local function mouse_ready(ui, ctx, w, cfg)
+  if w and w.inject and ctx.injected == nil then  -- embark.lua mouse injector (render-time mouse)
+    ctx.injected = w.inject(true)
+    return true, 'mouse injector ' .. (ctx.injected and 'on' or 'unavailable')
+  end
+  if ctx.real == nil and ui.probe then
+    if ui.real == nil then ui:probe(cfg.probe_frames or 150) return true, 'probing the cursor' end
+    ctx.real = ui.real
+  end
+  return false
+end
+
+-- BUG-247: the ONE pixel every placement and hover holds: the probed OS cursor when it lies over the map, else the
+-- middle of the window's centre tile. It never changes during a run; only the camera moves.
+local function hold_pixel(ui, ctx, s)
+  local cx, cy = centre_px(ui)
+  local r = ctx.real
+  if over_map(ui, r) then return {r[1], r[2]}, cx, cy end
+  return {cx + s // 2, cy + s // 2}, cx, cy
+end
+S.hold_pixel = hold_pixel
+
+-- BUG-247 (Run 15d on i4, 174x75 tiles): the old loop moved the HELD PIXEL by the learnt k and learnt k again from
+-- every miss; when the rectangle did not follow, k grew and the held pixel ran out of the window (437,-16 ...
+-- -7083,-9104) until 34/180 steps. Now: one fixed pixel P (hold_pixel), the camera at target - k - floor((P - C) / s),
+-- one hold. A miss counts when the same camera shows the same wrong rectangle on two checks (DF still takes the
+-- real OS cursor about one frame in 15, live L0). The first confirmed miss measures k once (|k| <= local_k_max,
+-- else the rectangle is not following at all); the second fails with what was held and seen.
 function S.place(ex, ey, cfg)
   local s = cfg.local_tile_px or 16
-  return {id = 'local.place', live = 'L0', tries = 12, timeout_ms = 120000,
+  local kmax = cfg.local_k_max or 48
+  return {id = 'local.place', live = 'L0', tries = 8, timeout_ms = 120000,
     wait = function(v) return kind_in(v, 'local', 'placing') end,
     act = function(ui, v, ctx, w)
       if popup_abort(v) then ui:release(); tap(ui, v, 'Abort', {exact = true}); ctx.p_px = nil return nil, 'closing popup' end
@@ -204,62 +308,46 @@ function S.place(ex, ey, cfg)
       end
       local zc = v.cs and v.cs.cam_local
       if not zc then return 'fail', 'no local camera' end
-      if w and w.inject and ctx.injected == nil then  -- embark.lua mouse injector (render-time mouse)
-        ctx.injected = w.inject(true)
-        return nil, 'mouse injector ' .. (ctx.injected and 'on' or 'unavailable')
-      end
-      if ctx.real == nil and ui.probe then
-        if ui.real == nil then ui:probe(cfg.probe_frames or 150) return nil, 'probing the cursor' end
-        ctx.real = ui.real
-      end
+      local busy, msg = mouse_ready(ui, ctx, w, cfg)
+      if busy then return nil, msg end
       local k = ctx.pk or cfg.local_k or {0, 0}
-      local cx, cy = centre_px(ui)
-      local r = ctx.real
-      if over_map(ui, r) then
-        local want = {ex - k[1] - (r[1] - cx) // s, ey - k[2] - (r[2] - cy) // s}
-        if zc[1] ~= want[1] or zc[2] ~= want[2] then
-          w.camera('local', want[1], want[2])
-          ui:wait(cfg.local_camera_ms or 300)
-        end
-        ui:hold(r[1], r[2])
-        ctx.p_px, ctx.p_c = {r[1], r[2]}, {cx, cy}
-        return nil, 'camera ' .. want[1] .. ',' .. want[2] .. ', holding the cursor pixel'
+      local p, cx, cy = hold_pixel(ui, ctx, s)
+      local want = {ex - k[1] - (p[1] - cx) // s, ey - k[2] - (p[2] - cy) // s}
+      if zc[1] ~= want[1] or zc[2] ~= want[2] then
+        w.camera('local', want[1], want[2])
+        ui:wait(cfg.local_camera_ms or 300)
       end
-      local px = cx + s * (ex - zc[1] - k[1]) + s // 2
-      local py = cy + s * (ey - zc[2] - k[2]) + s // 2
-      ui:hold(px, py)
-      ctx.p_px, ctx.p_c = {px, py}, {cx, cy}
-      return nil, 'holding ' .. px .. ',' .. py
+      ui:hold(p[1], p[2])
+      ctx.p_px, ctx.p_c = {p[1], p[2]}, {cx, cy}
+      return nil, 'camera ' .. want[1] .. ',' .. want[2] .. ', holding ' .. p[1] .. ',' .. p[2]
     end,
-    -- live L0: DF still takes the real OS cursor when Gordon moves his mouse on another desktop
-    -- (about 1 frame in 15), so a miss teaches k only when the same rectangle is seen twice for
-    -- the same held pixel.
-    -- BUG-020 (DF restarted and its window moved: the rectangle stayed at 224,132 whatever pixel was
-    -- held, and k learnt from two identical misses ran the hold out of the window): two confirmed
-    -- misses that should put the rectangle on different tiles (another held pixel or camera) but
-    -- show the same rectangle fail at once; k is never learnt from them
     done = function(v, ctx, mem)
       local m = v.cs and v.cs.emb_min
       if not m or not ctx.p_px then return false, 'no rectangle yet' end
       if not v.cs.choosing_embark or popup_abort(v) then return false, 'not placing' end
-      if m[1] == ex and m[2] == ey then ctx.p_seen = nil return true, 'rectangle at ' .. ex .. ',' .. ey end
+      if m[1] == ex and m[2] == ey then mem.seen = nil return true, 'rectangle at ' .. ex .. ',' .. ey end
       local p, zc, c = ctx.p_px, v.cs.cam_local, ctx.p_c
       if not zc then return false, 'no local camera' end
-      local key = p[1] .. ',' .. p[2] .. '>' .. m[1] .. ',' .. m[2]
-      if ctx.p_seen == key then
-        local want = {zc[1] + (p[1] - c[1]) // s, zc[2] + (p[2] - c[2]) // s}   -- rect_min - k
-        local o = mem and mem.p_conf
-        if o and (o.want[1] ~= want[1] or o.want[2] ~= want[2]) and o.m[1] == m[1] and o.m[2] == m[2] then
-          local cams = (o.zc[1] ~= zc[1] or o.zc[2] ~= zc[2])
-            and string.format(' (camera %d,%d and %d,%d)', o.zc[1], o.zc[2], zc[1], zc[2]) or ''
-          return 'fail', string.format('rectangle does not follow the mouse: held %d,%d and %d,%d%s, rectangle stays at %d,%d',
-                                       o.p[1], o.p[2], p[1], p[2], cams, m[1], m[2])
-        end
-        if mem then mem.p_conf = {p = {p[1], p[2]}, zc = {zc[1], zc[2]}, m = {m[1], m[2]}, want = want} end
-        ctx.pk = {m[1] - want[1], m[2] - want[2]}
+      local key = zc[1] .. ',' .. zc[2] .. '>' .. m[1] .. ',' .. m[2]
+      if mem.seen ~= key then
+        mem.seen = key
+        return false, 'rectangle at ' .. m[1] .. ',' .. m[2] .. ' (camera ' .. zc[1] .. ',' .. zc[2] .. ')'
       end
-      ctx.p_seen = key
-      return false, 'rectangle at ' .. m[1] .. ',' .. m[2]
+      mem.seen = nil
+      local base = {zc[1] + (p[1] - c[1]) // s, zc[2] + (p[2] - c[2]) // s}   -- rect_min - k
+      local k = {m[1] - base[1], m[2] - base[2]}
+      local o = mem.miss
+      if o or math.abs(k[1]) > kmax or math.abs(k[2]) > kmax then
+        local first = o and string.format('held %d,%d (camera %d,%d, rectangle %d,%d) and ', o.p[1], o.p[2], o.zc[1],
+          o.zc[2], o.m[1], o.m[2]) or ''
+        return 'fail', string.format('rectangle does not follow the mouse: %sheld %d,%d (camera %d,%d), rectangle stays ' ..
+          'at %d,%d, target %d,%d; offset %d,%d%s; read the panels by hover instead: embark.py scan ... --hover',
+          first, p[1], p[2], zc[1], zc[2], m[1], m[2], ex, ey, k[1], k[2],
+          o and '' or (' beyond +-' .. kmax))
+      end
+      mem.miss = {p = {p[1], p[2]}, zc = {zc[1], zc[2]}, m = {m[1], m[2]}}
+      ctx.pk = k
+      return false, 'rectangle at ' .. m[1] .. ',' .. m[2] .. ': offset ' .. k[1] .. ',' .. k[2] .. ' measured'
     end}
 end
 
@@ -303,7 +391,9 @@ local function merge_tiles(rec, tiles)
   local near = {}
   for _, n in ipairs(rec.neighbors or {}) do near[n.race] = n end
   local nw, nt, nmw, nter = 0, 0, 0, 0
+  local wat = {}   -- BUG-250: the hovered tiles that showed a brook or river (the scan summary's brook distance)
   for _, t in ipairs(tiles) do
+    if t.water and type(t.at) == 'table' and #wat < 16 then wat[#wat + 1] = {t.at[1], t.at[2]} end
     if t.terrain then   -- BUG-229: tiles whose biome DF does not embark on (mountain, lake, ocean)
       nter = nter + 1
       if t.terrain == 'mountain' or t.terrain == 'water' then nmw = nmw + 1 end
@@ -339,6 +429,7 @@ local function merge_tiles(rec, tiles)
   if #nb > 0 then rec.neighbors = nb end
   rec.tiles = {n = #tiles, water = nw, wood = nt}
   if nter > 0 then rec.tiles.terrain, rec.tiles.mw = nter, nmw end
+  if #wat > 0 then rec.tiles.water_at = wat end
   return rec
 end
 S.merge_tiles = merge_tiles
@@ -354,7 +445,7 @@ end
 S.json_key = json_key
 
 -- read the panel of one hovered tile (the rectangle was shifted there by local.place)
-function S.tile_read(n, rx, ry)
+function S.tile_read(n, rx, ry, at)
   return {id = 'site.tile.' .. n, live = 'L0', optional = true, timeout_ms = 15000,
     wait = function(v) return kind_in(v, 'placing') end,
     act = function(ui, v, ctx, w, mem)
@@ -369,6 +460,7 @@ function S.tile_read(n, rx, ry)
         if mem.n > 16 then return 'skip', 'tile ' .. n .. ' not read' end
         return 'wait', 'waiting for tile ' .. n
       end
+      rec.at = at   -- BUG-250: the hovered embark tile (embark --here and the brook distance use it)
       ctx.tile_recs = ctx.tile_recs or {}
       ctx.tile_recs[#ctx.tile_recs + 1] = rec
       local gob = ''
@@ -380,20 +472,171 @@ function S.tile_read(n, rx, ry)
     done = function() return false, 'reading tile' end}
 end
 
-local function record(ctx, tag, v, rec)
-  rec = merge_tiles(rec, ctx.tile_recs)
+-- a deep copy of a panel record (merge_tiles changes the record it gets)
+local function copy(t)
+  if type(t) ~= 'table' then return t end
+  local o = {}
+  for k, x in pairs(t) do o[k] = copy(x) end
+  return o
+end
+S.copy = copy
+
+-- where = {world, emb, size, hover} (hover scan, embark --here); default: the rectangle on the screen.
+-- The row keeps the hovered tiles' records as `parts` ({at = {x, y}, ...}): embark --here gates a rectangle placed
+-- by hand on them (BUG-250).
+local function record(ctx, tag, v, rec, where)
+  local parts = ctx.tile_recs
+  rec = merge_tiles(rec, parts)
   ctx.tile_recs = nil
-  local cs = v.cs
-  local world = {cs.emb_min[1] // 16, cs.emb_min[2] // 16}
-  local size = cs.emb_max and {cs.emb_max[1] - cs.emb_min[1] + 1, cs.emb_max[2] - cs.emb_min[2] + 1}
-  local verdict = checklist.evaluate(rec, ctx.rules, {world = world, size = size})
+  if not where then
+    local cs = v.cs
+    where = {world = {cs.emb_min[1] // 16, cs.emb_min[2] // 16}, emb = {cs.emb_min[1], cs.emb_min[2]},
+      size = cs.emb_max and {cs.emb_max[1] - cs.emb_min[1] + 1, cs.emb_max[2] - cs.emb_min[2] + 1}}
+  end
+  local verdict = checklist.evaluate(rec, ctx.rules, {world = where.world, size = where.size})
   ctx.results = ctx.results or {}
-  local row = {tag = tag, world = world, emb = {cs.emb_min[1], cs.emb_min[2]}, size = size,
+  local row = {tag = tag, world = where.world, emb = where.emb, size = where.size, hover = where.hover,
     verdict = verdict.verdict, score = verdict.score, fails = verdict.fails, warns = verdict.warns,
-    unknown = verdict.unknown, items = verdict.items, rec = rec}
+    unknown = verdict.unknown, items = verdict.items, rec = rec, parts = parts}
   ctx.results[#ctx.results + 1] = row
   ctx.last = row
   return 'done', tag .. ' ' .. verdict.verdict .. ' ' .. verdict.score
+end
+
+---------------------------------------------------------------- BUG-247: scan by hover only
+-- Run 15d (i4): the rectangle followed the mouse only on the first hold after a change, the panel ALWAYS. The hover
+-- scan never needs the rectangle: per candidate world tile it hovers a 4x4 grid of embark tiles (camera moved so
+-- the fixed held pixel lies on the tile; hovered tile = camera + floor((P - C) / s) + hover_k) and reads each panel
+-- twice alike; the row merges them (no size: the rectangle is placed later, by hand or by embark).
+function S.enter_placing()
+  return {id = 'local.embark', live = 'L0', tries = 4,
+    wait = function(v) return kind_in(v, 'local', 'placing') end,
+    act = function(ui, v)
+      if kind_in(v, 'placing') then return 'done', 'placing' end
+      if popup_abort(v) then tap(ui, v, 'Abort', {exact = true}) return nil, 'closing popup' end
+      if not tap(ui, v, 'Embark', {exact = true, from_bottom = true}) then return nil, 'no Embark button' end
+      return nil, 'Embark button'
+    end,
+    done = function(v) return kind_in(v, 'placing'), v:kind() end}
+end
+
+function S.hover_tile(n, tx, ty, cfg)
+  local s = cfg.local_tile_px or 16
+  return {id = 'site.hover.' .. n, live = 'untested', optional = true, timeout_ms = 20000, tries = 6,
+    wait = function(v) return kind_in(v, 'placing') end,
+    act = function(ui, v, ctx, w, mem)
+      if popup_abort(v) then ui:release(); tap(ui, v, 'Abort', {exact = true}) mem.held = nil return nil, 'closing popup' end
+      if not mem.held then
+        local busy, msg = mouse_ready(ui, ctx, w, cfg)
+        if busy then return nil, msg end
+        local zc = v.cs and v.cs.cam_local
+        if not zc then return 'fail', 'no local camera' end
+        local kh = cfg.hover_k or {0, 0}
+        local p, cx, cy = hold_pixel(ui, ctx, s)
+        local cam = {tx - kh[1] - (p[1] - cx) // s, ty - kh[2] - (p[2] - cy) // s}
+        w.camera('local', cam[1], cam[2])
+        ui:wait(cfg.local_camera_ms or 300)
+        ui:hold(p[1], p[2])
+        mem.held, ctx.p_px, ctx.p_c = cam, {p[1], p[2]}, {cx, cy}
+        return nil, 'hovering ' .. tx .. ',' .. ty .. ' (camera ' .. cam[1] .. ',' .. cam[2] .. ')'
+      end
+      local zc = v.cs and v.cs.cam_local
+      if zc and (zc[1] ~= mem.held[1] or zc[2] ~= mem.held[2]) then mem.held = nil return nil, 'camera moved' end
+      local rec = panel.parse(v)
+      local key = rec.read > 0 and json_key(rec)
+      if not key or key ~= mem.key then
+        mem.key = key
+        mem.n = (mem.n or 0) + 1
+        if mem.n > 16 then return 'skip', 'tile ' .. tx .. ',' .. ty .. ' not read' end
+        return 'wait', 'waiting for the panel of ' .. tx .. ',' .. ty
+      end
+      rec.at = {tx, ty}
+      ctx.tile_recs = ctx.tile_recs or {}
+      ctx.tile_recs[#ctx.tile_recs + 1] = rec
+      return 'done', 'tile ' .. tx .. ',' .. ty .. ': ' .. tostring(rec.trees) .. '/' .. tostring(rec.water or '-') ..
+        '/' .. tostring(rec.aquifer) .. '/' .. tostring(rec.soil)
+    end,
+    done = function() return false, 'reading tile' end}
+end
+
+function S.hover_record(tag, wx, wy, ex, ey)
+  return {id = 'site.hover.read', live = 'untested',
+    act = function(ui, v, ctx)
+      ui:release()
+      local tiles = ctx.tile_recs or {}
+      local base = copy(tiles[1]) or {read = 0, warnings = {}, rivers = {}, neighbors = {}}
+      base.at = nil
+      return record(ctx, tag, v, base, {world = {wx, wy}, emb = {ex, ey}, hover = true})
+    end}
+end
+
+local function hover_cand(out, c, cfg, tag)
+  local ex = 16 * c[1] + (c[3] or cfg.default_local[1])
+  local ey = 16 * c[2] + (c[4] or cfg.default_local[2])
+  out[#out + 1] = S.goto_world(c[1], c[2], cfg)
+  out[#out + 1] = S.enter_placing()
+  local n = 0
+  for dy = 0, 3 do
+    for dx = 0, 3 do
+      n = n + 1
+      out[#out + 1] = S.hover_tile(n, ex + dx, ey + dy, cfg)
+    end
+  end
+  out[#out + 1] = S.hover_record(tag, c[1], c[2], ex, ey)
+end
+
+---------------------------------------------------------------- BUG-250: embark --here
+-- Run 15d: local.place failed, the player placed the rectangle by hand (and opened its Confirm popup), then had to
+-- click Confirm himself: no checklist gate, no accept.log. embark --here takes the rectangle on the screen (popup
+-- open) and gates it on the panels read before (embark.py passes the rows of earlier scan/embark results as
+-- spec.prior): the hovered tiles that lie inside the rectangle, and a row of exactly this rectangle; the popup's
+-- warning sentences are merged in. No panel of the rectangle read: refused.
+local function inside(at, m, x)
+  return type(at) == 'table' and at[1] >= m[1] and at[1] <= x[1] and at[2] >= m[2] and at[2] <= x[2]
+end
+function S.here_rec(prior, m, x)
+  local parts, seen, exact = {}, {}, nil
+  for _, row in ipairs(prior or {}) do
+    local e, sz = row.emb, row.size
+    if not exact and type(e) == 'table' and e[1] == m[1] and e[2] == m[2] and type(sz) == 'table'
+      and sz[1] == x[1] - m[1] + 1 and sz[2] == x[2] - m[2] + 1 and type(row.rec) == 'table' then
+      exact = row
+    end
+    for _, p in ipairs(row.parts or {}) do
+      local k = type(p.at) == 'table' and (p.at[1] .. ',' .. p.at[2])
+      if k and not seen[k] and inside(p.at, m, x) then seen[k] = true; parts[#parts + 1] = p end
+    end
+  end
+  local base = exact and copy(exact.rec) or (parts[1] and copy(parts[1]))
+  if not base then return nil end
+  base.at = nil
+  return {base = base, parts = parts, exact = exact ~= nil, tag = exact and exact.tag}
+end
+
+function S.here(tag, prior)
+  return {id = 'site.here', live = 'untested', timeout_ms = 15000,
+    wait = function(v) return kind_in(v, 'placing', 'local') end,
+    act = function(ui, v, ctx)
+      if not (cell(v, 'Confirm') and popup_abort(v)) then
+        return 'fail', 'no Confirm popup: place the rectangle and click it so its Confirm popup is open, then embark --here'
+      end
+      local m, x = v.cs and v.cs.emb_min, v.cs and v.cs.emb_max
+      if not (m and x) then return 'fail', 'no rectangle on the screen' end
+      local pick = S.here_rec(prior, m, x)
+      if not pick then
+        return 'fail', string.format('no panel read for the rectangle %d,%d-%d,%d: scan it first (embark.py scan %d,%d ' ..
+          '--hover or --tiles)', m[1], m[2], x[1], x[2], m[1] // 16, m[2] // 16)
+      end
+      ctx.here = {m[1], m[2]}
+      ctx.warnings = ctx.warnings or {}
+      local want = (x[1] - m[1] + 1) * (x[2] - m[2] + 1)
+      if #pick.parts < want then
+        ctx.warnings[#ctx.warnings + 1] = string.format('site.here: %d of %d tiles of the rectangle were hovered%s',
+          #pick.parts, want, pick.exact and (', plus the read of ' .. tostring(pick.tag)) or '')
+      end
+      ctx.tile_recs = #pick.parts > 0 and pick.parts or nil
+      return record(ctx, tag, v, merge_popup(pick.base, panel.parse(v)))
+    end}
 end
 -- Stages (mem.stage): 'panel' (hovered; read the panel, then give the mouse focus back) ->
 -- 'click' (unfocused: the rectangle no longer moves; if it is still the target, click it) ->
@@ -500,13 +743,18 @@ end
 -- FAILED passes only if it is named in `accept` with a reason (FR-08, embark.py --accept ID --reason TEXT: a
 -- known trade-off such as no metal ore); there is no blanket waiver. Used waivers and acceptances (with their
 -- reason) go into the run warnings.
-function S.gate(waive, accept)
+-- BUG-248 (Run 15 Guildcleans, Earthboat): 'stone' was accepted on deep-soil sites and the forts later had no hard
+-- stone for levers, mechanisms and moods. Waiving or accepting a criterion of checklist.NEEDS_PLAN ('stone') now
+-- needs an explore-first plan (embark.py --explore-first TEXT: how the fort reaches stone in its first season); the
+-- plan goes into the warnings.
+function S.gate(waive, accept, plan)
   local named, took, why = {}, {}, {}
   for _, id in ipairs(waive or {}) do named[id] = true end
   for _, a in ipairs(accept or {}) do
     local id = type(a) == 'table' and a.id or a
     took[id], why[id] = true, type(a) == 'table' and a.why or nil
   end
+  local planned = type(plan) == 'string' and #plan:gsub('^%s+', ''):gsub('%s+$', '') >= 10
   return {id = 'site.gate', live = 'untested',
     act = function(ui, v, ctx)
       for id in pairs(named) do
@@ -516,6 +764,14 @@ function S.gate(waive, accept)
         if not checklist.ACCEPTABLE_SET[id] then return 'fail', 'cannot accept ' .. tostring(id) end
         if type(why[id]) ~= 'string' or #why[id]:gsub('^[ \t]+', '') < 3 then
           return 'fail', 'accepting ' .. id .. ' needs a reason'
+        end
+      end
+      for _, set in ipairs({named, took}) do
+        for id in pairs(set) do
+          if checklist.NEEDS_PLAN[id] and not planned then
+            return 'fail', (set == named and 'waiving ' or 'accepting ') .. id .. ' needs an explore-first plan ' ..
+              '(embark.py --explore-first TEXT, 10+ characters): ' .. checklist.NEEDS_PLAN[id]
+          end
         end
       end
       local r = ctx.last
@@ -535,6 +791,9 @@ function S.gate(waive, accept)
       for _, id in ipairs(accepted) do
         ctx.warnings[#ctx.warnings + 1] = 'site.gate: accepted ' .. id .. ' (' .. why[id] .. ')'
       end
+      if planned and (named.stone or took.stone) then
+        ctx.warnings[#ctx.warnings + 1] = 'site.gate: explore first (' .. plan .. ')'
+      end
       local notes = {}
       if #used > 0 then notes[#notes + 1] = 'waived ' .. table.concat(used, ',') end
       if #accepted > 0 then notes[#notes + 1] = 'accepted ' .. table.concat(accepted, ',') end
@@ -548,7 +807,8 @@ function S.confirm(ex, ey)
     wait = function(v) return cell(v, 'Confirm') ~= nil end,
     act = function(ui, v, ctx, w, mem)
       if not mem.Confirm then
-        local ok, why = same_rect(v, ex, ey)
+        local here = ctx.here or {}   -- embark --here: the rectangle site.here read
+        local ok, why = same_rect(v, ex or here[1] or -1, ey or here[2] or -1)
         if not ok then return 'fail', why end
         -- the popup freezes the rectangle; drop the mouse injector before DF changes screens
         ui:release()
@@ -688,19 +948,114 @@ end
 -- live L6 (Perplexrooms): the kernel erased the intro popup ("... Strike the earth!") from the popup
 -- vector and no dwarf ever took a job; Okay clicked like a player starts the fort (Castlerisen,
 -- Paddletribes). So the embark run ends by clicking it, before `dfllm adopt`.
-function S.intro()
-  return {id = 'fort.intro', live = 'L6', timeout_ms = 120000, tries = 3, optional = true,
+-- BUG-246 (Run 15c, --play-now): the popup that stayed open read "A Dwarven Outpost ... Okay" without a visible
+-- "Strike the earth", and the fort shows up a few polls before the popup is drawn. So any of these markers is the
+-- intro, the step looks for it for intro_polls polls (about 10 s) before it says there is none, and Okay is
+-- clicked again (at most 3 times) when the popup is still open 12 polls after a click. Okay is clicked only while a
+-- marker is shown.
+S.INTRO = {'Strike the earth', 'Dwarven Outpost', 'expedition has arrived'}
+function S.intro_shown(v)
+  for _, m in ipairs(S.INTRO) do
+    if v:has(m) then return m end
+  end
+  return nil
+end
+function S.intro(cfg)
+  local polls = (cfg and cfg.intro_polls) or 40
+  return {id = 'fort.intro', live = 'L6', timeout_ms = 120000, tries = 4, optional = true,
     wait = function(v) return kind_in(v, 'fort') end,
     act = function(ui, v, ctx, w, mem)
-      if not v:has('Strike the earth') then return 'done', 'no intro popup' end
-      return press_once(ui, v, mem, 'Okay', {exact = true})
+      local m = S.intro_shown(v)
+      if not m then
+        if mem.clicks then return 'done', 'intro popup closed' end
+        mem.n = (mem.n or 0) + 1
+        if mem.n > polls then return 'done', 'no intro popup' end
+        return 'wait', 'waiting for the intro popup'
+      end
+      if (mem.clicks or 0) >= 3 then return 'fail', 'intro popup ("' .. m .. '") still open after 3 clicks on Okay' end
+      mem.since = (mem.since or 0) + 1
+      if mem.clicks and mem.since < 12 then return 'wait', 'clicked Okay, waiting' end
+      if not cell(v, 'Okay') then return 'wait', 'intro popup ("' .. m .. '") without an Okay button yet' end
+      tap(ui, v, 'Okay', {exact = true})
+      mem.clicks, mem.since, mem.mark = (mem.clicks or 0) + 1, 0, m
+      return nil, 'clicked Okay on the intro popup ("' .. m .. '")'
     end,
-    done = function(v) return not v:has('Strike the earth'), 'intro popup open' end}
+    done = function(v, ctx, mem)
+      if S.intro_shown(v) then return false, 'intro popup open' end
+      if mem.clicks then return true, 'intro popup ("' .. tostring(mem.mark) .. '") closed by Okay' end
+      return false, 'no intro popup yet'
+    end}
+end
+
+---------------------------------------------------------------- BUG-250: save under a new name
+-- Run 15c/15d: "Save and continue playing" under a new name had no tool. Live: simulateInput LEAVESCREEN does not
+-- open the Esc menu in fort mode (15c), {_STRING = ...} types nothing into the name field, STRING_A<code> per
+-- character plus SELECT does (15d). So: fort.menu waits for the Esc menu (embark.py save-as posts one Esc key to
+-- this DF's window, as a player presses it), the menu entry is clicked once, the old name is erased (STRING_A000 =
+-- backspace) and the new one typed key by key, the field must show it before SELECT, and the run ends when
+-- dfhack.getSavePath() names the new folder and the menu is gone.
+S.SAVE_LABEL = 'Save and continue playing'
+local function save_named(v, name)
+  local p = tostring(v.save_path or ''):gsub('\\', '/')
+  return p:sub(-(#name + 1)) == '/' .. name
+end
+S.save_named = save_named
+
+function S.save_steps(name, cfg)
+  local back = (cfg and cfg.save_erase) or 48
+  return {
+    -- fort.menu logs whether the menu was open; embark.py posts Esc only during fort.menu.wait after the log line
+    -- 'fort.menu: Esc menu not open' (an Esc on an open menu would close it)
+    {id = 'fort.menu', live = 'untested',
+     wait = function(v) return kind_in(v, 'fort') end,
+     act = function(ui, v)
+       if v:has(S.SAVE_LABEL) then return 'done', 'Esc menu open' end
+       return 'done', 'Esc menu not open'
+     end},
+    {id = 'fort.menu.wait', live = 'untested', timeout_ms = 60000,
+     wait = function(v) return kind_in(v, 'fort') end,
+     act = function(ui, v)
+       if v:has(S.SAVE_LABEL) then return 'done', 'Esc menu open' end
+       return 'wait', 'waiting for the Esc menu (press Esc in DF; embark.py save-as posts it)'
+     end,
+     done = function(v) return v:has(S.SAVE_LABEL), 'Esc menu not open' end},
+    {id = 'fort.save', live = 'untested', timeout_ms = 30000, tries = 3,
+     wait = function(v) return v:has(S.SAVE_LABEL) end,
+     act = function(ui, v, ctx, w, mem) return press_once(ui, v, mem, S.SAVE_LABEL, {exact = true}) end,
+     done = function(v) return not v:has(S.SAVE_LABEL), 'menu still shown' end},
+    {id = 'fort.save.name', live = 'untested', timeout_ms = 120000, tries = 3,
+     wait = function(v) return kind_in(v, 'fort') and not v:has(S.SAVE_LABEL) end,
+     act = function(ui, v, ctx, w, mem)
+       if not mem.typed then
+         for _ = 1, back do ui:key('STRING_A000', {after_ms = 20}) end
+         for i = 1, #name do ui:key(string.format('STRING_A%03d', name:byte(i)), {after_ms = 40}) end
+         mem.typed = true
+         return nil, 'typed "' .. name .. '"'
+       end
+       if not mem.sel then
+         if not v:has(name) then return 'fail', 'the name field does not show "' .. name .. '" after typing' end
+         ui:key('SELECT')
+         mem.sel = true
+         return nil, 'SELECT'
+       end
+       return 'wait', 'saving'
+     end,
+     done = function(v, ctx, mem) return mem.sel == true, 'name typed' end},
+    {id = 'fort.save.done', live = 'untested', timeout_ms = 600000,
+     act = function(ui, v)
+       if save_named(v, name) and kind_in(v, 'fort') and not v:has(S.SAVE_LABEL) then
+         return 'done', 'saved as ' .. tostring(v.save_path)
+       end
+       return 'wait', 'saving (save path ' .. tostring(v.save_path) .. ')'
+     end,
+     done = function(v) return save_named(v, name) and not v:has(S.SAVE_LABEL), 'save path ' .. tostring(v.save_path) end},
+  }
 end
 
 ---------------------------------------------------------------- run specs
--- spec = {v=2, id, mode='newgame'|'scan'|'embark'|'prep', world='Zilirr', cands={{wx,wy,lx,ly}},
---         site={wx,wy,lx,ly}, waive={criterion ids}, accept={{id, why}}, play_now=bool, allow_unspent=bool}
+-- spec = {v=2, id, mode='newgame'|'scan'|'embark'|'here'|'prep'|'saveas', world='Zilirr', world_folder, portable,
+--         cands={{wx,wy,lx,ly}}, hover=bool, site={wx,wy,lx,ly}, waive={criterion ids}, accept={{id, why}},
+--         explore_first=TEXT, prior={rows of earlier results}, name=save folder, play_now=bool, allow_unspent=bool}
 local function place_and_read(out, c, cfg, tag, tiles)
   local ex = 16 * c[1] + (c[3] or cfg.default_local[1])
   local ey = 16 * c[2] + (c[4] or cfg.default_local[2])
@@ -715,7 +1070,7 @@ local function place_and_read(out, c, cfg, tag, tiles)
         local st = S.place(rx, ry, cfg)
         st.id, st.optional = 'local.place.t' .. n, true
         out[#out + 1] = st
-        out[#out + 1] = S.tile_read(n, rx, ry)
+        out[#out + 1] = S.tile_read(n, rx, ry, {ex + dx, ey + dy})
       end
     end
   end
@@ -726,7 +1081,7 @@ end
 
 local function prep_steps(out, spec, cfg, loadout)
   out[#out + 1] = S.prepare(spec.play_now)
-  if spec.play_now then out[#out + 1] = S.intro(); return end
+  if spec.play_now then out[#out + 1] = S.intro(cfg); return end
   for i, role in ipairs(loadout.roles) do out[#out + 1] = S.skills(i, role, cfg) end
   out[#out + 1] = S.tab('items', 'prep_items', cfg)
   for _, it in ipairs(loadout.items) do out[#out + 1] = S.buy(it, 'prep_items', cfg) end
@@ -735,25 +1090,39 @@ local function prep_steps(out, spec, cfg, loadout)
   out[#out + 1] = S.tab('items', 'prep_items', cfg)
   for _, n in ipairs(loadout.rest) do out[#out + 1] = S.buy({name = n, add = 999, rest = true}, 'prep_items', cfg) end
   out[#out + 1] = S.embark(spec.allow_unspent)
-  out[#out + 1] = S.intro()
+  out[#out + 1] = S.intro(cfg)
 end
 
 function S.build(spec, cfg, loadout)
   if spec.accept_review ~= nil then error('accept_review was removed: name each waived criterion in waive') end
   local out = {}
   if spec.mode == 'newgame' then
-    out = S.newgame(spec.world)
+    out = S.newgame(spec.world, spec.world_folder, spec.portable)
   elseif spec.mode == 'scan' then
     for n, c in ipairs(spec.cands or {}) do
-      place_and_read(out, c, cfg, spec.id .. '-' .. n, spec.tiles == true)
-      out[#out + 1] = S.abort_popup()
+      if spec.hover then   -- BUG-247: panels by hover only, no rectangle
+        hover_cand(out, c, cfg, spec.id .. '-' .. n)
+      else
+        place_and_read(out, c, cfg, spec.id .. '-' .. n, spec.tiles == true)
+        out[#out + 1] = S.abort_popup()
+      end
     end
   elseif spec.mode == 'embark' then
     -- read, gate and confirm the same placed rectangle; the popup stays open in between
     local ex, ey = place_and_read(out, spec.site, cfg, spec.id, spec.tiles ~= false)
-    out[#out + 1] = S.gate(spec.waive, spec.accept)
+    out[#out + 1] = S.gate(spec.waive, spec.accept, spec.explore_first)
     out[#out + 1] = S.confirm(ex, ey)
     prep_steps(out, spec, cfg, loadout)
+  elseif spec.mode == 'here' then  -- BUG-250: the rectangle on the screen (popup open), gated on earlier reads
+    out[#out + 1] = S.here(spec.id, spec.prior)
+    out[#out + 1] = S.gate(spec.waive, spec.accept, spec.explore_first)
+    out[#out + 1] = S.confirm()
+    prep_steps(out, spec, cfg, loadout)
+  elseif spec.mode == 'saveas' then  -- BUG-250
+    if type(spec.name) ~= 'string' or not spec.name:match('^[%w][%w _%-]*$') then
+      error('saveas: spec.name must be letters, digits, space, _ or -')
+    end
+    out = S.save_steps(spec.name, cfg)
   elseif spec.mode == 'prep' then
     prep_steps(out, spec, cfg, loadout)
   elseif spec.mode == 'steps' then  -- Lua-built step list (embark.lua 'click')
