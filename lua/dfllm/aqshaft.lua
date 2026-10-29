@@ -394,9 +394,7 @@ function A.observe(X, P, pos, src)
   local x, y, z = int(type(pos) == 'table' and pos[1]), int(type(pos) == 'table' and pos[2]),
                   int(type(pos) == 'table' and pos[3])
   if x and y and z then
-    local seen = false
-    for _, p in ipairs(r.pts) do if p[1] == x and p[2] == y and p[3] == z then seen = true end end
-    if not seen and #r.pts < A.CFG.obs_pts then r.pts[#r.pts + 1] = {x, y, z, 'new'} end
+    A.add_pt(r, x, y, z)
     X.level(z)
   end
   if new then
@@ -410,12 +408,22 @@ function A.observe(X, P, pos, src)
   return true
 end
 
+-- a tile A.tick seals around once it is dug (dedupe, at most obs_pts): a reported damp tile or a seeping own tile
+function A.add_pt(r, x, y, z)
+  r.pts = type(r.pts) == 'table' and r.pts or {}
+  for _, p in ipairs(r.pts) do if p[1] == x and p[2] == y and p[3] == z then return false end end
+  if #r.pts >= A.CFG.obs_pts then return false end
+  r.pts[#r.pts + 1] = {x, y, z, 'new'}
+  return true
+end
+
 function A.observing(rt, id)
   local r = type(rt) == 'table' and type(rt.aq) == 'table' and rt.aq[id] or nil
   return type(r) == 'table' and not r.heavy and (r.k == 'obs' or r.k == 'shaft') and r or nil
 end
 
--- a wet own tile t (flow f <= seep_max) of an observing project: AQ_SEEP once, true when the flow rises (heavy)
+-- a wet own tile t (flow f <= seep_max) of an observing project: AQ_SEEP once (and a point A.tick seals around), true
+-- when the flow rises (heavy)
 function A.wet(X, P, t, f)
   local r = A.observing(X.rt, P.id)
   if not r or r.k ~= 'obs' then return false end
@@ -431,6 +439,9 @@ function A.wet(X, P, t, f)
     r.wet[k] = s
   end
   if s[#s] ~= f then push(s, f, A.CFG.samples) end
+  -- BUG-219: DF reports damp for a tile with an aquifer neighbour (diagonals too), so later dug tiles seep beside rough
+  -- aquifer walls no report named: the seeping tile itself is sealed around as well
+  if first then A.add_pt(r, int(t[1]), int(t[2]), int(t[3])) end
   X.dirty()
   if first then
     X.emit('AQ_SEEP', 'B', string.format('%s: seepage %d/7 at %s (observe)', P.id, f, k),
@@ -454,7 +465,7 @@ function A.heavy_obs(X, P, pos, f, why)
   return true
 end
 
--- end of every run: observe mode's seal: once a reported damp tile is dug, its natural rough stone walls that are not
+-- end of every run: observe mode's seal: once a reported damp tile (or a seeping own tile) is dug, its natural rough stone walls that are not
 -- the project's own tiles are smoothed (priority 1, one quickfort call per level; soil walls stay: noted); records of
 -- projects that left the list are dropped once nothing is left to do
 function A.tick(X)

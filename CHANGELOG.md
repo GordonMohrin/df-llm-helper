@@ -1,5 +1,18 @@
 # CHANGELOG dfpilot
 
+## Live round 4 aquifer fix: observe mode seals around seeping tiles too (BUG-219, 2026-10-29; offline, live-untested)
+- **Why:** live round 4 and its skeptic: observe mode smoothed only the walls beside the reported damp tile. DF reports damp
+  for a tile with an aquifer neighbour (diagonals too), so later dug tiles seeped beside rough aquifer walls no report named
+  (`AQ_SEEP seepage 1/7 at 46,67,124 (observe)`, 45,67 and 47,67 still rough; c1a1866e 48,71,124 flow 1), and both
+  projects finished with them open. `A.wet` recorded the seepage but never added the tile to `r.pts`.
+- **What changed:** aqshaft.lua `A.add_pt` (module field: dedupe, at most `obs_pts`); `A.observe` and now `A.wet` (first
+  sample of a newly wet own tile) add the point, so `A.tick` smooths that tile's rough stone walls on the next run.
+- **Safety:** no new verb, event, config key or RULES row; no contract change. Wet points share the `obs_pts` cap (16) with
+  report points; `r.wet` itself holds at most `wet_keep` (6) tiles.
+- **Tests (each fails on 5e9e719):** tests/lua/test_bug219_seep_seal.lua.
+- **Live check:** on the next observe dig with an AQ_SEEP at x,y,z: kern.log `observe: N walls beside the damp tile x,y,z
+  smoothed` for that position, the rough walls orthogonal to it designated for smoothing, the seepage stops or stays <= 1/7.
+
 ## Live round 3 plan fixes: propose = check, core stages placeable, fresh fort, order libraries (BUG-195..198, 2026-10-29; offline, live-untested)
 - **Why:** live round 3 and its skeptic: on Trussroads `plan propose` drafted fortcore@same stage 2 that `plan check` refused
   (`overlaps project(s) y721s3b2`, a refuge_beds room of the y721 minimal plan) (BUG-195). On the fresh fort Earthboat propose
