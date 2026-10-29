@@ -6,14 +6,11 @@
 local T = require('testlib')
 local X = require('wp6_world')
 
--- the vanilla training raws (idx 6-8 in this fake world), skill = the class
-for _, w in ipairs({{'ITEM_WEAPON_AXE_TRAINING', 'AXE'}, {'ITEM_WEAPON_SWORD_SHORT_TRAINING', 'SWORD'},
-                    {'ITEM_WEAPON_SPEAR_TRAINING', 'SPEAR'}}) do
-  X.WEAPONS[#X.WEAPONS + 1] = w
-  X.WIDX[w[1]] = #X.WEAPONS - 1
+-- the vanilla training raws (idx 6-8 in the fake world, wp6_world.lua X.WEAPONS since FR-100), skill = the class
+for _, t in ipairs({'ITEM_WEAPON_AXE_TRAINING', 'ITEM_WEAPON_SWORD_SHORT_TRAINING', 'ITEM_WEAPON_SPEAR_TRAINING',
+                    'ITEM_WEAPON_HAMMER_WAR'}) do
+  assert(X.WIDX[t], 'wp6_world has ' .. t)
 end
-X.WEAPONS[#X.WEAPONS + 1] = {'ITEM_WEAPON_HAMMER_WAR', 'HAMMER'}
-X.WIDX['ITEM_WEAPON_HAMMER_WAR'] = #X.WEAPONS - 1
 
 local function mil_world(opts)
   local W = X.world(opts)

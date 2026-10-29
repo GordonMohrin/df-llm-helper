@@ -75,6 +75,8 @@ def test_state_slots_validate_with_wp6_keys(run):
     best = max(docs, key=lambda d: d["seq"])
     rot = best["mil"].pop("rot")                                # FR-79: squad B is a militia squad: its rotation line
     assert list(rot) == ["B"] and rot["B"]["w"] == "9-11" and rot["B"]["z"] == 3 and rot["B"]["e"] > 0, rot
+    kit = best["mil"].pop("kit")                                # FR-100: soldiers fully equipped
+    assert kit["n"] == 8 and kit["armor"] == 8 and kit["tr"] == 0 and 0 <= kit["full"] <= 8, kit
     assert best["mil"] == {"squads": 3, "soldiers": 8, "worn": 100, "cv": 13, "metal_pct": 0, "on_station": 0}
     assert best["ready"]["lvl"] == 2 and best["ready"]["fail"] == ["metal<20%"]       # D-01 = B: option_a is gone
     assert best["ready"]["audit"]["ok"] == 1 and best["ready"]["audit"]["min_traps"] == 35

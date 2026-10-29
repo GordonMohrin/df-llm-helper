@@ -884,6 +884,10 @@ def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
     if m:
         out.append(f"mil {m['squads']}sq {m['soldiers']}sol worn {m['worn']}% cv {m['cv']} metal {m['metal_pct']}%"
                    f" station {m['on_station']}")
+        kit = m.get("kit")
+        if kit and kit.get("n"):               # FR-100 (G18): armor + a weapon per soldier, wooden ones in training
+            extra.append(f"gear: {kit['full']}/{kit['n']} soldiers fully equipped (armor {kit['armor']}, weapon "
+                         f"{kit['weapon']}" + (f", wood {kit['wood']}" if kit.get("wood") else "") + ")")
         cap = m.get("cap")
         if cap:                                # Run 11: the melee squads follow the armor + weapon + shield sets
             extra.append(f"melee {cap['melee']}/{cap['want']} (gear sets {cap['sets']})"

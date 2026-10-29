@@ -90,6 +90,9 @@ T.test('real act: popcap runs pop-control set max-pop; squads from the UI are fi
       X.set_uniform(s, M.UNIFORM[sp.kind])
     end
   end)
+  -- FR-100: the shipped config puts the melee squads on training weapons, which re-specs the weapon slot through the real
+  -- act (df.squad_uniform_spec, not faked in this world); this test is about addToSquad and the pop cap
+  K.cfg.baseline.military.training = {on = false}
   H.run(W, 20, {skip = 9})
   H.run(W, 40, {paused = true})                         -- logs reach the files within 1 s
   T.eq(#cmds(W, 'squad_add'), 5)

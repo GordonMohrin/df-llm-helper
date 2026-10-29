@@ -49,6 +49,7 @@ local SL = require('dfllm.stations')       -- BUG-032: stations clear of the bri
 local ROT = require('dfllm.rotation')      -- FR-79: window edges, fairness ranking, swap plan (library, no module)
 
 local M = {name = 'military', every = {ticks = 3600}, verbs = {}, on = {}}
+M.KIT = require('dfllm.kit')               -- FR-100/101 (G18): per-soldier kit, training default, material refit (library)
 
 M.SQUADS = {{key = 'A', kind = 'melee'}, {key = 'B', kind = 'melee'}, {key = 'C', kind = 'xbow'}}
 M.SIZE = 10                 -- DF squads have 10 positions; position 0 is the leader
@@ -212,6 +213,7 @@ function M.conf(K)
     local x = int(rb[k])
     c.rot[k] = (x and x >= lim[1] and x <= lim[2]) and x or M.ROT_DEF[k]
   end
+  c.train = M.KIT.conf(b.training, type(K.plan) == 'table' and K.plan.military)   -- FR-100 (G18)
   return c
 end
 
@@ -1117,6 +1119,19 @@ end
 M.TRAINING = {AXE = 'ITEM_WEAPON_AXE_TRAINING', SWORD = 'ITEM_WEAPON_SWORD_SHORT_TRAINING',
               SPEAR = 'ITEM_WEAPON_SPEAR_TRAINING'}
 
+-- FR-101 (G18, Gordon: "sparring always with wooden weapons"): the training raw of a weapon class; a class without one
+-- (hammer, mace, whip, no weapon skill) takes its nearest relative (pike -> spear, dagger -> sword) or the configured
+-- fallback class (military.training.fallback, default SPEAR; 'none' = it keeps its weapon as before FR-101). nil for
+-- 'TRAINING' (the spec is one already) and the ranged classes (a crossbow squad never gets here)
+function M.train_token(K, cls)
+  if cls == 'TRAINING' or cls == 'CROSSBOW' or cls == 'BOW' then return nil end
+  local tok = cls and M.TRAINING[cls]
+  if tok then return tok end
+  local fb = M.tconf(K).fallback
+  if fb == 'none' then return nil end
+  return M.TRAINING[M.KIT.ALT[cls or ''] or fb]
+end
+
 -- the weapon class of a squad member's position: 'TRAINING' (a training weapon is the spec already), the skill of the
 -- weapon the position's spec names (df.job_skill name), else his best weapon skill (the class an individual choice
 -- would take), nil without any
@@ -1148,12 +1163,13 @@ function M.train_apply(K, s, only)
   for _, m in ipairs(members(s)) do
     if not only or only[m.pos] then
       local cls = M.weapon_class(m)
-      local tok = cls and M.TRAINING[cls]
+      local tok = M.train_token(K, cls)                 -- FR-101: a class without a variant takes the fallback's
       if cls == 'TRAINING' then held = held + 1
       elseif tok then
         if not by[tok] then by[tok] = {}; order[#order + 1] = tok end
         table.insert(by[tok], m.pos)
-        counts[cls] = (counts[cls] or 0) + 1
+        local tc = tok:match('^ITEM_WEAPON_(%u+)') or 'AXE'           -- counted by the training weapon's class
+        counts[tc] = (counts[tc] or 0) + 1
       else left[#left + 1] = {pos = m.pos, cls = cls or 'none'} end
     end
   end
@@ -1200,13 +1216,15 @@ local function ensure_weapons(K, k, s)
     end
   end
   local need, marked = {}, {}
+  local untrain, wooden = e.tr == 1 or e.un == 1, 0          -- FR-100 un: the default policy was withdrawn
   for _, m in ipairs(members(s)) do
     local ws = weapon_specs(m.p)
     local bad = #ws == 0 and (g ~= nil or nw_has(e, m.pos))
     if g and not bad then for _, sub in ipairs(ws) do if sub < 0 then bad = true end end end
-    if e.tr == 1 and not trn and not bad and M.weapon_class(m) == 'TRAINING' then bad = true end     -- review: see above
+    if untrain and not trn and not bad and M.weapon_class(m) == 'TRAINING' then bad = true; wooden = wooden + 1 end
     if bad then need[#need + 1] = m.pos; marked[m.pos] = true end
   end
+  if e.un == 1 and wooden == 0 then e.un, dirty = nil, true end
   -- BUG-023: tool specs beyond the spare tools are re-planned, the soldiers without that tool in hand first
   local ex, given = g and rt.wexcess, 0
   if ex then
@@ -2760,7 +2778,7 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
     for _, m in ipairs(members(s)) do nw_set(e, m.pos, true) end
   end
   e.uni, dirty = 1, true                  -- (the squad keeps its kind: military's own plan names it)
-  if e.tr then e.tr = nil end             -- FR-89: a metal kind ends the training policy
+  if kind ~= 'xbow' then e.tr, e.td = 0, nil end   -- FR-89: a metal kind ends the training policy (FR-100: for good)
   rt.kpi = nil
   return true, string.format('squad %s: %s uniform on %s positions', key, kind, tostring(res)), {squad = s.id}
 end
@@ -2787,7 +2805,7 @@ function M.uniform_training(K, s, key, e)
     return false, string.format('squad.uniform: no position has a training variant: %s',
                                 #tr.left > 0 and list(tr.left) or 'the squad has no soldiers')
   end
-  e.tr, dirty = 1, true
+  e.tr, e.td, dirty = 1, nil, true
   rt.kpi = nil
   local parts = {}
   for _, cls in ipairs({'AXE', 'SWORD', 'SPEAR'}) do
@@ -2813,7 +2831,7 @@ function M.training_need(K)
     if s then
       for _, m in ipairs(members(s)) do
         local cls = M.weapon_class(m)
-        local tok = cls ~= 'TRAINING' and cls and M.TRAINING[cls] or nil
+        local tok = M.train_token(K, cls)
         if cls == 'TRAINING' then
           for _, sub in ipairs(weapon_specs(m.p)) do
             local d = sub >= 0 and try(function() return dfhack.items.getSubtypeDef(df.item_type.WEAPON, sub) end)
@@ -3284,6 +3302,30 @@ local function off_reason(u, up, spos)
   return 'far'
 end
 
+-- FR-100 (G18): the per-soldier kit counts (state mil.kit): n soldiers, full = armor and a weapon, armor, weapon (any
+-- weapon in hand), wood (a training weapon in hand), tr = squads on the training policy. Cached KIT_TTL ticks (the KPIs
+-- are asked every few ticks; the kit changes over days: one game day)
+M.KIT_TTL = 1200
+function M.kit_stats(K)
+  local now = now_tick(K)
+  if rt.kit and rt.kit_t and now >= rt.kit_t and now - rt.kit_t < M.KIT_TTL then return rt.kit end
+  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads()}
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    for _, m in ipairs(s and members(s) or {}) do
+      local x = M.KIT.soldier(m.p, m.unit, roles(), is_metal)
+      t.n = t.n + 1
+      if x.armor then t.armor = t.armor + 1 end
+      if x.weapon then t.weapon = t.weapon + 1 end
+      if x.wood then t.wood = t.wood + 1 end
+      if x.armor and x.weapon then t.full = t.full + 1 end
+    end
+  end
+  rt.kit, rt.kit_t = t, now
+  return t
+end
+
 local function compute(K)
   local k = {squads = 0, soldiers = 0, worn = 0, cv = 0, metal_pct = 0, on_station = 0}
   local slots, worn, specs, cv, metal = 0, 0, 0, 0, 0
@@ -3358,6 +3400,70 @@ function M.squads(K)
   return r
 end
 
+---------------------------------------------------------------- FR-100/101 (G18): kit and training by default
+-- military.training as dfllm.kit reads it (config + plan), once per tick
+function M.tconf(K)
+  local now = now_tick(K)
+  if not (rt and rt.tc and rt.tc_t == now) then
+    local c = M.conf(K).train
+    if not rt then return c end
+    rt.tc, rt.tc_t = c, now
+  end
+  return rt.tc
+end
+
+-- squads on the training policy (state mil.kit.tr)
+function M.train_squads()
+  local n = 0
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    if e and e.tr == 1 then n = n + 1 end
+  end
+  return n
+end
+
+-- FR-100: a melee squad military made or adopted goes on the training policy (FR-89) unless the player turned it off
+-- for that squad (tr = 0: squad.uniform kind=melee); training.on = false (config or plan) takes back what the default set
+function M.train_default(K, k)
+  local e = st.sq[k]
+  if not e or e.kind == 'xbow' then return end
+  local on = M.tconf(K).on
+  if on and e.tr == nil then
+    e.tr, e.td, dirty = 1, 1, true
+    K.log('info', 'military: squad %s: training policy on by default (G18: sparring with wooden training weapons, real '
+          .. 'ones in any alert)', k)
+  elseif not on and e.tr == 1 and e.td == 1 then
+    e.tr, e.td, e.un, dirty = nil, nil, 1, true      -- un: ensure_weapons gives the wooden positions their real ones back
+    K.log('info', 'military: squad %s: training policy off (military.training off)', k)
+  end
+end
+
+-- FR-100: the material refit of squad k (dfllm.kit refit_plan): PEACE without danger, every refit_days per squad
+function M.refit(K, k, s, now)
+  local e = st.sq[k]
+  local days = M.tconf(K).refit_days
+  if not e or days == 0 then return end
+  if not e.rf or now < e.rf then e.rf, dirty = now, true; return end   -- first sight: DF gets refit_days to hand out the kit
+  if now - e.rf < days * M.KIT.DAY or M.danger(K) then return end
+  local mems = {}
+  for _, m in ipairs(members(s)) do
+    mems[#mems + 1] = {pos = m.pos, p = m.p, kit = M.KIT.soldier(m.p, m.unit, roles(), is_metal)}
+  end
+  local plan = M.KIT.refit_plan(mems, M.stock_mats)
+  e.rf, dirty = now, true
+  for _, r in ipairs(plan) do
+    local ok, res = K.act.squad_uniform(s.id, {mode = 'replace', positions = r.positions,
+                                               items = {{cat = r.cat, type = M.KIT.TYPE[r.cat], mat = r.mat}}})
+    if ok then
+      K.log('info', 'military: squad %s: %s of %d positions to %s material (%s)', k, r.cat, #r.positions, r.mat,
+            r.mat == 'metal' and 'free metal pieces cover them' or 'the slot stayed empty, other pieces lie free')
+    else
+      K.log('warn', 'military: squad %s: refit %s refused: %s', k, r.cat, tostring(res))
+    end
+  end
+  if #plan > 0 then rt.kpi, rt.kit = nil, nil end
+end
+
 ---------------------------------------------------------------- module
 function M.init(K)
   local p = K.persist.get('m.military')
@@ -3373,7 +3479,10 @@ function M.init(K)
         for _, p in ipairs(e.nw) do if int(p) then nw = nw or {}; nw[#nw + 1] = int(p) end end
       end
       st.sq[sp.key] = {id = int(e.id), kind = sp.kind, uni = int(e.uni) == 1 and 1 or 0,
-                       auto = int(e.auto) == 1 and 1 or nil, nw = nw, tr = int(e.tr) == 1 and 1 or nil}
+                       auto = int(e.auto) == 1 and 1 or nil, nw = nw,
+                       tr = (int(e.tr) == 1 or int(e.tr) == 0) and int(e.tr) or nil,   -- FR-100: 0 = off by the player
+                       td = int(e.td) == 1 and 1 or nil, rf = int(e.rf),              -- td: on by default; rf: last refit
+                       un = int(e.un) == 1 and 1 or nil}                               -- un: withdrawn, wooden ones go
     end
   end
   -- FR-79: rot[key] = {c = absolute month of the last window close whose members were credited, e = of the last one whose
@@ -3468,8 +3577,10 @@ function M.step(K, budget, ctx)
       local s = ensure_squad(K, sp, recruits)
       if s then
         if want > 0 and not leader_set(s) then seat_leader(K, sp.key, s, recruits) end   -- addToSquad needs one
+        M.train_default(K, sp.key)                                        -- FR-100 (G18)
         ensure_uniform(K, sp.key, s, want)
         ensure_weapons(K, sp.key, s)
+        if mode == 'PEACE' then M.refit(K, sp.key, s, now) end            -- FR-100: the armor's material fallback
         local rot = want > 0 and M.rot_on(K, sp.key)                      -- FR-79: the rotation owns the militia squad
         if rot then
           if M.rot_step(K, sp, s, want, now) then ensure_uniform(K, sp.key, s, want); ensure_weapons(K, sp.key, s) end
@@ -3525,6 +3636,10 @@ function M.state(K)
                on_station = k.on_station}
   local g = rt.gear                                  -- Run 11: the melee squads follow the gear
   if g then mil.cap = {sets = g.sets, melee = g.melee, want = g.want, xbow = g.xbow} end
+  local kt = M.kit_stats(K)                          -- FR-100 (G18): soldiers fully equipped, squads on wooden weapons
+  if kt.n > 0 then
+    mil.kit = {n = kt.n, full = kt.full, armor = kt.armor, weapon = kt.weapon, wood = kt.wood, tr = kt.tr}
+  end
   for key, info in pairs(rt.rot) do                  -- FR-79: the militia rotation per squad (counts, no names)
     local r = {}
     for f, v in pairs(info) do r[f] = v end

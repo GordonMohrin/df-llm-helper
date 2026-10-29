@@ -482,6 +482,11 @@ MILITARY_KEYS = ("A", "B", "C")
 # most members one game day changes (batches are a day apart), worn_min = no turnover of members who wear kit while the
 # army's worn % is below it (0 = never held)
 MILITARY_ROTATION_LIM: dict = {"on": "bool", "per_day": (1, 10), "worn_min": (0, 100)}
+# FR-100/101 (lua/dfllm/kit.lua KIT.DEF / KIT.REFIT_LIM, G18): military.training. on = every melee squad spars with wooden
+# training weapons (real ones in any alert; the plan's military.training wins), fallback = the training class of a weapon
+# class without a training raw (hammer, mace, whip, none; 'none' = it keeps its weapon), refit_days = days between two
+# material refits of a squad's empty armor slots (0 = never)
+MILITARY_TRAIN_LIM: dict = {"on": "bool", "fallback": ("AXE", "SWORD", "SPEAR", "none"), "refit_days": (0, 56)}
 
 
 def military_errors(path: str | Path | None = None) -> list[str]:
@@ -544,6 +549,22 @@ def military_errors(path: str | Path | None = None) -> list[str]:
                         errs.append(f"{name}: military.rotation.{rk}: true or false expected, got {rv!r}")
                 elif not is_int(rv, *lim):
                     errs.append(f"{name}: military.rotation.{rk}: int {lim[0]}..{lim[1]} expected, got {rv!r}")
+        elif k == "training":                                       # FR-100/101
+            if not isinstance(v, dict):
+                errs.append(f"{name}: military.training must be an object")
+                continue
+            for tk, tv in v.items():
+                lim = MILITARY_TRAIN_LIM.get(tk)
+                if lim is None:
+                    errs.append(f"{name}: military.training.{tk}: unknown key")
+                elif lim == "bool":
+                    if not isinstance(tv, bool):
+                        errs.append(f"{name}: military.training.{tk}: true or false expected, got {tv!r}")
+                elif isinstance(lim[0], str):
+                    if tv not in lim:
+                        errs.append(f"{name}: military.training.{tk}: one of {', '.join(lim)} expected, got {tv!r}")
+                elif not is_int(tv, *lim):
+                    errs.append(f"{name}: military.training.{tk}: int {lim[0]}..{lim[1]} expected, got {tv!r}")
         elif k in MILITARY_LIM:
             if not is_int(v, *MILITARY_LIM[k]):
                 lo, hi = MILITARY_LIM[k]

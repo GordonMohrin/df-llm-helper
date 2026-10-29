@@ -1376,6 +1376,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
         errs.append(f"military.pct {mil['pct']} < {share} (D-12 at pop {pop})")
     if doc["phase_target"] >= "P2" and mil["squads"]["melee"] < 1:
         warn.append("phase_target >= P2 but no melee squad")
+    warn.extend(kit_warnings(doc, s))                                  # FR-100 (G18)
     sup = doc.get("supply") or schema.PLAN_DEFAULTS["supply"]
     for k, m in SUPPLY_MIN.items():
         if sup[k] < m:
@@ -1624,6 +1625,24 @@ def metal_short(s: dict | None) -> bool | None:
         return st["mshort"] == 1
     worn = (s.get("mil") or {}).get("worn", (s.get("ready") or {}).get("worn"))
     return not _nat(worn) or worn < METAL_WORN
+
+
+def kit_warnings(doc: dict, s: dict | None) -> list[str]:
+    """FR-100 (Gordon's G18: every soldier armor + weapon, sparring always with wooden weapons): warnings of plan check.
+    military.training false while the plan wants melee squads (the squads spar with real weapons: wounds in training), and
+    soldiers short of armor or a weapon (state mil.kit) from P5 on, with what the kernel does about it."""
+    out: list[str] = []
+    mil = doc.get("military") or schema.PLAN_DEFAULTS["military"]
+    if doc["phase_target"] >= "P2" and mil["squads"]["melee"] >= 1 and mil.get("training") is False:
+        out.append("military.training false: the melee squads spar with real weapons (wounds in training; G18 wants "
+                   "wooden training weapons, the kernel swaps in the real ones in any alert)")
+    kit = ((s or {}).get("mil") or {}).get("kit") or {}
+    n = kit.get("n") if _nat(kit.get("n")) else 0
+    if doc["phase_target"] >= "P5" and n > 0 and kit.get("full", 0) < n:
+        out.append(f"gear: {kit.get('full', 0)}/{n} soldiers fully equipped (armor {kit.get('armor', 0)}, weapon "
+                   f"{kit.get('weapon', 0)}): economy orders the pieces (forge > leatherworks > bone at the craftsdwarf), "
+                   "military refits empty slots to any material; P6 wants kit 80 %")
+    return out
 
 
 def metal_gate(doc: dict, s: dict | None, fort: dict | None = None) -> tuple[list[str], list[str]]:
@@ -2209,7 +2228,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         "military": {"pct": max(pm["pct"], 20 if pop >= 60 else 15),
                      "squads": {"melee": max(melee, pm["squads"]["melee"] if prev else 0),
                                 "xbow": max(1 if target >= "P5" else 0, pm["squads"]["xbow"] if prev else 0)},
-                     "cv_min": pm["cv_min"]},
+                     "cv_min": pm["cv_min"], "training": pm.get("training", True) is not False},   # FR-100
         "supply": dict((prev or {}).get("supply") or schema.PLAN_DEFAULTS["supply"]),
         "orders": {"import": libs},
         "trade": dict((prev or {}).get("trade") or {"want": ["bar:iron", "anvil", "cloth"], "sell": ["crafts"]}),

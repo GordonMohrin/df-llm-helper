@@ -486,6 +486,8 @@ C.STATE_SPEC = obj({
             {free = obj(nil, {weapon = NAT, body = NAT, head = NAT, pants = NAT, gloves = NAT, shoes = NAT,
                               shield = NAT, ammo = NAT}),
              cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT}),     -- Run 11: melee follows the gear
+             -- FR-100 (G18): soldiers, fully equipped, armor, weapon in hand, training weapon in hand, squads on the policy
+             kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}),
              -- FR-79: the militia rotation per squad key (schema.py _ROT)
              rot = obj(nil, {A = ROT_ONE, B = ROT_ONE, C = ROT_ONE})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),

@@ -258,6 +258,35 @@
   forbidden hatch; if not, the plug gives up the lower wall after plug_wait and walls the top in PEACE) and CAVERN_PLUG done,
   and CAVERN_SWEEP_END (killed, lost, sealed 1). A citizen left in the cavern holds the recall (STEP `... other citizen still
   below`). If a siege comes during the sweep: the squad leaves at once and END says siege.
+
+## Run 15 G18 gear: every soldier armor + weapon, wooden weapons in training by default (FR-100, FR-101, 2026-10-29; offline, live-untested)
+- **Why:** Gordon's goal G18 (every soldier armor + weapon; sparring always with wooden training weapons). The FR-89 policy only ran after
+  `squad.uniform kind=training` by hand (military.lua `trn = e.tr == 1`), hammer/mace/no-skill positions kept metal weapons, a metal
+  armor spec stayed empty while leather or bone lay free (Earthboat `gear: 5 soldiers ... body 0/5`, worn 37 %), and no line counted the
+  soldiers who really had armor and a weapon (FR-100, FR-101).
+- **What changed:** (1) military `M.train_default`: every melee squad made or adopted goes on the policy (persist `sq.<key>.tr = 1`,
+  `td = 1`); config `military.training {on, fallback, refit_days}` (fairplay `MILITARY_TRAIN_LIM`, lint --config) and the plan's
+  `military.training` (schema, PLAN_DEFAULTS, propose keeps a player's false) switch it; off withdraws only the default and gives the wooden
+  positions their real weapons back (`un`); `squad.uniform kind=melee` sets `tr = 0` (off for good). (2) `M.train_token` (FR-101): pike ->
+  spear, dagger -> sword, other classes -> fallback (SPEAR); `train_apply` and `training_need` use it, so economy orders the right wooden
+  weapons. (3) New library `lua/dfllm/kit.lua`: per-soldier kit (`soldier`), material class of a spec, `refit_plan`; military `M.refit`
+  (PEACE, no danger, every refit_days, first look starts the clock) re-specs empty metal/leather armor slots to any material beyond the
+  own-material pieces, soft pieces back to metal when free metal covers them. (4) economy gear items: bone routes for helm, gauntlets,
+  greaves at the Craftsdwarf's (config/baseline.json + defaults; metal > leather > bone). (5) state `mil.kit {n, full, armor, weapon, wood,
+  tr}` (`military.kit_stats`, cached a day), status/brief `gear: N/M soldiers fully equipped (armor a, weapon w, wood k)`, plan check
+  warnings (training false from P2; soldiers short of kit from P5), runner deliverable `kit {pct}` (owner military), plans/year1.json P6
+  `{"k": "kit", "pct": 80}`; RULES rows squad.uniform, Military and P6 edited in place (300 lines). Contracts: state mil.kit, plan military.training,
+  deliverable kit, `military.kit_stats`; appendix regenerated. Design note docs/v2/FR-fr-gear-training-G18.md.
+- **Tests (each fails on 64df679):** tests/lua/test_fr100_kit.lua (7), tests/lua/test_fr100_phase.lua (2), tests/test_fr100_gear.py (8);
+  updated: tests/lua/wp6_world.lua (training raws, raws.itemdefs, spec material class; the WP6 worlds keep the policy off unless
+  `opts.training`), test_m6_training.lua (raws from the world), test_wp6_kern.lua (the addToSquad test turns the policy off),
+  test_military_a3.py (config pin).
+- **Live check:** a fort at P2: kern.log `squad A: training policy on by default`, the squads screen's weapon slots name training
+  axes/swords/spears, `dfllm:train_*` orders at the Carpenter's, a day later the soldiers hold them; `dfllm status` shows `gear: N/M
+  soldiers fully equipped`; in an ALERT the weapon slots go to individual choice within one upkeep and back to wooden in PEACE; a metal
+  body spec with only leather armor free: after 7 days `squad A: body of N positions to any material`; with bones and a Craftsdwarf's but no
+  metal or leather, `dfllm:gear_head` orders with bone (if the shop refuses the job, read the order's job/material read-only).
+
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders
