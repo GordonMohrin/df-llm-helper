@@ -273,6 +273,7 @@ C.ACT = {
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   hospital_remove = {'water'},                     -- BUG-034: a dry hospital's zones; BUG-131: hospital.retire
+  water_zone = {'water'},                          -- BUG-324: a Water Source zone on the water the scan found reachable
   sand_zone = {'economy'}, fish_zone = {'economy'},
   tool_pile = {'economy'},                         -- BUG-053: a weapons stockpile for the miners' picks near the mines
   zone_place = {'runner', 'economy'},              -- FR-78: the verb zone.place (zonelib); BUG-232: the manager's office zone

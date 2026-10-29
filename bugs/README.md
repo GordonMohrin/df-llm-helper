@@ -335,6 +335,8 @@ Related: FR-xx, BUG-xx
 | [BUG-321](BUG-321-refuge-bed-error-blocks-the-year-plan.md) | fixed (offline, live-untested) | high | Run 15b/c: plan check's refuge bed ERROR without a site blocks the year plan; refuge_dry asks for a store already planned | plan.py, readiness.lua |
 | [BUG-322](BUG-322-perimeter-open-beside-all-ways-closed.md) | fixed (offline, live-untested) | medium | Run 15b: status PERIMETER OPEN 2 ways in beside 'all with a door or bridge' (stale text outside PEACE) | readiness.lua |
 | [BUG-323](BUG-323-sapling-opening-left-out-by-seal.md) | partly fixed (offline, live-untested): sapling case; open: floor ways in on the canopy rim (tree crowns read as roof) | medium | Run 15c: seal at=last left a sapling way in out when no neighbour closes it; ways in under tree crowns keep coming back, R0 open | cmd.py; open: seal.lua |
+| [BUG-324](BUG-324-found-water-never-becomes-accepted-water.md) | fixed (offline, live-untested) | high | Run 15: water the scan found never becomes accepted water: no hospital, no GiveWater source | water.lua, act.lua |
+| [BUG-325](BUG-325-water-scan-reach-from-one-citizen.md) | fixed (offline, live-untested) | medium | Run 15: the water scan asks the walk from one citizen, one in another walk group hides every well spot | water.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

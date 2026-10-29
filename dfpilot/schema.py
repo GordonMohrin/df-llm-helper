@@ -79,6 +79,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
+    "water_zone": ["water"],                       # BUG-324: a Water Source zone on the water the scan found reachable
     "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
     "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager
     "mood_task": ["care"],                         # BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
@@ -524,7 +525,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # hospital (ok, dry, none), GiveWater/GiveFood jobs running (give: citizens giving now, run/open on the job list,
     # -1 unknown), free buckets, the cause
     # BUG-104: stuck = GiveWater jobs open for water.give_stuck_days or more, reach = caregivers whose walk group reaches the
-    # thirstiest patient, key = the verdict (alert | noreach | unreadable | stuck | open | run | nojob)
+    # thirstiest patient, key = the verdict (alert | noreach | unreadable | nowater | stuck | open | run | nojob)
     "PATIENT_DYING": ("A", "water", _d("units:ia n:i thirst:i carers:i want:i hosp:s",
                                        "idle:i added:i give:i open:i run:i buckets:i why:s stuck:i reach:i key:s")),
     # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,

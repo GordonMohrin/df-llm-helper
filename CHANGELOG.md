@@ -50,6 +50,25 @@
 - **Open (review):** most Inkintense ways in are floor tiles on the rim of the tree canopy (z134 branches above every named tile on
   s152283619-4): the entrance check reads crown-roofed surface tiles as inside, so the rim moves with the crowns. Not fixed; see
   BUG-323 Open.
+## Run 15 hospital water: the kernel zones the water its scan found, several walk origins (BUG-324, BUG-325, 2026-10-29; offline, live-untested)
+- **Why:** Inkintense y376-377: the water scan found 7/7 water at 88,102,132 (a well spot, reachable), `water.src` stayed `[]` and
+  `bp sites hospital` refused every site for 4 years. Earthboat y385: the river's 7/7 water under its ramp tops, a dry well 17700,
+  patients at thirst 37,348, `1 GiveWater job open, none taken by 53 idle`. Root cause water.lua:656/2176 (1d17c7e): the found water
+  only went into a recipe, no code zoned it (no Water Source act existed), so nothing was ever accepted; give_diag (1584) blamed idle
+  carers. Earthboat's scans of the same tiles flipped between 12 and 0 well spots: one walk origin (water.lua:862/1020).
+- **What changed:** water.lua `M.zone_found`: while no water is accepted, a 1x1 Water Source zone `dfllm-water` (new act
+  `water_zone`, quickfort key `w`, owner water) on the best reachable, safe water (bank tile's water, else a well spot's water and
+  the open tile above it); never cavern, attack path or BREACH, outside PEACE/RECOVERY only roofed; `wz_every` 2 d, `wz_max` 4 spots
+  per `wz_forget` 28 d. The next run accepts it (`water.src`, bp sites hospital ranks by it); the cause list and `inspect
+  water_sources` (`wz`) name it. give_diag verdict `nowater`. BUG-325: up to `ws_from` 3 walk origins (`M.origins`,
+  `M.reach_any`). Contract/schema act `water_zone`, CONTRACTS act row + appendix, fairplay water keys, RULES HOSPITAL_DRY row,
+  sites text names the kernel's zone.
+- **Tests (fail on 1d17c7e):** tests/lua/test_bug324_325_water_zone.lua (6 of 6), tests/test_bug324_hospital_found_water.py
+  (2 of 3), tests/lua/test_act_supply.lua (water_zone).
+- **Live check:** Inkintense kern.log `water: Water Source zone dfllm-water painted at 88,102,132 ...`, then `1 wet sources`,
+  state `water.src [[88,102,132]]`, `bp sites hospital` ranks `zone N at 88,102,132`; Earthboat a zone on the river, the next
+  patient_thirst `run` instead of `nowater`. Uncertain: whether DF's GiveWater fills from a zone whose water lies one level below
+  the carrier's floor (the open tile is zoned too), quickfort on open space, frozen rivers (no zone in winter).
 
 ## Run 15c surface farm: bp.emit places it, fewer plots when trees cut the block (BUG-316, 2026-10-29; offline, live-untested)
 - **Why:** Inkintense y377 (food 21 d), live: `bp sites farms plots=1 surface=1` ranked 2 sites, but `cmd bp.place tpl=farms
