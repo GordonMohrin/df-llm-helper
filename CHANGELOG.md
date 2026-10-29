@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Live round 3 curse fixes: inspect by nickname, curse_kill for a grown set (BUG-207..208, 2026-10-29; offline, live-untested)
+- **Why:** live test round 3 and its skeptic (kernel bd27973): `inspect what=unit` with key 'Blinky' or 'Blinky Imeshakrul' gave
+  `no such citizen` for "`Blinky' Imeshakrul", whose real name found him; the only sheet key was the bare last name, shared by his relatives
+  (BUG-173b -> BUG-207). A third were-form whose TRANSFORM went out 830 ticks after the curse_kill for two got no curse_kill for ~180 game
+  days: the question was tried only at a TRANSFORM emit and the 2400-tick gate refused it (BUG-174c -> BUG-208).
+- **What changed:** (1) curse.lua `unit_keys`: with `u.name.nickname` set, the keys `nickname + last` and the nickname alone; the sheet key
+  is dropped when it is only the last name; `find_unit` also matches the sheet name typed with its quotes (BUG-207). (2) `M.finish` (care's
+  run end and the daily watch) calls `M.kill_question` when a were-form is known and no TRANSFORM is queued; `CAD.due` keeps it to one
+  question per set and per 2400 ticks (BUG-208).
+- **Safety:** no new verb, event, config key, state field or RULES row; no contract change. A kill is still only a question.
+- **Tests (each fails on bd27973):** tests/lua/test_bug207_208_curse.lua.
+- **Live check:** (a) a citizen with a nickname (set on the unit sheet): `python -m dfpilot cmd inspect '{"what":"unit","key":"<Nick>"}'`
+  and key `"<Nick> <Last>"` return `ok unit <id>`; key `"<Real first> <Last>"` still does. (b) two units transform (one wave), a third
+  within 2400 ticks of the first curse_kill: `python -m dfpilot events` shows its TRANSFORM, then within a game day after the gate opens a
+  second `DECISION_NEEDED curse_kill: 3 were-form unit(s) ...`; no further curse_kill while the set stays the same; `dfllm cmd inspect
+  '{"what":"persist"}'` `m.care.cur.ev.kill.ids` holds all three ids.
+
 ## FR-95 live test 1 fixes: flooded shaft level unseen, observe smoothing, aqshaft S1 place, floor top level (BUG-191..194, 2026-10-29; offline, live-untested)
 - **Why:** FR-95 live test 1 on i4 (kernel b805745): shaft c1a1858c02562d7101 (56,56 top 129) had z128 designated, yielded its slot
   (BUG-037, `no progress 139 d: slot yielded`), the miners dug z128 and it filled to 7/7; the level was never opened, so no AQ_HEAVY and no

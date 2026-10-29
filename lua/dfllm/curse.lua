@@ -67,15 +67,28 @@ M.name_key = function(s) return name_key(short(s)) end           -- for tests an
 -- BUG-173 (live i2: key='Rigoth Savotdumat' -> 'no such citizen'; with a nickname set getReadableName reads
 -- "`Blinky' Savotdumat", the real first name is gone): the keys a unit is known by: its sheet name without the nickname,
 -- and its real first and last name (u.name.first_name + the last name alone, translateName only_last_name)
+-- BUG-207 (live 3: key 'Blinky' and 'Blinky Imeshakrul' -> 'no such citizen' for "`Blinky' Imeshakrul"): the nickname
+-- the sheet shows is a key too (nickname + last name, the nickname alone); a sheet key that is only the last name (the
+-- sheet name began with the nickname) is dropped, it is shared by the relatives
 local function unit_keys(u, env)
   local keys = {}
+  local function add(k) if k ~= '' then for _, x in ipairs(keys) do if x == k then return end end keys[#keys + 1] = k end end
   local n = env.nm(u)
-  if n ~= '' then keys[1] = name_key(short(n)) end
+  local last = rd(function() return strip(utf(dfhack.translation.translateName(u.name, false, true))) end, '')
+  last = type(last) == 'string' and last or ''
+  local nick = rd(function() return strip(utf(u.name.nickname)) end, '')
+  nick = type(nick) == 'string' and nick or ''
+  if n ~= '' then
+    local k = name_key(short(n))
+    if not (nick ~= '' and last ~= '' and k == name_key(last)) then add(k) end
+  end
   local first = rd(function() return strip(utf(u.name.first_name)) end, '')
   if type(first) == 'string' and first ~= '' then
-    local last = rd(function() return strip(utf(dfhack.translation.translateName(u.name, false, true))) end, '')
-    local k = name_key(first .. (type(last) == 'string' and last ~= '' and (' ' .. last) or ''))
-    if k ~= '' and k ~= keys[1] then keys[#keys + 1] = k end
+    add(name_key(first .. (last ~= '' and (' ' .. last) or '')))
+  end
+  if nick ~= '' then
+    if last ~= '' then add(name_key(nick .. ' ' .. last)) end
+    add(name_key(nick))
   end
   return keys
 end
@@ -710,6 +723,14 @@ function M.finish(K, c, p, env)
   end
   forget(K, c, cur)
   M.flush(K, c, p, env)
+  -- BUG-208 (live 3: a third were-form 830 ticks after the curse_kill for two got no question for four moons): a set that
+  -- grew inside the kill gate is asked about once the gate opens (CAD.due: still one question per set), never before
+  -- its TRANSFORM went out
+  local _, tfn = counts(cur)
+  if tfn > 0 and not (S.q.TRANSFORM and #S.q.TRANSFORM > 0) then
+    local okk, errk = pcall(M.kill_question, K, c, p, cur, env)
+    if not okk then K.log('warn', 'care curse kill: %s', tostring(errk)) end
+  end
   local okm, errm = pcall(moon_event, K, c, p, cur, env)
   if not okm then K.log('warn', 'care curse moon: %s', tostring(errm)) end
   build_view(K, c, cur)
@@ -808,6 +829,8 @@ local function find_unit(K, p, key, env)
     return u, id
   end
   local k = name_key(short(key))
+  -- BUG-207: the sheet name typed as shown ("`Blinky' Imeshakrul"): its nickname is a key, not a part to drop
+  local kq = name_key(short((tostring(key):gsub("`([^`']*)'", '%1'))))
   local single = not k:find(' ', 1, true)
   local hits, firsts = {}, {}
   for _, uid in ipairs(own_ids(K)) do
@@ -815,7 +838,7 @@ local function find_unit(K, p, key, env)
     if u then
       local hit, first = false, false
       for _, nk in ipairs(unit_keys(u, env)) do        -- BUG-173: the sheet name and the real first + last name
-        if nk == k then hit = true
+        if nk == k or nk == kq then hit = true
         elseif single and (nk:match('^(%S+)') or '') == k then first = true end
       end
       if hit then hits[#hits + 1] = uid elseif first then firsts[#firsts + 1] = uid end

@@ -210,6 +210,8 @@ Related: FR-xx, BUG-xx
 | [BUG-192](BUG-192-observe-mode-misses-damp-tiles-found-by-lost.md) | fixed (offline, live-untested) | medium | FR-95 live 1: a damp tile lost() found in an observing project never joined pts, so nothing was smoothed around it | lua/dfllm/runner.lua |
 | [BUG-193](BUG-193-aqshaft-place-with-column-in-p-refused.md) | fixed (offline, live-untested) | medium | FR-95 live 1: `bp.place aqshaft site=S1 p={x,y,top}` refused by bp.sites.rank (no ranking) | dfpilot/cmd.py |
 | [BUG-194](BUG-194-aqshaft-top-level-on-floor-opened-while-dig-pending.md) | fixed (offline, live-untested) | low | FR-95 live 1: an aqshaft top level on a floor counted as opened while its dig job was pending | lua/dfllm/aqshaft.lua |
+| [BUG-207](BUG-207-inspect-unit-by-nickname.md) | fixed (offline, live-untested) | low | Live 3: inspect what=unit found no unit by the nickname its sheet shows; the bare last name was a key | lua/dfllm/curse.lua |
+| [BUG-208](BUG-208-curse-kill-grown-set-inside-gate.md) | fixed (offline, live-untested) | medium | Live 3: a set of were-forms grown inside the 2400-tick kill gate never got its curse_kill | lua/dfllm/curse.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
