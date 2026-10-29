@@ -236,6 +236,21 @@ T.test('BUG-038: queued only while a pending workshops project builds a fishery 
   T.eq(requests(W2, 'fishery'), {}, 'a moving fishery project of the player: no request')
 end)
 
+T.test('BUG-206 (live Earthboat): a pending fortcore stage 1 builds the fishery: no request while it moves; a later ' ..
+       'fortcore stage (its doc lists the workshops of stage 1 too) holds nothing', function()
+  local function run(stage)
+    local W = world{food = 2000, setup = function(W) for _ = 1, 10 do F.item(W, 'FISH_RAW', {}) end end}
+    local P = project(W, 'fc' .. stage, true, {tpl = 'fortcore'})
+    local d = W.K.persist.get('bp.fc' .. stage)
+    d.params = {stage = stage}
+    W.K.persist.set('bp.fc' .. stage, d)
+    for _ = 1, 10 do P.pct = P.pct + 1; days(W, 1) end
+    return W
+  end
+  T.eq(requests(run(1), 'fishery'), {}, 'live: "fishery: none built ... request (first request)" beside the core')
+  T.eq(#requests(run(3), 'fishery'), 1, 'stage 3: its Fishery is the one of stage 1, built or lost long ago')
+end)
+
 -- the citizens stand at 50,50,100. Nearest water: a cavern lake, ice, a river whose bank lies on another walk group,
 -- then an open-sky river with a bank; farther a roofed pool one level down under open space
 local function waters()

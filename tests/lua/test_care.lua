@@ -516,6 +516,17 @@ T.test('weekly top stressors persisted (thoughts of stressed citizens)', functio
   for _ = 1, 8 do day(W) end
   local top = W.K.persist.get('m.care').stress.top
   T.eq(top, {{'SawDeadBody', 16}, {'AteNoTable', 8}}, 'eight daily samples in the first week')
+  local said = false
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('top stressors this week: SawDeadBody', 1, true) then said = true end end
+  T.ok(said, 'a week with stressors is logged')
+end)
+
+T.test('BUG-205 (live Earthboat): a week without stressors writes no empty "top stressors this week: " line', function()
+  local W = world{}
+  for _ = 1, 8 do day(W) end
+  for _, l in ipairs(W.logs) do
+    T.ok(not tostring(l.msg):find('top stressors this week', 1, true), 'live: the empty line 41 of 41 times: ' .. l.msg)
+  end
 end)
 
 T.test('work is sliced: 1,000 corpses take several frames, state stays valid', function()

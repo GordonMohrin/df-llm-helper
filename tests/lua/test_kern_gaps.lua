@@ -206,6 +206,30 @@ T.test('BUG-071: the last known values survive a reboot until the module publish
   kern.stop()
 end)
 
+T.test('BUG-199 (live round 3): a boot restarts the carry window; a value older than carry_days at the boot is still ' ..
+       'carried until the module publishes, with its true age in stale', function()
+  local W = H.world{tag = 'carry_reboots', ms_per_frame = 500}
+  local show = {pop = true, stock = true}
+  H.boot(W, {modules = {pop_mod(show), econ_mod(show)}})
+  H.run(W, 100, {skip = 10})
+  kern.stop()
+  show.pop, show.stock = false, false                   -- reloads before economy's first daily pass
+  for _ = 1, 3 do
+    df.global.cur_year_tick = df.global.cur_year_tick + 12 * 1200   -- 12 days between two reloads, 36 in all
+    H.boot(W, {modules = {pop_mod(show), econ_mod(show)}})
+    H.run(W, 20, {skip = 10})
+    kern.stop()
+  end
+  H.boot(W, {modules = {pop_mod(show), econ_mod(show)}})
+  local s = H.state(W)
+  T.eq(s.stock, {drink_d = 200, food_d = 90, meals = 12}, 'live: no stock line after back-to-back reloads (28 days ran out)')
+  T.ok(s.stale.stock >= 36 * 1200, 'the true age: ' .. json.encode(s.stale))
+  df.global.cur_year_tick = df.global.cur_year_tick + 29 * 1200
+  H.run(W, 100, {skip = 10})
+  T.eq(H.state(W).stock, nil, 'carry_days after the last boot it ends as before')
+  kern.stop()
+end)
+
 T.test('BUG-071: carry_days 0 turns the carrying off', function()
   for _, off in ipairs({false, true}) do
     local W = H.world{tag = 'carry_off' .. tostring(off), ms_per_frame = 500}

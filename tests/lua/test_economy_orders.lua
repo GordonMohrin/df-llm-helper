@@ -203,7 +203,8 @@ T.test('FR-01: the check is sliced (50 orders a frame); at most report_per_day O
   local W = world{setup = function(W)
     for _ = 1, 55 do
       F.order(W, {job_type = df.job_type.PrepareMeal, amount_left = 1, material_category = {}, mat_type = -1})
-    end                                                                          -- no kitchen anywhere
+    end
+    F.workshop(W, 'Kitchen')       -- BUG-205: a missing kitchen is one event for all; here nothing to cook (input)
   end}
   days(W, 4)
   T.eq(W.state().orders.n, 55)
@@ -339,6 +340,35 @@ end)
 -- BUG-059 (Run 14 y577): "no Farmers" for ProcessPlants meant that no Farmer's Workshop stood, not that no dwarf may
 -- farm; the game session chased work details for hours. The workshop is named as one, the state and the event tell a
 -- missing mandatory workshop from a missing worker.
+T.test('BUG-205 (live Earthboat: ORDER_STUCK x45 in 2 months, one per order of a missing shop): one event per missing ' ..
+       'shop type with the count; again only with a new order after 7 days and 10 min', function()
+  local W = world{setup = function(W)
+    add_jobs({'ProcessPlants'})
+    df.unit_labor.PROCESS_PLANT, df.unit_labor[7] = 7, 'PROCESS_PLANT'
+    for _ = 1, 4 do
+      F.order(W, {job_type = df.job_type.ProcessPlants, mat_type = -1, mat_index = -1, amount_left = 6,
+                  material_category = {}, _name = 'Process plants'})
+    end
+  end}
+  for i = 1, 6 do W.unit(i).status.labors = {[7] = true} end
+  days(W, 4)
+  local ev = W.find_events('ORDER_STUCK')
+  T.eq(#ev, 1, 'live: one per order')
+  T.eq({ev[1].d.kind, ev[1].d.n}, {'workshop', 4})
+  T.ok(ev[1].msg:find("4 order(s) cannot run for", 1, true) and ev[1].msg:find("no Farmer's Workshop", 1, true), ev[1].msg)
+  days(W, 10)
+  T.eq(#W.find_events('ORDER_STUCK'), 1, 'no news: quiet')
+  F.order(W, {job_type = df.job_type.ProcessPlants, mat_type = -1, mat_index = -1, amount_left = 2,
+              material_category = {}, _name = 'Process plants'})
+  days(W, 5)
+  T.eq(#W.find_events('ORDER_STUCK'), 1, 'a new order: the wall clock (10 min) holds it')
+  W.ms = W.ms + 700 * 1000
+  days(W, 1)
+  local ev2 = W.find_events('ORDER_STUCK')
+  T.eq(#ev2, 2)
+  T.eq(ev2[2].d.n, 5)
+end)
+
 T.test("BUG-059: a missing Farmer's Workshop is told as a workshop (kind workshop), not as 'no Farmers'; a missing worker apart",
        function()
   local function run(with_shop, with_labor)

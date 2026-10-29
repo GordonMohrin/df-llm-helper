@@ -46,6 +46,7 @@ local function world(opts)
   W.set_census('u', F.census_u(ids))
   W.load({name = 'runner', every = {ticks = 600}, dig_backlog = function() return 0 end,
           pending = function(K, tpl) return (opts.pending or {})[tpl] or 0 end,
+          req_types = function(K, key) return (opts.req or {})[key] end,        -- BUG-200
           state = function() return {phase = ctl.phase} end})
   W.load({name = 'care', every = {ticks = 1200},
           state = function()
@@ -365,6 +366,7 @@ T.test('BUG-060: no carpenters or logs: a simple order is made again (the new on
   T.eq(#again, 1)
   T.eq({again[1].args[1].job, again[1].args[1].amount_total, again[1].args[1].material, again[1].args[1].tag},
        {'ConstructDoor', 5, 'INORGANIC', 'dfllm:redo_1'})
+  T.eq(again[1].args[1].top, true, 'BUG-203: the made-again order goes first, not to the end of a full queue')
   local left = ids_of('ConstructDoor')
   T.ok(#left == 1 and left[1] ~= 1, 'the old one is gone, the new one stands')
   local ev = stuck(W, 'stale')
@@ -400,6 +402,31 @@ T.test('BUG-060: a stale wood order (the carpenters never take it) is made again
   local a2 = acts(W2, 'workorder', 'dfllm:redo_')
   T.eq(#a2, 1)
   T.eq({a2[1].args[1].material, a2[1].args[1].material_category}, {nil, {'wood'}})
+end)
+
+T.test('BUG-201 (live Earthboat): a stone door order re-entered in wood and then made again in stone is not switched ' ..
+       'to wood again (old: wood, stone, wood, stone ... for the same doors)', function()
+  local W = world{boulders = 60, wood = 80, setup = function(W)
+    W.act_result('workorder', function(spec)                    -- the new order in the spec's material class
+      local mo = df.global.world.manager_orders
+      local id = mo.manager_order_next_id
+      mo.manager_order_next_id = id + 1
+      mo.all:insert('#', {id = id, job_type = df.job_type[spec.job], reaction_name = '', amount_left = spec.amount_total,
+                          amount_total = spec.amount_total, item_subtype = -1, mat_index = -1, frequency = ONE,
+                          mat_type = spec.material == 'INORGANIC' and 0 or -1,
+                          material_category = spec.material_category and {wood = true} or {},
+                          item_conditions = kmock.vec{}, status = {validated = true}})
+      return true, id
+    end)
+    doors(W, 1)
+  end}
+  days(W, 11)
+  T.eq(#acts(W, 'order_material'), 1, 're-entered in wood')
+  days(W, 11)
+  T.eq(#stuck(W, 'made again in stone'), 1, 'the carpenters never took it: made again in stone')
+  days(W, 25)
+  T.eq(#acts(W, 'order_material'), 1, 'live: the made-again stone order was switched to wood again')
+  T.ok(#stuck(W, 'made again') >= 2, 'stale again: made again in its own class')
 end)
 
 T.test('BUG-060: the stale clock runs only in PEACE and RECOVERY', function()
@@ -781,6 +808,7 @@ T.test('BUG-133: no mason\'s workshop: kern.log says why (once), PROJECT_REQUEST
   for _, l in ipairs(W.logs) do if tostring(l.msg):find('slabs: no ConstructSlab', 1, true) then n = n + 1 end end
   T.eq(n, 1, 'once per reason within the cadence window')
   T.eq(#slabreq(W), 1, 'request_days 14')
+  W.ms = W.ms + 900 * 1000                                     -- BUG-200: and 900 wall seconds
   days(W, 10)
   T.eq(#slabreq(W), 2)
   local W2 = world{ghosts = 0, boulders = 40, shops = {'Carpenters'}}
@@ -796,6 +824,48 @@ T.test('BUG-133: no mason\'s workshop: kern.log says why (once), PROJECT_REQUEST
   days(W4, 2)
   T.eq(#slabreq(W4), 0, 'a workshops project is queued')
   T.eq(W4.inbox('inspect', {what = 'orders'}).data.slabs.asked, 'queued')
+end)
+
+T.test('BUG-200 (live i4 round 3): the unanswered slab request backs off (request_days and 900 s, doubled per repeat ' ..
+       'up to x8) and is cleared by a Masons', function()
+  local W, ctl = world{ghosts = 2, boulders = 40, shops = {'Carpenters'}}
+  local function run_days(n, wall_per_day)
+    for _ = 1, n do W.ms = W.ms + wall_per_day * 1000; days(W, 1) end
+  end
+  run_days(1, 60)
+  T.eq(#slabreq(W), 1, 'first request at once')
+  run_days(20, 60)                                             -- 20 game days, 20 real minutes
+  T.eq(#slabreq(W), 2, '14 days and 900 s: the second')
+  run_days(20, 60)
+  T.eq(#slabreq(W), 2, 'live: one every 21-26 game days; the third waits 28 days and 1800 s')
+  run_days(10, 60)
+  T.eq(#slabreq(W), 3)
+  run_days(60, 3)                                              -- 60 game days in 180 s: the wall clock holds it
+  T.eq(#slabreq(W), 3, 'the wall clock gate (live: ~3 real minutes between two)')
+  T.eq(W.K.persist.get('m.economy').slab_wsreq.k, 3)
+  ctl.shops.Masons = F.workshop(W, 'Masons')
+  days(W, 1)
+  T.eq(W.K.persist.get('m.economy').slab_wsreq, nil, 'the Masons stand: the record goes')
+end)
+
+T.test('BUG-200: more ghosts start the backoff over; the runner mandatory request for the Masons is not doubled', function()
+  local W, ctl = world{ghosts = 1, boulders = 40, shops = {'Carpenters'}}
+  days(W, 1)
+  T.eq(#slabreq(W), 1)
+  local p = W.K.persist.get('m.economy')
+  p.slab_wsreq.k = 4                                          -- asked four times for one ghost
+  ctl.ghosts = 2
+  W.ms = W.ms + 1000 * 1000
+  days(W, 15)
+  T.eq(#slabreq(W), 2, 'two ghosts > one: news, the base period only (not x8)')
+  T.eq(W.K.persist.get('m.economy').slab_wsreq.k, 1)
+  local W2 = world{ghosts = 2, boulders = 40, shops = {'Carpenters'}, req = {wsm = {'Masons', 'Still'}}}
+  days(W2, 2)
+  T.eq(#slabreq(W2), 0, 'the mandatory request names the Masons already')
+  T.eq(W2.inbox('inspect', {what = 'orders'}).data.slabs.asked, 'mandatory')
+  local W3 = world{ghosts = 2, boulders = 40, shops = {'Carpenters'}, req = {wsm = {'Still'}}}
+  days(W3, 2)
+  T.eq(#slabreq(W3), 1, 'a mandatory request without the Masons holds nothing back')
 end)
 
 T.test('BUG-181: a pending workshops project that does NOT build the Masons (skip=Masons) holds no slab request back; ' ..
@@ -868,6 +938,31 @@ T.test('BUG-177 (i1): the stock days are published as soon as the first run sinc
   T.ok(type(s.stock) == 'table' and math.type(s.stock.drink_d) == 'integer' and math.type(s.stock.food_d) == 'integer',
        'live: "stock  hospital ok" for 15 game days (st.out came only in T.finish)')
   T.eq(s.stale, nil, 'live values, not carried ones')
+end)
+
+T.test('BUG-199 (live round 3): at boot the stock days of the last daily run are published at once; the first ' ..
+       'run holds a boost until T.days ran; a value older than two days is left to the kernel carry', function()
+  local C = require('dfllm.util.contract')
+  local function boot(days_t)
+    return world{setup = function(W)
+      local tick = W.K.now().tick
+      W.persist_raw[C.persist_key('m.economy')] = json.encode{
+        v = 2, hist = {drink = {2000, 2000}, food = {1000, 1000}}, prev = {drink = 40, food = 30}, meals = 3,
+        days_t = days_t and (tick - days_t) or nil}
+    end}
+  end
+  local W = boot(600)
+  local s = W.state()
+  T.eq({s.stock and s.stock.drink_d, s.stock and s.stock.food_d, s.stock and s.stock.meals}, {20, 30, 3}, 'live: no stock line until the first paced census reached T.days')
+  T.eq(s.labor, nil, 'early: no labor')
+  days(W, 1)
+  T.ok(logged(W, 'economy boosted: first run since the boot'), 'the first run since the boot is boosted')
+  T.ok(logged(W, 'economy boost ended (unboost'), 'unboosted once T.days ran')
+  T.eq(W.boosts.economy, nil)
+  T.ok(W.state().stock.drink_d ~= 20, 'the live value replaced the boot one')
+  T.eq(boot(nil).state().stock.drink_d, 20, 'a save from before the fix (no p.days_t): published')
+  local s3 = boot(3 * 1200).state()
+  T.eq(s3.stock and s3.stock.drink_d, nil, 'three days old: the kernel carry speaks, with its age')
 end)
 
 T.done()

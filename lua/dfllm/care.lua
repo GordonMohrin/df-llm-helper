@@ -4071,7 +4071,8 @@ local function finish(K, c, r, p)
     p.stress.counts = json.object{}
     local parts = {}
     for _, e in ipairs(p.stress.top) do parts[#parts + 1] = e[1] .. '=' .. fmt(e[2]) end
-    K.log('info', 'top stressors this week: %s', table.concat(parts, ' '))
+    -- BUG-205 (live Earthboat: 'top stressors this week: ' with an empty list 41 of 41 times): only a week with stressors
+    if #parts > 0 then K.log('info', 'top stressors this week: %s', table.concat(parts, ' ')) end
   end
   if r.errs > 0 then K.log('warn', 'care: %d unreadable items (%s)', r.errs, tostring(r.err)) end
   -- the reserve and the mood wants for the hooks (care.reserved, care.mood_wants); kern.log on change

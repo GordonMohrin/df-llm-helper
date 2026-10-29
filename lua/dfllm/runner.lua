@@ -1784,7 +1784,9 @@ local function next_order_id()
 end
 
 -- seal first (Run 11 siege 8: ~110 rock orders stood before a seal's door): the manager orders a seal's quickfort
--- `orders` call made (ids n0 .. the next id - 1) move to the top of the work orders, the player's up arrow
+-- `orders` call made (ids n0 .. the next id - 1) move to the top of the work orders, the player's up arrow.
+-- BUG-203 (live Earthboat: the P0 core's door, bed and block orders stood at places 82-88 of 89, behind imported library
+-- orders that filled every shop): every project's piece orders go to the top the same way
 local function orders_first(K, P, st, n0)
   local n1 = next_order_id()
   if not (n0 and n1 and n1 > n0) then return end
@@ -1792,7 +1794,8 @@ local function orders_first(K, P, st, n0)
   for id = n0, math.min(n1 - 1, n0 + 31) do ids[#ids + 1] = id end
   local ok, n = K.act.order_top(ids)
   if ok and (int(n) or 0) > 0 then
-    K.log('info', '%s %s: %d manager orders moved to the top of the work orders (seal first)', P.id, st.label, n)
+    K.log('info', '%s %s: %d manager orders moved to the top of the work orders (%s first)', P.id, st.label, n,
+          SEALS[P.tpl] and 'seal' or 'project')
   end
 end
 
@@ -1825,7 +1828,8 @@ local function orders(K, P, st, R)
           job == 'ConstructDoor' and 'door' or 'hatch', open[job] or 0, job, M.CFG.orders_cap)
   end
   local ok, res = true, {}
-  local n0 = SEALS[P.tpl] and n > 0 and next_order_id() or nil
+  -- BUG-203: every project's orders go first, but never above an open seal's (seal first leads)
+  local n0 = n > 0 and (SEALS[P.tpl] or not (S.focus and S.focus.lead)) and next_order_id() or nil
   if n > 0 then ok, res = qf(K, {mode = st.mode, data = data, pos = {0, 0, 0}, command = 'orders'}) end
   if ok and n0 then orders_first(K, P, st, n0) end
   if ok and n > 0 then R.ps = now(K) end      -- BUG-037: manager orders made are new jobs
@@ -4944,6 +4948,14 @@ function M.req_due(K, key, ids)
   for i, v in ipairs(ids) do cp[i] = v end
   S.rt.req[key] = {t = T0.tick, w = T0.wall, k = same and k + 1 or 1, ids = cp}
   return true
+end
+
+-- BUG-200: the types of request key's last request while its episode stands (wsm: the mandatory workshops, S.rt.wmiss
+-- set), else nil; economy's slab request does not ask for a Masons that request already names
+function M.req_types(K, key)
+  local rec = S.rt and S.rt.req and S.rt.req[key]
+  if key == 'wsm' and not S.rt.wmiss then return nil end
+  return type(rec) == 'table' and type(rec.ids) == 'table' and rec.ids or nil
 end
 
 -- BUG-058 (DECISIONS 9; Run 11: five farms projects 'build_lost, parked', one after the other, no soil): the projects of a

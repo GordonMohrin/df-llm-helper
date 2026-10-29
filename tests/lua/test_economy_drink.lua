@@ -308,4 +308,47 @@ T.test('BUG-042: drink_low below 60 days names the blockers once per episode (no
   T.eq(W.state().stock.dwhy, nil)
 end)
 
+T.test('BUG-204 (live Earthboat): no free Office zone is a state said in kern.log once per 7 days and 10 min, not a ' ..
+       'daily act that fails (ACT_FAIL x39); a free zone is assigned by the act as before', function()
+  local function mk(office)
+    return world{office = office, setup = function(W)
+      dfhack.units.getUnitByNobleRole = function(role) if role == 'manager' then return W.unit(2) end end
+      if office == 'free' then
+        F.building(W, 'ACTIVITY_ZONE', {id = 18632, type = df.civzone_type.Office, x1 = 1, y1 = 1, x2 = 3, y2 = 3,
+                                        z = 141, assigned_unit_id = -1})
+      end
+    end}
+  end
+  local W = mk(false)
+  days(W, 20)
+  T.eq(#W.find_acts('manager_office'), 0, 'live: tried daily, ACT_FAIL every 4-10 game days')
+  local n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('manager office: no free office zone', 1, true) then n = n + 1 end end
+  T.eq(n, 1, 'once while the wall clock holds')
+  W.ms = W.ms + 700 * 1000
+  days(W, 8)
+  n = 0
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('manager office: no free office zone', 1, true) then n = n + 1 end end
+  T.eq(n, 2, 'again after 7 days and 10 min')
+  local W2 = mk('free')
+  days(W2, 2)
+  T.ok(#W2.find_acts('manager_office') >= 1, 'a free zone: the act assigns it')
+  dfhack.units.getUnitByNobleRole = nil
+end)
+
+T.test('BUG-206 (live Earthboat spr d43): no still but a pending fortcore stage 1 builds one: drink_low above the ' ..
+       'thirst alarm is a kern.log note, no DECISION_NEEDED; without the project the question as before', function()
+  local W = world{still = false, barrels = {4, 0}, chair = {128, 74}, table = {127, 74}, validated = true,
+                  setup = function(W)
+    W.K.persist.set('projects', {v = 2, list = {{id = 'fc1', tpl = 'fortcore', stage = 1, pct = 34, blocked = '',
+                                                 done = 0}}})
+    W.K.persist.set('bp.fc1', {v = 2, tpl = 'fortcore', params = {stage = 1},
+                               manifest = {v = 2, workshops = {{type = 'Still', pos = {6, 46, 100}}}}})
+  end}
+  days(W, 2)
+  T.eq(#decisions(W, 'drink_low'), 0, 'live: DECISION_NEEDED drink_low "no still; auto: brew" (A)')
+  T.ok(log_has(W, 'no still yet: project fc1 builds one'), 'the note')
+  T.eq(W.state().stock.dwhy, 'no still', 'status still says why')
+end)
+
 T.done()

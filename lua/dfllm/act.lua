@@ -1498,6 +1498,8 @@ local function impls(state)
   -- workorder <json> (tools/workorder.txt); the new order is the one at manager_order_next_id.
   -- FR-39: an item-definition job (MakeArmor/Pants/Shoes/Gloves/Helm/Weapon/Ammo/Shield, ...) without an
   -- item_subtype is refused: DF 53.16 crashes when a dwarf takes such a job (four crashes on 14.10.2026)
+  -- BUG-203 (live Earthboat: made-again orders landed at the end of 89 orders, behind jobs that filled every shop):
+  -- spec.top = true moves the new order to the top of the list (the work orders screen's up arrow, as order_top)
   function I.workorder(spec)
     if type(spec) ~= 'table' then return false, 'spec must be a table' end
     if type(spec.tag) ~= 'string' or spec.tag:sub(1, 6) ~= 'dfllm:' then return false, 'spec.tag must start with dfllm:' end
@@ -1505,14 +1507,18 @@ local function impls(state)
       return false, tostring(spec.job) .. ' needs item_subtype (ITEM_...): DF 53.16 crashes without one (FR-39)'
     end
     local body = {}
-    for k, v in pairs(spec) do if k ~= 'tag' then body[k] = v end end
+    for k, v in pairs(spec) do if k ~= 'tag' and k ~= 'top' then body[k] = v end end
     local mo = df.global.world.manager_orders
     local want = mo.manager_order_next_id
     local ok, out = cmd_run('workorder', json.encode(body))
     if not ok then return false, out end
     for i = #mo.all - 1, 0, -1 do
-      if mo.all[i].id == want then return true, want end
-      if mo.all[i].id < want then break end
+      local o = mo.all[i]
+      if o.id == want then
+        if spec.top == true and i > 0 then mo.all:erase(i); mo.all:insert(0, o) end
+        return true, want
+      end
+      if o.id < want then break end
     end
     return false, 'no order created: ' .. trim(out, 120)
   end

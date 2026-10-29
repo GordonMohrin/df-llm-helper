@@ -140,6 +140,7 @@ T.test('FR-76: a reclaimed fort without a Carpenters and Craftsdwarfs workshop g
   T.eq(#ev, 1)
   T.eq({ev[1].d.tpl, ev[1].d.why, ev[1].d.types, ev[1].d.n}, {'workshops', 'mandatory', {'Carpenters', 'Craftsdwarfs'}, 2})
   T.ok(logged(W, 'warn', 'reclaimed fort without Carpenters, Craftsdwarfs'), 'kern.log says what and how')
+  T.eq(package.loaded['dfllm.runner'].req_types(W.K, 'wsm'), {'Carpenters', 'Craftsdwarfs'}, 'BUG-200: economy reads them')
   H.runs(W, 2 * 6)
   T.eq(#W.find_events('PROJECT_REQUEST'), 1, 'one request per cooldown (7 days)')
   H.runs(W, 2 * 3)
@@ -163,6 +164,7 @@ T.test('FR-76: a reclaimed fort without a Carpenters and Craftsdwarfs workshop g
   shop('Craftsdwarfs', 25, 5, 10)
   H.runs(W, 4)
   T.eq(W.state().adopt.miss, nil, 'built by the request: nothing missing any more')
+  T.eq(package.loaded['dfllm.runner'].req_types(W.K, 'wsm'), nil, 'BUG-200: the episode is over')
 end)
 
 T.test('FR-76: no request in a SIEGE, with a workshops project pending, for a fort that is not a reclaimed one ' ..

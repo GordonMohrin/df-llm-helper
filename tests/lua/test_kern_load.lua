@@ -254,7 +254,7 @@ T.test('BUG-026 boost: lapses after BOOST.ttl_ms without a renewal; refused for 
   local W = H.world{tag = 'boost2', ms_per_frame = 100}
   local tr = {name = 'trade', every = {ticks = 100}, once = true}
   function tr.step(K) if tr.once then tr.once = false; tr.r = {K.boost('test')} end end
-  local eco = {name = 'economy', every = {ticks = 100}}
+  local eco = {name = 'care', every = {ticks = 100}}            -- BUG-199: economy may boost now
   function eco.step(K) eco.r = eco.r or {K.boost('mine')} end
   H.boot(W, {modules = {eco, tr}})
   H.run(W, 5)
