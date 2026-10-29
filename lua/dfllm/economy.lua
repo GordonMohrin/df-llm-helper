@@ -2179,6 +2179,12 @@ local function stone_free(c, r)
   return math.max(0, n - floor_of(c, r.p, r, 'rock'))
 end
 
+-- BUG-224: true when T.stale switched this order's material (sw) or made it again (redo, its dfllm:redo_ tag)
+function M.stale_mark(p, id)
+  local rec = type(p) == 'table' and type(p.ostale) == 'table' and p.ostale[tostring(id)] or nil
+  return type(rec) == 'table' and (rec.sw == 1 or (math.tointeger(rec.redo) or 0) > 0)
+end
+
 local function wood_orders(K, c, r)
   local w = c.wood_orders
   local rock = stone_free(c, r)
@@ -2194,7 +2200,9 @@ local function wood_orders(K, c, r)
   local n = 0
   for _, o in ipairs(orders_all()) do
     if n >= (w.per_day or 8) or budget <= 0 then break end
-    if open_of(o) and o.mat_type == 0 and o.amount_left <= budget then
+    -- BUG-224 (live i3 Earthboat: order 650 ConstructChest went rock -> wood one day after T.stale made it again in
+    -- stone): an order T.stale switched or made again (p.ostale sw/redo, M.stale_mark) keeps its material
+    if open_of(o) and o.mat_type == 0 and o.amount_left <= budget and not M.stale_mark(r.p, o.id) then
       local amount = o.amount_left
       if K.act.order_material(o.id, 'wood') then
         n, budget = n + 1, budget - amount
@@ -7254,7 +7262,8 @@ end
 
 -- BUG-205: one ORDER_STUCK kind=workshop per missing shop type with its order count (d.n), when an order of
 -- that type was not told yet; again for that type with news (an order not told) after 7 days and 10 min (util/cadence,
--- p.wsstuck[label]); counts as one report of report_per_day
+-- p.wsstuck[label]); counts as one report of report_per_day. BUG-225: the same for kind input and worker, one per
+-- 'kind:why' label, with up to 3 order ids in the text (a lone order keeps the old 'order N JOB cannot run' text)
 function M.ws_stuck(K, p, oq, oc)
   if type(p.wsstuck) ~= 'table' then p.wsstuck = json.object{} end
   local T0 = K.now()
@@ -7271,9 +7280,18 @@ function M.ws_stuck(K, p, oq, oc)
       p.wsstuck[label] = {t = T0.tick, w = T0.wall}
       for _, e in ipairs(g.new) do e.rec.told = 1 end
       local e1 = g.new[1]
-      K.emit('ORDER_STUCK', 'B', string.format('%d order(s) cannot run for %d days: %s (order %d %s%s)', #g.ids, g.days,
-                                               e1.why, e1.id, e1.job, #g.ids > 1 and ', ...' or ''):sub(1, 200),
-             {order = e1.id, job = e1.job, why = e1.why, days = g.days, dropped = 0, kind = 'workshop', n = #g.ids})
+      local kd = g.kind or 'workshop'
+      local msg
+      if kd ~= 'workshop' and #g.ids == 1 then
+        msg = string.format('order %d %s cannot run for %d days: %s', e1.id, e1.job, g.days, e1.why)
+      else
+        local more = {}
+        for _, id in ipairs(g.ids) do if id ~= e1.id and #more < 2 then more[#more + 1] = tostring(id) end end
+        msg = string.format('%d order(s) cannot run for %d days: %s (order %d %s%s%s)', #g.ids, g.days, e1.why, e1.id,
+                            e1.job, #more > 0 and (', ' .. table.concat(more, ', ')) or '', #g.ids > 3 and ', ...' or '')
+      end
+      K.emit('ORDER_STUCK', 'B', msg:sub(1, 200),
+             {order = e1.id, job = e1.job, why = e1.why, days = g.days, dropped = 0, kind = kd, n = #g.ids})
     end
   end
 end
@@ -7323,9 +7341,12 @@ function T.ocheck(K, c, r)
         if kind and kind.worker then oq.slab = oq.slab + 1 end
         -- BUG-205 (live Earthboat: ORDER_STUCK x45 in 2 months, one per imported order whose workshop is missing): a
         -- missing workshop is one event per shop type at the end of the pass (M.ws_stuck)
-        if kind and kind.ws then
-          local g = oq.wsg[kind.ws] or {ids = {}, new = {}, days = 0}
-          oq.wsg[kind.ws] = g
+        -- BUG-225 (live i3: 12x 'no bars:INORGANIC:IRON' and 9x 'no rock' in a month, one per order): a missing input
+        -- or worker is one event per kind and reason the same way
+        if kind and (kind.ws or rec.kind == 'input' or rec.kind == 'worker') then
+          local gk = kind.ws or (rec.kind .. ':' .. rec.why)
+          local g = oq.wsg[gk] or {ids = {}, new = {}, days = 0, kind = kind.ws and 'workshop' or rec.kind}
+          oq.wsg[gk] = g
           g.ids[#g.ids + 1], g.days = o.id, math.max(g.days, days)
           if rec.told ~= 1 then g.new[#g.new + 1] = {rec = rec, id = o.id, job = rec.job, why = rec.why} end
         elseif rec.told ~= 1 and oq.told < (oc.report_per_day or 3) then
@@ -7663,6 +7684,52 @@ function M.stale_reason(c, r, oq, o, job, mc, days)
   return table.concat(parts, '; '):sub(1, 110)
 end
 
+-- BUG-224: the order's shop type (the first built one, as M.stale_reason names it) when its shops hold other jobs, at
+-- least one a shop: {key, e = oq.shops.keys entry}; nil when the shops stand empty (the order itself is the problem)
+function M.shop_busy(oq, r, job, mc)
+  for _, w in ipairs(OL.workshops(job, mc) or {}) do
+    if (r.f or {})[w] then
+      local e = oq.shops and oq.shops.keys[w]
+      if e and (e.jobs or 0) > 0 and e.jobs >= math.max(1, e.shops or 1) then return {key = w, e = e} end
+      return nil
+    end
+  end
+end
+
+-- BUG-224: one shop holds >= M.BUSY_WAIT waiting jobs (shop jobs - working, per shop) while citizens with its labor stand
+-- idle: PROJECT_REQUEST workshops why=busy types=[Carpenters|Masons] (follow places one more shop of that type), at
+-- most every food.request_days and 15 min (util/cadence, p.busyreq[type]); not while a workshops project builds one
+M.BUSY_LABOR = {['workshop:Carpenters'] = 'CARPENTER', ['workshop:Masons'] = 'MASON'}
+M.BUSY_WAIT = 3
+function M.busy_request(K, c, r, b)
+  local lab = M.BUSY_LABOR[b.key]
+  local e, p = b.e, r.p
+  local shops = math.max(1, e.shops or 1)
+  local wait = (e.jobs or 0) - (e.working or 0)
+  if not lab or wait < M.BUSY_WAIT * shops then return end
+  local li = df.unit_labor and df.unit_labor[lab]
+  local cu = K.census.u
+  local idle = 0
+  for _, id in ipairs(li and type(cu) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    local okl, has = pcall(function() return u.status.labors[li] == true end)
+    if u and okl and has and (u.job == nil or u.job.current_job == nil) then idle = idle + 1 end
+  end
+  if idle == 0 then return end
+  local t = b.key:match(':(.+)$')
+  if M.ws_queued(K, t) then return end
+  if type(p.busyreq) ~= 'table' then p.busyreq = json.object{} end
+  local T0 = K.now()
+  local rec = p.busyreq[t]
+  if type(rec) == 'table' and not CAD.elapsed(rec, T0, ((c.food or {}).request_days or 14) * DAY, 900) then return end
+  p.busyreq[t] = {t = T0.tick, w = T0.wall}
+  K.log('info', 'workshops: %s busy (%d shop%s, %d jobs waiting, %d idle with %s): one more asked for', t, shops,
+        shops == 1 and '' or 's', wait, idle, lab)
+  K.emit('PROJECT_REQUEST', 'B', string.format('workshops: one more %s (%d shop%s, %d jobs waiting, %d idle %s)', t,
+                                               shops, shops == 1 and '' or 's', wait, idle, lab:lower()),
+         {tpl = 'workshops', n = 1, why = 'busy', types = {t}})
+end
+
 -- BUG-060 (daily, after T.ocheck): one-time validated orders without conditions that make no job. The state per order
 -- (p.ostale: amount left, since when) restarts when the amount changes or a job from the order stands in a workshop
 -- (job.order_id); `stale.days` (`stale.wait_days` while a planned building waits for that piece) later it is stale:
@@ -7706,7 +7773,10 @@ function T.stale(K, c, r)
         local rec = p.ostale[key]
         local has = oq.shops.by_order[o.id] ~= nil
         if type(rec) ~= 'table' or rec.left ~= left or has then
-          rec = {left = left, since = r.now}
+          -- BUG-224 (live: the stale record was rebuilt without sw and redo, and 'only reported' came again): the
+          -- switch marks stay; told stays while the amount does
+          local old = type(rec) == 'table' and rec or {}
+          rec = {left = left, since = r.now, sw = old.sw, redo = old.redo, told = old.left == left and old.told or nil}
           p.ostale[key] = rec
         elseif not calm then
           rec.since = math.min(r.now, (math.tointeger(rec.since) or r.now) + DAY)    -- the clock waits for PEACE
@@ -7722,7 +7792,13 @@ function T.stale(K, c, r)
   sq.i = last + 1
   r.cmds = r.cmds + 1
   if sq.i <= #oq.ids then return false end
-  for key in pairs(p.ostale) do if not sq.seen[key] then p.ostale[key] = nil end end
+  for key, rec in pairs(p.ostale) do
+    if not sq.seen[key] then
+      -- BUG-224: a marked order out of the stale pass for a while (stuck, a job standing) keeps its mark while it exists
+      if M.stale_mark(p, key) and order_by_id(math.tointeger(tonumber(key))) then rec.left = -1
+      else p.ostale[key] = nil end
+    end
+  end
   table.sort(sq.cand, function(a, b) if a.days ~= b.days then return a.days > b.days end return a.id < b.id end)
   local day = r.now // DAY
   if p.stale_day ~= day then p.stale_day, p.stale_n = day, 0 end
@@ -7745,8 +7821,15 @@ function T.stale(K, c, r)
       else
         -- made again in the other class when that one has the room (a wood order the carpenters never take, stone
         -- plenty), else in its own
+        -- BUG-224 (live i3: '1 shop, 5 jobs (1 working), none from this order' made a wood chest again in stone, and
+        -- wood_orders switched it back): a busy shop keeps the class (M.shop_busy, a second shop asked for instead);
+        -- stone only above wood_orders' own threshold, so the two rules never undo each other
         local mc2 = e.mc
-        if e.mc == 'wood' and wj[e.job] and (r.f or {})['workshop:Masons'] and stone_free(c, r) >= e.left + 10 then
+        local busy = M.shop_busy(oq, r, e.job, e.mc)
+        if busy then M.busy_request(K, c, r, busy) end
+        local bb = math.max(10, math.tointeger((c.wood_orders or {}).boulders_below) or 20)
+        if not busy and e.mc == 'wood' and wj[e.job] and (r.f or {})['workshop:Masons']
+           and stone_free(c, r) >= e.left + bb then
           mc2 = 'rock'
         end
         local spec = M.OF.simple_spec(o, e.job, mc2)

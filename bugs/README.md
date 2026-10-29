@@ -229,6 +229,10 @@ Related: FR-xx, BUG-xx
 | [BUG-211](BUG-211-follow-seals-audit-bypass-before-the-trap-hall.md) | fixed (offline, live-untested) | medium | live 3: follow seals the audit bypass before the trap hall, on fortcore tiles, logging it every audit | dfpilot/wake.py |
 | [BUG-212](BUG-212-status-drops-proj-and-lists-six-next-hints.md) | fixed (offline, live-untested) | low | live 3: status drops the proj line and lists six next: hints | dfpilot/brief.py |
 | [BUG-213](BUG-213-audit-wait-printed-as-a-float.md) | fixed (offline, live-untested) | low | live 3: dfllm audit prints its wait as a float | dfpilot/wake.py |
+| [BUG-224](BUG-224-made-again-order-flips-material-busy-shop.md) | fixed (offline, live-untested) | medium | live 4: a made-again order flips rock/wood; a busy shop changes the material class | lua/dfllm/economy.lua |
+| [BUG-225](BUG-225-order-stuck-input-one-event-per-order.md) | fixed (offline, live-untested) | low | live 4: ORDER_STUCK for a missing input or worker is one event per order | lua/dfllm/economy.lua |
+| [BUG-226](BUG-226-explore-digs-into-known-cavern-level.md) | fixed (offline, live-untested) | medium | live 4: a placed explore digs into a cavern level the kernel already knows | lua/dfllm/runner.lua |
+| [BUG-227](BUG-227-readiness-audit-wait-log-spam.md) | fixed (offline, live-untested) | low | live 4: kern.log spam: readiness monthly audit waits | lua/dfllm/readiness.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

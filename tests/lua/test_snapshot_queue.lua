@@ -426,4 +426,25 @@ T.test('BUG-033: readiness\' monthly audit waits while its last audit snapshot i
   S.export, S.pending = export, pending
 end)
 
+T.test('BUG-227 (live i3: "monthly audit waits for snapshot s153212559-1" 18 times in 50 s): the wait is logged once per ' ..
+       'snapshot id', function()
+  local W = world()
+  local S = package.loaded['dfllm.snapshot']
+  local export, pending = S.export, S.pending
+  local held = true
+  S.pending = function(K, id) if held then return true end return pending(K, id) end
+  W.K.persist.set('manifest', {v = 2, bridges = {O1 = {role = 'outer', fp = {4, 1, Z, 5, 1, Z}, levers = {{8, 3, Z}}}}})
+  package.loaded['dfllm.readiness'] = nil
+  W.load(require('dfllm.readiness'))
+  W.run(2, {skip = 1})
+  W.run(2 * 33600 + 10, {skip = 300})
+  T.eq(#warns(W, '^readiness: monthly audit waits for snapshot '), 1, 'live: one line every readiness run')
+  held = false
+  W.run(33600 + 10, {skip = 300})
+  held = true
+  W.run(2 * 33600 + 10, {skip = 300})
+  T.eq(#warns(W, '^readiness: monthly audit waits for snapshot '), 2, 'a new snapshot: one more line')
+  S.export, S.pending = export, pending
+end)
+
 T.done()

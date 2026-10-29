@@ -1,5 +1,35 @@
 # CHANGELOG dfpilot
 
+## Live round 4 economy/runner fixes: made-again orders keep their material, grouped input ORDER_STUCK, explores stop above known caverns, readiness log (BUG-224..227, 2026-10-29; offline, live-untested)
+- **Why:** live round 4 on Earthboat (port 5002) and its skeptic: order 644/650 ConstructChest flipped rock/wood without end
+  (`wood_orders` ignored the BUG-201 mark, T.stale went back to stone below wood_orders' threshold, the stale reason was one
+  busy Carpenters shop with 35 mostly idle carpenters, the mark was lost when the record was rebuilt) (BUG-224); ORDER_STUCK
+  `no bars:INORGANIC:IRON` x12 and `no rock` x9, one per order (BUG-225); explore y380s2b0 dug into the cavern level z123 that
+  s0b0 had found and the runner had recorded in manifest.caverns (BUG-226); `readiness: monthly audit waits for snapshot ...`
+  18 times in 50 s (BUG-227).
+- **What changed:** (1) economy `M.stale_mark`; `wood_orders` skips marked orders; T.stale keeps sw/redo/told on a rebuild and
+  keeps a marked record while its order exists; `M.shop_busy`: a shop full of other jobs keeps the made-again order's class;
+  stone only at `stone_free >= left + max(10, boulders_below)`; `M.busy_request`: >= 3 waiting jobs a shop and an idle holder of
+  the labor -> PROJECT_REQUEST workshops why=busy types=[Carpenters|Masons] (request_days and 15 min); follow (wake.py) places it
+  like why=mandatory/slabs, placement key `busy` (BUG-224). (2) T.ocheck groups kind input and worker per `kind:why` like the
+  missing workshops: one event with d.n and up to 3 order ids, again only with news after 7 days and 10 min (BUG-225). (3)
+  runner `Q.explore_cav` before an explore's first dig chunk: a manifest cavern level inside the shaft's z-range cuts the shaft
+  one level above it (depth = anchor z - cavern z - 1), or blocks it `cavern_known` with one PROJECT_BLOCKED (A) when < 2
+  levels remain (BUG-226). (4) readiness logs the audit wait once per snapshot id (BUG-227).
+- **Safety:** no new verb, event, config key, state field or RULES row; no contract change (PROJECT_REQUEST why/types and
+  ORDER_STUCK kind already exist). Not in this package: care.lua's stressor count (BUG-205 part 2), plan.py re-fitting kept
+  explores. Risk: a cut explore reaches less deep (the ore search goes on at the next plan); a busy request may place a second
+  Carpenters/Masons the fort did not need when the waiting jobs are blocked by something the shop count does not see.
+- **Tests (each fails on 5e9e719):** tests/lua/test_economy_b2.lua (BUG-224 x3), tests/test_bug224_busy_shop.py,
+  tests/lua/test_economy_orders.lua (BUG-225, FR-01 slicing), tests/lua/test_runner_cavern.lua (BUG-226 x2),
+  tests/lua/test_snapshot_queue.lua (BUG-227).
+- **Live check:** (a) Earthboat: kern.log has no `rock -> wood` for an order id after its `made again` line; a stale wood order
+  in the full Carpenters shop is `made again` (not `in stone`); one PROJECT_REQUEST `workshops: one more Carpenters (...)` d.why
+  busy and follow's cli.log `auto:busy` placement. (b) A month without iron: one ORDER_STUCK `N order(s) cannot run ...: no
+  bars:INORGANIC:IRON` with d.kind input, d.n = the count. (c) An explore queued through a level in manifest.caverns logs
+  `cavern level zN known ... the shaft stops at zN+1` when it starts; no BREACH_STOP/CAVERN_PLUG for it. (d) `grep -c "monthly
+  audit waits for snapshot <id>" kern.log` = 1 per id.
+
 ## Live round 3 plan fixes: propose = check, core stages placeable, fresh fort, order libraries (BUG-195..198, 2026-10-29; offline, live-untested)
 - **Why:** live round 3 and its skeptic: on Trussroads `plan propose` drafted fortcore@same stage 2 that `plan check` refused
   (`overlaps project(s) y721s3b2`, a refuge_beds room of the y721 minimal plan) (BUG-195). On the fresh fort Earthboat propose
