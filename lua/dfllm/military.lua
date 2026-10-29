@@ -2205,6 +2205,13 @@ local function so_begin(K, key, s, order, meta)
                 arrived = old and old.arrived or false, unseen = 0, mode = K.mode(), w0 = nil}
   if order.kind == 'kill' then
     rt.so[key].tgt = rt.so[key].tgt or unit_xyz(order.units[1])
+    -- BUG-169: every target of the kill order (so.ids keeps the living ones), for the end event; a new kill order on the
+    -- running sortie adds its targets to the earlier ones
+    local all, has = {}, {}
+    for _, l in ipairs({(old and old.kind == 'kill' and old.ids0) or {}, order.units or {}}) do
+      for _, id in ipairs(l) do if not has[id] then has[id], all[#all + 1] = true, id end end
+    end
+    rt.so[key].ids0 = all
   end
   if M.every.ticks > M.SO_EVERY then M.every = {ticks = M.SO_EVERY} end
   return true
@@ -2218,6 +2225,16 @@ local function so_end(K, key, phase, why, txt, d)
   d = d or {}
   d.why = why
   if so and so.ids then d.units = so.ids end
+  -- BUG-169 (live i3: '#35046 sortie A: target 42739 dead' while 42713 had died first): a kill sortie names every target;
+  -- dead: all of them; any other end adds the ones that died on the way (d.dead)
+  if so and so.ids0 and #so.ids0 > 0 then
+    if phase == 'dead' then d.units = so.ids0
+    else
+      local dead = {}
+      for _, id in ipairs(so.ids0) do if unit_dead(id) then dead[#dead + 1] = id end end
+      if #dead > 0 then d.dead, txt = dead, txt .. '; dead: ' .. so_ids_txt(dead) end
+    end
+  end
   if so and so.tgt then d.pos = {so.tgt.x, so.tgt.y, so.tgt.z} end
   if so then d.ticks = now_tick(K) - so.t0 end
   so_event(K, key, phase, txt, d)
@@ -2257,7 +2274,8 @@ local function sortie_pass(K, now)
       if rt.held[key] then
         rt.so[key] = nil
       elseif alive0 and #alive0 == 0 then
-        so_end(K, key, 'dead', 'killed', string.format('sortie %s: target %s dead after %d ticks', key, so_ids_txt(so.ids),
+        so_end(K, key, 'dead', 'killed', string.format('sortie %s: %s %s dead after %d ticks', key,
+               #(so.ids0 or so.ids) > 1 and 'targets' or 'target', so_ids_txt(so.ids0 or so.ids),
                now - so.t0))
       elseif not s or not info or info.n == 0 then
         so_end(K, key, 'abort', 'no_squad', 'sortie ' .. key .. ' ended: the squad has no members')
@@ -2281,7 +2299,8 @@ local function sortie_pass(K, now)
             if not unit_dead(id) then alive[#alive + 1] = id end
           end
           if #alive == 0 then
-            so_end(K, key, 'dead', 'killed', string.format('sortie %s: target %s dead after %d ticks', key, so_ids_txt(so.ids),
+            so_end(K, key, 'dead', 'killed', string.format('sortie %s: %s %s dead after %d ticks', key,
+               #(so.ids0 or so.ids) > 1 and 'targets' or 'target', so_ids_txt(so.ids0 or so.ids),
                    now - so.t0))
             goto continue
           end
@@ -2387,12 +2406,16 @@ function M.kill_lone(K, ids, by)
   local info = s and M.squad_info(K, key)
   if not info or info.n == 0 then return false, 'squad ' .. key .. ' has no members' end
   if info.worn < c.worn then return false, string.format('squad %s worn %d%% < %d%%', key, info.worn, c.worn) end
+  -- BUG-169 (live i3: the kill list held 42739 at zone 0, 149 tiles out, and the squad marched there in the BREACH): only
+  -- targets the census shows inside (zone 2: Kern+ and the zones past the intake)
   local seen = {}
-  for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do seen[h.id] = true end
-  local vis = {}
-  for _, id in ipairs(ids or {}) do if seen[id] then vis[#vis + 1] = id end end
+  for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do seen[h.id] = int(h.zn) or 0 end
+  local vis, out = {}, 0
+  for _, id in ipairs(ids or {}) do
+    if seen[id] == 2 then vis[#vis + 1] = id elseif seen[id] then out = out + 1 end
+  end
   table.sort(vis)
-  if #vis == 0 then return false, 'the target is not in sight' end
+  if #vis == 0 then return false, out > 0 and 'the target is not inside the fort' or 'the target is not in sight' end
   local p = unit_xyz(vis[1])
   local why = p and unreachable(K, s, p)
   if why then return false, why end

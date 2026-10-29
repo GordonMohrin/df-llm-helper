@@ -736,9 +736,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                            "killed:i traps:i armed:i ticks:i")),
     # M3 (BUG-113): military reports the sortie to a position too (by any): phase go (the order: why kill or station),
     # arrived, dead (why killed), done (why no_target: arrived and nobody within sortie.kill_near), abort (why: worn,
-    # timeout, mode, gone, not_attackable, order_dropped, more_hostiles, no_squad)
+    # timeout, mode, gone, not_attackable, order_dropped, more_hostiles, no_squad). BUG-169: a kill sortie's dead names
+    # every target in units; any other end lists the targets that died before it in dead
     "SORTIE": ("B", "any", _d("phase:s", "squad:s why:s units:ia n:i cv:i foes:i est:i worn:i lost:i pos:p "
-                                         "ticks:i")),
+                                         "ticks:i dead:ia")),
     # BUG-032 (Run 11: a squad stationed next to B2 held its BREACH raise): military moved a squad station off a bridge
     # footprint and its ring (gate margin + stations.spread): why bridge (to the nearest revealed floor on the inner
     # side), chain (the next station of the posture's chain), none (nothing clear: kept), hold (soldiers at their
@@ -764,8 +765,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "LEVER_NOEFFECT": ("B", "gate", _d("bridge:s lever:i", "pulls:i state:s wait:i worker:i")),
     # BUG-121 (Run 14 note 101): boot found the game clock (tick_neu) before the last tick the runtime folder saw (tick_alt): an
     # older save was loaded. n_alt = the last event number of the discarded timeline (numbers continue after it); readers drop
-    # events before this marker whose tick is later than tick_neu
-    "TIMELINE_RESET": ("B", "kern", _d("n_alt:i tick_alt:i tick_neu:i")),
+    # events before this marker whose tick is later than tick_neu. BUG-165: kind clock (the above) | foreign (the save's
+    # persisted kern.ev is ahead of the folder's last event: a line this folder never logged; n_alt = that last event)
+    "TIMELINE_RESET": ("B", "kern", _d("n_alt:i tick_alt:i tick_neu:i", "kind:s")),
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),

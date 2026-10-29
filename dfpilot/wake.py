@@ -585,7 +585,8 @@ class Follower:
         is wall-clock bound and stays. The events before the marker never reach this point (EventTail drops them)."""
         d = e.get("d") if isinstance(e.get("d"), dict) else {}
         files.log_cli(self.dir, "follow", "timeline_reset", {"n": e.get("n")},
-                      f"older save loaded: tick {d.get('tick_alt')} -> {d.get('tick_neu')}; dropped jobs {sorted(self.jobs)}")
+                      f"{'save of another line' if d.get('kind') == 'foreign' else 'older save'} loaded: tick "
+                      f"{d.get('tick_alt')} -> {d.get('tick_neu')}; dropped jobs {sorted(self.jobs)}")
         self.jobs, self.plan_auto, self._plan_read = {}, {}, 0.0
 
     def _on_event(self, e: dict, now: float) -> None:
