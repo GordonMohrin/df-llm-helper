@@ -1167,3 +1167,145 @@ def test_follow_no_auto_places_no_seal(save):
     append_events(save, [ev(8813, "AUDIT", "audit failed", {"ok": 0, "fails": [BYPASS], "min_traps": 35})])
     f.poll()
     assert inbox_docs(save) == []
+
+
+# ---------------------------------------------------------------- BUG-240: wake limit in game time, HELD line
+CUR = 3 * 403200 + 123456                                       # the fixture state's game tick
+
+
+def full_hour(g, now):
+    g.wakes = [now - 100 * i for i in range(g.per_hour)]       # six wakes within the last hour
+
+
+def test_bug240_mood_risk_waits_at_most_one_game_day_for_the_hourly_limit():
+    g = wake.WakeGate()
+    full_hour(g, 5000)
+    g.add(ev(1, "MOOD_RISK", "Fey mood needs gems", tick=CUR), 5000)
+    assert g.blocked(5020, tick=CUR + 600) == "hourly limit"     # half a game day: still merged into the next slot
+    assert g.flush(5020, tick=CUR + 600) is None
+    b = g.flush(5030, tick=lambda: CUR + schema.TICKS["DAY"])   # one game day later it wakes, hourly limit or not
+    assert set(b) == {"MOOD_RISK"}
+    assert g.blocked(5030) == "empty"
+
+
+def test_bug240_year_review_and_drink_low_pass_others_wait():
+    for e, ok in ((ev(1, "YEAR_REVIEW", "y3", {"year": 3}, tick=CUR), True),
+                  (ev(1, "DECISION_NEEDED", "drink 2 d", {"id": "drink_low", "q": "x"}, tick=CUR), True),
+                  (ev(1, "DECISION_NEEDED", "pick a site", {"id": "D-07", "q": "x"}, tick=CUR), False),
+                  (ev(1, "SEAL_STUCK", "seal stuck", tick=CUR), False)):
+        g = wake.WakeGate()
+        full_hour(g, 5000)
+        g.add(e, 5000)
+        assert (g.flush(5020, tick=CUR + 2 * schema.TICKS["DAY"]) is not None) is ok, e["type"]
+
+
+def test_bug240_held_burst_from_an_older_follow_gets_its_tick():
+    old = {"pending": {"MOOD_RISK": {"c": 2, "n0": 7, "e": ev(8, "MOOD_RISK", "m", tick=CUR)}}, "first": 1.0,
+           "last": 1.0, "type_last": {}, "wakes": [4900.0] * 6}
+    g = wake.WakeGate()
+    g.load(json.loads(json.dumps(old)))
+    assert g.flush(5000, tick=CUR + schema.TICKS["DAY"])["MOOD_RISK"]["c"] == 2
+
+
+def test_bug240_follow_prints_a_held_line_every_10_min(save):
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    full_hour(f.gate, c.t)
+    append_events(save, [A(8813, "SEAL_STUCK", "seal stuck 8 d"), A(8814, "SEAL_STUCK", "again"),
+                         A(8815, "PROJECT_BLOCKED", "no rock", {"proj": "p1"})])
+    f.poll()
+    c.t += 11
+    lines = f.poll()
+    assert len(lines) == 1 and lines[0].startswith("HELD y3 ")
+    assert "3 events held by the wake limit (6/h)" in lines[0] and "SEAL_STUCK x2" in lines[0]
+    assert "PROJECT_BLOCKED" in lines[0] and "--since 8812" in lines[0] and est_tokens(lines[0]) <= wake.WAKE_TOKENS
+    c.t += 300
+    assert f.poll() == []                                      # at most one HELD line per 10 min
+    c.t += wake.HELD_NOTE_S - 300
+    assert f.poll()[0].startswith("HELD ")
+    assert "held" in (save / "cli.log").read_text("utf-8")
+
+
+def test_bug240_follow_wakes_mood_risk_a_game_day_old_despite_the_limit(save):
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    full_hour(f.gate, c.t)
+    append_events(save, [ev(8813, "MOOD_RISK", "Fey mood: gems", tick=CUR - 2 * schema.TICKS["DAY"])])
+    f.poll()
+    c.t += 11
+    lines = f.poll()
+    assert len(lines) == 1 and lines[0].startswith("WAKE ") and "MOOD_RISK" in lines[0]
+
+
+# ---------------------------------------------------------------- BUG-238: one follow per save
+def lock_doc(save, pid, hb):
+    files.write_json_atomic(save / wake.FOLLOW_LOCK, {"v": 1, "pid": pid, "start": int(hb), "hb": int(hb)})
+
+
+def test_bug238_pid_alive():
+    assert wake.pid_alive(os.getpid()) is True
+    assert wake.pid_alive(0) is False and wake.pid_alive(None) is False and wake.pid_alive(2 ** 31 - 2) is False
+
+
+def test_bug238_lock_refused_taken_over_or_stale(save):
+    now = time.time()
+    alive = lambda pid: True                                   # noqa: E731
+    lock_doc(save, 4242, now)
+    ok, owner = wake.acquire_lock(save, now, alive=alive)
+    assert not ok and owner["pid"] == 4242
+    assert wake.acquire_lock(save, now, alive=lambda pid: False) == (True, None)          # its pid is gone
+    lock_doc(save, 4242, now - wake.FOLLOW_LOCK_STALE_S - 1)
+    assert wake.acquire_lock(save, now, alive=alive) == (True, None)                      # it stopped beating
+    lock_doc(save, 4242, now)
+    assert wake.acquire_lock(save, now, takeover=True, alive=alive) == (True, None)
+    doc = json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))
+    assert doc["pid"] == os.getpid() and doc["took"] == 4242
+    assert wake.refresh_lock(save, now + 10, alive=alive) is None
+    lock_doc(save, 5151, now + 20)                              # another follow took it over
+    assert wake.refresh_lock(save, now + 21, alive=alive)["pid"] == 5151
+    wake.release_lock(save)
+    assert (save / wake.FOLLOW_LOCK).exists()                  # never deletes another one's lock
+
+
+def ARGS(**kw):
+    a = {"save_pin": None, "since": None, "no_auto": False, "once": False, "max_s": 0.3, "interval": 0.02}
+    a.update(kw)
+    return type("A", (), a)()
+
+
+def test_bug238_second_follow_exits_without_polling(save, monkeypatch, capsys):
+    """Run 15: an old Monitor child kept following; the new follow audited every snapshot a second time."""
+    calls = []
+    monkeypatch.setattr(wake.Follower, "poll", lambda self: calls.append(1))
+    monkeypatch.setattr(wake, "pid_alive", lambda pid: pid == 4242 or pid == os.getpid())
+    lock_doc(save, 4242, time.time())
+    before = (save / ".follow.json").read_bytes() if (save / ".follow.json").exists() else None
+    assert wake.run(ARGS()) == 3 and calls == []
+    out = capsys.readouterr().out
+    assert "follow already runs (pid 4242" in out and "--takeover" in out
+    assert json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))["pid"] == 4242
+    assert ((save / ".follow.json").read_bytes() if (save / ".follow.json").exists() else None) == before
+
+
+def test_bug238_takeover_and_the_old_follow_exits(save, monkeypatch, capsys):
+    monkeypatch.setattr(wake, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(wake, "FOLLOW_HB_EVERY_S", 0)
+    lock_doc(save, 4242, time.time())
+    calls = []
+
+    def poll(self):
+        calls.append(1)
+        if len(calls) == 1:                                    # the old follow takes the save back (its --takeover)
+            lock_doc(save, 5151, time.time())
+    monkeypatch.setattr(wake.Follower, "poll", poll)
+    assert wake.run(ARGS(takeover=True, max_s=5)) == 0 and calls == [1]
+    assert "pid 5151 took over" in capsys.readouterr().out
+    assert json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))["pid"] == 5151
+
+
+def test_bug238_lock_released_on_exit(save):
+    assert wake.run(ARGS(once=True)) == 0
+    assert not (save / wake.FOLLOW_LOCK).exists()
+    assert "holds .follow.lock" in (save / "cli.log").read_text("utf-8")

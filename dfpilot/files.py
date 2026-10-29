@@ -1,7 +1,7 @@
 """Runtime files (CONTRACTS §8, §9): read what kern writes, write the inbox. 0 DF calls.
 
 Readers tolerate torn writes: a failed parse is retried once after 50 ms; events are only
-consumed as complete ('\\n'-terminated) lines. Python writes via '.<name>.tmp' + os.replace.
+consumed as complete ('\\n'-terminated) lines. Python writes via '.<name>.<pid>.tmp' + os.replace.
 """
 from __future__ import annotations
 
@@ -39,18 +39,35 @@ def read_json(path: Path, retry: bool = True, sleep: Callable[[float], None] = t
     return None
 
 
+def tmp_path(path: Path) -> Path:
+    """BUG-239: '.<name>.<pid>.tmp': two processes writing the same file never share (and steal) one temporary file."""
+    path = Path(path)
+    return path.with_name(f".{path.name}.{os.getpid()}.tmp")
+
+
 def write_json_atomic(path: Path, doc: Any) -> Path:
-    """Write to '.<name>.tmp' in the same folder, then os.replace (retried: readers may hold the file)."""
+    """Write to '.<name>.<pid>.tmp' in the same folder, then os.replace (retried: readers may hold the file). BUG-239: a
+    temporary file gone before the replace (Run 15: WinError 2 from a second follow) is written once more; the second
+    miss raises the FileNotFoundError to the caller, which logs it."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name("." + path.name + ".tmp")
-    tmp.write_text(dumps(doc) + "\n", encoding="utf-8", newline="\n")
+    tmp, text, lost = tmp_path(path), dumps(doc) + "\n", 0
+    tmp.write_text(text, encoding="utf-8", newline="\n")
     for i in range(5):
         try:
             os.replace(tmp, path)
             return path
+        except FileNotFoundError:
+            lost += 1
+            if lost > 1 or not path.parent.is_dir():
+                raise
+            tmp.write_text(text, encoding="utf-8", newline="\n")
         except PermissionError:
             if i == 4:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
                 raise
             time.sleep(RETRY_S)
     return path

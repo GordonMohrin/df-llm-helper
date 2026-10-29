@@ -2,7 +2,9 @@
 `dfllm audit`: the follower's audit job, run once on demand (FR-65).
 
 DESIGN §8 limits: <= 1 wake per type per 5 min, bursts merged within 60 s, <= 6 wakes per hour.
-Held events are never dropped: they wait (merged) for the next allowed wake. Class B/C events do
+Held events are never dropped: they wait (merged) for the next allowed wake. BUG-240: URGENT_GAME kinds (YEAR_REVIEW,
+MOOD_RISK, a drink/food decision, ...) wait at most one game day; the hourly limit prints one HELD line per 10 min.
+BUG-238: one follow per save (<save>/.follow.lock; a second one exits unless --takeover). Class B/C events do
 not wake; the follower acts on two of them without the LLM:
   SNAPSHOT_READY purpose=audit -> inspect manifest -> bp.topo.audit(snap, manifest) -> inbox `audit`
                                   (also with --no-auto: the audit changes nothing in the fort, it is the readiness
@@ -45,6 +47,7 @@ still refuses a hand-written `dfllm cmd audit`); it prints the result and the ke
 from __future__ import annotations
 
 import inspect
+import os
 import re
 import sys
 import time
@@ -184,15 +187,39 @@ AUDIT_SNAP_NOTE_S = 30                         # BUG-160: one progress line afte
 ERR_EVERY_S = 60                               # stderr 'poll error' at most once per minute
 
 
+# BUG-240 (Run 15 Guildcleans y374: at timestream 500 a real hour is ~4 game years; after 6 wakes follow said nothing for
+# about a game year while MOOD_RISK (the Fey mood that died), YEAR_REVIEW and SEAL_STUCK waited in gate.pending): these types
+# are never held by the hourly limit longer than URGENT_GAME_TICKS of game time (merged first, one per type per
+# URGENT_REPEAT_S); DECISION_NEEDED only for the ids in URGENT_DECISIONS (a fort running out of drink or food, a thirsty one)
+URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
+URGENT_DECISIONS = {"drink_low", "food_low", "thirst", "patient_thirst"}
+URGENT_GAME_TICKS = schema.TICKS["DAY"]
+HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often
+
+
+def urgent_game(e: dict) -> bool:
+    """BUG-240: an event of a kind that must not wait for the hourly limit longer than one game day."""
+    t = e.get("type")
+    if t == "DECISION_NEEDED":
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        return d.get("id") in URGENT_DECISIONS
+    return t in URGENT_GAME
+
+
+def _tick_of(v) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
 class WakeGate:
     """Pending class-A events -> at most one wake line per allowed slot."""
 
     def __init__(self, per_type_s: float = 300, merge_s: float = 60, quiet_s: float = 10, per_hour: int = 6):
         self.per_type_s, self.merge_s, self.quiet_s, self.per_hour = per_type_s, merge_s, quiet_s, per_hour
-        self.pending: dict[str, dict] = {}     # type -> {c: count, n0: first n, e: latest event}
+        self.pending: dict[str, dict] = {}     # type -> {c: count, n0: first n, e: latest event, t0: first game tick, ug}
         self.first = self.last = None          # wall time of the first / latest pending arrival
         self.type_last: dict[str, float] = {}  # type -> wall of its last wake
         self.wakes: list[float] = []           # walls of wakes (last hour)
+        self.held_said = -1e18                 # BUG-240: wall of the last HELD line
 
     def add(self, e: dict, now: float) -> None:
         t = e["type"]
@@ -201,12 +228,27 @@ class WakeGate:
         p["e"] = e
         if p["n0"] is None:
             p["n0"] = e.get("n")
+        if urgent_game(e):                     # BUG-240: the game tick it first waited at
+            p["ug"] = 1
+            if _tick_of(p.get("t0")) is None:
+                p["t0"] = _tick_of(e.get("tick"))
         self.first = now if self.first is None else self.first
         self.last = now
 
-    def blocked(self, now: float) -> str | None:
+    def _game_due(self, now: float, tick) -> bool:
+        """BUG-240: an URGENT_GAME pending type that has waited one game day (and did not wake within URGENT_REPEAT_S)."""
+        cands = [(t, p) for t, p in self.pending.items() if p.get("ug") and _tick_of(p.get("t0")) is not None
+                 and now - self.type_last.get(t, -1e18) >= URGENT_REPEAT_S]
+        if not cands:
+            return False
+        cur = _tick_of(tick() if callable(tick) else tick)
+        return cur is not None and any(cur - p["t0"] >= URGENT_GAME_TICKS for _, p in cands)
+
+    def blocked(self, now: float, tick=None) -> str | None:
         """Why the pending burst cannot wake now (None = it can). An URGENT type wakes at once (no merge wait, no
-        hourly limit) unless the same type woke within URGENT_REPEAT_S; it takes the rest of the burst along."""
+        hourly limit) unless the same type woke within URGENT_REPEAT_S; it takes the rest of the burst along.
+        BUG-240: `tick` (the current game tick, or a function that reads it) lets an URGENT_GAME type past the hourly
+        limit and the type cooldown once it has waited URGENT_GAME_TICKS; without a tick only wall time counts."""
         if not self.pending:
             return "empty"
         if any(t in URGENT and now - self.type_last.get(t, -1e18) >= URGENT_REPEAT_S for t in self.pending):
@@ -214,20 +256,42 @@ class WakeGate:
         if now - self.last < self.quiet_s and now - self.first < self.merge_s:
             return "merging"
         self.wakes = [w for w in self.wakes if now - w < 3600]
-        if len(self.wakes) >= self.per_hour:
+        limit = len(self.wakes) >= self.per_hour
+        cool = all(now - self.type_last.get(t, -1e18) < self.per_type_s for t in self.pending)
+        if (limit or cool) and tick is not None and self._game_due(now, tick):
+            return None
+        if limit:
             return "hourly limit"
-        if all(now - self.type_last.get(t, -1e18) < self.per_type_s for t in self.pending):
+        if cool:
             return "type cooldown"
         return None
 
-    def flush(self, now: float) -> dict[str, dict] | None:
-        if self.blocked(now):
+    def flush(self, now: float, tick=None) -> dict[str, dict] | None:
+        if self.blocked(now, tick):
             return None
         out, self.pending, self.first, self.last = self.pending, {}, None, None
         self.wakes.append(now)
         for t in out:
             self.type_last[t] = now
         return out
+
+    def held_note(self, now: float, state=None) -> str | None:
+        """BUG-240: while the hourly limit holds a burst, one 'HELD' line at most every HELD_NOTE_S: how many events of which
+        types wait and when the next wake slot opens (silence must never look like a quiet fort)."""
+        if not self.pending or now - self.held_said < HELD_NOTE_S or self.blocked(now) != "hourly limit":
+            return None
+        self.held_said = now
+        state = state() if callable(state) else state
+        t = (state or {}).get("t") or {}
+        when = fmt_tick(t.get("abs", t["y"] * schema.TICKS["YEAR"] + t["tick"])) if t.get("y") is not None else "?"
+        types = sorted(self.pending, key=_prio)
+        n = sum(p.get("c", 1) for p in self.pending.values())
+        ns = [p["n0"] for p in self.pending.values() if isinstance(p.get("n0"), int)]
+        wait = max(0, int((min(self.wakes) + 3600 - now) // 60) + 1) if self.wakes else 0
+        kinds = ", ".join(f"{ty}{' x%d' % self.pending[ty]['c'] if self.pending[ty].get('c', 1) > 1 else ''}" for ty in types)
+        line = (f"HELD {when} | {n} event{'s' if n != 1 else ''} held by the wake limit ({self.per_hour}/h): {kinds} | "
+                f"next wake in ~{wait} min" + (f"; now: dfllm events --cls A --since {min(ns) - 1}" if ns else ""))
+        return clip(line, WAKE_TOKENS)
 
     def to_json(self) -> dict:
         return {"pending": self.pending, "first": self.first, "last": self.last, "type_last": self.type_last,
@@ -239,6 +303,10 @@ class WakeGate:
             self.first, self.last = d.get("first"), d.get("last")
             self.type_last = d.get("type_last") or {}
             self.wakes = d.get("wakes") or []
+            for p in self.pending.values():    # BUG-240: a burst saved by an older follow carries no game tick yet
+                if isinstance(p, dict) and isinstance(p.get("e"), dict) and urgent_game(p["e"]):
+                    p["ug"] = 1
+                    p.setdefault("t0", _tick_of(p["e"].get("tick")))
 
 
 def _prio(t: str) -> int:
@@ -569,7 +637,13 @@ class Follower:
         if now - self._pruned >= PRUNE_EVERY_S:
             self._pruned = now
             files.prune_outbox(self.dir)
-        burst = self.gate.flush(now)
+        burst = self.gate.flush(now, tick=lambda: files.current_tick(self.dir))     # BUG-240: game time
+        if not burst and self.gate.pending:
+            held = self.gate.held_note(now, lambda: files.read_state(self.dir))
+            if held:
+                self.out(held)
+                printed.append(held)
+                files.log_cli(self.dir, "follow", "held", sorted(self.gate.pending), held)
         if burst:
             state = files.read_state(self.dir)
             review = plan_mod.review_note(self.dir, state) if "YEAR_REVIEW" in burst else ""     # FR-86
@@ -1164,13 +1238,143 @@ def add_audit_parser(sub) -> None:
     p.add_argument("--wait", type=float, default=10.0, help="seconds to wait for each kernel reply")
 
 
+# BUG-238 (Run 15 Guildcleans/Inkintense: a Monitor's old `follow` child kept running beside the new one; every audit
+# snapshot was audited twice, the second answer 'unknown snap' woke as AUTO_FAIL 15+ times, both wrote .follow.json):
+# one follow per save. <save>/.follow.lock {v, pid, start, hb}; a second follow refuses while the owner's pid lives and
+# its hb is younger than FOLLOW_LOCK_STALE_S, unless --takeover; an owner that finds another pid in the lock exits.
+FOLLOW_LOCK = ".follow.lock"
+FOLLOW_LOCK_STALE_S = 3 * FOLLOW_HB_EVERY_S
+
+
+def pid_alive(pid) -> bool:
+    """Whether a process with this pid runs (Windows: OpenProcess + GetExitCodeProcess; never os.kill, which ends it there)."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes as w
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.argtypes, k32.OpenProcess.restype = [w.DWORD, w.BOOL, w.DWORD], w.HANDLE
+        k32.GetExitCodeProcess.argtypes = [w.HANDLE, ctypes.POINTER(w.DWORD)]
+        k32.CloseHandle.argtypes = [w.HANDLE]
+        h = k32.OpenProcess(0x1000, False, pid)              # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ctypes.get_last_error() == 5             # access denied: it exists
+        try:
+            code = w.DWORD()
+            return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259    # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def lock_owner(save_dir: Path, now: float, alive: Callable[[int], bool] | None = None) -> dict | None:
+    """BUG-238: the lock of another follow that still runs for this save (live pid, fresh hb), else None."""
+    doc = files.read_json(Path(save_dir) / FOLLOW_LOCK, retry=False)
+    if not isinstance(doc, dict) or doc.get("pid") == os.getpid():
+        return None
+    hb = doc.get("hb")
+    if not isinstance(hb, (int, float)) or isinstance(hb, bool) or now - hb > FOLLOW_LOCK_STALE_S:
+        return None
+    return doc if (alive or pid_alive)(doc.get("pid")) else None
+
+
+def acquire_lock(save_dir: Path, now: float, takeover: bool = False,
+                 alive: Callable[[int], bool] | None = None) -> tuple[bool, dict | None]:
+    """(True, None) when this process now holds <save>/.follow.lock; (False, owner) when another follow runs."""
+    owner = lock_owner(save_dir, now, alive)
+    if owner is not None and not takeover:
+        return False, owner
+    files.write_json_atomic(Path(save_dir) / FOLLOW_LOCK, {"v": 1, "pid": os.getpid(), "start": int(now), "hb": int(now),
+                                                           **({"took": owner.get("pid")} if owner else {})})
+    return True, None
+
+
+def refresh_lock(save_dir: Path, now: float, alive: Callable[[int], bool] | None = None) -> dict | None:
+    """Beat the lock; the lock of a follow that took over (another live pid with a fresh hb) is returned untouched."""
+    owner = lock_owner(save_dir, now, alive)
+    if owner is not None:
+        return owner
+    doc = files.read_json(Path(save_dir) / FOLLOW_LOCK, retry=False)
+    start = doc.get("start") if isinstance(doc, dict) and doc.get("pid") == os.getpid() else None
+    files.write_json_atomic(Path(save_dir) / FOLLOW_LOCK, {"v": 1, "pid": os.getpid(),
+                                                           "start": start if isinstance(start, int) else int(now),
+                                                           "hb": int(now)})
+    return None
+
+
+def release_lock(save_dir: Path | None) -> None:
+    if save_dir is None:
+        return
+    p = Path(save_dir) / FOLLOW_LOCK
+    doc = files.read_json(p, retry=False)
+    if isinstance(doc, dict) and doc.get("pid") == os.getpid():
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
+class _Lock:
+    """run()'s hold on the lock of the save the follower is attached to (it follows a save switch)."""
+
+    def __init__(self, takeover: bool):
+        self.takeover, self.dir, self.beat = takeover, None, -1e18
+
+    def step(self, d: Path | None) -> str | None:
+        """None to go on; the line to print before exiting when another follow holds or took the lock."""
+        try:
+            return self._step(d)
+        except OSError as e:                        # a lock that cannot be written must not blind the follower
+            sys.stderr.write(f"follow: lock: {type(e).__name__}: {e}\n")
+            self.dir, self.beat = d, time.time()    # try again at the next beat, not every poll
+            return None
+
+    def _step(self, d: Path | None) -> str | None:
+        now = time.time()
+        if d is None:
+            return None
+        if d != self.dir:
+            release_lock(self.dir)
+            self.dir = None
+            ok, owner = acquire_lock(d, now, self.takeover)
+            if not ok:
+                age = int(now - owner["hb"]) if isinstance(owner.get("hb"), (int, float)) else "?"
+                return (f"follow already runs (pid {owner.get('pid')}, beat {age}s ago) for {d.name}: this one exits; "
+                        f"stop that one, or start this one with --takeover")
+            self.dir, self.beat = d, now
+            files.log_cli(d, "follow", "lock", {"takeover": self.takeover}, "holds .follow.lock")
+            return None
+        if now - self.beat >= FOLLOW_HB_EVERY_S:
+            self.beat = now
+            owner = refresh_lock(d, now)
+            if owner is not None:
+                self.dir = None                     # not ours any more: never delete it
+                return f"follow: pid {owner.get('pid')} took over {d.name} (--takeover): this one exits"
+        return None
+
+
 def run(args) -> int:
     f = Follower(save=args.save_pin, since=args.since, auto=not args.no_auto,
                  audit=not getattr(args, "no_audit", False))
     t0, errors, last_err = time.monotonic(), 0, -1e18
+    lock = _Lock(bool(getattr(args, "takeover", False)))          # BUG-238
     try:
         while True:
             try:
+                why = lock.step(f._resolve())
+                if why:
+                    print(why, flush=True)
+                    f.dir = None                    # leave the other follow's .follow.json alone
+                    return 3 if "already runs" in why else 0
                 f.poll()
                 errors = 0
             except Exception as e:             # noqa: BLE001 - never die: the Monitor would go blind
@@ -1190,6 +1394,7 @@ def run(args) -> int:
         return 0
     finally:
         f.save_state()
+        release_lock(lock.dir)
 
 
 def add_parser(sub) -> None:
@@ -1201,3 +1406,5 @@ def add_parser(sub) -> None:
     p.add_argument("--no-auto", action="store_true",
                    help="no automatic placements (tombs, workshops, farms, P0/P1 starters); the audit still runs")
     p.add_argument("--no-audit", action="store_true", help="do not run the path audit on audit snapshots either")
+    p.add_argument("--takeover", action="store_true",
+                   help="BUG-238: take the save over from a follow that still runs (it exits); without it this one exits")

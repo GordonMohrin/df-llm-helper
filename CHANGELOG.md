@@ -1,5 +1,24 @@
 # CHANGELOG dfpilot
 
+## Run 15 follow: one process per save, wake limit in game time, own tmp files (BUG-238, BUG-239, BUG-240, 2026-10-29; offline, live-untested)
+- **Why:** Run 15. A Monitor's old `follow` child kept running beside the new one: every audit snapshot was audited twice and
+  the second `audit` woke as AUTO_FAIL 'unknown snap' 15+ times (Guildcleans), both wrote `.follow.json` and one replace failed
+  with WinError 2 on the shared `..follow.json.tmp` (Inkintense) (BUG-238, BUG-239). At timestream 500 the 6 wakes per real hour
+  covered about 4 game years: follow said nothing for about a game year while MOOD_RISK (the Fey mood that died), YEAR_REVIEW
+  and SEAL_STUCK waited in gate.pending (BUG-240).
+- **What changed:** (1) `follow` holds `<save>/.follow.lock` {pid, start, hb} (beat every 10 s); a second follow for the save
+  prints `follow already runs (pid N ...)` and exits 3 unless the owner's pid is dead or its hb older than 30 s; `--takeover`
+  takes it and the old follow exits at its next beat without saving its state (BUG-238). (2) `files.write_json_atomic` writes
+  `.<name>.<pid>.tmp`, rewrites it once when it vanished before the replace, then raises to the caller (BUG-239). (3) WakeGate:
+  URGENT_GAME (YEAR_REVIEW, MOOD_RISK, MOOD_CRITICAL, DEATH, STRANDED, PATIENT_DYING, DECISION_NEEDED drink_low/food_low/thirst/
+  patient_thirst) waits for the hourly limit and the type cooldown at most one game day (`flush(now, tick)`, first tick per
+  type in `t0`); while the limit holds, one `HELD ... N events held by the wake limit (6/h): types | next wake in ~M min` line
+  at most every 10 min (BUG-240). Ordinary types keep 6 per real hour. No contract change.
+- **Tests (each fails on 6dc0f19):** tests/test_cli_wake.py `test_bug238_*`, `test_bug240_*`; tests/test_files.py `test_bug239_*`.
+- **Live check:** a second `python -m dfpilot follow` for the same save prints `follow already runs (pid N` and ends; with
+  `--takeover` the old process ends within 10 s; one `auto:audit` per audit snapshot in cli.log and no 'unknown snap' AUTO_FAIL;
+  no `cannot save state: [WinError 2]`. At timestream with more than 6 class-A events per hour a MOOD_RISK/YEAR_REVIEW still
+  wakes within about a game day, the rest shows as `HELD ...` lines (cli.log `held`).
 ## Live round 4 station fallback and the release without stations (BUG-214, BUG-215, 2026-10-29; offline, live-untested)
 - **Why:** live round 4 on E:/DF-test4 (Trussroads) and its skeptic: with B2 raised the BREACH chain b2, core, z4, melee failed entry by
   entry (b2 a wall, core on walk group 0, melee on 1507 behind B2, the soldiers on 1): no station order (kpi off nost 8, on_station 0 of 8

@@ -245,6 +245,9 @@ Related: FR-xx, BUG-xx
 | [BUG-228](BUG-228-embark-injector-leaves-tracking-on-off.md) | fixed (offline, live-untested) | medium | Run 15 embark: DF ignores the injected mouse while enabler.tracking_on is 0 (cause of BUG-020) | tools/embark |
 | [BUG-229](BUG-229-embark-scan-misses-water-mountain-rectangles-and-old-site-tiles.md) | fixed (offline, live-untested) | medium | Run 15 embark: scan passes all-water/mountain rectangles; old sites by world_site.pos | tools/embark |
 | [BUG-230](BUG-230-title-loader-same-named-worlds-and-no-scroll.md) | fixed (offline, live-untested) | medium | Run 15: title-screen loader cannot tell same-named worlds apart, never scrolls a list | tools/embark |
+| [BUG-238](BUG-238-follow-two-processes-on-one-save.md) | fixed (offline, live-untested) | high | Run 15: two follow processes on one save audit every snapshot twice (AUTO_FAIL unknown snap) | dfpilot/wake |
+| [BUG-239](BUG-239-atomic-write-shared-tmp-name.md) | fixed (offline, live-untested) | low | Run 15: write_json_atomic shares one tmp name per file (WinError 2 on .follow.json) | dfpilot/files |
+| [BUG-240](BUG-240-follow-wake-limit-in-real-hours-only.md) | fixed (offline, live-untested) | high | Run 15: wake limit in real hours only; MOOD_RISK/YEAR_REVIEW held for a game year, nothing said | dfpilot/wake |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
