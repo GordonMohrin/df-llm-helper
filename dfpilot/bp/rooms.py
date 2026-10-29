@@ -46,7 +46,9 @@ PARAMS = {
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40)},
     "workshops": {"skip": ("", None, None), "add": ("", None, None)},
-    "farms": {"plots": (2, 1, 4)},
+    # BUG-297: surface = 1 builds the plots on soil floor that stands already (no dig, no door, no burrow): sites.rank
+    # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
+    "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1)},
     "furnaces": {"wood": (1, 0, 2)},
     "office": {"role": ("manager", None, None)},
     "captives": {},
@@ -250,6 +252,16 @@ def farms(p: dict) -> Plan:
     P = Plan("farms", "infra")
     n = p["plots"]
     cols, rows = min(n, 2), -(-n // 2)
+    if p.get("surface"):
+        # BUG-297 (Run 15c Inkintense: no room site on soil, one plot for 50 citizens, a famine): plots on soil floor
+        # that is already there, anchor = the plot block's north-west corner; nothing is dug, no door, no burrow paint
+        W, H = 5 if cols == 1 else 11, 8 * rows - 1
+        b = P.stage("build", "build")
+        for i in range(n):
+            r, c = divmod(i, cols)
+            b.ent(6 * c, 8 * r, 6 * c + 4, 8 * r + 6, 0, "p")
+        P.room("", "farms", USE.get("farms", "utility"), (0, 0, 0, W - 1, H - 1, 0), 0)
+        return P
     box = _box(P, 5 if cols == 1 else 11, 8 * rows - 1)
     b = P.stage("build", "build")
     for i in range(n):

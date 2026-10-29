@@ -1,5 +1,42 @@
 # CHANGELOG dfpilot
 
+## Run 15c famine: the player's pop ceiling holds, a famine hold, no drill in a famine, hunters back after a drill, fishing from ramps, surface farms, the seal outside the burrow, no false "cannot reach food" (BUG-293..299, 2026-10-29; offline, live-untested)
+- **Why:** Run 15c Inkintense (pop 50, food 0-11 d since y375 autumn, one farm plot, 414 seeds, one dwarf starved; runs/run-15c-
+  inkintense/FR-BUGS.md 'Runde 2'): `popcap.lower cap=25` was dropped at the next plan.reload (#1029 -> #1031 `max-pop 100 (R0)`,
+  again #1264/#1312/#1375) and migrants came 26 -> 50 (BUG-293); automatic drills at food 9 d and 1 d (#1403, #1488) (BUG-294), each
+  taking the hunters off (`mode DRILL`, #1408/#1409, #1492/#1493) until a full economy run 30,000-50,000 ticks later (BUG-295);
+  `no safe fishing water (160 no bank on the walk group)` beside 164 water tiles under ramp tops `v` (BUG-296); `bp sites farms
+  --fresh` 0 ranked and plan propose `no water or food build left to draft` (BUG-297); the seal door 92,99,133 `no builder has
+  taken it` for years, outside Kern+ (#1487, #1500) (BUG-298); `28 cannot reach food` with all citizens and food on one walk group
+  (#1361, #1490) (BUG-299).
+- **What changed:** (1) readiness: the player's ceiling survives plan reloads (root cause readiness.lua inbox_cap cleared it on
+  every new `plan.loaded`); `popcap.lower {cap, until?}` (`until=food`, the default below 60 food days, is lifted at 60 food
+  days; `until=raise` holds), new verbs `popcap.raise {}` and `popcap.set {cap}`; the kernel's famine hold: food < 15 d and
+  falling (or 0) holds max-pop at the population until food is back at 30 d (POPCAP why famine); a `popcap.lower` below the plan but above a famine or open-perimeter hold is kept for after it; state `pop.hold`, status pop
+  line ` ceiling <hold>`. (2) drill: no automatic drill while economy.alarm() is set or food/drink < 30 d (`supply: food 9 d` as
+  the hold). (3) economy: the members a DRILL takes off return on the next PEACE (not RECOVERY; WORK_DETAIL why `drill over`).
+  (4) economy.fish_bank: a ramp top over the water is open like `_`, the bank is the floor beside it one level up. (5) farms
+  `p.surface=1` (plots on soil floor that stands, nothing dug) with sites inside Z4 or within 12 tiles of the entrance (manifest
+  `edge`), off the attack path, rooms and the way in; snapshot soil marks capped at 8000 of their own (they were all spent on
+  the fort's soil floors, 500); plan propose below 60 food days drafts farms@S1 (p.surface=1 when only a surface site is free)
+  whenever no farms project is under way, also after an earlier one (fort fact `farms`); a surface farm only in PEACE. (6) economy.burrow_out: build_state
+  names `outside the burrow X (N of M free citizens assigned to it)` / `(civil alert on)`; runner seal first (PEACE) paints the
+  piece's own tile into that burrow once (not its neighbours: a perimeter door's outer side stays out of the alert burrow) (act.burrow_tiles, now also for runner), then stuck_days before the BUG-274
+  re-place. (7) economy.cut_off: no food sample = nobody cut off; starvation says `no food left`. Contracts: verbs popcap.raise/
+  popcap.set, popcap.lower until, state pop.hold, act burrow_tiles runner, snapshot marks.soil hi 8000; appendix regenerated;
+  RULES section 6 popcap row edited in place.
+- **Tests (each fails on 05dc764):** tests/lua/test_fix10_famine.lua (6), tests/lua/test_fix10_economy.lua (4),
+  tests/lua/test_runner_seal_fix10.lua (1), tests/test_fix10_famine.py (8; the room-farm guard passes on both); updated pin: tests/lua/test_readiness.lua
+  (popcap.lower: the reload keeps the ceiling, popcap.raise lifts it), tests/test_wp6_files.py (pop.hold of the scenario's
+  popcap.lower 60), tests/test_seal_files.py (act burrow_tiles seal + runner), golden tests/bp/golden/farms.json/.txt (params surface 0).
+- **Live check:** Inkintense after the load: `dfllm status` pop line `ceiling player 25 until ...` (or `famine 50 (food 1 d)`)
+  and no POPCAP `R0` above it after a plan reload; drill hold `supply: food N d`; after any drill WORK_DETAIL `drill over`;
+  kern.log `fishing: zone dfllm-fish at x,y,132 (...; bank x,y,133)`; a fresh snapshot and `bp sites farms --p surface=1`, or
+  `plan propose` notes `BUG-297: ... farms@S1 p.surface=1 ... drafted`; SEAL_STUCK for c1a18844987fd71b01 names `outside the burrow`
+  if that is the cause, then `1 tiles added to it`; starvation `no food left`. Uncertain: whether the builders really keep to
+  Kern+ (no civil alert showed in round 1: `civ alert burrows 0`; burrow_out says so or stays silent), which crops the 414 seeds
+  grow on a surface plot, and whether DF lets a fisher stand beside a ramp top.
+
 ## Run 15b crush: the drill lowers its bridges before PEACE, a quiet window for every lowering (BUG-251..254, 2026-10-29; offline, live-untested)
 - **Why:** Run 15b Earthboat y374 summer d74: soldier 24165 died crushed by B1 going down after an automatic drill (#1057
   BRIDGE_CRUSH, #1058 DEATH 'last seen 1 tile from it'); kern.log: PEACE 150981959, 18 'B1 down still waits for citizen', the pull

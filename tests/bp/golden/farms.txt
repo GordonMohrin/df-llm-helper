@@ -1,4 +1,4 @@
-farms {'plots': 2, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+farms {'plots': 2, 'surface': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
   infra: dig(8), build(3), burrow(4)
   materials: {'door': 1, 'farm_plot': 2}
 z100  (x 64..76, y 69..79)

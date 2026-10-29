@@ -47,6 +47,9 @@ M.CFG = {
   margin_steps = {{16, 16, 2}, {8, 8, 1}, {4, 4, 1}, {0, 0, 0}}, col_margin = {2, 2, 1}, parts_max = 24,
   sites = {w = 96, h = 96, below = 8, above = 3},   -- default box without a manifest
   marks_max = 500,
+  -- BUG-297 (Run 15c Inkintense: the 500 soil marks were all spent on the fort's own soil floors on z130-z132, so the
+  -- ~5,900 revealed surface floors on z133 had none and `bp sites farms p.surface=1` saw no soil): soil keeps its own cap
+  soil_max = 8000,
   trap_ttl = 1200,                -- ticks between trap index refreshes for tile()
   liquid_tiles = 4096,            -- tiles one liquids() call may read (FR-47)
   items_tiles = 400,              -- tiles one items_at() call may cover (BUG-009: a building footprint)
@@ -1232,8 +1235,8 @@ local function start(K, j)
   j.t0 = K.now().ms
 end
 
-local function add_mark(list, x, y, z)
-  if #list < M.CFG.marks_max then list[#list + 1] = {x, y, z} end
+local function add_mark(list, x, y, z, max)
+  if #list < (max or M.CFG.marks_max) then list[#list + 1] = {x, y, z} end
 end
 
 -- Run 11 (Kilrudrabed, site98: no gem vein, every year the first mood that wanted gems died): is the revealed soil
@@ -1286,7 +1289,7 @@ local function scan_span(j, y, z, x0, x1)
       local ch, _bld, soil, plant = classify(x, y, z, des, oc, j.traps, j.bridges)
       c = ch
       if soil and c == '.' then
-        add_mark(j.marks.soil, x, y, z)
+        add_mark(j.marks.soil, x, y, z, M.CFG.soil_max)                 -- BUG-297
         if #j.marks.sand < M.SAND_MAX and M.is_sand(x, y, z, des) then add_mark(j.marks.sand, x, y, z) end
       end
       if plant and c == '.' then add_mark(des.outside and j.sky_plants[plant] or j.marks[plant], x, y, z) end

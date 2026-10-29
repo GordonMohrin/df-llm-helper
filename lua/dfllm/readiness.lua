@@ -7,7 +7,7 @@
 --       of adults and >= 8, combat value per soldier >= plan.military.cv_min, >= 30 armed traps on
 --       every attacker path (audit.min_traps), food >= 60 and drink >= 170 days (plan.supply)
 --   R3  R2 + D-01 = B + >= 20 % of soldiers in iron or steel body armor
--- Cap = min(level cap, plan.policy.pop_ceiling, inbox popcap.lower). A demotion freezes max-pop at
+-- Cap = min(level cap, plan.policy.pop_ceiling, inbox popcap.lower/set, famine hold). A demotion freezes max-pop at
 -- the current population; outside PEACE max-pop never rises. Audits are requested monthly and
 -- after defense stages through snapshot.export (WP7); the result comes back as the `audit` verb
 -- (sent by `dfllm follow`, also with --no-auto, or once by `dfllm audit`).
@@ -94,11 +94,6 @@ local function burrow_names(man)
   end
   if type(man.refuge) == 'table' and type(man.refuge.burrow) == 'string' then refuge = man.refuge.burrow end
   return kern or 'Kern+', refuge or 'Tiefe+'
-end
-
-local function plan_loaded(K)
-  local p = K.persist.get('plan')
-  return type(p) == 'table' and int(p.loaded) or -1
 end
 
 -- the newest passed drill and the newest drill of any result (persist `drill`, written by drill)
@@ -602,11 +597,75 @@ local function evaluate(K, why)
 end
 
 ---------------------------------------------------------------- pop cap
+-- BUG-293 (Run 15c Inkintense y375-y376: the player's `popcap.lower cap=25` was dropped at the next plan.reload, R0 set
+-- max-pop 100 again (#1264, #1312, #1375) and migrants came 26 -> 50 through a famine at 0-9 food days): the player's
+-- ceiling holds until the player lifts it (popcap.raise, popcap.set) or, set with until=food (the default while food
+-- is below FAMINE.player_d), until food is back at FAMINE.player_d days; a plan reload, an R0 pass or a closed perimeter
+-- no longer clear it. The kernel's own famine hold: food below FAMINE.low_d days and falling (or 0) holds max-pop at the
+-- population of that moment until food is back at FAMINE.recover_d days (state pop.hold, POPCAP why famine).
+M.FAMINE = {low_d = 15, recover_d = 30, player_d = 60}
+
+local function food_days(K)
+  local s = K.view().stock
+  return type(s) == 'table' and int(s.food_d) or nil
+end
+
 local function inbox_cap(K)
   local ib = st.inbox
-  if type(ib) == 'table' and int(ib.cap) and ib.plan == plan_loaded(K) then return ib.cap end
-  if ib then st.inbox, dirty = nil, true end                 -- a new plan supersedes an inbox lowering
-  return nil
+  if type(ib) ~= 'table' or not int(ib.cap) then return nil end
+  if ib.u == 'food' then
+    local fd = food_days(K)
+    if fd and fd >= M.FAMINE.player_d then                  -- the food condition it was set for is over
+      st.inbox, dirty = nil, true
+      K.log('info', 'readiness: the player ceiling %d is lifted: food %d d >= %d', ib.cap, fd, M.FAMINE.player_d)
+      return nil
+    end
+  end
+  return ib.cap
+end
+
+-- BUG-293: the famine hold, sampled once a game day: onset below low_d and falling (or 0), end at recover_d
+function M.famine_check(K)
+  local fd = food_days(K)
+  if not fd then return end
+  local now = K.now().tick
+  local f = st.fam
+  if f then
+    if fd >= M.FAMINE.recover_d then
+      st.fam, dirty = nil, true
+      K.log('info', 'readiness: famine hold over (food %d d >= %d): max-pop follows the ceiling again', fd,
+            M.FAMINE.recover_d)
+    end
+    return
+  end
+  local pv = st.fprev
+  if not pv or now - (int(pv.t) or 0) >= 1200 or now < (int(pv.t) or 0) then
+    local falling = pv and (fd < (int(pv.d) or fd) or fd == 0)
+    st.fprev, dirty = {d = fd, t = now}, true
+    local cu = K.census.u
+    local cit = type(cu) == 'table' and int(cu.cit) or nil
+    if falling and fd < M.FAMINE.low_d and cit and not st.fskip then
+      st.fam, dirty = {cap = math.max(1, cit), t = now, fd = fd}, true
+      K.log('warn', 'readiness: famine hold: food %d d and falling: max-pop held at %d (until food %d d)', fd, cit,
+            M.FAMINE.recover_d)
+    end
+    if st.fskip and fd >= M.FAMINE.recover_d then st.fskip = nil end
+  end
+end
+
+-- BUG-293: the hold that binds max-pop for state pop.hold (<= 40 bytes), or nil
+function M.hold_text(K)
+  local ib = st.inbox
+  local parts = {}
+  if type(ib) == 'table' and int(ib.cap) then
+    parts[1] = ib.u == 'food' and string.format('player %d until food %d d', ib.cap, M.FAMINE.player_d)
+               or string.format('player %d until popcap.raise', ib.cap)
+  end
+  if st.fam then
+    if parts[1] then parts[1] = string.format('player %d', ib.cap) end      -- both: the short form
+    parts[#parts + 1] = string.format('famine %d (food %d d)', st.fam.cap, int(st.fam.fd) or 0)
+  end
+  return #parts > 0 and cut(table.concat(parts, ', '), 40) or nil
 end
 
 -- readiness ceiling for a level and the binding limit
@@ -618,6 +677,7 @@ function M.ceiling(K, lvl)
   if pc and pc < c then c, why = pc, 'plan' end
   local ib = inbox_cap(K)
   if ib and ib < c then c, why = ib, 'inbox' end
+  if st.fam and st.fam.cap < c then c, why = st.fam.cap, 'famine' end     -- BUG-293
   if rt and rt.phold and rt.phold < c then c, why = rt.phold, 'open_perimeter' end     -- FR-70
   return c, why
 end
@@ -720,6 +780,7 @@ end
 
 local function refresh(K, why)
   evaluate(K, why)
+  M.famine_check(K)                                           -- BUG-293
   unready(K)
   apply_cap(K)
   rt.pub = true
@@ -815,16 +876,61 @@ M.verbs.audit = function(K, args, cmd)
   return true, string.format('audit stored, readiness R%d', st.lvl), {lvl = st.lvl}
 end
 
+-- BUG-293: until = 'food' (lifted once food is back at FAMINE.player_d days) or 'raise' (held until popcap.raise or
+-- popcap.set); without it 'food' while food is below FAMINE.player_d, else 'raise'. A plan reload keeps it.
+local function until_of(K, args)
+  if args['until'] == 'food' or args['until'] == 'raise' then return args['until'] end
+  local fd = food_days(K)
+  return (fd and fd < M.FAMINE.player_d) and 'food' or 'raise'
+end
+
+local function hold_tail(u)
+  return u == 'food' and string.format(', held until food %d d or popcap.raise', M.FAMINE.player_d)
+         or ', held until popcap.raise'
+end
+
 M.verbs['popcap.lower'] = function(K, args, cmd)
   local cap = int(args.cap)
   if not cap or cap < 0 or cap > 250 then return false, 'cap must be an integer 0..250' end
-  local cur = M.ceiling(K, st.lvl or 0)
-  if cap < cur then
-    st.inbox, dirty = {cap = cap, plan = plan_loaded(K)}, true
-    refresh(K, 'inbox')
-    return true, string.format('ceiling lowered to %d, max-pop %d', cap, M.cap(K)), {cap = M.cap(K)}
+  if args['until'] ~= nil and args['until'] ~= 'food' and args['until'] ~= 'raise' then
+    return false, 'until must be food or raise'
   end
-  return true, string.format('ceiling already %d (lower only)', cur), {cap = M.cap(K)}
+  local cur, cwhy = M.ceiling(K, st.lvl or 0)
+  -- a temporary hold (famine, open perimeter) below cap does not swallow the player's ceiling: it is kept for later
+  local mine = type(st.inbox) == 'table' and int(st.inbox.cap) or nil
+  if cap < cur or ((cwhy == 'famine' or cwhy == 'open_perimeter') and (not mine or cap < mine)) then
+    local u = until_of(K, args)
+    st.inbox, dirty = {cap = cap, u = u, t = K.now().tick}, true
+    refresh(K, 'inbox')
+    return true, string.format('ceiling lowered to %d, max-pop %d%s', cap, M.cap(K), hold_tail(u)), {cap = M.cap(K)}
+  end
+  return true, string.format('ceiling already %d (lower only; popcap.set raises)', cur), {cap = M.cap(K)}
+end
+
+-- BUG-293: the player lifts his ceiling (and the kernel's famine hold until the next famine episode)
+M.verbs['popcap.raise'] = function(K, args, cmd)
+  local had = type(st.inbox) == 'table' and int(st.inbox.cap) or nil
+  local fam = st.fam and st.fam.cap or nil
+  st.inbox, dirty = nil, true
+  if fam then st.fam, st.fskip = nil, 1 end
+  refresh(K, 'raise')
+  local c, why = M.ceiling(K, st.lvl or 0)
+  return true, string.format('%s; ceiling %d (%s), max-pop %d', (had or fam) and string.format('lifted%s%s',
+                             had and (' player ' .. had) or '', fam and (' famine ' .. fam) or '') or 'no player ceiling held',
+                             c, why, M.cap(K)), {cap = M.cap(K), ceiling = c}
+end
+
+-- BUG-293: the player's ceiling set to exactly `cap` (raise or lower), held until popcap.raise; never above the level's
+-- own cap (the readiness levels and the plan still bind)
+M.verbs['popcap.set'] = function(K, args, cmd)
+  local cap = int(args.cap)
+  if not cap or cap < 1 or cap > 250 then return false, 'cap must be an integer 1..250' end
+  st.inbox, dirty = {cap = cap, u = 'raise', t = K.now().tick}, true
+  if st.fam then st.fam, st.fskip = nil, 1 end
+  refresh(K, 'set')
+  local c, why = M.ceiling(K, st.lvl or 0)
+  return true, string.format('player ceiling %d (binding: %d %s), max-pop %d, held until popcap.raise', cap, c, why,
+                             M.cap(K)), {cap = M.cap(K), ceiling = c}
 end
 
 ---------------------------------------------------------------- module
@@ -845,7 +951,13 @@ function M.init(K)
   for name, v in pairs(type(p.mws) == 'table' and p.mws or {}) do          -- BUG-117: when a moodable shop was first missed
     if type(name) == 'string' and int(v) then st.mws = st.mws or {}; st.mws[name] = int(v) end
   end
-  if type(p.inbox) == 'table' and int(p.inbox.cap) then st.inbox = {cap = int(p.inbox.cap), plan = int(p.inbox.plan)} end
+  -- BUG-293: the player's ceiling (an older save's {cap, plan} is held until popcap.raise)
+  if type(p.inbox) == 'table' and int(p.inbox.cap) then
+    st.inbox = {cap = int(p.inbox.cap), u = p.inbox.u == 'food' and 'food' or 'raise', t = int(p.inbox.t)}
+  end
+  if type(p.fam) == 'table' and int(p.fam.cap) then st.fam = {cap = int(p.fam.cap), t = int(p.fam.t), fd = int(p.fam.fd)} end
+  if type(p.fprev) == 'table' and int(p.fprev.d) then st.fprev = {d = int(p.fprev.d), t = int(p.fprev.t)} end
+  st.fskip = int(p.fskip)
   local u = p.unready                                          -- FR-65: the last SIEGE_UNREADY (util/cadence record)
   if type(u) == 'table' and int(u.t) then
     local function strs(l)
@@ -890,7 +1002,7 @@ function M.state(K)
   if rt.route then r.route = rt.route end                     -- the bypass / refuge route the last audit names
   if rt.office then r.office = rt.office end                  -- BUG-055: the vacant office R0 `office` names
   if rt.mws then r.mws = rt.mws end                           -- BUG-117: the moodable shops R0 `mood_ws` names
-  return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0]}}
+  return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
 end
 
 M.on.MODE = function(K, ev)

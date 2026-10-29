@@ -73,6 +73,7 @@ BEDS_TPLS = ("bedrooms", REFUGE_BEDS)
 FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
 SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)
 EMERGENCY_D = 30              # BUG-243: drink or food days below this (or no accepted water): water and food builds first
+FOOD_DRAFT_D = 60             # BUG-297: food below this: a farms build is drafted when no farms project is under way
 AQWELL = "aqwell"             # BUG-243: the aquifer well template (fix6-water), drafted only when the bp package has it
 STUCK_SHORT_D = 28            # BUG-041: a seal stuck this long (a game month) gets one short plan check line
 REBUILD_KINDS = {"seal", "tombs", "supply", "beds", "depot", "repair"}
@@ -209,8 +210,65 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
+            "farms": farm_facts(save_dir, state),                     # BUG-297: an open farms project, a farm site
             "traps": _traps.facts(save_dir),                         # FR-96: doors on the ways in without a trap lane
             "seals": open_seals(save_dir, state)}
+
+
+def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
+    """BUG-297 (Run 15c Inkintense y376: food 1-9 d, one farm plot, `plan propose` drafted no farm because a farms project
+    had been applied once, and `bp sites farms --fresh` ranked 0): while state.stock.food_d is below FOOD_DRAFT_D,
+    {open: a farms project neither done nor parked (state.proj) stands, site: 'room' (a farms room site is free), 'surface'
+    (only a surface farm site on soil floor, p.surface = 1), 'none', or None (no snapshot or no bp package)}; None
+    otherwise (not looked up)."""
+    fd = ((state or {}).get("stock") or {}).get("food_d")
+    if not _nat(fd) or fd >= FOOD_DRAFT_D:
+        return None
+    done = done_projects(save_dir)
+    rows = {r[0]: str(r[3] if len(r) > 3 else "") for r in (state or {}).get("proj") or []
+            if isinstance(r, list) and r and isinstance(r[0], str)}
+    open_ = False
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == "farms" and p.stem not in done and "parked" not in rows.get(p.stem, ""):
+            open_ = True
+    site = None
+    if sites_snapshot(save_dir) is not None:
+        site = "none"
+        for kind, prm in (("room", {}), ("surface", {"surface": 1})):
+            try:
+                free, _, _ = free_sites(save_dir, "farms", prm, n=1)
+            except (BpError, BpUnavailable):
+                free = []
+            if free:
+                site = kind
+                break
+    return {"open": open_, "site": site}
+
+
+def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | None) -> tuple[dict | None, str]:
+    """BUG-297: food below FOOD_DRAFT_D and no farms build drafted or under way (fort.farms.open): farms@S1, p.surface = 1
+    when only a surface site is free (fort.farms.site), also when farms were applied before; the note says why or why
+    not. (None, '') when food is not low or the bp package has no farms template."""
+    fd = ((s or {}).get("stock") or {}).get("food_d")
+    ff = (fort or {}).get("farms")
+    if not _nat(fd) or fd >= FOOD_DRAFT_D or not isinstance(ff, dict) or (info is not None and "farms" not in info):
+        return None, ""
+    if any(b["tpl"] == "farms" for b in builds):
+        return None, ""
+    if ff.get("open"):
+        return None, f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): a farms project is under way, no new one"
+    site = ff.get("site")
+    if site == "none":
+        return None, (f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): no farm site (no room site on soil, no soil floor inside "
+                      "the fort or by its entrance): trade.want food, seeds; fishing; butcher.mark")
+    if site == "surface" and (s or {}).get("mode") != "PEACE":      # citizen safety: plots by the door only in PEACE
+        return None, (f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): only a surface farm site, drafted in PEACE only "
+                      f"(mode {(s or {}).get('mode')})")
+    b ={"tpl": "farms", "site": "S1", **({"p": {"surface": 1}} if site == "surface" else {})}
+    return b, (f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): farms@S1" + (" p.surface=1 (no room site on soil: plots on the "
+                                                                         "soil floor by the entrance)" if site == "surface"
+                                                                         else "") + " drafted")
 
 
 def _food_shops_missing(save_dir: Path) -> list[str] | None:
@@ -2127,6 +2185,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         builds = [b for b in builds if not any(b is x for x in front)]
         front = sorted(front + em, key=lambda b: (0 if b["tpl"] in (CISTERN["tpl"], AQWELL) else 1 if b["tpl"] == "farms"
                                                   else 2))
+    fdb, fnote = food_draft(s, fort, builds + front, info)   # BUG-297: a farm below FOOD_DRAFT_D food days
+    if fdb:
+        k = next((i for i, b in enumerate(front) if b["tpl"] not in (CISTERN["tpl"], AQWELL)), len(front))
+        front.insert(k, fdb)
     builds.sort(key=lambda b: b["tpl"] != SEAL)  # Run 11 siege 8: seal first (the runner runs it first anyway)
     if front:
         k = 0
@@ -2184,6 +2246,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
     doc["notes"] += core_note
+    if fnote and (fdb is None or any(b is fdb for b in builds)):
+        doc["notes"] += fnote
     if tb and any(b is tb for b in builds):
         doc["notes"] += tnote
     if ewhy:
