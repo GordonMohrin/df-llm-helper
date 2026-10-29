@@ -133,6 +133,31 @@
   paused, `(food N d < 60: ...)`. Earthboat: SEAL_STUCK d.why for the refuge hatch; 6 days on kern.log `hatch 55,82,133 open N days,
   its job taken by no builder ...: removed and placed again (once)`; if the fresh job is not taken either, read-only: the job's item
   position and walk group, the builders' burrows and labors. Guildcleans: `pop cap N held by the open perimeter` in kern.log/SEAL_STUCK.
+## Run 15 alarm noise: no CUTOFF/STRANDED for a trip to the map edge, migrant waves from the census, the refuge pending stage 3 (BUG-277..281, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 Earthboat (y372-y374): CUTOFF 'cause not found' and STRANDED 'thirst 29216, hunger 30004' four times for founders at
+  the map edge 1-4,126,141, never a death, the next read found them back with the others (BUG-277/278); brief 'migrants in 365 d: 0
+  waves' while the fort grew 7 -> 21 without a birth, one MIGRANTS for three or more waves (BUG-279). Run 15 Inkintense: `audit` 'fail:
+  refuge: none (manifest refuge.anchor)' right after fortcore stage 1 (BUG-280) and CUTOFF 'cause not found' between groups 4899/4898
+  in the famine (BUG-281, open).
+- **What changed:** (1) seal `M.trip` (the unit's current job: GatherPlants, FellTree, Hunt, Fish, ... `M.TRIP_JOBS`, read only) and
+  `M.cut_confirm`: citizens on a trip job do not count for CUTOFF (kern.log once); with a closer found CUTOFF comes at once, with 'cause
+  not found' it waits for an audit a game day later that still sees it ('cause not found (N d)'), the class keeps its old count while held
+  and a held CUTOFF is never skipped as an unchanged periodic audit (BUG-277). (2) siege: STRANDED marks = DF's lines (thirst 25,000,
+  hunger 50,000), a citizen counts on two reads `STRAND_CONFIRM` (1,200) ticks apart, a trip job is no stranding (kern.log once); a rescue
+  that ends in a SIEGE gives its bridges a grace until their raise deadline (no 'not up at T+900' BREACH in the step it ended) (BUG-278).
+  (3) care `M.census_waves`: new non-baby citizen ids in the census are arrivals, a day's cluster is a wave; a census wave and a MIGRANTS
+  within 3 days are one (`M.wave_add`, the bigger n) (BUG-279). (4) bp/topo.audit: no refuge in the manifest = `info.pending` 'refuge:
+  pending fortcore stage 3', no fail, refuge_sep stays false; bp.validate keeps it a `refuge` finding for a final fort (BUG-280). RULES §7 STRANDED and CUTOFF rows edited in place. No contract change.
+- **Review:** a CUTOFF rise made only by a trip citizen no longer re-reports citizens cut off long since (`cut_confirm` compares
+  the non-trip count with the class's old count).
+- **Tests (each fails on 2b9c009):** tests/lua/test_siege_strand_noise.lua (8, one from the review), tests/lua/test_care_pop_waves.lua (2),
+  tests/bp/test_topo_refuge_pending.py (1 + 1 guard); updated pins: tests/lua/test_fix5_gate.lua hunger 45000 -> 55000 (below DF's
+  Hungry line).
+- **Live check:** at the next trip to the map edge kern.log 'seal: CUTOFF held for an audit a day later' or 'no CUTOFF: ... on a job
+  outside (id:job)' and 'siege: not stranded, on a job outside: id:job', no A wake; a real cut still comes one audit later. No STRANDED
+  below hunger 50,000. After the next migrant wave `dfllm brief` counts it (with or without `dfllm events --type MIGRANTS`). `dfllm
+  audit` with fortcore stage 1/2 only: no 'fail: refuge: none'. BUG-281: at the next 'cause not found' read the walk groups along the
+  line from d.upos to d.at (read only) to find the tile that splits them.
 
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders

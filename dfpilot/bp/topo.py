@@ -377,7 +377,8 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     """{ok, fails, min_traps, bypass, refuge_sep, civ_sep, caverns} (= the `audit` verb args minus `snap`). `info`
     (a dict, optional) receives `traps` {armed, hall, any_route, walls, enters}: armed traps in the snapshot and in
     Z2, the fewest any route meets now, the bypass walls min_traps assumes built, where the counted route enters the
-    hall (for `dfllm audit` and follow's log; never sent)."""
+    hall (for `dfllm audit` and follow's log; never sent), and `pending` (BUG-280: the parts a later fortcore stage
+    brings, no fail)."""
     g = graph or Graph(snap)
     m = manifest or {}
     # BUG-048: a bridge the kernel replaced by a wall and a door (snapshot bridges: `replaced`) is a door entrance now:
@@ -461,7 +462,13 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     rmask = g.mask_pts(rpts)
     core = g.nodes_in(Z["Z4"])
     attack = _or(Z["Z1"], Z["Z2"], kill)
-    if not any(g.node(g.idx(p)) for p in rpts):
+    if not rpts:
+        # BUG-280 (Run 15 Inkintense y372: 'fail: refuge: none (manifest refuge.anchor)' right after fortcore stage 1,
+        # stages 2/3 planned): the refuge comes with fortcore stage 3 (its manifest fragment adds refuge.anchor), so a
+        # manifest without one is a stage still to come, no fail; refuge_sep stays false (readiness R0 keeps asking)
+        if info is not None:
+            info["pending"] = ["refuge: pending fortcore stage 3 (no refuge in the manifest yet)"]
+    elif not any(g.node(g.idx(p)) for p in rpts):
         fails.append("refuge: none (manifest refuge.anchor) or not walkable")
     else:
         _, h1 = g.bfs(core, blocked=_or(attack, Z["Z3"]), climb=False, stop=rmask)

@@ -241,7 +241,12 @@ end
 --       there on purpose, (a) rescues them) would stand on; a raise that would leave citizens on a part without drink
 --       or food waits (no BREACH for it) until a hostile is within CUT_NEAR tiles of that bridge, then goes ahead and
 --       STRANDED (forced) says whom it cut off.
-M.STRAND_THIRST, M.STRAND_HUNGER = 30000, 30000
+-- BUG-278 (Run 15 Earthboat y372-y374: STRANDED 'thirst 29216, hunger 30004' for founders at the map edge 1-4,126,141,
+-- four times, never a death; the next read found them back with the others): the marks are DF's own lines on the unit
+-- sheet (Thirsty at 25,000, Hungry at 50,000; 30,000 hunger is no hunger a player sees); a citizen counts only when two
+-- reads STRAND_CONFIRM ticks apart (a game day) find him off the stock, and a citizen on a job that takes him outside
+-- (seal.trip: gathering, hunting, fishing, felling) is on a trip, not stranded (kern.log names him, once per set)
+M.STRAND_THIRST, M.STRAND_HUNGER, M.STRAND_CONFIRM = 25000, 50000, 1200
 M.RESCUE_EVERY, M.RESCUE_MAX = 100, 2400
 M.CUT_NEAR, M.SEALED_HOLD, M.SPLIT_WAIT = 30, 600, 300
 local CAD = require('dfllm.util.cadence')
@@ -325,26 +330,45 @@ end
 
 -- (a) the citizens over the thresholds on a group without what they need, the worst group first
 local function cut_off(K, G)
-  local cu = K.census.u
   local by = {}
+  local now = K.now().tick
+  local seen, was, trip = {}, type(mem.str_seen) == 'table' and mem.str_seen or {}, {}
   for gid, list in pairs(G.cit) do
     for _, c in ipairs(list) do
       local u = df.unit.find(c[1])
+      local nd, nf, th, hu = false, false, 0, 0
       if u then
-        local th, hu = counter(u, 'thirst_timer'), counter(u, 'hunger_timer')
-        local nd = th > M.STRAND_THIRST and not G.drink[gid]
-        local nf = hu > M.STRAND_HUNGER and not G.food[gid]
-        if nd or nf then
-          local e = by[gid] or {g = gid, ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}}
-          by[gid] = e
-          e.ids[#e.ids + 1] = c[1]
-          e.thirst, e.hunger = math.max(e.thirst, th), math.max(e.hunger, hu)
-          if nd then e.need.drink = true end
-          if nf then e.need.food = true end
+        th, hu = counter(u, 'thirst_timer'), counter(u, 'hunger_timer')
+        nd = th > M.STRAND_THIRST and not G.drink[gid]
+        nf = hu > M.STRAND_HUNGER and not G.food[gid]
+      end
+      if nd or nf then                                     -- BUG-278: a trip job, then the second read a day later
+        local ok, j = K.call('seal', 'trip', c[1])
+        if ok and type(j) == 'string' then
+          trip[#trip + 1] = c[1] .. ':' .. j
+          nd, nf = false, false
+        else
+          seen[c[1]] = was[c[1]] or now
+          if now - seen[c[1]] < M.STRAND_CONFIRM then nd, nf = false, false end
         end
+      end
+      if nd or nf then
+        local e = by[gid] or {g = gid, ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}}
+        by[gid] = e
+        e.ids[#e.ids + 1] = c[1]
+        e.thirst, e.hunger = math.max(e.thirst, th), math.max(e.hunger, hu)
+        if nd then e.need.drink = true end
+        if nf then e.need.food = true end
       end
     end
   end
+  mem.str_seen = seen
+  table.sort(trip)
+  local sig = table.concat(trip, ',')
+  if sig ~= '' and sig ~= mem.str_trip then
+    K.log('info', 'siege: not stranded, on a job outside: %s', sig:sub(1, 160))
+  end
+  mem.str_trip = sig
   local best
   for _, e in pairs(by) do
     table.sort(e.ids)
@@ -473,7 +497,14 @@ end
 -- BUG-235: the end of a rescue: in quiet PEACE (pz) the bridges go back to gate's mode default, else up again
 function M.rescue_close(K, r, now)
   for _, b in ipairs(r.list) do
-    if r.pz or K.mode() == 'PEACE' then K.call('gate', 'release', b) else want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end
+    if r.pz or K.mode() == 'PEACE' then K.call('gate', 'release', b)
+    else
+      want(K, b, 'up', 'rescue_end', now + M.BREACH_AT)
+      -- BUG-278: its raise is under way: no gate failure for it before that deadline (a SIEGE older than T+900 read
+      -- the bridge still down in the step the rescue ended and went to BREACH)
+      mem.rs_grace = mem.rs_grace or {}
+      mem.rs_grace[b] = now + M.BREACH_AT
+    end
   end
 end
 
@@ -544,7 +575,7 @@ local function rescue_step(K, a, g, now)
       break
     end
   end
-  if not any then return end
+  if not any then mem.str_seen = nil; return end         -- BUG-278: nobody over a mark: the next one starts afresh
   local G = groups(K)
   if not G then return end
   relax_step(K, G)                                         -- (e) BUG-031: the confinement, not a bridge
@@ -739,6 +770,7 @@ local function failed_bridge(K, g)
         local okw, wait = K.call('gate', 'waiting', b)
         -- BUG-028: a raise held for citizens it would cut off (no hostile within CUT_NEAR), or a rescue's bridge
         local held = (st.str.hold[b] and not (d and d >= 0 and d <= M.CUT_NEAR)) or rescuing(b)
+                     or (mem.rs_grace and (mem.rs_grace[b] or -1) > now)
         if not held and not (okw and wait and not (d and d >= 0 and d <= M.NEAR_RAISE)) then return b end
       end
     end

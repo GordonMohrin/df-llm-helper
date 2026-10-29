@@ -1246,6 +1246,88 @@ function RF.floor(K, R)
           also = #rows > 1 and rows[2].n or nil})
 end
 
+-- BUG-277 (Run 15 Earthboat y372-y374: CUTOFF 'cause not found' four times for one founder at the map edge 1-4,126,141,
+-- hunger ~30000, never a death; the next read found him back with the others): a citizen on a job that takes him
+-- outside (gathering, hunting, fishing, felling, collecting) is on a trip, not cut off. His job as DF shows it in the
+-- unit sheet (unit.job.current_job), read only. M.trip(K, id): the job's name, or nil (siege asks it too).
+M.TRIP_JOBS = {'GatherPlants', 'FellTree', 'Hunt', 'HuntVermin', 'Fish', 'CatchLiveFish', 'CatchLiveLandAnimal',
+               'CollectSand', 'CollectClay', 'CollectWebs', 'GatherHoney'}
+function M.trip(_, id)
+  local u = df.unit.find(id)
+  local ok, name = pcall(function()
+    local j = u and u.job and u.job.current_job
+    if not j then return nil end
+    for _, n in ipairs(M.TRIP_JOBS) do
+      local v = df.job_type[n]
+      if v ~= nil and j.job_type == v then return n end
+    end
+  end)
+  return ok and name or nil
+end
+
+-- BUG-277: a confirmed rise of `cls`: CUTOFF (A) now when blame finds the closer; without a cause it waits for an audit
+-- a game day later that still sees it (mem.cut_pend; the class keeps its old count, so the next audit reads it again);
+-- citizens on a trip job (M.trip) do not count: the rise is only real when more citizens than `prev` (the class's old
+-- count) are off it without one (review: an old cut plus a new trip is no new CUTOFF). true while it is held, false
+-- once it is emitted
+function M.cut_confirm(K, R, t, cls, cits, main, by_cls, prev)
+  local has, off, trip = {}, {}, {}
+  for g in pairs(by_cls[cls]) do has[g] = true end
+  for _, c in ipairs(cits) do
+    if not has[c.g] then
+      local j = M.trip(K, c.id)
+      if j then trip[#trip + 1] = c.id .. ':' .. j else off[#off + 1] = c end
+    end
+  end
+  local p = mem.cut_pend
+  if p and p.cls ~= cls then p = nil end
+  if #off <= (prev or 0) then
+    local sig = table.concat(trip, ',')
+    if not (p and p.sig == sig) then
+      K.log('info', 'seal: no CUTOFF: the %d citizen%s off the %s group %s on a job outside (%s)', #trip,
+            #trip == 1 and '' or 's', cls, #trip == 1 and 'is' or 'are', trunc(sig, 120))
+    end
+    mem.cut_pend = {cls = cls, sig = sig, tick = p and p.tick or nil}
+    return true
+  end
+  local nby, gc = {}, nil
+  for _, c in ipairs(off) do nby[c.g] = (nby[c.g] or 0) + 1 end
+  for g, n in pairs(nby) do if not gc or n > nby[gc] or (n == nby[gc] and g < gc) then gc = g end end
+  local cz
+  for _, c in ipairs(off) do if c.g == gc then cz = c; break end end
+  local b = blame(K, gc, has, {cz.x, cz.y, cz.z})
+  if not b and not (p and p.tick and t - p.tick >= DAY) then
+    if not (p and p.tick) then
+      mem.cut_pend = {cls = cls, tick = t}
+      K.log('info', 'seal: CUTOFF held for an audit a day later: %d citizen%s off the %s group, cause not found ' ..
+            '(citizen %d at %d,%d,%d on group %d)', #off, #off == 1 and '' or 's', cls, cz.id, cz.x, cz.y, cz.z, gc)
+    end
+    return true
+  end
+  mem.cut_pend = nil
+  local at, ag = class_tile(R, cls, has, main)
+  local n = #off
+  local what = b and string.format('%s at %d,%d,%d', b[4], b[1], b[2], b[3]) or 'cause not found'
+  if b and b[5] then what = what .. ' (' .. b[5] .. ')' end
+  if not b then what = what .. string.format(' (%d d)', (t - p.tick) // DAY) end
+  -- BUG-021: who stands where: a cut-off citizen and his group, a stock tile of the class on another group (the main
+  -- group's first)
+  local where = string.format('; citizen %d at %d,%d,%d on group %d', cz.id, cz.x, cz.y, cz.z, gc)
+                .. (at and string.format(', %s at %d,%d,%d on group %d', cls, at[1], at[2], at[3], ag) or '')
+  local d = {cls = cls, n = n, grp = gc or 0, main = main or 0, why = trunc(b and b[4] or 'unknown', 60)}
+  if b then d.pos = {b[1], b[2], b[3]} end
+  d.unit, d.upos = cz.id, {cz.x, cz.y, cz.z}
+  if at then d.at, d.agrp = {at[1], at[2], at[3]}, ag end
+  if b and b.bridge and GATED[K.mode()] then
+    K.emit('SEAL', 'B', string.format('%d citizens shut out from %s by a raised bridge at %d,%d,%d', n, cls,
+           b[1], b[2], b[3]), {routes = 0, pos = d.pos, why = 'shut_out'})
+  else
+    K.emit('CUTOFF', 'A', trunc(string.format('%d citizens cut off from %s: %s%s', n, cls, what, where), 200), d)
+  end
+  R.blame = b and {b[1], b[2], b[3], b[4]} or nil
+  return false
+end
+
 local function commit_audit(K, R, cits)
   local t = now_t(K)
   local totals, by_cls = {}, {}
@@ -1269,36 +1351,11 @@ local function commit_audit(K, R, cits)
     end
   end
   R.cut = cut
-  if inc then
-    local gc, has = nil, {}
-    for g, n in pairs(cg) do
-      if not by_cls[inc.cls][g] and (not gc or n > cg[gc] or (n == cg[gc] and g < gc)) then gc = g end
-    end
-    for g in pairs(by_cls[inc.cls]) do has[g] = true end
-    local cz
-    for _, c in ipairs(cits) do if c.g == gc then cz = c; break end end
-    local at, ag = class_tile(R, inc.cls, has, main)
-    local b = blame(K, gc, has, cz and {cz.x, cz.y, cz.z})
-    local n = cut[inc.cls]
-    local what = b and string.format('%s at %d,%d,%d', b[4], b[1], b[2], b[3]) or 'cause not found'
-    if b and b[5] then what = what .. ' (' .. b[5] .. ')' end
-    -- BUG-021: who stands where: a cut-off citizen and his group, a stock tile of the class on another group (the main
-    -- group's first)
-    local where = (cz and string.format('; citizen %d at %d,%d,%d on group %d', cz.id, cz.x, cz.y, cz.z, gc) or '')
-                  .. (at and string.format(', %s at %d,%d,%d on group %d', inc.cls, at[1], at[2], at[3], ag) or '')
-    local d = {cls = inc.cls, n = n, grp = gc or 0, main = main or 0, why = trunc(b and b[4] or 'unknown', 60)}
-    if b then d.pos = {b[1], b[2], b[3]} end
-    if cz then d.unit, d.upos = cz.id, {cz.x, cz.y, cz.z} end
-    if at then d.at, d.agrp = {at[1], at[2], at[3]}, ag end
-    if b and b.bridge and GATED[K.mode()] then
-      K.emit('SEAL', 'B', string.format('%d citizens shut out from %s by a raised bridge at %d,%d,%d', n, inc.cls,
-             b[1], b[2], b[3]), {routes = 0, pos = d.pos, why = 'shut_out'})
-    else
-      K.emit('CUTOFF', 'A', trunc(string.format('%d citizens cut off from %s: %s%s', n, inc.cls, what, where), 200), d)
-    end
-    R.blame = b and {b[1], b[2], b[3], b[4]} or nil
-  end
+  local held = inc ~= nil and M.cut_confirm(K, R, t, inc.cls, cits, main, by_cls, int(st.cut[inc.cls]) or 0)
+  if not inc then mem.cut_pend = nil end                 -- BUG-277: the rise is gone (back from the trip)
+  local old = held and (int(st.cut[inc.cls]) or 0) or nil
   st.cut = {food = cut.food, drink = cut.drink, bed = cut.bed}
+  if held then st.cut[inc.cls] = old end                 -- BUG-277: held: the next audit reads the rise again
   dirty = true
   local sig = table.concat(R.flags, '|')
   if sig ~= (st.flag_sig or '') then
@@ -1356,7 +1413,8 @@ end
 
 local function job_audit(K, why)
   local t = now_t(K)
-  if why == 'periodic' and mem.reach and mem.audit_sig and t - mem.reach.tick < CFG.audit_max_age then
+  if why == 'periodic' and mem.reach and mem.audit_sig and t - mem.reach.tick < CFG.audit_max_age
+     and not mem.cut_pend then                           -- BUG-277: a held CUTOFF is read again, never skipped
     local cits = citizens(K)
     spend(3 * #cits + 8)
     if audit_sig(K, cits) == mem.audit_sig then

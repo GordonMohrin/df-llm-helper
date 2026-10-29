@@ -289,6 +289,11 @@ Related: FR-xx, BUG-xx
 | [BUG-274](BUG-274-seal-stuck-names-no-cause-and-never-replaces-the-piece.md) | mitigated (offline, live-untested): cause named, root cause open | high | Run 15 Earthboat: refuge hatch open 619 days, 'no builder has taken it', no cause named, never placed again | lua/dfllm/runner.lua |
 | [BUG-275](BUG-275-seal-first-pauses-food-projects-above-emergency.md) | fixed (offline, live-untested) | medium | Run 15 Drillchamber: seal first paused farms and food shops until food or drink fell below 30 days (food 27 d, drink 20 d later) | lua/dfllm/runner.lua |
 | [BUG-276](BUG-276-seal-does-not-say-it-holds-the-pop-cap.md) | mitigated (offline, live-untested): named, no priority raise | low | Run 15 Guildcleans: an opening walled after an unsuitable door held max-pop at 35 for days; the seal never said so | lua/dfllm/runner.lua |
+| [BUG-277](BUG-277-cutoff-cause-not-found-for-a-trip-to-the-map-edge.md) | fixed (offline, live-untested) | low | Run 15 Earthboat: CUTOFF 'cause not found' four times for founders on a trip to the map edge | lua/dfllm/seal.lua |
+| [BUG-278](BUG-278-stranded-for-hunger-30000-and-trips.md) | fixed (offline, live-untested) | low | Run 15 Earthboat: STRANDED at hunger 30000 (DF: Hungry 50000), on one read, for citizens on a trip | lua/dfllm/siege.lua |
+| [BUG-279](BUG-279-migrant-waves-only-from-the-arrival-report.md) | fixed (offline, live-untested; missed reports open) | low | Run 15 Earthboat: brief '0 waves' while the fort grew 7 -> 21; waves only from the arrival report | lua/dfllm/care.lua |
+| [BUG-280](BUG-280-audit-refuge-fail-before-fortcore-stage-3.md) | fixed (offline, live-untested) | low | Run 15 Inkintense: audit 'fail: refuge: none' before fortcore stage 3 brings the refuge | dfpilot/bp/topo.py, dfpilot/bp/validate.py |
+| [BUG-281](BUG-281-cutoff-cause-not-found-between-two-groups-in-a-famine.md) | open (cause not verified offline) | medium | Run 15 Inkintense: CUTOFF 'cause not found' between groups 4899/4898 in the famine | lua/dfllm/seal.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

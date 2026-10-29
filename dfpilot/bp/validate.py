@@ -233,7 +233,10 @@ def check_world(docs, final: bool | None = None) -> list[Finding]:
         return out
     last = docs[-1]
     final = final if final is not None else (last["tpl"] == "fortcore" and last["params"]["stage"] >= 3)
-    res = topo.audit(snap, man)
+    info: dict = {}
+    res = topo.audit(snap, man, info=info)
+    if final and info.get("pending"):                  # BUG-280: a final fort has its refuge; pending is a fail here
+        out += [Finding("refuge", p) for p in info["pending"]]
     if res["bypass"]:
         out += _bypass_kind(snap, man, next((f for f in res["fails"] if f.startswith("bypass:")), ""))
     for f in res["fails"]:
