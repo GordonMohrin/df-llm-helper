@@ -694,11 +694,13 @@ T.test('BUG-049: the refuge is trusted only while its separation is fresh, the h
   W.run(1200, {skip = 9})
   local ok, tr = W.K.call('seal', 'refuge_trust')
   T.ok(ok and tr.ok == false, T.show(tr))
-  T.eq(tr.why, {'no hatch at 6,6,6'})
-  T.eq(tr.hatch, {pos = {6, 6, Z - 3}, state = 'missing'})
+  -- BUG-313: the shaft z6-8 is walled in on every level, so the hatch is wanted on the hall level 6,6,9 (a builder stands
+  -- beside it there); a hatch on the old head 6,6,6 still counts
+  T.eq(tr.why, {'no hatch at 6,6,9'})
+  T.eq(tr.hatch, {pos = {6, 6, Z}, state = 'missing', man = {6, 6, Z - 3}})
   local ref = W.state().alert.ref
-  T.eq({ref.tr, ref.trw}, {0, 'no hatch at 6,6,6'})
-  T.ok(inspect(W, 'refuge').trust.why[1] == 'no hatch at 6,6,6')
+  T.eq({ref.tr, ref.trw}, {0, 'no hatch at 6,6,9'})
+  T.ok(inspect(W, 'refuge').trust.why[1] == 'no hatch at 6,6,9')
   -- the hatch is built on the stair head: trusted
   local hatch = SW.building(W, 'DOOR', 'Hatch', 6, 6, Z - 3)
   W.dyn[SW.key(6, 6, Z - 3)] = hatch
@@ -828,14 +830,14 @@ T.test('BUG-124: a real stair with no revealed tile above its refuge level: not 
   T.eq(tr.why, {'no hatch at 30,20,6'})
 end)
 
-T.test('BUG-123: the real fort stair keeps working: head revealed -> state ok, hatch missing is still the reason ' ..
-       '(a real exposed refuge stays untrusted)', function()
+T.test('BUG-123: the real fort stair keeps working: head revealed -> a hatch tile, hatch missing is still the reason ' ..
+       '(a real exposed refuge stays untrusted; BUG-313: the walled-in shaft moves it to the hall level 6,6,9)', function()
   local W = fort{door = true}
   with_manifest(W, 6, 6)
   local _, rs = W.K.call('seal', 'refuge_stair')
-  T.eq({rs.state, rs.pos}, {'ok', {6, 6, Z - 3}})
+  T.eq({rs.state, rs.pos, rs.why}, {'moved', {6, 6, Z}, 'boxed'})
   local _, tr = W.K.call('seal', 'refuge_trust')
-  T.eq(tr.why, {'no hatch at 6,6,6'})
+  T.eq(tr.why, {'no hatch at 6,6,9'})
 end)
 
 T.done()

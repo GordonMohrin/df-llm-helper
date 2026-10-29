@@ -787,6 +787,49 @@ def _snap_char(snap: dict | None, x: int, y: int, z: int) -> str | None:
     return None if c == " " else c
 
 
+STAND_CHARS = ".<>Xr+^=w"              # snapshot legend a builder can stand on (floor, stairs, ramp, door, trap, bridge)
+BOXED_NOTE = ("refuge: the stair head {} has no tile beside it on its level to build from (a shaft walled in on all 8 "
+              "sides: no builder takes a hatch there, BUG-313); hatch moved to {} (same stair, the first level with a "
+              "floor beside it)")
+
+
+def stair_boxed(snap: dict | None, x: int, y: int, z: int) -> bool | None:
+    """BUG-313 (Run 15: the refuge hatches 55,82,133 / 89,72,137 / 86,53,126 'not suspended, no builder has taken it' for
+    hundreds of days in three forts, each on an up/down stair one level above the refuge, walled in on all 8 sides): True
+    when all 8 neighbours of x,y,z on its own level are revealed and none is a tile a builder stands on; None when one is not
+    on the snapshot or not revealed (unknown, nothing is moved); else False."""
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            c = _snap_char(snap, x + dx, y + dy, z)
+            if c is None or c == "?":
+                return None
+            if c in STAND_CHARS:
+                return False
+    return True
+
+
+def _unboxed_head(snap: dict | None, x: int, y: int, zr: int, top: int) -> int | None:
+    """BUG-313: the level of the refuge stair the hatch goes on when its head zr + 1 is boxed in: the first level above whose
+    tile holds a door/hatch already or is a stair with a tile beside it to build from, each level between boxed too. None
+    when the head is not boxed (or that is unknown) or no such level exists (the head stays)."""
+    if stair_boxed(snap, x, y, zr + 1) is not True:
+        return None
+    for z in range(zr + 2, top + 1):
+        c = _snap_char(snap, x, y, z)
+        if c == "+":
+            return z
+        if c is None or c not in STAIR_CHARS:
+            return None
+        b = stair_boxed(snap, x, y, z)
+        if b is False:
+            return z
+        if b is None:
+            return None
+    return None
+
+
 def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
     """BUG-123/124 (Run 14 note 102: `seal at=refuge` was demanded for a manifest stair on undug rock, then failed with "the
     tile is not revealed"): the refuge's stair head as the map shows it, from revealed tiles only (the newest snapshot; fair
@@ -809,6 +852,13 @@ def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
     man = "%d,%d,%d %s" % (x, y, zr + 1, "stair_down" if top == zr + 1 else "stair_updown")
     xyz = "%d,%d,%d" % (x, y, zr + 1)
     out = {"state": "ok", "head": man, "man": man, "note": ""}
+    if c0 is not None and c0 in STAIR_CHARS:            # BUG-313: a head walled in on its level moves up the stair
+        zb = _unboxed_head(snap, x, y, zr, top)
+        if zb is not None:
+            to = "%d,%d,%d" % (x, y, zb)
+            c = _snap_char(snap, x, y, zb) or "X"
+            kind = "stair_down" if zb == top else HEAD_KIND.get(c, "stair_updown")
+            return {"state": "moved", "man": man, "head": f"{to} {kind}", "note": BOXED_NOTE.format(xyz, to)}
     if c0 is None or c0 in STAIR_CHARS + "+":
         return out                                      # unknown (no snapshot) or a stair: as given
     if c0 != "?":

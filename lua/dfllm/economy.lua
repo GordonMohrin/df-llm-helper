@@ -393,8 +393,11 @@ M.DEFAULTS = {
   -- office's chair and table were among them): orders unvalidated (or the office short of its chair/table) for
   -- bypass_days (0 = off) make the kernel add the items as workshop tasks (M.mgr_bypass: at most bypass_max a day,
   -- bypass_open such tasks queued at once)
+  -- BUG-315 (Run 15 Drillchamber: 192-194 open orders, 73-95 stuck, the mood's bag and charcoal behind them for 30 days):
+  -- the daily prune (M.order_prune) removes duplicates of a stuck order after stuck_days and, above `cap` open orders,
+  -- the longest stuck ones past prune_days, at most prune_per_day a day; never a piece, mood, seal or care order
   orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2,
-            bypass_days = 5, bypass_max = 4, bypass_open = 8},
+            bypass_days = 5, bypass_max = 4, bypass_open = 8, cap = 120, prune_days = 30, prune_per_day = 30},
   -- BUG-042: the manager's Office zone needs a chair (and a table: the live fix was both) to validate work orders; a
   -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
   -- item) at most every retry_days; zones larger than max_tiles are searched only that far. BUG-232: `zone` = with no
@@ -1233,6 +1236,7 @@ end
 
 local function live(id)
   local o = order_by_id(id)
+  if o ~= nil and (o.amount_left or 0) <= 0 and (st.jobord or {})[o.id] then return true end   -- BUG-315: its job is out
   return o ~= nil and (o.amount_left or 0) > 0
 end
 
@@ -1345,6 +1349,9 @@ local function scan_orders(p)
   st.brew = s.brew
   for _, o in ipairs(orders_all()) do
     local left = o.amount_left or 0
+    -- BUG-315: DF counts amount_left down as it hands out the jobs; an own order at 0 whose job is still out is open (else
+    -- the planner entered it again while that job waited)
+    if left <= 0 and own[o.id] and (st.jobord or {})[o.id] then s.live[own[o.id]] = s.live[own[o.id]] or 0 end
     if left > 0 then
       local tag = own[o.id]
       if tag then
@@ -7692,6 +7699,7 @@ function T.orders(K, c, r)
       spec.item_conditions = #conds > 0 and conds or nil
       if spec.material_category and #spec.material_category == 0 then spec.material_category = nil end
       spec.tag, spec.amount_total, spec.frequency = cd.tag, cd.n, spec.frequency or 'OneTime'
+      if M.mood_top(r.p, cd.tag) then spec.top = true end   -- BUG-315: a mood's material first in the work orders
       local ok, id = K.act.workorder(spec)
       r.cmds, r.made = r.cmds + 1, r.made + 1
       if ok then
@@ -8083,6 +8091,120 @@ function M.ws_missing(K, p, oq)
          n = #gone})
 end
 
+-- BUG-315 (Run 15 Drillchamber y377: `inspect orders` 192 -> 194 open, 73-95 stuck: 28 x 'no bars:INORGANIC:BISMUTH_BRONZE',
+-- 15 x 'no bars:INORGANIC:IRON', the gear orders made again every 1-2 days (commands.log: 28 MakeGloves x1), library
+-- imports that never run; the mood's bag (435) and charcoal (437) waited 30 days behind them). The daily prune at the end
+-- of T.ocheck: (1) of stuck orders (p.ostuck, stuck_days or more) with the same job, item subtype, material and reason one
+-- is kept (the one a tag tracks, else the oldest), the others are removed; (2) above orders.cap open orders the longest
+-- stuck ones past prune_days go too, oldest first. Only one-time orders, at most prune_per_day a day; never an order the
+-- planned buildings, a mood, the dead, the hospital or the player ask for (M.PRUNE_KEEP jobs, M.PRUNE_KEEP_TAG tags). A
+-- removed own order clears its tag and waits backoff_days. kern.log and one ORDER_STUCK (B, kind prune) a day
+M.PRUNE_KEEP = {ConstructBlocks = true, ConstructCoffin = true, ConstructMechanisms = true, MakeChain = true,
+                MakeBucket = true, MakeCage = true, ConstructSlab = true, EngraveSlab = true, MakeBag = true,
+                MakeCharcoal = true, CollectSand = true, MakeRawGlass = true, CutGlass = true, SpinThread = true,
+                WeaveCloth = true, TanAHide = true, ProcessPlants = true, PrepareMeal = true, CustomReaction = true,
+                CollectWebs = true, MakeBarrel = true}
+for _, e in pairs(M.PIECES) do M.PRUNE_KEEP[e.job] = true end
+M.PRUNE_KEEP_TAG = {'dfllm:piece_', 'dfllm:redo_', 'dfllm:slab', 'dfllm:mech', 'dfllm:sand', 'dfllm:bag', 'dfllm:charcoal',
+                    'dfllm:glass', 'dfllm:cutglass', 'dfllm:thread', 'dfllm:cloth', 'dfllm:tan', 'dfllm:drink',
+                    'dfllm:food', 'dfllm:stand_', 'dfllm:cmd', 'dfllm:coffin', 'dfllm:chain', 'dfllm:bucket'}
+-- BUG-315: while a strange mood wants a material (care's need, p.needs[key].care), the orders of the chains that make it
+-- (sand, bags, charcoal, glass, thread, cloth, leather) go first in the work orders (act.workorder top), not behind the queue
+M.MOOD_TOP = {'dfllm:sand', 'dfllm:bag', 'dfllm:charcoal', 'dfllm:glass', 'dfllm:cutglass', 'dfllm:thread', 'dfllm:cloth',
+              'dfllm:tan'}
+function M.mood_top(p, tag)
+  local on = false
+  for _, m in pairs(type(p.needs) == 'table' and p.needs or {}) do
+    if type(m) == 'table' and type(m.care) == 'table' then on = true; break end
+  end
+  if not on then return false end
+  for _, pre in ipairs(M.MOOD_TOP) do if tostring(tag):sub(1, #pre) == pre then return true end end
+  return false
+end
+
+function M.order_prune(K, c, p, now)
+  local oc = c.orders or M.DEFAULTS.orders
+  local cap, pdays = math.tointeger(oc.cap) or 120, math.tointeger(oc.prune_days) or 30
+  local per = math.tointeger(oc.prune_per_day) or 30
+  local sd = math.tointeger(oc.stuck_days) or 3
+  local day = now // DAY
+  if p.prune_day ~= day then p.prune_day, p.prune_n = day, 0 end
+  if per <= 0 or (p.prune_n or 0) >= per then return 0 end
+  local tag_of, keep_id = {}, {}
+  for tag, id in pairs(p.orders) do
+    tag_of[id] = tag
+    for _, pre in ipairs(M.PRUNE_KEEP_TAG) do
+      if tostring(tag):sub(1, #pre) == pre then keep_id[id] = true; break end
+    end
+  end
+  local one = df.workquota_frequency_type and df.workquota_frequency_type.OneTime
+  local open_n, cands, groups = 0, {}, {}
+  for _, o in ipairs(orders_all()) do
+    local left = math.tointeger(o.amount_left) or 0
+    if left > 0 then
+      open_n = open_n + 1
+      local rec = p.ostuck[tostring(o.id)]
+      local okn, job = pcall(job_name, o)
+      local days = type(rec) == 'table' and (now - (math.tointeger(rec.since) or now)) // DAY or -1
+      if days >= sd and okn and type(job) == 'string' and not M.PRUNE_KEEP[job] and not keep_id[o.id]
+         and (one == nil or o.frequency == nil or o.frequency == one) then
+        local sig = string.format('%s:%s:%s:%s:%s', job, tostring(o.item_subtype), tostring(o.mat_type),
+                                  tostring(o.mat_index), tostring(rec.why))
+        local e = {id = o.id, days = days, sig = sig, job = job, why = rec.why}
+        cands[#cands + 1] = e
+        local g = groups[sig]
+        if not g then g = {}; groups[sig] = g end
+        g[#g + 1] = e
+      end
+    end
+  end
+  local drop, dropped = {}, {}
+  for _, g in pairs(groups) do
+    if #g > 1 then
+      table.sort(g, function(a, b)
+        local ta, tb = tag_of[a.id] ~= nil, tag_of[b.id] ~= nil
+        if ta ~= tb then return ta end
+        return a.id < b.id
+      end)
+      for i = 2, #g do drop[#drop + 1] = g[i]; dropped[g[i].id] = 'duplicate' end
+    end
+  end
+  table.sort(drop, function(a, b) return a.id < b.id end)
+  if cap > 0 and open_n - #drop > cap then
+    table.sort(cands, function(a, b) if a.days ~= b.days then return a.days > b.days end return a.id < b.id end)
+    local over = open_n - #drop - cap
+    for _, e in ipairs(cands) do
+      if over <= 0 then break end
+      if not dropped[e.id] and e.days >= pdays then
+        drop[#drop + 1] = e
+        dropped[e.id] = 'over the cap'
+        over = over - 1
+      end
+    end
+  end
+  local gone, first = {}, nil
+  for _, e in ipairs(drop) do
+    if (p.prune_n or 0) >= per then break end
+    if K.act.order_remove(e.id) then
+      p.prune_n = (p.prune_n or 0) + 1
+      gone[#gone + 1] = string.format('%d %s (%s)', e.id, e.job, dropped[e.id])
+      first = first or e
+      p.ostuck[tostring(e.id)] = nil
+      local tag = tag_of[e.id]
+      if tag then p.orders[tag], st.backoff[tag] = nil, now + (oc.backoff_days or 10) * DAY end
+    end
+  end
+  if #gone == 0 then return 0 end
+  local msg = string.format('order queue: %d of %d open orders removed (stuck duplicates%s): %s', #gone, open_n,
+                            cap > 0 and string.format(', above the cap of %d', cap) or '',
+                            table.concat(gone, ', ', 1, math.min(#gone, 8)) .. (#gone > 8 and ', ...' or ''))
+  K.log('warn', '%s', msg)
+  K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = first.id, job = first.job,
+         why = ('prune: ' .. tostring(first.why)):sub(1, 80), days = first.days, dropped = 1, kind = 'prune', n = #gone})
+  K.persist.touch('m.economy')
+  return #gone
+end
+
 -- FR-01 (daily): orders that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days;
 -- sliced: ORDER_SLICE orders per frame
 local ORDER_SLICE = 50
@@ -8151,6 +8273,9 @@ function T.ocheck(K, c, r)
   M.ws_stuck(K, p, oq, oc)
   local okm, errm = pcall(M.ws_missing, K, p, oq)   -- BUG-267: ask for the missing shops, drop the hopeless orders
   if not okm then K.log('warn', 'missing workshops: %s', tostring(errm)) end
+  local okp, errp = pcall(M.order_prune, K, c, p, r.now)   -- BUG-315: stuck duplicates and the queue above its cap
+  if not okp then K.log('warn', 'order prune: %s', tostring(errp)) end
+  st.jobord = oq.shops and oq.shops.by_order or st.jobord   -- BUG-315: the orders whose jobs are out (scan_orders)
   local wl = {}
   for label, n in pairs(oq.wsn) do wl[#wl + 1] = {label, n} end
   table.sort(wl, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
@@ -8911,6 +9036,25 @@ function M.burrow_out(K, x, y, z)
           text = string.format('outside the burrow %s (%d of %d free citizens assigned to it)', best, kept, free)}
 end
 
+-- BUG-313 (Run 15: the refuge hatches 55,82,133 (Earthboat), 89,72,137 (Drillchamber) and 86,53,126 (Inkintense) 'not
+-- suspended, no builder has taken it; 1 item attached' for hundreds of days beside idle dwarves, re-placed in vain; each sits
+-- on an up/down stair inside a shaft, walls on all 8 sides of its level): true when every neighbour of x,y,z on its level is
+-- revealed and none is a tile a builder stands on (snapshot legend); nil when one is hidden; else false. Read-only
+M.STAND_C = {['.'] = true, ['<'] = true, ['>'] = true, X = true, r = true, ['+'] = true, ['^'] = true, ['='] = true,
+             w = true}
+function M.boxed_in(K, x, y, z)
+  for dy = -1, 1 do
+    for dx = -1, 1 do
+      if dx ~= 0 or dy ~= 0 then
+        local ok, t = K.call('snapshot', 'tile', x + dx, y + dy, z)
+        if not (ok and type(t) == 'table' and type(t.c) == 'string') then return nil end
+        if M.STAND_C[t.c] then return false end
+      end
+    end
+  end
+  return true
+end
+
 function M.build_state(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return nil end
@@ -8948,6 +9092,11 @@ function M.build_state(K, x, y, z)
       if okb and type(bo) == 'table' then
         rec.burrow, rec.bwhy = bo.name, bo.why
         rec.line = rec.line .. ': ' .. bo.text
+      end
+      local okx, bx = pcall(M.boxed_in, K, x, y, z)          -- BUG-313: no tile beside it to build from
+      if okx and bx == true then
+        rec.boxed = true
+        rec.line = rec.line .. ': walled in on its level (no tile beside it to build from)'
       end
     end
     return rec

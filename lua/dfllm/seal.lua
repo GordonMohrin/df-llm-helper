@@ -3250,6 +3250,27 @@ end
 --            is real and its hatch has no tile (the player is asked once, hatch_ask)
 --   nostair  the head tile is revealed and no stair (or nothing of the column is revealed as a stair): never dug. The
 --            stale manifest entry stays; nothing demands a hatch for it
+-- BUG-313 (Run 15: the refuge hatches 55,82,133, 89,72,137 and 86,53,126 'not suspended, no builder has taken it' for
+-- hundreds of days, each on an up/down stair one level above the refuge, walled in on all 8 sides): the tile shapes a
+-- builder stands on. M.boxed(x, y, z): true when all 8 neighbours on the tile's level are revealed and none is one, nil
+-- when one is hidden (unknown), else false. Revealed tiles only
+M.STAND = {FLOOR = true, BOULDER = true, PEBBLES = true, SHRUB = true, SAPLING = true, BROOK_BED = true, BROOK_TOP = true,
+           BRANCH = true, TRUNK_BRANCH = true, STAIR_UP = true, STAIR_DOWN = true, STAIR_UPDOWN = true, RAMP = true}
+function M.boxed(x, y, z)
+  for dy = -1, 1 do
+    for dx = -1, 1 do
+      if dx ~= 0 or dy ~= 0 then
+        if not rev(x + dx, y + dy, z) then return nil end
+        local sh = shape(x + dx, y + dy, z)
+        spend(1)
+        if sh == nil then return nil end
+        if M.STAND[sh.shape] then return false end
+      end
+    end
+  end
+  return true
+end
+
 function M.refuge_stair(K)
   local col = refuge_column(K)
   if not col then return nil end
@@ -3263,6 +3284,17 @@ function M.refuge_stair(K)
     return (sh ~= nil and STAIR_KIND[sh.shape] ~= nil) or sep_closer(key3(x, y, z))
   end
   local h = stair_at(zr + 1)
+  -- BUG-313: a head walled in on its level (no builder takes a hatch there) moves up the same stair to the first level
+  -- with a closer on it or a tile beside it to build from; every level between is walled in too (a shaft: nothing else
+  -- enters the refuge there). Unknown (a hidden neighbour) or no such level: the head stays
+  if h and not sep_closer(key3(x, y, zr + 1)) and M.boxed(x, y, zr + 1) == true then
+    for z = zr + 2, top do
+      if not stair_at(z) then break end
+      local b = sep_closer(key3(x, y, z)) and false or M.boxed(x, y, z)
+      if b == false then return {state = 'moved', pos = {x, y, z}, man = man, why = 'boxed'} end
+      if b == nil then break end
+    end
+  end
   if h then return {state = 'ok', pos = man, man = man} end
   if h == false then return {state = 'nostair', man = man} end
   for z = zr + 2, top do

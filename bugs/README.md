@@ -325,6 +325,9 @@ Related: FR-xx, BUG-xx
 | [BUG-310](BUG-310-forced-raise-goes-ahead-with-a-unit-on-the-bridge.md) | fixed (offline, live-untested) | critical | Run 15b: a forced raise went ahead with units on the bridge | gate.lua |
 | [BUG-311](BUG-311-raise-pull-not-cancelled-for-a-unit-walking-onto-the-bridge.md) | fixed (offline, live-untested) | high | Run 15b: a raise pull was not cancelled for a unit walking toward the bridge | gate.lua |
 | [BUG-312](BUG-312-automatic-drill-with-a-dry-refuge.md) | fixed (offline, live-untested) | medium | Run 15d: automatic drills with a dry refuge and kern burrow | drill.lua, seal.lua |
+| [BUG-313](BUG-313-refuge-hatch-walled-in-on-its-level-never-taken.md) | fixed (offline, live-untested) | high | Run 15: refuge hatches on a stair walled in on its level never taken; `seal at=refuge` and the trust check move the hatch up the stair, SEAL_STUCK why boxed | cmd, seal, economy, runner |
+| [BUG-314](BUG-314-bp-cancel-leaves-the-projects-df-jobs.md) | fixed (offline, live-untested) | high | Run 15 Earthboat: bp.cancel left the hatch and its DF job 8095, the next seal adopted it; a plain cancel now removes its unbuilt pieces | runner |
+| [BUG-315](BUG-315-order-queue-grows-without-a-cap.md) | mitigated (offline, live-untested): prune and cap; repeat cause a hypothesis | high | Run 15 Drillchamber: 194 orders, 73 stuck, gear made again every day; daily prune of stuck duplicates, a cap, mood orders on top | economy |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
