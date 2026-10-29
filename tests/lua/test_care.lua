@@ -529,6 +529,24 @@ T.test('BUG-205 (live Earthboat): a week without stressors writes no empty "top 
   end
 end)
 
+T.test('BUG-218 (live 4: None=361 ... SatisfiedAtWork=21): the stressors skip "None" and emotions that lower stress',
+       function()
+  local had_et, had_none = df.emotion_type, df.unit_thought_type[-1]
+  local W = world{setup = function(W)
+    df.unit_thought_type[-1] = 'None'
+    -- dividers as DF's: > 0 raises stress (Anger), < 0 lowers it (Satisfaction), 0 none
+    df.emotion_type = {attrs = {[1] = {divider = 2}, [2] = {divider = -4}, [3] = {divider = 0}}}
+    W.unit(1)._m.stress = 0
+    W.unit(1).status.current_soul.personality.emotions = kmock.vec{
+      {thought = -1, type = 1}, {thought = 0, type = 1}, {thought = 3, type = 2}, {thought = 1, type = 3},
+      {thought = 2}}                                           -- no readable type: counts as before
+  end}
+  for _ = 1, 8 do day(W) end
+  local top = W.K.persist.get('m.care').stress.top
+  df.emotion_type, df.unit_thought_type[-1] = had_et, had_none
+  T.eq(top, {{'SawDeadBody', 8}, {'Thirsty', 8}}, 'old code: None, AteNoTable (positive) and NoShirt (neutral) counted')
+end)
+
 T.test('work is sliced: 1,000 corpses take several frames, state stays valid', function()
   local W = world{setup = function(W)
     for i = 1, 1000 do F.item(W, 'ANY_CORPSE', {unit_id = 1000 + i, _pos = {1, 1, 1}}) end

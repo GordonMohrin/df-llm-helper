@@ -340,11 +340,21 @@ M.STRESS_SRC = {
   Thirsty = 'drink', Dehydrated = 'drink', Hungry = 'food', Starving = 'food',
   NoDining = 'rooms', DiningQuality = 'rooms', NoRooms = 'rooms', RoomPretension = 'rooms',
 }
+-- BUG-218 (live 4: 'top stressors' led by None=361 and SatisfiedAtWork=21): does the emotion raise stress? DF adds
+-- strength / divider of its emotion type (hack/scripts/add-thought.lua:36-38), so a divider > 0 is a stressor and <= 0
+-- is not; nil when the type cannot be read (then it counts, as before)
+function M.stressor(e)
+  local ok, d = pcall(function() return df.emotion_type.attrs[e.type].divider end)
+  d = ok and tonumber(d) or nil
+  if d == nil then return nil end
+  return d > 0
+end
 local function thoughts(u, counts, src)
   pcall(function()
     local seen = {}
     for _, e in ipairs(u.status.current_soul.personality.emotions) do   -- fixnaked.lua:12
       local name = df.unit_thought_type[e.thought]
+      if name == 'None' or M.stressor(e) == false then name = nil end      -- BUG-218: no thought, or not a stressor
       if name then
         counts[name] = (counts[name] or 0) + 1
         local g = M.STRESS_SRC[name]
@@ -2687,9 +2697,12 @@ function MEM.place(K, c, r, p, g, now, mem, G)
   local site, L = MEM.pick(K, G)
   if not site and fresh then site, L, G = MEM.widen(K, c, r, G) end
   if not site then
-    -- review: a record left from an older episode (no failed search for 2 x coffin_retry) starts a new one
-    local since = ns and now - (num(ns.t) or 0) <= 2 * (num(c.coffin_retry) or 3600) and num(ns.since) or now
-    mem.why, p.mem_nosite = G.why, {t = now, since = since, why = trunc(G.why, 200)}
+    -- review: a record left from an older episode (no failed search for 2 x coffin_retry) starts a new one.
+    -- BUG-217 (live 4: care's pacing ran the memorial searches 28000-31000 ticks apart, so every search began a new
+    -- episode and the request never came): the same slab still waiting keeps its episode, however far apart the runs
+    local same = ns and (ns.sid == sid or now - (num(ns.t) or 0) <= 2 * (num(c.coffin_retry) or 3600))
+    local since = same and num(ns.since) or now
+    mem.why, p.mem_nosite = G.why, {t = now, since = since, sid = sid, why = trunc(G.why, 200)}
     K.log('warn', 'memorial: slab %s of ghost unit %d waits: %s', sid, g.uid, G.why)
     if MEM.request(K, c, p, p.mem_nosite, now, G.why) then mem.req = now end
     return G, false, true
@@ -2716,7 +2729,7 @@ local function phase_memorials_run(K, c, r, p)
   for _, s in ipairs(MEM.STATES) do mem.n[s] = 0 end
   r.mem = mem
   local ids = MEM.ghosts(K, p, now)
-  if #ids == 0 then return end
+  if #ids == 0 then p.mem_nosite = nil; return end         -- BUG-217: no slab waits, the episode ends
   local sl, ords, loose = MEM.OF.slabs(4000), MEM.orders(), {}
   for _, id in ipairs(ids) do
     local u = df.unit.find(id)
@@ -2729,6 +2742,7 @@ local function phase_memorials_run(K, c, r, p)
     elseif ords[hf] then s = 'order' end
     mem.by[id] = s
   end
+  if #loose == 0 then p.mem_nosite = nil end               -- BUG-217: no loose slab left, a later one starts afresh
   local mode, per = K.mode(), num(c.memorials) or 2
   if #loose > 0 and per > 0 and (mode == 'PEACE' or mode == 'RECOVERY') then
     p.slabt = json.object(type(p.slabt) == 'table' and p.slabt or {})
