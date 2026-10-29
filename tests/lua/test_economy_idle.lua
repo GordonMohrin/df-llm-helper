@@ -36,7 +36,10 @@ local function world(spec, opts)
     u.mood = sp.mood or -1
     u.status.labors = {}
     for _, ln in ipairs(sp.labors or {}) do u.status.labors[df.unit_labor[ln]] = true end
-    if sp.hurt then u.health = {flags = {needs_healthcare = true}} end
+    -- BUG-271: hurt = a wound (or needs health care while bled); sp.care = the health care flag alone, full blood
+    if sp.hurt then u.health, u.body = {flags = {needs_healthcare = true}}, {wounds = {{id = 1}}} end
+    if sp.care then u.health, u.body = {flags = {needs_healthcare = true}}, {wounds = {}, blood_count = 100, blood_max = 100} end
+    if sp.bled then u.health, u.body = {flags = {needs_healthcare = true}}, {wounds = {}, blood_count = 60, blood_max = 100} end
     if sp.sleepy then u.counters2 = {sleepiness_timer = sp.sleepy} end
   end
   W.set_census('u', F.census_u(ids, {soldiers = #sids, soldier_ids = sids}))
@@ -116,6 +119,19 @@ T.test('FR-77: the daily scan publishes labor.why (own-state classes), the adult
   T.eq(s.labor.held, 2)
   T.eq(s.labor.why, {rest = 1, hurt = 1, mood = 0, free = 1})
   T.eq(s.labor.idle, 75)
+end)
+
+T.test('BUG-271 (live Earthboat: idle_why hurt 14, units without a wound, blood 100 %, hungry and sleepy): the health ' ..
+       'care flag alone is no hurt; sleepy is rest; a wound or lost blood still is', function()
+  local W = world{{idle = true, care = true, sleepy = 60000}, {idle = true, care = true}, {idle = true, bled = true},
+                  {idle = true, hurt = true}, {}}
+  jobs({})
+  days(W, 1)
+  local r = W.inbox('inspect', {what = 'workload'})
+  T.eq(r.ok, true, r.msg)
+  T.eq({r.data.idle_why.hurt, r.data.idle_why.rest, r.data.idle_why.nowork}, {2, 1, 1}, r.msg)
+  local E = require('dfllm.economy')
+  T.eq(E.idle_flags(W.unit(2)).care, true, 'the flag alone is kept apart')
 end)
 
 T.done()

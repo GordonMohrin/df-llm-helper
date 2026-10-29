@@ -90,6 +90,29 @@
   rough`, AQ_SEEP `(observe, cistern basin)`, no AQ_HEAVY on a light aquifer, then the well accepted in `inspect water_sources`.
   Uncertain: buildingplan job_items field names of a 53.16 well (pcall; a miss = no route), whether DF's rope takes cloth, whether the
   basin reaches 4/7 while the dig stage is still probed (the runner then stops it as heavy).
+## Run 15 economy supply: missing shops asked for, mechanisms for the levers, a soil fort's stone and gems, gear shops, hurt count (BUG-267..271, 2026-10-29; offline, live-untested)
+- **Why:** Earthboat: 11 orders (Loom, Clothier, Millstone, Quern, WoodFurnace) waited 344 days for shops nobody asked for, Drillchamber
+  37 of 55 orders 'workshop missing' (BUG-267); levers B2/O1 never linked ('needs 2 free reachable mechanisms, 1 found'), economy never
+  ordered a mechanism (BUG-268); Guildcleans deep soil: moods missed stone and gems, the player set trade.want gem by hand (BUG-269);
+  'gear: body 0/5 no bars/leatherworks' with no shop requested (BUG-270); idle 'hurt 14' counted dwarves with 0 wounds, full blood (BUG-271).
+- **What changed:** (1) economy: the stuck-order groups carry the shop key; a template-placeable shop (not Farmers/Fishery/Tanners) whose
+  orders waited 14 days -> one PROJECT_REQUEST workshops why=missing d.types (`M.ws_ask`: queued/mandatory types left out, backoff
+  14 d x 2^(k-1) and 900 s x 2^(k-1), a new type at once); orders for shops the kernel cannot ask for (Millstone, WoodFurnace,
+  MagmaForge) are removed after 112 days (work orders screen, <= 10 a day, ORDER_STUCK dropped=1). (2) `M.plan_mech`: 2 mechanisms per
+  manifest lever gate.linked does not count, minus the free ones -> ConstructMechanisms in stone (`dfllm:mech`, <= 4); no Mechanic's
+  workshop -> why=gear [Mechanics]; no stone -> rock need for the stone dig and `economy.supply_wants` `mechanism`. (3) two stone digs
+  without a boulder mark a soil fort: supply_wants `stone` and `gem`; trade.lua puts supply_wants after trade_wants, new tokens
+  `mechanism(s)` (TRAPPARTS, cap 8). (4) plan_gear: a slot without a Leatherworks asks why=gear [Leatherworks, Tanners]. (5) idle hurt =
+  a wound or needs_healthcare while bled; the flag alone is `care`, a sleepy dwarf is rest. (6) wake.py: follow places why=missing,
+  gear and well (fix6-water) like mandatory, only the named types. RULES trade.want row and economy paragraph edited in place (300 lines); CONTRACTS §7
+  `economy.supply_wants`. No config keys (module fields `M.WSMISS`, `M.MECH`, `M.SUPPLY`, `M.ROCK_SOIL`).
+- **Tests (each fails on 2b9c009):** tests/lua/test_economy_supply6.lua (7), tests/lua/test_economy_idle.lua (BUG-271; FR-77 fixture
+  `hurt` now has a wound), tests/test_bug267_271_supply.py (4).
+- **Live check:** Earthboat/Drillchamber: PROJECT_REQUEST why=missing types [Clothiers, Loom, Quern] within 14 days and cli.log
+  `auto:missing`; after 112 days kern.log 'order(s) removed after 112+ days without a Millstone/WoodFurnace'. Levers: inspect orders
+  `dfllm:mech`, then LEVER 'link B2' and status without levers:B2; no Mechanic's workshop: why=gear [Mechanics]. Guildcleans: inspect
+  workload stone.soil true, inspect trade want `stone`/`gem`/`mechanism`. Gear: why=gear [Leatherworks, Tanners]. inspect workload
+  idle_why.hurt = only wounded/bled dwarves; read-only for a former 'hurt' id: wounds, blood_count/blood_max, health.flags.
 
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders

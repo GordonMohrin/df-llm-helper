@@ -2074,9 +2074,16 @@ local function plan_steel(K, c, r)
   r.route.bars = (r.route.bars and r.route.bars .. '+' or '') .. 'steel'
 end
 
+-- BUG-270 (live Earthboat: 'gear: 5 soldiers ... body 0/5 no bars/leatherworks, quiver 3/5 no leatherworks', no shop
+-- was ever asked for): a slot that has no route because no Leatherworks stands asks for it (and for the Tanners when none
+-- stands), BUG-268: mechanisms the manifest levers miss without a Mechanic's workshop ask for that one; one
+-- PROJECT_REQUEST workshops why=gear (M.ws_ask, follow places only those)
 local function plan_gear(K, c, r)
   local g = c.gear
   local forge, lw = ws_any(r.f, g.forge), ws_any(r.f, g.leatherworks)
+  local shops = {}
+  local okm, mws = pcall(M.plan_mech, K, c, r)
+  if not okm then K.log('warn', 'mechanisms: %s', tostring(mws)) elseif mws then shops[#shops + 1] = mws end
   local magma = r.f['workshop:MagmaForge'] == true
   local fc = fuel_cond(r)
   for _, it in ipairs(g.items or {}) do
@@ -2118,7 +2125,14 @@ local function plan_gear(K, c, r)
             spec.item_conditions = {cond(ln + floor_of(c, r.p, r, 'leather'), 'SKIN_TANNED')}
             add(r, {tag = tag, spec = spec, n = n, out = it.out or 1, cat = it.cat, uses = {leather = ln}, why = 'gear'})
             rec.route = 'leather'
-          else why[#why + 1] = lw and 'leather' or 'leatherworks' end
+          else
+            why[#why + 1] = lw and 'leather' or 'leatherworks'
+            if not lw and not shops.lw then
+              shops.lw = true
+              shops[#shops + 1] = 'Leatherworks'
+              if not r.f['workshop:Tanners'] then shops[#shops + 1] = 'Tanners' end
+            end
+          end
         end
         if rec.route == 'none' and it.wood then
           local n = ws_any(r.f, it.wood.ws) and math.min(jobs, left(c, r, 'wood'), maxj) or 0
@@ -2142,6 +2156,9 @@ local function plan_gear(K, c, r)
       end
     end
   end
+  if #shops > 0 then
+    M.ws_ask(K, r.p, 'gear', shops, (c.food or {}).request_days or 14, "workshops: soldiers' gear and levers miss a shop")
+  elseif type(r.p.wsask) == 'table' then r.p.wsask.gear = nil end
 end
 
 -- the inputs of worn % (DESIGN Ã‚Â§5.3): wanted / at hand / ordered per slot and the route, logged on change
@@ -2290,7 +2307,7 @@ local function stale_filter(K, c, p, n, age, job)
 end
 
 -- FR-77 (Run 13: "N of M adults without a job (0 without reachable work)" with 40-70 % idle): why an adult has no job.
--- flags: mood (a strange mood or insanity), hurt (needs health care, or a wound), rest (drowsy: sleepiness_timer at DF's
+-- flags: mood (a strange mood or insanity), hurt (a wound, or needs health care while bled), rest (drowsy: sleepiness_timer at DF's
 -- "drowsy" mark, or lying down); idle_class names the first that holds (mood, hurt, rest) or nil. Every read is guarded:
 -- a field the game does not have is no flag. Module fields, not locals (this file sits at Lua's 200-locals limit).
 M.IDLE_SLEEPY = 57600
@@ -2301,8 +2318,16 @@ M.JOB_LABOR = {GatherPlants = 'HERBALIST', PlantSeeds = 'PLANT', HarvestPlants =
 function M.idle_flags(u)
   local f = {}
   pcall(function() f.mood = type(u.mood) == 'number' and u.mood >= 0 end)
+  -- BUG-271 (live Earthboat: idle_why hurt 14; units 26374/26371/21852 had 0 wounds, blood 100 %, were hungry and
+  -- sleepy): needs_healthcare alone is no hurt; it counts with a wound or blood below its maximum (f.care: the flag alone)
   pcall(function()
-    f.hurt = (u.health ~= nil and u.health.flags.needs_healthcare == true) or (u.body ~= nil and #u.body.wounds > 0)
+    local b = u.body
+    local wounds = b ~= nil and #b.wounds > 0
+    local care = u.health ~= nil and u.health.flags.needs_healthcare == true
+    local bled = b ~= nil and type(b.blood_count) == 'number' and type(b.blood_max) == 'number' and
+                 b.blood_count < b.blood_max
+    f.hurt = wounds or (care and bled)
+    f.care = care and not f.hurt or nil
   end)
   pcall(function()
     local t = u.counters2 and u.counters2.sleepiness_timer
@@ -4753,7 +4778,7 @@ function M.order_reasons(o, ctx)
     -- Farmer's Workshop stood): the workshop is named as one, not as a person
     local label = M.ws_label(ws[1])
     why[#why + 1] = 'no ' .. label
-    kind.ws = label
+    kind.ws, kind.wsk = label, ws[1]                -- BUG-267: the key ('workshop:Loom') names the shop to ask for
   end
   if job ~= 'CustomReaction' then
     local tok = (mc == 'metal' or job == 'SmeltOre') and (o.mat_index or -1) >= 0 and mat_token(0, o.mat_index) or nil
@@ -6055,11 +6080,17 @@ end
 
 -- rock below the need (the open rock orders, walls without material, care's needs) while the miners have nothing to
 -- dig: PROJECT_REQUEST bedrooms why=rock (a stone dig the fort needs anyway; follow places it), PEACE, with a pick
+-- BUG-268: the mechanisms the manifest levers miss (st.mech.stone) count as rock need too. BUG-269 (Guildcleans, deep soil:
+-- moods missed rock, 'stone free 0'): a stone dig asked rock_soil times while not one free boulder came marks the fort
+-- soil (p.rocksoil, st.rock.soil): M.supply_wants then asks the caravans for stone and gems
+M.ROCK_SOIL = 2
 function M.rock_dig(K, c, r, walls)
   local rc = c.rock
   local free = stone_free(c, r)
-  local need = (r.rk or M.rock_open()) + (walls or 0) + need_n(r.p, 'rock', r.now)
-  st.rock = {free = free, need = need, open = r.rk or 0}
+  local need = (r.rk or M.rock_open()) + (walls or 0) + need_n(r.p, 'rock', r.now) + ((st.mech or {}).stone or 0)
+  if free > 0 then r.p.rocksoil = nil end
+  st.rock = {free = free, need = need, open = r.rk or 0, gems = math.tointeger(r.inv.gems) or 0,
+             soil = (int(r.p.rocksoil) or 0) >= M.ROCK_SOIL or nil}
   if type(rc) ~= 'table' or need <= free or K.mode() ~= 'PEACE' or (r.inv.w_pick or 0) == 0 then return end
   if ((st.jobc or tool_jobs()).dig or 0) > 0 then return end                -- the miners have digging
   local okb, bl = K.call('runner', 'dig_backlog')
@@ -6069,10 +6100,85 @@ function M.rock_dig(K, c, r, walls)
   local last = int(r.p.rockreq)
   if last and r.now - last < (rc.request_days or 7) * DAY then return end
   r.p.rockreq = r.now
+  if free == 0 then r.p.rocksoil = (int(r.p.rocksoil) or 0) + 1 end
   local n = rc.rooms or 4
   K.emit('PROJECT_REQUEST', 'B', string.format('bedrooms x%d: a stone dig, %d free boulders < %d wanted (rock orders, ' ..
                                                'walls), the miners have nothing to dig', n, free, need),
          {tpl = 'bedrooms', n = n, why = 'rock', short = need - free})
+end
+
+-- BUG-268 (live Earthboat #1051 ACT_FAIL 'needs 2 free reachable mechanisms, 1 found', levers B2/O1 never linked;
+-- Guildcleans the same with stone free 0, so the STRANDED rescue through O1 could not run): nobody counted or ordered
+-- mechanisms. need = MECH.per_lever per manifest lever gate.linked does not count as linked; free = the mechanisms the
+-- lever sheet may take (not forbidden, in a job or building, owned, ...); short = need - free -> ConstructMechanisms
+-- (stone, at a Mechanic's workshop, at most MECH.max_jobs) under the tag dfllm:mech. No Mechanic's workshop: returns
+-- 'Mechanics' (plan_gear asks for it); no free stone: st.mech.stone = the short (M.rock_dig counts it) and
+-- M.supply_wants asks the caravans for mechanisms. State st.mech {need, levers, free, short, route, stone}.
+M.MECH = {tag = 'dfllm:mech', per_lever = 2, max_jobs = 4}
+M.MECH_SKIP = {'forbid', 'in_job', 'in_building', 'trader', 'garbage_collect', 'removed', 'dump', 'melt', 'hostile',
+               'owned', 'construction', 'encased', 'spider_web', 'on_fire', 'rotten'}   -- act.lua MECH_FLAGS
+function M.mech_free()
+  local n = 0
+  local ok = pcall(function()
+    for _, it in ipairs(df.global.world.items.other.TRAPPARTS) do
+      local bad = false
+      for _, k in ipairs(M.MECH_SKIP) do if it.flags[k] then bad = true; break end end
+      if not bad then n = n + 1 end
+    end
+  end)
+  return ok and n or 0
+end
+function M.mech_need(K)
+  local man = K.manifest()
+  local lv = 0
+  for name, spec in pairs(type(man) == 'table' and type(man.bridges) == 'table' and man.bridges or {}) do
+    local nl = type(spec) == 'table' and type(spec.levers) == 'table' and #spec.levers or 0
+    if nl > 0 then
+      local ok, n = K.call('gate', 'linked', name)
+      lv = lv + math.max(0, nl - (ok and int(n) or 0))
+    end
+  end
+  return lv * M.MECH.per_lever, lv
+end
+function M.plan_mech(K, c, r)
+  local need, lv = M.mech_need(K)
+  local free = M.mech_free()
+  local m = {need = need, levers = lv, free = free, short = math.max(0, need - free), route = 'none'}
+  st.mech = m
+  if m.short == 0 then m.route = nil; return nil end
+  if open(r, M.MECH.tag) then m.route = 'ordered'; return nil end
+  local stone = stone_free(c, r) - (r.s.used.rock or 0) - (r.planned.rock or 0)
+  if stone <= 0 then m.route, m.stone = 'no stone', m.short end
+  if not ws_any(r.f, {'workshop:Mechanics'}) then m.route = 'no Mechanics'; return 'Mechanics' end
+  if stone <= 0 then return nil end
+  local n = math.min(m.short, stone, M.MECH.max_jobs)
+  add(r, {tag = M.MECH.tag, spec = {job = 'ConstructMechanisms', material = 'INORGANIC'}, n = n, uses = {rock = 1},
+          why = string.format('levers: %d unlinked need %d mechanisms, %d free', lv, need, free)})
+  m.route = 'stone'
+  return nil
+end
+
+-- BUG-268/269: what the caravans are asked for besides economy.trade_wants (trade.lua puts these after them, before
+-- plan.trade.want): `mechanism` while levers miss mechanisms and no stone or no Mechanic's workshop makes them; in a soil
+-- fort (st.rock.soil) `stone` for the rock need and `gem` up to SUPPLY.gems (strange moods, Guildcleans #665-#672)
+M.SUPPLY = {gems = 3, stone_cap = 30}
+function M.supply_wants(K)
+  local w = {}
+  local m = st.mech
+  if type(m) == 'table' and (m.short or 0) > 0 and (m.route == 'no stone' or m.route == 'no Mechanics') then
+    w[#w + 1] = {buy = 'mechanism', n = m.short, why = string.format('levers: %d mechanisms short (%s)', m.short, m.route)}
+  end
+  local rk = st.rock
+  if type(rk) == 'table' and rk.soil then
+    if (rk.need or 0) > (rk.free or 0) then
+      w[#w + 1] = {buy = 'stone', n = math.min(M.SUPPLY.stone_cap, rk.need - rk.free),
+                   why = string.format('soil fort: %d free boulders < %d wanted', rk.free or 0, rk.need)}
+    end
+    if (rk.gems or 0) < M.SUPPLY.gems then
+      w[#w + 1] = {buy = 'gem', n = M.SUPPLY.gems - (rk.gems or 0), why = 'soil fort: gems for strange moods'}
+    end
+  end
+  return w
 end
 
 -- Run 11: the missing items of planned buildings (T.jmat's classes without a free or forbidden item) get an order in
@@ -7705,6 +7811,95 @@ function M.ws_stuck(K, p, oq, oc)
   end
 end
 
+-- BUG-267/270 (live Earthboat: 11 orders, Loom x3, Clothier x3, Millstone x2, Quern, WoodFurnace, waited 344 days for
+-- their shops; Drillchamber 37 of 55 orders 'workshop missing'; gear 'body 0/5 no leatherworks'): one PROJECT_REQUEST
+-- workshops why=`why` (missing | gear) d.types = `types` (follow places only those, wake.py). A type a pending workshops
+-- project builds (M.ws_queued) or runner's mandatory request asks for is left out. p.wsask[why] = {t, w, k, s = the types
+-- asked}: the k-th unanswered repeat of the same set waits days * 2^(k-1) game days AND wall_s * 2^(k-1) wall seconds
+-- (k <= backoff); a type not asked before starts over at k 1. Returns the types asked or nil.
+M.WSASK = {wall_s = 900, backoff = 4}
+function M.ws_ask(K, p, why, types, days, msg)
+  local okm, mand = K.call('runner', 'req_types', 'wsm')
+  local skip = {}
+  for _, t in ipairs(okm and type(mand) == 'table' and mand or {}) do skip[t] = true end
+  local want = {}
+  for _, t in ipairs(types) do
+    if not skip[t] and not M.ws_queued(K, t) then want[#want + 1] = t; skip[t] = true end
+  end
+  if #want == 0 then return nil end
+  table.sort(want)
+  if type(p.wsask) ~= 'table' then p.wsask = json.object{} end
+  local rec, T0 = p.wsask[why], K.now()
+  if type(rec) == 'table' then
+    local had, new = {}, false
+    for t in tostring(rec.s or ''):gmatch('[^,]+') do had[t] = true end
+    for _, t in ipairs(want) do if not had[t] then new = true end end
+    if new then rec = nil
+    else
+      local fx = 1 << (math.min(math.max(1, math.tointeger(rec.k) or 1), M.WSASK.backoff) - 1)
+      if not CAD.elapsed(rec, T0, days * DAY * fx, M.WSASK.wall_s * fx) then return nil end
+    end
+  end
+  local key = table.concat(want, ',')
+  p.wsask[why] = {t = T0.tick, w = T0.wall, k = (type(rec) == 'table' and (math.tointeger(rec.k) or 1) or 0) + 1, s = key}
+  K.log('info', '%s: asking for %s', msg, key)
+  K.emit('PROJECT_REQUEST', 'B', (msg .. ': ' .. key):sub(1, 200), {tpl = 'workshops', n = #want, why = why, types = want})
+  return want
+end
+
+-- BUG-267: the shops the stuck orders miss (T.ocheck's oq.wsg groups of kind workshop). A type the workshops template
+-- places (M.WS_PLACE) and no request of its own owns (M.WS_OWN: Farmers FR-73, Fishery Run 11, Tanners BUG-042) is asked
+-- for once its oldest order waited WSMISS.req_days (M.ws_ask why=missing); an order whose shop the kernel cannot ask for
+-- (Millstone needs power, WoodFurnace, MagmaForge, a custom shop) is removed (act.order_remove, the work orders screen)
+-- after WSMISS.cancel_days, at most drop_max a day, with kern.log and one ORDER_STUCK dropped=1. State st.wsmiss.
+M.WSMISS = {req_days = 14, cancel_days = 112, drop_max = 10}
+M.WS_PLACE = {}
+for _, t in ipairs({'Carpenters', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge', 'Bowyers', 'Clothiers',
+                    'Leatherworks', 'Tanners', 'Loom', 'GlassFurnace', 'Mechanics', 'Still', 'Kitchen', 'Butchers',
+                    'Fishery', 'Farmers', 'Quern', 'Ashery', 'Dyers', 'Kennels', 'Siege'}) do M.WS_PLACE[t] = true end
+M.WS_OWN = {Farmers = true, Fishery = true, Tanners = true}
+function M.ws_missing(K, p, oq)
+  local want, drop, n, days = {}, {}, 0, 0
+  for _, g in pairs(oq.wsg or {}) do
+    local t = g.kind == 'workshop' and type(g.wsk) == 'string' and g.wsk:match(':(.+)$')
+    if t and not M.WS_OWN[t] then
+      if M.WS_PLACE[t] then
+        if g.days >= M.WSMISS.req_days then want[#want + 1] = t; n, days = n + #g.ids, math.max(days, g.days) end
+      elseif g.days >= M.WSMISS.cancel_days then
+        for _, id in ipairs(g.ids) do drop[#drop + 1] = {id = id, t = t, days = g.days} end
+      end
+    end
+  end
+  table.sort(want)
+  local sm = {want = want, asked = 0, dropped = 0}
+  st.wsmiss = sm
+  if #want == 0 then
+    if type(p.wsask) == 'table' then p.wsask.missing = nil end
+  else
+    local asked = M.ws_ask(K, p, 'missing', want, M.WSMISS.req_days,
+                           string.format('workshops: %d order(s) wait up to %d days for a missing shop', n, days))
+    sm.asked = asked and #asked or 0
+  end
+  table.sort(drop, function(a, b) return a.id < b.id end)
+  local gone, ts = {}, {}
+  for _, e in ipairs(drop) do
+    if #gone >= M.WSMISS.drop_max then break end
+    if K.act.order_remove(e.id) == true then
+      gone[#gone + 1] = tostring(e.id)
+      if not ts[e.t] then ts[e.t] = true; ts[#ts + 1] = e.t end
+      p.ostuck[tostring(e.id)] = nil
+    end
+  end
+  if #gone == 0 then return end
+  sm.dropped = #gone
+  local msg = string.format('%d order(s) removed after %d+ days without a %s (the kernel cannot ask for it): %s', #gone,
+                            M.WSMISS.cancel_days, table.concat(ts, '/'), table.concat(gone, ', '))
+  K.log('warn', '%s', msg)
+  K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = math.tointeger(tonumber(gone[1])) or 0, job = 'workshop',
+         why = ('no ' .. table.concat(ts, '/')):sub(1, 80), days = drop[1].days, dropped = 1, kind = 'workshop',
+         n = #gone})
+end
+
 -- FR-01 (daily): orders that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days;
 -- sliced: ORDER_SLICE orders per frame
 local ORDER_SLICE = 50
@@ -7754,7 +7949,7 @@ function T.ocheck(K, c, r)
         -- or worker is one event per kind and reason the same way
         if kind and (kind.ws or rec.kind == 'input' or rec.kind == 'worker') then
           local gk = kind.ws or (rec.kind .. ':' .. rec.why)
-          local g = oq.wsg[gk] or {ids = {}, new = {}, days = 0, kind = kind.ws and 'workshop' or rec.kind}
+          local g = oq.wsg[gk] or {ids = {}, new = {}, days = 0, kind = kind.ws and 'workshop' or rec.kind, wsk = kind.wsk}
           oq.wsg[gk] = g
           g.ids[#g.ids + 1], g.days = o.id, math.max(g.days, days)
           if rec.told ~= 1 then g.new[#g.new + 1] = {rec = rec, id = o.id, job = rec.job, why = rec.why} end
@@ -7771,6 +7966,8 @@ function T.ocheck(K, c, r)
   if oq.i <= #oq.ids then return false end
   for key in pairs(p.ostuck) do if not oq.seen[key] then p.ostuck[key] = nil end end
   M.ws_stuck(K, p, oq, oc)
+  local okm, errm = pcall(M.ws_missing, K, p, oq)   -- BUG-267: ask for the missing shops, drop the hopeless orders
+  if not okm then K.log('warn', 'missing workshops: %s', tostring(errm)) end
   local wl = {}
   for label, n in pairs(oq.wsn) do wl[#wl + 1] = {label, n} end
   table.sort(wl, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)

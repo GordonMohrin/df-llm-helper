@@ -280,6 +280,11 @@ Related: FR-xx, BUG-xx
 | [BUG-264](BUG-264-well-waits-a-year-for-chain-or-rope.md) | fixed (offline, live-untested) | high | Run 15 Earthboat: the hospital well waited a year for a chain/rope, nothing produced one | lua/dfllm/water.lua |
 | [BUG-265](BUG-265-reach-zero-water-bodies-get-no-recipe.md) | fixed (offline, live-untested) | medium | Run 15 Earthboat: water bodies 10-29 tiles away with reach 0 got "a cistern" (ws_dig 8) | lua/dfllm/water.lua |
 | [BUG-266](BUG-266-dry-fortcore-well-not-named.md) | fixed (offline, live-untested) | medium | Run 15 Drillchamber: the dry fortcore well and its fill source were not named in HOSPITAL_DRY | lua/dfllm/water.lua, dfpilot/bp/fortcore.py |
+| [BUG-267](BUG-267-orders-wait-for-missing-workshops-nobody-asks.md) | fixed (offline, live-untested) | high | Run 15 Earthboat/Drillchamber: orders wait 344 days for a missing workshop, nobody asks for the shop | economy, wake |
+| [BUG-268](BUG-268-levers-never-linked-no-mechanisms-ordered.md) | fixed (offline, live-untested) | high | Run 15 Earthboat/Guildcleans: levers B2/O1 never linked, nobody counts or orders mechanisms | economy, trade |
+| [BUG-269](BUG-269-soil-fort-moods-miss-stone-and-gems.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: strange moods without stone or gems in a deep-soil fort | economy, trade |
+| [BUG-270](BUG-270-gear-misses-leatherworks-no-request.md) | fixed (offline, live-untested) | medium | Run 15 Earthboat: gear 'no leatherworks' and no workshop requested | economy, wake |
+| [BUG-271](BUG-271-hurt-counts-hungry-sleepy-dwarves.md) | fixed (offline, live-untested) | low | Run 15 Earthboat: inspect workload 'hurt 14' counts dwarves without a wound | economy |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

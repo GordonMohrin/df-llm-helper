@@ -148,6 +148,7 @@ L.KINDS = {
   shield = {t = {'SHIELD'}}, gloves = {t = {'GLOVES'}}, shoes = {t = {'SHOES'}}, pants = {t = {'PANTS'}},
   crossbow = {t = {'WEAPON'}, word = 'crossbow'}, pick = {t = {'WEAPON'}, word = 'pick'},
   axe = {t = {'WEAPON'}, word = 'axe'},
+  mechanism = {t = {'TRAPPARTS'}}, mechanisms = {t = {'TRAPPARTS'}},    -- BUG-268: lever links (2 a lever)
   crafts = {t = {'FIGURINE', 'AMULET', 'SCEPTER', 'CROWN', 'RING', 'EARRING', 'BRACELET', 'TOTEM', 'GOBLET',
                  'INSTRUMENT', 'TOY'}},
 }
@@ -155,7 +156,8 @@ L.KINDS = {
 L.CAPS = {default = 10, anvil = 1, bar = 20, cloth = 20, thread = 20, leather = 15, wood = 30, log = 30, logs = 30,
           block = 30, blocks = 30, seeds = 20, meat = 30, fish = 30, cheese = 30, egg = 20, meal = 30, food = 30,
           drink = 40, booze = 40, ammo = 100, bolt = 100, bolts = 100, gem = 10, gems = 10, weapon = 3, armor = 3,
-          helm = 3, shield = 3, gloves = 6, shoes = 6, pants = 3, crossbow = 3, pick = 2, axe = 2}
+          helm = 3, shield = 3, gloves = 6, shoes = 6, pants = 3, crossbow = 3, pick = 2, axe = 2,
+          mechanism = 8, mechanisms = 8}
 
 -- fibre kinds of cloth and thread (Run 10 y418: `cloth` bought 3 wool cloths while the merchants carried 40 rope reed
 -- cloths and a strange mood needed plant cloth): cloth:plant / thread:plant = material flag THREAD_PLANT, :silk = SILK,
@@ -897,9 +899,10 @@ end
 -- Run 11 (Kilrudrabed: 2 picks for the Miners, 1 bar): economy.trade_wants' buy tokens (picks) after the moods' ones,
 -- capped at the units economy misses; a plan token with the same text lifts that cap to the kind's default. Run 11
 -- (bars 0 for ten years, the caravans never asked for iron): a want economy marks `metal` (metal short for the
--- soldiers: bars, metal gear, picks, axes) is capped at its units up to METAL_CAP, not the kind's default
-local function econ_tokens(K, known, want, by)
-  local ok, list = K.call('economy', 'trade_wants')
+-- soldiers: bars, metal gear, picks, axes) is capped at its units up to METAL_CAP, not the kind's default. BUG-268/269:
+-- economy.supply_wants (mechanisms for the levers; stone and gems in a soil fort) the same way, after them
+local function econ_tokens(K, known, want, by, fn)
+  local ok, list = K.call('economy', fn or 'trade_wants')
   if not ok or type(list) ~= 'table' then return end
   for _, e in ipairs(list) do
     local tk = type(e) == 'table' and type(e.buy) == 'string' and e.buy ~= '' and L.token(e.buy, known)
@@ -939,6 +942,7 @@ local function wants(K)
   local known = function(n) return df.item_type ~= nil and df.item_type[n] ~= nil end
   local want, by = mood_tokens(K, known)
   econ_tokens(K, known, want, by)
+  econ_tokens(K, known, want, by, 'supply_wants')
   for _, tk in ipairs(L.tokens(w, known)) do
     local m = by[tk.src]
     if m then m.cap = math.max(m.short and m.cap or 0, tk.cap) else want[#want + 1] = tk end
