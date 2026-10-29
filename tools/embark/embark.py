@@ -6,7 +6,7 @@
     python tools/embark/embark.py embark WX,WY[,LX,LY] [--waive ID ...] [--accept ID ... --reason TEXT]
                                         [--play-now] [--allow-unspent]
     python tools/embark/embark.py prep [--play-now] [--allow-unspent]
-    python tools/embark/embark.py load SAVE [--entry TEXT] [--no-stock]    (K2: a saved fort from the title screen)
+    python tools/embark/embark.py load SAVE [--entry TEXT] [--no-stock] [--world-folder F]   (K2: a saved fort)
 
 A run costs ONE dfhack-run call (`embark.lua run <spec>`); afterwards only
 <DF>/dfllm-runtime/embark/status.json is read. Stdlib only. Env DFLLM_DF = DF folder.
@@ -65,7 +65,7 @@ def parse_site(text: str) -> list[int]:
 def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None, cands=None, site=None,
               waive=(), accept=(), reason: str | None = None, play_now: bool = False, allow_unspent: bool = False,
               tiles: bool | None = None, now: float | None = None, save: str | None = None,
-              entry: str | None = None, stock: bool = True) -> dict:
+              entry: str | None = None, stock: bool = True, world_folder: str | None = None) -> dict:
     spec = {"v": 2, "id": run_id or f"{mode}{int(now if now is not None else time.time())}", "mode": mode}
     if mode == "load":
         name = " ".join(str(save or "").split())
@@ -75,6 +75,11 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
         if entry:
             spec["entry"] = " ".join(str(entry).split())[:80]
         spec["stock"] = bool(stock)
+        if world_folder:   # BUG-230: which of several same-named worlds holds the save (a folder from the header list)
+            wf = " ".join(str(world_folder).split())
+            if not wf or "/" in wf or "\\" in wf or wf in (".", ".."):
+                raise ValueError(f"--world-folder needs a folder name (no path): {world_folder!r}")
+            spec["world_folder"] = wf
     elif mode == "newgame":
         spec["world"] = world or "Zilirr"
     elif mode == "scan":
@@ -184,8 +189,19 @@ def load_lines(res: dict) -> list[str]:
     for c in res.get("clicks") or []:
         out.append(f"  click {c.get('n')}: {c.get('kind')} \"{c.get('text')}\" tile {c.get('tx')},{c.get('ty')} "
                    f"pixel {c.get('px')},{c.get('py')}")
-    if res.get("title"):
-        out.append("  title screen fields: " + json.dumps(res["title"], sort_keys=True))
+    for sc in res.get("scrolls") or []:
+        out.append(f"  scrolled the {sc.get('which')} list to {sc.get('to')} (entry {sc.get('idx')})")
+    title = res.get("title")
+    if isinstance(title, dict) and title:
+        flat = {k: v for k, v in title.items() if not isinstance(v, (list, dict))}
+        out.append("  title screen fields: " + json.dumps(flat, sort_keys=True))
+        for key in ("worlds", "games"):   # BUG-230: the header lists (folder = what --world-folder / SAVE name)
+            rows = title.get(key)
+            if isinstance(rows, list) and rows:
+                shown = ", ".join(f"{i + 1}:{r.get('folder')}={r.get('world') or r.get('fort') or '?'}"
+                                  for i, r in enumerate(rows[:12]) if isinstance(r, dict))
+                more = f" (+{len(rows) - 12})" if len(rows) > 12 else ""
+                out.append(f"  {key}: {shown}{more}")
     if res.get("rows"):
         out.append(f"  last screen ({res.get('screen')}): {res['rows']}")
     return out
@@ -215,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("save", help="the save folder name, e.g. 'autosave 1'")
     sp.add_argument("--entry", help="the text to click in the list when it does not show the folder name")
     sp.add_argument("--no-stock", action="store_true", help="do not try DFHack's own load-save first")
+    sp.add_argument("--world-folder", help="BUG-230: the world (its folder in the header list) when several worlds "
+                                           "share a name and the run cannot tell which one holds SAVE")
     sp = sub.add_parser("newgame")
     sp.add_argument("--world", default="Zilirr", help="ASCII part of the world name (accents read as '?')")
     sp = sub.add_parser("scan")
@@ -253,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
                          tiles=(True if getattr(a, "tiles", False) else False if getattr(a, "no_tiles", False)
                                 else None),
                          save=getattr(a, "save", None), entry=getattr(a, "entry", None),
-                         stock=not getattr(a, "no_stock", False))
+                         stock=not getattr(a, "no_stock", False), world_folder=getattr(a, "world_folder", None))
     except ValueError as e:
         ap.error(str(e))
     log_accept(spec, out)

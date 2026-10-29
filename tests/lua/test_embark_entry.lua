@@ -15,8 +15,33 @@ local OUT = tmp .. '/dfllm-runtime/embark'
 local SKILL_IDS = {MINING = 0, WOODCUTTING = 1, CARPENTRY = 2, ENGRAVE_STONE = 3, MASONRY = 4, BREWING = 5,
   PLANT = 6, MECHANICS = 7, COOK = 8, DIAGNOSE = 9, SURGERY = 10, SET_BONE = 11, SUTURE = 12}
 
+-- BUG-228: a minimal gui.Screen/defclass so embark.lua builds its mouse injector; the pump then runs the shown
+-- injector's logic and render once per frame, as DF does for the top screen
+local function screen_api(scr)
+  local Screen = {}
+  Screen.__index = Screen
+  function Screen:show() self._native = {parent = scr} end
+  function Screen:dismiss()
+    if not self._native then return end
+    self._native = nil
+    if self.onDismiss then self:onDismiss() end
+  end
+  function Screen:renderParent() end
+  function Screen:sendInputToParent() end
+  _G.defclass = function(_, parent)
+    local C = setmetatable({}, {__index = parent, __call = function(cls, attrs)
+      return setmetatable(attrs or {}, {__index = cls})
+    end})
+    C.ATTRS = function() end
+    return C
+  end
+  return Screen
+end
+
 -- install fake globals for one fake DF `D`; returns the frame pump
-local function install(D)
+-- opt.screens: install gui.Screen/defclass (the mouse injector exists); opt.enabler: df.global.enabler
+local function install(D, opt)
+  opt = opt or {}
   local timers, lines = {}, nil
   local writes = {}
   local function cs_screen() return D.source().cs() ~= nil end
@@ -29,6 +54,7 @@ local function install(D)
       if k == 'zoomed_in' then return cs.zoomed_in end
       if k == 'choosing_embark' then return cs.choosing_embark end
       if k == 'doing_site_finder' then return false end
+      if k == 'logic' then return function() end end   -- the injector runs the native logic (embark.lua Inj:onIdle)
       if k == 'location' then
         local m, x, r = D.rect()
         r, m, x = r or {-1, -1}, m or {-1, -1}, x or {-1, -1}
@@ -61,7 +87,9 @@ local function install(D)
   for n, id in pairs(SKILL_IDS) do attrs[id] = {caption = F.CAPTION[n]} end
   local job_skill = {attrs = attrs}
   for n, id in pairs(SKILL_IDS) do job_skill[n] = id end
-  _G.df = {global = {gps = gps}, job_skill = job_skill,
+  _G.defclass = nil
+  _G.dfllm_embark_inj = nil
+  _G.df = {global = {gps = gps, enabler = opt.enabler}, job_skill = job_skill,
     viewscreen_choose_start_sitest = {is_instance = function(_, s) return s == scr and cs_screen() end},
     viewscreen_setupdwarfgamest = {is_instance = function(_, s) return s == scr and prep_screen() end}}
   _G.dfhack = {
@@ -81,7 +109,7 @@ local function install(D)
   package.loaded.gui = {simulateInput = function(s, keys)
     assert(s == scr)
     D.env.sim(keys)
-  end}
+  end, Screen = opt.screens and screen_api(scr) or nil}
   local chunk = assert(loadfile(repo .. '/tools/embark/embark.lua'))
   local function cmd(...) return chunk(...) end
   local function pump(max)
@@ -89,6 +117,10 @@ local function install(D)
     while #timers > 0 and n < (max or 100000) do
       local cb = table.remove(timers, 1)
       cb()
+      local inj = rawget(_G, 'dfllm_embark_inj')
+      if inj and inj._native then inj:onIdle() end
+      inj = rawget(_G, 'dfllm_embark_inj')
+      if inj and inj._native then inj:render() end
       D.ms = D.ms + 20
       D.tick()
       n = n + 1
@@ -197,6 +229,64 @@ T.test('entry: a second run while one is active is refused; stop ends it', funct
   capture_print(function() cmd('stop') end)
   pump()
   T.eq(json.decode(slurp(OUT .. '/status.json')).state, 'stopped')
+end)
+
+-- BUG-228 (the cause of BUG-020): live, enabler.tracking_on dropped to 0 and DF ignored the injected mouse: the
+-- rectangle stuck and the panel stayed empty. The injector sets tracking_on = 1 while it is shown and restores
+-- the old value when it is dismissed.
+local function scan_spec(id)
+  prefs('[EMBARK_WARNING_ALWAYS:YES]' .. string.char(10))
+  luahost.mkdir_recursive(OUT)
+  local spec = OUT .. '/spec-' .. id .. '.json'
+  local f = assert(io.open(spec, 'wb'))
+  f:write(json.encode({v = 2, id = id, mode = 'scan', cands = {{8, 30}}}))
+  f:close()
+  return spec
+end
+
+T.test('BUG-228: the injector turns enabler.tracking_on on while shown; the scan places and reads the panel', function()
+  local enabler = {tracking_on = 0, mouse_focus = false}
+  local seen = {}
+  local D = F.new({screen = 'world', tracking = function()
+    seen[enabler.tracking_on] = true
+    return enabler.tracking_on == 1
+  end})
+  local cmd, pump = install(D, {screens = true, enabler = enabler})
+  capture_print(function() cmd('run', scan_spec('t3')) end)
+  pump()
+  local st = json.decode(slurp(OUT .. '/status.json'))
+  T.eq(st.state, 'done', st.msg .. ' / ' .. table.concat(st.log or {}, ' | '))
+  T.eq(st.results[1].emb, {134, 486})
+  T.ok((st.results[1].rec.read or 0) > 0, 'the panel was read')
+  T.ok(seen[1], 'tracking_on was 1 while the rectangle was placed')
+  T.eq(enabler.tracking_on, 0, 'the old value is back after the run')
+  T.eq(rawget(_G, 'dfllm_embark_inj'), nil, 'the injector is gone')
+end)
+
+T.test('BUG-228: a tracking_on of 1 before the run stays 1; no enabler field is no error', function()
+  local enabler = {tracking_on = 1, mouse_focus = false}
+  local D = F.new({screen = 'world', tracking = function() return enabler.tracking_on == 1 end})
+  local cmd, pump = install(D, {screens = true, enabler = enabler})
+  capture_print(function() cmd('run', scan_spec('t4')) end)
+  pump()
+  T.eq(json.decode(slurp(OUT .. '/status.json')).state, 'done')
+  T.eq(enabler.tracking_on, 1)
+end)
+
+T.test('BUG-228: a boolean tracking_on of false is set true while shown and restored to false', function()
+  local enabler = {tracking_on = false, mouse_focus = false}
+  local seen_true = false
+  local D = F.new({screen = 'world', tracking = function()
+    if enabler.tracking_on == true then seen_true = true end
+    return enabler.tracking_on == true
+  end})
+  local cmd, pump = install(D, {screens = true, enabler = enabler})
+  capture_print(function() cmd('run', scan_spec('t5')) end)
+  pump()
+  local st = json.decode(slurp(OUT .. '/status.json'))
+  T.eq(st.state, 'done', st.msg)
+  T.ok(seen_true, 'tracking_on was true while the rectangle was placed')
+  T.eq(enabler.tracking_on, false, 'false is back, not left on')
 end)
 
 -- remove the files written above

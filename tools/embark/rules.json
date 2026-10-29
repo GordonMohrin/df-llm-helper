@@ -1,6 +1,7 @@
 {"v": 2,
  "about": "DESIGN 5.1 site checklist (checklist.lua). World tiles, Chebyshev distance. old_sites are Gordon's earlier forts (his own history). dark_fortresses_seen is filled from the vanilla world map (dark fortress icons) or left empty; then the panel's Neighbors section and the 'invaded very early' popup are the only evidence; without them the criterion stays 'unknown' (verdict review; embark only with --waive dark_fortress).",
  "old_site_note": "L0 2026-10-10 (world Zilirreth/region2, 33x33): with old_site_min 10 the only tiles left (y>=24, or x<=5 with y>=20) were all hot/scorching, light/heavy aquifer and within 1/2 day of goblin sites or on a site ('Cannot embark'); about 90 rectangles scanned. 4 keeps the fort out of every old fort's tile and its 3 neighbours; goblin distance is judged from the Neighbors section (dark_fortress).",
+ "old_site_g_note": "BUG-229: an old site may give g = its global embark tile [x, y] (world_site.global_min_x/y, or the embark_pos_min its embark showed); the checklist then uses g // 16 as its world tile, the same frame as the scanned rectangle (emb_min // 16). Never take world_site.pos: live it was up to 2 tiles off (Questmetal pos 4,10, global_min 6,12). w is the hand-entered world tile, used only without g.",
  "dark_fortress_min": 10, "old_site_min": 3, "goblin_min_rank": 6,
  "old_sites": [
    {"name": "Cobalthoist (run 1)", "w": [24, 10]},
@@ -18,6 +19,7 @@
  "stone_note": "live L6 (Laborkings: light aquifer, soil down to z125): deep soil means no stone layer in the upper levels; the fort had no boulders for a year. Run 9 postmortem lesson 1: embark only where metal and a hard stone layer are within reach, read from the embark panel's layer lines (soil depth, stone layers, 'difficult to obtain stone'). The 'stone' criterion fails for these soil depths and the 'ore' criterion fails when no metal is listed; accept a failure only with embark.py --accept ID --reason TEXT (FR-08).",
  "stone_fail_soil": ["deep", "very_deep", "extremely_deep"],
  "sizes": [[3, 3], [4, 4]],
- "fail_popups": ["heavy_aquifer", "salt_water", "evil", "savage", "necro", "early_invasion", "no_stone", "cannot"],
+ "fail_popups": ["heavy_aquifer", "salt_water", "evil", "savage", "necro", "early_invasion", "no_stone", "cannot",
+                 "water_mountain"],
  "warn_popups": ["light_aquifer", "dead_civ", "narrow", "smallest", "large", "very_large", "largest", "hard",
                  "few_resources", "unpleasant", "wildlife"]}

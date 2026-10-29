@@ -302,8 +302,12 @@ local function merge_tiles(rec, tiles)
   rec.stone_soil = rec.soil
   local near = {}
   for _, n in ipairs(rec.neighbors or {}) do near[n.race] = n end
-  local nw, nt = 0, 0
+  local nw, nt, nmw, nter = 0, 0, 0, 0
   for _, t in ipairs(tiles) do
+    if t.terrain then   -- BUG-229: tiles whose biome DF does not embark on (mountain, lake, ocean)
+      nter = nter + 1
+      if t.terrain == 'mountain' or t.terrain == 'water' then nmw = nmw + 1 end
+    end
     for _, r in ipairs(t.rivers or {}) do
       if not seen_r[r] then seen_r[r] = true; rec.rivers[#rec.rivers + 1] = r end
     end
@@ -334,6 +338,7 @@ local function merge_tiles(rec, tiles)
   table.sort(nb, function(a, b) return (a.rank or 99) < (b.rank or 99) end)
   if #nb > 0 then rec.neighbors = nb end
   rec.tiles = {n = #tiles, water = nw, wood = nt}
+  if nter > 0 then rec.tiles.terrain, rec.tiles.mw = nter, nmw end
   return rec
 end
 S.merge_tiles = merge_tiles
@@ -436,8 +441,9 @@ function S.read_site(tag, ex, ey)
         if ctx.dump then ctx.dump('site-' .. tag .. '-panel', v) end
         -- live L0: on an existing site the panel says "Cannot embark on another site." and a
         -- click opens no popup: record the reject without clicking
+        -- BUG-229: "Cannot embark entirely on water or mountains." is the same kind of refusal
         for _, wid in ipairs(rec.warnings) do
-          if wid == 'cannot' then ui:release() return record(ctx, tag, v, rec) end
+          if S.REFUSED[wid] then ui:release() return record(ctx, tag, v, rec) end
         end
         -- give the focus back NOW, in the frame whose capture showed the target: unfocused, the
         -- rectangle stays where it is (live L0); a later unfocus could catch a render frame
@@ -452,6 +458,9 @@ function S.read_site(tag, ex, ey)
         return nil, 'opening the popup'
       end
       if not cell(v, 'Confirm') then
+        -- BUG-229: DF answers the click with its refusal instead of the popup: record the reject, no retry
+        local ref = ok and S.refusal(v)
+        if ref then return record(ctx, tag, v, merge_popup(mem.panel, {warnings = {ref}})) end
         mem.wait_pop = (mem.wait_pop or 0) + 1
         if mem.wait_pop > 20 then return restart('no popup after the click') end
         return 'wait', 'waiting for the popup'
@@ -464,6 +473,15 @@ function S.read_site(tag, ex, ey)
       return record(ctx, tag, v, merge_popup(mem.panel, panel.parse(v)))
     end,
     done = function() return false, 'reading' end}
+end
+
+-- BUG-229: the warnings that mean DF refuses the rectangle (no popup follows a click there)
+S.REFUSED = {cannot = true, water_mountain = true}
+function S.refusal(v)
+  for _, wid in ipairs(panel.parse(v).warnings) do
+    if S.REFUSED[wid] then return wid end
+  end
+  return nil
 end
 
 -- close the popup with its own Abort (scan: next candidate; never the bottom-bar Abort)

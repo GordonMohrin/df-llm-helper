@@ -100,6 +100,34 @@
   bars:INORGANIC:IRON` with d.kind input, d.n = the count. (c) An explore queued through a level in manifest.caverns logs
   `cavern level zN known ... the shaft stops at zN+1` when it starts; no BREACH_STOP/CAVERN_PLUG for it. (d) `grep -c "monthly
   audit waits for snapshot <id>" kern.log` = 1 per id.
+## Live round 4 embark fixes: tracking_on (cause of BUG-020), water/mountain rectangles, old sites by global tile, same-named worlds and list scrolling (BUG-228..230, 2026-10-29; offline, live-untested)
+- **Why:** the Run 15 embark on i2 (tools/embark findings): the rectangle ignored the injected mouse and the panel stayed empty
+  because `enabler.tracking_on` had dropped to 0, so the embark was done by hand clicks (BUG-228, the cause of BUG-020); the
+  site finder's matches can lie entirely on water or mountains, which DF refuses, and scan had no criterion for it; world_site.pos
+  was 2 tiles off the real world tile (Questmetal pos 4,10, global_min 6,12) (BUG-229); the title-screen loader could not tell
+  two same-named worlds apart and never scrolled a list (BUG-230).
+- **What changed:** (1) embark.lua `W.track`: the mouse injector sets `tracking_on = 1` in its render and logic frames and
+  restores the old value on dismiss and in `W.release_all` (BUG-228). (2) panel.lua reads DF's refusal "Cannot embark entirely
+  on water or mountains." as `water_mountain` and the biome line (`P.BIOMES`, terrain mountain/water/land); merge_tiles counts the
+  terrain; checklist criterion `terrain` (refusal or 16 mountain/water tiles fail, partial reads warn; not waivable); site.read
+  records the refusal on the panel without a click and the refusal shown instead of the popup after a click. Old sites may give
+  `g` (global embark tile = world_site.global_min); `checklist.site_world` uses `g // 16` (BUG-229). (3) embark.lua reads the
+  title screen's header lists (`savegame_header_world/_game/` and all saves: folder = filename_noext, world_name, fort_name) and
+  the two list scroll positions; `W.scroll` writes only those scroll fields. loadsave.lua finds the save's row by its folder,
+  counts same-labelled rows from the scroll position, scrolls an entry outside the visible rows to the top, opens same-named
+  worlds in turn (Esc back when the game list lacks the save) or the one named by `--world-folder` (embark.py, embark.lua) (BUG-230).
+- **Safety:** fair play unchanged in kind: new UI-state writes are `enabler.tracking_on` only while the injector is shown
+  (restored) and the two list scroll positions on the title screen (= the mouse wheel), listed in tools/embark/README.md §1;
+  reads stay visible UI (the title screen's own list headers). No kernel, contract, config key or RULES change. Risks: the
+  header field names (`filename_noext`, `world_name`, `fort_name` on the savegame header) come from the dfhack.dll reflection
+  strings, not a live read; a missing one falls back to the text-only path. Biome captions are exact DF 53.16 strings.
+- **Tests (each fails on 5e9e719):** tests/lua/test_embark_entry.lua (BUG-228 x3), tests/lua/test_embark.lua (BUG-229 x4),
+  tests/lua/test_loadsave.lua (BUG-230 x5), tests/lua/test_loadsave_entry.lua (BUG-230 entry), tests/test_embark.py (BUG-228..230).
+- **Live check:** (a) embark world map, DF unfocused: `python tools/embark/embark.py scan 12,6` places the rectangle and the
+  row has panel facts (no "does not follow the mouse", no `panel` fail); afterwards the rectangle follows the real mouse again.
+  (b) `embark.py scan WX,WY --tiles` on an all-mountain finder match: `reject`, `fail=terrain`, the run goes on. (c) At the title
+  screen with two same-named worlds: `embark.py load "<save of the second world>" --no-stock` ends `LOAD OK`, prints the
+  `worlds:` list and, for a save below the visible rows, `scrolled the game list to N`.
 
 ## Live round 3 plan fixes: propose = check, core stages placeable, fresh fort, order libraries (BUG-195..198, 2026-10-29; offline, live-untested)
 - **Why:** live round 3 and its skeptic: on Trussroads `plan propose` drafted fortcore@same stage 2 that `plan check` refused
