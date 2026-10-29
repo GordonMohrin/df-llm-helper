@@ -326,12 +326,18 @@ T.test('fishers: food short and a fishing zone -> one per 15 citizens (max 3); n
   T.eq(#ctl5.wd.assigned_units, 2, 'Run 10: fishers the player put in stay in PEACE')
 end)
 
-T.test('fishers leave at once outside PEACE/RECOVERY (they stand at the water outside the walls)', function()
+T.test('fishers leave at once in a siege (they stand at the water outside the walls); BUG-326: an ALERT or a DRILL ' ..
+       'keeps them', function()
   local W, ctl = fish_world{cit = 53, fishers = {1, 2, 3}}
   settle(W)
   days(W, 1)
   T.eq(#ctl.wd.assigned_units, 3)
-  W.set_mode('ALERT')
+  for _, m in ipairs({'ALERT', 'DRILL'}) do
+    W.set_mode(m)
+    days(W, 4)
+    T.eq(#ctl.wd.assigned_units, 3, 'old code: off at once in ' .. m)
+  end
+  W.set_mode('SIEGE')
   days(W, 1)
   T.eq(#ctl.wd.assigned_units, 0, 'off the detail in the next run, not after shrink_days')
 end)

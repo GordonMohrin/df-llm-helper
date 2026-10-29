@@ -62,7 +62,7 @@ M.KEEP = 5
 M.RESTORE_MAX = 1200     -- BUG-251: the drill's bridges must be down this many ticks after the measurement, else PEACE anyway
 local R1_CAP = 55
 
-local st      -- persisted m.drill: {v, t0, why, try, siege}
+local st      -- persisted m.drill: {v, t0, why, try, siege, ..., sh (BUG-326 supply samples)}
 local rec     -- persisted `drill`: {v, streak_fail, last = [...]}
 local rt      -- runtime: boot tick, ending flag, home0/home (outside citizens' entry distance at T0 / T+1,100)
 
@@ -417,14 +417,42 @@ end
 -- hunters off their detail, reason 'mode DRILL'): no automatic drill while economy's supply alarm is set (thirst, hunger,
 -- drink or food days) or food or drink stands below SUPPLY_MIN days; the reason is the hold ('supply: food 9 d', state
 -- ready.dhold). The player's `drill` stays his choice.
-M.SUPPLY_MIN = {food_d = 30, drink_d = 30}
+-- BUG-326 (Run 15c Inkintense y376 win d59: 'auto: retry' at food 35-42 d, #1714, and again at food 31 -> 24 d, #1883;
+-- each drill took hunters and fishers off): 30 days was too low. No automatic drill below SUPPLY_MIN (60) days, nor while
+-- that stock is falling (lower than the oldest of the daily samples over SUPPLY_TREND days) below SUPPLY_FALL days
+-- ('supply: food falls 80 d').
+M.SUPPLY_MIN = {food_d = 60, drink_d = 60}
+M.SUPPLY_FALL = 120
+M.SUPPLY_TREND = 7
+local SUPPLY_KEYS = {'food_d', 'drink_d'}
+
+-- BUG-326: one sample of the food and drink days a game day (st.sh, persisted, at most SUPPLY_TREND + 1)
+function M.supply_sample(K, now)
+  local s = K.view().stock
+  if type(s) ~= 'table' then return end
+  local h = type(st.sh) == 'table' and st.sh or {}
+  local last = h[#h]
+  if last and now >= (int(last.t) or 0) and now - (int(last.t) or 0) < M.DAY then return end
+  if last and now < (int(last.t) or 0) then h = {} end            -- an older save: the trend starts again
+  h[#h + 1] = {t = now, f = int(s.food_d), d = int(s.drink_d)}
+  while #h > M.SUPPLY_TREND + 1 do table.remove(h, 1) end
+  st.sh = h
+  save(K)
+end
+
 function M.supply_hold(K)
   local ok, why = K.call('economy', 'alarm')
   if ok and type(why) == 'string' and why ~= '' then return cut('supply: ' .. why, 24) end
   local s = K.view().stock
-  for _, k in ipairs({'food_d', 'drink_d'}) do
+  local h = type(st.sh) == 'table' and st.sh or {}
+  for _, k in ipairs(SUPPLY_KEYS) do
     local v = type(s) == 'table' and int(s[k]) or nil
-    if v and v < M.SUPPLY_MIN[k] then return cut(string.format('supply: %s %d d', k:sub(1, -3), v), 24) end
+    local name = k:sub(1, -3)
+    if v and v < M.SUPPLY_MIN[k] then return cut(string.format('supply: %s %d d', name, v), 24) end
+    local old = h[1] and int(h[1][k:sub(1, 1)])
+    if v and old and #h >= 2 and v < old and v < M.SUPPLY_FALL then
+      return cut(string.format('supply: %s falls %d d', name, v), 24)
+    end
   end
   return nil
 end
@@ -501,7 +529,8 @@ function M.init(K)
   st = {v = 2, t0 = int(p.t0), why = p.why, try = int(p.try), siege = int(p.siege), ref = int(p.ref),
         rrec = type(p.rrec) == 'table' and p.rrec or nil, refp = int(p.refp),
         rs = int(p.rs), rl = type(p.rl) == 'table' and p.rl or nil,                 -- BUG-251: the restore phase
-        res = type(p.res) == 'table' and type(p.res.msg) == 'string' and type(p.res.d) == 'table' and p.res or nil}
+        res = type(p.res) == 'table' and type(p.res.msg) == 'string' and type(p.res.d) == 'table' and p.res or nil,
+        sh = type(p.sh) == 'table' and p.sh or nil}                                 -- BUG-326: the supply trend
   local d = K.persist.get('drill')
   rec = {v = 2, streak_fail = 0, last = {}}
   if type(d) == 'table' then
@@ -534,6 +563,7 @@ end
 function M.step(K, budget, ctx)
   local now = K.now().tick
   local mode = K.mode()
+  M.supply_sample(K, now)                         -- BUG-326
   if st.rs then
     if mode ~= 'DRILL' then M.restore_end(K, now, 'mode ' .. mode) else restore_step(K, now) end
     return

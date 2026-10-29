@@ -199,7 +199,8 @@ T.test('leather: hunters only with bolts; no catch for 10 days -> 20 days off; b
   T.eq(eco_warns(W2), {})
 end)
 
-T.test('hunters leave the detail at once when the fort leaves PEACE (MODE rushes the run); no famine hunt in a siege', function()
+T.test('hunters leave the detail at once in a siege (MODE rushes the run); no famine hunt in a siege (BUG-326: an ALERT ' ..
+       'keeps them)', function()
   local function hw(opts)
     local W, ctl = world{phase = 'P1', wood = 100, mode = opts.mode, food = opts.food, shops = {'Craftsdwarfs', 'Tanners'},
                          setup = function(W, ctl)
@@ -223,14 +224,17 @@ T.test('hunters leave the detail at once when the fort leaves PEACE (MODE rushes
   days(W, 1)
   T.eq(#ctl.wds.Hunters.assigned_units, 1, 'PEACE, bone/leather short: one hunter')
   W.K.set_mode('ALERT', 'test')
-  T.eq(ctl.E.every.ticks, 100, 'leaving PEACE with a hunter out: the next run within rush_ticks')
+  W.run(150, {skip = 50}); settle(W)
+  T.eq(#ctl.wds.Hunters.assigned_units, 1, 'BUG-326: an ALERT keeps the hunter')
+  W.K.set_mode('SIEGE', 'test')
+  T.eq(ctl.E.every.ticks, 100, 'a siege with a hunter out: the next run within rush_ticks')
   W.run(150, {skip = 50}); settle(W)
   T.eq(#ctl.wds.Hunters.assigned_units, 0, 'off the detail at once, not after shrink_days')
   local off
   for _, e in ipairs(W.find_events('WORK_DETAIL')) do if e.d.detail == 'Hunters' and e.d.on == 0 then off = e end end
-  T.ok(off and off.d.why == 'mode ALERT', 'reason logged')
+  T.ok(off and off.d.why == 'mode SIEGE', 'reason logged')
   days(W, 2)
-  T.eq(#ctl.wds.Hunters.assigned_units, 0, 'none while not in PEACE')
+  T.eq(#ctl.wds.Hunters.assigned_units, 0, 'none while the siege lasts')
   -- famine: hunters in PEACE (and RECOVERY), never while invaders are about
   local W2, ctl2 = hw{mode = 'SIEGE', food = 1}
   days(W2, 2)
