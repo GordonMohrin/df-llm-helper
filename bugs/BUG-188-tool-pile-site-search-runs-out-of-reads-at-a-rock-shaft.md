@@ -13,7 +13,7 @@ within 12). The members' area at 44,92,129 had a site within 300 reads. A failur
 - `pile_site`: budget `max(pile_reads, (2R+w)*(2R+h))`; the reason names the centre (`... within 12 tiles of job 46,75,122`).
 - `M.pile_centres`: open jobs with plain floor in their 3x3 (at most 2, a shaft in raw rock has none), then the members, the stockpile the tools sit
   in (`take`), the first loose tool; at most `M.PILE_CENTRES` (4). `T.toolpile` tries them in order; the placement log says `searched from <by> x,y,z`.
-- A `nosite` result is tried again after `M.PILE_RETRY_DAYS` (1) instead of `pile_every`; the same reason again logs at debug.
+- A `nosite` result is tried again after `M.PILE_RETRY_DAYS` (1) instead of `pile_every`; while it keeps failing it warns once per `pile_every` (`p.tpile.wt`) and logs the daily retries at debug (review: the reason names the centres, and a member centre moves daily).
 
 ## Tests
 `tests/lua/test_economy_tools_b128.lua` BUG-188 (centre skips a no-floor job, site at ring 10 with pile_reads 300, reason names the centre);

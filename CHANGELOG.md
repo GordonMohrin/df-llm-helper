@@ -11,7 +11,7 @@
   CHIEF_MEDICAL_DWARF (BUG-186). (3) TOOL_BLOCKED bk `patient` before `jobs`; `M.tool_long_patient` (patient and without the tool for block_days):
   the kernel's own member goes (WORK_DETAIL why `patient`), a player's stays uncounted (`d.g` `patient members not counted N`), a healthy
   candidate joins (BUG-187). (4) `pile_site` budget `max(pile_reads, (2R+w)*(2R+h))`, `M.pile_centres` (jobs with floor beside them, members,
-  the tools' stockpile, a loose tool), reasons and the placement log name the centre, `nosite` retries after 1 day, a repeat logs at debug (BUG-188).
+  the tools' stockpile, a loose tool), reasons and the placement log name the centre, `nosite` retries after 1 day, a failing search warns once per `pile_every`, its daily retries log at debug (BUG-188).
 - **Contracts:** no new field; TOOL_BLOCKED `bk` gains the value `patient` (CONTRACTS §TOOL_BLOCKED text, RULES TOOL_BLOCKED row edited in place).
 - **Tests (fail on b805745):** tests/lua/test_care_live_i4.lua BUG-185; tests/lua/test_economy_tools_b128.lua BUG-186, BUG-187 (3), BUG-188;
   tests/lua/test_economy_tools_a3.lua BUG-188 retry, and the BUG-053 "logged once" test counts warn lines.

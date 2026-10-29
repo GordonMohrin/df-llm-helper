@@ -268,6 +268,30 @@ T.test('BUG-053: no revealed floor near the mines: no pile, the reason is kept a
   T.ok(nd > 0, 'BUG-188: the daily retries of the same reason log at debug only')
 end)
 
+T.test('BUG-188 review: members that move every day (a new centre in the reason) still warn only once per pile_every',
+       function()
+  local W, ctl = world{miners = {1, 2, 3, 4, 5, 6}, picks = 20, dig = 14}
+  FLOOR.x1 = 41
+  for d = 1, 10 do
+    for i = 1, 6 do W.unit(i).pos = {x = 30 + d, y = 40 + i, z = 5} end
+    days(W, 1)
+  end
+  FLOOR.x1 = 80
+  T.eq(#ctl.piles, 0)
+  local n, whys = 0, {}
+  for _, l in ipairs(W.logs) do
+    local m = tostring(l.msg)
+    if m:find('tool pile: no site', 1, true) then
+      whys[m] = true
+      if l.level ~= 'debug' then n = n + 1 end
+    end
+  end
+  local nw = 0
+  for _ in pairs(whys) do nw = nw + 1 end
+  T.ok(nw > 1, 'the reason text changed as the members moved')
+  T.eq(n, 1, 'one warn line, the retries at debug')
+end)
+
 T.test('BUG-188 (live i4: a failed search waited pile_every 28 days): a search without a site is tried again the next '
        .. 'day, and the reason names the centre searched', function()
   local W, ctl = world{miners = {1, 2, 3, 4, 5, 6}, picks = 20, dig = 14}

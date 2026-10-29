@@ -8703,8 +8703,12 @@ function T.toolpile(K, c, r)
     end
   else
     out.state, out.why = 'nosite', tostring(why):sub(1, 120)
-    -- a daily retry logs the same reason at debug only (cadence: a repeat is no news)
-    K.log((rec.state == 'nosite' and rec.why == out.why) and 'debug' or 'warn', 'tool pile: no site: %s', tostring(why))
+    -- a daily retry logs at debug only: warn once per pile_every while it keeps failing (the reason names the centres,
+    -- and a member centre moves every day, so comparing the text alone would warn daily)
+    local wt = rec.state == 'nosite' and math.tointeger(rec.wt) or nil
+    local warn = not wt or r.now - wt >= (tc.pile_every or 28) * DAY
+    out.wt = warn and r.now or wt
+    K.log(warn and 'warn' or 'debug', 'tool pile: no site: %s', tostring(why))
   end
   p.tpile = json.object(out)
   return true
