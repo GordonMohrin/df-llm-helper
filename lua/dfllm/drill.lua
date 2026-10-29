@@ -351,6 +351,24 @@ local function retry_wait()
   return w
 end
 
+-- BUG-237 (Run 15 Guildcleans: O1 was never linked to a lever, 'needs 2 free reachable mechanisms, 1 found'; eight
+-- automatic drills about 100,000 ticks apart all failed 'up:O1', and each raised B1 with soldiers and citizens beyond it, who
+-- starved behind it): an outer/inner bridge without a linked lever fails every drill, so no automatic drill starts until it
+-- is linked ('no lever:O1'); BUG-236: nor while the player's `lever` hold keeps a bridge down ('lever hold B1'); BUG-235: nor
+-- while a STRANDED rescue holds one down ('stranded rescue'). kern.log names a new such reason once. Without the gate or
+-- siege module (tests) that check is skipped.
+function M.gate_held(K)
+  for _, name in ipairs(gate_bridges(K.manifest())) do
+    local ok, n = K.call('gate', 'linked', name)
+    if ok and n == 0 then return 'no lever:' .. name end
+  end
+  local okh, hb = K.call('gate', 'lever_hold')
+  if okh and type(hb) == 'string' then return 'lever hold ' .. hb end
+  local oks, rs = K.call('siege', 'rescue')
+  if oks and type(rs) == 'table' then return 'stranded rescue' end
+  return nil
+end
+
 -- why an automatic drill is due now (1st value), else why it is held (2nd value, <= 24 chars; FR-65 status)
 local function check(K, now)
   if st.t0 then return nil, 'running' end
@@ -364,6 +382,8 @@ local function check(K, now)
   if #gate_bridges(K.manifest()) == 0 then return nil, 'no bridges' end
   local gap = M.gap(K)                                      -- BUG-110: both roles, or no drill at all
   if gap then return nil, gap end
+  local held = M.gate_held(K)                               -- BUG-237, BUG-236, BUG-235
+  if held then return nil, held end
   local okm, mk = K.call('military', 'kpi')
   if not okm or type(mk) ~= 'table' then return nil, 'military?' end
   if (mk.soldiers or 0) == 0 then return nil, 'no soldiers' end
@@ -433,8 +453,14 @@ function M.step(K, budget, ctx)
     K.set_mode('PEACE', 'drill record lost')
     return
   end
-  local why = M.due(K, now)
+  local why, held = check(K, now)
   if why then M.start(K, 'auto: ' .. why) end
+  -- BUG-237: a bridge, lever hold or rescue that holds the automatic drills back is named in kern.log once per reason
+  local gh = (held and (held:find('^no lever:') or held:find('^lever hold ') or held == 'stranded rescue')) and held or nil
+  if gh ~= rt.gh then
+    rt.gh = gh
+    if gh then K.log('info', 'drill: automatic drills held: %s (a drill now would fail or lock citizens out)', gh) end
+  end
 end
 
 -- results for tests and inspect: streak, the last results (copies) and why a retry is held back

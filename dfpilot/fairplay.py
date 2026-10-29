@@ -204,6 +204,9 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif k == "giveup_wait":               # M3 (BUG-114): ticks without a pull after the give-up (doubled per give-up)
                 if not is_int(v, 600, 100800):
                     errs.append(f"{name}: gate.giveup_wait: int 600..100800 expected, got {v!r}")
+            elif k == "lever_hold_days":           # BUG-236: game days a player's `lever` down holds the bridge down
+                if not is_int(v, 0, 28):
+                    errs.append(f"{name}: gate.lever_hold_days: int 0..28 expected, got {v!r}")
             elif k == "manual":
                 if not isinstance(v, list) or len(v) > 32 or any(
                         not (is_int(x, 0, 2**31 - 1) or (isinstance(x, str) and re.match(schema.BRIDGE_RE, x)))

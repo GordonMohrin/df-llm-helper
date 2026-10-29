@@ -245,6 +245,10 @@ Related: FR-xx, BUG-xx
 | [BUG-228](BUG-228-embark-injector-leaves-tracking-on-off.md) | fixed (offline, live-untested) | medium | Run 15 embark: DF ignores the injected mouse while enabler.tracking_on is 0 (cause of BUG-020) | tools/embark |
 | [BUG-229](BUG-229-embark-scan-misses-water-mountain-rectangles-and-old-site-tiles.md) | fixed (offline, live-untested) | medium | Run 15 embark: scan passes all-water/mountain rectangles; old sites by world_site.pos | tools/embark |
 | [BUG-230](BUG-230-title-loader-same-named-worlds-and-no-scroll.md) | fixed (offline, live-untested) | medium | Run 15: title-screen loader cannot tell same-named worlds apart, never scrolls a list | tools/embark |
+| [BUG-234](BUG-234-refused-peace-rescue-raises-the-cutting-bridge.md) | fixed (offline, live-untested) | critical | Run 15 Guildcleans: a refused STRANDED rescue in PEACE wanted the bridge that cut citizens off from food up again | lua/dfllm/siege.lua |
+| [BUG-235](BUG-235-rescue-never-lowers-outer-bridges-in-peace.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the rescue never lowered an outer bridge and demanded a sealed outside even in quiet PEACE | lua/dfllm/siege.lua, lua/dfllm/gate.lua, lua/dfllm/drill.lua |
+| [BUG-236](BUG-236-player-lever-down-silently-overridden.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the player's lever down was accepted and then silently overridden | lua/dfllm/gate.lua |
+| [BUG-237](BUG-237-gate-cycles-up-down-with-drills-that-cannot-pass.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: B1 cycled up/down with automatic drills that could not pass (O1 without a lever) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
