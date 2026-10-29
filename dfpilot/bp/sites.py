@@ -238,7 +238,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     mk = _Pref(snap, points=marks)
     wet = _Pref(snap, lambda c: c in WET)
     rects = explore_rects(p) if tpl in mine.BUILD else footprint(tpl, p)
-    if tpl == "fortcore":
+    if tpl == "farms" and p.get("surface"):                 # BUG-297: plots on soil floor that stands already
+        cands = _surface_farms(snap, p, manifest)
+    elif tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
         cands = _dry(cands, manifest)                      # BUG-130: never again into a recorded breach
     elif tpl in mine.BUILD:
@@ -725,6 +727,68 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
                 why += f", soil {s}/{area} plot tiles" if soil_pts else ", soil unknown"
                 why += f", {top - az} levels below the top of Z4"
             out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, score), "box": box, "why": why})
+    return out
+
+
+SURFACE_NEAR = 12                     # BUG-297: a surface farm lies inside Z4 or within this many tiles of the entrance
+
+
+def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
+    """BUG-297 (Run 15c Inkintense y376: `bp sites farms --fresh` 0 ranked, the BUG-257 soil rule refused every undug site
+    and nothing else was offered; one plot for 50 citizens in a famine): farms p.surface = 1 sites. Every plot tile is a
+    revealed floor ('.') with a soil mark (the snapshot's revealed soil, as the vanilla UI shows it), nothing is dug; the
+    plot block lies inside a Z4 box (the walled fort, roofed: best) or within SURFACE_NEAR tiles of the fort entrance
+    (manifest `edge`, the tiles in front of the fortcore door) on the entrance's level, never on the attack path, the
+    military's tiles or a bridge (_keep_out), and overlaps no manifest room, workshop, depot, pit, station or stair."""
+    soil = {tuple(q) for q in (snap.get("marks") or {}).get("soil", []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    if not soil:
+        return []
+    at = _At(snap)
+    plots = plot_rects(p)
+    z4 = [tuple(b) for b in (manifest.get("zones") or {}).get("Z4", [])]
+    edge = [tuple(e) for e in manifest.get("edge") or [] if isinstance(e, (list, tuple)) and len(e) == 3]
+    keep = list(_keep_out(manifest))
+    keep += [tuple(r["bbox"]) for r in manifest.get("rooms", []) if isinstance(r, dict) and len(r.get("bbox") or []) == 6]
+    pts = [w.get("pos") for w in manifest.get("workshops", []) if isinstance(w, dict)]
+    pts += [manifest.get("depot"), manifest.get("pit")] + list((manifest.get("stations") or {}).values())
+    keep += [(q[0] - 1, q[1] - 1, q[2], q[0] + 1, q[1] + 1, q[2]) for q in pts if isinstance(q, list) and len(q) == 3]
+    for kind in ("civ", "mil"):
+        keep += [(s[0], s[1], s[2], s[0], s[1], s[3]) for s in (manifest.get("stairs") or {}).get(kind, []) if len(s) == 4]
+    keep += [(e[0] - 2, e[1] - 2, e[2], e[0] + 2, e[1] + 2, e[2]) for e in edge]     # the way in stays clear
+
+    def inside(b, box):
+        return box[0] <= b[0] and b[3] <= box[3] and box[1] <= b[1] and b[4] <= box[4] and box[2] <= b[2] <= box[5]
+
+    out = []
+    for (ax, ay, az) in sorted(soil):
+        for rot in range(4):
+            tiles, ok = [], True
+            for r in plots:
+                x0, y0, x1, y1 = _rot_rect(r[:4], ax, ay, rot)
+                for x in range(x0, x1 + 1):
+                    for y in range(y0, y1 + 1):
+                        if (x, y, az + r[4]) not in soil or at(x, y, az + r[4]) != ".":
+                            ok = False
+                            break
+                        tiles.append((x, y))
+                    if not ok:
+                        break
+                if not ok:
+                    break
+            if not ok or not tiles:
+                continue
+            box = (min(t[0] for t in tiles), min(t[1] for t in tiles), az, max(t[0] for t in tiles),
+                   max(t[1] for t in tiles), az)
+            if any(_overlap(box, k) for k in keep):
+                continue
+            roofed = any(inside(box, b) for b in z4)
+            d = min((box_dist(list(e), list(box)) for e in edge if e[2] == az), default=None)
+            if not roofed and (d is None or d > SURFACE_NEAR):
+                continue
+            score = 1000 - (0 if roofed else 200 + 5 * (d or 0))
+            where = "inside the fort (Z4)" if roofed else f"{d} tiles from the entrance"
+            out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, score), "box": box,
+                        "why": f"rot{rot}, surface farm on soil floor {where}, {len(tiles)} soil plot tiles, nothing dug"})
     return out
 
 

@@ -81,7 +81,9 @@ def test_state_slots_validate_with_wp6_keys(run):
     assert best["ready"]["lvl"] == 2 and best["ready"]["fail"] == ["metal<20%"]       # D-01 = B: option_a is gone
     assert best["ready"]["audit"]["ok"] == 1 and best["ready"]["audit"]["min_traps"] == 35
     assert 0 <= best["ready"]["drill_age"] <= 3000
-    assert best["pop"] == {"cit": 50, "adults": 50, "soldiers": 8, "cap": 60, "gate_cap": 60}
+    # BUG-293: the scenario's popcap.lower 60 is the player's ceiling, held until popcap.raise (food is fine)
+    assert best["pop"] == {"cit": 50, "adults": 50, "soldiers": 8, "cap": 60, "gate_cap": 60,
+                           "hold": "player 60 until popcap.raise"}
 
 
 def test_outbox_replies(run):

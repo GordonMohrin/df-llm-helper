@@ -43,7 +43,8 @@
   },
   "params": {
    "burrow": "Kern+",
-   "plots": 2
+   "plots": 2,
+   "surface": 0
   },
   "rot": 0,
   "site": "S1",

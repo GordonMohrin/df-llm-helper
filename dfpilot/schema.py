@@ -85,7 +85,7 @@ ACT = {
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
-    "burrow_tiles": ["seal"],
+    "burrow_tiles": ["seal", "runner"],          # BUG-298: runner widens a burrow for a seal piece outside it
     "popcap": ["readiness"],
     "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care", "traps"],
@@ -104,7 +104,7 @@ STATE_OWNERS = {
     "v": "kern", "seq": "kern", "ev": "kern", "t.*": "kern", "mode": "kern", "save": "kern", "k.*": "kern",
     "phase": "runner", "proj": "runner", "sched.*": "runner", "adopt.*": "runner",
     "pop.cit": "sense", "pop.adults": "sense", "pop.soldiers": "sense",
-    "pop.cap": "readiness", "pop.gate_cap": "readiness", "ready.*": "readiness",
+    "pop.cap": "readiness", "pop.gate_cap": "readiness", "pop.hold": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy",
@@ -852,7 +852,10 @@ VERB_ARGS: dict[str, Obj] = {
     "snapshot": Obj(opt={"bbox": BBOX, "purpose": Str(enum=["audit", "sites", "debug"])}),
     "audit": Obj(req={"snap": ID, "ok": Bool(), "fails": Arr(Str(maxbytes=80), hi=50), "min_traps": NAT,
                       "bypass": Bool(), "refuge_sep": Bool(), "civ_sep": Bool(), "caverns": Bool()}),
-    "popcap.lower": Obj(req={"cap": Int(0, 250)}),
+    "popcap.lower": Obj(req={"cap": Int(0, 250)}, opt={"until": Str(enum=["food", "raise"])}),
+    # BUG-293: lift the player's ceiling (and a famine hold); set it to exactly cap (raise or lower), held until a raise
+    "popcap.raise": Obj(),
+    "popcap.set": Obj(req={"cap": Int(1, 250)}),
     "tempo.lower": Obj(req={"fps": Int(10, 1000), "ttl_s": Int(1, 3600)}),
     "pause": Obj(req={"ttl_s": Int(1, 600)}, opt={"why": Str(maxbytes=200)}),
     "unpause": Obj(),
@@ -918,6 +921,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "bp.cancel": ("runner", None, False), "drill": ("drill", ["PEACE"], False),
     "snapshot": ("snapshot", None, False), "audit": ("readiness", None, False),
     "popcap.lower": ("readiness", None, False), "tempo.lower": ("arbiter", None, False),
+    "popcap.raise": ("readiness", None, False), "popcap.set": ("readiness", None, False),     # BUG-293
     "pause": ("arbiter", None, False), "unpause": ("arbiter", None, False),
     "resume": ("arbiter", None, False),
     "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
@@ -956,7 +960,8 @@ STATE = Obj(
                   opt={"disabled": Arr(MODULE), "ms_max": NAT, "top": Str(maxbytes=40)}),
          "ev": NAT},
     opt={"save": Str(maxbytes=120), "phase": PHASE,
-         "pop": Obj(opt={"cit": NAT, "adults": NAT, "soldiers": NAT, "cap": NAT, "gate_cap": NAT}),
+         "pop": Obj(opt={"cit": NAT, "adults": NAT, "soldiers": NAT, "cap": NAT, "gate_cap": NAT,
+                         "hold": Str(maxbytes=40)}),       # BUG-293: the player ceiling / famine hold that binds
          "ready": Obj(req={"lvl": Int(0, 3), "worn": PCT, "cv": NAT, "drill_age": Int(-1),
                            # BUG-043: why readiness' last audit request was refused; what the last audit covered
                            "audit": Obj(req={"ok": FLAG, "age": Int(-1), "min_traps": NAT},
@@ -1292,7 +1297,8 @@ SNAPSHOT = Obj(req={"v": Const(V), "id": ID, "tick": TICK, "purpose": Str(enum=[
                     "traps": Arr(TRAP)},
                # BUG-043: a union export lists its parts (the main box first; tiles outside every part are " "), a
                # default box its margin (x, y, z)
-               opt={"marks": Obj(extra=Arr(POS, hi=500), keys=r"^[a-z_]{1,20}$"),
+               # BUG-297: soil has its own cap (snapshot.lua CFG.soil_max 8000), every other mark list stays at 500
+               opt={"marks": Obj(opt={"soil": Arr(POS, hi=8000)}, extra=Arr(POS, hi=500), keys=r"^[a-z_]{1,20}$"),
                     "parts": Arr(BBOX, 1, 24), "margin": Tup([NAT, NAT, NAT])})
 
 

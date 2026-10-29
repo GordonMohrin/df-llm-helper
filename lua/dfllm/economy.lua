@@ -2578,6 +2578,12 @@ end
 -- leaving PEACE while hunters (or fishers) are out: the next run (tool details) within rush_ticks takes them off
 -- the detail, not up to a day later (drills check "nobody outside" at T+1,200)
 M.on.MODE = function(K, ev)
+  -- BUG-295: back in PEACE after a drill: the hunters and fishers the drill took off return at once (not in RECOVERY:
+  -- a drill that ended in a siege keeps them in until the fort is quiet again; p.drill_off waits for that PEACE)
+  if type(ev) == 'table' and ev.to == 'PEACE' and ev.from ~= ev.to then
+    local okd, nd = pcall(M.drill_restore, K)
+    if not okd then K.log('warn', 'drill restore of the tool details: %s', tostring(nd)) end
+  end
   if type(ev) ~= 'table' or ev.to == 'PEACE' or ((st.hunters or 0) == 0 and (st.fishers or 0) == 0) then return end
   st.rush = true
   local rt = M.conf(K).rush_ticks or 100
@@ -4279,6 +4285,7 @@ local function tools(K, c, p, inv, engine, r)
           while #stay + #out > tgt and #out > 0 do
             local u = table.remove(out)
             if not set(spec, u.id, false, why, tgt) then out[#out + 1] = u; break end
+            if at_once and K.mode() == 'DRILL' then M.drill_off_add(p, spec.name, u.id) end   -- BUG-295
             mine[u.id] = nil
           end
           cur = stay
@@ -4360,6 +4367,57 @@ local function tools(K, c, p, inv, engine, r)
     end
   end
   return changes
+end
+
+-- BUG-295 (Run 15c Inkintense y376: every automatic drill took both hunters off their detail, 'mode DRILL', #1408/#1409,
+-- #1492/#1493, and they came back only with the next full economy run 30,000-50,000 ticks later, in a famine): the members
+-- a DRILL took off (p.drill_off = {detail = {ids}}) go back on that detail as soon as the mode is PEACE or RECOVERY again
+-- (on.MODE), through the work details screen like any other add (act.work_detail), WORK_DETAIL why 'drill over'. A unit
+-- that died, joined a squad or is no adult any more stays off; the next tools pass decides about it as usual.
+function M.drill_off_add(p, name, id)
+  p.drill_off = json.object(type(p.drill_off) == 'table' and p.drill_off or {})
+  local l = type(p.drill_off[name]) == 'table' and p.drill_off[name] or {}
+  for _, x in ipairs(l) do if x == id then return end end
+  l[#l + 1] = id
+  p.drill_off[name] = json.array(l)
+end
+
+function M.drill_restore(K)
+  local p = pstate(K)
+  local off = type(p.drill_off) == 'table' and p.drill_off or nil
+  if not off or next(off) == nil then return 0 end
+  p.drill_off = nil
+  K.persist.touch('m.economy')
+  local c = M.conf(K)
+  local tc = type(c.tools) == 'table' and c.tools or {}
+  local n = 0
+  for _, spec in ipairs(tc.details or {}) do
+    local ids = off[spec.name]
+    for _, id in ipairs(type(ids) == 'table' and ids or {}) do
+      local u = math.tointeger(id) and df.unit.find(id)
+      if u and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) and u.military.squad_id < 0 then
+        local only = spec.only == true and not p.starve
+        local o = {only = only or nil, keep = only and tc.keep_labors or nil, equip = tc.equip_update == true or nil,
+                   select = spec.fish and true or nil}
+        if K.act.work_detail(spec.name, id, true, o) then
+          n = n + 1
+          if spec.ranged then st.hunters = (st.hunters or 0) + 1 elseif spec.fish then st.fishers = (st.fishers or 0) + 1 end
+          p.tools = json.object(type(p.tools) == 'table' and p.tools or {})
+          local ps = type(p.tools[spec.name]) == 'table' and p.tools[spec.name] or {}
+          local mine = type(ps.mine) == 'table' and ps.mine or {}
+          local has = false
+          for _, x in ipairs(mine) do if x == id then has = true end end
+          if not has then mine[#mine + 1] = id end
+          ps.mine = json.array(mine)
+          p.tools[spec.name] = json.object(ps)
+          K.emit('WORK_DETAIL', 'B', string.format('%s + %s (drill over, back from the drill)', spec.name, unit_name(id)),
+                 {detail = spec.name, unit = id, on = 1, n = #mine, why = 'drill over'})
+        end
+      end
+    end
+  end
+  if n > 0 then K.log('info', 'drill over: %d member%s back on the hunting/fishing details', n, n == 1 and '' or 's') end
+  return n
 end
 
 -- CONTRACTS Ã‚Â§7: the supply alarm, or nil (arbiter brakes tempo while it is set)
@@ -5203,8 +5261,12 @@ local function find_detail(names, labor)
 end
 
 -- who of the hungry cannot reach any food: unit ids (snapshot.reach to the census's food samples)
+-- BUG-299 (Run 15c Inkintense y376: '28 cannot reach food' at food 0 days while `inspect reach` put all 50 citizens and
+-- all 176 food items on one walk group): with no edible food lying free there is nothing to reach, so nobody is cut off;
+-- the starvation line says the stock is empty instead (T.starve)
 local function cut_off(K, ids)
   local samples, r = st.food_pos or {}, {}
+  if #samples == 0 then return r end
   for _, id in ipairs(ids) do
     local u = df.unit.find(id)
     local p = u and u.pos
@@ -6606,7 +6668,10 @@ function M.fish_bank(K, w)
   n = n + 1
   local oku, up = K.call('snapshot', 'tile', x, y, z + 1)
   if oku and type(up) == 'table' and not up.cav then
-    if up.c == '_' then
+    -- BUG-296 (Run 15c Inkintense: 164 water tiles on z132, 117 under a ramp top 'v' on z133, '160 no bank on the walk
+    -- group'): water that fills a ramp lies under the ramp's top, which is open like '_': a fisher stands on the floor
+    -- beside that top, one level up (DF lets a dwarf fish from a bank above the water)
+    if up.c == '_' or up.c == 'v' then
       for _, o in ipairs(M.N8) do
         if stand(x + o[1], y + o[2], z + 1) then
           return {water = {x, y, z}, bank = {x + o[1], y + o[2], z + 1}, up = true}, n
@@ -8676,6 +8741,61 @@ end
 -- CANCEL_JOB report near the tile, else the items on the tile, else no cause is readable). `line` is the one-line answer
 -- (SEAL_STUCK wait, PROJECT_BLOCKED parts, kern.log). The classes a planned building waits for carry what the fort has:
 -- free items of the class and the items its open piece orders still make (`piece_ord` = open / not validated).
+-- BUG-298 (Run 15c Inkintense y374-y376: the seal door 92,99,133 'not suspended, no builder has taken it' for years with
+-- 8-10 idle dwarves; the door lies outside Kern+ (y 30-73)): is the tile x,y,z outside the burrow the builders are kept
+-- to? A civil alert keeps every citizen in its burrows; a burrow's unit list keeps its members there. Read-only (the
+-- alerts screen, the burrows screen). {name, why = 'alert' | 'assigned', n, of, text} when the civil alert is on and the
+-- tile lies in none of its burrows, or when most free adult citizens (no soldier) are assigned to burrows that all lack
+-- the tile; else nil
+function M.burrow_out(K, x, y, z)
+  local pos = xyz2pos(x, y, z)
+  local function holds(bid)
+    local b = df.burrow.find(bid)
+    if not b then return true end                          -- unknown: no restriction claimed
+    return dfhack.burrows.isAssignedTile(b, pos) == true, dfhack.df2utf(b.name)
+  end
+  local al = df.global.plotinfo.alerts
+  local idx = math.tointeger(al.civ_alert_idx) or 0
+  if idx ~= 0 and al.list[idx] then
+    local first, inside = nil, false
+    for _, bid in ipairs(al.list[idx].burrows) do
+      local yes, name = holds(bid)
+      first = first or name
+      if yes then inside = true end
+    end
+    if not inside and first then
+      return {name = first, why = 'alert', text = string.format('outside the burrow %s (civil alert on)', first)}
+    end
+  end
+  local cu = K.census.u
+  local sold = {}
+  for _, id in ipairs(type(cu) == 'table' and cu.soldier_ids or {}) do sold[id] = true end
+  local free, kept, names = 0, 0, {}
+  for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do
+    local u = not sold[id] and df.unit.find(id)
+    if u and dfhack.units.isAdult(u) then
+      free = free + 1
+      local any, inside, name = false, false, nil
+      for _, bid in ipairs(u.burrows or {}) do
+        any = true
+        local yes, nm = holds(bid)
+        name = name or nm
+        if yes then inside = true end
+      end
+      if any and not inside then
+        kept = kept + 1
+        if name then names[name] = (names[name] or 0) + 1 end
+      end
+    end
+  end
+  if free == 0 or 2 * kept <= free then return nil end
+  local best, bn = nil, 0
+  for nm, c in pairs(names) do if c > bn or (c == bn and nm < best) then best, bn = nm, c end end
+  best = best or '?'
+  return {name = best, why = 'assigned', n = kept, of = free,
+          text = string.format('outside the burrow %s (%d of %d free citizens assigned to it)', best, kept, free)}
+end
+
 function M.build_state(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return nil end
@@ -8708,6 +8828,13 @@ function M.build_state(K, x, y, z)
   local head = string.format('job %s', tostring(rec.job))
   if not rec.susp then
     rec.line = rec.work and (head .. ' runs: a builder works at it') or (head .. ' not suspended, no builder has taken it')
+    if not rec.work then                                     -- BUG-298: the burrow the builders keep to
+      local okb, bo = pcall(M.burrow_out, K, x, y, z)
+      if okb and type(bo) == 'table' then
+        rec.burrow, rec.bwhy = bo.name, bo.why
+        rec.line = rec.line .. ': ' .. bo.text
+      end
+    end
     return rec
   end
   local sm, bp = plugin('suspendmanager'), plugin('buildingplan')
@@ -9699,14 +9826,16 @@ function T.starve(K, c, r)
   for i = 1, math.min(4, #cut) do names[#names + 1] = unit_name(cut[i]) end
   local fd = (r.days or {}).food_d or 0
   st.starve = {hungry = #sv.hungry, cut = cut, marked = sv.marked, added = sv.added, unreach = st.unreach or 0}
-  K.log('warn', 'starvation: %d hungry, %d cannot reach food; %d shrubs marked for gathering, %d helpers added',
-        #sv.hungry, #cut, sv.marked, sv.added)
+  local empty = not (st.food_pos and #st.food_pos > 0)       -- BUG-299: nothing edible lies free
+  K.log('warn', 'starvation: %d hungry, %s; %d shrubs marked for gathering, %d helpers added',
+        #sv.hungry, empty and 'no food left (the stock is empty)' or string.format('%d cannot reach food', #cut),
+        sv.marked, sv.added)
   if r.now - (math.tointeger(p.starve.woke) or -1e12) >= (sc.report_days or 2) * DAY then
     p.starve.woke = r.now
     local who = #cut > 0 and ('cannot reach food: ' .. table.concat(names, ', ') .. (#cut > #names and (' +' .. (#cut - #names)) or ''))
-                or ((st.food_pos and #st.food_pos > 0) and 'all can reach food' or 'no reachable food')
-    K.emit('DECISION_NEEDED', 'A', string.format('starvation: %d hungry, food %d days, %d cannot reach food', #sv.hungry,
-                                                 fd, #cut),
+                or (empty and 'no food left to eat (the stock is empty, not cut off)' or 'all can reach food')
+    K.emit('DECISION_NEEDED', 'A', string.format('starvation: %d hungry, food %d days, %s', #sv.hungry, fd,
+                                                 empty and 'no food left' or string.format('%d cannot reach food', #cut)),
            {id = 'starvation', q = string.format('%s; %d shrubs marked, +%d gatherers/planters, %d food items unreachable: ' ..
                                                  'open a path, bring food in, farms or trade?', who, sv.marked, sv.added,
                                                  st.unreach or 0):sub(1, 200)})

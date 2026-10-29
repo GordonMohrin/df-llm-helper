@@ -221,6 +221,8 @@ C.VERBS = {
   ['snapshot']     = {mod = 'snapshot'},
   ['audit']        = {mod = 'readiness'},
   ['popcap.lower'] = {mod = 'readiness'},
+  ['popcap.raise'] = {mod = 'readiness'},       -- BUG-293: lifts the player's ceiling (and a famine hold)
+  ['popcap.set']   = {mod = 'readiness'},       -- BUG-293: the player's ceiling exactly cap (raise or lower)
   ['tempo.lower']  = {mod = 'arbiter'},
   ['pause']        = {mod = 'arbiter'},
   ['unpause']      = {mod = 'arbiter'},
@@ -277,7 +279,7 @@ C.ACT = {
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
-  burrow_tiles = {'seal'},
+  burrow_tiles = {'seal', 'runner'},              -- BUG-298: runner widens a burrow for a seal piece outside it
   popcap = {'readiness'},
   quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care', 'traps'},
@@ -297,7 +299,7 @@ C.STATE_OWNERS = {
   ['save'] = 'kern', ['k.*'] = 'kern',
   ['phase'] = 'runner', ['proj'] = 'runner', ['sched.*'] = 'runner', ['adopt.*'] = 'runner',
   ['pop.cit'] = 'sense', ['pop.adults'] = 'sense', ['pop.soldiers'] = 'sense',
-  ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['ready.*'] = 'readiness',
+  ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['pop.hold'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
@@ -416,7 +418,8 @@ C.STATE_SPEC = obj({
   ev = NAT,
 }, {
   save = str(120), phase = str(nil, nil, 'phase'),
-  pop = obj(nil, {cit = NAT, adults = NAT, soldiers = NAT, cap = NAT, gate_cap = NAT}),
+  pop = obj(nil, {cit = NAT, adults = NAT, soldiers = NAT, cap = NAT, gate_cap = NAT,
+                  hold = str(40)}),            -- BUG-293: the player's ceiling / the famine hold that binds
   ready = obj({lvl = int(0, 3), worn = PCT, cv = NAT, drill_age = int(-1),
                -- BUG-043: why readiness' last audit request was refused; what the last audit's snapshot covered
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}, {why = str(80), cov = str(40)}),

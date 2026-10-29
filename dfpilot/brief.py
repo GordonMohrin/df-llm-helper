@@ -634,7 +634,10 @@ def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
     p = s.get("pop")
     if p:
         out.append((1, f"pop {p.get('cit', '?')} ({p.get('adults', '?')}ad {p.get('soldiers', '?')}sol)"
-                       f" cap {p.get('cap', '?')} gate {p.get('gate_cap', '?')}" + stale_note(s, "pop")))
+                       f" cap {p.get('cap', '?')} gate {p.get('gate_cap', '?')}"
+                       # BUG-293: the player's ceiling or the kernel's famine hold that binds max-pop
+                       + (f" ceiling {p['hold']}" if isinstance(p.get("hold"), str) and p["hold"] else "")
+                       + stale_note(s, "pop")))
     out.append((3, pop_diag(ctx)))
     r = s.get("ready")
     if r:

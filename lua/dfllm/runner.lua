@@ -3434,7 +3434,21 @@ function Q.stuck_replace(K, c)
           local at = tile and tkey(tile[1], tile[2], tile[3])
           if what and not r.rp[at] and qf_room() and not piece_built(K, tile) then
             local why, bs = Q.piece_why(K, tile)
-            if Q.cls_of(bs) == 'no builder' and int(bs.id) then
+            -- BUG-298: the piece lies outside the burrow its builders keep to: that burrow takes the piece's own tile
+            -- (the burrows screen's paint brush; a building job's site is its tile), once per piece, before the re-place.
+            -- Only that tile: a perimeter door's outer neighbours stay out of the burrow a civil alert keeps citizens in
+            r.bw = type(r.bw) == 'table' and r.bw or {}
+            if Q.cls_of(bs) == 'no builder' and type(bs.burrow) == 'string' and not r.bw[at] then
+              r.bw[at] = 1
+              local pts = {{tile[1], tile[2], tile[3]}}
+              local okb, nb = K.act.burrow_tiles(bs.burrow, pts)
+              K.log('warn', 'seal first: %s: %s %s outside the burrow %s its builders keep to (%s): %s', P.id, what, at,
+                    bs.burrow, tostring(bs.bwhy), okb and string.format('%d tiles added to it', int(nb) or 0)
+                    or ('not widened: ' .. trunc(tostring(nb), 60)))
+              if okb then r.bwt = t; return end              -- a fresh wait (stuck_days) before the re-place
+            end
+            local waiting = int(r.bwt) and t - r.bwt < c.stuck
+            if Q.cls_of(bs) == 'no builder' and int(bs.id) and not waiting then
               r.rp[at] = 1
               qf(K, {mode = 'build', data = {[0] = {[0] = {[0] = cell[4]}}}, pos = {tile[1], tile[2], tile[3]},
                      command = 'undo'})

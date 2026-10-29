@@ -314,7 +314,7 @@ T.test('after a siege R2 needs a new drill (frozen until re-drill)', function()
   T.eq(caps(W)[#caps(W)], 75)
 end)
 
-T.test('popcap.lower: lowers the ceiling only; a new plan clears the inbox ceiling', function()
+T.test('popcap.lower: lowers the ceiling only; a new plan keeps it (BUG-293), popcap.raise lifts it', function()
   local W = world{drill = NOW0 - 500, plan = plan(75)}
   day(W)
   audit(W)
@@ -334,7 +334,14 @@ T.test('popcap.lower: lowers the ceiling only; a new plan clears the inbox ceili
   W.run(9, {skip = 9})
   W.inbox('plan.reload', {})
   day(W)
+  T.eq(W.state().pop.gate_cap, 0, 'BUG-293: the player ceiling survives the plan reload')
+  T.eq(W.state().pop.hold, 'player 0 until popcap.raise')
+  T.eq(caps(W)[#caps(W)], 50)
+  local rr = W.inbox('popcap.raise', {})
+  T.ok(rr.ok, rr.msg)
+  day(W)
   T.eq(W.state().pop.gate_cap, 75)
+  T.eq(W.state().pop.hold, nil)
   T.eq(caps(W)[#caps(W)], 75)
   local whys = {}
   for _, e in ipairs(W.find_events('POPCAP')) do whys[#whys + 1] = e.d.why end

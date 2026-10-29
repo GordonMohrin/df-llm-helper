@@ -300,6 +300,13 @@ Related: FR-xx, BUG-xx
 | [BUG-285](BUG-285-status-and-brief-name-no-open-mood.md) | fixed (offline, live-untested) | medium | Run 15: status and brief name no open mood, its needs or its days left | care.lua, brief.py |
 | [BUG-286](BUG-286-unit-sheet-left-after-the-kernels-trade-screen-blocks-the-next-caravan.md) | fixed (offline, live-untested) | high | Run 15: a unit sheet left after the kernel's own trade screen blocks every later caravan as a player screen | trade.lua |
 | [BUG-287](BUG-287-player-screen-blocks-a-caravan-silently-until-it-leaves.md) | fixed (offline, live-untested) | medium | Run 15: a player screen blocks a caravan x7-x14 and nobody is asked | trade.lua, schema.py |
+| [BUG-293](BUG-293-player-popcap-lost-at-plan-reload-no-famine-hold.md) | fixed (offline, live-untested) | high | Run 15c: popcap.lower lost at a plan reload, no famine hold, no popcap.raise/set | readiness.lua, schema.py, brief.py |
+| [BUG-294](BUG-294-automatic-drill-during-a-famine.md) | fixed (offline, live-untested) | high | Run 15c: automatic drills start during a famine | drill.lua |
+| [BUG-295](BUG-295-hunters-taken-off-by-a-drill-come-back-late.md) | fixed (offline, live-untested) | high | Run 15c: hunters a drill took off come back a month later | economy.lua |
+| [BUG-296](BUG-296-fishing-water-under-a-ramp-top-has-no-bank.md) | fixed (offline, live-untested) | high | Run 15c: water under a ramp top has no fishing bank | economy.lua |
+| [BUG-297](BUG-297-no-farm-site-after-the-soil-rule-and-no-farm-draft.md) | fixed (offline, live-untested) | high | Run 15c: no farm site after the soil rule (soil marks capped), no farm drafted | sites.py, rooms.py, snapshot.lua, plan.py |
+| [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
+| [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

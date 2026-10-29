@@ -47,7 +47,7 @@ def test_contract_names():
     for t, cls in (("CUTOFF", "A"), ("SEAL_LEAK", "A"), ("PERIMETER_BROKEN", "A"), ("REFUGE_FAIL", "A"),
                    ("SEAL", "B"), ("REACH", "B")):
         assert schema.EVENTS[t][:2] == (cls, "seal")
-    assert schema.ACT["burrow_tiles"] == ["seal"]
+    assert schema.ACT["burrow_tiles"] == ["seal", "runner"]     # BUG-298: runner widens a burrow for a seal piece
     for what in ("reach", "entrances", "defense", "perimeter", "refuge"):
         assert schema.validate_args("inspect", {"what": what}) == []
     assert schema.validate_args("inspect", {"what": "nope"}) != []

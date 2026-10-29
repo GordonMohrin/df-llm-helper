@@ -413,12 +413,30 @@ function M.gate_held(K)
   return nil
 end
 
+-- BUG-294 (Run 15c Inkintense y376: automatic drills 'auto: retry' at food 9 d (#1403) and 1 d (#1488); each took the
+-- hunters off their detail, reason 'mode DRILL'): no automatic drill while economy's supply alarm is set (thirst, hunger,
+-- drink or food days) or food or drink stands below SUPPLY_MIN days; the reason is the hold ('supply: food 9 d', state
+-- ready.dhold). The player's `drill` stays his choice.
+M.SUPPLY_MIN = {food_d = 30, drink_d = 30}
+function M.supply_hold(K)
+  local ok, why = K.call('economy', 'alarm')
+  if ok and type(why) == 'string' and why ~= '' then return cut('supply: ' .. why, 24) end
+  local s = K.view().stock
+  for _, k in ipairs({'food_d', 'drink_d'}) do
+    local v = type(s) == 'table' and int(s[k]) or nil
+    if v and v < M.SUPPLY_MIN[k] then return cut(string.format('supply: %s %d d', k:sub(1, -3), v), 24) end
+  end
+  return nil
+end
+
 -- why an automatic drill is due now (1st value), else why it is held (2nd value, <= 24 chars; FR-65 status)
 local function check(K, now)
   if st.t0 or st.rs then return nil, 'running' end
   local d = danger(K)
   if d then return nil, d end
   if now - rt.boot < M.SETTLE then return nil, 'settling' end
+  local sup = M.supply_hold(K)                              -- BUG-294
+  if sup then return nil, sup end
   if st.try and now - st.try < M.RETRY_ABORT then          -- 5 days after the last start (finished or aborted)
     local newest = rec.last[#rec.last]
     return nil, (newest and newest.tick >= st.try) and 'just drilled' or 'aborted'
