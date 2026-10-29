@@ -1048,6 +1048,15 @@ def line_kern(ctx: Ctx) -> str:
     return _join(out)
 
 
+def line_rooms(ctx: Ctx, done: bool = False) -> str:
+    """G15 (FR-102/103): the large rooms' and the deep core's stages (relocate.rooms_line); brief reads PROJECT_DONE."""
+    try:
+        from . import relocate
+        return relocate.rooms_line(ctx.dir, ctx.s, relocate._done_ids(ctx.dir) if done else None)
+    except Exception:                          # noqa: BLE001 - a courtesy line, never a failure
+        return ""
+
+
 def line_snap(ctx: Ctx) -> str:
     """BUG-033: a starving snapshot export queue (the oldest request waits >= doctor.SNAP_STARVE_S), else ''."""
     from .doctor import snap_queue
@@ -1124,6 +1133,7 @@ def status_text(save_dir: Path) -> str:
                   (1, clip(line_proj(ctx, 2, blocked_first=True), PROJ_STATUS_TOKENS)),
                   (4, line_kern(ctx)),
                   (4, line_snap(ctx)),
+                  (4, line_rooms(ctx)),                              # FR-102/103 (G15)
                   (5, _join(extra))]                                 # J3: the army's detail is the first line to go
     return fit_ranked(lines, STATUS_TOKENS)
 
@@ -1263,7 +1273,8 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         head += [x for x in (line_unready(ctx), _join(t for _, t in curse_items(ctx)), line_alarm(ctx), line_pop(ctx),
                              line_supply(ctx), line_cavern(ctx), line_stress0(ctx), line_stress(ctx), _join(core),
                              _traps.status_line(ctx.s), line_burrow(ctx),                          # FR-96
-                             line_sched(ctx), line_proj(ctx, 8), line_kern(ctx), line_snap(ctx), _join(extra)) if x]
+                             line_sched(ctx), line_proj(ctx, 8), line_rooms(ctx, done=True), line_kern(ctx), line_snap(ctx),
+                             _join(extra)) if x]
     sections = [head]
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
                          ("## curse (recipe)", sec_curse(ctx)),

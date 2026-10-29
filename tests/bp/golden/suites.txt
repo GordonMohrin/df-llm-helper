@@ -1,0 +1,29 @@
+suites {'n': 8, 'size': 'large', 'stage': 1, 'tier': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+  living: dig(44), build(49), zone(8), burrow(8)
+  materials: {'bed': 8, 'cabinet': 8, 'chair': 8, 'chest': 8, 'door': 9, 'table': 8}
+z100  (x 64..76, y 69..91)
+#############
+######.######
+######+######
+#bh..#.#..hb#
+#....#.#....#
+#....+.+....#
+#f.ct#.#tc.f#
+######.######
+#bh..#.#..hb#
+#....#.#....#
+#....+.+....#
+#f.ct#.#tc.f#
+######.######
+#bh..#.#..hb#
+#....#.#....#
+#....+.+....#
+#f.ct#.#tc.f#
+######.######
+#bh..#.#..hb#
+#....#.#....#
+#....+.+....#
+#f.ct#.#tc.f#
+#############
+legend: # rock  S smoothed  C wall  F fortification  . floor  _ open  < > X stairs  r/v ramp  + door  = bridge  H raised  ^ trap  ? hidden
+overlay: b bed  f cabinet  h chest  t table  c chair  n coffin  l well  k weapon rack  a armor stand  L lever  R traction bench  A altar  D depot  p farm plot  W workshop

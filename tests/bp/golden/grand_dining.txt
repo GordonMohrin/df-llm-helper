@@ -1,0 +1,24 @@
+grand_dining {'seats': 40, 'size': 'large', 'stage': 1, 'tier': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+  living: dig(15), build(83), zone(1), burrow(8)
+  materials: {'cabinet': 2, 'chair': 40, 'door': 1, 'table': 40}
+z100  (x 62..78, y 69..86)
+#################
+########.########
+########+########
+#...............#
+#...............#
+#.cccccc.cccccc.#
+#.tttttt.tttttt.#
+#...............#
+#.cccccc.cccccc.#
+#.tttttt.tttttt.#
+#...............#
+#.cccccc.cccccc.#
+#.tttttt.tttttt.#
+#...............#
+#.cccc..........#
+#.tttt..........#
+#f.............f#
+#################
+legend: # rock  S smoothed  C wall  F fortification  . floor  _ open  < > X stairs  r/v ramp  + door  = bridge  H raised  ^ trap  ? hidden
+overlay: b bed  f cabinet  h chest  t table  c chair  n coffin  l well  k weapon rack  a armor stand  L lever  R traction bench  A altar  D depot  p farm plot  W workshop

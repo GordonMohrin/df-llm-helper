@@ -1903,6 +1903,7 @@ end
 local KEEP_BOX = {cistern = true, bedrooms = true, tombs = true, hall = true, guildhall = true, barracks = true,
                   temple = true, tavern = true, dining = true, hospital = true, office = true, workshops = true,
                   farms = true, furnaces = true, captives = true, refuge_drink = true,
+                  suites = true, grand_dining = true, grand_tavern = true, grand_temple = true, deepcore = true,  -- FR-102/103
                   seal = 'kind', plug = 'kind', repair = 'kind', explore = 'kind', aqshaft = 'kind'}
 
 local function keep_box(P, d)

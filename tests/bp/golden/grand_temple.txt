@@ -1,0 +1,19 @@
+grand_temple {'size': 'large', 'stage': 1, 'tier': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+  living: dig(10), build(4), zone(1), burrow(4)
+  materials: {'door': 1, 'offering_place': 1, 'statue': 2}
+z100  (x 65..75, y 69..81)
+###########
+#####.#####
+#####+#####
+#.........#
+#.........#
+#.........#
+#.........#
+#.........#
+#.........#
+#.........#
+#.B.....B.#
+#....A....#
+###########
+legend: # rock  S smoothed  C wall  F fortification  . floor  _ open  < > X stairs  r/v ramp  + door  = bridge  H raised  ^ trap  ? hidden
+overlay: b bed  f cabinet  h chest  t table  c chair  n coffin  l well  k weapon rack  a armor stand  L lever  R traction bench  A altar  D depot  p farm plot  W workshop
