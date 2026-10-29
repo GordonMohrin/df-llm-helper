@@ -381,8 +381,8 @@ def test_outer_gallery_warning_from_the_o1_phase(base):
     d5, s5 = _p5(doc, state)
     errs, warn = errs_of(d5, s5)
     assert errs == [] and [w for w in warn if GALLERY_WARN in w] == [
-        "no outward gallery over O1: a waiting army cannot be shot; add tpl gallery_o1 to a season "
-        "(site S1, once fortcore stage 2 is dug)"]
+        'no outward gallery over O1: a waiting army cannot be shot; add {"tpl":"gallery_o1","site":"S1"} '
+        "to a season"]                                                         # BUG-244: shown once stage 2 is dug
     assert not [w for w in errs_of(d5, s5, fort={"o1": True, "gallery": True})[1] if GALLERY_WARN in w]
     planned = copy.deepcopy(d5)
     planned["seasons"][3]["build"].append({"tpl": "gallery_o1", "site": "S1"})

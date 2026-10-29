@@ -72,6 +72,8 @@ SUPPLY_TPLS = ("farms", "cistern", STOCKROOM, REFUGE_DRINK)        # food/water/
 BEDS_TPLS = ("bedrooms", REFUGE_BEDS)
 FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
 SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)
+EMERGENCY_D = 30              # BUG-243: drink or food days below this (or no accepted water): water and food builds first
+AQWELL = "aqwell"             # BUG-243: the aquifer well template (fix6-water), drafted only when the bp package has it
 STUCK_SHORT_D = 28            # BUG-041: a seal stuck this long (a game month) gets one short plan check line
 REBUILD_KINDS = {"seal", "tombs", "supply", "beds", "depot", "repair"}
 REBUILD_DEF = (10, 12)                    # config/baseline.json runner.rebuild {pop, off} defaults (runner.lua M.CFG)
@@ -205,7 +207,17 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "aqshaft": any(t == AQSHAFT for t, _ in applied),       # FR-95: an aquifer shaft placed (any state)
             "z4": bool((man.get("zones") or {}).get("Z4")) if isinstance(man.get("zones"), dict) else False,  # BUG-197
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
+            "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
+            "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
             "seals": open_seals(save_dir, state)}
+
+
+def _food_shops_missing(save_dir: Path) -> list[str] | None:
+    """BUG-243: which of Still and Kitchen no workshop of the fort manifest has, built or planned (None: unknown)."""
+    try:
+        return _cmd.workshops_missing(save_dir, ["Still", "Kitchen"])
+    except Exception:                                   # noqa: BLE001 - no bp package or manifest: not drafted
+        return None
 
 
 def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
@@ -1091,8 +1103,20 @@ def _outer_gallery(doc: dict, s: dict, fort: dict) -> str | None:
         return None
     if fort.get("gallery") or any(b["tpl"] == GALLERY for b in builds):
         return None
-    return (f"no outward gallery over O1: a waiting army cannot be shot; add tpl {GALLERY} to a season "
-            "(site S1, once fortcore stage 2 is dug)")
+    if not core2_dug(s, fort):         # BUG-244: check refuses the gallery until then; no advice it cannot take
+        return None
+    return (f"no outward gallery over O1: a waiting army cannot be shot; add {_compact({'tpl': GALLERY, 'site': 'S1'})} "
+            "to a season")
+
+
+def core2_dug(s: dict | None, fort: dict | None) -> bool:
+    """BUG-244 (Run 15 Drillchamber y373: 'add tpl gallery_o1' while `plan check` refused it, stage 2 not dug): fortcore
+    stage 2 is applied (fort.core2; a fort dict without the key: not known, counted as dug) and no project of the state
+    digs stage 2 (label s2.dig)."""
+    if (fort or {}).get("core2") is False:
+        return False
+    return not any(isinstance(r, list) and len(r) >= 2 and isinstance(r[1], str) and r[1].startswith("s2.dig")
+                   for r in (s or {}).get("proj") or [])
 
 
 # ---------------------------------------------------------------- BUG-130: a fortcore stopped on a breach
@@ -1623,10 +1647,11 @@ def supply_goals(doc: dict, s: dict | None, fort: dict | None = None) -> tuple[l
     return errs, warn
 
 
-def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls) -> None:
+def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls, lead=()) -> None:
     """propose (Run 10): while ore_goal holds, one `explore` build per season from the current one, the first build after
     the season's kept (applied) ones, unless the season has one already; bar:iron in trade.want when no bar is wanted;
-    leather first in trade.want while leather_goal holds. tpls = the known template names (None: not checked)."""
+    leather first in trade.want while leather_goal holds. tpls = the known template names (None: not checked).
+    BUG-241: the explore goes after the season's new seals and the builds in `lead` (BUG-243's water/food first)."""
     trade = doc["trade"]
     want = list(trade.get("want") or [])
     why = ore_goal(s)
@@ -1634,7 +1659,11 @@ def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls) 
         for si in range(min(max(season, 0), 3), 4):
             builds = doc["seasons"][si]["build"]
             if not any(b["tpl"] == EXPLORE for b in builds):
-                builds.insert(min(kept[si], len(builds)), {"tpl": EXPLORE, "site": "S1"})
+                at = min(kept[si], len(builds))
+                # BUG-241: never ahead of a new seal or of the water/food builds an emergency put first (BUG-243)
+                while at < len(builds) and (builds[at]["tpl"] == SEAL or any(builds[at] is x for x in lead)):
+                    at += 1
+                builds.insert(at, {"tpl": EXPLORE, "site": "S1"})
         doc["notes"] += (f"; {why}: {EXPLORE}@S1 each season until ore is found (bp.cancel the later ones once ore "
                          "shows; p.depth for a shallower shaft)")
     if why and not _bar_want(want):
@@ -1648,10 +1677,35 @@ def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls) 
     trade["want"] = want[:40]
 
 
+def explore_room(save_dir: Path, sites: list, params: dict) -> int | None:
+    """BUG-241 (Run 15 Earthboat y375, Inkintense y373/y374: propose drafted explore@S1 in all four seasons while 1 or 2
+    sites were free; `plan check` refused the draft: 'only 0 free site(s) for explore ... taken by y375s0b0'): how many
+    explore shafts fit at once on the ranked `sites`: each site whose footprint touches no project in <save>/bp (applied
+    ones, kept ones of this year included) nor an explore counted before it. None when the bp package cannot emit."""
+    try:
+        occ = occupancy(save_dir)
+    except Exception:                                   # noqa: BLE001 - unreadable bp files: not counted
+        return None
+    n = 0
+    for s in sites:
+        try:
+            doc = _cmd.emit_at(EXPLORE, params, s, "S0", "probe")
+        except BpUnavailable:
+            return None
+        except BpError:
+            continue
+        if occ.clash(doc):
+            continue
+        occ.add(dict(doc, id=f"probe{n}"))
+        n += 1
+    return n
+
+
 def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     """propose (CLI): the deepest of EXPLORE_DEPTHS at which `explore` has a site on the sites snapshot (no shaft into
     an avoided level: p.avoid, a revealed cavern/damp/warm mark); the newly drafted explore builds get that p.depth, or
-    leave the draft when none fits. Builds kept from the applied same-year plan stay as they are. Returns a line for the
+    leave the draft when none fits. BUG-241: only as many new ones as explore_room counts free sites stay (the earliest
+    seasons'). Builds kept from the applied same-year plan stay as they are. Returns a line for the
     CLI, None when there was nothing to fit or no snapshot/manifest to fit on."""
     keep = {(si, bi) for si, se in enumerate(prev["seasons"]) for bi in range(len(se["build"]))} \
         if prev and prev.get("year") == doc["year"] else set()
@@ -1672,7 +1726,16 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
             if d != EXPLORE_DEPTHS[0]:
                 for _, b in new:
                     b["p"] = {**(b.get("p") or {}), "depth": d}
-            return f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
+            line = f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
+            room = explore_room(save_dir, sites, {"depth": d} if d != EXPLORE_DEPTHS[0] else {})
+            if room is None or room >= len(new):
+                return line
+            for si, b in new[room:]:                      # BUG-241: the later ones would find no free site
+                se = doc["seasons"][si]["build"]
+                del se[next(i for i, x in enumerate(se) if x is b)]
+            doc["notes"] += (f"; BUG-241: {room} free {EXPLORE} site(s): {room} of {len(new)} drafted (the next "
+                             "explore: propose next season)")
+            return line + f"; {room} free site(s): {room} of {len(new)} drafted, the next one: propose next season"
     for si, b in new:
         doc["seasons"][si]["build"].remove(b)
     doc["notes"] += f"; no {EXPLORE} site at any depth (avoided levels or no free rock): trade.want bar:iron only"
@@ -1855,9 +1918,55 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
     return out
 
 
+def live_trade(save_dir: Path) -> dict | None:
+    """BUG-242 (Run 15 Inkintense y373: Gordon's `cmd trade.want ... food, seeds` for food_low; the draft set the default
+    bar:iron, anvil, cloth and the apply would have dropped it): the wants the kernel trades by now. A `trade.want` (or
+    a `trade.retry` with lists) sent
+    after the last plan apply (plan.json's time: the plan.reload ends the override, trade.lua) is the running list:
+    {want?, sell?} of such cli.log lines whose reply was no ERR (a later one replaces the lists it names). None without
+    one."""
+    p = Path(save_dir) / "cli.log"
+    try:
+        since = (Path(save_dir) / "plan.json").stat().st_mtime
+    except OSError:
+        since = 0.0
+    try:
+        lines = p.read_text("utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    bad, sent = set(), []
+    for ln in lines:
+        f = ln.split("\t")
+        if len(f) < 5 or not f[0].isdigit():
+            continue
+        if f[2] in ("reply:trade.want", "reply:trade.retry") and f[4].startswith("ERR"):
+            try:
+                bad.add(json.loads(f[3]).get("id"))
+            except (ValueError, AttributeError):
+                pass
+            continue
+        # review: trade.retry's lists override the wants the same way (trade.lua override)
+        if f[2] not in ("verb:trade.want", "verb:trade.retry") or int(f[0]) < since:
+            continue
+        try:
+            args = json.loads(f[3])
+        except ValueError:
+            continue
+        cid = f[4].removeprefix("sent ").strip()
+        tr = {k: [str(x) for x in args[k]][:40] for k in ("want", "sell") if isinstance(args, dict)
+              and isinstance(args.get(k), list)}
+        if tr:
+            sent.append((cid, tr))
+    out: dict = {}
+    for cid, tr in sent:                                  # as trade.lua's override: a list left out stays
+        if cid not in bad:
+            out.update(tr)
+    return out or None
+
+
 def propose(state: dict | None, phases: dict | None, prev: dict | None, decisions: dict | None = None,
             tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None,
-            upto: str | None = None) -> dict:
+            upto: str | None = None, live: dict | None = None) -> dict:
     """Draft plan: phase_target = last phase before the next ★ phase; builds = `proj` deliverables of the
     phases up to it (a template with a `stage` param gets p.stage; stage >= 2 reuses the anchor: site 'same').
     Deliverables in `applied` (applied_builds) or in the previous plan (any year) are not drafted again.
@@ -1989,7 +2098,22 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     if drop_core:                                # BUG-130: nothing on the stopped anchor
         builds = [b for b in builds if b["tpl"] != "fortcore" or (drop_core != "all" and (
             b.get("site") != SAME or _stage_of(b.get("p") or {}) not in drop_core))]
+    # BUG-243: drink or food below EMERGENCY_D or no accepted water: water, farms and the food shops right after the seal
+    # and the refuge's pieces (drafted now or moved up from the phase builds)
+    ewhy, front = emergency(s), []
+    if ewhy:
+        em = emergency_drafts(s, fort, done, builds, info)
+        front = [b for b in builds if b["tpl"] in (CISTERN["tpl"], AQWELL, "farms")
+                 or (b["tpl"] == "workshops" and _food_shops(b.get("p") or {}))]
+        builds = [b for b in builds if not any(b is x for x in front)]
+        front = sorted(front + em, key=lambda b: (0 if b["tpl"] in (CISTERN["tpl"], AQWELL) else 1 if b["tpl"] == "farms"
+                                                  else 2))
     builds.sort(key=lambda b: b["tpl"] != SEAL)  # Run 11 siege 8: seal first (the runner runs it first anyway)
+    if front:
+        k = 0
+        while k < len(builds) and _refuge_fix(builds[k]):
+            k += 1
+        builds[k:k] = front
     fresh = None
     if (fort or {}).get("z4") is False and not (fort or {}).get("core_any") and not core \
             and not any(t == "fortcore" for t, _ in done):
@@ -2000,6 +2124,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
             keep.append({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}})
         fresh = sorted({b["tpl"] for b in builds if b not in keep})
         builds, target = keep, cur
+        front = [b for b in front if any(b is x for x in builds)]
         stone, held, sdrafts = None, None, []   # review: no note for a stone dig, cistern or temple left out here
         libs = list(dict.fromkeys(d["lib"] for p in plist if p["id"] == cur for d in p["deliver"] if d["k"] == "orders"))
     left_out = []
@@ -2032,9 +2157,20 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                   + "; site S<k> = k-th free site at apply time (never overlaps other projects or earlier"
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
     }
+    if live:                                     # BUG-242: the running cmd trade.want, not the old plan's list
+        doc["trade"].update({k: list(v) for k, v in live.items() if k in ("want", "sell")})
+        doc["notes"] += "; BUG-242: trade.want kept from the running cmd trade.want: " + ",".join(
+            doc["trade"]["want"][:8]) + ("..." if len(doc["trade"]["want"]) > 8 else "")
     tp = None if info is None else set(info)
-    draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp)  # rebuild: no explore
+    draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
+                 lead=front)
     doc["notes"] += core_note
+    if ewhy:
+        em_t = [b["tpl"] for b in front if any(b is x for x in builds)]
+        doc["notes"] += (f"; BUG-243: {ewhy} (< {EMERGENCY_D}): " + (", ".join(em_t) + "@S1 first" if em_t else
+                         "no water or food build left to draft (applied, under way or no template)")
+                         + ("" if fresh is None else "; after s1.dig propose again: cistern, farms and a Still/Kitchen"
+                            " first"))
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     if stress and sdrafts and not rb:
@@ -2061,6 +2197,48 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                          + (" and seal" if any(b["tpl"] == SEAL for b in builds) else "") + f" drafted, phase_target {cur}"
                          + (f" (left out: {', '.join(fresh)})" if fresh else "") + "; apply, wait for s1.dig, propose again")
     return doc
+
+
+def emergency(s: dict | None) -> str | None:
+    """BUG-243: why water and food come first: stock.drink_d or stock.food_d below EMERGENCY_D, or the state's water
+    key lists no accepted source (water.src empty). None when none holds (or an older kernel reports none of them)."""
+    st = (s or {}).get("stock") or {}
+    why = [f"{k[:-2]} {st[k]} d" for k in ("drink_d", "food_d") if _nat(st.get(k)) and st[k] < EMERGENCY_D]
+    w = (s or {}).get("water")
+    if isinstance(w, dict) and isinstance(w.get("src"), list) and not w["src"]:
+        why.append("no accepted water")
+    return ", ".join(why) or None
+
+
+def emergency_drafts(s: dict | None, fort: dict | None, done: set, builds: list, info: dict | None) -> list[dict]:
+    """BUG-243 (Run 15 Drillchamber y373 spr: drink 0 d, no accepted water, the cistern drafted in seasons[2] behind the
+    phase builds; Inkintense: food 10 d and no farm in the draft): the new water and food builds `emergency` asks for, in
+    that order: water (drink low or no accepted water): a cistern (_cistern_due), else the aquifer well (AQWELL, only when
+    the bp package lists it); farms (food or drink low) unless applied before; workshops with the missing Still/Kitchen
+    (fort.food_shops, the workshops the manifest lacks) and no other shop. Builds already in `builds` are not drafted."""
+    why = emergency(s)
+    if not why:
+        return []
+    st = (s or {}).get("stock") or {}
+    thirsty = _nat(st.get("drink_d")) and st["drink_d"] < EMERGENCY_D
+    dry = thirsty or "water" in why
+    hungry = (_nat(st.get("food_d")) and st["food_d"] < EMERGENCY_D) or thirsty     # farms grow the brew plants too
+    out: list[dict] = []
+    has = {b["tpl"] for b in builds}
+    if dry and _cistern_due(fort, done, builds, info):
+        out.append(copy.deepcopy(CISTERN))
+    elif dry and info is not None and AQWELL in info and (AQWELL, None) not in done and AQWELL not in has:
+        out.append({"tpl": AQWELL, "site": "S1"})
+    if hungry and ("farms", None) not in done and "farms" not in has and (info is None or "farms" in info):
+        out.append({"tpl": "farms", "site": "S1"})
+    miss = (fort or {}).get("food_shops")
+    want = [n for n in ("Still", "Kitchen") if isinstance(miss, list) and n in miss
+            and (n == "Kitchen" and hungry or n == "Still" and thirsty)]
+    mood = _moodable()
+    if want and mood and (info is None or "workshops" in info) and not any(
+            b["tpl"] == "workshops" and _food_shops(b.get("p") or {}) for b in builds):
+        out.append({"tpl": "workshops", "site": "S1", "p": {"add": ",".join(want), "skip": ",".join(mood)}})
+    return out
 
 
 def _cistern_due(fort: dict | None, done: set, builds: list, info: dict | None) -> bool:
@@ -2308,7 +2486,8 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     cur = s.get("phase") or "P0"
     season = (s.get("t") or {}).get("season", 0)
     tp = tpls if tpls is not None else templates()
-    doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort)
+    live = live_trade(save_dir)                               # BUG-242: the running cmd trade.want stays
+    doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, live=live)
     fit_core(save_dir, doc, prev)                             # BUG-195: never a core stage another project blocks
     doc["phase_target"] = cur
     doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
@@ -2317,7 +2496,8 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     out = {"doc": doc, "errs": errs, "warn": warn, "held": [], "raised": None}
     nxt = next_phase(ph, cur) if raise_due(save_dir, state, prev) else None
     if nxt:
-        cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt)
+        cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt,
+                       live=live)
         fit_core(save_dir, cand, prev)
         if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
             cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
@@ -2403,8 +2583,15 @@ def _draft(save_dir: Path) -> Path:
     return Path(save_dir) / "plan.draft.json"
 
 
+def build_label(b: dict) -> str:
+    """BUG-244 (Run 15 Earthboat y372: 'fortcore@same' twice, stage 3 ahead of stage 2, and the line did not say which is
+    which): tpl@site plus ' st<N>' for a staged build and ' (refuge)' for fortcore stage 3."""
+    st = _stage_of(b.get("p") or {})
+    return f"{b['tpl']}@{b['site']}" + (f" st{st}" if st is not None else "") + (" (refuge)" if _refuge_stage(b) else "")
+
+
 def _summary(doc: dict) -> str:
-    b = "; ".join(f"s{i}: " + (", ".join(f"{x['tpl']}@{x['site']}" for x in se["build"]) or "-")
+    b = "; ".join(f"s{i}: " + (", ".join(build_label(x) for x in se["build"]) or "-")
                   for i, se in enumerate(doc["seasons"]))
     pol = doc["policy"]
     return (f"y{doc['year']} target {doc['phase_target']} option {pol['option']} ceiling {pol['pop_ceiling']} "
@@ -2443,7 +2630,8 @@ def run(args, save_dir: Path) -> int:
         phases = load_phases(Path(args.phases) if args.phases else None)
         state = files.read_state(save_dir)
         fort = fort_facts(save_dir, state)
-        doc = propose(state, phases, prev, applied=applied_builds(save_dir, state), fort=fort)
+        doc = propose(state, phases, prev, applied=applied_builds(save_dir, state), fort=fort,
+                      live=live_trade(save_dir))
         fit = fit_explore(save_dir, doc, prev)                # Run 10: the ore search fits the known levels
         kfit = fit_explore_kept(save_dir, doc, prev)          # BUG-223: kept shafts into a cavern level known now
         cfit = fit_core(save_dir, doc, prev)                  # BUG-195: a later core stage another project blocks
