@@ -2068,6 +2068,16 @@ function Q.aq_level(K, z)
   dirty()
 end
 
+-- BUG-291 (Run 15 Inkintense: a sealed pit full of seepage on z130, 'no aquifer level known'): water's scan saw a revealed
+-- tile with the aquifer flag beside (or under) water on level z; true when z is new to the manifest's aquifer_levels
+function M.aq_seen(K, z)
+  z = int(z)
+  if not z then return false end
+  for _, v in ipairs(type(S.rt.aql) == 'table' and S.rt.aql or {}) do if v == z then return false end end
+  Q.aq_level(K, z)
+  return true
+end
+
 function Q.aq_marker(P) return (P.tpl == 'aqshaft' or M.AQ.observing(S.rt, P.id)) and {damp = true} or nil end
 
 -- lost(): a designation DF took. A damp cancel (or, in observe mode, one without a report the log search finds) is no

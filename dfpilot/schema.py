@@ -1163,8 +1163,11 @@ STATE = Obj(
                       # BUG-131: hout = the first blocking hospital zone outside the core (z id, at its centre, ok 1 = a
                       # finished hospital inside: hospital.retire needs no approve, pat = patients lying in it); a zone
                       # outside that is idle or superseded by a finished hospital inside is not counted in hosp_out
+                      # BUG-288/289/290: wst = the tick the water scan last finished, wsc = the best way to water it
+                      # found at any distance (a bank, a well spot over a flooded pit, a dig; bp sites hospital names it)
                       opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8),
-                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT})}),
+                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT}),
+                           "wst": NAT, "wsc": Str(maxbytes=96)}),
          # FR-96/97 (lua/dfllm/traps.lua, daily): armed traps on the manifest's trap tiles (n) of all listed (m); built (b),
          # ways in with every lane tile trapped (w) of the ways listed (wn), cage traps holding a caught creature (f), free
          # empty cages (c), listed tiles without a trap building (l; lh 1: some in the hall), the last cage order (ord)

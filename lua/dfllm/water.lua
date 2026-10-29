@@ -23,7 +23,9 @@
 --     (sliced, after the run's decisions); per water body its level, size, depth, an accepted zone or well
 --     over it, a standable bank reachable from the citizens (snapshot.reach), else the shortest dig through
 --     revealed natural wall on that level to such a bank. Run on request, and weekly while the hospital
---     gate is dry. Hidden tiles are never read. BUG-031: cavern water (a revealed cavern tile in the body) is
+--     gate is dry or no accepted water exists (BUG-288: a slice in every step, at most ws_slices + ws_body_slices; BUG-289:
+--     boxes round every citizen and the remembered bodies, a lattice survey of the surface levels; BUG-290: a pit open above
+--     the water is a well spot; BUG-291: a revealed aquifer tile beside the water marks its level). Hidden tiles are never read. BUG-031: cavern water (a revealed cavern tile in the body) is
 --     listed (`cavern` 1) but never offered: caverns stay sealed; a cistern room of the manifest is named with
 --     what it lacks (no well, its well over 0/7, out of reach) instead of "a cistern";
 --   * buckets (bucket-delivery fallback: caregivers carry water from any well or Water Source zone in a free
@@ -86,6 +88,17 @@ M.DEFAULTS = {
   -- BUG-265 (Run 15 Earthboat: 6 bodies 10-29 tiles from the hospital, all reach 0): ws_dig 8 -> 16 walls (ws_reads still
   -- caps the tile reads per body)
   ws_dz = 3, ws_tiles = 1500, ws_every = 7 * DAY, ws_bodies = 12, ws_dig = 16, ws_reach = 6, ws_reads = 400,
+  -- BUG-288 (Run 15 Inkintense: 'scan queued' a season long): a scan reads at most ws_read_max tiles in at most ws_slices
+  -- read slices (>= ws_tiles a slice) and its bodies in at most ws_body_slices slices. BUG-289 (Drillchamber: the brook
+  -- 141,67,143 outside the box): besides the hospital's (or the citizens' median) box, a ws_cit box round every citizen, a
+  -- ws_mem_r box round each of the ws_mem bodies the last scans found, a survey of the whole map's surface levels (the
+  -- surface at the reference column and the map centre, ws_survey_levels each, every ws_lattice-th tile, at most
+  -- ws_survey_max tiles) and a ws_seed_r box round what the survey met (at most ws_seed_max tiles)
+  -- (review: ws_lattice 5, not 3: with (x + 2y) % 3 a 1-tile brook running along x = y + k was never met)
+  ws_read_max = 90000, ws_slices = 18, ws_body_slices = 4, ws_cit = 10, ws_mem = 8, ws_mem_r = 10,
+  ws_survey_levels = 2, ws_lattice = 5, ws_survey_max = 36000, ws_seed_r = 10, ws_seed_max = 9000,
+  -- BUG-290: a pit (open space right above water >= deep, a reachable floor beside it) counts as a well spot
+  pit_well = true,
   -- BUG-034: a dry hospital's zones go once a patient is over patient_thirst (DF's "thirsty" mark is ~25,000-50,000;
   -- dehydration kills at ~75,000); hosp_remove false keeps them (report only, as before)
   patient_thirst = 25000, hosp_remove = true, remove_per_run = 8,
@@ -629,7 +642,7 @@ function M.recipe(c, cis, K)
     return string.format('a well over water or a Water Source zone on water >= %d/7 within %d tiles (inspect '
                          .. 'water_sources)%s%s', c.deep, c.near, aq and (', or ' .. aq) or '', tail)
   end
-  local best, cav
+  local best, cav, pit
   for _, b in ipairs(ws.bodies or {}) do
     if b.cavern == 1 and b.d <= c.near and not cav then cav = b end
     if b.cavern ~= 1 and b.d <= c.near and (b.bank or b.dig) then
@@ -637,11 +650,16 @@ function M.recipe(c, cis, K)
         best = b
       end
     end
+    if b.cavern ~= 1 and b.d <= c.near and b.pit and (not pit or b.d < pit.d) then pit = b end
   end
   if best and best.bank then
     return string.format('zone the water at %d,%d,%d (%d/7) as Water Source, bank %d,%d,%d is reachable, or a well '
                          .. 'over it%s', best.at[1], best.at[2], best.at[3], best.max, best.bank[1], best.bank[2],
                          best.bank[3], tail)
+  elseif pit then                                -- BUG-290: the open hole above the water (a flooded pit) takes a well
+    return string.format('build a well at %d,%d,%d over the water at %d,%d,%d (%d/7, open above it, %d,%d,%d reachable)%s',
+                         pit.pit[1], pit.pit[2], pit.pit[3], pit.at[1], pit.at[2], pit.at[3], pit.max, pit.stand[1],
+                         pit.stand[2], pit.stand[3], tail)
   elseif best then
     local d = best.dig
     return string.format('dig %d wall tile(s) from %d,%d,%d to %d,%d,%d to bare the water at %d,%d,%d, then zone '
@@ -649,6 +667,15 @@ function M.recipe(c, cis, K)
                          best.at[2], best.at[3], tail)
   end
   if cis then return cis.fix .. tail end
+  local way = M.best_way(ws)                   -- BUG-289: water farther than `near` that the citizens reach (a brook)
+  if way and way.kind ~= 'dig' then
+    local b = way.b
+    local at = way.kind == 'bank' and b.bank or b.pit
+    return string.format('the water at %d,%d,%d (%d/7) is %d tiles off (> %d): %s at %d,%d,%d, then the hospital within '
+                         .. '%d tiles of it (bp sites hospital)%s', b.at[1], b.at[2], b.at[3], b.max, b.d, c.near,
+                         way.kind == 'bank' and 'zone it as Water Source from the bank' or 'a well', at[1], at[2], at[3],
+                         c.near, tail)
+  end
   local far                                    -- BUG-265: the nearest body without a bank or a dig
   for _, b in ipairs(ws.bodies or {}) do
     if b.cavern ~= 1 and b.d <= c.near and (not far or b.d < far.d) then far = b end
@@ -728,36 +755,171 @@ local function cistern_state(K, c, r, h)
   return out
 end
 
-local function new_scan(K, c, r)
-  local boxes, ref = {}, nil
+-- BUG-288/289: the scan's plan is box arithmetic (module fields: tested on their own). M.box_n: tiles of a box
+-- {x1, y1, z1, x2, y2, z2}; M.merge_boxes: boxes whose union costs no more than both apart become that union (the
+-- earlier box keeps its place: the order is the reading priority)
+function M.first(t, n)
+  local o = {}
+  for i = 1, math.min(n, #t) do o[i] = t[i] end
+  return o
+end
+function M.box_n(b) return (b[4] - b[1] + 1) * (b[5] - b[2] + 1) * (b[6] - b[3] + 1) end
+function M.merge_boxes(list)
+  local out = {}
+  for _, b in ipairs(list) do out[#out + 1] = {b[1], b[2], b[3], b[4], b[5], b[6]} end
+  local i = 1
+  while i <= #out do
+    local merged = false
+    for j = 1, #out do
+      local a, b = out[i], out[j]
+      if j ~= i then
+        local u = {math.min(a[1], b[1]), math.min(a[2], b[2]), math.min(a[3], b[3]), math.max(a[4], b[4]),
+                   math.max(a[5], b[5]), math.max(a[6], b[6])}
+        if M.box_n(u) <= M.box_n(a) + M.box_n(b) then
+          local k = math.min(i, j)
+          out[k] = u
+          table.remove(out, math.max(i, j))
+          merged, i = true, 1
+          break
+        end
+      end
+    end
+    if not merged then i = i + 1 end
+  end
+  return out
+end
+local function clamp_box(b, X, Y, Z)
+  local r = {math.max(0, b[1]), math.max(0, b[2]), math.max(0, b[3]), b[4], b[5], b[6]}
+  if X then r[4], r[5], r[6] = math.min(X - 1, r[4]), math.min(Y - 1, r[5]), math.min((Z or r[6] + 1) - 1, r[6]) end
+  if r[1] > r[4] or r[2] > r[5] or r[3] > r[6] then return nil end
+  return r
+end
+local function in_box(b, x, y, z) return x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] end
+
+-- the scan of the hospital's surroundings (else the citizens'); BUG-289: plus every citizen's, the bodies the last scans
+-- found (p.wb), the map's surface levels (survey) and what the survey meets; BUG-288: within ws_read_max tiles, the
+-- hospital's or the median's box first
+local function new_scan(K, c, r, p)
+  local core, ref = {}, nil
   for i = 1, math.min(2, #r.hosp) do
     local h = r.hosp[i]
-    boxes[#boxes + 1] = {math.max(0, h.x1 - c.near), math.max(0, h.y1 - c.near), math.max(0, h.z - c.ws_dz),
-                         h.x2 + c.near, h.y2 + c.near, h.z + c.ws_dz}
+    core[#core + 1] = {h.x1 - c.near, h.y1 - c.near, h.z - c.ws_dz, h.x2 + c.near, h.y2 + c.near, h.z + c.ws_dz}
   end
   if r.hosp[1] then
     local h = r.hosp[1]
     ref = {x1 = h.x1, y1 = h.y1, x2 = h.x2, y2 = h.y2, z = h.z}
   elseif #r.home > 0 then
     local mx, my, mz = median(r.home, 'x'), median(r.home, 'y'), median(r.home, 'z')
-    boxes[1] = {math.max(0, mx - c.near), math.max(0, my - c.near), math.max(0, mz - c.ws_dz), mx + c.near,
-                my + c.near, mz + c.ws_dz}
+    core[1] = {mx - c.near, my - c.near, mz - c.ws_dz, mx + c.near, my + c.near, mz + c.ws_dz}
     ref = {x1 = mx, y1 = my, x2 = mx, y2 = my, z = mz}
   else
     return nil
+  end
+  local okm, X, Y, Z = K.call('snapshot', 'map_size')
+  if not (okm and math.tointeger(X) and math.tointeger(Y)) then X, Y, Z = nil, nil, nil end
+  local wide = {}
+  for _, b in ipairs(type(p.wb) == 'table' and p.wb or {}) do               -- the bodies the last scans found
+    local x, y, z = math.tointeger(b[1]), math.tointeger(b[2]), math.tointeger(b[3])
+    if x and y and z then
+      wide[#wide + 1] = {x - c.ws_mem_r, y - c.ws_mem_r, z - 1, x + c.ws_mem_r, y + c.ws_mem_r, z + 1}
+    end
+  end
+  for _, h in ipairs(r.home) do                                             -- every citizen (a drinker at the brook)
+    wide[#wide + 1] = {h.x - c.ws_cit, h.y - c.ws_cit, h.z - 1, h.x + c.ws_cit, h.y + c.ws_cit, h.z + 1}
+  end
+  local survey, scost = {}, 0
+  if X and c.ws_survey_levels > 0 and c.ws_lattice >= 2 then
+    local seen = {}
+    local per = (X * Y + c.ws_lattice - 1) // c.ws_lattice
+    for _, at in ipairs({{ref.x1, ref.y1}, {X // 2, Y // 2}}) do
+      local ok, sz = K.call('snapshot', 'surface_z', at[1], at[2])
+      sz = ok and math.tointeger(sz) or nil
+      for dz = 0, sz and c.ws_survey_levels - 1 or -1 do
+        local z = sz - dz
+        if z >= 0 and not seen[z] and scost + per <= c.ws_survey_max then
+          seen[z], survey[#survey + 1], scost = true, z, scost + per
+        end
+      end
+    end
+  end
+  local left = c.ws_read_max - scost - (#survey > 0 and c.ws_seed_max or 0)
+  local boxes, cut = {}, 0
+  for _, b in ipairs(M.merge_boxes(core)) do                                -- always read
+    local cb = clamp_box(b, X, Y, Z)
+    if cb then boxes[#boxes + 1], left = cb, left - M.box_n(cb) end
+  end
+  local ncore = #boxes
+  for _, b in ipairs(M.merge_boxes(wide)) do
+    local cb, inside = clamp_box(b, X, Y, Z), false
+    for i = 1, ncore do
+      local o = boxes[i]
+      if cb and in_box(o, cb[1], cb[2], cb[3]) and in_box(o, cb[4], cb[5], cb[6]) then inside = true end
+    end
+    if cb and not inside then
+      if M.box_n(cb) <= left then boxes[#boxes + 1], left = cb, left - M.box_n(cb) else cut = cut + 1 end
+    end
   end
   local from, fd                                     -- walk origin: the citizen nearest the reference
   for _, h in ipairs(r.home) do
     local d = dist_box(h.x, h.y, h.z, ref)
     if not fd or d < fd then from, fd = h, d end
   end
-  return {boxes = boxes, bi = 1, tiles = {}, n = 0, ref = ref, from = from, stage = 'read', sources = r.sources,
-          bk = 0, out = {}}
+  return {boxes = boxes, bi = 1, tiles = {}, n = 0, ref = ref, from = from, stage = #survey > 0 and 'survey' or 'read',
+          sources = r.sources, bk = 0, out = {}, survey = survey, si = 1, X = X, Y = Y, Z = Z, cut = cut,
+          seed_left = #survey > 0 and c.ws_seed_max or 0, seeds = 0, hits = {}, aqz = {}, reads = 0, slices = 0,
+          quota = math.max(c.ws_tiles, (c.ws_read_max + c.ws_slices - 1) // c.ws_slices)}
 end
 
--- one slice of reading: rows of the current level of the current box through snapshot.liquids
+-- BUG-289: one slice of the survey: rows of a surface level of the whole map, every ws_lattice-th tile (snapshot.liquids
+-- lattice); deep water outside caverns is kept as a seed. A failure ends the survey only (the boxes are read anyway)
+local function scan_survey(K, c, sc)
+  local budget, lat = sc.quota, c.ws_lattice
+  while budget > 0 do
+    local z = sc.survey[sc.si]
+    if not z then return true end
+    sc.y = sc.y or 0
+    local rows = math.max(1, math.min(sc.Y - sc.y, (budget * lat) // sc.X, (4096 * lat) // sc.X))
+    local ok, list, err = K.call('snapshot', 'liquids', 0, sc.y, sc.X - 1, sc.y + rows - 1, z, c.deep, false, lat)
+    if not ok or type(list) ~= 'table' then
+      sc.serr = 'survey: ' .. tostring(ok and err or list)
+      return true
+    end
+    for _, t in ipairs(list) do
+      if t[4] ~= 1 and #sc.hits < 2000 then sc.hits[#sc.hits + 1] = {t[1], t[2], z} end
+    end
+    local cost = (sc.X * rows + lat - 1) // lat
+    budget, sc.reads = budget - cost, sc.reads + cost
+    sc.y = sc.y + rows
+    if sc.y >= sc.Y then sc.si, sc.y = sc.si + 1, nil end
+  end
+  return false
+end
+
+-- BUG-289: a ws_seed_r box round each survey hit no box reads yet, within ws_seed_max tiles
+local function scan_seed(c, sc)
+  local seeds = {}
+  for _, h in ipairs(sc.hits) do
+    local inside = false
+    for _, b in ipairs(sc.boxes) do if in_box(b, h[1], h[2], h[3]) then inside = true end end
+    for _, b in ipairs(seeds) do if in_box(b, h[1], h[2], h[3]) then inside = true end end
+    if not inside then
+      seeds[#seeds + 1] = {h[1] - c.ws_seed_r, h[2] - c.ws_seed_r, h[3], h[1] + c.ws_seed_r, h[2] + c.ws_seed_r, h[3]}
+    end
+  end
+  for _, b in ipairs(M.merge_boxes(seeds)) do
+    local cb = clamp_box(b, sc.X, sc.Y, sc.Z)
+    if cb and M.box_n(cb) <= sc.seed_left then
+      sc.boxes[#sc.boxes + 1], sc.seed_left, sc.seeds = cb, sc.seed_left - M.box_n(cb), sc.seeds + 1
+    elseif cb then
+      sc.cut = sc.cut + 1
+    end
+  end
+  sc.hits = nil
+end
+
+-- one slice of reading: rows of the current level of the current box through snapshot.liquids (BUG-288: sc.quota tiles)
 local function scan_read(K, c, sc)
-  local budget = c.ws_tiles
+  local budget = sc.quota
   while budget > 0 do
     local b = sc.boxes[sc.bi]
     if not b then return true end
@@ -774,9 +936,9 @@ local function scan_read(K, c, sc)
       end
       for _, t in ipairs(list) do
         local key = k3(t[1], t[2], sc.z)
-        if not sc.tiles[key] and sc.n < 4000 then sc.tiles[key], sc.n = {t[1], t[2], sc.z, t[3], t[4]}, sc.n + 1 end
+        if not sc.tiles[key] and sc.n < 6000 then sc.tiles[key], sc.n = {t[1], t[2], sc.z, t[3], t[4]}, sc.n + 1 end
       end
-      budget = budget - w * rows
+      budget, sc.reads = budget - w * rows, sc.reads + w * rows
       sc.y = sc.y + rows
       if sc.y > b[5] then sc.y, sc.z = b[2], sc.z + 1 end
     end
@@ -784,7 +946,8 @@ local function scan_read(K, c, sc)
   return false
 end
 
--- deep tiles -> bodies (8-connected on one level), nearest to the reference first, at most ws_bodies
+-- deep tiles -> bodies (8-connected on one level), nearest to the reference first, at most ws_bodies (BUG-289: the three
+-- largest of the rest among them: a brook farther off than a few pools)
 local function scan_group(c, sc)
   local keys, seen, bodies = {}, {}, {}
   for k in pairs(sc.tiles) do keys[#keys + 1] = k end
@@ -811,16 +974,31 @@ local function scan_group(c, sc)
       bodies[#bodies + 1] = body
     end
   end
-  table.sort(bodies, function(a, b)
+  local function near_first(a, b)
     if a.d ~= b.d then return a.d < b.d end
     if #a.tiles ~= #b.tiles then return #a.tiles > #b.tiles end
-    return a.z > b.z
-  end)
-  while #bodies > c.ws_bodies do table.remove(bodies) end
+    if a.z ~= b.z then return a.z > b.z end
+    return a.at[2] < b.at[2] or (a.at[2] == b.at[2] and a.at[1] < b.at[1])
+  end
+  table.sort(bodies, near_first)
+  if #bodies > c.ws_bodies then
+    local keep, rest = {}, {}
+    local nk = math.max(0, c.ws_bodies - 3)
+    for i, b in ipairs(bodies) do if i <= nk then keep[#keep + 1] = b else rest[#rest + 1] = b end end
+    table.sort(rest, function(a, b)
+      if #a.tiles ~= #b.tiles then return #a.tiles > #b.tiles end
+      return near_first(a, b)
+    end)
+    for i = 1, c.ws_bodies - nk do keep[#keep + 1] = rest[i] end
+    table.sort(keep, near_first)
+    bodies = keep
+  end
   sc.list = bodies
 end
 
--- one body: the accepted zone or well over it, a reachable bank, else the shortest dig to one
+-- one body: the accepted zone or well over it, a reachable bank, else the shortest dig to one. BUG-290: open space right
+-- above a body tile beside a floor the citizens reach on that level is a well spot (`pit`: build the well there).
+-- BUG-291: a revealed tile with the aquifer flag in or beside the body marks its level (sc.aqz)
 local function scan_body(K, c, sc, body)
   local z, deepset = body.z, sc.tiles
   local res = {z = z, n = #body.tiles, max = body.max, at = body.at, d = body.d, zone = -1, well = -1, reach = 0}
@@ -835,19 +1013,38 @@ local function scan_body(K, c, sc, body)
     end
   end
   local checks = 0
-  local function reachable(x, y)
+  local function reachable(x, y, zz)
     if not sc.from then return true end
     if checks >= c.ws_reach then return nil end
     checks = checks + 1
-    local ok, yes = K.call('snapshot', 'reach', sc.from, {x = x, y = y, z = z})
+    local ok, yes = K.call('snapshot', 'reach', sc.from, {x = x, y = y, z = zz or z})
     return not ok or yes ~= false
+  end
+  if c.pit_well and res.well == -1 and res.zone == -1 then
+    for i = 1, math.min(16, #body.tiles) do
+      local t = body.tiles[i]
+      local own = tile(K, t[1], t[2], z)
+      if own and own.aq == true then sc.aqz[z] = sc.aqz[z] or {t[1], t[2], z} end
+      local up = not res.pit and tile(K, t[1], t[2], z + 1)
+      if up and (up.c == '_' or up.c == 'v') then          -- open space; 'v' over a channel's ramp (a pit)
+        for _, o in ipairs(N8) do
+          local nb = tile(K, t[1] + o[1], t[2] + o[2], z + 1)
+          if nb and STAND[nb.c] and not wet_char(nb.c) and not res.pit then
+            local yes = reachable(t[1] + o[1], t[2] + o[2], z + 1)
+            if yes then res.pit, res.stand = {t[1], t[2], z + 1}, {t[1] + o[1], t[2] + o[2], z + 1} end
+          end
+        end
+      end
+    end
   end
   -- at most ws_reads tile reads per body (one body a frame): a big lake must not make the module slow
   local reads = 0
   local function read(x, y)
     if reads >= c.ws_reads then res.partial = 1; return nil end
     reads = reads + 1
-    return tile(K, x, y, z)
+    local t = tile(K, x, y, z)
+    if t and t.aq == true then sc.aqz[z] = sc.aqz[z] or {x, y, z} end
+    return t
   end
   local seen, walls = {}, {}
   for _, t in ipairs(body.tiles) do
@@ -898,34 +1095,107 @@ local function scan_body(K, c, sc, body)
   return res
 end
 
-local function scan_done(K, c, sc)
+-- BUG-289/290: the best way to water the last scan offers (any distance): {kind = 'bank' | 'well' | 'dig', b = body}, the
+-- nearest bank first, then a well spot, then the shortest dig; nil without one
+function M.best_way(ws)
+  local best = {}
+  for _, b in ipairs(ws and ws.bodies or {}) do
+    if b.cavern ~= 1 then
+      for _, k in ipairs({{'bank', b.bank}, {'well', b.pit}, {'dig', b.dig}}) do
+        if k[2] and (not best[k[1]] or b.d < best[k[1]].d) then best[k[1]] = b end
+      end
+    end
+  end
+  for _, k in ipairs({'bank', 'well', 'dig'}) do if best[k] then return {kind = k, b = best[k]} end end
+end
+
+-- the short text of M.best_way (state water.wsc, <= 96 bytes; bp sites hospital names it when no accepted water exists)
+function M.way_text(w)
+  if not w then return nil end
+  local b = w.b
+  if w.kind == 'bank' then
+    return trunc(string.format('water %d,%d,%d (%d/7, %d tiles): bank %d,%d,%d reachable: zone it or a well over it',
+                               b.at[1], b.at[2], b.at[3], b.max, b.n, b.bank[1], b.bank[2], b.bank[3]), 96)
+  elseif w.kind == 'well' then
+    return trunc(string.format('water %d,%d,%d (%d/7): a well at %d,%d,%d over it (open above, reachable)', b.at[1],
+                               b.at[2], b.at[3], b.max, b.pit[1], b.pit[2], b.pit[3]), 96)
+  end
+  return trunc(string.format('water %d,%d,%d (%d/7): dig %d wall(s) from %d,%d,%d', b.at[1], b.at[2], b.at[3], b.max,
+                             b.dig.n, b.dig.from[1], b.dig.from[2], b.dig.from[3]), 96)
+end
+
+local function scan_done(K, c, sc, p)
   local levels, byz = {}, {}
   for _, t in pairs(sc.tiles) do byz[t[3]] = (byz[t[3]] or 0) + 1 end
   for z, n in pairs(byz) do levels[#levels + 1] = {z, n} end
   table.sort(levels, function(a, b) return a[1] > b[1] end)
-  st.ws = {tick = K.now().tick, deep = c.deep, boxes = sc.boxes, tiles = sc.n, levels = levels, bodies = sc.out,
-           err = sc.err}
-  local reach = 0
-  for _, b in ipairs(sc.out) do if b.bank or b.dig then reach = reach + 1 end end
-  K.log('info', 'water sources: %d tiles >= %d/7 in %d bodies, %d with a bank or a dig%s', sc.n, c.deep, #sc.out, reach,
+  local now = K.now().tick
+  -- BUG-291: the levels where a revealed aquifer tile touches the water (the manifest's aquifer_levels through the runner)
+  p.aqz = type(p.aqz) == 'table' and p.aqz or json.array{}
+  local aql = {}
+  for z, at in pairs(sc.aqz) do
+    local known = false
+    for _, v in ipairs(p.aqz) do if v == z then known = true end end
+    if not known and #p.aqz < 16 then
+      p.aqz[#p.aqz + 1] = z
+      K.log('info', 'water sources: aquifer level z%d (a revealed aquifer tile at %d,%d,%d beside water >= %d/7)', z, at[1],
+            at[2], at[3], c.deep)
+    end
+    K.call('runner', 'aq_seen', z)
+    aql[#aql + 1] = z
+  end
+  table.sort(aql)
+  st.ws = {tick = now, deep = c.deep, boxes = sc.boxes, tiles = sc.n, levels = levels, bodies = sc.out,
+           err = sc.err, serr = sc.serr, slices = sc.slices, reads = sc.reads, survey = sc.survey, seeds = sc.seeds,
+           cut = sc.cut, aq = aql}
+  -- BUG-289: the bodies to look at again next time (banks and well spots first, then the largest)
+  local mem = {}
+  for _, b in ipairs(sc.out) do if b.cavern ~= 1 then mem[#mem + 1] = b end end
+  table.sort(mem, function(a, b)
+    local ra, rb = (a.bank or a.pit) and 1 or 0, (b.bank or b.pit) and 1 or 0
+    if ra ~= rb then return ra > rb end
+    if a.n ~= b.n then return a.n > b.n end
+    return a.d < b.d
+  end)
+  p.wb = json.array{}
+  for i = 1, math.min(c.ws_mem, #mem) do p.wb[i] = json.array{mem[i].at[1], mem[i].at[2], mem[i].at[3]} end
+  p.ws_last = {t = now, slices = sc.slices, reads = sc.reads, bodies = #sc.out, boxes = #sc.boxes}
+  K.persist.touch('m.water')
+  local reach, pits = 0, 0
+  for _, b in ipairs(sc.out) do
+    if b.bank or b.dig then reach = reach + 1 end
+    if b.pit then pits = pits + 1 end
+  end
+  K.log('info', 'water sources: %d tiles >= %d/7 in %d bodies, %d with a bank or a dig, %d with a well spot (%d slices, %d '
+        .. 'tiles read, %d boxes)%s', sc.n, c.deep, #sc.out, reach, pits, sc.slices, sc.reads, #sc.boxes,
         sc.err and (' (' .. sc.err .. ')') or '')
 end
 
--- one frame of the scan: true while more remains
-local function scan_step(K, c)
+-- one frame of the scan: true while more remains. BUG-288: at most quota tiles a slice, ws_body_slices slices of bodies
+local function scan_step(K, c, p)
   local sc = st.scan
+  sc.slices = sc.slices + 1
+  if sc.stage == 'survey' then
+    if not scan_survey(K, c, sc) then return true end
+    scan_seed(c, sc)
+    sc.stage = 'read'
+    return true
+  end
   if sc.stage == 'read' then
     if not scan_read(K, c, sc) then return true end
-    if sc.err then scan_done(K, c, sc); return false end
+    if sc.err then scan_done(K, c, sc, p); return false end
     scan_group(c, sc)
     sc.stage = 'bodies'
+    sc.per = math.max(1, (#sc.list + c.ws_body_slices - 1) // math.max(1, c.ws_body_slices))
     if #sc.list > 0 then return true end
   end
-  sc.bk = sc.bk + 1
-  local body = sc.list[sc.bk]
-  if body then sc.out[#sc.out + 1] = scan_body(K, c, sc, body) end
+  for _ = 1, sc.per or 1 do
+    sc.bk = sc.bk + 1
+    local body = sc.list[sc.bk]
+    if body then sc.out[#sc.out + 1] = scan_body(K, c, sc, body) end
+  end
   if sc.bk < #sc.list then return true end
-  scan_done(K, c, sc)
+  scan_done(K, c, sc, p)
   return false
 end
 
@@ -1823,12 +2093,17 @@ function M.dry_causes(K, c, r, p)
   return out, dw
 end
 
--- BUG-262: the highest level the kernel saw damp or wet (manifest aquifer_levels), nil without one
+-- BUG-262: the highest level the kernel saw damp or wet (manifest aquifer_levels), nil without one. BUG-291: also a level
+-- the water scan saw a revealed aquifer tile beside water on (m.water aqz; the runner adds it to the manifest)
 function M.aq_level(K)
   local best
   local ok, man = pcall(K.manifest)
-  for _, z in ipairs(ok and type(man) == 'table' and type(man.aquifer_levels) == 'table' and man.aquifer_levels or {}) do
-    if math.tointeger(z) and (not best or z > best) then best = z end
+  local okp, p = pcall(K.persist.get, 'm.water')
+  for _, list in ipairs({ok and type(man) == 'table' and type(man.aquifer_levels) == 'table' and man.aquifer_levels or {},
+                         okp and type(p) == 'table' and type(p.aqz) == 'table' and p.aqz or {}}) do
+    for _, z in ipairs(list) do
+      if math.tointeger(z) and (not best or z > best) then best = z end
+    end
   end
   return best
 end
@@ -2031,6 +2306,9 @@ local function finish(K, c, r, p)
   local okh, hpend = K.call('runner', 'pending', 'hospital')
   local planned = #r.hosp == 0 and okh and type(hpend) == 'number' and hpend > 0
   local gate = dry or (planned and wet == 0)
+  -- BUG-288 (Run 15 Inkintense: no hospital zone, no accepted water, the scan ran only on an inspect): a fort without
+  -- accepted water scans weekly too (the recipe, the well spots, the aquifer level come from it)
+  if wet == 0 and (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end
   if gate then
     if (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end
     local every = #r.patients > 0 and c.hosp_every or c.gate_every
@@ -2191,6 +2469,17 @@ function M.step(K, budget, ctx)
     st.run, st.run_t = new_run(K), now
   end
   local r = st.run
+  -- BUG-288 (Run 15 Inkintense: 'scan queued' for a season): the scan in hand gets a slice in every step. It used to wait
+  -- for a step without a run, and with the slices paced 30 s apart every step began a new run (1200 ticks had passed):
+  -- the scan never moved while the game ran
+  if st.scan then
+    local ok, more = pcall(scan_step, K, c, p)
+    if not ok then
+      K.log('warn', 'water sources scan: %s', tostring(more))
+      st.ws = st.ws or {tick = now, deep = c.deep, boxes = {}, tiles = 0, levels = {}, bodies = {}, err = 'scan failed'}
+    end
+    if not (ok and more) then st.scan = nil end
+  end
   if r then
     while r.ph <= #PHASES do
       if not PHASES[r.ph](K, c, r) then return 'more' end
@@ -2200,15 +2489,12 @@ function M.step(K, budget, ctx)
     finish(K, c, r, p)
     if st.ws_want and not st.scan then
       st.ws_want = nil
-      st.scan = new_scan(K, c, r)
+      st.scan = new_scan(K, c, r, p)
+      if not st.scan then                -- nobody to scan around: say so instead of 'queued' for good
+        st.ws = {tick = now, deep = c.deep, boxes = {}, tiles = 0, levels = {}, bodies = {},
+                 err = 'no hospital zone and no citizen position to scan around'}
+      end
     end
-  elseif st.scan then
-    local ok, more = pcall(scan_step, K, c)
-    if not ok then
-      K.log('warn', 'water sources scan: %s', tostring(more))
-      st.ws = st.ws or {tick = now, deep = c.deep, boxes = {}, tiles = 0, levels = {}, bodies = {}, err = 'scan failed'}
-    end
-    if not (ok and more) then st.scan = nil end
   end
   if st.gate_pending and not st.scan then                 -- the gate alarm that waited for the scan
     emit_gate(K, c, st.gate_pending)
@@ -2242,20 +2528,36 @@ function M.inspect(K, what, key)
            src = n and n.src and M.label(K, n.src[1], n.src[2], n.src[3]) or nil, wells = rd.wells, wet = rd.wwet}
   end
   local queued = (st.ws_want or st.scan) and 1 or 0
-  local rm = pstate(K).rm                     -- BUG-034: the last dry hospital removal (zones, patients, GiveWater jobs)
+  local ps = pstate(K)
+  local rm = ps.rm                            -- BUG-034: the last dry hospital removal (zones, patients, GiveWater jobs)
   rm = type(rm) == 'table' and rm or nil
+  -- BUG-288: when a scan last finished (kept over reloads) and how far the running one is (stage, slices so far, at most)
+  local last = type(ps.ws_last) == 'table' and ps.ws_last or nil
+  local sc = st.scan
+  local run = sc and {stage = sc.stage, slices = sc.slices, max = c.ws_slices + c.ws_body_slices + 2, reads = sc.reads}
+              or nil
+  local lt = last and math.tointeger(last.t)
+  local since = lt and string.format('last finished at tick %d, %d ticks ago', lt, now - lt) or 'none finished yet'
   if not st.ws then
-    return true, 'water_sources: scan queued for the next water run',
-           {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm, refuge = ref,
+    local what = sc and string.format('scan running (%s, slice %d of at most %d)', sc.stage, sc.slices, run.max)
+                 or 'scan queued for the next water run'
+    return true, string.format('water_sources: %s; %s', what, since),
+           {tick = now, queued = queued, deep = c.deep, sources = srcs, removed = rm, refuge = ref, last = last, run = run,
             carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil, chain = st.chain}
   end
   local w = st.ws
-  local reach = 0
-  for _, b in ipairs(w.bodies) do if b.bank or b.dig then reach = reach + 1 end end
-  return true, string.format('water_sources: %d bodies >= %d/7, %d with a bank or a dig, %d sources', #w.bodies, w.deep,
-                             reach, #srcs),
-         {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = w.boxes, tiles = w.tiles,
-          levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm, refuge = ref,
+  local reach, pits = 0, 0
+  for _, b in ipairs(w.bodies) do
+    if b.bank or b.dig then reach = reach + 1 end
+    if b.pit then pits = pits + 1 end
+  end
+  return true, string.format('water_sources: %d bodies >= %d/7, %d with a bank or a dig, %d with a well spot, %d sources; '
+                             .. 'scan %s%s', #w.bodies, w.deep, reach, pits, #srcs, since, sc and ', a new one running' or ''),
+         {tick = w.tick, age = now - w.tick, queued = queued, deep = w.deep, boxes = M.first(w.boxes, 12),
+          nboxes = #w.boxes, tiles = w.tiles,
+          levels = w.levels, bodies = w.bodies, sources = srcs, err = w.err, removed = rm, refuge = ref, last = last,
+          run = run, slices = w.slices, reads = w.reads, survey = w.survey, seeds = w.seeds, cut = w.cut, aq = w.aq,
+          serr = w.serr, way = M.way_text(M.best_way(w)),
           carers = st.out and st.out.cw or nil, locs = st.out and st.out.locs or nil, chain = st.chain,
           note = 'sources [kind, id, x, y, z, accepted, depth under a well (-1 unknown), burrow]; refuge: its bbox, d = '
                  .. 'its nearest tile to the nearest accepted source (-1 none); bank: stand there and fill or zone the '
@@ -2264,7 +2566,11 @@ function M.inspect(K, what, key)
                  .. 'never offered (caverns stay sealed); removed: the last dry hospital removal (t, zones, locs, '
                  .. 'n patients, tmax, give = GiveWater jobs then, after = a day later); locs (BUG-056): hospital locations, total / '
                  .. 'with a zone (live) / without (stale: ignored by every count); carers (BUG-054): have, want, idle ones, '
-                 .. 'give = citizens giving water, mine = added by the kernel (Orderlies), err = why none was added'}
+                 .. 'give = citizens giving water, mine = added by the kernel (Orderlies), err = why none was added; pit '
+                 .. '(BUG-290): a well spot, the open tile right above the water (stand: the reachable floor beside it); '
+                 .. 'last/run (BUG-288): the last finished scan and the running one (slices, at most max); survey/seeds '
+                 .. '(BUG-289): the surface levels surveyed and the boxes round what they met; aq (BUG-291): levels with a '
+                 .. 'revealed aquifer tile beside the water; way: the best way to water at any distance'}
 end
 
 -- inspect what=hospital (kern routes it here; BUG-106): the audit of the last water run (a game day old at most): the gaps in a
@@ -2311,6 +2617,12 @@ function M.state(K)
   end
   -- BUG-106: the tokens of the hospital's gaps, while a hospital stands or a patient lies (a fort without either has none
   -- to fix yet); `inspect what=hospital` lists them with their counts
+  -- BUG-288/289/290: when the water scan last finished (wst) and the best way to water it found (wsc: bp sites hospital
+  -- names it while no accepted water exists)
+  local last = pstate(K).ws_last
+  if type(last) == 'table' and math.tointeger(last.t) and C.STATE_SPEC.opt.water.opt.wst then w.wst = last.t end
+  local wsc = st.ws and M.way_text(M.best_way(st.ws))
+  if wsc and C.STATE_SPEC.opt.water.opt.wsc then w.wsc = wsc end
   local a = st.audit
   if a and #a.gaps > 0 and (a.zones > 0 or a.patients > 0) and C.STATE_SPEC.opt.water.opt.gaps then
     w.gaps = json.array{}

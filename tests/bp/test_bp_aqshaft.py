@@ -35,7 +35,7 @@ def test_aqshaft_on_a_site_anchor_and_refusals():
     with pytest.raises(ValueError):
         bp.emit("aqshaft", {"dry_levels": 0})
     with pytest.raises(ValueError, match="aqshaft"):
-        bp.rank(terrain().snapshot(purpose="sites"), "aqshaft", {})      # no ranking: the player names the column
+        bp.rank(terrain().snapshot(purpose="sites"), "aqshaft", {})      # BUG-292: ranked from Z4, needs the manifest
 
 
 @pytest.fixture(scope="module")

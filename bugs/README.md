@@ -300,6 +300,11 @@ Related: FR-xx, BUG-xx
 | [BUG-285](BUG-285-status-and-brief-name-no-open-mood.md) | fixed (offline, live-untested) | medium | Run 15: status and brief name no open mood, its needs or its days left | care.lua, brief.py |
 | [BUG-286](BUG-286-unit-sheet-left-after-the-kernels-trade-screen-blocks-the-next-caravan.md) | fixed (offline, live-untested) | high | Run 15: a unit sheet left after the kernel's own trade screen blocks every later caravan as a player screen | trade.lua |
 | [BUG-287](BUG-287-player-screen-blocks-a-caravan-silently-until-it-leaves.md) | fixed (offline, live-untested) | medium | Run 15: a player screen blocks a caravan x7-x14 and nobody is asked | trade.lua, schema.py |
+| [BUG-288](BUG-288-water-scan-never-finishes-while-the-game-runs.md) | fixed (offline, live-untested) | high | Run 15 Inkintense: the water scan never finished while the game ran ('scan queued') | water.lua |
+| [BUG-289](BUG-289-water-scan-box-misses-the-brook.md) | fixed (offline, live-untested) | high | Run 15 Drillchamber: the water scan's box missed the brook the fort drinks from | water.lua, snapshot.lua, sites.py |
+| [BUG-290](BUG-290-flooded-pit-not-a-well-spot.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: a flooded pit open above the water was no well spot | water.lua |
+| [BUG-291](BUG-291-aquifer-level-not-learnt-from-seepage.md) | fixed (offline, live-untested) | high | Run 15 Inkintense: no aquifer level learnt from revealed seepage (cistern water=aquifer) | water.lua, runner.lua |
+| [BUG-292](BUG-292-aqshaft-not-ranked-and-refused-everywhere.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: `bp sites aqshaft` ranked nothing, hand-picked columns refused | sites.py, cmd.py |
 | [BUG-293](BUG-293-player-popcap-lost-at-plan-reload-no-famine-hold.md) | fixed (offline, live-untested) | high | Run 15c: popcap.lower lost at a plan reload, no famine hold, no popcap.raise/set | readiness.lua, schema.py, brief.py |
 | [BUG-294](BUG-294-automatic-drill-during-a-famine.md) | fixed (offline, live-untested) | high | Run 15c: automatic drills start during a famine | drill.lua |
 | [BUG-295](BUG-295-hunters-taken-off-by-a-drill-come-back-late.md) | fixed (offline, live-untested) | high | Run 15c: hunters a drill took off come back a month later | economy.lua |

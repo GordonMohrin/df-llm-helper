@@ -307,17 +307,23 @@ end
 -- cavern tile (designation.feature_global, the export's cavern mark; BUG-031: cavern water is never a hospital's
 -- source), else 0. Run 11 (economy's fishing zone): a frozen tile (tiletype material FROZEN_LIQUID, the ice the tile
 -- sheet shows) is no water and is left out; with `ice` true every revealed ice tile of the rect is listed too, with
--- a fifth field 1 (0 on water) and its flow as read
-function M.liquids(K, x0, y0, x1, y1, z, min, ice)
+-- a fifth field 1 (0 on water) and its flow as read. BUG-289 (water's survey of the surface): `lattice` n >= 2 reads only
+-- the tiles with (x + 2y) % n == 0, and the rect may then cover n times liquid_tiles. With n = 5 or 7 (prime to 1, 2, 3)
+-- that is every n-th tile of each row, column and both diagonals (a brook 1 tile wide is met every n tiles); 2, 3, 4, 6
+-- and 8 miss a direction (3: the diagonal x = y + k)
+function M.liquids(K, x0, y0, x1, y1, z, min, ice, lattice)
   x0, y0, x1, y1, z, min = int(x0), int(y0), int(x1), int(y1), int(z), int(min) or 1
   local out = {}
   if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
-  if (x1 - x0 + 1) * (y1 - y0 + 1) > M.CFG.liquid_tiles then return nil, 'rect too large' end
+  local lat = int(lattice)
+  lat = lat and lat >= 2 and lat or nil
+  local area = (x1 - x0 + 1) * (y1 - y0 + 1)
+  if (lat and (area + lat - 1) // lat or area) > M.CFG.liquid_tiles then return nil, 'rect too large' end
   local getTileFlags, getTileType = dfhack.maps.getTileFlags, dfhack.maps.getTileType
   ice = ice == true
   for y = y0, y1 do
     for x = x0, x1 do
-      local des = getTileFlags(x, y, z)
+      local des = (not lat or (x + 2 * y) % lat == 0) and getTileFlags(x, y, z) or nil
       if des and not des.hidden then
         local f = int(des.flow_size) or 0
         local lt = des.liquid_type
@@ -593,6 +599,16 @@ local function surface_z(cx, cy, zmax)
       if c ~= '_' and c ~= '?' then return z end
     end
   end
+end
+
+-- BUG-289 (water's survey): the map size in tiles (x, y, z) and the surface level of a column (its top revealed tile that
+-- is no open space; nil when none is revealed or the column lies off the map)
+function M.map_size(K) return map_size() end
+function M.surface_z(K, x, y)
+  x, y = int(x), int(y)
+  local X, Y, Z = map_size()
+  if not (x and y) or x < 0 or y < 0 or x >= X or y >= Y then return nil end
+  return surface_z(x, y, Z)
 end
 
 -- the box without a manifest: the surface around the map centre

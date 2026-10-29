@@ -294,6 +294,11 @@ WATER_LIM: dict = {
     "carers_per_run": (0, 20), "carers_hold_days": (0, 400), "dying_thirst": _THIRST, "dying_every": _TICKS,
     # BUG-104: a GiveWater job open (no worker) this many game days is 'stuck' in the patient_thirst / PATIENT_DYING cause
     "give_stuck_days": (1, 400),
+    # BUG-288/289: the scan's read budget and slices, the boxes round citizens and remembered bodies, the surface survey
+    # (levels per column, lattice, budget) and the boxes round its hits; BUG-290: a pit as a well spot
+    "ws_read_max": (1000, 400000), "ws_slices": (1, 200), "ws_body_slices": (1, 50), "ws_cit": (0, 60), "ws_mem": (0, 32),
+    "ws_mem_r": (0, 60), "ws_survey_levels": (0, 6), "ws_lattice": (2, 8), "ws_survey_max": (0, 200000),
+    "ws_seed_r": (0, 60), "ws_seed_max": (0, 100000), "pit_well": "bool",
 }
 
 

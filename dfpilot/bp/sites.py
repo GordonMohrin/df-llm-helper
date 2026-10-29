@@ -43,6 +43,8 @@ sources, state water.src; cmd.water_ctx) only sites whose hospital zone lies wit
 accepted source count, measured as water.lua's served() does (Chebyshev from the source to the zone rect, z included);
 +2 per tile nearer; ValueError names the source, the nearest candidate and the refuge's water when none is left.
 `fill_source`: what a bucket-fed cistern (no pipe) could be filled from (revealed open water reachable from the core).
+Aqshaft (BUG-292): columns from public Z4 floor whose levels below are rock or unknown with rock on their 4 sides,
+off the keep-out boxes and the cavern/warm levels; + AQ_SPAN for passing a known aquifer level (`_aqshaft`).
 """
 from __future__ import annotations
 
@@ -210,18 +212,17 @@ def _near_point(cands: list, tpl: str, near, within: int | None, at) -> list:
 
 
 def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None = None,
-         n: int = 3, water: dict | None = None, near=None, within: int | None = None, at=None) -> list[dict]:
+         n: int = 3, water: dict | None = None, near=None, within: int | None = None, at=None,
+         free=None) -> list[dict]:
     """Top `n` sites, best first: [{id:'S1'.., anchor:[x,y,z], rot, score:int, why:str}].
     Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4.
     `water` (BUG-040, WATER_TPLS only): {src: [[x,y,z]..] accepted sources, near, lbl?: labels parallel to src,
     refuge?: {name, box, wd, ws}}: only sites near accepted water, each with water {d, src}; None = not filtered.
     `near` (FR-78): [x, y, z], only sites whose footprint lies within `within` (default NEAR_WITHIN) tiles of it, nearest
     first; `at`: [x, y, z], only the sites anchored exactly there (the reason when there is none). Both apply to room,
-    explore and fortcore sites; the defense builds have the one site the manifest fixes."""
+    explore and fortcore sites; the defense builds have the one site the manifest fixes. `free` (BUG-292): a callable
+    candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
     p = check_params(tpl, params)
-    if tpl in aquifer.BUILD:                                 # FR-95: the player names the column (a reachable tile)
-        raise ValueError(f"{tpl}: no ranking; name the shaft column: p.x, p.y, p.top (a revealed tile the miners reach, "
-                         "e.g. the bottom of a fort stair) or site A<x>_<y>_<z>_0")
     if tpl in defense.BUILD:
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl in traps.BUILD:                                   # FR-96: absolute trap tiles, the site is the first one
@@ -237,8 +238,10 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     hid = _Pref(snap, lambda c: c == "?")
     mk = _Pref(snap, points=marks)
     wet = _Pref(snap, lambda c: c in WET)
-    rects = explore_rects(p) if tpl in mine.BUILD else footprint(tpl, p)
-    if tpl == "farms" and p.get("surface"):                 # BUG-297: plots on soil floor that stands already
+    rects = explore_rects(p) if tpl in mine.BUILD else {} if tpl in aquifer.BUILD else footprint(tpl, p)
+    if tpl in aquifer.BUILD:                                 # BUG-292: shaft columns are ranked (FR-95 named them only)
+        cands = _aqshaft(snap, p, manifest)
+    elif tpl == "farms" and p.get("surface"):               # BUG-297: plots on soil floor that stands already
         cands = _surface_farms(snap, p, manifest)
     elif tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
@@ -251,7 +254,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
             raise ValueError(_no_store(snap, p, manifest, bad, hid, mk, wet))
     if aqwell:
         cands = aquifer_well(cands, snap, manifest)         # BUG-262: the basin on an aquifer level, the room dry
-    else:
+    elif tpl not in aquifer.BUILD:                          # a shaft passes the aquifer levels: that is its point
         cands = aquifer_ok(cands, tpl, p, rects, manifest)  # FR-95: the levels the kernel saw damp or wet
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
@@ -259,11 +262,18 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _near_point(cands, tpl, near, within, at)
     cands.sort(key=lambda c: (c.get("_d", 0), -c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
     out: list[dict] = []
+    taken = 0
     for c in cands:
         if all(not _overlap(c["box"], o["box"]) for o in out):
+            if free is not None and not free(c):            # BUG-292: on or beside a placed project
+                taken += 1
+                continue
             out.append(c)
             if len(out) == n:
                 break
+    if free is not None and cands and not out:
+        raise ValueError(f"{tpl}: all {taken} candidate site(s) lie on or beside placed projects (bp.cancel frees a "
+                         "parked one's tiles)")
     return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"],
              **({"water": c["water"]} if "water" in c else {})} for i, c in enumerate(out)]
 
@@ -355,7 +365,8 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
         raise ValueError(f"{tpl}: no accepted water in the fort (state water.src is empty: no well over water, no water "
                          "zone on water >= 4/7; a well fed only by its own pond is none): a hospital without it is worse "
                          "than none (BUG-034); water first (dfllm cmd inspect '{\"what\":\"water_sources\"}'; no brook: "
-                         "dfllm bp sites cistern water=aquifer on a known aquifer level)" + rw)
+                         "dfllm bp sites cistern water=aquifer on a known aquifer level)" + rw
+                         + (f"; the water scan found: {water['cand']}" if water.get("cand") else ""))
     out, best = [], None
     for c in cands:
         zb = zone_box(tpl, p, c["anchor"], c["rot"])
@@ -860,6 +871,71 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
                          f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark or a cavern "
                          "breach); "
                          "give a smaller depth (p.depth)")
+    return out
+
+
+AQ_ORTH = ((1, 0), (-1, 0), (0, 1), (0, -1))
+AQ_SPAN = 40                          # aqshaft: score for a column that passes a known aquifer level
+
+
+def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
+    """BUG-292 (Run 15 Inkintense: `bp sites aqshaft` proposed nothing, every column tried by hand was refused): the shaft
+    columns, ranked. The top is a public Z4 floor tile (`.`, not a stair: the miners reach it, it opens no private room),
+    never on or below the refuge level; on each level below (p.depth levels in all) the column and its 4 orthogonal tiles
+    (the seal: lua/dfllm/aqshaft.lua smooths or walls them) are rock or unknown, levels below the snapshot count as unknown;
+    the column keeps off the attack zones, killboxes, bridges and the military stair (keep-out boxes) and off every level
+    with a revealed cavern or warm mark or a recorded cavern breach (damp is what it looks for). Score: 1000 - 5 per step to
+    a stair - 2 per unknown column tile + AQ_SPAN when it passes a known aquifer level (manifest aquifer_levels).
+    ValueError with the reason when no column is left."""
+    g = Graph(snap)
+    steps_of = _stair_steps(g)
+    keep_out = _keep_out(manifest)
+    at = _At(snap)
+    ref = manifest.get("refuge")
+    zr = ref["anchor"][2] if ref else None
+    avoid: set[int] = set()
+    for k in ("cavern", "warm"):
+        avoid |= {int(q[2]) for q in snap.get("marks", {}).get(k, []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    avoid |= {int(q[2]) for q in manifest.get("caverns", []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    aq = aquifer_levels(manifest)
+    depth = p["depth"]
+    out, why = [], {"rock": 0, "avoid": 0, "keep": 0}
+    for i in _anchor_tiles(g, "aqshaft", p, manifest):
+        ax, ay, az = g.pos(i)
+        if g.t[i] != "." or (zr is not None and az <= zr):
+            continue
+        z_lo = az - depth + 1
+        if any(z_lo <= z <= az for z in avoid):
+            why["avoid"] += 1
+            continue
+        unknown, ok = 0, True
+        for z in range(az - 1, z_lo - 1, -1):
+            for dx, dy in ((0, 0),) + AQ_ORTH:
+                c = at(ax + dx, ay + dy, z)
+                if c is not None and c not in GOOD:
+                    ok = False
+                    break
+                unknown += 1 if (dx, dy) == (0, 0) and c in (None, "?") else 0
+            if not ok:
+                break
+        if not ok:
+            why["rock"] += 1
+            continue
+        col = (ax, ay, z_lo, ax, ay, az)
+        if any(_overlap(col, b) for b in keep_out):
+            why["keep"] += 1
+            continue
+        steps = min(steps_of.get(i, 99), 99)
+        span = sorted(z for z in aq if z_lo <= z < az)
+        score = 1000 - 5 * steps - 2 * unknown + (AQ_SPAN if span else 0)
+        out.append({"anchor": [ax, ay, az], "rot": 0, "score": max(0, score),
+                    "box": (ax - 1, ay - 1, z_lo, ax + 1, ay + 1, az),
+                    "why": f"column {ax},{ay} z{az}-z{z_lo}, {steps} steps to a stair, {unknown} unknown column tiles"
+                           + (f", passes aquifer level z{span[-1]}" if span else "")})
+    if not out:
+        raise ValueError(f"aqshaft: no column of depth {depth} from public Z4 floor (rock or unknown below with rock on "
+                         f"its 4 sides: {why['rock']} refused; an avoided cavern/warm level: {why['avoid']}; attack zone "
+                         f"or military stair: {why['keep']}): give a smaller p.depth or name the column (p.x, p.y, p.top)")
     return out
 
 
