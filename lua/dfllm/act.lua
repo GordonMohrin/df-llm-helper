@@ -1284,11 +1284,15 @@ local function impls(state)
   -- the flag the sheet's forbid button sets). Doors only; returns the old value so the caller can undo its own change.
   -- BUG-015: `close` (with on) also sets door_flags.closed, the state a locked door takes once its doorway is clear;
   -- reflex asks for it only on the retry of a door whose flag fell back, with nobody standing in the doorway.
+  -- FR-98 (cavern sweep): a hatch cover's sheet has the same forbid toggle (building_hatchst door_flags)
   function I.door_forbid(building_id, on, close)
     local b = df.building.find(building_id)
     if not b then return false, 'no building ' .. tostring(building_id) end
     local okt, is_door = pcall(function()
-      if df.building_type and b.getType then return b:getType() == df.building_type.Door end
+      if df.building_type and b.getType then
+        local t = b:getType()
+        return t == df.building_type.Door or (df.building_type.Hatch ~= nil and t == df.building_type.Hatch)
+      end
       return b.door_flags ~= nil
     end)
     if not (okt and is_door) then return false, 'not a door' end

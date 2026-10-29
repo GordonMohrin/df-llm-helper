@@ -47,6 +47,7 @@ C.MODULES = {
   {name = 'baseline',  wp = 'WP8', every = {ticks = 33600}},
   {name = 'perf',      wp = 'WP1', every = {ms = 1000}},
   {name = 'selftest',  wp = 'WP1', every = {ms = 60000}},
+  {name = 'cavern',    wp = 'WP6', every = {ticks = 100}},     -- FR-98: the military clears the caverns (G16)
 }
 
 -- Event registry (§12): class fixed per type; by = emitting module ('any' = every module).
@@ -189,10 +190,12 @@ C.EVENTS = {
   -- BUG-121 (Run 14 note 101): boot found the game clock before the last tick the runtime folder saw (an older save was
   -- loaded): events before this marker with a later tick belong to the discarded timeline
   TIMELINE_RESET = {cls = 'B', by = 'kern'},
+  -- FR-98: the cavern sweep (squad A through a plugged shaft under a hatch): START (B), a step (C), the END (A: why, kills, losses, sealed)
+  CAVERN_SWEEP_START = {cls = 'B', by = 'cavern'}, CAVERN_SWEEP_END = {cls = 'A', by = 'cavern'},
   -- C: log only
   SIEGE_STATUS = {cls = 'C', by = 'siege'}, SEASON = {cls = 'C', by = 'kern'},
   PROJECT_STAGE = {cls = 'C', by = 'runner'}, MODE = {cls = 'C', by = 'kern'},
-  POPUP_GONE = {cls = 'C', by = 'arbiter'},       -- FR-87: a popup vanished without the kernel's dismiss (text, kind)
+  POPUP_GONE = {cls = 'C', by = 'arbiter'}, CAVERN_SWEEP_STEP = {cls = 'C', by = 'cavern'},       -- FR-87: a popup vanished without the kernel's dismiss (text, kind)
   GATE = {cls = 'C', by = 'gate'}, LEVER = {cls = 'C', by = 'gate'},
   SNAPSHOT_READY = {cls = 'C', by = 'snapshot'}, CMD = {cls = 'C', by = 'kern'},
   BOOT = {cls = 'C', by = 'kern'}, UNLOAD = {cls = 'C', by = 'kern'},
@@ -266,7 +269,7 @@ C.ACT = {
   zone_place = {'runner', 'economy'},              -- FR-78: the verb zone.place (zonelib); BUG-232: the manager's office zone
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
-  door_forbid = {'reflex'},
+  door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
   burrow_tiles = {'seal'},
   popcap = {'readiness'},
   quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
@@ -298,6 +301,7 @@ C.STATE_OWNERS = {
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
   ['clock.*'] = 'arbiter', ['alarm.*'] = 'reflex', ['lever.*'] = 'gate',
   ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot', ['water.*'] = 'water', ['stale.*'] = 'kern',
+  ['cav.*'] = 'cavern',                            -- FR-98
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -528,6 +532,11 @@ C.STATE_SPEC = obj({
                -- BUG-131: the first blocking hospital zone outside the core: id, centre, ok 1 = a finished hospital inside
                -- (hospital.retire needs no approve), pat = patients lying in it
                hout = obj({z = NAT, at = {t = 'tup', items = {NAT, NAT, NAT}}, ok = FLAG}, {pat = NAT})}),
+  -- FR-98: the cavern sweep: st = its phase (off, wait, open, muster, kill, recall, close), why = what it waits for or how the
+  -- last one ended, n = beasts seen at the plugged shafts, k/l = kills and losses of the running (else the last) sweep, acc =
+  -- plugged cavern shafts, clr = 1 the caverns count as clear (the P6 deliverable sweep)
+  cav = obj({st = str(nil, {'off', 'wait', 'open', 'muster', 'kill', 'recall', 'close'})},
+            {why = str(60), n = NAT, k = NAT, l = NAT, acc = NAT, clr = FLAG}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

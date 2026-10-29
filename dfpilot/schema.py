@@ -59,6 +59,7 @@ MODULES = [
     ("water", "WP8", False, {"ticks": 1200}),
     ("trade", "WP9", False, {"ticks": 100}), ("baseline", "WP8", False, {"ticks": 33600}),
     ("perf", "WP1", False, {"ms": 1000}), ("selftest", "WP1", False, {"ms": 60000}),
+    ("cavern", "WP6", False, {"ticks": 100}),      # FR-98: the military clears the caverns (G16)
 ]
 
 DECISIONS = {
@@ -81,7 +82,7 @@ ACT = {
     "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
-    "door_forbid": ["reflex"],
+    "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
     "burrow_tiles": ["seal"],
     "popcap": ["readiness"],
     "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
@@ -112,6 +113,7 @@ STATE_OWNERS = {
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
     "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water", "stale.*": "kern",
+    "cav.*": "cavern",                                                     # FR-98
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -776,6 +778,16 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # events before this marker whose tick is later than tick_neu. BUG-165: kind clock (the above) | foreign (the save's
     # persisted kern.ev is ahead of the folder's last event: a line this folder never logged; n_alt = that last event)
     "TIMELINE_RESET": ("B", "kern", _d("n_alt:i tick_alt:i tick_neu:i", "kind:s")),
+    # FR-98 (G16): the cavern sweep. START: squad A goes down a plugged explore shaft opened under a hatch: acc = the shaft's
+    # record (its explore project), pos = the shaft top, bot = its lowest level, n = cavern beasts in sight, sol/worn/ids = the
+    # squad. STEP (C): phase open (the unplug project done), muster, kill, recall, close. END (A): why done (no beast left in
+    # sight) | losses | worn | timeout | great (a great danger came) | muster | blocked (the unplug failed) | siege (SIEGE,
+    # BREACH, RECOVERY or a drill: the kernel's own defense took over) | seal_failed (the shaft is not walled: by hand);
+    # killed/lost/left = beasts killed, soldiers lost, beasts still in sight, sealed = 1 the walls stand again, plug = the
+    # plug project that walls it
+    "CAVERN_SWEEP_START": ("B", "cavern", _d("acc:s n:i", "pos:p bot:i sol:i worn:i ids:ia")),
+    "CAVERN_SWEEP_STEP": ("C", "cavern", _d("phase:s", "why:s n:i pos:p")),
+    "CAVERN_SWEEP_END": ("A", "cavern", _d("why:s", "acc:s killed:i lost:i left:i sealed:f ticks:i pos:p plug:s")),
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),
@@ -843,7 +855,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
-                                          "offices", "curse", "unit", "items"])},
+                                          "offices", "curse", "unit", "items", "cavern"])},
                    # BUG-137: `key=39052` arrives as an int from the CLI (cmd.parse_kv); a unit id or a name
                    opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
@@ -1122,7 +1134,12 @@ STATE = Obj(
                       # finished hospital inside: hospital.retire needs no approve, pat = patients lying in it); a zone
                       # outside that is idle or superseded by a finished hospital inside is not counted in hosp_out
                       opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8),
-                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT})})})
+                           "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT})}),
+         # FR-98: the cavern sweep: st = its phase, why = what it waits for or how the last one ended, n = beasts seen at the
+         # plugged shafts, k/l = kills and losses of the running (else the last) sweep, acc = plugged cavern shafts, clr = 1
+         # the caverns count as clear (the P6 deliverable `sweep`)
+         "cav": Obj(req={"st": Str(enum=["off", "wait", "open", "muster", "kill", "recall", "close"])},
+                    opt={"why": Str(maxbytes=60), "n": NAT, "k": NAT, "l": NAT, "acc": NAT, "clr": FLAG})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
@@ -1142,6 +1159,8 @@ PLAN = named("plan", Obj(
          "supply": Obj(req={"drink_d": NAT, "food_d": NAT, "mood_stock": NAT}),
          "orders": Obj(req={"import": LIBS}),
          "trade": Obj(req={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
+         # FR-99: the cavern sweep of phase P6 (cavern.lua runs it once its gates hold)
+         "caverns": Obj(req={"sweep": Bool()}),
          "notes": Str(maxbytes=2000)}))
 PLAN_DEFAULTS = {"military": {"pct": 15, "squads": {"melee": 2, "xbow": 1}, "cv_min": 12},
                  "supply": {"drink_d": 170, "food_d": 60, "mood_stock": 10},
@@ -1149,7 +1168,7 @@ PLAN_DEFAULTS = {"military": {"pct": 15, "squads": {"melee": 2, "xbow": 1}, "cv_
 
 DELIVER_KEYS = {"baseline": [], "proj": ["tpl"], "squads": ["n"], "drill": [], "workshops": ["types"],
                 "stock": ["key", "min"], "orders": ["lib"], "trade": ["n"], "ready": ["lvl"],
-                "metal": ["pct"], "bolts": ["n"]}
+                "metal": ["pct"], "bolts": ["n"], "sweep": []}      # FR-99: sweep = the caverns cleared (cavern.cleared)
 
 
 def _deliver_check(d):

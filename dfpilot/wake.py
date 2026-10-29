@@ -147,6 +147,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         # Run 11: a dig broke into a cavern; the kernel plugs an explore shaft itself (failed/none: by hand)
         "CAVERN_PLUG": "tell Gordon (queued: the kernel walls the shaft; failed/none: a constructed wall by hand); "
                        "bp.cancel the explore without undo",
+        # FR-98: the kernel's cavern sweep ended (it walls the shaft itself); seal_failed: the shaft is open
+        "CAVERN_SWEEP_END": "tell Gordon (d.why, killed, lost); seal_failed: a constructed wall on d.pos by hand at once; "
+                            "dfllm cmd inspect what=cavern; the next sweep waits a season (two after losses)",
         # Run 11 siege 8: an open seal built nothing for stuck_days; the other projects run again
         "SEAL_STUCK": "tell Gordon the open way in; dfllm cmd inspect '{\"what\":\"workload\"}' (material); no "
                       "material: logs, a stone dig; a refused tile: bp.cancel, then bp.place tpl=seal at=last or by hand; "

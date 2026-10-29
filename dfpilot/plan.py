@@ -1428,6 +1428,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     warn += seal_gate(doc, s, fort or {}, prev)   # Run 11 siege 8: seal first; the rebuild policy
     warn += aquifer_gate(doc, s, fort or {})      # FR-95: a breach:damp park, a heavy aquifer, fortcore p.aquifer pass
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
+    ce2, cw2 = sweep_gate(doc, s)                 # FR-99: the cavern sweep from P6 on
+    errs += ce2
+    warn += cw2
     if pol["beauty"] == "used_rooms" and lvl < 1:
         warn.append("beauty used_rooms waits for R1 (runner gates it)")
     seen_libs: set[str] = set()
@@ -1456,6 +1459,45 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
         for term in terms:
             if _has_term(text, term):
                 (warn if p.endswith("notes") else errs).append(f"fair play: {p} mentions {term!r}")
+    return errs, warn
+
+
+# ---------------------------------------------------------------- FR-98/99: the cavern sweep
+SWEEP_PHASE = "P6"            # plans/year1.json: the deliverable `sweep` (cavern.lua M.CFG.phase)
+SWEEP_WORN = 80               # cavern.lua M.CFG.worn: squad A's worn % before a sweep
+SWEEP_READY = 1               # cavern.lua M.CFG.ready
+
+
+def sweep_due(plist: list, target: str) -> bool:
+    """FR-99: a phase up to `target` delivers the cavern sweep (deliverable `sweep`)."""
+    return any(d.get("k") == "sweep" for p in plist if p["id"] <= target for d in p["deliver"])
+
+
+def sweep_gate(doc: dict, s: dict | None) -> tuple[list[str], list[str]]:
+    """FR-98/99 (G16): `caverns.sweep` lets the kernel send squad A through a plugged cavern shaft (cavern.lua). An error
+    before P6; warnings name the kernel's gates that still hold it (R1, squad A worn, a plugged shaft) and a P6+ plan
+    without it (the P6 deliverable `sweep` waits for it while beasts are in sight)."""
+    s = s or {}
+    on = ((doc.get("caverns") or {}).get("sweep")) is True
+    errs: list[str] = []
+    warn: list[str] = []
+    if on and doc["phase_target"] < SWEEP_PHASE:
+        errs.append(f"caverns.sweep needs phase_target {SWEEP_PHASE} or later (FR-99, RULES section 11)")
+        return errs, warn
+    cav = s.get("cav") if isinstance(s.get("cav"), dict) else {}
+    if not on:
+        if doc["phase_target"] >= SWEEP_PHASE and cav.get("n"):
+            warn.append(f"caverns.sweep is off with {cav['n']} cavern beasts in sight: the P6 deliverable sweep waits "
+                        "(add \"caverns\": {\"sweep\": true})")
+        return errs, warn
+    lvl = (s.get("ready") or {}).get("lvl")
+    if isinstance(lvl, int) and lvl < SWEEP_READY:
+        warn.append(f"caverns.sweep waits for R{SWEEP_READY} (now R{lvl})")
+    worn = (s.get("mil") or {}).get("worn")
+    if isinstance(worn, int) and worn < SWEEP_WORN:
+        warn.append(f"caverns.sweep waits for squad A worn >= {SWEEP_WORN} % (the army is at {worn} %)")
+    if cav and cav.get("acc") == 0:
+        warn.append("caverns.sweep: no plugged cavern shaft known: nothing to sweep (the deliverable passes)")
     return errs, warn
 
 
@@ -2165,6 +2207,13 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
     doc["notes"] += core_note
+    # FR-99: the cavern sweep comes with the phase that delivers it (P6), or stays on once a plan had it
+    if sweep_due(plist, target) or (((prev or {}).get("caverns") or {}).get("sweep") is True):
+        doc["caverns"] = {"sweep": True}
+        doc["notes"] += ("; FR-98: caverns.sweep on (squad A clears the caverns once R1, worn >= "
+                         f"{SWEEP_WORN} % and a plugged shaft hold; the kernel runs it)")
+    elif star is not None and sweep_due(plist, star):
+        doc["notes"] += f"; with phase_target {star} set caverns.sweep true (FR-99: the cavern sweep)"
     if ewhy:
         em_t = [b["tpl"] for b in front if any(b is x for x in builds)]
         doc["notes"] += (f"; BUG-243: {ewhy} (< {EMERGENCY_D}): " + (", ".join(em_t) + "@S1 first" if em_t else

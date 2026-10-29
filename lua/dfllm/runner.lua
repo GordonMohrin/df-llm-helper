@@ -144,7 +144,8 @@ M.MOODABLE = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsFo
               'Clothiers', 'Leatherworks', 'Tanners', 'Loom', 'GlassFurnace', 'Mechanics'}
 -- deliverable kind -> module that makes it measurable; an absent module skips the deliverable
 local OWNER = {baseline = 'baseline', squads = 'military', metal = 'military', drill = 'readiness',
-               ready = 'readiness', stock = 'economy', orders = 'economy', bolts = 'economy', trade = 'trade'}
+               ready = 'readiness', stock = 'economy', orders = 'economy', bolts = 'economy', trade = 'trade',
+               sweep = 'cavern'}     -- FR-99: the P6 cavern sweep (cavern.cleared)
 local PLAN_DRIVEN = {proj = true, workshops = true}
 
 local S = {}   -- module state, rebuilt by init (persist docs + caches)
@@ -3543,6 +3544,8 @@ local CHECK = {
   ready = function(K, dv) local v = K.view().ready; return v ~= nil and (v.lvl or 0) >= dv.lvl end,
   metal = function(K, dv) local v = K.view().mil; return v ~= nil and (v.metal_pct or 0) >= dv.pct end,
   bolts = function(K, dv) local v = K.census.i; return v ~= nil and (v.bolts or 0) >= dv.n end,
+  -- FR-99: the caverns are clear (no beast seen at a plugged shaft, the last sweep done) or no cavern way is known
+  sweep = function(K) local ok, v = K.call('cavern', 'cleared'); return ok and v == true end,
   workshops = function(K, dv)
     local have = {}
     for _, w in ipairs(K.manifest().workshops or {}) do have[w.type] = true end
@@ -4923,14 +4926,148 @@ end
 -- threat counts hostiles near them): n, {{x, y, z_top, z_bottom}, ...}
 function M.cavern_open(K)
   local n, list = 0, {}
-  for _, r in pairs(S.rt and S.rt.cav or {}) do
-    if type(r) == 'table' and (r.st == 'open' or r.st == 'failed') and r.why ~= 'heavy_aquifer' then   -- FR-95
+  for id, r in pairs(S.rt and S.rt.cav or {}) do
+    -- FR-98: a shaft the cavern sweep opened counts as open once no sweep runs on it (the sweep module gone or lost it)
+    if type(r) == 'table' and (r.st == 'open' or r.st == 'failed' or (r.st == 'sweep' and not M.swept(K, id)))
+       and r.why ~= 'heavy_aquifer' then   -- FR-95
       n = n + 1
       if type(r.s0) == 'table' then list[#list + 1] = {r.s0[1], r.s0[2], r.s0[3], int(r.bot) or r.s0[3]} end
     end
   end
   table.sort(list, function(a, b) return a[1] * 100000 + a[2] < b[1] * 100000 + b[2] end)
   return n, list
+end
+
+---------------------------------------------------------------- FR-98: the cavern sweep (cavern.lua, Gordon's goal G16)
+-- The sweep opens one plugged explore shaft under a hatch, sends squad A down and walls the shaft again. Its two runner
+-- projects are the player's own designations: `unplug` (u0.rm/u1.rm: quickfort dig `n` = remove construction on the plug
+-- walls; u1.stair/u0.stair: constructed stairs `Cx`/`Cd` in their place; u0.hatch: a hatch cover `H` on the top) and a
+-- `plug` again (the plug machinery: p1 the lower tile, then p0 the top; a stair is removed with `n`, the hatch with the
+-- player's remove building, then constructed walls). The record m.runner cav[<id>] holds st = 'sweep' (sw = the unplug
+-- project) while the sweep runs; module fields (runner.lua sits at Lua's limit of 200 locals).
+
+-- true when the cavern module runs a sweep on record `id` (absent module: false)
+function M.swept(K, id)
+  local ok, v = K.call('cavern', 'running', id)
+  return ok and v == true
+end
+
+-- public: the plugged cavern ways the sweep may open, {{id, s0 = {x, y, z}, s1, bot, why, st (done | sweep), sw}}, by id
+function M.cav_sealed(K)
+  local out = {}
+  for id, r in pairs(S.rt and S.rt.cav or {}) do
+    if type(r) == 'table' and (r.st == 'done' or r.st == 'sweep') and CAVERN[r.why] and type(r.s0) == 'table' then
+      out[#out + 1] = {id = id, s0 = {r.s0[1], r.s0[2], r.s0[3]}, bot = int(r.bot) or r.s0[3], why = r.why, st = r.st,
+                       s1 = (type(r.s1) == 'table' and not r.s1x) and {r.s1[1], r.s1[2], r.s1[3]} or nil, sw = r.sw}
+    end
+  end
+  table.sort(out, function(a, b) return tostring(a.id) < tostring(b.id) end)
+  return out
+end
+
+-- public: the record's state ('done', 'open', 'failed', 'sweep', 'none') and its plug project, nil when unknown
+function M.cav_state(K, id)
+  local r = S.rt and S.rt.cav and S.rt.cav[id]
+  if type(r) ~= 'table' then return nil end
+  return r.st, r.plug
+end
+
+-- public (cavern.lua): any project's progress, {done, stage, chunk, pct, blocked, label} or nil (gone)
+M.proj_state = function(K, id) return M.coffins_state(K, id) end
+
+function Q.sw_stage(label, mode, p, key)
+  return {label = label, mode = mode, orders = 0, defense = 1, chunks = {{pos = {p[1], p[2], p[3]}, cells = {{0, 0, 0, key}}}}}
+end
+
+-- public (cavern.lua): queue the unplug project of a plugged shaft; ok, project id
+function M.sweep_open(K, id)
+  local r = S.rt and S.rt.cav and S.rt.cav[id]
+  if type(r) ~= 'table' or r.st ~= 'done' or type(r.s0) ~= 'table' or not CAVERN[r.why] then
+    return false, 'no plugged cavern shaft ' .. tostring(id)
+  end
+  local s0, s1 = r.s0, (type(r.s1) == 'table' and not r.s1x) and r.s1 or nil
+  -- the top first: its wall goes, a down stair and the hatch take its place while the lower wall still closes the shaft;
+  -- then the lower wall goes and an up/down stair joins the shaft below (nothing climbs into the open tile before it)
+  local stages = {Q.sw_stage('u0.rm', 'dig', s0, 'n'), Q.sw_stage('u0.stair', 'build', s0, 'Cd'),
+                  Q.sw_stage('u0.hatch', 'build', s0, 'H')}
+  if s1 then
+    stages[#stages + 1] = Q.sw_stage('u1.rm', 'dig', s1, 'n')
+    stages[#stages + 1] = Q.sw_stage('u1.stair', 'build', s1, 'Cx')
+  end
+  local pid = new_id(K, 'us')
+  local d = {v = 2, tpl = 'unplug', site = 'plug', class = 'defense', params = obj{un = id}, rot = 0,
+             anchor = {s0[1], s0[2], s0[3]}, manifest = {v = 2}, materials = obj{hatch = 1}, stages = stages}
+  local ok, err = register(K, pid, d, 1, 'unplug')
+  if not ok then return false, err end
+  r.st, r.sw, r.plug = 'sweep', pid, ''
+  dirty()
+  save(K)
+  K.log('info', 'cavern sweep: %s opens the shaft %d,%d,%d of %s (remove the plug walls, stairs, a hatch on top)', pid,
+        s0[1], s0[2], s0[3], id)
+  return true, pid
+end
+
+-- the steps that wall one shaft tile as it stands now (lower tile first, like the plug): a wall stands: none; a hatch, a
+-- door or a building the unplug planned there: the player's remove building first; a stair (our constructed one, also
+-- under a hatch): removed (`n`); then a constructed wall
+Q.SW_STAIR = {['<'] = true, ['>'] = true, X = true}
+function Q.sw_keys(v)
+  if not v or v.c == 'C' then return {} end
+  local bld = type(v.bld) == 'string' and v.bld ~= '' and v.bld or nil
+  local out = {}
+  if v.c == '+' or bld then out[1] = 'free:' .. (bld == 'Door' and 'd' or 'H') end
+  if v.c == '+' or Q.SW_STAIR[v.c] then out[#out + 1] = 'n' end
+  out[#out + 1] = 'Cw'
+  return out
+end
+
+-- public (cavern.lua): wall the shaft of record `id` again: the unplug project (if it still runs) leaves the list without
+-- an undo, then a plug project (prio 1, every mode; CAVERN_PLUG done once the walls stand); ok, project id ('' when the
+-- walls stand already)
+function M.sweep_close(K, id)
+  local r = S.rt and S.rt.cav and S.rt.cav[id]
+  if type(r) ~= 'table' or type(r.s0) ~= 'table' then return false, 'no cavern record ' .. tostring(id) end
+  local U = type(r.sw) == 'string' and find(r.sw) or nil
+  if U and U.done ~= 1 then
+    -- a removal it designated and nobody took yet is taken back (a lower wall must not go once the shaft closes)
+    local ud = doc(K, U.id)
+    local ust = ud and ud.stages[U.stage + 1]
+    if ust and ust.mode == 'dig' and U.chunk > 0 then
+      local ch = ust.chunks[1]
+      K.act.quickfort({mode = 'dig', data = chunk_data(ch), pos = ch.pos, command = 'undo'})
+    end
+    cancel(K, U, false)
+  end
+  local stages = {}
+  for _, pc in ipairs({{'p1', (type(r.s1) == 'table' and not r.s1x) and r.s1 or false}, {'p0', r.s0}}) do
+    local p = pc[2]
+    if type(p) == 'table' then
+      for _, key in ipairs(Q.sw_keys(tile_at(K, p[1], p[2], p[3]))) do
+        local free = key:sub(1, 5) == 'free:'
+        stages[#stages + 1] = Q.sw_stage(pc[1] .. (key == 'n' and '.rm' or free and '.free' or '.wall'),
+                                          key == 'n' and 'dig' or 'build', p, free and key:sub(6) or key)
+      end
+    end
+  end
+  if #stages == 0 then
+    r.st, r.td, r.sw = 'done', now(K), nil
+    dirty()
+    save(K)
+    return true, ''
+  end
+  local walls = 0
+  for _, st in ipairs(stages) do if st.label:sub(-5) == '.wall' then walls = walls + 1 end end
+  local pid = plug_id(K)
+  local d = {v = 2, tpl = 'plug', site = 'plug', class = 'defense', params = obj{of = r.proj, sweep = 1}, rot = 0,
+             anchor = {r.s0[1], r.s0[2], r.s0[3]}, manifest = {v = 2}, materials = obj{wall = walls}, stages = stages}
+  local ok, err = register(K, pid, d, 1, 'plug')
+  if not ok then return false, err end
+  r.st, r.plug, r.sw = 'open', pid, nil
+  dirty()
+  save(K)
+  K.log('info', 'cavern sweep: plug %s walls the shaft %d,%d,%d of %s again (%d stages)', pid, r.s0[1], r.s0[2], r.s0[3],
+        id, #stages)
+  return true, pid
 end
 
 -- public (BUG-040, water's CISTERN_DRY): the id of the finished project whose kept box (m.runner keep) holds the centre
