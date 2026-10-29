@@ -23,8 +23,10 @@
   quality filter, the daily cavern check/plug stays explore's (the deep dig has the generic BREACH_STOP).
 - **Tests (each fails on 64df679):** tests/bp/test_bp_grand.py (46: both stages validate in 4 rotations and both sizes, beauty
   rects, sizes/tiers, private rooms, deepcore stages, ranking + audit on the 32-level fort, caverns/aquifer/breach/soil/open
-  space), tests/test_fr102_103_rooms.py (9: P7 deliverables, gate order, no banned term in the notes, readiness/seal/emergency holds, explicit deep
-  anchor, params carried, next plan year, facts on a save folder, rooms line, status/brief), tests/lua/test_fr102_rooms.lua
+  space), tests/test_fr102_103_rooms.py (11: P7 deliverables, gate order, no banned term in the notes, readiness/seal/emergency holds, explicit deep
+  anchor, params carried, next plan year, facts on a save folder, rooms line, status/brief; review: plan years 5-8 through
+  propose -> cmd.place -> PROJECT_DONE place every stage once and in order, and the emitted stages of suites, grand_temple and
+  deepcore run to done through bp.place and the real runner, tests/lua/fr102_e2e_scenario.lua), tests/lua/test_fr102_rooms.lua
   (3: beauty waits for R1, smooth then engrave, policy none; kept boxes); goldens for the five templates;
   test_bp_emit.test_list_templates (28 templates).
 - **Live check:** at P7 with R2: `dfllm plan propose` prints suites/grand_dining/grand_tavern/grand_temple@S1 st1 and, once an

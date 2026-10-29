@@ -1,7 +1,7 @@
 """FR-103 deep anchor search: where the deep core (grand.deepcore) may go, on revealed tiles only (fair play, DESIGN §11).
 
 An anchor is a public core floor (sites._anchor_tiles: Z4, not behind a private room's door, not on a civilian stair),
-above the refuge level. Its shaft (0,1,w) runs `depth` levels down; the deep level holds the rooms. A site is refused when
+above the refuge level. Its vestibule (0,1,0) gets a door, its shaft (0,2,w) runs `depth` levels down; the deep level holds the rooms. A site is refused when
 * a check rect (grand.deep_rects: the shaft ring per level, the rooms' ring at the bottom) holds a revealed open, wet or
   marked tile (damp, warm, cavern, water), a soil mark at the bottom (hard stone only), revealed liquid right above, or
   leaves the snapshot sideways (levels below the snapshot count as unknown rock, as for explore);

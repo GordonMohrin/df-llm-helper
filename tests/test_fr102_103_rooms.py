@@ -170,3 +170,69 @@ def test_the_deep_notes_name_no_banned_term(deep_save):
     snap = files.read_json(sv / "snap" / "s1.json")
     whys = [deep.pick(snap, man, [])["why"], deep.pick({**snap, "marks": {"cavern": [[5, 5, 13]]}}, man, [14])["why"]]
     assert all(whys) and not [(w, t) for w in whys for t in plan._banned_terms() if plan._has_term(w, t)]
+
+
+# ---------------------------------------------------------------- end to end: plan propose -> cmd.place -> the runner
+def test_plan_years_place_every_stage_in_order(tmp_path):
+    """Plan years 5..8 on a fort with a finished explore shaft: propose drafts, cmd.place places (S1, the deep anchor,
+    `same`), every placed project finishes before the next year; each stage comes once, after the one before it, and
+    the deep core's stages one plan year apart."""
+    from dfpilot import cmd
+    sv = tmp_path / "save"
+    (sv / "bp").mkdir(parents=True)
+    (sv / "snap").mkdir()
+    w = bp.as_built(fort_docs(anchor=[50, 20, 30]), base=terrain(z0=1, z1=32, surf=30).snapshot())
+    snap, man = w.snapshot(purpose="sites"), w.manifest
+    snap["id"] = "s1"
+    files.write_json_atomic(sv / "manifest.json", man)
+    files.write_json_atomic(sv / "snap" / "s1.json", snap)
+    doc = bp.emit("explore", {"depth": 11}, bp.rank(snap, "explore", {"depth": 11}, manifest=man)[0])
+    doc["id"] = "y4s0b0"
+    cmd.write_bp(sv, doc)
+    n = [0]
+
+    def finish(ids):
+        with (sv / "events.jsonl").open("a", encoding="utf-8") as f:
+            for i in ids:
+                n[0] += 1
+                f.write(json.dumps(ev(n[0], "PROJECT_DONE", f"{i} done", {"proj": i})) + "\n")
+    finish(["y4s0b0"])
+    seen = []
+    for y in range(5, 9):
+        s = {**STATE, "t": {"y": y, "season": 0}}
+        d = plan.propose(s, phases(), None, decisions={}, fort=plan.fort_facts(sv, s))
+        ids = []
+        for i, b in enumerate(mine(d)):
+            pid = f"y{y}s0b{i}"
+            got = cmd.place(sv, b["tpl"], dict(b["p"]), b["site"], pid)
+            got["id"] = pid
+            cmd.write_bp(sv, got)
+            seen.append((y, b["tpl"], b["p"]["stage"], b["site"]))
+            ids.append(pid)
+        finish(ids)
+    assert [x[1:3] for x in seen if x[0] == 5] == [(t, 1) for t in relocate.GRAND] + [("deepcore", 1)]
+    assert seen[4][3].startswith("A")
+    assert sorted(x[1:] for x in seen if x[0] == 6) == sorted([(t, 2, "same") for t in relocate.GRAND]
+                                                              + [("deepcore", 2, "same")])
+    assert [x[1:] for x in seen if x[0] == 7] == [("deepcore", 3, "same")] and not [x for x in seen if x[0] == 8]
+    line = relocate.rooms_line(sv, {}, relocate._done_ids(sv))
+    assert line.startswith("rooms: suites large st2 ok") and "deep core z14 st3/3 ok" in line
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+import luahost  # noqa: E402
+
+
+@pytest.mark.skipif(not luahost.available(), reason="lua53.dll not found")
+def test_the_emitted_stages_run_through_the_real_runner(tmp_path):
+    """tests/lua/fr102_e2e_scenario.lua: bp.emit's documents (not hand-made ones) through bp.place and the runner."""
+    site = {"id": "S1", "anchor": [60, 60, 100], "rot": 0}
+    docs = {"suites": [bp.emit("suites", {"stage": k, "size": "grand", "n": 4}, site) for k in (1, 2)],
+            "grand_temple": [bp.emit("grand_temple", {"stage": k, "size": "large"}, site) for k in (1, 2)],
+            "deepcore": [bp.emit("deepcore", {"stage": k, "depth": 4}, site) for k in (1, 2, 3)]}
+    p = tmp_path / "docs.json"
+    p.write_text(json.dumps(docs), encoding="utf-8")
+    lua = Path(__file__).resolve().parent / "lua"
+    r = luahost.run_file(lua / "fr102_e2e_scenario.lua", [str(p)], timeout=180, paths=[lua])
+    assert r.ok, f"exit {r.code}\n{r.out}\n{r.err}"
+    assert "# passed 3, failed 0" in r.out
