@@ -4061,6 +4061,12 @@ function M.curse_emit(K, kind, msg, d)
   elseif kind == 'DECISION_NEEDED' then return K.emit('DECISION_NEEDED', 'A', msg, d) end
 end
 
+-- BUG-167 (reflex, the TRANSFORM ack default re-checks its cause): the cursed citizens in were-form now (0 when none)
+function M.curse_tf(K)
+  local v = CU.view(K)
+  return v and math.tointeger(v.tf) or 0
+end
+
 -- what the curse library needs of care: the name reader, the tantrums seen (name -> tick) and the emitter
 function M.curse_env() return {nm = uname, tantrum = st.tantrum, emit = M.curse_emit} end
 

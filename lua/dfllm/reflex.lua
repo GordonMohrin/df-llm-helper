@@ -1577,8 +1577,13 @@ end
 local function defcon(K)
   local mode, h = K.mode(), K.census.h
   local inside = type(h) == 'table' and (h.inside or 0) > 0
+  -- BUG-166 (live i2: DEFCON 1 in PEACE for an INTRUDER whose default ran 3.7 years before): an interrupt is open while
+  -- nothing was done about it (done 0); one whose default ran (done 1) only while that lockdown holds; a far one (done 2)
+  -- never
   local open = {}
-  for _, r in ipairs(st.irq) do if r.n > (st.ack.n or 0) then open[r.done == 2 and 'far' or r.type] = true end end
+  for _, r in ipairs(st.irq) do
+    if r.n > (st.ack.n or 0) and (r.done == 0 or (r.done == 1 and st.hold)) then open[r.type] = true end
+  end
   if mode == 'BREACH' or inside or open.INTRUDER then return 1 end
   local army = false
   for k in pairs(st.hold and st.hold.kinds or {}) do if ARMY[k] then army = true end end
@@ -1622,10 +1627,10 @@ local function alarm_write(K, force)
 end
 
 local function record(K, n, etype, msg, u)
-  -- BUG-145 (live i3: DEATHS_3PLUS #32617 twice in alarm.txt, 2 ticks apart, two ack-timeout lines): one record per event
+  -- BUG-139/BUG-145 (live i3: DEATHS_3PLUS #32617 twice in alarm.txt, 2 ticks apart, two ack-timeout lines): one record
+  -- (and one default) per event. BUG-168: the second copy of this loop is gone
   for _, r in ipairs(st.irq) do if r.n == n then return end end
   local now = K.now()
-  for _, r in ipairs(st.irq) do if r.n == n then return end end     -- BUG-139: one record (and one default) per event
   st.irq[#st.irq + 1] = {n = n, type = etype, tick = now.tick, wall = now.wall, ms = now.ms,
                          msg = tostring(msg):sub(1, 200), done = 0, u = int(u)}
   while #st.irq > M.KEEP do table.remove(st.irq, 1) end
@@ -2116,15 +2121,17 @@ local function lone_picture(K, h, now)
   end
   if #ents == 0 then return nil, 'none' end
   if #ents > c.lone_max or (h.vis or 0) > #(h.list or {}) or (h.great or 0) > 0 or (h.undead or 0) > 0 then return nil, 'group' end
-  local ids, inside = {}, false
+  local ids, in_ids = {}, {}
   for _, e in ipairs(ents) do
     if not harmless(e, c) then return nil, 'dangerous' end
     ids[#ids + 1] = e.id
     local a = rt.ap[e.id]
-    if a and a.how == 'inside' then inside = true end
+    if a and a.how == 'inside' then in_ids[#in_ids + 1] = e.id end
   end
   table.sort(ids)
-  return {ents = ents, ids = ids, inside = inside, sig = table.concat(ids, ',')}
+  table.sort(in_ids)
+  -- BUG-169: in_ids = the entries inside Kern+ (the kernel's kill order targets only those)
+  return {ents = ents, ids = ids, in_ids = in_ids, inside = #in_ids > 0, sig = table.concat(ids, ',')}
 end
 
 -- public (military, the sortie's "target is lone and harmless" test): the ids of the lone harmless picture, or nil
@@ -2198,7 +2205,9 @@ local function lone_step(K, h, now)
   if c.kill_hours > 0 and mode == 'BREACH' and pic.inside and age >= c.kill_hours * 50 and (st.lone.kn or 0) < M.KILL_MAX
      and (not rt.kl_t or now < rt.kl_t or now - rt.kl_t >= wait) then
     rt.kl_t = now
-    local ok, started, msg = K.call('military', 'kill_lone', pic.ids, 'reflex')
+    -- BUG-169 (live i3: 42739 stood 149 tiles out, the squad marched there during the BREACH): only the ones inside
+    -- Kern+; the far ones are left to the question and siege_release
+    local ok, started, msg = K.call('military', 'kill_lone', pic.in_ids, 'reflex')
     rt.kl = {ok = ok and started == true, msg = tostring(ok and msg or started or 'no military module'):sub(1, 80), t = now,
              sig = pic.sig}
     if rt.kl.ok and not tostring(msg):find('is running', 1, true) then st.lone.kn, dirty = (st.lone.kn or 0) + 1, true end
@@ -2345,6 +2354,9 @@ local function ack_step(K, now)
         r.done = 2
         K.log('info', 'reflex: interrupt #%d %s unacked for %d s; inner cause at threat 0: no lockdown default, no ' ..
               'civ alert (reflex.inner)', r.n, r.type, age)
+      elseif r.type == 'TRANSFORM' and M.no_were(K) then
+        r.done = 2
+        K.log('info', 'reflex: interrupt #%d TRANSFORM unacked for %d s; no citizen is in were-form now: no default', r.n, age)
       else
         local parts, d = engage(K, 'unacked', 'unacked:' .. r.type, acts, now)
         d.why, d.n, d.type = 'ack_timeout', r.n, r.type
@@ -2354,6 +2366,26 @@ local function ack_step(K, now)
       alarm_write(K, true)
     end
   end
+end
+
+-- BUG-167 (live i2: LOCKDOWN 'TRANSFORM unacked for 60 s: clock 30 t/s' for 'Thikut Rulzas is back in dwarf form',
+-- 7,500-15,000 ticks after the wave was dead): the TRANSFORM default re-checks its cause when it would apply: care's
+-- curse view counts nobody in were-form (tf 0). Unknown (no care, no answer) keeps the default
+function M.no_were(K)
+  local ok, tf = K.call('care', 'curse_tf')
+  return ok and tf == 0
+end
+
+-- BUG-166: a persisted interrupt is taken over at boot unless it is a copy (same n), lies after the clock (BUG-121), or
+-- its default already ran (done 1/2) and it is older than IRQ_STALE ticks or the boot found another line (K.reset)
+M.IRQ_STALE = 33600        -- one game month
+function M.irq_keep(K, r, now0, seen)
+  if not (type(r) == 'table' and int(r.n) and type(r.type) == 'string') or seen[int(r.n)] then return false end
+  local t, done = int(r.tick) or 0, int(r.done) or 0
+  if t > now0 then return false end
+  if done ~= 0 and (K.reset or now0 - t > M.IRQ_STALE) then return false end
+  seen[int(r.n)] = true
+  return true
 end
 
 ---------------------------------------------------------------- module
@@ -2380,14 +2412,19 @@ function M.init(K)
     end
     if type(p.prec) == 'table' then st.prec = p.prec end
     if type(p.ack) == 'table' then st.ack = {n = int(p.ack.n) or 0, wall = int(p.ack.wall) or 0} end
-    local now0 = K.now().tick
+    local now0, seen, drop = K.now().tick, {}, 0
     for _, r in ipairs(type(p.irq) == 'table' and p.irq or {}) do
-      -- BUG-121: an interrupt stamped after the clock belongs to a discarded timeline (an older save was loaded)
-      if type(r) == 'table' and int(r.n) and type(r.type) == 'string' and (int(r.tick) or 0) <= now0 then
+      -- BUG-121: an interrupt stamped after the clock belongs to a discarded timeline (an older save was loaded); BUG-166
+      if not M.irq_keep(K, r, now0, seen) then drop = drop + 1
+      else
         st.irq[#st.irq + 1] = {n = int(r.n), type = r.type, tick = int(r.tick) or 0, wall = int(r.wall) or 0,
                                ms = int(r.ms) or K.now().ms, msg = tostring(r.msg or ''),
                                done = (int(r.done) == 1 or int(r.done) == 2) and int(r.done) or 0, u = int(r.u)}
       end
+    end
+    if drop > 0 then
+      K.log('info', 'reflex: %d persisted interrupts not taken over (copies, after the clock, or done long ago%s)', drop,
+            K.reset and (', ' .. tostring(K.reset.kind) .. ' line') or '')
     end
     local dp = p.depot
     if type(dp) == 'table' and type(dp.ents) == 'table' then
@@ -2458,6 +2495,8 @@ function M.init(K)
   end
   rt, dirty = {}, false
   far_set()
+  -- BUG-166 (live i2: alarm.txt showed the previous line's file until the first unpaused step): the loaded save's own
+  if K.cfg and K.cfg.paths and K.cfg.paths.save then alarm_write(K, true) end
 end
 
 function M.step(K, budget, ctx)

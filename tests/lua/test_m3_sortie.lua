@@ -216,7 +216,7 @@ T.test('BUG-113: kill_lone (the kernel\'s own order): the best squad, only at wo
   local ok, msg = X.call(W, 'military', 'kill_lone', {201}, 'reflex')
   T.eq(ok, false)
   T.ok(msg:find('worn', 1, true) and msg:find('< 100%', 1, true), msg)
-  local W2 = setup{X.S.inv(201, 100, 100, Z)}
+  local W2 = setup{X.S.inv(201, 78, 93, Z)}            -- BUG-169: the kernel's kill order is for a unit inside Kern+
   lone_ids = {201}
   ok, msg = X.call(W2, 'military', 'kill_lone', {201}, 'reflex')
   T.ok(ok and msg:find('kill order on 201', 1, true), msg)

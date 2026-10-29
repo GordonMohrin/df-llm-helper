@@ -1550,21 +1550,30 @@ function M.boot(opts)
     end
   end
   st.seq = math.max(math.tointeger(kp.seq) or 0, disk_seq(paths))
-  st.ev_n = math.max(math.tointeger(kp.ev) or 0, disk_ev(paths))
+  local ev_disk, ev_save = disk_ev(paths), math.tointeger(kp.ev) or 0
+  st.ev_n = math.max(ev_save, ev_disk)
   -- BUG-121 (Run 14 note 101): the clock stands before what the runtime folder last saw = an older save was loaded.
-  -- The marker comes before every other event of this boot; follow, events and brief drop what lies before it, and the
-  -- alarm.txt of the discarded line goes (reflex writes the loaded save's own in its first step).
+  -- BUG-165 (live i2: 'autosave 1' of another instance's line, kern.ev ~33436 while this folder's log ends at #32748, the
+  -- clock later than the log): the save's kern.ev ahead of the folder's last event = a line this folder never logged
+  -- (kind foreign). The marker comes before every other event of this boot; follow, events and brief drop what lies
+  -- before it, and the alarm.txt of the other line goes (reflex writes the loaded save's own at the end of its init).
+  -- K.reset tells the modules' init (reflex does not take over the done interrupts of that save).
   local tick_alt = disk_tick(paths)
-  if tick_alt and st.now.tick < tick_alt then
-    local d = {n_alt = st.ev_n, tick_alt = tick_alt, tick_neu = st.now.tick}
+  st.K.reset = nil
+  local kind = (tick_alt and st.now.tick < tick_alt) and 'clock' or (ev_disk > 0 and ev_save > ev_disk and 'foreign') or nil
+  if kind then
+    local d = {n_alt = kind == 'clock' and st.ev_n or ev_disk, tick_alt = tick_alt or 0, tick_neu = st.now.tick, kind = kind}
     st.current = 'kern'
-    st.emit_as('kern', 'TIMELINE_RESET', 'B', string.format(
+    st.emit_as('kern', 'TIMELINE_RESET', 'B', kind == 'clock' and string.format(
       'game clock jumped back (older save loaded): tick %d -> %d; events up to #%d belong to the discarded timeline',
-      tick_alt, st.now.tick, st.ev_n), d)
+      d.tick_alt, st.now.tick, st.ev_n) or string.format(
+      'save of another line loaded: its events reach #%d, this folder\'s log ends at #%d; events up to #%d belong to another line',
+      ev_save, ev_disk, ev_disk), d)
     st.current = nil
     fio.remove(paths.save .. '/alarm.txt')
-    st.log_as('kern', 'warn', string.format('timeline reset: tick %d -> %d, event numbers continue after #%d',
-                                            tick_alt, st.now.tick, st.ev_n))
+    st.K.reset = {kind = kind, n_alt = d.n_alt}
+    st.log_as('kern', 'warn', string.format('timeline reset (%s): tick %d -> %d, event numbers continue after #%d',
+                                            kind, d.tick_alt, st.now.tick, st.ev_n))
   end
   local pm = K.persist.get('mode')
   if type(pm) == 'table' and C.TRANSITIONS[pm.mode] then

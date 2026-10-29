@@ -1,5 +1,33 @@
 # CHANGELOG dfpilot
 
+## Live test round 2 fixes: kern/reflex boot and interrupts, the lone-intruder kill order (BUG-165..169, 2026-10-29; offline, live-untested)
+- **Why:** round 2 (i2, i3) and its skeptic confirmed: after loading `autosave 1` of another instance's line i2 said `DEFCON 1 ... PEACE, 12
+  unacked` (no TIMELINE_RESET because the clock went forward; reflex took over interrupts whose defaults ran 1.5-5 years before, #32617 twice;
+  done=1 INTRUDER counted as open for ever; alarm.txt of the previous line until the first step) (DEFCON-AFTER-LOAD, NEW5); the TRANSFORM ack
+  default clamped the clock for "back in dwarf form" after the wave was dead (NEW4); record() held its duplicate loop twice (NEW7); in i3 the
+  kernel's kill order on a lone harmless intruder inside Kern+ also took a rat 149 tiles out and the squad marched out during the BREACH
+  (M3-killorder, NEW2); the sortie end named only the last target (NEW7-kill-sortie-end-text).
+- **What changed:** (1) kern boot: the save's kern.ev ahead of the folder's last event (with a log) = TIMELINE_RESET `kind=foreign`
+  (n_alt = the folder's last event), alarm.txt deleted; the clock-back marker says `kind=clock`; `K.reset = {kind, n_alt}` for the modules'
+  init (BUG-165). (2) reflex init: `M.irq_keep` drops copies by n, interrupts after the clock, and done ones older than `M.IRQ_STALE` (a game
+  month) or after a reset; defcon counts done 0 as open, done 1 only while a lockdown holds, done 2 never; init writes alarm.txt (BUG-166).
+  (3) ack_step: a TRANSFORM gets no default when `care.curse_tf` (were-forms in care's curse view) is 0 (BUG-167). (4) record(): one duplicate
+  loop (BUG-168). (5) lone_picture `in_ids`; lone_step passes only those to `military.kill_lone`, which keeps only census zn 2 ids ("the target
+  is not inside the fort"); a kill sortie keeps all targets (`so.ids0`): `dead` names them all, other ends add `d.dead` (BUG-169).
+- **Contracts:** TIMELINE_RESET optional `kind` (clock | foreign), SORTIE optional `dead` (ia); CONTRACTS appendix regenerated. No new event,
+  verb, config key or RULES row.
+- **Tests (fail on b805745):** tests/lua/test_bug165_166_boot.lua, test_bug167_transform.lua (two of three; the others pin the default),
+  test_bug169_kill_order.lua, tests/test_bug165_169_reflex.py; test_m3_sortie.lua's kill_lone target now stands inside Kern+.
+- **Live check:** (a) i2: load a save written by another instance (shared save folder) into a runtime folder whose events.jsonl ends earlier;
+  while still paused: `dfllm events --type TIMELINE_RESET` shows `kind foreign` and n_alt = the folder's old last event, alarm.txt is the
+  save's own file (each n once, done interrupts older than a month gone), status shows no DEFCON 1 in PEACE without a hostile; kern.log
+  'timeline reset (foreign)' and reflex 'N persisted interrupts not taken over'. (b) i2/i4: an interrupt in state `default` after its
+  lockdown ended no longer raises DEFCON (status line 1 / alarm.txt head). (c) After a TRANSFORM wave whose units are back in dwarf form,
+  leave the TRANSFORM unacked 60 s: no LOCKDOWN, no `clock clamp on: unacked:TRANSFORM`, kern.log 'no citizen is in were-form now'; during a
+  wave the clamp still comes. (d) i3: BREACH with one harmless intruder inside Kern+ and one far out, `sortie.worn` low (memory): the SORTIE go
+  event names only the inside id, pos = its tile, DF's kill_list holds only it, no soldier walks out; with two inside the end reads "targets
+  A,B dead after N ticks"; `dfllm events --type SORTIE` an abort after one died carries d.dead.
+
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every
   4th call and after any other command (FR-85-88a, NEW2); `inspect what=items key=trash` said `ok` while 1056 marked items got no dump job and
