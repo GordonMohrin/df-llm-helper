@@ -64,6 +64,23 @@ local function short(name)
 end
 M.name_key = function(s) return name_key(short(s)) end           -- for tests and readers: the key a name is matched by
 
+-- BUG-173 (live i2: key='Rigoth Savotdumat' -> 'no such citizen'; with a nickname set getReadableName reads
+-- "`Blinky' Savotdumat", the real first name is gone): the keys a unit is known by: its sheet name without the nickname,
+-- and its real first and last name (u.name.first_name + the last name alone, translateName only_last_name)
+local function unit_keys(u, env)
+  local keys = {}
+  local n = env.nm(u)
+  if n ~= '' then keys[1] = name_key(short(n)) end
+  local first = rd(function() return strip(utf(u.name.first_name)) end, '')
+  if type(first) == 'string' and first ~= '' then
+    local last = rd(function() return strip(utf(dfhack.translation.translateName(u.name, false, true))) end, '')
+    local k = name_key(first .. (type(last) == 'string' and last ~= '' and (' ' .. last) or ''))
+    if k ~= '' and k ~= keys[1] then keys[#keys + 1] = k end
+  end
+  return keys
+end
+M.unit_keys = unit_keys
+
 ---------------------------------------------------------------- the texts
 -- text -> {kind = 'cursed', who, god?, ctype} | {kind = 'transform', who, to, dir = 'beast' | 'back'} | nil
 function M.parse(text)
@@ -183,7 +200,10 @@ function M.cur(p)
   if type(p.cur) ~= 'table' then p.cur = {} end
   local c = p.cur
   c.u = json.object(type(c.u) == 'table' and c.u or {})
-  c.ev = type(c.ev) == 'table' and c.ev or {}
+  -- BUG-178 (live i2: m.care.cur.ev was "[]" although CURSE_MOON and curse_kill had marked it): a plain {} encodes as [],
+  -- decodes as a json array and stays one whatever keys (moon, kill) are added, so the cadence records never reached the
+  -- save. The records are a keyed object
+  c.ev = json.object(type(c.ev) == 'table' and c.ev or {})
   c.dead = num(c.dead) or 0
   return c
 end
@@ -239,10 +259,9 @@ local function index(K, p, cur, env)
   local function add(id)
     local u = id and df.unit.find(id)
     if not u then return end
-    local n = env.nm(u)
-    if n == '' then return end
-    local k = name_key(short(n))
-    if map[k] == nil then map[k] = id elseif map[k] ~= id then map[k] = false end
+    for _, k in ipairs(unit_keys(u, env)) do          -- BUG-173: the real name too
+      if map[k] == nil then map[k] = id elseif map[k] ~= id then map[k] = false end
+    end
   end
   for _, id in ipairs(own_ids(K)) do add(id) end
   for k in pairs(cur.u) do add(num(k)) end
@@ -311,6 +330,7 @@ end
 local function build_view(K, c, cur)
   local n, tfn = counts(cur)
   S.built = true                     -- BUG-167: a view was built this boot (nil before: unknown, not 'nobody')
+  S.vbuilt = true
   if n + tfn == 0 then S.view = nil; return end
   local view = {n = n, tf = tfn, ids = (ids_of(cur, c.curse_ids or 8))}
   if cur.dead > 0 then view.dead = cur.dead end
@@ -336,10 +356,62 @@ function M.popup_type(text)
   return rec and M.LIVE_TYPES[rec.kind] or 'POPUP'
 end
 
+-- BUG-175 (live i2: 8 BODY_TRANSFORMATION reports of one tick became TRANSFORM '1 were-form' at once and the other seven
+-- 1199 ticks later, five of them dead by then, and curse_kill asked after the first): the other curse reports of the same
+-- game time (report year and time) as report `id`, from the newest 60 reports: {id, text, type, pos}. A report without a
+-- readable time has no wave
+function M.wave(id)
+  return rd(function()
+    local reps = df.global.world.status.reports
+    local lo, base = math.max(0, #reps - 60), nil
+    for i = #reps - 1, lo, -1 do
+      if reps[i].id == id and num(reps[i].time) then base = reps[i]; break end
+    end
+    local y, t = base and num(base.year), base and num(base.time)
+    if not (y and t) then return {} end
+    local out = {}
+    for i = lo, #reps - 1 do
+      local rep = reps[i]
+      if rep.id ~= id and num(rep.year) == y and num(rep.time) == t then
+        local text = utf(rep.text)
+        if M.parse(text) then
+          local ps = rep.pos
+          out[#out + 1] = {id = rep.id, text = text, type = df.announcement_type[rep.type] or '?',
+                           pos = ps and ps.x and ps.x >= 0 and {x = ps.x, y = ps.y, z = ps.z} or nil}
+        end
+      end
+    end
+    return out
+  end, {})
+end
+
+-- a report: this one and the rest of its wave are recorded, then one flush sends them together (a report taken with an
+-- earlier one's wave is not taken twice)
 function M.report(K, c, p, ev, env)
   local rec = M.parse(ev.text)
   if not rec then return false end
+  local rid = num(ev.id)
+  S.seen = S.seen or {n = 0, ids = {}}
+  if rid and S.seen.ids[rid] then return true end
+  local batch = {ev}
+  for _, o in ipairs(rid and M.wave(rid) or {}) do
+    if not S.seen.ids[o.id] then o.tick = ev.tick; batch[#batch + 1] = o end
+  end
+  if S.seen.n > 400 then S.seen = {n = 0, ids = {}} end
   local cur = M.cur(p)
+  for _, e in ipairs(batch) do
+    local id2 = num(e.id)
+    if id2 then S.seen.ids[id2] = true; S.seen.n = S.seen.n + 1 end
+    M.take(K, c, p, cur, e, e == ev and rec or M.parse(e.text), env)
+  end
+  M.flush(K, c, p, env)
+  build_view(K, c, cur)
+  return true
+end
+
+-- one report's record and queue entry (M.report)
+function M.take(K, c, p, cur, ev, rec, env)
+  if not rec then return end
   local now = num(ev.tick) or K.now().tick
   local id = resolve(K, p, cur, env, rec.who)
   local key, r = slot(cur, id, rec.who)
@@ -365,13 +437,11 @@ function M.report(K, c, p, ev, env)
       -- the first transformation of a wave sets the moon's phase (the same wave's later ones are no news)
       if beast and (not num(cur.mt) or now - cur.mt > YEAR / (c.curse_moon_cycles or 13) / 2) then cur.mt = now end
       -- BUG-138: the type of THIS report (live 53.16: BODY_TRANSFORMATION), not the curse's (r.a, DEITY_CURSE)
-      queue('TRANSFORM', {id = id, name = r.n, to = rec.to, dir = rec.dir, bite = fresh and beast, a = trunc(ev.type or '', 24),
-                          pos = ev.pos})
+      -- BUG-175: bitten = no curse report named him, or the game marks him by the bite's syndrome only (src syndrome)
+      queue('TRANSFORM', {id = id, name = r.n, to = rec.to, dir = rec.dir, bite = beast and (fresh or r.s == 'syndrome'),
+                          a = trunc(ev.type or '', 24), pos = ev.pos})
     end
   end
-  M.flush(K, c, p, env)
-  build_view(K, c, cur)
-  return true
 end
 
 ---------------------------------------------------------------- the unit scan
@@ -391,10 +461,18 @@ function M.look(K, c, p, u, env)
       if not S.warned[label] then S.warned[label] = true; K.log('warn', 'care curse: cannot read unit.%s', label) end
     end
     if not sh then return end
-    local name = trunc(short(env.nm(u)), 28)
-    local nk = 'n:' .. name_key(name)
-    local old = cur.u[nk]
-    cur.u[nk] = nil
+    -- BUG-176: the key from the whole name (a 28- or 40-byte cut never matched the report's name again); r.n is for display
+    local full = short(env.nm(u))
+    local name = trunc(full, 28)
+    local old
+    for _, k in ipairs(unit_keys(u, env)) do
+      old = old or cur.u['n:' .. k]
+      cur.u['n:' .. k] = nil
+    end
+    for _, nk in ipairs({'n:' .. name_key(full), 'n:' .. name_key(name)}) do    -- the 28-byte key of older saves too
+      old = old or cur.u[nk]
+      cur.u[nk] = nil
+    end
     local src = sh.hid and 'syndrome' or 'sheet'
     if sh.vampire and not sh.were then
       r = {t = now, n = name, k = 'vampire', s = 'sheet', f = sh.name, tf = 0}
@@ -421,13 +499,47 @@ function M.look(K, c, p, u, env)
     if ri.were then r.f = ri.name end
     if not recent then
       queue('TRANSFORM', {id = u.id, name = r.n, to = ri.were and ri.name or 'its normal form', dir = ri.were and 'beast' or 'back',
-                          a = 'sheet'})
+                          a = 'sheet', bite = ri.were and r.s == 'syndrome' or nil})       -- BUG-175
       if ri.were and (not num(cur.mt) or now - cur.mt > YEAR / (c.curse_moon_cycles or 13) / 2) then cur.mt = now end
     end
   end
 end
 
 ---------------------------------------------------------------- events
+-- the dead leave the list (counted in `dead`); BUG-134 (live i1: a popup "Urist McTest has been cursed" kept 'CURSED 1'
+-- for good): a record known by name only that no unit matched for one moon cycle expires (not counted as dead)
+local function forget(K, c, cur)
+  local gone = 0
+  local now = K.now().tick
+  local cyc = YEAR / math.max(1, num(c.curse_moon_cycles) or 13)
+  for k, r in pairs(cur.u) do
+    local id = num(k)
+    if id then
+      local u = df.unit.find(id)
+      if not u or dfhack.units.isDead(u) then
+        cur.u[k] = nil
+        cur.dead = cur.dead + 1
+        gone = gone + 1
+      end
+    elseif now - (num(r.t) or now) > cyc then
+      cur.u[k] = nil
+      K.log('info', 'care curse: "%s" matched no unit for a moon cycle: dropped', tostring(r.n))
+    end
+  end
+  return gone
+end
+
+-- BUG-175: a queued transformation that no longer holds when it goes out: the unit died, or it is back in the other form
+-- -> nil (keep) | 'dead' | 'reverted'
+local function stale_entry(cur, e)
+  if not e.id then return nil end
+  local u = df.unit.find(e.id)
+  if not u or rd(function() return dfhack.units.isDead(u) end, false) then return 'dead' end
+  local r = cur.u[tostring(e.id)]
+  if r and (r.tf == 1) ~= (e.dir == 'beast') then return 'reverted' end
+  return nil
+end
+
 local function idlist(list, limit)
   local ids = {}
   for _, e in ipairs(list) do
@@ -469,7 +581,16 @@ local function emit_cursed(K, c, p, cur, list, more, env)
   env.emit(K, 'CURSED', trunc(msg, 200), d)
 end
 
-local function emit_transform(K, c, p, cur, list, more, env)
+local function emit_transform(K, c, p, cur, all, more, env)
+  local list, died, back = {}, 0, 0
+  for _, e in ipairs(all) do                     -- BUG-175: the dead and the reverted are no news of this wave
+    local why = stale_entry(cur, e)
+    if why == 'dead' then died = died + 1 elseif why == 'reverted' then back = back + 1 else list[#list + 1] = e end
+  end
+  if #list == 0 then
+    K.log('info', 'care curse: %d queued transformation(s) dropped (%d died, %d changed back)', #all, died, back)
+    return
+  end
   local n, tfn = counts(cur)
   local first = list[1]
   local beasts = 0
@@ -487,6 +608,7 @@ local function emit_transform(K, c, p, cur, list, more, env)
     msg = string.format('%d transformed (%d into beasts): %s%s; %d were-form in the fort now', #list + more, beasts,
                         table.concat(names, ', '), #list > 3 and ' ...' or '', tfn)
   end
+  if died > 0 then msg = msg .. string.format(' (%d more died first)', died) end
   local d = {n = tfn, name = trunc(first.name, 40), dir = first.dir, cursed = n + tfn}
   if first.id then d.unit = first.id end
   if first.to then d.to = trunc(first.to, 24) end
@@ -515,7 +637,9 @@ function M.kill_question(K, c, p, cur, env)
   for _, id in ipairs(beasts) do all[#all + 1] = id end
   for _, k in ipairs(named) do all[#all + 1] = k end
   local T = K.now()
-  if not CAD.due(cur.ev.kill, T, all, {'k'}, {ticks = c.curse_every * 4, wall_s = c.wake_wall_s}) then return end
+  -- BUG-174 (live i2: no curse_kill for the d77, d155 and d181 waves, each under 600 real s after the last question): the
+  -- set of were-forms is the news and the game ticks the gate; a wall-clock gate is minutes of game at timestream speed
+  if not CAD.due(cur.ev.kill, T, all, {'k'}, {ticks = c.curse_every * 4, wall_s = 0}) then return end
   cur.ev.kill = CAD.mark(T, all, {'k'})
   local shown = {}
   for i = 1, math.min(6, #all) do
@@ -533,6 +657,7 @@ end
 function M.flush(K, c, p, env)
   local cur = M.cur(p)
   local now = K.now().tick
+  if S.q.TRANSFORM and #S.q.TRANSFORM > 0 then forget(K, c, cur) end     -- BUG-175: counts without the dead
   for _, kind in ipairs({'CURSED', 'TRANSFORM'}) do
     local q = S.q[kind]
     if q and #q > 0 then
@@ -550,29 +675,6 @@ function M.flush(K, c, p, env)
 end
 
 ---------------------------------------------------------------- the daily pass
--- the dead leave the list (counted in `dead`); BUG-134 (live i1: a popup "Urist McTest has been cursed" kept 'CURSED 1'
--- for good): a record known by name only that no unit matched for one moon cycle expires (not counted as dead)
-local function forget(K, c, cur)
-  local gone = 0
-  local now = K.now().tick
-  local cyc = YEAR / math.max(1, num(c.curse_moon_cycles) or 13)
-  for k, r in pairs(cur.u) do
-    local id = num(k)
-    if id then
-      local u = df.unit.find(id)
-      if not u or dfhack.units.isDead(u) then
-        cur.u[k] = nil
-        cur.dead = cur.dead + 1
-        gone = gone + 1
-      end
-    elseif now - (num(r.t) or now) > cyc then
-      cur.u[k] = nil
-      K.log('info', 'care curse: "%s" matched no unit for a moon cycle: dropped', tostring(r.n))
-    end
-  end
-  return gone
-end
-
 -- the full moon is near and units are cursed: CURSE_MOON (A), once per moon and again for a new cursed unit (util/cadence)
 local function moon_event(K, c, p, cur, env)
   local n, tfn = counts(cur)
@@ -583,7 +685,9 @@ local function moon_event(K, c, p, cur, env)
   local ids = ids_of(cur, 1000)
   local T = K.now()
   local toks = {'m' .. tostring(day)}
-  if not CAD.due(cur.ev.moon, T, ids_of(cur, 1000), toks, {ticks = c.curse_every * 4, wall_s = c.wake_wall_s}) then return end
+  -- BUG-174 (live i2: no CURSE_MOON for the moons within 600 real s of the last one, 60-100 s per moon at timestream
+  -- speed): the moon day token limits it to one per moon, the tick gate to one per 4 x curse_every; no wall gate
+  if not CAD.due(cur.ev.moon, T, ids_of(cur, 1000), toks, {ticks = c.curse_every * 4, wall_s = 0}) then return end
   cur.ev.moon = CAD.mark(T, ids_of(cur, 1000), toks)
   local shown = ids_of(cur, c.curse_ids or 8)
   env.emit(K, 'CURSE_MOON', trunc(string.format('full moon ~d%d in %d d: %d cursed (%s)%s; put them in one locked room now', day, mi,
@@ -598,7 +702,7 @@ function M.finish(K, c, p, env)
   for k in pairs(cur.u) do if k:sub(1, 2) == 'n:' then named[#named + 1] = k end end
   for _, k in ipairs(named) do                -- a record kept by name: the unit may be known by now
     local r = cur.u[k]
-    local id = resolve(K, p, cur, env, r.n)
+    local id = resolve(K, p, cur, env, k:sub(3))      -- BUG-176: the whole name's key, not the 28-byte display name
     if id then
       cur.u[k] = nil
       if not cur.u[tostring(id)] then cur.u[tostring(id)] = r end     -- a duplicate of a unit's record is dropped
@@ -641,8 +745,15 @@ function M.watch(K, c, p, env)
   M.finish(K, c, p, env)
 end
 
--- the state view with the moon of now (K given) or of the last build (no K: old callers)
-function M.view(K)
+-- the state view with the moon of now (K given) or of the last build (no K: old callers). BUG-172 (live i2: no `curse` in
+-- the state for 27 game days after a reload, across a transformation and a death): with c and p (care's config and
+-- persist) a view not built since the boot is built from the persisted records at once
+M.built = function() return S.vbuilt == true end
+function M.view(K, c, p)
+  if not S.vbuilt and type(c) == 'table' and type(p) == 'table' then
+    local okb, errb = pcall(build_view, K, c, M.cur(p))
+    if not okb then S.vbuilt = true; K.log('warn', 'care curse view: %s', tostring(errb)) end
+  end
   local v = S.view
   if not v then return nil end
   local out = {}
@@ -702,9 +813,12 @@ local function find_unit(K, p, key, env)
   for _, uid in ipairs(own_ids(K)) do
     local u = df.unit.find(uid)
     if u then
-      local nk = name_key(short(env.nm(u)))
-      if nk == k then hits[#hits + 1] = uid
-      elseif single and (nk:match('^(%S+)') or '') == k then firsts[#firsts + 1] = uid end
+      local hit, first = false, false
+      for _, nk in ipairs(unit_keys(u, env)) do        -- BUG-173: the sheet name and the real first + last name
+        if nk == k then hit = true
+        elseif single and (nk:match('^(%S+)') or '') == k then first = true end
+      end
+      if hit then hits[#hits + 1] = uid elseif first then firsts[#firsts + 1] = uid end
     end
   end
   if #hits == 0 then hits = firsts end
@@ -723,19 +837,35 @@ end
 local LINKS = {SPOUSE = 'spouse', MOTHER = 'mother', FATHER = 'father', CHILD = 'child', LOVER = 'lover',
            COMPANION = 'companion', DECEASED_SPOUSE = 'late spouse'}
 
--- BUG-137 (live i2: 'unread':['thoughts','wounds'] for every living unit): the emotions are a 0-based DF vector (newest
--- last); an emotion without a thought (-1) names its emotion type
+-- BUG-137 (live i2: 'unread':['thoughts','wounds'] for every living unit): the emotions are a 0-based DF vector; an
+-- emotion without a thought (-1) names its emotion type. BUG-173 (live i2: every list began with 'ANYTHING'): the empty
+-- slots (type ANYTHING, or no thought and strength 0) are skipped, and the vector is not in time order: newest first by
+-- (year, year_tick), the vector index breaking ties (the later the newer)
 local function thoughts_of(u)
-  local out, seen = {}, {}
-  local list = u.status.current_soul.personality.emotions
-  for i = #list - 1, 0, -1 do
-    local e = list[i]
+  local out, seen, list = {}, {}, {}
+  local vec = u.status.current_soul.personality.emotions
+  for i = 0, #vec - 1 do
+    local e = vec[i]
     local th = num(rd(function() return e.thought end))
+    local et = rd(function() return df.emotion_type[e.type] end)
+    local str = num(rd(function() return e.strength end))
+    local empty = et == 'ANYTHING' or ((th == nil or th < 0) and str == 0)
     local nm = th and th >= 0 and df.unit_thought_type[th] or nil
-    if not nm then nm = rd(function() return df.emotion_type[e.type] end) end
-    if nm and not seen[nm] then
-      seen[nm] = true
-      out[#out + 1] = tostring(nm)
+    if not nm then nm = et end
+    if nm and not empty then
+      list[#list + 1] = {nm = tostring(nm), y = num(rd(function() return e.year end)) or -1,
+                         t = num(rd(function() return e.year_tick end)) or -1, i = i}
+    end
+  end
+  table.sort(list, function(a, b)
+    if a.y ~= b.y then return a.y > b.y end
+    if a.t ~= b.t then return a.t > b.t end
+    return a.i > b.i
+  end)
+  for _, e in ipairs(list) do
+    if not seen[e.nm] then
+      seen[e.nm] = true
+      out[#out + 1] = e.nm
       if #out >= 6 then break end
     end
   end
@@ -781,7 +911,7 @@ function M.inspect_unit(K, c, p, key, env)
   local mood = rd(function() return u.mood >= 0 and df.mood_type[u.mood] or nil end)     -- BUG-137: -1 is no mood
   if mood then d.mood = mood end
   for k, t in pairs(env.tantrum or {}) do
-    if name_key(short(k)) == name_key(short(d.name)) then d.tantrum_ago = math.max(0, K.now().tick - t) end
+    if name_key(short(k)) == name_key(short(env.nm(u))) then d.tantrum_ago = math.max(0, K.now().tick - t) end
   end
   local th = get('thoughts', function() return thoughts_of(u) end, nil)      -- the last thoughts, newest first
   if th then d.thoughts = th end
@@ -800,7 +930,8 @@ function M.inspect_unit(K, c, p, key, env)
   local w = get('wounds', function() return wounds_of(u) end, nil)
   if w then d.wound = w end
   local bc, bm = rd(function() return num(u.body.blood_count) end), rd(function() return num(u.body.blood_max) end)
-  if bc and bm and bm > 0 then d.blood_pct = bc * 100 // bm end
+  -- BUG-173 (live: a dead unit showed blood_pct -1): only a living unit with a readable blood count
+  if d.dead ~= 1 and bc and bm and bm > 0 and bc >= 0 then d.blood_pct = math.min(100, bc * 100 // bm) end
   -- job and place
   local job = rd(function() return df.job_type[u.job.current_job.job_type] end)
   d.job = job or 'none'

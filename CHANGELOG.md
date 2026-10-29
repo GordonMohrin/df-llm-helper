@@ -92,6 +92,32 @@
   the squad 105 move order equals that tile; military kpi on_station reaches 8 of 8 within a day of ALERT; then the M3-release (lone harmless
   intruder cleared at max_days in SIEGE, LOCKDOWN_END cause=limit) and M3-breach-stuck (MODE BREACH>SIEGE bridge_stuck) runs without a
   teleport; lower B2 and check that after ~100 ticks the b2 station is taken again once its group equals the soldiers'.
+## Live round 2 curse fixes: state after a reload, the unit sheet, moon and kill cadence, transformation waves, long names, cur.ev (BUG-172..178, 2026-10-29; offline, live-untested)
+- **Why:** live test round 2 (i2, confirmed by the skeptic; i1 NEW1 and i4 NEW7 for economy): after a reload the state had no `curse` for 27
+  game days (care's first full run) and no stock days for ~15 game days (economy's), and economy's slab pass read 0 ghosts; `inspect what=unit`
+  missed a nicknamed unit's real name and listed empty ANYTHING emotions; CURSE_MOON and curse_kill were held by the 600 s wall gate (a moon is
+  60-100 s at timestream speed); a wave of 8 reports of one tick became two TRANSFORMs 1199 ticks apart, the late one naming 5 dead units; a
+  name cut at 40 bytes inside its epithet never matched (phantom were-form); `m.care.cur.ev` was saved as `[]`.
+- **What changed:** (1) care.state publishes `curse` without `st.out`; curse.view builds a view from the persisted records once per boot
+  (BUG-172). (2) curse `unit_keys`: the sheet name and the real first + last name, used by inspect and the report index; thoughts skip empty
+  slots and sort by (year, year_tick); no blood_pct for the dead (BUG-173). (3) moon_event and kill_question: `wall_s = 0` (BUG-174). (4)
+  `M.report` takes the other curse reports of the same report year/time (`M.wave`) and flushes once; flush forgets the dead first,
+  emit_transform drops dead/reverted entries ('N more died first'); bite also for src syndrome (BUG-175). (5) care `M.full_name` for the curse
+  library (no 40-byte cut); look/finish key name records by the whole name (BUG-176). (6) economy: early `st.out` from `T.days`; labor only
+  from a complete run; `M.slab_ghosts` (care view, else fresh census.g, else unknown: no restock on a guessed 0) (BUG-177). (7) `cur.ev` is a
+  json object (BUG-178).
+- **Safety:** reads only (report list, unit name fields). No new verb, event, event field, config key or RULES row; no contract change.
+- **Tests (each fails on b805745):** tests/lua/test_curse_live2.lua (10), tests/lua/test_economy_b2.lua BUG-177 (2).
+- **Live check:** (a) `dfhack-run dfllm reload` in a fort with cursed units, then `dfllm status` at once: the `CURSED n (ids ..)` line is there
+  before care's first run; status keeps `stock drink Nd food Nd` (never bare) through the following game days; `dfllm cmd inspect
+  '{"what":"orders"}'`: `slabs.ghosts` = the census ghosts, or `slabs.why` 'ghost count unknown'. (b) nickname a citizen; `inspect
+  what=unit key="<first> <last>"` finds him; `thoughts` without 'ANYTHING', newest first; a dead unit has no `blood_pct`. (c) at timestream
+  speed: `dfllm events --type CURSE_MOON` one event ~4 days before every full moon; every wave adding a were-form gives one curse_kill naming the
+  whole set. (d) at a wave: one TRANSFORM per wave tick with all ids (`more` = n-1), no dead unit in `ids`, a bitten (src syndrome) unit `bite
+  1`. UNCERTAIN: whether 53.16 fills `report.year`/`report.time` (without them the wave is not batched). (e) a cursed unit with a long epithet
+  name: `inspect what=curse` has no 'by name only' record; after his death no 'in were-form'. (f) after a CURSE_MOON: `inspect what=persist
+  key=m.care field=cur` shows `"ev":{"moon":...}`; a reload gives no second CURSE_MOON for that moon.
+- **Skipped:** i4 NEW1 (DOC_LABORS, not a state-publication issue); the d103 within-a-day were-phase the daily watch cannot see (NEW3 (2)).
 
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every

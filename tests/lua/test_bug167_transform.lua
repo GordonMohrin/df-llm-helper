@@ -78,7 +78,8 @@ T.test('BUG-167: care.curse_tf counts the were-forms of the curse view (0 withou
   df.creature_raw = {find = function(id) return ({[1] = {name = {[0] = 'dwarf'}, creature_id = 'DWARF'}})[id] end}
   for i = 1, 3 do W.unit(i).race = 1 end
   W.unit(2)._m.name = 'Kel Becordastot, Manager'
-  T.eq(care.curse_tf(W.K), nil, 'before care ran: unknown')
+  -- BUG-172: the boot's state publication builds the curse view from the persisted records, so it is known (0) at once
+  T.eq(care.curse_tf(W.K), 0, 'before care ran: the view from the persisted records')
   W.run(3)
   T.eq(care.curse_tf(W.K), 0, 'nobody cursed')
   W.event('REPORT', {type = 'CARAVAN_ARRIVAL', text = 'Kel Becordastot, Manager has transformed into a werecavy!'})

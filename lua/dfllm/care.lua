@@ -4065,8 +4065,15 @@ end
 -- nil before the curse view was built this boot: unknown)
 function M.curse_tf(K) return CU.tf_now() end
 
--- what the curse library needs of care: the name reader, the tantrums seen (name -> tick) and the emitter
-function M.curse_env() return {nm = uname, tantrum = st.tantrum, emit = M.curse_emit} end
+-- what the curse library needs of care: the name reader, the tantrums seen (name -> tick) and the emitter.
+-- BUG-176 (live i2: 'Kumil Akrulonam Dalkamennol Kadol "Tinshimmer the Lean Reputation of Gems", Werecavy Planter' cut at
+-- 40 bytes inside the quoted epithet: the nickname strip failed, the record never matched, a dead unit stayed a were-form):
+-- the curse library gets the whole name and cuts only what it shows
+M.full_name = function(u)
+  local ok, n = pcall(function() return dfhack.df2utf(dfhack.units.getReadableName(u)) end)
+  return ok and type(n) == 'string' and n or ''
+end
+function M.curse_env() return {nm = M.full_name, tantrum = st.tantrum, emit = M.curse_emit} end
 
 -- BUG-136 (live i2: the curse logic lived in the full run, 10-31 game days apart under pacing): the daily curse pass on
 -- kern's watch clock (CONTRACTS §3.2: never paced, never demoted): the form of the cursed, a new were-cursed unit,
@@ -4453,7 +4460,12 @@ end
 
 function M.state(K)
   local o = st.out
-  if not o then return {} end
+  -- BUG-172 (live i2: no `curse` key and no CURSED line for 27 game days after a reload, across a transformation and a
+  -- death): the curse view does not wait for care's first full run (st.out); it is built from the persisted records
+  -- (only while the curse is on, as the watch; persist read only until the first build)
+  local cc = M.conf(K)
+  local cv = cc.curse and CU.view(K, cc, not CU.built() and pstate(K) or nil) or nil
+  if not o then return {curse = cv} end
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
   if (o.corpses_unreach or 0) > 0 then care.corpses_unreach = o.corpses_unreach end     -- BUG-105: apart from corpses_old
@@ -4492,7 +4504,7 @@ function M.state(K)
     for k, n in pairs(st.died) do died[k] = n end
     care.died = died
   end
-  return {care = care, stock = {hosp_water = o.hosp_water}, curse = CU.view(K)}
+  return {care = care, stock = {hosp_water = o.hosp_water}, curse = cv}
 end
 
 local function deep(t)
