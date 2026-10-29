@@ -127,7 +127,7 @@ T.test('BUG-234: PEACE, no enemy, B1 up with a hungry citizen beyond it and O1 u
   -- the live picture: after a drill B1 stood up, a soldier next to it held the lowering pull, the stranded one starved
   local W = fort{up = {B1 = true}, o1_unlinked = true,
                  units = {S.cit(11, 34, 15, Z), S.cit(12, 41, 15, Z)}}       -- 12 stands next to B1 (core side)
-  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 45000}
+  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 55000}
   run(W, 1500)
   T.eq(W.K.mode(), 'PEACE')
   T.eq(up(W, 'B1'), true, 'held by the unit next to it')
@@ -148,7 +148,7 @@ T.test('BUG-235: PEACE, no enemy: citizens cut off from food behind a raised bri
   -- O1 is up (its lever pulled by hand), the zone between O1 and B1: citizens on the field outside O1 have no food
   local W = fort{up = {O1 = true}, units = {S.cit(11, 10, 15, Z)}}
   W.K.cfg.decisions['D-14'] = 'up'                    -- the peace gates keep O1 up: only the rescue lowers it
-  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 45000}
+  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 55000}
   local rescue
   local n = 0
   while n < 40 and not rescue do
@@ -180,7 +180,7 @@ end)
 T.test('BUG-235: a PEACE rescue ends with PEACE: a siege raises O1 again by its own rules', function()
   local W = fort{up = {O1 = true}, units = {S.cit(11, 10, 15, Z)}}
   W.K.cfg.decisions['D-14'] = 'up'
-  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 45000}
+  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 55000}
   local n = 0
   while n < 40 and up(W, 'O1') do run(W, 100); n = n + 1 end
   T.eq(up(W, 'O1'), false, 'lowered for the rescue')
@@ -296,7 +296,7 @@ T.test('BUG-235 (review): a lockdown raises an outer bridge a quiet-PEACE rescue
   local lock = {}
   local W = fort{up = {O1 = true}, units = {S.cit(11, 10, 15, Z)}, lock = lock}
   W.K.cfg.decisions['D-14'] = 'up'
-  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 45000}
+  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 55000}
   local n = 0
   while n < 40 and up(W, 'O1') do run(W, 100); n = n + 1 end
   T.eq(up(W, 'O1'), false, 'lowered for the rescue')

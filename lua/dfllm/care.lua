@@ -3983,6 +3983,7 @@ local function pop_stress(K, c, r, p, now)
   end
   while #keep > 300 do table.remove(keep, 1) end
   p.dlog = keep
+  M.census_waves(K, p, now)                                -- BUG-279: the arrivals the census saw
   local waves, mig, lastw = 0, 0, -1
   local wk = {}
   for _, w in ipairs(p.waves) do
@@ -4428,10 +4429,56 @@ end
 -- FR-74: migrant waves, from economy's MIGRANTS (B) after the census caught up with the arrival report (n may be 0)
 M.on['EV:MIGRANTS'] = function(K, ev)
   local n = type(ev.d) == 'table' and num(ev.d.n) or 0
-  local p = pstate(K)
-  p.waves[#p.waves + 1] = {t = ev.tick or K.now().tick, n = n}
-  while #p.waves > 40 do table.remove(p.waves, 1) end
+  M.wave_add(pstate(K), ev.tick or K.now().tick, n)
   K.persist.touch('m.care')
+end
+
+-- BUG-279 (Run 15 Earthboat y374: brief 'migrants in 365 d: 0 waves, 0 people' while the fort grew from 7 to 21 without
+-- a birth; one MIGRANTS (n=6) for three or more waves: economy's event needs DF's arrival report, and a missed report was
+-- never counted): the census counts the waves too. A citizen id the census did not hold before (p.known) and not a
+-- baby (born here) is an arrival; arrivals within WAVE_GAP of each other are one wave (p.wpend), closed once WAVE_GAP
+-- passed without one. A wave and a MIGRANTS within WAVE_SAME of each other are the same wave (the bigger n counts).
+-- The first read after a load without p.known only learns the ids.
+M.WAVE_GAP, M.WAVE_SAME = DAY, 3 * DAY
+function M.wave_add(p, t, n, src)
+  for _, w in ipairs(p.waves) do
+    if type(w) == 'table' and math.abs((num(w.t) or -1e9) - t) <= M.WAVE_SAME then
+      w.n = math.max(num(w.n) or 0, n)
+      return
+    end
+  end
+  p.waves[#p.waves + 1] = {t = t, n = n, src = src}
+  while #p.waves > 40 do table.remove(p.waves, 1) end
+end
+
+function M.census_waves(K, p, now)
+  local cu = K.census.u
+  local ids = type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or nil
+  if not ids then return end
+  local known = {}
+  for _, id in ipairs(type(p.known) == 'table' and p.known or {}) do known[id] = true end
+  local first, new = type(p.known) ~= 'table', 0
+  local list = {}
+  for _, id in ipairs(ids) do
+    list[#list + 1] = id
+    if not first and not known[id] then
+      local u = df.unit.find(id)
+      local ok, baby = pcall(function() return dfhack.units.isBaby(u) end)
+      if not (ok and baby == true) then new = new + 1 end
+    end
+  end
+  table.sort(list)
+  p.known = list
+  local w = type(p.wpend) == 'table' and p.wpend or nil
+  if w and now - (num(w.last) or now) > M.WAVE_GAP then
+    M.wave_add(p, num(w.t) or now, num(w.n) or 0, 'census')
+    w = nil
+  end
+  if new > 0 then
+    w = w or {t = now, n = 0}
+    w.n, w.last = w.n + new, now
+  end
+  p.wpend = w
 end
 
 -- BUG-003: an index older than one care period is rebuilt for the inspect (read-only: the corpse vector, the
