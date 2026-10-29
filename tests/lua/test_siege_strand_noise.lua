@@ -206,4 +206,19 @@ T.test('BUG-277: off every stock on a gathering job: no CUTOFF (kern.log: on a j
        or logged(W, 'off the bed group is on a job outside (3:GatherPlants)'), 'kern.log')
 end)
 
+T.test('BUG-277 (review): one citizen cut off long since (CUTOFF told), a second one off the stock on a gathering ' ..
+       'job: no second CUTOFF for the old one', function()
+  -- before the review: the trip citizen made the rise, the old one was the only non-trip citizen off it, CUTOFF again
+  local W = fort{}
+  run(W, 1500)
+  W.move(3, POCKET[1], POCKET[2], Z)
+  run(W, 9000)
+  T.eq(#cutoffs(W), 1, 'the real one, told once')
+  W.move(2, POCKET[1], POCKET[2], Z)
+  hunt(W, 2, 'GatherPlants')
+  run(W, 13500)
+  T.eq(#cutoffs(W), 1, 'no second CUTOFF')
+  T.ok(logged(W, 'on a job outside (2:GatherPlants)'), 'kern.log')
+end)
+
 T.done()

@@ -1267,8 +1267,10 @@ end
 
 -- BUG-277: a confirmed rise of `cls`: CUTOFF (A) now when blame finds the closer; without a cause it waits for an audit
 -- a game day later that still sees it (mem.cut_pend; the class keeps its old count, so the next audit reads it again);
--- citizens on a trip job (M.trip) do not count. true while it is held, false once it is emitted
-function M.cut_confirm(K, R, t, cls, cits, main, by_cls)
+-- citizens on a trip job (M.trip) do not count: the rise is only real when more citizens than `prev` (the class's old
+-- count) are off it without one (review: an old cut plus a new trip is no new CUTOFF). true while it is held, false
+-- once it is emitted
+function M.cut_confirm(K, R, t, cls, cits, main, by_cls, prev)
   local has, off, trip = {}, {}, {}
   for g in pairs(by_cls[cls]) do has[g] = true end
   for _, c in ipairs(cits) do
@@ -1279,7 +1281,7 @@ function M.cut_confirm(K, R, t, cls, cits, main, by_cls)
   end
   local p = mem.cut_pend
   if p and p.cls ~= cls then p = nil end
-  if #off == 0 then
+  if #off <= (prev or 0) then
     local sig = table.concat(trip, ',')
     if not (p and p.sig == sig) then
       K.log('info', 'seal: no CUTOFF: the %d citizen%s off the %s group %s on a job outside (%s)', #trip,
@@ -1349,7 +1351,7 @@ local function commit_audit(K, R, cits)
     end
   end
   R.cut = cut
-  local held = inc ~= nil and M.cut_confirm(K, R, t, inc.cls, cits, main, by_cls)
+  local held = inc ~= nil and M.cut_confirm(K, R, t, inc.cls, cits, main, by_cls, int(st.cut[inc.cls]) or 0)
   if not inc then mem.cut_pend = nil end                 -- BUG-277: the rise is gone (back from the trip)
   local old = held and (int(st.cut[inc.cls]) or 0) or nil
   st.cut = {food = cut.food, drink = cut.drink, bed = cut.bed}

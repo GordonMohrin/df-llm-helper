@@ -15,7 +15,9 @@
   (3) care `M.census_waves`: new non-baby citizen ids in the census are arrivals, a day's cluster is a wave; a census wave and a MIGRANTS
   within 3 days are one (`M.wave_add`, the bigger n) (BUG-279). (4) bp/topo.audit: no refuge in the manifest = `info.pending` 'refuge:
   pending fortcore stage 3', no fail, refuge_sep stays false; bp.validate keeps it a `refuge` finding for a final fort (BUG-280). RULES §7 STRANDED and CUTOFF rows edited in place. No contract change.
-- **Tests (each fails on 2b9c009):** tests/lua/test_siege_strand_noise.lua (7), tests/lua/test_care_pop_waves.lua (2),
+- **Review:** a CUTOFF rise made only by a trip citizen no longer re-reports citizens cut off long since (`cut_confirm` compares
+  the non-trip count with the class's old count).
+- **Tests (each fails on 2b9c009):** tests/lua/test_siege_strand_noise.lua (8, one from the review), tests/lua/test_care_pop_waves.lua (2),
   tests/bp/test_topo_refuge_pending.py (1 + 1 guard); updated pins: tests/lua/test_fix5_gate.lua hunger 45000 -> 55000 (below DF's
   Hungry line).
 - **Live check:** at the next trip to the map edge kern.log 'seal: CUTOFF held for an audit a day later' or 'no CUTOFF: ... on a job

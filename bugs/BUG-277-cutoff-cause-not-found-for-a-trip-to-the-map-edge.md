@@ -25,6 +25,11 @@ game day or more later that still sees it emits CUTOFF ('cause not found (N d)')
 ## Tests
 `tests/lua/test_siege_strand_noise.lua` `BUG-277: ...` x3 (fail on 2b9c009).
 
+## Review
+A rise made only by a trip citizen re-reported citizens cut off long since (they were the only non-trip ones off the
+stock): `cut_confirm` now counts a rise only when more non-trip citizens than the class's old count are off it (test:
+"one citizen cut off long since ... no second CUTOFF").
+
 ## Live check
 At the next trip to the map edge: kern.log 'seal: CUTOFF held for an audit a day later: 1 citizen off the food group' and no
 CUTOFF; or 'no CUTOFF: the 1 citizen off the food group is on a job outside (26275:GatherPlants)'. A real cut without a visible
