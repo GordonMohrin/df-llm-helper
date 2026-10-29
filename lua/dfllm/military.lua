@@ -1983,7 +1983,8 @@ end
 -- tried = why each entry failed ('b2 wall', 'core group 0', 'z4 none', 'b1 bridge B1')}. BUG-214 (live t4: b2 a wall,
 -- core on walk group 0, melee on 1507 behind the raised B2, the soldiers on 1: no station order, or melee 'kept'
 -- where nobody could walk): with o.fallback, a chain that failed on a wall or the walk group takes the nearest floor on
--- the squad's group within 3 * SEARCH_R of its first entry (via 'wide'), else the nearest Kern+ floor on it (via 'kern')
+-- the squad's group within 3 * SEARCH_R of its first entry (via 'wide'; inner side of the bridges there first), else the
+-- nearest Kern+ floor on it (via 'kern'), else that wide floor on any side
 local function pick(K, man, stations, chain, o)
   o = o or {}
   local clear = clearance(K)
@@ -2017,11 +2018,17 @@ local function pick(K, man, stations, chain, o)
   end
   if o.fallback and hard and r.first then
     local f = r.first
-    local q = reloc(K, man, brs, f.pos, {}, clear, {need_by = o.need_by, side = o.side, group = o.group,
-                                                    R = 3 * SL.SEARCH_R, tag = 'wide'})
+    -- review: first on the inner side of every bridge within the wide radius (a lowered bridge joins the walk groups,
+    -- so the group filter alone would allow a floor outside the gate), then Kern+, then any side on the squad's group
+    -- (soldiers shut out behind a raised bridge: no floor inside is theirs)
+    local wo = {need_by = o.need_by, side = o.side, group = o.group, R = 3 * SL.SEARCH_R, tag = 'wide'}
+    local q = reloc(K, man, brs, f.pos, SL.blockers(brs, f.pos, 3 * SL.SEARCH_R), clear, wo)
     if q then r.pos, r.name, r.from, r.via = q, f.name, f.pos, 'wide'; return r end
     q = M.kern_floor(K, man, brs, f.pos, clear, o)
-    if q then r.pos, r.name, r.from, r.via = q, 'Kern+', f.pos, 'kern' end
+    if q then r.pos, r.name, r.from, r.via = q, 'Kern+', f.pos, 'kern'; return r end
+    wo.tag = 'wide_any'
+    q = reloc(K, man, brs, f.pos, {}, clear, wo)
+    if q then r.pos, r.name, r.from, r.via = q, f.name, f.pos, 'wide' end
   end
   return r
 end

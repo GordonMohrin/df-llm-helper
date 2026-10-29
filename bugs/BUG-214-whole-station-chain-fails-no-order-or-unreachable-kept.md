@@ -22,11 +22,13 @@ nil for a wall. `note_pick` used a fixed text.
 (`b2 wall, core group 0, z4 none, melee group 1507`). When the chain failed on a wall or the walk group it takes the nearest floor on the
 soldiers' group within 3 * SEARCH_R (24) of the first entry (via `wide`), else the nearest revealed floor on a Kern+ tile on that group
 (`S.relocate_box` over the box of the burrow's blocks, `dfhack.burrows.listBlocks`, its level first, at most 4,000 probes, cached
-RELOC_TTL; via `kern`, station `Kern+`). STATION_MOVED `why fallback` with `via`, `home`, `tried`. `posture_station` never returns the
+RELOC_TTL; via `kern`, station `Kern+`). Review: the wide search first keeps to the inner side of every bridge within 24 tiles (a
+lowered bridge joins the walk groups); only after Kern+ found nothing does it take any side on the soldiers' group (soldiers shut out
+behind a raised bridge). STATION_MOVED `why fallback` with `via`, `home`, `tried`. `posture_station` never returns the
 first entry's position when it is a wall or on another group: no station order instead, and the event text names the failed entries.
 
 ## Tests
-`tests/lua/test_stations.lua` BUG-214 (three tests: relocate_box, the wide fallback naming every failed entry, the Kern+ fallback and no
+`tests/lua/test_stations.lua` BUG-214 (four tests: relocate_box, the inner side first (review), the wide fallback naming every failed entry, the Kern+ fallback and no
 order instead of the unreachable first entry); each fails on 5e9e719.
 
 ## Live check

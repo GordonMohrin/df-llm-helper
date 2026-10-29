@@ -451,7 +451,7 @@ T.test('BUG-214 (live t4: b2 a wall, core group 0, melee group 1507: no station 
     if y >= 50 then return 2 end
     if y < 41 then return 4 end
     return (x >= 60 and y >= 42) and 1 or 3
-  end, 65, 45)
+  end, 65, 45, false)                                      -- no Kern+ blocks (review: Kern+ comes before any side)
   breach(W)
   T.eq({orders_of(W, 'A'), orders_of(W, 'C')}, {'station@60,49,10', 'station@60,49,10'},
        'old code: no station order (b2 a wall, nothing within 8 tiles)')
@@ -463,6 +463,30 @@ T.test('BUG-214 (live t4: b2 a wall, core group 0, melee group 1507: no station 
   T.ok(mv[1].msg:find('no station of the chain b2 51,63,10 is usable (b2 wall, core group 0, z4 none, melee group 3): ' ..
                       'moved to the nearest floor on walk group 1 within 24 tiles, 60,49,10', 1, true), mv[1].msg)
   T.eq(#logs(W, 'no other station of its chain'), 0)
+  W.restore()
+end)
+
+T.test('BUG-214 review: the wide fallback prefers a floor on the inner side of B2 (the walk group alone allows the ' ..
+       'nearer floor on the far side when a lowered bridge joins the groups)', function()
+  -- group 1 (the soldiers at 75,90): inner (y >= 61) 10+ tiles from b2 51,63 and 9+ from core 60,75 and the z4 centre
+  -- 60,78; outer the band y 53-54 (9 tiles from b2, nearer than any inner floor of group 1). Else 5; core 60,75 on 0;
+  -- y 41-52 a pocket of group 3 (melee)
+  local function ch(x, y, cx, cy) return math.max(math.abs(x - cx), math.abs(y - cy)) end
+  local W = t4_world('t4i', function(x, y)
+    if x == 60 and y == 75 then return 0 end
+    if y >= 61 then
+      return (ch(x, y, 51, 63) <= 9 or ch(x, y, 60, 75) <= 8 or ch(x, y, 60, 78) <= 8) and 5 or 1
+    end
+    if y >= 55 then return 5 end
+    if y >= 53 then return 1 end
+    if y >= 41 then return 3 end
+    return 4
+  end, 75, 90)
+  breach(W)
+  T.eq(orders_of(W, 'A'), 'station@41,63,10', 'group rule alone: station@51,54,10 on the far side of B2')
+  local mv = {}
+  for _, e in ipairs(evs(W, 'STATION_MOVED', 'fallback')) do if e.d.first == 'b2' then mv[#mv + 1] = e end end
+  T.ok(#mv == 1 and mv[1].d.via == 'wide', mv[1] and mv[1].msg or 'none')
   W.restore()
 end)
 
