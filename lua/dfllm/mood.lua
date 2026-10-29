@@ -99,6 +99,23 @@ function MD.missing_set(ms)
   return set
 end
 
+-- the chain shops that are no moodable type (economy.mood_shops never lists them): Butchers for leather, bone and shell.
+-- Review fix: without this the typed request never named the Butchers. Read-only (the built workshops); added to `set`
+-- when none of the type is built; unreadable buildings: unchanged
+MD.EXTRA = {'Butchers'}
+function MD.extra_missing(set)
+  pcall(function()
+    local have = {}
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local n = df.workshop_type[b.type]
+      local okb, done = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+      if n and (not okb or done) then have[n] = true end
+    end
+    for _, t in ipairs(MD.EXTRA) do if not have[t] then set[t] = true end end
+  end)
+  return set
+end
+
 -- the short name of a unit sheet name ('Udil Monangasob "Drilledboard", Brewer' -> 'Udil Monangasob')
 function MD.short_name(n)
   local s = tostring(n or '')

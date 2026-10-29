@@ -681,7 +681,7 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   local okm, ms = K.call('economy', 'mood_shops')
   local typed = okm and type(ms) == 'table' and type(ms.missing) == 'table'
   rec.typed = typed or nil
-  local missing = typed and MD.missing_set(ms) or {}
+  local missing = typed and MD.extra_missing(MD.missing_set(ms)) or {}   -- (+ Butchers: no moodable type)
   local want = ws or M.SKILL_WS[skill or '']
   local shop = (not ws and want and missing[want]) and want or nil
   local miss = still_missing(job, rec)

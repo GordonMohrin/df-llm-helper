@@ -195,7 +195,20 @@ T.test('BUG-284: a missing cloth or leather chain names its shops in the typed r
   T.ok(#r >= 1)
   local set = {}
   for _, t in ipairs(r[#r].d.types) do set[t] = true end
-  T.ok(set.Loom and set.Tanners and not set.Jewelers and not set.Butchers, table.concat(r[#r].d.types, ','))
+  T.ok(set.Loom and set.Tanners and set.Butchers and not set.Jewelers, table.concat(r[#r].d.types, ','))
+  -- review fix: the Butchers is no moodable type (economy.mood_shops never lists it): asked while none is built, not after
+  local W2 = CW.world{cit = 6, setup = function(W)
+    W.load(shops_fake(W, {'Tanners'}))
+    F.workshop(W, 'Butchers')
+    local u = W.unit(2)
+    u.mood = df.mood_type.Secretive
+    u.counters2 = {thirst_timer = 1000, hunger_timer = 1000}
+    u.job.current_job = CW.mood_job(W, 907, F.workshop(W, 'Masons'), {filter('SKIN_TANNED')})
+  end}
+  CW.day(W2, 1)
+  local r2 = mood_reqs(W2)
+  T.ok(#r2 >= 1)
+  T.eq(r2[#r2].d.types, {'Tanners'})
 end)
 
 T.test('dfllm.mood: steps, the line, short names', function()

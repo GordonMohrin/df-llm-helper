@@ -26,6 +26,9 @@ a year).
 `tests/lua/test_mood_emergency.lua` (CollectWebs at the Loom once; chain types Loom/Tanners), `tests/lua/test_kern_act.lua`
 (mood_task fields, owner, refusals), `tests/test_bug282_285_moods.py` (plan propose). Fail on 64df679.
 
+Review fix: the Butchers is no moodable type, so economy.mood_shops never lists it and the chain never asked for it for
+leather, bone or shell; `MD.extra_missing` adds it while none is built (read-only), test in `test_mood_emergency.lua`.
+
 ## Live check
 A mood with a silk slot and webs near: kern.log `mood unit N: collect webs queued at Loom <id> (K webs near)`, the Loom sheet
 lists "Collect webs", a weaver takes it and silk thread appears (`inspect what=economy` thread_silk). If DF cancels the job at
