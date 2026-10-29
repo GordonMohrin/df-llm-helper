@@ -134,6 +134,7 @@ def test_fit_explore_takes_the_deepest_depth_with_a_site(save, base, monkeypatch
             raise cmd.BpError("rank explore: explore: every anchor's shaft of depth 9 reaches an avoided level (z20)")
         return [{"id": "S1", "anchor": [45, 56, 25], "rot": 1, "score": 990, "why": "rot1, shaft to z19"}], "c1"
     monkeypatch.setattr(plan, "rank_sites", rank)
+    monkeypatch.setattr(plan, "explore_room", lambda *a, **k: 9)       # BUG-241's site count: tests/test_bug241_244_*
     prev2 = copy.deepcopy(prev)
     prev2["seasons"][1]["build"].append(dict(EX))                       # applied in season 1: kept as it is
     doc = plan.propose(s, phases, prev2, decisions={}, tinfo=tinfo)

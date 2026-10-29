@@ -1,5 +1,26 @@
 # CHANGELOG dfpilot
 
+## Run 15 plan propose: explore per free site, the running trade.want, water and food first, stage labels (BUG-241..244, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 (Earthboat, Inkintense, Drillchamber): propose drafted explore@S1 in all four seasons with one or two free
+  sites and check refused the draft ('only 0 free site(s) for explore ... taken by y375s0b0'), the explore before a new seal
+  (BUG-241); the draft replaced the running `cmd trade.want ... food, seeds` by the old list (BUG-242); at drink 0 d the
+  cistern landed in seasons[2], at food 10 d no farm was drafted (BUG-243); the summary printed `fortcore@same` without the
+  stage and the gallery_o1 warning came while check refused the gallery (BUG-244).
+- **What changed:** (1) `plan.explore_room` counts the ranked explore sites that fit together beside the projects in bp;
+  `fit_explore` keeps only that many new explores (notes: 'the next explore: propose next season'); `draft_supply` puts the
+  explore after the new seals and the emergency builds (BUG-241). (2) `plan.live_trade` reads the `trade.want` cmds in
+  cli.log after the last apply (no ERR reply); `propose(live=...)` starts trade from them, CLI and `auto_plan` pass it
+  (BUG-242). (3) `plan.emergency` (drink_d or food_d < `EMERGENCY_D` 30, or water.src empty) and `emergency_drafts`: cistern
+  (else `aqwell` when the bp package has it), farms, workshops with the missing Still/Kitchen (`fort_facts.food_shops`) go
+  right after the seals and refuge pieces; not in the BUG-197 no-Z4 branch (a note instead) (BUG-243). (4) `build_label`:
+  `fortcore@same st3 (refuge)` in the summary; the gallery warning only after stage 2 is dug (`core2_dug`, `fort_facts.core2`)
+  and with its JSON (BUG-244). No contract, verb, event, config key or RULES change.
+- **Tests (each fails on 6dc0f19):** tests/test_bug241_244_plan_propose.py (11), tests/test_cli_plan.py (gallery text).
+- **Live check:** in a fort without ore and one free explore site, `plan propose` drafts one explore ('1 free site(s): 1 of
+  4 drafted') and check has no 'only 0 free site(s)' ERROR; after `cmd trade.want` with food/seeds the draft keeps them;
+  with drink < 30 d the cistern, farms and a Still/Kitchen workshops sit in the current season right after seal/refuge;
+  the draft line shows `fortcore@same st3 (refuge)`.
+
 ## Live round 4 station fallback and the release without stations (BUG-214, BUG-215, 2026-10-29; offline, live-untested)
 - **Why:** live round 4 on E:/DF-test4 (Trussroads) and its skeptic: with B2 raised the BREACH chain b2, core, z4, melee failed entry by
   entry (b2 a wall, core on walk group 0, melee on 1507 behind B2, the soldiers on 1): no station order (kpi off nost 8, on_station 0 of 8

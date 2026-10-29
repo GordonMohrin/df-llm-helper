@@ -245,6 +245,10 @@ Related: FR-xx, BUG-xx
 | [BUG-228](BUG-228-embark-injector-leaves-tracking-on-off.md) | fixed (offline, live-untested) | medium | Run 15 embark: DF ignores the injected mouse while enabler.tracking_on is 0 (cause of BUG-020) | tools/embark |
 | [BUG-229](BUG-229-embark-scan-misses-water-mountain-rectangles-and-old-site-tiles.md) | fixed (offline, live-untested) | medium | Run 15 embark: scan passes all-water/mountain rectangles; old sites by world_site.pos | tools/embark |
 | [BUG-230](BUG-230-title-loader-same-named-worlds-and-no-scroll.md) | fixed (offline, live-untested) | medium | Run 15: title-screen loader cannot tell same-named worlds apart, never scrolls a list | tools/embark |
+| [BUG-241](BUG-241-propose-explore-in-every-season-collides-with-itself.md) | fixed (offline, live-untested) | high | Run 15: propose drafts explore in every season with one or two free sites; check refuses the draft | dfpilot/plan |
+| [BUG-242](BUG-242-propose-overwrites-the-running-trade-want.md) | fixed (offline, live-untested) | medium | Run 15: propose overwrites the running cmd trade.want (food, seeds) | dfpilot/plan |
+| [BUG-243](BUG-243-propose-water-and-food-not-first-in-an-emergency.md) | fixed (offline, live-untested) | high | Run 15: cistern drafted in seasons[2] at drink 0 d; no farm or food shop in the draft | dfpilot/plan |
+| [BUG-244](BUG-244-draft-summary-without-stage-and-early-gallery-warning.md) | fixed (offline, live-untested) | low | Run 15: draft summary fortcore@same without stage; gallery_o1 warning before stage 2 is dug | dfpilot/plan |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
