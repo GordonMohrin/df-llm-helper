@@ -4458,7 +4458,9 @@ function M.state(K)
   local o = st.out
   -- BUG-172 (live i2: no `curse` key and no CURSED line for 27 game days after a reload, across a transformation and a
   -- death): the curse view does not wait for care's first full run (st.out); it is built from the persisted records
-  local cv = CU.view(K, M.conf(K), pstate(K))
+  -- (only while the curse is on, as the watch; persist read only until the first build)
+  local cc = M.conf(K)
+  local cv = cc.curse and CU.view(K, cc, not CU.built() and pstate(K) or nil) or nil
   if not o then return {curse = cv} end
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}

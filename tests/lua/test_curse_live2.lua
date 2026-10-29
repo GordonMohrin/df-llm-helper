@@ -51,6 +51,18 @@ T.test('BUG-172: after a reload the state carries `curse` at once, before care\'
   T.eq(s.care, nil, 'care\'s own values still wait for its run')
 end)
 
+T.test('BUG-172 review: with the curse switched off the reload view stays empty, as the watch does', function()
+  local W = world()
+  W.event('REPORT', {type = ANY, text = 'Olon Gatizbomrek, Axe Lord has been cursed by Risen!'})
+  W.run(3)
+  CW.day(W, 1)
+  T.eq(W.state().curse.n, 1)
+  W.K.cfg.baseline.care = type(W.K.cfg.baseline.care) == 'table' and W.K.cfg.baseline.care or {}
+  W.K.cfg.baseline.care.curse = false
+  W.mods.care.M.init(W.K)
+  T.eq(W.state().curse, nil)
+end)
+
 ---------------------------------------------------------------- BUG-173
 T.test('BUG-173: inspect what=unit finds a unit whose nickname replaced the first name by the real first and last name; '
        .. 'a report naming the real name resolves to him', function()

@@ -468,9 +468,10 @@ function M.look(K, c, p, u, env)
       old = old or cur.u['n:' .. k]
       cur.u['n:' .. k] = nil
     end
-    local nk = 'n:' .. name_key(full)
-    old = old or cur.u[nk]
-    cur.u[nk] = nil
+    for _, nk in ipairs({'n:' .. name_key(full), 'n:' .. name_key(name)}) do    -- the 28-byte key of older saves too
+      old = old or cur.u[nk]
+      cur.u[nk] = nil
+    end
     local src = sh.hid and 'syndrome' or 'sheet'
     if sh.vampire and not sh.were then
       r = {t = now, n = name, k = 'vampire', s = 'sheet', f = sh.name, tf = 0}
@@ -746,6 +747,7 @@ end
 -- the state view with the moon of now (K given) or of the last build (no K: old callers). BUG-172 (live i2: no `curse` in
 -- the state for 27 game days after a reload, across a transformation and a death): with c and p (care's config and
 -- persist) a view not built since the boot is built from the persisted records at once
+M.built = function() return S.vbuilt == true end
 function M.view(K, c, p)
   if not S.vbuilt and type(c) == 'table' and type(p) == 'table' then
     local okb, errb = pcall(build_view, K, c, M.cur(p))
