@@ -499,7 +499,11 @@ CISTERN_ROOM = (-1, 2, 1, 4)          # well room (w=0) and cistern (w=-1)
 CISTERN_WELL, CISTERN_POND, CISTERN_LEVER, CISTERN_STAIR = (0, 3), (1, 3), (-1, 2), (-1, 4)
 CISTERN_SPILL, CISTERN_START = (0, 5), (1, 6)     # the breaker: diagonal from the spill tile to the pipe start
 SIDES = {"N": (0, -1), "E": (1, 0), "S": (0, 1), "W": (-1, 0)}
-WATER_KINDS = ("bed", "bank")         # bed: water one level below the bank (brook); bank: water at bank level
+# bed: water one level below the bank (brook); bank: water at bank level (both with a `path`). BUG-262 (Run 15 Inkintense:
+# no brook, a light aquifer, the hospital held back for good): aquifer = no path and no pond: the basin (w=-1) is dug into
+# an aquifer level, the runner keeps its rough aquifer walls (lua/dfllm/aqshaft.lua A.basin) and the aquifer seeps into it
+# under the well; sites.rank puts the basin on a known aquifer level below a dry room level (a heavy one is refused)
+WATER_KINDS = ("bed", "bank", "aquifer")
 LEVELS = ("core", "refuge")
 
 
@@ -571,8 +575,13 @@ def cistern_layout(p: dict) -> dict:
     cist = [(u, v) for v in range(v0, v1 + 1) for u in range(u0, u1 + 1)]
     L = {"intake": False, "room": CISTERN_ROOM, "well": CISTERN_WELL, "stair": CISTERN_STAIR, "cistern": cist,
          "pond": CISTERN_POND, "lever": None, "pipe": [], "gate": None, "barrier": None, "shaft": None,
-         "w_top": None, "side": None, "breach": None, "water": []}
+         "w_top": None, "side": None, "breach": None, "water": [], "aquifer": False}
     pts = parse_path(p["path"])
+    if p["water"] == "aquifer":
+        if pts:
+            raise ValueError("cistern.water aquifer takes no path: the aquifer fills the basin (path is a brook pipe)")
+        L.update(pond=None, aquifer=True)        # BUG-262: no pond zone (a bucket loop), the aquifer is the source
+        return L
     if not pts:
         return L
     if pts[0] != CISTERN_START:
@@ -638,7 +647,8 @@ def cistern(p: dict) -> Plan:
     b = P.stage("build", "build", orders=1)
     b.tile(*CISTERN_WELL, 0, "l")
     if not L["intake"]:
-        d.tile(*CISTERN_POND, 0, "h")                    # pond hole: bucket carriers fill the cistern
+        if L["pond"]:                                    # BUG-262: an aquifer cistern has none
+            d.tile(*CISTERN_POND, 0, "h")                # pond hole: bucket carriers fill the cistern
     else:
         for u, v in L["pipe"]:
             d.tile(u, v, -1, "d")
@@ -660,7 +670,7 @@ def cistern(p: dict) -> Plan:
         for w in range(0, L["w_top"] + 1):
             e.ent(bu, bv, bu, bv, w, "e")
         P.stage("breach", "dig").tile(*L["breach"], "mdh")
-    if not L["intake"]:
+    if not L["intake"] and L["pond"]:
         P.stage("zone", "zone").ent(*CISTERN_POND, *CISTERN_POND, 0, "p", "pond=true")
     _finish(P, p, box)
     return P

@@ -16,7 +16,7 @@
 --    dry levels below the last aquifer level, or at the shaft's depth.
 -- 2. Observe mode (any other dig): a damp report starts it instead of a park (AQ_OBSERVE); the cancelled designation
 --    comes back with the damp marker, the natural rough walls beside each damp tile are smoothed once it is dug, seepage
---    <= runner seep_max goes on (AQ_SEEP).
+--    <= runner seep_max goes on (AQ_SEEP). BUG-262: a `cistern`'s basin (A.basin) keeps its rough walls: the aquifer fills it.
 -- 3. Heavy aquifer (both): visible water in our own dug tiles at >= heavy (4/7) or rising (rise samples in a row, each
 --    higher, all wet) stops the project for good (breach:heavy_aquifer), plugs a shaft (CAVERN_PLUG) and says AQ_HEAVY (A).
 -- Persist m.runner.aq[proj] (shaft): {k = 'shaft', mode, x, y, top, cur_z, aqn, dry, heavy, dz = {[z] = 1} damp levels,
@@ -394,7 +394,12 @@ function A.observe(X, P, pos, src)
   local x, y, z = int(type(pos) == 'table' and pos[1]), int(type(pos) == 'table' and pos[2]),
                   int(type(pos) == 'table' and pos[3])
   if x and y and z then
-    A.add_pt(r, x, y, z)
+    local keep = A.basin(X, P, x, y, z)
+    A.add_pt(r, x, y, z, keep and 'keep' or nil)
+    if keep then
+      X.log('info', '%s: damp stone at %d,%d,%d in the cistern basin: its walls stay rough (the aquifer fills it, BUG-262)',
+            P.id, x, y, z)
+    end
     X.level(z)
   end
   if new then
@@ -408,13 +413,26 @@ function A.observe(X, P, pos, src)
   return true
 end
 
--- a tile A.tick seals around once it is dug (dedupe, at most obs_pts): a reported damp tile or a seeping own tile
-function A.add_pt(r, x, y, z)
+-- a tile A.tick seals around once it is dug (dedupe, at most obs_pts): a reported damp tile or a seeping own tile.
+-- st 'keep' (BUG-262): a cistern basin tile, never sealed (A.tick works only 'new' points)
+function A.add_pt(r, x, y, z, st)
   r.pts = type(r.pts) == 'table' and r.pts or {}
   for _, p in ipairs(r.pts) do if p[1] == x and p[2] == y and p[3] == z then return false end end
   if #r.pts >= A.CFG.obs_pts then return false end
-  r.pts[#r.pts + 1] = {x, y, z, 'new'}
+  r.pts[#r.pts + 1] = {x, y, z, st or 'new'}
   return true
+end
+
+-- BUG-262 (Run 15 Inkintense: no brook, a light aquifer, the hospital held back for good): a cistern's basin is its water
+-- supply. Damp stone in the basin (an own tile of a `cistern` project with an own tile right above it: the 3x3 under the
+-- well room, its stair) keeps its rough aquifer walls, so the aquifer seeps into the basin under the well (a cistern with
+-- p.water = aquifer is dug into an aquifer level for this; bp sites keeps its room level dry), and its rising water there
+-- is no heavy stop (the runner's own probe still stops the dig at >= seep_max + 1: a heavy aquifer is refused). A pipe
+-- tile or any other project's damp tile is sealed as before
+function A.basin(X, P, x, y, z)
+  if P.tpl ~= 'cistern' or type(X.own) ~= 'function' then return false end
+  local own = X.own(P.id)
+  return type(own) == 'table' and own[key(x, y, z)] == true and own[key(x, y, z + 1)] == true
 end
 
 function A.observing(rt, id)
@@ -440,14 +458,15 @@ function A.wet(X, P, t, f)
   end
   if s[#s] ~= f then push(s, f, A.CFG.samples) end
   -- BUG-219: DF reports damp for a tile with an aquifer neighbour (diagonals too), so later dug tiles seep beside rough
-  -- aquifer walls no report named: the seeping tile itself is sealed around as well
-  if first then A.add_pt(r, int(t[1]), int(t[2]), int(t[3])) end
+  -- aquifer walls no report named: the seeping tile itself is sealed around as well. BUG-262: not in a cistern's basin
+  local keep = A.basin(X, P, int(t[1]), int(t[2]), int(t[3]))
+  if first then A.add_pt(r, int(t[1]), int(t[2]), int(t[3]), keep and 'keep' or nil) end
   X.dirty()
   if first then
-    X.emit('AQ_SEEP', 'B', string.format('%s: seepage %d/7 at %s (observe)', P.id, f, k),
+    X.emit('AQ_SEEP', 'B', string.format('%s: seepage %d/7 at %s (observe%s)', P.id, f, k, keep and ', cistern basin' or ''),
            {proj = P.id, z = t[3], flow = f, pos = {t[1], t[2], t[3]}})
   end
-  return rising(s)
+  return not keep and rising(s)
 end
 
 -- the stop of an observing project (runner.breach, why water: flow >= heavy, or rising): AQ_HEAVY; the runner then

@@ -1,5 +1,39 @@
 # CHANGELOG dfpilot
 
+## Run 15 hospital water: aquifer well, no pond loop as a source, the well's chain, deeper digs, the dry well named (BUG-262..266, 2026-10-29; offline, live-untested)
+- **Why:** no accepted water in 4 of 4 Run 15 forts (G3/G4). Inkintense/Guildcleans: no brook, a light aquifer, `hospital held back
+  (BUG-034)` for good: nothing dug a basin into the aquifer, observe mode sealed every aquifer wall (BUG-262). Drillchamber y373: well
+  17813 accepted (`src 1`), `bp sites hospital` placed the hospital by it, then pond_loops removed its pond 17822 as a loop and
+  HOSPITAL_DRY said `no accepted water on the map` 13 days later: acceptance and the loop rule disagreed (BUG-263). Earthboat: the
+  hospital's well waited a year for `chain x1` with 0 bars, 0 cloth, 244 thread, no Loom/Clothier requested (BUG-264); 6 bodies 10-29
+  tiles away had reach 0 and the recipe said "a cistern" (ws_dig 8, BUG-265). Drillchamber y372: the fortcore well 17718 over a dry
+  sump was never named with what fills it (BUG-266).
+- **What changed:** (1) `cistern` p.water `aquifer` (no path, no pond): the basin is dug into an aquifer level; `bp sites cistern
+  water=aquifer` (`sites.aquifer_well`) ranks only a basin on a known aquifer level (manifest aquifer_levels, damp marks) under a dry
+  room level, a recorded heavy aquifer refused; aqshaft.lua `A.basin`: damp stone in a cistern's basin keeps its rough walls (point
+  `keep`) and its rising water is no heavy stop; the HOSPITAL_DRY recipe and the `bp sites hospital` refusal name it (BUG-262).
+  (2) water.lua `M.loops`: a wet well with a pond within `pond_near` and no wet Water Source zone, or whose pond was removed as a
+  loop (persist `m.water.lw`), is not accepted (`water.src`, served, gate) but still counts as stored drink (refuge, wet_wells,
+  CISTERN_DRY); the last accepted source is remembered (`m.water.slast`) and HOSPITAL_DRY names it and why it dropped out (BUG-263).
+  (3) `M.chain`: a well under construction whose job wants an unattached CHAIN item: MakeChain of the hard metal with the most bars
+  (forge), a cloth rope (Clothier's), PROJECT_REQUEST workshops why=well [Clothiers] / [Loom, Clothiers] / [MetalsmithsForge], or
+  "buy rope or a chain"; every 14 days at most, never doubling a live MakeChain order; in HOSPITAL_DRY, kern.log, inspect
+  water_sources `chain` (BUG-264). (4) `ws_dig` 16; a body within `near` without a bank or dig: `a cistern piped to it (python -m
+  dfpilot.bp.sites cistern --near x,y,z)` (BUG-265). (5) HOSPITAL_DRY's cause `dry well N at x,y,z (0/7): only buckets fill its
+  sump; fill source: ...` (from the scan; the first alarm that waits for it gets it); fortcore.py documents the stage-1 well (BUG-266).
+  RULES §7 HOSPITAL_DRY row edited in place (300 lines). No contract change (PROJECT_REQUEST why is free text).
+- **Tests (each fails on 2b9c009):** tests/lua/test_bug262_266_water.lua (9; the Water Source zone case is a guard that passes
+  before), tests/bp/test_bug262_aquifer_well.py (4).
+- **Live check:** Drillchamber-like: `dfllm status` src no longer lists a well with its pond beside it; HOSPITAL_DRY `(well N ... is fed
+  only by its own pond P (a loop ...)` or `(the accepted well N ... dropped out (...))`; `(dry well 17718 at 91,70,139 (0/7): only buckets
+  fill its sump; ...)`. Earthboat-like: kern.log `water: well N at x,y,z waits for a chain: a rope: thread 244, no cloth: Loom+Clothiers`,
+  PROJECT_REQUEST workshops why=well types [Loom, Clothiers]; with iron bars and a forge a `dfllm:chain` MakeChain order of iron; the
+  next HOSPITAL_DRY names a dig or `a cistern piped to it ... --near`. Light-aquifer fort with aquifer_levels: `dfllm bp sites cistern
+  water=aquifer` lists `basin on aquifer level zN`; after bp.place kern.log `damp stone at ... in the cistern basin: its walls stay
+  rough`, AQ_SEEP `(observe, cistern basin)`, no AQ_HEAVY on a light aquifer, then the well accepted in `inspect water_sources`.
+  Uncertain: buildingplan job_items field names of a 53.16 well (pcall; a miss = no route), whether DF's rope takes cloth, whether the
+  basin reaches 4/7 while the dig stage is still probed (the runner then stops it as heavy).
+
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders

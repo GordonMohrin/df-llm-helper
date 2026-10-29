@@ -252,6 +252,11 @@ Related: FR-xx, BUG-xx
 | [BUG-235](BUG-235-rescue-never-lowers-outer-bridges-in-peace.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the rescue never lowered an outer bridge and demanded a sealed outside even in quiet PEACE | lua/dfllm/siege.lua, lua/dfllm/gate.lua, lua/dfllm/drill.lua |
 | [BUG-236](BUG-236-player-lever-down-silently-overridden.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the player's lever down was accepted and then silently overridden | lua/dfllm/gate.lua |
 | [BUG-237](BUG-237-gate-cycles-up-down-with-drills-that-cannot-pass.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: B1 cycled up/down with automatic drills that could not pass (O1 without a lever) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-262](BUG-262-no-aquifer-well-without-a-brook.md) | fixed (offline, live-untested) | high | Run 15 Inkintense/Guildcleans: no brook, a light aquifer: no aquifer well, the hospital held back for good | dfpilot/bp/rooms.py, dfpilot/bp/sites.py, lua/dfllm/aqshaft.lua, lua/dfllm/water.lua |
+| [BUG-263](BUG-263-pond-fed-well-accepted-then-dropped.md) | fixed (offline, live-untested) | high | Run 15 Drillchamber: a well fed only by its own pond was accepted, the hospital placed by it, then dropped as a loop | lua/dfllm/water.lua |
+| [BUG-264](BUG-264-well-waits-a-year-for-chain-or-rope.md) | fixed (offline, live-untested) | high | Run 15 Earthboat: the hospital well waited a year for a chain/rope, nothing produced one | lua/dfllm/water.lua |
+| [BUG-265](BUG-265-reach-zero-water-bodies-get-no-recipe.md) | fixed (offline, live-untested) | medium | Run 15 Earthboat: water bodies 10-29 tiles away with reach 0 got "a cistern" (ws_dig 8) | lua/dfllm/water.lua |
+| [BUG-266](BUG-266-dry-fortcore-well-not-named.md) | fixed (offline, live-untested) | medium | Run 15 Drillchamber: the dry fortcore well and its fill source were not named in HOSPITAL_DRY | lua/dfllm/water.lua, dfpilot/bp/fortcore.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
