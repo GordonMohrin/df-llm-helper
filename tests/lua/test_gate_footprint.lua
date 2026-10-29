@@ -224,6 +224,37 @@ T.test('BUG-027 BRIDGE_CRUSH: in a siege a foreign pull (the player\'s, or one f
   T.eq(#W.find_events('BRIDGE_CRUSH'), 1)
 end)
 
+T.test('BUG-310 (Earthboat y379 #3757: BRIDGE_CRUSH for a citizen last seen 1 tile from B2 whose incident said BLEED): ' ..
+       'a death with another incident cause is no bridge death next to the footprint (old: BRIDGE_CRUSH), on it it is',
+       function()
+  local W = world{units = cast({S.cit(26424, 51, 41), S.cit(26425, 51, 40)}), lever_cfg = {[21] = {worker = 100, pull = 40}}}
+  S.foreign_job(W, 21)
+  W.event('INVASION', {id = 11})
+  run(W, 300)
+  T.eq(S.bstate(W, 'B1'), 'up')
+  local m = select(2, W.K.call('gate', 'moves'))
+  m = m[#m]
+  local seen = {}
+  for _, e in ipairs(m.seen) do seen[e.id] = e.d end
+  T.eq({seen[26424], seen[26425]}, {1, 0})
+  local dt0, inc0 = df.death_type, df.incident
+  df.death_type = {[5] = 'BLEED', BLEED = 5}
+  df.incident = {find = function(id) if id >= 9100 then return {death_cause = 5, criminal = -1,
+                                                                 flags = {discovered = true}} end end}
+  for i, id in ipairs({26424, 26425}) do
+    local u = W.unit(id)
+    W.move(id, 51, 46, Z)
+    W.kill(id)
+    u.counters = {death_id = 9100 + i}
+    W.event('UNIT_DEATH', {unit = id})
+  end
+  run(W, 20)
+  local bc = W.find_events('BRIDGE_CRUSH')
+  T.eq(#bc, 1, 'only the one seen on it (old: both)')
+  T.eq(bc[1].d.unit, 26425)
+  df.death_type, df.incident = dt0, inc0
+end)
+
 T.test('BUG-027: a merchant (and his pack animal) on B1 hold the SIEGE raise (census.h.friends via gate.watch); a ' ..
        'wild animal does not', function()
   local W = world{units = cast({{id = 900, pos = {51, 40, Z}, merchant = true},

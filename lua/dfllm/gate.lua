@@ -1359,7 +1359,8 @@ function M.quiet_wait(K, name, r, br, sc, now)
 end
 
 -- BUG-251: the first unit (not the job's worker, not a soldier at his station) within MARGIN_DOWN tiles of the footprint
--- that came closer since the previous scan `prev` (or was not in it): a taken lowering pull is cancelled for it
+-- that came closer since the previous scan `prev` (or was not in it): a taken lowering pull is cancelled for it (BUG-311:
+-- an unforced raise too)
 function M.approach(br, sc, prev, wid)
   if not br or SIEGE_DOWN[br.why] or not sc then return nil end
   local before = {}
@@ -2647,6 +2648,11 @@ local function unit_death(K, ev)
   end
   local m = DT.bridge(id, now, mvl.list, pos, ic and ic.cause)
   if not m then return end
+  -- BUG-310 (Run 15b Earthboat y379 #3757: citizen 26424 'crushed' by B2, last seen 1 tile from it, while DF's incident
+  -- said BLEED at 55,82,132, six levels below, with a goblin killing citizens at the bridge): next to is not on. An
+  -- incident naming another cause (care's DEATH says it too) is a bridge death only for a unit seen on the footprint
+  local cat = ic and ic.cause and DT.TYPE[ic.cause]
+  if cat and cat ~= 'crushed' and m.d ~= 0 then return end
   mvl.crushed[id] = true
   local who_k = m.k or 'unit'
   local txt = string.format('%s %d crushed: %s', who_k, id, DT.bridge_why(m))

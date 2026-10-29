@@ -12,9 +12,11 @@
   known, without him; an unknown census holds a forced raise too. The BUG-251 approach cancel (a unit within 3 tiles walking toward the
   footprint) covers taken raise pulls (not forced ones). drill.lua `dry_hold`: no automatic drill while readiness says refuge_dry or
   seal's audit finds the kern burrow dry (`seal.refuge_drink(K, 'kern')`); ready.dhold `refuge dry` / `Kern+ dry`. RULES §7 and
-  CONTRACTS rows GATE_FORCED (no schema change).
+  CONTRACTS rows GATE_FORCED (no schema change). Review: gate.lua `unit_death` (BRIDGE_CRUSH): a death whose DF incident names
+  another cause (BLEED, ...) counts for a bridge only for a unit seen ON the footprint (y379: #3757 citizen 26424 was last seen 1 tile
+  from B2 and died BLEED at 55,82,132; care's DEATH #3758 said bled); RULES/CONTRACTS rows BRIDGE_CRUSH.
 - **Tests (fail on 9ef2ccb):** tests/lua/test_siege.lua `BUG-310` x2 (the old BUG-027 forced-onto-a-soldier scenario rewritten),
-  tests/lua/test_gate_crush.lua `BUG-311`, tests/lua/test_fix11_drill_dry.lua x2.
+  tests/lua/test_gate_crush.lua `BUG-311`, tests/lua/test_fix11_drill_dry.lua x2, tests/lua/test_gate_footprint.lua `BUG-310` (BRIDGE_CRUSH).
 - **Live check:** next SIEGE/BREACH raise with a hostile at the gate: GATE_FORCED reads `raised with ... next to it`, kern.log
   `waits for ... on the footprint` while one stands on it, no BRIDGE_CRUSH `last seen on it`; kern.log `up pull cancelled ... walking
   toward it` at a busy B2; Drillchamber status `drill never (auto: refuge dry)`. Uncertain: a unit stepping on during the move after the
