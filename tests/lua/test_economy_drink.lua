@@ -297,8 +297,10 @@ T.test('BUG-042: drink_low below 60 days names the blockers once per episode (no
   days(W, 1)
   local dl = decisions(W, 'drink_low')
   T.eq(#dl, 1)
-  T.eq(dl[1].d.block, {'still', 'brew', 'plants', 'barrels', 'brewer'}, 'the first run: no brew order yet either')
-  T.ok(dl[1].msg:find('drink low: 31 drink days (thirst alarm below 10): no still', 1, true), dl[1].msg)
+  -- BUG-255: the missing Still is requested by the kernel (auto), no longer the player's blocker
+  T.eq(dl[1].d.block, {'brew', 'plants', 'barrels', 'brewer'}, 'the first run: no brew order yet either')
+  T.ok(F.has(dl[1].d.auto, 'still'), 'auto: Still requested')
+  T.ok(dl[1].msg:find('drink low: 31 drink days (thirst alarm below 10): no brew order', 1, true), dl[1].msg)
   T.eq(W.state().stock.dwhy, 'no still')
   days(W, 3)
   T.eq(#decisions(W, 'drink_low'), 1, 'no news: once')

@@ -1194,6 +1194,7 @@ local function publish(K, c, a)
   if st.farm then i.farm_plots, i.farm_empty = st.farm.plots, st.farm.empty end   -- FR-17 (T.farmslots)
   K.census.i = i
   st.bars_by, st.ores, st.seeds = a.bars_by, a.ores, a.seeds
+  st.seeds_known = true                              -- BUG-256: st.seeds is the census' now (init holds an empty one)
   st.fix, st.reach, st.food_pos, st.unreach = a.fix, a.reach, a.food_pos, a.unreach or 0
   st.tool_items, st.web_pos = a.tool_items, a.web_pos
   st.ined = M.top(a.ined, 3)                         -- Run 11: the inedible food materials (M.cook_why)
@@ -3005,15 +3006,23 @@ local function alarm_check(K, c, p, days)
   local a = c.alarm or M.DEFAULTS.alarm
   local okn, thirsty, hungry = pcall(needs, K, a)
   if not okn then thirsty, hungry = 0, 0 end
+  -- BUG-259 (live Drillchamber: drink 0 days all year, DECISION_NEEDED thirst every 7 days with 0 thirsty, the dwarves
+  -- drank at the brook): low drink days alone are no alarm while the thirst timers show the citizens drink water; the
+  -- alarm and the thirst wake need one citizen past alarm.thirst (an unreadable census keeps the old rule)
+  local dry = days.drink_d < a.days and (thirsty > 0 or not okn)
   local why
   if thirsty >= a.units then why = string.format('thirst %d', thirsty)
   elseif hungry >= a.units then why = string.format('hunger %d', hungry)
-  elseif days.drink_d < a.days then why = string.format('drink %d d', days.drink_d)
+  elseif dry then why = string.format('drink %d d', days.drink_d)
   elseif days.food_d < a.days then why = string.format('food %d d', days.food_d) end
   if why ~= st.alarm then K.log(why and 'warn' or 'info', 'supply alarm %s', why or 'over') end
+  if days.drink_d < a.days and not dry and not st.water then
+    K.log('info', 'drink %d days but nobody thirsty: the citizens drink water (no supply alarm)', days.drink_d)
+  end
   st.alarm, st.thirsty, st.hungry = why, thirsty, hungry
+  st.water = days.drink_d < a.days and not dry or nil
   local now = K.now().tick
-  if (thirsty >= a.units or days.drink_d < a.days) and now - (p.thirst_woke or -1e9) >= 7 * DAY then
+  if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY then
     p.thirst_woke = now
     K.emit('DECISION_NEEDED', 'A', string.format('thirst: %d citizens thirsty, drink %d days', thirsty, days.drink_d),
            {id = 'thirst', q = string.format('%d thirsty, drink %d d: water near the fort (well), brewing, barrels?',
@@ -4395,26 +4404,41 @@ local function food_plan(K, c, r)
   local falling = #h > span and h[#h] < h[1]
   local tiles, need = farm_tiles(), M.farm_need(r.cit, fc)
   local fd = (r.days or {}).food_d or 9999
+  local pt = math.max(1, math.tointeger(fc.plot_tiles) or 35)
+  -- BUG-256 (live Inkintense y373/y374: famine on 1 plot; the player placed the second farm by hand): during a famine
+  -- (below famine_days) one more plot is wanted on top of the tiles built, up to twice the citizens' need
+  local hungry = p.famine and tiles < 2 * math.max(need, pt)
+  if hungry then need = math.max(need, tiles + pt) end
   st.food = {tiles = tiles, need = need, falling = falling, fd = fd}
   if tiles >= need or not (fd < (fc.want_days or 90) or falling) then return end
   local okp, pend = K.call('runner', 'pending', 'farms')
   if okp and (math.tointeger(pend) or 0) > 0 then return end
   -- BUG-058 (DECISIONS 9; Run 11: five farms projects build_lost and parked, no soil): one lost for good stops the
-  -- requests until it is cancelled or the farms are placed elsewhere
+  -- requests until it is cancelled or the farms are placed elsewhere. BUG-257 (live Inkintense/Drillchamber: the same
+  -- stone site re-dug for 8 seasons): each lost project is placed elsewhere once (follow ranks farms sites by soil now,
+  -- bp/sites.py), then the requests stop as before
   local okl, nl, lid = K.call('runner', 'lost', 'farms')
+  local resite
+  if type(p.farm_resite) ~= 'table' then p.farm_resite = {} end
   if okl and (math.tointeger(nl) or 0) > 0 then
-    if st.farm_lost ~= lid then
-      K.log('warn', 'farms: project %s lost to build_lost (no soil there?): no further farms request until it is ' ..
-            'cancelled (bp.cancel) or the farms are placed elsewhere', tostring(lid))
+    if p.farm_resite[tostring(lid)] == nil then resite = tostring(lid)
+    else
+      if st.farm_lost ~= lid then
+        K.log('warn', 'farms: project %s lost to build_lost (no soil there?): no further farms request until it is ' ..
+              'cancelled (bp.cancel) or the farms are placed elsewhere', tostring(lid))
+      end
+      st.farm_lost = lid
+      return
     end
-    st.farm_lost = lid
-    return
   end
   st.farm_lost = nil
   if p.farm_req and r.now - (math.tointeger(p.farm_req) or 0) < (fc.request_days or 14) * DAY then return end
-  local pt = math.max(1, math.tointeger(fc.plot_tiles) or 35)
   local plots = clamp((need - tiles + pt - 1) // pt, 1, fc.plots_max or 4)
   p.farm_req = r.now
+  if resite then
+    p.farm_resite[resite] = r.now
+    K.log('warn', 'farms: project %s lost to build_lost (no soil there): farms requested once at another site', resite)
+  end
   K.log('info', 'farms: %d of %d tiles for %d citizens, food %d days%s: request %d plots', tiles, need, r.cit, fd,
         falling and ' and falling' or '', plots)
   K.emit('PROJECT_REQUEST', 'B', string.format('farms x%d: %d of %d farm tiles for %d citizens, food %d days%s',
@@ -4482,7 +4506,61 @@ function M.drink_why(K, c, r)
   local d = (r.days or {}).drink_d or 9999
   if d >= (math.tointeger((K.plan.supply or {}).drink_d) or 170) then return nil end
   local bl = M.drink_block(K, c, r, r.inv or {})
-  return bl[1] and bl[1][2]:sub(1, 80) or nil
+  local w = bl[1] and bl[1][2] or nil
+  -- BUG-259: below the thirst line with nobody thirsty the status names it (the citizens drink water)
+  if st.water then w = (w and (w .. '; ') or '') .. 'nobody thirsty: they drink water' end
+  return w and w:sub(1, 80) or nil
+end
+
+-- BUG-255 (live Inkintense y372: drink 161 -> 55 days in year 1, 'no still', DECISION_NEEDED drink_low only; the player
+-- placed workshops only=Still by hand): no Still and no project building one -> PROJECT_REQUEST workshops why=mandatory
+-- types=[Still] (+ Kitchen while food is below 60 days and none stands; follow places them), at most every
+-- food.request_days and twice an episode; the request is what the kernel did (auto 'still'), not the player's blocker.
+-- BUG-259: no brewable plant -> the caravans are asked for plants and drink (M.trade_wants, st.fdwants)
+function M.drink_fix(K, c, r, bl, auto)
+  local p, now = r.p, r.now or K.now().tick
+  local i
+  for k, x in ipairs(bl) do if x[1] == 'still' then i = k end end
+  if i then
+    local q = type(p.still_req) == 'table' and p.still_req or {t = -1e12, n = 0}
+    local every = (((c.food or {}).request_days) or 14) * DAY
+    if (q.n or 0) < 2 and now - (math.tointeger(q.t) or 0) >= every then
+      local types = {'Still'}
+      local f = M.facts_now(K, r)
+      if ((r.days or {}).food_d or 9999) < 60 and not ws_any(f, {'workshop:Kitchen'}) then types[2] = 'Kitchen' end
+      q = {t = now, n = (q.n or 0) + 1}
+      p.still_req = q
+      K.log('warn', 'drink %d days, no still and no project builds one: request workshops %s (%d/2)',
+            (r.days or {}).drink_d or 0, table.concat(types, '+'), q.n)
+      K.emit('PROJECT_REQUEST', 'B', string.format('workshops %s: drink %d days and no still', table.concat(types, '+'),
+                                                   (r.days or {}).drink_d or 0),
+             {tpl = 'workshops', why = 'mandatory', types = types})
+    end
+    if now - (math.tointeger(q.t) or -1e12) < every then
+      table.remove(bl, i)
+      auto[#auto + 1] = {'still', 'Still requested'}
+    end
+  end
+  return bl, auto
+end
+
+-- BUG-259/BUG-256: what the caravans should bring for food and drink (st.fdwants, read by M.trade_wants): plants and
+-- drink while drink is below drink.low_d and no brewable plant is in stock; seeds while farm plots stand (or food is
+-- low) and not one usable seed is left
+function M.fd_wants(K, c, r)
+  local inv, out = r.inv or {}, {}
+  local dd = (r.days or {}).drink_d or 9999
+  if dd < (math.tointeger((c.drink or {}).low_d) or 0) and (inv.brew_p or 0) + (inv.brew_g or 0) == 0 then
+    out[#out + 1] = {buy = 'plant', n = 20, why = string.format('drink %d d, no brewable plants', dd)}
+    out[#out + 1] = {buy = 'drink', n = 40, why = string.format('drink %d d, no brewable plants', dd)}
+  end
+  local seeds = 0
+  for _, n in pairs(type(st.seeds) == 'table' and st.seeds or {}) do seeds = seeds + (math.tointeger(n) or 0) end
+  if st.seeds_known and seeds == 0 and ((st.farm and (st.farm.plots or 0) > 0) or M.food_low(c, r)) then
+    out[#out + 1] = {buy = 'seeds', n = 20, why = 'no usable seeds for the farm plots'}
+  end
+  st.fdwants = #out > 0 and out or nil
+  return out
 end
 
 -- BUG-042: the drink pre-alarm: below drink.low_d (and from alarm.days on, where DECISION_NEEDED thirst speaks), a
@@ -4496,22 +4574,25 @@ function M.drink_low(K, c, r)
     if p.drink_pre then p.drink_pre = nil; K.log('info', 'drink pre-alarm over: %d drink days', dd) end
     if type(p.drink_rep) == 'table' then p.drink_rep = CAD.quiet(p.drink_rep) end
     if type(p.drink_note) == 'table' then p.drink_note = CAD.quiet(p.drink_note) end
+    p.still_req = nil
     return
   end
-  if dd < ((c.alarm or M.DEFAULTS.alarm).days or 10) then return end      -- the thirst wake speaks now
   local now = K.now()
+  local bl, auto = M.drink_block(K, c, r, r.inv or {})
+  -- BUG-206 (live Earthboat spr d43: DECISION_NEEDED drink_low 'no still' while the applied fortcore stage 1 built the
+  -- Still): no still but a pending project builds one, above the thirst alarm: a kern.log note (own cadence p.drink_note),
+  -- no wake; the episode's question is not used up, so it comes once the Still stands and drink is still low
+  local sq = bl[1] and bl[1][1] == 'still' and M.fishery_proj(K, {'workshop:Still'})
+  if not sq then M.drink_fix(K, c, r, bl, auto) end                        -- BUG-255
+  -- the thirst wake speaks now (BUG-259: only with a thirsty citizen; drinking water, drink_low goes on asking)
+  if dd < ((c.alarm or M.DEFAULTS.alarm).days or 10) and not st.water then return end
   if not p.drink_pre then
     p.drink_pre = now.tick
     K.log('warn', 'drink pre-alarm: %d drink days (< %d)%s', dd, low, st.dwhy and (': ' .. st.dwhy) or '')
   end
-  local bl, auto = M.drink_block(K, c, r, r.inv or {})
   local ids, aids, head = M.food_head(bl, auto)
   local toks = {dd < 30 and 'below30' or 'below60'}
   for _, id in ipairs(ids) do toks[#toks + 1] = id end
-  -- BUG-206 (live Earthboat spr d43: DECISION_NEEDED drink_low 'no still' while the applied fortcore stage 1 built the
-  -- Still): no still but a pending project builds one, above the thirst alarm: a kern.log note (own cadence p.drink_note),
-  -- no wake; the episode's question is not used up, so it comes once the Still stands and drink is still low
-  local sq = ids[1] == 'still' and M.fishery_proj(K, {'workshop:Still'})
   if sq then
     if CAD.due(p.drink_note, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then
       p.drink_note = CAD.mark(now, {}, toks)
@@ -4866,8 +4947,8 @@ local function plant_index(id)
 end
 
 -- the crop for empty slot s (0-based) of a plot whose crops are `crops` (raw indices): a crop of the plot that
--- grows then with usable seeds, else the crop with the most usable seeds that grows then and there, else the
--- plot's own crop that grows then (underground crops grow all year)
+-- grows then with usable seeds, else the crop with the most usable seeds that grows then and there, else nil
+-- (BUG-256: never a crop without a seed; underground crops grow all year)
 function M.slot_crop(crops, under, s, seeds, food, fiber)
   local function fits(inf) return inf and inf.under == under and inf.seasons[s + 1] == true end
   -- I3: a fiber crop first while the kernel is the only farmer (fiber = M.fiber_plan, left[s] = slots still allowed)
@@ -4896,7 +4977,8 @@ function M.slot_crop(crops, under, s, seeds, food, fiber)
       end
     end
     if best then return best end
-    for _, pid in ipairs(crops) do if fits(plant_info(pid)) and ok(pid) then return pid end end
+    -- BUG-256: no seedless fallback (the plot's own crop without a seed made 'Needs <crop> spawn' cancels and an
+    -- empty plot through a famine); the slot stays empty, M.fd_wants asks the caravans for seeds
   end
 end
 
@@ -4917,6 +4999,12 @@ end
 -- `only` = one season (0..3, T.slotnow: the running season), else all; `food` = the edible crops first
 local function farm_fills(K, max, only, food, fiber)
   local fills, plots, empty = {}, 0, 0
+  -- BUG-256 (live Inkintense y373: a plot held MUSHROOM_CUP_DIMPLE with 0 seeds for autumn and winter beside 130 other
+  -- seeds; famine): a slot of the running season set to a crop without a usable seed is chosen again (only by a crop
+  -- with seeds); the seed census must be known (st.seeds)
+  local okc, cur = pcall(function() return K.now().season end)
+  cur = okc and math.tointeger(cur) or nil
+  local seeds = st.seeds_known and type(st.seeds) == 'table' and st.seeds or nil
   pcall(function()
     if fiber then                                   -- I3: the fiber slots a season already holds count against the cap
       fiber.left = {}
@@ -4948,16 +5036,31 @@ local function farm_fills(K, max, only, food, fiber)
             local pid = b.plant_id[s]
             local inf = pid and pid >= 0 and plant_info(pid) or nil
             local wrong = tile ~= nil and inf ~= nil and inf.under ~= tile
-            if not pid or pid < 0 or wrong then
-              if not wrong then empty = empty + 1 end
+            local seedless = not wrong and inf ~= nil and seeds ~= nil and s == cur and (seeds[inf.id] or 0) <= 0
+            if not pid or pid < 0 or wrong or seedless then
+              if not (wrong or seedless) then empty = empty + 1 end
               local crop = under ~= nil and #fills < max and M.slot_crop(crops, under, s, st.seeds or {}, food, fiber) or nil
               -- a crop of the wrong kind is replaced only by one with usable seeds (a wrong reading of the tile must not
               -- cost a planted slot)
-              if crop and wrong then
+              if crop and (wrong or seedless) then
                 local ci = plant_info(crop)
                 if not (ci and ((st.seeds or {})[ci.id] or 0) > 0) then crop = nil end
               end
-              if crop and crop ~= pid then fills[#fills + 1] = {id = b.id, s = s, crop = crop, wrong = wrong or nil} end
+              local key = seedless and (tostring(b.id) .. ':' .. s .. ':' .. tostring(inf.id) .. ':' .. tostring(crop))
+              if type(st.noseed) ~= 'table' then st.noseed = {} end
+              if key and not st.noseed[key] and (crop or #fills < max) then
+                st.noseed[key] = true
+                if crop then
+                  K.log('warn', 'farm plot %s season %d: no usable seeds for %s: %s instead', tostring(b.id), s,
+                        tostring(inf.id), tostring((plant_info(crop) or {}).id))
+                else
+                  K.log('warn', 'farm plot %s season %d: no seeds for %s and no other crop with seeds grows there now',
+                        tostring(b.id), s, tostring(inf.id))
+                end
+              end
+              if crop and crop ~= pid then
+                fills[#fills + 1] = {id = b.id, s = s, crop = crop, wrong = wrong or nil, seedless = seedless or nil}
+              end
             end
           end
         end
@@ -5151,6 +5254,7 @@ function T.watch(K, c, r)
   food_pre(K, c, r.p, r.days, r.inv, r)
   M.food_unban(K, c, r, r.inv)
   M.drink_low(K, c, r)                             -- BUG-042
+  M.fd_wants(K, c, r)                              -- BUG-256, BUG-259
 end
 
 function T.cmdq(K, c, r)
@@ -5252,6 +5356,49 @@ function T.slaughter(K, c, r)
   K.log('warn', 'food %d days (%s): %d surplus animals marked for slaughter', (r.days or {}).food_d or 0,
         p.famine and 'famine' or 'food low', r.sl_n)
   return true
+end
+
+-- BUG-260 (live Inkintense y373: famine, 4 tame animals of 2 races, each a breeding pair the famine slaughter keeps;
+-- the game session marked turkey 26285 and duck 26450 by hand): butcher.mark {n?, race?, keep_pairs?} marks n (1..20,
+-- default 1) tame animals for slaughter with the animal sheet's toggle (act.animal_slaughter): pets, war and hunting
+-- animals never; one adult female and one adult male per race stay unless keep_pairs is false (the player's word);
+-- race = the creature id (TURKEY) or the census' race number. The reply names the ids and whether a Butcher's shop stands.
+function M.race_name(race)
+  local ok, n = pcall(function() return df.global.world.raws.creatures.all[race].creature_id end)
+  return ok and type(n) == 'string' and n or tostring(race)
+end
+M.verbs['butcher.mark'] = function(K, args, cmd)
+  local n = args.n == nil and 1 or math.tointeger(args.n)
+  if not n or n < 1 or n > 20 then return false, 'n must be 1..20' end
+  if args.keep_pairs ~= nil and type(args.keep_pairs) ~= 'boolean' then return false, 'keep_pairs must be true or false' end
+  local race = args.race
+  if race ~= nil and not (math.tointeger(race) or (type(race) == 'string' and race:match('^[A-Z0-9_]+$'))) then
+    return false, 'race must be a creature id (TURKEY) or a race number'
+  end
+  local ca = K.census.a
+  local list = {}
+  for _, a in ipairs(type(ca) == 'table' and type(ca.list) == 'table' and ca.list or {}) do
+    if type(a) == 'table' and (race == nil or a.race == math.tointeger(race) or M.race_name(a.race) == race) then
+      list[#list + 1] = a
+    end
+  end
+  local keep = args.keep_pairs == false and 0 or 1
+  local pick = M.slaughter_pick(list, {keep_f = keep, keep_m = keep, max = n + 1000})
+  if #pick == 0 then
+    return false, string.format('no animal to mark (%d tame%s: pets, war/hunting animals, marked ones and %s stay)', #list,
+                                race and (' ' .. tostring(race)) or '', keep == 1 and 'one breeding pair per race' or 'none')
+  end
+  local done = {}
+  for i = 1, math.min(n, #pick) do
+    local ok = K.act.animal_slaughter(pick[i], true)
+    if ok then done[#done + 1] = pick[i] end
+  end
+  local ws = ws_any(M.facts_now(K, {p = pstate(K)}), (M.DEFAULTS.slaughter or {}).ws or {'workshop:Butchers'})
+  K.log('warn', 'butcher.mark by %s: %d animals marked for slaughter (%s)%s', tostring(cmd and cmd.by), #done,
+        table.concat(done, ','), ws and '' or "; no Butcher's shop stands")
+  return #done > 0, string.format('%d marked for slaughter: %s%s', #done, table.concat(done, ','),
+                                  ws and '' or "; no Butcher's shop: nobody slaughters them yet"),
+         {ids = done, butcher = ws and 1 or 0}
 end
 
 ---------------------------------------------------------------- glass for strange moods (Run 11)
@@ -6148,6 +6295,9 @@ function M.trade_wants(K)
     if e then e.n, e.metal = math.max(e.n, w.n), 1
     else e = {buy = w.buy, n = w.n, why = w.why, metal = 1}; r[#r + 1] = e; by[w.buy] = e end
   end
+  for _, w in ipairs(st.fdwants or {}) do                    -- BUG-256, BUG-259: plants, drink, seeds
+    if not by[w.buy] then r[#r + 1] = {buy = w.buy, n = w.n, why = w.why}; by[w.buy] = r[#r] end
+  end
   return r
 end
 
@@ -6456,7 +6606,10 @@ function M.fish_step(K, c, r)
     return false
   end
   local site = fz.best or fz.found[1]
-  local rec = {t = r.now, ice = fz.ice, cav = fz.cav}
+  -- BUG-258: seen = every water tile the scan met (fishable, frozen, cavern, shallow): 0 is a fort without water
+  -- (a scan that failed to read the map records none: the fishing zone stays an option then)
+  local rec = {t = r.now, ice = fz.ice, cav = fz.cav,
+               seen = not fz.err and (fz.nw + fz.ice + fz.cav + fz.shallow) or nil}
   if site then
     r.cmds = r.cmds + 1
     local ok, n = K.act.fish_zone(site.water, F.side or 3, site.up == true)
@@ -7100,14 +7253,23 @@ function M.food_block(K, c, r, inv)
   if not ws_any(f, {'workshop:Kitchen'}) then put('kitchen', 'no kitchen')
   elseif M.cook_n(inv) <= 0 then put('cook', 'no ' .. M.cook_why(inv, f))
   elseif not M.labor_holder(K, 'COOK') then put('cook', 'nobody holds the COOK labor') end
+  -- BUG-258 (live Inkintense: block [cook, fish_zone, hunt, farms] in a fort without a brook, 175 bolts and no
+  -- crossbow): a fishing zone is no option where the scan met no water at all (z.seen 0; frozen or cavern water is
+  -- still named), and hunting with no crossbow names the crossbow (its Bowyer's workshop), not bolts
   if not st.fishzone then
     local z = st.fishz
     local why = type(z) == 'table' and type(z.why) == 'string' and z.why ~= 'painted' and z.why or nil
-    put('fish_zone', why or 'no fishing zone')
+    if not (type(z) == 'table' and z.seen == 0 and not z.at) then put('fish_zone', why or 'no fishing zone') end
   end
   if hunters_spec(c) and (st.hunters or 0) == 0 then
     local h = st.hunt or {}
-    if (inv.w_xbow or 0) + (inv.w_bow or 0) == 0 then put('hunt', 'hunt: no crossbow')
+    if (inv.w_xbow or 0) + (inv.w_bow or 0) == 0 then
+      local bolts = inv.bolts_free or inv.bolts or 0
+      if r.s and r.s.live and (r.s.live['dfllm:gear_xbow'] or 0) > 0 then
+        auto[#auto + 1] = {'xbow', string.format('crossbows ordered (%d bolts)', bolts)}
+      elseif not ws_any(f, {'workshop:Bowyers'}) then
+        put('xbow', string.format("hunt: no crossbow, no Bowyer's workshop (%d bolts)", bolts))
+      else put('xbow', string.format('hunt: no crossbow (%d bolts)', bolts)) end
     elseif st.no_ammo or (inv.bolts_free or 0) == 0 then put('hunt', 'hunt: no bolts')
     elseif h.why == 'mode' then put('hunt', 'hunt: not in ' .. tostring(K.mode())) end
   end
@@ -7145,8 +7307,9 @@ end
 
 -- the decision text: numbers, blockers (each names its fix), what the kernel does itself (BUG-038: `auto: ...`, never
 -- cut), the player's other options (DECISION_NEEDED q <= 200 bytes); opts = every option, the blockers' first (d.opts)
-M.FOOD_OPTS = {fishery = 'fishery', fish_zone = 'fishing zone', kitchen = 'kitchen', hunt = 'bolts'}
-M.FOOD_MORE = {'trade.want food', 'butcher', 'gather', 'popcap.lower'}
+-- BUG-258: xbow = no crossbow for the hunters; butcher.mark = the verb that marks surplus tame animals
+M.FOOD_OPTS = {fishery = 'fishery', fish_zone = 'fishing zone', kitchen = 'kitchen', hunt = 'bolts', xbow = 'crossbow'}
+M.FOOD_MORE = {'trade.want food', 'butcher.mark', 'gather', 'popcap.lower'}
 function M.food_q(fd, r, inv, bl, auto)
   local parts, opts, au = {}, {}, {}
   for _, b in ipairs(bl) do

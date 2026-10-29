@@ -94,22 +94,43 @@ T.test('farms request: food short, too few tiles, nothing pending -> PROJECT_REQ
 end)
 
 -- BUG-058 (DECISIONS 9; Run 11: five farms projects 'build_lost, parked' one after the other, no soil there): a farms
--- project lost for good stops the requests until it is cancelled or the farms are placed elsewhere
-T.test('BUG-058: a farms project lost to build_lost stops the farms requests; cancelled, they go on', function()
+-- project lost for good stops the requests until it is cancelled or the farms are placed elsewhere. BUG-257 (Run 15:
+-- the same stone site re-dug for 8 seasons): each lost project is first placed elsewhere once (follow ranks by soil)
+T.test('BUG-058/BUG-257: a farms project lost to build_lost is placed elsewhere once, then stops the farms requests; ' ..
+       'cancelled, they go on', function()
   local W, ctl = world{cit = 53, lost = 1, setup = function(W)
     F.item(W, 'FOOD', {stack_size = 26, subtype = 1})
     plot(W, 5, 7); plot(W, 5, 7); plot(W, 5, 2)
   end}
   settle(W)
   days(W, 20)
-  T.eq(#requests(W), 0, 'food short and farms wanted, but the last project is lost')
-  local n = 0
-  for _, l in ipairs(W.logs) do if tostring(l.msg):find('c1a1farms lost to build_lost', 1, true) then n = n + 1 end end
-  T.eq(n, 1, 'told once')
+  T.eq(#requests(W), 1, 'one request for another site, then none while the project stays lost')
+  local function logs(s)
+    local n = 0
+    for _, l in ipairs(W.logs) do if tostring(l.msg):find(s, 1, true) then n = n + 1 end end
+    return n
+  end
+  T.eq(logs('c1a1farms lost to build_lost (no soil there): farms requested once at another site'), 1)
+  T.eq(logs('c1a1farms lost to build_lost (no soil there?): no further farms request'), 1, 'told once')
   ctl.lost = 0                                                  -- bp.cancel: the cause is gone
   days(W, 1)
-  T.eq(#requests(W), 1)
-  T.eq(requests(W)[1].tpl, 'farms')
+  T.eq(#requests(W), 2)
+  T.eq(requests(W)[2].tpl, 'farms')
+end)
+
+-- BUG-256 (Run 15 Inkintense y373/y374: famine on one plot; the second farm was placed by hand): in a famine one more
+-- plot is asked for although the tiles cover the citizens' need, up to twice that need
+T.test('BUG-256: a famine asks for one more farm plot on top of enough tiles, up to twice the need', function()
+  local W = world{cit = 10, setup = function(W) plot(W, 5, 7) end}       -- 35 tiles >= 30 wanted, no food: famine
+  settle(W)
+  days(W, 2)
+  local r = requests(W)
+  T.eq(#r, 1, 'old: enough tiles, no request through the famine')
+  T.eq({r[1].n, r[1].why}, {1, 'food'})
+  local W2 = world{cit = 10, setup = function(W) plot(W, 5, 7); plot(W, 5, 7) end}   -- 70 tiles >= 2 x 35
+  settle(W2)
+  days(W2, 2)
+  T.eq(#requests(W2), 0, 'twice the need stands: no more')
 end)
 
 T.test('farms request: never while a farms project is pending, never with enough tiles, at most plots_max', function()

@@ -4248,6 +4248,16 @@ local function retry_step(K, P, t)
   end
   q.n = int(q.n) or 0
   if q.n >= M.CFG.retry_max then return end
+  -- BUG-257 (Run 15 Inkintense/Drillchamber: farms build_lost 'missing p' re-dug on the same stone site for 8 seasons):
+  -- quickfort builds a farm plot only on soil or mud, a dig brings neither; the retries are spent at once (lost for good:
+  -- economy asks follow for farms at another site, M.lost)
+  if P.tpl == 'farms' then
+    q.n = M.CFG.retry_max
+    K.log('warn', '%s: farms build_lost: plots need soil or mud, a re-dig brings none: lost for good (placed elsewhere)',
+          P.id)
+    dirty()
+    return
+  end
   local d = doc(K, P.id)
   if not d then return end
   local why

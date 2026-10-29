@@ -304,10 +304,11 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   T.ok(#q <= 200, q)
   T.ok(q:find('food 20 d (20 cit, 10 meals)', 1, true), q)
   T.ok(q:find('no safe fishing water (2 frozen, 1 cavern)', 1, true), q)
-  T.ok(q:find('. Also: trade.want food, butcher, gather, popcap.lower', 1, true), q)
-  T.eq(d[1].d.opts, {'kitchen', 'fishing zone', 'bolts', 'trade.want food', 'butcher', 'gather', 'popcap.lower'})
+  T.ok(q:find('. Also: trade.want food, butcher.mark, gather, popcap.lower', 1, true), q)
+  -- BUG-258: no crossbow is the blocker 'xbow' (option crossbow), not bolts; frozen water still names the fishing zone
+  T.eq(d[1].d.opts, {'kitchen', 'fishing zone', 'crossbow', 'trade.want food', 'butcher.mark', 'gather', 'popcap.lower'})
   T.eq(d[1].d.food, 20)
-  T.eq(d[1].d.block, {'kitchen', 'fish_zone', 'hunt', 'farms'}, 'no animals: no butcher blocker')
+  T.eq(d[1].d.block, {'kitchen', 'fish_zone', 'xbow', 'farms'}, 'no animals: no butcher blocker')
   -- the same blockers: never again (BUG-008 cadence); a new blocker after 7 days and 10 minutes: again
   days(W, 8)
   T.eq(#decisions(W, 'food_low'), 1)
@@ -329,6 +330,31 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   ctl.water = {{60, 50, 100, 7}}
   days(W, 7)
   T.eq(#ctl.zones, 1)
+end)
+
+-- BUG-258 (Run 15 Inkintense y373: food_low block [cook, fish_zone, hunt, farms] in a fort without a brook, 175 bolts and
+-- no crossbow): no water at all is no fishing option; no crossbow names the crossbow and its workshop, not bolts
+T.test('BUG-258: a scan that met no water drops the fishing zone from food_low; no crossbow is xbow with the bolts', function()
+  local W = world{cit = 20, food = 10, setup = function(W)
+    W.subdefs[4] = {id = 'ITEM_AMMO_BOLTS'}
+    F.item(W, 'AMMO', {subtype = 4, stack_size = 175})
+  end}
+  days(W, 1)
+  local z = W.K.persist.get('m.economy').fishz
+  T.eq(z.seen, 0, 'the scan met no water tile')
+  local d = decisions(W, 'food_low')
+  T.eq(#d, 1)
+  T.ok(not F.has(d[1].d.block, 'fish_zone') and not F.has(d[1].d.opts, 'fishing zone'), table.concat(d[1].d.block, ','))
+  T.ok(F.has(d[1].d.block, 'xbow') and not F.has(d[1].d.block, 'hunt'), table.concat(d[1].d.block, ','))
+  T.ok(F.has(d[1].d.opts, 'crossbow') and not F.has(d[1].d.opts, 'bolts'), table.concat(d[1].d.opts, ','))
+  T.ok(d[1].d.q:find("hunt: no crossbow, no Bowyer's workshop (175 bolts)", 1, true), d[1].d.q)
+  local W2 = world{cit = 20, food = 10, setup = function(W2)
+    W2.subdefs[4] = {id = 'ITEM_AMMO_BOLTS'}
+    F.item(W2, 'AMMO', {subtype = 4, stack_size = 175})
+    F.workshop(W2, 'Bowyers')
+  end}
+  days(W2, 1)
+  T.ok(decisions(W2, 'food_low')[1].d.q:find('hunt: no crossbow (175 bolts)', 1, true), decisions(W2, 'food_low')[1].d.q)
 end)
 
 T.test('Run 11: no fishing search outside PEACE/RECOVERY, with a zone standing, or with food enough', function()

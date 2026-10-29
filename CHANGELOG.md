@@ -1,5 +1,39 @@
 # CHANGELOG dfpilot
 
+## Run 15 food and drink start: the kernel asks for a Still, seedless slots chosen again, farms only on soil, usable food options, no thirst noise, butcher.mark (BUG-255..260, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 Inkintense and Drillchamber (player reports runs/run-15*/FR-BUGS.md): year 1 without a Still, drink 161 -> 41-55
+  days, the kernel only asked (drink_low) and the player placed the Still by hand (BUG-255); famine y373 beside 130 seeds: a plot slot
+  held MUSHROOM_CUP_DIMPLE with 0 seeds (only empty slots were filled; a seedless fallback), one plot only (BUG-256); farms build_lost
+  'missing p' on `soil 0/70` sites, re-dug 8 seasons (BUG-257); food_low offered a fishing zone without water and bolts with 175 bolts and
+  no crossbow (BUG-258); Drillchamber: DECISION thirst every 7 days with 0 thirsty (they drank at the brook), the supply brake all year
+  and no plants asked for (BUG-259); breeding pairs marked for slaughter by hand, no verb (BUG-260).
+- **What changed:** economy (1) `M.drink_fix`: no Still and no project building one -> PROJECT_REQUEST workshops why=mandatory
+  types=[Still] (+Kitchen below 60 food days without one), every food.request_days, twice an episode, `auto: still` (BUG-255).
+  (2) `farm_fills`: the running season's slot of a crop without a usable seed is chosen again (only by a crop with seeds, census known);
+  no seedless fallback in `slot_crop`; a famine wants one more plot (up to 2x the need); `M.fd_wants` puts seeds (0 usable),
+  plant + drink (no brewable plant below drink.low_d) into `M.trade_wants` (BUG-256, BUG-259). (3) each lost farms project gets one
+  farms request (placed elsewhere) before the BUG-058 stop; runner: a farms build_lost spends its retries at once; bp/sites.py: with
+  soil marks a farms site needs soil under half its plot tiles (BUG-257). (4) `food_block`: no fish_zone when the scan met no water
+  (`fishz.seen` 0); no crossbow = blocker `xbow` (Bowyer's workshop, the bolts) with option `crossbow`; FOOD_MORE `butcher.mark` (BUG-258).
+  (5) `alarm_check`: low drink days are an alarm/thirst wake only with a citizen past alarm.thirst; stock.dwhy `nobody thirsty: they drink
+  water`; drink_low asks below the alarm line then (BUG-259). (6) verb `butcher.mark {n?, race?, keep_pairs?}` (act.animal_slaughter;
+  pets, war and hunting animals never, act refuses war/hunting too; one pair per race unless keep_pairs false) (BUG-260). RULES §6/§7/§9
+  rows edited in place (300 lines). Contracts: VERB butcher.mark; appendix regenerated. Not done: the year-1 plan draft (plan.py,
+  fix6-plan-propose), painting a gather zone, reading 'Needs <x> spawn' cancels.
+- **Tests (each fails on 2b9c009):** tests/lua/test_economy_food_run15.lua (4), tests/lua/test_runner_farms_lost.lua,
+  tests/bp/test_sites_farms_soil.py, tests/lua/test_economy_food.lua (BUG-256 famine plot, BUG-058/257), tests/lua/test_economy_fishing.lua
+  (BUG-258); updated pins: test_economy_drink.lua (BUG-042 blockers), test_economy_supply.lua (FR-17 autumn), test_economy_fishing.lua (Run 11 opts).
+- **Live check:** a fort below 60 drink days without a Still: PROJECT_REQUEST `workshops Still` (d.why mandatory) and a Still project
+  from follow; a plot slot with a seedless crop in the running season: kern.log `no usable seeds for X: Y instead`; caravan wants list
+  seeds/plant/drink when short; Drillchamber `bp sites farms --fresh` has no `soil 0/70` site, the next farms build_lost logs `lost for good`
+  and `farms requested once at another site`; no DECISION thirst with 0 thirsty, status `nobody thirsty: they drink water`; food_low with
+  no water lists no fish_zone, with bolts and no crossbow `xbow`; `dfllm cmd butcher.mark '{"n":1,"race":"TURKEY","keep_pairs":false}'`
+  marks one turkey (animal sheet), refused without keep_pairs:false when only pairs stand.
+- **Review fix:** a fishing scan that failed to read the map (`fz.err`) records no `seen`, so the fishing zone stays a food_low
+  option (only a scan that read the map and met no water drops it). Open: no crossbow order for hunters (the `xbow` auto line
+  shows only when the soldiers' gear orders crossbows), no gather zone for brewable plants, no famine Decision default,
+  the Kern+ refusal on drink 0 days (siege/refuge) still reads the raw drink days.
+
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders

@@ -252,6 +252,12 @@ Related: FR-xx, BUG-xx
 | [BUG-235](BUG-235-rescue-never-lowers-outer-bridges-in-peace.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the rescue never lowered an outer bridge and demanded a sealed outside even in quiet PEACE | lua/dfllm/siege.lua, lua/dfllm/gate.lua, lua/dfllm/drill.lua |
 | [BUG-236](BUG-236-player-lever-down-silently-overridden.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the player's lever down was accepted and then silently overridden | lua/dfllm/gate.lua |
 | [BUG-237](BUG-237-gate-cycles-up-down-with-drills-that-cannot-pass.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: B1 cycled up/down with automatic drills that could not pass (O1 without a lever) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-255](BUG-255-no-still-in-year-one-kernel-only-asks.md) | fixed (offline, live-untested) | high | Run 15 Inkintense/Drillchamber: year 1 without a Still, drink_low only asks | economy |
+| [BUG-256](BUG-256-seedless-crop-holds-farm-slots-famine.md) | fixed (offline, live-untested) | high | Run 15 Inkintense: a seedless crop held the farm slot through a famine; seedless fallback; no extra plot | economy |
+| [BUG-257](BUG-257-farms-build-lost-on-stone-retried-eight-seasons.md) | fixed (offline, live-untested) | high | Run 15: farms build_lost 'missing p' on soil 0/70 sites, re-dug for 8 seasons | bp/sites, runner, economy |
+| [BUG-258](BUG-258-food-low-options-unusable.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: food_low offers a fishing zone without water and bolts without a crossbow | economy |
+| [BUG-259](BUG-259-thirst-alarm-noise-while-dwarves-drink-water.md) | fixed (offline, live-untested) | medium | Run 15 Drillchamber: thirst DECISION every 7 days with 0 thirsty, no plants asked for | economy |
+| [BUG-260](BUG-260-no-butcher-verb-breeding-pairs-marked-by-hand.md) | fixed (offline, live-untested) | medium | Run 15 Inkintense: no butcher verb, breeding pairs marked for slaughter by hand | economy, act, schema |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
