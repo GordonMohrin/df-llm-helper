@@ -273,6 +273,22 @@ T.test('BUG-228: a tracking_on of 1 before the run stays 1; no enabler field is 
   T.eq(enabler.tracking_on, 1)
 end)
 
+T.test('BUG-228: a boolean tracking_on of false is set true while shown and restored to false', function()
+  local enabler = {tracking_on = false, mouse_focus = false}
+  local seen_true = false
+  local D = F.new({screen = 'world', tracking = function()
+    if enabler.tracking_on == true then seen_true = true end
+    return enabler.tracking_on == true
+  end})
+  local cmd, pump = install(D, {screens = true, enabler = enabler})
+  capture_print(function() cmd('run', scan_spec('t5')) end)
+  pump()
+  local st = json.decode(slurp(OUT .. '/status.json'))
+  T.eq(st.state, 'done', st.msg)
+  T.ok(seen_true, 'tracking_on was true while the rectangle was placed')
+  T.eq(enabler.tracking_on, false, 'false is back, not left on')
+end)
+
 -- remove the files written above
 os.remove(PREFS)
 for _, d in ipairs({OUT .. '/capture', OUT}) do

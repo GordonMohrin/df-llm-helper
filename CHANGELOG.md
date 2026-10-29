@@ -21,8 +21,8 @@
   reads stay visible UI (the title screen's own list headers). No kernel, contract, config key or RULES change. Risks: the
   header field names (`filename_noext`, `world_name`, `fort_name` on the savegame header) come from the dfhack.dll reflection
   strings, not a live read; a missing one falls back to the text-only path. Biome captions are exact DF 53.16 strings.
-- **Tests (each fails on 5e9e719):** tests/lua/test_embark_entry.lua (BUG-228 x2), tests/lua/test_embark.lua (BUG-229 x4),
-  tests/lua/test_loadsave.lua (BUG-230 x4), tests/lua/test_loadsave_entry.lua (BUG-230 entry), tests/test_embark.py (BUG-228..230).
+- **Tests (each fails on 5e9e719):** tests/lua/test_embark_entry.lua (BUG-228 x3), tests/lua/test_embark.lua (BUG-229 x4),
+  tests/lua/test_loadsave.lua (BUG-230 x5), tests/lua/test_loadsave_entry.lua (BUG-230 entry), tests/test_embark.py (BUG-228..230).
 - **Live check:** (a) embark world map, DF unfocused: `python tools/embark/embark.py scan 12,6` places the rectangle and the
   row has panel facts (no "does not follow the mouse", no `panel` fail); afterwards the rectangle follows the real mouse again.
   (b) `embark.py scan WX,WY --tiles` on an all-mountain finder match: `reject`, `fail=terrain`, the run goes on. (c) At the title

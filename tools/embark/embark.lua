@@ -162,23 +162,27 @@ local W = {}
 -- frames) and gives the old value back when it is dismissed. Never permanently: without the injector DF then
 -- uses the cached OS cursor and the rectangle jumps ("rectangle moved before the click").
 -- W.track(true) remembers the value before the injector, W.track(false) restores it (no field: no-op).
-local function tracking(v)   -- read (v nil) or write enabler.tracking_on; nil when the field does not exist
+-- The old value is kept boxed ({value}) so a boolean false (a bool field) is restored too, not mistaken for "none".
+local function tracking(v)   -- read (v nil): true, value | false (no field); write: true when written
   local e = df.global.enabler
-  if not e then return nil end
+  if not e then return false end
   if v == nil then
     local ok, val = pcall(function() return e.tracking_on end)
-    return ok and val or nil
+    return ok and val ~= nil, val
   end
   return (pcall(function() e.tracking_on = v end))
 end
 function W.track(on)
   if on then
-    if W.track_old == nil then W.track_old = tracking() or false end
-    tracking(1)
+    if W.track_old == nil then
+      local has, val = tracking()
+      W.track_old = has and {val} or {}
+    end
+    if W.track_old[1] ~= nil then tracking(type(W.track_old[1]) == 'boolean' and true or 1) end
   elseif W.track_old ~= nil then
-    local old = W.track_old
+    local old = W.track_old[1]
     W.track_old = nil
-    if old ~= false then tracking(old) end
+    if old ~= nil then tracking(old) end
   end
 end
 local Inj  -- class built on first use (the offline fake DF has no gui.Screen/defclass)

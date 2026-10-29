@@ -205,6 +205,10 @@ local function world_pick(v, t, spec, tried)
   for _, h in ipairs(hits or {}) do   -- same-named worlds: the first one not opened yet
     if not tried[h] then wi = h break end
   end
+  if wi and tried[wi] then   -- the one world (by folder or by its unique name) was opened and lacks the save
+    why, wname, wi = 'the world "' .. tostring(t.worlds[wi].folder) .. '" does not hold "' .. tostring(spec.save) .. '"',
+      t.worlds[wi].world, nil
+  end
   if not wi then   -- a refusal only on the world list itself (the name is shown)
     if wname and #L.find_all(v, L.shown(wname)) > 0 then
       return {which = 'world', refuse = true, why = why .. (hits and (', none holds "' .. tostring(spec.save) ..

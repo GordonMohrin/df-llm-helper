@@ -408,6 +408,15 @@ T.test('BUG-230: --world-folder opens that world at once; the save of a unique w
   T.eq({D.loaded, D.chosen_world}, {'autosave 3', 2})
 end)
 
+T.test('BUG-230: --world-folder naming a world without the save fails once, no open/Esc loop', function()
+  local D = F.new({worlds = WORLDS})
+  local run, _, ctx = start(D, spec('autosave 2', {world_folder = 'region3'}))
+  T.eq(run.state, 'failed', run.msg)
+  T.ok(run.msg:find('does not hold "autosave 2"', 1, true), run.msg)
+  T.eq(texts(ctx), {'main:Continue playing', 'world:Oldworld', 'back:Esc'})
+  T.eq(D.loaded, nil)
+end)
+
 T.test('BUG-230: entries below the visible rows are scrolled to (world list and game list)', function()
   local worlds = {}
   for i = 1, 6 do
