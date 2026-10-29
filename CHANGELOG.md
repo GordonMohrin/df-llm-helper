@@ -10,7 +10,7 @@
   ConstructThrone/Table/Door/Bed/Blocks job with a log (Carpenter's) or a non-economic boulder (Mason's) [live-untested job item fields].
   economy `M.mgr_bypass` (daily after the validation watch): orders unvalidated, the manager absent or the office short of its chair/table
   for `orders.bypass_days` (5, 0 = off) -> the office's chair and table and the doors, beds and blocks the planned buildings wait for are
-  added as tasks (wood first, else stone), deduped against the jobs queued at the shops, at most `orders.bypass_max` (4) a day and
+  added as tasks (wood first, the logs the held orders reserve counted free, else stone), deduped against the jobs queued at the shops, at most `orders.bypass_max` (4) a day and
   `orders.bypass_open` (8) queued; kern.log + MANAGER_BYPASS (B); no shop: PROJECT_REQUEST workshops why=manager (follow places it)
   (BUG-231). (2) plans/year1.json: office is a P0 deliverable after fortcore stage 1 (not P1); the office template digs, zones, then builds;
   `zone.place type=office`; with no Office zone at all economy zones a built chair (+ its table) outside every room zone (`office.zone`,
@@ -18,7 +18,7 @@
   needed)`; status/brief `manager: N orders unvalidated for D days: <why> -> <what the kernel does>`; the decision fix text, the wake hint
   of DECISION_NEEDED manager_office and RULES §7 (edited in place, 300 lines) name the kernel's tasks, no click (BUG-233). Contracts:
   ACT ws_task, zone_place owners, EVENT MANAGER_BYPASS, state orders.byp, ZONE_TYPES office; appendix regenerated.
-- **Tests (each fails on 6dc0f19):** tests/lua/test_manager_bypass.lua (4), tests/lua/test_kern_act.lua (ws_task),
+- **Tests (each fails on 6dc0f19):** tests/lua/test_manager_bypass.lua (5), tests/lua/test_kern_act.lua (ws_task),
   tests/test_bug231_233_manager.py (6), tests/test_cli_wake.py (P0 starter: office after the core), tests/test_bug042.py (the line);
   updated pins: test_zone_place.lua, test_a4_health.py, test_economy_drink.lua, test_economy_orders.lua, runner_dump.lua (P0 needs the
   office), golden office.*.

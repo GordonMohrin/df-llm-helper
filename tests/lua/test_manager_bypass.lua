@@ -208,6 +208,16 @@ T.test('BUG-231: no logs: the Mason\'s workshop in stone; no shop at all: PROJEC
   T.eq(#ctl3.tasks, 0, 'orders.bypass_days 0: off')
 end)
 
+T.test('BUG-231 live Guildcleans (deep soil, stone free 0): the logs the held wood orders reserve are free for the tasks; '
+       .. 'no stone and no mason workshop asks for no Masons', function()
+  local W, ctl = world{logs = 12, boulders = 0}             -- 22 held wood orders reserve more logs than stand
+  days(W, 6)
+  T.eq({tasks_of(ctl, 'ConstructThrone'), tasks_of(ctl, 'ConstructTable')}, {1, 1},
+       'old code: wood_left counted the held orders, 0 logs, no stone: no task ever (the deadlock stayed)')
+  T.eq(ctl.tasks[1].mat, 'wood')
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do T.ok(e.d.why ~= 'manager', e.msg) end
+end)
+
 T.test('BUG-232: no Office zone at all: one is drawn over a built chair and the table beside it outside every room zone; '
        .. 'a chair in a bedroom is left alone', function()
   local W, ctl = world{setup = function(W)

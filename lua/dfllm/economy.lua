@@ -5637,6 +5637,28 @@ function M.bypass_days(K, p)
   return d
 end
 
+-- the logs the unvalidated live orders still hold (scan_orders' count of s.used.wood, for those orders only)
+function M.held_wood(p)
+  local own, n = {}, 0
+  for tag, id in pairs(type(p) == 'table' and type(p.orders) == 'table' and p.orders or {}) do own[id] = tag end
+  for _, o in ipairs(orders_all()) do
+    local left = math.tointeger(o.amount_left) or 0
+    local okv, valid = pcall(function() return o.status.validated end)
+    if left > 0 and okv and valid == false then
+      local tag = own[o.id]
+      if tag then
+        local meta = type(p.meta) == 'table' and p.meta[tag] or nil
+        local uses = type(meta) == 'table' and type(meta.uses) == 'table' and meta.uses or {}
+        n = n + left * (math.tointeger(uses.wood) or 0)
+      else
+        local mc = o.material_category
+        if (mc and mc.wood) or df.job_type[o.job_type] == 'MakeCharcoal' then n = n + left end
+      end
+    end
+  end
+  return n
+end
+
 function M.mgr_bypass(K, p, c)
   local oc = c.orders or M.DEFAULTS.orders
   local lim = math.tointeger(oc.bypass_days) or 5
@@ -5650,6 +5672,9 @@ function M.mgr_bypass(K, p, c)
   if #want == 0 then st.byp = nil; return end
   local shops, queued = M.bypass_shops()
   local r = M.view_run(K)
+  -- the logs the unvalidated orders hold are free for the tasks: those orders wait for the very manager (live
+  -- Guildcleans: deep soil, no stone, the held wood orders took every log, so no task could be made in wood)
+  r.s.used.wood = math.max(0, (r.s.used.wood or 0) - M.held_wood(r.p))
   local wood = M.wood_left(c, r, true)
   local rock = stone_free(c, r)
   local budget, open_n = math.tointeger(oc.bypass_max) or 4, 0
@@ -5669,7 +5694,7 @@ function M.mgr_bypass(K, p, c)
                   or (e.rock and #shops.Masons > 0 and rock > 0) and 'rock' or nil
       if not mat then                                  -- no shop for the material the fort has (no logs: the masons)
         if e.wood and #shops.Carpenters == 0 and (wood > 0 or not e.rock or rock <= 0) then noshop = noshop or 'Carpenters'
-        elseif e.rock and #shops.Masons == 0 then noshop = noshop or 'Masons'
+        elseif e.rock and #shops.Masons == 0 and rock > 0 then noshop = noshop or 'Masons'
         else nomat = true end
         break
       end

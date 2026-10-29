@@ -1241,6 +1241,8 @@ local function impls(state)
       it.item_type = mat == 'wood' and df.item_type.WOOD or df.item_type.BOULDER
       it.item_subtype, it.mat_type, it.mat_index, it.quantity = -1, mat == 'wood' and -1 or 0, -1, 1
       if mat == 'rock' then it.flags2.non_economic = true end
+      -- the item vector DF's job picker searches (logs / boulders, as its own tasks); an old build without it: ANY
+      pcall(function() it.vector_id = df.job_item_vector_id[mat == 'wood' and 'WOOD' or 'BOULDER'] end)
       local list = j.job_items.elements or j.job_items   -- DF 50+: a struct holding the vector
       list:insert('#', it)
     end)

@@ -29,9 +29,13 @@ logs are free, else stone at a Mason's; the jobs of that type already queued at 
 `orders.bypass_max` (4) a day and `orders.bypass_open` (8) queued at once; kern.log and MANAGER_BYPASS (B). No shop for the material:
 PROJECT_REQUEST workshops why=manager types [Carpenters|Masons] at most every 7 days (not while a workshops project or runner's
 mandatory request builds it); follow places it like the slabs' Masons.
+The logs the unvalidated orders reserve (`M.held_wood`, the same count as scan_orders' `used.wood`) are free for the tasks:
+Guildcleans had deep soil and no free stone, and the held wood orders took every log, so `wood_left` alone left nothing to make
+a task from. A missing Mason's workshop is asked for only when stone is free. The job item also names DF's item vector (WOOD /
+BOULDER) when the build has it.
 
 ## Tests
-`tests/lua/test_manager_bypass.lua` (the Guildcleans replay, the doors with bypass_max/bypass_open, stone at the Masons, the shop
+`tests/lua/test_manager_bypass.lua` (the Guildcleans replay, the held wood orders' logs, the doors with bypass_max/bypass_open, stone at the Masons, the shop
 request, bypass_days 0), `tests/lua/test_kern_act.lua` `BUG-231 ws_task ...`, `tests/test_bug231_233_manager.py` (contracts, follow
 why=manager, knobs). All fail on 6dc0f19.
 
