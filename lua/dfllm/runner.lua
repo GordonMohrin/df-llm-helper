@@ -3738,7 +3738,11 @@ local CHECK = {
     local ok, done = K.call('baseline', 'done')
     return ok and done == true
   end,
-  proj = function(K, dv) return proj_reached(K, dv.tpl, int(dv.stage)) end,
+  -- BUG-300 (Run 15 Inkintense: P0 for years beside a farm plot that stands, its project parked build_lost at 40 %):
+  -- farms is met once a farm plot stands, whoever built it
+  proj = function(K, dv)
+    return proj_reached(K, dv.tpl, int(dv.stage)) or (dv.tpl == 'farms' and not dv.stage and Q.farm_plots() > 0)
+  end,
   squads = function(K, dv) local v = K.view().mil; return v ~= nil and (v.squads or 0) >= dv.n end,
   drill = function(K) local v = K.view().ready; return v ~= nil and (v.drill_age or -1) >= 0 end,
   stock = function(K, dv)
@@ -3758,8 +3762,13 @@ local CHECK = {
     local t = type(v) == 'table' and v.kit
     return type(t) == 'table' and (t.n or 0) > 0 and 100 * (t.full or 0) >= (dv.pct or 100) * t.n
   end,
-  workshops = function(K, dv)
-    local have = {}
+  workshops = function(K, dv) return #Q.ws_missing(K, dv) == 0 end,
+}
+
+-- the workshop types of a `workshops` deliverable that no workshop of the manifest or the map has (BUG-301: the status
+-- line names them)
+function Q.ws_missing(K, dv)
+    local have, miss = {}, {}
     for _, w in ipairs(K.manifest().workshops or {}) do have[w.type] = true end
     -- live L1b: a mood needs the workshop type anywhere in the fort, also one built by hand
     pcall(function()
@@ -3771,28 +3780,97 @@ local CHECK = {
       end
     end)
     for _, t in ipairs(dv.types or {}) do
-      for _, n in ipairs(t == 'moodable' and M.MOODABLE or {t}) do if not have[n] then return false end end
+      for _, n in ipairs(t == 'moodable' and M.MOODABLE or {t}) do if not have[n] then miss[#miss + 1] = n end end
     end
-    return true
-  end,
-}
+    return miss
+end
+
+-- BUG-300: built farm plots on the map (0 when unreadable)
+function Q.farm_plots()
+  local ok, n = pcall(function()
+    local c = 0
+    for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do if built(b) then c = c + 1 end end
+    return c
+  end)
+  return ok and n or 0
+end
+
+-- BUG-300/301: a deliverable's key (what phase.waive names: the template, 'fortcore 2', 'workshops', or the kind) and
+-- the text the status line shows for one that is not met
+function Q.dv_key(dv)
+  if dv.k == 'proj' then return tostring(dv.tpl) .. (int(dv.stage) and (' ' .. int(dv.stage)) or '') end
+  return tostring(dv.k)
+end
+function Q.dv_text(K, dv)
+  local k = Q.dv_key(dv)
+  if dv.k == 'workshops' then
+    local m = Q.ws_missing(K, dv)
+    return trunc(k .. ' ' .. table.concat(m, ',', 1, math.min(#m, 4)) .. (#m > 4 and ('+' .. (#m - 4)) or ''), 40)
+  end
+  if dv.k == 'stock' then return trunc(string.format('%s %s>=%s', k, tostring(dv.key), tostring(dv.min)), 40) end
+  local n = dv.n or dv.lvl or dv.pct or dv.lib
+  return trunc(n ~= nil and (k .. ' ' .. tostring(n)) or k, 40)
+end
+
+-- BUG-300 (Run 15 Drillchamber: P0 for six years, plans at P5, because `farms` can never be built: every farm site is
+-- stone without water, 0 of 126 farm tiles, `bp sites farms` 0 ranked; so traps P5, kit and sweep P6, rooms P7 never came):
+-- a deliverable that cannot be made is waived with its reason (persist phase.waive {d, why, ph, t, by}: by phase.waive of
+-- follow or the player, or the kernel's own rule: every farms project lost to build_lost (plots need soil or mud) and
+-- parked). A waived deliverable does not hold the phase; the status line names it.
+Q.WAIVE_MAX = 8
+function Q.waiver(ph, key)
+  for _, w in ipairs(type(ph) == 'table' and type(ph.waive) == 'table' and ph.waive or {}) do
+    if w.d == key then return w end
+  end
+end
+function Q.add_waive(K, ph, key, why, by)
+  if type(ph.waive) ~= 'table' then ph.waive = {} end
+  ph.waive[#ph.waive + 1] = {d = trunc(key, 40), why = trunc(why, 80), ph = ph.phase, t = now(K), by = trunc(by, 16)}
+  while #ph.waive > Q.WAIVE_MAX do table.remove(ph.waive, 1) end
+  K.persist.touch('phase')
+  K.log('warn', 'phase %s: %s cannot be made (%s, by %s): waived, the phase goes on without it', ph.phase, key,
+        trunc(why, 80), trunc(by, 16))
+end
+function Q.auto_waive(K, dv)
+  if dv.k ~= 'proj' or dv.tpl ~= 'farms' or dv.stage then return nil end
+  local n = M.lost(K, 'farms')
+  if (n or 0) == 0 then return nil end
+  local pt = conf(K).park
+  for _, P in ipairs(S.pd.list) do if P.tpl == 'farms' and Q.live(K, P, pt) then return nil end end
+  return string.format('%d farms project(s) lost to build_lost: plots need soil or mud', n)
+end
 
 -- all deliverables pass?; second value: a failing one depends on projects (proj, workshops)
-local function check_phase(K, ph)
-  local pass, plan_fail = true, false
+-- BUG-300/301: third and fourth values: the texts of the deliverables it waits for, and the waived ones ('farms: why');
+-- pd = the persisted phase doc (its waivers)
+local function check_phase(K, ph, pd)
+  local pass, plan_fail, wait, wv = true, false, {}, {}
   for _, dv in ipairs(type(ph.deliver) == 'table' and ph.deliver or {}) do
     local f = CHECK[dv.k]
     local mod = dv.k == 'stock' and dv.key == 'hosp_water' and 'care' or OWNER[dv.k]
     local ok = f ~= nil and ((mod ~= nil and absent(K, mod)) or f(K, dv) == true)
-    if not ok then pass = false; plan_fail = plan_fail or PLAN_DRIVEN[dv.k] == true end
+    if not ok then
+      local key = Q.dv_key(dv)
+      local w = Q.waiver(pd, key)
+      if not w and type(pd) == 'table' then
+        local why = Q.auto_waive(K, dv)
+        if why then Q.add_waive(K, pd, key, why, 'kernel'); w = Q.waiver(pd, key) end
+      end
+      if w then wv[#wv + 1] = trunc(key .. ': ' .. tostring(w.why), 100)
+      else
+        pass = false; plan_fail = plan_fail or PLAN_DRIVEN[dv.k] == true
+        wait[#wait + 1] = Q.dv_text(K, dv)
+      end
+    end
   end
-  return pass, plan_fail
+  return pass, plan_fail, wait, wv
 end
 
 local function phases(K)
   local list = phase_list(K)
   local ph = K.persist.get('phase')
   S.stuck = true
+  S.phw = nil
   if not list then S.phase = type(ph) == 'table' and ph.phase or nil; return end
   if type(ph) ~= 'table' or not idx_of(list, ph.phase) then
     ph = {v = 2, phase = list[1].id, since = now(K), done = {}}
@@ -3802,7 +3880,10 @@ local function phases(K)
   for _ = 1, #list do
     local i = idx_of(list, ph.phase)
     local cur, nxt = list[i], list[i + 1]
-    local pass, plan_fail = check_phase(K, cur)
+    local pass, plan_fail, wait, wv = check_phase(K, cur, ph)
+    -- BUG-301: what holds the phase (and what was waived) for the status line
+    S.phw = (#wait > 0 or #wv > 0) and {wait = {table.unpack(wait, 1, math.min(#wait, 4))},
+                                         waived = {table.unpack(wv, 1, math.min(#wv, 4))}} or nil
     if not pass then S.stuck = plan_fail; break end
     if not nxt or (nxt.approve == true and target < (pnum(nxt.id) or 99)) then break end
     local done = append_unique(ph.done, {cur.id}, 99)
@@ -4895,7 +4976,7 @@ function M.state(K)
     sc = sc and copy(sc) or {}
     sc.q, sc.run, sc.pk = q, run, pk
   end
-  return {phase = S.phase, proj = S.rows, sched = sc, adopt = Q.adopt_state()}
+  return {phase = S.phase, phw = S.phw, proj = S.rows, sched = sc, adopt = Q.adopt_state()}
 end
 
 -- BUG-037 (economy's inspect workload and idle rule): the runner's queue in one clause, nil when nothing waits;
@@ -5446,6 +5527,42 @@ function M.lost(K, tpl)
   return n, first
 end
 
+function Q.waive_verb(K, args, cmd)
+  local tpl, why = args.tpl, args.why
+  if type(tpl) ~= 'string' or tpl == '' then return false, 'tpl required (the deliverable, e.g. farms)' end
+  if type(why) ~= 'string' or why == '' then return false, 'why required (what makes it impossible)' end
+  local key = tpl .. (int(args.stage) and (' ' .. int(args.stage)) or '')
+  local list, ph = phase_list(K), K.persist.get('phase')
+  local i = list and type(ph) == 'table' and idx_of(list, ph.phase)
+  if not i then return false, 'no phase list or phase yet' end
+  local keys, hit = {}, nil
+  for _, dv in ipairs(type(list[i].deliver) == 'table' and list[i].deliver or {}) do
+    keys[#keys + 1] = Q.dv_key(dv)
+    if Q.dv_key(dv) == key then hit = dv end
+  end
+  if not hit then
+    return false, string.format('%s is no deliverable of %s (%s)', key, ph.phase, table.concat(keys, ', '))
+  end
+  if Q.waiver(ph, key) then return true, string.format('%s is waived already in %s', key, ph.phase) end
+  local f = CHECK[hit.k]
+  if f and f(K, hit) == true then return false, string.format('%s is met already in %s', key, ph.phase) end
+  if hit.k == 'proj' then
+    local pt = conf(K).park
+    for _, P in ipairs(S.pd.list) do
+      if P.tpl == hit.tpl and Q.live(K, P, pt) then
+        return false, string.format('project %s (%s) runs: it may still deliver it (bp.cancel it first)', P.id, P.tpl)
+      end
+    end
+  end
+  local from = ph.phase
+  Q.add_waive(K, ph, key, why, type(cmd) == 'table' and cmd.by or 'player')
+  phases(K)
+  rows(K)
+  save(K)
+  return true, string.format('%s waived in %s (%s); phase now %s', key, from, trunc(why, 80), tostring(S.phase)),
+         {phase = S.phase}
+end
+
 M.on = {
   -- damp/warm cancel and cavern reports stop the dig of every nearby project (no pos: all diggers)
   REPORT = function(K, ev)
@@ -5490,6 +5607,10 @@ M.on = {
 }
 
 M.verbs = {
+  -- BUG-300: a deliverable of the current phase that cannot be made is waived with its reason (follow sends it when farms
+  -- find no site at all; the player when a template cannot be built). Refused for a deliverable met already, for one of
+  -- another phase and while a project of that template runs
+  ['phase.waive'] = function(K, args, cmd) return Q.waive_verb(K, args, cmd) end,
   -- FR-78 (Run 14 note 65): a civzone in a box through quickfort's zone mode (lua/dfllm/zonelib.lua)
   ['zone.place'] = function(K, args, cmd) return require('dfllm.zonelib').verb(K, args, cmd) end,
   ['bp.place'] = function(K, args, cmd)

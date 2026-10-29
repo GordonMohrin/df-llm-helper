@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## Run 15 phase: a deliverable that can never be made is waived, the status names what holds the phase, no farms draft without a site (BUG-300..302, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 round 3: Drillchamber stayed at P0 the whole run (y372-y378) while every plan targeted P5, so trap lanes
+  (P5), kit and the cavern sweep (P6) and the large rooms (P7) never unlocked. Of the P0 deliverables only `farms` failed:
+  both farms projects were lost on stone (`plots need soil or mud`) and cancelled, `bp sites farms --fresh` ranks 0 (copy of
+  the runtime: `farm_facts` site `none`), and follow's starter and economy's requests ended in `AUTO_FAIL farms: only 0 free
+  site(s)` for years (BUG-300). Inkintense stayed at P0 beside a farm plot that stands (its project parked build_lost at 40
+  %). Nothing said which deliverable held the phase (BUG-301), and `plan propose` drafted farms@S1 again with 0 sites (BUG-302).
+- **What changed:** (1) runner: `farms` is met by a built farm plot on the map; waivers in persist `phase.waive` (key, why,
+  phase, tick, by): the verb `phase.waive {tpl, why, stage?}` (refused when not a deliverable of the current phase, met
+  already, or while a live project of it runs) and the kernel's own rule (every farms project lost to build_lost and parked);
+  a waived deliverable no longer holds the phase. (2) follow: a farms placement with 0 free sites and neither a room nor a
+  surface farm site on the snapshot sends `phase.waive farms` (once an hour, cli.log `auto:waive`). (3) state `phw {wait,
+  waived}`; status, brief (plan section) and doctor print `phase P0: waits for X (Y impossible: why -> waived)`, doctor with
+  the phase.waive command. (4) plan: `farm_site_fix` leaves farms out of the phase and emergency drafts when the farm site
+  fact (`farm_facts`, below 60 food days) says none exists (p.surface=1 when only a surface site is free, in PEACE). Contracts:
+  verb phase.waive, state phw, persist.phase waive; appendix regenerated; RULES section 6 bp.place row edited in place.
+- **Tests (each fails on 9ef2ccb):** tests/lua/test_bug300_phase_waive.lua (7), tests/test_bug300_302_phase.py (6).
+- **Live check:** Drillchamber after the load: cli.log `follow auto:waive`, kern.log `phase P0: farms cannot be made (...):
+  waived`, PHASE events P0 -> ... -> P5; Inkintense PHASE P0 -> P1 at the next runner run; `dfllm status` `phase Pn: waits
+  for ...` in every fort below its target; `plan propose` in Drillchamber with the note `BUG-302: farms left out`. Uncertain:
+  which deliverable holds Drillchamber next (the status line names it), and whether the farm plot of Inkintense counts as
+  built (getBuildStage of a farm plot).
+
 ## Run 15 trade sheet: the kernel closes the sheet its own trade screen left, a blocking player screen is asked once (BUG-286, BUG-287, 2026-10-29; offline, live-untested)
 - **Why:** Run 15 (DF 53.16): Drillchamber, Inkintense and Earthboat (2 more visits) lost whole caravans to `CARAVAN ... blocked: a
   player screen is open (dwarfmode/ViewSheets/UNIT/Overview)` x7-x14, then `failed: time`. Nobody issued a view; commands.log shows no

@@ -129,6 +129,28 @@ def line_head(ctx: Ctx) -> str:
             + f" hb {fmt_age(ctx.hb_age)}" + plan_flag(ctx))
 
 
+def line_phase(s: dict, hint: bool = False) -> str:
+    """BUG-301 (Run 15 Drillchamber: P0 for six game years and nothing said which deliverable held it): state phw as
+    'phase P0: waits for farms, workshops Still (fortcore 2 impossible: why -> waived)'; '' when nothing holds or was
+    waived. hint: the phase.waive command for a deliverable that cannot be made (doctor)."""
+    w = s.get("phw")
+    if not isinstance(w, dict) or not (w.get("wait") or w.get("waived")):
+        return ""
+    wait = [str(x) for x in w.get("wait") or []]
+    wv = []
+    for x in w.get("waived") or []:
+        k, _, why = str(x).partition(": ")
+        wv.append(f"{k} impossible: {why} -> waived" if why else f"{k} -> waived")
+    out = f"phase {s.get('phase', '?')}: " + (f"waits for {', '.join(wait)}" if wait else "deliverables met")
+    if wv:
+        out += f" ({'; '.join(wv)})"
+    if hint and wait:
+        tpl = wait[0].split(" ")[0]
+        out += (f"; one that can never be made (bp sites {tpl}: 0 ranked): dfllm cmd phase.waive "
+                f"'{{\"tpl\":\"{tpl}\",\"why\":\"<what makes it impossible>\"}}'")
+    return out
+
+
 def plan_flag(ctx: Ctx) -> str:
     """FR-86 (Run 14: plan.json of y503 in y708, 190 YEAR_REVIEW wakes, no apply): ' | PLAN STALE: applied y503, now y708'
     once the applied plan is more than a year old, ' | PLAN NONE' while none was ever applied, ' | PLAN MINIMAL' while the
@@ -1125,7 +1147,7 @@ def status_text(save_dir: Path) -> str:
         # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first.
         # BUG-212 (live round 3): PLAYBOOK 9.3 reads the proj line: rank 1 too, its first two projects (brief has three)
         lines += [(2, line_unready(ctx, cmds=False)), (1, line_r0_cmd(ctx)), (1, line_hosp_retire(ctx)),
-                  (1, line_sched(ctx, "care"))]
+                  (1, line_sched(ctx, "care")), (2, clip(line_phase(ctx.s), 60))]      # BUG-301
         lines += curse_items(ctx) + alarm_items(ctx) + pop_items(ctx) + supply_items(ctx) + [(3, line_cavern(ctx))]   # FR-98
         s0 = (ctx.s.get("care") or {}).get("s0")
         if isinstance(s0, dict) and s0.get("n"):
@@ -1150,6 +1172,9 @@ def sec_plan(ctx: Ctx) -> list[str]:
     season = (ctx.s.get("t") or {}).get("season", 0)
     out = [f"plan y{p['year']} target {p['phase_target']} option {pol['option']} ceiling {pol['pop_ceiling']}"
            f" beauty {pol['beauty']}"]
+    ph = line_phase(ctx.s)                     # BUG-301: what holds the phase below the target
+    if ph:
+        out.append(" " + ph)
     for i, se in enumerate(p["seasons"]):
         if i < season or not se["build"]:
             continue

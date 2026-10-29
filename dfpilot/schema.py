@@ -102,7 +102,7 @@ ACT = {
 
 STATE_OWNERS = {
     "v": "kern", "seq": "kern", "ev": "kern", "t.*": "kern", "mode": "kern", "save": "kern", "k.*": "kern",
-    "phase": "runner", "proj": "runner", "sched.*": "runner", "adopt.*": "runner",
+    "phase": "runner", "phw.*": "runner", "proj": "runner", "sched.*": "runner", "adopt.*": "runner",
     "pop.cit": "sense", "pop.adults": "sense", "pop.soldiers": "sense",
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "pop.hold": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
@@ -848,6 +848,9 @@ VERB_ARGS: dict[str, Obj] = {
     "bp.place": Obj(req={"tpl": TPL, "site": Str(ID_RE)},
                     opt={"p": Obj(extra=SCALAR), "prio": Int(1, 7)}, extra=SCALAR),
     "bp.cancel": Obj(req={"proj": ID}, opt={"undo": Bool()}),
+    # BUG-300: a deliverable of the current phase that cannot be made (tpl = its template, `workshops` or the kind;
+    # stage for a staged template), waived with the reason
+    "phase.waive": Obj(req={"tpl": Str(r"^[a-z_0-9]{1,24}$"), "why": Str(maxbytes=80)}, opt={"stage": Int(1, 9)}),
     "drill": Obj(opt={"why": Str(maxbytes=200)}),
     "snapshot": Obj(opt={"bbox": BBOX, "purpose": Str(enum=["audit", "sites", "debug"])}),
     "audit": Obj(req={"snap": ID, "ok": Bool(), "fails": Arr(Str(maxbytes=80), hi=50), "min_traps": NAT,
@@ -918,7 +921,7 @@ VERB_ARGS: dict[str, Obj] = {
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "plan.reload": ("kern", None, False), "bp.place": ("runner", None, False),
-    "bp.cancel": ("runner", None, False), "drill": ("drill", ["PEACE"], False),
+    "bp.cancel": ("runner", None, False), "phase.waive": ("runner", None, False), "drill": ("drill", ["PEACE"], False),
     "snapshot": ("snapshot", None, False), "audit": ("readiness", None, False),
     "popcap.lower": ("readiness", None, False), "tempo.lower": ("arbiter", None, False),
     "popcap.raise": ("readiness", None, False), "popcap.set": ("readiness", None, False),     # BUG-293
@@ -1041,6 +1044,8 @@ STATE = Obj(
          # BUG-066 / FR-76 (runner): workshops that stand, adopted into the manifest (new) and pruned from it (gone);
          # standing stockpiles, wells, beds, doors (counts); rec = a reclaimed fort (>= runner.reclaim.min_ws adopted at
          # the first scan); miss = the mandatory workshops of a reclaimed fort that nothing builds yet
+         # BUG-301: what holds the phase (deliverables not met) and the waived ones ('farms: why', BUG-300)
+         "phw": Obj(opt={"wait": Arr(Str(maxbytes=40), hi=4), "waived": Arr(Str(maxbytes=100), hi=4)}),
          "adopt": Obj(req={"ws": NAT, "new": NAT},
                       opt={"gone": NAT, "stock": NAT, "wells": NAT, "beds": NAT, "doors": NAT, "rec": FLAG,
                            "miss": Arr(Str(maxbytes=24), hi=8)}),
@@ -1350,7 +1355,10 @@ PERSIST_PROJECTS = Obj(req={"v": Const(V), "list": Arr(Obj(req={
     "created": TICK, "done": FLAG, "orders_done": FLAG}), hi=64)})
 PERSIST_PLAN = Obj(req={"v": Const(V), "plan": AnyOf(Null(), PLAN), "phases": AnyOf(Null(), PHASES),
                         "loaded": TICK})
-PERSIST_PHASE = Obj(req={"v": Const(V), "phase": PHASE, "since": TICK, "done": Arr(PHASE, hi=8)})
+PERSIST_PHASE = Obj(req={"v": Const(V), "phase": PHASE, "since": TICK, "done": Arr(PHASE, hi=8)},
+                    # BUG-300: the waived deliverables (key, reason, phase, tick, who: kernel, follow, player)
+                    opt={"waive": Arr(Obj(req={"d": Str(maxbytes=40), "why": Str(maxbytes=80), "ph": PHASE, "t": TICK},
+                                          opt={"by": Str(maxbytes=16)}), hi=8)})
 PERSIST_MODE = Obj(req={"v": Const(V), "mode": MODE, "since": TICK, "why": Str(maxbytes=200), "prev": MODE})
 PERSIST_DRILL = Obj(req={"v": Const(V), "streak_fail": NAT, "last": Arr(Obj(req={
     "tick": TICK, "pass": FLAG, "raised": Int(-1), "worn": PCT, "outside": NAT, "dbl": NAT,

@@ -312,6 +312,9 @@ Related: FR-xx, BUG-xx
 | [BUG-297](BUG-297-no-farm-site-after-the-soil-rule-and-no-farm-draft.md) | fixed (offline, live-untested) | high | Run 15c: no farm site after the soil rule (soil marks capped), no farm drafted | sites.py, rooms.py, snapshot.lua, plan.py |
 | [BUG-298](BUG-298-seal-door-outside-the-builders-burrow-untaken.md) | fixed (offline, live-untested) | high | Run 15c: a seal door outside the builders' burrow is never taken | economy.lua, runner.lua |
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
+| [BUG-300](BUG-300-phase-stays-p0-impossible-deliverable-never-waived.md) | fixed (offline, live-untested) | high | Run 15: phase stays P0 for years, an impossible deliverable (farms, 0 sites) is never waived | runner.lua, wake.py, schema.py |
+| [BUG-301](BUG-301-no-line-names-the-deliverable-that-holds-the-phase.md) | fixed (offline, live-untested) | medium | Run 15: no status/brief/doctor line names the deliverable that holds the phase | runner.lua, brief.py, doctor.py |
+| [BUG-302](BUG-302-plan-propose-drafts-farms-with-0-farm-sites.md) | fixed (offline, live-untested) | medium | Run 15d: plan propose drafts farms@S1 with 0 farm sites | plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
