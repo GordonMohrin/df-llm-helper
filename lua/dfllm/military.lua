@@ -2205,9 +2205,12 @@ local function so_begin(K, key, s, order, meta)
                 arrived = old and old.arrived or false, unseen = 0, mode = K.mode(), w0 = nil}
   if order.kind == 'kill' then
     rt.so[key].tgt = rt.so[key].tgt or unit_xyz(order.units[1])
-    -- BUG-169: every target of the kill order (so.ids keeps the living ones), for the end event
-    local all = {}
-    for i, id in ipairs((old and old.ids0) or order.units or {}) do all[i] = id end
+    -- BUG-169: every target of the kill order (so.ids keeps the living ones), for the end event; a new kill order on the
+    -- running sortie adds its targets to the earlier ones
+    local all, has = {}, {}
+    for _, l in ipairs({(old and old.kind == 'kill' and old.ids0) or {}, order.units or {}}) do
+      for _, id in ipairs(l) do if not has[id] then has[id], all[#all + 1] = true, id end end
+    end
     rt.so[key].ids0 = all
   end
   if M.every.ticks > M.SO_EVERY then M.every = {ticks = M.SO_EVERY} end

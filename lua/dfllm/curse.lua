@@ -310,6 +310,7 @@ end
 -- published (M.view), from the phase kept here, not frozen at the time the view was built
 local function build_view(K, c, cur)
   local n, tfn = counts(cur)
+  S.built = true                     -- BUG-167: a view was built this boot (nil before: unknown, not 'nobody')
   if n + tfn == 0 then S.view = nil; return end
   local view = {n = n, tf = tfn, ids = (ids_of(cur, c.curse_ids or 8))}
   if cur.dead > 0 then view.dead = cur.dead end
@@ -650,6 +651,13 @@ function M.view(K)
   local ok, now = pcall(function() return K.now().tick end)
   if ok and math.type(now) == 'integer' then out.mo, out.mi = M.moon(now, vm.cycles, vm.mt) end
   return out
+end
+
+-- BUG-167 (reflex's TRANSFORM ack default): the citizens in were-form now; nil while no view was built since the boot
+-- (care has not run yet after a reload: unknown, so the default stays)
+function M.tf_now()
+  if not S.built then return nil end
+  return S.view and math.tointeger(S.view.tf) or 0
 end
 
 ---------------------------------------------------------------- inspect

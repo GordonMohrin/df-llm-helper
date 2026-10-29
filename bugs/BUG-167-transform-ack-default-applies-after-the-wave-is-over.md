@@ -10,7 +10,8 @@ dwarf form", 7,500-15,000 ticks after the wave was dead. ack_step applies a defa
 
 ## Fix
 When the TRANSFORM default would apply, reflex asks `care.curse_tf` (the cursed citizens in were-form in care's curse view). 0 = no default
-(done 2, kern.log says why); no answer (care off) keeps the default.
+(done 2, kern.log says why); no answer (care off) keeps the default. Review: `curse.tf_now` is nil until care built its curse view
+after the boot (a reload before care's first run is unknown, not 'nobody'), so the default stays then too.
 
 ## Tests
 `tests/lua/test_bug167_transform.lua` (the no-were case and curse_tf fail on b805745; the were-form and no-care cases pin the default).

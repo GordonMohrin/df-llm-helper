@@ -11,9 +11,10 @@
   (n_alt = the folder's last event), alarm.txt deleted; the clock-back marker says `kind=clock`; `K.reset = {kind, n_alt}` for the modules'
   init (BUG-165). (2) reflex init: `M.irq_keep` drops copies by n, interrupts after the clock, and done ones older than `M.IRQ_STALE` (a game
   month) or after a reset; defcon counts done 0 as open, done 1 only while a lockdown holds, done 2 never; init writes alarm.txt (BUG-166).
-  (3) ack_step: a TRANSFORM gets no default when `care.curse_tf` (were-forms in care's curse view) is 0 (BUG-167). (4) record(): one duplicate
+  (3) ack_step: a TRANSFORM gets no default when `care.curse_tf` (were-forms in care's curse view) is 0; nil before care built the view
+  after a boot keeps the default (BUG-167). (4) record(): one duplicate
   loop (BUG-168). (5) lone_picture `in_ids`; lone_step passes only those to `military.kill_lone`, which keeps only census zn 2 ids ("the target
-  is not inside the fort"); a kill sortie keeps all targets (`so.ids0`): `dead` names them all, other ends add `d.dead` (BUG-169).
+  is not inside the fort"); a kill sortie keeps all targets (`so.ids0`, a later kill order on it adds its own): `dead` names them all, other ends add `d.dead` (BUG-169).
 - **Contracts:** TIMELINE_RESET optional `kind` (clock | foreign), SORTIE optional `dead` (ia); CONTRACTS appendix regenerated. No new event,
   verb, config key or RULES row.
 - **Tests (fail on b805745):** tests/lua/test_bug165_166_boot.lua, test_bug167_transform.lua (two of three; the others pin the default),

@@ -59,6 +59,17 @@ T.test('BUG-167: with a citizen in were-form the default still applies; without 
   W2.K.emit('TRANSFORM', 'A', 'Oddom Letmoscog turned into a werecavy', {n = 1, dir = 'beast', unit = 7})
   S.run(W2, 9 * 140)
   T.eq(#lockdowns(W2), 1, 'no care module: the cause is unknown, the default stays')
+  TF = nil                                           -- care has not built its curse view since the boot
+  local W3 = setup('tfnil', true)
+  W3.K.emit('TRANSFORM', 'A', 'Oddom Letmoscog turned into a werecavy', {n = 1, dir = 'beast', unit = 7})
+  S.run(W3, 9 * 140)
+  T.eq(#lockdowns(W3), 1, 'no curse view yet: unknown, the default stays')
+end)
+
+T.test('BUG-167: curse.tf_now is nil until a view was built after the reset, then counts the were-forms', function()
+  local CU = require('dfllm.curse')
+  CU.reset()
+  T.eq(CU.tf_now(), nil, 'after a reload, before care ran: unknown (not 0)')
 end)
 
 T.test('BUG-167: care.curse_tf counts the were-forms of the curse view (0 without one)', function()
@@ -67,6 +78,8 @@ T.test('BUG-167: care.curse_tf counts the were-forms of the curse view (0 withou
   df.creature_raw = {find = function(id) return ({[1] = {name = {[0] = 'dwarf'}, creature_id = 'DWARF'}})[id] end}
   for i = 1, 3 do W.unit(i).race = 1 end
   W.unit(2)._m.name = 'Kel Becordastot, Manager'
+  T.eq(care.curse_tf(W.K), nil, 'before care ran: unknown')
+  W.run(3)
   T.eq(care.curse_tf(W.K), 0, 'nobody cursed')
   W.event('REPORT', {type = 'CARAVAN_ARRIVAL', text = 'Kel Becordastot, Manager has transformed into a werecavy!'})
   W.run(3)
