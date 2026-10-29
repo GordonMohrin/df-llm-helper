@@ -143,7 +143,17 @@ T.test('FR-76: a reclaimed fort without a Carpenters and Craftsdwarfs workshop g
   H.runs(W, 2 * 6)
   T.eq(#W.find_events('PROJECT_REQUEST'), 1, 'one request per cooldown (7 days)')
   H.runs(W, 2 * 3)
+  T.eq(#W.find_events('PROJECT_REQUEST'), 1, 'BUG-184: the game cooldown alone is not enough: req_wall_s (900 s) too')
+  W.ms = W.ms + 900 * 1000
+  H.runs(W, 1)
   T.eq(#W.find_events('PROJECT_REQUEST'), 2, 'asked again after the cooldown while they are missing')
+  -- BUG-184 (live i4: the request every 9-10k ticks, about a minute, with nobody acting): the next repeat waits twice
+  W.ms = W.ms + 900 * 1000
+  H.runs(W, 2 * 8)
+  T.eq(#W.find_events('PROJECT_REQUEST'), 2, 'the second repeat waits 14 days and 1800 s')
+  W.ms = W.ms + 900 * 1000
+  H.runs(W, 2 * 7)
+  T.eq(#W.find_events('PROJECT_REQUEST'), 3)
   shop('Carpenters', 21, 5, 10)
   shop('Craftsdwarfs', 25, 5, 10)
   H.runs(W, 4)
@@ -216,6 +226,21 @@ T.test('FR-76: a fortcore stage 2 that finishes while stage 1 never ran is not c
   H.place(W2, 'f2', stage_doc(2, 40))
   H.runs(W2, 3)
   T.eq(W2.K.persist.get('m.runner').hist.fortcore.ps, 2, 'zones in the manifest: stage 1 ran in an older kernel')
+end)
+
+T.test('BUG-181: a pending workshops project holds back only the types it builds: one with skip=Masons (its manifest ' ..
+       'lists Carpenters only) leaves the Craftsdwarfs asked for (live i4: no request at all)', function()
+  local W = fresh{tag = 'mandq'}
+  shop('Masons', 9, 5, 10); shop('Kitchen', 13, 5, 10); shop('Still', 17, 5, 10)
+  H.place(W, 'wsq', H.dig_doc(1, {tpl = 'workshops', class = 'infra', params = {skip = 'Craftsdwarfs'}, x = 40, label = 'dig',
+                                  manifest = {v = 2, workshops = {{type = 'Carpenters', pos = {42, 11, 100}}}}}))
+  H.runs(W, 2 * 5)
+  T.eq(runner.pending(W.K, 'workshops'), 1)
+  local ev = W.find_events('PROJECT_REQUEST')
+  T.eq(#ev, 1, 'old code: nothing asked while any workshops project is pending')
+  T.eq({ev[1].d.why, ev[1].d.types, ev[1].d.n}, {'mandatory', {'Craftsdwarfs'}, 1}, 'the Carpenters are on their way')
+  local set, all, n = runner.pending_types(W.K, 'workshops')
+  T.eq({set.Carpenters, all, n}, {true, false, 1})
 end)
 
 T.done()

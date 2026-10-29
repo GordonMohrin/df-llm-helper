@@ -751,6 +751,14 @@ T.test('BUG-133: a ghost with a memorial (loose, in a build job, placed) or an o
   T.eq(cs[1].args[1].amount_total, 1, 'one blank slab: only ghost 4 wants one')
 end)
 
+-- BUG-181: a pending workshops project (the runner's persisted list and doc) whose manifest lists the types (nil: none)
+local function wsproj(W, id, types)
+  local ws = {}
+  for i, t in ipairs(types or {}) do ws[i] = {type = t, pos = {40 + 4 * i, 10, 100}} end
+  W.K.persist.set('projects', {list = {{id = id, tpl = 'workshops', stage = 1, pct = 0}}})
+  W.K.persist.set('bp.' .. id, {v = 2, tpl = 'workshops', manifest = types and {v = 2, workshops = ws} or {v = 2}})
+end
+
 local function slabreq(W)
   local r = {}
   for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.why == 'slabs' then r[#r + 1] = e end end
@@ -779,10 +787,52 @@ T.test('BUG-133: no mason\'s workshop: kern.log says why (once), PROJECT_REQUEST
   local W3 = world{ghosts = 3, boulders = 40}
   days(W3, 2)
   T.eq(#slabreq(W3), 0, 'the masons stand')
-  -- review: a workshops project already queued (paused by the rebuild policy) is not asked for again
-  local W4 = world{ghosts = 3, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 1}}
+  -- review: a workshops project already queued (paused by the rebuild policy) is not asked for again. BUG-181: one that
+  -- builds the Masons (its doc's manifest lists them)
+  local W4 = world{ghosts = 3, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 1},
+                   setup = function(W) wsproj(W, 'wsm', {'Masons', 'Craftsdwarfs'}) end}
   days(W4, 2)
   T.eq(#slabreq(W4), 0, 'a workshops project is queued')
+  T.eq(W4.inbox('inspect', {what = 'orders'}).data.slabs.asked, 'queued')
+end)
+
+T.test('BUG-181: a pending workshops project that does NOT build the Masons (skip=Masons) holds no slab request back; ' ..
+       'one whose doc lists no workshop (unknown) still does', function()
+  local W = world{ghosts = 1, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 1},
+                  setup = function(W) wsproj(W, 'wsk', {'Craftsdwarfs', 'Jewelers'}) end}
+  days(W, 2)
+  local ev = slabreq(W)
+  T.eq(#ev, 1, 'old code: asked "queued", no request (live i4)')
+  T.eq(ev[1].d.types, {'Masons'})
+  local W2 = world{ghosts = 1, boulders = 40, shops = {'Carpenters'}, pending = {workshops = 1},
+                   setup = function(W) wsproj(W, 'wsu', nil) end}
+  days(W2, 2)
+  T.eq(#slabreq(W2), 0, 'a project of unknown types may build them')
+end)
+
+T.test('BUG-182: a standing ConstructSlab order nobody can work (no Masons) still says "no Masons" in kern.log and ' ..
+       'inspect orders (live i4: order 55 stood, n = 0, the reason was never said)', function()
+  local W = world{ghosts = 1, boulders = 40, shops = {'Carpenters'},
+                  setup = function(W) order(W, {job = 'ConstructSlab', left = 1}) end}
+  days(W, 1)
+  T.eq(#acts(W, 'workorder', 'dfllm:slab'), 0, 'the standing order covers the ghost')
+  T.eq(W.inbox('inspect', {what = 'orders'}).data.slabs.why, 'no Masons')
+  T.ok(logged(W, 'slabs: no ConstructSlab for 1 ghosts'), 'the reason in kern.log')
+end)
+
+T.test('BUG-183: the "EngraveSlab ... removed" warn follows the ORDER_STUCK cadence: once, then debug lines with a count ' ..
+       '(live i4: 35 identical warn lines, one per economy pass)', function()
+  local W = world{boulders = 40}
+  for _ = 1, 4 do engrave(W, 1); days(W, 1) end
+  local warn, debug = 0, 0
+  for _, l in ipairs(W.logs) do
+    if tostring(l.msg):find('EngraveSlab: ', 1, true) and tostring(l.msg):find('removed', 1, true) then
+      if l.level == 'warn' then warn = warn + 1 elseif l.level == 'debug' then debug = debug + 1 end
+    end
+  end
+  T.eq(warn, 1, 'old code: a warn on every pass')
+  T.ok(debug >= 3, 'the later removals at debug: ' .. debug)
+  T.eq(#stuck(W, 'EngraveSlab'), 1)
 end)
 
 T.done()

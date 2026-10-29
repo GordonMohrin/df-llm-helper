@@ -36,6 +36,9 @@ M.CFG = {
   blocked_a = 2 * DAY,   -- blocked longer than this -> PROJECT_BLOCKED (A), once per episode
   dry_every = 2 * DAY,   -- dig measurement by quickfort dry run when there is no snapshot module
   keep_every = 3 * DAY, req_cool = 7 * DAY,
+  -- BUG-184: an unanswered mandatory workshops request backs off: the k-th repeat of the same types waits
+  -- req_cool * 2^(k-1) game ticks and req_wall_s * 2^(k-1) wall seconds, k at most req_backoff
+  req_wall_s = 900, req_backoff = 4,
   lost_pct = 10,         -- buildings still missing after one re-apply that let a stage pass (%)
   remake_max = 4,        -- Run 11: more re-applies of a seal stage whose lost pieces economy can make (M.remake)
   -- BUG-022 (Run 10: fortcore stage 2 ended build_lost for two game years, B1 and its levers never built): a
@@ -4012,9 +4015,10 @@ function Q.sync(K, t)
   ad.miss = miss
   if ad.rec == 1 and #miss > 0 then
     S.rt.wmiss = int(S.rt.wmiss) or t
-    if K.mode() == 'PEACE' and t - S.rt.wmiss >= rc.ask and M.pending(K, 'workshops') == 0
-       and (not S.rt.req.wsm or t - S.rt.req.wsm >= M.CFG.req_cool) then
-      S.rt.req.wsm = t
+    -- BUG-181: a pending workshops project holds back only the types it builds (live i4: skip=Masons held the Masons back)
+    local want = M.uncovered(K, 'workshops', miss)
+    if K.mode() == 'PEACE' and t - S.rt.wmiss >= rc.ask and #want > 0 and M.req_due(K, 'wsm', want) then
+      miss = want
       local names = table.concat(miss, ', ')
       K.log('warn', 'reclaimed fort without %s: workshops project requested (dfllm bp sites workshops; the fort cannot ' ..
             'make coffins, crafts or meals without them)', names)
@@ -4023,6 +4027,7 @@ function Q.sync(K, t)
     end
   else
     S.rt.wmiss = nil
+    if type(S.rt.req.wsm) == 'table' then S.rt.req.wsm.k = 0 end            -- BUG-184: a new episode starts unbacked
   end
   dirty()
 end
@@ -4879,6 +4884,58 @@ function M.pending(K, tpl)
   local n = 0
   for _, P in ipairs(S.pd and S.pd.list or {}) do if P.tpl == tpl and Q.live(K, P) then n = n + 1 end end
   return n
+end
+
+-- BUG-181: the workshop types the pending (live) projects of tpl build, from their docs' manifest.workshops: set, all
+-- (true when a pending project's doc lists no workshop: it may build anything), n (the pending projects)
+function M.pending_types(K, tpl)
+  local out, all, n = {}, false, 0
+  for _, P in ipairs(S.pd and S.pd.list or {}) do
+    if P.tpl == tpl and Q.live(K, P) then
+      n = n + 1
+      local d = doc(K, P.id)
+      local m = type(d) == 'table' and type(d.manifest) == 'table' and d.manifest.workshops
+      if type(m) ~= 'table' or #m == 0 then all = true
+      else
+        for _, w in ipairs(m) do if type(w) == 'table' and type(w.type) == 'string' then out[w.type] = true end end
+      end
+    end
+  end
+  return out, all, n
+end
+
+-- BUG-181: the types of list no pending project of tpl builds (all of them while none is pending)
+function M.uncovered(K, tpl, list)
+  local set, all = M.pending_types(K, tpl)
+  local out = {}
+  if all then return out end
+  for _, t in ipairs(list) do if not set[t] then out[#out + 1] = t end end
+  return out
+end
+
+-- BUG-184 (live i4: 'reclaimed fort without Masons, Still, Kitchen' and its PROJECT_REQUEST every 9-10k ticks, about a
+-- minute at 145 ticks/s, with follow off): whether request key may go out for ids now. A changed set waits req_cool;
+-- the k-th repeat of the same set waits req_cool * 2^(k-1) ticks AND req_wall_s * 2^(k-1) wall seconds (k <= req_backoff).
+-- Records the request when due. S.rt.req[key]: {t, w, k, ids} (an old plain tick counts as k 1)
+function M.req_due(K, key, ids)
+  local rec = S.rt.req[key]
+  if type(rec) == 'number' then rec = {t = rec, k = 1, ids = ids} end
+  local T0 = K.now()
+  local k, same = 0, false
+  if type(rec) == 'table' then
+    k = int(rec.k) or 1
+    same = table.concat(type(rec.ids) == 'table' and rec.ids or {}, ',') == table.concat(ids, ',')
+    if not same or k < 1 then
+      if (T0.tick or 0) - (int(rec.t) or 0) < M.CFG.req_cool then return false end
+    else
+      local f = 1 << (math.min(k, int(M.CFG.req_backoff) or 4) - 1)
+      if not CAD.elapsed(rec, T0, M.CFG.req_cool * f, (M.CFG.req_wall_s or 0) * f) then return false end
+    end
+  end
+  local cp = {}
+  for i, v in ipairs(ids) do cp[i] = v end
+  S.rt.req[key] = {t = T0.tick, w = T0.wall, k = same and k + 1 or 1, ids = cp}
+  return true
 end
 
 -- BUG-058 (DECISIONS 9; Run 11: five farms projects 'build_lost, parked', one after the other, no soil): the projects of a
