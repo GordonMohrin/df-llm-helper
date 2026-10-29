@@ -1,7 +1,7 @@
 -- drill (WP6): the siege drill (DESIGN §3 DRILL, §4, §5.4). A drill is SIEGE without enemies: mode
 -- DRILL makes siege sound the civ alert (Kern+), send the squads to READY_STATION and raise the
 -- outer and inner bridges with real lever pulls (gate's single-pending invariant). At T+1,200 the
--- drill records its KPIs, then PEACE lowers the bridges again with the same invariant.
+-- drill records its KPIs, lowers the bridges again with the same invariant while still in DRILL (BUG-251), then PEACE.
 -- Pass: every outer/inner bridge up by T+900, worn >= 90 %, nobody outside Kern+ at T+1,200, 0 double toggles
 -- (DESIGN §11 R2, §14). Results go to persist `drill` (≤5), DRILL_RESULT (B) and, on exactly the 2nd
 -- consecutive failure, DRILL_FAIL (A, CONTRACTS §12); readiness reads them (R2).
@@ -28,6 +28,13 @@
 -- inner bridge, so with either role missing (readiness' no_outer / no_inner; a bridge seal replaced by wall + door is
 -- no gate) `drill.start`, the inbox verb and the automatic start all refuse with NOBRIDGE before they touch the mode:
 -- no alert, no recall, no FPS change. The refusals are counted (state ready.dref, once a game day) and logged once a day.
+-- BUG-251 (Run 15b Earthboat y374: soldier 24165 crushed by B1 going down after an automatic drill): the drill handed the
+-- lowering to PEACE, so B1 came down while the whole crowd walked home over it. Now the measurement at T+1,200 starts a
+-- restore phase: the mode stays DRILL (civ alert on, squads at their stations, the siege FPS cap held), gate.drill_end
+-- wants the outer/inner bridges down (those PEACE wants down) and PEACE comes only once they are down, or after RESTORE_MAX
+-- ticks. DRILL_RESULT comes then and says how long the restore took (d.restore, -1: not down in time or cut short) and why
+-- the drill ran (d.why: 'auto: retry', 'inbox:llm'). A bridge not up and not being pulled at T+900 is dropped
+-- (gate.drill_skip): it never rises late while the soldiers walk to their stations.
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')
 
@@ -52,6 +59,7 @@ M.RETRY_CAP = 100800     -- at most a season between retries
 M.RETRY_ABORT = 6000     -- 5 days after a drill a real threat interrupted
 M.SETTLE = 2400          -- no automatic drill in the first 2 days after a load
 M.KEEP = 5
+M.RESTORE_MAX = 1200     -- BUG-251: the drill's bridges must be down this many ticks after the measurement, else PEACE anyway
 local R1_CAP = 55
 
 local st      -- persisted m.drill: {v, t0, why, try, siege}
@@ -207,7 +215,7 @@ end
 ---------------------------------------------------------------- start / measure / end
 -- public (CONTRACTS §7): PEACE only, no danger, no trade session under way, one drill at a time
 function M.start(K, why)
-  if st.t0 then return false, 'a drill is running' end
+  if st.t0 or st.rs then return false, 'a drill is running' end
   local gap = M.gap(K)
   if gap then
     note_refusal(K, gap)
@@ -221,7 +229,7 @@ function M.start(K, why)
   if M.trading(K) then return false, 'a trade session is under way (the broker would be called home)' end
   local now = K.now().tick
   K.call('gate', 'reset_kpi')                     -- raise ticks and double toggles count from T0
-  st.t0, st.why, st.try, rt.home = now, cut(why or 'drill', 40), now, nil
+  st.t0, st.why, st.try, rt.home, rt.skip = now, cut(why or 'drill', 40), now, nil, nil
   rt.home0 = home_sample(K)                       -- who is outside at T0, and how far from the entry
   save(K)
   local ok, err = K.set_mode('DRILL', 'drill: ' .. st.why)
@@ -296,22 +304,58 @@ local function finish(K, now)
   rec.streak_fail = r.pass == 1 and 0 or rec.streak_fail + 1
   K.persist.set('drill', rec)
   local fl = table.concat(r.fails, ', ')
-  K.emit('DRILL_RESULT', 'B', string.format('drill %s: raised %d, outer %d (goal %d), worn %d%%, outside %d (%d walking home), dbl %d%s',
-         r.pass == 1 and 'passed' or 'failed', r.raised, x.outer, M.OUTER_GOAL, r.worn, r.outside, x.walking, r.dbl,
-         fl ~= '' and (' (' .. fl .. ')') or ''),
-         {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl,
-          walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers})
-  if r.pass == 0 and rec.streak_fail == 2 then
-    K.emit('DRILL_FAIL', 'A', string.format('drill failed %d times in a row: %s', rec.streak_fail, fl),
-           {streak = rec.streak_fail, fails = r.fails})
-  end
+  -- BUG-251: DRILL_RESULT waits for the restore (persisted: a reload mid-restore still reports it)
+  st.res = {msg = string.format('drill %s: raised %d, outer %d (goal %d), worn %d%%, outside %d (%d walking home), dbl %d%s',
+                                r.pass == 1 and 'passed' or 'failed', r.raised, x.outer, M.OUTER_GOAL, r.worn, r.outside,
+                                x.walking, r.dbl, fl ~= '' and (' (' .. fl .. ')') or ''),
+            d = {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl, why = st.why,
+                 walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers}}
+  if r.pass == 0 and rec.streak_fail == 2 then st.res.fail = {streak = rec.streak_fail, fails = r.fails, fl = fl} end
   st.t0, rt.home, rt.home0 = nil, nil, nil
+  st.rs = now
+  local okg, low = K.call('gate', 'drill_end')
+  st.rl = okg and type(low) == 'table' and low or {}
   save(K)
-  rt.ending = true
-  K.set_mode('PEACE', 'drill done')               -- gate lowers the bridges, siege ends the alert
-  rt.ending = false
-  M.every = {ticks = M.SLOW}
+  if #st.rl == 0 then M.restore_end(K, now, 'nothing to lower') end
   return r
+end
+
+-- BUG-251: the restore ends (why: 'down', 'timeout', 'nothing to lower', or 'mode X' when another mode cut it short):
+-- DRILL_RESULT (+ DRILL_FAIL on the 2nd failure in a row), then PEACE unless the mode already changed
+function M.restore_end(K, now, why)
+  local res = st.res or {msg = 'drill result lost', d = {}}
+  local ok = why == 'down' or why == 'nothing to lower'
+  local took = ok and math.max(0, now - (st.rs or now)) or -1
+  local low = table.concat(st.rl or {}, ',')
+  res.d.restore = took
+  local tail = why == 'nothing to lower' and '' or (ok and string.format('; %s down %d ticks later', low, took)
+               or string.format('; %s not down (%s)', low, why))
+  K.emit('DRILL_RESULT', 'B', (res.msg .. tail):sub(1, 200), res.d)
+  if res.fail then
+    K.emit('DRILL_FAIL', 'A', string.format('drill failed %d times in a row: %s', res.fail.streak, res.fail.fl),
+           {streak = res.fail.streak, fails = res.fail.fails})
+  end
+  if not ok then K.log('warn', 'drill: restore %s: %s still not down at PEACE', why, low) end
+  st.rs, st.rl, st.res = nil, nil, nil
+  save(K)
+  M.every = {ticks = M.SLOW}
+  if why:sub(1, 5) == 'mode ' then return end
+  rt.ending = true
+  K.set_mode('PEACE', ok and 'drill done' or 'drill done, restore ' .. why)   -- siege ends the alert
+  rt.ending = false
+end
+
+-- public (BUG-251): the drill measured and waits for its bridges to come down (mode DRILL)
+function M.restoring(K) return st.rs ~= nil end
+
+local function restore_step(K, now)
+  local all = true
+  for _, name in ipairs(st.rl or {}) do
+    local ok, s = K.call('gate', 'state', name)
+    if ok and (s == 'up' or s == 'moving') then all = false end
+  end
+  if all then M.restore_end(K, now, 'down')
+  elseif now - st.rs >= M.RESTORE_MAX then M.restore_end(K, now, 'timeout') end
 end
 
 local function abort(K, why)
@@ -371,7 +415,7 @@ end
 
 -- why an automatic drill is due now (1st value), else why it is held (2nd value, <= 24 chars; FR-65 status)
 local function check(K, now)
-  if st.t0 then return nil, 'running' end
+  if st.t0 or st.rs then return nil, 'running' end
   local d = danger(K)
   if d then return nil, d end
   if now - rt.boot < M.SETTLE then return nil, 'settling' end
@@ -421,7 +465,9 @@ function M.init(K)
   local p = K.persist.get('m.drill')
   p = type(p) == 'table' and p or {}
   st = {v = 2, t0 = int(p.t0), why = p.why, try = int(p.try), siege = int(p.siege), ref = int(p.ref),
-        rrec = type(p.rrec) == 'table' and p.rrec or nil, refp = int(p.refp)}
+        rrec = type(p.rrec) == 'table' and p.rrec or nil, refp = int(p.refp),
+        rs = int(p.rs), rl = type(p.rl) == 'table' and p.rl or nil,                 -- BUG-251: the restore phase
+        res = type(p.res) == 'table' and type(p.res.msg) == 'string' and type(p.res.d) == 'table' and p.res or nil}
   local d = K.persist.get('drill')
   rec = {v = 2, streak_fail = 0, last = {}}
   if type(d) == 'table' then
@@ -437,16 +483,34 @@ function M.init(K)
     end
   end
   rt = {boot = K.now().tick, ending = false}
-  M.every = {ticks = st.t0 and M.FAST or M.SLOW}
+  M.every = {ticks = (st.t0 or st.rs) and M.FAST or M.SLOW}
+end
+
+-- BUG-251: at T+900 the outer/inner bridges that are not up and not being pulled are dropped (no late raise)
+local function skip_late(K)
+  for _, name in ipairs(gate_bridges(K.manifest())) do
+    local ok, s = K.call('gate', 'state', name)
+    if ok and s ~= 'up' then
+      local okk, done = K.call('gate', 'drill_skip', name)
+      if okk and done then K.log('info', 'drill: %s not up at T+%d: its raise is dropped', name, M.RAISE_MAX) end
+    end
+  end
 end
 
 function M.step(K, budget, ctx)
   local now = K.now().tick
   local mode = K.mode()
+  if st.rs then
+    if mode ~= 'DRILL' then M.restore_end(K, now, 'mode ' .. mode) else restore_step(K, now) end
+    return
+  end
   if st.t0 then
     if mode ~= 'DRILL' then abort(K, 'mode ' .. mode); return end
     if now - st.t0 >= M.MEASURE then finish(K, now)
-    elseif not rt.home and now - st.t0 >= M.MEASURE - M.HOME_WINDOW then rt.home = home_sample(K) end
+    else
+      if not rt.skip and now - st.t0 >= M.RAISE_MAX then rt.skip = true; skip_late(K) end
+      if not rt.home and now - st.t0 >= M.MEASURE - M.HOME_WINDOW then rt.home = home_sample(K) end
+    end
     return
   end
   if mode == 'DRILL' then                         -- a drill without its record (lost persist): end it
@@ -473,6 +537,7 @@ end
 M.on.MODE = function(K, ev)
   if (ev.to == 'SIEGE' or ev.to == 'BREACH') then st.siege = ev.tick or K.now().tick; save(K) end
   if st.t0 and ev.from == 'DRILL' and not rt.ending then abort(K, ev.from .. '>' .. ev.to) end
+  if st.rs and ev.from == 'DRILL' and not rt.ending then M.restore_end(K, ev.tick or K.now().tick, 'mode ' .. ev.to) end
 end
 
 -- inbox `drill` (PEACE only, checked by kern)

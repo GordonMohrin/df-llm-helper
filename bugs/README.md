@@ -252,6 +252,10 @@ Related: FR-xx, BUG-xx
 | [BUG-235](BUG-235-rescue-never-lowers-outer-bridges-in-peace.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the rescue never lowered an outer bridge and demanded a sealed outside even in quiet PEACE | lua/dfllm/siege.lua, lua/dfllm/gate.lua, lua/dfllm/drill.lua |
 | [BUG-236](BUG-236-player-lever-down-silently-overridden.md) | fixed (offline, live-untested) | high | Run 15 Guildcleans: the player's lever down was accepted and then silently overridden | lua/dfllm/gate.lua |
 | [BUG-237](BUG-237-gate-cycles-up-down-with-drills-that-cannot-pass.md) | fixed (offline, live-untested) | medium | Run 15 Guildcleans: B1 cycled up/down with automatic drills that could not pass (O1 without a lever) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-251](BUG-251-drill-end-lowers-bridges-onto-the-crowd.md) | fixed (offline, live-untested) | critical | Run 15b Earthboat: the drill's end lowered B1 in PEACE onto the crowd walking home (soldier crushed) | lua/dfllm/drill.lua, lua/dfllm/gate.lua |
+| [BUG-252](BUG-252-pending-pull-ignores-unknown-census.md) | fixed (offline, live-untested) | high | Run 15b Earthboat: a pending pull went ahead while the census was unknown | lua/dfllm/gate.lua |
+| [BUG-253](BUG-253-no-warning-when-a-unit-steps-on-a-moving-bridge.md) | fixed (offline, live-untested) | medium | Run 15b Earthboat: no warning when a unit stepped onto a moving bridge (GATE_CRUSH_RISK) | lua/dfllm/gate.lua |
+| [BUG-254](BUG-254-status-says-drill-never-after-an-automatic-drill.md) | fixed (offline, live-untested) | low | Run 15b Earthboat: status said 'drill never' right after an automatic drill had run | dfpilot/brief.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
