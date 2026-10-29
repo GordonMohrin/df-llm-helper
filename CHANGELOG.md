@@ -28,14 +28,21 @@
   the close below the hatch + CAVERN_PLUG done, a half-done unplug, an untaken removal undone, the P6 deliverable),
   tests/test_fr98_caverns.py (6); updated pins: test_kern_misc.lua (module list), test_reflex.lua (door_forbid owners);
   runner_world.lua learns quickfort `n`, constructed stairs and hatch covers.
+- **Review fixes:** the recall also waits for other citizens in the cavern box or the shaft column (new
+  `snapshot.cave_citizens`; a hauler after the corpses is not walled in); a close before the muster forbids a hatch the
+  unplug built already (a siege while the lower wall is gone); a clean sweep keeps the P6 deliverable met when new beasts
+  come later (`cavern.cleared`); the phase gate compares numbers (P10 > P6). 4 more tests in test_fr98_cavern.lua (each
+  fails on c43431f).
 - **Live check:** in a P6 fort with a plugged shaft (`dfllm events --type CAVERN_PLUG` done) and a beast in sight below:
   `dfllm cmd inspect what=cavern` (shafts, beasts, the first gate), status `caverns: sweep wait: <gate>`. With the plan key on
   and the gates green: CAVERN_SWEEP_START, `inspect projects` shows `us<tick>` (unplug): uncertain whether quickfort `n`
   designates the plug walls (the tile shows a dig designation), whether a miner reaches the lower wall from the rebuilt top,
   and whether the hatch cover stands on the constructed down stair; read kern.log `cavern sweep` lines and the u* stage
   labels. Then the hatch sheet shows forbidden at muster and free at kill, squad A's orders on the squads screen, DEATH events
-  of the beasts, CAVERN_SWEEP_STEP recall/close, a `pl<tick>` plug and CAVERN_PLUG done, and CAVERN_SWEEP_END (killed, lost,
-  sealed 1). If a siege comes during the sweep: the squad leaves at once and END says siege.
+  of the beasts, CAVERN_SWEEP_STEP recall/close, a `pl<tick>` plug (watch whether a miner removes the stair below the
+  forbidden hatch; if not, the plug gives up the lower wall after plug_wait and walls the top in PEACE) and CAVERN_PLUG done,
+  and CAVERN_SWEEP_END (killed, lost, sealed 1). A citizen left in the cavern holds the recall (STEP `... other citizen still
+  below`). If a siege comes during the sweep: the squad leaves at once and END says siege.
 ## Run 15 manager deadlock: held orders as workshop tasks, the office in P0 with its zone first, a clear status line (BUG-231..233, 2026-10-29; offline, live-untested)
 - **Why:** live Guildcleans (pop 20, y372-y373): the manager had no office zone, so DF's manager validated none of the 22 work orders
   (doors, blocks, food) for ~330 days; the office project c1a1873b86d5b80201 waited for a chair and a table that only those orders

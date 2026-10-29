@@ -1569,4 +1569,22 @@ function M.cave_units(K, box)
   return out, great
 end
 
+-- FR-98 review (cavern.lua's recall): the living citizens inside box {x0, y0, z0, x1, y1, z1} or in the shaft column
+-- col {x, y, z_top} below its top (from z0 on): their ids, sorted. The player always sees his own citizens (units screen).
+function M.cave_citizens(K, box, col)
+  if type(box) ~= 'table' or #box ~= 6 or type(col) ~= 'table' then return {} end
+  local U, out = dfhack.units, {}
+  for _, u in ipairs(df.global.world.units.active) do
+    local ok, hit = pcall(function()
+      if not U.isCitizen(u) or U.isDead(u) then return false end
+      local x, y, z = U.getPosition(u)
+      if not x or z >= col[3] or z < box[3] then return false end
+      return (x == col[1] and y == col[2]) or (x >= box[1] and x <= box[4] and y >= box[2] and y <= box[5] and z <= box[6])
+    end)
+    if ok and hit then out[#out + 1] = u.id end
+  end
+  table.sort(out)
+  return out
+end
+
 return M

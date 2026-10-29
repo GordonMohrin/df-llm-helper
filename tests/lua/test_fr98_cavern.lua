@@ -52,6 +52,7 @@ local function world(o)
   function mil.release(K, key) W.rec.release = W.rec.release + 1; return true end
   local snap = {name = 'snapshot', every = {ticks = 100}}
   snap.cave_units = require('dfllm.snapshot').cave_units      -- the real reader (visible units only)
+  snap.cave_citizens = require('dfllm.snapshot').cave_citizens  -- the real reader (review fix: nobody walled in)
   function snap.tile(K, x, y, z) if x == S0[1] + 1 and y == S0[2] and z == S0[3] then return {c = '.'} end return {c = '#'} end
   local rf = {name = 'reflex', every = {ticks = 10}}
   function rf.holding() return '' end
@@ -239,6 +240,54 @@ T.test('FR-98: state cav validates and stays small; inspect what=cavern names th
   local r = W.inbox('inspect', {what = 'cavern'})
   T.ok(r.ok, r.msg)
   T.eq({r.data.ph, r.data.shafts[1].beasts, r.data.shafts[1].ids}, {'open', 2, {201, 202}})
+end)
+
+T.test('FR-98 review: a citizen in the cavern box keeps the shaft open; soldiers far away on a level above the top do not',
+       function()
+  local W = world()
+  W.add_unit{id = 301, citizen = true, pos = {12, 14, 94}}       -- a hauler went down after the corpses
+  W.add_unit{id = 302, citizen = true, pos = {80, 80, 90}}       -- a deep fort room far off: not in the cavern box
+  to_kill(W)
+  W.kill(201); W.kill(202)
+  W.run(1000, {skip = 50})
+  T.eq({cav(W).st, W.rec.close}, {'recall', 0}, 'a citizen below: nobody is walled in')
+  W.run(2400, {skip = 50})
+  local st = steps(W)
+  T.eq(st[#st], 'recall')
+  local ev = W.find_events('CAVERN_SWEEP_STEP')
+  T.ok(ev[#ev].msg:find('0 soldiers, 1 other citizen still below', 1, true), ev[#ev].msg)
+  W.move(301, 12, 12, 100)
+  W.run(200, {skip = 50})
+  T.eq(W.rec.close, 1, 'everybody up: walled')
+end)
+
+T.test('FR-98 review: a siege after the hatch stands but before the muster forbids it before the plug', function()
+  local W = world()
+  W.run(1300, {skip = 50})
+  W.hatch_built = true                 -- the hatch stands, the lower wall goes: the unplug is not done yet
+  W.K.set_mode('SIEGE', 'test')
+  W.run(100, {skip = 50})
+  T.eq({W.rec.close, forbids(W)}, {1, {{77, true}}})
+end)
+
+T.test('FR-99 review: a clean sweep keeps the P6 deliverable met when new beasts come later', function()
+  local W = world()
+  to_kill(W)
+  W.kill(201); W.kill(202)
+  W.run(1000, {skip = 50})
+  W.cav = 'done'
+  W.run(200, {skip = 50})
+  W.acc[1].st = 'done'
+  W.add_unit{id = 203, danger = true, pos = {15, 12, 93}}
+  W.run(1300, {skip = 50})
+  T.eq({cav(W).clr, cav(W).n}, {0, 1})
+  T.eq(W.mod.cleared(W.K), true)
+end)
+
+T.test('FR-98 review: the phase gate compares numbers (P10 is past P6)', function()
+  local W = world{phase = 'P10'}
+  W.run(1300, {skip = 50})
+  T.eq(W.rec.open, 1)
 end)
 
 T.done()

@@ -14,7 +14,7 @@ Nothing ever opened a plug again.
 | open | the `unplug` project: u0.rm (quickfort dig `n`, remove construction), u0.stair `Cd`, u0.hatch `H`, then u1.rm `n`, u1.stair `Cx`. The top is rebuilt while the lower wall still seals the shaft | done; blocked or 4 months: close (why blocked) |
 | muster | the hatch is forbidden (`act.door_forbid`, which now also takes hatch covers). Squad A gets a held station order on a revealed floor beside the top (`military.hold_order`, so the posture leaves it alone) | half the squad there: the hatch opens, kill. 2 days: recall (why muster) |
 | kill | a held kill order on the visible beasts in the cavern box. The order is renewed as the picture changes | done (3 scans without a beast), losses (1 soldier), worn, great, timeout (20 days): recall |
-| recall | a station order. The shaft closes only when no living soldier is below the top, or after 5 x `recall_max` | close |
+| recall | a station order. The shaft closes only when no living soldier is below the top and no other citizen stands in the cavern box or the shaft column (`snapshot.cave_citizens`), or after 5 x `recall_max` | close |
 | close | hatch forbidden, the squad released, `runner.sweep_close`. The unplug leaves the list and its pending removal designation is undone. A `plug` project walls the shaft: lower tile first, the stair removed with `n`, then `Cw`. CAVERN_PLUG done follows when the walls stand | CAVERN_SWEEP_END (A): why, killed, lost, left, sealed |
 
 SIEGE, BREACH, RECOVERY or a drill at any point: the kernel's defense wins. The squad is released at once, so its posture takes
@@ -23,13 +23,15 @@ with why `siege`. ALERT is allowed: once the shaft is open, the beasts share the
 see them as usual (lockdown, PREDATOR).
 
 Safety: the plug walls are the seal. The hatch is the bypass while the shaft is open, forbidden whenever the squad is not
-fighting. The squad is never walled in. A great danger (forgotten beast, titan, building destroyer) never starts a sweep and
+fighting, and also forbidden when a sweep closes before its muster (a siege while the unplug is half done). The squad
+and the citizens in the cavern box are never walled in (only after 5 x `recall_max`, named in a STEP). A great danger (forgotten beast, titan, building destroyer) never starts a sweep and
 ends a running one: those are Gordon's decision. `runner.cavern_open` (readiness R0 `caverns`) counts a shaft the sweep opened
 as open once no sweep runs on it. A shaft left open by a lost sweep (persist `m.cavern` gone) is walled again at the next look.
 
 ## Plan phases (FR-99)
 - `plans/year1.json` P6 has the deliverable `sweep` (runner CHECK -> `cavern.cleared`: no sweep running, and at the last look
-  no plugged shaft had a beast in sight, or none is known). With the module absent, the deliverable is skipped.
+  no plugged shaft had a beast in sight, or none is known, or a clean sweep (why done, walled again) ended once: new
+  beasts later do not take the deliverable back). With the module absent, the deliverable is skipped.
 - Plan key `caverns: {sweep: bool}`. `plan propose` sets it once phase_target reaches a phase with the deliverable, and keeps it
   from the previous plan. While P6 still needs approval, the notes say to set it. `plan check`: an ERROR before P6; warnings
   for R0, the army's worn %, no plugged shaft, and a P6+ plan without it while beasts are in sight.

@@ -45,7 +45,7 @@ M.RUN = {open = true, muster = true, kill = true, recall = true, close = true}
 M.DAY = 1200
 
 local st      -- persisted m.cavern {v, ph, acc, pos, bot, t0, tp, open, plug, ids0, tg, k, l, clear, ls, sg, why, hatch, sta,
-              -- cool, last, lk, ll}
+              -- cool, last, lk, ll, ok, rw}
 local rt      -- runtime: next look, the last wait reason, beasts seen, plugged shafts
 
 local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
@@ -153,7 +153,10 @@ local function end_sweep(K, why, sealed, extra)
   K.emit('CAVERN_SWEEP_END', 'A', cut(msg, 200), d)
   K.log(sealed and 'info' or 'warn', '%s', msg)
   K.flush()
-  st = {v = 1, ph = 'wait', cool = t + ((why == 'done' and sealed) and M.CFG.cool or M.CFG.cool_bad), last = why, lk = k, ll = l}
+  -- ok (review fix): a clean sweep (done, walled again) keeps the P6 deliverable met (M.cleared) when new beasts come later
+  local clean = why == 'done' and sealed
+  st = {v = 1, ph = 'wait', cool = t + (clean and M.CFG.cool or M.CFG.cool_bad), last = why, lk = k, ll = l,
+        ok = (clean or st.ok == 1) and 1 or nil}
   rt.next = t + M.CFG.look
   save(K)
 end
@@ -161,6 +164,9 @@ end
 -- the shaft is walled again: the hatch forbidden, the squad released, the plug queued
 local function to_close(K, why)
   st.why = st.why or why
+  -- review fix: a hatch the unplug built already is forbidden also when the sweep closes before its muster (a siege or a
+  -- block while the lower wall is gone: an unlocked hatch would join the cavern to the fort until the plug stands)
+  if not st.hatch and type(st.pos) == 'table' then st.hatch = M.hatch_at(st.pos) end
   lock(K, true)
   call(K, 'military', 'release', M.SQUAD)
   local ok, pid = call(K, 'runner', 'sweep_close', st.acc)
@@ -175,14 +181,22 @@ local function to_recall(K, why)
   go(K, 'recall', why)
 end
 
+-- who would be walled in: squad A's soldiers below the shaft top (anywhere: one may chase a beast far), and (review
+-- fix) every other citizen in the cavern box or the shaft column (a hauler after the corpses, a gatherer: the open
+-- hatch let them down; the player always sees his citizens); soldiers + citizens, citizens
 local function below(K)
+  if type(st.pos) ~= 'table' then return 0, 0 end
   local q = squad(K)
-  local n = 0
+  local n, seen = 0, {}
   for _, id in ipairs(q and q.ids or st.ids0 or {}) do
+    seen[id] = true
     local p = unit_pos(id)
-    if p and type(st.pos) == 'table' and p[3] < st.pos[3] then n = n + 1 end
+    if p and p[3] < st.pos[3] then n = n + 1 end
   end
-  return n
+  local c = 0
+  local ok, ids = K.call('snapshot', 'cave_citizens', M.box({s0 = st.pos, bot = st.bot}), st.pos)
+  for _, id in ipairs(ok and type(ids) == 'table' and ids or {}) do if not seen[id] then c = c + 1 end end
+  return n + c, c
 end
 
 local function start(K, a, b, q)
@@ -196,7 +210,7 @@ local function start(K, a, b, q)
   local ids = {}
   for _, e in ipairs(b) do ids[#ids + 1] = e.id end
   st = {v = 1, ph = 'open', acc = a.id, pos = {a.s0[1], a.s0[2], a.s0[3]}, bot = a.bot, t0 = t, tp = t, open = pid,
-        ids0 = q.ids or {}, tg = {}, clear = 0, cool = st.cool}
+        ids0 = q.ids or {}, tg = {}, clear = 0, cool = st.cool, ok = st.ok}
   local msg = string.format('cavern sweep: squad A (%d, worn %d%%) clears the cavern below %s: %d beast%s in sight; %s opens '
                             .. 'the shaft under a hatch', q.n, q.worn, pstr(st.pos), #b, #b == 1 and '' or 's', pid)
   K.emit('CAVERN_SWEEP_START', 'B', cut(msg, 200), {acc = cut(a.id, 60), n = #b, pos = st.pos, bot = a.bot, sol = q.n,
@@ -214,7 +228,10 @@ function M.gates(K, n_acc)
   local v = K.view()
   local ph = v.phase
   if type(ph) ~= 'string' then ph = (K.persist.get('phase') or {}).phase end
-  if type(ph) ~= 'string' or ph < M.CFG.phase then return 'wait', 'phase ' .. tostring(ph or '?') .. ' < ' .. M.CFG.phase end
+  local pn = type(ph) == 'string' and tonumber(ph:match('^P(%d+)$')) or nil     -- numeric: P10 > P6
+  if not pn or pn < tonumber(M.CFG.phase:sub(2)) then
+    return 'wait', 'phase ' .. tostring(ph or '?') .. ' < ' .. M.CFG.phase
+  end
   local mode = K.mode()
   if mode ~= 'PEACE' then return 'wait', 'mode ' .. mode end
   local t = now(K)
@@ -348,14 +365,15 @@ local function run_step(K, t)
     save(K)
   elseif ph == 'recall' then
     if not st.sg and type(st.sta) == 'table' then hold(K, {kind = 'station', pos = st.sta}) end
-    local n = below(K)
+    local n, nc = below(K)
     -- nobody is walled in: the shaft closes once nobody stands below its top; after recall_max x 5 it closes anyway
     if n == 0 or t - st.tp >= 5 * M.CFG.recall_max then
       return to_close(K, st.why)
     end
     if n > 0 and t - st.tp >= M.CFG.recall_max and not st.rw then
       st.rw = 1
-      step_ev(K, 'recall', string.format('%d soldier%s still below the shaft top', n, n == 1 and '' or 's'), {n = n})
+      step_ev(K, 'recall', string.format('%d soldier%s, %d other citizen%s still below the shaft top', n - nc,
+                                         n - nc == 1 and '' or 's', nc, nc == 1 and '' or 's'), {n = n})
     end
   elseif ph == 'close' then
     local s = call(K, 'runner', 'cav_state', st.acc)
@@ -386,8 +404,8 @@ end
 function M.running(K, id) return M.RUN[st.ph] == true and st.ph ~= 'close' and st.acc == id end
 
 -- public (runner's P6 deliverable `sweep`, FR-99): the caverns count as clear (no plugged shaft known, or no beast in sight
--- at any at the last look, and no sweep running)
-function M.cleared(K) return not M.RUN[st.ph] and rt.clr == 1 end
+-- at any at the last look, or (review fix) a clean sweep ended once, and no sweep running)
+function M.cleared(K) return not M.RUN[st.ph] and (rt.clr == 1 or st.ok == 1) end
 
 function M.state(K)
   local running = M.RUN[st.ph] == true
