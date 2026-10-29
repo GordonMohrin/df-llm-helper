@@ -222,6 +222,8 @@ Related: FR-xx, BUG-xx
 | [BUG-204](BUG-204-no-free-office-zone-reported-as-act-fail.md) | fixed (offline, live-untested) | low | live round 3: 'act.manager_office failed for economy: no free office zone' as ACT_FAIL every 4-10 game days (x39) | lua/dfllm/economy.lua |
 | [BUG-205](BUG-205-order-stuck-once-per-order-of-a-missing-workshop.md) | fixed (offline, live-untested) | low | live round 3: ORDER_STUCK came once per order whose workshop is missing (x45 in 2 months); care logged an empty stressor line weekly | lua/dfllm/economy.lua, lua/dfllm/care.lua |
 | [BUG-206](BUG-206-fortcore-stage-1-still-and-fishery-not-seen-as-pending.md) | fixed (offline, live-untested) | medium | live round 3: a pending fortcore stage 1 that builds the Still and the Fishery did not count: fishery request and an A drink_low wake | lua/dfllm/economy.lua |
+| [BUG-207](BUG-207-inspect-unit-by-nickname.md) | fixed (offline, live-untested) | low | Live 3: inspect what=unit found no unit by the nickname its sheet shows; the bare last name was a key | lua/dfllm/curse.lua |
+| [BUG-208](BUG-208-curse-kill-grown-set-inside-gate.md) | fixed (offline, live-untested) | medium | Live 3: a set of were-forms grown inside the 2400-tick kill gate never got its curse_kill | lua/dfllm/curse.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
