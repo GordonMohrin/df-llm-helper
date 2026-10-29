@@ -177,6 +177,10 @@ Related: FR-xx, BUG-xx
 | [BUG-156](BUG-156-p1-mood-features-never-run-in-a-plan-less-fort.md) | fixed (offline, live-untested) | high | live i4: a plan-less fort stays at P0, so mood shops, mood stock, cloth floor and training (all P1) never run | lua/dfllm/economy.lua |
 | [BUG-157](BUG-157-bp-sites-anchor-rooms-on-the-civilian-stair-and-the-refuge-hatch-tile.md) | fixed (offline, live-untested) | medium | live i4: `bp sites` anchors hospital, tombs and workshops on the civilians' stair column, tombs at the refuge's hatch tile | dfpilot/bp/sites.py |
 | [BUG-158](BUG-158-coffin-provisioner-counts-zones-df-re-gives-as-free-and-inspect-tombs-header-disagrees.md) | fixed (offline, live-untested) | medium | live i4: `inspect tombs` `0 free` vs `prov.free 20`; the provisioner counts zones it freed and DF re-gives as free | lua/dfllm/care.lua |
+| [BUG-185](BUG-185-planless-false-for-a-persisted-plan-stuck-at-p0.md) | fixed (offline, live-untested) | high | live i4 round 2: an old persisted plan stuck at P0 (phase_target P0, P0 for years) made `planless` false, so the P1 mood features stayed off | lua/dfllm/economy.lua |
+| [BUG-186](BUG-186-tool-detail-skips-almost-everyone-as-doctor.md) | fixed (offline, live-untested) | high | live round 2: SUTURING/DRESSING_WOUNDS are on by default in DF 53.16, the tool details skipped 29 of 30 candidates as doctors | lua/dfllm/economy.lua |
+| [BUG-187](BUG-187-long-term-patient-blocks-the-tool-detail.md) | fixed (offline, live-untested) | high | live i4 round 2: a resting patient held a Miners seat for 1313 days and TOOL_BLOCKED blamed `jobs` | lua/dfllm/economy.lua |
+| [BUG-188](BUG-188-tool-pile-site-search-runs-out-of-reads-at-a-rock-shaft.md) | fixed (offline, live-untested) | medium | live i4 round 2: `tool pile: no site: the 300 tile reads are spent` at a rock-shaft dig job, next try after 28 days | lua/dfllm/economy.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

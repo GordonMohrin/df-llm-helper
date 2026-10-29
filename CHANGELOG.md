@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## Live test round 2 fixes: tool details and the plan-less fort (BUG-185..188, 2026-10-29; offline, live-untested)
+- **Why:** live test round 2 on i4 (Trussroads y723-y726) and the skeptic re-check confirmed: the fort of BUG-156 still got no P1 mood features,
+  because the kernel holds a y712 plan doc stuck at P0 and `planless` was false (BUG-156 FAIL); the tool details skipped nearly everyone as a
+  doctor since DF 53.16 turns SUTURING/DRESSING_WOUNDS on by default (NEW1); a resting patient held a Miners seat for 1313 days while
+  TOOL_BLOCKED blamed `jobs` (BUG-128d, NEW2); the tool pile found no site (300 reads for a 702-read search, a rock-shaft dig job as centre, 28 days
+  to the next try; BUG-128e, NEW6).
+- **What changed:** (1) `M.plan_stuck`: a persisted plan with phase_target <= P0, or with phase P0 held more than `M.PLAN_STUCK_YEARS` (1), counts
+  as no plan in `M.planless` (BUG-185). (2) `M.DOC_LABORS` = DIAGNOSE/SURGERY/BONE_SETTING, plus a hospital job (`M.DOC_JOBS`) or
+  CHIEF_MEDICAL_DWARF (BUG-186). (3) TOOL_BLOCKED bk `patient` before `jobs`; `M.tool_long_patient` (patient and without the tool for block_days):
+  the kernel's own member goes (WORK_DETAIL why `patient`), a player's stays uncounted (`d.g` `patient members not counted N`), a healthy
+  candidate joins (BUG-187). (4) `pile_site` budget `max(pile_reads, (2R+w)*(2R+h))`, `M.pile_centres` (jobs with floor beside them, members,
+  the tools' stockpile, a loose tool), reasons and the placement log name the centre, `nosite` retries after 1 day, a repeat logs at debug (BUG-188).
+- **Contracts:** no new field; TOOL_BLOCKED `bk` gains the value `patient` (CONTRACTS §TOOL_BLOCKED text, RULES TOOL_BLOCKED row edited in place).
+- **Tests (fail on b805745):** tests/lua/test_care_live_i4.lua BUG-185; tests/lua/test_economy_tools_b128.lua BUG-186, BUG-187 (3), BUG-188;
+  tests/lua/test_economy_tools_a3.lua BUG-188 retry, and the BUG-053 "logged once" test counts warn lines.
+- **Live check:** (a) i4, read-only Lua: `economy.planless(K)` true, `economy.phase_ok(K,'P1')` true, `economy.mood_shops(K)` a table; after
+  `offices.mood_ws_days` status shows R0 `mood_ws` with the missing Masons/MetalsmithsForge command. (b) Dig 30+ wall tiles: a `WORK_DETAIL Miners +`
+  comes; the next TOOL_BLOCKED `d.g` reads `skipped pat N doc ~4` (not 29). (c) Within block_days the Miners lose patient 42435
+  (`WORK_DETAIL Miners - ... (patient, ...)`), or, if he was the player's member, he stays and a healthy miner joins; while a patient is a member
+  the kern.log `tools: Miners blocked (...)` line carries `patient`, not `jobs`. (d) Remove dfllm-tools; the next daily pass logs
+  `tool pile: dfllm-tools 3x2 at ... (searched from member|job|source pile ...)` or `no site: ... of <centre> x,y,z; ...`, and a failed day is
+  retried the next day (not after 28).
+
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every
   4th call and after any other command (FR-85-88a, NEW2); `inspect what=items key=trash` said `ok` while 1056 marked items got no dump job and
