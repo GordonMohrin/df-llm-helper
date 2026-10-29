@@ -282,13 +282,13 @@ local function outer_up(K, g)
   return true
 end
 
--- the shortest way over raised non-outer bridges from group `from` to a group with the needed stock: the bridges and
--- the groups on it, or nil
-local function way(K, g, G, from, need)
+-- the shortest way over raised non-outer bridges (BUG-235: `outer` true, in quiet PEACE, outer ones too) from group
+-- `from` to a group with the needed stock: the bridges and the groups on it, or nil
+local function way(K, g, G, from, need, outer)
   local adj = {}
   for _, b in ipairs(g.all) do
     local spec = g.man.bridges[b]
-    if spec.role ~= 'outer' and gate_state(K, b) == 'up' then
+    if (outer or spec.role ~= 'outer') and gate_state(K, b) == 'up' then
       local ok, sides = K.call('seal', 'sides', spec.fp)
       local list = {}
       for s in pairs(ok and type(sides) == 'table' and sides or {}) do list[#list + 1] = s end
@@ -456,6 +456,27 @@ local function relax_step(K, G)
   end
 end
 
+-- BUG-234/235 (Run 15 Guildcleans, PEACE, no enemy: STRANDED '8 citizens on walk group 580 without food ... no rescue (an
+-- outer bridge is not up)' while O1 had no linked lever; the refusal wanted the very bridge that cut them off, B1, up again
+-- ('rescue_end') every 100 ticks, so B1 stayed up after a drill, 15 pulls waited for the crowd at it, GATE_FAIL 'B1 not up
+-- after 29399 ticks', the player's two `lever` downs were cancelled and soldier 25905 starved): in quiet PEACE (no
+-- lockdown, nobody hostile in sight or inside) a rescue needs no sealed outside: the way may cross outer bridges too, the
+-- bridges on it are wanted down ('rescue'), a refusal raises nothing, and at its end (everybody ate/drank or is gone; no
+-- RESCUE_MAX: the doors stay open while one still starves) or abort (a threat) gate.release hands each bridge back to the
+-- mode default instead of a raise. The rescue record carries pz = true. A threat mode keeps the BUG-028 rules.
+function M.calm(K, a)
+  if K.mode() ~= 'PEACE' or not a or (a.vis or 0) > 0 or (a.inside or 0) > 0 then return false end
+  local ok, why = K.call('reflex', 'holding', 'gates')
+  return not (ok and type(why) == 'string' and why ~= '')
+end
+
+-- BUG-235: the end of a rescue: in quiet PEACE (pz) the bridges go back to gate's mode default, else up again
+function M.rescue_close(K, r, now)
+  for _, b in ipairs(r.list) do
+    if r.pz or K.mode() == 'PEACE' then K.call('gate', 'release', b) else want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end
+  end
+end
+
 -- (a) the rescue: open one, watch one, close it
 local function rescue_step(K, a, g, now)
   local str = st.str
@@ -465,9 +486,11 @@ local function rescue_step(K, a, g, now)
   if r then
     local G = groups(K)
     local why
-    if a and (a.inside or 0) > 0 then why = 'a hostile inside'
-    elseif not outer_up(K, g) then why = 'an outer bridge is not up'
-    elseif G and next(G.hostile) then
+    if r.pz then                                           -- BUG-235: a PEACE rescue ends on a threat
+      if not M.calm(K, a) then why = K.mode() ~= 'PEACE' and ('mode ' .. K.mode()) or 'a threat in PEACE' end
+    elseif a and (a.inside or 0) > 0 then why = 'a hostile inside'
+    elseif not outer_up(K, g) then why = 'an outer bridge is not up' end
+    if not why and G and next(G.hostile) then
       for gid in pairs(G.hostile) do if G.cit[gid] then why = 'a hostile on the citizens\' walk group' end end
     end
     if not why then
@@ -496,17 +519,18 @@ local function rescue_step(K, a, g, now)
           if not ((ok_d and ok_f) or home) then left = left + 1 end
         end
       end
-      done = left == 0 or now - r.since >= M.RESCUE_MAX
+      done = left == 0 or (not r.pz and now - r.since >= M.RESCUE_MAX)     -- BUG-235: PEACE has no time limit
     end
     if why or done then
       str.rescue, dirty = nil, true
-      for _, b in ipairs(r.list) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end
+      M.rescue_close(K, r, now)
       local phase = why and 'abort' or 'done'
-      local txt = why and string.format('rescue aborted (%s): raising %s again', why, table.concat(r.list, ', '))
-                  or string.format('rescue over after %d ticks: %d of %d citizens through, raising %s again',
-                                   now - r.since, #r.ids - left, #r.ids, table.concat(r.list, ', '))
+      local how = r.pz and 'back to the mode default:' or 'raising'
+      local txt = why and string.format('rescue aborted (%s): %s %s again', why, how, table.concat(r.list, ', '))
+                  or string.format('rescue over after %d ticks: %d of %d citizens through, %s %s', now - r.since,
+                                   #r.ids - left, #r.ids, how, table.concat(r.list, ', '))
       stranded(K, phase, txt, {grp = r.grp, n = #r.ids, units = r.ids, bridges = r.list, why = why or 'done',
-               left = left}, r.ids, {phase, table.concat(r.list, ',')})
+               left = left, peace = r.pz and 1 or nil}, r.ids, {phase, table.concat(r.list, ',')})
     end
     return
   end
@@ -530,10 +554,15 @@ local function rescue_step(K, a, g, now)
                              needs_txt(e), e.thirst, e.hunger)
   local d = {grp = e.g, n = #e.ids, units = e.ids, thirst = e.thirst, hunger = e.hunger, pos = e.pos,
              need = needs_txt(e)}
-  local bs, gs = way(K, g, G, e.g, e.need)
+  local calm = M.calm(K, a)                                -- BUG-235: quiet PEACE, outer bridges too
+  local bs, gs = way(K, g, G, e.g, e.need, calm)
   local why
-  if not bs then why = 'no raised inner or core bridge leads to ' .. needs_txt(e)
+  if not bs then why = (calm and 'no raised bridge leads to ' or 'no raised inner or core bridge leads to ') .. needs_txt(e)
   elseif a and (a.inside or 0) > 0 then why = 'a hostile inside'
+  elseif calm then
+    for _, gid in ipairs(gs) do
+      if G.hostile[gid] then why = string.format('a hostile on walk group %d', gid) end
+    end
   elseif not outer_up(K, g) then why = 'an outer bridge is not up'
   elseif not G.sealed then
     -- BUG-031: the way in the entrance check found (a door does not split DF's walk groups: a doored entrance is a
@@ -545,22 +574,26 @@ local function rescue_step(K, a, g, now)
       if G.hostile[gid] then why = string.format('a hostile on walk group %d', gid) end
     end
   end
+  local low = {}
   if not why then
     for _, b in ipairs(bs) do
       local ok, ok2, msg = K.call('gate', 'want', b, 'down', 'rescue')
-      if not (ok and ok2) then why = string.format('%s: %s', b, tostring(msg)) end
+      if not (ok and ok2) then why = string.format('%s: %s', b, tostring(msg)) else low[#low + 1] = b end
     end
   end
+  if calm then d.peace = 1 end
   if why then
-    for _, b in ipairs(bs or {}) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end
+    -- BUG-234: in quiet PEACE a refusal raises nothing (the old rule wanted the cutting bridge up again, every 100 ticks)
+    if calm then M.rescue_close(K, {list = low, pz = true}, now)
+    else for _, b in ipairs(bs or {}) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end end
     d.why, d.bridges = why, bs
     stranded(K, 'refused', string.format('%s: no rescue (%s)', base, why), d, e.ids, {'refused', why})
     return
   end
-  str.rescue, dirty = {list = bs, grp = e.g, ids = e.ids, since = now, need = e.need}, true
+  str.rescue, dirty = {list = bs, grp = e.g, ids = e.ids, since = now, need = e.need, pz = calm or nil}, true
   d.bridges = bs
-  stranded(K, 'rescue', string.format('%s: lowering %s (outside sealed, outer gates up)', base, table.concat(bs, ', ')),
-           d, e.ids, {'rescue', table.concat(bs, ',')})
+  stranded(K, 'rescue', string.format('%s: lowering %s (%s)', base, table.concat(bs, ', '),
+           calm and 'PEACE, no threat' or 'outside sealed, outer gates up'), d, e.ids, {'rescue', table.concat(bs, ',')})
 end
 
 -- a bridge a rescue holds down
@@ -2138,6 +2171,15 @@ function M.hold_alert(K)
   return 'pending ' .. tostring(burrow)
 end
 
+-- public (BUG-235, drill): the bridges a STRANDED rescue holds down now (a copy), or nil
+function M.rescue(K)
+  local r = st and st.str and st.str.rescue
+  if not r then return nil end
+  local l = {}
+  for i, b in ipairs(r.list) do l[i] = b end
+  return l
+end
+
 -- public (BUG-028, gate): siege holds bridge `b` down: a raise that would cut citizens off from drink or food (c), or
 -- a rescue's bridge (a); gate does not raise it on its own at a BREACH entry then
 function M.held(K, b)
@@ -2219,7 +2261,7 @@ function M.init(K)
     for _, id in ipairs(type(r.ids) == 'table' and r.ids or {}) do if int(id) then ids[#ids + 1] = int(id) end end
     local need = type(r.need) == 'table' and r.need or {}
     st.str.rescue = {list = list, ids = ids, grp = int(r.grp) or 0, since = int(r.since),
-                     need = {drink = need.drink == true, food = need.food == true}}
+                     need = {drink = need.drink == true, food = need.food == true}, pz = r.pz == true or nil}
   end
   for b, t in pairs(type(ps.hold) == 'table' and ps.hold or {}) do
     if type(b) == 'string' and int(t) then st.str.hold[b] = int(t) end
@@ -2324,6 +2366,15 @@ M.on = {
     if to == 'PEACE' or to == 'DRILL' then st.ep = nil end
     if to ~= 'SIEGE' and to ~= 'BREACH' then st.deep, st.deep_rec = nil, nil end   -- BUG-030: the episode is over
     dirty = true
+    local r = st.str.rescue                      -- BUG-235: a PEACE rescue ends with PEACE; the new mode's rules apply
+    if r and to == 'PEACE' then r.pz = true      -- a rescue that outlived the episode follows the PEACE rules (no raise)
+    elseif r and r.pz then
+      st.str.rescue = nil
+      M.rescue_close(K, r, now)
+      stranded(K, 'abort', string.format('rescue aborted (mode %s): back to the mode default: %s', tostring(to),
+               table.concat(r.list, ', ')), {grp = r.grp, n = #r.ids, units = r.ids, bridges = r.list,
+               why = 'mode ' .. tostring(to), peace = 1}, r.ids, {'abort', table.concat(r.list, ',')})
+    end
     local a, g = assess(K), geometry(K)
     if to == 'SIEGE' then deep_step(K, a, g, now) end     -- BUG-030: destroyers at T0 send the civilians deep at once
     apply(K, a, g, now)                      -- T0 actions in the detecting step

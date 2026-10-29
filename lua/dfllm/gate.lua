@@ -987,6 +987,66 @@ function M.gu_cfg(K)
   return n, w
 end
 
+-- BUG-236 (Run 15 Guildcleans: `dfllm cmd lever {"bridge":"B1","want":"down"}` was accepted twice, jobs 20775 and 21087,
+-- and never pulled: 100 ticks later siege's refused rescue wanted B1 up again and gate cancelled the player's pull without
+-- a word): a `lever` down holds that bridge down for gate.lever_hold_days game days (config/reflex.json, 0..28, default 3;
+-- 0 = no hold). While it runs, in PEACE without a lockdown, every automatic 'up' (gate.want with a why other than lever:*,
+-- the D-14 up peace gates) is refused with the reason, kern.log says so once a game day; a lockdown, a mode other than
+-- PEACE (a threat, a drill) or `lever up` ends it (kern.log names why), and it ends by itself at its tick (st.hold =
+-- {<b> = {u = until, by, t = since}}, persisted)
+M.HOLD_DAYS = 3
+function M.hold_cfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+  local n = math.tointeger(r.lever_hold_days)
+  if not n or n < 0 or n > 28 then n = M.HOLD_DAYS end
+  return n
+end
+
+function M.hold_end(K, name, why)
+  local h = st.hold and st.hold[name]
+  if not h then return end
+  st.hold[name], dirty = nil, true
+  K.log('info', 'gate: lever hold on %s (by %s) ended: %s', name, tostring(h.by), why)
+end
+
+-- the running lever hold of bridge `name` (an expired one ends here), or nil
+function M.held_down(K, name, now)
+  local h = st.hold and st.hold[name]
+  if not h then return nil end
+  if now >= h.u then M.hold_end(K, name, 'its time is over'); return nil end
+  return h
+end
+
+-- BUG-237: a flip from a 'down' want younger than FLIP_COOL ticks to an automatic 'up' in quiet PEACE is refused (no
+-- up/down cycling); the reason goes to kern.log once per FLIP_COOL ticks and bridge
+M.FLIP_COOL = 1200
+-- why an automatic 'up' of `name` is refused now (PEACE without a lockdown: a lever hold, or a too recent 'down'), or nil
+function M.up_refusal(K, name, why, now)
+  why = tostring(why or '?')
+  if K.mode() ~= 'PEACE' or why:find('^lever:') then return nil end
+  local txt
+  local h = M.held_down(K, name, now)
+  if lock_why(K) then
+    if h then M.hold_end(K, name, 'lockdown') end
+    return nil
+  end
+  if h then
+    txt = string.format('%s up (%s) refused: held down by the player\'s lever (%s) for %d more ticks; a threat ends the hold',
+                        name, why, tostring(h.by), h.u - now)
+  else
+    local br = st.br[name]
+    if not (br and br.want == 'down') or now - (br.since or now) >= M.FLIP_COOL then return nil end
+    txt = string.format('%s up (%s) refused: wanted down (%s) only %d ticks ago; no up/down cycling within %d ticks',
+                        name, why, tostring(br.why), now - br.since, M.FLIP_COOL)
+  end
+  local r = runtime(name)
+  if not r.ur_log or now - r.ur_log >= M.FLIP_COOL or r.ur_txt ~= txt:sub(1, 30) then
+    r.ur_log, r.ur_txt = now, txt:sub(1, 30)
+    K.log('info', 'gate: %s', txt)
+  end
+  return txt
+end
+
 -- M3 (BUG-114): what the unsuccessful pulls of bridge r did, for the GATE_FAIL and the status line: the units on or next to
 -- the footprint, then per lever how many pulls a worker took (else DF dropped every job unclaimed: no path to the lever,
 -- nobody may take it) and that the bridge did not move
@@ -1187,7 +1247,13 @@ local function set_want(name, w, why, deadline, now)
   local br = st.br[name]
   if br and br.want == w then
     if deadline and br.deadline == nil then br.deadline, dirty = deadline, true end
+    -- BUG-236: the player's lever takes over a want that already matches (the hold and the override log follow it)
+    if tostring(why or ''):find('^lever:') then br.why, dirty = tostring(why):sub(1, 40), true end
     return false
+  end
+  -- BUG-236: a want that replaces the player's `lever` want is named in kern.log (never silently)
+  if br and tostring(br.why or ''):find('^lever:') and not tostring(why or ''):find('^lever:') and M.K then
+    M.K.log('info', 'gate: %s %s (%s) replaces the player\'s %s (%s)', name, w, tostring(why or ''), br.want, br.why)
   end
   st.br[name] = {want = w, why = tostring(why or ''):sub(1, 40), since = now,
                  deadline = w == 'up' and (deadline or now + M.DEADLINE) or nil, failed = false}
@@ -1854,10 +1920,16 @@ local function manifest_pass(K, man, now)
   for _, name in ipairs(bridge_names(man)) do
     local role, br = man.bridges[name].role, st.br[name]
     local w, why
-    if br and br.want == 'down' and SIEGE_DOWN[br.why] then w = nil   -- BUG-028 rescue, intake, sortie: until they end
-    elseif lock and GATE_ROLES[role] then w, why = 'up', 'lockdown'
+    -- BUG-028 rescue, intake, sortie: until they end; BUG-235: a quiet-PEACE rescue of an outer bridge never outlasts
+    -- a lockdown (the lockdown raises it at once, siege's next step aborts the rescue)
+    if br and br.want == 'down' and SIEGE_DOWN[br.why] and not (lock and br.why == 'rescue' and GATE_ROLES[role]
+       and not SIEGE_DOWN.rescue[role]) then w = nil
+    elseif lock and GATE_ROLES[role] then
+      M.hold_end(K, name, 'lockdown')                                -- BUG-236: a threat ends the player's hold
+      w, why = 'up', 'lockdown'
     elseif mode == 'PEACE' and GATE_ROLES[role] and (peace_up(K) or (br and br.why == 'lockdown')) then
       w, why = peace_want(K, name, role, now)
+      if w == 'up' and M.held_down(K, name, now) then w = nil end     -- BUG-236: the player's lever hold
     end
     if w and not (br and br.want == w) then set_want(name, w, why, nil, now) end
   end
@@ -1978,9 +2050,25 @@ function M.init(K)
       st.kpi = k
     end
   end
-  st.ex, st.winb, st.seen, st.gone, st.lost = {}, {}, {}, {}, {}
+  -- BUG-234: a save from before the fix keeps the refused rescue's 'up' (rescue_end) want in PEACE for good (manifest_pass
+  -- resets only a lockdown's): dropped at the load, the PEACE default follows in the first pass
+  if K.mode() == 'PEACE' then
+    for name, br in pairs(st.br) do
+      if br.want == 'up' and br.why == 'rescue_end' then
+        st.br[name], dirty = nil, true
+        K.log('info', 'gate: %s stale rescue_end up want dropped at the load (PEACE): the PEACE default takes over', name)
+      end
+    end
+  end
+  st.ex, st.winb, st.seen, st.gone, st.lost, st.hold = {}, {}, {}, {}, {}, {}
+  M.K = K                                         -- BUG-236: set_want names a replaced player want in kern.log
   if type(p) == 'table' then
     local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
+    for name, x in pairs(type(p.hold) == 'table' and p.hold or {}) do     -- BUG-236: the player's lever holds
+      if type(name) == 'string' and type(x) == 'table' and int(x.u) then
+        st.hold[name] = {u = int(x.u), t = int(x.t) or now, by = tostring(x.by or '?'):sub(1, 24)}
+      end
+    end
     -- BUG-030: the complete bridge last seen on each manifest footprint, and the destroyed ones
     for name, x in pairs(type(p.seen) == 'table' and p.seen or {}) do
       if type(name) == 'string' and type(x) == 'table' and int(x.bid) and type(x.fp) == 'string' then
@@ -2100,7 +2188,8 @@ function M.step(K, budget, ctx)
   pass(K, false)
 end
 
--- public (CONTRACTS §7): request a bridge state. 'up' is always honoured; 'down' is refused in
+-- public (CONTRACTS §7): request a bridge state. 'up' is honoured except in PEACE without a lockdown while the player's
+-- lever hold runs (BUG-236) or a 'down' want is younger than FLIP_COOL ticks (BUG-237; a lever:* why always passes); 'down' is refused in
 -- SIEGE/BREACH/DRILL and while a visible hostile is within 30 tiles. deadline (abs tick, optional,
 -- WP5 extension) = when a missing 'up' becomes GATE_FAIL; default now + 900.
 function M.want(K, bridge, want, why, deadline)
@@ -2110,11 +2199,14 @@ function M.want(K, bridge, want, why, deadline)
   if not valid_spec(spec) then return false, 'no bridge ' .. tostring(bridge) end
   local GONE = ' destroyed: no bridge on its footprint'          -- BUG-030
   if st.gone[bridge] then return false, bridge .. GONE end
+  local now = K.now().tick
   if want == 'down' then
     local g = down_guard(K, bridge, why)
     if g then return false, g end
+  else
+    local no = M.up_refusal(K, bridge, why, now)          -- BUG-236 lever hold, BUG-237 no up/down cycling
+    if no then return false, no end
   end
-  local now = K.now().tick
   local changed = set_want(bridge, want, why, deadline and math.tointeger(deadline), now)
   control(K, bridge, spec, now)
   update_every(K)
@@ -2437,6 +2529,7 @@ M.on = {
     pullers_step(K, now)                         -- T0: pullers walk to the levers; PEACE etc. release them
     for _, name in ipairs(bridge_names(man)) do
       local r = runtime(name)
+      if ev.to ~= 'PEACE' then M.hold_end(K, name, 'mode ' .. tostring(ev.to)) end   -- BUG-236: a threat or a drill
       if not st.gone[name] then resolve(r, man.bridges[name], now) end
       -- BUG-030: a destroyed bridge has no epoch (one found destroyed now is BRIDGE_DESTROYED, never GATE_FAIL)
       if not (st.gone[name] or rep_check(K, name, r, now) or gone_check(K, name, r, man.bridges[name], now)) then
@@ -2478,12 +2571,62 @@ M.verbs.lever = function(K, args, cmd)
   if w == 'down' and peace_up(K) then    -- D-14 up: the operator's planned opening is a window for this bridge
     st.winb[b], dirty = K.now().tick + M.WIN_LEVER, true
   end
-  local ok, msg = M.want(K, b, w, 'lever:' .. tostring(cmd and cmd.by or '?'))
+  local by = tostring(cmd and cmd.by or '?')
+  local ok, msg = M.want(K, b, w, 'lever:' .. by)
   if not ok then return false, msg end
+  -- BUG-236: a `lever` down holds the bridge down for gate.lever_hold_days game days (no automatic raise in PEACE)
+  local hold = ''
+  local now = K.now().tick
+  if w == 'up' then M.hold_end(K, b, 'lever up')
+  else
+    local days = M.hold_cfg(K)
+    if days > 0 then
+      st.hold[b], dirty = {u = now + days * 1200, t = now, by = by:sub(1, 24)}, true
+      hold = string.format('; held down %d days', days)
+      K.log('info', 'gate: %s held down by lever (%s) for %d days (until tick %d): no automatic raise in PEACE; a ' ..
+            'lockdown, a threat, a drill or lever up ends it', b, by, days, now + days * 1200)
+      flush(K)
+    end
+  end
   local r = runtime(b)
-  if r.job then return true, 'queued ' .. b .. ' ' .. w, {job = r.job.id} end
-  if r.last == w then return true, b .. ' already ' .. w end
-  return true, 'wanted ' .. b .. ' ' .. w .. ' (' .. (r.stuck or 'waiting') .. ')'
+  if r.job then return true, 'queued ' .. b .. ' ' .. w .. hold, {job = r.job.id} end
+  if r.last == w then return true, b .. ' already ' .. w .. hold end
+  return true, 'wanted ' .. b .. ' ' .. w .. ' (' .. (r.stuck or 'waiting') .. ')' .. hold
+end
+
+-- public (BUG-236, drill): the first bridge a player's lever hold keeps down now, or nil
+function M.lever_hold(K)
+  local now = K.now().tick
+  local names = {}
+  for name in pairs(st.hold or {}) do names[#names + 1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do if M.held_down(K, name, now) then return name end end
+  return nil
+end
+
+-- public (BUG-235, siege's PEACE rescue): drop siege's 'rescue' down want of `name`; the mode default takes over at once
+-- (PEACE: peace_want). Returns true when a rescue want was dropped
+function M.release(K, name)
+  local br = st.br[name]
+  if not (br and br.want == 'down' and br.why == 'rescue') then return false end
+  st.br[name], dirty = nil, true
+  ensure_default(K, name, K.now().tick)
+  local nb = st.br[name]
+  K.log('info', 'gate: %s rescue want released, now %s', name, nb and (nb.want .. ' (' .. nb.why .. ')') or 'no want')
+  flush(K)
+  return true
+end
+
+-- public (BUG-237, drill): how many linked levers manifest bridge `name` has (0: no pull can move it)
+function M.linked(K, name)
+  local man = K.manifest()
+  local spec = type(man.bridges) == 'table' and man.bridges[name]
+  if not valid_spec(spec) or st.gone[name] then return 0 end
+  local r = runtime(name)
+  resolve(r, spec, K.now().tick)
+  local n = 0
+  for _, lid in ipairs(r.levers) do if r.linked[lid] then n = n + 1 end end
+  return n
 end
 
 return M

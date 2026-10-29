@@ -29,6 +29,29 @@
   or it is cancelled at once, read that job's job_items (item_type, mat_type, flags2) read-only. A fresh embark: cli.log `auto:starter ...
   placing office` right after fortcore stage 1, its Office zone right after its dig.
 
+## Run 15 gate fixes: PEACE rescue instead of a raise, the player's lever hold, no drill/up-down cycling (BUG-234..237, 2026-10-29; offline, live-untested)
+- **Why:** Run 15 Guildcleans (i2, read-only kern.log/events.jsonl): in PEACE without an enemy B1 stayed up after a drill, 15 'pull B1
+  up' waited for the crowd at it, GATE_FAIL 'B1 not up after 29399 ticks', STRANDED '8 citizens on walk group 580 without food ... no
+  rescue', soldier 25905 starved, and the player's two `lever` B1 down (jobs 20775, 21087) were cancelled without a line. Root cause:
+  siege's refused rescue wanted the bridges of the way UP ('rescue_end') on every refusal, in PEACE too, every 100 ticks (BUG-234);
+  the rescue only crossed inner/core bridges and demanded a sealed outside, impossible with O1 unlinked (BUG-235); nothing held the
+  player's down (BUG-236); the automatic drill retried every ~100,000 ticks although it could never pass (up:O1), raising B1 each time (BUG-237).
+- **What changed:** (1) siege `M.calm` (PEACE, no lockdown, nobody hostile in sight/inside): a refusal raises nothing; the rescue may
+  cross outer bridges, needs no sealed outside, has no RESCUE_MAX and ends with `gate.release` (the mode default takes over); STRANDED
+  `peace` 1; a mode change aborts it; a rescue that outlives its episode into PEACE follows these rules (BUG-234/235). (2) gate:
+  `lever` down holds the bridge down `gate.lever_hold_days` (3) days: automatic ups in PEACE are refused with the reason, a lockdown,
+  another mode or `lever up` ends it; any want replacing a player's lever want is logged (BUG-236). (3) gate `M.up_refusal`: no
+  automatic up within 1,200 ticks of a down in quiet PEACE; drill: no automatic drill while a gate bridge has no linked lever
+  (`gate.linked`), a lever hold or a rescue runs, kern.log names it once (BUG-237). Contracts: STRANDED d `peace`, reflex
+  `gate.lever_hold_days`, `gate.want` up rule; appendix regenerated. RULES rows `lever` and STRANDED edited in place. (4) review:
+  gate's load drops a stale 'up' (rescue_end) want in PEACE (a save from before the fix kept B1 wanted up for good, BUG-234); a
+  lockdown raises an outer bridge a quiet-PEACE rescue holds down at once instead of waiting for siege's abort (BUG-235).
+- **Tests (each fails on 6dc0f19):** tests/lua/test_fix5_gate.lua (7 tests); review: the stale rescue_end test fails on 5b1d334, the
+  lockdown-during-PEACE-rescue test guards the threat path.
+- **Live check:** Guildcleans after the reload: no PEACE>DRILL while O1 is unlinked (status drill hold 'no lever:O1', kern.log 'automatic
+  drills held' once); B1 down in PEACE, no 'pull B1 up' LEVER, no GATE_FAIL B1; a stranded group gets STRANDED rescue `peace` 1 and
+  done '... back to the mode default'; `dfllm cmd lever {"bridge":"B1","want":"down"}` replies '... held down 3 days' and B1 stays down;
+  at the load kern.log 'gate: B1 stale rescue_end up want dropped at the load (PEACE)' if the save still had it.
 ## Live round 4 station fallback and the release without stations (BUG-214, BUG-215, 2026-10-29; offline, live-untested)
 - **Why:** live round 4 on E:/DF-test4 (Trussroads) and its skeptic: with B2 raised the BREACH chain b2, core, z4, melee failed entry by
   entry (b2 a wall, core on walk group 0, melee on 1507 behind B2, the soldiers on 1): no station order (kpi off nost 8, on_station 0 of 8

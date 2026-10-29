@@ -606,9 +606,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "BRIDGE_CRUSH": ("A", "gate", _d("bridge:s unit:i", "bid:i pull:i t:i to:s how:s k:s pos:p")),
     # BUG-028: citizens cut off from drink/food by our raised gates; phase hold (a raise waits), forced (raised: a
     # hostile at the gate), rescue (inner/core bridges lowered), refused (no rescue: why), done, abort; BUG-031:
-    # relax (the civ alert's burrow kept them from drink/food on their own walk group: seal refuses it now; burrow)
+    # relax (the civ alert's burrow kept them from drink/food on their own walk group: seal refuses it now; burrow);
+    # BUG-235: peace = 1 a rescue in quiet PEACE (outer bridges too, no sealed outside; ends by handing the bridges back
+    # to the mode default, never a raise)
     "STRANDED": ("A", "siege", _d("phase:s", "n:i units:ia grp:i thirst:i hunger:i bridges:sa why:s need:s pos:p "
-                                             "left:i hostile:i burrow:s")),
+                                             "left:i hostile:i burrow:s peace:i")),
     # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
     "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
     # BUG-096/FR-80 (Run 14 note 70: Kern+ shrank to about one tile and Tiefe+ vanished): the burrow guard of seal read Kern+ or
