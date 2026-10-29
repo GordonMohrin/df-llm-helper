@@ -118,6 +118,38 @@
   name: `inspect what=curse` has no 'by name only' record; after his death no 'in were-form'. (f) after a CURSE_MOON: `inspect what=persist
   key=m.care field=cur` shows `"ev":{"moon":...}`; a reload gives no second CURSE_MOON for that moon.
 - **Skipped:** i4 NEW1 (DOC_LABORS, not a state-publication issue); the d103 within-a-day were-phase the daily watch cannot see (NEW3 (2)).
+## Live test round 2 i4 fixes: tombs, memorial slabs and the workshop requests (BUG-179..184, 2026-10-29; offline, live-untested)
+- **Why:** in round 2 of the live test on i4 (region2-site90, y723-y726), with the skeptic's re-check: every care run logged `tombs: freed 20,
+  assigned 0, entomb 0`, and DF gave each freed zone back to the same dead owner within 18 ticks, because his remains lie in a coffin under
+  ANOTHER unit's tomb zone (BUG-133c, NEW3). A memorial slab waited because nothing lay within 16 tiles of the seeds (NEW5). A pending workshops
+  project with skip=Masons held back both the slab request and the mandatory request (BUG-133d, NEW4). A standing ConstructSlab order hid
+  'no Masons' (BUG-133d). The `EngraveSlab ... removed` warn came on every pass (NEW8). The runner's `reclaimed fort without ...` request came
+  about once a minute with follow off (NEW9).
+- **What changed:** (1) care.lua `M.held_own`: a zone counts as 'elsewhere' only when the holding coffin's tomb zone belongs to the owner or to
+  nobody; otherwise it is kept (`acts.kept_shared`). `lk.fown` / `lk.regive`: a zone DF hands back to the same owner after a free is never
+  freed again (`acts.kept_regive`) (BUG-179). (2) care.lua `MEM.grid(R, cap)`, `MEM.widen` (radii `care.mem_scan_wide` [32, 48], at most
+  `mem_scan_reads` 10000 reads each) and `MEM.request` (PROJECT_REQUEST tombs n=1 why=memorial after `mem_req_days` 3 days without a site) (BUG-180).
+  (3) economy `M.ws_queued` and runner `M.pending_types` / `M.uncovered`: a pending workshops project holds back only the types its doc's manifest
+  lists (a doc that lists none still holds everything back) (BUG-181). (4) economy: `sb.why = 'no Masons'` also when n = 0 (BUG-182). (5) economy:
+  the removal warn follows the ORDER_STUCK cadence, with debug lines and a count in between (BUG-183). (6) runner `M.req_due`: the mandatory
+  request backs off, req_cool * 2^(k-1) ticks and `req_wall_s` (900 s) * 2^(k-1) wall seconds, k <= `req_backoff` 4 (BUG-184).
+  New helpers are module fields (the 200-locals limit).
+- **Contracts / config:** no event, verb or schema change (PROJECT_REQUEST gains the value why=memorial; follow places it as any tombs request).
+  New config keys `care.mem_scan_wide`, `mem_scan_reads`, `mem_req_days` (config/baseline.json); runner CFG `req_wall_s`, `req_backoff`.
+- **Tests (each new one fails on b805745):** tests/lua/test_fix2_tombs.lua (4), tests/lua/test_economy_b2.lua (3 new; the W4 case now carries a
+  project doc that lists Masons), tests/lua/test_runner_manifest.lua (1 new; the cooldown test also covers the wall clock and the backoff).
+- **Live check:** (a) i4 after `dfllm reload`: two care runs, then kern.log `tombs: ...` shows `freed 0` (not 20); `dfllm cmd inspect
+  '{"what":"tombs"}'` acts.kept_shared about 20 or more, lock.churn stops rising; zone 23336 keeps owner 33030 and is not freed again. (b) A ghost
+  with a loose memorial and no free 3x3 within 16 tiles: kern.log `memorial: ... placed at` further out, or `waits: ... within 48`; after 3 game
+  days `dfllm events --type PROJECT_REQUEST` shows `tombs: a crypt room for the memorial slabs` (d.why memorial). (c) `bp.place tpl=workshops
+  site=S1 skip=Masons`, a ghost, no Masons: PROJECT_REQUEST `workshops: no mason's workshop for the memorial slabs` (types [Masons]);
+  `inspect orders` slabs.asked 1 (not 'queued'); the runner's `reclaimed fort without ...` names only the skipped types. (d) With
+  ConstructSlab order 55 standing and no Masons: kern.log `slabs: no ConstructSlab for 1 ghosts ...: no Masons` once; inspect orders slabs.why
+  `no Masons`. (e) Ghost and no blank slab: one `EngraveSlab: ... removed` warn per cadence episode, the rest at debug. (f) Follow off, mandatory
+  shops missing: the `reclaimed fort without ...` warn / PROJECT_REQUEST at most every 15 real minutes, then 30, 60, 120.
+- **Review:** `M.ws_queued` counts only live projects (runner `pending_types`, else `pending` > 0), so a parked workshops project that lists
+  the Masons no longer holds the slab request back. `M.req_due` treats a set that only shrank as the same request, so the backoff goes on. A
+  memorial `since` older than 2 x coffin_retry starts a new episode. Each has a new test.
 
 ## Live test i1 fixes: next repeat memory, trash no_jobs, save marker per fort, reply text, view, doctor hook (BUG-147..152, 2026-10-28; offline, live-untested)
 - **Why:** the live test of instance i1 (region2-site90 Trussroads y715) and its verifier confirmed: `next` offered a skipped command again every

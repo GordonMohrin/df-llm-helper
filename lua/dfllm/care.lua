@@ -142,6 +142,9 @@ M.DEFAULTS = {
   curse = true, curse_every = 600, curse_keep = 60, curse_ids = 8, curse_moon_cycles = 13, curse_moon_lead = 4,
   curse_trig_win = 4800, s0_ids = 6,
   coffins = true, coffin_reserve = 10, coffin_batch = 30, coffin_scan_r = 16, coffin_min_side = 4,
+  -- BUG-180: a memorial slab without a site within coffin_scan_r: the wider radii searched in turn (mem_scan_reads tile
+  -- reads at most each), and PROJECT_REQUEST tombs why=memorial after mem_req_days without a site (0: never)
+  mem_scan_wide = {32, 48}, mem_scan_reads = 10000, mem_req_days = 3,
   coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
   coffin_stale = 15 * DAY,                         -- BUG-126: a coffin project without progress this long (PEACE) is dropped
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
@@ -1214,6 +1217,9 @@ function M.lockstate()
           pend = {free = 0, owned = 0, entomb = 0, churn = 0}}
     st.lk = lk
   end
+  -- BUG-179: the owner each freed zone had (fown) and the zones DF gave back to that same owner after care's free
+  -- (regive: zone id -> owner); tomb_repair never frees such a (zone, owner) pair again
+  lk.fown, lk.regive = lk.fown or {}, lk.regive or {}
   return lk
 end
 
@@ -1230,7 +1236,10 @@ local function lock_scan(T, readonly)
     -- and care did not assign it: DF handed it to another body (the freed-20-every-round loop of Run 14, if that is it)
     if lk.freed[z.id] and z.unit >= 0 and not lk.assigned[z.id] then
       c.churn = c.churn + 1
-      if not readonly then lk.freed[z.id] = nil end
+      if not readonly then
+        if lk.fown[z.id] == z.unit then lk.regive[z.id] = z.unit end           -- BUG-179: back to the same dead owner
+        lk.freed[z.id], lk.fown[z.id] = nil, nil
+      end
     end
     if not z.drop and z.closed then
       c.closed = c.closed + 1
@@ -1252,6 +1261,8 @@ local function lock_scan(T, readonly)
   for id in pairs(lk.opened) do if not live[id] then lk.opened[id] = nil end end
   for id in pairs(lk.entombed) do if not live[id] then lk.entombed[id] = nil end end
   for id in pairs(lk.freed) do if not live[id] then lk.freed[id] = nil end end
+  for id in pairs(lk.fown) do if not live[id] then lk.fown[id] = nil end end
+  for id in pairs(lk.regive) do if not live[id] then lk.regive[id] = nil end end
   for id in pairs(lk.assigned) do if not live[id] then lk.assigned[id] = nil end end
   lk.again_free, lk.again_owned = lk.again_free + c.again_free, lk.again_owned + c.again_owned
   lk.by_entomb = lk.by_entomb + c.by_entomb
@@ -1263,9 +1274,21 @@ local function lock_scan(T, readonly)
   return c
 end
 
+-- BUG-179: the remains of uid lie in coffin e "in their own tomb" for DF: a tomb zone over e is assigned to uid, or no
+-- zone over e has an owner at all; a coffin under another unit's tomb zone does not count (DF re-gives uid's own zone)
+function M.held_own(e, uid)
+  local owned = false
+  for _, z in ipairs(e and e.zones or {}) do
+    if not z.drop and z.unit == uid then return true end
+    if not z.drop and z.unit >= 0 then owned = true end
+  end
+  return not owned
+end
+
 -- the repair plan (marks on the index) and its acts; returns the act counts
 local function tomb_repair(K, c, r, p, T, now)
-  local acts = {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0, kept_occ = 0}
+  local acts = {removed = 0, freed = 0, opened = 0, assigned = 0, entombed = 0, failed = 0, kept_occ = 0, kept_shared = 0,
+                kept_regive = 0}
   local mode = K.mode()
   local force = st.force_repair == true
   local zone_ok = force or (c.tomb_repair ~= false and mode ~= 'SIEGE' and mode ~= 'BREACH')
@@ -1305,7 +1328,12 @@ local function tomb_repair(K, c, r, p, T, now)
       local inside_here = false
       for _, e in ipairs(z.coffins) do if e.occs[u] then inside_here = true end end
       if not inside_here then
-        if r.held_by[u] and T.cof_by_id[r.held_by[u]] then z.free = 'elsewhere'
+        if r.held_by[u] and T.cof_by_id[r.held_by[u]] then
+          -- BUG-179 (live i4: 'freed 20, assigned 0, entomb 0' every run, DF gave each zone back to the same dead
+          -- owner within 18 ticks): remains in a coffin under ANOTHER unit's tomb zone are not entombed for DF, so it
+          -- hands the owner's own zone straight back; that zone is kept ('shared'), not freed
+          if M.held_own(T.cof_by_id[r.held_by[u]], u) then z.free = 'elsewhere'
+          else acts.kept_shared = acts.kept_shared + 1 end
         elseif not r.bodies[u] then z.free = 'stale'
         else
           local ok = false
@@ -1321,6 +1349,8 @@ local function tomb_repair(K, c, r, p, T, now)
           if e.occ ~= nil and z.free then z.free, acts.kept_occ = nil, acts.kept_occ + 1 end
         end
       end
+      -- BUG-179: a zone DF gave back to this same owner after an earlier free is not freed again (lock_scan's memo)
+      if z.free and M.lockstate().regive[z.id] == u then z.free, acts.kept_regive = nil, acts.kept_regive + 1 end
     end
   end
   -- the plan's free zones go to the unburied dead without a usable zone (lowest unit id first)
@@ -1367,9 +1397,11 @@ local function tomb_repair(K, c, r, p, T, now)
   -- what is left of the budget (160 stale owners freed 20 at a time used to take the whole budget before any body got
   -- its zone). BUG-133: the zones the bodies are given (their free first) on the assignment budget, before the removals
   local function release(z, own)
+    local owner = z.unit
     if act('free', z, nil, own) then
       acts.freed, z.unit, z.closed = acts.freed + 1, -1, false
       lk.opened[z.id], lk.freed[z.id], lk.assigned[z.id] = now, now, nil
+      lk.fown[z.id] = owner >= 0 and owner or nil
       acts.why = acts.why or {}
       acts.why[z.free] = (acts.why[z.free] or 0) + 1                 -- bad | stale | elsewhere
     end
@@ -2527,18 +2559,21 @@ function MEM.held(K, it)
   if not revealed(K, x, y, z) then return 'on a tile not revealed' end
 end
 
--- the free floor around the seeds (read once a run): {levels = {{seed, L}}, reads, why}
-function MEM.grid(K, c, r)
+-- the free floor around the seeds (read once a run): {levels = {{seed, L}}, reads, why}; R the radius (default
+-- coffin_scan_r), cap the most tile reads (BUG-180: the wider fallback; the rows read until then are searched)
+function MEM.grid(K, c, r, R, cap)
   local T = r.tomb_src and r.tomb_src.T or {coffins = {}, zones = {}}
   local cs = {ents = entrance_list(K), boxes = r.boxes, er = c.coffin_entrance_r}
-  local R = num(c.coffin_scan_r) or 16
-  local G, where = {levels = {}, reads = 0}, {}
+  R = R or num(c.coffin_scan_r) or 16
+  local G, where = {levels = {}, reads = 0, R = R}, {}
   for _, sd in ipairs(coffin_seeds(K, r, T)) do
+    if cap and G.reads >= cap then G.cut = true; break end
     where[#where + 1] = string.format('%s %d,%d,%d', sd.why, sd.x, sd.y, sd.z)
     local L = {x0 = sd.x - R, y0 = sd.y - R, w = 2 * R + 1, h = 2 * R + 1, z = sd.z, g = {}}
     local occ = occ_index({L.x0, L.y0, L.z, L.x0 + L.w - 1, L.y0 + L.h - 1, L.z}, {})
     local nosky = false
     for j = 0, L.h - 1 do
+      if cap and G.reads >= cap then G.cut = true; break end
       local y, row = L.y0 + j, {}
       for i = 0, L.w - 1 do
         local x = L.x0 + i
@@ -2564,6 +2599,7 @@ function MEM.grid(K, c, r)
   r.left = r.left - G.reads * PROBE_COST
   G.why = string.format('no free 3x3 floor (roofed, outside zones and buildings, %d+ tiles from the entrances, reachable) '
                         .. 'within %d of %s', c.coffin_entrance_r, R, #where > 0 and table.concat(where, '; ') or 'no seed')
+  if G.cut then G.why = G.why .. string.format(' (%d tile reads, capped)', G.reads) end
   return G
 end
 
@@ -2594,6 +2630,32 @@ function MEM.pick(K, G)
   end
 end
 
+-- BUG-180 (live i4: 'no free 3x3 floor ... within 16 of crypt; core; citizens' twice, then placed at a spot the citizens
+-- seed happened to come near): no site within coffin_scan_r: the seeds are searched again wider, mem_scan_wide radii in
+-- turn, mem_scan_reads tile reads at most each; returns site, L, the last grid
+function MEM.widen(K, c, r, G)
+  local R0 = num(c.coffin_scan_r) or 16
+  for _, R in ipairs(type(c.mem_scan_wide) == 'table' and c.mem_scan_wide or {}) do
+    R = num(R)
+    if R and R > R0 then
+      local G2 = MEM.grid(K, c, r, R, num(c.mem_scan_reads) or 10000)
+      if G2.why == 'no tile reader' then return nil, nil, G end
+      local site, L = MEM.pick(K, G2)
+      if site then return site, L, G2 end
+      G, R0 = G2, R
+    end
+  end
+  return nil, nil, G
+end
+
+-- BUG-180: no site for mem_req_days in a row: PROJECT_REQUEST tombs why=memorial (follow places a tombs dig: a new
+-- crypt room, the first seed of the next search); at most every tomb_request_every ticks (shared with the coffin request)
+function MEM.request(K, c, p, ns, now, why)
+  local days = num(c.mem_req_days) or 3
+  if days <= 0 or now - (num(ns.since) or now) < days * DAY then return false end
+  return tomb_request(K, c, p, 1, 'memorial', 'tombs: a crypt room for the memorial slabs (' .. why .. ')')
+end
+
 -- "none 3, loose 1, placed 2" (the states with ghosts in them)
 function MEM.text(n)
   local parts = {}
@@ -2620,11 +2682,16 @@ function MEM.place(K, c, r, p, g, now, mem, G)
     mem.why = tostring(ns.why)
     return G, false, true
   end
+  local fresh = G == nil
   G = G or MEM.grid(K, c, r)
   local site, L = MEM.pick(K, G)
+  if not site and fresh then site, L, G = MEM.widen(K, c, r, G) end
   if not site then
-    mem.why, p.mem_nosite = G.why, {t = now, why = trunc(G.why, 200)}
+    -- review: a record left from an older episode (no failed search for 2 x coffin_retry) starts a new one
+    local since = ns and now - (num(ns.t) or 0) <= 2 * (num(c.coffin_retry) or 3600) and num(ns.since) or now
+    mem.why, p.mem_nosite = G.why, {t = now, since = since, why = trunc(G.why, 200)}
     K.log('warn', 'memorial: slab %s of ghost unit %d waits: %s', sid, g.uid, G.why)
+    if MEM.request(K, c, p, p.mem_nosite, now, G.why) then mem.req = now end
     return G, false, true
   end
   p.mem_nosite = nil

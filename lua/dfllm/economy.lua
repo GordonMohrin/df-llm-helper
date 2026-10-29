@@ -5826,6 +5826,30 @@ function M.fishery_proj(K, ws)
   end
 end
 
+-- BUG-181: the id of the pending workshops project that builds workshop type t (its doc's manifest lists it, as
+-- M.fishery_proj), 'unknown' when a pending workshops project's doc lists no workshop at all (it may build anything:
+-- held back as before), else nil. Only live projects count (runner.pending_types, else runner.pending > 0): a parked one
+-- (build_lost, breach) builds nothing and held no request back before BUG-181 either
+function M.ws_queued(K, t)
+  local okt, set, all = K.call('runner', 'pending_types', 'workshops')
+  if okt and type(set) == 'table' then
+    if not (set[t] or all) then return nil end
+  else
+    local okp, pend = K.call('runner', 'pending', 'workshops')
+    if not (okp and type(pend) == 'number' and pend > 0) then return nil end
+  end
+  local q = M.fishery_proj(K, {'workshop:' .. t})
+  if q then return q.id end
+  if okt and type(set) == 'table' then return set[t] and 'pending' or 'unknown' end
+  local pd = K.persist.get('projects')
+  for _, P in ipairs(type(pd) == 'table' and type(pd.list) == 'table' and pd.list or {}) do
+    local id = type(P) == 'table' and P.tpl == 'workshops' and P.done ~= 1 and tostring(P.id or '')
+    local d = id and id:match('^[%w_.%-]+$') and K.persist.get('bp.' .. id)
+    local m = type(d) == 'table' and type(d.manifest) == 'table' and d.manifest.workshops
+    if id and not (type(m) == 'table' and #m > 0) then return 'unknown' end
+  end
+end
+
 -- raw fish (>= fish.min) or fishers at work and no fishery built: PROJECT_REQUEST workshops why=fishery at most every
 -- food.request_days (p.fishery_req, the last request). BUG-038 (Run 11, y451: the fishery was destroyed in the sieges,
 -- food fell from 51 to 22 days and no fishery came): a fishery seen standing leaves the clock alone (a fishery built
@@ -7227,12 +7251,18 @@ function M.slab_pass(K, c, r)
   sb.removed = #removed
   if #removed > 0 then
     local list = table.concat(removed, ',', 1, math.min(#removed, 12)) .. (#removed > 12 and (' +' .. (#removed - 12)) or '')
-    K.log('warn', 'EngraveSlab: %d orders, %d unengraved slabs (%d in jobs, %d held), %d ghosts: orders %s removed, %d kept ' ..
-          '(at most %d)', #eng, sl.blank, sl.busy, sl.held, ghosts, list, #eng - #removed, sc.max_orders or 3)
     local T0 = K.now()
     local why = sl.blank == 0 and 'no unengraved slab' or 'more orders than unengraved slabs'
-    if CAD.due(p.slab_ann, T0, {}, {why}, {ticks = CAD.TICKS, wall_s = CAD.WALL_S}) then
-      p.slab_ann = CAD.mark(T0, {}, {why})
+    -- BUG-183 (live i4: 35 identical warn lines, one per economy pass, while autoslab re-queued the order each time): the
+    -- warn goes with the ORDER_STUCK cadence; the removals between two announcements are logged at debug and counted
+    local due = CAD.due(p.slab_ann, T0, {}, {why}, {ticks = CAD.TICKS, wall_s = CAD.WALL_S})
+    local quiet = due and (math.tointeger(p.slab_quiet) or 0) or 0
+    K.log(due and 'warn' or 'debug', 'EngraveSlab: %d orders, %d unengraved slabs (%d in jobs, %d held), %d ghosts: orders %s ' ..
+          'removed, %d kept (at most %d)%s', #eng, sl.blank, sl.busy, sl.held, ghosts, list, #eng - #removed, sc.max_orders or 3,
+          quiet > 0 and string.format('; %d more removed since the last warn', quiet) or '')
+    if not due then p.slab_quiet = (math.tointeger(p.slab_quiet) or 0) + #removed end
+    if due then
+      p.slab_ann, p.slab_quiet = CAD.mark(T0, {}, {why}), nil
       K.emit('ORDER_STUCK', 'B', string.format('%d EngraveSlab orders removed (%s: %d unengraved slabs, %d ghosts): %s',
                                                #removed, why, sl.blank, ghosts, list):sub(1, 200),
              {order = removed[1], job = 'EngraveSlab', why = ('slab: ' .. why):sub(1, 60), n = #removed, dropped = 1})
@@ -7253,6 +7283,8 @@ function M.slab_pass(K, c, r)
   local n, want = OF.restock(sl.blank, cons, gneed, #eng - #removed + sb.engraved, math.min(ghosts, sc.restock_cap or 20))
   sb.want = want
   local f = r.f or {}
+  -- BUG-182: a standing ConstructSlab order nobody can work (no mason's workshop) leaves n = 0: the reason is said too
+  if n <= 0 and gneed > 0 and not f['workshop:Masons'] then sb.why = 'no Masons' end
   if n > 0 then
     local free = stone_free(c, r)
     if not f['workshop:Masons'] then sb.why = 'no Masons'
@@ -7298,9 +7330,10 @@ function M.slab_why(K, c, r, sb, ghosts, f)
   local last = math.tointeger(p.slab_wsreq)
   if last and now - last < every and now >= last then return end
   -- review: a workshops project already queued (paused by the rebuild policy, still digging) is not asked for again:
-  -- follow would place a second masons' shop beside it (as the tannery request, runner.pending)
-  local okp, pend = K.call('runner', 'pending', 'workshops')
-  if okp and type(pend) == 'number' and pend > 0 then sb.asked = 'queued'; return end
+  -- follow would place a second masons' shop beside it. BUG-181 (live i4: a pending workshops project with skip=Masons
+  -- held the request back): only one that builds the Masons (M.ws_queued)
+  local q = M.ws_queued(K, 'Masons')
+  if q then sb.asked = 'queued'; sb.queued = q; return end
   p.slab_wsreq = now
   sb.asked = 1
   K.emit('PROJECT_REQUEST', 'B', string.format("workshops: no mason's workshop for the memorial slabs of %d ghost(s)", ghosts),
