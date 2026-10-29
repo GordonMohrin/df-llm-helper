@@ -965,4 +965,22 @@ T.test('BUG-199 (live round 3): at boot the stock days of the last daily run are
   T.eq(s3.stock and s3.stock.drink_d, nil, 'three days old: the kernel carry speaks, with its age')
 end)
 
+T.test('BUG-199 review: the first-run boost lasts at most FIRST_BOOST_MS real time (a run that never reaches T.days)',
+       function()
+  local E = require('dfllm.economy')
+  local W = world{}
+  local log, boosts, unb = {}, 0, 0
+  local K = {now = function() return {tick = 0, ms = W.ms} end, log = function(_, f) log[#log + 1] = f end,
+             boost = function() boosts = boosts + 1; return true end, unboost = function() unb = unb + 1 end}
+  E.boot_out(K, nil)
+  E.first_boost(K)
+  T.eq(boosts, 1)
+  W.ms = W.ms + E.FIRST_BOOST_MS + 1
+  E.first_boost(K)
+  T.eq({boosts, unb}, {1, 1}, 'dropped, unboosted')
+  T.ok(tostring(log[1]):find('boost dropped', 1, true) ~= nil)
+  E.first_boost(K)
+  T.eq({boosts, unb}, {1, 1}, 'not again')
+end)
+
 T.done()

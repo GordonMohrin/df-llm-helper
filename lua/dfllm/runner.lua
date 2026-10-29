@@ -4954,7 +4954,7 @@ end
 -- set), else nil; economy's slab request does not ask for a Masons that request already names
 function M.req_types(K, key)
   local rec = S.rt and S.rt.req and S.rt.req[key]
-  if key == 'wsm' and not S.rt.wmiss then return nil end
+  if key == 'wsm' and not (S.rt and S.rt.wmiss) then return nil end
   return type(rec) == 'table' and type(rec.ids) == 'table' and rec.ids or nil
 end
 

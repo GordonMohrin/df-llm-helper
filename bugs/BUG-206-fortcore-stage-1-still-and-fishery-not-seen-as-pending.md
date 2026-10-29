@@ -17,6 +17,9 @@ fisheries were built), and DECISION_NEEDED drink_low 'no still' (A) woke the ses
 ## Tests
 `tests/lua/test_economy_fishing.lua` (BUG-206), `tests/lua/test_economy_drink.lua` (BUG-206). Each fails on bd27973.
 
+Review: the note has its own cadence (`p.drink_note`) and does not use up the episode's drink_low question, so the question comes as
+before once no pending project builds the Still.
+
 ## Live check
 A fresh fort with fortcore stage 1 applied: no PROJECT_REQUEST why=fishery while the stage moves; with drink below drink.low_d before the
 Still stands, kern.log `no still yet: project <id> builds one` and no DECISION_NEEDED drink_low.

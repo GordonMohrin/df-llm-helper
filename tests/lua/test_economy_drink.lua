@@ -349,6 +349,10 @@ T.test('BUG-206 (live Earthboat spr d43): no still but a pending fortcore stage 
   T.eq(#decisions(W, 'drink_low'), 0, 'live: DECISION_NEEDED drink_low "no still; auto: brew" (A)')
   T.ok(log_has(W, 'no still yet: project fc1 builds one'), 'the note')
   T.eq(W.state().stock.dwhy, 'no still', 'status still says why')
+  -- review: the note does not use up the episode's question; the project gone (cancelled), the question comes at once
+  W.K.persist.set('projects', {v = 2, list = {}})
+  days(W, 1)
+  T.eq(#decisions(W, 'drink_low'), 1, 'no project builds the Still any more: the question as before')
 end)
 
 T.done()

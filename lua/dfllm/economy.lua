@@ -4476,6 +4476,7 @@ function M.drink_low(K, c, r)
   if dd >= low then
     if p.drink_pre then p.drink_pre = nil; K.log('info', 'drink pre-alarm over: %d drink days', dd) end
     if type(p.drink_rep) == 'table' then p.drink_rep = CAD.quiet(p.drink_rep) end
+    if type(p.drink_note) == 'table' then p.drink_note = CAD.quiet(p.drink_note) end
     return
   end
   if dd < ((c.alarm or M.DEFAULTS.alarm).days or 10) then return end      -- the thirst wake speaks now
@@ -4488,16 +4489,20 @@ function M.drink_low(K, c, r)
   local ids, aids, head = M.food_head(bl, auto)
   local toks = {dd < 30 and 'below30' or 'below60'}
   for _, id in ipairs(ids) do toks[#toks + 1] = id end
-  if not CAD.due(p.drink_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
-  p.drink_rep = CAD.mark(now, {}, toks)
   -- BUG-206 (live Earthboat spr d43: DECISION_NEEDED drink_low 'no still' while the applied fortcore stage 1 built the
-  -- Still): no still but a pending project builds one, above the thirst alarm: a kern.log note, no wake
+  -- Still): no still but a pending project builds one, above the thirst alarm: a kern.log note (own cadence p.drink_note),
+  -- no wake; the episode's question is not used up, so it comes once the Still stands and drink is still low
   local sq = ids[1] == 'still' and M.fishery_proj(K, {'workshop:Still'})
   if sq then
-    K.log('warn', 'drink low: %d drink days, no still yet: project %s builds one (%s %s%%)%s', dd, sq.id,
-          tostring(sq.stage), tostring(sq.pct), sq.halted and (', halted: ' .. sq.halted) or '')
+    if CAD.due(p.drink_note, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then
+      p.drink_note = CAD.mark(now, {}, toks)
+      K.log('warn', 'drink low: %d drink days, no still yet: project %s builds one (%s %s%%)%s', dd, sq.id,
+            tostring(sq.stage), tostring(sq.pct), sq.halted and (', halted: ' .. sq.halted) or '')
+    end
     return
   end
+  if not CAD.due(p.drink_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
+  p.drink_rep = CAD.mark(now, {}, toks)
   local parts, au = {}, {}
   for _, x in ipairs(bl) do parts[#parts + 1] = x[2]:sub(1, 90) end
   for _, x in ipairs(auto) do au[#au + 1] = x[2]:sub(1, 50) end
@@ -5943,7 +5948,7 @@ function M.fishery_proj(K, ws)
   for _, P in ipairs(type(pd) == 'table' and type(pd.list) == 'table' and pd.list or {}) do
     local id = type(P) == 'table' and (P.tpl == 'workshops' or P.tpl == 'fortcore') and P.done ~= 1 and tostring(P.id or '')
     local d = id and id:match('^[%w_.%-]+$') and K.persist.get('bp.' .. id)
-    if P.tpl == 'fortcore' and type(d) == 'table' then
+    if id and P.tpl == 'fortcore' and type(d) == 'table' then
       local pp = type(d.params) == 'table' and d.params or {}
       if (math.tointeger(pp.stage) or 1) ~= 1 or (math.tointeger(pp.retrofit) or 0) ~= 0 then d = nil end
     end
@@ -9185,8 +9190,9 @@ end
 -- p.prev / p.hist, p.days_t) are published at once (early, no labor) when that run is at most two days old (or of
 -- unknown age: a save from before this fix); an older value is left to the kernel's carry, which names its age.
 -- The first run after the boot holds a boost (util/sched BOOST.shares.economy) until T.days ran.
+M.FIRST_BOOST_MS = 20 * 60 * 1000
 function M.boot_out(K, p)
-  st.first = true
+  st.first, st.first_ms = true, K.now().ms
   if st.out or type(p) ~= 'table' or type(p.prev) ~= 'table' then return end
   local dr, fo = math.tointeger(p.prev.drink), math.tointeger(p.prev.food)
   if not (dr and fo) or #p.hist.drink == 0 or #p.hist.food == 0 then return end
@@ -9196,9 +9202,16 @@ function M.boot_out(K, p)
             hungry = 0, mood_miss = {}, early = true, boot = true}
 end
 
--- BUG-199: the first run since the boot asks for the boost each step until T.days published the stock days
+-- BUG-199: the first run since the boot asks for the boost each step until T.days published the stock days; at most
+-- M.FIRST_BOOST_MS real time (a run that never reaches T.days, faults: not boosted for good)
 function M.first_boost(K)
   if type(K.boost) ~= 'function' then return end
+  local ms = K.now().ms
+  if st.first and st.first_ms and ms and ms - st.first_ms > M.FIRST_BOOST_MS then
+    st.first = false
+    K.log('warn', 'economy: the first run since the boot did not reach the stock days in %d min: boost dropped',
+          M.FIRST_BOOST_MS // 60000)
+  end
   if st.first then K.boost('first run since the boot')
   elseif st.first == false then
     st.first = nil

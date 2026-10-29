@@ -22,6 +22,9 @@ renewed it, so repeated reloads let it run out.
 `tests/lua/test_economy_b2.lua` (BUG-199), `tests/lua/test_kern_gaps.lua` (BUG-199); `tests/lua/test_kern_load.lua` uses care as the module
 that may not boost. Each fails on bd27973.
 
+Review: the first-run boost lasts at most `M.FIRST_BOOST_MS` (20 real minutes); a run that never reaches `T.days` drops it with one
+kern.log warn, so economy is not boosted for good.
+
 ## Live check
 Two `dfllm reload` back to back on a big fort: `dfhack-run dfllm status` shows `stock drink Nd food Md` right after each boot; kern.log
 `economy boosted: first run since the boot`, later `economy boost ended (unboost; ...)`.

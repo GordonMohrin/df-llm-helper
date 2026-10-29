@@ -10,7 +10,7 @@
   and drink_low woke the session (A) (BUG-206).
 - **What changed:** (1) economy `M.boot_out`: at init the stock days of the save's last daily run (`p.prev`/`p.hist`, `p.days_t` <= 2 days
   or unknown) are published at once (early); the first run after a boot holds a boost (`util/sched` `BOOST.modules.economy`,
-  `shares.economy` 8 ms/s) until `T.days` ran; kern: the carry window restarts at a boot (`rec.boot`), `stale` keeps the true age (BUG-199).
+  `shares.economy` 8 ms/s) until `T.days` ran, at most 20 real minutes (`M.FIRST_BOOST_MS`); kern: the carry window restarts at a boot (`rec.boot`), `stale` keeps the true age (BUG-199).
   (2) `M.slab_why`: `p.slab_wsreq = {t, w, k, n}`, backoff `request_days * 2^(k-1)` and `900 s * 2^(k-1)` (k <= 4), more ghosts start over,
   a Masons clears it, no slab request while runner's mandatory request names Masons (new runner `M.req_types`) (BUG-200). (3) `T.stale`: the
   made-again record keeps `sw` (BUG-201). (4) `T.imports`: plan and season libraries of a config stage wait for its gate (`M.lib_ready`)
@@ -18,7 +18,7 @@
   top, a seal's first while one is open (BUG-203). (6) `M.office_none`: no Office zone (or no manager) is a kern.log state once per 7 days
   and 10 min, the act is not tried (BUG-204). (7) ORDER_STUCK kind=workshop is one event per shop type with `d.n` (`M.ws_stuck`, again
   with news after 7 days and 10 min); care logs the stressor line only when it has stressors (BUG-205). (8) `M.fishery_proj` accepts a
-  pending fortcore stage-1 project; `drink_low` with 'no still' and such a project is a kern.log note, not DECISION_NEEDED (BUG-206).
+  pending fortcore stage-1 project; `drink_low` with 'no still' and such a project is a kern.log note (own cadence `p.drink_note`), not DECISION_NEEDED; the episode's question is kept for when no project builds the Still any more (BUG-206).
 - **Safety:** no new verb, event, config key or RULES row; ORDER_STUCK keeps its fields (kind workshop now carries `n`). CONTRACTS §3.3.9
   names economy in `BOOST.modules`. Risks: the boost shrinks the other modules' pool for economy's first run after a boot; topping every
   project's orders can move a defense project's orders above older library orders by design.
