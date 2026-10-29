@@ -16,6 +16,9 @@
   bridge`. Inkintense: the next `seal at=last` with a sapling way in notes `the piece goes on the sapling` and queues it. Uncertain:
   whether DF's builder takes a sapling tile as quickfort places it (a stuck door is walled by the runner), and whether growing tree
   crowns create new roofed openings on the surface.
+- **Open (review):** most Inkintense ways in are floor tiles on the rim of the tree canopy (z134 branches above every named tile on
+  s152283619-4): the entrance check reads crown-roofed surface tiles as inside, so the rim moves with the crowns. Not fixed; see
+  BUG-323 Open.
 
 ## Run 15c surface farm: bp.emit places it, fewer plots when trees cut the block (BUG-316, 2026-10-29; offline, live-untested)
 - **Why:** Inkintense y377 (food 21 d), live: `bp sites farms plots=1 surface=1` ranked 2 sites, but `cmd bp.place tpl=farms

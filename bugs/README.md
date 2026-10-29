@@ -314,7 +314,7 @@ Related: FR-xx, BUG-xx
 | [BUG-299](BUG-299-cannot-reach-food-when-the-stock-is-empty.md) | fixed (offline, live-untested) | medium | Run 15c: 'cannot reach food' when the stock is simply empty | economy.lua |
 | [BUG-316](BUG-316-surface-farm-emit-crash-and-no-fewer-plots.md) | fixed (offline, live-untested) | high | Run 15c: a surface farm crashes bp.emit (min() of no dug tile); trees cut the 2-plot block, no fall back to fewer plots | emit.py, render.py, cmd.py, cli.py, plan.py |
 | [BUG-322](BUG-322-perimeter-open-beside-all-ways-closed.md) | fixed (offline, live-untested) | medium | Run 15b: status PERIMETER OPEN 2 ways in beside 'all with a door or bridge' (stale text outside PEACE) | readiness.lua |
-| [BUG-323](BUG-323-sapling-opening-left-out-by-seal.md) | fixed (offline, live-untested) | medium | Run 15c: seal at=last left a sapling way in out when no neighbour closes it; regrowth kept R0 open | cmd.py |
+| [BUG-323](BUG-323-sapling-opening-left-out-by-seal.md) | partly fixed (offline, live-untested): sapling case; open: floor ways in on the canopy rim (tree crowns read as roof) | medium | Run 15c: seal at=last left a sapling way in out when no neighbour closes it; ways in under tree crowns keep coming back, R0 open | cmd.py; open: seal.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

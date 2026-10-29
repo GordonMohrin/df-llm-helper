@@ -1,5 +1,5 @@
 # BUG-323 a way in on a sapling is left out by seal at=last when no neighbour closes it; regrowth keeps R0 open
-Status: fixed (offline, live-untested)
+Status: partly fixed (offline, live-untested): the sapling case; the recurring floor ways in under tree crowns are open (see Open)
 Severity: medium
 Found: 2026-10-29, Run 15c (Inkintense, live, y376 win - y377 sum)
 Module: `dfpilot/cmd.py` (seal_openings)
@@ -29,3 +29,15 @@ Inkintense: the next `dfllm cmd bp.place tpl=seal site=S1 at=last` with a saplin
 the sapling; the SEAL_STUCK of that piece (if any) names why DF does not build it (the runner walls a door that stays stuck).
 Uncertain: whether DF's builder accepts a sapling tile as quickfort's placement does; whether tree crowns that grow from saplings
 make new roofed ('inside') tiles on the surface and so new openings (not decidable offline).
+
+## Open (review, 2026-10-29; read-only evidence, not fixed)
+The sapling case is 2 of about 25 ways in SIEGE_UNREADY named y374-y377 (events.jsonl). Most are `floor` tiles that come and go
+without a seal (`87,100,133 floor` in 7 events, `76,87,133`, `78,97,133`; far ones `16,95,133`, `106,63,133`, `124,23,135`), and the
+open count drops to 0 and back (pd 2, 40, 79, 2, 0, 28, ...). On snapshot s152283619-4 every named z133 tile (87,100 79,85 78,97 92,81)
+has a `.` on z134 above it, and z134 over the forest is the tree canopy (snapshot.SHAPE draws BRANCH and TRUNK_BRANCH as `.`; DESIGN:
+"a tree crown counts as a roof"). The entrance check (seal.lua bfs eval, `des.outside`) reads canopy-roofed surface tiles as inside, so
+the fort's interior runs out through the crowns, and its rim (the openings) moves as crowns grow and branches fall. A door on such a
+rim tile closes nothing for good. Likely fix (kernel, needs a live look first): a tile whose roof is only tree (BRANCH/TRUNK_BRANCH/TWIG
+or leaves above, no natural or constructed floor) counts as outside in the entrance check, so the openings are the fort's real mouths.
+Live check first: `dfllm cmd inspect what=entrances` on Inkintense, and in DF the tile 87,100,133 (Outside/Inside) and what is above it.
+
