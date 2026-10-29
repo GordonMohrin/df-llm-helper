@@ -525,7 +525,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # hospital (ok, dry, none), GiveWater/GiveFood jobs running (give: citizens giving now, run/open on the job list,
     # -1 unknown), free buckets, the cause
     # BUG-104: stuck = GiveWater jobs open for water.give_stuck_days or more, reach = caregivers whose walk group reaches the
-    # thirstiest patient, key = the verdict (alert | noreach | unreadable | stuck | open | run | nojob)
+    # thirstiest patient, key = the verdict (alert | noreach | unreadable | nowater | stuck | open | run | nojob)
     "PATIENT_DYING": ("A", "water", _d("units:ia n:i thirst:i carers:i want:i hosp:s",
                                        "idle:i added:i give:i open:i run:i buckets:i why:s stuck:i reach:i key:s")),
     # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,

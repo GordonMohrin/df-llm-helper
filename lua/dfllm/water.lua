@@ -54,7 +54,7 @@
 --     the locations and the patients; a day later kern.log says how many GiveWater jobs run (see remove_dry).
 --   * BUG-103: patients and caregivers are citizens (isCitizen); the census also holds residents, who are neither;
 --   * BUG-104: a patient over the alarm gets a verdict on why no GiveWater job runs (M.give_diag: alert / noreach / stuck / open /
---     nojob / run, with the job, caregiver and bucket counts); `added` of patient_thirst counts caregivers put into the Orderlies
+--     nojob / run, BUG-324: nowater, with the job, caregiver and bucket counts); `added` of patient_thirst counts caregivers put into the Orderlies
 --     detail, never jobs (the kernel creates none);
 --   * BUG-106: `inspect what=hospital` and the state's water.gaps list the gaps of the wound care (M.audit), once per run.
 --   * BUG-131: a hospital zone outside the core that is idle or superseded does not count in hosp_out (M.hosp_sort); the
