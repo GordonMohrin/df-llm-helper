@@ -3799,6 +3799,10 @@ end
 -- the text the status line shows for one that is not met
 function Q.dv_key(dv)
   if dv.k == 'proj' then return tostring(dv.tpl) .. (int(dv.stage) and (' ' .. int(dv.stage)) or '') end
+  -- review: several stock / orders deliverables of one phase (P5 drink_d and food_d, P3 three order libraries) get
+  -- keys of their own, so one waiver never waives its siblings ('stock_drink_d', 'orders_rockstock')
+  local sub = dv.k == 'stock' and dv.key or (dv.k == 'orders' and type(dv.lib) == 'string' and dv.lib:match('([^/]+)$'))
+  if sub then return trunc(((tostring(dv.k) .. '_' .. tostring(sub)):lower():gsub('[^a-z_0-9]', '_')), 24) end
   return tostring(dv.k)
 end
 function Q.dv_text(K, dv)
@@ -3807,7 +3811,8 @@ function Q.dv_text(K, dv)
     local m = Q.ws_missing(K, dv)
     return trunc(k .. ' ' .. table.concat(m, ',', 1, math.min(#m, 4)) .. (#m > 4 and ('+' .. (#m - 4)) or ''), 40)
   end
-  if dv.k == 'stock' then return trunc(string.format('%s %s>=%s', k, tostring(dv.key), tostring(dv.min)), 40) end
+  if dv.k == 'stock' then return trunc(string.format('%s>=%s', k, tostring(dv.min)), 40) end
+  if dv.k == 'orders' then return trunc(k, 40) end
   local n = dv.n or dv.lvl or dv.pct or dv.lib
   return trunc(n ~= nil and (k .. ' ' .. tostring(n)) or k, 40)
 end
@@ -3820,7 +3825,9 @@ end
 Q.WAIVE_MAX = 8
 function Q.waiver(ph, key)
   for _, w in ipairs(type(ph) == 'table' and type(ph.waive) == 'table' and ph.waive or {}) do
-    if w.d == key then return w end
+    -- review: a waiver holds in the phase it was given for only (P0 workshops waived must not waive P1 workshops,
+    -- nor P2 squads those of P5)
+    if w.d == key and (w.ph == nil or w.ph == ph.phase) then return w end
   end
 end
 function Q.add_waive(K, ph, key, why, by)

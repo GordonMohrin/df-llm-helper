@@ -602,6 +602,9 @@ class Follower:
             t = jobs.get(key)
             if isinstance(t, dict) and (t.get("placed") or fresh(t)):
                 out[key] = t
+        w = jobs.get("waive")                  # BUG-300 review: the phase.waive cooldown survives a follow restart
+        if isinstance(w, dict) and now - (w.get("since") or 0) < WAIVE_COOLDOWN_S:
+            out["waive"] = w
         if out != jobs:
             files.log_cli(self.dir, "follow", "resume", {}, f"dropped stale jobs {sorted(jobs)}")
         return out

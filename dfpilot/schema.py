@@ -848,8 +848,8 @@ VERB_ARGS: dict[str, Obj] = {
     "bp.place": Obj(req={"tpl": TPL, "site": Str(ID_RE)},
                     opt={"p": Obj(extra=SCALAR), "prio": Int(1, 7)}, extra=SCALAR),
     "bp.cancel": Obj(req={"proj": ID}, opt={"undo": Bool()}),
-    # BUG-300: a deliverable of the current phase that cannot be made (tpl = its template, `workshops` or the kind;
-    # stage for a staged template), waived with the reason
+    # BUG-300: a deliverable of the current phase that cannot be made (tpl = its template, `workshops`, the kind, or
+    # stock_<key> / orders_<lib> for those; stage for a staged template), waived with the reason
     "phase.waive": Obj(req={"tpl": Str(r"^[a-z_0-9]{1,24}$"), "why": Str(maxbytes=80)}, opt={"stage": Int(1, 9)}),
     "drill": Obj(opt={"why": Str(maxbytes=200)}),
     "snapshot": Obj(opt={"bbox": BBOX, "purpose": Str(enum=["audit", "sites", "debug"])}),

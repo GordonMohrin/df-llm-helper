@@ -129,4 +129,19 @@ T.test('BUG-300: a staged template is waived by tpl + stage', function()
   T.eq(W.state().phase, 'P1')
 end)
 
+T.test('BUG-300 review: a waiver holds in its own phase only; sibling stock deliverables have keys of their own', function()
+  local W = fresh('scope', {
+    {id = 'P0', title = 'p0', approve = false, deliver = {{k = 'workshops', types = {'Carpenters'}}}},
+    {id = 'P1', title = 'p1', approve = false,
+     deliver = {{k = 'workshops', types = {'Carpenters'}}, {k = 'stock', key = 'drink_d', min = 170},
+                {k = 'stock', key = 'food_d', min = 60}}},
+    {id = 'P2', title = 'p2', approve = false, deliver = {}}})
+  H.runs(W, 2)
+  T.ok(W.inbox('phase.waive', {tpl = 'workshops', why = 'x'}).ok)
+  T.eq(W.state().phase, 'P1')
+  T.eq(W.state().phw.wait, {'workshops Carpenters'}, 'the P0 waiver does not waive the P1 workshops')
+  local r = W.inbox('phase.waive', {tpl = 'stock', why = 'x'})
+  T.ok(not r.ok and r.msg:find('(workshops, stock_drink_d, stock_food_d)', 1, true), r.msg)
+end)
+
 T.done()

@@ -113,3 +113,12 @@ def test_follow_waives_farms_when_no_site_exists_at_all(save, monkeypatch):
     f._waive_farms(err, 9000.0)
     assert len(sent) == 1, "P1 has no farms deliverable"
     assert files.read_state(save)["phase"] == "P1"
+
+
+def test_follow_restart_keeps_the_waive_cooldown(save):
+    """Review: _fresh_jobs dropped jobs['waive'] (not a PLACE_KEY), so every follow restart sent phase.waive again."""
+    f = wake.Follower(out=lambda s: None, clock=lambda: 2000.0)
+    f.dir = save
+    kept = f._fresh_jobs({"waive": {"since": 1000.0}})
+    assert kept == {"waive": {"since": 1000.0}}
+    assert f._fresh_jobs({"waive": {"since": 2000.0 - wake.WAIVE_COOLDOWN_S - 1}}) == {}
