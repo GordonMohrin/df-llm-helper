@@ -108,9 +108,10 @@ def test_core_breaches_from_the_manifest_the_state_and_the_events(save):
     assert [(b["proj"], b["why"], b["pos"]) for b in got] == [(PID, "damp", DAMP)]
     (save / "manifest.json").unlink()
     assert plan.core_breaches(save, {**st, "proj": []}) == []
-    # a cancelled (retired) project is no stopped fortcore any more
+    # a cancelled (retired: bp/.cancelled) project is no stopped fortcore any more (BUG-162: a bp file that is merely
+    # missing while the kernel's manifest names the row still counts, see test_bug162_164_fortcore_resite.py)
     files.write_json_atomic(save / "manifest.json", {"v": 2, "breaches": [_breach(DAMP)]})
-    (save / "bp" / f"{PID}.json").unlink()
+    assert cmd.retire(save, PID)
     assert plan.core_breaches(save, st) == []
 
 
@@ -204,7 +205,8 @@ def test_an_applied_resite_is_never_drafted_again(save, monkeypatch):
     fort = _facts(save, monkeypatch, st)
     assert fort["core"]["moved"]["proj"] == "y707s1b0"
     doc = plan.propose(st, plan.load_phases(), None, decisions={}, applied=plan.applied_builds(save, st), fort=fort)
-    assert not [b for b in _builds(doc) if b["tpl"] == "fortcore" and b["site"] != "same"], _builds(doc)
+    # BUG-163: its later stages are drafted at the moved core's explicit anchor, never a second stage 1
+    assert not [b for b in _builds(doc) if plan._resite(b)], _builds(doc)
     assert f"bp.cancel proj={PID}" in doc["notes"]
     doc["seasons"][0]["build"].append({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}})
     errs, _ = plan.check(doc, st, decisions={}, banned=plan.BANNED, fort=fort)

@@ -180,6 +180,9 @@ Related: FR-xx, BUG-xx
 | [BUG-159](BUG-159-brief-trims-the-timeline-reset-and-status-the-hospital-retire-hint.md) | fixed (offline, live-untested) | medium | live round 2 i1: the default brief trims the TIMELINE_RESET marker; status clips the hospital.retire hint off the R0 line | dfpilot/brief.py |
 | [BUG-160](BUG-160-plan-check-duplicate-seal-and-audit-snapshot-timeout.md) | fixed (offline, live-untested) | low | live round 2 i1: `plan check` calls seal at=audit and at=refuge a duplicate; `dfllm audit` gives up after 60 s on a big fort | dfpilot/plan.py, wake.py |
 | [BUG-161](BUG-161-dfllm-lua-and-kern-pacing-lines-print-decimals-with-the-locale-comma.md) | fixed (offline, live-untested) | low | live round 2 i3: `dfhack-run dfllm status` prints `load x8,89` (LC_NUMERIC); the BUG-143 rule missed dfllm.lua and tostring(float) | lua/dfllm.lua, kern.lua, util/num.lua |
+| [BUG-162](BUG-162-core-breaches-ignores-a-manifest-breach-without-a-bp-file.md) | fixed (offline, live-untested) | high | live i3: a manifest breach of a fortcore without a bp file is ignored; propose drafts a fortcore@S1 that `plan check` rejects (no dry site) | dfpilot/plan.py |
+| [BUG-163](BUG-163-fortcore-resite-drafts-only-the-stopped-anchors-stages.md) | fixed (offline, live-untested) | high | live i3: the fortcore re-site drafts only the stopped anchor's stages (no stage 2); a moved core never gets its stages 2 and 3 | dfpilot/plan.py, dfpilot/cmd.py |
+| [BUG-164](BUG-164-applied-builds-count-fortcore-stages-of-another-anchor.md) | fixed (offline, live-untested) | medium | live i3: applied_builds counts fortcore stage 2 of an older core at another anchor; the new core gets a lone stage 3 | dfpilot/plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

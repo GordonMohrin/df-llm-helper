@@ -1146,7 +1146,12 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     if ma:      # live L6: an explicit anchor picked by the LLM (the ranking excludes uneven high ground)
         x, y, z = (int(ma.group(i)) for i in (1, 2, 3))
         doc = emit_at(tpl, params, {"id": "S0", "anchor": [x, y, z], "rot": int(ma.group(4) or 0)}, label, bp_id)
-        hit = occ.clash(doc)
+        # BUG-163: a later stage at the explicit anchor of this template's earlier stage (plan propose names a re-sited
+        # fortcore's anchor so) overlaps its own earlier stages, as `same` does
+        st = params.get("stage") if isinstance(params, dict) else None
+        own = tpl if isinstance(st, int) and not isinstance(st, bool) and st >= 2 \
+            and stage_anchor(save_dir, tpl, [x, y, z]) else None
+        hit = occ.clash(doc, ignore_tpl=own)
         if hit:
             raise BpError(f"{tpl}{label} overlaps project(s) {', '.join(hit[:4])}")
         return doc
@@ -1253,6 +1258,20 @@ def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
         _free_scan(tpl, params, wide, occ, n, out, held, tried)
         ranked = len(wide)
     return out, snap_id, ranked
+
+
+def stage_anchor(save_dir: Path, tpl: str, anchor: list) -> bool:
+    """BUG-163: a project of `tpl` in <save>/bp (not cancelled) is anchored at `anchor`."""
+    for f in bp_files(save_dir):
+        d = files.read_json(f)
+        if isinstance(d, dict) and d.get("tpl") == tpl and list(d.get("anchor") or []) == list(anchor):
+            return True
+    return False
+
+
+def anchor_label(anchor: list, rot: int = 0) -> str:
+    """BUG-163: the explicit site label `A<x>_<y>_<z>_<rot>` of an anchor (bp.place site=...)."""
+    return f"A{anchor[0]}_{anchor[1]}_{anchor[2]}_{int(rot or 0) % 4}"
 
 
 def resolve_site(save_dir: Path, tpl: str, label: str, params: dict | None = None) -> dict:
