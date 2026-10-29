@@ -78,3 +78,24 @@ def test_hospital_sites_name_the_best_way_to_water_the_scan_found(tmp_path):
     st = {"water": {"patients": 0, "thirst_max": 0, "hosp_ok": 0, "refuge_ok": 0, "buckets_free": 0, "hosp": 0, "src": [],
                     "wsc": "water 1,2,3 (5/7): dig 2 wall(s) from 4,5,6", "wst": 99}}
     assert cmd.water_ctx(tmp_path, "hospital", st)["cand"] == "water 1,2,3 (5/7): dig 2 wall(s) from 4,5,6"
+
+
+def test_review_shaft_top_on_a_corridor_floor_and_ranking_keeps_free_columns(fort):
+    """Review (Inkintense bp files replayed: all 53 ranked columns lay on placed project floor, `bp.place aqshaft S1` found
+    none free): the shaft's own top tile on a corridor project's floor is no clash (a water project's still is), and the
+    ranking keeps only the columns `free` accepts."""
+    occ = cmd.Occupancy()
+    occ.add(_doc("fc", "fortcore", (10, 11, 6), [(10, 11, 6), (11, 11, 6), (12, 11, 6)]))
+    shaft = cmd.emit_at("aqshaft", {"x": 11, "y": 11, "top": 6, "depth": 3}, {"id": "S1", "anchor": [11, 11, 6], "rot": 0},
+                        "S1", "aq1")
+    assert occ.clash(shaft) == [], "old code: ['fc'] (its own top tile on the corridor)"
+    wet = cmd.Occupancy()
+    wet.add(_doc("cis", "cistern", (11, 11, 6), [(11, 11, 6)]))
+    assert wet.clash(shaft) == ["cis"], "a basin under the top still clashes"
+    snap, man = fort
+    got = bp.rank(snap, "aqshaft", {"depth": 4}, manifest=man)
+    first = got[0]["anchor"]
+    rest = bp.rank(snap, "aqshaft", {"depth": 4}, manifest=man, free=lambda c: c["anchor"] != first)
+    assert first not in [s["anchor"] for s in rest] and rest
+    with pytest.raises(ValueError, match="lie on or beside placed projects"):
+        bp.rank(snap, "aqshaft", {"depth": 4}, manifest=man, free=lambda c: False)

@@ -305,8 +305,9 @@ end
 -- source), else 0. Run 11 (economy's fishing zone): a frozen tile (tiletype material FROZEN_LIQUID, the ice the tile
 -- sheet shows) is no water and is left out; with `ice` true every revealed ice tile of the rect is listed too, with
 -- a fifth field 1 (0 on water) and its flow as read. BUG-289 (water's survey of the surface): `lattice` n >= 2 reads only
--- the tiles with (x + 2y) % n == 0 (every n-th tile of each row, column and diagonal: a brook 1 tile wide is met every n
--- tiles), and the rect may then cover n times liquid_tiles
+-- the tiles with (x + 2y) % n == 0, and the rect may then cover n times liquid_tiles. With n = 5 or 7 (prime to 1, 2, 3)
+-- that is every n-th tile of each row, column and both diagonals (a brook 1 tile wide is met every n tiles); 2, 3, 4, 6
+-- and 8 miss a direction (3: the diagonal x = y + k)
 function M.liquids(K, x0, y0, x1, y1, z, min, ice, lattice)
   x0, y0, x1, y1, z, min = int(x0), int(y0), int(x1), int(y1), int(z), int(min) or 1
   local out = {}

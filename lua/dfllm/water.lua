@@ -94,8 +94,9 @@ M.DEFAULTS = {
   -- ws_mem_r box round each of the ws_mem bodies the last scans found, a survey of the whole map's surface levels (the
   -- surface at the reference column and the map centre, ws_survey_levels each, every ws_lattice-th tile, at most
   -- ws_survey_max tiles) and a ws_seed_r box round what the survey met (at most ws_seed_max tiles)
+  -- (review: ws_lattice 5, not 3: with (x + 2y) % 3 a 1-tile brook running along x = y + k was never met)
   ws_read_max = 90000, ws_slices = 18, ws_body_slices = 4, ws_cit = 10, ws_mem = 8, ws_mem_r = 10,
-  ws_survey_levels = 2, ws_lattice = 3, ws_survey_max = 36000, ws_seed_r = 10, ws_seed_max = 9000,
+  ws_survey_levels = 2, ws_lattice = 5, ws_survey_max = 36000, ws_seed_r = 10, ws_seed_max = 9000,
   -- BUG-290: a pit (open space right above water >= deep, a reachable floor beside it) counts as a well spot
   pit_well = true,
   -- BUG-034: a dry hospital's zones go once a patient is over patient_thirst (DF's "thirsty" mark is ~25,000-50,000;

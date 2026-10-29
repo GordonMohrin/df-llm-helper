@@ -221,4 +221,19 @@ T.test('BUG-291 (Run 15 Inkintense: water >= 4/7 seeping on z130, "no aquifer le
   T.ok(rc:find('basin on aquifer level z4', 1, true), rc)
 end)
 
+T.test('BUG-289 review: the survey lattice (x + 2y) % ws_lattice meets a 1-tile brook in every direction (rows, columns, ' ..
+       'both diagonals) within ws_lattice tiles; 3 never met the diagonal x = y + k', function()
+  local lat = require('dfllm.water').DEFAULTS.ws_lattice
+  local function met(n, dx, dy, x0, y0)
+    for i = 0, n - 1 do if ((x0 + i * dx) + 2 * (y0 + i * dy)) % n == 0 then return true end end
+    return false
+  end
+  for _, d in ipairs({{1, 0}, {0, 1}, {1, 1}, {1, -1}}) do
+    for x0 = 0, lat - 1 do
+      for y0 = 0, lat - 1 do T.ok(met(lat, d[1], d[2], x0 + 50, y0 + 50), d[1] .. ',' .. d[2] .. ' from ' .. x0 .. ',' .. y0) end
+    end
+  end
+  T.ok(not met(3, 1, 1, 51, 50), 'the old lattice 3 misses x = y + 1')
+end)
+
 T.done()

@@ -16,6 +16,11 @@ orthogonal tiles are rock or unknown on every level below (p.depth; below the sn
 cavern/warm levels; score 1000 - 5/step to a stair - 2/unknown column tile + 40 when it passes a known aquifer level. bp.place S1
 takes the best free one. An aqshaft clashes with other projects only orthogonally (its seal is its 4 orthogonal walls; a diagonal
 neighbour is allowed: 56 instead of 50 free columns there); every other template keeps the 8-neighbour rule.
+Review: replayed on the Inkintense bp files, all 53 ranked columns lay on placed room or fortcore floor and S1 found none
+free (the shaft's own top tile clashed with the floor's project). Now the shaft's top tile on a corridor project's floor is no
+clash (a WET_TPLS project's still is), and `cmd.rank_sites` passes `bp.sites.rank(free=...)`: only columns whose top is
+unowned or fortcore floor and whose emitted shaft no placed project clashes with (ValueError when none is). There S1 is now
+68,50,128.
 
 ## Tests
 `tests/bp/test_bug292_aqshaft_sites.py` (ranking, aquifer bonus, cavern refusal, diagonal/orthogonal clash);

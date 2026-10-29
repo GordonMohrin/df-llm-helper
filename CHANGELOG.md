@@ -17,9 +17,11 @@
   distance), quoted by `bp sites hospital`. (3) a well spot: open space or a ramp top right above the water beside a reachable floor.
   (4) a revealed aquifer tile beside the water marks its level (m.water aqz, `runner.aq_seen` -> manifest aquifer_levels, M.aq_level).
   sites.py (5) `bp sites aqshaft` ranks columns (public Z4 floor; rock or unknown below with rock on its 4 sides; off keep-out boxes
-  and cavern/warm levels; +40 through a known aquifer level); cmd.py: an aqshaft clashes only orthogonally. Config keys in
+  and cavern/warm levels; +40 through a known aquifer level); cmd.py: an aqshaft clashes only orthogonally, its own top tile on a
+  corridor's floor is no clash (a water project's is), and its ranking keeps only columns with an unowned or fortcore top that
+  no placed project clashes with (review: on the Inkintense bp files all 53 ranked columns lay on room floor, S1 found none). Config keys in
   fairplay.WATER_LIM; contracts: state water.wst/wsc, appendix regenerated; RULES rows 172/270 edited in place (300 lines).
-- **Tests (each fails on 05dc764):** tests/lua/test_bug288_291_water_scan.lua (7), tests/bp/test_bug292_aqshaft_sites.py (4); updated:
+- **Tests (each fails on 05dc764):** tests/lua/test_bug288_291_water_scan.lua (7), tests/bp/test_bug292_aqshaft_sites.py (5); updated:
   tests/test_bug193_aqshaft_place.py (S1 without a column now places the best one), tests/bp/test_bp_aqshaft.py (comment).
 - **Live check:** Inkintense: kern.log `water sources: ... N with a well spot (N slices, M tiles read, K boxes)` within minutes,
   `water sources: aquifer level z130`, `inspect water_sources` body 77,57,130 with pit [77,57,131], `scan last finished at tick`; then

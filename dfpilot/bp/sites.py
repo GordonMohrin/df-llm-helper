@@ -212,14 +212,16 @@ def _near_point(cands: list, tpl: str, near, within: int | None, at) -> list:
 
 
 def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None = None,
-         n: int = 3, water: dict | None = None, near=None, within: int | None = None, at=None) -> list[dict]:
+         n: int = 3, water: dict | None = None, near=None, within: int | None = None, at=None,
+         free=None) -> list[dict]:
     """Top `n` sites, best first: [{id:'S1'.., anchor:[x,y,z], rot, score:int, why:str}].
     Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4.
     `water` (BUG-040, WATER_TPLS only): {src: [[x,y,z]..] accepted sources, near, lbl?: labels parallel to src,
     refuge?: {name, box, wd, ws}}: only sites near accepted water, each with water {d, src}; None = not filtered.
     `near` (FR-78): [x, y, z], only sites whose footprint lies within `within` (default NEAR_WITHIN) tiles of it, nearest
     first; `at`: [x, y, z], only the sites anchored exactly there (the reason when there is none). Both apply to room,
-    explore and fortcore sites; the defense builds have the one site the manifest fixes."""
+    explore and fortcore sites; the defense builds have the one site the manifest fixes. `free` (BUG-292): a callable
+    candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
     p = check_params(tpl, params)
     if tpl in defense.BUILD:
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
@@ -255,11 +257,18 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _near_point(cands, tpl, near, within, at)
     cands.sort(key=lambda c: (c.get("_d", 0), -c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
     out: list[dict] = []
+    taken = 0
     for c in cands:
         if all(not _overlap(c["box"], o["box"]) for o in out):
+            if free is not None and not free(c):            # BUG-292: on or beside a placed project
+                taken += 1
+                continue
             out.append(c)
             if len(out) == n:
                 break
+    if free is not None and cands and not out:
+        raise ValueError(f"{tpl}: all {taken} candidate site(s) lie on or beside placed projects (bp.cancel frees a "
+                         "parked one's tiles)")
     return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"],
              **({"water": c["water"]} if "water" in c else {})} for i, c in enumerate(out)]
 

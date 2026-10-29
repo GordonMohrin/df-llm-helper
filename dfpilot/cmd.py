@@ -195,7 +195,7 @@ def _digest(doc) -> str:
 
 
 def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | None, water: dict | None = None,
-          where: dict | None = None) -> list:
+          where: dict | None = None, free=None) -> list:
     fn = load_bp("sites").rank
     try:
         names = inspect.signature(fn).parameters    # WP3 extensions; CONTRACTS §15 has rank(snap, tpl, params)
@@ -206,6 +206,8 @@ def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | No
         kw["manifest"] = manifest
     if "water" in names and water is not None:
         kw["water"] = water
+    if "free" in names and free is not None:            # BUG-292: only sites free of placed projects
+        kw["free"] = free
     for k, v in (where or {}).items():                  # FR-78: near / within / at (bp.sites.rank extensions)
         if k in names and v is not None:
             kw[k] = v
@@ -266,13 +268,36 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
     manifest = manifest if manifest is not None else fort_manifest(save_dir)
     water = water_ctx(save_dir, tpl)
-    sites = _rank(snap, tpl, params, n, manifest, water, where)
+    sites = _rank(snap, tpl, params, n, manifest, water, where, _free_of_projects(save_dir, tpl, params))
     if where:
         return sites, snap["id"]
     files.write_json_atomic(_sites_cache(save_dir, tpl), {"v": 2, "tpl": tpl, "snap": snap["id"], "n": n,
                                                           "params": params or {}, "man": _digest(manifest),
                                                           "water": _digest(water), "sites": sites})
     return sites, snap["id"]
+
+
+# BUG-292 (Run 15 Inkintense review: the 12 ranked aqshaft columns all lay on dug project floor, `bp.place aqshaft S1`
+# found 0 free of 53): a shaft's column starts on existing floor, mostly a placed room's; its ranking keeps only the
+# columns whose top is unowned or fortcore floor (a corridor) and whose emitted shaft no placed project clashes with
+# (Occupancy.clash, as bp.place checks it)
+FREE_RANK_TPLS = ("aqshaft",)
+
+
+def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):
+    if tpl not in FREE_RANK_TPLS:
+        return None
+    occ = occupancy(save_dir)
+
+    def free(c: dict) -> bool:
+        try:
+            doc = emit_at(tpl, params or {}, {"id": "S0", "anchor": list(c["anchor"]), "rot": c.get("rot", 0)}, "S0",
+                          "rank")
+        except BpError:
+            return False
+        top = occ.owner.get(tuple(c["anchor"]))          # the shaft starts in a corridor, never in a placed room
+        return (top is None or top[1] == "fortcore") and not occ.clash(doc)
+    return free
 
 
 def ranking(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None) -> tuple[list, str]:
@@ -423,6 +448,10 @@ class Occupancy:
                     if orth and dx and dy:           # BUG-292: a shaft's seal is its 4 orthogonal walls
                         continue
                     o = self.owner.get((x + dx, y + dy, z))
+                    # BUG-292 (review): a shaft's top is its stair in the existing floor it starts from (a fortcore
+                    # corridor tile): that floor's project is no clash there, a water project's still is
+                    if orth and (x, y, z) == (ax, ay, az) and not (dx or dy) and not (o and o[1] in WET_TPLS):
+                        continue
                     if (dx or dy) and near_anchor and not (o and o[1] in WET_TPLS):
                         continue
                     if o and o[1] not in skip and not ((dx or dy) and self._opened_off(o, (x + dx, y + dy, z), corr)):
