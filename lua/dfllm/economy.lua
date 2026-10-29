@@ -5969,7 +5969,7 @@ end
 -- M.supply_wants asks the caravans for mechanisms. State st.mech {need, levers, free, short, route, stone}.
 M.MECH = {tag = 'dfllm:mech', per_lever = 2, max_jobs = 4}
 M.MECH_SKIP = {'forbid', 'in_job', 'in_building', 'trader', 'garbage_collect', 'removed', 'dump', 'melt', 'hostile',
-               'owned', 'construction', 'encased'}
+               'owned', 'construction', 'encased', 'spider_web', 'on_fire', 'rotten'}   -- act.lua MECH_FLAGS
 function M.mech_free()
   local n = 0
   local ok = pcall(function()
