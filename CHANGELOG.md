@@ -1,5 +1,27 @@
 # CHANGELOG dfpilot
 
+## Defence before growth, no dry refuge with a way in, a death census with causes (BUG-377 to BUG-379, 2026-11-04; offline, live-untested)
+- **Why:** Run 16d (i4 Plankscale fell y382: two goblin sieges, pop 66 -> 1, 0 attackers killed; refuge Tiefe+ dry at every siege,
+  6 traps, soldiers in worn 30-55 % armor, no ore; phase P5 'waits for squads 3, drill, ready 1' for ten years, so the P6 hall and
+  the kits never came while the plans drafted explore/bedrooms/tavern/temple and the fort grew 7 -> 66; the brief said pop 1 and
+  'deaths unknown 67').
+- **BUG-377:** `plan.defense_gaps` (refuge_dry, an attacker path without one armed trap, soldiers' armor worn < 60 %): from P3, for 20+
+  citizens, `propose` sets `policy.pop_ceiling` to the citizens now, drafts the P6 trap hall (`fortcore stage 4 @same`) without the
+  phase raise, runs the traps draft as at P5, puts traps and the hall ahead of the growth builds (the refuge's pieces stay first), `bar:iron` first for the
+  armor; `plan check` warns about the ceiling, the missing hall/traps and the missing iron.
+- **BUG-378:** seal `choose`: a refuge without drink that has a way in (open stair head, tolerated opening, hatch/door with
+  building destroyers in sight) is not the civilians' burrow in a fight while Kern+ (or the interior burrow) is separated, reachable
+  and free of hostiles: they stay there at the BREACH level (no counts, the breach days). The merge15 'keep them in the open
+  refuge' case now moves them to Kern+.
+- **BUG-379:** care: an unknown cause in SIEGE/BREACH/RECOVERY is `fight`-tagged (DEATH `fight`, `siege` in the tallies, DEATHS_3PLUS,
+  clusters, `care.died_y`, the brief's `## deaths`); the year census takes the cause found later; 120 death records (found ones
+  dropped first) instead of 40. The cause is still not guessed (fair play).
+- **Tests (fail on ec9bd8e):** tests/test_bug377_379_defense.py (6), tests/lua/test_seal_refuge.lua (+2, one changed),
+  tests/lua/test_care_deaths.lua (+3). Schema appendix regenerated (DEATH `fight`).
+- **Live check:** a P3+ fort of 20+ with a dry refuge / few traps / worn armor: `plan propose` notes `BUG-377: defence short`, ceiling =
+  citizens, hall + traps first; a siege with Tiefe+ dry: REFUGE_FAIL names the way in and the alert burrow is Kern+, no flee while
+  Kern+ is closed; after a siege `DEATHS_3PLUS` causes `<id>:siege` and the brief census `siege N` that turns into killed/bled as
+  bodies are found.
 ## A shallower core in an aquifer world, the fortcore sites box, damp stone on a lost stair, explore depth (BUG-364 to BUG-367, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a-d (new forts in region1, an aquifer almost everywhere): no fortcore site anywhere (heavy_aquifer, cavern_lake,
   dig_lost), `bp sites fortcore` 0 ranked for good after every bp.cancel (i1, i2), the draft kept the cancelled `fortcore@same`,

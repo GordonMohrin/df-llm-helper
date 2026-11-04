@@ -428,6 +428,7 @@ end
 -- the DEATH line: "citizen 25889 died: dehydrated (incident THIRST; thirst 18879; patient)"
 function D.text(id, r, revised)
   local what = r.cause
+  if r.cause == 'unknown' and r.fight then what = 'unknown, in a ' .. r.fight end      -- BUG-379
   if r.cause == 'killed' and r.by then what = 'killed by ' .. r.by .. (r.killer and (' ' .. r.killer) or '') end
   return cut(string.format('citizen %d %s: %s (%s)', id, revised and 'found dead' or 'died', what,
                            table.concat(r.why, '; ')), 200)
@@ -456,10 +457,18 @@ function D.window(list, now, win, same)
 end
 
 -- causes of a list of records: "dehydrated 2, killed 1" (most first) and the counts
+-- BUG-379: the census key of a record: its cause, `unknown` while it is not found, and `siege` for an unknown one
+-- (not found, or never) that died in a fight (care's e.fl = the mode)
+function D.key(e)
+  local c = e.pend == 1 and 'unknown' or tostring(e.c or 'unknown')
+  if c == 'unknown' and e.fl then return 'siege' end
+  return c
+end
+
 function D.tally(list)
   local n, order = {}, {}
   for _, e in ipairs(list) do
-    local c = e.pend == 1 and 'unknown' or e.c
+    local c = D.key(e)
     if not n[c] then order[#order + 1] = c end
     n[c] = (n[c] or 0) + 1
   end

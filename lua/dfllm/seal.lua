@@ -3657,6 +3657,29 @@ local function choose(K, mode, want, hold)
     r.short = not au[refuge].fed
     return r
   end
+  -- BUG-378 (Run 16d Plankscale y382: Tiefe+ dry at every siege, a hatch the destroyers break, one open stair: the
+  -- civilians went there or fled while Kern+ stood closed): a refuge without its drink that has a way in is never the
+  -- civilians' burrow in a fight. Its way in: the open stair head (BUG-336), a hatch or door building destroyers in sight
+  -- break (BUG-337), an opening the dead-end tolerance lets by. Kern+ (or the interior burrow) separated, reachable and
+  -- without a hostile holds them at the BREACH level (no counts, the breach days) instead of the dry refuge or no
+  -- confinement; a burrow an opening reaches or a hostile stands in stays refused (flee as before)
+  local rf = au[refuge]
+  if rf and rf.exists and not rf.wet and (fight or r.danger) and bwin then
+    local sx = sep_of(refuge)
+    local soft = bd_sight(K) > 0 and refuge_closure(K) == 'soft'
+    local way = ropen or (sx and sx.exp and 'an opening reaches it') or (soft and 'a hatch or door the building destroyers break') or nil
+    if way then
+      for _, n in ipairs({kern, CFG.interior}) do
+        if n ~= refuge and rate(K, au, n, 'BREACH', t) then
+          r.pick, r.level, r.dryref = n, 'BREACH', true
+          r.rwhy = string.format('%s: no drink (drink %d<%d) and %s', refuge, int(rf.drink) or 0, int(rf.dneed) or 0,
+                                 tostring(way))
+          r.why = r.why or r.rwhy
+          return r
+        end
+      end
+    end
+  end
   if r.danger or mode == 'BREACH' then
     if bwin or rwet then
       if try(refuge, 'BREACH') then return r end

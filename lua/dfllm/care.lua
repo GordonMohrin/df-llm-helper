@@ -3973,7 +3973,7 @@ end
 
 -- the cause of one citizen's death (dfllm.deaths.classify); `since` = the death tick (a report up to half a day
 -- older counts: eventful delivers UNIT_DEATH up to 100 ticks late); groups = the announcement log, read once
-local function classify(K, c, p, id, since, groups)
+local function classify0(K, c, p, id, since, groups)
   local okm, mv = K.call('gate', 'moves')          -- BUG-027: the bridge moves (a citizen crushed by a bridge)
   mv = okm and type(mv) == 'table' and mv or nil
   local u = df.unit.find(id)
@@ -3984,6 +3984,20 @@ local function classify(K, c, p, id, since, groups)
   if ok and type(res) == 'table' then return res end
   K.log('warn', 'care: death cause of %d unreadable: %s', id, tostring(res))
   return {cause = 'unknown', src = 'none', why = {'unreadable'}, found = true}
+end
+
+-- BUG-379 (Run 16d Plankscale y382: 'pop 1' beside 'deaths unknown 67': the bodies of a siege lie unfound, the incident
+-- stays undiscovered, and the year's census kept the first answer): a death whose cause stays unknown while the fort is in
+-- a fight (a SIEGE, a BREACH or its RECOVERY) says so (res.fight = the mode): the DEATH line, the clusters and the year's
+-- census name it `siege` (a missing citizen of a siege), never `unknown`. The cause itself is not guessed (fair play).
+local FIGHT_MODES = {SIEGE = true, BREACH = true, RECOVERY = true}
+local function classify(K, c, p, id, since, groups)
+  local res = classify0(K, c, p, id, since, groups)
+  local m = K.mode()
+  if res.cause == 'unknown' and FIGHT_MODES[m] then
+    res.fight = m
+  end
+  return res
 end
 
 local function death_d(id, res, revised)
@@ -3999,6 +4013,7 @@ local function death_d(id, res, revised)
   if res.pos then d.pos = res.pos end
   if res.job then d.job = res.job end
   if res.bridge then d.bridge = trunc(tostring(res.bridge), 20) end
+  if res.fight then d.fight = res.fight end                  -- BUG-379
   if revised then d.revised = 1 end
   return d
 end
@@ -4009,6 +4024,7 @@ local function died_set(e, res)
   e.pend = (not res.found) and 1 or nil
   e.by = res.by and trunc(res.by, 40) or nil
   e.pat = res.patient and 1 or nil
+  e.fl = res.cause == 'unknown' and res.fight or nil      -- BUG-379
   if res.pos then e.x, e.y, e.z = res.pos[1], res.pos[2], res.pos[3] end
   e.job = res.job
 end
@@ -4022,7 +4038,13 @@ local function died_prune(c, p, now)
       out[#out + 1] = e
     end
   end
-  while #out > 40 do table.remove(out, 1) end
+  -- BUG-379 (67 deaths in one siege, the oldest 27 dropped before their bodies were found: never revised): room for a
+  -- siege's dead, the found ones go first
+  while #out > 120 do
+    local k = 1
+    for i, e in ipairs(out) do if e.pend ~= 1 then k = i; break end end
+    table.remove(out, k)
+  end
   p.died = out
   for sid, e in pairs(p.mend) do
     if type(e) ~= 'table' or not math.tointeger(e.t) or now - e.t > C.TICKS.YEAR then p.mend[sid] = nil end
@@ -4033,7 +4055,7 @@ local function died_tally(p, now)
   local t = {}
   for _, e in ipairs(p.died) do
     if now - e.t < C.TICKS.SEASON then
-      local k = e.pend == 1 and 'unknown' or tostring(e.c or 'unknown')
+      local k = DT.key(e)                                   -- BUG-379
       t[k] = (t[k] or 0) + 1
     end
   end
@@ -4065,7 +4087,7 @@ local function cluster_announce(K, c, cause, list, win)
     if #ids < 10 then
       ids[#ids + 1] = e.u
       idl[#idl + 1] = fmt(e.u)
-      cs[#cs + 1] = trunc(string.format('%d:%s%s', e.u, e.pend == 1 and 'unknown' or tostring(e.c),
+      cs[#cs + 1] = trunc(string.format('%d:%s%s', e.u, DT.key(e),
                                         e.by and (' by ' .. e.by) or ''), 60)
     end
     if e.pat == 1 then pats = pats + 1 end
@@ -4117,7 +4139,7 @@ local function cluster_scan(K, c, p)
   local ids, toks, seen = {}, {}, {}
   for i, e in ipairs(win) do
     ids[i] = e.u
-    local k = e.pend == 1 and 'unknown' or tostring(e.c)
+    local k = DT.key(e)
     if not seen[k] then seen[k] = true; toks[#toks + 1] = k end
   end
   table.sort(toks)
@@ -4142,6 +4164,10 @@ local function death_recheck(K, c, p)
         local res = classify(K, c, p, e.u, e.t, groups)
         if res.found then
           died_set(e, res)
+          for i = #p.dlog, 1, -1 do                  -- BUG-379: the year's census takes the cause found later
+            local l = p.dlog[i]
+            if type(l) == 'table' and l.u == e.u then l.c, l.fl = tostring(res.cause), e.fl; break end
+          end
           K.emit('DEATH', 'B', DT.text(e.u, res, true), death_d(e.u, res, true))
         end
       end
@@ -4182,7 +4208,8 @@ local function pop_stress(K, c, r, p, now)
     if type(e) == 'table' and now - (num(e.t) or -1e9) <= C.TICKS.YEAR then
       keep[#keep + 1] = e
       dy = dy + 1
-      by[tostring(e.c)] = (by[tostring(e.c)] or 0) + 1
+      local k = DT.key({c = e.c, fl = e.fl})                 -- BUG-379
+      by[k] = (by[k] or 0) + 1
     end
   end
   while #keep > 300 do table.remove(keep, 1) end
@@ -4609,7 +4636,7 @@ M.on.UNIT_DEATH = function(K, ev)
   local rec = {t = now, u = id}
   died_set(rec, res)
   p.died[#p.died + 1] = rec
-  p.dlog[#p.dlog + 1] = {t = now, c = res.found and tostring(res.cause) or 'unknown'}      -- FR-74: a year of deaths
+  p.dlog[#p.dlog + 1] = {t = now, u = id, c = res.found and tostring(res.cause) or 'unknown', fl = rec.fl}   -- FR-74: a year of deaths
   died_prune(c, p, now)
   K.emit('DEATH', 'B', DT.text(id, res, false), death_d(id, res, false))
   local recent = {}
@@ -4624,7 +4651,7 @@ M.on.UNIT_DEATH = function(K, ev)
       local e = by[d[2]] or {c = 'unknown'}
       ids[#ids + 1] = d[2]
       list[#list + 1] = e
-      cs[#cs + 1] = string.format('%d:%s', d[2], e.pend == 1 and 'unknown' or tostring(e.c))
+      cs[#cs + 1] = string.format('%d:%s', d[2], DT.key(e))
     end
     K.emit('DEATHS_3PLUS', 'A', trunc(string.format('%d citizens died within a day: %s', #recent,
                                                    (DT.tally(list))), 200), {n = #recent, ids = ids, causes = cs})

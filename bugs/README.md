@@ -388,6 +388,9 @@ Related: FR-xx, BUG-xx
 | [BUG-374](BUG-374-seal-says-nothing-to-close-while-status-names-ways-in.md) | fixed (offline, live-untested) | medium | Run 16d: seal at=last 'nothing to close' beside open ways in (old snapshot closes, counted ways without tiles) | dfpilot/cmd |
 | [BUG-375](BUG-375-perimeter-opens-again-every-year-and-holds-the-pop-cap.md) | fixed (offline, live-untested) | medium | Run 16d: saplings reopen the perimeter every year; pop cap held beside a queued seal | dfpilot/cmd, lua/readiness |
 | [BUG-376](BUG-376-audit-bypass-no-wall-tile-no-fix.md) | fixed (offline, live-untested) | low | Run 16d/16b: audit bypass 'no wall tile on the route' names no fix or waiver | dfpilot/bp/topo, cmd, brief, plan |
+| [BUG-377](BUG-377-defence-short-the-fort-grows-and-p5-drill-holds-hall-and-armor.md) | fixed (offline, live-untested) | critical | Run 16d Plankscale: pop 7 -> 66 on a dry refuge, 6 traps, worn 30-55 % armor; two sieges 66 -> 1; P5 'waits for drill' never drafted the P6 hall or the armor; the plan now holds the ceiling and puts traps, hall, refuge drink first | dfpilot/plan.py |
+| [BUG-378](BUG-378-dry-refuge-with-a-way-in-is-the-civilians-burrow.md) | fixed (offline, live-untested) | critical | Run 16d Plankscale y382: in the siege the alert took the dry refuge (a hatch the destroyers break) or none while Kern+ stood closed; Kern+ at the BREACH level instead | lua/dfllm/seal.lua |
+| [BUG-379](BUG-379-deaths-census-unknown-after-a-siege.md) | fixed (offline, live-untested) | medium | Run 16d Plankscale: 'pop 1' beside 'deaths unknown 67'; the year census kept the first answer, care kept 40 records; a siege's unfound dead are named `siege`, the census follows the revision | lua/dfllm/care.lua, deaths.lua, dfpilot/brief.py, schema.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
