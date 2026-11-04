@@ -1017,4 +1017,51 @@ T.test('BUG-336 review: before the first audit (boot) a BREACH ask for the open 
   T.eq({ok, pick}, {true, 'Kern+'})
 end)
 
+---------------------------------------------------------------- Review fix (merge15)
+-- A quiet SIEGE (no hostile in, no opening reaching Kern+) with the refuge hatch not built and Kern+ without drink:
+-- choose refused the open refuge at every level (BUG-336's `fight`), returned no pick, and siege turned the civ alert
+-- off; citizens held in the open refuge were sent out ('unsealed' to none, flee) though it was as safe as Kern+.
+local function kern_dry(W)
+  local v = df.global.world.items.other.DRINK
+  for i = 0, #v - 1 do v[i]._pos = {2, 2, Z + 1} end     -- the drink onto the surface, outside every burrow
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+end
+
+T.test('Review fix (merge15): quiet SIEGE, open refuge with its own well, Kern+ without drink, no interior burrow: the ' ..
+       'open refuge is the ' ..
+       'last resort at WET (old: no pick, the alert off); the deep defense too; with a hostile in Kern+ refused, flee',
+       function()
+  local W, M = fort{door = true, well = true}
+  with_manifest(W, 6, 6)
+  kern_dry(W)
+  M.CFG.interior = 'Weg+'               -- no interior burrow (the painted Innen+ holds the well: it would be the pick)
+  T.eq(W.state().alert.ref.op, 1)
+  W.set_mode('SIEGE')
+  local ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({ok, pick, flee}, {true, 'Tiefe+', false}, 'old: nil (the alert off)')
+  ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq({pick, flee}, {'Tiefe+', false}, 'deep defense, old: nil and flee')
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
+  ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({pick, flee}, {nil, true}, 'danger: the open refuge is the trap')
+end)
+
+T.test('Review fix (merge15): citizens held in the open refuge in a quiet SIEGE with no other usable burrow are kept ' ..
+       '(KEEP, no REFUGE_SWITCH; old: unsealed -> none, flee, the alert off); with a hostile in Kern+ they flee',
+       function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  kern_dry(W)
+  W.set_mode('SIEGE')
+  local ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq({ok, pick, flee}, {true, 'Tiefe+', false}, 'old: nil, flee')
+  T.eq(#evs(W, 'REFUGE_SWITCH'), 0)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
+  ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq({pick, flee}, {nil, true})
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[1].d.to, sw[1].d.why}, {1, '', 'unsealed'})
+end)
+
 T.done()

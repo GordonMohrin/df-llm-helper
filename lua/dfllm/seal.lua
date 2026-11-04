@@ -3648,6 +3648,15 @@ local function choose(K, mode, want, hold)
   if try_best('FED') then return r end
   if hold and try(CFG.interior, 'HOLD') then r.forced = au[CFG.interior].why; return r end
   if try_best('WET') then r.short = not au[r.pick].fed; return r end
+  -- Review fix (merge15): an open refuge is one room with Kern+, exactly as separated as Kern+ while no danger is known
+  -- (nothing reaches or stands in a candidate, Kern+ included): refusing it then protects nobody and only takes the last
+  -- burrow with drink, so the fight ended with no confinement (siege turned the civ alert off mid-siege, the deep
+  -- defense even under a held lockdown). Last resort at WET (its drink), never with danger: then it is the trap
+  if ropen and not r.danger and au[refuge] and au[refuge].exists and rate(K, au, refuge, 'WET', t) then
+    r.pick, r.level, r.ropen = refuge, 'WET', true
+    r.short = not au[refuge].fed
+    return r
+  end
   if r.danger or mode == 'BREACH' then
     if bwin or rwet then
       if try(refuge, 'BREACH') then return r end
@@ -3731,6 +3740,19 @@ end
 -- stands in it), unreachable, window (a refuge without drink after breach_days), released (BUG-331 review: siege eased the
 -- SIEGE and lifted the deep defense, r.release: the refuge is left for the free pick, never for no burrow at all),
 -- unsealed (BUG-336: the refuge's own way in is open, refuge_open: to the free pick, or to none and the citizens flee)
+-- Review fix (merge15): danger for the open refuge's 'unsealed' to none: choose found it (r.danger), or a visible hostile
+-- stands in Kern+ or the refuge, or an opening reaches Kern+ or the refuge (sep exposure)
+local function open_danger(K, refuge, t, r)
+  if r.danger then return true end
+  local kern = burrow_names(K)
+  for _, n in ipairs({kern, refuge}) do
+    local s = sep_of(n)
+    if s and s.exp then return true end
+    if hostile_in(K, n, t) > 0 then return true end
+  end
+  return false
+end
+
 local function leave_why(K, au, cur, refuge, t, r)
   local a = au[cur]
   if not (a and a.exists) then return 'gone', 'missing' end
@@ -3738,10 +3760,12 @@ local function leave_why(K, au, cur, refuge, t, r)
     return 'released', 'the eased siege lifted the deep defense'
   end
   -- BUG-336: the refuge the alert holds them in has an open way in (one room with Kern+): to the free pick; review: with
-  -- no other usable burrow to none (the citizens flee, fight_rule), never kept in the open refuge
+  -- no other usable burrow to none (the citizens flee, fight_rule), never kept in the open refuge. Review fix (merge15):
+  -- to none only with real danger (choose's r.danger, a hostile in Kern+ or the refuge, an opening reaching either):
+  -- in a quiet siege the open refuge is as safe as Kern+, and fleeing turned the alert off; the other reasons decide
   if cur == refuge and r and r.pick ~= refuge then
     local op = refuge_open(K, t)
-    if op then return 'unsealed', op end
+    if op and (r.pick or open_danger(K, refuge, t, r)) then return 'unsealed', op end
   end
   local dw = dry_why(cur, a)
   if dw then return 'dry', dw end
