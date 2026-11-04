@@ -375,6 +375,10 @@ Related: FR-xx, BUG-xx
 | [BUG-361](BUG-361-the-year-plan-seal-sits-on-the-fortcore-site-and-blocks-it.md) | fixed (offline, live-untested) | high | Run 16c: the seal on the dead cores' tunnels held every ranked fortcore site; the ranking keeps only free sites and names the holders | cmd.py, sites.py |
 | [BUG-362](BUG-362-runtime-name-stays-after-save-as.md) | fixed (offline, live-untested) | medium | Run 16b: runtime folder/status keep the pre-save-as name | lua/kern, tools/embark |
 | [BUG-363](BUG-363-propose-drafts-rooms-for-an-undug-core.md) | fixed (offline, live-untested) | medium | Run 16b: propose drafts rooms while the placed fortcore dug nothing (no state row) | dfpilot/plan |
+| [BUG-364](BUG-364-no-fortcore-site-in-an-aquifer-world.md) | partly fixed (offline, live-untested): a core of depth 1-2 is valid, `bp sites`, `bp.place` and the draft fall back to it, later stages keep the core's depth; open: a core fully above an aquifer 2 levels under the surface | critical | Run 16a-d: no fortcore site in the aquifer world (i1 surface z110, aquifer z105/107/108), depth 1 refused | fortcore.py, cmd.py, cli.py, plan.py |
+| [BUG-365](BUG-365-dig-lost-far-from-the-anchor-is-an-aquifer-tile.md) | fixed (offline, live-untested) | high | Run 16c i3: dig_lost at a chunk 45 tiles from the anchor = the civilian stair on an aquifer tile, DF's damp report not in the log | runner.lua |
+| [BUG-366](BUG-366-bp-sites-fortcore-stays-at-zero-after-bp-cancel.md) | fixed (offline, live-untested) | critical | Run 16a/16b: `bp sites fortcore` 0 ranked after bp.cancel (the sites box shrank to the pieces, 44 x 51 tiles), the draft kept the cancelled `fortcore@same` | cmd.py, cli.py, plan.py |
+| [BUG-367](BUG-367-explore-draft-leaves-the-depth-to-the-player.md) | fixed (offline, live-untested) | medium | Run 16b i2: explore depth 12 on an aquifer layer, the check said p.depth=2 for the player to type | plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

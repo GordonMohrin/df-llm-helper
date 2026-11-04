@@ -1,5 +1,29 @@
 # CHANGELOG dfpilot
 
+## A shallower core in an aquifer world, the fortcore sites box, damp stone on a lost stair, explore depth (BUG-364 to BUG-367, 2026-11-04; offline, live-untested)
+- **Why:** Run 16a-d (new forts in region1, an aquifer almost everywhere): no fortcore site anywhere (heavy_aquifer, cavern_lake,
+  dig_lost), `bp sites fortcore` 0 ranked for good after every bp.cancel (i1, i2), the draft kept the cancelled `fortcore@same`,
+  explore depth 12 on an aquifer layer with `p.depth=2` left to the player.
+- **BUG-364:** fortcore `depth` 1..12 (default 3): a core directly under the defense level. `bp sites fortcore` prints a "shallower
+  core" block (depth 2, 1) when nothing is ranked or every site passes a known aquifer level; `bp.place` at a ranked label falls
+  back to depth 2, 1 (note in cli.log); `plan propose` and follow's plan (`fit_core_depth`) give a new stage 1 and the new later
+  stages the shallower `p.depth`; a later stage at `site=same` / an explicit anchor takes depth/refuge from the stage 1 file
+  (`core_params_of`). Open: a core fully above an aquifer that starts 2 levels under the surface.
+- **BUG-365:** no offset bug: chunk 8 at x=111 for anchor 66,80,127 is the civilian stair (v=45 of the 35 x 52 fort). runner.lua
+  `lost()`: a lost designation without a damp report on a revealed aquifer tile (snapshot.tile `aq`) is damp stone (observe mode /
+  breach:damp), no longer `dig_lost`.
+- **BUG-366:** the cancelled project's breach was not the cause. The kernel's default sites box shrank to the remaining pieces
+  (44 x 51 tiles on i1), the 35 x 52 fortcore fitted nowhere (6,946 of 7,612 candidates 'outside box'). `bp sites fortcore --fresh`
+  asks for a box 52 tiles round the fort's pieces (`sites_box`, no contract change: the snapshot command's own bbox), an empty
+  ranking on a small snapshot says so (`box_hint`). `plan propose`: the fortcore builds of the applied plan that no project stands
+  behind (nothing on file, due seasons) are not done any more (`stale_core_keys`): stage 1 @S1 + seal again.
+- **BUG-367:** follow's automatic plan runs `fit_explore` (as `plan propose`): the draft's explore gets the depth that has a site
+  (`bp.place explore` without a depth stays refused with the hint).
+- **Tests (fail on 2fcd6e0):** tests/test_bug364_367_aquifer_core.py (15), tests/lua/test_bug365_lost_aquifer.lua (3).
+- **Live check:** i1-like: after bp.cancel `bp sites fortcore --fresh` lists sites (box ~150 x 150) and, in the aquifer, `shallower core
+  ... depth=1/2`; `bp.place fortcore depth=1`, stages at `site=same` build at depth 1; a lost stair designation on a damp tile logs
+  `designated again with the damp marker` / `breach:damp`, never `dig_lost`; `plan propose` after a cancel drafts fortcore stage 1
+  @S1; follow's explore draft carries `p.depth`.
 ## Startup shops on the surface, no door wait without a carpenter, one fortcore (BUG-356, BUG-357, BUG-358, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a-d (new forts, y372/373): the first year hung on the fortcore (no still, kitchen, carpenter or mason until
   stage 1 was dug, drink 3 d -> 0 in every fort); farms and two workshops projects stood 32 d at build 50 % 'waits for door'
