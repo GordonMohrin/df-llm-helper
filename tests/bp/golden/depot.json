@@ -1,0 +1,51 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "infra",
+  "manifest": {
+   "depot": [
+    72,
+    72,
+    100
+   ],
+   "v": 2
+  },
+  "materials": {
+   "trade_depot": 1
+  },
+  "params": {},
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "D(5x5)"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "build",
+    "mode": "build",
+    "orders": 0
+   }
+  ],
+  "tpl": "depot",
+  "v": 2
+ }
+]

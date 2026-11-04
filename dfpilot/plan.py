@@ -51,6 +51,7 @@ SEAL_LAST = {"tpl": "seal", "site": "S1", "p": {"at": "last"}}          # doors 
 # back by the seal demand (they are no "other new build" the refuge's pieces must precede)
 LIFE_TPLS = ("hospital", "tombs", "farms", "stockroom", "cistern", "refuge_drink")
 SEAL_REFUGE = {"tpl": "seal", "site": "S1", "p": {"at": "refuge"}}      # BUG-031: the refuge's stair-head hatch + tiles
+DEPOT = "depot"                           # bp/rooms.py: a 5x5 trade depot on open surface floor (BUG-368)
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
 EXPLORE_DEPTHS = _cmd.EXPLORE_DEPTHS        # propose tries the explore template's default depth first, then shallower
@@ -255,6 +256,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "core_dig": core_digging(save_dir, state),               # BUG-354: its stage 1 is still digging
             "startup": startup_placed(save_dir),                     # BUG-356: the surface still/kitchen/carpenter/mason set
+            "depot": depot_planned(save_dir, state),                 # BUG-368: a trade depot stands or is under way
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
             "farms": farm_facts(save_dir, state),                     # BUG-297: an open farms project, a farm site
@@ -612,7 +614,7 @@ def _food_shops(p: dict) -> bool:
 
 def build_kind(b: dict) -> str:
     """What a plan build is to the runner's seal first and rebuild policy (runner.lua kind_of): seal, tombs, explore,
-    supply, beds, defense or work (a plan build is never a depot or repair: the kernel queues those)."""
+    supply, beds, depot (BUG-368: the `depot` template), defense or work (a plan build is never a repair: the kernel queues those)."""
     tpl, p = b["tpl"], b.get("p") or {}
     if tpl == SEAL:
         return "seal"
@@ -620,6 +622,8 @@ def build_kind(b: dict) -> str:
         return "tombs"
     if tpl == EXPLORE:                                    # DECISIONS 4: the ore search is paused by no open seal
         return "explore"
+    if tpl == DEPOT:                                      # BUG-368: the surface trade depot (runner.lua kind_of 'depot')
+        return "depot"
     if tpl in SUPPLY_TPLS or (tpl == "workshops" and (_food_shops(p) or p.get("surface") == 1)):   # BUG-356: startup shops
         return "supply"
     if tpl in BEDS_TPLS:
@@ -1996,6 +2000,59 @@ def mood_buys(s: dict | None) -> list[str]:
     return out
 
 
+# BUG-370 (Run 16d i4 y378/y379: propose drafted explore@S1 and bedrooms@S1 whose every candidate site lay in a walk group the
+# citizens cannot reach, and gallery_o1 at a place whose tunnel wall is open; its own check then said ERROR and the player
+# struck the builds by hand every year): the builds whose own placement dry run fails for a reason of the site are left out
+FIT_KEEP_TPLS = ("fortcore", SEAL, "traps")        # own fits (fit_core, core_gaps, seal/traps expand); never dropped here
+
+
+def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
+    """BUG-370: place every NEW build of `doc` in plan order the way `apply` would (place_all: the first free site, no
+    overlap with a project or an earlier build) and leave out each one that finds no site that works: all candidate sites in a
+    walk group the citizens cannot reach, a site whose rock or tunnel does not fit (gallery_o1: 'the tunnel's east wall is
+    open'), no free site. fortcore, seal and traps are not judged (their own fits and the kernel's openings decide); a
+    build placed `same` after one that is not placed here is not judged either. The notes say what was left out and why.
+    Returns one line per build left out ([] when everything places or the bp package / snapshot cannot tell)."""
+    todo = new_builds(doc, prev)
+    if not todo:
+        return []
+    year = doc["year"]
+    try:
+        occ = occupancy(save_dir, skip={bp_id(year, si, bi) for si, bi, _ in todo})
+        snap = sites_snapshot(save_dir) if any(b["site"] != SAME for _, _, b in todo) else None
+    except Exception:                                   # noqa: BLE001 - unreadable bp files / no bp package: not judged
+        return []
+    placed: dict[str, dict] = {}
+    gone: list[tuple[dict, str]] = []
+    for si, bi, b in todo:
+        bid = bp_id(year, si, bi)
+        if b["site"] == SAME and b["tpl"] not in placed:
+            continue
+        try:
+            d = place(save_dir, b["tpl"], b.get("p") or {}, b["site"], bid, occ=occ, snap=snap,
+                      same=placed.get(b["tpl"]) if b["site"] == SAME else None)
+        except BpUnavailable:
+            return []
+        except BpError as e:
+            if b["tpl"] not in FIT_KEEP_TPLS:
+                gone.append((b, _cut(str(e).removeprefix("site " + str(b["site"]) + ": "), 110)))
+            continue
+        occ.add(d)
+        placed[b["tpl"]] = {"anchor": d["anchor"], "rot": d["rot"]}
+    lines = []
+    for b, why in gone:
+        for se in doc["seasons"]:
+            k = next((i for i, x in enumerate(se["build"]) if x is b), None)
+            if k is not None:
+                del se["build"][k]
+                break
+        fp = _cmd.fmt_params(b.get("p"))
+        lines.append(f"BUG-370: {b['tpl']}@{b['site']}{fp} left out: {why}")
+    if lines:
+        doc["notes"] += "; " + "; ".join(lines)
+    return lines
+
+
 def explore_room(save_dir: Path, sites: list, params: dict, tpl: str = EXPLORE) -> int | None:
     """BUG-241 (Run 15 Earthboat y375, Inkintense y373/y374: propose drafted explore@S1 in all four seasons while 1 or 2
     sites were free; `plan check` refused the draft: 'only 0 free site(s) for explore ... taken by y375s0b0'): how many
@@ -2320,6 +2377,22 @@ def startup_placed(save_dir: Path) -> bool:
     return False
 
 
+DEPOT_BUILD = {"tpl": DEPOT, "site": "S1"}                       # BUG-368: the trade depot on the surface, no fortcore needed
+
+
+def depot_planned(save_dir: Path, state: dict | None) -> bool:
+    """BUG-368 (Run 16b i2 Ostgate: NO_DEPOT / DEPOT_MISSING every year, no caravan ever traded, no metal or leather): a
+    trade depot stands or is under way: the kernel's manifest names one, a `depot` project is in <save>/bp (placed, running
+    or done), or a fortcore's stage 1 is digging (its bailey builds the depot). A fortcore a breach stopped is not one."""
+    if _kern_manifest(save_dir).get("depot"):
+        return True
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == DEPOT:
+            return True
+    return core_digging(save_dir, state)
+
+
 def core_digging(save_dir: Path, state: dict | None) -> bool:
     """BUG-354 (Run 16c: propose in year 1 wanted farms@S1, dining and bedrooms while the placed fortcore's stage 1 had dug
     nothing): a fortcore stage 1 project (not a retrofit, not parked on a breach) has not dug the core floor yet. Room
@@ -2596,6 +2669,16 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         front = [b for b in front if any(b is x for x in builds)]
         stone, held, sdrafts = None, None, []   # review: no note for a stone dig, cistern or temple left out here
         libs = list(dict.fromkeys(d["lib"] for p in plist if p["id"] == cur for d in p["deliver"] if d["k"] == "orders"))
+    depot_note = ""
+    # BUG-368 (Run 16b i2: no fortcore, so no trade depot, NO_DEPOT every year): a fort with no depot standing, planned or
+    # coming with a fortcore stage 1 of this draft gets one on the surface (site S1: sites.rank, `depot` template)
+    known = templates()                                      # what `check` accepts; None: bp package unavailable, not checked
+    if (fort or {}).get("depot") is False and (info is None or DEPOT in info) and (known is None or DEPOT in known) \
+            and not any(b["tpl"] == DEPOT or (b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) == 1)
+                        for b in builds):
+        builds.append(copy.deepcopy(DEPOT_BUILD))
+        depot_note = ("; BUG-368: no trade depot and no fortcore stage 1 to build one: depot@S1 on the surface "
+                      "(bp sites depot --fresh --near <wagon x,y,z>)")
     left_out = []
     if rb:                                       # the rebuild drafts only what the runner runs then
         left_out = [b["tpl"] for b in builds if build_kind(b) not in REBUILD_KINDS]
@@ -2633,7 +2716,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note
+    doc["notes"] += core_note + depot_note
     if fnote and (fdb is None or any(b is fdb for b in builds)):
         doc["notes"] += fnote
     if fsnote:
@@ -2994,6 +3077,7 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     fit_core_depth(save_dir, doc, prev)                       # BUG-364: a shallower core where the aquifer is near
     fit_explore(save_dir, doc, prev)                          # BUG-367: the explore's depth fits the levels known now
     fit_stone_dig(save_dir, doc, prev)                        # BUG-351: never a stone dig without a free site
+    fit_placeable(save_dir, doc, prev)                        # BUG-370: nor a build whose site is out of reach or does not fit
     doc["phase_target"] = cur
     doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
     doc = _with_new(doc, prev, [(si, b) for si, _, b in new_builds(doc, prev) if minimal_ok(b)])
@@ -3007,6 +3091,7 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
         fit_core_depth(save_dir, cand, prev)
         fit_explore(save_dir, cand, prev)
         fit_stone_dig(save_dir, cand, prev)
+        fit_placeable(save_dir, cand, prev)
         if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
             cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
             best = (cand, cwarn) if not cerrs else _subset(cand, state, prev, fort, decisions, tp)
@@ -3134,6 +3219,12 @@ def _dry_place(save_dir: Path, doc: dict, prev: dict | None, errs: list[str], wa
 def run(args, save_dir: Path) -> int:
     path = Path(args.file) if args.file else _draft(save_dir)
     prev = applied_plan(save_dir)
+    snap0 = sites_snapshot(save_dir)
+    why = _cmd.snapshot_stale(save_dir, snap0) if snap0 is not None else None
+    if why:                                           # BUG-369: drafts, checks and placements never rank on an old map
+        note = _cmd.auto_refresh(save_dir, why)[1]
+        if note:
+            print(note)
     if args.action == "propose":
         phases = load_phases(Path(args.phases) if args.phases else None)
         state = files.read_state(save_dir)
@@ -3146,6 +3237,7 @@ def run(args, save_dir: Path) -> int:
         cfit += fit_core_depth(save_dir, doc, prev)           # BUG-364: a shallower core where the aquifer is near
         sfit = fit_stone_dig(save_dir, doc, prev)             # BUG-351: a stone dig no free bedrooms site takes
         cfit += [sfit] if sfit else []
+        cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
         for ln in ([fit] if fit else []) + kfit + cfit:

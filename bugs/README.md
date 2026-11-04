@@ -379,6 +379,9 @@ Related: FR-xx, BUG-xx
 | [BUG-365](BUG-365-dig-lost-far-from-the-anchor-is-an-aquifer-tile.md) | fixed (offline, live-untested) | high | Run 16c i3: dig_lost at a chunk 45 tiles from the anchor = the civilian stair on an aquifer tile, DF's damp report not in the log | runner.lua |
 | [BUG-366](BUG-366-bp-sites-fortcore-stays-at-zero-after-bp-cancel.md) | fixed (offline, live-untested) | critical | Run 16a/16b: `bp sites fortcore` 0 ranked after bp.cancel (the sites box shrank to the pieces, 44 x 51 tiles), the draft kept the cancelled `fortcore@same` | cmd.py, cli.py, plan.py |
 | [BUG-367](BUG-367-explore-draft-leaves-the-depth-to-the-player.md) | fixed (offline, live-untested) | medium | Run 16b i2: explore depth 12 on an aquifer layer, the check said p.depth=2 for the player to type | plan.py |
+| [BUG-368](BUG-368-no-trade-depot-without-a-fortcore.md) | fixed (offline, live-untested) | high | Run 16b i2: no trade depot without a fortcore (NO_DEPOT / DEPOT_MISSING every year, no trade, no metal or leather); template `depot` (5x5 on open surface floor, walk group), propose drafts it | rooms.py, sites.py, emit.py, plan.py, cmd.py |
+| [BUG-369](BUG-369-stale-site-ranking-reports-no-sites.md) | fixed (offline, live-untested) | high | Run 16d/16b: `bp sites` without --fresh ranked 0 on a snapshot older than the dug core, the year plan had no workshops; a stale or empty ranking asks for a new snapshot itself | cmd.py, cli.py, plan.py |
+| [BUG-370](BUG-370-propose-drafts-builds-that-cannot-be-placed.md) | fixed (offline, live-untested) | medium | Run 16d i4: propose drafted explore/bedrooms in an unreachable walk group and gallery_o1 with an open wall (check ERROR); builds that cannot be placed are left out | plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
