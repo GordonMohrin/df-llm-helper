@@ -34,6 +34,20 @@
 - **Live check:** `bp sites workshops --fresh` right after DF autosaves/changes the map: sites ranked, `walk group` equals `inspect reach`;
   a cut-off group over thirst 25,000 without a bridge: DECISION stranded_drink once, status 'N stranded without drink'; plan propose after an
   explore breach names another anchor or 'no safe explore site'.
+## Moods that cannot be met: a stone dig of care's own, shops on the surface, a deadline decision with commands (BUG-393 to BUG-395, 2026-11-04; offline, live-untested)
+- **Why:** Run 16 round 2: i3 Yawninggilt 4 mood deaths (`boulders(hard) x1` / `blocks x1: none in the fort`, a Fey strangling), i2 Ostgate 5+ failed moods (ore, leather,
+  bars, a berserker), i1 Bachwald a Possessed dwarf with `no Craftsdwarfs` until the shop was placed by hand (24 x `only 0 free site(s) for workshops`). The stone dig a mood asks for
+  and every shop request needed a fortcore room site; none of these forts had one.
+- **BUG-393:** `care.stone_site/stone_dig` + `runner.stonedig`: a mood short of boulders/blocks that are none in the fort gets a small dig (PEACE) at the nearest revealed stone-layer wall
+  beside a floor tile the dwarf walks to, a straight tunnel of short + 2 tiles, nothing wet/aquifer/cavern/magma within 3 tiles, no soil or vein, the tile behind stays rock; at most 3 digs,
+  3 days apart; MOOD_CRITICAL names the dig or why none. `snapshot.tile` returns `mat`. Config `care.stone_*`.
+- **BUG-394:** follow tries a workshops request with a named selection (mood, mandatory, missing, gear ...) again as `surface = 1` in PEACE when no room site is free
+  (`wake.workshop_tries`, `_place_workshops`; the starter and plain requests unchanged).
+- **BUG-395:** `DECISION_NEEDED mood_deadline` (A) within `care.mood_decide` (15) days of insanity while a workshop, a material or the reach is missing: q + `cmds` (`trade.want` with the mood's tokens
+  and `stone`/`blocks`, `bp.place workshops only=<shops> surface=1`), `opts`, `auto`; again at 10/5/2 days; urgent in follow, the wake line carries the first command. No verb confines one dwarf (open).
+- **Tests (fail on bb87afb):** tests/lua/test_bug393_395_mood_stone.lua (6), tests/test_bug393_395_mood_stone.py (8).
+- **Live check:** a fort with a revealed hillside, no fortcore and a Secretive mood short of boulders(hard): kern.log `stone dig sdg... queued`, the boulders appear, MOOD_NEED ends; a mood without a
+  workshop: cli.log `BUG-394: ... placed on the surface`; a mood short at <= 15 days: `events --cls A` shows `mood_deadline` with `d.cmds`.
 
 ## Review fix (merge20): the SIEGE/BREACH raise waits by time, not by the hostile's distance (BUG-380; offline, live-untested)
 - **Why:** two review findings in gate.lua `holders()`: with a visible hostile 11..30 tiles away walkers 7..20 steps out were let go but

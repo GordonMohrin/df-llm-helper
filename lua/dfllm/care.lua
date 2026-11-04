@@ -138,6 +138,12 @@ M.DEFAULTS = {
   -- mood_crit_wall_s seconds apart. BUG-283/284: the kernel's own steps for the mood (shops, webs) every mood_act_every ticks
   mood_crit_nows = 1200, mood_crit_wait = 5, mood_crit_left = 10, mood_timer = 50000, mood_crit_every = 600,
   mood_crit_wall_s = 30, mood_act_every = 2400,
+  -- BUG-393 (Run 16 i3 Yawninggilt: 'boulders(hard) x1: none in the fort', 4 mood deaths; the stone dig a mood asks for needed a
+  -- fortcore room site): a mood whose boulders/blocks are none in the fort gets a small stone dig of care's own (runner.stonedig:
+  -- hard-stone wall on the dwarf's walk group within stone_r tiles, no water/magma/aquifer/cavern within stone_wet tiles), at most
+  -- stone_tries digs stone_retry days apart, at most stone_probes tile reads a search. BUG-395: DECISION_NEEDED mood_deadline
+  -- (ready commands) within mood_decide days of insanity while the mood is still short
+  stone_dig = true, stone_r = 14, stone_probes = 900, stone_wet = 3, stone_tries = 3, stone_retry = 3, mood_decide = 15,
   -- BUG-064: one BUILDING_TOPPLED per culprit per topple_every ticks; gate asks for a culprit near a vanished bridge
   -- within topple_win ticks and topple_r tiles
   topple_every = 2400, topple_win = 4800, topple_r = 6,
@@ -719,6 +725,8 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   st.mview = st.mview or {}
   st.mview[sid] = {u = u.id, t = line, left = days or -1, why = reasons[1], buy = rec.buy}
   if #reasons == 0 then return end
+  local okd, errd = pcall(M.mood_deadline, K, c, u, rec, kind, name, days, reasons, miss, types, ws)    -- BUG-395
+  if not okd then K.log('warn', 'care mood deadline %s: %s', sid, tostring(errd)) end
   local toks = {}
   for i, w in ipairs(reasons) do toks[i] = w end
   toks[#toks + 1] = MD.step(days) or 'unknown'
@@ -729,6 +737,9 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   if webs then did[#did + 1] = webs end
   local reach = M.mood_reach_text(K, rec, miss)                     -- BUG-341
   if reach then did[#did + 1] = reach end
+  local rk = M.rock_short(rec)                                       -- BUG-393: the stone dig of care's own, or why none
+  if rk and rec.sdig_txt then did[#did + 1] = rec.sdig_txt
+  elseif rk and rec.sdig_why then did[#did + 1] = 'no stone dig: ' .. rec.sdig_why end
   -- BUG-372: a material none in the fort (yarn, silk, gems ...) the chain may not make in time: the caravan is asked at once and
   -- the line says it with the days left (the reach text above names it for far items already)
   if not reach and type(rec.nosrc) == 'table' and #rec.nosrc > 0 and type(rec.buy) == 'table' and #rec.buy > 0 then
@@ -766,6 +777,74 @@ function M.mood_reach_text(K, rec, miss)
   end
   parts[#parts + 1] = 'open the way, bring them in, or wall him in'
   return table.concat(parts, '; ')
+end
+
+-- BUG-393: the boulders/blocks classes of the mood's last report that are none in the fort (nil without one)
+function M.rock_short(rec)
+  local out
+  for _, name in ipairs(type(rec.nosrc) == 'table' and rec.nosrc or {}) do
+    local n = tostring(name):match('^[%a_]+')
+    if n == 'boulders' or n == 'blocks' then out = out or {}; out[#out + 1] = n end
+  end
+  return out
+end
+
+-- BUG-395 (Run 16 i2/i3: 9 failed moods, 4 deaths, the kernel's last word was MOOD_CRITICAL 'none in the fort' with the days
+-- ticking; nothing ready to send): within mood_decide days of DF's insanity line a mood that is still short of a workshop, a
+-- material (none in the fort, out of reach, waiting for days) gets DECISION_NEEDED mood_deadline with the commands that can
+-- still help, again at each step of days left (10, 5, 2): the caravans asked for the tokens (trade.want), the shops placed on
+-- the surface (bp.place workshops only= surface=1: no fortcore needed). The mood cannot be cancelled and no verb confines one
+-- dwarf: if it fails he turns insane, so the text says it and the soldiers' sortie is the last line (squad.sortie).
+function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, ws)
+  local lim = math.tointeger(tonumber(c.mood_decide)) or 15
+  if not days or days > lim then return end
+  local why = {}
+  for _, w in ipairs(reasons) do why[w] = true end
+  if not (why.workshop or why.material or why.reach or why.waiting) then return end
+  local T, sid = K.now(), fmt(u.id)
+  local toks = {M.MD.step(days) or 'unknown'}
+  if not CAD.due(rec.dl, T, {sid}, toks, {ticks = DAY, wall_s = c.mood_crit_wall_s}) then return end
+  rec.dl = CAD.mark(T, {sid}, toks)
+  local cmds, opts, short = {}, {}, {}
+  local want, seen = {}, {}
+  for _, t in ipairs(type(rec.buy) == 'table' and rec.buy or {}) do
+    if not seen[t] and #want < 6 then seen[t] = true; want[#want + 1] = t end
+  end
+  for _, n in ipairs(M.rock_short(rec) or {}) do
+    local t = n == 'blocks' and 'blocks' or 'stone'
+    if not seen[t] and #want < 6 then seen[t] = true; want[#want + 1] = t end
+  end
+  if #want > 0 then
+    local q = {}
+    for _, t in ipairs(want) do q[#q + 1] = '"' .. t .. '"' end
+    cmds[#cmds + 1] = [[dfllm cmd trade.want '{"want":[]] .. table.concat(q, ',') .. [[]}']]
+    opts[#opts + 1] = 'trade.want'
+  end
+  local ask = {}
+  for _, t in ipairs(types or {}) do if #ask < 3 and t:match('^%w+$') then ask[#ask + 1] = t end end
+  if #ask == 0 and why.workshop and not ws then ask[1] = M.SKILL_WS[best_skill(u)] or 'Craftsdwarfs' end
+  if #ask > 0 then
+    cmds[#cmds + 1] = [[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"]] .. table.concat(ask, ',') ..
+                      [[","surface":1}}']]
+    opts[#opts + 1] = 'workshops'
+  end
+  local lack = {}
+  for _, sl in ipairs(rec.sl or {}) do
+    local nm, bk = M.MD.slot_parts(sl)
+    if bk ~= M.MD.BK_HAVE then lack[#lack + 1] = nm .. (bk ~= '' and (' (' .. bk .. ')') or '') end
+  end
+  if #lack == 0 then
+    for _, t in ipairs(ask) do lack[#lack + 1] = 'no ' .. t end
+    for _, cl in ipairs(miss or {}) do lack[#lack + 1] = cl end
+  end
+  local auto = {}
+  if rec.sdig_txt and M.rock_short(rec) then auto[#auto + 1] = 'stone dig' end
+  if #want > 0 then auto[#auto + 1] = 'caravans asked' end
+  local q = string.format('%s %s: %d d to insanity, still short: %s; if it fails he turns on others: send these, the squad is the last line',
+                          M.MD.short_name(name), kind or '?', days, table.concat(lack, ', '))
+  K.emit('DECISION_NEEDED', 'A', trunc('strange mood deadline: ' .. q, 200),
+         {id = 'mood_deadline', q = trunc(q, 200), cmds = #cmds > 0 and cmds or nil, opts = #opts > 0 and opts or nil,
+          auto = #auto > 0 and auto or nil})
 end
 
 local function mood_seen(K, c, r, p, u, kind)
@@ -3310,6 +3389,132 @@ end
 
 local CORPSE_CLS = {bone = true, shell = true, leather = true}
 
+-- BUG-393 (Run 16c i3 Yawninggilt: a Secretive mason, a Fey, a Possessed and a Fey strangling died for 'boulders(hard) x1 / blocks x1:
+-- none in the fort', the dig a mood asks for is a `bedrooms` project that needs a fortcore room site and there was none): a safe
+-- small stone dig. Returns {{x, y, z}, ...} (nearest first), or nil + why. The wall tile: a revealed STONE layer wall (no soil, no
+-- vein, no aquifer, no cavern, no designation, no building) beside an open floor tile the dwarf can walk to, and the tunnel runs
+-- straight on from it for up to `want` tiles over the same tests; no water, magma, aquifer or cavern within stone_wet tiles of any dug
+-- tile (and none right above or below it), and the tile behind the last one stays rock (no new way in). Reads only revealed tiles
+-- (snapshot.tile), at most stone_probes of them; the tile material cannot tell soft from hard stone (the report says so).
+function M.stone_site(K, c, from, want, used)
+  if not from then return nil, 'no position' end
+  local R, budget = math.max(2, num(c.stone_r) or 14), math.max(10, num(c.stone_probes) or 900)
+  local W = math.max(1, num(c.stone_wet) or 3)
+  local memo, reads, out = {}, 0, false
+  local function tile(x, y, z)
+    local k = key3(x, y, z)
+    local t = memo[k]
+    if t == nil then
+      if reads >= budget then out = true; return nil end
+      reads = reads + 1
+      local ok, r = K.call('snapshot', 'tile', x, y, z)
+      t = (ok and type(r) == 'table') and r or false
+      memo[k] = t
+    end
+    return t or nil
+  end
+  local function wet(t)
+    return (num(t.flow) or 0) > 0 or t.magma == true or t.aq == true or t.cav == true or t.c == '~' or t.c == 'w' or t.c == '%'
+  end
+  local function dry(x, y, z)
+    for dy = -W, W do
+      for dx = -W, W do
+        local t = tile(x + dx, y + dy, z)
+        if t and wet(t) then return false end
+      end
+    end
+    for _, dz in ipairs({-1, 1}) do
+      local t = tile(x, y, z + dz)
+      if t and wet(t) then return false end
+    end
+    return true
+  end
+  local function rock(t)                  -- a plain stone wall to dig: layer rock, nothing on it, not claimed
+    return t.c == '#' and not t.soilmat and not t.aq and not t.cav and (t.dig or '') == '' and (t.bld or '') == ''
+           and (t.shape == nil or t.shape == '' or t.shape == 'WALL') and (t.mat == nil or t.mat == 'STONE')
+  end
+  local z = from.z
+  local cand = {}
+  for y = from.y - R, from.y + R do
+    for x = from.x - R, from.x + R do
+      cand[#cand + 1] = {math.max(math.abs(x - from.x), math.abs(y - from.y)), math.abs(x - from.x) + math.abs(y - from.y), y, x}
+    end
+  end
+  table.sort(cand, function(a, b)
+    for k = 1, 4 do if a[k] ~= b[k] then return a[k] < b[k] end end
+    return false
+  end)
+  local banned = {}
+  for _, k in ipairs(type(used) == 'table' and used or {}) do banned[k] = true end
+  local need, seen_wall, best = math.max(1, want), 0, nil
+  for _, cd in ipairs(cand) do
+    if out then break end
+    local x, y = cd[4], cd[3]
+    local t = tile(x, y, z)
+    if t and rock(t) and not banned[x .. ',' .. y .. ',' .. z] then
+      seen_wall = seen_wall + 1
+      for _, dir in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+        local fx, fy = x - dir[1], y - dir[2]
+        local f = tile(fx, fy, z)
+        if f and f.c == '.' and (f.bld or '') == '' and not wet(f) and reach_ok(K, {x = fx, y = fy, z = z}, from) then
+          local line = {}
+          for k = 0, need - 1 do
+            local lx, ly = x + dir[1] * k, y + dir[2] * k
+            local lt = tile(lx, ly, z)
+            local nt = tile(lx + dir[1], ly + dir[2], z)
+            if not (lt and rock(lt)) or (nt and nt.c ~= '#') or banned[lx .. ',' .. ly .. ',' .. z] or not dry(lx, ly, z) then break end
+            line[#line + 1] = {lx, ly, z}
+          end
+          if #line >= math.min(need, 2) then return line, nil end
+          if #line > 0 and (not best or #line > #best) then best = line end
+        end
+      end
+    end
+  end
+  if best then return best, nil end
+  if out then return nil, string.format('no safe stone within %d tiles (%d reads)', R, reads) end
+  return nil, seen_wall > 0 and string.format('%d stone wall tiles within %d tiles, none safe and reachable', seen_wall, R)
+              or string.format('no revealed stone wall within %d tiles', R)
+end
+
+-- BUG-393: the stone dig of one mood: when a mood's boulders/blocks are none in the fort (short = how many), PEACE, no dig of ours
+-- running: queue runner.stonedig on the nearest safe hard-stone wall (stone_tries digs stone_retry days apart; a tile of an earlier
+-- dig that gave no boulder is skipped). rec.sdig = {id, at, n}; rec.sdig_why = why none. Returns the text for the MOOD line or nil.
+function M.stone_dig(K, c, m, rec, short)
+  if short <= 0 or c.stone_dig == false then return rec.sdig_txt end
+  local now = K.now().tick
+  local sd = rec.sdig
+  if type(sd) == 'table' and sd.id then
+    local okq, stt = K.call('runner', 'proj_state', sd.id)
+    if okq and type(stt) == 'table' and stt.done ~= 1 then return rec.sdig_txt end      -- still being dug
+  end
+  if (num(rec.sdig_n) or 0) >= (num(c.stone_tries) or 3) then return rec.sdig_txt end
+  if now - (num(rec.sdig_t) or -1e12) < (num(c.stone_retry) or 3) * DAY then return rec.sdig_txt end
+  if K.mode() ~= 'PEACE' then rec.sdig_why = 'digs run in PEACE only'; return rec.sdig_txt end
+  local okp, pend = K.call('runner', 'pending', 'stonedig')
+  if okp and type(pend) == 'number' and pend > 0 then return rec.sdig_txt end
+  local site, why = M.stone_site(K, c, m.upos, short + 2, rec.sdig_used)
+  if not site then
+    rec.sdig_why = why
+    if rec.sdig_log ~= why then rec.sdig_log = why; K.log('info', 'mood unit %s: no stone dig: %s', m.sid, tostring(why)) end
+    return rec.sdig_txt
+  end
+  local ok, okr, id = K.call('runner', 'stonedig', site, 'mood unit ' .. tostring(m.sid))
+  if not (ok and okr) then
+    rec.sdig_why = 'stone dig refused: ' .. trunc(tostring(ok and id or okr), 60)
+    K.log('warn', 'mood unit %s: runner.stonedig refused: %s', m.sid, tostring(ok and id or okr))
+    return rec.sdig_txt
+  end
+  rec.sdig_used = type(rec.sdig_used) == 'table' and rec.sdig_used or {}
+  for _, t in ipairs(site) do rec.sdig_used[#rec.sdig_used + 1] = t[1] .. ',' .. t[2] .. ',' .. t[3] end
+  while #rec.sdig_used > 40 do table.remove(rec.sdig_used, 1) end
+  rec.sdig = {id = tostring(id), at = string.format('%d,%d,%d', site[1][1], site[1][2], site[1][3]), n = #site}
+  rec.sdig_t, rec.sdig_n, rec.sdig_why, rec.sdig_log = now, (num(rec.sdig_n) or 0) + 1, nil, nil
+  rec.sdig_txt = string.format('stone dig %s: %d tiles at %s', tostring(id), #site, rec.sdig.at)
+  K.log('info', 'mood unit %s: %s', m.sid, rec.sdig_txt)
+  return rec.sdig_txt
+end
+
 -- what care starts itself: the autobutcher policy run (bone, shell, leather from animals over the targets;
 -- pets are never butchered) and a stone dig through the runner (PROJECT_REQUEST bedrooms, as tombs). Hunters,
 -- production orders and purchases are economy's and trade's (care.mood_wants).
@@ -3359,6 +3564,7 @@ local function mood_report(K, c, r, p)
     local rec = not m.gone and p.moods[m.sid]
     if rec then
       local labels, classes, primary, seen, nopath, far = {}, {}, {}, {}, false, 0
+      local rockn = 0                               -- BUG-393: boulders/blocks short and none in the fort
       local nosrc, nseen, kinds, plain = {}, {}, {}, {}
       local blocked, fetch = {}, {}                 -- K3: every open slot with its blocker; the blocked ones go first
       local glassy = false                          -- Run 11: a missing "cut gems" filter (cut glass serves it)
@@ -3392,6 +3598,7 @@ local function mood_report(K, c, r, p)
             end
           end
           labels[#labels + 1] = nd.legacy or R.label(nd.nd, short)
+          if (name == 'boulders' or name == 'blocks') and (nd.src or 0) == 0 then rockn = rockn + short end   -- BUG-393
           local path = false
           for _, alt in ipairs(nd.alts) do
             local cls = alt.cls or 'other'
@@ -3484,6 +3691,7 @@ local function mood_report(K, c, r, p)
                   slots = slot_texts(slots, 3, 150)})
         end
         acquire(K, r, p, primary)
+        M.stone_dig(K, c, m, rec, rockn)          -- BUG-393: the dig that needs no fortcore room
         local age = now - (u.since or now)
         -- DECISION_NEEDED once the need stood for wake_ticks (at once without any path); again when a blocker is new
         -- (after max(mood_risk_every, wake_wall_s)) and as the weekly reminder (rewake_ticks and wake_wall_s, util/cadence)

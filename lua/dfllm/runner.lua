@@ -3153,7 +3153,7 @@ local function kind_of(P, d)
     local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
     return (p.peace == 1 and p.cl ~= 1) and 'defense' or 'repair'     -- BUG-081: a closure is a repair, not a bridge
   end
-  if t == 'mood_drink' then return 'mood' end                         -- BUG-081: a drink for a mood dwarf, never paused
+  if t == 'mood_drink' or t == 'stonedig' then return 'mood' end      -- BUG-081: a drink for a mood dwarf, never paused; BUG-393: its stone
   if t == 'workshops' and Q.mood_shop(d) then return 'mood' end       -- BUG-283: a shop a strange mood waits for
   if t == 'aqshaft' then return 'aq' end              -- FR-95: an open aquifer level is never paused by seal or care first
   return P.class == 'defense' and 'defense' or 'work'
@@ -5906,6 +5906,40 @@ function M.nook_state(K, id)
   return 'placed'
 end
 
+-- BUG-393 (Run 16c i3 Yawninggilt y380: 'boulders(hard) x1: none in the fort', four moods failed, the stone dig a mood asks for is a
+-- `bedrooms` project that needs a fortcore room site, so no dig was ever placed): care's small stone dig for a strange mood. tiles =
+-- {{x, y, z}, ...} (1-stonedig_max wall tiles care picked: revealed hard-stone wall on the citizens' walk group, a tunnel from open
+-- floor, away from water, magma, aquifer and caverns). One dig stage, no room, no door, no burrow, no manifest: every dug wall
+-- tile is a boulder. PEACE only (class living). Returns ok, project id.
+M.CFG.stonedig_max = 12
+function M.stonedig(K, tiles, why)
+  if type(tiles) ~= 'table' or #tiles == 0 or #tiles > M.CFG.stonedig_max then
+    return false, string.format('need 1-%d tiles', M.CFG.stonedig_max)
+  end
+  local cells, seen = {}, {}
+  for i, t in ipairs(tiles) do
+    local x, y, z
+    if type(t) == 'table' then x, y, z = int(t[1] or t.x), int(t[2] or t.y), int(t[3] or t.z) end
+    if not (x and y and z) or not on_map(x, y, z) then return false, 'bad tile ' .. i end
+    local k = x .. ',' .. y .. ',' .. z
+    if seen[k] then return false, 'tile ' .. i .. ' twice' end
+    seen[k] = true
+    cells[#cells + 1] = {x, y, z, 'd'}
+  end
+  sort_cells(cells)
+  local id = new_id(K, 'sdg')
+  local d = {v = 2, tpl = 'stonedig', site = 'care', class = 'living', params = obj{n = #cells}, rot = 0,
+             anchor = {cells[1][1], cells[1][2], cells[1][3]}, manifest = {v = 2}, materials = obj{},
+             stages = {{label = 'stone.dig', mode = 'dig', orders = 0, defense = 0, chunks = abs_chunks(cells)}}}
+  local ok, err = register(K, id, d, 1, 'stonedig')
+  if not ok then return false, err end
+  Q.join_run(K, id)                                  -- a mood waits: not after the run in hand
+  save(K)
+  K.log('info', 'stone dig %s queued: %d tiles from %d,%d,%d (%s)', id, #cells, cells[1][1], cells[1][2], cells[1][3],
+        trunc(why, 80))
+  return true, id
+end
+
 -- Run 11: explore shafts open to a cavern whose top wall does not stand yet (readiness keeps R0 `caverns` for them,
 -- threat counts hostiles near them): n, {{x, y, z_top, z_bottom}, ...}
 function M.cavern_open(K)
@@ -6126,7 +6160,7 @@ end
 -- while one runs: nothing else may hold the slots while a dwarf in a strange mood waits
 M.CFG.mood_slots = 2
 function Q.mood_proj(P)
-  return P ~= nil and (P.tpl == 'mood_drink' or (S.mood_ids or {})[P.id] == true)
+  return P ~= nil and (P.tpl == 'mood_drink' or P.tpl == 'stonedig' or (S.mood_ids or {})[P.id] == true)
 end
 -- a mood project queued while a run is in hand works in it (a task before the run's check/end), its slot beside `active`
 function Q.join_run(K, id)

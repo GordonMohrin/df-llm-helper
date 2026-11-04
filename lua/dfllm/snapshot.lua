@@ -100,6 +100,7 @@ local function tt_info(tt)
     r.shape = shape                              -- BUG-102: the tiletype shape name (care's nook judges it like place.lua)
     r.soilmat = SOIL_MAT[mat] == true            -- FR-95: soil of any shape (a soil wall cannot be smoothed)
     r.bare = mat == 'SOIL' and shape == 'FLOOR'  -- BUG-303: bare soil floor (no grass, no plant): what DF collects sand from
+    r.mat = mat                                  -- BUG-393: the tiletype material (STONE layer rock, MINERAL vein, SOIL ...)
   end)
   tt_cache[tt] = r
   return r
@@ -289,7 +290,7 @@ function M.tile(K, x, y, z)
   return {c = c, dig = dig, bld = bld, flow = des.flow_size or 0, magma = des.liquid_type == true,
           cav = des.feature_global == true, ice = info.ice == true, shape = info.shape, plant = plant or false,
           occ = oc and int(oc.building) or 0, aq = M.revealed_aquifer(des) == true, soilmat = info.soilmat == true,
-          sand = oks and sand == true}
+          sand = oks and sand == true, mat = info.mat}   -- BUG-393: mat = the tiletype material name (care's stone dig skips veins)
 end
 
 -- BUG-058 (economy's farm plots; Run 13 y513: surface crops on a plot on z149 made no PlantSeeds job): does the plot tile
