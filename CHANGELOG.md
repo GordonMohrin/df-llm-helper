@@ -10,7 +10,7 @@
   economy's reach checks); `snapshot.groups(near, prefer)` lets a tree answer a citizens' group it touches (cv_reach, idle reasons).
 - **BUG-391:** STRANDED 'no raised bridge leads to drink' now raises DECISION_NEEDED `stranded_drink` (class A, urgent) with the commands
   (inspect reach / water_sources, `bp sites cistern --near <their tile>`); `siege.dry_group` makes economy count them as thirsty (alarm, thirst
-  decision) and drop the 'nobody thirsty: they drink water' all-clear; `bp sites --near/--at` on another walk group is not filtered.
+  decision) and drop the 'nobody thirsty: they drink water' all-clear; `bp sites --near/--at` on a cut-off walk group keeps only sites on that side (none from the citizens' group).
 - **BUG-392:** `explore` ranking keeps off recorded breach tiles within 6 tiles of the shaft's levels and off the anchors of failed explores
   (`manifest.failed_explore` from the bp files); none left -> 'no safe explore site'.
 - **Tests:** tests/lua/test_bug390_reach.lua (3), test_stranded.lua (+1), test_economy_food_run15.lua (+1), tests/test_bug390_392_reach.py (5).

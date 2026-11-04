@@ -318,12 +318,18 @@ def reachable(cands: list, snap: dict, tpl: str, focus=None) -> list:
     sites export marks it: snapshot wg); the others carry `walk` = the citizens' group. A tile without a read group claims
     nothing; a snapshot without walk groups is not filtered. ValueError when every candidate lies beyond.
     BUG-391: a ranking asked for one spot (`focus` = near / at) on a tile of another walk group (a cut-off group's well) is
-    not filtered: the caller chose that group."""
+    is not filtered to the citizens' group: the caller chose the cut-off group, so the sites on the citizens' group are dropped."""
     wg = snap.get("wg")
     if not isinstance(wg, dict) or not cands:
         return cands
     if focus is not None and walk_at(snap, focus) == "0":
-        return cands
+        # the caller chose the cut-off group: only sites on that side (or without a read group) are offered, never a
+        # site on the citizens' main group, which the stranded cannot reach
+        stranded = [c for c in cands if walk_at(snap, c["anchor"]) != "1"]
+        if not stranded:
+            raise ValueError(f"{tpl}: every candidate site near that spot lies on the citizens' walk group "
+                             f"{wg.get('home')}, which the cut-off group there cannot reach")
+        return stranded
     home = wg.get("home")
     keep, far = [], []
     for c in cands:

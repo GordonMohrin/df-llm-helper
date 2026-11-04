@@ -24,12 +24,13 @@ off, no DECISION. The water zone the kernel had accepted lay on another group. 7
 - siege.lua:534 `M.dry_group(K)`: {n, thirst, grp, pos} of the last cut-off set over the thirst mark without drink on its group (2 game days).
 - economy.lua: `alarm_check` counts them as thirsty (alarm + `DECISION_NEEDED thirst`), no `st.water`; `drink_why` leads with
   "4 stranded without drink (group 2829)".
-- sites.py `reachable(.., focus)`: a ranking asked near/at a tile on another walk group is not filtered (the caller chose that group).
+- sites.py `reachable(.., focus)`: a ranking asked near/at a tile on another walk group ('0') keeps only the sites not on the citizens' group ('1'), so the stranded never get a home-side well (ValueError when none is left); mixed 0/1 test test_a_cutoff_focus_drops_sites_on_the_citizens_group.
 
 ## Tests
 tests/lua/test_stranded.lua (+1: citizens on the field, DECISION once with the commands, dry_group, gone with the thirst), tests/lua/test_economy_food_run15.lua
 (+1: no all-clear, alarm, status), tests/test_bug390_392_reach.py (near a '0' tile, wake urgency).
 
 ## Open
+The status 'N stranded without drink' (mem.dry, siege.lua) is also set while a bridge rescue is found and running; conservative, accepted.
 No automatic well: placing a building for a group the kernel cannot reach needs a builder there (the decision names the commands). What separates the
 walk groups is still not named in STRANDED.

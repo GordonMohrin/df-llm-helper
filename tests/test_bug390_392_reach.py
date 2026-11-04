@@ -50,6 +50,19 @@ def test_a_ranking_asked_for_a_spot_on_another_group_is_not_filtered(deep):
     assert all(abs(s["anchor"][0] - ax) + abs(s["anchor"][1] - ay) <= 3 for s in got)
 
 
+def test_a_cutoff_focus_drops_sites_on_the_citizens_group(deep):
+    snap, man = deep
+    plain = bp.rank(snap, "explore", {"depth": 4}, manifest=man, n=6)
+    ax, ay, az = plain[0]["anchor"]
+    # a mixed snapshot: only the tiles around the first anchor are the cut-off group, the rest is the citizens' group
+    mixed = _groups(snap, lambda x, y: abs(x - ax) + abs(y - ay) <= 3)
+    got = bp.rank(mixed, "explore", {"depth": 4}, manifest=man, near=[ax, ay, az], within=40, n=6)
+    assert got
+    for s in got:
+        assert sites.walk_at(mixed, s["anchor"]) != "1", s["anchor"]
+        assert "walk" not in s
+
+
 # ---------------------------------------------------------------- BUG-392: not again where a dig stopped
 def test_explore_keeps_off_a_breach_and_a_failed_anchor(deep):
     snap, man = deep
