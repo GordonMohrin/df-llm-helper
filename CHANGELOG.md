@@ -1,5 +1,17 @@
 # CHANGELOG dfpilot
 
+## Run 15 gate review (merge15): walkers do not give a bridge up, a forced raise beats a blocked park, a destroyed bridge is not busy (BUG-335/342/338 review fix, 2026-11-04; offline, live-untested)
+- **Why:** review of merge15: path-only crossers made every queued pull a 'blocked' cancel toward gate.pull_cap (busy SIEGE
+  traffic: give-up, every lever parked giveup_wait, also with a hostile at the gate); a bridge destroyed in the settle window
+  kept r.nec (gate.busy true for ever, military froze station switches); a second lever puller stepping about in his room
+  cancelled the taken raise as 'approach'.
+- **What changed (gate.lua):** a blocked cancel with nobody on/next to the footprint counts as a walker (r.ap, AP_CREDIT,
+  gate_traffic), not toward r.bc; pick(..., forced) pulls past the 'blocked' give-up's parks (r.bpark) for a forced raise;
+  gone_check/rep_check clear nec/settle, gate.busy false for a gone bridge; M.approach skips the room's own pullers for a raise
+  (not on the footprint). inner_wait's comment names siege's RAISE_BY timer as the SIEGE release. No contract change.
+- **Tests (fail on d40fb59):** tests/lua/test_merge15_gate_review.lua (4).
+- **Live check:** a siege with traffic over B2: `gate_traffic` instead of a GATE_FAIL blocked give-up; with a parked bridge and
+  a hostile within force_near a GATE_FORCED raise. Open: military.lua:2224 squad frozen outside a rising B2 (BUG-335 Open).
 ## Run 15 gate review: our squads kept off a busy bridge, approach cancels bounded (BUG-335/342 review, 2026-11-04; offline, live-untested)
 - **Why:** the verifiers of BUG-335 and BUG-342: gate only waited for our soldiers walking over a bridge (Earthboat squads 99-101
   would hold every SIEGE close until the give-up), the inner station flipped melee -> b2 the moment B2 moved, stairs/ramps (another

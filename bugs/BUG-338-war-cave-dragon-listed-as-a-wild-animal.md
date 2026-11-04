@@ -99,3 +99,9 @@ over the killing field and a civilian in it, O1 rises at T0, B1 only on the T+45
   during a lockdown until a hostile is within 30 tiles (60 with O1 not up). Safe while O1 is up; the raise takes 250-300 ticks
   after the pull, so a fast attacker can reach B1 first. Not tuned live.
 - **FR: cavern openings sealed by default.** Asked in the round, not built: y379 had no cavern opening. Needs its own case.
+
+## Review fix (merge15)
+- Documentation only (gate.lua inner_wait): in a SIEGE the inner hold also ends when siege.raise's RAISE_BY timer (450 ticks,
+  whatever census.u.atk says) wants B1 up; the hostile-distance releases decide alone only in an ALERT lockdown. Civilians
+  still out after 450 ticks of a siege are shut out (crossers keep the footprint clear). Not changed: letting the hold beat the
+  siege timer would keep B1 down with a siege under way; needs a live look first.
