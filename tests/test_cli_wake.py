@@ -1302,8 +1302,8 @@ def test_bug238_takeover_and_the_old_follow_exits(save, monkeypatch, capsys):
         if len(calls) == 1:                                    # the old follow takes the save back (its --takeover)
             lock_doc(save, 5151, time.time())
     monkeypatch.setattr(wake.Follower, "poll", poll)
-    assert wake.run(ARGS(takeover=True, max_s=5)) == 0 and calls == [1]
-    assert "pid 5151 took over" in capsys.readouterr().out
+    assert wake.run(ARGS(takeover=True, max_s=5)) == wake.FOLLOW_OWNED_EXIT and calls == [1]
+    assert "another follow owns this instance (pid 5151); do not restart" in capsys.readouterr().out
     assert json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))["pid"] == 5151
 
 

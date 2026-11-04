@@ -27,8 +27,17 @@ same moment both believed to hold it). `refresh_lock` (:1526) rewrote the lock a
   `files.follow_owner` and a doctor line 'follow: pid N (beat 4s ago, took over from pid M 17s ago)', a problem line when the lock and
   the heartbeat name two pids.
 
+## Review fix (merge20)
+Confirmed MAJOR: the cool-down only delayed the ping-pong to a 120 s period when two `--takeover` starts each have a restarting
+Monitor (the refused start exits, its Monitor restarts it after the cool-down, it takes the lock back, the other one loses ...), and the
+'allowed once' comment/message was wrong. Now `wake.took_from_me` (wake.py:1517) / `acquire_lock` (wake.py:1523) refuse a takeover
+regardless of time when the owner took over from the requesting start (lock `took` == my pid, or `took_sid` == my start id: the lock
+records `sid` = DFLLM_FOLLOW_SID else the parent pid, a Monitor's restarts keep it; beats keep `took_sid`). The refused and the displaced
+start exit `FOLLOW_OWNED_EXIT` (4) with 'follow: another follow owns this instance (pid N); do not restart', which a Monitor can key on.
+Only stopping the owner frees the instance. Plain 'already runs' (no --takeover) stays exit 3. Tests: +3 in the test file below.
+
 ## Tests
-tests/test_bug385_follow_lock.py (8).
+tests/test_bug385_follow_lock.py (11).
 
 ## Open
 A wrapper that restarts a refused follow every few seconds still starts a process each time (it exits at once, exit 3).
