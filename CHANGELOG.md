@@ -11,6 +11,22 @@
 - **Tests (fail on b35af6d):** tests/lua/test_gate_crush.lua (2), tests/lua/test_siege.lua (2).
 - **Live check:** in a siege kern.log `... waits for soldier N walking onto it in K steps`, no GATE_CRUSH_RISK/BRIDGE_CRUSH.
   Uncertain: a path set only after the pull; military still routes squads over a core bridge (gate waits for them now).
+## Run 15 sieges: GATE_FAIL names the real reason, lever pullers no longer hold their own bridge (BUG-342, 2026-11-04; offline, live-untested)
+- **Why:** Earthboat y387 (BREACH `O1 not up at T+900`, GATE_FAIL B2 `no_worker` x2, the fort fell), Drillchamber (GATE_FAIL O1/B2
+  `no_worker`): each of those GATE_FAILs came 5-50 ticks after a fresh pull; the pulls before were cancelled one after the other
+  for units walking toward the bridge (i3: 90 B2 pulls in 8,400 ticks, `B2 up pull cancelled: citizen 26729 2 tiles from it and
+  walking toward it`). Root cause lua/dfllm/gate.lua:1821 (`r.stuck = 'no_worker'` for any pull not taken yet) read first by
+  check_fail :1978. And fortcore's `dfllm-levers-b2` lies 1-3 tiles from B2: `B2 up waits for citizen 27079 next to it`, 27079 its
+  puller (:1868 and :1772 counted him; BUG-141 exempted only the job's worker).
+- **What changed:** a pull waiting for its worker is `queued`; GATE_FAIL `no_worker` only for pulls nobody took in 200 ticks, the
+  text names the lever rooms and their pullers at the levers; new GATE_FAIL why `cancelled` (`d.pulls`, `d.units` the last walker)
+  when the walking-toward cancels outnumber them. An assigned puller standing in his bridge's lever room beside the footprint holds
+  it no more than the job's worker; on the footprint he holds it, the walking-toward cancel is unchanged. Contract: GATE_FAIL why
+  `cancelled`.
+- **Tests (4 fail on b35af6d):** tests/lua/test_bug342_gate_workers.lua (6).
+- **Live check:** next siege/drill: `cancelled: N pulls cancelled for units walking toward it, the last ...` instead of no_worker;
+  no `B2 up waits for citizen <puller> next to it` for a puller in dfllm-levers-b2. Open: the traffic that cancels the pulls (the
+  footprint safety side), pullers rarely reach their room under the civ alert (574 `away` in i3).
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or
