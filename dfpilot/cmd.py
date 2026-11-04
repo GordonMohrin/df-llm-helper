@@ -281,13 +281,17 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
 # found 0 free of 53): a shaft's column starts on existing floor, mostly a placed room's; its ranking keeps only the
 # columns whose top is unowned or fortcore floor (a corridor) and whose emitted shaft no placed project clashes with
 # (Occupancy.clash, as bp.place checks it)
-FREE_RANK_TPLS = ("aqshaft",)
+# BUG-361 (Run 16c i3: the year plan's seal y373s0b0 stood on the doors of the dead cores' tunnels; the ranked fortcore sites
+# beside them were all 'taken', and `bp.place fortcore` found 0 free): the fortcore ranking keeps only the sites no placed
+# project holds either, and names the holders when none is left
+FREE_RANK_TPLS = ("aqshaft", "fortcore")
 
 
 def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):
     if tpl not in FREE_RANK_TPLS:
         return None
     occ = occupancy(save_dir)
+    held: set[str] = set()
 
     def free(c: dict) -> bool:
         try:
@@ -295,8 +299,14 @@ def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):
                           "rank")
         except BpError:
             return False
-        top = occ.owner.get(tuple(c["anchor"]))          # the shaft starts in a corridor, never in a placed room
-        return (top is None or top[1] == "fortcore") and not occ.clash(doc)
+        if tpl == "aqshaft":
+            top = occ.owner.get(tuple(c["anchor"]))      # the shaft starts in a corridor, never in a placed room
+            if not (top is None or top[1] == "fortcore"):
+                return False
+        hit = occ.clash(doc)
+        held.update(hit)
+        return not hit
+    free.held = held                                      # type: ignore[attr-defined]  # ids of the holding projects
     return free
 
 

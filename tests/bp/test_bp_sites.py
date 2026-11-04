@@ -69,7 +69,7 @@ def test_fortcore_rejects_marks_and_water(land):
 def test_levels_below_the_snapshot_are_unknown_but_never_below_z0():
     shallow = terrain(z0=6, z1=12).snapshot(purpose="sites")      # snapshot stops 4 levels below the surface
     sites = bp.rank(shallow, "fortcore")
-    assert sites and sites[0]["why"].endswith("5 levels below the snapshot")   # z5 core .. z1 refuge sump
+    assert sites and "5 levels below the snapshot" in sites[0]["why"]   # z5 core .. z1 refuge sump
     for s in sites:
         bp.emit("fortcore", {"stage": 3}, s)                       # still inside the map
     near_bottom = terrain(z0=0, z1=8, surf=6).snapshot(purpose="sites")

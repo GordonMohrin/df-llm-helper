@@ -370,6 +370,9 @@ Related: FR-xx, BUG-xx
 | [BUG-356](BUG-356-first-year-hangs-on-the-fortcore-no-still-kitchen-carpenter.md) | fixed (offline, live-untested) | high | Run 16a-d: the first year of every new fort hangs on the fortcore: no still, kitchen or carpenter until stage 1 is dug, drink 3 d -> 0 | rooms.py, sites.py, plan.py |
 | [BUG-357](BUG-357-door-deadlock-no-carpenter.md) | fixed (offline, live-untested) | high | Run 16b/16c: workshops and farms wait 32+ days for a door that only a Carpenter's workshop (that does not exist) makes | lua/dfllm/runner.lua |
 | [BUG-358](BUG-358-three-parallel-fortcore-projects.md) | fixed (offline, live-untested) | medium | Run 16d: three parallel fortcore projects, two set aside for 34-50 days (a plan's stage 1 beside the hand-placed core) | dfpilot/cmd.py |
+| [BUG-359](BUG-359-site-ranking-ignores-aquifer-and-cavern-water-under-the-shaft.md) | fixed (offline, live-untested) | critical | Run 16c: every fortcore site broke into a heavy aquifer or a cavern lake, the ranking said nothing; heavy_aquifer never counted as a wet layer; the ranking now rates the levels under the anchor and names them | sites.py, snapshot.lua, schema.py |
+| [BUG-360](BUG-360-bp-sites-fortcore-no-water-reachable-with-a-brook-in-the-embark.md) | fixed (offline, live-untested) | medium | Run 16b: 'no water reachable' with a brook in the embark rectangle (the sites box did not cover it); the line names the box, a cut-off body counts | sites.py |
+| [BUG-361](BUG-361-the-year-plan-seal-sits-on-the-fortcore-site-and-blocks-it.md) | fixed (offline, live-untested) | high | Run 16c: the seal on the dead cores' tunnels held every ranked fortcore site; the ranking keeps only free sites and names the holders | cmd.py, sites.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

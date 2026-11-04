@@ -1281,6 +1281,7 @@ local function start(K, j)
   if j.purpose == 'sites' then
     j.home = M.home_group()
     if j.home then j.grows = {} end
+    j.aqn = {}        -- BUG-359: revealed tiles with the aquifer flag per level (M.revealed_aquifer; hidden tiles never)
   end
 end
 
@@ -1349,6 +1350,7 @@ local function scan_span(j, y, z, x0, x1)
       end
       if plant and c == '.' then add_mark(des.outside and j.sky_plants[plant] or j.marks[plant], x, y, z) end
       if des.feature_global == true then add_mark(j.marks.cavern, x, y, z) end
+      if j.aqn and M.revealed_aquifer(des) == true then j.aqn[z] = (j.aqn[z] or 0) + 1 end
     end
     out[#out + 1] = c
     if gout then
@@ -1419,6 +1421,11 @@ local function encode(j, id)
   local head = {v = 2, id = j.id, tick = j.tick, purpose = j.purpose, bbox = j.bbox,
                 bridges = json.object(j.bstate), traps = json.array(traps)}
   if next(marks) then head.marks = marks end
+  if j.aqn and next(j.aqn) then                    -- BUG-359: the levels with revealed aquifer tiles: {"z<N>": count}
+    local aq = {}
+    for z, n in pairs(j.aqn) do aq['z' .. z] = n end
+    head.aqz = json.object(aq)
+  end
   if #j.parts > 1 or not contains(j.parts[1], j.bbox) then head.parts = j.parts end      -- BUG-043: a union export
   if j.margin then head.margin = {j.margin[1], j.margin[2], j.margin[3]} end           -- the default box's margin
   j.head = function(x)

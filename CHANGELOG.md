@@ -21,6 +21,22 @@
 - **Live check:** a new fort: `plan propose` = seal + fortcore stage 1 + `workshops surface=1`; `bp sites workshops surface=1
   --fresh --near <wagon x,y,z>`; the four shops stand in days, drink days rise; `bp.place fortcore` twice: the second refused;
   farms without a carpenter pass their build stage.
+## Fortcore sites rated for the aquifer and water under the shaft, no-water reason, free sites only (BUG-359, BUG-360, BUG-361, 2026-11-04; offline, live-untested)
+- **Why:** i3 Run 16c (site97): every reachable fortcore site broke into water (`breach:heavy_aquifer` at A74_92_125_3,
+  `breach:cavern_lake` at A88_92_125_3, dig_lost at A106_78_125_1) and the ranking said nothing; i2 Run 16b Ostgate: 'no
+  water reachable' with a brook in the embark; i3: the seal y373s0b0 on the dead cores' tunnels held every ranked site.
+- **What changed:** sites `_breach_layers`: one heavy_aquifer stop is a wet layer (its label's first word was never
+  damp/water); `_flooded`: a fortcore site is dropped when revealed water lies within 4 tiles of a deep dug rect, penalized
+  per known aquifer level (250) and per cavern level (150), and the reason line says `aquifer at z..` / `cavern near z..` /
+  `no aquifer or water known on z..-z..`; `known_aquifer` (manifest `aquifer_levels` + snapshot `aqz` + breach layers) also
+  governs rooms (`aquifer_ok`). snapshot.lua: a sites export counts revealed aquifer-flag tiles per level (`aqz`; hidden
+  tiles never read). BUG-360: the no-water line names the snapshot box (none / puddle / no route), a body under 8 tiles
+  that touches the box border counts. BUG-361: the fortcore ranking keeps only sites no placed project holds
+  (`FREE_RANK_TPLS`) and names the holders. RANK_V 4. Contract: snapshot `aqz?` (schema, CONTRACTS, appendix).
+- **Open:** below hidden rock nothing is known; the default sites box is still the fort pieces plus margin.
+- **Tests (fail on 595364a):** tests/test_bug359_361_sites.py, tests/lua/test_snapshot_aquifer.lua (2).
+- **Live check:** `bp sites fortcore --fresh` on i3: sites passing z118 gone, others say `aquifer at z..`; on i2 the line
+  names the box; with a seal on the best site, other sites are listed.
 ## Site ranking only where the citizens can walk, an unreachable dig is named after 3 days, year 1 digs before it plans rooms (BUG-352, BUG-354, 2026-11-04; offline, live-untested)
 - **Why:** i3 Run 16c (site97): all 13 citizens stood in walk group 1562, `bp sites fortcore` ranked S2/S3 on soil beyond
   the brook (group 1), the fortcore on [58,128,125] stood 30 d at s1.dig 0 % ('unreachable DigChannel'), the fort starved;

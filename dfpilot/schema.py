@@ -1343,7 +1343,9 @@ SNAPSHOT = Obj(req={"v": Const(V), "id": ID, "tick": TICK, "purpose": Str(enum=[
                     "parts": Arr(BBOX, 1, 24), "margin": Tup([NAT, NAT, NAT]),
                     # BUG-352: a sites export: the citizens' walk group (home) and per level the rows of '1' (a walkable
                     # tile in that group), '0' (in another walk group), '-' (no walkable tile read)
-                    "wg": Obj(req={"home": Int(1), "rows": Obj(extra=Arr(Str("^[01-]*$")), keys=r"^z-?\d+$")})})
+                    "wg": Obj(req={"home": Int(1), "rows": Obj(extra=Arr(Str("^[01-]*$")), keys=r"^z-?\d+$")}),
+                    # BUG-359: a sites export: per level the number of revealed tiles with the aquifer flag
+                    "aqz": Obj(extra=NAT, keys=r"^z-?\d+$")})
 
 
 def _snapshot_post(doc: dict, out: list[str]) -> None:
