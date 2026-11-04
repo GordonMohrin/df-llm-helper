@@ -306,6 +306,8 @@ WATER_LIM: dict = {
     "ws_from": (1, 10), "wz": "bool", "wz_every": _TICKS, "wz_max": (0, 32), "wz_forget": _TICKS,
     # BUG-330: the care burrow Pflege+ for a patient over care_thirst outside the alert burrows, no hostile within care_near
     "care": "bool", "care_thirst": _THIRST, "care_near": (1, 200),
+    # BUG-344: a thirsty citizen beside an accepted well (water.drink_fix, economy's thirst decision)
+    "well_thirst": _THIRST,
 }
 
 

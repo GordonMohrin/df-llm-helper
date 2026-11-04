@@ -123,47 +123,18 @@ T.test('BUG-263 (Run 15 Drillchamber y373: well 17813 accepted, its pond 17822 r
   T.eq(W.state().water.hosp_ok, 1)
 end)
 
--- BUG-343/344: the zone beside the pond (as near to it as the well) is the carriers' nearest source: it is the supply
-T.test('BUG-263: a wet Water Source zone beside the pond is the real supply: the well beside it is accepted (no loop)',
-       function()
-  local W = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['22,12,5'] = '~'}, setup = function(W)
+T.test('BUG-263: a wet Water Source zone is the real supply: the well beside a pond is accepted (no loop)', function()
+  local W = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['30,12,5'] = '~'}, setup = function(W)
     hospital(W)
     well(W, 20, 12, 5)
     pond(W, 80, 21, 12, 5)
-    F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 22, y1 = 12, x2 = 22, y2 = 12,
+    F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 30, y1 = 12, x2 = 30, y2 = 12,
                                         z = 5, spec_sub_flag = {active = true}})
   end}
   day(W)
   local src = W.state().water.src
   T.eq(#src, 2, 'the well and the zone')
   T.eq(W.find_events('HOSPITAL_DRY'), {})
-  T.ok(not logged(W, 'water: pond zone 80 removed'), 'the pond stays')
-end)
-
----------------------------------------------------------------- BUG-343/344
-T.test('BUG-343/344 (Run 15 Guildcleans y386-y390: "hospital ok, src 3 (well 18183 in Kern+)", 13 patients dead of thirst; ' ..
-       'Drillchamber: a citizen died of thirst beside well 18324 "wet"): the hospital template well with its own pond ' ..
-       'beside it stays a loop while the only wet Water Source zone lies far away; the pond goes, the hospital is dry',
-       function()
-  local wid
-  local W = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['60,40,5'] = '~'}, setup = function(W)
-    hospital(W)
-    wid = well(W, 20, 12, 5).id
-    pond(W, 80, 21, 12, 5)
-    F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 60, y1 = 40, x2 = 60, y2 = 40,
-                                        z = 5, spec_sub_flag = {active = true}})
-  end}
-  day(W)
-  local w = W.state().water
-  T.eq(#w.src, 1, 'old code: 2 (the loop well accepted beside the far zone)')
-  T.eq(w.src[1], {60, 40, 5}, 'only the far zone')
-  T.eq(w.hosp_ok, 0, 'old code: 1 ("hospital ok")')
-  T.ok(logged(W, 'water: pond zone 80 removed'), 'old code: kept (no loop with a wet zone anywhere)')
-  local hd = W.find_events('HOSPITAL_DRY')
-  T.eq(#hd, 1)
-  local want = string.format('well %d at 20,12,5 is fed only by its own pond 80', wid)
-  T.ok(hd[1].d.why:find(want, 1, true), hd[1].d.why)
-  T.ok(hd[1].d.why:find('nearest accepted water', 1, true), hd[1].d.why)
 end)
 
 T.test('BUG-263: the source a planned hospital was placed by drops out (its pond appears): HOSPITAL_DRY names it and ' ..
@@ -359,6 +330,56 @@ T.test('BUG-262: damp stone in a cistern basin (an own tile under an own tile) k
   local hv = false
   for f = 1, 3 do hv = AQ.wet(X, Pf, {22, 22, 89, 'd'}, f) or hv end
   T.eq(hv, true, 'another project: rising water stops it')
+end)
+
+---------------------------------------------------------------- BUG-344
+T.test('BUG-344 (Run 15d Drillchamber y379-y397: DECISION_NEEDED thirst "water near the fort (well), brewing, barrels?" ' ..
+       'for years, 13 citizens dead of thirst beside well 18324 read wet): water.drink_fix names the well a thirsty ' ..
+       'citizen stands at, or the missing water, with the recipe and the commands', function()
+  local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~'}, setup = function(W)
+    well(W, 20, 12, 5, {id = 18324})
+  end}
+  T.eq(M.drink_fix(W.K), nil, 'before the first run')
+  day(W)
+  local txt, cmds = M.drink_fix(W.K)
+  T.ok(txt:find('accepted water: well 18324 at 20,12,5', 1, true), txt)
+  T.eq(cmds, {'dfllm cmd inspect what=water_sources'})
+  -- citizen 2 (no patient) at thirst 61,000 stands beside the well: it gives him no water
+  W.unit(2).counters2.thirst_timer = 61000
+  W.move(2, 19, 12, 5)
+  day(W)
+  txt, cmds = M.drink_fix(W.K)
+  T.ok(txt:find('citizen 2 (thirst 61000) stands beside well 18324 at 20,12,5, read wet: it gives no water; ', 1, true),
+       'old code: no such text: ' .. tostring(txt))
+  T.ok(not txt:find('until then', 1, true), 'no hospital tail: ' .. txt)
+  T.eq(cmds, {'dfllm cmd inspect what=water_sources', 'dfllm bp sites cistern'})
+  -- two tiles away: not at the well
+  W.move(2, 18, 12, 5)
+  day(W)
+  T.ok(M.drink_fix(W.K):find('accepted water', 1, true))
+  -- no accepted water at all
+  W.cmap['20,12,3'] = '.'
+  day(W)
+  txt = M.drink_fix(W.K)
+  T.ok(txt:find('no accepted water; ', 1, true), txt)
+end)
+
+T.test('BUG-344: economy\'s thirst decision carries water.drink_fix and its commands, brewing as a command too', function()
+  local W = world{tiles = {}, setup = function(W) well(W, 20, 12, 5, {id = 18324}) end}
+  day(W)
+  package.loaded['dfllm.economy'] = nil
+  local E = require('dfllm.economy')
+  W.load(E)
+  for i = 1, 3 do W.unit(i).counters2 = {thirst_timer = 45000, hunger_timer = 0} end
+  for _ = 1, 3 do day(W) end
+  local d
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'thirst' then d = e.d end end
+  T.ok(d, 'a thirst decision')
+  T.ok(d.q:find('no accepted water; ', 1, true), 'old code: "water near the fort (well), brewing, barrels?": ' .. d.q)
+  T.ok(#d.q <= 200, d.q)
+  T.eq(d.cmds[1], 'dfllm cmd inspect what=water_sources')
+  T.eq(d.cmds[2], 'dfllm bp sites cistern')
+  T.eq(d.cmds[3], E.FOOD_CMD.farms)
 end)
 
 T.done()

@@ -3150,9 +3150,15 @@ local function alarm_check(K, c, p, days)
   local now = K.now().tick
   if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY then
     p.thirst_woke = now
+    -- BUG-344 (Run 15d Drillchamber y379-y397: this question 271 times, 37 dead of thirst, 13 beside well 18324): water
+    -- says what its last run found (a well a thirsty citizen stands at, no accepted water: the recipe) with the commands
+    local okw, wtxt, wcmds = K.call('water', 'drink_fix')
+    local wq = okw and type(wtxt) == 'string' and wtxt or 'water near the fort (well)'
+    local cmds = okw and type(wcmds) == 'table' and wcmds or {}
+    if #cmds < 8 then cmds[#cmds + 1] = M.FOOD_CMD.farms end            -- brewing needs plants (BUG-340)
     K.emit('DECISION_NEEDED', 'A', string.format('thirst: %d citizens thirsty, drink %d days', thirsty, days.drink_d),
-           {id = 'thirst', q = string.format('%d thirsty, drink %d d: water near the fort (well), brewing, barrels?',
-                                             thirsty, days.drink_d)})
+           {id = 'thirst', q = string.format('%d thirsty, drink %d d (brew: farms, barrels): %s', thirsty,
+                                             days.drink_d, wq):sub(1, 200), cmds = cmds})
   end
 end
 

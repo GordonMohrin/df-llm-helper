@@ -425,6 +425,13 @@ T.test('BUG-343 (Run 15 Guildcleans y386-y390: 13 patients dead of thirst while 
   T.eq(M.give_effect(p, gv(), {id = 6, thirst = 9000}, 12 * 1200, nil).key, 'run', 'a timer standing still proves nothing')
   T.eq(M.give_effect(p, {key = 'open'}, {id = 6, thirst = 20000}, 13 * 1200, nil).key, 'open')
   T.eq(p.grun, nil, 'another verdict forgets it')
+  -- BUG-343 review (the dead starved too, hunger 53,000-98,000): a starving patient names the care, not the water
+  p = {grun = {u = 7, t = 0, th = 61000}}
+  local r = M.give_effect(p, gv(), {id = 7, thirst = 61000 + 3 * 1200, hunger = 88000}, 3 * 1200, nil).reason
+  T.ok(r:find('hunger 88000 too: no food reaches him either, the care fails, not the water', 1, true), r)
+  p = {grun = {u = 7, t = 0, th = 61000}}
+  r = M.give_effect(p, gv(), {id = 7, thirst = 61000 + 3 * 1200, hunger = 1000}, 3 * 1200, nil).reason
+  T.ok(r:find('a dry well, or the carriers cancel?', 1, true), r)
 end)
 
 T.test('BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought Syndrome): PATIENT_DYING says why the ' ..
@@ -433,18 +440,34 @@ T.test('BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought S
                   setup = function(W)
                     local u = W.unit(5)
                     u.body = {wounds = {}}
-                    u.counters = {unconscious = 30, paralysis = 0}
+                    -- DFHack: paralysis is a field of unit.counters2 (scripts/full-heal.lua:127), webbed and
+                    -- suffocation of unit.counters (full-heal.lua:115/119); a `paralysis` in counters is not read
+                    u.counters = {unconscious = 30, webbed = 0, suffocation = 12, paralysis = 99}
+                    u.counters2.paralysis = 40
+                    u.counters2.hunger_timer = 60000
                     u.syndromes = {active = {{type = 7}}}
                     df.syndrome = {find = function(id) return id == 7 and {syn_name = 'webbed dust'} or nil end}
                   end}
   day(W)
   local ev = W.find_events('PATIENT_DYING')
   T.eq(#ev, 1)
-  T.eq(ev[1].d.lie, 'wounds 0, unconscious, syndrome webbed dust', 'old code: nil')
+  local want = 'wounds 0, unconscious, suffocation, paralysis, hunger 60000, syndrome webbed dust'
+  T.eq(ev[1].d.lie, want, 'first pass: counters.paralysis (never set in DF), no suffocation, no hunger')
   local line
   for _, l in ipairs(W.logs) do if tostring(l.msg):find('near death of thirst', 1, true) then line = l.msg end end
-  T.ok(line and line:find('unit 5: wounds 0, unconscious, syndrome webbed dust', 1, true), tostring(line))
+  T.ok(line and line:find('unit 5: ' .. want, 1, true), tostring(line))
   df.syndrome = nil
+  -- water on his tile (drowning), webbed; an unreadable map is no fault
+  local M = package.loaded['dfllm.water']
+  local K = {call = function(m, f, x, y, z)
+    if m == 'snapshot' and f == 'tile' and x == 3 and y == 4 and z == 5 then return true, {c = '~', flow = 4} end
+    return true, nil                                      -- hidden
+  end}
+  local v = {pos = {x = 3, y = 4, z = 5}, counters = {webbed = 9}, counters2 = {}}
+  T.eq(M.lie(K, v), 'webbed, in water 4/7')
+  v.pos = {x = 9, y = 9, z = 9}
+  T.eq(M.lie(K, v), 'webbed')
+  T.eq(M.lie(K, nil), '')
 end)
 
 T.done()

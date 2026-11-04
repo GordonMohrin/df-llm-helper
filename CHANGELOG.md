@@ -1,22 +1,26 @@
 # CHANGELOG dfpilot
 
-## Run 15 hospital water: a far zone does not make the hospital's own pond well a source, GiveWater without effect is named (BUG-343/344, 2026-11-04; offline, live-untested)
-- **Why:** i2 Guildcleans y386-y390: 13 patients died of thirst at 75,000 while status said `hospital ok, src 3 (well 18183
-  in Kern+)` and PATIENT_DYING `N GiveWater jobs running` (verdict `run`); i4 Drillchamber y397: a citizen died beside well
-  18324, 'wet' in inspect water_sources. Both wells are the hospital template's (rooms.py:182) over a sump with its own Pond
-  zone 1 tile away; any wet Water Source zone on the map (i2: 66 tiles outside, i4: ~30 tiles) switched the loop rule off
-  (water.lua pond_loops :514, M.loops :556/:567), so the trickle the carriers poured back counted as the hospital's water.
-- **What changed (water.lua):** `M.pond_fed`: a wet zone feeds a pond only when it lies at most as far from it as the well
-  beside it; pond_loops and M.loops ask it per pond (a far zone leaves the loop a loop: pond removed, well not accepted,
-  HOSPITAL_DRY / the BUG-034 removal as for any loop). `M.give_effect`: `run` for 2 days (`M.NOEFFECT_DAYS`) while the same
-  patient's thirst climbs is verdict `noeffect` with the nearest accepted water. `M.lie`: PATIENT_DYING `lie` (wounds,
-  unconscious, paralysis, syndrome names) and in its kern.log line. Contract: PATIENT_DYING `lie:s` optional, key `noeffect`
-  (schema.py, CONTRACTS.md, appendix). The 7 `suffocated by dwarf` deaths are kills by other dwarves (26740 Berserk), not water.
-- **Tests (fail on 14ff5a3):** tests/lua/test_bug262_266_water.lua (+1, the supplying-zone test now has its zone beside the
-  pond), tests/lua/test_water.lua (pond loop: far zone), tests/lua/test_water_m1.lua (+2).
-- **Live check:** i2/i4 kern.log `water: pond zone N removed: the wet well 18183 (i4: 18324) beside it was its water source (a
-  loop)`, no `well 18183 in Kern+` in src; PATIENT_DYING `key noeffect`, `lie`. Open: what the carrier does with the bucket,
-  the template's bucket-filled sump, drink 0 d in i4 is brewing (BUG-340), a dry well is not refilled automatically.
+## Run 15 hospital water: GiveWater without effect and why a patient lies are named, the thirst decision carries the water and its commands (BUG-343/344, 2026-11-04; offline, live-untested)
+- **Why:** i2 Guildcleans y386-y390: 24 patients died of thirst at 75,000, all with hunger 52,824-98,595 (no food reached
+  them either), while status said `hospital ok` and PATIENT_DYING `N GiveWater jobs running` (verdict `run`); 7 more patients
+  were strangled in their beds by other dwarves (`suffocated by dwarf`). i4 Drillchamber y379-y397: 13 citizens (no patients)
+  died of thirst beside well 18324 'wet' (hunger 51,683-94,529) while DECISION_NEEDED thirst asked 271 times `water near the
+  fort (well), brewing, barrels?`.
+- **What changed:** water.lua `M.give_effect`: `run` for 2 days (`M.NOEFFECT_DAYS`) while the same patient's thirst climbs is
+  `noeffect`, with the nearest water and, from hunger 50,000 (`M.STARVE_HUNGER`), `no food reaches him either, the care
+  fails, not the water`. `M.lie`: PATIENT_DYING `lie` (≤ 120) and its kern.log line read the DFHack fields: unit.counters
+  unconscious/stunned/webbed/suffocation, unit.counters2 paralysis/numbness, liquid on his tile, hunger, syndrome names.
+  `water.drink_fix()` (public, report only): the accepted well a thirsty citizen (≥ `well_thirst` 50,000) stands beside, or
+  `no accepted water`, with M.recipe (new `bare`: no hospital tail) and command lines; economy's thirst decision carries it
+  in q and `cmds` (+ the farms command). The first pass's `M.pond_fed` (a far zone keeps the hospital's own pond a loop) is
+  reverted: it would remove every template hospital's pond (rooms.py:182) and then the hospital, and the starving shows the
+  water was not the cause. Contract: PATIENT_DYING `lie` ≤ 120 / key `noeffect`, DECISION_NEEDED thirst, `water.drink_fix`
+  (CONTRACTS.md, schema.py comment).
+- **Tests (fail on 14ff5a3):** tests/lua/test_water_m1.lua (noeffect + hunger reason; lie, also failing on the first pass
+  40b118e), tests/lua/test_bug262_266_water.lua (+2: drink_fix, the thirst decision).
+- **Live check:** i2 PATIENT_DYING `lie` / `key noeffect`; i4 DECISION_NEEDED thirst `citizen N ... stands beside well 18324
+  ... it gives no water; <recipe>` with `cmds`. Open: why the caregivers' jobs cancel (no reason recorded), no automatic refill
+  of a dry well (the player places what the decision names), why 18324 serves nobody, brewing (BUG-340).
 ## Run 15 gate review (merge15): walkers do not give a bridge up, a forced raise beats a blocked park, a destroyed bridge is not busy (BUG-335/342/338 review fix, 2026-11-04; offline, live-untested)
 - **Why:** review of merge15: path-only crossers made every queued pull a 'blocked' cancel toward gate.pull_cap (busy SIEGE
   traffic: give-up, every lever parked giveup_wait, also with a hostile at the gate); a bridge destroyed in the settle window
