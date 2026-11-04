@@ -1107,6 +1107,14 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
         label = f"{x},{y},{z} {'open route' if kind == dmod.OPEN_ROUTE else kind or '?'}"
         if dmod.piece_kind(kind):
             keep.append({"pos": e["pos"], "kind": kind, "piece": e["piece"], "nodoor": e.get("nodoor", False)})
+        elif kind == "sapling" and (geo is None or geo.char(x, y, z) in (None, "?")):
+            # BUG-333 (Run 15d Drillchamber y377: status '3 ways in: 12,170,146 sapling, 14,170,146 sapling, 11,169,146
+            # sapling', seal at=last 'nothing to close ... its tile is not on the snapshot', after bp sites seal --fresh
+            # too; 21,85,146 sapling the same): the neighbour search needs the snapshot, the piece on the sapling
+            # (BUG-323) does not: quickfort checks the tile when it places it
+            keep.append({"pos": e["pos"], "kind": "floor", "piece": e["piece"]})
+            notes.append(f"{label}: not on the snapshot, the piece goes on the sapling (quickfort builds on sapling "
+                         "tiles)")
         elif dmod.needs_neighbour(kind) and (geo is None or geo.char(x, y, z) in (None, "?")):
             notes.append(f"{label}: left out, its tile is not on the snapshot (dfllm bp sites seal --fresh, then "
                          "again; or name the tile that closes it: at=\"x,y,z floor\")")

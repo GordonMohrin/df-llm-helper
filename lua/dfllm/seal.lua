@@ -5466,15 +5466,27 @@ M.inspect.entrances = function(K, args)
   local s = mem.seal
   if not s then return true, 'entrances: the first check is running', {} end
   local msg = s.msg or '?'
+  -- BUG-333 (Run 15d Drillchamber y377: status named '12,170,146 sapling, 14,170,146 sapling, 11,169,146 sapling',
+  -- this answer's `openings` named 120,126,144 floor: status, SIEGE_UNREADY and seal at=last read entrance_doors' open
+  -- tiles (an opening's gap tiles: where it leads in), `openings` holds each route's nearest tile): `ways` are the open
+  -- tiles as status names them, the message names the first of them
+  local ways = {}
   if not s.sealed then                                 -- BUG-012: what a lockdown can lock
     local x = M.entrance_doors(K)
+    for _, o in ipairs(x.open) do
+      ways[#ways + 1] = string.format('%d,%d,%d %s', o.pos[1], o.pos[2], o.pos[3], tostring(o.kind or '?'))
+    end
     msg = string.format('%s; %d entrance door%s, %d opening%s without one', msg, #x.doors, #x.doors == 1 and '' or 's',
                         #x.open, #x.open == 1 and '' or 's')
+    if #ways > 0 then
+      msg = msg .. ' (ways in as status names them: ' .. table.concat(ways, ', ', 1, math.min(#ways, 3))
+            .. (#ways > 3 and ', ...)' or ')')
+    end
   end
   return true, msg, {tick = s.tick, why = s.why, sealed = s.sealed, routes = s.routes, first = s.first,
                      openings = s.openings, edge = s.edge, len = s.len, via = s.via, partial = s.partial,
                      expect_sealed = s.expect, bfs = s.bfs, reused = s.reused and 1 or 0, closed = s.closed,
-                     doors = s.doors}
+                     doors = s.doors, ways = ways}
 end
 
 M.inspect.defense = function(K)

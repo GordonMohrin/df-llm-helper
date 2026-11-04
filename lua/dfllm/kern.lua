@@ -1510,6 +1510,24 @@ function M.runtime_key(marker, save)
   return save
 end
 
+-- BUG-332 (Run 15 i2/i4: `dfllm save` scanned %APPDATA%/Bay 12 Games/Dwarf Fortress/save while DF in portable mode
+-- (<DF>/prefs/portable.txt) wrote its saves to <DF>/save): DF's save folder, the parent of dfhack.getSavePath() (the
+-- loaded save's folder), else dfhack.filesystem.getBaseDir() .. 'save' (the install folder in portable mode, else SDL's
+-- pref dir); nil when DFHack names neither. The kernel writes it to <runtime>/SAVEDIR at boot (supervise.saves_root).
+function M.save_root()
+  local ok, p = pcall(function() return dfhack.getSavePath and dfhack.getSavePath() end)
+  if ok and type(p) == 'string' and p ~= '' then
+    local d = p:gsub('[/\\]+$', ''):match('^(.*)[/\\][^/\\]+$')
+    if d and d ~= '' then return d end
+  end
+  local okb, base = pcall(function()
+    local fs = dfhack.filesystem
+    return fs and fs.getBaseDir and fs.getBaseDir()
+  end)
+  if okb and type(base) == 'string' and base ~= '' then return base:gsub('[/\\]+$', '') .. '/save' end
+  return nil
+end
+
 -- opts: {repo=path, modules=list (tests), strict=bool (tests)}
 function M.boot(opts)
   opts = opts or {}
@@ -1530,6 +1548,8 @@ function M.boot(opts)
   end
   fio.ensure(paths)
   fio.write(paths.runtime .. '/ACTIVE', M.runtime_key(marker, save))
+  local sroot = M.save_root()
+  if sroot then fio.write(paths.runtime .. '/SAVEDIR', sroot) end      -- BUG-332: where DF saves (dfllm save, supervise)
   -- BUG-149: a world save keeps the marker of every fort adopted in that world; this names the one that is loaded
   pcall(dfhack.persistent.saveWorldDataString, M.ACTIVE_KEY,
         json.encode({save = M.runtime_key(marker, save), fort = clean(tostring(marker.fort or ''), 60)}))

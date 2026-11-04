@@ -264,7 +264,7 @@ def run(args, save_dir: Path, env: supervise.Env | None = None) -> int:
         print(f"QUICKSAVE_RUNNING: {rec['why']} (exit {EXIT_RUNNING}; no failure wake; look again with dfllm save in a minute)")
         return EXIT_RUNNING
     print(f"QUICKSAVE_FAILED: {rec['why']} (attempt {rec.get('fails', 1)}; follow wakes the LLM; save by hand: "
-          "Esc > Save game, or dfllm save again in 2 min)")
+          f"Esc > Save game, or dfllm save again in 2 min; save folder looked at: {env.saves})")   # BUG-332
     return 1
 
 
