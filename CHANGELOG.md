@@ -49,6 +49,9 @@
   names the folder. `inspect what=entrances`: `data.ways` and the message name the ways in as status does. `seal at=last`: a
   sapling off the snapshot gets its piece on itself (BUG-323's rule). `.follow.lock` carries `code`; a new follow takes over from
   an owner on other code by itself (`follow: pid N ran OLD CODE ...: taken over`), the same code is refused as before.
+- **Review fix:** `kern.save_root` asks `dfhack.filesystem.getBaseDir() .. 'save'` first (DFHack's `getSavePath()` is always
+  below `getDFPath()`, so a non-portable install got `<DF>/save` in SAVEDIR, BUG-332). `follow --once` / `--max-s` never take
+  over a long-running follow by themselves (exit 3 as for the same code, BUG-334).
 - **Tests:** tests/test_bug332_save_root.py, tests/lua/test_bug332_save_root.lua, tests/lua/test_bug333_ways_one_source.lua,
   tests/bp/test_bug333_sapling_off_snapshot.py, tests/test_bug334_follow_old_code.py; pytest 2750 passed, 1 skipped; Lua 199
   suites 2104 passed; lint 0.

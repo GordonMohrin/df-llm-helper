@@ -108,9 +108,9 @@ PORTABLE = ("prefs", "portable.txt")
 def saves_root(df: Path, runtime: Path) -> tuple[Path, str]:
     """BUG-332 (Run 15 i2/i4 29.10.: `dfllm save` said QUICKSAVE_FAILED 'the newest save is a-run15-guildcleans' while DF
     had written 'autosave 1' to <df>/save: all four installs run in portable mode, the scan looked in %APPDATA%):
-    (DF's save folder, where it came from). In this order: DFLLM_SAVES; <runtime>/SAVEDIR (the kernel writes the parent
-    of dfhack.getSavePath() at boot: DF's own answer; a relative one is below <df>) when that folder exists;
-    <df>/prefs/portable.txt -> <df>/save (DF's portable mode); else %APPDATA%/Bay 12 Games/Dwarf Fortress/save."""
+    (DF's save folder, where it came from). In this order: DFLLM_SAVES; <runtime>/SAVEDIR (the kernel writes
+    dfhack.filesystem.getBaseDir()/save at boot, review fix: DF's own answer; a relative one is below <df>) when that
+    folder exists; <df>/prefs/portable.txt -> <df>/save (DF's portable mode); else %APPDATA%/Bay 12 Games/Dwarf Fortress/save."""
     env = os.environ.get("DFLLM_SAVES")
     if env:
         return Path(env), "DFLLM_SAVES"

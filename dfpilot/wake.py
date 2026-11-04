@@ -1434,8 +1434,10 @@ def release_lock(save_dir: Path | None) -> None:
 class _Lock:
     """run()'s hold on the lock of the save the follower is attached to (it follows a save switch)."""
 
-    def __init__(self, takeover: bool):
-        self.takeover, self.dir, self.beat = takeover, None, -1e18
+    def __init__(self, takeover: bool, auto: bool = True):
+        # BUG-334 review fix: auto=False (follow --once / --max-s, a one-shot) never takes over an owner on old code by
+        # itself: it would poll beside the long-running follow, end it at its beat, then release the lock and exit too.
+        self.takeover, self.auto, self.dir, self.beat = takeover, auto, None, -1e18
 
     def step(self, d: Path | None) -> str | None:
         """None to go on; the line to print before exiting when another follow holds or took the lock."""
@@ -1453,7 +1455,7 @@ class _Lock:
         if d != self.dir:
             release_lock(self.dir)
             self.dir = None
-            old = None if self.takeover else old_code_owner(d, now)    # BUG-334: an owner on old code is taken over
+            old = None if self.takeover or not self.auto else old_code_owner(d, now)   # BUG-334: old code is taken over
             ok, owner = acquire_lock(d, now, self.takeover or old is not None)
             if not ok:
                 age = int(now - owner["hb"]) if isinstance(owner.get("hb"), (int, float)) else "?"
@@ -1481,7 +1483,8 @@ def run(args) -> int:
     f = Follower(save=args.save_pin, since=args.since, auto=not args.no_auto,
                  audit=not getattr(args, "no_audit", False))
     t0, errors, last_err = time.monotonic(), 0, -1e18
-    lock = _Lock(bool(getattr(args, "takeover", False)))          # BUG-238
+    lock = _Lock(bool(getattr(args, "takeover", False)),          # BUG-238
+                 auto=not (getattr(args, "once", False) or getattr(args, "max_s", None)))   # BUG-334 review fix
     try:
         while True:
             try:

@@ -19,9 +19,12 @@ the owner's code (the lock's, else the owner's fresh `.follow.hb` `code`: follow
 from its own CODE, takes over by itself: stdout and cli.log `follow: pid N ran OLD CODE (<old>, this one <new>): taken over, it
 exits at its next beat`. The old one exits at its next beat (BUG-238 refresh_lock, unchanged). The same code: refused as
 before; the line names the command `dfllm follow --takeover`.
+Review fix: only a long-running follow takes over by itself; `follow --once` / `--max-s` (a one-shot) is refused (exit 3)
+like the same code, else it polled beside the old follow, ended it at its beat, then released the lock and left no follow.
 
 ## Tests
-`tests/test_bug334_follow_old_code.py` (5; the takeover and the lock's code fail on 9b6f614).
+`tests/test_bug334_follow_old_code.py` (7; the takeover and the lock's code fail on 9b6f614; the two one-shot cases fail
+before the review fix).
 
 ## Live check
 After the update: a new `dfllm follow` beside a running older one prints the OLD CODE takeover line and runs; within ~10 s the

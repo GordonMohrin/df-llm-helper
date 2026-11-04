@@ -13,9 +13,10 @@ T.test('boot writes SAVEDIR = the parent of dfhack.getSavePath()', function()
   kern.stop()
 end)
 
-T.test('save_root: getSavePath with a trailing separator, backslashes; getBaseDir fallback; nil without either', function()
+T.test('save_root: getBaseDir first; getSavePath (trailing separator, backslashes) fallback; nil without either', function()
   local old_sp = dfhack.getSavePath
   local old_fs = dfhack.filesystem
+  dfhack.filesystem = {}
   dfhack.getSavePath = function() return 'E:\\DF-test2\\save\\r15-guildcleans\\' end
   T.eq(kern.save_root(), 'E:\\DF-test2\\save')
   dfhack.getSavePath = function() return nil end
@@ -23,6 +24,18 @@ T.test('save_root: getSavePath with a trailing separator, backslashes; getBaseDi
   T.eq(kern.save_root(), 'E:/DF-test4/save')
   dfhack.filesystem = {}
   T.eq(kern.save_root(), nil)
+  dfhack.getSavePath, dfhack.filesystem = old_sp, old_fs
+end)
+
+-- BUG-332 review fix: DFHack's getSavePath() is always getDFPath() .. '/save/' .. save_dir (hack/lua/dfhack.lua:1206),
+-- also in a non-portable install whose saves go to getBaseDir() (SDL's pref dir, %APPDATA%/Bay 12 Games/Dwarf Fortress/).
+T.test('save_root: non-portable install, getSavePath at <df>/save but getBaseDir at AppData -> the AppData save folder', function()
+  local old_sp = dfhack.getSavePath
+  local old_fs = dfhack.filesystem
+  dfhack.getSavePath = function() return 'C:/Steam/Dwarf Fortress/save/autosave 1' end
+  dfhack.filesystem = {getBaseDir = function()
+    return 'C:\\Users\\x\\AppData\\Roaming\\Bay 12 Games\\Dwarf Fortress\\' end}
+  T.eq(kern.save_root(), 'C:\\Users\\x\\AppData\\Roaming\\Bay 12 Games\\Dwarf Fortress/save')
   dfhack.getSavePath, dfhack.filesystem = old_sp, old_fs
 end)
 
