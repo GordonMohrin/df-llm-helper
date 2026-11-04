@@ -253,7 +253,22 @@ def fort_manifest(save_dir: Path) -> dict:
                 m = merge(m, _without_gone(frag, gone, mtime(p)))
             except Exception:                  # noqa: BLE001 - one malformed fragment must not block ranking
                 continue
-    return m
+    return _with_failed_explores(save_dir, m)
+
+
+def _with_failed_explores(save_dir: Path, m: dict) -> dict:
+    """BUG-392: m["failed_explore"] = [{anchor, why, proj}] for each recorded breach of an explore project whose bp file
+    still names its anchor (bp.sites.rank keeps a new explore off those spots)."""
+    out, seen = [], set()
+    for b in m.get("breaches") or []:
+        if not (isinstance(b, dict) and b.get("tpl") == "explore" and isinstance(b.get("proj"), str)) or b["proj"] in seen:
+            continue
+        seen.add(b["proj"])
+        doc = files.read_json(Path(save_dir) / "bp" / f"{b['proj']}.json")
+        a = doc.get("anchor") if isinstance(doc, dict) else None
+        if isinstance(a, list) and len(a) == 3 and all(isinstance(v, int) for v in a):
+            out.append({"anchor": a, "why": b.get("why", "breach"), "proj": b["proj"]})
+    return dict(m, failed_explore=out) if out else m
 
 
 def _digest(doc) -> str:

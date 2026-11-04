@@ -271,7 +271,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = aquifer_ok(cands, tpl, p, rects, manifest, snap)  # FR-95/BUG-359: the levels known damp or wet
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
-    cands = reachable(cands, snap, tpl)                     # BUG-352: the citizens' walk group (snapshot wg)
+    cands = reachable(cands, snap, tpl, near if near is not None else at)    # BUG-352: the citizens' walk group (snapshot wg)
     if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
         cands = _near_point(cands, tpl, near, within, at)
     cands.sort(key=lambda c: (c.get("_d", 0), -c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
@@ -314,14 +314,24 @@ def walk_at(snap: dict, pos) -> str | None:
     return c if c in "01" else None
 
 
-def reachable(cands: list, snap: dict, tpl: str) -> list:
+def reachable(cands: list, snap: dict, tpl: str, focus=None) -> list:
     """BUG-352 (Run 16c site97: fortcore ranked S3/S2 on soil beyond the brook, a project 30 d at s1.dig 0 %, 'unreachable
     DigChannel'): the sites whose anchor tile lies in another walk group than the citizens stand in are dropped (the kernel's
     sites export marks it: snapshot wg); the others carry `walk` = the citizens' group. A tile without a read group claims
-    nothing; a snapshot without walk groups is not filtered. ValueError when every candidate lies beyond."""
+    nothing; a snapshot without walk groups is not filtered. ValueError when every candidate lies beyond.
+    BUG-391: a ranking asked for one spot (`focus` = near / at) on a tile of another walk group (a cut-off group's well) is
+    is not filtered to the citizens' group: the caller chose the cut-off group, so the sites on the citizens' group are dropped."""
     wg = snap.get("wg")
     if not isinstance(wg, dict) or not cands:
         return cands
+    if focus is not None and walk_at(snap, focus) == "0":
+        # the caller chose the cut-off group: only sites on that side (or without a read group) are offered, never a
+        # site on the citizens' main group, which the stranded cannot reach
+        stranded = [c for c in cands if walk_at(snap, c["anchor"]) != "1"]
+        if not stranded:
+            raise ValueError(f"{tpl}: every candidate site near that spot lies on the citizens' walk group "
+                             f"{wg.get('home')}, which the cut-off group there cannot reach")
+        return stranded
     home = wg.get("home")
     keep, far = [], []
     for c in cands:
@@ -1073,6 +1083,35 @@ def avoid_levels(snap: dict, p: dict, manifest: dict | None = None) -> set[int]:
     return out
 
 
+EXPLORE_REDO_R = 6          # BUG-392: tiles (x/y) around a failed explore's anchor / a recorded breach the new shaft keeps off
+
+
+def failed_explores(manifest: dict | None) -> list[tuple[tuple[int, int, int], str]]:
+    """BUG-392 (Run 16b i2 Ostgate: the draft proposed explore at 54,100,129 again after it stopped there as breach:cavern_lake,
+    and 3 tiles away from the y374 one that stopped as breach:water): the anchors of explore projects that stopped at a
+    breach (manifest `failed_explore`, cmd.fort_manifest: the anchor of the bp file of each breach whose tpl is explore),
+    each with a label for the reason line."""
+    out = []
+    for f in (manifest or {}).get("failed_explore") or []:
+        a = f.get("anchor") if isinstance(f, dict) else None
+        if isinstance(a, (list, tuple)) and len(a) == 3:
+            out.append((tuple(int(v) for v in a), f"{f.get('why', 'breach')} {_pos(a)}" + (f" {f['proj']}" if f.get("proj") else "")))
+    return out
+
+
+def _explore_redo(ax: int, ay: int, az: int, depth: int, pts: list, failed: list) -> str | None:
+    """BUG-392: why an explore anchor repeats a failure: its shaft (az-depth-1 .. az+1, arms EXPLORE_REDO_R wide) holds a
+    recorded breach, or it lies within EXPLORE_REDO_R tiles of a failed explore's anchor on the same level +-1."""
+    R = EXPLORE_REDO_R
+    for (x, y, z), lbl in pts:
+        if az - depth - 1 <= z <= az + 1 and abs(x - ax) <= R and abs(y - ay) <= R:
+            return lbl
+    for (x, y, z), lbl in failed:
+        if abs(z - az) <= 1 and abs(x - ax) <= R and abs(y - ay) <= R:
+            return "failed explore " + lbl
+    return None
+
+
 def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     """explore (Run 10): public Z4 anchors like a room whose shaft (depth levels) reaches no avoided level; footprint and
     ring rock or unknown (levels below the snapshot count as unknown); never from the refuge level or below it (the
@@ -1085,7 +1124,8 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     ref = manifest.get("refuge")
     zr = ref["anchor"][2] if ref else None
     avoid = avoid_levels(snap, p, manifest)
-    out, hit = [], set()
+    out, hit, redo = [], set(), []
+    pts, failed = breach_points(manifest), failed_explores(manifest)
     for i in _anchor_tiles(g, "explore", p, manifest):
         ax, ay, az = g.pos(i)
         if zr is not None and az <= zr:
@@ -1093,6 +1133,11 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
         lv = {z for z in avoid if az - p["depth"] <= z <= az}
         if lv:
             hit |= lv
+            continue
+        why = _explore_redo(ax, ay, az, p["depth"], pts, failed) if (pts or failed) else None
+        if why:                                              # BUG-392: not again where a dig already stopped
+            if why not in redo:
+                redo.append(why)
             continue
         for rot in range(4):
             du, dv = rot_uv(0, 1, rot)
@@ -1115,6 +1160,10 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
                          f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark or a cavern "
                          "breach); "
                          "give a smaller depth (p.depth)")
+    if not out and redo:
+        raise ValueError(f"explore: every anchor lies within {EXPLORE_REDO_R} tiles of a dig that already stopped "
+                         f"({'; '.join(redo[:3])}{' +more' if len(redo) > 3 else ''}); no safe explore site: trade for ore "
+                         "and bars, or open a new core level first")
     return out
 
 

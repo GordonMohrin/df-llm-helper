@@ -17,6 +17,23 @@
   `_refuge_stage` counts the surface core, `stage3_gate` and `core_order_note` stand aside.
 - **Tests:** tests/test_bug387_389_surface_core.py, rewritten wet-layer tests in test_bug130 and test_bug359_361, goldens bedrooms/dining/office/tavern
   (new `surface` param) and surfacecore.
+## Walk groups, stranded thirst and failed explore spots (BUG-390 to BUG-392, 2026-11-04; offline, live-untested)
+- **Why:** Run 16: i4 Mazelanterns could build nothing from y373 (`bp sites`: every site 'in a walk group the citizens cannot reach' while
+  `inspect reach` said cut 0; 5 FellTree 'unreachable'); i1 Bachwald lost 8 citizens of a cut-off group to thirst under 'nobody thirsty: they
+  drink water'; i2 Ostgate's draft proposed explore again where it had breached.
+- **BUG-390:** the sites export read the citizens' walk group id once at its start; DFHack renumbers the groups while an export runs, so nine
+  exports in a row had 7529 of 7531 tiles '0' (wg.home 2461, 2953, 3327, ...). snapshot `scan_row` re-reads the home groups from the citizens'
+  tiles before every row; the home groups are the biggest and every one with a fifth of the citizens (`snapshot.home_set`, shared with
+  economy's reach checks); `snapshot.groups(near, prefer)` lets a tree answer a citizens' group it touches (cv_reach, idle reasons).
+- **BUG-391:** STRANDED 'no raised bridge leads to drink' now raises DECISION_NEEDED `stranded_drink` (class A, urgent) with the commands
+  (inspect reach / water_sources, `bp sites cistern --near <their tile>`); `siege.dry_group` makes economy count them as thirsty (alarm, thirst
+  decision) and drop the 'nobody thirsty: they drink water' all-clear; `bp sites --near/--at` on a cut-off walk group keeps only sites on that side (none from the citizens' group).
+- **BUG-392:** `explore` ranking keeps off recorded breach tiles within 6 tiles of the shaft's levels and off the anchors of failed explores
+  (`manifest.failed_explore` from the bp files); none left -> 'no safe explore site'.
+- **Tests:** tests/lua/test_bug390_reach.lua (3), test_stranded.lua (+1), test_economy_food_run15.lua (+1), tests/test_bug390_392_reach.py (5).
+- **Live check:** `bp sites workshops --fresh` right after DF autosaves/changes the map: sites ranked, `walk group` equals `inspect reach`;
+  a cut-off group over thirst 25,000 without a bridge: DECISION stranded_drink once, status 'N stranded without drink'; plan propose after an
+  explore breach names another anchor or 'no safe explore site'.
 
 ## Review fix (merge20): the SIEGE/BREACH raise waits by time, not by the hostile's distance (BUG-380; offline, live-untested)
 - **Why:** two review findings in gate.lua `holders()`: with a visible hostile 11..30 tiles away walkers 7..20 steps out were let go but
