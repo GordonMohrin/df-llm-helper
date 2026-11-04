@@ -18,6 +18,14 @@
   tests/test_bug352_354_sitewg.py (8).
 - **Live check:** `bp sites fortcore --fresh` on i3: only `walk group 1562` sites; a dig beyond water: PROJECT_BLOCKED
   `unreachable` after 3 d; `plan propose` after `bp.place fortcore`: the seal only, notes `BUG-354`.
+## bp.cancel takes back the project's dig designations, the fort name is readable after embark (BUG-353, BUG-355, 2026-11-04; offline, live-untested)
+- **BUG-353:** runner `cancel` (plain) now queues a quickfort undo of the dig chunks the project applied (`Q.applied_dig`,
+  `R.undo.plain`) before removing the project, so its not yet dug designations leave the map (old: ~1580 stayed on z120-124
+  in Run 16c i3, the fort starved). Only the project's own cells; the player's and other projects' stay. Logged with the
+  count; the answer says `K applied dig chunk(s) taken back`. No contract change.
+- **BUG-355:** `embark.py state` and every run status carry `fort` (the current site's name); the summary prints it.
+- **Tests (fail on 8890b59):** tests/lua/test_runner.lua (BUG-353), tests/lua/test_embark_fix6.lua (BUG-355).
+- **Live check:** `bp.cancel` of a stalled dig project: designations gone, kern.log count; `embark.py state` after embark shows `fort`.
 ## Review fix (merge16): no Kern+ fallback for life projects in a silent-alert SIEGE, the perimeter waiver counts the newest opening (BUG-347, BUG-349, 2026-11-04; offline, live-untested)
 - **BUG-347:** runner Q.life_burrows fell back to Kern+ in a SIEGE whose civ alert is silent (seal `flee`, BUG-031 relax,
   `civ_alert_idx` 0): hospital/cistern work ran with unheld citizens hauling from the surface. The fallback is ALERT/RECOVERY

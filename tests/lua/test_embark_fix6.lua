@@ -404,4 +404,23 @@ T.test('BUG-250: save-as fails when the field does not show the typed name (typi
   T.eq(D.save_path, 'E:/DF/save/region1', 'nothing saved')
 end)
 
+---------------------------------------------------------------- BUG-355
+T.test('BUG-355: the fort name is in the view, the run doc and (with embark.py state) readable before save-as', function()
+  local D = F.new()
+  fort_menu(D)
+  local source = D.source
+  D.source = function()
+    local s = source()
+    s.fort_name = function() return 'Rimtarlocun "Castlerisen"' end
+    return s
+  end
+  T.eq(V.capture(D.source()).fort, 'Rimtarlocun "Castlerisen"')
+  D.menu = true
+  local run, docs, ctx = start(D, {v = 2, id = 'fn1', mode = 'saveas', name = 'r15b'})
+  T.eq(run.state, 'done', run.msg)
+  T.eq(ctx.fort, 'Rimtarlocun "Castlerisen"')
+  T.eq(docs[#docs].fort, 'Rimtarlocun "Castlerisen"')
+  T.eq(V.capture(F.new().source()).fort, nil, 'off a fort map: no name')
+end)
+
 T.done()

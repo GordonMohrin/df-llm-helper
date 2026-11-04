@@ -2352,9 +2352,16 @@ local function undo(K, P)
       local ci = table.remove(u.l, 1)
       local st = d.stages[u.s + 1]
       local ch = st and st.chunks[ci + 1]
-      if ch then qf(K, {mode = st.mode, data = chunk_data(ch), pos = ch.pos, command = 'undo'}) end
+      if ch then
+        local okq, sq = qf(K, {mode = st.mode, data = chunk_data(ch), pos = ch.pos, command = 'undo'})
+        if u.plain and okq and type(sq) == 'table' then u.n = (int(u.n) or 0) + (int(sq.dig_designated) or 0) end
+      end
       dirty()
     end
+  end
+  if u and u.plain then                       -- BUG-353: what a plain cancel took back of the project's own digging
+    K.log('info', '%s (%s) cancelled: %d dig designation(s) of its applied chunks removed (tiles not dug yet)', P.id, P.tpl,
+          int(u.n) or 0)
   end
   R.undo = nil
   dirty()
@@ -2830,13 +2837,31 @@ function Q.remove_unbuilt(K, P, R)
   return n
 end
 
+-- BUG-353 (Run 16c r16c-w9-18-site97: two bp.cancel + re-place left ~1580 dig designations of the cancelled fortcore
+-- projects on z120-124, the fort starved with nothing it could dig): the chunk indices (nearest the last applied first,
+-- as a breach undo) of the current stage's dig the project applied, for one quickfort undo each. Quickfort's undo clears
+-- the designation of a tile not dug yet and leaves a dug one; only cells of this project's own blueprint are named, so
+-- another project's or the player's designations elsewhere stay. {} when the stage is no dig or nothing is applied.
+function Q.applied_dig(P, d, R)
+  local st = d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'dig') then return {} end
+  local n = P.chunk
+  if R.ra == 1 then n = #st.chunks end
+  n = math.min(n or 0, #st.chunks)
+  local l = {}
+  for ci = n - 1, 0, -1 do l[#l + 1] = ci end
+  return l
+end
+
 local function cancel(K, P, with_undo)
   local R, d = R_of(K, P), doc(K, P.id)
   if not with_undo then
     if R.undo and d then return set_blocked(K, P, 'cancel') end   -- finish a breach undo, then remove
     local rm = d and Q.unbuilt_cells(K, P, d, R) or {}             -- BUG-314: its planned buildings and their jobs go
-    if #rm > 0 then
-      R.rm = rm
+    local ul = d and Q.applied_dig(P, d, R) or {}                  -- BUG-353: and the dig it designated, not dug yet
+    if #rm > 0 or #ul > 0 then
+      if #rm > 0 then R.rm = rm end
+      if #ul > 0 then R.undo = {s = P.stage, l = ul, cancel = 0, plain = true, n = 0} end
       return set_blocked(K, P, 'cancel')
     end
     return remove(K, P)
@@ -6271,6 +6296,11 @@ M.verbs = {
     save(K)
     local R = S.rt.p[P.id]
     local nrm = not args.undo and type(R) == 'table' and type(R.rm) == 'table' and #R.rm or 0
+    local nul = not args.undo and type(R) == 'table' and type(R.undo) == 'table' and R.undo.plain and #R.undo.l or 0
+    if nul > 0 then                                  -- BUG-353: the applied dig chunks are taken back first
+      return true, string.format('cancelling %s (%d applied dig chunk(s) taken back%s)', P.id, nul,
+                                 nrm > 0 and string.format(', %d unbuilt piece(s) removed', nrm) or '')
+    end
     if nrm > 0 then                                  -- BUG-314: the unbuilt pieces go first (their DF jobs with them)
       return true, string.format('cancelling %s (%d unbuilt piece(s) removed first, their jobs with them)', P.id, nrm)
     end

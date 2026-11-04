@@ -364,7 +364,9 @@ Related: FR-xx, BUG-xx
 | [BUG-350](BUG-350-bp-files-of-a-discarded-timeline-block-explore-sites.md) | fixed (offline, live-untested) | medium | Run 15c: bp files of explores that lived only in a discarded timeline (older save loaded) blocked every explore site | files.py, cmd.py |
 | [BUG-351](BUG-351-propose-drafts-a-stone-dig-without-a-site.md) | fixed (offline, live-untested) | medium | Run 15d: propose drafted the stone dig bedrooms n=4 with 0 free sites, an ERROR with nothing to insert | plan.py |
 | [BUG-352](BUG-352-site-ranking-picks-anchors-the-citizens-cannot-reach.md) | fixed (offline, live-untested); open: a plain bp.cancel leaves the stage's dig designations | critical | Run 16c: fortcore ranked on soil beyond the brook (another walk group), 30 d at s1.dig 0 %; the sites export now carries the citizens' walk group, unreachable sites are dropped, an unreachable dig is named after 3 d | snapshot.lua, sites.py, runner.lua, cli.py, wake.py |
+| [BUG-353](BUG-353-bp-cancel-leaves-the-dig-designations-in-the-map.md) | fixed (offline, live-untested) | high | Run 16c: two bp.cancel + re-place left ~1580 dig designations of the cancelled fortcore projects in the map, the fort starved | runner.lua |
 | [BUG-354](BUG-354-propose-in-year-1-demands-rooms-before-the-core-is-dug.md) | fixed (offline, live-untested) | medium | Run 16c: propose in year 1 drafts farms/dining/bedrooms (ERROR no soil marks, no refuge) while the placed fortcore still digs | plan.py |
+| [BUG-355](BUG-355-fort-name-unreadable-before-save-as.md) | fixed (offline, live-untested) | low | Run 16c: the new fort's name was not readable before save-as | tools/embark |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

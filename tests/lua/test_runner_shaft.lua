@@ -163,6 +163,7 @@ T.test('a done explore and a cancelled one: their shafts still stand; a lake bes
   dug(W, 80, 41, 100, 95)
   local r = W.inbox('bp.cancel', {proj = 'e3'}, {id = 'k1'})
   T.ok(r.ok, r.msg)
+  H.runs(W, 1)                                    -- BUG-353: the applied dig is taken back first, then it goes
   T.eq(H.proj(W, 'e3'), nil)
   T.eq(W.K.persist.get('m.runner').xs.e3.fin, 'cancelled')
   local n0 = #checks(W)
@@ -319,6 +320,7 @@ T.test('an explore cancelled before shaft records existed (c1a14676 under a6c33a
   H.runs(W, 1)
   dug(W, 40, 41, 100, 95)
   T.ok(W.inbox('bp.cancel', {proj = 'c1a14676'}, {id = 'k1'}).ok)
+  H.runs(W, 1)                                    -- BUG-353: the applied dig is taken back first, then it goes
   local persist = H.reloaded(W)
   persist['m.runner'].xs = nil                    -- the older kernel kept no shaft record
   local W2 = H.world{tag = 'xgone2', persist = persist}

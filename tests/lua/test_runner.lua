@@ -1379,4 +1379,29 @@ T.test('BUG-030 rebuild policy: a lost bridge\'s repair (opts.peace) is frozen i
   T.ok(built(42), 'quiet PEACE')
 end)
 
+T.test('BUG-353: a plain bp.cancel takes back the dig designations its applied chunks left (old: ~1580 stayed in the map), ' ..
+       'only the project own tiles; what is dug stays', function()
+  local W = fresh{tag = 'cancel_dig'}
+  H.place(W, 'f1', H.dig_doc(3))                     -- rows y 10..12, x 10..14
+  H.place(W, 'f2', H.dig_doc(2, {x = 40}))           -- another project: untouched
+  H.runs(W, 3)
+  W.tile(30, 10, 100).dig = 'd'                      -- the player's designation elsewhere
+  local own = 0
+  for y = 10, 12 do for x = 10, 14 do if W.tile(x, y, 100).dig ~= '' then own = own + 1 end end end
+  T.ok(own > 0, 'the project designated tiles')
+  local dug = H.dig(W, 2)                            -- 2 tiles are dug before the cancel
+  T.eq(dug, 2)
+  local r = W.inbox('bp.cancel', {proj = 'f1'})
+  T.ok(r.ok and r.msg:find('applied dig chunk(s) taken back', 1, true), r.msg)
+  T.ok(H.proj(W, 'f1'), 'kept until its designations are undone')
+  H.runs(W, 1)
+  T.eq(H.proj(W, 'f1'), nil)
+  for y = 10, 12 do for x = 10, 14 do T.eq(W.tile(x, y, 100).dig, '', x .. ',' .. y) end end
+  T.eq(W.tile(30, 10, 100).dig, 'd', 'the player designation stays')
+  local n2 = 0
+  for y = 10, 11 do for x = 40, 44 do if W.tile(x, y, 100).dig ~= '' then n2 = n2 + 1 end end end
+  T.ok(n2 > 0, 'the other project keeps its designations')
+  T.ok(logged(W, 'info', 'f1 %(fortcore%) cancelled: %d+ dig designation%(s%) of its applied chunks removed'))
+end)
+
 T.done()
