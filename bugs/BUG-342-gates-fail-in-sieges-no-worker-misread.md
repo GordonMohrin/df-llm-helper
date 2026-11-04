@@ -79,3 +79,13 @@ path onto O1 holds the raise; the cancelled test checks DECISION_NEEDED gate_tra
   burrow that holds the lever room, pre-positioning before raising and a retry with the nearest citizen need a live test
   (e.g. one puller per room kept from ALERT on, or a station-like hold).
 - Related: BUG-013, BUG-027, BUG-141, BUG-251, BUG-310, BUG-311.
+
+## Review fix (merge15)
+- A lever puller of the bridge's own room stepping about in it (1-3 tiles from the footprint) cancelled the taken raise as
+  'approach' (drop_own filtered only the hold; M.approach exempted the job's worker only). `M.approach(br, sc, prev, wid, own)`
+  (gate.lua:1531) skips the room's pullers for a raise unless on the footprint (a path onto it holds them already: crossers).
+  Lowerings unchanged (BUG-027).
+- Path-only crossers (BUG-335) cancel the queued pull as 'blocked' but count as walkers (r.ap, AP_CREDIT, gate_traffic), not
+  toward pull_cap (gate.lua:1980, :2053); see BUG-335.
+
+Tests: `tests/lua/test_merge15_gate_review.lua` (the second puller in a 3x3 room; fails on d40fb59).

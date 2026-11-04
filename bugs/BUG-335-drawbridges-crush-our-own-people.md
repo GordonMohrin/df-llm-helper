@@ -77,3 +77,19 @@ inner one, STATION_MOVED cross, walking in he is left alone).
   which tiles DF flings from).
 - Pulls not queued by gate (the player's own lever jobs) are not cancelled (DESIGN §5.9: only our own job is removed); they
   count as busy for military's freeze.
+
+## Review fix (merge15)
+- A unit only walking onto the footprint from farther away (a crosser, not within MARGIN) made every queued pull a 'blocked'
+  cancel counted toward gate.pull_cap: 15 of them in busy SIEGE traffic gave the bridge up and parked every lever for
+  giveup_wait. Now a blocked cancel with nobody on or next to the footprint is a walker cancel (r.ap, AP_CREDIT credit, then
+  DECISION_NEEDED gate_traffic and GATE_FAIL `cancelled`), gate.lua:1980/:2053. Units on or next to it count as before (BUG-141).
+- The 'blocked' give-up's parks (`r.bpark`, gate.lua:1264) do not stop a forced raise (SIEGE/BREACH, a hostile within
+  force_near): pick(..., forced) pulls past them (gate.lua:904, :2108); no-effect parks (BUG-068) still hold.
+- A bridge destroyed or replaced within SETTLE ticks of our pull kept `r.nec` for ever (gone_check/rep_check returned before the
+  settle check): gate.busy listed it and military froze station switches across its old footprint. gone_check and rep_check
+  clear `nec`/`settle` (rep_check also `mv`), and `gate.busy` is false for a bridge in st.gone (gate.lua:1828, :1874, :2783).
+- Not fixed (minor, military.lua:2224): a squad frozen outside while B2 rises stays out once it is up (see Open above); a safe
+  fix needs gate to lower B2 again for our squad, not a cheap change.
+
+Tests: `tests/lua/test_merge15_gate_review.lua` (3: the 10-tile crosser no give-up; give-up then a goblin at O1 raises it;
+destroyed in the settle window not busy; all fail on d40fb59).

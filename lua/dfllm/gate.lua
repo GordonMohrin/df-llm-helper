@@ -899,12 +899,16 @@ end
 
 -- linked lever to pull next: first one that has not failed in this epoch, rotating after failures;
 -- the link is re-checked right before the pull (a lever may have been unlinked or removed)
-local function pick(K, r, now)
+-- Review fix (merge15): `forced` (a SIEGE/BREACH raise with a hostile within force_near) pulls a lever the 'blocked'
+-- give-up parked (r.bpark: the units beside it are no reason with the hostile at the gate); a no-effect park holds
+local function pick(K, r, now, forced)
   local cand, parked = {}, 0
-  if r.park and r.pm ~= K.mode() then r.park, r.ne = nil, nil end      -- BUG-068: a new mode, a new try
+  if r.park and r.pm ~= K.mode() then r.park, r.ne, r.bpark = nil, nil, nil end   -- BUG-068: a new mode, a new try
   for _, lid in ipairs(r.levers) do
     if r.linked[lid] then
-      if r.park and (r.park[lid] or 0) > now then parked = parked + 1       -- BUG-068: parked, no effect
+      local pk = r.park and (r.park[lid] or 0) > now
+      if pk and forced and r.bpark and r.bpark[lid] == r.park[lid] then pk = false end
+      if pk then parked = parked + 1                                         -- BUG-068: parked, no effect
       else cand[#cand + 1] = lid end
     end
   end
@@ -1257,7 +1261,13 @@ function M.giveup(K, name, r, s, now, tot, why, lever)
   gu.untl, gu.pulls, gu.why = now + w, tot, why
   r.gu = gu
   r.park = r.park or {}
-  for _, lid in ipairs(r.levers or {}) do if r.linked[lid] then r.park[lid] = now + w end end
+  if why == 'blocked' then r.bpark = {} end         -- Review fix (merge15): a forced raise pulls past these (pick)
+  for _, lid in ipairs(r.levers or {}) do
+    if r.linked[lid] then
+      r.park[lid] = now + w
+      if r.bpark then r.bpark[lid] = now + w end
+    end
+  end
   r.pm = K.mode()
   local story = pull_story(r)
   gu.story = story
@@ -1516,13 +1526,16 @@ end
 -- BUG-251: the first unit (not the job's worker, not a soldier at his station) within MARGIN_DOWN tiles of the footprint
 -- that came closer since the previous scan `prev` (or was not in it): a taken lowering pull is cancelled for it (BUG-311:
 -- an unforced raise too)
-function M.approach(br, sc, prev, wid)
+-- Review fix (merge15, BUG-342): `own` {[id] = true}, the bridge's lever pullers in their room (raises): they step about
+-- in it, that is no walk toward the bridge; on the footprint they count (a path onto it holds them already: crossers)
+function M.approach(br, sc, prev, wid, own)
   if not br or SIEGE_DOWN[br.why] or not sc then return nil end
   local before = {}
   for _, e in ipairs(prev and prev.list or {}) do before[e.id] = e.d end
   for _, e in ipairs(within(sc, M.MARGIN_DOWN)) do
     local d0 = before[e.id]
-    if e.id ~= wid and (d0 == nil or e.d < d0) and not M.at_station(e) then return e end
+    if e.id ~= wid and (d0 == nil or e.d < d0) and not M.at_station(e)
+       and not (own and own[e.id] and e.d > 0 and not e.path) then return e end
   end
   return nil
 end
@@ -1812,6 +1825,7 @@ local function gone_check(K, name, r, spec, now)
   if r.mv then r.mv.t1, r.mv = now, nil end
   unblock(r, now)
   r.block_ev, r.stuck, r.near, r.last, r.gone_next = nil, nil, nil, 'destroyed', now + M.GONE_RECHECK
+  r.nec, r.settle = nil, nil                      -- Review fix (merge15): no settle check, not busy (gate.busy)
   st.gone[name], st.br[name], dirty = {t = now, bid = seen.bid, last = last}, nil, true
   local c = geom.bbox_center(spec.fp)
   local mode = K.mode()
@@ -1856,6 +1870,8 @@ local function rep_check(K, name, r, now)
   if rep_cache.v[name] == nil then return false end
   if r.job then K.act.cancel_own_lever_job(r.job.id); r.job = nil end
   r.stuck, r.near, r.last, r.gone_next = nil, nil, 'destroyed', now + M.GONE_RECHECK
+  if r.mv then r.mv.t1, r.mv = now, nil end
+  r.nec, r.settle = nil, nil                      -- Review fix (merge15): not busy (gate.busy)
   st.gone[name], st.br[name], dirty = {t = now, bid = -1, last = 'replaced', rep = true}, nil, true
   K.log('info', 'gate: %s is replaced by a wall and a door (seal): no want, no pull, no GATE_FAIL for it', name)
   return true
@@ -1941,6 +1957,7 @@ local function control(K, name, spec, now)
       -- BUG-027 (Run 10: the old rule kept a SIEGE raise pending while a miner and a recruit walked onto B1): the
       -- lever moves the bridge when the puller finishes the job, so a unit on or next to the footprint cancels our
       -- pending pull in every mode and both ways (live L4: the margin); only a forced raise goes on (GATE_FORCED)
+      local walk                                      -- Review fix (merge15): a 'blocked' cancel for walkers only
       if not stale then
         local hold, hd, beside = holders(K, name, spec.fp, sc, dir)
         -- BUG-141 (live i3: lever 25729 two tiles from X25718's footprint): the job's own worker has to stand at the
@@ -1951,11 +1968,24 @@ local function control(K, name, spec, now)
           for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 then keep[#keep + 1] = e end end
           if #keep < #hold then hold = keep end
         end
-        if dir == 'up' then hold = drop_own(hold, own_pullers(K, name, now)) end   -- BUG-342: nor its pullers in their room
+        local own = dir == 'up' and own_pullers(K, name, now) or {}
+        if dir == 'up' then hold = drop_own(hold, own) end   -- BUG-342: nor its pullers in their room
         if #hold > 0 then                             -- BUG-310: a unit on the footprint cancels a forced raise too
           stale = 'blocked'
           r.block_since = r.block_since or now
           note_hold(K, name, spec.fp, dir, hold, now)
+          -- Review fix (merge15, BUG-335/342): only a unit on or next to the footprint makes it a 'blocked' cancel
+          -- (r.bc, pull_cap, the give-up that parks every lever); one only walking onto it from farther away (a crosser,
+          -- busy forts: i3 90 B2 pulls) is a walker like the approach cancel: AP_CREDIT, then gate_traffic
+          local close
+          for _, e in ipairs(hold) do if e.d <= M.MARGIN then close = true; break end end
+          if not close then
+            local e = hold[1]
+            walk = true
+            if dir == 'down' then r.qd = now end
+            r.ap, r.ap_last = (r.ap or 0) + 1, {k = e.k, id = e.id, d = e.d}
+            if dir == 'up' then M.ap_credit(K, name, r, now) end
+          end
         elseif hold.unknown then
           stale = 'census'                            -- BUG-252: nobody can say who stands there: no pull goes ahead
         elseif hd then
@@ -1967,7 +1997,7 @@ local function control(K, name, spec, now)
         elseif w0 then
           -- BUG-251: someone walks toward it while the pull is being done; BUG-311 (Earthboat y376 #2182, RECOVERY: soldier
           -- 26588 on his way to his station walked onto B2 while it rose): a raise too (not a forced one)
-          local e = M.approach(br, sc, prev, wid)
+          local e = M.approach(br, sc, prev, wid, own)   -- Review fix (merge15): its pullers in their room neither
           if e then
             stale = 'approach'
             if dir == 'down' then r.qd = now end
@@ -2020,7 +2050,7 @@ local function control(K, name, spec, now)
       -- give-up (GATE_FAIL blocked naming the units) instead of a new pull every few hundred ticks for weeks
       local blid = r.job.lever
       r.job = nil
-      if stale == 'blocked' then
+      if stale == 'blocked' and not walk then
         local m = K.mode()
         if not r.bc or r.bc.m ~= m then r.bc = {n = 0, m = m} end
         r.bc.n = r.bc.n + 1
@@ -2050,6 +2080,7 @@ local function control(K, name, spec, now)
   if w == nil or w == s then
     unblock(r, now); r.block_ev = nil
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
+    r.bpark = nil
     r.nec, r.bc = nil, nil                            -- BUG-141: the blocked-cancel count of the want ends too
     return s
   end
@@ -2074,7 +2105,7 @@ local function control(K, name, spec, now)
   unblock(r, now)
   -- BUG-251: a lowering waits for its quiet window (nobody within MARGIN_DOWN tiles for QUIET_DOWN ticks)
   if w == 'down' and M.quiet_wait(K, name, r, br, sc, now) then r.stuck = 'quiet'; return s end
-  local lid, why = pick(K, r, now)
+  local lid, why = pick(K, r, now, hd ~= nil)
   if not lid then
     if why == 'parked' then r.stuck = 'no_effect'; return s end      -- BUG-068: every linked lever is parked
     r.stuck, r.resolved = 'no_lever', nil
@@ -2272,7 +2303,10 @@ end
 -- the refuge stays open for them. It goes ahead at once with a hostile within INNER_NEAR tiles of the bridge (INNER_FAR
 -- while an outer bridge is not up yet), a hostile inside Kern+, a building destroyer or great danger in the intake area or
 -- past B1, a census older than INNER_FRESH, in BREACH, or once it was wanted up (never lowered for it). Returns the
--- number of civilians it waits for, or nil
+-- number of civilians it waits for, or nil. Review fix (merge15): in a SIEGE "wanted up" also comes from siege.raise's
+-- RAISE_BY timer (450 ticks after the start, whatever census.u.atk says): there the hold lasts at most that long, the
+-- civilians still out then are shut out (crossers keep the footprint itself clear); the hostile-distance releases above
+-- decide alone only in an ALERT lockdown
 local function inner_wait(K, man, name, mode, br, now)
   if mode == 'BREACH' or (br and br.want == 'up') then return nil end
   local cu, h = K.census.u, K.census.h
@@ -2744,6 +2778,9 @@ function M.busy(K, name)
   local br = st and st.br[name]
   local x = rt and rt[name]
   if not x then return false, br and br.want end
+  -- Review fix (merge15): a destroyed or replaced bridge is never busy (its settle window could outlive it: military
+  -- froze station switches across its old footprint until it was rebuilt)
+  if st and st.gone[name] then return false, nil end
   local now = K.now().tick
   -- a pull nobody took yet is not busy: a unit setting off over the bridge cancels it (crossers), the soldiers' switch
   -- may go ahead; a taken one may be done any frame
