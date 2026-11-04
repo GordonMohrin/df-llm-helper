@@ -709,6 +709,60 @@ T.test('BUG-065: a lone small intruder near a citizen holds the lockdown only fo
   T.eq(W.state().alarm.lock, 1)
 end) end)
 
+-- BUG-348 (Run 15 Guildcleans, i2): goblin 24649 stood at 1,136,117 (114 tiles out) for years; every new invasion made
+-- it count again (BUG-065's 'another hostile is in sight'), the newcomers died, the lone static goblin held SIEGE and
+-- lockdown 11-13 more days each time (LOCKDOWN_END limit 'harmless: inv 24649 ... (114 tiles)', 4 times)
+local function cleared_then_newcomer(tag)
+  local W = setup{tag = tag, manifest = false, cfg = CONFINE}
+  raws()
+  W.move(2, 100, 20, Z)
+  gremlin(W, 300, 110, 20)
+  S.run(W, 120)
+  for _ = 1, 4 do W.inbox('ack', {}); S.run(W, 1300) end
+  T.eq(#events(W, 'LOCKDOWN_END'), 1, 'released at the confinement limit')
+  W.K.cfg.reflex = {v = 2, confine = {max_days = 30, offer_days = 1}}   -- the next lockdown ends by its own clocks
+  W.move(2, 60, 71, Z)                                   -- the woodcutter back inside: the gremlin is far now
+  S.run(W, 200)
+  add(W, S.inv(301, 150, 30, Z), GOB)                    -- a newcomer
+  S.run(W, 120)
+  T.eq(W.state().alarm.lock, 1, 'the newcomer: a lockdown, the cleared gremlin counts again')
+  T.ok(logged(W, '1 cleared harmless intruder count again'), 'kern.log')
+  return W
+end
+
+T.test('BUG-348: a cleared harmless intruder a newcomer made count again is cleared again once the newcomer is gone, ' ..
+       'while it stood still and far: threat counts it for nothing again, not for 10 more days', function()
+  with_sortie(function()
+    local W = cleared_then_newcomer('b348a')
+    W.kill(301); W.event('UNIT_DEATH', {unit = 301})
+    S.run(W, 200)
+    T.ok(logged(W, 'no other hostile in sight: 1 harmless intruder that stood still cleared again: inv 300 at 110,20,10'),
+         'old code: it stayed counted')
+    local p = json.decode(W.persist_raw['dfllm.m.reflex'])
+    T.eq({p.far.ids, p.far.hl, #p.far.rc}, {{300}, {300}, 0})
+    local _, f = W.K.call('reflex', 'far_ids')
+    T.eq(f[300], true, 'threat counts it for nothing again (its SIEGE quiet clock runs)')
+    S.run(W, 6 * 1200)
+    T.eq({#events(W, 'LOCKDOWN_END'), W.state().alarm.lock}, {2, 0})
+  end)
+end)
+
+T.test('BUG-348: one that moved off its spot (or came near) after it counted again stays counted', function()
+  with_sortie(function()
+    local W = cleared_then_newcomer('b348b')
+    W.move(300, 115, 20, Z)                              -- 5 tiles: it walks
+    S.run(W, 120)
+    W.kill(301); W.event('UNIT_DEATH', {unit = 301})
+    S.run(W, 200)
+    T.ok(logged(W, 'inv 300 (counted again since another hostile came) moved 5 tiles: it stays counted'), 'kern.log')
+    T.ok(not logged(W, 'cleared again'))
+    local p = json.decode(W.persist_raw['dfllm.m.reflex'])
+    T.eq({p.far.ids, #p.far.rc}, {{}, 0})
+    local _, f = W.K.call('reflex', 'far_ids')
+    T.eq(f[300], nil, 'threat counts it (a SIEGE holds by its own rules)')
+  end)
+end)
+
 T.test('BUG-065: the limit is config: max_days 0 keeps the old rule; a dangerous (big) hostile near keeps the lockdown ' ..
        'and the offer says so; three small ones are a group, not a lone intruder', function() with_sortie(function()
   local W = setup{tag = 'gremdanger', manifest = false, cfg = CONFINE}

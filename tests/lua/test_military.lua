@@ -423,6 +423,18 @@ T.test('BUG-065: sortie_squad names the squad the intruder offer would send (mel
   T.eq({ok2, k3}, {true, nil}, 'no squad yet')
 end)
 
+T.test('BUG-348: sortie_advice says whether the offered sortie is recommended (squad worn against sortie.worn 80 %)',
+       function()
+  local W = setup(50)
+  local a = select(2, W.K.call('military', 'sortie_advice', 'A'))
+  T.eq({a.worn, a.need, a.rec, a.txt}, {0, 80, false, 'sortie not recommended: worn 0% < 80%'}, 'old code: no such call')
+  X.equip_all(W)
+  W.run(30, {skip = 9})
+  a = select(2, W.K.call('military', 'sortie_advice', 'A'))
+  T.eq({a.worn, a.rec, a.txt}, {100, true, 'sortie recommended: worn 100% >= 80%'})
+  T.eq(select(2, W.K.call('military', 'sortie_advice', 'Q')), nil, 'no such squad')
+end)
+
 ---------------------------------------------------------------- KPIs
 T.test('worn %: worn assigned uniform items / uniform slots; assigned-only and unassigned do not count', function()
   local W = setup(50)

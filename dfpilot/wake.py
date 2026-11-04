@@ -368,11 +368,21 @@ def next_hint(etype: str, e: dict) -> str:
     return NEXT.get(etype, "dfllm brief")
 
 
+def armour_note(d: dict) -> str:
+    """BUG-348 (Run 15 Guildcleans: kill_lone_intruder #7150 offered a sortie with worn 43 %, the player held back by the
+    80 % rule): the kernel's word on the sortie it offers, from d.worn / d.need / d.rec (military.sortie_advice)."""
+    if not isinstance(d.get("worn"), int) or not isinstance(d.get("need"), int):
+        return ""
+    if d.get("rec") == 1:
+        return f" (sortie recommended: worn {d['worn']}% >= {d['need']}%)"
+    return f" (sortie NOT recommended: worn {d['worn']}% < {d['need']}%; wait)"
+
+
 def sortie_hint(d: dict) -> str:
     """BUG-065: an intruder holds a lockdown. A harmless one: the lockdown ends by itself at the limit, the sortie is the
     faster way; a dangerous one past the limit: the lockdown stays while it is near, the sortie is the way out."""
     cmd = d.get("cmd")
-    how = f"; to send the squad: {cmd} (approve:true is a logged decision)" if cmd else "; no squad to send"
+    how = f"; to send the squad{armour_note(d)}: {cmd} (approve:true is a logged decision)" if cmd else "; no squad to send"
     if d.get("hl"):
         return f"tell Gordon{how}; otherwise the lockdown ends by itself at its limit (confine.max_days)"
     return (f"tell Gordon: the lockdown stays while this one is near{how} (only if the squad can win); "
@@ -398,7 +408,8 @@ def lone_hint(d: dict) -> str:
     """M3 (BUG-112, notes 94 and 96): a harmless lone intruder holds a SIEGE/BREACH for days. The kernel kills one inside Kern+
     itself after confine.kill_hours when a squad stands at sortie.worn; this is the question when it is still there."""
     cmd = d.get("cmd")
-    how = f"; to send the squad now: {cmd} (approve:true is a logged decision)" if cmd else "; no squad to send"
+    how = (f"; to send the squad now{armour_note(d)}: {cmd} (approve:true is a logged decision)" if cmd
+           else "; no squad to send")
     kill = f" (the kernel's own kill order: {d['kill']})" if d.get("kill") else ""
     return (f"tell Gordon{how}{kill}; otherwise the kernel releases it at confine.max_days when the soldiers stand at "
             "their stations (LOCKDOWN_END limit); dfllm events --type SORTIE says whether the soldiers arrived, killed it or "
@@ -419,7 +430,8 @@ def siege_long_hint(d: dict) -> str:
     lifted, the civilians back to Kern+ or where seal keeps them: d.to); attacking is the player's call."""
     cmd = d.get("cmd")
     where = f"civilians in {d['to']}" if d.get("to") else "civilians in Kern+"   # BUG-331 review: seal's real pick
-    how = f"; to attack: {cmd} (approve:true is a logged decision, only if the squad can win)" if cmd else "; no squad to send"
+    how = (f"; to attack{armour_note(d)}: {cmd} (approve:true is a logged decision, only if the squad can win)" if cmd
+           else "; no squad to send")
     return (f"tell Gordon: the siege has been calm for {d.get('days', '?')} days (nearest hostile {d.get('n', '?')} tiles), "
             f"the kernel eased it ({where}, the bridges stay up){how}; otherwise wait")
 

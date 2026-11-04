@@ -3177,6 +3177,21 @@ function M.squad_info(K, key)
   return r
 end
 
+-- BUG-348 (Run 15 Guildcleans: DECISION_NEEDED kill_lone_intruder #7150 and siege_long offered squad.sortie with a ready
+-- command and no word on the armour; the player held back by the 80 % rule, worn 43 %): whether the kernel recommends the
+-- sortie it offers. {worn, need (sortie.worn, 80), rec = true/false, txt} for squad `key`, nil without that squad. The
+-- same threshold the gate sortie refuses below (siege.sortie)
+function M.sortie_advice(K, key)
+  local info = M.squad_info(K, key)
+  if not info then return nil end
+  local need = so_conf(K).worn
+  local w = int(info.worn) or 0
+  local rec = w >= need
+  return {worn = w, need = need, rec = rec,
+          txt = rec and string.format('sortie recommended: worn %d%% >= %d%%', w, need)
+                or string.format('sortie not recommended: worn %d%% < %d%%', w, need)}
+end
+
 ---------------------------------------------------------------- loot and free metal gear (FR-46)
 local LOOT_SKIP = {'trader', 'in_building', 'garbage_collect', 'removed', 'owned', 'in_job', 'construction', 'hostile'}
 local function is_metal(it)

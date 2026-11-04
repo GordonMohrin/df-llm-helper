@@ -278,6 +278,7 @@ local function forget(id)
   for k in pairs(S.tiles) do if k:sub(1, #id + 1) == id .. '/' then S.tiles[k] = nil end end
   if S.own then S.own[id] = nil end                -- BUG-033: own_tiles cache
   S.bbox[id], S.meas[id] = nil, nil
+  if S.life then S.life[id] = nil end               -- BUG-347: the life-support burrow check
   if S.cl then S.cl[id] = nil end                   -- BUG-129: tile clusters
   if S.rt and S.rt.skip then S.rt.skip[id], S.rt.rty[id], S.rt.pb[id] = nil, nil, nil end   -- BUG-022 records
   if S.rt and S.rt.br then S.rt.br[id] = nil end    -- Run 11: the breach record (m.runner cav outlives the project)
@@ -2862,9 +2863,86 @@ local function inside(K, P, d)    -- the whole project lies in one Z3/Z4 bbox (r
   return false
 end
 
+-- BUG-347 (Run 15 Guildcleans y386-387, i2: the hospital c1a1a510be3991ea01, the stockroom and gallery_o1 stood 'dig 0%
+-- BLOCKED:frozen' through a siege of 150+ days, patient 26739 died of thirst before the hospital was dug): the class gate
+-- let only defense projects inside Z3/Z4 run in a SIEGE. Life support now runs in SIEGE (and the hospital, a living
+-- project, in ALERT/RECOVERY) when every tile of its current stage lies inside a burrow the sounding civ alert holds the
+-- citizens in (the care burrow Pflege+ aside: it reaches patients outside), or inside Kern+ (manifest role kern) while no
+-- civ alert sounds: the work stays where the citizens already are, nothing opens a way out. Life support: the hospital,
+-- the cistern, the refuge's drink store, and farms / the stockroom while a food or drink emergency holds (S.focus.emerg:
+-- seal_first food_d / drink_d, patients without water). A stage with a tile outside stays frozen; the row says how many
+-- ('frozen: 9/11 tiles off Kern+'). Measured once per LIFE_TTL ticks and stage (S.life, runtime only).
+Q.LIFE = {hospital = true, cistern = true, refuge_drink = true}
+Q.LIFE_EMERG = {farms = true, stockroom = true}
+Q.CARE_BURROW = 'Pflege+'                         -- water.M.CARE (BUG-330's care burrow)
+M.LIFE_TTL = 1200
+
+-- the burrows the work must lie in: the sounding civ alert's (plotinfo.alerts.list[idx].burrows, as water.alert_burrows
+-- reads them), else Kern+; {burrow...}, the first name
+function Q.life_burrows(K)
+  local bs, name = {}, nil
+  pcall(function()
+    local al = df.global.plotinfo.alerts
+    local idx = int(al.civ_alert_idx) or 0
+    if idx == 0 or not al.list[idx] then return end
+    local ids = {}
+    for _, id in ipairs(al.list[idx].burrows) do ids[id] = true end
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+      if ids[b.id] and tostring(b.name) ~= Q.CARE_BURROW then
+        bs[#bs + 1] = b
+        name = name or tostring(b.name)
+      end
+    end
+  end)
+  if #bs == 0 then
+    local mb = K.manifest().burrows
+    for nm, spec in pairs(type(mb) == 'table' and mb or {}) do
+      if type(spec) == 'table' and spec.role == 'kern' then
+        local ok, b = pcall(dfhack.burrows.findByName, nm)
+        if ok and b then bs[#bs + 1] = b; name = name or nm end
+      end
+    end
+  end
+  return bs, name
+end
+
+-- true when P is life support whose current stage lies wholly inside the life burrows; false, why (nil: no life support)
+function Q.life_ok(K, P, d)
+  local life = Q.LIFE[P.tpl] or (Q.LIFE_EMERG[P.tpl] and type(S.focus) == 'table' and S.focus.emerg ~= nil)
+  if not life or type(d) ~= 'table' or P.stage >= #d.stages then return false end
+  local t = now(K)
+  S.life = S.life or {}
+  local c = S.life[P.id]
+  if c and c.si == P.stage and t >= c.t and t - c.t < M.LIFE_TTL then return c.ok, c.why end
+  local bs, name = Q.life_burrows(K)
+  local ok, why = false, nil
+  if #bs == 0 then why = 'no alert burrow'
+  else
+    local tl = stage_tiles(P.id, d, P.stage)
+    local n, out = 0, 0
+    local pos = {}
+    for ci = 1, #d.stages[P.stage + 1].chunks do
+      for _, tt in ipairs(tl[ci] or {}) do
+        n = n + 1
+        pos.x, pos.y, pos.z = tt[1], tt[2], tt[3]
+        local inb = false
+        for _, b in ipairs(bs) do
+          local okb, yes = pcall(dfhack.burrows.isAssignedTile, b, pos)
+          if okb and yes == true then inb = true; break end
+        end
+        if not inb then out = out + 1 end
+      end
+    end
+    ok = n > 0 and out == 0
+    if not ok then why = string.format('%d/%d tiles off %s', out, n, tostring(name)) end
+  end
+  S.life[P.id] = {t = t, si = P.stage, ok = ok, why = why}
+  return ok, why
+end
+
 -- CONTRACTS §9.8 class gating: ALERT/RECOVERY defense+infra, SIEGE defense inside, beauty PEACE+R1; the cavern plug
 -- (Run 11) in every mode: an open way from a cavern matters most in a fight; a lost bridge's repair (seal, BUG-030
--- rebuild policy: params.peace) only in PEACE without a reflex lockdown
+-- rebuild policy: params.peace) only in PEACE without a reflex lockdown; BUG-347: life support inside the alert burrow
 local function allowed(K, P, d)
   if P.tpl == 'plug' then return true end
   local m = K.mode()
@@ -2876,8 +2954,13 @@ local function allowed(K, P, d)
     return not (ok and type(why) == 'string' and why ~= '')
   end
   if m == 'PEACE' then return P.class ~= 'beauty' or beauty_ok(K) end
-  if m == 'ALERT' or m == 'RECOVERY' then return P.class == 'defense' or P.class == 'infra' end
-  if m == 'SIEGE' then return P.class == 'defense' and d ~= nil and inside(K, P, d) end
+  if m == 'ALERT' or m == 'RECOVERY' then
+    return P.class == 'defense' or P.class == 'infra' or (Q.LIFE[P.tpl] == true and (Q.life_ok(K, P, d)))
+  end
+  if m == 'SIEGE' then
+    if P.class == 'defense' and d ~= nil and inside(K, P, d) then return true end
+    return (Q.life_ok(K, P, d))                     -- BUG-347: life support inside the alert burrow
+  end
   return false
 end
 
@@ -3925,7 +4008,10 @@ function rows(K)
       local ok = allowed(K, P, d)
       local pw = ok and paused(K, P, d)
       local yd = S.yielded and S.yielded[P.id]
-      if not ok then b = 'frozen'
+      if not ok then
+        b = 'frozen'
+        local lw = S.life and S.life[P.id]                        -- BUG-347: life support with tiles off the burrow
+        if lw and lw.si == P.stage and lw.why then b = 'frozen: ' .. lw.why end
       elseif pw then b = 'paused: ' .. pw
       elseif S.active and not S.active[P.id] then
         b = yd and string.format('no progress %d d: slot yielded', yd) or behind

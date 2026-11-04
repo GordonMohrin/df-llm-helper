@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Run 15 sieges: life support runs inside the alert burrow, a static far goblin is cleared again, sortie offers name the armour (BUG-347, BUG-348, 2026-11-04; offline, live-untested)
+- **Why:** i2 Guildcleans: the hospital, stockroom and gallery stood `dig BLOCKED:frozen` through a 160-day siege, patient 26739
+  died of thirst (runner.lua allowed: SIEGE ran only defense inside Z3/Z4); goblin 24649, static at 1,136,117 (114 tiles), was
+  put back in the count by every invasion (reflex far_scan, BUG-065 'another hostile is in sight') and held SIEGE and lockdown
+  11-13 days each time after the newcomers died; the army before stood 26-40 tiles out and restarted BUG-331's calm clock
+  without a word; kill_lone_intruder / siege_long offered sorties with no word on the armour (Gordon's 80 % rule).
+- **What changed:** runner `Q.life_ok`: the hospital, cistern, refuge drink (farms/stockroom in a food or drink emergency) run in
+  SIEGE (the hospital in ALERT/RECOVERY) when every tile of the stage lies in a sounding civ alert burrow (not Pflege+), else
+  Kern+; the row says `frozen: N/M tiles off Kern+`. reflex: the re-armed cleared ones (`m.reflex far.rc`) are cleared again
+  once no other hostile is in sight while they stand within 2 tiles and are not near. siege: kern.log `the calm clock restarts
+  after N of D days: ...`. military `sortie_advice`: kill_lone_intruder, intruder_sortie and siege_long carry `worn`, `need`,
+  `rec` and `sortie (not) recommended: worn W% >= / < 80%`; the wake hints say it. CONTRACTS: the class gating and the `confine` text.
+- **Tests (fail on 14ff5a3):** tests/lua/test_bug347_life_siege.lua (3), test_reflex.lua (+2), test_bug331_siege_long.lua
+  (+1, +1 check), test_military.lua (+1), tests/test_bug348_sortie_advice.py (2).
+- **Live check:** i2 at the next invasion: `count again`, then `cleared again` and SIEGE>RECOVERY quiet within about 2 days, no
+  LOCKDOWN_END limit for 24649; a hospital in Kern+ digs during a siege. Open: a life-support stage with tiles off the alert
+  burrow (the i2 hospital until its burrow stage), an army that stays 26-40 tiles out is never calm at near 25.
 ## Run 15 gate review (merge15): walkers do not give a bridge up, a forced raise beats a blocked park, a destroyed bridge is not busy (BUG-335/342/338 review fix, 2026-11-04; offline, live-untested)
 - **Why:** review of merge15: path-only crossers made every queued pull a 'blocked' cancel toward gate.pull_cap (busy SIEGE
   traffic: give-up, every lever parked giveup_wait, also with a hostile at the gate); a bridge destroyed in the settle window
