@@ -1563,6 +1563,23 @@ def core_gaps(builds: list[dict], done: set) -> None:
         have.add(j)
 
 
+def core_order_gate(doc: dict) -> list[str]:
+    """Review fix (merge20, BUG-164/BUG-377): a fortcore @same stage k >= 2 placed in the plan before the plan's own stage k-1
+    (same core, no retrofit) would run bp.place on a stage whose predecessor does not exist yet: an ERROR for each such build."""
+    seq = [(si, bi, b) for si, se in enumerate(doc["seasons"]) for bi, b in enumerate(se["build"])
+           if b["tpl"] == "fortcore" and b.get("site") == SAME and not (b.get("p") or {}).get("retrofit")]
+    errs = []
+    for i, (si, bi, b) in enumerate(seq):
+        k = _stage_of(b.get("p") or {}) or 1
+        if k < 2:
+            continue
+        later = next(((sj, bj) for sj, bj, c in seq[i + 1:] if (_stage_of(c.get("p") or {}) or 1) == k - 1), None)
+        if later:
+            errs.append(f"seasons[{si}].build[{bi}] fortcore stage {k} @same comes before stage {k - 1} "
+                        f"(seasons[{later[0]}].build[{later[1]}]): stage {k - 1} must be placed first (BUG-164)")
+    return errs
+
+
 def core_movable(core: dict | None) -> bool:
     """The stopped fortcore may move: no stage 1 was dug on its anchor and a dry site exists (or is not known)."""
     return bool(core) and core["resite"] and core["ok"] is not False
@@ -1704,6 +1721,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
     warn += _traps.gate(doc, fort)                # FR-96: a way in without a trap lane from P5 on
     warn += defense_gate(doc, s, fort or {}, prev)    # BUG-377: the defence before growth
+    errs += core_order_gate(doc)                  # review fix (merge20): fortcore stage k never before stage k-1 in the plan
     ce2, cw2 = sweep_gate(doc, s)                 # FR-99: the cavern sweep from P6 on
     errs += ce2
     warn += cw2
@@ -1944,7 +1962,11 @@ def defense_order(builds: list, lead: list) -> list:
     k = 0
     while k < len(rest) and (rest[k]["tpl"] == SEAL or _refuge_fix(rest[k]) or any(rest[k] is x for x in lead)):
         k += 1
-    return rest[:k] + first + rest[k:]
+    # review fix (merge20, BUG-164): the hall is stage 4: every fortcore build of a lower stage (core_gaps' inserted stages 2/3
+    # included) stays ahead of it, in plan order, so bp.place never runs stage 4 before stage 2 exists
+    core = [b for b in rest[k:] if b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) < 4]
+    tail = [b for b in rest[k:] if not any(b is x for x in core)]
+    return rest[:k] + core + first + tail
 
 
 def defense_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:

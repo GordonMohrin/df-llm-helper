@@ -1,5 +1,9 @@
 # CHANGELOG dfpilot
 
+## Review fix (merge20): the defence order keeps fortcore stages 2/3 ahead of the hall (BUG-377/BUG-164; offline, live-untested)
+- `plan.defense_order` put the P6 hall (fortcore stage 4) ahead of stages 2/3 that `core_gaps` inserted, so `bp.place` stage 4 could run
+  before stage 2 exists. Now every fortcore build of stage < 4 stays in the leading prefix before the hall. `plan check` gets
+  `core_order_gate`: ERROR when fortcore stage k @same is placed before the plan's stage k-1. Tests: tests/test_bug377_379_defense.py (+2).
 ## Defence before growth, no dry refuge with a way in, a death census with causes (BUG-377 to BUG-379, 2026-11-04; offline, live-untested)
 - **Why:** Run 16d (i4 Plankscale fell y382: two goblin sieges, pop 66 -> 1, 0 attackers killed; refuge Tiefe+ dry at every siege,
   6 traps, soldiers in worn 30-55 % armor, no ore; phase P5 'waits for squads 3, drill, ready 1' for ten years, so the P6 hall and
