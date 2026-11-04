@@ -125,7 +125,9 @@ M.CFG = {
   -- progress (R.ps) for idle_days is set aside: no runner slot (measured meas_every like a stalled one, so DF's builders
   -- finishing it is noticed), its row last ('set aside N d: no progress'), PROJECT_BLOCKED d.idle with the commands; it
   -- comes back by itself on progress, by `bp.resume` (a fresh idle_days) or goes by `bp.cancel`. Not set aside: a mood
-  -- project, the hospital care first leads, an aqshaft watching an open level. config "runner": {queue: {idle_days}}
+  -- project, the hospital care first leads, an aqshaft watching an open level, the refuge drink, a seal in SIEGE/BREACH,
+  -- a food/drink project in an emergency (Q.idle_keep; a set-aside one comes back once it becomes one). config "runner":
+  -- {queue: {idle_days}}
   task_days = 3, idle_days = 30,
   -- BUG-066 (Run 14 y560: a toppled MetalsmithsForge stayed `built` in manifest.json and "bp sites workshops" said
   -- "nothing left to build" while a mood dwarf had no workshop) and FR-76 (Run 12 Trussroads, a reclaimed fort with
@@ -811,6 +813,9 @@ local function measure_build(K, P, d, R)
                                  and t - (int(R.rt) or 0) >= M.CFG.reapply_gap) or M.remake(K, P, d, R)) then
     R.b, R.uns, R.ra, P.chunk = keep, lost, 1, 0
     R.rn, R.rt = (int(R.rn) or 0) + 1, t
+    -- BUG-328 review: the kernel's own step, as the seal fallbacks: a set-aside project comes back (its next run applies
+    -- the lost part; a measure-only task stops before measure_build while P.chunk < #chunks, so nothing else moves R.ps)
+    moved(K, R)
     dirty()
     return 'reapply'
   end
@@ -4839,6 +4844,19 @@ end
 
 -- BUG-328: set aside for want of progress (m.runner ip[<proj>] = {t, ps, si, why}); see M.CFG.idle_days
 function Q.idle(P) return type(S.rt.ip) == 'table' and type(S.rt.ip[P.id]) == 'table' end
+-- BUG-328 review: never set aside, and a set-aside one comes back once this holds (the reason): a mood project,
+-- the hospital care first leads, an aqshaft watching an open level, the refuge's drink store, a seal or plug in
+-- SIEGE/BREACH and a food/drink project (SUPPLY) while a food/drink emergency holds
+function Q.idle_keep(K, P)
+  if Q.mood_proj(P) then return 'a strange mood waits for it' end
+  if S.care_id == P.id then return 'care leads it' end
+  if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return 'an open aquifer level' end
+  if P.tpl == 'refuge_drink' then return 'the refuge drink' end
+  local m = K.mode()
+  if SEALS[P.tpl] and (m == 'SIEGE' or m == 'BREACH') then return 'a seal in ' .. m end
+  local f = S.focus
+  if SUPPLY[P.tpl] and type(f) == 'table' and f.emerg then return tostring(f.emerg) end
+end
 -- the commands that end it, for the event and status
 function Q.idle_cmds(id)
   return string.format('resume: dfllm cmd bp.resume \'{"proj":"%s"}\'; cancel: dfllm cmd bp.cancel \'{"proj":"%s"}\'', id, id)
@@ -4851,20 +4869,26 @@ function Q.idle_scan(K, c, t)
   for id, r in pairs(S.rt.ip) do
     local P = find(id)
     local R = P and S.rt.p[P.id]
+    local keep = P and type(r) == 'table' and Q.idle_keep(K, P)
     if not P or P.done == 1 or halted(P) or type(r) ~= 'table' then S.rt.ip[id] = nil; dirty()
     elseif type(R) == 'table' and (R.si ~= int(r.si) or (int(R.ps) or 0) > (int(r.ps) or 0)) then
       S.rt.ip[id] = nil
       dirty()
       K.log('info', '%s (%s) moves again after %d days set aside: it takes a runner slot again', P.id, P.tpl,
             (t - (int(r.t) or t)) // DAY)
+    elseif keep then                         -- BUG-328 review: it became life-critical while set aside
+      S.rt.ip[id] = nil
+      if type(R) == 'table' then R.ps, R.last = t, t end           -- a fresh idle_days once that ends
+      dirty()
+      K.log('info', '%s (%s) back after %d days set aside (%s): it takes a runner slot again', P.id, P.tpl,
+            (t - (int(r.t) or t)) // DAY, keep)
     end
   end
   if K.mode() ~= 'PEACE' then return end
   for _, P in ipairs(sorted()) do
     local R = S.rt.p[P.id]
     local ps = type(R) == 'table' and R.si == P.stage and int(R.ps) or nil
-    if ps and P.done ~= 1 and not halted(P) and not S.rt.ip[P.id] and t - ps >= c.idle and not Q.mood_proj(P)
-       and S.care_id ~= P.id and not (P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id)) then
+    if ps and P.done ~= 1 and not halted(P) and not S.rt.ip[P.id] and t - ps >= c.idle and not Q.idle_keep(K, P) then
       local d = doc(K, P.id)
       local st = d and d.stages[P.stage + 1]
       local label = trunc(st and st.label or '', 24)
@@ -4948,7 +4972,7 @@ local function begin_run(K)
   -- to a waiting project. A paused project waits like a frozen one (no chunk, no stall); waiting for a slot is no
   -- idleness (R.ps), holding one is
   local function second(P, R)
-    if Q.idle(P) then return true end                                             -- BUG-328: set aside
+    if Q.idle(P) and not Q.idle_keep(K, P) then return true end                   -- BUG-328: set aside
     if SEALS[P.tpl] and c.on and not f.stk[P.id] then return false end
     if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return false end        -- BUG-191: an open aquifer level
     if S.care_id == P.id and P.blocked ~= 'stalled' then return false end         -- BUG-116: the hospital never yields
@@ -4976,7 +5000,7 @@ local function begin_run(K)
           end
         end
         local mood_slot = ok and Q.mood_proj(P) and nm < (int(M.CFG.mood_slots) or 2)    -- BUG-306: beside `active`
-        local aside = Q.idle(P)                                 -- BUG-328: set aside: measured only, never a slot
+        local aside = Q.idle(P) and not Q.idle_keep(K, P)       -- BUG-328: set aside: measured only, never a slot
         if ok and not aside and (n < M.CFG.active or mood_slot) then
           if mood_slot then nm = nm + 1 else n = n + 1 end
           S.active[P.id] = true
