@@ -126,6 +126,11 @@ def test_surface_core_why_names_a_known_aquifer_within_three_levels_of_the_ancho
     assert sites.surface_core_why(snap, {"v": 2, "aquifer_levels": [120]}, site) is None       # deep enough
     heavy = {"v": 2, "breaches": [_breach([5, 5, Z - 1])]}
     assert "z129" in sites.surface_core_why(snap, heavy, site)
+    deep = {"v": 2, "breaches": [_breach([5, 5, Z - 5])]}          # recorded wet level inside the dig (depth 1-3 reaches az-8)
+    assert "z125" in sites.surface_core_why(snap, deep, site)
+    assert sites.surface_core_why(snap, {"v": 2, "breaches": [_breach([5, 5, Z - 9])]}, site) is None
+    assert "z121" in sites.surface_core_why(snap, {"v": 2, "breaches": [_breach([5, 5, Z - 9])]},
+                                            {"anchor": [110, 110, Z], "dig": (100, 100, Z - 9, 120, 120, Z)})
 
 
 # ---------------------------------------------------------------- BUG-389: plan propose

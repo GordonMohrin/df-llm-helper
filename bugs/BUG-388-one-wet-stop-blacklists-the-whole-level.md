@@ -25,3 +25,8 @@ test_bug359_361_sites.py (rewritten wet-layer tests).
 ## Live check
 i2-like: `bp sites fortcore --fresh` after two stops on z130 lists sites farther than 16 tiles from them (or, with the aquifer under every
 site, plan propose drafts the surface core).
+
+## Follow-up (verifier)
+`_dry` only rules out digs within `LAYER_R` of a wet layer's stops, so a farther site could still dig into a breach-recorded wet level
+at az-4..az-8 while `surface_core_why` (SURFACE_AQ 3) said no surface core was needed. `surface_core_why` now also returns a reason
+when a breach-recorded wet layer lies in `[az-SURFACE_DIG (8) or the site's dig z0, az]`. Test: `test_surface_core_why_names_...` (az-5, az-9).

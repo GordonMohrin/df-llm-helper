@@ -10,6 +10,8 @@
   surface core's depot. RANK_V 5.
 - **BUG-388:** `sites._dry`: a wet layer (2 damp/water stops or 1 heavy_aquifer on a level) rules out only the dig within `LAYER_R` (16) tiles of one of its stops,
   not every site of the level.
+  Follow-up: `sites.surface_core_why` also sends the fort to the surface core when a breach-recorded wet level lies inside the site's dig range
+  (`SURFACE_DIG` 8 under the anchor, or the site's own dig z0), since `_dry` keeps farther sites that would dig into the same aquifer.
 - **BUG-389:** `fort.surface` (`plan.surface_facts`: no fortcore ranks at depth 3/2/1, a known aquifer within 3 levels under the best site, or a core stopped on a
   breach that cannot move) makes `propose` draft `surfacecore@S1` in place of the fortcore, rooms with `p.surface=1`, rooms that dig rock left out with a note;
   `_refuge_stage` counts the surface core, `stage3_gate` and `core_order_note` stand aside.

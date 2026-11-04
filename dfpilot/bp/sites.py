@@ -1230,6 +1230,7 @@ BREACH_R = 10               # BUG-130: tiles (x/y) a fortcore's dig keeps from a
 LAYER_MIN = 2               # BUG-130: damp/water breaches of this many projects on one level make it a wet layer (aquifer)
 LAYER_R = 16                # BUG-388: tiles (x/y) around a stop on a wet layer that count as that layer's wet area (not the level)
 SURFACE_AQ = 3              # BUG-387: an aquifer level this close (or closer) under a fortcore anchor: the core goes on the surface
+SURFACE_DIG = 8             # BUG-387: a fortcore digs this deep under its anchor (depth 3 reaches az-8): a breach-recorded wet level inside
 
 
 def breach_points(manifest: dict | None) -> list[tuple[tuple[int, int, int], str]]:
@@ -1373,6 +1374,14 @@ def surface_core_why(snap: dict, manifest: dict | None, site: dict | None, p: di
     near = sorted((z for z in known_aquifer(snap, manifest) if z >= lo), reverse=True)
     if near:
         return f"aquifer known at z{near[0]}, {max(az - near[0], 0)} level(s) under the fortcore anchor (z{az})"
+    # a wet layer a breach recorded (heavy_aquifer, damp stops) inside the whole dig range: `_dry` only rules out digs near its
+    # stops, a farther site would dig into the same aquifer (Run 16 i1/i3), so the core goes on the surface
+    reach = az - SURFACE_DIG
+    if site.get("dig"):
+        reach = min(reach, int(site["dig"][2]))
+    wet = sorted((z for z in _breach_layers(manifest) if reach <= z <= az), reverse=True)
+    if wet:
+        return f"wet level z{wet[0]} recorded by a breach, {max(az - wet[0], 0)} level(s) under the fortcore anchor (z{az}), inside its dig"
     return None
 
 
