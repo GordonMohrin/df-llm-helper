@@ -1,5 +1,16 @@
 # CHANGELOG dfpilot
 
+## Review fix (merge15): the open refuge as the last resort, no flight without danger (BUG-336, 2026-11-04; offline, live-untested)
+- **Why:** the merge15 review: BUG-336 refused an open refuge in every SIEGE, so with Kern+ failing only on supply (no drink,
+  no Innen+) choose returned no burrow and siege turned the civ alert off mid-siege; 'unsealed' sent citizens held in the open
+  refuge to none (flee) in a quiet siege (seal.lua choose/leave_why). The seal_stalled question for the stair-foot doors
+  offered to wall them (runner.lua:3428) and idle_days could set them aside.
+- **What changed:** seal: the open refuge at WET as the last resort when no danger is known; 'unsealed' to none only with danger
+  (r.danger, a hostile in Kern+ or the refuge, an opening reaching either), else KEEP. runner: `Q.refuge_seal` counts pieces
+  beside the refuge stair on its floor; no wall command for them, never set aside.
+- **Tests (fail on d40fb59):** test_seal_refuge.lua (+2), test_bug336_seal_escalate.lua (+1).
+- **Live check:** a siege with the refuge hatch missing and Kern+ dry: the alert stays on (Tiefe+ WET), no `none (alert off)`
+  REFUGE_SWITCH without a hostile inside. Open: the refuge is a dead end; once Kern+ is breached the citizens flee from it.
 ## Run 15 gate review: our squads kept off a busy bridge, approach cancels bounded (BUG-335/342 review, 2026-11-04; offline, live-untested)
 - **Why:** the verifiers of BUG-335 and BUG-342: gate only waited for our soldiers walking over a bridge (Earthboat squads 99-101
   would hold every SIEGE close until the give-up), the inner station flipped melee -> b2 the moment B2 moved, stairs/ramps (another

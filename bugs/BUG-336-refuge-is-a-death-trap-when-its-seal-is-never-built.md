@@ -92,6 +92,22 @@ doors; no bp.place on the same head), test_gate_pullers.lua (BREACH with seal's 
 refuge lever), test_bug336_337_refuge.py (every kernel command passes schema.validate_args and defense.seal_pieces, <= 200
 bytes; cmd.refuge_stair state foot; plan head_open False).
 
+## Review fix (merge15)
+- The open refuge was refused at every level in every SIEGE (`fight`), even with no danger known: Kern+ and Innen+ failing
+  only on supply (Kern+ without drink, no Innen+) left no pick, and siege turned the civ alert off mid-siege (the deep defense
+  too, its BREACH ask flees even under a held lockdown). Now seal.lua `choose` takes the open refuge as the last resort at WET
+  (its own drink) when nothing else passes and no danger is known (r.danger: nothing reaches or stands in a candidate,
+  Kern+ included); with danger it stays refused (the trap).
+- `leave_why`'s 'unsealed' sent citizens held in the open refuge to none (flee, alert off) in a quiet SIEGE. Now 'unsealed'
+  goes to a real free pick as before, to none only with danger (`open_danger`: r.danger, a hostile in Kern+ or the refuge,
+  an opening reaching either); otherwise the other reasons (dry, window, ...) decide or the refuge is KEPT.
+- runner.lua `Q.refuge_seal` also knows the doors round the stair foot (beside the column on the refuge floor, the level below
+  the manifest head): never set aside (idle_keep), and seal_stalled no longer offers `close=wall` for them (walling the foot
+  cuts the refuge off from its only stair); the question asks for the hand build.
+- Tests (each fails on d40fb59): test_seal_refuge.lua (+2: quiet SIEGE and deep defense -> the open wet refuge, with a hostile
+  in Kern+ flee; held in the open refuge, nothing else -> KEEP, no REFUGE_SWITCH, with a hostile -> none + flee),
+  test_bug336_seal_escalate.lua (+1: foot-door seal not set aside, no wall command).
+
 ## Live check
 A fort with the refuge hatch missing: status `REFUGE OPEN`, state `alert.ref.op 1`; at a siege REFUGE_FAIL `Tiefe+: open: ...`
 and the alert on Kern+; 30 days after the clock stopped DECISION_NEEDED seal_stalled with d.cmd. Uncertain: whether fleeing beats

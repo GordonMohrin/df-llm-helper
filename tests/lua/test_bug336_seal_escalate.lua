@@ -36,7 +36,10 @@ local function world(o)
           state = function() return {stock = {food_d = 200, drink_d = 300, rock = 50, rock_need = 10}} end})
   if o.refuge then
     W.load({name = 'seal', every = {ticks = 100000},
-            refuge_stair = function(K) return {state = 'ok', pos = {SX, SY, Z}, man = {SX, SY, Z}} end,
+            refuge_stair = function(K)
+              if o.col then return {state = 'ok', pos = o.col, man = o.col} end
+              return {state = 'ok', pos = {SX, SY, Z}, man = {SX, SY, Z}}
+            end,
             refuge_alt = o.alt and function(K, at) S_AT = at; return o.alt end or nil})
   end
   W.load(runner)
@@ -123,6 +126,21 @@ T.test('BUG-336 review: the refuge hatch stalled on the head the map shows (no o
                        'the stair foot', 1, true), a[1].d.how)
   T.eq(a[1].d.cmd, [[dfllm cmd bp.cancel '{"proj":"rf"}' then dfllm cmd bp.place ]] ..
                    [['{"tpl":"seal","site":"S1","p":{"at":"115,73,141 floor;114,74,141 floor"}}']])
+end)
+
+T.test('Review fix (merge15): the foot-door seal round the refuge stair (refuge_alt doors, beside the column on the ' ..
+       'refuge floor) nobody builds: it is the refuge seal (never set aside), and no wall command (old: close=wall on ' ..
+       'the foot tile, the refuge cut off from its stair)', function()
+  local W = world{tag = 'b336d', refuge = true, col = {SX - 1, SY, Z + 1}}
+  H.place(W, 'fd', seal_doc('d'))
+  for _ = 1, 24 do H.runs(W, 1) end
+  T.ok(not ((row(W, 'fd') or {})[4] or ''):find('^set aside'), T.show(row(W, 'fd')))
+  local a = asks(W)
+  T.ok(#a >= 1, 'asked')
+  T.eq(a[1].d.mat, 'door 114,73,143')
+  T.ok(a[1].d.q:find("the refuge is NOT the civilians' burrow in a fight until it stands", 1, true), a[1].d.q)
+  T.eq(a[1].d.cmd, nil, 'old: bp.place close=wall')
+  T.ok(a[1].d.how:find('never wall these tiles', 1, true), a[1].d.how)
 end)
 
 T.done()

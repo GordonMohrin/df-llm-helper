@@ -3330,29 +3330,38 @@ function Q.closure(P, d)
 end
 
 -- BUG-336: the open piece of seal P on the refuge's stair column (seal.refuge_stair: its x,y), 'hatch x,y,z', else nil.
--- The column is read once per tick (S.rfc)
+-- The column is read once per tick (S.rfc). Review fix (merge15): a piece beside the column on the refuge floor (the
+-- foot doors seal.refuge_alt offers: the level below the manifest head, man) is the refuge's seal too; the second value
+-- is then true (seal_escalate never offers to wall it: the stair is the refuge's only way in; idle_keep keeps it)
 function Q.refuge_seal(K, P)
   local t = now(K)
   local c = S.rfc
   if not (c and c.t == t) then
     local ok, rs = K.call('seal', 'refuge_stair')
     local m = ok and type(rs) == 'table' and (rs.pos or rs.man) or nil
-    c = {t = t, x = m and int(m[1]), y = m and int(m[2])}
+    local man = ok and type(rs) == 'table' and type(rs.man) == 'table' and rs.man or nil
+    c = {t = t, x = m and int(m[1]), y = m and int(m[2]), zr = man and int(man[3]) and man[3] - 1}
     S.rfc = c
   end
   if not c.x then return nil end
   local d = doc(K, P.id)
   local st = d and d.stages[P.stage + 1]
+  local foot
   for _, ch in ipairs(st and st.chunks or {}) do
     for _, cell in ipairs(ch.cells) do
       local tl = {}
       cell_tiles(ch, cell, tl)
       local tile = tl[1]
-      if tile and tile[1] == c.x and tile[2] == c.y and not piece_built(K, tile) then
-        return string.format('%s %d,%d,%d', PIECE_NAME[cell[4]] or cell[4], tile[1], tile[2], tile[3])
+      if tile and not piece_built(K, tile) then
+        local name = string.format('%s %d,%d,%d', PIECE_NAME[cell[4]] or cell[4], tile[1], tile[2], tile[3])
+        if tile[1] == c.x and tile[2] == c.y then return name end
+        if not foot and c.zr and tile[3] == c.zr and math.abs(tile[1] - c.x) <= 1 and math.abs(tile[2] - c.y) <= 1 then
+          foot = name
+        end
       end
     end
   end
+  if foot then return foot, true end
 end
 
 -- BUG-336 review: the bp.place args (dfpilot/schema.py VERB_ARGS bp.place: tpl and site; the seal's own params in p) as the
@@ -3395,7 +3404,7 @@ function Q.seal_escalate(K, P, d, r, n, names, t, c)
   r.dn = t
   dirty()
   local days = (t - r.t) // DAY
-  local rf = Q.refuge_seal(K, P)
+  local rf, rfoot = Q.refuge_seal(K, P)
   local piece = rf or names[1] or '?'
   local tried = {}
   if type(r.rp) == 'table' and next(r.rp) then tried[#tried + 1] = 'removed and placed again' end
@@ -3406,7 +3415,12 @@ function Q.seal_escalate(K, P, d, r, n, names, t, c)
   -- d.cmd: the commands alone (every d string <= 200 bytes, CONTRACTS section 12: one that does not fit is left out);
   -- d.how: what they do and the other way (build it by hand), for the player
   local place, how
-  if rf then
+  if rfoot then
+    -- Review fix (merge15): the doors round the refuge's stair foot (refuge_alt's way): walling them cuts the refuge
+    -- off from its only stair, so no command, only the hand build
+    how = 'build the doors round the stair foot by hand in DF (units in the way? no builder reaches them?); never ' ..
+          'wall these tiles: the stair is the only way into the refuge'
+  elseif rf then
     local oka, alt = K.call('seal', 'refuge_alt', tile)
     alt = oka and type(alt) == 'table' and alt or {}
     local why = alt.boxed == true and 'no tile beside it to build from' or 'units on the stair? no builder reaches it?'
