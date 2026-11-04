@@ -1,5 +1,21 @@
 # CHANGELOG dfpilot
 
+## Run 15 year plans: the phase rises past a seal that cannot close, discarded-timeline bp files free their sites, no stone dig without a site (BUG-349/350/351, 2026-11-04; offline, live-untested)
+- **Why:** i2 Guildcleans stayed at P3 from y388: plan check refused every raise 'while the perimeter is open 468 d' with
+  seal@S1 first and the seal stuck 4500 d (plan.py perimeter_gate), propose drafted the raise its check refused, and the
+  seal_stalled question did not say its bp.cancel is safe; i1 Inkintense y381: bp files of y378 explores that lived only in
+  a discarded timeline (TIMELINE_RESET #2422) held every explore site (cmd.py occupancy); i4 Drillchamber y381/y384: propose
+  drafted the stone dig bedrooms@S1 n=4 with 0 free sites.
+- **What changed:** perimeter_gate waives the raise (a warning with the reason) after `PERIMETER_WAIVE_D` 365 d of
+  open_perimeter when a seal is stuck that long or set aside, a seal is among the plan's new builds due now, or nothing left
+  a seal closes (only lost bridges/levers); the refusal says when; propose keeps the phase when the gate refuses.
+  seal_stalled how texts say `recommended and safe`/`safe` (bp.cancel drops only unbuilt pieces), a wall waiting for an item
+  gets no command; the wake hint says the cancel is safe and what stays open. files.discarded_projects / cmd.stale_bps:
+  occupancy leaves out projects only a discarded timeline had (while state proj is complete). plan.fit_stone_dig leaves a
+  stone dig no free bedrooms site takes out, with a note (propose, auto_plan). No contract change.
+- **Tests (fail on 14ff5a3):** tests/test_bug349_351_plan.py (9), tests/lua/test_bug336_seal_escalate.lua (+1, safety checks).
+- **Live check:** i2 `plan check` P5: `... is waived (BUG-349 ...)`, plan OK; i1 explore@S1 without `taken by y378s...`; i4
+  propose prints `stone dig bedrooms@S1 n=4 left out`.
 ## Run 15 gate review (merge15): walkers do not give a bridge up, a forced raise beats a blocked park, a destroyed bridge is not busy (BUG-335/342/338 review fix, 2026-11-04; offline, live-untested)
 - **Why:** review of merge15: path-only crossers made every queued pull a 'blocked' cancel toward gate.pull_cap (busy SIEGE
   traffic: give-up, every lever parked giveup_wait, also with a hostile at the gate); a bridge destroyed in the settle window

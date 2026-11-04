@@ -33,6 +33,7 @@ local function world(o)
   end
   H.floor(W, SX, SY, Z, SX, SY)
   W.load({name = 'economy', every = {ticks = 1200}, mat_for = function() return 'rock' end,
+          build_state = o.bs and function() return o.bs end or nil,
           state = function() return {stock = {food_d = 200, drink_d = 300, rock = 50, rock_need = 10}} end})
   if o.refuge then
     W.load({name = 'seal', every = {ticks = 100000},
@@ -74,6 +75,7 @@ T.test('BUG-336: a perimeter seal door nobody builds: after esc_days DECISION_NE
   T.eq(a[1].d.cmd, [[dfllm cmd bp.cancel '{"proj":"sl"}' then dfllm cmd bp.place ]] ..
                    [['{"tpl":"seal","site":"S1","p":{"at":"114,73,143 floor","close":"wall"}}']])
   T.ok(a[1].d.how:find('wall the tile', 1, true), a[1].d.how)
+  T.ok(a[1].d.how:find('^safe %(the cancel drops only the unbuilt piece; open until the wall stands%)'), a[1].d.how)
   H.runs(W, 4)
   T.eq(#asks(W), 1, 'not again within esc_days')
   H.runs(W, 8)
@@ -109,6 +111,9 @@ T.test('BUG-336 review: the refuge hatch stalled where the map now shows another
   T.ok(#a >= 1, 'asked')
   T.eq(S_AT, {SX, SY, Z}, 'refuge_alt gets the stalled piece')
   T.ok(a[1].d.how:find('place it at the head the map shows now (114,73,145)', 1, true), a[1].d.how)
+  T.ok(a[1].d.how:find('^recommended and safe %(the cancel drops only the unbuilt hatch; the refuge stays open'),
+       a[1].d.how)                                                            -- BUG-349
+  T.ok(#a[1].d.how <= 200, #a[1].d.how)
   T.eq(a[1].d.cmd, [[dfllm cmd bp.cancel '{"proj":"rf"}' then dfllm cmd bp.place ]] ..
                    [['{"tpl":"seal","site":"S1","p":{"at":"refuge"}}']])
 end)
@@ -122,8 +127,10 @@ T.test('BUG-336 review: the refuge hatch stalled on the head the map shows (no o
   while #asks(W) == 0 and runs < 40 do H.runs(W, 1); runs = runs + 1 end
   local a = asks(W)
   T.ok(#a >= 1, 'asked')
-  T.ok(a[1].d.how:find('build it by hand in DF (no tile beside it to build from), or cancel it and put doors round ' ..
-                       'the stair foot', 1, true), a[1].d.how)
+  T.ok(a[1].d.how:find('put doors round the stair foot on the refuge floor (2 tiles); or build it by hand ' ..
+                       '(no tile beside it to build from)', 1, true), a[1].d.how)
+  T.ok(a[1].d.how:find('^recommended and safe %(the cancel drops only the unbuilt hatch'), a[1].d.how)   -- BUG-349
+  T.ok(#a[1].d.how <= 200, #a[1].d.how)
   T.eq(a[1].d.cmd, [[dfllm cmd bp.cancel '{"proj":"rf"}' then dfllm cmd bp.place ]] ..
                    [['{"tpl":"seal","site":"S1","p":{"at":"115,73,141 floor;114,74,141 floor"}}']])
 end)
@@ -141,6 +148,22 @@ T.test('Review fix (merge15): the foot-door seal round the refuge stair (refuge_
   T.ok(a[1].d.q:find("the refuge is NOT the civilians' burrow in a fight until it stands", 1, true), a[1].d.q)
   T.eq(a[1].d.cmd, nil, 'old: bp.place close=wall')
   T.ok(a[1].d.how:find('never wall these tiles', 1, true), a[1].d.how)
+end)
+
+T.test('BUG-349 (Run 15 Guildcleans y389-y390, i2 #7283: seal c1a1a485b71c19f201 wall 130,93,130 open 2300 d (no item), ' ..
+       'the question offered bp.cancel + bp.place close=wall on the same tile): a wall waiting for an item gets no ' ..
+       'command, the how says why and what helps', function()
+  local W = world{tag = 'b349w', bs = {line = 'waits for an item', job = 7, susp = true, who = 'buildingplan'}}
+  H.place(W, 'sw', seal_doc('Cw'))
+  local runs = 0
+  while #asks(W) == 0 and runs < 40 do H.runs(W, 1); runs = runs + 1 end
+  local a = asks(W)
+  T.ok(#a >= 1, 'asked')
+  T.eq(a[1].d.mat, 'wall 114,73,143')
+  T.ok(a[1].d.q:find('(no item)', 1, true), a[1].d.q)
+  T.eq(a[1].d.cmd, nil, 'old: bp.cancel then bp.place close=wall on the same tile')
+  T.ok(a[1].d.how:find('^no command helps: the wall waits for a building item'), a[1].d.how)
+  T.ok(#a[1].d.how <= 200, #a[1].d.how)
 end)
 
 T.done()
