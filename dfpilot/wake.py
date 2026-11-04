@@ -357,6 +357,8 @@ def next_hint(etype: str, e: dict) -> str:
     if etype == "DECISION_NEEDED" and d.get("id") == "curse_kill":
         return ("ask Gordon: a kill order on the were-form (dfllm cmd squad.sortie, approve:true is the logged decision; "
                 "a squad and its target position) or keep them apart in a locked room; no answer = no kill")
+    if etype == "PROJECT_BLOCKED" and d.get("idle") is not None and d.get("proj"):
+        return idle_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
         return park_hint(d)
     return NEXT.get(etype, "dfllm brief")
@@ -415,6 +417,14 @@ def park_hint(d: dict) -> str:
     Cancelling it without undo keeps what it built (an explore's shaft stays watched)."""
     return (f"tell Gordon; once he agrees: dfllm cmd bp.cancel '{{\"proj\":\"{d['proj']}\"}}' (no undo), then place "
             "it again elsewhere if still wanted")
+
+
+def idle_hint(d: dict) -> str:
+    """BUG-328: a project without progress for runner queue.idle_days was set aside (no runner slot, measured now and then;
+    it comes back by itself when DF's workers finish a piece). The line's `waits:` names what it waits for."""
+    p = d["proj"]
+    return (f"tell Gordon what it waits for (dfllm cmd inspect what=projects); fix that, then dfllm cmd bp.resume "
+            f"'{{\"proj\":\"{p}\"}}', or once he agrees bp.cancel it (its unbuilt pieces go with it)")
 
 
 def rebuild_hint(d: dict) -> str:

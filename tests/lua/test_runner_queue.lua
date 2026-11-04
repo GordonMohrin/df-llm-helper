@@ -235,7 +235,7 @@ T.test('BUG-037 watchdog: a task that yields task_slices slices in a row is skip
   runner.CFG.task_slices = 2
   H.place(W, 'w1', H.dig_doc(5, {tpl = 'fortcore', class = 'defense', params = {stage = 2}, x = 10, label = 's2.dig'}))
   H.runs(W, 1)
-  T.ok(logged(W, 'warn', '^runner watchdog: task 1/3 %(work w1%) yielded 2 slices in a row: skipped this run$'))
+  T.ok(logged(W, 'warn', '^runner watchdog: task 1/3 %(work w1%) yielded 2 slices in a row %(0 days%): skipped this run$'))
   T.eq(H.proj(W, 'w1').chunk, 2)
   H.runs(W, 3)
   T.eq(H.proj(W, 'w1').chunk, 5, 'every chunk applied over the next runs')

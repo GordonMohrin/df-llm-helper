@@ -67,6 +67,7 @@ C.EVENTS = {
   PAUSED_BY_DF = {cls = 'A', by = 'arbiter'},     -- FR-94: the game stood paused by DF (a load, a popup) for resume.wake_min minutes
   -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z');
   -- BUG-037 d.park: the days a project blocked for good stood before it was parked (msg: its bp.cancel command)
+  -- BUG-328 d.idle: the days a project stood without progress before it was set aside (msg: bp.resume and bp.cancel)
   PLAN_EXHAUSTED = {cls = 'A', by = 'runner'}, PROJECT_BLOCKED = {cls = 'A', by = 'runner'},
   YEAR_REVIEW = {cls = 'A', by = 'kern'},
   -- FR-04/26 ghosts and unburied citizens, FR-34 a hospital without accepted water, FR-44 a strange mood at risk
@@ -219,6 +220,7 @@ C.VERBS = {
   ['plan.reload']  = {mod = 'kern'},
   ['bp.place']     = {mod = 'runner'},
   ['bp.cancel']    = {mod = 'runner'},
+  ['bp.resume']    = {mod = 'runner'},       -- BUG-328: a project set aside for want of progress takes a slot again
   ['phase.waive']  = {mod = 'runner'},       -- BUG-300: a deliverable of the current phase that cannot be made
   ['drill']        = {mod = 'drill', modes = {PEACE = true}},
   ['snapshot']     = {mod = 'snapshot'},
@@ -485,10 +487,12 @@ C.STATE_SPEC = obj({
                     care = obj({proj = str(nil, nil, 'id'), paused = NAT}, {why = str(24), stuck = FLAG, days = NAT}),
                     -- BUG-037: projects waiting for a slot and the slot holders (id, template, days without own
                     -- progress); no run ended for d days (the run in hand: task i of n, its label, slices, age in days);
-                    -- parked projects (blocked for good past runner queue.park_days)
+                    -- parked projects (blocked for good past runner queue.park_days); BUG-328: ip = the projects set
+                    -- aside for want of progress (queue.idle_days): count, {id, template, days without progress}
                     q = obj({n = NAT, by = arr({t = 'tup', items = {str(nil, nil, 'id'), str(16), NAT}}, 0, 8)}),
                     run = obj({d = NAT}, {i = NAT, n = NAT, task = str(40), sl = NAT, age = NAT}),
-                    pk = NAT}),
+                    pk = NAT,
+                    ip = obj({n = NAT, by = arr({t = 'tup', items = {str(nil, nil, 'id'), str(16), NAT}}, 0, 8)})}),
   bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown', 'destroyed', 'replaced'}), 'bridge'),   -- BUG-030, BUG-048
   owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
                 tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),

@@ -1017,7 +1017,9 @@ T.test('plan builds: y<Y>s<S>b<I> due per season, never twice, a missing file is
   W.set_plan(plan)                               -- plan.reload of the same year
   H.runs(W, 2)
   T.eq(H.proj(W, 'y3s1b0'), nil)
-  T.eq(#W.find_events('PROJECT_BLOCKED'), 1)
+  local nb = 0                                   -- BUG-328: the summer jump sets y3s0b0 aside (no progress), not counted
+  for _, e in ipairs(W.find_events('PROJECT_BLOCKED')) do if e.d.idle == nil then nb = nb + 1 end end
+  T.eq(nb, 1)
 end)
 
 local PHASES = {
