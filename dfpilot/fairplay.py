@@ -420,6 +420,10 @@ CARE_LIM: dict = {
     # mood_crit_every ticks and mood_crit_wall_s s apart; the kernel's shop request / webs task every mood_act_every ticks
     "mood_crit_nows": _TICKS, "mood_crit_wait": (1, 60), "mood_crit_left": (1, 60), "mood_timer": (1200, 200000),
     "mood_crit_every": _TICKS, "mood_crit_wall_s": (0, 3600), "mood_act_every": _TICKS,
+    # BUG-393/395: care's own stone dig for a mood (radius, tile reads a search, water-free margin, tries, days between them) and the
+    # days of insanity left from which DECISION_NEEDED mood_deadline names the ready commands
+    "stone_dig": "bool", "stone_r": (2, 40), "stone_probes": (10, 2000), "stone_wet": (1, 8), "stone_tries": (1, 10),
+    "stone_retry": (1, 30), "mood_decide": (2, 60),
     "topple_every": _TICKS, "topple_win": _TICKS, "topple_r": (0, 50),
     "stress_high": (1, 100), "stress_days": (1, 400), "stress_every": _TICKS,
     # BUG-115 / FR-83: curses and transformations (lua/dfllm/curse.lua)

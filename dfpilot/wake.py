@@ -202,7 +202,8 @@ ERR_EVERY_S = 60                               # stderr 'poll error' at most onc
 # are never held by the hourly limit longer than URGENT_GAME_TICKS of game time (merged first, one per type per
 # URGENT_REPEAT_S); DECISION_NEEDED only for the ids in URGENT_DECISIONS (a fort running out of drink or food, a thirsty one)
 URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
-URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst"}   # BUG-340: famine too
+URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst",
+                    "mood_deadline"}   # BUG-340: famine too; BUG-395: a mood about to fail
 URGENT_GAME_TICKS = schema.TICKS["DAY"]
 HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often
 
@@ -351,7 +352,7 @@ def next_hint(etype: str, e: dict) -> str:
         return siege_long_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "seal_stalled":
         return seal_stalled_hint(d)
-    if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low") and d.get("cmds"):
+    if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline") and d.get("cmds"):
         return food_hint(d)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)
@@ -518,7 +519,8 @@ OFFICE_HINT = ("a vacant office or squads without a leader: dfllm cmd inspect '{
 
 # BUG-117 (Run 14 note 92) readiness R0 mood_ws: moodable workshop types missing; the line's msg carries the command
 MOOD_WS_HINT = ("moodable workshops missing: run the bp.place command the line names (dfllm cmd bp.place "
-                "'{\"tpl\":\"workshops\",\"site\":\"S1\",\"p\":{\"only\":\"Loom\"}}'); follow places the rest")
+                "'{\"tpl\":\"workshops\",\"site\":\"S1\",\"p\":{\"only\":\"Loom\"}}'); follow places the rest "
+                "(BUG-394: on the surface when no fortcore site is free)")
 
 
 SHOW_FIGHT = ("SIEGE", "BREACH", "ALERT", "DRILL")     # viewlib.lua V.FIGHT: the camera is the player's there
@@ -1152,6 +1154,8 @@ class Follower:
             need = job.get("need") if isinstance(job.get("need"), list) else None
             if tpl == "farms":
                 cid = self._place_farms(args, now, snap)
+            elif tpl == "workshops" and key != "starter":
+                cid = self._place_workshops(args, now, snap, need)
             else:
                 cid = self._send("bp.place", args, tpl, now, snap=snap, need=need)
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped
@@ -1163,6 +1167,32 @@ class Follower:
         job.update(placed=cid, since=now, prev=prev if isinstance(prev, dict) else None)
         files.log_cli(self.dir, "follow", f"auto:{key}", args, f"placed {cid}")
 
+
+    def _place_workshops(self, args: dict, now: float, snap: dict, need: list | None) -> str:
+        """BUG-394 (Run 16a i1 Bachwald: a Possessed dwarf waited for 'no Craftsdwarfs' until the shop was placed by hand, the
+        kernel's mood request answered `only 0 free site(s) for workshops` 25 times; i2/i3 the same, no fortcore room site):
+        a request for named shops (skip/add: the mood's, mandatory, missing ...) that finds no room site is tried again as the
+        startup style `surface = 1`, on open surface floor with no fortcore, in PEACE (workshop_tries). The first that places
+        is sent; none: the first error with the surface one behind it."""
+        from .cmd import BpError
+        st = files.read_state(self.dir) or {}
+        first = last = None
+        tries = workshop_tries(args.get("p") or {}, st.get("mode"))
+        for p in tries:
+            try:
+                cid = self._send("bp.place", {**args, "p": p}, "workshops", now, snap=snap, need=need)
+            except BpError as e:
+                first = first or e
+                last = e
+                continue
+            if p != (args.get("p") or {}):
+                files.log_cli(self.dir, "follow", "auto:workshops", {"p": p},
+                              f"BUG-394: no room site for {args.get('p')}: placed on the surface")
+            args["p"] = p
+            return cid
+        if first is not None and last is not first:
+            raise BpError(f"{first}; BUG-394: surface=1 too: {last}")
+        raise first if first else BpError("workshops: nothing to try")
 
     def _place_farms(self, args: dict, now: float, snap: dict) -> str:
         """BUG-340 (Run 15d Drillchamber y379-y382: 220 AUTO_FAIL `only 0 free site(s) for farms plots=2` while food fell to
@@ -1210,6 +1240,16 @@ class Follower:
             return self._fail("phase.waive farms", e, now)
         files.log_cli(self.dir, "follow", "auto:waive", {"tpl": "farms", "phase": st.get("phase")},
                       f"no farm site at all: deliverable farms of {st.get('phase')} waived")
+
+
+def workshop_tries(params: dict, mode: str | None) -> list[dict]:
+    """BUG-394: the workshops params follow tries in order: the request's (a room of the fortcore), then in PEACE (BUG-302:
+    builders on the surface only then) the same shops as the startup style p.surface = 1. Only a named selection (skip/add)
+    gets the second try: surface=1 without them is the four startup shops, not what a plain 12-shop request asks for."""
+    p = dict(params or {})
+    if p.get("surface") or not (p.get("skip") or p.get("add")) or mode != "PEACE":
+        return [p]
+    return [p, {**p, "surface": 1}]
 
 
 def farm_tries(params: dict, mode: str | None) -> list[dict]:
