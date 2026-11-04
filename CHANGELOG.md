@@ -13,6 +13,8 @@
   building destroyers in sight) is not the civilians' burrow in a fight while Kern+ (or the interior burrow) is separated, reachable
   and free of hostiles: they stay there at the BREACH level (no counts, the breach days). The merge15 'keep them in the open
   refuge' case now moves them to Kern+.
+  Review fix (merge20): citizens already held in the dry refuge with a soft hatch + destroyers in sight or a tolerated opening
+  were kept there until the hatch broke; `leave_why` has the reason `dryref` now (REFUGE_SWITCH to the Kern+ BREACH pick, never to none).
 - **BUG-379:** care: an unknown cause in SIEGE/BREACH/RECOVERY is `fight`-tagged (DEATH `fight`, `siege` in the tallies, DEATHS_3PLUS,
   clusters, `care.died_y`, the brief's `## deaths`); the year census takes the cause found later; 120 death records (found ones
   dropped first) instead of 40. The cause is still not guessed (fair play).

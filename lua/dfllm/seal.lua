@@ -3762,7 +3762,8 @@ end
 -- unseparated (an opening reaches it; the refuge keeps the dead-end tolerance, dead_gap), breached (a visible hostile
 -- stands in it), unreachable, window (a refuge without drink after breach_days), released (BUG-331 review: siege eased the
 -- SIEGE and lifted the deep defense, r.release: the refuge is left for the free pick, never for no burrow at all),
--- unsealed (BUG-336: the refuge's own way in is open, refuge_open: to the free pick, or to none and the citizens flee)
+-- unsealed (BUG-336: the refuge's own way in is open, refuge_open: to the free pick, or to none and the citizens flee),
+-- dryref (BUG-378 review: a refuge without drink and a way in: to the pick, Kern+ at the BREACH level)
 -- Review fix (merge15): danger for the open refuge's 'unsealed' to none: choose found it (r.danger), or a visible hostile
 -- stands in Kern+ or the refuge, or an opening reaches Kern+ or the refuge (sep exposure)
 local function open_danger(K, refuge, t, r)
@@ -3794,6 +3795,18 @@ local function leave_why(K, au, cur, refuge, t, r)
   if dw then return 'dry', dw end
   local s = sep_of(cur)
   if s and s.exp and not (cur == refuge and (s.d or 0) >= CFG.dead_gap) then return 'unseparated', tostring(s.why) end
+  -- Review fix (merge20, BUG-378): the dry refuge the alert holds them in has a way in (a hatch or door building destroyers
+  -- in sight break, or an opening the dead-end tolerance lets by; the open stair head is 'unsealed' above) and choose found
+  -- another burrow (Kern+ at the BREACH level): leave it for that pick, not kept until the hatch breaks (Plankscale y382).
+  -- Never to none: with no pick (Kern+ unusable) the other reasons decide as before
+  if cur == refuge and not a.wet and r and r.pick and r.pick ~= refuge then
+    local sx = sep_of(refuge)
+    local soft = bd_sight(K) > 0 and refuge_closure(K) == 'soft'
+    if soft or (sx and sx.exp) then
+      return 'dryref', string.format('no drink (drink %d<%d) and %s', int(a.drink) or 0, int(a.dneed) or 0,
+                                     soft and 'a hatch or door the building destroyers break' or 'an opening reaches it')
+    end
+  end
   local hn, hat = hostile_in(K, cur, t)
   if hn > 0 then return 'breached', hostile_txt(hn, hat) end
   if a.reach == 0 then return 'unreachable', 'out of the citizens\' reach' end

@@ -1107,4 +1107,54 @@ T.test('BUG-378: building destroyers in sight, the refuge dry and closed by a ha
   T.ok(note:find('Tiefe+: no drink', 1, true), note)
 end)
 
+-- Review fix (merge20, BUG-378): citizens already held in the dry refuge (cur = Tiefe+) with a way in were KEPT there by
+-- fight_rule (no leave reason) until the hatch broke; they now move to Kern+ (reason 'dryref'), never to no burrow
+T.test('Review fix (merge20, BUG-378): held in the dry refuge closed by a hatch only, destroyers in sight: REFUGE_SWITCH ' ..
+       'dryref to Kern+ (old: Tiefe+ kept until the hatch broke); without destroyers the refuge is kept', function()
+  local W, M = fort{door = true}
+  with_manifest(W, 6, 6)
+  hatch_on_head(W)
+  kern_dry(W)
+  M.CFG.interior = 'Weg+'
+  W.set_mode('SIEGE')
+  local ok, pick = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq(pick, 'Tiefe+', 'no destroyer: kept')
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, bd = 1, list = {{id = 301, x = 30, y = 20, z = Z + 1, bd = 1}}})
+  W.run(1200, {skip = 9})
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, bd = 1, list = {{id = 301, x = 30, y = 20, z = Z + 1, bd = 1}}})
+  inspect(W, 'refuge', 'refresh')
+  local flee
+  ok, pick, _, _, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq({pick, flee}, {'Kern+', false}, 'old: Tiefe+ kept')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[#sw].d.from, sw[#sw].d.to, sw[#sw].d.why}, {1, 'Tiefe+', 'Kern+', 'dryref'})
+end)
+
+T.test('Review fix (merge20, BUG-378): held in the dry refuge an opening (beyond dead_gap) reaches, Kern+ closed: ' ..
+       'dryref to Kern+ (old: Tiefe+ kept)', function()
+  local W, M = fort{door = true}
+  -- a second way in: a stair from the field at 30,20 down to z5 and a corridor to the refuge room (>= dead_gap steps)
+  SW.draw(W, Z + 1, {'>'}, 30, 20, {outside = true})
+  SW.draw(W, Z, {'<'}, 30, 20)
+  SW.draw(W, Z, {'>'}, 30, 21)
+  for z = Z - 3, Z - 1 do SW.draw(W, z, {'X'}, 30, 21) end
+  SW.draw(W, Z - 4, {'<'}, 30, 21)
+  SW.fill(W, Z - 4, 9, 6, 30, 6, '.')
+  SW.fill(W, Z - 4, 30, 6, 30, 21, '.')
+  SW.draw(W, Z - 4, {'<'}, 30, 21)
+  SW.regroup(W)
+  with_manifest(W, 6, 6)
+  hatch_on_head(W)
+  kern_dry(W)
+  M.CFG.interior = 'Weg+'
+  W.set_mode('SIEGE')
+  local sx = inspect(W, 'refuge')
+  io.stderr:write(T.show(sx), '\n')
+  T.ok(sx.burrows['Tiefe+'] and sx.burrows['Tiefe+'].sep == 0, T.show(sx.burrows['Tiefe+']))
+  local ok, pick, _, _, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq({pick, flee}, {'Kern+', false}, 'old: Tiefe+ kept')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({sw[#sw].d.from, sw[#sw].d.to, sw[#sw].d.why}, {'Tiefe+', 'Kern+', 'dryref'})
+end)
+
 T.done()
