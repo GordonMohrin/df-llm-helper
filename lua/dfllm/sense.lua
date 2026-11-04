@@ -441,7 +441,10 @@ local function consider(hs, u)
   -- Run 11 (site98 y439): an invader whose raws make it an animal (rf.an: a mount or pet the invaders left behind,
   -- ELK_BIRD 28188 at the map edge for 45 days) counts like a wild animal: not in inv (no arrival lockdown of its own;
   -- threat and reflex apply the predator rules), k 'danger' with an = 1, and the walk-group rule below applies to it
-  local an = inv and rf.an == true and not great and not undead
+  -- BUG-338 (Run 15c Inkintense y379: the army's war cave dragon was listed as a wild danger, PREDATOR_FAR "no
+  -- lockdown" at the map edge, then toppled the raised O1 and killed 5 at B1): a building destroyer is never a mount left
+  -- behind; it stays an invader (k 'inv', counted in inv) whatever its raws say about learning
+  local an = inv and rf.an == true and not rf.bd and not great and not undead
   if an then inv = false end
   -- live L7 (Paddletribes): demons in the underworld (z1-5, a walkable group of their own) were visible from the
   -- map's edge and kept the fort in ALERT (idle 78 %, O1 up). A non-invader on another walkable group that cannot

@@ -1,5 +1,19 @@
 # CHANGELOG dfpilot
 
+## Run 15c war cave dragon and deaths: building destroyers are never a stray animal, deaths name the attacker (BUG-338, BUG-339, 2026-11-04; offline, live-untested)
+- **Why:** Inkintense y379 (i1): invasion 4 brought a war cave dragon (gamelog); sense listed it as a wild danger (Run 11 animal
+  invader rule, sense.lua:444), PREDATOR_FAR `59 tiles: no lockdown` at the map edge; it toppled the raised O1 (BREACH at once),
+  then PREDATOR_FAR again at 85,80,131 (dc counts only citizens outside Kern+, reflex.lua:1773) while it killed 5 at B1. No
+  cavern was open: not a cavern breach. 11 DEATH `unknown (missing)`, DEATHS_3PLUS `unknown 3`; the revisions came 5300 ticks
+  later (death_recheck only after care's full run, care.lua:4278), 5 bled deaths named no attacker (deaths.lua:392).
+- **What changed:** sense keeps a building-destroying animal invader an invader (k inv, bd 1). reflex: a wild building
+  destroyer on a roofed tile of the citizens' group is PREDATOR, never PREDATOR_FAR. care asks the missing deaths again on
+  every UNIT_DEATH (before DEATHS_3PLUS) and every run start. deaths: any death type with an incident criminal carries
+  `killer`/`by` (`bled (incident BLEED; by cave dragon 26704)`).
+- **Tests (fail on b35af6d):** tests/lua/test_reflex.lua (2 new), tests/lua/test_care_deaths.lua (2 new).
+- **Live check:** next siege with war beasts: census.h `k inv` for the beast, no PREDATOR_FAR for it; a cavern building destroyer
+  under a roof gives PREDATOR with everybody in Kern+; DEATH lines `by <race> <id>` for bled too; DEATHS_3PLUS lists earlier
+  causes once DF shows them found. Uncertain: DF sets the incident criminal for bleed-outs; a raised bridge still falls to it.
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or

@@ -829,4 +829,39 @@ T.test('review C1: an unchanged dangerous intruder past the limit is offered onc
   end)
 end)
 
+---------------------------------------------------------------- BUG-338: building destroyers are never "far" or a stray mount
+-- Run 15c Inkintense y379: the goblins' war cave dragon 26704 (no CAN_LEARN/CAN_SPEAK, BUILDINGDESTROYER) came with
+-- invasion 4 as a wild danger: PREDATOR_FAR "59 tiles from the citizens: no lockdown"; it toppled the raised O1, then
+-- PREDATOR_FAR again at 85,80,131 (63 tiles from the citizens outside Kern+: none) while it killed five at B1.
+local DRAGON = 91
+local function dragon_raws()
+  local c = {flags = {CAN_LEARN = false, CAN_SPEAK = false, BUILDINGDESTROYER = true, LARGE_PREDATOR = true}}
+  df.creature_raw = {find = function(r) if r == DRAGON then return {caste = {[0] = c}} end end}
+end
+
+T.test('BUG-338: an animal invader that destroys buildings (a war cave dragon) stays an invader: INTRUDER, k inv',
+       function()
+  local W = setup{tag = 'wardragon', manifest = false}
+  dragon_raws()
+  add(W, S.inv(26704, 150, 30, Z, {race = DRAGON}), DRAGON)
+  S.run(W, 200)
+  local e
+  for _, x in ipairs(W.K.census.h.list or {}) do if x.id == 26704 then e = x end end
+  T.ok(e ~= nil, 'listed')
+  T.eq({e.k, e.an, e.bd, W.K.census.h.inv, W.K.census.h.an}, {'inv', nil, 1, 1, 0})
+  T.eq(#events(W, 'PREDATOR_FAR'), 0)
+  T.ok(#events(W, 'INTRUDER') + #events(W, 'ARRIVAL') > 0, 'an invader: the arrival or intruder rules')
+end)
+
+T.test('BUG-338: a wild building destroyer on a roofed tile of the citizens group is PREDATOR however far', function()
+  local units = S.fort_units()
+  local W = setup{tag = 'cavedragon', manifest = false, units = units}
+  dragon_raws()
+  add(W, S.danger(400, 150, 30), DRAGON)              -- where the Run 10 animal is PREDATOR_FAR
+  S.run(W, 200)
+  T.eq(#events(W, 'PREDATOR_FAR'), 0)
+  local p = events(W, 'PREDATOR')
+  T.eq({#p, p[1] and p[1].d.id}, {1, 400})
+end)
+
 T.done()

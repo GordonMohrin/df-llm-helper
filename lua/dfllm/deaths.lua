@@ -393,6 +393,10 @@ function D.classify(u, o)
     local h = r.rep or nil
     r.killer = ic and ic.killer or nil
     r.by = (ic and ic.race) or (h and h.by and utf(h.by)) or D.BY[dtype or ''] or nil
+  elseif ic and ic.killer then
+    -- BUG-339 (Run 15c y379: five citizens "bled" at B1 while the war cave dragon struck them, no attacker named): the
+    -- incident's criminal is the attacker whatever the death type (deathcause.lua names it for every type)
+    r.killer, r.by = ic.killer, ic.race
   end
   r.dtype = dtype
   local w = r.why
@@ -406,7 +410,9 @@ function D.classify(u, o)
   end
   if bm then w[#w + 1] = D.bridge_why(bm) end
   if dtype then w[#w + 1] = (src == 'unit' and 'unit ' or 'incident ') .. dtype end
-  if r.by and r.cause ~= 'killed' then w[#w + 1] = 'by ' .. r.by .. (r.killer and (' ' .. r.killer) or '') end
+  if (r.by or r.killer) and r.cause ~= 'killed' then
+    w[#w + 1] = 'by ' .. (r.by or 'unit') .. (r.killer and (' ' .. r.killer) or '')
+  end
   local h = r.rep or nil
   if h and (src == 'report' or not dtype) then w[#w + 1] = 'report "' .. cut(utf(h.text), 48) .. '"' end
   if th and (th >= D.LINES.thirsty or r.cause == 'dehydrated' or r.cause == 'mood') then

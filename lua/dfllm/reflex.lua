@@ -1770,7 +1770,9 @@ local function inside_scan(K, h, now)
         if oko and type(out) == 'table' and out[1] == 0 then
           -- sense's dc: the distance to the nearest citizen outside Kern+ (-1 none); zone 2 = inside Kern+ / past B1
           local dc, lim = math.tointeger(e.dc), near
-          if lim > 0 and dc and (e.zn or 0) < 2 and (dc < 0 or dc > lim) then
+          -- BUG-338: a building destroyer (bd, a cave dragon from a cavern) is never "far": the next bridge or door is
+          -- its way to the citizens, and dc counts only the citizens outside Kern+ (none during a lockdown)
+          if lim > 0 and dc and (e.zn or 0) < 2 and e.bd ~= 1 and (dc < 0 or dc > lim) then
             nf = nf + 1
             if not far_one or (dc >= 0 and (far_one.dc < 0 or dc < far_one.dc)) then far_one = e end
           else np = np + 1; predator = predator or e end
