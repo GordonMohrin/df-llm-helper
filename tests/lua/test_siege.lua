@@ -713,6 +713,51 @@ add{name = 'BUG-310: a pending forced raise is cancelled the frame a citizen ste
     T.eq(S.bstate(W, 'B1'), 'up')
   end}
 
+-- BUG-335 (Run 15b Earthboat y385 #7504-#7515: five soldiers on their way to their station walked onto B2 while it rose,
+-- nobody within the margin at the pull): a unit's walk path (unit.path.path) onto the footprint holds a forced raise too
+local function walk(id, tiles)                 -- his next path tiles {{x, y}, ...} on Z; nil: no path
+  return function(W)
+    local vec = require('dfllm.util.k_mock').vec
+    if not tiles then W.unit(id).path = nil; return end
+    local xs, ys, zs = {}, {}, {}
+    for i, t in ipairs(tiles) do xs[i], ys[i], zs[i] = t[1], t[2], Z end
+    W.unit(id).path = {path = {x = vec(xs), y = vec(ys), z = vec(zs)}}
+  end
+end
+
+add{name = 'BUG-335 (Earthboat y385: five soldiers crushed by B2): with a hostile at the gate a soldier 4 tiles from B1 ' ..
+           'whose path steps onto it holds the forced raise (old: pulled, nobody within the margin); pulled once he stops',
+  units = function() return units(S.army(6, 51, 37)) end,
+  setup = walk(5, {{51, 43}, {51, 42}, {51, 41}, {51, 40}, {51, 39}}),
+  at = {{300, walk(5, nil)}},
+  run = 700,
+  check = function(W)
+    local b1 = S.pulls(W, 'B1')
+    T.eq(#b1, 1)
+    T.ok(rel(W, b1[1].tick) >= 300, 'not pulled while his path crossed it: ' .. tostring(rel(W, b1[1].tick)))
+    local g = gate_blocked(W, 'B1')
+    T.ok(#g >= 1 and g[1].d.units[1] == 5, 'GATE blocked names him')
+    T.ok(g[1].msg:find('soldier 5 walking onto it in 4 steps', 1, true), g[1].msg)
+    T.eq(S.bstate(W, 'B1'), 'up')
+  end}
+
+add{name = 'BUG-335: a pending forced raise is cancelled the frame a citizen 6 tiles away sets off along a path over B1 ' ..
+           '(old: it went on and B1 rose under him); queued again once his path is clear',
+  units = function() return units(S.army(6, 51, 37)) end,
+  lever_cfg = {[21] = {worker = 30, pull = 300}, [22] = {worker = 30, pull = 300}},
+  at = {{1, mv(1, 51, 46)}, {60, walk(1, {{51, 45}, {51, 44}, {51, 43}, {51, 42}, {51, 41}, {51, 40}, {51, 39}})},
+        {400, walk(1, nil)}},
+  run = 1200,
+  check = function(W)
+    local b1 = S.pulls(W, 'B1')
+    T.ok(#b1 >= 2, 'queued, cancelled, queued again: ' .. #b1)
+    local c = S.acts(W, 'cancel_own_lever_job')
+    T.ok(#c >= 1 and c[1].args[1] == b1[1].job, 'the first pull cancelled')
+    between(rel(W, c[1].tick), 60, 100, 'cancelled within a gate pass')
+    for _, f in ipairs(S.flips(W, 'B1')) do T.ok(rel(W, f.tick) >= 400, 'no move while his path crossed it') end
+    T.eq(S.bstate(W, 'B1'), 'up')
+  end}
+
 add{name = 'BUG-027: force_near 0 (config/reflex.json gate) never raises onto a unit, not even with a hostile at the gate',
   units = function()
     local r = units(S.army(6, 51, 37))

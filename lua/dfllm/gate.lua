@@ -14,7 +14,10 @@
 -- `gate.force_near`, default 3, 0 = never) goes ahead past units NEXT TO the footprint, and GATE_FORCED (A) names them.
 -- BUG-310 (Run 15b Earthboat y379, GATE_FORCED #3723 then two citizens crushed by B2): a forced raise is never pulled,
 -- and its pending pull is cancelled the frame a unit stands ON the footprint (d 0); the job's worker at his lever is
--- not named. Bridges named in
+-- not named. BUG-335 (Run 15b Earthboat y385 #7504-#7515: five soldiers on their way to their station walked onto B2 in
+-- the 100 ticks it rose after the lever was pulled, nobody within the margin when the pull was queued or taken; Run 15
+-- Guildcleans y379 #2628 the same with B1): a unit whose walk path (unit.path.path) steps onto the footprint within
+-- PATH_STEPS steps holds every pull like one on it (forced or not), and cancels our pending one. Bridges named in
 -- `gate.manual` (manifest names or building ids) get no automatic pull at all (a stop-gap; the inbox `lever` still
 -- works). A held 'up' reaches GATE_FAIL (blocked) at its deadline with the units and their squad stations named.
 -- Our own job without a worker for 200 ticks is cancelled (act.cancel_own_lever_job, the UI
@@ -102,6 +105,11 @@ M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with 
 -- (a dwarf walks about a tile per 9-tick frame, so nobody reaches the margin unseen within FAST ticks)
 M.PENDING = 1
 M.SCAN_R = 5
+-- BUG-335: the lever moves the bridge the moment the puller finishes, and it moves ~100 ticks (a dwarf on the run covers
+-- 12-17 tiles then): a unit whose next PATH_STEPS path tiles enter the footprint holds the pull; the census pass keeps the
+-- units within PATH_R tiles (PATH_STEPS + what a unit walks in FAST ticks) whose paths every frame re-reads
+M.PATH_STEPS = 20
+M.PATH_R = 24
 -- BUG-027 (Run 10: GATE_FAIL B1/O1 "timeout" at T+900 with the pulls under way, lever latency 11-19 s at 30 t/s): the
 -- time a bridge waits for units on its footprint does not count toward its deadline (a bridge held for DEADLINE ticks
 -- on end is GATE_FAIL blocked); a pull in progress at the deadline (a worker took it, or the bridge moves) goes once to
@@ -886,9 +894,22 @@ local function around(K, fp, rad)
   return res
 end
 
--- the units of the last census pass (near = {t, list}) where they stand now (by id), as around() returns them
+-- BUG-335: a wide scan (around, PATH_R) cut to `rad` tiles, as around() returns it; far = the whole wide list
+local function narrow(wide, rad)
+  local res = {n = 0, on = 0, list = {}, far = wide.list}
+  for _, e in ipairs(wide.list) do
+    if e.d <= rad then
+      res.n = res.n + 1
+      if e.d == 0 then res.on = res.on + 1 end
+      res.list[#res.list + 1] = e
+    end
+  end
+  return res
+end
+
+-- the units of the last census pass (near = {t, list, far}) where they stand now (by id), as around() returns them
 local function refresh(near, fp)
-  local res = {n = 0, on = 0, list = {}}
+  local res = {n = 0, on = 0, list = {}, far = near.far}
   local isDead, getPos = dfhack.units.isDead, dfhack.units.getPosition
   for _, e in ipairs(near.list) do
     local u = df.unit.find(e.id)
@@ -904,6 +925,34 @@ local function refresh(near, fp)
   end
   table.sort(res.list, function(p, q) if p.d ~= q.d then return p.d < q.d end return p.id < q.id end)
   return res
+end
+
+-- BUG-335: the units of a wide scan's list `far` (not on the footprint now) whose walk path (unit.path.path: the tiles
+-- DF steps them onto next) enters the footprint within PATH_STEPS steps, where they stand now: {id, k, d, x, y, z, path =
+-- steps}. An unreadable path is none (fail-open: the margin still holds them as before).
+function M.crossers(fp, far)
+  local r = {}
+  local isDead, getPos = dfhack.units.isDead, dfhack.units.getPosition
+  for _, e in ipairs(far or {}) do
+    local u = df.unit.find(e.id)
+    if u and not isDead(u) then
+      local x, y, z = getPos(u)
+      local d = fp_dist(fp, x, y, z)
+      if d ~= 0 then
+        local ok, n = pcall(function()
+          local p = u.path.path
+          local px, py, pz = p.x, p.y, p.z
+          for i = 0, math.min(#px, #py, #pz, M.PATH_STEPS) - 1 do
+            if fp_dist(fp, px[i], py[i], pz[i]) == 0 then return i + 1 end
+          end
+        end)
+        if ok and math.type(n) == 'integer' then
+          r[#r + 1] = {id = e.id, k = e.k, d = d or e.d, x = x, y = y, z = z, path = n}
+        end
+      end
+    end
+  end
+  return r
 end
 
 -- the units of a scan (or a plain list of them) within `m` tiles of the footprint (the ones that hold a pull)
@@ -967,7 +1016,8 @@ local function who(list, fp)
   local parts = {}
   for i, e in ipairs(list) do
     if i > M.NAME_MAX then parts[#parts + 1] = string.format('+%d more', #list - M.NAME_MAX); break end
-    local s = string.format('%s %d %s', e.k, e.id, e.d == 0 and 'on the footprint' or 'next to it')
+    local s = string.format('%s %d %s', e.k, e.id, e.d == 0 and 'on the footprint'
+                            or (e.path and string.format('walking onto it in %d steps', e.path)) or 'next to it')
     local q = e.k == 'soldier' and fp and squad_note(e.id, fp, e)
     parts[#parts + 1] = q and (s .. ' (' .. q .. ')') or s
   end
@@ -1212,17 +1262,27 @@ end
 local function holders(K, name, fp, sc, dir)
   local hold = within(sc, M.MARGIN)
   if not sc then hold.unknown = true end
+  -- BUG-335: a unit walking onto the footprint holds it like one on it (forced or not)
+  local cross, cby = sc and M.crossers(fp, sc.far) or {}, {}
+  for _, e in ipairs(cross) do cby[e.id] = e end
   if dir == 'up' and FORCE_MODES[K.mode()] then
     local fn = gcfg(K)
     local d = fn > 0 and hostile_dist(K, name, fp) or -1
     if d >= 0 and d <= fn then
-      local on, beside = {unknown = hold.unknown}, {}
+      local on, beside, seen = {unknown = hold.unknown}, {}, {}
       for _, e in ipairs(hold) do
-        if e.d == 0 then on[#on + 1] = e else beside[#beside + 1] = e end
+        seen[e.id] = true
+        if e.d == 0 then on[#on + 1] = e
+        elseif cby[e.id] then on[#on + 1] = cby[e.id]
+        else beside[#beside + 1] = e end
       end
+      for _, e in ipairs(cross) do if not seen[e.id] then on[#on + 1] = e end end
       return on, d, beside
     end
   end
+  local seen = {}
+  for _, e in ipairs(hold) do seen[e.id] = true end
+  for _, e in ipairs(cross) do if not seen[e.id] then hold[#hold + 1] = e end end
   return hold, nil
 end
 
@@ -1727,8 +1787,9 @@ local function control(K, name, spec, now)
   if r.job or (w ~= nil and w ~= s) or s == 'moving' then
     if r.near and now >= r.near.t and now - r.near.t < M.FAST then sc = refresh(r.near, spec.fp)
     else
-      sc = around(K, spec.fp, M.SCAN_R)
-      r.near = sc and {t = now, list = sc.list} or nil
+      local wide = around(K, spec.fp, M.PATH_R)         -- BUG-335: the walkers who may reach it, SCAN_R of them near
+      sc = wide and narrow(wide, M.SCAN_R)
+      r.near = sc and {t = now, list = sc.list, far = sc.far} or nil
     end
   else r.near = nil end
   if r.nec and now >= r.nec.at then                  -- BUG-068: did the pull move the bridge?

@@ -198,6 +198,68 @@ T.test('BUG-311 (Earthboat y376 #2182, RECOVERY: a soldier walked onto B2 while 
   T.eq({up(W, 'B1'), pulls(W, 'B1', 'up')}, {true, 2}, 'queued again, raised while he stands still')
 end)
 
+-- BUG-335 (Run 15b Earthboat y385 #7504-#7515, Run 15 Guildcleans y379 #2628: soldiers on their way walked onto the
+-- bridge in the ~100 ticks it moved after the pull; nobody within the margin when it was queued or taken)
+local function walk(W, id, tiles)
+  local vec = require('dfllm.util.k_mock').vec
+  if not tiles then W.unit(id).path = nil; return end
+  local xs, ys, zs = {}, {}, {}
+  for i, t in ipairs(tiles) do xs[i], ys[i], zs[i] = t[1], t[2], Z end
+  W.unit(id).path = {path = {x = vec(xs), y = vec(ys), z = vec(zs)}}
+end
+
+T.test('BUG-335: a citizen 8 tiles from B1 whose walk path steps onto it holds the raise (old: pulled at once); a path ' ..
+       'past it or beyond 20 steps holds nothing; pulled once his path is clear', function()
+  local W = fort{units = {S.cit(12, 32, 15, Z)}}                           -- 8 tiles west of B1, walking east over it
+  local over = {}
+  for x = 33, 44 do over[#over + 1] = {x, 15} end
+  walk(W, 12, over)
+  run(W, 100)
+  T.eq(select(2, W.K.call('gate', 'want', 'B1', 'up', 'lever:test')), true)
+  run(W, 400)
+  T.eq({up(W, 'B1'), pulls(W, 'B1', 'up')}, {false, 0}, 'no pull while his path crosses B1')
+  local g = W.find_events('GATE')
+  local b
+  for _, e in ipairs(g) do if e.d.state == 'blocked' then b = e end end
+  T.ok(b and b.msg == 'B1 up waits: citizen 12 walking onto it in 8 steps', b and b.msg)
+  local far = {}
+  for i = 1, 25 do far[i] = {32, 15} end                                    -- B1 is step 26: beyond PATH_STEPS
+  far[26] = {40, 15}
+  walk(W, 12, far)
+  run(W, 300)
+  T.eq({up(W, 'B1'), pulls(W, 'B1', 'up')}, {true, 1}, 'pulled: the crossing lies beyond 20 steps')
+end)
+
+T.test('BUG-335: a taken raise pull is cancelled when a soldier 7 tiles away sets off on a path over B1 (old: done, ' ..
+       'B1 rose under him); the pull\'s own worker walking over it holds nothing', function()
+  local W = fort{units = {S.cit(12, 33, 15, Z, {squad = 4})}}
+  run(W, 100)
+  T.eq(select(2, W.K.call('gate', 'want', 'B1', 'up', 'lever:test')), true)
+  run(W, 600, function() local j = job(W, 'B1'); return j and j._worker ~= nil end)
+  T.ok(job(W, 'B1') and job(W, 'B1')._worker, 'the pull is taken')
+  local jid = job(W, 'B1').id
+  local over = {}
+  for x = 34, 42 do over[#over + 1] = {x, 15} end
+  walk(W, 12, over)
+  run(W, 9)
+  T.ok(job(W, 'B1') == nil or job(W, 'B1').id ~= jid, 'cancelled within a frame')
+  T.eq(up(W, 'B1'), false)
+  walk(W, 12, nil)
+  run(W, 400)
+  T.eq({up(W, 'B1'), pulls(W, 'B1', 'up')}, {true, 2}, 'queued again, raised')
+  -- the worker (unit 1) on a path over the footprint: his own pull goes on
+  local W2 = fort{}
+  run(W2, 100)
+  W2.K.call('gate', 'want', 'B1', 'up', 'lever:test')
+  run(W2, 600, function() local j = job(W2, 'B1'); return j and j._worker ~= nil end)
+  W2.move(1, 33, 15, Z)
+  local o2 = {}
+  for x = 34, 42 do o2[#o2 + 1] = {x, 15} end
+  walk(W2, 1, o2)
+  run(W2, 300)
+  T.eq({up(W2, 'B1'), pulls(W2, 'B1', 'up')}, {true, 1}, 'not cancelled for its own worker')
+end)
+
 T.test('BUG-252: an unknown census while our pull is pending cancels it (old: only the queue path waited for it); ' ..
        'no give-up count, no GATE_FAIL; with the census back the bridge comes down', function()
   local W = fort{up = {B1 = true}}

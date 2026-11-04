@@ -1,5 +1,16 @@
 # CHANGELOG dfpilot
 
+## Run 15b gate: no pull while a unit walks onto the bridge (BUG-335, 2026-11-04; offline, live-untested)
+- **Why:** Earthboat y385 (i3) #7504-#7515: five soldiers of squads 99-101 on their way to their station walked onto B2 in the
+  100 ticks it rose after the pull (taken with nobody within the margin); Guildcleans y379 (i2) #2628 the same with B1. Root
+  cause lua/dfllm/gate.lua:1212 (holders: only where units stand, MARGIN 1 / d 0 forced) and the pending check (approach: 3
+  tiles, not for a forced raise): DF moves the bridge the moment the puller finishes, runners from farther out reach it.
+- **What changed:** gate.crossers: units within 24 tiles whose walk path (unit.path.path) enters the footprint within 20 steps
+  hold every pull like one on it (forced raises too) and cancel our pending one in the frame they set off; text `walking onto
+  it in N steps`. The census scan reads the wider radius once (cut to SCAN_R for the rest).
+- **Tests (fail on b35af6d):** tests/lua/test_gate_crush.lua (2), tests/lua/test_siege.lua (2).
+- **Live check:** in a siege kern.log `... waits for soldier N walking onto it in K steps`, no GATE_CRUSH_RISK/BRIDGE_CRUSH.
+  Uncertain: a path set only after the pull; military still routes squads over a core bridge (gate waits for them now).
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or
