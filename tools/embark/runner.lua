@@ -30,7 +30,7 @@ function Run:doc()
   return {v = 2, id = self.id, state = self.state, step = s and s.id or '', live = s and s.live or '',
     i = self.i, n = #self.steps, phase = self.phase, tries = self.tries, msg = self.msg,
     elapsed_ms = self.env.now() - self.t0, log = self.log, results = self.ctx.results or {},
-    warnings = self.ctx.warnings or {}}
+    warnings = self.ctx.warnings or {}, fort = self.ctx.fort}   -- BUG-355: the fort's name once on the fort map
 end
 
 function Run:push() if self.env.status then self.env.status(self:doc()) end end
@@ -95,6 +95,7 @@ function Run:frame()
   self.armed = false
   self.t_poll = now
   local v = self.env.capture()
+  if v.fort then self.ctx.fort = v.fort end   -- BUG-355
   if self.phase == 'wait' then
     if s.wait and not s.wait(v, self.ctx) then return true end
     self:set_phase('act')

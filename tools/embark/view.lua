@@ -84,6 +84,7 @@ function V.capture(src)
   v.prep = src.prep and src.prep() or nil
   v.title = src.title and src.title() or nil   -- viewscreen_titlest fields (loadsave.lua); nil off the title screen
   v.save_path = src.save_path and src.save_path() or nil   -- dfhack.getSavePath() (save-as, BUG-250)
+  v.fort = src.fort_name and src.fort_name() or nil        -- BUG-355: the fort's name, readable before save-as
   return v
 end
 

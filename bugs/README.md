@@ -363,6 +363,8 @@ Related: FR-xx, BUG-xx
 | [BUG-349](BUG-349-plan-check-refuses-the-phase-while-the-seal-cannot-close.md) | fixed (offline, live-untested) | high | Run 15: plan check refused P3 -> P5 for a perimeter open 468 d with seal@S1 first and the seal stuck 4500 d; propose drafted the raise its check refused; seal_stalled did not say bp.cancel is safe | plan.py, wake.py, runner.lua |
 | [BUG-350](BUG-350-bp-files-of-a-discarded-timeline-block-explore-sites.md) | fixed (offline, live-untested) | medium | Run 15c: bp files of explores that lived only in a discarded timeline (older save loaded) blocked every explore site | files.py, cmd.py |
 | [BUG-351](BUG-351-propose-drafts-a-stone-dig-without-a-site.md) | fixed (offline, live-untested) | medium | Run 15d: propose drafted the stone dig bedrooms n=4 with 0 free sites, an ERROR with nothing to insert | plan.py |
+| [BUG-353](BUG-353-bp-cancel-leaves-the-dig-designations-in-the-map.md) | fixed (offline, live-untested) | high | Run 16c: two bp.cancel + re-place left ~1580 dig designations of the cancelled fortcore projects in the map, the fort starved | runner.lua |
+| [BUG-355](BUG-355-fort-name-unreadable-before-save-as.md) | fixed (offline, live-untested) | low | Run 16c: the new fort's name was not readable before save-as | tools/embark |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

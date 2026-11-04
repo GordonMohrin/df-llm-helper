@@ -308,6 +308,8 @@ def summarize(doc: dict | None) -> list[str]:
     if not doc:
         return ["no status (is DF running and the run started?)"]
     lines = [f"{doc['id']}: {doc['state']} at {doc.get('step') or '-'} ({doc.get('i')}/{doc.get('n')}) {doc.get('msg', '')}"]
+    if doc.get("fort"):   # BUG-355: the new fort's name, readable right after embark (before save-as)
+        lines.append(f"  fort name: {doc['fort']}")
     res = doc.get("results")
     rows = sorted(res, key=lambda r: (ORDER.get(r.get("verdict"), 3), -r.get("score", 0))) if isinstance(res, list) else []
     wpts = water_points(rows)

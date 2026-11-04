@@ -148,6 +148,15 @@ local function source()
       local ok, p = pcall(dfhack.getSavePath)
       return ok and type(p) == 'string' and p or nil
     end,
+    -- BUG-355: the name of the fort in play (the new fort's right after embark, before any save-as); nil off a fort map
+    fort_name = function()
+      local ok, name = pcall(function()
+        if not dfhack.isMapLoaded() then return nil end
+        local site = dfhack.world.getCurrentSite()
+        return site and dfhack.df2utf(dfhack.translation.translateName(site.name, true))
+      end)
+      return ok and type(name) == 'string' and name ~= '' and name or nil
+    end,
     prep = function()
       if not df.viewscreen_setupdwarfgamest:is_instance(scr) then return nil end
       local units = {}
@@ -380,7 +389,8 @@ local cmd = args[1] or 'state'
 if cmd == 'state' or cmd == 'check' then
   local v = capture()
   local rec, verdict, ctx = site_eval(v)
-  local doc = {kind = v:kind(), focus = v.focus, cs = v.cs, rec = rec, verdict = verdict, world = ctx.world}
+  local doc = {kind = v:kind(), focus = v.focus, cs = v.cs, rec = rec, verdict = verdict, world = ctx.world,
+    fort = v.fort}   -- BUG-355
   if cmd == 'state' then
     doc.prep = v.prep and {selected = v.prep.selected, points = v.prep.points, units = v.prep.units} or nil
   end
