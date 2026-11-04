@@ -239,7 +239,7 @@ def run_bp(args, save_dir: Path | None) -> int:
             print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}{lbl}: {s.get('why', '')}")
         if not sites:
             from .cmd import no_site_hint
-            why = no_site_hint(save_dir, args.tpl, snap_id, ranked, sorted(set(held)))      # BUG-067
+            why = no_site_hint(save_dir, args.tpl, snap_id, ranked, sorted(set(held)), params)      # BUG-067
             print(f"  none ({ranked} ranked, {len(set(held))} project(s) hold them): try --fresh" + (f"; {why}" if why else ""))
         return 0
     except (BpError, BpUnavailable, RuntimeError, ValueError) as e:

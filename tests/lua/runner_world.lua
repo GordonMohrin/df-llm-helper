@@ -84,7 +84,9 @@ local function building(W, x, y, z, key)
   df.global.building_next_id = id + 1
   local cons = key:sub(1, 1) == 'C'
   local hatch = key == 'H'                         -- FR-98: a hatch cover (over a stair)
-  W.add_building{id = id, _t = cons and df.building_type.Construction or hatch and df.building_type.Hatch or df.building_type.Bed,
+  local door = key == 'd' and W.real_doors == true     -- BUG-357: opt in, a door is a Door building (else a Bed as before)
+  W.add_building{id = id, _t = cons and df.building_type.Construction or hatch and df.building_type.Hatch
+                               or door and df.building_type.Door or df.building_type.Bed,
                  _st = 0, _pos = {x, y, z}, _key = key, _bld = hatch and 'Hatch' or nil, _under = hatch and W.tile(x, y, z).c or nil,
                  getType = function(self) return self._t end,
                  getBuildStage = function(self) return self._st end,

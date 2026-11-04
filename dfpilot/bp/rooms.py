@@ -35,6 +35,9 @@ EXTRA = [("wl", "Still"), ("wz", "Kitchen"), ("wu", "Butchers"), ("wh", "Fishery
          ("wq", "Quern"), ("wM", "Millstone"), ("wy", "Ashery"), ("wd", "Dyers"), ("wv", "MagmaForge"),
          ("k", "Kennels"), ("ws", "Siege")]
 EXTRA_TYPES = [n for _, n in EXTRA]
+# BUG-356 (Run 16a-d: the first year hung on the fortcore, drink 3 d -> 0, no still, kitchen or carpenter until stage 1 was
+# dug): workshops p.surface = 1 without skip/add builds exactly these four on the surface floor of the embark
+STARTUP = ("Still", "Kitchen", "Carpenters", "Masons")
 SHOP_SIZE = {"Quern": 1, "Millstone": 1, "Kennels": 5, "Siege": 5}      # side of the footprint; 3 for every other shop
 
 COMMON = {"burrow": ("Kern+", None, None)}
@@ -45,7 +48,8 @@ PARAMS = {
     "hospital": {"beds": (4, 1, 10)},
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40)},
-    "workshops": {"skip": ("", None, None), "add": ("", None, None)},
+    # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
+    "workshops": {"skip": ("", None, None), "add": ("", None, None), "surface": (0, 0, 1)},
     # BUG-297: surface = 1 builds the plots on soil floor that stands already (no dig, no door, no burrow): sites.rank
     # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
     "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1)},
@@ -208,10 +212,13 @@ def workshops(p: dict) -> Plan:
     """All 12 moodable workshop types (DESIGN §5.9), minus `skip` (comma-separated df type names), plus the
     non-moodable `add` types (EXTRA_TYPES: Still, Kitchen, Butchers, Fishery, Farmers)."""
     skip = {s.strip() for s in p["skip"].split(",") if s.strip()}
+    add = {s.strip() for s in p.get("add", "").split(",") if s.strip()}
+    if p.get("surface") and not skip and not add:              # BUG-356: the startup set
+        add = {n for n in STARTUP if n in EXTRA_TYPES}
+        skip = {n for n in MOODABLE_TYPES if n not in STARTUP}
     bad = skip - set(MOODABLE_TYPES)
     if bad:
         raise ValueError(f"workshops: unknown skip types {sorted(bad)}; known: {MOODABLE_TYPES}")
-    add = {s.strip() for s in p.get("add", "").split(",") if s.strip()}
     bad = add - set(EXTRA_TYPES)
     if bad:
         raise ValueError(f"workshops: unknown add types {sorted(bad)}; known: {EXTRA_TYPES}")
@@ -221,6 +228,8 @@ def workshops(p: dict) -> Plan:
     if not todo:
         raise ValueError("workshops: nothing left to build")
     P = Plan("workshops", "infra")
+    if p.get("surface"):
+        return _surface_shops(P, todo)
     # BUG-118: 3x3 cells in rows of six, 4 apart; a 1x1 shop sits in the middle of its cell; the 5x5 shops (Kennels, Siege)
     # follow in a strip of their own below the rows (6 apart), so the layout of the usual 3x3 shops does not change
     small = [(k, n) for k, n in todo if SHOP_SIZE.get(n, 3) < 5]
@@ -243,6 +252,34 @@ def workshops(p: dict) -> Plan:
         b.ent(u, v, u + 4, v + 4, 0, key)
         P.workshops.append((name, (u + 2, v + 2, 0)))
     _finish(P, p, box)
+    return P
+
+
+SURFACE_COLS = 4
+
+
+def surface_block(n: int) -> tuple[int, int]:
+    """BUG-356: (width, height) of the surface block for n shops of 3x3: SURFACE_COLS cells a row, 4 apart, 1 tile margin."""
+    return 4 * min(n, SURFACE_COLS) + 1, 4 * -(-n // SURFACE_COLS) + 1
+
+
+def _surface_shops(P: Plan, todo: list) -> Plan:
+    """BUG-356 (Run 16a-d: every new fort hung on the fortcore for its first year, no still, kitchen or carpenter until
+    stage 1 was dug, drink 3 d -> 0, a door that only a carpenter makes): the shops stand on open surface floor, anchor =
+    the block's north-west corner. Nothing is dug, no door, no burrow; a 3x3 cell per shop (the 1x1 Quern and Millstone in
+    its middle), SURFACE_COLS a row. The manifest lists them, so the later `workshops` project skips what stands."""
+    big = [n for _, n in todo if SHOP_SIZE.get(n, 3) == 5]
+    if big:
+        raise ValueError(f"workshops surface=1: no 5x5 shops on the startup block ({', '.join(big)})")
+    b = P.stage("build", "build", orders=1)
+    for i, (key, name) in enumerate(todo):
+        r, c = divmod(i, SURFACE_COLS)
+        u, v = 1 + 4 * c, 1 + 4 * r
+        if SHOP_SIZE.get(name, 3) == 1:
+            b.tile(u + 1, v + 1, 0, key)
+        else:
+            b.ent(u, v, u + 2, v + 2, 0, key)
+        P.workshops.append((name, (u + 1, v + 1, 0)))
     return P
 
 

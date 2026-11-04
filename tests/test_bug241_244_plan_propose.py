@@ -198,7 +198,7 @@ def test_no_z4_yet_notes_the_emergency_builds_for_after_s1_dig(base):
     prev, state = base
     doc = plan.propose(_thirsty(state), phases(), None, decisions={}, tinfo=tinfo(), fort={"z4": False})
     tpls = {b["tpl"] for x in doc["seasons"] for b in x["build"]}
-    assert tpls <= {"fortcore", "seal"}
+    assert tpls <= {"fortcore", "seal", "workshops"}                  # BUG-356: + the startup shops
     assert "after s1.dig propose again: cistern, farms and a Still/Kitchen first" in doc["notes"]
     assert doc["notes"].rstrip().endswith("apply, wait for s1.dig, propose again")
 

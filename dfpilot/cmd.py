@@ -1281,7 +1281,8 @@ def _proj_status(save_dir: Path, pid: str) -> str:
     return f"{pid} ({what})"
 
 
-def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: list[str]) -> str:
+def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: list[str],
+                 params: dict | None = None) -> str:
     """BUG-067 (Run 12/13, notes 5, 31, 41): why a placement found no free site and what to do. Taken: the projects that
     hold the ranked sites and their state (a parked or build_lost one keeps its tiles until `bp.cancel <id>`).
     Nothing ranked for a room template: its sites hang on the dug public Z4 floor of the fortcore, so a fortcore that
@@ -1292,7 +1293,12 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
         out.append("taken by " + ", ".join(_proj_status(save_dir, h) for h in holders[:4])
                    + (f" +{len(holders) - 4}" if len(holders) > 4 else "")
                    + "; a parked or blocked project keeps its tiles: `dfllm cmd bp.cancel proj=<id>` frees them")
-    if ranked == 0 and tpl not in ("fortcore", "seal", "explore", "plug", "repair"):
+    if ranked == 0 and tpl == "workshops" and (params or {}).get("surface"):
+        # BUG-356: the startup shops need no fortcore, only open flat ground the citizens reach
+        out.append("no ranked site: the startup shops need a flat block of open surface floor (no trees, rocks, water or "
+                   "hill) on the citizens' walk group; `dfllm bp sites workshops surface=1 --fresh --near <wagon x,y,z> "
+                   "--within 40` on a snapshot of the surface, or fewer shops (only=Still,Kitchen)")
+    elif ranked == 0 and tpl not in ("fortcore", "seal", "explore", "plug", "repair"):
         cores = []
         for p in bp_files(save_dir):
             d = files.read_json(p)
@@ -1420,6 +1426,28 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     raise BpError(f"{first}; BUG-316: no smaller surface farm ({tried}) has a free site either")
 
 
+def first_core(save_dir: Path, skip: str = "") -> tuple[str, list] | None:
+    """BUG-358 (Run 16d y372: three fortcore projects at once, two of them 'set aside' for 34-50 days; Run 16a/16b: a plan's
+    fortcore beside the one placed by hand): (id, anchor) of a fortcore stage 1 project in <save>/bp, a retrofit and a
+    project of a discarded timeline (stale_bps) not counted, `skip` = the id being placed again. None without one."""
+    stale = stale_bps(save_dir)
+    for p in bp_files(save_dir):
+        if p.stem == skip or p.stem in stale:
+            continue
+        d = files.read_json(p)
+        if not isinstance(d, dict) or d.get("tpl") != "fortcore" or schema.validate("bp", d):
+            continue
+        par = d.get("params") or {}
+        if not par.get("retrofit") and _stage_param(par) == 1 and isinstance(d.get("anchor"), list):
+            return p.stem, d["anchor"]
+    return None
+
+
+def _stage_param(params) -> int:
+    st = params.get("stage", 1) if isinstance(params, dict) else 1
+    return st if isinstance(st, int) and not isinstance(st, bool) else 1
+
+
 def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
            same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
@@ -1431,19 +1459,26 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
     lists them."""
     params, want = translate_only(tpl, params)
     need = tuple(need) + want                              # named by the caller: kept although the manifest lists them
+    if tpl == "fortcore" and not params.get("retrofit") and _stage_param(params) == 1:
+        core = first_core(save_dir, bp_id)                 # BUG-358: one fortcore; a second stage 1 is refused
+        if core:
+            raise BpError(f"fortcore stage 1: {core[0]} (anchor {core[1]}) is the fort's fortcore already; a second one "
+                          f"digs and queues beside it for weeks. Build on it (stage 2-4: site=same), or take it back first: "
+                          f"""dfllm cmd bp.cancel '{{"proj":"{core[0]}"}}' (a plain cancel undoes its not yet dug designations), then place again""")
     if tpl == "seal":                                      # absolute openings; at=last: the current open ways in
         params["at"], SEAL_NOTES[bp_id] = seal_openings(save_dir, params.get("at"), snap,
                                                         params.get("close") or "auto")
     if tpl == "traps":                                     # FR-96: at=ways|hall: the lanes / hall tiles still to trap
         from . import traps as _traps
         params["at"], SEAL_NOTES[bp_id] = _traps.expand(save_dir, params, snap)
-    if tpl == "workshops" and "skip" not in params:
+    surface = tpl == "workshops" and bool(params.get("surface"))   # BUG-356: the startup shops build what the fortcore plans
+    if tpl == "workshops" and "skip" not in params and not surface:
         miss = set(workshops_missing(save_dir))
         # BUG-042: a moodable type the kernel saw missing on the map (economy's tannery request) is built again
         have = [n for n in _moodable() if n not in miss and n not in need]
         if have:
             params["skip"] = ",".join(have)
-    if tpl == "workshops" and params.get("add"):          # live L6: never a second still or butcher's shop
+    if tpl == "workshops" and params.get("add") and not surface:   # live L6: never a second still or butcher's shop
         want = [t.strip() for t in str(params["add"]).split(",") if t.strip()]
         miss = set(workshops_missing(save_dir, want))
         # unknown names: emit reports them; `need` (BUG-038): the kernel saw it missing on the map
@@ -1529,7 +1564,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
         ranked = len(wide)
     holders = sorted({t.split("~", 1)[1] for t in taken})
     why = "; ".join(x for x in (f"taken {', '.join(taken[:3])}" if taken else "", bad[0] if bad else "") if x)
-    hint = farm_hint(save_dir, tpl, params, snap, ranked) or no_site_hint(save_dir, tpl, snap_id, ranked, holders)
+    hint = farm_hint(save_dir, tpl, params, snap, ranked) or no_site_hint(save_dir, tpl, snap_id, ranked, holders, params)
     raise BpError(f"site {label}: only {free} free site(s) for {tpl}{fmt_params(params)} on snapshot {snap_id} "
                   f"({ranked} ranked{'; ' + why if why else ''}); try `dfllm bp sites {tpl} --fresh`"
                   + (f"; {hint}" if hint else ""))

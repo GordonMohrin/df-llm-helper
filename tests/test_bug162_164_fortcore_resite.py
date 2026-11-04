@@ -161,8 +161,10 @@ def test_an_explicit_anchor_stage_does_not_clash_with_its_own_stage_1(save):
     x = cmd.place(save, "fortcore", {"stage": 2}, "A100_100_130_0", "y9s0b1")
     assert x["anchor"] == [100, 100, 130] and x["params"]["stage"] == 2
     assert cmd.anchor_label([100, 100, 130], 0) == "A100_100_130_0"
-    with pytest.raises(cmd.BpError, match="overlaps"):                  # another template there still clashes
+    with pytest.raises(cmd.BpError, match="fortcore already"):          # BUG-358: a second stage 1 is refused
         cmd.place(save, "fortcore", {"stage": 1}, "A100_100_130_0", "y9s0b2")
+    again = cmd.place(save, "fortcore", {"stage": 1}, "A100_100_130_0", "y9s0b0")   # the same id is placed again: valid
+    assert again["anchor"] == [100, 100, 130]
 
 
 def test_the_why_text_is_cut_at_a_word_boundary():

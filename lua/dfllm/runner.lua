@@ -798,14 +798,47 @@ end
 
 local function built(b) return b:getBuildStage() >= b:getMaxBuildStage() end
 
+-- BUG-357 (Run 16b i2 y372 d28-60, Run 16c i3: farms and two workshops projects stood 32 days at build 50% "waits for door
+-- (0 free, 3 ordered)", the door's order "no Carpenters workshop", ConstructBlocks "no Masons workshop", and no shop stood
+-- for 130 days): a door is made at a Carpenter's or a Mason's workshop. While neither stands built, a planned door of a room
+-- or farm project is not awaited: the stage goes on without it (the planned door stays on the map and DF builds it once a
+-- shop makes the item), and the mandatory shops are requested (Q.sync). Seals, plugs and repairs keep their doors: a way in
+-- is not left open on that account. nil = unreadable (no claim).
+Q.DOOR_KEEP = {seal = true, plug = true, repair = true}
+function Q.no_door_shop()
+  local have = false
+  local ok = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local n = df.workshop_type[b.type]
+      if (n == 'Carpenters' or n == 'Masons') and b:getBuildStage() >= b:getMaxBuildStage() then have = true; return end
+    end
+  end)
+  if not ok then return nil end
+  return not have
+end
+
 local function measure_build(K, P, d, R)
   if R.noid == 1 then return 'complete' end
   local pend, done, keep = 0, 0, {}
+  local noshop, deferred = nil, 0
   for _, id in ipairs(R.b) do
     local b = df.building.find(id)
     if b then
       keep[#keep + 1] = id
-      if built(b) then done = done + 1 else pend = pend + 1 end
+      if built(b) then done = done + 1
+      else
+        local door = P.class ~= 'defense' and not Q.DOOR_KEEP[P.tpl] and b:getType() == df.building_type.Door
+        if door and noshop == nil then noshop = Q.no_door_shop() end
+        if door and noshop then deferred = deferred + 1; done = done + 1 else pend = pend + 1 end   -- BUG-357
+      end
+    end
+  end
+  if deferred > 0 then
+    S.rt.dd = S.rt.dd or now(K)
+    if R.dd ~= deferred then
+      R.dd = deferred
+      K.log('warn', '%s (%s): %d door(s) not awaited: no Carpenters or Masons workshop stands (a door is made at one); the stage ' ..
+            'goes on, the planned door is built once a shop exists (BUG-357)', P.id, P.tpl, deferred)
     end
   end
   for _, id in ipairs(R.c) do               -- a finished construction is no building any more
@@ -3064,6 +3097,13 @@ local function food_shops(d)
   return true
 end
 
+-- BUG-356: the startup shops (workshops params.surface = 1: still, kitchen, carpenter, mason on the surface beside the wagon)
+-- are the first year's supply: no open seal pauses them
+function Q.startup_shops(d)
+  local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
+  return int(p.surface) == 1
+end
+
 -- BUG-133: a workshops project of the shops the dead need only (Masons: slabs and stone coffins, Carpenters: wood coffins)
 Q.TOMB_SHOPS = {Masons = true, Carpenters = true}
 function Q.tomb_shops(d)
@@ -3092,7 +3132,7 @@ local function kind_of(P, d)
   local t = P.tpl
   if SEALS[t] then return 'seal' end
   if t == 'tombs' or t == 'depot' or t == 'explore' then return t end   -- DECISIONS 4: the ore search never rests
-  if SUPPLY[t] or (t == 'workshops' and food_shops(d)) then return 'supply' end
+  if SUPPLY[t] or (t == 'workshops' and (food_shops(d) or Q.startup_shops(d))) then return 'supply' end
   if t == 'workshops' and Q.tomb_shops(d) then return 'tomb_shops' end
   if BEDS[t] then return 'beds' end
   if t == 'repair' then
@@ -4775,7 +4815,9 @@ function Q.sync(K, t)
   local miss = {}
   for _, name in ipairs(Q.MANDATORY) do if not have[name] then miss[#miss + 1] = name end end
   ad.miss = miss
-  if ad.rec == 1 and #miss > 0 then
+  -- BUG-357: a new fort whose stages deferred a door for want of a Carpenters or Masons workshop asks for the mandatory shops
+  -- like a reclaimed one (S.rt.dd, set by measure_build)
+  if (ad.rec == 1 or int(S.rt.dd)) and #miss > 0 then
     S.rt.wmiss = int(S.rt.wmiss) or t
     -- BUG-181: a pending workshops project holds back only the types it builds (live i4: skip=Masons held the Masons back)
     local want = M.uncovered(K, 'workshops', miss)
@@ -4789,6 +4831,7 @@ function Q.sync(K, t)
     end
   else
     S.rt.wmiss = nil
+    if #miss == 0 then S.rt.dd = nil end                                    -- BUG-357: every mandatory shop stands
     if type(S.rt.req.wsm) == 'table' then S.rt.req.wsm.k = 0 end            -- BUG-184: a new episode starts unbacked
   end
   dirty()

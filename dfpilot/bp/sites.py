@@ -45,6 +45,8 @@ sources, state water.src; cmd.water_ctx) only sites whose hospital zone lies wit
 accepted source count, measured as water.lua's served() does (Chebyshev from the source to the zone rect, z included);
 +2 per tile nearer; ValueError names the source, the nearest candidate and the refuge's water when none is left.
 `fill_source`: what a bucket-fed cistern (no pipe) could be filled from (revealed open water reachable from the core).
+Startup shops (`workshops` p.surface = 1, BUG-356): no manifest needed; a block of open surface floor (every tile '.' with '_'
+above, on the citizens' walk group), nearest the middle of the snapshot (or `near`), clear of the fortcore's keep-out tiles.
 Aqshaft (BUG-292): columns from public Z4 floor whose levels below are rock or unknown with rock on their 4 sides,
 off the keep-out boxes and the cavern/warm levels; + AQ_SPAN for passing a known aquifer level (`_aqshaft`).
 """
@@ -230,7 +232,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl in traps.BUILD:                                   # FR-96: absolute trap tiles, the site is the first one
         return traps.site(snap, p, _At(snap))[:n]
-    if tpl != "fortcore" and not ((manifest or {}).get("zones") or {}).get("Z4"):
+    surface_shops = tpl == "workshops" and bool(p.get("surface"))     # BUG-356: the startup set needs no fort manifest
+    if tpl != "fortcore" and not surface_shops and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
         from . import deep
@@ -246,6 +249,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _aqshaft(snap, p, manifest)
     elif tpl == "farms" and p.get("surface"):               # BUG-297: plots on soil floor that stands already
         cands = _surface_farms(snap, p, manifest)
+    elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
+        cands = _surface_shops(snap, p, manifest or {})
     elif tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
         cands = _dry(cands, manifest)                      # BUG-130: never again into a recorded breach
@@ -937,6 +942,58 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
             where = "inside the fort (Z4)" if roofed else f"{d} tiles from the entrance"
             out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, score), "box": box,
                         "why": f"rot{rot}, surface farm on soil floor {where}, {len(tiles)} soil plot tiles, nothing dug"})
+    return out
+
+
+SHOP_NEAR = 25                        # BUG-356: a startup block within this many tiles of the fort entrance scores best
+
+
+def _surface_shops(snap: dict, p: dict, manifest: dict) -> list[dict]:
+    """BUG-356 (Run 16a-d: the first year hung on the fortcore: Kueche/Still refused, drink 3 d -> 0): workshops p.surface = 1
+    sites. The block (rooms.surface_block of the shops asked for) is flat open ground: every tile a revealed floor ('.') on
+    one level with open sky ('_') right above it, nothing dug, on the citizens' walk group (snapshot wg) where that is read,
+    clear of the fort's own tiles (the fortcore's attack path and military tiles, rooms, workshops and the way in).
+    Score: 1000, - 1 per tile from the middle of the snapshot (the embark: the wagon stands there; `near` = the wagon's
+    tile overrides it), + 60 when within SHOP_NEAR of the fort entrance (manifest `edge`). The caller's free callable keeps
+    it off every placed project."""
+    todo = rooms.workshops(p).workshops
+    W, H = rooms.surface_block(len(todo))
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    floor = _Pref(snap, lambda c: c == ".")
+    sky = _Pref(snap, lambda c: c == "_")
+    edge = [tuple(e) for e in manifest.get("edge") or [] if isinstance(e, (list, tuple)) and len(e) == 3]
+    keep = list(_keep_out(manifest)) if manifest else []
+    keep += [tuple(r["bbox"]) for r in manifest.get("rooms", []) if isinstance(r, dict) and len(r.get("bbox") or []) == 6]
+    keep += [(w["pos"][0] - 2, w["pos"][1] - 2, w["pos"][2], w["pos"][0] + 2, w["pos"][1] + 2, w["pos"][2])
+             for w in manifest.get("workshops", []) if isinstance(w, dict) and isinstance(w.get("pos"), list)
+             and len(w["pos"]) == 3]
+    keep += [(e[0] - 2, e[1] - 2, e[2], e[0] + 2, e[1] + 2, e[2]) for e in edge]
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 else 1
+    out = []
+    for z in range(z0, z1):
+        cur, up = snap["rows"][f"z{z}"], snap["rows"][f"z{z + 1}"]
+        for yy in range(0, len(cur), step):
+            for xx in range(0, len(cur[yy]), step):
+                if cur[yy][xx] != "." or up[yy][xx] != "_":
+                    continue
+                ax, ay = x0 + xx, y0 + yy
+                for rot in range(4):
+                    bx0, by0, bx1, by1 = _rot_rect((0, 0, W - 1, H - 1), ax, ay, rot)
+                    if floor.count(bx0, by0, bx1, by1, z) != W * H or sky.count(bx0, by0, bx1, by1, z + 1) != W * H:
+                        continue
+                    box = (bx0, by0, z, bx1, by1, z)
+                    if any(_overlap(box, k) for k in keep):
+                        continue
+                    if "0" in (walk_at(snap, (bx0, by0, z)), walk_at(snap, (bx1, by1, z)),
+                               walk_at(snap, ((bx0 + bx1) // 2, (by0 + by1) // 2, z))):
+                        continue                                # BUG-352: another walk group than the citizens'
+                    d = max(abs((bx0 + bx1) // 2 - cx), abs((by0 + by1) // 2 - cy))
+                    de = min((box_dist(list(e), list(box)) for e in edge if e[2] == z), default=None)
+                    near = de is not None and de <= SHOP_NEAR
+                    out.append({"anchor": [ax, ay, z], "rot": rot, "score": max(0, 1000 - d + (60 if near else 0)), "box": box,
+                                "why": f"rot{rot}, {W}x{H} open surface floor for {len(todo)} shops, {d} tiles from the middle "
+                                       "of the snapshot" + (f", {de} from the entrance" if near else "") + ", nothing dug"})
     return out
 
 
