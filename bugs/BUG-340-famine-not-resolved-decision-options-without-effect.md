@@ -69,6 +69,29 @@ Module: `dfpilot/wake.py` (follow `_place`, `_place_farms`, `farm_tries`, `food_
   the BUG-316 live-shaped snapshot: no room site at plots 2 or 1, the PEACE surface farm is placed with plots 1; in ALERT
   nothing is written and the first error stands.
 
+## Review fix (merge15)
+The famine crew (round 2) kept a member's everybody-does-this labors (hauling, cleaning, building, Orderlies) off for good
+in four cases, and held the whole crew back on the drink days alone:
+- a member who got a strange mood or was drafted was dropped from `p.fcrew` without a return (economy.lua `fcrew_run`, the
+  members loop, was 7686-7696): he stays a Planters member with those labors off, never picked again. Now he goes back at
+  once (`M.fcrew_release`: act.work_detail off with opts.only, a plain member again of an everybody detail), WORK_DETAIL
+  `Planters - <name> (famine crew: in a mood)` / `(famine crew: drafted)`;
+- a member the player or DF took off the crew detail: act.work_detail(off, opts.only) returned `not a member` before
+  `generalize` (act.lua:2164), so the return logged `back to every labor` and restored nothing. Now `generalize` runs for a
+  non-member too (act.lua), and the crew gives such a member back the next day without a rejoin (`no longer a member`);
+- `famine_crew.on = false` returned without a return (economy.lua:7643): now every member goes back, then p.fcrew is cleared;
+- the return wanted food AND drink at `off_days` (was :7650): a long drink dip between famine_days and off_days kept up to
+  `share` % of the adults specialized after the food was back. Now each member goes back when the shortage he was named for
+  is over (`p.fcrew.k`: `food`, `drink` for a brewer named below famine_days of drink; an older state: the brew detail's
+  members drink, all others food; `M.fcrew_cause`);
+- the crew share is held on every run, not only when adding: fewer adults (deaths, departures) and a crew above
+  `share` gives the last ones back (`famine crew above its cap: N of M adults`).
+Tests (fail on d40fb59): tests/lua/test_economy_fcrew.lua (+4: mood/drafted/off the detail, `on` false, food back with a
+drink dip, the cap), tests/lua/test_act_supply.lua (+1 check: `not a member` with opts.only gives the labors back).
+Live check: in a famine kern.log `famine crew: ... (off at 30): k specialists back to every labor (...)` for a moody or
+drafted member; WORK_DETAIL `... (famine crew: in a mood)`; with food >= 30 days and drink 10-30 days the farmers go back.
+Uncertain: whether changing a moody dwarf's labors disturbs his mood (DF ties a mood to its workshop, not to labors).
+
 ## Open
 - A fort with no soil underground and no free surface soil (Drillchamber before y379): nothing to place; muddying stone
   needs water (never dug near water without Gordon).

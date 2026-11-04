@@ -1,5 +1,17 @@
 # CHANGELOG dfpilot
 
+## Run 15 famine crew review: dropped-out members get their labors back, release by the own shortage (BUG-340 review fix (merge15), 2026-11-04; offline, live-untested)
+- **Why:** the merge15 review of the famine crew: a moody or drafted member, or one the player/DF took off the detail, was
+  dropped without a return and kept hauling, cleaning, building and Orderlies off for good (economy.lua fcrew_run, was
+  7686-7696; act.lua:2164 returned `not a member` before generalize); `famine_crew.on = false` left the crew specialized
+  (:7643); the return wanted food AND drink at off_days (:7650), so a drink dip held farmers and cooks after the food was back.
+- **What changed:** `M.fcrew_release` (off with opts.only, plain rejoin of an everybody detail) for a drafted, moody or
+  off-the-detail member at once, for every member when `on` is false, for the last ones when the crew is above its share of
+  the adults (now checked every run); each member goes back when his own shortage stands at off_days (`p.fcrew.k` food/drink,
+  `M.fcrew_cause`); act.work_detail off with opts.only gives a non-member the everybody labors back too.
+- **Tests (fail on d40fb59):** tests/lua/test_economy_fcrew.lua (+4), tests/lua/test_act_supply.lua (+1 check).
+- **Live check:** kern.log `famine crew: ... (off at 30): k specialists back to every labor`, WORK_DETAIL `(famine crew: in a
+  mood)` / `(drafted)` / `(no longer a member)`; food back with drink below 30 days: the farmers go back.
 ## Run 15 gate review: our squads kept off a busy bridge, approach cancels bounded (BUG-335/342 review, 2026-11-04; offline, live-untested)
 - **Why:** the verifiers of BUG-335 and BUG-342: gate only waited for our soldiers walking over a bridge (Earthboat squads 99-101
   would hold every SIEGE close until the give-up), the inner station flipped melee -> b2 the moment B2 moved, stairs/ramps (another

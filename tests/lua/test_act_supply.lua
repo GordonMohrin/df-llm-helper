@@ -185,6 +185,12 @@ T.test('work_detail opts (Run 10): a specialist leaves the everybody details; eq
        'no equipment request without opts.equip')
   T.eq({env.api.work_detail('Miners', 7, false, {only = true})}, {true, 'removed'})
   T.eq({u.status.labors[MINE], u.status.labors[PLANT]}, {false, true}, 'back to everybody work')
+  -- review fix (merge15): a specialist already off the detail (the player, DF) still gets the everybody labors back
+  T.eq({env.api.work_detail('Miners', 7, true, {only = true})}, {true, 'added'})
+  T.eq(u.status.labors[PLANT], false)
+  miners.assigned_units:erase(0)
+  T.eq({env.api.work_detail('Miners', 7, false, {only = true})}, {true, 'not a member'})
+  T.eq(u.status.labors[PLANT], true, 'not a member: the everybody labors back all the same')
   T.eq({env.api.work_detail('Woodcutters', 7, true, {equip = true})}, {true, 'added'})
   T.eq({u.status.labors[CUT], u.uniform.pickup_flags.update, df.global.plotinfo.equipment.update.weapon},
        {true, true, true}, '[live-untested] the equipment update request with the tool labor')

@@ -2161,7 +2161,12 @@ local function impls(state)
       if opts.equip and A.TOOL_LABOR_DETAILS[name] and (turned or not at or opts.equip == 'force') then equip_update(u) end
       return true, (at and 'already' or 'added') .. sel
     end
-    if not at then return true, 'not a member' end
+    -- Review fix (merge15): a specialist the player or DF already took off the detail still gets the everybody labors
+    -- back (the famine crew's return logged 'back to every labor' while they stayed off)
+    if not at then
+      if opts.only and u then generalize(details, wd, u) end
+      return true, 'not a member'
+    end
     vec:erase(at)                              -- a unit that left the fort (or died) is only taken off the list
     if not u then return true, 'removed' end
     if opts.only then generalize(details, wd, u) end
