@@ -1283,6 +1283,7 @@ local function frame(st)
   if not st.load_at or t0 - st.load_at >= CAD.load_ms then
     refresh_load(st)
     st.save_seen = save_name() or st.save_seen     -- BUG-070: a rename without a gap is no evidence for the next one
+    pcall(M.note_player_save, st, st.save_seen)    -- BUG-386
   end
   st.current = 'kern'
   if ticking and (now.year ~= st.cal_year or now.season ~= st.cal_season) then
@@ -1510,14 +1511,65 @@ function M.runtime_key(marker, save)
   return save
 end
 
+-- BUG-386: a save folder the player named (not DF's 'autosave N' / 'current', no path)
+function M.player_save(save)
+  if type(save) ~= 'string' or save == '' then return false end
+  return not (save:find('^autosave') or save == 'current' or save:find('[/\\]') or save == '.' or save == '..')
+end
+
+-- BUG-386 (Run 16 i2: the save-as r16b-ostgate booted at 14:15 on code from before BUG-362, every later boot ran in 'autosave N'
+-- and rekey_to ignores those by design: the name the player gave was gone, the key stayed region1-site97 for good): the name of
+-- the save-as, from the first that says one. 1. the loaded folder when it is a player name; 2. `marker.want`, which the running
+-- kernel writes when the loaded folder changes to a player name (note_player_save); 3. an older fort: the newest BOOT event
+-- in the runtime folder of the marker's key whose save is a player name (events.jsonl, then its rotation).
+function M.player_name(marker, save, root)
+  if M.player_save(save) then return save end
+  if type(marker) ~= 'table' then return nil end
+  if M.player_save(marker.want) then return marker.want end
+  if type(marker.save) ~= 'string' or not root then return nil end
+  local f = root .. '/' .. marker.save .. '/events.jsonl'
+  for _, file in ipairs({f, fio.rotated(f)}) do
+    local txt = fio.read(file)
+    local found
+    local pos = 1
+    while txt do
+      local a = txt:find('"type":"BOOT"', pos, true)
+      if not a then break end
+      local ls = a
+      while ls > 1 and txt:sub(ls - 1, ls - 1) ~= '\n' do ls = ls - 1 end
+      local le = txt:find('\n', a, true) or #txt + 1
+      local d = json.try_decode(txt:sub(ls, le - 1))
+      if type(d) == 'table' and type(d.d) == 'table' and M.player_save(d.d.save) then found = d.d.save end
+      pos = le + 1
+    end
+    if found then return found end
+  end
+  return nil
+end
+
+-- BUG-386: the running kernel sees DF's save folder change (frame: refresh_load) to a name the player gave: it keeps the name in the
+-- marker (`want`), so the next boot (adopt, reload) re-keys the runtime folder even when DF has renamed the save to 'autosave N' by
+-- then. Returns true when the marker changed.
+function M.note_player_save(st, name)
+  if not st.marked or not M.player_save(name) or st.want_noted == name then return false end
+  st.want_noted = name
+  local raw = dfhack.persistent.getSiteDataString('dfllm')
+  local m = raw and json.try_decode(raw)
+  if type(m) ~= 'table' or m.v ~= 2 or m.want == name then return false end
+  if clean(name, 100) == m.base then return false end
+  m.want = clean(name, 100)
+  pcall(dfhack.persistent.saveSiteDataString, 'dfllm', json.encode(m))
+  st.log_as('kern', 'info', 'BUG-386: save folder ' .. name .. ' noted for the next boot (runtime folder re-key)')
+  return true
+end
+
 -- BUG-362 (Run 16 i2: embark in world save 'region1', adopt, then embark.py save-as r16b-ostgate, adopt again: the runtime
 -- folder and the status stayed 'region1-site97', and two forts of one world at one site id share that folder): the runtime key
 -- is fixed at the first adopt, in whatever folder DF had then. A player save-as (a folder that is neither 'autosave N' nor
 -- 'current') gives the fort its real name: the next boot (dfllm adopt) moves the runtime folder to <that save>-site<N>.
 -- Returns the new key, or nil when the key stays (autosave, same folder, a key without the '-site<N>' tail = legacy).
 function M.rekey_to(marker, save)
-  if type(marker) ~= 'table' or type(marker.save) ~= 'string' or type(save) ~= 'string' or save == '' then return nil end
-  if save:find('^autosave') or save == 'current' or save:find('[/\\]') or save == '.' or save == '..' then return nil end
+  if type(marker) ~= 'table' or type(marker.save) ~= 'string' or not M.player_save(save) then return nil end
   local base, tail = marker.save:match('^(.*)(%-site%d+)$')
   if not base then return nil end
   base = type(marker.base) == 'string' and marker.base ~= '' and marker.base or base
@@ -1530,6 +1582,7 @@ end
 -- moves <runtime>/<old> to <runtime>/<new> and re-keys the marker (saved into the site data at once); false + why when
 -- the old key stays: the new folder exists (another fort's data, never merged) or the rename failed (a tool holds a file open)
 local function rekey(marker, save, paths_root)
+  save = M.player_name(marker, save, paths_root) or save           -- BUG-386: the name of the save-as, also behind 'autosave N'
   local key = M.rekey_to(marker, save)
   if not key then return false end
   local old = marker.save
@@ -1539,7 +1592,7 @@ local function rekey(marker, save, paths_root)
     local ok, err = os.rename(from, to)
     if not ok then return false, string.format('runtime folder %s not moved to %s (%s): key stays', old, key, tostring(err)) end
   end
-  marker.save, marker.base = key, clean(save, 100)
+  marker.save, marker.base, marker.want = key, clean(save, 100), nil
   pcall(dfhack.persistent.saveSiteDataString, 'dfllm', json.encode(marker))
   return true, string.format('runtime folder %s > %s (save-as %s)', old, key, save)
 end

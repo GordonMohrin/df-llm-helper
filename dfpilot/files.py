@@ -198,12 +198,32 @@ def follow_off(save_dir: Path, now: float | None = None) -> str | None:
     doc, age = read_follow_hb(save_dir, now)
     if age is None:
         return "follow: OFF (no heartbeat yet: start dfllm follow)"
+    pid = (doc or {}).get("pid")
+    who = f" pid {pid}" if isinstance(pid, int) and not isinstance(pid, bool) else ""       # BUG-385: the owner
     if age > FOLLOW_STALE_S:
-        return f"follow: OFF (last heartbeat {fmt_age(age)} ago)"
+        return f"follow: OFF (last heartbeat {fmt_age(age)} ago{', was' + who if who else ''})"
     code = (doc or {}).get("code")
     if isinstance(code, str) and code != code_stamp():
-        return "follow: OLD CODE (dfpilot changed on disk since it started): restart dfllm follow"
+        return f"follow{who}: OLD CODE (dfpilot changed on disk since it started): restart dfllm follow"
     return None
+
+
+def follow_owner(save_dir: Path, now: float | None = None) -> str | None:
+    """BUG-385: 'follow: pid 123 (beat 4s ago, took over from pid 99 17s ago)' for the follow that holds <save>/.follow.lock
+    and beats; two pids (lock and heartbeat) say so; None when nobody beats."""
+    from .events import fmt_age
+    now = time.time() if now is None else now
+    doc = read_json(Path(save_dir) / ".follow.lock", retry=False)
+    hb, age = read_follow_hb(save_dir, now)
+    if not isinstance(doc, dict) or age is None or age > FOLLOW_STALE_S:
+        return None
+    pid = doc.get("pid")
+    if hb and isinstance(hb.get("pid"), int) and hb["pid"] != pid:
+        return f"follow: lock names pid {pid}, heartbeat pid {hb['pid']}: two follows write this folder"
+    took = ""
+    if isinstance(doc.get("took"), int) and isinstance(doc.get("took_at"), (int, float)):
+        took = f", took over from pid {doc['took']} {fmt_age(now - doc['took_at'])} ago"
+    return f"follow: pid {pid} (beat {fmt_age(age)} ago{took})"
 
 
 GUARD = "guard.json"

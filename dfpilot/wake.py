@@ -850,6 +850,7 @@ class Follower:
         try:
             files.write_follow_hb(self.dir, {"v": 2, "wall": int(now), "last_n": self.tail.last_n if self.tail else 0,
                                              "code": CODE,        # BUG-042: status names a follow on old code
+                                             "pid": os.getpid(),  # BUG-385: status names the owner
                                              "auto": 1 if self.auto else 0})   # DECISIONS 2: --no-auto places nothing
         except OSError as e:
             sys.stderr.write(f"follow: cannot write heartbeat: {e}\n")
@@ -1424,8 +1425,14 @@ def add_audit_parser(sub) -> None:
 # watched by polling): the lock carries the owner's code stamp (`code`, BUG-042); a follow whose CODE differs from the
 # owner's (the lock's code, else the owner's .follow.hb code: followers from before BUG-334) takes over by itself and
 # says so; the old one exits at its next beat (refresh_lock). Same code: refused as before (--takeover).
+# BUG-385 (Run 16b i2: 'also the 2nd and 3rd start is taken over by a foreign pid 17492': two followers with --takeover on one
+# runtime folder, each restarted by its own Monitor after "took over, this one exits", kept taking the lock from each other): a
+# takeover is allowed once. The lock names who took it (`took`) and when (`took_at`); a --takeover (or an old-code takeover) of
+# a lock that itself took over less than FOLLOW_TAKEOVER_COOL_S ago is refused, naming the owner's pid. The loser exits cleanly
+# and nobody takes the lock back: the player stops the other start, or waits out the cool-down.
 FOLLOW_LOCK = ".follow.lock"
 FOLLOW_LOCK_STALE_S = 3 * FOLLOW_HB_EVERY_S
+FOLLOW_TAKEOVER_COOL_S = 120
 
 
 def pid_alive(pid) -> bool:
@@ -1490,15 +1497,29 @@ def old_code_owner(save_dir: Path, now: float, alive: Callable[[int], bool] | No
     return (owner, code) if owner is not None and code is not None and code != CODE else None
 
 
+def recent_takeover(owner: dict | None, now: float) -> bool:
+    """BUG-385: the lock's owner took the save over itself less than FOLLOW_TAKEOVER_COOL_S ago."""
+    t = (owner or {}).get("took_at")
+    return isinstance(t, (int, float)) and not isinstance(t, bool) and 0 <= now - t < FOLLOW_TAKEOVER_COOL_S
+
+
 def acquire_lock(save_dir: Path, now: float, takeover: bool = False,
                  alive: Callable[[int], bool] | None = None) -> tuple[bool, dict | None]:
-    """(True, None) when this process now holds <save>/.follow.lock; (False, owner) when another follow runs."""
+    """(True, None) when this process now holds <save>/.follow.lock; (False, owner) when another follow runs. BUG-385: a
+    takeover of an owner that took over less than FOLLOW_TAKEOVER_COOL_S ago is refused (owner['cooldown'] = seconds left),
+    and the lock is read back after the write: of two starts at the same moment the one the file names keeps it."""
     owner = lock_owner(save_dir, now, alive)
     if owner is not None and not takeover:
         return False, owner
-    files.write_json_atomic(Path(save_dir) / FOLLOW_LOCK, {"v": 1, "pid": os.getpid(), "start": int(now), "hb": int(now),
-                                                           "code": CODE,          # BUG-334
-                                                           **({"took": owner.get("pid")} if owner else {})})
+    if owner is not None and recent_takeover(owner, now):
+        return False, {**owner, "cooldown": int(FOLLOW_TAKEOVER_COOL_S - (now - owner["took_at"]))}
+    path = Path(save_dir) / FOLLOW_LOCK
+    files.write_json_atomic(path, {"v": 1, "pid": os.getpid(), "start": int(now), "hb": int(now),
+                                   "code": CODE,          # BUG-334
+                                   **({"took": owner.get("pid"), "took_at": int(now)} if owner else {})})
+    back = files.read_json(path, retry=False)
+    if isinstance(back, dict) and back.get("pid") not in (None, os.getpid()):
+        return False, back                                 # BUG-385: the other start wrote after us
     return True, None
 
 
@@ -1508,10 +1529,12 @@ def refresh_lock(save_dir: Path, now: float, alive: Callable[[int], bool] | None
     if owner is not None:
         return owner
     doc = files.read_json(Path(save_dir) / FOLLOW_LOCK, retry=False)
-    start = doc.get("start") if isinstance(doc, dict) and doc.get("pid") == os.getpid() else None
+    mine = isinstance(doc, dict) and doc.get("pid") == os.getpid()
+    start = doc.get("start") if mine else None
+    kept = {k: doc[k] for k in ("took", "took_at") if k in doc} if mine else {}      # BUG-385: the cool-down outlives the beats
     files.write_json_atomic(Path(save_dir) / FOLLOW_LOCK, {"v": 1, "pid": os.getpid(),
                                                            "start": start if isinstance(start, int) else int(now),
-                                                           "hb": int(now), "code": CODE})       # BUG-334
+                                                           "hb": int(now), "code": CODE, **kept})       # BUG-334
     return None
 
 
@@ -1553,6 +1576,11 @@ class _Lock:
             self.dir = None
             old = None if self.takeover or not self.auto else old_code_owner(d, now)   # BUG-334: old code is taken over
             ok, owner = acquire_lock(d, now, self.takeover or old is not None)
+            if not ok and owner.get("cooldown") is not None:      # BUG-385: no ping-pong
+                return (f"follow already runs (pid {owner.get('pid')} took {d.name} over from pid {owner.get('took')} "
+                        f"{FOLLOW_TAKEOVER_COOL_S - owner['cooldown']}s ago): this one exits and does not take it back; two "
+                        f"starts with --takeover fight over one instance: stop the other start (a Monitor that restarts "
+                        f"follow), or try again in {owner['cooldown']}s")
             if not ok:
                 age = int(now - owner["hb"]) if isinstance(owner.get("hb"), (int, float)) else "?"
                 return (f"follow already runs (pid {owner.get('pid')}, beat {age}s ago) for {d.name}: this one exits; "
@@ -1571,7 +1599,8 @@ class _Lock:
             owner = refresh_lock(d, now)
             if owner is not None:
                 self.dir = None                     # not ours any more: never delete it
-                return f"follow: pid {owner.get('pid')} took over {d.name} (--takeover): this one exits"
+                return (f"follow: pid {owner.get('pid')} took over {d.name} (--takeover): this one (pid {os.getpid()}) exits "
+                        f"and does not take it back")
         return None
 
 

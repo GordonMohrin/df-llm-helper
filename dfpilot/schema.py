@@ -1395,7 +1395,8 @@ ALLOWLIST = Obj(req={"v": Const(V),
 
 PERSIST_MARKER = Obj(req={"v": Const(V), "adopted": TICK, "save": Str(maxbytes=120), "fort": Str(maxbytes=120),
                           "acceptance": FLAG, "baseline": FLAG, "boots": NAT},
-                    opt={"base": Str(maxbytes=120)})   # BUG-362: the save folder the key was derived from
+                    opt={"base": Str(maxbytes=120),    # BUG-362: the save folder the key was derived from
+                         "want": Str(maxbytes=120)})   # BUG-386: a player-named save folder the next boot re-keys to
 PERSIST_PROJECTS = Obj(req={"v": Const(V), "list": Arr(Obj(req={
     "id": ID, "tpl": TPL, "site": Str(ID_RE), "class": Str(enum=["defense", "infra", "living", "beauty"]),
     "prio": Int(1, 7), "stage": NAT, "chunk": NAT, "pct": PCT, "blocked": Str(maxbytes=40), "since": TICK,
