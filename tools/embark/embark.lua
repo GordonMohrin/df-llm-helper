@@ -209,8 +209,11 @@ function W.track(on)
 end
 local Inj  -- class built on first use (the offline fake DF has no gui.Screen/defclass)
 local function inj_class()
-  if Inj or not (rawget(_G, 'defclass') and gui.Screen) then return Inj end
-  Inj = defclass(nil, gui.Screen)
+  -- Run 16 (04.11.2026, DFHack 53.16-r3): defclass is reached through _G's metatable, rawget(_G) is nil, so the
+  -- injector was never shown, tracking_on stayed 0, the rectangle stuck and no panel was read on all four instances
+  local dc = rawget(_G, 'defclass') or (type(defclass) == 'function' and defclass) or nil
+  if Inj or not (dc and gui.Screen) then return Inj end
+  Inj = dc(nil, gui.Screen)
   Inj.ATTRS{focus_path = 'dfllm-embark/mouse'}
   function Inj:render()
     local p = self.pos
