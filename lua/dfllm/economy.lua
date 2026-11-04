@@ -1473,7 +1473,8 @@ local function care_hook(K, fn)
   end
 end
 
--- care's pull hooks (live L4): reserved() -> {class = n}, mood_wants() -> {{cls, n}} | {class = n}
+M.MOOD_FAR_CAP = 100                -- BUG-341: unreachable items counted on top of a mood need at most
+-- care's pull hooks (live L4): reserved() -> {class = n}, mood_wants() -> {{cls, n, far?}} | {class = n}
 local function care_hooks(K, r)
   r.held = {}
   local res = care_hook(K, 'reserved')
@@ -1491,6 +1492,11 @@ local function care_hooks(K, r)
       local key, n
       if type(k) == 'number' and type(v) == 'table' then key, n = key_of(v.cls or v.class or v.key), count_of(v.n or 1)
       else key, n = key_of(k), count_of(v) end
+      -- BUG-341 (Run 15 Guildcleans y376: a Possessed carpenter needed logs x1, 89 free logs lay on another walk group
+      -- [89/89/0], the need of 1 stood under the stock of 89, autochop felled nothing, the mood failed and the dwarf killed):
+      -- the free items the moody dwarf cannot reach (care's `far`) are no stock for the need, so its floor stands above them
+      -- (autochop's min over the log count: the reachable trees are felled; more tanning, hunting, weaving the same way)
+      if n and n > 0 and type(v) == 'table' then n = n + math.min(M.MOOD_FAR_CAP, count_of(v.far) or 0) end
       if KEYS[key] and n and n > 0 then
         wants[key] = (wants[key] or 0) + n
         if type(v) == 'table' and v.glass == 'cut' then r.glass_cut = r.glass_cut + n end
@@ -4518,10 +4524,11 @@ local function famine(K, c, p, days, inv, r)
     p.famine.woke = now
     -- Run 11: the blockers (no fishery for the raw fish, why the kitchens cook nothing, no safe fishing water, ...)
     local bl, auto = M.food_block(K, c, r, inv)
-    local q, opts = M.food_q(fd, r, inv, bl, auto)
+    local q, opts, cmds = M.food_q(fd, r, inv, bl, auto, M.food_more(K, r))
     local ids, aids, head = M.food_head(bl, auto)
     K.emit('DECISION_NEEDED', 'A', string.format('famine: %d food days, %d drink days%s', fd, dd, head),
-           {id = 'famine', q = q, food = fd, block = ids, opts = opts, auto = aids})
+           {id = 'famine', q = q, food = fd, block = ids, opts = opts, auto = aids,
+            cmds = #cmds > 0 and cmds or nil})     -- BUG-340
   end
 end
 
@@ -4626,9 +4633,10 @@ local function food_pre(K, c, p, days, inv, r)
   for _, id in ipairs(ids) do toks[#toks + 1] = id end
   if not CAD.due(p.food_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
   p.food_rep, p.food_pre.woke = CAD.mark(now, {}, toks), now.tick
-  local q, opts = M.food_q(fd, r, inv, bl, auto)
+  local q, opts, cmds = M.food_q(fd, r, inv, bl, auto, M.food_more(K, r))
   K.emit('DECISION_NEEDED', 'A', string.format('food low: %d food days (famine below %d)%s', fd, lim, head),
-         {id = 'food_low', q = q, food = fd, block = ids, opts = opts, auto = aids})
+         {id = 'food_low', q = q, food = fd, block = ids, opts = opts, auto = aids,
+          cmds = #cmds > 0 and cmds or nil})       -- BUG-340
 end
 
 -- BUG-042 (Run 11, y471: drink 93 -> 32 days beside 15 stills, 275 plants and 3079 growths; every brew order waited
@@ -4714,6 +4722,15 @@ function M.fd_wants(K, c, r)
   for _, n in pairs(type(st.seeds) == 'table' and st.seeds or {}) do seeds = seeds + (math.tointeger(n) or 0) end
   if st.seeds_known and seeds == 0 and ((st.farm and (st.farm.plots or 0) > 0) or M.food_low(c, r)) then
     out[#out + 1] = {buy = 'seeds', n = 20, why = 'no usable seeds for the farm plots'}
+  end
+  -- BUG-340 (Run 15c/15d: the famine decisions asked the player for `trade.want food`, which the verb refused as written
+  -- and which replaces the plan's whole want list): below food.pre_days (or in a famine) the caravans bring food and seeds
+  if M.food_low(c, r) then
+    local fd = (r.days or {}).food_d or 0
+    out[#out + 1] = {buy = 'food', n = 30, why = string.format('food %d d', fd)}
+    local have = false
+    for _, w in ipairs(out) do if w.buy == 'seeds' then have = true end end
+    if not have then out[#out + 1] = {buy = 'seeds', n = 10, why = string.format('food %d d: more farm crops', fd)} end
   end
   st.fdwants = #out > 0 and out or nil
   return out
@@ -7540,11 +7557,12 @@ end
 
 function T.cover(K, c, r) if r.day then return M.cover_run(K, c, r) end end
 
--- what keeps food from coming, for the food_low and famine decisions: {{id, text}} by weight, and what the kernel
--- does about it itself (BUG-038): {{id, text}} (the fishery request, the gatherers)
+-- what keeps food from coming, for the food_low and famine decisions: {{id, text, cmd?}} by weight, and what the kernel
+-- does about it itself (BUG-038): {{id, text}} (the fishery request, the gatherers). BUG-340: cmd = the command line that
+-- fixes the blocker as it stands (M.FOOD_CMD; nil when only the kernel or DF can: cook, hungry, gather, hunt)
 function M.food_block(K, c, r, inv)
   local f, out, auto = M.facts_now(K, r), {}, {}
-  local function put(id, txt) out[#out + 1] = {id, txt} end
+  local function put(id, txt, cmd) out[#out + 1] = {id, txt, cmd} end
   -- BUG-059: hungry citizens and no prepared meal: the food days count raw food nobody cooks, say so first
   if (st.hungry_n or 0) > 0 and (inv.meals or 0) == 0 then
     put('hungry', string.format('%d hungry, 0 meals: raw food is not cooked', st.hungry_n))
@@ -7555,7 +7573,7 @@ function M.food_block(K, c, r, inv)
       auto[#auto + 1] = {'fishery', string.format('fishery %s (%d raw fish%s)', st.fishery, raw,
                                                   st.fishery == 'queued' and st.fishery_proj and (', ' .. st.fishery_proj)
                                                   or '')}
-    else put('fishery', string.format('build a fishery (%d raw fish)', raw)) end
+    else put('fishery', string.format('build a fishery (%d raw fish)', raw), M.FOOD_CMD.fishery) end
   end
   local sg = st.gather
   if type(sg) == 'table' then
@@ -7563,7 +7581,9 @@ function M.food_block(K, c, r, inv)
                                                                      sg.open or 0)}
     elseif sg.why then put('gather', 'gather: ' .. sg.why) end
   end
-  if not ws_any(f, {'workshop:Kitchen'}) then put('kitchen', 'no kitchen')
+  -- BUG-340: the caravans are asked for food and seeds by the kernel itself (M.fd_wants), never the player's option
+  if M.food_low(c, r) then auto[#auto + 1] = {'trade', 'caravans asked for food, seeds'} end
+  if not ws_any(f, {'workshop:Kitchen'}) then put('kitchen', 'no kitchen', M.FOOD_CMD.kitchen)
   elseif M.cook_n(inv) <= 0 then put('cook', 'no ' .. M.cook_why(inv, f))
   elseif not M.labor_holder(K, 'COOK') then put('cook', 'nobody holds the COOK labor') end
   -- BUG-258 (live Inkintense: block [cook, fish_zone, hunt, farms] in a fort without a brook, 175 bolts and no
@@ -7581,7 +7601,7 @@ function M.food_block(K, c, r, inv)
       if r.s and r.s.live and (r.s.live['dfllm:gear_xbow'] or 0) > 0 then
         auto[#auto + 1] = {'xbow', string.format('crossbows ordered (%d bolts)', bolts)}
       elseif not ws_any(f, {'workshop:Bowyers'}) then
-        put('xbow', string.format("hunt: no crossbow, no Bowyer's workshop (%d bolts)", bolts))
+        put('xbow', string.format("hunt: no crossbow, no Bowyer's workshop (%d bolts)", bolts), M.FOOD_CMD.bowyer)
       else put('xbow', string.format('hunt: no crossbow (%d bolts)', bolts)) end
     elseif st.no_ammo or (inv.bolts_free or 0) == 0 then put('hunt', 'hunt: no bolts')
     elseif h.why == 'siege' or h.why == 'hold' then put('hunt', 'hunt: not in ' .. tostring(K.mode())) end
@@ -7590,13 +7610,28 @@ function M.food_block(K, c, r, inv)
   if (fs.need or 0) > (fs.tiles or 0) then
     put('farms', st.farm_lost and string.format('farms %d/%d tiles; %s lost (build_lost): cancel it, place elsewhere',
                                                 fs.tiles or 0, fs.need or 0, tostring(st.farm_lost):sub(1, 12))
-                 or string.format('farms %d/%d tiles', fs.tiles or 0, fs.need or 0))
+                 or string.format('farms %d/%d tiles', fs.tiles or 0, fs.need or 0), M.FOOD_CMD.farms)
   end
   local ca = K.census.a
   if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 and not ws_any(f, (c.slaughter or {}).ws) then
-    put('butcher', "no butcher's shop")
+    put('butcher', "no butcher's shop", M.FOOD_CMD.butcher)
   end
   return out, auto
+end
+
+-- BUG-340: the player's options besides the blockers' fixes, as command lines: butcher.mark while tame animals stand (the
+-- verb keeps breeding pairs, pets and war animals), popcap.lower to the citizens now until food recovers
+function M.food_more(K, r)
+  local out = {}
+  local ca = K.census.a
+  if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 then
+    out[#out + 1] = {'butcher.mark', [[dfllm cmd butcher.mark '{"n":2}']]}
+  end
+  local cit = math.tointeger(r and r.cit) or 0
+  if cit > 0 then
+    out[#out + 1] = {'popcap.lower', string.format([[dfllm cmd popcap.lower '{"cap":%d,"until":"food"}']], cit)}
+  end
+  return out
 end
 
 -- BUG-059 (Run 12 y503: 12 starved under "food 41 d", meals 0): hungry citizens while no prepared meal stands and the
@@ -7621,23 +7656,39 @@ end
 -- the decision text: numbers, blockers (each names its fix), what the kernel does itself (BUG-038: `auto: ...`, never
 -- cut), the player's other options (DECISION_NEEDED q <= 200 bytes); opts = every option, the blockers' first (d.opts)
 -- BUG-258: xbow = no crossbow for the hunters; butcher.mark = the verb that marks surplus tame animals
-M.FOOD_OPTS = {fishery = 'fishery', fish_zone = 'fishing zone', kitchen = 'kitchen', hunt = 'bolts', xbow = 'crossbow'}
-M.FOOD_MORE = {'trade.want food', 'butcher.mark', 'gather', 'popcap.lower'}
-function M.food_q(fd, r, inv, bl, auto)
-  local parts, opts, au = {}, {}, {}
+-- BUG-340 (Run 15c Inkintense y378, 15d Drillchamber y379-y381: famine for weeks; the options `gather` (no verb) and
+-- `trade.want food` (bad args; the verb replaces the whole want list) could not be sent): an option is offered only with
+-- its command line (d.cmds, in the order of d.opts); the caravans' food and seeds and the gatherers are the kernel's (auto),
+-- the fishing zone too (M.fish_zone paints it on safe water; the blocker names why none stands)
+M.FOOD_OPTS = {fishery = 'fishery', kitchen = 'kitchen', xbow = 'bowyer', farms = 'farms', butcher = 'butcher'}
+M.FOOD_CMD = {
+  fishery = [[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"Fishery"}}']],
+  kitchen = [[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"Kitchen"}}']],
+  butcher = [[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"Butchers"}}']],
+  bowyer = [[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"Bowyers"}}']],
+  farms = [[dfllm cmd bp.place '{"tpl":"farms","site":"S1","p":{"surface":1}}']],
+}
+M.FOOD_CMDS_BYTES = 420                         -- d stays under kern's 1,024 bytes with q, block, opts and auto (JSON escapes)
+function M.food_q(fd, r, inv, bl, auto, more)
+  local parts, opts, au, cmds, bytes = {}, {}, {}, {}, 0
+  local function offer(o, cmd)
+    if not cmd or bytes + #cmd > M.FOOD_CMDS_BYTES then return end
+    opts[#opts + 1], cmds[#cmds + 1], bytes = o, cmd, bytes + #cmd
+  end
   for _, b in ipairs(bl) do
     parts[#parts + 1] = b[2]:sub(1, 72)
-    if M.FOOD_OPTS[b[1]] then opts[#opts + 1] = M.FOOD_OPTS[b[1]] end
+    if M.FOOD_OPTS[b[1]] then offer(M.FOOD_OPTS[b[1]], b[3]) end
   end
-  for _, o in ipairs(M.FOOD_MORE) do opts[#opts + 1] = o end
+  local names = {}
+  for _, o in ipairs(more or {}) do names[#names + 1] = o[1]; offer(o[1], o[2]) end
   for _, a in ipairs(auto or {}) do au[#au + 1] = a[2]:sub(1, 44) end
   local ap = #au > 0 and ('; auto: ' .. table.concat(au, ', ')) or ''
   local q = string.format('food %d d (%d cit, %s%d meals)', fd, r and r.cit or 0,
                           (st.hungry_n or 0) > 0 and (st.hungry_n .. ' hungry, ') or '', inv.meals or 0) ..
             (#parts > 0 and (': ' .. table.concat(parts, '; ')) or '')
-  local tail = '. Also: ' .. table.concat(M.FOOD_MORE, ', ')
+  local tail = #names > 0 and ('. Also: ' .. table.concat(names, ', ')) or ''
   if #q + #ap + #tail > 200 then q = q:sub(1, math.max(30, 197 - #ap - #tail)) .. '...' end
-  return (q .. ap .. tail):sub(1, 200), opts
+  return (q .. ap .. tail):sub(1, 200), opts, cmds
 end
 
 -- the decision's d.block / d.auto ids and the head of its line: the first blocker, then 'auto: fishery, gather'

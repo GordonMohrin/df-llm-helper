@@ -60,7 +60,8 @@ C.EVENTS = {
   CURSED = {cls = 'A', by = 'care'}, TRANSFORM = {cls = 'A', by = 'care'}, CURSE_MOON = {cls = 'A', by = 'care'},
   DRILL_FAIL = {cls = 'A', by = 'drill'}, KERN_FAULT = {cls = 'A', by = 'any'},   -- BUG-075: kern (back-off), runner (caught fault)
   -- DECISION_NEEDED food_low/famine (economy): food, block, opts and, BUG-038, auto (fishery: its request is out or
-  -- queued; gather: plant gatherers added): what the kernel does itself, never an option for the player; BUG-042:
+  -- queued; gather: plant gatherers added; BUG-340 trade: the caravans are asked for food and seeds): what the kernel
+  -- does itself, never an option for the player; BUG-340: an option only with its command line (cmds, opts order); BUG-042:
   -- drink_low (drink = days; block: still, brew, unvalidated, plants, barrels, brewer; auto: brew, office, barrels,
   -- gather) and manager_office (unvalidated orders older than orders.unval_days, with the reason)
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},

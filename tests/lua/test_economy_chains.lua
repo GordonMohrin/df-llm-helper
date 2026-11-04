@@ -708,4 +708,16 @@ T.test('FR-89: training weapons the positions lack are ordered at the carpenters
 end)
 
 
+
+-- BUG-341 (Run 15 Guildcleans y376: a Possessed carpenter needed logs x1 [89/89/0]: 89 free logs, none on his walk
+-- group; the need of 1 stood under the stock of 89, autochop felled nothing, the mood failed and the dwarf killed two)
+T.test('BUG-341: mood logs out of reach are no stock: the wood floor stands above them, autochop fells trees', function()
+  local W = world{care = true, phase = 'P3', wood = 89, wants = {{cls = 'logs', n = 1, far = 89}}}
+  days(W, 1)
+  T.ok(F.has(F.runs(W), 'autochop target 200 110'), '1 + 89 unreachable + 20 margin: ' .. table.concat(F.runs(W), ' | '))
+  local W2 = world{care = true, phase = 'P3', wood = 89, wants = {{cls = 'logs', n = 1}}}
+  days(W2, 1)
+  for _, line in ipairs(F.runs(W2)) do T.ok(not line:find('autochop', 1, true), 'reachable logs: baseline suffices: ' .. line) end
+end)
+
 T.done()

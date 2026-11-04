@@ -3371,8 +3371,10 @@ local function mood_report(K, c, r, p)
           local g = #nd.alts == 1 and R.glass_ok(a) or nil
           if g == 'cut' then glassy = true end
           if #wants < 20 then
+            -- BUG-341: far = the free items of this need the dwarf cannot reach (economy counts them as no stock)
             wants[#wants + 1] = {unit = int(m.sid), cls = a.cls or 'other', n = short, label = labels[#labels],
-                                 acq = table.concat(R.ACQ[a.cls or ''] or {}, ','), buy = R.token(a) or '', glass = g}
+                                 acq = table.concat(R.ACQ[a.cls or ''] or {}, ','), buy = R.token(a) or '', glass = g,
+                                 far = (nd.far or 0) > 0 and nd.far or nil}
           end
         end
       end
@@ -3464,7 +3466,14 @@ local function mood_report(K, c, r, p)
             u.woke = now
             u.wrec = CAD.mark(T, {m.sid}, btoks)
             local hints = {}
-            if far > 0 then hints[#hints + 1] = string.format('%d outside Kern+: haul in or open the way', far) end
+            -- BUG-341: with the walk-group hook the far items lie on another walk group, not only outside Kern+;
+            -- economy counts them as no stock (autochop fells the reachable trees, more tanning/hunting/orders)
+            if far > 0 and (r.no_reach or st.reach_bad) then
+              hints[#hints + 1] = string.format('%d outside Kern+: haul in or open the way', far)
+            elseif far > 0 then
+              hints[#hints + 1] = string.format('%d out of his reach (another walk group): the kernel makes more; open the way',
+                                                far)
+            end
             for _, cls in ipairs(classes) do hints[#hints + 1] = R.HINT[cls] or R.HINT.other end
             if glassy then hints[#hints + 1] = 'cut gems: cut glass (' .. R.HINT.glass .. ')' end   -- Run 11
             local pre = string.format('unit %s, %d d: ', m.sid, age // DAY)

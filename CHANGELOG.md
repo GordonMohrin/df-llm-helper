@@ -1,5 +1,29 @@
 # CHANGELOG dfpilot
 
+## Run 15 famine and moods: farms placed with fewer plots or on the surface, food asked from the caravans, every option a command, unreachable mood stock counts as missing (BUG-340, BUG-341, 2026-11-04; offline, live-untested)
+- **Why:** Drillchamber y379-y382 (i4): 220 AUTO_FAIL `farms: site S1: only 0 free site(s) for farms plots=2` while food fell to
+  0 days; only the plans' surface farms plots=1 came, one a year. Root cause dfpilot/wake.py:734/1095 (b35af6d): follow placed
+  economy's farms request as a room at its plots, once. Inkintense y378 / Drillchamber: the famine options `gather` (no verb)
+  and `trade.want food` (bad args; the verb replaces the whole want list) could not be sent (economy.lua:7625 `FOOD_MORE`).
+  Guildcleans y376 (i2): Possessed 26504 needed logs x1 `none reachable [89/89/0]`, nothing was felled, the mood failed and
+  he killed 26509 and 26377: economy.lua:1492 raised the wood floor to 1 under 89 logs nobody could reach (care.lua:3375
+  dropped `far`).
+- **What changed:** follow `_place_farms` / `farm_tries`: the room at the request's plots, then fewer plots, then in PEACE a
+  surface farm (cmd.place falls back to fewer surface plots, BUG-316); cli.log `auto:farms BUG-340 ... placed with ...`.
+  economy `fd_wants`: below food.pre_days the caravans are asked for `food` and `seeds` (auto `trade`). `food_q`: an option
+  only with its command line, `d.cmds` in `d.opts` order (bp.place workshops only=Kitchen/Fishery/Bowyers/Butchers, bp.place
+  farms surface, butcher.mark while tame animals stand, popcap.lower cap=citizens until=food; <= 420 bytes); wake
+  `food_hint`; `famine` is an urgent decision. Schema DECISION_NEEDED `cmds`. care.mood_wants `far` (the free items of a short
+  need the dwarf cannot reach); economy counts them as no stock (need n + far, cap 100): autochop's min goes over the log
+  count, the reachable trees are felled; the hint says `out of his reach (another walk group)`. RULES, CONTRACTS.
+- **Tests (fail on b35af6d):** tests/lua/test_economy_fishing.lua (1 new, 2 changed: opts/cmds, d <= 1,024 bytes),
+  test_economy.lua and test_economy_gather.lua (auto `trade`), tests/lua/test_economy_chains.lua (1 new),
+  tests/lua/test_care_moods.lua (1 new), tests/test_bug340_341_famine_mood.py (5).
+- **Live check:** a farms request without a room site -> `auto:farms BUG-340` placed instead of AUTO_FAIL; famine lines carry
+  `cmds` the verbs accept as they stand; `inspect what=trade` lists food and seeds below 30 food days; a mood with logs on
+  another walk group -> `need wood N (care: mood)` above the free count and `autochop target` raised. Open: idle labor beside
+  4417 unclaimed jobs (Inkintense), no soil anywhere, brewing from gathered plants, locking a moody dwarf who will fail, a
+  fort cut off from every tree.
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or

@@ -304,9 +304,12 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   T.ok(#q <= 200, q)
   T.ok(q:find('food 20 d (20 cit, 10 meals)', 1, true), q)
   T.ok(q:find('no safe fishing water (2 frozen, 1 cavern)', 1, true), q)
-  T.ok(q:find('. Also: trade.want food, butcher.mark, gather, popcap.lower', 1, true), q)
+  T.ok(q:find('. Also: popcap.lower', 1, true), q)
   -- BUG-258: no crossbow is the blocker 'xbow' (option crossbow), not bolts; frozen water still names the fishing zone
-  T.eq(d[1].d.opts, {'kitchen', 'fishing zone', 'crossbow', 'trade.want food', 'butcher.mark', 'gather', 'popcap.lower'})
+  -- BUG-340: every option has its command line (d.cmds in opts order); no animals: no butcher.mark
+  T.eq(d[1].d.opts, {'kitchen', 'bowyer', 'farms', 'popcap.lower'}, 'the kernel paints the fishing zone: no option')
+  T.eq(#d[1].d.cmds, 4)
+  T.ok(d[1].d.cmds[2]:find('"only":"Bowyers"', 1, true) and d[1].d.cmds[4]:find('"cap":20', 1, true), d[1].d.cmds[4])
   T.eq(d[1].d.food, 20)
   T.eq(d[1].d.block, {'kitchen', 'fish_zone', 'xbow', 'farms'}, 'no animals: no butcher blocker')
   -- the same blockers: never again (BUG-008 cadence); a new blocker after 7 days and 10 minutes: again
@@ -321,10 +324,15 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   days(W, 1)
   d = decisions(W, 'food_low')
   T.eq(#d, 2)
-  T.eq(d[2].d.auto, {'fishery'})
+  T.eq(d[2].d.auto, {'fishery', 'trade'})
   T.ok(not F.has(d[2].d.block, 'fishery') and F.has(d[2].d.block, 'butcher'), table.concat(d[2].d.block, ','))
   T.ok(not F.has(d[2].d.opts, 'fishery'), table.concat(d[2].d.opts, ','))
-  T.ok(d[2].d.q:find('; auto: fishery asked (10 raw fish). Also: ', 1, true), d[2].d.q)
+  T.ok(d[2].d.q:find('; auto: fishery asked (10 raw fish), caravans asked for food, seeds. Also: butcher.mark', 1, true),
+       d[2].d.q)
+  T.eq(d[2].d.opts, {'kitchen', 'bowyer', 'farms', 'butcher', 'butcher.mark', 'popcap.lower'})
+  local enc = require('dfllm.util.json').encode(d[2].d)
+  T.ok(#enc <= 1024, 'BUG-340: the d with its command lines stays under the kernel 1,024 bytes: ' .. #enc)
+  T.eq(#d[2].d.opts, #d[2].d.cmds)
   T.ok(d[2].msg:find('food low: 20 food days (famine below 10): no kitchen; auto: fishery', 1, true), d[2].msg)
   -- the winter ends: the next search (scan_days) finds the river thawed
   ctl.water = {{60, 50, 100, 7}}
@@ -346,7 +354,7 @@ T.test('BUG-258: a scan that met no water drops the fishing zone from food_low; 
   T.eq(#d, 1)
   T.ok(not F.has(d[1].d.block, 'fish_zone') and not F.has(d[1].d.opts, 'fishing zone'), table.concat(d[1].d.block, ','))
   T.ok(F.has(d[1].d.block, 'xbow') and not F.has(d[1].d.block, 'hunt'), table.concat(d[1].d.block, ','))
-  T.ok(F.has(d[1].d.opts, 'crossbow') and not F.has(d[1].d.opts, 'bolts'), table.concat(d[1].d.opts, ','))
+  T.ok(F.has(d[1].d.opts, 'bowyer') and not F.has(d[1].d.opts, 'bolts'), table.concat(d[1].d.opts, ','))
   T.ok(d[1].d.q:find("hunt: no crossbow, no Bowyer's workshop (175 bolts)", 1, true), d[1].d.q)
   local W2 = world{cit = 20, food = 10, setup = function(W2)
     W2.subdefs[4] = {id = 'ITEM_AMMO_BOLTS'}
@@ -383,6 +391,33 @@ T.test('Run 11: cookable growths on the kitchen ban are let go once in the food_
   local n = 0
   for _, line in ipairs(F.runs(W)) do if line:find('^ban%-cooking fruit') then n = n + 1 end end
   T.eq(n, 1, 'once per episode')
+end)
+
+
+-- BUG-340 (Run 15c Inkintense y378, 15d Drillchamber y379-y381: famine for weeks; the decision offered `gather`, no
+-- verb, and `trade.want food`, refused as written and replacing the plan's whole want list): the caravans are asked for
+-- food and seeds by the kernel itself, and every option of the decision comes with its command line
+T.test('BUG-340: food_low asks the caravans for food and seeds itself; each option carries a runnable command', function()
+  local W = world{cit = 20, food = 10}
+  days(W, 1)
+  local _, tw = W.K.call('economy', 'trade_wants')
+  local buys = {}
+  for _, w in ipairs(tw or {}) do buys[w.buy] = w.n end
+  T.eq({buys.food, buys.seeds ~= nil}, {30, true}, 'food 20 d < pre_days 30: food and seeds wanted')
+  local d = decisions(W, 'food_low')[1].d
+  T.ok(F.has(d.auto, 'trade'), table.concat(d.auto, ','))
+  T.ok(not F.has(d.opts, 'gather') and not F.has(d.opts, 'trade.want food'), table.concat(d.opts, ','))
+  T.eq(#d.opts, #d.cmds)
+  for _, c in ipairs(d.cmds) do
+    local verb, args = c:match("^dfllm cmd ([%w%.]+) '(.+)'$")
+    T.ok(verb and args, 'a command line: ' .. c)
+    T.ok(({['bp.place'] = true, ['butcher.mark'] = true, ['popcap.lower'] = true})[verb], 'a kernel verb: ' .. c)
+    T.ok(require('dfllm.util.json').decode(args) ~= nil, 'JSON args: ' .. c)
+  end
+  local W2 = world{cit = 20, food = 2000}
+  days(W2, 1)
+  local _, tw2 = W2.K.call('economy', 'trade_wants')
+  for _, w in ipairs(tw2 or {}) do T.ok(w.buy ~= 'food', 'food enough: no food wanted') end
 end)
 
 T.done()
