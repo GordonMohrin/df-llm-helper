@@ -482,7 +482,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-340: food_low/famine opts only with a command; cmds = their command lines in opts order (`dfllm cmd ...`); auto
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -529,9 +529,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # hospital (ok, dry, none), GiveWater/GiveFood jobs running (give: citizens giving now, run/open on the job list,
     # -1 unknown), free buckets, the cause
     # BUG-104: stuck = GiveWater jobs open for water.give_stuck_days or more, reach = caregivers whose walk group reaches the
-    # thirstiest patient, key = the verdict (alert | noreach | unreadable | nowater | stuck | open | run | nojob)
+    # thirstiest patient, key = the verdict (alert | noreach | unreadable | nowater | stuck | open | run | nojob; BUG-343:
+    # noeffect = jobs ran for days while his thirst only climbed), lie = why the top patient lies (wounds, body counters, liquid, hunger, syndromes)
     "PATIENT_DYING": ("A", "water", _d("units:ia n:i thirst:i carers:i want:i hosp:s",
-                                       "idle:i added:i give:i open:i run:i buckets:i why:s stuck:i reach:i key:s")),
+                                       "idle:i added:i give:i open:i run:i buckets:i why:s stuck:i reach:i key:s lie:s")),
     # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,
     # n of the patients lie outside the burrow the civ alert confines to (burrow; Kern+/Tiefe+ while it is silent):
     # units, all patients, mode, hosp_out = hospital zones outside Kern+ and the refuge

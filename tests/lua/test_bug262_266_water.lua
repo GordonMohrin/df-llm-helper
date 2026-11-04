@@ -332,4 +332,85 @@ T.test('BUG-262: damp stone in a cistern basin (an own tile under an own tile) k
   T.eq(hv, true, 'another project: rising water stops it')
 end)
 
+---------------------------------------------------------------- BUG-344
+T.test('BUG-344 (Run 15d Drillchamber y379-y397: DECISION_NEEDED thirst "water near the fort (well), brewing, barrels?" ' ..
+       'for years, 13 citizens dead of thirst beside well 18324 read wet): water.drink_fix names the well a thirsty ' ..
+       'citizen stands at, or the missing water, with the recipe and the commands', function()
+  local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~'}, setup = function(W)
+    well(W, 20, 12, 5, {id = 18324})
+  end}
+  T.eq(M.drink_fix(W.K), nil, 'before the first run')
+  day(W)
+  local txt, cmds = M.drink_fix(W.K)
+  T.ok(txt:find('accepted water: well 18324 at 20,12,5', 1, true), txt)
+  T.eq(cmds, {'dfllm cmd inspect what=water_sources'})
+  -- citizen 2 (no patient) at thirst 61,000 stands beside the well: it gives him no water
+  W.unit(2).counters2.thirst_timer = 61000
+  W.move(2, 19, 12, 5)
+  day(W)
+  txt, cmds = M.drink_fix(W.K)
+  T.ok(txt:find('citizen 2 (thirst 61000) stands beside well 18324 at 20,12,5, read wet: it gives no water; ', 1, true),
+       'old code: no such text: ' .. tostring(txt))
+  T.ok(not txt:find('until then', 1, true), 'no hospital tail: ' .. txt)
+  T.eq(cmds, {'dfllm cmd inspect what=water_sources', 'dfllm bp sites cistern'})
+  -- two tiles away: not at the well
+  W.move(2, 18, 12, 5)
+  day(W)
+  T.ok(M.drink_fix(W.K):find('accepted water', 1, true))
+  -- no accepted water at all
+  W.cmap['20,12,3'] = '.'
+  day(W)
+  txt = M.drink_fix(W.K)
+  T.ok(txt:find('no accepted water; ', 1, true), txt)
+end)
+
+T.test('BUG-344: economy\'s thirst decision carries water.drink_fix and its commands, brewing as a command too', function()
+  local W = world{tiles = {}, setup = function(W) well(W, 20, 12, 5, {id = 18324}) end}
+  day(W)
+  package.loaded['dfllm.economy'] = nil
+  local E = require('dfllm.economy')
+  W.load(E)
+  for i = 1, 3 do W.unit(i).counters2 = {thirst_timer = 45000, hunger_timer = 0} end
+  for _ = 1, 3 do day(W) end
+  local d
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'thirst' then d = e.d end end
+  T.ok(d, 'a thirst decision')
+  T.ok(d.q:find('no accepted water; ', 1, true), 'old code: "water near the fort (well), brewing, barrels?": ' .. d.q)
+  T.ok(#d.q <= 200, d.q)
+  T.eq(d.cmds[1], 'dfllm cmd inspect what=water_sources')
+  T.eq(d.cmds[2], 'dfllm bp sites cistern')
+  T.eq(d.cmds[3], E.FOOD_CMD.farms)
+  local _, wt = W.K.call('water', 'drink_fix')
+  T.eq(table.concat(d.water, ' '), wt, 'd.water: the whole text')
+end)
+
+T.test('BUG-344 review: the thirst decision\'s farm command is the surface farm only in PEACE (else the farm room); ' ..
+       'a long water text keeps every coordinate (q short, d.water whole in lines of <= 200 bytes)', function()
+  local W, M = world{tiles = {}, setup = function(W) well(W, 20, 12, 5, {id = 18324}) end}
+  W.mode = 'ALERT'
+  day(W)
+  package.loaded['dfllm.economy'] = nil
+  local E = require('dfllm.economy')
+  W.load(E)
+  for i = 1, 3 do W.unit(i).counters2 = {thirst_timer = 45000, hunger_timer = 0} end
+  for _ = 1, 3 do day(W) end
+  local d
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'thirst' then d = e.d end end
+  T.ok(d, 'a thirst decision in ALERT')
+  T.eq(d.cmds[#d.cmds], E.FOOD_CMD.farms_room, 'old code: the surface farm (surface:1) in ALERT')
+  for _, c in ipairs(d.cmds) do T.ok(not c:find('surface', 1, true), c) end
+  -- M.lines: breaks at spaces only, so a position x,y,z is never cut
+  local long = 'citizen 2 (thirst 61000) stands beside well 18324 at 76,50,142, read wet: it gives no water; the water '
+               .. 'at 141,67,143 (5/7, 25 tiles) has no reachable bank: a cistern piped to it (python -m dfpilot.bp.sites '
+               .. 'cistern --near 141,67,143), or an aquifer well (dfllm bp sites cistern water=aquifer: its basin on '
+               .. 'aquifer level z130)'
+  local l = E.lines(long, 200, 3)
+  T.ok(#l >= 2, #l)
+  for _, x in ipairs(l) do T.ok(#x <= 200, x) end
+  T.eq(table.concat(l, ' '), long)
+  local all = table.concat(l, '\n')
+  for _, p in ipairs({'76,50,142', '141,67,143', 'z130'}) do T.ok(all:find(p, 1, true), p) end
+  T.eq(E.lines('', 200, 3), {})
+end)
+
 T.done()

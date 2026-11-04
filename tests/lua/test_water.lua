@@ -360,10 +360,10 @@ T.test('the hospital location\'s desired buckets raise the want', function()
 end)
 
 T.test('refuge: a wet well on a Tiefe+ tile', function()
-  local W, M = world{tiles = {['45,45,1'] = 'w'}, setup = function(W) well(W, 45, 45, 2); well(W, 70, 70, 2) end}
+  local W, M = world{tiles = {['45,45,1'] = '~'}, setup = function(W) well(W, 45, 45, 2); well(W, 70, 70, 2) end}
   day(W)
   T.eq(M.kpi(W.K).refuge_ok, 1)
-  local W2, M2 = world{tiles = {['70,70,1'] = 'w'}, setup = function(W) well(W, 70, 70, 2) end}
+  local W2, M2 = world{tiles = {['70,70,1'] = '~'}, setup = function(W) well(W, 70, 70, 2) end}
   day(W2)
   T.eq(M2.kpi(W2.K).refuge_ok, 0)
 end)
@@ -375,7 +375,7 @@ T.test('BUG-035 (Run 11: "refuge dry, 1 wet sources (13 wells)"): the summary sa
     return ''
   end
   -- three wells: one dry in Tiefe+, a wet one and a dry one outside it
-  local W, M = world{tiles = {['20,20,1'] = 'w'}, setup = function(W)
+  local W, M = world{tiles = {['20,20,1'] = '~'}, setup = function(W)
     well(W, 45, 45, 2); well(W, 20, 20, 2); well(W, 70, 70, 2)
   end}
   day(W)
@@ -383,12 +383,12 @@ T.test('BUG-035 (Run 11: "refuge dry, 1 wet sources (13 wells)"): the summary sa
   T.eq({k.refuge_ok, k.wells, k.rwells, k.rwet}, {0, 3, 1, 0})
   T.ok(line(W):find('refuge dry (3 wells, 1 in Tiefe+, 0 of them wet), 1 wet sources', 1, true), line(W))
   -- none in Tiefe+
-  local W2, M2 = world{tiles = {['20,20,1'] = 'w'}, setup = function(W) well(W, 20, 20, 2) end}
+  local W2, M2 = world{tiles = {['20,20,1'] = '~'}, setup = function(W) well(W, 20, 20, 2) end}
   day(W2)
   T.eq({M2.kpi(W2.K).rwells, M2.kpi(W2.K).rwet}, {0, 0})
   T.ok(line(W2):find('refuge dry (1 well, 0 in Tiefe+), 1 wet sources', 1, true), line(W2))
   -- its well is wet
-  local W3, M3 = world{tiles = {['45,45,1'] = 'w'}, setup = function(W) well(W, 45, 45, 2) end}
+  local W3, M3 = world{tiles = {['45,45,1'] = '~'}, setup = function(W) well(W, 45, 45, 2) end}
   day(W3)
   T.ok(line(W3):find('refuge ok (1 well, 1 in Tiefe+, 1 of them wet), 1 wet sources', 1, true), line(W3))
 end)
@@ -716,7 +716,7 @@ T.test('BUG-034: below patient_thirst nothing goes (HOSPITAL_DRY as before); con
 end)
 
 T.test('BUG-034: the state water.src lists the accepted sources nearest the hospital first (at most 8); a dry well and ' ..
-       'a shallow zone are none', function()
+       'a shallow zone are none (BUG-344 review: a well over 1..3/7 of unknown depth is shallow, none too)', function()
   local W = world{tiles = {['30,12,4'] = '~', ['20,12,4'] = 'w', ['50,12,4'] = '.', ['70,12,5'] = '~'},
                   setup = function(W)
                     F.hospital(W, {10, 10, 14, 14, 5})
@@ -726,7 +726,7 @@ T.test('BUG-034: the state water.src lists the accepted sources nearest the hosp
                   end}
   day(W)
   local w = W.state().water
-  T.eq(w.src, {{20, 12, 5}, {30, 12, 5}, {70, 12, 5}})
+  T.eq(w.src, {{30, 12, 5}, {70, 12, 5}}, 'old code: the well 20,12,5 over w (1..3/7) first')
   T.eq({w.hosp, w.hosp_ok}, {1, 1})
   T.eq(C.check_state(W.state()), {})
 end)
@@ -780,7 +780,7 @@ T.test('BUG-040 (Run 11 y453: the cisterns y450s0b0 and y452s1b0 were PROJECT_DO
   T.ok(logged(W, 'water: ' .. want), 'kern.log')
   day(W, 40)
   T.eq(#W.find_events('CISTERN_DRY'), 1, 'once per dry spell')
-  W.cmap['50,53,1'] = 'w'                                    -- a few buckets reached the cistern: the well is wet
+  W.cmap['50,53,1'] = '~'                                    -- a few buckets reached the cistern: the well is wet
   day(W)
   T.ok(logged(W, 'water: cistern cistern50_50_2r0: its well ' .. wid .. ' holds water again'), 'kern.log')
   W.cmap['50,53,1'] = '.'
@@ -796,7 +796,7 @@ T.test('BUG-040: the reason names a pond zone water removed as a loop (the ciste
        'source), a pipe waiting for its lever, nothing at all, and the nearest accepted water to carry from', function()
   local C2 = require('dfllm.util.contract')
   -- the well was wet once (a bucket), the pond loop rule removed the cistern's pond zone, then the well dried again
-  local W, M, wid = cistern_world{tiles = {['50,53,1'] = 'w'}, setup = function(W)
+  local W, M, wid = cistern_world{tiles = {['50,53,1'] = '~'}, setup = function(W)
     W.act_result('pond_remove', function(id) W.pond.type = 0; return true, 1 end)
   end}
   C2.ACT.pond_remove = {'water'}
@@ -809,7 +809,7 @@ T.test('BUG-040: the reason names a pond zone water removed as a loop (the ciste
   T.eq({e[1].d.fill, e[1].d.pond}, {'pond_removed', 77})
   T.ok(e[1].msg:find('bucket-fed, its pond zone 77 removed as a pond loop (its own well fed it)', 1, true), e[1].msg)
   -- piped: the floodgate waits for its lever; a wet well elsewhere is the water to carry from
-  local W2, _, wid2 = cistern_world{pond = false, path = '1,6;1,9;4,9', tiles = {['50,53,1'] = '.', ['20,20,1'] = 'w'},
+  local W2, _, wid2 = cistern_world{pond = false, path = '1,6;1,9;4,9', tiles = {['50,53,1'] = '.', ['20,20,1'] = '~'},
                                     setup = function(W) W.wid = well(W, 20, 20, 2).id end}
   day(W2, 31)
   e = W2.find_events('CISTERN_DRY')
@@ -829,7 +829,7 @@ end)
 T.test('BUG-040: every accepted source is labelled with the burrow it stands on (state water.src_l, water.label); ' ..
        'wet_wells tells seal how many wells of a burrow are wet; inspect water_sources gives the depth under a well, ' ..
        'the burrow and where the refuge lies', function()
-  local W, M = world{tiles = {['20,20,1'] = 'w', ['45,45,1'] = '.', ['80,80,1'] = '~'}, setup = function(W)
+  local W, M = world{tiles = {['20,20,1'] = '~', ['45,45,1'] = '.', ['80,80,1'] = '~'}, setup = function(W)
     W.burrow('Kern+', {0, 0, 0, 30, 30, 20})               -- Kern+ x0-30, Tiefe+ x40-60 z2
     W.w1, W.w2, W.w3 = well(W, 20, 20, 2).id, well(W, 45, 45, 2).id, well(W, 80, 80, 2).id
     W.load({name = 'seal', every = {ticks = 100000}, refuge_drink = function(K)

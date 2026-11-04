@@ -3158,6 +3158,21 @@ local function needs(K, a)
   return thirsty, hungry
 end
 
+-- BUG-344 review: text `s` in at most `max` lines of <= `n` bytes, broken at the last space (a word longer than `n` is
+-- cut; the rest past `max` lines is dropped)
+function M.lines(s, n, max)
+  local out = {}
+  s = tostring(s or '')
+  while #s > 0 and #out < max do
+    if #s <= n then out[#out + 1] = s; break end
+    local cut = s:sub(1, n + 1):match('^.*() ')
+    if not cut or cut <= 1 then cut = n + 1 end
+    out[#out + 1] = s:sub(1, cut - 1)
+    s = (s:sub(cut):gsub('^ +', ''))
+  end
+  return out
+end
+
 local function alarm_check(K, c, p, days)
   local a = c.alarm or M.DEFAULTS.alarm
   local okn, thirsty, hungry = pcall(needs, K, a)
@@ -3180,9 +3195,23 @@ local function alarm_check(K, c, p, days)
   local now = K.now().tick
   if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY then
     p.thirst_woke = now
+    -- BUG-344 (Run 15d Drillchamber y379-y397: this question 271 times, 37 dead of thirst, 13 beside well 18324): water
+    -- says what its last run found (a well a thirsty citizen stands at, no accepted water: the recipe) with the commands
+    local okw, wtxt, wcmds = K.call('water', 'drink_fix')
+    local wq = okw and type(wtxt) == 'string' and wtxt or 'water near the fort (well)'
+    local cmds = okw and type(wcmds) == 'table' and wcmds or {}
+    -- brewing needs plants (BUG-340); BUG-344 review: a surface farm only in PEACE (BUG-341's rule), else the farm room
+    if #cmds < 8 then cmds[#cmds + 1] = K.mode() == 'PEACE' and M.FOOD_CMD.farms or M.FOOD_CMD.farms_room end
+    -- BUG-344 review: no coordinate is cut off: q is the whole text when it fits, else the head with the text's first
+    -- part; d.water is the whole text in lines of <= 200 bytes broken at spaces (a position x,y,z holds none)
+    local head = string.format('%d thirsty, drink %d d (brew: farms, barrels): ', thirsty, days.drink_d)
+    local q = head .. wq
+    if #q > 200 then
+      local first = wq:match('^[^;]*')
+      q = #head + #first + 15 <= 200 and (head .. first .. '; see d.water') or (head .. 'see d.water')
+    end
     K.emit('DECISION_NEEDED', 'A', string.format('thirst: %d citizens thirsty, drink %d days', thirsty, days.drink_d),
-           {id = 'thirst', q = string.format('%d thirsty, drink %d d: water near the fort (well), brewing, barrels?',
-                                             thirsty, days.drink_d)})
+           {id = 'thirst', q = q, water = M.lines(wq, 200, 3), cmds = cmds})
   end
 end
 
