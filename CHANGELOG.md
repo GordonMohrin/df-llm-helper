@@ -1,5 +1,11 @@
 # CHANGELOG dfpilot
 
+## The runtime folder follows a save-as, propose reduces for a placed core without a state row (BUG-362, BUG-363, 2026-11-04; offline, live-untested)
+- **BUG-362:** the runtime key (`<save>-site<N>`) was fixed at the first adopt; after `embark.py save-as` the status and the folder kept the world save's name. The boot in a player-named folder (not `autosave N`/`current`) other than `marker.base` now moves `dfllm-runtime/<old>` to `<new>-site<N>` and re-keys marker, ACTIVE and world data; an existing target or a failed rename keeps the old key (kern.log says why). `adopt` writes `marker.base` (schema: optional). `embark.py save-as` ends with the hint to run `dfllm adopt`.
+- **BUG-363:** `plan.core_digging` counts a placed fortcore stage 1 without PROJECT_DONE as digging when state.proj lists no row for it (just placed, queued, beyond the 8 rows); propose then drafts the seal only (BUG-354). `plan propose` itself never places anything; the early fortcore came from follow.
+- **Open:** saves written before the re-key keep the old key in their marker (supervise falls back to the single marker); stale same-year plan entries of a cancelled fortcore stay (year up).
+- **Tests:** tests/lua/test_bug362_rekey.lua, tests/test_bug363_propose_core.py, tests/test_bug245_250_embark_tools.py.
+- **Live check:** embark, adopt, save-as NAME, adopt: kern.log `BUG-362`, status `NAME-siteN`; follow-placed fortcore, then `plan propose`: seal only.
 ## Site ranking only where the citizens can walk, an unreachable dig is named after 3 days, year 1 digs before it plans rooms (BUG-352, BUG-354, 2026-11-04; offline, live-untested)
 - **Why:** i3 Run 16c (site97): all 13 citizens stood in walk group 1562, `bp sites fortcore` ranked S2/S3 on soil beyond
   the brook (group 1), the fortcore on [58,128,125] stood 30 d at s1.dig 0 % ('unreachable DigChannel'), the fort starved;

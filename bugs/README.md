@@ -367,6 +367,8 @@ Related: FR-xx, BUG-xx
 | [BUG-353](BUG-353-bp-cancel-leaves-the-dig-designations-in-the-map.md) | fixed (offline, live-untested) | high | Run 16c: two bp.cancel + re-place left ~1580 dig designations of the cancelled fortcore projects in the map, the fort starved | runner.lua |
 | [BUG-354](BUG-354-propose-in-year-1-demands-rooms-before-the-core-is-dug.md) | fixed (offline, live-untested) | medium | Run 16c: propose in year 1 drafts farms/dining/bedrooms (ERROR no soil marks, no refuge) while the placed fortcore still digs | plan.py |
 | [BUG-355](BUG-355-fort-name-unreadable-before-save-as.md) | fixed (offline, live-untested) | low | Run 16c: the new fort's name was not readable before save-as | tools/embark |
+| [BUG-362](BUG-362-runtime-name-stays-after-save-as.md) | fixed (offline, live-untested) | medium | Run 16b: runtime folder/status keep the pre-save-as name | lua/kern, tools/embark |
+| [BUG-363](BUG-363-propose-drafts-rooms-for-an-undug-core.md) | fixed (offline, live-untested) | medium | Run 16b: propose drafts rooms while the placed fortcore dug nothing (no state row) | dfpilot/plan |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -1390,7 +1390,8 @@ ALLOWLIST = Obj(req={"v": Const(V),
                      "blocked": Arr(Str(maxbytes=60)), "armok_exceptions": Arr(Str(maxbytes=60))})
 
 PERSIST_MARKER = Obj(req={"v": Const(V), "adopted": TICK, "save": Str(maxbytes=120), "fort": Str(maxbytes=120),
-                          "acceptance": FLAG, "baseline": FLAG, "boots": NAT})
+                          "acceptance": FLAG, "baseline": FLAG, "boots": NAT},
+                    opt={"base": Str(maxbytes=120)})   # BUG-362: the save folder the key was derived from
 PERSIST_PROJECTS = Obj(req={"v": Const(V), "list": Arr(Obj(req={
     "id": ID, "tpl": TPL, "site": Str(ID_RE), "class": Str(enum=["defense", "infra", "living", "beauty"]),
     "prio": Int(1, 7), "stage": NAT, "chunk": NAT, "pct": PCT, "blocked": Str(maxbytes=40), "since": TICK,

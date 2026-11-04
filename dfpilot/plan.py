@@ -2277,16 +2277,25 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
 
 def core_digging(save_dir: Path, state: dict | None) -> bool:
     """BUG-354 (Run 16c: propose in year 1 wanted farms@S1, dining and bedrooms while the placed fortcore's stage 1 had dug
-    nothing): a fortcore project (not a retrofit, not parked on a breach) is at its stage 1 dig in state.proj. Room builds
-    open from the dug Z4 floor, so no site exists for them until it is done."""
+    nothing): a fortcore stage 1 project (not a retrofit, not parked on a breach) has not dug the core floor yet. Room
+    builds open from the dug Z4 floor, so no site exists for them until it is done. BUG-363 (Run 16b: follow placed the
+    fortcore before the plan, the draft still had rooms): a placed stage 1 counts as digging also when state.proj has no
+    row for it (queued, or beyond the 8 rows the state carries) as long as no PROJECT_DONE names it; a row past the dig
+    (s1.build, later stages) or on a breach does not."""
     ids = set()
     for p in bp_files(save_dir):
         doc = files.read_json(p)
-        if isinstance(doc, dict) and doc.get("tpl") == "fortcore" and not (doc.get("params") or {}).get("retrofit"):
+        if isinstance(doc, dict) and doc.get("tpl") == "fortcore" and not (doc.get("params") or {}).get("retrofit")                 and _stage_of(doc.get("params")) in (1, None):
             ids.add(p.stem)
-    for row in (state or {}).get("proj") or []:
-        if isinstance(row, list) and len(row) >= 3 and row[0] in ids and isinstance(row[1], str) \
-                and row[1].startswith("s1.dig") and "breach:" not in str(row[-1]):
+    if not ids:
+        return False
+    rows = {row[0]: row for row in (state or {}).get("proj") or [] if isinstance(row, list) and len(row) >= 3}
+    done = done_projects(save_dir)
+    for pid in ids - done:
+        row = rows.get(pid)
+        if row is None:
+            return True
+        if isinstance(row[1], str) and row[1].startswith("s1.dig") and "breach:" not in str(row[-1]):
             return True
     return False
 
