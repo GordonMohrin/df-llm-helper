@@ -358,7 +358,14 @@ function M.plan(K, c)
     add(id, function() return K.act.run(table.unpack(a, 1, a.n)) end)
   end
   add('legacy_guard', function() M.legacy_guard(K, 'apply'); return true end)   -- BUG-010: before anything else
-  for _, name in ipairs(c.control_panel or {}) do cmd('cp:' .. name, 'control-panel', 'enable', name) end
+  -- BUG-345 (Run 15 Guildcleans: seedwatch enabled at tick 150019880, its list cleared at 150049832; meanwhile it watched
+  -- every plant at 30 seeds and banned the cooking of each one with fewer, bans no unwatch lifts): the seedwatch task right
+  -- after the enable, in the same slice where per_slice allows (economy's cook_repair lifts what slipped through)
+  local sw = false
+  for _, name in ipairs(c.control_panel or {}) do
+    cmd('cp:' .. name, 'control-panel', 'enable', name)
+    if name == 'seedwatch' then add('seedwatch', function() return seeds(K, c) end); sw = true end
+  end
   if c.timestream and decision(K, 'D-11') == 'accepted' then
     cmd('cp:timestream', 'control-panel', 'enable', 'timestream')
   end
@@ -395,7 +402,7 @@ function M.plan(K, c)
   cmd('popcap:wave', 'pop-control', 'set', 'wave-size', fmt(c.popcap.wave))
   if not K.enabled('readiness') then cmd('popcap:max', 'pop-control', 'set', 'max-pop', fmt(c.popcap.max_pop)) end
   add('labormanager', function() return labor(K, c) end)
-  add('seedwatch', function() return seeds(K, c) end)
+  if not sw then add('seedwatch', function() return seeds(K, c) end) end
   cmd('ban-cooking', 'ban-cooking', table.unpack(c.ban_cooking))
   cmd('burial', 'burial', table.unpack(c.burial))
   add('melt', function() return melt(K, c) end)

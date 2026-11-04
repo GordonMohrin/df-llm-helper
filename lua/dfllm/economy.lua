@@ -784,6 +784,7 @@ function M.sandy(it) return it:isSandBearing() end      -- Run 11: a bag of sand
 -- EDIBLE_COOKED food item on the kitchen's Cook ban? The config ban (`kitchen`: plump helmets, Gordon's rule) or a
 -- kitchen exclusion (the kitchen screen; ban-cooking writes the same list): dfhack.kitchen.findExclusion with the item's
 -- type, subtype (a plant growth's growth index; -1 matches too) and material. Cached per census (a.kc).
+-- BUG-345: true = the config ban; a kitchen exclusion returns its row {cat, sub, t, i, tok, n} (a.kx: M.cook_repair)
 function M.cook_banned(a, cat, it)
   local t, i = item_mat(it)
   if t == nil or i == nil then return false end
@@ -805,15 +806,26 @@ function M.cook_banned(a, cat, it)
     if not v and kit and kit.findExclusion then
       local itype = df.item_type[cat]
       local ok1, k1 = pcall(kit.findExclusion, {Cook = true}, itype, sub, t, i)
-      v = ok1 and (math.tointeger(k1) or -1) >= 0
-      if not v and sub ~= -1 then
+      local ex = ok1 and (math.tointeger(k1) or -1) >= 0
+      local esub = sub
+      if not ex and sub ~= -1 then
         local ok2, k2 = pcall(kit.findExclusion, {Cook = true}, itype, -1, t, i)
-        v = ok2 and (math.tointeger(k2) or -1) >= 0
+        ex, esub = ok2 and (math.tointeger(k2) or -1) >= 0, -1
+      end
+      if ex then
+        v = {cat = cat, sub = esub, t = t, i = i, tok = mat_token(t, i), n = 0}
+        a.kx[#a.kx + 1] = v
       end
     end
     row[i] = v
   end
   return v
+end
+
+-- BUG-345: a material token as the kitchen lines name it: 'PLANT:MUSHROOM_HELMET_PLUMP:STRUCTURAL' -> 'MUSHROOM_HELMET_PLUMP',
+-- 'PLANT:STRAWBERRY:FRUIT' -> 'STRAWBERRY:FRUIT'
+function M.short_mat(tok)
+  return (tostring(tok):gsub('^PLANT:', ''):gsub(':STRUCTURAL$', ''))
 end
 
 -- BUG-042: does a material have the DRINK_MAT reaction product (a still brews it)? (material.reaction_product.id, a
@@ -966,10 +978,17 @@ local function classify(it, a, cat)
       -- Run 11 (Kilrudrabed: PrepareMeal 'no cook' beside 1566 plant growths): a kitchen cooks what is EDIBLE_COOKED
       -- and not on its Cook ban (cook_in; cook_ban the banned ones); neither flag is no food at all (food_inedible)
       if mf and mf.EDIBLE_COOKED then
-        if not M.cook_banned(a, cat, it) then a.cook_in = a.cook_in + n
+        local ban = M.cook_banned(a, cat, it)
+        if not ban then a.cook_in = a.cook_in + n
         else
           a.cook_ban = a.cook_ban + n
           if cat == 'PLANT_GROWTH' then a.cook_ban_g = a.cook_ban_g + n end   -- M.food_unban
+          -- BUG-345: which material, and whose ban (the config's `kitchen` rule, D-09, or a kitchen exclusion)
+          if ban == true then M.tally(a.cban, 'D-09 ' .. M.short_mat(mat_token(item_mat(it))), n)
+          else
+            ban.n, a.cook_ban_x = ban.n + n, a.cook_ban_x + n
+            M.tally(a.cban, M.short_mat(ban.tok), n)
+          end
         end
       elseif not (mf and mf.EDIBLE_RAW) then
         a.food_inedible = a.food_inedible + n
@@ -1148,7 +1167,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
-              'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'food_inedible', 'food_far',
+              'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'cook_ban_x', 'food_inedible', 'food_far',
               'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt',
               'w_pick_far', 'w_axe_far', 'w_pick_use', 'w_axe_use',
               'brew_p', 'brew_g', 'chairs', 'tables'}
@@ -1161,7 +1180,7 @@ local function new_acc(c)
   end
   local a = {kinds = {}, food_set = fs, bars_by = {}, ores = {}, seeds = {}, nocook = nocook, fix = {}, fix_seen = {},
              reach = {}, food_pos = {}, res = {}, tool_items = {pick = {}, axe = {}}, web_probes = 0, kc = {}, ined = {},
-             bc = {}}
+             bc = {}, kx = {}, cban = {}}
   for _, k in ipairs(ZERO) do a[k] = 0 end
   -- BUG-023: weapons a squad uniform reserved (equipment screen; DF hands no reserved pick or axe out as a work tool)
   pcall(function()
@@ -1215,6 +1234,7 @@ local function publish(K, c, a)
   st.fix, st.reach, st.food_pos, st.unreach = a.fix, a.reach, a.food_pos, a.unreach or 0
   st.tool_items, st.web_pos = a.tool_items, a.web_pos
   st.ined = M.top(a.ined, 3)                         -- Run 11: the inedible food materials (M.cook_why)
+  st.cban, st.kx = M.top(a.cban, 3), a.kx            -- BUG-345: the cook-banned materials, the exclusions behind them
 end
 
 ---------------------------------------------------------------- stock days (7-day moving average)
@@ -1347,7 +1367,10 @@ function M.cook_why(inv, f)
   end
   if (inv.food_far or 0) > 0 then parts[#parts + 1] = string.format('%d cut off', inv.food_far) end
   if (inv.food_forb or 0) > 0 then parts[#parts + 1] = string.format('%d forbidden', inv.food_forb) end
-  if (inv.cook_ban or 0) > 0 then parts[#parts + 1] = string.format('%d cook-banned', inv.cook_ban) end
+  if (inv.cook_ban or 0) > 0 then
+    local t = st.cban and st.cban[1]                -- BUG-345: 'D-09 MUSHROOM_HELMET_PLUMP' or the exclusion's material
+    parts[#parts + 1] = string.format('%d cook-banned%s', inv.cook_ban, t and (' (' .. tostring(t[1]) .. ')') or '')
+  end
   return 'cook ingredient' .. (#parts > 0 and (' (' .. table.concat(parts, ', ') .. ')') or '')
 end
 
@@ -2301,12 +2324,19 @@ local function wood_orders(K, c, r)
 end
 
 -- Gordon's rule: plump helmets are never cooked (D-09 'yes' lifts it only during a famine)
+-- BUG-345: D-09 'yes' in a famine takes the plant's exclusion off (it only stopped adding it, so a ban set before the
+-- famine stood all famine long; the seeds stay banned: the farms' spawn); after the famine the next run puts it back
 local function kitchen(K, c, food_d)
-  if decision(K, 'D-09') == 'yes' and food_d and food_d < (c.famine_days or 10) then return end
+  local lift = decision(K, 'D-09') == 'yes' and food_d and food_d < (c.famine_days or 10)
   for _, e in ipairs(c.kitchen or {}) do
     local mi = dfhack.matinfo.find(e.plant, e.mat)            -- as ban-cooking.lua:67
     local it = df.item_type[e.item]
-    if mi and it and dfhack.kitchen.findExclusion({[e.what] = true}, it, -1, mi.type, mi.index) < 0 then
+    local has = mi and it and dfhack.kitchen.findExclusion({[e.what] = true}, it, -1, mi.type, mi.index) >= 0
+    if lift and has and e.item ~= 'SEEDS' then
+      if K.act.kitchen_include(e.item, -1, mi.type, mi.index, e.what) then
+        K.log('warn', 'famine (food %d days), D-09 yes: %s %s may be cooked until the famine ends', food_d, e.plant, e.item)
+      end
+    elseif mi and it and not has and not (lift and e.item ~= 'SEEDS') then
       K.act.kitchen_exclude(e.item, -1, mi.type, mi.index, e.what)    -- Lua API.txt:2648-2662
     end
   end
@@ -5446,6 +5476,7 @@ function T.watch(K, c, r)
   famine(K, c, r.p, r.days, r.inv, r)
   food_pre(K, c, r.p, r.days, r.inv, r)
   M.food_unban(K, c, r, r.inv)
+  M.cook_repair(K, c, r, r.inv)                    -- BUG-345
   M.drink_low(K, c, r)                             -- BUG-042
   M.fd_wants(K, c, r)                              -- BUG-256, BUG-259
 end
@@ -7978,9 +8009,13 @@ function M.hungry_warn(K, c, r)
   local w = type(p.hungry_w) == 'table' and p.hungry_w or nil
   if w and r.now - (math.tointeger(w.t) or 0) < 7 * DAY and n < 2 * (math.tointeger(w.n) or 0) then return end
   p.hungry_w = {t = r.now, n = n}
+  -- BUG-345 (Run 15 Guildcleans y386: '0 cook ingredients' beside 517 cook-banned): the ban and its material are named
+  local t = (inv.cook_ban or 0) > 0 and st.cban and st.cban[1]
   K.log('warn', 'food %d days but %d citizens hungry and no prepared meal: raw plants and seeds are not cooked (%d cook ' ..
-        'ingredients, kitchen %s, COOK labor %s)', fd, n, M.cook_n(inv), ws_any(M.facts_now(K, r), {'workshop:Kitchen'}) and
-        'built' or 'missing', M.labor_holder(K, 'COOK') and 'held' or 'on nobody')
+        'ingredients%s, kitchen %s, COOK labor %s)', fd, n, M.cook_n(inv),
+        t and string.format(', %d cook-banned: %s', inv.cook_ban, tostring(t[1])) or '',
+        ws_any(M.facts_now(K, r), {'workshop:Kitchen'}) and 'built' or 'missing',
+        M.labor_holder(K, 'COOK') and 'held' or 'on nobody')
 end
 
 -- the decision text: numbers, blockers (each names its fix), what the kernel does itself (BUG-038: `auto: ...`, never
@@ -8043,6 +8078,46 @@ function M.food_unban(K, c, r, inv)
   r.cmdq[#r.cmdq + 1] = {'ban-cooking', 'fruit', '--unban'}
   K.log('warn', 'food %d days: %d cookable plant growths on the kitchen ban: ban-cooking fruit --unban',
         (r.days or {}).food_d or 0, inv.cook_ban_g)
+end
+
+-- BUG-345 (Run 15 Guildcleans y386: PrepareMeal 'no cook ingredient (517 cook-banned)', 0 meals beside 100 food days):
+-- the baseline enables seedwatch, which watches every plant at 30 seeds and bans the cooking of each one with fewer
+-- (Kitchen::denyPlantSeedCookery: PLANT and SEEDS), and clears that list only tens of thousands of ticks later (i2
+-- commands.log: enable at tick 150019880, clear at 150049832); unwatching lifts no ban. When the kitchen has nothing to cook
+-- while food lies on a kitchen exclusion, the exclusion goes (act.kitchen_include), at most COOK_REPAIR_N a day and each one
+-- once a year at most. Kept: Gordon's rule (config `kitchen`, D-09: no exclusion row), the farmed crops (seedwatch guards
+-- their seeds), every SEEDS exclusion (seeds are no food: never in st.kx).
+M.COOK_REPAIR_N = 16
+M.COOK_REPAIR_AGAIN = 336 * DAY
+function M.cook_repair(K, c, r, inv)
+  if not r.day or (inv.cook_in or 0) > 0 or (inv.cook_ban_x or 0) <= 0 or type(st.kx) ~= 'table' then return end
+  local p = r.p
+  if type(p.kit_rep) ~= 'table' then p.kit_rep = {} end
+  local okc, bs = K.call('baseline', 'status')
+  if not (okc and type(bs) == 'table' and type(bs.crops) == 'table') then return end    -- the farmed crops unknown: no lift
+  local crops = {}
+  for _, id in ipairs(bs.crops) do crops[id] = true end
+  local done, names = 0, {}
+  for _, e in ipairs(st.kx) do
+    if done >= M.COOK_REPAIR_N then break end
+    local plant = tostring(e.tok or ''):match('^PLANT:([^:]+):')
+    local key = string.format('%s:%d:%d:%d', e.cat, e.sub, e.t, e.i)
+    local last = math.tointeger(p.kit_rep[key])
+    if (e.n or 0) > 0 and not (plant and crops[plant]) and not (last and r.now - last < M.COOK_REPAIR_AGAIN) then
+      local ok, why = K.act.kitchen_include(e.cat, e.sub, e.t, e.i, 'Cook')
+      if ok then
+        p.kit_rep[key], done = r.now, done + 1
+        names[#names + 1] = string.format('%s x%d', M.short_mat(e.tok), e.n)
+      else K.log('warn', 'kitchen: %s stays on the ban: %s', tostring(e.tok), tostring(why)) end
+    end
+  end
+  local n = 0
+  for _ in pairs(p.kit_rep) do n = n + 1 end
+  if n > 64 then p.kit_rep = {} end                 -- bounded: a dropped key only allows one more lift
+  if done > 0 then
+    K.log('warn', 'kitchen: nothing to cook, %d food items on kitchen exclusions (seedwatch or the kitchen screen; ' ..
+          'farmed crops and D-09 stay): cooking allowed again for %s', inv.cook_ban_x, table.concat(names, ', '):sub(1, 200))
+  end
 end
 
 function T.plan(K, c, r)

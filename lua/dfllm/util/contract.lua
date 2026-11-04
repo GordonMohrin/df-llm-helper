@@ -292,6 +292,7 @@ C.ACT = {
   quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care', 'traps'},
   order_suspend = {'economy'}, engrave_order = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy', 'water'},
+  kitchen_include = {'economy'},                   -- BUG-345: lift a Cook exclusion (seedwatch leftovers, D-09 in a famine)
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
   plant_gather = {'economy'}, plant_ungather = {'economy'}, work_detail_prune = {'economy'},
   item_flag = {'care', 'water', 'economy', 'military'}, zone_assign = {'care'},

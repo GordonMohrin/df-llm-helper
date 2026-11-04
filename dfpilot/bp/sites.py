@@ -13,7 +13,8 @@ to it (rotated (0,1)) and the footprint plus its 1-tile wall ring must be rock (
 footprint keeps one rock tile to Z1/Z2, killboxes and bridges (also on the levels above and below), to Z3,
 the military stair and the gallery and melee stations (same level), and stays off the refuge level.
 Score: 1000 - 5 per walking step to the nearest stair (the hubs) - 1 per 10 unknown tiles; farms also
-+10 per soil-marked plot tile (`marks.soil`) and -25 per level below the top of Z4.
++10 per soil-marked plot tile (`marks.soil`) and -25 per level below the top of Z4; BUG-346: on a soil level (the fort's
+dug Z4 floor there is soil, `soil_levels`) the undug plot tiles count as soil (the snapshot marks floor only).
 Fortcore: the anchor is a surface floor tile under open sky with floor in front of the entrance; no level of
 the footprint may hold a revealed open tile. Score: flat dry surface over the footprint, map margin, and water
 (live L3: the only water was a brook 90 tiles away and bedridden dwarves died of thirst): + up to 60 when a
@@ -58,6 +59,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
+RANK_V = 2                            # BUG-346: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -718,6 +720,7 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
         plots = plot_rects(p)
         area = sum((r[2] - r[0] + 1) * (r[3] - r[1] + 1) for r in plots)
         top = max(b[5] for b in manifest["zones"]["Z4"])
+        slv = soil_level_set(soil_levels(snap, manifest))      # BUG-346
     out = []
     for i in _anchor_tiles(g, tpl, p, manifest):
         ax, ay, az = g.pos(i)
@@ -753,17 +756,80 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
                 why += f", pipe {len(cis['pipe'])} tiles to the water"
                 box = core
             if farm:
-                s = sum(soil.count(*_rot_rect(r[:4], ax, ay, rot), az + r[4]) or 0 for r in plots)
+                # BUG-346 (Run 15 Guildcleans y381, Inkintense: 'only 0 free site(s) for farms' for years though the fort's
+                # z128 floors were 499 of 499 soil): the snapshot marks soil on revealed floor only, never on the rock or
+                # hidden tiles a farm room is dug from, so every room site counted 'soil 0/70'. On a soil level (the
+                # fort's own dug Z4 floor there is soil, soil_levels) the undug plot tiles count as soil: the layer.
+                s = lv = 0
+                for r in plots:
+                    x0, y0, x1, y1 = _rot_rect(r[:4], ax, ay, rot)
+                    m = soil.count(x0, y0, x1, y1, az + r[4]) or 0
+                    s += m
+                    if az + r[4] in slv:
+                        lv += (x1 - x0 + 1) * (y1 - y0 + 1) - m
+                s += lv
                 # BUG-257 (Run 15 Inkintense/Drillchamber: farms on 'soil 0/70' sites, build_lost 'missing p' for 8
                 # seasons): quickfort builds farm plots only on soil or mud, so with the soil known (the snapshot's soil
                 # marks) a site needs soil under half its plot tiles; unknown soil stays a warning (plan check)
                 if soil_pts and 2 * s < area:
                     continue
                 score += 10 * s - 25 * (top - az)
-                why += f", soil {s}/{area} plot tiles" if soil_pts else ", soil unknown"
+                if soil_pts:
+                    why += f", soil {s}/{area} plot tiles" + (f" ({lv} by the soil level)" if lv else "")
+                else:
+                    why += ", soil unknown"
                 why += f", {top - az} levels below the top of Z4"
             out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, score), "box": box, "why": why})
     return out
+
+
+SOIL_LEVEL_MIN = 8                    # BUG-346: soil-marked fort floor tiles that make a level a soil level
+
+
+def soil_levels(snap: dict, manifest: dict | None) -> dict[int, tuple[int, int]]:
+    """BUG-346: {z: (soil, floor)}: the fort's revealed floor tiles ('.') inside its Z4 boxes per level and how many of them
+    carry a soil mark. A level whose dug floor is soil lies in a soil layer (what the player sees on the walls of every
+    room dug there); a farm room dug on it gets soil floor."""
+    marks = (snap.get("marks") or {}).get("soil") or []
+    soil = {tuple(q) for q in marks if isinstance(q, (list, tuple)) and len(q) == 3}
+    if not soil:
+        return {}
+    at = _At(snap)
+    seen: set = set()
+    out: dict[int, list[int]] = {}
+    for b in ((manifest or {}).get("zones") or {}).get("Z4") or []:
+        if not (isinstance(b, (list, tuple)) and len(b) == 6):
+            continue
+        for z in range(b[2], b[5] + 1):
+            for x in range(b[0], b[3] + 1):
+                for y in range(b[1], b[4] + 1):
+                    t = (x, y, z)
+                    if t in seen or at(x, y, z) != ".":
+                        continue
+                    seen.add(t)
+                    row = out.setdefault(z, [0, 0])
+                    row[1] += 1
+                    row[0] += t in soil
+    return {z: (v[0], v[1]) for z, v in out.items()}
+
+
+def soil_level_set(levels: dict) -> set[int]:
+    """BUG-346: the soil levels: at least SOIL_LEVEL_MIN soil floor tiles and half the level's fort floor."""
+    return {z for z, (s, f) in levels.items() if s >= SOIL_LEVEL_MIN and 2 * s >= f}
+
+
+def farm_soil_why(snap: dict, manifest: dict | None) -> str:
+    """BUG-346: why no farms room site: the soil of the fort's levels (`z128 499/499`), named for the no-site error."""
+    lv = soil_levels(snap, manifest)
+    if not lv:
+        return "farms: no soil marks in this snapshot (the soil is unknown)"
+    slv = soil_level_set(lv)
+    each = ", ".join(f"z{z} {s}/{f}" for z, (s, f) in sorted(lv.items(), reverse=True)[:5])
+    if not slv:
+        return (f"farms: no soil level in the fort (soil on its dug floor: {each}); farm plots need soil, a dug stone "
+                "floor has none: a surface farm (p.surface=1, in PEACE) or trade for food")
+    return (f"farms: soil levels {', '.join(f'z{z}' for z in sorted(slv, reverse=True))} (soil on the dug floor: {each}); "
+            "no room site there is free of rock-ring, keep-out or refuge rules")
 
 
 SURFACE_NEAR = 12                     # BUG-297: a surface farm lies inside Z4 or within this many tiles of the entrance

@@ -1856,6 +1856,19 @@ local function impls(state)
     return true, 'added'
   end
 
+  -- BUG-345: the same screen's allow (dfhack.kitchen.removeExclusion, as ban-cooking --unban); idempotent
+  function I.kitchen_include(item_type, subtype, mat_type, mat_index, what)
+    if what ~= 'Cook' and what ~= 'Brew' then return false, "what must be 'Cook' or 'Brew'" end
+    local it = type(item_type) == 'string' and df.item_type[item_type] or item_type
+    if type(it) ~= 'number' then return false, 'unknown item type ' .. tostring(item_type) end
+    local flags = {[what] = true}
+    if dfhack.kitchen.findExclusion(flags, it, subtype, mat_type, mat_index) < 0 then return true, 'absent' end
+    if not dfhack.kitchen.removeExclusion(flags, it, subtype, mat_type, mat_index) then
+      return false, 'removeExclusion failed'
+    end
+    return true, 'removed'
+  end
+
   -- forbid/dump toggles; melt through dfhack.items.markForMelting/cancelMelting (Lua API.txt:2135-2141)
   function I.item_flag(item_id, flag, on)
     if not ITEM_FLAGS[flag] then return false, 'flag must be forbid, dump or melt' end

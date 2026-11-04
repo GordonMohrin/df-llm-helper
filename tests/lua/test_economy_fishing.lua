@@ -132,7 +132,7 @@ T.test("Run 11: ORDER_STUCK PrepareMeal names the real cause, not 'no cook'; Pre
   days(W, 4)
   local m = stuck(W, 'PrepareMeal')
   T.eq(#m, 1)
-  T.ok(m[1].d.why:find('no cook ingredient (900 raw fish need a fishery, 1566 inedible (OAK:LEAF), 11 cook-banned)', 1, true),
+  T.ok(m[1].d.why:find('no cook ingredient (900 raw fish need a fishery, 1566 inedible (OAK:LEAF), 11 cook-banned (D-09 MUSHROOM_HELMET_PLUMP))', 1, true),
        m[1].d.why)
   T.ok(not m[1].d.why:find('no worker', 1, true), 'a cook holds the COOK labor')
   local f = stuck(W, 'PrepareRawFish')

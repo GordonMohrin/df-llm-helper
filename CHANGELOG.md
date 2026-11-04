@@ -16,6 +16,27 @@
 - **Tests (fail on 14ff5a3):** tests/test_bug349_351_plan.py (9), tests/lua/test_bug336_seal_escalate.lua (+1, safety checks).
 - **Live check:** i2 `plan check` P5: `... is waived (BUG-349 ...)`, plan OK; i1 explore@S1 without `taken by y378s...`; i4
   propose prints `stone dig bedrooms@S1 n=4 left out`.
+## Run 15 kitchen and farms: seedwatch's leftover cook bans lifted, farm rooms on soil levels (BUG-345/346, 2026-11-04; offline, live-untested)
+- **Why (BUG-345):** i2 Guildcleans PrepareMeal `no cook ingredient (517 cook-banned)`, 0 meals beside 100 food days; the
+  baseline enabled seedwatch (watches every plant at 30 seeds, bans the cooking of each one below) and cleared its list only
+  30,000 ticks later (i2 commands.log 150019880 -> 150049832, i1 the same); no unwatch lifts a ban, nothing else did either.
+  D-09 `yes` never took the plump helmet ban off in a famine; the texts named only the count.
+- **What changed:** baseline runs the seedwatch task right after `control-panel enable seedwatch`; economy `cook_repair`
+  lifts the kitchen exclusions of food while the kitchen has nothing else to cook (`act.kitchen_include`, new; at most 16 a
+  day, each once a year; never the config ban D-09, a farmed crop or a SEEDS exclusion); D-09 `yes` in a famine lifts the
+  plump helmet exclusion, it returns after the famine; ORDER_STUCK / hungry warn name the material (`11 cook-banned (D-09
+  MUSHROOM_HELMET_PLUMP)`). Contract: act `kitchen_include` (CONTRACTS, contract.lua, schema.py, appendix).
+- **Why (BUG-346):** `only 0 free site(s) for farms` for years in all four forts: the snapshot marks soil on revealed floor
+  only, so the BUG-257 rule (sites.py:760) counted 0 soil under every undug room; offline on the live snapshots the fort's
+  floor was soil on i2 z128 (499/499), i3 z138, i1 z131, stone on i4.
+- **What changed:** sites `soil_levels`: a level whose fort Z4 floor is soil (>= 8 tiles, at least half) counts the undug plot
+  tiles as soil (`(k by the soil level)`); a stone fort's farms error names the levels' soil and the way out (surface farm in
+  PEACE, trade) instead of the fortcore hint; cmd's sites cache carries `rv` (sites.RANK_V) so old rankings are redone.
+- **Tests (fail on 14ff5a3):** tests/lua/test_bug345_kitchen.lua (4, 3 fail), tests/bp/test_bug346_farm_soil_level.py (5),
+  test_kern_act.lua (+3 checks).
+- **Live check:** kern.log `kitchen: nothing to cook, ... cooking allowed again for ...`, then meals > 0; `bp sites farms
+  --fresh` in i1/i2/i3 ranks room sites `(N by the soil level)` and the farms project builds its plots. Open: hungry citizens
+  stranded or bedridden (i2), no cookable food at all (i1 tree leaves), a stone fort outside PEACE.
 ## Run 15 gate review (merge15): walkers do not give a bridge up, a forced raise beats a blocked park, a destroyed bridge is not busy (BUG-335/342/338 review fix, 2026-11-04; offline, live-untested)
 - **Why:** review of merge15: path-only crossers made every queued pull a 'blocked' cancel toward gate.pull_cap (busy SIEGE
   traffic: give-up, every lever parked giveup_wait, also with a hostile at the gate); a bridge destroyed in the settle window
