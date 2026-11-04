@@ -208,3 +208,9 @@ def test_bug249_gamelog_since_embark_skips_the_old_fort(tmp_path, capsys, monkey
     assert cli.gamelog_since(["a", "b"]) == (0, None)
     monkeypatch.setenv("DFLLM_DF", str(tmp_path / "nope"))
     assert cli.main(["gamelog"]) == 2
+
+
+def test_bug362_save_as_hint_asks_for_adopt():
+    h = drv.saveas_hint({"state": "done"}, "r16b-ostgate")
+    assert len(h) == 1 and "dfllm adopt" in h[0] and "r16b-ostgate" in h[0]
+    assert drv.saveas_hint({"state": "failed"}, "x") == [] and drv.saveas_hint(None, "x") == []

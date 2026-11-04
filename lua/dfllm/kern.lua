@@ -1510,6 +1510,40 @@ function M.runtime_key(marker, save)
   return save
 end
 
+-- BUG-362 (Run 16 i2: embark in world save 'region1', adopt, then embark.py save-as r16b-ostgate, adopt again: the runtime
+-- folder and the status stayed 'region1-site97', and two forts of one world at one site id share that folder): the runtime key
+-- is fixed at the first adopt, in whatever folder DF had then. A player save-as (a folder that is neither 'autosave N' nor
+-- 'current') gives the fort its real name: the next boot (dfllm adopt) moves the runtime folder to <that save>-site<N>.
+-- Returns the new key, or nil when the key stays (autosave, same folder, a key without the '-site<N>' tail = legacy).
+function M.rekey_to(marker, save)
+  if type(marker) ~= 'table' or type(marker.save) ~= 'string' or type(save) ~= 'string' or save == '' then return nil end
+  if save:find('^autosave') or save == 'current' or save:find('[/\\]') or save == '.' or save == '..' then return nil end
+  local base, tail = marker.save:match('^(.*)(%-site%d+)$')
+  if not base then return nil end
+  base = type(marker.base) == 'string' and marker.base ~= '' and marker.base or base
+  if clean(save, 100) == base then return nil end
+  local key = clean(save, 100) .. tail
+  if key == marker.save then return nil end
+  return key
+end
+
+-- moves <runtime>/<old> to <runtime>/<new> and re-keys the marker (saved into the site data at once); false + why when
+-- the old key stays: the new folder exists (another fort's data, never merged) or the rename failed (a tool holds a file open)
+local function rekey(marker, save, paths_root)
+  local key = M.rekey_to(marker, save)
+  if not key then return false end
+  local old = marker.save
+  local from, to = paths_root .. '/' .. old, paths_root .. '/' .. key
+  if fio.exists(to) then return false, string.format('runtime folder %s exists already: key stays %s', key, old) end
+  if fio.exists(from) then
+    local ok, err = os.rename(from, to)
+    if not ok then return false, string.format('runtime folder %s not moved to %s (%s): key stays', old, key, tostring(err)) end
+  end
+  marker.save, marker.base = key, clean(save, 100)
+  pcall(dfhack.persistent.saveSiteDataString, 'dfllm', json.encode(marker))
+  return true, string.format('runtime folder %s > %s (save-as %s)', old, key, save)
+end
+
 -- BUG-332 (Run 15 i2/i4: `dfllm save` scanned %APPDATA%/Bay 12 Games/Dwarf Fortress/save while DF in portable mode
 -- (<DF>/prefs/portable.txt) wrote its saves to <DF>/save): DF's save folder, dfhack.filesystem.getBaseDir() .. 'save' (the
 -- install folder in portable mode, else SDL's pref dir), else the parent of dfhack.getSavePath() (the loaded save's
@@ -1538,9 +1572,12 @@ function M.boot(opts)
   local ok, save = preconditions()
   if not ok then return false, save end
   local marker = read_marker()
+  local rk_done, rk_msg                       -- BUG-362: a save-as renames the runtime folder at this boot
+  if marker then rk_done, rk_msg = rekey(marker, save, dfhack.getDFPath():gsub('[/\\]+$', '') .. '/dfllm-runtime') end
   local paths = fio.paths(dfhack.getDFPath(), M.runtime_key(marker, save))
   local st = build{opts = opts, paths = paths, save = save, marked = marker ~= nil}
   local repo = opts.repo or '.'
+  if rk_msg then st.log_as('kern', rk_done and 'info' or 'warn', 'BUG-362: ' .. rk_msg) end
   if guarded then st.log_as('kern', 'info', 'stop guard removed at boot: ' .. guarded) end
   if not marker then
     -- unmarked save: only heal settings a crashed session left behind; nothing in the save is touched
@@ -1674,7 +1711,7 @@ function M.adopt(opts)
   local okp, sid = pcall(function() return df.global.plotinfo.site_id end)
   local site_id = okp and math.tointeger(sid) or 0
   local key = clean(save, 100) .. '-site' .. site_id
-  local marker = {v = 2, adopted = tick, save = key, fort = clean(fort_name(), 120),
+  local marker = {v = 2, adopted = tick, save = key, base = clean(save, 100), fort = clean(fort_name(), 120),
                   acceptance = opts.acceptance and 1 or 0, baseline = 0, boots = 0}
   dfhack.persistent.saveSiteDataString('dfllm', json.encode(marker))
   local phases = fio.read_json((opts.repo or '.') .. '/plans/year1.json')

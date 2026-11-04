@@ -357,6 +357,15 @@ def load_lines(res: dict) -> list[str]:
     return out
 
 
+def saveas_hint(doc: dict | None, name: str) -> list[str]:
+    """BUG-362: after a finished save-as the kernel still runs under the runtime folder of the old save name; its next boot
+    (dfllm adopt on an adopted fort = boot) moves the runtime folder to <NAME>-site<N> and the status shows the new name."""
+    if not doc or doc.get("state") != "done":
+        return []
+    return [f"  save-as {name}: now run `dfhack-run dfllm adopt` so the kernel renames its runtime folder after the save "
+            "(status shows the new name; without it the old name stays until the next boot in this folder)"]
+
+
 def load_verdict(doc: dict | None) -> str:
     """K2: the one line a load run ends with: LOAD OK or LOAD FAILED and the reason (screen text found or not, no such save)."""
     if not doc:

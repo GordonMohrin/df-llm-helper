@@ -111,9 +111,10 @@ def test_core_digging_needs_a_fortcore_project_at_its_first_dig(save):
     (save / "bp" / "y1s0b1.json").write_text(json.dumps({"tpl": "bedrooms", "params": {}}), "utf-8")
     assert plan.core_digging(save, {"proj": [["c1a1a6ad31b228f901", "s1.dig", 0, "stalled"]]}) is True
     assert plan.core_digging(save, {"proj": [["c1a1a6ad31b228f901", "s1.build", 10, ""]]}) is False
-    assert plan.core_digging(save, {"proj": [["y1s0b1", "s1.dig", 0, ""]]}) is False        # not the core
+    assert plan.core_digging(save, {"proj": [["y1s0b1", "s1.dig", 0, ""]]}) is True          # BUG-363: placed, no row yet
     assert plan.core_digging(save, {"proj": [["c1a1a6ad31b228f901", "s1.dig", 0, "breach:damp"]]}) is False
-    assert plan.core_digging(save, {"proj": []}) is False
+    (save / "bp" / "c1a1a6ad31b228f901.json").unlink()
+    assert plan.core_digging(save, {"proj": []}) is False          # no fortcore project at all
 
 
 def _p0_state(save):
