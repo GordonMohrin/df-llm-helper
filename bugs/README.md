@@ -398,6 +398,9 @@ Related: FR-xx, BUG-xx
 | [BUG-384](BUG-384-no-hospital-without-a-fortcore.md) | fixed (offline, live-untested) | high | Run 16c: hospital 0 sites without a fortcore, 7 hurt: `hospital surface=1` on open floor by the accepted water | dfpilot/bp, plan, cmd |
 | [BUG-385](BUG-385-two-follows-take-the-lock-from-each-other.md) | fixed (offline, live-untested) | medium | Run 16b: two `follow --takeover` on one instance take the lock from each other (a Monitor restarts the loser); status names no owner; review fix merge20: refused regardless of time, exit 4 | dfpilot/wake.py:1517 |
 | [BUG-386](BUG-386-runtime-name-stays-behind-autosave-names.md) | fixed (offline, live-untested) | medium | Run 16b: runtime name stays `region1-site97` after save-as although BUG-362 is in: every later boot runs in `autosave N`, the player's name is gone | lua/dfllm/kern.lua:1519 |
+| [BUG-387](BUG-387-no-core-in-an-aquifer-world-surface-core.md) | fixed (offline, live-untested) | high | Run 16a-c region1: aquifer everywhere, no fort got a core, every Z4 room template stood still; new `surfacecore` template + surface dining/bedrooms/tavern/office | dfpilot/bp/surfacecore.py, rooms.py, sites.py |
+| [BUG-388](BUG-388-one-wet-stop-blacklists-the-whole-level.md) | fixed (offline, live-untested) | high | Run 16b: `no dry fortcore site ... (wet level z130)`: one wet stop ruled out the whole level for every site; now only the dig within 16 tiles of a stop | dfpilot/bp/sites.py |
+| [BUG-389](BUG-389-plan-propose-unapplicable-without-a-fortcore-site.md) | fixed (offline, live-untested) | high | Run 16a/b: plan propose drew fortcore with 0 sites + ERROR refuge, players hand-built empty P1 plans for 11 years; now the surface core draft | dfpilot/plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -56,13 +56,13 @@ from __future__ import annotations
 import heapq
 from collections import deque
 
-from . import aquifer, defense, fortcore, mine, rooms, topo, traps
+from . import aquifer, defense, fortcore, mine, rooms, surfacecore, topo, traps
 from .emit import TEMPLATES, check_params
 from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 4                            # BUG-346/359: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 5                            # BUG-346/359: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -234,7 +234,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     if tpl in traps.BUILD:                                   # FR-96: absolute trap tiles, the site is the first one
         return traps.site(snap, p, _At(snap))[:n]
     # BUG-356/368/384: no fort manifest needed (the startup shops, the trade depot, the surface hospital)
-    surface_shops = (tpl in ("workshops", "hospital") and bool(p.get("surface"))) or tpl == "depot"
+    # BUG-387: the surface core and the surface variants of dining, bedrooms, tavern and office need none either
+    surface_shops = (tpl in ("workshops", "hospital", *rooms.SURFACE_ROOMS) and bool(p.get("surface"))) \
+        or tpl in ("depot", "surfacecore")
     if tpl != "fortcore" and not surface_shops and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
@@ -984,9 +986,17 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
     for `depot` (tpl): one rooms.DEPOT_SIDE square of open surface floor, the depot stands where a caravan's wagon reaches it
     without the dug core. BUG-384 (Run 16c i3: 'hospital: 0 sites without a fortcore', 7 hurt): and for `hospital` with p.surface = 1,
     a 7x5 block; rank() then keeps the ones near accepted water (WATER_TPLS) like the dug hospital."""
+    rect = None                              # BUG-387: the local rect that must be open floor (default: from the anchor)
     if tpl == "depot":
         W = H = rooms.DEPOT_SIDE
         what = "a trade depot"
+    elif tpl == "surfacecore":               # BUG-387: the walled compound, depot apron included
+        W, H = surfacecore.block(p)
+        what = "the surface core"
+    elif tpl in rooms.SURFACE_ROOMS:         # BUG-387: the room's walls and floor, and the tile before its doorway
+        rect = rooms.BUILD[tpl](p).surface_rect
+        W, H = rect[2] - rect[0] + 1, rect[3] - rect[1] + 1
+        what = f"a surface {tpl}"
     elif tpl == "hospital":                  # BUG-384: the surface hospital's 7x5 block, ranked by the accepted water after
         W, H = rooms.HOSPITAL_SURFACE
         what = "a hospital"
@@ -1005,7 +1015,11 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
              and len(w["pos"]) == 3]
     keep += [(e[0] - 2, e[1] - 2, e[2], e[0] + 2, e[1] + 2, e[2]) for e in edge]
     cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
-    step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 else 1
+    if tpl in rooms.SURFACE_ROOMS and isinstance(manifest.get("depot"), (list, tuple)) and len(manifest["depot"]) == 3:
+        cx, cy = manifest["depot"][0], manifest["depot"][1]      # BUG-387: a room stands beside the surface core's depot
+    keep += [tuple(b) for b in (manifest.get("zones") or {}).get("Z4", []) if isinstance(b, (list, tuple)) and len(b) == 6]
+    rect = rect or (0, 0, W - 1, H - 1)
+    step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 and tpl not in rooms.SURFACE_ROOMS else 1
     out = []
     for z in range(z0, z1):
         cur, up = snap["rows"][f"z{z}"], snap["rows"][f"z{z + 1}"]
@@ -1015,7 +1029,7 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
                     continue
                 ax, ay = x0 + xx, y0 + yy
                 for rot in range(4):
-                    bx0, by0, bx1, by1 = _rot_rect((0, 0, W - 1, H - 1), ax, ay, rot)
+                    bx0, by0, bx1, by1 = _rot_rect(rect, ax, ay, rot)
                     if floor.count(bx0, by0, bx1, by1, z) != W * H or sky.count(bx0, by0, bx1, by1, z + 1) != W * H:
                         continue
                     box = (bx0, by0, z, bx1, by1, z)
@@ -1214,6 +1228,9 @@ def _fortcore(snap, rects, bad, hid, mk, wet_above=None):
 
 BREACH_R = 10               # BUG-130: tiles (x/y) a fortcore's dig keeps from a recorded breach on its levels (+-1)
 LAYER_MIN = 2               # BUG-130: damp/water breaches of this many projects on one level make it a wet layer (aquifer)
+LAYER_R = 16                # BUG-388: tiles (x/y) around a stop on a wet layer that count as that layer's wet area (not the level)
+SURFACE_AQ = 3              # BUG-387: an aquifer level this close (or closer) under a fortcore anchor: the core goes on the surface
+SURFACE_DIG = 8             # BUG-387: a fortcore digs this deep under its anchor (depth 3 reaches az-8): a breach-recorded wet level inside
 
 
 def breach_points(manifest: dict | None) -> list[tuple[tuple[int, int, int], str]]:
@@ -1310,10 +1327,14 @@ def _flooded(cands: list, snap: dict, manifest: dict | None, p: dict, rects: dic
 def _dry(cands: list, manifest: dict | None) -> list:
     """BUG-130 (Run 9, Run 14 y707: the fortcore stopped as breach:damp and was never re-sited): the fortcore candidates
     whose dig (the full box over all its levels, `dig`) stays more than BREACH_R tiles (x/y) away from every recorded
-    breach on a level from one above to one below it, and whose dig reaches no wet layer: a level with damp or water
-    breaches of LAYER_MIN projects (a light aquifer is a layer: a second stop on the same level shows it is no pocket).
+    breach on a level from one above to one below it, and whose dig reaches no wet area: BUG-388 (Run 16 region1, aquifer
+    nearly everywhere: 'no dry fortcore site ... within 10 tiles of a recorded breach (wet level z130)' at every depth, so a
+    single stop blacklisted every site of the map): a level with damp or water breaches of LAYER_MIN projects (a light aquifer
+    is a layer: a second stop on the same level shows it is no pocket), or one heavy_aquifer stop, rules out only the dig
+    that reaches that level within LAYER_R tiles (x/y) of one of the stops on it, never the whole level. Beyond that radius
+    the known-aquifer rating (`_flooded`, `aquifer_ok`) still judges the levels.
     ValueError ("no dry fortcore site") when candidates existed and every one comes too close: the caller drafts the
-    closure instead (plan propose)."""
+    closure instead (plan propose), or, when the whole map is wet, the surface core (BUG-387)."""
     pts = breach_points(manifest)
     if not pts or not cands:
         return cands
@@ -1322,9 +1343,10 @@ def _dry(cands: list, manifest: dict | None) -> list:
 
     def near(c):
         x0, y0, z0, x1, y1, z1 = c["dig"]
-        lay = next((z for z in sorted(layers) if z0 <= z <= z1), None)
-        if lay is not None:
-            return layers[lay]
+        for z in sorted(layers):                # BUG-388: the wet layer's area around its own stops
+            if z0 <= z <= z1 and any(pz == z and x0 - LAYER_R <= x <= x1 + LAYER_R and y0 - LAYER_R <= y <= y1 + LAYER_R
+                                     for (x, y, pz), _ in pts):
+                return layers[z]
         return next((lbl for (x, y, z), lbl in pts
                      if z0 - 1 <= z <= z1 + 1 and x0 - R <= x <= x1 + R and y0 - R <= y <= y1 + R), None)
     out, hit = [], []
@@ -1338,6 +1360,29 @@ def _dry(cands: list, manifest: dict | None) -> list:
         raise ValueError(f"fortcore: no dry fortcore site: every site's dig lies within {R} tiles of a recorded breach "
                          f"({'; '.join(hit[:3])}{' +more' if len(hit) > 3 else ''})")
     return out
+
+
+def surface_core_why(snap: dict, manifest: dict | None, site: dict | None, p: dict | None = None) -> str | None:
+    """BUG-387 (Run 16 region1: aquifer almost everywhere; i1 depth=1 breached heavy_aquifer at 4 %, i3 sites 1-6 steps from
+    water): why the fort's core goes on the surface (bp/surfacecore.py), or None when a dug fortcore is fine. `site` = the best
+    fortcore site the ranking offered (None: it offered none). A known aquifer level within SURFACE_AQ levels under the anchor
+    (the dig would meet it: `known_aquifer`), or a wet level a recorded breach shows at or under it, says the same."""
+    if site is None:
+        return "no dry fortcore site on the snapshot"
+    az = site["anchor"][2]
+    lo = az - SURFACE_AQ
+    near = sorted((z for z in known_aquifer(snap, manifest) if z >= lo), reverse=True)
+    if near:
+        return f"aquifer known at z{near[0]}, {max(az - near[0], 0)} level(s) under the fortcore anchor (z{az})"
+    # a wet layer a breach recorded (heavy_aquifer, damp stops) inside the whole dig range: `_dry` only rules out digs near its
+    # stops, a farther site would dig into the same aquifer (Run 16 i1/i3), so the core goes on the surface
+    reach = az - SURFACE_DIG
+    if site.get("dig"):
+        reach = min(reach, int(site["dig"][2]))
+    wet = sorted((z for z in _breach_layers(manifest) if reach <= z <= az), reverse=True)
+    if wet:
+        return f"wet level z{wet[0]} recorded by a breach, {max(az - wet[0], 0)} level(s) under the fortcore anchor (z{az}), inside its dig"
+    return None
 
 
 def water_bonus(steps: int | None) -> int:

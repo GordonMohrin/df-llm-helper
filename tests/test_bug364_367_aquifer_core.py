@@ -199,7 +199,8 @@ def test_a_cancelled_core_is_not_done_for_the_draft(save):
     s = copy.deepcopy(files.read_state(save))
     s["phase"], s["proj"] = "P0", []
     s["t"] = {**(s.get("t") or {}), "y": 372, "season": 1}
-    fort = dict(plan.fort_facts(save, s), z4=False, core_any=False, core_dig=False)
+    # BUG-387: the recorded snapshot has no fortcore site, so the surface core would take its place; this test is about the core
+    fort = dict(plan.fort_facts(save, s), z4=False, core_any=False, core_dig=False, surface={})
     prev = _prev(372, [{"tpl": "fortcore", "site": "same", "p": {"stage": 3}}])
     keys = plan.stale_core_keys(prev, set(), fort, s)
     assert keys == {("fortcore", 3)}

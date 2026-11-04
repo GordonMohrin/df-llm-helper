@@ -1423,6 +1423,16 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
                    "on the citizens' walk group within reach of accepted water (a well over water, a Water Source zone): "
                    "`dfllm bp sites hospital surface=1 --fresh --near <wagon x,y,z> --within 40`; no accepted water yet: "
                    "water first (dfllm cmd inspect '{\"what\":\"water_sources\"}')")
+    elif ranked == 0 and tpl == "surfacecore":
+        # BUG-387: the surface core needs a flat open block, no dig and no rock
+        out.append("no ranked site: the surface core needs a flat block of open surface floor (default 21x21 tiles: the "
+                   "walled compound and the depot in front of its gate; no trees, rocks, water or hill) on the citizens' walk "
+                   "group; `dfllm bp sites surfacecore --fresh --near <wagon x,y,z> --within 60`, or the smallest compound "
+                   "(w=20 h=12: 20x18 tiles)")
+    elif ranked == 0 and (params or {}).get("surface") and tpl in ("dining", "bedrooms", "tavern", "office"):
+        out.append(f"no ranked site: the surface {tpl} needs its walls' footprint of open surface floor (no trees, rocks, water or "
+                   f"hill) on the citizens' walk group, beside the surface core: `dfllm bp sites {tpl} surface=1 --fresh "
+                   "--near <depot x,y,z> --within 40`")
     elif ranked == 0 and tpl == "depot":
         # BUG-368: the trade depot needs no fortcore, only a 5x5 block of open flat ground the citizens reach
         out.append("no ranked site: the trade depot needs a 5x5 block of open surface floor (no trees, rocks, water or hill) "

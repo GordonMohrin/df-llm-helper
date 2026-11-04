@@ -1,4 +1,4 @@
-tavern {'seats': 12, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+tavern {'seats': 12, 'surface': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
   living: dig(7), build(27), zone(1), burrow(3)
   materials: {'chair': 12, 'chest': 2, 'door': 1, 'table': 12}
 z100  (x 65..75, y 69..78)

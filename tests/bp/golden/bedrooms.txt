@@ -1,4 +1,4 @@
-bedrooms {'n': 10, 'tier': 500, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+bedrooms {'n': 10, 'tier': 500, 'surface': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
   living: dig(40), build(40), zone(10), burrow(6)
   materials: {'bed': 10, 'cabinet': 10, 'chest': 10, 'door': 10}
 z100  (x 65..75, y 69..91)

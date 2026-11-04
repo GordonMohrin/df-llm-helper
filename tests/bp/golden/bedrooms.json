@@ -46,6 +46,7 @@
   "params": {
    "burrow": "Kern+",
    "n": 10,
+   "surface": 0,
    "tier": 500
   },
   "rot": 0,
