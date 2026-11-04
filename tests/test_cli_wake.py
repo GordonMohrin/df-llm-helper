@@ -413,6 +413,33 @@ def test_follow_farms_for_food_places_prio1_farms_with_plots(save, monkeypatch):
     assert out == []                                  # class B: no wake line
 
 
+@pytest.mark.parametrize("why,want", [("drink", {"plots": 1}), ("drink_surface", {"plots": 1, "surface": 1})])
+def test_follow_farms_for_brewable_seeds_places_one_plot_of_their_kind(save, monkeypatch, why, want):
+    """BUG-406/408: economy's PROJECT_REQUEST farms why=drink|drink_surface (the stock's brewable seeds fit no farm plot) is
+    placed by follow at once: one plot, a surface one (p.surface = 1) for why=drink_surface, prio 1."""
+    calls = install_fake_bp(monkeypatch)
+    c = Clock()
+    f, out = F(c)
+    f.poll()
+    append_events(save, [ev(8813, "PROJECT_REQUEST", "farms", {"tpl": "farms", "n": 1, "why": why})])
+    f.poll()
+    (snap_cmd,) = inbox_docs(save)
+    assert snap_cmd["verb"] == "snapshot"
+    for p in (save / "inbox").glob("*.json"):
+        p.unlink()
+    sid = snap_cmd["id"]
+    snap = json.loads((save / "snap" / "c201.json").read_text("utf-8"))
+    snap["id"] = sid
+    files.write_json_atomic(save / "snap" / f"{sid}.json", snap)
+    append_events(save, [ev(8815, "SNAPSHOT_READY", "", {"id": sid, "path": f"snap/{sid}.json", "purpose": "sites"})])
+    f.poll()
+    (place,) = inbox_docs(save)
+    assert place["verb"] == "bp.place"
+    assert place["args"] == {"tpl": "farms", "site": "S1", "p": want, "prio": 1}
+    assert calls["rank"] == [(sid, "farms", want)]
+    assert out == []
+
+
 def test_follow_fishery_request_places_only_a_fishery_at_prio1(save, monkeypatch):
     """Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days. economy's PROJECT_REQUEST
     workshops why=fishery is placed by follow at once: the workshops template with only the fishery (every moodable

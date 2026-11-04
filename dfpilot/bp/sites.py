@@ -62,7 +62,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 6                            # BUG-346/359/400: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 7                            # BUG-346/359/400/407: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -237,7 +237,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     # BUG-387: the surface core and the surface variants of dining, bedrooms, tavern and office need none either
     surface_shops = (tpl in ("workshops", "hospital", *rooms.SURFACE_ROOMS) and bool(p.get("surface"))) \
         or tpl in ("depot", "surfacecore")
-    if tpl != "fortcore" and not surface_shops and not ((manifest or {}).get("zones") or {}).get("Z4"):
+    surface_farm = tpl == "farms" and bool(p.get("surface"))      # BUG-407: needs no fort manifest either (ground anywhere)
+    if tpl != "fortcore" and not surface_shops and not surface_farm and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
         from . import deep
@@ -252,7 +253,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     if tpl in aquifer.BUILD:                                 # BUG-292: shaft columns are ranked (FR-95 named them only)
         cands = _aqshaft(snap, p, manifest)
     elif tpl == "farms" and p.get("surface"):               # BUG-297: plots on soil floor that stands already
-        cands = _surface_farms(snap, p, manifest)
+        cands = _surface_farms(snap, p, manifest or {})
     elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
         cands = _surface_shops(snap, p, manifest or {}, tpl)
         if not cands and surface_top_floor(snap) >= SURFACE_TOP_MIN and not sky_over_floor(snap):
@@ -925,6 +926,28 @@ def farm_soil_why(snap: dict, manifest: dict | None) -> str:
 
 
 SURFACE_NEAR = 12                     # BUG-297: a surface farm lies inside Z4 or within this many tiles of the entrance
+MUD_WET_R = 3                         # BUG-407: a muddy plot keeps this many tiles from water (irrigation is risky)
+FAR_SCORE = 500                       # BUG-407: a plot beyond SURFACE_NEAR scores below any near one (<= this, - 1 per tile)
+
+
+def _marks_of(snap: dict, kind: str) -> set:
+    return {tuple(q) for q in (snap.get("marks") or {}).get(kind, []) if isinstance(q, (list, tuple)) and len(q) == 3}
+
+
+def farm_ground_why(snap: dict, manifest: dict | None) -> str:
+    """BUG-407 (Run 16a i1 Bachwald: 'only 0 free site(s) for farms surface=1' on a mountain, 13 thirsty citizens died): why a
+    surface farm has no site, with the ground it looked at and what is left to do (the DECISION: trade, or a plot by hand)."""
+    soil, mud = _marks_of(snap, "soil"), _marks_of(snap, "mud")
+    floors = sum(str(r).count(".") for rows in (snap.get("rows") or {}).values() for r in rows)
+    if not soil and not mud:
+        return (f"farms surface=1: no soil and no mud floor in this snapshot ({floors} revealed floor tiles, rock ground: a farm "
+                "plot needs a soil or mud floor, quickfort drops the others); DECISION: buy food and seeds from the caravans "
+                "(trade.want food seeds), dig down to a soil layer (explore), or wait for rain to mud a floor and run "
+                "`dfllm bp sites farms surface=1 --fresh` again; irrigation by a channel to water is risky, never near the "
+                "fort's wells")
+    return (f"farms surface=1: {len(soil)} soil and {len(mud)} mud floor tiles, but no plot block fits (the blocks overlap the "
+            "fort's own tiles, a wall, a tree or water, or lie on another walk group than the citizens'); DECISION: fewer plots "
+            "(p.plots=1), another spot (`bp sites farms surface=1 --near x,y,z`) or trade for food and seeds")
 
 
 def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
@@ -933,15 +956,21 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
     revealed floor ('.') with a soil mark (the snapshot's revealed soil, as the vanilla UI shows it), nothing is dug; the
     plot block lies inside a Z4 box (the walled fort, roofed: best) or within SURFACE_NEAR tiles of the fort entrance
     (manifest `edge`, the tiles in front of the fortcore door) on the entrance's level, never on the attack path, the
-    military's tiles or a bridge (_keep_out), and overlaps no manifest room, workshop, depot, pit, station or stair."""
-    soil = {tuple(q) for q in (snap.get("marks") or {}).get("soil", []) if isinstance(q, (list, tuple)) and len(q) == 3}
-    if not soil:
+    military's tiles or a bridge (_keep_out), and overlaps no manifest room, workshop, depot, pit, station or stair.
+    BUG-407 (Run 16a i1 Bachwald: a fort with no fortcore, 'only 0 free site(s)'; Run 16c i3 the same): (1) a muddy floor counts
+    as ground (snapshot marks.mud, quickfort's has_mud: farm plots stand on soil or mud) when no tile of the block lies within
+    MUD_WET_R of water; (2) when no block lies inside Z4 or near the entrance (no entrance at all without a fortcore), the
+    soil or mud anywhere on the citizens' walk group is offered, FAR_SCORE minus the tiles to the entrance, the depot or the
+    middle of the snapshot."""
+    soil, mud = _marks_of(snap, "soil"), _marks_of(snap, "mud")
+    ground = soil | mud
+    if not ground:
         return []
     at = _At(snap)
     plots = plot_rects(p)
     z4 = [tuple(b) for b in (manifest.get("zones") or {}).get("Z4", [])]
     edge = [tuple(e) for e in manifest.get("edge") or [] if isinstance(e, (list, tuple)) and len(e) == 3]
-    keep = list(_keep_out(manifest))
+    keep = list(_keep_out(manifest)) if manifest else []
     keep += [tuple(r["bbox"]) for r in manifest.get("rooms", []) if isinstance(r, dict) and len(r.get("bbox") or []) == 6]
     pts = [w.get("pos") for w in manifest.get("workshops", []) if isinstance(w, dict)]
     pts += [manifest.get("depot"), manifest.get("pit")] + list((manifest.get("stations") or {}).values())
@@ -949,21 +978,28 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
     for kind in ("civ", "mil"):
         keep += [(s[0], s[1], s[2], s[0], s[1], s[3]) for s in (manifest.get("stairs") or {}).get(kind, []) if len(s) == 4]
     keep += [(e[0] - 2, e[1] - 2, e[2], e[0] + 2, e[1] + 2, e[2]) for e in edge]     # the way in stays clear
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    dep = manifest.get("depot")
+    ref = edge[0] if edge else (dep if isinstance(dep, list) and len(dep) == 3 else None)
+    cx, cy = (ref[0], ref[1]) if ref else ((x0 + x1) // 2, (y0 + y1) // 2)
+    wet = _Pref(snap, lambda c: c in WET) if mud else None
 
     def inside(b, box):
         return box[0] <= b[0] and b[3] <= box[3] and box[1] <= b[1] and b[4] <= box[4] and box[2] <= b[2] <= box[5]
 
-    out = []
-    for (ax, ay, az) in sorted(soil):
+    near_out, far_out = [], []
+    for (ax, ay, az) in sorted(ground):
         for rot in range(4):
-            tiles, ok = [], True
+            tiles, ok, nmud = [], True, 0
             for r in plots:
-                x0, y0, x1, y1 = _rot_rect(r[:4], ax, ay, rot)
-                for x in range(x0, x1 + 1):
-                    for y in range(y0, y1 + 1):
-                        if (x, y, az + r[4]) not in soil or at(x, y, az + r[4]) != ".":
+                rx0, ry0, rx1, ry1 = _rot_rect(r[:4], ax, ay, rot)
+                for x in range(rx0, rx1 + 1):
+                    for y in range(ry0, ry1 + 1):
+                        t = (x, y, az + r[4])
+                        if t not in ground or at(*t) != ".":
                             ok = False
                             break
+                        nmud += t not in soil
                         tiles.append((x, y))
                     if not ok:
                         break
@@ -975,15 +1011,25 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
                    max(t[1] for t in tiles), az)
             if any(_overlap(box, k) for k in keep):
                 continue
+            if nmud and (wet.count(box[0] - MUD_WET_R, box[1] - MUD_WET_R, box[3] + MUD_WET_R, box[4] + MUD_WET_R, az) or 0):
+                continue                                # BUG-407: mud beside water floods (irrigation is risky)
             roofed = any(inside(box, b) for b in z4)
             d = min((box_dist(list(e), list(box)) for e in edge if e[2] == az), default=None)
-            if not roofed and (d is None or d > SURFACE_NEAR):
-                continue
-            score = 1000 - (0 if roofed else 200 + 5 * (d or 0))
-            where = "inside the fort (Z4)" if roofed else f"{d} tiles from the entrance"
-            out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, score), "box": box,
-                        "why": f"rot{rot}, surface farm on soil floor {where}, {len(tiles)} soil plot tiles, nothing dug"})
-    return out
+            what = "soil floor" if not nmud else f"muddy floor ({nmud} of {len(tiles)} tiles mud)"
+            if roofed or (d is not None and d <= SURFACE_NEAR):
+                score = 1000 - (0 if roofed else 200 + 5 * (d or 0)) - (30 if nmud else 0)
+                where = "inside the fort (Z4)" if roofed else f"{d} tiles from the entrance"
+                near_out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, score), "box": box,
+                                 "why": f"rot{rot}, surface farm on {what} {where}, {len(tiles)} plot tiles, nothing dug"})
+            else:
+                if "0" in (walk_at(snap, (box[0], box[1], az)), walk_at(snap, (box[3], box[4], az))):
+                    continue                            # another walk group than the citizens'
+                dd = max(abs((box[0] + box[3]) // 2 - cx), abs((box[1] + box[4]) // 2 - cy))
+                far_out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, FAR_SCORE - dd - (30 if nmud else 0)),
+                                "box": box, "why": f"rot{rot}, surface farm on {what} {dd} tiles from "
+                                                   f"{'the entrance' if edge else 'the middle of the snapshot'}, "
+                                                   f"{len(tiles)} plot tiles, nothing dug"})
+    return near_out or far_out
 
 
 SHOP_NEAR = 25                        # BUG-356: a startup block within this many tiles of the fort entrance scores best

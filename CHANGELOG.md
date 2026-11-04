@@ -22,6 +22,21 @@
 - **BUG-404:** `sites.sky_over_floor`: the BUG-399 guard fires only when the snapshot shows no open sky above any floor tile.
 - **BUG-405:** economy `site_items`/`jfree`: a stranger's corpse (or part) on a construction footprint is unforbidden and marked dump.
 - **Tests:** tests/test_bug403_405_plan_order_guard.py, tests/lua/test_economy_sites.lua.
+## Seeds that fit no plot, surface farms without a fortcore, an earlier gather zone (BUG-406 to BUG-408, 2026-11-04; offline, live-untested)
+- **Why:** Run 16: i3 Yawninggilt one underground farm plot beside 476 brewable surface seeds (`no seeds for MUSHROOM_HELMET_PLUMP and no other crop with
+  seeds grows there now` in every season, drink 23 d); i1 Bachwald `bp.place farms surface=1` 'only 0 free site(s)' on a mountain, 'no brewable plants' beside 50
+  seeds, 13 dead of thirst.
+- **BUG-406:** `economy.brew_fit` / `brew_farm_request`: the stills' plants short and the brewable seeds in stock fit no plot (kind: underground / surface) ->
+  `PROJECT_REQUEST farms why=drink` (room) or `why=drink_surface` (PEACE), every `food.request_days`; follow places one plot (`wake.py`); the drink block says
+  `N seeds fit no farm plot: surface seeds; a plot is requested`.
+- **BUG-407:** `sites._surface_farms`: ground = soil + the new `marks.mud` (snapshot.lua `has_mud`, quickfort's rule; mud keeps 3 tiles from water), soil/mud
+  anywhere on the citizens' walk group when no block lies inside Z4 or near the entrance (a fort without a core), no manifest needed; no ground ->
+  `farm_ground_why` (in the `farm_hint` of the refusal): reason + DECISION (trade, dig down, rain; irrigation is risky). `RANK_V` 6, schema `snapshot.marks.mud`, appendix rewritten.
+- **BUG-408:** `gather.drink_early` (120): with no brewable plant at all the gather zone (`stock.bshort`) starts at 120 drink days, not 60; the plot request
+  above covers 'seeds but no plot'.
+- **Tests:** tests/lua/test_bug406_brew_fit.lua (7), test_snapshot_mud.lua (2), tests/test_bug406_408_farm_ground.py (9), test_cli_wake.py (+2).
+- **Live check:** i3-like (one underground plot, surface seeds): `PROJECT_REQUEST farms` in kern.log, a surface farms project; i1-like without a fortcore: `bp sites
+  farms surface=1 --fresh` ranks soil 'from the middle of the snapshot' or says 'no soil and no mud floor' with the DECISION; rain on rock gives `marks.mud`.
 ## Surface core for an aquifer world, area-only wet layers, an applicable propose (BUG-387 to BUG-389, 2026-11-04; offline, live-untested)
 - **Why:** Run 16 region1 (aquifer nearly everywhere): no fort got a dug fortcore ('no dry fortcore site ... (wet level z130)' at every depth in i2, depth=1
   breached heavy_aquifer at 4 % in i1, sites 1-6 steps from water in i3); every room template hangs on the dug Z4 floor, so office, dining, tavern and bedrooms

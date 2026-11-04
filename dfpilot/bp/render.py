@@ -78,7 +78,7 @@ class World:
                 i = w._i(x0, y0 + j, z)
                 w.t[i:i + w.W] = row.encode()
         w.traps = [list(t) for t in snap.get("traps", [])]
-        w.soil = {tuple(p) for p in snap.get("marks", {}).get("soil", [])}
+        w.soil = {tuple(p) for k in ("soil", "mud") for p in snap.get("marks", {}).get(k, [])}   # BUG-407: mud takes plots too
         return w
 
     def _i(self, x, y, z):

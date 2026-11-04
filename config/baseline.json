@@ -222,7 +222,7 @@
              "planters": 4, "plants": ["GRASS_WHEAT_CAVE", "MUSHROOM_HELMET_PLUMP", "POD_SWEET", "BUSH_QUARRY",
                                        "MUSHROOM_CUP_DIMPLE"],
              "details": {"planters": ["Planters"], "gatherers": ["Plant gatherers", "Gatherers", "Herbalists"]}},
-  "gather": {"n": 4, "min_jobs": 10, "off_days": 60, "drink_d": 60, "drink_off": 100},
+  "gather": {"n": 4, "min_jobs": 10, "off_days": 60, "drink_d": 60, "drink_off": 100, "drink_early": 120},
   "cover": {"on": true, "min_jobs": 20, "gather_jobs": 10, "farm_per": 10, "farm_min": 2, "farm_max": 12,
             "gather_per": 25, "gather_min": 2, "gather_max": 8, "other_per": 20, "other_max": 3, "share": 50,
             "step": 4, "idle_days": 7, "stale_days": 30, "unmark_max": 200,

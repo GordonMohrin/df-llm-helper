@@ -1340,8 +1340,8 @@ SNAPSHOT = Obj(req={"v": Const(V), "id": ID, "tick": TICK, "purpose": Str(enum=[
                     "traps": Arr(TRAP)},
                # BUG-043: a union export lists its parts (the main box first; tiles outside every part are " "), a
                # default box its margin (x, y, z)
-               # BUG-297: soil has its own cap (snapshot.lua CFG.soil_max 8000), every other mark list stays at 500
-               opt={"marks": Obj(opt={"soil": Arr(POS, hi=8000)}, extra=Arr(POS, hi=500), keys=r"^[a-z_]{1,20}$"),
+               # BUG-297: soil has its own cap (snapshot.lua CFG.soil_max 8000), BUG-407: so has mud, every other mark list stays at 500
+               opt={"marks": Obj(opt={"soil": Arr(POS, hi=8000), "mud": Arr(POS, hi=8000)}, extra=Arr(POS, hi=500), keys=r"^[a-z_]{1,20}$"),
                     "parts": Arr(BBOX, 1, 24), "margin": Tup([NAT, NAT, NAT]),
                     # BUG-352: a sites export: the citizens' walk group (home) and per level the rows of '1' (a walkable
                     # tile in that group), '0' (in another walk group), '-' (no walkable tile read)

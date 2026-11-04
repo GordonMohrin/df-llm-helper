@@ -82,6 +82,6 @@ def test_farm_hint_replaces_the_fortcore_hint(tmp_path, monkeypatch, fort):
     live = {**snap, "marks": {"soil": _surface_soil(snap)}}
     monkeypatch.setattr(cmd, "fort_manifest", lambda sd: man)
     assert "no soil level in the fort" in cmd.farm_hint(tmp_path, "farms", {}, live, 0)
-    assert cmd.farm_hint(tmp_path, "farms", {"surface": 1}, live, 0) == ""
+    assert "DECISION" in cmd.farm_hint(tmp_path, "farms", {"surface": 1}, live, 0)    # BUG-407: a surface farm names its ground too
     assert cmd.farm_hint(tmp_path, "farms", {}, live, 2) == ""
     assert cmd.farm_hint(tmp_path, "dining", {}, live, 0) == ""
