@@ -140,7 +140,7 @@ local function describe(fn, args, ms)
     a = {{mode = p.mode, command = p.command or 'run', pos = p.pos, cells = n, ms = ms,
           dry = p.dry_run == true and 1 or nil}}
   elseif fn == 'burrow_tiles' and type(a[2]) == 'table' then
-    a = {a[1], {tiles = #a[2], first = a[2][1]}, a[3]}
+    a = {a[1], {tiles = #a[2], first = a[2][1]}, a[3], a[4]}
   end
   local ok, s = pcall(json.encode, json.array(a))
   if not ok then s = '"?"' end
@@ -1419,10 +1419,16 @@ local function impls(state)
   -- burrows screen > add burrow / paint (FR-33, seal's whole-interior alert burrow): the tiles {{x,y,z},...} are
   -- added to the burrow (dfhack.burrows.setAssignedTile, Lua API.txt:2436; the screen's paint brush). With `create`
   -- a missing burrow is made the way the screen's "add burrow" does (v1 Run 4 created 'Zuflucht' the same way).
-  -- Returns the number of tiles newly added.
-  function I.burrow_tiles(name, tiles, create)
+  -- Returns the number of tiles newly added. BUG-330: with `exact` the burrow's tiles are erased first (the screen's erase
+  -- brush over the whole burrow, dfhack.burrows.clearTiles), so it holds exactly `tiles` (water's care burrow Pflege+).
+  function I.burrow_tiles(name, tiles, create, exact)
     if type(name) ~= 'string' or not name:match('^[%w%+%-_ ]+$') or #name > 40 then return false, 'bad burrow name' end
     if type(tiles) ~= 'table' or #tiles > 2000 then return false, 'need at most 2000 tiles' end
+    if exact then
+      -- BUG-096: never a burrow of the fort's own (Kern+, Tiefe+, Innen+, Hebel+): only the care burrow is erased
+      if name ~= 'Pflege+' then return false, 'exact only for the care burrow Pflege+' end
+      if type(dfhack.burrows.clearTiles) ~= 'function' then return false, 'no burrows.clearTiles in this DFHack' end
+    end
     local b = dfhack.burrows.findByName(name)
     if not b then
       if not create then return false, 'no burrow ' .. name end
@@ -1435,6 +1441,7 @@ local function impls(state)
       b.texture_br, b.texture_bg, b.texture_bb = 195, 95, 0
       list.list:insert('#', b)
     end
+    if exact then dfhack.burrows.clearTiles(b) end
     local n = 0
     for _, p in ipairs(tiles) do
       local x, y, z = xyz(p)

@@ -86,7 +86,8 @@ ACT = {
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
-    "burrow_tiles": ["seal", "runner"],          # BUG-298: runner widens a burrow for a seal piece outside it
+    "burrow_tiles": ["seal", "runner", "water"],  # BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
+                                                  # water paints its care burrow Pflege+ (exact)
     "popcap": ["readiness"],
     "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care", "traps"],
@@ -1152,9 +1153,10 @@ STATE = Obj(
          # intake waves (siege, Gordon 2026-10-16): phase, waves so far, the last refusal, the sortie (squad phase)
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
          # M3 (BUG-114): in BREACH ba = ticks since it began, bw = what it waits for (bridges not up and why, quiet clock)
+         # BUG-331: lg = ticks since a long calm SIEGE was eased (deep defense lifted, DECISION_NEEDED siege_long)
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),
                                                                  "deep": Str(maxbytes=24), "ba": NAT,
-                                                                 "bw": Str(maxbytes=100)}),
+                                                                 "bw": Str(maxbytes=100), "lg": NAT}),
          # BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s),
          # exports written and requests dropped this boot; the running (else the first waiting) export: id, purpose,
          # who asked, progress, why it waits ('busy trade', 'paced 3 min', 'not started 2 min')

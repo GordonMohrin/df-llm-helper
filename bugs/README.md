@@ -338,6 +338,8 @@ Related: FR-xx, BUG-xx
 | [BUG-324](BUG-324-found-water-never-becomes-accepted-water.md) | fixed (offline, live-untested) | high | Run 15: water the scan found never becomes accepted water: no hospital, no GiveWater source | water.lua, act.lua |
 | [BUG-325](BUG-325-water-scan-reach-from-one-citizen.md) | fixed (offline, live-untested) | medium | Run 15: the water scan asks the walk from one citizen, one in another walk group hides every well spot | water.lua |
 | [BUG-326](BUG-326-drills-and-alerts-empty-hunters-and-fishers.md) | fixed (offline, live-untested) | high | Run 15c: drills at 30-42 food days and every alert empty the hunters and fishers | drill.lua, economy.lua |
+| [BUG-330](BUG-330-patient-dies-of-thirst-outside-the-lockdown.md) | fixed (offline, live-untested) | critical | Run 15b: a patient outside the alert burrow dies of thirst while 77 carers wait inside; the verdict names the alert, not the missing water | water.lua, siege.lua, act.lua |
+| [BUG-331](BUG-331-long-calm-siege-keeps-the-fort-locked-down.md) | fixed (offline, live-untested) | high | Run 15b: a calm siege of 64+ days keeps the deep defense and the dry refuge, nothing eases, nobody asks to attack | siege.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

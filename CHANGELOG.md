@@ -1,5 +1,27 @@
 # CHANGELOG dfpilot
 
+## Run 15b lockdown: carriers to a patient outside the alert burrow, a long calm siege is eased (BUG-330, BUG-331, 2026-11-04; offline, live-untested)
+- **Why:** Earthboat y385 (i3): SIEGE for 70 days (tick 155285731-155370107), 35 goblins 37-84 tiles out, none inside; the deep
+  defense (`weak: worn 56% < 60%`, siege.lua:1963 deep_step, never lifted) held the civilians in the dry Tiefe+; patient 26629 lay at
+  74,83,138 outside it and died of thirst (#6966, 75000) while 77 carers waited idle inside. Nothing let a carrier out (water.lua:1536
+  patients_out only reported, siege.lua:957 alert_list held the mode burrow and lever rooms); the verdict (water.lua:1713) named
+  only the alert although no water was accepted at all (well 17700 dry, no zone). A SIEGE ends only on quiet (siege.lua:830-838),
+  an army in sight never is.
+- **What changed:** water `care_step`: while the civ alert sounds, a patient over `care_thirst` 30000 outside every alert burrow,
+  with a fresh census and no hostile within `care_near` 20, gets his tile + the nearest accepted water + a free bucket painted
+  exactly into `Pflege+` (act.burrow_tiles `exact`, refused for every other burrow), `water.care_rooms` names it, siege's
+  alert list appends it; closes on a hostile near / patient fine / alert off. The `alert` verdict adds `and no accepted water ...:
+  nothing to carry` or `Pflege+ opened to him`; PATIENTS_OUT `d.care`. siege `long_step` (reflex.json `siege_long` on/days 10/near 25):
+  `days` calm days in a SIEGE (nobody inside, every distance to O1, bridges and citizens outside over `near`) lift the deep defense
+  (no destroyers) and keep it off, DECISION_NEEDED `siege_long` (A, once) with the `squad.sortie` command, state `wave.lg`, brief
+  `eased N d`; an approach ends it. Contract: burrow_tiles owners + water; wave.lg; fairplay `siege_long`, water `care*` keys;
+  RULES, wake hint `siege_long_hint`.
+- **Tests (fail on 9b6f614):** tests/lua/test_bug330_care_burrow.lua (4), tests/lua/test_bug331_siege_long.lua (4),
+  tests/test_bug330_331_lockdown.py (4).
+- **Live check:** Earthboat after a reload: 10 calm days -> kern.log `siege: SIEGE N days ... calm`, DECISION_NEEDED siege_long,
+  alert on Kern+; a patient over 30000 outside -> `water: care burrow Pflege+ opened ...` (only with accepted water). Uncertain: DF's
+  burrow rule for paths and the well/bucket outside the carrier's own burrow; Kern+ passing seal's audit for the population.
+
 ## Run 15b bridge traps: a stone-fall lane behind the drawbridges of a fort without a door way in (BUG-317, 2026-10-29; offline, live-untested)
 - **Why:** Earthboat (entered over O1/B1 only) y383-385: `bp sites traps` -> `no way in left to trap (0 door(s) ...)`, `traps 0`,
   plan propose never drafted traps in P5 (G14 red). Root cause dfpilot/bp/traps.py:247 `ways_in` reads door tiles only;
