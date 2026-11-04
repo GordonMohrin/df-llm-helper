@@ -46,6 +46,9 @@ local function world(opts)
   if (opts.drinks or 20) > 0 then F.item(W, 'DRINK', {stack_size = opts.drinks or 20}) end
   F.item(W, 'FOOD', {stack_size = opts.food or 2000, subtype = 1})
   for mi, n in pairs(opts.seeds or {}) do F.item(W, 'SEEDS', {mat_type = 419, mat_index = mi, stack_size = n}) end
+  if opts.dry then                                              -- BUG-391: siege found a cut-off group over the thirst mark
+    W.load({name = 'siege', every = {ticks = 100000}, dry_group = function() return opts.dry end})
+  end
   if opts.still then F.workshop(W, 'Still') end
   if opts.kitchen then F.workshop(W, 'Kitchen') end
   W.act_result('farm_crop', function(id, s, crop)
@@ -128,6 +131,18 @@ T.test('BUG-259: drink below the alarm line with nobody thirsty: no supply alarm
   days(W, 1)
   T.eq(select(2, W.K.call('economy', 'alarm')), 'drink 0 d')
   T.eq(#decisions(W, 'thirst'), 1)
+end)
+
+T.test('BUG-391: drink below the alarm line, nobody thirsty in the census, but siege found 4 citizens of a cut-off walk group ' ..
+       'over the thirst mark: no "they drink water" all-clear, the supply alarm and DECISION_NEEDED thirst speak, the status ' ..
+       'names the stranded', function()
+  local W = world{cit = 6, drinks = 0, still = true, dry = {n = 4, thirst = 34937, grp = 2829}}
+  days(W, 10)
+  T.ok(select(2, W.K.call('economy', 'alarm')) ~= nil, 'live: no alarm while 4 died of thirst')
+  T.ok(#decisions(W, 'thirst') >= 1, 'the thirst question (every 7 days)')
+  T.ok(not log_has(W, 'drink 0 days but nobody thirsty'), 'no all-clear line')
+  local dwhy = W.state().stock.dwhy or ''
+  T.ok(dwhy:find('4 stranded without drink (group 2829)', 1, true) and not dwhy:find('nobody thirsty', 1, true), dwhy)
 end)
 
 T.test('BUG-256: the running season\'s slot of a crop without a usable seed is chosen again (a crop with seeds only); ' ..

@@ -508,23 +508,29 @@ local function grp_at(x, y, z)
   if not des or des.hidden then return -1 end
   return int(dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))) or -1
 end
-local function grp_near(x, y, z, near)
+-- BUG-390: with `prefer` ({[group] = true}, the citizens' groups) the neighbour in a preferred group wins over the first one
+-- (a tree on the brook's bank has the far bank's tile first in the list: a woodcutter fells it from the near one)
+local function grp_near(x, y, z, near, prefer)
   local own = grp_at(x, y, z)
   if own ~= 0 or not near then return own end
+  local first
   for _, d in ipairs(NEAR) do
     local g = grp_at(x + d[1], y + d[2], z + d[3])
-    if g > 0 then return g end
+    if g > 0 then
+      if not prefer or prefer[g] then return g end
+      first = first or g
+    end
   end
-  return 0
+  return first or 0
 end
-function M.groups(K, pts, near)
+function M.groups(K, pts, near, prefer)
   local out, lim = {}, M.CFG.group_pts or 4000
   for i, p in ipairs(type(pts) == 'table' and pts or {}) do
     local g = -1
     if i <= lim and type(p) == 'table' then
       local x, y, z = int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])
       if x and y and z then
-        local ok, v = pcall(grp_near, x, y, z, near)
+        local ok, v = pcall(grp_near, x, y, z, near, type(prefer) == 'table' and prefer or nil)
         g = ok and v or -1
       end
     end
@@ -1230,22 +1236,60 @@ function M.pending(K, id)
   return false
 end
 
--- BUG-352: the walk group most citizens stand in (nil on a fault or without one); a map-wide read per sites export
-function M.home_group()
-  local cnt, best, bn = {}, nil, 0
+-- BUG-390 (Run 16d Mazelanterns: every sites export carried a different wg.home - 2461, 2953, 3327, 3697 - and 7529 of 7531
+-- tiles were '0'; DFHack renumbers the walk groups whenever the map changes, also while an export runs for minutes, so the id
+-- read at the start matched nothing by the time the rows were read): the home groups are re-read from the citizens' tiles
+-- before every row. home_set(K, ids): from the group ids the citizens stand on, the set {[id] = true} of the groups that
+-- count as theirs (the one most stand on, plus every group with a fifth of them: a brook bridge splits a fort in two, two
+-- stranded dwarves are not a fort) and the best one. economy's reach checks (FellTree, idle noreach) use the same set.
+local HOME_SHARE = 5                    -- a group holds >= 1/HOME_SHARE of the citizens read
+function M.home_set(_K, ids)
+  local cnt, best, bn, total = {}, nil, 0, 0
+  for _, g in ipairs(type(ids) == 'table' and ids or {}) do
+    g = int(g)
+    if g and g > 0 then
+      total = total + 1
+      cnt[g] = (cnt[g] or 0) + 1
+      if cnt[g] > bn or (cnt[g] == bn and g < best) then best, bn = g, cnt[g] end
+    end
+  end
+  local set = {}
+  for g, n in pairs(cnt) do if n * HOME_SHARE >= total then set[g] = true end end
+  if best then set[best] = true end
+  return set, best
+end
+
+-- the tiles the citizens stand on (up to 40: the probes whose groups are re-read per row); nil without one
+function M.home_probes()
+  local pts = {}
   pcall(function()
-    local n = 0
     for _, c in ipairs(dfhack.units.getCitizens(true)) do
-      n = n + 1
-      if n > 80 then break end
-      local g = dfhack.maps.isValidTilePos(c.pos) and dfhack.maps.getWalkableGroup(c.pos)
-      g = int(g)
-      if g and g > 0 then
-        cnt[g] = (cnt[g] or 0) + 1
-        if cnt[g] > bn then best, bn = g, cnt[g] end
-      end
+      if #pts >= 40 then break end
+      if dfhack.maps.isValidTilePos(c.pos) then pts[#pts + 1] = {c.pos.x, c.pos.y, c.pos.z} end
     end
   end)
+  return #pts > 0 and pts or nil
+end
+
+-- the home groups now: (set, best) of the probes' current groups; nil on a fault or without a group
+function M.home_now(probes)
+  local ids = {}
+  pcall(function()
+    for _, p in ipairs(probes) do
+      local g = dfhack.maps.getWalkableGroup(xyz2pos(p[1], p[2], p[3]))
+      ids[#ids + 1] = int(g) or 0
+    end
+  end)
+  local set, best = M.home_set(nil, ids)
+  if not best then return nil end
+  return set, best
+end
+
+-- BUG-352: the walk group most citizens stand in (nil on a fault or without one); a map-wide read per sites export
+function M.home_group()
+  local probes = M.home_probes()
+  if not probes then return nil end
+  local _, best = M.home_now(probes)
   return best
 end
 
@@ -1279,7 +1323,8 @@ local function start(K, j)
   -- BUG-352: a sites export carries each walkable tile's group against the citizens' (wg), so the ranking drops sites
   -- the citizens cannot reach (the far side of a brook)
   if j.purpose == 'sites' then
-    j.home = M.home_group()
+    j.probes = M.home_probes()
+    if j.probes then j.hset, j.home = M.home_now(j.probes) end
     if j.home then j.grows = {} end
     j.aqn = {}        -- BUG-359: revealed tiles with the aquifer flag per level (M.revealed_aquifer; hidden tiles never)
   end
@@ -1358,7 +1403,7 @@ local function scan_span(j, y, z, x0, x1)
       if WALKCH[c] then                               -- BUG-352: 1 = the citizens' group, 0 = another walk group
         local okg, g = pcall(dfhack.maps.getWalkableGroup, xyz2pos(x, y, z))
         g = okg and int(g) or nil
-        if g and g > 0 then gc = g == j.home and '1' or '0' end
+        if g and g > 0 then gc = j.hset[g] and '1' or '0' end
       end
       gout[#gout + 1] = gc
     end
@@ -1369,6 +1414,10 @@ end
 -- one row (x0..x1) of level z -> its text and the tiles read; BUG-043: only inside the job's parts, ' ' elsewhere
 local function scan_row(j, y, z)
   local b = j.bbox
+  if j.probes then                      -- BUG-390: the walk group ids move while an export runs: read the home groups again
+    local set, best = M.home_now(j.probes)
+    if set then j.hset, j.home = set, best end
+  end
   if #j.parts > 1 or not contains(j.parts[1], b) then
     local out, gout, x, n = {}, {}, b[1], 0
     for _, s in ipairs(row_spans(j.parts, y, z)) do

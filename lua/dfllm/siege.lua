@@ -508,6 +508,35 @@ function M.rescue_close(K, r, now)
   end
 end
 
+-- BUG-391 (Run 16a Bachwald y378: 4 citizens on walk group 2829 over thirst 34,937 with 'no rescue (no raised bridge leads
+-- to drink)', 8 dead of thirst; a water zone existed but their group could not reach it): no bridge brings them drink, so
+-- the kernel cannot save them alone; a class-A DECISION_NEEDED stranded_drink says where they stand and the commands
+-- that help (the walk groups, the water sources, the well sites near them; `bp sites --near` takes a site on THEIR group),
+-- again only for news (CAD: more citizens or another cause)
+local function dry_decision(K, e, now)
+  local pos = string.format('%d,%d,%d', e.pos[1], e.pos[2], e.pos[3])
+  local rec = mem.dry_rec
+  local T = K.now()
+  local toks = {'drink'}
+  if not CAD.due(rec, T, e.ids, toks, {ticks = 2 * M.STRAND_CONFIRM, wall_s = 120}) then return end
+  mem.dry_rec = CAD.mark(T, e.ids, toks)
+  local q = string.format('%d citizens on walk group %d at %s have no drink they can reach (thirst %d): no bridge leads '
+                          .. 'to one; a water zone elsewhere does not help them. Open a way (ramp, stair, bridge) or build '
+                          .. 'a well on their side', #e.ids, e.g, pos, e.thirst)
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'stranded_drink', q = q:sub(1, 200), n = #e.ids, cmds = {
+    'dfllm cmd inspect what=reach', 'dfllm cmd inspect what=water_sources',
+    string.format('dfllm bp sites cistern --near %s --within 20 --fresh', pos)}})
+  K.log('warn', 'siege: stranded_drink: %s', q)
+end
+
+-- public (BUG-391, economy): the citizens of one walk group over the thirst mark with no drink on their group (a bridge
+-- may or may not bring it): {n, thirst, grp, pos}; nil when none was found in the last two days
+function M.dry_group(K)
+  local d = mem.dry
+  if type(d) ~= 'table' or K.now().tick - (d.tick or 0) > 2 * M.STRAND_CONFIRM then return nil end
+  return d
+end
+
 -- (a) the rescue: open one, watch one, close it
 local function rescue_step(K, a, g, now)
   local str = st.str
@@ -575,12 +604,16 @@ local function rescue_step(K, a, g, now)
       break
     end
   end
-  if not any then mem.str_seen = nil; return end         -- BUG-278: nobody over a mark: the next one starts afresh
+  if not any then mem.str_seen, mem.dry = nil, nil; return end   -- BUG-278: nobody over a mark: the next one starts afresh
   local G = groups(K)
   if not G then return end
   relax_step(K, G)                                         -- (e) BUG-031: the confinement, not a bridge
   local e = cut_off(K, G)
+  if not (e and e.need.drink) then mem.dry = nil end
   if not e then return end
+  if e.need.drink then                                     -- BUG-391: economy's 'they drink water' all-clear reads this
+    mem.dry = {n = #e.ids, thirst = e.thirst, grp = e.g, pos = e.pos, tick = now}
+  end
   local base = string.format('%d citizens on walk group %d without %s (thirst %d, hunger %d)', #e.ids, e.g,
                              needs_txt(e), e.thirst, e.hunger)
   local d = {grp = e.g, n = #e.ids, units = e.ids, thirst = e.thirst, hunger = e.hunger, pos = e.pos,
@@ -619,6 +652,7 @@ local function rescue_step(K, a, g, now)
     else for _, b in ipairs(bs or {}) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end end
     d.why, d.bridges = why, bs
     stranded(K, 'refused', string.format('%s: no rescue (%s)', base, why), d, e.ids, {'refused', why})
+    if e.need.drink and not bs then dry_decision(K, e, now) end
     return
   end
   str.rescue, dirty = {list = bs, grp = e.g, ids = e.ids, since = now, need = e.need, pz = calm or nil}, true

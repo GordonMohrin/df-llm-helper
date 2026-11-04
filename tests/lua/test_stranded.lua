@@ -502,4 +502,34 @@ T.test('BUG-031: "no rescue (the outside is not verified sealed)" names the way 
   T.ok(e.msg:find('no rescue (the outside is not verified sealed: leak at 30,13,5 Door closed)', 1, true), e.msg)
 end)
 
+T.test('BUG-391: citizens on a cut-off group over the thirst mark, no bridge brings drink: DECISION_NEEDED stranded_drink ' ..
+       'with the commands (once), and economy has no "they drink water" all-clear while siege knows them', function()
+  -- old code: STRANDED refused 'no raised inner or core bridge leads to drink' and nothing else; Run 16a Bachwald: 8 dead
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  trapped(W, {{11, 10, 20, 40000}, {12, 11, 21, 41000}})     -- on the field outside O1, no drink there
+  local n = 0
+  while n < 40 and #evs(W, 'STRANDED') == 0 do run(W, 100); n = n + 1 end
+  local e = evs(W, 'STRANDED')[1]
+  T.ok(e and e.d.phase == 'refused' and e.msg:find('leads to drink', 1, true), e and e.msg or 'no STRANDED')
+  local ds = {}
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_drink' then ds[#ds + 1] = x end end
+  T.eq(#ds, 1, 'one decision')
+  T.eq({ds[1].cls, ds[1].d.n}, {'A', 2})
+  T.ok(ds[1].d.q:find('2 citizens on walk group', 1, true) and ds[1].d.q:find('10,20,5', 1, true) and
+       ds[1].d.q:find('thirst 41000', 1, true), ds[1].d.q)
+  local cmds = table.concat(ds[1].d.cmds, ' | ')
+  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('bp sites cistern --near 10,20,5 --within 20', 1, true), cmds)
+  run(W, 1500)
+  local again = 0
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_drink' then again = again + 1 end end
+  T.eq(again, 1, 'not again for the same set')
+  local ok, g = W.K.call('siege', 'dry_group')
+  T.ok(ok and g and g.n == 2 and g.thirst == 41000, 'dry_group: ' .. tostring(g and g.n))
+  W.move(11, 50, 18, Z); W.move(12, 51, 18, Z)               -- they reach the core and drink
+  W.unit(11).counters2.thirst_timer, W.unit(12).counters2.thirst_timer = 0, 0
+  run(W, 400)
+  local _, g2 = W.K.call('siege', 'dry_group')
+  T.eq(g2, nil, 'gone with the thirst')
+end)
+
 T.done()

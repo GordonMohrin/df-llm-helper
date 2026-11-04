@@ -3184,6 +3184,14 @@ local function alarm_check(K, c, p, days)
   -- drank at the brook): low drink days alone are no alarm while the thirst timers show the citizens drink water; the
   -- alarm and the thirst wake need one citizen past alarm.thirst (an unreadable census keeps the old rule)
   local dry = days.drink_d < a.days and (thirsty > 0 or not okn)
+  -- BUG-391 (Run 16a Bachwald: 'nobody thirsty: they drink water' while 4 citizens on a cut-off walk group stood at thirst
+  -- 34,937 and died): citizens siege found over the thirst mark on a group without drink are thirsty, whatever the
+  -- others do; no all-clear then
+  local okg, sd = K.call('siege', 'dry_group')
+  if okg and type(sd) == 'table' and (math.tointeger(sd.n) or 0) > 0 then
+    thirsty = math.max(thirsty, math.tointeger(sd.n))
+    dry = dry or days.drink_d < a.days
+  end
   local why
   if thirsty >= a.units then why = string.format('thirst %d', thirsty)
   elseif hungry >= a.units then why = string.format('hunger %d', hungry)
@@ -4751,6 +4759,10 @@ function M.drink_why(K, c, r)
   local w = bl[1] and bl[1][2] or nil
   -- BUG-259: below the thirst line with nobody thirsty the status names it (the citizens drink water)
   if st.water then w = (w and (w .. '; ') or '') .. 'nobody thirsty: they drink water' end
+  local okg, sd = K.call('siege', 'dry_group')                 -- BUG-391: a cut-off group without drink is no all-clear
+  if okg and type(sd) == 'table' and (math.tointeger(sd.n) or 0) > 0 then
+    w = string.format('%d stranded without drink (group %s)', math.tointeger(sd.n), tostring(sd.grp)) .. (w and ('; ' .. w) or '')
+  end
   return w and w:sub(1, 80) or nil
 end
 
@@ -7389,6 +7401,16 @@ function M.cover_specs(cv)
   return out
 end
 
+-- BUG-390: the walk groups that count as the citizens' (snapshot.home_set: the biggest and every one with a fifth of them,
+-- the rule the sites ranking uses), from the group ids read at their tiles; all groups with a citizen when the module cannot say
+function M.home_groups(K, cg)
+  local ok, set = K.call('snapshot', 'home_set', cg)
+  if ok and type(set) == 'table' then return set end
+  local home = {}
+  for _, g in ipairs(cg) do if math.type(g) == 'integer' and g > 0 then home[g] = true end end
+  return home
+end
+
 -- open jobs of a kind the citizens can walk to: (reachable open, off the walk group, the sampled positions' flags)
 function M.cv_reach(K, jc, kind)
   local open = math.tointeger(jc[kind .. '_open']) or 0
@@ -7401,10 +7423,10 @@ function M.cv_reach(K, jc, kind)
     if u and okp and math.tointeger(x) then cpts[#cpts + 1] = {x, y, z} end
   end
   local okc, cg = K.call('snapshot', 'groups', cpts, false)
-  local okj, jg = K.call('snapshot', 'groups', pts, true)
-  if not (okc and okj and type(cg) == 'table' and type(jg) == 'table') then return open, 0, {} end
-  local home = {}
-  for _, g in ipairs(cg) do if math.type(g) == 'integer' and g > 0 then home[g] = true end end
+  if not (okc and type(cg) == 'table') then return open, 0, {} end
+  local home = M.home_groups(K, cg)
+  local okj, jg = K.call('snapshot', 'groups', pts, true, home)      -- BUG-390: a tree answers the citizens' group when it touches it
+  if not (okj and type(jg) == 'table') then return open, 0, {} end
   if next(home) == nil then return open, 0, {} end
   local far, nf = {}, 0
   for k = 1, #pts do
@@ -11437,11 +11459,10 @@ M.inspect.workload = function(K, args)
     end
   end)
   local okc, cg = K.call('snapshot', 'groups', pts, false)
-  local okj, jg = K.call('snapshot', 'groups', open_p, true)
   cg = okc and type(cg) == 'table' and cg or {}
+  local home = M.home_groups(K, cg)
+  local okj, jg = K.call('snapshot', 'groups', open_p, true, home)     -- BUG-390
   jg = okj and type(jg) == 'table' and jg or {}
-  local home = {}
-  for _, g in ipairs(cg) do if math.type(g) == 'integer' and g > 0 then home[g] = true end end
   local known = next(home) ~= nil
   -- FR-72 (Run 12 y504: 275 GatherPlants jobs, HERBALIST on nobody, '0 without reachable work'): a job type of
   -- cover.labors whose labor no adult citizen holds is not work for the idle: counted apart, named in the line
