@@ -329,7 +329,7 @@
   "give_stuck_days": 2
  },
  "runner": {
-  "seal_first": {"on": true, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": true, "wall_days": 2},
+  "seal_first": {"on": true, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": true, "wall_days": 2, "esc_days": 30},
   "rebuild": {"pop": 10, "off": 12},
   "care_first": {"on": true, "stuck_days": 10, "patients": 1},
   "queue": {"yield_days": 7, "park_days": 30, "idle_days": 30},

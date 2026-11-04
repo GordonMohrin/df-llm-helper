@@ -79,7 +79,7 @@ def test_status_shows_the_open_seal_the_stuck_seal_and_the_rebuild(save):
 def test_runner_config_validates(tmp_path):
     cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
     assert cfg["runner"] == {"seal_first": {"on": True, "stuck_days": 3, "food_d": 30, "drink_d": 30, "wall": True,
-                                            "wall_days": 2},
+                                            "wall_days": 2, "esc_days": 30},          # BUG-336
                              "rebuild": {"pop": 10, "off": 12}, "care_first": {"on": True, "stuck_days": 10, "patients": 1},
                              "queue": {"yield_days": 7, "park_days": 30, "idle_days": 30},   # BUG-328
                              "reclaim": {"on": True, "gone_scans": 2, "min_ws": 3, "ask_days": 3}}   # BUG-116 adds care_first

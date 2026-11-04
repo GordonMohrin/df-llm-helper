@@ -260,6 +260,19 @@ T.test('BREACH (hostile inside), B2 lever linked inside Tiefe+: alert Tiefe+ alo
   invariants(W)
 end)
 
+-- BUG-336 review (Run 15b Earthboat y387): seal refuses an open refuge in a BREACH, so the civilians stay in Kern+; the
+-- lever order followed the refuge regardless (its levers class 1, the Kern+ ones class 3: nobody confined takes them).
+-- Now it follows seal's BREACH pick (seal.breach_pick): the Kern+ landing lever of B2 comes before the refuge lever
+T.test('BUG-336 review: BREACH while seal picks Kern+ (the refuge open): B2 is pulled from its Kern+ lever first, not ' ..
+       'from the refuge lever nobody confined reaches (old: the refuge lever first, as if the civilians sat there)', function()
+  local seal = {name = 'seal', every = {ticks = 100000}, breach_pick = function() return 'Kern+' end}
+  local W, tb = breach_inside{prep = function(W) W.load(seal) end}
+  local p = S.pulls(W, 'B2')
+  T.ok(#p >= 1, T.show(p))
+  T.ok(p[1].lever ~= lever_at(W, REF.B2), 'old: the refuge lever first')
+  invariants(W)
+end)
+
 T.test('BREACH fallback (no B2 lever in Tiefe+, a pre-L3 fort): alert Tiefe+ and the B2 room; B2 pullers raise B2; no GATE_FAIL', function()
   local m = manifest()
   m.bridges.B2.levers = {{54, 66, Z}, {55, 66, Z}}

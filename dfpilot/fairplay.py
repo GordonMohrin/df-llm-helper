@@ -344,8 +344,10 @@ def water_errors(path: str | Path | None = None) -> list[str]:
 # for good is parked after park_days: out of the pause, the keepers and PLAN_EXHAUSTED, announced once with bp.cancel)
 # BUG-044: seal_first.wall / wall_days = a seal door still not built wall_days (0-60, default 2) after SEAL_STUCK becomes a
 # constructed wall when the citizens keep another way (wall false = never)
+# BUG-336: seal_first.esc_days = a stuck seal without progress this long (1-60, default 30) asks the player
+# (DECISION_NEEDED seal_stalled), again every esc_days; the refuge's seal is never set aside
 RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d": (0, 400), "drink_d": (0, 400),
-                                   "wall": "bool", "wall_days": (0, 60)},
+                                   "wall": "bool", "wall_days": (0, 60), "esc_days": (1, 60)},
                     "rebuild": {"pop": (0, 250), "off": (0, 250)},
                     # BUG-116: care first (runner.lua Q.care_lead): the hospital project leads while hospital_out is set or
                     # `patients` patients lie in the fort; stuck_days without progress lifts the pause

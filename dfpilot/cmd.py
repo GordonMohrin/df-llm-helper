@@ -830,6 +830,30 @@ def _unboxed_head(snap: dict | None, x: int, y: int, zr: int, top: int) -> int |
     return None
 
 
+FOOT_NOTE = ("refuge: doors close every tile beside the stair foot {} (BUG-336): the stair is closed off the refuge, no "
+             "hatch is demanded on its head")
+
+
+def foot_closed(snap: dict | None, x: int, y: int, zr: int) -> bool:
+    """BUG-336 review (seal.lua refuge_foot): the stair foot x,y,zr is a stair and every tile beside it on the refuge level a
+    walker stands on carries a door/hatch ('+'), at least one; a hidden or missing neighbour: False (unknown)."""
+    if _snap_char(snap, x, y, zr) not in tuple(STAIR_CHARS):
+        return False
+    n = 0
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            c = _snap_char(snap, x + dx, y + dy, zr)
+            if c is None or c == "?":
+                return False
+            if c == "+":
+                n += 1
+            elif c in STAND_CHARS:
+                return False
+    return n > 0
+
+
 def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
     """BUG-123/124 (Run 14 note 102: `seal at=refuge` was demanded for a manifest stair on undug rock, then failed with "the
     tile is not revealed"): the refuge's stair head as the map shows it, from revealed tiles only (the newest snapshot; fair
@@ -841,7 +865,9 @@ def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
       hidden    the head tile is not revealed and no other tile above it is, but a tile of the stair at or below the
                 refuge level is a stair: the stair is real, the hatch has no tile (head None; the kernel asks once);
       nostair   the head tile is revealed and not a stair, or nothing of the stair column is revealed as a stair: it was
-                never dug (head None; the manifest entry stays, flagged).
+                never dug (head None; the manifest entry stays, flagged);
+      foot      BUG-336 review: no closer on the head, but doors close every tile beside the stair foot on the refuge
+                level (the kernel's seal_stalled offers them when the hatch is never built): head None, nothing demanded.
     head = 'x,y,z kind' of the tile `seal at=refuge` closes (None for hidden and nostair); note = the plan check's text."""
     col = _refuge_column(save_dir)
     if col is None:
@@ -852,6 +878,8 @@ def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
     man = "%d,%d,%d %s" % (x, y, zr + 1, "stair_down" if top == zr + 1 else "stair_updown")
     xyz = "%d,%d,%d" % (x, y, zr + 1)
     out = {"state": "ok", "head": man, "man": man, "note": ""}
+    if c0 != "+" and foot_closed(snap, x, y, zr):     # BUG-336 review: the doors round the foot close it instead
+        return {"state": "foot", "head": None, "man": man, "note": FOOT_NOTE.format("%d,%d,%d" % (x, y, zr))}
     if c0 is not None and c0 in STAIR_CHARS:            # BUG-313: a head walled in on its level moves up the stair
         zb = _unboxed_head(snap, x, y, zr, top)
         if zb is not None:

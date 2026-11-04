@@ -672,8 +672,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "SEAL_WALLED": ("B", "runner", _d("proj:s at:s", "was:s days:i why:s")),
     # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
     # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
+    # BUG-336/337: ropen = the refuge's open way in (seal.refuge_open: it is not the civilians' burrow), soft = what alone
+    # closes its stair head with building destroyers in sight (hatch | door: they break it)
     "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "
-                                              "pos:p")),
+                                              "pos:p ropen:s soft:s")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     # Run 11: cause far (ended with hostiles in sight beyond reflex.lockdown_near; far names <= 3, nfar) or quiet
@@ -695,8 +697,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): the civ alert's burrow changed in SIEGE or
     # BREACH; why = breached (a hostile in it), unseparated (an opening reaches it), gone, dry (seal.dry: thirsty or
     # hungry there), window (a refuge without drink after refuge.breach_days), unreachable, released (BUG-331 review: the
-    # eased siege lifted the deep defense, out of the refuge), deeper (to the refuge, away from the entrances: BREACH or
-    # the deep defense); to '' = the alert off (no usable burrow)
+    # eased siege lifted the deep defense, out of the refuge), unsealed (BUG-336: the refuge's own way in is open, out of
+    # it), deeper (to the refuge, away from the entrances: BREACH or the deep defense); to '' = the alert off (no usable
+    # burrow)
     "REFUGE_SWITCH": ("B", "seal", _d("from:s to:s why:s mode:s", "level:s")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f slots:sa")),
@@ -1153,7 +1156,13 @@ STATE = Obj(
                                                              "dr": NAT, "dn": NAT, "st": NAT,
                                                              # BUG-049: trusted (1) or not (0) and the first reason
                                                              # (separation fresh, hatch stands, nobody inside)
-                                                             "tr": FLAG, "trw": Str(maxbytes=40)}),
+                                                             "tr": FLAG, "trw": Str(maxbytes=40),
+                                                             # BUG-336: its own way in (the stair head) is open: never
+                                                             # the civ alert's burrow in a SIEGE or BREACH
+                                                             "op": FLAG,
+                                                             # BUG-337 review: building destroyers in sight and only
+                                                             # a hatch or door closes it (they break it)
+                                                             "sf": FLAG}),
                                              # BUG-096/FR-80: the worst open burrow episode: how many, the burrow, its tiles
                                              # at the last good reading and now, the cause (load | runtime), the tiles
                                              # painted again, what the repair does ('repairing', 'waits for peace', 'repair
