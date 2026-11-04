@@ -694,8 +694,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
                                                              "pull:i nnew:i newu:ia")),
     # Run 11 (siege 8: the refuge switched Tiefe+/Kern+ during the fight): the civ alert's burrow changed in SIEGE or
     # BREACH; why = breached (a hostile in it), unseparated (an opening reaches it), gone, dry (seal.dry: thirsty or
-    # hungry there), window (a refuge without drink after refuge.breach_days), unreachable, deeper (to the refuge, away
-    # from the entrances: BREACH or the deep defense); to '' = the alert off (no usable burrow)
+    # hungry there), window (a refuge without drink after refuge.breach_days), unreachable, released (BUG-331 review: the
+    # eased siege lifted the deep defense, out of the refuge), deeper (to the refuge, away from the entrances: BREACH or
+    # the deep defense); to '' = the alert off (no usable burrow)
     "REFUGE_SWITCH": ("B", "seal", _d("from:s to:s why:s mode:s", "level:s")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f slots:sa")),

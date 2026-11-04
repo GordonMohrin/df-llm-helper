@@ -388,11 +388,12 @@ def lone_hint(d: dict) -> str:
 
 def siege_long_hint(d: dict) -> str:
     """BUG-331: a SIEGE calm for siege_long.days (nobody inside, every hostile far): the kernel eased it (the deep defense
-    lifted, the civilians back to Kern+); attacking is the player's call."""
+    lifted, the civilians back to Kern+ or where seal keeps them: d.to); attacking is the player's call."""
     cmd = d.get("cmd")
+    where = f"civilians in {d['to']}" if d.get("to") else "civilians in Kern+"   # BUG-331 review: seal's real pick
     how = f"; to attack: {cmd} (approve:true is a logged decision, only if the squad can win)" if cmd else "; no squad to send"
     return (f"tell Gordon: the siege has been calm for {d.get('days', '?')} days (nearest hostile {d.get('n', '?')} tiles), "
-            f"the kernel eased it (civilians in Kern+, the bridges stay up){how}; otherwise wait")
+            f"the kernel eased it ({where}, the bridges stay up){how}; otherwise wait")
 
 
 PATIENTS_OUT_HINT = ("patients lie outside the alert burrow and cannot walk there: only a rescue moves them. Tell Gordon; "

@@ -3576,10 +3576,14 @@ end
 -- (`cur`) is left only for a reason worse than staying. leave_why returns the reason key and its text, nil = keep it:
 -- gone (the burrow is missing), dry (seal.dry: siege found them dehydrating or starving there, its fight mark),
 -- unseparated (an opening reaches it; the refuge keeps the dead-end tolerance, dead_gap), breached (a visible hostile
--- stands in it), unreachable, window (a refuge without drink after breach_days)
+-- stands in it), unreachable, window (a refuge without drink after breach_days), released (BUG-331 review: siege eased the
+-- SIEGE and lifted the deep defense, r.release: the refuge is left for the free pick, never for no burrow at all)
 local function leave_why(K, au, cur, refuge, t, r)
   local a = au[cur]
   if not (a and a.exists) then return 'gone', 'missing' end
+  if r and r.release and cur == refuge and r.pick and r.pick ~= refuge then
+    return 'released', 'the eased siege lifted the deep defense'
+  end
   local dw = dry_why(cur, a)
   if dw then return 'dry', dw end
   local s = sep_of(cur)
@@ -3644,8 +3648,9 @@ end
 -- <burrow>: <why>[; <interior> kept for the lockdown although <why> | <interior> missing, paint queued | <refuge> is a
 -- dead end ... | no separated burrow ...]') and short ('REFUGE_FAIL <burrow>[, lockdown fallback | , <interior>
 -- missing | , dead end <refuge> | , citizens flee]'); the fourth is true when the citizens are to flee (BUG-018: no
--- separated burrow; siege turns the alert off even in a lockdown).
-function M.alert_burrow(K, mode, default, hold, cur)
+-- separated burrow; siege turns the alert off even in a lockdown). `release` (BUG-331 review): siege eased the SIEGE and
+-- lifted the deep defense: a `cur` refuge is left for the free pick (fight_rule's reason 'released').
+function M.alert_burrow(K, mode, default, hold, cur, release)
   mode = mode or K.mode()
   hold = hold == true
   local kern, refuge = burrow_names(K)
@@ -3660,6 +3665,7 @@ function M.alert_burrow(K, mode, default, hold, cur)
   local r = choose(K, mode, default, hold)
   local au0 = mem.audit and mem.audit.burrows
   if FIGHT[K.mode()] and type(cur) == 'string' and cur ~= '' and cur ~= r.pick and au0 then
+    r.release = release == true and mode == 'SIEGE' or nil       -- BUG-331 review: the eased siege's release
     r = fight_rule(K, r, cur, refuge, au0, t)                    -- Run 11: no switch without a reason
   elseif not (FIGHT[K.mode()] and cur == r.pick) then mem.keep_sig = nil end
   local pick, want, why, forced = r.pick, r.want, r.why, r.forced

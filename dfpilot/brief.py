@@ -936,8 +936,9 @@ def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
                    + (f", sortie {wv['so']}" if wv.get("so") else "")
                    # BUG-030: the deep defense (civilians in the refuge, squads at the core station)
                    + (f", DEEP {wv['deep']}: civilians in the refuge, squads in the core" if wv.get("deep") else "")
-                   # BUG-331: a long calm siege, eased (civilians in Kern+, the bridges up)
-                   + (f", eased {wv['lg'] / 1200:.1f} d: calm, civilians in Kern+" if "lg" in wv else ""))
+                   # BUG-331: a long calm siege, eased (the bridges up); review fix: the burrow seal really holds
+                   + (f", eased {wv['lg'] / 1200:.1f} d: calm, civilians in "
+                      f"{(s.get('alert') or {}).get('burrow') or 'Kern+'}" if "lg" in wv else ""))
     tr = s.get("trade")
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")

@@ -21,7 +21,8 @@ local function owners()
 end
 
 -- opts: patient {id, thirst, pos}, foe (a hostile's position, nil = none in sight), census (false: no hostile census),
--- well (false: no well, no accepted water), alert (default 'Tiefe+')
+-- well (false: no well, no accepted water), alert (default 'Tiefe+'), kern (Kern+'s box, default the whole map), zone (a
+-- wet Water Source zone's tile {x, y, z}), mode (default PEACE)
 local function world(o)
   o = o or {}
   owners()
@@ -48,14 +49,22 @@ local function world(o)
   pu.health = {flags = {needs_healthcare = true}}
   W.move(pt[1], pt[3][1], pt[3][2], pt[3][3])
   W.set_census('u', F.census_u(ids))
-  W.burrow('Kern+', {0, 0, 0, 99, 99, 20})
+  W.burrow('Kern+', o.kern or {0, 0, 0, 99, 99, 20})
+  if o.mode then W.set_mode(o.mode) end
+  local zw = o.zone
   W.burrow('Tiefe+', {40, 40, 2, 60, 60, 2})
   W.load({name = 'snapshot', every = {ticks = 100},
-          tile = function(K, x, y, z) return {c = (x == 20 and y == 12 and z == 4) and '_' or ((x == 20 and y == 12 and z == 3) and '~' or '#'),
-                                              dig = '', bld = ''} end})
+          tile = function(K, x, y, z)
+            if zw and x == zw[1] and y == zw[2] and z == zw[3] then return {c = '~', dig = '', bld = ''} end
+            return {c = (x == 20 and y == 12 and z == 4) and '_' or ((x == 20 and y == 12 and z == 3) and '~' or '#'),
+                    dig = '', bld = ''} end})
   df.global.plotinfo.alerts.civ_alert_idx = 1
   W.load({name = 'siege', every = {ticks = 1000}, alert_names = function() return {o.alert or 'Tiefe+'} end})
   if o.well ~= false then F.building(W, 'WELL', {x1 = 20, y1 = 12, x2 = 20, y2 = 12, z = 5}) end
+  if zw then
+    F.building(W, 'ZONE_WATER_SOURCE', {id = 950, type = df.civzone_type.WaterSource, x1 = zw[1], y1 = zw[2], x2 = zw[1],
+                                        y2 = zw[2], z = zw[3], spec_sub_flag = {active = true}})
+  end
   for i = 1, 3 do F.item(W, 'BUCKET', {_pos = {20, 13 + i, 5}}) end
   W.act_result('work_detail', function(name, id, on) W.unit(id).status.labors[FEED] = on; return true, 'added' end)
   df.global.world.jobs = {list = {next = {item = {job_type = 78, id = 501}}}}
@@ -75,7 +84,8 @@ local function day(W, n)
     if W.hcensus then
       local list = {}
       if W.foe then list[1] = {id = 900, x = W.foe[1], y = W.foe[2], z = W.foe[3], k = 'inv', d_o1 = 50, dc = 50} end
-      W.set_census('h', {tick = W.K.now().tick, vis = #list, inv = #list, inside = 0, list = list})
+      local vis = #list + (W.unlisted or 0)                -- W.unlisted: hostiles in sight cut from the list (LIST_MAX)
+      W.set_census('h', {tick = W.K.now().tick, vis = vis, inv = vis, inside = 0, list = list})
     end
     W.run(100, {skip = 100})
   end
@@ -119,7 +129,8 @@ T.test('BUG-330 (Earthboat y385: patient 26629 outside the alert burrow Tiefe+, 
   W.foe = {70, 83, 5}                                      -- 4 tiles from the patient
   day(W)
   T.eq(M.care_rooms(W.K), {}, 'a hostile near him: closed')
-  T.ok(logged(W, 'care burrow Pflege+ closed: patient 5: a hostile 4 tiles from it'), 'kern.log names why')
+  -- review fix: care_check closes it on the step the census shows him, before the next water run (its painted tile)
+  T.ok(logged(W, 'care burrow Pflege+ closed: 74,83,5: a hostile 4 tiles from it'), 'kern.log names why')
   W.foe = {5, 95, 5}
   day(W)
   T.eq(M.care_rooms(W.K), {'Pflege+'}, 'open again')
@@ -163,6 +174,95 @@ T.test('BUG-330: the civ alert off closes the care burrow', function()
   day(W)
   T.eq(M.care_rooms(W.K), {})
   T.ok(logged(W, 'care burrow Pflege+ closed: the civ alert is off'), 'kern.log')
+end)
+
+---------------------------------------------------------------- review fixes (merge14)
+local function fresh(W, foe, unlisted)
+  local list = {}
+  if foe then list[1] = {id = 900, x = foe[1], y = foe[2], z = foe[3], k = 'inv', d_o1 = 50, dc = 50} end
+  W.set_census('h', {tick = W.K.now().tick, vis = #list + (unlisted or 0), inv = #list, inside = 0, list = list})
+end
+
+T.test('BUG-330 review (1): never in BREACH: an open care burrow closes as soon as the mode is BREACH, and none opens ' ..
+       'in BREACH (the BREACH list is Tiefe+ alone)', function()
+  local W, M = world{foe = {5, 95, 5}}
+  day(W)
+  T.eq(M.care_rooms(W.K), {'Pflege+'})
+  W.set_mode('BREACH')
+  T.eq(M.care_rooms(W.K), {}, 'old code: Pflege+ stays in the BREACH alert list')
+  T.ok(logged(W, 'care burrow Pflege+ closed: BREACH: nobody is drawn out toward a seal that may be down'), 'kern.log')
+  local W2, M2 = world{foe = {5, 95, 5}, mode = 'BREACH'}
+  day(W2)
+  T.eq(#W2.find_acts('burrow_tiles'), 0, 'old code: painted in BREACH')
+  T.eq(M2.care_rooms(W2.K), {})
+end)
+
+T.test('BUG-330 review (1): outside PEACE/ALERT only tiles on Kern+: a patient outside Kern+ in a SIEGE gets no care ' ..
+       'burrow; one on Kern+ (outside Tiefe+) does, with a well and a bucket on Kern+', function()
+  local W, M = world{foe = {5, 95, 5}, mode = 'SIEGE', kern = {0, 0, 0, 60, 60, 20}}
+  day(W)
+  T.eq(#W.find_acts('burrow_tiles'), 0, 'old code: the patient at 74,83,5 outside Kern+ gets the care burrow')
+  T.eq(M.care_rooms(W.K), {})
+  local e = needed(W, 'patient_thirst')
+  T.ok(#e >= 1 and e[#e].d.q:find('patient 5: outside Kern+ in SIEGE', 1, true), e[#e] and e[#e].d.q)
+  local W2, M2 = world{foe = {5, 95, 5}, mode = 'SIEGE', kern = {0, 0, 0, 60, 60, 20}, patient = {5, 46000, {30, 30, 5}}}
+  day(W2)
+  local a = W2.find_acts('burrow_tiles')
+  T.eq(#a, 1)
+  T.ok(has_tile(a[1].args[2], 30, 30, 5) and has_tile(a[1].args[2], 20, 12, 5), 'his tile and the well on Kern+')
+  T.eq(M2.care_rooms(W2.K), {'Pflege+'})
+end)
+
+T.test('BUG-330 review (1): a well on Kern+ is preferred over a nearer Water Source zone; in a SIEGE a zone outside ' ..
+       'Kern+ never counts', function()
+  local W, M = world{foe = {5, 95, 5}, zone = {72, 80, 5}}
+  day(W)
+  local a = W.find_acts('burrow_tiles')
+  T.eq(#a, 1)
+  T.ok(has_tile(a[1].args[2], 20, 12, 5), 'the well on Kern+')
+  T.ok(not has_tile(a[1].args[2], 72, 80, 5), 'old code: the nearer zone (2 tiles from him)')
+  local W2, M2 = world{foe = {5, 95, 5}, zone = {32, 30, 5}, well = false, mode = 'SIEGE', kern = {0, 0, 0, 30, 60, 20},
+                       patient = {5, 46000, {30, 30, 5}}}
+  day(W2)
+  T.eq(#W2.find_acts('burrow_tiles'), 0, 'the only water is a zone outside Kern+')
+  T.eq(M2.care_rooms(W2.K), {})
+end)
+
+T.test('BUG-330 review (2): the open care burrow is re-checked between the water runs: a hostile coming near one of ' ..
+       'its tiles, a stale census or a mode change closes it at once', function()
+  local W, M = world{foe = {5, 95, 5}}
+  day(W)
+  T.eq(M.care_rooms(W.K), {'Pflege+'})
+  fresh(W, {22, 12, 5})                                   -- 2 tiles from the well, no water run in between
+  T.eq(M.care_rooms(W.K), {}, 'old code: open until the next water run')
+  T.ok(logged(W, 'care burrow Pflege+ closed: 20,12,5: a hostile 2 tiles from it'), 'kern.log')
+  local W2, M2 = world{foe = {5, 95, 5}}
+  day(W2)
+  T.eq(M2.care_rooms(W2.K), {'Pflege+'})
+  W2.hcensus = false
+  W2.run(300, {skip = 100})
+  T.eq(M2.care_rooms(W2.K), {}, 'old code: a census up to 1200 ticks old counted')
+  T.ok(logged(W2, 'no fresh hostile census'), 'kern.log')
+  T.eq(M2.CARE_FRESH, 200)
+  local W3, M3 = world{foe = {5, 95, 5}}
+  day(W3)
+  W3.set_mode('ALERT')
+  T.eq(M3.care_rooms(W3.K), {}, 'old code: kept over the mode change')
+  T.ok(logged(W3, 'care burrow Pflege+ closed: the mode changed (PEACE -> ALERT)'), 'kern.log')
+end)
+
+T.test('BUG-330 review (3): a census that sees more hostiles than it lists (sense keeps the 40 nearest O1) gives no ' ..
+       'distance: nothing opens, an open one closes', function()
+  local W, M = world{foe = {5, 95, 5}}
+  W.unlisted = 5
+  day(W)
+  T.eq(#W.find_acts('burrow_tiles'), 0, 'old code: the listed goblin is far, the unlisted ones are not looked at')
+  T.eq(M.foe_dist(W.K, 74, 83, 5), nil)
+  local W2, M2 = world{foe = {5, 95, 5}}
+  day(W2)
+  T.eq(M2.care_rooms(W2.K), {'Pflege+'})
+  fresh(W2, {5, 95, 5}, 3)
+  T.eq(M2.care_rooms(W2.K), {})
 end)
 
 T.done()

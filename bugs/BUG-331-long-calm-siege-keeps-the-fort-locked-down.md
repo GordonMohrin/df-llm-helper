@@ -30,6 +30,16 @@ A hostile within `near` or inside, or no distance measured, ends the easing (ker
 and restarts the clock; the deep defense comes back on its own reasons. The bridges stay up and the civ alert stays on: the
 easing changes the burrow, never the seal. BUG-330's care burrow lets carriers to a patient outside the alert burrow meanwhile.
 
+## Review fix (merge14)
+The eased siege cleared `st.deep`, but seal's `fight_rule` keeps a sounding burrow during a SIEGE without a reason (KEEP): a
+refuge with drink stayed the alert burrow, while DECISION_NEEDED siege_long and the brief said `civilians back to Kern+`. Now
+siege passes `release` to `seal.alert_burrow` while eased without the deep defense; seal's `leave_why` gives the reason
+`released` for a held refuge (only toward a real pick, never in a BREACH; REFUGE_SWITCH why `released`). The question names the
+burrow seal really picks (`back to Kern+` only when it is Kern+, else `deep defense lifted, but the civ alert holds the civilians
+in <burrow>`; `d.to`), the wake hint uses `d.to`, the brief's `eased` line names state `alert.burrow`. Tests: 2 new in
+`tests/lua/test_bug331_siege_long.lua` (a seal stub with the KEEP rule), 1 in `tests/lua/test_seal_refuge.lua` (the real seal), 1
+in `tests/test_bug330_331_lockdown.py`; all fail on merge14.
+
 ## Tests
 `tests/lua/test_bug331_siege_long.lua` (3 BUG-331 tests: eased + asked once, ends on approach and the deep defense comes back,
 off / near army), `tests/test_bug330_331_lockdown.py` (config lint, wake hint, state key). All fail on 9b6f614 but the off/near-army guard (passes on both).

@@ -42,6 +42,21 @@ Labor Feed Patients was not the cause: 77 carers held FEED_WATER_CIVILIANS (`car
 - Contract: act `burrow_tiles` owners seal, runner, water (contract.lua, schema.py, CONTRACTS row); config/baseline.json water keys
   `care` (bool), `care_thirst`, `care_near` (fairplay WATER_LIM).
 
+## Review fix (merge14)
+The care burrow could open where it draws civilians into danger, and stayed open on old data. Now (water.lua `care_step`,
+`care_check`, `foe_dist`):
+- never in BREACH (closed at once; the BREACH alert list is Tiefe+ alone again);
+- outside PEACE/ALERT the patient, water and bucket tiles must lie on Kern+ (the rule of `unforbid_ok`); a well on Kern+ is
+  preferred over a Water Source zone, and a zone counts only when every painted tile of it is on Kern+;
+- the painted tiles are kept in `st.care` and re-checked on every water step and every `care_rooms` ask (siege asks it on every
+  alert set): a hostile within `care_near` of one, a census older than `CARE_FRESH` (now 200 ticks, siege's fresh rule, was 1200),
+  another mode than the one it opened in, or BREACH closes it (kern.log `care burrow Pflege+ closed: <tile>: a hostile N tiles
+  from it`, `the mode changed (PEACE -> ALERT)`, `BREACH: ...`);
+- `foe_dist` gives no distance (unknown, not safe) when the census sees more hostiles than it lists (sense keeps the 40 nearest
+  O1), so a goblin group cut from the list can no longer pass as far.
+Tests: 5 new in `tests/lua/test_bug330_care_burrow.lua` (BREACH, SIEGE outside Kern+, well before zone, re-check between runs,
+truncated list); all fail on merge14. Still not checked: the walk path to the tiles (Kern+ is the bound instead).
+
 ## Tests
 `tests/lua/test_bug330_care_burrow.lua` (4), `tests/lua/test_bug331_siege_long.lua` (the alert list test),
 `tests/test_bug330_331_lockdown.py` (contract, guard, config keys). All fail on 9b6f614.

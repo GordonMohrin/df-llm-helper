@@ -1043,7 +1043,10 @@ local function alert_plan(K, a, g, now)
   local note, brief, audited, flee
   if on then
     local cur = (alert_idx() or 0) ~= 0 and (mem.burrow or sounding_burrow(g)) or nil
-    local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', deep and 'BREACH' or mode, burrow, held, cur)
+    -- BUG-331 review: an eased siege without the deep defense releases the refuge (seal's fight_rule kept it: KEEP)
+    local release = mode == 'SIEGE' and not deep and st.lg ~= nil
+    local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', deep and 'BREACH' or mode, burrow, held, cur,
+                                             release)
     if okb then
       burrow, on, audited, flee = pick, pick ~= nil, true, fl == true
       note, brief = type(why) == 'string' and why or nil, type(short) == 'string' and short or nil
@@ -2065,7 +2068,7 @@ local function lg_target(K)
   return best
 end
 
-local function long_step(K, a, now)
+local function long_step(K, a, g, now)
   local c = lg_cfg(K)
   if not c.on or K.mode() ~= 'SIEGE' or not (a and a.fresh) then return end
   local d = lg_nearest(a)
@@ -2086,6 +2089,14 @@ local function long_step(K, a, now)
     mem.kill_sig, mem.kill_set = nil, nil      -- the posture change re-issues every squad's orders
   end
   st.lg, dirty = {t = now, d = d}, true
+  -- BUG-331 review: where the civilians really go (seal may keep another burrow): the same decision as the step
+  local to = g.kern
+  if lifted then
+    local on, pick = alert_plan(K, a, g, now)
+    to = on and pick or nil
+  end
+  local back = to == g.kern and string.format(', deep defense lifted: the civilians back to %s (food, drink, patients)', g.kern)
+               or string.format(', deep defense lifted, but the civ alert holds the civilians in %s', tostring(to or 'none'))
   local days = (now - st.t0) // M.LG_DAY
   local e = lg_target(K)
   local cmd, key, n
@@ -2096,9 +2107,9 @@ local function long_step(K, a, now)
   end
   local q = string.format('SIEGE %d days, %d calm: no hostile inside Kern+ or within %d tiles (nearest %d, %d visible)%s; '
                           .. 'attack: %s; else wait (the bridges stay up)', days, (now - st.lc) // M.LG_DAY, c.near, d,
-                          a.vis or 0, lifted and ', deep defense lifted: the civilians back to Kern+ (food, drink, patients)'
-                          or '', cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or 'no squad to send')
-  local dd = {id = 'siege_long', q = q:sub(1, 200), days = days, n = d, vis = a.vis or 0, lifted = lifted and 1 or 0}
+                          a.vis or 0, lifted and back or '', cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or 'no squad to send')
+  local dd = {id = 'siege_long', q = q:sub(1, 200), days = days, n = d, vis = a.vis or 0, lifted = lifted and 1 or 0,
+              to = lifted and tostring(to or '') or nil}
   if e then dd.unit, dd.pos = e.id, {e.x, e.y, e.z} end
   if cmd then dd.squad, dd.cmd = key, cmd end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), dd)
@@ -2456,7 +2467,7 @@ function M.step(K, budget, ctx)
   local mode = K.mode()
   prune_holds(K)                                           -- BUG-030
   if mode == 'SIEGE' then
-    long_step(K, a, now)                                   -- BUG-331: a long calm siege eases first
+    long_step(K, a, g, now)                                -- BUG-331: a long calm siege eases first
     deep_step(K, a, g, now)
   end
   -- BUG-028 (a); a wave or a sortie brings its soldiers back itself (it owns B1 meanwhile)

@@ -37,6 +37,12 @@
 - **Live check:** Earthboat after a reload: 10 calm days -> kern.log `siege: SIEGE N days ... calm`, DECISION_NEEDED siege_long,
   alert on Kern+; a patient over 30000 outside -> `water: care burrow Pflege+ opened ...` (only with accepted water). Uncertain: DF's
   burrow rule for paths and the well/bucket outside the carrier's own burrow; Kern+ passing seal's audit for the population.
+- **Review fix (merge14):** the care burrow never opens in BREACH; outside PEACE/ALERT only on Kern+ tiles (wells on Kern+ before
+  Water Source zones); its tiles are re-checked on every water step and `care_rooms` ask (hostile near, census > 200 ticks
+  (`CARE_FRESH` was 1200), mode change, BREACH close it); `foe_dist` is unknown when the census lists fewer hostiles than it sees.
+  The eased siege passes `release` to `seal.alert_burrow` (leave_why `released`: the held refuge is left, REFUGE_SWITCH why
+  `released`), siege_long names where the civilians really are (`d.to`), wake hint and brief follow it. Tests: 5 Lua in
+  test_bug330_care_burrow, 2 in test_bug331_siege_long, 1 in test_seal_refuge, 1 pytest; all fail on merge14.
 ## Run 15 status: the save folder from DF's own path, one ways-in list, follow takes over from old code (BUG-332..334, 2026-11-04; offline, live-untested)
 - **Why:** i2/i4 29.10.: `dfllm save` QUICKSAVE_FAILED ('the newest save is a-run15-guildcleans', an %APPDATA% folder) while DF
   in portable mode had written `autosave 1`/`autosave 2` to `<DF>/save` (supervise.py:107-108 read %APPDATA% only, BUG-332).

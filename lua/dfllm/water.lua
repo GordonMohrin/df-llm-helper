@@ -1780,8 +1780,14 @@ end
 -- GiveWater job out there. Without accepted water nothing opens (no carrier could bring any; the verdict says so). A hostile
 -- within care_near, the patient below care_thirst, dead or inside, or the alert off closes it again (the burrow leaves the
 -- list; its tiles are erased and painted anew the next time). kern.log 'water: care burrow ...' on every change.
+-- Review fix (merge14): never in BREACH (the BREACH list is Tiefe+ alone: nobody is drawn toward a seal that may be down);
+-- outside PEACE/ALERT the patient, water and bucket tiles must lie on Kern+ (unforbid_ok's rule; a well on Kern+ is
+-- preferred over a Water Source zone, a zone counts only with every painted tile on Kern+); the painted tiles are kept in
+-- st.care and re-checked on every water step and every care_rooms ask (M.care_check): a hostile within care_near of one,
+-- a census older than CARE_FRESH, another mode than the one it opened in, or BREACH closes it at once; a census that
+-- lists fewer hostiles than it sees (sense keeps the 40 nearest O1) is no distance (foe_dist nil: not safe)
 M.CARE = 'Pflege+'
-M.CARE_FRESH = 1200                    -- ticks a hostile census may be old for the distance check
+M.CARE_FRESH = 200                     -- ticks a hostile census may be old for the distance check (siege's fresh rule)
 M.NOT_YET = 'no thirsty patient outside the alert burrows'
 
 -- the burrows the sounding civ alert holds the citizens in, the care burrow left out; nil while it is silent
@@ -1814,7 +1820,8 @@ function M.foe_dist(K, x, y, z)
       if best < 0 or d < best then best = d end
     end
   end
-  if best < 0 and (math.tointeger(h.vis) or 0) > 0 then return nil end     -- in sight but not listed: unknown
+  -- in sight but not listed (BUG-330 review: sense lists only the LIST_MAX nearest O1): unknown, never 'far'
+  if (math.tointeger(h.vis) or 0) > #(type(h.list) == 'table' and h.list or {}) then return nil end
   return best
 end
 
@@ -1838,6 +1845,13 @@ function M.care_step(K, c, r, now)
   if not c.care or not M.can('burrow_tiles') then st.care = nil; return nil end
   local bs = alert_set(K)
   if not bs then return close('the civ alert is off') end
+  -- review fix: never in BREACH; outside PEACE/ALERT only tiles on Kern+ (unforbid_ok's rule)
+  local mode = K.mode()
+  if mode == 'BREACH' then return close('BREACH: nobody is drawn out toward a seal that may be down') end
+  local strict = mode ~= 'PEACE' and mode ~= 'ALERT'
+  local kern, kname = burrow(K, 'kern', 'Kern+')
+  if strict and not kern then return close(string.format('%s: no %s burrow to keep it inside', mode, kname)) end
+  local function inside(x, y, z) return not strict or on_burrow(kern, x, y, z) end
   local out = {}
   for _, pt in ipairs(r.patients) do
     if pt.x and pt.thirst >= c.care_thirst and not in_set(bs, pt.x, pt.y, pt.z) then out[#out + 1] = pt end
@@ -1847,43 +1861,58 @@ function M.care_step(K, c, r, now)
   local function add(x, y, z) tiles[#tiles + 1] = {x, y, z}; sig[#sig + 1] = string.format('%d,%d,%d', x, y, z) end
   for _, pt in ipairs(out) do
     local ok, w = care_safe(K, c, pt.x, pt.y, pt.z)
+    if ok and not inside(pt.x, pt.y, pt.z) then ok, w = false, string.format('outside %s in %s', kname, mode) end
     if ok then ids[pt.id] = true; add(pt.x, pt.y, pt.z) else why = why or string.format('patient %d: %s', pt.id, w) end
   end
   if #tiles == 0 then return close(why or 'no patient safe to reach') end
   local ref = tiles[1]
   -- the water: none wet = nothing to carry (the verdict names it); one inside the alert burrows needs no tile
-  local wet, near_w, nd = false, nil, nil
+  -- the tiles a source paints (a zone's rect, at most zone_tiles; a well's tile)
+  local function src_tiles(s)
+    local b, l = s.box, {}
+    if not b then return {{s.x, s.y, s.z}} end
+    for y = b.y1, b.y2 do
+      for x = b.x1, b.x2 do
+        if #l < c.zone_tiles then l[#l + 1] = {x, y, b.z} end
+      end
+    end
+    return l
+  end
+  local wet, near_w, nd, nr = false, nil, nil, nil
   for _, s in ipairs(r.sources) do
     if s.wet then
       wet = true
       if in_set(bs, s.x, s.y, s.z) then near_w = 'in'; break end
-      local d = cheb(ref, s.x, s.y, s.z)
-      if care_safe(K, c, s.x, s.y, s.z) and (not nd or d < nd) then near_w, nd = s, d end
+      local ok, kin = care_safe(K, c, s.x, s.y, s.z), true
+      for _, t in ipairs(src_tiles(s)) do
+        if not on_burrow(kern, t[1], t[2], t[3]) then kin = false end
+        if not inside(t[1], t[2], t[3]) then ok = false end
+      end
+      -- review fix: a well on Kern+ first, then the nearest (a Water Source zone may lie outside the walls)
+      local rank, d = (s.kind ~= 'zone' and kin) and 0 or 1, cheb(ref, s.x, s.y, s.z)
+      if ok and (not nd or rank < nr or (rank == nr and d < nd)) then near_w, nd, nr = s, d, rank end
     end
   end
   if not wet then return close('no accepted water (nothing to carry)') end
-  if not near_w then return close('every accepted water outside the alert burrows has a hostile near it') end
+  if not near_w then
+    return close(strict and string.format('every accepted water outside the alert burrows has a hostile near it or ' ..
+                                          'lies outside %s', kname)
+                 or 'every accepted water outside the alert burrows has a hostile near it')
+  end
   if near_w ~= 'in' then
-    local b = near_w.box
-    if b then
-      local n = 0
-      for y = b.y1, b.y2 do
-        for x = b.x1, b.x2 do
-          if n < c.zone_tiles then add(x, y, b.z); n = n + 1 end
-        end
-      end
-    else add(near_w.x, near_w.y, near_w.z) end
+    for _, t in ipairs(src_tiles(near_w)) do add(t[1], t[2], t[3]) end
   end
   -- a free bucket the confined carriers may take (one inside the alert burrows needs none)
   local bk, bd, bin = nil, nil, false
   for _, q in ipairs(r.bpos or {}) do
     if in_set(bs, q.x, q.y, q.z) then bin = true; break end
     local d = cheb(ref, q.x, q.y, q.z)
-    if care_safe(K, c, q.x, q.y, q.z) and (not bd or d < bd) then bk, bd = q, d end
+    if inside(q.x, q.y, q.z) and care_safe(K, c, q.x, q.y, q.z) and (not bd or d < bd) then bk, bd = q, d end
   end
   if bk and not bin then add(bk.x, bk.y, bk.z) end
   local s = table.concat(sig, ' ')
-  local cs = {on = true, ids = ids, sig = s, t = now, n = #tiles}
+  local cs = {on = true, ids = ids, sig = s, t = now, n = #tiles, th = c.care_thirst,
+              tiles = tiles, mode = mode}                    -- review fix: care_check re-checks these tiles
   if not (prev and prev.on and prev.sig == s) then
     local ok, res = K.act.burrow_tiles(M.CARE, tiles, true, true)
     if not ok then return close('act.burrow_tiles: ' .. trunc(tostring(res), 60)) end
@@ -1897,9 +1926,33 @@ function M.care_step(K, c, r, now)
   return cs
 end
 
+-- BUG-330 review fix: the open care burrow against the current census and mode, between the water runs (care_step runs
+-- once a run, 1200+ ticks apart): BREACH, another mode than the one it opened in, a census older than CARE_FRESH or a
+-- hostile within care_near of one of its painted tiles (or one not listed) closes it at once; true while it stays open
+function M.care_check(K)
+  local cs = st and st.care
+  if not (cs and cs.on) then return false end
+  local now, mode = K.now().tick, K.mode()
+  local why
+  if mode == 'BREACH' then why = 'BREACH: nobody is drawn out toward a seal that may be down'
+  elseif cs.mode and mode ~= cs.mode then why = string.format('the mode changed (%s -> %s)', cs.mode, mode)
+  else
+    local c = M.conf(K)
+    for _, t in ipairs(cs.tiles or {}) do
+      local ok, w = care_safe(K, c, t[1], t[2], t[3])
+      if not ok then why = string.format('%d,%d,%d: %s', t[1], t[2], t[3], w); break end
+    end
+  end
+  if not why then return true end
+  K.log('info', 'water: care burrow %s closed: %s', M.CARE, why)
+  st.care = {on = false, ids = {}, why = why, t = now, th = cs.th}
+  return false
+end
+
 -- public (BUG-330, siege.alert_list): the burrows water wants in the civ alert's list now: {M.CARE} while it is open
+-- (review fix: re-checked on every ask, M.care_check)
 function M.care_rooms(K)
-  if st and st.care and st.care.on then return {M.CARE} end
+  if M.care_check(K) then return {M.CARE} end
   return {}
 end
 
@@ -2778,6 +2831,7 @@ function M.step(K, budget, ctx)
   local c = M.conf(K)
   local p = pstate(K)
   local now = K.now().tick
+  M.care_check(K)                                         -- BUG-330 review: the open care burrow on every step
   if not (ctx and ctx.cont) or (not st.run and not st.scan) then
     st.run, st.run_t = new_run(K), now
   elseif not st.run and now - (st.run_t or now) >= M.every.ticks then
