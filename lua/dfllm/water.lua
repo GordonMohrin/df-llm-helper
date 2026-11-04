@@ -3253,6 +3253,23 @@ function M.drink_fix(K)
   return head .. '; ' .. M.recipe(c, nil, K, true, true), cmds
 end
 
+-- public (BUG-401, Run 16a Mansionlauded and Bachwald: two forts without a drop of reachable water died of thirst, 13 of 16):
+-- can the citizens drink anywhere? {known, ok, acc, bank, bodies, partial}: known = a water run and a scan finished; acc =
+-- accepted sources (a Water Source zone, a wet well); bank = bodies (not cavern) with a bank the citizens reach (the scan's
+-- walk test: ice-covered or walled-off water has none); ok = acc + bank > 0. partial = a body's scan stopped at its read cap.
+-- Report only
+function M.drink_access(K)
+  local ws = st.ws
+  if not st.src or not ws then return {known = false, ok = true, acc = 0, bank = 0, bodies = 0} end
+  local acc, bank, partial = 0, 0, 0
+  for _, s in ipairs(st.src) do if s.wet then acc = acc + 1 end end
+  for _, b in ipairs(ws.bodies or {}) do
+    if b.cavern ~= 1 and b.bank then bank = bank + 1 end
+    if b.partial == 1 then partial = partial + 1 end
+  end
+  return {known = true, ok = acc + bank > 0, acc = acc, bank = bank, bodies = #(ws.bodies or {}), partial = partial}
+end
+
 -- public (BUG-036, readiness): the hospital zones outside Kern+ and the refuge by the last run: {n, total, zones = {{id,
 -- loc, x, y, z (the zone's centre), tiles (outside), of (tiles looked at, <= HOSP_TILES)}}, kern, refuge}; n 0 before the
 -- first run

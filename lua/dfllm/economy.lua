@@ -3213,6 +3213,8 @@ local function alarm_check(K, c, p, days)
     thirsty = math.max(thirsty, math.tointeger(sd.n))
     dry = dry or days.drink_d < a.days
   end
+  -- BUG-401: no water the citizens reach and no brewable plant (no_water): low drink days are no 'they drink water'
+  if st.nowater and days.drink_d < a.days then dry = true end
   local why
   if thirsty >= a.units then why = string.format('thirst %d', thirsty)
   elseif hungry >= a.units then why = string.format('hunger %d', hungry)
@@ -4780,9 +4782,10 @@ end
 -- BUG-042: the drink cause in one line (state stock.dwhy, <= 80 bytes) while drink is below the plan's target, or nil
 function M.drink_why(K, c, r)
   local d = (r.days or {}).drink_d or 9999
-  if d >= (math.tointeger((K.plan.supply or {}).drink_d) or 170) then return nil end
+  if d >= (math.tointeger((K.plan.supply or {}).drink_d) or 170) and not st.nowater then return nil end     -- BUG-401
   local bl = M.drink_block(K, c, r, r.inv or {})
   local w = bl[1] and bl[1][2] or nil
+  if st.nowater then w = 'no reachable water' .. (w and ('; ' .. w) or '') end            -- BUG-401
   -- BUG-259: below the thirst line with nobody thirsty the status names it (the citizens drink water)
   if st.water then w = (w and (w .. '; ') or '') .. 'nobody thirsty: they drink water' end
   local okg, sd = K.call('siege', 'dry_group')                 -- BUG-391: a cut-off group without drink is no all-clear
@@ -4830,7 +4833,7 @@ end
 function M.fd_wants(K, c, r)
   local inv, out = r.inv or {}, {}
   local dd = (r.days or {}).drink_d or 9999
-  if dd < (math.tointeger((c.drink or {}).low_d) or 0) and (inv.brew_p or 0) + (inv.brew_g or 0) == 0 then
+  if (dd < (math.tointeger((c.drink or {}).low_d) or 0) or st.nowater) and (inv.brew_p or 0) + (inv.brew_g or 0) == 0 then
     out[#out + 1] = {buy = 'plant', n = 20, why = string.format('drink %d d, no brewable plants', dd)}
     out[#out + 1] = {buy = 'drink', n = 40, why = string.format('drink %d d, no brewable plants', dd)}
   end
@@ -4868,6 +4871,48 @@ function M.fd_wants(K, c, r)
   return out
 end
 
+-- BUG-401 (Run 16a Mansionlauded: 13 of 16 dead of thirst in y372-373, the first fort Bachwald the same; the stock of 48 drink
+-- days ran out beside a frozen river, no accepted water, no brewable plant, and the only questions came with the thirst):
+-- the early check. The water run knows no source the citizens drink at (no Water Source zone, no wet well, no body with a
+-- bank they reach: water.drink_access) and not one brewable plant is in stock: the stock is all the fort has, whatever its
+-- days say. At once, once a week while it holds: DECISION_NEEDED no_water (A, urgent) with the commands (the water scan, a zone
+-- or well at the nearest reachable water, a cistern, the caravans for plants and drink); the kernel sends the gatherers for
+-- wild plants (st.bshort) and the caravans (fd_wants) itself. st.nowater switches off 'nobody thirsty: they drink water'.
+function M.no_water(K, c, r)
+  local p = r.p
+  local plants = ((r.inv or {}).brew_p or 0) + ((r.inv or {}).brew_g or 0)
+  local oka, acc = K.call('water', 'drink_access')
+  local dry = oka and type(acc) == 'table' and acc.known == true and acc.ok == false and plants == 0 and (r.cit or 0) > 0
+  if not dry then
+    if st.nowater then K.log('info', 'no-water check over: %s', oka and type(acc) == 'table' and acc.ok and 'water reachable'
+                             or 'brewable plants or no scan') end
+    st.nowater = nil
+    if type(p.nw_rep) == 'table' then p.nw_rep = CAD.quiet(p.nw_rep) end
+    return
+  end
+  local now, dd = K.now(), (r.days or {}).drink_d or 0
+  if not st.nowater then
+    K.log('warn', 'no reachable water and no brewable plant: %d bodies, %d with a bank, %d accepted sources, drink %d d', acc.bodies,
+          acc.bank, acc.acc, dd)
+  end
+  st.nowater = {tick = st.nowater and st.nowater.tick or now.tick, d = dd}
+  local toks = {dd < 30 and 'below30' or 'stock', 'w' .. (now.tick // (7 * DAY))}               -- a new token each week: the question repeats while it holds
+  if not CAD.due(p.nw_rep, now, {}, toks, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
+  p.nw_rep = CAD.mark(now, {}, toks)
+  local okf, wtxt, wcmds = K.call('water', 'drink_fix')
+  local fix = okf and type(wtxt) == 'string' and wtxt or 'a well over water or a Water Source zone (inspect water_sources)'
+  local cmds = {}
+  for _, x in ipairs(okf and type(wcmds) == 'table' and wcmds or {}) do cmds[#cmds + 1] = x end
+  cmds[#cmds + 1] = 'dfllm cmd inspect what=reach'
+  cmds[#cmds + 1] = [[dfllm cmd trade.want '{"want":["plant","drink","seeds"]}']]
+  local head = string.format('%d bodies of water, %d with a bank the citizens reach%s, no brewable plant, drink %d d', acc.bodies,
+                             acc.bank, acc.partial > 0 and ' (scan partial)' or '', dd)
+  local q = string.format('no water the citizens reach: %s; what to do: d.water, d.cmds', head)
+  K.emit('DECISION_NEEDED', 'A', string.format('no reachable water, no brewable plant: drink %d days is all the fort has', dd),
+         {id = 'no_water', q = q:sub(1, 200), drink = dd, auto = {'gatherers for wild plants', 'caravans asked for plants and drink'},
+          cmds = cmds, water = M.lines(fix, 200, 2)})
+end
+
 -- BUG-042: the drink pre-alarm: below drink.low_d (and from alarm.days on, where DECISION_NEEDED thirst speaks), a
 -- class-A DECISION_NEEDED drink_low with the days, why the stills do not brew and what the kernel did; once per
 -- episode, again with news (a new cause, below 30 days) after max(7 days, 10 min) (util/cadence)
@@ -4879,7 +4924,7 @@ function M.drink_low(K, c, r)
   -- (census brew_p + brew_g) short of the drink deficit (M.brew_need, as M.gather_low's dshort)
   local gd = type(c.gather) == 'table' and math.tointeger(c.gather.drink_d) or 0
   local bneed, bhave = M.brew_need(K, r)
-  st.bshort = dd < gd and bhave < bneed or nil
+  st.bshort = (dd < gd or st.nowater ~= nil) and bhave < bneed or nil               -- BUG-401: no water: gather at once
   -- BUG-397: the Cook ban's plants (brewed by rule) and the seeds of brewable crops, for the farm slots, the caravans' wants
   -- and the words of the block
   st.nocook = st.bshort and M.cook_ban_set(c) or nil
@@ -5728,6 +5773,7 @@ function T.kitchen(K, c, r) pcall(kitchen, K, c, r.days.food_d) end
 function T.appoint(K, c, r) M.appoint_vacant(K) end
 function T.food(K, c, r) if r.day then food_plan(K, c, r) end end
 function T.watch(K, c, r)
+  M.no_water(K, c, r)                              -- BUG-401: first, alarm_check and drink_low read st.nowater
   validation_watch(K, r.p, c)
   alarm_check(K, c, r.p, r.days)
   famine(K, c, r.p, r.days, r.inv, r)

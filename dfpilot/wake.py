@@ -204,7 +204,7 @@ ERR_EVERY_S = 60                               # stderr 'poll error' at most onc
 # URGENT_REPEAT_S); DECISION_NEEDED only for the ids in URGENT_DECISIONS (a fort running out of drink or food, a thirsty one)
 URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
 URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst", "stranded_drink",
-                    "mood_deadline"}   # BUG-340: famine too; BUG-391; BUG-395: a mood about to fail
+                    "mood_deadline", "no_water"}   # BUG-340: famine too; BUG-391; BUG-395: a mood about to fail; BUG-401
 URGENT_GAME_TICKS = schema.TICKS["DAY"]
 HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often
 
@@ -353,7 +353,7 @@ def next_hint(etype: str, e: dict) -> str:
         return siege_long_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "seal_stalled":
         return seal_stalled_hint(d)
-    if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline") and d.get("cmds"):
+    if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline", "no_water") and d.get("cmds"):
         return food_hint(d)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)

@@ -32,6 +32,7 @@ local fio = require('dfllm.io')
 local M = {name = 'snapshot', every = {ms = 250}, verbs = {}, on = {}}
 
 M.CFG = {
+  ice_max = 8000,                 -- BUG-400: ice tiles one export lists (head.ice)
   slice = 1000,                   -- tiles per frame (DESIGN §4: <= 2,000)
   -- BUG-043 (Run 11 y479: 'bbox has 252108 tiles > 250000'): tiles one export reads at most (400 slices; config/
   -- baseline.json snapshot.max_tiles within M.CAP_LIM), and the file box of a union export at most
@@ -200,7 +201,9 @@ local function classify(x, y, z, des, oc, traps, bridges)
       if traps and traps[key] then c, bld = '^', 'Trap' elseif not SOLID[c] then c, bld = '.', 'passable' end
     else c, bld = 'B', b == occ.Well and 'Well' or 'impassable' end
   end
-  if not SOLID[c] and c ~= 'B' and c ~= 'H' then
+  -- BUG-400 (Run 16a Mansionlauded, 13 of 16 dead of thirst): a frozen river or lake is an ice FLOOR over its water; the
+  -- tile keeps no water char (its flow_size can linger) and the export lists it (head.ice): water under ice is no drink
+  if not SOLID[c] and c ~= 'B' and c ~= 'H' and not info.ice then
     local f = int(des.flow_size) or 0
     if f > 0 then
       local lt = des.liquid_type
@@ -208,7 +211,7 @@ local function classify(x, y, z, des, oc, traps, bridges)
       else c = f >= 4 and '~' or 'w' end
     end
   end
-  return c, bld, info.soil, info.plant
+  return c, bld, info.soil, info.plant, info.ice == true
 end
 
 -- pending designation of a revealed tile (quickfort dig.lua:95-101 has_designation)
@@ -1325,6 +1328,7 @@ local function start(K, j)
   j.z, j.y, j.rows, j.cur = j.bbox[3], j.bbox[2], {}, {}
   j.traps = trap_index(j.bbox)
   j.marks = {soil = {}, cavern = {}, sand = {}, shrub = {}, sapling = {}}
+  j.ice = {}                                      -- BUG-400: revealed ice tiles (a frozen river or lake)
   j.sky_plants = {shrub = {}, sapling = {}}       -- open-sky plants, appended after the roofed ones
   j.bridges, j.bstate = {}, {}
   for name, spec in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
@@ -1411,8 +1415,9 @@ local function scan_span(j, y, z, x0, x1)
     local c
     if not des or des.hidden then c = '?'
     else
-      local ch, _bld, soil, plant = classify(x, y, z, des, oc, j.traps, j.bridges)
+      local ch, _bld, soil, plant, ice = classify(x, y, z, des, oc, j.traps, j.bridges)
       c = ch
+      if ice and j.ice and #j.ice < M.CFG.ice_max then j.ice[#j.ice + 1] = {x, y, z} end      -- BUG-400
       if soil and c == '.' then
         add_mark(j.marks.soil, x, y, z, M.CFG.soil_max)                 -- BUG-297
         if #j.marks.sand < M.SAND_MAX and M.is_sand(x, y, z, des) then add_mark(j.marks.sand, x, y, z) end
@@ -1494,6 +1499,7 @@ local function encode(j, id)
   local head = {v = 2, id = j.id, tick = j.tick, purpose = j.purpose, bbox = j.bbox,
                 bridges = json.object(j.bstate), traps = json.array(traps)}
   if next(marks) then head.marks = marks end
+  if j.ice and #j.ice > 0 then head.ice = j.ice end       -- BUG-400: [[x,y,z]..] (<= CFG.ice_max): ice floors, the water under them is no drink
   if j.aqn and next(j.aqn) then                    -- BUG-359: the levels with revealed aquifer tiles: {"z<N>": count}
     local aq = {}
     for z, n in pairs(j.aqn) do aq['z' .. z] = n end
