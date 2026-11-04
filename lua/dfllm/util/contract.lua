@@ -188,6 +188,8 @@ C.EVENTS = {
   STATION_MOVED = {cls = 'B', by = 'military'},
   -- FR-79: the members of a militia squad were swapped for the next cohort at the close of its window (counts only)
   MILITIA_ROTATED = {cls = 'B', by = 'military'},
+  -- BUG-327: soldiers left a squad without a swap (the targets 0 on purpose, or a squad over its target)
+  SOLDIERS_RELEASED = {cls = 'B', by = 'military'},
   -- BUG-068: a lever pulled gate.noeffect_max times in a row without the bridge moving is parked (once per lever)
   LEVER_NOEFFECT = {cls = 'B', by = 'gate'},
   -- BUG-253: a unit on the footprint of a bridge while it moved (once per move; the death is BRIDGE_CRUSH)
@@ -493,6 +495,7 @@ C.STATE_SPEC = obj({
             {free = obj(nil, {weapon = NAT, body = NAT, head = NAT, pants = NAT, gloves = NAT, shoes = NAT,
                               shield = NAT, ammo = NAT}),
              cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT}),     -- Run 11: melee follows the gear
+             rel = obj({n = NAT, why = str(24), t = NAT, sq = str(8)}),          -- BUG-327: the last release
              -- FR-100 (G18): soldiers, fully equipped, armor, weapon in hand, training weapon in hand, squads on the policy
              kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}),
              -- FR-79: the militia rotation per squad key (schema.py _ROT)

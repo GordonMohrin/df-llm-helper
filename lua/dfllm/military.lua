@@ -68,8 +68,8 @@ M.NOTE_EVERY = 2400         -- BUG-032: a squad with no station clear of a bridg
 -- Run 11 siege 3 (y432/433: 25 dead, pop 54 -> 29, soldiers 10 -> 5, O1 destroyed): squads A and B emptied and were
 -- never refilled, only C (5) remained. In SIEGE/BREACH (SIEGE_FILL) a melee squad below half its target is refilled
 -- from healthy adult civilians who stand in Kern+ (the core), never from the refuge; the first melee squad's target is
--- at least HOLD_MIN then (the core stations need them; neither the shrunk population target nor the tools-first rule
--- lowers it in a siege). Tool-detail members only after everybody else (they keep their place in PEACE).
+-- at least HOLD_MIN then (the core stations need them; the shrunk population target does not lower it in a siege; the
+-- tools-first rule is gone since BUG-327). Tool-detail members only after everybody else (they keep their place in PEACE).
 M.HOLD_MIN = 5              -- melee soldiers the core stations need in a siege (half a squad: the routine's minimum)
 -- Run 11 (Kilrudrabed y441, siege 8: 10 soldiers at worn 58 %, no metal in ten years; the recruits without armor or a
 -- weapon died first): melee positions are filled only as far as the gear goes (M.gear_fill). A melee set = a true body
@@ -628,9 +628,9 @@ local function active(K)
   return r
 end
 
--- soldiers wanted in total and per squad key; third value: why the total is 0 on purpose ('tools': fewer than
--- TOOLS_MIN axes or picks, 'phase': a known phase before P2), else nil. Existing soldiers are released then. Fourth:
--- the tools-first rule took the melee squads. Fifth (Run 11): the gear cap, nil when the gear fills every melee
+-- soldiers wanted in total and per squad key; third value: why the total is 0 on purpose ('phase': a known phase
+-- before P2), else nil. Existing soldiers are released then. Fourth: fewer than TOOLS_MIN axes or picks in the fort
+-- (report only since BUG-327: the soldiers stay, the weapon guard keeps the tools with the civilians). Fifth (Run 11): the gear cap, nil when the gear fills every melee
 -- position (or the census does not know it): {sets, melee, want, xbow, fill = {key = n}, parts}: `per` stays the demand
 -- (economy orders the gear for it), `fill` is what the squads are filled to, `xbow` the crossbow positions added to
 -- the demand while metal is short
@@ -644,17 +644,14 @@ function M.targets(K)
   local ph = phase_no(K)
   if ph and ph < 2 and not M.early(K) then zero = 'phase' end
   -- live L6: the soldiers took the fort's only two (battle) axes for a year, so nobody cut wood and every
-  -- build stalled. Tools first: no melee soldiers while the fort has fewer than TOOLS_MIN axes or picks in
-  -- all. Live L7 (Paddletribes, no metal for years): crossbowmen carry no axe or pick, so the crossbow
-  -- squad stays staffed (the fort had 14 crossbows and 1100 bolts and no soldiers at all)
+  -- build stalled. BUG-327 (Run 15c Inkintense y373-y378: 1 axe in the fort, so the old tools-first rule set the melee
+  -- targets to 0 and released every melee soldier each PEACE upkeep, a SIEGE/DRILL filled squad A to HOLD_MIN, the next
+  -- PEACE released them again: '8 soldiers released (tools)', mil 0 at pop 53): the soldiers stay; the weapon guard
+  -- (weapon_guard, tool_excess, release_tools: BUG-023) keeps the axes and picks with the civilians instead, and a
+  -- position without a spare weapon trains with a wooden one (G18). `short` only reports fewer than TOOLS_MIN axes or
+  -- picks in all now.
   local ci = K.census.i
-  if type(ci) == 'table' and ((ci.w_axe or 0) < M.TOOLS_MIN or (ci.w_pick or 0) < M.TOOLS_MIN) then
-    local only = {}
-    for _, s in ipairs(act) do if s.kind == 'xbow' then only[#only + 1] = s end end
-    act = only
-    if #act == 0 then n, zero = 0, zero or 'tools' end
-    short = true
-  end
+  if type(ci) == 'table' and ((ci.w_axe or 0) < M.TOOLS_MIN or (ci.w_pick or 0) < M.TOOLS_MIN) then short = true end
   n = math.min(n, M.SIZE * #act)
   local per = {}
   local melee, xbow = {}, nil
@@ -1352,6 +1349,18 @@ end
 -- is passed over for ADD_BAD ticks and the next candidate is tried (ADD_TRIES refusals per refill), and the refusal's
 -- text goes to kern.log (at most every NOTE_EVERY ticks per squad). rot (FR-79): the candidates come in the rotation's
 -- order and the member over the target who leaves is the most served one, not the weakest fighter.
+-- BUG-327: soldiers who leave a squad without a swap (release: the targets 0 on purpose; fill: a squad over its target +
+-- KEEP_EXTRA) are news: event SOLDIERS_RELEASED (B) and state mil.rel {n, why, t, sq} (the last one; the status line
+-- `soldiers released: ...`). The rotation's swaps and a promoted leader are no release.
+local function released(K, n, why, keys)
+  if n <= 0 then return end
+  local t = now_tick(K)
+  rt.rel = {n = n, why = why, t = t, sq = table.concat(keys, '')}
+  rt.kpi = nil
+  K.emit('SOLDIERS_RELEASED', 'B', string.format('%d soldiers released (%s) from squad %s', n, why, rt.rel.sq),
+         {n = n, why = why, squads = keys})
+end
+
 local function fill(K, k, s, want, recruits, siege, rot)
   local mem = members(s)
   local n = #mem
@@ -1397,7 +1406,11 @@ local function fill(K, k, s, want, recruits, siege, rot)
         elseif M.cv(m.unit) < M.cv(worst.unit) then worst = m end
       end
     end
-    if worst then K.act.squad_remove(s.id, worst.unit.id) end
+    if worst and K.act.squad_remove(s.id, worst.unit.id) then
+      K.log('info', 'military: squad %s: unit %d left (%d members over the target %d + %d)', k, worst.unit.id, n, want,
+            M.KEEP_EXTRA)
+      released(K, 1, rot and 'rotation' or 'over_target', {k})                        -- BUG-327
+    end
   end
 end
 
@@ -1719,8 +1732,9 @@ end
 -- on purpose (tools first, a phase before P2) every soldier leaves, after the squad's uniform specs and assigned
 -- items are released (act.squad_unequip, the squads screen's equip > remove), so the tools go back to the
 -- civilians. PEACE only; the leader (position 0) leaves last.
+-- BUG-327: only the phase does this now (the tools-first rule is gone); event SOLDIERS_RELEASED names it.
 local function release(K, why, kind)
-  local n = 0
+  local n, keys = 0, {}
   for _, sp in ipairs(M.SQUADS) do
     local e = (kind == nil or sp.kind == kind) and st.sq[sp.key]
     local s = e and squad(e.id)
@@ -1728,14 +1742,16 @@ local function release(K, why, kind)
     if #mem > 0 then
       K.act.squad_unequip(s.id)
       table.sort(mem, function(a, b) return a.pos > b.pos end)
+      local n0 = n
       for _, m in ipairs(mem) do if K.act.squad_remove(s.id, m.unit.id) then n = n + 1 end end
+      if n > n0 then keys[#keys + 1] = sp.key end
       if e.uni ~= 0 or e.nw then e.uni, e.nw, dirty = 0, nil, true end
       rt.mats[sp.key], rt.order[sp.key] = nil, nil
     end
   end
   if n > 0 then
-    rt.kpi = nil
     K.log('warn', 'military: %d soldiers released (%s): uniforms cleared, the tools go back to the civilians', n, why)
+    released(K, n, why, keys)
   end
   return n
 end
@@ -3557,8 +3573,7 @@ function M.step(K, budget, ctx)
   if mode == 'PEACE' and soldiers > 0 then M.unstick(K, now) end    -- BUG-050
   M.windows(K)                                                      -- FR-71
   local _, per, zero, short, gear = M.targets(K)
-  if zero and mode == 'PEACE' then release(K, zero)
-  elseif short and mode == 'PEACE' then release(K, 'tools', 'melee') end
+  if zero and mode == 'PEACE' then release(K, zero) end              -- BUG-327: never for the tools (`short`)
   M.gear_note(K, gear)
   if gear then per = gear.fill end                                    -- Run 11: the squads follow the gear
   local siege = SIEGE_FILL[mode] == true
@@ -3636,6 +3651,8 @@ function M.state(K)
                on_station = k.on_station}
   local g = rt.gear                                  -- Run 11: the melee squads follow the gear
   if g then mil.cap = {sets = g.sets, melee = g.melee, want = g.want, xbow = g.xbow} end
+  local rl = rt.rel                                  -- BUG-327: the last soldiers who left without a swap (this boot)
+  if rl then mil.rel = {n = rl.n, why = rl.why, t = rl.t, sq = rl.sq} end
   local kt = M.kit_stats(K)                          -- FR-100 (G18): soldiers fully equipped, squads on wooden weapons
   if kt.n > 0 then
     mil.kit = {n = kt.n, full = kt.full, armor = kt.armor, weapon = kt.weapon, wood = kt.wood, tr = kt.tr}

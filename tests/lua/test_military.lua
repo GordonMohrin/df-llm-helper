@@ -615,27 +615,35 @@ T.test('live L6: no squad is created while the phase is unknown (right after ado
   T.ok(X.members(s) > 1, 'and filled')
 end)
 
-T.test('live L6: targets 0 by the tools rule release every melee soldier, uniforms first (squad equipment screen)', function()
+-- BUG-327 (Run 15c Inkintense y373-y378: 1 axe in the fort; '8 soldiers released (tools)' each PEACE upkeep after a
+-- SIEGE/DRILL filled squad A, mil 0 at pop 53). Old code: per A/B 0, squad_unequip and squad_remove for every melee soldier.
+T.test('BUG-327: fewer than TOOLS_MIN axes or picks: the melee soldiers stay, the weapon guard keeps the tools', function()
   local W = setup(50)
   T.eq(soldiers(W), 8)
   local M = mil()
-  W.set_census('i', {tick = 0, w_axe = 2, w_pick = 5})
-  local _, per = M.targets(W.K)
-  T.eq({per.A or 0, per.B or 0}, {0, 0}, 'no melee squad while axes are short')
-  W.run(3600, {skip = 9})
-  for _, k in ipairs({'A', 'B'}) do
-    local s = X.squad_of(W, k)
-    T.eq(s and X.members(s) or 0, 0, 'everybody left ' .. k .. ', the leader too')
-    T.ok(not s or not X.has_uniform(s), 'no uniform spec left in ' .. k)
+  W.set_census('i', {tick = 0, w_axe = 1, w_pick = 5})
+  local n, per, zero, short = M.targets(W.K)
+  T.ok((per.A or 0) > 0, 'squad A keeps its target while axes are short')
+  T.eq(zero, nil, 'no release on purpose')
+  T.eq(short, true, 'short is still reported')
+  T.ok(M.weapon_guard(W.K, per) ~= nil, 'the weapon guard holds the axes and picks for the civilians')
+  W.run(3600 * 3, {skip = 9})
+  T.eq(#X.acts(W, 'squad_remove'), 0, 'nobody leaves')
+  for _, a in ipairs(X.acts(W, 'squad_unequip')) do
+    T.eq(a.args[3], {'weapon'}, 'only the guard drops weapon specs; no whole uniform cleared')
   end
-  local first_remove = nil
-  for i, a in ipairs(W.acts) do if a.fn == 'squad_remove' and not first_remove then first_remove = i end end
-  local first_un = nil
-  for i, a in ipairs(W.acts) do if a.fn == 'squad_unequip' and not first_un then first_un = i end end
-  T.ok(first_un < first_remove, 'the uniform is released before the soldier leaves')
-  W.set_census('i', {tick = 0, w_axe = 20, w_pick = 20})
-  W.run(3600, {skip = 9})
-  T.ok(soldiers(W) >= 8, 'enough tools: the squads fill again')
+  T.eq(soldiers(W), 8, 'the squads stay staffed')
+  T.ok(not logged(W, 'soldiers released'), 'no release line')
+  T.eq(#W.find_events('SOLDIERS_RELEASED'), 0)
+end)
+
+T.test('BUG-327: a fort that never had 3 axes still staffs its melee squads in PEACE (old code: never)', function()
+  local W = boot{n = 50}
+  W.set_census('i', {tick = 0, w_axe = 1, w_pick = 1})
+  W.run(9, {skip = 9})
+  W.run(3600 * 2, {skip = 9})
+  T.ok(X.members(X.squad_of(W, 'A')) >= 2, 'squad A staffed: ' .. X.members(X.squad_of(W, 'A')))
+  T.eq(soldiers(W), 8, 'the population target')
 end)
 
 T.test('live L7: crossbowmen carry no axe or pick, so the crossbow squad stays staffed when tools are short', function()
@@ -666,6 +674,12 @@ T.test('live L6: a known phase before P2 releases the soldiers; outside PEACE no
   W.run(3600, {skip = 9})
   T.eq(soldiers(W), 0)
   T.ok(logged(W, 'soldiers released (phase)'))
+  -- BUG-327: the release is an event and a state line
+  local ev = W.find_events('SOLDIERS_RELEASED')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.n, ev[1].d.why}, {8, 'phase'})
+  local rel = mil().state(W.K).mil.rel
+  T.eq({rel.n, rel.why, rel.sq}, {8, 'phase', 'ABC'})
 end)
 
 T.test('live L6: melee uniforms keep 1 axe and 2 picks for civilians (explicit weapons, merchant goods excluded)', function()
