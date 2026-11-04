@@ -1682,6 +1682,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     warn += aquifer_gate(doc, s, fort or {})      # FR-95: a breach:damp park, a heavy aquifer, fortcore p.aquifer pass
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
     warn += _traps.gate(doc, fort)                # FR-96: a way in without a trap lane from P5 on
+    warn += defense_gate(doc, s, fort or {}, prev)    # BUG-377: the defence before growth
     ce2, cw2 = sweep_gate(doc, s)                 # FR-99: the cavern sweep from P6 on
     errs += ce2
     warn += cw2
@@ -1841,6 +1842,112 @@ def pick_goal(s: dict | None) -> str | None:
 
 def _bar_want(want: list) -> bool:
     return any(t == "bar" or t.startswith("bar:") for t in want)
+
+
+# ---------------------------------------------------------------- BUG-377: defence before growth
+# BUG-377 (Run 16d Plankscale y372-y382: pop 7 -> 66 on a dry refuge, 6 traps, soldiers in worn 30-55 % armor, no ore; two
+# goblin sieges took 66 -> 1 and killed none; the plan kept drafting explore/bedrooms/tavern/temple while phase P5 'waits for
+# drill' and the hall (P6) and the armor orders never came): while the defence is short, the year plan puts it first and
+# holds the population where it is. The gaps: the refuge without drink (R0 refuge_dry), an attacker path without a single armed
+# trap (audit.min_traps 0; readiness R2 wants TRAPS_MIN, which is the kernel's own gate, not a reason to stop growth), soldiers in
+# armor worn under DEFENSE_WORN %.
+DEFENSE_FROM = REFUGE_PHASE               # no defence gate in the first phases (nothing to defend yet)
+DEFENSE_POP = 20                          # a fort below this many citizens draws no siege worth the hold
+TRAPS_MIN = 30                            # readiness.lua R2: >= 30 armed traps on every attacker path (audit.min_traps)
+TRAPS_HOLE = 1                            # fewer armed traps than this on an attacker path: no defence there at all
+DEFENSE_WORN = 60                         # soldiers wear under this % of the armor they need: armor is a gap
+HALL = {"tpl": "fortcore", "site": SAME, "p": {"stage": 4}}     # the trap hall (41 stone-fall traps), a P6 deliverable
+DEFENSE_FIRST = ("traps",)                # builds that come before the growth builds (plus HALL); the refuge's pieces,
+                                          # drink store included, are first already (refuge_drafts, _refuge_fix)
+
+
+def defense_gaps(s: dict | None) -> list[str]:
+    """BUG-377: the defence gaps of the fort now, each a short text: 'refuge_dry' (readiness R0), 'traps 0' (the audit's
+    fewest armed traps on an attacker path is under TRAPS_HOLE, or no audit and no trap in state `traps`), 'armor worn N %'
+    (soldiers and the worn share, mil.worn) or 'armor 0' (no armor at all in mil.kit). [] when none or nothing is known."""
+    s = s or {}
+    out: list[str] = []
+    if refuge_dry(s):
+        out.append("refuge_dry")
+    r = s.get("ready") or {}
+    mt = (r.get("audit") or {}).get("min_traps")
+    tr = s.get("traps")
+    if _nat(mt):
+        if mt < TRAPS_HOLE:
+            out.append("traps 0")
+    elif isinstance(tr, dict) and tr and not tr.get("n"):
+        out.append("traps 0")
+    mil = s.get("mil") or {}
+    soldiers = mil.get("soldiers") or (s.get("pop") or {}).get("soldiers") or 0
+    worn = mil.get("worn", r.get("worn"))
+    kit = mil.get("kit") or {}
+    if _nat(soldiers) and soldiers > 0:
+        if _nat(worn) and worn < DEFENSE_WORN:
+            out.append(f"armor worn {worn} %")
+        elif _nat(kit.get("n")) and kit["n"] > 0 and kit.get("armor", 0) == 0:
+            out.append("armor 0")
+    return out
+
+
+def defense_on(s: dict | None, target: str) -> list[str]:
+    """BUG-377: the defence gaps that hold growth: [] below DEFENSE_FROM, in a fort below DEFENSE_POP citizens and while the
+    fort rebuilds (the rebuild policy drafts only its own kinds)."""
+    pop = ((s or {}).get("pop") or {}).get("cit", 0)
+    if target < DEFENSE_FROM or not _nat(pop) or pop < DEFENSE_POP or rebuild_state(s):
+        return []
+    return defense_gaps(s)
+
+
+def defense_cap(s: dict | None, cap: int) -> int:
+    """BUG-377: the population ceiling while the defence is short: the citizens now (at least DEFENSE_POP), never above `cap`."""
+    pop = ((s or {}).get("pop") or {}).get("cit", 0)
+    return min(cap, max(pop if _nat(pop) else 0, DEFENSE_POP))
+
+
+def _hall_due(fort: dict | None, done: set, builds: list, info: dict | None) -> bool:
+    """BUG-377: the trap hall (fortcore stage 4) is not applied, not drafted and not blocked: a fortcore stands in the plan's
+    history, no breach parked it and its stage 1 is dug."""
+    f = fort or {}
+    return (info is None or "fortcore" in info) and not f.get("core") and not f.get("core_dig")         and ("fortcore", 4) not in done and any(t == "fortcore" for t, _ in done)         and not any(b["tpl"] == "fortcore" and _stage_of(b.get("p") or {}) == 4 for b in builds)
+
+
+def _defense_first(b: dict) -> bool:
+    return b["tpl"] in DEFENSE_FIRST or (b["tpl"] == "fortcore" and _stage_of(b.get("p") or {}) == 4)
+
+
+def defense_order(builds: list, lead: list) -> list:
+    """BUG-377: the defence builds (traps, the hall) ahead of the growth builds, behind the seals, the refuge's pieces (beds,
+    drink store, stage 3) and the water/food builds in `lead` that already stand first."""
+    first = [b for b in builds if _defense_first(b)]
+    rest = [b for b in builds if not any(b is x for x in first)]
+    k = 0
+    while k < len(rest) and (rest[k]["tpl"] == SEAL or _refuge_fix(rest[k]) or any(rest[k] is x for x in lead)):
+        k += 1
+    return rest[:k] + first + rest[k:]
+
+
+def defense_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
+    """plan check (BUG-377): warnings while the defence is short (defense_on): the population ceiling above what the fort has,
+    no trap hall or traps build in the plan while traps are short, no iron in trade.want while the armor is."""
+    gaps = defense_on(s, doc["phase_target"])
+    if not gaps:
+        return []
+    out: list[str] = []
+    pop = (s.get("pop") or {}).get("cit", 0)
+    hold = defense_cap(s, 10 ** 6)
+    head = f"defense: {', '.join(gaps)}"
+    if doc["policy"]["pop_ceiling"] > hold:
+        out.append(f"{head}: pop_ceiling {doc['policy']['pop_ceiling']} lets the fort grow past {pop} citizens before it "
+                   f"is defended (BUG-377): set it to {hold} until the gaps are closed (dfllm plan propose does)")
+    builds = [b for se in doc["seasons"] for b in se["build"]]
+    planned = any(b["tpl"] == "traps" or (b["tpl"] == "fortcore" and _stage_of(b.get("p") or {}) == 4) for b in builds)
+    if any(g.startswith("traps") for g in gaps) and not planned:
+        out.append(f"{head}: no trap hall (fortcore stage 4) or traps build in the plan: add {_compact(HALL)} (the P6 "
+                   "hall; a drill that waits for R1 does not hold it back) (BUG-377)")
+    if any(g.startswith("armor") for g in gaps) and not _bar_want(list((doc.get("trade") or {}).get("want") or [])):
+        out.append(f"{head}: no iron in trade.want: add bar:iron first (the depot's caravans bring metal; economy makes "
+                   "armor from bars, leather and bone as they come) (BUG-377)")
+    return out
 
 
 # ---------------------------------------------------------------- the metal route (Run 11)
@@ -2620,8 +2727,12 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs and p["id"] <= lib_top:
                     libs.append(d["lib"])
-    tb, tnote = _traps.draft(fort, target, builds, prev, year, info, rb)   # FR-96: trap lanes at the ways in (P5+)
+    gaps = defense_on(s, target)                 # BUG-377: refuge dry / traps short / armor worn: defence before growth
+    tb, tnote = _traps.draft(fort, max(target, _traps.TRAPS_PHASE) if gaps else target, builds, prev, year, info, rb)   # FR-96
     builds += tb                                 # BUG-317: and at=bridges for the bridge ways
+    hall = bool(gaps) and any(g.startswith("traps") for g in gaps) and _hall_due(fort, done, builds, info)
+    if hall:                                     # BUG-377: the P6 hall without waiting for the phase list (P5's drill)
+        builds.append(copy.deepcopy(HALL))
     if applied is not None:                      # BUG-164: no stage 3 @same without the core's stage 2 (known applied)
         core_gaps(builds, done)
     if drop_core:                                # BUG-130: nothing on the stopped anchor
@@ -2672,6 +2783,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         front = [b for b in front if any(b is x for x in builds)]
         stone, held, sdrafts = None, None, []   # review: no note for a stone dig, cistern or temple left out here
         libs = list(dict.fromkeys(d["lib"] for p in plist if p["id"] == cur for d in p["deliver"] if d["k"] == "orders"))
+    if gaps and fresh is None:
+        builds = defense_order(builds, front)    # BUG-377: traps and the hall before the growth builds
     depot_note = ""
     # BUG-368 (Run 16b i2: no fortcore, so no trade depot, NO_DEPOT every year): a fort with no depot standing, planned or
     # coming with a fortcore stage 1 of this draft gets one on the surface (site S1: sites.rank, `depot` template)
@@ -2692,6 +2805,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     for i, b in enumerate(builds):              # appended: applied builds keep their y<Y>s<S>b<I> ids
         seasons[min(3, season + i // BUILDS_PER_SEASON)]["build"].append(b)
     cap = min(level_cap(lvl, d01), OPTION_A_MAX if d01 != "B" else R_CAPS[3])
+    if gaps:
+        cap = defense_cap(s, cap)                # BUG-377: no growth past the citizens now while the defence is short
     pop = (s.get("pop") or {}).get("cit", 0)
     pm = (prev or {}).get("military") or schema.PLAN_DEFAULTS["military"]
     melee = 2 if target >= "P5" else 1 if target >= "P2" else 0
@@ -2720,6 +2835,17 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
     doc["notes"] += core_note + depot_note
+    if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
+        armor = any(g.startswith("armor") for g in gaps)
+        if armor and not _bar_want(doc["trade"]["want"]):
+            doc["trade"]["want"].insert(0, "bar:iron")
+        ph = [str(x) for x in (s.get("phw") or {}).get("wait") or []]
+        doc["notes"] += (f"; BUG-377: defence short ({', '.join(gaps)}): pop_ceiling {cap} (the citizens now, no growth), "
+                         "traps and the hall before the growth builds (the refuge's pieces first)"
+                         + (", bar:iron first in trade.want" if armor else "")
+                         + ((f"; phase {cur} waits for {', '.join(ph)}: " if ph else "; ")
+                            + "the P6 hall is drafted all the same" if hall and any(
+                                b["tpl"] == "fortcore" and _stage_of(b.get("p") or {}) == 4 for b in builds) else ""))
     if fnote and (fdb is None or any(b is fdb for b in builds)):
         doc["notes"] += fnote
     if fsnote:

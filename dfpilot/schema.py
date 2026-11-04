@@ -745,7 +745,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "
-                                  "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s")),
+                                  "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s fight:s")),
     "DEATH_CLUSTER": ("B", "care", _CLUSTER),
     # BUG-068: cmd = the command line of a failed act.run (<= 80 bytes), err 'raised an error without a message' when
     # the command raised error(nil)

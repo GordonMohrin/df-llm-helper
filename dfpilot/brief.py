@@ -1278,7 +1278,10 @@ def sec_deaths(ctx: Ctx) -> list[str]:
     for u, d in sorted(last.items()):
         tag = (str(u) + (f" by {d['by']}" if d.get("by") else "") + (" patient" if d.get("patient") else "")
                + (" missing" if d.get("found") == 0 else ""))
-        by.setdefault(str(d.get("cause") or "unknown"), []).append(tag)
+        cause = str(d.get("cause") or "unknown")
+        if cause == "unknown" and d.get("fight"):          # BUG-379: missing in a siege, not 'unknown'
+            cause = "siege"
+        by.setdefault(cause, []).append(tag)
     if not by:
         return []
     groups = sorted(by.items(), key=lambda kv: (-len(kv[1]), kv[0]))

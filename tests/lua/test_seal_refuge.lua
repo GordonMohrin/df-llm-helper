@@ -1047,21 +1047,64 @@ T.test('Review fix (merge15): quiet SIEGE, open refuge with its own well, Kern+ 
   T.eq({pick, flee}, {nil, true}, 'danger: the open refuge is the trap')
 end)
 
-T.test('Review fix (merge15): citizens held in the open refuge in a quiet SIEGE with no other usable burrow are kept ' ..
-       '(KEEP, no REFUGE_SWITCH; old: unsealed -> none, flee, the alert off); with a hostile in Kern+ they flee',
+T.test('Review fix (merge15, BUG-378): citizens held in the open dry refuge in a quiet SIEGE leave it for the closed Kern+ ' ..
+       '(merge15 kept them: no other burrow; the alert off before); with a hostile in Kern+ they flee',
        function()
   local W = fort{door = true}
   with_manifest(W, 6, 6)
   kern_dry(W)
   W.set_mode('SIEGE')
+  -- BUG-378: Kern+ is closed (no drink either): the citizens in the open dry refuge go to Kern+, not on being kept there
   local ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
-  T.eq({ok, pick, flee}, {true, 'Tiefe+', false}, 'old: nil, flee')
-  T.eq(#evs(W, 'REFUGE_SWITCH'), 0)
+  T.eq({ok, pick, flee}, {true, 'Kern+', false}, 'old: Tiefe+ kept (merge15), before: nil, flee')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[1].d.from, sw[1].d.to, sw[1].d.why}, {1, 'Tiefe+', 'Kern+', 'unsealed'})
   W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
   ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
   T.eq({pick, flee}, {nil, true})
-  local sw = evs(W, 'REFUGE_SWITCH')
-  T.eq({#sw, sw[1].d.to, sw[1].d.why}, {1, '', 'unsealed'})
+  sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({sw[#sw].d.to, sw[#sw].d.why}, {'', 'unsealed'})
+end)
+
+---------------------------------------------------------------- BUG-378
+-- Run 16d Plankscale y382: Tiefe+ had no drink at every siege and a way in (the stair head open, or a hatch a cave dragon
+-- breaks); Kern+ stood closed but held no counts, so the BREACH ask took the dry refuge (soft hatch) or nothing (open
+-- stair, the citizens fled). A refuge without drink that has a way in is never the civilians' burrow while Kern+ is closed.
+T.test('BUG-378: quiet SIEGE, the refuge open and dry, Kern+ closed but without drink: Kern+ at the BREACH level, no ' ..
+       'flee (old: no pick, the alert off); with a hostile in Kern+ the citizens still flee', function()
+  local W, M = fort{door = true}
+  with_manifest(W, 6, 6)
+  kern_dry(W)
+  M.CFG.interior = 'Weg+'
+  T.eq(W.state().alert.ref.op, 1)
+  W.set_mode('SIEGE')
+  local ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({ok, pick, flee}, {true, 'Kern+', false}, 'old: nil (the alert off)')
+  ok, pick, note = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, 'Kern+', 'the deep defense ask too')
+  T.ok(note:find('Tiefe+: open: no hatch at 6,6,9', 1, true), note)
+  T.ok(note:find('Kern+ is separated: no drink, food or bed counts for 7 days', 1, true), note)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
+  ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+')
+  T.eq({pick, flee}, {nil, true}, 'a hostile in Kern+: nothing closed')
+end)
+
+T.test('BUG-378: building destroyers in sight, the refuge dry and closed by a hatch only: the BREACH ask keeps the ' ..
+       'citizens in Kern+ (old: the dry Tiefe+ at the BREACH level); no destroyers: the dead end as before', function()
+  local W, M = fort{door = true}
+  with_manifest(W, 6, 6)
+  hatch_on_head(W)
+  kern_dry(W)
+  M.CFG.interior = 'Weg+'
+  W.set_mode('SIEGE')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+', 'no destroyer: the closed dead end')
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, bd = 1, list = {{id = 301, x = 30, y = 20, z = Z + 1, bd = 1}}})
+  W.run(1200, {skip = 9})
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, bd = 1, list = {{id = 301, x = 30, y = 20, z = Z + 1, bd = 1}}})
+  inspect(W, 'refuge', 'refresh')
+  local ok, pick, note = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, 'Kern+', 'old: Tiefe+')
+  T.ok(note:find('Tiefe+: no drink', 1, true), note)
 end)
 
 T.done()

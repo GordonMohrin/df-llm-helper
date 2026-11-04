@@ -444,4 +444,63 @@ T.test('BUG-339: a new death asks the missing ones again first: DEATHS_3PLUS nam
   T.eq(rev, 2, 'the two found deaths revised before the alarm')
 end)
 
+---------------------------------------------------------------- BUG-379
+-- Run 16d Plankscale y382: two sieges, pop 66 -> 1, the brief said 'deaths unknown 67': the bodies of a siege lay unfound
+-- (the incident stays undiscovered), the first answer 'unknown' stayed in the year's census for good, and care kept 40
+-- records only (the older missing ones were dropped before anyone found them).
+T.test('BUG-379: a death missing in a SIEGE is named `siege` (DEATH d.fight, the line, DEATHS_3PLUS, the season tally), ' ..
+       'not `unknown`; outside a fight it stays unknown', function()
+  local W = world{cit = 6, mode = 'SIEGE'}
+  W.run(1)
+  die(W, 1, 'STRUCK_DOWN', {found = false})
+  die(W, 2, 'STRUCK_DOWN', {found = false})
+  die(W, 3, 'BLEED', {found = false})
+  W.run(1)
+  local d = deaths(W)
+  T.eq({d[1].d.cause, d[1].d.fight, d[1].d.found}, {'unknown', 'SIEGE', 0}, 'the cause is not guessed')
+  T.eq(d[1].msg, 'citizen 1 died: unknown, in a SIEGE (not found yet, missing in the unit list)')
+  local a = W.find_events('DEATHS_3PLUS')
+  T.eq(#a, 1)
+  T.eq(a[1].d.causes, {'1:siege', '2:siege', '3:siege'})
+  T.eq(a[1].msg, '3 citizens died within a day: siege 3')
+  T.eq(W.state().care.died, {siege = 3}, 'old: {unknown = 3}')
+  W.set_mode('PEACE')
+  die(W, 4, nil, {found = false})
+  W.run(1)
+  T.eq(deaths(W)[4].d.fight, nil)
+  T.eq(deaths(W)[4].d.cause, 'unknown')
+end)
+
+T.test("BUG-379: the year's census takes the cause found later (old: `unknown` for ever), and names a siege's unfound dead",
+       function()
+  local W = world{cit = 6, mode = 'SIEGE'}
+  W.run(1)
+  die(W, 1, 'STRUCK_DOWN', {found = false})
+  die(W, 2, 'STRUCK_DOWN', {found = false})
+  CW.day(W)
+  T.eq(W.state().care.pop.dy, 2)
+  T.eq(W.state().care.died_y, {siege = 2}, 'old: {unknown = 2}')
+  incidents[501].flags.discovered = true                       -- one body found
+  CW.day(W)
+  T.eq(W.state().care.died_y, {killed = 1, siege = 1}, 'old: {unknown = 2}')
+  incidents[502].flags.discovered = true
+  CW.day(W)
+  T.eq(W.state().care.died_y, {killed = 2})
+end)
+
+T.test('BUG-379: care keeps the missing dead of a whole siege (old: the oldest of 40 dropped before they were found)',
+       function()
+  local W = world{cit = 60, mode = 'SIEGE'}
+  W.run(1)
+  for i = 1, 60 do die(W, i, 'STRUCK_DOWN', {found = false}) end
+  W.run(1)
+  local pend = 0
+  for _, e in ipairs(W.K.persist.get('m.care').died) do if e.pend == 1 then pend = pend + 1 end end
+  T.eq(pend, 60, 'old: 40 records')
+  incidents[501].flags.discovered = true                       -- the oldest body found: revised, it was not dropped
+  CW.day(W)
+  local d = deaths(W)
+  T.eq({d[1].d.cause, d[1].d.revised}, {'killed', 1})
+end)
+
 T.done()
