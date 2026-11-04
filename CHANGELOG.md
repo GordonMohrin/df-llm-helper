@@ -1,5 +1,21 @@
 # CHANGELOG dfpilot
 
+## Mood drink nook never waits, cloth chain with the Farmers workshop, mood shops first (BUG-371, BUG-372, BUG-373, 2026-11-04; offline, live-untested)
+- **Why:** i4 Plankscale (Run 16d y375-377): two moody dwarves died of thirst 75,002; the nook was reported 'queued behind' and
+  'moods missed cloth,gems'. kern.log: the nook ran 5,278 ticks after it was queued, after a DRILL froze it and a paced runner;
+  the cloth was missing (no yarn/silk, no Farmers chain), and the text kept saying 'queued' after the nook stood.
+- **BUG-371:** runner `allowed`: mood_drink also in DRILL; care queues the nook in ALERT/DRILL too (SIEGE/BREACH unchanged); the
+  nook is exempt from `mood_slots` (scheduler, `join_run`); the row of a waiting mood project reads 'mood: starts next run';
+  `Q.mood_boost` asks kern for the boost while a nook is pending; the nook text reads 'drink nook stands at ...' once placed.
+- **BUG-372:** `MD.CHAIN` cloth = Loom + Farmers, thread = Farmers (`MD.EXTRA` adds Farmers like Butchers): the typed request
+  `workshops why=mood` names them; MOOD_CRITICAL says 'caravans asked: <tokens>' for a material none in the fort.
+- **BUG-373:** `runner.mood_wanted()` (CONTRACTS); readiness' 'mood shops missing' lists the shops a mood waits for first and
+  counts them at once ('(N a mood waits for)').
+- **Tests (fail on 2fcd6e0):** tests/lua/test_bug371_373_moods.lua (9), test_care_nook.lua (+1, one text pinned to 'stands').
+- **Live check:** a mood with no cloth: follow places Loom + Farmers (PROJECT_REQUEST why=mood types), MOOD_CRITICAL carries
+  'caravans asked'; a nook queued during a bridge drill runs at once, rows read 'mood: starts next run' (never 'queued behind');
+  MOOD_RISK says 'stands at' after it stood; status R0 names 'Loom ... (1 a mood waits for)' first.
+
 ## Startup shops on the surface, no door wait without a carpenter, one fortcore (BUG-356, BUG-357, BUG-358, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a-d (new forts, y372/373): the first year hung on the fortcore (no still, kitchen, carpenter or mason until
   stage 1 was dug, drink 3 d -> 0 in every fort); farms and two workshops projects stood 32 d at build 50 % 'waits for door'

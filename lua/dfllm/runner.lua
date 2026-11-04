@@ -3016,7 +3016,9 @@ local function allowed(K, P, d)
   if P.tpl == 'plug' then return true end
   local m = K.mode()
   -- BUG-306: a mood drink nook (one stockpile tile beside the claimed workshop) is life support, as in PEACE in ALERT/RECOVERY
-  if P.tpl == 'mood_drink' and (m == 'ALERT' or m == 'RECOVERY') then return true end
+  -- BUG-371 (Run 16d y376: the nook of a thirsty Possessed dwarf stood frozen through a bridge drill and waited 5,000 ticks for
+  -- the next run): and in a DRILL, which freezes the rest for a day
+  if P.tpl == 'mood_drink' and (m == 'ALERT' or m == 'RECOVERY' or m == 'DRILL') then return true end
   if P.tpl == 'repair' and d and type(d.params) == 'table' and d.params.peace == 1 then
     if m ~= 'PEACE' then return false end
     local ok, why = K.call('reflex', 'holding')
@@ -4106,7 +4108,8 @@ function rows(K)
         if lw and lw.si == P.stage and lw.why and lw.m == K.mode() then b = 'frozen: ' .. lw.why end
       elseif pw then b = 'paused: ' .. pw
       elseif S.active and not S.active[P.id] then
-        b = yd and string.format('no progress %d d: slot yielded', yd) or behind
+        -- BUG-371: a mood project never queues behind others, it starts in the next run (said so, not 'queued behind <seal>')
+        b = yd and string.format('no progress %d d: slot yielded', yd) or (Q.mood_proj(P) and 'mood: starts next run') or behind
       end
     elseif pk[P.id] then b = 'parked: ' .. b
     elseif b == 'stalled' then                     -- BUG-154 (live i4): a stalled project is not halted and still paused
@@ -5429,7 +5432,9 @@ local function begin_run(K)
             tasks[#tasks + 1] = {k = 'work', id = P.id, hold = true}
           end
         end
-        local mood_slot = ok and Q.mood_proj(P) and nm < (int(M.CFG.mood_slots) or 2)    -- BUG-306: beside `active`
+        -- BUG-306: beside `active`; BUG-371: the one-tile drink nook needs no slot of the mood_slots (two mood shops projects
+        -- that hold them never keep a nook, the dwarf's life support, waiting 'queued behind')
+        local mood_slot = ok and Q.mood_proj(P) and (nm < (int(M.CFG.mood_slots) or 2) or P.tpl == 'mood_drink')
         local aside = Q.idle(P) and not Q.idle_keep(K, P)       -- BUG-328: set aside: measured only, never a slot
         if ok and not aside and (n < M.CFG.active or mood_slot) then
           if mood_slot then nm = nm + 1 else n = n + 1 end
@@ -5532,9 +5537,27 @@ end
 
 -- BUG-037 watchdog: a task that yields task_slices slices in a row is skipped for this run (kern.log; what it did stays,
 -- the next run goes on from there), so one task can never hold the run, and with it every slot, for good
+-- BUG-371 (Run 16d y376: "runner paced: over its share of 4 ms/s ... runs and slices wait" while a thirsty Possessed dwarf's drink
+-- nook stood queued): while a drink nook is pending the runner asks kern for the boost (no demotion, a bigger share); it lapses
+-- by itself and is dropped at once when the nook is done
+function Q.mood_boost(K)
+  local pend = false
+  for _, P in ipairs(S.pd and S.pd.list or {}) do
+    if P.tpl == 'mood_drink' and P.done ~= 1 and not halted(P) then pend = true; break end
+  end
+  if pend and type(K.boost) == 'function' then
+    K.boost('mood drink nook pending', false)
+    S.mboost = true
+  elseif S.mboost then
+    S.mboost = nil
+    if type(K.unboost) == 'function' then K.unboost() end
+  end
+end
+
 function M.step(K, budget, ctx)
   S.slice = {qf = 0, probes = 0, qf_max = M.CFG.qf_per_slice}
   if not (ctx and ctx.cont) or not S.run then S.dtask, S.doing = nil, 'begin run'; begin_run(K) end
+  pcall(Q.mood_boost, K)
   local run = S.run
   run.sl = (run.sl or 0) + 1
   while run.i <= #run.tasks do
@@ -6091,7 +6114,7 @@ function Q.join_run(K, id)
   if not (run and P and S.active) or S.active[id] then return false end
   local nm = 0
   for pid in pairs(S.active) do if Q.mood_proj(find(pid)) then nm = nm + 1 end end
-  if nm >= (int(M.CFG.mood_slots) or 2) then return false end
+  if nm >= (int(M.CFG.mood_slots) or 2) and not (find(id) and find(id).tpl == 'mood_drink') then return false end   -- BUG-371
   local at = #run.tasks + 1
   for i = math.max(run.i, 1), #run.tasks do
     local k = run.tasks[i].k
@@ -6131,6 +6154,16 @@ function M.mood_types(K, sid, types)
   S.mood_ids = ids
   local out = {}
   for _, t in ipairs(list) do if not own[t] then out[#out + 1] = t end end
+  return out
+end
+
+-- public (BUG-373, readiness' R0 mood_ws): the workshop types the open strange moods wait for now (care's chain: his shop, Loom
+-- for cloth, Tanners for leather ...), sorted; {} without a mood
+function M.mood_wanted(K)
+  local set, out = {}, {}
+  for _, ts in pairs(Q.MOODWS) do for t in pairs(ts) do set[t] = true end end
+  for t in pairs(set) do out[#out + 1] = t end
+  table.sort(out)
   return out
 end
 

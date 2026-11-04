@@ -368,7 +368,7 @@ T.test('BUG-063: from 40,000 a one-barrel drink stockpile is queued beside the c
   local n = 0
   for _, x in ipairs((W.K.persist.get('projects') or {}).list or {}) do if x.tpl == 'mood_drink' then n = n + 1 end end
   T.eq(n, 1)
-  T.ok(W.find_events('MOOD_CRITICAL')[1].msg:find('drink nook queued at 22,21,5', 1, true))
+  T.ok(W.find_events('MOOD_CRITICAL')[1].msg:find('drink nook stands at 22,21,5', 1, true))   -- BUG-371: placed by then
   for _, a in ipairs(W.acts) do
     T.ok(a.fn ~= 'job' and a.fn ~= 'item_flag', 'no act on the dwarf or his items: ' .. a.fn)
   end

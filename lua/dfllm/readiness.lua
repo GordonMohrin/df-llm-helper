@@ -316,14 +316,25 @@ function M.mood_ws_blocker(K, now)
   for _, t in ipairs(ms.missing) do miss[t] = true end
   st.mws = st.mws or {}
   for t in pairs(st.mws) do if not miss[t] then st.mws[t], dirty = nil, true end end
-  local list, oldest = {}, 0
+  -- BUG-373 (Run 16d: 'mood shops missing' named the first three of twelve types, Loom and Clothiers sit at the end of the list
+  -- and were cut off while cloth was what the moods wanted): the shops an open mood waits for come first and count at once
+  local want = {}
+  local okw, wl = K.call('runner', 'mood_wanted')
+  for _, t in ipairs(okw and type(wl) == 'table' and wl or {}) do want[t] = true end
+  local list, oldest, first = {}, 0, {}
   for _, t in ipairs(ms.missing) do
     if type(t) == 'string' then
       if not st.mws[t] then st.mws[t], dirty = now, true end
       local age = math.max(0, (now - st.mws[t]) // 1200)
-      if age >= days then list[#list + 1] = t; oldest = math.max(oldest, age) end
+      if age >= days or want[t] then
+        if want[t] then first[#first + 1] = t else list[#list + 1] = t end
+        oldest = math.max(oldest, age)
+      end
     end
   end
+  local nwant = #first
+  for _, t in ipairs(list) do first[#first + 1] = t end
+  list = first
   if #list == 0 then return nil end
   local ask, queued = {}, {}
   local qd = type(ms.queued) == 'table' and ms.queued or {}
@@ -331,8 +342,9 @@ function M.mood_ws_blocker(K, now)
     if type(qd[t]) == 'table' then queued[#queued + 1] = string.format('%s %s %s%%', t, cut(qd[t].id, 12), tostring(int(qd[t].pct) or 0))
     else ask[#ask + 1] = t end
   end
-  local head = string.format('mood shops missing %d days: %s%s', oldest, table.concat(list, ',', 1, math.min(#list, 3)),
-                             #list > 3 and string.format(' +%d', #list - 3) or '')
+  local head = string.format('mood shops missing %d days: %s%s%s', oldest, table.concat(list, ',', 1, math.min(#list, 3)),
+                             #list > 3 and string.format(' +%d', #list - 3) or '',
+                             nwant > 0 and string.format(' (%d a mood waits for)', nwant) or '')
   local parts = {head}
   if #ask > 0 then
     local only = table.concat(ask, ',', 1, math.min(#ask, 3))

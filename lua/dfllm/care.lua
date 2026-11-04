@@ -729,6 +729,11 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   if webs then did[#did + 1] = webs end
   local reach = M.mood_reach_text(K, rec, miss)                     -- BUG-341
   if reach then did[#did + 1] = reach end
+  -- BUG-372: a material none in the fort (yarn, silk, gems ...) the chain may not make in time: the caravan is asked at once and
+  -- the line says it with the days left (the reach text above names it for far items already)
+  if not reach and type(rec.nosrc) == 'table' and #rec.nosrc > 0 and type(rec.buy) == 'table' and #rec.buy > 0 then
+    did[#did + 1] = 'caravans asked: ' .. table.concat(rec.buy, ',')       -- (the MOOD line before it carries the days left)
+  end
   local msg = string.format('[unit %d %s] %s', u.id, table.concat(reasons, ','), line)
   if #did > 0 then msg = msg .. '; ' .. table.concat(did, '; ') end
   local sl = open_slots(job, rec) or {}
@@ -2216,11 +2221,14 @@ mood_relief = function(K, c, p, u, rec, job, ws, crit)
       K.log('warn', 'mood nook: unit %s: %s; the tile is skipped', sid, rec.nook_why)
     elseif okq and state == 'placed' then
       done.ok = true
+      -- BUG-371 (Run 16d: MOOD_RISK said 'drink nook queued' for days after the nook stood): the text says what is true
+      done.txt = tostring(done.txt):gsub('^drink nook queued at', 'drink nook stands at', 1)
     end
   end
   if type(done) == 'table' then return done.txt end
   local mode = K.mode()
-  if mode ~= 'PEACE' and mode ~= 'RECOVERY' then return nil end
+  -- BUG-371: ALERT and DRILL too (the runner runs a nook in them); SIEGE/BREACH still read no tile (FR-82)
+  if mode ~= 'PEACE' and mode ~= 'RECOVERY' and mode ~= 'ALERT' and mode ~= 'DRILL' then return nil end
   local r0 = math.max(1, num(c.mood_nook_r) or MOOD_NOOK_R)
   local widen = crit and (num(c.mood_nook_rmax) or 9) > r0 and not rec.nook_wide     -- the first critical look widens at once
   if now - (num(rec.nook_try) or -c.mood_nook_retry) < c.mood_nook_retry and not widen then return rec.nook_why end

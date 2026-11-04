@@ -375,6 +375,9 @@ Related: FR-xx, BUG-xx
 | [BUG-361](BUG-361-the-year-plan-seal-sits-on-the-fortcore-site-and-blocks-it.md) | fixed (offline, live-untested) | high | Run 16c: the seal on the dead cores' tunnels held every ranked fortcore site; the ranking keeps only free sites and names the holders | cmd.py, sites.py |
 | [BUG-362](BUG-362-runtime-name-stays-after-save-as.md) | fixed (offline, live-untested) | medium | Run 16b: runtime folder/status keep the pre-save-as name | lua/kern, tools/embark |
 | [BUG-363](BUG-363-propose-drafts-rooms-for-an-undug-core.md) | fixed (offline, live-untested) | medium | Run 16b: propose drafts rooms while the placed fortcore dug nothing (no state row) | dfpilot/plan |
+| [BUG-371](BUG-371-mood-drink-nook-waits-in-a-drill-behind-the-slots-and-paced.md) | fixed (offline, live-untested) | high | Run 16d: the moody dwarf's drink nook waited through a DRILL, behind the mood slots and a paced runner, and the line said 'queued' after it stood; allowed in DRILL, no slot cap, boost, 'stands at' | runner.lua, care.lua |
+| [BUG-372](BUG-372-mood-cloth-chain-misses-the-farmers-workshop.md) | fixed (offline, live-untested); open: yarn/silk from nothing | high | Run 16d: a mood needing cloth/thread asked the Loom only (no Farmers workshop for thread) and MOOD_CRITICAL did not say the caravan was asked | mood.lua, care.lua |
+| [BUG-373](BUG-373-mood-shops-missing-cuts-the-shops-a-mood-waits-for.md) | fixed (offline, live-untested) | medium | Run 16d: R0 'mood shops missing' named the first three of twelve types, cutting off Loom/Clothiers for 7 days; the shops a mood waits for come first, at once | readiness.lua, runner.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
