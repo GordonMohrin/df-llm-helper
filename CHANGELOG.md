@@ -22,6 +22,21 @@
   citizens, hall + traps first; a siege with Tiefe+ dry: REFUGE_FAIL names the way in and the alert burrow is Kern+, no flee while
   Kern+ is closed; after a siege `DEATHS_3PLUS` causes `<id>:siege` and the brief census `siege N` that turns into killed/bled as
   bodies are found.
+## A bridge no longer raises onto a soldier walking to his station (BUG-380, 2026-11-04; offline, live-untested)
+- **Why:** Run 16d i4 Woodmill (the fort that fell): in a BREACH with 0 visible hostiles B2 moved up under soldier 26395, nine tiles
+  out when the pull was done (BRIDGE_CRUSH #2700); B1/B2/O1 were pulled ~10 times in 1500 ticks beside squads 99-101 walking to
+  stations 2 tiles from B2's footprint, on a level below it.
+- **BUG-380:** gate.lua `holders`: the hotfix let walkers beyond PATH_SIEGE (6) steps go in SIEGE/BREACH with or without a hostile;
+  now only while a hostile is in sight within `HURRY_NEAR` (30) tiles of the bridge, else the walkers 20 steps out hold the raise
+  (the forced branch is unchanged: a hostile within force_near holds only for units on the footprint). stations.lua `sdist`:
+  `blockers`/`relocate` count a footprint up to `ZREACH` (3) levels above or below by the x/y distance (a stair joins them), so
+  stations.b2 76,115,134 beside B2 77..79,113,137 moves.
+- **Tests (fail on ec9bd8e):** tests/lua/test_bug380_siege_traffic.lua (3: squad + citizens streaming over a bridge, BREACH without
+  a hostile and SIEGE with an army: nobody on a footprint while it moves AND up before the army and before T+900),
+  tests/lua/test_stations.lua (2); test_siege.lua's stream test now has the army 25 tiles out.
+- **Live check:** BREACH without a visible hostile: `B2 up still waits for ... walking onto it in N steps` up to 20, no
+  GATE_CRUSH_RISK / BRIDGE_CRUSH; an army inside 30 tiles: the stream still does not hold the raise (no `not up at T+900`).
+
 ## A shallower core in an aquifer world, the fortcore sites box, damp stone on a lost stair, explore depth (BUG-364 to BUG-367, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a-d (new forts in region1, an aquifer almost everywhere): no fortcore site anywhere (heavy_aquifer, cavern_lake,
   dig_lost), `bp sites fortcore` 0 ranked for good after every bp.cancel (i1, i2), the draft kept the cancelled `fortcore@same`,

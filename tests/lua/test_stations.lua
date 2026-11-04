@@ -576,4 +576,33 @@ T.test('BUG-335 review: a soldier holding the raise of B2 by walking over it to 
   T.eq(n2, 0, 'walking in to the core: not moved')
 end)
 
+-- BUG-380 (Run 16d i4 Woodmill: stations.b2 76,115,134 two tiles from B2's footprint 77..79,113,137 three levels down, the core
+-- stair at 78,115 between them; 'another z never holds a station' put the whole squad there, the soldiers crossed B2 to and
+-- from it for good and one was crushed by its raise)
+T.test('BUG-380 dfllm.stations: a footprint up to ZREACH levels above or below holds a station by the x/y distance', function()
+  local brs = SL.bridges(manifest())
+  local b2 = brs[2].fp
+  T.eq({SL.sdist(b2, 51, 62, Z - 3), SL.sdist(b2, 51, 62, Z + 3), SL.sdist(b2, 51, 62, Z - 4), SL.sdist(b2, 51, 62, Z)},
+       {2, 2, nil, 2})
+  T.eq(SL.dist(b2, 51, 62, Z - 3), nil, 'dist (the footprint itself) stays on its own levels')
+  local blk = SL.blockers(brs, {x = 51, y = 62, z = Z - 3}, 2)
+  T.eq({#blk, blk[1].name, blk[1].d}, {1, 'B2', 2})
+  T.eq(#SL.blockers(brs, {x = 51, y = 63, z = Z - 3}, 2), 0, 'three tiles away: clear')
+  T.eq(#SL.blockers(brs, {x = 51, y = 62, z = Z - 4}, 2), 0, 'four levels down: the stair does not join them')
+end)
+
+T.test('BUG-380: BREACH with stations.b2 two tiles from B2 on a level three below it -> military moves it to the nearest ' ..
+       'floor clear of the footprint on that level (old: kept, the squad crossed B2 for good), STATION_MOVED names both',
+       function()
+  local m = manifest{b2 = {51, 62, Z - 3}}
+  m.zones.Z4[#m.zones.Z4 + 1] = {40, 61, Z - 3, 80, 95, Z - 3}
+  local W = world{manifest = m, tag = 'st380'}
+  breach(W)
+  T.eq({orders_of(W, 'A'), orders_of(W, 'B'), orders_of(W, 'C')},
+       {'station@51,63,7', 'station@51,63,7', 'station@51,63,7'})
+  local mv = evs(W, 'STATION_MOVED', 'bridge')
+  T.eq(#mv, 1)
+  T.eq({mv[1].d.station, mv[1].d.from, mv[1].d.to, mv[1].d.bridge, mv[1].d.d}, {'b2', {51, 62, Z - 3}, {51, 63, Z - 3}, 'B2', 2})
+end)
+
 T.done()

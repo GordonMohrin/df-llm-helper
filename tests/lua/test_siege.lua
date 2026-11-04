@@ -773,10 +773,11 @@ local function stream(ids, steps)              -- units ids walk north onto O1 (
   end
 end
 
-add{name = 'Hotfix (live BREACH): a stream of citizens walking onto O1 20 steps out never holds the SIEGE raise ' ..
-           '(BUG-335 held it the whole siege: BREACH at T+900); O1 up, no GATE blocked, no GATE_FAIL',
+add{name = 'Hotfix (live BREACH) + BUG-380: with the army 25 tiles from O1 a stream of citizens walking onto it 20 steps ' ..
+           'out does not hold the SIEGE raise (BUG-335 held it the whole siege: BREACH at T+900); O1 up, no GATE blocked, ' ..
+           'no GATE_FAIL',
   units = function()
-    return units(S.army(6, 150, 150), S.cit(101, 50, 30), S.cit(102, 51, 30), S.cit(103, 52, 30), S.cit(104, 51, 31))
+    return units(S.army(6, 51, 35), S.cit(101, 50, 30), S.cit(102, 51, 30), S.cit(103, 52, 30), S.cit(104, 51, 31))
   end,
   setup = function(W) stream({101, 102, 103}, 20)(W); stream({104}, 21)(W) end,
   run = 1500, modes = {'PEACE>SIEGE'},
