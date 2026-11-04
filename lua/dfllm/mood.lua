@@ -8,7 +8,7 @@
 --     tick + mood_timer (an estimate, said so); no claim yet: unknown.
 --   * MD.reasons: why a mood is an emergency now (workshop, material, waiting, timer), MD.step: the days-left step whose
 --     change says MOOD_CRITICAL again (20, 10, 5, 2 days).
---   * MD.chain: the workshops a missing material class is made in (cloth/thread: Loom; leather: Tanners, Butchers; glass:
+--   * MD.chain: the workshops a missing material class is made in (cloth: Loom, Farmers; thread: Farmers; leather: Tanners, Butchers; glass:
 --     Glass Furnace; gems: Jewelers (cut glass: the Glass Furnace too); bone/shell: Butchers).
 --   * MD.line: the status/brief line 'MOOD <name> <kind> needs <items>: <have/missing>, <days left>'.
 local C = require('dfllm.util.contract')
@@ -22,7 +22,9 @@ MD.BK_HAVE = 'enough exist'          -- care's slot blocker for a slot the dwarf
 
 -- the shops a missing class is made in (df.workshop_type / df.furnace_type names; Butchers is no moodable shop: follow
 -- places it through `add`). `glassy`: a gems slot that cut glass serves (care's rec.glass): the Glass Furnace as well
-MD.CHAIN = {cloth = {'Loom'}, thread = {'Loom'}, leather = {'Tanners', 'Butchers'}, glass = {'GlassFurnace'},
+-- BUG-372 (Run 16d y375: 'moods missed cloth,gems', thread 5 in stock and nobody to spin or weave it): thread is spun (yarn, silk) or
+-- processed (plants) at a Farmer's workshop, cloth is woven at a Loom: both shops ask for a missing cloth, the Farmers for thread
+MD.CHAIN = {cloth = {'Loom', 'Farmers'}, thread = {'Farmers'}, leather = {'Tanners', 'Butchers'}, glass = {'GlassFurnace'},
             gems = {'Jewelers'}, bone = {'Butchers'}, shell = {'Butchers'}}
 -- a built shop that stands for a wanted one (economy.MOOD_ALT: a mood claims either)
 MD.ALT = {MetalsmithsForge = 'MagmaForge', GlassFurnace = 'MagmaGlassFurnace'}
@@ -123,10 +125,10 @@ function MD.missing_set(ms)
   return set
 end
 
--- the chain shops that are no moodable type (economy.mood_shops never lists them): Butchers for leather, bone and shell.
+-- the chain shops that are no moodable type (economy.mood_shops never lists them): Butchers for leather, bone and shell, Farmers for thread (BUG-372).
 -- Review fix: without this the typed request never named the Butchers. Read-only (the built workshops); added to `set`
 -- when none of the type is built; unreadable buildings: unchanged
-MD.EXTRA = {'Butchers'}
+MD.EXTRA = {'Butchers', 'Farmers'}
 function MD.extra_missing(set)
   pcall(function()
     local have = {}

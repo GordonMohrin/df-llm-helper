@@ -308,7 +308,7 @@ T.test('BUG-102: a nook quickfort refuses ("tile occupied") is skipped: the next
   T.eq(sites, {'22,21', '23,21', '24,21'}, 'each refused tile is skipped by the next probe')
   T.eq(logs(W, 'refused by quickfort'), 2)
   local nk = W.K.persist.get('m.care').nook['2']
-  T.ok(nk.txt:find('drink nook queued at 24,21,5', 1, true), nk.txt)
+  T.ok(nk.txt:find('drink nook stands at 24,21,5', 1, true), nk.txt)    -- BUG-371: it was said 'queued' after it stood
   W.run(3000, {skip = 100})
   T.eq(projects(W), 3, 'a nook that stands is not queued again')
 end)
@@ -358,6 +358,32 @@ T.test('BUG-102: a mood that ends, an old state without the new fields and a leg
   W3.run(450, {skip = 50})
   T.eq(projects(W3), 1, 'the old record is widened')
   T.eq(#W3.find_events('KERN_FAULT'), 0)
+end)
+
+---------------------------------------------------------------- BUG-371
+T.test('BUG-371: ALERT and DRILL queue the nook too (life support); the text says "stands" once it is placed', function()
+  for _, mode in ipairs({'ALERT', 'DRILL'}) do
+    local W = nook_world{mode = mode}
+    moody(W, 2, 'Fey', 41000, 0)
+    W.run(1)
+    T.eq(projects(W), 1, mode .. ': old code queued none')
+  end
+  local W = nook_world{}
+  moody(W, 2, 'Fey', 41000, 0)
+  W.run(1)
+  T.eq(projects(W), 1)
+  W.run(1500, {skip = 100})
+  local r = events(W, 'MOOD_RISK', 'thirst')
+  local last = r[#r].msg
+  W.run(4000, {skip = 100})
+  local nook = ''
+  for _, e in ipairs(W.find_events('MOOD_CRITICAL')) do nook = e.d.nook or nook end
+  local txt = (W.K.persist.get('m.care') or {}).nook
+  local any = false
+  for _, v in pairs(type(txt) == 'table' and txt or {}) do
+    if type(v) == 'table' and v.ok == true then any = true; T.ok(v.txt:find('^drink nook stands at'), v.txt) end
+  end
+  T.ok(any or not txt, 'a placed nook is marked ok')
 end)
 
 T.done()
