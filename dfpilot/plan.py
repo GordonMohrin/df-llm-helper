@@ -31,6 +31,7 @@ CORE_DAYS = 90                            # BUG-028: drink/food days wanted insi
 O1_PHASE = "P3"                           # DECISIONS 1: plans/year1.json: fortcore stage 3 (O1, B2, the refuge) is a P3 build
 GALLERY_PHASE = "P5"                      # plans/year1.json: the outward gallery over O1 comes with P5 (Run 10)
 PERIMETER_GATE_FROM = "P2"                # FR-70: phase raises are refused while the perimeter is open from this phase on
+PERIMETER_WAIVE_D = 365                   # BUG-349: open this long while the seal cannot close it: the raise is waived
 STAGE3_PHASE = O1_PHASE                   # no phase_target at or above it without O1, B2 and the refuge (stage3_gate)
 BRIDGE_STANDING = ("up", "down", "moving", "replaced")      # state.bridges: a gate that stands (BUG-048: or a wall + door)
 GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
@@ -1083,17 +1084,73 @@ def perimeter_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[l
     days, pw = r.get("pd"), r.get("pw") or "?"
     open_for = f" for {days} day{'s' if days != 1 else ''}" if isinstance(days, int) else ""
     cur = s.get("phase") or "P0"
+    waiver = perimeter_waiver(doc, s, fort, prev)
     # Before P2 the entrance tunnel is open by design (B1, the first gate, is the P2 build: fortcore stage 2), so a raise
     # from P0 or P1 is the way to close it and is never refused; the days still count in the warning
     if doc["phase_target"] > cur and cur >= PERIMETER_GATE_FROM:
+        if waiver:                                     # BUG-349: the seal cannot close it: the raise goes on
+            return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter) while {waiver}: raising "
+                        f"phase_target {cur} -> {doc['phase_target']} is waived (BUG-349: open {PERIMETER_WAIVE_D} d "
+                        "or more and the seal cannot close it); the seal keeps running and max-pop stays held; the "
+                        "seal_stalled question (dfllm events --cls A) says what still helps"]
         return [f"perimeter: raising phase_target {cur} -> {doc['phase_target']} while the perimeter is open{open_for} "
                 f"({pw}; readiness R0 open_perimeter): seal first (dfllm cmd bp.place tpl=seal site=S1 at=last; a "
-                "lost bridge: dfllm cmd inspect what=defense)"], []
+                "lost bridge: dfllm cmd inspect what=defense)" + _waive_when(days)], []
     if cur < PERIMETER_GATE_FROM:
         return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter): by design until B1 stands (P2); the "
                     "phase may rise"]
+    if waiver:
+        return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter) while {waiver}: max-pop stays held; "
+                    "a phase raise is waived (BUG-349)"]
     return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter): max-pop and the phase stay held until "
                 "it is closed; seal first (dfllm cmd bp.place tpl=seal site=S1 at=last)"]
+
+
+def _waive_when(days) -> str:
+    """BUG-349: the refusal's tail that says when the raise is waived."""
+    left = f" (in {PERIMETER_WAIVE_D - days} d)" if isinstance(days, int) and days < PERIMETER_WAIVE_D else ""
+    return (f"; after {PERIMETER_WAIVE_D} d open{left} with a seal stuck, set aside or first in this plan's due season "
+            "the raise is waived (BUG-349)")
+
+
+def stalled_seal(s: dict, fort: dict | None) -> str | None:
+    """BUG-349: the seal work that does not close the perimeter, as a short text: an open seal stuck PERIMETER_WAIVE_D
+    days or more (fort.seals, state sched.seal: SEAL_STUCK's days and why), or a seal the runner set aside for want of
+    progress (state proj row 'set aside N d: ...'); None when there is none."""
+    rows = [x for x in (fort or {}).get("seals") or [] if isinstance(x, dict)]
+    se = (s.get("sched") or {}).get("seal")
+    if isinstance(se, dict) and isinstance(se.get("proj"), str) and not any(x.get("proj") == se["proj"] for x in rows):
+        rows.append(se)
+    for x in rows:
+        d = x.get("days")
+        if x.get("stuck") and isinstance(d, int) and d >= PERIMETER_WAIVE_D:
+            return f"seal {x.get('proj')} stuck {d} d" + (f" ({_cut(x['why'], 60)})" if x.get("why") else "")
+    for r in s.get("proj") or []:
+        if isinstance(r, list) and len(r) >= 4 and str(r[1]).startswith("seal.") and str(r[3]).startswith("set aside"):
+            return f"seal {r[0]} {str(r[3]).split(':')[0]}"
+    return None
+
+
+def perimeter_waiver(doc: dict, s: dict, fort: dict | None, prev: dict | None) -> str | None:
+    """BUG-349 (Run 15 Guildcleans y388-y390, i2: `plan check` refused P3 -> P5 'while the perimeter is open 468 d' with
+    seal@S1 first in seasons[0]; the refuge hatch 77,100,123 and the wall 130,93,130 (no item) stood stuck 4500 and 2300
+    d, B2's lever lost: the fort stayed at P3 every year). After PERIMETER_WAIVE_D days of R0 open_perimeter (state
+    ready.pd) the raise is waived when the fort did its part and the seal cannot close it: a seal stuck that long or set
+    aside (stalled_seal), a seal among this plan's new builds due now, or nothing left a seal closes (only lost bridges
+    or levers: the rebuild's, stage3_gate's). The reason as text, else None."""
+    days = (s.get("ready") or {}).get("pd")
+    if not isinstance(days, int) or days < PERIMETER_WAIVE_D:
+        return None
+    st = stalled_seal(s, fort)
+    if st:
+        return st
+    due = due_season(doc, s)
+    if any(b["tpl"] == SEAL and si <= due for si, _, b in new_builds(doc, prev)):
+        return f"seal@{next(b['site'] for si, _, b in new_builds(doc, prev) if b['tpl'] == SEAL)} in this plan"
+    pw = str((s.get("ready") or {}).get("pw") or "")
+    if pw and not re.search(r"\bways? in\b", pw):
+        return f"nothing a seal closes ({pw})"
+    return None
 
 
 def stage3_due(s: dict, fort: dict, done: set, builds: list) -> bool:
@@ -1924,7 +1981,7 @@ def mood_buys(s: dict | None) -> list[str]:
     return out
 
 
-def explore_room(save_dir: Path, sites: list, params: dict) -> int | None:
+def explore_room(save_dir: Path, sites: list, params: dict, tpl: str = EXPLORE) -> int | None:
     """BUG-241 (Run 15 Earthboat y375, Inkintense y373/y374: propose drafted explore@S1 in all four seasons while 1 or 2
     sites were free; `plan check` refused the draft: 'only 0 free site(s) for explore ... taken by y375s0b0'): how many
     explore shafts fit at once on the ranked `sites`: each site whose footprint touches no project in <save>/bp (applied
@@ -1936,7 +1993,7 @@ def explore_room(save_dir: Path, sites: list, params: dict) -> int | None:
     n = 0
     for s in sites:
         try:
-            doc = _cmd.emit_at(EXPLORE, params, s, "S0", "probe")
+            doc = _cmd.emit_at(tpl, params, s, "S0", "probe")
         except BpUnavailable:
             return None
         except BpError:
@@ -1987,6 +2044,45 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
         doc["seasons"][si]["build"].remove(b)
     doc["notes"] += f"; no {EXPLORE} site at any depth (avoided levels or no free rock): trade.want bar:iron only"
     return f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
+
+
+def fit_stone_dig(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
+    """BUG-351 (Run 15d Drillchamber y381 and y384, i4: propose drafted the stone dig bedrooms@S1 n=4 (rock_goal) and its
+    own check refused it: 'only 0 free site(s) for bedrooms n=4 (0 ranked); bedrooms rooms open from the dug Z4 floor',
+    an ERROR without a build to insert; the player took it out by hand both times): the new stone digs (STONE_DIG) of the
+    draft against the free bedrooms sites (explore_room on the ranking, as place_all finds them); those no free site
+    takes are left out, the notes say why and what digs stone instead. Returns a line for the CLI, None when nothing was
+    left out or the bp package / snapshot cannot tell."""
+    new = [b for _, _, b in new_builds(doc, prev) if b == STONE_DIG]
+    if not new:
+        return None
+    p = STONE_DIG["p"]
+    why = ""
+    try:
+        sites, _ = rank_sites(save_dir, STONE_DIG["tpl"], p)
+    except BpUnavailable:
+        return None
+    except BpError as e:
+        if "no snapshot" in str(e):
+            return None
+        sites, why = [], _cut(str(e), 80)
+    room = explore_room(save_dir, sites, p, tpl=STONE_DIG["tpl"]) if sites else 0
+    if room is None or room >= len(new):
+        return None
+    for b in new[room:]:
+        for se in doc["seasons"]:
+            k = next((i for i, x in enumerate(se["build"]) if x is b), None)
+            if k is not None:
+                del se["build"][k]
+    other = any(b["tpl"] in STONE_DIGS for se in doc["seasons"] for b in se["build"])
+    instead = ("the drafted explore/stockroom digs stone meanwhile" if other else
+               "stone: a stockroom or explore dig, trade.want stone; the rooms open from the dug Z4 floor of the "
+               "fortcore (dfllm bp sites bedrooms --fresh once it is dug)")
+    text = (f"stone dig {STONE_DIG['tpl']}@S1 n={p['n']} left out: {room} free site(s) ({len(sites)} ranked"
+            + (f"; {why}" if why else "") + f"); {instead}")
+    doc["notes"] = doc["notes"].replace(" bedrooms@S1 n=4 first (a stone dig)", " no bedrooms site for a stone dig")
+    doc["notes"] += f"; BUG-351: {text}"
+    return text
 
 
 def fit_explore_kept(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
@@ -2476,6 +2572,17 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["notes"] += (f"; BUG-197: no fortcore and no Z4 core floor yet: only fortcore stage 1"
                          + (" and seal" if any(b["tpl"] == SEAL for b in builds) else "") + f" drafted, phase_target {cur}"
                          + (f" (left out: {', '.join(fresh)})" if fresh else "") + "; apply, wait for s1.dig, propose again")
+    # BUG-349 (Run 15 i1 y378, i2 y388: every draft raised the phase and its own check refused it 'while the perimeter is
+    # open'; the player lowered phase_target by hand): the draft keeps the phase when perimeter_gate refuses the raise
+    if doc["phase_target"] > cur and perimeter_gate(doc, s, fort or {}, prev)[0]:
+        r = s.get("ready") or {}
+        doc["notes"] += (f"; FR-70: phase_target stays {cur} (not {doc['phase_target']}): the perimeter is open "
+                         f"{r.get('pd', '?')} d ({r.get('pw') or '?'}): seal first"
+                         + (f"; waived after {PERIMETER_WAIVE_D} d with the seal stuck (BUG-349)"
+                            if not isinstance(r.get("pd"), int) or r["pd"] < PERIMETER_WAIVE_D else ""))
+        doc["phase_target"] = cur
+        if cur < SWEEP_PHASE and not (((prev or {}).get("caverns") or {}).get("sweep") is True):
+            doc.pop("caverns", None)               # FR-99: the sweep came with the raise only
     return doc
 
 
@@ -2772,6 +2879,7 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     live = live_trade(save_dir)                               # BUG-242: the running cmd trade.want stays
     doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, live=live)
     fit_core(save_dir, doc, prev)                             # BUG-195: never a core stage another project blocks
+    fit_stone_dig(save_dir, doc, prev)                        # BUG-351: never a stone dig without a free site
     doc["phase_target"] = cur
     doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
     doc = _with_new(doc, prev, [(si, b) for si, _, b in new_builds(doc, prev) if minimal_ok(b)])
@@ -2782,6 +2890,7 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
         cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt,
                        live=live)
         fit_core(save_dir, cand, prev)
+        fit_stone_dig(save_dir, cand, prev)
         if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
             cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
             best = (cand, cwarn) if not cerrs else _subset(cand, state, prev, fort, decisions, tp)
@@ -2918,6 +3027,8 @@ def run(args, save_dir: Path) -> int:
         fit = fit_explore(save_dir, doc, prev)                # Run 10: the ore search fits the known levels
         kfit = fit_explore_kept(save_dir, doc, prev)          # BUG-223: kept shafts into a cavern level known now
         cfit = fit_core(save_dir, doc, prev)                  # BUG-195: a later core stage another project blocks
+        sfit = fit_stone_dig(save_dir, doc, prev)             # BUG-351: a stone dig no free bedrooms site takes
+        cfit += [sfit] if sfit else []
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
         for ln in ([fit] if fit else []) + kfit + cfit:

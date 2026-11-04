@@ -3414,6 +3414,10 @@ function Q.seal_escalate(K, P, d, r, n, names, t, c)
   local cancel = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}' then ", P.id)
   -- d.cmd: the commands alone (every d string <= 200 bytes, CONTRACTS section 12: one that does not fit is left out);
   -- d.how: what they do and the other way (build it by hand), for the player
+  -- BUG-349 (Run 15 Guildcleans y388-y390, i2: #7282/#7283 offered bp.cancel for a hatch open 4500 d and a wall 2300 d; the
+  -- player did not dare to send them): every how with a command says whether it is safe and recommended (a plain
+  -- bp.cancel drops only the unbuilt pieces and their jobs, nothing built goes; the way in is open now and stays so until
+  -- the new piece stands); a wall waiting for an item (no item) gets no command: a new wall waits for the same item
   local place, how
   if rfoot then
     -- Review fix (merge15): the doors round the refuge's stair foot (refuge_alt's way): walling them cuts the refuge
@@ -3426,28 +3430,34 @@ function Q.seal_escalate(K, P, d, r, n, names, t, c)
     local why = alt.boxed == true and 'no tile beside it to build from' or 'units on the stair? no builder reaches it?'
     if alt.moved and type(alt.head) == 'table' then
       place = Q.seal_place('refuge')
-      how = string.format('build it by hand in DF (%s), or cancel and place it at the head the map shows now (%d,%d,%d)',
-                          why, alt.head[1], alt.head[2], alt.head[3])
+      how = string.format('recommended and safe (the cancel drops only the unbuilt hatch; the refuge stays open until ' ..
+                          'the new one stands): place it at the head the map shows now (%d,%d,%d); or build it by hand',
+                          alt.head[1], alt.head[2], alt.head[3])
     elseif type(alt.foot) == 'table' and #alt.foot > 0 then
       place = Q.seal_place(table.concat(alt.foot, ';'))
-      how = string.format('build it by hand in DF (%s), or cancel it and put doors round the stair foot on the refuge ' ..
-                          'floor instead (%d tiles; they close the refuge as the hatch does)', why, #alt.foot)
+      how = string.format('recommended and safe (the cancel drops only the unbuilt hatch): put ' ..
+                          'doors round the stair foot on the refuge floor (%d tiles); or build it by hand (%s)',
+                          #alt.foot, why)
     else
       how = string.format('build it by hand in DF (%s); placing it again at the same head does not help%s', why,
                           alt.footwhy and ('; ' .. alt.footwhy) or '')
     end
   else
     local seg, kind = Q.seal_opening(d, tile or {})
-    if seg and Q.FLOORISH[kind] then
+    if r.why == 'no item' and piece:match('^wall ') then
+      how = 'no command helps: the wall waits for a building item (stone, block, log) and none is free; placed again it ' ..
+            'waits for the same; get one (trade.want stone, a stone dig) or build it by hand'
+    elseif seg and Q.FLOORISH[kind] then
       place = Q.seal_place(seg:match('^(%-?%d+,%-?%d+,%-?%d+%s+%S+)') or seg, 'wall')
-      how = 'build it by hand in DF, or cancel it and wall the tile (a wall needs no door; only where the citizens keep ' ..
-            'another way)'
+      how = 'safe (the cancel drops only the unbuilt piece; open until the wall stands), recommended where the citizens ' ..
+            'keep another way: wall the tile (a wall needs no door); or build it by hand in DF'
     elseif seg then
       place = Q.seal_place(seg)
-      how = 'build it by hand in DF, or cancel it and place it again'
+      how = 'safe (the cancel drops only the unbuilt pieces; open until they stand): place it again; or build it by hand'
     else
       place = Q.seal_place('last')
-      how = 'build it by hand in DF, or cancel it and seal the open ways in now (at=last)'
+      how = 'safe (the cancel drops only the unbuilt pieces; open until a new seal stands): seal the open ways in now ' ..
+            '(at=last); or build it by hand in DF'
     end
   end
   local cmd = place and (cancel .. place) or nil

@@ -476,9 +476,29 @@ def bp_files(save_dir: Path) -> list[Path]:
         return []
 
 
+def stale_bps(save_dir: Path) -> set[str]:
+    """BUG-350: bp files of projects the kernel does not have: named by events only in a discarded timeline
+    (files.discarded_projects: an older save was loaded after they were placed) and not among the kernel's projects now
+    (state proj). Only while that list is complete (fewer rows than its cap of 8: a longer list may leave a live project
+    out), else none. Their tiles were never dug or built in the game that runs, so they block no new site."""
+    st = files.read_state(Path(save_dir))
+    rows = (st or {}).get("proj")
+    if not isinstance(rows, list) or len(rows) >= STATE_PROJ_ROWS:
+        return set()
+    gone = files.discarded_projects(save_dir)
+    if not gone:
+        return set()
+    return gone - {r[0] for r in rows if isinstance(r, list) and r and isinstance(r[0], str)}
+
+
+STATE_PROJ_ROWS = 8          # schema state proj: at most 8 rows (runner.lua rows)
+
+
 def occupancy(save_dir: Path, skip=()) -> Occupancy:
-    """Every blueprint project in <save>/bp except the ids in skip. Done projects stay in: their tiles are dug."""
+    """Every blueprint project in <save>/bp except the ids in skip. Done projects stay in: their tiles are dug.
+    BUG-350: a project of a discarded timeline only (stale_bps) is no project: left out."""
     occ = Occupancy()
+    skip = set(skip) | stale_bps(save_dir)
     for p in bp_files(save_dir):
         if p.stem in skip:
             continue

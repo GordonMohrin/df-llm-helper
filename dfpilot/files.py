@@ -322,6 +322,62 @@ def iter_events_rev(save_dir: Path, since_n: int = 0, min_tick: int | None = Non
                 yield e
 
 
+_DISCARDED: dict = {}
+
+
+def discarded_projects(save_dir: Path) -> set[str]:
+    """BUG-350 (Run 15c Inkintense y381, i1: an older save was loaded at y378 (TIMELINE_RESET #2422), the y378 plan's
+    explore shafts were queued and done only in the discarded timeline; their bp files stayed and `plan check` found
+    'only 0 free site(s) for explore ... taken by y378s0b1, y378s1b0, y378s2b0, y378s3b0 (+1)' every year after): the
+    project ids (d.proj) that events name only in a discarded timeline (an event before a TIMELINE_RESET marker whose
+    tick is later than the marker's tick_neu, as iter_events_rev drops them) and never in the live one. Cached per
+    events file size and mtime."""
+    save_dir = Path(save_dir)
+    paths_ = [save_dir / "events.1.jsonl", save_dir / "events.jsonl"]
+    key = []
+    for p in paths_:
+        try:
+            st = p.stat()
+            key.append((st.st_size, st.st_mtime_ns))
+        except OSError:
+            key.append(None)
+    hit = _DISCARDED.get(str(save_dir))
+    if hit and hit[0] == key:
+        return set(hit[1])
+    evs: list[tuple[int, int | None, str | None]] = []
+    marks: list[tuple[int, int]] = []
+    blobs = []
+    for p in paths_:
+        try:
+            blobs.append(p.read_bytes())
+        except OSError:
+            pass
+    if not any(TIMELINE_RESET.encode() in b for b in blobs):      # one timeline: nothing discarded
+        blobs = []
+    for data in blobs:
+        for ln in data.split(b"\n"):
+            e = _parse_event(ln) if ln.strip() else None
+            if e is None:
+                continue
+            mt = mark_tick(e)
+            if mt is not None:
+                marks.append((e["n"], mt))
+            d = e.get("d") if isinstance(e.get("d"), dict) else {}
+            tick = e.get("tick")
+            evs.append((e["n"], tick if isinstance(tick, int) and not isinstance(tick, bool) else None,
+                        d.get("proj") if isinstance(d.get("proj"), str) else None))
+    gone, live = set(), set()
+    if marks:
+        for n, tick, proj in evs:
+            if proj is None:
+                continue
+            lost = tick is not None and any(mn > n and tick > mt for mn, mt in marks)
+            (gone if lost else live).add(proj)
+    out = gone - live
+    _DISCARDED[str(save_dir)] = (key, frozenset(out))
+    return out
+
+
 def tail_events(save_dir: Path, since_n: int = 0, limit: int | None = None, cls: str | None = None,
                 types: set[str] | None = None, min_tick: int | None = None, max_tick: int | None = None) -> list[dict]:
     """Events with n > since_n (and tick >= min_tick), ascending, from events.jsonl and events.1.jsonl.
