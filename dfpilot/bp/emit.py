@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from . import aquifer, defense, fortcore, grand, mine, rooms, traps
+from . import aquifer, defense, fortcore, grand, mine, rooms, surfacecore, traps
 from .primitives import BRIDGE_KEYS, Plan, Xform, transform_manifest
 
 MAX_W = 40
@@ -23,6 +23,8 @@ TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress co
                 for n, f in rooms.BUILD.items()},
              **{n: (f, dict(rooms.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in rooms.SURFACE.items()},        # BUG-368: the surface trade depot (no fortcore)
+             "surfacecore": (surfacecore.surfacecore, dict(surfacecore.PARAMS),
+                             (surfacecore.surfacecore.__doc__ or "").strip().split("\n")[0]),   # BUG-387
              **{n: (f, dict(defense.PARAMS.get(n, {})), (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in defense.BUILD.items()},
              **{n: (f, dict(mine.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0]) for n, f in mine.BUILD.items()},

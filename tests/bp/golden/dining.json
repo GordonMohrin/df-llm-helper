@@ -45,6 +45,7 @@
   "params": {
    "burrow": "Kern+",
    "seats": 20,
+   "surface": 0,
    "tavern": false,
    "tier": 2500
   },

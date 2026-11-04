@@ -44,7 +44,8 @@
   },
   "params": {
    "burrow": "Kern+",
-   "role": "manager"
+   "role": "manager",
+   "surface": 0
   },
   "rot": 0,
   "site": "S1",

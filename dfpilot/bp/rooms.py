@@ -42,14 +42,16 @@ SHOP_SIZE = {"Quern": 1, "Millstone": 1, "Kennels": 5, "Siege": 5}      # side o
 
 COMMON = {"burrow": ("Kern+", None, None)}
 PARAMS = {
-    "dining": {"seats": (20, 4, 60), "tavern": (False, None, None), "tier": (2500, 0, 100000)},
-    "bedrooms": {"n": (10, 1, 40), "tier": (500, 0, 100000)},
+    # BUG-387: surface = 1 on dining, bedrooms, tavern and office is the same room on open surface floor inside constructed walls
+    # (no dig, no Z4 core needed, no burrow): the fort whose core stands on the surface (bp/surfacecore.py) has no rock to dig
+    "dining": {"seats": (20, 4, 60), "tavern": (False, None, None), "tier": (2500, 0, 100000), "surface": (0, 0, 1)},
+    "bedrooms": {"n": (10, 1, 40), "tier": (500, 0, 100000), "surface": (0, 0, 1)},
     "tombs": {"n": (10, 1, 60), "tier": (0, 0, 100000)},
     # BUG-384: surface = 1 is a hospital on open surface floor beside the wagon and the water (no fortcore needed): no dig,
     # no door, no burrow, no well; the sites follow the kernel's accepted water as the dug one does
     "hospital": {"beds": (4, 1, 10), "surface": (0, 0, 1)},
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
-    "tavern": {"seats": (12, 4, 40)},
+    "tavern": {"seats": (12, 4, 40), "surface": (0, 0, 1)},
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
     "workshops": {"skip": ("", None, None), "add": ("", None, None), "surface": (0, 0, 1)},
     "depot": {},                      # BUG-368: SURFACE, not BUILD: no room (nothing dug, no Z4, no burrow)
@@ -57,7 +59,7 @@ PARAMS = {
     # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
     "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1)},
     "furnaces": {"wood": (1, 0, 2)},
-    "office": {"role": ("manager", None, None)},
+    "office": {"role": ("manager", None, None), "surface": (0, 0, 1)},
     "captives": {},
     # Gordon 11.10.2026: stately rooms, guild halls, trained soldiers. tier = the room value the kernel aims at
     "hall": {"seats": (16, 8, 48), "tier": (5000, 0, 1000000)},
@@ -107,6 +109,30 @@ def _finish(P: Plan, p: dict, box, zkey: str = "", zprops: str = "", sfx: str = 
         P.room(sfx, P.tpl, USE.get(P.tpl, "utility"), (u0, v0, 0, u1, v1, 0), tier)
 
 
+SURFACE_ROOMS = ("dining", "bedrooms", "tavern", "office")      # BUG-387: the room templates with a surface variant
+
+
+def _surface(P: Plan, p: dict) -> Plan:
+    """BUG-387 (Run 16 region1: no fort got a dug core, so no office, dining room, tavern or bedrooms in years): the same room
+    on open surface floor. The dug tiles stay the room's floor, doorway and corridors; the dig stage goes, every other tile of the
+    room's bbox grown by one (the rock the dig would have left) becomes a constructed wall `Cw`, built first. The anchor stays
+    the walkable tile in front of the doorway, so the geometry (and the furniture) is the dug room's. No burrow: the room is
+    not inside the surface core's walls. `P.surface_rect` = the local rect that must be open floor (sites.rank)."""
+    tiles = P.dug().get(0, set())
+    P.stages = [s for s in P.stages if s.mode not in ("dig", "burrow")]
+    us, vs = [t[0] for t in tiles], [t[1] for t in tiles]
+    u0, u1, v0, v1 = min(us) - 1, max(us) + 1, max(1, min(vs) - 1), max(vs) + 1
+    w = P.stage("walls", "build", orders=1)
+    for v in range(v0, v1 + 1):
+        for u in range(u0, u1 + 1):
+            if (u, v) not in tiles:
+                w.tile(u, v, 0, "Cw")
+    P.stages.remove(w)
+    P.stages.insert(0, w)
+    P.surface_rect = (u0, 0, u1, v1)
+    return P
+
+
 def _seats(P: Plan, box, seats: int, cols: int):
     """Chair row, table row, aisle row per set; the centre column stays free as the aisle."""
     u0, v0, u1, _ = box
@@ -130,7 +156,7 @@ def dining(p: dict) -> Plan:
     box = _box(P, W, H)
     _seats(P, box, p["seats"], cols)
     _finish(P, p, box, "h", "name=Dining" + (" location=tavern" if p["tavern"] else ""), "", p["tier"])
-    return P
+    return _surface(P, p) if p.get("surface") else P
 
 
 def tavern(p: dict) -> Plan:
@@ -141,7 +167,7 @@ def tavern(p: dict) -> Plan:
     _seats(P, box, p["seats"], cols)
     P.stage("build", "build", orders=1).tile(box[0], box[1], 0, "h").tile(box[2], box[1], 0, "h")
     _finish(P, p, box, "h", "location=tavern name=Tavern desired_goblets=10")
-    return P
+    return _surface(P, p) if p.get("surface") else P
 
 
 def bedrooms(p: dict) -> Plan:
@@ -164,7 +190,7 @@ def bedrooms(p: dict) -> Plan:
         b.tile(s, va + 1, 0, "d").tile(far, va + 1, 0, "b").tile(far, va, 0, "f").tile(far, va + 2, 0, "h")
         z.ent(ua, va, ub, va + 2, 0, "b")
     _finish(P, p, (-4, 1, 4, 4 * rows), tier=p["tier"])
-    return P
+    return _surface(P, p) if p.get("surface") else P
 
 
 def tombs(p: dict) -> Plan:
@@ -379,7 +405,7 @@ def office(p: dict) -> Plan:
     zone = next(s for s in P.stages if s.label == "zone")
     P.stages.remove(zone)
     P.stages.insert(1, zone)
-    return P
+    return _surface(P, p) if p.get("surface") else P
 
 
 def hall(p: dict) -> Plan:

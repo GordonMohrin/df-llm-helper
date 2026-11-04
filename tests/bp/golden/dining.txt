@@ -1,4 +1,4 @@
-dining {'seats': 20, 'tavern': False, 'tier': 2500, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+dining {'seats': 20, 'tavern': False, 'tier': 2500, 'surface': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
   living: dig(10), build(41), zone(1), burrow(4)
   materials: {'chair': 20, 'door': 1, 'table': 20}
 z100  (x 65..75, y 69..81)

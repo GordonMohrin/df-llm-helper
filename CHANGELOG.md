@@ -1,5 +1,21 @@
 # CHANGELOG dfpilot
 
+## Surface core for an aquifer world, area-only wet layers, an applicable propose (BUG-387 to BUG-389, 2026-11-04; offline, live-untested)
+- **Why:** Run 16 region1 (aquifer nearly everywhere): no fort got a dug fortcore ('no dry fortcore site ... (wet level z130)' at every depth in i2, depth=1
+  breached heavy_aquifer at 4 % in i1, sites 1-6 steps from water in i3); every room template hangs on the dug Z4 floor, so office, dining, tavern and bedrooms
+  stood still for years and i1/i2 ran hand-built empty P1 plans for 11 years.
+- **BUG-387:** new template `surfacecore` (bp/surfacecore.py): a walled compound of constructed walls on open surface floor (gate, Kern+ with dormitory and
+  stockpiles, a walled refuge Tiefe+, the 5x5 trade depot in front of the gate), manifest roles Kern+/Tiefe+/refuge/depot/edge/Z4 as the fortcore, no bridges.
+  `dining`, `bedrooms`, `tavern`, `office` take `surface=1`: the same room inside constructed walls, nothing dug, sited by `sites.rank` on open floor beside the
+  surface core's depot. RANK_V 5.
+- **BUG-388:** `sites._dry`: a wet layer (2 damp/water stops or 1 heavy_aquifer on a level) rules out only the dig within `LAYER_R` (16) tiles of one of its stops,
+  not every site of the level.
+- **BUG-389:** `fort.surface` (`plan.surface_facts`: no fortcore ranks at depth 3/2/1, a known aquifer within 3 levels under the best site, or a core stopped on a
+  breach that cannot move) makes `propose` draft `surfacecore@S1` in place of the fortcore, rooms with `p.surface=1`, rooms that dig rock left out with a note;
+  `_refuge_stage` counts the surface core, `stage3_gate` and `core_order_note` stand aside.
+- **Tests:** tests/test_bug387_389_surface_core.py, rewritten wet-layer tests in test_bug130 and test_bug359_361, goldens bedrooms/dining/office/tavern
+  (new `surface` param) and surfacecore.
+
 ## Review fix (merge20): the SIEGE/BREACH raise waits by time, not by the hostile's distance (BUG-380; offline, live-untested)
 - **Why:** two review findings in gate.lua `holders()`: with a visible hostile 11..30 tiles away walkers 7..20 steps out were let go but
   cover ~11 tiles while the bridge moves (soldier 26395 crushed); with no hostile (or a stale census, or one beyond 30 tiles) a steady stream

@@ -45,7 +45,8 @@
   },
   "params": {
    "burrow": "Kern+",
-   "seats": 12
+   "seats": 12,
+   "surface": 0
   },
   "rot": 0,
   "site": "S1",

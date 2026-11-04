@@ -52,6 +52,16 @@ SEAL_LAST = {"tpl": "seal", "site": "S1", "p": {"at": "last"}}          # doors 
 LIFE_TPLS = ("hospital", "tombs", "farms", "stockroom", "cistern", "refuge_drink")
 SEAL_REFUGE = {"tpl": "seal", "site": "S1", "p": {"at": "refuge"}}      # BUG-031: the refuge's stair-head hatch + tiles
 DEPOT = "depot"                           # bp/rooms.py: a 5x5 trade depot on open surface floor (BUG-368)
+# BUG-387/389 (Run 16 region1, aquifer nearly everywhere: no fort got a dug fortcore for 11 years, every room template that hangs
+# on the dug Z4 core stood still): the core on the surface (bp/surfacecore.py: walled compound, Kern+, refuge, depot) and the
+# surface variants of the room templates that hang on it
+SURFACE_CORE = "surfacecore"
+SURFACE_ROOMS = ("dining", "bedrooms", "tavern", "office")      # bp/rooms.py SURFACE_ROOMS: p.surface = 1
+SURFACE_CORE_BUILD = {"tpl": SURFACE_CORE, "site": "S1"}
+# room templates with no surface variant: they dig into rock (or hang on the refuge room) and wait for a dug core
+SURFACE_DUG_ONLY = ("furnaces", "tombs", "temple", "captives", "hall", "guildhall", "barracks", "stockroom", REFUGE_BEDS,
+                    REFUGE_DRINK, "explore")
+SURFACE_SMALL = {"w": 20, "h": 12}                              # the smallest compound, tried when the default block does not fit
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
 EXPLORE_DEPTHS = _cmd.EXPLORE_DEPTHS        # propose tries the explore template's default depth first, then shallower
@@ -256,6 +266,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "z4": bool((man.get("zones") or {}).get("Z4")) if isinstance(man.get("zones"), dict) else False,  # BUG-197
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "core_dig": core_digging(save_dir, state),               # BUG-354: its stage 1 is still digging
+            "surface": surface_facts(save_dir, state, applied, core),  # BUG-387/389: the core on the surface
             "startup": startup_placed(save_dir),                     # BUG-356: the surface still/kitchen/carpenter/mason set
             "depot": depot_planned(save_dir, state),                 # BUG-368: a trade depot stands or is under way
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
@@ -397,7 +408,12 @@ def _has_z4(save_dir: Path) -> bool:
     except BpUnavailable:
         man = files.read_manifest(save_dir) or {}
     z = man.get("zones") if isinstance(man, dict) else None
-    return bool(isinstance(z, dict) and z.get("Z4"))
+    # BUG-387: the surface core's Z4 lies on open floor, no dug room hangs on it (the surface variants are sited there)
+    return bool(isinstance(z, dict) and z.get("Z4")) and not _surface_core_in(man)
+
+
+def _surface_core_in(man: dict | None) -> bool:
+    return any(isinstance(r, dict) and r.get("tpl") == SURFACE_CORE for r in (man or {}).get("rooms") or [])
 
 
 def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
@@ -445,6 +461,87 @@ def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
     except Exception:                          # noqa: BLE001 - an older bp package or a bad snapshot: not checked
         pass
     return out
+
+
+def surface_facts(save_dir: Path, state: dict | None, applied: set | None, core: dict | None) -> dict:
+    """BUG-387/389 (Run 16 region1, aquifer nearly everywhere: i2 'no dry fortcore site ... (wet level z130)' at every depth, i1
+    depth=1 breached heavy_aquifer at 4 %, i3 sites 1-6 steps from water; i1 and i2 hand-built empty P1 plans for 11 years):
+    {have: a surface core project is placed (any state) or the manifest lists one, need: the fort has no fortcore standing or
+    digging and none can be built, why, site: a block for the surface core is free (None: not looked up), p: its params when
+    the smaller compound is what fits}. need = no fortcore site ranks at depth 3, 2 or 1 on the sites snapshot, or the best
+    one has a known aquifer level within sites.SURFACE_AQ levels under its anchor (sites.surface_core_why), or a fortcore was
+    stopped on a breach and cannot move (core_movable). Not looked up without a sites snapshot or the bp package."""
+    have = any(t == SURFACE_CORE for t, _ in (applied or ())) or _surface_core_in(_kern_manifest(save_dir))
+    out: dict = {"have": have, "need": False, "why": "", "site": None, "p": None}
+    if any(t == "fortcore" for t, _ in (applied or ())) and not (core and not core_movable(core)):
+        return out                                         # a fortcore stands or digs (a re-site is the other fix)
+    if core:
+        out["need"], out["why"] = True, f"the fortcore was stopped on a breach and cannot move ({_cut(core['why'])})"
+    else:
+        snap = sites_snapshot(save_dir)
+        if snap is None:
+            return out
+        site, err = None, "no free fortcore site on the snapshot"
+        for depth in (3, 2, 1):                            # a shallower core digs less of the aquifer
+            try:
+                free, _, _ = free_sites(save_dir, "fortcore", {"stage": 1, "depth": depth}, n=1)
+            except BpUnavailable:
+                return out
+            except BpError as e:
+                err = str(e).split(": ", 1)[-1] if str(e).startswith("bp.sites.rank(") else str(e)
+                continue
+            if free:
+                site = free[0]
+                break
+        try:
+            out["why"] = load_bp("sites").surface_core_why(snap, fort_manifest(save_dir), site) or ""
+        except BpUnavailable:
+            return out
+        except Exception:                                  # noqa: BLE001 - an older bp package: judged by the site alone
+            out["why"] = "" if site else err
+        if site is None:
+            out["why"] = out["why"] or err
+        out["need"] = bool(out["why"])
+    if not out["need"]:
+        return out
+    for prm in ({}, SURFACE_SMALL):                        # the default compound, else the smallest
+        try:
+            free, _, _ = free_sites(save_dir, SURFACE_CORE, prm, n=1)
+        except (BpError, BpUnavailable):
+            free = []
+        if free:
+            out["site"], out["p"] = True, (dict(prm) or None)
+            break
+    else:
+        out["site"] = False
+    return out
+
+
+def surface_core_swap(builds: list[dict], sf: dict) -> tuple[list[dict], str]:
+    """BUG-387/389: a fort whose fortcore cannot be built (surface_facts.need) gets the surface core in its place: every
+    fortcore build leaves the draft, the surface core comes first (the refuge is in it) unless one is placed already or no
+    block for it is free, and the room builds that hang on a core (dining, bedrooms, tavern, office) get p.surface = 1. A stone
+    dig (bedrooms n=4 for rock) is left out: nothing is dug. Returns (builds, note)."""
+    out = [b for b in builds if b["tpl"] != "fortcore" and b != STONE_DIG and b["tpl"] not in SURFACE_DUG_ONLY]
+    dropped = len(builds) - len(out)
+    waits = sorted({b["tpl"] for b in builds if b["tpl"] in SURFACE_DUG_ONLY})
+    first = []
+    if not sf.get("have") and sf.get("site") is not False and not any(b["tpl"] == SURFACE_CORE for b in out):
+        first.append({**copy.deepcopy(SURFACE_CORE_BUILD), **({"p": dict(sf["p"])} if sf.get("p") else {})})
+    for b in out:
+        if b["tpl"] in (*SURFACE_ROOMS, HOSPITAL) and not (b.get("p") or {}).get("surface"):
+            b["p"] = {**(b.get("p") or {}), "surface": 1}
+    note = (f"; BUG-387/389: no fortcore can be dug ({_cut(sf.get('why') or 'no site')}): the core goes on the surface"
+            + (f" ({SURFACE_CORE}@S1: constructed walls, Kern+, refuge, depot; bp sites {SURFACE_CORE} --fresh)" if first else
+               " (placed already)" if sf.get("have") else
+               f"; BUT no open block of floor is free for it (a flat {20}x{18} tiles on the citizens' walk group)")
+            + (f"; {dropped} fortcore/stone-dig build(s) left out" if dropped else "")
+            + (f" ({', '.join(waits)} dig into rock: they wait for a dug core)" if waits else "")
+            + "; dining/bedrooms/tavern/office/hospital with p.surface=1")
+    k = 0
+    while k < len(out) and out[k]["tpl"] == SEAL:        # a seal runs first anyway
+        k += 1
+    return out[:k] + first + out[k:], note
 
 
 def _pos(p) -> str:
@@ -798,7 +895,8 @@ def rebuild_metal(errs: list[str], warn: list[str], s: dict | None) -> tuple[lis
 
 def _refuge_stage(b: dict) -> bool:
     p = b.get("p", b.get("params")) or {}
-    return b["tpl"] == "fortcore" and _stage_of(p) == 3 and not p.get("retrofit")
+    # BUG-387: the surface core has its refuge (Tiefe+) in it: it is the refuge's build where no fortcore can be dug
+    return b["tpl"] == SURFACE_CORE or (b["tpl"] == "fortcore" and _stage_of(p) == 3 and not p.get("retrofit"))
 
 
 def _seal_at(save_dir: Path, at: str) -> list[str] | None:
@@ -1075,6 +1173,9 @@ def stage3_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
     pt = doc["phase_target"]
     br, ref = s.get("bridges"), (s.get("alert") or {}).get("ref")
     if pt < STAGE3_PHASE or not isinstance(br, dict) or not isinstance(ref, dict) or not ref.get("ex"):
+        return [], []
+    sf = (fort or {}).get("surface") or {}
+    if sf.get("have") or sf.get("need"):       # BUG-387: the surface core has no bridge (no O1, B2): the gates do not apply
         return [], []
     miss = [n for n in ("O1", "B2") if br.get(n) not in BRIDGE_STANDING]
     if not miss:
@@ -2424,7 +2525,7 @@ def fit_core_depth(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     return [line]
 
 
-CORE_FREE_TPLS = ("fortcore", "seal", "explore", "plug", "repair", "captives", "barracks")   # not sited on the Z4 floor
+CORE_FREE_TPLS = ("fortcore", "seal", "explore", "plug", "repair", "captives", "barracks", "surfacecore")   # not sited on the Z4 floor
 
 
 def core_order_note(doc: dict, state: dict | None, fort: dict | None = None) -> str | None:
@@ -2437,12 +2538,13 @@ def core_order_note(doc: dict, state: dict | None, fort: dict | None = None) -> 
     core = next((r for r in (state or {}).get("proj") or []
                  if isinstance(r, list) and len(r) >= 3 and isinstance(r[1], str) and r[1].startswith("s1.dig")
                  and "breach:" not in str(r[-1])), None)      # BUG-130: a core parked on a breach digs nothing
-    rooms = sorted({b["tpl"] for se in doc["seasons"] for b in se["build"] if b["tpl"] not in CORE_FREE_TPLS})
+    rooms = sorted({b["tpl"] for se in doc["seasons"] for b in se["build"] if b["tpl"] not in CORE_FREE_TPLS
+                    and not (b.get("p") or {}).get("surface")})        # BUG-387: a surface room hangs on no Z4 floor
     if not rooms:
         return None
     if core is None:
         f = fort or {}
-        if f.get("z4") is False and not f.get("core_any"):
+        if f.get("z4") is False and not f.get("core_any") and not (f.get("surface") or {}).get("need"):
             return (f"order: no fortcore project and no Z4 core floor yet; {', '.join(rooms)} open from its dug Z4 floor, "
                     "so no site exists for them: apply fortcore stage 1 (and seal) alone, wait for s1.dig, propose again")
         return None
@@ -2822,7 +2924,13 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         builds[k:k] = front
     fresh, hosp_note = None, ""
     dug = (fort or {}).get("core_dig") is True
-    if (fort or {}).get("z4") is False and not core and (dug or (
+    # BUG-387/389: where no fortcore can be dug the surface core replaces it and the surface rooms need no Z4 floor
+    sf = (fort or {}).get("surface") or {}
+    sc_note = ""
+    if sf.get("need") and (info is None or SURFACE_CORE in info):
+        builds, sc_note = surface_core_swap(builds, sf)
+        front = [b for b in front if any(b is x for x in builds)]
+    if (fort or {}).get("z4") is False and not core and not sc_note and (dug or (
             not (fort or {}).get("core_any") and not any(t == "fortcore" for t, _ in done))):
         # BUG-197 (live Earthboat): no fortcore and no Z4 floor yet: every room build fails its site ranking, so
         # year 1 is the core's stage 1 (and a seal) only, at the current phase. BUG-354 (Run 16c): the same while a placed
@@ -2897,7 +3005,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + depot_note + hosp_note
+    doc["notes"] += core_note + depot_note + hosp_note + sc_note
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
         if armor and not _bar_want(doc["trade"]["want"]):

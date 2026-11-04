@@ -75,8 +75,12 @@ def test_two_damp_stops_on_one_level_make_it_a_wet_layer(land):
     one = {"v": 2, "breaches": [_breach([5, 5, 5], proj="a")]}
     assert bp.rank(land, "fortcore", manifest=one)                        # one pocket far away: sites stay
     two = {"v": 2, "breaches": [_breach([5, 5, 5], proj="a"), _breach([5, 95, 5], proj="b")]}
+    # BUG-388: the layer rules out the dig that reaches it near a stop, no longer every site of the map
+    got = bp.rank(land, "fortcore", manifest=two, n=10)
+    assert got and all(max(abs(s["anchor"][0] - 5), min(abs(s["anchor"][1] - 5), abs(s["anchor"][1] - 95))) > 16 for s in got)
+    grid = [_breach([x, y, 5], proj=f"p{x}x{y}") for x in range(0, 100, 15) for y in range(0, 100, 15)][:32]
     with pytest.raises(ValueError, match="wet level z5"):
-        bp.rank(land, "fortcore", manifest=two)                           # every core here digs through z5
+        bp.rank(land, "fortcore", manifest={"v": 2, "breaches": grid})    # stops all over the map: every core digs into one
     warm = {"v": 2, "breaches": [_breach([5, 5, 5], proj="a", why="warm"), _breach([5, 95, 5], proj="b", why="warm")]}
     assert bp.rank(land, "fortcore", manifest=warm)                       # warm stone is no water layer
 

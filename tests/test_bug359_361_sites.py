@@ -70,11 +70,15 @@ def test_a_known_aquifer_level_under_the_shaft_is_named_and_costs_score(land):
     assert "aquifer at" not in far[0]["why"]
 
 
-def test_one_heavy_aquifer_stop_makes_the_level_a_wet_layer_for_every_site(land):
+def test_one_heavy_aquifer_stop_makes_the_level_a_wet_layer_around_its_stop(land):
     man = {"v": 2, "breaches": [_breach([5, 5, 6], "heavy_aquifer")]}
     assert sites._breach_layers(man) == {6: "wet level z6 (heavy aquifer: breach heavy_aquifer 5,5,6 p1)"}
+    # BUG-388: the wet layer rules out the dig near its stop (LAYER_R), not the level for every site of the map
+    got = bp.rank(land, "fortcore", manifest=man, n=10)
+    assert got and all(max(abs(s["anchor"][0] - 5), abs(s["anchor"][1] - 5)) > sites.LAYER_R for s in got)
+    grid = {"v": 2, "breaches": [_breach([x, y, 6], "heavy_aquifer") for x in range(0, 100, 15) for y in range(0, 100, 15)][:32]}
     with pytest.raises(ValueError, match=r"no dry fortcore site.*wet level z6 \(heavy aquifer"):
-        bp.rank(land, "fortcore", manifest=man)                         # old: sites 90 tiles away stayed
+        bp.rank(land, "fortcore", manifest=grid)                        # stops all over the map: nothing dry is left
     # damp keeps its two-stop rule (a pocket), and a heavy stop on a level the dig never reaches changes nothing
     assert sites._breach_layers({"v": 2, "breaches": [_breach([5, 5, 6], "damp")]}) == {}
     assert bp.rank(land, "fortcore", manifest={"v": 2, "breaches": [_breach([5, 5, 11], "heavy_aquifer")]})

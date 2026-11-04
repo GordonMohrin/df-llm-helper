@@ -64,7 +64,7 @@ def test_bridge_keys_rotate_with_the_template():
 
 
 def test_params_are_checked():
-    assert bp.check_params("bedrooms", {"n": 20}) == {"n": 20, "tier": 500, "burrow": "Kern+"}
+    assert bp.check_params("bedrooms", {"n": 20}) == {"n": 20, "tier": 500, "burrow": "Kern+", "surface": 0}
     for tpl, p in [("bedrooms", {"n": 0}), ("bedrooms", {"n": "4"}), ("bedrooms", {"rooms": 4}),
                    ("dining", {"tavern": 1}), ("bedrooms", {"n": True}), ("tombs", {"burrow": "a b"}),
                    ("workshops", {"skip": "Forge"}), ("workshops", {"skip": ",".join(bp.MOODABLE_TYPES)}),
@@ -169,7 +169,7 @@ def test_rooms_touch_the_anchor_row_only_through_the_doorway(tpl):
 
 def test_list_templates():
     names = [t["tpl"] for t in bp.list_templates()]
-    assert names == TPLS and len(names) == 30     # + suites, grand_dining/tavern/temple, deepcore (FR-102/103), traps (FR-96), aqshaft (FR-95), furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6), gallery_o1, seal, stockroom, refuge_beds, explore (Run 10), refuge_drink (FR-69), depot (BUG-368)
+    assert names == TPLS and len(names) == 31     # + surfacecore (BUG-387), suites, grand_dining/tavern/temple, deepcore (FR-102/103), traps (FR-96), aqshaft (FR-95), furnaces, office, captives (L1), cistern (L3), hall, guildhall, barracks (L6), gallery_o1, seal, stockroom, refuge_beds, explore (Run 10), refuge_drink (FR-69), depot (BUG-368)
     assert all(t["about"] for t in bp.list_templates())
 
 
