@@ -217,7 +217,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
                       ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM),
-                      ("breach", BREACH_LIM), ("resume", RESUME_LIM)):
+                      ("breach", BREACH_LIM), ("resume", RESUME_LIM), ("siege_long", SIEGE_LONG_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -247,9 +247,12 @@ CONFINE_LIM: dict = {"max_days": (0, 365), "harmless_size": (0, 5000000), "lone_
 POPUPS_LIM: dict = {"other": "bool", "other_s": (5, 600), "log_s": (60, 86400)}
 # M3 (BUG-114): siege.lua breach_stuck: ticks of a BREACH whose failed bridges stay down before it falls back to SIEGE (0 = off)
 BREACH_LIM: dict = {"stuck_ticks": (0, 4032000)}
+# BUG-331: siege.lua M.LG / M.LG_LIM: a SIEGE calm for `days` game days (nobody inside Kern+, every hostile beyond `near` tiles)
+# is eased (the deep defense lifted, DECISION_NEEDED siege_long); on false = off
+SIEGE_LONG_LIM: dict = {"on": "bool", "days": (1, 336), "near": (5, 200)}
 # FR-94 (Run 14 note 100): arbiter.lua resume_cfg: real minutes a pause by DF may stand before the wake PAUSED_BY_DF (0 = no wake)
 RESUME_LIM: dict = {"wake_min": (0, 240)}
-REFLEX_EXTRA = ("confine", "popups", "breach", "resume")
+REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)
@@ -301,6 +304,8 @@ WATER_LIM: dict = {
     "ws_seed_r": (0, 60), "ws_seed_max": (0, 100000), "pit_well": "bool",
     # BUG-325: walk origins of the scan; BUG-324: the kernel's Water Source zone on found water (on/off, cadence, spots)
     "ws_from": (1, 10), "wz": "bool", "wz_every": _TICKS, "wz_max": (0, 32), "wz_forget": _TICKS,
+    # BUG-330: the care burrow Pflege+ for a patient over care_thirst outside the alert burrows, no hostile within care_near
+    "care": "bool", "care_thirst": _THIRST, "care_near": (1, 200),
 }
 
 

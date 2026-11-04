@@ -935,7 +935,9 @@ def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
         out.append(f"intake {wv['ph']} (waves {wv['n']})" + (f": {wv['why']}" if wv.get("why") else "")
                    + (f", sortie {wv['so']}" if wv.get("so") else "")
                    # BUG-030: the deep defense (civilians in the refuge, squads at the core station)
-                   + (f", DEEP {wv['deep']}: civilians in the refuge, squads in the core" if wv.get("deep") else ""))
+                   + (f", DEEP {wv['deep']}: civilians in the refuge, squads in the core" if wv.get("deep") else "")
+                   # BUG-331: a long calm siege, eased (civilians in Kern+, the bridges up)
+                   + (f", eased {wv['lg'] / 1200:.1f} d: calm, civilians in Kern+" if "lg" in wv else ""))
     tr = s.get("trade")
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")

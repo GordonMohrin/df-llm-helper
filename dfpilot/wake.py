@@ -347,6 +347,8 @@ def next_hint(etype: str, e: dict) -> str:
         return need_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "kill_lone_intruder":
         return lone_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "siege_long":
+        return siege_long_hint(d)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)
     if etype == "PAUSED_BY_DF" and d.get("deny"):
@@ -380,6 +382,15 @@ def lone_hint(d: dict) -> str:
     return (f"tell Gordon{how}{kill}; otherwise the kernel releases it at confine.max_days when the soldiers stand at "
             "their stations (LOCKDOWN_END limit); dfllm events --type SORTIE says whether the soldiers arrived, killed it or "
             "stood beside it (not_attackable: DF does not treat it as an enemy)")
+
+
+def siege_long_hint(d: dict) -> str:
+    """BUG-331: a SIEGE calm for siege_long.days (nobody inside, every hostile far): the kernel eased it (the deep defense
+    lifted, the civilians back to Kern+); attacking is the player's call."""
+    cmd = d.get("cmd")
+    how = f"; to attack: {cmd} (approve:true is a logged decision, only if the squad can win)" if cmd else "; no squad to send"
+    return (f"tell Gordon: the siege has been calm for {d.get('days', '?')} days (nearest hostile {d.get('n', '?')} tiles), "
+            f"the kernel eased it (civilians in Kern+, the bridges stay up){how}; otherwise wait")
 
 
 PATIENTS_OUT_HINT = ("patients lie outside the alert burrow and cannot walk there: only a rescue moves them. Tell Gordon; "

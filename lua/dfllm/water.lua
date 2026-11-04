@@ -65,7 +65,8 @@
 -- membership; tiles only through snapshot.tile (revealed only). Never edits units or jobs; zones only through act
 -- (a Pond zone beside a wet well, the zones of a dry hospital: the zones screen's remove).
 -- Writes only through K.act, and only acts whose contract owners list `water` (item_flag, workorder, pond_remove,
--- hospital_remove; the module also runs before such a contract change, reporting what it would do instead).
+-- hospital_remove, water_zone, work_detail, BUG-330: burrow_tiles for the care burrow Pflege+; the module also runs before
+-- such a contract change, reporting what it would do instead).
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A condition is announced again
@@ -119,6 +120,10 @@ M.DEFAULTS = {
   -- BUG-324: while no water is accepted, the kernel zones the scan's best reachable, safe water as a Water Source (wz false:
   -- off), at most one zone every wz_every and wz_max spots within wz_forget (a spot tried is not tried again before)
   wz = true, wz_every = 2 * DAY, wz_max = 4, wz_forget = 28 * DAY,
+  -- BUG-330: while the civ alert sounds, a patient over care_thirst outside every alert burrow with no visible hostile within
+  -- care_near tiles gets his tile, the nearest accepted water and a free bucket painted into the care burrow M.CARE, which
+  -- siege lists in the alert (care false: off)
+  care = true, care_thirst = 30000, care_near = 20,
 }
 M.SRC_MAX = 8                                -- accepted sources in the state (water.src), nearest first
 M.SRC_LBL = 4                                -- BUG-040: labels of the first ones (water.src_l: 'well 19098 in Kern+')
@@ -250,13 +255,13 @@ end
 -- BUG-153 (live i4): the burrows the sounding civ alert holds the citizens in, read from the game
 -- (plotinfo.alerts.list[idx].burrows, as the alerts screen shows them): {{n = name, b = burrow}}; {} when unreadable.
 -- give_diag asks it when siege's list (runtime memory) is empty: after a reload or for an alert the player raised
-function M.alert_burrows(idx)
+function M.alert_burrows(idx, nocare)
   local out = {}
   pcall(function()
     local ids = {}
     for _, id in ipairs(df.global.plotinfo.alerts.list[idx].burrows) do ids[id] = true end
     for _, b in ipairs(df.global.plotinfo.burrows.list) do
-      if ids[b.id] then out[#out + 1] = {n = tostring(b.name), b = b} end
+      if ids[b.id] and not (nocare and b.name == M.CARE) then out[#out + 1] = {n = tostring(b.name), b = b} end
     end
   end)
   return out
@@ -427,6 +432,10 @@ local function phase_buckets(K, c, r)
         r.full = r.full + 1
       elseif not busy and not f.forbid and not f.dump then
         r.free = r.free + 1
+        if #r.bpos < 20 then                     -- BUG-330: where free buckets lie (the care burrow takes the nearest)
+          local x, y, z = item_pos(it)
+          if x then r.bpos[#r.bpos + 1] = {x = x, y = y, z = z} end
+        end
       elseif not busy and f.forbid then
         r.forbidden[#r.forbidden + 1] = it.id       -- an id: the item may be gone before the run finishes
       end
@@ -1557,10 +1566,18 @@ local function patients_out(K, r, kern, refuge, kname, rname, ho)
   local tail = ho.n > 0 and string.format('; the hospital lies outside %s/%s: move it into %s next to accepted water',
                                           kname, rname, rname)
                or '; plan the hospital inside the refuge'
+  -- BUG-330: what the care burrow does for them (open, or why not; it opens for a patient over care_thirst)
+  local cs = st.care
+  local care
+  if cs and cs.on then care = M.CARE .. ' open to them'
+  elseif cs and cs.why == M.NOT_YET then
+    care = string.format('%s opens to one over thirst %d with no hostile near', M.CARE, cs.th or 0)
+  elseif cs then care = 'no ' .. M.CARE .. ': ' .. tostring(cs.why) end
   local msg = string.format('%s: %d of %d patients lie outside the alert burrow %s (%s): they cannot walk there, only a '
                             .. 'rescue moves them%s', mode, #out, #r.patients, label, table.concat(at, ', '), tail)
+  if care and #msg + #care + 2 <= 200 then msg = msg .. '; ' .. care end
   K.emit('PATIENTS_OUT', 'B', trunc(msg, 200), {n = #out, patients = #r.patients, burrow = trunc(label, 60), units = ids,
-                                                mode = mode, hosp_out = ho.n})
+                                                mode = mode, hosp_out = ho.n, care = care and trunc(care, 80) or nil})
   K.log('warn', 'water: %s', msg)
 end
 
@@ -1696,8 +1713,10 @@ function M.give_diag(K, c, r, sc, bfree, top)
     local okn, names = K.call('siege', 'alert_names')
     names = okn and type(names) == 'table' and names or {}
     local bs = {}
-    for _, nm in ipairs(names) do bs[#bs + 1] = {n = nm, b = type(nm) == 'string' and burrow_named(nm) or nil} end
-    if #bs == 0 then bs = M.alert_burrows(idx) end    -- BUG-153: siege's list is runtime only; the game's alert is not
+    for _, nm in ipairs(names) do
+      if nm ~= M.CARE then bs[#bs + 1] = {n = nm, b = type(nm) == 'string' and burrow_named(nm) or nil} end
+    end
+    if #bs == 0 then bs = M.alert_burrows(idx, true) end   -- BUG-153: siege's list is runtime only; the game's alert is not
     local inside = #bs == 0
     for _, e in ipairs(bs) do
       if e.b and on_burrow(e.b, top.x, top.y, top.z) then inside = true end
@@ -1711,6 +1730,17 @@ function M.give_diag(K, c, r, sc, bfree, top)
   gv.txt = string.format('%s, buckets %d free of %d', gv.short, bfree, r.buckets)
   if alert then
     gv.key, gv.reason = 'alert', 'the civ alert holds the caregivers in ' .. alert .. ', the patient lies outside'
+    -- BUG-330 (Earthboat y385: 'the civ alert holds the caregivers in Tiefe+' while no water was accepted at all): both
+    -- causes; the care burrow (M.care_step) opens the way out to him, never water that does not exist
+    local cs = st.care
+    if not wet_any then
+      gv.nowater = true
+      gv.reason = gv.reason .. ', and no accepted water (no well over water, no Water Source zone): nothing to carry'
+    elseif cs and cs.on and cs.ids[top.id] then
+      gv.reason = gv.reason .. string.format('; %s opened to him (his tile and the water)', M.CARE)
+    elseif cs and cs.why then
+      gv.reason = gv.reason .. '; ' .. M.CARE .. ' not opened: ' .. cs.why
+    end
   elseif gv.reach == 0 then
     gv.key, gv.reason = 'noreach', string.format('no caregiver reaches the patient (0 of %d)', #r.cpos)
   elseif not ok_job then
@@ -1735,6 +1765,142 @@ function M.give_diag(K, c, r, sc, bfree, top)
     gv.key, gv.reason = 'nojob', 'the game posts no GiveWater job'
   end
   return gv
+end
+
+---------------------------------------------------------------- BUG-330: water carriers to a patient outside the lockdown
+-- Run 15b Earthboat y385 (i3): patient 26629 lay at 74,83,138 outside the alert burrow Tiefe+ (the deep defense) for 30 days
+-- of a SIEGE and died of thirst (75,000) while 77 caregivers stood idle in Tiefe+ ('the civ alert holds the caregivers in
+-- Tiefe+, the patient lies outside'): a citizen the alert confines takes no job on a tile outside its burrows, nothing let
+-- the carriers out, and PATIENTS_OUT only named it. Now, while the civ alert sounds, every patient over care_thirst lying
+-- outside every alert burrow (the care burrow itself not counted) with no visible hostile within care_near tiles of him (a
+-- fresh census; none read = not safe) gets his tile, the nearest accepted water outside the alert burrows (a wet well's tile,
+-- a Water Source zone's rect, at most zone_tiles) and the nearest free bucket outside them, each with no hostile within
+-- care_near, painted into the burrow M.CARE (act.burrow_tiles exact: the burrows screen's erase + paint, exactly these
+-- tiles), and siege lists that burrow in the alert (siege.alert_list asks water.care_rooms): the caregivers may take the
+-- GiveWater job out there. Without accepted water nothing opens (no carrier could bring any; the verdict says so). A hostile
+-- within care_near, the patient below care_thirst, dead or inside, or the alert off closes it again (the burrow leaves the
+-- list; its tiles are erased and painted anew the next time). kern.log 'water: care burrow ...' on every change.
+M.CARE = 'Pflege+'
+M.CARE_FRESH = 1200                    -- ticks a hostile census may be old for the distance check
+M.NOT_YET = 'no thirsty patient outside the alert burrows'
+
+-- the burrows the sounding civ alert holds the citizens in, the care burrow left out; nil while it is silent
+local function alert_set(K)
+  local okc, idx = pcall(function() return df.global.plotinfo.alerts.civ_alert_idx end)
+  if not (okc and idx ~= nil and idx ~= 0) then return nil end
+  local okn, names = K.call('siege', 'alert_names')
+  names = okn and type(names) == 'table' and names or {}
+  local bs = {}
+  for _, nm in ipairs(names) do
+    if type(nm) == 'string' and nm ~= M.CARE then bs[#bs + 1] = {n = nm, b = burrow_named(nm)} end
+  end
+  if #bs == 0 then bs = M.alert_burrows(idx, true) end
+  return bs
+end
+
+local function in_set(bs, x, y, z)
+  for _, e in ipairs(bs) do if e.b and on_burrow(e.b, x, y, z) then return true end end
+  return false
+end
+
+-- the distance of the nearest visible hostile to x,y,z (Chebyshev, z counted); -1 = none in sight; nil = no fresh census
+function M.foe_dist(K, x, y, z)
+  local h = K.census.h
+  if type(h) ~= 'table' or K.now().tick - (math.tointeger(h.tick) or -1000000000) > M.CARE_FRESH then return nil end
+  local best = -1
+  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+    if e.x then
+      local d = math.max(math.abs(e.x - x), math.abs(e.y - y), math.abs(e.z - z))
+      if best < 0 or d < best then best = d end
+    end
+  end
+  if best < 0 and (math.tointeger(h.vis) or 0) > 0 then return nil end     -- in sight but not listed: unknown
+  return best
+end
+
+local function care_safe(K, c, x, y, z)
+  local d = M.foe_dist(K, x, y, z)
+  if d == nil then return false, 'no fresh hostile census' end
+  if d >= 0 and d <= c.care_near then return false, string.format('a hostile %d tiles from it', d) end
+  return true
+end
+
+local function cheb(a, x, y, z) return math.max(math.abs(x - a[1]), math.abs(y - a[2]), math.abs(z - a[3])) end
+
+-- one run's decision: st.care = {on, ids = {[id] = true}, sig, n, why, t}; paints only on a change of the tile set
+function M.care_step(K, c, r, now)
+  local prev = st.care
+  local function close(why)
+    if prev and prev.on then K.log('info', 'water: care burrow %s closed: %s', M.CARE, why) end
+    st.care = {on = false, ids = {}, why = why, t = now, th = c.care_thirst}
+    return st.care
+  end
+  if not c.care or not M.can('burrow_tiles') then st.care = nil; return nil end
+  local bs = alert_set(K)
+  if not bs then return close('the civ alert is off') end
+  local out = {}
+  for _, pt in ipairs(r.patients) do
+    if pt.x and pt.thirst >= c.care_thirst and not in_set(bs, pt.x, pt.y, pt.z) then out[#out + 1] = pt end
+  end
+  if #out == 0 then return close(M.NOT_YET) end
+  local tiles, ids, sig, why = {}, {}, {}, nil
+  local function add(x, y, z) tiles[#tiles + 1] = {x, y, z}; sig[#sig + 1] = string.format('%d,%d,%d', x, y, z) end
+  for _, pt in ipairs(out) do
+    local ok, w = care_safe(K, c, pt.x, pt.y, pt.z)
+    if ok then ids[pt.id] = true; add(pt.x, pt.y, pt.z) else why = why or string.format('patient %d: %s', pt.id, w) end
+  end
+  if #tiles == 0 then return close(why or 'no patient safe to reach') end
+  local ref = tiles[1]
+  -- the water: none wet = nothing to carry (the verdict names it); one inside the alert burrows needs no tile
+  local wet, near_w, nd = false, nil, nil
+  for _, s in ipairs(r.sources) do
+    if s.wet then
+      wet = true
+      if in_set(bs, s.x, s.y, s.z) then near_w = 'in'; break end
+      local d = cheb(ref, s.x, s.y, s.z)
+      if care_safe(K, c, s.x, s.y, s.z) and (not nd or d < nd) then near_w, nd = s, d end
+    end
+  end
+  if not wet then return close('no accepted water (nothing to carry)') end
+  if not near_w then return close('every accepted water outside the alert burrows has a hostile near it') end
+  if near_w ~= 'in' then
+    local b = near_w.box
+    if b then
+      local n = 0
+      for y = b.y1, b.y2 do
+        for x = b.x1, b.x2 do
+          if n < c.zone_tiles then add(x, y, b.z); n = n + 1 end
+        end
+      end
+    else add(near_w.x, near_w.y, near_w.z) end
+  end
+  -- a free bucket the confined carriers may take (one inside the alert burrows needs none)
+  local bk, bd, bin = nil, nil, false
+  for _, q in ipairs(r.bpos or {}) do
+    if in_set(bs, q.x, q.y, q.z) then bin = true; break end
+    local d = cheb(ref, q.x, q.y, q.z)
+    if care_safe(K, c, q.x, q.y, q.z) and (not bd or d < bd) then bk, bd = q, d end
+  end
+  if bk and not bin then add(bk.x, bk.y, bk.z) end
+  local s = table.concat(sig, ' ')
+  local cs = {on = true, ids = ids, sig = s, t = now, n = #tiles}
+  if not (prev and prev.on and prev.sig == s) then
+    local ok, res = K.act.burrow_tiles(M.CARE, tiles, true, true)
+    if not ok then return close('act.burrow_tiles: ' .. trunc(tostring(res), 60)) end
+    local pid = {}
+    for id in pairs(ids) do pid[#pid + 1] = id end
+    table.sort(pid)
+    K.log('warn', 'water: care burrow %s opened to patient(s) %s outside the alert burrow %s: %d tiles (%s)', M.CARE,
+          table.concat(pid, ','), bs[1] and bs[1].n or '?', #tiles, trunc(s, 120))
+  else cs.t = prev.t end
+  st.care = cs
+  return cs
+end
+
+-- public (BUG-330, siege.alert_list): the burrows water wants in the civ alert's list now: {M.CARE} while it is open
+function M.care_rooms(K)
+  if st and st.care and st.care.on then return {M.CARE} end
+  return {}
 end
 
 -- the plan of one run: {have, want, idle, added = {ids}, dropped = {ids}, err}. `over` = a patient is over thirst_alarm.
@@ -2269,6 +2435,7 @@ local function finish(K, c, r, p)
   local kern, kname = burrow(K, 'kern', 'Kern+')
   local ho = M.hosp_sort(K, r, hospital_out(r, kern, refuge, kname, rname))    -- BUG-036, BUG-131
   st.hout, st.hz = ho, r.hosp
+  M.care_step(K, c, r, now)                             -- BUG-330: the care burrow before the texts that name it
   patients_out(K, r, kern, refuge, kname, rname, ho)
   local refuge_ok, rwells, rwet = false, 0, 0          -- BUG-035: the wells in the refuge and the wet ones of them
   for _, s in ipairs(r.sources) do
@@ -2597,7 +2764,7 @@ local function new_run(K)
   for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do ids[#ids + 1] = id end
   return {ph = 1, idx = 0, ids = ids, patients = {}, sources = {}, hosp = {}, buckets = 0, free = 0, full = 0,
           forbidden = {}, ponds = {}, carers = {}, home = {}, give = 0, pool = {}, carers_idle = 0, cpos = {}, doc = {},
-          outsiders = 0}
+          outsiders = 0, bpos = {}}
 end
 
 function M.init(K)

@@ -283,7 +283,8 @@ C.ACT = {
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
-  burrow_tiles = {'seal', 'runner'},              -- BUG-298: runner widens a burrow for a seal piece outside it
+  burrow_tiles = {'seal', 'runner', 'water'},     -- BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
+                                                  -- water paints its care burrow Pflege+ (exact)
   popcap = {'readiness'},
   quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care', 'traps'},
@@ -536,7 +537,8 @@ C.STATE_SPEC = obj({
   -- intake waves (siege, Gordon 2026-10-16): phase, wave count, the last refusal, the sortie squad and phase; BUG-030:
   -- deep = the deep defense's reasons ('destroyers,army,weak')
   -- M3 (BUG-114): in BREACH ba = ticks since it began, bw = what it waits for (the bridges not up and why, the quiet clock)
-  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24), ba = NAT, bw = str(100)}),
+  -- BUG-331: lg = ticks since a long calm SIEGE was eased (the deep defense lifted, DECISION_NEEDED siege_long)
+  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24), ba = NAT, bw = str(100), lg = NAT}),
   -- BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s), exports
   -- written and requests dropped this boot; the running (else the first waiting) export: id, purpose, who asked,
   -- progress, why it waits

@@ -960,6 +960,11 @@ local function alert_list(K, burrow)
   for _, n in ipairs(ok and type(rooms) == 'table' and rooms or {}) do
     if n ~= burrow then l[#l + 1] = n end
   end
+  -- BUG-330: water's care burrow (a thirsty patient outside the alert burrows, his water and a bucket) while it is open
+  local okc, care = K.call('water', 'care_rooms')
+  for _, n in ipairs(okc and type(care) == 'table' and care or {}) do
+    if type(n) == 'string' and n ~= burrow then l[#l + 1] = n end
+  end
   return l
 end
 
@@ -1962,6 +1967,7 @@ end
 
 local function deep_step(K, a, g, now)
   if not (a and a.fresh) then return end
+  if st.lg and (int(a.bd) or 0) == 0 then return end    -- BUG-331: an eased siege, no destroyer in sight: no deep defense
   local why, d = deep_reasons(K, a)
   local dp = st.deep
   if #why == 0 then
@@ -2015,6 +2021,88 @@ local function deep_step(K, a, g, now)
                                               soldiers = d.sol, worn = d.worn, metal = d.metal, refuge = g.refuge,
                                               pos = p})
   K.log('warn', 'siege: %s', txt:sub(1, 200))
+end
+
+---------------------------------------------------------------- BUG-331: the long calm siege
+-- Run 15b Earthboat y385 (i3): 35 goblins stood 37-84 tiles out for 64+ days (SIEGE from tick 155285731, never quiet: they
+-- stayed in sight), none came inside or near a bridge, nobody attacked them, nothing eased; the deep defense (weak: worn 56%
+-- < 60%) held the civilians in the dry Tiefe+ the whole time, patient 26629 died of thirst outside it (BUG-330). Now a SIEGE
+-- (never a BREACH) with a fresh census, nobody hostile inside Kern+ and every listed distance (to O1, every bridge footprint,
+-- every citizen outside Kern+) over siege_long.near tiles is calm; calm for siege_long.days game days in a row (st.lc, its
+-- start) eases the siege (st.lg): the deep defense ends unless building destroyers are in sight (the civilians go back to
+-- Kern+, its food, drink and patients; the squads to the inner station) and does not start again while it holds, and
+-- DECISION_NEEDED siege_long (A, once per easing) names the days, the nearest hostile and the ready squad.sortie command at it
+-- (approve:true is the player's call). A hostile within near or inside ends the easing (kern.log) and restarts the clock; the
+-- deep defense comes back on its own reasons. A distance nobody can measure (no O1, no bridge, nobody outside) is no calm.
+-- The bridges stay up and the civ alert stays on: the easing is the burrow, not the seal. siege_long.on false = off.
+M.LG = {on = true, days = 10, near = 25}
+M.LG_LIM = {days = {1, 336}, near = {5, 200}}
+local function lg_cfg(K) return cfg_block(K, 'siege_long', M.LG, M.LG_LIM) end
+M.LG_DAY = 1200
+
+-- the nearest measured distance of a visible hostile (O1, the bridge footprints, the citizens outside Kern+); -1 = none
+local function lg_nearest(a)
+  local best = -1
+  local function take(v)
+    v = int(v)
+    if v and v >= 0 and (best < 0 or v < best) then best = v end
+  end
+  take(a.near_o1)
+  take(a.near_cit)
+  for _, v in pairs(type(a.near_bridge) == 'table' and a.near_bridge or {}) do take(v) end
+  return best
+end
+
+-- the census hostile nearest to O1 (else to a citizen outside), for the sortie command
+local function lg_target(K)
+  local h = K.census.h
+  local best, bd
+  for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
+    local d = int(e.d_o1) or -1
+    if d < 0 then d = int(e.dc) or -1 end
+    if int(e.x) and d >= 0 and (not bd or d < bd) then best, bd = e, d end
+  end
+  return best
+end
+
+local function long_step(K, a, now)
+  local c = lg_cfg(K)
+  if not c.on or K.mode() ~= 'SIEGE' or not (a and a.fresh) then return end
+  local d = lg_nearest(a)
+  if (a.inside or 0) > 0 or d < 0 or d <= c.near then
+    if st.lg then
+      K.log('warn', 'siege: the eased siege ends after %d ticks: %s', now - st.lg.t,
+            (a.inside or 0) > 0 and 'a hostile inside Kern+' or (d < 0 and 'no distance measured'
+            or string.format('a hostile %d tiles from the fort (near %d)', d, c.near)))
+    end
+    if st.lc or st.lg then st.lc, st.lg, dirty = nil, nil, true end
+    return
+  end
+  if not st.lc then st.lc, dirty = now, true end
+  if st.lg or now - st.lc < c.days * M.LG_DAY then return end
+  local dp, lifted = st.deep, false
+  if dp and not dp.bd then
+    st.deep, st.deep_rec, lifted = nil, CAD.quiet(st.deep_rec), true
+    mem.kill_sig, mem.kill_set = nil, nil      -- the posture change re-issues every squad's orders
+  end
+  st.lg, dirty = {t = now, d = d}, true
+  local days = (now - st.t0) // M.LG_DAY
+  local e = lg_target(K)
+  local cmd, key, n
+  local okq, k, nn = K.call('military', 'sortie_squad')
+  if okq and type(k) == 'string' and e then
+    key, n = k, int(nn) or 0
+    cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z)
+  end
+  local q = string.format('SIEGE %d days, %d calm: no hostile inside Kern+ or within %d tiles (nearest %d, %d visible)%s; '
+                          .. 'attack: %s; else wait (the bridges stay up)', days, (now - st.lc) // M.LG_DAY, c.near, d,
+                          a.vis or 0, lifted and ', deep defense lifted: the civilians back to Kern+ (food, drink, patients)'
+                          or '', cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or 'no squad to send')
+  local dd = {id = 'siege_long', q = q:sub(1, 200), days = days, n = d, vis = a.vis or 0, lifted = lifted and 1 or 0}
+  if e then dd.unit, dd.pos = e.id, {e.x, e.y, e.z} end
+  if cmd then dd.squad, dd.cmd = key, cmd end
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), dd)
+  K.log('warn', 'siege: %s', q)
 end
 
 -- BUG-030: a raise hold (BUG-028 c) on a bridge that is gone holds nothing
@@ -2265,6 +2353,7 @@ function M.state(K)
   if ik.why then w.why = ik.why:sub(1, 40) end
   if so then w.so = (so.sq .. ' ' .. so.ph):sub(1, 24) end
   if st.deep and K.mode() == 'SIEGE' then w.deep = deep_txt():sub(1, 24) end    -- BUG-030: the deep defense
+  if st.lg and K.mode() == 'SIEGE' then w.lg = math.max(0, K.now().tick - st.lg.t) end   -- BUG-331: eased since
   return {wave = w}
 end
 
@@ -2331,6 +2420,9 @@ function M.init(K)
     if not next(st.deep.why) then st.deep = nil end
   end
   st.deep_rec = type(p.deep_rec) == 'table' and p.deep_rec or nil
+  -- BUG-331: the calm clock and the easing survive a reload within the SIEGE
+  st.lc = int(p.lc)
+  if type(p.lg) == 'table' and int(p.lg.t) then st.lg = {t = int(p.lg.t), d = int(p.lg.d) or 0} end
   if type(p.ep) == 'table' then
     st.ep = {}
     for _, f in ipairs({'start', 'hmax', 'seen', 'killed', 'lost', 'caps', 'sealed', 'sol0', 'onmax'}) do
@@ -2363,7 +2455,10 @@ function M.step(K, budget, ctx)
   track(K, g, now, dt)
   local mode = K.mode()
   prune_holds(K)                                           -- BUG-030
-  if mode == 'SIEGE' then deep_step(K, a, g, now) end
+  if mode == 'SIEGE' then
+    long_step(K, a, now)                                   -- BUG-331: a long calm siege eases first
+    deep_step(K, a, g, now)
+  end
   -- BUG-028 (a); a wave or a sortie brings its soldiers back itself (it owns B1 meanwhile)
   if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) and not wave_busy() then rescue_step(K, a, g, now) end
   if mode == 'SIEGE' then                                  -- Gordon 2026-10-16: the sortie, then the intake waves
@@ -2397,6 +2492,7 @@ M.on = {
     if to ~= 'SIEGE' then wave_abort(K, to, now, ev.why) end   -- intake waves and the sortie run in SIEGE only
     if to == 'PEACE' or to == 'DRILL' then st.ep = nil end
     if to ~= 'SIEGE' and to ~= 'BREACH' then st.deep, st.deep_rec = nil, nil end   -- BUG-030: the episode is over
+    if to ~= 'SIEGE' then st.lc, st.lg = nil, nil end   -- BUG-331: calm counts in one SIEGE only
     dirty = true
     local r = st.str.rescue                      -- BUG-235: a PEACE rescue ends with PEACE; the new mode's rules apply
     if r and to == 'PEACE' then r.pz = true      -- a rescue that outlived the episode follows the PEACE rules (no raise)
