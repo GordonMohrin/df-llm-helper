@@ -703,7 +703,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BREACH; why = breached (a hostile in it), unseparated (an opening reaches it), gone, dry (seal.dry: thirsty or
     # hungry there), window (a refuge without drink after refuge.breach_days), unreachable, released (BUG-331 review: the
     # eased siege lifted the deep defense, out of the refuge), unsealed (BUG-336: the refuge's own way in is open, out of
-    # it), deeper (to the refuge, away from the entrances: BREACH or the deep defense); to '' = the alert off (no usable
+    # it), dryref (BUG-378 review: the dry refuge has a way in, out of it to Kern+ at the BREACH level), deeper (to the refuge, away from the entrances: BREACH or the deep defense); to '' = the alert off (no usable
     # burrow)
     "REFUGE_SWITCH": ("B", "seal", _d("from:s to:s why:s mode:s", "level:s")),
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),

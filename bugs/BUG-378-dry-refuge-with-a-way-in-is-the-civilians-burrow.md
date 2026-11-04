@@ -36,3 +36,12 @@ in the open refuge' test now expects the move to Kern+. Fail on ec9bd8e.
 A siege with Tiefe+ dry: REFUGE_FAIL carries `no drink ... and <way in>`, the alert burrow is Kern+ (status `alert Kern+`), no
 `civ alert off, citizens flee` while Kern+ is closed. Uncertain: Kern+ without drink holds only for the breach days; the BUG-031
 dry mark takes the citizens out again if they go thirsty there.
+
+## Review fix (merge20)
+`fight_rule` kept citizens the alert already held in the dry refuge (`cur == refuge`) when it had a soft hatch with building destroyers
+in sight or a tolerated opening (`sep.exp`, `d >= dead_gap`): `leave_why` had no reason for it, so they stayed until the hatch broke (the
+Plankscale y382 failure), although `choose` already picked Kern+. `leave_why` now returns `dryref` (no drink and a way in) when `cur` is
+the refuge without drink, `choose` found another burrow and the refuge has a soft closure with destroyers in sight or an opening
+reaching it (the open stair head stays `unsealed`): REFUGE_SWITCH to the Kern+ BREACH pick. Never to none: with no pick the old reasons
+decide. Tests: tests/lua/test_seal_refuge.lua +2 (soft hatch + destroyers, cur=Tiefe+: kept without destroyers, dryref to Kern+ with;
+a second opening 41 steps from the refuge, Kern+ closed: dryref to Kern+); both fail without the fix.
