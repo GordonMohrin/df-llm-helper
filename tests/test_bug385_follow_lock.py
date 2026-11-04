@@ -59,7 +59,7 @@ def test_bug385_run_exits_clean_and_names_the_owner(save, monkeypatch, capsys):
     put(save, 222, took=111, took_at=int(time.time()) - 5)
     args = type("A", (), {"save_pin": None, "since": None, "no_auto": False, "once": False, "max_s": 0.3, "interval": 0.02,
                           "takeover": True})()
-    assert wake.run(args) == 3 and calls == []
+    assert wake.run(args) == wake.FOLLOW_OWNED_EXIT and calls == []
     out = capsys.readouterr().out
     assert "pid 222" in out and "from pid 111" in out and "does not take it back" in out
     assert json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))["pid"] == 222
@@ -71,7 +71,7 @@ def test_bug385_old_code_takeover_obeys_the_cool_down_too(save, monkeypatch, cap
     put(save, 333, code="0ld0c0de0000", took=1, took_at=int(time.time()) - 5)
     args = type("A", (), {"save_pin": None, "since": None, "no_auto": False, "once": False, "max_s": 0, "interval": 0.02})()
     monkeypatch.setattr(wake.Follower, "poll", lambda self: (_ for _ in ()).throw(KeyboardInterrupt))
-    assert wake.run(args) == 3
+    assert wake.run(args) == wake.FOLLOW_OWNED_EXIT
     assert "does not take it back" in capsys.readouterr().out
 
 
@@ -95,3 +95,50 @@ def test_bug385_doctor_lists_the_owner(save):
     put(save, 4711)
     files.write_follow_hb(save, {"v": 2, "wall": int(now), "last_n": 0, "code": files.code_stamp(), "auto": 1, "pid": 4711})
     assert hasattr(doctor, "files") and "pid 4711" in files.follow_owner(save, now)
+
+
+def test_bug385_review_refused_whatever_the_time_when_the_owner_took_over_from_me(save, monkeypatch):
+    """merge20 review: after the cool-down the displaced start's Monitor restart (new pid, same start id) is still refused."""
+    monkeypatch.setenv("DFLLM_FOLLOW_SID", "mon-A")
+    put(save, 222, took=111, took_at=int(time.time()) - 10 * wake.FOLLOW_TAKEOVER_COOL_S, took_sid="mon-A")
+    ok, owner = wake.acquire_lock(save, time.time(), True, alive=lambda p: True)
+    assert not ok and owner["pid"] == 222
+    put(save, 222, took=os.getpid(), took_at=int(time.time()) - 10 * wake.FOLLOW_TAKEOVER_COOL_S)      # same pid, too
+    assert not wake.acquire_lock(save, time.time(), True, alive=lambda p: True)[0]
+    monkeypatch.setenv("DFLLM_FOLLOW_SID", "someone-else")                 # another start after the cool-down may take over
+    put(save, 222, took=111, took_at=int(time.time()) - 10 * wake.FOLLOW_TAKEOVER_COOL_S, took_sid="mon-A")
+    assert wake.acquire_lock(save, time.time(), True, alive=lambda p: True) == (True, None)
+
+
+def test_bug385_review_lock_records_the_displaced_start(save, monkeypatch):
+    monkeypatch.setenv("DFLLM_FOLLOW_SID", "mon-B")
+    put(save, 111, sid="mon-A")
+    assert wake.acquire_lock(save, time.time(), True, alive=lambda p: True) == (True, None)
+    doc = json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))
+    assert doc["sid"] == "mon-B" and doc["took_sid"] == "mon-A"
+    wake.refresh_lock(save, time.time() + 1, alive=lambda p: False)
+    doc = json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))
+    assert doc["took_sid"] == "mon-A" and doc["sid"] == "mon-B"            # kept across beats
+
+
+def test_bug385_review_two_start_loop_ends_after_one_round(save, monkeypatch, capsys):
+    """Two --takeover starts, each restarted by its Monitor (new pid, same start id) after the message: A starts, B takes over,
+    A' is refused with the distinct exit code even after the cool-down; B keeps the lock and nobody ping-pongs."""
+    monkeypatch.setattr(wake.Follower, "poll", lambda self: None)
+    live = set()
+    monkeypatch.setattr(wake, "pid_alive", lambda p: p in live)
+    args = type("A", (), {"save_pin": None, "since": None, "no_auto": False, "once": False, "max_s": 0.2, "interval": 0.02,
+                          "takeover": True})()
+    now = int(time.time())
+    # A (pid 1001, start id mon-A) holds; B (pid 2002, mon-B) took over from it
+    live.update({1001, 2002})
+    files.write_json_atomic(save / wake.FOLLOW_LOCK, {"v": 1, "pid": 2002, "start": now, "hb": now, "code": wake.CODE,
+                                                      "sid": "mon-B", "took": 1001, "took_at": now - 5 * wake.FOLLOW_TAKEOVER_COOL_S,
+                                                      "took_sid": "mon-A"})
+    for new_pid in (1003, 1004, 1005):                       # A's Monitor restarts it again and again
+        monkeypatch.setattr(os, "getpid", lambda n=new_pid: n)
+        live.add(new_pid)
+        monkeypatch.setenv("DFLLM_FOLLOW_SID", "mon-A")
+        assert wake.run(args) == wake.FOLLOW_OWNED_EXIT
+        assert "another follow owns this instance (pid 2002); do not restart" in capsys.readouterr().out
+        assert json.loads((save / wake.FOLLOW_LOCK).read_text("utf-8"))["pid"] == 2002

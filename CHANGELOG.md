@@ -61,6 +61,10 @@
   refused (exit 3, names both pids), so the newer start wins once and the older one exits and does not take it back. The lock is read back
   after the write; beats keep the record. The heartbeat carries `pid`; status names it (`follow pid N: OLD CODE`, `OFF ..., was pid N`),
   doctor has a `follow: pid N (beat .., took over from pid M ..)` line and flags two pids.
+- **Review fix (merge20), BUG-385:** the cool-down only slowed the ping-pong of two restarting `--takeover` starts to a 120 s period. A
+  takeover is now refused regardless of time when the owner took over from the requesting start (pid, or start id = DFLLM_FOLLOW_SID /
+  parent pid, kept in the lock as `sid`/`took_sid`); the refused and the displaced start exit 4 with 'another follow owns this instance
+  (pid N); do not restart' (a Monitor can key on it). Plain 'already runs' stays exit 3.
 - **BUG-386:** not a missed adopt: i2's save-as boot ran before BUG-362 and every later boot ran in `autosave N`, which `rekey_to` ignores.
   `kern.player_name` finds the player's name again (loaded folder, else `marker.want`, else the newest player-named BOOT event of the
   fort's runtime folder), the running kernel notes a player-named folder as `marker.want` (`note_player_save`). Old data moves along.
