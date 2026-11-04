@@ -137,6 +137,14 @@ function F.install(W)
     W.kitchen[#W.kitchen + 1] = {what = what, it = df.item_type[item], t = t, i = i}
     return true, 'added'
   end)
+  W.act_result('kitchen_include', function(item, sub, t, i, what)        -- BUG-345
+    local it = type(item) == 'string' and df.item_type[item] or item
+    for k = #W.kitchen, 1, -1 do
+      local e = W.kitchen[k]
+      if e.what == what and e.it == it and e.t == t and e.i == i then table.remove(W.kitchen, k); return true, 'removed' end
+    end
+    return true, 'absent'
+  end)
   dfhack.items = {
     getContainer = function(it) return it._cont end,
     getHolderBuilding = function(it) return it._holder end,

@@ -271,8 +271,8 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
     sites = _rank(snap, tpl, params, n, manifest, water, where, _free_of_projects(save_dir, tpl, params))
     if where:
         return sites, snap["id"]
-    files.write_json_atomic(_sites_cache(save_dir, tpl), {"v": 2, "tpl": tpl, "snap": snap["id"], "n": n,
-                                                          "params": params or {}, "man": _digest(manifest),
+    files.write_json_atomic(_sites_cache(save_dir, tpl), {"v": 2, "rv": _rank_v(), "tpl": tpl, "snap": snap["id"],
+                                                          "n": n, "params": params or {}, "man": _digest(manifest),
                                                           "water": _digest(water), "sites": sites})
     return sites, snap["id"]
 
@@ -300,6 +300,15 @@ def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):
     return free
 
 
+def _rank_v():
+    """BUG-346: bp.sites.RANK_V, the ranking rules' version: a cached ranking of older rules (the farms soil rule that
+    refused every room site) is ranked again on the same snapshot."""
+    try:
+        return getattr(load_bp("sites"), "RANK_V", None)
+    except BpUnavailable:
+        return None
+
+
 def ranking(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None) -> tuple[list, str]:
     """The cached ranking only if it was made for these params, on the snapshot ranking would use now, with the
     same fort manifest and (BUG-040) the same accepted water (a cache for other params, an older snapshot or other
@@ -310,6 +319,7 @@ def ranking(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | N
     manifest = fort_manifest(save_dir)
     c = files.read_json(_sites_cache(save_dir, tpl))
     if isinstance(c, dict) and c.get("snap") == snap["id"] and c.get("params") == (params or {}) \
+            and c.get("rv") == _rank_v() \
             and c.get("n", 3) >= RANK_N and c.get("man") == _digest(manifest) \
             and c.get("water", _digest(None)) == _digest(water_ctx(save_dir, tpl)) and isinstance(c.get("sites"), list):
         return [s for s in c["sites"] if isinstance(s, dict)], snap["id"]
@@ -1278,6 +1288,19 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
     return "; ".join(out)
 
 
+def farm_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None, ranked: int) -> str:
+    """BUG-346 (Run 15d Drillchamber y395: fortcore dug, `bp sites farms` still 0 and the hint said the snapshot may
+    predate the fortcore's dig): a farms room with nothing ranked names the soil of the fort's levels instead
+    (bp.sites.farm_soil_why: no soil level -> a surface farm or trade)."""
+    if tpl != "farms" or ranked or (params or {}).get("surface"):
+        return ""
+    try:
+        snap = snap or sites_snapshot(save_dir)
+        return load_bp("sites").farm_soil_why(snap, fort_manifest(save_dir)) if snap else ""
+    except (BpUnavailable, AttributeError):
+        return ""
+
+
 def depth_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None, occ: "Occupancy", err: str) -> str:
     """BUG-067 (note 5: explore depth 12 always refused, the caverns at z127/z131): when every anchor's shaft of the asked
     depth reaches an avoided level, the deepest shallower depth (EXPLORE_DEPTHS) that has a free site, as `p.depth=N`."""
@@ -1486,7 +1509,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
         ranked = len(wide)
     holders = sorted({t.split("~", 1)[1] for t in taken})
     why = "; ".join(x for x in (f"taken {', '.join(taken[:3])}" if taken else "", bad[0] if bad else "") if x)
-    hint = no_site_hint(save_dir, tpl, snap_id, ranked, holders)
+    hint = farm_hint(save_dir, tpl, params, snap, ranked) or no_site_hint(save_dir, tpl, snap_id, ranked, holders)
     raise BpError(f"site {label}: only {free} free site(s) for {tpl}{fmt_params(params)} on snapshot {snap_id} "
                   f"({ranked} ranked{'; ' + why if why else ''}); try `dfllm bp sites {tpl} --fresh`"
                   + (f"; {hint}" if hint else ""))
