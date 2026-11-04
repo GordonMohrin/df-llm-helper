@@ -585,9 +585,14 @@ local function evaluate(K, why)
   if st.pw ~= rt.pw and st.pt then st.pw, dirty = rt.pw, true end
   -- the freeze: from escalate_days days on, a fort of hold_pop citizens or more keeps max-pop where it stands
   local hp, cit0 = pcfg(K, 'hold_pop'), type(cu) == 'table' and cu.cit or nil
-  if st.pt and hp > 0 and rt.pd >= pcfg(K, 'escalate_days') and cit0 and cit0 >= hp then
+  -- BUG-375 (Run 16d Plankscale y374-y380: the perimeter stood open 79 days, max-pop hung at 38 beside a seal project
+  -- that was queued): the freeze is a push to seal; with a seal project live (runner.pending 'seal') the push has worked
+  -- and the cap is neither set to the population nor kept there. It applies again when no seal is queued
+  local oks, nseal = K.call('runner', 'pending', 'seal')
+  rt.sealq = oks and type(nseal) == 'number' and nseal > 0 or nil
+  if st.pt and hp > 0 and rt.pd >= pcfg(K, 'escalate_days') and cit0 and cit0 >= hp and not rt.sealq then
     if not st.phold then st.phold, dirty = cit0, true end
-  elseif st.phold and not (st.pt and hp > 0 and cit0 and cit0 >= hp) then st.phold, dirty = nil, true end
+  elseif st.phold and not (st.pt and hp > 0 and cit0 and cit0 >= hp and not rt.sealq) then st.phold, dirty = nil, true end
   rt.phold = st.phold
   -- R2
   local f2 = {}
@@ -755,6 +760,8 @@ end
 local function route_fix(route)
   if not route then return nil end
   if route:find('wall %-?%d+,%-?%d+,%-?%d+ ') then return route .. ' (fix: seal at=audit)' end
+  -- BUG-376: 'bypass: via stair x,y,z -> X' (bp.topo.route_via): no wall can stand there; status names the way out or the waiver
+  if route:find('via %a+ %-?%d+,%-?%d+,%-?%d+') then return route .. ' (no wall tile: placeable fix or waiver in status)' end
   return route .. ' (no wall tile: inspect entrances)'
 end
 

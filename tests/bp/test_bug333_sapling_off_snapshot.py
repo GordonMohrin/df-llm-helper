@@ -30,7 +30,7 @@ def test_saplings_off_the_snapshot_get_their_piece(tmp_path):
     save = save_with(tmp_path, ["40,30,0 sapling", "42,30,0 sapling"])
     at, notes = cmd.seal_openings(save, "last")         # old: BpError 'nothing to close (... not on the snapshot ...)'
     assert at == "40,30,0 floor;42,30,0 floor", (at, notes)
-    assert sum("not on the snapshot, the piece goes on the sapling" in n for n in notes) == 2, notes
+    assert sum("the piece goes on the sapling itself" in n for n in notes) == 2, notes
 
 
 def test_a_door_route_off_the_snapshot_still_waits_for_it(tmp_path):

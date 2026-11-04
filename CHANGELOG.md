@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Seal reads the check, saplings get their piece, a no-wall bypass names a fix (BUG-374, BUG-375, BUG-376, 2026-11-04; offline, live-untested)
+- **Why:** Run 16d i4 (Plankscale y374-y380): `seal at=last` 'nothing to close' beside 3 open ways in; the perimeter opened
+  again after almost every season (saplings), 79 days open, max-pop pinned at 38 beside a queued seal; the audit's
+  `bypass ... no wall tile on the route` stood for years with `inspect what=entrances` as the only advice (also i2 R0).
+- **BUG-374:** `cmd._seal_kind`: a snapshot more than a day older than the entrance check no longer closes a way in by a
+  door/wall char; `entrance_reading`: a checked state that counts ways without tiles takes the SIEGE_UNREADY list;
+  `seal_openings`: counted ways with no tile anywhere are a BpError naming the way out (not SealClosed, which plan apply
+  silently drops).
+- **BUG-375:** a sapling's seal piece goes on the sapling itself (as shrubs do), snapshot or not; readiness' open-perimeter
+  freeze of max-pop (`phold`) waits while `runner.pending('seal')` > 0 and applies again when none is live.
+- **BUG-376:** `bp.topo.route_via`: `bypass: via stair|door|bridge x,y,z -> X,Y,Z` where no floor/ramp tile takes a wall;
+  `cmd.route_advice` (status, plan check): remove the door and wall the tile, or the explicit WAIVED text (plan check warns
+  only; no stair/bridge takes a wall; the audit verdict is unchanged). Readiness' wake line points at status.
+- **Tests (fail on 2fcd6e0):** tests/test_bug374_376_seal_audit.py (8), tests/lua/test_bug375_hold_seal_queued.lua (2),
+  tests/lua/test_readiness.lua (via route); tests/bp/test_bp_seal_run11.py and test_bug333_sapling_off_snapshot.py adjusted.
+- **Live check:** a sapling way in -> `seal at=last` queues `x,y,z floor` on it and the pop hold lifts while the seal is live;
+  `dfllm audit` in a fort with a stair/door bypass -> finding `via ...`, status shows the advice; a refused seal names why.
 ## Startup shops on the surface, no door wait without a carpenter, one fortcore (BUG-356, BUG-357, BUG-358, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a-d (new forts, y372/373): the first year hung on the fortcore (no still, kitchen, carpenter or mason until
   stage 1 was dug, drink 3 d -> 0 in every fort); farms and two workshops projects stood 32 d at build 50 % 'waits for door'

@@ -317,7 +317,8 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     elif WALL_RE.search(route):
         nxt.append("wall it: dfllm cmd bp.place tpl=seal site=S1 at=audit (or a plan build seal p.at=audit)")
     elif route:
-        nxt.append("no wall tile on that route: dfllm cmd inspect what=entrances")
+        from .cmd import route_advice
+        nxt.append(route_advice(route) or "no wall tile on that route: dfllm cmd inspect what=entrances")  # BUG-376
     if why:
         nxt.append("the refusal's way out, then dfllm audit")
     elif a.get("age", -1) < 0 or any(f in ("audit", "audit_old") for f in fails):

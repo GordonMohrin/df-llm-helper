@@ -595,6 +595,10 @@ def entrance_reading(save_dir: Path, state: dict | None = None, unready: dict | 
         return ev, _tick(unready)
     if unready and sents and ev[:len(sents)] == sents:
         return ev, _tick(unready)
+    if checked and not sents and r["open"] > 0 and ev:
+        # BUG-374: the state counts open ways in but carries no tile (ready.ents is written only with tiles): the newest
+        # SIEGE_UNREADY's list is the better reading than none (status counted ways, seal at=last 'nothing to close')
+        return ev, _tick(unready)
     return (sents if checked or not unready else ev), _state_tick(st)
 
 
@@ -623,6 +627,30 @@ def last_audit_walls(save_dir: Path) -> list[str]:
 
 
 NO_HALL = "manifest: no Z2 trap hall"      # bp.topo.audit: the fort has no trap hall yet (fortcore stage 2)
+
+
+# BUG-376 (Run 16d/16b: 'bypass ... no wall tile on the route' for years, 'inspect what=entrances' as the only advice):
+# bp.topo.audit names what a route without a wall tile passes instead, 'bypass: via door|stair|bridge x,y,z -> X'
+ROUTE_VIA = re.compile(r"via (door|stair|bridge) (-?\d+),(-?\d+),(-?\d+)")
+
+
+def route_advice(route: str) -> str:
+    """BUG-376: what to do about an audit route that has no wall tile ('bypass: via stair 1,2,3 -> 4,5,6'): a concrete
+    placeable fix or the waiver, never 'look at it'. '' when the route names no such tile (the old finding text)."""
+    mt = ROUTE_VIA.search(str(route or ""))
+    if not mt:
+        return ""
+    kind, at = mt.group(1), "%s,%s,%s" % mt.group(2, 3, 4)
+    waived = ("or accept it: WAIVED, `plan check` only warns about it (no plan build can close it) and R0 `bypass` stays "
+              "until the audit reads another route")
+    if kind == "door":
+        return (f"the route passes the door {at} and no floor tile on it takes a wall: take the door out by hand "
+                f"(remove the building), then dfllm cmd bp.place tpl=seal site=S1 at=\"{at} floor wall\"; {waived}")
+    if kind == "stair":
+        return (f"the route passes the stair {at}: a wall cannot stand on a stair and the audit counts a hatch open, so "
+                f"no seal piece closes it; {waived}")
+    return (f"the route passes the bridge {at}: the audit counts a bridge lowered; no wall tile; rebuild it as wall + "
+            f"door (dfllm cmd inspect what=defense) or {waived}")
 
 
 def audit_fails(save_dir: Path) -> list[str]:
@@ -1029,6 +1057,9 @@ def _piece_gone(geo, pc: dict, done_tick: int) -> bool:
     return c == "."
 
 
+SNAP_LAG = 1200          # ticks (a game day, the readiness period): a snapshot older than the entrance check by more is stale
+
+
 def _seal_kind(dmod, geo, e: dict, notes: list[str]) -> str | None:
     """The opening's kind on the newest reading: the snapshot's shape wins for plain tiles (as before), the entry's
     kind where the snapshot cannot tell (plants: the shrub/sapling marks if the snapshot is the newer reading; a door
@@ -1039,6 +1070,13 @@ def _seal_kind(dmod, geo, e: dict, notes: list[str]) -> str | None:
     if c is None or c == "?" or kind == dmod.OPEN_ROUTE:
         return kind
     newer = geo.tick >= e["tick"]
+    if e["src"] not in ("at", "audit") and e["tick"] >= 0 and geo.tick + SNAP_LAG < e["tick"] \
+            and (c == "+" or c not in dmod.CHAR_KIND):
+        # BUG-374 (Run 16d y374: status named 3 open ways in, `seal at=last` 'nothing to close'): the snapshot is more
+        # than a day older than the entrance check, and the check is what status shows. A door, wall or building on
+        # the old snapshot proves nothing about the tile now (a door destroyed, a plant or building gone): the entry
+        # keeps its own kind and the seal goes on with the check's reading
+        return kind or "floor"
     if c == "+":
         if kind in dmod.CLOSER_KINDS:
             return kind
@@ -1077,6 +1115,13 @@ CLOSED_NOTES = ("(closed)", "(closed, or no floor/ramp/stair)", "left out, seale
                 "a seal under way closes its route", "(a seal project builds them)",
                 "no stair found (not dug)", "is not revealed: look at the tile", "hatch moved to",
                 "(a fortcore tile, the fort's own way)")
+
+
+def _counted_open(save_dir: Path) -> int:
+    """The ways in the state's last entrance check counts (ready.open), 0 when it counts none or was not made."""
+    r = (files.read_state(save_dir) or {}).get("ready")
+    n = r.get("open") if isinstance(r, dict) else None
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
 
 
 def _all_closed(notes: list[str], key: str, entries: list) -> bool:
@@ -1175,14 +1220,15 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
         label = f"{x},{y},{z} {'open route' if kind == dmod.OPEN_ROUTE else kind or '?'}"
         if dmod.piece_kind(kind):
             keep.append({"pos": e["pos"], "kind": kind, "piece": e["piece"], "nodoor": e.get("nodoor", False)})
-        elif kind == "sapling" and (geo is None or geo.char(x, y, z) in (None, "?")):
-            # BUG-333 (Run 15d Drillchamber y377: status '3 ways in: 12,170,146 sapling, 14,170,146 sapling, 11,169,146
-            # sapling', seal at=last 'nothing to close ... its tile is not on the snapshot', after bp sites seal --fresh
-            # too; 21,85,146 sapling the same): the neighbour search needs the snapshot, the piece on the sapling
-            # (BUG-323) does not: quickfort checks the tile when it places it
+        elif kind == "sapling":
+            # BUG-375 (Run 16d Plankscale y374-y380: the perimeter opened again every year, saplings growing into the
+            # openings, 79 days open; BUG-333 Drillchamber y377 'not on the snapshot'; BUG-323 Inkintense y377): a
+            # sapling is no tree yet and quickfort builds doors and walls on SAPLING tiles (build.lua
+            # is_valid_tile_generic and is_valid_tile_has_space), so the piece goes on the sapling itself, read as
+            # floor, snapshot or none: a neighbour piece leaves the plant standing, the next one regrows beside it
             keep.append({"pos": e["pos"], "kind": "floor", "piece": e["piece"]})
-            notes.append(f"{label}: not on the snapshot, the piece goes on the sapling (quickfort builds on sapling "
-                         "tiles)")
+            notes.append(f"{label}: the piece goes on the sapling itself (quickfort builds on sapling tiles; "
+                         "a neighbour piece would leave the plant to regrow)")
         elif dmod.needs_neighbour(kind) and (geo is None or geo.char(x, y, z) in (None, "?")):
             notes.append(f"{label}: left out, its tile is not on the snapshot (dfllm bp sites seal --fresh, then "
                          "again; or name the tile that closes it: at=\"x,y,z floor\")")
@@ -1200,15 +1246,6 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
             c = _geo_try(geo.neighbour, notes, label, e["pos"], kind in dmod.CLOSER_KINDS, avoid)
             if c == "covered":
                 notes.append(f"{label}: left out, a seal under way closes its route")
-                continue
-            if c is None and kind == "sapling":
-                # BUG-323 (Run 15c y377: '79,85,133 sapling: left out, no single neighbouring tile closes its route',
-                # the way in stayed open; a sapling regrows on the open ground 2-3 times a year, so R0 never cleared):
-                # quickfort builds doors and walls on SAPLING tiles (build.lua is_valid_tile_generic and
-                # is_valid_tile_has_space): the piece goes on the sapling itself, read as floor
-                keep.append({"pos": e["pos"], "kind": "floor", "piece": e["piece"]})
-                notes.append(f"{label}: no neighbour closes its route, the piece goes on the sapling (quickfort builds "
-                             "on sapling tiles)")
                 continue
             if c is None:
                 if kind not in dmod.CLOSER_KINDS:
@@ -1251,6 +1288,12 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
                      + dmod.format_openings(rest[:4]))
     if not keep:
         closed = _all_closed(notes, key, entries)
+        counted = _counted_open(save_dir) if key in SEAL_LAST and not entries else 0
+        if counted:                                        # BUG-374: status counts ways in the seal could not read
+            closed = False
+            notes.append(f"status counts {counted} way{'s' if counted != 1 else ''} in but no tile is on file (state "
+                         "ready.ents empty, no SIEGE_UNREADY list, no leak): dfllm cmd inspect what=entrances "
+                         "key=refresh, then again, or name the tiles: at=\"x,y,z floor\"")
         why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
                                    else "the last audit names no wall" if key == "audit"
                                    else "no refuge stair head in the manifest and no REFUGE_FAIL tile"
