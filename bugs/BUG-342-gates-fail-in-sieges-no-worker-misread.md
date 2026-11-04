@@ -1,5 +1,5 @@
 # BUG-342 gates fail in sieges: GATE_FAIL no_worker is a misread, lever pullers hold their own bridge
-Status: partly fixed (offline, live-untested): the exact reason, the pullers in their room; open: the traffic that cancels the pulls (safety side), pullers that never reach their room
+Status: partly fixed (offline, live-untested): the exact reason, the pullers in their room, review fix 2026-11-04: approach cancels no longer eat the deadline (bounded, DECISION_NEEDED gate_traffic), no_worker for foreign pulls, drop_own raises only; open: pullers that never reach their room, holding civilians off a footprint
 Severity: high
 Found: 2026-11-04, Run 15 (i3 Earthboat y387 spr, i4 Drillchamber y378 win / y376, i2 Guildcleans y378 sum)
 Module: `lua/dfllm/gate.lua` (control: :1821 `r.stuck = 'no_worker'` for any pull without a worker, check_fail :1978; holders
@@ -51,11 +51,31 @@ Next siege or drill: GATE_FAIL reads `cancelled: N pulls cancelled for units wal
 said no_worker; a real `no_worker` names the pullers. With fortcore's B2 landing room: no `B2 up waits for citizen <puller> next
 to it` for a puller in dfllm-levers-b2.
 
+## Review fix (2026-11-04, merged into fix15-bridge with BUG-335)
+- Approach-cancelled time (gate.lua:1845 `M.ap_credit`): a raise pull cancelled for a unit walking toward the bridge adds the
+  ticks it stood queued to `r.held_sum` (not toward the deadline), for the first AP_CREDIT (8) such cancels of an epoch.
+  Bounded: at the 8th DECISION_NEEDED `gate_traffic` (A; bridge, n, opts hold_civilians/reroute/lever, q names the last walker)
+  asks once and the deadline runs again (then GATE_FAIL `cancelled`). No safe DF mechanism keeps civilians off a footprint (a
+  burrow restricts where they go, not where they walk; traffic designations only weight the path), hence the question; the
+  walking-toward cancel itself stays (safety first).
+- gate.lua:2022 (the verifier's ~1907): a pending pull gate did not queue (the player's, or ours after a reload lost the
+  runtime) without a worker is `queued`; `no_worker` only once nobody took that job in NO_WORKER ticks (`r.fj`), and the text
+  then says `no_worker: a pull gate did not queue (job N) not taken in T ticks; lever pullers: ...` (old: '0 pull(s) not taken').
+- drop_own (merge resolution): raises only (gate.lua:1931, :2042: a lowering crushes, a puller one tile away holds it as
+  BUG-027 wants), and never drops a unit on the footprint or walking onto it (BUG-335 crossers).
+- Our soldiers walking to their station over a bridge wanted up are re-stationed to its inner side (BUG-335 review), which
+  removes one source of the cancels.
+
+Tests: `tests/lua/test_bug342_gate_workers.lua` (+2: the puller beside O1 still holds a lowering; a puller in his room on a
+path onto O1 holds the raise; the cancelled test checks DECISION_NEEDED gate_traffic once with n 8 before the GATE_FAIL),
+`tests/lua/test_siege.lua` (the foreign pull's no_worker text). All fail on the merge base.
+
 ## Open
-- The traffic itself (recall walking past B2 to the refuge stair, soldiers walking to their station, animals) cancels the pulls
-  and makes the BREACH; that is the footprint safety side (the parallel bridge-crush fix), not changed here. Approach cancels do
-  not count as held time toward the deadline.
+- The traffic itself (recall walking past B2 to the refuge stair, animals) still cancels the pulls; now bounded by the
+  question, not solved. Holding the civilians back (an alert burrow without the footprint's approaches, a recall that waits
+  for the raise) needs a live test of how DF paths burrow-restricted civilians.
 - Pullers rarely reach their room (574 `away` in i3): under the civ alert DF seems to keep a citizen anywhere in the alert's
-  burrows, so the personal lever-room burrow is no destination; not verifiable offline. Pre-positioning needs a live test
+  burrows, so the personal lever-room burrow is no destination; not verifiable offline. A designated puller kept inside the
+  burrow that holds the lever room, pre-positioning before raising and a retry with the nearest citizen need a live test
   (e.g. one puller per room kept from ALERT on, or a station-like hold).
 - Related: BUG-013, BUG-027, BUG-141, BUG-251, BUG-310, BUG-311.

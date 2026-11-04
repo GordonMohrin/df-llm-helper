@@ -330,6 +330,8 @@ add{name = 'single-pending invariant: a foreign pending pull blocks queueing; GA
   check = function(W)
     T.eq(#S.pulls(W, 'B1'), 0, 'never a second pull next to a pending one')
     T.eq(ev1(W, 'GATE_FAIL').d, {bridge = 'B1', want = 'up', why = 'no_worker'})
+    -- BUG-342 review: the foreign pull's own text (old: 'no_worker: 0 pull(s) not taken in 200 ticks')
+    T.ok(ev1(W, 'GATE_FAIL').msg:find('no_worker: a pull gate did not queue (job ', 1, true), ev1(W, 'GATE_FAIL').msg)
     T.eq(ev1(W, 'BREACH').d.bridge, 'B1')
     T.eq(#S.acts(W, 'cancel_own_lever_job'), 0, 'a foreign job is never cancelled')
   end}

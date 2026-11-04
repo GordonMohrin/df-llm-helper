@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Run 15 gate review: our squads kept off a busy bridge, approach cancels bounded (BUG-335/342 review, 2026-11-04; offline, live-untested)
+- **Why:** the verifiers of BUG-335 and BUG-342: gate only waited for our soldiers walking over a bridge (Earthboat squads 99-101
+  would hold every SIEGE close until the give-up), the inner station flipped melee -> b2 the moment B2 moved, stairs/ramps (another
+  z) were never scanned, the walking-toward cancels ate the up deadline (i3: 90 B2 pulls), a foreign pull without a worker read
+  `no_worker` (gate.lua:1907), and the merged drop_own also let a puller beside the footprint go for a lowering.
+- **What changed:** `gate.busy` (a taken pull, the settle window, moving); military freezes a station switch across a busy bridge
+  (kern.log `... waits: bridge B2 is being pulled or moves`), `core_up` keeps its answer while B2 is busy and counts a want 'up';
+  `military.restation` gives a squad whose soldier walks over a bridge wanted up to an outer station an inner one (STATION_MOVED
+  `cross`; `gate.holds` units carry `path`); the census keeps walkers PATH_Z 3 levels above/below for crossers; crossers counts a
+  unit now on the footprint; a beside-and-crossing unit is held as the crosser. The first 8 approach cancels of an epoch do not
+  count toward the deadline, then DECISION_NEEDED `gate_traffic` once; a foreign pending pull is `queued`, `no_worker` after 200
+  ticks with its own text; drop_own raises only, never a crosser. Live fact used: unit.path.path[0] is the next step.
+- **Tests (fail on the merge base):** test_gate_crush.lua (+2), test_stations.lua (+2), test_bug342_gate_workers.lua (+2, +1
+  check), test_siege.lua (+1 check).
+- **Live check:** siege with squads behind B1: no squad order over a moving B2, STATION_MOVED `cross` for a squad sent out over
+  a bridge wanted up, `waits for soldier N walking onto it` for one on a stair; DECISION_NEEDED gate_traffic after 8 cancels.
+  Open: tiles a bridge swings over, foreign lever pulls, holding civilians off a footprint, pullers not reaching their room.
 ## Run 15b gate: no pull while a unit walks onto the bridge (BUG-335, 2026-11-04; offline, live-untested)
 - **Why:** Earthboat y385 (i3) #7504-#7515: five soldiers of squads 99-101 on their way to their station walked onto B2 in the
   100 ticks it rose after the pull (taken with nobody within the margin); Guildcleans y379 (i2) #2628 the same with B1. Root

@@ -96,13 +96,21 @@ T.test('BUG-342: pulls cancelled for a unit walking toward the bridge fail as ca
        function()
   local W = world{x6 = 60, y6 = 80}
   W.event('INVASION', {id = 1})
-  run(W, 1800, {passer = true})
+  run(W, 3600, {passer = true})
   local f = fails(W, 'O1')
-  T.eq(#f >= 1, true, 'a GATE_FAIL at the deadline')
+  T.eq(#f >= 1, true, 'a GATE_FAIL at the deadline (after the AP_CREDIT cancels the deadline runs again)')
   T.eq(f[1].d.why, 'cancelled', 'old code: no_worker (the fresh pull after the last cancel had no worker yet)')
   T.ok(f[1].d.pulls >= 2, 'pulls ' .. tostring(f[1].d.pulls))
   T.eq(f[1].d.units, {7})
   T.ok(f[1].msg:find('pulls cancelled for units walking toward it, the last citizen 7 3 tiles from it', 1, true), f[1].msg)
+  -- BUG-335/342 review: the first AP_CREDIT cancels do not eat the deadline; at that count DECISION_NEEDED gate_traffic
+  -- asks once, then the deadline runs again (old: GATE_FAIL at T+900 with the time gone to the cancels, no question)
+  local dn = {}
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'gate_traffic' then dn[#dn + 1] = e end end
+  T.eq(#dn, 1, 'asked once')
+  T.eq({dn[1].d.bridge, dn[1].d.n, dn[1].d.opts}, {'O1', 8, {'hold_civilians', 'reroute', 'lever'}})
+  T.ok(f[1].tick > dn[1].tick, 'GATE_FAIL only after the question')
+  T.ok(f[1].d.pulls > 8, 'pulls ' .. tostring(f[1].d.pulls))
   T.eq(require('dfllm.util.contract').check_state(W.state()), {})
 end)
 
@@ -124,6 +132,44 @@ T.test('BUG-342: a pull nobody takes is still no_worker; the message counts them
   T.eq(#f >= 1, true, 'a GATE_FAIL at the deadline')
   T.eq(f[1].d.why, 'no_worker')
   T.ok(f[1].msg:find('not taken in 200 ticks; lever pullers: dfllm-levers 0 of ', 1, true), f[1].msg)
+end)
+
+T.test('BUG-342 review: a puller in his room beside the footprint still holds a LOWERING (old: drop_own for both ' ..
+       'directions, the intake down of O1 pulled at once with him one tile from it)', function()
+  local W = world()
+  W.event('INVASION', {id = 1})
+  run(W, 1500)
+  T.eq(S.bstate(W, 'O1'), 'up')
+  local ok, pul = W.K.call('gate', 'puller_of')
+  T.eq(ok and pul[6], 'dfllm-levers')
+  local n0 = #S.pulls(W, 'O1')
+  local okw, res = W.K.call('gate', 'want', 'O1', 'down', 'intake')
+  T.ok(okw and res == true, 'wanted down')
+  T.eq(#S.pulls(W, 'O1'), n0, 'no lowering pull with the puller one tile from the footprint')
+  local b
+  for _, e in ipairs(W.find_events('GATE')) do if e.d.state == 'blocked' and e.d.bridge == 'O1' then b = e end end
+  T.ok(b and b.msg:find('O1 down waits: citizen 6 next to it', 1, true), b and b.msg)
+end)
+
+T.test('BUG-342 review: a puller in his room whose walk path crosses the footprint holds the raise (drop_own keeps ' ..
+       'the crossers of BUG-335)', function()
+  local W = world()
+  local vec = kmock.vec
+  W.unit(6).path = {path = {x = vec{52, 51}, y = vec{11, 10}, z = vec{Z, Z}}}
+  W.event('INVASION', {id = 1})
+  local pul, n = nil, 0
+  repeat
+    run(W, 50)
+    n = n + 50
+    pul = select(2, W.K.call('gate', 'puller_of'))
+  until (pul and pul[6]) or n >= 1500
+  T.eq(pul and pul[6], 'dfllm-levers', 'citizen 6 a puller in his room')
+  run(W, 100)
+  T.ok(S.bstate(W, 'O1') ~= 'up', 'old code: dropped as a puller in his room, raised onto his path')
+  local ok, nu = W.K.call('gate', 'not_up')
+  local why
+  for _, x in ipairs(ok and nu or {}) do if x.bridge == 'O1' then why = x.why end end
+  T.ok(why and why:find('citizen 6 walking onto it in 2 steps', 1, true), tostring(why))
 end)
 
 T.done()
