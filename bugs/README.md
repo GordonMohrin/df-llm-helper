@@ -388,6 +388,7 @@ Related: FR-xx, BUG-xx
 | [BUG-374](BUG-374-seal-says-nothing-to-close-while-status-names-ways-in.md) | fixed (offline, live-untested) | medium | Run 16d: seal at=last 'nothing to close' beside open ways in (old snapshot closes, counted ways without tiles) | dfpilot/cmd |
 | [BUG-375](BUG-375-perimeter-opens-again-every-year-and-holds-the-pop-cap.md) | fixed (offline, live-untested) | medium | Run 16d: saplings reopen the perimeter every year; pop cap held beside a queued seal | dfpilot/cmd, lua/readiness |
 | [BUG-376](BUG-376-audit-bypass-no-wall-tile-no-fix.md) | fixed (offline, live-untested) | low | Run 16d/16b: audit bypass 'no wall tile on the route' names no fix or waiver | dfpilot/bp/topo, cmd, brief, plan |
+| [BUG-380](BUG-380-bridge-crushes-a-soldier-walking-to-his-station-in-breach.md) | fixed (offline, live-untested) | high | Run 16d i4: B2 crushed soldier 26395 walking to his station (BREACH, no hostile); walkers 7+ steps out were let go, stations on a level beside a bridge ignored | lua/gate, stations |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

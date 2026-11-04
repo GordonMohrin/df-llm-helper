@@ -117,6 +117,9 @@ M.PATH_STEPS = 20
 -- 20 steps out, BREACH 'B1 not up at T+900', 60+ dead each): in SIEGE/BREACH a raise waits only for walkers within
 -- PATH_SIEGE steps of the footprint; with a hostile within force_near only for units on it (BUG-310)
 M.PATH_SIEGE = 6
+-- BUG-380: the hostile distance (tiles to the footprint) from which a SIEGE/BREACH raise lets walkers farther than PATH_SIEGE
+-- steps go (siege's own 30-tile rule for raising); no visible hostile that near = the full PATH_STEPS hold
+M.HURRY_NEAR = 30
 M.PATH_R = 24
 -- BUG-335 review: a unit on a stair or ramp up to the bridge stands on another z level (fp_dist nil); the census pass
 -- also keeps those within PATH_R tiles (x/y) and PATH_Z levels of the footprint, for their paths only (their path steps
@@ -1390,7 +1393,14 @@ local function holders(K, name, fp, sc, dir)
     end
   end
   local seen = {}
-  local lim = (dir == 'up' and FORCE_MODES[K.mode()]) and M.PATH_SIEGE or nil   -- Hotfix: only near walkers in a fight
+  -- Hotfix: only near walkers hold a raise in a fight. BUG-380 (Run 16d i4 BREACH, 0 visible hostiles: soldier 26395 walked
+  -- 9 tiles on to B2 in the ~100 ticks it moved, the walkers 7..20 steps out being let go): that holds only with a hostile
+  -- in sight within HURRY_NEAR tiles of this bridge; with none, nothing is worth a crush and every walker PATH_STEPS out holds
+  local lim
+  if dir == 'up' and FORCE_MODES[K.mode()] then
+    local hd = hostile_dist(K, name, fp)
+    if hd >= 0 and hd <= M.HURRY_NEAR then lim = M.PATH_SIEGE end
+  end
   for i, e in ipairs(hold) do
     seen[e.id] = true
     if cby[e.id] and e.d > 0 then hold[i] = cby[e.id] end   -- beside it AND walking onto it: the crosser (drop_own keeps it)

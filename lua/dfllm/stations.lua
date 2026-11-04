@@ -6,10 +6,11 @@
 -- the squad at its station held the core seal down.
 -- Rules (military applies them wherever it picks a station: postures, siege's sortie gathering point, the re-station
 -- of a squad that holds a raise):
---   clearance   a station lies more than `clear` tiles (Chebyshev, same z) from every manifest bridge footprint:
+--   clearance   a station lies more than `clear` tiles (Chebyshev) from every manifest bridge footprint:
 --               clear = gate.MARGIN (1) + stations.spread (config/reflex.json, default 1: DF stands a squad's soldiers
 --               on the tiles around its station point, so a station two tiles from a footprint still puts soldiers
---               into the ring). A footprint on another z never holds a station.
+--               into the ring). BUG-380: a footprint up to ZREACH (3) levels above or below holds it by the x/y
+--               distance too (the stair joins the levels); before, a footprint on another z never did.
 --   inner side  a replacement lies on the inner side of every footprint that held the station: the side with the
 --               deepest manifest zone around the footprint (Z1 1, Z2 and killboxes 2, Z3 3, Z4 4: O1 -> the bailey,
 --               B1 -> the gatehouse, B2 -> the core), else the side the station lay on, else farther from the map
@@ -63,12 +64,24 @@ function S.dist(fp, x, y, z)
   return math.max(dx, dy)
 end
 
+-- BUG-380 (Run 16d i4 B2: stations.b2 76,115,134 lay 2 tiles from the footprint 77..79,113,137 three levels down, the core
+-- stair at 78,115 between them: S.dist said 'another level, no bridge'; soldiers going to and from it crossed B2 all the
+-- time, one was crushed by its raise): a station also counts as near a footprint on a level up to ZREACH levels away, by
+-- the x/y distance (the stair a few tiles off the footprint joins the levels)
+S.ZREACH = 3
+function S.sdist(fp, x, y, z)
+  if z < fp[3] - S.ZREACH or z > fp[6] + S.ZREACH then return nil end
+  local dx = x < fp[1] and fp[1] - x or (x > fp[4] and x - fp[4] or 0)
+  local dy = y < fp[2] and fp[2] - y or (y > fp[5] and y - fp[5] or 0)
+  return math.max(dx, dy)
+end
+
 -- the bridges that hold p: {{name, fp, d, need}} with d <= need (need = need_by[name], else clear)
 function S.blockers(brs, p, clear, need_by)
   local r = {}
   for _, b in ipairs(brs) do
     local need = need_by and need_by[b.name] or clear
-    local d = S.dist(b.fp, p.x, p.y, p.z)
+    local d = S.sdist(b.fp, p.x, p.y, p.z)
     if d and d <= need then r[#r + 1] = {name = b.name, fp = b.fp, d = d, need = need} end
   end
   return r
@@ -206,7 +219,7 @@ function S.relocate(man, brs, p, blk, o)
   local function ok(x, y, z)
     for _, b in ipairs(brs) do
       local need = o.need_by and o.need_by[b.name] or o.clear
-      local d = S.dist(b.fp, x, y, z)
+      local d = S.sdist(b.fp, x, y, z)                     -- BUG-380: a level above or below counts too
       if d and d <= need then return false end
     end
     for _, f in ipairs(sides) do if not f(x, y, z) then return false end end
