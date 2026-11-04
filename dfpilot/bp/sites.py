@@ -59,7 +59,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 3                            # BUG-346: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 4                            # BUG-346/359: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -249,6 +249,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     elif tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
         cands = _dry(cands, manifest)                      # BUG-130: never again into a recorded breach
+        cands = _flooded(cands, snap, manifest, p, rects)  # BUG-359: the water and aquifer levels under the shaft
     elif tpl in mine.BUILD:
         cands = _explore(snap, p, rects, bad, hid, mk, manifest, wet)
     else:
@@ -258,7 +259,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     if aqwell:
         cands = aquifer_well(cands, snap, manifest)         # BUG-262: the basin on an aquifer level, the room dry
     elif tpl not in aquifer.BUILD:                          # a shaft passes the aquifer levels: that is its point
-        cands = aquifer_ok(cands, tpl, p, rects, manifest)  # FR-95: the levels the kernel saw damp or wet
+        cands = aquifer_ok(cands, tpl, p, rects, manifest, snap)  # FR-95/BUG-359: the levels known damp or wet
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
     cands = reachable(cands, snap, tpl)                     # BUG-352: the citizens' walk group (snapshot wg)
@@ -276,8 +277,10 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
             if len(out) == n:
                 break
     if free is not None and cands and not out:
-        raise ValueError(f"{tpl}: all {taken} candidate site(s) lie on or beside placed projects (bp.cancel frees a "
-                         "parked one's tiles)")
+        held = sorted(getattr(free, "held", None) or ())
+        raise ValueError(f"{tpl}: all {taken} candidate site(s) lie on or beside placed projects"
+                         f"{' (' + ', '.join(held[:4]) + ')' if held else ''} (bp.cancel frees a parked one's tiles; a "
+                         "seal's cancel drops only its unbuilt pieces)")
     return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"],
              "why": c["why"] + (f"; walk group {c['walk']}" if "walk" in c else ""),
              **({"water": c["water"]} if "water" in c else {}),
@@ -690,12 +693,32 @@ def aquifer_levels(manifest: dict | None) -> set[int]:
     return {int(z) for z in (manifest or {}).get("aquifer_levels") or [] if isinstance(z, int) and not isinstance(z, bool)}
 
 
-def aquifer_ok(cands: list, tpl: str, p: dict, rects: dict, manifest: dict | None) -> list:
+def snapshot_aquifer(snap: dict | None) -> dict[int, int]:
+    """BUG-359: {z: revealed tiles with the aquifer flag} of a sites export (snapshot `aqz`; hidden tiles never count)."""
+    out: dict[int, int] = {}
+    for k, n in ((snap or {}).get("aqz") or {}).items():
+        try:
+            z = int(str(k)[1:])
+        except ValueError:
+            continue
+        if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+            out[z] = n
+    return out
+
+
+def known_aquifer(snap: dict | None, manifest: dict | None) -> set[int]:
+    """BUG-359 (Run 16c: 'light aquifer' at embark, then heavy_aquifer at z118, a lake at z120): every level known wet
+    without digging first: the manifest's aquifer_levels (the kernel saw damp or wet), the levels with a revealed
+    aquifer tile on the snapshot (aqz) and the wet layers the recorded breaches show (`_breach_layers`)."""
+    return aquifer_levels(manifest) | set(snapshot_aquifer(snap)) | set(_breach_layers(manifest))
+
+
+def aquifer_ok(cands: list, tpl: str, p: dict, rects: dict, manifest: dict | None, snap: dict | None = None) -> list:
     """FR-95: rooms keep off the aquifer levels and off the level right below one (water drips from an aquifer ceiling;
     one dry solid level stays between an aquifer and a room under it); shafts (explore) may pass. fortcore p.aquifer =
     above: its deepest level above every aquifer level; = pass: its deepest level at least one dry level below them;
     '' as before (not filtered)."""
-    aq = aquifer_levels(manifest)
+    aq = known_aquifer(snap, manifest)
     if not aq or tpl in mine.BUILD:
         return cands
     if tpl == "fortcore":
@@ -1083,7 +1106,10 @@ def _fortcore(snap, rects, bad, hid, mk, wet_above=None):
     wet = _Pref(snap, lambda c: c in WET)
     under = {w: lst for w, lst in rects.items() if w < 0}
     g = Graph(snap)
-    wsteps = water_steps(g, _water_bodies(snap, 8))       # a brook, river or lake, not a puddle
+    bodies = _water_bodies(snap, 8, edge=True)             # a brook, river or lake, not a puddle
+    wsteps = water_steps(g, bodies)
+    nwet = sum(row.count(c) for z in range(z0, z1 + 1) for row in rows[f"z{z}"] for c in "~w")
+    none = _no_water(snap, bodies, nwet)                   # BUG-360: why there is no water to walk to
     out = []
     step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 else 1
     for z in range(z0, z1):
@@ -1108,7 +1134,7 @@ def _fortcore(snap, rects, bad, hid, mk, wet_above=None):
                     steps = wsteps.get(g.idx((ax, ay, z)))
                     score = 1000 - uneven // 4 - 40 * water - 30 * missing - (100 if margin < 5 else 0) \
                         + water_bonus(steps)
-                    near = f"water {steps} steps" if steps is not None else "no water reachable"
+                    near = f"water {steps} steps" if steps is not None else none
                     out.append({"anchor": [ax, ay, z], "rot": rot, "score": max(score, 0),
                                 "box": (ax - 6, ay - 6, z, ax + 6, ay + 6, z), "dig": box,
                                 "why": f"rot{rot}, {near}, {uneven} uneven and {water} water surface tiles, "
@@ -1135,6 +1161,82 @@ def breach_points(manifest: dict | None) -> list[tuple[tuple[int, int, int], str
     return out
 
 
+def _breach_layers(manifest: dict | None) -> dict[int, str]:
+    """BUG-130/359: {z: label} of the levels the recorded breaches show as a wet layer (an aquifer spans the whole
+    level): damp or water stops of LAYER_MIN projects, or one heavy_aquifer stop (Run 16c: its label is `heavy_aquifer
+    x,y,z`, which the old first-word test never took for a wet layer, so a new core a few tiles away dug into it again)."""
+    stops: dict[int, int] = {}
+    heavy: dict[int, str] = {}
+    for (_, _, z), lbl in breach_points(manifest):
+        why = lbl.split()[0]
+        if why in ("damp", "water"):
+            stops[z] = stops.get(z, 0) + 1
+        elif why == "heavy_aquifer":
+            heavy.setdefault(z, lbl)
+    out = {z: f"wet level z{z} ({n} damp/water stops)" for z, n in stops.items() if n >= LAYER_MIN}
+    for z, lbl in heavy.items():
+        out[z] = f"wet level z{z} (heavy aquifer: breach {lbl})"
+    return out
+
+
+FLOOD_R = 4                 # BUG-359: tiles around a deep dug rect in which revealed water or a revealed cavern counts
+FLOOD_W = -3                # BUG-359: dug levels this deep below the anchor or deeper (a brook bed lies at -1/-2)
+AQ_PENALTY = 250            # BUG-359: score per known aquifer level the dig passes (light: it can still be dug damp)
+CAV_PENALTY = 150           # BUG-359: score per level with a revealed cavern within FLOOD_R of the dig
+
+
+def _flooded(cands: list, snap: dict, manifest: dict | None, p: dict, rects: dict) -> list:
+    """BUG-359 (Run 16c i3: every fortcore site broke into water, 'breach:heavy_aquifer' at A74_92_125_3, 'breach:cavern_lake'
+    at A88_92_125_3, the ranking only said 'light aquifer'): the levels under the anchor down to the core are rated from
+    the snapshot and the manifest, like `_dry` rates the recorded breaches. A site is dropped when revealed water lies
+    within FLOOD_R of a deep dug rect (a lake or pool beside the shaft); it is penalized (AQ_PENALTY per level) for each
+    known aquifer level the dig passes (`known_aquifer`) and (CAV_PENALTY) for a revealed cavern near it. The reason line
+    names them (`aquifer at z120,z122`, `cavern near z120`) or says that nothing is known (hidden rock is unknown).
+    p.aquifer above/pass chooses its levels itself (aquifer_ok); ValueError when every site meets water."""
+    if not cands or p.get("aquifer", ""):
+        return cands
+    x0, y0, _, x1, y1, _ = snap["bbox"]
+    wmin, wmax = min(rects), max(rects)
+    light = known_aquifer(snap, manifest)
+    wet = _Pref(snap, lambda c: c in WET)
+    cav = _Pref(snap, points=[tuple(q) for q in (snap.get("marks") or {}).get("cavern", [])])
+    deep = [(w, lst) for w, lst in rects.items() if w <= FLOOD_W]
+    out, hit = [], []
+    for c in cands:
+        ax, ay, az = c["anchor"]
+        wat, cvz = set(), set()
+        for w, lst in deep:
+            for r in lst:
+                a, b, d, e = _rot_rect(r, ax, ay, c["rot"])
+                a, b, d, e = max(a - FLOOD_R, x0), max(b - FLOOD_R, y0), min(d + FLOOD_R, x1), min(e + FLOOD_R, y1)
+                if a > d or b > e:
+                    continue
+                if wet.count(a, b, d, e, az + w):
+                    wat.add(az + w)
+                if cav.count(a, b, d, e, az + w):
+                    cvz.add(az + w)
+        if wat:
+            lbl = f"water below at z{','.join(str(z) for z in sorted(wat))}"
+            if lbl not in hit:
+                hit.append(lbl)
+            continue
+        aq = sorted(z for z in light if az + wmin <= z <= az + wmax)
+        notes = []
+        if aq:
+            notes.append("aquifer at " + ",".join(f"z{z}" for z in aq))
+        if cvz:
+            notes.append("cavern near " + ",".join(f"z{z}" for z in sorted(cvz)))
+        if not notes:
+            notes.append(f"no aquifer or water known on z{az + wmin}-{az + wmax} (hidden rock is unknown)")
+        out.append({**c, "score": max(c["score"] - AQ_PENALTY * len(aq) - CAV_PENALTY * len(cvz), 0),
+                    "why": c["why"] + "; " + "; ".join(notes)})
+    if not out:
+        raise ValueError(f"fortcore: no site clear of water below: every site's deep dig lies within {FLOOD_R} tiles of "
+                         f"revealed water ({'; '.join(hit[:3])}{' +more' if len(hit) > 3 else ''}); another part of the "
+                         "map, or p.aquifer=pass (core below the aquifer)")
+    return out
+
+
 def _dry(cands: list, manifest: dict | None) -> list:
     """BUG-130 (Run 9, Run 14 y707: the fortcore stopped as breach:damp and was never re-sited): the fortcore candidates
     whose dig (the full box over all its levels, `dig`) stays more than BREACH_R tiles (x/y) away from every recorded
@@ -1146,17 +1248,13 @@ def _dry(cands: list, manifest: dict | None) -> list:
     if not pts or not cands:
         return cands
     R = BREACH_R
-    wet: dict[int, int] = {}
-    for (_, _, z), lbl in pts:
-        if lbl.split()[0] in ("damp", "water"):
-            wet[z] = wet.get(z, 0) + 1
-    layers = {z: n for z, n in wet.items() if n >= LAYER_MIN}
+    layers = _breach_layers(manifest)
 
     def near(c):
         x0, y0, z0, x1, y1, z1 = c["dig"]
         lay = next((z for z in sorted(layers) if z0 <= z <= z1), None)
         if lay is not None:
-            return f"wet level z{lay} ({layers[lay]} damp/water stops)"
+            return layers[lay]
         return next((lbl for (x, y, z), lbl in pts
                      if z0 - 1 <= z <= z1 + 1 and x0 - R <= x <= x1 + R and y0 - R <= y <= y1 + R), None)
     out, hit = [], []
@@ -1230,13 +1328,29 @@ def _ring_ok(at, marks, x, y, z, wet_above=True) -> bool:
     return True
 
 
-def _water_bodies(snap: dict, min_tiles: int) -> set:
+def _water_bodies(snap: dict, min_tiles: int, edge: bool = False) -> set:
     """Revealed drinkable water tiles that belong to a body of at least `min_tiles` tiles (8-connected per level,
-    and across levels): a brook, river or lake, never a 2-tile well sump."""
-    return {t for comp in _water_components(snap, min_tiles) for t in comp}
+    and across levels): a brook, river or lake, never a 2-tile well sump. `edge` (BUG-360): a smaller body that touches
+    the snapshot's x/y border counts too (the box cuts it off, it goes on outside)."""
+    return {t for comp in _water_components(snap, min_tiles, edge) for t in comp}
 
 
-def _water_components(snap: dict, min_tiles: int) -> list[list]:
+def _no_water(snap: dict, bodies: set, nwet: int) -> str:
+    """BUG-360 (Run 16b Ostgate: 'no water reachable, 0 water surface tiles' with a brook in the embark rectangle): the
+    fortcore reason line when no walkable tile reaches revealed water. The sites box is the fort's pieces plus a margin
+    (or the surface around the map centre), not the embark: it said nothing about where the brook lay. Now it names
+    the box and whether any water was inside it at all."""
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    box = f"x{x0}-{x1} y{y0}-{y1} z{z0}-{z1}"
+    if bodies:
+        return f"no water reachable (revealed water in the snapshot box {box}, but no walking route to it)"
+    if nwet:
+        return f"no water reachable (only {nwet} water tile(s) in the snapshot box {box}: a puddle, not a brook)"
+    return (f"no water reachable (none revealed inside the snapshot box {box}; a brook beyond it is not seen: "
+            "dfllm cmd snapshot purpose=sites with a bbox that covers the embark)")
+
+
+def _water_components(snap: dict, min_tiles: int, edge: bool = False) -> list[list]:
     """The bodies of _water_bodies one by one (each a list of tiles, in a stable order)."""
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
     wet = set()
@@ -1260,7 +1374,7 @@ def _water_components(snap: dict, min_tiles: int) -> list[list]:
                         seen.add(n)
                         comp.append(n)
                         dq.append(n)
-        if len(comp) >= min_tiles:
+        if len(comp) >= min_tiles or (edge and any(t[0] in (x0, x1) or t[1] in (y0, y1) for t in comp)):
             keep.append(comp)
     return keep
 

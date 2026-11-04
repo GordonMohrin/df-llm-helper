@@ -367,6 +367,9 @@ Related: FR-xx, BUG-xx
 | [BUG-353](BUG-353-bp-cancel-leaves-the-dig-designations-in-the-map.md) | fixed (offline, live-untested) | high | Run 16c: two bp.cancel + re-place left ~1580 dig designations of the cancelled fortcore projects in the map, the fort starved | runner.lua |
 | [BUG-354](BUG-354-propose-in-year-1-demands-rooms-before-the-core-is-dug.md) | fixed (offline, live-untested) | medium | Run 16c: propose in year 1 drafts farms/dining/bedrooms (ERROR no soil marks, no refuge) while the placed fortcore still digs | plan.py |
 | [BUG-355](BUG-355-fort-name-unreadable-before-save-as.md) | fixed (offline, live-untested) | low | Run 16c: the new fort's name was not readable before save-as | tools/embark |
+| [BUG-359](BUG-359-site-ranking-ignores-aquifer-and-cavern-water-under-the-shaft.md) | fixed (offline, live-untested) | critical | Run 16c: every fortcore site broke into a heavy aquifer or a cavern lake, the ranking said nothing; heavy_aquifer never counted as a wet layer; the ranking now rates the levels under the anchor and names them | sites.py, snapshot.lua, schema.py |
+| [BUG-360](BUG-360-bp-sites-fortcore-no-water-reachable-with-a-brook-in-the-embark.md) | fixed (offline, live-untested) | medium | Run 16b: 'no water reachable' with a brook in the embark rectangle (the sites box did not cover it); the line names the box, a cut-off body counts | sites.py |
+| [BUG-361](BUG-361-the-year-plan-seal-sits-on-the-fortcore-site-and-blocks-it.md) | fixed (offline, live-untested) | high | Run 16c: the seal on the dead cores' tunnels held every ranked fortcore site; the ranking keeps only free sites and names the holders | cmd.py, sites.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
