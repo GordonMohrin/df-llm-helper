@@ -909,6 +909,12 @@ def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
     if m:
         out.append(f"mil {m['squads']}sq {m['soldiers']}sol worn {m['worn']}% cv {m['cv']} metal {m['metal_pct']}%"
                    f" station {m['on_station']}")
+        rel = m.get("rel")
+        if rel:                                # BUG-327: soldiers who left without a swap (last time, this boot)
+            now = ctx.now_tick()               # within a month in the core part, older ones in the detail
+            recent = isinstance(now, int) and now - rel["t"] <= 33600
+            (out if recent else extra).append(f"soldiers released: {rel['n']} ({rel['why']}) from {rel['sq'] or '?'} "
+                                              f"{_ago(ctx, rel['t'])} ago")
         kit = m.get("kit")
         if kit and kit.get("n"):               # FR-100 (G18): armor + a weapon per soldier, wooden ones in training
             extra.append(f"gear: {kit['full']}/{kit['n']} soldiers fully equipped (armor {kit['armor']}, weapon "

@@ -77,14 +77,27 @@ T.test('Run 11 siege 3: never from the refuge, never a hurt, thirsty or outside 
   T.eq(alive(W, A), 5)
 end)
 
-T.test('Run 11 siege 3: the tools-first rule (fewer than 3 axes) does not leave the core without melee in a siege',
-       function()
-  -- old code: melee targets 0 with fewer than TOOLS_MIN axes: A and B are never refilled
+T.test('Run 11 siege 3: fewer than 3 axes do not leave the core without melee in a siege', function()
+  -- old code: melee targets 0 with fewer than TOOLS_MIN axes: A and B are never refilled. BUG-327: the tools no longer
+  -- lower any target, so B keeps its own (1) too
   local W, A, B = siege_world()
   W.set_census('i', {tick = 0, w_axe = 1, w_pick = 5})
   W.run(1300, {skip = 9})
   T.eq(alive(W, A), 5, 'A at HOLD_MIN')
-  T.eq(alive(W, B), 0, 'B has no target without axes: only the hold minimum')
+  T.eq(alive(W, B), 1, 'B back to its target')
+end)
+
+T.test('BUG-327: after the siege the refilled squads stay in PEACE although axes are short (old code: all released)',
+       function()
+  local W, A, B = siege_world()
+  W.set_census('i', {tick = 0, w_axe = 1, w_pick = 5})
+  W.run(1300, {skip = 9})
+  T.eq(alive(W, A), 5)
+  W.K.set_mode('RECOVERY', 'test')
+  W.K.set_mode('PEACE', 'test')
+  W.run(3600 * 2, {skip = 9})
+  T.eq(#logs(W, 'soldiers released'), 0, 'no tools release')
+  T.ok(alive(W, A) >= 2 and alive(W, B) == 1, 'A ' .. alive(W, A) .. ', B ' .. alive(W, B))
 end)
 
 T.test('Run 11 siege 3: a squad at or above half its target gets no top-up in a siege; nobody in the core: a ' ..

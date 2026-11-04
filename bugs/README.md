@@ -338,6 +338,7 @@ Related: FR-xx, BUG-xx
 | [BUG-324](BUG-324-found-water-never-becomes-accepted-water.md) | fixed (offline, live-untested) | high | Run 15: water the scan found never becomes accepted water: no hospital, no GiveWater source | water.lua, act.lua |
 | [BUG-325](BUG-325-water-scan-reach-from-one-citizen.md) | fixed (offline, live-untested) | medium | Run 15: the water scan asks the walk from one citizen, one in another walk group hides every well spot | water.lua |
 | [BUG-326](BUG-326-drills-and-alerts-empty-hunters-and-fishers.md) | fixed (offline, live-untested) | high | Run 15c: drills at 30-42 food days and every alert empty the hunters and fishers | drill.lua, economy.lua |
+| [BUG-327](BUG-327-soldiers-released-for-the-tools.md) | fixed (offline, live-untested) | critical | Run 15c: fewer than 3 axes or picks release every melee soldier each PEACE upkeep, the squads are never refilled | military.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

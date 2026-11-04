@@ -1,5 +1,21 @@
 # CHANGELOG dfpilot
 
+## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
+- **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
+  at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or
+  picks the melee squads dropped out of the wanted list, at phase < P5 the total became 0 with `zero = 'tools'`) and :3561
+  (M.step released every melee soldier in each PEACE upkeep); a SIEGE/drill refilled A to HOLD_MIN, the next PEACE emptied it again.
+- **What changed:** M.targets keeps every target when tools are short (`short` is a report only); M.step releases only for
+  `zero = 'phase'`. The weapon guard (BUG-023) keeps the axes and picks with the civilians; positions without a spare weapon
+  train with wooden ones (G18). New event SOLDIERS_RELEASED (B, military: n, why phase/over_target/rotation, squads) for every
+  leave without a swap, state `mil.rel` {n, why, t, sq}, status `soldiers released: 8 (phase) from AB 2.1 d ago`.
+- **Tests (fail on 9b6f614):** tests/lua/test_military.lua (2 new, the phase test checks event and state),
+  tests/lua/test_military_refill.lua (siege with 1 axe: B back to its target; the squads stay in PEACE after the siege),
+  tests/test_bug327_soldiers_released.py.
+- **Live check:** Inkintense after a kernel reload: no `soldiers released (tools)`, squads A/B fill to their targets in PEACE,
+  `squad A: N positions without a weapon (... axes and picks stay with the civilians)` instead; woodcutters and miners keep
+  their tools. Uncertain: a soldier who already carries the only axe may keep it until his spec change is honoured by DF;
+  economy orders picks but no axes (open).
 ## Run 15b bridge traps: a stone-fall lane behind the drawbridges of a fort without a door way in (BUG-317, 2026-10-29; offline, live-untested)
 - **Why:** Earthboat (entered over O1/B1 only) y383-385: `bp sites traps` -> `no way in left to trap (0 door(s) ...)`, `traps 0`,
   plan propose never drafted traps in P5 (G14 red). Root cause dfpilot/bp/traps.py:247 `ways_in` reads door tiles only;

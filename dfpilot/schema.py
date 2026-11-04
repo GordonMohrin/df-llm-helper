@@ -773,6 +773,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # window's months ('9-11'), left = swaps still to follow on the next days, worn = the army's worn %, edge = the month
     # (0-11) the window closed in
     "MILITIA_ROTATED": ("B", "military", _d("squad:s out:i into:i", "size:i eligible:i lo:i hi:i win:s left:i worn:i edge:i")),
+    # BUG-327 (Run 15c Inkintense: '8 soldiers released (tools)', mil 0 at pop 53, nothing said so): n soldiers left the
+    # squads (keys) without a swap; why = phase (a known phase before P2: every squad emptied), over_target / rotation (one
+    # member over the target + KEEP_EXTRA). The tools no longer release anybody
+    "SOLDIERS_RELEASED": ("B", "military", _d("n:i why:s", "squads:sa")),
     # Run 11: economy's glass chain for strange moods is blocked: why = no_sand (no revealed sand floor), no_bags (no
     # spare cloth/leather or shop for ConstructBag), no_fuel (no charcoal and no wood furnace or wood, no magma glass
     # furnace); raw/cut = the raw and cut glass wanted; once per set of blockers (util/cadence). BUG-303: sand_invalid = DF
@@ -1080,6 +1084,9 @@ STATE = Obj(
                          # Run 11: the melee squads follow the gear (military.gear_fill): sets, melee filled to, melee
                          # wanted, crossbow positions added while metal is short
                          "cap": Obj(req={"sets": NAT, "melee": NAT, "want": NAT, "xbow": NAT}),
+                         # BUG-327: the last soldiers who left without a swap this boot: n, why (SOLDIERS_RELEASED), t =
+                         # the absolute tick, sq = the squad keys ('AB')
+                         "rel": Obj(req={"n": NAT, "why": Str(maxbytes=24), "t": NAT, "sq": Str(maxbytes=8)}),
                          # FR-100 (G18): n soldiers, full = armor + a weapon, armor = every armor slot worn, weapon = a
                          # weapon in hand, wood = a training weapon in hand, tr = squads on the training policy
                          "kit": Obj(req={"n": NAT, "full": NAT, "armor": NAT, "weapon": NAT, "wood": NAT, "tr": NAT}),
