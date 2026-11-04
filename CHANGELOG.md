@@ -1,5 +1,12 @@
 # CHANGELOG dfpilot
 
+## Core stage order, the BUG-399 guard, corpses on build sites (BUG-403 to BUG-405, 2026-11-04; offline, live-untested)
+- **Why:** Run 16: i1 drafts had fortcore stage 3 before stage 2; i2 Ostgate could not draft the surface core or bedrooms (the BUG-399 guard
+  fired with the surface at z131 under a z138 peak); a trap site held a corpse for 36 days.
+- **BUG-403:** `plan.core_stage_order`: the fortcore builds a draft adds run in ascending stage order.
+- **BUG-404:** `sites.sky_over_floor`: the BUG-399 guard fires only when the snapshot shows no open sky above any floor tile.
+- **BUG-405:** economy `site_items`/`jfree`: a stranger's corpse (or part) on a construction footprint is unforbidden and marked dump.
+- **Tests:** tests/test_bug403_405_plan_order_guard.py, tests/lua/test_economy_sites.lua.
 ## Surface core for an aquifer world, area-only wet layers, an applicable propose (BUG-387 to BUG-389, 2026-11-04; offline, live-untested)
 - **Why:** Run 16 region1 (aquifer nearly everywhere): no fort got a dug fortcore ('no dry fortcore site ... (wet level z130)' at every depth in i2, depth=1
   breached heavy_aquifer at 4 % in i1, sites 1-6 steps from water in i3); every room template hangs on the dug Z4 floor, so office, dining, tavern and bedrooms

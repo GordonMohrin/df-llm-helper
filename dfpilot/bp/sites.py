@@ -255,7 +255,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _surface_farms(snap, p, manifest)
     elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
         cands = _surface_shops(snap, p, manifest or {}, tpl)
-        if not cands and surface_top_floor(snap) >= SURFACE_TOP_MIN:
+        if not cands and surface_top_floor(snap) >= SURFACE_TOP_MIN and not sky_over_floor(snap):
             raise ValueError(f"{tpl}: no valid site on the snapshot: its top level z{snap['bbox'][5]} holds "
                              f"{surface_top_floor(snap)} floor tiles but no level above it to show open sky (BUG-399: a sites "
                              "export from an older kernel ends at the surface; dfllm reload, then `bp sites --fresh`)")
@@ -999,6 +999,26 @@ def surface_top_floor(snap: dict) -> int:
         return sum(str(r).count(".") for r in snap["rows"][f"z{snap['bbox'][5]}"])
     except (KeyError, TypeError, IndexError):
         return 0
+
+
+def sky_over_floor(snap: dict) -> bool:
+    """BUG-404 (Run 16b i2 Ostgate: the BUG-399 guard fired on a snapshot z127..z138 whose surface lies at z131 and whose top
+    level z138 is a mountain peak with 1865 floor tiles; `surfacecore`, bedrooms, dining and tavern were refused 'no level above
+    it to show open sky' for days while `office surface=1` found 4 sites): True when the snapshot shows open sky ('_') right above a
+    floor ('.') anywhere. Then the export does reach above the surface, the guard's reading (the box ends AT the surface) is wrong,
+    and an empty answer is a real 'no valid site'."""
+    try:
+        z0, z1 = snap["bbox"][2], snap["bbox"][5]
+        for z in range(z0, z1):
+            lo, up = snap["rows"].get(f"z{z}"), snap["rows"].get(f"z{z + 1}")
+            if not lo or not up:
+                continue
+            for rl, ru in zip(lo, up):
+                if any(a == "." and b == "_" for a, b in zip(rl, ru)):
+                    return True
+    except (KeyError, TypeError, IndexError, AttributeError):
+        return False
+    return False
 
 
 def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") -> list[dict]:
