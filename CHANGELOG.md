@@ -1,5 +1,25 @@
 # CHANGELOG dfpilot
 
+## Run 15 status: the save folder from DF's own path, one ways-in list, follow takes over from old code (BUG-332..334, 2026-11-04; offline, live-untested)
+- **Why:** i2/i4 29.10.: `dfllm save` QUICKSAVE_FAILED ('the newest save is a-run15-guildcleans', an %APPDATA% folder) while DF
+  in portable mode had written `autosave 1`/`autosave 2` to `<DF>/save` (supervise.py:107-108 read %APPDATA% only, BUG-332).
+  Drillchamber y377: status named 3 saplings as ways in, `inspect entrances key=refresh` 120,126,144, `seal at=last` refused the
+  saplings `its tile is not on the snapshot` (seal.lua:5458 answered with the openings' nearest tiles, status reads
+  entrance_doors' gap tiles; cmd.py:1110 left a sapling off the snapshot out, BUG-333). Earthboat: `follow already runs` (pid
+  22684, OLD CODE), the player did not know `--takeover` (wake.py:1351, BUG-334).
+- **What changed:** `supervise.saves_root`: `$DFLLM_SAVES`, `<runtime>/SAVEDIR` (the kernel writes the parent of
+  `dfhack.getSavePath()` at boot, `kern.save_root`), `<DF>/save` with `prefs/portable.txt`, else %APPDATA%; `QUICKSAVE_FAILED`
+  names the folder. `inspect what=entrances`: `data.ways` and the message name the ways in as status does. `seal at=last`: a
+  sapling off the snapshot gets its piece on itself (BUG-323's rule). `.follow.lock` carries `code`; a new follow takes over from
+  an owner on other code by itself (`follow: pid N ran OLD CODE ...: taken over`), the same code is refused as before.
+- **Tests:** tests/test_bug332_save_root.py, tests/lua/test_bug332_save_root.lua, tests/lua/test_bug333_ways_one_source.lua,
+  tests/bp/test_bug333_sapling_off_snapshot.py, tests/test_bug334_follow_old_code.py; pytest 2750 passed, 1 skipped; Lua 199
+  suites 2104 passed; lint 0.
+- **Live check:** i2/i4 `dfllm save --dry-run` names `<DF>\save`, the next `dfllm save` is ok; after a kernel reload
+  `<DF>/dfllm-runtime/SAVEDIR`; `inspect what=entrances key=refresh` lists the same tiles as status; a new `dfllm follow` beside an
+  old one prints the OLD CODE takeover and the old one ends within 10 s. BUG-322 (Earthboat's PERIMETER OPEN in SIEGE) is live:
+  state SIEGE `ready.open 0`, no pd. Open: surface ways in under tree crowns (BUG-323 Open), not fixed.
+
 ## Run 15b bridge traps: a stone-fall lane behind the drawbridges of a fort without a door way in (BUG-317, 2026-10-29; offline, live-untested)
 - **Why:** Earthboat (entered over O1/B1 only) y383-385: `bp sites traps` -> `no way in left to trap (0 door(s) ...)`, `traps 0`,
   plan propose never drafted traps in P5 (G14 red). Root cause dfpilot/bp/traps.py:247 `ways_in` reads door tiles only;

@@ -338,6 +338,9 @@ Related: FR-xx, BUG-xx
 | [BUG-324](BUG-324-found-water-never-becomes-accepted-water.md) | fixed (offline, live-untested) | high | Run 15: water the scan found never becomes accepted water: no hospital, no GiveWater source | water.lua, act.lua |
 | [BUG-325](BUG-325-water-scan-reach-from-one-citizen.md) | fixed (offline, live-untested) | medium | Run 15: the water scan asks the walk from one citizen, one in another walk group hides every well spot | water.lua |
 | [BUG-326](BUG-326-drills-and-alerts-empty-hunters-and-fishers.md) | fixed (offline, live-untested) | high | Run 15c: drills at 30-42 food days and every alert empty the hunters and fishers | drill.lua, economy.lua |
+| [BUG-332](BUG-332-quicksave-check-looks-in-appdata.md) | fixed (offline, live-untested) | high | Run 15: `dfllm save` QUICKSAVE_FAILED: it looked in %APPDATA% while DF saves portably to <DF>/save | supervise.py, kern.lua, save.py |
+| [BUG-333](BUG-333-ways-in-status-vs-inspect-and-saplings-off-the-snapshot.md) | partly fixed (offline, live-untested): one ways-in list, saplings off the snapshot; open: surface ways in under tree crowns (BUG-323) | medium | Run 15b/c/d: status and inspect entrances name other ways in; seal at=last leaves a sapling off the snapshot out | seal.lua, cmd.py |
+| [BUG-334](BUG-334-follow-on-old-code-blocks-the-new-one.md) | fixed (offline, live-untested) | medium | Run 15: a follow on old code blocks the new one; players must know --takeover | wake.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

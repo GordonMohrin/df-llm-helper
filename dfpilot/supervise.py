@@ -86,7 +86,7 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 class Env:
     df: Path                       # DF install
     runtime: Path                  # <df>/dfllm-runtime
-    saves: Path                    # DF save folder (%APPDATA%/Bay 12 Games/Dwarf Fortress/save)
+    saves: Path                    # DF save folder (saves_root: <df>/save in portable mode, else %APPDATA%/...)
     backups: Path                  # backup root (own folders only)
     repo: Path                     # repo A (tools/win/vdesk_move.ps1)
     os: Any = None                 # process/window/dfhack hooks; WinOS by default, a fake in tests
@@ -101,13 +101,41 @@ class Env:
             self.os = WinOS(self.df, self.repo)
 
 
+SAVEDIR = "SAVEDIR"                # BUG-332: <runtime>/SAVEDIR, DF's save folder as the kernel reads it at boot
+PORTABLE = ("prefs", "portable.txt")
+
+
+def saves_root(df: Path, runtime: Path) -> tuple[Path, str]:
+    """BUG-332 (Run 15 i2/i4 29.10.: `dfllm save` said QUICKSAVE_FAILED 'the newest save is a-run15-guildcleans' while DF
+    had written 'autosave 1' to <df>/save: all four installs run in portable mode, the scan looked in %APPDATA%):
+    (DF's save folder, where it came from). In this order: DFLLM_SAVES; <runtime>/SAVEDIR (the kernel writes the parent
+    of dfhack.getSavePath() at boot: DF's own answer; a relative one is below <df>) when that folder exists;
+    <df>/prefs/portable.txt -> <df>/save (DF's portable mode); else %APPDATA%/Bay 12 Games/Dwarf Fortress/save."""
+    env = os.environ.get("DFLLM_SAVES")
+    if env:
+        return Path(env), "DFLLM_SAVES"
+    try:
+        line = (Path(runtime) / SAVEDIR).read_text(encoding="utf-8-sig").strip().splitlines()
+    except OSError:
+        line = []
+    if line and line[0].strip():
+        p = Path(line[0].strip())
+        p = p if p.is_absolute() else Path(df) / p
+        if p.is_dir():
+            return p, "kernel " + SAVEDIR
+    if Path(df).joinpath(*PORTABLE).is_file():
+        return Path(df) / "save", "portable mode (prefs/portable.txt)"
+    appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    return Path(appdata) / "Bay 12 Games" / "Dwarf Fortress" / "save", "%APPDATA%"
+
+
 def default_env() -> Env:
     from . import paths
     df = paths.df_dir()
-    appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    saves = os.environ.get("DFLLM_SAVES") or os.path.join(appdata, "Bay 12 Games", "Dwarf Fortress", "save")
+    runtime = paths.runtime_root()
+    saves, _src = saves_root(df, runtime)
     backups = os.environ.get("DFLLM_BACKUPS") or os.path.join(df.anchor or "C:\\", "df-backups", "dfllm")
-    return Env(df=df, runtime=paths.runtime_root(), saves=Path(saves), backups=Path(backups),
+    return Env(df=df, runtime=runtime, saves=saves, backups=Path(backups),
                repo=Path(__file__).resolve().parent.parent)
 
 

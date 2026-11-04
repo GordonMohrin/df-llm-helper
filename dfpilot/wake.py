@@ -1303,6 +1303,10 @@ def add_audit_parser(sub) -> None:
 # snapshot was audited twice, the second answer 'unknown snap' woke as AUTO_FAIL 15+ times, both wrote .follow.json):
 # one follow per save. <save>/.follow.lock {v, pid, start, hb}; a second follow refuses while the owner's pid lives and
 # its hb is younger than FOLLOW_LOCK_STALE_S, unless --takeover; an owner that finds another pid in the lock exits.
+# BUG-334 (Run 15b Earthboat: 'follow already runs' from pid 22684 on OLD CODE, the player did not know --takeover and
+# watched by polling): the lock carries the owner's code stamp (`code`, BUG-042); a follow whose CODE differs from the
+# owner's (the lock's code, else the owner's .follow.hb code: followers from before BUG-334) takes over by itself and
+# says so; the old one exits at its next beat (refresh_lock). Same code: refused as before (--takeover).
 FOLLOW_LOCK = ".follow.lock"
 FOLLOW_LOCK_STALE_S = 3 * FOLLOW_HB_EVERY_S
 
@@ -1348,6 +1352,27 @@ def lock_owner(save_dir: Path, now: float, alive: Callable[[int], bool] | None =
     return doc if (alive or pid_alive)(doc.get("pid")) else None
 
 
+def owner_code(save_dir: Path, owner: dict | None, now: float) -> str | None:
+    """BUG-334: the code stamp the lock's owner runs: the lock's `code`, else (a follower from before BUG-334) the code
+    of a fresh <save>/.follow.hb, which only the lock's owner writes (BUG-238); None when neither says."""
+    if not isinstance(owner, dict):
+        return None
+    c = owner.get("code")
+    if isinstance(c, str) and c:
+        return c
+    doc, age = files.read_follow_hb(save_dir, now)
+    c = (doc or {}).get("code")
+    return c if isinstance(c, str) and c and age is not None and age <= files.FOLLOW_STALE_S else None
+
+
+def old_code_owner(save_dir: Path, now: float, alive: Callable[[int], bool] | None = None) -> tuple[dict, str] | None:
+    """BUG-334: (owner, its code) when another follow holds the lock with other dfpilot code than this process
+    imported (CODE), else None."""
+    owner = lock_owner(save_dir, now, alive)
+    code = owner_code(save_dir, owner, now)
+    return (owner, code) if owner is not None and code is not None and code != CODE else None
+
+
 def acquire_lock(save_dir: Path, now: float, takeover: bool = False,
                  alive: Callable[[int], bool] | None = None) -> tuple[bool, dict | None]:
     """(True, None) when this process now holds <save>/.follow.lock; (False, owner) when another follow runs."""
@@ -1355,6 +1380,7 @@ def acquire_lock(save_dir: Path, now: float, takeover: bool = False,
     if owner is not None and not takeover:
         return False, owner
     files.write_json_atomic(Path(save_dir) / FOLLOW_LOCK, {"v": 1, "pid": os.getpid(), "start": int(now), "hb": int(now),
+                                                           "code": CODE,          # BUG-334
                                                            **({"took": owner.get("pid")} if owner else {})})
     return True, None
 
@@ -1368,7 +1394,7 @@ def refresh_lock(save_dir: Path, now: float, alive: Callable[[int], bool] | None
     start = doc.get("start") if isinstance(doc, dict) and doc.get("pid") == os.getpid() else None
     files.write_json_atomic(Path(save_dir) / FOLLOW_LOCK, {"v": 1, "pid": os.getpid(),
                                                            "start": start if isinstance(start, int) else int(now),
-                                                           "hb": int(now)})
+                                                           "hb": int(now), "code": CODE})       # BUG-334
     return None
 
 
@@ -1406,12 +1432,19 @@ class _Lock:
         if d != self.dir:
             release_lock(self.dir)
             self.dir = None
-            ok, owner = acquire_lock(d, now, self.takeover)
+            old = None if self.takeover else old_code_owner(d, now)    # BUG-334: an owner on old code is taken over
+            ok, owner = acquire_lock(d, now, self.takeover or old is not None)
             if not ok:
                 age = int(now - owner["hb"]) if isinstance(owner.get("hb"), (int, float)) else "?"
                 return (f"follow already runs (pid {owner.get('pid')}, beat {age}s ago) for {d.name}: this one exits; "
-                        f"stop that one, or start this one with --takeover")
+                        f"stop that one, or start this one with --takeover (dfllm follow --takeover)")
             self.dir, self.beat = d, now
+            if old is not None:
+                msg = (f"follow: pid {old[0].get('pid')} ran OLD CODE ({old[1]}, this one {CODE}): taken over, it exits "
+                       f"at its next beat")
+                print(msg, flush=True)
+                files.log_cli(d, "follow", "lock", {"takeover": "old_code"}, msg)
+                return None
             files.log_cli(d, "follow", "lock", {"takeover": self.takeover}, "holds .follow.lock")
             return None
         if now - self.beat >= FOLLOW_HB_EVERY_S:
