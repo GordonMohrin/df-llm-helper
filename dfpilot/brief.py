@@ -1051,6 +1051,12 @@ def sched_queue(sc: dict) -> list[str]:
         out.append(f"queued: {q['n']} behind {who or '?'}")
     if sc.get("pk"):
         out.append(f"{sc['pk']} parked (blocked for good: bp.cancel, PROJECT_BLOCKED)")
+    ip = sc.get("ip")
+    if isinstance(ip, dict) and ip.get("n"):          # BUG-328: set aside for want of progress, no runner slot
+        who = ", ".join(f"{i} {t} {d} d" for i, t, d in ip.get("by") or [])
+        first = (ip.get("by") or [[None]])[0][0]
+        out.append(f"set aside (no progress): {ip['n']}: {who or '?'}"
+                   + (f"; resume: dfllm cmd bp.resume proj={first} or bp.cancel" if first else ""))
     return out
 
 

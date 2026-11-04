@@ -491,7 +491,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # 22236 suspended by buildingplan: waits for building material x1'); walled also lists the doors replaced by walls
     # (BUG-044)
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
-                                                    "park:i parts:s")),
+                                                    "park:i parts:s idle:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
     # BUG-105: unreach = of the far bodies, those on a tile nobody can path to (corpse_unreachable, not in old)
@@ -661,8 +661,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # them, blocked = the project's block (build_lost ...); BUG-041: wait = why the first open piece waits, as far as the
     # kernel can tell ('FellTree at x,y,z: Wood cutting enabled for 0 of 26 citizens: nobody takes it', 'no citizen
     # reaches wall x,y,z or a tile beside it (walk groups 5018; citizens 7827)'); BUG-274: why = the cause in one word
-    # (unreachable, confined, no item, suspended, no builder, building, not placed); BUG-276: hold = the pop cap the
-    # open perimeter holds ('pop cap 35 held by the open perimeter (5 d: 1 way in)')
+    # (unreachable, confined, no item, suspended, no builder, no labor (BUG-329), building, not placed); BUG-276: hold =
+    # the pop cap the open perimeter holds ('pop cap 35 held by the open perimeter (5 d: 1 way in)')
     "SEAL_STUCK": ("A", "runner", _d("proj:s", "tpl:s stage:s days:i n:i pieces:sa mat:s blocked:s wait:s why:s hold:s")),
     # BUG-044 (Run 11 y483-y497, the seal door 115,73,143): a seal door still not built seal_first.wall_days after
     # SEAL_STUCK was replaced by a constructed wall on its tile (PEACE; the citizens keep another way: seal.opening_ways):
@@ -851,6 +851,7 @@ VERB_ARGS: dict[str, Obj] = {
     "bp.place": Obj(req={"tpl": TPL, "site": Str(ID_RE)},
                     opt={"p": Obj(extra=SCALAR), "prio": Int(1, 7)}, extra=SCALAR),
     "bp.cancel": Obj(req={"proj": ID}, opt={"undo": Bool()}),
+    "bp.resume": Obj(req={"proj": ID}),       # BUG-328: a project set aside for want of progress takes a slot again
     # BUG-300: a deliverable of the current phase that cannot be made (tpl = its template, `workshops`, the kind, or
     # stock_<key> / orders_<lib> for those; stage for a staged template), waived with the reason
     "phase.waive": Obj(req={"tpl": Str(r"^[a-z_0-9]{1,24}$"), "why": Str(maxbytes=80)}, opt={"stage": Int(1, 9)}),
@@ -925,7 +926,7 @@ VERB_ARGS: dict[str, Obj] = {
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "plan.reload": ("kern", None, False), "bp.place": ("runner", None, False),
-    "bp.cancel": ("runner", None, False), "phase.waive": ("runner", None, False), "drill": ("drill", ["PEACE"], False),
+    "bp.cancel": ("runner", None, False), "bp.resume": ("runner", None, False), "phase.waive": ("runner", None, False), "drill": ("drill", ["PEACE"], False),
     "snapshot": ("snapshot", None, False), "audit": ("readiness", None, False),
     "popcap.lower": ("readiness", None, False), "tempo.lower": ("arbiter", None, False),
     "popcap.raise": ("readiness", None, False), "popcap.set": ("readiness", None, False),     # BUG-293
@@ -1069,7 +1070,9 @@ STATE = Obj(
                            "q": Obj(req={"n": NAT, "by": Arr(Tup([ID, Str(maxbytes=16), NAT]), hi=8)}),
                            "run": Obj(req={"d": NAT}, opt={"i": NAT, "n": NAT, "task": Str(maxbytes=40), "sl": NAT,
                                                            "age": NAT}),
-                           "pk": NAT}),
+                           "pk": NAT,
+                           # BUG-328: the projects set aside for want of progress (runner queue.idle_days)
+                           "ip": Obj(req={"n": NAT, "by": Arr(Tup([ID, Str(maxbytes=16), NAT]), hi=8)})}),
          "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
          "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df"])),
                             "tempo": Str(enum=["mode", "inbox", "brake", "clock"])}),

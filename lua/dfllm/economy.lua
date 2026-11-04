@@ -9076,6 +9076,78 @@ function M.boxed_in(K, x, y, z)
   return true
 end
 
+-- BUG-329 (Run 15c Inkintense y374-y378: FarmPlot 86,87,133 job 152960, doors 64,47,128 / 75,34,131 / 92,99,133 and the
+-- hatch 86,53,126 'not suspended, no builder has taken it' for 80 to 1,000 days beside 10-23 idle adults; Drillchamber's
+-- hatch 89,72,137, Earthboat's 55,82,133): the line ended there, the reason was never named. DF gives a ConstructBuilding
+-- job only to a citizen with the building's labor on, who reaches its attached items. The labor per building type is the
+-- table of DFHack's labormanager (plugins/labormanager/joblabormapper.cpp, jlfunc_construct_bld: furniture, doors and
+-- hatches Furniture hauling, farm plots Farming, traps and mechanisms Mechanics; workshops and constructions by material,
+-- not checked here). Read-only.
+M.BUILD_LABOR = {FarmPlot = 'PLANT', Hive = 'BEEKEEPING', Trap = 'MECHANIC', GearAssembly = 'MECHANIC',
+                 AxleHorizontal = 'MECHANIC', AxleVertical = 'MECHANIC', Rollers = 'MECHANIC'}
+for _, k in ipairs({'Chair', 'Bed', 'Table', 'Coffin', 'Door', 'Floodgate', 'Box', 'Weaponrack', 'Armorstand', 'Cabinet',
+                    'Statue', 'WindowGlass', 'WindowGem', 'Cage', 'NestBox', 'TractionBench', 'Slab', 'Chain', 'GrateFloor',
+                    'GrateWall', 'Hatch', 'BarsFloor', 'BarsVertical', 'Bookcase', 'Instrument', 'DisplayFurniture'}) do
+  M.BUILD_LABOR[k] = 'HAUL_FURNITURE'
+end
+M.LABOR_WORD = {PLANT = 'Farming (fields)', HAUL_FURNITURE = 'Furniture hauling', MECHANIC = 'Mechanics',
+                BEEKEEPING = 'Beekeeping'}
+-- the reasons a job nobody takes may have, as far as they are readable: {'no free adult citizen has the labor ...', ...};
+-- sets rec.labor = {labor, with it, free adults}, rec.nolabor (none has it), rec.item_bad (an attached item forbidden or
+-- off the citizens' walk group: snapshot.far), rec.unposted (DF's job board holds it not: posting_index < 0)
+function M.nobuilder_why(K, rec, j)
+  local out = {}
+  local ln = M.BUILD_LABOR[rec.kind or '']
+  local li = ln and df.unit_labor and df.unit_labor[ln]
+  local cu = K.census.u
+  if type(li) == 'number' and type(cu) == 'table' then
+    local sold, of, n = {}, 0, 0
+    for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
+    for _, id in ipairs(cu.ids or {}) do
+      local u = not sold[id] and df.unit.find(id) or nil
+      local oka, adult = pcall(function() return dfhack.units.isAdult(u) end)
+      if u and oka and adult then
+        of = of + 1
+        local okl, has = pcall(function() return u.status.labors[li] == true end)
+        if okl and has then n = n + 1 end
+      end
+    end
+    rec.labor = {ln, n, of}
+    if of > 0 and n == 0 then
+      rec.nolabor = true
+      out[#out + 1] = string.format('no free adult citizen has the labor %s on (0 of %d; a work detail grants it)',
+                                    M.LABOR_WORD[ln] or ln, of)
+    end
+  end
+  pcall(function()
+    local k = 0
+    for _, ref in ipairs(j.items) do
+      local it = ref.item
+      k = k + 1
+      if k > 4 then break end
+      local f = it and it.flags
+      if f and not f.in_building then
+        local ix, iy, iz = dfhack.items.getPosition(it)
+        local okt, tn = pcall(function() return df.item_type[it:getType()] end)
+        local what = okt and type(tn) == 'string' and tn:lower() or 'item'
+        if f.forbid then
+          rec.item_bad = true
+          out[#out + 1] = string.format('its %s %s is forbidden', what, ix and string.format('at %d,%d,%d', ix, iy, iz) or '')
+        elseif ix and far(K, ix, iy, iz) then
+          rec.item_bad = true
+          out[#out + 1] = string.format('its %s at %d,%d,%d lies off the citizens\' walk group', what, ix, iy, iz)
+        end
+      end
+    end
+  end)
+  local okp, pi = pcall(function() return j.posting_index end)
+  if okp and int(pi) and int(pi) < 0 then
+    rec.unposted = true
+    out[#out + 1] = 'on no DF job posting (posting_index ' .. tostring(pi) .. ')'
+  end
+  return out
+end
+
 function M.build_state(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return nil end
@@ -9119,6 +9191,8 @@ function M.build_state(K, x, y, z)
         rec.boxed = true
         rec.line = rec.line .. ': walled in on its level (no tile beside it to build from)'
       end
+      local okn, why = pcall(M.nobuilder_why, K, rec, j)      -- BUG-329: the labor, the items, the job board
+      if okn and type(why) == 'table' and #why > 0 then rec.line = rec.line .. ': ' .. table.concat(why, '; ') end
     end
     return rec
   end
@@ -9193,6 +9267,23 @@ function M.build_state(K, x, y, z)
         if site.forb + site.other > 0 then
           bits[#bits + 1] = string.format('%d forbidden and %d other items on the tile', site.forb, site.other)
         end
+      end
+      -- BUG-329 (Earthboat y383-y384: refuge hatches on the refuge stair 'suspended by DF ... no cause readable'): DF
+      -- suspends a construction whose site a creature stands on; the citizens standing there now (a stair the fort walks)
+      local okw, nu = pcall(function()
+        local rc, c, cu = rec.rect, 0, K.census.u
+        for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do
+          local u = df.unit.find(id)
+          local ux, uy, uz
+          if u then ux, uy, uz = dfhack.units.getPosition(u) end
+          if uz == rc.z and ux and ux >= rc.x1 and ux <= rc.x2 and uy >= rc.y1 and uy <= rc.y2 then c = c + 1 end
+        end
+        return c
+      end)
+      if okw and int(nu) and nu > 0 then
+        rec.units = nu
+        bits[#bits + 1] = string.format('%d citizen%s on the site now (a walked tile: DF suspends it)', nu,
+                                        nu == 1 and '' or 's')
       end
     end
     rec.line = string.format('%s suspended by DF (not buildingplan, not suspendmanager): %s', head,

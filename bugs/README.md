@@ -338,6 +338,8 @@ Related: FR-xx, BUG-xx
 | [BUG-324](BUG-324-found-water-never-becomes-accepted-water.md) | fixed (offline, live-untested) | high | Run 15: water the scan found never becomes accepted water: no hospital, no GiveWater source | water.lua, act.lua |
 | [BUG-325](BUG-325-water-scan-reach-from-one-citizen.md) | fixed (offline, live-untested) | medium | Run 15: the water scan asks the walk from one citizen, one in another walk group hides every well spot | water.lua |
 | [BUG-326](BUG-326-drills-and-alerts-empty-hunters-and-fishers.md) | fixed (offline, live-untested) | high | Run 15c: drills at 30-42 food days and every alert empty the hunters and fishers | drill.lua, economy.lua |
+| [BUG-328](BUG-328-projects-without-progress-block-the-queue.md) | fixed (offline, live-untested) | high | Run 15: projects without progress hang for years and block the queue (an aqshaft yielding every slice, a 1,000-day seal holding a slot); set aside after idle_days, bp.resume | aqshaft.lua, runner.lua |
+| [BUG-329](BUG-329-no-builder-reason-and-farm-plot-detection.md) | partly fixed (offline, live-untested): farm detection; the diagnosis names labor, items, job board, citizens on the site | high | Run 15: 'no builder has taken it' for years without a reason; a finished farm plot read as 'missing p' | runner.lua, economy.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

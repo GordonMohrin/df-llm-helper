@@ -294,7 +294,8 @@ T.test('BUG-046: a part quickfort refused is placed again although another part 
   -- the forge stays unbuilt: stalled, the event names it
   H.runs(W, 12 * 24)
   T.eq(H.proj(W, 'ws').blocked, 'stalled')
-  local pb = W.find_events('PROJECT_BLOCKED')
+  local pb = {}                                     -- BUG-328: the set-aside event after idle_days is not this one
+  for _, e in ipairs(W.find_events('PROJECT_BLOCKED')) do if e.d.idle == nil then pb[#pb + 1] = e end end
   T.eq(#pb, 1)
   T.ok(pb[1].msg:find('blocked: stalled at build; waits: MetalsmithsForge 10,10,100: job 5 suspended by buildingplan: ' ..
                       'waits for building material x1', 1, true), pb[1].msg)

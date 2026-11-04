@@ -36,6 +36,7 @@ A.CFG = {
   redig = 12,            -- a lost designation is designated again at most this often (per level / per chunk)
   obs_pts = 16, samples = 8, wet_keep = 6, prio = 1,
   qf_tick = 2,           -- quickfort calls of A.tick per run (observe mode's smoothing)
+  refuse_max = 3,        -- BUG-328: quickfort refusals of a level's dig before the shaft stops (apply_fail)
 }
 A.MODES = {auto = true, stone = true, soil = true, all = true}
 local ORTH = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
@@ -201,8 +202,31 @@ local function dig_step(X, P, d, r, z, L)
   local ch = st.chunks[1]
   local k = ch.cells[1][4]
   if not L.des then
-    if not designate(X, P, ch.pos[1] + ch.cells[1][1], ch.pos[2] + ch.cells[1][2], ch.pos[3] + ch.cells[1][3], k, true) then
-      return X.room() and 'done' or 'yield'
+    local dx, dy, dz = ch.pos[1] + ch.cells[1][1], ch.pos[2] + ch.cells[1][2], ch.pos[3] + ch.cells[1][3]
+    local got = designate(X, P, dx, dy, dz, k, true)
+    if got == nil then return 'yield' end            -- no quickfort call left in this slice: the next one
+    if not got then
+      -- BUG-328 (Run 15c Inkintense y377: aqshaft c1a188b5f1ae45b201 'l0.dig 0 %', 'no run ended for 176 d', the
+      -- watchdog after 600 slices, every other project and the seal behind it 'queued'): quickfort designated nothing
+      -- on the level's tile, the call used the slice's quickfort room and dig_step yielded, so every slice made the
+      -- same refused call and the run never ended. A refused tile that is open already (no wall left) needs no dig:
+      -- the level goes on as designated (also one designated already); else the refusal counts (L.nd) and the task is done for this run; refuse_max
+      -- refusals stop the shaft (apply_fail: parked after park_days with its bp.cancel command)
+      local v = X.tile(dx, dy, dz)
+      if v and (dug(v) or (v.dig or '') ~= '') then    -- open already, or a designation / dig job on it already
+        L.des, P.chunk = 1, 1
+        X.log('info', '%s: z%d %d,%d: %s: nothing more to designate, the level goes on', P.id, dz, dx, dy,
+              dug(v) and ('open already (tile ' .. tostring(v.c) .. ')') or ('designated already (' .. tostring(v.dig) .. ')'))
+        X.moved(P)
+        X.dirty()
+        return 'done'
+      end
+      L.nd = (int(L.nd) or 0) + 1
+      X.log('warn', '%s: z%d: quickfort designated nothing at %d,%d,%d (%s, refused %d/%d)', P.id, dz, dx, dy, dz,
+            v and ('tile ' .. tostring(v.c)) or 'hidden', L.nd, A.CFG.refuse_max)
+      if L.nd >= A.CFG.refuse_max then X.block(P, 'apply_fail') end
+      X.dirty()
+      return 'done'
     end
     L.des, P.chunk = 1, 1
     X.moved(P)

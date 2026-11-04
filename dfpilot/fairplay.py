@@ -345,7 +345,7 @@ RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d"
                     # BUG-116: care first (runner.lua Q.care_lead): the hospital project leads while hospital_out is set or
                     # `patients` patients lie in the fort; stuck_days without progress lifts the pause
                     "care_first": {"on": "bool", "stuck_days": (1, 60), "patients": (1, 250)},
-                    "queue": {"yield_days": (1, 60), "park_days": (1, 400)},
+                    "queue": {"yield_days": (1, 60), "park_days": (1, 400), "idle_days": (1, 400)},   # BUG-328
                     # BUG-066 / FR-76: the manifest follows the standing workshops (runner.lua Q.sync)
                     "reclaim": {"on": "bool", "gone_scans": (1, 10), "min_ws": (1, 50), "ask_days": (1, 60)}}
 

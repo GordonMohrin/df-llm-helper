@@ -119,6 +119,14 @@ M.CFG = {
   -- task that yields task_slices times in a row is skipped this run (kern.log); state sched.run once no run ended for
   -- run_idle_d days
   yield_days = 7, park_days = 30, task_slices = 600, run_idle_d = 3,
+  -- BUG-328 (Run 15c Inkintense y377: 'runner: no run ended for 176 d, 78 slices': a task yielding every slice, the runner
+  -- paced and demoted to a few slices a game day, so 600 slices took 130 game days and every project and the seal waited
+  -- that long): a task yielding for task_days game days is skipped too, whatever its slice count. A project without own
+  -- progress (R.ps) for idle_days is set aside: no runner slot (measured meas_every like a stalled one, so DF's builders
+  -- finishing it is noticed), its row last ('set aside N d: no progress'), PROJECT_BLOCKED d.idle with the commands; it
+  -- comes back by itself on progress, by `bp.resume` (a fresh idle_days) or goes by `bp.cancel`. Not set aside: a mood
+  -- project, the hospital care first leads, an aqshaft watching an open level. config "runner": {queue: {idle_days}}
+  task_days = 3, idle_days = 30,
   -- BUG-066 (Run 14 y560: a toppled MetalsmithsForge stayed `built` in manifest.json and "bp sites workshops" said
   -- "nothing left to build" while a mood dwarf had no workshop) and FR-76 (Run 12 Trussroads, a reclaimed fort with
   -- workshops no project of ours built): once a game day the manifest's workshops are compared with the workshops that
@@ -1387,6 +1395,32 @@ end
 ---------------------------------------------------------------- applying stages
 local function is_construction(b) return b:getType() == df.building_type.Construction end
 
+-- BUG-329 (Run 15c Inkintense y372-y378: farms c1a18745d4e25dac02 'build_lost at build, missing p' for 8 retries while its
+-- p(7x5) stood as plot 17696 at 76,50,131, Plump Helmet growing; Drillchamber farms likewise): a finished farm plot sets no
+-- building occupancy on its tiles (a planned one does: findAtTile found the unbuilt FarmPlot 86,87,133 and its job), so
+-- dfhack.buildings.findAtTile, which returns at once on a tile without the occupancy bit (Buildings.cpp findAtTile), and
+-- snapshot's legend (bld '' on a None occupancy) both miss it. The building on a tile: findAtTile, else a farm plot of
+-- buildings.other.FARM_PLOT whose rectangle (and extent, when it has one) holds the tile
+function Q.bld_at(x, y, z)
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if find then
+    local ok, b = pcall(find, x, y, z)
+    if ok and b then return b end
+  end
+  local ok, b = pcall(function()
+    for _, p in ipairs(df.global.world.buildings.other.FARM_PLOT) do
+      if p.z == z and x >= p.x1 and x <= p.x2 and y >= p.y1 and y <= p.y2 then
+        local rm = p.room
+        local ex, w, rx, ry = rm and rm.extents, rm and int(rm.width), rm and int(rm.x), rm and int(rm.y)
+        if not (ex and w and w > 0 and rx and ry) then return p end
+        local okv, v = pcall(function() return ex[(y - ry) * w + (x - rx)] end)
+        if not okv or (v ~= nil and v ~= 0 and v ~= false) then return p end    -- an unreadable extent: the rectangle
+      end
+    end
+  end)
+  return ok and b or nil
+end
+
 -- live L2: a stage placed again over buildings it already has (fortcore stages 2-3 re-placed without their
 -- traps) finds those tiles occupied, and quickfort counts them as unsuitable (building.lua:517-559), which
 -- read as lost buildings (build_lost). Before a build chunk, the tiles that already hold a building or a
@@ -1397,11 +1431,9 @@ local function pre_occupied(K, ch, R)
   local tiles, n, seen = {}, 0, {}
   for _, cell in ipairs(ch.cells) do cell_tiles(ch, cell, tiles) end
   for _, id in ipairs(R.b) do seen[id] = true end
-  local find = dfhack.buildings and dfhack.buildings.findAtTile             -- Lua API.txt:2484
   for _, t in ipairs(tiles) do
-    local ok, b = false, nil
-    if find then ok, b = pcall(find, t[1], t[2], t[3]) end
-    if ok and b then
+    local b = Q.bld_at(t[1], t[2], t[3])            -- findAtTile (Lua API.txt:2484); BUG-329: a finished farm plot too
+    if b then
       n = n + 1
       if not seen[b.id] and not is_construction(b) then seen[b.id] = true; R.b[#R.b + 1] = b.id end
     else
@@ -1526,11 +1558,7 @@ end
 -- does a cell's tile hold what the stage placed? A building there (findAtTile, else snapshot's bld), or a finished
 -- construction / closing tile (snapshot legend); hidden tiles hold nothing we may know of (BUG-022)
 local function cell_present(K, t)
-  local find = dfhack.buildings and dfhack.buildings.findAtTile
-  if find then
-    local ok, b = pcall(find, t[1], t[2], t[3])
-    if ok and b then return true end
-  end
+  if Q.bld_at(t[1], t[2], t[3]) then return true end          -- BUG-329: a finished farm plot sets no occupancy
   local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
   if not (okt and type(tile) == 'table') then return false, nil end
   return (tile.bld ~= nil and tile.bld ~= '') or OCCUPIED[tile.c] == true, tile
@@ -3023,7 +3051,8 @@ local function conf(K)
              food_d = nat(sf.food_d, 0, 400, M.CFG.emerg_food_d), drink_d = nat(sf.drink_d, 0, 400, M.CFG.emerg_drink_d),
              pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off),
              yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
-             park = nat(q.park_days, 1, 400, M.CFG.park_days) * DAY}
+             park = nat(q.park_days, 1, 400, M.CFG.park_days) * DAY,
+             idle = nat(q.idle_days, 1, 400, M.CFG.idle_days) * DAY}               -- BUG-328
   -- BUG-066 / FR-76: the manifest follows the workshops that stand (reclaim = config runner.reclaim)
   local rc = type(c.reclaim) == 'table' and c.reclaim or {}
   r.rec = {on = rc.on ~= false, scans = nat(rc.gone_scans, 1, 10, M.CFG.rec_scans),
@@ -3074,11 +3103,8 @@ end
 -- a piece stands built on the tile: a finished building (not a planned one), or a finished construction / closing tile
 -- on the snapshot (a construction is no building once it is built)
 local function piece_built(K, t)
-  local find = dfhack.buildings and dfhack.buildings.findAtTile
-  if find then
-    local ok, b = pcall(find, t[1], t[2], t[3])
-    if ok and b then return not is_construction(b) and built(b) end
-  end
+  local b = Q.bld_at(t[1], t[2], t[3])                        -- BUG-329: a finished farm plot too
+  if b then return not is_construction(b) and built(b) end
   local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
   return okt and type(tile) == 'table' and OCCUPIED[tile.c] == true
 end
@@ -3216,7 +3242,7 @@ function Q.wait_why(K, P, d)
     local w, bs = Q.piece_why(K, t)         -- BUG-044: the building and its job, who suspends it
     if w then out[#out + 1] = w end
     cls = Q.cls_of(bs)
-    if (cls == 'no builder' or cls == 'boxed') and (int(bs.items) or 0) > 0 then
+    if (cls == 'no builder' or cls == 'boxed' or cls == 'no labor') and (int(bs.items) or 0) > 0 then
       out[#out + 1] = plural(int(bs.items), 'item') .. ' attached'
     end
   end
@@ -3281,6 +3307,7 @@ function Q.cls_of(bs)
   if not int(bs.job) then return nil end
   if bs.susp then return bs.who == 'buildingplan' and 'no item' or 'suspended' end
   if not bs.work and bs.boxed then return 'boxed' end   -- BUG-313: walled in on its level, a re-place there is no help
+  if not bs.work and bs.nolabor then return 'no labor' end   -- BUG-329: nobody has its labor on: a re-place is no help
   return bs.work and 'building' or 'no builder'
 end
 
@@ -3532,6 +3559,7 @@ function Q.stuck_replace(K, c)
               local keep = {}
               for _, id in ipairs(R.b) do if df.building.find(id) then keep[#keep + 1] = id end end
               R.b, R.uns, R.ra, P.chunk = keep, (int(R.uns) or 0) + 1, 1, 0
+              moved(K, R)                                      -- BUG-328: the kernel's own step (a set-aside seal is back)
               K.log('warn', 'seal first: %s: %s %s open %d days, its job taken by no builder (%s): removed and placed ' ..
                     'again (once)', P.id, what, at, (t - r.t) // DAY, trunc(why, 100))
               r.st, r.t, r.ev, r.why = 0, t, CAD.quiet(r.ev), nil       -- a fresh start: the stuck clock again
@@ -3606,6 +3634,7 @@ function Q.stuck_walls(K, c)
               local keep = {}
               for _, id in ipairs(R.b) do if df.building.find(id) then keep[#keep + 1] = id end end
               R.b, R.uns, R.ra, P.chunk = keep, (int(R.uns) or 0) + 1, 1, 0
+              moved(K, R)                                      -- BUG-328: the kernel's own step (a set-aside seal is back)
               local l = type(S.rt.sw[P.id]) == 'table' and S.rt.sw[P.id] or {}
               if #l < 8 then l[#l + 1] = at end
               S.rt.sw[P.id] = l
@@ -3726,17 +3755,25 @@ end
 function rows(K)
   local out, pt, sl = {}, conf(K).park, S.slots or {}
   local behind = #sl > 0 and ('queued behind ' .. sl[1] .. (#sl > 1 and (' +' .. (#sl - 1)) or '')) or 'queued'
-  local list, last, pk = {}, {}, {}
+  local list, last, pk, aside = {}, {}, {}, {}
   for _, P in ipairs(sorted()) do
-    if Q.parked(K, P, pt) then pk[P.id] = true; last[#last + 1] = P else list[#list + 1] = P end
+    if Q.parked(K, P, pt) then pk[P.id] = true; last[#last + 1] = P
+    elseif Q.idle(P) then aside[#aside + 1] = P                -- BUG-328: set aside, before the parked ones
+    else list[#list + 1] = P end
   end
+  for _, P in ipairs(aside) do list[#list + 1] = P end
   for _, P in ipairs(last) do list[#list + 1] = P end
+  local t = now(K)
   for _, P in ipairs(list) do
     if #out >= 8 then break end
     local d = doc(K, P.id)
     local st = d and d.stages[P.stage + 1]
     local b = P.blocked
-    if b == '' then
+    if not pk[P.id] and Q.idle(P) then             -- BUG-328 (no 'parked' word: plan reads that as blocked for good)
+      local R = S.rt.p[P.id]
+      local ps = type(R) == 'table' and int(R.ps) or int(S.rt.ip[P.id].ps) or t
+      b = string.format('set aside %d d: %s (bp.resume)', math.max(0, (t - ps) // DAY), S.rt.ip[P.id].why or 'no progress')
+    elseif b == '' then
       local ok = allowed(K, P, d)
       local pw = ok and paused(K, P, d)
       local yd = S.yielded and S.yielded[P.id]
@@ -4800,6 +4837,71 @@ function Q.fault(K, err)
          {module = 'runner', err = err, n = S.fc, backoff_s = 0})
 end
 
+-- BUG-328: set aside for want of progress (m.runner ip[<proj>] = {t, ps, si, why}); see M.CFG.idle_days
+function Q.idle(P) return type(S.rt.ip) == 'table' and type(S.rt.ip[P.id]) == 'table' end
+-- the commands that end it, for the event and status
+function Q.idle_cmds(id)
+  return string.format('resume: dfllm cmd bp.resume \'{"proj":"%s"}\'; cancel: dfllm cmd bp.cancel \'{"proj":"%s"}\'', id, id)
+end
+-- once a run in PEACE (begin_run, before the slots): projects without own progress (R.ps) for c.idle are set aside
+-- (kern.log, PROJECT_BLOCKED d.idle = days); a set-aside one whose R.ps moved (a measure found progress, the seal fallback
+-- placed a piece again) or whose stage changed comes back. What it placed in DF stays; nothing is undone
+function Q.idle_scan(K, c, t)
+  S.rt.ip = obj(S.rt.ip)
+  for id, r in pairs(S.rt.ip) do
+    local P = find(id)
+    local R = P and S.rt.p[P.id]
+    if not P or P.done == 1 or halted(P) or type(r) ~= 'table' then S.rt.ip[id] = nil; dirty()
+    elseif type(R) == 'table' and (R.si ~= int(r.si) or (int(R.ps) or 0) > (int(r.ps) or 0)) then
+      S.rt.ip[id] = nil
+      dirty()
+      K.log('info', '%s (%s) moves again after %d days set aside: it takes a runner slot again', P.id, P.tpl,
+            (t - (int(r.t) or t)) // DAY)
+    end
+  end
+  if K.mode() ~= 'PEACE' then return end
+  for _, P in ipairs(sorted()) do
+    local R = S.rt.p[P.id]
+    local ps = type(R) == 'table' and R.si == P.stage and int(R.ps) or nil
+    if ps and P.done ~= 1 and not halted(P) and not S.rt.ip[P.id] and t - ps >= c.idle and not Q.mood_proj(P)
+       and S.care_id ~= P.id and not (P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id)) then
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      local label = trunc(st and st.label or '', 24)
+      local days = (t - ps) // DAY
+      local why = P.blocked == 'stalled' and 'stalled' or 'no progress'
+      local wait
+      if P.blocked == 'stalled' and d then
+        local okp, parts = pcall(Q.parts, K, P, d)
+        if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 80) end
+      end
+      S.rt.ip[P.id] = {t = t, ps = ps, si = P.stage, why = why}
+      dirty()
+      local msg = string.format('%s (%s) %s %d d at %s %d%%%s: set aside, no runner slot (the others go first); %s', P.id,
+                                P.tpl, why, days, label, int(P.pct) or 0, wait and ('; waits: ' .. wait) or '',
+                                Q.idle_cmds(P.id))
+      K.log('warn', '%s', msg)
+      K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), {proj = P.id, tpl = P.tpl, stage = label, why = why,
+                                                       ticks = t - ps, idle = days, parts = wait})
+    end
+  end
+end
+
+-- BUG-328: the set-aside projects for state sched.ip: {n, by = {{id, tpl, days}}} (<= 8), nil without
+function Q.idle_state(K)
+  local t, by, n = now(K), {}, 0
+  for _, P in ipairs(sorted()) do
+    local r = Q.idle(P) and S.rt.ip[P.id]
+    if r then
+      n = n + 1
+      local R = S.rt.p[P.id]
+      local ps = type(R) == 'table' and int(R.ps) or int(r.ps) or t
+      if #by < 8 then by[#by + 1] = {P.id, trunc(P.tpl, 16), math.max(0, (t - ps) // DAY)} end
+    end
+  end
+  return n > 0 and {n = n, by = by} or nil
+end
+
 local function begin_run(K)
   sync_plan(K)
   S.snap_ok = K.enabled('snapshot')
@@ -4832,6 +4934,8 @@ local function begin_run(K)
       if S.werr ~= err then S.werr = err; K.log('error', 'seal wall fallback failed: %s', err) end
     else S.werr = nil end
   end
+  local oki, erri = pcall(Q.idle_scan, K, f.c, now(K))   -- BUG-328: own pcall, a fault costs only the set-aside rule
+  if not oki then K.log('error', 'runner set-aside failed: %s', trunc(erri, 160)) end
   local tasks, n, t, c = {}, 0, now(K), f.c
   local list = sorted()
   for _, P in ipairs(list) do
@@ -4844,6 +4948,7 @@ local function begin_run(K)
   -- to a waiting project. A paused project waits like a frozen one (no chunk, no stall); waiting for a slot is no
   -- idleness (R.ps), holding one is
   local function second(P, R)
+    if Q.idle(P) then return true end                                             -- BUG-328: set aside
     if SEALS[P.tpl] and c.on and not f.stk[P.id] then return false end
     if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return false end        -- BUG-191: an open aquifer level
     if S.care_id == P.id and P.blocked ~= 'stalled' then return false end         -- BUG-116: the hospital never yields
@@ -4871,7 +4976,8 @@ local function begin_run(K)
           end
         end
         local mood_slot = ok and Q.mood_proj(P) and nm < (int(M.CFG.mood_slots) or 2)    -- BUG-306: beside `active`
-        if ok and (n < M.CFG.active or mood_slot) then
+        local aside = Q.idle(P)                                 -- BUG-328: set aside: measured only, never a slot
+        if ok and not aside and (n < M.CFG.active or mood_slot) then
           if mood_slot then nm = nm + 1 else n = n + 1 end
           S.active[P.id] = true
           slots[#slots + 1] = P.id
@@ -4886,7 +4992,9 @@ local function begin_run(K)
             tasks[#tasks + 1] = {k = 'work', id = P.id, meas = true}
           end
           if ok and pass == 1 then waiting = waiting + 1 end
-          if ok and p2 and P.blocked ~= 'stalled' and not SEALS[P.tpl] then yielded[P.id] = (t - int(R.ps)) // DAY end
+          if ok and p2 and not aside and P.blocked ~= 'stalled' and not SEALS[P.tpl] then
+            yielded[P.id] = (t - int(R.ps)) // DAY
+          end
           R.last = t                         -- waiting (queued, frozen or paused) is no stall
           if pass == 1 then R.ps = t end     -- BUG-037: nor is it idleness
           dirty()
@@ -4931,6 +5039,7 @@ function M.init(K)
   rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
   rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box
   rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
+  rt.ip = obj(rt.ip)                                                 -- BUG-328: projects set aside (no progress)
   rt.aq = obj(rt.aq)                                                 -- FR-95: aquifer shafts and observe mode
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
@@ -4997,13 +5106,15 @@ function M.step(K, budget, ctx)
     end
     if r == 'yield' then
       run.ty = (run.ty or 0) + 1
-      if run.ty < M.CFG.task_slices then save(K); return 'more' end
+      run.tt = run.tt or now(K)                      -- BUG-328: when this task began to yield
+      local age = now(K) - run.tt
+      if run.ty < M.CFG.task_slices and age < M.CFG.task_days * DAY then save(K); return 'more' end
       S.wd = (S.wd or 0) + 1
-      K.log('warn', 'runner watchdog: task %d/%d (%s%s) yielded %d slices in a row: skipped this run', run.i, #run.tasks,
-            task.k, task.id and (' ' .. task.id) or '', run.ty)
+      K.log('warn', 'runner watchdog: task %d/%d (%s%s) yielded %d slices in a row (%d days): skipped this run', run.i,
+            #run.tasks, task.k, task.id and (' ' .. task.id) or '', run.ty, age // DAY)
       if task.k == 'check' then S.chk = nil end
     end
-    run.i, run.ty = run.i + 1, 0
+    run.i, run.ty, run.tt = run.i + 1, 0, nil
   end
   S.run, S.ended = nil, now(K)
   save(K)
@@ -5042,9 +5153,11 @@ end
 
 function M.state(K)
   local sc, q, run, pk = S.sched, S.q, Q.run_state(K), (S.npk or 0) > 0 and S.npk or nil
-  if q or run or pk then
+  local okip, ip = pcall(Q.idle_state, K)                         -- BUG-328: the set-aside projects
+  ip = okip and ip or nil
+  if q or run or pk or ip then
     sc = sc and copy(sc) or {}
-    sc.q, sc.run, sc.pk = q, run, pk
+    sc.q, sc.run, sc.pk, sc.ip = q, run, pk, ip
   end
   return {phase = S.phase, phw = S.phw, proj = S.rows, sched = sc, adopt = Q.adopt_state()}
 end
@@ -5741,6 +5854,26 @@ M.verbs = {
     end
     return true, msg, {proj = id}
   end,
+  -- BUG-328: a project set aside for want of progress takes a runner slot again, with a fresh idle_days
+  ['bp.resume'] = function(K, args)
+    local P = type(args.proj) == 'string' and find(args.proj)
+    if not P then return false, 'no project ' .. tostring(args.proj) end
+    if P.done == 1 then return false, P.id .. ' is already done' end
+    if not Q.idle(P) then
+      return false, string.format('%s is not set aside (%s)', P.id, P.blocked ~= '' and P.blocked or 'it runs')
+    end
+    local t = now(K)
+    local r = S.rt.ip[P.id]
+    S.rt.ip[P.id] = nil
+    local R = S.rt.p[P.id]
+    if type(R) == 'table' then R.ps, R.last = t, t end
+    dirty()
+    K.log('info', '%s (%s) resumed by bp.resume after %d days set aside', P.id, P.tpl, (t - (int(r.t) or t)) // DAY)
+    rows(K)
+    save(K)
+    return true, string.format('resumed %s: it takes a runner slot again (set aside again after %d days without progress)',
+                               P.id, conf(K).idle // DAY), {proj = P.id}
+  end,
   ['bp.cancel'] = function(K, args)
     local P = type(args.proj) == 'string' and find(args.proj)
     if not P then return false, 'no project ' .. tostring(args.proj) end
@@ -5758,5 +5891,8 @@ M.verbs = {
     return true, (args.undo and 'cancelling ' .. P.id .. ' (undo queued)' or 'cancelled ' .. P.id)
   end,
 }
+
+-- BUG-329 (tests, read-only): the building on a tile (a finished farm plot too), build_state's answer in one word
+M.bld_at, M.cls_of = Q.bld_at, Q.cls_of
 
 return M

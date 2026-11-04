@@ -1,5 +1,28 @@
 # CHANGELOG dfpilot
 
+## Run 15 projects without progress: set aside, a refused shaft dig ends its run, the reason nobody builds, farm plots seen (BUG-328, BUG-329, 2026-11-04; offline, live-untested)
+- **Why:** Inkintense y377: aqshaft c1a188b5f1ae45b201 `l0.dig 0 %`, `runner: no run ended for 176 d`, watchdog after 600 slices
+  (132 game days), seal and farm queued behind it; seal y374s0b0 `stalled` 900-1399 d holding a slot (`queued behind y374s0b0`);
+  Drillchamber/Earthboat hatches and Inkintense FarmPlot 86,87,133 / doors `not suspended, no builder has taken it` for years with
+  no reason; farms c1a18745d4e25dac02 `build_lost, missing p` beside its own standing plot 17696. Root causes:
+  aqshaft.lua:204-205 (a refused designation yielded every slice), runner.lua:5000 (watchdog by slices only), runner.lua:4846-4853
+  (pass-2 slots by list order, no limit for no progress), runner.lua:1400/1528/3076 (findAtTile misses a finished farm plot),
+  economy.lua:9110 (no reason read).
+- **What changed:** aqshaft: a refused level dig goes on when the tile is open/designated already, else counts and ends the
+  task (3 refusals: apply_fail). Runner: watchdog also after `task_days` 3 game days; projects without own progress for
+  `queue.idle_days` 30 are set aside (no slot, measured, row `set aside N d: ... (bp.resume)`, PROJECT_BLOCKED `d.idle` with
+  bp.resume/bp.cancel, state `sched.ip`, status line, wake hint), back on progress or by the new verb `bp.resume {proj}`; the
+  seal fallbacks count as progress. Q.bld_at: findAtTile, else a FARM_PLOT holding the tile (pre_occupied, cell_present,
+  piece_built). economy.build_state: `no free adult citizen has the labor <Farming (fields) | Furniture hauling | Mechanics> on`,
+  forbidden / unreachable attached items, `posting_index -1`, citizens on a DF-suspended site; SEAL_STUCK why `no labor` (no
+  re-place). Config `runner.queue.idle_days`, contract/schema `bp.resume`, `sched.ip`, PROJECT_BLOCKED `idle`; RULES rows.
+- **Tests (fail on 9b6f614):** tests/lua/test_bug328_329_projects.lua (10), tests/test_bug328_329_projects.py (4); adjusted
+  test_runner_queue.lua (watchdog line), test_runner.lua and test_runner_seal_door.lua (PROJECT_BLOCKED without d.idle),
+  test_runner_queue.py (queue config).
+- **Live check:** Inkintense/Drillchamber/Earthboat after a kernel reload: no `no run ended` line from a refused shaft; stuck
+  projects `set aside` after 30 days, others take the slots; `bp.resume proj=<id>` answers `resumed`; the no-builder lines name
+  a labor nobody has (then: the work details) or nothing more (cause still unknown). Uncertain: the labor table (labormanager's
+  mirror of DF), the finished-farm-plot occupancy (inferred from the live evidence), whether 30 days fits slow builds.
 ## Run 15b bridge traps: a stone-fall lane behind the drawbridges of a fort without a door way in (BUG-317, 2026-10-29; offline, live-untested)
 - **Why:** Earthboat (entered over O1/B1 only) y383-385: `bp sites traps` -> `no way in left to trap (0 door(s) ...)`, `traps 0`,
   plan propose never drafted traps in P5 (G14 red). Root cause dfpilot/bp/traps.py:247 `ways_in` reads door tiles only;
