@@ -128,16 +128,20 @@ def test_propose_drafts_stage_3_first(base):
     new = [b for se in doc["seasons"] for b in se["build"]]
     mine = [b for b in new if b not in [x for se in prev["seasons"] for x in se["build"]]]
     assert doc["phase_target"] == "P5"
-    assert mine[0] == STAGE3, "fortcore stage 3 is the first new build (old code: furnaces, hospital, ... first)"
+    # BUG-403: the fortcore builds run in ascending stage order, so a stage 2 of the phase list takes the first slot; the refuge's
+    # stage 3 still comes ahead of every growth build (old code: furnaces, hospital, ... first)
+    fcs = [b for b in mine if b["tpl"] == "fortcore"]
+    assert mine[0] in fcs and STAGE3 in fcs[:2], "fortcore stage 3 (after a stage 2) is among the first new builds"
+    assert [b["p"]["stage"] for b in fcs] == sorted(b["p"]["stage"] for b in fcs)
     assert sum(b == STAGE3 for b in new) == 1
-    assert [b["tpl"] for b in mine].index("furnaces") > 0
+    assert [b["tpl"] for b in mine].index("furnaces") > mine.index(STAGE3)
     errs, _ = plan.check(doc, s, decisions={}, banned=plan.BANNED, prev=prev, fort=fort)
     assert [e for e in errs if e.startswith("stage 3")] == []
     # a fort whose phase list (adopted before) had stage 3 in P5 and is in P4 now, with O1 and B2 missing: drafted first
     s4 = dict(sealed(state, {"B1": "down"}), phase="P4")
     doc = plan.propose(s4, phases, prev, decisions={}, tinfo=TINFO, fort=fort)
     mine = [b for se in doc["seasons"] for b in se["build"] if b not in [x for q in prev["seasons"] for x in q["build"]]]
-    assert mine[0] == STAGE3
+    assert mine[0] == STAGE3 or (mine[0]["tpl"] == "fortcore" and STAGE3 in mine[:2])       # BUG-403: a stage 2 first
     # standing gates, stage 3 under way, or no fortcore to anchor on: nothing extra
     for st, ft in ((dict(sealed(state, {"B2": "down", "O1": "up"}), phase="P4"), fort),
                    (s4, {"refuge": dict(fort["refuge"], stage3=True)}),

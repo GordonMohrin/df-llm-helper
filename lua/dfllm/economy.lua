@@ -9664,6 +9664,21 @@ local function queue_free(jb, id, why)
   jb.frees[#jb.frees + 1] = {id = id, why = why}
 end
 
+-- BUG-405 (Run 16b i2 Ostgate y397: a trap at 88,101,130 'suspended ... 1 corpse' for 36 days, the builder cancels 'Item
+-- blocking site' and nobody hauls a corpse nobody marked): is the corpse (or its part) a stranger's, an enemy or an
+-- animal that died on the site? A fort member's body is care's (burial, a coffin), never dumped here. False when the unit
+-- cannot be read: nothing is dumped on a guess.
+function M.stray_corpse(it)
+  local ok, yes = pcall(function()
+    local uid = it.unit_id
+    if math.type(uid) ~= 'integer' or uid < 0 then return false end
+    local u = df.unit.find(uid)
+    if u == nil then return false end
+    return dfhack.units.isOwnGroup(u) ~= true and dfhack.units.isCitizen(u) ~= true
+  end)
+  return ok and yes == true
+end
+
 -- the items on one footprint: counted and queued (no write here)
 local function site_items(K, jb, j, items)
   local s = {forb = 0, other = 0, corpse = 0, held = 0}
@@ -9672,7 +9687,12 @@ local function site_items(K, jb, j, items)
     local it = df.item.find(int(e[1]) or -1)
     local f = it and it.flags
     if f and not (f.in_job or f.in_building or f.trader or f.removed or f.garbage_collect or f.construction) then
-      if CORPSE_T[tname(it) or ''] or f.dead_dwarf then s.corpse = s.corpse + 1
+      if CORPSE_T[tname(it) or ''] or f.dead_dwarf then
+        s.corpse = s.corpse + 1
+        if not f.dead_dwarf and not held[it.id] and not f.dump and M.stray_corpse(it) then
+          s.moved = (s.moved or 0) + 1                  -- BUG-405: unforbid and dump it, the haulers carry it off the site
+          queue_free(jb, it.id, 'corpse')
+        end
       elseif held[it.id] then s.held = s.held + 1
       elseif f.forbid then
         s.forb = s.forb + 1
@@ -10138,7 +10158,15 @@ function T.jfree(K, c, r)
   while #jb.frees > 0 and jb.freed < lim do
     local e = table.remove(jb.frees, 1)
     local it = df.item.find(e.id)
-    if it and it.flags.forbid then
+    if it and e.why == 'corpse' then                  -- BUG-405: a stranger's corpse on a site: unforbidden and dumped
+      r.cmds = r.cmds + 1
+      local ok = true
+      if it.flags.forbid then ok = K.act.item_flag(e.id, 'forbid', false) and ok end
+      if ok and not it.flags.dump and K.act.item_flag(e.id, 'dump', true) then
+        jb.freed_by.corpse = (jb.freed_by.corpse or 0) + 1
+      end
+      return #jb.frees == 0 or jb.freed >= lim
+    elseif it and it.flags.forbid then
       r.cmds = r.cmds + 1
       if K.act.item_flag(e.id, 'forbid', false) then
         jb.freed = jb.freed + 1
@@ -10234,6 +10262,7 @@ function T.jcheck(K, c, r)
     extra = string.format('; on the sites %d forbidden (%d unforbidden), %d other', jb.forb, jb.freed_by.site or 0,
                           jb.other)
   end
+  if (jb.freed_by.corpse or 0) > 0 then extra = extra .. string.format('; %d corpses on sites marked for dumping', jb.freed_by.corpse) end
   if (jb.freed_by.material or 0) > 0 then extra = extra .. string.format('; %d materials unforbidden', jb.freed_by.material) end
   if #jb.mats > 0 then extra = extra .. '; missing ' .. table.concat(jb.mats, ', ') end
   local sig = string.format('%d/%d/%d/%d/%d/%d/%s', #jb.list, resumed, failed, jb.kept, jb.planned, #blocked, why .. extra)

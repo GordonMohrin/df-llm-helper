@@ -299,4 +299,28 @@ T.test('BUG-005: economy.build_info answers trade for the depot\'s building', fu
   T.eq(select(2, W.K.call('economy', 'build_info', 999)), nil)
 end)
 
+
+T.test('BUG-405: a stranger\'s corpse on a site is unforbidden and dumped; a citizen\'s body and unreadable units stay', function()
+  local W = world{jobs = function() return {cjob(1, 'Trap', {88, 101, 88, 101, 5})} end, setup = function(W)
+    F.item(W, 'CORPSE', {id = 7020, unit_id = 3, flags = {forbid = true}, _pos = {88, 101, 5}})     -- a citizen's
+    F.item(W, 'CORPSE', {id = 7021, unit_id = 77, flags = {forbid = true}, _pos = {88, 101, 5}})    -- a stranger's (a goblin)
+    F.item(W, 'CORPSE', {id = 7022, flags = {}, _pos = {88, 101, 5}})                                -- no unit read
+  end}
+  local find0 = df.unit.find
+  df.unit.find = function(id) if id == 77 then return {id = 77, _m = {}} end return find0(id) end
+  days(W, 1)
+  df.unit.find = find0
+  local dumped, unforb = {}, {}
+  for _, a in ipairs(W.find_acts('item_flag')) do
+    if a.args[2] == 'dump' and a.args[3] == true then dumped[#dumped + 1] = a.args[1] end
+    if a.args[2] == 'forbid' and a.args[3] == false then unforb[#unforb + 1] = a.args[1] end
+  end
+  T.eq(dumped, {7021}, 'only the stranger\'s corpse is dumped')
+  T.eq(unforb, {7021}, 'and unforbidden first')
+  T.ok(W.items_by_id[7021].flags.dump == true and W.items_by_id[7021].flags.forbid == false)
+  T.ok(W.items_by_id[7020].flags.forbid == true, 'a citizen\'s body is care\'s')
+  local ev = W.find_events('JOBS_SUSPENDED')
+  T.ok(ev[1] and ev[1].msg:find('1 corpses on sites marked for dumping', 1, true), ev[1] and ev[1].msg)
+end)
+
 T.done()

@@ -1696,6 +1696,20 @@ def core_gaps(builds: list[dict], done: set) -> None:
         have.add(j)
 
 
+def core_stage_order(seasons: list[dict], kept: list[int]) -> None:
+    """BUG-403 (Run 16a i1 y372: `plan propose` put fortcore stage 3 before stage 2, plan check ERROR BUG-164): the fortcore
+    builds this draft added (not the first kept[i] of season i: those stay as they are, applied ones keep their y<Y>s<S>b<I> id)
+    run in ascending stage order. The slots they hold stay where they are (the seals, the refuge's pieces and the defence builds
+    keep their places), the builds are refilled by stage, so no step of propose (core_gaps, the defence-first order of BUG-377, the
+    surface-core swap of BUG-387, the farm and emergency fronts) can leave stage k+1 ahead of stage k."""
+    pos = [(si, bi) for si, se in enumerate(seasons) for bi in range(kept[si], len(se["build"]))]
+    slots = [(si, bi) for si, bi in pos if seasons[si]["build"][bi]["tpl"] == "fortcore"
+             and not (seasons[si]["build"][bi].get("p") or {}).get("retrofit")]
+    ordered = sorted((seasons[si]["build"][bi] for si, bi in slots), key=lambda b: _stage_of(b.get("p") or {}) or 1)
+    for (si, bi), b in zip(slots, ordered):
+        seasons[si]["build"][bi] = b
+
+
 def core_order_gate(doc: dict) -> list[str]:
     """Review fix (merge20, BUG-164/BUG-377): a fortcore @same stage k >= 2 placed in the plan before the plan's own stage k-1
     (same core, no retrofit) would run bp.place on a stage whose predecessor does not exist yet: an ERROR for each such build."""
@@ -3011,6 +3025,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     kept = [len(se["build"]) for se in seasons]
     for i, b in enumerate(builds):              # appended: applied builds keep their y<Y>s<S>b<I> ids
         seasons[min(3, season + i // BUILDS_PER_SEASON)]["build"].append(b)
+    core_stage_order(seasons, kept)              # BUG-403: stage 2 before 3 before 4 among the builds added now
     cap = min(level_cap(lvl, d01), OPTION_A_MAX if d01 != "B" else R_CAPS[3])
     if gaps:
         cap = defense_cap(s, cap)                # BUG-377: no growth past the citizens now while the defence is short
