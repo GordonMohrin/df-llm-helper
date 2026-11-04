@@ -19,6 +19,10 @@
 -- works). A held 'up' reaches GATE_FAIL (blocked) at its deadline with the units and their squad stations named.
 -- Our own job without a worker for 200 ticks is cancelled (act.cancel_own_lever_job, the UI
 -- cancel) and the next pull goes to the backup lever.
+-- BUG-342: a pull still waiting for its worker reads 'queued' (not_up); GATE_FAIL no_worker means pulls nobody took in
+-- NO_WORKER ticks (the text names the lever rooms and their pullers at the levers), GATE_FAIL cancelled more pulls
+-- cancelled for units walking toward the bridge (pulls, the last of them in units). A lever puller standing in his
+-- room beside the footprint holds it no more than the job's worker does (BUG-141); on the footprint he holds it.
 -- Pulls go through act.pull -> reqscript('lever').leverPullJob (lever.lua:4, never deduplicates).
 -- Lever rooms (live L3, the S3 fallback): manifest burrows named 'dfllm-levers*' hold levers; in SIEGE/DRILL/
 -- BREACH gate assigns lever pullers to them (act.burrow_units, the burrow screen) and pulls a lever with a
@@ -150,7 +154,7 @@ local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit
 local LOCK_MODES = {SIEGE = true, BREACH = true}        -- raise the unmanaged bridges even without the reflex module
 local GATE_ROLES = {outer = true, inner = true}         -- the bridges a lockdown and the peace gates hold up
 local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker', outside = 'outside_alert',
-                  manual = 'manual', slow = 'slow', no_effect = 'no_effect'}
+                  manual = 'manual', slow = 'slow', no_effect = 'no_effect', cancelled = 'cancelled'}
 
 local st      -- persisted m.gate: {v, br = {<b> = {want, why, since, deadline, failed}}, kpi = {...},
               --   ex = {X<id> = {bid, raised}} (unmanaged bridges in hand), lat = {s, t}, win = tick, winb = {<b> = tick},
@@ -514,6 +518,46 @@ local function puller_room(id)
   for name, p in pairs(pl.rooms) do
     for _, x in ipairs(p.ids) do if x == id then return name end end
   end
+end
+
+-- BUG-342 (Run 15b Earthboat y387: fortcore's B2 landing room 'dfllm-levers-b2' lies 1-3 tiles from B2's footprint,
+-- 'B2 up waits for citizen 27079 next to it' with 27079 one of its pullers): the assigned pullers of a room that holds
+-- a lever of `name`, standing on a tile of that room now, {[id] = true}. They wait there to pull it; like the job's own
+-- worker (BUG-141) they hold the bridge only when they stand on its footprint.
+local function own_pullers(K, name, now)
+  local set = {}
+  if not pl then return set end
+  for _, rm in ipairs(room_list(K, now)) do
+    local p = pl.rooms[rm.name]
+    if rm.bridges[name] and p and #p.ids > 0 then
+      local b = burrow(rm.name)
+      for _, id in ipairs(p.ids) do
+        if on_tile(b, unit_pos(df.unit.find(id))) then set[id] = true end
+      end
+    end
+  end
+  return set
+end
+
+-- BUG-342: `hold` without the units of `set` that stand beside the footprint (on it they always hold)
+local function drop_own(hold, set)
+  if #hold == 0 or next(set) == nil then return hold end
+  local keep = {unknown = hold.unknown}
+  for _, e in ipairs(hold) do if not set[e.id] or e.d == 0 then keep[#keep + 1] = e end end
+  return #keep < #hold and keep or hold
+end
+
+-- BUG-342: the lever rooms of `name` for a GATE_FAIL no_worker text: 'lever pullers: dfllm-levers 0 of 2 at the levers'
+-- ('no lever room' when none holds one of its levers)
+local function puller_note(K, name, now)
+  local parts = {}
+  for _, rm in ipairs(room_list(K, now)) do
+    if rm.bridges[name] then
+      local p = pl and pl.rooms[rm.name]
+      parts[#parts + 1] = string.format('%s %d of %d at the levers', rm.name, present(rm), p and #p.ids or 0)
+    end
+  end
+  return #parts > 0 and ('lever pullers: ' .. table.concat(parts, ', ')) or 'no lever room'
 end
 
 local function counter(u, k)
@@ -1306,7 +1350,7 @@ local function set_want(name, w, why, deadline, now)
   st.br[name] = {want = w, why = tostring(why or ''):sub(1, 40), since = now,
                  deadline = w == 'up' and (deadline or now + M.DEADLINE) or nil, failed = false}
   local r = runtime(name)
-  r.bad, r.nw, r.block_since, r.lat0, r.nw_out = {}, 0, nil, nil, nil
+  r.bad, r.nw, r.block_since, r.lat0, r.nw_out, r.ap, r.ap_last = {}, 0, nil, nil, nil, 0, nil
   r.block, r.block_ev, r.hold_log, r.forced_ev, r.hold_seen = nil, nil, nil, nil, nil
   r.held_sum, r.fail_at, r.switch, r.want_ms = nil, nil, nil, nil
   r.qd, r.qw, r.qlog, r.qnote, r.qref = nil, nil, nil, nil, nil   -- BUG-251: the quiet window of a lowering
@@ -1377,6 +1421,7 @@ end
 -- not decide the new one's GATE_FAIL (a SIEGE no-worker cancel made a BREACH fail read outside_alert)
 local function new_epoch(r)
   r.nw, r.nw_out, r.bad, r.fail_at, r.switch, r.held_sum, r.block_since = 0, nil, {}, nil, nil, nil, nil
+  r.ap, r.ap_last = 0, nil                            -- BUG-342: the pulls cancelled for a unit walking toward it
 end
 
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
@@ -1775,6 +1820,7 @@ local function control(K, name, spec, now)
           for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 then keep[#keep + 1] = e end end
           if #keep < #hold then hold = keep end
         end
+        hold = drop_own(hold, own_pullers(K, name, now))   -- BUG-342: nor do its pullers waiting in their room
         if #hold > 0 then                             -- BUG-310: a unit on the footprint cancels a forced raise too
           stale = 'blocked'
           r.block_since = r.block_since or now
@@ -1794,6 +1840,7 @@ local function control(K, name, spec, now)
           if e then
             stale = 'approach'
             if dir == 'down' then r.qd = now end
+            r.ap, r.ap_last = (r.ap or 0) + 1, {k = e.k, id = e.id, d = e.d}   -- BUG-342: GATE_FAIL cancelled names it
             K.log('info', 'gate: %s %s pull cancelled: %s %d %d tiles from it and walking toward it', name, dir, e.k, e.id,
                   e.d)
           end
@@ -1818,7 +1865,10 @@ local function control(K, name, spec, now)
         end
       end
       if not stale then
-        r.stuck = (not has_worker) and 'no_worker' or nil
+        -- BUG-342 (Run 15 i3/i4: every GATE_FAIL no_worker came 5-50 ticks after a fresh pull, the ones before cancelled
+        -- for units walking toward the bridge): a pull waiting for its worker is 'queued'; no_worker is a pull nobody
+        -- took in NO_WORKER ticks (r.nw)
+        r.stuck = (not has_worker) and 'queued' or nil
         return s
       end
       local ok = K.act.cancel_own_lever_job(r.job.id)       -- UI: cancel the queued pull
@@ -1872,6 +1922,7 @@ local function control(K, name, spec, now)
   -- not hostile on or next to the footprint (an unknown census too); a raise in SIEGE/BREACH goes ahead only with a
   -- visible hostile within force_near tiles of it (never because the wait was long)
   local hold, hd = holders(K, name, spec.fp, sc, w)
+  hold = drop_own(hold, own_pullers(K, name, now))   -- BUG-342: its pullers waiting in their room beside the footprint
   -- no census yet (the first frame after a boot): wait silently, the pull is still to do (reflex's alert waits for it)
   if hold.unknown then r.stuck = 'census'; return s end
   if #hold > 0 then                                -- BUG-310: forced or not, never onto a unit on the footprint
@@ -1975,8 +2026,10 @@ local function check_fail(K, name, now, mode)
     end
   end
   br.failed, dirty = true, true
+  -- BUG-342: more pulls cancelled for units walking toward it than left without a worker: 'cancelled', not no_worker
+  local ap = r.ap or 0
   local why = FAIL_WHY[r.stuck] or (slow and FAIL_WHY.slow) or (M.ne_any(r) and FAIL_WHY.no_effect) or
-              (r.nw > 0 and 'no_worker') or 'timeout'
+              (ap > r.nw and FAIL_WHY.cancelled) or (r.nw > 0 and 'no_worker') or 'timeout'
   if why == 'no_worker' then                          -- BUG-013: nobody may take it while the alert sounds
     local out = r.nw_out                              -- seen at a no-worker cancel; else now, in a step only (a
     if out == nil and mode == nil then                -- mode change has just moved the alert to another burrow)
@@ -1994,8 +2047,17 @@ local function check_fail(K, name, now, mode)
   if why == FAIL_WHY.outside then                     -- BUG-027: name the burrows the alert holds the civilians in
     local _, names = alert_burrows(K)
     txt = 'no worker: its levers lie outside the alert burrow' .. (names and (' ' .. table.concat(names, ', ')) or '')
+  elseif why == FAIL_WHY.no_worker then               -- BUG-342: how many pulls nobody took, and where the pullers are
+    txt = string.format('no_worker: %d pull(s) not taken in %d ticks; %s', r.nw, M.NO_WORKER, puller_note(K, name, now))
   end
   local d = {bridge = name, want = 'up', why = why}
+  if why == FAIL_WHY.cancelled then                   -- BUG-342: the pulls the units walking toward it cancelled
+    local e = r.ap_last
+    txt = string.format('cancelled: %d pulls cancelled for units walking toward it%s', ap,
+                        e and string.format(', the last %s %d %d tiles from it', e.k, e.id, e.d) or '')
+    d.pulls = ap
+    if e then d.units = {e.id} end
+  end
   if why == FAIL_WHY.blocked and r.block then         -- BUG-027: name who holds it (and the soldiers' stations)
     if #r.block > 0 then
       txt = 'blocked: ' .. who(r.block, r.foot) .. ', never raised onto them'
@@ -2425,6 +2487,7 @@ function M.not_up(K)
       elseif r.stuck == 'blocked' and type(r.block) == 'table' and #r.block > 0 then
         why = who(r.block, r.foot)
       elseif r.stuck == 'no_effect' then why = 'every lever parked after pulls without effect'
+      elseif r.stuck == 'queued' then why = 'a pull is queued, no worker yet'      -- BUG-342
       elseif r.stuck then why = tostring(r.stuck)
       elseif r.last == 'moving' or (r.job and r.job.taken) then why = 'a pull is under way'
       elseif r.job then why = 'a pull is queued, no worker yet'

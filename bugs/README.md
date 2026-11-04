@@ -346,6 +346,7 @@ Related: FR-xx, BUG-xx
 | [BUG-332](BUG-332-quicksave-check-looks-in-appdata.md) | fixed (offline, live-untested) | high | Run 15: `dfllm save` QUICKSAVE_FAILED: it looked in %APPDATA% while DF saves portably to <DF>/save | supervise.py, kern.lua, save.py |
 | [BUG-333](BUG-333-ways-in-status-vs-inspect-and-saplings-off-the-snapshot.md) | partly fixed (offline, live-untested): one ways-in list, saplings off the snapshot; open: surface ways in under tree crowns (BUG-323) | medium | Run 15b/c/d: status and inspect entrances name other ways in; seal at=last leaves a sapling off the snapshot out | seal.lua, cmd.py |
 | [BUG-334](BUG-334-follow-on-old-code-blocks-the-new-one.md) | fixed (offline, live-untested) | medium | Run 15: a follow on old code blocks the new one; players must know --takeover | wake.py |
+| [BUG-342](BUG-342-gates-fail-in-sieges-no-worker-misread.md) | partly fixed (offline, live-untested): exact reason, pullers in their room; open: the traffic cancelling the pulls, pullers not reaching their room | high | Run 15 sieges: GATE_FAIL no_worker read for pulls cancelled by walking units; lever pullers in fortcore's B2 room held their own bridge | gate.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
