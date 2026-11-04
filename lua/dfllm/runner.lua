@@ -2868,7 +2868,8 @@ end
 -- let only defense projects inside Z3/Z4 run in a SIEGE. Life support now runs in SIEGE (and the hospital, a living
 -- project, in ALERT/RECOVERY) when every tile of its current stage lies inside a burrow the sounding civ alert holds the
 -- citizens in (the care burrow Pflege+ aside: it reaches patients outside), or inside Kern+ (manifest role kern) while no
--- civ alert sounds: the work stays where the citizens already are, nothing opens a way out. Life support: the hospital,
+-- civ alert sounds in ALERT/RECOVERY (review fix merge16: not in a SIEGE, there it stays frozen): the work stays where the
+-- citizens already are, nothing opens a way out. Life support: the hospital,
 -- the cistern, the refuge's drink store, and farms / the stockroom while a food or drink emergency holds (S.focus.emerg:
 -- seal_first food_d / drink_d, patients without water). A stage with a tile outside stays frozen; the row says how many
 -- ('frozen: 9/11 tiles off Kern+'). Measured once per LIFE_TTL ticks and stage (S.life, runtime only).
@@ -2878,8 +2879,10 @@ Q.CARE_BURROW = 'Pflege+'                         -- water.M.CARE (BUG-330's car
 M.LIFE_TTL = 1200
 
 -- the burrows the work must lie in: the sounding civ alert's (plotinfo.alerts.list[idx].burrows, as water.alert_burrows
--- reads them), else Kern+; {burrow...}, the first name
-function Q.life_burrows(K)
+-- reads them), else Kern+ in ALERT/RECOVERY only; {burrow...}, the first name. Review fix (merge16): in a SIEGE/BREACH
+-- with a silent civ alert (seal 'flee', BUG-031 relax: civ_alert_idx 0) the citizens are not held anywhere, so a
+-- Kern+ fallback let a life project run with free citizens hauling material from everywhere (the surface too): none.
+function Q.life_burrows(K, m)
   local bs, name = {}, nil
   pcall(function()
     local al = df.global.plotinfo.alerts
@@ -2894,7 +2897,7 @@ function Q.life_burrows(K)
       end
     end
   end)
-  if #bs == 0 then
+  if #bs == 0 and (m == 'ALERT' or m == 'RECOVERY') then
     local mb = K.manifest().burrows
     for nm, spec in pairs(type(mb) == 'table' and mb or {}) do
       if type(spec) == 'table' and spec.role == 'kern' then
@@ -2912,13 +2915,13 @@ function Q.life_ok(K, P, d)
   if not life or type(d) ~= 'table' or P.stage >= #d.stages then return false end
   local t = now(K)
   S.life = S.life or {}
-  local bs, name = Q.life_burrows(K)
   local m = K.mode()
+  local bs, name = Q.life_burrows(K, m)
   -- a switch of the alert burrow (Kern+ <-> Tiefe+) or of the mode measures again
   local c = S.life[P.id]
   if c and c.si == P.stage and c.bn == name and c.m == m and t >= c.t and t - c.t < M.LIFE_TTL then return c.ok, c.why end
   local ok, why = false, nil
-  if #bs == 0 then why = 'no alert burrow'
+  if #bs == 0 then why = (m == 'ALERT' or m == 'RECOVERY') and 'no alert burrow' or 'no civ alert sounding'
   else
     local tl = stage_tiles(P.id, d, P.stage)
     local n, out = 0, 0

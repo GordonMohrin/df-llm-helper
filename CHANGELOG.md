@@ -1,5 +1,17 @@
 # CHANGELOG dfpilot
 
+## Review fix (merge16): no Kern+ fallback for life projects in a silent-alert SIEGE, the perimeter waiver counts the newest opening (BUG-347, BUG-349, 2026-11-04; offline, live-untested)
+- **BUG-347:** runner Q.life_burrows fell back to Kern+ in a SIEGE whose civ alert is silent (seal `flee`, BUG-031 relax,
+  `civ_alert_idx` 0): hospital/cistern work ran with unheld citizens hauling from the surface. The fallback is ALERT/RECOVERY
+  only; a SIEGE without a sounding alert keeps life support `frozen: no civ alert sounding`.
+- **BUG-349:** plan perimeter_waiver hung on `ready.pd` (the whole open spell): an old stuck seal waived a gate bridge
+  destroyed today. readiness `ready.pn` = days since the newest opening (spell start, more ways in than before, a newly lost
+  bridge/lever); plan.waive_age = min(pd, pn) drives the waiver, the refusal's `(in N d)` and propose's note. Contract: state
+  `ready.pn` (contract.lua, schema.py, CONTRACTS, appendix).
+- **Tests (fail on cc65ee4):** tests/lua/test_bug347_life_siege.lua (+1), tests/lua/test_open_perimeter.lua (+1),
+  tests/test_bug349_351_plan.py (+1).
+- **Live check:** a SIEGE after seal `flee`: the hospital row `frozen: no civ alert sounding`; a destroyed bridge: `ready.pn`
+  0 while `pd` counts on, `plan check` refuses the raise.
 ## Run 15 year plans: the phase rises past a seal that cannot close, discarded-timeline bp files free their sites, no stone dig without a site (BUG-349/350/351, 2026-11-04; offline, live-untested)
 - **Why:** i2 Guildcleans stayed at P3 from y388: plan check refused every raise 'while the perimeter is open 468 d' with
   seal@S1 first and the seal stuck 4500 d (plan.py perimeter_gate), propose drafted the raise its check refused, and the

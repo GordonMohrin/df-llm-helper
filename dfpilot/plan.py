@@ -1095,7 +1095,7 @@ def perimeter_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[l
                         "seal_stalled question (dfllm events --cls A) says what still helps"]
         return [f"perimeter: raising phase_target {cur} -> {doc['phase_target']} while the perimeter is open{open_for} "
                 f"({pw}; readiness R0 open_perimeter): seal first (dfllm cmd bp.place tpl=seal site=S1 at=last; a "
-                "lost bridge: dfllm cmd inspect what=defense)" + _waive_when(days)], []
+                "lost bridge: dfllm cmd inspect what=defense)" + _waive_when(waive_age(s))], []
     if cur < PERIMETER_GATE_FROM:
         return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter): by design until B1 stands (P2); the "
                     "phase may rise"]
@@ -1111,6 +1111,17 @@ def _waive_when(days) -> str:
     left = f" (in {PERIMETER_WAIVE_D - days} d)" if isinstance(days, int) and days < PERIMETER_WAIVE_D else ""
     return (f"; after {PERIMETER_WAIVE_D} d open{left} with a seal stuck, set aside or first in this plan's due season "
             "the raise is waived (BUG-349)")
+
+
+def waive_age(s: dict) -> int | None:
+    """Review fix (merge16, BUG-349): the days the waiver counts: ready.pn, the age of the newest opening (a gate bridge
+    destroyed today, a way in more than the entrance check counted before), else ready.pd (an older kernel). pd alone
+    let an old seal stuck elsewhere waive a fresh real way in at once."""
+    r = s.get("ready") or {}
+    pd, pn = r.get("pd"), r.get("pn")
+    if not isinstance(pd, int):
+        return None
+    return min(pd, pn) if isinstance(pn, int) else pd
 
 
 def stalled_seal(s: dict, fort: dict | None) -> str | None:
@@ -1137,8 +1148,10 @@ def perimeter_waiver(doc: dict, s: dict, fort: dict | None, prev: dict | None) -
     d, B2's lever lost: the fort stayed at P3 every year). After PERIMETER_WAIVE_D days of R0 open_perimeter (state
     ready.pd) the raise is waived when the fort did its part and the seal cannot close it: a seal stuck that long or set
     aside (stalled_seal), a seal among this plan's new builds due now, or nothing left a seal closes (only lost bridges
-    or levers: the rebuild's, stage3_gate's). The reason as text, else None."""
-    days = (s.get("ready") or {}).get("pd")
+    or levers: the rebuild's, stage3_gate's). Review fix (merge16): the days are waive_age's, the newest opening's
+    (ready.pn), so a fresh opening is refused for PERIMETER_WAIVE_D days whatever stuck seal stands. The reason as text,
+    else None."""
+    days = waive_age(s)
     if not isinstance(days, int) or days < PERIMETER_WAIVE_D:
         return None
     st = stalled_seal(s, fort)
@@ -2579,7 +2592,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["notes"] += (f"; FR-70: phase_target stays {cur} (not {doc['phase_target']}): the perimeter is open "
                          f"{r.get('pd', '?')} d ({r.get('pw') or '?'}): seal first"
                          + (f"; waived after {PERIMETER_WAIVE_D} d with the seal stuck (BUG-349)"
-                            if not isinstance(r.get("pd"), int) or r["pd"] < PERIMETER_WAIVE_D else ""))
+                            if not isinstance(waive_age(s), int) or waive_age(s) < PERIMETER_WAIVE_D else ""))
         doc["phase_target"] = cur
         if cur < SWEEP_PHASE and not (((prev or {}).get("caverns") or {}).get("sweep") is True):
             doc.pop("caverns", None)               # FR-99: the sweep came with the raise only

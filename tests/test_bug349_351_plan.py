@@ -98,6 +98,26 @@ def test_bug349_a_seal_set_aside_or_planned_now_or_only_levers_lost(save):
     assert e == [] and "while nothing a seal closes (levers lost: B2):" in w[0], w
 
 
+def test_bug349_review_a_fresh_opening_is_not_waived_by_an_old_stuck_seal(save):
+    """Review fix (merge16): open 468 d, a seal stuck 4500 d elsewhere, and the gate bridge B1 destroyed 3 days ago
+    (ready.pn 3): the raise is refused (old: waived at once, pd alone counted). Once pn reaches 365 the waiver holds."""
+    prev, doc = _raise(save)
+    st = _open(save, 468, pw="2 ways in; bridges lost: B1", sched=STUCK)
+    st["ready"]["pn"] = 3
+    _write_state(save, st)
+    e, w = _perim(*plan.check(doc, st, decisions={}, banned=plan.BANNED, prev=prev))
+    assert len(e) == 1 and e[0].startswith("perimeter: raising phase_target P3 -> P5 while the perimeter is open for 468 "
+                                           "days"), (e, w)
+    assert e[0].endswith("; after 365 d open (in 362 d) with a seal stuck, set aside or first in this plan's due season "
+                         "the raise is waived (BUG-349)"), e[0]
+    assert plan.perimeter_waiver(doc, st, {}, prev) is None
+    st["ready"]["pn"] = 400
+    e, w = _perim(*plan.check(doc, st, decisions={}, banned=plan.BANNED, prev=prev))
+    assert e == [] and "is waived (BUG-349" in w[0], w
+    st["ready"].pop("pn")                                             # an older kernel: pd alone, as before
+    assert plan.perimeter_waiver(doc, st, {}, prev)
+
+
 def test_bug349_propose_keeps_the_phase_its_check_refuses(save):
     prev = json.loads((save / "plan.json").read_text("utf-8"))
     phases = json.loads((FIX / "phases.json").read_text("utf-8"))

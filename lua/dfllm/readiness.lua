@@ -560,6 +560,28 @@ local function evaluate(K, why)
     if not rt.pw then rt.pw = st.pw end
     table.insert(f1, 1, 'open_perimeter')
   end
+  -- Review fix (merge16, BUG-349): the age of the newest opening (state ready.pn, days). pd counts from the first opening
+  -- of the whole open spell, so an old seal stuck elsewhere waived a gate bridge destroyed today at once. st.nt is set
+  -- when the spell begins, when the entrance check counts more ways in than before (0 -> 1 included) and when a bridge
+  -- or lever is lost that the last text did not name; a drop of the ways in lowers the count, a later rise is new again
+  if not st.pt then
+    if st.nt or st.wn then st.nt, st.wn, dirty = nil, nil, true end
+  else
+    local new = not st.nt
+    local o = rt.open or -1
+    if o >= 0 then
+      if o > (st.wn or 0) then new = true end
+      if st.wn ~= o then st.wn, dirty = o, true end
+    end
+    local old = {}
+    for nm in tostring(st.pw or ''):gmatch('[%w_]+') do old[nm] = true end
+    for part in tostring(rt.pw or ''):gmatch('[^;]+') do
+      local l = part:match('^%s*%a+ lost: (.+)$')
+      for nm in tostring(l or ''):gmatch('[%w_]+') do if not old[nm] then new = true end end
+    end
+    if new then st.nt, dirty = now, true end
+  end
+  rt.pn = st.nt and math.max(0, (now - st.nt) // 1200) or nil     -- game days since the newest opening
   if st.pw ~= rt.pw and st.pt then st.pw, dirty = rt.pw, true end
   -- the freeze: from escalate_days days on, a fort of hold_pop citizens or more keeps max-pop where it stands
   local hp, cit0 = pcfg(K, 'hold_pop'), type(cu) == 'table' and cu.cit or nil
@@ -969,6 +991,7 @@ function M.init(K)
   -- bridges seen whole with their levers
   st.pt, st.phold = int(p.pt), int(p.phold)
   st.pw = type(p.pw) == 'string' and p.pw:sub(1, 60) or nil
+  st.nt, st.wn = int(p.nt), int(p.wn)                         -- review fix merge16: the newest opening, ways in counted
   for name, v in pairs(type(p.lvok) == 'table' and p.lvok or {}) do
     if type(name) == 'string' and int(v) == 1 then st.lvok = st.lvok or {}; st.lvok[name] = 1 end
   end
@@ -1016,6 +1039,7 @@ function M.state(K)
              fail = rt.fail,
              open = math.max(-1, rt.open or -1)}                -- FR-65: ways in without door or bridge (-1 unknown)
   if rt.pd then r.pd, r.pw = rt.pd, rt.pw and cut(rt.pw, 60) or nil end    -- FR-70: days open, what is open
+  if rt.pd and rt.pn then r.pn = math.min(rt.pn, rt.pd) end    -- review fix merge16: days since the newest opening
   if rt.ents and #rt.ents > 0 then
     local e = {}
     for i = 1, math.min(#rt.ents, 3) do e[i] = rt.ents[i] end

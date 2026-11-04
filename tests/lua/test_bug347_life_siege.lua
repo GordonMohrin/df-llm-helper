@@ -71,11 +71,12 @@ T.test('BUG-347: farms run in a SIEGE only in a food or drink emergency; the cis
   T.eq(#H.qf_calls(W2, 'dig'), 0, 'a BREACH freezes life support too')
 end)
 
-T.test('BUG-347: no civ alert sounding: Kern+ (manifest role kern) is the burrow; ALERT runs the hospital inside it', function()
-  local W = world{tag = 'b347d'}
+T.test('BUG-347: no civ alert sounding: Kern+ (manifest role kern) is the burrow in ALERT; ALERT runs the hospital inside it',
+       function()
+  local W = world{tag = 'b347d', mode = 'ALERT'}
   H.place(W, 'hosp', H.doc{x = 10, y = 10, tpl = 'hospital', class = 'living'})
   H.settle(W); W.frame(1); H.settle(W)
-  T.ok(dug(W)['10,10'], 'the hospital inside Kern+ digs without a sounding alert')
+  T.ok(dug(W)['10,10'], 'the hospital inside Kern+ digs in ALERT without a sounding alert')
   local W2 = world{tag = 'b347e', mode = 'ALERT', manifest = {v = 2}}
   H.place(W2, 'hosp', H.doc{x = 10, y = 10, tpl = 'hospital', class = 'living'})
   H.settle(W2); W2.frame(1); H.settle(W2)
@@ -85,6 +86,19 @@ T.test('BUG-347: no civ alert sounding: Kern+ (manifest role kern) is the burrow
   H.place(W3, 'hosp', H.doc{x = 10, y = 10, tpl = 'hospital', class = 'living'})
   H.settle(W3); W3.frame(1); H.settle(W3)
   T.ok(dug(W3)['10,10'], 'old code: a living project, frozen in ALERT')
+end)
+
+-- review fix (merge16): a SIEGE with a silent civ alert (seal 'flee' / BUG-031 relax: civ_alert_idx 0) holds the
+-- citizens nowhere; the Kern+ fallback let the hospital run with free citizens hauling from the surface. No fallback in
+-- a SIEGE: frozen. Fail on cc65ee4 (the hospital dug).
+T.test('review fix merge16: a SIEGE with civ_alert_idx 0 keeps the hospital inside Kern+ frozen', function()
+  local W = world{tag = 'b347r'}
+  T.eq(df.global.plotinfo.alerts.civ_alert_idx or 0, 0)
+  H.place(W, 'hosp', H.doc{x = 10, y = 10, tpl = 'hospital', class = 'living'})
+  H.settle(W); W.frame(1); H.settle(W)
+  T.eq(#H.qf_calls(W, 'dig'), 0, 'old code: Kern+ fallback in a SIEGE, the hospital dug with unheld citizens')
+  T.eq(row(W, 'hosp')[4], 'frozen: no civ alert sounding')
+  T.eq(W.K.mode(), 'SIEGE')
 end)
 
 -- verifier pass 2: the S.life measure (LIFE_TTL 1200) is taken again when the alert burrow switches (Kern+ <-> Tiefe+),

@@ -201,4 +201,34 @@ T.test('the signal survives a reload (the days keep counting) and outside PEACE 
   T.eq(ready(W).pd, nil, 'closed in PEACE: gone')
 end)
 
+-- review fix (merge16, BUG-349): plan check's waiver counted pd, the age of the whole open spell, so an old stuck seal
+-- waived a gate bridge destroyed today. ready.pn = days since the newest opening: a lost bridge or a way in more than
+-- before starts it again; fewer ways in do not, a rise after them does
+T.test('review fix merge16: ready.pn counts from the newest opening (a lost bridge, one way in more), pd from the first',
+       function()
+  local W = world{entrances = SEALED}
+  day(W)
+  audit(W)
+  W.seal.x = {tick = 1, sealed = 0, routes = 2, doors = {}, open = {{pos = {55, 62, 117}, kind = 'floor'}}}
+  day(W, 6)
+  T.eq(ready(W).open, 1)
+  T.ok(ready(W).pd >= 5 and ready(W).pn == ready(W).pd, T.show(ready(W)))
+  destroy_o1(W)
+  day(W, 2)
+  T.ok(ready(W).pw:find('bridges lost: O1', 1, true), ready(W).pw)
+  T.ok(ready(W).pd >= 7, 'pd keeps the spell: ' .. tostring(ready(W).pd))
+  T.ok(ready(W).pn <= 2, 'old code: no pn, the waiver read pd ' .. T.show(ready(W)))
+  day(W, 4)
+  local pn = ready(W).pn
+  T.ok(pn >= 4, tostring(pn))
+  W.seal.x = SEALED
+  day(W)
+  T.eq(ready(W).open, 0)
+  T.ok(ready(W).pn >= pn, 'fewer ways in: no new opening ' .. T.show(ready(W)))
+  W.seal.x = LEAKY
+  day(W)
+  T.eq(ready(W).open, 2)
+  T.ok(ready(W).pn <= 1, 'ways in again after none: new ' .. T.show(ready(W)))
+end)
+
 T.done()

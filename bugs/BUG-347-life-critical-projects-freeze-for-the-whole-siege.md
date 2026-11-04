@@ -40,6 +40,14 @@ one outside: `frozen: N/M tiles off Kern+`.
 Review pass 2: the measure (S.life) is taken again when the alert burrow (Kern+ <-> Tiefe+) or the mode changes, and a row in
 BREACH/DRILL (where life_ok is not called) no longer shows the tile count of an earlier SIEGE measure (plain `frozen`).
 
+## Review fix (merge16)
+A SIEGE whose civ alert is silent (seal `flee`, BUG-031 relax: `civ_alert_idx` 0) holds the citizens nowhere, yet
+Q.life_burrows (lua/dfllm/runner.lua) fell back to Kern+ and let life projects inside it run with unheld citizens who fetch
+material from everywhere, the surface included. The Kern+ fallback now applies only in ALERT/RECOVERY; in a SIEGE (BREACH
+freezes anyway) without a sounding alert there is no life burrow and the project stays `frozen: no civ alert sounding`.
+Test: tests/lua/test_bug347_life_siege.lua `review fix merge16` (fails on cc65ee4: the hospital dug); the earlier
+`no civ alert sounding` case now runs in ALERT.
+
 ## Open
 Not closed for the reported incident: hospital blueprints (dfpilot/bp/rooms.py:92-98, `_finish`) add the room to Kern+ only in
 their LAST stage (`burrow`), so a newly placed hospital's dig/build stages normally lie outside Kern+ and stay frozen in a SIEGE,

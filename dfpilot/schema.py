@@ -993,6 +993,8 @@ STATE = Obj(
                       # FR-70: pd = game days the perimeter has been open in PEACE (open_perimeter), pw = what is open
                       opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24), "dref": NAT,
                            "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60),
+                           # review fix merge16 (BUG-349): pn = game days since the newest opening (<= pd)
+                           "pn": NAT,
                            # BUG-055: the vacant office (or squad leader post) R0 `office` names, with its fix
                            "office": Str(maxbytes=200),
                            # BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command

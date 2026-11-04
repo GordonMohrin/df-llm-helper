@@ -44,3 +44,14 @@ tests/test_bug349_351_plan.py (5 BUG-349 tests), tests/lua/test_bug336_seal_esca
 i2 Guildcleans: `dfllm plan check` with phase_target P5: `warn perimeter: open for N days (...) while seal y374s1b0 stuck
 5508 d ...: raising phase_target P3 -> P5 is waived (BUG-349 ...)`, plan OK; PHASE P3 -> P4 once orders_rockstock passes.
 The next seal_stalled for 130,93,130 without a command, its how `no command helps: the wall waits for a building item`.
+
+## Review fix (merge16)
+The waiver counted `ready.pd`, the age of the whole open spell, so an old seal stuck elsewhere waived a newly opened real way in
+(a gate bridge destroyed today) at once. readiness now keeps the newest opening's tick (`st.nt`, persisted with `st.wn`, the
+ways in counted): set when the spell begins, when the entrance check counts more ways in than before (0 -> 1 included; a drop
+lowers the count, a later rise is new again) and when `pw` names a lost bridge or lever it did not name before. State
+`ready.pn` = its days (<= pd; contract.lua, schema.py, CONTRACTS, appendix). plan.waive_age = min(pd, pn) (pd alone for an
+older kernel) drives perimeter_waiver, the refusal's `(in N d)` and propose's note. Tests: tests/test_bug349_351_plan.py
+`test_bug349_review_a_fresh_opening_is_not_waived_by_an_old_stuck_seal`, tests/lua/test_open_perimeter.lua `review fix
+merge16` (both fail on cc65ee4). Live: after a bridge loss `ready.pn` restarts at 0 while `pd` keeps counting; plan check
+refuses the raise until pn reaches 365.
