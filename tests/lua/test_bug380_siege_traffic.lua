@@ -30,7 +30,7 @@ local function build(o)
     local x, y = w.route[1][1], w.route[1][2]
     local u = S.cit(w.id, x, y, Z, w.kind == 'soldier' and {squad = 1} or nil)
     units[#units + 1] = u
-    walkers[#walkers + 1] = {id = w.id, route = w.route, start = w.start or 0, i = 1, kind = w.kind}
+    walkers[#walkers + 1] = {id = w.id, route = w.route, start = w.start or 0, i = 1, kind = w.kind, ghost = w.ghost}
   end
   for _, u in ipairs(o.army or {}) do units[#units + 1] = u end
   local W = S.world{units = units, mode = o.mode, move = o.move or 100, lever_default = {worker = 30, pull = 40}}
@@ -50,6 +50,7 @@ local function path_of(w)
   for k = w.i + 1, math.min(#w.route, w.i + 25) do
     xs[#xs + 1], ys[#ys + 1], zs[#zs + 1] = w.route[k][1], w.route[k][2], Z
   end
+  for _, g in ipairs(w.ghost or {}) do xs[#xs + 1], ys[#ys + 1], zs[#zs + 1] = g[1], g[2], Z end
   if #xs == 0 then return nil end
   return {path = {x = kmock.vec(xs), y = kmock.vec(ys), z = kmock.vec(zs)}}
 end
@@ -111,28 +112,28 @@ local function flips_to(W, b, to)
 end
 
 -- a squad of six walks in over B2 to the stations behind it (y 66), one tile apart, then a citizen reaches B2 every 170 ticks
--- (19 tiles apart), alternately from each side, 8 of them: no gap longer than 170 ticks opens, so the pull is held for
--- good by the walkers 20 steps out; the old rule (only the last 6 steps hold) found a gap for the pull (~70 ticks) and
--- the next citizen, 14 steps out, walked onto B2 in the ~100 ticks it moved
+-- (19 tiles apart), alternately from each side, 8 of them (Review fix merge20: 230 ticks apart, so a gap of the 70 ticks the
+-- pull needs opens after each walker is across; the walkers within 13 steps hold, the old rule of the last 6 steps let the
+-- next citizen, 14 steps out, walk onto B2 in the ~100 ticks it moved)
 local function traffic_b2(n)
   local ws = {}
   for i = 1, 6 do ws[#ws + 1] = {id = 300 + i, kind = 'soldier', route = route(51, 46, 66), start = (i - 1) * 18} end
   for k = 0, n - 1 do
     local north = k % 2 == 0                   -- from y 90 (30 steps to the footprint) or from y 46 (14 steps)
     ws[#ws + 1] = {id = 320 + k, kind = 'citizen', route = north and route(50, 90, 46) or route(52, 46, 90),
-                   start = 300 + 170 * k - (north and 270 or 126)}
+                   start = 300 + 230 * k - (north and 270 or 126)}
   end
   return ws
 end
 
 T.test('BUG-380 traffic (1): BREACH, no hostile in sight, a squad and a stream of citizens over B2 -> nobody is crushed, ' ..
-       'B2 stays down while a walker is within 20 steps of it and rises once they are gone', function()
+       'B2 stays down while a walker can reach it before it has moved (13 steps) and rises in the first gap', function()
   local W = build{mode = 'BREACH', walkers = traffic_b2(8)}
   run(W, 2600)
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
   local up = flips_to(W, 'B2', 'up')
   T.eq(#up, 1, 'B2 rose once')
-  T.ok(up[1] >= 300 + 7 * 170, 'not before the last citizen is at B2 (1490): ' .. up[1])
+  T.ok(up[1] + W.move_ticks < 900, 'up before T+900: ' .. up[1])
   T.eq(S.bstate(W, 'B2'), 'up')
   T.eq(#W.find_events('GATE_FORCED'), 0, 'no hostile in sight: nothing is forced')
 end)
@@ -176,8 +177,8 @@ end)
 -- the other half: with the army within HURRY_NEAR (30) tiles of B1 (25: it stands in the killing field) the stream must
 -- not keep B1 down for good (BUG-335: BREACH at T+900): the walkers farther than PATH_SIEGE steps are let go again
 -- (the hotfix; the accepted risk, a hostile being there), so B1 rises at the siege timer, long before T+900
-T.test('BUG-380 traffic (3): SIEGE, an army 25 tiles from B1 and a stream over it -> B1 up at the siege timer, before ' ..
-       'T+900, no GATE_FAIL, no BREACH', function()
+T.test('BUG-380 traffic (3): SIEGE, an army 25 tiles from B1 and a stream over it -> B1 up before T+900, nobody crushed, ' ..
+       'no GATE_FAIL, no BREACH', function()
   local army = S.army(6, 50, 14)
   local W = build{walkers = traffic_b1(), army = army}
   run(W, 1400)
@@ -185,9 +186,84 @@ T.test('BUG-380 traffic (3): SIEGE, an army 25 tiles from B1 and a stream over i
   local up = flips_to(W, 'B1', 'up')
   T.eq(#up, 1)
   T.ok(up[1] + W.move_ticks - t0 < 900, 'B1 up before T+900: ' .. (up[1] + W.move_ticks - t0))
-  T.ok(up[1] < 610, 'not held for the whole stream (the last citizen is at B1 at 610): ' .. up[1])
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
   T.eq(S.bstate(W, 'B1'), 'up')
   T.eq(#W.find_events('GATE_FAIL') + #W.find_events('BREACH'), 0)
+end)
+
+-- Review fix (merge20): the raise is timed (CROSS_REACH), not measured by the hostile's distance. Every test asserts both
+-- halves: nobody is crushed (nobody on a footprint while it moves) and the bridge is up before T+900 of its epoch.
+local function t900(W, b)
+  local up = flips_to(W, b, 'up')                  -- the world starts in the mode: the epoch begins at the first tick
+  T.eq(#up >= 1, true, b .. ' rose')
+  return up[1] + W.move_ticks, up[1]
+end
+-- a stream 8..20 steps south of B2: citizens in a queue 14..20 steps out whose paths lead over it (they stand there for good:
+-- the 20-step rule held the raise for them until GATE_FAIL) and real citizens crossing 220 ticks apart, each within 8..20 steps
+-- of it for ~110 ticks
+local function south_stream(n, gap, first)
+  local ws = {}
+  for j = 0, 5 do
+    local y = 74 + j
+    ws[#ws + 1] = {id = 600 + j, kind = 'citizen', route = {{50 + j % 3, y}}, ghost = route(50 + j % 3, y - 1, 58), start = 0}
+  end
+  for k = 0, n - 1 do
+    ws[#ws + 1] = {id = 400 + k, kind = 'citizen', route = route(50, 80, 46), start = first + gap * k}
+  end
+  return ws
+end
+
+T.test('BUG-380 traffic (4): BREACH, no hostile in sight, a stream of citizens 8..20 steps from B2 -> B2 up before T+900, ' ..
+       'nobody on the footprint while it moves', function()
+  local W = build{mode = 'BREACH', walkers = south_stream(8, 220, 0)}
+  run(W, 2200)
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
+  local rel = t900(W, 'B2')
+  T.ok(rel < 900, 'B2 up before T+900: ' .. rel)
+  T.eq(S.bstate(W, 'B2'), 'up')
+  T.eq(#W.find_events('GATE_FAIL'), 0, 'no GATE_FAIL')
+end)
+
+T.test('BUG-380 traffic (5): BREACH, a hostile parked 20 tiles from B2 and the same stream -> B2 up before T+900, ' ..
+       'nobody crushed (the walkers 14..20 steps out are let go, the nearer ones hold)', function()
+  local W = build{mode = 'BREACH', walkers = south_stream(8, 220, 0), army = S.army(3, 50, 80)}
+  run(W, 2200)
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
+  local rel = t900(W, 'B2')
+  T.ok(rel < 900, 'B2 up before T+900: ' .. rel)
+  T.eq(S.bstate(W, 'B2'), 'up')
+  T.eq(#W.find_events('GATE_FAIL'), 0, 'no GATE_FAIL')
+end)
+
+T.test('BUG-380 traffic (6): BREACH, a hostile 20 tiles from B2, a soldier 9 steps out walks onto it -> he holds the raise ' ..
+       '(not crushed), B2 rises behind him before T+900', function()
+  local ws = {{id = 301, kind = 'soldier', route = route(51, 51, 70), start = 40}}
+  local W = build{mode = 'BREACH', walkers = ws, army = S.army(3, 50, 80)}
+  run(W, 1400)
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
+  local rel, at = t900(W, 'B2')
+  T.ok(rel < 900, 'B2 up before T+900: ' .. rel)
+  T.ok(at >= 18 * 9, 'not before the soldier is across (19 steps): ' .. at)
+  T.eq(S.bstate(W, 'B2'), 'up')
+end)
+
+-- units standing 3..5 steps from B2 with a path that goes on over it (a queue at the gate) never leave: the walkers hold
+-- until CROSS_HELD of the DEADLINE, then the deadline escape raises the bridge (nobody on the footprint), logged
+T.test('BUG-380 traffic (7): BREACH, a queue within 5 steps of B2 for good -> the deadline escape raises B2 before T+900 ' ..
+       'with nobody on the footprint', function()
+  local ws = {}
+  for i = 0, 5 do
+    local y = 63 + i % 3
+    ws[#ws + 1] = {id = 500 + i, kind = 'citizen', route = {{50 + i % 3, y}}, ghost = route(50 + i % 3, y - 1, 58), start = 0}
+  end
+  local W = build{mode = 'BREACH', walkers = ws}
+  run(W, 1600)
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
+  local rel = t900(W, 'B2')
+  T.ok(rel < 900, 'B2 up before T+900: ' .. rel)
+  T.ok(rel >= 450, 'held until the escape (450 held): ' .. rel)
+  T.eq(S.bstate(W, 'B2'), 'up')
+  T.eq(#W.find_events('GATE_FAIL'), 0, 'no GATE_FAIL')
 end)
 
 T.done()

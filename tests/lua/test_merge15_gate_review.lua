@@ -51,12 +51,13 @@ local function jobs(W)
 end
 
 -- o.cross: citizen 7 sets off on a path over O1 whenever a pull is queued (and stops when none is); it enters the
--- footprint at step 6 (Hotfix live BREACH: in a SIEGE only walkers within PATH_SIEGE 6 steps hold a raise);
+-- footprint at step 6 (Review fix merge20: o.cross = 'near' at step 2, within CROSS_ESCAPE: a raise held for half the DEADLINE
+-- goes on over walkers farther out, only units on the footprint or within 2 steps still hold it);
 -- o.beside: citizen 7 steps beside O1 while a pull is taken; o.mill: puller 18 steps closer in his room while one is taken
 local function run(W, ticks, o)
   o = o or {}
   local over = {}
-  for y = 15, 10, -1 do over[#over + 1] = {51, y} end
+  for y = o.cross == 'near' and 11 or 15, o.cross == 'near' and 8 or 10, -1 do over[#over + 1] = {51, y} end
   S.run(W, ticks, {frame = function(dt)
     W.frame(dt)
     local q, taken = jobs(W)
@@ -92,7 +93,7 @@ T.test('Review fix (merge15): pulls cancelled for a unit only walking onto the b
        'toward pull_cap (old: GATE_FAIL blocked, every lever parked); they are approach cancels (gate_traffic)', function()
   local W = world{cfg = {gate = {pull_cap = 4, giveup_wait = 3000}}}
   W.event('INVASION', {id = 1})
-  run(W, 3000, {cross = true})
+  run(W, 3000, {cross = 'near'})
   T.eq(#fails(W, 'O1', 'blocked'), 0, 'old code: give-up blocked after 4 cancels')
   T.eq(logged(W, 'give-up'), nil, 'no give-up')
   T.ok(#S.pulls(W, 'O1') > 4, 'pulls go on: ' .. #S.pulls(W, 'O1'))
