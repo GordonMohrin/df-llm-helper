@@ -43,6 +43,7 @@ def test_the_draft_has_no_rooms_for_a_floor_that_is_not_dug_and_places_nothing(s
     assert fort["core_dig"] is True
     before = sorted(p.name for p in (save / "bp").iterdir())
     doc = plan.propose(s, plan.load_phases(), None, decisions={}, applied=plan.applied_builds(save, s), fort=fort)
-    assert all(b["tpl"] == "seal" for se in doc["seasons"] for b in se["build"])
+    # BUG-356 (merged with BUG-363): besides the seal only the surface startup set (no dug floor needed)
+    assert all(b["tpl"] == "seal" or (b["tpl"] == "workshops" and (b.get("p") or {}).get("surface")) for se in doc["seasons"] for b in se["build"])
     assert doc["phase_target"] == "P0" and schema.validate("plan", doc) == []
     assert sorted(p.name for p in (save / "bp").iterdir()) == before        # propose only drafts
