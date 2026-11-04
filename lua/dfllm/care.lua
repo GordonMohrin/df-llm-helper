@@ -713,6 +713,7 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   local line = MD.line{name = name, unit = u.id, kind = kind, sl = open_slots(job, rec), miss = miss, ws = ws, shop = shop,
                        left = left, src = lsrc}
   local reasons = MD.reasons(c, {now = now, ws = ws, shop = shop, left = left, nosrc = rec.nosrc, since = rec.since,
+                                 far = rec.far,
                                  unres_since = type(rec.unres) == 'table' and math.tointeger(rec.unres.since) or nil})
   local days = left and left // DAY or nil
   st.mview = st.mview or {}
@@ -726,6 +727,8 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   local did = {}
   if ask ~= '' then did[#did + 1] = 'kernel asked ' .. ask .. ' first' end
   if webs then did[#did + 1] = webs end
+  local reach = M.mood_reach_text(K, rec, miss)                     -- BUG-341
+  if reach then did[#did + 1] = reach end
   local msg = string.format('[unit %d %s] %s', u.id, table.concat(reasons, ','), line)
   if #did > 0 then msg = msg .. '; ' .. table.concat(did, '; ') end
   local sl = open_slots(job, rec) or {}
@@ -734,7 +737,30 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   K.emit('MOOD_CRITICAL', 'A', trunc(msg, 200),
          {unit = u.id, why = reasons[1], reasons = reasons, kind = kind, name = name, ws = ws, missing = miss,
           left = days or -1, lsrc = lsrc, need = shop, ask = ask ~= '' and trunc(ask, 80) or nil,
-          webs = webs and trunc(webs, 80) or nil, slots = #slt > 0 and slt or nil})
+          webs = webs and trunc(webs, 80) or nil, slots = #slt > 0 and slt or nil,
+          far = (math.tointeger(rec.far) or 0) > 0 and rec.far or nil, reach = reach and trunc(reach, 120) or nil})
+end
+
+-- BUG-341: what the kernel does and what is left to the player when a mood's material lies only out of his reach (rec.far,
+-- set by mood_report): the caravans are asked (rec.buy goes to trade first), economy counts the far items as no stock
+-- (more is felled / made); for wood the FellTree jobs the woodcutters can reach (economy.fell_reach). Left: open the way,
+-- bring the items in, or wall the dwarf in before the mood ends (no kernel verb). nil without far items
+function M.mood_reach_text(K, rec, miss)
+  local far = math.tointeger(rec.far) or 0
+  if far <= 0 then return nil end
+  local parts = {string.format('%d out of his reach', far)}
+  if type(rec.buy) == 'table' and #rec.buy > 0 then parts[#parts + 1] = 'caravans asked: ' .. table.concat(rec.buy, ',') end
+  local wood = false
+  for _, cls in ipairs(type(miss) == 'table' and miss or {}) do if cls == 'wood' then wood = true end end
+  if wood then
+    local okf, fr = K.call('economy', 'fell_reach')
+    if okf and type(fr) == 'table' and (math.tointeger(fr.open) or 0) > 0 then
+      parts[#parts + 1] = string.format('trees: %d of %d FellTree reachable', math.tointeger(fr.reach) or 0,
+                                        math.tointeger(fr.open) or 0)
+    end
+  end
+  parts[#parts + 1] = 'open the way, bring them in, or wall him in'
+  return table.concat(parts, '; ')
 end
 
 local function mood_seen(K, c, r, p, u, kind)
@@ -3389,6 +3415,7 @@ local function mood_report(K, c, r, p)
         end
       end
       rec.buy = #buys > 0 and buys or nil
+      rec.far = far > 0 and far or nil              -- BUG-341: MOOD_CRITICAL 'reach' (mood_emergency)
       if #labels == 0 then
         if rec.unres then K.log('info', 'mood unit %s: every material is available now', m.sid) end
         rec.unres, rec.missing, rec.checked, rec.nosrc, rec.glass, rec.sl = nil, {}, rec.checked or now, nil, nil, nil

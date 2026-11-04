@@ -720,4 +720,16 @@ T.test('BUG-341: mood logs out of reach are no stock: the wood floor stands abov
   for _, line in ipairs(F.runs(W2)) do T.ok(not line:find('autochop', 1, true), 'reachable logs: baseline suffices: ' .. line) end
 end)
 
+
+-- BUG-341 review (r15 famine verdict: `far` was added per mood_wants entry, two wood needs with 89 far logs each made a
+-- floor of ~180 and held every wood order while the mood lasted): the far items count once per class, the most any one
+-- need of the class misses
+T.test('BUG-341 review: far items count once per class (max, not the sum of the needs)', function()
+  local W = world{care = true, phase = 'P3', wood = 89,
+                  wants = {{cls = 'logs', n = 1, far = 89}, {cls = 'logs', n = 2, far = 89}, {cls = 'logs', n = 1, far = 40}}}
+  days(W, 1)
+  local _, sup = W.K.call('economy', 'supply')
+  T.eq(sup.wood.floor >= 93 and sup.wood.floor < 120, true, 'need 1+2+1 + far 89 once (floor ' .. tostring(sup.wood.floor) .. ')')
+end)
+
 T.done()

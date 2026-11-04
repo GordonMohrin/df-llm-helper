@@ -226,7 +226,9 @@
   "cover": {"on": true, "min_jobs": 20, "gather_jobs": 10, "farm_per": 10, "farm_min": 2, "farm_max": 12,
             "gather_per": 25, "gather_min": 2, "gather_max": 8, "other_per": 20, "other_max": 3, "share": 50,
             "step": 4, "idle_days": 7, "stale_days": 30, "unmark_max": 200,
-            "labors": {"GatherPlants": "HERBALIST", "PlantSeeds": "PLANT", "HarvestPlants": "PLANT"}}
+            "labors": {"GatherPlants": "HERBALIST", "PlantSeeds": "PLANT", "HarvestPlants": "PLANT"}},
+  "famine_crew": {"on": true, "farmers": 3, "cooks": 1, "brewers": 1, "gatherers": 2, "share": 25, "step": 2,
+                  "off_days": 30}
  },
  "care": {
   "units_per_slice": 50,

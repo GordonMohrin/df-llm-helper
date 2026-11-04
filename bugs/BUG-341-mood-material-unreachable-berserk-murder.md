@@ -1,6 +1,6 @@
 # BUG-341 a mood material out of reach ends in a berserk murder: the unreachable stock hides the need
-Status: partly fixed (offline, live-untested): unreachable stock counts as missing; open: locking a moody dwarf who will fail,
-opening the way (a raised bridge) for him
+Status: partly fixed (offline, live-untested): unreachable stock counts as missing (once per class), MOOD_CRITICAL `reach` at
+once and at each days-left step; open: locking a moody dwarf who will fail, opening the way, hauling items across walk groups
 Severity: critical
 Found: 2026-11-04, Run 15 (Guildcleans, i2, `runs/run-15-guildcleans/FR-BUGS.md` "Mood-Material 'logs none reachable' fuehrt
 zu Berserk-Mord (y376 Sommer d68)"), kernel main b35af6d
@@ -27,19 +27,39 @@ the walk-group hook said another walk group.
 - care's decision hint with the walk-group hook: `N out of his reach (another walk group): the kernel makes more; open the
   way` (`outside Kern+` stays for the Kern+ fallback without the hook).
 
+## Round 2 (review r15_famine_verdict)
+- The verdict: more felling only adds unreachable FellTree jobs when no tree lies on the woodcutters' walk group, nothing
+  escalated with the time left, the far add was per need, not per class.
+- `far` once per class (economy.lua care_hooks): the need is the sum of the needs plus the largest `far` of the class (cap
+  100), not `far` per need (two wood needs with 89 far logs each made a floor of ~180 and held every wood order).
+- MOOD_CRITICAL `reach` (mood.lua MD.reasons, care.lua mood_emergency / `mood_reach_text`): a short need whose free items lie
+  off his walk group is an emergency at once, again at each step of days left (20, 10, 5, 2: the existing cadence tokens).
+  The line names what the kernel did and what is left: `N out of his reach; caravans asked: <buy tokens>; trees: R of O
+  FellTree reachable (economy.fell_reach); open the way, bring them in, or wall him in` (d.far, d.reach). The mood's buy
+  tokens already go to trade first (care.mood_wants -> trade mood_tokens; the far shortage is part of `n`).
+- economy.fell_reach() (CONTRACTS §7): the open FellTree jobs of the last job census and how many the citizens reach.
+
 ## Open
 - Locking the moody dwarf when the mood will fail (Possessed/Fey go berserk): no verb or act for it yet; seal/door_forbid
   could hold him in his workshop room. Needs Gordon's rule (FR).
 - When the fort is cut off from every tree and log (bridges up, no tree on the walk group), more chopping does not help;
-  the way must be opened (lever in PEACE) or the material bought (trade wants carry the mood's `buy` tokens, BUG-284).
+  the way must be opened (lever in PEACE) or the material bought (trade wants carry the mood's `buy` tokens, BUG-284). The
+  kernel opens no way and moves no item across walk groups itself (an item nobody reaches cannot be hauled); MOOD_CRITICAL
+  `reach` asks the player at once instead of at 20 days left.
+- Withdrawing FellTree designations off the woodcutters' walk group (as cover_unmark does for GatherPlants) so autochop marks
+  reachable trees is not done (autochop's own reach test is DFHack's).
 
 ## Tests (fail on b35af6d)
 - tests/lua/test_economy_chains.lua `BUG-341: mood logs out of reach are no stock: the wood floor stands above them,
   autochop fells trees` (89 logs, far 89: `autochop target 200 110`; reachable: no change).
 - tests/lua/test_care_moods.lua `BUG-341: free items out of reach of the moody dwarf are mood_wants.far; the decision says
   another walk group`.
+- Round 2: tests/lua/test_economy_chains.lua `BUG-341 review: far items count once per class`; tests/lua/test_care_moods.lua
+  `BUG-341: a short need with its items out of reach -> MOOD_CRITICAL reach at once, naming the caravans and the way`.
 
 ## Live check
 A mood whose logs (or leather, cloth) lie on another walk group: kern.log `need wood N (care: mood)` with N above the free
 count, `autochop target ...` raised, FellTree jobs on the citizens' walk group; DECISION_NEEDED mood_material names
 `out of his reach (another walk group)`.
+Round 2: `dfllm events --type MOOD_CRITICAL` shows `reach` at the first mood check after the need is known, d.reach naming
+the FellTree reach for wood.

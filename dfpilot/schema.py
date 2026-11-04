@@ -549,9 +549,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa fix:s")),
     # BUG-282: why = thirst | hunger (the bars above) or, whatever the thirst, workshop | material | waiting | timer (reasons =
     # all of them); left = days to the nearest death line (-1 unknown; lsrc timer | est | thirst | hunger, BUG-307), need = the shop type his skill lacks, ask =
-    # the shops the kernel requested itself (PROJECT_REQUEST workshops why=mood), webs = its collect-webs task
+    # the shops the kernel requested itself (PROJECT_REQUEST workshops why=mood), webs = its collect-webs task; BUG-341: why
+    # reach = the material lies only out of his reach (far = those free items), reach = what the kernel did and what is left
     "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s "
-                                                    "reasons:sa left:i lsrc:s need:s ask:s webs:s slots:sa")),
+                                                    "reasons:sa left:i lsrc:s need:s ask:s webs:s slots:sa far:i reach:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),

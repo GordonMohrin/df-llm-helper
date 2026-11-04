@@ -420,4 +420,20 @@ T.test('BUG-340: food_low asks the caravans for food and seeds itself; each opti
   for _, w in ipairs(tw2 or {}) do T.ok(w.buy ~= 'food', 'food enough: no food wanted') end
 end)
 
+
+-- BUG-341 review (r15 famine verdict): the option `bp.place farms surface:1` was offered in every mode, also in a siege;
+-- follow itself places a surface farm only in PEACE (BUG-302). Outside PEACE the option is an underground farm room
+T.test('BUG-341 review: the farms option is a surface farm only in PEACE, a farm room otherwise', function()
+  for _, m in ipairs({'PEACE', 'ALERT', 'SIEGE'}) do
+    local W = world{cit = 20, food = 10, mode = m}
+    days(W, 1)
+    local d = decisions(W, 'food_low')[1]
+    local cmd
+    for i, o in ipairs(d and d.d.opts or {}) do if o == 'farms' then cmd = d.d.cmds[i] end end
+    T.ok(cmd, m .. ': farms offered')
+    if m == 'PEACE' then T.ok(cmd:find('"surface":1', 1, true), cmd)
+    else T.ok(not cmd:find('surface', 1, true) and cmd:find('"tpl":"farms"', 1, true), m .. ': ' .. cmd) end
+  end
+end)
+
 T.done()
