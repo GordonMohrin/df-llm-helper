@@ -388,6 +388,8 @@ Related: FR-xx, BUG-xx
 | [BUG-374](BUG-374-seal-says-nothing-to-close-while-status-names-ways-in.md) | fixed (offline, live-untested) | medium | Run 16d: seal at=last 'nothing to close' beside open ways in (old snapshot closes, counted ways without tiles) | dfpilot/cmd |
 | [BUG-375](BUG-375-perimeter-opens-again-every-year-and-holds-the-pop-cap.md) | fixed (offline, live-untested) | medium | Run 16d: saplings reopen the perimeter every year; pop cap held beside a queued seal | dfpilot/cmd, lua/readiness |
 | [BUG-376](BUG-376-audit-bypass-no-wall-tile-no-fix.md) | fixed (offline, live-untested) | low | Run 16d/16b: audit bypass 'no wall tile on the route' names no fix or waiver | dfpilot/bp/topo, cmd, brief, plan |
+| [BUG-385](BUG-385-two-follows-take-the-lock-from-each-other.md) | fixed (offline, live-untested) | medium | Run 16b: two `follow --takeover` on one instance take the lock from each other (a Monitor restarts the loser); status names no owner | dfpilot/wake.py:1493 |
+| [BUG-386](BUG-386-runtime-name-stays-behind-autosave-names.md) | fixed (offline, live-untested) | medium | Run 16b: runtime name stays `region1-site97` after save-as although BUG-362 is in: every later boot runs in `autosave N`, the player's name is gone | lua/dfllm/kern.lua:1519 |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
