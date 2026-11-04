@@ -126,8 +126,9 @@ def test_bug250_summary_brook_distance_and_best_compromise():
     lines = drv.summarize({"id": "s", "state": "done", "results": rows})
     row_a = next(x for x in lines if x.startswith("  a:"))
     assert row_a.endswith("brook=8 tiles at 114,172 (b)"), row_a
-    assert next(x for x in lines if x.startswith("  b:")).endswith("brook=in (brook)")
-    assert next(x for x in lines if x.startswith("  c:")).endswith("brook=36 tiles at 114,172 (b)")
+    assert next(x for x in lines if x.startswith("  b:")).endswith(
+        "brook=in (brook) 2 tile(s), nearest 0.5 tiles (~24 steps) from the centre")      # BUG-409
+    assert next(x for x in lines if x.startswith("  c:")).endswith("brook=none seen"), "BUG-409: 36 tiles away is not near"
     best = [x for x in lines if "best compromise" in x]
     assert best == ["  best compromise: a score 34 fails dark_fortress,water: embark 7,10,10,6 --accept dark_fortress "
                     "--accept water --reason TEXT"], lines

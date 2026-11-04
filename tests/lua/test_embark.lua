@@ -300,7 +300,7 @@ T.test('steps: merge_tiles keeps the best water/trees/metals and the worst evil/
   local m = S.merge_tiles(rec, {t1, t2})
   T.eq(m.water, 'brook'); T.eq(m.trees, 'heavily_forested'); T.eq(m.metals, {'iron'}); T.eq(m.flux, true)
   T.eq(m.evil, 'evil'); T.eq(m.savagery, 'high'); T.eq(m.aquifer, 'light')
-  T.eq(m.neighbors[1].race, 'goblins'); T.eq(m.tiles, {n = 2, water = 1, wood = 1})
+  T.eq(m.neighbors[1].race, 'goblins'); T.eq(m.tiles, {n = 2, water = 1, wood = 1, aq_best = 'none'}, 'BUG-411: the tiles differ, the best aquifer is kept')
   local deep = P.parse(fixture('site_aquifer_popup'))                      -- very deep soil on the hovered tile
   local d = S.merge_tiles(deep, {{rivers = {}, soil = 'some', layers = {'granite'}}, {rivers = {}, soil = 'deep'}})
   T.eq({d.soil, d.stone_soil, d.layers}, {'very_deep', 'some', {'granite'}}, 'stone: the shallowest tile counts')

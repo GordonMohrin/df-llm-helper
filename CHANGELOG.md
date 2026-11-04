@@ -1,5 +1,20 @@
 # CHANGELOG dfpilot
 
+## Embark tool: brook distance, a world pre-rank, worst-case hover merge (BUG-409 to BUG-411, 2026-11-04; offline, live-untested)
+- **Why:** Run 16: i1 Mansionlauded (18,22) embarked on `brook=in` whose brook lay on the rectangle's rim, the only water 95 steps away at the map
+  edge (13 of 16 died of thirst); every fort was found by ~25-45 blind scans at ~25 s each; i4/i2 read 'light aquifer' by hover and met a heavy
+  one in the placed rectangle.
+- **BUG-409:** `embark.py scan` shows the brook against the rectangle: ` brook=in (kind) 3 tile(s), nearest 0.5 tiles (~24 steps) from the centre`,
+  ` brook=EDGE ONLY ...` (only the outer ring), ` brook=OUTSIDE the rectangle`; the checklist `water` item warns (score -12) for an edge-only
+  brook (`steps.water_geometry`, `rec.tiles.water_n/core/d2`); the 'none seen' search takes only brooks within 16 tiles (not other sites).
+- **BUG-410:** `embark.py rank --box X0,Y0,X1,Y1 [--step N] [--sample 1|4|9] [--top N]` and `rank --last`: a hover sweep over a box of world tiles
+  (1/4/9 hovered panels each, compact rows, at most 400 tiles per run; vanilla panel text only, no world data), printed as a pre-rank (counts,
+  failed criteria, best N, the `scan ... --hover` line). A sweep's missing brook is a warn, not a fail.
+- **BUG-411:** a hover row's stone uses the DEEPEST soil of its tiles (`merge_tiles` `worst_stone`), the aquifer item and the summary show the
+  spread (`aq=heavy (tiles differ, best none)`), and a note says the popup of the placed rectangle decides.
+- **Tests:** tests/lua/test_embark_fix22.lua, tests/test_bug409_411_embark.py; test_embark.lua, test_embark_fix6.lua and test_bug245_250
+  expectations updated (worst-case merge, brook text).
+
 ## Surface core for an aquifer world, area-only wet layers, an applicable propose (BUG-387 to BUG-389, 2026-11-04; offline, live-untested)
 - **Why:** Run 16 region1 (aquifer nearly everywhere): no fort got a dug fortcore ('no dry fortcore site ... (wet level z130)' at every depth in i2, depth=1
   breached heavy_aquifer at 4 % in i1, sites 1-6 steps from water in i3); every room template hangs on the dug Z4 floor, so office, dining, tavern and bedrooms

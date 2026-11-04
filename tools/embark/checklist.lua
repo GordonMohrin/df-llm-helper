@@ -137,11 +137,24 @@ function C.evaluate(rec, rules, ctx)
   tiered('evil', evil, {'neutral', 'good'}, {})
   tiered('savagery', sav, {'low', 'medium'}, {})
   tiered('trees', rec.trees, rules.trees_ok, rules.trees_warn)
-  if rec.water then put('water', 'pass', rec.water)
+  local wt = rec.tiles
+  if rec.water and wt and (wt.water_n or 0) > 0 and (wt.water_core or 0) == 0 then
+    -- BUG-409 (i1 18,22: 'brook=in', the brook on the rectangle's top row, the only water 95 steps away at the map
+    -- edge): a brook on the outer ring only may lie at the map edge, far from where the fort digs
+    put('water', 'warn', string.format('%s only on the edge tiles of the rectangle (%d tile(s), nearest %.1f tiles = about %d ' ..
+      'steps from the centre)', rec.water, wt.water_n, (wt.water_d2 or 0) / 2, (wt.water_d2 or 0) * 24))
+  elseif rec.water then put('water', 'pass', rec.water)
   elseif rec.aquifer == 'light' then put('water', 'warn', 'no stream shown; light aquifer as well source')
+  elseif ctx.sweep then   -- BUG-410: a sweep hovers a few tiles; a brook on the others is not excluded
+    put('water', 'warn', 'no brook in the ' .. tostring(wt and wt.n or '?') .. ' sampled tiles (scan --hover reads all 16)')
   elseif (rec.read or 0) > 0 then put('water', 'fail', 'no brook or river shown')
   else put('water', 'unknown', 'not shown') end
   tiered('aquifer', rec.aquifer, rules.aquifer_ok, rules.aquifer_warn)
+  if wt and wt.aq_best then   -- BUG-411: the hovered tiles differ; the item shows the worst, say so
+    for _, it in ipairs(items) do
+      if it.id == 'aquifer' then it.why = it.why .. ' (worst of the hovered tiles, best ' .. wt.aq_best .. ')' end
+    end
+  end
   put('flux', rec.flux and 'pass' or 'warn', rec.flux and 'flux stone layer' or 'no flux shown')
   -- Run 9 postmortem lesson 1: a metal ore within reach is required; the panel lists the site's metals
   if (rec.read or 0) == 0 then put('ore', 'unknown', 'panel not read')
@@ -171,6 +184,11 @@ function C.evaluate(rec, rules, ctx)
         (layers and (', ' .. layers) or '') .. ')')
   elseif layers then put('stone', 'pass', 'stone layers ' .. layers)
   else put('stone', 'unknown', 'soil depth not shown') end
+  if wt and wt.worst_stone then   -- BUG-411: a hover row judges stone on the deepest soil of its tiles
+    for _, it in ipairs(items) do
+      if it.id == 'stone' then it.why = it.why .. ' [deepest soil of the hovered tiles]' end
+    end
+  end
   -- BUG-229: DF refuses a rectangle entirely on water or mountains; the site finder's matches can be such rectangles
   local tl = rec.tiles
   if pop.water_mountain then put('terrain', 'fail', 'popup: cannot embark entirely on water or mountains')

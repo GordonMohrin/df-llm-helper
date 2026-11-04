@@ -135,6 +135,8 @@ python tools/embark/embark.py newgame [--world Zilirr]     # title -> world map
 python tools/embark/embark.py newgame --world-folder region1 --portable   # BUG-245: one of several same-named worlds
 python tools/embark/embark.py scan 26,10 18,9,6,6 7,23     # read and rank sites, embark nowhere
 python tools/embark/embark.py scan 9,7 10,6 --hover        # BUG-247: 16 hovered panels per site, no rectangle
+python tools/embark/embark.py rank --box 14,18,20,24 --top 6   # BUG-410: pre-rank a box of world tiles (4 hovered panels each)
+python tools/embark/embark.py rank --last --top 12         # BUG-410: rank the newest finished sweep again (no DF call)
 python tools/embark/embark.py embark 7,23,6,6              # read -> gate -> confirm -> prepare -> Embark!
 python tools/embark/embark.py embark 7,23,6,6 --waive dark_fortress   # one criterion checked by eye
 python tools/embark/embark.py embark 7,23,6,6 --accept ore --reason "copper/tin listed, iron by trade"   # FR-08
@@ -150,8 +152,16 @@ warning) and then confirms it like `embark` (accept.log site `here`). `save-as N
 Esc key to this DF's window, found by its executable folder, when the menu is closed; `--no-post`: press Esc yourself),
 clicks "Save and continue playing" once, erases the old name (STRING_A000), types NAME key by key (STRING_A<code>; the
 field must show it), SELECT, and ends when `dfhack.getSavePath()` names the new folder; an existing folder is refused.
-The scan summary appends to each row `brook=in (kind)` or `brook=N tiles at x,y (tag)` (nearest hovered tile with water)
-and, when no rectangle is `ok`, a line `best compromise: <tag> ... : embark WX,WY,LX,LY --accept ... --reason TEXT`.
+**BUG-409..411.** The scan summary shows a brook against the rectangle (`brook=in (kind) 3 tile(s), nearest 0.5 tiles (~24 steps)
+from the centre`; `brook=EDGE ONLY` when no brook tile is inside the outer ring, which also makes the `water` item a warning: the
+brook may lie at the map edge, i1 18,22 walked 95 steps; `brook=OUTSIDE the rectangle`). A hover row merges the worst aquifer and the
+deepest soil of its hovered tiles (`aq=... (tiles differ, best ...)`), but covers only those tiles: the Confirm popup of the placed
+rectangle decides. `rank` (BUG-410) is a SWEEP: per world tile `goto`, `Embark`, 1/4/9 hovered tiles (`--sample`, default 4 = the
+corners of the 4x4) and one compact row; only the site panel text of the vanilla UI is read (no world data, section 1). The output is
+the verdict counts, the failed criteria counted, the best `--top` tiles and the `scan ... --hover` line for them; a missing brook in
+the few sampled tiles is a warning. At most 400 world tiles per run (`--step`, or several boxes); `rank --last` ranks again.
+The scan summary appends to each row `brook=...` (see above) or `brook=N tiles at x,y (tag)` (nearest hovered tile with water within
+16 tiles) and, when no rectangle is `ok`, a line `best compromise: <tag> ... : embark WX,WY,LX,LY --accept ... --reason TEXT`.
 `WX,WY` is the world tile, optional `LX,LY` (0-15) the local tile of the rectangle's top-left
 corner (default `6,6`, the tile centre; v1 lesson: edges pick up neighbour geology). Then in the
 fort: `dfhack-run dfllm adopt`.
