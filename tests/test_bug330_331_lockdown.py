@@ -49,3 +49,23 @@ def test_bug331_wake_hint_carries_the_sortie_command_and_the_state_field():
     assert "calm for 64 days" in h and "squad.sortie" in h and "approve:true" in h
     assert "no squad to send" in wake.siege_long_hint({"id": "siege_long"})
     assert "lg" in schema.STATE.opt["wave"].opt
+
+
+def test_bug331_review_hint_and_brief_name_the_burrow_seal_really_holds():
+    """Review fix (merge14): seal's fight_rule may keep the civ alert on the refuge although siege lifted the deep defense;
+    the hint and the brief name the burrow seal holds (DECISION_NEEDED d.to, state alert.burrow), not a fixed Kern+."""
+    from types import SimpleNamespace
+
+    from dfpilot import brief
+    h = wake.siege_long_hint({"id": "siege_long", "days": 12, "n": 40, "to": "Tiefe+"})
+    assert "civilians in Tiefe+" in h and "civilians in Kern+" not in h
+    assert "civilians in Kern+" in wake.siege_long_hint({"id": "siege_long"})
+    s = {"wave": {"ph": "idle", "n": 0, "lg": 2400}, "alert": {"want": "Kern+", "burrow": "Tiefe+", "tiles": 9,
+                                                              "inside": 0, "ok": 0}}
+    out, _ = brief.def_parts(SimpleNamespace(s=s))
+    line = next(x for x in out if "eased" in x)
+    assert "eased 2.0 d: calm, civilians in Tiefe+" in line
+    out, _ = brief.def_parts(SimpleNamespace(s={"wave": {"ph": "idle", "n": 0, "lg": 1200}}))
+    assert any("civilians in Kern+" in x for x in out)
+    contracts = (ROOT / "docs" / "v2" / "CONTRACTS.md").read_text(encoding="utf-8")
+    assert "`seal.alert_burrow(mode, default, hold?, cur?, release?)`" in contracts

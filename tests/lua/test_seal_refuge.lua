@@ -484,6 +484,27 @@ T.test('Run 11 (siege 8: the alert switched between Tiefe+ and Kern+ during the 
   T.eq(#evs(W, 'REFUGE_SWITCH'), 1)
 end)
 
+T.test('BUG-331 review (merge14: the eased siege lifted st.deep, but fight_rule kept the alert on Tiefe+): with ' ..
+       '`release` the held refuge is left for the free pick (REFUGE_SWITCH released); never in a BREACH, never for no ' ..
+       'burrow', function()
+  local W = fort()
+  W.set_mode('SIEGE')
+  SW.draw(W, Z, {'+'}, 19, 10)
+  SW.regroup(W)
+  inspect(W, 'entrances', 'refresh')
+  W.run(1200, {skip = 9})
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')), 'Tiefe+', 'kept without release')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+', true)), 'Kern+',
+       'old code: Tiefe+ kept (KEEP) although siege lifted the deep defense')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[1].d.from, sw[1].d.to, sw[1].d.why}, {1, 'Tiefe+', 'Kern+', 'released'})
+  T.ok(sw[1].msg:find('Tiefe+ released (the eased siege lifted the deep defense)', 1, true), sw[1].msg)
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Kern+', true)), 'Kern+', 'Kern+ held: no switch')
+  W.set_mode('BREACH')
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+', false, 'Tiefe+', true)), 'Tiefe+',
+       'BREACH: the refuge')
+end)
+
 
 ---------------------------------------------------------------- BUG-040 (Run 11, y453)
 T.test('BUG-040 (Run 11 y453: Tiefe+ drink 0, wells 1, the alert on the dry Tiefe+): refuge_drink and inspect say ' ..

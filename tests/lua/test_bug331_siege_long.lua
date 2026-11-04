@@ -136,6 +136,52 @@ T.test('BUG-331: siege_long.on false keeps the old rule; an army near O1 is neve
   T.eq(W2.state().wave.deep, 'weak')
 end)
 
+-- BUG-331 review (merge14): seal's fight_rule kept a sounding refuge (KEEP) unless it had a reason; a stub with that rule
+-- (the refuge kept unless `release`, Kern+ otherwise) records what siege asks
+local function seal_stub(calls)
+  return {name = 'seal', every = {ticks = 100000},
+          alert_burrow = function(K, mode, default, hold, cur, release)
+            calls[#calls + 1] = {mode = mode, cur = cur, release = release}
+            if mode == 'BREACH' then return 'Tiefe+' end
+            if cur == 'Tiefe+' and release ~= true then return 'Tiefe+', nil, 'Tiefe+ kept (SIEGE)' end
+            return default
+          end}
+end
+
+T.test('BUG-331 review: the eased siege releases the refuge in seal (alert_burrow `release`): the civilians really go ' ..
+       'back to Kern+, and the question and the brief name the burrow seal holds', function()
+  local calls = {}
+  local W = world{equip = false, reflex = LG, extra = {seal_stub(calls)}}
+  T.ok(until_(W, 900, function() return W.K.mode() == 'SIEGE' end), 'SIEGE')
+  T.ok(until_(W, 900, function() return #evs(W, 'SIEGE_DEEP') > 0 end), 'the deep defense first')
+  run(W, 300)
+  T.eq(W.alert_burrows[1], 'Tiefe+')
+  T.ok(until_(W, 2400, function() return #evs(W, 'DECISION_NEEDED', 'siege_long') > 0 end), 'eased')
+  local e = evs(W, 'DECISION_NEEDED', 'siege_long')[1]
+  T.eq({e.d.lifted, e.d.to}, {1, 'Kern+'})
+  T.ok(e.msg:find('deep defense lifted: the civilians back to Kern+', 1, true), e.msg)
+  run(W, 300)
+  T.eq(W.alert_burrows[1], 'Kern+', 'old code: seal keeps the sounding Tiefe+ (no release)')
+  local last = calls[#calls]
+  T.eq({last.mode, last.release}, {'SIEGE', true})
+end)
+
+T.test('BUG-331 review: when seal still holds another burrow, the question says so (never "back to Kern+")', function()
+  local calls = {}
+  local stub = seal_stub(calls)
+  stub.alert_burrow = function(K, mode, default, hold, cur, release)
+    calls[#calls + 1] = {mode = mode, cur = cur, release = release}
+    return 'Tiefe+', nil, 'Tiefe+ kept'                       -- Kern+ fails seal's audit: the refuge stays
+  end
+  local W = world{equip = false, reflex = LG, extra = {stub}}
+  T.ok(until_(W, 900, function() return W.K.mode() == 'SIEGE' end), 'SIEGE')
+  T.ok(until_(W, 3600, function() return #evs(W, 'DECISION_NEEDED', 'siege_long') > 0 end), 'eased')
+  local e = evs(W, 'DECISION_NEEDED', 'siege_long')[1]
+  T.eq(e.d.to, 'Tiefe+')
+  T.ok(e.msg:find('deep defense lifted, but the civ alert holds the civilians in Tiefe+', 1, true),
+       'old code: "back to Kern+": ' .. e.msg)
+end)
+
 ---------------------------------------------------------------- BUG-330: the care burrow in the alert list
 T.test('BUG-330: while water names its care burrow (water.care_rooms), siege lists it in the civ alert after the mode\'s ' ..
        'burrow; when water drops it, it leaves the list', function()
