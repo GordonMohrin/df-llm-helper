@@ -22,9 +22,12 @@ crash reload: the newest save), `dfllm load`/`loadnow` and `follow`'s QUICKSAVE 
   `dfhack.filesystem.getBaseDir() .. 'save'`; boot writes it to `<runtime>/SAVEDIR` beside ACTIVE (DF's own answer, also
   for a non-portable install whose pref dir is not %APPDATA%).
 - `QUICKSAVE_FAILED:` names the folder it looked at.
+- Review fix: `kern.save_root()` asks `dfhack.filesystem.getBaseDir() .. 'save'` first and the parent of `getSavePath()`
+  only as the fallback: DFHack's `getSavePath()` is always `getDFPath() .. '/save/' .. save_dir` (hack/lua/dfhack.lua:1206),
+  so a non-portable install saving to %APPDATA% would have written `<DF>/save` to SAVEDIR, which saves_root trusts first.
 
 ## Tests
-`tests/test_bug332_save_root.py` (5; portable, SAVEDIR, default_env fail on 9b6f614), `tests/lua/test_bug332_save_root.lua` (2).
+`tests/test_bug332_save_root.py` (5; portable, SAVEDIR, default_env fail on 9b6f614), `tests/lua/test_bug332_save_root.lua` (3; review fix: getSavePath at `<DF>/save`, getBaseDir at AppData).
 
 ## Live check
 After a kernel reload: `<DF>/dfllm-runtime/SAVEDIR` names `<DF>/save` (e.g. `E:/DF-test2/save`). `dfllm save --dry-run` prints

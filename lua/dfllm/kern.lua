@@ -1511,20 +1511,22 @@ function M.runtime_key(marker, save)
 end
 
 -- BUG-332 (Run 15 i2/i4: `dfllm save` scanned %APPDATA%/Bay 12 Games/Dwarf Fortress/save while DF in portable mode
--- (<DF>/prefs/portable.txt) wrote its saves to <DF>/save): DF's save folder, the parent of dfhack.getSavePath() (the
--- loaded save's folder), else dfhack.filesystem.getBaseDir() .. 'save' (the install folder in portable mode, else SDL's
--- pref dir); nil when DFHack names neither. The kernel writes it to <runtime>/SAVEDIR at boot (supervise.saves_root).
+-- (<DF>/prefs/portable.txt) wrote its saves to <DF>/save): DF's save folder, dfhack.filesystem.getBaseDir() .. 'save' (the
+-- install folder in portable mode, else SDL's pref dir), else the parent of dfhack.getSavePath() (the loaded save's
+-- folder); nil when DFHack names neither. The kernel writes it to <runtime>/SAVEDIR at boot (supervise.saves_root).
+-- BUG-332 review fix: getBaseDir first, because DFHack's getSavePath() is always getDFPath() .. '/save/' .. save_dir
+-- (hack/lua/dfhack.lua:1206), not portable-aware: a non-portable install saving to %APPDATA% would get <DF>/save.
 function M.save_root()
-  local ok, p = pcall(function() return dfhack.getSavePath and dfhack.getSavePath() end)
-  if ok and type(p) == 'string' and p ~= '' then
-    local d = p:gsub('[/\\]+$', ''):match('^(.*)[/\\][^/\\]+$')
-    if d and d ~= '' then return d end
-  end
   local okb, base = pcall(function()
     local fs = dfhack.filesystem
     return fs and fs.getBaseDir and fs.getBaseDir()
   end)
   if okb and type(base) == 'string' and base ~= '' then return base:gsub('[/\\]+$', '') .. '/save' end
+  local ok, p = pcall(function() return dfhack.getSavePath and dfhack.getSavePath() end)
+  if ok and type(p) == 'string' and p ~= '' then
+    local d = p:gsub('[/\\]+$', ''):match('^(.*)[/\\][^/\\]+$')
+    if d and d ~= '' then return d end
+  end
   return nil
 end
 
