@@ -13,6 +13,14 @@ from cli_v2_helpers import make_runtime, reset_paths
 
 from dfpilot import bp, cmd, files, plan, schema
 
+
+@pytest.fixture(autouse=True)
+def _surface_core_on(monkeypatch):
+    """BUG-413: the surface core and the surface room variants are drafted only with plan.surface_core true (default false); these
+    tests are about those variants."""
+    monkeypatch.setattr(plan, "surface_core_on", lambda: True)
+
+
 X0, Y0, Z = 100, 100, 130
 W, H = 40, 30
 

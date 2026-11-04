@@ -74,14 +74,16 @@ T.test('light aquifer in stone: dig with the damp marker, smooth the 4 walls, wa
   H.dig(W)
   T.ok(until_(W, function() return W.tile(AX, AY, 99).dig == 'i' end, 3), 'the dry top level leads on to z99')
   T.eq(rec(W, 'aq1').levels['100'].state, 'dry')
-  H.dig(W)
+  -- BUG-412: the seal of a level that looks like an aquifer (a revealed aquifer flag on its side tiles) is designated WITH
+  -- its dig: one quickfort call, the centre 'i' and the 4 walls 's', priority 1, damp marker
+  local sm = last_dig(W, AX, AY, 99)
+  T.eq({sm.priority, sm.data[0][0][0], sm.data[0][0][1], sm.data[0][0][-1], sm.data[0][1][0], sm.data[0][-1][0], sm.marker},
+       {1, 'i', 's', 's', 's', 's', {damp = true}}, 'the seal digs at priority 1, with the dig')
+  for _, o in ipairs(ORTH) do T.eq(W.tile(AX + o[1], AY + o[2], 99).dig, 's', 'smoothing designated') end
+  W.tile(AX, AY, 99).c, W.tile(AX, AY, 99).dig = '.', ''        -- the miner opens the tile; the walls are still rough
   H.runs(W, 1)
   local L = rec(W, 'aq1').levels['99']
-  T.eq({L.state, L.material}, {'seal', 'stone'})
-  for _, o in ipairs(ORTH) do T.eq(W.tile(AX + o[1], AY + o[2], 99).dig, 's', 'smoothing designated') end
-  local sm = last_dig(W, AX, AY, 99)                -- one quickfort call for the 4 walls, relative to the centre
-  T.eq({sm.priority, sm.data[0][0][1], sm.data[0][0][-1], sm.data[0][1][0], sm.data[0][-1][0]}, {1, 's', 's', 's', 's'},
-       'the seal digs at priority 1')
+  T.eq({L.state, L.material, L.pre}, {'seal', 'stone', 1})
   H.runs(W, 2)
   T.eq(W.tile(AX, AY, 98).dig, '', 'no next level while the seal is open')
   T.eq(H.proj(W, 'aq1').blocked, '', 'sealing is progress, never blocked')
@@ -116,15 +118,14 @@ T.test('soil walls: a plus shape is dug and constructed walls go on the 4 arms',
   aquifer_level(W, 100, true)
   H.place(W, 'aq2', shaft_doc{depth = 3, dry = 1})
   H.runs(W, 1)
+  -- BUG-412: the plus shape is designated WITH the dig of the aquifer level (one call, damp marker)
+  for _, o in ipairs(ORTH) do T.eq(W.tile(AX + o[1], AY + o[2], 100).dig, 'd', 'the arm is designated with the dig') end
+  local arm = last_dig(W, AX, AY, 100)
+  T.eq({arm.data[0][0][0], arm.data[0][0][1], arm.marker}, {'j', 'd', {damp = true}})
   H.dig(W)
   H.runs(W, 1)
   local L = rec(W, 'aq2').levels['100']
   T.eq({L.state, L.material}, {'seal', 'soil'})
-  for _, o in ipairs(ORTH) do T.eq(W.tile(AX + o[1], AY + o[2], 100).dig, 'd', 'the arm is dug') end
-  local arm = last_dig(W, AX, AY, 100)
-  T.eq({arm.data[0][0][1], arm.marker}, {'d', {damp = true}})
-  H.dig(W)
-  H.runs(W, 1)
   for _, o in ipairs(ORTH) do T.ok(W.bld_at[(AX + o[1]) .. ',' .. (AY + o[2]) .. ',100'], 'a wall is placed on each arm') end
   T.eq(#ev(W, 'AQ_LEVEL_SEALED'), 0)
   H.build(W)

@@ -2126,6 +2126,14 @@ function Q.aqx(K)
       return type(r) == 'table' and r.plug ~= '' and r.plug or nil
     end,
     level = function(z) Q.aq_level(K, z) end,
+    aq_known = function(z)                     -- BUG-412: the manifest's aquifer levels (damp or wet seen)
+      for _, v in ipairs(type(S.rt.aql) == 'table' and S.rt.aql or {}) do if v == z then return true end end
+      return false
+    end,
+    unreachable = function(P, d)               -- BUG-412: no citizen reaches the stage's dig (BUG-352's test)
+      local ok, tl = pcall(Q.unreachable, K, P, d, S.rt.p[P.id])
+      return ok and tl ~= nil
+    end,
     mat = function(n)
       local ok, via, why = K.call('economy', 'mat_for', 'wall', n)
       if not ok then return nil, 'no economy' end
@@ -4129,6 +4137,7 @@ function rows(K)
       local pw = allowed(K, P, d) and paused(K, P, d)
       if pw then b = 'stalled, paused: ' .. pw end
     end
+    if P.tpl == 'aqshaft' and b == '' then b = M.AQ.stall_text(S.rt, P.id) end     -- BUG-412: a visible stall
     out[#out + 1] = {P.id, trunc(st and st.label or 'done', 24), P.pct, trunc(b, 40)}
   end
   S.rows, S.npk = out, #last

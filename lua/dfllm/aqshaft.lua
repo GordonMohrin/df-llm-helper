@@ -19,6 +19,13 @@
 --    <= runner seep_max goes on (AQ_SEEP). BUG-262: a `cistern`'s basin (A.basin) keeps its rough walls: the aquifer fills it.
 -- 3. Heavy aquifer (both): visible water in our own dug tiles at >= heavy (4/7) or rising (rise samples in a row, each
 --    higher, all wet) stops the project for good (breach:heavy_aquifer), plugs a shaft (CAVERN_PLUG) and says AQ_HEAVY (A).
+-- 1a. BUG-412 (Gordon 04.11.2026: the fort belongs under the aquifer): the per-level method is the safest one dfpilot can do:
+--    only the shaft tile of a level is ever open; for a level that looks like an aquifer (a revealed aquifer flag on a side
+--    tile, a damp report, a known aquifer level) the seal is designated IN THE SAME CALL GROUP as the dig (pre-ring: stone
+--    walls smoothed, soil arms dug) so the first miner on the opened tile seals it before the water has built up, and the
+--    next level is designated only when every side tile stands sealed and the flow was watched; a plug reserve (wall
+--    material) must exist before the shaft goes below its top; a heavy aquifer stops the shaft and plugs it, the core below
+--    waits for a PASSED shaft and is never dug blind. Every wait is visible: stall() names why and the command.
 -- Persist m.runner.aq[proj] (shaft): {k = 'shaft', mode, x, y, top, cur_z, aqn, dry, heavy, dz = {[z] = 1} damp levels,
 -- levels = {[z] = {state = dig|seal|watch|passed|dry|heavy, opened, samples, seal_tiles = {{x, y, z, kind, st}},
 -- material, ws, rd, seep}}}; (observe): {k = 'obs', mode = 'observe', t, n, pts = {{x, y, z, st}}, wet = {['x,y,z'] =
@@ -37,6 +44,9 @@ A.CFG = {
   obs_pts = 16, samples = 8, wet_keep = 6, prio = 1,
   qf_tick = 2,           -- quickfort calls of A.tick per run (observe mode's smoothing)
   refuse_max = 3,        -- BUG-328: quickfort refusals of a level's dig before the shaft stops (apply_fail)
+  stall = 3 * DAY,       -- BUG-412: a designated dig / unfinished seal this long without progress is a visible stall
+  pre_ring = true,       -- BUG-412: the seal of a level that looks like an aquifer is designated with its dig
+  plug_walls = 2,        -- BUG-412: wall material the plug needs (X.mat) before the shaft goes below its top
 }
 A.MODES = {auto = true, stone = true, soil = true, all = true}
 local ORTH = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
@@ -141,9 +151,60 @@ local function check_level(X, P, d, r, z, L)
   return false
 end
 
-local function designate(X, P, x, y, z, k, marker)
+
+---------------------------------------------------------------- BUG-412: visible stalls
+-- why in unreachable | no_stone | no_mason | no_smoother; one PROJECT_BLOCKED (A, why aq_stall:<why>) per level and cause with
+-- the command, the row says `stall zN: <why>` (A.stall_text); L.stall is cleared when the level moves on
+local STALL_CMD = {
+  unreachable = "dfllm cmd bp.cancel proj=%s; dfllm bp sites aqshaft --fresh; dfllm cmd inspect '{\"what\":\"reach\"}'",
+  no_stone = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm bp sites workshops surface=1 --fresh (Masons) and a stone dig",
+  no_mason = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm bp sites workshops surface=1 --fresh (Masons)",
+  no_smoother = "dfllm cmd inspect '{\"what\":\"workload\"}' (stone detailing / smoothing labor)",
+}
+local STALL_TXT = {
+  unreachable = 'no citizen reaches the shaft tile',
+  no_stone = 'no stone for the plug and the soil walls',
+  no_mason = 'no mason builds the soil walls',
+  no_smoother = 'nobody smooths the side walls',
+}
+local function stall(X, P, r, z, L, why, days)
+  local first = type(L.stall) ~= 'table' or L.stall.why ~= why
+  if first then L.stall = {why = why, t = X.now()} end
+  if L.said ~= why then
+    L.said = why
+    local cmd = string.format(STALL_CMD[why] or STALL_CMD.unreachable, P.id)
+    local msg = string.format('%s: shaft z%d waits (%s)%s: %s', P.id, z, STALL_TXT[why] or why,
+                              days and (' ' .. days .. ' d') or '', cmd)
+    X.log('warn', '%s', msg)
+    X.emit('PROJECT_BLOCKED', 'A', msg, {proj = P.id, tpl = 'aqshaft', stage = 'l' .. (r.top - z) .. '.dig',
+                                         why = 'aq_stall:' .. why, cmd = #cmd <= 200 and cmd or nil})
+    X.dirty()
+  end
+end
+local function unstall(X, L)
+  if L.stall ~= nil or L.said ~= nil then L.stall, L.said = nil, nil; X.dirty() end
+end
+-- the row text of a stalled shaft ('' when it is not): `stall z128: no mason builds the soil walls`
+function A.stall_text(rt, id)
+  local r = type(rt) == 'table' and type(rt.aq) == 'table' and rt.aq[id] or nil
+  if type(r) ~= 'table' or r.k ~= 'shaft' or r.heavy or r.done == 1 or type(r.levels) ~= 'table' then return '' end
+  local L = r.levels[tostring(r.cur_z)]
+  if type(L) ~= 'table' or type(L.stall) ~= 'table' then return '' end
+  return string.format('stall z%d: %s', r.cur_z, STALL_TXT[L.stall.why] or tostring(L.stall.why))
+end
+
+-- the plug reserve: wall material for CAVERN_PLUG / the soil walls (economy.mat_for 'wall'); nil = fine or unknown (no
+-- economy in a mock), else the stall cause
+local function plug_missing(X)
+  if type(X.mat) ~= 'function' then return nil end
+  local via, why = X.mat(A.CFG.plug_walls)
+  if via ~= nil or why == nil or why == 'no economy' then return nil end
+  return tostring(why):find('mason', 1, true) and 'no_mason' or 'no_stone'
+end
+
+local function designate(X, P, x, y, z, k, marker, data)
   if not X.room() then return nil end
-  local ok, st = X.qf{mode = 'dig', data = cell1(k), pos = {x, y, z}, priority = A.CFG.prio,
+  local ok, st = X.qf{mode = 'dig', data = data or cell1(k), pos = {x, y, z}, priority = A.CFG.prio,
                       marker = marker and {damp = true} or nil}
   return ok and (type(st) ~= 'table' or (int(st.dig_designated) or 1) > 0)
 end
@@ -203,7 +264,21 @@ local function dig_step(X, P, d, r, z, L)
   local k = ch.cells[1][4]
   if not L.des then
     local dx, dy, dz = ch.pos[1] + ch.cells[1][1], ch.pos[2] + ch.cells[1][2], ch.pos[3] + ch.cells[1][3]
-    local got = designate(X, P, dx, dy, dz, k, true)
+    -- BUG-412: the plug reserve first. Below the top level the shaft may meet water at any level; without wall material
+    -- the CAVERN_PLUG (and a soil seal) cannot be built, so nothing deeper is designated until the fort can make walls
+    if P.stage >= 1 then
+      local miss = plug_missing(X)
+      if miss then
+        stall(X, P, r, z, L, miss)
+        return 'done'
+      end
+      unstall(X, L)
+    end
+    local rdata, rpieces, rn
+    if ch.pos[1] == r.x and ch.pos[2] == r.y and ch.pos[3] == z and dx == r.x and dy == r.y and dz == z then
+      rdata, rpieces, rn = A.ring_data(X, r, z, L, k)
+    end
+    local got = designate(X, P, dx, dy, dz, k, true, rdata)
     if got == nil then return 'yield' end            -- no quickfort call left in this slice: the next one
     if not got then
       -- BUG-328 (Run 15c Inkintense y377: aqshaft c1a188b5f1ae45b201 'l0.dig 0 %', 'no run ended for 176 d', the
@@ -228,13 +303,22 @@ local function dig_step(X, P, d, r, z, L)
       X.dirty()
       return 'done'
     end
-    L.des, P.chunk = 1, 1
+    L.des, P.chunk, L.dt = 1, 1, X.now()
+    if rdata then
+      for _, p in ipairs(rpieces) do if p[4] == 'stone' or p[4] == 'soil' then p[5] = 'des' end end
+      L.pre, L.seal_tiles, L.sealt = 1, rpieces, X.now()
+      X.log('info', '%s: z%d looks like an aquifer: %d side walls designated with the dig (pre-ring)', P.id, z, rn)
+    end
     X.moved(P)
     X.dirty()
     return 'done'
   end
   local v = X.tile(r.x, r.y, z)
   if not v then return 'done' end                   -- hidden: the stair above is not dug yet
+  if (v.c == '#' or v.c == 'S' or v.dig ~= '') and L.dt and X.now() - L.dt >= A.CFG.stall
+     and type(X.unreachable) == 'function' and X.unreachable(P, d) then
+    stall(X, P, r, z, L, 'unreachable', (X.now() - L.dt) // DAY)         -- BUG-412: nobody can walk to the tile
+  end
   if v.c == '#' or v.c == 'S' then
     if v.dig == '' then                              -- DF took the designation (damp stone): the marker says go on
       if (int(L.rd) or 0) >= A.CFG.redig then
@@ -260,7 +344,9 @@ local function dig_step(X, P, d, r, z, L)
     return A.next_level(X, P, d, r, z)
   end
   local pieces, mat, soil = seal_pieces(X, r, z)
-  L.state, L.seal_tiles, L.material, L.aq = 'seal', pieces, mat, 1
+  if L.pre then pieces, mat, soil = A.keep_pre(L, pieces) end        -- BUG-412: the pre-ring keeps its designations
+  L.state, L.seal_tiles, L.material, L.aq, L.sealt = 'seal', pieces, mat, 1, X.now()
+  unstall(X, L)
   if soil > 0 then
     local via, why = X.mat(soil)
     L.mat = via and tostring(via) or ('none: ' .. tostring(why or '?'))
@@ -313,11 +399,59 @@ local function piece_state(X, r, p)
   return st ~= was and st ~= 'new'
 end
 
+-- BUG-412: does level z look like an aquifer before its tile is opened? A revealed aquifer flag on a side tile (the
+-- ring of the level below an open shaft tile is revealed), a damp report, a known aquifer level, or mode 'all'
+local function suspect(X, r, z, L)
+  if r.mode == 'all' or L.damp or (type(r.dz) == 'table' and r.dz[tostring(z)]) then return true end
+  if type(X.aq_known) == 'function' and X.aq_known(z) then return true end
+  for _, o in ipairs(ORTH) do
+    local n = X.tile(r.x + o[1], r.y + o[2], z)
+    if n and n.aq == true then return true end
+  end
+  return false
+end
+
+-- BUG-412 pre-ring: the seal of a suspect level is designated in the SAME quickfort call as its dig (stone: the 4 side
+-- walls smoothed, soil: the 4 arms dug, all with the damp marker, priority 1), so the miner who opens the tile finds the
+-- jobs waiting and the water has no run-up. Returns the call's cells (the centre key k plus the ring, relative to the
+-- centre) and the seal pieces, or nil when the level does not look like an aquifer or has no wall to prepare (the old
+-- order then: seal after the tile is open)
+function A.ring_data(X, r, z, L, k)
+  if not A.CFG.pre_ring or not suspect(X, r, z, L) then return nil end
+  local pieces = seal_pieces(X, r, z)
+  local data, n = {[0] = {[0] = {[0] = k}}}, 0
+  for _, p in ipairs(pieces) do
+    if p[4] == 'stone' or p[4] == 'soil' then
+      local dx, dy = p[1] - r.x, p[2] - r.y
+      data[0][dy] = data[0][dy] or {}
+      data[0][dy][dx] = p[4] == 'stone' and 's' or 'd'
+      n = n + 1
+    end
+  end
+  if n == 0 then return nil end
+  return data, pieces, n
+end
+
+-- the pieces of an opened pre-ringed level: a piece the pre-ring designated keeps its record (its tile is open now only
+-- when the arm was dug), every other piece is the fresh reading; returns pieces, material, soil count
+function A.keep_pre(L, fresh)
+  local out, soil, stone = {}, 0, 0
+  for i, f in ipairs(fresh) do
+    local old = L.seal_tiles[i]
+    local p = (type(old) == 'table' and old[1] == f[1] and old[2] == f[2] and (old[4] == 'stone' or old[4] == 'soil')
+               and old[5] ~= 'new') and old or f
+    out[#out + 1] = p
+    if p[4] == 'soil' then soil = soil + 1 elseif p[4] == 'stone' then stone = stone + 1 end
+  end
+  local mat = (soil > 0 and stone > 0) and 'mixed' or soil > 0 and 'soil' or 'stone'
+  return out, mat, soil
+end
+
 function A.seal_step(X, P, d, r, z, L)
   local left, smooth, arms, walls = 0, {}, {}, {}
   for _, p in ipairs(L.seal_tiles) do
     if p[5] ~= 'done' then
-      if piece_state(X, r, p) then X.moved(P) end
+      if piece_state(X, r, p) then X.moved(P); L.sealt = X.now() end
       if p[5] == 'new' and p[4] == 'stone' then smooth[#smooth + 1] = p
       elseif p[5] == 'new' and p[4] == 'soil' then arms[#arms + 1] = p
       elseif p[5] == 'dug' then walls[#walls + 1] = p end
@@ -331,11 +465,26 @@ function A.seal_step(X, P, d, r, z, L)
       if batch(X, r, z, job[2], job[3], job[1], job[4]) then
         for _, p in ipairs(job[1]) do p[5] = job[5] end
         X.moved(P)
+        L.sealt = X.now()
       end
     end
   end
   X.dirty()
-  if left > 0 then return 'done' end
+  if left > 0 then
+    -- BUG-412: a seal that stands unfinished for A.CFG.stall without a piece changing says why (visible, with a command)
+    if X.now() - (int(L.sealt) or X.now()) >= A.CFG.stall then
+      local wall, smooth_left = false, false
+      for _, p in ipairs(L.seal_tiles) do
+        if p[5] ~= 'done' then
+          if p[4] == 'soil' then wall = true elseif p[4] == 'stone' then smooth_left = true end
+        end
+      end
+      local why = wall and (plug_missing(X) or 'no_mason') or smooth_left and 'no_smoother' or nil
+      if why then stall(X, P, r, z, L, why, (X.now() - (int(L.sealt) or X.now())) // DAY) end
+    end
+    return 'done'
+  end
+  unstall(X, L)
   L.state, L.ws = 'watch', X.now()
   local n = 0
   for _, p in ipairs(L.seal_tiles) do if p[4] == 'stone' or p[4] == 'soil' then n = n + 1 end end

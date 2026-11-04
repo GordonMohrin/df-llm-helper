@@ -291,7 +291,7 @@ def test_config_lint_knows_the_plan_key(tmp_path):
     assert fairplay.plan_errors(p) == ["config/baseline.json: plan.stale_apply_years: int 0..20 expected, got 99",
                                        "config/baseline.json: plan.x: unknown key"]
     assert json.loads((Path(__file__).resolve().parent.parent / "config" / "baseline.json")
-                      .read_text("utf-8"))["plan"] == {"stale_apply_years": plan.STALE_DEF}
+                      .read_text("utf-8"))["plan"] == {"stale_apply_years": plan.STALE_DEF, "surface_core": plan.SURFACE_CORE_DEF}
 
 
 # ---------------------------------------------------------------- the YEAR_REVIEW wake names the fixes

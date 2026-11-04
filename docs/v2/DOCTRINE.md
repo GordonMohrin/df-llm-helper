@@ -33,6 +33,12 @@ Sources: [W] dwarffortresswiki.org (v50+ namespace, fetched today); [D] the inst
   and its flow watched for a day before the next. Or keep the fort above that layer (fortcore `p.aquifer above`).
 - Rooms stay off the aquifer levels and keep one dry solid level between an aquifer and a room below it (water drips from an
   aquifer ceiling; smoothing cannot fix a ceiling). A fortcore below a passed shaft takes `p.aquifer pass`.
+- BUG-412 (Gordon 04.11.2026: the fort belongs under the aquifer, no surface fort): where the core would cut an aquifer level `plan
+  propose` drafts the shaft first (beside the core's entrance, the citizens' walk group, no open water within 3 tiles), then the
+  fortcore `p.aquifer pass` with its core level (Kern+) two levels under the shallowest aquifer level. Per level: the shaft tile
+  alone is dug, the seal of its side tiles is designated in the same quickfort call (the pre-ring), the next level waits for the
+  seal and a day's watch; a missing plug stone, mason or smoother and an unreachable tile are named (`stall zN`). A heavy aquifer
+  stops and plugs the shaft; the core is never dug blind. Surface cores only with config `plan.surface_core` (BUG-413).
 - The kernel reads the aquifer flag of revealed tiles only (what the vanilla drip icon shows); unrevealed tiles stay unknown.
 - Every breach of water or caverns goes through a 2-wall airlock with a pathcheck before and after.
 - A dig that breaks into a cavern or a cavern lake by accident (Run 11: an ore shaft into a lake, reported as damp) is

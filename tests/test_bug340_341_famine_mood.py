@@ -11,6 +11,13 @@ from cli_v2_helpers import make_runtime, reset_paths
 from dfpilot import cmd, schema, wake
 
 
+@pytest.fixture(autouse=True)
+def _surface_core_on(monkeypatch):
+    """BUG-413: surface farm plots are drafted/tried only with plan.surface_core true (default false); these tests are about them."""
+    from dfpilot import plan as _plan
+    monkeypatch.setattr(_plan, "surface_core_on", lambda: True)
+
+
 @pytest.fixture
 def save(tmp_path, monkeypatch):
     monkeypatch.setenv("DFLLM_CONFIG", str(tmp_path / "config"))
