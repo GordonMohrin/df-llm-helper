@@ -147,3 +147,40 @@ def test_bug379_deaths_census_names_the_siege_dead():
     out = brief.sec_deaths(Ctx)
     assert out and out[0].startswith("siege 3: 1 missing, 2 missing, 3 missing"), out
     assert "unknown 1: 9 missing" in out[0] and "killed 1: 10 by goblin" in out[0]
+
+
+def _fc(stage, site="same"):
+    return {"tpl": "fortcore", "site": site, "p": {"stage": stage}}
+
+
+def test_review_merge20_hall_stays_behind_core_stages_2_and_3(save):
+    """Review fix (merge20): defense_order pulled the hall (stage 4) ahead of the stages 2/3 core_gaps had inserted."""
+    s = world(save)
+    growth = {"tpl": "bedrooms", "site": "S1"}
+    traps = {"tpl": "traps", "site": "S1"}
+    out = plan.defense_order([growth, _fc(2), growth, _fc(3), traps, _fc(4)], [])
+    st = [(b["tpl"], plan._stage_of(b.get("p") or {})) for b in out]
+    assert st.index(("fortcore", 2)) < st.index(("fortcore", 3)) < st.index(("fortcore", 4)), st
+    assert st.index(("fortcore", 4)) < st.index(("bedrooms", None)), st
+    # end to end: stages 2/3 not applied, the draft needs them before the hall
+    doc, prev = propose(save, s, applied={("fortcore", 1)})
+    fc = [plan._stage_of(b["p"]) for b in builds(doc) if b["tpl"] == "fortcore" and b["site"] == "same"]
+    assert fc == sorted(fc) and 4 in fc and 2 in fc, fc
+    e, _ = plan.check(doc, world(save), decisions={}, banned=plan.BANNED, prev=prev, fort=dict(FORT))
+    assert not [x for x in e if "BUG-164" in x], e
+
+
+def test_review_merge20_check_errors_on_stage_before_its_predecessor(save):
+    s = world(save)
+    prev = json.loads((save / "plan.json").read_text("utf-8"))
+    d = copy.deepcopy(prev)
+    d["seasons"][0]["build"] = [_fc(4), _fc(2), _fc(3)]
+    e, _ = plan.check(d, s, decisions={}, banned=plan.BANNED, prev=prev, fort=dict(FORT))
+    bad = [x for x in e if "BUG-164" in x]
+    assert len(bad) == 1 and "stage 4 @same comes before stage 3" in bad[0], bad
+    d["seasons"][0]["build"] = [_fc(3), _fc(2)]
+    e, _ = plan.check(d, s, decisions={}, banned=plan.BANNED, prev=prev, fort=dict(FORT))
+    assert len([x for x in e if "BUG-164" in x]) == 1
+    d["seasons"][0]["build"] = [_fc(2), _fc(3), _fc(4)]
+    e, _ = plan.check(d, s, decisions={}, banned=plan.BANNED, prev=prev, fort=dict(FORT))
+    assert not [x for x in e if "BUG-164" in x], e

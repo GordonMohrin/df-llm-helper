@@ -51,3 +51,10 @@ A fort at P3+ with 20+ citizens, refuge dry, `ready.audit.min_traps` < 30 or wor
 temple; POPCAP `max-pop N (plan)`; once the gaps close, the next propose raises the ceiling again.
 Risk: a fort whose kernel sends no audit `min_traps` counts only `traps n == 0`; `bar:iron` in trade.want does nothing without a
 depot (BUG-368 drafts one).
+
+## Review fix (merge20)
+`defense_order` (plan.py) pulled the hall (fortcore stage 4) to the front of the growth builds, but `core_gaps` had inserted the core's
+stages 2/3 right before it in plan order and they were left behind the growth builds, so bp.place ran stage 4 before stage 2 existed
+(BUG-164 invariant). Now every fortcore build of a stage < 4 (stages 2/3 inserted by `core_gaps` included) stays in the leading prefix
+ahead of the hall, in plan order. New `plan.core_order_gate` (called from `check`): ERROR when a fortcore @same stage k >= 2 stands in
+the plan before the plan's own stage k-1 (retrofits excepted). Tests: tests/test_bug377_379_defense.py (2 new).
