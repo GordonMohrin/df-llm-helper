@@ -137,6 +137,7 @@ M.KEEP = 20                -- interrupts kept for alarm.txt and the ack bookkeep
 M.DOOR_EVERY = 2400        -- ticks between entrance-door scans (a trigger without a fresh list scans at once)
 M.DOOR_MAX = 400           -- doors looked at per scan
 M.REARM = 1200             -- INTRUDER/PREDATOR again only after this many ticks without one
+M.BD_NEAR = 30             -- BUG-338: a wild building destroyer this close (xy) to a bridge on its levels is never far
 M.ETA_TILE = 6             -- ticks per tile for the ETA (dwarves and goblins walk ~9, fast beasts less)
 M.FRESH = 200              -- census.h older than this is unknown (never quiet, no sighting)
 -- BUG-013 (Run 9 forced arrival on 677bc3e: the alert sounded 6 s after the popup, the pulls took 9-16 s real, 526-801
@@ -1756,7 +1757,7 @@ end
 -- near after an INTRUDER for far ones only (its ack timeout default skips a far unit)
 local function inside_scan(K, h, now)
   local hostile, predator, nh, np, hnear = nil, nil, 0, 0, false
-  local near, nf, far_one = cfg(K).predator_near, 0, nil
+  local near, nf, far_one, far_dc = cfg(K).predator_near, 0, nil, -1
   local okx, expects = K.call('siege', 'expects')
   local wave = okx and expects == true
   for _, e in ipairs(h.list or {}) do
@@ -1770,11 +1771,19 @@ local function inside_scan(K, h, now)
         if oko and type(out) == 'table' and out[1] == 0 then
           -- sense's dc: the distance to the nearest citizen outside Kern+ (-1 none); zone 2 = inside Kern+ / past B1
           local dc, lim = math.tointeger(e.dc), near
-          -- BUG-338: a building destroyer (bd, a cave dragon from a cavern) is never "far": the next bridge or door is
-          -- its way to the citizens, and dc counts only the citizens outside Kern+ (none during a lockdown)
-          if lim > 0 and dc and (e.zn or 0) < 2 and e.bd ~= 1 and (dc < 0 or dc > lim) then
+          -- BUG-338 (Run 15c y379: PREDATOR_FAR "nearest citizen 63 tiles" while the dragon killed 32 stranded in the
+          -- killing field 8-11 tiles away, a part of Kern+ there): the nearest civilian anywhere on its levels (sense da:
+          -- Kern+, killing field and refuge too) decides, not only the ones outside Kern+
+          local da = math.tointeger(e.da)
+          if dc and da and da >= 0 and (dc < 0 or da < dc) then dc = da end
+          -- BUG-338: a building destroyer is "far" only while it is far from the fort itself: not in the intake area
+          -- or past B1, beyond bd_near tiles of every bridge on the bridges' levels (sense db) and not walking into the
+          -- fort (sense pd: its path ends there). A cavern troll far below the fort keeps the Run 10 PREDATOR_FAR rule
+          local bdn = e.bd == 1 and ((e.zn or 0) >= 1 or e.pd == 1
+                                     or ((math.tointeger(e.db) or -1) >= 0 and math.tointeger(e.db) <= M.BD_NEAR))
+          if lim > 0 and dc and (e.zn or 0) < 2 and not bdn and (dc < 0 or dc > lim) then
             nf = nf + 1
-            if not far_one or (dc >= 0 and (far_one.dc < 0 or dc < far_one.dc)) then far_one = e end
+            if not far_one or (dc >= 0 and (far_dc < 0 or dc < far_dc)) then far_one, far_dc = e, dc end
           else np = np + 1; predator = predator or e end
         end
       else
@@ -1803,8 +1812,8 @@ local function inside_scan(K, h, now)
     rt.pfar_last = now
     K.emit('PREDATOR_FAR', 'B', string.format('%d wild dangers on the citizens\' walkable group but far from the citizens '
            .. '(%d at %d,%d,%d, %s): no lockdown', nf, far_one.id, far_one.x, far_one.y, far_one.z,
-           (math.tointeger(far_one.dc) or -1) >= 0 and ('nearest citizen ' .. far_one.dc .. ' tiles') or 'no citizen outside Kern+'),
-           {n = nf, id = far_one.id, pos = {far_one.x, far_one.y, far_one.z}, dc = math.tointeger(far_one.dc) or -1})
+           far_dc >= 0 and ('nearest citizen ' .. far_dc .. ' tiles') or 'no citizen near'),
+           {n = nf, id = far_one.id, pos = {far_one.x, far_one.y, far_one.z}, dc = far_dc})
   end
   if predator then
     if now - (rt.pred_last or -M.REARM) >= M.REARM then

@@ -1006,6 +1006,21 @@ T.test('T0 raise uses a census from the detecting step: a citizen who left < 100
   end
 end)
 
+-- BUG-338 (Run 15c y379: Kern+ covered the killing field, the civilians in it counted as inside and B1 rose over them)
+T.test('BUG-338: T0 raise with Kern+ over the killing field: O1 at once, B1 waits for the civilian in the field', function()
+  local army = S.army(6, 150, 150)
+  for _, u in ipairs(army) do u.hidden = true end
+  local W = S.world{units = units(army, S.cit(6, 51, 28)), kern = {40, 20, Z - 2, 80, 95, Z}}
+  S.load(W, {S.military()})
+  S.run(W, 200)
+  T.eq({W.K.census.u.outside, W.K.census.u.atk}, {0, 1})
+  S.run(W, 800, {at = {{0, function(W) for _, u in ipairs(army) do W.unit(u.id)._m.hidden = false end end}}})
+  local t0 = S.mode_tick(W, 'PEACE>SIEGE')
+  T.ok(t0 ~= nil, 'siege')
+  between(S.pulls(W, 'O1')[1].tick - t0, 0, 40, 'O1 raise (nobody outside Kern+)')
+  between(S.pulls(W, 'B1')[1].tick - t0, 450, 490, 'B1 raise (the timer: a civilian in the field)')
+end)
+
 T.test('ALERT civ alert with citizens who obey it: on once, held while the danger lingers, off once', function()
   local W = S.world{units = units(S.cit(6, 100, 100), S.danger(300, 120, 100))}
   W.mil = S.military()

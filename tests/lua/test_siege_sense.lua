@@ -56,7 +56,8 @@ T.test('census.h: visible only; distances to O1, bridges and outside citizens; i
   T.eq(h.near_cit, 10)
   T.eq(#h.list, 3)
   -- intake waves (Gordon 2026-10-16): the zone first (202 on Kern+ = past B1, 201 in the killbox K1), then distance
-  T.eq(h.list[2], {id = 201, x = 51, y = 30, z = Z, k = 'inv', d_o1 = 20, dc = 10, zn = 1, dz = 0})
+  -- BUG-338: da = the nearest civilian anywhere (10: citizen 2), db = the xy distance to the nearest bridge (B1)
+  T.eq(h.list[2], {id = 201, x = 51, y = 30, z = Z, k = 'inv', d_o1 = 20, dc = 10, zn = 1, dz = 0, da = 10, db = 10})
   T.eq({h.list[1].id, h.list[1].zn, h.list[3].id, h.list[3].zn}, {202, 2, 301, 0}, 'past B1, the field, then by O1')
   T.eq({h.zin, h.zpast, h.dz, h.dz_o1}, {1, 1, 0, -1})
   W.run(100)                         -- caged ids reach census.u with the next citizen scan

@@ -129,6 +129,10 @@ M.WIN_CARAVAN = 4800       -- ... a caravan arrival report (trade's state keeps 
 M.WIN_LEVER = 2400         -- ... an inbox `lever` down keeps that bridge open this long
 M.GONE_RECHECK = 1200      -- BUG-030: a destroyed bridge's footprint is searched for a rebuilt one once a game day
 M.LOST_BD = 2400           -- loss history: building destroyers in sight this many ticks before a loss make it theirs
+-- BUG-338: a lockdown's first raise of an inner bridge waits while civilians stand on its attack side (census.u.atk) and no
+-- hostile is within INNER_NEAR tiles of it (INNER_FAR while an outer bridge is not up yet); censuses older than
+-- INNER_FRESH ticks never hold
+M.INNER_NEAR, M.INNER_FAR, M.INNER_FRESH = 30, 60, 300
 M.LOST_EV, M.LOST_RACES = 6, 4   -- ... the newest losses and the destroyer races kept per bridge
 -- BUG-068 (Run 12 Trussroads, a reclaimed fort: lever 11808 of the old fort's bridge X11814 pulled six times in one
 -- second at timestream speed with no effect): a pull whose job left the queue without the bridge moving counted
@@ -2012,7 +2016,8 @@ local function update_every(K)
   if not fast then
     for name, r in pairs(rt) do
       local br = st.br[name]
-      if r.job or (br and br.want and br.want ~= r.last) then fast = true; break end
+      -- BUG-338: an inner bridge the lockdown holds down for civilians is looked at every FAST ticks
+      if r.job or r.iw or (br and br.want and br.want ~= r.last) then fast = true; break end
     end
   end
   local want = fast and M.FAST or M.SLOW
@@ -2058,6 +2063,53 @@ local function ensure_default(K, name, now)
   end
 end
 
+-- BUG-338 (Run 15c Inkintense y379: the arrival lockdown raised B1 at once, before O1 and while 33 civilians walked in
+-- from the gathering; they stood in the killing field between O1 and B1, a part of Kern+ there, "shut out from food",
+-- the deep defense's recall to Tiefe+ found 31 who could not come, and the war cave dragon that broke O1 killed 10 of them
+-- there): the lockdown's first raise of an inner bridge waits while civilians stand on its attack side (sense's
+-- census.u.atk: outside Kern+ and the refuge, or on an intake tile even where Kern+ covers it), so the way to the core and
+-- the refuge stays open for them. It goes ahead at once with a hostile within INNER_NEAR tiles of the bridge (INNER_FAR
+-- while an outer bridge is not up yet), a hostile inside Kern+, a building destroyer or great danger in the intake area or
+-- past B1, a census older than INNER_FRESH, in BREACH, or once it was wanted up (never lowered for it). Returns the
+-- number of civilians it waits for, or nil
+local function inner_wait(K, man, name, mode, br, now)
+  if mode == 'BREACH' or (br and br.want == 'up') then return nil end
+  local cu, h = K.census.u, K.census.h
+  if type(cu) ~= 'table' or type(h) ~= 'table' then return nil end
+  local n = math.tointeger(cu.atk) or -1
+  if n <= 0 or now - (math.tointeger(cu.tick) or -1e9) > M.INNER_FRESH
+     or now - (math.tointeger(h.tick) or -1e9) > M.INNER_FRESH then return nil end
+  if (math.tointeger(h.inside) or 0) > 0 then return nil end
+  local outer_up = false
+  for _, o in ipairs(bridge_names(man)) do
+    if man.bridges[o].role == 'outer' then
+      outer_up = true
+      if st.gone[o] or (rt[o] or {}).last ~= 'up' then outer_up = false; break end
+    end
+  end
+  local d = type(h.near_bridge) == 'table' and math.tointeger(h.near_bridge[name]) or -1
+  if d >= 0 and d <= (outer_up and M.INNER_NEAR or M.INNER_FAR) then return nil end
+  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+    if (e.bd == 1 or e.k == 'great') and (e.zn or 0) >= 1 then return nil end
+  end
+  return n
+end
+
+-- the GATE (C) 'held' once per hold, a kern.log line when it ends
+local function note_inner(K, name, n, now)
+  local r = runtime(name)
+  if n and not r.iw then
+    r.iw = now
+    local ids = type(K.census.u.atk_ids) == 'table' and K.census.u.atk_ids or {}
+    K.emit('GATE', 'C', cut(string.format('%s up held: %d civilians on its attack side (outside Kern+ or in the killing '
+           .. 'field), no hostile within %d tiles', name, n, M.INNER_NEAR), 200), {bridge = name, state = 'held', units = ids})
+    K.log('warn', 'gate: %s up held for %d civilians on its attack side', name, n)
+  elseif not n and r.iw then
+    K.log('info', 'gate: %s up no longer held (after %d ticks)', name, now - r.iw)
+    r.iw = nil
+  end
+end
+
 -- lockdown and PEACE gates for the manifest bridges (level-triggered): a lockdown wants outer/inner up in every
 -- mode; in PEACE D-14 up keeps them up outside a window, and a bridge the lockdown held goes back to its PEACE want
 local function manifest_pass(K, man, now)
@@ -2065,13 +2117,16 @@ local function manifest_pass(K, man, now)
   for _, name in ipairs(bridge_names(man)) do
     local role, br = man.bridges[name].role, st.br[name]
     local w, why
+    if not lock and rt[name] and rt[name].iw then note_inner(K, name, nil, now) end   -- BUG-338: the hold ended with it
     -- BUG-028 rescue, intake, sortie: until they end; BUG-235: a quiet-PEACE rescue of an outer bridge never outlasts
     -- a lockdown (the lockdown raises it at once, siege's next step aborts the rescue)
     if br and br.want == 'down' and SIEGE_DOWN[br.why] and not (lock and br.why == 'rescue' and GATE_ROLES[role]
        and not SIEGE_DOWN.rescue[role]) then w = nil
     elseif lock and GATE_ROLES[role] then
       M.hold_end(K, name, 'lockdown')                                -- BUG-236: a threat ends the player's hold
-      w, why = 'up', 'lockdown'
+      local n = role == 'inner' and inner_wait(K, man, name, mode, br, now) or nil      -- BUG-338
+      note_inner(K, name, n, now)
+      if not n then w, why = 'up', 'lockdown' end
     elseif mode == 'PEACE' and GATE_ROLES[role] and (peace_up(K) or (br and br.why == 'lockdown')) then
       w, why = peace_want(K, name, role, now)
       if w == 'up' and M.held_down(K, name, now) then w = nil end     -- BUG-236: the player's lever hold

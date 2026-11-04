@@ -153,9 +153,14 @@ function M.assess(K)
   local geo = fort_geo(K)
   local an, far = animal_near(K), far_ids(K)
   local rel, wide, great_rel, great_wide, undead_rel, near, nfar, far_inv = 0, 0, 0, 0, 0, 0, 0, 0
-  local far_in = 0
+  local far_in, hard_past = 0, 0
   for _, e in ipairs(h.list or {}) do
-    if far and far[e.id] and e.k ~= 'great' then
+    -- BUG-338 (Run 15c y379: the war cave dragon broke O1 and killed the civilians in the killing field): a building
+    -- destroyer or a great danger past B1 (zone 2: a Kern+ tile or zones Z3/Z4) is a BREACH at once, never cleared
+    -- as far or harmless; one in Z3/Z4 off Kern+ counts as inside too
+    local hard = (e.bd == 1 or e.k == 'great') and (e.zn or 0) >= 2
+    if hard and e.ik ~= 1 then hard_past = hard_past + 1 end
+    if far and far[e.id] and e.k ~= 'great' and not hard then
       nfar = nfar + 1
       if e.ik == 1 then far_in = far_in + 1 end         -- M3: a cleared harmless intruder inside Kern+ (reflex ig)
       if e.k == 'inv' then far_inv = far_inv + 1 end
@@ -179,7 +184,7 @@ function M.assess(K)
     -- confinement limit) counts for nothing in the distances either: the ALERT civ alert follows near_cit
     local nc, no = -1, -1
     for _, e in ipairs(h.list or {}) do
-      if not (far and far[e.id] and e.k ~= 'great') then
+      if not (far and far[e.id] and e.k ~= 'great' and not ((e.bd == 1 or e.k == 'great') and (e.zn or 0) >= 2)) then
         if type(e.dc) == 'number' and e.dc >= 0 and (nc < 0 or e.dc < nc) then nc = e.dc end
         if type(e.d_o1) == 'number' and e.d_o1 >= 0 and (no < 0 or e.d_o1 < no) then no = e.d_o1 end
       end
@@ -187,6 +192,7 @@ function M.assess(K)
     a.near_cit, a.near_o1 = nc, no
   end
   a.inside = math.max(0, a.inside - far_in)    -- M3 (BUG-112): the cleared ones inside Kern+ do not make a BREACH
+  a.inside = a.inside + hard_past                -- BUG-338: a building destroyer or great danger in Z3/Z4
   a.inv = math.max(0, a.inv - far_inv)     -- Run 11: invaders whose lockdown expired far count again on approach
   local inv_armed = now < st.inv
   if great_rel > 0 then a.siege = 'great'

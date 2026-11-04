@@ -1,5 +1,25 @@
 # CHANGELOG dfpilot
 
+## Run 15c killing field: the lockdown no longer strands civilians behind B1, predator distance counts Kern+, building destroyers near the fort (BUG-338 review, 2026-11-04; offline, live-untested)
+- **Why (corrected root cause):** Inkintense y379: the arrival lockdown raised B1 before O1 (#2922/#2926, gate.lua:2124) while
+  33 civilians walked in from the gathering; they stood in the killing field K1, part of Kern+ in this fort, "shut out from
+  food" (#2924); the deep defense's recall to Tiefe+ found 31 who could not come (#2973/#2984), the war cave dragon broke O1 and
+  killed 9 of the 10 dead there (#3030-#3039 at 84-87,66-72,131). PREDATOR_FAR said "nearest citizen 63 tiles" (#2983) because
+  dc counts only citizens outside Kern+ (sense.lua:146/487). The invader-label fix of the first BUG-338 round would not have
+  changed mode, recall or gates here.
+- **What changed:** sense: census.u `atk`/`atk_ids` (civilians outside Kern+/refuge or on an intake tile), hostile entries `da`
+  (nearest civilian anywhere within 3 levels), `db` (xy to the nearest bridge within 3 levels), `pd` (a building destroyer's or
+  great danger's path ends inside the fort, unit.path.dest). gate: a lockdown's first inner-bridge raise waits for the `atk`
+  civilians (GATE `held`) unless a hostile is within 30 tiles (60 with an outer bridge not up), inside Kern+, a building
+  destroyer/great danger in the intake area or past B1, a stale census, or BREACH. siege.raise: "nobody outside" needs `atk` 0 for
+  an inner bridge. reflex: the predator test uses min(dc, da); a wild building destroyer is never far only near the fort (zone
+  1/2, `db` <= 30, `pd`), so a cavern troll far below keeps PREDATOR_FAR. threat: a building destroyer or great danger in zone 2
+  (Kern+, Z3/Z4) is inside (BREACH at once), never cleared as far.
+- **Tests (fail on 038ef1b):** tests/lua/test_reflex.lua (6 new, 2 changed), tests/lua/test_siege.lua (1 new),
+  tests/lua/test_siege_sense.lua (fields).
+- **Live check:** GATE `B1 up held` with citizens outside at a lockdown, O1 first; PREDATOR (not FAR) next to citizens in Kern+;
+  no lockdown for a cavern building destroyer far below. Open (bugs/BUG-338): Kern+ over the killing field itself, civilians who
+  cannot come keep B1 down until a hostile is near, FR caverns sealed by default.
 ## Run 15c war cave dragon and deaths: building destroyers are never a stray animal, deaths name the attacker (BUG-338, BUG-339, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y379 (i1): invasion 4 brought a war cave dragon (gamelog); sense listed it as a wild danger (Run 11 animal
   invader rule, sense.lua:444), PREDATOR_FAR `59 tiles: no lockdown` at the map edge; it toppled the raised O1 (BREACH at once),

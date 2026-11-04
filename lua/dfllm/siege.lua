@@ -1074,6 +1074,8 @@ local function raise(K, g, now)
   local t = now - st.t0
   local cu, h = K.census.u, K.census.h
   local outside = type(cu) == 'table' and (cu.tick or -1) >= st.t0 and cu.outside or -1
+  -- BUG-338: civilians in the killing field (Kern+ may cover it) or outside are no "nobody outside" for an inner bridge
+  local atk = type(cu) == 'table' and (cu.tick or -1) >= st.t0 and int(cu.atk) or -1
   local nb = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge or {}
   local whys, fresh = {}, {}
   for _, list in ipairs({g.outer, g.inner}) do
@@ -1082,7 +1084,7 @@ local function raise(K, g, now)
       if wave_skip(b, now) or gate_state(K, b) == 'destroyed' then why = nil      -- BUG-030: nothing to raise
       elseif not why then
         local d = nb[b]
-        if outside == 0 then why = 'inside'
+        if outside == 0 and (list ~= g.inner or atk <= 0) then why = 'inside'
         elseif t >= M.RAISE_BY then why = 'timer'
         elseif d and d >= 0 and d <= M.NEAR_RAISE then why = 'hostile_near' end
         if why and gate_state(K, b) ~= 'up' and not rescuing(b) then fresh[#fresh + 1] = b end
