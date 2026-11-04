@@ -1,4 +1,4 @@
-hospital {'beds': 4, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
+hospital {'beds': 4, 'surface': 0, 'burrow': 'Kern+'} anchor [70, 70, 100] rot 0
   living: dig(7), build(9), zone(2), burrow(2)
   materials: {'bed': 4, 'chest': 2, 'door': 1, 'traction_bench': 1, 'well': 1}
 z100  (x 66..74, y 69..77)

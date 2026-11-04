@@ -46,7 +46,8 @@
   },
   "params": {
    "beds": 4,
-   "burrow": "Kern+"
+   "burrow": "Kern+",
+   "surface": 0
   },
   "rot": 0,
   "site": "S1",

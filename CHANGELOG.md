@@ -37,6 +37,23 @@
 - **Live check:** BREACH without a visible hostile: `B2 up still waits for ... walking onto it in N steps` up to 20, no
   GATE_CRUSH_RISK / BRIDGE_CRUSH; an army inside 30 tiles: the stream still does not hold the raise (no `not up at T+900`).
 
+## Meals from a cook crop, plants for the stills, a stale GiveWater job, a hospital without a fortcore (BUG-381 to BUG-384, 2026-11-04; offline, live-untested)
+- **Why:** Run 16 (i1-i4): 0 meals beside 2,000+ cook-banned plump helmets and a built kitchen; drink 150 -> 0 days with 'no brewable
+  plants' and food 378 days; a patient dead of thirst under '1 GiveWater job running 25+ days'; 'hospital: 0 sites without a fortcore'.
+- **BUG-381:** economy.lua `M.cook_plan`: while the kitchen has fewer cook ingredients and meals than citizens, `farms.cook_slots`
+  (2; 0 = off) empty slots of a season take a seeded crop it may cook (`M.cook_plant`: EDIBLE_COOKED, not on the config's Cook ban);
+  D-09 untouched (plump helmets stay brewed). No cook seeds: kern.log says so, `fd_wants` asks the caravans for seeds.
+- **BUG-382:** `stock.bshort` (drink below `gather.drink_d`, brewable plants short; contract + schema + appendix); runner.lua
+  `gather_zone` draws and keeps the gather zone for it as for low food and removes it when the plants are back.
+- **BUG-383:** water.lua `M.restale`: on the `noeffect` verdict the carriers of the running GiveWater jobs that are Orderlies
+  members (at most `water.restale_max` 2) leave the detail for one run and return the next (`restale`, `restale_every`); no job
+  removal (DESIGN 5.9). A bed switch is not done.
+- **BUG-384:** template `hospital` p.surface = 1 (7x5 on open surface floor, nothing dug, manifest room without Z4); `bp sites hospital
+  surface=1` follows the accepted water; `plan propose` drafts it for patients, no hospital zone and no dug core.
+- **Tests (fail on ec9bd8e):** tests/lua/test_bug381_cook_crop.lua (2), test_bug382_gather_drink.lua (2), test_economy_gather.lua (+1),
+  test_bug383_stale_give.lua (2), tests/test_bug384_surface_hospital.py (6).
+- **Live check:** see the four bug files (cook crop in two slots a season and PrepareMeal; `drink plants short` gather zone;
+  `carrier N taken off Orderlies for one run`; `hospital surface=1` site and draft).
 ## A shallower core in an aquifer world, the fortcore sites box, damp stone on a lost stair, explore depth (BUG-364 to BUG-367, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a-d (new forts in region1, an aquifer almost everywhere): no fortcore site anywhere (heavy_aquifer, cavern_lake,
   dig_lost), `bp sites fortcore` 0 ranked for good after every bp.cancel (i1, i2), the draft kept the cancelled `fortcore@same`,

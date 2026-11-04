@@ -299,6 +299,8 @@ WATER_LIM: dict = {
     "carers_per_run": (0, 20), "carers_hold_days": (0, 400), "dying_thirst": _THIRST, "dying_every": _TICKS,
     # BUG-104: a GiveWater job open (no worker) this many game days is 'stuck' in the patient_thirst / PATIENT_DYING cause
     "give_stuck_days": (1, 400),
+    # BUG-383: a `noeffect` GiveWater verdict takes up to restale_max carriers off the Orderlies detail for a run, again after restale_every
+    "restale": "bool", "restale_max": (1, 8), "restale_every": _TICKS,
     # BUG-288/289: the scan's read budget and slices, the boxes round citizens and remembered bodies, the surface survey
     # (levels per column, lattice, budget) and the boxes round its hits; BUG-290: a pit as a well spot
     "ws_read_max": (1000, 400000), "ws_slices": (1, 200), "ws_body_slices": (1, 50), "ws_cit": (0, 60), "ws_mem": (0, 32),
@@ -857,7 +859,7 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                      # BUG-058: the running season's slots at once, autofarm 'auto' | 'off' | 'keep' and its food-day lines
                      "farms": {"per_day": (1, 200), "now_max": (1, 200), "autofarm": ["auto", "off", "keep"],
                                "af_off_days": (0, 400), "af_on_days": (0, 400), "af_hold_days": (1, 112),
-                               "fiber_slots": (0, 50)},
+                               "fiber_slots": (0, 50), "cook_slots": (0, 50)},
                      # BUG-057/FR-72: the work details follow the unclaimed jobs ("labors": job type -> labor name)
                      "cover": {"on": "bool", "min_jobs": (1, 1000), "gather_jobs": (1, 1000), "farm_per": (1, 100),
                                "farm_min": (1, 50), "farm_max": (1, 50), "gather_per": (1, 100), "gather_min": (1, 50),

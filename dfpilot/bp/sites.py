@@ -45,7 +45,8 @@ sources, state water.src; cmd.water_ctx) only sites whose hospital zone lies wit
 accepted source count, measured as water.lua's served() does (Chebyshev from the source to the zone rect, z included);
 +2 per tile nearer; ValueError names the source, the nearest candidate and the refuge's water when none is left.
 `fill_source`: what a bucket-fed cistern (no pipe) could be filled from (revealed open water reachable from the core).
-Startup shops (`workshops` p.surface = 1, BUG-356) and the trade `depot` (BUG-368): no manifest needed; a block of open surface floor (every tile '.' with '_'
+Startup shops (`workshops` p.surface = 1, BUG-356), the trade `depot` (BUG-368) and the `hospital` p.surface = 1 (BUG-384, a 7x5 block
+near accepted water): no manifest needed; a block of open surface floor (every tile '.' with '_'
 above, on the citizens' walk group), nearest the middle of the snapshot (or `near`), clear of the fortcore's keep-out tiles.
 Aqshaft (BUG-292): columns from public Z4 floor whose levels below are rock or unknown with rock on their 4 sides,
 off the keep-out boxes and the cavern/warm levels; + AQ_SPAN for passing a known aquifer level (`_aqshaft`).
@@ -232,7 +233,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl in traps.BUILD:                                   # FR-96: absolute trap tiles, the site is the first one
         return traps.site(snap, p, _At(snap))[:n]
-    surface_shops = (tpl == "workshops" and bool(p.get("surface"))) or tpl == "depot"   # BUG-356/368: no fort manifest needed
+    # BUG-356/368/384: no fort manifest needed (the startup shops, the trade depot, the surface hospital)
+    surface_shops = (tpl in ("workshops", "hospital") and bool(p.get("surface"))) or tpl == "depot"
     if tpl != "fortcore" and not surface_shops and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
@@ -980,10 +982,14 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
     tile overrides it), + 60 when within SHOP_NEAR of the fort entrance (manifest `edge`). The caller's free callable keeps
     it off every placed project. BUG-368 (Run 16b i2 Ostgate: no trade depot without a fortcore, NO_DEPOT every year): the same
     for `depot` (tpl): one rooms.DEPOT_SIDE square of open surface floor, the depot stands where a caravan's wagon reaches it
-    without the dug core."""
+    without the dug core. BUG-384 (Run 16c i3: 'hospital: 0 sites without a fortcore', 7 hurt): and for `hospital` with p.surface = 1,
+    a 7x5 block; rank() then keeps the ones near accepted water (WATER_TPLS) like the dug hospital."""
     if tpl == "depot":
         W = H = rooms.DEPOT_SIDE
         what = "a trade depot"
+    elif tpl == "hospital":                  # BUG-384: the surface hospital's 7x5 block, ranked by the accepted water after
+        W, H = rooms.HOSPITAL_SURFACE
+        what = "a hospital"
     else:
         todo = rooms.workshops(p).workshops
         W, H = rooms.surface_block(len(todo))

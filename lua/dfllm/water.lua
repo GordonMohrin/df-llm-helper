@@ -122,6 +122,10 @@ M.DEFAULTS = {
   dying_thirst = 60000, dying_every = 2 * DAY,
   -- BUG-104: a GiveWater job that stood open (no worker) this many days is "stuck" in the cause text
   give_stuck_days = 2,
+  -- BUG-383 (Run 16b i2 y381: unit 26275 died of thirst at 75,001 with '1 GiveWater job running 25+ days without effect'): a
+  -- `noeffect` verdict releases the carriers of the running GiveWater jobs from the Orderlies detail for one run (at most
+  -- restale_max of them, again after restale_every) so the game drops the stale job and posts a new one; restale false: off
+  restale = true, restale_max = 2, restale_every = 2 * DAY,
   -- BUG-325: the scan asks the walk from up to ws_from citizens (the nearest the reference); a tile is reachable from any
   ws_from = 3,
   -- BUG-324: while no water is accepted, the kernel zones the scan's best reachable, safe water as a Water Source (wz false:
@@ -1689,7 +1693,7 @@ function M.job_scan(p, now, days)
   end
   local water, food = types({'GiveWater', 'GiveWater2'}), types({'GiveFood'})
   if next(water) == nil and next(food) == nil then return nil end
-  local sc = {w_open = 0, w_run = 0, f_open = 0, f_run = 0, stuck = 0, oldest = 0, read = true}
+  local sc = {w_open = 0, w_run = 0, f_open = 0, f_run = 0, stuck = 0, oldest = 0, read = true, w_workers = {}}
   local seen, i = {}, 0
   local ok = pcall(function()
     local link = df.global.world.jobs.list.next
@@ -1702,6 +1706,11 @@ function M.job_scan(p, now, days)
         local k = (isw and 'w_' or 'f_') .. (open and 'open' or 'run')
         sc[k] = sc[k] + 1
         if isw and open and math.type(j.id) == 'integer' then seen[string.format('%d', j.id)] = true end
+        -- BUG-383: who carries the running GiveWater jobs (at most 8 ids), for the stale-job release (M.restale)
+        if isw and not open and okw and #sc.w_workers < 8 then
+          local okid, wid = pcall(function() return math.type(w) == 'integer' and w or w.id end)
+          if okid and math.type(wid) == 'integer' then sc.w_workers[#sc.w_workers + 1] = wid end
+        end
       end
       link, i = link.next, i + 1
     end
@@ -1836,6 +1845,55 @@ function M.give_effect(p, gv, top, now, src)
                             plural(gv.run, 'GiveWater job', 'GiveWater jobs'), days, top.id,
                             math.tointeger(g.th) or -1, top.thirst, at, why)
   return gv
+end
+
+-- BUG-383 (Run 16b i2 y381: 26275 thirst 30,076 -> 60,594 -> dead at 75,001 under '1 GiveWater job running 25+ days without
+-- effect' (BUG-343's verdict was only a report): the job the game keeps for a patient can hang on its carrier for ever.
+-- The kernel never removes a job (DESIGN 5.9), but it may take the carrier off the Orderlies detail: his labor goes, the game
+-- drops the job and posts a new one for the patient; the next run puts him back. On the verdict `noeffect`, at most
+-- restale_max carriers of the running GiveWater jobs that are members of the detail leave it, again after restale_every.
+-- p.rs = {t, ids (released, to be put back), n (rounds)}. Returns the text for the log/cause, or nil
+local function detail_member(name, id)
+  local found
+  pcall(function()
+    for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+      if dfhack.df2utf(w.name) == name then
+        found = false
+        for _, u in ipairs(w.assigned_units) do if u == id then found = true end end
+        return
+      end
+    end
+  end)
+  return found
+end
+
+function M.restale(K, c, r, p, now, gv, sc)
+  local rs = type(p.rs) == 'table' and p.rs or nil
+  if rs and type(rs.ids) == 'table' and #rs.ids > 0 then            -- last run's carriers go back into the detail
+    local back = {}
+    for _, id in ipairs(rs.ids) do
+      local uid = math.tointeger(id)
+      if uid and K.act.work_detail(M.CARER_DETAIL, uid, true, {select = true}) then back[#back + 1] = uid end
+    end
+    rs.ids = json.array({})
+    K.log('info', 'water: %d carrier(s) back in %s after the stale GiveWater job release', #back, M.CARER_DETAIL)
+  end
+  if not (c.restale and gv and gv.key == 'noeffect' and sc and sc.read ~= false and M.can('work_detail')) then return nil end
+  if rs and now - (math.tointeger(rs.t) or -c.restale_every) < c.restale_every then return nil end
+  local out = {}
+  for _, id in ipairs(sc.w_workers or {}) do
+    if #out >= c.restale_max then break end
+    if detail_member(M.CARER_DETAIL, id) == true and K.act.work_detail(M.CARER_DETAIL, id, false) then out[#out + 1] = id end
+  end
+  p.rs = {t = now, ids = json.array(out), n = (rs and math.tointeger(rs.n) or 0) + 1}
+  if #out == 0 then
+    K.log('warn', 'water: stale GiveWater job (%s) and its carrier(s) %s are no member of %s: nothing to release', gv.reason,
+          #(sc.w_workers or {}) > 0 and table.concat(sc.w_workers, ',') or 'unknown', M.CARER_DETAIL)
+    return nil
+  end
+  K.log('warn', 'water: stale GiveWater job (%s): carrier(s) %s taken off %s for one run so the game posts the job anew (round %d)',
+        gv.reason, table.concat(out, ','), M.CARER_DETAIL, p.rs.n)
+  return string.format('stale job released: carrier %s off %s (round %d)', table.concat(out, ','), M.CARER_DETAIL, p.rs.n)
 end
 
 -- BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought 'Syndrome'): why a patient lies, as the unit
@@ -2640,6 +2698,8 @@ local function finish(K, c, r, p)
     gv = M.give_effect(p, M.give_diag(K, c, r, sc, r.free + fixed, top), top, now, best_h)   -- BUG-343
     st.gv = {tick = now, key = gv.key, txt = gv.txt, reason = gv.reason}
   end
+  local rel = M.restale(K, c, r, p, now, gv, sc)                      -- BUG-383
+  if rel and gv then gv.reason = rel .. '; ' .. gv.reason end              -- first: the lines are cut at 200
   -- patients over the alarm: one class-A line for all of them, with the cause (cadence: M.DEFAULTS)
   local thirsty, tmax = 0, 0
   local dry = not hosp_ok and #r.hosp > 0

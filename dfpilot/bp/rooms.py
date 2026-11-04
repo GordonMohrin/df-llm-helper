@@ -45,7 +45,9 @@ PARAMS = {
     "dining": {"seats": (20, 4, 60), "tavern": (False, None, None), "tier": (2500, 0, 100000)},
     "bedrooms": {"n": (10, 1, 40), "tier": (500, 0, 100000)},
     "tombs": {"n": (10, 1, 60), "tier": (0, 0, 100000)},
-    "hospital": {"beds": (4, 1, 10)},
+    # BUG-384: surface = 1 is a hospital on open surface floor beside the wagon and the water (no fortcore needed): no dig,
+    # no door, no burrow, no well; the sites follow the kernel's accepted water as the dug one does
+    "hospital": {"beds": (4, 1, 10), "surface": (0, 0, 1)},
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40)},
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
@@ -187,6 +189,8 @@ def tombs(p: dict) -> Plan:
 def hospital(p: dict) -> Plan:
     """Beds, traction bench, chests and its own well spot (well + pond hole over a sump below)."""
     P = Plan("hospital", "living")
+    if p.get("surface"):
+        return _surface_hospital(P, p)
     box = _box(P, 7, 5)
     u0, v0, u1, v1 = box
     P.stage("dig", "dig").tile(2, v0 + 1, 0, "h").tile(3, v0 + 1, 0, "h")
@@ -196,6 +200,25 @@ def hospital(p: dict) -> Plan:
     b.tile(u0, v0 + 2, 0, "R").tile(u0, v0, 0, "h").tile(u0 + 1, v0, 0, "h").tile(2, v0 + 1, 0, "l")
     P.stage("zone", "zone").ent(3, v0 + 1, 3, v0 + 1, 0, "p", "pond=true")
     _finish(P, p, box, "m", "location=hospital name=Hospital allow=residents")
+    return P
+
+
+HOSPITAL_SURFACE = (7, 5)            # BUG-384: the surface hospital's block (the dug one's interior)
+
+
+def _surface_hospital(P: Plan, p: dict) -> Plan:
+    """BUG-384 (Run 16c i3: 'hospital: 0 sites without a fortcore', 7 hurt, a patient's thirst up to 23,500 with no hospital):
+    the hospital on open surface floor, anchor = the block's north-west corner (as farms surface and the BUG-368 depot).
+    Nothing is dug, no door, no burrow, no well and pond (the kernel's accepted water is what the site is ranked by, as for
+    the dug hospital); beds in the bottom rows, the traction bench and chests as in the dug one, the meeting zone
+    location=hospital over the whole block. The manifest lists it as a hospital room."""
+    W, H = HOSPITAL_SURFACE
+    b = P.stage("build", "build", orders=1)
+    for i in range(p["beds"]):
+        b.tile(i if i < 7 else i - 7, H - 1 if i < 7 else H - 2, 0, "b")
+    b.tile(0, 2, 0, "R").tile(0, 0, 0, "h").tile(1, 0, 0, "h")
+    P.stage("zone", "zone").ent(0, 0, W - 1, H - 1, 0, "m", "location=hospital name=Hospital allow=residents")
+    P.room("", "hospital", USE.get("hospital", "utility"), (0, 0, 0, W - 1, H - 1, 0), 0)
     return P
 
 

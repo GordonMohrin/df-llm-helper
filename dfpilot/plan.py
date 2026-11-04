@@ -64,6 +64,7 @@ STONE_DIG = {"tpl": "bedrooms", "site": "S1", "p": {"n": 4}}
 # drafted `hospital` again each review): a hospital only within `near` tiles of an accepted source (state water.src: a
 # well over water, a Water Source zone on water >= 4/7), else the cistern first (hospital_gate, propose)
 HOSPITAL = "hospital"                     # bp/rooms.py: beds, traction bench, its own well spot (location=hospital)
+HOSPITAL_SURFACE_P = {"surface": 1}       # BUG-384: the same on open surface floor (no fortcore, no dug Z4)
 CISTERN = {"tpl": "cistern", "site": "S1"}    # bp/rooms.py: a well over real water (a pipe from a brook, or bucket-fed)
 # WATER_NEAR, water_near(): water.lua `near` (config/baseline.json water.near), in cmd (the site ranking uses it too)
 # Run 11 siege 8 (y441, pop 52 -> 3: the seal c1a147c261 placed two days before the attack was not finished): the runner
@@ -389,6 +390,16 @@ def _food_shops_missing(save_dir: Path) -> list[str] | None:
         return None
 
 
+def _has_z4(save_dir: Path) -> bool:
+    """BUG-384: the fort manifest has a Z4 (civilian core) zone: room sites hang on it."""
+    try:
+        man = fort_manifest(save_dir)
+    except BpUnavailable:
+        man = files.read_manifest(save_dir) or {}
+    z = man.get("zones") if isinstance(man, dict) else None
+    return bool(isinstance(z, dict) and z.get("Z4"))
+
+
 def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
     """BUG-034: cistern = a cistern project not done yet or a manifest cistern room; site = the anchor `bp.place
     tpl=hospital site=S1` would take now (cmd.free_sites; only looked up while the state has the `water` key, None
@@ -415,6 +426,16 @@ def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
             why = str(e).split(": ", 1)[-1] if str(e).startswith("bp.sites.rank(") else str(e)
             if "accepted water" in why:        # the ranking's water refusal (other faults: not checked, as before)
                 out["why"] = why.removeprefix(f"{HOSPITAL}: ")
+        if not free and not _has_z4(save_dir):
+            # BUG-384 (Run 16c i3: 'hospital: 0 sites without a fortcore', 7 hurt): no dug Z4 floor to hang a room on, so
+            # the surface hospital's site (hospital p.surface = 1, a 7x5 block of open floor near the accepted water)
+            try:
+                free, _, _ = free_sites(save_dir, HOSPITAL, HOSPITAL_SURFACE_P, n=1)
+            except (BpError, BpUnavailable):
+                free = []
+            if free:
+                out["surface"] = True
+                out.pop("why", None)
         if free and isinstance(free[0].get("anchor"), list):
             out["site"], out["rot"] = free[0]["anchor"], free[0].get("rot", 0)
             if isinstance(free[0].get("water"), dict):
@@ -2474,6 +2495,21 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
     return out
 
 
+HOSPITAL_SURFACE_BUILD = {"tpl": HOSPITAL, "site": "S1", "p": {"surface": 1}}     # BUG-384
+
+
+def hospital_surface_due(s: dict | None, fort: dict | None, done: set) -> bool:
+    """BUG-384: the fort has patients lying and no hospital zone (state water.patients > 0, water.hosp 0), no fortcore room set to
+    hang a hospital on, none drafted or applied before, and a surface site by the accepted water is free (fort.hosp)."""
+    w = (s or {}).get("water")
+    h = (fort or {}).get("hosp") or {}
+    if not isinstance(w, dict) or not h.get("surface") or not h.get("site"):
+        return False
+    if not _nat(w.get("patients")) or w["patients"] <= 0 or (w.get("hosp") or 0) > 0:
+        return False
+    return not any(t == HOSPITAL for t, _ in done)
+
+
 STARTUP_BUILD = {"tpl": "workshops", "site": "S1", "p": {"surface": 1}}     # BUG-356: Still, Kitchen, Carpenters, Masons
 
 
@@ -2762,7 +2798,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         while k < len(builds) and _refuge_fix(builds[k]):
             k += 1
         builds[k:k] = front
-    fresh = None
+    fresh, hosp_note = None, ""
     dug = (fort or {}).get("core_dig") is True
     if (fort or {}).get("z4") is False and not core and (dug or (
             not (fort or {}).get("core_any") and not any(t == "fortcore" for t, _ in done))):
@@ -2778,6 +2814,11 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         startup = not (fort or {}).get("startup") and (info is None or "workshops" in info)
         if startup:
             keep.append(copy.deepcopy(STARTUP_BUILD))
+        # BUG-384 (Run 16c i3: 7 hurt, 'hospital: 0 sites without a fortcore', a patient's thirst up to 23,500): hurt citizens
+        # and no hospital zone: the surface hospital by the accepted water, if a site stands (fort.hosp.surface)
+        if hospital_surface_due(s, fort, done) and (info is None or HOSPITAL in info):
+            keep.append(copy.deepcopy(HOSPITAL_SURFACE_BUILD))
+            hosp_note = "; BUG-384: patients and no hospital: hospital p.surface=1 at S1 on the surface by the accepted water"
         fresh = sorted({b["tpl"] for b in builds if b not in keep})
         builds, target = keep, cur
         front = [b for b in front if any(b is x for x in builds)]
@@ -2834,7 +2875,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + depot_note
+    doc["notes"] += core_note + depot_note + hosp_note
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
         if armor and not _bar_want(doc["trade"]["want"]):
