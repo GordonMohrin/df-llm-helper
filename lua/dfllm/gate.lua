@@ -779,15 +779,34 @@ local function lever_room(K, mode, main, rooms)
 end
 
 -- lever order for a pull: 0 = in an allowed room with a puller present, 1 = on a tile of the burrow the civ alert
--- holds the civilians in (BREACH: the refuge if it exists, as siege; else the burrows of the sounding alert, siege's
+-- holds the civilians in (BREACH: seal's BREACH pick (the refuge unless it is open or refused), else the alert's; else the burrows of the sounding alert, siege's
 -- list; else Kern+), 2 = in another allowed room, 3 = the rest; manifest order inside a class (live L3: in BREACH the
 -- levers in Kern+ had no worker, GATE_FAIL no_worker x3). In BREACH a linked refuge lever thus comes before the B2
 -- landing; Run 11 y432 winter: in the deep defense (the alert in the refuge, mode SIEGE) the Kern+ levers came first
--- and no confined civilian could take them
+-- and no confined civilian could take them.
+-- BUG-336 review: in BREACH the burrow seal picks for it (seal.breach_pick, no side effects: an open refuge is refused,
+-- so the civilians may sit in Kern+; at the BREACH entry the alert still sounds on the SIEGE burrow); no answer (before
+-- seal's first audit) the refuge as before unless its way in is open; else the sounding alert's own burrow (siege's
+-- list, its first name), else Kern+
 local function order(K, r, cand, now)
   local mode = K.mode()
   local kn, rn = core_burrows(K.manifest())
-  local homes = mode == 'BREACH' and burrow(rn) and {burrow(rn)} or alert_burrows(K)
+  local homes
+  if mode == 'BREACH' then
+    local okp, pk = K.call('seal', 'breach_pick')
+    local main = okp and type(pk) == 'string' and pk ~= '' and burrow(pk) or nil
+    if not main and not (okp and pk == '') and burrow(rn) then   -- no answer (no audit yet): the refuge, as before,
+      local okr, rop = K.call('seal', 'refuge_open')              -- unless its way in is open
+      if not (okr and type(rop) == 'string') then main = burrow(rn) end
+    end
+    if not main then
+      local _, names = alert_burrows(K)
+      main = names and burrow(names[1]) or nil
+    end
+    if main then homes = {main} end
+  else
+    homes = alert_burrows(K)
+  end
   if not homes or #homes == 0 then homes = {burrow(kn)} end
   local rooms, pres = {}, {}
   for _, rm in ipairs(room_list(K, now)) do

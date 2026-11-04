@@ -1159,7 +1159,10 @@ STATE = Obj(
                                                              "tr": FLAG, "trw": Str(maxbytes=40),
                                                              # BUG-336: its own way in (the stair head) is open: never
                                                              # the civ alert's burrow in a SIEGE or BREACH
-                                                             "op": FLAG}),
+                                                             "op": FLAG,
+                                                             # BUG-337 review: building destroyers in sight and only
+                                                             # a hatch or door closes it (they break it)
+                                                             "sf": FLAG}),
                                              # BUG-096/FR-80: the worst open burrow episode: how many, the burrow, its tiles
                                              # at the last good reading and now, the cause (load | runtime), the tiles
                                              # painted again, what the repair does ('repairing', 'waits for peace', 'repair

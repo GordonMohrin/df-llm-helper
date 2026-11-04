@@ -9,6 +9,7 @@ local runner = require('dfllm.runner')
 
 local SX, SY, Z = 114, 73, 143
 local CFG0 = {}
+local S_AT                      -- the tile the fake seal.refuge_alt was asked for
 for k, v in pairs(runner.CFG) do CFG0[k] = v end
 
 local function row(W, id)
@@ -35,7 +36,8 @@ local function world(o)
           state = function() return {stock = {food_d = 200, drink_d = 300, rock = 50, rock_need = 10}} end})
   if o.refuge then
     W.load({name = 'seal', every = {ticks = 100000},
-            refuge_stair = function(K) return {state = 'ok', pos = {SX, SY, Z}, man = {SX, SY, Z}} end})
+            refuge_stair = function(K) return {state = 'ok', pos = {SX, SY, Z}, man = {SX, SY, Z}} end,
+            refuge_alt = o.alt and function(K, at) S_AT = at; return o.alt end or nil})
   end
   W.load(runner)
   W.state()
@@ -65,7 +67,10 @@ T.test('BUG-336: a perimeter seal door nobody builds: after esc_days DECISION_NE
   T.ok(a[1].d.q:find('^seal sl: door 114,73,143 open %d+ d'), a[1].d.q)
   T.ok(a[1].d.q:find('the way in stays open', 1, true), a[1].d.q)
   T.eq(a[1].d.proj, 'sl')
-  T.ok(a[1].d.cmd:find([[dfllm cmd bp.place '{"tpl":"seal","at":"114,73,143","close":"wall"}']], 1, true), a[1].d.cmd)
+  -- review: the command the CLI schema takes (bp.place needs site; old: '{"tpl":"seal","at":...}' -> $.args.site: missing)
+  T.eq(a[1].d.cmd, [[dfllm cmd bp.cancel '{"proj":"sl"}' then dfllm cmd bp.place ]] ..
+                   [['{"tpl":"seal","site":"S1","p":{"at":"114,73,143 floor","close":"wall"}}']])
+  T.ok(a[1].d.how:find('wall the tile', 1, true), a[1].d.how)
   H.runs(W, 4)
   T.eq(#asks(W), 1, 'not again within esc_days')
   H.runs(W, 8)
@@ -76,7 +81,8 @@ T.test('BUG-336: a perimeter seal door nobody builds: after esc_days DECISION_NE
 end)
 
 T.test('BUG-336: the refuge hatch nobody builds: never set aside (old: set aside after idle_days, BUG-328), the question ' ..
-       'says the refuge is not the civilians\' burrow in a fight and names bp.place at=refuge', function()
+       'says the refuge is not the civilians\' burrow in a fight; review: never bp.place at=refuge on the same head again',
+       function()
   local W = world{tag = 'b336r', refuge = true}
   H.place(W, 'rf', seal_doc('H'))
   for _ = 1, 24 do H.runs(W, 1) end
@@ -86,7 +92,37 @@ T.test('BUG-336: the refuge hatch nobody builds: never set aside (old: set aside
   T.ok(#a >= 1, 'asked')
   T.eq(a[1].d.mat, 'hatch 114,73,143')
   T.ok(a[1].d.q:find("the refuge is NOT the civilians' burrow in a fight until it stands", 1, true), a[1].d.q)
-  T.ok(a[1].d.cmd:find([[bp.place '{"tpl":"seal","at":"refuge"}']], 1, true), a[1].d.cmd)
+  T.eq(a[1].d.cmd, nil, 'no bp.place on the same head')
+  T.ok(a[1].d.how:find('placing it again at the same head does not help', 1, true), a[1].d.how)
+end)
+
+T.test('BUG-336 review: the refuge hatch stalled where the map now shows another head (BUG-313 moved it up a walled-in ' ..
+       'shaft): the question names that tile and the schema-valid bp.place at=refuge', function()
+  local W = world{tag = 'b336m', refuge = true, alt = {head = {SX, SY, Z + 2}, moved = true, boxed = true}}
+  H.place(W, 'rf', seal_doc('H'))
+  local runs = 0
+  while #asks(W) == 0 and runs < 40 do H.runs(W, 1); runs = runs + 1 end
+  local a = asks(W)
+  T.ok(#a >= 1, 'asked')
+  T.eq(S_AT, {SX, SY, Z}, 'refuge_alt gets the stalled piece')
+  T.ok(a[1].d.how:find('place it at the head the map shows now (114,73,145)', 1, true), a[1].d.how)
+  T.eq(a[1].d.cmd, [[dfllm cmd bp.cancel '{"proj":"rf"}' then dfllm cmd bp.place ]] ..
+                   [['{"tpl":"seal","site":"S1","p":{"at":"refuge"}}']])
+end)
+
+T.test('BUG-336 review: the refuge hatch stalled on the head the map shows (no other tile): the doors round the stair ' ..
+       'foot on the refuge floor, one bp.place with their tiles; boxed names the cause', function()
+  local W = world{tag = 'b336f', refuge = true,
+                  alt = {head = {SX, SY, Z}, boxed = true, foot = {'115,73,141 floor', '114,74,141 floor'}}}
+  H.place(W, 'rf', seal_doc('H'))
+  local runs = 0
+  while #asks(W) == 0 and runs < 40 do H.runs(W, 1); runs = runs + 1 end
+  local a = asks(W)
+  T.ok(#a >= 1, 'asked')
+  T.ok(a[1].d.how:find('build it by hand in DF (no tile beside it to build from), or cancel it and put doors round ' ..
+                       'the stair foot', 1, true), a[1].d.how)
+  T.eq(a[1].d.cmd, [[dfllm cmd bp.cancel '{"proj":"rf"}' then dfllm cmd bp.place ]] ..
+                   [['{"tpl":"seal","site":"S1","p":{"at":"115,73,141 floor;114,74,141 floor"}}']])
 end)
 
 T.done()

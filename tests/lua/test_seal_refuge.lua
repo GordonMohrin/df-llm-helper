@@ -25,7 +25,7 @@ end
 local Z = 9
 local function fort(opts)
   opts = opts or {}
-  local W = SW.new{persist = {manifest = {v = 2, burrows = {['Kern+'] = {role = 'kern'}}}}}
+  local W = SW.new{persist = {manifest = opts.man or {v = 2, burrows = {['Kern+'] = {role = 'kern'}}}}}
   SW.fill(W, Z + 1, 0, 0, 40, 30, ',')
   SW.draw(W, Z + 1, {'>'}, 20, 10, {outside = true})
   SW.fill(W, Z, 0, 0, 40, 30, '#')
@@ -914,6 +914,107 @@ T.test('BUG-336: the deep defense asks for the open refuge (the BREACH ask in a 
   W.set_mode('PEACE')
   local _, ch = W.K.call('seal', 'alert_burrow', 'PEACE', 'Kern+')
   T.eq(ch, 'Kern+')
+end)
+
+---------------------------------------------------------------- BUG-336/337 review
+-- The verifier: ALERT (a lockdown, an ambush) and the no-audit path could still pick the open refuge; a held open refuge
+-- with no other burrow was KEPT instead of fled; re-placing the hatch at the same stair head is no fix (refuge_alt names
+-- the doors round the stair foot); with building destroyers in sight a raised bridge beats a hatch (BUG-337 (c)).
+local HOSTILE_IN = {{id = 300, x = 10, y = 12, z = Z}}
+
+T.test('BUG-336 review: ALERT with a hostile inside Kern+ (a lockdown, an ambush): the open refuge is refused at the ' ..
+       'BREACH/DEAD level too (old: Tiefe+ at the BREACH level, the open dead end), the citizens flee', function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
+  local ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'ALERT', 'Kern+', true)
+  T.eq({ok, pick, flee}, {true, nil, true}, 'old: Tiefe+')
+  T.ok(note:find('Tiefe+: open: no hatch at 6,6,9', 1, true), note)
+  hatch_on_head(W)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
+  ok, pick = W.K.call('seal', 'alert_burrow', 'ALERT', 'Kern+', true)
+  T.eq(pick, 'Tiefe+', 'closed: the dead end again')
+end)
+
+T.test('BUG-336 review: citizens the alert holds in the open refuge while no other burrow is usable (a hostile in ' ..
+       'Kern+) leave it and flee (REFUGE_SWITCH Tiefe+ -> none, why unsealed; old: KEEP Tiefe+, the open dead end)',
+       function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  W.set_mode('SIEGE')
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
+  local ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq({ok, pick, flee}, {true, nil, true}, 'old: Tiefe+ kept')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[1].d.from, sw[1].d.to, sw[1].d.why}, {1, 'Tiefe+', '', 'unsealed'})
+end)
+
+T.test('BUG-336 review: refuge_alt: the stair head now, moved for a piece on another level of the stair, and why doors ' ..
+       'round the stair foot cannot close it when the foot stands in a room', function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  -- (BUG-313: the shaft z6-8 is walled in, the head the map shows is 6,6,9 on the hall floor)
+  local ok, a = W.K.call('seal', 'refuge_alt', {6, 6, Z})
+  T.ok(ok, a)
+  T.eq({a.head, a.moved, a.boxed, a.foot}, {{6, 6, Z}, nil, false, nil})
+  T.eq(a.footwhy, 'the stair foot stands in a room (8 floor tiles round it)')
+  ok, a = W.K.call('seal', 'refuge_alt', {6, 6, Z - 3})
+  T.eq({a.moved, a.boxed}, {true, true}, 'a piece on the walled-in manifest head: at=refuge goes elsewhere now')
+end)
+
+T.test('BUG-336 review: a stair foot with two floor tiles beside it: refuge_alt offers doors there; built, they close ' ..
+       'the refuge as a hatch on the head does (state op gone, trusted, the BREACH pick again; old: open for ever)',
+       function()
+  local W = fort{door = true}
+  SW.draw(W, Z - 4, {'###', '#<.', '#.#'}, 5, 5)
+  SW.regroup(W)
+  with_manifest(W, 6, 6)
+  local ok, a = W.K.call('seal', 'refuge_alt', {6, 6, Z})
+  T.eq(a.foot, {'7,6,5 floor', '6,7,5 floor'}, T.show(a))
+  T.eq(W.state().alert.ref.op, 1)
+  SW.draw(W, Z - 4, {'+'}, 7, 6)
+  SW.draw(W, Z - 4, {'+'}, 6, 7)
+  SW.regroup(W)
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+  T.eq(W.state().alert.ref.op, nil, 'the foot doors close it')
+  local _, tr = W.K.call('seal', 'refuge_trust')
+  T.eq(tr.hatch, {pos = {6, 6, Z - 4}, state = 'ok', man = {6, 6, Z - 3}})
+  local _, op, cl = W.K.call('seal', 'refuge_open')
+  T.eq({op, cl and cl.kind, cl and cl.foot}, {nil, 'door', true})
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = HOSTILE_IN})
+  W.set_mode('BREACH')
+  local _, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, 'Tiefe+')
+end)
+
+T.test('BUG-337 review (c): building destroyers in sight and only a hatch closes the refuge: state alert.ref.sf 1 (the ' ..
+       'status names it); a raised bridge on the head: no flag', function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  hatch_on_head(W)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, bd = 1, list = {{id = 301, x = 30, y = 20, z = Z + 1, bd = 1}}})
+  W.run(1200, {skip = 9})
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, bd = 1, list = {{id = 301, x = 30, y = 20, z = Z + 1, bd = 1}}})
+  inspect(W, 'refuge', 'refresh')
+  T.eq(W.state().alert.ref.sf, 1, T.show(W.state().alert.ref))
+  local _, kind = W.K.call('seal', 'refuge_closure')
+  T.eq(kind, 'soft')
+  SW.draw(W, Z - 3, {'H'}, 6, 6)
+  inspect(W, 'refuge', 'refresh')
+  _, kind = W.K.call('seal', 'refuge_closure')
+  T.eq(kind, 'hard')
+  T.eq(W.state().alert.ref.sf, nil)
+end)
+
+T.test('BUG-336 review: before the first audit (boot) a BREACH ask for the open refuge gets Kern+ (old: Tiefe+, want ' ..
+       'unchecked)', function()
+  local man = {v = 2, burrows = {['Kern+'] = {role = 'kern'}, ['Tiefe+'] = {role = 'refuge'}},
+               refuge = {anchor = {5, 5, Z - 4}, burrow = 'Tiefe+'}, stairs = {civ = {{6, 6, Z - 4, Z}}}}
+  local W = fort{door = true, man = man, settle = 0}
+  W.set_mode('BREACH')
+  local ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq({ok, pick}, {true, 'Kern+'})
 end)
 
 T.done()

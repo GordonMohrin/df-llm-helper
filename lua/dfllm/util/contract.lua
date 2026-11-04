@@ -536,7 +536,9 @@ C.STATE_SPEC = obj({
                           -- BUG-049: trusted (1) or not (0) and the first reason
                           tr = FLAG, trw = str(40),
                           -- BUG-336: its own way in (the stair head) is open: never the alert burrow in a fight
-                          op = FLAG}),
+                          op = FLAG,
+                          -- BUG-337 review: building destroyers in sight and only a hatch or door closes it
+                          sf = FLAG}),
                -- BUG-096/FR-80: the worst open burrow episode: how many, the burrow, its tiles at the last good reading and
                -- now, the cause (load | runtime), tiles painted again, what the repair does, what the lost tiles held
                bg = obj({n = NAT, b = str(24), was = NAT, now = NAT}, {c = str(8), fx = NAT, st = str(16), crit = str(24)})}),

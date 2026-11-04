@@ -390,10 +390,11 @@ def lone_hint(d: dict) -> str:
 
 def seal_stalled_hint(d: dict) -> str:
     """BUG-336 (Run 15b Earthboat: the refuge hatch stalled 911 days, trolls walked down the open stair, 92 -> 1): a stuck seal
-    without progress for seal_first.esc_days; d.cmd = the commands (the refuge's: build by hand or place it again)."""
-    cmd = d.get("cmd")
+    without progress for seal_first.esc_days; d.how = what to do (build it by hand, or the other closure), d.cmd = its
+    commands (bp.cancel then bp.place; none when placing it again cannot help: the refuge's hatch on the same head)."""
+    cmd, how = d.get("cmd"), d.get("how")
     return (f"tell Gordon: seal {d.get('proj', '?')} ({d.get('mat', '?')}) has built nothing for {d.get('n', '?')} days"
-            + (f"; fix: {cmd}" if cmd else "") + "; until it stands that way in is open")
+            + (f"; {how}" if how else "") + (f"; fix: {cmd}" if cmd else "") + "; until it stands that way in is open")
 
 
 def siege_long_hint(d: dict) -> str:

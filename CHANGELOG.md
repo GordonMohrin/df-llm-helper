@@ -20,6 +20,23 @@
 - **Live check:** a fort with the refuge hatch missing: status `REFUGE OPEN`, at a siege REFUGE_FAIL `Tiefe+: open: no hatch ...`
   and the alert on Kern+; 30 days after a seal's clock stopped DECISION_NEEDED seal_stalled. Open (BUG-337): ranking burrows by
   walls/raised bridges vs doors/hatches (needs a flood with doors passable); fleeing vs an open dead end after a Kern+ breach.
+## Run 15b refuge review: schema-valid seal_stalled commands, no re-place on the same head, BREACH levers follow seal (BUG-336, BUG-337, 2026-11-04; offline, live-untested)
+- **Why:** the verifier of the first round: `DECISION_NEEDED seal_stalled` handed out `bp.place '{"tpl":"seal","at":"refuge"}'`
+  (`$.args.site: missing`, dfpilot/schema.py:860) and its d.cmd (cut at 300 bytes) could break the contract's 200-byte rule (then the
+  question was dropped); it re-placed the refuge hatch on the same head (Earthboat did that four times); gate.lua:790 ranked the refuge's levers
+  first in every BREACH although seal now keeps the civilians in Kern+; ALERT and the boot path could still pick the open refuge;
+  a held open refuge with nothing else was KEPT, not fled; (c) had no safe core.
+- **What changed:** runner Q.seal_place/Q.seal_opening (bp.cancel + bp.place with site S1 and p; d.cmd the commands only,
+  d.how the prose); seal refuge_alt (the moved head, or doors round the stair foot), refuge_foot (doors there close the refuge:
+  refuge_open, refuge_trust, Python cmd.refuge_stair state `foot`); choose refuses the open refuge in ALERT with danger, at
+  BREACH/DEAD and before the first audit; leave_why `unsealed` to none + flee; seal.breach_pick, gate `order` in BREACH follows
+  it; seal.refuge_closure, state `alert.ref.sf` + status line for a hatch/door-only refuge with building destroyers in sight.
+- **Tests (fail on 16c716f):** test_seal_refuge.lua (6), test_bug336_seal_escalate.lua (2 new, 2 changed), test_gate_pullers.lua
+  (1), test_bug336_337_refuge.py (3 new, 3 changed).
+- **Live check:** a stalled refuge hatch: d.cmd runs as given (`dfllm cmd bp.place ...` accepted); a BREACH with the refuge open:
+  GATE pulls from the Kern+ levers. Open: per-burrow closer ranking (BUG-337), foot doors for a foot in a room, a planned (not yet
+  built) foot closure still trips the plan check.
+
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or

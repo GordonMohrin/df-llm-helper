@@ -46,11 +46,51 @@ set it aside after idle_days (Q.idle_keep :4856 kept a seal only in SIEGE/BREACH
 - Interaction: BUG-331's eased siege (`release`) still leaves a held refuge (`released` is checked before `unsealed`); BUG-330's
   care burrow is untouched (outside PEACE only on Kern+ tiles, which is where the civilians now are while the refuge is open).
 
+## Fix, review round (verifier r15_refuge_verdict)
+- **seal_stalled commands pass the CLI schema:** the old `bp.place '{"tpl":"seal","at":"refuge"}'` failed
+  `schema.validate_args` (`$.args.site: missing`, dfpilot/schema.py:860); every command is now `bp.cancel '{"proj":..}' then
+  bp.place '{"tpl":"seal","site":"S1","p":{"at":..[,"close":"wall"]}}'` (runner.lua Q.seal_place), and d.cmd holds the
+  commands alone (CONTRACTS §12: every d string <= 200 bytes; a longer one, which the old 300-byte cut let through, made the
+  contract refuse the event and the question was dropped), d.how the prose (by hand, what the command does). A perimeter piece takes its own opening from the
+  seal's `at` (Q.seal_opening): a floor door -> `close=wall`, a stair/ramp piece -> placed again as it was. Status text
+  `bp.place tpl=seal site=S1 at=refuge`.
+- **No re-place on the same stair head:** seal `M.refuge_alt(K, at)`: where `at=refuge` puts the hatch now (BUG-313 moves a
+  walled-in head up the stair) -> that command only when it is another tile; else the doors round the stair foot on the
+  refuge floor (at most 4 floor tiles beside the foot, no stair/ramp/sapling there) as one bp.place; else no command, d.how
+  `build it by hand in DF (no tile beside it to build from | units on the stair? no builder reaches it?); placing it again
+  at the same head does not help` (+ why the foot cannot be closed: `the stair foot stands in a room (8 floor tiles round
+  it)`, the Earthboat case).
+- **Doors round the foot count as closed:** seal `refuge_foot`; `refuge_open`, `refuge_trust` (hatch ok at the foot) and
+  Python `cmd.refuge_stair` (state `foot`, head None: `seal at=refuge` and the plan check's BUG-031 head demand stop) accept
+  a foot whose every walkable neighbour carries a door/hatch.
+- **ALERT and boot:** `choose` refuses the open refuge also outside SIEGE/BREACH once danger is known (a candidate refused for
+  an opening or a hostile inside) and at the BREACH/DEAD levels (only reached with danger): a lockdown or ambush with a
+  hostile in Kern+ no longer lands in the open dead end. Before the first audit a BREACH default of an open refuge is Kern+.
+- **Flee instead of KEEP:** `leave_why` 'unsealed' no longer needs another pick: held in the open refuge with nothing else
+  usable the alert goes off and the citizens flee (fight_rule sets flee; REFUGE_SWITCH `Tiefe+ -> none`, why unsealed).
+- **Gate lever order in BREACH:** gate.lua `order` ranked the refuge's levers class 1 in every BREACH; now it follows seal's
+  BREACH pick (`seal.breach_pick`, choose without side effects): an open refuge -> the Kern+ levers class 1; no answer
+  (before the first audit) the refuge only while it is closed, else the sounding alert's own burrow, else Kern+.
+
+## Open
+- The plan check (plan.py refuge_gate) still asks for `SEAL_REFUGE` while the foot doors are only planned, not built (the
+  snapshot shows them once built).
+- Doors at a foot that stands in a room (more than 4 floor tiles beside it, Earthboat 55,82,132) are not offered; no wall
+  or plug closure exists for a dug stair (DF builds no wall on it; removing the stair cuts the refuge off).
+- Why no builder takes a head with a free tile beside it (Earthboat y385b 55,82,135) is not read (units on the stair,
+  path): the question says what to look at in DF.
+
 ## Tests (fail on b35af6d)
 `tests/lua/test_seal_refuge.lua` (2: a BREACH in Kern+ with the open refuge -> flee, the built hatch -> Tiefe+ again; the deep
 ask -> Kern+, a held open refuge -> REFUGE_SWITCH unsealed, PEACE unchanged), `tests/lua/test_intake.lua` (BUG-336 SIEGE_DEEP with
 an open refuge), `tests/lua/test_bug336_seal_escalate.lua` (2: a perimeter door asks after esc_days and again, the refuge hatch is
 never set aside), `tests/test_bug336_337_refuge.py` (4: brief, schema, config lint, wake hint).
+Review round (each fails on 16c716f): test_seal_refuge.lua (ALERT with a hostile in Kern+ -> flee; held open refuge, nothing
+else -> none + flee; refuge_alt head/moved/footwhy; foot doors offered, built -> closed, trusted, the BREACH pick; boot without
+audit -> Kern+), test_bug336_seal_escalate.lua (exact schema-valid d.cmd: perimeter close=wall, the moved head, the foot
+doors; no bp.place on the same head), test_gate_pullers.lua (BREACH with seal's pick Kern+: B2 from its Kern+ lever, not the
+refuge lever), test_bug336_337_refuge.py (every kernel command passes schema.validate_args and defense.seal_pieces, <= 200
+bytes; cmd.refuge_stair state foot; plan head_open False).
 
 ## Live check
 A fort with the refuge hatch missing: status `REFUGE OPEN`, state `alert.ref.op 1`; at a siege REFUGE_FAIL `Tiefe+: open: ...`

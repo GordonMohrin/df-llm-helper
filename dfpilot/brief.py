@@ -975,7 +975,9 @@ def line_alert(al: dict) -> str:
     if ref.get("tr") == 0:                     # BUG-049: Tiefe+ is trusted only while separated (fresh), hatched, empty
         txt += f" | refuge NOT TRUSTED: {ref.get('trw') or '?'}"
     if ref.get("op") == 1:                     # BUG-336: its way in is open: seal never confines to it in a fight
-        txt += " | REFUGE OPEN: not used in a siege or breach, close its stair head (bp.place tpl=seal at=refuge)"
+        txt += " | REFUGE OPEN: not used in a siege or breach, close its stair head (bp.place tpl=seal site=S1 at=refuge)"
+    elif ref.get("sf") == 1:                   # BUG-337 review: building destroyers in sight break its hatch or door
+        txt += " | refuge closed by a hatch/door only: building destroyers in sight break it"
     if isinstance(al.get("aud"), int):         # BUG-146: the refuge audit is overdue (it runs as an urgent job)
         txt += f" | refuge data {al['aud'] / 1200:.1f} d old"
     return txt

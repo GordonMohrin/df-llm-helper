@@ -3355,9 +3355,41 @@ function Q.refuge_seal(K, P)
   end
 end
 
+-- BUG-336 review: the bp.place args (dfpilot/schema.py VERB_ARGS bp.place: tpl and site; the seal's own params in p) as the
+-- command line's JSON
+function Q.seal_place(at, close)
+  return string.format("dfllm cmd bp.place '{\"tpl\":\"seal\",\"site\":\"S1\",\"p\":{\"at\":\"%s\"%s}}'", at,
+                       close and string.format(',\"close\":\"%s\"', close) or '')
+end
+
+-- BUG-336 review: the opening of seal doc d whose piece stands on tile {x, y, z} ('x,y,z kind[ piece][ for=..]', its
+-- kind), from d.params.at (a ramp's piece stands on the ramp top, one level up), else nil
+Q.FLOORISH = {floor = true, boulder = true, pebbles = true, brook_top = true, passable = true, shrub = true}
+function Q.seal_opening(d, tile)
+  local at = type(d) == 'table' and type(d.params) == 'table' and d.params.at
+  if type(at) ~= 'string' then return nil end
+  for seg in at:gmatch('[^;]+') do
+    local x, y, z, rest = seg:match('^%s*(%-?%d+),(%-?%d+),(%-?%d+)%s*(.*)$')
+    x, y, z = int(x), int(y), int(z)
+    if x then
+      local kind = (rest or ''):match('^(%S+)') or 'floor'
+      kind = kind:lower()
+      local zt = kind == 'ramp' and z + 1 or z
+      if x == tile[1] and y == tile[2] and zt == tile[3] then
+        return seg:gsub('^%s+', ''):gsub('%s+$', ''), kind
+      end
+    end
+  end
+end
+
 -- BUG-336: a stuck seal (r.st 1) without progress for c.esc asks the player, again every c.esc while it stays so (r.dn):
 -- the piece, the cause (SEAL_STUCK's), what the kernel tried (re-placed: BUG-274 r.rp; walled: BUG-044 S.rt.sw) and the
--- commands. The refuge's seal says the refuge is not the civilians' burrow in a fight until it stands (seal.refuge_open)
+-- commands. The refuge's seal says the refuge is not the civilians' burrow in a fight until it stands (seal.refuge_open).
+-- Review: every command validates against the CLI schema (bp.place needs site S1, the seal's at/close go in p); the
+-- refuge's hatch is never placed again on the same stair head (Earthboat did it four times, 'no builder has taken it'):
+-- seal.refuge_alt names where at=refuge puts it now (BUG-313: a boxed head moves up the stair) when that is another tile,
+-- else doors round the stair foot on the refuge floor (at most 4), else only the hand-built hatch and what to look at.
+-- d.cmd = the commands alone (bp.cancel then bp.place; nil when there is none), d.how = what they do and the other way
 function Q.seal_escalate(K, P, d, r, n, names, t, c)
   if P.tpl ~= 'seal' or t - r.t < c.esc or (int(r.dn) and t - r.dn < c.esc and t >= r.dn) then return end
   r.dn = t
@@ -3368,23 +3400,52 @@ function Q.seal_escalate(K, P, d, r, n, names, t, c)
   local tried = {}
   if type(r.rp) == 'table' and next(r.rp) then tried[#tried + 1] = 'removed and placed again' end
   if type(S.rt.sw) == 'table' and type(S.rt.sw[P.id]) == 'table' then tried[#tried + 1] = 'doors walled' end
-  local at = piece:match('(%-?%d+,%-?%d+,%-?%d+)') or '?'
-  local cmd
+  local px, py, pz = piece:match('(%-?%d+),(%-?%d+),(%-?%d+)')
+  local tile = px and {int(px), int(py), int(pz)} or nil
+  local cancel = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}' then ", P.id)
+  -- d.cmd: the commands alone (every d string <= 200 bytes, CONTRACTS section 12: one that does not fit is left out);
+  -- d.how: what they do and the other way (build it by hand), for the player
+  local place, how
   if rf then
-    cmd = string.format("build it by hand in DF, or dfllm cmd bp.cancel '{\"proj\":\"%s\"}' then dfllm cmd bp.place " ..
-                        "'{\"tpl\":\"seal\",\"at\":\"refuge\"}'", P.id)
+    local oka, alt = K.call('seal', 'refuge_alt', tile)
+    alt = oka and type(alt) == 'table' and alt or {}
+    local why = alt.boxed == true and 'no tile beside it to build from' or 'units on the stair? no builder reaches it?'
+    if alt.moved and type(alt.head) == 'table' then
+      place = Q.seal_place('refuge')
+      how = string.format('build it by hand in DF (%s), or cancel and place it at the head the map shows now (%d,%d,%d)',
+                          why, alt.head[1], alt.head[2], alt.head[3])
+    elseif type(alt.foot) == 'table' and #alt.foot > 0 then
+      place = Q.seal_place(table.concat(alt.foot, ';'))
+      how = string.format('build it by hand in DF (%s), or cancel it and put doors round the stair foot on the refuge ' ..
+                          'floor instead (%d tiles; they close the refuge as the hatch does)', why, #alt.foot)
+    else
+      how = string.format('build it by hand in DF (%s); placing it again at the same head does not help%s', why,
+                          alt.footwhy and ('; ' .. alt.footwhy) or '')
+    end
   else
-    cmd = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}' then dfllm cmd bp.place '{\"tpl\":\"seal\",\"at\":\"%s\"," ..
-                        "\"close\":\"wall\"}' (a wall needs no door; only where the citizens keep another way)", P.id, at)
+    local seg, kind = Q.seal_opening(d, tile or {})
+    if seg and Q.FLOORISH[kind] then
+      place = Q.seal_place(seg:match('^(%-?%d+,%-?%d+,%-?%d+%s+%S+)') or seg, 'wall')
+      how = 'build it by hand in DF, or cancel it and wall the tile (a wall needs no door; only where the citizens keep ' ..
+            'another way)'
+    elseif seg then
+      place = Q.seal_place(seg)
+      how = 'build it by hand in DF, or cancel it and place it again'
+    else
+      place = Q.seal_place('last')
+      how = 'build it by hand in DF, or cancel it and seal the open ways in now (at=last)'
+    end
   end
+  local cmd = place and (cancel .. place) or nil
+  if cmd and #cmd > 200 then cmd, how = nil, how .. ' (the command is too long: dfllm cmd inspect what=refuge)' end
   local q = string.format('seal %s: %s open %d d%s%s%s; %s', P.id, piece, days,
                           n > 1 and string.format(' (+%d)', n - 1) or '', r.why and (' (' .. r.why .. ')') or '',
                           #tried > 0 and ('; tried: ' .. table.concat(tried, ', ')) or '',
                           rf and "the refuge is NOT the civilians' burrow in a fight until it stands" or
                           'the way in stays open')
-  K.log('warn', 'seal first: %s: %s', q, cmd)
+  K.log('warn', 'seal first: %s: %s%s', q, how, cmd and (': ' .. cmd) or '')
   K.emit('DECISION_NEEDED', 'A', trunc(q, 200), {id = 'seal_stalled', q = trunc(q, 200), n = days, mat = trunc(piece, 40),
-                                                 cmd = trunc(cmd, 300), proj = P.id})
+                                                 cmd = cmd, how = trunc(how, 200), proj = P.id})
 end
 
 -- SEAL_STUCK (A): the seal built nothing for stuck_days; util/cadence per project (r.ev): a repeat needs news and
