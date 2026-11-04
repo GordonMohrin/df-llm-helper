@@ -50,12 +50,13 @@ local function jobs(W)
   return q, taken
 end
 
--- o.cross: citizen 7 sets off on a path over O1 whenever a pull is queued (and stops when none is);
+-- o.cross: citizen 7 sets off on a path over O1 whenever a pull is queued (and stops when none is); it enters the
+-- footprint at step 6 (Hotfix live BREACH: in a SIEGE only walkers within PATH_SIEGE 6 steps hold a raise);
 -- o.beside: citizen 7 steps beside O1 while a pull is taken; o.mill: puller 18 steps closer in his room while one is taken
 local function run(W, ticks, o)
   o = o or {}
   local over = {}
-  for y = 19, 10, -1 do over[#over + 1] = {51, y} end
+  for y = 15, 10, -1 do over[#over + 1] = {51, y} end
   S.run(W, ticks, {frame = function(dt)
     W.frame(dt)
     local q, taken = jobs(W)
@@ -87,7 +88,7 @@ local function logged(W, s)
   for _, l in ipairs(W.logs) do if l.msg:find(s, 1, true) then return l.msg end end
 end
 
-T.test('Review fix (merge15): pulls cancelled for a unit only walking onto the bridge from 10 tiles away do not count ' ..
+T.test('Review fix (merge15): pulls cancelled for a unit only walking onto the bridge (in 6 steps) do not count ' ..
        'toward pull_cap (old: GATE_FAIL blocked, every lever parked); they are approach cancels (gate_traffic)', function()
   local W = world{cfg = {gate = {pull_cap = 4, giveup_wait = 3000}}}
   W.event('INVASION', {id = 1})

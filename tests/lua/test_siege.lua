@@ -727,24 +727,24 @@ local function walk(id, tiles)                 -- his next path tiles {{x, y}, .
   end
 end
 
-add{name = 'BUG-335 (Earthboat y385: five soldiers crushed by B2): with a hostile at the gate a soldier 4 tiles from B1 ' ..
-           'whose path steps onto it holds the forced raise (old: pulled, nobody within the margin); pulled once he stops',
+-- Hotfix (live BREACH, Run 15 i2/i4 y392/y402): BUG-335 let a walker hold a FORCED raise too; a stream of citizens
+-- and animals walking toward B1 held it for the whole SIEGE ('B1 not up at T+900', 60+ dead each). With a hostile within
+-- force_near only a unit ON the footprint holds a raise again (BUG-310); a walker is let go (the fight goes first)
+add{name = 'Hotfix (live BREACH): with a hostile at the gate a soldier 4 tiles from B1 whose path steps onto it no ' ..
+           'longer holds the forced raise (BUG-335 held it, an endless stream of walkers kept B1 down: BREACH)',
   units = function() return units(S.army(6, 51, 37)) end,
   setup = walk(5, {{51, 43}, {51, 42}, {51, 41}, {51, 40}, {51, 39}}),
-  at = {{300, walk(5, nil)}},
   run = 700,
   check = function(W)
     local b1 = S.pulls(W, 'B1')
     T.eq(#b1, 1)
-    T.ok(rel(W, b1[1].tick) >= 300, 'not pulled while his path crossed it: ' .. tostring(rel(W, b1[1].tick)))
-    local g = gate_blocked(W, 'B1')
-    T.ok(#g >= 1 and g[1].d.units[1] == 5, 'GATE blocked names him')
-    T.ok(g[1].msg:find('soldier 5 walking onto it in 4 steps', 1, true), g[1].msg)
+    T.ok(rel(W, b1[1].tick) < 100, 'pulled at once, his path does not hold it: ' .. tostring(rel(W, b1[1].tick)))
+    T.eq(#gate_blocked(W, 'B1'), 0, 'no GATE blocked for a walker')
     T.eq(S.bstate(W, 'B1'), 'up')
   end}
 
-add{name = 'BUG-335: a pending forced raise is cancelled the frame a citizen 6 tiles away sets off along a path over B1 ' ..
-           '(old: it went on and B1 rose under him); queued again once his path is clear',
+add{name = 'Hotfix (live BREACH): a pending forced raise is not cancelled when a citizen 6 tiles away sets off along ' ..
+           'a path over B1 (BUG-335 cancelled it); B1 rises; one stepping ON it still cancels (BUG-310 test above)',
   units = function() return units(S.army(6, 51, 37)) end,
   lever_cfg = {[21] = {worker = 30, pull = 300}, [22] = {worker = 30, pull = 300}},
   at = {{1, mv(1, 51, 46)}, {60, walk(1, {{51, 45}, {51, 44}, {51, 43}, {51, 42}, {51, 41}, {51, 40}, {51, 39}})},
@@ -752,12 +752,55 @@ add{name = 'BUG-335: a pending forced raise is cancelled the frame a citizen 6 t
   run = 1200,
   check = function(W)
     local b1 = S.pulls(W, 'B1')
-    T.ok(#b1 >= 2, 'queued, cancelled, queued again: ' .. #b1)
-    local c = S.acts(W, 'cancel_own_lever_job')
-    T.ok(#c >= 1 and c[1].args[1] == b1[1].job, 'the first pull cancelled')
-    between(rel(W, c[1].tick), 60, 100, 'cancelled within a gate pass')
-    for _, f in ipairs(S.flips(W, 'B1')) do T.ok(rel(W, f.tick) >= 400, 'no move while his path crossed it') end
+    T.eq(#b1, 1, 'one pull, never cancelled')
+    T.eq(#S.acts(W, 'cancel_own_lever_job'), 0)
+    local f = S.flips(W, 'B1')
+    T.ok(#f >= 1 and rel(W, f[1].tick) < 400, 'B1 rose while his path crossed it: ' .. tostring(f[1] and rel(W, f[1].tick)))
     T.eq(S.bstate(W, 'B1'), 'up')
+  end}
+
+-- Hotfix (live BREACH, Run 15d Drillchamber y402 kern.log: 'B1 up waits: ... walking onto it in 20 steps' for the whole
+-- SIEGE, a stream of citizens and animals, then BREACH 'not up at T+900'): in SIEGE/BREACH a raise waits only for walkers
+-- within PATH_SIEGE steps of the footprint
+local function stream(ids, steps)              -- units ids walk north onto O1 (y 10), the footprint at path step `steps`
+  return function(W)
+    for _, id in ipairs(ids) do
+      local u = W.unit(id)
+      local tiles = {}
+      for i = 1, steps do tiles[i] = {u.pos.x, u.pos.y - i} end
+      walk(id, tiles)(W)
+    end
+  end
+end
+
+add{name = 'Hotfix (live BREACH): a stream of citizens walking onto O1 20 steps out never holds the SIEGE raise ' ..
+           '(BUG-335 held it the whole siege: BREACH at T+900); O1 up, no GATE blocked, no GATE_FAIL',
+  units = function()
+    return units(S.army(6, 150, 150), S.cit(101, 50, 30), S.cit(102, 51, 30), S.cit(103, 52, 30), S.cit(104, 51, 31))
+  end,
+  setup = function(W) stream({101, 102, 103}, 20)(W); stream({104}, 21)(W) end,
+  run = 1500, modes = {'PEACE>SIEGE'},
+  check = function(W)
+    local p = S.pulls(W, 'O1')
+    T.ok(#p >= 1, 'O1 pulled')
+    T.ok(rel(W, p[1].tick) < 500, 'pulled at RAISE_BY (450), not held: ' .. tostring(rel(W, p[1].tick)))
+    T.eq(#gate_blocked(W, 'O1'), 0, 'the walkers 20 steps out do not hold it')
+    T.eq(S.bstate(W, 'O1'), 'up')
+    T.eq(#evs(W, 'GATE_FAIL') + #evs(W, 'BREACH'), 0)
+  end}
+
+add{name = 'Hotfix (live BREACH): in a SIEGE a citizen walking onto O1 within PATH_SIEGE (6) steps still holds the ' ..
+           'raise (no hostile at the gate); pulled once he stops',
+  units = function() return units(S.army(6, 150, 150), S.cit(101, 51, 15)) end,
+  setup = stream({101}, 5),
+  at = {{700, walk(101, nil)}},
+  run = 1100,
+  check = function(W)
+    local p = S.pulls(W, 'O1')
+    T.ok(#p >= 1 and rel(W, p[1].tick) >= 700, 'not pulled while his path crossed it: ' .. tostring(p[1] and rel(W, p[1].tick)))
+    local g = gate_blocked(W, 'O1')
+    T.ok(#g >= 1 and g[1].msg:find('citizen 101 walking onto it in 5 steps', 1, true), g[1] and g[1].msg)
+    T.eq(S.bstate(W, 'O1'), 'up')
   end}
 
 add{name = 'BUG-027: force_near 0 (config/reflex.json gate) never raises onto a unit, not even with a hostile at the gate',

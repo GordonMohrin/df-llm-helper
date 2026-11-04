@@ -105,3 +105,15 @@ over the killing field and a civilian in it, O1 rises at T0, B1 only on the T+45
   whatever census.u.atk says) wants B1 up; the hostile-distance releases decide alone only in an ALERT lockdown. Civilians
   still out after 450 ticks of a siege are shut out (crossers keep the footprint clear). Not changed: letting the hold beat the
   siege timer would keep B1 down with a siege under way; needs a live look first.
+
+## Hotfix (live BREACH)
+- **Live (Run 15 i2 Guildcleans y392, 66 -> 18):** kern.log (r15-guildcleans-site97, ~6407-6522): `B1 up held for 4-10
+  civilians on its attack side`, each hold 6600-7320 ticks (`no longer held (after 7350 ticks)`), again and again, then the
+  BREACH `B1 not up at T+900`, 63 lost.
+- **Fix (gate.lua inner_wait):** one hold lasts at most `M.INNER_MAX` = 900 ticks; then B1 is wanted up (kern.log `up hold for
+  civilians ends after N ticks (INNER_MAX 900), not held again for 12000 ticks`) and the inner hold does not come back for
+  `M.INNER_REST` = 12000 ticks (r.iwx, runtime only: a reload forgets it), also not in the next lockdown.
+- **Tests:** test_reflex.lua (+1: the hold ends after 900 ticks with citizen 6 still outside; the lockdown lifts, B1 goes
+  down for PEACE, the lockdown comes again: B1 rises without a second hold; fails with INNER_REST 1).
+- **Open:** civilians still outside after 900 ticks are shut out (the Open point above, now bounded). INNER_MAX/INNER_REST are
+  constants, not config; not tuned live.

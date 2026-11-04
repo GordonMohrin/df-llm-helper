@@ -1056,6 +1056,36 @@ T.test('BUG-338: B1 rises once the civilians are past it; a census of nobody on 
   T.eq({S.bstate(W2, 'O1'), S.bstate(W2, 'B1'), #gate_held(W2)}, {'up', 'up', 0})
 end)
 
+-- Hotfix (live BREACH, Run 15 i2 Guildcleans y392: B1 held 6600-7320 ticks again and again for 4-10 civilians on its
+-- attack side, then BREACH, 63 lost): one hold lasts at most INNER_MAX ticks, after it B1 is not held for INNER_REST
+T.test('Hotfix (live BREACH): the inner hold ends after INNER_MAX (900) ticks with civilians still outside; a new ' ..
+       'lockdown within INNER_REST raises B1 without a new hold', function()
+  local G = require('dfllm.gate')
+  T.eq({G.INNER_MAX, G.INNER_REST}, {900, 12000})
+  local units = S.fort_units()
+  units[#units + 1] = S.cit(6, 51, 20)                -- in the bailey, outside Kern+, never walks in
+  local W = setup{tag = 'atkmax', units = units}
+  S.run(W, 120)                                       -- the census is there before the news
+  W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
+  S.run(W, 700)
+  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), #gate_held(W)}, {'up', 'down', 1}, 'held for citizen 6')
+  S.run(W, 500)
+  T.eq(S.bstate(W, 'B1'), 'up', 'old: held as long as citizen 6 stood outside')
+  local m = logged(W, 'B1 up no longer held')
+  T.ok(m ~= nil, 'kern.log says the hold ended')
+  local n = tonumber(m:match('after (%d+) ticks'))
+  T.ok(n and n > 900 and n <= 1000, 'ended after INNER_MAX: ' .. tostring(m))
+  -- the lockdown lifts (B1 goes back down for PEACE) and comes again: no second hold, B1 rises at once
+  local R = W.mods.reflex.M
+  local hold = R.holding
+  R.holding = function(K, what) if what == 'gates' then return nil end return hold(K, what) end
+  S.run(W, 600)
+  T.eq(S.bstate(W, 'B1'), 'down', 'PEACE lowered it')
+  R.holding = hold
+  S.run(W, 1000)                                      -- the PEACE gate pass comes every SLOW (600) ticks
+  T.eq({S.bstate(W, 'B1'), #gate_held(W)}, {'up', 1}, 'no new hold within INNER_REST')
+end)
+
 T.test('BUG-338: a building destroyer in the intake area raises B1 at once, civilians outside or not', function()
   local units = S.fort_units()
   units[#units + 1] = S.cit(6, 80, 20)                -- outside Kern+

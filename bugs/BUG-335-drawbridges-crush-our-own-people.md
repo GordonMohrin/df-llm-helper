@@ -93,3 +93,21 @@ inner one, STATION_MOVED cross, walking in he is left alone).
 
 Tests: `tests/lua/test_merge15_gate_review.lua` (3: the 10-tile crosser no give-up; give-up then a goblin at O1 raises it;
 destroyed in the settle window not busy; all fail on d40fb59).
+
+## Hotfix (live BREACH)
+- **Live (Run 15, 2026-11-04):** Drillchamber (i4, y402, 47 -> 1) and Guildcleans (i2, y392, 66 -> 18) lost B1 to a BREACH
+  `B1 not up at T+900`. Drillchamber kern.log (r15d-drillchamber-site97, ~7908-7957): `B1 up still waits for ... walking onto
+  it in 20 steps` for the whole SIEGE, one citizen, visitor or animal after the other (a stream that never ends in a fort
+  under siege); the crosser hold of this bug kept the bridge down until the hostiles were inside.
+- **Policy now (the fight goes before far walkers):** in SIEGE/BREACH a raise waits only for crossers within `M.PATH_SIEGE`
+  = 6 path steps of the footprint (gate.lua holders, the non-forced branch); with a hostile within force_near (the forced
+  raise) only units ON the footprint hold it (crossers with path 0 included), as BUG-310 had it: units next to it are
+  named in GATE_FORCED, walkers farther out are let go. Outside SIEGE/BREACH (PEACE, ALERT) and for every lowering the PATH_STEPS
+  (20) crossers hold as before.
+- **Tests:** test_siege.lua (the BUG-335 forced tests turned round: a soldier 4 steps out no longer holds the forced raise, a
+  citizen setting off 6 tiles away no longer cancels the pending forced pull; new: a stream of 4 citizens 20 steps out never
+  holds the SIEGE raise of O1 (fails with PATH_SIEGE 20), a walker 5 steps out still holds it); test_merge15_gate_review.lua
+  (the crosser enters the footprint at step 6, so its approach cancels still happen in a SIEGE).
+- **Open:** units within MARGIN (next to the footprint) still hold a non-forced SIEGE raise; a stream passing through the
+  doorway itself can still hold it until a hostile is within force_near. A raise with a unit 1-6 steps out in a forced raise
+  can crush him if he arrives before the bridge swings (the BUG-310 risk, accepted: losing the gate kills more).

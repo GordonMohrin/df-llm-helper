@@ -81,6 +81,21 @@
 - **Live check:** i2 at the next invasion: `count again`, then `cleared again` and SIEGE>RECOVERY quiet within about 2 days, no
   LOCKDOWN_END limit for 24649; a hospital in Kern+ digs during a siege. Open: a life-support stage with tiles off the alert
   burrow (the i2 hospital until its burrow stage), an army that stays 26-40 tiles out is never calm at near 25.
+## Hotfix (live BREACH): far walkers and the civilian hold no longer keep B1 down in a fight (BUG-335/338, 2026-11-04; offline, live-untested)
+- **Why:** Run 15 live, two forts lost B1 to a BREACH `B1 not up at T+900` (Guildcleans 66 -> 18, Drillchamber 47 -> 1):
+  BUG-335 crossers held the SIEGE raise for a never-ending stream of citizens and animals `walking onto it in 20 steps`
+  (i4 kern.log ~7908-7957), and BUG-338's inner_wait held B1 6600-7320 ticks again and again for 4-10 civilians on its
+  attack side (i2 kern.log ~6407-6522).
+- **What changed (gate.lua):** holders: in SIEGE/BREACH a raise waits only for crossers within `PATH_SIEGE` = 6 steps; with a
+  hostile within force_near only for units ON the footprint (BUG-310). inner_wait: a hold ends after `INNER_MAX` = 900 ticks
+  (kern.log warn) and does not come back for `INNER_REST` = 12000 ticks. PEACE/ALERT and lowerings unchanged. No contract
+  change.
+- **Tests (fail on 14ff5a3):** test_siege.lua (2 BUG-335 forced tests turned round to the new policy, +2: a 20-step stream
+  does not hold the SIEGE raise, a 5-step walker still does), test_merge15_gate_review.lua (walker at 6 steps),
+  test_reflex.lua (+1: INNER_MAX end, no new hold within INNER_REST).
+- **Live check:** a siege with traffic toward B1: no `B1 up still waits for ... walking onto it in N steps` with N > 6, B1 up
+  before T+900; a lockdown with civilians outside: `up hold for civilians ends after ~900 ticks`, no second `up held`.
+  Open: units next to the footprint still hold a non-forced SIEGE raise.
 ## Run 15 gate review (merge15): walkers do not give a bridge up, a forced raise beats a blocked park, a destroyed bridge is not busy (BUG-335/342/338 review fix, 2026-11-04; offline, live-untested)
 - **Why:** review of merge15: path-only crossers made every queued pull a 'blocked' cancel toward gate.pull_cap (busy SIEGE
   traffic: give-up, every lever parked giveup_wait, also with a hostile at the gate); a bridge destroyed in the settle window
