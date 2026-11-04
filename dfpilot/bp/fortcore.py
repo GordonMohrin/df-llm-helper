@@ -37,7 +37,7 @@ from __future__ import annotations
 from .primitives import Plan
 
 STAGES = 4
-PARAMS = {"stage": (1, 1, STAGES), "depth": (3, 2, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16),
+PARAMS = {"stage": (1, 1, STAGES), "depth": (3, 1, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16),
           "retrofit": (0, 0, 2),     # 1: only the lever rooms up to `stage`; 2: + the refuge levers (_lever_retrofit)
           # FR-95: '' (as before) | above (bp sites: the whole fort above the manifest's aquifer_levels) | pass (its deepest
           # level at least one dry level below them; the runner digs it once an aqshaft passed, in observe mode)

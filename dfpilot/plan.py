@@ -2183,6 +2183,37 @@ def fit_core(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     return out
 
 
+def fit_core_depth(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
+    """BUG-364 (Run 16a-d: an aquifer almost everywhere, every fortcore site at the default depth 3 broke into it, and the
+    draft said nothing of a shallower core): a NEW fortcore stage 1 build (not a retrofit, no p.depth, no p.aquifer) whose
+    free sites at the default depth are none, or all pass a known aquifer level ('aquifer at z..'), gets the deepest
+    shallower p.depth (2, 1) with a free site that clears it; the new fortcore stages 2-4 of the draft get the same p.depth
+    (a core of depth 1 has other levels at every stage). Returns the lines (also in the notes); [] when nothing changed or
+    the sites snapshot / bp package cannot tell."""
+    new = [(si, b) for si, _, b in new_builds(doc, prev) if b["tpl"] == "fortcore"
+           and not (b.get("p") or {}).get("retrofit")]
+    first = [b for _, b in new if (_stage_of(b.get("p") or {}) or 1) == 1 and "depth" not in (b.get("p") or {})
+             and not (b.get("p") or {}).get("aquifer")]
+    if not first:
+        return []
+    try:
+        sites, _, _ = _cmd.free_sites(save_dir, "fortcore", {"stage": 1}, n=3)
+        alt = _cmd.shallower_core_sites(save_dir, "fortcore", {"stage": 1}, n=3, have=sites)
+    except (BpError, BpUnavailable, ValueError):
+        return []
+    if not alt:
+        return []
+    d, out, _, _ = alt
+    for _, b in new:
+        if "depth" not in (b.get("p") or {}):
+            b["p"] = {**(b.get("p") or {}), "depth": d}
+    line = (f"fortcore: depth {d} (BUG-364): " + ("no free site at depth 3" if not sites else
+            f"every site at depth 3 passes a known aquifer level ({sites[0].get('why', '')[:80]})")
+            + f"; shallower core at {out[0].get('anchor')} ({out[0].get('why', '')[:80]})")
+    doc["notes"] += "; " + line
+    return [line]
+
+
 CORE_FREE_TPLS = ("fortcore", "seal", "explore", "plug", "repair", "captives", "barracks")   # not sited on the Z4 floor
 
 
@@ -2360,6 +2391,21 @@ def live_trade(save_dir: Path) -> dict | None:
     return out or None
 
 
+def stale_core_keys(prev: dict | None, applied: set | None, fort: dict | None, state: dict | None = None) -> set[tuple]:
+    """BUG-366 (Run 16b i2: after bp.cancel of both fortcores the draft kept `fortcore@same st3` and `plan check` refused it,
+    'site same: fortcore was never placed'; the player counted the year up to get rid of it): the (tpl, stage) keys of the
+    fortcore builds of the applied plan that no project stands behind any more. No fortcore project is on file (fort.core_any
+    False: bp.cancel moved them away; `applied` is known) and the key is not in `applied`: the build counts as not done, so
+    the draft starts the core again (BUG-197: stage 1 @S1 and the seal) instead of stages @same on an anchor that is gone.
+    Only the seasons that are due by now count (a build of a later season of this year is simply not placed yet)."""
+    if applied is None or not prev or not isinstance(fort, dict) or fort.get("core_any") is not False:
+        return set()
+    t = (state or {}).get("t") or {}
+    due = t.get("season", 0) if t.get("y", prev.get("year", 0)) <= prev.get("year", 0) else 3
+    return {_build_key(b) for si, se in enumerate(prev.get("seasons", [])) if si <= due for b in se["build"]
+            if b["tpl"] == "fortcore" and _build_key(b) not in applied}
+
+
 def propose(state: dict | None, phases: dict | None, prev: dict | None, decisions: dict | None = None,
             tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None,
             upto: str | None = None, live: dict | None = None) -> dict:
@@ -2393,7 +2439,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     rb = rebuild_state(s)                   # Run 11 siege 8: below rebuild.pop the fort rebuilds; no phase raise
     if rb:
         target = cur
-    done = {_build_key(b) for se in (prev or {}).get("seasons", []) for b in se["build"]} | set(applied or ())
+    stale = stale_core_keys(prev, applied, fort, s)      # BUG-366: a cancelled core is not 'done'
+    done = ({_build_key(b) for se in (prev or {}).get("seasons", []) for b in se["build"]} - stale) | set(applied or ())
     staged = None if info is None else {t for t, i in info.items() if "stage" in i["params"]}
     builds, libs = [], []
     # Run 10: the audit's bypass wall first (audit_gate refuses growth without it)
@@ -2944,6 +2991,8 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     live = live_trade(save_dir)                               # BUG-242: the running cmd trade.want stays
     doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, live=live)
     fit_core(save_dir, doc, prev)                             # BUG-195: never a core stage another project blocks
+    fit_core_depth(save_dir, doc, prev)                       # BUG-364: a shallower core where the aquifer is near
+    fit_explore(save_dir, doc, prev)                          # BUG-367: the explore's depth fits the levels known now
     fit_stone_dig(save_dir, doc, prev)                        # BUG-351: never a stone dig without a free site
     doc["phase_target"] = cur
     doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
@@ -2955,6 +3004,8 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
         cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt,
                        live=live)
         fit_core(save_dir, cand, prev)
+        fit_core_depth(save_dir, cand, prev)
+        fit_explore(save_dir, cand, prev)
         fit_stone_dig(save_dir, cand, prev)
         if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
             cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
@@ -3092,6 +3143,7 @@ def run(args, save_dir: Path) -> int:
         fit = fit_explore(save_dir, doc, prev)                # Run 10: the ore search fits the known levels
         kfit = fit_explore_kept(save_dir, doc, prev)          # BUG-223: kept shafts into a cavern level known now
         cfit = fit_core(save_dir, doc, prev)                  # BUG-195: a later core stage another project blocks
+        cfit += fit_core_depth(save_dir, doc, prev)           # BUG-364: a shallower core where the aquifer is near
         sfit = fit_stone_dig(save_dir, doc, prev)             # BUG-351: a stone dig no free bedrooms site takes
         cfit += [sfit] if sfit else []
         files.write_json_atomic(path, doc)

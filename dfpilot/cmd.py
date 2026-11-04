@@ -1398,6 +1398,64 @@ def fewer_plots(tpl: str, params: dict | None) -> list[int]:
     return list(range(int(n) - 1, 0, -1))
 
 
+def core_depth(params: dict | None) -> int:
+    """BUG-364: the fortcore depth in `params` (the template default 3 when absent or not an integer)."""
+    d = (params or {}).get("depth")
+    return d if isinstance(d, int) and not isinstance(d, bool) else 3
+
+
+def core_params_of(save_dir: Path, tpl: str, anchor: list, params: dict | None) -> dict | None:
+    """BUG-364: a later fortcore stage (>= 2) placed at the anchor of an earlier stage without its own depth / refuge takes
+    them from that earlier stage's bp file: a core placed at depth 1 (or 2) has a different geometry at every stage, and the
+    stages 2-4 of the plan (`fortcore@same`) carry no depth param, so they were emitted for depth 3 on a depth-1 core."""
+    if tpl != "fortcore" or not isinstance(params, dict) or _stage_param(params) < 2:
+        return params
+    keys = [k for k in ("depth", "refuge") if k not in params]
+    if not keys:
+        return params
+    for f in bp_files(save_dir):
+        d = files.read_json(f)
+        if isinstance(d, dict) and d.get("tpl") == "fortcore" and list(d.get("anchor") or []) == list(anchor):
+            par = d.get("params") or {}
+            if isinstance(par, dict) and not par.get("retrofit") and any(k in par for k in keys):
+                return {**{k: par[k] for k in keys if k in par}, **params}
+    return params
+
+
+def shallower_core(tpl: str, params: dict | None) -> list[int]:
+    """BUG-364 (Run 16a-d: a world with an aquifer almost everywhere, every fortcore site broke into it; depth 1 was refused
+    as 'expected 2..12'): a fortcore stage 1 (not a retrofit, not p.aquifer pass/above) shallower than its depth -> the
+    depths to fall back to, deepest first (2, 1: the core one or two levels under the defense level, so the whole fort
+    ends 6-7 levels under the surface instead of 8-9); [] for anything else."""
+    if tpl != "fortcore" or not isinstance(params, (dict, type(None))):
+        return []
+    p = params or {}
+    if p.get("retrofit") or p.get("aquifer") or _stage_param(p) != 1:
+        return []
+    return [d for d in (2, 1) if d < core_depth(p)]
+
+
+def shallower_core_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict | None = None, n: int = 3,
+                         where: dict | None = None, have: list | None = None) -> tuple[int, list[dict], str, int] | None:
+    """BUG-364: (depth, free sites, snapshot id, ranked) at the deepest shallower core depth that has a free site when `have`
+    (the sites of the asked depth) is empty, or whose best site passes no known aquifer level when the asked depth's best does
+    ('aquifer at z..' in its reason line, BUG-359); None when none helps."""
+    def wet(sites):
+        return bool(sites) and "aquifer at" in str(sites[0].get("why", ""))
+    if have and not wet(have):
+        return None
+    for d in shallower_core(tpl, params):
+        try:
+            out, snap_id, ranked = free_sites(save_dir, tpl, {**(params or {}), "depth": d}, snap, n=n, where=where)
+        except (BpError, BpUnavailable, ValueError):
+            continue
+        if out and not wet(out):
+            return d, out, snap_id, ranked
+        if out and not have:
+            return d, out, snap_id, ranked
+    return None
+
+
 def fewer_plots_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict | None = None, n: int = 3,
                       where: dict | None = None) -> tuple[int, list[dict], str, int] | None:
     """BUG-316: (plots, free sites, snapshot id, ranked) at the largest smaller plot count that has a free surface farm
@@ -1412,6 +1470,60 @@ def fewer_plots_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict 
     return None
 
 
+# BUG-366 (Run 16a i1, 16b i2: `bp sites fortcore --fresh` listed 12 sites while the cancelled fortcore project stood, then "0
+# ranked" for good; the cancelled project's breach was not the cause): the kernel's default 'sites' box is the fort's pieces
+# plus a margin of 16. Without the fortcore project it shrank to the farms + 16 (44 x 51 tiles on i1), and the fortcore
+# (35 x 52 tiles from the anchor: u -14..20, v -2..49) fitted nowhere: all 6,946 candidate rotations 'outside box'. The box of
+# a fortcore sites export now reaches CORE_PAD tiles round the fort's pieces (placed projects' anchors, workshops), two
+# levels under and CORE_UP above the surface pieces (an anchor needs the open level above it).
+CORE_PAD = 52
+CORE_UP = 3
+CORE_DOWN = 3
+CORE_TILES = 300000          # under the kernel's snapshot cap (config snapshot.max_tiles, default 400000)
+
+
+def sites_box(save_dir: Path, tpl: str) -> list[int] | None:
+    """BUG-366: the explicit box `bp sites fortcore --fresh` asks the kernel for, [x0, y0, z0, x1, y1, z1], or None (the
+    kernel's default box: any other template, or no piece of the fort known, e.g. a fresh embark whose box is the map
+    centre). The pieces are the anchors of the bp files (cancelled ones are moved away) and the manifest's workshops."""
+    if tpl != "fortcore":
+        return None
+    pts: list[tuple[int, int, int]] = []
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        a = d.get("anchor") if isinstance(d, dict) else None
+        if isinstance(a, list) and len(a) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in a):
+            pts.append((a[0], a[1], a[2]))
+    man = files.read_manifest(save_dir) or files.read_json(Path(save_dir) / MANIFEST_CACHE)
+    for w in (man.get("workshops") or []) if isinstance(man, dict) else []:
+        q = w.get("pos") if isinstance(w, dict) else None
+        if isinstance(q, list) and len(q) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in q):
+            pts.append((q[0], q[1], q[2]))
+    if not pts:
+        return None
+    z0, z1 = min(q[2] for q in pts) - CORE_DOWN, max(q[2] for q in pts) + CORE_UP
+    for pad in (CORE_PAD, 40, 30, 20):
+        x0, x1 = max(0, min(q[0] for q in pts) - pad), max(q[0] for q in pts) + pad
+        y0, y1 = max(0, min(q[1] for q in pts) - pad), max(q[1] for q in pts) + pad
+        if (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) <= CORE_TILES:
+            return [x0, y0, max(0, z0), x1, y1, z1]
+    return None                                           # pieces spread over the map: the kernel's own box
+
+
+def box_hint(snap: dict | None, tpl: str) -> str:
+    """BUG-366: why a fortcore ranking is empty although the land may be fine: the sites snapshot is smaller than the fort
+    (35 x 52 tiles from the anchor), so every candidate leaves it. '' when the box is big enough or the template differs."""
+    b = (snap or {}).get("bbox")
+    if tpl != "fortcore" or not (isinstance(b, list) and len(b) == 6):
+        return ""
+    w, h = b[3] - b[0] + 1, b[4] - b[1] + 1
+    if min(w, h) >= 36 + 52 and max(w, h) >= 36 + 52:
+        return ""
+    return (f"the sites snapshot is only {w} x {h} tiles (x {b[0]}-{b[3]} y {b[1]}-{b[4]}) and a fortcore needs 35 x 52 round "
+            "its anchor: `dfllm bp sites fortcore --fresh` asks for a box reaching 52 tiles round the fort (BUG-366), or "
+            "`dfllm cmd snapshot '{\"bbox\":[x0,y0,z0,x1,y1,z1],\"purpose\":\"sites\"}'` with a box you choose")
+
+
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
           same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """_place; BUG-316: a surface farm (farms p.surface) at a ranked label S<k> that finds no free site for its plots
@@ -1420,10 +1532,23 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     try:
         return _place(save_dir, tpl, params, label, bp_id, occ, same, snap, need)
     except BpError as e:
-        steps = fewer_plots(tpl, params) if _LABEL.fullmatch(str(label)) else []
-        if not steps:
+        ranked = bool(_LABEL.fullmatch(str(label)))
+        steps = fewer_plots(tpl, params) if ranked else []
+        shallow = shallower_core(tpl, params) if ranked else []
+        if not steps and not shallow:
             raise
         first = e
+    for d in shallow:                                     # BUG-364: a shallower core clears the aquifer or fits the site
+        try:
+            doc = _place(save_dir, tpl, {**(params or {}), "depth": d}, label, bp_id, occ, same, snap, need)
+        except BpError:
+            continue
+        PLACE_NOTES[bp_id] = (f"BUG-364: no free fortcore site at depth {core_depth(params)}: placed depth={d} (core {d} "
+                              f"level(s) under the defense level; give depth= to every later stage, or place them at "
+                              f"site=same, which keeps it)")
+        return doc
+    if not steps:
+        raise BpError(f"{first}; BUG-364: no shallower core (depth {'/'.join(str(d) for d in shallow)}) has a free site either")
     tried = f"plots={steps[0]}" + (f"..{steps[-1]}" if len(steps) > 1 else "")
     for k in steps:
         try:
@@ -1502,6 +1627,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
         s = same or files.read_json(_placed(save_dir, tpl))
         if not isinstance(s, dict) or not isinstance(s.get("anchor"), list):
             raise BpError(f"site 'same': {tpl} was never placed from this save folder")
+        params = core_params_of(save_dir, tpl, s["anchor"], params)      # BUG-364: the core's depth/refuge
         doc = emit_at(tpl, params, {"id": SAME, "anchor": s["anchor"], "rot": s.get("rot", 0)}, SAME, bp_id)
         # BUG-195: tiles its own placed stages dig already (a seal wall, a room's doorway on them) are not new ground
         hit = occ.clash(doc, cells=footprint(doc) - occ.own_cells(tpl, doc["anchor"]), ignore_tpl=tpl)
@@ -1511,6 +1637,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
     ma = re.fullmatch(r"A(\d+)_(\d+)_(\d+)(?:_([0-3]))?", str(label))
     if ma:      # live L6: an explicit anchor picked by the LLM (the ranking excludes uneven high ground)
         x, y, z = (int(ma.group(i)) for i in (1, 2, 3))
+        params = core_params_of(save_dir, tpl, [x, y, z], params)         # BUG-364: the core's depth/refuge
         doc = emit_at(tpl, params, {"id": "S0", "anchor": [x, y, z], "rot": int(ma.group(4) or 0)}, label, bp_id)
         # BUG-163: a later stage at the explicit anchor of this template's earlier stage (plan propose names a re-sited
         # fortcore's anchor so) overlaps its own earlier stages, as `same` does

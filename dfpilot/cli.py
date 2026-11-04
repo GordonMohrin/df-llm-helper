@@ -201,7 +201,10 @@ def run_bp(args, save_dir: Path | None) -> int:
             return 0
         snap = None
         if args.fresh:
-            cid, reply = send(save_dir, "snapshot", {"purpose": "sites"}, by="cli", wait_s=min(10.0, args.timeout))
+            from .cmd import sites_box
+            box = sites_box(save_dir, args.tpl)               # BUG-366: a fortcore needs a box the size of the fort
+            cid, reply = send(save_dir, "snapshot", {"purpose": "sites", **({"bbox": box} if box else {})}, by="cli",
+                              wait_s=min(10.0, args.timeout))
             if reply is not None and not reply.get("ok"):
                 print(f"snapshot refused: {reply.get('msg')}")
                 return 1
@@ -219,6 +222,8 @@ def run_bp(args, save_dir: Path | None) -> int:
                   f"fewer plots fit, plots={k}:")
             params = {**params, "plots": k}
             sites, snap_id, ranked = fewer[1:]
+        from .cmd import shallower_core_sites
+        shallow = shallower_core_sites(save_dir, args.tpl, params, snap, where=where, have=sites)   # BUG-364
         if where:
             print(f"free sites for {args.tpl}{fmt_params(params)} {_where_text(where)} on snapshot {snap_id} ({ranked} "
                   f"ranked; place by the label: dfllm cmd bp.place tpl={args.tpl} site=<label>{fmt_params(params)} --by llm):")
@@ -238,9 +243,19 @@ def run_bp(args, save_dir: Path | None) -> int:
             lbl = f" label {s['label']}" if s.get("label") else ""
             print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}{lbl}: {s.get('why', '')}")
         if not sites:
-            from .cmd import no_site_hint
+            from .cmd import box_hint, no_site_hint
             why = no_site_hint(save_dir, args.tpl, snap_id, ranked, sorted(set(held)), params)      # BUG-067
-            print(f"  none ({ranked} ranked, {len(set(held))} project(s) hold them): try --fresh" + (f"; {why}" if why else ""))
+            bh = box_hint(snap or files.latest_snapshot(save_dir, "sites"), args.tpl)                # BUG-366
+            print(f"  none ({ranked} ranked, {len(set(held))} project(s) hold them): try --fresh" + (f"; {why}" if why else "")
+                  + (f"; {bh}" if bh else ""))
+        if shallow:                                        # BUG-364: a shallower core clears the aquifer / fits the site
+            from .cmd import core_depth
+            d, alt, alt_id, alt_n = shallow
+            print(f"shallower core (BUG-364): depth={d} ({alt_n} ranked on snapshot {alt_id}; the whole fort ends "
+                  f"{core_depth(params) - d} level(s) higher; place: dfllm cmd bp.place tpl={args.tpl} site=S1"
+                  f"{fmt_params({**params, 'depth': d})} --by llm; its later stages at site=same keep the depth):")
+            for s in alt:
+                print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}: {s.get('why', '')}")
         return 0
     except (BpError, BpUnavailable, RuntimeError, ValueError) as e:
         print(f"bp: {e}")

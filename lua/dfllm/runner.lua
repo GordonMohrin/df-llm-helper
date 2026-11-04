@@ -643,10 +643,22 @@ function Q.redesignate(K, P, d, R, ci, n)
   return true
 end
 
+-- BUG-365 (Run 16c i3 Yawninggilt, 16a-d: 's1.dig chunk 8: designation at 111,80,124 lost twice without a damp report:
+-- blocked', 'dig_lost' 4 times; the chunk lies 45 tiles from the anchor 66,80,127 because it is the civilian stair at v 45 of
+-- the 35 x 52 fort, not an offset): DF cancelled the designation on an aquifer tile (gamelog: 'Digging designation cancelled:
+-- damp stone located', 56 of them) and the announcement log search found none of them (the newest 200 reports held fights and
+-- caravan notices by then). The lost tile itself answers: a revealed tile with the aquifer flag (snapshot.tile `aq`) is damp
+-- stone, whatever the log says. Hidden tiles answer nothing (their flag is never read).
+function Q.lost_on_aquifer(K, t)
+  local ok, v = K.call('snapshot', 'tile', t[1], t[2], t[3])
+  return ok and type(v) == 'table' and v.aq == true
+end
+
 local function lost(K, P, d, R, ci, t)
   local ch = d.stages[P.stage + 1].chunks[ci]
   local bb = stage_tiles(P.id, d, P.stage).bbox
   local why = P.tpl ~= 'plug' and M.cancel_reported(bb, M.CFG.breach_r) or nil   -- the cavern plug never stops
+  if why == nil and P.tpl ~= 'plug' and Q.lost_on_aquifer(K, t) then why = 'damp' end   -- BUG-365
   R.rl = obj(R.rl)
   local sk = tostring(ci)
   -- light aquifer (damp_dig): DF often cancels damp stone without a report the log search finds (live L6)
