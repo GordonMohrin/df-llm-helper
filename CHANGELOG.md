@@ -16,7 +16,7 @@
   (no destroyers) and keep it off, DECISION_NEEDED `siege_long` (A, once) with the `squad.sortie` command, state `wave.lg`, brief
   `eased N d`; an approach ends it. Contract: burrow_tiles owners + water; wave.lg; fairplay `siege_long`, water `care*` keys;
   RULES, wake hint `siege_long_hint`.
-- **Tests (fail on 9b6f614):** tests/lua/test_bug330_care_burrow.lua (4), tests/lua/test_bug331_siege_long.lua (4),
+- **Tests (fail on 9b6f614):** tests/lua/test_bug330_care_burrow.lua (4), tests/lua/test_bug331_siege_long.lua (4; the off/near guard passes on both),
   tests/test_bug330_331_lockdown.py (4).
 - **Live check:** Earthboat after a reload: 10 calm days -> kern.log `siege: SIEGE N days ... calm`, DECISION_NEEDED siege_long,
   alert on Kern+; a patient over 30000 outside -> `water: care burrow Pflege+ opened ...` (only with accepted water). Uncertain: DF's

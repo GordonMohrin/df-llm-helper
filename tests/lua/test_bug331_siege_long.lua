@@ -3,7 +3,7 @@
 -- nobody asked to attack, nothing eased. Now siege_long.days of calm ease the siege (the deep defense lifted, the civilians back
 -- to Kern+, DECISION_NEEDED siege_long with the squad.sortie command); a hostile coming near ends the easing. BUG-330 (the same
 -- night): siege lists water's care burrow in the civ alert. The world is test_intake's (the real sense, threat, siege, gate,
--- military and reflex on the siege world) with the army far east of O1. Every test fails on 9b6f614.
+-- military and reflex on the siege world) with the army far east of O1. Every test fails on 9b6f614 except the off/near guard.
 local T = require('testlib')
 local S = require('siege_world')
 local X = require('wp6_world')

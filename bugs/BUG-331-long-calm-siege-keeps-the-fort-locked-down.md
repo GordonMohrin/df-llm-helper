@@ -32,7 +32,7 @@ easing changes the burrow, never the seal. BUG-330's care burrow lets carriers t
 
 ## Tests
 `tests/lua/test_bug331_siege_long.lua` (3 BUG-331 tests: eased + asked once, ends on approach and the deep defense comes back,
-off / near army), `tests/test_bug330_331_lockdown.py` (config lint, wake hint, state key). All fail on 9b6f614.
+off / near army), `tests/test_bug330_331_lockdown.py` (config lint, wake hint, state key). All fail on 9b6f614 but the off/near-army guard (passes on both).
 
 ## Live check
 Earthboat (SIEGE since tick 155285731, goblins 37+ tiles out): after a kernel reload and 10 calm days kern.log `siege: SIEGE N
