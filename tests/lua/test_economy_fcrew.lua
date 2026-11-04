@@ -280,4 +280,137 @@ T.test('review fix (merge15): fewer adults: a crew above its share gives the las
   T.eq(#W.K.persist.get('m.economy').fcrew.ids, 2)
 end)
 
+-- BUG-340 second review fix: the crew's labors in the mock. HAULX (32) is an everybody labor every citizen has on and the
+-- crew takes away (act's specialize); CLEANX (33) an everybody labor the player had switched off for all. Off with
+-- opts.only: with opts.labors only those come back, without them (the old way) every everybody labor (generalize).
+local HAULX, CLEANX = 32, 33
+local function labor_sim(W, cit)
+  df.unit_labor.HAULX, df.unit_labor[HAULX] = HAULX, 'HAULX'
+  df.unit_labor.CLEANX, df.unit_labor[CLEANX] = CLEANX, 'CLEANX'
+  for i = 1, cit or 16 do W.unit(i).status.labors[HAULX] = true end
+  local base = W.act_results.work_detail
+  W.act_result('work_detail', function(name, id, on, o)
+    local ok, res = base(name, id, on, o)
+    local u = W.unit(id)
+    if ok and u and type(o) == 'table' and o.only then
+      if on then u.status.labors[HAULX] = false
+      elseif type(o.labors) == 'table' then
+        for _, n in ipairs(o.labors) do u.status.labors[df.unit_labor[n] or n] = true end
+      else u.status.labors[HAULX], u.status.labors[CLEANX] = true, true end
+    end
+    return ok, res
+  end)
+end
+
+-- the off-with-only calls since call index `from`: {id -> opts.labors}
+local function offs(ctl, from)
+  local r = {}
+  for i = from + 1, #ctl.calls do
+    local c = ctl.calls[i]
+    if not c.on and c.opts and c.opts.only then r[c.id] = c.opts.labors or 'none' end
+  end
+  return r
+end
+
+local function back_ok(W, id, what)
+  T.eq(W.unit(id).status.labors[HAULX], true, what .. ': the labor the crew took is back')
+  T.ok(not W.unit(id).status.labors[CLEANX], what .. ': the labor the player had switched off stays off')
+end
+
+T.test('BUG-340 second review fix: one the player took off his detail goes back with the labors the crew took and is ' ..
+       'not named again while the famine lasts (same run and later days)', function()
+  local W, ctl = world{}
+  labor_sim(W)
+  days(W, 2)
+  local add = crew_calls(ctl, 'Planters', true)
+  T.eq(#add, 3)
+  T.ok(has(add, 9))
+  T.eq(W.K.persist.get('m.economy').fcrew.l['9'], {'HAULX'}, 'the crew remembers what it took')
+  local v = ctl.wds.Planters.assigned_units
+  for i = #v - 1, 0, -1 do if v[i] == 9 then v:erase(i) end end
+  local before = #ctl.calls
+  days(W, 1)
+  T.eq(offs(ctl, before)[9], {'HAULX'}, 'off with only the taken labors')
+  back_ok(W, 9, 'player removal')
+  days(W, 3)
+  for i = before + 1, #ctl.calls do
+    local c = ctl.calls[i]
+    T.ok(not (c.id == 9 and c.on), 'never named again: ' .. tostring(c.name))
+  end
+  local p = W.K.persist.get('m.economy').fcrew
+  T.ok(not has(p.ids, 9), 'not in the crew')
+  T.eq(p.x['9'], 1, 'the removal is remembered')
+  T.eq(#crew_calls(ctl, 'Planters', true), 4, 'another farmer instead')
+  T.ok(W.unit(9).status.labors[HAULX], 'his labor stays on')
+  -- famine over: the crew goes back and the mark goes with it
+  ctl.food.stack_size = 2000
+  days(W, 2)
+  T.eq(W.K.persist.get('m.economy').fcrew, nil, 'mark cleared with the famine')
+end)
+
+T.test('BUG-340 second review fix: every exit (mood, squad, removal, food back, on = false, above the share) gives back ' ..
+       'exactly the labors the crew took; a dead member is only dropped', function()
+  -- mood, squad, removal, then food back for the rest
+  local W, ctl = world{}
+  labor_sim(W)
+  days(W, 2)
+  local add = crew_calls(ctl, 'Planters', true)
+  local third
+  for _, id in ipairs(add) do if id ~= 9 and id ~= 10 then third = id end end
+  W.unit(9).mood = 1
+  W.unit(10).military.squad_id = 3
+  local v = ctl.wds.Planters.assigned_units
+  for i = #v - 1, 0, -1 do if v[i] == third then v:erase(i) end end
+  local before = #ctl.calls
+  days(W, 1)
+  local o = offs(ctl, before)
+  for _, id in ipairs({9, 10, third}) do
+    T.eq(o[id], {'HAULX'}, 'off with the taken labors: ' .. id)
+    back_ok(W, id, 'exit ' .. id)
+  end
+  local p = W.K.persist.get('m.economy').fcrew
+  local rest = {}
+  for _, id in ipairs(p.ids) do rest[#rest + 1] = id end
+  T.ok(#rest > 0)
+  ctl.food.stack_size = 2000
+  before = #ctl.calls
+  days(W, 2)
+  o = offs(ctl, before)
+  for _, id in ipairs(rest) do
+    T.eq(o[id], {'HAULX'}, 'food back: ' .. id)
+    back_ok(W, id, 'food back ' .. id)
+  end
+  -- famine_crew.on = false
+  local W2, ctl2 = world{}
+  labor_sim(W2)
+  days(W2, 2)
+  local ids2 = {}
+  for _, id in ipairs(W2.K.persist.get('m.economy').fcrew.ids) do ids2[#ids2 + 1] = id end
+  ctl2.bc.economy.famine_crew.on = false
+  before = #ctl2.calls
+  days(W2, 1)
+  o = offs(ctl2, before)
+  for _, id in ipairs(ids2) do T.eq(o[id], {'HAULX'}, 'on = false: ' .. id); back_ok(W2, id, 'on = false ' .. id) end
+  -- above the share; and a dead member: no act call, only dropped
+  local W3, ctl3 = world{}
+  labor_sim(W3)
+  days(W3, 2)
+  local ids3 = {}
+  for _, id in ipairs(W3.K.persist.get('m.economy').fcrew.ids) do ids3[#ids3 + 1] = id end
+  T.eq(#ids3, 4)
+  local dead = ids3[1]
+  W3.unit(dead)._m.dead = true
+  local cen = {1, 2, 3, 5}
+  for _, id in ipairs(ids3) do cen[#cen + 1] = id end
+  W3.set_census('u', F.census_u(cen, {}))
+  before = #ctl3.calls
+  days(W3, 1)
+  o = offs(ctl3, before)
+  T.eq(o[dead], nil, 'a dead member: no work detail call')
+  local n = 0
+  for id, l in pairs(o) do n = n + 1; T.eq(l, {'HAULX'}, 'cap: ' .. id); back_ok(W3, id, 'cap ' .. id) end
+  T.eq(n, 2, '7 adults alive: cap 1, 2 of the 3 alive members go back')
+  T.ok(not has(W3.K.persist.get('m.economy').fcrew.ids, dead), 'the dead one is dropped')
+end)
+
 T.done()

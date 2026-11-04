@@ -92,6 +92,29 @@ Live check: in a famine kern.log `famine crew: ... (off at 30): k specialists ba
 drafted member; WORK_DETAIL `... (famine crew: in a mood)`; with food >= 30 days and drink 10-30 days the farmers go back.
 Uncertain: whether changing a moody dwarf's labors disturbs his mood (DF ties a mood to its workshop, not to labors).
 
+## Second review fix (merge15)
+The verifier of the review fix: a member the player took off the crew detail was given back (`no longer a member`) and in
+the same run named again (economy.lua `fcrew_run`, the add loop: `excl` held only the remaining members and gather_cand's
+member map only the detail's current members, so he counted as free): `Planters 1 off(only)` then `Planters 1 on(only)`,
+his everybody labors off again at once while the famine lasted. And every return switched on every everybody-does-this
+labor (act.lua `generalize`), also one the player had switched off himself before the crew.
+- one released in a run (any cause) is not named again in that run (`excl`); one the player took off his detail is kept in
+  `p.fcrew.x` and never named again while the famine lasts (also with no member left; cleared once it is over);
+- at the join the crew notes what it took (`p.fcrew.l`: the labors on before and off after act.work_detail(on, only), and
+  those of the detail he had before; `M.fcrew_labors`, `M.fcrew_taken`); every way back (mood, squad, the player's removal,
+  shortage over, `on` false, above the share) passes them as `opts.labors` and act.work_detail(off, only) switches on only
+  those, after the detail's own labors went off; an older state without `l` still gets every everybody labor; a dead or
+  departed member is only dropped;
+- `on` false in modern labormanager drops the state without an act call (labormanager sets the labors).
+Tests (fail on 5b39a14): tests/lua/test_economy_fcrew.lua (+2: the player's removal not named again, the same run and later
+days, mark cleared with the famine; every exit gives back exactly the taken labors, a player-off labor stays off, a dead one
+is only dropped), tests/lua/test_act_supply.lua (+1: off with opts.labors).
+Live check: take a crew farmer off Planters in a famine: WORK_DETAIL `Planters - <name> (famine crew: no longer a member)`,
+no `Planters + <name>` after it while the famine lasts; his labors screen shows hauling etc. on again, and a labor switched
+off by hand before the crew stays off.
+Open: a member released because his own shortage is over can be named again on a later day for the other shortage (one
+off/on pair); a labor the player switched off by hand during the crew (one the crew had taken) comes back on.
+
 ## Open
 - A fort with no soil underground and no free surface soil (Drillchamber before y379): nothing to place; muddying stone
   needs water (never dug near water without Gordon).

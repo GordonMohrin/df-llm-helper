@@ -1,5 +1,16 @@
 # CHANGELOG dfpilot
 
+## Run 15 famine crew second review: the player's removal sticks, only the taken labors come back (BUG-340 second review fix (merge15), 2026-11-04; offline, live-untested)
+- **Why:** the verifier of the review fix: a member the player took off his crew detail was given back and named again in
+  the same run (economy.lua fcrew_run, the add loop's `excl` held only the remaining members), his everybody labors off
+  again while the famine lasted; every return switched on every everybody labor (act.lua generalize), also one the player had
+  switched off himself.
+- **What changed:** released members are excluded for the run, the player's removals for the famine (`p.fcrew.x`); the crew
+  notes the labors it took at the join (`p.fcrew.l`) and every way back passes them as act.work_detail `opts.labors`
+  (only those come back, after the detail's own went off); `on` false in modern labormanager only drops the state.
+- **Tests (fail on 5b39a14):** tests/lua/test_economy_fcrew.lua (+2), tests/lua/test_act_supply.lua (+1).
+- **Live check:** a farmer taken off Planters in a famine: `(famine crew: no longer a member)` and no `Planters + <name>`
+  after it; a labor switched off by hand before the crew stays off after the return.
 ## Run 15 famine crew review: dropped-out members get their labors back, release by the own shortage (BUG-340 review fix (merge15), 2026-11-04; offline, live-untested)
 - **Why:** the merge15 review of the famine crew: a moody or drafted member, or one the player/DF took off the detail, was
   dropped without a return and kept hauling, cleaning, building and Orderlies off for good (economy.lua fcrew_run, was

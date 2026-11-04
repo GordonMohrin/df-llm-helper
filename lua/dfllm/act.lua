@@ -2098,6 +2098,16 @@ local function impls(state)
       end
       return n
     end
+    -- BUG-340 second review fix: opts.labors (names or numbers) are the labors the famine crew took away; on its way
+    -- back only those come back on (generalize would also switch on an everybody labor the player had switched off)
+    local function restore(u, list)
+      local n = 0
+      for _, x in ipairs(list) do
+        local l = type(x) == 'number' and x or (df.unit_labor and df.unit_labor[x])
+        if type(l) == 'number' and not u.status.labors[l] then u.status.labors[l] = true; n = n + 1 end
+      end
+      return n
+    end
     local function equip_update(u)
       pcall(function() u.uniform.pickup_flags.update = true end)
       pcall(function() df.global.plotinfo.equipment.update.weapon = true end)
@@ -2163,13 +2173,14 @@ local function impls(state)
     end
     -- Review fix (merge15): a specialist the player or DF already took off the detail still gets the everybody labors
     -- back (the famine crew's return logged 'back to every labor' while they stayed off)
+    local back = type(opts.labors) == 'table' and opts.labors or nil
     if not at then
-      if opts.only and u then generalize(details, wd, u) end
+      if opts.only and u then if back then restore(u, back) else generalize(details, wd, u) end end
       return true, 'not a member'
     end
     vec:erase(at)                              -- a unit that left the fort (or died) is only taken off the list
     if not u then return true, 'removed' end
-    if opts.only then generalize(details, wd, u) end
+    if opts.only and not back then generalize(details, wd, u) end
     local every = df.work_detail_mode and df.work_detail_mode.EverybodyDoesThis
     for l = 0, #al - 1 do
       if al[l] then
@@ -2183,6 +2194,8 @@ local function impls(state)
         if not keep then u.status.labors[l] = false end
       end
     end
+    -- (after the detail's own labors went off: one he had before the crew, by the player's hand, stays on)
+    if opts.only and back then restore(u, back) end
     return true, 'removed'
   end
 
