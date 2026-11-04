@@ -76,6 +76,12 @@
 - **Tests (fail on 9b6f614):** tests/lua/test_bug328_329_projects.lua (10), tests/test_bug328_329_projects.py (4); adjusted
   test_runner_queue.lua (watchdog line), test_runner.lua and test_runner_seal_door.lua (PROJECT_BLOCKED without d.idle),
   test_runner_queue.py (queue config).
+- **Review fix:** a set-aside build project that lost a placed piece comes back by itself (measure_build's re-apply counts as
+  `moved`; before, P.chunk 0 stopped every later measure and it waited for bp.resume). The exemptions are one rule
+  (`Q.idle_keep`) used when setting aside, in `second()` and the pass-2 slot test, and a set-aside project that becomes one is
+  taken back at once (kern.log `back after N days set aside (<reason>)`): mood project, care lead, aqshaft at an open level,
+  and new the refuge drink store, a seal/plug in SIEGE/BREACH, a food/drink project in a food/drink emergency. Tests:
+  tests/lua/test_bug328_review.lua (4, fail on 5dca864).
 - **Live check:** Inkintense/Drillchamber/Earthboat after a kernel reload: no `no run ended` line from a refused shaft; stuck
   projects `set aside` after 30 days, others take the slots; `bp.resume proj=<id>` answers `resumed`; the no-builder lines name
   a labor nobody has (then: the work details) or nothing more (cause still unknown). Uncertain: the labor table (labormanager's

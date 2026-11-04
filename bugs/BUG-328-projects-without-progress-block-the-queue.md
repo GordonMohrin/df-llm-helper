@@ -45,8 +45,20 @@ state, verb bp.resume), contract/schema/fairplay/brief/wake
 4. `bp.cancel` and its DF jobs: done by BUG-314 (a plain cancel removes the unbuilt pieces of the current build stage with their
    jobs); Drillchamber's y377 note (job 24715 new) shows it worked live. Unchanged here.
 
+Review fix (merge14): (a) a set-aside build project that lost a placed piece never came back: measure_build's re-apply set
+`P.chunk = 0` without `moved`, and every later measure-only task stopped before measure_build (`P.chunk < #chunks`), so `R.ps`
+froze until `bp.resume`. The re-apply now counts as the kernel's own step (`moved`, as the seal fallbacks): the next run
+takes it back and places the piece again. (b) The exemptions were checked only when a project was set aside. They are one
+rule now, `Q.idle_keep`, used by the set-aside test, `second()` and the pass-2 `aside` test, and the release loop of
+`idle_scan` takes a set-aside project back at once (kern.log `<id> (<tpl>) back after N days set aside (<reason>)`, a fresh
+idle_days) when it becomes one: a mood project, the care lead, an aqshaft watching an open level, and new: the refuge drink
+store (`refuge_drink`), a seal or plug in SIEGE/BREACH, a food/drink project (farms, cistern, stockroom, refuge_drink) while a
+food/drink emergency holds (seal_first food_d/drink_d, patients without water). Open: a project set aside after an apply
+that refused mid-stage (`P.chunk < #chunks`, no loss) still waits for `bp.resume`.
+
 ## Tests
 `tests/lua/test_bug328_329_projects.lua` (5 BUG-328 cases), `tests/test_bug328_329_projects.py`; all fail on 9b6f614.
+Review fix: `tests/lua/test_bug328_review.lua` (4 cases, all fail on 5dca864).
 Adjusted: `tests/lua/test_runner_queue.lua` (watchdog line names the days), `tests/lua/test_runner.lua` and
 `tests/lua/test_runner_seal_door.lua` (count PROJECT_BLOCKED without `d.idle`: their 84 / 144 game days set the stalled project
 aside), `tests/test_runner_queue.py` (config queue).
