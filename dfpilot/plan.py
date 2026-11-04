@@ -253,6 +253,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "aqshaft": any(t == AQSHAFT for t, _ in applied),       # FR-95: an aquifer shaft placed (any state)
             "z4": bool((man.get("zones") or {}).get("Z4")) if isinstance(man.get("zones"), dict) else False,  # BUG-197
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
+            "core_dig": core_digging(save_dir, state),               # BUG-354: its stage 1 is still digging
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
             "farms": farm_facts(save_dir, state),                     # BUG-297: an open farms project, a farm site
@@ -2274,6 +2275,22 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
     return out
 
 
+def core_digging(save_dir: Path, state: dict | None) -> bool:
+    """BUG-354 (Run 16c: propose in year 1 wanted farms@S1, dining and bedrooms while the placed fortcore's stage 1 had dug
+    nothing): a fortcore project (not a retrofit, not parked on a breach) is at its stage 1 dig in state.proj. Room builds
+    open from the dug Z4 floor, so no site exists for them until it is done."""
+    ids = set()
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == "fortcore" and not (doc.get("params") or {}).get("retrofit"):
+            ids.add(p.stem)
+    for row in (state or {}).get("proj") or []:
+        if isinstance(row, list) and len(row) >= 3 and row[0] in ids and isinstance(row[1], str) \
+                and row[1].startswith("s1.dig") and "breach:" not in str(row[-1]):
+            return True
+    return False
+
+
 def live_trade(save_dir: Path) -> dict | None:
     """BUG-242 (Run 15 Inkintense y373: Gordon's `cmd trade.want ... food, seeds` for food_low; the draft set the default
     bar:iron, anvil, cloth and the apply would have dropped it): the wants the kernel trades by now. A `trade.want` (or
@@ -2489,12 +2506,15 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
             k += 1
         builds[k:k] = front
     fresh = None
-    if (fort or {}).get("z4") is False and not (fort or {}).get("core_any") and not core \
-            and not any(t == "fortcore" for t, _ in done):
+    dug = (fort or {}).get("core_dig") is True
+    if (fort or {}).get("z4") is False and not core and (dug or (
+            not (fort or {}).get("core_any") and not any(t == "fortcore" for t, _ in done))):
         # BUG-197 (live Earthboat): no fortcore and no Z4 floor yet: every room build fails its site ranking, so
-        # year 1 is the core's stage 1 (and a seal) only, at the current phase
-        keep = [b for b in builds if b["tpl"] == SEAL or (b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) == 1)]
-        if not any(b["tpl"] == "fortcore" for b in keep) and (info is None or "fortcore" in info):
+        # year 1 is the core's stage 1 (and a seal) only, at the current phase. BUG-354 (Run 16c): the same while a placed
+        # fortcore's stage 1 is still digging (PLAYBOOK 3a): its stage 1 is not drafted again, rooms wait for the floor
+        keep = [b for b in builds if b["tpl"] == SEAL or (b["tpl"] == "fortcore" and not dug
+                                                          and (_stage_of(b.get("p") or {}) or 1) == 1)]
+        if not dug and not any(b["tpl"] == "fortcore" for b in keep) and (info is None or "fortcore" in info):
             keep.append({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}})
         fresh = sorted({b["tpl"] for b in builds if b not in keep})
         builds, target = keep, cur
@@ -2582,8 +2602,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                             if fill.get("ok") is False else "; water first (a cistern, a well or a water zone on deep "
                             "water: dfllm cmd inspect water_sources)"))     # BUG-197: no blocked word in the notes
     if fresh is not None:                        # BUG-197: the last words of the notes say what comes next
-        doc["notes"] += (f"; BUG-197: no fortcore and no Z4 core floor yet: only fortcore stage 1"
-                         + (" and seal" if any(b["tpl"] == SEAL for b in builds) else "") + f" drafted, phase_target {cur}"
+        what = ("BUG-354: fortcore stage 1 is still digging (no Z4 core floor yet): only the seal" if dug else
+                "BUG-197: no fortcore and no Z4 core floor yet: only fortcore stage 1"
+                + (" and seal" if any(b["tpl"] == SEAL for b in builds) else ""))
+        doc["notes"] += (f"; {what} drafted, phase_target {cur}"
                          + (f" (left out: {', '.join(fresh)})" if fresh else "") + "; apply, wait for s1.dig, propose again")
     # BUG-349 (Run 15 i1 y378, i2 y388: every draft raised the phase and its own check refused it 'while the perimeter is
     # open'; the player lowered phase_target by hand): the draft keeps the phase when perimeter_gate refuses the raise

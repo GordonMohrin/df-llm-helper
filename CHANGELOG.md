@@ -1,5 +1,23 @@
 # CHANGELOG dfpilot
 
+## Site ranking only where the citizens can walk, an unreachable dig is named after 3 days, year 1 digs before it plans rooms (BUG-352, BUG-354, 2026-11-04; offline, live-untested)
+- **Why:** i3 Run 16c (site97): all 13 citizens stood in walk group 1562, `bp sites fortcore` ranked S2/S3 on soil beyond
+  the brook (group 1), the fortcore on [58,128,125] stood 30 d at s1.dig 0 % ('unreachable DigChannel'), the fort starved;
+  propose in year 1 drafted farms/dining/bedrooms (ERROR 'no soil marks', 'no refuge') while the placed core dug nothing.
+- **What changed:** a `sites` snapshot export carries `wg` (the citizens' walk group `home` and a row per level: `1` their
+  group, `0` another, `-` else; snapshot.lua `M.home_group`); `bp.sites.rank` drops sites whose anchor reads `0`, adds
+  `walk` and `; walk group N` (shown by `bp sites`), ValueError when every site lies beyond; RANK_V 3. runner `Q.reach_scan`:
+  a dig stage without progress for `queue.reach_days` (3) that no citizen reaches (sampled tiles, `snapshot.groups`) is
+  PROJECT_BLOCKED `why` `unreachable` (`unreach`, `cmd`: cancel, `bp sites <tpl> --fresh`, place again), the row says
+  `unreachable N d`, wake hint `unreach_hint`. plan: fort fact `core_dig` (a fortcore at s1.dig); while it holds and no Z4
+  floor exists, propose drafts the seal only (stage 1 not again), the notes say BUG-354. Contract: snapshot `wg`,
+  PROJECT_BLOCKED `unreach`/`cmd`, config `runner.queue.reach_days` (schema, CONTRACTS appendix, fairplay, baseline).
+- **Open:** a plain `bp.cancel` leaves the dig designations of the stage (~1,580 on z120-124 in the live case); the claim
+  needs revealed tiles (hidden = no claim).
+- **Tests (fail on 8890b59):** tests/lua/test_snapshot_walkgroup.lua (2), tests/lua/test_bug352_unreachable.lua (2),
+  tests/test_bug352_354_sitewg.py (8).
+- **Live check:** `bp sites fortcore --fresh` on i3: only `walk group 1562` sites; a dig beyond water: PROJECT_BLOCKED
+  `unreachable` after 3 d; `plan propose` after `bp.place fortcore`: the seal only, notes `BUG-354`.
 ## Review fix (merge16): no Kern+ fallback for life projects in a silent-alert SIEGE, the perimeter waiver counts the newest opening (BUG-347, BUG-349, 2026-11-04; offline, live-untested)
 - **BUG-347:** runner Q.life_burrows fell back to Kern+ in a SIEGE whose civ alert is silent (seal `flee`, BUG-031 relax,
   `civ_alert_idx` 0): hospital/cistern work ran with unheld citizens hauling from the surface. The fallback is ALERT/RECOVERY

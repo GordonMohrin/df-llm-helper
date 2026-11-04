@@ -228,6 +228,12 @@ def run_bp(args, save_dir: Path | None) -> int:
         note = water_note(save_dir, args.tpl)
         if note:
             print(f"  {note}")
+        homes = sorted({s["walk"] for s in sites if s.get("walk") is not None})
+        if homes:                                          # BUG-352: the sites lie where the citizens can walk
+            print(f"  walk group {', '.join(str(h) for h in homes)}: the citizens' (sites beyond a brook or a cave wall in "
+                  "another group are left out)")
+        elif sites and args.tpl not in ("seal", "traps"):
+            print("  walk group unknown (the snapshot has none: reachability not checked; run with --fresh)")
         for s in sites:
             lbl = f" label {s['label']}" if s.get("label") else ""
             print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}{lbl}: {s.get('why', '')}")

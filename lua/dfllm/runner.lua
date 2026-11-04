@@ -134,6 +134,12 @@ M.CFG = {
   -- a food/drink project in an emergency (Q.idle_keep; a set-aside one comes back once it becomes one). config "runner":
   -- {queue: {idle_days}}
   task_days = 3, idle_days = 30,
+  -- BUG-352 (Run 16c site97: fortcore stage 1 on soil beyond the brook, 30 d at s1.dig 0 %, 'unreachable DigChannel'): a
+  -- dig stage without own progress (R.ps) for reach_days whose revealed tiles (or their neighbours) lie in no walk group a
+  -- citizen stands in is announced (PROJECT_BLOCKED d.why 'unreachable', row 'unreachable N d', Q.reach_scan): the
+  -- commands cancel it and place it again at a site `bp sites` offers (it lists reachable sites only). Informative: the
+  -- project stays. config "runner": {queue: {reach_days}}
+  reach_days = 3,
   -- BUG-066 (Run 14 y560: a toppled MetalsmithsForge stayed `built` in manifest.json and "bp sites workshops" said
   -- "nothing left to build" while a mood dwarf had no workshop) and FR-76 (Run 12 Trussroads, a reclaimed fort with
   -- workshops no project of ours built): once a game day the manifest's workshops are compared with the workshops that
@@ -3151,7 +3157,8 @@ local function conf(K)
              pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off),
              yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
              park = nat(q.park_days, 1, 400, M.CFG.park_days) * DAY,
-             idle = nat(q.idle_days, 1, 400, M.CFG.idle_days) * DAY}               -- BUG-328
+             idle = nat(q.idle_days, 1, 400, M.CFG.idle_days) * DAY,               -- BUG-328
+             reach = nat(q.reach_days, 1, 60, M.CFG.reach_days) * DAY}             -- BUG-352
   -- BUG-066 / FR-76: the manifest follows the workshops that stand (reclaim = config runner.reclaim)
   local rc = type(c.reclaim) == 'table' and c.reclaim or {}
   r.rec = {on = rc.on ~= false, scans = nat(rc.gone_scans, 1, 10, M.CFG.rec_scans),
@@ -4019,6 +4026,10 @@ function rows(K)
       local R = S.rt.p[P.id]
       local ps = type(R) == 'table' and int(R.ps) or int(S.rt.ip[P.id].ps) or t
       b = string.format('set aside %d d: %s (bp.resume)', math.max(0, (t - ps) // DAY), S.rt.ip[P.id].why or 'no progress')
+    elseif (b == '' or b == 'stalled') and S.ur and S.ur[P.id] then
+      local R = S.rt.p[P.id]                       -- BUG-352: no citizen reaches its dig
+      local ps = type(R) == 'table' and int(R.ps) or int(S.ur[P.id].ps) or t
+      b = string.format('unreachable %d d: bp.cancel, place again', math.max(0, (t - ps) // DAY))
     elseif b == '' then
       local ok = allowed(K, P, d)
       local pw = ok and paused(K, P, d)
@@ -5157,6 +5168,109 @@ function Q.idle_scan(K, c, t)
   end
 end
 
+-- BUG-352: does a citizen reach the dig stage of P? Up to 30 pending tiles of the stage (walls to cut: a tile without a
+-- walk group answers its neighbours' first, snapshot.groups near) against the walk groups of up to 50 citizens. Claims
+-- only when some tile has a known group, none shares a citizen's group and a citizen stands somewhere (a hidden tile is
+-- unknown and a tile with no group nothing: no claim). Returns the tile groups and the citizens' groups as lists, or nil
+function Q.unreachable(K, P, d, R)
+  local tiles = stage_tiles(P.id, d, P.stage)
+  local cd = type(R) == 'table' and R.si == P.stage and type(R.cd) == 'string' and R.cd or ''
+  local all = {}
+  for ci = 1, #tiles do
+    if cd:sub(ci, ci) ~= '1' then
+      for _, x in ipairs(tiles[ci]) do all[#all + 1] = x end
+    end
+  end
+  if #all == 0 then return nil end
+  local step = math.max(1, (#all + 29) // 30)
+  local pts = {}
+  for i = 1, #all, step do
+    local x = all[i]
+    if on_map(x[1], x[2], x[3]) then pts[#pts + 1] = {x[1], x[2], x[3]} end
+  end
+  local np = #pts
+  if np == 0 then return nil end
+  local cu = K.census.u
+  local n = 0
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    if n >= 50 then break end
+    local u = df.unit.find(id)
+    if u then
+      local ok, x, y, z = pcall(dfhack.units.getPosition, u)
+      if ok and int(x) then pts[#pts + 1] = {x, y, z}; n = n + 1 end
+    end
+  end
+  if n == 0 then return nil end
+  local ok, g = K.call('snapshot', 'groups', pts, true)
+  if not (ok and type(g) == 'table') then return nil end
+  local cg, cl, tg, tl = {}, {}, {}, {}
+  for i = np + 1, #pts do
+    local v = int(g[i])
+    if v and v > 0 and not cg[v] then cg[v] = true; cl[#cl + 1] = v end
+  end
+  for i = 1, np do
+    local v = int(g[i])
+    if v and v > 0 then
+      if cg[v] then return nil end
+      if not tg[v] then tg[v] = true; tl[#tl + 1] = v end
+    end
+  end
+  if #cl == 0 or #tl == 0 then return nil end
+  table.sort(tl)
+  table.sort(cl)
+  return tl, cl
+end
+
+-- BUG-352: once a run in PEACE (begin_run): a dig stage without own progress for c.reach that no citizen reaches is
+-- announced once (S.ur[id] = {t, ps, si}; PROJECT_BLOCKED d.why 'unreachable' with the commands, kern.log, its row says
+-- 'unreachable N d'); the record goes when the project moves on, changes stage or leaves. It sets nothing aside and
+-- cancels nothing: the commands are the player's (the cancel drops only the unbuilt pieces; a plain cancel leaves the
+-- dig designations the stage placed: BUG-352, open)
+function Q.reach_scan(K, c, t)
+  S.ur = S.ur or {}
+  for id, r in pairs(S.ur) do
+    local P = find(id)
+    local R = P and S.rt.p[P.id]
+    if not P or P.done == 1 or halted(P) or type(R) ~= 'table' or R.si ~= int(r.si)
+       or (int(R.ps) or 0) > (int(r.ps) or 0) then
+      S.ur[id] = nil
+    end
+  end
+  if K.mode() ~= 'PEACE' then return end
+  for _, P in ipairs(sorted()) do
+    local R = S.rt.p[P.id]
+    local ps = type(R) == 'table' and R.si == P.stage and int(R.ps) or nil
+    if ps and P.done ~= 1 and not halted(P) and not S.ur[P.id] and not Q.idle(P) and t - ps >= c.reach then
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      if st and st.mode == 'dig' then
+        local okr, tl, cl = pcall(Q.unreachable, K, P, d, R)
+        if okr and tl then
+          S.ur[P.id] = {t = t, ps = ps, si = P.stage}
+          local label = trunc(st.label or '', 24)
+          local days = (t - ps) // DAY
+          local kv = {}
+          for k, v in pairs(type(d.params) == 'table' and d.params or {}) do
+            if type(v) == 'number' or (type(v) == 'string' and v:match('^[%w:_,.%-]+$')) then kv[#kv + 1] = k .. '=' .. tostring(v) end
+          end
+          table.sort(kv)
+          local cmd = string.format('dfllm cmd bp.cancel proj=%s; dfllm bp sites %s --fresh; dfllm cmd bp.place tpl=%s site=S1%s',
+                                    P.id, P.tpl, P.tpl, #kv > 0 and (' ' .. table.concat(kv, ' ')) or '')
+          local msg = string.format('%s (%s) unreachable: no citizen reaches the %s dig (walk groups %s; citizens %s), %d d ' ..
+                                    'without progress at %s %d%%; cancel it and place it at a site the citizens reach ' ..
+                                    '(bp sites lists those): %s', P.id, P.tpl, label, table.concat(tl, ',', 1, math.min(#tl, 4)),
+                                    table.concat(cl, ',', 1, math.min(#cl, 4)), days, label, int(P.pct) or 0, cmd)
+          K.log('warn', '%s', msg)
+          K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200),
+                 {proj = P.id, tpl = P.tpl, stage = label, why = 'unreachable', ticks = t - ps, unreach = days,
+                  cmd = #cmd <= 200 and cmd or nil})
+          K.flush()
+        end
+      end
+    end
+  end
+end
+
 -- BUG-328: the set-aside projects for state sched.ip: {n, by = {{id, tpl, days}}} (<= 8), nil without
 function Q.idle_state(K)
   local t, by, n = now(K), {}, 0
@@ -5206,6 +5320,8 @@ local function begin_run(K)
   end
   local oki, erri = pcall(Q.idle_scan, K, f.c, now(K))   -- BUG-328: own pcall, a fault costs only the set-aside rule
   if not oki then K.log('error', 'runner set-aside failed: %s', trunc(erri, 160)) end
+  local okr, errr = pcall(Q.reach_scan, K, f.c, now(K))  -- BUG-352: own pcall, a fault costs only this announcement
+  if not okr then K.log('error', 'runner reach scan failed: %s', trunc(errr, 160)) end
   local tasks, n, t, c = {}, 0, now(K), f.c
   local list = sorted()
   for _, P in ipairs(list) do
@@ -5291,7 +5407,7 @@ end
 
 ---------------------------------------------------------------- module interface
 function M.init(K)
-  S = {tiles = {}, bbox = {}, meas = {}, absent = {}, rows = {}, active = nil, slice = {qf = 0, probes = 0, qf_max = 1},
+  S = {tiles = {}, bbox = {}, meas = {}, absent = {}, rows = {}, ur = {}, active = nil, slice = {qf = 0, probes = 0, qf_max = 1},
        boot = K.now().tick}
   local pd = K.persist.get('projects')
   if type(pd) ~= 'table' or type(pd.list) ~= 'table' then pd = {v = 2, list = {}}; K.persist.set('projects', pd) end

@@ -1230,6 +1230,28 @@ function M.pending(K, id)
   return false
 end
 
+-- BUG-352: the walk group most citizens stand in (nil on a fault or without one); a map-wide read per sites export
+function M.home_group()
+  local cnt, best, bn = {}, nil, 0
+  pcall(function()
+    local n = 0
+    for _, c in ipairs(dfhack.units.getCitizens(true)) do
+      n = n + 1
+      if n > 80 then break end
+      local g = dfhack.maps.isValidTilePos(c.pos) and dfhack.maps.getWalkableGroup(c.pos)
+      g = int(g)
+      if g and g > 0 then
+        cnt[g] = (cnt[g] or 0) + 1
+        if cnt[g] > bn then best, bn = g, cnt[g] end
+      end
+    end
+  end)
+  return best
+end
+
+local WALKCH = {}
+for c in ('.<>Xrv+=H^w'):gmatch('.') do WALKCH[c] = true end
+
 local function start(K, j)
   local man = K.manifest()
   j.z, j.y, j.rows, j.cur = j.bbox[3], j.bbox[2], {}, {}
@@ -1254,6 +1276,12 @@ local function start(K, j)
     end
   end
   j.t0 = K.now().ms
+  -- BUG-352: a sites export carries each walkable tile's group against the citizens' (wg), so the ranking drops sites
+  -- the citizens cannot reach (the far side of a brook)
+  if j.purpose == 'sites' then
+    j.home = M.home_group()
+    if j.home then j.grows = {} end
+  end
 end
 
 local function add_mark(list, x, y, z, max)
@@ -1307,6 +1335,7 @@ end
 -- the tiles x0..x1 of row y, level z
 local function scan_span(j, y, z, x0, x1)
   local out, getTileFlags = {}, dfhack.maps.getTileFlags
+  local gout = j.home and {} or nil
   for x = x0, x1 do
     local des, oc = getTileFlags(x, y, z)
     local c
@@ -1322,27 +1351,39 @@ local function scan_span(j, y, z, x0, x1)
       if des.feature_global == true then add_mark(j.marks.cavern, x, y, z) end
     end
     out[#out + 1] = c
+    if gout then
+      local gc = '-'
+      if WALKCH[c] then                               -- BUG-352: 1 = the citizens' group, 0 = another walk group
+        local okg, g = pcall(dfhack.maps.getWalkableGroup, xyz2pos(x, y, z))
+        g = okg and int(g) or nil
+        if g and g > 0 then gc = g == j.home and '1' or '0' end
+      end
+      gout[#gout + 1] = gc
+    end
   end
-  return table.concat(out)
+  return table.concat(out), gout and table.concat(gout) or nil
 end
 
 -- one row (x0..x1) of level z -> its text and the tiles read; BUG-043: only inside the job's parts, ' ' elsewhere
 local function scan_row(j, y, z)
   local b = j.bbox
   if #j.parts > 1 or not contains(j.parts[1], b) then
-    local out, x, n = {}, b[1], 0
+    local out, gout, x, n = {}, {}, b[1], 0
     for _, s in ipairs(row_spans(j.parts, y, z)) do
       local a, e = math.max(s[1], b[1]), math.min(s[2], b[4])
       if a <= e then
-        if a > x then out[#out + 1] = string.rep(M.NOSCAN, a - x) end
-        out[#out + 1] = (scan_span(j, y, z, a, e))
+        if a > x then out[#out + 1] = string.rep(M.NOSCAN, a - x); gout[#gout + 1] = string.rep('-', a - x) end
+        local text, gt = scan_span(j, y, z, a, e)
+        out[#out + 1] = text
+        gout[#gout + 1] = gt or string.rep('-', e - a + 1)
         n, x = n + e - a + 1, e + 1
       end
     end
-    if x <= b[4] then out[#out + 1] = string.rep(M.NOSCAN, b[4] - x + 1) end
-    return table.concat(out), n
+    if x <= b[4] then out[#out + 1] = string.rep(M.NOSCAN, b[4] - x + 1); gout[#gout + 1] = string.rep('-', b[4] - x + 1) end
+    return table.concat(out), n, j.home and table.concat(gout) or nil
   end
-  return scan_span(j, y, z, b[1], b[4]), b[4] - b[1] + 1
+  local text, gt = scan_span(j, y, z, b[1], b[4])
+  return text, b[4] - b[1] + 1, gt
 end
 
 -- the file text of request `id` (the job's own or one that joined it): the head per id, the rows once (j.body)
@@ -1384,7 +1425,15 @@ local function encode(j, id)
     head.id = x
     return json.encode(head):sub(1, -2)
   end
-  j.body = ',"rows":{' .. table.concat(parts, ',') .. '}}'
+  local wg = ''
+  if j.home and j.grows then              -- BUG-352: the citizens' walk group per walkable tile ('1' theirs, '0' another)
+    local gp = {}
+    for z = j.bbox[3], j.bbox[6] do
+      gp[#gp + 1] = string.format('"z%d":["%s"]', z, table.concat(j.grows[z] or {}, '","'))
+    end
+    wg = string.format(',"wg":{"home":%d,"rows":{%s}}', j.home, table.concat(gp, ','))
+  end
+  j.body = wg .. ',"rows":{' .. table.concat(parts, ',') .. '}}'
   return j.head(id) .. j.body
 end
 
@@ -1518,8 +1567,13 @@ function M.step(K, budget, ctx)
   while left > 0 and j.z <= b[6] do
     j.rows[j.z] = j.rows[j.z] or {}
     local r = j.rows[j.z]
-    local text, n = scan_row(j, j.y, j.z)
+    local text, n, gtext = scan_row(j, j.y, j.z)
     r[#r + 1] = text
+    if gtext then
+      j.grows[j.z] = j.grows[j.z] or {}
+      local gr = j.grows[j.z]
+      gr[#gr + 1] = gtext
+    end
     left = left - math.max(1, n + (w - n) // 16)  -- BUG-043: a tile not exported costs a char, not a read
     j.y = j.y + 1
     if j.y > b[5] then j.y, j.z = b[2], j.z + 1 end
