@@ -261,6 +261,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "refuge": refuge,
             "stone_dig": stone_digs(save_dir),
             "hosp": hospital_facts(save_dir, state, rooms),
+            "office": office_facts(save_dir, rooms, applied),         # BUG-396: an office stands or is planned; a surface site
             "metal": metal_facts(save_dir, man, applied),
             "aqshaft": any(t == AQSHAFT for t, _ in applied),       # FR-95: an aquifer shaft placed (any state)
             "z4": bool((man.get("zones") or {}).get("Z4")) if isinstance(man.get("zones"), dict) else False,  # BUG-197
@@ -275,6 +276,35 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "traps": _traps.facts(save_dir),                         # FR-96: doors on the ways in without a trap lane
             "grand": _grand_facts(save_dir, state),                  # FR-102/103: large rooms, the deep core
             "seals": open_seals(save_dir, state)}
+
+
+OFFICE_SURFACE_P = {"surface": 1}
+OFFICE_SURFACE_BUILD = {"tpl": "office", "site": "S1", "p": {"surface": 1}}     # BUG-396
+
+
+def office_facts(save_dir: Path, rooms: list, applied) -> dict:
+    """BUG-396 (Run 16a i1 Bachwald: no office for 294 days, the manager validated nothing, 7 brews unvalidated, drink 0): {have:
+    an office room in the manifest or an office project applied (any state, a surface one too), site: the anchor of a free
+    surface office site when there is no office and no dug Z4 floor to hang one on (else None)}."""
+    have = any(isinstance(r, dict) and r.get("tpl") == "office" for r in rooms)         or any(t == "office" for t, _ in applied)
+    out: dict = {"have": have, "site": None}
+    if have or _has_z4(save_dir):
+        return out
+    try:
+        free, _, _ = free_sites(save_dir, "office", OFFICE_SURFACE_P, n=1)
+    except (BpError, BpUnavailable):
+        free = []
+    if free and isinstance(free[0].get("anchor"), list):
+        out["site"] = free[0]["anchor"]
+    return out
+
+
+def office_surface_due(fort: dict | None, done: set) -> bool:
+    """BUG-396: a fort without an office (none standing, planned or applied) and without a dug core to hang one on, with a free
+    surface office site: the draft carries `office p.surface=1` early (the manager validates nothing without it, the brews
+    wait)."""
+    o = (fort or {}).get("office") or {}
+    return bool(o.get("site")) and not o.get("have") and not any(t == "office" for t, _ in done)
 
 
 def _grand_facts(save_dir: Path, state: dict | None) -> dict:
@@ -743,6 +773,8 @@ def build_kind(b: dict) -> str:
     if tpl == DEPOT:                                      # BUG-368: the surface trade depot (runner.lua kind_of 'depot')
         return "depot"
     if tpl in SUPPLY_TPLS or (tpl == "workshops" and (_food_shops(p) or p.get("surface") == 1)):   # BUG-356: startup shops
+        return "supply"
+    if tpl == "office" and p.get("surface") == 1:           # BUG-396: the manager validates the brews: no seal pauses it
         return "supply"
     if tpl in BEDS_TPLS:
         return "beds"
@@ -2922,7 +2954,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         while k < len(builds) and _refuge_fix(builds[k]):
             k += 1
         builds[k:k] = front
-    fresh, hosp_note = None, ""
+    fresh, hosp_note, office_note = None, "", ""
     dug = (fort or {}).get("core_dig") is True
     # BUG-387/389: where no fortcore can be dug the surface core replaces it and the surface rooms need no Z4 floor
     sf = (fort or {}).get("surface") or {}
@@ -2949,6 +2981,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         if hospital_surface_due(s, fort, done) and (info is None or HOSPITAL in info):
             keep.append(copy.deepcopy(HOSPITAL_SURFACE_BUILD))
             hosp_note = "; BUG-384: patients and no hospital: hospital p.surface=1 at S1 on the surface by the accepted water"
+        # BUG-396: and the manager's office on the surface (no core to hang one on): without it the manager validates nothing
+        if office_surface_due(fort, done) and (info is None or "office" in info):
+            keep.append(copy.deepcopy(OFFICE_SURFACE_BUILD))
+            office_note = "; BUG-396: no office for the manager: office p.surface=1 at S1 on the surface"
         fresh = sorted({b["tpl"] for b in builds if b not in keep})
         builds, target = keep, cur
         front = [b for b in front if any(b is x for x in builds)]
@@ -3005,7 +3041,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + depot_note + hosp_note + sc_note
+    doc["notes"] += core_note + depot_note + hosp_note + sc_note + office_note
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
         if armor and not _bar_want(doc["trade"]["want"]):

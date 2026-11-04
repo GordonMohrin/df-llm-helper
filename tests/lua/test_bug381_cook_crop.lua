@@ -114,4 +114,37 @@ T.test('BUG-381: no cook slot with meals or cook ingredients for every citizen, 
   T.ok(#logs_like(Wn, 'no seeds of a crop it may cook') >= 1, 'kern.log says the caravans are asked')
 end)
 
+-- BUG-398 (Run 16b i2 Ostgate: 79 citizens, 0 meals, every plot slot planted with plump helmets: the R20 plan found no empty
+-- slot): planted slots of a crop the kitchen will not cook give way to the cook crop, up to the plan's slots a season.
+T.test('BUG-398: planted plump helmet slots are swapped for the cook crop up to cook_slots a season; planted cook slots count', function()
+  local W = world()
+  days(W, 1)
+  local pl = plots(W, 3)
+  for _, p in ipairs(pl) do p.plant_id[0], p.plant_id[2] = 0, 0 end       -- every spring and autumn slot is planted: plump helmets
+  days(W, 2)
+  T.eq(count(pl, 0, 1), 2, 'two of three planted spring slots turn to quarry bushes (cook_slots 2)')
+  T.eq(count(pl, 0, 0), 1, 'the third stays a brew crop')
+  T.eq(count(pl, 2, 1), 2, 'and in autumn')
+  days(W, 2)
+  T.eq(count(pl, 0, 1), 2, 'idempotent: planted cook slots count against the plan, no more swaps')
+  pl[3].plant_id[0] = 2                                                 -- MUSHROOM_CUP_DIMPLE (brewed only) is swapped as well
+  days(W, 1)
+  T.eq(count(pl, 0, 1), 2, 'the cap holds')
+end)
+
+T.test('BUG-398: a planted slot is kept with meals for everyone or with no seed of a cook crop in the season', function()
+  local W = world{meals = 10}
+  days(W, 1)
+  local pl = plots(W, 3)
+  for _, p in ipairs(pl) do p.plant_id[0] = 0 end
+  days(W, 2)
+  T.eq(count(pl, 0, 0), 3, 'meals for all: no swap')
+  local Wn = world{quarry = false}
+  days(Wn, 1)
+  local pln = plots(Wn, 3)
+  for _, p in ipairs(pln) do p.plant_id[0] = 0 end
+  days(Wn, 2)
+  T.eq(count(pln, 0, 0), 3, 'no cook seeds: no swap')
+end)
+
 T.done()

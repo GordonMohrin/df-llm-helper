@@ -84,7 +84,10 @@ T.test('BUG-043 live: the default audit box of 252,108 tiles (Run 11 y479) is ex
   T.eq({r.data.id, r.data.tiles, r.data.margin}, {'aud1', 252108, '16,16,2'})
   local r2 = W.inbox('snapshot', {purpose = 'sites'}, {id = 'st1', by = 'cli'})          -- bp sites --fresh
   T.eq(r2.ok, true, r2.msg)
-  T.eq(r2.data.tiles, 252108, 'sites: the same fort box (no project boxes, no shafts)')
+  -- BUG-399: a sites box (no project boxes, no shafts) is the same fort box with 3 more levels on top: the surface of an
+  -- embark lies at the top of the fort's box and the surface templates (depot, startup shops) need the sky row above it
+  T.eq(r2.data.tiles, 252108 + 3 * 149 * 94, 'sites: the fort box and the sky levels over it')
+  T.eq(r.data.tiles, 252108, 'an audit box stays as it was')
 end)
 
 T.test('BUG-043: over the cap the margin shrinks stepwise (16,16,2 -> 8,8,1 -> ...), logged once', function()
@@ -132,7 +135,7 @@ T.test('BUG-043: an audit box holds the runner\'s projects; an explore shaft is 
   -- the column 148-164 x 44-55 x 126-140 adds its 4 levels below the main box: 17 x 12 x 4 = 816
   T.eq({r.data.tiles, r.data.margin, r.data.cols}, {285108, '16,16,2', 1})
   local s = W.inbox('snapshot', {purpose = 'sites'}, {id = 'st1', by = 'cli'})
-  T.eq(s.data.tiles, 252108, 'a sites box needs neither the projects nor the shafts')
+  T.eq(s.data.tiles, 252108 + 3 * 149 * 94, 'a sites box needs neither the projects nor the shafts (BUG-399: 3 sky levels on top)')
 end)
 
 T.test('BUG-043: the file of a union export: tiles outside every part are " " (not exported), parts and margin in the head', function()

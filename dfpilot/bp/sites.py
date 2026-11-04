@@ -45,8 +45,8 @@ sources, state water.src; cmd.water_ctx) only sites whose hospital zone lies wit
 accepted source count, measured as water.lua's served() does (Chebyshev from the source to the zone rect, z included);
 +2 per tile nearer; ValueError names the source, the nearest candidate and the refuge's water when none is left.
 `fill_source`: what a bucket-fed cistern (no pipe) could be filled from (revealed open water reachable from the core).
-Startup shops (`workshops` p.surface = 1, BUG-356), the trade `depot` (BUG-368) and the `hospital` p.surface = 1 (BUG-384, a 7x5 block
-near accepted water): no manifest needed; a block of open surface floor (every tile '.' with '_'
+Startup shops (`workshops` p.surface = 1, BUG-356), the trade `depot` (BUG-368), the `office` p.surface = 1 (BUG-396, 3x3) and the
+`hospital` p.surface = 1 (BUG-384, a 7x5 block near accepted water): no manifest needed; a block of open surface floor (every tile '.' with '_'
 above, on the citizens' walk group), nearest the middle of the snapshot (or `near`), clear of the fortcore's keep-out tiles.
 Aqshaft (BUG-292): columns from public Z4 floor whose levels below are rock or unknown with rock on their 4 sides,
 off the keep-out boxes and the cavern/warm levels; + AQ_SPAN for passing a known aquifer level (`_aqshaft`).
@@ -255,6 +255,10 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _surface_farms(snap, p, manifest)
     elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
         cands = _surface_shops(snap, p, manifest or {}, tpl)
+        if not cands and surface_top_floor(snap) >= SURFACE_TOP_MIN:
+            raise ValueError(f"{tpl}: no valid site on the snapshot: its top level z{snap['bbox'][5]} holds "
+                             f"{surface_top_floor(snap)} floor tiles but no level above it to show open sky (BUG-399: a sites "
+                             "export from an older kernel ends at the surface; dfllm reload, then `bp sites --fresh`)")
     elif tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
         cands = _dry(cands, manifest)                      # BUG-130: never again into a recorded breach
@@ -983,6 +987,18 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
 
 
 SHOP_NEAR = 25                        # BUG-356: a startup block within this many tiles of the fort entrance scores best
+
+
+SURFACE_TOP_MIN = 25                  # BUG-399: floor tiles on the top level that make an empty answer suspicious
+
+
+def surface_top_floor(snap: dict) -> int:
+    """BUG-399 (Run 16c i3: `bp sites depot` 0 sites for years, 8,366 floor tiles on the snapshot's top level z127): the floor
+    tiles of the top level, where the sky check of the surface templates has no row above it to read."""
+    try:
+        return sum(str(r).count(".") for r in snap["rows"][f"z{snap['bbox'][5]}"])
+    except (KeyError, TypeError, IndexError):
+        return 0
 
 
 def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") -> list[dict]:

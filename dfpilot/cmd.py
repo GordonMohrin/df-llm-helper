@@ -1451,7 +1451,8 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
     elif ranked == 0 and tpl == "depot":
         # BUG-368: the trade depot needs no fortcore, only a 5x5 block of open flat ground the citizens reach
         out.append("no ranked site: the trade depot needs a 5x5 block of open surface floor (no trees, rocks, water or hill) "
-                   "on the citizens' walk group; `dfllm bp sites depot --fresh --near <wagon x,y,z> --within 40`")
+                   "on the citizens' walk group; `dfllm bp sites depot --fresh --near <wagon x,y,z> --within 40` (BUG-399: the sites "
+                   "export carries 3 sky levels over the fort's box since the kernel was reloaded)")
     elif ranked == 0 and tpl not in ("fortcore", "seal", "explore", "plug", "repair"):
         cores = []
         for p in bp_files(save_dir):

@@ -3147,6 +3147,7 @@ local function kind_of(P, d)
   if SEALS[t] then return 'seal' end
   if t == 'tombs' or t == 'depot' or t == 'explore' then return t end   -- DECISIONS 4: the ore search never rests
   if SUPPLY[t] or (t == 'workshops' and (food_shops(d) or Q.startup_shops(d))) then return 'supply' end
+  if t == 'office' and Q.startup_shops(d) then return 'supply' end    -- BUG-396: the surface office; the manager validates the brews
   if t == 'workshops' and Q.tomb_shops(d) then return 'tomb_shops' end
   if BEDS[t] then return 'beds' end
   if t == 'repair' then

@@ -21,6 +21,7 @@ not wake; the follower acts on two of them without the LLM:
                                   and no mason's workshop, d.types [Masons]) -> the same; why=manager (BUG-231),
                                   why=missing (BUG-267), gear (BUG-270), well;
                                   why=mood with d.types (BUG-283: the shops a strange mood and its materials need) -> the same
+  PROJECT_REQUEST tpl=office why=office -> BUG-396: the manager's office (the surface variant without a dug core), prio 1
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
@@ -510,7 +511,7 @@ HOSPITAL_OUT_HINT = ("the hospital lies outside the core: plan it next to accept
 # BUG-233 (live Guildcleans y373): the manager validates nothing; nothing here asks for a click at a workshop (the kernel
 # adds chair, table, doors, beds and blocks as workshop tasks itself after orders.bypass_days, MANAGER_BYPASS)
 MANAGER_HINT = ("tell Gordon once; the kernel adds the office's chair and table (and the doors, beds, blocks projects wait "
-                "for) as workshop tasks itself (MANAGER_BYPASS); no office zone: dfllm cmd bp.place tpl=office site=S1")
+                "for) as workshop tasks itself (MANAGER_BYPASS); no office zone: dfllm cmd bp.place tpl=office site=S1 (p.surface=1 without a dug core; follow places it itself, BUG-396)")
 
 # BUG-055 (Run 14 y577: the CHIEF_MEDICAL_DWARF office stood vacant for good; Run 11 note 25: squads without a leader):
 # readiness R0 office; the line's msg carries the exact command
@@ -828,6 +829,12 @@ class Follower:
                             set(prev.get("need") or []) != set(want):
                         self.jobs.pop("mood")          # BUG-283: another set of mood shops is no repeat (no cooldown)
                     self._request_place(d["why"], "workshops", params, "S1", now, prio=1, need=want)
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "office" and d.get("why") == "office":
+                # BUG-396 (Run 16a i1: no office for 294 days, the manager validated nothing, drink 0): the manager's office,
+                # on the surface when there is no dug core to hang one on; never twice (an office project exists)
+                from .plan import _has_z4, applied_builds
+                if not any(t2 == "office" for t2, _ in applied_builds(self.dir, files.read_state(self.dir))):
+                    self._request_place("office", "office", {} if _has_z4(self.dir) else {"surface": 1}, "S1", now, prio=1)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 # live L1: a strange mood needs a shop; BUG-042: economy's tannery request names the Tanners the map
                 # lacks, kept although the fort manifest lists a destroyed one (as the fishery, BUG-038)

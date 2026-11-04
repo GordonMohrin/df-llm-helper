@@ -202,7 +202,9 @@ T.test('BUG-231: no logs: the Mason\'s workshop in stone; no shop at all: PROJEC
   T.eq({rq[1].d.tpl, rq[1].d.types}, {'workshops', {'Carpenters'}})
   T.ok(W2.state().orders.byp:find('no Carpenters: workshop requested for chair, table', 1, true), W2.state().orders.byp)
   days(W2, 3)
-  T.eq(#W2.find_events('PROJECT_REQUEST'), 1, 'not again within 7 days')
+  local nws = 0
+  for _, e in ipairs(W2.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'workshops' then nws = nws + 1 end end
+  T.eq(nws, 1, 'not again within 7 days')
   local W3, ctl3 = world{cfg = {orders = {bypass_days = 0}}}
   days(W3, 8)
   T.eq(#ctl3.tasks, 0, 'orders.bypass_days 0: off')
@@ -240,6 +242,29 @@ T.test('BUG-232: no Office zone at all: one is drawn over a built chair and the 
   T.ok(#W.find_acts('manager_office') >= 1, 'the free zone is then given to the manager (act.manager_office)')
   days(W, 8)
   T.eq(#ctl.zones, 1, 'one zone; the free one exists now')
+end)
+
+-- BUG-396 (Run 16a i1 Bachwald: no office for 294 days, 7 brews and 18 orders unvalidated, drink 0): with no Office zone and
+-- manager orders waiting, the kernel asks for the office itself (follow places the surface variant without a dug core)
+T.test('BUG-396: no Office zone and unvalidated manager orders: PROJECT_REQUEST office why=office, once a week', function()
+  local W = world{}
+  local function reqs()
+    local r = {}
+    for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'office' then r[#r + 1] = e end end
+    return r
+  end
+  days(W, 3)
+  T.eq(#reqs(), 1, 'asked as soon as the unvalidated orders are seen')
+  T.eq({reqs()[1].d.tpl, reqs()[1].d.why}, {'office', 'office'})
+  days(W, 5)
+  T.eq(#reqs(), 1, 'not again within 7 days')
+  days(W, 4)
+  T.eq(#reqs(), 2, 'again after a week while it stands unbuilt')
+  local W2 = world{office = true}
+  days(W2, 12)
+  local n = 0
+  for _, e in ipairs(W2.find_events('PROJECT_REQUEST')) do if e.d.tpl == 'office' then n = n + 1 end end
+  T.eq(n, 0, 'an Office zone for the manager stands: no request')
 end)
 
 T.done()
