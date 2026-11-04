@@ -1,5 +1,49 @@
 # CHANGELOG dfpilot
 
+## Run 15 gate review: our squads kept off a busy bridge, approach cancels bounded (BUG-335/342 review, 2026-11-04; offline, live-untested)
+- **Why:** the verifiers of BUG-335 and BUG-342: gate only waited for our soldiers walking over a bridge (Earthboat squads 99-101
+  would hold every SIEGE close until the give-up), the inner station flipped melee -> b2 the moment B2 moved, stairs/ramps (another
+  z) were never scanned, the walking-toward cancels ate the up deadline (i3: 90 B2 pulls), a foreign pull without a worker read
+  `no_worker` (gate.lua:1907), and the merged drop_own also let a puller beside the footprint go for a lowering.
+- **What changed:** `gate.busy` (a taken pull, the settle window, moving); military freezes a station switch across a busy bridge
+  (kern.log `... waits: bridge B2 is being pulled or moves`), `core_up` keeps its answer while B2 is busy and counts a want 'up';
+  `military.restation` gives a squad whose soldier walks over a bridge wanted up to an outer station an inner one (STATION_MOVED
+  `cross`; `gate.holds` units carry `path`); the census keeps walkers PATH_Z 3 levels above/below for crossers; crossers counts a
+  unit now on the footprint; a beside-and-crossing unit is held as the crosser. The first 8 approach cancels of an epoch do not
+  count toward the deadline, then DECISION_NEEDED `gate_traffic` once; a foreign pending pull is `queued`, `no_worker` after 200
+  ticks with its own text; drop_own raises only, never a crosser. Live fact used: unit.path.path[0] is the next step.
+- **Tests (fail on the merge base):** test_gate_crush.lua (+2), test_stations.lua (+2), test_bug342_gate_workers.lua (+2, +1
+  check), test_siege.lua (+1 check).
+- **Live check:** siege with squads behind B1: no squad order over a moving B2, STATION_MOVED `cross` for a squad sent out over
+  a bridge wanted up, `waits for soldier N walking onto it` for one on a stair; DECISION_NEEDED gate_traffic after 8 cancels.
+  Open: tiles a bridge swings over, foreign lever pulls, holding civilians off a footprint, pullers not reaching their room.
+## Run 15b gate: no pull while a unit walks onto the bridge (BUG-335, 2026-11-04; offline, live-untested)
+- **Why:** Earthboat y385 (i3) #7504-#7515: five soldiers of squads 99-101 on their way to their station walked onto B2 in the
+  100 ticks it rose after the pull (taken with nobody within the margin); Guildcleans y379 (i2) #2628 the same with B1. Root
+  cause lua/dfllm/gate.lua:1212 (holders: only where units stand, MARGIN 1 / d 0 forced) and the pending check (approach: 3
+  tiles, not for a forced raise): DF moves the bridge the moment the puller finishes, runners from farther out reach it.
+- **What changed:** gate.crossers: units within 24 tiles whose walk path (unit.path.path) enters the footprint within 20 steps
+  hold every pull like one on it (forced raises too) and cancel our pending one in the frame they set off; text `walking onto
+  it in N steps`. The census scan reads the wider radius once (cut to SCAN_R for the rest).
+- **Tests (fail on b35af6d):** tests/lua/test_gate_crush.lua (2), tests/lua/test_siege.lua (2).
+- **Live check:** in a siege kern.log `... waits for soldier N walking onto it in K steps`, no GATE_CRUSH_RISK/BRIDGE_CRUSH.
+  Uncertain: a path set only after the pull; military still routes squads over a core bridge (gate waits for them now).
+## Run 15 sieges: GATE_FAIL names the real reason, lever pullers no longer hold their own bridge (BUG-342, 2026-11-04; offline, live-untested)
+- **Why:** Earthboat y387 (BREACH `O1 not up at T+900`, GATE_FAIL B2 `no_worker` x2, the fort fell), Drillchamber (GATE_FAIL O1/B2
+  `no_worker`): each of those GATE_FAILs came 5-50 ticks after a fresh pull; the pulls before were cancelled one after the other
+  for units walking toward the bridge (i3: 90 B2 pulls in 8,400 ticks, `B2 up pull cancelled: citizen 26729 2 tiles from it and
+  walking toward it`). Root cause lua/dfllm/gate.lua:1821 (`r.stuck = 'no_worker'` for any pull not taken yet) read first by
+  check_fail :1978. And fortcore's `dfllm-levers-b2` lies 1-3 tiles from B2: `B2 up waits for citizen 27079 next to it`, 27079 its
+  puller (:1868 and :1772 counted him; BUG-141 exempted only the job's worker).
+- **What changed:** a pull waiting for its worker is `queued`; GATE_FAIL `no_worker` only for pulls nobody took in 200 ticks, the
+  text names the lever rooms and their pullers at the levers; new GATE_FAIL why `cancelled` (`d.pulls`, `d.units` the last walker)
+  when the walking-toward cancels outnumber them. An assigned puller standing in his bridge's lever room beside the footprint holds
+  it no more than the job's worker; on the footprint he holds it, the walking-toward cancel is unchanged. Contract: GATE_FAIL why
+  `cancelled`.
+- **Tests (4 fail on b35af6d):** tests/lua/test_bug342_gate_workers.lua (6).
+- **Live check:** next siege/drill: `cancelled: N pulls cancelled for units walking toward it, the last ...` instead of no_worker;
+  no `B2 up waits for citizen <puller> next to it` for a puller in dfllm-levers-b2. Open: the traffic that cancels the pulls (the
+  footprint safety side), pullers rarely reach their room under the civ alert (574 `away` in i3).
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or

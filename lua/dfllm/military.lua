@@ -1758,14 +1758,24 @@ end
 
 ---------------------------------------------------------------- postures and orders
 -- BUG-029: is a manifest core bridge (B2) not down? (gate.state 'up' or 'moving'; unknown = not built, not up)
+-- BUG-335 review (Run 15b Earthboat y385 #7504-#7515: squads 99-101 on their way to station 62,82,138 across B2 were
+-- crushed; the inner station flips from melee to b2 the moment B2 moves): wanted up by gate counts too (the squads
+-- walk to b2 over the lowered bridge and gate's crossers wait for them before the pull), and while a core bridge is busy
+-- (gate.busy: a pull pending, just done or moving) the answer stays the one from before (no station switch over it then)
 local function core_up(K, man)
+  local up, busy = false, false
   for name, b in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
     if type(b) == 'table' and b.role == 'core' then
       local ok, s = K.call('gate', 'state', name)
-      if ok and (s == 'up' or s == 'moving') then return true end
+      if ok and (s == 'up' or s == 'moving') then up = true end
+      local okb, bz, want = K.call('gate', 'busy', name)
+      if okb and bz == true then busy = true end
+      if okb and want == 'up' and s ~= 'unknown' then up = true end
     end
   end
-  return false
+  if busy and rt.core_up ~= nil then return rt.core_up end
+  rt.core_up = up
+  return up
 end
 
 -- BUG-029: the inner station, on the side of the fort that holds the drink: stations.melee (inside B1) while every
@@ -2155,6 +2165,28 @@ local function off_season(K, k)
   return c.free[month] == true
 end
 
+-- BUG-335 review: the busy bridge (gate.busy: a pull pending, just done, or moving) that lies between a member of squad
+-- `s` and station `pos` (the member and the station on different sides of its footprint: dfllm.stations.side), or nil.
+-- A new station there waits until the bridge settles (the pull cannot be taken back; DF moves it ~100 ticks later).
+local function crosses_busy(K, man, s, pos)
+  local ok, busy = K.call('gate', 'busy')
+  if not (ok and type(busy) == 'table' and next(busy) ~= nil) then return nil end
+  local clear = clearance(K)
+  for _, b in ipairs(SL.bridges(man)) do
+    if busy[b.name] then
+      for _, m in ipairs(members(s)) do
+        local okp, x, y, z = pcall(function() return dfhack.units.getPosition(m.unit) end)
+        if okp and int(x) and int(y) and int(z) then
+          local side = SL.side(man, b.fp, {x = x, y = y, z = z}, clear)
+          local on = SL.dist(b.fp, x, y, z) == 0
+          if on or side(x, y, z) ~= side(pos.x, pos.y, pos.z) then return b.name end
+        end
+      end
+    end
+  end
+  return nil
+end
+
 -- bring one squad to the posture; force = re-issue even if it looks applied. Returns ok.
 local function apply_squad(K, k, force)
   local e = st.sq[k]
@@ -2187,6 +2219,20 @@ local function apply_squad(K, k, force)
   if held and not force then return ok end           -- a kill order or an approved sortie runs
   local drift = (pos and order_count(s) == 0) or (not pos and order_count(s) > 0)
   if force or cur ~= sig or drift then
+    -- BUG-335 review: a new station across a busy bridge waits (kept as it is; military's next step, SO_EVERY ticks
+    -- while one waits, gives it once the bridge has settled)
+    local frz = pos and cur ~= sig and crosses_busy(K, man, s, pos)
+    if frz then
+      rt.frz = rt.frz or {}
+      if rt.frz[k] ~= frz then
+        K.log('info', 'military: squad %d (%s) to station %s waits: bridge %s is being pulled or moves', s.id, k,
+              pstr(pos), frz)
+      end
+      rt.frz[k] = frz
+      if type(M.every) == 'table' and (M.every.ticks or 0) > M.SO_EVERY then M.every = {ticks = M.SO_EVERY} end
+      return ok
+    end
+    if rt.frz then rt.frz[k] = nil end
     local r = K.act.squad_order(s.id, pos and {kind = 'station', pos = pos} or {kind = off and 'clear' or 'train'})
     if r then rt.order[k] = sig else ok = false end
   end
@@ -2994,8 +3040,13 @@ local function restation_one(K, man, stations, bname, fp, q, clear, margin)
   local label = key and string.format('squad %d (%s)', q.sid, key) or string.format('squad %d', q.sid)
   local head = string.format('%s holds the raise of %s: soldier %d %d tile%s from its footprint, %d from the squad\'s '
                              .. 'station %s', label, bname, q.ids[1], q.d, q.d == 1 and '' or 's', q.o, pstr(q.p))
+  if q.cross then                                          -- BUG-335 review: on his way out over it
+    head = string.format('%s holds the raise of %s: soldier %d walks over it to the squad\'s station %s on its outer side',
+                         label, bname, q.ids[1], pstr(q.p))
+  end
   local d = {why = 'hold', squad = q.sid, key = key, bridge = bname, from = geom.arr(q.p), units = q.ids,
              d = q.d, first = 'station'}
+  if q.cross then d.why = 'cross' end
   if not r.pos or (r.pos.x == q.p.x and r.pos.y == q.p.y and r.pos.z == q.p.z) then
     rt.rs_note = rt.rs_note or {}
     local nk, now = q.sid .. ':' .. bname, now_tick(K)
@@ -3045,7 +3096,19 @@ function M.restation(K, holds)
       for _, e in ipairs(type(h.units) == 'table' and h.units or {}) do
         local x, y, z = int(e.x), int(e.y), int(e.z)
         local so = e.k == 'soldier' and x and y and z and station_order(e.id)
-        if so and so.p.z == z then
+        -- BUG-335 review (Earthboat y385: squads 99-101 walked over B2 to their station while it rose): a soldier whose
+        -- path crosses the footprint (gate's crossers, e.path) to a station on the bridge's outer side (a lower zone rank
+        -- than its inner side) gets his squad a station on the inner side, so the raise does not wait for him for ever
+        -- (not in INTAKE: there the melee walk out to the killing field on purpose and the raise waits for them)
+        local ir = so and e.path and st.posture ~= 'INTAKE' and SL.inner_rank(man, fp, clear)
+        if ir and SL.rank(man, so.p.x, so.p.y, so.p.z) < ir then
+          local q = by[so.sid]
+          if not q then
+            q = {sid = so.sid, p = so.p, o = 0, ids = {}, d = int(e.d) or 0, cross = true}
+            by[so.sid], order[#order + 1] = q, so.sid
+          end
+          q.ids[#q.ids + 1] = e.id
+        elseif so and so.p.z == z then
           local o = math.max(math.abs(x - so.p.x), math.abs(y - so.p.y))
           local ds = SL.dist(fp, so.p.x, so.p.y, so.p.z)
           if o <= crowd or (ds and ds <= clear) then
@@ -3565,6 +3628,7 @@ function M.step(K, budget, ctx)
   local want_every = mode == 'PEACE' and M.SLOW or M.FAST
   local so_run = sortie_pass(K, now)                                -- M3 (BUG-113)
   if so_run and want_every > M.SO_EVERY then want_every = M.SO_EVERY end
+  if rt.frz and next(rt.frz) ~= nil and want_every > M.SO_EVERY then want_every = M.SO_EVERY end   -- BUG-335 review
   if M.every.ticks ~= want_every then M.every = {ticks = want_every} end
   if so_run and rt.up_t and now >= rt.up_t and now - rt.up_t < M.FAST then return end   -- the full upkeep keeps its own pace
   rt.up_t = now

@@ -521,4 +521,59 @@ T.test('BUG-214: nothing on the soldiers\' group within 24 tiles -> the nearest 
   W2.restore()
 end)
 
+---------------------------------------------------------------- BUG-335 review: our squads and a busy bridge
+-- Run 15b Earthboat y385 #7504-#7515: squads 99-101 on their way to station 62,82,138 across B2 were crushed by it; the
+-- inner station flips from melee to b2 the moment B2 moves, and nothing kept a squad off a bridge whose pull was taken.
+T.test('BUG-335 review: a station switch over B2 while a pull on its lever is taken waits (no move order, kern.log); ' ..
+       'given once B2 is no longer busy', function()
+  local W = world{}
+  T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end), 'SIEGE')
+  run(W, 600)
+  T.eq(orders_of(W, 'A'), 'station@51,44,10', 'READY_IN: melee while B2 is down')
+  W.lever_cfg[31] = {pull = 1000000}                -- a pull taken on B2's lever 31 that is not done yet
+  local j = S.foreign_job(W, 31, true)
+  run(W, 9)
+  T.eq(select(2, W.K.call('gate', 'busy', 'B2')), true)
+  local n0 = #X.acts(W, 'squad_order')
+  W.K.call('military', 'posture', 'B2_HOLD', true)
+  run(W, 50)
+  T.eq(orders_of(W, 'A'), 'station@51,44,10', 'old code: ordered to b2 over B2 while its pull was taken')
+  T.eq(#X.acts(W, 'squad_order', function(a) return type(a.args[2]) == 'table' and a.args[2].pos ~= nil
+                                                  and a.args[2].pos.y == 63 end), 0)
+  T.ok(#logs(W, 'to station 51,63,10 waits: bridge B2 is being pulled or moves') >= 1, 'kern.log names the wait')
+  local lv = W.buildings[31]
+  for i = #lv.jobs - 1, 0, -1 do if lv.jobs[i] == j then lv.jobs:erase(i) end end
+  T.ok(until_(W, 300, function() return orders_of(W, 'A') == 'station@51,63,10' end),
+       'given once B2 settled (military looks every 100 ticks while one waits): ' .. orders_of(W, 'A'))
+  T.ok(#X.acts(W, 'squad_order') > n0)
+end)
+
+T.test('BUG-335 review: a soldier holding the raise of B2 by walking over it to his squad\'s station on its outer side ' ..
+       '(melee, Z3) gets his squad a station on the inner side (STATION_MOVED cross); old: only squads at their station', function()
+  local W = world{}
+  T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end), 'SIEGE')
+  run(W, 600)
+  T.eq(orders_of(W, 'A'), 'station@51,44,10')
+  local A = X.squad_of(W, 'A')
+  local id = W.hfs[A.positions[0].occupant].unit_id
+  local holds = {{bridge = 'B2', want = 'up', fp = {50, 60, Z, 52, 60, Z}, since = 1,
+                  units = {{id = id, k = 'soldier', d = 3, x = 51, y = 63, z = Z, path = 3}}}}
+  local _, n = W.K.call('military', 'restation', holds)
+  T.eq(n, 1, 'one squad ordered')
+  local mv = evs(W, 'STATION_MOVED', 'cross')
+  T.eq(#mv, 1)
+  T.eq({mv[1].d.squad, mv[1].d.bridge, mv[1].d.from}, {A.id, 'B2', {51, 44, Z}})
+  T.ok(mv[1].d.to and mv[1].d.to[2] > 60, 'on B2\'s inner side (the core, y > 60): ' .. tostring(mv[1].d.to and mv[1].d.to[2]))
+  T.ok(mv[1].msg:find('walks over it to the squad\'s station 51,44,10 on its outer side', 1, true), mv[1].msg)
+  T.ok(orders_of(W, 'A') ~= 'station@51,44,10', orders_of(W, 'A'))
+  -- the same soldier walking IN over B2 (his station on the inner side) is not moved: the raise waits for him
+  local B = X.squad_of(W, 'B')
+  B.orders = kmock.vec{{kind = 'station', pos = {x = 51, y = 70, z = Z}}}
+  local bid = W.hfs[B.positions[0].occupant].unit_id
+  local _, n2 = W.K.call('military', 'restation', {{bridge = 'B2', want = 'up', fp = {50, 60, Z, 52, 60, Z}, since = 1,
+                                                    units = {{id = bid, k = 'soldier', d = 3, x = 51, y = 57, z = Z,
+                                                              path = 3}}}})
+  T.eq(n2, 0, 'walking in to the core: not moved')
+end)
+
 T.done()
