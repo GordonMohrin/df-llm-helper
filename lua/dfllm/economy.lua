@@ -3197,6 +3197,63 @@ function M.lines(s, n, max)
   return out
 end
 
+-- BUG-422 (Run 16d i4 Mazelanterns y386 autumn: citizen 26275 died of thirst 75000/hunger 87384 with 766 days of barrel
+-- drink in the fort; the alarm needs alarm.units (2) citizens over the mark or low drink days, so no THIRSTY wake came and
+-- the cause read 'unknown' for 4 days): ONE citizen over SOLO_THIRST (or SOLO_HUNGER) is a DECISION_NEEDED thirst_unit
+-- (A) every SOLO_EVERY ticks while he stays over it, naming why he cannot drink (caged, unconscious, his job, idle, where
+-- he stands) and the drink stock, with the commands that look at him. Dying alone looks like this: stranded, stuck on a
+-- job, locked in, unconscious, a lever puller no one relieves
+M.SOLO_THIRST, M.SOLO_HUNGER, M.SOLO_EVERY, M.SOLO_MAX = 50000, 70000, 3 * DAY, 5
+function M.solo_check(K, p, days)
+  local cu = K.census.u
+  local now = K.now().tick
+  local old = type(p.solo) == 'table' and p.solo or {}
+  local nxt, rows = json.object{}, {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    local cn = u and u.counters2
+    if cn and M.citizen(u) then
+      local th, hu = cn.thirst_timer or 0, cn.hunger_timer or 0
+      if th >= M.SOLO_THIRST or hu >= M.SOLO_HUNGER then
+        local key = tostring(id)
+        local last = math.tointeger(old[key])
+        nxt[key] = last or now
+        if (last == nil or now - last >= M.SOLO_EVERY) and #rows < M.SOLO_MAX then
+          nxt[key] = now
+          local why = {}
+          if u.flags1 and u.flags1.caged then why[#why + 1] = 'caged' end
+          local okc, unc = pcall(function() return u.counters.unconscious end)
+          if okc and (unc or 0) > 0 then why[#why + 1] = 'unconscious' end
+          local okj, jn = pcall(function()
+            local j = u.job and u.job.current_job
+            return j and df.job_type[j.job_type] or nil
+          end)
+          why[#why + 1] = okj and jn and ('job ' .. jn) or 'no job'
+          local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+          rows[#rows + 1] = {id = id, th = th, hu = hu, why = table.concat(why, ', '),
+                             pos = okp and {x, y, z} or nil}
+        end
+      end
+    end
+  end
+  p.solo = next(nxt) ~= nil and nxt or nil
+  if #rows == 0 then return 0 end
+  local parts = {}
+  for _, r in ipairs(rows) do
+    parts[#parts + 1] = string.format('%d (thirst %d, hunger %d, %s%s)', r.id, r.th, r.hu, r.why,
+                                      r.pos and string.format(' at %d,%d,%d', r.pos[1], r.pos[2], r.pos[3]) or '')
+  end
+  local q = string.format('%d citizen%s dehydrating or starving with drink %d d: %s', #rows, #rows == 1 and '' or 's',
+                          days.drink_d, table.concat(parts, '; '))
+  K.log('warn', 'solo thirst: %s', q)
+  local cmds = {}
+  for i, r in ipairs(rows) do if i <= 3 then cmds[#cmds + 1] = 'dfllm cmd inspect what=unit key=' .. r.id end end
+  cmds[#cmds + 1] = 'dfllm cmd inspect what=reach'
+  K.emit('DECISION_NEEDED', 'A', ('thirst_unit: ' .. q):sub(1, 200), {id = 'thirst_unit', q = q:sub(1, 400),
+         units = (function() local l = {} for _, r in ipairs(rows) do l[#l + 1] = r.id end return l end)(), cmds = cmds})
+  return #rows
+end
+
 local function alarm_check(K, c, p, days)
   local a = c.alarm or M.DEFAULTS.alarm
   local okn, thirsty, hungry = pcall(needs, K, a)
@@ -3225,6 +3282,7 @@ local function alarm_check(K, c, p, days)
     K.log('info', 'drink %d days but nobody thirsty: the citizens drink water (no supply alarm)', days.drink_d)
   end
   st.alarm, st.thirsty, st.hungry = why, thirsty, hungry
+  pcall(M.solo_check, K, p, days)                  -- BUG-422: one dehydrating citizen is no 'units' crowd
   st.water = days.drink_d < a.days and not dry or nil
   local now = K.now().tick
   if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY then

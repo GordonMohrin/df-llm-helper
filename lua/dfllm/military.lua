@@ -2074,6 +2074,18 @@ local function pick(K, man, stations, chain, o)
     q = reloc(K, man, brs, f.pos, {}, clear, wo)
     if q then r.pos, r.name, r.from, r.via = q, f.name, f.pos, 'wide' end
   end
+  -- BUG-420 (Ostgate y401, 40 goblins: 'every squad at the core station (none in the manifest)', 0 of 15 soldiers at a
+  -- station 1829 ticks into the siege, nost 15): a fort without a fortcore manifest has no station at all, so the squads
+  -- kept doing what they did outside. The posture's squads then stand on the nearest Kern+ floor to the middle of the
+  -- burrow (the core the citizens are called into), on the squad's walk group, clear of the bridges (kern_floor)
+  if o.fallback and o.core_floor and not r.first and not r.pos then
+    local box = M.kern_box(K, man)
+    if box then
+      local c = geom.pos((box[1] + box[4]) // 2, (box[2] + box[5]) // 2, (box[3] + box[6]) // 2)
+      local q = M.kern_floor(K, man, brs, c, clear, o)
+      if q then r.pos, r.name, r.from, r.via = q, 'Kern+', c, 'core'; r.first = {name = 'Kern+', pos = c} end
+    end
+  end
   return r
 end
 
@@ -2103,7 +2115,11 @@ local function note_pick(K, r)
   -- entry and why
   local tried = table.concat(r.tried or {}, ', ')
   local grp = r.home and string.format('walk group %d', r.home) or 'any walk group'
-  if r.via then                                  -- BUG-214: the whole chain failed, the fallback found a floor
+  if r.via == 'core' then                        -- BUG-420: the manifest has no station at all
+    why = 'core'
+    txt = string.format('no station in the manifest: the squads stand on the nearest Kern+ floor to the middle of the '
+                        .. 'burrow on %s, %s', r.home and string.format('walk group %d', r.home) or 'any walk group', pstr(to))
+  elseif r.via then                              -- BUG-214: the whole chain failed, the fallback found a floor
     why = 'fallback'
     txt = string.format('no station of the chain %s %s is usable (%s): moved to %s', f.name, pstr(f.pos), tried,
                         r.via == 'kern' and string.format('the nearest Kern+ floor on %s, %s', grp, pstr(to))
@@ -2146,7 +2162,8 @@ end
 local function posture_station(K, man, stations, P, kind, first_melee, sq)
   local which, chain = station_of(K, man, P, kind, first_melee, stations)
   if not chain then return which, nil, nil end
-  local r = pick(K, man, stations, chain, {sq = sq, fallback = true})
+  -- BUG-420: the ready postures (not the peace-time inner station) fall back to a Kern+ floor without any station
+  local r = pick(K, man, stations, chain, {sq = sq, fallback = true, core_floor = P ~= 'STATION_B1' and P ~= 'INTAKE'})
   note_pick(K, r)
   local src = r.first and (r.first.name .. '@' .. pstr(r.first.pos)) or nil
   -- BUG-142: never the first entry's position when it is a wall (the squad would scatter); BUG-214: nor when it lies

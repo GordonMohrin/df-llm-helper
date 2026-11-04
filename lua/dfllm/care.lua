@@ -4841,6 +4841,8 @@ M.on.UNIT_DEATH = function(K, ev)
   -- 5300 ticks later, when care's full run finished): the earlier deaths still missing are asked again first
   death_recheck(K, c, p)
   local res = classify(K, c, p, id, now)
+  -- BUG-421: a wild animal that struck a citizen down is a predator for sense (PREDATOR wake, lockdown/sortie decision)
+  if res.cause == 'killed' and res.killer then K.call('sense', 'mark_killer', res.killer) end
   local rec = {t = now, u = id}
   died_set(rec, res)
   p.died[#p.died + 1] = rec

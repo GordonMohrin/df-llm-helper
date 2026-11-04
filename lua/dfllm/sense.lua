@@ -358,8 +358,22 @@ local function large_predator(u) return raw_flags(u).p end
 
 
 
+-- BUG-421 (Run 16d i4 Mazelanterns y386: a wild PLATYBELODON, a grazer without the LARGE_PREDATOR flag, struck down two
+-- citizens inside the fort; no PREDATOR, no INTRUDER, threat 0): a wild unit that killed a citizen (care passes the
+-- death incident's killer through M.mark_killer) is a large predator from then on, for KILLER_DAYS game days
+M.KILLER_DAYS = 30
+M.KILLER_MAX = 20
+local function killer(u)
+  local k = st and st.killers
+  local t = k and k[u.id]
+  if not t then return false end
+  local tick = st.hs and st.hs.tick or t
+  if tick - t > M.KILLER_DAYS * 1200 then k[u.id] = nil; return false end
+  return true
+end
+
 local function predator(u, hs)
-  if not large_predator(u) then return false end
+  if not (large_predator(u) or killer(u)) then return false end
   local ok, yes = pcall(function()
     -- off-map units (pos -30000) crashed DF 53 in getWalkableGroup (live L6): validate first
     if not dfhack.maps.isValidTilePos(u.pos) then return false end
@@ -570,7 +584,8 @@ local function consider(hs, u)
   if an then entry.an = 1 end
   -- BUG-065 (Run 14, a gremlin in the caves): the unit's own body size (cm3; a dwarf is 60000) and the large-predator
   -- flag go to the census, so reflex can tell a small harmless intruder from a dangerous one [size field: ? live]
-  if rf.p then entry.pr = 1 end
+  if rf.p or killer(u) then entry.pr = 1 end             -- BUG-421: a wild killer is dangerous whatever its raws say
+  if killer(u) then entry.kl = 1 end
   if (try_num(function() return u.counters.unconscious end) or 0) > 0 then entry.uc = 1 end    -- M3: it wakes up
   local okz, sz = pcall(function() return u.body.size_info.size_cur end)
   if okz and math.type(sz) == 'integer' and sz >= 0 then entry.sz = sz end
@@ -667,6 +682,25 @@ M.on = {
 }
 
 function M.state(K) return st.pub or {} end
+
+-- public (BUG-421, care): the unit that killed a citizen (a death incident's killer) is a wild danger from now on. Only
+-- a wild unit counts (not a citizen, an invader's kin or a pet: sense's own rules drop those); the next scan is at once.
+-- Returns true when it was added
+function M.mark_killer(K, id)
+  id = math.tointeger(id)
+  if not (st and id) then return false end
+  local u = df.unit.find(id)
+  if not u or dfhack.units.isCitizen(u, true) or dfhack.units.isTame(u) then return false end
+  st.killers = st.killers or {}
+  local n = 0
+  for _ in pairs(st.killers) do n = n + 1 end
+  if n >= M.KILLER_MAX and not st.killers[id] then return false end
+  st.killers[id] = K.now().tick
+  st.h_tick = nil
+  K.log('warn', 'sense: unit %d (%s) killed a citizen: a wild danger from now on (PREDATOR inside the fort)', id,
+        tostring(dfhack.units.getRaceName and dfhack.units.getRaceName(u) or u.race))
+  return true
+end
 
 -- public (BUG-035, reflex's recall): the burrows the recall measures arrival in (the sounding civ alert's confining
 -- burrows, <= AWAY_NAMES), or nil to stop; the citizens are counted again at once (census.u away, away_ids, away_to)
