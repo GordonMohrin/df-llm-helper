@@ -1314,6 +1314,78 @@ def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
     return out
 
 
+# BUG-412 (Gordon 04.11.2026: "ich moechte generell dass durch aquifier gegraben wird, so sicher wie moeglich"): the fort belongs
+# under the aquifer. The shaft that passes it stands at the chosen fortcore site: on open surface floor beside the entrance
+# (local u -3 / +3, v 0..2: two tiles from the 3-wide entrance channel and tunnel, so the shaft's own seal walls (its 4 orthogonal
+# tiles) never touch a fortcore tile), straight down through the aquifer levels
+CORE_SHAFT_AT = ((-3, 1), (3, 1), (-3, 2), (3, 2), (-3, 0), (3, 0), (-4, 1), (4, 1), (-4, 2), (4, 2))
+WATER_KEEP = 3                        # BUG-412: no open water within this many tiles of the shaft (any level it passes)
+
+
+def core_shaft(snap: dict, manifest: dict, anchor, rot: int, depth: int, n_levels: int | None = None) -> dict:
+    """BUG-412: the aqshaft column for a fortcore at `anchor`/`rot` with core depth `depth`: {x, y, top, depth, why}. The top is
+    open surface floor (`.`) in the citizens' walk group; on every level down to the core's deepest one the column and its 4
+    side tiles are rock or unknown; no open water (`~`, `w`, magma) within WATER_KEEP tiles on any of those levels; no revealed
+    cavern/warm level and no keep-out box in its way. ValueError with the reason for every offset when none fits."""
+    ax, ay, az = (int(c) for c in anchor)
+    zc = fortcore.ZE - int(depth)
+    zr = zc - fortcore.PARAMS["refuge"][0]
+    z_lo = az + zr
+    at = _At(snap)
+    xf = Xform((ax, ay, az), rot)
+    keep_out = _keep_out(manifest)
+    avoid: set[int] = set()
+    for k in ("cavern", "warm"):
+        avoid |= {int(q[2]) for q in snap.get("marks", {}).get(k, []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    avoid |= {int(q[2]) for q in (manifest or {}).get("caverns", []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    shaft_depth = n_levels or max(2, min(60, az - (az + zc) + 1))
+    # the core levels (Kern+ at zc down to the refuge) keep off every known aquifer level and the level right below one (water
+    # drips from an aquifer ceiling): the shaft is worth building only when the core ends up under all of them
+    forbidden = {z for a in known_aquifer(snap, manifest) for z in (a, a - 1)}
+    meet = sorted(z for z in range(z_lo, az + zc + 1) if z in forbidden)
+    if meet:
+        raise ValueError(f"the core levels z{z_lo}-z{az + zc} meet the aquifer (z{', z'.join(str(z) for z in meet[::-1])}): a "
+                         "deeper core (p.depth) is needed")
+    why: list[str] = []
+    for u, v in CORE_SHAFT_AT:
+        x, y, _ = xf.pos(u, v, 0)
+        tag = f"{x},{y}"
+        if at(x, y, az) != ".":
+            why.append(f"{tag}: top tile is not open floor ({at(x, y, az) or 'outside the snapshot'})")
+            continue
+        if walk_at(snap, (x, y, az)) == "0":
+            why.append(f"{tag}: not in the citizens' walk group")
+            continue
+        if any(z_lo <= z <= az for z in avoid):
+            why.append(f"{tag}: a cavern/warm level z{z_lo}-z{az}")
+            continue
+        bad = None
+        for z in range(az - 1, z_lo - 1, -1):
+            for dx, dy in ((0, 0),) + AQ_ORTH:
+                c = at(x + dx, y + dy, z)
+                if c is not None and c not in GOOD:
+                    bad = f"{x + dx},{y + dy} z{z} is '{c}', not rock"
+                    break
+            if bad:
+                break
+        if bad:
+            why.append(f"{tag}: {bad}")
+            continue
+        wet = next(((x + dx, y + dy, z) for z in range(z_lo, az + 1)
+                    for dx in range(-WATER_KEEP, WATER_KEEP + 1) for dy in range(-WATER_KEEP, WATER_KEEP + 1)
+                    if at(x + dx, y + dy, z) in WET), None)
+        if wet:
+            why.append(f"{tag}: open water at {wet[0]},{wet[1]} z{wet[2]} (within {WATER_KEEP} tiles)")
+            continue
+        col = (x, y, z_lo, x, y, az)
+        if any(_overlap(col, b) for b in keep_out):
+            why.append(f"{tag}: attack zone or military stair")
+            continue
+        return {"x": x, "y": y, "top": az, "depth": shaft_depth,
+                "why": f"shaft column {x},{y} z{az}-z{z_lo} beside the entrance (local {u},{v}), no water within {WATER_KEEP}"}
+    raise ValueError("aqshaft beside the fortcore: " + "; ".join(why[:4]) + (f" (+{len(why) - 4} more)" if len(why) > 4 else ""))
+
+
 def _fortcore(snap, rects, bad, hid, mk, wet_above=None):
     rows = snap["rows"]
     x0, y0, z0, x1, y1, z1 = snap["bbox"]

@@ -841,9 +841,11 @@ class Follower:
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "office" and d.get("why") == "office":
                 # BUG-396 (Run 16a i1: no office for 294 days, the manager validated nothing, drink 0): the manager's office,
                 # on the surface when there is no dug core to hang one on; never twice (an office project exists)
-                from .plan import _has_z4, applied_builds
+                from .plan import _has_z4, applied_builds, surface_core_on
                 if not any(t2 == "office" for t2, _ in applied_builds(self.dir, files.read_state(self.dir))):
-                    self._request_place("office", "office", {} if _has_z4(self.dir) else {"surface": 1}, "S1", now, prio=1)
+                    # BUG-413: no surface office unless plan.surface_core; without a dug core the office waits for the fortcore
+                    if _has_z4(self.dir) or surface_core_on():
+                        self._request_place("office", "office", {} if _has_z4(self.dir) else {"surface": 1}, "S1", now, prio=1)
             elif t == "PROJECT_REQUEST" and d.get("tpl") in AUTO_REQUESTS:
                 # live L1: a strange mood needs a shop; BUG-042: economy's tannery request names the Tanners the map
                 # lacks, kept although the fort manifest lists a destroyed one (as the fishery, BUG-038)
@@ -1268,6 +1270,11 @@ def workshop_tries(params: dict, mode: str | None) -> list[dict]:
     return [p, {**p, "surface": 1}]
 
 
+def _surface_core_on() -> bool:
+    from .plan import surface_core_on
+    return surface_core_on()
+
+
 def farm_tries(params: dict, mode: str | None) -> list[dict]:
     """BUG-340: the farms params follow tries in order: the request's (a farms room at its plots), the same room with fewer
     plots (plots - 1 .. 1), and in PEACE (BUG-302: builders on the surface only then) a surface farm p.surface = 1 at the
@@ -1277,7 +1284,7 @@ def farm_tries(params: dict, mode: str | None) -> list[dict]:
         return [p]
     n = p.get("plots") if isinstance(p.get("plots"), int) and not isinstance(p.get("plots"), bool) else 2
     out = [p] + [{**p, "plots": k} for k in range(n - 1, 0, -1)]
-    if mode == "PEACE":
+    if mode == "PEACE" and _surface_core_on():          # BUG-413: surface farm plots only when plan.surface_core allows them
         out.append({**p, "plots": n, "surface": 1})
     return out
 

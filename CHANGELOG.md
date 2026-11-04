@@ -52,6 +52,20 @@
 - **Tests:** tests/lua/test_embark_fix22.lua, tests/test_bug409_411_embark.py; test_embark.lua, test_embark_fix6.lua and test_bug245_250
   expectations updated (worst-case merge, brook text).
 
+## The fort goes under the aquifer, no surface fort by default (BUG-412, BUG-413, 2026-11-04; offline, live-untested)
+- **Why:** Gordon: "ich moechte generell dass durch aquifier gegraben wird, so sicher wie moeglich. oberflaechenfort finde ich doof". Round 21 had put
+  the core on the surface in every aquifer world; the aqshaft was never drafted (0 % for 176 days on i1 Inkintense when placed by hand, heavy_aquifer on every
+  core site of region1) and its stalls were invisible.
+- **BUG-412:** where the core would cut an aquifer level, `plan propose` drafts `aqshaft` (column beside the core's entrance: open surface floor in the
+  citizens' walk group, rock around it down to the core, no open water within 3 tiles; `sites.core_shaft`) first, then the fortcore `p.aquifer=pass` at the
+  same site (explicit anchor label) with the shallowest depth that puts Kern+ two levels under the aquifer (`plan.aquifer_route`, `aquifer_core_swap`);
+  no safe shaft: the core is left out, nothing is dug blind. Per level (aqshaft.lua): one tile open, the seal (stone smoothed / soil arms dug) designated
+  in the same quickfort call as the dig when the level looks like an aquifer (pre-ring), next level only after seal + a day's watch, plug reserve (wall
+  material) before going below the top, heavy = stop + plug as before. Stalls (unreachable, no stone, no mason, no smoother) are PROJECT_BLOCKED
+  `aq_stall:<cause>` with a command and `stall zN: ...` in the project row (no contract change).
+- **BUG-413:** config `plan.surface_core` (default false): the surface core and the surface variants of office/dining/bedrooms/tavern/hospital/farms are
+  drafted only when true; the startup workshops and the depot stay.
+- **Tests:** tests/lua/test_bug412_aqshaft_order.lua, tests/test_bug412_413_aquifer_default.py; test_aqshaft.lua (pre-ring), the round 21 surface tests run with the switch on.
 ## Surface core for an aquifer world, area-only wet layers, an applicable propose (BUG-387 to BUG-389, 2026-11-04; offline, live-untested)
 - **Why:** Run 16 region1 (aquifer nearly everywhere): no fort got a dug fortcore ('no dry fortcore site ... (wet level z130)' at every depth in i2, depth=1
   breached heavy_aquifer at 4 % in i1, sites 1-6 steps from water in i3); every room template hangs on the dug Z4 floor, so office, dining, tavern and bedrooms

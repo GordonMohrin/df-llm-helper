@@ -14,6 +14,14 @@ from dfpilot import cmd, plan, schema
 from dfpilot.bp import render, sites
 from dfpilot.bp.emit import emit
 
+
+@pytest.fixture(autouse=True)
+def _surface_core_on(monkeypatch):
+    """BUG-413: surface farm plots are drafted/tried only with plan.surface_core true (default false); these tests are about them."""
+    from dfpilot import plan as _plan
+    monkeypatch.setattr(_plan, "surface_core_on", lambda: True)
+
+
 X0, Y0, Z = 300, 300, 133
 EDGE = [320, 315, Z]
 

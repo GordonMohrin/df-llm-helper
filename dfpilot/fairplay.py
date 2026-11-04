@@ -661,9 +661,11 @@ def zones_errors(path: str | Path | None = None) -> list[str]:
 
 
 # FR-86 (dfpilot/plan.py stale_years): config/baseline.json "plan": stale_apply_years = the years without a `plan apply` after
-# which `follow` applies a minimal plan itself (0 = never). plan.py keeps its default for a value of another type or out of
-# range; lint --config refuses it.
-PLAN_LIM: dict = {"stale_apply_years": (0, 20)}
+# which `follow` applies a minimal plan itself (0 = never). BUG-413 (Gordon 04.11.2026: the fort belongs under the aquifer):
+# surface_core = the surface core and the surface variants of office/dining/bedrooms/tavern/hospital/farms are drafted (default
+# false; the startup workshops and the depot stay). plan.py keeps its default for a value of another type or out of range; lint
+# --config refuses it.
+PLAN_LIM: dict = {"stale_apply_years": (0, 20), "surface_core": "bool"}
 
 
 def plan_errors(path: str | Path | None = None) -> list[str]:
@@ -685,6 +687,9 @@ def plan_errors(path: str | Path | None = None) -> list[str]:
         lim = PLAN_LIM.get(k)
         if lim is None:
             errs.append(f"{name}: plan.{k}: unknown key")
+        elif lim == "bool":
+            if not isinstance(v, bool):
+                errs.append(f"{name}: plan.{k}: true or false expected, got {v!r}")
         elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
             errs.append(f"{name}: plan.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
     return errs

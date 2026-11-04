@@ -62,6 +62,24 @@ SURFACE_CORE_BUILD = {"tpl": SURFACE_CORE, "site": "S1"}
 SURFACE_DUG_ONLY = ("furnaces", "tombs", "temple", "captives", "hall", "guildhall", "barracks", "stockroom", REFUGE_BEDS,
                     REFUGE_DRINK, "explore")
 SURFACE_SMALL = {"w": 20, "h": 12}                              # the smallest compound, tried when the default block does not fit
+# BUG-413 (Gordon 04.11.2026: "oberflaechenfort finde ich doof"): the fort belongs under the aquifer; the surface core and the
+# surface variants of office/dining/bedrooms/tavern/hospital/farms are drafted only when config/baseline.json plan.surface_core
+# is true (default false). The startup workshops beside the wagon and the depot are temporary/normal and stay.
+SURFACE_CORE_DEF = False
+
+
+def surface_core_on() -> bool:
+    """config/baseline.json plan.surface_core (BUG-413): the surface core and the surface room variants are drafted; a missing or
+    bad value (`lint --config` reports it) keeps the default, false."""
+    doc = files.read_json(paths.config_dir() / "baseline.json", retry=False)
+    sec = doc.get("plan") if isinstance(doc, dict) else None
+    v = sec.get("surface_core") if isinstance(sec, dict) else None
+    return v if isinstance(v, bool) else SURFACE_CORE_DEF
+
+
+def surface_need(sf: dict | None) -> bool:
+    """BUG-413: the fort's core goes on the surface (surface_facts.need) and the player's config allows it."""
+    return bool((sf or {}).get("need")) and surface_core_on()
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
 EXPLORE_DEPTHS = _cmd.EXPLORE_DEPTHS        # propose tries the explore template's default depth first, then shallower
@@ -288,7 +306,7 @@ def office_facts(save_dir: Path, rooms: list, applied) -> dict:
     surface office site when there is no office and no dug Z4 floor to hang one on (else None)}."""
     have = any(isinstance(r, dict) and r.get("tpl") == "office" for r in rooms)         or any(t == "office" for t, _ in applied)
     out: dict = {"have": have, "site": None}
-    if have or _has_z4(save_dir):
+    if have or _has_z4(save_dir) or not surface_core_on():      # BUG-413: no surface office unless plan.surface_core
         return out
     try:
         free, _, _ = free_sites(save_dir, "office", OFFICE_SURFACE_P, n=1)
@@ -304,7 +322,7 @@ def office_surface_due(fort: dict | None, done: set) -> bool:
     surface office site: the draft carries `office p.surface=1` early (the manager validates nothing without it, the brews
     wait)."""
     o = (fort or {}).get("office") or {}
-    return bool(o.get("site")) and not o.get("have") and not any(t == "office" for t, _ in done)
+    return surface_core_on() and bool(o.get("site")) and not o.get("have") and not any(t == "office" for t, _ in done)
 
 
 def _grand_facts(save_dir: Path, state: dict | None) -> dict:
@@ -337,12 +355,17 @@ def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
     return {"open": open_, "site": site, **({"plots": plots} if plots else {})}
 
 
+def _farm_kinds() -> tuple:
+    """BUG-413: the farm sites looked up: a room of the fortcore, and the surface plots only when plan.surface_core allows them."""
+    return (("room", {}), ("surface", {"surface": 1})) if surface_core_on() else (("room", {}),)
+
+
 def farm_site_plots(save_dir: Path) -> tuple[str | None, int | None]:
     """BUG-297/300/316: (kind, plots): kind 'room' / 'surface' / 'none' as farm_site; plots = the fewer plots that fit
     when the default surface block does not (BUG-316: trees cut it), else None."""
     if sites_snapshot(save_dir) is None:
         return None, None
-    for kind, prm in (("room", {}), ("surface", {"surface": 1})):
+    for kind, prm in _farm_kinds():
         try:
             free, _, _ = free_sites(save_dir, "farms", prm, n=1)
         except (BpError, BpUnavailable):
@@ -362,7 +385,7 @@ def farm_site(save_dir: Path) -> str | None:
     soil floor, p.surface = 1), 'none' (neither), None (no sites snapshot: unknown)."""
     if sites_snapshot(save_dir) is None:
         return None
-    for kind, prm in (("room", {}), ("surface", {"surface": 1})):
+    for kind, prm in _farm_kinds():
         try:
             free, _, _ = free_sites(save_dir, "farms", prm, n=1)
         except (BpError, BpUnavailable):
@@ -472,7 +495,7 @@ def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
             why = str(e).split(": ", 1)[-1] if str(e).startswith("bp.sites.rank(") else str(e)
             if "accepted water" in why:        # the ranking's water refusal (other faults: not checked, as before)
                 out["why"] = why.removeprefix(f"{HOSPITAL}: ")
-        if not free and not _has_z4(save_dir):
+        if not free and not _has_z4(save_dir) and surface_core_on():      # BUG-413: a surface hospital only if allowed
             # BUG-384 (Run 16c i3: 'hospital: 0 sites without a fortcore', 7 hurt): no dug Z4 floor to hang a room on, so
             # the surface hospital's site (hospital p.surface = 1, a 7x5 block of open floor near the accepted water)
             try:
@@ -534,6 +557,9 @@ def surface_facts(save_dir: Path, state: dict | None, applied: set | None, core:
         out["need"] = bool(out["why"])
     if not out["need"]:
         return out
+    if not surface_core_on():                              # BUG-412/413: the fort goes under the aquifer, not on the surface
+        out["aq"] = aquifer_route(save_dir)
+        return out
     for prm in ({}, SURFACE_SMALL):                        # the default compound, else the smallest
         try:
             free, _, _ = free_sites(save_dir, SURFACE_CORE, prm, n=1)
@@ -545,6 +571,123 @@ def surface_facts(save_dir: Path, state: dict | None, applied: set | None, core:
     else:
         out["site"] = False
     return out
+
+
+AQ_DEPTHS = tuple(range(1, 13))                            # fortcore.PARAMS depth 1..12
+AQSHAFT_DRY = 2                                           # aqshaft p.dry_levels in a core draft (the default)
+
+
+def aquifer_route(save_dir: Path) -> dict:
+    """BUG-412 (Gordon 04.11.2026: the fort belongs under the aquifer): the way through it for a core that would cut an aquifer
+    level: {ok, why, depth (the fortcore's p.depth), site: {anchor, rot, label}, col: {x, y, top, depth, why}, aquifers}. The
+    fortcore is ranked with p.aquifer=pass (its deepest level below every known aquifer level) from the shallowest depth that can
+    clear them; the first ranked free site with a safe shaft column beside its entrance (bp sites core_shaft: open surface floor in
+    the citizens' walk group, rock around the column on every level down, no open water within 3 tiles) wins, and the column
+    must clash with neither the fortcore nor a placed project. ok False with the reason when no site and column is left."""
+    out: dict = {"ok": False, "why": ""}
+    try:
+        snap = sites_snapshot(save_dir)
+        if snap is None:
+            out["why"] = "no sites snapshot (bp sites fortcore --fresh)"
+            return out
+        sm, man = load_bp("sites"), fort_manifest(save_dir)
+        aq = sorted(sm.known_aquifer(snap, man))
+    except (BpError, BpUnavailable, AttributeError) as e:
+        out["why"] = f"aquifer route not looked up ({_cut(str(e))})"
+        return out
+    out["aquifers"] = aq
+    if not aq:
+        out["why"] = "no aquifer level is known: nothing to pass (bp sites fortcore says why no core ranks)"
+        return out
+    # the shallowest depth that can clear the aquifer: the core level (anchor z - 2 - depth) two levels under its shallowest level
+    try:
+        base, _, _ = free_sites(save_dir, "fortcore", {"stage": 1}, n=3)
+    except (BpError, BpUnavailable):
+        base = []
+    d0 = max(1, min(((int(b["anchor"][2]) - min(aq)) for b in base), default=3))     # the core level zc = anchor - 2 - depth
+    notes: list[str] = []
+    occ = _cmd.occupancy(save_dir)
+    for depth in [d for d in AQ_DEPTHS if d >= d0]:
+        prm = {"stage": 1, "aquifer": "pass", "depth": depth}
+        try:
+            free, _, _ = free_sites(save_dir, "fortcore", prm, n=5)
+        except BpUnavailable:
+            break
+        except BpError as e:
+            notes.append(f"depth {depth}: {_cut(str(e).split(': ', 1)[-1])}")
+            continue
+        for site in free:
+            try:
+                col = sm.core_shaft(snap, man, site["anchor"], site.get("rot", 0), depth)
+            except ValueError as e:
+                notes.append(f"{site['anchor']}: {_cut(str(e))}")
+                continue
+            clash = _shaft_clash(site, depth, col, occ)
+            if clash:
+                notes.append(f"{site['anchor']}: shaft {col['x']},{col['y']} clashes with {clash}")
+                continue
+            out.update(ok=True, depth=depth, col=col,
+                       site={"anchor": list(site["anchor"]), "rot": site.get("rot", 0),
+                             "label": _cmd.anchor_label(site["anchor"], site.get("rot", 0))})
+            return out
+    out["why"] = ("no fortcore site with a safe shaft column below the aquifer ("
+                  + _cut("; ".join(notes[:3]) or "no site ranks") + ")")
+    return out
+
+
+def _shaft_clash(site: dict, depth: int, col: dict, occ) -> str:
+    """BUG-412: '' when the aqshaft column and the fortcore stage 1 at this site, placed in this order, neither overlap nor touch
+    each other nor a placed project; else the ids (or 'the fortcore')."""
+    try:
+        aq = _cmd.emit_at("aqshaft", {"x": col["x"], "y": col["y"], "top": col["top"], "depth": col["depth"]},
+                          {"id": "S1", "anchor": [col["x"], col["y"], col["top"]], "rot": 0}, "aq", "chk")
+        core = _cmd.emit_at("fortcore", {"stage": 1, "aquifer": "pass", "depth": depth},
+                            {"id": "S1", "anchor": list(site["anchor"]), "rot": site.get("rot", 0)}, "core", "chk")
+    except (BpError, BpUnavailable) as e:
+        return f"unplaceable ({_cut(str(e))})"
+    hit = occ.clash(aq)
+    if hit:
+        return ", ".join(hit[:3])
+    probe = _cmd.Occupancy()
+    probe.add(aq)
+    return "the fortcore" if probe.clash(core) else ""
+
+
+def aquifer_core_swap(builds: list[dict], af: dict, have_shaft: bool) -> tuple[list[dict], str]:
+    """BUG-412: a fort whose core would cut an aquifer level (surface_facts.need with plan.surface_core off) passes it: the
+    aqshaft (the column beside the chosen core site) comes first, then the fortcore with p.aquifer=pass and the route's depth at
+    that very site (the explicit anchor label, so the ranking cannot pick another site than the shaft's), its later stages at
+    `same`. A fort with a shaft placed already gets no second one. No safe route: the fortcore builds leave the draft and the
+    note says why (nothing is dug blind into the aquifer). Returns (builds, note)."""
+    if not af.get("ok"):
+        out = [b for b in builds if b["tpl"] != "fortcore"]
+        return out, (f"; BUG-412: the core would cut an aquifer and no safe shaft is possible ({_cut(af.get('why') or '?')}): "
+                     f"{len(builds) - len(out)} fortcore build(s) left out, nothing is dug blind; see `dfllm bp sites fortcore "
+                     "--fresh` and `plan check`")
+    site, col = af["site"], af["col"]
+    out = copy.deepcopy(builds)
+    for b in out:
+        if b["tpl"] == "fortcore":
+            p = dict(b.get("p") or {})
+            p["depth"] = af["depth"]
+            if (_stage_of(p) or 1) == 1:
+                p["aquifer"] = "pass"
+                b["site"] = site["label"]
+            b["p"] = p
+    first: list[dict] = []
+    if not have_shaft and not any(b["tpl"] == AQSHAFT for b in out):
+        first.append({"tpl": AQSHAFT, "site": "S1",
+                      "p": {"x": col["x"], "y": col["y"], "top": col["top"], "depth": col["depth"],
+                            "dry_levels": AQSHAFT_DRY}})
+    k = 0
+    while k < len(out) and out[k]["tpl"] == SEAL:        # a seal runs first anyway
+        k += 1
+    levels = ", ".join(f"z{z}" for z in sorted(af.get("aquifers", []), reverse=True))
+    how = ("by the shaft placed already" if not first else f"by aqshaft@{col['x']},{col['y']} z{col['top']}")
+    note = (f"; BUG-412: the core would cut the aquifer ({levels}): passed {how} ({col['why']}), then fortcore p.aquifer=pass "
+            f"depth={af['depth']} at {site['anchor']} rot{site['rot']}: per level the shaft digs one tile, designates the seal "
+            "of the side tiles with the dig, seals and watches a day before the next; the core waits for a PASSED shaft")
+    return out[:k] + first + out[k:], note
 
 
 def surface_core_swap(builds: list[dict], sf: dict) -> tuple[list[dict], str]:
@@ -1207,7 +1350,7 @@ def stage3_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
     if pt < STAGE3_PHASE or not isinstance(br, dict) or not isinstance(ref, dict) or not ref.get("ex"):
         return [], []
     sf = (fort or {}).get("surface") or {}
-    if sf.get("have") or sf.get("need"):       # BUG-387: the surface core has no bridge (no O1, B2): the gates do not apply
+    if sf.get("have") or surface_need(sf):     # BUG-387: the surface core has no bridge (no O1, B2): the gates do not apply
         return [], []
     miss = [n for n in ("O1", "B2") if br.get(n) not in BRIDGE_STANDING]
     if not miss:
@@ -2590,7 +2733,7 @@ def core_order_note(doc: dict, state: dict | None, fort: dict | None = None) -> 
         return None
     if core is None:
         f = fort or {}
-        if f.get("z4") is False and not f.get("core_any") and not (f.get("surface") or {}).get("need"):
+        if f.get("z4") is False and not f.get("core_any") and not surface_need(f.get("surface")):
             return (f"order: no fortcore project and no Z4 core floor yet; {', '.join(rooms)} open from its dug Z4 floor, "
                     "so no site exists for them: apply fortcore stage 1 (and seal) alone, wait for s1.dig, propose again")
         return None
@@ -2673,7 +2816,7 @@ def hospital_surface_due(s: dict | None, fort: dict | None, done: set) -> bool:
     hang a hospital on, none drafted or applied before, and a surface site by the accepted water is free (fort.hosp)."""
     w = (s or {}).get("water")
     h = (fort or {}).get("hosp") or {}
-    if not isinstance(w, dict) or not h.get("surface") or not h.get("site"):
+    if not surface_core_on() or not isinstance(w, dict) or not h.get("surface") or not h.get("site"):
         return False
     if not _nat(w.get("patients")) or w["patients"] <= 0 or (w.get("hosp") or 0) > 0:
         return False
@@ -2973,7 +3116,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     # BUG-387/389: where no fortcore can be dug the surface core replaces it and the surface rooms need no Z4 floor
     sf = (fort or {}).get("surface") or {}
     sc_note = ""
-    if sf.get("need") and (info is None or SURFACE_CORE in info):
+    if surface_need(sf) and (info is None or SURFACE_CORE in info):
         builds, sc_note = surface_core_swap(builds, sf)
         front = [b for b in front if any(b is x for x in builds)]
     if (fort or {}).get("z4") is False and not core and not sc_note and (dug or (
@@ -3004,6 +3147,12 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         front = [b for b in front if any(b is x for x in builds)]
         stone, held, sdrafts = None, None, []   # review: no note for a stone dig, cistern or temple left out here
         libs = list(dict.fromkeys(d["lib"] for p in plist if p["id"] == cur for d in p["deliver"] if d["k"] == "orders"))
+    aq_note = ""
+    if sf.get("need") and not surface_core_on() and sf.get("aq") is not None and not dug \
+            and any(b["tpl"] == "fortcore" for b in builds) and (info is None or AQSHAFT in info):
+        # BUG-412: the core would cut an aquifer level: pass it with a lined shaft first (surface_facts.aq, aquifer_route)
+        builds, aq_note = aquifer_core_swap(builds, sf["aq"], bool((fort or {}).get("aqshaft")))
+        front = [b for b in front if any(b is x for x in builds)]
     if gaps and fresh is None:
         builds = defense_order(builds, front)    # BUG-377: traps and the hall before the growth builds
     depot_note = ""
@@ -3056,7 +3205,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + depot_note + hosp_note + sc_note + office_note
+    doc["notes"] += core_note + depot_note + hosp_note + sc_note + aq_note + office_note
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
         if armor and not _bar_want(doc["trade"]["want"]):
