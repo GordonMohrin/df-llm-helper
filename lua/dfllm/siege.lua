@@ -2092,10 +2092,14 @@ local function long_step(K, a, g, now)
   if not c.on or K.mode() ~= 'SIEGE' or not (a and a.fresh) then return end
   local d = lg_nearest(a)
   if (a.inside or 0) > 0 or d < 0 or d <= c.near then
+    local why = (a.inside or 0) > 0 and 'a hostile inside Kern+' or (d < 0 and 'no distance measured'
+                or string.format('a hostile %d tiles from the fort (near %d)', d, c.near))
     if st.lg then
-      K.log('warn', 'siege: the eased siege ends after %d ticks: %s', now - st.lg.t,
-            (a.inside or 0) > 0 and 'a hostile inside Kern+' or (d < 0 and 'no distance measured'
-            or string.format('a hostile %d tiles from the fort (near %d)', d, c.near)))
+      K.log('warn', 'siege: the eased siege ends after %d ticks: %s', now - st.lg.t, why)
+    elseif st.lc and now - st.lc >= M.LG_DAY then
+      -- BUG-348 (Run 15 Guildcleans: an army 26-40 tiles out for 145 days, no easing and no line saying why): a calm
+      -- clock of a game day or more that restarts is named
+      K.log('info', 'siege: the calm clock restarts after %d of %d days: %s', (now - st.lc) // M.LG_DAY, c.days, why)
     end
     if st.lc or st.lg then st.lc, st.lg, dirty = nil, nil, true end
     return
@@ -2118,19 +2122,24 @@ local function long_step(K, a, g, now)
                or string.format(', deep defense lifted, but the civ alert holds the civilians in %s', tostring(to or 'none'))
   local days = (now - st.t0) // M.LG_DAY
   local e = lg_target(K)
-  local cmd, key, n
+  local cmd, key, n, adv
   local okq, k, nn = K.call('military', 'sortie_squad')
   if okq and type(k) == 'string' and e then
     key, n = k, int(nn) or 0
     cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z)
+    local oka, av = K.call('military', 'sortie_advice', key)     -- BUG-348: the armour against sortie.worn (80 %)
+    adv = oka and type(av) == 'table' and av or nil
   end
   local q = string.format('SIEGE %d days, %d calm: no hostile inside Kern+ or within %d tiles (nearest %d, %d visible)%s; '
                           .. 'attack: %s; else wait (the bridges stay up)', days, (now - st.lc) // M.LG_DAY, c.near, d,
-                          a.vis or 0, lifted and back or '', cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or 'no squad to send')
+                          a.vis or 0, lifted and back or '',
+                          cmd and string.format('send squad %s (%d soldiers): %s%s', key, n, cmd,
+                                                adv and (' (' .. adv.txt .. ')') or '') or 'no squad to send')
   local dd = {id = 'siege_long', q = q:sub(1, 200), days = days, n = d, vis = a.vis or 0, lifted = lifted and 1 or 0,
               to = lifted and tostring(to or '') or nil}
   if e then dd.unit, dd.pos = e.id, {e.x, e.y, e.z} end
   if cmd then dd.squad, dd.cmd = key, cmd end
+  if adv then dd.worn, dd.need, dd.rec = adv.worn, adv.need, adv.rec and 1 or 0 end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), dd)
   K.log('warn', 'siege: %s', q)
 end

@@ -99,6 +99,9 @@ T.test('BUG-331 (Earthboat y385: 64 days of SIEGE, the army far, the civilians h
   T.ok(type(e.d.cmd) == 'string' and e.d.cmd:find('squad.sortie', 1, true) and e.d.cmd:find('"approve":true', 1, true),
        tostring(e.d.cmd))
   T.ok(#e.msg <= 200 and #e.d.q <= 200)
+  -- BUG-348: the offer says whether the kernel recommends it (squad worn against sortie.worn 80 %, Gordon's rule)
+  T.eq({e.d.worn, e.d.need, e.d.rec}, {0, 80, 0}, 'old code: no word on the armour')
+  T.ok(logged(W, 'sortie not recommended: worn 0% < 80%'), 'the kern.log line keeps the whole sentence')
   run(W, 300)
   T.eq(W.state().wave.deep, nil, 'the deep defense is lifted')
   T.ok(W.state().wave.lg ~= nil, 'state wave.lg: eased since')
@@ -121,6 +124,17 @@ T.test('BUG-331: a hostile within siege_long.near ends the easing (kern.log) and
   T.ok(#evs(W, 'SIEGE_DEEP') > n0, 'SIEGE_DEEP again')
   run(W, 300)
   T.eq(W.alert_burrows[1], 'Tiefe+')
+end)
+
+T.test('BUG-348 (Guildcleans: an army 26-40 tiles out for 145 days, no easing, no line saying why): a calm clock of a ' ..
+       'day or more that restarts is named in kern.log with the distance', function()
+  local W = world{equip = false, reflex = {v = 2, siege_long = {days = 5, near = 25}}}
+  T.ok(until_(W, 900, function() return W.K.mode() == 'SIEGE' end), 'SIEGE')
+  run(W, 1500)                                               -- over a game day of calm
+  T.eq(#evs(W, 'DECISION_NEEDED', 'siege_long'), 0, 'not eased yet')
+  W.move(W.goblins[1], 60, 2, Z)                             -- 9 tiles from O1
+  T.ok(until_(W, 600, function() return logged(W, 'siege: the calm clock restarts after 1 of 5 days: a hostile') end),
+       'old code: the clock restarted without a word')
 end)
 
 T.test('BUG-331: siege_long.on false keeps the old rule; an army near O1 is never calm', function()

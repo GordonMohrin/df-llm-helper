@@ -642,6 +642,86 @@ local function nearest(e, pts)
   return best
 end
 
+-- BUG-348 (Run 15 Guildcleans y386-390, i2: goblin 24649 stood at 1,136,117, 101-114 tiles out, for years; each new
+-- invasion (13, 16, 17) put it back in the count through BUG-065's 'another hostile is in sight' rule, the newcomers died
+-- or left within days, and the lone static goblin held SIEGE and lockdown 11-13 more days every time, LOCKDOWN_END cause
+-- limit 'harmless: inv 24649 GOBLIN at 1,136,117 (114 tiles)'): the cleared ones a newcomer makes count again are noted
+-- (st.far.rc: id, where it stood, ig); once no hostile but them (and the still cleared) is in sight, each that stands
+-- within RC_MOVE tiles of that spot and is not near (lockdown_near) is cleared again at once (far.ids + far.hl, far.ig
+-- as before). One that moved or came near stays counted; one out of sight longer than RC_KEEP ticks is forgotten.
+-- Every cleared one is noted, also one the census list (sense LIST_MAX nearest, a far one is cut first) leaves out: its
+-- spot is taken when it is next listed; r.t is refreshed whenever it is listed, and while the list is cut (h.vis > #list)
+-- an unlisted one is unknown, not out of sight: it is kept (a big army must not make it forgotten).
+M.RC_MOVE = 2              -- tiles (Chebyshev) a re-armed cleared unit may stand off its spot and still be static
+M.RC_KEEP = 2400           -- ticks a re-armed cleared unit out of sight is remembered
+
+local function rc_note(list, now)
+  st.far.rc = st.far.rc or {}
+  local have, by = {}, {}
+  for _, r in ipairs(st.far.rc) do have[r.id] = true end
+  for _, e in ipairs(list) do if int(e.x) and int(e.y) and int(e.z) then by[e.id] = e end end
+  local ids = {}
+  for id in pairs(rt.hlset) do if not have[id] then ids[#ids + 1] = id end end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local e = by[id] or {}                     -- not listed (cut off the census list): its spot is taken when listed
+    st.far.rc[#st.far.rc + 1] = {id = id, x = e.x, y = e.y, z = e.z, t = now, ig = rt.igset[id] and 1 or nil}
+  end
+  while #st.far.rc > M.FAR_MAX do table.remove(st.far.rc, 1) end
+  dirty = true
+end
+
+-- rs = {[id] = rc entry}: entries dropped here leave it (they count like any other hostile)
+local function rc_scan(K, list, ap, fs, rs, now, cut)
+  local others = false
+  for _, e in ipairs(list) do if not fs[e.id] and not rs[e.id] then others = true; break end end
+  local keep, back = {}, {}
+  local changed = false
+  for _, r in ipairs(st.far.rc) do
+    local a = ap[r.id]
+    if a and not int(r.x) then                 -- noted while cut off the list: this is its spot
+      r.x, r.y, r.z, r.t, changed = a.e.x, a.e.y, a.e.z, now, true
+      keep[#keep + 1] = r
+    elseif a then
+      local e = a.e
+      -- seen: its out-of-sight time starts again (saved at most every RC_KEEP/4 ticks, not every census)
+      if now - (int(r.t) or now) >= M.RC_KEEP / 4 or now < (int(r.t) or now) then changed = true end
+      r.t = now
+      local mv = math.max(math.abs(e.x - r.x), math.abs(e.y - r.y), math.abs(e.z - r.z))
+      if mv > M.RC_MOVE or a.near or a.unknown then
+        rs[r.id] = nil
+        K.log('info', 'reflex: %s %d (counted again since another hostile came) %s: it stays counted', e.k, r.id,
+              mv > M.RC_MOVE and string.format('moved %d tiles', mv) or (a.near and 'came near' or 'has no distance'))
+      elseif others then keep[#keep + 1] = r
+      else back[#back + 1] = {r = r, e = e, d = a.d} end
+    elseif cut or (now >= (int(r.t) or now) and now - (int(r.t) or now) < M.RC_KEEP) then keep[#keep + 1] = r
+    else rs[r.id] = nil end
+  end
+  changed = changed or #keep ~= #st.far.rc
+  st.far.rc = keep
+  if #back > 0 then
+    local have, hl, ig = {}, {}, {}
+    for _, v in ipairs(st.far.ids) do have[v] = true end
+    for _, v in ipairs(st.far.hl) do hl[v] = true end
+    for _, v in ipairs(st.far.ig) do ig[v] = true end
+    local names = {}
+    for _, b in ipairs(back) do
+      local id = b.r.id
+      if not have[id] then st.far.ids[#st.far.ids + 1] = id end
+      if not hl[id] then st.far.hl[#st.far.hl + 1] = id end
+      if b.r.ig == 1 and not ig[id] then st.far.ig[#st.far.ig + 1] = id end
+      rs[id] = nil
+      names[#names + 1] = string.format('%s %d at %d,%d,%d (%d tiles)', b.e.k, id, b.e.x, b.e.y, b.e.z, b.d)
+    end
+    while #st.far.ids > M.FAR_MAX do table.remove(st.far.ids, 1) end
+    st.far.t, changed = now, true
+    far_set()
+    K.log('info', 'reflex: no other hostile in sight: %d harmless intruder%s that stood still cleared again: %s', #back,
+          #back == 1 and '' or 's', table.concat(names, ', '):sub(1, 160))
+  end
+  if changed then dirty = true end
+end
+
 -- per listed hostile of census h, rt.ap[id] = {near, how ('inside' | 'citizen' | 'entrance' | 'off'), unknown, dc, de,
 -- d, e}: near = inside Kern+ / past B1 (zone 2), or within lockdown_near of a citizen outside Kern+ (sense dc) or of an
 -- entrance (de), every one with lockdown_near 0 (off); unknown = neither distance known; else far, d = the smaller known
@@ -674,13 +754,18 @@ local function far_scan(K, h, now)
             rt.appr.k, e.id, e.x, e.y, e.z, what)
     end
   end
+  -- BUG-348: the ones a newcomer made count again (st.far.rc) are cleared again once nobody else is in sight
+  local rs = {}
+  for _, r in ipairs(st.far.rc or {}) do rs[r.id] = r end
+  if next(rs) then rc_scan(K, list, ap, fs, rs, now, (h.vis or 0) > #list); fs = rt.fset end
   if next(rt.hlset) then                  -- BUG-065: any other hostile in sight and the cleared ones count again
     local others = false
-    for _, e in ipairs(list) do if not fs[e.id] then others = true; break end end
+    for _, e in ipairs(list) do if not fs[e.id] and not rs[e.id] then others = true; break end end
     if others then
       gone = gone or {}
       local n = 0
       for id in pairs(rt.hlset) do gone[id] = true; n = n + 1 end
+      rc_note(list, now)
       K.log('info', 'reflex: another hostile is in sight: %d cleared harmless intruder%s count again', n, n == 1 and '' or 's')
     end
   end
@@ -2069,12 +2154,18 @@ local function offer_step(K, h, now)
   local tok = cs.hl == 1 and 'harmless' or 'dangerous'
   if not CAD.due(rec, T, {cs.id}, {tok}, {ticks = math.max(1, c.offer_days) * 1200, wall_s = 60}) then return end
   local cmd, key, n = sortie_cmd(K, cs)
+  local adv                                              -- BUG-348: the armour against sortie.worn (80 %)
+  if cmd then
+    local oka, av = K.call('military', 'sortie_advice', key)
+    adv = oka and type(av) == 'table' and av or nil
+  end
   local days = NUM.dec(age / 1200)                       -- BUG-143: never the locale's comma
   local q
   if cs.hl == 1 then
     q = string.format('harmless lone intruder %s holds the lockdown %s for %s days (it ends by itself after %d): %s',
                       cause_txt(cs), hd.why, days, c.max_days,
-                      cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or
+                      cmd and string.format('send squad %s (%d soldiers): %s%s', key, n, cmd,
+                                            adv and (' (' .. adv.txt .. ')') or '') or
                       'no squad to send; wait for the limit')
   else
     q = string.format('dangerous %s keeps the lockdown %s for %s days (limit %d days, it stays while this one is near): %s',
@@ -2088,6 +2179,7 @@ local function offer_step(K, h, now)
   local d = {id = 'intruder_sortie', q = q:sub(1, 200), unit = cs.id, pos = cs.pos, race = cs.race, hl = cs.hl, dc = cs.dc,
              de = cs.de, age = age, lim = lim}
   if cmd then d.squad, d.cmd = key, cmd end
+  if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end        -- BUG-348
   K.emit('DECISION_NEEDED', 'A', q, d)
   K.log('info', 'reflex: %s', q)
 end
@@ -2184,8 +2276,9 @@ local function lone_cmd(K, pic)
   local e = pic.ents[1]
   local ok, key, n = K.call('military', 'sortie_squad')
   if not (ok and type(key) == 'string') then return nil, nil, 0 end
+  local oka, adv = K.call('military', 'sortie_advice', key)      -- BUG-348: the armour against sortie.worn (80 %)
   return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z),
-         key, int(n) or 0
+         key, int(n) or 0, oka and type(adv) == 'table' and adv or nil
 end
 
 local function lone_step(K, h, now)
@@ -2231,17 +2324,19 @@ local function lone_step(K, h, now)
     local e = pic.ents[1]
     local tok = (kl and (kl.ok and 'running' or kl.msg:sub(1, 20))) or 'none'
     if CAD.due(st.cf and st.cf.k, T, pic.ids, {tok}, {ticks = math.max(1, c.ask_days) * 1200, wall_s = 60}) then
-      local cmd, key, n = lone_cmd(K, pic)
+      local cmd, key, n, adv = lone_cmd(K, pic)
       local race = race_of(e.id):upper():gsub('[^%w]+', '_'):sub(1, 24)
       local q = string.format('harmless lone %s %d (%s) at %d,%d,%d has held the %s for %s days%s; %s', e.k == 'inv' and 'inv' or e.k,
                               e.id, race, e.x, e.y, e.z, mode, NUM.dec(age / 1200),
                               kl and (kl.ok and ('; kernel kill order: ' .. kl.msg) or ('; kernel kill order refused: ' .. kl.msg)) or '',
-                              cmd and string.format('send squad %s (%d soldiers): %s', key, n, cmd) or 'no squad to send')
+                              cmd and string.format('send squad %s (%d soldiers): %s%s', key, n, cmd,
+                                                    adv and (' (' .. adv.txt .. ')') or '') or 'no squad to send')
       st.cf = st.cf or {}
       st.cf.k, dirty = CAD.mark(T, pic.ids, {tok}), true
       local d = {id = 'kill_lone_intruder', q = q:sub(1, 200), unit = e.id, pos = {e.x, e.y, e.z}, race = race,
                  hl = 1, age = age, mode = mode, inside = pic.inside and 1 or 0}
       if cmd then d.squad, d.cmd = key, cmd end
+      if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end      -- BUG-348
       if kl then d.kill = kl.msg end
       K.emit('DECISION_NEEDED', 'A', q, d)
       K.log('info', 'reflex: %s', q)
@@ -2490,6 +2585,15 @@ function M.init(K)
       for _, id in ipairs(st.far.hl) do inh[id] = true end
       for _, id in ipairs(type(f.ig) == 'table' and f.ig or {}) do      -- M3: cleared even inside Kern+
         if int(id) and inh[int(id)] then st.far.ig[#st.far.ig + 1] = int(id) end
+      end
+      for _, r in ipairs(type(f.rc) == 'table' and f.rc or {}) do      -- BUG-348: counted again by a newcomer
+        local spot = type(r) == 'table' and int(r.x) and int(r.y) and int(r.z)   -- none yet: noted while cut off the list
+        if type(r) == 'table' and int(r.id) and (spot or r.x == nil) and #(st.far.rc or {}) < M.FAR_MAX then
+          st.far.rc = st.far.rc or {}
+          st.far.rc[#st.far.rc + 1] = {id = int(r.id), x = spot and int(r.x), y = spot and int(r.y), z = spot and int(r.z),
+                                       t = int(r.t) or 0,
+                                       ig = int(r.ig) == 1 and 1 or nil}
+        end
       end
     end
     local cf = p.cf                                      -- BUG-065: the offer and need cadences
