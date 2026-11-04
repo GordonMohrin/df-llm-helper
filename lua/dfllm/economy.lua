@@ -505,7 +505,9 @@ M.DEFAULTS = {
   -- below gather.drink_d), `gatherers` (only while the gathering detail is everybody-does-this: gather_low staffs it
   -- otherwise). A crew member keeps the food labors (FCREW_KEEP) and gives up the everybody-does-this labors (hauling,
   -- cleaning, building...), so the food jobs are his. At most `share` percent of the adults, `step` a day, only in
-  -- PEACE/RECOVERY; all go back once food and drink stand at `off_days`
+  -- PEACE/RECOVERY; each goes back once the shortage he was named for (food; drink for a brewer named below famine_days of
+  -- drink) stands at `off_days` (review fix merge15: not food AND drink), at once when drafted, moody, off his detail,
+  -- above `share` or `on` false
   famine_crew = {on = true, farmers = 3, cooks = 1, brewers = 1, gatherers = 2, share = 25, step = 2, off_days = 30},
 }
 
@@ -7591,10 +7593,13 @@ function T.cover(K, c, r) if r.day then return M.cover_run(K, c, r) end end
 -- ones, so a planter plants and builds the farm plot, a cook cooks. Candidates as the gatherers' (M.gather_cand: never a
 -- soldier, noble, doctor, mood, tool member or sole key-labor holder; idle and skilled first), no patient. New members only
 -- in PEACE/RECOVERY (a gatherer or a surface planter walks outside: never toward hostiles); at most famine_crew.share
--- percent of the adults, famine_crew.step a day. Food and drink back at off_days: each goes back (act.work_detail off with
--- opts.only gives the everybody labors back; one who was a member before, or of an everybody-does-this detail, joins
--- again as a plain member). State p.fcrew {t, ids, d (id -> detail), w (id -> 1: member before)}; st.fcrew feeds the
--- food decisions (auto 'crew').
+-- percent of the adults, famine_crew.step a day. His shortage back at off_days (M.fcrew_cause): he goes back
+-- (act.work_detail off with opts.only gives the everybody labors back; one who was a member before, or of an
+-- everybody-does-this detail, joins again as a plain member). State p.fcrew {t, ids, d (id -> detail), w (id -> 1: member before), k (id -> 'food' |
+-- 'drink': the shortage he was named for; review fix merge15: he goes back when that one is over), l (id -> the labors
+-- the crew took away or he had of the detail before: only those come back, BUG-340 second review fix), x (id -> 1: the
+-- player took him off his detail; never named again while the famine lasts)}; st.fcrew feeds the food decisions (auto
+-- 'crew').
 M.FCREW = {
   {key = 'farm', det = 'planters', labor = 'PLANT', skill = 'PLANT', n = 'farmers'},
   {key = 'cook', names = {'Cooks', 'Cooking', 'Cook'}, labor = 'COOK', skill = 'COOK', n = 'cooks'},
@@ -7638,41 +7643,104 @@ function M.fcrew_want(K, c, r, s, wd)
   return 0
 end
 
+-- the work detail of that name (nil: none)
+function M.fcrew_wd(d)
+  local wd
+  pcall(function()
+    for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+      if dfhack.df2utf(w.name) == d then wd = w end
+    end
+  end)
+  return wd
+end
+
+-- Review fix (merge15): one crew member goes back (act.work_detail off with opts.only gives the everybody-does-this labors
+-- back, also to one already off the detail); with `rejoin` one who was a member before, or of an everybody-does-this
+-- detail, joins again as a plain member. why: the WORK_DETAIL text's reason. false: act refused (he is dropped anyway).
+function M.fcrew_release(K, pc, uid, d, why, rejoin)
+  -- BUG-340 second review fix: only the labors the crew took away come back (pc.l; an older state without it: every
+  -- everybody-does-this labor), never one the player had switched off himself
+  local l = type(pc.l) == 'table' and type(pc.l[tostring(uid)]) == 'table' and pc.l[tostring(uid)] or nil
+  if not K.act.work_detail(d, uid, false, {only = true, labors = l}) then return false end
+  M.cv_off(d, uid)
+  if rejoin then
+    local wm, wd = df.work_detail_mode or {}, M.fcrew_wd(d)
+    local every = wd ~= nil and wm.EverybodyDoesThis ~= nil and wd.flags.mode == wm.EverybodyDoesThis
+    if (type(pc.w) == 'table' and pc.w[tostring(uid)]) or every then K.act.work_detail(d, uid, true) end
+  end
+  K.emit('WORK_DETAIL', 'B', string.format('%s - %s (%s)', d, unit_name(uid), why),
+         {detail = d, unit = uid, on = 0, n = 0, why = 'famine_crew over'})
+  return true
+end
+
+-- Review fix (merge15): the shortage a member was named for (p.fcrew.k: 'food' or 'drink'; an older state without k:
+-- a member of the brew detail drink, every other one food)
+function M.fcrew_cause(pc, uid, d)
+  local k = type(pc.k) == 'table' and pc.k[tostring(uid)]
+  if k == 'food' or k == 'drink' then return k end
+  for _, s in ipairs(M.FCREW) do
+    if s.key == 'brew' then for _, n in ipairs(s.names) do if n == d then return 'drink' end end end
+  end
+  return 'food'
+end
+
+-- BUG-340 second review fix: the labors a unit has on now (set of labor numbers)
+function M.fcrew_labors(u)
+  local s = {}
+  pcall(function()
+    local ul = df.unit_labor
+    local lo, hi = ul._first_item, ul._last_item
+    if type(lo) == 'number' and type(hi) == 'number' then
+      for l = math.max(0, lo), hi do if u.status.labors[l] then s[l] = true end end
+    else
+      for _, l in pairs(ul) do if type(l) == 'number' and u.status.labors[l] then s[l] = true end end
+    end
+  end)
+  return s
+end
+
+-- the labors to give back after a crew join: those on before and off after, and those of the detail he had before
+function M.fcrew_taken(before, after, wd)
+  local r = {}
+  for l in pairs(before) do
+    local own = false
+    pcall(function() own = wd.allowed_labors[l] and true or false end)
+    if not after[l] or own then
+      local n = df.unit_labor and df.unit_labor[l]
+      r[#r + 1] = type(n) == 'string' and n or l
+    end
+  end
+  table.sort(r, function(a, b) return tostring(a) < tostring(b) end)
+  return r
+end
+
 function M.fcrew_run(K, c, r)
   local cf, p = c.famine_crew, r.p
-  if type(cf) ~= 'table' or cf.on == false then st.fcrew = nil; return end
   local days = r.days or {}
   local fd, dd = days.food_d or 9999, days.drink_d or 9999
   local lim = c.famine_days or 10
   local pc = type(p.fcrew) == 'table' and type(p.fcrew.ids) == 'table' and p.fcrew or nil
-  if st.engine == 'modern' or st.engine == nil or not df.global.plotinfo.labor_info then return end
-  local off = math.tointeger(cf.off_days) or 30
-  if pc and fd >= off and dd >= off then                                  -- food and drink back: the crew goes back
-    local out = {}
-    for _, id in ipairs(pc.ids) do
-      local uid = math.tointeger(id)
-      local d = uid and type(pc.d) == 'table' and pc.d[tostring(uid)]
-      if uid and d and K.act.work_detail(d, uid, false, {only = true}) then
-        M.cv_off(d, uid)
-        local wm, every = df.work_detail_mode or {}, false
-        pcall(function()
-          for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
-            if dfhack.df2utf(w.name) == d then every = wm.EverybodyDoesThis ~= nil and w.flags.mode == wm.EverybodyDoesThis end
-          end
-        end)
-        if (type(pc.w) == 'table' and pc.w[tostring(uid)]) or every then K.act.work_detail(d, uid, true) end
-        out[#out + 1] = unit_name(uid)
-        K.emit('WORK_DETAIL', 'B', string.format('%s - %s (famine crew over: food %d days, drink %d days)', d,
-                                                 unit_name(uid), fd, dd),
-               {detail = d, unit = uid, on = 0, n = 0, why = 'famine_crew over'})
+  if type(cf) ~= 'table' or cf.on == false then
+    st.fcrew = nil
+    -- Review fix (merge15): the crew switched off gives its members back (they stayed specialized before)
+    -- (second review fix: not in modern labormanager, which sets the labors itself; the state is dropped all the same)
+    local ok, li = pcall(function() return df.global.plotinfo.labor_info end)
+    if pc and st.engine == 'modern' then p.fcrew = nil end
+    if pc and st.engine ~= 'modern' and ok and li then
+      local n = 0
+      for _, id in ipairs(pc.ids) do
+        local uid = math.tointeger(id)
+        local d = uid and type(pc.d) == 'table' and pc.d[tostring(uid)]
+        if uid and d and M.fcrew_release(K, pc, uid, d, 'famine crew switched off', true) then n = n + 1 end
       end
+      r.cmds = r.cmds + 1
+      K.log('info', 'famine crew switched off: %d specialists back to every labor', n)
+      p.fcrew = nil
     end
-    r.cmds = r.cmds + 1
-    K.log('info', 'famine crew: food %d days, drink %d days (>= %d): %d specialists back to every labor (%s)', fd, dd, off,
-          #out, table.concat(out, ', '):sub(1, 160))
-    p.fcrew, st.fcrew = nil, nil
     return
   end
+  if st.engine == 'modern' or st.engine == nil or not df.global.plotinfo.labor_info then return end
+  local off = math.tointeger(cf.off_days) or 30
   local cu = K.census.u or {}
   local alive, adults = {}, 0
   for _, id in ipairs(cu.ids or {}) do
@@ -7682,26 +7750,71 @@ function M.fcrew_run(K, c, r)
       if dfhack.units.isAdult(u) then adults = adults + 1 end
     end
   end
-  -- the members still there (dead, departed, drafted or moody ones drop out of the list; their details are DF's)
-  local ids, dmap, wmap, by = {}, {}, {}, {}
+  local cap = math.max(1, adults * (math.tointeger(cf.share) or 25) // 100)
+  -- the members still there. Review fix (merge15): a drafted or moody one, one off his detail (the player, DF) and one
+  -- whose shortage is over (food or drink back at off_days: the one he was named for, not both) goes back with his
+  -- everybody labors (they stayed off for good before); a dead or departed one is only dropped
+  local ids, dmap, wmap, kmap, lmap, by, out = {}, {}, {}, {}, {}, {}, {}
+  -- BUG-340 second review fix: one released this run is not named again in the same run (excl below); one the player
+  -- took off his detail stays out while the famine lasts (xmap, p.fcrew.x)
+  local gone, xmap = {}, {}
+  for k in pairs(pc and type(pc.x) == 'table' and pc.x or {}) do
+    local x = math.tointeger(tonumber(k))
+    if x then xmap[tostring(x)] = 1 end
+  end
+  local function back(uid, d, why, rejoin)
+    gone[uid] = true
+    if M.fcrew_release(K, pc, uid, d, why, rejoin) then out[#out + 1] = unit_name(uid) end
+  end
   for _, id in ipairs(pc and pc.ids or {}) do
     local uid = math.tointeger(id)
     local u = uid and alive[uid]
     local d = uid and type(pc.d) == 'table' and pc.d[tostring(uid)]
-    if u and d and not ((u.military and (math.tointeger(u.military.squad_id) or -1) >= 0) or (u.mood or -1) >= 0) then
-      ids[#ids + 1], dmap[tostring(uid)] = uid, d
-      if type(pc.w) == 'table' and pc.w[tostring(uid)] then wmap[tostring(uid)] = 1 end
-      by[d] = (by[d] or 0) + 1
+    if u and d then
+      local wd = M.fcrew_wd(d)
+      local member = false
+      if wd then for _, x in ipairs(wd.assigned_units) do if x == uid then member = true end end end
+      local cause = M.fcrew_cause(pc, uid, d)
+      if u.military and (math.tointeger(u.military.squad_id) or -1) >= 0 then
+        back(uid, d, 'famine crew: drafted', true)
+      elseif (u.mood or -1) >= 0 then
+        back(uid, d, 'famine crew: in a mood', true)
+      elseif not member then
+        xmap[tostring(uid)] = 1
+        back(uid, d, 'famine crew: no longer a member', false)
+      elseif (cause == 'drink' and dd >= off) or (cause ~= 'drink' and fd >= off) then
+        back(uid, d, string.format('famine crew over: food %d days, drink %d days', fd, dd), true)
+      else
+        ids[#ids + 1], dmap[tostring(uid)], kmap[tostring(uid)] = uid, d, cause
+        if type(pc.w) == 'table' and pc.w[tostring(uid)] then wmap[tostring(uid)] = 1 end
+        if type(pc.l) == 'table' and type(pc.l[tostring(uid)]) == 'table' then lmap[tostring(uid)] = pc.l[tostring(uid)] end
+        by[d] = (by[d] or 0) + 1
+      end
     end
   end
+  -- Review fix (merge15): fewer adults (deaths, departures, soldiers): a crew above its share gives the last ones back
+  while #ids > cap do
+    local uid = table.remove(ids)
+    local d = dmap[tostring(uid)]
+    dmap[tostring(uid)], wmap[tostring(uid)], kmap[tostring(uid)], lmap[tostring(uid)] = nil, nil, nil, nil
+    by[d] = (by[d] or 1) - 1
+    back(uid, d, string.format('famine crew above its cap: %d of %d adults', cap, adults), true)
+  end
+  if #out > 0 then
+    r.cmds = r.cmds + 1
+    K.log('info', 'famine crew: food %d days, drink %d days (off at %d): %d specialists back to every labor (%s)', fd, dd,
+          off, #out, table.concat(out, ', '):sub(1, 160))
+  end
   local active = p.famine ~= nil or fd < lim or dd < lim
+  if not active then xmap = {} end
   local rows, names = {}, {}
   if active and HUNT_MODES[K.mode()] then
     local sc = c.starve or M.DEFAULTS.starve
-    local cap = math.max(1, adults * (math.tointeger(cf.share) or 25) // 100)
     local step = math.max(1, math.tointeger(cf.step) or 2)
     local excl = {}
     for _, uid in ipairs(ids) do excl[uid] = true end
+    for uid in pairs(gone) do excl[uid] = true end
+    for k in pairs(xmap) do excl[math.tointeger(tonumber(k))] = true end
     local wm = df.work_detail_mode or {}
     for _, s in ipairs(M.FCREW) do
       local name, wd = find_detail(s.det and (sc.details or {})[s.det] or s.names, s.labor)
@@ -7722,11 +7835,14 @@ function M.fcrew_run(K, c, r)
             local was = false
             for _, x in ipairs(wd.assigned_units) do if x == id then was = true end end
             r.cmds = r.cmds + 1
+            local before = M.fcrew_labors(u)
             local okd, err = K.act.work_detail(name, id, true, {only = true, keep = M.FCREW_KEEP, select = true})
             if not okd then row.why = ('%s refused: %s'):format(name, tostring(err)):sub(1, 60); break end
             if okd then
               excl[id], have, step = true, have + 1, step - 1
               ids[#ids + 1], dmap[tostring(id)] = id, name
+              kmap[tostring(id)] = s.key == 'brew' and dd < lim and 'drink' or 'food'
+              lmap[tostring(id)] = json.array(M.fcrew_taken(before, M.fcrew_labors(u), wd))
               if was and not every then wmap[tostring(id)] = 1 end
               names[#names + 1] = unit_name(id)
               K.emit('WORK_DETAIL', 'B', string.format('%s + %s (famine crew %s: food %d days, drink %d days, target %d)',
@@ -7740,9 +7856,16 @@ function M.fcrew_run(K, c, r)
       elseif want > have then row.why = string.format('crew at its cap (%d of %d adults)', #ids, adults) end
     end
   end
-  if #ids == 0 then p.fcrew, st.fcrew = nil, nil; return end
+  if #ids == 0 then
+    st.fcrew = nil
+    -- (second review fix: the player's removals are kept while the famine lasts, also with no member left)
+    p.fcrew = next(xmap) and {t = pc and pc.t or r.now, ids = json.array({}), d = json.object({}), w = json.object({}),
+                              k = json.object({}), l = json.object({}), x = json.object(xmap)} or nil
+    return
+  end
   table.sort(ids)
-  p.fcrew = {t = pc and pc.t or r.now, ids = json.array(ids), d = json.object(dmap), w = json.object(wmap)}
+  p.fcrew = {t = pc and pc.t or r.now, ids = json.array(ids), d = json.object(dmap), w = json.object(wmap),
+             k = json.object(kmap), l = json.object(lmap), x = json.object(xmap)}
   local cnt = {}
   for _, d in pairs(dmap) do cnt[d] = (cnt[d] or 0) + 1 end
   local parts = {}

@@ -23,6 +23,29 @@
 - **Tests (fail on d40fb59):** test_seal_refuge.lua (+2), test_bug336_seal_escalate.lua (+1).
 - **Live check:** a siege with the refuge hatch missing and Kern+ dry: the alert stays on (Tiefe+ WET), no `none (alert off)`
   REFUGE_SWITCH without a hostile inside. Open: the refuge is a dead end; once Kern+ is breached the citizens flee from it.
+## Run 15 famine crew second review: the player's removal sticks, only the taken labors come back (BUG-340 second review fix (merge15), 2026-11-04; offline, live-untested)
+- **Why:** the verifier of the review fix: a member the player took off his crew detail was given back and named again in
+  the same run (economy.lua fcrew_run, the add loop's `excl` held only the remaining members), his everybody labors off
+  again while the famine lasted; every return switched on every everybody labor (act.lua generalize), also one the player had
+  switched off himself.
+- **What changed:** released members are excluded for the run, the player's removals for the famine (`p.fcrew.x`); the crew
+  notes the labors it took at the join (`p.fcrew.l`) and every way back passes them as act.work_detail `opts.labors`
+  (only those come back, after the detail's own went off); `on` false in modern labormanager only drops the state.
+- **Tests (fail on 5b39a14):** tests/lua/test_economy_fcrew.lua (+2), tests/lua/test_act_supply.lua (+1).
+- **Live check:** a farmer taken off Planters in a famine: `(famine crew: no longer a member)` and no `Planters + <name>`
+  after it; a labor switched off by hand before the crew stays off after the return.
+## Run 15 famine crew review: dropped-out members get their labors back, release by the own shortage (BUG-340 review fix (merge15), 2026-11-04; offline, live-untested)
+- **Why:** the merge15 review of the famine crew: a moody or drafted member, or one the player/DF took off the detail, was
+  dropped without a return and kept hauling, cleaning, building and Orderlies off for good (economy.lua fcrew_run, was
+  7686-7696; act.lua:2164 returned `not a member` before generalize); `famine_crew.on = false` left the crew specialized
+  (:7643); the return wanted food AND drink at off_days (:7650), so a drink dip held farmers and cooks after the food was back.
+- **What changed:** `M.fcrew_release` (off with opts.only, plain rejoin of an everybody detail) for a drafted, moody or
+  off-the-detail member at once, for every member when `on` is false, for the last ones when the crew is above its share of
+  the adults (now checked every run); each member goes back when his own shortage stands at off_days (`p.fcrew.k` food/drink,
+  `M.fcrew_cause`); act.work_detail off with opts.only gives a non-member the everybody labors back too.
+- **Tests (fail on d40fb59):** tests/lua/test_economy_fcrew.lua (+4), tests/lua/test_act_supply.lua (+1 check).
+- **Live check:** kern.log `famine crew: ... (off at 30): k specialists back to every labor`, WORK_DETAIL `(famine crew: in a
+  mood)` / `(drafted)` / `(no longer a member)`; food back with drink below 30 days: the farmers go back.
 ## Run 15 gate review: our squads kept off a busy bridge, approach cancels bounded (BUG-335/342 review, 2026-11-04; offline, live-untested)
 - **Why:** the verifiers of BUG-335 and BUG-342: gate only waited for our soldiers walking over a bridge (Earthboat squads 99-101
   would hold every SIEGE close until the give-up), the inner station flipped melee -> b2 the moment B2 moved, stairs/ramps (another

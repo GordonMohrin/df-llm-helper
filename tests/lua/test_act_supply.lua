@@ -185,6 +185,12 @@ T.test('work_detail opts (Run 10): a specialist leaves the everybody details; eq
        'no equipment request without opts.equip')
   T.eq({env.api.work_detail('Miners', 7, false, {only = true})}, {true, 'removed'})
   T.eq({u.status.labors[MINE], u.status.labors[PLANT]}, {false, true}, 'back to everybody work')
+  -- review fix (merge15): a specialist already off the detail (the player, DF) still gets the everybody labors back
+  T.eq({env.api.work_detail('Miners', 7, true, {only = true})}, {true, 'added'})
+  T.eq(u.status.labors[PLANT], false)
+  miners.assigned_units:erase(0)
+  T.eq({env.api.work_detail('Miners', 7, false, {only = true})}, {true, 'not a member'})
+  T.eq(u.status.labors[PLANT], true, 'not a member: the everybody labors back all the same')
   T.eq({env.api.work_detail('Woodcutters', 7, true, {equip = true})}, {true, 'added'})
   T.eq({u.status.labors[CUT], u.uniform.pickup_flags.update, df.global.plotinfo.equipment.update.weapon},
        {true, true, true}, '[live-untested] the equipment update request with the tool labor')
@@ -221,6 +227,41 @@ T.test('work_detail: joining Miners takes off a stray HUNT/CUTWOOD labor, a Hunt
   hunters.flags.mode = 2                                               -- nobody does this: it grants nothing
   T.eq({env.api.work_detail('Miners', 8, true)}, {true, 'already'})
   T.eq(u8.status.labors[HUNT], false)
+end)
+
+-- BUG-340 second review fix: off with opts.only and opts.labors (the famine crew's way back) switches on only the listed
+-- labors, after the detail's own went off: an everybody labor the player had switched off stays off, a labor of the
+-- detail he had before the crew stays on; a unit no longer a member gets the listed ones too
+T.test('work_detail off with opts.labors: only the listed labors come back, never one the player switched off', function()
+  local W = H.world{tag = 'wdl', units = {{id = 7, citizen = true}}}
+  local PLANT, HAUL, CLEAN = 0, 1, 2
+  local function wd(name, labors, ids, mode)
+    local al = setmetatable({}, {__len = function() return 3 end})
+    for _, l in ipairs(labors) do al[l] = true end
+    return {name = name, assigned_units = kmock.vec(ids), allowed_labors = al, flags = {mode = mode}}
+  end
+  df.work_detail_mode = {EverybodyDoesThis = 1, OnlySelectedDoesThis = 3}
+  df.unit_labor = {PLANT = PLANT, HAULX = HAUL, CLEANX = CLEAN, [PLANT] = 'PLANT', [HAUL] = 'HAULX', [CLEAN] = 'CLEANX'}
+  local planters = wd('Planters', {PLANT}, {}, 3)
+  df.global.plotinfo.labor_info = {work_details = kmock.vec{planters, wd('Haulers', {HAUL}, {}, 1),
+                                                              wd('Cleaners', {CLEAN}, {}, 1)}}
+  local u = W.unit(7)
+  u.status = {labors = {[PLANT] = true, [HAUL] = true}}               -- CLEAN: the player switched it off
+  local env = mk('economy')
+  T.eq({env.api.work_detail('Planters', 7, true, {only = true})}, {true, 'added'})
+  T.eq({u.status.labors[PLANT], u.status.labors[HAUL]}, {true, false})
+  T.eq({env.api.work_detail('Planters', 7, false, {only = true, labors = {'HAULX', 'PLANT'}})}, {true, 'removed'})
+  T.eq({u.status.labors[PLANT], u.status.labors[HAUL], u.status.labors[CLEAN] or false}, {true, true, false},
+       'HAUL back, PLANT (his before) kept, CLEAN stays off')
+  -- no longer a member (the player took him off): the listed labors all the same
+  T.eq({env.api.work_detail('Planters', 7, true, {only = true})}, {true, 'added'})
+  planters.assigned_units:erase(0)
+  T.eq({env.api.work_detail('Planters', 7, false, {only = true, labors = {'HAULX'}})}, {true, 'not a member'})
+  T.eq({u.status.labors[HAUL], u.status.labors[CLEAN] or false}, {true, false}, 'not a member: HAUL back, CLEAN off')
+  -- without opts.labors (an older crew state): every everybody labor, as before
+  T.eq({env.api.work_detail('Planters', 7, true, {only = true})}, {true, 'added'})
+  T.eq({env.api.work_detail('Planters', 7, false, {only = true})}, {true, 'removed'})
+  T.eq(u.status.labors[CLEAN], true, 'generalize without a list')
 end)
 
 -- BUG-038 (Run 11): the plant gatherers at food_low; a detail on "nobody does this" grants nothing, so opts.select sets
