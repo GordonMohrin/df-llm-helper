@@ -3008,6 +3008,24 @@ function M.office_spots(K, c, rec, n)
   return {table.unpack(out, 1, math.min(n, #out))}
 end
 
+-- BUG-396 (Run 16a i1 Bachwald: no office for 294 days, 7 brews and 18 orders unvalidated, drink 0): with no Office zone
+-- for the manager and manager orders waiting, the kernel asks for the office itself (PROJECT_REQUEST office why=office, which
+-- follow places: the dug template with a core, the surface one without), at most every 7 days; the brews are life.
+function M.office_request(K, p)
+  local u = st.unval
+  if type(u) ~= 'table' or (math.tointeger(u.n) or 0) <= 0 then return end
+  local now = K.now().tick
+  if now - (math.tointeger(p.office_req) or -7 * DAY) < 7 * DAY then return end
+  p.office_req = now
+  local b = type(st.brew) == 'table' and st.brew or {}
+  local msg = string.format('manager office: none stands and %d manager orders wait%s: an office is requested (surface when ' ..
+                            'the fort has no dug core)', math.tointeger(u.n) or 0,
+                            (b.unval or 0) > 0 and string.format(' (%d brews)', b.unval) or '')
+  K.log('warn', '%s', msg)
+  K.emit('PROJECT_REQUEST', 'B', msg:sub(1, 200), {tpl = 'office', n = 1, why = 'office'})
+  K.persist.touch('m.economy')
+end
+
 -- BUG-042 (daily, from validation_watch): the manager's office must hold a chair (and a table, office.table) to
 -- validate work orders. A missing one (destroyed in a siege, never built) is placed on a free floor tile of the zone
 -- through runner.repair (quickfort #build: the player's build designation; buildingplan waits for the item, T.jmake
@@ -3022,9 +3040,12 @@ function M.office_check(K, c, p)
   if not rec then
     -- BUG-233: the reason the status line shows ('manager: N orders unvalidated for D days: no office ...')
     st.office = {why = 'no office (chair+table needed)', fix = 'an Office zone with a chair and a table for him ' ..
-                 '(bp.place office; the kernel adds chair and table as workshop tasks)', none = true}
+                 '(bp.place office, p.surface=1 without a dug core: dfllm bp sites office surface=1 --fresh; the kernel ' ..
+                 'adds chair and table as workshop tasks)', none = true}
     local okz, zerr = pcall(M.office_zone, K, c, p)
     if not okz then K.log('warn', 'office zone: %s', tostring(zerr)) end
+    local okr, rerr = pcall(M.office_request, K, p)
+    if not okr then K.log('warn', 'office request: %s', tostring(rerr)) end
     return
   end
   local o = type(p.office) == 'table' and p.office or nil
@@ -4731,7 +4752,12 @@ function M.drink_block(K, c, r, inv)
   elseif (b.unval or 0) > 0 and st.unval and st.unval.why then        -- past orders.unval_days (M.unval_watch)
     put('unvalidated', string.format('%d brews wait for validation: %s', b.unval, st.unval.why))
   end
-  if plants == 0 then put('plants', 'no brewable plants') end
+  if plants == 0 then
+    -- BUG-397: what the fort does about it, so nobody asks: seeds of a brewable crop in stock, the gather zone, the caravans
+    local bs = st.bseeds
+    put('plants', bs ~= nil and string.format('no brewable plants (%d seeds; gathering, trade)', bs)
+                  or 'no brewable plants')
+  end
   if (inv.barrels_empty or 0) == 0 then put('barrels', 'no empty barrel') end
   if not M.labor_holder(K, 'BREWER') then put('brewer', 'nobody brews (Brewing on no citizen)') end
   if b.n > 0 then auto[#auto + 1] = {'brew', string.format('%d brews ordered', b.left)} end
@@ -4801,6 +4827,16 @@ function M.fd_wants(K, c, r)
   if st.seeds_known and seeds == 0 and ((st.farm and (st.farm.plots or 0) > 0) or M.food_low(c, r)) then
     out[#out + 1] = {buy = 'seeds', n = 20, why = 'no usable seeds for the farm plots'}
   end
+  -- BUG-397: the stills' plants are short and no seed of a brewable crop is in stock: the caravans bring seeds (and the
+  -- plants and drink above) -- the gather zone (BUG-382) brings wild plants meanwhile
+  if st.bshort and st.bseeds == 0 and (st.farm and (st.farm.plots or 0) > 0) then
+    local have = false
+    for _, w in ipairs(out) do if w.buy == 'seeds' then have = true end end
+    if not have then out[#out + 1] = {buy = 'seeds', n = 15, why = 'no seeds of a brewable crop'} end
+    local hp = false
+    for _, w in ipairs(out) do if w.buy == 'plant' then hp = true end end
+    if not hp then out[#out + 1] = {buy = 'plant', n = 20, why = 'drink short: no brewable seeds'} end
+  end
   -- BUG-381: the kitchen has nothing to cook and no seeds of a crop it may cook (M.cook_plan): seeds of one come by trade
   if st.cook_sig == 'none' and (st.farm and (st.farm.plots or 0) > 0) then
     local have = false
@@ -4832,6 +4868,10 @@ function M.drink_low(K, c, r)
   local gd = type(c.gather) == 'table' and math.tointeger(c.gather.drink_d) or 0
   local bneed, bhave = M.brew_need(K, r)
   st.bshort = dd < gd and bhave < bneed or nil
+  -- BUG-397: the Cook ban's plants (brewed by rule) and the seeds of brewable crops, for the farm slots, the caravans' wants
+  -- and the words of the block
+  st.nocook = st.bshort and M.cook_ban_set(c) or nil
+  st.bseeds = st.bshort and M.brew_seeds(c) or nil
   if dd >= low then
     if p.drink_pre then p.drink_pre = nil; K.log('info', 'drink pre-alarm over: %d drink days', dd) end
     if type(p.drink_rep) == 'table' then p.drink_rep = CAD.quiet(p.drink_rep) end
@@ -5208,21 +5248,84 @@ local function plant_index(id)
   return pidx[id]
 end
 
+-- BUG-397 (Run 16c i3 Yawninggilt: an embark without plump helmet seeds and no depot, 'no brewable plants', drink 150 -> 0):
+-- a crop whose plant a still brews: DRINK_MAT in the structural material or a growth, or a plant on the Cook ban (plump helmets,
+-- brewed by rule D-09; nocook = {plant id = true}). Cached per plant.
+M.brew_cache = {}
+function M.brew_crop(pid, nocook)
+  local raw = df.global.world.raws.plants.all[pid]
+  if not raw then return false end
+  if nocook and nocook[raw.id] then return true end
+  local v = M.brew_cache[pid]
+  if v ~= nil then return v end
+  v = false
+  pcall(function()
+    local mi = dfhack.matinfo.find(raw.id, 'STRUCTURAL')
+    if mi and M.drink_mat(mi.type, mi.index) then v = true; return end
+    for _, g in ipairs(raw.growths) do
+      if M.drink_mat(g.mat_type, g.mat_index) then v = true; return end
+    end
+  end)
+  M.brew_cache[pid] = v
+  return v
+end
+
+-- the plants on the config's Cook ban (the kitchen entries what = Cook, item = PLANT): {plant id = true}
+function M.cook_ban_set(c)
+  local nocook = {}
+  for _, e in ipairs(type(c) == 'table' and c.kitchen or {}) do
+    if e.what == 'Cook' and e.item == 'PLANT' and type(e.plant) == 'string' then nocook[e.plant] = true end
+  end
+  return nocook
+end
+
+-- seeds in stock of crops a still brews (the census' st.seeds), or nil before the seed census
+function M.brew_seeds(c)
+  if not st.seeds_known or type(st.seeds) ~= 'table' then return nil end
+  local nocook, n = M.cook_ban_set(c), 0
+  for id, cnt in pairs(st.seeds) do
+    local pid = (math.tointeger(cnt) or 0) > 0 and plant_index(id) or nil
+    local inf = pid and plant_info(pid)
+    if pid and inf and inf.crop and M.brew_crop(pid, nocook) then n = n + math.tointeger(cnt) end
+  end
+  return n
+end
+
+-- BUG-381/BUG-398: the cook crop (most seeds) that grows in season s (0-based) under/over ground while the plan has slots
+-- left for that season; takes the slot from the plan. nil when none is due or none fits.
+function M.cook_pick(cook, under, s, seeds)
+  if not (cook and cook.left and (cook.left[s] or 0) > 0) then return nil end
+  local best, bn
+  for id, n in pairs(seeds) do
+    local pid = plant_index(id)
+    local inf = pid and cook.set[pid] and plant_info(pid)
+    if inf and inf.under == under and inf.seasons[s + 1] == true and inf.crop and n > 0
+       and (not bn or n > bn or (n == bn and pid < best)) then best, bn = pid, n end
+  end
+  if best then cook.left[s] = cook.left[s] - 1 end
+  return best
+end
+
 -- the crop for empty slot s (0-based) of a plot whose crops are `crops` (raw indices): a crop of the plot that
 -- grows then with usable seeds, else the crop with the most usable seeds that grows then and there, else nil
 -- (BUG-256: never a crop without a seed; underground crops grow all year)
 function M.slot_crop(crops, under, s, seeds, food, fiber, cook)
   local function fits(inf) return inf and inf.under == under and inf.seasons[s + 1] == true end
-  -- BUG-381: a crop the kitchen may cook first while it has nothing to cook (cook = M.cook_plan, left[s] = slots allowed)
-  if cook and (cook.left[s] or 0) > 0 then
+  -- BUG-397: the stills' plants are short (st.bshort, M.drink_low): an empty slot takes the brewable crop with the most seeds
+  if st.bshort then
     local best, bn
     for id, n in pairs(seeds) do
       local pid = plant_index(id)
-      local inf = pid and cook.set[pid] and plant_info(pid)
-      if fits(inf) and inf.crop and n > 0 and (not bn or n > bn or (n == bn and pid < best)) then best, bn = pid, n end
+      local inf = pid and plant_info(pid)
+      if fits(inf) and inf.crop and n > 0 and M.brew_crop(pid, st.nocook) and (not bn or n > bn or (n == bn and pid < best)) then
+        best, bn = pid, n
+      end
     end
-    if best then cook.left[s] = cook.left[s] - 1; return best end
+    if best then return best end
   end
+  -- BUG-381: a crop the kitchen may cook first while it has nothing to cook (cook = M.cook_plan, left[s] = slots allowed)
+  local ck = M.cook_pick(cook, under, s, seeds)
+  if ck then return ck end
   -- I3: a fiber crop first while the kernel is the only farmer (fiber = M.fiber_plan, left[s] = slots still allowed)
   if fiber and not food and (fiber.left[s] or 0) > 0 then
     local best, bn
@@ -5321,7 +5424,17 @@ local function farm_fills(K, max, only, food, fiber, cook)
             local inf = pid and pid >= 0 and plant_info(pid) or nil
             local wrong = tile ~= nil and inf ~= nil and inf.under ~= tile
             local seedless = not wrong and inf ~= nil and seeds ~= nil and s == cur and (seeds[inf.id] or 0) <= 0
-            if not pid or pid < 0 or wrong or seedless then
+            -- BUG-398 (Run 16b i2 Ostgate: 79 citizens, 0 meals for months, every slot planted with plump helmets, so the
+            -- R20 cook plan found no empty slot): a planted slot of a crop the kitchen will not cook gives way to a cook
+            -- crop while the plan has slots left for that season (never more than the plan's, planted cook slots count)
+            local swap = cook and cook.left and (cook.left[s] or 0) > 0 and pid and pid >= 0 and not wrong and not seedless
+                         and inf ~= nil and not cook.set[pid] and not M.cook_plant(pid, cook.nocook)
+            if swap then
+              local ck = under ~= nil and #fills < max and M.cook_pick(cook, under, s, st.seeds or {}) or nil
+              if ck and ck ~= pid then
+                fills[#fills + 1] = {id = b.id, s = s, crop = ck, swap = true}
+              end
+            elseif not pid or pid < 0 or wrong or seedless then
               if not (wrong or seedless) then empty = empty + 1 end
               local crop = under ~= nil and #fills < max and M.slot_crop(crops, under, s, st.seeds or {}, food, fiber, cook) or nil
               -- a crop of the wrong kind is replaced only by one with usable seeds (a wrong reading of the tile must not
@@ -5418,7 +5531,8 @@ function M.cook_plan(K, c, r)
     K.log('warn', 'kitchen has %d cook ingredients and %d meals for %d citizens: the farms plant a cook crop (%s; at most %d ' ..
           'slots a season)', M.cook_n(inv), inv.meals or 0, cit, sig:sub(1, 120), n)
   end
-  return {set = set, max = n}
+  -- BUG-398: a big fort needs more than two slots a season for its meals (cook_slots + 1 per 30 citizens, at most 8)
+  return {set = set, max = math.min(8, n + math.floor(cit / 30)), nocook = nocook}
 end
 
 -- I3: autofarm off for good ('off', two wipes) is the kernel as the only farmer; the thread and cloth chain (standing

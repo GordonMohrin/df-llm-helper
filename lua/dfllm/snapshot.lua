@@ -969,6 +969,29 @@ function M.regions(K, pcs, cap)
   return nil, refusal(last, core, cap, 'fort core')
 end
 
+-- BUG-399 (Run 16c i3 Yawninggilt: `bp sites depot` 0 sites for years, 8,366 floor tiles on the top level z127): the sites
+-- box is the fort's pieces plus a margin, and an embark whose surface lies at the top of that box has no level above it, so
+-- the sky check of the surface templates (depot, startup shops, surface farm and hospital) never saw an open tile. A sites
+-- export gets M.CFG.sites_up more levels on top of the main box when the cap allows it.
+M.CFG.sites_up = 3
+function M.sites_up(c, purpose, cap)
+  local up = M.CFG.sites_up
+  if purpose ~= 'sites' or not up or up <= 0 or type(c) ~= 'table' or type(c.parts) ~= 'table' or not c.parts[1] then
+    return c
+  end
+  local parts = {}
+  for i, p in ipairs(c.parts) do parts[i] = {p[1], p[2], p[3], p[4], p[5], p[6]} end
+  parts[1][6] = parts[1][6] + up
+  parts[1] = clamp_bbox(parts[1]) or c.parts[1]
+  if parts[1][6] == c.parts[1][6] then return c end
+  local tiles, bbox = union_tiles(parts), bbox_of(parts)
+  if tiles > cap or ntiles(bbox) > M.CFG.grid_max then return c end
+  local n = {}
+  for k, v in pairs(c) do n[k] = v end
+  n.parts, n.bbox, n.tiles = parts, bbox, tiles
+  return n
+end
+
 -- the default box of a purpose: {parts, bbox, tiles, margin?, cols, out = 0} or nil, why. The first margin step whose
 -- union fits the cap wins; without fort pieces the surface around the map centre (no margin, no columns). BUG-129: an
 -- audit box over the cap as one box: as regions (M.regions)
@@ -986,7 +1009,7 @@ local function compose(K, purpose)
     local parts = parts_at(mb, cols, m)
     if parts then
       last = {parts = parts, bbox = bbox_of(parts), tiles = union_tiles(parts), margin = m, cols = #parts - 1, out = 0}
-      if last.tiles <= cap and ntiles(last.bbox) <= M.CFG.grid_max then return last end
+      if last.tiles <= cap and ntiles(last.bbox) <= M.CFG.grid_max then return M.sites_up(last, purpose, cap) end
     end
   end
   if not last then return nil, 'bbox outside the map' end

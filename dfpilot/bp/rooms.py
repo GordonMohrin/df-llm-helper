@@ -57,7 +57,8 @@ PARAMS = {
     # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
     "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1)},
     "furnaces": {"wood": (1, 0, 2)},
-    "office": {"role": ("manager", None, None)},
+    # BUG-396: surface = 1 is the office on open surface floor beside the wagon (no fortcore, nothing dug, no door, no burrow)
+    "office": {"role": ("manager", None, None), "surface": (0, 0, 1)},
     "captives": {},
     # Gordon 11.10.2026: stately rooms, guild halls, trained soldiers. tier = the room value the kernel aims at
     "hall": {"seats": (16, 8, 48), "tier": (5000, 0, 1000000)},
@@ -371,6 +372,8 @@ def office(p: dict) -> Plan:
     if role not in OFFICE_ROLES:
         raise ValueError(f"office: unknown role {role!r}; known: {', '.join(OFFICE_ROLES)}")
     P = Plan("office", "living")
+    if p.get("surface"):
+        return _surface_office(P, role)
     box = _box(P, 3, 3)
     P.stage("build", "build", orders=1).tile(0, box[1] + 1, 0, "c").tile(1, box[1] + 1, 0, "t")
     _finish(P, p, box, "o", f"assigned_unit={role} name=Office")
@@ -379,6 +382,22 @@ def office(p: dict) -> Plan:
     zone = next(s for s in P.stages if s.label == "zone")
     P.stages.remove(zone)
     P.stages.insert(1, zone)
+    return P
+
+
+OFFICE_SURFACE = (3, 3)              # BUG-396: the surface office's block
+
+
+def _surface_office(P: Plan, role: str) -> Plan:
+    """BUG-396 (Run 16a i1 Bachwald: no office for 294 days, so the manager validated nothing: 7 brews and 18 orders waited,
+    drink 0; every office hung on the dug Z4 floor of a fortcore): the office on open surface floor, anchor = the block's
+    north-west corner (as the surface hospital and the BUG-368 depot). Nothing is dug, no door, no burrow; chair and table
+    side by side (a table and a chair made the manager take ManageWorkOrders at once, BUG-042), the Office zone over the
+    whole block first (BUG-232: before the furniture the unvalidated orders never make)."""
+    W, H = OFFICE_SURFACE
+    P.stage("zone", "zone").ent(0, 0, W - 1, H - 1, 0, "o", f"assigned_unit={role} name=Office")
+    P.stage("build", "build", orders=1).tile(0, 1, 0, "c").tile(1, 1, 0, "t")
+    P.room("", "office", USE.get("office", "utility"), (0, 0, 0, W - 1, H - 1, 0), 0)
     return P
 
 

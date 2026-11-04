@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Supply: an office for the manager, brewable seeds, cook crops in planted slots, depot sites on the surface (BUG-396 to BUG-399, 2026-11-04; offline, live-untested)
+- **Why:** Run 16 round 2: i1 Bachwald had no office for 294 days (7 brews and 18 orders unvalidated, drink 0, 10 dead), i3 Yawninggilt
+  no brewable seeds and no depot (drink 201 -> 0), i2 Ostgate meals 0 for months beside 700 food days after the cook-crop fix, and
+  `bp sites depot` found nothing for years.
+- **BUG-396:** `office` p.surface=1 (3x3 on open surface floor, Office zone + chair + table, nothing dug), sites without a manifest,
+  `supply` kind (no seal pauses it); `plan propose` drafts it early in a fort without office and dug core (`fort.office`); the kernel
+  asks for it (`PROJECT_REQUEST office why=office`, once a week while manager orders wait), follow places it.
+- **BUG-397:** while the stills' plants are short (`stock.bshort`) empty farm slots take the brewable crop that has seeds; the caravans
+  are asked for seeds and plants when no brewable seed is in stock; the drink block says `(N seeds; gathering, trade)`.
+- **BUG-398:** the cook-crop plan swaps planted slots of crops the kitchen will not cook (plump helmets) for a cook crop, up to
+  `farms.cook_slots` + 1 per 30 citizens (max 8) a season, idempotent; before it needed empty slots, i2 had none.
+- **BUG-399:** the sites export (default box) gets 3 levels on top (`snapshot.sites_up`): the fort's box ended at the surface, so the
+  sky check of the surface templates never saw the top level; an empty answer on such a snapshot says so.
+- **Tests:** tests/test_bug396_399_supply.py (9), tests/lua/test_bug397_brew_seeds.lua (3), test_bug381_cook_crop.lua (+2),
+  test_manager_bypass.lua (+1), test_snapshot_box.lua (sites +3 levels).
+- **Live check:** see the four bug files.
+
 ## Review fix (merge20): the SIEGE/BREACH raise waits by time, not by the hostile's distance (BUG-380; offline, live-untested)
 - **Why:** two review findings in gate.lua `holders()`: with a visible hostile 11..30 tiles away walkers 7..20 steps out were let go but
   cover ~11 tiles while the bridge moves (soldier 26395 crushed); with no hostile (or a stale census, or one beyond 30 tiles) a steady stream
