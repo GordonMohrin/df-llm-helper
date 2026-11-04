@@ -137,7 +137,7 @@ def test_a_fresh_fort_drafts_only_the_core_first(save):
     s = _p0_state(save)
     doc = plan.propose(s, plan.load_phases(), None, decisions={}, applied=set(), fort={"z4": False, "core_any": False})
     built = [b for se in doc["seasons"] for b in se["build"]]
-    assert built and all(b["tpl"] in ("fortcore", "seal") for b in built), built
+    assert built and all(b["tpl"] in ("fortcore", "seal", "workshops") for b in built), built   # BUG-356: + startup shops
     assert {"tpl": "fortcore", "site": "S1", "p": {"stage": 1}} in built
     assert doc["phase_target"] == "P0" and doc["notes"].endswith("apply, wait for s1.dig, propose again")
     assert "a stone dig" not in doc["notes"] and "in its place" not in doc["notes"]    # review: nothing left out is noted

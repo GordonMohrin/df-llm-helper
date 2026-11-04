@@ -367,6 +367,9 @@ Related: FR-xx, BUG-xx
 | [BUG-353](BUG-353-bp-cancel-leaves-the-dig-designations-in-the-map.md) | fixed (offline, live-untested) | high | Run 16c: two bp.cancel + re-place left ~1580 dig designations of the cancelled fortcore projects in the map, the fort starved | runner.lua |
 | [BUG-354](BUG-354-propose-in-year-1-demands-rooms-before-the-core-is-dug.md) | fixed (offline, live-untested) | medium | Run 16c: propose in year 1 drafts farms/dining/bedrooms (ERROR no soil marks, no refuge) while the placed fortcore still digs | plan.py |
 | [BUG-355](BUG-355-fort-name-unreadable-before-save-as.md) | fixed (offline, live-untested) | low | Run 16c: the new fort's name was not readable before save-as | tools/embark |
+| [BUG-356](BUG-356-first-year-hangs-on-the-fortcore-no-still-kitchen-carpenter.md) | fixed (offline, live-untested) | high | Run 16a-d: the first year of every new fort hangs on the fortcore: no still, kitchen or carpenter until stage 1 is dug, drink 3 d -> 0 | rooms.py, sites.py, plan.py |
+| [BUG-357](BUG-357-door-deadlock-no-carpenter.md) | fixed (offline, live-untested) | high | Run 16b/16c: workshops and farms wait 32+ days for a door that only a Carpenter's workshop (that does not exist) makes | lua/dfllm/runner.lua |
+| [BUG-358](BUG-358-three-parallel-fortcore-projects.md) | fixed (offline, live-untested) | medium | Run 16d: three parallel fortcore projects, two set aside for 34-50 days (a plan's stage 1 beside the hand-placed core) | dfpilot/cmd.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

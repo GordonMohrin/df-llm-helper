@@ -1,5 +1,26 @@
 # CHANGELOG dfpilot
 
+## Startup shops on the surface, no door wait without a carpenter, one fortcore (BUG-356, BUG-357, BUG-358, 2026-11-04; offline, live-untested)
+- **Why:** Run 16a-d (new forts, y372/373): the first year hung on the fortcore (no still, kitchen, carpenter or mason until
+  stage 1 was dug, drink 3 d -> 0 in every fort); farms and two workshops projects stood 32 d at build 50 % 'waits for door'
+  for a door only a carpenter makes, with no carpenter; three fortcore projects ran at once (two set aside 34-50 d).
+- **BUG-356:** `workshops surface=1` (new param, default 0): Still, Kitchen, Carpenters, Masons (or `only=`/skip/add) on open
+  surface floor, nothing dug, no door, no burrow, no fort manifest needed (sites.py `_surface_shops`: flat revealed floor with
+  open sky above, the citizens' walk group, off the keep-out tiles; `--near <wagon>` moves it). plan propose in year 1 drafts it
+  after the seal and the fortcore stage 1 (once; fort fact `startup`), build kind 'supply' (plan.py, runner.lua kind_of): no
+  open seal pauses it. The undug fortcore's planned shops no longer make `place()` drop Still/Kitchen of this set. Not built:
+  the water source zone for a reachable brook.
+- **BUG-357:** runner.lua measure_build: while neither a Carpenters nor a Masons workshop stands built, a planned door of a room
+  or farm project (not seal/plug/repair/defense) is not awaited: the stage goes on, the planned door is built once a shop makes
+  the item (kern.log 'door(s) not awaited'); a new fort that deferred a door asks for the mandatory shops (PROJECT_REQUEST
+  workshops why=mandatory, as a reclaimed fort did). No contract change (event, fields and config as before).
+- **BUG-358:** `cmd._place` refuses a fortcore stage 1 while another stage 1 project (not a retrofit, not cancelled, not of a
+  discarded timeline) is on file, naming it and the way out (stage 2-4 `site=same`, or `bp.cancel`, then place again).
+- **Tests (fail on 595364a):** tests/test_bug356_358_startup.py (13), tests/lua/test_bug357_door_shop.lua (5; runner_world
+  `real_doors` option), golden workshops.json (param `surface`).
+- **Live check:** a new fort: `plan propose` = seal + fortcore stage 1 + `workshops surface=1`; `bp sites workshops surface=1
+  --fresh --near <wagon x,y,z>`; the four shops stand in days, drink days rise; `bp.place fortcore` twice: the second refused;
+  farms without a carpenter pass their build stage.
 ## Site ranking only where the citizens can walk, an unreachable dig is named after 3 days, year 1 digs before it plans rooms (BUG-352, BUG-354, 2026-11-04; offline, live-untested)
 - **Why:** i3 Run 16c (site97): all 13 citizens stood in walk group 1562, `bp sites fortcore` ranked S2/S3 on soil beyond
   the brook (group 1), the fortcore on [58,128,125] stood 30 d at s1.dig 0 % ('unreachable DigChannel'), the fort starved;

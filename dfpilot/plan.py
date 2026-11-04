@@ -254,6 +254,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "z4": bool((man.get("zones") or {}).get("Z4")) if isinstance(man.get("zones"), dict) else False,  # BUG-197
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "core_dig": core_digging(save_dir, state),               # BUG-354: its stage 1 is still digging
+            "startup": startup_placed(save_dir),                     # BUG-356: the surface still/kitchen/carpenter/mason set
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
             "farms": farm_facts(save_dir, state),                     # BUG-297: an open farms project, a farm site
@@ -619,7 +620,7 @@ def build_kind(b: dict) -> str:
         return "tombs"
     if tpl == EXPLORE:                                    # DECISIONS 4: the ore search is paused by no open seal
         return "explore"
-    if tpl in SUPPLY_TPLS or (tpl == "workshops" and _food_shops(p)):
+    if tpl in SUPPLY_TPLS or (tpl == "workshops" and (_food_shops(p) or p.get("surface") == 1)):   # BUG-356: startup shops
         return "supply"
     if tpl in BEDS_TPLS:
         return "beds"
@@ -2275,6 +2276,19 @@ def applied_builds(save_dir: Path, state: dict | None = None) -> set[tuple]:
     return out
 
 
+STARTUP_BUILD = {"tpl": "workshops", "site": "S1", "p": {"surface": 1}}     # BUG-356: Still, Kitchen, Carpenters, Masons
+
+
+def startup_placed(save_dir: Path) -> bool:
+    """BUG-356: a workshops project of the startup set (p.surface = 1) is in <save>/bp (placed, running or done; a cancelled
+    one is moved away by bp.cancel)."""
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == "workshops" and (doc.get("params") or {}).get("surface") == 1:
+            return True
+    return False
+
+
 def core_digging(save_dir: Path, state: dict | None) -> bool:
     """BUG-354 (Run 16c: propose in year 1 wanted farms@S1, dining and bedrooms while the placed fortcore's stage 1 had dug
     nothing): a fortcore project (not a retrofit, not parked on a breach) is at its stage 1 dig in state.proj. Room builds
@@ -2516,6 +2530,11 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                                                           and (_stage_of(b.get("p") or {}) or 1) == 1)]
         if not dug and not any(b["tpl"] == "fortcore" for b in keep) and (info is None or "fortcore" in info):
             keep.append({"tpl": "fortcore", "site": "S1", "p": {"stage": 1}})
+        # BUG-356 (Run 16a-d: still, kitchen and carpenter refused until stage 1 was dug, drink 3 d -> 0 in every new fort,
+        # a door that only a carpenter makes): the startup shops on the surface beside the wagon, after the core's anchor
+        startup = not (fort or {}).get("startup") and (info is None or "workshops" in info)
+        if startup:
+            keep.append(copy.deepcopy(STARTUP_BUILD))
         fresh = sorted({b["tpl"] for b in builds if b not in keep})
         builds, target = keep, cur
         front = [b for b in front if any(b is x for x in builds)]
@@ -2605,6 +2624,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         what = ("BUG-354: fortcore stage 1 is still digging (no Z4 core floor yet): only the seal" if dug else
                 "BUG-197: no fortcore and no Z4 core floor yet: only fortcore stage 1"
                 + (" and seal" if any(b["tpl"] == SEAL for b in builds) else ""))
+        if any(b.get("tpl") == "workshops" and (b.get("p") or {}).get("surface") == 1 for b in builds):
+            what += "; BUG-356: + workshops surface=1 (still, kitchen, carpenter, mason on the surface beside the wagon: bp sites workshops surface=1 --near <wagon x,y,z>)"
         doc["notes"] += (f"; {what} drafted, phase_target {cur}"
                          + (f" (left out: {', '.join(fresh)})" if fresh else "") + "; apply, wait for s1.dig, propose again")
     # BUG-349 (Run 15 i1 y378, i2 y388: every draft raised the phase and its own check refused it 'while the perimeter is

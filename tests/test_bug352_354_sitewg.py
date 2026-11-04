@@ -128,7 +128,7 @@ def test_year_one_with_the_placed_core_still_digging_drafts_no_rooms(save):
     fort = {"z4": False, "core_any": True, "core_dig": True}
     doc = plan.propose(s, plan.load_phases(), None, decisions={}, applied={("fortcore", 1)}, fort=fort)
     built = [b for se in doc["seasons"] for b in se["build"]]
-    assert all(b["tpl"] == "seal" for b in built), built               # old: farms, dining, bedrooms ...
+    assert all(b["tpl"] in ("seal", "workshops") for b in built), built   # BUG-356: + startup shops; old: farms, dining, bedrooms ...
     assert doc["phase_target"] == "P0"
     assert "BUG-354: fortcore stage 1 is still digging" in doc["notes"]
     assert doc["notes"].endswith("apply, wait for s1.dig, propose again")
