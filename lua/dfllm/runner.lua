@@ -4485,10 +4485,14 @@ local function gather_zone(K)
   local st = K.view().stock
   local fd = type(st) == 'table' and int(st.food_d) or nil
   if not fd then return end
+  -- BUG-382 (Run 16c i3: drink 150 -> 0 days with 16 brews waiting and 'no brewable plants' beside food 378 days; the zone
+  -- was removed at food > gather_off and never drawn again): economy's stock.bshort (drink below gather.drink_d, too few
+  -- brewable plants) draws the zone like low food does, and keeps it
+  local dshort = type(st) == 'table' and int(st.bshort) == 1
   local g = S.rt.gather
   -- BUG-074: a zone an older kernel drew (no v) covers its whole square, unreachable plants included: while food is still
   -- short it is removed once and drawn again on the citizens' walk group (when that group is known)
-  if type(g) == 'table' and g.v ~= 2 and type(g.z) == 'table' and #g.z > 0 and fd < M.CFG.gather_below
+  if type(g) == 'table' and g.v ~= 2 and type(g.z) == 'table' and #g.z > 0 and (fd < M.CFG.gather_below or dshort)
      and (K.now().season or 0) < 3 and Q.home_group(K) then
     local ok, n = K.act.zone_remove(GATHER)
     K.log('info', 'gather zone of an older kernel (the whole square) removed, %s zones: drawn again on the citizens\' walk group',
@@ -4497,7 +4501,9 @@ local function gather_zone(K)
     dirty()
   end
   if type(g) == 'table' then
-    if fd > M.CFG.gather_off then
+    -- BUG-382: a zone drawn for the drink (g.dr) goes once the drink is back and food is not low; one drawn for food at
+    -- gather_off food days, unless the drink needs it
+    if not dshort and (fd > M.CFG.gather_off or (g.dr and fd >= M.CFG.gather_below)) then
       local ok, n = K.act.zone_remove(GATHER)
       S.rt.gather = nil
       dirty()
@@ -4505,7 +4511,7 @@ local function gather_zone(K)
     end
     return
   end
-  if fd >= M.CFG.gather_below or (K.now().season or 0) >= 3 then return end
+  if (fd >= M.CFG.gather_below and not dshort) or (K.now().season or 0) >= 3 then return end
   local c = S.rt.gc or fort_center(K)
   if not c then return end
   S.rt.gc = c
@@ -4564,15 +4570,17 @@ local function gather_zone(K)
       drawn, out = drawn + tiles, out + left
     end
   end
-  S.rt.gather = {v = 2, z = made, x = x0, y = y0, side = side, t = now(K), g = home, n = drawn, out = out}
+  S.rt.gather = {v = 2, z = made, x = x0, y = y0, side = side, t = now(K), g = home, n = drawn, out = out,
+                 dr = (fd >= M.CFG.gather_below and dshort) or nil}
   dirty()
   if home and not whole then
-    K.log('warn', 'food %d days: gather zone at %d,%d on z %s: %d tiles in %d rects on the citizens\' walk group %d, ' ..
-          '%d tiles of the %dx%d square left out (not on that group, or past the %d-rect cap)', fd, x0, y0,
+    K.log('warn', 'food %d days%s: gather zone at %d,%d on z %s: %d tiles in %d rects on the citizens\' walk group %d, ' ..
+          '%d tiles of the %dx%d square left out (not on that group, or past the %d-rect cap)', fd,
+          dshort and ', drink plants short' or '', x0, y0,
           table.concat(made, ','), drawn, nrect, home, out, side, side, M.CFG.gather_rects)
   else
-    K.log('warn', 'food %d days: gather zone %dx%d at %d,%d on z %s (%d tiles; the citizens\' walk group is unknown, ' ..
-          'nothing left out)', fd, side, side, x0, y0, table.concat(made, ','), side * side * #made)
+    K.log('warn', 'food %d days%s: gather zone %dx%d at %d,%d on z %s (%d tiles; the citizens\' walk group is unknown, ' ..
+          'nothing left out)', fd, dshort and ', drink plants short' or '', side, side, x0, y0, table.concat(made, ','), side * side * #made)
   end
 end
 

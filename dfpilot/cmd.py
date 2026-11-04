@@ -1417,6 +1417,12 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
         out.append("no ranked site: the startup shops need a flat block of open surface floor (no trees, rocks, water or "
                    "hill) on the citizens' walk group; `dfllm bp sites workshops surface=1 --fresh --near <wagon x,y,z> "
                    "--within 40` on a snapshot of the surface, or fewer shops (only=Still,Kitchen)")
+    elif ranked == 0 and tpl == "hospital" and (params or {}).get("surface"):
+        # BUG-384: the surface hospital needs no fortcore, only a 7x5 block of open flat ground near accepted water
+        out.append("no ranked site: the surface hospital needs a 7x5 block of open surface floor (no trees, rocks, water or hill) "
+                   "on the citizens' walk group within reach of accepted water (a well over water, a Water Source zone): "
+                   "`dfllm bp sites hospital surface=1 --fresh --near <wagon x,y,z> --within 40`; no accepted water yet: "
+                   "water first (dfllm cmd inspect '{\"what\":\"water_sources\"}')")
     elif ranked == 0 and tpl == "depot":
         # BUG-368: the trade depot needs no fortcore, only a 5x5 block of open flat ground the citizens reach
         out.append("no ranked site: the trade depot needs a 5x5 block of open surface floor (no trees, rocks, water or hill) "

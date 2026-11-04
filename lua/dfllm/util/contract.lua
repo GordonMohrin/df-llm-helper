@@ -313,7 +313,7 @@ C.STATE_OWNERS = {
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
-  ['stock.dwhy'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy',
+  ['stock.dwhy'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
@@ -444,6 +444,7 @@ C.STATE_SPEC = obj({
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
                     pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
                     dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target
+                    bshort = FLAG,                  -- BUG-382: drink below gather.drink_d and too few brewable plants (runner's gather zone)
                     hungry = NAT,                   -- BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
                     dforb = NAT, fforb = NAT}),     -- FR-76: drink / food units the census counts as forbidden
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},

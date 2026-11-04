@@ -112,7 +112,7 @@ STATE_OWNERS = {
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy",
     "stock.picks": "economy",
-    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy",
+    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy",
     "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "mood": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
@@ -1012,6 +1012,8 @@ STATE = Obj(
                            "mshort": FLAG, "melt": NAT,
                            # BUG-042: why the stills do not brew while drink is below the plan's target
                            "dwhy": Str(maxbytes=80),
+                           # BUG-382: drink below gather.drink_d and too few brewable plants: the runner's gather zone follows it
+                           "bshort": FLAG,
                            # BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
                            "hungry": NAT,
                            # FR-76: drink / food units the census counts as forbidden (a reclaimed fort's stock)

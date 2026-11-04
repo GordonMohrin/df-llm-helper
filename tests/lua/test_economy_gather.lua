@@ -231,4 +231,18 @@ T.test('BUG-042: drink low with too few brewable plants -> plant gatherers (why 
   T.eq(#W2.find_events('WORK_DETAIL'), 0)
 end)
 
+-- BUG-382: the same condition (drink below gather.drink_d, the brewable plants short of the deficit) is published as
+-- stock.bshort, which the runner's gather zone follows
+T.test('BUG-382: stock.bshort is 1 while the brewable plants cannot brew the deficit below gather.drink_d, else absent', function()
+  local W = world{food = 2000, drink = 20, plants = 0}
+  days(W, 2)
+  T.eq(W.state().stock.bshort, 1)
+  local W2 = world{food = 2000, drink = 20, plants = 500}
+  days(W2, 2)
+  T.eq(W2.state().stock.bshort, nil, '500 plump helmets brew the deficit')
+  local W3 = world{food = 2000, drink = 4000, plants = 0}
+  days(W3, 2)
+  T.eq(W3.state().stock.bshort, nil, 'drink above the line')
+end)
+
 T.done()

@@ -388,6 +388,10 @@ Related: FR-xx, BUG-xx
 | [BUG-374](BUG-374-seal-says-nothing-to-close-while-status-names-ways-in.md) | fixed (offline, live-untested) | medium | Run 16d: seal at=last 'nothing to close' beside open ways in (old snapshot closes, counted ways without tiles) | dfpilot/cmd |
 | [BUG-375](BUG-375-perimeter-opens-again-every-year-and-holds-the-pop-cap.md) | fixed (offline, live-untested) | medium | Run 16d: saplings reopen the perimeter every year; pop cap held beside a queued seal | dfpilot/cmd, lua/readiness |
 | [BUG-376](BUG-376-audit-bypass-no-wall-tile-no-fix.md) | fixed (offline, live-untested) | low | Run 16d/16b: audit bypass 'no wall tile on the route' names no fix or waiver | dfpilot/bp/topo, cmd, brief, plan |
+| [BUG-381](BUG-381-no-meals-the-only-crop-is-the-cook-banned-plump-helmet.md) | fixed (offline, live-untested) | high | Run 16 i1/i2/i4: 0 meals 'raw food is not cooked' for months beside 2,000 cook-banned plump helmets and a built kitchen; the farms plant no crop the kitchen may cook | economy.lua |
+| [BUG-382](BUG-382-drink-spirals-no-gather-zone-for-the-stills-plants.md) | fixed (offline, live-untested) | high | Run 16c: 'no brewable plants' beside 2 seedless farms, drink 150 -> 0 d at food 378 d; the gather zone follows low food only | economy.lua, runner.lua, contract |
+| [BUG-383](BUG-383-patient-dies-of-thirst-under-a-stale-givewater-job.md) | fixed (offline, live-untested); open: a patient no carrier reaches | high | Run 16b: a patient died of thirst under '1 GiveWater job running 25+ days without effect' (noeffect was a report only) | water.lua |
+| [BUG-384](BUG-384-no-hospital-without-a-fortcore.md) | fixed (offline, live-untested) | high | Run 16c: hospital 0 sites without a fortcore, 7 hurt: `hospital surface=1` on open floor by the accepted water | dfpilot/bp, plan, cmd |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
