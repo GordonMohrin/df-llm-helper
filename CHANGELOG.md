@@ -1,5 +1,20 @@
 # CHANGELOG dfpilot
 
+## Water the citizens can reach: ice, an early drink check, a thirst line (BUG-400 to BUG-402, 2026-11-04; offline, live-untested)
+- **Why:** Run 16a i1 Mansionlauded (and the first i1 fort Bachwald) died of thirst, 13 of 16 in y372-373: `bp sites fortcore` ranked S1 110,62,159
+  `water 1 steps` (score 1029) while `inspect reach` had drink empty and `water_sources` knew one body with reach 0; the questions that came
+  were about stills and, later, thirst; the status showed 'nobody thirsty: they drink water' and the dead in a rank-4 line.
+- **BUG-400:** the sites export lists the ice tiles (`ice`, snapshot.lua `classify` gives an ice tile no water char); `sites.water_steps` gives no
+  bank above water with ice right over it and walks the citizens' walk group (`wg`) only; `_no_water` says `lie under ice` / `is frozen`.
+  Contract: snapshot `ice?` (schema, CONTRACTS, appendix). RANK_V 6.
+- **BUG-401:** `water.drink_access` (accepted source or a bank the citizens reach); economy `no_water`: none and no brewable plant ->
+  DECISION_NEEDED `no_water` (A, urgent) at once and weekly, with `d.cmds` (water_sources, bp sites cistern, reach, trade.want), no 'they drink
+  water' all-clear, gatherers and caravans (plants, drink) started, `stock.dwhy` says `no reachable water`; `plan propose` puts a first note.
+- **BUG-402:** `brief.thirst_items`: `DYING OF THIRST: drink 0d, N dead of dehydration this month: <reason>` right under the clock in status and brief.
+- **Tests:** tests/test_bug400_402_water.py (9), tests/lua/test_bug400_402_water.lua (5).
+- **Live check:** a river in winter/early spring: the sites export has `ice`, `bp sites fortcore --fresh` no longer says `water 1 steps` over it; a fort
+  with no reachable water and no brewable plant: `events --cls A` shows `no_water` on the first day; `status` with dehydration deaths and drink 0: the
+  second line is `DYING OF THIRST`.
 ## Surface core for an aquifer world, area-only wet layers, an applicable propose (BUG-387 to BUG-389, 2026-11-04; offline, live-untested)
 - **Why:** Run 16 region1 (aquifer nearly everywhere): no fort got a dug fortcore ('no dry fortcore site ... (wet level z130)' at every depth in i2, depth=1
   breached heavy_aquifer at 4 % in i1, sites 1-6 steps from water in i3); every room template hangs on the dug Z4 floor, so office, dining, tavern and bedrooms

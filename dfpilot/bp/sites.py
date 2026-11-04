@@ -62,7 +62,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 5                            # BUG-346/359: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 6                            # BUG-346/359/400: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -494,7 +494,7 @@ def fill_source(snap: dict, manifest: dict | None) -> dict:
     if not z4:
         return {"ok": None, "steps": None, "at": None, "why": "the fort manifest has no core (zones.Z4): not checked"}
     g = Graph(snap)
-    dist = water_steps(g, [t for comp in keep for t in comp])
+    dist = water_steps(g, [t for comp in keep for t in comp], ice_tiles(snap), other_group(snap, g))
     core = g.mask(z4)
     steps = min((d for i, d in dist.items() if core[i]), default=None)
     if steps is None:
@@ -1256,9 +1256,10 @@ def _fortcore(snap, rects, bad, hid, mk, wet_above=None):
     under = {w: lst for w, lst in rects.items() if w < 0}
     g = Graph(snap)
     bodies = _water_bodies(snap, 8, edge=True)             # a brook, river or lake, not a puddle
-    wsteps = water_steps(g, bodies)
+    ice = ice_tiles(snap)
+    wsteps = water_steps(g, bodies, ice, other_group(snap, g))      # BUG-400: not over ice, on the citizens' walk group
     nwet = sum(row.count(c) for z in range(z0, z1 + 1) for row in rows[f"z{z}"] for c in "~w")
-    none = _no_water(snap, bodies, nwet)                   # BUG-360: why there is no water to walk to
+    none = _no_water(snap, bodies, nwet, ice)                   # BUG-360: why there is no water to walk to
     out = []
     step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 else 1
     for z in range(z0, z1):
@@ -1459,32 +1460,64 @@ def water_bonus(steps: int | None) -> int:
     return max(-80, WATER_NEAR - steps)
 
 
-def water_steps(g: Graph, water=None) -> dict[int, int]:
+def ice_tiles(snap: dict | None) -> set[tuple[int, int, int]]:
+    """BUG-400: the revealed ice tiles of a sites export (snapshot `ice`: a frozen river or lake)."""
+    return {(int(q[0]), int(q[1]), int(q[2])) for q in ((snap or {}).get("ice") or []) if isinstance(q, (list, tuple)) and len(q) == 3}
+
+
+def other_group(snap: dict, g: Graph) -> bytearray | None:
+    """BUG-400: the nodes of g that lie in another walk group than the citizens' (snapshot wg '0'); None when the
+    snapshot carries no walk groups (an audit or debug export, an older kernel)."""
+    wg = snap.get("wg")
+    if not isinstance(wg, dict):
+        return None
+    out = bytearray(g.N)
+    z0 = g.bbox[2]
+    for k, rows in (wg.get("rows") or {}).items():
+        try:
+            base = (int(k[1:]) - z0) * g.WH
+        except ValueError:
+            continue
+        if base < 0 or base >= g.N:
+            continue
+        for yy, row in enumerate(rows[:g.H]):
+            for xx in range(min(len(row), g.W)):
+                if row[xx] == "0":
+                    out[base + yy * g.W + xx] = 1
+    return out
+
+
+def water_steps(g: Graph, water=None, ice=None, other=None) -> dict[int, int]:
     """Walking steps (no climbing) from every reachable node to the nearest tile a dwarf can fill a bucket at:
     a walkable tile with revealed drinkable water on it, beside it, or one level below it (a brook bed under
-    the walkable brook top). `water`: the water tiles that count (default every revealed one)."""
+    the walkable brook top). `water`: the water tiles that count (default every revealed one).
+    BUG-400 (Run 16a Mansionlauded and Bachwald, 'water 1 steps' over a frozen river, the fort died of thirst): `ice`
+    = the ice tiles; water with ice right above it (the ice floor is no brook top) gives no bank above it. `other` =
+    nodes in another walk group than the citizens': never a bank and never walked through, so a step count is a
+    path the citizens can take."""
     if water is None:
         wet = [i for i, c in enumerate(g.t) if c in WATER]
     else:
         wet = [i for i in (g.idx(t) for t in water) if i is not None]
+    iced = {i for i in (g.idx(t) for t in (ice or ())) if i is not None}
     src = set()
     W, H, WH = g.W, g.H, g.WH
     for i in wet:
         x, y, z = i % W, (i // W) % H, i // WH
         for dz in (0, 1):
-            if z + dz >= g.D:
+            if z + dz >= g.D or (dz == 1 and i + WH in iced):
                 continue
             for dx, dy in ((0, 0),) + N8:
                 if 0 <= x + dx < W and 0 <= y + dy < H:
                     j = i + dz * WH + dy * W + dx
-                    if g.walk[j]:
+                    if g.walk[j] and not (other and other[j]):
                         src.add(j)
     dist = {i: 0 for i in src}
     dq = deque(src)
     while dq:
         i = dq.popleft()
         for j in g.adj.get(i, ()):
-            if j not in dist:
+            if j not in dist and not (other and other[j]):
                 dist[j] = dist[i] + 1
                 dq.append(j)
     return dist
@@ -1515,13 +1548,20 @@ def _water_bodies(snap: dict, min_tiles: int, edge: bool = False) -> set:
     return {t for comp in _water_components(snap, min_tiles, edge) for t in comp}
 
 
-def _no_water(snap: dict, bodies: set, nwet: int) -> str:
+def _no_water(snap: dict, bodies: set, nwet: int, ice=None) -> str:
     """BUG-360 (Run 16b Ostgate: 'no water reachable, 0 water surface tiles' with a brook in the embark rectangle): the
     fortcore reason line when no walkable tile reaches revealed water. The sites box is the fort's pieces plus a margin
     (or the surface around the map centre), not the embark: it said nothing about where the brook lay. Now it names
     the box and whether any water was inside it at all."""
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
     box = f"x{x0}-{x1} y{y0}-{y1} z{z0}-{z1}"
+    if bodies and ice and any((x, y, z + 1) in ice for x, y, z in bodies):
+        n = sum(1 for x, y, z in bodies if (x, y, z + 1) in ice)
+        return (f"no water reachable ({n} of {len(bodies)} water tile(s) in the snapshot box {box} lie under ice: a frozen "
+                "river or lake is no drink until it thaws)")
+    if not bodies and not nwet and ice:
+        return (f"no water reachable ({len(ice)} ice tile(s) in the snapshot box {box}: the river or lake is frozen, "
+                "no drink until it thaws)")
     if bodies:
         return f"no water reachable (revealed water in the snapshot box {box}, but no walking route to it)"
     if nwet:

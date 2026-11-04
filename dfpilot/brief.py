@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from . import files, paths, schema, traps as _traps
-from .events import SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, fmt_tick, fmt_ticks
+from .events import DAY, SEASON, YEAR, clip, est_tokens, fmt_age, fmt_d, fmt_event, fmt_tick, fmt_ticks
 
 STATUS_TOKENS, BRIEF_TOKENS = 300, 1500
 PROJ_STATUS_TOKENS = 32               # BUG-212: the status proj line (rank 1, never dropped) is clipped to this
@@ -507,6 +507,45 @@ def mood_items(ctx: Ctx, n: int = 2) -> list[tuple[int, str]]:
     if not isinstance(ms, list):
         return []
     return [(1, str(m["t"])) for m in ms[:n] if isinstance(m, dict) and m.get("t")]
+
+
+THIRST_DRINK_D = 3          # BUG-402: the drink days at or under which dying of thirst is a supply failure, not fate
+THIRST_MONTH = 28 * DAY     # BUG-402: the window of dehydration deaths
+THIRST_DYING = 50000        # BUG-402: a patient's thirst from which death is near (water.lua PATIENT_DYING at 60,000)
+
+
+def thirst_items(ctx: Ctx) -> list[tuple[int, str]]:
+    """BUG-402 (Run 16a Mansionlauded: 13 of 16 dead of dehydration, drink 0 d; the status showed them as 'deaths (season)'
+    among rank-4 lines and 'nobody thirsty: they drink water'): while drink is at THIRST_DRINK_D days or less and citizens
+    died of dehydration within a month (DEATH events; else the season's care.died) or a patient lies over THIRST_DYING, a
+    rank-1 line under the clock: how many, the drink days and the reason (the kernel's drink cause stock.dwhy, else no
+    accepted water, else that the water cannot be reached), with the two commands that show it."""
+    st, w = ctx.s.get("stock") or {}, ctx.s.get("water")
+    dd = st.get("drink_d")
+    if not isinstance(dd, int) or dd > THIRST_DRINK_D:
+        return []
+    now = ctx.now_tick()
+    dead = 0
+    if isinstance(now, int):
+        seen = {}
+        for e in ctx.b:
+            d, t = _d(e), e.get("tick")
+            if e.get("type") == "DEATH" and d.get("cause") == "dehydrated" and isinstance(t, int) and now - t < THIRST_MONTH:
+                seen[d.get("unit", t)] = 1
+        dead = len(seen)
+    if not dead:
+        dead = ((ctx.s.get("care") or {}).get("died") or {}).get("dehydrated", 0)
+    dying = w.get("patients", 0) if isinstance(w, dict) and (w.get("thirst_max") or 0) >= THIRST_DYING else 0
+    if not dead and not dying:
+        return []
+    if st.get("dwhy"):
+        why = str(st["dwhy"])
+    elif isinstance(w, dict) and not w.get("src"):
+        why = "no accepted water and no brewed drink"
+    else:
+        why = "no brewed drink, the accepted water is out of their reach"
+    out = f"DYING OF THIRST: drink {dd}d" + (f", {dead} dead of dehydration this month" if dead else "")         + (f", {dying} patient(s) over thirst {THIRST_DYING}" if dying else "")         + f": {why} (dfllm cmd inspect what=reach / water_sources; events --cls A)"
+    return [(1, out)]
 
 
 SWEEP_RUN = ("open", "muster", "kill", "recall", "close")
@@ -1162,7 +1201,7 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append((1, _no_state(ctx)))
     else:
-        lines[1:1] = mood_items(ctx)             # BUG-285: a strange mood is an emergency: the top line under the clock
+        lines[1:1] = thirst_items(ctx) + mood_items(ctx)     # BUG-402: dying of thirst first; BUG-285: a strange mood is an emergency: the top line under the clock
         # BUG-154 (live i4): the mood_ws command and the care-first line are short and say what to do next and what
         # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first.
         # BUG-212 (live round 3): PLAYBOOK 9.3 reads the proj line: rank 1 too, its first two projects (brief has three)
@@ -1320,7 +1359,7 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
         head.append(_no_state(ctx))
     else:
         core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
-        head[1:1] = [t for _, t in mood_items(ctx, 4)]  # BUG-285: the open strange moods under the clock line
+        head[1:1] = [t for _, t in thirst_items(ctx) + mood_items(ctx, 4)]  # BUG-402, BUG-285: the open strange moods under the clock line
         head += [x for x in (line_unready(ctx), _join(t for _, t in curse_items(ctx)), line_alarm(ctx), line_pop(ctx),
                              line_supply(ctx), line_cavern(ctx), line_stress0(ctx), line_stress(ctx), _join(core),
                              _traps.status_line(ctx.s), line_burrow(ctx),                          # FR-96

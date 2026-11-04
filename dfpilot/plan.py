@@ -3072,6 +3072,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                          "no water or food build left to draft (applied, under way or no template)")
                          + ("" if fresh is None else "; after s1.dig propose again: cistern, farms and a Still/Kitchen"
                             " first"))
+    nw = no_water_note(s)
+    if nw:                                       # BUG-401: before every other note, the first thing the plan says
+        doc["notes"] = nw + ("; " + doc["notes"] if doc["notes"] else "")
     if stone:
         doc["notes"] += f"; {stone}: bedrooms@S1 n=4 first (a stone dig)"
     if stress and sdrafts and not rb:
@@ -3115,6 +3118,19 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         if cur < SWEEP_PHASE and not (((prev or {}).get("caverns") or {}).get("sweep") is True):
             doc.pop("caverns", None)               # FR-99: the sweep came with the raise only
     return doc
+
+
+def no_water_note(s: dict | None) -> str | None:
+    """BUG-401 (Run 16a Mansionlauded, Bachwald: the fort sat on a frozen river with no reachable water and no brewable plant,
+    the plan was fortcore, shops, office; 13 of 16 died of thirst): the kernel's early check (economy no_water) says so in
+    state stock.dwhy ('no reachable water ...') and raised DECISION_NEEDED no_water. The plan puts it first: water before
+    every other build, and the commands of that decision. None while the kernel reports water the citizens reach."""
+    why = ((s or {}).get("stock") or {}).get("dwhy")
+    if not (isinstance(why, str) and why.startswith("no reachable water")):
+        return None
+    return ("BUG-401: NO WATER THE CITIZENS REACH and no brewable plant: water comes before every build below "
+            "(dfllm events --cls A: DECISION_NEEDED no_water has the commands: a Water Source zone or a well at the nearest "
+            "reachable water, a cistern, gatherers and caravans for plants and drink; dfllm cmd inspect what=water_sources)")
 
 
 def emergency(s: dict | None) -> str | None:
