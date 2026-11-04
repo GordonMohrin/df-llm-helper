@@ -41,6 +41,15 @@ M.AWAY_NAMES = 4       -- burrows a recall may name
 M.COUNT_EVERY = 1000   -- ticks between visible-unit counts (perf.csv `units`) and the animal census (census.a)
 M.ANIMAL_MAX = 120     -- census.a.list bound
 M.FRIEND_MAX = 40      -- census.h.friends bound (BUG-027)
+-- BUG-338 (Run 15c Inkintense y379: 32 civilians stood in the killing field between O1 and B1, a part of Kern+ there,
+-- when the war cave dragon broke O1; PREDATOR_FAR said "nearest citizen 63 tiles" while it killed them 8-11 tiles away):
+-- census.u.atk = the civilians on the attack side of the inner bridge (outside Kern+ and the refuge, or on an intake tile:
+-- zones Z1/Z2 and the killboxes, even where Kern+ covers them), atk_ids <= OUT_MAX of them; every hostile entry carries
+-- da = the distance to the nearest civilian anywhere (Kern+, killing field, refuge; only those within DA_DZ levels: a
+-- cavern under the fort is no neighbour), db = the xy distance to the nearest bridge footprint within BD_DZ levels (-1
+-- none) and, for a building destroyer or a great danger, pd = 1 when its own path ends inside the fort (a Kern+ tile, an
+-- intake or past-B1 zone, or within BD_NEAR tiles of a bridge): DF's unit.path.dest, the last step of the path it walks
+M.DA_DZ, M.BD_DZ, M.BD_NEAR = 3, 3, 30
 local CIT_FAST = {SIEGE = true, BREACH = true, DRILL = true}
 
 local st                -- module state, reset by init
@@ -92,6 +101,13 @@ local function geometry(K)
   return g
 end
 
+local function in_boxes(boxes, x, y, z)
+  for _, b in ipairs(boxes) do
+    if x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] then return true end
+  end
+  return false
+end
+
 local function threat_armed(K)
   local ok, flag = K.call('threat', 'armed')
   return ok and flag == 1
@@ -119,6 +135,7 @@ local function scan_citizens(K, now)
   -- default to sane only, API.txt:1464-1470). Insane ones only count on bridge footprints.
   local all = U.getCitizens(false, true)
   local ids, sids, out, out_pos, insane = {}, {}, {}, {}, {}
+  local civ_pos, atk, atk_n = {}, {}, 0           -- BUG-338
   local cit, adults, soldiers, stressed, outside = 0, 0, 0, 0, 0
   local on_bridge = {}
   for _, b in ipairs(g.bridges) do on_bridge[b.name] = 0 end
@@ -143,10 +160,20 @@ local function scan_citizens(K, now)
         if geom.in_bbox(P, b.fp) then on_bridge[b.name] = on_bridge[b.name] + 1 end
       end
       -- inside = Kern+ or the refuge (behind B2); soldiers do not count (DESIGN §4)
+      local is_out = false
       if sane and not soldier and kb and not B.isAssignedTile(kb, P) and not (rb and B.isAssignedTile(rb, P)) then
+        is_out = true
         outside = outside + 1
         out[#out + 1] = id
         out_pos[#out_pos + 1] = {x = x, y = y, z = z}
+      end
+      -- BUG-338: every civilian's position (the predator distance da), and the ones on the attack side of B1
+      if sane and not soldier then
+        civ_pos[#civ_pos + 1] = {x = x, y = y, z = z}
+        if is_out or in_boxes(g.zin, x, y, z) then
+          atk_n = atk_n + 1
+          if #atk < M.OUT_MAX then atk[#atk + 1] = id end
+        end
       end
       if awb and sane and not soldier then
         local inb = false
@@ -163,12 +190,13 @@ local function scan_citizens(K, now)
   table.sort(insane)
   local out_ids = {}
   for i = 1, math.min(#out, M.OUT_MAX) do out_ids[i] = out[i] end
-  st.out_pos = out_pos
+  st.out_pos, st.civ_pos = out_pos, civ_pos
+  table.sort(atk)
   st.cit_tick, st.cit_due = now.tick, false
   K.census.u = {tick = now.tick, cit = cit, adults = adults, children = cit - adults, soldiers = soldiers,
                 ids = ids, soldier_ids = sids, outside = kb and outside or -1, outside_ids = out_ids,
                 on_bridge = on_bridge, stressed = stressed, caged = st.caged or {}, units = st.units or -1,
-                insane_ids = insane}
+                insane_ids = insane, atk = kb and atk_n or -1, atk_ids = atk}
   if awb then
     table.sort(aw)
     local l, to = {}, {}
@@ -186,7 +214,7 @@ local function hscan_begin(K, now, armed)
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
            zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0, an = 0, rin = 0,
            near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick, nben = 0, benign = {},
-           armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {},
+           armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {}, civ_pos = st.civ_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
   st.hs.K = K                                   -- FR-33 entrances: fetched on the first predator candidate
@@ -329,12 +357,6 @@ end
 local function large_predator(u) return raw_flags(u).p end
 
 
-local function in_boxes(boxes, x, y, z)
-  for _, b in ipairs(boxes) do
-    if x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] then return true end
-  end
-  return false
-end
 
 local function predator(u, hs)
   if not large_predator(u) then return false end
@@ -441,7 +463,10 @@ local function consider(hs, u)
   -- Run 11 (site98 y439): an invader whose raws make it an animal (rf.an: a mount or pet the invaders left behind,
   -- ELK_BIRD 28188 at the map edge for 45 days) counts like a wild animal: not in inv (no arrival lockdown of its own;
   -- threat and reflex apply the predator rules), k 'danger' with an = 1, and the walk-group rule below applies to it
-  local an = inv and rf.an == true and not great and not undead
+  -- BUG-338 (Run 15c Inkintense y379: the army's war cave dragon was listed as a wild danger, PREDATOR_FAR "no
+  -- lockdown" at the map edge, then toppled the raised O1 and killed 5 at B1): a building destroyer is never a mount left
+  -- behind; it stays an invader (k 'inv', counted in inv) whatever its raws say about learning
+  local an = inv and rf.an == true and not rf.bd and not great and not undead
   if an then inv = false end
   -- live L7 (Paddletribes): demons in the underworld (z1-5, a walkable group of their own) were visible from the
   -- map's edge and kept the fort in ALERT (idle 78 %, O1 up). A non-invader on another walkable group that cannot
@@ -471,7 +496,7 @@ local function consider(hs, u)
     d_o1 = math.max(math.abs(x - c.x), math.abs(y - c.y), math.abs(z - c.z))
     hs.near_o1 = minpos(hs.near_o1, d_o1)
   end
-  local nb = hs.near_bridge
+  local nb, db = hs.near_bridge, -1
   for _, b in ipairs(g.bridges) do               -- Chebyshev distance to the footprint box
     local f = b.fp
     local dx = x < f[1] and f[1] - x or (x > f[4] and x - f[4] or 0)
@@ -480,10 +505,16 @@ local function consider(hs, u)
     local d = math.max(dx, dy, dz)
     local cur = nb[b.name]
     if cur < 0 or d < cur then nb[b.name] = d end
+    if dz <= M.BD_DZ then db = minpos(db, math.max(dx, dy)) end       -- BUG-338: on the bridges' own levels
   end
   for _, p in ipairs(hs.out_pos) do
     local d = math.max(math.abs(x - p.x), math.abs(y - p.y), math.abs(z - p.z))
     if dcit < 0 or d < dcit then dcit = d end
+  end
+  local da = -1                                  -- BUG-338: the nearest civilian anywhere, within DA_DZ levels
+  for _, p in ipairs(hs.civ_pos) do
+    local dzc = math.abs(z - p.z)
+    if dzc <= M.DA_DZ then da = minpos(da, math.max(math.abs(x - p.x), math.abs(y - p.y), dzc)) end
   end
   if dcit >= 0 then hs.near_cit = minpos(hs.near_cit, dcit) end
   local zn, ik = 0, false
@@ -509,8 +540,30 @@ local function consider(hs, u)
     if dfhack.burrows.isAssignedTile(hs.rb, P) then rin, hs.rin = true, hs.rin + 1 end
   end
   local list = hs.list
-  local entry = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz,
+  local entry = {id = id, x = x, y = y, z = z, d_o1 = d_o1, dc = dcit, zn = zn, dz = dz, da = da, db = db,
                  k = great and 'great' or (undead and 'undead') or (inv and 'inv') or 'danger'}
+  -- BUG-338: where a building destroyer or great danger is walking to (DF: path.path x/y/z[0] is its next step, the
+  -- last entry path.dest; the path crosses levels): into the fort is never "far", whatever the distance now
+  if (rf.bd or great) and zn < 2 then
+    local okp, dx, dy, dzp = pcall(function() local q = u.path.dest; return q.x, q.y, q.z end)
+    if okp and math.type(dx) == 'integer' and dx >= 0 and math.type(dy) == 'integer' and math.type(dzp) == 'integer' then
+      local inf = in_boxes(g.zin, dx, dy, dzp) or in_boxes(g.zpast, dx, dy, dzp)
+      if not inf and hs.kb then
+        P.x, P.y, P.z = dx, dy, dzp
+        inf = dfhack.burrows.isAssignedTile(hs.kb, P) == true
+      end
+      if not inf then
+        for _, b in ipairs(g.bridges) do
+          local f = b.fp
+          local ex = dx < f[1] and f[1] - dx or (dx > f[4] and dx - f[4] or 0)
+          local ey = dy < f[2] and f[2] - dy or (dy > f[5] and dy - f[5] or 0)
+          local ez = dzp < f[3] and f[3] - dzp or (dzp > f[6] and dzp - f[6] or 0)
+          if ez <= M.BD_DZ and math.max(ex, ey) <= M.BD_NEAR then inf = true; break end
+        end
+      end
+      if inf then entry.pd = 1 end
+    end
+  end
   if rin then entry.rf = 1 end
   if ik then entry.ik = 1 end                      -- M3: inside Kern+ itself (zn 2 also covers zones Z3/Z4)
   if rf.bd then entry.bd, hs.bd = 1, hs.bd + 1 end

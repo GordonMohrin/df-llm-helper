@@ -4525,6 +4525,7 @@ function M.step(K, budget, ctx)
       if not st.prev_fast and ctx and (ctx.dt or 0) > 0 then st.gap = ctx.dt end
     end
     st.prev_fast, st.full_now, st.last_full = fast, nil, now
+    death_recheck(K, c, p)                 -- BUG-339: every run start too, not only after a full run (siege: days)
     st.run = new_run(K, c, p)
   else st.run.kern = kern_burrow(K) end        -- no burrow pointer from an earlier frame (it may be gone)
   local r = st.run
@@ -4557,6 +4558,9 @@ M.on.UNIT_DEATH = function(K, ev)
   while #p.announced > 200 do table.remove(p.announced, 1) end
   remember_dead(p, id)              -- a corpse scan may have tracked it already
   local c = M.conf(K)
+  -- BUG-339 (Run 15c y379: DEATHS_3PLUS "unknown 3" while DF had announced the first two found dead; the revisions came
+  -- 5300 ticks later, when care's full run finished): the earlier deaths still missing are asked again first
+  death_recheck(K, c, p)
   local res = classify(K, c, p, id, now)
   local rec = {t = now, u = id}
   died_set(rec, res)

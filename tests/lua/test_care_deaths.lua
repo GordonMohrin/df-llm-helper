@@ -408,4 +408,40 @@ T.test('BUG-027: a found death on the footprint and an incident DRAWBRIDGE name 
   T.eq({d[4].d.cause, d[4].d.found}, {'unknown', 0})
 end)
 
+---------------------------------------------------------------- BUG-339: the attacker of every death; missing ones asked again
+-- Run 15c Inkintense y379: the goblins' war cave dragon 26704 broke O1; 11 DEATH "unknown (not found yet, missing in the
+-- unit list)", DEATHS_3PLUS "unknown 3" although DF had announced the first ones found dead; the revisions came 5300
+-- ticks later, and the five "bled" ones never named the dragon.
+T.test('BUG-339: a death of any type names the incident\'s attacker (bled by the cave dragon)', function()
+  local W = world{cit = 3, units = {{id = 77, invader = true, race = 'CAVE_DRAGON'}}}
+  W.run(1)
+  die(W, 1, 'BLEED', {killer = 77})
+  die(W, 2, 'BLEED')
+  W.run(1)
+  local d = deaths(W)
+  T.eq({d[1].d.cause, d[1].d.killer}, {'bled', 77})
+  T.ok(type(d[1].d.by) == 'string' and d[1].d.by ~= '', 'the race of the attacker: ' .. tostring(d[1].d.by))
+  T.ok(d[1].msg:find('died: bled (incident BLEED; by ' .. d[1].d.by .. ' 77)', 1, true), d[1].msg)
+  T.eq({d[2].d.cause, d[2].d.killer, d[2].d.by}, {'bled', nil, nil}, 'no criminal: no attacker')
+end)
+
+T.test('BUG-339: a new death asks the missing ones again first: DEATHS_3PLUS names the causes DF has shown', function()
+  local W = world{cit = 4, units = {{id = 77, invader = true, race = 'CAVE_DRAGON'}}}
+  W.run(1)
+  die(W, 1, 'STRUCK_DOWN', {killer = 77, found = false})
+  die(W, 2, 'BLEED', {killer = 77, found = false})
+  W.run(1)
+  T.eq(#W.find_events('DEATH'), 2)
+  incidents[501].flags.discovered = true                       -- "..., Farmer has been found dead."
+  incidents[502].flags.discovered = true
+  die(W, 3, 'STRUCK_DOWN', {killer = 77, found = false})
+  W.run(1)
+  local a = W.find_events('DEATHS_3PLUS')
+  T.eq(#a, 1)
+  T.eq(a[1].d.causes, {'1:killed', '2:bled', '3:unknown'})
+  local rev = 0
+  for _, e in ipairs(W.find_events('DEATH')) do if e.d.revised == 1 then rev = rev + 1 end end
+  T.eq(rev, 2, 'the two found deaths revised before the alarm')
+end)
+
 T.done()

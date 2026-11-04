@@ -230,7 +230,8 @@ T.test('Run 10: a roofed wild danger far from every citizen is PREDATOR_FAR (B),
   S.run(W, 200)
   T.eq(#events(W, 'PREDATOR'), 0, 'no class A interrupt')
   local f = events(W, 'PREDATOR_FAR')
-  T.eq({#f, f[1].cls, f[1].d.id, f[1].d.dc}, {1, 'B', 400, -1})
+  -- BUG-338: dc is the nearest civilian anywhere now (citizen 4 in Kern+ at 63,72: 87 tiles), not -1
+  T.eq({#f, f[1].cls, f[1].d.id, f[1].d.dc}, {1, 'B', 400, 87})
   T.eq(#events(W, 'LOCKDOWN'), 0)
   T.eq(W.state().alarm.unacked, 0, 'nothing to ack, no clock hold')
   -- a woodcutter walks out to 12 tiles from it: now it is a danger to a citizen
@@ -827,6 +828,159 @@ T.test('review C1: an unchanged dangerous intruder past the limit is offered onc
     for _ = 1, 3 do S.run(W, 1900); W.ms = W.ms + 120000; W.inbox("ack", {}) end
     T.ok(#decisions(W, 'intruder_sortie') <= 3, 'bounded')
   end)
+end)
+
+---------------------------------------------------------------- BUG-338: building destroyers are never "far" or a stray mount
+-- Run 15c Inkintense y379: the goblins' war cave dragon 26704 (no CAN_LEARN/CAN_SPEAK, BUILDINGDESTROYER) came with
+-- invasion 4 as a wild danger: PREDATOR_FAR "59 tiles from the citizens: no lockdown"; it toppled the raised O1, then
+-- PREDATOR_FAR again at 85,80,131 (63 tiles from the citizens outside Kern+: none) while it killed five at B1.
+local DRAGON = 91
+local function dragon_raws()
+  local c = {flags = {CAN_LEARN = false, CAN_SPEAK = false, BUILDINGDESTROYER = true, LARGE_PREDATOR = true}}
+  df.creature_raw = {find = function(r) if r == DRAGON then return {caste = {[0] = c}} end end}
+end
+
+T.test('BUG-338: an animal invader that destroys buildings (a war cave dragon) stays an invader: INTRUDER, k inv',
+       function()
+  local W = setup{tag = 'wardragon', manifest = false}
+  dragon_raws()
+  add(W, S.inv(26704, 150, 30, Z, {race = DRAGON}), DRAGON)
+  S.run(W, 200)
+  local e
+  for _, x in ipairs(W.K.census.h.list or {}) do if x.id == 26704 then e = x end end
+  T.ok(e ~= nil, 'listed')
+  T.eq({e.k, e.an, e.bd, W.K.census.h.inv, W.K.census.h.an}, {'inv', nil, 1, 1, 0})
+  T.eq(#events(W, 'PREDATOR_FAR'), 0)
+  T.ok(#events(W, 'INTRUDER') + #events(W, 'ARRIVAL') > 0, 'an invader: the arrival or intruder rules')
+end)
+
+-- BUG-338 (review of BUG-338: "never far at any distance" would lock a fort down for a troll deep in a cavern): a wild
+-- building destroyer is never far near the fort (within BD_NEAR of a bridge on its levels, in the intake area or past
+-- B1, or walking into it: its path ends there); far from all of that the Run 10 PREDATOR_FAR rule holds
+T.test('BUG-338: a wild building destroyer far from the fort is PREDATOR_FAR; near a bridge it is PREDATOR', function()
+  local units = S.fort_units()
+  local W = setup{tag = 'cavedragon', units = units}
+  dragon_raws()
+  add(W, S.danger(400, 150, 30), DRAGON)              -- 98 tiles from every bridge, 87 from every civilian
+  S.run(W, 200)
+  T.eq(#events(W, 'PREDATOR'), 0, 'far from the fort: no lockdown')
+  T.eq(#events(W, 'PREDATOR_FAR'), 1)
+  W.move(400, 78, 12, Z)                              -- 26 tiles from O1, 75 from the nearest civilian (beyond 40)
+  S.run(W, 200)
+  local p = events(W, 'PREDATOR')
+  T.eq({#p, p[1] and p[1].d.id}, {1, 400})
+end)
+
+T.test('BUG-338: a wild building destroyer whose path ends inside the fort is PREDATOR; in a cavern below it is not',
+       function()
+  local units = S.fort_units()
+  local W = setup{tag = 'cavedest', units = units}
+  dragon_raws()
+  add(W, S.danger(400, 150, 30), DRAGON)
+  W.unit(400).path = {dest = {x = 51, y = 28, z = Z}}  -- DF: path.dest = the last step, here the killing field
+  S.run(W, 200)
+  T.eq(#events(W, 'PREDATOR_FAR'), 0)
+  T.eq(#events(W, 'PREDATOR'), 1, 'walking into the fort')
+  -- a cavern 20 levels below the bridges, right under Kern+ (xy next to the citizens): no civilian on its levels, no
+  -- bridge on its levels, its path stays in the cavern
+  local W2 = setup{tag = 'cavedeep', units = S.fort_units()}
+  dragon_raws()
+  add(W2, S.danger(401, 61, 69, Z - 20), DRAGON)
+  W2.unit(401).path = {dest = {x = 70, y = 69, z = Z - 20}}
+  S.run(W2, 200)
+  T.eq(#events(W2, 'PREDATOR'), 0, 'a cavern below: no lockdown')
+  T.eq(#events(W2, 'PREDATOR_FAR'), 1)
+end)
+
+-- BUG-338 (Run 15c y379: PREDATOR_FAR "nearest citizen 63 tiles" while the dragon killed the civilians it stood next to in
+-- the killing field, a part of Kern+ there): the predator distance counts every civilian, Kern+ ones too
+T.test('BUG-338: a wild danger next to civilians inside Kern+ is PREDATOR, not PREDATOR_FAR', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 60, 108)         -- 38 tiles from citizen 1 (60,70) in Kern+, roofed
+  local W = setup{tag = 'predkern', manifest = false, units = units, cfg = {reflex = {v = 2, predator_near = 40}}}
+  S.run(W, 200)
+  T.eq(#events(W, 'PREDATOR_FAR'), 0)
+  T.eq(#events(W, 'PREDATOR'), 1)
+end)
+
+---------------------------------------------------------------- BUG-338: the lockdown strands nobody on the attack side
+-- Run 15c Inkintense y379: the arrival lockdown raised B1 at once (before O1), 33 civilians coming in from the gathering
+-- stood in the killing field between O1 and B1 (a part of Kern+ there), the recall to Tiefe+ found 31 who could not come,
+-- and the war cave dragon that broke O1 killed 10 of them there
+local function gate_held(W)
+  local r = {}
+  for _, e in ipairs(events(W, 'GATE')) do if e.d.state == 'held' then r[#r + 1] = e end end
+  return r
+end
+
+T.test('BUG-338: Kern+ over the killing field: B1 waits for the civilians in it, O1 rises; a hostile near B1 raises it',
+       function()
+  local units = S.fort_units()
+  units[#units + 1] = S.cit(6, 51, 28)                -- in the killbox K1, on Kern+ (old rule: inside, B1 rises at once)
+  local W = setup{tag = 'atkfield', units = units, kern = {40, 20, Z - 2, 80, 95, Z}}
+  S.run(W, 120)                                       -- the census is there before the news
+  W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
+  S.run(W, 400)
+  T.eq(W.K.census.u.outside, 0, 'Kern+ covers the field: nobody outside Kern+')
+  T.eq({W.K.census.u.atk, W.K.census.u.atk_ids}, {1, {6}})
+  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'up', 'down'}, 'the way in stays open for citizen 6')
+  local g = gate_held(W)
+  T.eq({#g, g[1] and g[1].d.bridge, g[1] and g[1].d.units}, {1, 'B1', {6}})
+  -- an invader comes within INNER_NEAR (30) of B1: it rises
+  add(W, S.inv(700, 51, 12), nil)                     -- 28 tiles from B1 (y 40)
+  S.run(W, 300)
+  T.eq(S.bstate(W, 'B1'), 'up')
+end)
+
+T.test('BUG-338: B1 rises once the civilians are past it; a census of nobody on the attack side never holds it', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.cit(6, 51, 20)                -- in the bailey, outside Kern+
+  local W = setup{tag = 'atkin', units = units}
+  S.run(W, 120)                                       -- the census is there before the news
+  W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
+  S.run(W, 300)
+  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'up', 'down'})
+  W.move(6, 60, 72, Z)                                -- walked in
+  S.run(W, 300)
+  T.eq(S.bstate(W, 'B1'), 'up')
+  T.ok(logged(W, 'B1 up no longer held') ~= nil, 'kern.log says the hold ended')
+  -- the plain fort: no civilian outside, the lockdown raises both at once (unchanged)
+  local W2 = setup{tag = 'atknone'}
+  S.run(W2, 120)
+  W2.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
+  S.run(W2, 300)
+  T.eq({S.bstate(W2, 'O1'), S.bstate(W2, 'B1'), #gate_held(W2)}, {'up', 'up', 0})
+end)
+
+T.test('BUG-338: a building destroyer in the intake area raises B1 at once, civilians outside or not', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.cit(6, 80, 20)                -- outside Kern+
+  local W = setup{tag = 'atkbd', units = units}
+  dragon_raws()
+  S.run(W, 120)                                       -- the census is there before the news
+  W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
+  S.run(W, 100)
+  T.eq(S.bstate(W, 'B1'), 'down', 'held for citizen 6')
+  add(W, S.danger(701, 49, 26), DRAGON)               -- in K1, 14 tiles from B1
+  S.run(W, 300)
+  T.eq(S.bstate(W, 'B1'), 'up')
+end)
+
+-- BUG-338: a building destroyer or great danger past B1 is a BREACH at once, also in zones Z3/Z4 off Kern+
+T.test('BUG-338: threat counts a building destroyer in Z3 off Kern+ as inside (BREACH), never cleared as far', function()
+  local man = S.manifest()
+  man.zones = {Z3 = {{60, 30, Z, 70, 38, Z}}}         -- off Kern+ (Kern+ starts at y 41)
+  local W = setup{tag = 'bdz3', persist = {manifest = man}, units = S.fort_units()}
+  dragon_raws()
+  add(W, S.danger(702, 65, 34), DRAGON)
+  S.run(W, 60)
+  local e
+  for _, x in ipairs(W.K.census.h.list or {}) do if x.id == 702 then e = x end end
+  T.eq({e and e.zn, e and e.bd, W.K.census.h.inside}, {2, 1, 0})
+  local ok, a = W.K.call('threat', 'assess')
+  T.eq({ok, a and a.inside}, {true, 1})
+  S.run(W, 200)
+  T.eq(W.K.mode(), 'BREACH')
 end)
 
 T.done()
