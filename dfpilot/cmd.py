@@ -137,6 +137,72 @@ def sites_snapshot(save_dir: Path) -> dict | None:
     return first
 
 
+# BUG-369 (Run 16d i4 y372: `bp sites workshops` said 0 ranked on a snapshot that predated the dug core, only --fresh found 6
+# sites, the year plan had no workshops and 16 orders stood; Run 16b: `bp.place workshops only=Bowyers` '0 free sites'): a
+# ranking made from an old snapshot is refreshed by itself: when the newest sites snapshot is older than the latest stage
+# a project finished (PROJECT_STAGE / PROJECT_DONE), is no sites export, or ranks nothing, and the kernel beats, the
+# CLI asks for a new one (the cache is keyed on the snapshot id, so the ranking follows)
+AUTO_SNAP_HB_S = 120.0                # the kernel counts as running when its heartbeat is younger than this
+AUTO_SNAP_WAIT_S = 25.0               # an automatic refresh waits this long for the export, then ranks the old one
+SNAP_STAGE_EVENTS = ("PROJECT_STAGE", "PROJECT_DONE")
+AUTO_SNAP = True                      # False: never request a snapshot by itself (tests/conftest.py: no kernel answers there)
+
+
+def snapshot_stale(save_dir: Path, snap: dict | None) -> str | None:
+    """BUG-369: why `snap` (the snapshot a ranking would use) may predate the map as it is now, None when it does not: it is
+    no sites export (no walk group, no aquifer levels), or a project finished a stage (a dig or a build) after its tick."""
+    if snap is None:
+        return "no snapshot"
+    if snap.get("purpose") != "sites":
+        return f"snapshot {snap.get('id')} is a {snap.get('purpose')} export, not a sites export"
+    tick = snap.get("tick")
+    if isinstance(tick, int) and not isinstance(tick, bool):
+        for e in files.iter_events_rev(save_dir, min_tick=tick):
+            et = e.get("tick")
+            if e.get("type") in SNAP_STAGE_EVENTS and isinstance(et, int) and et > tick:
+                d = e.get("d") if isinstance(e.get("d"), dict) else {}
+                return (f"{e.get('type')} {d.get('proj', '')} {d.get('stage', '')}".strip()
+                        + f" came after snapshot {snap.get('id')}")
+    return None
+
+
+def kern_running(save_dir: Path) -> bool:
+    """BUG-369: the kernel's heartbeat is fresh (an automatic snapshot request is answered)."""
+    hb, age = files.read_heartbeat(save_dir)
+    return hb is not None and age is not None and age <= AUTO_SNAP_HB_S
+
+
+def wait_snapshot(save_dir: Path, cid: str, timeout: float) -> dict | None:
+    t0 = time.monotonic()
+    while True:
+        for p in [Path(save_dir) / "snap" / f"{cid}.json", *sorted((Path(save_dir) / "snap").glob(f"{cid}-*.json"))]:
+            doc = files.read_snapshot(p) if p.exists() else None
+            if doc:
+                return doc
+        if time.monotonic() - t0 >= timeout:
+            return None
+        time.sleep(0.5)
+
+
+def auto_refresh(save_dir: Path, why: str, timeout: float = AUTO_SNAP_WAIT_S) -> tuple[dict | None, str]:
+    """BUG-369: request a new sites snapshot because `why` and wait for it. (snapshot or None, one line for the output).
+    Nothing is sent when the kernel does not beat (the old snapshot is ranked, the line says so)."""
+    if not AUTO_SNAP:
+        return None, ""
+    if not kern_running(save_dir):
+        return None, f"snapshot may predate the map ({why}); the kernel does not beat, not refreshed: `dfllm bp sites <tpl> --fresh` once it runs"
+    try:
+        cid, reply = send(save_dir, "snapshot", {"purpose": "sites"}, by="cli", wait_s=min(10.0, timeout))
+    except (schema.SchemaError, BpError, BpUnavailable) as e:
+        return None, f"snapshot may predate the map ({why}); refresh not sent: {e}"
+    if reply is not None and not reply.get("ok"):
+        return None, f"snapshot may predate the map ({why}); the kernel refused a new one: {reply.get('msg')}"
+    snap = wait_snapshot(save_dir, cid, timeout)
+    if snap is None:
+        return None, f"snapshot may predate the map ({why}); no new snapshot {cid} within {timeout:.0f}s, ranked on the old one"
+    return snap, f"snapshot refreshed ({why}): {snap.get('id')}"
+
+
 MANIFEST_CACHE = ".manifest.json"   # <save>/: the last valid kern manifest seen in an `inspect manifest` reply
 
 
@@ -1308,6 +1374,10 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
         out.append("no ranked site: the startup shops need a flat block of open surface floor (no trees, rocks, water or "
                    "hill) on the citizens' walk group; `dfllm bp sites workshops surface=1 --fresh --near <wagon x,y,z> "
                    "--within 40` on a snapshot of the surface, or fewer shops (only=Still,Kitchen)")
+    elif ranked == 0 and tpl == "depot":
+        # BUG-368: the trade depot needs no fortcore, only a 5x5 block of open flat ground the citizens reach
+        out.append("no ranked site: the trade depot needs a 5x5 block of open surface floor (no trees, rocks, water or hill) "
+                   "on the citizens' walk group; `dfllm bp sites depot --fresh --near <wagon x,y,z> --within 40`")
     elif ranked == 0 and tpl not in ("fortcore", "seal", "explore", "plug", "repair"):
         cores = []
         for p in bp_files(save_dir):
@@ -1865,7 +1935,19 @@ def run(args, save_dir: Path) -> int:
               "kernel snapshot; dfllm follow runs it too)")
         return EXIT_BAD
     try:
-        cmd_id, reply = send(save_dir, args.verb, a, by=args.by, wait_s=args.wait, cmd_id=args.id)
+        try:
+            cmd_id, reply = send(save_dir, args.verb, a, by=args.by, wait_s=args.wait, cmd_id=args.id)
+        except BpError as e:
+            # BUG-369 (Run 16b '0 free sites' that --fresh cured): no free site on an old snapshot -> one automatic refresh
+            old = sites_snapshot(save_dir)
+            if args.verb != "bp.place" or not re.search(r"only \d+ free site\(s\)", str(e)):
+                raise
+            snap, note = auto_refresh(save_dir, snapshot_stale(save_dir, old) or "no free site on the cached snapshot")
+            if note:
+                print(note)
+            if snap is None or snap.get("id") == (old or {}).get("id"):
+                raise
+            cmd_id, reply = send(save_dir, args.verb, a, by=args.by, wait_s=args.wait, cmd_id=args.id)
     except schema.SchemaError as e:
         print("refused (not sent): " + "; ".join(e.errors[:5]))
         return EXIT_BAD

@@ -172,15 +172,8 @@ def _preview(save_dir: Path, tpl: str, params: dict, label: str | None) -> str:
 
 
 def _wait_snapshot(save_dir: Path, cid: str, timeout: float) -> dict | None:
-    from . import files
-    t0 = time.monotonic()
-    while time.monotonic() - t0 < timeout:
-        for p in [save_dir / "snap" / f"{cid}.json", *sorted((save_dir / "snap").glob(f"{cid}-*.json"))]:
-            doc = files.read_snapshot(p) if p.exists() else None
-            if doc:
-                return doc
-        time.sleep(0.5)
-    return None
+    from .cmd import wait_snapshot
+    return wait_snapshot(save_dir, cid, timeout)
 
 
 def run_bp(args, save_dir: Path | None) -> int:
@@ -211,7 +204,23 @@ def run_bp(args, save_dir: Path | None) -> int:
                 return 3
         where = _where(args)
         held: list = []
+        tried = False
+        if snap is None:                                   # BUG-369: a ranking never runs on a snapshot that predates the map
+            from .cmd import auto_refresh, sites_snapshot, snapshot_stale
+            why = snapshot_stale(save_dir, sites_snapshot(save_dir)) if sites_snapshot(save_dir) is not None else None
+            if why:
+                tried = True
+                snap, note = auto_refresh(save_dir, why)
+                if note:
+                    print(note)
         sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap, where=where, taken=held)
+        if not ranked and not args.fresh and not tried and snap is None and args.tpl not in ("seal", "traps"):
+            from .cmd import auto_refresh      # BUG-369: nothing ranked on the cached snapshot: ask once for a new one
+            snap, note = auto_refresh(save_dir, "nothing ranked on the cached snapshot")
+            if note:
+                print(note)
+            if snap is not None:
+                sites, snap_id, ranked = free_sites(save_dir, args.tpl, params, snap, where=where, taken=held)
         fewer = None if sites else fewer_plots_sites(save_dir, args.tpl, params, snap, where=where)
         if fewer:                                          # BUG-316: trees cut the larger surface farm block
             k = fewer[0]

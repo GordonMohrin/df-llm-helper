@@ -1,5 +1,24 @@
 # CHANGELOG dfpilot
 
+## A depot without a fortcore, rankings on a fresh map, no unplaceable builds in the draft (BUG-368, BUG-369, BUG-370, 2026-11-04; offline, live-untested)
+- **Why:** Run 16 (i2 Ostgate: NO_DEPOT / DEPOT_MISSING every year, no trade, no metal or leather without a fortcore; i4: `bp sites`
+  said 0 on a snapshot older than the dug core, no workshops in the year plan, '0 free sites' for a bp.place; propose drafted
+  explore/bedrooms in a walk group the citizens cannot reach and gallery_o1 with an open tunnel wall, the check said ERROR).
+- **BUG-368:** template `depot` (bp/rooms.py `SURFACE`, merged into `emit.TEMPLATES`): `D(5x5)` on open surface floor, nothing
+  dug, manifest `depot` = its middle (the keeper rebuilds it there). sites.py `_surface_shops(.., "depot")`: flat revealed floor
+  with open sky above, the citizens' walk group, off the keep-out tiles, nearest the snapshot middle or `--near <wagon>`; no fort
+  manifest needed. plan.py: fort fact `depot` (`depot_planned`: kernel manifest `depot`, a depot project, or a digging fortcore
+  stage 1), `propose` drafts `depot@S1` when none stands or comes with the draft's fortcore stage 1; `build_kind` 'depot'.
+- **BUG-369:** `cmd.snapshot_stale` (not a sites export, or a PROJECT_STAGE/PROJECT_DONE after the snapshot's tick) and
+  `cmd.auto_refresh` (a `snapshot purpose=sites` request when the heartbeat is fresh, 25 s wait): `bp sites` without `--fresh`
+  refreshes a stale snapshot and asks once more for an empty ranking; `plan propose|check|apply` refresh a stale snapshot;
+  `cmd bp.place` with `only N free site(s)` refreshes once and retries. A refresh that cannot be done is a note.
+- **BUG-370:** `plan.fit_placeable`: the new builds are placed in plan order as `apply` would; those whose placement fails on
+  their site (walk group, rock or tunnel does not fit, no free site) are left out with a `BUG-370` note (not fortcore, seal,
+  traps). Run by `plan propose` and the auto plan.
+- **Tests:** tests/test_bug368_370_depot_fresh_walk.py (14).
+- **Live check:** i2: `bp sites depot --fresh --near <wagon>`, `plan propose` (depot@S1), `bp.place depot`, the autumn caravan
+  trades; i4: `bp sites workshops` after a core stage refreshes itself; `plan propose` leaves out the unreachable explore with a note.
 ## Startup shops on the surface, no door wait without a carpenter, one fortcore (BUG-356, BUG-357, BUG-358, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a-d (new forts, y372/373): the first year hung on the fortcore (no still, kitchen, carpenter or mason until
   stage 1 was dug, drink 3 d -> 0 in every fort); farms and two workshops projects stood 32 d at build 50 % 'waits for door'

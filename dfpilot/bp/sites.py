@@ -45,7 +45,7 @@ sources, state water.src; cmd.water_ctx) only sites whose hospital zone lies wit
 accepted source count, measured as water.lua's served() does (Chebyshev from the source to the zone rect, z included);
 +2 per tile nearer; ValueError names the source, the nearest candidate and the refuge's water when none is left.
 `fill_source`: what a bucket-fed cistern (no pipe) could be filled from (revealed open water reachable from the core).
-Startup shops (`workshops` p.surface = 1, BUG-356): no manifest needed; a block of open surface floor (every tile '.' with '_'
+Startup shops (`workshops` p.surface = 1, BUG-356) and the trade `depot` (BUG-368): no manifest needed; a block of open surface floor (every tile '.' with '_'
 above, on the citizens' walk group), nearest the middle of the snapshot (or `near`), clear of the fortcore's keep-out tiles.
 Aqshaft (BUG-292): columns from public Z4 floor whose levels below are rock or unknown with rock on their 4 sides,
 off the keep-out boxes and the cavern/warm levels; + AQ_SPAN for passing a known aquifer level (`_aqshaft`).
@@ -232,7 +232,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl in traps.BUILD:                                   # FR-96: absolute trap tiles, the site is the first one
         return traps.site(snap, p, _At(snap))[:n]
-    surface_shops = tpl == "workshops" and bool(p.get("surface"))     # BUG-356: the startup set needs no fort manifest
+    surface_shops = (tpl == "workshops" and bool(p.get("surface"))) or tpl == "depot"   # BUG-356/368: no fort manifest needed
     if tpl != "fortcore" and not surface_shops and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
@@ -250,7 +250,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     elif tpl == "farms" and p.get("surface"):               # BUG-297: plots on soil floor that stands already
         cands = _surface_farms(snap, p, manifest)
     elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
-        cands = _surface_shops(snap, p, manifest or {})
+        cands = _surface_shops(snap, p, manifest or {}, tpl)
     elif tpl == "fortcore":
         cands = _fortcore(snap, rects, bad, hid, mk, wet)
         cands = _dry(cands, manifest)                      # BUG-130: never again into a recorded breach
@@ -971,16 +971,23 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
 SHOP_NEAR = 25                        # BUG-356: a startup block within this many tiles of the fort entrance scores best
 
 
-def _surface_shops(snap: dict, p: dict, manifest: dict) -> list[dict]:
+def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") -> list[dict]:
     """BUG-356 (Run 16a-d: the first year hung on the fortcore: Kueche/Still refused, drink 3 d -> 0): workshops p.surface = 1
     sites. The block (rooms.surface_block of the shops asked for) is flat open ground: every tile a revealed floor ('.') on
     one level with open sky ('_') right above it, nothing dug, on the citizens' walk group (snapshot wg) where that is read,
     clear of the fort's own tiles (the fortcore's attack path and military tiles, rooms, workshops and the way in).
     Score: 1000, - 1 per tile from the middle of the snapshot (the embark: the wagon stands there; `near` = the wagon's
     tile overrides it), + 60 when within SHOP_NEAR of the fort entrance (manifest `edge`). The caller's free callable keeps
-    it off every placed project."""
-    todo = rooms.workshops(p).workshops
-    W, H = rooms.surface_block(len(todo))
+    it off every placed project. BUG-368 (Run 16b i2 Ostgate: no trade depot without a fortcore, NO_DEPOT every year): the same
+    for `depot` (tpl): one rooms.DEPOT_SIDE square of open surface floor, the depot stands where a caravan's wagon reaches it
+    without the dug core."""
+    if tpl == "depot":
+        W = H = rooms.DEPOT_SIDE
+        what = "a trade depot"
+    else:
+        todo = rooms.workshops(p).workshops
+        W, H = rooms.surface_block(len(todo))
+        what = f"{len(todo)} shops"
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
     floor = _Pref(snap, lambda c: c == ".")
     sky = _Pref(snap, lambda c: c == "_")
@@ -1015,7 +1022,7 @@ def _surface_shops(snap: dict, p: dict, manifest: dict) -> list[dict]:
                     de = min((box_dist(list(e), list(box)) for e in edge if e[2] == z), default=None)
                     near = de is not None and de <= SHOP_NEAR
                     out.append({"anchor": [ax, ay, z], "rot": rot, "score": max(0, 1000 - d + (60 if near else 0)), "box": box,
-                                "why": f"rot{rot}, {W}x{H} open surface floor for {len(todo)} shops, {d} tiles from the middle "
+                                "why": f"rot{rot}, {W}x{H} open surface floor for {what}, {d} tiles from the middle "
                                        "of the snapshot" + (f", {de} from the entrance" if near else "") + ", nothing dug"})
     return out
 

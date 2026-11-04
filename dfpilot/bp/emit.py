@@ -21,6 +21,8 @@ TEMPLATES = {"fortcore": (fortcore.build, fortcore.PARAMS, "doctrine fortress co
              **{n: (f, {**rooms.PARAMS[n], **{k: v for k, v in rooms.COMMON.items() if k not in rooms.PARAMS[n]}},
                     (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in rooms.BUILD.items()},
+             **{n: (f, dict(rooms.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0])
+                for n, f in rooms.SURFACE.items()},        # BUG-368: the surface trade depot (no fortcore)
              **{n: (f, dict(defense.PARAMS.get(n, {})), (f.__doc__ or n).strip().split("\n")[0])
                 for n, f in defense.BUILD.items()},
              **{n: (f, dict(mine.PARAMS[n]), (f.__doc__ or n).strip().split("\n")[0]) for n, f in mine.BUILD.items()},

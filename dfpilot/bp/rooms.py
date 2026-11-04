@@ -50,6 +50,7 @@ PARAMS = {
     "tavern": {"seats": (12, 4, 40)},
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
     "workshops": {"skip": ("", None, None), "add": ("", None, None), "surface": (0, 0, 1)},
+    "depot": {},                      # BUG-368: SURFACE, not BUILD: no room (nothing dug, no Z4, no burrow)
     # BUG-297: surface = 1 builds the plots on soil floor that stands already (no dig, no door, no burrow): sites.rank
     # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
     "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1)},
@@ -280,6 +281,21 @@ def _surface_shops(P: Plan, todo: list) -> Plan:
         else:
             b.ent(u, v, u + 2, v + 2, 0, key)
         P.workshops.append((name, (u + 1, v + 1, 0)))
+    return P
+
+
+DEPOT_SIDE = 5
+
+
+def depot(p: dict) -> Plan:
+    """Trade depot (5x5) on open surface floor, no fortcore needed (BUG-368)."""
+    # BUG-368 (Run 16b i2 Ostgate: DEPOT_MISSING 'no known depot site (no fortcore depot)' every year, no caravan ever traded,
+    # no metal or leather): until now only fortcore stage 1 built a depot (in its bailey). The anchor is the north-west
+    # corner of the 5x5 block; the manifest names its middle (`depot`), so the depot keeper rebuilds it there after a siege.
+    # Nothing is dug, no door, no burrow; sites.rank offers flat open surface floor on the citizens' walk group.
+    P = Plan("depot", "infra")
+    P.stage("build", "build").ent(0, 0, DEPOT_SIDE - 1, DEPOT_SIDE - 1, 0, "D")   # orders=0: buildingplan, like the keeper's depot
+    P.manifest["depot"] = (DEPOT_SIDE // 2, DEPOT_SIDE // 2, 0)
     return P
 
 
@@ -732,6 +748,8 @@ BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hos
          "tavern": tavern, "workshops": workshops, "farms": farms, "furnaces": furnaces, "office": office,
          "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks,
          "stockroom": stockroom, "refuge_beds": refuge_beds, "refuge_drink": refuge_drink}
+
+SURFACE = {"depot": depot}            # BUG-368: templates that build on open surface floor and join no room set
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:
