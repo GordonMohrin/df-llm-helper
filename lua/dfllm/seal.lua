@@ -3379,6 +3379,41 @@ function M.refuge_trust(K)
   return r
 end
 
+-- BUG-336 (Run 15b Earthboat y387: the refuge hatch 55,82,133 never built (911 days 'no builder has taken it'), 5 trolls
+-- broke into Kern+, the alert switched to Tiefe+ at the BREACH level and they walked down the open stair after the
+-- citizens: 92 -> 1): the refuge's own way in is open. The separation flood starts at the fort's openings, so a refuge
+-- whose stair head has no closer counts as separated while Kern+ is; it is one room with Kern+ for anyone inside. Its
+-- text ('open: no hatch at x,y,z (its seal is not built)') or nil (no manifest stair, or no revealed stair tile above the
+-- refuge: unknown, as before); per tick. Public M.refuge_open (siege's deep defense text, runner's seal escalation)
+local function refuge_open(K, t)
+  local c = mem.ropen
+  if c and c.t == t then return c.v or nil end
+  local rs = M.refuge_stair(K)
+  local v
+  -- (a head that is not revealed, BUG-124 'hidden', stays unknown: nobody walks through unrevealed rock)
+  if rs and rs.pos then
+    local h = rs.pos
+    if not sep_closer(key3(h[1], h[2], h[3])) then
+      v = string.format('open: no hatch at %d,%d,%d (its seal is not built)', h[1], h[2], h[3])
+    end
+  end
+  mem.ropen = {t = t, v = v or false}
+  return v
+end
+-- public: the open text (nil closed or unknown) and, when closed, what closes the head: {kind ('hatch', 'door',
+-- 'bridge', ...), pos} (BUG-337: a building destroyer breaks a hatch or a door, not a wall or a raised bridge)
+function M.refuge_open(K)
+  local v = refuge_open(K, now_t(K))
+  if v then return v end
+  local rs = M.refuge_stair(K)
+  local h = rs and rs.pos
+  if not h then return nil end
+  local des, occ = rev(h[1], h[2], h[3])
+  local b = des and bld_on(h[1], h[2], h[3], occ)
+  local kind = b and BKIND[btype(b) or '']
+  return nil, kind and {kind = kind, pos = {h[1], h[2], h[3]}} or nil
+end
+
 -- BUG-019: the BREACH level and the dead end hold for breach_days after the first such pick of an episode. BUG-031
 -- (Run 11: "no confinement, citizens flee" at every invasion): the window opened by a lockdown in PEACE (an arrival, a
 -- predator) was never closed, because only a mode change to PEACE ended it; `episode` ends it once neither a gated mode
@@ -3475,8 +3510,15 @@ local function choose(K, mode, want, hold)
     if not r.why and au[name] and au[name].exists then r.why = name .. ': ' .. tostring(why) end
     if name == refuge and au[name] and au[name].exists then r.rwhy = name .. ': ' .. tostring(why) end
   end
+  -- BUG-336: in a fight (SIEGE, BREACH, the deep defense's BREACH ask) a refuge whose own way in is open is refused at
+  -- every level, the dead end included: Kern+ or the best closed burrow, else no confinement (flee in a BREACH)
+  local ropen = (mode == 'SIEGE' or mode == 'BREACH') and refuge_open(K, t) or nil
+  local function rate2(name, lvl)
+    if ropen and name == refuge and au[name] and au[name].exists then return false, ropen end
+    return rate(K, au, name, lvl, t)
+  end
   local function try(name, lvl)
-    local ok, why, danger, dry = rate(K, au, name, lvl, t)
+    local ok, why, danger, dry = rate2(name, lvl)
     if ok then r.pick, r.level = name, lvl; return true end
     refused(name, why, danger, dry)
     return false
@@ -3486,7 +3528,7 @@ local function choose(K, mode, want, hold)
   local function try_best(lvl)
     local best, bs
     for _, n in ipairs(chain) do
-      local ok, why, danger, dry = rate(K, au, n, lvl, t)
+      local ok, why, danger, dry = rate2(n, lvl)
       if ok then
         local sc = RF.score(au[n])
         if not bs or sc > bs then best, bs = n, sc end
@@ -3554,6 +3596,7 @@ local function publish(K)
       mem.pub.ref.tr = tr.ok and 1 or 0
       if not tr.ok then mem.pub.ref.trw = trunc(tr.why[1], 40) end
     end
+    if ex and refuge_open(K, now_t(K)) then mem.pub.ref.op = 1 end   -- BUG-336: never the alert burrow in a fight
     M.hatch_ask(K, ex and M.refuge_stair(K) or nil)                 -- BUG-124: once, a real stair with a hidden head
     -- FR-69: its drink, the drink it wants (refuge_dry's rule) and its drink store's tiles (plan check/propose)
     if ex then
@@ -3577,12 +3620,18 @@ end
 -- gone (the burrow is missing), dry (seal.dry: siege found them dehydrating or starving there, its fight mark),
 -- unseparated (an opening reaches it; the refuge keeps the dead-end tolerance, dead_gap), breached (a visible hostile
 -- stands in it), unreachable, window (a refuge without drink after breach_days), released (BUG-331 review: siege eased the
--- SIEGE and lifted the deep defense, r.release: the refuge is left for the free pick, never for no burrow at all)
+-- SIEGE and lifted the deep defense, r.release: the refuge is left for the free pick, never for no burrow at all),
+-- unsealed (BUG-336: the refuge's own way in is open, refuge_open: to the free pick, never to no burrow)
 local function leave_why(K, au, cur, refuge, t, r)
   local a = au[cur]
   if not (a and a.exists) then return 'gone', 'missing' end
   if r and r.release and cur == refuge and r.pick and r.pick ~= refuge then
     return 'released', 'the eased siege lifted the deep defense'
+  end
+  -- BUG-336: the refuge the alert holds them in has an open way in (one room with Kern+): to the free pick, never to none
+  if cur == refuge and r and r.pick and r.pick ~= refuge then
+    local op = refuge_open(K, t)
+    if op then return 'unsealed', op end
   end
   local dw = dry_why(cur, a)
   if dw then return 'dry', dw end

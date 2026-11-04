@@ -1995,9 +1995,17 @@ local function deep_step(K, a, g, now)
   if d.bd > 0 then dp.bd = true end
   dirty = true
   local races, ids, near, kinds = destroyers(K)
+  -- BUG-336/337 (Run 15b Earthboat y387: 'civilians to Tiefe+ (the separated refuge)' while its hatch was never built;
+  -- 5 trolls followed the citizens down the open stair): an open refuge is named first (seal refuses it in a fight),
+  -- one closed only by a hatch or a door is named as no barrier for building destroyers
+  local okr, rop, rcl = K.call('seal', 'refuge_open')
+  rop = okr and type(rop) == 'string' and rop or nil
+  local soft = not rop and d.bd > 0 and okr and type(rcl) == 'table' and (rcl.kind == 'hatch' or rcl.kind == 'door')
+               and rcl or nil
   local toks = {}
   for _, w in ipairs(why) do toks[#toks + 1] = w end
   for _, r in ipairs(kinds) do toks[#toks + 1] = r end
+  if rop then toks[#toks + 1] = 'open' elseif soft then toks[#toks + 1] = 'soft' end
   if not CAD.due(st.deep_rec, K.now(), {}, toks, {ticks = 0, wall_s = 0}) then return end
   st.deep_rec = CAD.mark(K.now(), {}, toks)
   local parts, has = {}, {}
@@ -2015,14 +2023,23 @@ local function deep_step(K, a, g, now)
                         or string.format('iron/steel %d%% < %d%%', d.metal, d.c.metal)
   end
   local p = core_station(K, g)
+  if soft and has.destroyers then
+    parts[1] = string.format('%s, nor the refuge %s %d,%d,%d', parts[1], soft.kind, soft.pos[1], soft.pos[2], soft.pos[3])
+  end
   local txt = string.format('deep defense: %s; civilians to %s (the separated refuge), every squad at the core station '
                             .. '%s, no intake waves', table.concat(parts, '; '), g.refuge,
                             p and string.format('%d,%d,%d', p[1], p[2], p[3]) or '(none in the manifest)')
+  if rop then        -- first, so the 200-byte event keeps it
+    txt = string.format("deep defense: %s %s, NOT the civilians' burrow: they stay in the best closed one; %s; every " ..
+                        'squad at the core station %s', g.refuge, rop, table.concat(parts, '; '),
+                        p and string.format('%d,%d,%d', p[1], p[2], p[3]) or '(none in the manifest)')
+  end
   local all = {}
   for _, w in ipairs(DEEP_WHY) do if dp.why[w] then all[#all + 1] = w end end
   K.emit('SIEGE_DEEP', 'A', txt:sub(1, 200), {why = all, bd = d.bd, races = races, units = ids, vis = d.vis,
                                               soldiers = d.sol, worn = d.worn, metal = d.metal, refuge = g.refuge,
-                                              pos = p})
+                                              pos = p, ropen = rop and rop:sub(1, 80) or nil,
+                                              soft = soft and soft.kind or nil})
   K.log('warn', 'siege: %s', txt:sub(1, 200))
 end
 

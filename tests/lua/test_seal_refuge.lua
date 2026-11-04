@@ -861,4 +861,59 @@ T.test('BUG-123: the real fort stair keeps working: head revealed -> a hatch til
   T.eq(tr.why, {'no hatch at 6,6,9'})
 end)
 
+---------------------------------------------------------------- BUG-336 (Run 15b Earthboat y387)
+-- The refuge hatch 55,82,133 was never built (911 days 'no builder has taken it'); 5 trolls broke into Kern+, the alert
+-- switched to Tiefe+ at the BREACH level ('Kern+ breached') and they walked down the open stair after the citizens:
+-- 92 -> 1 in two days. The separation flood starts at the fort's openings, so a refuge with an open stair head counted as
+-- separated while Kern+ was. Now a refuge whose own way in is open is never the alert's burrow in a SIEGE or BREACH.
+local function hatch_on_head(W)
+  local h = SW.building(W, 'DOOR', 'Hatch', 6, 6, Z - 3)
+  W.dyn[SW.key(6, 6, Z - 3)] = h
+  W.tiles[SW.key(6, 6, Z - 3)].occ.building = df.tile_building_occ.Dynamic
+  inspect(W, 'refuge', 'refresh')
+  W.run(1200, {skip = 9})
+end
+
+T.test('BUG-336: a BREACH in Kern+ and the refuge stair head without a hatch: the refuge is refused ("open: no hatch at ' ..
+       '6,6,9 (its seal is not built)"), no confinement, the citizens flee (old: Tiefe+ at the BREACH level, the open ' ..
+       'dead end); with the hatch built it is the pick again', function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  T.eq(W.state().alert.ref.op, 1, 'state alert.ref.op')
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = {{id = 300, x = 10, y = 12, z = Z}}})
+  W.set_mode('BREACH')
+  local ok, pick, note, short, flee = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq({ok, pick, flee}, {true, nil, true}, 'old: Tiefe+')
+  T.ok(note:find('Tiefe+: open: no hatch at 6,6,9 (its seal is not built)', 1, true), note)
+  local f = evs(W, 'REFUGE_FAIL')
+  T.ok(#f == 1 and f[1].d.burrow == 'Tiefe+' and f[1].d.flee == 1, T.show(f))
+  T.ok(f[1].msg:find('open: no hatch at 6,6,9', 1, true), f[1].msg)
+  hatch_on_head(W)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = {{id = 300, x = 10, y = 12, z = Z}}})
+  ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, 'Tiefe+', 'closed: the refuge again')
+  T.eq(W.state().alert.ref.op, nil)
+end)
+
+T.test('BUG-336: the deep defense asks for the open refuge (the BREACH ask in a SIEGE): Kern+, REFUGE_FAIL names the ' ..
+       'open stair head; citizens the alert holds in the open refuge leave it for Kern+ (REFUGE_SWITCH unsealed); in ' ..
+       'PEACE (a drill, a lockdown) the open refuge is no matter', function()
+  local W = fort{door = true}
+  with_manifest(W, 6, 6)
+  W.set_mode('SIEGE')
+  local ok, pick, note = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, 'Kern+')
+  T.ok(note:find('Tiefe+: open: no hatch at 6,6,9', 1, true), note)
+  -- held in Tiefe+ (old: kept, no reason to leave)
+  ok, pick = W.K.call('seal', 'alert_burrow', 'SIEGE', 'Kern+', false, 'Tiefe+')
+  T.eq(pick, 'Kern+', 'old: Tiefe+ kept (KEEP)')
+  local sw = evs(W, 'REFUGE_SWITCH')
+  T.eq({#sw, sw[1].d.from, sw[1].d.to, sw[1].d.why}, {1, 'Tiefe+', 'Kern+', 'unsealed'})
+  T.ok(sw[1].msg:find('Tiefe+ unsealed (open: no hatch at 6,6,9', 1, true), sw[1].msg)
+  -- PEACE: no fight, the open refuge does not change the pick
+  W.set_mode('PEACE')
+  local _, ch = W.K.call('seal', 'alert_burrow', 'PEACE', 'Kern+')
+  T.eq(ch, 'Kern+')
+end)
+
 T.done()

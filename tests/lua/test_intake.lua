@@ -40,7 +40,9 @@ local function world(o)
   function snap.far(K, x, y, z) return y < 25 end
   if o.traps then function snap.traps(K, boxes) return o.traps[1], o.traps[2] end end
   package.loaded['dfllm.reflex'] = nil
-  X.load(W, {'military'}, {X.runner('P5'), snap, require('dfllm.reflex')})
+  local mods = {X.runner('P5'), snap, require('dfllm.reflex')}
+  for _, m in ipairs(o.extra or {}) do mods[#mods + 1] = m end      -- BUG-336/337: a fake seal
+  X.load(W, {'military'}, mods)
   -- military staffs A, B (melee) and C (crossbows), 8 soldiers, in PEACE (the army out of sight for that frame): a
   -- squad created in a siege is refilled to military.HOLD_MIN at once (Run 11 siege 3)
   for _, u in ipairs(units) do if u.invader then W.unit(u.id)._m.hidden = true end end
@@ -491,6 +493,48 @@ T.test('BUG-030: weak squads (worn 0 < 60): the deep defense (weak) at the manif
   run(W, 1500)
   T.eq(#evs(W, 'SIEGE_DEEP'), 0, 'stations.worn 0: no weak reason')
   T.eq(orders_of(W, 'A'), 'station@51,44,10', 'the inner station')
+end)
+
+---------------------------------------------------------------- BUG-336/337 (Run 15b Earthboat y387)
+-- SIEGE_DEEP said 'civilians to Tiefe+ (the separated refuge)' while the refuge hatch 55,82,133 had never been built (911
+-- days); 5 trolls followed the citizens down the open stair, 92 -> 1. A fake seal answers refuge_open (its open text, or
+-- what alone closes the head) and confines to the burrow the real seal would pick.
+local function fake_seal(open, closer)
+  return {name = 'seal', every = {ticks = 100000},
+          refuge_open = function(K) return open, closer end,
+          alert_burrow = function(K, mode, default) return open and 'Kern+' or default end}
+end
+
+T.test('BUG-336: building destroyers in sight and the refuge way in open: SIEGE_DEEP names the open refuge first ' ..
+       '(NOT the civilians burrow, d.ropen) and the alert stays on Kern+ (old: "civilians to Tiefe+ (the separated ' ..
+       'refuge)")', function()
+  local W = world{tag = 'b336', extra = {fake_seal('open: no hatch at 55,82,133 (its seal is not built)')}}
+  troll_raws()
+  T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end))
+  trolls(W, 3)
+  T.ok(until_(W, 300, function() return #evs(W, 'SIEGE_DEEP') > 0 end), 'SIEGE_DEEP: ' .. phases(W))
+  local e = evs(W, 'SIEGE_DEEP')[1]
+  T.ok(e.msg:find("deep defense: Tiefe+ open: no hatch at 55,82,133 (its seal is not built), NOT the civilians' burrow",
+                  1, true), e.msg)
+  T.ok(not e.msg:find('the separated refuge', 1, true), e.msg)
+  T.eq({e.d.ropen, e.d.soft}, {'open: no hatch at 55,82,133 (its seal is not built)', nil})
+  run(W, 300)
+  T.eq(W.alert_burrows[1], 'Kern+', 'the pick of seal')
+end)
+
+T.test('BUG-337: building destroyers in sight and the refuge closed only by a hatch: SIEGE_DEEP says they break it ' ..
+       '(d.soft hatch); the refuge stays the pick of the deep defense (it lies behind the ways in of Kern+)', function()
+  local W = world{tag = 'b337', extra = {fake_seal(nil, {kind = 'hatch', pos = {55, 82, 133}})}}
+  troll_raws()
+  T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end))
+  trolls(W, 3)
+  T.ok(until_(W, 300, function() return #evs(W, 'SIEGE_DEEP') > 0 end), 'SIEGE_DEEP: ' .. phases(W))
+  local e = evs(W, 'SIEGE_DEEP')[1]
+  T.ok(e.msg:find('the bridges are no barrier, nor the refuge hatch 55,82,133; civilians to Tiefe+ (the separated ' ..
+                  'refuge)', 1, true), e.msg)
+  T.eq({e.d.soft, e.d.ropen}, {'hatch', nil})
+  run(W, 300)
+  T.eq(W.alert_burrows[1], 'Tiefe+')
 end)
 
 T.done()

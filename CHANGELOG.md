@@ -1,5 +1,25 @@
 # CHANGELOG dfpilot
 
+## Run 15b refuge: an open refuge is never the civilians' burrow in a fight, a stalled seal asks (BUG-336, BUG-337, 2026-11-04; offline, live-untested)
+- **Why:** Earthboat y387 (i3) fell, pop 92 -> 1: the refuge hatch 55,82,133 (y384s1b0) stood `stalled 0%` for 911 days ('no
+  builder has taken it'); 5 trolls broke O1 and Kern+, REFUGE_SWITCH #8907 sent the citizens `Kern+ -> Tiefe+` at the BREACH
+  level and the trolls followed down the open stair (#9111 `hostile inside at 54,82,132`), 34 then 39 dead in two days. Root
+  cause seal.lua:3460-3521 (choose; rate :3412 reads only the separation flood, which starts at the fort's openings, so an open
+  refuge counts as separated while Kern+ is; the BREACH fallback :3512 took it); SIEGE_DEEP siege.lua:2018 called it `the
+  separated refuge`; the stalled hatch asked nobody after SEAL_STUCK and BUG-274's one re-place, BUG-328 (runner.lua:4891) would
+  set it aside.
+- **What changed:** seal `refuge_open` (stair head without a closer or unrevealed): in SIEGE/BREACH (and the deep defense's ask)
+  the open refuge is refused at every level, Kern+ or the best closed burrow, else no confinement; a held one is left
+  (REFUGE_SWITCH `unsealed`); state `alert.ref.op`, status `REFUGE OPEN: not used in a siege or breach`; SIEGE_DEEP names the open
+  refuge first (d.ropen) or, with destroyers in sight, the hatch/door that alone closes it (`nor the refuge hatch x,y,z`, d.soft).
+  runner: a stuck seal without progress for `seal_first.esc_days` (30) asks DECISION_NEEDED `seal_stalled` (piece, cause, what
+  was tried, d.cmd), again every esc_days; the refuge's seal is never set aside. Contract: seal.refuge_open, alert.ref.op,
+  SIEGE_DEEP ropen/soft, REFUGE_SWITCH unsealed, DECISION_NEEDED seal_stalled; fairplay `seal_first.esc_days`; RULES, wake hint.
+- **Tests (fail on b35af6d):** tests/lua/test_seal_refuge.lua (2), tests/lua/test_intake.lua (2),
+  tests/lua/test_bug336_seal_escalate.lua (2), tests/test_bug336_337_refuge.py (4); tests/test_seal_first.py follows the config.
+- **Live check:** a fort with the refuge hatch missing: status `REFUGE OPEN`, at a siege REFUGE_FAIL `Tiefe+: open: no hatch ...`
+  and the alert on Kern+; 30 days after a seal's clock stopped DECISION_NEEDED seal_stalled. Open (BUG-337): ranking burrows by
+  walls/raised bridges vs doors/hatches (needs a flood with doors passable); fleeing vs an open dead end after a Kern+ breach.
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or

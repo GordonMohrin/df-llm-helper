@@ -102,6 +102,11 @@ M.CFG = {
   -- plug, tombs, food/drink, beds, wall repairs and the depot run, until rebuild_off. config/baseline.json "runner":
   -- {seal_first: {on, stuck_days, food_d, drink_d}, rebuild: {pop, off}} (fairplay.RUNNER_LIM; a bad value: default)
   seal_first = true, seal_stuck_days = 3, emerg_food_d = 30, emerg_drink_d = 30, rebuild_pop = 10, rebuild_off = 12,
+  -- BUG-336 (Run 15b Earthboat y384-y387: the refuge hatch 55,82,133 'stalled 0%' 911 days, trolls walked down the open
+  -- stair, 92 -> 1): a stuck seal without progress for seal_esc_days (1-60) asks the player (DECISION_NEEDED
+  -- seal_stalled, A, again every seal_esc_days while it stays so) with the piece, the cause, what the kernel tried and the
+  -- commands; the refuge's seal is never set aside (BUG-328). config seal_first {esc_days}
+  seal_esc_days = 30,
   -- BUG-116 (Run 14 note 89: hospital_out for 60 game years, the hospital placed seven times and parked at "dig 0 %, slot
   -- yielded"): care first. While hospital_out is set or care_patients patients lie in the fort the hospital project runs first
   -- and the work and housing projects pause (PEACE); one that makes no progress for care_stuck_days stops pausing them.
@@ -3053,6 +3058,7 @@ local function conf(K)
   local cf = type(c.care_first) == 'table' and c.care_first or {}           -- BUG-116
   local r = {on = M.CFG.seal_first, stuck = nat(sf.stuck_days, 1, 60, M.CFG.seal_stuck_days) * DAY,
              wall = M.CFG.seal_wall, wall_days = nat(sf.wall_days, 0, 60, M.CFG.seal_wall_days) * DAY,
+             esc = nat(sf.esc_days, 1, 60, M.CFG.seal_esc_days) * DAY,                    -- BUG-336
              food_d = nat(sf.food_d, 0, 400, M.CFG.emerg_food_d), drink_d = nat(sf.drink_d, 0, 400, M.CFG.emerg_drink_d),
              pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off),
              yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
@@ -3323,6 +3329,64 @@ function Q.closure(P, d)
   return P.tpl == 'repair' and type(d) == 'table' and type(d.params) == 'table' and d.params.cl == 1
 end
 
+-- BUG-336: the open piece of seal P on the refuge's stair column (seal.refuge_stair: its x,y), 'hatch x,y,z', else nil.
+-- The column is read once per tick (S.rfc)
+function Q.refuge_seal(K, P)
+  local t = now(K)
+  local c = S.rfc
+  if not (c and c.t == t) then
+    local ok, rs = K.call('seal', 'refuge_stair')
+    local m = ok and type(rs) == 'table' and (rs.pos or rs.man) or nil
+    c = {t = t, x = m and int(m[1]), y = m and int(m[2])}
+    S.rfc = c
+  end
+  if not c.x then return nil end
+  local d = doc(K, P.id)
+  local st = d and d.stages[P.stage + 1]
+  for _, ch in ipairs(st and st.chunks or {}) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      local tile = tl[1]
+      if tile and tile[1] == c.x and tile[2] == c.y and not piece_built(K, tile) then
+        return string.format('%s %d,%d,%d', PIECE_NAME[cell[4]] or cell[4], tile[1], tile[2], tile[3])
+      end
+    end
+  end
+end
+
+-- BUG-336: a stuck seal (r.st 1) without progress for c.esc asks the player, again every c.esc while it stays so (r.dn):
+-- the piece, the cause (SEAL_STUCK's), what the kernel tried (re-placed: BUG-274 r.rp; walled: BUG-044 S.rt.sw) and the
+-- commands. The refuge's seal says the refuge is not the civilians' burrow in a fight until it stands (seal.refuge_open)
+function Q.seal_escalate(K, P, d, r, n, names, t, c)
+  if P.tpl ~= 'seal' or t - r.t < c.esc or (int(r.dn) and t - r.dn < c.esc and t >= r.dn) then return end
+  r.dn = t
+  dirty()
+  local days = (t - r.t) // DAY
+  local rf = Q.refuge_seal(K, P)
+  local piece = rf or names[1] or '?'
+  local tried = {}
+  if type(r.rp) == 'table' and next(r.rp) then tried[#tried + 1] = 'removed and placed again' end
+  if type(S.rt.sw) == 'table' and type(S.rt.sw[P.id]) == 'table' then tried[#tried + 1] = 'doors walled' end
+  local at = piece:match('(%-?%d+,%-?%d+,%-?%d+)') or '?'
+  local cmd
+  if rf then
+    cmd = string.format("build it by hand in DF, or dfllm cmd bp.cancel '{\"proj\":\"%s\"}' then dfllm cmd bp.place " ..
+                        "'{\"tpl\":\"seal\",\"at\":\"refuge\"}'", P.id)
+  else
+    cmd = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}' then dfllm cmd bp.place '{\"tpl\":\"seal\",\"at\":\"%s\"," ..
+                        "\"close\":\"wall\"}' (a wall needs no door; only where the citizens keep another way)", P.id, at)
+  end
+  local q = string.format('seal %s: %s open %d d%s%s%s; %s', P.id, piece, days,
+                          n > 1 and string.format(' (+%d)', n - 1) or '', r.why and (' (' .. r.why .. ')') or '',
+                          #tried > 0 and ('; tried: ' .. table.concat(tried, ', ')) or '',
+                          rf and "the refuge is NOT the civilians' burrow in a fight until it stands" or
+                          'the way in stays open')
+  K.log('warn', 'seal first: %s: %s', q, cmd)
+  K.emit('DECISION_NEEDED', 'A', trunc(q, 200), {id = 'seal_stalled', q = trunc(q, 200), n = days, mat = trunc(piece, 40),
+                                                 cmd = trunc(cmd, 300), proj = P.id})
+end
+
 -- SEAL_STUCK (A): the seal built nothing for stuck_days; util/cadence per project (r.ev): a repeat needs news and
 -- 7 days (Run 9 GHOSTS rule). BUG-041: d.wait = Q.wait_why
 local function stuck_event(K, P, d, n, names, ticks, r)
@@ -3457,7 +3521,7 @@ local function focus(K)
           K.log('info', 'seal first: %s moves again (%s open)%s', P.id, plural(n, 'piece'),
                 P.tpl == 'repair' and '' or ': it pauses the others again')
         end
-        r.sig, r.t, r.nw, r.nu, r.wt = sig, t, nil, nil, nil
+        r.sig, r.t, r.nw, r.nu, r.wt, r.dn = sig, t, nil, nil, nil, nil
         dirty()
       elseif r.st ~= 1 and (not c.on or not allowed(K, P, d)) then
         r.t = t                                       -- the clock waits while the mode freezes the seal
@@ -3466,6 +3530,10 @@ local function focus(K)
         r.st = 1
         dirty()
         stuck_event(K, P, d, n, names, t - r.t, r)
+      end
+      if r.st == 1 then
+        local oke, erre = pcall(Q.seal_escalate, K, P, d, r, n, names, t, c)          -- BUG-336: own pcall
+        if not oke then K.log('error', 'seal escalation failed: %s', trunc(erre, 160)) end
       end
       if P.tpl == 'repair' then                       -- BUG-081: a closure pauses nobody and is never "stuck" for the others
       elseif r.st == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}; f.stk[P.id] = true
@@ -4854,6 +4922,7 @@ function Q.idle_keep(K, P)
   if P.tpl == 'refuge_drink' then return 'the refuge drink' end
   local m = K.mode()
   if SEALS[P.tpl] and (m == 'SIEGE' or m == 'BREACH') then return 'a seal in ' .. m end
+  if P.tpl == 'seal' and Q.refuge_seal(K, P) then return 'the refuge seal' end       -- BUG-336: it escalates instead
   local f = S.focus
   if SUPPLY[P.tpl] and type(f) == 'table' and f.emerg then return tostring(f.emerg) end
 end

@@ -534,7 +534,9 @@ C.STATE_SPEC = obj({
                           -- FR-69: drink units on its tiles, drink wanted, tiles of its drink store (0 none)
                           dr = NAT, dn = NAT, st = NAT,
                           -- BUG-049: trusted (1) or not (0) and the first reason
-                          tr = FLAG, trw = str(40)}),
+                          tr = FLAG, trw = str(40),
+                          -- BUG-336: its own way in (the stair head) is open: never the alert burrow in a fight
+                          op = FLAG}),
                -- BUG-096/FR-80: the worst open burrow episode: how many, the burrow, its tiles at the last good reading and
                -- now, the cause (load | runtime), tiles painted again, what the repair does, what the lost tiles held
                bg = obj({n = NAT, b = str(24), was = NAT, now = NAT}, {c = str(8), fx = NAT, st = str(16), crit = str(24)})}),

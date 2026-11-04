@@ -349,6 +349,8 @@ def next_hint(etype: str, e: dict) -> str:
         return lone_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "siege_long":
         return siege_long_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "seal_stalled":
+        return seal_stalled_hint(d)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)
     if etype == "PAUSED_BY_DF" and d.get("deny"):
@@ -384,6 +386,14 @@ def lone_hint(d: dict) -> str:
     return (f"tell Gordon{how}{kill}; otherwise the kernel releases it at confine.max_days when the soldiers stand at "
             "their stations (LOCKDOWN_END limit); dfllm events --type SORTIE says whether the soldiers arrived, killed it or "
             "stood beside it (not_attackable: DF does not treat it as an enemy)")
+
+
+def seal_stalled_hint(d: dict) -> str:
+    """BUG-336 (Run 15b Earthboat: the refuge hatch stalled 911 days, trolls walked down the open stair, 92 -> 1): a stuck seal
+    without progress for seal_first.esc_days; d.cmd = the commands (the refuge's: build by hand or place it again)."""
+    cmd = d.get("cmd")
+    return (f"tell Gordon: seal {d.get('proj', '?')} ({d.get('mat', '?')}) has built nothing for {d.get('n', '?')} days"
+            + (f"; fix: {cmd}" if cmd else "") + "; until it stands that way in is open")
 
 
 def siege_long_hint(d: dict) -> str:

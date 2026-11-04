@@ -346,6 +346,8 @@ Related: FR-xx, BUG-xx
 | [BUG-332](BUG-332-quicksave-check-looks-in-appdata.md) | fixed (offline, live-untested) | high | Run 15: `dfllm save` QUICKSAVE_FAILED: it looked in %APPDATA% while DF saves portably to <DF>/save | supervise.py, kern.lua, save.py |
 | [BUG-333](BUG-333-ways-in-status-vs-inspect-and-saplings-off-the-snapshot.md) | partly fixed (offline, live-untested): one ways-in list, saplings off the snapshot; open: surface ways in under tree crowns (BUG-323) | medium | Run 15b/c/d: status and inspect entrances name other ways in; seal at=last leaves a sapling off the snapshot out | seal.lua, cmd.py |
 | [BUG-334](BUG-334-follow-on-old-code-blocks-the-new-one.md) | fixed (offline, live-untested) | medium | Run 15: a follow on old code blocks the new one; players must know --takeover | wake.py |
+| [BUG-336](BUG-336-refuge-is-a-death-trap-when-its-seal-is-never-built.md) | fixed (offline, live-untested) | critical | Run 15b: the refuge with its hatch never built (911 d stalled) stays the civilians' burrow; trolls follow them down the open stair, 92 -> 1; the stalled seal asks nobody | seal.lua, runner.lua, siege.lua |
+| [BUG-337](BUG-337-building-destroyers-walk-into-the-refuge.md) | partly fixed (offline, live-untested): open refuge and text; open: ranking by wall/raised bridge vs door/hatch | high | Run 15b: the deep defense sends the civilians to a refuge only a hatch (or nothing) closes while building destroyers are in sight | siege.lua, seal.lua |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
