@@ -1,5 +1,22 @@
 # CHANGELOG dfpilot
 
+## Run 15 hospital water: a far zone does not make the hospital's own pond well a source, GiveWater without effect is named (BUG-343/344, 2026-11-04; offline, live-untested)
+- **Why:** i2 Guildcleans y386-y390: 13 patients died of thirst at 75,000 while status said `hospital ok, src 3 (well 18183
+  in Kern+)` and PATIENT_DYING `N GiveWater jobs running` (verdict `run`); i4 Drillchamber y397: a citizen died beside well
+  18324, 'wet' in inspect water_sources. Both wells are the hospital template's (rooms.py:182) over a sump with its own Pond
+  zone 1 tile away; any wet Water Source zone on the map (i2: 66 tiles outside, i4: ~30 tiles) switched the loop rule off
+  (water.lua pond_loops :514, M.loops :556/:567), so the trickle the carriers poured back counted as the hospital's water.
+- **What changed (water.lua):** `M.pond_fed`: a wet zone feeds a pond only when it lies at most as far from it as the well
+  beside it; pond_loops and M.loops ask it per pond (a far zone leaves the loop a loop: pond removed, well not accepted,
+  HOSPITAL_DRY / the BUG-034 removal as for any loop). `M.give_effect`: `run` for 2 days (`M.NOEFFECT_DAYS`) while the same
+  patient's thirst climbs is verdict `noeffect` with the nearest accepted water. `M.lie`: PATIENT_DYING `lie` (wounds,
+  unconscious, paralysis, syndrome names) and in its kern.log line. Contract: PATIENT_DYING `lie:s` optional, key `noeffect`
+  (schema.py, CONTRACTS.md, appendix). The 7 `suffocated by dwarf` deaths are kills by other dwarves (26740 Berserk), not water.
+- **Tests (fail on 14ff5a3):** tests/lua/test_bug262_266_water.lua (+1, the supplying-zone test now has its zone beside the
+  pond), tests/lua/test_water.lua (pond loop: far zone), tests/lua/test_water_m1.lua (+2).
+- **Live check:** i2/i4 kern.log `water: pond zone N removed: the wet well 18183 (i4: 18324) beside it was its water source (a
+  loop)`, no `well 18183 in Kern+` in src; PATIENT_DYING `key noeffect`, `lie`. Open: what the carrier does with the bucket,
+  the template's bucket-filled sump, drink 0 d in i4 is brewing (BUG-340), a dry well is not refilled automatically.
 ## Run 15 gate review (merge15): walkers do not give a bridge up, a forced raise beats a blocked park, a destroyed bridge is not busy (BUG-335/342/338 review fix, 2026-11-04; offline, live-untested)
 - **Why:** review of merge15: path-only crossers made every queued pull a 'blocked' cancel toward gate.pull_cap (busy SIEGE
   traffic: give-up, every lever parked giveup_wait, also with a hostile at the gate); a bridge destroyed in the settle window

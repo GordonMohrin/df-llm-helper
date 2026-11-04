@@ -392,4 +392,59 @@ T.test('BUG-153: the civ alert sounds but siege holds no list (a reload, a playe
   T.ok(e.msg:find('the civ alert holds the caregivers in Kern+', 1, true), e.msg)
 end)
 
+---------------------------------------------------------------- BUG-343
+T.test('BUG-343 (Run 15 Guildcleans y386-y390: 13 patients dead of thirst while PATIENT_DYING said "N GiveWater jobs ' ..
+       'running"): jobs that run for days while the thirst of the same patient only climbs are `noeffect`, with the nearest ' ..
+       'water; a drink starts anew', function()
+  local W = world{patients = {{id = 5, thirst = 61000, care = true, pos = {12, 12, 5}}}, carers = {1, 2},
+                  jobs = {{id = 501, worker = 1}}}
+  local u = W.unit(5)
+  day(W)
+  local ev = W.find_events('PATIENT_DYING')
+  T.eq(ev[#ev].d.key, 'run')
+  for _ = 1, 3 do
+    u.counters2.thirst_timer = u.counters2.thirst_timer + 1200
+    W.ms = W.ms + 600000
+    day(W)
+  end
+  ev = W.find_events('PATIENT_DYING')
+  local e = ev[#ev]
+  T.eq(e.d.key, 'noeffect', 'old code: run for ever (nothing to do)')
+  T.ok(e.msg:find('1 GiveWater job running 2+ days without effect (unit 5 thirst 61000 -> ', 1, true), e.msg)
+  local line
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('without effect', 1, true) then line = l.msg end end
+  T.ok(line and line:find('nearest water: well ', 1, true) and line:find('at 20,12,5', 1, true), tostring(line))
+  -- he drinks (the timer falls): `run` again, the count starts anew; another patient on top too
+  local M = package.loaded['dfllm.water']
+  local p = {grun = {u = 5, t = 0, th = 61000}}
+  local function gv() return {key = 'run', run = 1} end
+  T.eq(M.give_effect(p, gv(), {id = 5, thirst = 61000 + 3 * 1200}, 3 * 1200, nil).key, 'noeffect')
+  T.eq(M.give_effect(p, gv(), {id = 5, thirst = 200}, 4 * 1200, nil).key, 'run', 'a drink')
+  T.eq(p.grun, {u = 5, t = 4 * 1200, th = 200})
+  T.eq(M.give_effect(p, gv(), {id = 6, thirst = 9000}, 9 * 1200, nil).key, 'run', 'another patient')
+  T.eq(M.give_effect(p, gv(), {id = 6, thirst = 9000}, 12 * 1200, nil).key, 'run', 'a timer standing still proves nothing')
+  T.eq(M.give_effect(p, {key = 'open'}, {id = 6, thirst = 20000}, 13 * 1200, nil).key, 'open')
+  T.eq(p.grun, nil, 'another verdict forgets it')
+end)
+
+T.test('BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought Syndrome): PATIENT_DYING says why the ' ..
+       'top patient lies (wounds, unconscious, the syndrome name)', function()
+  local W = world{patients = {{id = 5, thirst = 61000, care = true, pos = {12, 12, 5}}}, carers = {1, 2},
+                  setup = function(W)
+                    local u = W.unit(5)
+                    u.body = {wounds = {}}
+                    u.counters = {unconscious = 30, paralysis = 0}
+                    u.syndromes = {active = {{type = 7}}}
+                    df.syndrome = {find = function(id) return id == 7 and {syn_name = 'webbed dust'} or nil end}
+                  end}
+  day(W)
+  local ev = W.find_events('PATIENT_DYING')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.lie, 'wounds 0, unconscious, syndrome webbed dust', 'old code: nil')
+  local line
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('near death of thirst', 1, true) then line = l.msg end end
+  T.ok(line and line:find('unit 5: wounds 0, unconscious, syndrome webbed dust', 1, true), tostring(line))
+  df.syndrome = nil
+end)
+
 T.done()

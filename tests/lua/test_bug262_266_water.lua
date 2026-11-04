@@ -123,18 +123,47 @@ T.test('BUG-263 (Run 15 Drillchamber y373: well 17813 accepted, its pond 17822 r
   T.eq(W.state().water.hosp_ok, 1)
 end)
 
-T.test('BUG-263: a wet Water Source zone is the real supply: the well beside a pond is accepted (no loop)', function()
-  local W = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['30,12,5'] = '~'}, setup = function(W)
+-- BUG-343/344: the zone beside the pond (as near to it as the well) is the carriers' nearest source: it is the supply
+T.test('BUG-263: a wet Water Source zone beside the pond is the real supply: the well beside it is accepted (no loop)',
+       function()
+  local W = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['22,12,5'] = '~'}, setup = function(W)
     hospital(W)
     well(W, 20, 12, 5)
     pond(W, 80, 21, 12, 5)
-    F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 30, y1 = 12, x2 = 30, y2 = 12,
+    F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 22, y1 = 12, x2 = 22, y2 = 12,
                                         z = 5, spec_sub_flag = {active = true}})
   end}
   day(W)
   local src = W.state().water.src
   T.eq(#src, 2, 'the well and the zone')
   T.eq(W.find_events('HOSPITAL_DRY'), {})
+  T.ok(not logged(W, 'water: pond zone 80 removed'), 'the pond stays')
+end)
+
+---------------------------------------------------------------- BUG-343/344
+T.test('BUG-343/344 (Run 15 Guildcleans y386-y390: "hospital ok, src 3 (well 18183 in Kern+)", 13 patients dead of thirst; ' ..
+       'Drillchamber: a citizen died of thirst beside well 18324 "wet"): the hospital template well with its own pond ' ..
+       'beside it stays a loop while the only wet Water Source zone lies far away; the pond goes, the hospital is dry',
+       function()
+  local wid
+  local W = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['60,40,5'] = '~'}, setup = function(W)
+    hospital(W)
+    wid = well(W, 20, 12, 5).id
+    pond(W, 80, 21, 12, 5)
+    F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 60, y1 = 40, x2 = 60, y2 = 40,
+                                        z = 5, spec_sub_flag = {active = true}})
+  end}
+  day(W)
+  local w = W.state().water
+  T.eq(#w.src, 1, 'old code: 2 (the loop well accepted beside the far zone)')
+  T.eq(w.src[1], {60, 40, 5}, 'only the far zone')
+  T.eq(w.hosp_ok, 0, 'old code: 1 ("hospital ok")')
+  T.ok(logged(W, 'water: pond zone 80 removed'), 'old code: kept (no loop with a wet zone anywhere)')
+  local hd = W.find_events('HOSPITAL_DRY')
+  T.eq(#hd, 1)
+  local want = string.format('well %d at 20,12,5 is fed only by its own pond 80', wid)
+  T.ok(hd[1].d.why:find(want, 1, true), hd[1].d.why)
+  T.ok(hd[1].d.why:find('nearest accepted water', 1, true), hd[1].d.why)
 end)
 
 T.test('BUG-263: the source a planned hospital was placed by drops out (its pond appears): HOSPITAL_DRY names it and ' ..

@@ -36,7 +36,8 @@
 --   * pond loop (live L6, Paddletribes): a Pond zone beside a WET well makes the carriers take the water from that
 --     very well (the nearest source) and pour it into the pond hole over the same sump, again and again. A Pond
 --     zone within `pond_near` tiles of a wet well is removed (act.pond_remove) unless a wet Water Source zone
---     is the real supply; at most `pond_per_run` a run;
+--     at most as far from the pond as the well is the real supply (BUG-343/344: a far zone is not); at most
+--     `pond_per_run` a run;
 --   * cisterns (manifest rooms tpl `cistern`): revealed water on the well room floor (2 tiles, or 1 tile in
 --     two runs in a row) means the pipe is flooding the room: DECISION_NEEDED cistern_flood (A), close the
 --     floodgate with the room's lever;
@@ -55,7 +56,8 @@
 --   * BUG-103: patients and caregivers are citizens (isCitizen); the census also holds residents, who are neither;
 --   * BUG-104: a patient over the alarm gets a verdict on why no GiveWater job runs (M.give_diag: alert / noreach / stuck / open /
 --     nojob / run, BUG-324: nowater, with the job, caregiver and bucket counts); `added` of patient_thirst counts caregivers put into the Orderlies
---     detail, never jobs (the kernel creates none);
+--     detail, never jobs (the kernel creates none); BUG-343: `run` for M.NOEFFECT_DAYS while the same patient's thirst
+--     only climbs is `noeffect` (M.give_effect), and PATIENT_DYING's `lie` says why he lies (M.lie: wounds, syndromes);
 --   * BUG-106: `inspect what=hospital` and the state's water.gaps list the gaps of the wound care (M.audit), once per run.
 --   * BUG-131: a hospital zone outside the core that is idle or superseded does not count in hosp_out (M.hosp_sort); the
 --     verb hospital.retire removes one such zone (the zones screen's remove, act.hospital_remove; M.verbs).
@@ -510,15 +512,13 @@ end
 -- CISTERN_DRY (once its own well was wet the carriers took from it: a bucket-fed cistern cannot fill past that)
 local function pond_loops(K, c, r, p)
   if #r.ponds == 0 or not M.can('pond_remove') then return 0 end
-  for _, s in ipairs(r.sources) do
-    if s.kind == 'zone' and s.wet then return 0 end            -- a real supply exists: the pond is no loop
-  end
   local n = 0
   for _, pd in ipairs(r.ponds) do
     if n >= c.pond_per_run then break end
     for _, s in ipairs(r.sources) do
-      if s.kind == 'well' and s.wet and dist_box(s.x, s.y, s.z, {x1 = pd.x1, y1 = pd.y1, x2 = pd.x2, y2 = pd.y2,
-                                                                 z = pd.z}) <= c.pond_near then
+      local d = s.kind == 'well' and s.wet and dist_box(s.x, s.y, s.z, {x1 = pd.x1, y1 = pd.y1, x2 = pd.x2, y2 = pd.y2,
+                                                                        z = pd.z}) or nil
+      if d and d <= c.pond_near and not M.pond_fed(r, pd, d) then   -- BUG-343/344: only a nearer zone is the supply
         if K.act.pond_remove(pd.id) then
           n = n + 1
           K.log('warn', 'water: pond zone %d removed: the wet well %d beside it was its water source (a loop)',
@@ -551,10 +551,23 @@ function M.loop_mark(p, wid, pond)
   if type(p.lw[k]) ~= 'table' then p.lw[k] = {pond = pond} end
 end
 
+-- BUG-343/344 (Run 15 Guildcleans y386-y390: 'hospital ok, src 3 (well 18183 in Kern+)', 13 patients dead of thirst
+-- with 1-10 GiveWater jobs running; Drillchamber y379-y397: a citizen died of thirst beside well 18324, 'wet' in inspect
+-- water_sources): the hospital template's own well (105,105,125 / 76,50,142) stands over a channel with a Pond zone beside
+-- it (p{pond=true}, 1 tile away), and any wet Water Source zone on the map (zone 18086 66 tiles away outside, zone 18276
+-- 30 tiles away) made it "the real supply": no loop, the well's trickle the carriers pour back counted as the hospital's
+-- water. The carriers take the nearest source (the header's pond loop, live L6): a zone feeds the pond only when it lies
+-- at most as far from the pond as the well beside it (d, Chebyshev to the pond rect); a farther one leaves the loop a loop
+function M.pond_fed(r, pd, d)
+  local box = {x1 = pd.x1, y1 = pd.y1, x2 = pd.x2, y2 = pd.y2, z = pd.z}
+  for _, s in ipairs(r.sources) do
+    if s.kind == 'zone' and s.wet and dist_box(s.x, s.y, s.z, box) <= d then return true end
+  end
+  return false
+end
+
 function M.loops(K, c, r, p)
   p.lw = json.object(type(p.lw) == 'table' and p.lw or {})
-  local zone_wet = false
-  for _, s in ipairs(r.sources) do if s.kind == 'zone' and s.wet then zone_wet = true end end
   local n = 0
   for _, s in ipairs(r.sources) do
     s.water = s.wet
@@ -564,10 +577,9 @@ function M.loops(K, c, r, p)
         p.lw[k] = nil                                         -- dry: a refill from elsewhere is judged anew
       else
         local pond
-        for _, pd in ipairs(zone_wet and {} or r.ponds) do
-          if dist_box(s.x, s.y, s.z, {x1 = pd.x1, y1 = pd.y1, x2 = pd.x2, y2 = pd.y2, z = pd.z}) <= c.pond_near then
-            pond = pd.id
-          end
+        for _, pd in ipairs(r.ponds) do
+          local d = dist_box(s.x, s.y, s.z, {x1 = pd.x1, y1 = pd.y1, x2 = pd.x2, y2 = pd.y2, z = pd.z})
+          if d <= c.pond_near and not M.pond_fed(r, pd, d) then pond = pd.id end
         end
         if pond then M.loop_mark(p, s.id, pond) end
         local rec = p.lw[k]
@@ -1767,6 +1779,57 @@ function M.give_diag(K, c, r, sc, bfree, top)
   return gv
 end
 
+-- BUG-343 (Run 15 Guildcleans y386-y390: 13 patients dead of thirst at 75,000 while PATIENT_DYING said '1-10 GiveWater
+-- jobs running', verdict `run`, i.e. nothing to do): a job that runs for days while the same patient's thirst only climbs
+-- brings no water (a drink resets the timer). M.NOEFFECT_DAYS after the first `run` verdict for the thirstiest patient
+-- without his thirst ever falling (p.grun {u, t, th}) the verdict is `noeffect`, naming the accepted water nearest the
+-- hospital the carriers would fill at (src, served()'s best: {d, s}); any other verdict, another top patient or a drink
+-- starts anew. Report only: what the carrier really does with the bucket is the game's (kern.log, inspect water_sources)
+M.NOEFFECT_DAYS = 2
+function M.give_effect(p, gv, top, now, src)
+  local g = type(p.grun) == 'table' and p.grun or nil
+  if gv.key ~= 'run' or not top or not top.id then p.grun = nil; return gv end
+  if not g or math.tointeger(g.u) ~= top.id or top.thirst < (math.tointeger(g.th) or 0) then
+    p.grun = {u = top.id, t = now, th = top.thirst}
+    return gv
+  end
+  local dt = now - (math.tointeger(g.t) or now)
+  -- climbing: at least half the timer's tick rate since then (a timer that stands still is no proof of anything)
+  if dt // DAY < M.NOEFFECT_DAYS or top.thirst - (math.tointeger(g.th) or 0) < dt // 2 then return gv end
+  local days = dt // DAY
+  local s = src and src.s
+  local at = s and string.format('%s %d at %d,%d,%d, %d tiles', s.kind, s.id, s.x, s.y, s.z, src.d) or 'none accepted'
+  gv.key = 'noeffect'
+  gv.reason = string.format('%s running %d+ days without effect (unit %d thirst %d -> %d; nearest water: %s): a dry '
+                            .. 'or pond-fed well?', plural(gv.run, 'GiveWater job', 'GiveWater jobs'), days, top.id,
+                            math.tointeger(g.th) or -1, top.thirst, at)
+  return gv
+end
+
+-- BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought 'Syndrome'): why a patient lies, as the unit
+-- sheet would show it: wounds, unconscious / paralysed (counters), the active syndromes' names (at most 2); '' unread
+function M.lie(u)
+  if not u then return '' end
+  local out = {}
+  local okw, nw = pcall(function() return #u.body.wounds end)
+  if okw and math.tointeger(nw) then out[#out + 1] = 'wounds ' .. nw end
+  for _, k in ipairs({'unconscious', 'paralysis'}) do
+    local ok, v = pcall(function() return u.counters[k] end)
+    if ok and (math.tointeger(v) or 0) > 0 then out[#out + 1] = k end
+  end
+  pcall(function()
+    local n = 0
+    for _, a in ipairs(u.syndromes.active) do
+      if n >= 2 then break end
+      local syn = df.syndrome.find(a.type)
+      local nm = syn and syn.syn_name
+      n = n + 1
+      out[#out + 1] = 'syndrome ' .. ((type(nm) == 'string' and nm ~= '') and trunc(nm, 24) or fmt(a.type))
+    end
+  end)
+  return table.concat(out, ', ')
+end
+
 ---------------------------------------------------------------- BUG-330: water carriers to a patient outside the lockdown
 -- Run 15b Earthboat y385 (i3): patient 26629 lay at 74,83,138 outside the alert burrow Tiefe+ (the deep defense) for 30 days
 -- of a SIEGE and died of thirst (75,000) while 77 caregivers stood idle in Tiefe+ ('the civ alert holds the caregivers in
@@ -2523,10 +2586,11 @@ local function finish(K, c, r, p)
   local need_gv = over_alarm
   for _, pt in ipairs(r.patients) do if pt.thirst >= c.dying_thirst then need_gv = true end end
   local gv
+  if not need_gv then p.grun = nil end
   if need_gv then
     local top
     for _, pt in ipairs(r.patients) do if not top or pt.thirst > top.thirst then top = pt end end
-    gv = M.give_diag(K, c, r, sc, r.free + fixed, top)
+    gv = M.give_effect(p, M.give_diag(K, c, r, sc, r.free + fixed, top), top, now, best_h)   -- BUG-343
     st.gv = {tick = now, key = gv.key, txt = gv.txt, reason = gv.reason}
   end
   -- patients over the alarm: one class-A line for all of them, with the cause (cadence: M.DEFAULTS)
@@ -2651,6 +2715,7 @@ local function finish(K, c, r, p)
       local gopen, grun
       if gv and gv.open ~= nil then gopen, grun = gv.open, gv.run else gopen, grun = M.give_jobs() end
       local top = dying[1]
+      local lie = M.lie(df.unit.find(top.id))                        -- BUG-343: wounds, syndromes
       local shown = {}
       for i = 1, math.min(8, #dids) do shown[i] = dids[i] end
       local msg = string.format('%d patient(s) near death of thirst (>= %d), unit %d at %d: hospital %s, caregivers %d of %d '
@@ -2660,9 +2725,9 @@ local function finish(K, c, r, p)
              {units = shown, n = #dying, thirst = top.thirst, carers = after, want = cs.want, hosp = hs,
               idle = cs.idle, added = #cs.added, give = r.give, open = gopen or -1, run = grun or -1,
               buckets = r.free + fixed, why = trunc(why, 120), stuck = gv and gv.stuck or nil,
-              reach = gv and gv.reach or nil, key = gv and gv.key or nil})
-      K.log('warn', 'water: %s (GiveWater/GiveFood jobs: %s open, %s running)%s', msg, tostring(gopen), tostring(grun),
-            gv and ('; ' .. gv.txt) or '')
+              reach = gv and gv.reach or nil, key = gv and gv.key or nil, lie = lie ~= '' and trunc(lie, 80) or nil})
+      K.log('warn', 'water: %s (GiveWater/GiveFood jobs: %s open, %s running)%s%s', msg, tostring(gopen), tostring(grun),
+            gv and ('; ' .. gv.txt) or '', lie ~= '' and ('; unit ' .. top.id .. ': ' .. lie) or '')
     end
   else
     p.dying = CAD.quiet(p.dying)

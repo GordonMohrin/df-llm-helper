@@ -495,9 +495,9 @@ T.test('cistern flood: water on the well room floor wakes the LLM every 2 days; 
 end)
 
 T.test('pond loop (live L6): a Pond zone beside a wet well is removed; a real Water Source zone keeps it', function()
-  local function run(with_source)
+  local function run(with_source)                -- BUG-343/344: with_source = the zone's x1 (it spans x1..x1+1)
     local removed = {}
-    local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['31,12,5'] = '~'},
+    local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~', ['31,12,5'] = '~', ['23,12,5'] = '~'},
                        setup = function(W)
                          df.civzone_type.Pond = 11
                          df.civzone_type[11] = 'Pond'
@@ -507,8 +507,8 @@ T.test('pond loop (live L6): a Pond zone beside a wet well is removed; a real Wa
                          F.building(W, 'ANY_ZONE', {id = 81, type = df.civzone_type.Pond, x1 = 70, y1 = 70, x2 = 70,
                                                     y2 = 70, z = 5})
                          if with_source then
-                           F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource, x1 = 30,
-                                                               y1 = 12, x2 = 31, y2 = 12, z = 5,
+                           F.building(W, 'ZONE_WATER_SOURCE', {id = 82, type = df.civzone_type.WaterSource,
+                                                               x1 = with_source, y1 = 12, x2 = with_source + 1, y2 = 12, z = 5,
                                                                spec_sub_flag = {active = true}})
                          end
                          W.act_result('pond_remove', function(id) removed[#removed + 1] = id; return true, 1 end)
@@ -519,7 +519,9 @@ T.test('pond loop (live L6): a Pond zone beside a wet well is removed; a real Wa
     return removed
   end
   T.eq(run(false), {80}, 'only the pond beside the wet well; the far one stays')
-  T.eq(run(true), {}, 'a wet Water Source zone is the real supply: no loop')
+  T.eq(run(22), {}, 'a wet Water Source zone beside the pond is the real supply: no loop')
+  -- BUG-343/344: a zone farther from the pond than the well is not the carriers' nearest source: still a loop
+  T.eq(run(30), {80}, 'old code: {} (any wet zone on the map exempted the pond)')
 end)
 
 T.test('state: water is published once a run is done (BUG-034: the contract has the key); the census is sliced', function()
