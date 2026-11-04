@@ -584,4 +584,44 @@ T.test('BUG-117: no skill names the first three missing types; a queued shop is 
 end)
 
 
+-- BUG-341 (Run 15 Guildcleans y376: logs x1 'none reachable [89/89/0]', the stock of 89 hid the need from economy): the
+-- free items of a short need the dwarf cannot reach go to care.mood_wants as `far`; the hint names the walk group
+T.test('BUG-341: free items out of reach of the moody dwarf are mood_wants.far; the decision says another walk group', function()
+  local W = CW.world{reach = function(a, b) return b.x ~= 20 end, setup = function(W)
+    F.mat(W, 0, 9, {token = 'INORGANIC:IRON'})
+    moody(W, 1, 'Fell', {filter('BAR', {mat_type = 0, quantity = 1})})
+    bar(W, 50, 9, {}, {20, 10, 5})                       -- free but on another walk group
+    bar(W, 53, 9, {}, {20, 12, 5})
+  end}
+  W.run(1)
+  local _, w = W.K.call('care', 'mood_wants')
+  T.eq({#w, w[1].cls, w[1].n, w[1].far}, {1, 'bars', 1, 2})
+  CW.day(W, 2)
+  local q = W.find_events('DECISION_NEEDED')[1].d.q
+  T.ok(q:find('2 out of his reach (another walk group)', 1, true) and #q <= 200, q)
+end)
+
+
+-- BUG-341 (Run 15 Guildcleans: MOOD_CRITICAL came only at 39/32/20 days left and named no act): material that lies only out
+-- of his reach is an emergency at once (MD.reasons 'reach'); MOOD_CRITICAL names what the kernel did and what is left
+T.test('BUG-341: a short need with its items out of reach -> MOOD_CRITICAL reach at once, naming the caravans and the way', function()
+  local MD = require('dfllm.mood')
+  local r = MD.reasons({}, {now = 100, ws = 'Forge', far = 2})
+  T.ok(F.has(r, 'reach'), table.concat(r, ','))
+  T.ok(not F.has(MD.reasons({}, {now = 100, ws = 'Forge'}), 'reach'))
+  local W = CW.world{reach = function(a, b) return b.x ~= 20 end, setup = function(W)
+    F.mat(W, 0, 9, {token = 'INORGANIC:IRON'})
+    moody(W, 1, 'Fell', {filter('BAR', {mat_type = 0, quantity = 1})})
+    bar(W, 50, 9, {}, {20, 10, 5})
+  end}
+  CW.day(W, 1)
+  local mc
+  for _, e in ipairs(W.find_events('MOOD_CRITICAL')) do if F.has(e.d.reasons or {}, 'reach') then mc = e end end
+  T.ok(mc, 'MOOD_CRITICAL reach')
+  T.eq(mc.d.far, 1)
+  T.ok(type(mc.d.reach) == 'string' and mc.d.reach:find('1 out of his reach', 1, true) and
+       mc.d.reach:find('wall him in', 1, true), tostring(mc.d.reach))
+  T.ok(#mc.msg <= 200, mc.msg)
+end)
+
 T.done()

@@ -431,7 +431,7 @@ OPEN = Obj(extra=AnyV())
 
 # ---------------------------------------------------------------- events
 _DT = {"i": INT, "s": Str(maxbytes=200), "f": FLAG, "ia": Arr(INT, hi=50), "sa": Arr(Str(maxbytes=60), hi=50),
-       "p": POS}
+       "p": POS, "ca": Arr(Str(maxbytes=200), hi=8)}     # BUG-340: ca = command lines
 
 
 def _d(req: str = "", opt: str = "") -> Obj:
@@ -478,8 +478,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-042: drink_low adds drink (days), block (still, brew, unvalidated, plants, barrels, brewer) and auto (brew,
     # office, barrels, gather); manager_office names why the manager validates nothing (orders older than unval_days)
     # BUG-287: trade_screen = a player screen blocked the caravan's trade n times (trade.BUSY_ASK); screen = its focus
+    # BUG-340: food_low/famine opts only with a command; cmds = their command lines in opts order (`dfllm cmd ...`); auto
+    # trade = the caravans are asked for food and seeds (economy.fd_wants)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -547,9 +549,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MOOD_RISK": ("A", "care", _d("unit:i why:s", "kind:s missing:sa thirst:i hunger:i nosrc:sa route:s ws:s slots:sa fix:s")),
     # BUG-282: why = thirst | hunger (the bars above) or, whatever the thirst, workshop | material | waiting | timer (reasons =
     # all of them); left = days to the nearest death line (-1 unknown; lsrc timer | est | thirst | hunger, BUG-307), need = the shop type his skill lacks, ask =
-    # the shops the kernel requested itself (PROJECT_REQUEST workshops why=mood), webs = its collect-webs task
+    # the shops the kernel requested itself (PROJECT_REQUEST workshops why=mood), webs = its collect-webs task; BUG-341: why
+    # reach = the material lies only out of his reach (far = those free items), reach = what the kernel did and what is left
     "MOOD_CRITICAL": ("A", "care", _d("unit:i why:s", "kind:s thirst:i hunger:i ws:s name:s pos:p missing:sa nook:s "
-                                                    "reasons:sa left:i lsrc:s need:s ask:s webs:s slots:sa")),
+                                                    "reasons:sa left:i lsrc:s need:s ask:s webs:s slots:sa far:i reach:s")),
     # class A since Run 9 (an army walked in while these were digest-only): they wake at once
     "SIEGE_START": ("A", "siege", _d(opt="vis:i inv:i great:i why:s")),
     "INVASION": ("A", "threat", _d(opt="id:i")),

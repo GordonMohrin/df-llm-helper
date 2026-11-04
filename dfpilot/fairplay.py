@@ -859,12 +859,15 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                                "gather_max": (1, 50), "other_per": (1, 100), "other_max": (1, 20), "share": (5, 100),
                                "step": (1, 20), "idle_days": (1, 112), "stale_days": (1, 365), "unmark_max": (1, 400),
                                "labors": "labors"},
+                     # BUG-340: the famine crew (food specialists) per spec, its share of the adults, adds a day, way back
+                     "famine_crew": {"on": "bool", "farmers": (0, 20), "cooks": (0, 10), "brewers": (0, 10),
+                                     "gatherers": (0, 20), "share": (5, 60), "step": (1, 10), "off_days": (10, 400)},
                      # BUG-053: stale tools, the tool pile (the part's other keys are checked by the mirror test)
                      "tools": {"stale_days": (1, 400), "keep_days": (0, 400), "pile": "bool", "pile_days": (1, 400), "pile_w": (1, 5),
                                "pile_h": (1, 5), "pile_r": (2, 40), "pile_reads": (20, 2000), "pile_every": (1, 400)},
                      # FR-76: a forbidden stock (>= burst_min drink + food units) is unforbidden burst_per_day a day
                      "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000)}}
-ECONOMY_OWN = ("drink", "office", "farms", "cover", "slabs", "stale")   # parts whose every key is listed above
+ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale")   # parts whose every key is listed above
 _PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
 _JOB_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,40}$")

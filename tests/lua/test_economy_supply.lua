@@ -202,6 +202,7 @@ end)
 T.test('FR-25: starvation marks shrubs, staffs gatherers and planters, unforbids food, names who is cut off', function()
   local ctl = {}
   local W = world{cit = 6, food = 1, starve_days = 10, hungry = {[1] = 60000, [3] = 70000},
+                  cfg = function(cf) cf.economy.famine_crew.on = false end,   -- BUG-340's crew: test_economy_fcrew
                   setup = function(W)
     ctl.planters = {name = 'Planters', assigned_units = kmock.vec{}, allowed_labors = {}, flags = {mode = 3}}
     ctl.gather = {name = 'Plant gatherers', assigned_units = kmock.vec{5}, allowed_labors = {}, flags = {mode = 3}}

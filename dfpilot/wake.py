@@ -202,7 +202,7 @@ ERR_EVERY_S = 60                               # stderr 'poll error' at most onc
 # are never held by the hourly limit longer than URGENT_GAME_TICKS of game time (merged first, one per type per
 # URGENT_REPEAT_S); DECISION_NEEDED only for the ids in URGENT_DECISIONS (a fort running out of drink or food, a thirsty one)
 URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
-URGENT_DECISIONS = {"drink_low", "food_low", "thirst", "patient_thirst"}
+URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst"}   # BUG-340: famine too
 URGENT_GAME_TICKS = schema.TICKS["DAY"]
 HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often
 
@@ -351,6 +351,8 @@ def next_hint(etype: str, e: dict) -> str:
         return siege_long_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "seal_stalled":
         return seal_stalled_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low") and d.get("cmds"):
+        return food_hint(d)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)
     if etype == "PAUSED_BY_DF" and d.get("deny"):
@@ -375,6 +377,21 @@ def sortie_hint(d: dict) -> str:
         return f"tell Gordon{how}; otherwise the lockdown ends by itself at its limit (confine.max_days)"
     return (f"tell Gordon: the lockdown stays while this one is near{how} (only if the squad can win); "
             "dfllm status shows the cause")
+
+
+def food_hint(d: dict) -> str:
+    """BUG-340 (Run 15c/15d: the famine options `gather` and `trade.want food` could not be sent): food_low/famine carry
+    d.cmds, the command lines of the options (in d.opts order); what the kernel does itself is d.auto (caravans asked for
+    food and seeds, gatherers, the fishery request). The wake line is short (WAKE_TOKENS): the first command in full, the
+    rest by name; `dfllm events --cls A` shows every line of d.cmds."""
+    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    if not cmds:
+        return NEXT["DECISION_NEEDED"]
+    auto = ", ".join(str(a) for a in d.get("auto") or [])
+    head = f"the kernel already: {auto}; " if auto else ""
+    opts = [str(o) for o in d.get("opts") or []]
+    more = f"; also {', '.join(opts[1:len(cmds)])} (d.cmds: dfllm events --cls A)" if len(cmds) > 1 else ""
+    return f"{head}tell Gordon, send the option he picks as d.cmds has it: {cmds[0]}{more}"
 
 
 def lone_hint(d: dict) -> str:
@@ -1103,7 +1120,10 @@ class Follower:
                 args["prio"] = job["prio"]
             prev = files.read_json(_placed(self.dir, tpl))
             need = job.get("need") if isinstance(job.get("need"), list) else None
-            cid = self._send("bp.place", args, tpl, now, snap=snap, need=need)
+            if tpl == "farms":
+                cid = self._place_farms(args, now, snap)
+            else:
+                cid = self._send("bp.place", args, tpl, now, snap=snap, need=need)
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped
             self.jobs.pop(key, None)
             self._fail(tpl, e, now)
@@ -1113,6 +1133,27 @@ class Follower:
         job.update(placed=cid, since=now, prev=prev if isinstance(prev, dict) else None)
         files.log_cli(self.dir, "follow", f"auto:{key}", args, f"placed {cid}")
 
+
+    def _place_farms(self, args: dict, now: float, snap: dict) -> str:
+        """BUG-340 (Run 15d Drillchamber y379-y382: 220 AUTO_FAIL `only 0 free site(s) for farms plots=2` while food fell to
+        0 days; the plans placed three surface farms plots=1 that fed the fort, one a year): economy's farms request tries
+        the farms room at its plots, then fewer plots (farm_tries), then in PEACE a surface farm on soil floor (cmd.place
+        falls back to fewer surface plots itself, BUG-316). The first that places is sent; none: the first error."""
+        from .cmd import BpError
+        st = files.read_state(self.dir) or {}
+        first = None
+        for p in farm_tries(args.get("p") or {}, st.get("mode")):
+            try:
+                cid = self._send("bp.place", {**args, "p": p}, "farms", now, snap=snap)
+            except BpError as e:
+                first = first or e
+                continue
+            if p != (args.get("p") or {}):
+                files.log_cli(self.dir, "follow", "auto:farms", {"p": p},
+                              f"BUG-340: no farms site for {args.get('p')}: placed with {p}")
+            args["p"] = p
+            return cid
+        raise first if first else BpError("farms: nothing to try")
 
     def _waive_farms(self, err: str, now: float) -> None:
         """BUG-300 (Run 15 Drillchamber: phase P0 for six game years, plans at P5; `farms` found 'only 0 free site(s)'
@@ -1139,6 +1180,20 @@ class Follower:
             return self._fail("phase.waive farms", e, now)
         files.log_cli(self.dir, "follow", "auto:waive", {"tpl": "farms", "phase": st.get("phase")},
                       f"no farm site at all: deliverable farms of {st.get('phase')} waived")
+
+
+def farm_tries(params: dict, mode: str | None) -> list[dict]:
+    """BUG-340: the farms params follow tries in order: the request's (a farms room at its plots), the same room with fewer
+    plots (plots - 1 .. 1), and in PEACE (BUG-302: builders on the surface only then) a surface farm p.surface = 1 at the
+    request's plots. A surface request stays as it is (cmd.place falls back to fewer plots, BUG-316)."""
+    p = dict(params or {})
+    if p.get("surface"):
+        return [p]
+    n = p.get("plots") if isinstance(p.get("plots"), int) and not isinstance(p.get("plots"), bool) else 2
+    out = [p] + [{**p, "plots": k} for k in range(n - 1, 0, -1)]
+    if mode == "PEACE":
+        out.append({**p, "plots": n, "surface": 1})
+    return out
 
 
 class AuditError(RuntimeError):

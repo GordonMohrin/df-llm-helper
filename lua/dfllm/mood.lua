@@ -87,12 +87,15 @@ end
 
 -- why the mood is an emergency now, weightiest first. o = {now, ws (claimed type or nil), shop (the type his skill needs,
 -- missing on the map, or nil), left (ticks or nil), nosrc (rec.nosrc), unres_since (tick a material went missing or nil),
--- since (mood start)}; c = care's config (mood_crit_nows ticks, mood_crit_wait / mood_crit_left days)
+-- since (mood start), far (free items of his short needs he cannot reach: BUG-341)}; c = care's config (mood_crit_nows ticks, mood_crit_wait / mood_crit_left days)
 function MD.reasons(c, o)
   local out = {}
   local nows = int(c.mood_crit_nows) or DAY
   if o.shop or (not o.ws and (o.now - (int(o.since) or o.now)) >= nows) then out[#out + 1] = 'workshop' end
   if type(o.nosrc) == 'table' and #o.nosrc > 0 then out[#out + 1] = 'material' end
+  -- BUG-341 (Run 15 Guildcleans: logs x1 'none reachable [89/89/0]', MOOD_CRITICAL only at 39/32/20 days left with no act,
+  -- the mood failed, the dwarf killed two): material that lies only out of his reach is an emergency at once
+  if (int(o.far) or 0) > 0 then out[#out + 1] = 'reach' end
   local wait = (int(c.mood_crit_wait) or 5) * DAY
   if o.unres_since and o.now - o.unres_since >= wait then out[#out + 1] = 'waiting' end
   if o.left and o.left <= (int(c.mood_crit_left) or 10) * DAY then out[#out + 1] = 'timer' end

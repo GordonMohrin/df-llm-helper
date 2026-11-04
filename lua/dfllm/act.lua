@@ -17,7 +17,10 @@ local ITEM_FLAGS = {forbid = true, dump = true, melt = true}
 -- plant gatherers in a starvation, by the names DF 53 may give the gathering detail [live-untested])
 A.TOOL_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true, Planters = true,
                   ['Plant gatherers'] = true, Gatherers = true, Herbalists = true,
-                  Orderlies = true}      -- BUG-054: water adds caregivers (FEED_WATER_CIVILIANS) for the patients
+                  Orderlies = true,      -- BUG-054: water adds caregivers (FEED_WATER_CIVILIANS) for the patients
+                  -- BUG-340: economy's famine crew (cooks, brewers) by the names a player or DF 53 may give them
+                  -- [live-untested]
+                  Cooks = true, Cooking = true, Cook = true, Brewers = true, Brewing = true, Brewer = true}
 -- the details whose labor needs a tool (pick, axe, crossbow, rod): a specialist (work_detail opts.only) keeps them
 A.TOOL_LABOR_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fisherdwarves = true}
 -- BUG-023 (Run 11): the tool labors one dwarf may hold only one of (DFHack manipulator.cpp `special` columns: MINE,

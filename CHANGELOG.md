@@ -115,6 +115,55 @@
   GATE pulls from the Kern+ levers. Open: per-burrow closer ranking (BUG-337), foot doors for a foot in a room, a planned (not yet
   built) foot closure still trips the plan check.
 
+## Run 15 famine round 2: a food crew of specialists, the surface farm option only in PEACE, mood material out of reach is an emergency at once (BUG-340, BUG-341, 2026-11-04; offline, live-untested)
+- **Why (review r15_famine_verdict):** Inkintense (i1) starves: food 0-9 d for a year, 31 hungry, `inspect workload` 2 of 39
+  idle beside 4417 unclaimed jobs, the FarmPlot 86,87,133 `no builder has taken it`, Planters and Plant gatherers
+  everybody-does-this (kern.log), labormanager in monitor mode. Root cause economy.lua `gather_low` / `cover_plan` stop at an
+  everybody-does-this detail, T.starve adds plain members, `famine` only queues the modern-mode labormanager switches: nothing
+  made the food anybody's job. The farms option offered `surface:1` in every mode (economy.lua FOOD_CMD.farms). BUG-341: `far`
+  was added per mood need, not per class (economy.lua:1499), and a mood whose material lay only out of reach got
+  MOOD_CRITICAL at 39/32/20 days left without an act.
+- **What changed:** economy `fcrew_run` (T.fcrew, daily): in a famine (or below famine_days of drink), not in modern
+  labormanager, a food crew of specialists through act.work_detail opts.only keeping the food labors: farmers (Planters,
+  while a farm plot stands or is placed), a cook, a brewer, gatherers only on an everybody-does-this gathering detail; new
+  members only in PEACE/RECOVERY, at most 25 % of the adults, 2 a day; back to every labor at 30 food and drink days
+  (config `economy.famine_crew`, fairplay limits, CONTRACTS); the food decisions name it in `auto` (crew). act.work_detail
+  takes Cooks/Brewers details. Farms option: a surface farm only in PEACE, a farm room otherwise. care/mood: MOOD_CRITICAL
+  reason `reach` at once when a short need's free items lie off his walk group, with `d.far` and `d.reach` (caravans asked,
+  FellTree reachable via the new economy.fell_reach, open the way / bring them in / wall him in); economy adds the largest
+  `far` once per class.
+- **Tests (fail on 9967f00):** tests/lua/test_economy_fcrew.lua (3 new), test_economy_fishing.lua (1 new: the farms option per
+  mode), test_economy_chains.lua (1 new: far per class), test_care_moods.lua (1 new: MOOD_CRITICAL reach),
+  test_economy_supply.lua (the FR-25 test runs without the crew); tests/test_bug340_farms_emit_e2e.py (2, a coverage gap: they pass on 9967f00 too; follow's farms
+  fallback through the real emit_bp on the BUG-316 snapshot).
+- **Live check:** i1 after a kernel reload: kern.log `famine crew: ... +k food specialists`, WORK_DETAIL `Planters + ...
+  (famine crew farm ...)`, the FarmPlot gets a builder; a famine decision with `auto` crew and, outside PEACE, the farms
+  option without `surface`; a mood with material off his walk group -> MOOD_CRITICAL `reach` at once. Open: no soil anywhere,
+  a quern, Inkintense's gathered tree leaves are no food, slaughter policy, locking a moody dwarf, opening the way.
+## Run 15 famine and moods: farms placed with fewer plots or on the surface, food asked from the caravans, every option a command, unreachable mood stock counts as missing (BUG-340, BUG-341, 2026-11-04; offline, live-untested)
+- **Why:** Drillchamber y379-y382 (i4): 220 AUTO_FAIL `farms: site S1: only 0 free site(s) for farms plots=2` while food fell to
+  0 days; only the plans' surface farms plots=1 came, one a year. Root cause dfpilot/wake.py:734/1095 (b35af6d): follow placed
+  economy's farms request as a room at its plots, once. Inkintense y378 / Drillchamber: the famine options `gather` (no verb)
+  and `trade.want food` (bad args; the verb replaces the whole want list) could not be sent (economy.lua:7625 `FOOD_MORE`).
+  Guildcleans y376 (i2): Possessed 26504 needed logs x1 `none reachable [89/89/0]`, nothing was felled, the mood failed and
+  he killed 26509 and 26377: economy.lua:1492 raised the wood floor to 1 under 89 logs nobody could reach (care.lua:3375
+  dropped `far`).
+- **What changed:** follow `_place_farms` / `farm_tries`: the room at the request's plots, then fewer plots, then in PEACE a
+  surface farm (cmd.place falls back to fewer surface plots, BUG-316); cli.log `auto:farms BUG-340 ... placed with ...`.
+  economy `fd_wants`: below food.pre_days the caravans are asked for `food` and `seeds` (auto `trade`). `food_q`: an option
+  only with its command line, `d.cmds` in `d.opts` order (bp.place workshops only=Kitchen/Fishery/Bowyers/Butchers, bp.place
+  farms surface, butcher.mark while tame animals stand, popcap.lower cap=citizens until=food; <= 420 bytes); wake
+  `food_hint`; `famine` is an urgent decision. Schema DECISION_NEEDED `cmds`. care.mood_wants `far` (the free items of a short
+  need the dwarf cannot reach); economy counts them as no stock (need n + far, cap 100): autochop's min goes over the log
+  count, the reachable trees are felled; the hint says `out of his reach (another walk group)`. RULES, CONTRACTS.
+- **Tests (fail on b35af6d):** tests/lua/test_economy_fishing.lua (1 new, 2 changed: opts/cmds, d <= 1,024 bytes),
+  test_economy.lua and test_economy_gather.lua (auto `trade`), tests/lua/test_economy_chains.lua (1 new),
+  tests/lua/test_care_moods.lua (1 new), tests/test_bug340_341_famine_mood.py (5).
+- **Live check:** a farms request without a room site -> `auto:farms BUG-340` placed instead of AUTO_FAIL; famine lines carry
+  `cmds` the verbs accept as they stand; `inspect what=trade` lists food and seeds below 30 food days; a mood with logs on
+  another walk group -> `need wood N (care: mood)` above the free count and `autochop target` raised. Open: idle labor beside
+  4417 unclaimed jobs (Inkintense), no soil anywhere, brewing from gathered plants, locking a moody dwarf who will fail, a
+  fort cut off from every tree.
 ## Run 15c military: the tools no longer release soldiers, every release is an event (BUG-327, 2026-11-04; offline, live-untested)
 - **Why:** Inkintense y373-y378 (1 axe, 3 picks): kern.log `N soldiers released (tools)` six times (2 .. 8), status `mil 0sq 0sol`
   at pop 53, militia squad B on duty with 0 members. Root cause lua/dfllm/military.lua:651 (M.targets: below TOOLS_MIN axes or
