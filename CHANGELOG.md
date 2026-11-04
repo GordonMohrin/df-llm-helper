@@ -1,5 +1,19 @@
 # CHANGELOG dfpilot
 
+## Review fix (f16-water): a shallow well is no drink, the thirst decision digs nothing and keeps its coordinates (BUG-344 review, 2026-11-04; offline, live-untested)
+- **Why:** review of aaa444a: the thirst decision always offered the surface farm (also in a fight), its recipe could say
+  `dig ... to bare the water` without the PLAYBOOK's water checks, q was cut at 200 bytes (coordinates lost), and well 18324
+  over 1-2/7 still counted as wet (any depth under a well).
+- **What changed:** economy.lua alarm_check: the farm command by mode (PEACE `farms`, else `farms_room`); q whole when it fits,
+  else head + first part + `; see d.water`; `d.water` = the whole text in <= 3 lines of <= 200 bytes (`M.lines`, breaks at
+  spaces). water.lua: `M.recipe(..., nodig)` for `drink_fix` (no dig named); `M.well_wet(..., min)` with `water.well_min` 3
+  (fairplay.WATER_LIM 1-7): shallower is `shallow` (no source for hospital, refuge, src), a kern.log line once per spell, named
+  in HOSPITAL_DRY's cistern state, the dry-well cause, `dropped` and `drink_fix`. Contract: DECISION_NEEDED thirst `water`
+  (schema `water:ca`), `water.well_min`, `water.drink_fix` (CONTRACTS.md).
+- **Tests (fail on aaa444a):** tests/lua/test_water_fr.lua (+2), tests/lua/test_bug262_266_water.lua (+1); changed: the old
+  "any depth under a well" expectations (test_water_fr BUG-031, test_water BUG-034; test_water's wet wells read `~`).
+- **Live check:** i4 kern.log `water: well 18324 ... is shallow` (if 1-2/7), `inspect water_sources` its depth; the thirst
+  decision's `d.water` and its farm command in ALERT. Open: DF's own minimum depth for a well is unknown here (3/7 conservative).
 ## Run 15 hospital water: GiveWater without effect and why a patient lies are named, the thirst decision carries the water and its commands (BUG-343/344, 2026-11-04; offline, live-untested)
 - **Why:** i2 Guildcleans y386-y390: 24 patients died of thirst at 75,000, all with hunger 52,824-98,595 (no food reached
   them either), while status said `hospital ok` and PATIENT_DYING `N GiveWater jobs running` (verdict `run`); 7 more patients

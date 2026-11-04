@@ -291,6 +291,8 @@ WATER_LIM: dict = {
     "patient_thirst": _THIRST, "hosp_remove": "bool", "remove_per_run": (0, 32),
     # BUG-040: a done cistern whose well stays dry this many days is reported once (CISTERN_DRY, B)
     "cistern_dry_days": (1, 400),
+    # BUG-344 review: a well counts as drink only over water >= well_min/7 (shallower: why shallow, no source)
+    "well_min": (1, 7),
     # BUG-054: caregivers (Orderlies) per patient, the bounds, the urgent extra, the additions a run, the hold in days;
     # the death-risk line of PATIENT_DYING and its cadence
     "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20),

@@ -108,6 +108,10 @@ M.DEFAULTS = {
   patient_thirst = 25000, hosp_remove = true, remove_per_run = 8,
   -- BUG-040: a done cistern whose built well stays dry this many days is reported once (CISTERN_DRY, B)
   cistern_dry_days = 30,
+  -- BUG-344 review (Run 15d Drillchamber: well 18324 over 1-2/7 gave no citizen water, 13 dead beside it): a well counts
+  -- as accepted drink only over water >= well_min/7; shallower is 'shallow' (no source for hospital, refuge, served).
+  -- DF's own line for a well is not documented in this repo (the Water Source zone's is 4/7, deep): 3 is conservative
+  well_min = 3,
   -- BUG-054 (Run 11 y497: 5 patients dead of thirst at once with 4 caregivers, 24-27 free buckets and "hospital ok"):
   -- caregivers (the FEED_WATER_CIVILIANS labor, the Orderlies work detail) scale with the patients: carers_per_patient
   -- each (at least carers_min while there is a patient, at most carers_max), carers_urgent more while a patient is over
@@ -191,14 +195,19 @@ local ROCK = {['#'] = true, S = true, C = true, F = true, T = true}     -- snaps
 -- shaft. Without a tile reader nothing counts as wet. BUG-031 (Run 11: HOSPITAL_DRY monthly beside a cistern, the
 -- recipe "a cistern"): the second value says what the shaft ends on, {at = {x, y, z}, flow = depth 0..7 (nil
 -- unknown), why = 'water' | 'dry' (a floor or ramp without water) | 'rock' | 'hidden' | 'deep' (open space below the
--- shaft limit)}, for the HOSPITAL_DRY text
-function M.well_wet(K, x, y, z, depth)
+-- shaft limit) | 'shallow' (BUG-344 review: water below `min`/7, default 1; without a depth 'w' is 1..3: shallow)},
+-- for the HOSPITAL_DRY text
+function M.well_wet(K, x, y, z, depth, min)
+  min = min or 1
   for zz = z - 1, z - (depth or 12), -1 do
     local t = tile(K, x, y, zz)
     local at = {x, y, zz}
     if not t then return false, {at = at, why = 'hidden'} end
     local f = math.tointeger(t.flow)
-    if wet_char(t.c) then return true, {at = at, flow = f, why = 'water'} end
+    if wet_char(t.c) then
+      if (f and f < min) or (not f and t.c == 'w' and min > 1) then return false, {at = at, flow = f, why = 'shallow'} end
+      return true, {at = at, flow = f, why = 'water'}
+    end
     if t.c ~= '_' then
       return false, {at = at, flow = f or 0, why = ROCK[t.c] and 'rock' or 'dry'}
     end
@@ -381,7 +390,7 @@ local function phase_sites(K, c, r)
     local done = true
     pcall(function() done = w:getBuildStage() >= w:getMaxBuildStage() end)
     local wet, info = false, nil
-    if done then wet, info = M.well_wet(K, w.x1, w.y1, w.z, c.shaft) end
+    if done then wet, info = M.well_wet(K, w.x1, w.y1, w.z, c.shaft, c.well_min) end   -- BUG-344 review: well_min
     r.sources[#r.sources + 1] = {kind = 'well', id = w.id, x = w.x1, y = w.y1, z = w.z, wet = wet,
                                  built = done, below = info,                  -- BUG-031: what the shaft ends on
                                  chain = not done and M.chain_wait(w) or nil} -- BUG-264: its job waits for a chain
@@ -660,7 +669,10 @@ local function removes(c) return c.hosp_remove ~= false and M.can('hospital_remo
 -- known (manifest aquifer_levels) and nothing better, an aquifer well (a cistern with p.water aquifer: its basin dug into
 -- the aquifer level, the walls kept rough, no pond). BUG-265 (Run 15 Earthboat: 6 bodies 10-29 tiles away, reach 0): a body
 -- within `near` without a bank or a dig gets a piped cistern to it instead of "a cistern"
-function M.recipe(c, cis, K, bare)     -- bare (BUG-344): without the hospital's tail
+-- bare (BUG-344): without the hospital's tail. nodig (BUG-344 review: economy's thirst decision): no 'dig ... to bare
+-- the water' (digging at water is the player's, only after the PLAYBOOK's water checks): a body reached only by a dig
+-- takes the later ways (a piped cistern, an aquifer well, a cistern)
+function M.recipe(c, cis, K, bare, nodig)
   local ws = st.ws
   local tail = bare and '' or removes(c) and string.format('; until then the kernel removes it at thirst %d',
                                                             c.patient_thirst) or '; until then delete the hospital zone'
@@ -675,7 +687,7 @@ function M.recipe(c, cis, K, bare)     -- bare (BUG-344): without the hospital's
   local best, cav, pit
   for _, b in ipairs(ws.bodies or {}) do
     if b.cavern == 1 and b.d <= c.near and not cav then cav = b end
-    if b.cavern ~= 1 and b.d <= c.near and (b.bank or b.dig) then
+    if b.cavern ~= 1 and b.d <= c.near and (b.bank or (b.dig and not nodig)) then
       if not best or (b.bank and not best.bank) or ((b.bank ~= nil) == (best.bank ~= nil) and b.d < best.d) then
         best = b
       end
@@ -711,9 +723,11 @@ function M.recipe(c, cis, K, bare)     -- bare (BUG-344): without the hospital's
     if b.cavern ~= 1 and b.d <= c.near and (not far or b.d < far.d) then far = b end
   end
   if far then
-    return string.format('the water at %d,%d,%d (%d/7, %d tiles) has no bank and no dig within %d walls: a cistern piped '
-                         .. 'to it (python -m dfpilot.bp.sites cistern --near %d,%d,%d)%s%s', far.at[1], far.at[2], far.at[3],
-                         far.max, far.d, c.ws_dig, far.at[1], far.at[2], far.at[3], aq and (', or ' .. aq) or '', tail)
+    local nob = (nodig and far.dig) and 'has no reachable bank'
+                or string.format('has no bank and no dig within %d walls', c.ws_dig)
+    return string.format('the water at %d,%d,%d (%d/7, %d tiles) %s: a cistern piped to it (python -m dfpilot.bp.sites '
+                         .. 'cistern --near %d,%d,%d)%s%s', far.at[1], far.at[2], far.at[3], far.max, far.d, nob,
+                         far.at[1], far.at[2], far.at[3], aq and (', or ' .. aq) or '', tail)
   end
   local ctxt = cav and string.format(' (the cavern water at %d,%d,%d is none: caverns stay sealed)', cav.at[1], cav.at[2],
                                      cav.at[3]) or ''
@@ -772,7 +786,9 @@ local function cistern_state(K, c, r, h)
     local bl = w.below or {}
     local p = bl.at or {w.x, w.y, w.z - 1}
     local what = bl.why == 'hidden' and 'a hidden tile' or (bl.why == 'rock' and 'rock'
-                 or (bl.why == 'deep' and 'a dry shaft' or string.format('%d/7 (dry)', bl.flow or 0)))
+                 or (bl.why == 'deep' and 'a dry shaft'
+                 or (bl.why == 'shallow' and string.format('%d/7 (shallow, < %d/7)', bl.flow or 0, c.well_min or 3)
+                 or string.format('%d/7 (dry)', bl.flow or 0))))
     out.txt = string.format('cistern %s: its well %d stands over %s at %d,%d,%d (cistern max %d/7)%s', id, w.id, what,
                             p[1], p[2], p[3], maxf, far)
     out.fix = out.txt .. ': fill it (pond zone and bucket carriers, or its pipe)'
@@ -2487,7 +2503,9 @@ function M.dropped(r, p)
   local why = 'gone'
   for _, s in ipairs(r.sources) do
     if s.kind == ls.k and s.id == ls.id then
-      why = s.loop and string.format('fed only by its own pond %d: a loop', s.loop) or 'dry now'
+      why = s.loop and string.format('fed only by its own pond %d: a loop', s.loop)
+            or (s.below and s.below.why == 'shallow' and string.format('shallow now (%d/7)', s.below.flow or 0))
+            or 'dry now'                                                       -- BUG-344 review
     end
   end
   local at = type(ls.at) == 'table' and string.format('%d,%d,%d', math.tointeger(ls.at[1]) or -1,
@@ -2515,7 +2533,8 @@ function M.dry_well(K, c, r)
       if not inc then
         local bl = s.below or {}
         local what = bl.why == 'rock' and 'rock below' or (bl.why == 'hidden' and 'a hidden tile below'
-                     or string.format('%d/7', bl.flow or 0))
+                     or (bl.why == 'shallow' and string.format('%d/7 below, shallow: < %d/7', bl.flow or 0, c.well_min or 3)
+                     or string.format('%d/7', bl.flow or 0)))
         local best
         for _, b in ipairs(st.ws and st.ws.bodies or {}) do      -- BUG-324: a well spot's floor is a bank one level up
           if b.cavern ~= 1 and (b.bank or b.stand) and (not best or b.d < best.d) then best = b end
@@ -2891,6 +2910,20 @@ local function finish(K, c, r, p)
     K.log('warn', 'water: hospital audit failed: %s', tostring(audit))
   end
   st.out = out
+  -- BUG-344 review: a built well over water below well_min is no source; one kern.log line per shallow spell
+  p.shal = json.object(type(p.shal) == 'table' and p.shal or {})
+  local shal = {}
+  for _, s in ipairs(r.sources) do
+    if s.kind == 'well' and s.below and s.below.why == 'shallow' then
+      shal[tostring(s.id)] = true
+      if not p.shal[tostring(s.id)] then
+        p.shal[tostring(s.id)] = now
+        K.log('warn', 'water: well %d at %d,%d,%d is shallow: %d/7 below (< well_min %d/7), no drink source', s.id, s.x,
+              s.y, s.z, s.below.flow or 0, c.well_min)
+      end
+    end
+  end
+  for id in pairs(p.shal) do if not shal[id] then p.shal[id] = nil end end
   st.src = r.sources
   st.thirsty = r.thirsty                                    -- BUG-344
   K.persist.touch('m.water')
@@ -3122,28 +3155,36 @@ end
 -- (76,50,142), which inspect water_sources read wet, their hunger 51,683-94,529): what economy's thirst decision says
 -- about the water, by the last run. A thirsty citizen (>= well_thirst, no patient) within 1 tile of an accepted well: that
 -- well gives him no water; no accepted water at all; in both cases the recipe (M.recipe: the scan's ways, a Water Source
--- zone from a reachable bank, a well over a pit, a cistern, an aquifer well; nothing here digs, a dig it names is the
--- player's under the PLAYBOOK's water checks). Else the nearest accepted water. Returns txt, cmds (command lines); nil
--- before the first run. Report only
+-- zone from a reachable bank, a well over a pit, a cistern, an aquifer well). Review: the recipe here names no dig at
+-- all (M.recipe nodig: digging at water is the player's, only after the PLAYBOOK's water checks), and a well over
+-- water below well_min (why 'shallow', no accepted source) a thirsty citizen stands at is named with its depth. Else
+-- the nearest accepted water. Returns txt, cmds (command lines); nil before the first run. Report only
 function M.drink_fix(K)
   local src = st.src
   if not src then return nil end
   local acc, at
   for _, s in ipairs(src) do
-    if s.wet then
-      acc = acc or s
-      for _, t in ipairs(s.kind == 'well' and not at and st.thirsty or {}) do
+    local shallow = s.kind == 'well' and s.below and s.below.why == 'shallow'
+    if s.wet then acc = acc or s end
+    if s.kind == 'well' and (s.wet or shallow) and not at then
+      for _, t in ipairs(st.thirsty or {}) do
         if t.z == s.z and math.max(math.abs(t.x - s.x), math.abs(t.y - s.y)) <= 1 then at = {s = s, u = t}; break end
       end
     end
   end
   local cmds = json.array{'dfllm cmd inspect what=water_sources'}
   if acc and not at then return 'accepted water: ' .. M.label(K, acc.x, acc.y, acc.z), cmds end
-  local head = at and string.format('citizen %d (thirst %d) stands beside well %d at %d,%d,%d, read wet: it gives no '
-                                    .. 'water', at.u.id, at.u.thirst, at.s.id, at.s.x, at.s.y, at.s.z)
-               or 'no accepted water'
+  local c = M.conf(K)
+  local head = 'no accepted water'
+  if at and at.s.wet then
+    head = string.format('citizen %d (thirst %d) stands beside well %d at %d,%d,%d, read wet: it gives no water',
+                         at.u.id, at.u.thirst, at.s.id, at.s.x, at.s.y, at.s.z)
+  elseif at then
+    head = string.format('citizen %d (thirst %d) stands beside well %d at %d,%d,%d: shallow (%d/7 < %d/7), no source',
+                         at.u.id, at.u.thirst, at.s.id, at.s.x, at.s.y, at.s.z, at.s.below.flow or 0, c.well_min)
+  end
   cmds[#cmds + 1] = 'dfllm bp sites cistern'
-  return head .. '; ' .. M.recipe(M.conf(K), nil, K, true), cmds
+  return head .. '; ' .. M.recipe(c, nil, K, true, true), cmds
 end
 
 -- public (BUG-036, readiness): the hospital zones outside Kern+ and the refuge by the last run: {n, total, zones = {{id,

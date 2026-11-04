@@ -380,6 +380,37 @@ T.test('BUG-344: economy\'s thirst decision carries water.drink_fix and its comm
   T.eq(d.cmds[1], 'dfllm cmd inspect what=water_sources')
   T.eq(d.cmds[2], 'dfllm bp sites cistern')
   T.eq(d.cmds[3], E.FOOD_CMD.farms)
+  local _, wt = W.K.call('water', 'drink_fix')
+  T.eq(table.concat(d.water, ' '), wt, 'd.water: the whole text')
+end)
+
+T.test('BUG-344 review: the thirst decision\'s farm command is the surface farm only in PEACE (else the farm room); ' ..
+       'a long water text keeps every coordinate (q short, d.water whole in lines of <= 200 bytes)', function()
+  local W, M = world{tiles = {}, setup = function(W) well(W, 20, 12, 5, {id = 18324}) end}
+  W.mode = 'ALERT'
+  day(W)
+  package.loaded['dfllm.economy'] = nil
+  local E = require('dfllm.economy')
+  W.load(E)
+  for i = 1, 3 do W.unit(i).counters2 = {thirst_timer = 45000, hunger_timer = 0} end
+  for _ = 1, 3 do day(W) end
+  local d
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'thirst' then d = e.d end end
+  T.ok(d, 'a thirst decision in ALERT')
+  T.eq(d.cmds[#d.cmds], E.FOOD_CMD.farms_room, 'old code: the surface farm (surface:1) in ALERT')
+  for _, c in ipairs(d.cmds) do T.ok(not c:find('surface', 1, true), c) end
+  -- M.lines: breaks at spaces only, so a position x,y,z is never cut
+  local long = 'citizen 2 (thirst 61000) stands beside well 18324 at 76,50,142, read wet: it gives no water; the water '
+               .. 'at 141,67,143 (5/7, 25 tiles) has no reachable bank: a cistern piped to it (python -m dfpilot.bp.sites '
+               .. 'cistern --near 141,67,143), or an aquifer well (dfllm bp sites cistern water=aquifer: its basin on '
+               .. 'aquifer level z130)'
+  local l = E.lines(long, 200, 3)
+  T.ok(#l >= 2, #l)
+  for _, x in ipairs(l) do T.ok(#x <= 200, x) end
+  T.eq(table.concat(l, ' '), long)
+  local all = table.concat(l, '\n')
+  for _, p in ipairs({'76,50,142', '141,67,143', 'z130'}) do T.ok(all:find(p, 1, true), p) end
+  T.eq(E.lines('', 200, 3), {})
 end)
 
 T.done()

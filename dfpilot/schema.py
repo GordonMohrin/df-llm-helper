@@ -481,7 +481,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-340: food_low/famine opts only with a command; cmds = their command lines in opts order (`dfllm cmd ...`); auto
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1

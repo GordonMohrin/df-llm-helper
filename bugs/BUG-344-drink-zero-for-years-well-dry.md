@@ -51,4 +51,27 @@ beside well 18324 at 76,50,142, read wet: it gives no water; <recipe>` and `cmds
 - Why well 18324 does not serve (depth under it, the game's well rule) needs a live `inspect water_sources` read.
 - drink 0 d: brewing needs farms (BUG-340 open).
 
+## Review fix (f16-water, 2026-11-04; offline, live-untested)
+- Safety: the thirst decision's farm command was always `FOOD_CMD.farms` (surface:1), in every mode (economy.lua alarm_check);
+  now the surface farm only in PEACE, else `farms_room` (BUG-341's rule, as economy.lua food blockers).
+- Safety: `drink_fix` could name `dig N wall tile(s) ... to bare the water` without a word of warning. Its recipe is now
+  `M.recipe(..., bare, nodig)`: no dig at all (a body reached only by a dig gets the piped cistern, the aquifer well or a
+  cistern; `has no reachable bank`). HOSPITAL_DRY keeps its dig recipe as before.
+- q was cut at 200 bytes (coordinates lost): q is the whole text when it fits, else the head with the text's first part and
+  `; see d.water`; `d.water` (str[] <= 3, schema `water:ca`) holds the whole text in lines of <= 200 bytes broken at spaces
+  (economy `M.lines`), so no position x,y,z is cut.
+- Core (i4: well 18324 over 1-2/7 gave nobody water): `M.well_wet(K, x, y, z, depth, min)` counts a well only over water >=
+  `water.well_min` (3, 1-7, fairplay.WATER_LIM); shallower is `why = 'shallow'`, `wet` false, so hospital (served), refuge
+  (wet_wells), state `water.src` and `drink_fix` no longer count it. A depth-less reader's `w` (1..3/7) is shallow. One
+  kern.log line per shallow spell (`water: well N at x,y,z is shallow: D/7 below (< well_min M/7), no drink source`);
+  HOSPITAL_DRY's cistern state `stands over D/7 (shallow, < M/7)`, the dry-well cause and `dropped` (`shallow now`) name it;
+  drink_fix: `citizen N (thirst T) stands beside well W at x,y,z: shallow (D/7 < M/7), no source; <recipe>`.
+- Tests: tests/lua/test_water_fr.lua (+2: no dig in drink_fix; well_wet/shallow, the log line, drink_fix),
+  tests/lua/test_bug262_266_water.lua (+1: ALERT farm room, M.lines; d.water whole). Changed expectations (old rule "any
+  depth under a well"): test_water_fr BUG-031 (2/7 no longer serves; well_min 2 does), test_water BUG-034 (`w` well none);
+  test_water's other wet wells read `~` now.
+- Open: DF's own minimum water depth for a well is not documented in this repo (docs/v2/DESIGN.md has only the Water Source
+  zone's 4/7 and "1/7 seepage does not count" for zones); 3/7 is a conservative guess. Live: `inspect water_sources` depth
+  under 18324 and whether a well over exactly 3/7 serves.
+
 Related: BUG-259, BUG-263, BUG-266, BUG-324, BUG-340, BUG-343

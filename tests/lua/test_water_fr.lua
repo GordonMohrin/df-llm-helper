@@ -232,7 +232,7 @@ T.test('BUG-031: a dry cistern beside the hospital: HOSPITAL_DRY names it, its w
 end)
 
 T.test('BUG-031: a wet cistern 47 tiles from the hospital does not serve it: HOSPITAL_DRY says how far; a well with ' ..
-       'water in reach serves (any depth under a well, deep water only for a zone)', function()
+       'water in reach serves (>= well_min 3/7 under a well, BUG-344 review; deep water only for a zone)', function()
   local W = world{rooms = {cistern_room(61, 61, 5)}, tiles = {['61,61,4'] = '~'},
                   setup = function(W)
                     hospital(W)
@@ -250,7 +250,17 @@ T.test('BUG-031: a wet cistern 47 tiles from the hospital does not serve it: HOS
                      F.building(W, 'WELL', {id = 79, x1 = 20, y1 = 12, x2 = 20, y2 = 12, z = 5})
                    end}
   day(W2)
-  T.eq(W2.find_events('HOSPITAL_DRY'), {}, '2/7 under the well: served')
+  -- BUG-344 review (Run 15d: well 18324 over 1-2/7 gave no water): 2/7 is below water.well_min (3): shallow, no source
+  local hd2 = W2.find_events('HOSPITAL_DRY')
+  T.eq(#hd2, 1, 'old code: 2/7 under the well served')
+  T.ok(hd2[1].d.recipe:find('its well 79 stands over 2/7 (shallow, < 3/7) at 20,12,4', 1, true), hd2[1].d.recipe)
+  local W3 = world{rooms = {cistern_room(20, 12, 5)}, tiles = {['20,12,4'] = 'w'}, cfg = {well_min = 2},
+                   setup = function(W)
+                     hospital(W)
+                     F.building(W, 'WELL', {id = 79, x1 = 20, y1 = 12, x2 = 20, y2 = 12, z = 5})
+                   end}
+  day(W3)
+  T.eq(W3.find_events('HOSPITAL_DRY'), {}, 'well_min 2: 2/7 under the well serves')
 end)
 
 T.test('BUG-031: deep cavern water with a reachable bank is listed but never offered (caverns stay sealed): the ' ..
@@ -274,6 +284,57 @@ T.test('BUG-031: deep cavern water with a reachable bank is listed but never off
   day(W2)
   T.ok(W2.find_events('HOSPITAL_DRY')[1].d.recipe:find('^cistern cistern40_12_5r0: its well 80 stands over 0/7'),
        W2.find_events('HOSPITAL_DRY')[1].d.recipe)
+end)
+
+---------------------------------------------------------------- BUG-344 review
+T.test('BUG-344 review: the thirst decision\'s recipe (water.drink_fix) names no dig at water; HOSPITAL_DRY still does',
+       function()
+  local W, M = world{tiles = {['40,40,5'] = '~', ['43,40,5'] = '.', ['38,40,5'] = '.'}, unreach = {['38,40,5'] = true},
+                     setup = function(W) F.hospital(W, {30, 30, 34, 34, 5}) end}
+  day(W)
+  T.ok(W.find_events('HOSPITAL_DRY')[1].d.recipe:find('dig 2 wall tile(s) from 43,40,5', 1, true), 'the hospital\'s own')
+  local txt = M.drink_fix(W.K)
+  T.ok(txt:find('no accepted water; ', 1, true), txt)
+  T.ok(not txt:find('to bare the water', 1, true), 'old code: "dig 2 wall tile(s) ... to bare the water": ' .. txt)
+  T.ok(not txt:find('dig %d'), txt)
+  T.ok(txt:find('the water at 40,40,5 (7/7, ', 1, true) and txt:find('has no reachable bank: a cistern piped to it', 1, true),
+       txt)
+end)
+
+T.test('BUG-344 review (Run 15d: well 18324 over 1-2/7, 13 dead of thirst beside it): water.well_wet needs well_min/7 ' ..
+       'under a well; shallower is why shallow, no source; the kern.log line once per spell', function()
+  local TL = {['1,1,4'] = {c = 'w', flow = 2}, ['2,2,4'] = {c = 'w', flow = 3}, ['3,3,4'] = {c = 'w'}, ['4,4,4'] = {c = '~'}}
+  local K = {call = function(_, _, x, y, z) return true, TL[x .. ',' .. y .. ',' .. z] end}
+  local M = fresh('water')
+  local wet, info = M.well_wet(K, 1, 1, 5, 12, 3)
+  T.eq({wet, info.why, info.flow}, {false, 'shallow', 2})
+  T.eq({M.well_wet(K, 2, 2, 5, 12, 3)}, {true, {at = {2, 2, 4}, flow = 3, why = 'water'}})
+  T.eq(M.well_wet(K, 3, 3, 5, 12, 3), false, 'w without a depth may be 1/7: shallow')
+  T.eq(M.well_wet(K, 4, 4, 5, 12, 3), true, '~ is 4..7')
+  T.eq(M.well_wet(K, 1, 1, 5, 12), true, 'no min: the old rule (any water)')
+  T.eq(M.DEFAULTS.well_min, 3)
+  -- in a run: the shallow well is no source, one kern.log line per spell, the thirst text names it
+  local W, M2 = world{tiles = {['20,12,4'] = 'w'}, setup = function(W)
+    F.building(W, 'WELL', {id = 18324, x1 = 20, y1 = 12, x2 = 20, y2 = 12, z = 5})
+  end}
+  W.unit(2).counters2.thirst_timer = 61000
+  W.move(2, 19, 12, 5)
+  local function said()
+    local n = 0
+    for _, l in ipairs(W.logs) do
+      if tostring(l.msg):find('water: well 18324 at 20,12,5 is shallow: 2/7 below (< well_min 3/7), no drink source', 1,
+                              true) then n = n + 1 end
+    end
+    return n
+  end
+  day(W)
+  T.eq(W.state().water.src, {}, 'old code: {{20, 12, 5}}')
+  T.eq(said(), 1)
+  day(W)
+  T.eq(said(), 1, 'once per shallow spell')
+  local txt = M2.drink_fix(W.K)
+  T.ok(txt:find('citizen 2 (thirst 61000) stands beside well 18324 at 20,12,5: shallow (2/7 < 3/7), no source; ', 1, true),
+       tostring(txt))
 end)
 
 T.done()
