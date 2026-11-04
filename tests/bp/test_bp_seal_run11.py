@@ -90,33 +90,29 @@ def test_seal_leak_is_a_source_and_gets_a_wall(tmp_path):
     assert cmd.seal_openings(save, "last")[0] == "6,2,0 floor"
 
 
-def test_shrubs_carry_their_piece_and_saplings_are_closed_beside(tmp_path):
+def test_shrubs_and_saplings_carry_their_piece(tmp_path):
     """188,88,144 shrub / 177,99,144 sapling. BUG-041 (Run 11 y461: a gather designation before the door waited 220
-    days for a plant gatherer): the shrub's door goes on the shrub in seal.build (quickfort builds on SHRUB tiles); the
-    sapling (no tree yet: neither quickfort's chop nor any player designation takes it) gets a door on the neighbour
-    that closes its route (y429 code: doors on both plants, the snapshot's '.' read as floor)."""
+    days for a plant gatherer): the shrub's door goes on the shrub in seal.build (quickfort builds on SHRUB tiles).
+    BUG-375 (Run 16d: the perimeter opened again every year): the sapling's piece goes on the sapling too (quickfort
+    builds on SAPLING tiles); a neighbour piece left the plant to regrow (y429 code: doors on both plants)."""
     marks = {"shrub": [[6, 2, 0]], "sapling": [[9, 2, 0]]}
     save = save_with(tmp_path, [fort(marks)], [unready(7, ["6,2,0 shrub", "9,2,0 sapling"])])
     at, _ = cmd.seal_openings(save, "last")
-    assert at == "6,2,0 shrub;9,3,0 floor for=9,2,0:sapling"
+    assert at == "6,2,0 shrub;9,2,0 floor"
     doc = bp.emit("seal", {"at": at}, {"id": "S1", "anchor": [6, 2, 0], "rot": 0})
     got = [(st["label"], k, (x0, y0, z)) for st, k, _, x0, y0, _, _, z in cell_rects(doc)]
-    assert got == [("seal.build", "d", (6, 2, 0)), ("seal.build", "d", (9, 3, 0))]
+    assert got == [("seal.build", "d", (6, 2, 0)), ("seal.build", "d", (9, 2, 0))]
     assert doc["materials"] == {"door": 2}
-    assert [pc["why"] for pc in defense.seal_pieces({"at": at})] == [
-        "6,2,0 shrub: door at 6,2,0 on the shrub (quickfort builds on shrub tiles; no gather job)",
-        "9,2,0 sapling: door at 9,3,0 (the neighbour on the same route: no piece and no player designation takes a "
-        "sapling)"]
     assert bp.check_doc({**doc, "id": "c1"}) == []
     # a snapshot of an older kernel (no plant marks) cannot tell: the entrance check's kinds stand
     assert cmd.seal_openings(save, "last", snap=fort())[0] == at
     # a newer plant-aware snapshot without the marks: both are gone, plain doors
     bare = fort({"shrub": [], "sapling": []}, tick=300)
     assert cmd.seal_openings(save, "last", snap=bare)[0] == "6,2,0 floor;9,2,0 floor"
-    # a seal under way builds a door behind the sapling already: its route is covered, the shrub alone is left
-    seal_doc(save, "c5", "9,3,0 floor")
+    # a seal under way has the sapling's piece already: only the shrub is left
+    seal_doc(save, "c5", "9,2,0 floor")
     at, notes = cmd.seal_openings(save, "last")
-    assert at == "6,2,0 shrub" and "9,2,0 sapling: left out, a seal under way closes its route" in notes
+    assert at == "6,2,0 shrub" and any("9,2,0: left out, seal project c5 builds its piece" in n for n in notes), notes
     # a tree tile on the route: the chop designation, no piece (the felled tree takes its branches along)
     pcs = defense.seal_pieces({"at": "4,1,0 branch"})
     assert [(pc["key"], pc["clear"]) for pc in pcs] == [("", "t")] and "chop the tree" in pcs[0]["why"]

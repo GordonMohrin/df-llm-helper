@@ -385,6 +385,9 @@ Related: FR-xx, BUG-xx
 | [BUG-371](BUG-371-mood-drink-nook-waits-in-a-drill-behind-the-slots-and-paced.md) | fixed (offline, live-untested) | high | Run 16d: the moody dwarf's drink nook waited through a DRILL, behind the mood slots and a paced runner, and the line said 'queued' after it stood; allowed in DRILL, no slot cap, boost, 'stands at' | runner.lua, care.lua |
 | [BUG-372](BUG-372-mood-cloth-chain-misses-the-farmers-workshop.md) | fixed (offline, live-untested); open: yarn/silk from nothing | high | Run 16d: a mood needing cloth/thread asked the Loom only (no Farmers workshop for thread) and MOOD_CRITICAL did not say the caravan was asked | mood.lua, care.lua |
 | [BUG-373](BUG-373-mood-shops-missing-cuts-the-shops-a-mood-waits-for.md) | fixed (offline, live-untested) | medium | Run 16d: R0 'mood shops missing' named the first three of twelve types, cutting off Loom/Clothiers for 7 days; the shops a mood waits for come first, at once | readiness.lua, runner.lua |
+| [BUG-374](BUG-374-seal-says-nothing-to-close-while-status-names-ways-in.md) | fixed (offline, live-untested) | medium | Run 16d: seal at=last 'nothing to close' beside open ways in (old snapshot closes, counted ways without tiles) | dfpilot/cmd |
+| [BUG-375](BUG-375-perimeter-opens-again-every-year-and-holds-the-pop-cap.md) | fixed (offline, live-untested) | medium | Run 16d: saplings reopen the perimeter every year; pop cap held beside a queued seal | dfpilot/cmd, lua/readiness |
+| [BUG-376](BUG-376-audit-bypass-no-wall-tile-no-fix.md) | fixed (offline, live-untested) | low | Run 16d/16b: audit bypass 'no wall tile on the route' names no fix or waiver | dfpilot/bp/topo, cmd, brief, plan |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -808,6 +808,13 @@ T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY a
   u = unready(W)
   T.ok(u[#u].msg:find('bypass: edge->Z3/Z4 avoids the trap hall (reaches 1,2,3) (no wall tile: inspect entrances)', 1,
                       true), u[#u].msg)
+  -- BUG-376: a route through a stair/door/bridge (bp.topo.route_via): status names the way out, the wake line says so
+  audit(W, {ok = false, bypass = true, min_traps = 0, fails = {'bypass: via stair 1,2,3 -> 4,5,6'}})
+  W.ms = W.ms + 3600 * 1000
+  day(W, 31)
+  u = unready(W)
+  T.ok(u[#u].msg:find('bypass: via stair 1,2,3 -> 4,5,6 (no wall tile: placeable fix or waiver in status)', 1, true),
+       u[#u].msg)
   -- a passed audit: R1, no route
   audit(W)
   T.eq(lvl(W), 1)

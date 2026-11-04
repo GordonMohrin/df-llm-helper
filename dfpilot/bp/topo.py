@@ -312,6 +312,27 @@ def choke_pick(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -
     return cands[0] + (False,)
 
 
+VIA_KIND = {"+": "door", "<": "stair", ">": "stair", "X": "stair", "=": "bridge", "H": "bridge"}
+
+
+def route_via(g: Graph, m: dict, path: list[int], attack) -> str:
+    """BUG-376 (Run 16d/16b: 'bypass: edge->Z3/Z4 avoids the trap hall (reaches ...)' for years, 'no wall tile on the
+    route' and no way out): the foreign part of the route (as in choke_pick) holds no floor or ramp tile a wall can
+    stand on. Name what it does pass instead, the tile nearest the target: 'via door|stair|bridge x,y,z' (a wall cannot
+    stand on a stair or a building, the worst-case audit counts doors, hatches and bridges open); '' when the route
+    has no such tile (the target lies on the attack side itself)."""
+    fort = g.mask(fort_boxes(m))
+    route = path[:-1]
+    last = max((k for k, i in enumerate(route) if attack[i]), default=-1)
+    foreign = route[last + 1:]
+    own = [i for i in reversed(foreign) if not fort[i]] or list(reversed(foreign))
+    for i in own:
+        kind = VIA_KIND.get(g.t[i])
+        if kind:
+            return "via %s %d,%d,%d" % ((kind,) + g.pos(i))
+    return ""
+
+
 def choke(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -> str:
     """choke_pick as finding text: 'wall x,y,z floor', 'wall x,y,z ramp (+more)'; '' when none fits."""
     ch = choke_pick(g, m, path, src, blocked, stop, attack)
@@ -409,7 +430,9 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     if hit is not None:
         side = _or(Z["Z1"], Z["Z2"], kill, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
         ch = choke(g, m, g.path(par, hit), src, Z["Z2"], T, side)
+        via = "" if ch else route_via(g, m, g.path(par, hit), side)        # BUG-376: no wall tile: what it passes
         fails.append(_msg(("bypass: %s -> %d,%d,%d" % ((ch,) + g.pos(hit))) if ch else
+                          ("bypass: %s -> %d,%d,%d" % ((via,) + g.pos(hit))) if via else
                           "bypass: edge->Z3/Z4 avoids the trap hall (reaches %d,%d,%d)" % g.pos(hit)))
     # 2. armed traps on every attacker path
     cost = bytearray(g.N)
@@ -480,7 +503,9 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
         if h2 is not None:
             side = _or(attack, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
             ch = choke(g, m, g.path(par, h2), src, rblock, rmask, side)
+            via = "" if ch else route_via(g, m, g.path(par, h2), side)     # BUG-376
             fails.append(_msg("refuge: on the attack path, " + ch) if ch else
+                         _msg("refuge: on the attack path, " + via) if via else
                          "refuge: on the attack path (reachable without passing Z4)")
         res["refuge_sep"] = h1 is not None and h2 is None
     # 4. civilian path != attacker path

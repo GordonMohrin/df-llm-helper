@@ -1316,6 +1316,9 @@ def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[
     if _cmd.no_trap_hall(a.get("fails") or []):     # BUG-211: no trap hall yet: the walls are room doors, no gaps
         return [], [f"audit: {route}: no trap hall yet, the bypass waits for fortcore stage 2; no seal at=audit before it"]
     if not a.get("walls"):
+        adv = _cmd.route_advice(routes[0])                 # BUG-376: a placeable fix or the waiver, not 'look at it'
+        if adv:
+            return [], [f"audit: {route}: {adv}"]
         return [], [f"audit: {route}: no wall tile on the route (stairs, doors or bridges); look at it with dfllm cmd "
                     "inspect '{\"what\":\"entrances\"}' and close it; readiness stays R0 until then"]
     open_ = a.get("open") or []
