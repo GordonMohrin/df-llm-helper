@@ -24,6 +24,8 @@ not wake; the follower acts on two of them without the LLM:
   PROJECT_REQUEST tpl=office why=office -> BUG-396: the manager's office (the surface variant without a dug core), prio 1
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
+  PROJECT_REQUEST tpl=farms why=drink|drink_surface -> BUG-406/408: one plot of the kind the stock's brewable seeds
+                                  fit (drink_surface: p.surface = 1), prio 1
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
                                   for a boulder (care), or the free stone is below what the rock orders and walls
                                   want while the miners have nothing to dig (economy, Run 11)
@@ -792,6 +794,13 @@ class Follower:
                 # live L5: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days; economy sizes the plots
                 n = d.get("n") if isinstance(d.get("n"), int) and not isinstance(d.get("n"), bool) else 2
                 self._request_place("farms", "farms", {"plots": max(1, min(n, 4))}, "S1", now, prio=1)
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "farms" and d.get("why") in ("drink", "drink_surface"):
+                # BUG-406/408: brewable seeds in stock fit no farm plot (a surface crop, only an underground plot; or no plot at
+                # all): one plot of their kind. why=drink_surface: p.surface = 1 (soil or mud floor, in PEACE; economy asks then)
+                fp: dict = {"plots": 1}
+                if d.get("why") == "drink_surface":
+                    fp["surface"] = 1
+                self._request_place("farms", "farms", fp, "S1", now, prio=1)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "fishery":
                 # Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days: the fishery alone
                 from .cmd import _moodable

@@ -1324,7 +1324,8 @@ local function start(K, j)
   local man = K.manifest()
   j.z, j.y, j.rows, j.cur = j.bbox[3], j.bbox[2], {}, {}
   j.traps = trap_index(j.bbox)
-  j.marks = {soil = {}, cavern = {}, sand = {}, shrub = {}, sapling = {}}
+  j.marks = {soil = {}, cavern = {}, sand = {}, shrub = {}, sapling = {}, mud = {}}   -- BUG-407: mud = a muddy rock floor
+  j.mudblk = {}
   j.sky_plants = {shrub = {}, sapling = {}}       -- open-sky plants, appended after the roofed ones
   j.bridges, j.bstate = {}, {}
   for name, spec in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
@@ -1402,6 +1403,36 @@ local function remember_sand(j)
   sand_known = {tick = j.tick, tiles = list}
 end
 
+-- BUG-407 (Run 16a i1 Bachwald: a mountain fort, 'only 0 free site(s) for farms surface=1'): quickfort builds a farm plot on soil
+-- OR on a floor with mud (build.lua is_valid_tile_farm: a solid MUD spatter in the map block). Is the revealed floor tile x, y, z
+-- muddy? The block's mud spatters are read once per export and block (j.mudblk); the tile counts when a spatter has an amount
+-- there (a field: tests replace it).
+function M.has_mud(j, x, y, z)
+  local key = x // 16 + (y // 16) * 4096 + z * 16777216
+  local evs = j.mudblk and j.mudblk[key]
+  if evs == nil then
+    evs = false
+    pcall(function()
+      local blk = dfhack.maps.getTileBlock(x, y, z)
+      local list = {}
+      for _, bev in ipairs(blk.block_events) do
+        if bev:getType() == df.block_square_event_type.material_spatter and bev.mat_type == df.builtin_mats.MUD
+           and bev.mat_state == df.matter_state.Solid then
+          list[#list + 1] = bev
+        end
+      end
+      if #list > 0 then evs = list end
+    end)
+    if j.mudblk then j.mudblk[key] = evs end
+  end
+  if not evs then return false end
+  for _, bev in ipairs(evs) do
+    local ok, a = pcall(function() return bev.amount[x % 16][y % 16] end)
+    if ok and (tonumber(a) or 0) > 0 then return true end
+  end
+  return false
+end
+
 -- the tiles x0..x1 of row y, level z
 local function scan_span(j, y, z, x0, x1)
   local out, getTileFlags = {}, dfhack.maps.getTileFlags
@@ -1413,6 +1444,9 @@ local function scan_span(j, y, z, x0, x1)
     else
       local ch, _bld, soil, plant = classify(x, y, z, des, oc, j.traps, j.bridges)
       c = ch
+      if not soil and c == '.' and j.purpose == 'sites' and M.has_mud(j, x, y, z) then
+        add_mark(j.marks.mud, x, y, z, M.CFG.soil_max)                  -- BUG-407
+      end
       if soil and c == '.' then
         add_mark(j.marks.soil, x, y, z, M.CFG.soil_max)                 -- BUG-297
         if #j.marks.sand < M.SAND_MAX and M.is_sand(x, y, z, des) then add_mark(j.marks.sand, x, y, z) end

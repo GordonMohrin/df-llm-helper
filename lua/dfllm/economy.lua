@@ -485,7 +485,7 @@ M.DEFAULTS = {
   -- BUG-042: also below drink_d drink days while the brewable plants (census brew_p + brew_g) cannot brew the deficit
   -- to the drink target (5 drinks a plant); the members stay until food >= off_days and drink >= drink_off (or enough
   -- brewable plants)
-  gather = {n = 4, min_jobs = 10, off_days = 60, drink_d = 60, drink_off = 100},
+  gather = {n = 4, min_jobs = 10, off_days = 60, drink_d = 60, drink_off = 100, drink_early = 120},
   -- BUG-057/FR-72 (Run 12-14: PlantSeeds 122-421 and GatherPlants 250-565 unclaimed for years, 30-70 % of the adults idle,
   -- Planters / Fisherdwarves / Plant gatherers at 0 members): the details follow the demand (M.cover_run, daily).
   -- Farmers (PLANT, detail Planters) for PlantSeeds + HarvestPlants unclaimed above `min_jobs` (one per `farm_per`,
@@ -4762,9 +4762,14 @@ function M.drink_block(K, c, r, inv)
   end
   if plants == 0 then
     -- BUG-397: what the fort does about it, so nobody asks: seeds of a brewable crop in stock, the gather zone, the caravans
-    local bs = st.bseeds
-    put('plants', bs ~= nil and string.format('no brewable plants (%d seeds; gathering, trade)', bs)
-                  or 'no brewable plants')
+    local bs, bf = st.bseeds, st.bfit
+    local w = bs ~= nil and string.format('no brewable plants (%d seeds; gathering, trade)', bs) or 'no brewable plants'
+    -- BUG-406: seeds in stock that fit no plot say so (a plot of their kind is requested)
+    if bs and bs > 0 and type(bf) == 'table' and ((bf.surf > 0 and bf.pl_surf == 0) or (bf.under > 0 and bf.pl_under == 0)) then
+      w = string.format('no brewable plants (%d seeds fit no farm plot: %s; a plot is requested, gathering)', bs,
+                        bf.surf > 0 and bf.pl_surf == 0 and 'surface seeds' or 'underground seeds')
+    end
+    put('plants', w)
   end
   if (inv.barrels_empty or 0) == 0 then put('barrels', 'no empty barrel') end
   if not M.labor_holder(K, 'BREWER') then put('brewer', 'nobody brews (Brewing on no citizen)') end
@@ -4879,11 +4884,16 @@ function M.drink_low(K, c, r)
   -- (census brew_p + brew_g) short of the drink deficit (M.brew_need, as M.gather_low's dshort)
   local gd = type(c.gather) == 'table' and math.tointeger(c.gather.drink_d) or 0
   local bneed, bhave = M.brew_need(K, r)
-  st.bshort = dd < gd and bhave < bneed or nil
+  -- BUG-408 (Run 16a i1: 'no brewable plants' beside 50 seeds, the zone drawn at 60 drink days only): with no brewable plant at all
+  -- the zone is drawn from gather.drink_early drink days on
+  local ge = type(c.gather) == 'table' and math.tointeger(c.gather.drink_early) or 0
+  st.bshort = (dd < gd or (bhave == 0 and dd < ge)) and bhave < bneed or nil
   -- BUG-397: the Cook ban's plants (brewed by rule) and the seeds of brewable crops, for the farm slots, the caravans' wants
   -- and the words of the block
   st.nocook = st.bshort and M.cook_ban_set(c) or nil
   st.bseeds = st.bshort and M.brew_seeds(c) or nil
+  local okf, ferr = pcall(M.brew_farm_request, K, c, r)                    -- BUG-406/408: seeds that fit no plot -> a plot
+  if not okf then K.log('warn', 'brew farm request: %s', tostring(ferr)) end
   if dd >= low then
     if p.drink_pre then p.drink_pre = nil; K.log('info', 'drink pre-alarm over: %d drink days', dd) end
     if type(p.drink_rep) == 'table' then p.drink_rep = CAD.quiet(p.drink_rep) end
@@ -5301,6 +5311,72 @@ function M.brew_seeds(c)
     if pid and inf and inf.crop and M.brew_crop(pid, nocook) then n = n + math.tointeger(cnt) end
   end
   return n
+end
+
+-- BUG-406 (Run 16c i3 Yawninggilt y388: one underground farm plot, 'no seeds for MUSHROOM_HELMET_PLUMP and no other crop with seeds
+-- grows there now' in every season while 476 seeds of brewable surface crops lay unused, drink 23 days): the stock seeds of brewable
+-- crops by kind (under = grows underground only, surf = on the surface) and the built farm plots by kind. A plot whose kind is
+-- unknown (no tile reading, no crop yet) counts for both. nil before the seed census.
+function M.brew_fit(K, c)
+  if not st.seeds_known or type(st.seeds) ~= 'table' then return nil end
+  local nocook = st.nocook or M.cook_ban_set(c)
+  local f = {under = 0, surf = 0, pl_under = 0, pl_surf = 0, plots = 0}
+  for id, cnt in pairs(st.seeds) do
+    local n = math.tointeger(cnt) or 0
+    local pid = n > 0 and plant_index(id) or nil
+    local inf = pid and plant_info(pid)
+    if inf and inf.crop and M.brew_crop(pid, nocook) then
+      local k = inf.under and 'under' or 'surf'
+      f[k] = f[k] + n
+    end
+  end
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.FARM_PLOT) do
+      if built(b) then
+        f.plots = f.plots + 1
+        local u = M.plot_under(K, b)
+        if u == nil then
+          for s = 0, 3 do
+            local pid = b.plant_id[s]
+            local inf = pid and pid >= 0 and plant_info(pid) or nil
+            if inf then u = inf.under; break end
+          end
+        end
+        if u ~= false then f.pl_under = f.pl_under + 1 end
+        if u ~= true then f.pl_surf = f.pl_surf + 1 end
+      end
+    end
+  end)
+  return f
+end
+
+-- BUG-406/BUG-408 (Run 16a i1 Bachwald: 'no brewable plants' beside 50 seeds and no farm plot; Run 16c i3: 476 seeds, one plot of the
+-- other kind): the stills' plants are short and the brewable seeds in stock fit no farm plot (no plot of their kind, or no plot at
+-- all): PROJECT_REQUEST farms why=drink (an underground plot) or why=drink_surface (a surface plot, in PEACE only: planters walk
+-- outside), one plot, at most every food.request_days; never while a farms project is pending or lost. follow places it (wake.py)
+function M.brew_farm_request(K, c, r)
+  local p = r.p
+  if not st.bshort or (st.bseeds or 0) <= 0 then st.bfit = nil; return end
+  local f = M.brew_fit(K, c)
+  st.bfit = f
+  if not f then return end
+  local sgap, ugap = f.surf > 0 and f.pl_surf == 0, f.under > 0 and f.pl_under == 0
+  if not (sgap or ugap) then return end
+  local surface = sgap and (not ugap or f.surf >= f.under)
+  if surface and K.mode() ~= 'PEACE' then return end
+  local now = r.now or K.now().tick
+  if p.bfarm_req and now - (math.tointeger(p.bfarm_req) or 0) < (((c.food or {}).request_days) or 14) * DAY then return end
+  local okp, pend = K.call('runner', 'pending', 'farms')
+  if okp and (math.tointeger(pend) or 0) > 0 then return end
+  local okl, nl = K.call('runner', 'lost', 'farms')
+  if okl and (math.tointeger(nl) or 0) > 0 then return end
+  p.bfarm_req = now
+  local msg = string.format('drink %d days: %d brewable %s seeds fit no farm plot (%d plots): a %s farm plot is requested',
+                            (r.days or {}).drink_d or 0, surface and f.surf or f.under, surface and 'surface' or 'underground',
+                            f.plots, surface and 'surface' or 'room')
+  K.log('warn', '%s', msg)
+  K.emit('PROJECT_REQUEST', 'B', msg:sub(1, 200), {tpl = 'farms', n = 1, why = surface and 'drink_surface' or 'drink'})
+  K.persist.touch('m.economy')
 end
 
 -- BUG-381/BUG-398: the cook crop (most seeds) that grows in season s (0-based) under/over ground while the plan has slots
@@ -7384,7 +7460,7 @@ function M.gather_low(K, c, r)
   local pg = type(p.gather) == 'table' and type(p.gather.ids) == 'table' and p.gather or nil
   local jc = st.jobc
   local open = type(jc) == 'table' and math.tointeger(jc.gather_open) or 0
-  if pg and fd >= (g.off_days or 60) and not (dshort and dd < (g.drink_off or 0)) then   -- food (and drink) back
+  if pg and fd >= (g.off_days or 60) and not (dshort and (dd < (g.drink_off or 0) or st.bshort)) then   -- food (and drink) back
     local out = {}
     for _, id in ipairs(pg.ids) do
       local uid = math.tointeger(id)
@@ -7404,7 +7480,7 @@ function M.gather_low(K, c, r)
   end
   st.gather = pg and {n = #pg.ids, open = open, d = pg.d} or nil
   local flow = fd < ((c.food or {}).pre_days or 30)
-  local dlow = dd < (g.drink_d or 0) and dshort
+  local dlow = (dd < (g.drink_d or 0) or st.bshort) and dshort           -- BUG-408: bshort = the early zone too
   if not (flow or dlow) then return end                                  -- no food_low, no drink_low: nothing new
   local why = flow and 'food_low' or 'drink_low'
   local lead = flow and string.format('food %d days', fd)

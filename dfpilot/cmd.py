@@ -1473,11 +1473,15 @@ def farm_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None, 
     """BUG-346 (Run 15d Drillchamber y395: fortcore dug, `bp sites farms` still 0 and the hint said the snapshot may
     predate the fortcore's dig): a farms room with nothing ranked names the soil of the fort's levels instead
     (bp.sites.farm_soil_why: no soil level -> a surface farm or trade)."""
-    if tpl != "farms" or ranked or (params or {}).get("surface"):
+    if tpl != "farms" or ranked:
         return ""
     try:
         snap = snap or sites_snapshot(save_dir)
-        return load_bp("sites").farm_soil_why(snap, fort_manifest(save_dir)) if snap else ""
+        if not snap:
+            return ""
+        if (params or {}).get("surface"):    # BUG-407: the ground a surface farm looked at, and the DECISION
+            return load_bp("sites").farm_ground_why(snap, fort_manifest(save_dir))
+        return load_bp("sites").farm_soil_why(snap, fort_manifest(save_dir))
     except (BpUnavailable, AttributeError):
         return ""
 

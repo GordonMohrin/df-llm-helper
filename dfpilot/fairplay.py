@@ -854,7 +854,7 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
                                "redo_max": (0, 20)},
                      # J3: from_phase = the phase the standing orders start in ("P0".."P7"; a number made the daily task raise)
                      "standing": {"amount": (1, 200), "request_days": (1, 112), "from_phase": "phase"},
-                     "gather": {"drink_d": (0, 400), "drink_off": (0, 400)},
+                     "gather": {"drink_d": (0, 400), "drink_off": (0, 400), "drink_early": (0, 400)},
                      "barrels": {"brew_wait": (0, 200)},
                      # BUG-117: free cloth the kernel keeps itself (0 = off); the part's other keys: the mirror test
                      "cloth": {"floor": (0, 500)},
