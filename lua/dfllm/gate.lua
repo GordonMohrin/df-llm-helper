@@ -113,6 +113,10 @@ M.SCAN_R = 5
 -- 12-17 tiles then): a unit whose next PATH_STEPS path tiles enter the footprint holds the pull; the census pass keeps the
 -- units within PATH_R tiles (PATH_STEPS + what a unit walks in FAST ticks) whose paths every frame re-reads
 M.PATH_STEPS = 20
+-- Hotfix (Run 15 i2/i4 y392/y402: B1 never rose in a SIEGE while a stream of citizens and animals walked toward it
+-- 20 steps out, BREACH 'B1 not up at T+900', 60+ dead each): in SIEGE/BREACH a raise waits only for walkers within
+-- PATH_SIEGE steps of the footprint; with a hostile within force_near only for units on it (BUG-310)
+M.PATH_SIEGE = 6
 M.PATH_R = 24
 -- BUG-335 review: a unit on a stair or ramp up to the bridge stands on another z level (fp_dist nil); the census pass
 -- also keeps those within PATH_R tiles (x/y) and PATH_Z levels of the footprint, for their paths only (their path steps
@@ -154,6 +158,9 @@ M.LOST_BD = 2400           -- loss history: building destroyers in sight this ma
 -- hostile is within INNER_NEAR tiles of it (INNER_FAR while an outer bridge is not up yet); censuses older than
 -- INNER_FRESH ticks never hold
 M.INNER_NEAR, M.INNER_FAR, M.INNER_FRESH = 30, 60, 300
+-- Hotfix (Run 15 i2 y392: B1 held 6600-7320 ticks again and again for 4-10 civilians on its attack side, then BREACH,
+-- 63 lost): one hold lasts at most INNER_MAX ticks; after it the bridge is not held again for INNER_REST ticks
+M.INNER_MAX, M.INNER_REST = 900, 12000
 M.LOST_EV, M.LOST_RACES = 6, 4   -- ... the newest losses and the destroyer races kept per bridge
 -- BUG-068 (Run 12 Trussroads, a reclaimed fort: lever 11808 of the old fort's bridge X11814 pulled six times in one
 -- second at timestream speed with no effect): a pull whose job left the queue without the bridge moving counted
@@ -1374,20 +1381,23 @@ local function holders(K, name, fp, sc, dir)
       local on, beside, seen = {unknown = hold.unknown}, {}, {}
       for _, e in ipairs(hold) do
         seen[e.id] = true
-        if e.d == 0 then on[#on + 1] = e
-        elseif cby[e.id] then on[#on + 1] = cby[e.id]
+        if e.d == 0 or (cby[e.id] and cby[e.id].path == 0) then on[#on + 1] = cby[e.id] or e
         else beside[#beside + 1] = e end
       end
-      for _, e in ipairs(cross) do if not seen[e.id] then on[#on + 1] = e end end
+      -- Hotfix: a forced raise waits only for units ON the footprint (walkers are let go, as before BUG-335)
+      for _, e in ipairs(cross) do if not seen[e.id] and e.path == 0 then on[#on + 1] = e end end
       return on, d, beside
     end
   end
   local seen = {}
+  local lim = (dir == 'up' and FORCE_MODES[K.mode()]) and M.PATH_SIEGE or nil   -- Hotfix: only near walkers in a fight
   for i, e in ipairs(hold) do
     seen[e.id] = true
     if cby[e.id] and e.d > 0 then hold[i] = cby[e.id] end   -- beside it AND walking onto it: the crosser (drop_own keeps it)
   end
-  for _, e in ipairs(cross) do if not seen[e.id] then hold[#hold + 1] = e end end
+  for _, e in ipairs(cross) do
+    if not seen[e.id] and (not lim or (e.path or 0) <= lim) then hold[#hold + 1] = e end
+  end
   return hold, nil
 end
 
@@ -2309,6 +2319,14 @@ end
 -- decide alone only in an ALERT lockdown
 local function inner_wait(K, man, name, mode, br, now)
   if mode == 'BREACH' or (br and br.want == 'up') then return nil end
+  local r = runtime(name)
+  if r.iwx and now - r.iwx < M.INNER_REST then return nil end      -- Hotfix: a spent hold does not come back at once
+  if r.iw and now - r.iw > M.INNER_MAX then
+    r.iwx = now
+    K.log('warn', 'gate: %s up hold for civilians ends after %d ticks (INNER_MAX %d), not held again for %d ticks', name,
+          now - r.iw, M.INNER_MAX, M.INNER_REST)
+    return nil
+  end
   local cu, h = K.census.u, K.census.h
   if type(cu) ~= 'table' or type(h) ~= 'table' then return nil end
   local n = math.tointeger(cu.atk) or -1
