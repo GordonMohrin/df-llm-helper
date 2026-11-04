@@ -113,13 +113,19 @@ M.SCAN_R = 5
 -- 12-17 tiles then): a unit whose next PATH_STEPS path tiles enter the footprint holds the pull; the census pass keeps the
 -- units within PATH_R tiles (PATH_STEPS + what a unit walks in FAST ticks) whose paths every frame re-reads
 M.PATH_STEPS = 20
--- Hotfix (Run 15 i2/i4 y392/y402: B1 never rose in a SIEGE while a stream of citizens and animals walked toward it
--- 20 steps out, BREACH 'B1 not up at T+900', 60+ dead each): in SIEGE/BREACH a raise waits only for walkers within
--- PATH_SIEGE steps of the footprint; with a hostile within force_near only for units on it (BUG-310)
-M.PATH_SIEGE = 6
--- BUG-380: the hostile distance (tiles to the footprint) from which a SIEGE/BREACH raise lets walkers farther than PATH_SIEGE
--- steps go (siege's own 30-tile rule for raising); no visible hostile that near = the full PATH_STEPS hold
-M.HURRY_NEAR = 30
+-- Review fix (merge20, BUG-380 review): a SIEGE/BREACH raise is timed, not measured by the hostile's distance. A walker holds
+-- it iff he can be on the footprint before the bridge has finished moving: the bridge moves the moment the puller is done
+-- and for ~100 ticks (the lever latency is already past while the pull is pending and re-checked every frame), a dwarf covers
+-- a tile per STEP_TICKS ticks, so ~11 tiles + a margin = CROSS_REACH steps. Walkers farther out cannot reach it in time and
+-- never hold it (a steady stream 14..20 steps out no longer keeps it down until GATE_FAIL at T+900: the round-15 disaster;
+-- with a hostile 11..30 tiles away they are no longer let go at 7 steps: soldier 26395 died so). Units ON the footprint
+-- always hold (BUG-310).
+M.STEP_TICKS = 9
+M.CROSS_REACH = 13
+-- Deadline escape: a SIEGE/BREACH raise held for CROSS_HELD (50 %) of DEADLINE ticks is held only by units ON the footprint or
+-- within CROSS_ESCAPE steps (a stream inside CROSS_REACH must not keep the bridge down until GATE_FAIL)
+M.CROSS_HELD = 0.5
+M.CROSS_ESCAPE = 2
 M.PATH_R = 24
 -- BUG-335 review: a unit on a stair or ramp up to the bridge stands on another z level (fp_dist nil); the census pass
 -- also keeps those within PATH_R tiles (x/y) and PATH_Z levels of the footprint, for their paths only (their path steps
@@ -1393,13 +1399,23 @@ local function holders(K, name, fp, sc, dir)
     end
   end
   local seen = {}
-  -- Hotfix: only near walkers hold a raise in a fight. BUG-380 (Run 16d i4 BREACH, 0 visible hostiles: soldier 26395 walked
-  -- 9 tiles on to B2 in the ~100 ticks it moved, the walkers 7..20 steps out being let go): that holds only with a hostile
-  -- in sight within HURRY_NEAR tiles of this bridge; with none, nothing is worth a crush and every walker PATH_STEPS out holds
+  -- Review fix (merge20): in a fight a raise waits for the walkers who can reach the footprint while it moves (CROSS_REACH
+  -- steps), whether a hostile is in sight or not; after CROSS_HELD of the DEADLINE held only for those ON it or within CROSS_ESCAPE
   local lim
   if dir == 'up' and FORCE_MODES[K.mode()] then
-    local hd = hostile_dist(K, name, fp)
-    if hd >= 0 and hd <= M.HURRY_NEAR then lim = M.PATH_SIEGE end
+    lim = M.CROSS_REACH
+    local r = rt[name]
+    if r then
+      local held = (r.held_sum or 0) + (r.block_since and math.max(0, K.now().tick - r.block_since) or 0)
+      if held >= M.DEADLINE * M.CROSS_HELD then
+        lim = M.CROSS_ESCAPE
+        if not r.esc then
+          r.esc = true
+          K.log('info', 'gate: %s raise held %d ticks: only units on the footprint or within %d steps hold it now',
+                name, held, lim)
+        end
+      end
+    end
   end
   for i, e in ipairs(hold) do
     seen[e.id] = true
@@ -1492,6 +1508,7 @@ local function set_want(name, w, why, deadline, now)
                  deadline = w == 'up' and (deadline or now + M.DEADLINE) or nil, failed = false}
   local r = runtime(name)
   r.bad, r.nw, r.block_since, r.lat0, r.nw_out, r.ap, r.ap_last, r.ap_ask = {}, 0, nil, nil, nil, 0, nil, nil
+  r.esc = nil
   r.block, r.block_ev, r.hold_log, r.forced_ev, r.hold_seen = nil, nil, nil, nil, nil
   r.held_sum, r.fail_at, r.switch, r.want_ms = nil, nil, nil, nil
   r.qd, r.qw, r.qlog, r.qnote, r.qref = nil, nil, nil, nil, nil   -- BUG-251: the quiet window of a lowering
@@ -1566,6 +1583,7 @@ end
 local function new_epoch(r)
   r.nw, r.nw_out, r.bad, r.fail_at, r.switch, r.held_sum, r.block_since = 0, nil, {}, nil, nil, nil, nil
   r.ap, r.ap_last, r.ap_ask = 0, nil, nil            -- BUG-342: the pulls cancelled for a unit walking toward it
+  r.esc = nil
 end
 
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)

@@ -1,5 +1,15 @@
 # CHANGELOG dfpilot
 
+## Review fix (merge20): the SIEGE/BREACH raise waits by time, not by the hostile's distance (BUG-380; offline, live-untested)
+- **Why:** two review findings in gate.lua `holders()`: with a visible hostile 11..30 tiles away walkers 7..20 steps out were let go but
+  cover ~11 tiles while the bridge moves (soldier 26395 crushed); with no hostile (or a stale census, or one beyond 30 tiles) a steady stream
+  within 20 steps kept the raise down until GATE_FAIL at T+900.
+- **Fix:** a walker holds the raise iff his path enters the footprint within `CROSS_REACH` (13) steps (move time / `STEP_TICKS` 9 + margin),
+  hostile or not; farther walkers never hold; units ON the footprint always hold (BUG-310). Deadline escape: once a raise has been held for
+  50 % of `DEADLINE`, only units on the footprint or within `CROSS_ESCAPE` (2) steps hold it (kern.log line). `PATH_SIEGE`, `HURRY_NEAR` removed.
+- **Tests:** tests/lua/test_bug380_siege_traffic.lua (+4 traffic tests, each asserts no crush and up before T+900; test_merge15_gate_review
+  walker moved to step 2).
+
 ## Defence before growth, no dry refuge with a way in, a death census with causes (BUG-377 to BUG-379, 2026-11-04; offline, live-untested)
 - **Why:** Run 16d (i4 Plankscale fell y382: two goblin sieges, pop 66 -> 1, 0 attackers killed; refuge Tiefe+ dry at every siege,
   6 traps, soldiers in worn 30-55 % armor, no ore; phase P5 'waits for squads 3, drill, ready 1' for ten years, so the P6 hall and

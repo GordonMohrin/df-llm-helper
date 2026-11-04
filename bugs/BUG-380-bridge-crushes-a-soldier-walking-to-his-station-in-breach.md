@@ -41,3 +41,28 @@ pull goes out when the stream is gone; no `GATE_CRUSH_RISK` / `BRIDGE_CRUSH`. Wi
 beyond 6 steps are let go as before (the stream does not keep B1 down: no `B1 not up at T+900`). A station 2 tiles from a footprint
 on another level is moved (`STATION_MOVED why bridge`). Open: a hostile within 30 tiles with a stream over the bridge still
 accepts walkers 7+ steps out (the hotfix); soldiers still cross a bridge to a station on its inner side while it is down.
+
+## Review fix (merge20)
+Two review findings on `holders()` (gate.lua) in a SIEGE/BREACH raise:
+- CRITICAL crush: with a visible hostile 11..30 tiles away the walkers 7..20 steps out were let go, but a walker covers ~11 tiles in the
+  ~100 ticks the bridge moves (9 ticks per tile): soldier 26395 died so.
+- MAJOR breach: with no hostile in sight, a stale census or a hostile beyond 30 tiles every walker within 20 steps held the raise, so a
+  steady stream kept B1 down until GATE_FAIL at T+900 (the round-15 disaster).
+The rule is now on time, not on the hostile's distance (`M.STEP_TICKS` 9, `M.CROSS_REACH` 13 = the ~11 tiles of the move + margin;
+`PATH_SIEGE` and `HURRY_NEAR` are gone):
+- a walker holds the raise iff he can be on the footprint before the bridge has finished moving: his path enters it within CROSS_REACH
+  steps. Walkers farther out never hold (they cannot get there in time), with a hostile or without. Units ON the footprint always
+  hold (BUG-310); a forced raise (hostile within force_near) still holds only for them.
+- deadline escape (`M.CROSS_HELD` 0.5, `M.CROSS_ESCAPE` 2): once a raise has been held for half the DEADLINE (`held_sum` + the running
+  hold) only units on the footprint or within 2 steps hold it; kern.log `gate: B2 raise held N ticks: only units on the footprint or
+  within 2 steps hold it now` (once per epoch, `r.esc`). Accepted risk: a unit 3..13 steps out then walks onto the moving bridge; the
+  alternative was GATE_FAIL.
+Tests: tests/lua/test_bug380_siege_traffic.lua (4 more: (4) stream 8..20 steps out without a hostile, (5) the same with a hostile
+parked 20 tiles away, (6) BREACH, hostile at 20 tiles, soldier 9 steps out walks onto it, (7) a queue within 5 steps for good ->
+the escape raises before T+900; every test asserts no crush AND up before T+900; (1), (3), (4), (5), (7) fail on the merge20 code).
+Test (6) passes on the old code too (the parked army is not in the census of the siege world); it guards the new rule only.
+The existing tests: (1) citizens 230 instead of 170 ticks apart (a stream with no gap of the pull's ~70 ticks cannot be raised onto
+without the escape), (3) no longer expects B1 before the last citizen; test_merge15_gate_review.lua walker path at step 2 (the walker
+at step 6 is let go by the escape). Live check: a stream over a bridge in a BREACH: the raise goes out in the first gap, or after
+~450 held ticks with the escape line in kern.log; never `B1 not up at T+900` for walkers only.
+
