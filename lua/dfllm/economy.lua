@@ -3211,7 +3211,7 @@ local function alarm_check(K, c, p, days)
       q = #head + #first + 15 <= 200 and (head .. first .. '; see d.water') or (head .. 'see d.water')
     end
     K.emit('DECISION_NEEDED', 'A', string.format('thirst: %d citizens thirsty, drink %d days', thirsty, days.drink_d),
-           {id = 'thirst', q = q, water = M.lines(wq, 200, 3), cmds = cmds})
+           {id = 'thirst', q = q, water = M.lines(wq, 200, 2), cmds = cmds})
   end
 end
 

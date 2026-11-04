@@ -313,6 +313,17 @@ T.test('BUG-344 review (Run 15d: well 18324 over 1-2/7, 13 dead of thirst beside
   T.eq(M.well_wet(K, 4, 4, 5, 12, 3), true, '~ is 4..7')
   T.eq(M.well_wet(K, 1, 1, 5, 12), true, 'no min: the old rule (any water)')
   T.eq(M.DEFAULTS.well_min, 3)
+  -- merge16 review: 2/7 in open space over a full tile (a cistern's or river's top layer) is water, not shallow;
+  -- 2/7 on a floor (the shaft ends there) stays shallow, and a thin layer over a dry floor below is shallow too
+  local TL2 = {['5,5,4'] = {c = 'w', flow = 2, shape = 'EMPTY'}, ['5,5,3'] = {c = '~', flow = 7, shape = 'FLOOR'},
+               ['6,6,4'] = {c = 'w', flow = 2, shape = 'FLOOR'},
+               ['7,7,4'] = {c = 'w', flow = 1, shape = 'EMPTY'}, ['7,7,3'] = {c = '.', flow = 0, shape = 'FLOOR'}}
+  local K2 = {call = function(_, _, x, y, z) return true, TL2[x .. ',' .. y .. ',' .. z] end}
+  T.eq({M.well_wet(K2, 5, 5, 5, 12, 3)}, {true, {at = {5, 5, 3}, flow = 7, why = 'water'}})
+  local w6, i6 = M.well_wet(K2, 6, 6, 5, 12, 3)
+  T.eq({w6, i6.why, i6.flow}, {false, 'shallow', 2})
+  local w7, i7 = M.well_wet(K2, 7, 7, 5, 12, 3)
+  T.eq({w7, i7.why, i7.flow}, {false, 'shallow', 1})
   -- in a run: the shallow well is no source, one kern.log line per spell, the thirst text names it
   local W, M2 = world{tiles = {['20,12,4'] = 'w'}, setup = function(W)
     F.building(W, 'WELL', {id = 18324, x1 = 20, y1 = 12, x2 = 20, y2 = 12, z = 5})

@@ -199,20 +199,26 @@ local ROCK = {['#'] = true, S = true, C = true, F = true, T = true}     -- snaps
 -- for the HOSPITAL_DRY text
 function M.well_wet(K, x, y, z, depth, min)
   min = min or 1
+  local shal                                          -- merge16 review: the first shallow tile over open space
   for zz = z - 1, z - (depth or 12), -1 do
     local t = tile(K, x, y, zz)
     local at = {x, y, zz}
-    if not t then return false, {at = at, why = 'hidden'} end
+    if not t then return false, shal or {at = at, why = 'hidden'} end
     local f = math.tointeger(t.flow)
     if wet_char(t.c) then
-      if (f and f < min) or (not f and t.c == 'w' and min > 1) then return false, {at = at, flow = f, why = 'shallow'} end
-      return true, {at = at, flow = f, why = 'water'}
-    end
-    if t.c ~= '_' then
-      return false, {at = at, flow = f or 0, why = ROCK[t.c] and 'rock' or 'dry'}
+      if (f and f < min) or (not f and t.c == 'w' and min > 1) then
+        -- a thin layer in open space over deeper water (a cistern's or river's top) is not the bottom: look further
+        -- down; shallow only when the shaft ends on it or nothing deeper is found
+        shal = shal or {at = at, flow = f, why = 'shallow'}
+        if t.shape ~= 'EMPTY' then return false, shal end
+      else
+        return true, {at = at, flow = f, why = 'water'}
+      end
+    elseif t.c ~= '_' then
+      return false, shal or {at = at, flow = f or 0, why = ROCK[t.c] and 'rock' or 'dry'}
     end
   end
-  return false, {at = {x, y, z - (depth or 12)}, why = 'deep'}
+  return false, shal or {at = {x, y, z - (depth or 12)}, why = 'deep'}
 end
 
 -- water the game accepts in a Water Source zone (FR-33a/34): a revealed tile of depth >= deep, never magma.
