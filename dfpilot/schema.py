@@ -495,7 +495,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # 22236 suspended by buildingplan: waits for building material x1'); walled also lists the doors replaced by walls
     # (BUG-044)
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
-                                                    "park:i parts:s idle:i")),
+                                                    "park:i parts:s idle:i unreach:i cmd:s")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
     # BUG-105: unreach = of the far bodies, those on a tile nobody can path to (corpse_unreachable, not in old)
@@ -1340,7 +1340,10 @@ SNAPSHOT = Obj(req={"v": Const(V), "id": ID, "tick": TICK, "purpose": Str(enum=[
                # default box its margin (x, y, z)
                # BUG-297: soil has its own cap (snapshot.lua CFG.soil_max 8000), every other mark list stays at 500
                opt={"marks": Obj(opt={"soil": Arr(POS, hi=8000)}, extra=Arr(POS, hi=500), keys=r"^[a-z_]{1,20}$"),
-                    "parts": Arr(BBOX, 1, 24), "margin": Tup([NAT, NAT, NAT])})
+                    "parts": Arr(BBOX, 1, 24), "margin": Tup([NAT, NAT, NAT]),
+                    # BUG-352: a sites export: the citizens' walk group (home) and per level the rows of '1' (a walkable
+                    # tile in that group), '0' (in another walk group), '-' (no walkable tile read)
+                    "wg": Obj(req={"home": Int(1), "rows": Obj(extra=Arr(Str("^[01-]*$")), keys=r"^z-?\d+$")})})
 
 
 def _snapshot_post(doc: dict, out: list[str]) -> None:
@@ -1359,6 +1362,12 @@ def _snapshot_post(doc: dict, out: list[str]) -> None:
         for i, r in enumerate(rows):
             if len(r) != w:
                 out.append(f"$.rows.{k}[{i}]: width {len(r)}, expected {w}")
+    wg = doc.get("wg")
+    if isinstance(wg, dict) and isinstance(wg.get("rows"), dict):
+        for k in sorted(set(wg["rows"]) & want):
+            rows = wg["rows"][k]
+            if len(rows) != h or any(len(r) != w for r in rows):
+                out.append(f"$.wg.rows.{k}: not {h} rows of width {w}")
 
 # ---------------------------------------------------------------- misc files
 RESTORE = Obj(req={"v": Const(V), "save": Str(maxbytes=120), "wall": NAT, "active": FLAG,

@@ -59,7 +59,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 2                            # BUG-346: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 3                            # BUG-346: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -261,6 +261,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = aquifer_ok(cands, tpl, p, rects, manifest)  # FR-95: the levels the kernel saw damp or wet
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
+    cands = reachable(cands, snap, tpl)                     # BUG-352: the citizens' walk group (snapshot wg)
     if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
         cands = _near_point(cands, tpl, near, within, at)
     cands.sort(key=lambda c: (c.get("_d", 0), -c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0], c["rot"]))
@@ -277,8 +278,53 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     if free is not None and cands and not out:
         raise ValueError(f"{tpl}: all {taken} candidate site(s) lie on or beside placed projects (bp.cancel frees a "
                          "parked one's tiles)")
-    return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"],
-             **({"water": c["water"]} if "water" in c else {})} for i, c in enumerate(out)]
+    return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"],
+             "why": c["why"] + (f"; walk group {c['walk']}" if "walk" in c else ""),
+             **({"water": c["water"]} if "water" in c else {}),
+             **({"walk": c["walk"]} if "walk" in c else {})} for i, c in enumerate(out)]
+
+
+def walk_at(snap: dict, pos) -> str | None:
+    """BUG-352: '1' when the tile lies in the citizens' walk group, '0' in another walk group, None when the snapshot has
+    no walk groups (an older export, not a sites export), the tile lies outside it or no walkable tile was read there."""
+    wg = snap.get("wg")
+    if not isinstance(wg, dict):
+        return None
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    x, y, z = (int(v) for v in pos)
+    rows = (wg.get("rows") or {}).get(f"z{z}")
+    if not rows or not (x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1):
+        return None
+    try:
+        c = rows[y - y0][x - x0]
+    except IndexError:
+        return None
+    return c if c in "01" else None
+
+
+def reachable(cands: list, snap: dict, tpl: str) -> list:
+    """BUG-352 (Run 16c site97: fortcore ranked S3/S2 on soil beyond the brook, a project 30 d at s1.dig 0 %, 'unreachable
+    DigChannel'): the sites whose anchor tile lies in another walk group than the citizens stand in are dropped (the kernel's
+    sites export marks it: snapshot wg); the others carry `walk` = the citizens' group. A tile without a read group claims
+    nothing; a snapshot without walk groups is not filtered. ValueError when every candidate lies beyond."""
+    wg = snap.get("wg")
+    if not isinstance(wg, dict) or not cands:
+        return cands
+    home = wg.get("home")
+    keep, far = [], []
+    for c in cands:
+        w = walk_at(snap, c["anchor"])
+        if w == "0":
+            far.append(c)
+            continue
+        if w == "1":
+            c["walk"] = home
+        keep.append(c)
+    if far and not keep:
+        raise ValueError(f"{tpl}: all {len(far)} candidate site(s) lie in a walk group the citizens cannot reach (they stand in "
+                         f"walk group {home}, e.g. the far side of a brook or a cave); open a way there (a bridge, a ramp, "
+                         "a stair) or choose another level")
+    return keep
 
 
 def _no_store(snap, p, manifest, bad, hid, mk, wet) -> str:

@@ -361,6 +361,8 @@ def next_hint(etype: str, e: dict) -> str:
     if etype == "DECISION_NEEDED" and d.get("id") == "curse_kill":
         return ("ask Gordon: a kill order on the were-form (dfllm cmd squad.sortie, approve:true is the logged decision; "
                 "a squad and its target position) or keep them apart in a locked room; no answer = no kill")
+    if etype == "PROJECT_BLOCKED" and d.get("unreach") is not None and d.get("proj"):
+        return unreach_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("idle") is not None and d.get("proj"):
         return idle_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
@@ -463,6 +465,16 @@ def park_hint(d: dict) -> str:
     Cancelling it without undo keeps what it built (an explore's shaft stays watched)."""
     return (f"tell Gordon; once he agrees: dfllm cmd bp.cancel '{{\"proj\":\"{d['proj']}\"}}' (no undo), then place "
             "it again elsewhere if still wanted")
+
+
+def unreach_hint(d: dict) -> str:
+    """BUG-352: a dig stage no citizen reaches (its tiles lie in another walk group, e.g. across a brook) stands still. The
+    cancel drops only the unbuilt pieces; `bp sites` lists the sites the citizens reach (it shows the walk group)."""
+    p = d["proj"]
+    tpl = d.get("tpl") or "<tpl>"
+    return (f"safe: dfllm cmd bp.cancel '{{\"proj\":\"{p}\"}}' (drops only the unbuilt pieces), then dfllm bp sites {tpl} "
+            f"--fresh (only sites the citizens reach) and bp.place tpl={tpl} site=S1 again; the project's old dig "
+            "designations stay: dfllm cmd inspect what=workload names the unreachable jobs")
 
 
 def idle_hint(d: dict) -> str:

@@ -78,7 +78,7 @@ def test_parked_project_blocked_event_and_its_wake_hint():
 
 def test_runner_queue_config_validates(tmp_path):
     cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
-    assert cfg["runner"]["queue"] == {"yield_days": 7, "park_days": 30, "idle_days": 30}   # BUG-328: idle_days
+    assert cfg["runner"]["queue"] == {"yield_days": 7, "park_days": 30, "idle_days": 30, "reach_days": 3}   # BUG-328: idle_days, BUG-352
     assert fairplay.runner_errors() == []
     p = tmp_path / "baseline.json"
     p.write_text(json.dumps({"v": 2, "runner": {"queue": {"yield_days": 0, "park_days": 401, "slots": 4}}}),
