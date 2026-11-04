@@ -381,8 +381,13 @@ local AQ_RANK = {none = 0, light = 1, varied = 2, heavy = 3}
 -- soil depth, shallowest first: the stone criterion takes the best tile (a fort is dug where stone is near)
 local SOIL_RANK = {none = 0, little = 1, shallow_sand = 2, shallow_clay = 2, some = 3, deep = 4, very_deep = 5,
   extremely_deep = 6}
-local function merge_tiles(rec, tiles)
+-- BUG-411: opts.worst_stone (a hover row, no rectangle placed): the stone criterion takes the DEEPEST soil of the hovered
+-- tiles, not the shallowest (the rectangle placed later may lie on any of them; i2/i4 read 'light aquifer / stone ok' by
+-- hover, the placed rectangle was heavy / 'difficult to obtain stone'). rec.tiles.aq_best keeps the best aquifer seen when
+-- the tiles differ, so the summary can show the spread.
+local function merge_tiles(rec, tiles, opts)
   if not tiles or #tiles == 0 then return rec end
+  opts = opts or {}
   local seen_r, seen_m, seen_l = {}, {}, {}
   for _, r in ipairs(rec.rivers or {}) do seen_r[r] = true end
   for _, m in ipairs(rec.metals or {}) do seen_m[m] = true end
@@ -391,6 +396,7 @@ local function merge_tiles(rec, tiles)
   local near = {}
   for _, n in ipairs(rec.neighbors or {}) do near[n.race] = n end
   local nw, nt, nmw, nter = 0, 0, 0, 0
+  local aq_lo
   local wat = {}   -- BUG-250: the hovered tiles that showed a brook or river (the scan summary's brook distance)
   for _, t in ipairs(tiles) do
     if t.water and type(t.at) == 'table' and #wat < 16 then wat[#wat + 1] = {t.at[1], t.at[2]} end
@@ -410,11 +416,15 @@ local function merge_tiles(rec, tiles)
     for _, l in ipairs(t.layers or {}) do
       if not seen_l[l] then seen_l[l] = true; rec.layers = rec.layers or {}; rec.layers[#rec.layers + 1] = l end
     end
-    if (SOIL_RANK[t.soil] or 99) < (SOIL_RANK[rec.stone_soil] or 99) then rec.stone_soil = t.soil end
+    if opts.worst_stone then   -- BUG-411: the deepest soil
+      if (SOIL_RANK[t.soil] or -1) > (SOIL_RANK[rec.stone_soil] or -1) then rec.stone_soil = t.soil end
+    elseif (SOIL_RANK[t.soil] or 99) < (SOIL_RANK[rec.stone_soil] or 99) then rec.stone_soil = t.soil end
     if t.flux then rec.flux = true end
     if (EVIL_RANK[t.evil] or -1) > (EVIL_RANK[rec.evil] or -1) then rec.evil = t.evil end
     if (SAV_RANK[t.savagery] or -1) > (SAV_RANK[rec.savagery] or -1) then rec.savagery = t.savagery end
     if (AQ_RANK[t.aquifer] or -1) > (AQ_RANK[rec.aquifer] or -1) then rec.aquifer = t.aquifer end
+    local aq = AQ_RANK[t.aquifer or 'none'] or 0   -- a panel without an aquifer line shows none
+    if aq_lo == nil or aq < aq_lo then aq_lo = aq end
     for _, n in ipairs(t.neighbors or {}) do
       local o = near[n.race]
       if not o or (n.rank or 99) < (o.rank or 99) then near[n.race] = n end
@@ -430,9 +440,34 @@ local function merge_tiles(rec, tiles)
   rec.tiles = {n = #tiles, water = nw, wood = nt}
   if nter > 0 then rec.tiles.terrain, rec.tiles.mw = nter, nmw end
   if #wat > 0 then rec.tiles.water_at = wat end
+  local hi = AQ_RANK[rec.aquifer or 'none'] or 0
+  if aq_lo ~= nil and aq_lo < hi then   -- BUG-411: the tiles differ; the row shows the worst
+    for name, r in pairs(AQ_RANK) do if r == aq_lo then rec.tiles.aq_best = name end end
+  end
+  if opts.worst_stone then rec.tiles.worst_stone = true end
   return rec
 end
 S.merge_tiles = merge_tiles
+
+-- BUG-409: where the brook/river tiles lie in a rectangle {emb, size}: n tiles inside it, core = those not on its outer
+-- ring, d2 = TWICE the Chebyshev distance of the nearest one from the rectangle's centre (integers; a tile is 48 map
+-- cells, so d2 * 24 is about the steps from the centre: i1 18,22, brook on the top row of a 4x4 = 1.5 tiles = ~72 steps,
+-- walked 95). Tiles outside the rectangle do not count.
+function S.water_geometry(wat, emb, size)
+  size = size or {4, 4}
+  local x0, y0 = emb[1], emb[2]
+  local x1, y1 = x0 + size[1] - 1, y0 + size[2] - 1
+  local n, core, d2 = 0, 0, nil
+  for _, p in ipairs(wat or {}) do
+    if p[1] >= x0 and p[1] <= x1 and p[2] >= y0 and p[2] <= y1 then
+      n = n + 1
+      if p[1] > x0 and p[1] < x1 and p[2] > y0 and p[2] < y1 then core = core + 1 end
+      local d = math.max(math.abs(2 * p[1] - (x0 + x1)), math.abs(2 * p[2] - (y0 + y1)))
+      if d2 == nil or d < d2 then d2 = d end
+    end
+  end
+  return {n = n, core = core, d2 = d2}
+end
 
 -- a stable text key of a panel record (facts the checklist uses)
 local function json_key(rec)
@@ -486,18 +521,30 @@ S.copy = copy
 -- by hand on them (BUG-250).
 local function record(ctx, tag, v, rec, where)
   local parts = ctx.tile_recs
-  rec = merge_tiles(rec, parts)
+  -- BUG-411: a hover row has no rectangle; its stone is the worst of the hovered tiles
+  rec = merge_tiles(rec, parts, {worst_stone = where and where.hover and true or false})
   ctx.tile_recs = nil
   if not where then
     local cs = v.cs
     where = {world = {cs.emb_min[1] // 16, cs.emb_min[2] // 16}, emb = {cs.emb_min[1], cs.emb_min[2]},
       size = cs.emb_max and {cs.emb_max[1] - cs.emb_min[1] + 1, cs.emb_max[2] - cs.emb_min[2] + 1}}
   end
-  local verdict = checklist.evaluate(rec, ctx.rules, {world = where.world, size = where.size})
+  -- BUG-409: the brook tiles against the rectangle (a sweep samples a few tiles, so it has no geometry; a hover row is
+  -- measured against the 4x4 the hover grid covers)
+  if rec.tiles and rec.tiles.water_at and not where.sweep and where.emb then
+    local g = S.water_geometry(rec.tiles.water_at, where.emb, where.size)
+    rec.tiles.water_n, rec.tiles.water_core, rec.tiles.water_d2 = g.n, g.core, g.d2
+  end
+  local verdict = checklist.evaluate(rec, ctx.rules, {world = where.world,
+    size = where.size or (where.sweep and {4, 4} or nil), sweep = where.sweep})
   ctx.results = ctx.results or {}
   local row = {tag = tag, world = where.world, emb = where.emb, size = where.size, hover = where.hover,
     verdict = verdict.verdict, score = verdict.score, fails = verdict.fails, warns = verdict.warns,
     unknown = verdict.unknown, items = verdict.items, rec = rec, parts = parts}
+  if where.sweep then   -- BUG-410: one compact row per world tile (status.json is rewritten after every step)
+    row.sweep, row.items, row.parts = true, nil, nil
+    row.rec = S.sweep_rec(rec)
+  end
   ctx.results[#ctx.results + 1] = row
   ctx.last = row
   return 'done', tag .. ' ' .. verdict.verdict .. ' ' .. verdict.score
@@ -559,30 +606,53 @@ function S.hover_tile(n, tx, ty, cfg)
     done = function() return false, 'reading tile' end}
 end
 
-function S.hover_record(tag, wx, wy, ex, ey)
+-- BUG-410: the few fields of a panel record a pre-rank row keeps
+function S.sweep_rec(rec)
+  local o = {}
+  for _, k in ipairs({'read', 'water', 'aquifer', 'trees', 'soil', 'stone_soil', 'evil', 'savagery', 'temperature', 'biome',
+      'surroundings', 'flux', 'ice', 'terrain'}) do o[k] = rec[k] end
+  o.metals, o.warnings = rec.metals, rec.warnings
+  for _, n in ipairs(rec.neighbors or {}) do
+    if n.race == 'goblins' then o.goblins = n.travel end
+  end
+  if rec.tiles then o.tiles = {n = rec.tiles.n, water = rec.tiles.water, aq_best = rec.tiles.aq_best} end
+  return o
+end
+
+function S.hover_record(tag, wx, wy, ex, ey, sweep)
   return {id = 'site.hover.read', live = 'untested',
     act = function(ui, v, ctx)
       ui:release()
       local tiles = ctx.tile_recs or {}
       local base = copy(tiles[1]) or {read = 0, warnings = {}, rivers = {}, neighbors = {}}
       base.at = nil
-      return record(ctx, tag, v, base, {world = {wx, wy}, emb = {ex, ey}, hover = true})
+      return record(ctx, tag, v, base, {world = {wx, wy}, emb = {ex, ey}, hover = true, sweep = sweep})
     end}
 end
 
-local function hover_cand(out, c, cfg, tag)
+-- BUG-410: which tiles of the 4x4 a sweep hovers (offsets from the rectangle's corner): 1 = one inner tile, 4 = the
+-- corners (they spread over the rectangle, so a brook line is more likely met), 9 = a 3x3 spread; 16 = all (no sweep)
+local SWEEP_OFFSETS = {
+  [1] = {{1, 1}},
+  [4] = {{0, 0}, {3, 0}, {0, 3}, {3, 3}},
+  [9] = {{0, 0}, {1, 0}, {3, 0}, {0, 1}, {1, 1}, {3, 1}, {0, 3}, {1, 3}, {3, 3}},
+}
+S.SWEEP_OFFSETS = SWEEP_OFFSETS
+
+local function hover_cand(out, c, cfg, tag, sweep)
   local ex = 16 * c[1] + (c[3] or cfg.default_local[1])
   local ey = 16 * c[2] + (c[4] or cfg.default_local[2])
   out[#out + 1] = S.goto_world(c[1], c[2], cfg)
   out[#out + 1] = S.enter_placing()
-  local n = 0
-  for dy = 0, 3 do
-    for dx = 0, 3 do
-      n = n + 1
-      out[#out + 1] = S.hover_tile(n, ex + dx, ey + dy, cfg)
-    end
+  local offs = sweep and SWEEP_OFFSETS[sweep]
+  if not offs then
+    offs = {}
+    for dy = 0, 3 do for dx = 0, 3 do offs[#offs + 1] = {dx, dy} end end
   end
-  out[#out + 1] = S.hover_record(tag, c[1], c[2], ex, ey)
+  for n, o in ipairs(offs) do
+    out[#out + 1] = S.hover_tile(n, ex + o[1], ey + o[2], cfg)
+  end
+  out[#out + 1] = S.hover_record(tag, c[1], c[2], ex, ey, SWEEP_OFFSETS[sweep or 0] and true or nil)
 end
 
 ---------------------------------------------------------------- BUG-250: embark --here
@@ -1054,7 +1124,7 @@ end
 
 ---------------------------------------------------------------- run specs
 -- spec = {v=2, id, mode='newgame'|'scan'|'embark'|'here'|'prep'|'saveas', world='Zilirr', world_folder, portable,
---         cands={{wx,wy,lx,ly}}, hover=bool, site={wx,wy,lx,ly}, waive={criterion ids}, accept={{id, why}},
+--         cands={{wx,wy,lx,ly}}, hover=bool, sweep=1|4|9 (BUG-410: that many hovered tiles per world tile, compact rows), site={wx,wy,lx,ly}, waive={criterion ids}, accept={{id, why}},
 --         explore_first=TEXT, prior={rows of earlier results}, name=save folder, play_now=bool, allow_unspent=bool}
 local function place_and_read(out, c, cfg, tag, tiles)
   local ex = 16 * c[1] + (c[3] or cfg.default_local[1])
@@ -1101,7 +1171,7 @@ function S.build(spec, cfg, loadout)
   elseif spec.mode == 'scan' then
     for n, c in ipairs(spec.cands or {}) do
       if spec.hover then   -- BUG-247: panels by hover only, no rectangle
-        hover_cand(out, c, cfg, spec.id .. '-' .. n)
+        hover_cand(out, c, cfg, spec.id .. '-' .. n, spec.sweep)
       else
         place_and_read(out, c, cfg, spec.id .. '-' .. n, spec.tiles == true)
         out[#out + 1] = S.abort_popup()

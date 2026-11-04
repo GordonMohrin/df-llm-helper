@@ -232,7 +232,7 @@ T.test('BUG-247: scan --hover reads 16 hovered panels per site without any recta
   T.eq(r.rec.tiles.n, 16, logtxt(run))
   T.eq(r.rec.water, 'brook', 'the brook of one hovered tile')
   T.eq(r.rec.tiles.water_at, {{ex + 3, ey + 1}})
-  T.eq(r.rec.stone_soil, 'little')
+  T.eq(r.rec.stone_soil, 'deep', 'BUG-411: a hover row takes the deepest soil of its tiles (the brook tile is deep)')
   T.eq(#r.parts, 16); T.eq(r.parts[1].at, {ex, ey})
   T.eq(D.pressed.Confirm, nil); T.eq(ctx.pk, nil, 'no rectangle offset needed')
   T.eq(#docs[#docs].results[1].parts, 16, 'the parts reach status.json (embark --here)')

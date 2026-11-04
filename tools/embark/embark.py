@@ -3,6 +3,8 @@
     python tools/embark/embark.py state | check | screen [NAME] | status | stop
     python tools/embark/embark.py newgame [--world Zilirr] [--world-folder F [--portable | --appdata]]
     python tools/embark/embark.py scan WX,WY[,LX,LY] ... [--tiles | --hover]
+    python tools/embark/embark.py rank --box X0,Y0,X1,Y1 [--step N] [--sample 1|4|9] [--top N]   (BUG-410: pre-rank)
+    python tools/embark/embark.py rank --last [--top N]   (BUG-410: rank the newest finished sweep again, no DF needed)
     python tools/embark/embark.py embark WX,WY[,LX,LY] | --here  [--waive ID ...] [--accept ID ... --reason TEXT]
                                         [--explore-first TEXT] [--play-now] [--allow-unspent]
     python tools/embark/embark.py prep [--play-now] [--allow-unspent]
@@ -40,6 +42,15 @@ NEEDS_PLAN = ("stone",)
 # BUG-250: a save folder name save-as types key by key (STRING_A<code>)
 SAVE_NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$"
 PRIOR_FILES, PRIOR_ROWS = 30, 200      # embark --here: the newest result files and rows passed as spec.prior
+# BUG-410: rank = a hover sweep (few hovered tiles per world tile, compact rows). Samples per world tile (= steps.lua
+# SWEEP_OFFSETS), world tiles per run (status.json is rewritten after every step), seconds per tile (guess, live-untested)
+SWEEP_SAMPLES = (1, 4, 9)
+SWEEP_MAX = 400
+SWEEP_SECONDS = (5.0, 1.5)             # per world tile: base + per hovered tile
+# BUG-409: an embark tile is 48 map cells (steps); a brook farther than this from every other scanned rectangle is not
+# 'near' it (BUG-250 searched all scanned sites: 'brook=47 tiles at 390,391' for a site 160 tiles away)
+TILE_STEPS = 48
+BROOK_NEAR = 16
 
 
 def df_dir() -> Path:
@@ -61,6 +72,21 @@ def call(args: list[str], df: Path | None = None, timeout: float = 60) -> str:
     return r.stdout
 
 
+def parse_box(text: str) -> list[int]:
+    """BUG-410: 'X0,Y0,X1,Y1' world tiles (inclusive, X0<=X1, Y0<=Y1)."""
+    parts = [int(p) for p in text.split(",")]
+    if len(parts) != 4 or any(p < 0 for p in parts) or parts[0] > parts[2] or parts[1] > parts[3]:
+        raise ValueError(f"box must be X0,Y0,X1,Y1 with X0<=X1 and Y0<=Y1: {text!r}")
+    return parts
+
+
+def box_cands(box: list[int], step: int = 1) -> list[list[int]]:
+    """BUG-410: the world tiles of a box, row by row, every STEP-th in each direction."""
+    if step < 1:
+        raise ValueError("--step must be 1 or more")
+    return [[x, y] for y in range(box[1], box[3] + 1, step) for x in range(box[0], box[2] + 1, step)]
+
+
 def parse_site(text: str) -> list[int]:
     """'26,10' or '26,10,6,6' -> ints (world tile, optional local tile 0-15)."""
     parts = [int(p) for p in text.split(",")]
@@ -74,7 +100,7 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
               tiles: bool | None = None, now: float | None = None, save: str | None = None,
               entry: str | None = None, stock: bool = True, world_folder: str | None = None,
               portable: bool | None = None, hover: bool = False, here: bool = False,
-              explore_first: str | None = None, prior=None, name: str | None = None) -> dict:
+              explore_first: str | None = None, prior=None, name: str | None = None, sweep: int | None = None) -> dict:
     spec = {"v": 2, "id": run_id or f"{mode}{int(now if now is not None else time.time())}", "mode": mode}
     if mode == "embark" and here:
         mode = spec["mode"] = "here"           # BUG-250: the rectangle on the screen, gated on earlier reads
@@ -118,6 +144,15 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
             spec["tiles"] = True        # hover all 16 tiles of each rectangle (the panel shows one tile)
         if hover:
             spec["hover"] = True        # BUG-247: 16 hovered panels per candidate, no rectangle placed
+        if sweep is not None:           # BUG-410: a pre-rank: SWEEP tiles hovered per world tile, compact rows
+            if sweep not in SWEEP_SAMPLES:
+                raise ValueError(f"--sample must be one of {list(SWEEP_SAMPLES)}: {sweep!r}")
+            if tiles:
+                raise ValueError("a sweep hovers a few tiles by itself: no --tiles")
+            if len(cands) > SWEEP_MAX:
+                raise ValueError(f"a sweep reads at most {SWEEP_MAX} world tiles per run ({len(cands)} asked): use --step "
+                                 "or a smaller --box")
+            spec["hover"], spec["sweep"] = True, sweep
     elif mode in ("embark", "here"):
         bad = sorted(set(waive) - set(WAIVABLE))
         if bad:
@@ -171,7 +206,7 @@ def prior_rows(out: Path, files: int = PRIOR_FILES, rows: int = PRIOR_ROWS) -> l
             continue
         res = doc.get("results") if isinstance(doc, dict) else None
         for r in res if isinstance(res, list) else []:
-            if isinstance(r, dict) and isinstance(r.get("rec"), dict):
+            if isinstance(r, dict) and isinstance(r.get("rec"), dict) and not r.get("sweep"):
                 got.append({k: r.get(k) for k in ("tag", "emb", "size", "rec", "parts", "hover") if r.get(k) is not None})
                 if len(got) >= rows:
                     return got
@@ -257,24 +292,70 @@ def water_points(rows: list[dict]) -> list[tuple[int, int, str]]:
     return pts
 
 
+def brook_geometry(r: dict) -> dict | None:
+    """BUG-409: the brook/river tiles a row saw against its rectangle: {n inside, core = not on the outer ring, d2 = twice
+    the Chebyshev tile distance of the nearest one from the rectangle's centre, out = tiles outside it}; None without
+    tile positions. A hover row has no size: the 4x4 the hover grid covers (= steps.lua water_geometry)."""
+    rec = r.get("rec") if isinstance(r.get("rec"), dict) else {}
+    tl = rec.get("tiles") if isinstance(rec.get("tiles"), dict) else {}
+    at = tl.get("water_at")
+    b = _box(r)
+    if not (isinstance(at, list) and at and b):
+        return None
+    n = core = out = 0
+    d2 = None
+    for p in at:
+        if not (isinstance(p, list) and len(p) == 2):
+            continue
+        x, y = p
+        if not (b[0] <= x <= b[2] and b[1] <= y <= b[3]):
+            out += 1
+            continue
+        n += 1
+        if b[0] < x < b[2] and b[1] < y < b[3]:
+            core += 1
+        d = max(abs(2 * x - (b[0] + b[2])), abs(2 * y - (b[1] + b[3])))
+        d2 = d if d2 is None else min(d2, d)
+    return {"n": n, "core": core, "d2": d2, "out": out}
+
+
 def brook_text(r: dict, pts: list[tuple[int, int, str]]) -> str:
-    """' brook=in (stream)', ' brook=5 tiles at 122,170 (scan1-3)' or ' brook=none seen'; '' without a record."""
+    """' brook=in (stream) 3 tiles, nearest 0.5 tiles (~12 steps) from the centre', ' brook=EDGE ONLY (brook) ...' (BUG-409:
+    only on the outer ring: it may lie at the map edge, i1 18,22 walked 95 steps), ' brook=5 tiles at 122,170 (scan1-3)'
+    or ' brook=none seen'; '' without a record."""
     rec = r.get("rec")
     if not isinstance(rec, dict):
         return ""
     if rec.get("water"):
-        return f" brook=in ({rec['water']})"
+        g = brook_geometry(r)
+        if g is None:
+            return f" brook=in ({rec['water']}) (tile positions not read: scan --tiles)"
+        if g["n"] == 0:
+            return f" brook=OUTSIDE the rectangle ({rec['water']}, {g['out']} tile(s) beyond it)"
+        near = f"{g['n']} tile(s), nearest {g['d2'] / 2:g} tiles (~{g['d2'] * TILE_STEPS // 2} steps) from the centre"
+        if g["core"] == 0:
+            return f" brook=EDGE ONLY ({rec['water']}) {near}"
+        return f" brook=in ({rec['water']}) {near}"
     b = _box(r)
     if not b:
         return ""
     best = None
     for x, y, tag in pts:
         d = max(max(0, b[0] - x, x - b[2]), max(0, b[1] - y, y - b[3]))
-        if best is None or d < best[0]:
+        if d <= BROOK_NEAR and (best is None or d < best[0]):
             best = (d, x, y, tag)
     if best is None:
         return " brook=none seen"
     return f" brook={best[0]} tiles at {best[1]},{best[2]} ({best[3]})"
+
+
+def aquifer_text(r: dict) -> str:
+    """BUG-411: ' aq=heavy (tiles differ, best none)' when the merged hovered tiles disagree (the row shows the worst)."""
+    rec = r.get("rec") if isinstance(r.get("rec"), dict) else {}
+    tl = rec.get("tiles") if isinstance(rec.get("tiles"), dict) else {}
+    if tl.get("aq_best") and rec.get("aquifer"):
+        return f" aq={rec['aquifer']} (tiles differ, best {tl['aq_best']})"
+    return ""
 
 
 def best_compromise(rows: list[dict]) -> str | None:
@@ -304,7 +385,56 @@ def best_compromise(rows: list[dict]) -> str | None:
     return f"  best compromise: {r['tag']} score {r.get('score')} fails {lacks}: {cmd}"
 
 
-def summarize(doc: dict | None) -> list[str]:
+def rank_key(r: dict) -> tuple:
+    """BUG-410: best first: verdict, then fewest failed criteria, fewest unknown, highest score."""
+    return (ORDER.get(r.get("verdict"), 3), len(r.get("fails") or []), len(r.get("unknown") or []),
+            -(r.get("score") or 0), str(r.get("tag")))
+
+
+def rank_lines(rows: list[dict], top: int = 8) -> list[str]:
+    """BUG-410: the pre-rank of a sweep: counts, the reasons of the rejects, the best `top` world tiles and the scan command
+    that reads their 16 tiles each."""
+    sw = sorted((r for r in rows if r.get("sweep") and isinstance(r.get("world"), list)), key=rank_key)
+    if not sw:
+        return ["  rank: no sweep rows"]
+    verdicts = {v: sum(1 for r in sw if r.get("verdict") == v) for v in ORDER}
+    lines = [f"  pre-rank: {len(sw)} world tile(s) read: " + ", ".join(f"{v} {n}" for v, n in verdicts.items())]
+    why: dict[str, int] = {}
+    for r in sw:
+        for f in r.get("fails") or []:
+            why[f] = why.get(f, 0) + 1
+    if why:
+        lines.append("  fails: " + ", ".join(f"{k} {n}" for k, n in sorted(why.items(), key=lambda kv: (-kv[1], kv[0]))))
+    best = sw[:max(1, top)]
+    for i, r in enumerate(best, 1):
+        rec = r.get("rec") if isinstance(r.get("rec"), dict) else {}
+        w = r["world"]
+        lines.append(f"  {i}. {w[0]},{w[1]} {r.get('verdict')} {r.get('score')} fail={','.join(r.get('fails') or []) or '-'}"
+                     f" warn={','.join(r.get('warns') or []) or '-'} water={rec.get('water') or '-'}"
+                     f" aquifer={rec.get('aquifer') or '-'} goblins={rec.get('goblins') or '-'}")
+    lines.append("  next: python tools/embark/embark.py scan " + " ".join(f"{r['world'][0]},{r['world'][1]}" for r in best)
+                 + " --hover   (all 16 tiles per site; a sweep only samples, the popup of a placed rectangle decides)")
+    return lines
+
+
+def last_sweep(out: Path) -> dict | None:
+    """BUG-410: the newest finished result file that holds sweep rows (rank --last)."""
+    try:
+        paths = sorted(out.glob("result-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    for p in paths:
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        res = doc.get("results") if isinstance(doc, dict) else None
+        if isinstance(res, list) and any(isinstance(r, dict) and r.get("sweep") for r in res):
+            return doc
+    return None
+
+
+def summarize(doc: dict | None, top: int = 8) -> list[str]:
     if not doc:
         return ["no status (is DF running and the run started?)"]
     lines = [f"{doc['id']}: {doc['state']} at {doc.get('step') or '-'} ({doc.get('i')}/{doc.get('n')}) {doc.get('msg', '')}"]
@@ -312,13 +442,19 @@ def summarize(doc: dict | None) -> list[str]:
         lines.append(f"  fort name: {doc['fort']}")
     res = doc.get("results")
     rows = sorted(res, key=lambda r: (ORDER.get(r.get("verdict"), 3), -r.get("score", 0))) if isinstance(res, list) else []
+    if any(r.get("sweep") for r in rows):   # BUG-410: one line per world tile would be hundreds
+        lines.extend(rank_lines(rows, top))
+        rows = [r for r in rows if not r.get("sweep")]
     wpts = water_points(rows)
     for r in rows:
         w, e, s = r.get("world") or ["?", "?"], r.get("emb") or ["?", "?"], r.get("size") or ["?", "?"]
         lines.append(f"  {r['tag']}: world {w[0]},{w[1]} rect {e[0]},{e[1]} {s[0]}x{s[1]} -> {r['verdict']} {r.get('score')}"
                      f" fail={','.join(r.get('fails') or []) or '-'} warn={','.join(r.get('warns') or []) or '-'}"
-                     f" unknown={','.join(r.get('unknown') or []) or '-'}" + brook_text(r, wpts)
+                     f" unknown={','.join(r.get('unknown') or []) or '-'}" + brook_text(r, wpts) + aquifer_text(r)
                      + (" (hover read, no rectangle placed)" if r.get("hover") else ""))
+    if any(r.get("hover") for r in rows):   # BUG-411
+        lines.append("  note: a hover row merges the WORST aquifer and the DEEPEST soil of its hovered tiles, but covers "
+                     "only the tiles it hovered; the rectangle you place may differ: its Confirm popup (embark gate) decides")
     best = best_compromise(rows)
     if best:
         lines.append(best)
@@ -471,6 +607,14 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--tiles", action="store_true", help="read the panel on all 16 tiles of each rectangle")
     sp.add_argument("--hover", action="store_true", help="BUG-247: read 16 hovered panels per site without placing "
                                                          "a rectangle (when the rectangle does not follow the mouse)")
+    sp = sub.add_parser("rank", help="BUG-410: pre-rank the world: a hover sweep (few panels per world tile, vanilla "
+                                     "UI only) over a box of world tiles, then the best N tiles to scan")
+    sp.add_argument("--box", type=parse_box, help="X0,Y0,X1,Y1 world tiles, inclusive (at most 400 after --step)")
+    sp.add_argument("--step", type=int, default=1, help="read every STEP-th world tile (default 1)")
+    sp.add_argument("--sample", type=int, default=4, choices=SWEEP_SAMPLES,
+                    help="panels hovered per world tile (default 4: the corners of the 4x4; ~5 s + 1.5 s each, a guess)")
+    sp.add_argument("--top", type=int, default=8, help="how many tiles to propose (default 8)")
+    sp.add_argument("--last", action="store_true", help="rank the newest finished sweep again (no DF call)")
     sp = sub.add_parser("save-as", help="BUG-250: Esc menu > 'Save and continue playing' under the name NAME")
     sp.add_argument("name", help="the new save folder name (letters, digits, space, _ -)")
     sp.add_argument("--no-post", action="store_true", help="do not post the Esc key to DF's window (press it yourself)")
@@ -504,20 +648,32 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "screen":
         print(call(["screen"] + ([a.name] if a.name else [])).rstrip())
         return 0
+    if a.cmd == "rank" and a.last:   # BUG-410: no DF call
+        doc = last_sweep(out)
+        print("\n".join(rank_lines(doc["results"], a.top) if doc else ["  rank: no finished sweep result in " + str(out)]))
+        return 0 if doc else 1
     here = getattr(a, "here", False)
     try:
-        spec = make_spec("saveas" if a.cmd == "save-as" else a.cmd, world=getattr(a, "world", None),
-                         cands=getattr(a, "sites", None),
-                         site=getattr(a, "site", None), waive=getattr(a, "waive", ()),
-                         accept=getattr(a, "accept", ()), reason=getattr(a, "reason", None),
-                         play_now=getattr(a, "play_now", False), allow_unspent=getattr(a, "allow_unspent", False),
-                         tiles=(True if getattr(a, "tiles", False) else False if getattr(a, "no_tiles", False)
-                                else None),
-                         save=getattr(a, "save", None), entry=getattr(a, "entry", None),
-                         stock=not getattr(a, "no_stock", False), world_folder=getattr(a, "world_folder", None),
-                         portable=getattr(a, "portable", None), hover=getattr(a, "hover", False), here=here,
-                         explore_first=getattr(a, "explore_first", None),
-                         prior=prior_rows(out) if here else None, name=getattr(a, "name", None))
+        if a.cmd == "rank":   # BUG-410
+            if not a.box:
+                ap.error("rank needs --box X0,Y0,X1,Y1 (or --last)")
+            cands = box_cands(a.box, a.step)
+            spec = make_spec("scan", cands=cands, hover=True, sweep=a.sample)
+            if a.timeout == 1800:
+                a.timeout = max(1800.0, 2 * len(cands) * (SWEEP_SECONDS[0] + SWEEP_SECONDS[1] * a.sample))
+        else:
+            spec = make_spec("saveas" if a.cmd == "save-as" else a.cmd, world=getattr(a, "world", None),
+                             cands=getattr(a, "sites", None),
+                             site=getattr(a, "site", None), waive=getattr(a, "waive", ()),
+                             accept=getattr(a, "accept", ()), reason=getattr(a, "reason", None),
+                             play_now=getattr(a, "play_now", False), allow_unspent=getattr(a, "allow_unspent", False),
+                             tiles=(True if getattr(a, "tiles", False) else False if getattr(a, "no_tiles", False)
+                                    else None),
+                             save=getattr(a, "save", None), entry=getattr(a, "entry", None),
+                             stock=not getattr(a, "no_stock", False), world_folder=getattr(a, "world_folder", None),
+                             portable=getattr(a, "portable", None), hover=getattr(a, "hover", False), here=here,
+                             explore_first=getattr(a, "explore_first", None),
+                             prior=prior_rows(out) if here else None, name=getattr(a, "name", None))
     except ValueError as e:
         ap.error(str(e))
     if spec["mode"] == "saveas" and (df_dir() / "save" / spec["name"]).exists():
