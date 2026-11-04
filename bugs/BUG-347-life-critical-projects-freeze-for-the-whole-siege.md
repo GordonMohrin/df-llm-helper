@@ -28,7 +28,8 @@ with a tile outside says so in the row: `frozen: 9/11 tiles off Kern+` (status, 
 (S.life, runtime).
 
 ## Tests
-`tests/lua/test_bug347_life_siege.lua` (3: the hospital inside the alert burrow digs, a bedroom and a hospital outside stay
+`tests/lua/test_bug347_life_siege.lua` (4: review pass 2: an alert burrow switch measures again inside LIFE_TTL, a BREACH
+row says plain `frozen`; the hospital inside the alert burrow digs, a bedroom and a hospital outside stay
 frozen with the count; farms only in a famine, the cistern always, BREACH freezes; no civ alert: Kern+, ALERT runs the hospital).
 All fail on 14ff5a3.
 
@@ -36,7 +37,15 @@ All fail on 14ff5a3.
 A siege with a hospital, cistern or farm project (famine) whose tiles lie in Kern+: the row leaves `frozen` and the project digs;
 one outside: `frozen: N/M tiles off Kern+`.
 
+Review pass 2: the measure (S.life) is taken again when the alert burrow (Kern+ <-> Tiefe+) or the mode changes, and a row in
+BREACH/DRILL (where life_ok is not called) no longer shows the tile count of an earlier SIEGE measure (plain `frozen`).
+
 ## Open
+Not closed for the reported incident: hospital blueprints (dfpilot/bp/rooms.py:92-98, `_finish`) add the room to Kern+ only in
+their LAST stage (`burrow`), so a newly placed hospital's dig/build stages normally lie outside Kern+ and stay frozen in a SIEGE,
+as the i2 hospital c1a1a510be3991ea01 did; and while the civ alert sounds on Tiefe+ (i2 for most of the siege) only Tiefe+
+counts, so a Kern+ hospital stays frozen too. This fix would likely not have saved patient 26739. FR-BUGS y388-389 also shows
+patients dying of thirst with `hospital ok`, which is a care/water problem this bug does not touch.
 The i2 hospital's dig tiles (103-108,104-110,125) may lie outside Kern+ until its own last stage (`burrow`: `a{name=Kern+}`)
 adds them; such a project stays frozen (the row says how many tiles). Painting the work tiles into the alert burrow first would
 let it run, but changes seal's audited burrow (a way out could open): left to a separate decision.

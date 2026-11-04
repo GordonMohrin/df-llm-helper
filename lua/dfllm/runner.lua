@@ -2912,9 +2912,11 @@ function Q.life_ok(K, P, d)
   if not life or type(d) ~= 'table' or P.stage >= #d.stages then return false end
   local t = now(K)
   S.life = S.life or {}
-  local c = S.life[P.id]
-  if c and c.si == P.stage and t >= c.t and t - c.t < M.LIFE_TTL then return c.ok, c.why end
   local bs, name = Q.life_burrows(K)
+  local m = K.mode()
+  -- a switch of the alert burrow (Kern+ <-> Tiefe+) or of the mode measures again
+  local c = S.life[P.id]
+  if c and c.si == P.stage and c.bn == name and c.m == m and t >= c.t and t - c.t < M.LIFE_TTL then return c.ok, c.why end
   local ok, why = false, nil
   if #bs == 0 then why = 'no alert burrow'
   else
@@ -2936,7 +2938,7 @@ function Q.life_ok(K, P, d)
     ok = n > 0 and out == 0
     if not ok then why = string.format('%d/%d tiles off %s', out, n, tostring(name)) end
   end
-  S.life[P.id] = {t = t, si = P.stage, ok = ok, why = why}
+  S.life[P.id] = {t = t, si = P.stage, ok = ok, why = why, bn = name, m = m}
   return ok, why
 end
 
@@ -4011,7 +4013,8 @@ function rows(K)
       if not ok then
         b = 'frozen'
         local lw = S.life and S.life[P.id]                        -- BUG-347: life support with tiles off the burrow
-        if lw and lw.si == P.stage and lw.why then b = 'frozen: ' .. lw.why end
+        -- only a measure of this mode (BREACH/DRILL freeze everything and never measure: no stale tile count)
+        if lw and lw.si == P.stage and lw.why and lw.m == K.mode() then b = 'frozen: ' .. lw.why end
       elseif pw then b = 'paused: ' .. pw
       elseif S.active and not S.active[P.id] then
         b = yd and string.format('no progress %d d: slot yielded', yd) or behind

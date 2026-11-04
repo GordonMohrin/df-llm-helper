@@ -712,7 +712,7 @@ end) end)
 -- BUG-348 (Run 15 Guildcleans, i2): goblin 24649 stood at 1,136,117 (114 tiles out) for years; every new invasion made
 -- it count again (BUG-065's 'another hostile is in sight'), the newcomers died, the lone static goblin held SIEGE and
 -- lockdown 11-13 more days each time (LOCKDOWN_END limit 'harmless: inv 24649 ... (114 tiles)', 4 times)
-local function cleared_then_newcomer(tag)
+local function cleared_then_newcomer(tag, before)
   local W = setup{tag = tag, manifest = false, cfg = CONFINE}
   raws()
   W.move(2, 100, 20, Z)
@@ -723,6 +723,7 @@ local function cleared_then_newcomer(tag)
   W.K.cfg.reflex = {v = 2, confine = {max_days = 30, offer_days = 1}}   -- the next lockdown ends by its own clocks
   W.move(2, 60, 71, Z)                                   -- the woodcutter back inside: the gremlin is far now
   S.run(W, 200)
+  if before then before(W) end
   add(W, S.inv(301, 150, 30, Z), GOB)                    -- a newcomer
   S.run(W, 120)
   T.eq(W.state().alarm.lock, 1, 'the newcomer: a lockdown, the cleared gremlin counts again')
@@ -744,6 +745,55 @@ T.test('BUG-348: a cleared harmless intruder a newcomer made count again is clea
     T.eq(f[300], true, 'threat counts it for nothing again (its SIEGE quiet clock runs)')
     S.run(W, 6 * 1200)
     T.eq({#events(W, 'LOCKDOWN_END'), W.state().alarm.lock}, {2, 0})
+  end)
+end)
+
+-- verifier pass 2: the census lists only the sense LIST_MAX (40) nearest hostiles; i2's long siege had 40 in sight, so
+-- the far static goblin was the first cut. It was never noted (only listed ones were) and a noted one was forgotten
+-- RC_KEEP ticks after it was noted, though the army kept it off the list the whole time
+T.test('BUG-348: an army of more nearer hostiles than the census lists keeps the cut-off cleared one noted, for longer ' ..
+       'than RC_KEEP; once the army is gone it is listed, its spot taken, and it is cleared again', function()
+  with_sortie(function()
+    local sense, lmax
+    local ok, err = pcall(function()
+      local W = cleared_then_newcomer('b348c', function(W)
+        sense = require('dfllm.sense')                   -- the instance setup loaded
+        lmax, sense.LIST_MAX = sense.LIST_MAX, 2                               -- stands in for 40: two nearer goblins fill the list
+        W.move(2, 110, 85, Z)                            -- the census sorts by the distance to a citizen outside Kern+
+        S.run(W, 400)
+        add(W, S.inv(302, 110, 40, Z), GOB)              -- 45 tiles of him (gremlin 65): nearer, not near
+        add(W, S.inv(303, 111, 41, Z), GOB)
+      end)
+      local p = json.decode(W.persist_raw['dfllm.m.reflex'])
+      T.eq({#p.far.rc, p.far.rc[1].id, p.far.rc[1].x}, {1, 300, nil}, 'old code: the unlisted gremlin was never noted')
+      S.run(W, require('dfllm.reflex').RC_KEEP + 600)    -- the army stays: the gremlin stays off the list
+      p = json.decode(W.persist_raw['dfllm.m.reflex'])
+      T.eq(#p.far.rc, 1, 'kept while the list is cut, not forgotten after RC_KEEP')
+      for _, id in ipairs({301, 302, 303}) do W.kill(id); W.event('UNIT_DEATH', {unit = id}) end
+      S.run(W, 400)
+      T.ok(logged(W, 'no other hostile in sight: 1 harmless intruder that stood still cleared again: inv 300 at 110,20,10'),
+           'cleared again')
+      p = json.decode(W.persist_raw['dfllm.m.reflex'])
+      T.eq({p.far.ids, p.far.hl, #p.far.rc}, {{300}, {300}, 0})
+    end)
+    if sense then sense.LIST_MAX = lmax end
+    assert(ok, err)
+  end)
+end)
+
+T.test('BUG-348: a noted one that stays in sight is not forgotten after RC_KEEP (its time is refreshed while listed)',
+       function()
+  with_sortie(function()
+    local W = cleared_then_newcomer('b348d')
+    S.run(W, require('dfllm.reflex').RC_KEEP + 600)      -- a long siege: the newcomer and the gremlin both in sight
+    W.unit(300)._m.hidden = true                         -- one census without it (a visibility flicker)
+    S.run(W, 60)
+    W.unit(300)._m.hidden = nil
+    local p = json.decode(W.persist_raw['dfllm.m.reflex'])
+    T.eq(#p.far.rc, 1, 'old code: forgotten at the first census without it, RC_KEEP ticks after it was noted')
+    W.kill(301); W.event('UNIT_DEATH', {unit = 301})
+    S.run(W, 200)
+    T.ok(logged(W, 'cleared again: inv 300 at 110,20,10'), 'cleared again')
   end)
 end)
 

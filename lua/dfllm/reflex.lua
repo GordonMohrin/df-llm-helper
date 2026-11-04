@@ -649,32 +649,44 @@ end
 -- (st.far.rc: id, where it stood, ig); once no hostile but them (and the still cleared) is in sight, each that stands
 -- within RC_MOVE tiles of that spot and is not near (lockdown_near) is cleared again at once (far.ids + far.hl, far.ig
 -- as before). One that moved or came near stays counted; one out of sight longer than RC_KEEP ticks is forgotten.
+-- Every cleared one is noted, also one the census list (sense LIST_MAX nearest, a far one is cut first) leaves out: its
+-- spot is taken when it is next listed; r.t is refreshed whenever it is listed, and while the list is cut (h.vis > #list)
+-- an unlisted one is unknown, not out of sight: it is kept (a big army must not make it forgotten).
 M.RC_MOVE = 2              -- tiles (Chebyshev) a re-armed cleared unit may stand off its spot and still be static
 M.RC_KEEP = 2400           -- ticks a re-armed cleared unit out of sight is remembered
 
 local function rc_note(list, now)
   st.far.rc = st.far.rc or {}
-  local have = {}
+  local have, by = {}, {}
   for _, r in ipairs(st.far.rc) do have[r.id] = true end
-  for _, e in ipairs(list) do
-    if rt.hlset[e.id] and not have[e.id] and int(e.x) and int(e.y) and int(e.z) then
-      have[e.id] = true
-      st.far.rc[#st.far.rc + 1] = {id = e.id, x = e.x, y = e.y, z = e.z, t = now, ig = rt.igset[e.id] and 1 or nil}
-    end
+  for _, e in ipairs(list) do if int(e.x) and int(e.y) and int(e.z) then by[e.id] = e end end
+  local ids = {}
+  for id in pairs(rt.hlset) do if not have[id] then ids[#ids + 1] = id end end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local e = by[id] or {}                     -- not listed (cut off the census list): its spot is taken when listed
+    st.far.rc[#st.far.rc + 1] = {id = id, x = e.x, y = e.y, z = e.z, t = now, ig = rt.igset[id] and 1 or nil}
   end
   while #st.far.rc > M.FAR_MAX do table.remove(st.far.rc, 1) end
   dirty = true
 end
 
 -- rs = {[id] = rc entry}: entries dropped here leave it (they count like any other hostile)
-local function rc_scan(K, list, ap, fs, rs, now)
+local function rc_scan(K, list, ap, fs, rs, now, cut)
   local others = false
   for _, e in ipairs(list) do if not fs[e.id] and not rs[e.id] then others = true; break end end
   local keep, back = {}, {}
+  local changed = false
   for _, r in ipairs(st.far.rc) do
     local a = ap[r.id]
-    if a then
+    if a and not int(r.x) then                 -- noted while cut off the list: this is its spot
+      r.x, r.y, r.z, r.t, changed = a.e.x, a.e.y, a.e.z, now, true
+      keep[#keep + 1] = r
+    elseif a then
       local e = a.e
+      -- seen: its out-of-sight time starts again (saved at most every RC_KEEP/4 ticks, not every census)
+      if now - (int(r.t) or now) >= M.RC_KEEP / 4 or now < (int(r.t) or now) then changed = true end
+      r.t = now
       local mv = math.max(math.abs(e.x - r.x), math.abs(e.y - r.y), math.abs(e.z - r.z))
       if mv > M.RC_MOVE or a.near or a.unknown then
         rs[r.id] = nil
@@ -682,10 +694,10 @@ local function rc_scan(K, list, ap, fs, rs, now)
               mv > M.RC_MOVE and string.format('moved %d tiles', mv) or (a.near and 'came near' or 'has no distance'))
       elseif others then keep[#keep + 1] = r
       else back[#back + 1] = {r = r, e = e, d = a.d} end
-    elseif now >= (int(r.t) or now) and now - (int(r.t) or now) < M.RC_KEEP then keep[#keep + 1] = r
+    elseif cut or (now >= (int(r.t) or now) and now - (int(r.t) or now) < M.RC_KEEP) then keep[#keep + 1] = r
     else rs[r.id] = nil end
   end
-  local changed = #keep ~= #st.far.rc
+  changed = changed or #keep ~= #st.far.rc
   st.far.rc = keep
   if #back > 0 then
     local have, hl, ig = {}, {}, {}
@@ -745,7 +757,7 @@ local function far_scan(K, h, now)
   -- BUG-348: the ones a newcomer made count again (st.far.rc) are cleared again once nobody else is in sight
   local rs = {}
   for _, r in ipairs(st.far.rc or {}) do rs[r.id] = r end
-  if next(rs) then rc_scan(K, list, ap, fs, rs, now); fs = rt.fset end
+  if next(rs) then rc_scan(K, list, ap, fs, rs, now, (h.vis or 0) > #list); fs = rt.fset end
   if next(rt.hlset) then                  -- BUG-065: any other hostile in sight and the cleared ones count again
     local others = false
     for _, e in ipairs(list) do if not fs[e.id] and not rs[e.id] then others = true; break end end
@@ -2152,8 +2164,8 @@ local function offer_step(K, h, now)
   if cs.hl == 1 then
     q = string.format('harmless lone intruder %s holds the lockdown %s for %s days (it ends by itself after %d): %s',
                       cause_txt(cs), hd.why, days, c.max_days,
-                      cmd and string.format('send squad %s (%d soldiers)%s: %s', key, n,
-                                            adv and (', ' .. adv.txt) or '', cmd) or
+                      cmd and string.format('send squad %s (%d soldiers): %s%s', key, n, cmd,
+                                            adv and (' (' .. adv.txt .. ')') or '') or
                       'no squad to send; wait for the limit')
   else
     q = string.format('dangerous %s keeps the lockdown %s for %s days (limit %d days, it stays while this one is near): %s',
@@ -2317,8 +2329,8 @@ local function lone_step(K, h, now)
       local q = string.format('harmless lone %s %d (%s) at %d,%d,%d has held the %s for %s days%s; %s', e.k == 'inv' and 'inv' or e.k,
                               e.id, race, e.x, e.y, e.z, mode, NUM.dec(age / 1200),
                               kl and (kl.ok and ('; kernel kill order: ' .. kl.msg) or ('; kernel kill order refused: ' .. kl.msg)) or '',
-                              cmd and string.format('send squad %s (%d soldiers)%s: %s', key, n,
-                                                    adv and (', ' .. adv.txt) or '', cmd) or 'no squad to send')
+                              cmd and string.format('send squad %s (%d soldiers): %s%s', key, n, cmd,
+                                                    adv and (' (' .. adv.txt .. ')') or '') or 'no squad to send')
       st.cf = st.cf or {}
       st.cf.k, dirty = CAD.mark(T, pic.ids, {tok}), true
       local d = {id = 'kill_lone_intruder', q = q:sub(1, 200), unit = e.id, pos = {e.x, e.y, e.z}, race = race,
@@ -2575,9 +2587,11 @@ function M.init(K)
         if int(id) and inh[int(id)] then st.far.ig[#st.far.ig + 1] = int(id) end
       end
       for _, r in ipairs(type(f.rc) == 'table' and f.rc or {}) do      -- BUG-348: counted again by a newcomer
-        if type(r) == 'table' and int(r.id) and int(r.x) and int(r.y) and int(r.z) and #(st.far.rc or {}) < M.FAR_MAX then
+        local spot = type(r) == 'table' and int(r.x) and int(r.y) and int(r.z)   -- none yet: noted while cut off the list
+        if type(r) == 'table' and int(r.id) and (spot or r.x == nil) and #(st.far.rc or {}) < M.FAR_MAX then
           st.far.rc = st.far.rc or {}
-          st.far.rc[#st.far.rc + 1] = {id = int(r.id), x = int(r.x), y = int(r.y), z = int(r.z), t = int(r.t) or 0,
+          st.far.rc[#st.far.rc + 1] = {id = int(r.id), x = spot and int(r.x), y = spot and int(r.y), z = spot and int(r.z),
+                                       t = int(r.t) or 0,
                                        ig = int(r.ig) == 1 and 1 or nil}
         end
       end

@@ -87,4 +87,26 @@ T.test('BUG-347: no civ alert sounding: Kern+ (manifest role kern) is the burrow
   T.ok(dug(W3)['10,10'], 'old code: a living project, frozen in ALERT')
 end)
 
+-- verifier pass 2: the S.life measure (LIFE_TTL 1200) is taken again when the alert burrow switches (Kern+ <-> Tiefe+),
+-- and a BREACH row does not show the tile count measured in the SIEGE before it
+T.test('BUG-347: an alert burrow switch measures again at once; a BREACH row says plain frozen, not an old tile count',
+       function()
+  local W = world{tag = 'b347g', alert = true}
+  H.place(W, 'far', H.doc{x = 60, y = 10, tpl = 'hospital', class = 'living'})
+  H.settle(W); W.frame(1); H.settle(W)
+  T.eq(row(W, 'far')[4], 'frozen: 10/10 tiles off Kern+')
+  local tiefe = W.burrow('Tiefe+', {50, 0, 90, 80, 40, 110})
+  df.global.plotinfo.alerts.list = kmock.vec{{burrows = kmock.vec{}}, {burrows = kmock.vec{}}, {burrows = kmock.vec{tiefe.id}}}
+  df.global.plotinfo.alerts.civ_alert_idx = 2            -- the alert now sounds on Tiefe+
+  H.runs(W, 1)                                           -- 600 ticks: inside LIFE_TTL
+  T.ok(dug(W)['60,10'], 'old code: the Kern+ measure held for LIFE_TTL ticks')
+  local W2 = world{tag = 'b347h', alert = true}
+  H.place(W2, 'far', H.doc{x = 60, y = 10, tpl = 'hospital', class = 'living'})
+  H.settle(W2); W2.frame(1); H.settle(W2)
+  T.eq(row(W2, 'far')[4], 'frozen: 10/10 tiles off Kern+')
+  W2.mode = 'BREACH'
+  H.runs(W2, 1)
+  T.eq(row(W2, 'far')[4], 'frozen', 'old code: the SIEGE tile count in a BREACH row')
+end)
+
 T.done()

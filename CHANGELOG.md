@@ -1,5 +1,20 @@
 # CHANGELOG dfpilot
 
+## Run 15 sieges review pass 2: a cut-off cleared goblin is noted and kept, the life measure follows the alert burrow, the command before the advice (BUG-347, BUG-348, 2026-11-04; offline, live-untested)
+- **Why:** review of the first BUG-347/348 fix: census.h.list holds only the 40 nearest hostiles (sense LIST_MAX) and i2's army
+  showed `40 visible`, so the far goblin was cut off the list; reflex rc_note noted only listed ones, and an entry was forgotten
+  RC_KEEP after it was noted (r.t never refreshed) at the first census without it: BUG-348 came back for big invasions. The S.life
+  measure ignored an alert burrow switch, BREACH rows showed an old SIEGE tile count, and the sortie advice stood before the
+  command in the 200-byte d.q.
+- **What changed:** reflex rc_note notes every cleared one (an unlisted one without spot, taken when next listed); rc_scan
+  refreshes r.t while listed and keeps unlisted entries while the list is cut (`h.vis > #list`); persist loads entries without a
+  spot. runner Q.life_ok caches by burrow name and mode, rows show the tile count only for a measure of the current mode. reflex/
+  siege: `send squad A (n soldiers): <cmd> (sortie (not) recommended: ...)`. BUG-347/348 docs: the army-distance claim corrected
+  (not evidenced), BUG-347 Open names the hospital's last-stage burrow and Tiefe+.
+- **Tests (fail on a964058):** test_reflex.lua (+2: an army filling the list beyond RC_KEEP; a listed one missing one census
+  after RC_KEEP), test_bug347_life_siege.lua (+1: alert burrow switch, BREACH row).
+- **Live check:** i2 next big invasion (`40 visible`): after it `cleared again: inv 24649`, no LOCKDOWN_END limit for it.
+
 ## Run 15 sieges: life support runs inside the alert burrow, a static far goblin is cleared again, sortie offers name the armour (BUG-347, BUG-348, 2026-11-04; offline, live-untested)
 - **Why:** i2 Guildcleans: the hospital, stockroom and gallery stood `dig BLOCKED:frozen` through a 160-day siege, patient 26739
   died of thirst (runner.lua allowed: SIEGE ran only defense inside Z3/Z4); goblin 24649, static at 1,136,117 (114 tiles), was

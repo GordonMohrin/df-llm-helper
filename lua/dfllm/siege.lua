@@ -2133,8 +2133,8 @@ local function long_step(K, a, g, now)
   local q = string.format('SIEGE %d days, %d calm: no hostile inside Kern+ or within %d tiles (nearest %d, %d visible)%s; '
                           .. 'attack: %s; else wait (the bridges stay up)', days, (now - st.lc) // M.LG_DAY, c.near, d,
                           a.vis or 0, lifted and back or '',
-                          cmd and string.format('send squad %s (%d soldiers)%s: %s', key, n,
-                                                adv and (', ' .. adv.txt) or '', cmd) or 'no squad to send')
+                          cmd and string.format('send squad %s (%d soldiers): %s%s', key, n, cmd,
+                                                adv and (' (' .. adv.txt .. ')') or '') or 'no squad to send')
   local dd = {id = 'siege_long', q = q:sub(1, 200), days = days, n = d, vis = a.vis or 0, lifted = lifted and 1 or 0,
               to = lifted and tostring(to or '') or nil}
   if e then dd.unit, dd.pos = e.id, {e.x, e.y, e.z} end
