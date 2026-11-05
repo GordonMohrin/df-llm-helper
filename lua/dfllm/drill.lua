@@ -35,6 +35,14 @@
 -- ticks. DRILL_RESULT comes then and says how long the restore took (d.restore, -1: not down in time or cut short) and why
 -- the drill ran (d.why: 'auto: retry', 'inbox:llm'). A bridge not up and not being pulled at T+900 is dropped
 -- (gate.drill_skip): it never rises late while the soldiers walk to their stations.
+-- BUG-493 (Run 16d i4 Trumpetrealms y382-y387, i2 Roadvises: 'cmd drill started' but status 'drill never', P5 waits for the drill,
+-- 'last auto drill failed, bridges not down in time'; 45 drills in i4, none passed): a pass also needs worn >= 90, and the fort had
+-- no metal (worn 20-70 %), so no drill could ever pass, and the drills failed on the mechanics as well: 'up:B1/O1' in 42 of 45
+-- (DRILL did not time its raise like SIEGE/BREACH: the recall streaming over B1 held it for the whole drill, gate.lua BUG-493),
+-- 'not down' = the restore gave the bridges 1200 ticks and the quiet window waited 2400 (gate.QUIET_DRILL). Now: DRILL_RESULT
+-- carries `fails`; a result has `mech = 1` when only the gear is missing (the bridges rose, nobody outside, no double toggle):
+-- readiness `drill_mech_age`, the P5 deliverable 'drill' is met by it (the R2 pass still wants worn >= 90). The retries back off
+-- as before (a month, x2, at most a season).
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')
 
@@ -289,8 +297,13 @@ local function measure(K, now)
     if tk and tk > take then take = tk end
   end
   for _, n in pairs(type(kpi.pullers) == 'table' and kpi.pullers or {}) do pullers = pullers + (int(n) or 0) end
+  -- BUG-493: the mechanics worked when every failure is a gear one (worn, soldiers, the military module)
+  local mech = 1
+  for _, f in ipairs(fails) do
+    if not (f:sub(1, 4) == 'worn' or f == 'military?' or f == 'no_soldiers') then mech = 0 end
+  end
   return {tick = now, pass = #fails == 0 and 1 or 0, raised = raised, worn = math.max(0, math.min(100, worn)),
-          outside = math.max(0, outside), dbl = dbl, fails = fails,
+          outside = math.max(0, outside), dbl = dbl, fails = fails, mech = mech,
           extra = {walking = walking, outer = outer or -1, take = take, pullers = pullers}}
 end
 
@@ -309,7 +322,7 @@ local function finish(K, now)
                                 r.pass == 1 and 'passed' or 'failed', r.raised, x.outer, M.OUTER_GOAL, r.worn, r.outside,
                                 x.walking, r.dbl, fl ~= '' and (' (' .. fl .. ')') or ''),
             d = {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl, why = st.why,
-                 walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers}}
+                 walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers, fails = r.fails, mech = r.mech}}
   if r.pass == 0 and rec.streak_fail == 2 then st.res.fail = {streak = rec.streak_fail, fails = r.fails, fl = fl} end
   st.t0, rt.home, rt.home0 = nil, nil, nil
   st.rs = now
@@ -541,7 +554,7 @@ function M.init(K)
         for i, f in ipairs(type(e.fails) == 'table' and e.fails or {}) do fails[i] = cut(f, 40) end
         rec.last[#rec.last + 1] = {tick = e.tick, pass = e.pass == 1 and 1 or 0, raised = int(e.raised) or -1,
                                    worn = int(e.worn) or 0, outside = int(e.outside) or 0, dbl = int(e.dbl) or 0,
-                                   fails = fails}
+                                   fails = fails, mech = int(e.mech) == 1 and 1 or 0}
       end
     end
   end

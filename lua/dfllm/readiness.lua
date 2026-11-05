@@ -100,14 +100,15 @@ end
 -- the newest passed drill and the newest drill of any result (persist `drill`, written by drill)
 local function drills(K)
   local d = K.persist.get('drill')
-  local pass, last
+  local pass, last, mech
   for _, e in ipairs(type(d) == 'table' and type(d.last) == 'table' and d.last or {}) do
     if type(e) == 'table' and int(e.tick) then
       if not last or e.tick >= last.tick then last = e end
       if e.pass == 1 and (not pass or e.tick >= pass.tick) then pass = e end
+      if (e.pass == 1 or e.mech == 1) and (not mech or e.tick >= mech.tick) then mech = e end    -- BUG-493
     end
   end
-  return pass, last
+  return pass, last, mech
 end
 
 -- army share (%) from D-12 '<low>/<high>' (low below pop 60) and plan.military.pct
@@ -676,8 +677,9 @@ local function evaluate(K, why)
   rt.phold = st.phold
   -- R2
   local f2 = {}
-  local pass, last = drills(K)
+  local pass, last, mech = drills(K)
   rt.pass_tick = pass and pass.tick or nil
+  rt.mech_tick = mech and mech.tick or nil                      -- BUG-493: the newest drill whose bridges worked
   if not pass then f2[#f2 + 1] = 'drill'
   elseif now - pass.tick > M.DRILL_VALID then f2[#f2 + 1] = 'drill_old'
   elseif st.siege and pass.tick < st.siege then f2[#f2 + 1] = 'redrill' end
@@ -1141,6 +1143,7 @@ function M.state(K)
   local a = st.audit
   local r = {lvl = st.lvl or 0, worn = math.max(0, math.min(100, rt.worn or 0)), cv = math.max(0, rt.cv or 0),
              drill_age = rt.pass_tick and math.max(0, now - rt.pass_tick) or -1,
+             drill_mech_age = rt.mech_tick and math.max(0, now - rt.mech_tick) or -1,    -- BUG-493
              audit = {ok = rt.audit_ok or 0, age = a and math.max(0, now - a.tick) or -1,
                       min_traps = a and a.min_traps or 0,
                       -- BUG-043: why readiness' last audit request was refused; what the last audit's snapshot covered

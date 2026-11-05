@@ -157,6 +157,11 @@ M.CFG = {
   -- many times by building destroyers since the player's last order is replaced by a wall + door (BUG-048;
   -- config/reflex.json perimeter.stop_after, 0 = always rebuilt); the bridge queue is looked at daily in quiet PEACE
   stop_after = 2, gates_every = DAY, gq_max = 16, gq_keep = 60 * DAY,
+  -- BUG-491 (Run 16d i4 Trumpetrealms y383-y387: O1 destroyed once, rebuilt, its levers never linked again for 1500 days because
+  -- the fort had no mechanisms; PERIMETER OPEN, the pop ceiling stuck, three cave dragons came through): a lost bridge whose
+  -- levers cannot be linked again (fewer free mechanisms than its links need) is replaced by a wall + door at the FIRST loss
+  -- when nothing can make the mechanisms now (no stone, no Mechanics' workshop), else link_wait ticks after the loss
+  link_wait = 10 * DAY,
   -- BUG-048: a bridge that vanished this many times with no building destroyer in sight (perimeter.vanish_after, 0 =
   -- always rebuilt) is replaced by a wall and a door too, so the rebuild loop has an end
   vanish_after = 3,
@@ -1769,14 +1774,14 @@ end
 
 -- the wall and the door that replace a bridge: the footprint's first row across the way (its shorter side is the way
 -- through; a square one counts as x), walls on all of it but the middle tile of the long side, which gets the door
-function KP.cells(fp)
+function KP.cells(fp, doors)
   local w, h, z, c = fp[4] - fp[1] + 1, fp[5] - fp[2] + 1, fp[3], {}
   if w <= h then
     local mid = fp[2] + (h - 1) // 2
-    for y = fp[2], fp[5] do c[#c + 1] = {fp[1], y, z, y == mid and 'd' or 'Cw'} end
+    for y = fp[2], fp[5] do c[#c + 1] = {fp[1], y, z, (doors or y == mid) and 'd' or 'Cw'} end
   else
     local mid = fp[1] + (w - 1) // 2
-    for x = fp[1], fp[4] do c[#c + 1] = {x, fp[2], z, x == mid and 'd' or 'Cw'} end
+    for x = fp[1], fp[4] do c[#c + 1] = {x, fp[2], z, (doors or x == mid) and 'd' or 'Cw'} end
   end
   return c
 end
@@ -1787,7 +1792,7 @@ function KP.standing(cells)
   for _, c in ipairs(cells) do
     spend(2)
     if not rev(c[1], c[2], c[3]) then return false end
-    local b = c[4] == 'd' and bld_at(c[1], c[2], c[3])
+    local b = bld_at(c[1], c[2], c[3])                  -- BUG-491: a door on a wall cell closes it too (the all-door closure)
     if b and btype(b) == 'Door' and built(b) then
       -- the door stands
     else
@@ -1910,9 +1915,34 @@ end
 -- 'rebuild', or 'replace' and the reason: building destroyers broke the bridge stop_after times since the player's last
 -- answer, it vanished vanish_after times with none in sight, its rebuild was never built (g.force), or the closure is
 -- already under way (g.cl)
+-- BUG-491: why a rebuilt bridge could not get its levers linked again (its links went with the building): nil, or the reason.
+-- A link takes 2 mechanisms and the fort wants 2 linked levers per bridge; economy knows the free mechanisms (mech_free) and
+-- whether anything can make more now (mech_state route 'no stone' / 'no Mechanics' = no). Replaced at once when nothing can
+-- make them, else after CFG.link_wait ticks of waiting for them.
+function KP.nolink(K, g, t)
+  local man = K.manifest()
+  local spec = g.name and type(man.bridges) == 'table' and man.bridges[g.name]
+  local nl = type(spec) == 'table' and type(spec.levers) == 'table' and #spec.levers or 0
+  if nl == 0 then return nil end
+  local need = 2 * math.min(nl, 2)
+  local okf, free = K.call('economy', 'mech_free')
+  if not (okf and int(free)) or free >= need then return nil end
+  local oks, ms = K.call('economy', 'mech_state')
+  local route = oks and type(ms) == 'table' and ms.route or nil
+  if route == 'no stone' or route == 'no Mechanics' then
+    return string.format('its %d levers need %d mechanisms and %d are free (%s)', nl, need, free, route)
+  end
+  if t - (g.t or t) >= CFG.link_wait then
+    return string.format('its levers need %d mechanisms and %d are free after %d days', need, free, CFG.link_wait // DAY)
+  end
+  return nil
+end
+
 function KP.verdict(K, g, stop, van)
   if g.cl then return 'replace', g.why or 'closure under way' end
   if g.force then return 'replace', g.force end
+  local nlw = g.name and KP.nolink(K, g, now_t(K))             -- BUG-491: no mechanisms for its levers: the first loss is enough
+  if nlw then return 'replace', trunc('lost, ' .. nlw, 120) end
   local L = g.name and losses(K, g.name)
   if not L then return 'rebuild' end
   local n, bd = int(L.n) or 0, int(L.bd) or 0
@@ -1932,13 +1962,27 @@ end
 
 -- queue the closure: walls and a door through the runner, built in quiet PEACE only
 function KP.close(K, k, g, t, why)
-  local ok, r1, r2 = K.call('runner', 'repair', KP.cells(g.fp),
+  -- BUG-491 (BUG-458/487 reach check): walls on the footprint must not cut a citizen or a place the citizens need off the main
+  -- walk group; a cut, or a reach the flood cannot prove, makes every cell a door (standing() counts a door on a wall cell)
+  local cells = KP.cells(g.fp)
+  local walls = {}
+  for _, c in ipairs(cells) do if c[4] == 'Cw' then walls[#walls + 1] = {c[1], c[2], c[3]} end end
+  local wc = #walls > 0 and M.wall_cuts(K, walls) or nil
+  local doors = wc ~= nil and (wc.known ~= true or (int(wc.n) or 0) > 0 or wc.partial == true)
+  if doors then
+    cells = KP.cells(g.fp, true)
+    K.log('warn', 'seal: bridge %s: walls on its footprint %s: the closure is %d doors', g.name or k,
+          wc.known ~= true and ('cannot be proven safe (' .. tostring(wc.why) .. ')') or
+          string.format('would cut %d off the main walk group', int(wc.n) or 0), #cells)
+  end
+  local ok, r1, r2 = K.call('runner', 'repair', cells,
                             trunc(string.format('bridge %s replaced by wall + door (%s)', g.name or k, why), 120),
                             {peace = true, closure = true})        -- BUG-081: walls first, the door next, a stuck-door fallback
   if not (ok and r1) then
     K.log('warn', 'seal: bridge %s: wall + door not queued: %s', g.name or k, tostring(r2 or r1))
     return false
   end
+  g.ad = doors and 1 or nil
   g.proj, g.qt, g.cl, g.why, dirty = tostring(r2), t, 1, trunc(why, 120), true
   K.log('info', 'seal: bridge %s at %s replaced by wall + door as %s (%s)', g.name or '?', k, g.proj, why)
   return true
@@ -2004,7 +2048,7 @@ local function gates_pass(K, t, why)
     local g = st.gq[k]
     spend(4)
     local s = piece_state(k, {k = 'bridge', fp = g.fp})
-    if g.cl and KP.standing(KP.cells(g.fp)) then
+    if g.cl and KP.standing(KP.cells(g.fp, g.ad == 1)) then
       KP.done(K, k, g, t, 'wall + door')
       out[k] = 'replaced'
     elseif s == 'ok' then                             -- it stands again (its repair, or by hand)
@@ -2014,6 +2058,16 @@ local function gates_pass(K, t, why)
       KP.done(K, k, g, t, 'walled')
       out[k] = 'walled'
     elseif s == 'gone' then
+      -- BUG-491: the rebuild waits for its project and the mechanisms for its levers do not come (link_wait): the closure instead
+      if g.proj and not g.cl and not g.force and g.name then
+        local nlw = KP.nolink(K, g, t)
+        if nlw then
+          local ok, can = K.call('runner', 'cancel_proj', g.proj)
+          K.log('info', 'seal: lost bridge %s: its rebuild %s is cancelled (%s): %s', g.name, g.proj, nlw,
+                ok and can and 'cancelled' or 'not cancellable')
+          g.force, g.proj, dirty = trunc('lost, ' .. nlw, 120), nil, true
+        end
+      end
       if g.proj and t - (g.qt or t) > CFG.gq_keep then
         K.log('warn', 'seal: lost bridge %s at %s: %s did not build %s in %d days', g.name or '?', k, g.proj,
               g.cl and 'its wall + door' or 'it', CFG.gq_keep // DAY)
@@ -5866,6 +5920,7 @@ function M.init(K)
                   proj = type(g.proj) == 'string' and g.proj:sub(1, 40) or nil, qt = int(g.qt),
                   how = (g.how == 'none' or g.how == 'destroyers') and g.how or nil, cl = int(g.cl) == 1 and 1 or nil,
                   why = type(g.why) == 'string' and g.why:sub(1, 120) or nil, rep = int(g.rep) == 1 and 1 or nil,
+                  ad = int(g.ad) == 1 and 1 or nil,
                   force = type(g.force) == 'string' and g.force:sub(1, 120) or nil}
     end
   end

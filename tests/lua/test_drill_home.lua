@@ -100,7 +100,7 @@ T.test('DRILL_RESULT reports the outer raise time, the lever-job take and the pu
   local keys = {}
   for key in pairs(rec) do keys[#keys + 1] = key end
   table.sort(keys)
-  T.eq(keys, {'dbl', 'fails', 'outside', 'pass', 'raised', 'tick', 'worn'}, 'persist drill: CONTRACTS §10 fields only')
+  T.eq(keys, {'dbl', 'fails', 'mech', 'outside', 'pass', 'raised', 'tick', 'worn'}, 'persist drill: CONTRACTS §10 fields (+ BUG-493 mech)')
 end)
 
 T.done()

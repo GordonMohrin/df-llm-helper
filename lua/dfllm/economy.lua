@@ -7142,6 +7142,13 @@ function M.mech_need(K)
   end
   return lv * M.MECH.per_lever, lv
 end
+-- BUG-491 (seal): what the last plan_mech pass found {need, free, short, route ('ordered' | 'stone' | 'no stone' | 'no Mechanics' |
+-- nil: none short)}; nil before the first pass
+function M.mech_state(K)
+  local m = st.mech
+  if type(m) ~= 'table' then return nil end
+  return {need = m.need or 0, free = m.free or 0, short = m.short or 0, route = m.route}
+end
 function M.plan_mech(K, c, r)
   local need, lv = M.mech_need(K)
   -- BUG-435 (Run 16d i4 Mazelanterns y401: the traps project 'waits for trapparts' 912 days, nobody ordered the mechanisms: only the

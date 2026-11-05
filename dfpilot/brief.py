@@ -685,7 +685,11 @@ def drill_note(ctx, r: dict) -> str:
         return ""
     kind = "auto " if str(_d(e).get("why") or "").startswith("auto") else ""
     low = ", bridges not down in time" if _d(e).get("restore") == -1 else ""
-    return f" [last {kind}drill {fmt_ticks(age)} ago failed{low}]"
+    # BUG-493: what failed (DRILL_RESULT fails), and that the bridges worked when only the gear is short
+    fl = _d(e).get("fails")
+    why = ": " + ", ".join(str(f) for f in fl[:4]) if isinstance(fl, list) and fl else ""
+    mech = "; bridges ok" if _d(e).get("mech") == 1 else ""
+    return f" [last {kind}drill {fmt_ticks(age)} ago failed{why}{mech}{low}]"
 
 
 def pop_items(ctx: Ctx) -> list[tuple[int, str]]:

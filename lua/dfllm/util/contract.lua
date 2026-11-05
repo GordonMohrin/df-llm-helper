@@ -441,6 +441,7 @@ C.STATE_SPEC = obj({
                audit = obj({ok = FLAG, age = int(-1), min_traps = NAT}, {why = str(80), cov = str(40)}),
                fail = arr(str(24), 0, 8)},
               {open = int(-1), ents = arr(str(24), 0, 3), dhold = str(24), dref = NAT,     -- FR-65; BUG-110: drills refused for want of O1/B1
+               drill_mech_age = int(-1),                                  -- BUG-493: the newest drill whose bridges worked
                route = str(60),            -- the last audit's first attacker-route finding (bypass, refuge)
                pd = NAT, pw = str(60),     -- FR-70: days the perimeter has been open (PEACE), and what is open
                pn = NAT,                   -- review fix merge16 (BUG-349): days since the newest opening (<= pd)
