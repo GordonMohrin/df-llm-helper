@@ -248,6 +248,43 @@ T.test('live L6: food low or famine -> surplus animals marked for slaughter (one
   T.eq(m2, {}, 'food plenty: no marks')
 end)
 
+-- BUG-498 (Run 16d i4 Trumpetrealms y383: a Fey mood 'bone x1 none in the fort', butcher.mark took one young cavy and 12 animals stayed because
+-- each race kept its breeding pair; three mood deaths): a mood that needs bone with nothing in stock marks an ADULT (the surplus first, the
+-- most numerous race first), and when only the breeding pairs are left the last adult of a race; pets and war animals never; ANIMAL_MARKED says so
+T.test('BUG-498: a mood needs bone: the surplus adult first, then (only pairs left) the last adult of the largest race; ANIMAL_MARKED names it', function()
+  local function A(id, race, female, adult, extra)
+    local a = {id = id, race = race, female = female, adult = adult ~= false, pet = false, slaughter = false, war = false}
+    for k, v in pairs(extra or {}) do a[k] = v end
+    return a
+  end
+  local function run(herd)
+    local marks = {}
+    local W = world{cit = 53, setup = function(W)
+      F.item(W, 'FOOD', {stack_size = 500, subtype = 1})
+      F.workshop(W, 'Butchers')
+      W.set_census('a', {tick = 0, n = #herd, list = herd})
+      W.act_result('animal_slaughter', function(id, on) marks[#marks + 1] = id; return true, 'marked' end)
+      W.load({name = 'care', every = {ticks = 1200}, reserved = function() return {} end,       -- a strange mood needs 1 bone
+              mood_wants = function() return {bone = 1} end})
+    end}
+    settle(W)
+    days(W, 2)
+    return marks, W
+  end
+  local surplus = {A(10, 1, true, false), A(11, 1, true), A(12, 1, true), A(13, 1, false)}      -- a young cavy first by id, an adult surplus
+  local m1 = run(surplus)
+  T.eq(m1, {12}, 'an adult of the surplus, not the young one (old code: 10)')
+  local pairs_only = {A(20, 1, true), A(21, 1, false), A(22, 2, true), A(23, 2, false), A(24, 2, true, true, {pet = true}),
+                      A(25, 3, true, true, {war = true})}
+  local m2, W2 = run(pairs_only)
+  T.eq(#m2, 1, 'old code: nothing (every race keeps its pair)')
+  T.ok(m2[1] ~= 24 and m2[1] ~= 25, 'never the pet, never the war animal')
+  local hit
+  for _, e in ipairs(W2.find_events('ANIMAL_MARKED')) do if tostring(e.msg):find('marked for slaughter', 1, true) then hit = e end end
+  T.ok(hit and hit.msg:find('last of its breeding pair', 1, true), hit and hit.msg or 'no ANIMAL_MARKED')
+  T.eq({hit.d.need, hit.d.animal}, {'bone', m2[1]})
+end)
+
 local STATUS = 'Autofarm is Active.\nSPELT limit 50 current 32\nMUSHROOM_HELMET_PLUMP limit 50 current 40\n' ..
                'GRASS_TAIL_PIG limit 50 current 0\nDefault: 50\n'
 

@@ -3264,6 +3264,12 @@ local function allowed(K, P, d)
 end
 
 -- seal first (Run 11 siege 8): seal and plug projects before every other, then prio, then age
+-- BUG-497 (Run 16d i4 Trumpetrealms y384: no stone, the explore at 40 % 'set aside, no runner slot' for 1700 days behind bedrooms and
+-- a tavern): while economy.stone_zero holds (S.stone0, set each scheduling pass) an explore project queues with the hospital
+function Q.quarry_first(P)
+  return S.stone0 == true and P ~= nil and P.tpl == 'explore'
+end
+
 local function sorted()
   local r = {}
   for _, P in ipairs(S.pd.list) do if P.done ~= 1 then r[#r + 1] = P end end
@@ -3271,8 +3277,9 @@ local function sorted()
   -- BUG-283: a workshops project with a shop a strange mood waits for runs with the hospital, before the rest
   -- (M.mood_types marks them while care's mood check runs); BUG-306: the mood drink nook sorts with them
   table.sort(r, function(a, b)
-    local sa = SEALS[a.tpl] and 0 or (care == a.id or Q.mood_proj(a)) and 1 or 2
-    local sb = SEALS[b.tpl] and 0 or (care == b.id or Q.mood_proj(b)) and 1 or 2
+    -- BUG-497: with no free boulder in the fort the explore shaft that digs to hard stone runs with the hospital, before the rest
+    local sa = SEALS[a.tpl] and 0 or (care == a.id or Q.mood_proj(a) or Q.quarry_first(a)) and 1 or 2
+    local sb = SEALS[b.tpl] and 0 or (care == b.id or Q.mood_proj(b) or Q.quarry_first(b)) and 1 or 2
     if sa ~= sb then return sa < sb end
     if a.prio ~= b.prio then return a.prio < b.prio end
     if a.created ~= b.created then return a.created < b.created end
@@ -6164,6 +6171,8 @@ local function begin_run(K)
   local okl, errl = pcall(Q.lockout_scan, K, f.c, now(K))  -- BUG-458: own pcall, a fault costs only this announcement
   if not okl then K.log('error', 'runner locked-out scan failed: %s', trunc(errl, 160)) end
   local tasks, n, t, c = {}, 0, now(K), f.c
+  local okz, zero = K.call('economy', 'stone_zero')       -- BUG-497: no free boulder: the quarry dig goes first
+  S.stone0 = okz and zero == true
   local list = sorted()
   for _, P in ipairs(list) do
     local R = S.rt.p[P.id]

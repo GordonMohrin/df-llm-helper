@@ -368,13 +368,35 @@ T.test('BUG-450: a manager with a complete office who validates nothing for 14 d
   local dn = decisions(W, 'manager_stuck')
   T.eq(#dn, 1)
   T.ok(dn[1].msg:find('manager Astesh validates nothing for', 1, true) and dn[1].msg:find('complete office', 1, true), dn[1].msg)
-  T.ok(dn[1].d.cmds[1]:find('inspect what=unit key=', 1, true) and #dn[1].d.cmds == 3, table.concat(dn[1].d.cmds, '|'))
+  T.ok(dn[1].d.cmds[1]:find('inspect what=manager', 1, true) and dn[1].d.cmds[2]:find('inspect what=unit key=', 1, true)
+       and #dn[1].d.cmds == 4, table.concat(dn[1].d.cmds, '|'))     -- BUG-499: the manager's facts first
   T.ok(dn[1].d.days >= 14 and dn[1].d.n >= 1)
+  T.ok(tostring(dn[1].d.cause):find('nothing the kernel can read is wrong', 1, true), 'BUG-499: ' .. tostring(dn[1].d.cause))
   days(W, 6)
   T.eq(#decisions(W, 'manager_stuck'), 1, 'once per mgr_stuck_days (util/cadence)')
   local W2 = world{chair = {128, 74}, table = {127, 74}, plants = 40, mgr_stuck_days = 0}
   days(W2, 18)
   T.eq(#decisions(W2, 'manager_stuck'), 0, 'mgr_stuck_days 0 is off')
+end)
+
+-- BUG-499 (Run 16b i2 Roadvises y373, Run 16a i1 y386: 188 orders, 93 hanging; 'inspect the manager (job, path to the office)' had no command):
+-- inspect what=manager names the manager, his job and place, the office with chair and table, the orders and the findings
+T.test('BUG-499: inspect what=manager: the facts of a manager who validates nothing, the finding "nothing the kernel can read is wrong"', function()
+  local W = world{chair = {128, 74}, table = {127, 74}, plants = 40}
+  days(W, 16)
+  local r = W.inbox('inspect', {what = 'manager'})
+  T.ok(r.ok ~= false, tostring(r.msg))
+  T.ok(r.msg:find('manager Astesh unit 2', 1, true) and r.msg:find('office zone', 1, true), r.msg)
+  T.eq({r.data.office.chair, r.data.office.table}, {1, 1})
+  T.ok(r.data.orders.n >= 1 and r.data.orders.d >= 14, 'the unvalidated orders and their age')
+  T.ok(r.data.causes[1]:find('nothing the kernel can read is wrong', 1, true), r.data.causes[1])
+  T.ok(#r.data.next >= 1)
+  -- a manager in a squad: the cause names it
+  local W2 = world{chair = {128, 74}, table = {127, 74}, plants = 40}
+  W2.unit(2).military = {squad_id = 7}
+  days(W2, 16)
+  local r2 = W2.inbox('inspect', {what = 'manager'})
+  T.ok(r2.data.causes[1]:find('soldier on duty', 1, true) or r2.data.causes[1]:find('squad', 1, true), r2.data.causes[1])
 end)
 
 -- BUG-458 (Run 16d Orbblock y377: the seal's walls left the manager outside, `appoint code=MANAGER` said 'MANAGER has no vacant

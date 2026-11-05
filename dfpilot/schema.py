@@ -844,6 +844,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),
     # BUG-231: manager orders held past orders.bypass_days: the workshop tasks the kernel added ('chair (wood) at 412')
     "MANAGER_BYPASS": ("B", "economy", _d("days:i n:i tasks:s", "why:s")),
+    # BUG-498: a strange mood needs bone / shell / leather and the fort has none: an adult animal was marked for slaughter (last 1: the
+    # last adult of its breeding pair; pets and war animals never)
+    "ANIMAL_MARKED": ("B", "economy", _d("need:s animal:i", "race:s adult:f last:f")),
     # BUG-052: off = why soldiers are off their station ('equip 5, far 2': equip, hurt, level, far, nost)
     "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i off:s")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
@@ -915,7 +918,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
-                                          "offices", "curse", "unit", "items", "cavern"])},
+                                          "offices", "curse", "unit", "items", "cavern", "manager"])},
                    # BUG-137: `key=39052` arrives as an int from the CLI (cmd.parse_kv); a unit id or a name
                    opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),

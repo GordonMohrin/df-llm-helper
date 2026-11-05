@@ -1406,7 +1406,10 @@ local function scan_orders(p)
         end
       else
         local mc = o.material_category
-        if (mc and mc.wood) or df.job_type[o.job_type] == 'MakeCharcoal' then s.used.wood = (s.used.wood or 0) + left end
+        if (mc and mc.wood) or df.job_type[o.job_type] == 'MakeCharcoal' then
+          s.used.wood = (s.used.wood or 0) + left
+          s.xwood = (s.xwood or 0) + left                -- BUG-497: wood other owners' orders want (a seal door goes before them)
+        end
       end
     end
   end
@@ -3246,6 +3249,127 @@ function M.reachable_candidate(K, skip)
   return best
 end
 
+-- BUG-499 (Run 16b i2 Roadvises y373 / Run 16a i1 Syrupobeyed y386: 188 open orders, 93 hanging, 30 brews unvalidated, the manager 'validates
+-- nothing (his office has a chair and a table)' and the one question left, 'inspect the manager (job, path to the office)', had no command):
+-- everything the kernel can read about why a manager validates nothing, in one table: {state (manager_state), unit, job, pos, squad, mood,
+-- out (days outside the citizens' walk group), office {zone, box, chair, table, assigned, walk (a walking path from him to the zone),
+-- required (DF's room value for the post)}, orders {n, d (days), brews, jobs (ManageWorkOrders jobs in the world and their workers)},
+-- causes = {the findings that explain it, most likely first}, next = {the commands}}. Read only.
+function M.manager_facts(K, p, c)
+  local oc = (c or M.conf(K)).office or M.DEFAULTS.office
+  local f = {causes = {}, next = {}, office = json.object{}, orders = json.object{}}
+  local mg = M.manager_state(K)
+  if type(mg) ~= 'table' then
+    f.causes[1] = 'no MANAGER post is open in the fortress (the nobles screen: the mandate/appointment of a manager)'
+    return f
+  end
+  f.state, f.name, f.unit = mg.why, mg.name, mg.unit
+  if mg.why then f.causes[#f.causes + 1] = mg.why end
+  local un = st.unval or {}
+  f.orders.n, f.orders.d = math.tointeger(un.n) or 0, math.tointeger(un.d) or 0
+  f.orders.brews = math.tointeger((st.brew or {}).unval) or 0
+  if not mg.unit then return f end
+  local u = df.unit.find(mg.unit)
+  if not u then return f end
+  pcall(function()
+    local j = u.job and u.job.current_job
+    f.job = j and df.job_type[j.job_type] or 'none'
+    f.squad = (u.military.squad_id or -1) >= 0 and u.military.squad_id or nil
+    f.mood = (u.mood or -1) >= 0 and u.mood or nil
+    f.pos = {u.pos.x, u.pos.y, u.pos.z}
+  end)
+  if f.squad then f.causes[#f.causes + 1] = 'he is in squad ' .. tostring(f.squad) .. ': soldiers on duty do not walk to the office' end
+  local outd, outrec = M.out_days(K, p or pstate(K), 'MANAGER')
+  if outrec then
+    f.out = outd
+    f.causes[#f.causes + 1] = string.format('he stands outside the walk group of the citizens (%d days): the walls shut him out', outd)
+    f.next[#f.next + 1] = 'dfllm cmd inspect what=reach'
+  end
+  local rec, nz = M.office_of(K, mg.unit)
+  if not rec then
+    f.office.zone = nz
+    f.causes[#f.causes + 1] = 'no Office zone is assigned to him (bp.place office, p.surface=1 without a dug core)'
+    f.next[#f.next + 1] = 'dfllm cmd zone.place type=office'
+  else
+    f.office.zone, f.office.box, f.office.chair, f.office.table = rec.zone, rec.box, rec.chair, rec.table
+    f.office.chair_p, f.office.table_p = rec.chair_p, rec.table_p
+    if rec.chair == 0 then f.causes[#f.causes + 1] = string.format('office %d has no chair (%d planned)', rec.zone, rec.chair_p) end
+    if oc.table ~= false and rec.table == 0 then
+      f.causes[#f.causes + 1] = string.format('office %d has no table (%d planned)', rec.zone, rec.table_p)
+    end
+    local okw, walk = pcall(function()
+      local z = rec.zobj
+      local ux, uy, uz = u.pos.x, u.pos.y, u.pos.z
+      local tried = 0
+      for y = z.y1, z.y2 do
+        for x = z.x1, z.x2 do
+          tried = tried + 1
+          if tried <= 60 and M.in_zone(z, x, y, z.z) then
+            local ok2, can = K.call('snapshot', 'reach', {x = ux, y = uy, z = uz}, {x = x, y = y, z = z.z})
+            if ok2 and can == true then return true end
+            if ok2 and can == false then f.office.unreached = (f.office.unreached or 0) + 1 end
+          end
+        end
+      end
+      return f.office.unreached ~= nil and false or nil
+    end)
+    if okw then f.office.walk = walk end
+    if f.office.walk == false then
+      f.causes[#f.causes + 1] = string.format('no walking path from him (%d,%d,%d) to office %d: a wall, a locked door or a burrow cuts it',
+                                              f.pos and f.pos[1] or -1, f.pos and f.pos[2] or -1, f.pos and f.pos[3] or -1, rec.zone)
+      f.next[#f.next + 1] = 'dfllm cmd inspect what=reach'
+    end
+    pcall(function()
+      local ok2, txt = pcall(dfhack.buildings.getRoomDescription, rec.zobj, u)
+      if ok2 and type(txt) == 'table' then
+        local parts = {}
+        for _, l in ipairs(txt) do parts[#parts + 1] = tostring(l) end
+        f.office.room = table.concat(parts, ' '):sub(1, 120)
+      elseif ok2 and type(txt) == 'string' then f.office.room = txt:sub(1, 120) end
+    end)
+  end
+  pcall(function()
+    local ent = df.global.plotinfo.main.fortress_entity
+    for _, pp in ipairs(ent.positions.own) do
+      if pp.code == 'MANAGER' and math.tointeger(pp.required_office) then f.office.required = pp.required_office end
+    end
+  end)
+  -- the jobs of the post (DF posts ManageWorkOrders for a manager in a fit office), with the worker
+  pcall(function()
+    local jt = df.job_type.ManageWorkOrders
+    if not jt then return end
+    local n, mine, link, i = 0, 0, df.global.world.jobs.list.next, 0
+    while link and i < 20000 do
+      local j = link.item
+      if j and j.job_type == jt then
+        n = n + 1
+        if dfhack.job.getWorker(j) == u then mine = mine + 1 end
+      end
+      link, i = link.next, i + 1
+    end
+    f.orders.mjobs, f.orders.mjobs_his = n, mine
+  end)
+  if #f.causes == 0 and f.orders.n > 0 then
+    local rq = f.office.required
+    f.causes[1] = 'nothing the kernel can read is wrong' .. (rq and rq > 0 and string.format(' (DF asks the office for room value %d: a bigger, '
+                  .. 'furnished office zone, dfllm cmd zone.place type=office)', rq) or '')
+    f.next[#f.next + 1] = 'dfllm cmd zone.place type=office'
+  end
+  f.next[#f.next + 1] = 'dfllm cmd inspect what=orders'
+  return f
+end
+
+M.inspect.manager = function(K)
+  local f = M.manager_facts(K, pstate(K), M.conf(K))
+  local o = f.orders or {}
+  local head = string.format('manager %s%s: %s%s%s; %d orders unvalidated%s%s', f.name or '?', f.unit and (' unit ' .. f.unit) or '',
+                             f.job and ('job ' .. f.job) or 'no unit', f.pos and string.format(' at %d,%d,%d', f.pos[1], f.pos[2], f.pos[3]) or '',
+                             f.office.zone and (type(f.office.zone) == 'number' and (', office zone ' .. f.office.zone) or (', ' .. f.office.zone)) or '',
+                             o.n or 0, (o.d or 0) > 0 and string.format(' for %d d', o.d) or '',
+                             (o.brews or 0) > 0 and string.format(' (%d brews)', o.brews) or '')
+  return true, (head .. '; ' .. (#f.causes > 0 and ('cause: ' .. table.concat(f.causes, '; ')) or 'no cause found')):sub(1, 1000), f
+end
+
 -- BUG-450 (Run 16a i1 Syrupobeyed y386: the manager validated nothing for 149 days, 35 orders, brewing and cooking stopped, drink 291 -> 123 days;
 -- `inspect offices` said 'none vacant', his office had a chair and a table, zone.place was locked in SIEGE): orders unvalidated for
 -- orders.mgr_stuck_days with a manager who is able (manager_watch said nothing) and a complete office (st.office nil) are
@@ -3296,8 +3420,12 @@ function M.mgr_stuck(K, p, c, days, n, why)
     q = string.format('manager %s OUTSIDE the fort for %d days (off the main walk group), %d orders unvalidated%s',
                       mg.name, outd, n, best and ('; reachable candidate unit ' .. best) or '')
   end
-  K.log('warn', '%s', q)
-  local cmds = {'dfllm cmd inspect what=unit key=' .. mg.unit, 'dfllm cmd inspect what=orders', 'dfllm cmd inspect what=offices'}
+  -- BUG-499: the first finding of `inspect what=manager` in the question, and that command first
+  local okf, fx = pcall(M.manager_facts, K, p, c)
+  local cause = okf and type(fx) == 'table' and fx.causes[1] or nil
+  K.log('warn', '%s%s', q, cause and not outrec and ('; cause: ' .. cause) or '')
+  local cmds = {'dfllm cmd inspect what=manager', 'dfllm cmd inspect what=unit key=' .. mg.unit, 'dfllm cmd inspect what=orders',
+                'dfllm cmd inspect what=offices'}
   local replace
   if outrec and outd >= M.OUT_DAYS and best then
     -- BUG-458: outside for days: a reachable citizen takes the post (appoint replace), the first command
@@ -3306,8 +3434,9 @@ function M.mgr_stuck(K, p, c, days, n, why)
   elseif outrec then
     table.insert(cmds, 1, 'dfllm cmd inspect what=reach')
   end
-  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'manager_stuck', q = q:sub(1, outrec and 200 or 400), n = n, days = days,
-         units = {mg.unit}, cmds = cmds, out = outrec and outd or nil, replace = replace})
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'manager_stuck', q = q:sub(1, 200), n = n, days = days,
+         units = {mg.unit}, cmds = cmds, out = outrec and outd or nil, replace = replace,
+         cause = cause and not outrec and cause:sub(1, 200) or nil})     -- BUG-499: the first finding of inspect what=manager
   K.persist.touch('m.economy')
 end
 
@@ -6209,6 +6338,23 @@ function M.slaughter_pick(list, sc)
       end
     end
   end
+  -- BUG-498: a mood wants bones, not the youngest animal: adults first, then the race with most animals (the breeding stock stays)
+  if sc.adult_first then
+    local byid, count = {}, {}
+    for _, a in ipairs(sorted) do
+      if not a.pet and not a.war and not a.slaughter then
+        byid[a.id] = a
+        count[tostring(a.race)] = (count[tostring(a.race)] or 0) + 1
+      end
+    end
+    table.sort(cand, function(x, y)
+      local ax, ay = byid[x].adult == true, byid[y].adult == true
+      if ax ~= ay then return ax end
+      local cx, cy = count[tostring(byid[x].race)], count[tostring(byid[y].race)]
+      if cx ~= cy then return cx > cy end
+      return x < y
+    end)
+  end
   local r = {}
   for i = 1, math.min(#cand, math.max(0, (sc.max or 10) - marked)) do r[i] = cand[i] end
   return r
@@ -6219,7 +6365,7 @@ end
 -- animal (same keep rules), at most every `mood_days`.
 local function mood_animal_need(r)
   local needs = r.p.needs or {}
-  for _, key in ipairs({'bone', 'leather'}) do
+  for _, key in ipairs({'bone', 'shell', 'leather'}) do      -- BUG-498: shell too (a tortoise)
     local m = needs[key]
     if type(m) == 'table' and type(m.care) == 'table' and (m.care.n or 0) > 0 and have(r, key) <= 0 then return key end
   end
@@ -6236,10 +6382,29 @@ function T.slaughter(K, c, r)
     if not ws_any(r.f, sc.ws) then return true end
     local ca = K.census.a
     local pick_sc = sc
-    if mood then pick_sc = {keep_f = sc.keep_f, keep_m = sc.keep_m, max = 1} end
-    r.sl, r.sl_n = M.slaughter_pick(type(ca) == 'table' and ca.list, pick_sc), 0
+    if mood then pick_sc = {keep_f = sc.keep_f, keep_m = sc.keep_m, max = 1, adult_first = true} end
+    local alist = type(ca) == 'table' and ca.list
+    r.sl, r.sl_n = M.slaughter_pick(alist, pick_sc), 0
+    local last = false
+    if mood and #r.sl == 0 then
+      -- BUG-498 (Run 16d i4 Trumpetrealms y383: a Fey mood 'bone x1 none in the fort', butcher.mark took one young cavy, 12 animals
+      -- stayed because each race kept its breeding pair; three mood deaths): the dwarf's life is worth more than the last pair; an adult
+      -- (pets and war / hunting animals never) is marked, the most numerous race first
+      r.sl = M.slaughter_pick(alist, {keep_f = 0, keep_m = 0, max = 1, adult_first = true})
+      last = #r.sl > 0
+    end
     p[t_key] = r.now
-    if mood and #r.sl > 0 then K.log('warn', 'mood needs %s: animal %d marked for slaughter', mood, r.sl[1]) end
+    if mood and #r.sl > 0 then
+      local a
+      for _, x in ipairs(type(alist) == 'table' and alist or {}) do if type(x) == 'table' and x.id == r.sl[1] then a = x end end
+      a = a or {}
+      K.log('warn', 'mood needs %s: animal %d marked for slaughter', mood, r.sl[1])
+      K.emit('ANIMAL_MARKED', 'B', string.format('mood needs %s (none in the fort): %s %s %d marked for slaughter%s', mood,
+                                                 a.adult and 'adult' or 'young', M.race_name(a.race), r.sl[1],
+                                                 last and ' (the last of its breeding pair: pets and war animals stay)' or
+                                                 ' (a surplus animal)'):sub(1, 200),
+             {need = mood, animal = r.sl[1], race = M.race_name(a.race), adult = a.adult and 1 or 0, last = last and 1 or 0})
+    end
     if #r.sl == 0 then return true end
   end
   local id = table.remove(r.sl, 1)
@@ -6281,7 +6446,7 @@ M.verbs['butcher.mark'] = function(K, args, cmd)
     end
   end
   local keep = args.keep_pairs == false and 0 or 1
-  local pick = M.slaughter_pick(list, {keep_f = keep, keep_m = keep, max = n + 1000})
+  local pick = M.slaughter_pick(list, {keep_f = keep, keep_m = keep, max = n + 1000, adult_first = true})   -- BUG-498: adults before young
   if #pick == 0 then
     return false, string.format('no animal to mark (%d tame%s: pets, war/hunting animals, marked ones and %s stay)', #list,
                                 race and (' ' .. tostring(race)) or '', keep == 1 and 'one breeding pair per race' or 'none')
@@ -6634,7 +6799,10 @@ function M.wood_left(c, r, def)
   if not def then return left(c, r, 'wood') end
   local p = r.p
   local fl = math.max(0, math.max(holder_floor(p, 'wood'), need_n(p, 'wood', r.now)) - (r.held.wood or 0))
-  return math.max(0, (r.inv.wood or 0) - fl - (r.s.used.wood or 0) - (r.planned.wood or 0))
+  -- BUG-497 (Run 16d i4 Trumpetrealms y384: a seal door 'queued behind the other rock orders, no logs' with 229 logs in stock; the
+  -- barrels, beds and tables of other owners had claimed them): a defense piece goes before the orders of others, their wood is
+  -- not taken off its stock (only the floor and our own open orders are)
+  return math.max(0, (r.inv.wood or 0) - fl - math.max(0, (r.s.used.wood or 0) - (r.s.xwood or 0)) - (r.planned.wood or 0))
 end
 
 -- a run-shaped view outside a run (the hooks): census, floors, open orders, the workshops of the last run
@@ -7112,6 +7280,13 @@ function M.rock_dig(K, c, r, walls)
   K.emit('PROJECT_REQUEST', 'B', string.format('bedrooms x%d: a stone dig, %d free boulders < %d wanted (rock orders, ' ..
                                                'walls), the miners have nothing to dig', n, free, need),
          {tpl = 'bedrooms', n = n, why = 'rock', short = need - free})
+end
+
+-- BUG-497 (Run 16d i4 Trumpetrealms y384: no boulder in the fort, the explore that digs to hard stone at 40 % behind 'no runner slot'):
+-- true while the last stone census found no free boulder (st.rock.free, rock_dig); the runner queues the stone-reaching dig first
+function M.stone_zero()
+  local rk = st.rock
+  return type(rk) == 'table' and math.type(rk.free) == 'integer' and rk.free <= 0
 end
 
 -- BUG-268 (live Earthboat #1051 ACT_FAIL 'needs 2 free reachable mechanisms, 1 found', levers B2/O1 never linked;

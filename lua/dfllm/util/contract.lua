@@ -195,6 +195,8 @@ C.EVENTS = {
   MANAGER_OFFICE = {cls = 'B', by = 'economy'},
   -- BUG-231: manager orders held past orders.bypass_days: the items added as workshop tasks (act.ws_task)
   MANAGER_BYPASS = {cls = 'B', by = 'economy'},
+  -- BUG-498: an adult animal marked for slaughter for a strange mood's bone/shell/leather (d.need, animal, race, adult, last)
+  ANIMAL_MARKED = {cls = 'B', by = 'economy'},
   -- BUG-032: military moved a squad station off a bridge footprint and its ring (bridge, chain, none, hold)
   STATION_MOVED = {cls = 'B', by = 'military'},
   -- FR-79: the members of a militia squad were swapped for the next cohort at the close of its window (counts only)
