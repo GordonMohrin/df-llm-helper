@@ -122,7 +122,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         # command that builds the store (stockroom in Kern+, refuge_drink in the refuge); d.total_f/total_d: if the whole fort
         # holds too little, make food/drink first
         "REFUGE_STOCK": "dfllm cmd inspect '{\"what\":\"refuge\"}'; send the line's d.cmd (stockroom / refuge_drink) when the "
-                        "fort's own stock covers it, else food and drink first; tell Gordon",
+                        "fort's own stock covers it, else food and drink first; tell Gordon (BUG-464: d.fight=1 is a refuge "
+                        "that took the citizens in short of food or drink in a fight: no build now, stock it when the way "
+                        "is clear)",
         "HOSPITAL_DRY": "dfllm cmd inspect '{\"what\":\"water_sources\"}'",
         # BUG-034: the kernel already removed the dry hospital's zones; water (a cistern) comes before a new hospital
         "HOSPITAL_REMOVED": "tell Gordon; dfllm cmd inspect '{\"what\":\"water_sources\"}'; next plan: water before "
@@ -148,7 +150,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         # BUG-030: the kernel already acted (no pulls for a destroyed bridge; the deep defense); tell the player
         "BRIDGE_DESTROYED": "dfllm status; tell Gordon; the kernel rebuilds it in quiet PEACE, or replaces it by wall + "
                             "door after perimeter.stop_after losses to building destroyers (BUG-048: no question); "
-                            "nothing tactical",
+                            "BUG-462: building destroyers break a RAISED bridge too, the kernel already sent the civilians to "
+                            "the refuge (seal.lost); nothing tactical",
         # BUG-048: replaced = bridges now a wall + door; wait = lost bridges waiting for quiet PEACE
         "PERIMETER_BROKEN": "dfllm status; dfllm cmd inspect what=perimeter; tell Gordon; the kernel rebuilds lost "
                             "walls, doors and bridges in quiet PEACE; nothing tactical",

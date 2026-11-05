@@ -3581,15 +3581,21 @@ end
 -- drink or food (no bridge in the way: the burrow is the cause). siege marks it (M.dry); while the mark stands (until
 -- the episode ends) and the burrow still holds none of it, every level refuses it, so the alert goes to a burrow that
 -- has it or off. A well in it does not count: the thirst says it serves nobody (dry, or out of reach)
+-- BUG-464 (Run 16a i1 Syrupobeyed y387: 'Tiefe+ no food for 1 hungry citizen' refused the refuge for everybody in the BREACH
+-- that broke the outer line: no confinement, 'citizens flee', ~40 dead): the second value is true when the mark is FEW (at most
+-- DRY_FEW citizens, or under a fifth of those inside): such a mark never refuses the refuge as the retreat of a fight
+M.DRY_FEW = 3
 local function dry_why(name, a)
   local d = st.dry and st.dry[name]
   if not d then return nil end
   local nd = d.drink and (int(a.drink) or 0) == 0
   local nf = d.food and (int(a.food) or 0) == 0
   if not (nd or nf) then return nil end
+  local n = d.n or 1
+  local few = n <= M.DRY_FEW or n * 5 <= (int(a.inside) or 0)
   return string.format('no %s for %d %s citizen%s', nd and nf and 'drink or food' or (nd and 'drink' or 'food'),
-                       d.n or 1, nd and nf and 'thirsty and hungry' or (nd and 'thirsty' or 'hungry'),
-                       (d.n or 1) == 1 and '' or 's')
+                       n, nd and nf and 'thirsty and hungry' or (nd and 'thirsty' or 'hungry'),
+                       n == 1 and '' or 's'), few
 end
 
 -- burrow `name` at level `lvl`: SIEGE (separated, reachable, no hostile in it, the counts and the beds), SOFT (the same
@@ -3598,11 +3604,12 @@ end
 -- BREACH (separated, reachable, CFG.breach_tiles; no counts, BUG-019) and DEAD (as BREACH, but an opening may reach it
 -- CFG.dead_gap steps or more away: the dead end, FR-67). Returns ok, why, danger (refused because an opening reaches it
 -- or a hostile stands in it), dry (BUG-031: refused because the citizens in it went thirsty or hungry there).
-local function rate(K, au, name, lvl, t)
+local function rate(K, au, name, lvl, t, lenient)
   local a = au[name]
   if not (a and a.exists) then return false, 'missing' end
-  local dw = dry_why(name, a)
-  if dw then return false, dw, false, true end
+  local dw, few = dry_why(name, a)
+  -- BUG-464: `lenient` (the refuge as the retreat of a fight): a few-citizen mark is no refusal, the last-resort pass ignores any
+  if dw and not (lenient == 'all' or (lenient and few)) then return false, dw, false, true end
   local s = sep_of(name)
   if s and s.exp and not (lvl == 'DEAD' and (s.d or 0) >= CFG.dead_gap) then return false, s.why, true end
   local hn, hat = hostile_in(K, name, t)
@@ -3675,15 +3682,26 @@ local function choose(K, mode, want, hold)
   -- hostile in it) and at the BREACH and DEAD levels (only reached with danger): there it is one room with Kern+ as well
   local ropen = refuge_open(K, t)
   local fight = mode == 'SIEGE' or mode == 'BREACH'
-  local function rate2(name, lvl)
+  -- BUG-464: with the outer line lost (seal.lost) the refuge is the retreat of the episode: a mark of a FEW dry citizens does
+  -- not refuse it (rate's lenient); r.dryok keeps the text, the stock ask follows. In a BREACH without a loss the mark still
+  -- refuses it (Kern+ may be the safer place for them), but see the last resort below
+  local retreat = mode == 'BREACH' or st.lostb ~= nil
+  local lost = st.lostb ~= nil
+  local function rate2(name, lvl, lenient)
     if ropen and name == refuge and au[name] and au[name].exists
        and (fight or r.danger or lvl == 'BREACH' or lvl == 'DEAD') then
       return false, ropen
     end
-    return rate(K, au, name, lvl, t)
+    if name == refuge and lenient == nil and lost then lenient = true end
+    local ok, why, danger, dry = rate(K, au, name, lvl, t, lenient)
+    if ok and name == refuge and lenient and au[name] then
+      local dw = dry_why(name, au[name])
+      if dw then r.dryok = name .. ': ' .. dw end
+    end
+    return ok, why, danger, dry
   end
-  local function try(name, lvl)
-    local ok, why, danger, dry = rate2(name, lvl)
+  local function try(name, lvl, lenient)
+    local ok, why, danger, dry = rate2(name, lvl, lenient)
     if ok then r.pick, r.level = name, lvl; return true end
     refused(name, why, danger, dry)
     return false
@@ -3753,6 +3771,21 @@ local function choose(K, mode, want, hold)
     elseif au[refuge] and au[refuge].exists then
       r.rwhy = string.format('%s: the %d days without counts are spent (since tick %d)', refuge, rcfg(K).breach_days,
                              int(st.bsince) or -1)
+    end
+  end
+  -- BUG-464 (Run 16a i1 Syrupobeyed y387): the last resort of a breached fort. Everything else is refused (hostiles inside Kern+,
+  -- an opening reaching Interior), the refuge is separated and reachable and holds no hostile, but a mark of dry citizens in it
+  -- (any number) or the spent breach days refused it: no confinement meant 'citizens flee' through the invaders (96 -> 1). The
+  -- stay in a refuge without food is shorter than the way through the breach: it takes them in whatever it lacks, short, and the
+  -- stock ask (REFUGE_STOCK) says what to carry in
+  if retreat and (bwin or rwet) and au[refuge] and au[refuge].exists and not ropen then
+    if try(refuge, 'BREACH', 'all') or try(refuge, 'DEAD', 'all') then
+      r.short = true
+      r.last = true
+      local why = r.dryok or r.dwhy or r.rwhy
+      r.why = r.why or why
+      r.rwhy = r.rwhy or why
+      return r
     end
   end
   r.flee = r.danger == true or mode == 'BREACH' or r.dry == true
@@ -3857,8 +3890,10 @@ local function leave_why(K, au, cur, refuge, t, r)
     local op = refuge_open(K, t)
     if op and (r.pick or open_danger(K, refuge, t, r)) then return 'unsealed', op end
   end
-  local dw = dry_why(cur, a)
-  if dw then return 'dry', dw end
+  local dw, few = dry_why(cur, a)
+  -- BUG-464: a few dry citizens do not make the refuge the citizens hold in a fight a place to leave (they would be sent
+  -- through the breach); a bigger mark does, as before
+  if dw and not (cur == refuge and few and st.lostb) then return 'dry', dw end
   local s = sep_of(cur)
   if s and s.exp and not (cur == refuge and (s.d or 0) >= CFG.dead_gap) then return 'unseparated', tostring(s.why) end
   -- Review fix (merge20, BUG-378): the dry refuge the alert holds them in has a way in (a hatch or door building destroyers
@@ -4054,6 +4089,22 @@ function M.alert_burrow(K, mode, default, hold, cur, release)
                     ('; ' .. others) or ''), 120) or nil})
     end
   end
+  -- BUG-464: the refuge took them in short of food or drink (the retreat of a fight): REFUGE_STOCK (A, fight=1) names what is
+  -- missing and where the stock is, once per game day at most and again only with news (util/cadence)
+  if pick == refuge and (r.last or r.dryok) and pa and pa.exists then
+    local lf = (pa.fneed or 0) > 0 and pa.food < pa.fneed
+    local ld = not pa.wet and (pa.dneed or 0) > 0 and pa.drink < pa.dneed
+    local what = (lf and ld) and 'food+drink' or (lf and 'food' or (ld and 'drink' or 'food'))
+    local now = K.now()
+    if CAD.due(st.fstock_rec, now, {refuge}, {what}, {ticks = DAY, wall_s = 60}) then
+      st.fstock_rec, dirty = CAD.mark(now, {refuge}, {what}), true
+      local cmd = "dfllm cmd inspect '{\"what\":\"refuge\"}'"
+      local txt = string.format('%s took the citizens in short of %s (%s) as the retreat of the %s: %s; stock the refuge when the way is clear', refuge, what,
+                                RF.txt(pa), mode, tostring(r.dryok or r.rwhy or 'the other burrows are breached or open'))
+      K.emit('REFUGE_STOCK', 'A', trunc(txt, 200), {burrow = refuge, short = what, food = pa.food, fneed = pa.fneed or 0,
+             drink = pa.drink, dneed = pa.dneed or 0, pct = 0, cit = pa.inside or 0, cmd = trunc(cmd, 160), fight = 1})
+    end
+  end
   if pick == want and not r.short and st.refuge_rec then st.refuge_rec, dirty = nil, true end   -- the episode ended
   mem.keep_r = keep and r or nil
   publish(K)
@@ -4129,6 +4180,23 @@ function M.dry(K, name, need, n)
   save(K)
   return true, string.format('%s holds no %s', name, nd and nf and 'drink or food' or (nd and 'drink' or 'food')),
          fresh
+end
+
+-- public (BUG-462, siege): an outer or inner bridge was destroyed (building destroyers broke it, raised or not) in the fight.
+-- The line is gone: from now on, for the episode (it ends as the dry mark does), the refuge is the retreat of every ask and a
+-- few-citizen dry mark does not refuse it (choose's `retreat`); fight_rule moves the citizens at once (the next ask, siege
+-- re-asks in the same pass). Returns true when it is news (REFUGE_SWITCH / REFUGE_FAIL carry the rest)
+function M.lost(K, name)
+  if K.mode() == 'PEACE' then return false end
+  local fresh = st.lostb == nil
+  if fresh then
+    st.lostb, dirty = {t = now_t(K), name = type(name) == 'string' and name:sub(1, 24) or ''}, true
+    mem.keep_sig, mem.keep_r = nil, nil              -- a kept burrow is re-decided with the line gone
+    K.log('warn', 'seal: bridge %s destroyed: the refuge is the retreat of this fight (a few dry citizens do not refuse it)',
+          tostring(name))
+    save(K)
+  end
+  return fresh
 end
 
 -- public (BUG-013, gate): the lever burrow CFG.levers ('Hebel+'; burrows screen: add burrow, paint) holds `tiles`
@@ -5572,6 +5640,7 @@ function M.init(K)
         painted = int(p.painted), flag_sig = type(p.flag_sig) == 'string' and p.flag_sig or nil, pep = int(p.pep),
         bsince = int(p.bsince), sup_rec = type(p.sup_rec) == 'table' and p.sup_rec or nil,
         floor_rec = type(p.floor_rec) == 'table' and p.floor_rec or nil,
+        fstock_rec = type(p.fstock_rec) == 'table' and p.fstock_rec or nil,
         hatch_rec = type(p.hatch_rec) == 'table' and p.hatch_rec or nil}
   -- BUG-031 (b): the burrows the citizens went thirsty or hungry in during this episode
   for name, d in pairs(type(p.dry) == 'table' and p.dry or {}) do
@@ -5579,6 +5648,9 @@ function M.init(K)
       st.dry = st.dry or {}
       st.dry[name] = {t = int(d.t), drink = d.drink == true, food = d.food == true, n = int(d.n) or 1}
     end
+  end
+  if type(p.lostb) == 'table' and int(p.lostb.t) then      -- BUG-462: an outer or inner bridge destroyed in this episode
+    st.lostb = {t = int(p.lostb.t), name = type(p.lostb.name) == 'string' and p.lostb.name:sub(1, 24) or ''}
   end
   if type(p.dead) == 'table' and int(p.dead.t) then
     local d = p.dead
@@ -5677,8 +5749,8 @@ local function episode(K, t)
   end
   -- BUG-031: the breach days and the thirst marks belong to one episode (Run 11: a PEACE lockdown opened the breach
   -- window, no mode change closed it, and every later invasion found it spent: no refuge, the citizens fled)
-  if not busy and (st.bsince or st.dry) and not held(K) then
-    st.bsince, st.dry, dirty = nil, nil, true
+  if not busy and (st.bsince or st.dry or st.lostb) and not held(K) then
+    st.bsince, st.dry, st.lostb, dirty = nil, nil, nil, true
     K.log('info', 'seal: episode over: breach days and thirst marks reset')
   end
   if busy and not st.pep then
@@ -5769,7 +5841,9 @@ M.on.MODE = function(K, ev)
     st.swap, dirty = nil, true
     K.log('info', 'seal: breach over (sealed): refuge released')
   end
-  if to == 'PEACE' and (st.bsince or st.dry) and not held(K) then st.bsince, st.dry, dirty = nil, nil, true end   -- BUG-019
+  if to == 'PEACE' and (st.bsince or st.dry or st.lostb) and not held(K) then
+    st.bsince, st.dry, st.lostb, dirty = nil, nil, nil, true      -- BUG-019, BUG-462
+  end
   publish(K)
   save(K)
 end
