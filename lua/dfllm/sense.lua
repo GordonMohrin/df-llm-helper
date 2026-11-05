@@ -115,6 +115,67 @@ end
 
 M.GHOST_MAX = 200      -- BUG-062: census.g.ids, the fort's own ghosts met in a hostile scan
 
+---------------------------------------------------------------- water (BUG-494, BUG-496)
+-- Run 16b i2 Brotherarrow y372-y375: a Hibbertopterus pack in the brook drowned five citizens (fisher, carpenter) with
+-- `threat 0 vis`: a unit in the water is on no walk group of the citizens, so the wild-danger rule below (same group, near an
+-- entrance) never listed it; the deaths read `missing`, then `drowned` five days later, without a place or a cause. Only
+-- sense and snapshot read tiles and walk the unit list: care asks through water_at and scene. Every DF read is guarded.
+local WW = {R = 8, SCENE_MAX = 4}     -- R: tiles round a drowned body searched for wild units; SCENE_MAX: units named
+
+-- 'water n/7' for a tile with water (flow_size >= 1, liquid water), else nil. Magma is not water.
+function WW.wet(x, y, z)
+  local ok, kind = pcall(function()
+    local pos = {x = x, y = y, z = z}
+    if not dfhack.maps.isValidTilePos(pos) then return nil end
+    local des = dfhack.maps.getTileFlags(pos)
+    if des == nil or des.hidden then return nil end
+    local fs = tonumber(des.flow_size) or 0
+    if fs < 1 then return nil end
+    local lt = des.liquid_type
+    if not (lt == 0 or lt == false or lt == nil or lt == 'Water') then return nil end
+    return string.format('water %d/7', fs)
+  end)
+  if ok then return kind end
+end
+
+-- the water at the tile or on one of the 8 tiles round it (same level): kind ('water 3/7', 'beside water 3/7'), its tile
+function WW.near(x, y, z)
+  local k = WW.wet(x, y, z)
+  if k then return k, {x, y, z} end
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      if dx ~= 0 or dy ~= 0 then
+        k = WW.wet(x + dx, y + dy, z)
+        if k then return 'beside ' .. k, {x + dx, y + dy, z} end
+      end
+    end
+  end
+end
+
+-- the tile's material when it is a brook or a river bed ('brook' | 'river'), else nil
+function WW.stream(x, y, z)
+  local ok, m = pcall(function()
+    local tt = dfhack.maps.getTileType(x, y, z)
+    if tt == nil then return nil end
+    local a = df.tiletype.attrs[tt]
+    local name = a and df.tiletype_material[a.material]
+    if name == 'BROOK' then return 'brook' elseif name == 'RIVER' then return 'river' end
+  end)
+  if ok then return m end
+end
+
+function WW.race_name(u)
+  local ok, n = pcall(function() return dfhack.units.getRaceName(u) end)
+  if ok and type(n) == 'string' and n ~= '' then return n:sub(1, 40) end
+  return tostring(u.race)
+end
+
+local function size_cur(u) return u.body.size_info.size_cur end      -- no closure per unit: the scan touches every unit
+function WW.size_of(u)
+  local ok, sz = pcall(size_cur, u)
+  if ok and math.type(sz) == 'integer' and sz >= 0 then return sz end
+end
+
 ---------------------------------------------------------------- citizens (§6.1)
 local P = {x = 0, y = 0, z = 0}   -- scratch coord for burrow lookups (a table coord, cf. item.lua:12)
 
@@ -222,6 +283,7 @@ local function hscan_begin(K, now, armed)
   st.hs.watch = okw and type(wb) == 'table' and #wb > 0 and wb or nil
   st.hs.friends, st.hs.fseen = {}, {}
   st.hs.ghosts = {}                              -- BUG-062: the fort's own ghosts met in the scan
+  st.hs.wl, st.hs.wseen = {}, {}                 -- BUG-494: wild beasts at water met in the scan
   st.h_tick = now.tick
 end
 
@@ -408,6 +470,72 @@ local function predator(u, hs)
   return ok and yes == true
 end
 
+-- BUG-495 (Run 16c i3 Sealcertain: PREDATOR without race or size, inspect unit did not know the unit): how a unit is
+-- reached from the citizens' walk group: 1 = it stands on it, 2 = a bank tile beside it does (a unit in the water: a soldier
+-- can strike it from the bank), 0 = neither (a cavern, another level), nil = unknown (no citizen group, an unreadable tile)
+local function reach_of(u)
+  local ok, r = pcall(function()
+    local cg = citizens_group()
+    if not cg then return nil end
+    local p = u.pos
+    local function grp(x, y)
+      local q = {x = x, y = y, z = p.z}
+      if not dfhack.maps.isValidTilePos(q) then return nil end
+      return dfhack.maps.getWalkableGroup(q)
+    end
+    if grp(p.x, p.y) == cg then return 1 end
+    for dx = -1, 1 do
+      for dy = -1, 1 do
+        if (dx ~= 0 or dy ~= 0) and grp(p.x + dx, p.y + dy) == cg then return 2 end
+      end
+    end
+    return 0
+  end)
+  if ok then return r end
+end
+
+-- BUG-494 (Run 16b i2 Brotherarrow y372-y375: a Hibbertopterus pack in the brook drowned five citizens, `threat 0 vis`, no
+-- PREDATOR): a wild unit in or beside water is on no walk group of the citizens, so predator() dropped it. A wild, visible
+-- unit that is a large predator (raws), a marked killer or of a large body (size_cur >= WATER.big cm3, a dwarf is 60000)
+-- and stands in or beside water is a WATER BEAST: census.w, the event WATER_PREDATOR (once per unit and WATER.rearm
+-- ticks), the fishers released (economy fish_want reads census.w.hold). Never a hostile (no lockdown, no siege mode): the
+-- brook is no entrance; the player decides on the sortie.
+M.WATER = {big = 100000, near = 60, hold = 2400, rearm = 7200, max = 10}
+local function civ_dist(hs, x, y, z)
+  local best = -1
+  for _, p in ipairs(hs.civ_pos) do
+    local dzc = math.abs(z - p.z)
+    if dzc <= M.DA_DZ then best = minpos(best, math.max(math.abs(x - p.x), math.abs(y - p.y), dzc)) end
+  end
+  return best
+end
+
+local function water_beast(hs, u, U)
+  local W = M.WATER
+  if #hs.wl >= W.max or hs.wseen[u.id] then return end
+  local rf = raw_flags(u)
+  local sz
+  if not (rf.p or killer(u)) then
+    sz = WW.size_of(u)
+    if not (sz and sz >= W.big) then return end
+  else
+    sz = WW.size_of(u)
+  end
+  if U.isTame(u) or U.isFortControlled(u) or U.isCitizen(u, true) or U.isResident(u, true) or U.isInvader(u) then return end
+  if (U.isMerchant and U.isMerchant(u)) or not U.isVisible(u) or U.isHidden(u) then return end
+  local f1, f2 = u.flags1, u.flags2
+  if f1.merchant or f1.diplomat or f1.caged or f1.chained or f2.visitor then return end
+  if not dfhack.maps.isValidTilePos(u.pos) then return end
+  local x, y, z = u.pos.x, u.pos.y, u.pos.z
+  local kind = WW.near(x, y, z)
+  if not kind then return end
+  hs.wseen[u.id] = true
+  local e = {id = u.id, x = x, y = y, z = z, sz = sz, rn = WW.race_name(u), p = rf.p and 1 or nil, wt = kind,
+             st = WW.stream(x, y, z), rc = reach_of(u), dc = civ_dist(hs, x, y, z)}
+  if killer(u) then e.kl = 1 end
+  hs.wl[#hs.wl + 1] = e
+end
+
 local function try_num(f) local ok, v = pcall(f); return ok and type(v) == 'number' and v or nil end
 
 -- M3 / BUG-111 (Run 14 y707 notes 94 and 96: an "invader" of size 6486 held the fort in BREACH for 26 days and the
@@ -444,6 +572,7 @@ local function consider(hs, u)
     if hs.count and U.isVisible(u) and not U.isHidden(u) then hs.units = hs.units + 1 end
     return 1
   end
+  water_beast(hs, u, U)                                -- BUG-494: a big or predatory wild unit in or beside water
   local undead = U.isUndead(u)
   if not (undead or U.isDanger(u) or (not U.isTame(u) and predator(u, hs))) then
     if hs.count and U.isVisible(u) and not U.isHidden(u) then
@@ -613,6 +742,8 @@ local function consider(hs, u)
   if (try_num(function() return u.counters.unconscious end) or 0) > 0 then entry.uc = 1 end    -- M3: it wakes up
   local okz, sz = pcall(function() return u.body.size_info.size_cur end)
   if okz and math.type(sz) == 'integer' and sz >= 0 then entry.sz = sz end
+  entry.rn = WW.race_name(u)                       -- BUG-495: the event names race, size and reach
+  entry.rc = reach_of(u)
   list[#list + 1] = entry
   -- integer sort key: the zone (past B1, then the intake area), then distance (O1, else nearest outside citizen),
   -- then scan order
@@ -636,6 +767,52 @@ local function hscan_slice()
   end
   hs.i = i
   return i >= n
+end
+
+-- BUG-494: census.w = {tick, n, list (nearest to a citizen first), near (the nearest one's distance, -1 none), hold (1:
+-- a beast within WATER.near tiles of a citizen now, or WATER.hold ticks ago: the fishers stay home)}; WATER_PREDATOR (A)
+-- for every beast within WATER.near not announced for WATER.rearm ticks. d.reach 1 = on the citizens' walk group, 2 = from a
+-- bank, 0 = out of reach; d.cmd = the sortie the squad can be sent on (squad.sortie to its tile)
+local function wild_publish(K, hs)
+  local W = M.WATER
+  local l = hs.wl
+  table.sort(l, function(a, b)
+    local da, db = a.dc < 0 and 1e9 or a.dc, b.dc < 0 and 1e9 or b.dc
+    if da ~= db then return da < db end
+    return a.id < b.id
+  end)
+  local near, fresh = -1, {}
+  st.w_ann = st.w_ann or {}
+  for _, e in ipairs(l) do
+    if e.dc >= 0 and e.dc <= W.near then
+      near = minpos(near, e.dc)
+      local t = st.w_ann[e.id]
+      if t == nil or hs.tick - t >= W.rearm then fresh[#fresh + 1] = e end
+    end
+  end
+  if near >= 0 then st.w_last = hs.tick end
+  local hold = (near >= 0 or (st.w_last and hs.tick - st.w_last < W.hold)) and 1 or 0
+  K.census.w = {tick = hs.tick, n = #l, list = l, near = near, hold = hold}
+  if #fresh == 0 then return end
+  local e = fresh[1]
+  for _, f in ipairs(fresh) do st.w_ann[f.id] = hs.tick end
+  local cmd
+  local ok, key = K.call('military', 'sortie_squad')
+  if ok and type(key) == 'string' then
+    cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z)
+  end
+  local d = {n = #fresh, id = e.id, race = e.rn, pos = {e.x, e.y, e.z}, dc = e.dc, wet = e.wt, fish = hold,
+             reach = e.rc, cmd = cmd}
+  if e.sz then d.sz = e.sz end
+  if e.st then d.stream = e.st end
+  if e.kl then d.killer = 1 end
+  K.log('warn', 'sense: %d wild beast(s) at water: %s %d (%s) at %d,%d,%d, %d tiles from a citizen', #fresh,
+        tostring(e.rn), e.id, tostring(e.wt), e.x, e.y, e.z, e.dc)
+  K.emit('WATER_PREDATOR', 'A', string.format('%d wild beast(s) at water: %s %d%s at %d,%d,%d (%s%s), %d tiles from a citizen; %s; '
+         .. 'fishers held home%s', #fresh, tostring(e.rn), e.id, e.sz and (' ' .. e.sz .. ' cm3') or '', e.x, e.y, e.z,
+         tostring(e.wt), e.st and (', ' .. e.st) or '', e.dc,
+         e.rc == 1 and 'on the citizens\' ground' or (e.rc == 2 and 'reachable from the bank' or (e.rc == 0 and 'out of reach'
+         or 'reach unknown')), cmd and '; sortie offered' or ''), d)
 end
 
 local function hscan_finish(K)
@@ -665,6 +842,7 @@ local function hscan_finish(K)
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
                 dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign}
+  wild_publish(K, hs)                            -- BUG-494
 end
 
 ---------------------------------------------------------------- module
@@ -737,6 +915,82 @@ function M.recount(K, names)
   st.aw_to = #l > 0 and l or nil
   scan_citizens(K, K.now())
   return K.census.u
+end
+
+-- public (BUG-496, care's DROWNED event): the living wild units within WW.R tiles (Chebyshev, one level up or down) of a tile,
+-- the nearest first (at most WW.SCENE_MAX): {id, race, sz, d, tame}. A citizen, resident, merchant or caged unit is none of them;
+-- a tame one is listed (it may have pulled a dwarf in) but flagged. Returns the list
+function M.scene(K, x, y, z, skip)
+  local out = {}
+  local ok = pcall(function()
+    local U = dfhack.units
+    for _, u in ipairs(df.global.world.units.active) do
+      if u.id ~= skip and U.isActive(u) and not U.isDead(u) then
+        local p = u.pos
+        local d = math.max(math.abs(p.x - x), math.abs(p.y - y))
+        if d <= WW.R and math.abs(p.z - z) <= 1 and not U.isCitizen(u, true) and not U.isResident(u, true)
+           and not (U.isMerchant and U.isMerchant(u)) and not u.flags1.caged then
+          out[#out + 1] = {id = u.id, race = WW.race_name(u), sz = WW.size_of(u), d = d, tame = U.isTame(u) == true}
+        end
+      end
+    end
+  end)
+  if not ok then return {} end
+  -- wild before tame, then the nearest
+  table.sort(out, function(a, b)
+    if a.tame ~= b.tame then return not a.tame end
+    if a.d ~= b.d then return a.d < b.d end
+    return a.id < b.id
+  end)
+  while #out > WW.SCENE_MAX do table.remove(out) end
+  return out
+end
+
+-- public (BUG-496, care's DROWNED event): the water at a tile: 'water 5/7' | 'beside water 2/7' | nil, and 'brook' | 'river' | nil
+function M.water_at(K, x, y, z)
+  if not (math.type(x) == 'integer' and math.type(y) == 'integer' and math.type(z) == 'integer') then return nil end
+  return WW.near(x, y, z), WW.stream(x, y, z)
+end
+
+-- public (BUG-495, care's inspect what=unit): what the fort can see of a unit that is no citizen: race, size, flags that make it
+-- a danger, whether it stands at water, whether the citizens reach it, how far the nearest citizen is. Returns ok, text, d
+-- (false, why when the unit is gone or not on the map)
+function M.describe(K, id)
+  id = math.tointeger(id)
+  local u = id and df.unit.find(id)
+  if not u then return false, 'no such unit: ' .. tostring(id) end
+  local U = dfhack.units
+  local x, y, z = U.getPosition(u)
+  if not x then return false, string.format('unit %d is not on the map', id) end
+  local rf = raw_flags(u)
+  local d = {id = id, wild = U.isTame(u) and 0 or 1, race = WW.race_name(u), dead = U.isDead(u) and 1 or 0, pos = {x, y, z}}
+  d.sz = WW.size_of(u)
+  if rf.p then d.pred = 1 end
+  if killer(u) then d.killer = 1 end
+  if rf.bd then d.bd = 1 end
+  if U.isInvader(u) then d.inv = 1 end
+  if U.isTame(u) then d.tame = 1 end
+  if U.isFortControlled(u) then d.own = 1 end
+  if u.flags1.caged then d.caged = 1 end
+  if (U.isMerchant and U.isMerchant(u)) or u.flags1.merchant then d.merchant = 1 end
+  if U.isDanger(u) then d.danger = 1 end
+  d.wet = WW.near(x, y, z)
+  d.stream = WW.stream(x, y, z)
+  d.reach = reach_of(u)
+  local best = -1
+  for _, p in ipairs(st and st.civ_pos or {}) do
+    local dzc = math.abs(z - p.z)
+    if dzc <= M.DA_DZ then best = minpos(best, math.max(math.abs(x - p.x), math.abs(y - p.y), dzc)) end
+  end
+  if best >= 0 then d.dc = best end
+  local okj, job = pcall(function() return df.job_type[u.job.current_job.job_type] end)
+  d.job = okj and job or 'none'
+  local msg = string.format('unit %d %s%s%s at %d,%d,%d%s%s%s%s', id, d.race, d.sz and (' ' .. d.sz .. ' cm3') or '',
+        d.dead == 1 and ', DEAD' or '', x, y, z, d.wet and (', ' .. d.wet) or '',
+        d.tame and ', tame' or (d.inv and ', invader' or ', wild'),
+        d.reach == 1 and ', on the citizens\' ground' or (d.reach == 2 and ', reachable from the bank'
+        or (d.reach == 0 and ', out of reach' or '')), d.dc and (', ' .. d.dc .. ' tiles from a citizen') or '')
+  return true, msg:sub(1, 200), d
 end
 
 -- public (BUG-134, live i2: a name lookup failed while paused after a load, before the first census): the ids of the

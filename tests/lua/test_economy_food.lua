@@ -342,6 +342,22 @@ T.test('fishers leave at once in a siege (they stand at the water outside the wa
   T.eq(#ctl.wd.assigned_units, 0, 'off the detail in the next run, not after shrink_days')
 end)
 
+T.test('BUG-494: a water beast at the brook (sense census.w.hold) takes the fishers off the detail at once and keeps them off',
+       function()
+  local W, ctl = fish_world{cit = 53, fishers = {1, 2, 3}}
+  settle(W)
+  days(W, 1)
+  T.eq(#ctl.wd.assigned_units, 3, 'fishing as before')
+  W.set_census('w', {tick = 0, n = 1, list = {}, near = 10, hold = 1})
+  days(W, 1)
+  T.eq(#ctl.wd.assigned_units, 0, 'off the detail in the next run, also members the player put in')
+  days(W, 3)
+  T.eq(#ctl.wd.assigned_units, 0, 'and nobody is added while the beast is there')
+  W.set_census('w', {tick = 0, n = 0, list = {}, near = -1, hold = 0})
+  days(W, 2)
+  T.ok(#ctl.wd.assigned_units >= 1, 'fishing again once sense releases the hold')
+end)
+
 T.test('cooking: meals_per_dwarf meals per citizen from cookable stock, never from plump helmets; cap grows', function()
   local W = world{cit = 20, setup = function(W)
     F.item(W, 'PLANT_GROWTH', {stack_size = 40, mat_type = 419, mat_index = 52})   -- cook-only

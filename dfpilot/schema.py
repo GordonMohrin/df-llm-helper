@@ -567,8 +567,19 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "ARRIVAL": ("A", "any", _d("kind:s", "src:s text:s raised:i doors:i alert:s clock:i out:i eta:i recall:i "
                                          "rc_left:i rc_new:i")),
     # Run 11: dist = tiles from the nearest citizen outside Kern+ or entrance (-1 unknown), far = beyond lockdown_near
-    "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f")),
-    "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p")),
+    # BUG-495: the unit's race, body size (cm3, a dwarf is 60000), reach (1 on the citizens' walk group, 2 from a bank,
+    # 0 out of reach) and the sortie command that would go for it
+    "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f race:s sz:i reach:i cmd:s")),
+    "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p race:s sz:i reach:i cmd:s")),
+    # BUG-494 (Run 16b i2 Brotherarrow: a Hibbertopterus pack at the brook drowned five citizens, threat 0): a large or
+    # predatory wild unit in or beside water within reach of the citizens; n = beasts announced now, race/sz/pos = the nearest,
+    # dc = tiles to the nearest citizen, wet = the tile ('water 3/7', 'beside water 3/7'), stream brook | river, reach as
+    # PREDATOR, fish = 1 when the fishers are held home, cmd = the sortie, killer = it killed a citizen
+    "WATER_PREDATOR": ("A", "sense", _d("n:i id:i race:s pos:p dc:i wet:s", "sz:i stream:s reach:i fish:f cmd:s killer:f")),
+    # BUG-496: a citizen found drowned; pos = where the body lies, tile = the water there ('water 5/7', 'beside water 2/7',
+    # 'dry'), stream brook | river, near = the wild units within 8 tiles ({id, race, sz, d, tame}; extra key), cause = the likely cause
+    # (wild: a wild unit stood near | water: deep water without a creature | unknown), revised = found after being missing
+    "DROWNED": ("A", "care", _d("unit:i cause:s", "pos:p tile:s stream:s revised:f")),
     "NO_DEPOT": ("A", "reflex", _d(opt="text:s")),
     "LOCKDOWN": ("A", "reflex", _d("why:s", "n:i type:s raised:i doors:i alert:s clock:i out:i recall:i rc_left:i "
                                             "rc_new:i")),

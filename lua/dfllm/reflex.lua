@@ -1850,6 +1850,25 @@ end
 -- Run 11: an invader, undead or great danger whose lockdown expired far is no INTRUDER (it counts again once far_scan
 -- finds it within lockdown_near); the INTRUDER names a near one first (far_scan) and comes again at once when one comes
 -- near after an INTRUDER for far ones only (its ack timeout default skips a far unit)
+-- BUG-495 (Run 16c i3 Sealcertain: PREDATOR without species or size, `inspect unit` did not know the unit): what the player
+-- needs to decide on a sortie: race, body size (cm3, a dwarf is 60000), reach (sense rc: 1 on the citizens' walk group, 2 from
+-- a bank, 0 out of reach, nil unknown) and the exact squad.sortie command (not for a great danger or an undead: no sortie
+-- offered for those). Returns the data fields and the text for the event line
+local REACH_TXT = {[0] = 'out of reach', [1] = 'reachable', [2] = 'reachable from a bank'}
+local function unit_facts(K, e)
+  local f, bits = {}, {}
+  if type(e.rn) == 'string' and e.rn ~= '' then f.race = e.rn; bits[#bits + 1] = e.rn end
+  if math.type(e.sz) == 'integer' then f.sz = e.sz; bits[#bits + 1] = e.sz .. ' cm3' end
+  if math.type(e.rc) == 'integer' then f.reach = e.rc; bits[#bits + 1] = REACH_TXT[e.rc] end
+  if e.k == 'danger' or e.k == 'inv' then
+    local ok, key = K.call('military', 'sortie_squad')
+    if ok and type(key) == 'string' then
+      f.cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z)
+    end
+  end
+  return f, #bits > 0 and (' [' .. table.concat(bits, ', ') .. ']') or ''
+end
+
 local function inside_scan(K, h, now)
   local hostile, predator, nh, np, hnear = nil, nil, 0, 0, false
   local near, nf, far_one, far_dc = cfg(K).predator_near, 0, nil, -1
@@ -1893,11 +1912,12 @@ local function inside_scan(K, h, now)
     if now - (rt.intr_last or -M.REARM) >= M.REARM or (hnear and not rt.intr_near) then
       local a = rt.ap and rt.ap[hostile.id]
       local dist = a and a.d or -1
-      interrupt(K, 'INTRUDER', string.format('%d hostiles on the citizens\' walkable group (%s %d at %d,%d,%d%s)', nh,
+      local facts, ftxt = unit_facts(K, hostile)
+      facts.n, facts.id, facts.pos, facts.k, facts.dist, facts.far = nh, hostile.id, {hostile.x, hostile.y, hostile.z},
+                                                                     hostile.k, dist, hnear and 0 or 1
+      interrupt(K, 'INTRUDER', string.format('%d hostiles on the citizens\' walkable group (%s %d at %d,%d,%d%s)%s', nh,
                 hostile.k, hostile.id, hostile.x, hostile.y, hostile.z,
-                hnear and '' or string.format('; far: %d tiles from the citizens and entrances', dist)),
-                {n = nh, id = hostile.id, pos = {hostile.x, hostile.y, hostile.z}, k = hostile.k, dist = dist,
-                 far = hnear and 0 or 1})
+                hnear and '' or string.format('; far: %d tiles from the citizens and entrances', dist), ftxt), facts)
       rt.intr_near = hnear
     end
     rt.intr_last = now
@@ -1912,8 +1932,10 @@ local function inside_scan(K, h, now)
   end
   if predator then
     if now - (rt.pred_last or -M.REARM) >= M.REARM then
-      interrupt(K, 'PREDATOR', string.format('%d wild dangers inside the fort (%d at %d,%d,%d)', np, predator.id,
-                predator.x, predator.y, predator.z), {n = np, id = predator.id, pos = {predator.x, predator.y, predator.z}})
+      local facts, ftxt = unit_facts(K, predator)
+      facts.n, facts.id, facts.pos = np, predator.id, {predator.x, predator.y, predator.z}
+      interrupt(K, 'PREDATOR', string.format('%d wild dangers inside the fort (%d at %d,%d,%d)%s', np, predator.id,
+                predator.x, predator.y, predator.z, ftxt), facts)
     end
     rt.pred_last = now
   end
