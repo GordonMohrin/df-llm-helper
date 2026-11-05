@@ -503,4 +503,61 @@ T.test('BUG-379: care keeps the missing dead of a whole siege (old: the oldest o
   T.eq({d[1].d.cause, d[1].d.revised}, {'killed', 1})
 end)
 
+---------------------------------------------------------------- BUG-496: a citizen found drowned
+-- Run 16b i2 Brotherarrow y372-y375: five citizens `missing`, then `drowned` five days later, no place, no cause (a Hibbertopterus pack
+-- at the brook). DROWNED (A) at the first found drowned: the body's tile, the water there, the wild units near, the likely cause.
+local function sense_stub(water, near)
+  return function(W)
+    W.load({name = 'sense', every = {ticks = 1200},
+            water_at = function() return water, water and 'brook' or nil end,
+            scene = function() return near or {} end,
+            mark_killer = function(K, id) W.marked = id; return true end})
+  end
+end
+
+T.test('BUG-496: a drowned citizen -> DROWNED (A) with pos, the water at the body and the wild unit near', function()
+  local W = world{cit = 3, units = {{id = 77, race = 'HIBBERTOPTERUS'}},
+                  setup = sense_stub('water 5/7', {{id = 77, race = 'HIBBERTOPTERUS', sz = 150000, d = 2, tame = false}})}
+  W.run(1)
+  W.move(1, 70, 20, 10)
+  die(W, 1, 'DROWN', {killer = 77})
+  W.run(1)
+  local ev = W.find_events('DROWNED')
+  T.eq(#ev, 1)
+  T.eq({ev[1].cls, ev[1].d.unit, ev[1].d.cause, ev[1].d.tile, ev[1].d.stream}, {'A', 1, 'wild', 'water 5/7', 'brook'})
+  T.eq(ev[1].d.pos, {70, 20, 10})
+  T.eq(ev[1].d.near[1].race, 'HIBBERTOPTERUS')
+  T.ok(ev[1].msg:find('drowned at 70,20,10 (water 5/7, brook)', 1, true) and ev[1].msg:find('sortie', 1, true), ev[1].msg)
+  T.eq(W.marked, 77, 'the attacker of the incident is a wild danger for sense from now on')
+  T.eq(#W.find_events('DEATH'), 1, 'the DEATH line stays')
+end)
+
+T.test('BUG-496: no creature near -> cause water; a dry body -> unknown; a missing one is announced when found', function()
+  local W = world{cit = 4, setup = sense_stub('beside water 2/7', {})}
+  W.run(1)
+  die(W, 1, 'DROWN')
+  die(W, 2, 'DROWN', {found = false})
+  W.run(1)
+  local ev = W.find_events('DROWNED')
+  T.eq(#ev, 1, 'the missing one says nothing yet')
+  T.eq({ev[1].d.unit, ev[1].d.cause, ev[1].d.tile}, {1, 'water', 'beside water 2/7'})
+  incidents[502].flags.discovered = true
+  CW.day(W, 2)
+  W.run(1)
+  ev = W.find_events('DROWNED')
+  T.eq(#ev, 2, 'found later: DROWNED once')
+  T.eq({ev[2].d.unit, ev[2].d.revised}, {2, 1})
+  local W2 = world{cit = 2, setup = sense_stub(nil, {})}
+  W2.run(1)
+  die(W2, 1, 'DROWN')
+  W2.run(1)
+  local d = W2.find_events('DROWNED')[1].d
+  T.eq({d.cause, d.tile}, {'unknown', 'dry'}, 'no water at the body')
+  local W3 = world{cit = 2, setup = sense_stub('water 3/7', {})}
+  W3.run(1)
+  die(W3, 1, 'THIRST')
+  W3.run(1)
+  T.eq(W3.find_events('DROWNED'), {}, 'other causes make no DROWNED')
+end)
+
 T.done()

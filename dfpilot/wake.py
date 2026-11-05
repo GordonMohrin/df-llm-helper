@@ -73,7 +73,7 @@ WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
 SYNTH = {"HB_STALE", "TICK_STALL", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK", "PLAN_AUTO", "PROJECT_STALE"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
-PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP", "REFUGE_PLUG",
+PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "WATER_PREDATOR", "DROWNED", "LOCKDOWN", "SIEGE_DEEP", "REFUGE_PLUG",
         "BRIDGE_DESTROYED", "GATE_FAIL",
         "TRANSFORM", "CURSED",                # BUG-115: a were-form among the citizens, then a curse (interrupts)
         "DEATHS_3PLUS", "NO_DEPOT", "CURSE_MOON",
@@ -84,7 +84,7 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "SIEGE_END",
         "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
         "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "PROJECT_STALE", "PLAN_AUTO", "YEAR_REVIEW", "AUTO_FAIL"]
-URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
+URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN", "WATER_PREDATOR", "DROWNED"} | set(schema.INTERRUPTS)   # BUG-494/496: a pack at the brook kills in days
 URGENT_REPEAT_S = 60
 _IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
 NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan check, plan apply",
@@ -119,6 +119,13 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         # Run 11: seal at=last reads SEAL_LEAK (a wall per leak) and REFUGE_FAIL (its open entrances) too
         "SEAL_LEAK": "dfllm cmd inspect '{\"what\":\"entrances\"}'; dfllm cmd bp.place tpl=seal site=S1 at=last "
                      "(walls); tell Gordon",
+        # BUG-494: a large or predatory wild unit in or beside water near the citizens; the kernel holds the fishers home. d.cmd is
+        # the exact squad.sortie (d.reach 1 = on the citizens' ground, 2 = strike from the bank, 0 = out of reach: no sortie)
+        "WATER_PREDATOR": "dfllm cmd inspect what=unit key=<d.id>; keep everybody off that water (no well, fishing, bridge "
+                          "or dig beside it); d.cmd sends the squad when d.reach is 1 or 2; tell Gordon",
+        # BUG-496: a citizen was found drowned; the line names the tile, the water and the wild units near
+        "DROWNED": "dfllm cmd inspect what=unit key=<id of a d.near unit> for a wild unit near the body; keep the others away "
+                   "from that water (WATER_PREDATOR keeps the fishers home); no dig, well or bridge beside it; tell Gordon",
         # BUG-479: building destroyers are at the refuge; the kernel walled the stair foot (a hatch/door is broken by them)
         "REFUGE_PLUG": "dfllm status; tell Gordon: the refuge stair foot is walled against the building destroyers; the kernel lifts it in PEACE",
         "REFUGE_FAIL": "dfllm cmd inspect '{\"what\":\"refuge\"}'; dfllm cmd bp.place tpl=seal site=S1 at=refuge "
@@ -646,7 +653,7 @@ def view_target(etype: str, d: dict, state: dict | None = None) -> str | None:
     cause (state alarm.by id, else its pos). None when the event names nothing to look at."""
     def num(v):
         return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
-    uid = num(d.get("id")) if etype in ("INTRUDER", "PREDATOR", "INVASION") else num(d.get("unit"))
+    uid = num(d.get("id")) if etype in ("INTRUDER", "PREDATOR", "INVASION", "WATER_PREDATOR") else (None if etype == "DROWNED" else num(d.get("unit")))
     units = d.get("units")
     if uid is None and isinstance(units, list) and units:
         uid = num(units[0])

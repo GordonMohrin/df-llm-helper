@@ -92,6 +92,10 @@ C.EVENTS = {
   -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)
   ARRIVAL = {cls = 'A', by = 'any'}, INTRUDER = {cls = 'A', by = 'reflex'},
   PREDATOR = {cls = 'A', by = 'reflex'}, NO_DEPOT = {cls = 'A', by = 'reflex'},
+  -- BUG-494: a large or predatory wild unit in or beside water within reach of the citizens (Run 16b i2: a Hibbertopterus
+  -- pack drowned five); d.race, sz, pos, dc, wet, reach, fish (the fishers are held home), cmd (the sortie). BUG-496: a
+  -- citizen was found drowned: d.unit, pos, tile (the water there), near (the wild units round the body)
+  WATER_PREDATOR = {cls = 'A', by = 'sense'}, DROWNED = {cls = 'A', by = 'care'},
   LOCKDOWN = {cls = 'A', by = 'reflex'},
   ORDER_BAD = {cls = 'A', by = 'economy'}, DEPOT_MISSING = {cls = 'A', by = 'trade'},
   CUTOFF = {cls = 'A', by = 'seal'}, PERIMETER_BROKEN = {cls = 'A', by = 'seal'},

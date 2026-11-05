@@ -4226,6 +4226,41 @@ local function classify(K, c, p, id, since, groups)
   return res
 end
 
+-- BUG-496 (Run 16b i2 Brotherarrow: five citizens `missing`, then `drowned` five days later; no place, no cause): a citizen
+-- found drowned is an A event at once: DROWNED with the body's tile, the water there (sense.water_at: 'water 5/7', 'beside
+-- water 2/7', 'dry'), brook or river, and the wild units within 8 tiles (sense.scene). cause 'wild' = the incident names an
+-- attacker or a wild, untamed unit stood near (a Hibbertopterus pack: WATER_PREDATOR is the standing warning), 'water' = deep
+-- water and nothing round it (a flooded dig, a pit), 'unknown' = the body's tile is not wet (moved, or the pos was lost)
+local function drowned_event(K, id, res, revised)
+  if res.cause ~= 'drowned' or not res.found then return end
+  local d = {unit = id, cause = 'unknown'}
+  local msg
+  local pos = res.pos
+  if type(pos) == 'table' and math.type(pos[1]) == 'integer' then
+    d.pos = {pos[1], pos[2], pos[3]}
+    local okw, kind, stream = K.call('sense', 'water_at', pos[1], pos[2], pos[3])      -- only sense reads tiles
+    if not okw then kind, stream = nil, nil end
+    d.tile = kind or 'dry'
+    d.stream = stream
+    local oks, near = K.call('sense', 'scene', pos[1], pos[2], pos[3], id)       -- only sense walks the unit list
+    near = oks and type(near) == 'table' and near or {}
+    local wild
+    for _, v in ipairs(near) do if not v.tame then wild = wild or v end end
+    if #near > 0 then d.near = near end
+    if res.killer or res.by or wild then d.cause = 'wild' elseif kind then d.cause = 'water' end
+    msg = string.format('citizen %d drowned at %d,%d,%d (%s%s): %s', id, pos[1], pos[2], pos[3], d.tile,
+                        d.stream and (', ' .. d.stream) or '',
+                        d.cause == 'wild' and ('a wild ' .. tostring(res.by or (wild and wild.race) or 'unit') ..
+                                               (wild and (' ' .. wild.id .. ' ' .. wild.d .. ' tiles away') or '') ..
+                                               '; keep everybody off this water, sortie the beast')
+                        or (d.cause == 'water' and 'deep water and no creature near' or 'no water at the body'))
+  else
+    msg = string.format("citizen %d drowned (the body's position is unknown)", id)
+  end
+  if revised then d.revised = 1 end
+  K.emit('DROWNED', 'A', trunc(msg, 200), d)
+end
+
 local function death_d(id, res, revised)
   local d = {unit = id, citizen = 1, cause = res.cause, src = res.src, found = res.found and 1 or 0,
              why = trunc(table.concat(res.why, '; '), 160)}
@@ -4395,6 +4430,7 @@ local function death_recheck(K, c, p)
             if type(l) == 'table' and l.u == e.u then l.c, l.fl = tostring(res.cause), e.fl; break end
           end
           K.emit('DEATH', 'B', DT.text(e.u, res, true), death_d(e.u, res, true))
+          drowned_event(K, e.u, res, true)          -- BUG-496
         end
       end
     end
@@ -4860,13 +4896,15 @@ M.on.UNIT_DEATH = function(K, ev)
   death_recheck(K, c, p)
   local res = classify(K, c, p, id, now)
   -- BUG-421: a wild animal that struck a citizen down is a predator for sense (PREDATOR wake, lockdown/sortie decision)
-  if res.cause == 'killed' and res.killer then K.call('sense', 'mark_killer', res.killer) end
+  -- BUG-496: a drowning with an attacker in the incident (a Hibbertopterus) marks it too
+  if (res.cause == 'killed' or res.cause == 'drowned') and res.killer then K.call('sense', 'mark_killer', res.killer) end
   local rec = {t = now, u = id}
   died_set(rec, res)
   p.died[#p.died + 1] = rec
   p.dlog[#p.dlog + 1] = {t = now, u = id, c = res.found and tostring(res.cause) or 'unknown', fl = rec.fl}   -- FR-74: a year of deaths
   died_prune(c, p, now)
   K.emit('DEATH', 'B', DT.text(id, res, false), death_d(id, res, false))
+  drowned_event(K, id, res, false)                  -- BUG-496
   local recent = {}
   for _, d in ipairs(p.deaths) do if now - d[1] < DAY then recent[#recent + 1] = d end end
   recent[#recent + 1] = {now, id}

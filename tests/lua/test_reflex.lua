@@ -53,6 +53,7 @@ local function setup(opts)
   snap.outside_near = require('dfllm.snapshot').outside_near
   for _, n in ipairs({'reflex', 'arbiter'}) do package.loaded['dfllm.' .. n] = nil end
   local mods = {S.military(), snap}
+  if opts.sortie then mods[1].sortie_squad = function() return opts.sortie, 5 end end      -- BUG-495
   if opts.reflex ~= false then mods[#mods + 1] = require('dfllm.reflex') end
   mods[#mods + 1] = require('dfllm.arbiter')
   for _, m in ipairs(opts.extra or {}) do mods[#mods + 1] = m end
@@ -239,6 +240,30 @@ T.test('Run 10: a roofed wild danger far from every citizen is PREDATOR_FAR (B),
   S.run(W, 200)
   local p = events(W, 'PREDATOR')
   T.eq({#p, p[1].d.id}, {1, 400})
+end)
+
+T.test('BUG-495: PREDATOR and INTRUDER name race, size, reach and offer the sortie command (Run 16c i3: no species, no size)',
+       function()
+  local units = S.fort_units()
+  local pred = S.danger(400, 45, 7, Z, {race = 'MAMMOTH'})        -- outside (open sky row y=7)
+  units[#units + 1] = pred
+  local W = setup{tag = 'predfacts', manifest = false, units = units, sortie = 'A'}
+  W.unit(400).body = {size_info = {size_cur = 4000000}}
+  dfhack.maps.getWalkableGroup = function() return 7 end
+  W.move(400, 62, 72, Z)                             -- inside the fort
+  S.run(W, 200)
+  local p = events(W, 'PREDATOR')
+  T.eq({#p, p[1].d.id, p[1].d.race, p[1].d.sz, p[1].d.reach}, {1, 400, 'MAMMOTH', 4000000, 1})
+  T.ok(p[1].d.cmd:find('squad.sortie', 1, true) and p[1].d.cmd:find('"target":[62,72,10]', 1, true), tostring(p[1].d.cmd))
+  T.ok(p[1].msg:find('[MAMMOTH, 4000000 cm3, reachable]', 1, true), p[1].msg)
+  local W2 = setup{tag = 'intfacts', manifest = false, sortie = 'A', units = S.fort_units()}
+  dfhack.maps.getWalkableGroup = function() return 7 end
+  for _, u in ipairs(S.army(3, 51, 8)) do W2.add_unit(u) end
+  S.run(W2, 300)
+  local i = events(W2, 'INTRUDER')
+  T.ok(#i >= 1, 'INTRUDER')
+  T.eq({i[1].d.race, i[1].d.reach}, {'GOBLIN', 1})
+  T.ok(i[1].d.cmd, 'the sortie is offered')
 end)
 
 T.test('Run 10: reflex.predator_near 0 keeps the old rule (any roofed wild danger on the citizens group)', function()

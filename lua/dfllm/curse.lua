@@ -912,7 +912,13 @@ function M.inspect_unit(K, c, p, key, env)
   if key == nil or tostring(key) == '' then return false, 'inspect what=unit needs key=<unit id or name>' end
   local u, id, hits, foreign = find_unit(K, p, key, env)
   if not u then
-    if foreign then return false, 'unit ' .. tostring(id) .. ' is not a citizen or resident of the fort' end
+    if foreign then
+      -- BUG-495: a PREDATOR / INTRUDER / WATER_PREDATOR names a unit that is no citizen: sense describes it (race, size,
+      -- flags, water, reach, distance); a unit sense cannot read keeps the old answer
+      local okc, ok2, msg, d = K.call('sense', 'describe', id)
+      if okc and ok2 == true and type(d) == 'table' then return true, msg, d end
+      return false, 'unit ' .. tostring(id) .. ' is not a citizen or resident of the fort' .. (okc and ok2 == false and msg and (' (' .. tostring(msg) .. ')') or '')
+    end
     if hits and #hits > 1 then
       return false, string.format('%d citizens share that name (%s): use the id', #hits, table.concat(hits, ','))
     end

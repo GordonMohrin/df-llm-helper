@@ -1813,6 +1813,11 @@ local function fish_want(K, c, r)
   for _, d in ipairs((c.tools or {}).details or {}) do if d.fish then spec = d end end
   if not spec then return 0, 'none' end
   st.fishzone = fishing_zone()
+  -- BUG-494 (Run 16b i2 Brotherarrow: a Hibbertopterus pack at the brook drowned the fisher and the carpenter): sense saw a
+  -- large or predatory wild unit in or beside water within reach of a citizen (census.w.hold): nobody fishes until it has
+  -- been away for sense's WATER.hold ticks, and the members leave the detail at once
+  local cw = K.census and K.census.w
+  if type(cw) == 'table' and cw.hold == 1 then return 0, 'water beast' end
   local mode = K.mode()
   if not HUNT_MODES[mode] or (mode ~= 'PEACE' and not r.p.famine) then                -- BUG-326
     if M.hunt_siege(K) then return 0, 'siege' end
@@ -4697,7 +4702,7 @@ local function tools(K, c, p, inv, engine, r)
         -- hunters outside the walls while the fort leaves PEACE: off the detail now (siege reflex, drills); every
         -- member then, also the player's
         local at_once = r ~= nil and ((spec.ranged ~= nil and r.hunt_why == 'siege') or     -- BUG-326: a real siege only
-                                      (spec.fish ~= nil and r.fish_why == 'siege'))
+                                      (spec.fish ~= nil and (r.fish_why == 'siege' or r.fish_why == 'water beast')))
         if at_once or now - ps.low >= (tc.shrink_days or 3) * DAY then
           local out, stay = {}, {}
           -- BUG-128: a member who holds the tool, has DF's work tool pair or joined less than keep_days ago stays
@@ -7618,6 +7623,8 @@ function M.fish_start(K, c, r)
   local last = type(p.fishz) == 'table' and p.fishz or nil
   if last then st.fishz = last end
   if not HUNT_MODES[K.mode()] then return nil end
+  local cw = K.census and K.census.w
+  if type(cw) == 'table' and cw.hold == 1 then return nil end       -- BUG-494: no new fishing zone beside a water beast
   if last and r.now - (math.tointeger(last.t) or 0) < (F.scan_days or 7) * DAY then return nil end
   local xs, ys, zn = {}, {}, {}
   for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do
