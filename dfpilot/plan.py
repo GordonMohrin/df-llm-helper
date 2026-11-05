@@ -293,7 +293,9 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "farms": farm_facts(save_dir, state),                     # BUG-297: an open farms project, a farm site
             "traps": _traps.facts(save_dir),                         # FR-96: doors on the ways in without a trap lane
             "grand": _grand_facts(save_dir, state),                  # FR-102/103: large rooms, the deep core
-            "seals": open_seals(save_dir, state)}
+            "seals": open_seals(save_dir, state),
+            "requests": request_facts(save_dir, state),             # BUG-418: PROJECT_REQUESTs nobody placed yet
+            "mood_ws": mood_ws_missing(save_dir, state)}            # BUG-418: R0 mood_ws: the moodable shops missing
 
 
 OFFICE_SURFACE_P = {"surface": 1}
@@ -1524,16 +1526,23 @@ def _drink_store(s: dict, f: dict) -> int | None:
     return -1 if f.get("drink_room") else None
 
 
-def drink_draft(s: dict, fort: dict, done: set) -> dict | None:
+def drink_draft(s: dict, fort: dict, done: set, force: bool = False) -> dict | None:
     """FR-69: the refuge drink store propose drafts while readiness says refuge_dry and none stands, is under way
     (fort.refuge.drink), was applied before, or has no site (fort.refuge.drink_fit 0); sized from the citizens
     (drink_want), the smaller one the ranking found room for (drink_fit), without the take_from link when the fort has
-    no core stockroom (fort.stockroom False)."""
+    no core stockroom (fort.stockroom False). BUG-418 `force`: R0 still says refuge_dry although a store stands that is smaller
+    than the citizens' need (Run 16d i4: a 6 tile store, drink 0<66, the player added refuge_drink by hand every year): the
+    missing part (want - tiles) is drafted as a second store; a standing store of the right size still waits for barrels."""
     f = (fort or {}).get("refuge") or {}
-    if not refuge_dry(s) or f.get("drink") or _drink_store(s, f) is not None or f.get("drink_fit") == 0 \
-            or (REFUGE_DRINK, None) in done:
+    if not refuge_dry(s) or f.get("drink") or f.get("drink_fit") == 0:
         return None
-    n = f.get("drink_fit") or drink_want(s)
+    want = drink_want(s)
+    n = f.get("drink_fit") or want
+    store = _drink_store(s, f)
+    if store is not None or (REFUGE_DRINK, None) in done:
+        if not (force and store is not None and store > 0 and isinstance(want, int) and store < want):
+            return None
+        n = min(want - store, f.get("drink_fit") or want)      # BUG-418: the standing store lacks this much
     p = {"n": n} if isinstance(n, int) else {}
     if (fort or {}).get("stockroom") is False:
         p["take"] = ""
@@ -2938,6 +2947,159 @@ def stale_core_keys(prev: dict | None, applied: set | None, fort: dict | None, s
             if b["tpl"] == "fortcore" and _build_key(b) not in applied}
 
 
+REQUEST_BEDS = ("bedrooms", REFUGE_BEDS)
+REQUEST_FRESH_T = 40 * 1200            # a PROJECT_REQUEST is open while its newest repeat is at most 40 game days old
+REQUEST_STONE_WHY = ("mood_rock", "rock")      # the stone dig requests follow places itself (and propose drafts STONE_DIG)
+REQUEST_MAX = {"bedrooms": 40, REFUGE_BEDS: REFUGE_BEDS_MAX}      # the templates' `n` limits
+
+
+def mood_ws_missing(save_dir: Path, state: dict | None) -> list[str]:
+    """BUG-418 (Run 16d i4: 'mood shops missing 4124 days: Jewelers,MetalsmithsForge,Clothiers +4' and a draft without one
+    workshops entry; the player added `workshops only=...` by hand each year): the moodable shop types no workshop of the fort
+    manifest has, built or planned, while readiness R0 names mood_ws; [] otherwise (or unknown)."""
+    if "mood_ws" not in (((state or {}).get("ready") or {}).get("fail") or []):
+        return []
+    try:
+        return _cmd.workshops_missing(save_dir)
+    except Exception:                                   # noqa: BLE001 - no bp package or manifest: nothing drafted
+        return []
+
+
+def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
+    """BUG-418 (Run 16d i4: 'bedrooms x19: free 0 < homeless 15 + 4' every ~9 days from #5385, follow places no bedrooms for that
+    why, 15 homeless; the player put bedrooms/refuge_beds into the plan by hand each year): the open PROJECT_REQUESTs, newest
+    per template, [{tpl, n, why, types}]: events of the last REQUEST_FRESH_T ticks before the newest one, bedrooms/refuge_beds/
+    refuge_drink and workshops (types the fort manifest lacks), not a stone dig request (follow places those), none newer than
+    a PROJECT_DONE of a project of that template, none while a project of that template is under way (not done, not parked)."""
+    ids: dict[str, str] = {}
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and isinstance(doc.get("tpl"), str):
+            ids[p.stem] = doc["tpl"]
+    reqs: dict[str, dict] = {}
+    done_t: dict[str, int] = {}
+    newest = None
+    for e in files.iter_events_rev(save_dir):
+        tick = e.get("tick")
+        if not isinstance(tick, int) or isinstance(tick, bool):
+            continue
+        newest = tick if newest is None else newest
+        if tick < newest - REQUEST_FRESH_T:
+            break
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "PROJECT_DONE" and ids.get(d.get("proj")):
+            done_t[ids[d["proj"]]] = max(done_t.get(ids[d["proj"]], -1), tick)
+        elif e.get("type") == "PROJECT_REQUEST" and isinstance(d.get("tpl"), str):
+            tpl = d["tpl"]
+            if tpl in (*REQUEST_BEDS, REFUGE_DRINK) and not (tpl == "bedrooms" and d.get("why") in REQUEST_STONE_WHY):
+                if tpl not in reqs:                          # newest first
+                    reqs[tpl] = {"tpl": tpl, "n": d.get("n") if _nat(d.get("n")) else None, "why": str(d.get("why") or ""),
+                                 "tick": tick}
+            elif tpl == "workshops" and isinstance(d.get("types"), list):
+                r = reqs.setdefault("workshops", {"tpl": "workshops", "types": [], "why": str(d.get("why") or ""),
+                                                  "tick": tick})
+                r["types"] += [t for t in d["types"] if isinstance(t, str) and t not in r["types"]]
+    done = done_projects(save_dir)
+    rows = {r[0]: str(r[3] if len(r) > 3 else "") for r in (state or {}).get("proj") or []
+            if isinstance(r, list) and r and isinstance(r[0], str)}
+    under = {tpl for pid, tpl in ids.items() if pid not in done and "parked" not in rows.get(pid, "")}
+    out = []
+    for tpl, r in reqs.items():
+        if r["tick"] <= done_t.get(tpl, -1) or tpl in under:
+            continue
+        if tpl == "workshops":
+            try:
+                r["types"] = _cmd.workshops_missing(save_dir, r["types"])
+            except Exception:                           # noqa: BLE001
+                r["types"] = []
+            if not r["types"]:
+                continue
+        out.append({k: v for k, v in r.items() if k != "tick"})
+    return out
+
+
+def request_drafts(s: dict | None, fort: dict | None, done: set, builds: list[dict],
+                   info: dict | None, kept: list[dict] | None = None) -> tuple[list[dict], str]:
+    """BUG-418 (propose): the builds for what the kernel asked for and nobody placed: the open requests of fort.requests
+    (bedrooms n, refuge_beds n, workshops for named shop types), the moodable shops R0 mood_ws names (fort.mood_ws, one
+    workshops build with skip = the other moodable types) and refuge_drink while R0 says refuge_dry (also when a store stands
+    empty or was applied before). Each is drafted once (the same template and params already in `builds` or under way is not
+    repeated; `kept` = the builds of the same year's plan that stays); (builds, note)."""
+    out: list[dict] = []
+    why: list[str] = []
+    fort = fort or {}
+
+    def have(b: dict) -> bool:
+        return any(x["tpl"] == b["tpl"] and (x.get("p") or {}) == (b.get("p") or {}) for x in (*builds, *out, *(kept or ())))
+
+    for r in fort.get("requests") or []:
+        tpl = r.get("tpl")
+        if tpl in REQUEST_BEDS and (info is None or tpl in info):
+            n = max(1, min(r["n"] if _nat(r.get("n")) else 4, REQUEST_MAX[tpl]))
+            b = {"tpl": tpl, "site": "S1", "p": {"n": n}}
+            if not have(b):
+                out.append(b)
+                why.append(f"{tpl} n={n} ({_cut(r.get('why') or 'PROJECT_REQUEST')})")
+    want = list(dict.fromkeys([*(fort.get("mood_ws") or []),
+                               *(t for r in fort.get("requests") or [] if r.get("tpl") == "workshops"
+                                 for t in r.get("types") or [])]))
+    mood = _cmd._moodable() if want else []
+    if want and mood and (info is None or "workshops" in info) and not any(
+            x["tpl"] == "workshops" and "skip" not in (x.get("p") or {}) and not (x.get("p") or {}).get("surface")
+            for x in builds):
+        extra = [t for t in want if t not in mood]
+        p = {"skip": ",".join(m for m in mood if m not in want)}
+        if extra:
+            p["add"] = ",".join(extra)
+        b = {"tpl": "workshops", "site": "S1", "p": p}
+        if not have(b):
+            out.append(b)
+            why.append("workshops " + ",".join(want))
+    dd = drink_draft(s or {}, fort, done, force=True)
+    if dd and (info is None or REFUGE_DRINK in info) and not any(x["tpl"] == REFUGE_DRINK for x in (*builds, *out)):
+        out.append(dd)
+        why.append("refuge_drink (R0 refuge_dry)")
+    note = ("; BUG-418: open requests and R0 blockers drafted: " + "; ".join(why)) if why else ""
+    return out, note
+
+
+def wet_core_guard(save_dir: Path, params: dict | None, snap: dict | None = None) -> tuple[dict | None, str]:
+    """BUG-419 (Run 16b i2 Ostgate y399, event #5420: follow placed fortcore stage 1 @S1 'water 15 steps, aquifer at z123,z126,
+    z127,z130', score 0, after PLAN_EXHAUSTED; the player cancelled it): follow's own fortcore (starter, request) never takes a
+    site that is wet: score 0 or an 'aquifer at z..' reason line. (params to place with, '') when the best free site is dry, or
+    a shallower core depth (BUG-364) has a dry one; (None, why) otherwise: no wet core without the aqshaft route (BUG-412), the
+    reason says what `plan propose` drafts instead. Unknown (no bp package, no ranking, the placement's own error): (params, '')."""
+    params = dict(params or {})
+
+    def wet(c: dict) -> bool:
+        return not c.get("score") or "aquifer at" in str(c.get("why", ""))
+    try:
+        free, _, _ = free_sites(save_dir, "fortcore", params, snap, n=1)
+    except (BpError, BpUnavailable, ValueError):
+        return params, ""
+    if not free or not wet(free[0]):
+        return params, ""
+    sh = _cmd.shallower_core_sites(save_dir, "fortcore", params, snap, n=1, have=free)
+    if sh and not wet(sh[1][0]):
+        return {**params, "depth": sh[0]}, ""
+    top = free[0]
+    where = f"{top['anchor']} (score {top.get('score', 0)}: {_cut(str(top.get('why', '')))})"
+    if surface_core_on():
+        return None, (f"BUG-419: the best fortcore site {where} is wet: follow places no wet core; the surface core "
+                      "is the alternative (dfllm plan propose)")
+    try:
+        route = aquifer_route(save_dir)
+    except Exception as e:                              # noqa: BLE001 - an older bp package: judged by the site alone
+        route = {"ok": False, "why": f"{type(e).__name__}: {e}"}
+    if route.get("ok"):
+        return None, (f"BUG-419: the best fortcore site {where} is wet: follow places no wet core; the aqshaft route "
+                      f"(BUG-412) is free: dfllm plan propose drafts aqshaft@{route['col']['x']},{route['col']['y']} then "
+                      f"fortcore p.aquifer=pass depth={route['depth']} at {route['site']['anchor']}")
+    return None, (f"BUG-419: the best fortcore site {where} is wet and no aqshaft route exists "
+                  f"({_cut(route.get('why') or '?')}): nothing is placed; dfllm bp sites fortcore --fresh, "
+                  "dfllm plan propose says more")
+
+
 def propose(state: dict | None, phases: dict | None, prev: dict | None, decisions: dict | None = None,
             tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None,
             upto: str | None = None, live: dict | None = None) -> dict:
@@ -3076,6 +3238,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs and p["id"] <= lib_top:
                     libs.append(d["lib"])
+    kept_b = [b for se in prev["seasons"] for b in se["build"]] if prev and prev.get("year") == year else []
+    rq_builds, rq_note = request_drafts(s, fort, done, builds, info, kept_b)    # BUG-418: requests, mood shops, refuge drink
+    builds += rq_builds
     gaps = defense_on(s, target)                 # BUG-377: refuge dry / traps short / armor worn: defence before growth
     tb, tnote = _traps.draft(fort, max(target, _traps.TRAPS_PHASE) if gaps else target, builds, prev, year, info, rb)   # FR-96
     builds += tb                                 # BUG-317: and at=bridges for the bridge ways
@@ -3205,7 +3370,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + depot_note + hosp_note + sc_note + aq_note + office_note
+    doc["notes"] += core_note + depot_note + hosp_note + sc_note + aq_note + office_note + (
+        rq_note if any(b is x for b in builds for x in rq_builds) else "")
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
         if armor and not _bar_want(doc["trade"]["want"]):
