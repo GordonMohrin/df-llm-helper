@@ -180,6 +180,9 @@ NEXT["PROJECT_STALE"] = ("tell Gordon what follow cancelled (d.msg: project, tem
                          "missing mechanisms itself); dfllm plan propose y.json draws the template again with the material in reach, "
                          "plan check, plan apply; a core, seal or water project is never cancelled this way (PROJECT_BLOCKED why=stale)")
 STALE_CHECK_EVERY_S = 600                      # BUG-435: how often follow looks at the set-aside projects
+CORE_SITE_EVERY_S = 300                        # BUG-441: how often follow looks for a queued core above / in the aquifer
+ORPHAN_FIRST_S = 120                           # BUG-442: the first sweep of a save folder comes this long after follow saw it
+ORPHAN_EVERY_S = 900                           # BUG-442: how often follow asks the kernel about bp files it may not know
 STALE_RETRY_S = 21600                          # BUG-435: a refused cancel is tried again after this long
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
@@ -645,6 +648,9 @@ class Follower:
         self._plan_read = 0.0
         self._stale_read = 0.0
         self._stale_tried: dict[str, float] = {}     # BUG-435: project id -> wall of the last cancel try
+        self._orphan_read = 0.0                      # BUG-442: wall of the last orphan sweep
+        self._core_site_read = 0.0                   # BUG-441: wall of the last core-site look
+        self._core_site_tried: dict[str, float] = {}     # BUG-441: project id -> wall of the last re-site cancel
         self._beat = -1e18
 
     @staticmethod
@@ -684,6 +690,7 @@ class Follower:
         self.tail = files.EventTail(d, since, tick_fn=lambda: files.current_tick(d))    # BUG-121
         self.since = None
         self._pruned = 0.0
+        self._orphan_read = 0.0                # BUG-442: a new save folder / reload: the bp files are asked about again
         files.prune_snaps(d)
 
     def _fresh_jobs(self, jobs: dict) -> dict:
@@ -752,6 +759,8 @@ class Follower:
         self._check_quicksave(now)
         self._check_plan(now)
         self._check_stale(now)
+        self._sweep_orphans(now)
+        self._check_core_site(now)
         if self.auto or self.audit:
             self._run_jobs(now)
         if now - self._pruned >= PRUNE_EVERY_S:
@@ -1026,6 +1035,53 @@ class Follower:
         except Exception as ex:                        # noqa: BLE001 - the stale check must never stop the follower
             self._fail("stale projects", f"{type(ex).__name__}: {ex}", now)
 
+    def _check_core_site(self, now: float) -> None:
+        """BUG-441 (Run 16b i2 Roadvises, 16c i3 Castletongs): a fortcore stage 1 that was queued before the aquifer was known and is
+        not started (plan.core_over_aquifer: at most CORE_UNSTARTED_PCT % dug, its deepest level not under the lowest known aquifer
+        level) is re-sited: a plain bp.cancel (only the designations not dug yet go; the file moves to bp/.cancelled), PROJECT_STALE
+        says why, and `plan propose` draws aqshaft@S1 and the core below the aquifer (plan.surface_facts / aquifer_route). Never with
+        --no-auto, never in a fight; the same project is cancelled once per STALE_RETRY_S."""
+        if not self.auto or self.dir is None or now - self._core_site_read < CORE_SITE_EVERY_S:
+            return
+        self._core_site_read = now
+        try:
+            state = files.read_state(self.dir)
+            if (state or {}).get("mode") != "PEACE":
+                return
+            hit = plan_mod.core_over_aquifer(self.dir, state)
+            if not hit or now - self._core_site_tried.get(hit["proj"], -1e18) < STALE_RETRY_S:
+                return
+            self._core_site_tried[hit["proj"]] = now
+            self._send("bp.cancel", {"proj": hit["proj"]}, f"core re-site {hit['proj']}", now)
+            self._synth("PROJECT_STALE", f"BUG-441: {hit['why']}: the core was queued before the aquifer was known; cancelled (only "
+                        "what is not dug yet goes). dfllm plan propose drafts the aqshaft through every aquifer level and the core "
+                        "below the lowest", now)
+        except Exception as ex:                        # noqa: BLE001 - the core-site check must never stop the follower
+            self._fail("core re-site", f"{type(ex).__name__}: {ex}", now)
+
+    def _sweep_orphans(self, now: float) -> None:
+        """BUG-442 (Run 16b i2 Roadvises: bp/y372s0b0.json, a project the kernel did not know ('no project y372s0b0'), blocked every
+        new fortcore stage 1 for a year; retire() ran only after an ok bp.cancel and the player may not delete in dfllm-runtime): at
+        start and every ORPHAN_EVERY_S follow asks the kernel (`inspect persist key=bp.<id> field=tpl`, no wait) about the few bp
+        files that may be orphans (cmd.orphan_candidates); the reply (_read_replies) retires the ones it does not hold. A fort heals
+        itself after a reload. Never with --no-auto."""
+        if not self.auto or self.dir is None or now - self._orphan_read < ORPHAN_EVERY_S:
+            return
+        if self._orphan_read == 0.0:           # first look at a save folder: after ORPHAN_FIRST_S (the kernel is loading, the reply is slow)
+            self._orphan_read = now - ORPHAN_EVERY_S + ORPHAN_FIRST_S
+            return
+        self._orphan_read = now
+        try:
+            from .cmd import orphan_candidates
+            asked = {r.get("orphan") for r in (self.jobs.get("replies") or {}).values()}
+            for pid in orphan_candidates(self.dir):
+                if pid in asked:
+                    continue
+                cid = self._send("inspect", {"what": "persist", "key": f"bp.{pid}", "field": "tpl"}, f"orphan check {pid}", now)
+                self.jobs["replies"][cid]["orphan"] = pid
+        except Exception as ex:                        # noqa: BLE001 - the sweep must never stop the follower
+            self._fail("orphan sweep", f"{type(ex).__name__}: {ex}", now)
+
     def _send(self, verb: str, args: dict, what: str | None, now: float, snap: dict | None = None,
               need: list | None = None) -> str:
         """Send without waiting; with `what`, the reply is read in _run_jobs (refusal/timeout -> AUTO_FAIL)."""
@@ -1191,16 +1247,28 @@ class Follower:
             job = self.jobs.get(key) if key else None
             mine = job is not None
             if reply is None:
+                if r.get("orphan"):
+                    continue                   # BUG-442: no kernel answer (DF closed): asked again at the next sweep, no AUTO_FAIL
                 if mine and r["verb"] == "snapshot":
                     del self.jobs[key]         # no second 'no sites snapshot' fail for the same cause
                 self._fail(r["what"], f"no reply to {r['verb']} {cid} within {AUTO_TIMEOUT_S}s", now)
                 continue
             files.log_cli(self.dir, "follow", f"reply:{r['verb']}", {"id": cid},
                           ("ok " if reply.get("ok") else "ERR ") + str(reply.get("msg", "")))
+            if r.get("orphan"):                # BUG-442: the kernel's answer to 'do you hold this project?'
+                from .cmd import kernel_knows, retire
+                if kernel_knows(reply) is False and retire(self.dir, r["orphan"]):
+                    files.log_cli(self.dir, "follow", "retire:orphan", {"proj": r["orphan"]},
+                                  "the kernel does not know this project: bp file retired")
+                continue
             if reply.get("ok"):
                 if r["verb"] == "bp.cancel" and isinstance(r.get("proj"), str):
                     from .cmd import retire        # BUG-435: the file moves to bp/.cancelled (send(wait_s>0) does it for the CLI)
                     retire(self.dir, r["proj"])
+                continue
+            if r["verb"] == "bp.cancel" and isinstance(r.get("proj"), str) and "no project " in str(reply.get("msg", "")):
+                from .cmd import retire            # BUG-442: the kernel has no such project: the file goes, no AUTO_FAIL
+                retire(self.dir, r["proj"])
                 continue
             if r["verb"] == "bp.place" and r.get("tpl"):
                 from .cmd import unplace
@@ -1252,13 +1320,23 @@ class Follower:
             ap = args.get("p") or {}
             if tpl == "fortcore" and not ap.get("retrofit") and not ap.get("aquifer") and (ap.get("stage") or 1) == 1 \
                     and re.fullmatch(r"S[0-9]+", str(args["site"])):
-                from .plan import wet_core_guard
+                from .plan import CORE_PROBE_DEPTH, core_span_gate, wet_core_guard
                 # BUG-419 (Run 16b i2 #5420: a wet fortcore, score 0, placed after PLAN_EXHAUSTED): never a wet site by itself
                 wp, why = wet_core_guard(self.dir, args.get("p"), snap)
                 if wp is None:
                     raise BpError(why)
                 if wp != (args.get("p") or {}):
                     args["p"] = wp
+                # BUG-441 (Run 16b i2, 16c i3: follow queued the fortcore 1 minute after adopt, before the aquifer was known; it
+                # landed above and in it and the aqshaft sites lay beside it): no fortcore of its own before the span is known
+                gate = core_span_gate(self.dir, args.get("p"), snap)
+                if gate["action"] in ("refuse", "wait"):
+                    raise BpError(gate["why"])
+                if gate["action"] == "probe":
+                    tpl = "aqshaft"                # the probe shaft goes first; the starter asks again at the next PLAN_EXHAUSTED
+                    args = {"tpl": "aqshaft", "site": "S1", "p": {"depth": CORE_PROBE_DEPTH}}
+                    prev = files.read_json(_placed(self.dir, tpl))
+                    files.log_cli(self.dir, "follow", "auto:probe", args, gate["why"])
             if tpl == "farms":
                 cid = self._place_farms(args, now, snap)
             elif tpl == "workshops" and key != "starter":

@@ -389,4 +389,21 @@ T.test('Run 11: picks short and no bar: economy.trade_wants asks the caravans fo
   T.eq(wants(W2), {})
 end)
 
+-- BUG-443 (Run 16c i3: an aqshaft ring hung a year in a soil fort): mat_for answers yes for ONE log or boulder; wall_stock counts
+T.test('BUG-443: economy.wall_stock counts the free blocks, boulders and logs (mat_for says yes for one of them)', function()
+  local W = world{boulders = 1, logs = 3, setup = function(W)
+    F.item(W, 'BLOCKS', {stack_size = 4})
+  end}
+  settle(W)
+  T.eq(mat_for(W, 'wall', 6) ~= nil, true, 'mat_for: one boulder / a log is enough for the question')
+  local ok, st = W.K.call('economy', 'wall_stock')
+  T.ok(ok and type(st) == 'table', 'wall_stock answers')
+  T.eq({st.blocks, st.rock}, {4, 1})
+  T.ok(st.have >= 5 and st.have < 6 + 30, 'blocks + boulders + logs above the floor: ' .. tostring(st.have))
+  local W0 = world{boulders = 0, logs = 0}
+  settle(W0)
+  local _, s0 = W0.K.call('economy', 'wall_stock')
+  T.eq({s0.have, s0.blocks, s0.rock, s0.logs}, {0, 0, 0, 0})
+end)
+
 T.done()

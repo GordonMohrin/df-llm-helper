@@ -361,7 +361,8 @@ RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d"
                     # `patients` patients lie in the fort; stuck_days without progress lifts the pause
                     "care_first": {"on": "bool", "stuck_days": (1, 60), "patients": (1, 250)},
                     "queue": {"yield_days": (1, 60), "park_days": (1, 400), "idle_days": (1, 400),
-                              "reach_days": (1, 60), "stale_days": (0, 3000), "stale_every": (1, 400)},   # BUG-328, BUG-352, BUG-435
+                              "reach_days": (1, 60), "stale_days": (0, 3000), "stale_every": (1, 400),
+                              "stall_days": (0, 3000), "stall_every": (1, 400)},   # BUG-328, BUG-352, BUG-435, BUG-444
                     # BUG-066 / FR-76: the manifest follows the standing workshops (runner.lua Q.sync)
                     "reclaim": {"on": "bool", "gone_scans": (1, 10), "min_ws": (1, 50), "ask_days": (1, 60)}}
 
@@ -669,7 +670,8 @@ def zones_errors(path: str | Path | None = None) -> list[str]:
 # --config refuses it.
 # BUG-435: stale_project_days = a project set aside this many days without progress is cancelled by follow (the templates in
 # plan.STALE_CANCEL_TPLS) and drafted again by `plan propose`; 0 = never
-PLAN_LIM: dict = {"stale_apply_years": (0, 20), "surface_core": "bool", "stale_project_days": (0, 3000)}
+PLAN_LIM: dict = {"stale_apply_years": (0, 20), "surface_core": "bool", "stale_project_days": (0, 3000),
+                  "core_probe": "bool"}                       # BUG-441: aqshaft probe before follow's own fortcore
 
 
 def plan_errors(path: str | Path | None = None) -> list[str]:

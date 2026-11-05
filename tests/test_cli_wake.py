@@ -7,7 +7,7 @@ import time
 import pytest
 from cli_v2_helpers import FakeKern, append_events, ev, inbox_docs, install_fake_bp, make_runtime, reset_paths
 
-from dfpilot import files, schema, wake
+from dfpilot import files, plan, schema, wake
 from dfpilot.events import est_tokens
 
 TOMBS_COOLDOWN = wake.TOMBS_COOLDOWN_S + 1
@@ -515,6 +515,7 @@ def test_follow_plan_exhausted_p0_autostarts_first_deliverable(save, monkeypatch
     """Live L0/L1: with no plan the fort idled a year and a dwarf starved. PLAN_EXHAUSTED in P0/P1 places the
     phase's first proj deliverable without a project at once (no LLM); the wake still goes out."""
     calls = install_fake_bp(monkeypatch)
+    monkeypatch.setattr(plan, "core_probe_on", lambda: False)    # BUG-441: with the probe on, an aqshaft goes first (tests/test_bug441_445_f28.py)
     for p in (save / "bp").glob("*.json"):
         p.unlink()                                   # a fresh fort: nothing applied yet
     st = files.read_state(save)

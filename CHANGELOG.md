@@ -1,5 +1,18 @@
 # CHANGELOG dfpilot
 
+## Fort core under the aquifer, orphan bp files, ring without boulders, stall announcement (BUG-441 to BUG-445, 2026-11-05; offline, live-untested)
+- **Why:** Run 16b i2 Roadvises / 16c i3 Castletongs: follow queued the fortcore 1 minute after adopt, before the aquifer was known (i2: z120/z119 light, z115 and z112 heavy), so the core sat above / in it and `bp sites aqshaft` found
+  every column beside it; a dead bp file the kernel did not know blocked every new stage 1; an aqshaft ring on a heavy level hung 60 % for a year in soil (no boulders, no event); aqshaft S1 held a slot 556 days without a word.
+- **BUG-441:** `plan.core_span_gate` in `wake._place` (follow's own fortcore stage 1): a known aquifer level refuses it (the core goes below the lowest level, `plan propose` drafts aqshaft + `p.aquifer=pass`); nothing known and no probe places an
+  `aqshaft` probe (12 levels) first; the probe digs -> wait; probe done without aquifer -> the core; `plan.core_probe` (true). `wake._check_core_site` cancels a queued, not started (<= 20 %) core above / in the known aquifer.
+- **BUG-442:** a bp.cancel reply 'no project' retires the file; `cmd.orphan_candidates` + `inspect persist key=bp.<id>`: follow's sweep (start, every 15 min) and `plan apply` retire bp files the kernel does not hold (to `bp/.cancelled`).
+- **BUG-443:** `economy.wall_stock` (count of blocks / free boulders / logs; mat_for says yes for one): the aqshaft ring and soil walls check it, register the walls as a rock need (stone dig, caravans) and say
+  PROJECT_BLOCKED `aq_stall:no_boulders` with commands; a ring that does not move for 3 days says `aq_stall:ring_stuck`.
+- **BUG-444:** `runner.Q.stall_scan`: a running (not set aside) project without progress for `queue.stall_days` (60) is announced as PROJECT_BLOCKED `why=stalled` with the cause and commands, every `stall_every` (60) days.
+- **BUG-445:** the embark checklist's aquifer item names the unknown span of a 'light' panel; `bp.place surfacecore` is refused unless `plan.surface_core`.
+- **Contract:** CONTRACTS.md (`economy.wall_stock`, PROJECT_BLOCKED why values, `runner.queue.stall_days/stall_every`, `plan.core_probe`); no schema.py change (the generated appendix is unchanged).
+- **Tests:** tests/test_bug441_445_f28.py (15), tests/lua/test_bug443_444_ring_stall.lua (3), test_embark_bug445.lua (1), test_economy_pieces.lua (+1). **Live check:** see the five bug files.
+
 ## Patients' water without a hospital, stale projects, a plan check verdict that says why (BUG-434 to BUG-436, 2026-11-05; offline, live-untested)
 - **Why:** Run 16d i4 Mazelanterns y399-y404: 11 died of thirst with 272 days of barrel drink (8 patients over 60,000, no hospital, accepted water 83-101 tiles away); nine projects set aside 300-900 days
   (traps 912 d 'waits for trapparts', tombs 461 d, fortcore 341 d); `plan check` REJECTED with no ERROR line in the tail.

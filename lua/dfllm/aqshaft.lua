@@ -176,6 +176,9 @@ local STALL_CMD = {
   no_mason = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm bp sites workshops surface=1 --fresh (Masons)",
   no_smoother = "dfllm cmd inspect '{\"what\":\"workload\"}' (stone detailing / smoothing labor)",
   ring_dig = "dfllm cmd inspect '{\"what\":\"workload\"}' (mining labor); dfllm cmd inspect '{\"what\":\"reach\"}'",
+  -- BUG-443: no free boulder or block for the ring walls (a soil fort): the caravans, a stone dig down to hard stone (plan propose)
+  no_boulders = "dfllm cmd trade.want '{\"add\":[\"stone\",\"block\"]}'; dfllm plan propose (a stone dig to hard stone); dfllm cmd inspect '{\"what\":\"workload\"}'",
+  ring_stuck = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm cmd inspect '{\"what\":\"reach\"}'; dfllm cmd bp.cancel proj=%s",
 }
 local STALL_TXT = {
   unreachable = 'no citizen reaches the shaft tile',
@@ -183,6 +186,8 @@ local STALL_TXT = {
   no_mason = 'no mason builds the soil walls',
   no_smoother = 'nobody smooths the side walls',
   ring_dig = 'nobody channels the ring tile above the heavy level',
+  no_boulders = 'no free boulders or blocks for the ring walls (soil: the stone lies deeper)',   -- BUG-443
+  ring_stuck = 'the ring has not moved',                                                        -- BUG-443
 }
 local function stall(X, P, r, z, L, why, days)
   local first = type(L.stall) ~= 'table' or L.stall.why ~= why
@@ -210,13 +215,37 @@ function A.stall_text(rt, id)
   return string.format('stall z%d: %s', r.cur_z, STALL_TXT[L.stall.why] or tostring(L.stall.why))
 end
 
+-- BUG-444: where a shaft stands, for the stall announcement: 'z113 dig, ring wall/new/new/new' ('' when it is no live shaft)
+function A.where(rt, id)
+  local r = type(rt) == 'table' and type(rt.aq) == 'table' and rt.aq[id] or nil
+  if type(r) ~= 'table' or r.k ~= 'shaft' or r.heavy or r.done == 1 or type(r.levels) ~= 'table' then return '' end
+  local L = r.levels[tostring(r.cur_z)]
+  if type(L) ~= 'table' then return '' end
+  local out = string.format('z%s %s', tostring(r.cur_z), tostring(L.state))
+  if type(L.ring) == 'table' and type(L.ring.pieces) == 'table' then
+    local st = {}
+    for _, pc in ipairs(L.ring.pieces) do st[#st + 1] = tostring(pc[3]) end
+    out = out .. ', ring ' .. table.concat(st, '/')
+  end
+  return out
+end
+
 -- the plug reserve: wall material for CAVERN_PLUG / the soil walls (economy.mat_for 'wall'); nil = fine or unknown (no
 -- economy in a mock), else the stall cause
-local function plug_missing(X, n)
+local function plug_missing(X, n, P)
   if type(X.mat) ~= 'function' then return nil end
   local via, why = X.mat(n or A.CFG.plug_walls)
-  if via ~= nil or why == nil or why == 'no economy' then return nil end
-  return tostring(why):find('mason', 1, true) and 'no_mason' or 'no_stone'
+  if via == nil and why ~= nil and why ~= 'no economy' then
+    return tostring(why):find('mason', 1, true) and 'no_mason' or 'no_stone'
+  end
+  -- BUG-443 (Run 16c i3: mat_for says yes for ONE log or boulder; the ring ate none and hung 60 % for a year): the COUNT of free
+  -- blocks / boulders / logs must cover the walls; the need is registered with economy (a stone dig, the caravans) either way
+  if type(X.wall_stock) == 'function' and n then
+    if type(X.need) == 'function' and P then X.need(n, 'aqshaft ' .. tostring(P.id)) end
+    local s = X.wall_stock()
+    if type(s) == 'table' and (tonumber(s.have) or 0) < n then return 'no_boulders' end
+  end
+  return nil
 end
 
 local function designate(X, P, x, y, z, k, marker, data)
@@ -288,7 +317,7 @@ local function dig_step(X, P, d, r, z, L)
     -- BUG-412: the plug reserve first. Below the top level the shaft may meet water at any level; without wall material
     -- the CAVERN_PLUG (and a soil seal) cannot be built, so nothing deeper is designated until the fort can make walls
     if P.stage >= 1 then
-      local miss = plug_missing(X)
+      local miss = plug_missing(X, A.CFG.plug_walls, P)      -- BUG-443: the count of walls, not one log
       if miss then
         stall(X, P, r, z, L, miss)
         return 'done'
@@ -442,7 +471,7 @@ function A.ring_step(X, P, d, r, z, L)
   if type(R) ~= 'table' then
     if ring_stacked(X, P, d, r, z, L) then return 'done' end
     if L.noring then return nil end
-    local miss = plug_missing(X, A.CFG.plug_walls + #ORTH)
+    local miss = plug_missing(X, A.CFG.plug_walls + #ORTH, P)
     if miss then stall(X, P, r, z, L, miss); return 'done' end
     unstall(X, L)
     R = {pieces = {}, t = X.now()}
@@ -454,6 +483,15 @@ function A.ring_step(X, P, d, r, z, L)
   end
   if R.done == 1 then return nil end
   local t = X.now()
+  -- BUG-443 (Run 16c i3: the ring of a heavy level stood at 60 % for a year, no event): whatever waits silently below (a hidden
+  -- ring tile, a wall nobody builds), a ring whose pieces did not change state for A.CFG.stall says so once (with the commands)
+  local sig = {}
+  for _, pc in ipairs(R.pieces) do sig[#sig + 1] = tostring(pc[3]) end
+  sig = table.concat(sig, ',')
+  if R.sig ~= sig then R.sig, R.sigt = sig, t; X.dirty()
+  elseif t - (int(R.sigt) or t) >= A.CFG.stall and L.stall == nil then
+    stall(X, P, r, z, L, 'ring_stuck', (t - (int(R.sigt) or t)) // DAY)
+  end
   for _, pc in ipairs(R.pieces) do
     if pc[3] ~= 'done' then
       local top, bot = X.tile(pc[1], pc[2], z + 1), X.tile(pc[1], pc[2], z)
@@ -496,6 +534,11 @@ function A.ring_step(X, P, d, r, z, L)
         X.dirty()
       end
       if pc[3] == 'open' then
+        local left = 0
+        for _, q in ipairs(R.pieces) do if q[3] ~= 'done' and q[3] ~= 'wall' then left = left + 1 end end
+        local miss = plug_missing(X, left, P)     -- BUG-443: an open ring tile with no wall material: said, not designated blind
+        if miss == 'no_boulders' then stall(X, P, r, z, L, miss); return 'done' end
+        if L.stall ~= nil and L.stall.why == 'no_boulders' then unstall(X, L) end
         local ok, st = X.qf{mode = 'build', data = cell1('Cw'), pos = {pc[1], pc[2], z}}
         local n = ok and type(st) == 'table' and int(st.build_designated) or nil
         if not ok or (n ~= nil and n <= 0) then
@@ -650,13 +693,13 @@ function A.seal_step(X, P, d, r, z, L)
   if left > 0 then
     -- BUG-412: a seal that stands unfinished for A.CFG.stall without a piece changing says why (visible, with a command)
     if X.now() - (int(L.sealt) or X.now()) >= A.CFG.stall then
-      local wall, smooth_left = false, false
+      local wall, smooth_left, nwall = false, false, 0
       for _, p in ipairs(L.seal_tiles) do
         if p[5] ~= 'done' then
-          if p[4] == 'soil' then wall = true elseif p[4] == 'stone' then smooth_left = true end
+          if p[4] == 'soil' then wall = true; nwall = nwall + 1 elseif p[4] == 'stone' then smooth_left = true end
         end
       end
-      local why = wall and (plug_missing(X) or 'no_mason') or smooth_left and 'no_smoother' or nil
+      local why = wall and (plug_missing(X, nwall, P) or 'no_mason') or smooth_left and 'no_smoother' or nil   -- BUG-443
       if why then stall(X, P, r, z, L, why, (X.now() - (int(L.sealt) or X.now())) // DAY) end
     end
     return 'done'
