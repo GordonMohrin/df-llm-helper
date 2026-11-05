@@ -701,4 +701,61 @@ T.test('BUG-451: a BREACH ends the release at once (the station is ordered again
   T.ok(orders_of(W, 'A'):find('station@', 1, true), 'BREACH: the release ended, station ordered ' .. orders_of(W, 'A'))
 end)
 
+-- review of round 28 (BUG-451): feed_pass was throttled by FEED_EVERY before it looked at the mode, and apply_squad kept the feed hold
+-- even when forced, so a BREACH or a posture change during a release was swallowed for 600-1200 ticks
+local function released_world(tag)
+  local W = world{tag = tag}
+  X.call(W, 'military', 'posture', 'B2_HOLD', true)
+  run(W, 100)
+  local uid
+  for _, p in ipairs(X.squad_of(W, 'A').positions) do
+    if p.occupant >= 0 then uid = W.hfs[p.occupant].unit_id end
+  end
+  local u = W.unit(uid)
+  u.counters2 = {hunger_timer = 70000, thirst_timer = 0}
+  u.job = {}
+  run(W, 700)
+  T.eq(orders_of(W, 'A'), '', 'released')
+  return W, u
+end
+
+T.test('BUG-451 review: a posture change during the release gives the new station at once (old: swallowed up to FEED_EVERY ticks)', function()
+  local W = released_world('st451d')
+  X.call(W, 'military', 'posture', 'STATION_B1', false)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'no run in between: ' .. orders_of(W, 'A'))
+  T.ok(#logs(W, 'feed release ended by a forced') >= 1 or #logs(W, 'back to its station at once') >= 1, 'kern.log says so')
+end)
+
+T.test('BUG-451 review: a BREACH during the release is not throttled by FEED_EVERY: the station is back within one frame', function()
+  local W = released_world('st451e')
+  W.K.set_mode('BREACH', 'test')
+  run(W, 20)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'BREACH, 20 ticks later: ' .. orders_of(W, 'A'))
+end)
+
+T.test('BUG-451 review: hostiles at the station in a SIEGE: nobody is released; one released is called back', function()
+  local W = world{tag = 'st451f'}
+  X.call(W, 'military', 'posture', 'B2_HOLD', true)
+  run(W, 100)
+  local o = X.squad_of(W, 'A').orders[0]
+  T.ok(o and o.kind == 'station', 'on station')
+  local uid
+  for _, p in ipairs(X.squad_of(W, 'A').positions) do
+    if p.occupant >= 0 then uid = W.hfs[p.occupant].unit_id end
+  end
+  local u = W.unit(uid)
+  u.counters2 = {hunger_timer = 70000, thirst_timer = 0}
+  u.job = {}
+  W.K.set_mode('SIEGE', 'test')
+  W.K.census.h = {list = {{id = 9001, x = o.pos.x + 3, y = o.pos.y, z = o.pos.z}}}
+  X.call(W, 'military', 'feed_pass', W.K.now().tick + 5000, 'SIEGE')
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'hostile 3 tiles from the station: kept ' .. orders_of(W, 'A'))
+  W.K.census.h = {list = {}}
+  X.call(W, 'military', 'feed_pass', W.K.now().tick + 10000, 'SIEGE')
+  T.eq(orders_of(W, 'A'), '', 'no hostile: released')
+  W.K.census.h = {list = {{id = 9001, x = o.pos.x + 3, y = o.pos.y, z = o.pos.z}}}
+  X.call(W, 'military', 'feed_pass', W.K.now().tick + 10050, 'SIEGE')
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'hostiles came: called back at once (inside FEED_EVERY) ' .. orders_of(W, 'A'))
+end)
+
 T.done()

@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
 from pathlib import Path
 
 from . import cmd as _cmd, files, paths, relocate as _reloc, schema, traps as _traps
@@ -3570,7 +3571,10 @@ def wet_core_guard(save_dir: Path, params: dict | None, snap: dict | None = None
 
 CORE_PROBE_DEF = True                 # BUG-441: follow places an aqshaft probe before its fortcore while the aquifer span is unknown
 CORE_PROBE_DEPTH = 12                 # ... as deep as that (levels); the aquifer layers of a site lie within ~16 levels of the surface
-CORE_UNSTARTED_PCT = 20               # BUG-441: a fortcore stage 1 at most this far dug counts as not started (a re-site cancels it)
+CORE_UNSTARTED_PCT = 0                # BUG-441: only a fortcore stage 1 with NO tile dug counts as not started (a re-site cancels it);
+                                      # review of round 28: a core with any dug tile is never cancelled by follow (a decision is said)
+PROBE_WAIT_DAYS = 45                  # BUG-441: a probe shaft that has not finished after this many game days is stalled (BUG-443/444)
+PROBE_OLD_S = 14 * 86400              # ... or, with no clock to measure the days, a probe file this many wall seconds old
 
 
 def core_probe_on() -> bool:
@@ -3597,20 +3601,68 @@ def known_aquifer_levels(save_dir: Path, snap: dict | None = None) -> list[int]:
     return sorted(aq)
 
 
-def probe_state(save_dir: Path) -> str | None:
-    """BUG-441: the aquifer probe of this fort: 'done' (an aqshaft or explore project with PROJECT_DONE), 'running' (one is placed, not
-    cancelled), None (none). The shaft digs down through the rock the fort will sit in: it shows every aquifer level before a core is."""
+def probe_file(save_dir: Path) -> tuple[str, dict, Path] | None:
+    """BUG-441: (id, doc, path) of the fort's aquifer probe: the aqshaft / explore bp file not cancelled (cancelled ones sit in
+    bp/.cancelled), a finished one first, then the newest; None without one."""
+    best = None
     done = None
-    out = None
     for p in bp_files(save_dir):
         d = files.read_json(p)
         if not (isinstance(d, dict) and d.get("tpl") in (AQSHAFT, EXPLORE)):
             continue
         done = done_projects(save_dir) if done is None else done
-        if p.stem in done:
-            return "done"
-        out = "running"
-    return out
+        try:
+            key = (p.stem in done, p.stat().st_mtime)
+        except OSError:
+            continue
+        if best is None or key > best[0]:
+            best = (key, p.stem, d, p)
+    return None if best is None else (best[1], best[2], best[3])
+
+
+def probe_days(save_dir: Path, pid: str, path: Path, state: dict | None = None) -> float | None:
+    """BUG-441: game days since the probe project was placed: from the CMD event of its bp.place (event tick) to the state's tick, else
+    from the file's age times the state's ticks per second. None when neither can be read."""
+    st = state if state is not None else (files.read_state(save_dir) or {})
+    t = st.get("t") if isinstance(st.get("t"), dict) else {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "CMD" and d.get("id") == pid and isinstance(e.get("tick"), int) and isinstance(t.get("tick"), int):
+            return max(0, t["tick"] - e["tick"]) / schema.TICKS["DAY"]
+    wall, tps = t.get("wall"), t.get("tps")
+    try:
+        age = (wall if isinstance(wall, (int, float)) else time.time()) - path.stat().st_mtime
+    except OSError:
+        return None
+    if isinstance(tps, (int, float)) and tps > 0 and age >= 0:
+        return age * tps / schema.TICKS["DAY"]
+    return None
+
+
+def probe_state(save_dir: Path) -> str | None:
+    """BUG-441: the aquifer probe of this fort: 'done' (an aqshaft or explore project with PROJECT_DONE, as deep as CORE_PROBE_DEPTH),
+    'short' (done, but dug shallower than the probe is meant to: it may end above the aquifer, the span is not known), 'running'
+    (one is placed, not cancelled), 'stalled' (running for more than PROBE_WAIT_DAYS game days: BUG-443/444, or its PROJECT_DONE and
+    its kernel row are both gone for good), None (none). The shaft digs down through the rock the fort will sit in: it shows every
+    aquifer level before a core is."""
+    got = probe_file(save_dir)
+    if got is None:
+        return None
+    pid, doc, path = got
+    prm = doc.get("params") if isinstance(doc.get("params"), dict) else {}
+    if pid in done_projects(save_dir):
+        dep = prm.get("depth")
+        return "short" if isinstance(dep, int) and not isinstance(dep, bool) and dep < CORE_PROBE_DEPTH else "done"
+    st = files.read_state(save_dir) or {}
+    rows = {r[0] for r in st.get("proj") or [] if isinstance(r, list) and r and isinstance(r[0], str)}
+    days = probe_days(save_dir, pid, path, st)
+    if days is not None and days > PROBE_WAIT_DAYS:
+        return "stalled"
+    try:
+        old = time.time() - path.stat().st_mtime > PROBE_OLD_S
+    except OSError:
+        old = False
+    return "stalled" if days is None and old and pid not in rows else "running"
 
 
 def core_span_gate(save_dir: Path, params: dict | None, snap: dict | None = None) -> dict:
@@ -3621,8 +3673,12 @@ def core_span_gate(save_dir: Path, params: dict | None, snap: dict | None = None
       {action: 'refuse'}  a level is known: the core goes below the lowest of them by the aqshaft (plan propose drafts both),
       {action: 'probe'}   nothing known and no probe yet: place an aqshaft probe (depth CORE_PROBE_DEPTH) first,
       {action: 'wait'}    the probe digs: nothing is placed,
+      {action: 'stalled'} the probe has not finished in PROBE_WAIT_DAYS days (review of round 28: no endless wait; follow says
+                          PROJECT_BLOCKED + DECISION_NEEDED, then places the core as before),
+      {action: 'short'}   the probe is done but shallower than CORE_PROBE_DEPTH: it need not have reached below the aquifer, so the
+                          span is NOT known (same escape as 'stalled'),
       {action: 'place'}   the probe is done and found no aquifer, or plan.core_probe is off.
-    + why (the text for the AUTO_FAIL / log line)."""
+    + why (the text for the AUTO_FAIL / log line), + proj (the probe) for wait / stalled / short."""
     if not core_probe_on():
         return {"action": "place", "why": ""}
     levels = known_aquifer_levels(save_dir, snap)
@@ -3633,20 +3689,44 @@ def core_span_gate(save_dir: Path, params: dict | None, snap: dict | None = None
                         f"(it would sit above or in it); the core goes below the lowest level (z{low}) and the aqshaft pierces every "
                         "level down to it: dfllm plan propose drafts aqshaft@S1 then fortcore p.aquifer=pass")}
     pr = probe_state(save_dir)
+    got = probe_file(save_dir) if pr else None
+    pid = got[0] if got else ""
     if pr == "done":
         return {"action": "place", "why": ""}
     if pr == "running":
-        return {"action": "wait",
+        return {"action": "wait", "proj": pid,
                 "why": "BUG-441: the aquifer probe shaft digs: follow places the fortcore once it is done and shows no aquifer "
                        "(dfllm plan propose drafts the aqshaft route when it finds one)"}
+    if pr == "stalled":
+        return {"action": "stalled", "proj": pid,
+                "why": (f"BUG-441: the aquifer probe {pid} has not finished in {PROBE_WAIT_DAYS}+ game days (stalled: see its "
+                        "PROJECT_BLOCKED, BUG-443/444): the core cannot wait for it for ever")}
+    if pr == "short":
+        return {"action": "short", "proj": pid,
+                "why": (f"BUG-441: the aquifer probe {pid} is done but dug less than {CORE_PROBE_DEPTH} levels: it may end above the "
+                        "aquifer, the span is not known")}
     return {"action": "probe", "why": f"BUG-441: aquifer span unknown: an aqshaft probe of {CORE_PROBE_DEPTH} levels first"}
 
 
+def core_probe_args(save_dir: Path, snap: dict | None) -> tuple[dict | None, str]:
+    """BUG-441 (review of round 28): the `bp.place` arguments of the aquifer probe on a fresh embark: no fort core, no manifest with
+    zones.Z4 yet, so the ranked `aqshaft site=S1` could never be placed. The column comes from the open surface near the embark
+    centre / depot (sites.probe_column), `cmd.place` checks it with the aqshaft rules (BUG-433). ({tpl, site, p}, why) or (None, why)."""
+    if snap is None:
+        return None, "no snapshot"
+    try:
+        col = load_bp("sites").probe_column(snap, fort_manifest(save_dir), CORE_PROBE_DEPTH)
+    except (BpError, BpUnavailable, AttributeError, ValueError) as e:
+        return None, str(e)
+    return {"tpl": AQSHAFT, "site": "S1", "p": {k: col[k] for k in ("x", "y", "top", "depth")}}, col["why"]
+
+
 def core_over_aquifer(save_dir: Path, state: dict | None) -> dict | None:
-    """BUG-441: a fortcore stage 1 that is queued but not started (state.proj row s1.* at most CORE_UNSTARTED_PCT %, no PROJECT_DONE,
-    no p.aquifer / retrofit) while the aquifer is known and its levels (anchor z - 2 - depth - refuge .. anchor z) lie above or in
-    it, i.e. the deepest core level + 1 is not below the lowest known level. {proj, anchor, levels, why} or None. Re-sited by follow:
-    cancelled (only the designations not dug yet go), `plan propose` then draws aqshaft@S1 and the core below the aquifer."""
+    """BUG-441: a fortcore stage 1 (state.proj row s1.*, no PROJECT_DONE, no p.aquifer / retrofit) while the aquifer is known and its
+    levels (anchor z - 2 - depth - refuge .. anchor z) lie above or in it, i.e. the deepest core level + 1 is not below the lowest known
+    level. {proj, anchor, levels, started, pct, why} or None. `started` False (no tile dug, pct <= CORE_UNSTARTED_PCT = 0): re-sited by
+    follow, cancelled (nothing is dug yet), `plan propose` then draws aqshaft@S1 and the core below the aquifer. `started` True: never
+    cancelled (a dug core is the fort's), follow says DECISION_NEEDED instead (review of round 28: i2 Roadvises)."""
     levels = known_aquifer_levels(save_dir)
     if not levels:
         return None
@@ -3660,14 +3740,15 @@ def core_over_aquifer(save_dir: Path, state: dict | None) -> dict | None:
         if prm.get("retrofit") or prm.get("aquifer") or (_stage_of(prm) or 1) != 1 or not isinstance(d.get("anchor"), list):
             continue
         row = rows.get(p.stem)
-        if row is None or not str(row[1]).startswith("s1.") or not isinstance(row[2], int) or row[2] > CORE_UNSTARTED_PCT:
-            continue                                   # unknown to the state, past stage 1 or already dug: not "not started"
+        if row is None or not str(row[1]).startswith("s1.") or not isinstance(row[2], int):
+            continue                                   # unknown to the state or past stage 1
+        started = row[2] > CORE_UNSTARTED_PCT          # review of round 28: any dug tile = started: never cancelled, but said
         depth = prm.get("depth") if _nat(prm.get("depth")) else 3
         refuge = prm.get("refuge") if _nat(prm.get("refuge")) else 3
         z_deep = d["anchor"][2] - 2 - depth - refuge
         if z_deep + 1 < levels[0]:
             continue                                   # the core's deepest level lies under the lowest known aquifer level
-        return {"proj": p.stem, "anchor": list(d["anchor"]), "levels": levels,
+        return {"proj": p.stem, "anchor": list(d["anchor"]), "levels": levels, "started": started, "pct": row[2],
                 "why": (f"{p.stem} (fortcore stage 1, {row[2]} % dug) reaches down to z{z_deep}, the aquifer is known at "
                         f"{', '.join(f'z{z}' for z in reversed(levels))}")}
     return None

@@ -1865,7 +1865,12 @@ function M.src_reach(K, r, top)
   table.sort(list, function(a, b) return a.d < b.d end)
   local pts = {{x = top.x, y = top.y, z = top.z}}
   for i = 1, math.min(8, #list) do pts[#pts + 1] = {x = list[i].s.x, y = list[i].s.y, z = list[i].s.z} end
-  local ok, gs = K.call('snapshot', 'groups', pts, true)
+  -- review of round 28: the patient's group first, then the zone / well tiles with it as `prefer` (BUG-390, as economy does): a zone
+  -- centre is water, no floor, and its neighbour lookup answered the first walkable neighbour, often another group than the one the
+  -- patient shares with it: a false 'no accepted water on his group'
+  local ok0, g0 = K.call('snapshot', 'groups', {pts[1]}, true)
+  if not ok0 or type(g0) ~= 'table' or type(g0[1]) ~= 'number' or g0[1] <= 0 then return nil end
+  local ok, gs = K.call('snapshot', 'groups', pts, true, {[g0[1]] = true})
   if not ok or type(gs) ~= 'table' or type(gs[1]) ~= 'number' or gs[1] <= 0 then return nil end
   local known = false
   for i = 2, #pts do
@@ -1882,7 +1887,7 @@ end
 -- BUG-449: the commands that can be run for a patient whose water does not come (patient_thirst / PATIENT_DYING `cmds`)
 function M.patient_cmds(gv, top)
   local out = json.array{}
-  if top and top.x and gv and gv.key == 'srcreach' then
+  if top and top.x and gv and (gv.key == 'srcreach' or gv.srcreach) then
     out[#out + 1] = string.format('dfllm bp sites cistern --near %d,%d,%d --within 15 --fresh', top.x, top.y, top.z)
   end
   if top and top.id then out[#out + 1] = string.format('dfllm cmd inspect what=unit key=%d', top.id) end
@@ -1948,12 +1953,6 @@ function M.give_diag(K, c, r, sc, bfree, top)
     end
   elseif gv.reach == 0 then
     gv.key, gv.reason = 'noreach', string.format('no caregiver reaches the patient (0 of %d)', #r.cpos)
-  elseif sreach and sreach.ok == false then
-    local sr = sreach
-    gv.key = 'srcreach'
-    gv.reason = string.format('no accepted water on the walk group %d of the patient: the nearest, %s %d at %d,%d,%d (%d tiles), lies on group %s '
-                              .. '(the carriers cannot fetch it): a cistern beside him', sr.g, sr.s.kind, sr.s.id or -1, sr.s.x, sr.s.y,
-                              sr.s.z, sr.d, tostring(sr.gs))
   elseif not ok_job then
     gv.key, gv.reason = 'unreadable', 'the GiveWater jobs cannot be read'
   elseif not wet_any and gv.run == 0 then
@@ -1974,6 +1973,18 @@ function M.give_diag(K, c, r, sc, bfree, top)
     gv.key, gv.reason = 'run', plural(gv.run, 'GiveWater job', 'GiveWater jobs') .. ' running'
   else
     gv.key, gv.reason = 'nojob', 'the game posts no GiveWater job'
+  end
+  -- BUG-449 (review of round 28): no accepted water on the patient's walk group. It is told in addition to stuck / open / run: those
+  -- verdicts feed the noeffect release (give_effect, BUG-383 restale) and must not be masked; only when the game posts no job at
+  -- all (`nojob`) is it the verdict itself
+  if sreach and sreach.ok == false then
+    local sr = sreach
+    gv.srcreach = {g = sr.g, gs = sr.gs, d = sr.d, kind = sr.s.kind, id = sr.s.id}
+    local txt = string.format('no accepted water on the walk group %d of the patient: the nearest, %s %d at %d,%d,%d (%d tiles), lies on group %s '
+                              .. '(the carriers cannot fetch it): a cistern beside him', sr.g, sr.s.kind, sr.s.id or -1, sr.s.x, sr.s.y,
+                              sr.s.z, sr.d, tostring(sr.gs))
+    if gv.key == 'nojob' then gv.key, gv.reason = 'srcreach', txt
+    else gv.reason = gv.reason .. '; ' .. txt end
   end
   -- BUG-434: the verdict stays (a stale job is still a stale job); the distance is added to it
   if pf > 0 and gv.sd and gv.sd > pf and gv.key ~= 'nowater' then

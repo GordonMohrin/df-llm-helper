@@ -677,6 +677,7 @@ class Follower:
         self._stale_read = 0.0
         self._stale_tried: dict[str, float] = {}     # BUG-435: project id -> wall of the last cancel try
         self._orphan_read = 0.0                      # BUG-442: wall of the last orphan sweep
+        self._core_gate_said: dict[str, int] = {}    # BUG-441: how often the core gate said DECISION_NEEDED, per kind
         self._core_site_read = 0.0                   # BUG-441: wall of the last core-site look
         self._core_site_tried: dict[str, float] = {}     # BUG-441: project id -> wall of the last re-site cancel
         self._beat = -1e18
@@ -719,6 +720,7 @@ class Follower:
         self.since = None
         self._pruned = 0.0
         self._orphan_read = 0.0                # BUG-442: a new save folder / reload: the bp files are asked about again
+        self._core_gate_said = {}
         files.prune_snaps(d)
 
     def _fresh_jobs(self, jobs: dict) -> dict:
@@ -1064,11 +1066,12 @@ class Follower:
             self._fail("stale projects", f"{type(ex).__name__}: {ex}", now)
 
     def _check_core_site(self, now: float) -> None:
-        """BUG-441 (Run 16b i2 Roadvises, 16c i3 Castletongs): a fortcore stage 1 that was queued before the aquifer was known and is
-        not started (plan.core_over_aquifer: at most CORE_UNSTARTED_PCT % dug, its deepest level not under the lowest known aquifer
-        level) is re-sited: a plain bp.cancel (only the designations not dug yet go; the file moves to bp/.cancelled), PROJECT_STALE
-        says why, and `plan propose` draws aqshaft@S1 and the core below the aquifer (plan.surface_facts / aquifer_route). Never with
-        --no-auto, never in a fight; the same project is cancelled once per STALE_RETRY_S."""
+        """BUG-441 (Run 16b i2 Roadvises, 16c i3 Castletongs): a fortcore stage 1 that was queued before the aquifer was known and has
+        no tile dug yet (plan.core_over_aquifer: CORE_UNSTARTED_PCT = 0 %, its deepest level not under the lowest known aquifer level)
+        is re-sited: a plain bp.cancel (the file moves to bp/.cancelled), PROJECT_STALE says why plus DECISION_NEEDED with the command,
+        and `plan propose` draws aqshaft@S1 and the core below the aquifer (plan.surface_facts / aquifer_route). A core with ANY dug
+        tile is never cancelled here (review of round 28: i2 Roadvises had a blocked stage-1 core): DECISION_NEEDED says it reaches
+        into the aquifer and what to do. Never with --no-auto, never in a fight; the same project is said once per STALE_RETRY_S."""
         if not self.auto or self.dir is None or now - self._core_site_read < CORE_SITE_EVERY_S:
             return
         self._core_site_read = now
@@ -1080,12 +1083,44 @@ class Follower:
             if not hit or now - self._core_site_tried.get(hit["proj"], -1e18) < STALE_RETRY_S:
                 return
             self._core_site_tried[hit["proj"]] = now
+            if hit.get("started"):
+                self._synth("DECISION_NEEDED", f"BUG-441 core_over_aquifer: {hit['why']}; it has {hit.get('pct')} % dug, so follow does "
+                            "not cancel it and the fort keeps a core that reaches into the aquifer. Decide: let it finish and pass "
+                            f"the aquifer with `dfllm plan propose` (aqshaft@S1, later stages below), or take it back with "
+                            f"`dfllm cmd bp.cancel '{{\"proj\":\"{hit['proj']}\"}}'` and re-site", now)
+                return
             self._send("bp.cancel", {"proj": hit["proj"]}, f"core re-site {hit['proj']}", now)
-            self._synth("PROJECT_STALE", f"BUG-441: {hit['why']}: the core was queued before the aquifer was known; cancelled (only "
-                        "what is not dug yet goes). dfllm plan propose drafts the aqshaft through every aquifer level and the core "
+            self._synth("PROJECT_STALE", f"BUG-441: {hit['why']}: the core was queued before the aquifer was known; cancelled (nothing "
+                        "dug yet). dfllm plan propose drafts the aqshaft through every aquifer level and the core "
                         "below the lowest", now)
+            self._synth("DECISION_NEEDED", f"BUG-441 core_resite: the fort has no core now ({hit['proj']} cancelled): run `dfllm plan "
+                        "propose` (aqshaft@S1 through the aquifer, the core below it) and `plan apply`", now)
         except Exception as ex:                        # noqa: BLE001 - the core-site check must never stop the follower
             self._fail("core re-site", f"{type(ex).__name__}: {ex}", now)
+
+    def _core_gate_escape(self, kind: str, gate: dict, now: float) -> bool:
+        """Review of round 28 (BUG-441): the core gate must not block the core for ever. The first time a probe is stalled / too
+        short / cannot be placed, say it (PROJECT_BLOCKED for a stalled probe, DECISION_NEEDED with the commands) and keep the core
+        back (False); the next ask of the starter places the core as before the gate (True), the re-site (_check_core_site) and
+        `plan propose` stay the way to a core under the aquifer."""
+        n = self._core_gate_said.get(kind, 0)
+        self._core_gate_said[kind] = n + 1
+        if n:
+            files.log_cli(self.dir, "follow", "auto:core", {"gate": kind}, "BUG-441: " + gate["why"] + "; the core is placed anyway")
+            return True
+        pid = gate.get("proj") or ""
+        if kind == "stalled":
+            self._synth("PROJECT_BLOCKED", f"BUG-441 why=stalled: the aquifer probe {pid} does not finish ({gate['why']})", now)
+        cmds = {"stalled": f"`dfllm cmd bp.cancel '{{\"proj\":\"{pid}\"}}'` takes the probe back (follow probes again), or `plan.core_probe = false` "
+                           "in config/baseline.json places the core without a probe",
+                "short": "`dfllm plan propose` drafts aqshaft@S1 through the aquifer when you know its levels, or `plan.core_probe = false` "
+                         "in config/baseline.json places the core without the probe's answer",
+                "noprobe": "name a column: `dfllm cmd bp.place '{\"tpl\":\"aqshaft\",\"site\":\"S1\",\"p\":{\"x\":X,\"y\":Y,\"top\":Z,"
+                           "\"depth\":12}}'` (open surface floor, rock beneath, no water within 4 tiles), or `plan.core_probe = false` in "
+                           "config/baseline.json"}[kind]
+        self._synth("DECISION_NEEDED", f"BUG-441 core_probe_{kind}: {gate['why']}. {cmds}. If nothing is decided follow places the core "
+                    "at its next ask", now)
+        return False
 
     def _sweep_orphans(self, now: float) -> None:
         """BUG-442 (Run 16b i2 Roadvises: bp/y372s0b0.json, a project the kernel did not know ('no project y372s0b0'), blocked every
@@ -1285,8 +1320,8 @@ class Follower:
             files.log_cli(self.dir, "follow", f"reply:{r['verb']}", {"id": cid},
                           ("ok " if reply.get("ok") else "ERR ") + str(reply.get("msg", "")))
             if r.get("orphan"):                # BUG-442: the kernel's answer to 'do you hold this project?'
-                from .cmd import kernel_knows, retire
-                if kernel_knows(reply) is False and retire(self.dir, r["orphan"]):
+                from .cmd import kernel_knows, retire_orphan
+                if kernel_knows(reply) is False and retire_orphan(self.dir, r["orphan"]):
                     files.log_cli(self.dir, "follow", "retire:orphan", {"proj": r["orphan"]},
                                   "the kernel does not know this project: bp file retired")
                 continue
@@ -1296,8 +1331,8 @@ class Follower:
                     retire(self.dir, r["proj"])
                 continue
             if r["verb"] == "bp.cancel" and isinstance(r.get("proj"), str) and "no project " in str(reply.get("msg", "")):
-                from .cmd import retire            # BUG-442: the kernel has no such project: the file goes, no AUTO_FAIL
-                retire(self.dir, r["proj"])
+                from .cmd import retire_orphan     # BUG-442: the kernel has no such project: the file goes (unless it may be a finished one)
+                retire_orphan(self.dir, r["proj"])
                 continue
             if r["verb"] == "bp.place" and r.get("tpl"):
                 from .cmd import unplace
@@ -1349,7 +1384,7 @@ class Follower:
             ap = args.get("p") or {}
             if tpl == "fortcore" and not ap.get("retrofit") and not ap.get("aquifer") and (ap.get("stage") or 1) == 1 \
                     and re.fullmatch(r"S[0-9]+", str(args["site"])):
-                from .plan import CORE_PROBE_DEPTH, core_span_gate, wet_core_guard
+                from .plan import core_probe_args, core_span_gate, wet_core_guard
                 # BUG-419 (Run 16b i2 #5420: a wet fortcore, score 0, placed after PLAN_EXHAUSTED): never a wet site by itself
                 wp, why = wet_core_guard(self.dir, args.get("p"), snap)
                 if wp is None:
@@ -1361,11 +1396,22 @@ class Follower:
                 gate = core_span_gate(self.dir, args.get("p"), snap)
                 if gate["action"] in ("refuse", "wait"):
                     raise BpError(gate["why"])
-                if gate["action"] == "probe":
-                    tpl = "aqshaft"                # the probe shaft goes first; the starter asks again at the next PLAN_EXHAUSTED
-                    args = {"tpl": "aqshaft", "site": "S1", "p": {"depth": CORE_PROBE_DEPTH}}
-                    prev = files.read_json(_placed(self.dir, tpl))
-                    files.log_cli(self.dir, "follow", "auto:probe", args, gate["why"])
+                if gate["action"] in ("stalled", "short"):
+                    # review of round 28: a probe that never finishes (BUG-443/444) or stopped above the aquifer must not hold the
+                    # core for ever: PROJECT_BLOCKED + DECISION_NEEDED once, the next ask places the core as before
+                    if not self._core_gate_escape(gate["action"], gate, now):
+                        raise BpError(gate["why"])
+                elif gate["action"] == "probe":
+                    # review of round 28: a fresh embark has no core and no manifest zones.Z4, the ranked `aqshaft site=S1` can never be
+                    # placed: the probe is a surface column near the embark centre (plan.core_probe_args), checked by cmd.place
+                    pargs, pwhy = core_probe_args(self.dir, snap)
+                    if pargs is None:
+                        if not self._core_gate_escape("noprobe", {"why": pwhy, "proj": ""}, now):
+                            raise BpError(f"{gate['why']}: no probe column fits ({pwhy})")
+                    else:
+                        tpl, args = "aqshaft", pargs       # the probe shaft goes first; the starter asks again at the next PLAN_EXHAUSTED
+                        prev = files.read_json(_placed(self.dir, tpl))
+                        files.log_cli(self.dir, "follow", "auto:probe", args, gate["why"] + "; " + pwhy)
             if tpl == "farms":
                 cid = self._place_farms(args, now, snap)
             elif tpl == "workshops" and key != "starter":

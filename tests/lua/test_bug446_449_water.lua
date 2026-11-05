@@ -72,9 +72,20 @@ local function world(opts)
   end
   function snap.reach(K, a, b) return true end
   W.groups = {}
-  function snap.groups(K, pts)
+  W.nb = {}                                      -- review of round 28: a water tile has no group of its own: its neighbours' groups, in lookup order
+  function snap.groups(K, pts, near, prefer)
     local out = {}
-    for i, p in ipairs(pts) do out[i] = W.groups[p.x .. ',' .. p.y .. ',' .. p.z] or -1 end
+    for i, p in ipairs(pts) do
+      local k = p.x .. ',' .. p.y .. ',' .. p.z
+      local g = W.groups[k] or -1
+      if g == -1 and near and W.nb[k] then           -- as snapshot.grp_near: the first neighbour, or the first one in `prefer`
+        g = W.nb[k][1]
+        if type(prefer) == 'table' then
+          for _, cand in ipairs(W.nb[k]) do if prefer[cand] then g = cand; break end end
+        end
+      end
+      out[i] = g
+    end
     return out
   end
   function snap.map_size() return 192, 192, 20 end
@@ -266,8 +277,11 @@ T.test('BUG-449 (Run 16a i1 Syrupobeyed: patients at 94,113,135 died under "2 Gi
   T.eq(sr.ok, false, 'old code: no such test')
   T.eq({sr.g, sr.gs, sr.d}, {5, 9, 12})
   local gv = M.give_diag(W.K, M.conf(W.K), r, {read = true, w_open = 0, w_run = 2, stuck = 0}, 15, top)
-  T.eq(gv.key, 'srcreach')
+  T.eq(gv.key, 'run', 'review of round 28: the verdict run / noeffect stays, srcreach is told in addition')
+  T.ok(gv.srcreach and gv.srcreach.g == 5, 'gv.srcreach')
   T.ok(gv.reason:find('walk group 5', 1, true) and gv.reason:find('zone 17697 at 106,109,139', 1, true), gv.reason)
+  local gv0 = M.give_diag(W.K, M.conf(W.K), r, {read = true, w_open = 0, w_run = 0, stuck = 0}, 15, top)
+  T.eq(gv0.key, 'srcreach', 'no job posted at all: srcreach is the verdict')
   local cmds = table.concat(M.patient_cmds(gv, top), '\n')
   T.ok(cmds:find('bp sites cistern --near 94,113,135', 1, true) and cmds:find('inspect what=unit key=26664', 1, true), cmds)
   groups['106,109,139'] = 5                      -- the same group: the verdict is the old one
@@ -276,6 +290,40 @@ T.test('BUG-449 (Run 16a i1 Syrupobeyed: patients at 94,113,135 died under "2 Gi
   T.eq(M.src_reach(W.K, r, top).ok, true)
   groups['106,109,139'] = -1                     -- unread: unknown, not a verdict
   T.eq(M.src_reach(W.K, r, top), nil)
+end)
+
+T.test('BUG-449 review of round 28: a zone tile resolves to the PATIENT\'s group (prefer), not to the first neighbour: no false srcreach', function()
+  local W, M = world{}
+  W.groups['94,113,135'] = 5
+  W.nb['106,109,139'] = {9, 5}                   -- the zone centre is water: its neighbours lie on group 9 first, then 5 (the patient's)
+  local r = {sources = {{kind = 'zone', id = 17697, x = 106, y = 109, z = 139, wet = true}}, carers = {}, carers_idle = 0, cpos = {},
+             buckets = 25, hosp = {}}
+  local top = {id = 26664, x = 94, y = 113, z = 135, thirst = 40000}
+  local sr = M.src_reach(W.K, r, top)
+  T.eq({sr.ok, sr.g}, {true, 5}, 'old code (no prefer): group 9, a false srcreach')
+  local gv = M.give_diag(W.K, M.conf(W.K), r, {read = true, w_open = 0, w_run = 2, stuck = 0}, 15, top)
+  T.eq(gv.key, 'run')
+  T.eq(gv.srcreach, nil)
+end)
+
+T.test('BUG-449 review of round 28: srcreach does not mask run -> noeffect (the BUG-383 release of the carrier still fires)', function()
+  local W, M = world{}
+  W.groups['94,113,135'] = 5
+  W.groups['106,109,139'] = 9
+  local r = {sources = {{kind = 'zone', id = 17697, x = 106, y = 109, z = 139, wet = true}}, carers = {}, carers_idle = 0, cpos = {},
+             buckets = 25, hosp = {}}
+  local DAYT = 1200
+  local p = {}
+  local top = {id = 26664, x = 94, y = 113, z = 135, thirst = 30000}
+  local gv = M.give_effect(p, M.give_diag(W.K, M.conf(W.K), r, {read = true, w_open = 0, w_run = 1, stuck = 0}, 15, top), top, 1000, nil)
+  T.eq(gv.key, 'run')
+  top.thirst = 30000 + 3 * DAYT
+  local gv2 = M.give_diag(W.K, M.conf(W.K), r, {read = true, w_open = 0, w_run = 1, stuck = 0}, 15, top)
+  T.ok(gv2.srcreach, 'srcreach is told')
+  gv2 = M.give_effect(p, gv2, top, 1000 + 3 * DAYT, nil)
+  T.eq(gv2.key, 'noeffect', 'old code: srcreach, give_effect and restale never ran')
+  local cmds = table.concat(M.patient_cmds(gv2, top), '\n')
+  T.ok(cmds:find('bp sites cistern --near 94,113,135', 1, true), 'the cistern command is still offered: ' .. cmds)
 end)
 
 T.test('BUG-449: src_near: the accepted source near a position, none when it stands inside Kern+ / Tiefe+ (then water did not draw them out)', function()

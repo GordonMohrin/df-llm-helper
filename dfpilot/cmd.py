@@ -2126,6 +2126,8 @@ def retire(save_dir: Path, proj: str) -> bool:
     doc = files.read_json(src)
     if not src.is_file():
         return False
+    if _finished_event(save_dir, proj):          # review of round 28: a finished project's file and .placed record stay (tile reservations)
+        return False
     dst = Path(save_dir) / "bp" / ".cancelled"
     try:
         dst.mkdir(parents=True, exist_ok=True)
@@ -2192,12 +2194,88 @@ def no_such_project(reply: dict | None) -> bool:
     return isinstance(reply, dict) and not reply.get("ok") and "no project " in str(reply.get("msg", ""))
 
 
+def _finished_event(save_dir: Path, proj: str) -> bool:
+    """BUG-442: a PROJECT_DONE event of `proj` in events.jsonl / events.1.jsonl."""
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "PROJECT_DONE" and d.get("proj") == proj:
+            return True
+    return False
+
+
+def dig_cells(doc: dict) -> set[tuple[int, int, int]]:
+    """BUG-442: the tiles a document's dig stages (mode dig) designate: what a started or finished project has opened."""
+    out: set[tuple[int, int, int]] = set()
+    for st in doc.get("stages") or []:
+        if not isinstance(st, dict) or st.get("mode") != "dig":
+            continue
+        for ch in st.get("chunks") or []:
+            px, py, pz = ch["pos"]
+            for dx, dy, dz, text in ch["cells"]:
+                m = _EXT.search(text)
+                w, h = (max(-256, min(256, int(m.group(1)))) or 1, max(-256, min(256, int(m.group(2)))) or 1) if m else (1, 1)
+                for xx in (range(px + dx, px + dx + w) if w > 0 else range(px + dx + w + 1, px + dx + 1)):
+                    for yy in (range(py + dy, py + dy + h) if h > 0 else range(py + dy + h + 1, py + dy + 1)):
+                        out.add((xx, yy, pz + dz))
+    return out
+
+
+def untouched_on_snapshot(save_dir: Path, doc: dict) -> bool:
+    """BUG-442 (review of round 28): True only when the newest sites snapshot PROVES that nothing of the project was dug: it has dig
+    tiles, all lie inside the snapshot and read rock (`#`) or still hidden (`?`), and the snapshot is not older than a game month
+    against the state's clock (a snapshot from before the project ran would read rock too). False in every doubtful case."""
+    snap = sites_snapshot(save_dir)
+    cells = dig_cells(doc)
+    if not cells or not isinstance(snap, dict) or snap.get("purpose") != "sites":
+        return False
+    t = (files.read_state(save_dir) or {}).get("t")
+    tick, now_t = snap.get("tick"), t.get("tick") if isinstance(t, dict) else None
+    if isinstance(tick, int) and isinstance(now_t, int) and now_t - tick > schema.TICKS["MONTH"]:
+        return False
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    proof = 0
+    for x, y, z in cells:
+        if not (x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1):
+            return False
+        try:
+            c = snap["rows"][f"z{z}"][y - y0][x - x0]
+            if c == "." and (z == z1 or snap["rows"][f"z{z + 1}"][y - y0][x - x0] == "_"):
+                continue                       # an open surface tile (a core's entrance channel starts on one): says nothing
+            if c not in "#?":
+                return False
+        except (KeyError, IndexError, TypeError):
+            return False
+        proof += 1
+    return proof > 0
+
+
+def never_finished(save_dir: Path, proj: str, doc: dict | None = None) -> bool:
+    """BUG-442 (review of round 28: orphan_candidates() took a FINISHED project for an orphan once its PROJECT_DONE had rotated out of
+    events.1.jsonl and the kernel had cleared persist key bp.<id> at completion; retire() then moved the finished core's file to
+    bp/.cancelled and reset bp/.placed-<tpl>.json, which lost tile reservations and stage anchors): whether the project is provably
+    NOT finished. No PROJECT_DONE and the whole event log still on disk (no events.1.jsonl: nothing rotated out) = never finished;
+    after a rotation the done event may be gone and only the map proves it (untouched_on_snapshot). A doubtful project is kept."""
+    save_dir = Path(save_dir)
+    if _finished_event(save_dir, proj):
+        return False
+    if not (save_dir / "events.1.jsonl").exists():
+        return True
+    d = doc if isinstance(doc, dict) else files.read_json(save_dir / "bp" / f"{proj}.json")
+    return isinstance(d, dict) and untouched_on_snapshot(save_dir, d)
+
+
+def retire_orphan(save_dir: Path, proj: str) -> bool:
+    """BUG-442: retire() for a bp file the kernel does not know, only when never_finished() proves it was never finished; the
+    .placed-<tpl>.json record of a finished project is never touched."""
+    return never_finished(save_dir, proj) and retire(save_dir, proj)
+
+
 def orphan_candidates(save_dir: Path, now: float | None = None, limit: int = 8) -> list[str]:
     """BUG-442 (Run 16b i2 Roadvises: the dead bp/y372s0b0.json the kernel did not know blocked every new fortcore stage 1 for a
     year; retire() fired only on an ok bp.cancel): the bp files that MAY be orphans, to be asked of the kernel one by one
-    (`inspect persist key=bp.<id>`): older than ORPHAN_AGE_S, no PROJECT_DONE (a done project's tiles are dug), not a row of the
-    state's project list. At most `limit`, oldest first."""
-    from . import plan as _plan                              # plan imports this module: late, at call time
+    (`inspect persist key=bp.<id>`): older than ORPHAN_AGE_S, not a row of the state's project list, provably never finished
+    (never_finished: no PROJECT_DONE in a complete event log, or after a log rotation the snapshot shows its dig tiles untouched; a
+    finished project's persist key is cleared as well, so the kernel's 'none' alone proves nothing). At most `limit`, oldest first."""
     now = time.time() if now is None else now
     st = files.read_state(Path(save_dir)) or {}
     rows = {r[0] for r in st.get("proj") or [] if isinstance(r, list) and r and isinstance(r[0], str)}
@@ -2205,7 +2283,6 @@ def orphan_candidates(save_dir: Path, now: float | None = None, limit: int = 8) 
     plan = files.read_json(Path(save_dir) / "plan.json")
     py = plan.get("year") if isinstance(plan, dict) else None
     out: list[tuple[float, str]] = []
-    done = None
     for p in bp_files(save_dir):
         try:
             age = now - p.stat().st_mtime
@@ -2220,9 +2297,7 @@ def orphan_candidates(save_dir: Path, now: float | None = None, limit: int = 8) 
             ty, ts = t.get("y"), t.get("season")
             if not (isinstance(ty, int) and isinstance(ts, int)) or (ty, ts) < (py, int(m.group(2))):
                 continue
-        if done is None:
-            done = _plan.done_projects(save_dir)
-        if p.stem not in done:
+        if never_finished(save_dir, p.stem):         # review of round 28: the done event may have rotated out: see never_finished
             out.append((p.stat().st_mtime, p.stem))
     return [i for _, i in sorted(out)[:limit]]
 
@@ -2249,7 +2324,7 @@ def retire_orphans(save_dir: Path, wait_s: float = 5.0, by: str = "cli") -> list
             _, rep = send(save_dir, "inspect", {"what": "persist", "key": f"bp.{pid}", "field": "tpl"}, by=by, wait_s=wait_s)
         except Exception:                                    # noqa: BLE001 - a sweep never stops the caller
             return gone
-        if kernel_knows(rep) is False and retire(save_dir, pid):
+        if kernel_knows(rep) is False and retire_orphan(save_dir, pid):
             files.log_cli(save_dir, by, "retire:orphan", {"proj": pid}, "the kernel does not know this project: bp file retired")
             gone.append(pid)
     return gone
@@ -2302,8 +2377,10 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
                       + str(reply.get("msg", "")))
         if verb == "bp.place" and not reply.get("ok"):
             unplace(save_dir, cmd_id, args["tpl"], prev)
-        if verb == "bp.cancel" and (reply.get("ok") or no_such_project(reply)) and isinstance(args.get("proj"), str):
-            retire(save_dir, args["proj"])          # BUG-442: 'no project X' = already gone in the kernel: the file goes too
+        if verb == "bp.cancel" and isinstance(args.get("proj"), str) and (reply.get("ok") or no_such_project(reply)):
+            # BUG-442: 'no project X' = gone in the kernel: the file goes too, unless the project may have been finished (a pruned
+            # finished project answers the same: its file keeps the tile reservations and stage anchors)
+            (retire if reply.get("ok") else retire_orphan)(save_dir, args["proj"])
         if verb == "inspect" and args.get("what") == "manifest" and reply.get("ok"):
             cache_manifest(save_dir, reply.get("data"))
     return cmd_id, reply

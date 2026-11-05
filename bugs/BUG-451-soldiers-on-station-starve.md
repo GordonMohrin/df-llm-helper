@@ -23,3 +23,7 @@ A soldier over hunger 50,000 with "job none": kern.log "military: squad A releas
 ## Review fix
 
 While a squad is released to eat (`rt.feed[k].on`, order `feed`), a sortie or kill order that takes the squad over now ends the release without re-stationing it (the running order stands). A BREACH ends the release at once. Test: `tests/lua/test_stations.lua` (BREACH ends the release).
+
+## Review fix 2 (pre-deploy review of round 28)
+`feed_pass` was throttled by `FEED_EVERY` (600 ticks) before it looked at the mode, and `apply_squad` returned early while `rt.feed[k].on`, so a BREACH or a posture change (`M.posture`, force) during a release was swallowed for 600-1200 ticks. Now the end of a release is checked before the throttle (BREACH, a changed posture, hostiles near the station in a SIEGE) and a forced `apply_squad` overrides the feed hold. A station squad is not released while hostiles lie within `FEED_NEAR` (15) tiles of its station in a SIEGE.
+Tests: `tests/lua/test_stations.lua` (posture change during the release, BREACH within 20 ticks, SIEGE with a hostile at the station).

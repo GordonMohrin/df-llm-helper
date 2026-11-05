@@ -1461,6 +1461,55 @@ def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
     return out
 
 
+PROBE_WATER_KEEP = 4                  # BUG-441: the probe shaft keeps one tile more from open water than any aqshaft (WATER_KEEP)
+PROBE_TRIES = 600                     # BUG-441: surface tiles probe_column checks, nearest to the embark centre first
+
+
+def probe_column(snap: dict, manifest: dict | None, depth: int, near=None) -> dict:
+    """BUG-441 (review of round 28: a fresh embark has no fort manifest with zones.Z4, so `bp sites aqshaft` ranked nothing and the
+    probe could never be placed): the aquifer probe's column from the open surface, needing no core and no Z4. The top is an open
+    surface floor tile (`.` with open sky `_` above) in the citizens' walk group, nearest to `near` (x, y: the wagon / the depot;
+    default the middle of the snapshot = the embark); on each level below (`depth` in all) the column and its 4 orthogonal tiles are
+    rock or unknown, off every cavern/warm level, no keep-out box, and no open water within PROBE_WATER_KEEP tiles on any of them
+    (the top level included). {x, y, top, depth, why}; ValueError with the first reasons when no tile fits."""
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    at = _At(snap)
+    cx, cy = (int(near[0]), int(near[1])) if near else ((x0 + x1) // 2, (y0 + y1) // 2)
+    dep = (manifest or {}).get("depot")
+    if not near and isinstance(dep, (list, tuple)) and len(dep) == 3 and all(isinstance(v, int) for v in dep):
+        cx, cy = dep[0], dep[1]
+    avoid = shaft_avoid(snap, manifest)
+    keep_out = _keep_out(manifest or {})
+    cands = []
+    step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 else 1
+    for z in range(z0, z1):
+        cur, up = snap["rows"][f"z{z}"], snap["rows"][f"z{z + 1}"]
+        for yy in range(0, len(cur), step):
+            for xx in range(0, len(cur[yy]), step):
+                if cur[yy][xx] == "." and up[yy][xx] == "_":
+                    cands.append((max(abs(x0 + xx - cx), abs(y0 + yy - cy)), -z, x0 + xx, y0 + yy, z))
+    cands.sort()
+    why: list[str] = []
+    for _, _, x, y, z in cands[:PROBE_TRIES]:
+        if walk_at(snap, (x, y, z)) == "0":
+            continue
+        z_lo = z - depth + 1
+        got = shaft_why(at, x, y, z, z_lo, avoid, keep_out, wet=False)
+        if got is None:
+            w = next(((x + dx, y + dy, zz) for zz in range(z_lo, z + 1)
+                      for dx in range(-PROBE_WATER_KEEP, PROBE_WATER_KEEP + 1) for dy in range(-PROBE_WATER_KEEP, PROBE_WATER_KEEP + 1)
+                      if at(x + dx, y + dy, zz) in WET), None)
+            if w is None:
+                return {"x": x, "y": y, "top": z, "depth": depth,
+                        "why": f"probe column {x},{y} z{z}-z{z_lo} on open surface floor, {max(abs(x - cx), abs(y - cy))} tiles from the "
+                               f"embark centre, no water within {PROBE_WATER_KEEP}"}
+            got = ("water", f"{x},{y}: open water at {w[0]},{w[1]} z{w[2]} (within {PROBE_WATER_KEEP} tiles)")
+        if len(why) < 3:
+            why.append(got[1])
+    raise ValueError(f"aqshaft probe: no open surface floor column of depth {depth} fits ({len(cands)} surface tile(s) read"
+                     + (f"; first refusals: {'; '.join(why)}" if why else "") + ")")
+
+
 # BUG-412 (Gordon 04.11.2026: "ich moechte generell dass durch aquifier gegraben wird, so sicher wie moeglich"): the fort belongs
 # under the aquifer. The shaft that passes it stands at the chosen fortcore site: on open surface floor beside the entrance
 # (local u -3 / +3, v 0..2: two tiles from the 3-wide entrance channel and tunnel, so the shaft's own seal walls (its 4 orthogonal

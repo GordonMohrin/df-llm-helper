@@ -25,3 +25,8 @@ Module: `lua/dfllm/water.lua` (give_diag, src_reach, patient_cmds, src_near), `l
 
 ## Live check
 At the next PATIENT_DYING with `key: noeffect` or `srcreach`: `d.cmds`, `d.unrel`; run `inspect what=unit key=<id>` for the job and position.
+
+## Review fix (pre-deploy review of round 28)
+- `water.src_reach` asked `snapshot.groups` for the patient and the zone centres in one call without `prefer`: a zone / well tile is water, no floor, so it resolves to its first walkable neighbour, often another group than the patient's: a false `srcreach`. Now the patient's group is read first and the sources are resolved with it as `prefer` (as economy does, BUG-390).
+- `srcreach` no longer pre-empts the verdict: with GiveWater jobs open / stuck / running the verdict stays `stuck` / `open` / `run` (so `give_effect` -> `noeffect` and the BUG-383 carrier release run), the finding is added to the reason and `gv.srcreach`; `patient_cmds` still offers the cistern command. Only with no job posted at all is `srcreach` the verdict.
+- Tests: `tests/lua/test_bug446_449_water.lua` (zone tile with neighbours on two groups; srcreach with a running job -> noeffect).
