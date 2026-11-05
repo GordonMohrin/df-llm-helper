@@ -189,6 +189,26 @@ def _no_trade_tokens(text: str, tokens: set[str]) -> str:
     return _TOKEN_RUN.sub(drop, text) if tokens else text
 
 
+# BUG-485 (Run 16a i1 Basementflew: `plan propose` warned "fair play: $.notes mentions 'aquifer'" about its own BUG-130 note text): the
+# plan's notes are prose for the player, never run. An ordinary English word among the blocked terms (`aquifer`, `plant`, `source`,
+# `caravan`, `lever` ...) counts in the notes only as a command: after dfhack-run / dfhack / dfllm / lua, or in backticks or after
+# a `$ ` prompt. A tool name that is no everyday word (fastdwarf, digv, createitem ...) is flagged in the notes as before; every
+# other plan string (build params, site labels) is checked as before.
+PROSE_WORDS = frozenset({"aquifer", "plant", "source", "clean", "force", "launch", "weather", "feature", "points", "justice", "lair",
+                         "tame", "liquids", "diplomacy", "colonies", "lever", "caravan", "reveal", "prospect", "teleport", "tiletypes",
+                         "geld", "adaptation", "deramp", "regrass", "extinguish", "exterminate", "machine-toggle"})
+
+
+def _command_use(text: str, term: str) -> bool:
+    """BUG-485: `term` stands in command position in `text`: right after dfhack-run / dfhack / dfllm / lua (options between), inside
+    backticks, or after a `$ ` prompt."""
+    t = re.escape(term.lower())
+    low = text.lower()
+    return (re.search(r"(?<![\w-])(?:dfhack-run|dfhack|dfllm|lua)\s+(?:-\S+\s+)*" + t + r"(?![\w-])", low) is not None
+            or re.search(r"`\s*(?:dfhack-run\s+)?" + t + r"(?![\w-])", low) is not None
+            or re.search(r"(?:^|\s)\$\s+" + t + r"(?![\w-])", low) is not None)
+
+
 def fair_play_hits(doc: dict, terms) -> list[tuple[str, str]]:
     """(path, term) of every plan string that mentions a blocked term; the plan's trade tokens are no command (BUG-304)."""
     tokens = trade_tokens(doc)
@@ -198,6 +218,9 @@ def fair_play_hits(doc: dict, terms) -> list[tuple[str, str]]:
             continue
         if p.endswith("notes"):
             text = _no_trade_tokens(text, tokens)
+            hits += [(p, term) for term in terms if _has_term(text, term)
+                     and (term.lower() not in PROSE_WORDS or _command_use(text, term))]         # BUG-485
+            continue
         hits += [(p, term) for term in terms if _has_term(text, term)]
     return hits
 
@@ -2827,6 +2850,33 @@ def reserve_shop_room(save_dir: Path, doc: dict, prev: dict | None) -> list[str]
     return [line]
 
 
+RESERVE_ID = "reserve-hospital"
+HOSPITAL_FIRST = ("captives",)          # BUG-483: the templates that never take the hospital's site while the fort has none
+
+
+def hospital_reserve(save_dir: Path, builds: list[dict], occ, snap: dict | None) -> str | None:
+    """BUG-483 (Run 16b i2 Roadvises y398: `bp sites hospital` had one site, 'taken by y398s3b3 (captives)'; the patients' thirst climbed
+    to 31000 and the player cancelled the captives by hand): the fort has no hospital (no hospital project in <save>/bp, none in the
+    manifest) and a HOSPITAL_FIRST build comes before any hospital build of the plan: the hospital's first free site is held back
+    in `occ` (id RESERVE_ID) while those builds are placed; the hospital build itself, when it comes, takes it. Returns the id held,
+    None when nothing is held (a hospital stands or is planned first, no captives, no hospital site, no bp package)."""
+    if occ is None:
+        return None
+    tpls = [b["tpl"] for b in builds]
+    first = next((i for i, t in enumerate(tpls) if t in HOSPITAL_FIRST), None)
+    if first is None or HOSPITAL in tpls[:first] or any(t == HOSPITAL for t, *_ in occ.meta.values()):
+        return None
+    man = fort_manifest(save_dir)
+    if any(isinstance(r, dict) and r.get("tpl") == HOSPITAL for r in (man or {}).get("rooms") or []):
+        return None
+    try:
+        d = place(save_dir, HOSPITAL, {}, "S1", RESERVE_ID, occ=occ, snap=snap)
+    except (BpError, BpUnavailable):
+        return None
+    occ.add(d)
+    return RESERVE_ID
+
+
 def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     """BUG-370: place every NEW build of `doc` in plan order the way `apply` would (place_all: the first free site, no
     overlap with a project or an earlier build) and leave out each one that finds no site that works: all candidate sites in a
@@ -2845,10 +2895,14 @@ def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
         return []
     placed: dict[str, dict] = {}
     gone: list[tuple[dict, str]] = []
+    held = hospital_reserve(save_dir, [b for _, _, b in todo], occ, snap)       # BUG-483: the hospital's site first
     for si, bi, b in todo:
         bid = bp_id(year, si, bi)
         if b["site"] == SAME and b["tpl"] not in placed:
             continue
+        if held and b["tpl"] == HOSPITAL:
+            occ.discard(held)
+            held = None
         try:
             d = place(save_dir, b["tpl"], b.get("p") or {}, b["site"], bid, occ=occ, snap=snap,
                       same=placed.get(b["tpl"]) if b["site"] == SAME else None)
@@ -2856,7 +2910,9 @@ def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
             return []
         except BpError as e:
             if b["tpl"] not in FIT_KEEP_TPLS:
-                gone.append((b, _cut(str(e).removeprefix("site " + str(b["site"]) + ": "), 110)))
+                why = _cut(str(e).removeprefix("site " + str(b["site"]) + ": "), 110)
+                gone.append((b, why + ("; BUG-483: the hospital's site is kept for the hospital" if held and b["tpl"] in HOSPITAL_FIRST
+                                       else "")))
             continue
         except Exception as e:                          # noqa: BLE001 - BUG-457: one template's bug drops that template, not the propose
             gone.append((b, "ERROR " + _cut(f"{type(e).__name__}: {e}", 110)))
@@ -4421,6 +4477,7 @@ def place_all(save_dir: Path, doc: dict, prev: dict | None,
     occ = occupancy(save_dir, skip={bp_id(year, si, bi) for si, bi, _ in todo}) if todo else None
     snap = sites_snapshot(save_dir) if any(b["site"] != SAME for _, _, b in todo) else None
     docs, placed, lines = [], {}, []
+    held = hospital_reserve(save_dir, [b for _, _, b in todo], occ, snap)      # BUG-483: the hospital's site first
     for si, se in enumerate(doc["seasons"]):
         for bi, b in enumerate(se["build"]):
             if (si, bi) in old:
@@ -4429,6 +4486,9 @@ def place_all(save_dir: Path, doc: dict, prev: dict | None,
                 lines.append(f"s{si} {b['tpl']}@{b['site']} kept {o['id']} at {o['anchor']}")
                 continue
             bid = bp_id(year, si, bi)
+            if held and b["tpl"] == HOSPITAL:
+                occ.discard(held)
+                held = None
             try:
                 d = place(save_dir, b["tpl"], b.get("p") or {}, b["site"], bid, occ=occ, snap=snap,
                           same=placed.get(b["tpl"]) if b["site"] == SAME else None)

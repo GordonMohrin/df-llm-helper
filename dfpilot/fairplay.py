@@ -367,7 +367,9 @@ RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d"
                     "care_first": {"on": "bool", "stuck_days": (1, 60), "patients": (1, 250)},
                     "queue": {"yield_days": (1, 60), "park_days": (1, 400), "idle_days": (1, 400),
                               "reach_days": (1, 60), "stale_days": (0, 3000), "stale_every": (1, 400),
-                              "stall_days": (0, 3000), "stall_every": (1, 400)},   # BUG-328, BUG-352, BUG-435, BUG-444
+                              "stall_days": (0, 3000), "stall_every": (1, 400),   # BUG-328, BUG-352, BUG-435, BUG-444
+                              # BUG-486: parallel slots = active + free idle adults // slots_idle + adults // slots_pop, at most slots_max
+                              "slots_idle": (0, 50), "slots_pop": (1, 250), "slots_max": (1, 20)},
                     # BUG-066 / FR-76: the manifest follows the standing workshops (runner.lua Q.sync)
                     "reclaim": {"on": "bool", "gone_scans": (1, 10), "min_ws": (1, 50), "ask_days": (1, 60)}}
 

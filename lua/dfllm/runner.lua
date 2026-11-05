@@ -134,6 +134,12 @@ M.CFG = {
   -- a food/drink project in an emergency (Q.idle_keep; a set-aside one comes back once it becomes one). config "runner":
   -- {queue: {idle_days}}
   task_days = 3, idle_days = 30,
+  -- BUG-486 (Run 16d i4 Trumpetrealms: dining, tavern, temple, hospital 'set aside, no runner slot (the others go first)' for 478 d while 15
+  -- of 16 adults had no job: `active` = 3 projects at once whatever the fort's size): the slots grow with the idle hands and the
+  -- population, active + free idle adults // slots_idle + adults // slots_pop, at most slots_max. The order of the
+  -- queue is the same (seal, care, mood, then the plan's order); only more of them run. slots_idle 0 = off (active slots only).
+  -- config "runner": {queue: {slots_idle, slots_pop, slots_max}}
+  slots_idle = 3, slots_pop = 40, slots_max = 8,
   -- BUG-435 (Run 16d i4 Mazelanterns y401: traps 912 d, tombs 461 d, fortcore 341 d set aside, 'waits for trapparts': nine projects
   -- clogged the brief for ever): a project set aside stale_days without progress is announced (PROJECT_BLOCKED why=stale, A) with
   -- what it waits for and the commands, again every stale_every days; follow cancels the replaceable templates itself
@@ -3429,7 +3435,10 @@ local function conf(K)
              stale_every = nat(q.stale_every, 1, 400, M.CFG.stale_every) * DAY,
              runstall = nat(q.stall_days, 0, 3000, M.CFG.stall_days) * DAY,        -- BUG-444
              runstall_every = nat(q.stall_every, 1, 400, M.CFG.stall_every) * DAY,
-             reach = nat(q.reach_days, 1, 60, M.CFG.reach_days) * DAY}             -- BUG-352
+             reach = nat(q.reach_days, 1, 60, M.CFG.reach_days) * DAY,             -- BUG-352
+             slots_idle = nat(q.slots_idle, 0, 50, M.CFG.slots_idle),              -- BUG-486
+             slots_pop = nat(q.slots_pop, 1, 250, M.CFG.slots_pop),
+             slots_max = nat(q.slots_max, 1, 20, M.CFG.slots_max)}
   -- BUG-066 / FR-76: the manifest follows the workshops that stand (reclaim = config runner.reclaim)
   local rc = type(c.reclaim) == 'table' and c.reclaim or {}
   r.rec = {on = rc.on ~= false, scans = nat(rc.gone_scans, 1, 10, M.CFG.rec_scans),
@@ -3442,6 +3451,23 @@ local function conf(K)
   r.supply_d = nat(sf.supply_d, 0, 400, Q.SUPPLY_D)                          -- BUG-275
   r.off = math.max(r.off, r.pop)
   return r
+end
+
+-- BUG-486: the projects worked on at once: M.CFG.active, plus one for every slots_idle free idle adults (economy.idle_free) and
+-- one for every slots_pop adults, at most slots_max (never below active). The queue order does not change. c = conf(K)
+function Q.slot_cap(K, c)
+  local base = M.CFG.active
+  if not c or c.slots_idle <= 0 then return base end
+  local ok, free, adults = K.call('economy', 'idle_free')
+  if not (ok and math.type(free) == 'integer' and math.type(adults) == 'integer') then return base end
+  local cap = math.max(base, math.min(c.slots_max, base + free // c.slots_idle + adults // c.slots_pop))
+  if cap ~= S.cap_seen then
+    S.cap_seen = cap
+    if cap > base then
+      K.log('info', 'runner slots %d (active %d + %d free idle adults of %d): more projects run at once', cap, base, free, adults)
+    end
+  end
+  return cap
 end
 
 -- BUG-037: blocked for good (nothing in the kernel clears it: build_lost with its retries spent, a breach stop, quickfort
@@ -6114,6 +6140,8 @@ local function begin_run(K)
     return type(R) == 'table' and R.si == P.stage and t - (int(R.ps) or t) >= c.yield
   end
   local extra, pz, held, slots, yielded, waiting, nm = 0, {}, 0, {}, {}, 0, 0
+  local okc, cap = pcall(Q.slot_cap, K, c)                  -- BUG-486: more slots for idle hands; a fault keeps `active`
+  if not okc or math.type(cap) ~= 'integer' then cap = M.CFG.active end
   for pass = 1, 2 do
     for _, P in ipairs(list) do
       local R0 = S.rt.p[P.id]
@@ -6136,7 +6164,7 @@ local function begin_run(K)
         -- that hold them never keep a nook, the dwarf's life support, waiting 'queued behind')
         local mood_slot = ok and Q.mood_proj(P) and (nm < (int(M.CFG.mood_slots) or 2) or P.tpl == 'mood_drink')
         local aside = Q.idle(P) and not Q.idle_keep(K, P)       -- BUG-328: set aside: measured only, never a slot
-        if ok and not aside and (n < M.CFG.active or mood_slot) then
+        if ok and not aside and (n < cap or mood_slot) then
           if mood_slot then nm = nm + 1 else n = n + 1 end
           S.active[P.id] = true
           slots[#slots + 1] = P.id

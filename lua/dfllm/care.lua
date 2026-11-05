@@ -429,7 +429,7 @@ end
 -- sees it missing (queued: the project that builds it), else the first three missing types; nil when the shop stands, the
 -- skill has no shop type or economy does not answer. <= 140 bytes
 function M.ws_fix(K, skill)
-  local ok, ms = K.call('economy', 'mood_shops')
+  local ok, ms = K.call('economy', 'mood_shops', true)           -- BUG-486: a mood is here, whatever the phase
   if not (ok and type(ms) == 'table' and type(ms.missing) == 'table' and #ms.missing > 0) then return nil end
   local want = M.SKILL_WS[skill or '']
   local ask, queued = {}, {}
@@ -618,6 +618,7 @@ end
 -- shops a mood needs, as ONE request of only those types (PROJECT_REQUEST workshops why=mood types; follow places them at
 -- prio 1, runner.mood_types makes such a project run first and never pause). runner.mood_types names the types no project
 -- that builds only mood shops covers yet; again after mood_act_every while uncovered. Returns the asked types ('' none).
+M.MOOD_ASK_MAX = 3
 function M.mood_shop_ask(K, c, rec, sid, types)
   local okr, left = K.call('runner', 'mood_types', sid, types)
   local ask = (okr and type(left) == 'table') and left or types
@@ -704,7 +705,7 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   if ws and not rec.claim then rec.claim = now end
   local left, lsrc = MD.left(u, rec, now, c)
   local skill = (not ws) and best_skill(u) or nil
-  local okm, ms = K.call('economy', 'mood_shops')
+  local okm, ms = K.call('economy', 'mood_shops', true)         -- BUG-486: a mood is here, whatever the phase
   local typed = okm and type(ms) == 'table' and type(ms.missing) == 'table'
   rec.typed = typed or nil
   local missing = typed and MD.extra_missing(MD.missing_set(ms)) or {}   -- (+ Butchers: no moodable type)
@@ -713,6 +714,15 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   local miss = still_missing(job, rec)
   local types = MD.chain(miss, missing, rec.glass)
   if shop then table.insert(types, 1, shop) end
+  -- BUG-486: no shop claimed and the skill names none that is missing (a skill with no shop type, or a standing shop he has not claimed
+  -- yet is the rarer case): the moodable shops missing on the map are asked at once, the first M.MOOD_ASK_MAX, not at the next year's plan
+  if typed and not ws and not shop and #types == 0 then
+    local seen = {}
+    for _, t in ipairs(ms.missing) do
+      if #types >= M.MOOD_ASK_MAX then break end
+      if not seen[t] then seen[t] = true; types[#types + 1] = t end
+    end
+  end
   local ask = typed and M.mood_shop_ask(K, c, rec, sid, types) or ''   -- (an empty list clears the runner's mark)
   local webs = M.mood_webs(K, c, rec, sid, miss)
   local name = MD.short_name(uname(u))
