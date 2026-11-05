@@ -53,6 +53,7 @@ SEAL_LAST = {"tpl": "seal", "site": "S1", "p": {"at": "last"}}          # doors 
 LIFE_TPLS = ("hospital", "tombs", "farms", "stockroom", "cistern", "refuge_drink")
 SEAL_REFUGE = {"tpl": "seal", "site": "S1", "p": {"at": "refuge"}}      # BUG-031: the refuge's stair-head hatch + tiles
 DEPOT = "depot"                           # bp/rooms.py: a 5x5 trade depot on open surface floor (BUG-368)
+TRADEPOST = "tradepost"                   # bp/rooms.py: the dfllm-trade pile beside the depot, no fortcore needed (BUG-488)
 # BUG-387/389 (Run 16 region1, aquifer nearly everywhere: no fort got a dug fortcore for 11 years, every room template that hangs
 # on the dug Z4 core stood still): the core on the surface (bp/surfacecore.py: walled compound, Kern+, refuge, depot) and the
 # surface variants of the room templates that hang on it
@@ -341,12 +342,14 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "office": office_facts(save_dir, rooms, applied),         # BUG-396: an office stands or is planned; a surface site
             "metal": metal_facts(save_dir, man, applied),
             "aqshaft": any(t == AQSHAFT for t, _ in applied),       # FR-95: an aquifer shaft placed (any state)
+            "aq_live": aq_shafts(save_dir, applied)["live"],        # BUG-489: one is not finished yet (a finished one may be short)
             "z4": bool((man.get("zones") or {}).get("Z4")) if isinstance(man.get("zones"), dict) else False,  # BUG-197
             "core_any": any(t == "fortcore" for t, _ in applied),   # BUG-197: a fortcore project in any stage
             "core_dig": core_digging(save_dir, state),               # BUG-354: its stage 1 is still digging
             "surface": surface_facts(save_dir, state, applied, core),  # BUG-387/389: the core on the surface
             "startup": startup_placed(save_dir),                     # BUG-356: the surface still/kitchen/carpenter/mason set
             "depot": depot_planned(save_dir, state),                 # BUG-368: a trade depot stands or is under way
+            "trade_pile": trade_pile_planned(save_dir, core),        # BUG-488: the dfllm-trade pile stands or is under way
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
             "farms": farm_facts(save_dir, state),                     # BUG-297: an open farms project, a farm site
@@ -610,10 +613,11 @@ def surface_facts(save_dir: Path, state: dict | None, applied: set | None, core:
     stopped on a breach and cannot move (core_movable). Not looked up without a sites snapshot or the bp package."""
     have = any(t == SURFACE_CORE for t, _ in (applied or ())) or _surface_core_in(_kern_manifest(save_dir))
     out: dict = {"have": have, "need": False, "why": "", "site": None, "p": None}
-    if any(t == "fortcore" for t, _ in (applied or ())):
+    if any(t == "fortcore" for t, _ in (applied or ())) or any(t == AQSHAFT for t, _ in (applied or ())):
         # BUG-429 (Run 16b i2 Glendagger: fortcore stage 1+2 applied, stage 3 stopped on breach:water three times, the player
         # cancelled each stopped project, so `core` was None and this returned at once: no aqshaft route for years, although the
-        # manifest knew aquifer z123-129): a core that stands is no reason not to pass the aquifer for its remaining stages
+        # manifest knew aquifer z123-129): a core that stands is no reason not to pass the aquifer for its remaining stages.
+        # BUG-489: a shaft that ended above the known levels (BUG-490) is a reason too, with or without a fortcore applied
         late = aquifer_late(save_dir, applied)
         if late:
             out["aq_late"] = late
@@ -713,6 +717,48 @@ def fortcore_stops(save_dir: Path) -> list[dict]:
     return sorted(out.values(), key=lambda r: r["proj"])
 
 
+def aq_shafts(save_dir: Path, applied: set | None = None) -> dict:
+    """BUG-489/490: the fort's aquifer shafts from the bp files (cancelled ones are not there): {placed: any aqshaft placed (the
+    `applied` set or a bp file), live: one is not finished (under way, waiting, stopped and not cancelled), bottom: the lowest z the
+    finished shafts reached (AQ_PASS_DONE bot, else top - depth + 1), None when a bp file is unreadable or none is known}. A shaft that
+    ended above the known aquifer levels is no pass (aquifer_late)."""
+    done = done_projects(save_dir)
+    passed: dict[str, int] = {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "AQ_PASS_DONE" and isinstance(d.get("proj"), str) and _nat(d.get("bot"))                 and d["proj"] not in passed:
+            passed[d["proj"]] = d["bot"]
+    live, bottoms, seen = False, [], False
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if not (isinstance(d, dict) and d.get("tpl") == AQSHAFT):
+            continue
+        seen = True
+        prm = d.get("params") or {}
+        if p.stem not in done:
+            live = True
+            continue
+        if p.stem in passed:
+            bottoms.append(passed[p.stem])
+        elif isinstance(prm.get("top"), int) and isinstance(prm.get("depth"), int) and prm["top"] >= 0:
+            bottoms.append(prm["top"] - prm["depth"] + 1)
+        elif isinstance(d.get("anchor"), list) and len(d["anchor"]) == 3 and isinstance(prm.get("depth"), int):
+            bottoms.append(d["anchor"][2] - prm["depth"] + 1)
+    placed = seen or any(t == AQSHAFT for t, _ in (applied or ()))
+    return {"placed": placed, "live": live, "bottom": min(bottoms) if bottoms else None}
+
+
+def core_stands(save_dir: Path) -> bool:
+    """BUG-489: a fortcore stage 1 (or an unstaged one) is finished (PROJECT_DONE): the core is dug. False: nothing was ever dug of it
+    (parked on a breach, cancelled): its stage 2 / 3 builds and the refuge seal are phantoms."""
+    done = done_projects(save_dir)
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if isinstance(d, dict) and d.get("tpl") == "fortcore" and p.stem in done and _stage_of(d.get("params")) in (1, None):
+            return True
+    return False
+
+
 def aquifer_late(save_dir: Path, applied: set | None) -> dict | None:
     """BUG-429 (Run 16b i2 Glendagger, Gordon: the fort goes UNDER the aquifer): a fort whose fortcore stands (stage 1 or 2 applied,
     maybe dug) and has no aqshaft yet, while its remaining stages would meet an aquifer: the manifest / snapshot / breach levels
@@ -721,7 +767,10 @@ def aquifer_late(save_dir: Path, applied: set | None) -> dict | None:
     stopped on such water, or the core levels (stage 1's anchor, depth, refuge) meet a known level. {ok, why, aquifers, stops, meet,
     site: {anchor, rot, id, why}}: ok when `bp sites aqshaft` ranks a free column (sites.aqshaft: public Z4 floor, rock or unknown
     around it, no open water). None: nothing due, no aquifer known or the bp package unavailable."""
-    if any(t == AQSHAFT for t, _ in (applied or ())) or not any(t == "fortcore" for t, _ in (applied or ())):
+    shafts = aq_shafts(save_dir, applied)
+    if shafts["placed"] and (shafts["live"] or shafts["bottom"] is None):
+        return None                                 # a shaft is under way (or unknown): its pass is awaited
+    if not shafts["placed"] and not any(t == "fortcore" for t, _ in (applied or ())):
         return None
     try:
         snap, man = sites_snapshot(save_dir), fort_manifest(save_dir)
@@ -735,6 +784,11 @@ def aquifer_late(save_dir: Path, applied: set | None) -> dict | None:
     aq |= {z for z, ids in by_z.items() if len(ids) >= 2}        # the same level stopped two stages: an aquifer, not a puddle
     if not aq:
         return None
+    # BUG-489/490 (Run 16a i1 Basementflew y390: the shaft ended at z125 above the heavy z123/z120/z116, plan propose drew no second
+    # one because "a shaft was placed"): every placed shaft is done and its bottom lies above the lowest known aquifer level
+    gap = shafts["placed"] and shafts["bottom"] >= min(aq)
+    if shafts["placed"] and not gap:
+        return None                                 # the shaft passed every known level
     meet: list[int] = []
     anchor = core_anchor(save_dir)
     if anchor:
@@ -748,9 +802,12 @@ def aquifer_late(save_dir: Path, applied: set | None) -> dict | None:
                 break
         zc = -2 - depth                                           # fortcore.ZE - depth, then the refuge below it
         meet = sorted((z for z in range(anchor[2] + zc - refuge, anchor[2] + zc + 1) if z in aq or z + 1 in aq), reverse=True)
-    if not stops and not meet:
+    if not stops and not meet and not gap:
         return None
     out: dict = {"ok": False, "why": "", "aquifers": sorted(aq), "stops": stops[:6], "meet": meet}
+    if gap:
+        out["gap"] = {"bottom": shafts["bottom"], "below": sorted((z for z in aq if z < shafts["bottom"]), reverse=True),
+                      "parked": not core_stands(save_dir)}
     try:
         free, _, _ = free_sites(save_dir, "aqshaft", {}, n=1)
     except BpUnavailable:
@@ -778,6 +835,17 @@ def aquifer_late_swap(builds: list[dict], late: dict) -> str:
                 f"({_cut(late.get('why') or '?')}): `dfllm bp sites aqshaft --fresh`, `plan check`")
     site = late["site"]
     shaft = {"tpl": AQSHAFT, "site": "S1", "p": {"x": site["anchor"][0], "y": site["anchor"][1], "top": site["anchor"][2]}}
+    gap = late.get("gap") or {}
+    drop_note = ""
+    if gap.get("parked"):
+        # BUG-489 (Run 16a i1 Basementflew y390: fortcore st2/st3 and seal@refuge drawn on phantom depths while stage 1 was parked for a
+        # heavy aquifer): nothing of the core was dug, so every fortcore build and the refuge seal are phantoms (a stage 1 with
+        # p.aquifer=pass would find no site before the shaft passed); the draft after the PASSED shaft brings the core
+        n0 = len(builds)
+        builds[:] = [b for b in builds if b["tpl"] != "fortcore" and not (b["tpl"] == SEAL and (b.get("p") or {}).get("at") == "refuge")]
+        if n0 != len(builds):
+            drop_note = (f"; BUG-489: {n0 - len(builds)} parked core piece(s) (fortcore, seal at=refuge) left out: nothing of the core "
+                         "is dug, the core is drafted again once the shaft passed")
     k = 0
     while k < len(builds) and builds[k]["tpl"] == SEAL:        # a seal runs first anyway
         k += 1
@@ -785,10 +853,13 @@ def aquifer_late_swap(builds: list[dict], late: dict) -> str:
     later = [b for b in builds if b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) >= 2]
     for b in later:
         b["p"] = {**(b.get("p") or {}), "aquifer": "pass"}
+    if gap:
+        why = (f"the shaft placed before ended at z{gap['bottom']}, above the known level(s) "
+               + ", ".join(f"z{z}" for z in gap.get("below") or []))
     return (f"; BUG-429: the core's remaining stages meet the aquifer ({levels}; {why}): aqshaft@S1 first "
             f"({site['anchor'][0]},{site['anchor'][1]} z{site['anchor'][2]}: {_cut(site.get('why') or '')})"
             + (f", fortcore stage(s) {', '.join(str(_stage_of(b['p'])) for b in later)} p.aquifer=pass: they wait for the PASSED shaft"
-               if later else ""))
+               if later else "") + drop_note)
 
 
 def aquifer_route(save_dir: Path) -> dict:
@@ -1173,7 +1244,7 @@ def build_kind(b: dict) -> str:
         return "tombs"
     if tpl == EXPLORE:                                    # DECISIONS 4: the ore search is paused by no open seal
         return "explore"
-    if tpl == DEPOT:                                      # BUG-368: the surface trade depot (runner.lua kind_of 'depot')
+    if tpl in (DEPOT, TRADEPOST):                         # BUG-368: the surface trade depot (runner.lua kind_of 'depot'); BUG-488: its pile
         return "depot"
     if tpl in SUPPLY_TPLS or (tpl == "workshops" and (_food_shops(p) or p.get("surface") == 1)):   # BUG-356: startup shops
         return "supply"
@@ -3432,6 +3503,7 @@ def startup_placed(save_dir: Path) -> bool:
     return False
 
 
+TRADEPOST_BUILD = {"tpl": TRADEPOST, "site": "S1"}                # BUG-488: the trade pile beside the depot
 DEPOT_BUILD = {"tpl": DEPOT, "site": "S1"}                       # BUG-368: the trade depot on the surface, no fortcore needed
 
 
@@ -3446,6 +3518,22 @@ def depot_planned(save_dir: Path, state: dict | None) -> bool:
         if isinstance(doc, dict) and doc.get("tpl") == DEPOT:
             return True
     return core_digging(save_dir, state)
+
+
+def trade_pile_planned(save_dir: Path, core: dict | None = None) -> bool:
+    """BUG-488 (Run 16a i1 Basementflew: caravans 'nothing_listed' for four years, no stone or iron bought, trade.want useless): the
+    stockpile `dfllm-trade` is made by a `tradepost` project (placed in any state), the surface core, or fortcore stage 1 (its s1.place
+    stage; placed and not stopped on a breach). A fortcore a breach stopped (`core`) is not one: the fort has a depot and no pile."""
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if not isinstance(doc, dict):
+            continue
+        tpl = doc.get("tpl")
+        if tpl in (TRADEPOST, SURFACE_CORE):
+            return True
+        if tpl == "fortcore" and _stage_of(doc.get("params")) in (1, None) and not (core and p.stem in (core.get("ids") or []))                 and not (doc.get("params") or {}).get("retrofit"):
+            return True                                  # stage 1 placed and not stopped on a breach: its s1.place makes the pile
+    return False
 
 
 def core_digging(save_dir: Path, state: dict | None) -> bool:
@@ -4201,10 +4289,13 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     if sf.get("need") and not surface_core_on() and sf.get("aq") is not None and not dug \
             and any(b["tpl"] == "fortcore" for b in builds) and (info is None or AQSHAFT in info):
         # BUG-412: the core would cut an aquifer level: pass it with a lined shaft first (surface_facts.aq, aquifer_route)
-        builds, aq_note = aquifer_core_swap(builds, sf["aq"], bool((fort or {}).get("aqshaft")))
+        # BUG-489: a shaft that ended above the known levels (aq_late.gap) is no shaft that passes this core: the swap adds another
+        builds, aq_note = aquifer_core_swap(builds, sf["aq"], bool((fort or {}).get("aqshaft")) and not (sf.get("aq_late") or {}).get("gap"))
         front = [b for b in front if any(b is x for x in builds)]
     late = sf.get("aq_late")
-    if isinstance(late, dict) and not (fort or {}).get("aqshaft") and not aq_note and not sc_note and not rb \
+    # BUG-489: `aqshaft` is any shaft ever placed; a finished one that ended above the known levels is the gap aquifer_late drafts for
+    aq_have = (fort or {}).get("aq_live") if "aq_live" in (fort or {}) else (fort or {}).get("aqshaft")
+    if isinstance(late, dict) and not aq_have and not aq_note and not sc_note and not rb \
             and (info is None or AQSHAFT in info) and not any(b["tpl"] == AQSHAFT for b in builds):
         aq_note = aquifer_late_swap(builds, late)                  # BUG-429: a core that stands still passes the aquifer
     if gaps and fresh is None:
@@ -4222,6 +4313,15 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         depot_note = ("; BUG-368: no trade depot and " + ("a fortcore that waits for the aquifer shaft" if aq_wait
                                                           else "no fortcore stage 1 to build one")
                       + ": depot@S1 on the surface before the first caravan (bp sites depot --fresh --near <wagon x,y,z>)")
+    # BUG-488: a depot (standing, placed or drafted now) and no dfllm-trade pile (made by fortcore stage 1 / the surface core only) =
+    # the caravans find nothing to buy with: the pile alone, beside the depot, before the first caravan season
+    trade_note = ""
+    if (fort or {}).get("trade_pile") is False and (info is None or TRADEPOST in info) and (known is None or TRADEPOST in known)             and ((fort or {}).get("depot") is True or any(b["tpl"] == DEPOT for b in builds))             and not any(b["tpl"] in (TRADEPOST, SURFACE_CORE) or (b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) == 1
+                                                                 and not aq_wait) for b in builds):
+        builds.append(copy.deepcopy(TRADEPOST_BUILD))
+        trade_note = ("; BUG-488: a trade depot and no dfllm-trade pile (fortcore stage 1 builds it, none stands): tradepost@S1 beside the "
+                      "depot, so logistics can send goods and `trade.want` buys have something to pay with "
+                      "(bp sites tradepost --fresh --near <depot x,y,z>)")
     left_out = []
     if rb:                                       # the rebuild drafts only what the runner runs then
         left_out = [b["tpl"] for b in builds if build_kind(b) not in REBUILD_KINDS]
@@ -4284,7 +4384,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + cap_note + depot_note + hosp_note + sc_note + aq_note + office_note + (
+    doc["notes"] += core_note + cap_note + depot_note + trade_note + hosp_note + sc_note + aq_note + office_note + (
         rq_note if any(b is x for b in builds for x in rq_builds) else "")
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
