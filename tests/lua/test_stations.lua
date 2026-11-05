@@ -683,4 +683,22 @@ T.test('BUG-451: a hungry soldier who has a job (he is eating) and a BREACH rele
   T.ok(orders_of(W, 'A'):find('station@', 1, true), 'a BREACH: the fight comes first ' .. orders_of(W, 'A'))
 end)
 
+T.test('BUG-451: a BREACH ends the release at once (the station is ordered again, not after FEED_HOLD)', function()
+  local W = world{tag = 'st451c'}
+  X.call(W, 'military', 'posture', 'B2_HOLD', true)
+  run(W, 100)
+  local uid
+  for _, p in ipairs(X.squad_of(W, 'A').positions) do
+    if p.occupant >= 0 then uid = W.hfs[p.occupant].unit_id end
+  end
+  local u = W.unit(uid)
+  u.counters2 = {hunger_timer = 70000, thirst_timer = 0}
+  u.job = {}
+  run(W, 700)
+  T.eq(orders_of(W, 'A'), '', 'released')
+  W.K.set_mode('BREACH', 'test')
+  run(W, 700)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'BREACH: the release ended, station ordered ' .. orders_of(W, 'A'))
+end)
+
 T.done()

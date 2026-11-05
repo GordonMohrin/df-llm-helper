@@ -19,3 +19,7 @@ Not for a squad on a kill order or a sortie, never in a BREACH, not twice within
 
 ## Live check
 A soldier over hunger 50,000 with "job none": kern.log "military: squad A released from its station to eat and drink: <id> (hunger ..)" and the squad's order list empty for up to a game day, then `station@` again.
+
+## Review fix
+
+While a squad is released to eat (`rt.feed[k].on`, order `feed`), a sortie or kill order that takes the squad over now ends the release without re-stationing it (the running order stands). A BREACH ends the release at once. Test: `tests/lua/test_stations.lua` (BREACH ends the release).

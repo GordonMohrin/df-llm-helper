@@ -3757,8 +3757,12 @@ function M.feed_pass(K, now, mode)
         local th = try(function() return u.counters2.thirst_timer end) or 0
         if hu >= M.FEED_HUNGER or th >= M.FEED_THIRST then hungry[#hungry + 1] = {u = u, hu = hu, th = th} end
       end
-      if f and f.on then
-        if #hungry == 0 or now < f.t or now - f.t >= M.FEED_HOLD then
+      if f and f.on and (rt.order[k] ~= 'feed' or rt.held[k] or rt.so[k] ~= nil) then
+        -- another order (a sortie, a kill) took the squad over while it was released: that order stands, no re-station
+        f.on, f.end_t = false, now
+        K.log('info', 'military: squad %s feed release ended, order %s took over', k, tostring(rt.order[k]))
+      elseif f and f.on then
+        if #hungry == 0 or now < f.t or now - f.t >= M.FEED_HOLD or mode == 'BREACH' then
           f.on, f.end_t = false, now
           K.log('info', 'military: squad %s back to its station after %s (%d still hungry or thirsty)', k,
                 #hungry == 0 and 'the meal' or 'FEED_HOLD ticks', #hungry)
