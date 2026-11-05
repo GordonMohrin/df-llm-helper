@@ -247,9 +247,12 @@ def _same_build(a: dict, b: dict) -> bool:
     return (a["tpl"], a["site"], a.get("p") or {}) == (b["tpl"], b["site"], b.get("p") or {})
 
 
-def stable_ids(doc: dict, prev: dict | None) -> list[str]:
+def stable_ids(doc: dict, prev: dict | None, free: set[str] | frozenset[str] | None = None) -> list[str]:
     """A plan for the same year as the applied one must keep every applied build at its index:
-    `y<Y>s<S>b<I>` is already a project in the game (drop one with `bp.cancel`, append new builds)."""
+    `y<Y>s<S>b<I>` is already a project in the game (drop one with `bp.cancel`, append new builds). BUG-500 (Run 16a i1 Basementflew: the
+    temple and the cistern were cancelled and drafted again, the applied plan 'could not be shrunk'): `free` = the ids of cancelled projects
+    (bp/.cancelled); the plan may END before one of them, so a trailing run of cancelled builds is dropped (an index in the middle
+    would shift the ids of the builds behind it)."""
     if not prev or prev.get("year") != doc["year"]:
         return []
     errs = []
@@ -257,6 +260,8 @@ def stable_ids(doc: dict, prev: dict | None) -> list[str]:
         new = doc["seasons"][si]["build"]
         for bi, b in enumerate(se["build"]):
             pid = bp_id(doc["year"], si, bi)
+            if bi >= len(new) and free and all(bp_id(doc["year"], si, k) in free for k in range(bi, len(se["build"]))):
+                break
             if bi >= len(new):
                 errs.append(f"seasons[{si}].build[{bi}]: {b['tpl']}@{b['site']} is applied as {pid}; keep it "
                             f"(cancel with `dfllm cmd bp.cancel proj={pid}`)")
@@ -266,11 +271,11 @@ def stable_ids(doc: dict, prev: dict | None) -> list[str]:
     return errs
 
 
-def rebase_on_applied(doc: dict, prev: dict | None) -> tuple[dict, str]:
+def rebase_on_applied(doc: dict, prev: dict | None, free: set[str] | None = None) -> tuple[dict, str]:
     """BUG-454 (Run 16a i1 y384: follow applied a MINIMAL plan, then the player's draft, written before it, checked with 3 ERRORs 'is applied as
     y384s0b1; keep it'): a draft for the year of the applied plan that drops or changes an applied build is rebuilt on that plan: the applied
     builds stand at their ids, the draft's other builds follow them in their seasons. (doc, note); the note is '' when nothing was needed."""
-    if not prev or prev.get("year") != doc.get("year") or not stable_ids(doc, prev):
+    if not prev or prev.get("year") != doc.get("year") or not stable_ids(doc, prev, free):
         return doc, ""
     out = copy.deepcopy(doc)
     seasons = copy.deepcopy(prev["seasons"])
@@ -324,6 +329,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
     else:
         o1 = any(isinstance(b, dict) and b.get("role") == "outer" for b in bridges.values()) \
             or any(t == "fortcore" and (st or 0) >= 3 for t, st in applied)
+    famine = material_famine(save_dir, state)
     refuge = refuge_projects(save_dir, state, applied, skip=set(core["ids"]) if core else set())
     if core and not (core["resite"] and core["ok"] is not False):
         refuge["fortcore"] = False                  # nothing to anchor stage 3 on: the core's anchor is the damp one
@@ -337,7 +343,9 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "audit": audit_routes(save_dir, state),
             "refuge": refuge,
             "stone_dig": stone_digs(save_dir, state),               # BUG-430: a dead dig is none
-            "famine": material_famine(save_dir, state),             # BUG-430: no boulders and no logs
+            "famine": famine,                                        # BUG-430: no boulders and no logs
+            "nostone": nostone_reason(state, famine),                # BUG-500: temple / cistern cannot be made
+            "cancelled": sorted(cancelled_ids(save_dir)),            # BUG-500: bp.cancel'ed project ids (the plan may end before them)
             "hosp": hospital_facts(save_dir, state, rooms),
             "office": office_facts(save_dir, rooms, applied),         # BUG-396: an office stands or is planned; a surface site
             "metal": metal_facts(save_dir, man, applied),
@@ -2300,7 +2308,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     errs = schema.validate("plan", doc)
     if errs:
         return errs, []
-    errs += stable_ids(doc, prev)
+    errs += stable_ids(doc, prev, set((fort or {}).get("cancelled") or ()))     # BUG-500: a cancelled tail may be dropped
     dec = decisions if decisions is not None else load_decisions()
     d01 = schema.decision("D-01", dec)
     warn: list[str] = []
@@ -2381,6 +2389,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     warn += seal_gate(doc, s, fort or {}, prev)   # Run 11 siege 8: seal first; the rebuild policy
     warn += aquifer_gate(doc, s, fort or {})      # FR-95: a breach:damp park, a heavy aquifer, fortcore p.aquifer pass
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
+    warn += stone_gate(doc, prev, fort)           # BUG-500: no temple / cistern while stone is out of reach
     warn += _traps.gate(doc, fort)                # FR-96: a way in without a trap lane from P5 on
     warn += defense_gate(doc, s, fort or {}, prev)    # BUG-377: the defence before growth
     warn += trap_hold_gate(doc, s)                    # BUG-437: no stone-fall traps on the citizens' way out
@@ -3241,6 +3250,101 @@ def soil_dig(save_dir: Path, doc: dict, prev: dict | None) -> str:
     note = quarry_fallback(save_dir, doc, prev, si, soil=True)
     if note:
         doc["notes"] += "; " + note
+    return note
+
+
+# BUG-500 (Run 16a i1 Basementflew y388-y391, Run 16d i4 Trumpetrealms: a fort with no free boulder and no hard stone; propose drafted the temple
+# and the cistern again after the player had cancelled them: the temple's offering place is a stone altar, the well, the lever and the floodgate
+# of a cistern are mechanisms (stone); they hung at 37 % for years): while stone is out of reach these templates are left out and the notes say why
+NEEDS_STONE = {"temple": "its offering place is a stone altar", "cistern": "its well, lever and floodgate need mechanisms (made of stone)"}
+
+
+def cancelled_ids(save_dir: Path) -> set[str]:
+    """BUG-500: ids of the projects bp.cancel moved away (<save>/bp/.cancelled/<id>.json) and that have no live bp file."""
+    root = Path(save_dir) / "bp"
+    try:
+        return {p.stem for p in (root / ".cancelled").glob("*.json") if not (root / p.name).is_file()}
+    except OSError:
+        return set()
+
+
+def nostone_reason(s: dict | None, famine: dict | None) -> str:
+    """BUG-500: why stone is out of reach ('' when it is not): the kernel's soil mark (state stock.rsoil), or no free boulder
+    (state stock.rock 0) with a current MATERIAL_SHORT event (material_famine)."""
+    if soil_fort(s):
+        return "the stone digs found only soil (no hard stone yet)"
+    rock = ((s or {}).get("stock") or {}).get("rock")
+    if _nat(rock) and rock == 0 and (famine or {}).get("rock0"):
+        return "no free boulder and a current MATERIAL_SHORT"
+    return ""
+
+
+def drop_impossible(doc: dict, prev: dict | None, fort: dict | None) -> str:
+    """BUG-500: the builds of NEEDS_STONE templates are left out of the draft while fort.nostone holds: the new ones, and the cancelled ones at the
+    end of the applied plan's season (stable_ids lets the plan end before a cancelled tail; a build in the middle would shift the ids behind
+    it). Returns the note ('' when nothing was left out)."""
+    why = (fort or {}).get("nostone")
+    if not why:
+        return ""
+    year = doc["year"]
+    same = bool(prev) and prev.get("year") == year
+    free = set((fort or {}).get("cancelled") or ())
+    out: list[str] = []
+    for si, se in enumerate(doc["seasons"]):
+        n = len(prev["seasons"][si]["build"]) if same else 0
+        head, tail = se["build"][:n], se["build"][n:]
+        for b in tail:
+            if b["tpl"] in NEEDS_STONE:
+                out.append(f"{b['tpl']} ({NEEDS_STONE[b['tpl']]})")
+        tail = [b for b in tail if b["tpl"] not in NEEDS_STONE]
+        while not tail and head and head[-1]["tpl"] in NEEDS_STONE and bp_id(year, si, len(head) - 1) in free:
+            b = head.pop()
+            out.append(f"{b['tpl']} {bp_id(year, si, len(head))} (cancelled; {NEEDS_STONE[b['tpl']]})")
+        se["build"] = head + tail
+    if not out:
+        return ""
+    note = (f"BUG-500: stone is out of reach ({why}): left out {', '.join(out)}; trade.want stone, mechanism and a dig to hard stone "
+            "first, then propose again")
+    doc["notes"] += "; " + note
+    return note
+
+
+def stone_gate(doc: dict, prev: dict | None, fort: dict | None) -> list[str]:
+    """check (BUG-500): a warning for each NEW temple / cistern build while fort.nostone holds: it would wait for a stone altar / mechanisms
+    for years (the applied one: bp.cancel it; the plan may then end before it)."""
+    why = (fort or {}).get("nostone")
+    if not why:
+        return []
+    return [f"{b['tpl']} (seasons[{si}]): {NEEDS_STONE[b['tpl']]}, and stone is out of reach ({why}): leave it out until stone arrives "
+            "(trade.want stone,mechanism; a dig to hard stone)"
+            for si, _, b in new_builds(doc, prev) if b["tpl"] in NEEDS_STONE]
+
+
+def stone_first(save_dir: Path, doc: dict, prev: dict | None) -> str:
+    """BUG-497 (Run 16d i4 Trumpetrealms y384, i1 Basementflew: not one free boulder, a seal wall waited 30 days for stone, 15 of 29 adults idle
+    with 54 unclaimed jobs, the explore dig that reaches hard stone sat behind bedrooms and a tavern): while the fort has no free boulder
+    (state stock.rock 0, or the kernel's soil mark) the NEW builds of every season are ordered seals, then the digs that reach hard stone
+    (the explore quarry, the stone dig), then the rest. The applied builds keep their index (stable_ids). Returns the note ('' when
+    nothing moved)."""
+    s = files.read_state(save_dir) or {}
+    rock = (s.get("stock") or {}).get("rock")
+    if not (soil_fort(s) or (_nat(rock) and rock == 0)):
+        return ""
+    same = bool(prev) and prev.get("year") == doc["year"]
+    moved = 0
+    for si, se in enumerate(doc["seasons"]):
+        n = len(prev["seasons"][si]["build"]) if same else 0
+        head, tail = se["build"][:n], se["build"][n:]
+        order = ([b for b in tail if b["tpl"] == SEAL] + [b for b in tail if b["tpl"] != SEAL and (b["tpl"] == EXPLORE or b == STONE_DIG)]
+                 + [b for b in tail if b["tpl"] != SEAL and not (b["tpl"] == EXPLORE or b == STONE_DIG)])
+        if any(x is not y for x, y in zip(order, tail)):
+            moved += 1
+            se["build"] = head + order
+    if not moved:
+        return ""
+    note = ("BUG-497: no free boulder: the dig that reaches hard stone (explore / stone dig) is drafted before the other new builds "
+            "(a seal wall, door or lock waits for stone; logs make the doors meanwhile)")
+    doc["notes"] += "; " + note
     return note
 
 
@@ -4837,6 +4941,8 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     soil_dig(save_dir, doc, prev)                             # BUG-438: a soil fort digs down to the first hard stone
     fit_explore(save_dir, doc, prev)                          # BUG-367: the explore's depth fits the levels known now
     fit_stone_dig(save_dir, doc, prev)                        # BUG-351: never a stone dig without a free site
+    stone_first(save_dir, doc, prev)                          # BUG-497: no boulder: the dig to hard stone before the other new builds
+    drop_impossible(doc, prev, fort)                          # BUG-500: no temple / cistern while stone is out of reach
     fit_placeable(save_dir, doc, prev)                        # BUG-370: nor a build whose site is out of reach or does not fit
     cap_notes(doc)                                            # BUG-440: the notes fit the schema's 2000 bytes
     doc["phase_target"] = cur
@@ -4862,6 +4968,8 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
         soil_dig(save_dir, cand, prev)
         fit_explore(save_dir, cand, prev)
         fit_stone_dig(save_dir, cand, prev)
+        stone_first(save_dir, cand, prev)
+        drop_impossible(cand, prev, fort)
         fit_placeable(save_dir, cand, prev)
         cap_notes(cand)
         if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
@@ -5041,6 +5149,10 @@ def run(args, save_dir: Path) -> int:
         sfit = fit_stone_dig(save_dir, doc, prev)             # BUG-351: a stone dig no free bedrooms site takes
         cfit += [sfit] if sfit else []
         cfit += [sdig] if sdig else []
+        sfirst = stone_first(save_dir, doc, prev)             # BUG-497: no boulder: the dig to hard stone before the other new builds
+        cfit += [sfirst] if sfirst else []
+        simp = drop_impossible(doc, prev, fort)               # BUG-500: no temple / cistern while stone is out of reach
+        cfit += [simp] if simp else []
         cfit += reserve_shop_room(save_dir, doc, prev)        # BUG-461: Still, Kitchen, Butchers ... before dining and furnaces
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
         if cap_notes(doc):                                    # BUG-440: the notes fit the schema's 2000 bytes
@@ -5073,7 +5185,7 @@ def run(args, save_dir: Path) -> int:
         return 2
     if isinstance(doc, dict) and isinstance(doc.get("seasons"), list) and len(doc["seasons"]) >= 1             and all(isinstance(se, dict) and isinstance(se.get("build"), list) for se in doc["seasons"]):
         try:
-            doc, rnote = rebase_on_applied(doc, prev)
+            doc, rnote = rebase_on_applied(doc, prev, cancelled_ids(save_dir))     # BUG-500: a cancelled tail stays dropped
         except (KeyError, TypeError, ValueError):           # a malformed draft: check reports it
             rnote = ""
         if rnote:                                         # BUG-454: the file keeps the rebuilt draft, so the next edit starts from it

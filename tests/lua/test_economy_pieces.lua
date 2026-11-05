@@ -165,6 +165,21 @@ T.test('Run 11: a planned door without any order gets one in wood (no free stone
   T.eq(#orders(W, 'dfllm:piece_door'), 1, 'the open order covers it: never twice')
 end)
 
+-- BUG-497 (Run 16d i4 Trumpetrealms y384: a seal door 'stone queued behind the other rock orders, no logs' with 229 logs in stock, the wall beside it
+-- 30 days open): the wood of other owners' open orders (barrels, beds, tables: 300 logs wanted, 200 in stock) is no reason to hold a defense piece back
+T.test('BUG-497: no stone, 200 logs, other orders want 300 of them: the seal door is ordered in wood all the same', function()
+  local W = world{boulders = 0, logs = 200, jobs = function() return {planned(1, 'DOOR')} end, setup = function(W)
+    F.order(W, {job_type = df.job_type.ConstructTable, mat_type = -1, mat_index = -1, amount_left = 300, amount_total = 300,
+                frequency = df.workquota_frequency_type.OneTime, material_category = {wood = true}, _name = 'Construct wooden Table'})
+  end}
+  days(W, 1)
+  local d = orders(W, 'dfllm:piece_door')
+  T.eq(#d, 1, 'old code: wood_left 0 (200 - 300), MATERIAL_SHORT "no logs"')
+  T.eq({d[1].job, d[1].material_category}, {'ConstructDoor', {'wood'}})
+  T.eq(W.find_events('MATERIAL_SHORT'), {})
+  T.eq(mat_for(W, 'door', 1), 'wood')
+end)
+
 T.test('Run 11: rock free and no rock orders waiting: the door is ordered in stone at the mason\'s', function()
   local W = world{boulders = 30, logs = 0, jobs = function() return {planned(1, 'DOOR')} end}
   days(W, 1)
