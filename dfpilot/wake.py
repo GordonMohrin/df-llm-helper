@@ -1170,6 +1170,16 @@ class Follower:
                 args["prio"] = job["prio"]
             prev = files.read_json(_placed(self.dir, tpl))
             need = job.get("need") if isinstance(job.get("need"), list) else None
+            ap = args.get("p") or {}
+            if tpl == "fortcore" and not ap.get("retrofit") and not ap.get("aquifer") and (ap.get("stage") or 1) == 1 \
+                    and re.fullmatch(r"S[0-9]+", str(args["site"])):
+                from .plan import wet_core_guard
+                # BUG-419 (Run 16b i2 #5420: a wet fortcore, score 0, placed after PLAN_EXHAUSTED): never a wet site by itself
+                wp, why = wet_core_guard(self.dir, args.get("p"), snap)
+                if wp is None:
+                    raise BpError(why)
+                if wp != (args.get("p") or {}):
+                    args["p"] = wp
             if tpl == "farms":
                 cid = self._place_farms(args, now, snap)
             elif tpl == "workshops" and key != "starter":

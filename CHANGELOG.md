@@ -24,6 +24,17 @@
   fight marks; `need` in the payload.
 - **Tests:** tests/lua/test_bug416_417_reach_groups.lua, test_stranded.lua, test_seal_refuge.lua.
 - **Live check:** `inspect what=reach` twice: classes on one main group; a stranded group over hunger 50,000: `stranded_food` once.
+## plan propose drafts open requests and R0 pieces; follow places no wet core (BUG-418, BUG-419, 2026-11-05; offline, live-untested)
+- **Why:** Run 16d i4 Mazelanterns: `bedrooms x19` requested every 9 days, 15 homeless, `mood shops missing 4124 days`, refuge_dry for years - the
+  player wrote bedrooms, refuge_beds, `workshops only=...` and refuge_drink into the plan by hand each year. Run 16b i2 Ostgate #5420: follow placed
+  a wet fortcore (score 0, aquifer z123-z130) after PLAN_EXHAUSTED.
+- **BUG-418:** `fort.requests` (open PROJECT_REQUESTs: bedrooms, refuge_beds, refuge_drink, workshops types; newest per template within 40 days,
+  none after a PROJECT_DONE of that template or while one is under way) and `fort.mood_ws` (R0 mood_ws) feed `propose`: bedrooms/refuge_beds with the
+  request's n, one workshops build with `skip` for the missing moodable shops, refuge_drink while R0 says refuge_dry for the part a too small
+  standing store lacks (`drink_draft(force=True)`); deduplicated, noted `BUG-418`.
+- **BUG-419:** `plan.wet_core_guard` in `wake._place`: follow's fortcore stage 1 at `S<k>` is not placed when the best free site has score 0 or
+  an `aquifer at z..` reason, unless a shallower depth is dry (BUG-364); AUTO_FAIL names the aqshaft route (BUG-412) `plan propose` drafts, or
+  that none exists. No contract change.
 
 ## Water the citizens can reach: ice, an early drink check, a thirst line (BUG-400 to BUG-402, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a i1 Mansionlauded (and the first i1 fort Bachwald) died of thirst, 13 of 16 in y372-373: `bp sites fortcore` ranked S1 110,62,159
