@@ -608,4 +608,19 @@ T.test('BUG-431: soil beyond the walk group (a wall between) is not offered', fu
   T.ok(not cmds:find('farms', 1, true), cmds)
 end)
 
+T.test('BUG-449 (Run 16d i4 Mazelanterns: 5-6 citizens a day at the only accepted water 101 tiles out, hunger 70-120k, 8 starved): '
+       .. 'the question says where they stand and why, and offers water inside and the entrance check, not only a farm search', function()
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  snapshot_on(W)
+  W.load({name = 'water', every = {ticks = 100000},
+          src_near = function() return {d = 9, txt = 'zone 17696 at 164,170,137, 9 tiles'} end})
+  trapped(W, {{11, 10, 20, 0}, {12, 11, 21, 0}})
+  local cmds, q = hungry_decision(W)
+  T.ok(q:find('only accepted water of the fort', 1, true) and q:find('zone 17696 at 164,170,137', 1, true), q)
+  T.ok(cmds:find('bp sites cistern --fresh', 1, true) and cmds:find('inspect what=entrances', 1, true), cmds)
+  local d
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_food' then d = x.d end end
+  T.eq(d.at_water, 'zone 17696 at 164,170,137, 9 tiles')
+end)
+
 T.done()

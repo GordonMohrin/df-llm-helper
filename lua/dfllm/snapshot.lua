@@ -320,7 +320,7 @@ end
 -- the tiles with (x + 2y) % n == 0, and the rect may then cover n times liquid_tiles. With n = 5 or 7 (prime to 1, 2, 3)
 -- that is every n-th tile of each row, column and both diagonals (a brook 1 tile wide is met every n tiles); 2, 3, 4, 6
 -- and 8 miss a direction (3: the diagonal x = y + k)
-function M.liquids(K, x0, y0, x1, y1, z, min, ice, lattice)
+function M.liquids(K, x0, y0, x1, y1, z, min, ice, lattice, brook)
   x0, y0, x1, y1, z, min = int(x0), int(y0), int(x1), int(y1), int(z), int(min) or 1
   local out = {}
   if not (x0 and y0 and x1 and y1 and z) or x1 < x0 or y1 < y0 then return out end
@@ -330,17 +330,26 @@ function M.liquids(K, x0, y0, x1, y1, z, min, ice, lattice)
   if (lat and (area + lat - 1) // lat or area) > M.CFG.liquid_tiles then return nil, 'rect too large' end
   local getTileFlags, getTileType = dfhack.maps.getTileFlags, dfhack.maps.getTileType
   ice = ice == true
+  -- BUG-446 (Run 16b i2 / 16c i3: `brook=in` on the embark scan, the water scan met only a pond 72 tiles off): a brook tile
+  -- (tiletype BROOK_BED / BROOK_TOP) lies under 1-3/7 of water, below the 4/7 `min` the water scan reads. With `brook` n (1 <= n <
+  -- min) such a tile of depth >= n is listed too, a sixth field 1 marks it (no other shallow water is: puddles, rain, seepage)
+  local bmin = int(brook)
+  bmin = bmin and bmin >= 1 and bmin < min and bmin or nil
+  local need = bmin or min
   for y = y0, y1 do
     for x = x0, x1 do
       local des = (not lat or (x + 2 * y) % lat == 0) and getTileFlags(x, y, z) or nil
       if des and not des.hidden then
         local f = int(des.flow_size) or 0
         local lt = des.liquid_type
-        local tt = (ice or f >= min) and getTileType and getTileType(x, y, z) or nil
+        local tt = (ice or f >= need) and getTileType and getTileType(x, y, z) or nil
         if tt ~= nil and tt_info(tt).ice == true then
           if ice then out[#out + 1] = {x, y, f, des.feature_global == true and 1 or 0, 1} end
-        elseif f >= min and not (lt == true or (lt ~= false and lt ~= nil and lt ~= 0)) then
-          out[#out + 1] = {x, y, f, des.feature_global == true and 1 or 0, ice and 0 or nil}
+        elseif f >= need and not (lt == true or (lt ~= false and lt ~= nil and lt ~= 0)) then
+          local br = f < min and tt ~= nil and (tt_info(tt).shape == 'BROOK_BED' or tt_info(tt).shape == 'BROOK_TOP')
+          if f >= min or br then
+            out[#out + 1] = {x, y, f, des.feature_global == true and 1 or 0, ice and 0 or nil, br and 1 or nil}
+          end
         end
         if #out >= 512 then return out end
       end

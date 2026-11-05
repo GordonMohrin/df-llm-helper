@@ -4949,6 +4949,14 @@ function M.no_water(K, c, r)
   local plants = ((r.inv or {}).brew_p or 0) + ((r.inv or {}).brew_g or 0)
   local oka, acc = K.call('water', 'drink_access')
   local dry = oka and type(acc) == 'table' and acc.known == true and acc.ok == false and plants == 0 and (r.cit or 0) > 0
+  -- BUG-446 (Run 16b i2 Roadvises: water 72 tiles off counted as 'reachable', drink 0 days and no brewable plant, nobody asked): water the
+  -- citizens reach only farther than water.drink_far tiles, no accepted source, drink under drink_far_d days: dry as well
+  local far = false
+  if not dry and oka and type(acc) == 'table' and acc.known == true and acc.far == true and plants == 0 and (r.cit or 0) > 0 then
+    local fd = math.tointeger(acc.far_d) or 0
+    far = fd > 0 and ((r.days or {}).drink_d or 0) < fd
+    dry = far
+  end
   if not dry then
     if st.nowater then K.log('info', 'no-water check over: %s', oka and type(acc) == 'table' and acc.ok and 'water reachable'
                              or 'brewable plants or no scan') end
@@ -4973,22 +4981,27 @@ function M.no_water(K, c, r)
   cmds[#cmds + 1] = [[dfllm cmd trade.want '{"add":["plant","drink","seeds"]}']]
   local head = string.format('%d bodies of water, %d with a bank the citizens reach%s, no brewable plant, drink %d d', acc.bodies,
                              acc.bank, acc.partial > 0 and ' (scan partial)' or '', dd)
+  if far and acc.bd then head = string.format('the nearest water they reach is %d tiles off, no accepted source, no brewable plant, drink %d d', acc.bd, dd) end
   local q = string.format('no water the citizens reach: %s; what to do: d.water, d.cmds', head)
+  if far then q = string.format('water only %d tiles off: %s; what to do: d.water, d.cmds', acc.bd or -1, head) end
   -- BUG-423/424: the water NEAREST to the fort (acc.near, not a fixed representative tile) with the cistern commands that name it
-  if type(acc.near) == 'table' then
-    local at = string.format('%d,%d,%d', acc.near[1], acc.near[2], acc.near[3])
+  local nat = type(acc.near) == 'table' and acc.near or (far and type(acc.bat) == 'table' and acc.bat or nil)   -- BUG-446: far water has a bank
+  if nat then
+    local at = string.format('%d,%d,%d', nat[1], nat[2], nat[3])
     cmds[#cmds + 1] = 'python -m dfpilot.bp.sites cistern --near ' .. at .. ' --radius 20'
   end
   local auto = {'gatherers for wild plants', 'caravans asked for plants and drink'}
   if (acc.emerg or 0) > 0 then auto[#auto + 1] = 'EMERGENCY well accepted as a slow drink source (water.well_emerg)' end
-  K.emit('DECISION_NEEDED', 'A', string.format('no reachable water, no brewable plant: drink %d days is all the fort has', dd),
+  K.emit('DECISION_NEEDED', 'A', far and string.format('water is %d tiles away, no brewable plant: drink %d days is all the fort has',
+                                                       acc.bd or -1, dd)
+         or string.format('no reachable water, no brewable plant: drink %d days is all the fort has', dd),
          {id = 'no_water', q = q:sub(1, 200), drink = dd, auto = auto, cmds = cmds, water = M.lines(fix, 200, 2),
-          near = acc.near and json.array{acc.near[1], acc.near[2], acc.near[3]} or nil, nd = acc.nd})
+          near = nat and json.array{nat[1], nat[2], nat[3]} or nil, nd = far and acc.bd or acc.nd})
   local ad = math.tointeger(((c.drink or {}).access_d)) or 0
-  if ad > 0 and dd < ad and type(acc.near) == 'table' then
+  if ad > 0 and dd < ad and nat then
     K.emit('PROJECT_REQUEST', 'B', string.format('cistern: no water the citizens reach, the nearest %d tiles off at %d,%d,%d, drink %d days',
-                                                 acc.nd or -1, acc.near[1], acc.near[2], acc.near[3], dd),
-           {tpl = 'cistern', why = 'no_water', n = acc.nd, at = json.array{acc.near[1], acc.near[2], acc.near[3]}})
+                                                 (far and acc.bd or acc.nd) or -1, nat[1], nat[2], nat[3], dd),
+           {tpl = 'cistern', why = 'no_water', n = far and acc.bd or acc.nd, at = json.array{nat[1], nat[2], nat[3]}})
   end
 end
 

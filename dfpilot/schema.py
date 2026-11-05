@@ -532,7 +532,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # thirstiest patient, key = the verdict (alert | noreach | unreadable | nowater | stuck | open | run | nojob; BUG-343:
     # noeffect = jobs ran for days while his thirst only climbed), lie = why the top patient lies (wounds, body counters, liquid, hunger, syndromes)
     "PATIENT_DYING": ("A", "water", _d("units:ia n:i thirst:i carers:i want:i hosp:s",
-                                       "idle:i added:i give:i open:i run:i buckets:i why:s stuck:i reach:i key:s lie:s")),
+                                       "idle:i added:i give:i open:i run:i buckets:i why:s stuck:i reach:i key:s lie:s "
+                                       "cmds:sa unrel:s")),      # BUG-449: key srcreach, the commands, carriers outside the detail
     # BUG-036 (Run 11 siege 9: 7 patients killed in their hospital beds in the BREACH): in SIEGE/BREACH, once per fight,
     # n of the patients lie outside the burrow the civ alert confines to (burrow; Kern+/Tiefe+ while it is silent):
     # units, all patients, mode, hosp_out = hospital zones outside Kern+ and the refuge

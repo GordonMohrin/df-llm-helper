@@ -150,6 +150,18 @@ M.DEFAULTS = {
   -- BUG-344: a citizen (no patient) at this thirst within 1 tile of an accepted well tells economy's thirst decision that
   -- the well gives him no water (M.drink_fix)
   well_thirst = 50000,
+  -- BUG-446 (Run 16b i2 Roadvises, 16c i3 Castletongs: the embark scan said `brook=in`, the water scan met only a pond 72 tiles off or
+  -- nothing, i2 ran out of drink): a brook (tiletype BROOK_BED / BROOK_TOP) lies under 1-3/7 of water, below `deep`. The scan reads
+  -- brook tiles from brook_min/7 up (0 = off: only >= deep as before); such a body (`brook` 1) with a bank the citizens reach is a
+  -- place to drink (water.drink_access), but no Water Source zone (the game wants 4/7) and no well spot: the recipe is a piped
+  -- cistern to it
+  brook_min = 1,
+  -- BUG-446: water that is only reachable farther than drink_far tiles is no drink supply for a fort that has none of its own: with no
+  -- accepted source, no brewable plant and drink under drink_far_d days economy asks DECISION_NEEDED no_water (0 = off)
+  drink_far = 40, drink_far_d = 120,
+  -- BUG-448 (Run 16d i4: aqshaft and cistern finished, the water scan 7.3 M ticks old): a finished aqshaft or cistern queues a
+  -- scan at once and again ws_redo ticks later (the cistern fills; 0 = no second scan)
+  ws_redo = 3 * DAY,
 }
 M.THIRSTY_MAX = 16                           -- BUG-344: thirsty citizens' positions kept a run
 M.SRC_MAX = 8                                -- accepted sources in the state (water.src), nearest first
@@ -745,15 +757,17 @@ function M.recipe(c, cis, K, bare, nodig)
     return string.format('a well over water or a Water Source zone on water >= %d/7 within %d tiles (inspect '
                          .. 'water_sources)%s%s', c.deep, c.near, aq and (', or ' .. aq) or '', tail)
   end
-  local best, cav, pit
+  local best, cav, pit, brk
   for _, b in ipairs(ws.bodies or {}) do
     if b.cavern == 1 and b.d <= c.near and not cav then cav = b end
-    if b.cavern ~= 1 and b.d <= c.near and (b.bank or (b.dig and not nodig)) then
+    if b.brook == 1 then                         -- BUG-446: 1-3/7 takes no zone and no well: its own branch below
+      if b.cavern ~= 1 and b.bank and (not brk or b.d < brk.d) then brk = b end
+    elseif b.cavern ~= 1 and b.d <= c.near and (b.bank or (b.dig and not nodig)) then
       if not best or (b.bank and not best.bank) or ((b.bank ~= nil) == (best.bank ~= nil) and b.d < best.d) then
         best = b
       end
     end
-    if b.cavern ~= 1 and b.d <= c.near and b.pit and (not pit or b.d < pit.d) then pit = b end
+    if b.cavern ~= 1 and b.brook ~= 1 and b.d <= c.near and b.pit and (not pit or b.d < pit.d) then pit = b end
   end
   if best and best.bank then
     return string.format('zone the water at %d,%d,%d (%d/7) as Water Source, bank %d,%d,%d is reachable, or a well '
@@ -770,8 +784,15 @@ function M.recipe(c, cis, K, bare, nodig)
                          best.at[2], best.at[3], tail)
   end
   if cis then return cis.fix .. tail end
-  local way = M.best_way(ws)                   -- BUG-289: water farther than `near` that the citizens reach (a brook)
-  if way and way.kind ~= 'dig' then
+  local bway = M.best_way(ws)
+  if brk and not (bway and bway.kind ~= 'brook' and bway.kind ~= 'dig' and bway.b.d < brk.d) then   -- BUG-446: drink at a brook bank; a cistern brings it
+    return string.format('the brook at %d,%d,%d (%d/7 shallow, %d tiles, %d tiles off) is drinkable from the bank %d,%d,%d but takes no Water '
+                         .. 'Source zone or well (they want %d/7): a cistern piped to it (python -m dfpilot.bp.sites cistern --near '
+                         .. '%d,%d,%d)%s%s', brk.at[1], brk.at[2], brk.at[3], brk.max, brk.n, brk.nd or brk.d, brk.bank[1], brk.bank[2],
+                         brk.bank[3], c.deep, brk.at[1], brk.at[2], brk.at[3], aq and (', or ' .. aq) or '', tail)
+  end
+  local way = bway                             -- BUG-289: water farther than `near` that the citizens reach (a brook)
+  if way and way.kind ~= 'dig' and way.kind ~= 'brook' then
     local b = way.b
     local at = way.kind == 'bank' and b.bank or b.pit
     return string.format('the water at %d,%d,%d (%d/7) is %d tiles off (> %d): %s at %d,%d,%d, then the hospital within '
@@ -1015,7 +1036,8 @@ local function scan_survey(K, c, sc)
     if not z then return true end
     sc.y = sc.y or 0
     local rows = math.max(1, math.min(sc.Y - sc.y, (budget * lat) // sc.X, (4096 * lat) // sc.X))
-    local ok, list, err = K.call('snapshot', 'liquids', 0, sc.y, sc.X - 1, sc.y + rows - 1, z, c.deep, false, lat)
+    local ok, list, err = K.call('snapshot', 'liquids', 0, sc.y, sc.X - 1, sc.y + rows - 1, z, c.deep, false, lat,
+                            c.brook_min > 0 and c.brook_min or nil)
     if not ok or type(list) ~= 'table' then
       sc.serr = 'survey: ' .. tostring(ok and err or list)
       return true
@@ -1065,14 +1087,15 @@ local function scan_read(K, c, sc)
     else
       local w = b[4] - b[1] + 1
       local rows = math.max(1, math.min(b[5] - sc.y + 1, budget // w, 4096 // w))
-      local ok, list, err = K.call('snapshot', 'liquids', b[1], sc.y, b[4], sc.y + rows - 1, sc.z, c.deep)
+      local ok, list, err = K.call('snapshot', 'liquids', b[1], sc.y, b[4], sc.y + rows - 1, sc.z, c.deep, false, nil,
+                            c.brook_min > 0 and c.brook_min or nil)
       if not ok or type(list) ~= 'table' then
         sc.err = 'snapshot.liquids: ' .. tostring(ok and err or list)
         return true
       end
       for _, t in ipairs(list) do
         local key = k3(t[1], t[2], sc.z)
-        if not sc.tiles[key] and sc.n < 6000 then sc.tiles[key], sc.n = {t[1], t[2], sc.z, t[3], t[4]}, sc.n + 1 end
+        if not sc.tiles[key] and sc.n < 6000 then sc.tiles[key], sc.n = {t[1], t[2], sc.z, t[3], t[4], t[6]}, sc.n + 1 end
       end
       budget, sc.reads = budget - w * rows, sc.reads + w * rows
       sc.y = sc.y + rows
@@ -1129,6 +1152,7 @@ local function scan_group(c, sc)
       end)
       body.at = {body.tiles[1][1], body.tiles[1][2], body.z}
       body.nd = body.tiles[1].nd
+      body.brook = body.max < c.deep and 1 or nil      -- BUG-446: only shallow brook tiles (the deeper ones are water as ever)
       local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
       for _, t in ipairs(body.tiles) do
         if t[1] < x0 then x0 = t[1] end
@@ -1167,7 +1191,8 @@ end
 -- BUG-291: a revealed tile with the aquifer flag in or beside the body marks its level (sc.aqz)
 local function scan_body(K, c, sc, body)
   local z, deepset = body.z, sc.tiles
-  local res = {z = z, n = #body.tiles, max = body.max, at = body.at, d = body.d, nd = body.nd, ext = body.ext, zone = -1, well = -1, reach = 0}
+  local res = {z = z, n = #body.tiles, max = body.max, at = body.at, d = body.d, nd = body.nd, ext = body.ext, zone = -1, well = -1, reach = 0,
+               brook = body.brook}
   -- BUG-031 (Run 11: a 7/7 cavern lake 1146 tiles on z127 below an aborted shaft): caverns stay sealed (DOCTRINE: every
   -- breach of caverns through a 2-wall airlock), so cavern water is listed but never looked at for a bank or a dig
   if body.cav == 1 then res.cavern = 1; return res end
@@ -1186,7 +1211,7 @@ local function scan_body(K, c, sc, body)
     checks = checks + 1
     return M.reach_any(K, froms, {x = x, y = y, z = zz or z})
   end
-  if c.pit_well and res.well == -1 and res.zone == -1 then
+  if c.pit_well and res.well == -1 and res.zone == -1 and not res.brook then     -- BUG-446: a well over 1-3/7 gives no water
     for i = 1, math.min(16, #body.tiles) do
       local t = body.tiles[i]
       local own = tile(K, t[1], t[2], z)
@@ -1267,19 +1292,23 @@ function M.best_way(ws)
   local best = {}
   for _, b in ipairs(ws and ws.bodies or {}) do
     if b.cavern ~= 1 then
-      for _, k in ipairs({{'bank', b.bank}, {'well', b.pit}, {'dig', b.dig}}) do
+      -- BUG-446: a shallow brook is no zone or well water: its bank is a place to drink ('brook'), offered after the rest
+      for _, k in ipairs({{b.brook == 1 and 'brook' or 'bank', b.bank}, {'well', b.pit}, {'dig', b.dig}}) do
         if k[2] and (not best[k[1]] or b.d < best[k[1]].d) then best[k[1]] = b end
       end
     end
   end
-  for _, k in ipairs({'bank', 'well', 'dig'}) do if best[k] then return {kind = k, b = best[k]} end end
+  for _, k in ipairs({'bank', 'well', 'dig', 'brook'}) do if best[k] then return {kind = k, b = best[k]} end end
 end
 
 -- the short text of M.best_way (state water.wsc, <= 96 bytes; bp sites hospital names it when no accepted water exists)
 function M.way_text(w)
   if not w then return nil end
   local b = w.b
-  if w.kind == 'bank' then
+  if w.kind == 'brook' then      -- BUG-446
+    return trunc(string.format('brook %d,%d,%d (%d/7, %d tiles) drinkable from bank %d,%d,%d; no zone below 4/7: piped cistern',
+                               b.at[1], b.at[2], b.at[3], b.max, b.n, b.bank[1], b.bank[2], b.bank[3]), 96)
+  elseif w.kind == 'bank' then
     return trunc(string.format('water %d,%d,%d (%d/7, %d tiles): bank %d,%d,%d reachable: zone it or a well over it',
                                b.at[1], b.at[2], b.at[3], b.max, b.n, b.bank[1], b.bank[2], b.bank[3]), 96)
   elseif w.kind == 'well' then
@@ -1325,7 +1354,7 @@ end
 function M.zone_cands(ws)
   local out = {}
   for _, b in ipairs(ws and ws.bodies or {}) do
-    if b.cavern ~= 1 and b.zone == -1 and b.well == -1 then
+    if b.cavern ~= 1 and b.zone == -1 and b.well == -1 and b.brook ~= 1 then     -- BUG-446: the game takes no zone on 1-3/7
       if b.bank and b.wt then out[#out + 1] = {wt = b.wt, stand = b.bank, up = false, b = b} end
       if b.pit and b.stand then
         out[#out + 1] = {wt = {b.pit[1], b.pit[2], b.pit[3] - 1}, stand = b.stand, up = true, b = b}
@@ -1819,6 +1848,50 @@ local function plural(n, one, many) return string.format('%d %s', n, n == 1 and 
 -- {key, reason (short), txt (counts), short (counts without the buckets), open, run, stuck, reach, idle, carers}. The first
 -- of: alert (confined away from the patient), noreach (none walks to him), stuck / open (jobs nobody takes), nojob (the game
 -- posts none), run (jobs run). Live data that decides the rest: `inspect what=hospital` and kern.log 'water:' lines.
+-- BUG-449 (Run 16a i1 Syrupobeyed y384-y386: two patients died of thirst in the same bed area 94,113,135 under '1-4 GiveWater jobs running
+-- 25+ days without effect', hospital ok, 25 free buckets, the nearest accepted water a zone at 106,109,139 four levels up): the verdict
+-- `run` said nothing about WHERE the water is. Does an accepted source (a wet well or Water Source zone, no emergency well) lie on the walk
+-- group of the patient (snapshot.groups with the neighbour lookup: a zone tile is water, no floor)? {ok, s, d} with the nearest source
+-- on his group, else the nearest overall with ok false; nil when unknown (no source, no group read)
+function M.src_reach(K, r, top)
+  if not (top and top.x) then return nil end
+  local list = {}
+  for _, s in ipairs(r.sources or {}) do
+    if s.wet and not s.emerg and s.x then
+      list[#list + 1] = {s = s, d = math.max(math.abs(s.x - top.x), math.abs(s.y - top.y), math.abs(s.z - top.z))}
+    end
+  end
+  if #list == 0 then return nil end
+  table.sort(list, function(a, b) return a.d < b.d end)
+  local pts = {{x = top.x, y = top.y, z = top.z}}
+  for i = 1, math.min(8, #list) do pts[#pts + 1] = {x = list[i].s.x, y = list[i].s.y, z = list[i].s.z} end
+  local ok, gs = K.call('snapshot', 'groups', pts, true)
+  if not ok or type(gs) ~= 'table' or type(gs[1]) ~= 'number' or gs[1] <= 0 then return nil end
+  local known = false
+  for i = 2, #pts do
+    local g = gs[i]
+    if type(g) == 'number' and g > 0 then
+      known = true
+      if g == gs[1] then return {ok = true, s = list[i - 1].s, d = list[i - 1].d, g = gs[1]} end
+    end
+  end
+  if not known then return nil end
+  return {ok = false, s = list[1].s, d = list[1].d, g = gs[1], gs = gs[2]}
+end
+
+-- BUG-449: the commands that can be run for a patient whose water does not come (patient_thirst / PATIENT_DYING `cmds`)
+function M.patient_cmds(gv, top)
+  local out = json.array{}
+  if top and top.x and gv and gv.key == 'srcreach' then
+    out[#out + 1] = string.format('dfllm bp sites cistern --near %d,%d,%d --within 15 --fresh', top.x, top.y, top.z)
+  end
+  if top and top.id then out[#out + 1] = string.format('dfllm cmd inspect what=unit key=%d', top.id) end
+  out[#out + 1] = 'dfllm cmd inspect what=hospital'
+  out[#out + 1] = 'dfllm cmd inspect what=reach'
+  out[#out + 1] = 'dfllm cmd inspect what=water_sources'
+  return out
+end
+
 function M.give_diag(K, c, r, sc, bfree, top)
   local gv = {carers = #r.carers, idle = r.carers_idle, key = 'unreadable'}
   local ok_job = sc ~= nil and sc.read ~= false
@@ -1851,6 +1924,7 @@ function M.give_diag(K, c, r, sc, bfree, top)
     end
     if not inside then alert = bs[1].n or '?' end
   end
+  local sreach = wet_any and top and top.x and not alert and M.src_reach(K, r, top) or nil   -- BUG-449
   local jobs_t = ok_job and string.format('jobs %d open/%d running', gv.open, gv.run) or 'jobs unreadable'
   gv.jobs_t = jobs_t
   gv.reach_t = string.format('%d idle, %s reach', gv.idle, gv.reach and tostring(gv.reach) or '?')
@@ -1874,6 +1948,12 @@ function M.give_diag(K, c, r, sc, bfree, top)
     end
   elseif gv.reach == 0 then
     gv.key, gv.reason = 'noreach', string.format('no caregiver reaches the patient (0 of %d)', #r.cpos)
+  elseif sreach and sreach.ok == false then
+    local sr = sreach
+    gv.key = 'srcreach'
+    gv.reason = string.format('no accepted water on the walk group %d of the patient: the nearest, %s %d at %d,%d,%d (%d tiles), lies on group %s '
+                              .. '(the carriers cannot fetch it): a cistern beside him', sr.g, sr.s.kind, sr.s.id or -1, sr.s.x, sr.s.y,
+                              sr.s.z, sr.d, tostring(sr.gs))
   elseif not ok_job then
     gv.key, gv.reason = 'unreadable', 'the GiveWater jobs cannot be read'
   elseif not wet_any and gv.run == 0 then
@@ -1990,6 +2070,8 @@ function M.restale(K, c, r, p, now, gv, sc)
   end
   p.rs = {t = now, ids = json.array(out), n = (rs and math.tointeger(rs.n) or 0) + 1}
   if #out == 0 then
+    -- BUG-449: said in the verdict too (the lines are cut at 200: short)
+    if #(sc.w_workers or {}) > 0 then gv.unrel = table.concat(sc.w_workers, ',') end
     K.log('warn', 'water: stale GiveWater job (%s) and its carrier(s) %s are no member of %s: nothing to release', gv.reason,
           #(sc.w_workers or {}) > 0 and table.concat(sc.w_workers, ',') or 'unknown', M.CARER_DETAIL)
     return nil
@@ -2904,6 +2986,8 @@ local function finish(K, c, r, p)
                n_carers = after, want = cs.want, added = #cs.added, buckets = r.free + fixed, buckets_all = r.buckets,
                q = trunc(q, 200)}
     if gv then d.open, d.run, d.stuck, d.reach, d.key, d.idle = gv.open, gv.run, gv.stuck, gv.reach, gv.key, gv.idle end
+    d.cmds = M.patient_cmds(gv, top)               -- BUG-449: a decision names what can be run
+    if gv and gv.unrel then d.unrel = trunc(gv.unrel, 60) end
     K.emit('DECISION_NEEDED', 'A', trunc(msg, 200), d)
   end
   -- BUG-054: a patient at the death-risk line (dying_thirst; death follows at ~75,000) is a class-A line of its own, with
@@ -2935,7 +3019,8 @@ local function finish(K, c, r, p)
              {units = shown, n = #dying, thirst = top.thirst, carers = after, want = cs.want, hosp = hs,
               idle = cs.idle, added = #cs.added, give = r.give, open = gopen or -1, run = grun or -1,
               buckets = r.free + fixed, why = trunc(why, 120), stuck = gv and gv.stuck or nil,
-              reach = gv and gv.reach or nil, key = gv and gv.key or nil, lie = lie ~= '' and trunc(lie, 120) or nil})
+              reach = gv and gv.reach or nil, key = gv and gv.key or nil, lie = lie ~= '' and trunc(lie, 120) or nil,
+              cmds = M.patient_cmds(gv, top), unrel = gv and gv.unrel and trunc(gv.unrel, 60) or nil})
       K.log('warn', 'water: %s (GiveWater/GiveFood jobs: %s open, %s running)%s%s', msg, tostring(gopen), tostring(grun),
             gv and ('; ' .. gv.txt) or '', lie ~= '' and ('; unit ' .. top.id .. ': ' .. lie) or '')
     end
@@ -3145,6 +3230,23 @@ function M.init(K)
   pstate(K)
 end
 
+-- BUG-448 (Run 16d i4 Mazelanterns y404: the aqshaft and the cistern 100 % done, `bp sites hospital --fresh` still 'no accepted water', the
+-- water scan 7.3 M ticks old and 'queued for the next water run'): a finished aqshaft or cistern changes the water the fort reaches. The
+-- scan is queued at once and, as a cistern fills, once more ws_redo ticks later (state m.water ws_redo, kept over reloads)
+M.on['EV:PROJECT_DONE'] = function(K, ev)
+  local d = type(ev) == 'table' and type(ev.d) == 'table' and ev.d or {}
+  if d.tpl ~= 'aqshaft' and d.tpl ~= 'cistern' then return end
+  local c = M.conf(K)
+  local now = K.now().tick
+  st.ws_want = true
+  if c.ws_redo > 0 then
+    pstate(K).ws_redo = now + c.ws_redo
+    K.persist.touch('m.water')
+  end
+  K.log('info', 'water: %s %s finished: the water sources scan is queued%s', tostring(d.tpl), tostring(d.proj),
+        c.ws_redo > 0 and ' (and once more in a few days)' or '')
+end
+
 -- the run (patients, sources, buckets, decisions), then a requested water sources scan in the following frames;
 -- a scan that outlasts the cadence lets the next run go first
 function M.step(K, budget, ctx)
@@ -3158,6 +3260,12 @@ function M.step(K, budget, ctx)
     st.run, st.run_t = new_run(K), now
   end
   local r = st.run
+  local redo = math.tointeger(p.ws_redo)                  -- BUG-448: the second scan after a finished aqshaft / cistern
+  if redo and now >= redo then
+    p.ws_redo = nil
+    K.persist.touch('m.water')
+    if not st.scan then st.ws_want = true end
+  end
   -- BUG-288 (Run 15 Inkintense: 'scan queued' for a season): the scan in hand gets a slice in every step. It used to wait
   -- for a step without a run, and with the slices paced 30 s apart every step began a new run (1200 ticks had passed):
   -- the scan never moved while the game ran
@@ -3391,6 +3499,25 @@ function M.drink_fix(K)
   return head .. '; ' .. M.recipe(c, nil, K, true, true), cmds
 end
 
+-- public (BUG-449, Run 16d i4 Mazelanterns y403-y408: 5-6 citizens a day stood at the only accepted water, a zone 101 tiles from the
+-- core at the map edge, hunger 70-120k, 8 starved; siege's stranded_food offered a farm search): the accepted source (wet well or
+-- Water Source zone, last run) within `r` tiles of a position, nearest first: {d, txt} ('zone 17696 at 164,170,137, 9 tiles'); nil when
+-- none, or when the fort has an accepted source of its own as near the core (then the water is not what drew them out)
+function M.src_near(K, x, y, z, r)
+  local best
+  for _, s in ipairs(st.src or {}) do
+    if s.wet and not s.emerg and s.x then
+      local d = math.max(math.abs(s.x - x), math.abs(s.y - y), math.abs(s.z - z))
+      if d <= (math.tointeger(r) or 20) and (not best or d < best.d) then best = {d = d, s = s} end
+    end
+  end
+  if not best then return nil end
+  local s = best.s
+  local inside = s.inn ~= nil                                   -- a source inside Kern+ / Tiefe+ is no reason to walk out
+  if inside then return nil end
+  return {d = best.d, txt = string.format('%s %s at %d,%d,%d, %d tiles', s.kind, tostring(s.id), s.x, s.y, s.z, best.d)}
+end
+
 -- public (BUG-401, Run 16a Mansionlauded and Bachwald: two forts without a drop of reachable water died of thirst, 13 of 16):
 -- can the citizens drink anywhere? {known, ok, acc, bank, bodies, partial}: known = a water run and a scan finished; acc =
 -- accepted sources (a Water Source zone, a wet well); bank = bodies (not cavern) with a bank the citizens reach (the scan's
@@ -3403,8 +3530,12 @@ function M.drink_access(K)
   for _, s in ipairs(st.src) do
     if s.wet and s.emerg then emerg = emerg + 1 elseif s.wet then acc = acc + 1 end       -- BUG-425: a slow emergency well is no source
   end
+  local bd, bat                                 -- BUG-446: the nearest body with a bank (its distance, its water tile)
   for _, b in ipairs(ws.bodies or {}) do
-    if b.cavern ~= 1 and b.bank then bank = bank + 1 end
+    if b.cavern ~= 1 and b.bank then
+      bank = bank + 1
+      if not bd or (b.nd or b.d) < bd then bd, bat = b.nd or b.d, b.at end
+    end
     if b.partial == 1 then partial = partial + 1 end
   end
   -- BUG-423/424: `near` = the water nearest to the fort or a citizen (b.at is that tile, b.nd its distance) of the bodies without
@@ -3413,8 +3544,14 @@ function M.drink_access(K)
   for _, b in ipairs(ws.bodies or {}) do
     if b.cavern ~= 1 and not b.bank and (not near or (b.nd or b.d) < (near.nd or near.d)) then near = b end
   end
+  -- BUG-446 (Run 16b i2 Roadvises: a pond 72 tiles off was 'reachable water', drink 0 days and no word): `far` = no accepted source and
+  -- the nearest bank farther than drink_far tiles (bd, bat = that body's nearest water tile); economy's no_water treats it as dry once
+  -- the drink is short and no plant brews
+  local cf = M.conf(K)
+  local far = acc == 0 and bd ~= nil and cf.drink_far > 0 and bd > cf.drink_far
   return {known = true, ok = acc + bank > 0, acc = acc, bank = bank, bodies = #(ws.bodies or {}), partial = partial, emerg = emerg,
-          near = near and {near.at[1], near.at[2], near.at[3]} or nil, nd = near and (near.nd or near.d) or nil}
+          near = near and {near.at[1], near.at[2], near.at[3]} or nil, nd = near and (near.nd or near.d) or nil,
+          far = far or nil, far_d = cf.drink_far_d, bd = bd, bat = bat and {bat[1], bat[2], bat[3]} or nil}
 end
 
 -- public (BUG-036, readiness): the hospital zones outside Kern+ and the refuge by the last run: {n, total, zones = {{id,
