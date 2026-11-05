@@ -14,6 +14,17 @@
   the median when the pieces are spread), `fresh_wait` sizes the wait to the box, `wait_snapshot` prints progress.
 - **Tests:** tests/lua/test_bug414_heavy_ring.lua (10), tests/test_bug414_415_heavy_core.py (11), test_bug364_367 (far-flung box), test_bp_aqshaft + golden (param).
 - **Live check:** see BUG-414 (the ring cycle on a heavy level; the first ring tile decides the three open questions) and BUG-415.
+## Walk groups read in one frame, a decision for stranded food (BUG-416, BUG-417, 2026-11-05; offline, live-untested)
+- **Why:** Run 16d Mazelanterns y391: three `inspect reach` calls gave three main ids, beds and the well in neighbour ids; phantom CUTOFF,
+  "133 logs out of his reach", mood material "none reachable", furniture jams. Citizens starved 100+ tiles out with "no rescue (no raised
+  bridge leads to food)".
+- **BUG-416:** `seal.audit_pass` collects positions while it yields and labels them by anchor tiles (one per citizen group) read in one
+  frame, re-read at every later frame; `snapshot.far` compares with the home set (BUG-390's `home_set`) instead of the first citizen's group.
+- **BUG-417:** `siege.dry_decision`: DECISION_NEEDED `stranded_food` (A, urgent) with commands; also for a refused bridge rescue past the
+  fight marks; `need` in the payload.
+- **Tests:** tests/lua/test_bug416_417_reach_groups.lua, test_stranded.lua, test_seal_refuge.lua.
+- **Live check:** `inspect what=reach` twice: classes on one main group; a stranded group over hunger 50,000: `stranded_food` once.
+
 ## Water the citizens can reach: ice, an early drink check, a thirst line (BUG-400 to BUG-402, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a i1 Mansionlauded (and the first i1 fort Bachwald) died of thirst, 13 of 16 in y372-373: `bp sites fortcore` ranked S1 110,62,159
   `water 1 steps` (score 1029) while `inspect reach` had drink empty and `water_sources` knew one body with reach 0; the questions that came

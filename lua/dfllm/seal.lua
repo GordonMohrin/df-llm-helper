@@ -576,15 +576,15 @@ end
 local function add(t, g, n) t[g] = (t[g] or 0) + n end
 
 -- the walk group a building stands on: its centre tile, else the first walkable neighbour (wells, depots)
-local function bgroup(b)
-  local x, y, z = b.centerx, b.centery, b.z
+local function bgroup_at(x, y, z, gf)
   if not (x and y and z) then return nil end
-  local g = grp(x, y, z)
+  gf = gf or grp
+  local g = gf(x, y, z)
   if g and g ~= 0 then return g, x, y, z end
   for dy = -1, 1 do
     for dx = -1, 1 do
       if dx ~= 0 or dy ~= 0 then
-        local h = grp(x + dx, y + dy, z)
+        local h = gf(x + dx, y + dy, z)
         if h and h ~= 0 then return h, x + dx, y + dy, z end
       end
     end
@@ -726,7 +726,7 @@ local function audit_pass(K)
   local t0 = now_t(K)
   local cits = citizens(K)
   spend(3 * #cits)
-  local cg, main = group_counts(cits)
+  local cg, main = group_counts(cits)       -- (BUG-416: read again in one go below, with every other group)
   local R = {tick = t0, main = main, cit = {n = #cits, by = cg}, cls = {}, reps = {}}
   for _, c in ipairs(CLASSES) do R.cls[c] = {n = 0, by = {}, at = {}} end
   local names, kern, refuge = audit_names(K)
@@ -761,14 +761,90 @@ local function audit_pass(K)
     end
     return r
   end
-  -- FR-59/62: stock per tile from the census (stored drink, food and seeds included); one group read per tile
+  -- FR-59/62: stock per tile from the census (stored drink, food and seeds included). BUG-416 (Run 16d Mazelanterns y391:
+  -- main group 48575, beds in 48583/48587, the well in 48927, a new numbering at every call, phantom CUTOFF and 'none
+  -- reachable'): DFHack renumbers the walk groups whenever the map changes and this pass yields over many ticks, so a
+  -- group id read in one tick matched nothing read in another. The yielding loops only COLLECT the positions. Then the
+  -- citizens and anchor tiles (one citizen per group, the biggest groups first) are read in ONE frame: the anchors' groups
+  -- are the labels of the audit. Every later frame reads the anchors again first and gives a tile the label of the anchor
+  -- whose group it shares (a connectivity test, never an id carried over a renumbering); a tile on no citizen's group
+  -- gets a label of its own frame.
   if not mem.items then job_items(K, 'audit', true) end
   local I = mem.items
   R.items = {tick = I.tick, n = I.n, tiles = #I.keys, drop = {drink = I.drop[1], food = I.drop[2], seeds = I.drop[3]}}
+  local pst, pbl, ped = {}, {}, {}
   for _, k in ipairs(I.keys) do
-    local c = I.at[k]
     local x, y, z = dec3(k)
+    pst[#pst + 1] = {x, y, z, I.at[k]}
+    spend(2)
+  end
+  for _, e in ipairs(BLD_CATS) do
+    local i = 0
+    while true do
+      local v = vec('buildings', e[1])                -- re-read after every yield
+      if not v or i >= #v then break end
+      local b = v[i]
+      i = i + 1
+      if b and built(b) and b.centerx and b.centery and b.z then pbl[#pbl + 1] = {e[2], b.centerx, b.centery, b.z} end
+      spend(4)
+    end
+  end
+  R.edge_known = mem.edges ~= nil
+  for _, k in ipairs(mem.edges and mem.edges.list or {}) do
+    ped[#ped + 1] = {dec3(k)}
+    spend(2)
+  end
+  local apos, amap, off, tick0 = {}, {}, 0, now_t(K)
+  local function label(g)                              -- a group read in this frame -> its label
+    return amap[g] or (g + off)
+  end
+  local function lgrp(x, y, z)
     local g = grp(x, y, z)
+    if g and g ~= 0 then return label(g) end
+    return g
+  end
+  local function anchors()                             -- the citizens' frame: citizens read, anchors chosen, labels set
+    local left = mem.left
+    mem.left = math.huge
+    cits = citizens(K)
+    cg, main = group_counts(cits)
+    R.main, R.cit = main, {n = #cits, by = cg}
+    local first = {}
+    for _, c in ipairs(cits) do if not first[c.g] then first[c.g] = c end end
+    local gs = sorted_keys(cg)
+    table.sort(gs, function(u, v) if cg[u] ~= cg[v] then return cg[u] > cg[v] end return u < v end)
+    apos, amap = {}, {}
+    for i = 1, math.min(#gs, 16) do
+      local c = first[gs[i]]
+      apos[#apos + 1] = {c.x, c.y, c.z, gs[i]}
+      amap[gs[i]] = gs[i]
+    end
+    mem.left = left
+    spend(3 * #cits)
+  end
+  local function reanchor()                            -- a later frame: the anchors' groups now -> their labels
+    local left = mem.left
+    mem.left = math.huge
+    amap = {}
+    for _, p in ipairs(apos) do
+      local g = grp(p[1], p[2], p[3])
+      if g and g ~= 0 and not amap[g] then amap[g] = p[4] end
+    end
+    mem.left = left
+  end
+  anchors()
+  local used = 0
+  local function flush(cost)
+    used = used + cost
+    if used < 48 then return end
+    spend(used)
+    used = 0
+    local t = now_t(K)
+    if t ~= tick0 then tick0, off = t, off + 10000000; reanchor() end
+  end
+  for _, q in ipairs(pst) do
+    local x, y, z, c = q[1], q[2], q[3], q[4]
+    local g = lgrp(x, y, z)
     local cost = 2
     if g and g ~= 0 then
       local inb
@@ -787,48 +863,38 @@ local function audit_pass(K)
         end
       end
     end
-    spend(cost)
+    flush(cost)
   end
-  for _, e in ipairs(BLD_CATS) do
-    local i = 0
-    while true do
-      local v = vec('buildings', e[1])                -- re-read after every yield
-      if not v or i >= #v then break end
-      local b = v[i]
-      i = i + 1
-      local cost = 2
-      if b and built(b) then
-        local g, x, y, z = bgroup(b)
-        cost = cost + 2
-        if g then
-          local C = R.cls[e[2]]
-          C.n = C.n + 1
-          add(C.by, g, 1)
-          if not C.at[g] then C.at[g] = {x, y, z} end
-          rep(e[2], g, 1, x, y, z)
-          if e[2] == 'bed' or e[2] == 'well' then
-            local fld = e[2] == 'bed' and 'beds' or 'wells'
-            local inb = burrows_at(b.centerx, b.centery, b.z)
-            cost = cost + 2 * #names
-            for _, bn in ipairs(names) do if inb[bn] then B[bn][fld] = B[bn][fld] + 1 end end
-          end
-        end
+  for _, q in ipairs(pbl) do
+    local cat = q[1]
+    local g, x, y, z = bgroup_at(q[2], q[3], q[4], lgrp)
+    local cost = 4
+    if g then
+      local C = R.cls[cat]
+      C.n = C.n + 1
+      add(C.by, g, 1)
+      if not C.at[g] then C.at[g] = {x, y, z} end
+      rep(cat, g, 1, x, y, z)
+      if cat == 'bed' or cat == 'well' then
+        local fld = cat == 'bed' and 'beds' or 'wells'
+        local inb = burrows_at(q[2], q[3], q[4])
+        cost = cost + 2 * #names
+        for _, bn in ipairs(names) do if inb[bn] then B[bn][fld] = B[bn][fld] + 1 end end
       end
-      spend(cost)
     end
+    flush(cost)
   end
-  R.edge_known = mem.edges ~= nil
-  for _, k in ipairs(mem.edges and mem.edges.list or {}) do
-    local x, y, z = dec3(k)
-    local g = grp(x, y, z)
+  for _, q in ipairs(ped) do
+    local g = lgrp(q[1], q[2], q[3])
     if g and g ~= 0 then
       local C = R.cls.exit
       C.n = C.n + 1
       add(C.by, g, 1)
-      if not C.at[g] then C.at[g] = {x, y, z} end
+      if not C.at[g] then C.at[g] = {q[1], q[2], q[3]} end
     end
-    spend(2)
+    flush(2)
   end
+  spend(used)
   -- BUG-040: the refuge's place and its nearest accepted water (water's state src), and the wet wells per burrow
   local wv = K.view().water
   local wsrc = type(wv) == 'table' and type(wv.src) == 'table' and wv.src or {}

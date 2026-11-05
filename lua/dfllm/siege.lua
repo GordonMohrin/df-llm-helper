@@ -513,20 +513,35 @@ end
 -- the kernel cannot save them alone; a class-A DECISION_NEEDED stranded_drink says where they stand and the commands
 -- that help (the walk groups, the water sources, the well sites near them; `bp sites --near` takes a site on THEIR group),
 -- again only for news (CAD: more citizens or another cause)
+-- BUG-417 (Run 16d Mazelanterns y389: 2 citizens 100+ tiles out at the only water zone, hunger 72,249 of 75,000, STRANDED 'no
+-- rescue (no raised bridge leads to food)', the fort held 387 days of drink; Run 16c y377: the same for drink): the decision
+-- is for food too (stranded_food, drink first when both are short) and comes also when a bridge way exists but the rescue is
+-- refused while the stranded are past the fight mark (death in about two days): the kernel's rescue is bridges only.
 local function dry_decision(K, e, now)
   local pos = string.format('%d,%d,%d', e.pos[1], e.pos[2], e.pos[3])
   local rec = mem.dry_rec
   local T = K.now()
-  local toks = {'drink'}
+  local drink = e.need.drink == true
+  local what = drink and 'drink' or 'food'
+  local toks = {what}
   if not CAD.due(rec, T, e.ids, toks, {ticks = 2 * M.STRAND_CONFIRM, wall_s = 120}) then return end
   mem.dry_rec = CAD.mark(T, e.ids, toks)
-  local q = string.format('%d citizens on walk group %d at %s have no drink they can reach (thirst %d): no bridge leads '
-                          .. 'to one; a water zone elsewhere does not help them. Open a way (ramp, stair, bridge) or build '
-                          .. 'a well on their side', #e.ids, e.g, pos, e.thirst)
-  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'stranded_drink', q = q:sub(1, 200), n = #e.ids, cmds = {
-    'dfllm cmd inspect what=reach', 'dfllm cmd inspect what=water_sources',
-    string.format('dfllm bp sites cistern --near %s --within 20 --fresh', pos)}})
-  K.log('warn', 'siege: stranded_drink: %s', q)
+  local own = drink and string.format('thirst %d', e.thirst) or string.format('hunger %d', e.hunger)
+  local q = string.format('%d citizens on walk group %d at %s have no %s they can reach (%s): no bridge rescue is possible '
+                          .. 'now; stock elsewhere does not help them. Open a way (ramp, stair, bridge), %s on their side, or '
+                          .. 'bring it to them (a hauler cannot cross the groups: dig the way first)', #e.ids, e.g, pos, what,
+                          own, drink and 'build a well' or 'put a farm or a food stockpile')
+  local cmds = {'dfllm cmd inspect what=reach'}
+  if drink then
+    cmds[#cmds + 1] = 'dfllm cmd inspect what=water_sources'
+    cmds[#cmds + 1] = string.format('dfllm bp sites cistern --near %s --within 20 --fresh', pos)
+  else
+    cmds[#cmds + 1] = 'dfllm cmd inspect what=items'
+    cmds[#cmds + 1] = string.format('dfllm bp sites farms surface=1 --near %s --within 20 --fresh', pos)
+  end
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = drink and 'stranded_drink' or 'stranded_food', q = q:sub(1, 200),
+         n = #e.ids, cmds = cmds, need = what})
+  K.log('warn', 'siege: stranded_%s: %s', what, q)
 end
 
 -- public (BUG-391, economy): the citizens of one walk group over the thirst mark with no drink on their group (a bridge
@@ -652,7 +667,10 @@ local function rescue_step(K, a, g, now)
     else for _, b in ipairs(bs or {}) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end end
     d.why, d.bridges = why, bs
     stranded(K, 'refused', string.format('%s: no rescue (%s)', base, why), d, e.ids, {'refused', why})
-    if e.need.drink and not bs then dry_decision(K, e, now) end
+    -- BUG-417: no bridge brings it (drink or food), or the bridge rescue is refused while they are past the fight mark
+    if (e.need.drink or e.need.food) and (not bs or e.thirst >= M.FIGHT_THIRST or e.hunger >= M.FIGHT_HUNGER) then
+      dry_decision(K, e, now)
+    end
     return
   end
   str.rescue, dirty = {list = bs, grp = e.g, ids = e.ids, since = now, need = e.need, pz = calm or nil}, true

@@ -233,9 +233,12 @@ T.test('BUG-021: walk group ids renumbered while an audit runs: no CUTOFF ("caus
   W.run(3000, {skip = 9})
   T.eq(#evs(W, 'CUTOFF'), 0)
   local d = inspect(W, 'reach')
-  T.ok((d.runs.cut_unconfirmed or 0) >= 1, require('dfllm.util.json').encode(d.runs))
+  -- BUG-416: the audit labels every tile by the citizens' groups read in one frame, so a renumbering mid-audit leaves no
+  -- phantom cut to unconfirm (before: runs.cut_unconfirmed >= 1 and the log line 'CUTOFF not confirmed')
   T.eq(d.cut, {food = 0, drink = 0, bed = 0})
-  T.ok(logged(W, 'seal: CUTOFF not confirmed'), 'kern.log')
+  T.eq(d.classes.bed.off, 0, 'every bed on the main group')
+  T.eq(d.classes.food.off, 0, 'the food on the main group')
+  for _, f in ipairs(d.flags) do T.ok(not f:find('off', 1, true) and not f:find('none on', 1, true), f) end
 end)
 
 T.test('BUG-021: a real cut is confirmed and says which citizen and which stock lie on which group', function()
