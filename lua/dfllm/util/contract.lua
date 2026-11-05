@@ -175,6 +175,9 @@ C.EVENTS = {
   -- tile (d.proj, at 'x,y,z', was 'door', days, why = the SEAL_STUCK wait); PROJECT_BLOCKED d.parts (BUG-046): the parts
   -- of a stalled build stage that wait
   SEAL_WALLED = {cls = 'B', by = 'runner'},
+  -- BUG-487: a wall the reach check refused (bp.place, a plan build, the door fallback): d.at ('x,y,z' list), n (places cut off),
+  -- how (place | plan | door), proj, why; plan check / propose / follow draft close=door there
+  WALL_REFUSED = {cls = 'B', by = 'runner'},
   -- Gordon 2026-10-16: intake waves in SIEGE (muster, open, close, clear, back, abort, refused) and the sortie
   -- through O1 (gather, open, out, recall, close, done, abort)
   INTAKE = {cls = 'B', by = 'siege'}, SORTIE = {cls = 'B', by = 'any'},       -- M3: military reports the position sorties too

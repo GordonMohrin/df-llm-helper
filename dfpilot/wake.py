@@ -501,6 +501,11 @@ def locked_out_hint(d: dict) -> str:
     and the broker outside, 23 starved): citizens (d.units) and places (d.places) stand off the main walk group beside the kernel's wall
     (d.at). d.cmd = bp.cancel reopen (quickfort undo of our wall only); then a door goes there (the kernel adds the workshop task)."""
     cmd = d.get("cmd")
+    if d.get("reop"):                          # BUG-487: the kernel took the wall down itself
+        return (f"our wall at {', '.join(str(a) for a in (d.get('at') or [])[:4])} shut {d.get('n', '?')} citizens "
+                + (f"and {', '.join(d['places'][:3])} " if d.get("places") else "")
+                + "out; the kernel designated it for removal and puts a door there (workshop task); nothing to do but watch it "
+                "(dfllm status); no wall at that tile again (WALL_REFUSED keeps plan propose / seal at=audit on close=door)")
     return (f"act now: our wall at {', '.join(str(a) for a in (d.get('at') or [])[:4])} shuts {d.get('n', '?')} citizens "
             + (f"and {', '.join(d['places'][:3])} " if d.get("places") else "")
             + "off the fort (they starve outside)"
@@ -1362,7 +1367,9 @@ class Follower:
         if not a["open"] or no_trap_hall(a.get("fails") or []):
             return
         prev = self.jobs.get("seal") if isinstance(self.jobs.get("seal"), dict) else {}
-        if not self._request_place("seal", "seal", {"at": "audit"}, "S1", now):
+        # BUG-487: a wall the kernel's reach check refused (WALL_REFUSED) is asked for as a door
+        params = {"at": "audit", "close": "door"} if a.get("cut") else {"at": "audit"}
+        if not self._request_place("seal", "seal", params, "S1", now):
             return                             # cooldown: the placement of this audit runs already, no log line
         key = ";".join(sorted(a["open"]))
         logged = prev.get("logged") if prev.get("walls") == key and isinstance(prev.get("logged"), (int, float)) else None

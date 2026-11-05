@@ -809,6 +809,42 @@ def done_ticks(save_dir: Path) -> dict[str, int]:
     return done
 
 
+WALL_CUT_AGE = 403200                  # BUG-487: a refused wall counts for a game year (ticks)
+
+
+def wall_refusals(save_dir: Path) -> dict[tuple[int, int, int], int]:
+    """BUG-487 (Run 16b i2 Roadvises y399-y402: `bp.place seal at=audit` was refused ('would cut 1 off the main walk group'), the plan
+    drafted the same wall every year and the kernel built it: 12 died of thirst): {tile: tick} of the walls the kernel's reach check
+    refused (WALL_REFUSED, newest per tile, at most WALL_CUT_AGE ticks before the newest event). A seal project of ours that finished
+    after the refusal (a door there) clears the tile. The kernel's check is the only one that knows the citizens' walk group; the plan
+    layer takes its answer from the event stream."""
+    out: dict = {}
+    done: dict[str, int] = {}
+    newest = None
+    for e in files.iter_events_rev(save_dir):
+        t = e.get("type")
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        tick = e.get("tick") if isinstance(e.get("tick"), int) else 0
+        if newest is None:
+            newest = tick
+        if tick < newest - WALL_CUT_AGE:
+            break
+        if t == "PROJECT_DONE" and isinstance(d.get("proj"), str):
+            done.setdefault(d["proj"], tick)
+        elif t == "WALL_REFUSED" and isinstance(d.get("at"), list):
+            for a in d["at"]:
+                mt = re.match(r"\s*(-?\d+),(-?\d+),(-?\d+)\s*$", str(a))
+                if mt:
+                    out.setdefault((int(mt.group(1)), int(mt.group(2)), int(mt.group(3))), tick)
+    if out:
+        seals = seal_records(save_dir)
+        for pos in list(out):
+            pid = (seals.get(pos) or (None, None))[0]
+            if pid is not None and pid in done and done[pid] > out[pos]:
+                del out[pos]
+    return out
+
+
 def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
     """The newest audit's attacker routes (Run 10: `bypass: wall x,y,z floor -> X` stood for months and the trap hall
     stayed unused): {found (an audit event was read), tick, routes (the bypass / refuge-on-the-attack-path findings),
@@ -840,19 +876,25 @@ def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
             w = f"{mt.group(1)},{mt.group(2)},{mt.group(3)} {mt.group(4)} wall"
             if w not in walls:
                 walls.append(w)
-    seals = seal_projects(save_dir) if walls else {}
+    recs = seal_records(save_dir) if walls else {}
+    seals = {t: pid for t, (pid, _) in recs.items()}
     core = core_cells(save_dir) if walls else set()
-    pending, open_, on_core = {}, [], {}
+    refused = wall_refusals(save_dir) if walls else {}
+    pending, open_, on_core, doored = {}, [], {}, {}
     for w in walls:
         pid = seals.get(_wall_pos(w))
+        piece = (recs.get(_wall_pos(w)) or (None, {}))[1].get("piece")
         if pid is not None and (pid not in done or done[pid] > tick):
             pending[w] = pid
+        elif pid is not None and pid in done and piece not in (None, "wall") and _wall_pos(w) in refused:
+            doored[w] = pid                    # BUG-487: a door stands where the wall would cut citizens off: no wall again
         elif _wall_pos(w) in core:             # BUG-211: never wall a tile of the fortcore (its corridor, later stages)
             on_core[w] = core[_wall_pos(w)]
         else:
             open_.append(w)
+    cut = [w for w in open_ if _wall_pos(w) in refused]    # BUG-487: the kernel refused a wall there: close=door
     return {"found": found, "tick": tick, "routes": routes, "walls": walls, "open": open_, "pending": pending,
-            "core": on_core, "fails": fails}
+            "core": on_core, "fails": fails, "cut": cut, "doored": doored}
 
 
 def core_cells(save_dir: Path) -> dict[tuple[int, int, int], str]:
@@ -1260,10 +1302,21 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
                     entries.append({"pos": tuple(fo["pos"]), "kind": fo["kind"], "piece": "",
                                     "src": f"refuge {burrow}", "tick": rtick})
     routes = audit_routes(save_dir) if key in ("audit", "all") else None
+    refused = wall_refusals(save_dir) if routes else {}
     for w in (routes["open"] if routes else []):
         o = dmod.parse_openings(w)[0]
         pos = tuple(o["pos"])
-        entry = {"pos": pos, "kind": o["kind"], "piece": o["piece"], "src": "audit", "tick": 1 << 62}
+        piece = o["piece"]
+        # BUG-487 (Run 16b i2 Roadvises y402: `close=door` was ignored, the audit's own 'wall' piece won and the kernel built a wall
+        # where 12 citizens had died): an explicit close=door (or grate / bars) beats the audit's wall piece on a floor tile, and so
+        # does a refusal of the kernel's reach check (WALL_REFUSED): the bypass gets a door where a wall cuts citizens off
+        if piece == "wall" and (o["kind"] in dmod.FLOORISH_KINDS or o["kind"] in dmod.SHRUB_KINDS) \
+                and (close in ("door", "grate", "bars") or pos in refused):
+            piece = ""
+            notes.append("%d,%d,%d %s: %s instead of the audit's wall (%s)" % (
+                *pos, o["kind"], close if close != "auto" else "door",
+                "close=" + close if close != "auto" else "the kernel refused a wall there: it would cut citizens off"))
+        entry = {"pos": pos, "kind": o["kind"], "piece": piece, "src": "audit", "tick": 1 << 62}
         entries = [entry if e["pos"] == pos else e for e in entries]
         if all(e["pos"] != pos for e in entries):
             entries.append(entry)
@@ -1365,6 +1418,7 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
     walled = []
     for o in keep:                  # Run 11 (site98 y435): quickfort builds a door only next to a wall or fortification
         if geo is not None and not o.get("nodoor") and dmod.door_piece(o, close) \
+                and tuple(o["pos"]) not in refused \
                 and dmod.door_stands(geo.char, o["pos"]) is False:
             o["nodoor"] = True
             walled.append(o)

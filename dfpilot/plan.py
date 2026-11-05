@@ -1864,14 +1864,30 @@ def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[
                     "inspect '{\"what\":\"entrances\"}' and close it; readiness stays R0 until then"]
     open_ = a.get("open") or []
     if not open_:
+        if a.get("doored"):                      # BUG-487: a door stands where the wall would cut citizens off
+            return [], [f"audit: {route}: a door stands at {', '.join(w.rsplit(' ', 1)[0] for w in a['doored'])} (seal "
+                        f"{', '.join(sorted(set(a['doored'].values())))}): a wall there cut citizens off (the kernel refused it), "
+                        "the audit counts walls only; decide by hand (a second way for them, then the wall)"]
         pend = ", ".join(sorted(set((a.get("pending") or {}).values())))
         return [], [f"audit: {route}: seal project {pend} builds the wall; dfllm audit once it stands"]
     due = due_season(doc, s)
     adds = new_builds(doc, prev)
     seals = [si for si, _, b in adds if _seals_walls(b, open_)]
+    cut = [w for w in (a.get("cut") or []) if w in open_]
+    if cut:
+        # BUG-487 (Run 16b i2 Roadvises y399-y401: the kernel refused `bp.place seal at=audit` ('would cut 1 off the main walk group'),
+        # the plan drafted the same seal every year, `plan check` said OK and the wall that went up shut 12 citizens in: they died of
+        # thirst): a wall the kernel's reach check refused is built as a door (close=door), never as the audit's wall
+        wrong = [b for _, _, b in adds if _seals_walls(b, open_) and (b.get("p") or {}).get("close") != "door"]
+        if wrong:
+            return [f"audit: {route}: the kernel refused the wall {', '.join(w.rsplit(' ', 1)[0] for w in cut)} (it would cut "
+                    "citizens off, WALL_REFUSED); the seal build there needs p.close=door (a wall shuts them in: BUG-487)"], []
     if any(si <= due for si in seals):
         return [], []
-    fix = (f"add {json.dumps(SEAL_AUDIT, separators=(',', ':'))} as the first build of seasons[{due}] "
+    seal_fix = copy.deepcopy(SEAL_AUDIT)
+    if cut:
+        seal_fix["p"]["close"] = "door"          # BUG-487: the door, never the wall that cuts citizens off
+    fix = (f"add {json.dumps(seal_fix, separators=(',', ':'))} as the first build of seasons[{due}] "
            "(dfllm plan propose drafts it)")
     if seals:
         fix = f"move the seal from seasons[{seals[0]}] to seasons[{due}] (it must run now)"
@@ -3921,6 +3937,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     aud = (fort or {}).get("audit") or {}
     if aud.get("open") and not _cmd.no_trap_hall(aud.get("fails") or []) and (info is None or "seal" in info):
         builds.append(copy.deepcopy(SEAL_AUDIT))
+        if aud.get("cut"):                       # BUG-487: the kernel refused a wall there: a door, as bp.place close=door
+            builds[-1]["p"]["close"] = "door"
     # BUG-130: a fortcore stopped on a breach (parked for good): re-site it (stage 1 @S1 away from the recorded breaches,
     # its stages @same after it) or, when it cannot move, close the ways in by wall + door and, with no core at all,
     # stay below P3 (no refuge can be built)

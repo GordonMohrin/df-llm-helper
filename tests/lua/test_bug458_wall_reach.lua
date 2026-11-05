@@ -128,6 +128,7 @@ end
 -- o: cuts (the wall_cuts answer), lo (the locked_out answer), esc (esc_days)
 local function rworld(o)
   for k, v in pairs(CFG0) do runner.CFG[k] = v end
+  runner.CFG.lock_reopen = false          -- BUG-487 takes the walls down itself (test_bug487_plan_seal_walls.lua); here: the question
   require('dfllm.aqshaft').CFG.on = true
   local W = H.world{tag = o.tag, map_size = {16, 16, 160},
                     cfg = o.esc and {baseline = {v = 2, runner = {seal_first = {esc_days = o.esc}}}} or nil}

@@ -423,6 +423,20 @@ local function sync_plan(K)
           dirty()
           local d, err = read_bp(K, id)
           local ok = false
+          if d and (d.tpl == 'seal' or d.tpl == 'repair') then
+            -- BUG-487: the plan's seal goes through the reach check bp.place makes (Q.place_walls): a wall that would cut a
+            -- citizen or a farm, well, depot, workshop or office off (or whose reach cannot be proven) is built as a door
+            d.id = id
+            local walls = Q.place_walls(K, d, 'plan')
+            if walls then
+              local n = Q.walls_to_doors(K, d)
+              if n > 0 then
+                K.log('warn', 'plan build %s (%s): %d wall(s) built as doors: %s', id, d.tpl, n, walls)
+              else
+                d, err = nil, walls
+              end
+            end
+          end
           if d then ok, err = register(K, id, d, int(b.prio) or 4, b.tpl)
           elseif b.tpl == 'seal' and err == 'missing' then
             -- BUG-047: plan apply left a seal out that had nothing to close (every opening closed, or a seal has it)
@@ -4149,7 +4163,7 @@ function Q.keep_walls(K, P)
     for _, at in ipairs(type(l) == 'table' and l or {}) do add(tostring(at)) end
   end
   for _, at in ipairs((Q.doc_walls(K, P, d))) do add(at) end
-  if #list > 0 then S.rt.ow[P.id] = list end
+  if #list > 0 then S.rt.ow[P.id] = list; S.lo = S.lo or {}; S.lo.t = nil end    -- BUG-487: looked at on the next run
 end
 -- the walls of ours at a project: the records of the kernel's own fallbacks (sw, dw: capped at 8 per project), the walls a finished
 -- project left (ow, only while they stand) and the built Cw cells of a running seal / repair document.
@@ -4181,6 +4195,47 @@ function Q.own_walls(K, P)
   return out, cells, d
 end
 
+-- BUG-487: take our walls at `ats` ('x,y,z' of seal.locked_out's `at`; own = {tile = project id}) down and put a door there: bp.cancel
+-- reopen (the document cell of a running project becomes a door), for a wall of a finished project a repair project with the
+-- door cell (PEACE only, buildingplan makes the door; quickfort's refusal walks the BUG-458 guard: the door stays) and the door
+-- task at the workshop. Returns the tiles reopened
+M.CFG.lock_reopen = true
+function Q.lock_reopen(K, ats, own)
+  local by, order = {}, {}
+  for _, at in ipairs(ats) do
+    local proj = own[at]
+    if proj then
+      if not by[proj] then by[proj] = {}; order[#order + 1] = proj end
+      by[proj][#by[proj] + 1] = at
+    end
+  end
+  local done = {}
+  for _, proj in ipairs(order) do
+    local P = find(proj)
+    if P then
+      local running = P.done ~= 1
+      local ok, msg = Q.reopen(K, P, {reopen = table.concat(by[proj], ';')})
+      if ok then
+        local cells = {}
+        for _, at in ipairs(by[proj]) do
+          done[#done + 1] = at
+          local x, y, z = at:match('^(%-?%d+),(%-?%d+),(%-?%d+)$')
+          if x then cells[#cells + 1] = {int(x), int(y), int(z), 'd'} end
+        end
+        if not running and #cells > 0 then
+          local okr, okp, rid = pcall(M.repair, K, cells, 'BUG-487: a door where our wall shut citizens out', {peace = true})
+          if not (okr and okp) then K.log('warn', 'locked out: door project not queued: %s', trunc(okr and rid or okp, 100)) end
+        end
+        pcall(K.call, 'economy', 'seal_doors', #cells)
+        K.log('warn', 'locked out: %s (taken down by the kernel, BUG-487)', msg)
+      else
+        K.log('warn', 'locked out: reopen of %s at %s failed: %s', proj, table.concat(by[proj], ';'), trunc(msg, 120))
+      end
+    end
+  end
+  return done
+end
+
 function Q.lockout_scan(K, c, t)
   S.lo = S.lo or {}
   local m = K.mode()
@@ -4188,7 +4243,9 @@ function Q.lockout_scan(K, c, t)
   if t - (S.lo.t or -DAY) < DAY then return end
   S.lo.t = t
   local tiles, own = {}, {}
-  for _, P in ipairs(sorted()) do
+  -- BUG-487: every project, the finished ones too (sorted() lists the open ones only: the walls a finished seal left in S.rt.ow were
+  -- never looked at once the project was done)
+  for _, P in ipairs(S.pd.list) do
     for _, at in ipairs(Q.own_walls(K, P)) do
       local x, y, z = at:match('^(%-?%d+),(%-?%d+),(%-?%d+)$')
       if x and #tiles < 48 and not own[at] then
@@ -4203,6 +4260,11 @@ function Q.lockout_scan(K, c, t)
   local outside = (int(w.n) or 0)
   if outside == 0 and #(w.places or {}) == 0 then S.lo.n = nil; return end
   S.lo.n = outside
+  -- BUG-487 (Run 16b i2 Roadvises y401: 12 citizens died of thirst behind the kernel's own wall, the question waited for a
+  -- player for 5 days): a wall of ours that shuts citizens or places out comes down at once, every look, and a door goes
+  -- there (the project's document cell, else a repair project; the door task at the workshop)
+  local reopened = M.CFG.lock_reopen ~= false and Q.lock_reopen(K, w.at, own) or {}
+  S.lo = S.lo or {t = t}                          -- Q.reopen clears it
   if S.lo.ann and t - S.lo.ann < Q.LOCK_AGAIN then return end
   S.lo.ann = t
   local proj = own[w.at[1]]
@@ -4218,9 +4280,14 @@ function Q.lockout_scan(K, c, t)
                           #places > 0 and (' and ' .. places[1] .. (#places > 1 and ' (+)' or '')) or '')
   local how = 'reopen takes only the wall the kernel built there down (quickfort undo, the wall is deconstructed); then ' ..
               'dfllm cmd bp.place seal at=last puts a door, the kernel orders it as a workshop task'
+  if #reopened > 0 then
+    q = q .. string.format('; the kernel took %d wall(s) down itself and puts a door there', #reopened)
+    how = 'the walls are designated for removal (quickfort undo), a door goes there (' .. table.concat(reopened, ' ', 1, math.min(#reopened, 3)) .. ')'
+  end
   K.log('warn', 'locked out: %s: %s%s', q, how, cmd and (': ' .. cmd) or '')
   K.emit('DECISION_NEEDED', 'A', trunc(q, 200), {id = 'locked_out', q = trunc(q, 200), n = outside, at = mine, units = ids,
-                                                 places = places, proj = proj, cmd = cmd, how = trunc(how, 200)})
+                                                 places = places, proj = proj, cmd = cmd, how = trunc(how, 200),
+                                                 reop = #reopened > 0 and #reopened or nil})
   K.flush()
 end
 
@@ -4325,7 +4392,7 @@ function Q.wall_text(s) return type(s) == 'string' and s:sub(1, 7) == 'a wall ' 
 -- fails closed like the runner's fallback (Q.wall_refuse): a reach check that does not know the citizens or ran out of tiles refuses
 -- too (a repair outside PEACE/RECOVERY only on a proven cut: a breach is closed in a siege). The doors of the same seal are no
 -- objection. nil = placed (also when the seal module has no such check)
-function Q.place_walls(K, d)
+function Q.place_walls(K, d, how)
   local tiles = {}
   for _, st in ipairs(d.stages or {}) do
     if st.mode == 'build' then
@@ -4347,12 +4414,73 @@ function Q.place_walls(K, d)
   if kind ~= 'cut' and d.tpl == 'repair' and m ~= 'PEACE' and m ~= 'RECOVERY' then return nil end
   local way = 'close with doors (close=door: the kernel orders them at the workshop) or wall once they are in (BUG-458)'
   if kind == 'cut' then
+    Q.note_cut(K, tiles, n, how or 'place', d.id, Q.cut_parts(w, 4))
     return string.format('refused: the %s walls (%d) would cut %d off the main walk group (%s); %s', d.tpl, #tiles, n,
                          Q.cut_parts(w, 4), way)
   end
   local why = kind == 'unknown' and string.format("the citizens' reach is not known (%s)", trunc(w.why or '?', 60))
               or string.format('the reach check ran out of tiles (%d places not met: %s)', n, Q.cut_parts(w, 4))
+  Q.note_cut(K, tiles, 0, how or 'place', d.id, why)
   return string.format('refused: the %s walls (%d) cannot be proven safe: %s; %s', d.tpl, #tiles, why, way)
+end
+
+-- BUG-487 (Run 16b i2 Roadvises y401: `bp.place seal at=audit` was refused here for a wall that cuts one citizen off, then the
+-- plan's seal@S1 on the same bypass went through plan.reload -> sync_plan -> register with no reach check, the kernel built
+-- the wall and 12 citizens died of thirst behind it): the refusals leave WALL_REFUSED (B, once a game day per tile) in the
+-- event stream, so `plan check` / `plan propose` / follow's seal at=audit know the tile and draft close=door
+function Q.note_cut(K, tiles, n, how, proj, why)
+  S.rt.wc = obj(S.rt.wc)
+  local t, ats = now(K), {}
+  local fresh = false
+  for _, tl in ipairs(tiles) do
+    local at = tkey(tl[1], tl[2], tl[3])
+    if #ats < 6 then ats[#ats + 1] = at end
+    if t - (int(S.rt.wc[at]) or -2 * DAY) >= DAY then S.rt.wc[at] = t; fresh = true end
+  end
+  if not fresh then return end
+  local keys = {}
+  for k in pairs(S.rt.wc) do keys[#keys + 1] = k end
+  if #keys > 64 then                              -- a short memory: the oldest entries go
+    table.sort(keys, function(a, b) return S.rt.wc[a] < S.rt.wc[b] end)
+    for i = 1, #keys - 64 do S.rt.wc[keys[i]] = nil end
+  end
+  dirty()
+  local msg = string.format('wall refused (%s): %s at %s: %s', how or '?', n > 0 and string.format('would cut %d off', n) or 'cannot be proven safe',
+                            table.concat(ats, ' '), trunc(why or '?', 100))
+  K.log('warn', '%s%s', msg, proj and (' (' .. tostring(proj) .. ')') or '')
+  K.emit('WALL_REFUSED', 'B', trunc(msg, 200), {at = ats, n = n, how = how or '?', proj = type(proj) == 'string' and proj or nil,
+                                                 why = trunc(why or '?', 160)})
+end
+
+-- BUG-487: a plan build's seal / repair walls that cut citizens off (or whose reach cannot be proven) become doors: the cells
+-- 'Cw...' -> 'd...' (materials wall -> door). A wall on a ramp top cannot be a door (quickfort builds a door on a floor): then
+-- nothing changes and the caller refuses the build. Returns the cells changed (0 = nothing)
+function Q.walls_to_doors(K, d)
+  local ramp = {}
+  for x, y, z in tostring(type(d.params) == 'table' and d.params.at or ''):gmatch('(%-?%d+),(%-?%d+),(%-?%d+) ramp') do
+    ramp[tkey(int(x), int(y), int(z) + 1)] = true
+  end
+  local list = {}
+  for _, st in ipairs(d.stages or {}) do
+    if st.mode == 'build' then
+      for _, ch in ipairs(st.chunks or {}) do
+        for _, cell in ipairs(ch.cells or {}) do
+          if type(cell[4]) == 'string' and cell[4]:match('^[^{(:/]*') == 'Cw' then
+            local tl = {}
+            cell_tiles(ch, cell, tl)
+            if tl[1] and ramp[tkey(tl[1][1], tl[1][2], tl[1][3])] then return 0 end
+            list[#list + 1] = cell
+          end
+        end
+      end
+    end
+  end
+  for _, cell in ipairs(list) do cell[4] = 'd' .. cell[4]:sub(3) end
+  local m = d.materials
+  if #list > 0 and type(m) == 'table' and int(m.wall) then
+    m.wall, m.door = int(m.wall) > #list and int(m.wall) - #list or nil, (int(m.door) or 0) + #list
+  end
+  return #list
 end
 -- the reason the wall fallback holds the door at `tile` back (r = the seal's S.rt.sf record), else nil
 function Q.wall_refused(r, tile)
@@ -4445,6 +4573,7 @@ function Q.stuck_walls(K, c)
                 dirty()
               end
               if Q.wall_text(refuse) then                   -- BUG-458: no wall here: the door is made at the workshop
+                Q.note_cut(K, {tile}, 0, 'door', P.id, refuse)      -- BUG-487: the tile is known to the plan
                 local okd, n = K.call('economy', 'seal_doors', 1)
                 if okd and int(n) and int(n) > 0 then
                   K.log('warn', 'seal first: %s: door %s: %d door task(s) added at the workshops (no wall: %s)', P.id, at, int(n),
@@ -6066,6 +6195,7 @@ function M.init(K)
   rt.dw = obj(rt.dw)                                                 -- Run 11: seal doors planned as walls
   rt.sw = obj(rt.sw)                                                 -- BUG-044: stuck seal doors replaced by walls
   rt.ow = obj(rt.ow)                                                 -- BUG-458: walls of finished seals / repairs (LOCKED_OUT, reopen)
+  rt.wc = obj(rt.wc)                                                 -- BUG-487: tiles whose wall was refused (WALL_REFUSED, once a day)
   rt.so = obj(rt.so)                                                 -- BUG-044: door/hatch order items per seal project
   rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
   rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box

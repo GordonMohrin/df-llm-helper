@@ -481,8 +481,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-287: trade_screen = a player screen blocked the caravan's trade n times (trade.BUSY_ASK); screen = its focus
     # BUG-340: food_low/famine opts only with a command; cmds = their command lines in opts order (`dfllm cmd ...`); auto
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
+    # BUG-487: locked_out reop = the walls of ours the kernel took down itself (quickfort undo; a door goes there)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -676,6 +677,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # at = 'x,y,z', was = the piece (door), days = days it stood stuck, why = the SEAL_STUCK wait (the job and who
     # suspends it)
     "SEAL_WALLED": ("B", "runner", _d("proj:s at:s", "was:s days:i why:s")),
+    # BUG-487: a wall the reach check refused (bp.place: how place; a plan build: plan, built as doors; the door fallback: door);
+    # at = the tiles (<= 6), n = the places it would cut off (0: not provable)
+    "WALL_REFUSED": ("B", "runner", _d("at:sa n:i", "how:s proj:s why:s")),
     # BUG-030: the siege's deep defense: why = destroyers (building destroyers in sight), army (> stations.core_ratio x
     # soldiers), weak (worn or iron/steel below stations.worn/metal); civilians to the separated refuge, squads at the core
     # BUG-336/337: ropen = the refuge's open way in (seal.refuge_open: it is not the civilians' burrow), soft = what alone
