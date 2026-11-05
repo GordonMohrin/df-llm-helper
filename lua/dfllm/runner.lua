@@ -134,6 +134,11 @@ M.CFG = {
   -- a food/drink project in an emergency (Q.idle_keep; a set-aside one comes back once it becomes one). config "runner":
   -- {queue: {idle_days}}
   task_days = 3, idle_days = 30,
+  -- BUG-435 (Run 16d i4 Mazelanterns y401: traps 912 d, tombs 461 d, fortcore 341 d set aside, 'waits for trapparts': nine projects
+  -- clogged the brief for ever): a project set aside stale_days without progress is announced (PROJECT_BLOCKED why=stale, A) with
+  -- what it waits for and the commands, again every stale_every days; follow cancels the replaceable templates itself
+  -- (plan.stale_project_days); the kernel never cancels. 0 = never announced. config "runner": {queue: {stale_days, stale_every}}
+  stale_days = 300, stale_every = 90,
   -- BUG-352 (Run 16c site97: fortcore stage 1 on soil beyond the brook, 30 d at s1.dig 0 %, 'unreachable DigChannel'): a
   -- dig stage without own progress (R.ps) for reach_days whose revealed tiles (or their neighbours) lie in no walk group a
   -- citizen stands in is announced (PROJECT_BLOCKED d.why 'unreachable', row 'unreachable N d', Q.reach_scan): the
@@ -3276,6 +3281,8 @@ local function conf(K)
              yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
              park = nat(q.park_days, 1, 400, M.CFG.park_days) * DAY,
              idle = nat(q.idle_days, 1, 400, M.CFG.idle_days) * DAY,               -- BUG-328
+             stale = nat(q.stale_days, 0, 3000, M.CFG.stale_days) * DAY,           -- BUG-435
+             stale_every = nat(q.stale_every, 1, 400, M.CFG.stale_every) * DAY,
              reach = nat(q.reach_days, 1, 60, M.CFG.reach_days) * DAY}             -- BUG-352
   -- BUG-066 / FR-76: the manifest follows the workshops that stand (reclaim = config runner.reclaim)
   local rc = type(c.reclaim) == 'table' and c.reclaim or {}
@@ -5299,6 +5306,39 @@ function Q.idle_scan(K, c, t)
   end
 end
 
+-- BUG-435: a project set aside stale_days without progress (r.ps = its last progress) is announced, again every stale_every days
+-- (r.sn = the last announcement): what it waits for (the first parts of its stage) and the commands that end it
+function Q.stale_scan(K, c, t)
+  local sd = c.stale
+  if not sd or sd <= 0 or K.mode() ~= 'PEACE' then return end
+  for id, r in pairs(S.rt.ip) do
+    local P = find(id)
+    local ps = type(r) == 'table' and int(r.ps) or nil
+    local sn = type(r) == 'table' and int(r.sn) or nil
+    if P and ps and P.done ~= 1 and not halted(P) and t - ps >= sd and (not sn or t - sn >= c.stale_every)
+       and not Q.idle_keep(K, P) then
+      r.sn = t
+      dirty()
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      local label = trunc(st and st.label or '', 24)
+      local wait
+      if d then
+        local okp, parts = pcall(Q.parts, K, P, d)
+        if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 80) end
+      end
+      local days = (t - ps) // DAY
+      local cmds = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}', then dfllm plan propose (follow cancels traps, tombs and "
+                                 .. 'the other replaceable templates itself after plan.stale_project_days)', P.id)
+      local msg = string.format('%s (%s) stale: set aside %d d without progress at %s %d%%%s; %s', P.id, P.tpl, days, label,
+                                int(P.pct) or 0, wait and ('; waits: ' .. wait) or '', cmds)
+      K.log('warn', '%s', msg)
+      K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), {proj = P.id, tpl = P.tpl, stage = label, why = 'stale', ticks = t - ps,
+                                                       idle = days, parts = wait, cmd = trunc(cmds, 200)})
+    end
+  end
+end
+
 -- BUG-352: does a citizen reach the dig stage of P? Up to 30 pending tiles of the stage (walls to cut: a tile without a
 -- walk group answers its neighbours' first, snapshot.groups near) against the walk groups of up to 50 citizens. Claims
 -- only when some tile has a known group, none shares a citizen's group and a citizen stands somewhere (a hidden tile is
@@ -5451,6 +5491,8 @@ local function begin_run(K)
   end
   local oki, erri = pcall(Q.idle_scan, K, f.c, now(K))   -- BUG-328: own pcall, a fault costs only the set-aside rule
   if not oki then K.log('error', 'runner set-aside failed: %s', trunc(erri, 160)) end
+  local oks, errs = pcall(Q.stale_scan, K, f.c, now(K))   -- BUG-435: own pcall, a fault costs only this announcement
+  if not oks then K.log('error', 'runner stale scan failed: %s', trunc(errs, 160)) end
   local okr, errr = pcall(Q.reach_scan, K, f.c, now(K))  -- BUG-352: own pcall, a fault costs only this announcement
   if not okr then K.log('error', 'runner reach scan failed: %s', trunc(errr, 160)) end
   local tasks, n, t, c = {}, 0, now(K), f.c

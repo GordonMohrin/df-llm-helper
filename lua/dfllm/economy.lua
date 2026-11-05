@@ -6470,7 +6470,7 @@ function M.jneed(jb)
   if type(jb) ~= 'table' or type(jb.mq) ~= 'table' then return nil end
   local out = {}
   for _, q in ipairs(jb.mq) do
-    if M.BYPASS[q.label] and (q.free or 0) == 0 and (q.forb or 0) == 0 then
+    if (M.BYPASS[q.label] or q.label == 'trapparts') and (q.free or 0) == 0 and (q.forb or 0) == 0 then   -- BUG-435: trapparts
       out[q.label] = (out[q.label] or 0) + (q.n or 0)
     end
   end
@@ -6833,7 +6833,7 @@ end
 -- (stone, at a Mechanic's workshop, at most MECH.max_jobs) under the tag dfllm:mech. No Mechanic's workshop: returns
 -- 'Mechanics' (plan_gear asks for it); no free stone: st.mech.stone = the short (M.rock_dig counts it) and
 -- M.supply_wants asks the caravans for mechanisms. State st.mech {need, levers, free, short, route, stone}.
-M.MECH = {tag = 'dfllm:mech', per_lever = 2, max_jobs = 4}
+M.MECH = {tag = 'dfllm:mech', per_lever = 2, max_jobs = 4, max_traps = 12}      -- BUG-435: max_traps = the waiting trap parts counted
 M.MECH_SKIP = {'forbid', 'in_job', 'in_building', 'trader', 'garbage_collect', 'removed', 'dump', 'melt', 'hostile',
                'owned', 'construction', 'encased', 'spider_web', 'on_fire', 'rotten'}   -- act.lua MECH_FLAGS
 function M.mech_free()
@@ -6861,8 +6861,12 @@ function M.mech_need(K)
 end
 function M.plan_mech(K, c, r)
   local need, lv = M.mech_need(K)
+  -- BUG-435 (Run 16d i4 Mazelanterns y401: the traps project 'waits for trapparts' 912 days, nobody ordered the mechanisms: only the
+  -- levers' need was counted): the mechanisms the planned buildings wait for (T.jmat's class `trapparts`, none free or forbidden)
+  local tp = math.min(math.tointeger((st.jneed or {}).trapparts) or 0, M.MECH.max_traps)
+  need = need + tp
   local free = M.mech_free()
-  local m = {need = need, levers = lv, free = free, short = math.max(0, need - free), route = 'none'}
+  local m = {need = need, levers = lv, traps = tp, free = free, short = math.max(0, need - free), route = 'none'}
   st.mech = m
   if m.short == 0 then m.route = nil; return nil end
   if open(r, M.MECH.tag) then m.route = 'ordered'; return nil end
@@ -6872,7 +6876,7 @@ function M.plan_mech(K, c, r)
   if stone <= 0 then return nil end
   local n = math.min(m.short, stone, M.MECH.max_jobs)
   add(r, {tag = M.MECH.tag, spec = {job = 'ConstructMechanisms', material = 'INORGANIC'}, n = n, uses = {rock = 1},
-          why = string.format('levers: %d unlinked need %d mechanisms, %d free', lv, need, free)})
+          why = string.format('levers: %d unlinked, traps waiting: %d; need %d mechanisms, %d free', lv, tp, need, free)})
   m.route = 'stone'
   return nil
 end

@@ -127,6 +127,13 @@ M.DEFAULTS = {
   dying_thirst = 60000, dying_every = 2 * DAY,
   -- BUG-104: a GiveWater job that stood open (no worker) this many days is "stuck" in the cause text
   give_stuck_days = 2,
+  -- BUG-434 (Run 16d i4 Mazelanterns y401: 11 died of thirst beside 272 days of barrel drink, 8 patients over 60,000, no hospital
+  -- zone, the only accepted water a zone 83-101 tiles away): GiveWater needs water, not a hospital zone (kern.log showed GiveWater
+  -- jobs with 'hospital none'), and barrels are no water. A patient over thirst_watch whose nearest accepted source (a wet well or
+  -- Water Source zone, no emergency well) is farther than patient_far tiles, or with none at all, is a PROJECT_REQUEST cistern
+  -- why=patient_water (at most every request_every, none while a cistern project is pending) and the GiveWater verdict names the
+  -- distance. 0 = off
+  patient_far = 40,
   -- BUG-383 (Run 16b i2 y381: unit 26275 died of thirst at 75,001 with '1 GiveWater job running 25+ days without effect'): a
   -- `noeffect` verdict releases the carriers of the running GiveWater jobs from the Orderlies detail for one run (at most
   -- restale_max of them, again after restale_every) so the game drops the stale job and posts a new one; restale false: off
@@ -1849,6 +1856,9 @@ function M.give_diag(K, c, r, sc, bfree, top)
   gv.reach_t = string.format('%d idle, %s reach', gv.idle, gv.reach and tostring(gv.reach) or '?')
   gv.short = string.format('%s, carers %d (%s)', jobs_t, gv.carers, gv.reach_t)
   gv.txt = string.format('%s, buckets %d free of %d', gv.short, bfree, r.buckets)
+  -- BUG-434: how far the carriers have to walk for the thirstiest patient's water (nil: no accepted source)
+  local pf = math.tointeger(c.patient_far) or 0
+  gv.sd = top and top.x and M.source_dist(r, top) or nil
   if alert then
     gv.key, gv.reason = 'alert', 'the civ alert holds the caregivers in ' .. alert .. ', the patient lies outside'
     -- BUG-330 (Earthboat y385: 'the civ alert holds the caregivers in Tiefe+' while no water was accepted at all): both
@@ -1885,7 +1895,26 @@ function M.give_diag(K, c, r, sc, bfree, top)
   else
     gv.key, gv.reason = 'nojob', 'the game posts no GiveWater job'
   end
+  -- BUG-434: the verdict stays (a stale job is still a stale job); the distance is added to it
+  if pf > 0 and gv.sd and gv.sd > pf and gv.key ~= 'nowater' then
+    gv.far = gv.sd
+    gv.reason = gv.reason .. string.format('; nearest accepted water %d tiles from him (> %d): the carriers walk that far, '
+                                           .. 'barrels are no water, a cistern near the patients', gv.sd, pf)
+  end
   return gv
+end
+
+-- BUG-434: the Chebyshev distance from a patient to the nearest accepted source (a wet well or Water Source zone, not an emergency
+-- well) of this run; nil when there is none
+function M.source_dist(r, pt)
+  local best
+  for _, s in ipairs(r.sources or {}) do
+    if s.wet and not s.emerg and s.x then
+      local d = math.max(math.abs(s.x - pt.x), math.abs(s.y - pt.y), math.abs(s.z - pt.z))
+      if not best or d < best then best = d end
+    end
+  end
+  return best
 end
 
 -- BUG-343 (Run 15 Guildcleans y386-y390: 13 patients dead of thirst at 75,000 while PATIENT_DYING said '1-10 GiveWater
@@ -2963,6 +2992,36 @@ local function finish(K, c, r, p)
     end
   else
     p.hosp, p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks = nil, nil, nil, nil, nil   -- a new dry episode wakes at once
+  end
+  -- BUG-434: patients thirsty with no accepted water within patient_far tiles of them: the cistern is asked for whatever hospital zone
+  -- there is (or not: the gate above needs a hospital zone or project). Nothing while a cistern project is pending
+  local pf = math.tointeger(c.patient_far) or 0
+  if pf > 0 and thirsty > 0 then
+    local worst, wd
+    for _, pt in ipairs(r.patients) do
+      if pt.x and pt.thirst >= c.thirst_watch then
+        local d = M.source_dist(r, pt)
+        if not d or d > pf then
+          if not worst or pt.thirst > worst.thirst then worst, wd = pt, d end
+        end
+      end
+    end
+    if worst then
+      local okq, pend = K.call('runner', 'pending', 'cistern')
+      if not (okq and type(pend) == 'number' and pend > 0) and now - (p.req or -c.request_every) >= c.request_every then
+        p.req = now                       -- the hospital gate's cadence: one cistern request per request_every, whoever asks
+        local acc = M.drink_access(K)
+        local near = type(acc) == 'table' and acc.near or nil
+        local msg = string.format('cistern: patient %d (thirst %d) has %s', worst.id, worst.thirst,
+                                  wd and string.format('no accepted water within %d tiles (nearest %d)', pf, wd)
+                                  or 'no accepted water at all')
+        local data = {tpl = 'cistern', n = near and acc.nd or wd or 1, why = 'patient_water'}
+        if near then data.at = json.array{near[1], near[2], near[3]} end
+        K.emit('PROJECT_REQUEST', 'B', trunc(msg, 200), data)
+        K.log('warn', 'water: %s; %d patient(s) over thirst %d, %d hospital zone(s): GiveWater needs water, not a zone', msg,
+              thirsty, c.thirst_watch, #r.hosp)
+      end
+    end
   end
   -- a cistern that floods its well room (the breaker failed or something was dug into the pipe). One wet tile
   -- in one run is no flood: a bucket poured into a dry cistern's pond hole shows water there for a moment

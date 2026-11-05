@@ -280,7 +280,7 @@ _TICKS = (1, 4032000)                     # a cadence in game ticks (at most ten
 # lua/dfllm/water.lua M.DEFAULTS: the knobs config/baseline.json "water" may tune ("bool", else an int range).
 # water.conf ignores a value of another type; tests/test_hospital_water.py checks the key set against water.lua.
 WATER_LIM: dict = {
-    "thirst_alarm": _THIRST, "thirst_watch": _THIRST, "near": (1, 200), "shaft": (1, 60), "pond_near": (0, 20),
+    "thirst_alarm": _THIRST, "thirst_watch": _THIRST, "near": (1, 200), "patient_far": (0, 400), "shaft": (1, 60), "pond_near": (0, 20),
     "pond_per_run": (0, 20), "buckets_min": (0, 50), "bucket_per_patient": (0, 10), "buckets_max": (0, 100),
     "unforbid_per_run": (0, 100), "alarm_every": _TICKS, "hosp_every": _TICKS, "request_every": _TICKS,
     "flood_every": _TICKS, "flood_tiles": (1, 100), "units_per_slice": (1, 1000), "items_per_slice": (1, 10000),
@@ -361,7 +361,7 @@ RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d"
                     # `patients` patients lie in the fort; stuck_days without progress lifts the pause
                     "care_first": {"on": "bool", "stuck_days": (1, 60), "patients": (1, 250)},
                     "queue": {"yield_days": (1, 60), "park_days": (1, 400), "idle_days": (1, 400),
-                              "reach_days": (1, 60)},   # BUG-328, BUG-352
+                              "reach_days": (1, 60), "stale_days": (0, 3000), "stale_every": (1, 400)},   # BUG-328, BUG-352, BUG-435
                     # BUG-066 / FR-76: the manifest follows the standing workshops (runner.lua Q.sync)
                     "reclaim": {"on": "bool", "gone_scans": (1, 10), "min_ws": (1, 50), "ask_days": (1, 60)}}
 
@@ -667,7 +667,9 @@ def zones_errors(path: str | Path | None = None) -> list[str]:
 # surface_core = the surface core and the surface variants of office/dining/bedrooms/tavern/hospital/farms are drafted (default
 # false; the startup workshops and the depot stay). plan.py keeps its default for a value of another type or out of range; lint
 # --config refuses it.
-PLAN_LIM: dict = {"stale_apply_years": (0, 20), "surface_core": "bool"}
+# BUG-435: stale_project_days = a project set aside this many days without progress is cancelled by follow (the templates in
+# plan.STALE_CANCEL_TPLS) and drafted again by `plan propose`; 0 = never
+PLAN_LIM: dict = {"stale_apply_years": (0, 20), "surface_core": "bool", "stale_project_days": (0, 3000)}
 
 
 def plan_errors(path: str | Path | None = None) -> list[str]:

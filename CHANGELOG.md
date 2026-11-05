@@ -1,5 +1,16 @@
 # CHANGELOG dfpilot
 
+## Patients' water without a hospital, stale projects, a plan check verdict that says why (BUG-434 to BUG-436, 2026-11-05; offline, live-untested)
+- **Why:** Run 16d i4 Mazelanterns y399-y404: 11 died of thirst with 272 days of barrel drink (8 patients over 60,000, no hospital, accepted water 83-101 tiles away); nine projects set aside 300-900 days
+  (traps 912 d 'waits for trapparts', tombs 461 d, fortcore 341 d); `plan check` REJECTED with no ERROR line in the tail.
+- **BUG-434:** kern.log shows GiveWater jobs with 'hospital none': the game needs water (a wet well or Water Source zone), not a hospital zone, and barrels are not water. `water.patient_far` (40, 0 = off): a patient over
+  `thirst_watch` with no accepted source within that many tiles asks `PROJECT_REQUEST cistern why=patient_water` (whatever hospital zones exist; `at` when a body without a bank is known), the GiveWater verdict names the distance.
+  Follow answers it (piped cistern), `plan propose` drafts the cistern the fort can fill or else the aquifer cistern (`p.water=aquifer`, `fort.hosp.aq`); the held-back hospital and the emergency drafts take that one too.
+- **BUG-435:** the mechanisms planned traps wait for (`trapparts`) are ordered (`economy.plan_mech`, with the lever need); `runner.queue.stale_days` (300, 0 = off) / `stale_every` (90): PROJECT_BLOCKED `why=stale`;
+  follow (`plan.stale_project_days` 300, 0 = off) cancels a set-aside traps/tombs/bedrooms/... project (`bp.cancel`, file to `bp/.cancelled`) and wakes PROJECT_STALE, `plan propose` draws it again; core, seal, water and supply builds are never cancelled.
+- **BUG-436:** the `plan check` verdict line names the error count, the first error and the sites snapshot (and a refresh this call made); `propose` prints the snapshot id it ranked on.
+- **Tests:** tests/lua/test_bug434_435.lua (7), tests/test_bug434_436.py (11). No schema change (PROJECT_REQUEST `why` and PROJECT_BLOCKED `why`/`cmd` are free text; PROJECT_STALE is a follower wake reason). **Live check:** see the three bug files.
+
 ## aqshaft: a cavern below the refuge level refuses nothing, refusals name level and coordinate, an explicit column is checked (BUG-432, BUG-433, 2026-11-05; offline, live-untested)
 - **Why:** Run 16c i3 Yawninggilt (aquifer z120-127): `bp sites aqshaft` (any depth) refused all 1271 columns for a cavern/warm level, `plan propose` drafted no aqshaft; the fort stayed above the aquifer.
 - **BUG-432:** the default shaft depth (20) ran far below the core into a recorded cavern. Without p.depth the ranking goes down to AQ_REACH (2) levels under the shallowest known aquifer level = the core's top level
