@@ -159,7 +159,7 @@ M.DEFAULTS = {
   -- BUG-180: a memorial slab without a site within coffin_scan_r: the wider radii searched in turn (mem_scan_reads tile
   -- reads at most each), and PROJECT_REQUEST tombs why=memorial after mem_req_days without a site (0: never)
   mem_scan_wide = {32, 48}, mem_scan_reads = 10000, mem_req_days = 3,
-  coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wake = 2400, coffin_prio = 3,
+  coffin_entrance_r = 10, coffin_retry = 3600, coffin_wood_keep = 20, coffin_wood_floor = 5, coffin_wake = 2400, coffin_prio = 3,
   coffin_stale = 15 * DAY,                         -- BUG-126: a coffin project without progress this long (PEACE) is dropped
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
   death_thirst = 50000, death_hunger = 75000, death_reports = 400,
@@ -2591,6 +2591,7 @@ end
 -- ConstructCoffin orders for the coffin items still missing, hard stone first, then wood
 local function coffin_order(K, c, r, p, q, cs)
   q.missing = 0
+  M.cof_miss = nil
   local mode = K.mode()
   if mode == 'SIEGE' or mode == 'BREACH' then return end
   if not q.census then q.nocensus = true; return end          -- BUG-126: said in the view, not silent
@@ -2608,9 +2609,16 @@ local function coffin_order(K, c, r, p, q, cs)
   q.items, q.make = items, make
   if make <= 0 then return end
   -- the boulders and logs the open coffin orders will take are spoken for; wood first (beyond the keep), then hard stone
-  local wood = q.carp and math.max(0, math.min(make, q.wood - c.coffin_wood_keep - q.order_by.wood)) or 0
+  -- BUG-466 (Run 16d i4 Mazelanterns: 17 ghosts, 95 bodies without a coffin, no stone: the 20 logs kept for the economy stayed unspent):
+  -- a fort with no hard stone and bodies lying about spends the logs down to coffin_wood_floor
+  local keep = c.coffin_wood_keep
+  if q.stone <= 0 and q.open > 0 then keep = math.min(keep, c.coffin_wood_floor or 5) end
+  local wood = q.carp and math.max(0, math.min(make, q.wood - keep - q.order_by.wood)) or 0
   local rock = q.masons and math.max(0, math.min(make - wood, q.stone - q.order_by.rock)) or 0
   q.missing = make - rock - wood
+  -- BUG-466: the caravans bring what the coffins lack (economy.supply_wants reads M.coffin_wants)
+  M.cof_miss = q.missing > 0 and {n = q.missing, carp = q.carp == true, masons = q.masons == true, wood = q.wood, stone = q.stone,
+                                  open = q.open} or nil
   local now = K.now().tick
   if now < (num(p.cof.oretry) or 0) then return end
   local mats = {}
@@ -5142,6 +5150,22 @@ end
 -- (reserve.glass_ok); economy's glass chain makes them.
 function M.mood_wants(K)
   return deep(st.wants or {})
+end
+
+-- BUG-466 (Run 16d i4 Mazelanterns: 95 bodies without a coffin, 17 ghosts, no stone and no wood for the coffin orders): what the caravans
+-- are asked for while coffins cannot be made from the fort's own material: [{buy, n, why}], logs when a carpenter's shop stands,
+-- stone when masons stand, else coffins themselves (economy.supply_wants adds them to trade's wants)
+function M.coffin_wants(K)
+  local m = M.cof_miss
+  if type(m) ~= 'table' or (num(m.n) or 0) <= 0 then return {} end
+  local n = math.min(30, num(m.n))
+  local why = string.format('%d coffins cannot be made: hard stone %d, logs %d, masons %s, carpenters %s', n, num(m.stone) or 0,
+                            num(m.wood) or 0, m.masons and 'yes' or 'no', m.carp and 'yes' or 'no')
+  local out = {}
+  if m.carp then out[#out + 1] = {buy = 'wood', n = n, why = why}
+  elseif m.masons then out[#out + 1] = {buy = 'stone', n = n, why = why} end
+  out[#out + 1] = {buy = 'coffin', n = n, why = why}
+  return out
 end
 
 return M

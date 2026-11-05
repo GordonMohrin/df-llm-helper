@@ -270,19 +270,30 @@ T.test('BUG-248: stone fails when the soil above it is deeper than hard_stone_le
   T.eq(RULES.hard_stone_levels, 6)
 end)
 
-T.test('BUG-248: waiving or accepting stone needs an explore-first plan at the gate', function()
+T.test('BUG-248/BUG-465: a failed stone cannot be accepted; waiving an unknown stone needs an explore-first plan at the gate', function()
   local deep = {['8,30'] = {neighbors = F.NEIGHBORS_FAR, panel = {'Temperate Broadleaf Forest', 'Temperature: Temperate',
     'Trees: Woodland', 'Surroundings: Calm', 'Brook: Yes', 'Deep soil', 'Iron'}}}
   local D = F.new({screen = 'world', sites = deep})
   local run = start(D, {v = 2, id = 'g1', mode = 'embark', site = {8, 30}, play_now = true,
-    accept = {{id = 'stone', why = 'deep soil, we dig'}}}, rules_far())
-  T.eq(run.state, 'failed'); T.ok(run.msg:find('accepting stone needs an explore-first plan', 1, true), run.msg)
+    accept = {{id = 'stone', why = 'deep soil, we dig'}}, explore_first = 'explore shaft to the first stone in spring'}, rules_far())
+  T.eq(run.state, 'failed'); T.ok(run.msg:find('cannot accept stone: no hard stone within reach', 1, true), run.msg)
   T.eq(D.pressed.Confirm, nil)
+  -- waiving does not turn a FAILED stone into a pass either
   D = F.new({screen = 'world', sites = deep})
+  run = start(D, {v = 2, id = 'g1b', mode = 'embark', site = {8, 30}, play_now = true, waive = {'stone'},
+    explore_first = 'explore shaft to the first stone in spring'}, rules_far())
+  T.eq(run.state, 'failed'); T.ok(run.msg:find('site rejected (fails: stone', 1, true), run.msg)
+  T.eq(D.pressed.Confirm, nil)
+  -- soil depth not shown: stone is unknown and may be waived, with a plan
+  local unk = {['8,30'] = {neighbors = F.NEIGHBORS_FAR, panel = {'Temperate Broadleaf Forest', 'Temperature: Temperate',
+    'Trees: Woodland', 'Surroundings: Calm', 'Brook: Yes', 'Iron'}}}
+  D = F.new({screen = 'world', sites = unk})
+  run = start(D, {v = 2, id = 'g2', mode = 'embark', site = {8, 30}, play_now = true, waive = {'stone', 'soil'}}, rules_far())
+  T.eq(run.state, 'failed'); T.ok(run.msg:find('waiving stone needs an explore-first plan', 1, true), run.msg)
+  D = F.new({screen = 'world', sites = unk})
   local ctx
-  run, _, ctx = start(D, {v = 2, id = 'g2', mode = 'embark', site = {8, 30}, play_now = true,
-    accept = {{id = 'stone', why = 'deep soil, we dig'}}, explore_first = 'explore shaft to the first stone in spring'},
-    rules_far())
+  run, _, ctx = start(D, {v = 2, id = 'g3', mode = 'embark', site = {8, 30}, play_now = true, waive = {'stone', 'soil'},
+    explore_first = 'explore shaft to the first stone in spring'}, rules_far())
   T.eq(run.state, 'done', run.msg); T.eq(D.screen, 'fort')
   T.ok(has(ctx.warnings, 'site.gate: explore first (explore shaft to the first stone in spring)'), json.encode(ctx.warnings))
   T.ok(C.NEEDS_PLAN.stone ~= nil)

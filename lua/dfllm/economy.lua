@@ -5461,6 +5461,12 @@ local function building_info(rec, j, b)
   rec.kind = okt and type(tn) == 'string' and tn or 'building'
   local oks, sg = pcall(function() return b:getBuildStage() end)
   rec.stage = oks and int(sg) or nil
+  -- BUG-466: the subtype tells a furnace / forge (fire-safe building material: logs burn) from a shop any material builds
+  if rec.kind == 'Workshop' or rec.kind == 'Furnace' then
+    local okw, sub = pcall(function() return (rec.kind == 'Workshop' and df.workshop_type or df.furnace_type)[b.type] end)
+    if okw and type(sub) == 'string' then rec.sub = sub end
+  end
+  rec.fire = M.fire_safe(rec.kind, rec.sub) or nil
 end
 
 -- BUG-004: what a planned building still waits for: its job_items without an attached item (the building sheet's
@@ -6924,17 +6930,29 @@ function M.bp_settings()
   return s
 end
 
+-- BUG-466 (Run 16a i1 Basementflew: GlassFurnace and MetalsmithsForge 'waits for building material' 300-395 days with 203 logs in
+-- stock; economy answered 'logs' for them and ordered nothing, said nothing): a furnace and a forge need FIRE-SAFE building material
+-- (stone or blocks; logs burn, bars are the soldiers'). Every other shop (carpenter, kitchen, still, butcher, farmer, craftsdwarf, mechanic,
+-- masons ...) takes any building material, logs too. Fields, not locals: the main chunk is at Lua's 200-local limit.
+M.FIRE_SHOPS = {MetalsmithsForge = true, MagmaForge = true}
+function M.fire_safe(kind, sub)
+  return kind == 'Furnace' or (kind == 'Workshop' and M.FIRE_SHOPS[sub] == true)
+end
+
 -- what buildingplan builds a wall of now: via (the setting: blocks, boulders, logs, bars), nil + the setting to
--- switch on (only that material is there), or nil, why
-function M.bm_route(r, s, kind)
+-- switch on (only that material is there), or nil, why. BUG-466: fire = a furnace or forge: no logs
+function M.bm_route(r, s, kind, fire)
   local inv = r.inv
   for _, e in ipairs(M.BM) do
-    if s[e[1]] and (inv[e[2]] or 0) > 0 then return e[1] end
+    if s[e[1]] and (inv[e[2]] or 0) > 0 and not (fire and e[1] == 'logs') then return e[1] end
   end
   for _, k in ipairs(M.BM_ON) do
     for _, e in ipairs(M.BM) do
-      if e[1] == k and (inv[e[2]] or 0) > 0 then return nil, nil, k end
+      if e[1] == k and (inv[e[2]] or 0) > 0 and not (fire and k == 'logs') then return nil, nil, k end
     end
+  end
+  if fire then
+    return nil, 'no material for ' .. (kind or 'furnace') .. ': no rock, no blocks (logs burn: a furnace or forge needs stone)'
   end
   return nil, 'no material for ' .. (kind or 'wall') .. ': no rock, no blocks, no logs'
 end
@@ -6944,6 +6962,7 @@ end
 M.BM_KIND = {Construction = 'wall', TradeDepot = 'depot', Workshop = 'workshop', Furnace = 'workshop'}
 function M.bm_kind(q)
   local j = (q.jobs or {})[1]
+  if q.fire then return 'furnace' end                    -- BUG-466: a furnace or forge (fire-safe material)
   return j and M.BM_KIND[j.kind or ''] or (j and 'building') or 'wall'
 end
 
@@ -6954,8 +6973,8 @@ function M.mat_for(K, kind, n)
   n = math.max(1, math.tointeger(n) or 1)
   if not K.census.i then return 'unknown' end
   local c, r = M.conf(K), M.view_run(K)
-  if kind == 'wall' or kind == 'depot' or kind == 'workshop' then
-    local via, why, set = M.bm_route(r, M.bp_settings(), kind)
+  if kind == 'wall' or kind == 'depot' or kind == 'workshop' or kind == 'furnace' then
+    local via, why, set = M.bm_route(r, M.bp_settings(), kind, kind == 'furnace')   -- BUG-466: furnace = fire-safe only
     if set then return 'setting', 'buildingplan ' .. set .. ' goes on' end
     return via, why
   end
@@ -7052,8 +7071,15 @@ function M.rock_dig(K, c, r, walls)
   local free = stone_free(c, r)
   local need = (r.rk or M.rock_open()) + (walls or 0) + need_n(r.p, 'rock', r.now) + ((st.mech or {}).stone or 0)
   if free > 0 then r.p.rocksoil = nil end
+  -- BUG-467 (Run 16b i2 Roadvises: six strange moods and three deaths in a stone-0 fort, 16a i1 two more for glass and gems): the fort that
+  -- has had no free boulder for SUPPLY.zero_days is stone-poor whether or not the stone digs found soil (rocksoil): the moods' stone, gems,
+  -- bars and cloth are bought before a mood asks (st.rock.zero)
+  if free > 0 then r.p.rock0 = nil
+  elseif int(r.p.rock0) == nil then r.p.rock0 = r.now end
+  local zero = int(r.p.rock0) ~= nil and (r.now - int(r.p.rock0)) >= M.SUPPLY.zero_days * DAY or nil
   st.rock = {free = free, need = need, open = r.rk or 0, gems = math.tointeger(r.inv.gems) or 0,
-             soil = (int(r.p.rocksoil) or 0) >= M.ROCK_SOIL or nil}
+             soil = (int(r.p.rocksoil) or 0) >= M.ROCK_SOIL or nil, zero = zero,
+             bars = math.tointeger(r.inv.bars) or 0, cloth = math.tointeger(r.inv.cloth) or 0}
   if type(rc) ~= 'table' or need <= free or K.mode() ~= 'PEACE' or (r.inv.w_pick or 0) == 0 then return end
   if ((st.jobc or tool_jobs()).dig or 0) > 0 then return end                -- the miners have digging
   local okb, bl = K.call('runner', 'dig_backlog')
@@ -7128,21 +7154,49 @@ end
 -- BUG-268/269: what the caravans are asked for besides economy.trade_wants (trade.lua puts these after them, before
 -- plan.trade.want): `mechanism` while levers miss mechanisms and no stone or no Mechanic's workshop makes them; in a soil
 -- fort (st.rock.soil) `stone` for the rock need and `gem` up to SUPPLY.gems (strange moods, Guildcleans #665-#672)
-M.SUPPLY = {gems = 3, stone_cap = 30}
+M.SUPPLY = {gems = 3, stone_cap = 30, zero_days = 14, mood_stone = 5, mood_bars = 2, mood_cloth = 2, fire_cap = 6}
 function M.supply_wants(K)
   local w = {}
   local m = st.mech
   if type(m) == 'table' and (m.short or 0) > 0 and (m.route == 'no stone' or m.route == 'no Mechanics') then
     w[#w + 1] = {buy = 'mechanism', n = m.short, why = string.format('levers: %d mechanisms short (%s)', m.short, m.route)}
   end
+  -- BUG-466: coffins that cannot be made (no hard stone, no spare logs): the caravans bring logs, stone or the coffins
+  local okc, cw = K.call('care', 'coffin_wants')
+  for _, e in ipairs(okc and type(cw) == 'table' and cw or {}) do
+    if type(e) == 'table' and type(e.buy) == 'string' then w[#w + 1] = {buy = e.buy, n = e.n, why = e.why} end
+  end
   local rk = st.rock
-  if type(rk) == 'table' and rk.soil then
+  -- BUG-466: a furnace or forge waits for fire-safe building material and the fort has no stone or block: the caravans bring stone
+  local fn = math.tointeger(st.fire_n) or 0
+  local askstone = false
+  if fn > 0 then
+    w[#w + 1] = {buy = 'stone', n = math.min(M.SUPPLY.fire_cap, math.max(1, fn)),
+                 why = string.format('%d furnace/forge waits for fire-safe material (logs burn), no stone or block in the fort', fn)}
+    askstone = true
+  end
+  if type(rk) == 'table' and (rk.soil or rk.zero) then
+    local why = rk.soil and 'soil fort' or 'stone-0 fort'
     if (rk.need or 0) > (rk.free or 0) then
-      w[#w + 1] = {buy = 'stone', n = math.min(M.SUPPLY.stone_cap, rk.need - rk.free),
-                   why = string.format('soil fort: %d free boulders < %d wanted', rk.free or 0, rk.need)}
+      if not askstone then
+        w[#w + 1] = {buy = 'stone', n = math.min(M.SUPPLY.stone_cap, rk.need - rk.free),
+                     why = string.format('%s: %d free boulders < %d wanted', why, rk.free or 0, rk.need)}
+        askstone = true
+      end
+    elseif rk.zero and not askstone then
+      -- BUG-467: nothing is wanted by the orders yet, but a strange mood needs a boulder at once (stone / mason's mood)
+      w[#w + 1] = {buy = 'stone', n = M.SUPPLY.mood_stone, why = 'stone-0 fort: boulders for strange moods'}
     end
     if (rk.gems or 0) < M.SUPPLY.gems then
-      w[#w + 1] = {buy = 'gem', n = M.SUPPLY.gems - (rk.gems or 0), why = 'soil fort: gems for strange moods'}
+      w[#w + 1] = {buy = 'gem', n = M.SUPPLY.gems - (rk.gems or 0), why = why .. ': gems for strange moods'}
+    end
+    if rk.zero then   -- the moods that need a bar (smith) or cloth (weaver, clothier) cannot be made from stone the fort lacks
+      if (rk.bars or 0) < M.SUPPLY.mood_bars then
+        w[#w + 1] = {buy = 'bar:iron', n = M.SUPPLY.mood_bars - (rk.bars or 0), why = 'stone-0 fort: bars for strange moods'}
+      end
+      if (rk.cloth or 0) < M.SUPPLY.mood_cloth then
+        w[#w + 1] = {buy = 'cloth', n = M.SUPPLY.mood_cloth - (rk.cloth or 0), why = 'stone-0 fort: cloth for strange moods'}
+      end
     end
   end
   return w
@@ -7153,13 +7207,14 @@ end
 function T.jmake(K, c, r)
   local jb, pc = r.jb, c.pieces
   st.jneed = M.jneed(jb)                              -- BUG-231: what the planned buildings wait for (M.mgr_bypass)
+  st.fire_n = nil                                     -- BUG-466: furnaces / forges waiting for fire-safe material, none in the fort
   if not jb or type(pc) ~= 'table' then return true end
   local short, walls, s = {}, 0, nil
   for _, q in ipairs(jb.mq or {}) do
     if q.label == 'building material' then
       s = s or M.bp_settings()
       local kind = M.bm_kind(q)
-      local via, why, set = M.bm_route(r, s, kind)
+      local via, why, set = M.bm_route(r, s, kind, q.fire)
       st.bp_on = st.bp_on or {}
       if set and not st.bp_on[set] then
         st.bp_on[set] = true
@@ -7171,6 +7226,7 @@ function T.jmake(K, c, r)
       elseif not via and not set then
         short[#short + 1] = {kind = kind, n = q.n, why = why}
         walls = walls + q.n
+        if q.fire then st.fire_n = (st.fire_n or 0) + q.n end      -- BUG-466: supply_wants asks the caravans for stone
       end
     else
       local e = M.PIECES[q.label]
@@ -10514,10 +10570,11 @@ function T.jmat(K, c, r)
         label = label or 'item'
         labels[#labels + 1] = string.format('%s x%d', label, nd.n)
         if vecs then
-          local key = string.format('%s:%d:%d', label, nd.mt, nd.mi)
+          local fire = nd.bm and j.fire == true or nil      -- BUG-466: the fire-safe building material of a furnace / forge is its own class
+          local key = string.format('%s:%d:%d%s', label, nd.mt, nd.mi, fire and ':fire' or '')
           local q = by[key]
           if not q then
-            q = {key = key, label = label, vecs = vecs, mt = nd.mt, mi = nd.mi, n = 0, free = 0, forb = 0, jobs = {}}
+            q = {key = key, label = label, vecs = vecs, mt = nd.mt, mi = nd.mi, n = 0, free = 0, forb = 0, jobs = {}, fire = fire}
             by[key] = q
             jb.mq[#jb.mq + 1] = q
           end

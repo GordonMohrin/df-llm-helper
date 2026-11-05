@@ -376,6 +376,34 @@ T.test('FR-61 material: stock and open orders that can run count; a stuck rock o
   T.eq(coffin_orders(W3), {{11, 'wood', 'dfllm:coffin'}})
 end)
 
+T.test('BUG-466: no hard stone and a body waiting: the logs go down to coffin_wood_floor; what still lacks is asked of the caravans', function()
+  local function scene(o)
+    o.runner = false
+    local setup = o.setup
+    o.setup = function(W) planned(W, 5); dead(W, 4); corpse(W, 4); if setup then setup(W) end end
+    local W = world(o)
+    W.run(60)
+    return W
+  end
+  -- 5 planned + 5 short + 1 for the dead = 11 coffins; 23 logs: the old keep 20 left 3, the floor 5 leaves 18 (all 11 made)
+  local W = scene{census_i = {rock = 0, wood = 23}, carpenters = true}
+  T.eq(coffin_orders(W), {{11, 'wood', 'dfllm:coffin'}}, 'no stone, a body: logs down to the floor of 5')
+  local ok, cw = W.K.call('care', 'coffin_wants')
+  T.ok(ok and #cw == 0, 'enough material: nothing asked of the caravans')
+  -- 8 logs: 3 coffins from wood (8 - floor 5), 8 lack: logs and coffins are asked, never more than 30
+  local W2 = scene{census_i = {rock = 0, wood = 8}, carpenters = true}
+  T.eq(coffin_orders(W2), {{3, 'wood', 'dfllm:coffin'}})
+  local _, cw2 = W2.K.call('care', 'coffin_wants')
+  T.eq({#cw2, cw2[1].buy, cw2[1].n, cw2[2].buy, cw2[2].n}, {2, 'wood', 8, 'coffin', 8}, json and json.encode(cw2) or '')
+  T.ok(cw2[1].why:find('hard stone 0, logs 8, masons yes, carpenters yes', 1, true), cw2[1].why)
+  -- no carpenter's shop but masons: stone and coffins; with stone around (hard stone) the keep is not touched
+  local W3 = scene{census_i = {rock = 0, wood = 8}}
+  local _, cw3 = W3.K.call('care', 'coffin_wants')
+  T.eq({cw3[1].buy, cw3[2].buy}, {'stone', 'coffin'})
+  local W4 = scene{census_i = {rock = 3, wood = 23}, carpenters = true}
+  T.eq(coffin_orders(W4)[1], {3, 'wood', 'dfllm:coffin'}, 'hard stone in the fort: the keep of 20 logs stays')
+end)
+
 ---------------------------------------------------------------- when not
 T.test('FR-61: nothing while free usable coffins >= bodies without a tomb + reserve; nothing in SIEGE; config off', function()
   local W = world{setup = function(W) for i = 1, 10 do CW.tomb(W, 40 + i, 10, 5) end end}
@@ -488,7 +516,8 @@ T.test('BUG-126: the short coffins are ordered although no space is found yet; w
 end)
 
 T.test('BUG-126: neither wood nor hard stone for the short coffins: DECISION_NEEDED coffin_material, once a week', function()
-  local W = world{carpenters = true, census_i = {rock = 30, rock_bad = 30, wood = 10},
+  -- BUG-466: with bodies waiting and no hard stone the logs go down to coffin_wood_floor (5); 4 logs are below it
+  local W = world{carpenters = true, census_i = {rock = 30, rock_bad = 30, wood = 4},
                   setup = function(W) for _, id in ipairs({4, 5, 6}) do dead(W, id); corpse(W, id) end end}
   W.run(300)
   T.eq(coffin_orders(W), {})

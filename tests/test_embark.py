@@ -223,7 +223,10 @@ def test_waivable_ids_match_checklist_lua():
     body = re.search(r"C\.ACCEPTABLE = \{(.*?)\}", text, re.S).group(1)
     assert tuple(re.findall(r"'([a-z_]+)'", body)) == drv.ACCEPTABLE
     assert "panel" not in drv.ACCEPTABLE and "popup" not in drv.ACCEPTABLE
-    assert {"ore", "stone"} <= set(drv.ACCEPTABLE)
+    assert "ore" in drv.ACCEPTABLE
+    # BUG-465: a failed stone is a hard reject, not a trade-off (waiving an unknown one stays)
+    assert "stone" not in drv.ACCEPTABLE and "stone" in drv.WAIVABLE and set(drv.HARD_REJECT) == {"stone"}
+    assert re.search(r"C\.HARD_REJECT = \{stone =", text)
 
 
 def test_rules_json_requires_metal_and_stone():
@@ -259,12 +262,18 @@ def test_main_embark_passes_named_waivers_only(tmp_path, monkeypatch):
         with pytest.raises(SystemExit):
             drv.main(["embark", "7,23", "--no-wait", *bad])
     assert len(calls) == 1
-    assert drv.main(["embark", "7,23", "--accept", "ore", "--accept", "stone", "--reason", "known trade-off",
+    assert drv.main(["embark", "7,23", "--accept", "ore", "--waive", "stone", "--reason", "known trade-off",
                      "--explore-first", "explore shaft to stone in spring", "--no-wait"]) == 0   # BUG-248
     spec = json.loads(Path(calls[1][1]).read_text(encoding="utf-8"))
-    assert spec["accept"] == [{"id": "ore", "why": "known trade-off"}, {"id": "stone", "why": "known trade-off"}]
+    assert spec["accept"] == [{"id": "ore", "why": "known trade-off"}] and spec["waive"] == ["stone"]
     log = (tmp_path / "dfllm-runtime" / "embark" / "accept.log").read_text(encoding="utf-8").splitlines()
-    assert [x.split("\t")[3] for x in log] == ["ore", "stone"]
+    assert [x.split("	")[3] for x in log] == ["ore"]
+    # BUG-465: accepting a failed stone is refused with the reason, nothing is started
+    n = len(calls)
+    with pytest.raises(SystemExit):
+        drv.main(["embark", "7,23", "--accept", "stone", "--reason", "deep soil, we dig",
+                  "--explore-first", "explore shaft to stone in spring", "--no-wait"])
+    assert len(calls) == n
 
 
 def test_main_scan_makes_one_dfhack_call(tmp_path, monkeypatch):

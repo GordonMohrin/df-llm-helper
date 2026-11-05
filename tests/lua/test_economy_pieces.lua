@@ -31,9 +31,9 @@ end
 
 -- a planned building (buildingplan) at x,50,109 waiting for `n` items of item type `itype` ('BM' = building material;
 -- a Construction then, or `btype`)
-local function planned(id, itype, n, x, btype)
+local function planned(id, itype, n, x, btype, sub)
   local bt = btype or (itype == 'BM' and 'Construction' or 'Door')
-  local b = {id = 500 + id, x1 = x or 20, y1 = 50, x2 = x or 20, y2 = 50, z = 109,
+  local b = {id = 500 + id, x1 = x or 20, y1 = 50, x2 = x or 20, y2 = 50, z = 109, type = sub,
              getType = function() return df.building_type[bt] end, getBuildStage = function() return 0 end}
   local ji = itype == 'BM' and {item_type = -1, mat_type = -1, mat_index = -1, quantity = n or 1,
                                 flags2 = {building_material = true}}
@@ -405,5 +405,78 @@ T.test('BUG-443: economy.wall_stock counts the free blocks, boulders and logs (m
   local _, s0 = W0.K.call('economy', 'wall_stock')
   T.eq({s0.have, s0.blocks, s0.rock, s0.logs}, {0, 0, 0, 0})
 end)
+
+-- BUG-466 (Run 16a i1 Basementflew: GlassFurnace and MetalsmithsForge 'waits for building material' 300-395 days with 203 logs in stock;
+-- economy answered 'logs' for them): a furnace or forge needs fire-safe material, a Craftsdwarfs/Carpenters/Mechanics shop takes logs
+T.test('BUG-466: a furnace or forge waits for stone, not logs: MATERIAL_SHORT says so, the caravans are asked; a wood shop is fine', function()
+  local function jobs()
+    return {planned(1, 'BM', 1, 60, 'Furnace', df.furnace_type.GlassFurnace),
+            planned(2, 'BM', 1, 64, 'Workshop', df.workshop_type.MetalsmithsForge),
+            planned(3, 'BM', 1, 68, 'Workshop', df.workshop_type.Craftsdwarfs)}
+  end
+  local W = world{boulders = 0, logs = 200, jobs = jobs}
+  days(W, 1)
+  local ev = W.find_events('MATERIAL_SHORT')
+  T.eq(#ev, 1, 'one set: the furnace and the forge')
+  T.ok(ev[1].msg:find('no material for furnace: no rock, no blocks (logs burn', 1, true), ev[1].msg)
+  T.ok(ev[1].msg:find('furnace x2 wait', 1, true), ev[1].msg)          -- the Craftsdwarfs shop is not in the set
+  T.eq(mat_for(W, 'furnace', 1), nil, 'mat_for furnace: 203 logs are no answer')
+  T.ok(why_for(W, 'furnace', 1):find('logs burn', 1, true), why_for(W, 'furnace', 1))
+  T.eq(mat_for(W, 'workshop', 1), 'logs', 'a shop any material builds: logs')
+  local ok, w = W.K.call('economy', 'supply_wants')
+  local stone
+  for _, e in ipairs(ok and w or {}) do if e.buy == 'stone' then stone = e end end
+  T.ok(stone and stone.n == 2 and stone.why:find('furnace/forge waits for fire-safe material', 1, true), '')
+  -- logs only and buildingplan's logs off: the setting is NOT switched on for a furnace (it would burn) ...
+  local W2 = world{boulders = 0, logs = 10, bp = {blocks = true, boulders = true, logs = false, bars = false},
+                   jobs = function() return {planned(1, 'BM', 1, 60, 'Furnace', df.furnace_type.Smelter)} end}
+  days(W2, 1)
+  T.ok(not F.has(F.runs(W2), 'buildingplan set logs true'), table.concat(F.runs(W2), ' | '))
+  T.eq(#W2.find_events('MATERIAL_SHORT'), 1)
+  -- ... but for a wood shop it is
+  local W3 = world{boulders = 0, logs = 10, bp = {blocks = true, boulders = true, logs = false, bars = false},
+                   jobs = function() return {planned(1, 'BM', 1, 60, 'Workshop', df.workshop_type.Mechanics)} end}
+  days(W3, 1)
+  T.ok(F.has(F.runs(W3), 'buildingplan set logs true'))
+  T.eq(W3.find_events('MATERIAL_SHORT'), {})
+  -- a boulder in the fort: the furnace has its material, nothing is short, nothing asked
+  local W4 = world{boulders = 2, logs = 0, jobs = jobs}
+  days(W4, 1)
+  T.eq(W4.find_events('MATERIAL_SHORT'), {})
+  T.eq(mat_for(W4, 'furnace', 1), 'boulders')
+end)
+
+-- BUG-467 (Run 16b i2 Roadvises: six strange moods, three deaths, no stone, gems, bars or cloth): the fort that has had no free boulder for
+-- two weeks buys the moods' materials before a mood asks
+T.test('BUG-467: a stone-0 fort asks the caravans for the stone, gems, bars and cloth after 14 days; stone in the fort cancels it', function()
+  local W = world{boulders = 0, logs = 5}
+  days(W, 3)
+  local function wants(W)
+    local ok, w = W.K.call('economy', 'supply_wants')
+    local by = {}
+    for _, e in ipairs(ok and w or {}) do by[e.buy] = e end
+    return by
+  end
+  T.eq(wants(W).stone, nil, 'not yet: stone zero for 3 days only')
+  days(W, 13)
+  local by = wants(W)
+  T.ok(by.stone and by.stone.n == 5 and by.stone.why:find('stone-0 fort', 1, true), 'stone')
+  T.ok(by.gem and by.gem.n == 3, 'gems')
+  T.ok(by['bar:iron'] and by['bar:iron'].n == 2, 'bars')
+  T.ok(by.cloth and by.cloth.n == 2, 'cloth')
+  -- a fort with bars and cloth in stock buys none
+  local W2 = world{boulders = 0, logs = 5, bars = {IRON = 3}, setup = function(W) F.item(W, 'CLOTH', {}); F.item(W, 'CLOTH', {}) end}
+  days(W2, 16)
+  local by2 = wants(W2)
+  T.ok(by2.stone and by2.gem and by2['bar:iron'] == nil, 'bars in stock')
+  -- boulders come in (a trade, a dig): the clock is off
+  local W3 = world{boulders = 0, logs = 5}
+  days(W3, 16)
+  T.ok(wants(W3).stone ~= nil)
+  for _ = 1, 8 do F.item(W3, 'BOULDER', {mat_type = 0, mat_index = 7}) end
+  days(W3, 1)
+  T.eq(wants(W3).stone, nil)
+end)
+
 
 T.done()

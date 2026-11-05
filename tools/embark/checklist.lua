@@ -22,6 +22,11 @@ C.DEFAULT = {
   stone_pass_levels = 2,
   soil_levels = {none = 0, little = 1, shallow_sand = 2, shallow_clay = 2, some = 3, deep = 8, very_deep = 15,
     extremely_deep = 25},
+  -- BUG-465 (Run 16a i1 Basementflew: 15 soil levels, panel 'light', real light z126/127 over heavy z120-123 = 8 aquifer levels; Run 16b i2:
+  -- z112 and z115 heavy, z118-120 = 9): the panel names a class, never the span. Estimated aquifer levels per class; the hard stone lies
+  -- below them, so the reach is soil levels + span. stone_score_per_level = score points a warning loses per level beyond a pass
+  aquifer_span = {light = 4, varied = 6, heavy = 8},
+  stone_score_per_level = 3,
   sizes = {{3, 3}, {4, 4}},
   fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot',
     'water_mountain'},
@@ -43,9 +48,13 @@ C.WAIVABLE_SET = set(C.WAIVABLE)
 -- FR-08: criteria a player may accept although they FAILED (a known trade-off: an old fort nearby, scarce trees,
 -- no metal ore), one by one and with a logged reason (steps.gate, embark.py --accept ID --reason TEXT). Never the
 -- unreadable panel or a failing warning popup (heavy aquifer, evil, savage, necromancer, early invasion).
-C.ACCEPTABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'water', 'aquifer', 'soil', 'stone',
+-- BUG-465 (Run 16a-d, all four forts of region1 had no hard stone: Syrupobeyed, Basementflew, Roadvises, Castletongs, Mazelanterns): a FAILED
+-- stone criterion is no trade-off, it is no fort (no mechanisms, traps, levers, coffins, mood stone, aqshaft ring); 'stone' is not acceptable
+-- (waiving it stays possible for an UNKNOWN soil depth, with an explore-first plan)
+C.ACCEPTABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'water', 'aquifer', 'soil',
   'ore', 'temperature', 'size'}
 C.ACCEPTABLE_SET = set(C.ACCEPTABLE)
+C.HARD_REJECT = {stone = 'no hard stone within reach: a failed stone criterion cannot be accepted, choose another site'}
 -- warning popups judged by their own criterion, not by 'popup' ("difficult to obtain stone" is the stone rule)
 C.POPUP_OWNER = {no_stone = 'stone', water_mountain = 'terrain'}
 -- BUG-248 (Run 15 Guildcleans 'stone free 0', Earthboat 'no hard stone' for mechanisms): criteria a new fort may
@@ -191,21 +200,33 @@ function C.evaluate(rec, rules, ctx)
   -- BUG-248: and the estimated soil levels above the stone must not exceed hard_stone_levels
   local lv, maxlv = C.soil_levels(soil, rules), rules.hard_stone_levels
   local too_deep = lv ~= nil and maxlv ~= nil and lv > maxlv
+  -- BUG-465: with an aquifer the hard stone lies BELOW its levels (the panel shows a class, not the span): the reach is the soil
+  -- levels plus the estimated span of the class
+  local aqc = rec.aquifer
+  local span = (aqc == 'light' or aqc == 'varied' or aqc == 'heavy') and (rules.aquifer_span or C.DEFAULT.aquifer_span)[aqc] or 0
+  out.stone_levels, out.aquifer_span = lv, span > 0 and span or nil
+  out.reach = lv ~= nil and (lv + span) or nil
+  local reach_txt = (span > 0 and lv ~= nil)
+    and string.format('; about %d levels to the hard stone (%d soil + about %d of the %s aquifer)', lv + span, lv, span, aqc) or ''
+  local pen = 0
   if pop.no_stone then put('stone', 'fail', 'popup: difficult to obtain stone')
   elseif soil ~= nil and (set(rules.stone_fail_soil or rules.stone_warn_soil)[soil] or too_deep) then
     local aq = rec.aquifer == 'light' or rec.aquifer == 'varied'
     put('stone', 'fail', soil .. ' soil: no stone layer in the upper levels' ..
         (aq and ', the first stone lies below the aquifer (Laborkings: no boulders)' or ' (boulders scarce)') ..
-        (lv and maxlv and string.format('; about %d levels of soil, hard stone wanted within %d', lv, maxlv) or ''))
+        (lv and maxlv and string.format('; about %d levels of soil, hard stone wanted within %d', lv, maxlv) or '') .. reach_txt ..
+        ' - hard reject: no hard stone within reach, this site cannot be accepted (BUG-465)')
   elseif soil ~= nil and lv ~= nil and (rules.stone_pass_levels or C.DEFAULT.stone_pass_levels) < lv then
+    pen = math.min(20, (rules.stone_score_per_level or C.DEFAULT.stone_score_per_level) * (lv - (rules.stone_pass_levels or C.DEFAULT.stone_pass_levels)))
     put('stone', 'warn', string.format('about %d levels of soil above the first hard stone (an estimate from the %s soil category, more than %d ' ..
-        'for a pass): boulders and mechanisms wait for the first dig - plan an explore shaft of at least %d levels in the first season%s',
-        lv, soil, rules.stone_pass_levels or C.DEFAULT.stone_pass_levels, lv + 2, layers and (' (' .. layers .. ')') or ''))
+        'for a pass): boulders and mechanisms wait for the first dig - plan an explore shaft of at least %d levels in the first season%s%s',
+        lv, soil, rules.stone_pass_levels or C.DEFAULT.stone_pass_levels, lv + 2, layers and (' (' .. layers .. ')') or '', reach_txt))
   elseif soil ~= nil then
     put('stone', 'pass', 'stone near the surface (' .. (soil == 'none' and 'no' or soil) .. ' soil' ..
-        (layers and (', ' .. layers) or '') .. ')')
+        (layers and (', ' .. layers) or '') .. ')' .. reach_txt)
   elseif layers then put('stone', 'pass', 'stone layers ' .. layers)
   else put('stone', 'unknown', 'soil depth not shown') end
+  out.stone_pen = pen
   if wt and wt.worst_stone then   -- BUG-411: a hover row judges stone on the deepest soil of its tiles
     for _, it in ipairs(items) do
       if it.id == 'stone' then it.why = it.why .. ' [deepest soil of the hovered tiles]' end
@@ -239,7 +260,7 @@ function C.evaluate(rec, rules, ctx)
   end
 
   out.items = items
-  out.score = math.max(0, 100 - 12 * #out.warns - 4 * #out.unknown - 30 * #out.fails)
+  out.score = math.max(0, 100 - 12 * #out.warns - 4 * #out.unknown - 30 * #out.fails - (out.stone_pen or 0))
   out.verdict = (#out.fails > 0 and 'reject') or (#out.unknown > 0 and 'review') or 'ok'
   return out
 end

@@ -155,6 +155,7 @@ L.KINDS = {
   crossbow = {t = {'WEAPON'}, word = 'crossbow'}, pick = {t = {'WEAPON'}, word = 'pick'},
   axe = {t = {'WEAPON'}, word = 'axe'},
   mechanism = {t = {'TRAPPARTS'}}, mechanisms = {t = {'TRAPPARTS'}},    -- BUG-268: lever links (2 a lever)
+  coffin = {t = {'COFFIN'}}, coffins = {t = {'COFFIN'}},                -- BUG-466: bodies without a coffin in a fort with no stone
   -- BUG-456 (Run 16a/16d moods that needed bone, `trade.want bone` was ignored without a word): a bone is a corpse piece whose description
   -- says so
   bone = {t = {'CORPSEPIECE'}, word = 'bone'}, bones = {t = {'CORPSEPIECE'}, word = 'bone'},
@@ -166,7 +167,7 @@ L.CAPS = {default = 10, anvil = 1, bar = 20, cloth = 20, thread = 20, leather = 
           block = 30, blocks = 30, seeds = 20, meat = 30, fish = 30, cheese = 30, egg = 20, meal = 30, food = 30,
           drink = 40, booze = 40, ammo = 100, bolt = 100, bolts = 100, gem = 10, gems = 10, weapon = 3, armor = 3,
           helm = 3, shield = 3, gloves = 6, shoes = 6, pants = 3, crossbow = 3, pick = 2, axe = 2,
-          mechanism = 8, mechanisms = 8, bone = 6, bones = 6}
+          mechanism = 8, mechanisms = 8, bone = 6, bones = 6, coffin = 10, coffins = 10}
 
 -- fibre kinds of cloth and thread (Run 10 y418: `cloth` bought 3 wool cloths while the merchants carried 40 rope reed
 -- cloths and a strange mood needed plant cloth): cloth:plant / thread:plant = material flag THREAD_PLANT, :silk = SILK,

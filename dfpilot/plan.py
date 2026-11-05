@@ -2665,6 +2665,10 @@ def supply_goals(doc: dict, s: dict | None, fort: dict | None = None) -> tuple[l
     errs: list[str] = []
     warn: list[str] = []
     want = list((doc.get("trade") or {}).get("want") or [])
+    for si, se in enumerate(doc["seasons"]):          # BUG-468: explore shafts of one season compete for the same miners
+        n = sum(b["tpl"] == EXPLORE for b in se["build"])
+        if n > 1:
+            warn.append(f"explore: {n} explore builds in season {si}: the shafts compete for the miners and the runner slots; keep one")
     why = ore_goal(s)
     if why:
         explore = any(b["tpl"] == EXPLORE for se in doc["seasons"] for b in se["build"])
@@ -2701,16 +2705,19 @@ def draft_supply(doc: dict, s: dict | None, kept: list[int], season: int, tpls, 
     want = list(trade.get("want") or [])
     why = ore_goal(s)
     if why and (tpls is None or EXPLORE in tpls):
-        for si in range(min(max(season, 0), 3), 4):
-            builds = doc["seasons"][si]["build"]
-            if not any(b["tpl"] == EXPLORE for b in builds):
-                at = min(kept[si], len(builds))
-                # BUG-241: never ahead of a new seal or of the water/food builds an emergency put first (BUG-243)
-                while at < len(builds) and (builds[at]["tpl"] == SEAL or any(builds[at] is x for x in lead)):
-                    at += 1
-                builds.insert(at, {"tpl": EXPLORE, "site": "S1"})
-        doc["notes"] += (f"; {why}: {EXPLORE}@S1 each season until ore is found (bp.cancel the later ones once ore "
-                         "shows; p.depth for a shallower shaft)")
+        # BUG-468 (Run 16a i1 Basementflew y373: explore depth 24 in s0, s1 and s2, three shafts at once competing for the miners, one
+        # 'set aside, no runner slot' for 35 days): ONE explore at a time, in the current season; the next one is drafted by the next
+        # propose once this one is done or stopped (fit_explore holds it back while one runs)
+        si = min(max(season, 0), 3)
+        builds = doc["seasons"][si]["build"]
+        if not any(b["tpl"] == EXPLORE for se in doc["seasons"] for b in se["build"]):
+            at = min(kept[si], len(builds))
+            # BUG-241: never ahead of a new seal or of the water/food builds an emergency put first (BUG-243)
+            while at < len(builds) and (builds[at]["tpl"] == SEAL or any(builds[at] is x for x in lead)):
+                at += 1
+            builds.insert(at, {"tpl": EXPLORE, "site": "S1"})
+        doc["notes"] += (f"; {why}: {EXPLORE}@S1 in the current season, one explore at a time (BUG-468: propose again once it is "
+                         "done or stopped; bp.cancel it once ore shows; p.depth for a shallower shaft)")
     if why and not _bar_want(want):
         want.insert(0, "bar:iron")
     if leather_goal(s):
@@ -2897,6 +2904,30 @@ def explore_room(save_dir: Path, sites: list, params: dict, tpl: str = EXPLORE) 
     return n
 
 
+def heavy_explore_levels(save_dir: Path) -> list[int]:
+    """BUG-468: the levels a dig of ours met a heavy aquifer on (sites.heavy_breach_levels), deepest first; [] when none or no bp package."""
+    try:
+        return sorted(load_bp("sites").heavy_breach_levels(fort_manifest(save_dir)), reverse=True)
+    except (BpError, BpUnavailable, AttributeError):
+        return []
+
+
+def explore_running(save_dir: Path) -> list[str]:
+    """BUG-468: the explore projects under way: a bp file with no PROJECT_DONE that did not stop at a breach (manifest `breaches` names
+    its project: heavy_aquifer, water, cavern; a stopped dig digs no more and holds no miner). Sorted ids."""
+    try:
+        done = done_projects(save_dir)
+        stopped = {b.get("proj") for b in _kern_manifest(save_dir).get("breaches") or [] if isinstance(b, dict)}
+    except Exception:                                   # noqa: BLE001 - no event log / manifest: nothing counts as running
+        return []
+    out = []
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if isinstance(d, dict) and d.get("tpl") == EXPLORE and p.stem not in done and p.stem not in stopped:
+            out.append(p.stem)
+    return sorted(out)
+
+
 def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     """propose (CLI): the deepest of EXPLORE_DEPTHS at which `explore` has a site on the sites snapshot (no shaft into
     an avoided level: p.avoid, a revealed cavern/damp/warm mark); the newly drafted explore builds get that p.depth, or
@@ -2909,6 +2940,15 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
            if b["tpl"] == EXPLORE and (si, bi) not in keep and "depth" not in (b.get("p") or {})]
     if not new:
         return None
+    run = explore_running(save_dir)
+    if run:                                              # BUG-468: one explore at a time; the miners have this one
+        for _, b in new:
+            for se in doc["seasons"]:
+                if any(x is b for x in se["build"]):
+                    se["build"] = [x for x in se["build"] if x is not b]
+        doc["notes"] += (f"; BUG-468: {EXPLORE} {', '.join(run[:3])} is under way: no second explore now (propose again once it is done; "
+                         f"dfllm cmd bp.cancel proj=<id> if it is dead)")
+        return f"{EXPLORE}: {', '.join(run[:3])} under way: no second explore drafted"
     avoid = next(((b.get("p") or {}).get("avoid") for _, b in new if (b.get("p") or {}).get("avoid")), "")   # BUG-430: the quarry
     soil = soil_fort(files.read_state(save_dir))                                   # BUG-438: down to the first hard stone
     for d in (SOIL_DEPTHS if soil else ()) + tuple(EXPLORE_DEPTHS):
@@ -2926,6 +2966,11 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
                 for _, b in new:
                     b["p"] = {**(b.get("p") or {}), "depth": d, **extra}
             line = f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
+            heavy = heavy_explore_levels(save_dir)
+            if heavy:                                    # BUG-468: the shaft stops above a level a dig of ours met a heavy aquifer on
+                hz = ",".join(f"z{z}" for z in heavy)
+                doc["notes"] += f"; BUG-468: the explore stops above the known heavy aquifer level(s) {hz} (depth {d})"
+                line += f"; stops above the heavy aquifer {hz}"
             room = explore_room(save_dir, sites, {**({"depth": d} if d != EXPLORE_DEPTHS[0] else {}), **extra,
                                                   **({"avoid": avoid} if avoid else {})})
             if room is None or room >= len(new):
