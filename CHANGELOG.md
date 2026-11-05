@@ -1,5 +1,10 @@
 # CHANGELOG dfpilot
 
+## Round 28 (propose): neighbouring doors no longer crash plan propose, a failing template drops itself, military.pct passes D-12 (BUG-457, 2026-11-05; offline, live-untested)
+- **Why:** Run 16b i2 Roadvises y376-y385: `plan propose` died every year with `traps.at: tile 60,100,121 named twice`; the player copied last year's plan ten times, and the copy failed `plan check` with `military.pct 15 < 20 (D-12 at pop 62)`.
+- **BUG-457:** two doors side by side share outside lane tiles; `bp.traps.dedupe` (used by `format_at` and `traps.expand`) keeps a tile with the first way that names it and notes it; `plan.fit_placeable` drops any build whose placement raises (`BUG-457: ERROR <tpl>@<site> left out: ...`)
+  instead of dying; `plan.propose` drafts military.pct 20 from 50 citizens (`MIL_MARGIN_POP`), so a draft made at 55 passes the check at 62.
+- **Contract:** none (no schema.py change). **Tests:** tests/test_bug457_traps_dupe_propose.py (10). **Live check:** see the bug file.
 ## Fort core under the aquifer, orphan bp files, ring without boulders, stall announcement (BUG-441 to BUG-445, 2026-11-05; offline, live-untested)
 - **Why:** Run 16b i2 Roadvises / 16c i3 Castletongs: follow queued the fortcore 1 minute after adopt, before the aquifer was known (i2: z120/z119 light, z115 and z112 heavy), so the core sat above / in it and `bp sites aqshaft` found
   every column beside it; a dead bp file the kernel did not know blocked every new stage 1; an aqshaft ring on a heavy level hung 60 % for a year in soil (no boulders, no event); aqshaft S1 held a slot 556 days without a word.

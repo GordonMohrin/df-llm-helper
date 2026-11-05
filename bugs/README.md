@@ -468,6 +468,7 @@ Related: FR-xx, BUG-xx
 | [BUG-454](BUG-454-propose-contradicts-the-applied-minimal-plan.md) | fixed (offline, live-untested) | medium | a draft written before follow's MINIMAL plan checked with 'applied as ...; keep it' ERRORs; plan check / apply rebuild the draft on the applied plan of the year | dfpilot/plan.py:rebase_on_applied |
 | [BUG-455](BUG-455-perimeter-open-vs-nothing-to-close.md) | fixed (offline, live-untested) | low | status 'PERIMETER OPEN, 3 ways in' while `bp.place tpl=seal` says 'nothing to close': the refusal names the entrance check's count and how it is brought up to date | dfpilot/cmd.py:seal_openings |
 | [BUG-456](BUG-456-ops-small-ones.md) | fixed (offline, live-untested) | low | brief 'starving 53' (postings) vs status 'HUNGRY 1' (citizens), trade.want bone, orders.import kept by propose, phase.waive why up to 200 bytes, a planned slot of the same template named in the no-site hint | dfpilot/brief.py, lua/dfllm/trade.lua, dfpilot/plan.py, dfpilot/cmd.py |
+| [BUG-457](BUG-457-propose-traps-named-twice.md) | fixed (offline, live-untested) | high | plan propose crashed every year with 'traps.at: tile named twice' (neighbouring doors share lane tiles); one failing template now drops only itself with an ERROR line; propose drafts military.pct 20 from pop 50 | dfpilot/bp/traps.py, dfpilot/traps.py, dfpilot/plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

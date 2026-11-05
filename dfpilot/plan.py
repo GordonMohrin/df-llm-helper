@@ -2753,6 +2753,9 @@ def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
             if b["tpl"] not in FIT_KEEP_TPLS:
                 gone.append((b, _cut(str(e).removeprefix("site " + str(b["site"]) + ": "), 110)))
             continue
+        except Exception as e:                          # noqa: BLE001 - BUG-457: one template's bug drops that template, not the propose
+            gone.append((b, "ERROR " + _cut(f"{type(e).__name__}: {e}", 110)))
+            continue
         occ.add(d)
         placed[b["tpl"]] = {"anchor": d["anchor"], "rot": d["rot"]}
     lines = []
@@ -2763,7 +2766,8 @@ def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
                 del se["build"][k]
                 break
         fp = _cmd.fmt_params(b.get("p"))
-        lines.append(f"BUG-370: {b['tpl']}@{b['site']}{fp} left out: {why}")
+        lines.append(f"{'BUG-457: ERROR' if why.startswith('ERROR ') else 'BUG-370:'} {b['tpl']}@{b['site']}{fp} left out: "
+                     f"{why.removeprefix('ERROR ')}")
     if lines:
         doc["notes"] += "; " + ("; ".join(lines) if len(lines) <= FIT_NOTE_LINES else
                                 f"BUG-370: {len(lines)} builds left out ({', '.join(dict.fromkeys(b['tpl'] for b, _ in gone))}): "
@@ -2771,6 +2775,7 @@ def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     return lines
 
 
+MIL_MARGIN_POP = 50       # BUG-457: propose drafts military.pct 20 from this many citizens (check demands it at 60, D-12)
 NOTES_MAX = 1900          # BUG-440: schema plan.notes is Str(maxbytes=2000); propose stays well under it
 FIT_NOTE_LINES = 3        # BUG-440: more fit_placeable lines than this go into the notes as one summary line
 
@@ -3954,7 +3959,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         "policy": {"option": "B" if d01 == "B" else "A", "pop_ceiling": cap,
                    "beauty": "used_rooms" if lvl >= 1 else "none"},
         "phase_target": target, "seasons": seasons,
-        "military": {"pct": max(pm["pct"], 20 if pop >= 60 else 15),
+        # BUG-457: the share D-12 asks at pop 60 is drafted from MIL_MARGIN_POP on (a draft made at 55 citizens met plan check at 62:
+        # 'military.pct 15 < 20 (D-12 at pop 62)')
+        "military": {"pct": max(pm["pct"], 20 if pop >= MIL_MARGIN_POP else 15),
                      "squads": {"melee": max(melee, pm["squads"]["melee"] if prev else 0),
                                 "xbow": max(1 if target >= "P5" else 0, pm["squads"]["xbow"] if prev else 0)},
                      "cv_min": pm["cv_min"], "training": pm.get("training", True) is not False},   # FR-100

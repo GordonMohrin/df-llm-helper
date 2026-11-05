@@ -106,9 +106,30 @@ def parse_at(text) -> list[dict]:
     return out
 
 
+def dedupe(parts: list[dict]) -> tuple[list[dict], int]:
+    """BUG-457 (Run 16b i2 Roadvises y376-y385: plan propose died every year with 'traps.at: tile 60,100,121 named twice'): two doors
+    side by side share their outside neighbours (ways_in lists a tile in both lanes), a hall tile can lie in a lane too. A tile
+    belongs to the first part that names it; a part left without a tile is dropped. (parts, number of tiles taken out)."""
+    seen, out, cut = set(), [], 0
+    for p in parts:
+        tiles = []
+        for t in p["tiles"]:
+            k = tuple(t)
+            if k in seen:
+                cut += 1
+                continue
+            seen.add(k)
+            tiles.append(t)
+        if tiles:
+            out.append({**p, "tiles": tiles})
+    return out, cut
+
+
 def format_at(parts: list[dict]) -> str:
     """The inverse of parse_at; a way whose lane would pass AT_MAX characters, WAY_MAX ways or TRAP_MAX tiles is left
-    out whole (a half lane is walked around; the next traps project takes it), a hall part is cut to what fits."""
+    out whole (a half lane is walked around; the next traps project takes it), a hall part is cut to what fits. A tile two
+    parts name stays with the first (BUG-457: parse_at refuses a tile named twice)."""
+    parts = dedupe(parts)[0]
     out, n, nw = [], 0, 0
     for p in parts:
         if p.get("way") is None:

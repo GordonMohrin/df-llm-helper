@@ -111,10 +111,13 @@ def _expand_bridges(save_dir: Path, params: dict, snap: dict) -> tuple[str, list
     if not want:
         raise c.SealClosed(f"traps at=bridges: no bridge way left to trap on snapshot {snap.get('id', '?')} ({len(ws)} "
                            f"outer/inner bridge(s), {sum(w['trapped'] for w in ws)} trapped)")
-    out = tm.format_at([{"way": w["way"], "tiles": w["tiles"], "bridge": True} for w in want])
+    want, cut = tm.dedupe([{"way": w["way"], "tiles": w["tiles"], "bridge": True} for w in want])   # BUG-457
+    if cut:
+        notes.append(f"BUG-457: {cut} lane tile(s) named by two bridge ways kept with the first")
+    out = tm.format_at(want)
     if not out:
         raise c.BpError("traps at=bridges: the first lane does not fit one project (name its tiles: at=bx,y,z:dx,dy ...)")
-    n = sum(1 for p in tm.parse_at(out) if p["way"])
+    n = sum(1 for p in c._call_bp("bp.traps.parse_at", tm.parse_at, out) if p["way"])
     if n < len(want):
         notes.append(f"{len(want) - n} more bridge lane(s) wait for the next traps at=bridges")
     return out, notes
@@ -143,7 +146,7 @@ def expand(save_dir: Path, params: dict, snap: dict | None = None) -> tuple[str,
             raise c.SealClosed(f"traps at=hall: every stone-fall trap of the hall stands on snapshot {sid} (or a traps "
                             "project rebuilds it)")
         out = tm.format_at([{"way": None, "tiles": miss}])
-        n = len(tm.parse_at(out)[0]["tiles"])
+        n = len(c._call_bp("bp.traps.parse_at", tm.parse_at, out)[0]["tiles"])
         return out, ([f"{len(miss) - n} more hall tiles wait for the next traps at=hall"] if n < len(miss) else [])
     depth = params.get("depth", 1) if isinstance(params.get("depth"), int) else 1
     ws = c._call_bp("bp.traps.ways_in", tm.ways_in, snap, c.fort_manifest(save_dir), depth, covered(save_dir))
@@ -156,10 +159,13 @@ def expand(save_dir: Path, params: dict, snap: dict | None = None) -> tuple[str,
         raise c.SealClosed(f"traps at=ways: no way in left to trap on snapshot {sid} ({len(ws)} door(s) between the outside "
                            f"and the fort, {sum(w['trapped'] for w in ws)} trapped; an open way in gets `seal` first)"
                            + (f"; {len(bw)} bridge way(s) want a lane: traps at=bridges" if bw else ""))
-    out = tm.format_at([{"way": w["way"], "tiles": w["tiles"]} for w in want])
+    want, cut = tm.dedupe([{"way": w["way"], "tiles": w["tiles"]} for w in want])   # BUG-457: doors side by side share tiles
+    if cut:
+        notes.append(f"BUG-457: {cut} lane tile(s) shared by two ways kept with the first")
+    out = tm.format_at(want)
     if not out:
         raise c.BpError("traps at=ways: the first lane does not fit one project (name its tiles: at=x,y,z:dx,dy ...)")
-    n = sum(1 for p in tm.parse_at(out) if p["way"])
+    n = sum(1 for p in c._call_bp("bp.traps.parse_at", tm.parse_at, out) if p["way"])
     if n < len(want):
         notes.append(f"{len(want) - n} more way(s) wait for the next traps project")
     return out, notes
