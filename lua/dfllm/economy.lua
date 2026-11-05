@@ -445,7 +445,10 @@ M.DEFAULTS = {
                       {tag = 'dfllm:stand_shear', spec = {job = 'ShearCreature'}}}},
   -- BUG-042: below low_d drink days (and above alarm.days, where the thirst decision speaks) a class-A DECISION_NEEDED
   -- drink_low names why the stills do not brew (M.drink_why) and what the kernel did; again with news after 7 days
-  drink = {low_d = 60},
+  -- BUG-424 (Run 16a i1 Manorsubtle: 211 drink days at the start, the brook in a rock gully 8 tiles away, nobody asked for a way to it): from
+  -- access_d drink days down, with no reachable water and no brewable plant, no_water also asks PROJECT_REQUEST cistern why=no_water with
+  -- the nearest water tile (follow places the piped cistern with its sealed intake when the planner finds a safe one); 0 = never
+  drink = {low_d = 60, access_d = 400},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -4971,9 +4974,22 @@ function M.no_water(K, c, r)
   local head = string.format('%d bodies of water, %d with a bank the citizens reach%s, no brewable plant, drink %d d', acc.bodies,
                              acc.bank, acc.partial > 0 and ' (scan partial)' or '', dd)
   local q = string.format('no water the citizens reach: %s; what to do: d.water, d.cmds', head)
+  -- BUG-423/424: the water NEAREST to the fort (acc.near, not a fixed representative tile) with the cistern commands that name it
+  if type(acc.near) == 'table' then
+    local at = string.format('%d,%d,%d', acc.near[1], acc.near[2], acc.near[3])
+    cmds[#cmds + 1] = 'python -m dfpilot.bp.sites cistern --near ' .. at .. ' --radius 20'
+  end
+  local auto = {'gatherers for wild plants', 'caravans asked for plants and drink'}
+  if (acc.emerg or 0) > 0 then auto[#auto + 1] = 'EMERGENCY well accepted as a slow drink source (water.well_emerg)' end
   K.emit('DECISION_NEEDED', 'A', string.format('no reachable water, no brewable plant: drink %d days is all the fort has', dd),
-         {id = 'no_water', q = q:sub(1, 200), drink = dd, auto = {'gatherers for wild plants', 'caravans asked for plants and drink'},
-          cmds = cmds, water = M.lines(fix, 200, 2)})
+         {id = 'no_water', q = q:sub(1, 200), drink = dd, auto = auto, cmds = cmds, water = M.lines(fix, 200, 2),
+          near = acc.near and json.array{acc.near[1], acc.near[2], acc.near[3]} or nil, nd = acc.nd})
+  local ad = math.tointeger(((c.drink or {}).access_d)) or 0
+  if ad > 0 and dd < ad and type(acc.near) == 'table' then
+    K.emit('PROJECT_REQUEST', 'B', string.format('cistern: no water the citizens reach, the nearest %d tiles off at %d,%d,%d, drink %d days',
+                                                 acc.nd or -1, acc.near[1], acc.near[2], acc.near[3], dd),
+           {tpl = 'cistern', why = 'no_water', n = acc.nd, at = json.array{acc.near[1], acc.near[2], acc.near[3]}})
+  end
 end
 
 -- BUG-042: the drink pre-alarm: below drink.low_d (and from alarm.days on, where DECISION_NEEDED thirst speaks), a

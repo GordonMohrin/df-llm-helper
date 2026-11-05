@@ -3051,6 +3051,10 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
                 if tpl not in reqs:                          # newest first
                     reqs[tpl] = {"tpl": tpl, "n": d.get("n") if _nat(d.get("n")) else None, "why": str(d.get("why") or ""),
                                  "tick": tick}
+            elif tpl == CISTERN["tpl"] and d.get("why") == "no_water" and isinstance(d.get("at"), list) and len(d["at"]) == 3 \
+                    and all(_nat(v) for v in d["at"]):
+                reqs.setdefault(tpl, {"tpl": tpl, "why": "no_water", "at": d["at"], "n": d.get("n") if _nat(d.get("n")) else None,
+                                      "tick": tick})                     # BUG-424: the water nearest to the fort, newest first
             elif tpl == "workshops" and isinstance(d.get("types"), list):
                 r = reqs.setdefault("workshops", {"tpl": "workshops", "types": [], "why": str(d.get("why") or ""),
                                                   "tick": tick})
@@ -3061,6 +3065,12 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
     under = {tpl for pid, tpl in ids.items() if pid not in done and "parked" not in rows.get(pid, "")}
     out = []
     for tpl, r in reqs.items():
+        if tpl == CISTERN["tpl"]:                                   # BUG-424: only a cistern WITH a pipe answers this request
+            if _piped_cistern(save_dir, done=True):
+                continue
+            r["access"] = water_access(save_dir, r["at"])
+            out.append({k: v for k, v in r.items() if k != "tick"})
+            continue
         if r["tick"] <= done_t.get(tpl, -1) or tpl in under:
             continue
         if tpl == "workshops":
@@ -3072,6 +3082,35 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
                 continue
         out.append({k: v for k, v in r.items() if k != "tick"})
     return out
+
+
+def _piped_cistern(save_dir: Path, done: bool = False) -> bool:
+    """BUG-424: a cistern project with a pipe (p.path) is placed and not done yet (done=True: or done)."""
+    fin = done_projects(save_dir)
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == CISTERN["tpl"] and (doc.get("params") or {}).get("path") \
+                and (done or p.stem not in fin):
+            return True
+    return False
+
+
+def water_access(save_dir: Path, at: list) -> dict:
+    """BUG-424 (Run 16a i1 Manorsubtle: a brook 8 tiles from the start room behind rock, 13 of 15 dead of thirst): the safe cistern
+    route to the water tile nearest to the fort on the sites snapshot (sites.cistern_access): {site, params, unsafe, rock, why}.
+    Unknown without a snapshot, the manifest or the bp package: {why}."""
+    try:
+        snap = sites_snapshot(save_dir)
+        if snap is None:
+            return {"why": "no sites snapshot (dfllm cmd snapshot purpose=sites over the fort and the water)"}
+        acc = load_bp("sites").cistern_access(snap, fort_manifest(save_dir), near=at, radius=20)
+    except Exception as e:                                  # noqa: BLE001 - an older bp package, a bad manifest
+        return {"why": f"{type(e).__name__}: {e}"}
+    pl = acc.get("plan")
+    if not pl:
+        return {"why": acc.get("why") or "no route"}
+    return {"site": acc["site"], "params": pl["params"], "unsafe": bool(acc.get("unsafe")), "rock": pl.get("rock", 0),
+            "why": pl.get("why", "")}
 
 
 def request_drafts(s: dict | None, fort: dict | None, done: set, builds: list[dict],
@@ -3090,6 +3129,18 @@ def request_drafts(s: dict | None, fort: dict | None, done: set, builds: list[di
 
     for r in fort.get("requests") or []:
         tpl = r.get("tpl")
+        if tpl == CISTERN["tpl"]:                           # BUG-424: the piped cistern from the water nearest to the fort
+            acc = r.get("access") if isinstance(r.get("access"), dict) else {}
+            at = ",".join(str(v) for v in r.get("at") or [])
+            if acc.get("params") and not acc.get("unsafe") and (info is None or tpl in info):
+                b = {"tpl": tpl, "site": acc["site"], "p": acc["params"]}
+                if not have(b):
+                    out.append(b)
+                    why.append(f"cistern piped from the water at {at}" + (" (sealed rock intake)" if acc.get("rock") else ""))
+            else:
+                why.append(f"cistern access to the water at {at}: " + (
+                    "the only route needs water above the well room, Gordon decides (python -m dfpilot.bp.sites cistern --near "
+                    f"{at} --unsafe)" if acc.get("params") else _cut(str(acc.get("why") or "no route"))))
         if tpl in REQUEST_BEDS and (info is None or tpl in info):
             n = max(1, min(r["n"] if _nat(r.get("n")) else 4, REQUEST_MAX[tpl]))
             b = {"tpl": tpl, "site": "S1", "p": {"n": n}}
