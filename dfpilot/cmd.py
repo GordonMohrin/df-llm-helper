@@ -382,8 +382,8 @@ def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):
 
     def free(c: dict) -> bool:
         try:
-            doc = emit_at(tpl, params or {}, {"id": "S0", "anchor": list(c["anchor"]), "rot": c.get("rot", 0)}, "S0",
-                          "rank")
+            doc = emit_at(tpl, site_params(tpl, params, c) or {}, {"id": "S0", "anchor": list(c["anchor"]),
+                                                                    "rot": c.get("rot", 0)}, "S0", "rank")
         except BpError:
             return False
         if tpl == "aqshaft":
@@ -1836,6 +1836,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
         raise BpError(f"site {label!r}: use S1..S{RANK_N} (S1 = best free site of `dfllm bp sites {tpl}`) or '{SAME}'")
     col = own_anchor(tpl, params)
     if col:     # BUG-193 (live i4): aqshaft p.x/p.y/p.top name the column; bp.sites.rank has no ranking for it
+        params = column_checked(save_dir, tpl, params, col, snap)       # BUG-433: the ranking's safety rules
         doc = emit_at(tpl, params, {"id": label, "anchor": col, "rot": 0}, label, bp_id)
         hit = occ.clash(doc)
         if hit:
@@ -1860,7 +1861,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
                 continue
             tried.add(key)
             try:
-                doc = emit_at(tpl, params, s, label, bp_id)
+                doc = emit_at(tpl, site_params(tpl, params, s), s, label, bp_id)
             except BpError as e:
                 bad.append(f"{s.get('anchor')}: {e}")
                 continue
@@ -1890,6 +1891,41 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
                   + (f"; {hint}" if hint else ""))
 
 
+def column_checked(save_dir: Path, tpl: str, params: dict | None, col: list[int], snap: dict | None) -> dict:
+    """BUG-433 (Run 16c i3 Yawninggilt: a hand-named aqshaft column went unchecked, `bp sites aqshaft` refused every column with a
+    bare count): an explicit aqshaft column p.x/p.y/p.top is checked with the ranking's rules (bp.sites.check_column: no cavern/warm
+    level in the shaft or right below it, rock on its 4 sides, off the keep-out boxes, no open water within 3 tiles); BpError
+    with the level / coordinate of the reason. Without p.depth the shaft goes down to the core's refuge level under the known
+    aquifer (BUG-432), else 20; the returned params carry that depth. No snapshot: the column is not checked."""
+    params = dict(params or {})
+    if tpl != "aqshaft":
+        return params
+    snap = snap or sites_snapshot(save_dir)
+    if snap is None:
+        return params
+    try:
+        sm, man = load_bp("sites"), fort_manifest(save_dir)
+    except BpUnavailable:
+        return params
+    if "depth" not in params:
+        auto = _call_bp("bp.sites(shaft_depth_auto)", sm.shaft_depth_auto, snap, man, col[2])
+        if auto:
+            params["depth"] = auto
+    depth = int(params.get("depth", 20))
+    try:
+        sm.check_column(snap, man, col[0], col[1], col[2], depth)
+    except ValueError as e:
+        raise BpError(str(e)) from e
+    return params
+
+
+def site_params(tpl: str, params: dict | None, site: dict) -> dict | None:
+    """BUG-432: a ranked aqshaft site names its own depth (down to the core's refuge level); p.depth given stays."""
+    if tpl == "aqshaft" and site.get("depth") and "depth" not in (params or {}):
+        return {**(params or {}), "depth": site["depth"]}
+    return params
+
+
 def own_anchor(tpl: str, params: dict | None) -> list[int] | None:
     """BUG-193: the anchor a template takes from its own params (bp.emit `anchor_of_params`, FR-95 aqshaft p.x/p.y/p.top),
     None when it has none or the params leave it to the site; BpError on bad params (e.g. only some of x, y, top)."""
@@ -1915,7 +1951,7 @@ def _free_scan(tpl: str, params: dict | None, sites: list, occ: "Occupancy", n: 
             continue
         tried.add(key)
         try:
-            doc = emit_at(tpl, params or {}, s, "S0", "probe")
+            doc = emit_at(tpl, site_params(tpl, params, s) or {}, s, "S0", "probe")
         except BpError:
             continue
         hit = occ.clash(doc)

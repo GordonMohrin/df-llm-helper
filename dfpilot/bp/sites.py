@@ -62,7 +62,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 7                            # BUG-346/359/400/407: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 8                            # BUG-346/359/400/407: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -229,6 +229,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     explore and fortcore sites; the defense builds have the one site the manifest fixes. `free` (BUG-292): a callable
     candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
     p = check_params(tpl, params)
+    if tpl in aquifer.BUILD:
+        p["depth_auto"] = "depth" not in (params or {})     # BUG-432: no p.depth = down to the core's refuge level, not 20
     if tpl in defense.BUILD:
         return _defense(snap, tpl, p, manifest)[:n]          # one site the manifest fixes: near/at do not apply
     if tpl in traps.BUILD:                                   # FR-96: absolute trap tiles, the site is the first one
@@ -298,6 +300,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"],
              "why": c["why"] + (f"; walk group {c['walk']}" if "walk" in c else ""),
              **({"water": c["water"]} if "water" in c else {}),
+             **({"depth": c["depth"]} if "depth" in c else {}),          # BUG-432: an aqshaft site names its own depth
              **({"walk": c["walk"]} if "walk" in c else {})} for i, c in enumerate(out)]
 
 
@@ -1272,6 +1275,67 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
 
 AQ_ORTH = ((1, 0), (-1, 0), (0, 1), (0, -1))
 AQ_SPAN = 40                          # aqshaft: score for a column that passes a known aquifer level
+AQ_REACH = 5                          # BUG-432: levels below the shallowest aquifer level the shaft must reach: the core level two
+                                      # under it and the refuge room three under that (fortcore PARAMS refuge)
+WATER_KEEP = 3                        # BUG-412: no open water within this many tiles of the shaft (any level it passes)
+
+
+def shaft_avoid(snap: dict, manifest: dict | None) -> set[int]:
+    """Levels with a revealed cavern or warm mark or a recorded cavern breach: a shaft never passes or opens into one."""
+    avoid: set[int] = set()
+    for k in ("cavern", "warm"):
+        avoid |= {int(q[2]) for q in snap.get("marks", {}).get(k, []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    avoid |= {int(q[2]) for q in (manifest or {}).get("caverns", []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    return avoid
+
+
+def shaft_depth_auto(snap: dict, manifest: dict | None, top: int) -> int | None:
+    """BUG-432 (Run 16c i3 Yawninggilt: `bp sites aqshaft` refused all 1271 columns for a cavern/warm level, every column ran the
+    default 20 levels down from z127, far below the core's refuge level): the depth that takes a shaft from `top` to the core's
+    refuge level, AQ_REACH levels under the shallowest known aquifer level; None when no aquifer level is known (the default stays)."""
+    aq = known_aquifer(snap, manifest)
+    if not aq:
+        return None
+    return max(2, min(60, top - (min(aq) - AQ_REACH) + 1))
+
+
+def shaft_why(at, x: int, y: int, top: int, z_lo: int, avoid, keep_out, wet: bool = True) -> tuple[str, str] | None:
+    """BUG-432/433: the one safety check of a shaft column (the ranking and `bp.place aqshaft` with p.x/p.y/p.top): (kind, reason
+    naming the level / coordinate) for the first rule it breaks, None when it is safe. The shaft's own levels z_lo..top and the one
+    level right below its bottom hold no cavern/warm level (never open into one); deeper ones do not matter. The column and its 4
+    side tiles on every level below the top are rock or unknown; no keep-out box; no open water within WATER_KEEP tiles on any
+    level it passes (`wet` False skips this slow scan)."""
+    hit = sorted(z for z in avoid if z_lo - 1 <= z <= top)
+    if hit:
+        return "avoid", f"{x},{y}: cavern/warm level z{hit[-1]} lies within the shaft's z{top}-z{z_lo} or the level below it"
+    for z in range(top - 1, z_lo - 1, -1):
+        for dx, dy in ((0, 0),) + AQ_ORTH:
+            c = at(x + dx, y + dy, z)
+            if c is not None and c not in GOOD:
+                return "rock", f"{x + dx},{y + dy} z{z} is '{c}', not rock"
+    col = (x, y, z_lo, x, y, top)
+    for b in keep_out:
+        if _overlap(col, b):
+            return "keep", f"{x},{y} z{z_lo}-z{top} overlaps an attack zone or the military stair {tuple(b)}"
+    if wet:
+        w = next(((x + dx, y + dy, z) for z in range(z_lo, top + 1)
+                  for dx in range(-WATER_KEEP, WATER_KEEP + 1) for dy in range(-WATER_KEEP, WATER_KEEP + 1)
+                  if at(x + dx, y + dy, z) in WET), None)
+        if w:
+            return "water", f"{x},{y}: open water at {w[0]},{w[1]} z{w[2]} (within {WATER_KEEP} tiles)"
+    return None
+
+
+def check_column(snap: dict, manifest: dict | None, x: int, y: int, top: int, depth: int) -> None:
+    """BUG-433: `bp.place aqshaft` with an explicit column p.x/p.y/p.top: the ranking's safety rules (shaft_why); ValueError with the
+    level / coordinate of the reason."""
+    at = _At(snap)
+    if at(x, y, top) in WET:
+        raise ValueError(f"aqshaft {x},{y} z{top}: the top tile is open water")
+    z_lo = top - depth + 1
+    got = shaft_why(at, x, y, top, z_lo, shaft_avoid(snap, manifest), _keep_out(manifest or {}))
+    if got:
+        raise ValueError(f"aqshaft {x},{y} z{top} depth {depth} (z{top}-z{z_lo}): {got[1]}")
 
 
 def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
@@ -1279,59 +1343,55 @@ def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
     columns, ranked. The top is a public Z4 floor tile (`.`, not a stair: the miners reach it, it opens no private room),
     never on or below the refuge level; on each level below (p.depth levels in all) the column and its 4 orthogonal tiles
     (the seal: lua/dfllm/aqshaft.lua smooths or walls them) are rock or unknown, levels below the snapshot count as unknown;
-    the column keeps off the attack zones, killboxes, bridges and the military stair (keep-out boxes) and off every level
-    with a revealed cavern or warm mark or a recorded cavern breach (damp is what it looks for). Score: 1000 - 5 per step to
-    a stair - 2 per unknown column tile + AQ_SPAN when it passes a known aquifer level (manifest aquifer_levels).
-    ValueError with the reason when no column is left."""
+    the column keeps off the attack zones, killboxes, bridges and the military stair (keep-out boxes), off a revealed cavern or
+    warm level or a recorded cavern breach within its own levels and the one below its bottom (BUG-432: deeper ones do not
+    matter) and off open water (BUG-433). Without p.depth the shaft goes down to the core's refuge level under the known aquifer
+    (shaft_depth_auto), else 20. Score: 1000 - 5 per step to a stair - 2 per unknown column tile + AQ_SPAN when it passes a
+    known aquifer level (manifest aquifer_levels). ValueError with the reason (first 3 examples per rule: level / coordinate)
+    when no column is left."""
     g = Graph(snap)
     steps_of = _stair_steps(g)
     keep_out = _keep_out(manifest)
     at = _At(snap)
     ref = manifest.get("refuge")
     zr = ref["anchor"][2] if ref else None
-    avoid: set[int] = set()
-    for k in ("cavern", "warm"):
-        avoid |= {int(q[2]) for q in snap.get("marks", {}).get(k, []) if isinstance(q, (list, tuple)) and len(q) == 3}
-    avoid |= {int(q[2]) for q in manifest.get("caverns", []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    avoid = shaft_avoid(snap, manifest)
     aq = aquifer_levels(manifest)
-    depth = p["depth"]
-    out, why = [], {"rock": 0, "avoid": 0, "keep": 0}
+    auto = bool(p.get("depth_auto"))
+    out = []
+    why: dict[str, list] = {"rock": [0], "avoid": [0], "keep": [0], "water": [0]}
     for i in _anchor_tiles(g, "aqshaft", p, manifest):
         ax, ay, az = g.pos(i)
         if g.t[i] != "." or (zr is not None and az <= zr):
             continue
+        reach = shaft_depth_auto(snap, manifest, az) if auto else None
+        depth = reach or p["depth"]
         z_lo = az - depth + 1
-        if any(z_lo <= z <= az for z in avoid):
-            why["avoid"] += 1
+        got = shaft_why(at, ax, ay, az, z_lo, avoid, keep_out, wet=False)
+        if got is None:
+            got = shaft_why(at, ax, ay, az, z_lo, (), (), wet=True)          # the slow water scan, only for the survivors
+        if got:
+            why[got[0]][0] += 1
+            if len(why[got[0]]) < 4:
+                why[got[0]].append(got[1])
             continue
-        unknown, ok = 0, True
-        for z in range(az - 1, z_lo - 1, -1):
-            for dx, dy in ((0, 0),) + AQ_ORTH:
-                c = at(ax + dx, ay + dy, z)
-                if c is not None and c not in GOOD:
-                    ok = False
-                    break
-                unknown += 1 if (dx, dy) == (0, 0) and c in (None, "?") else 0
-            if not ok:
-                break
-        if not ok:
-            why["rock"] += 1
-            continue
-        col = (ax, ay, z_lo, ax, ay, az)
-        if any(_overlap(col, b) for b in keep_out):
-            why["keep"] += 1
-            continue
+        unknown = sum(1 for z in range(az - 1, z_lo - 1, -1) if at(ax, ay, z) in (None, "?"))
         steps = min(steps_of.get(i, 99), 99)
         span = sorted(z for z in aq if z_lo <= z < az)
         score = 1000 - 5 * steps - 2 * unknown + (AQ_SPAN if span else 0)
-        out.append({"anchor": [ax, ay, az], "rot": 0, "score": max(0, score),
+        out.append({"anchor": [ax, ay, az], "rot": 0, "score": max(0, score), "depth": depth,
                     "box": (ax - 1, ay - 1, z_lo, ax + 1, ay + 1, az),
                     "why": f"column {ax},{ay} z{az}-z{z_lo}, {steps} steps to a stair, {unknown} unknown column tiles"
-                           + (f", passes aquifer level z{span[-1]}" if span else "")})
+                           + (f", passes aquifer level z{span[-1]}" if span else "")
+                           + (f", p.depth {depth} (down to the core's refuge level)" if reach else "")})
     if not out:
-        raise ValueError(f"aqshaft: no column of depth {depth} from public Z4 floor (rock or unknown below with rock on "
-                         f"its 4 sides: {why['rock']} refused; an avoided cavern/warm level: {why['avoid']}; attack zone "
-                         f"or military stair: {why['keep']}): give a smaller p.depth or name the column (p.x, p.y, p.top)")
+        def ex(k):
+            return f" [{'; '.join(why[k][1:])}]" if len(why[k]) > 1 else ""
+        raise ValueError(f"aqshaft: no column of depth {'auto' if auto else p['depth']} from public Z4 floor (rock or unknown below "
+                         f"with rock on its 4 sides: {why['rock'][0]} refused{ex('rock')}; an avoided cavern/warm level: "
+                         f"{why['avoid'][0]}{ex('avoid')}; attack zone or military stair: {why['keep'][0]}{ex('keep')}; open "
+                         f"water within {WATER_KEEP} tiles: {why['water'][0]}{ex('water')}): give a smaller p.depth or name the "
+                         "column (p.x, p.y, p.top, p.depth: checked by the same rules)")
     return out
 
 
@@ -1340,7 +1400,6 @@ def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
 # (local u -3 / +3, v 0..2: two tiles from the 3-wide entrance channel and tunnel, so the shaft's own seal walls (its 4 orthogonal
 # tiles) never touch a fortcore tile), straight down through the aquifer levels
 CORE_SHAFT_AT = ((-3, 1), (3, 1), (-3, 2), (3, 2), (-3, 0), (3, 0), (-4, 1), (4, 1), (-4, 2), (4, 2))
-WATER_KEEP = 3                        # BUG-412: no open water within this many tiles of the shaft (any level it passes)
 
 
 def core_shaft(snap: dict, manifest: dict, anchor, rot: int, depth: int, n_levels: int | None = None) -> dict:
@@ -1377,8 +1436,9 @@ def core_shaft(snap: dict, manifest: dict, anchor, rot: int, depth: int, n_level
         if walk_at(snap, (x, y, az)) == "0":
             why.append(f"{tag}: not in the citizens' walk group")
             continue
-        if any(z_lo <= z <= az for z in avoid):
-            why.append(f"{tag}: a cavern/warm level z{z_lo}-z{az}")
+        hit = sorted(z for z in avoid if z_lo - 1 <= z <= az)     # BUG-432: the shaft's levels and the one below its bottom only
+        if hit:
+            why.append(f"{tag}: a cavern/warm level z{hit[-1]} within the shaft's z{az}-z{z_lo} or the level below it")
             continue
         bad = None
         for z in range(az - 1, z_lo - 1, -1):
