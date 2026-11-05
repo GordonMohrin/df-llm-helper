@@ -257,13 +257,15 @@ def site(snap: dict, p: dict, at) -> list[dict]:
 
 
 # ---------------------------------------------------------------- the ways in (snapshot)
-def ways_in(snap: dict, manifest: dict | None, depth: int = 1, covered=frozenset()) -> list[dict]:
+def ways_in(snap: dict, manifest: dict | None, depth: int = 1, covered=frozenset(), seal_doors=frozenset()) -> list[dict]:
     """Every door that separates the outside from the fort, read on revealed tiles only (fair play): with doors,
     hatches and bridges closed, a door tile with an outside walkable tile (reached from the attacker sources,
     topo.sources) and an inside walkable tile (reached from the fort's own geometry) among its 8 neighbours on its level.
     [{way, tiles (the lane tiles still to trap), trapped (every lane tile is a trap or covered), partial (an outside
     neighbour takes no trap: a ramp, stair or other building)}], ordered by position. `covered`: tiles a traps project
-    under way builds."""
+    under way builds. `seal_doors` (BUG-504): the doors a finished seal project built; such a door leads into the fort's
+    own ground (a surface fort's yard, not in any manifest box), so any walkable tile the outside does not reach counts as
+    its inside, not only the tiles reached from the manifest boxes."""
     m = manifest or {}
     g = topo.Graph(snap, closed="+=H")
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
@@ -274,9 +276,9 @@ def ways_in(snap: dict, manifest: dict | None, depth: int = 1, covered=frozenset
     out_seen, _ = g.bfs(src)
     own = g.mask(topo.fort_boxes(m))
     inner_src = [i for i in g.nodes_in(own) if not out_seen[i]]
-    if not inner_src:
+    if not inner_src and not seal_doors:
         return []
-    in_seen, _ = g.bfs(inner_src, climb=False)
+    in_seen, _ = g.bfs(inner_src, climb=False) if inner_src else ([False] * g.N, None)
     edge = {tuple(p) for p in m.get("edge", [])}
     W, H = g.W, g.H
     res = []
@@ -293,6 +295,8 @@ def ways_in(snap: dict, manifest: dict | None, depth: int = 1, covered=frozenset
                 outs.append((dx, dy, j))
             elif in_seen[j] and raw[j] in PASS_IN:
                 ins = True
+            elif g.pos(i) in seal_doors and g.walk[j] and raw[j] in PASS_IN:
+                ins = True                            # BUG-504: a seal door's inside is the ground the outside cannot reach
         if not outs or not ins:
             continue
         way = g.pos(i)

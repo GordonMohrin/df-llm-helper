@@ -86,10 +86,50 @@ def hall_missing(save_dir: Path, snap: dict, done: dict | None = None) -> list[l
     return [t for t in tiles if c._snap_char(snap, *t) == "." and tuple(t) not in cov]
 
 
-def lanes(save_dir: Path, snap: dict, depth: int = 1) -> list[dict]:
-    """bp.traps.ways_in on the newest snapshot and the fort manifest, tiles of projects under way counted as trapped."""
+def seal_doors(save_dir: Path, snap: dict | None = None) -> tuple[set[tuple[int, int, int]], dict | None]:
+    """BUG-504 (Run 16b i2 Roadvises y376: `traps at=ways: no way in left to trap (0 door(s) ...)` after `seal at=last` had built the
+    doors 75,78,139 and 79,85,139): (the door tiles of the finished seal projects, the snapshot with those doors drawn in). The
+    sites snapshot is read before the doors stand (or the doors lie on the surface, outside every manifest box): a door of a
+    finished seal project whose tile the snapshot shows as floor, and that the snapshot is not newer than, is drawn as `+`."""
     c = _cmd()
-    return _tmod().ways_in(snap, c.fort_manifest(save_dir), depth, covered(save_dir))
+    done = c.done_ticks(save_dir)
+    tiles: dict[tuple[int, int, int], int] = {}
+    render = _render()
+    for p in c.bp_files(save_dir):
+        if p.stem not in done:
+            continue
+        doc = files.read_json(p)
+        if not (isinstance(doc, dict) and doc.get("tpl") == "seal"):
+            continue
+        try:
+            for st, key, _, x0, y0, x1, y1, z in render.cell_rects(doc):
+                if st.get("mode") == "build" and key == "d":
+                    for y in range(y0, y1 + 1):
+                        for x in range(x0, x1 + 1):
+                            tiles[(x, y, z)] = done[p.stem]
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not tiles or not isinstance(snap, dict):
+        return set(tiles), snap
+    st_tick = snap.get("tick") if isinstance(snap.get("tick"), int) else None
+    patch = [t for t, dt in tiles.items() if c._snap_char(snap, *t) == "." and (st_tick is None or st_tick < dt)]
+    if not patch:
+        return set(tiles), snap
+    rows = {k: list(v) for k, v in snap["rows"].items()}
+    x0, y0 = snap["bbox"][0], snap["bbox"][1]
+    for x, y, z in patch:
+        row = rows[f"z{z}"]
+        line = row[y - y0]
+        row[y - y0] = line[:x - x0] + "+" + line[x - x0 + 1:]
+    return set(tiles), {**snap, "rows": rows}
+
+
+def lanes(save_dir: Path, snap: dict, depth: int = 1) -> list[dict]:
+    """bp.traps.ways_in on the newest snapshot and the fort manifest, tiles of projects under way counted as trapped; the doors
+    the seal projects built count (BUG-504)."""
+    c = _cmd()
+    doors, snap = seal_doors(save_dir, snap)
+    return _tmod().ways_in(snap, c.fort_manifest(save_dir), depth, covered(save_dir), doors)
 
 
 def bridge_lanes(save_dir: Path, snap: dict) -> list[dict]:
@@ -149,7 +189,8 @@ def expand(save_dir: Path, params: dict, snap: dict | None = None) -> tuple[str,
         n = len(c._call_bp("bp.traps.parse_at", tm.parse_at, out)[0]["tiles"])
         return out, ([f"{len(miss) - n} more hall tiles wait for the next traps at=hall"] if n < len(miss) else [])
     depth = params.get("depth", 1) if isinstance(params.get("depth"), int) else 1
-    ws = c._call_bp("bp.traps.ways_in", tm.ways_in, snap, c.fort_manifest(save_dir), depth, covered(save_dir))
+    doors, seen = seal_doors(save_dir, snap)                  # BUG-504: the doors a finished seal built
+    ws = c._call_bp("bp.traps.ways_in", tm.ways_in, seen, c.fort_manifest(save_dir), depth, covered(save_dir), doors)
     want = [w for w in ws if w["tiles"]]
     notes = [f"way {'%d,%d,%d' % tuple(w['way'])}: an outside neighbour takes no trap (ramp, stair, building)"
              for w in want if w["partial"]]

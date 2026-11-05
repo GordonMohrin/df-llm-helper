@@ -3872,8 +3872,28 @@ function Q.seal_escalate(K, P, d, r, n, names, t, c)
                           '\'{"job":"ConstructDoor","amount":2}\'; or build it in DF', trunc(Q.wall_refused(r, tile), 56))
     elseif seg and Q.FLOORISH[kind] then
       place = Q.seal_place(seg:match('^(%-?%d+,%-?%d+,%-?%d+%s+%S+)') or seg, 'wall')
-      how = 'safe (the cancel drops only the unbuilt piece; open until the wall stands), recommended where the citizens ' ..
-            'keep another way: wall the tile (a wall needs no door); or build it by hand in DF'
+      -- BUG-504 (Run 16b i2 Roadvises y377: 'recommended where the citizens keep another way' with no check and no way named,
+      -- the player chose blind): the entrance check names the ways that stay when this tile is walled; none = no wall
+      local okw, w = K.call('seal', 'opening_ways', tile[1], tile[2], tile[3])
+      w = okw and type(w) == 'table' and w or {}
+      local where = type(w.where) == 'table' and w.where or {}
+      local others = int(w.others) or #where
+      local base = 'safe (the cancel drops only the unbuilt piece; open until the wall stands), recommended where the ' ..
+                   'citizens keep another way'
+      if #where > 0 then
+        how = string.format('%s: they keep %s (%d other way%s with a door or bridge): wall the tile (a wall needs no door); ' ..
+                            'or build it by hand in DF', base, table.concat(where, ', '), others, others == 1 and '' or 's')
+      elseif w.known == true and others < 1 then
+        place = nil
+        how = 'no wall: the entrance check names no other way in or out with a door or bridge, a wall here would leave ' ..
+              'the fort without one; place a door elsewhere first (dfllm cmd bp.place seal at=last), or build this door ' ..
+              'by hand in DF'
+      else
+        how = base .. ': wall the tile (a wall needs no door)' .. (w.known == true and
+              string.format(' (%d other way%s with a door or bridge)', others, others == 1 and '' or 's') or
+              ' (the entrance check is not known: look at dfllm cmd inspect what=entrances first)') ..
+              '; or build it by hand in DF'
+      end
     elseif seg then
       place = Q.seal_place(seg)
       how = 'safe (the cancel drops only the unbuilt pieces; open until they stand): place it again; or build it by hand'
@@ -6549,6 +6569,23 @@ function M.repair(K, cells, why, opts)
              params = cl and obj{peace = 1, cl = 1} or (type(opts) == 'table' and opts.peace) and obj{peace = 1} or obj{},
              rot = 0, anchor = {list[1][1], list[1][2], list[1][3]}, manifest = {v = 2}, materials = obj{},
              stages = stages}
+  -- BUG-505 (review of BUG-487: seal.lua KP.extend / KP.close / the perimeter repair after a siege / the lost-bridge repair queued
+  -- `Cw` walls here with no reach check, only bp.place and the plan build had one): the walls of a repair that would cut a citizen
+  -- or a farm, well, depot, workshop or office off the main walk group, or whose reach cannot be proven, become doors (the cells
+  -- 'Cw' -> 'd', as the plan build does); a closure (a wall + door that replaces a bridge) or a wall on a ramp top cannot, it is
+  -- refused with the reason and the caller waits or logs. opts.noreach: the refuge plug confines on purpose (BUG-479).
+  if not (type(opts) == 'table' and opts.noreach == true) then
+    d.id = id
+    local refused = Q.place_walls(K, d, 'repair')
+    d.id = nil
+    if refused then
+      if not cl and Q.walls_to_doors(K, d) > 0 then
+        K.log('warn', 'repair %s: %s -> its walls are built as doors (BUG-505)', id, trunc(refused, 140))
+      else
+        return false, refused
+      end
+    end
+  end
   local ok, err = register(K, id, d, cl and 1 or 2, 'repair')
   if not ok then return false, err end
   save(K)
