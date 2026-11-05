@@ -55,6 +55,7 @@ A.CFG = {
   qf_tick = 2,           -- quickfort calls of A.tick per run (observe mode's smoothing)
   refuse_max = 3,        -- BUG-328: quickfort refusals of a level's dig before the shaft stops (apply_fail)
   stall = 3 * DAY,       -- BUG-412: a designated dig / unfinished seal this long without progress is a visible stall
+  mason_every = 14 * DAY, -- BUG-473: the Masons request is repeated this often while no mason's workshop stands
   pre_ring = true,       -- BUG-412: the seal of a level that looks like an aquifer is designated with its dig
   plug_walls = 2,        -- BUG-412: wall material the plug needs (X.mat) before the shaft goes below its top
   heavy_ring = true,     -- BUG-414: a known heavy level is ringed from above before its shaft tile is dug
@@ -189,11 +190,24 @@ local STALL_TXT = {
   no_boulders = 'no free boulders or blocks for the ring walls (soil: the stone lies deeper)',   -- BUG-443
   ring_stuck = 'the ring has not moved',                                                        -- BUG-443
 }
+-- BUG-473 (Run 16a i1 Basementflew y374: the level z127 waited 4 days for a mason, then the player placed the Masons by hand): soil
+-- walls (and a plug) need a Mason's workshop; it is asked for (PROJECT_REQUEST workshops why=masonry, types Masons; follow places it
+-- at prio 1) the moment a level needs masonry and none stands, not after the stall. At most once per A.CFG.mason_every ticks
+local function ask_masons(X, P, r, z)
+  local last = int(r.mreq)
+  if last and X.now() - last < A.CFG.mason_every then return end
+  r.mreq = X.now()
+  local msg = string.format("%s: shaft z%d needs a mason's workshop for its soil walls: none stands", P.id, z)
+  X.log('warn', '%s', msg)
+  X.emit('PROJECT_REQUEST', 'B', msg, {tpl = 'workshops', n = 1, why = 'masonry', types = {'Masons'}})
+  X.dirty()
+end
 local function stall(X, P, r, z, L, why, days)
   local first = type(L.stall) ~= 'table' or L.stall.why ~= why
   if first then L.stall = {why = why, t = X.now()} end
   if L.said ~= why then
     L.said = why
+    if why == 'no_mason' then ask_masons(X, P, r, z) end                    -- BUG-473
     local cmd = string.format(STALL_CMD[why] or STALL_CMD.unreachable, P.id)
     local msg = string.format('%s: shaft z%d waits (%s)%s: %s', P.id, z, STALL_TXT[why] or why,
                               days and (' ' .. days .. ' d') or '', cmd)
@@ -400,6 +414,7 @@ local function dig_step(X, P, d, r, z, L)
   if soil > 0 then
     local via, why = X.mat(soil)
     L.mat = via and tostring(via) or ('none: ' .. tostring(why or '?'))
+    if via == nil and tostring(why or ''):find('mason', 1, true) then ask_masons(X, P, r, z) end     -- BUG-473
   end
   X.level(z)
   X.log('info', '%s: aquifer at z%d (%s walls): sealing level %d before the next', P.id, z, mat, z)

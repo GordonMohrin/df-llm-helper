@@ -269,6 +269,7 @@ function A.install_trade(I, gui, int)
   -- linked into the world for DF's own job picker. a.assign: a posted job nobody took is given to the
   -- broker, only while he has no job (nothing of his is cancelled; never anyone else). Refused while a
   -- TradeAtDepot job is on the depot already (one per depot), and never removes a job.
+  local TR_BROKER_THIRST, TR_BROKER_HUNGER = 20000, 40000     -- BUG-470 (DF: thirsty 25,000, hungry 50,000)
   function TR.broker_job(a)
     local d = tr_depot(a.depot)
     if not d then return false, 'no trade depot ' .. tostring(a.depot) end
@@ -283,6 +284,13 @@ function A.install_trade(I, gui, int)
         return false, 'no broker to assign'
       end
       if u.job.current_job then return true, 'broker busy' end   -- a no-op, not a failure (no ACT_FAIL)
+      -- BUG-470 (Run 16d i4 Mazelanterns y410: the mayor, a patient at thirst 37,000, was handed the depot job and stood at it until he
+      -- died of thirst at 75,000 beside 4899 days of drink): a broker who is thirsty or hungry drinks and eats first
+      local th, hu = 0, 0
+      pcall(function() th, hu = u.counters2.thirst_timer or 0, u.counters2.hunger_timer or 0 end)
+      if th >= TR_BROKER_THIRST or hu >= TR_BROKER_HUNGER then
+        return true, string.format('broker thirsty or hungry (%d/%d)', th, hu)    -- a no-op: the job waits for his meal
+      end
       if not dfhack.job.addWorker(job, u) then return false, 'addWorker refused' end   -- Lua API.txt:1366
       return true, 'assigned'
     end

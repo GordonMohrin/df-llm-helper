@@ -144,6 +144,13 @@ T.test('broker_job (live L4): one TradeAtDepot job on the depot; an idle broker 
   T.eq({E.I.trade('broker_job', {depot = 50})}, {true, 'exists'}, 'never a second job')
   T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'broker busy'}, 'his own job is never cancelled')
   broker.job.current_job = nil
+  -- BUG-470 (Run 16d i4: the mayor-broker at thirst 37,000 was handed the depot job and died of thirst at it)
+  broker.counters2 = {thirst_timer = 37000, hunger_timer = 100}
+  T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'broker thirsty or hungry (37000/100)'}, 'a thirsty broker drinks first')
+  T.eq(workers[j], nil)
+  broker.counters2 = {thirst_timer = 100, hunger_timer = 45000}
+  T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'broker thirsty or hungry (100/45000)'}, 'a hungry one eats first')
+  broker.counters2 = {thirst_timer = 100, hunger_timer = 100}
   T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'assigned'})
   T.eq(workers[j], broker)
   T.eq({E.I.trade('broker_job', {depot = 50, assign = true})}, {true, 'taken'})
