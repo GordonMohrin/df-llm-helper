@@ -1795,6 +1795,35 @@ def _stage_param(params) -> int:
     return st if isinstance(st, int) and not isinstance(st, bool) else 1
 
 
+def cistern_fill_guard(save_dir: Path, params: dict | None, snap: dict | None, bp_id: str = "") -> dict:
+    """BUG-469 (Run 16d i4 Mazelanterns y403/y404, 16c i3: the cisterns were built bucket-fed 87-106 tiles from the pond zone, the
+    wells stayed dry for 30 days, patients died of thirst): a cistern without a pipe (p.path) and not p.water=aquifer is filled by
+    bucket carriers from a pond zone. When the sites snapshot has no revealed water within sites.BUCKET_STEPS_MAX steps of the core
+    (fill_source ok False) the carriers never fill it: an aquifer level is known -> p.water=aquifer (the basin in the aquifer, noted
+    in PLACE_NOTES), else the placement is refused. No snapshot, no core, a pipe or an aquifer cistern: params unchanged."""
+    params = dict(params or {})
+    if params.get("path") or params.get("water") == "aquifer":
+        return params
+    snap = snap or sites_snapshot(save_dir)
+    if snap is None:
+        return params
+    try:
+        sm, man = load_bp("sites"), fort_manifest(save_dir)
+        fill = sm.fill_source(snap, man)
+        aq = bool(sm.known_aquifer(snap, man))
+    except (BpUnavailable, BpError, ValueError, KeyError, TypeError, AttributeError):
+        return params
+    if not isinstance(fill, dict) or not (fill.get("ok") is False or (fill.get("ok") and fill.get("far"))):
+        return params
+    if aq:
+        PLACE_NOTES[bp_id] = (f"BUG-469: a bucket-fed cistern would stay dry ({fill.get('why')}): placed p.water=aquifer (the basin "
+                              "on a known aquifer level, the aquifer fills it)")
+        return {**params, "water": "aquifer"}
+    raise BpError(f"BUG-469: a bucket-fed cistern (no p.path) would stay dry: {fill.get('why')}, and no aquifer level is known "
+                  "for an aquifer cistern (p.water=aquifer). A piped one needs revealed water (python -m dfpilot.bp.sites cistern); "
+                  "else the refuge drink store (tpl refuge_drink) and barrels")
+
+
 def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
            same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """Emit tpl for a site label without overlapping other projects (occ, default: every bp/*.json but bp_id).
@@ -1806,6 +1835,8 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
     lists them."""
     params, want = translate_only(tpl, params)
     need = tuple(need) + want                              # named by the caller: kept although the manifest lists them
+    if tpl == "cistern":                                   # BUG-469: no bucket-fed cistern that cannot fill
+        params = cistern_fill_guard(save_dir, params, snap, bp_id)
     if tpl == "fortcore" and not params.get("retrofit") and _stage_param(params) == 1:
         core = first_core(save_dir, bp_id)                 # BUG-358: one fortcore; a second stage 1 is refused
         if core:

@@ -1,5 +1,14 @@
 # CHANGELOG dfpilot
 
+## Round 29 (water/seal): a cistern that can fill, a broker who drinks first, no phantom refuge, a seal that cannot hold the builds, masons and depot in time (BUG-469 to BUG-473, 2026-11-05; offline, live-untested)
+- **Why:** Run 16a-d: i3/i4 cisterns built bucket-fed 87-106 tiles from the pond zone (wells dry 30 days), the i4 mayor died of thirst at the depot job beside 4899 d of drink, i1 kept a phantom refuge after `bp.cancel` and 'seal first' paused bedrooms and workshops for months, the aqshaft waited 4 days for masons and the depot for the caravan.
+- **BUG-469:** `sites.fill_source` marks water farther than 40 steps (`far`); `cmd.cistern_fill_guard` (every `cistern` placement) turns a pipe-less bucket-fed cistern that cannot fill into the aquifer cistern (known aquifer) or refuses it; `plan` drafts no plain cistern for far water; follow answers `patient_water` without a tile with the aquifer cistern.
+- **BUG-470:** `act.trade broker_job` does not hand the depot job to a thirsty or hungry broker (the i4 mayor-broker); GiveWater cannot use barrels (DF), the cistern is BUG-469's.
+- **BUG-471:** `bp.cancel` takes the cancelled project's undug manifest parts (refuge, burrow, stair, zones, rooms, bridges, stations) out of the kernel manifest (`runner.unmerge_manifest`).
+- **BUG-472:** `seal_first.lead_days` (10): a seal that led this long without closing a piece pauses nobody and raises SEAL_STUCK.
+- **BUG-473:** the aqshaft asks for the Masons (PROJECT_REQUEST workshops `why=masonry`) when a level needs soil walls and no mason's workshop stands; the surface depot is drafted with a core that waits for the aqshaft.
+- **Contract:** `runner.seal_first.lead_days` (CONTRACTS.md, fairplay.RUNNER_LIM, baseline.json), PROJECT_REQUEST `why=masonry`; no schema.py change. **Tests:** tests/test_bug469_473_f29.py, tests/lua/test_bug469_473.lua, test_bug412_aqshaft_order.lua (+1), test_trade_act.lua (+3 asserts). **Live check:** see the five bug files.
+
 ## Round 28 (propose): neighbouring doors no longer crash plan propose, a failing template drops itself, military.pct passes D-12 (BUG-457, 2026-11-05; offline, live-untested)
 - **Why:** Run 16b i2 Roadvises y376-y385: `plan propose` died every year with `traps.at: tile 60,100,121 named twice`; the player copied last year's plan ten times, and the copy failed `plan check` with `military.pct 15 < 20 (D-12 at pop 62)`.
 - **BUG-457:** two doors side by side share outside lane tiles; `bp.traps.dedupe` (used by `format_at` and `traps.expand`) keeps a tile with the first way that names it and notes it; `plan.fit_placeable` drops any build whose placement raises (`BUG-457: ERROR <tpl>@<site> left out: ...`)

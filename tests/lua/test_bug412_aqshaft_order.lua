@@ -158,4 +158,22 @@ T.test('BUG-412 stall: a designated level nobody reaches says unreachable', func
   T.ok(b[1].d.cmd:find('bp.cancel proj=aq', 1, true), b[1].d.cmd)
 end)
 
+
+-- BUG-473 (Run 16a i1 Basementflew y374: the shaft waited 4 days for a mason, the player placed the Masons by hand): the Masons
+-- are asked for (PROJECT_REQUEST workshops why=masonry, types Masons) the moment the shaft needs them and none stands
+T.test('BUG-473: a shaft without a mason\'s workshop asks for the Masons once, at the first stall, not after the player noticed', function()
+  local W = fresh{tag = 'b473mason'}
+  local mat = {nil, "no rock, no mason's workshop"}
+  W.load{name = 'economy', every = {ticks = 1200}, mat_for = function() return mat[1], mat[2] end}
+  H.place(W, 'aq', shaft_doc(4))
+  H.runs(W, 1)
+  H.dig(W)
+  H.runs(W, 3)
+  local r = ev(W, 'PROJECT_REQUEST')
+  T.eq(#r, 1, 'one request')
+  T.eq({r[1].cls, r[1].d.tpl, r[1].d.why, r[1].d.types}, {'B', 'workshops', 'masonry', {'Masons'}})
+  H.runs(W, 4)
+  T.eq(#ev(W, 'PROJECT_REQUEST'), 1, 'not again within mason_every')
+end)
+
 T.done()

@@ -922,7 +922,7 @@ class Follower:
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and (
-                    d.get("why") in ("mandatory", "slabs", "busy", "manager", "missing", "gear", "well")
+                    d.get("why") in ("mandatory", "slabs", "busy", "manager", "missing", "gear", "well", "masonry")
                     or (d.get("why") == "mood" and d.get("types"))):
                 # BUG-283 (Run 15 Drillchamber: the glass furnace a fey mood waited for came 30 days late in a plain
                 # 12-shop placement at prio 4): why=mood with types = only the shops the mood and its materials need, prio 1
@@ -932,7 +932,8 @@ class Follower:
                 # BUG-224: why=busy (one Carpenters/Masons holds the waiting jobs, idle workers stand): one more of it
                 # BUG-231: why=manager (the held manager orders' items go to a Carpenters/Masons as tasks; none stands)
                 # BUG-267: why=missing (orders wait 14+ days for these shops); BUG-270: why=gear (Leatherworks, Tanners,
-                # Mechanics for gear and lever mechanisms); why=well (fix6-water: the hospital well's shop)
+                # Mechanics for gear and lever mechanisms); why=well (fix6-water: the hospital well's shop); BUG-473 why=masonry
+                # (an aqshaft level with soil walls and no Masons workshop: the Masons alone, prio 1)
                 from .cmd import _extra_shops, _moodable
                 mood, extra = _moodable(), set(_extra_shops())
                 want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]
@@ -1253,7 +1254,8 @@ class Follower:
         to the fort (d.at). One piped cistern per fort (a cistern project with a pipe stands or is placed: nothing more); the
         snapshot decides the route in `_place` (sites.cistern_access)."""
         at = d.get("at")
-        if not (isinstance(at, list) and len(at) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in at)):
+        has_at = isinstance(at, list) and len(at) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in at)
+        if not has_at and d.get("why") != "patient_water":
             return
         from .cmd import bp_files
         for f in bp_files(self.dir):
@@ -1261,6 +1263,12 @@ class Follower:
             prm = doc.get("params") if isinstance(doc, dict) and isinstance(doc.get("params"), dict) else {}
             if isinstance(doc, dict) and doc.get("tpl") == "cistern" and (prm.get("path") or prm.get("water") == "aquifer"):
                 return                       # BUG-448: an aquifer cistern (no pipe) brings its own water as well
+        if not has_at:
+            # BUG-469 (Run 16d i4: PROJECT_REQUEST cistern why=patient_water carried no tile, nothing was placed, the mayor died of thirst
+            # beside 4899 d of barrel drink): no water body to pipe from; the aquifer cistern (cmd.cistern_fill_guard refuses it
+            # without a known aquifer level, and the plain one when no water lies within reach)
+            self._request_place("cistern_water", "cistern", {"water": "aquifer"}, "S1", now, prio=1)
+            return
         if self._request_place("cistern_water", "cistern", {}, "S1", now, prio=1):
             self.jobs["cistern_water"].update(access=True, at=at)
 

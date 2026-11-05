@@ -101,7 +101,7 @@ M.CFG = {
   -- dead): below rebuild_pop citizens in a fort past P1 or that had rebuild_off of them, in PEACE/RECOVERY only seal,
   -- plug, tombs, food/drink, beds, wall repairs and the depot run, until rebuild_off. config/baseline.json "runner":
   -- {seal_first: {on, stuck_days, food_d, drink_d}, rebuild: {pop, off}} (fairplay.RUNNER_LIM; a bad value: default)
-  seal_first = true, seal_stuck_days = 3, emerg_food_d = 30, emerg_drink_d = 30, rebuild_pop = 10, rebuild_off = 12,
+  seal_first = true, seal_stuck_days = 3, seal_lead_days = 10, emerg_food_d = 30, emerg_drink_d = 30, rebuild_pop = 10, rebuild_off = 12,
   -- BUG-336 (Run 15b Earthboat y384-y387: the refuge hatch 55,82,133 'stalled 0%' 911 days, trolls walked down the open
   -- stair, 92 -> 1): a stuck seal without progress for seal_esc_days (1-60) asks the player (DECISION_NEEDED
   -- seal_stalled, A, again every seal_esc_days while it stays so) with the piece, the cause, what the kernel tried and the
@@ -2445,7 +2445,100 @@ local function work(K, P, meas, hold)
 end
 
 ---------------------------------------------------------------- undo (bp.cancel undo, BREACH_STOP)
+-- BUG-471 (Run 16a i1 Basementflew y372-377: fortcore stage 1 and stage 3 cancelled after AQ_HEAVY / breach:water; the manifest
+-- kept 'Tiefe+' z123 and the civilians' stair 98,87,124, nothing stood there, the refuge hatch was 'unreachable' 5x, plan check
+-- demanded the seal every year, refuge_sep / civ_sep stayed red): what a cancelled project's fragment put into the manifest
+-- (refuge and its burrow, stairs, zones, rooms, bridges, stations) leaves it again where the tiles are still undug rock.
+-- undug(x, y, z) -> true only for a tile known to be solid; dug or unknown parts stay. Returns the names removed.
+function M.unmerge_manifest(man, frag, undug)
+  local out = {}
+  if type(man) ~= 'table' or type(frag) ~= 'table' then return out end
+  local function same(a, b) return key_of(a) == key_of(b) end
+  local function solid(x, y, z) return undug(x, y, z) == true end
+  local function box_solid(b)
+    return type(b) == 'table' and #b >= 6 and solid(b[1], b[2], b[3]) and solid(b[4], b[5], b[6])
+  end
+  local fr = frag.refuge
+  if type(fr) == 'table' and type(man.refuge) == 'table' and same(man.refuge, fr) and type(fr.anchor) == 'table'
+      and solid(fr.anchor[1], fr.anchor[2], fr.anchor[3]) then
+    man.refuge = nil
+    out[#out + 1] = 'refuge'
+    local bn = fr.burrow
+    if type(bn) == 'string' and type(man.burrows) == 'table' and type(frag.burrows) == 'table' and frag.burrows[bn]
+        and type(man.burrows[bn]) == 'table' and man.burrows[bn].role == 'refuge' then
+      man.burrows[bn] = nil
+      out[#out + 1] = 'burrow ' .. bn
+    end
+  end
+  for kind, list in pairs(type(frag.stairs) == 'table' and frag.stairs or {}) do
+    local have = type(man.stairs) == 'table' and man.stairs[kind]
+    if type(have) == 'table' and type(list) == 'table' then
+      local keep, n = {}, 0
+      for _, e in ipairs(have) do
+        local mine = false
+        for _, f in ipairs(list) do if same(e, f) then mine = true end end
+        if mine and type(e) == 'table' and #e >= 4 and solid(e[1], e[2], e[3]) then n = n + 1     -- its foot (the refuge level) is undug
+        else keep[#keep + 1] = e end
+      end
+      if n > 0 then man.stairs[kind] = keep; out[#out + 1] = string.format('%d stair(s) %s', n, tostring(kind)) end
+    end
+  end
+  for kind, list in pairs(type(frag.zones) == 'table' and frag.zones or {}) do
+    local have = type(man.zones) == 'table' and man.zones[kind]
+    if type(have) == 'table' and type(list) == 'table' then
+      local keep, n = {}, 0
+      for _, e in ipairs(have) do
+        local mine = false
+        for _, f in ipairs(list) do if same(e, f) then mine = true end end
+        if mine and box_solid(e) then n = n + 1 else keep[#keep + 1] = e end
+      end
+      if n > 0 then man.zones[kind] = keep; out[#out + 1] = string.format('%d zone box(es) %s', n, tostring(kind)) end
+    end
+  end
+  if type(frag.rooms) == 'table' and type(man.rooms) == 'table' then
+    local ids = {}
+    for _, f in ipairs(frag.rooms) do if type(f) == 'table' and f.id then ids[f.id] = f end end
+    local keep, n = {}, 0
+    for _, e in ipairs(man.rooms) do
+      local f = type(e) == 'table' and ids[e.id]
+      if f and same(e, f) and box_solid(e.bbox) then n = n + 1 else keep[#keep + 1] = e end
+    end
+    if n > 0 then man.rooms = keep; out[#out + 1] = string.format('%d room(s)', n) end
+  end
+  for _, key in ipairs({'bridges', 'stations'}) do
+    local fk, mk = frag[key], man[key]
+    if type(fk) == 'table' and type(mk) == 'table' then
+      for name, f in pairs(fk) do
+        if type(mk[name]) == 'table' and same(mk[name], f) then
+          local at = key == 'bridges' and type(f) == 'table' and f.fp or f      -- a bridge's footprint box / a station's tile
+          local gone = false
+          if type(at) == 'table' and #at >= 6 then gone = box_solid(at)
+          elseif type(at) == 'table' and #at >= 3 then gone = solid(at[1], at[2], at[3]) end
+          if gone then mk[name] = nil; out[#out + 1] = key:sub(1, -2) .. ' ' .. tostring(name) end
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- a tile of the running map: true for a solid wall tile (undug rock or soil), false for anything else, nil unknown (not revealed)
+function Q.undug_tile(K, x, y, z)
+  local v = tile_at(K, x, y, z)
+  if v == nil or v.c == nil then return nil end
+  return v.c == '#' or v.c == 'S'
+end
+
 local function remove(K, P)
+  local d0 = doc(K, P.id)
+  if P.done ~= 1 and type(d0) == 'table' and type(d0.manifest) == 'table' then       -- BUG-471
+    local man = K.manifest()
+    local okm, gone = pcall(M.unmerge_manifest, man, d0.manifest, function(x, y, z) return Q.undug_tile(K, x, y, z) end)
+    if okm and #gone > 0 then
+      K.persist.set('manifest', man)
+      K.log('info', '%s (%s) cancelled: its undug manifest parts left the manifest (%s)', P.id, P.tpl, table.concat(gone, ', '))
+    end
+  end
   local xr = note_shaft(K, P, doc(K, P.id))   -- Run 11: a cancelled explore's shaft may still stand (shaft check)
   if xr then xr.fin = 'cancelled' end
   K.log('info', '%s (%s) cancelled at stage %d: removed from the list', P.id, P.tpl, P.stage)   -- BUG-039
@@ -3312,6 +3405,7 @@ local function conf(K)
   local r = {on = M.CFG.seal_first, stuck = nat(sf.stuck_days, 1, 60, M.CFG.seal_stuck_days) * DAY,
              wall = M.CFG.seal_wall, wall_days = nat(sf.wall_days, 0, 60, M.CFG.seal_wall_days) * DAY,
              esc = nat(sf.esc_days, 1, 60, M.CFG.seal_esc_days) * DAY,                    -- BUG-336
+             lead = nat(sf.lead_days, 1, 400, M.CFG.seal_lead_days) * DAY,               -- BUG-472
              food_d = nat(sf.food_d, 0, 400, M.CFG.emerg_food_d), drink_d = nat(sf.drink_d, 0, 400, M.CFG.emerg_drink_d),
              pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off),
              yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
@@ -3868,7 +3962,7 @@ local function focus(K)
         if r.st == 1 then
           r.st, r.ev = 0, CAD.quiet(r.ev)
           K.log('info', 'seal first: %s moves again (%s open)%s', P.id, plural(n, 'piece'),
-                P.tpl == 'repair' and '' or ': it pauses the others again')
+                (P.tpl == 'repair' or r.ld == 1) and '' or ': it pauses the others again')
         end
         r.sig, r.t, r.nw, r.nu, r.wt, r.dn = sig, t, nil, nil, nil, nil
         dirty()
@@ -3880,12 +3974,29 @@ local function focus(K)
         dirty()
         stuck_event(K, P, d, n, names, t - r.t, r)
       end
+      -- BUG-472 (Run 16a i1 Basementflew y374-375, i4: a refuge hatch 'unreachable' led 'seal first' for months, bedrooms and
+      -- workshops paused, the same decision eight times): a seal that leads this long without closing one more piece pauses
+      -- nobody; SEAL_STUCK / the stalled decision speak for it, and it leads again only once a piece of it is built
+      if not r.n0 or n < r.n0 or not r.ls then
+        if r.ld == 1 then K.log('info', 'seal first: %s closed a piece (%s open): it leads again', P.id, plural(n, 'piece')) end
+        r.n0, r.ls, r.ld = n, t, nil
+        dirty()
+      elseif r.ld ~= 1 and P.tpl ~= 'repair' and t - r.ls >= c.lead and allowed(K, P, d) then
+        r.ld = 1
+        dirty()
+        K.log('warn', 'seal first: %s led %d days without closing a piece (%s open): the others run again; the seal stays stuck',
+              P.id, (t - r.ls) // DAY, plural(n, 'piece'))
+        if r.st ~= 1 then
+          r.st = 1
+          stuck_event(K, P, d, n, names, t - r.t, r)
+        end
+      end
       if r.st == 1 then
         local oke, erre = pcall(Q.seal_escalate, K, P, d, r, n, names, t, c)          -- BUG-336: own pcall
         if not oke then K.log('error', 'seal escalation failed: %s', trunc(erre, 160)) end
       end
       if P.tpl == 'repair' then                       -- BUG-081: a closure pauses nobody and is never "stuck" for the others
-      elseif r.st == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}; f.stk[P.id] = true
+      elseif r.st == 1 or r.ld == 1 then f.stuck[#f.stuck + 1] = {id = P.id, n = n, days = (t - r.t) // DAY}; f.stk[P.id] = true
       elseif not f.lead then f.lead, f.n, f.names = P.id, n, names
       else f.more = f.more + 1 end
     end

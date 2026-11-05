@@ -474,12 +474,15 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
     return out
 
 
+BUCKET_STEPS_MAX = 40       # BUG-469: farther than this a bucket-fed cistern stays dry (same as water.patient_far / drink_far)
+
+
 def fill_source(snap: dict, manifest: dict | None) -> dict:
     """BUG-040 (Run 11: the cisterns y450s0b0 and y452s1b0 were done and their wells stayed dry): what a bucket-fed
     cistern (no pipe) could be filled from: a revealed body of drinkable water (>= 8 tiles: a brook, river or lake; not
     one with a cavern mark, not water inside the fort's own geometry such as a sump or a cistern) that a walker reaches
     from the civilian core (Z4). A wet well is no fill source (live L6: the carriers take from the nearest source, the
-    cistern's own well once it is wet, and water.lua removes such a pond as a loop). Returns {ok, why, steps, at}."""
+    cistern's own well once it is wet, and water.lua removes such a pond as a loop). Returns {ok, why, steps, at, far}."""
     z4 = ((manifest or {}).get("zones") or {}).get("Z4") or []
     cav = {tuple(q) for q in (snap.get("marks") or {}).get("cavern", []) if isinstance(q, (list, tuple))}
     fort = [(b[0] - 1, b[1] - 1, b[2] - 1, b[3] + 1, b[4] + 1, b[5] + 1) for b in topo.fort_boxes(manifest or {})]
@@ -517,8 +520,12 @@ def fill_source(snap: dict, manifest: dict | None) -> dict:
             break
         i = nxt
     at = list(g.pos(i))
-    return {"ok": True, "steps": steps, "at": at,
-            "why": f"revealed water at {_pos(at)}, {steps} steps from the core on snapshot {sid}"}
+    # BUG-469 (Run 16d i4 / 16c i3: cisterns 87-106 steps from the pond zone, the wells dry after 30 days): `far` = the carriers walk
+    # more than BUCKET_STEPS_MAX steps; the water is there (ok), but a bucket-fed cistern does not fill from it in any useful time
+    far = steps > BUCKET_STEPS_MAX
+    return {"ok": True, "steps": steps, "at": at, "far": far,
+            "why": f"revealed water at {_pos(at)}, {steps} steps from the core on snapshot {sid}"
+                   + (f" (> {BUCKET_STEPS_MAX}: too far for bucket carriers)" if far else "")}
 
 
 SEAL_OPEN = {"floor": ".^", "ramp": "r", "stair_up": "<", "stair_down": ">", "stair_updown": "X", "stair": "<>X"}

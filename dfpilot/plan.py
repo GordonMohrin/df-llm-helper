@@ -983,7 +983,7 @@ def cistern_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]
     (fort.hosp.fill, sites.fill_source) is a warning: it stays dry and counts for no hospital or refuge. A piped one
     (p.path, python -m dfpilot.bp.sites cistern) fills once its lever is linked and pulled."""
     fill = ((fort or {}).get("hosp") or {}).get("fill")
-    if not isinstance(fill, dict) or fill.get("ok") is not False:
+    if not isinstance(fill, dict) or not (fill.get("ok") is False or fill.get("far")):    # BUG-469: far water fills nothing either
         return []
     out = []
     for si, _, b in new_builds(doc, prev):
@@ -4088,12 +4088,15 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     # BUG-368 (Run 16b i2: no fortcore, so no trade depot, NO_DEPOT every year): a fort with no depot standing, planned or
     # coming with a fortcore stage 1 of this draft gets one on the surface (site S1: sites.rank, `depot` template)
     known = templates()                                      # what `check` accepts; None: bp package unavailable, not checked
-    if (fort or {}).get("depot") is False and (info is None or DEPOT in info) and (known is None or DEPOT in known) \
-            and not any(b["tpl"] == DEPOT or (b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) == 1)
+    # BUG-473 (Run 16a i1 Basementflew: NO_DEPOT / DEPOT_MISSING only when the caravan stood outside, the player placed the depot by hand):
+    # a core that waits for the aquifer shaft (aqshaft drafted or under way) builds its bailey depot seasons late, past the first caravan
+    aq_wait = any(b["tpl"] == AQSHAFT for b in builds) or bool((fort or {}).get("aqshaft"))
+    if (fort or {}).get("depot") is False and (info is None or DEPOT in info) and (known is None or DEPOT in known)             and not any(b["tpl"] == DEPOT or (b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) == 1 and not aq_wait)
                         for b in builds):
         builds.append(copy.deepcopy(DEPOT_BUILD))
-        depot_note = ("; BUG-368: no trade depot and no fortcore stage 1 to build one: depot@S1 on the surface "
-                      "(bp sites depot --fresh --near <wagon x,y,z>)")
+        depot_note = ("; BUG-368: no trade depot and " + ("a fortcore that waits for the aquifer shaft" if aq_wait
+                                                          else "no fortcore stage 1 to build one")
+                      + ": depot@S1 on the surface before the first caravan (bp sites depot --fresh --near <wagon x,y,z>)")
     left_out = []
     if rb:                                       # the rebuild drafts only what the runner runs then
         left_out = [b["tpl"] for b in builds if build_kind(b) not in REBUILD_KINDS]
@@ -4301,7 +4304,7 @@ def _cistern_due(fort: dict | None, done: set, builds: list, info: dict | None) 
     bucket-fed one without a fill source on the sites snapshot (fort.hosp.fill ok False: it would stay dry)."""
     hosp = (fort or {}).get("hosp") or {}
     fill = hosp.get("fill") if isinstance(hosp.get("fill"), dict) else {}
-    return not hosp.get("cistern") and fill.get("ok") is not False and (CISTERN["tpl"], None) not in done \
+    return not hosp.get("cistern") and fill.get("ok") is not False and not fill.get("far")         and (CISTERN["tpl"], None) not in done \
         and (info is None or CISTERN["tpl"] in info) and all(x["tpl"] != CISTERN["tpl"] for x in builds)
 
 
@@ -4312,7 +4315,7 @@ def _aq_cistern_due(fort: dict | None, done: set, builds: list, info: dict | Non
     cistern under way or standing, none drafted or applied before, the template exists."""
     hosp = (fort or {}).get("hosp") or {}
     fill = hosp.get("fill") if isinstance(hosp.get("fill"), dict) else {}
-    return bool(hosp.get("aq")) and fill.get("ok") is False and not hosp.get("cistern") \
+    return bool(hosp.get("aq")) and (fill.get("ok") is False or bool(fill.get("far"))) and not hosp.get("cistern") \
         and (CISTERN["tpl"], None) not in done and (info is None or CISTERN["tpl"] in info) \
         and all(x["tpl"] != CISTERN["tpl"] for x in builds)
 
