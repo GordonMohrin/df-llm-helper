@@ -304,12 +304,13 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   T.ok(#q <= 200, q)
   T.ok(q:find('food 20 d (20 cit, 10 meals)', 1, true), q)
   T.ok(q:find('no safe fishing water (2 frozen, 1 cavern)', 1, true), q)
-  T.ok(q:find('. Also: popcap.lower', 1, true), q)
+  T.ok(q:find('. Also: popcap.lower', 1, true), q)        -- BUG-459: trade.want is a quiet option (the q has it as auto)
   -- BUG-258: no crossbow is the blocker 'xbow' (option crossbow), not bolts; frozen water still names the fishing zone
   -- BUG-340: every option has its command line (d.cmds in opts order); no animals: no butcher.mark
-  T.eq(d[1].d.opts, {'kitchen', 'bowyer', 'farms', 'popcap.lower'}, 'the kernel paints the fishing zone: no option')
-  T.eq(#d[1].d.cmds, 4)
-  T.ok(d[1].d.cmds[2]:find('"only":"Bowyers"', 1, true) and d[1].d.cmds[4]:find('"cap":20', 1, true), d[1].d.cmds[4])
+  T.eq(d[1].d.opts, {'kitchen', 'bowyer', 'farms', 'trade.want', 'popcap.lower'}, 'the kernel paints the fishing zone: no option')
+  T.eq(#d[1].d.cmds, 5)
+  T.ok(d[1].d.cmds[2]:find('"only":"Bowyers"', 1, true) and d[1].d.cmds[5]:find('"cap":20', 1, true), d[1].d.cmds[5])
+  T.ok(d[1].d.cmds[4]:find('trade.want', 1, true) and d[1].d.cmds[4]:find('"food"', 1, true), d[1].d.cmds[4])
   T.eq(d[1].d.food, 20)
   T.eq(d[1].d.block, {'kitchen', 'fish_zone', 'xbow', 'farms'}, 'no animals: no butcher blocker')
   -- the same blockers: never again (BUG-008 cadence); a new blocker after 7 days and 10 minutes: again
@@ -320,7 +321,8 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   days(W, 1)
   T.eq(#decisions(W, 'food_low'), 1, 'BUG-038: raw fish and no fishery is asked by itself (PROJECT_REQUEST): no news')
   T.eq(#requests(W, 'fishery'), 1)
-  W.set_census('a', {n = 3})                                 -- tame animals and no butcher's shop: a new blocker
+  W.set_census('a', {n = 3, list = {{id = 1, race = 5, adult = true, female = true}, {id = 2, race = 5, adult = true, female = true},
+                                    {id = 3, race = 5, adult = true, female = true}}})   -- tame animals and no butcher's shop: a new blocker; BUG-459: two can be marked
   days(W, 1)
   d = decisions(W, 'food_low')
   T.eq(#d, 2)
@@ -329,7 +331,7 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   T.ok(not F.has(d[2].d.opts, 'fishery'), table.concat(d[2].d.opts, ','))
   T.ok(d[2].d.q:find('; auto: fishery asked (10 raw fish), caravans asked for food, seeds. Also: butcher.mark', 1, true),
        d[2].d.q)
-  T.eq(d[2].d.opts, {'kitchen', 'bowyer', 'farms', 'butcher', 'butcher.mark', 'popcap.lower'})
+  T.eq(d[2].d.opts, {'kitchen', 'bowyer', 'farms', 'butcher', 'trade.want', 'butcher.mark', 'popcap.lower'})
   local enc = require('dfllm.util.json').encode(d[2].d)
   T.ok(#enc <= 1024, 'BUG-340: the d with its command lines stays under the kernel 1,024 bytes: ' .. #enc)
   T.eq(#d[2].d.opts, #d[2].d.cmds)
@@ -411,7 +413,7 @@ T.test('BUG-340: food_low asks the caravans for food and seeds itself; each opti
   for _, c in ipairs(d.cmds) do
     local verb, args = c:match("^dfllm cmd ([%w%.]+) '(.+)'$")
     T.ok(verb and args, 'a command line: ' .. c)
-    T.ok(({['bp.place'] = true, ['butcher.mark'] = true, ['popcap.lower'] = true})[verb], 'a kernel verb: ' .. c)
+    T.ok(({['bp.place'] = true, ['butcher.mark'] = true, ['popcap.lower'] = true, ['trade.want'] = true})[verb], 'a kernel verb: ' .. c)
     T.ok(require('dfllm.util.json').decode(args) ~= nil, 'JSON args: ' .. c)
   end
   local W2 = world{cit = 20, food = 2000}

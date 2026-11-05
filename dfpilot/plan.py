@@ -389,21 +389,34 @@ def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
         doc = files.read_json(p)
         if isinstance(doc, dict) and doc.get("tpl") == "farms" and p.stem not in done and "parked" not in rows.get(p.stem, ""):
             open_ = True
-    site, plots = farm_site_plots(save_dir)
+    site, plots = farm_site_plots(save_dir, urgent=True)           # BUG-460: food is low, the surface plots count
     return {"open": open_, "site": site, **({"plots": plots} if plots else {})}
 
 
-def _farm_kinds() -> tuple:
-    """BUG-413: the farm sites looked up: a room of the fortcore, and the surface plots only when plan.surface_core allows them."""
-    return (("room", {}), ("surface", {"surface": 1})) if surface_core_on() else (("room", {}),)
+def _farm_kinds(urgent: bool = False) -> tuple:
+    """BUG-413: the farm sites looked up: a room of the fortcore, and the surface plots only when plan.surface_core allows them.
+    BUG-460 (Run 16d Orbblock y374-y377: food 1 day, `plan propose` drafted no farm for 'farms: 0 sites' while `bp sites farms
+    surface=1` found one, the player placed it by hand after drink had fallen 85 -> 19 days): `urgent` (food below FOOD_DRAFT_D) looks
+    the surface plots up too; the surface fort stays off (no surface core, no surface rooms), only the food comes first."""
+    return (("room", {}), ("surface", {"surface": 1})) if (surface_core_on() or urgent) else (("room", {}),)
 
 
-def farm_site_plots(save_dir: Path) -> tuple[str | None, int | None]:
+FARM_POP_PER_PLOT = 10                   # BUG-460: a surface farm of `ceil(citizens / 10)` plots (1-4: the template's plots limit)
+
+
+def farm_plots_for(pop) -> int | None:
+    """BUG-460: plots a surface farm needs for `pop` citizens (None when the population is not known)."""
+    if not _nat(pop) or pop <= 0:
+        return None
+    return max(1, min(4, -(-pop // FARM_POP_PER_PLOT)))
+
+
+def farm_site_plots(save_dir: Path, urgent: bool = False) -> tuple[str | None, int | None]:
     """BUG-297/300/316: (kind, plots): kind 'room' / 'surface' / 'none' as farm_site; plots = the fewer plots that fit
     when the default surface block does not (BUG-316: trees cut it), else None."""
     if sites_snapshot(save_dir) is None:
         return None, None
-    for kind, prm in _farm_kinds():
+    for kind, prm in _farm_kinds(urgent):
         try:
             free, _, _ = free_sites(save_dir, "farms", prm, n=1)
         except (BpError, BpUnavailable):
@@ -418,12 +431,13 @@ def farm_site_plots(save_dir: Path) -> tuple[str | None, int | None]:
     return "none", None
 
 
-def farm_site(save_dir: Path) -> str | None:
+def farm_site(save_dir: Path, urgent: bool = False) -> str | None:
     """BUG-297/300: 'room' (a farms room site is free on the newest sites snapshot), 'surface' (only a surface site on
-    soil floor, p.surface = 1), 'none' (neither), None (no sites snapshot: unknown)."""
+    soil floor, p.surface = 1), 'none' (neither), None (no sites snapshot: unknown). BUG-460: `urgent` looks up the surface
+    plots with plan.surface_core off too."""
     if sites_snapshot(save_dir) is None:
         return None
-    for kind, prm in _farm_kinds():
+    for kind, prm in _farm_kinds(urgent):
         try:
             free, _, _ = free_sites(save_dir, "farms", prm, n=1)
         except (BpError, BpUnavailable):
@@ -443,8 +457,10 @@ def farm_site_fix(builds: list, s: dict | None, fort: dict | None) -> tuple[list
     if not farms or site not in ("none", "surface"):
         return builds, ""
     if site == "surface" and (s or {}).get("mode") == "PEACE":
+        want = farm_plots_for(((s or {}).get("pop") or {}).get("cit"))       # BUG-460: plots per citizens (what fits, if less)
+        fit = ff.get("plots") if _nat(ff.get("plots")) else None
         for b in farms:
-            b["p"] = {**(b.get("p") or {}), "surface": 1}
+            b["p"] = {**(b.get("p") or {}), "surface": 1, **({"plots": min(want, fit) if fit else want} if want else {})}
         return builds, "; BUG-302: farms@S1 p.surface=1 (no farms room site on soil, a surface site is free)"
     keep = [b for b in builds if not any(b is f for f in farms)]
     if site == "surface":
@@ -475,6 +491,9 @@ def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | Non
                       f"(mode {(s or {}).get('mode')})")
     # BUG-316: fort.farms.plots = the fewer plots that have a surface site (trees cut the default block)
     plots = ff.get("plots") if site == "surface" and _nat(ff.get("plots")) else None
+    want = farm_plots_for(((s or {}).get("pop") or {}).get("cit")) if site == "surface" else None
+    if want:                                    # BUG-460: plots per citizens, never more than the soil has room for
+        plots = min(want, plots) if plots else want
     b = {"tpl": "farms", "site": "S1",
          **({"p": {"surface": 1, **({"plots": plots} if plots else {})}} if site == "surface" else {})}
     why = ""
@@ -2723,6 +2742,62 @@ def mood_buys(s: dict | None) -> list[str]:
 FIT_KEEP_TPLS = ("fortcore", SEAL, "traps")        # own fits (fit_core, core_gaps, seal/traps expand); never dropped here
 
 
+# BUG-461 (Run 16d Orbblock y372: one ranked workshops site, `plan propose` drew dining@S1 and furnaces@S1 on that tile, `bp.place workshops` was
+# refused 'taken by y372s1b1/y372s2b1' while phase P0 waited for Still and Butchers and drink was 1 day): the shops a fort cannot do without
+# get their room before the builds that share the workshop floor
+ESSENTIAL_SHOPS = ("Still", "Kitchen", "Butchers", "Farmers", "Masons", "Carpenters", "Mechanics")
+SHOP_SPACE_USERS = ("dining", "furnaces", "tavern", "temple", "captives")
+
+
+def _shop_set(p: dict) -> set:
+    """The workshop types a `workshops` build makes: only=..., else the moodable set plus add, minus skip."""
+    def words(k):
+        return {x.strip() for x in str((p or {}).get(k, "")).split(",") if x.strip()}
+    if words("only"):
+        return words("only")
+    try:
+        base = set(_moodable())
+    except Exception:                                   # noqa: BLE001 - no bp package: add and skip alone
+        base = set()
+    return (base | words("add")) - words("skip")
+
+
+def reserve_shop_room(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
+    """BUG-461: the essential shops (ESSENTIAL_SHOPS) that no workshop of the fort manifest has, built or planned, are drafted before the
+    first build that takes workshop floor (SHOP_SPACE_USERS). A `workshops` build of the draft that makes one of them moves ahead of it;
+    none in the draft: `workshops only=<the missing>` is drafted there. Returns the note lines ([] when nothing changed or the
+    manifest cannot tell); the notes say so too."""
+    try:
+        missing = _cmd.workshops_missing(save_dir, list(ESSENTIAL_SHOPS))
+    except Exception:                                   # noqa: BLE001 - no bp package or manifest: not judged
+        return []
+    if not missing:
+        return []
+    todo = new_builds(doc, prev)
+    user = next((i for i, (_, _, b) in enumerate(todo) if b["tpl"] in SHOP_SPACE_USERS), None)
+    if user is None:
+        return []
+    shop = next((i for i, (_, _, b) in enumerate(todo)
+                 if b["tpl"] == "workshops" and _shop_set(b.get("p") or {}) & set(missing)), None)
+    if shop is not None and shop < user:
+        return []
+    usi, ubi, ub = todo[user]
+    if shop is not None:
+        si, bi, b = todo[shop]
+        del doc["seasons"][si]["build"][bi]
+        if si == usi and bi < ubi:
+            ubi -= 1
+        how = f"workshops@{b['site']}{_cmd.fmt_params(b.get('p'))} moved ahead of {ub['tpl']}"
+    else:
+        b = {"tpl": "workshops", "site": "S1", "p": {"only": ",".join(missing[:6])}}
+        how = f"workshops only={','.join(missing[:6])} drafted ahead of {ub['tpl']}"
+    doc["seasons"][usi]["build"].insert(ubi, b)
+    line = (f"BUG-461: {how}: {', '.join(missing)} missing, the workshop floor goes to them before "
+            f"{', '.join(dict.fromkeys(x['tpl'] for _, _, x in todo if x['tpl'] in SHOP_SPACE_USERS))}")
+    doc["notes"] += "; " + line
+    return [line]
+
+
 def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     """BUG-370: place every NEW build of `doc` in plan order the way `apply` would (place_all: the first free site, no
     overlap with a project or an earlier build) and leave out each one that finds no site that works: all candidate sites in a
@@ -4030,6 +4105,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         seasons[min(3, season + i // BUILDS_PER_SEASON)]["build"].append(b)
     core_stage_order(seasons, kept)              # BUG-403: stage 2 before 3 before 4 among the builds added now
     cap = min(level_cap(lvl, d01), OPTION_A_MAX if d01 != "B" else R_CAPS[3])
+    policy_cap = cap
     if gaps:
         cap = defense_cap(s, cap)                # BUG-377: no growth past the citizens now while the defence is short
     pop = (s.get("pop") or {}).get("cit", 0)
@@ -4052,8 +4128,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         "orders": {"import": libs if libs else [x for x in ((prev or {}).get("orders") or {}).get("import") or []
                                                 if isinstance(x, str)]},
         "trade": dict((prev or {}).get("trade") or {"want": ["bar:iron", "anvil", "cloth"], "sell": ["crafts"]}),
-        "notes": (f"draft from phases {cur}..{target}" + (f"; {star} needs approval: set phase_target {star}"
-                                                          if star else "")
+        "notes": (f"draft from phases {cur}..{target}" + ceiling_held_note(cap, policy_cap, gaps)
+                  + (f"; {star} needs approval: set phase_target {star}" if star else "")
                   + "; site S<k> = k-th free site at apply time (never overlaps other projects or earlier"
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
     }
@@ -4639,11 +4715,25 @@ def build_label(b: dict) -> str:
     return f"{b['tpl']}@{b['site']}" + (f" st{st}" if st is not None else "") + (" (refuge)" if _refuge_stage(b) else "")
 
 
+def ceiling_held_note(cap: int, policy_cap: int, gaps: list) -> str:
+    """BUG-460 (Run 16d Orbblock y374: `plan propose` set pop_ceiling 26 for pop 26 where the goal is 100, with no reason in sight): a
+    ceiling below the policy's cap is said with its blocker, in the notes right after the phases; '' when the ceiling is the policy's."""
+    if cap >= policy_cap or not gaps:
+        return ""
+    return (f"; pop_ceiling {cap} held (policy {policy_cap}): defence short ({', '.join(gaps)}), BUG-377: no growth past the "
+            "citizens now until they are closed")
+
+
+HELD_RE = re.compile(r"pop_ceiling (\d+) held \(policy (\d+)\): ([^;]*?)(?:, BUG-377|;|$)")
+
+
 def _summary(doc: dict) -> str:
     b = "; ".join(f"s{i}: " + (", ".join(build_label(x) for x in se["build"]) or "-")
                   for i, se in enumerate(doc["seasons"]))
     pol = doc["policy"]
-    return (f"y{doc['year']} target {doc['phase_target']} option {pol['option']} ceiling {pol['pop_ceiling']} "
+    m = HELD_RE.search(doc.get("notes") or "")           # BUG-460: a ceiling under the policy's names its blocker
+    held = f" (held, policy {m.group(2)}: {m.group(3)})" if m and int(m.group(1)) == pol["pop_ceiling"] else ""
+    return (f"y{doc['year']} target {doc['phase_target']} option {pol['option']} ceiling {pol['pop_ceiling']}{held} "
             f"beauty {pol['beauty']} | {b} | orders {' '.join(doc.get('orders', {}).get('import', [])) or '-'}")
 
 
@@ -4710,6 +4800,7 @@ def run(args, save_dir: Path) -> int:
         sfit = fit_stone_dig(save_dir, doc, prev)             # BUG-351: a stone dig no free bedrooms site takes
         cfit += [sfit] if sfit else []
         cfit += [sdig] if sdig else []
+        cfit += reserve_shop_room(save_dir, doc, prev)        # BUG-461: Still, Kitchen, Butchers ... before dining and furnaces
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
         if cap_notes(doc):                                    # BUG-440: the notes fit the schema's 2000 bytes
             cfit.append("BUG-440: notes cut under 2000 bytes (the CLI lines above hold the full reasons)")

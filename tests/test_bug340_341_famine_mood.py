@@ -95,7 +95,8 @@ def test_food_hint_names_the_commands_and_famine_is_urgent():
     h = wake.food_hint({"id": "famine", "cmds": CMDS, "opts": ["kitchen", "popcap.lower"], "auto": ["trade", "gather"]})
     assert h.startswith("the kernel already: trade, gather; ")
     assert CMDS[0] in h and "also popcap.lower (d.cmds" in h
-    assert wake.food_hint({"id": "food_low"}) == wake.NEXT["DECISION_NEEDED"]
+    # BUG-459: a decision without a command still hands the player the one that always works
+    assert wake.TRADE_FOOD_CMD in wake.food_hint({"id": "food_low"})
     e = {"type": "DECISION_NEEDED", "cls": "A", "d": {"id": "famine", "cmds": CMDS}}
     assert CMDS[0] in wake.next_hint("DECISION_NEEDED", e)
     line = wake.wake_line({"DECISION_NEEDED": {"c": 1, "n0": 5, "e": {**e, "n": 5, "msg": "famine: 0 food days"}}}, None)

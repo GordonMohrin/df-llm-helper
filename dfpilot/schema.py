@@ -865,7 +865,7 @@ VERB_ARGS: dict[str, Obj] = {
     "plan.reload": Obj(opt={"phases": Bool()}),
     "bp.place": Obj(req={"tpl": TPL, "site": Str(ID_RE)},
                     opt={"p": Obj(extra=SCALAR), "prio": Int(1, 7)}, extra=SCALAR),
-    "bp.cancel": Obj(req={"proj": ID}, opt={"undo": Bool()}),
+    "bp.cancel": Obj(req={"proj": ID}, opt={"undo": Bool(), "reopen": Str(maxbytes=200)}),    # BUG-458: reopen = our walls (x,y,z;...)
     "bp.resume": Obj(req={"proj": ID}),       # BUG-328: a project set aside for want of progress takes a slot again
     # BUG-300: a deliverable of the current phase that cannot be made (tpl = its template, `workshops`, the kind, or
     # stock_<key> / orders_<lib> for those; stage for a staged template), waived with the reason
@@ -925,7 +925,7 @@ VERB_ARGS: dict[str, Obj] = {
     "bridge.rebuild": Obj(req={"bridge": BRIDGE}),
     # BUG-055 (Run 11 note 25, Run 14 notes 61/64): the nobles screen (appoint) and the squads screen (create a squad,
     # choose its leader, add a soldier, give the kind's uniform) as verbs; a squad is a key A/B/C or the game's squad id
-    "appoint": Obj(req={"code": Str(r"^[A-Z_]{3,40}$"), "unit": NAT}),
+    "appoint": Obj(req={"code": Str(r"^[A-Z_]{3,40}$"), "unit": NAT}, opt={"replace": Const(True)}),     # BUG-458: MANAGER / BROKER outside 7 days
     "squad.create": Obj(req={"name": Str(r"^[A-Za-z0-9 _-]{1,30}$")}, opt={"leader": NAT, "assignment": NAT}),
     "squad.leader": Obj(req={"squad": SQUAD, "unit": NAT}),
     "squad.add": Obj(req={"squad": SQUAD, "unit": NAT}),

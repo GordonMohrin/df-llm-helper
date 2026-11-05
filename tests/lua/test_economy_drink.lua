@@ -377,4 +377,76 @@ T.test('BUG-450: a manager with a complete office who validates nothing for 14 d
   T.eq(#decisions(W2, 'manager_stuck'), 0, 'mgr_stuck_days 0 is off')
 end)
 
+-- BUG-458 (Run 16d Orbblock y377: the seal's walls left the manager outside, `appoint code=MANAGER` said 'MANAGER has no vacant
+-- assignment', 5 orders unvalidated for 145 days): a MANAGER (or BROKER) who stands off the citizens' walk group is tracked
+-- (p.out, snapshot.far); manager_stuck names the case from orders.unval_days with a replacement who is not outside and the
+-- command appoint {replace = true}, which works after OUT_DAYS (7) days outside and for nobody who stands among the citizens
+local function far_world(extra)
+  local o = {chair = {128, 74}, table = {127, 74}, plants = 40}
+  for k, v in pairs(extra or {}) do o[k] = v end
+  o.setup = function(W)
+    W.mods.snapshot.M.far = function(K, x, y, z) return x >= 500 end
+    W.act_result('appoint', function(code, id, replace)
+      W.appoints = (W.appoints or {})
+      W.appoints[#W.appoints + 1] = {code, id, replace}
+      return true, 22
+    end)
+  end
+  return world(o)
+end
+T.test('BUG-458: the manager outside the fort for 7 days: manager_stuck says so (not 14 days), names a reachable candidate and ' ..
+       'appoint replace; standing among the citizens: the old 14 days', function()
+  local W = far_world()
+  W.move(2, 520, 5, 137)
+  days(W, 6)
+  T.eq(#decisions(W, 'manager_stuck'), 0, 'outside for 5 days: not yet')
+  days(W, 4)
+  local dn = decisions(W, 'manager_stuck')
+  T.eq(#dn, 1, 'old code: nothing before 14 days')
+  T.ok(dn[1].msg:find('OUTSIDE the fort for', 1, true) or dn[1].d.q:find('OUTSIDE the fort for', 1, true), dn[1].d.q)
+  T.ok(dn[1].d.out >= 7, dn[1].d.out)
+  T.ok(dn[1].d.replace:find([[^dfllm cmd appoint '{"code":"MANAGER","unit":%d+,"replace":true}'$]]), dn[1].d.replace)
+  T.eq(dn[1].d.cmds[1], dn[1].d.replace)
+  local cand = tonumber(dn[1].d.replace:match('"unit":(%d+)'))
+  T.ok(cand ~= 2 and W.unit(cand)._m.x < 500, 'a citizen who is not outside, not the manager: ' .. tostring(cand))
+  -- among the citizens: no such case before mgr_stuck_days
+  local W2 = far_world()
+  days(W2, 10)
+  T.eq(#decisions(W2, 'manager_stuck'), 0)
+end)
+
+T.test('BUG-458: appoint MANAGER replace: refused while he stands among the citizens and before 7 days outside; after 7 days the act ' ..
+       'gets replace=true; a plain appoint refusal says the manager lives and for how long he has been outside', function()
+  local W = far_world()
+  days(W, 2)
+  local r = W.inbox('appoint', {code = 'MANAGER', unit = 4, replace = true})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('MANAGER lives and stands among the citizens', 1, true), r.msg)
+  T.eq(W.appoints, nil, 'the act is not asked')
+  W.move(2, 520, 5, 137)
+  days(W, 3)
+  r = W.inbox('appoint', {code = 'MANAGER', unit = 4, replace = true})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('has stood outside for', 1, true) and r.msg:find('of 7 days', 1, true), r.msg)
+  days(W, 5)
+  r = W.inbox('appoint', {code = 'MANAGER', unit = 4, replace = true})
+  T.eq(r.ok, true, r.msg)
+  T.eq(W.appoints, {{'MANAGER', 4, true}})
+  r = W.inbox('appoint', {code = 'MANAGER', unit = 2, replace = true})
+  T.eq(r.ok, false)
+  -- the plain refusal of the act, with the reason
+  local W2 = far_world()
+  W2.act_result('appoint', function() return false, 'MANAGER has no vacant assignment' end)
+  W2.move(2, 520, 5, 137)
+  days(W2, 9)
+  r = W2.inbox('appoint', {code = 'MANAGER', unit = 4})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('MANAGER has no vacant assignment; MANAGER is alive and has stood outside the fort for', 1, true), r.msg)
+  T.ok(r.msg:find('appoint with replace:true after 7 days', 1, true), r.msg)
+  -- any other post is never replaced
+  r = W2.inbox('appoint', {code = 'CHIEF_MEDICAL_DWARF', unit = 4, replace = true})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('only MANAGER and BROKER', 1, true), r.msg)
+end)
+
 T.done()
