@@ -1802,9 +1802,19 @@ end
 
 -- public (K.call, arbiter FR-36): a threat or depot popup; the reflexes are issued before this returns, and the
 -- arbiter dismisses the popup only after it. kind = siege|ambush|snatcher|beast|no_depot (arbiter's popup kinds)
+-- BUG-480 (Run 16c i3 Castletongs y403: 'With them come monstrous siege engineers!' was in the popup; the census saw the five
+-- trolls 9 ticks later and the alert moved from Kern+ to Tiefe+ with 83 citizens crossing the gates): a siege popup that names
+-- siege engineers or trolls tells siege first, so the first alert is the refuge's
+local function destroyer_words(text)
+  local t = tostring(text or ''):lower()
+  return t:find('siege engineer', 1, true) ~= nil or t:find('troll', 1, true) ~= nil
+end
+M.destroyer_words = destroyer_words
+
 function M.announce(K, kind, text, src)
   kind = tostring(kind or M.kind_of(text) or '')
   if kind == '' then return false end
+  if kind == 'siege' and destroyer_words(text) then K.call('siege', 'expect_destroyers', text) end
   return true, arrival(K, kind, src or 'popup', text)
 end
 
@@ -2712,6 +2722,7 @@ M.on = {
   end,
   REPORT = function(K, ev)
     local kind = M.kind_of(ev.text) or REPORT_KIND[ev.type]
+    if kind == 'siege' and destroyer_words(ev.text) then K.call('siege', 'expect_destroyers', ev.text) end   -- BUG-480
     if kind then arrival(K, kind, 'report', ev.text ~= '' and ev.text or ev.type) end
   end,
   ['EV:DEATHS_3PLUS'] = function(K, ev)

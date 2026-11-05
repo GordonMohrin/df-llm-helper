@@ -141,6 +141,48 @@ local function lever_ok(p, fp)
   end) == true
 end
 
+-- BUG-478/481 (Run 16a i1 Syrupobeyed y387 Pop 96 -> 1, Run 16c i3 Castletongs y403 Pop 100 -> 7): the defense shortfall.
+--   reflever      (no R0 blocker: R0 stops the automatic drills) a bridge gate holds has no linked lever inside the refuge
+--                 burrow (gate.refuge_gaps): in a fight that confines the civilians to the refuge nobody can pull it
+--                 (GATE_FAIL 'its levers lie outside the alert burrow'). State ready.rg, the SIEGE_UNREADY text and
+--                 DECISION_NEEDED refuge_levers name the repair (the fortcore retrofit that builds them).
+--   traps_short   fewer armed traps on the weakest attacker path (the audit's min_traps, and the armed traps in all) than
+--                 the target for the siege this fort expects: max(largest army its sieges met (siege.history), 0.35 x
+--                 citizens) / DEF.per_invader + 4, DEF.traps_floor..DEF.traps_cap, from DEF.trap_pop citizens on (Castletongs:
+--                 9 traps against 34 goblins and 5 trolls, Syrupobeyed: 38 listed, no mechanism to arm them). The listed
+--                 tiles without a trap building need a mechanism each (traps.need): the text says how many and where to
+--                 get them (trade.want mechanism, hard stone). A shortfall older than DEF.grace_days game days in a fort of
+--                 DEF.hold_pop citizens or more holds max-pop where it stands (ceiling why 'defense_short'); R0 only
+--                 blocks R1, the cap itself is R0's 100 as before.
+M.DEF = {trap_pop = 40, traps_floor = 20, traps_cap = 40, per_invader = 2, grace_days = 20, hold_pop = 30,
+         ask_days = 30}
+
+function M.trap_target(K, cit)
+  local d = M.DEF
+  local ok, h = K.call('siege', 'history')
+  local peak = ok and type(h) == 'table' and int(h.peak) or 0
+  local expected = math.max(peak, (cit or 0) * 35 // 100)
+  local t = (expected + d.per_invader - 1) // d.per_invader + 4
+  return math.max(d.traps_floor, math.min(d.traps_cap, t)), expected, peak
+end
+
+-- the traps part: {text, have, target} or nil when no shortfall (or nothing known: no audit, small fort)
+local function trap_shortfall(K, cit)
+  if not cit or cit < M.DEF.trap_pop or type(st.audit) ~= 'table' then return nil end
+  local have = int(st.audit.min_traps) or 0
+  local tv = K.view().traps
+  if type(tv) == 'table' and int(tv.n) then have = math.min(have, int(tv.n)) end
+  local target, expected, peak = M.trap_target(K, cit)
+  rt.ttarget = target
+  if have >= target then return nil end
+  local okn, need = K.call('traps', 'need')
+  need = okn and int(need) or 0
+  local tail = need > 0 and string.format('; %d listed tiles lack a trap: a mechanism each (trade.want mechanism, hard stone)',
+                                          need) or ''
+  return {have = have, target = target, short = string.format('traps short %d<%d', have, target), text = cut(string.format('traps short: %d armed on the weakest path < %d for ~%d invaders%s%s',
+          have, target, expected, peak > 0 and string.format(' (largest army %d)', peak) or '', tail), 200)}
+end
+
 -- bridges and levers: outer + inner exist, every bridge known to gate, >= 2 linked levers each
 local function check_levers(K, man)
   local fails, roles, good = {}, {}, {}
@@ -539,6 +581,32 @@ local function evaluate(K, why)
     local b = f:match('^bridge:(.+)$') or f:match('^levers:(.+)$')
     if not (b and lost[b]) then f1[#f1 + 1] = f end
   end
+  -- BUG-478: a bridge with no linked lever inside the refuge burrow (PEACE only: a fight changes the lists)
+  rt.rlg = nil
+  if man.refuge and K.mode() == 'PEACE' then
+    local okg, gaps = K.call('gate', 'refuge_gaps')
+    if okg and type(gaps) == 'table' and #gaps > 0 then
+      -- not an R0 blocker: R0 stops the automatic drills and a soil fort without mechanisms could never build the levers;
+      -- the DECISION and the SIEGE_UNREADY text carry it, the state says which bridges
+      local rl = {}
+      for _, b in ipairs(gaps) do if not lost[b] then rl[#rl + 1] = b end end
+      rt.rlg = #rl > 0 and rl or nil
+    end
+  end
+  -- BUG-481: the trap shortfall for the siege this fort expects
+  rt.tshort, rt.tshort_s = nil, nil
+  local cit1 = type(cu) == 'table' and int(cu.cit) or nil
+  local ts = K.mode() == 'PEACE' and trap_shortfall(K, cit1) or nil
+  if ts then
+    f1[#f1 + 1] = 'traps_short'
+    rt.tshort, rt.tshort_s = ts.text, ts.short
+  end
+  if ts and not st.dt then st.dt, dirty = now, true
+  elseif not ts and st.dt and K.mode() == 'PEACE' then st.dt, st.dhold, dirty = nil, nil, true end
+  if st.dt and cit1 and cit1 >= M.DEF.hold_pop and now - st.dt >= M.DEF.grace_days * 1200 then
+    if not st.dhold then st.dhold, dirty = cit1, true end
+  end
+  rt.dhold_pop = st.dhold
   -- FR-70: the open perimeter. A bridge seen whole with 2 linked levers is remembered (a lost lever is news)
   for _, name in ipairs(rt.lev.good or {}) do
     st.lvok = st.lvok or {}
@@ -742,6 +810,7 @@ function M.ceiling(K, lvl)
   if ib and ib < c then c, why = ib, 'inbox' end
   if st.fam and st.fam.cap < c then c, why = st.fam.cap, 'famine' end     -- BUG-293
   if rt and rt.phold and rt.phold < c then c, why = rt.phold, 'open_perimeter' end     -- FR-70
+  if rt and rt.dhold_pop and rt.dhold_pop < c then c, why = rt.dhold_pop, 'defense_short' end   -- BUG-481
   return c, why
 end
 
@@ -777,7 +846,7 @@ local function route_fix(route)
   return route .. ' (no wall tile: inspect entrances)'
 end
 
-local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim, office, blost, mws)
+local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, perim, office, blost, mws, tshort)
   local ent
   if routes < 0 then ent = 'entrances not checked yet'
   elseif open == 0 then ent = string.format('%d way%s in, all with a door or bridge', routes, routes == 1 and '' or 's')
@@ -796,10 +865,12 @@ local function unready_msg(fails, routes, open, ents, traps, route, rdry, hout, 
   if blost then head = head .. blost .. '; ' end               -- BUG-096: a burrow lost its wells or the refuge
   if office then head = head .. office .. '; ' end             -- BUG-055: a vacant office, squads without a leader
   if mws then head = head .. mws .. '; ' end                   -- BUG-117: moodable shops missing
+  if tshort then head = head .. tshort .. '; ' end                    -- BUG-481: fewer traps than the expected siege needs
   local tail = '; traps ' .. (traps >= 0 and tostring(traps) or '? (no audit)')
   if #head + #ent + #tail > 200 and open > 0 then              -- the list stands in d.ents: keep the traps visible
     ent = string.format('%d of %d ways in without door or bridge', open, routes)
   end
+  if tshort and #head + #ent + #tail > 200 then head = cut(head, math.max(20, 200 - #ent - #tail)) end   -- BUG-481: the traps tail stays visible
   return cut(head .. ent .. tail, 200)
 end
 
@@ -835,10 +906,10 @@ local function unready(K)
   end
   local routes, open = rt.routes or -1, rt.open or -1
   local perim = rt.pd and string.format('perimeter OPEN %d d (%s)', rt.pd, rt.pw or '?') or nil
-  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim, rt.office, rt.blost, rt.mws),
+  K.emit('SIEGE_UNREADY', 'A', unready_msg(fails, routes, open, ents, traps, rt.route, rt.rdry, rt.hout, perim, rt.office, rt.blost, rt.mws, rt.tshort_s),
          {fails = fails, afails = afails, routes = routes, open = open, ents = ents, traps = traps,
           age = a and math.max(0, now.tick - a.tick) or -1, rdry = rt.rdry, hout = rt.hout, office = rt.office,
-          blost = rt.blost, mws = rt.mws,
+          blost = rt.blost, mws = rt.mws, ts = rt.tshort,
           pd = rt.pd, pw = rt.pd and rt.pw or nil})
   st.unready, dirty = CAD.mark(now, ents, toks), true
 end
@@ -1009,6 +1080,8 @@ function M.init(K)
   -- FR-70: the tick the open perimeter began (nil: closed), what was open, the population max-pop is held at, the
   -- bridges seen whole with their levers
   st.pt, st.phold = int(p.pt), int(p.phold)
+  st.dt, st.dhold = int(p.dt), int(p.dhold)                   -- BUG-481: the trap shortfall since, the pop it holds
+  st.rlq = int(p.rlq)                                         -- BUG-478: the last refuge_levers question
   st.pw = type(p.pw) == 'string' and p.pw:sub(1, 60) or nil
   st.nt, st.wn = int(p.nt), int(p.wn)                         -- review fix merge16: the newest opening, ways in counted
   for name, v in pairs(type(p.lvok) == 'table' and p.lvok or {}) do
@@ -1037,12 +1110,29 @@ function M.init(K)
   dirty = false
 end
 
+-- BUG-478: DECISION_NEEDED refuge_levers (A), once per DEF.ask_days game days while a bridge has no linked lever inside the
+-- refuge burrow in PEACE: what happens in a fight, and the command that builds them (the fortcore retrofit; their links
+-- are gate's own jobs once the levers stand)
+local function ask_reflevers(K, now)
+  if not rt.rlg or K.mode() ~= 'PEACE' or now - rt.boot < M.UNREADY_SETTLE then return end
+  if st.rlq and now - st.rlq < M.DEF.ask_days * 1200 then return end
+  st.rlq, dirty = now, true
+  local q = string.format('bridge%s %s: no linked lever inside the refuge: in a fight the civilians are confined there and ' ..
+                          'nobody can pull %s (GATE_FAIL outside_alert); build the refuge levers',
+                          #rt.rlg == 1 and '' or 's', table.concat(rt.rlg, ','), #rt.rlg == 1 and 'it' or 'them')
+  local cmd = 'bp.place tpl=fortcore site=same stage=3 retrofit=2'
+  K.emit('DECISION_NEEDED', 'A', cut(q .. ': ' .. cmd, 200),
+         {id = 'refuge_levers', q = cut(q, 200), bridge = rt.rlg[1], cmds = {cmd}})
+end
+
 function M.step(K, budget, ctx)
   local now = K.now().tick
   if st.audit_due == 1 or not st.audit_req or now - st.audit_req >= M.AUDIT_EVERY then
     request_audit(K, st.audit_due == 1)
   end
   refresh(K, 'check')
+  ask_reflevers(K, now)
+  save(K)
 end
 
 function M.state(K)
@@ -1069,6 +1159,9 @@ function M.state(K)
   if rt.route then r.route = rt.route end                     -- the bypass / refuge route the last audit names
   if rt.office then r.office = rt.office end                  -- BUG-055: the vacant office R0 `office` names
   if rt.mws then r.mws = rt.mws end                           -- BUG-117: the moodable shops R0 `mood_ws` names
+  if rt.tshort then r.ts = rt.tshort end                      -- BUG-481: the trap shortfall R0 `traps_short` names
+  if rt.ttarget then r.tt = rt.ttarget end                    -- BUG-481: the trap target for the expected siege
+  if rt.rlg then r.rg = rt.rlg end                            -- BUG-478: the bridges without a refuge lever
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
 end
 

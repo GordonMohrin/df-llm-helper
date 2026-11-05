@@ -1400,6 +1400,18 @@ local function impls(state)
     return true, old
   end
 
+  -- designations > remove construction (BUG-479, seal's refuge plug): the wall at x,y,z is designated for removal, the
+  -- designation a player gives with the remove-construction key (dfhack.constructions.designateRemove); only a construction
+  function I.construction_remove(x, y, z)
+    if not (math.type(x) == 'integer' and math.type(y) == 'integer' and math.type(z) == 'integer') then
+      return false, 'need integer x, y, z'
+    end
+    local ok, r = pcall(dfhack.constructions.designateRemove, x, y, z)
+    if not ok then return false, tostring(r) end
+    if r == false then return false, 'no construction at ' .. x .. ',' .. y .. ',' .. z end
+    return true
+  end
+
   -- burrows screen > units (live L3, gate's lever pullers): the burrow's unit list becomes exactly `ids`,
   -- living citizens only; dfhack.burrows.setAssignedUnit (Lua API.txt:2424) is the screen's per-unit toggle
   -- (hack/lua/plugins/sort/unitselector.lua:122). Units no longer found stay listed (fix/dead-units --burrow).

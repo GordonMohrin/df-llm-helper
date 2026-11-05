@@ -128,6 +128,8 @@ C.EVENTS = {
   -- stations.core_ratio x the soldiers, weak squads): refuge and core. PERIMETER_BROKEN d.wait/replaced (BUG-048: a lost
   -- bridge the keeper replaces by a wall and a door; DECISION_NEEDED id bridge_rebuild is not asked any more): the rebuild policy
   BRIDGE_DESTROYED = {cls = 'A', by = 'gate'}, SIEGE_DEEP = {cls = 'A', by = 'siege'},
+  -- BUG-479: the refuge's second line, a wall round the stair foot, queued against building destroyers / lifted in PEACE
+  REFUGE_PLUG = {cls = 'A', by = 'seal'},
   -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand); the
   -- daily shaft check (any explore state, field state) queues it too
   CAVERN_PLUG = {cls = 'A', by = 'runner'},
@@ -289,6 +291,7 @@ C.ACT = {
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
+  construction_remove = {'seal'},                  -- BUG-479: the refuge plug's walls come down in PEACE
   door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
   burrow_tiles = {'seal', 'runner', 'water'},     -- BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
                                                   -- water paints its care burrow Pflege+ (exact)
@@ -442,7 +445,9 @@ C.STATE_SPEC = obj({
                pd = NAT, pw = str(60),     -- FR-70: days the perimeter has been open (PEACE), and what is open
                pn = NAT,                   -- review fix merge16 (BUG-349): days since the newest opening (<= pd)
                office = str(200),          -- BUG-055: the vacant office (or squad leader post) R0 `office` names, with the fix
-               mws = str(200)}),           -- BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command
+               mws = str(200),             -- BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command
+               ts = str(200), tt = NAT,    -- BUG-481: the trap shortfall R0 `traps_short` names, the trap target for the expected siege
+               rg = arr(str(24), 0, 8)}),  -- BUG-478: the bridges with no linked lever inside the refuge (no R0 blocker)
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,

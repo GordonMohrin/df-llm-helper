@@ -2483,6 +2483,12 @@ def defense_gaps(s: dict | None) -> list[str]:
     if _nat(mt):
         if mt < TRAPS_HOLE:
             out.append("traps 0")
+        else:
+            # BUG-481: fewer armed traps than the siege this fort expects (readiness ready.tt: its largest army, 0.35 x citizens)
+            tt = r.get("tt")
+            have = min(mt, tr["n"]) if isinstance(tr, dict) and _nat(tr.get("n")) else mt
+            if _nat(tt) and have < tt:
+                out.append(f"traps short {have}<{tt}")
     elif isinstance(tr, dict) and tr and not tr.get("n"):
         out.append("traps 0")
     mil = s.get("mil") or {}
