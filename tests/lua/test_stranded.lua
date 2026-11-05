@@ -536,6 +536,8 @@ T.test('BUG-417: citizens on a cut-off group over the hunger mark, no bridge bri
        'the commands (once)', function()
   -- old code: STRANDED 'no rescue (no raised ... bridge leads to food)' and nothing else (Run 16d y389: hunger 72,249 of 75,000)
   local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  package.loaded['dfllm.snapshot'] = nil
+  W.load(require('dfllm.snapshot'))
   trapped(W, {{11, 10, 20, 0}, {12, 11, 21, 0}})
   W.unit(11).counters2.hunger_timer, W.unit(12).counters2.hunger_timer = 72000, 70000
   local n = 0
@@ -548,11 +550,62 @@ T.test('BUG-417: citizens on a cut-off group over the hunger mark, no bridge bri
   T.eq({ds[1].cls, ds[1].d.n}, {'A', 2})
   T.ok(ds[1].d.q:find('hunger 72000', 1, true) and ds[1].d.q:find('10,20,5', 1, true), ds[1].d.q)
   local cmds = table.concat(ds[1].d.cmds, ' | ')
-  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('bp sites farms surface=1 --near 10,20,5 --within 20', 1, true), cmds)
+  -- BUG-431: the field is bare stone and dry: no farm and no fishing zone can work there, so none is offered (it answered 'no valid site')
+  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('inspect what=items', 1, true), cmds)
+  T.ok(not cmds:find('farms', 1, true) and not cmds:find('zone.place', 1, true), cmds)
+  T.ok(ds[1].d.q:find('no soil floor and no water on their side', 1, true), ds[1].d.q)
   run(W, 1500)
   local again = 0
   for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_food' then again = again + 1 end end
   T.eq(again, 1, 'not again for the same set')
+end)
+
+local function snapshot_on(W)                               -- siege reads tiles through the snapshot module (not loaded by seal_world)
+  package.loaded['dfllm.snapshot'] = nil
+  W.load(require('dfllm.snapshot'))
+end
+
+local function hungry_decision(W)
+  W.unit(11).counters2.hunger_timer, W.unit(12).counters2.hunger_timer = 72000, 70000
+  local n = 0
+  while n < 40 and #evs(W, 'STRANDED') == 0 do run(W, 100); n = n + 1 end
+  local ds = {}
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_food' then ds[#ds + 1] = x end end
+  T.eq(#ds, 1, 'one decision')
+  return table.concat(ds[1].d.cmds, ' | '), ds[1].d.q
+end
+
+T.test('BUG-431: soil floor on the stranded group within 10 tiles: the farm option is offered at that soil, nothing else', function()
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  SW.draw(W, Z, {'ss', 'ss'}, 14, 22)                          -- a soil patch 4 tiles from them, same walk group
+  SW.regroup(W)
+  snapshot_on(W)
+  trapped(W, {{11, 10, 20, 0}, {12, 11, 21, 0}})
+  local cmds = hungry_decision(W)
+  T.ok(cmds:find('bp sites farms surface=1 --near 14,22,5 --within 12', 1, true), cmds)
+  T.ok(not cmds:find('zone.place', 1, true), cmds)
+end)
+
+T.test('BUG-431: water beside their walk group: a fishing zone round the shore tile is offered (a valid zone.place)', function()
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  SW.draw(W, Z, {'~~', '~~'}, 6, 20)                            -- a pool west of them
+  SW.regroup(W)
+  snapshot_on(W)
+  trapped(W, {{11, 10, 20, 0}, {12, 11, 21, 0}})
+  local cmds = hungry_decision(W)
+  T.ok(cmds:find('zone.place', 1, true) and cmds:find('"type":"fishing"', 1, true), cmds)
+  T.ok(not cmds:find('farms', 1, true), cmds)
+end)
+
+T.test('BUG-431: soil beyond the walk group (a wall between) is not offered', function()
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  SW.fill(W, Z, 13, 0, 13, 30, '#')                             -- a wall across the field; soil behind it
+  SW.draw(W, Z, {'ss', 'ss'}, 14, 22)
+  SW.regroup(W)
+  snapshot_on(W)
+  trapped(W, {{11, 10, 20, 0}, {12, 11, 21, 0}})
+  local cmds = hungry_decision(W)
+  T.ok(not cmds:find('farms', 1, true), cmds)
 end)
 
 T.done()

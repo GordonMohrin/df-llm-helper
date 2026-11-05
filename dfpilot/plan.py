@@ -277,7 +277,8 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "sieged": sieged(save_dir, state),
             "audit": audit_routes(save_dir, state),
             "refuge": refuge,
-            "stone_dig": stone_digs(save_dir),
+            "stone_dig": stone_digs(save_dir, state),               # BUG-430: a dead dig is none
+            "famine": material_famine(save_dir, state),             # BUG-430: no boulders and no logs
             "hosp": hospital_facts(save_dir, state, rooms),
             "office": office_facts(save_dir, rooms, applied),         # BUG-396: an office stands or is planned; a surface site
             "metal": metal_facts(save_dir, man, applied),
@@ -528,6 +529,13 @@ def surface_facts(save_dir: Path, state: dict | None, applied: set | None, core:
     stopped on a breach and cannot move (core_movable). Not looked up without a sites snapshot or the bp package."""
     have = any(t == SURFACE_CORE for t, _ in (applied or ())) or _surface_core_in(_kern_manifest(save_dir))
     out: dict = {"have": have, "need": False, "why": "", "site": None, "p": None}
+    if any(t == "fortcore" for t, _ in (applied or ())):
+        # BUG-429 (Run 16b i2 Glendagger: fortcore stage 1+2 applied, stage 3 stopped on breach:water three times, the player
+        # cancelled each stopped project, so `core` was None and this returned at once: no aqshaft route for years, although the
+        # manifest knew aquifer z123-129): a core that stands is no reason not to pass the aquifer for its remaining stages
+        late = aquifer_late(save_dir, applied)
+        if late:
+            out["aq_late"] = late
     if any(t == "fortcore" for t, _ in (applied or ())) and not (core and not core_movable(core)):
         return out                                         # a fortcore stands or digs (a re-site is the other fix)
     if core:
@@ -590,6 +598,116 @@ def heavy_levels(man: dict | None) -> list[int]:
         if isinstance(pos[2], int) and not isinstance(pos[2], bool):
             out.add(pos[2])
     return sorted(out, reverse=True)
+
+
+AQ_STOP_WHY = ("water", "damp", "heavy_aquifer")         # BUG-429: breach stops that show an aquifer under a dig
+
+
+def fortcore_stops(save_dir: Path) -> list[dict]:
+    """BUG-429: every stop of a fortcore project on water, damp or a heavy aquifer, [{proj, why, pos}] by project: the manifest's
+    `breaches` (the kernel drops a row when the stopped project is cancelled) and the BREACH_STOP events whose project's bp file
+    (also a cancelled one, bp/.cancelled) is a fortcore. The player cancelling a stopped stage 3 does not erase the aquifer."""
+    out: dict[str, dict] = {}
+    for b in _kern_manifest(save_dir).get("breaches") or []:
+        pos = b.get("pos") if isinstance(b, dict) else None
+        if isinstance(b, dict) and b.get("tpl") == "fortcore" and b.get("why") in AQ_STOP_WHY and isinstance(b.get("proj"), str) \
+                and isinstance(pos, list) and len(pos) == 3 and all(_nat(v) for v in pos):
+            out.setdefault(b["proj"], {"proj": b["proj"], "why": b["why"], "pos": list(pos)})
+    tpl_of: dict[str, str | None] = {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        pid, pos = d.get("proj"), d.get("pos")
+        if e.get("type") != "BREACH_STOP" or d.get("why") not in AQ_STOP_WHY or not isinstance(pid, str) or pid in out \
+                or not (isinstance(pos, list) and len(pos) == 3 and all(_nat(v) for v in pos)):
+            continue
+        if pid not in tpl_of:
+            doc = None
+            for q in (Path(save_dir) / "bp" / f"{pid}.json", Path(save_dir) / "bp" / ".cancelled" / f"{pid}.json"):
+                doc = files.read_json(q)
+                if isinstance(doc, dict):
+                    break
+            tpl_of[pid] = doc.get("tpl") if isinstance(doc, dict) else None
+        if tpl_of[pid] == "fortcore":
+            out[pid] = {"proj": pid, "why": d["why"], "pos": list(pos)}
+    return sorted(out.values(), key=lambda r: r["proj"])
+
+
+def aquifer_late(save_dir: Path, applied: set | None) -> dict | None:
+    """BUG-429 (Run 16b i2 Glendagger, Gordon: the fort goes UNDER the aquifer): a fort whose fortcore stands (stage 1 or 2 applied,
+    maybe dug) and has no aqshaft yet, while its remaining stages would meet an aquifer: the manifest / snapshot / breach levels
+    (sites.known_aquifer: aquifer_levels = water_sources aq + damp, the snapshot's aqz, heavy_aquifer and repeated water/damp stops)
+    plus the levels two or more fortcore projects stopped on (fortcore_stops, also of cancelled projects). Due when a fortcore
+    stopped on such water, or the core levels (stage 1's anchor, depth, refuge) meet a known level. {ok, why, aquifers, stops, meet,
+    site: {anchor, rot, id, why}}: ok when `bp sites aqshaft` ranks a free column (sites.aqshaft: public Z4 floor, rock or unknown
+    around it, no open water). None: nothing due, no aquifer known or the bp package unavailable."""
+    if any(t == AQSHAFT for t, _ in (applied or ())) or not any(t == "fortcore" for t, _ in (applied or ())):
+        return None
+    try:
+        snap, man = sites_snapshot(save_dir), fort_manifest(save_dir)
+        aq = set(load_bp("sites").known_aquifer(snap, man))
+        stops = fortcore_stops(save_dir)
+    except (BpError, BpUnavailable, AttributeError):
+        return None
+    by_z: dict[int, set] = {}
+    for r in stops:
+        by_z.setdefault(r["pos"][2], set()).add(r["proj"])
+    aq |= {z for z, ids in by_z.items() if len(ids) >= 2}        # the same level stopped two stages: an aquifer, not a puddle
+    if not aq:
+        return None
+    meet: list[int] = []
+    anchor = core_anchor(save_dir)
+    if anchor:
+        depth, refuge = 3, 3
+        for p in bp_files(save_dir):
+            d = files.read_json(p)
+            if isinstance(d, dict) and d.get("tpl") == "fortcore" and list(d.get("anchor") or []) == list(anchor):
+                prm = d.get("params") or {}
+                depth = prm.get("depth") if _nat(prm.get("depth")) else depth
+                refuge = prm.get("refuge") if _nat(prm.get("refuge")) else refuge
+                break
+        zc = -2 - depth                                           # fortcore.ZE - depth, then the refuge below it
+        meet = sorted((z for z in range(anchor[2] + zc - refuge, anchor[2] + zc + 1) if z in aq or z + 1 in aq), reverse=True)
+    if not stops and not meet:
+        return None
+    out: dict = {"ok": False, "why": "", "aquifers": sorted(aq), "stops": stops[:6], "meet": meet}
+    try:
+        free, _, _ = free_sites(save_dir, "aqshaft", {}, n=1)
+    except BpUnavailable:
+        return None
+    except BpError as e:
+        out["why"] = _cut(str(e).split(": ", 1)[-1])
+        return out
+    if free:
+        out.update(ok=True, site={"anchor": list(free[0]["anchor"]), "rot": free[0].get("rot", 0), "id": free[0].get("id", "S1"),
+                                  "why": free[0].get("why", "")})
+    else:
+        out["why"] = "no free aqshaft column on the snapshot (bp sites aqshaft --fresh)"
+    return out
+
+
+def aquifer_late_swap(builds: list[dict], late: dict) -> str:
+    """BUG-429: the aqshaft for the remaining stages of a core that stands: aqshaft@S1 (the column `bp sites aqshaft` ranks first,
+    after a seal), and every fortcore stage >= 2 build of this draft gets p.aquifer = pass (the runner digs it once the shaft
+    passed, in observe mode). Edits `builds` in place. No column: the note says so and nothing is added. Returns the note."""
+    levels = ", ".join(f"z{z}" for z in sorted(late.get("aquifers") or [], reverse=True))
+    why = ("fortcore stopped at " + ", ".join(f"{r['proj']} {r['why']} z{r['pos'][2]}" for r in late.get("stops") or [])
+           if late.get("stops") else f"the core levels meet z{', z'.join(str(z) for z in late.get('meet') or [])}")
+    if not late.get("ok"):
+        return (f"; BUG-429: the core's remaining stages meet the aquifer ({levels}; {why}) and no aqshaft column is free "
+                f"({_cut(late.get('why') or '?')}): `dfllm bp sites aqshaft --fresh`, `plan check`")
+    site = late["site"]
+    shaft = {"tpl": AQSHAFT, "site": "S1", "p": {"x": site["anchor"][0], "y": site["anchor"][1], "top": site["anchor"][2]}}
+    k = 0
+    while k < len(builds) and builds[k]["tpl"] == SEAL:        # a seal runs first anyway
+        k += 1
+    builds.insert(k, shaft)
+    later = [b for b in builds if b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) >= 2]
+    for b in later:
+        b["p"] = {**(b.get("p") or {}), "aquifer": "pass"}
+    return (f"; BUG-429: the core's remaining stages meet the aquifer ({levels}; {why}): aqshaft@S1 first "
+            f"({site['anchor'][0]},{site['anchor'][1]} z{site['anchor'][2]}: {_cut(site.get('why') or '')})"
+            + (f", fortcore stage(s) {', '.join(str(_stage_of(b['p'])) for b in later)} p.aquifer=pass: they wait for the PASSED shaft"
+               if later else ""))
 
 
 def aquifer_route(save_dir: Path) -> dict:
@@ -854,14 +972,54 @@ def hospital_outside(s: dict | None, adds: list[int]) -> list[str]:
     return out
 
 
-def stone_digs(save_dir: Path) -> bool:
-    """Run 11: a dig template (STONE_DIGS) is under way (a bp file without PROJECT_DONE): its digging gives boulders."""
+DEAD_DIG = re.compile(r"parked|breach:|set aside|stalled|blocked|paused")    # BUG-430: a project row that digs nothing now
+
+
+def dead_dig(row) -> bool:
+    """BUG-430: a state.proj row of a dig project that gives no boulders: parked on a breach, set aside, stalled or paused, or past
+    its digging (stage label `build`: the rooms are dug, the furniture waits)."""
+    if not (isinstance(row, list) and len(row) >= 4):
+        return False
+    label = str(row[1])
+    return bool(DEAD_DIG.search(str(row[-1]))) or label == "build" or label.endswith(".build")
+
+
+def stone_digs(save_dir: Path, state: dict | None = None) -> bool:
+    """Run 11: a dig template (STONE_DIGS) is under way (a bp file without PROJECT_DONE): its digging gives boulders.
+    BUG-430 (Run 16b i2 Glendagger: 0 boulders, 61 pieces suspended for 200-1200 days, no stone dig drafted because an explore parked
+    at breach:heavy_aquifer and a bedrooms dig set aside 'stalled' counted as 'under way'): with the state, a project whose row
+    is dead_dig (parked, set aside, stalled, paused, building) does not count."""
     done = done_projects(save_dir)
+    rows = {r[0]: r for r in (state or {}).get("proj") or [] if isinstance(r, list) and r and isinstance(r[0], str)}
     for p in bp_files(save_dir):
         doc = files.read_json(p)
-        if isinstance(doc, dict) and doc.get("tpl") in STONE_DIGS and p.stem not in done:
+        if isinstance(doc, dict) and doc.get("tpl") in STONE_DIGS and p.stem not in done and not dead_dig(rows.get(p.stem)):
             return True
     return False
+
+
+FAMINE_T = 60 * 1200                       # BUG-430: a MATERIAL_SHORT newer than this (ticks before the newest event) is current
+
+
+def material_famine(save_dir: Path, s: dict | None) -> dict:
+    """BUG-430 (Run 16b i2 Glendagger: 'no material for chair, table: no rock, no logs', 0 boulders, 61 pieces suspended): {short:
+    the newest MATERIAL_SHORT event is current, rock0: no free boulder (state stock.rock 0 or the event's rock 0), logs0: the event
+    says no logs}. {} when nothing is short."""
+    st = (s or {}).get("stock") or {}
+    newest, ev = None, None
+    for e in files.iter_events_rev(save_dir):
+        tick = e.get("tick")
+        if isinstance(tick, int) and not isinstance(tick, bool):
+            newest = tick if newest is None else newest
+            if tick < newest - FAMINE_T:
+                break
+        if e.get("type") == "MATERIAL_SHORT":
+            ev = e.get("d") if isinstance(e.get("d"), dict) else {}
+            break
+    if ev is None:
+        return {}
+    rock = st.get("rock") if _nat(st.get("rock")) else ev.get("rock")
+    return {"short": True, "rock0": rock == 0, "logs0": ev.get("logs") == 0}
 
 
 def done_projects(save_dir: Path) -> set[str]:
@@ -2577,9 +2735,10 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
            if b["tpl"] == EXPLORE and (si, bi) not in keep and "depth" not in (b.get("p") or {})]
     if not new:
         return None
+    avoid = next(((b.get("p") or {}).get("avoid") for _, b in new if (b.get("p") or {}).get("avoid")), "")   # BUG-430: the quarry
     for d in EXPLORE_DEPTHS:
         try:
-            sites, _ = rank_sites(save_dir, EXPLORE, {"depth": d})
+            sites, _ = rank_sites(save_dir, EXPLORE, {"depth": d, **({"avoid": avoid} if avoid else {})})
         except BpUnavailable:
             return None
         except BpError as e:
@@ -2591,7 +2750,8 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
                 for _, b in new:
                     b["p"] = {**(b.get("p") or {}), "depth": d}
             line = f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
-            room = explore_room(save_dir, sites, {"depth": d} if d != EXPLORE_DEPTHS[0] else {})
+            room = explore_room(save_dir, sites, {**({"depth": d} if d != EXPLORE_DEPTHS[0] else {}),
+                                                  **({"avoid": avoid} if avoid else {})})
             if room is None or room >= len(new):
                 return line
             for si, b in new[room:]:                      # BUG-241: the later ones would find no free site
@@ -2629,11 +2789,14 @@ def fit_stone_dig(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     room = explore_room(save_dir, sites, p, tpl=STONE_DIG["tpl"]) if sites else 0
     if room is None or room >= len(new):
         return None
+    first_si = None
     for b in new[room:]:
-        for se in doc["seasons"]:
+        for si, se in enumerate(doc["seasons"]):
             k = next((i for i, x in enumerate(se["build"]) if x is b), None)
             if k is not None:
                 del se["build"][k]
+                first_si = si if first_si is None else min(first_si, si)
+    quarry = quarry_fallback(save_dir, doc, prev, first_si)          # BUG-430: no bedrooms site, but no boulder either
     other = any(b["tpl"] in STONE_DIGS for se in doc["seasons"] for b in se["build"])
     instead = ("the drafted explore/stockroom digs stone meanwhile" if other else
                "stone: a stockroom or explore dig, trade.want stone; the rooms open from the dug Z4 floor of the "
@@ -2641,8 +2804,54 @@ def fit_stone_dig(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     text = (f"stone dig {STONE_DIG['tpl']}@S1 n={p['n']} left out: {room} free site(s) ({len(sites)} ranked"
             + (f"; {why}" if why else "") + f"); {instead}")
     doc["notes"] = doc["notes"].replace(" bedrooms@S1 n=4 first (a stone dig)", " no bedrooms site for a stone dig")
-    doc["notes"] += f"; BUG-351: {text}"
-    return text
+    doc["notes"] += f"; BUG-351: {text}" + (f"; {quarry}" if quarry else "")
+    return text + (f"; {quarry}" if quarry else "")
+
+
+def quarry_fallback(save_dir: Path, doc: dict, prev: dict | None, si: int | None) -> str:
+    """BUG-430 (Run 16b i2 Glendagger: 0 boulders and 0 logs for 200-1200 days, 61 pieces suspended; the stone dig bedrooms@S1 needs a
+    dug Z4 floor and had no site, so propose only warned): while the fort has no free boulder (material_famine) and the draft has
+    no stone dig left, a quarry in its place: `explore` (a 1-wide shaft with short side tunnels from a public core floor, rock or
+    unknown around it, never from the refuge level) with p.avoid = every known aquifer / wet level (so its shaft stops above
+    them), the first season of the left-out dig, at the deepest depth fit_explore finds a site for (never near water: the ranking
+    keeps off revealed water, cavern and damp marks and recorded breaches). '' when there is no famine or the draft has a dig."""
+    if si is None or any(b["tpl"] in STONE_DIGS for se in doc["seasons"] for b in se["build"]):
+        return ""
+    fam = material_famine(save_dir, files.read_state(save_dir) or {})
+    if not (fam.get("short") and fam.get("rock0")):
+        return ""
+    avoid = ""
+    try:
+        sm = load_bp("sites")
+        zs = set(sm.known_aquifer(sites_snapshot(save_dir), fort_manifest(save_dir))) | {r["pos"][2] for r in fortcore_stops(save_dir)}
+        avoid = _z_ranges(sorted(zs))
+    except (BpError, BpUnavailable, AttributeError):
+        pass
+    b = {"tpl": EXPLORE, "site": "S1", "p": {**({"avoid": avoid} if avoid else {})}}
+    if not b["p"]:
+        del b["p"]
+    k = 0
+    while k < len(doc["seasons"][si]["build"]) and doc["seasons"][si]["build"][k]["tpl"] == SEAL:
+        k += 1
+    doc["seasons"][si]["build"].insert(k, b)
+    line = fit_explore(save_dir, doc, prev)
+    if any(x is b for se in doc["seasons"] for x in se["build"]):
+        return (f"BUG-430: no free boulder: quarry {EXPLORE}@S1" + (f" p.avoid={avoid}" if avoid else "")
+                + f" in seasons[{si}] ({_cut(line or '', 100)}) digs stone on the citizens' walk group, off the aquifer levels")
+    return "BUG-430: no free boulder and no safe quarry site either: trade.want stone, block, wood (the caravan); dfllm bp sites explore --fresh"
+
+
+def _z_ranges(zs: list[int]) -> str:
+    """[123, 124, 125, 127] -> '123-125,127' (explore p.avoid)."""
+    out: list[str] = []
+    i = 0
+    while i < len(zs):
+        j = i
+        while j + 1 < len(zs) and zs[j + 1] == zs[j] + 1:
+            j += 1
+        out.append(str(zs[i]) if i == j else f"{zs[i]}-{zs[j]}")
+        i = j + 1
+    return ",".join(out)
 
 
 def fit_explore_kept(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
@@ -3320,7 +3529,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     if low and (STOCKROOM, None) not in done and (info is None or STOCKROOM in info):
         builds.append({"tpl": STOCKROOM, "site": "S1", **({"p": {"still": 0}} if low == ["core_f"] else {})})
     # Run 11: rock below the rock orders' need and no dig under way: a bedrooms dig (boulders, rooms the fort needs)
-    stone = rock_goal(s) if not (fort or {}).get("stone_dig") and (info is None or "bedrooms" in info) and \
+    famine = (fort or {}).get("famine") or {}
+    stone = (rock_goal(s) or ("rock: 0 free boulders and material short (BUG-430)" if famine.get("rock0") else None)) \
+        if not (fort or {}).get("stone_dig") and (info is None or "bedrooms" in info) and \
         all(b["tpl"] not in STONE_DIGS for b in builds) else None
     if stone:
         builds.append(copy.deepcopy(STONE_DIG))
@@ -3441,6 +3652,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         # BUG-412: the core would cut an aquifer level: pass it with a lined shaft first (surface_facts.aq, aquifer_route)
         builds, aq_note = aquifer_core_swap(builds, sf["aq"], bool((fort or {}).get("aqshaft")))
         front = [b for b in front if any(b is x for x in builds)]
+    late = sf.get("aq_late")
+    if isinstance(late, dict) and not (fort or {}).get("aqshaft") and not aq_note and not sc_note and not rb \
+            and (info is None or AQSHAFT in info) and not any(b["tpl"] == AQSHAFT for b in builds):
+        aq_note = aquifer_late_swap(builds, late)                  # BUG-429: a core that stands still passes the aquifer
     if gaps and fresh is None:
         builds = defense_order(builds, front)    # BUG-377: traps and the hall before the growth builds
     depot_note = ""
@@ -3490,6 +3705,15 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["trade"].update({k: list(v) for k, v in live.items() if k in ("want", "sell")})
         doc["notes"] += "; BUG-242: trade.want kept from the running cmd trade.want: " + ",".join(
             doc["trade"]["want"][:8]) + ("..." if len(doc["trade"]["want"]) > 8 else "")
+    if famine.get("short") and (famine.get("rock0") or famine.get("logs0")):
+        # BUG-430: nothing to build with: wood and blocks from the caravan first (a woodcutter needs trees, a mason stone), the stone
+        # dig of this draft (fit_stone_dig: bedrooms, else a shallow explore quarry) digs meanwhile
+        want = doc["trade"].setdefault("want", [])
+        add = [t for t in (("wood",) if famine.get("logs0") else ()) + (("block",) if famine.get("rock0") else ()) if t not in want]
+        want[0:0] = add
+        doc["notes"] += (f"; BUG-430: no {'logs' if famine.get('logs0') else ''}{' and ' if famine.get('logs0') and famine.get('rock0') else ''}"
+                         f"{'free boulders' if famine.get('rock0') else ''} (MATERIAL_SHORT): "
+                         + (f"trade.want {','.join(add)} first, " if add else "") + "a safe stone dig first")
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)

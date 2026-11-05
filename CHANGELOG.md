@@ -1,5 +1,15 @@
 # CHANGELOG dfpilot
 
+## The aqshaft for a core that stands, a quarry in a stone and wood famine, stranded food options that work (BUG-429 to BUG-431, 2026-11-05; offline, live-untested)
+- **Why:** Run 16b i2 Glendagger: aquifer z123-129 known, fortcore stage 3 stopped on breach:water three times, `plan propose` never drafted an aqshaft (the player placed one by hand); 0 boulders
+  and 0 logs for years with 61 pieces suspended. Run 16d i4 Mazelanterns: `stranded_food` offered a farm command that found no site.
+- **BUG-429:** `surface_facts` returned at once for an applied fortcore (the stopped stages were cancelled, so `fort.core` was None): `aquifer_late` now drafts `aqshaft@S1` first and
+  gives the remaining fortcore stages `p.aquifer = pass` (they wait for the PASSED shaft); the aquifer comes from every source (manifest `aquifer_levels` = water_sources aq + damp, snapshot `aqz`,
+  heavy / repeated water stops of fortcore projects incl. cancelled ones via the BREACH_STOP events); `sites.surface_core_why` counts a known level inside the whole dig (8 levels), not only 3.
+- **BUG-430:** `stone_digs` ignores dead digs (parked on a breach, set aside, stalled, building); `material_famine` (MATERIAL_SHORT) puts `wood` / `block` first in `trade.want`, drafts the stone
+  dig, and `fit_stone_dig` -> `quarry_fallback` replaces a stone dig no bedrooms site takes by `explore` with `p.avoid` on the aquifer levels.
+- **BUG-431:** `siege.dry_decision` offers a farm only at a soil floor and a fishing zone only at a shore tile on the stranded group within 10 tiles, else only the reads and a question that says so.
+- **Tests:** tests/test_bug429_431_aqprop.py (13), tests/lua/test_stranded.lua (+3). No contract change. **Live check:** see the three bug files.
 ## Water behind rock: the nearest tile, a sealed-rock cistern intake, an emergency well (BUG-423 to BUG-425, 2026-11-05; offline, live-untested)
 - **Why:** Run 16a i1 Manorsubtle died of thirst (13 of 15) with a brook in a rock gully 8 tiles from the start room: `water_sources` knew one body by its
   first tile in y order (`10,0,158`, the map edge), `bp sites cistern --near 10,0,158` found no site, the cistern template wanted bank floor, the wells read 1-2/7.

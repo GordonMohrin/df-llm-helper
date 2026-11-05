@@ -182,10 +182,11 @@ function SW.draw(W, z, rows, x0, y0, opts)
       if ch == ' ' then W.tiles[k] = nil
       else
         local tt = ({['#'] = T.wall, C = T.cwall, F = T.cfort, X = T.stair, ['<'] = T.up, ['>'] = T.down, r = T.ramp,
-                     ['^'] = T.top, _ = T.open})[ch] or T.floor
+                     ['^'] = T.top, _ = T.open, s = SNW.TT.soil})[ch] or T.floor     -- BUG-431: a soil floor
         local outside = opts.outside == true
         if ch == ',' then outside = true elseif ch == '.' then outside = false end
-        local des = {hidden = ch == '?', outside = outside, flow_size = 0, liquid_type = false, dig = 0, smooth = 0}
+        local des = {hidden = ch == '?', outside = outside, flow_size = ch == '~' and 6 or 0, liquid_type = false, dig = 0,
+                     smooth = 0}                                                  -- BUG-431: '~' water 6/7 on a floor
         local t = {des = des, occ = {building = O.None}, tt = tt}
         W.tiles[k] = t
         if ch == '+' then

@@ -517,6 +517,47 @@ end
 -- rescue (no raised bridge leads to food)', the fort held 387 days of drink; Run 16c y377: the same for drink): the decision
 -- is for food too (stranded_food, drink first when both are short) and comes also when a bridge way exists but the rescue is
 -- refused while the stranded are past the fight mark (death in about two days): the kernel's rescue is bridges only.
+-- BUG-431 (Run 16d Mazelanterns y399: stranded_food offered `bp sites farms surface=1 --near <pos> --within 20` and the ranking answered
+-- 'farms: no valid site on the snapshot' for good: no soil floor on THEIR walk group within 20 tiles; the player had no other option
+-- and the 3 citizens starved): the options are read where the stranded stand, on the revealed tiles of their own walk group within
+-- M.FOOD_R tiles, nearest first: a soil floor (a farm plot can stand there: bp sites farms surface=1) and a tile beside water
+-- (a fishing zone, fish is food). Neither: only the reads are offered and the question says so. Returns soil {x,y}, shore {x,y}.
+M.FOOD_R = 10
+local function food_spots(K, e)
+  local x0, y0, z = e.pos[1], e.pos[2], e.pos[3]
+  local pts, at = {{x0, y0, z}}, {}
+  for r = 1, M.FOOD_R do                                   -- rings outward: nearest first
+    for dx = -r, r do
+      for dy = -r, r do
+        if math.max(math.abs(dx), math.abs(dy)) == r then pts[#pts + 1] = {x0 + dx, y0 + dy, z} end
+      end
+    end
+  end
+  local okg, gs = K.call('snapshot', 'groups', pts)       -- one read of every walk group (snapshot owns the tile reads)
+  if not okg or type(gs) ~= 'table' or type(gs[1]) ~= 'number' or gs[1] <= 0 then return nil, nil, false end
+  local g0 = gs[1]
+  for i, p in ipairs(pts) do at[p[1] .. ',' .. p[2]] = gs[i] end
+  local function mine(x, y) return at[x .. ',' .. y] == g0 end
+  local soil, shore, read = nil, nil, false
+  for _, p in ipairs(pts) do
+    local x, y = p[1], p[2]
+    local okt, t = K.call('snapshot', 'tile', x, y, z)
+    if okt and type(t) == 'table' then
+      read = true
+      if not soil and t.soilmat == true and t.shape == 'FLOOR' and not t.plant and (t.occ or 0) == 0 and mine(x, y) then
+        soil = {x, y}
+      end
+      if not shore and (t.flow or 0) >= 4 and not t.ice then
+        for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+          if not shore and mine(x + d[1], y + d[2]) then shore = {x + d[1], y + d[2]} end
+        end
+      end
+    end
+    if soil and shore then break end
+  end
+  return soil, shore, read
+end
+
 local function dry_decision(K, e, now)
   local pos = string.format('%d,%d,%d', e.pos[1], e.pos[2], e.pos[3])
   local rec = mem.dry_rec
@@ -537,7 +578,21 @@ local function dry_decision(K, e, now)
     cmds[#cmds + 1] = string.format('dfllm bp sites cistern --near %s --within 20 --fresh', pos)
   else
     cmds[#cmds + 1] = 'dfllm cmd inspect what=items'
-    cmds[#cmds + 1] = string.format('dfllm bp sites farms surface=1 --near %s --within 20 --fresh', pos)
+    -- BUG-431: only what can work where they stand (food_spots); the question names what is missing
+    local ok, soil, shore, read = pcall(food_spots, K, e)
+    if not ok then soil, shore, read = nil, nil, false end
+    if soil then
+      cmds[#cmds + 1] = string.format('dfllm bp sites farms surface=1 --near %d,%d,%d --within 12 --fresh', soil[1], soil[2], e.pos[3])
+    end
+    if shore then
+      cmds[#cmds + 1] = string.format("dfllm cmd zone.place '{\"type\":\"fishing\",\"bbox\":[%d,%d,%d,%d,%d,%d]}'", shore[1] - 1,
+                                      shore[2] - 1, e.pos[3], shore[1] + 1, shore[2] + 1, e.pos[3])
+    end
+    if read and not soil and not shore then
+      q = string.format('%d citizens on walk group %d at %s have no food they can reach (%s): no soil floor and no water on their side '
+                        .. 'within %d tiles, so no farm or fishing zone can feed them there. Open a way to the fort (ramp, stair, bridge)',
+                        #e.ids, e.g, pos, own, M.FOOD_R)
+    end
   end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = drink and 'stranded_drink' or 'stranded_food', q = q:sub(1, 200),
          n = #e.ids, cmds = cmds, need = what})

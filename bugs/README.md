@@ -440,6 +440,9 @@ Related: FR-xx, BUG-xx
 | [BUG-426](BUG-426-embark-brook-behind-rock-bare-mountain.md) | fixed (offline, live-untested) | high | Run 16a i1 Manorsubtle: embark rated a brook in a gully of a bare mountain (no soil, no aquifer = no well, no farm) as water; now a water FAIL, ranked below soil + brook bank | tools/embark/checklist.lua:mountain_dry |
 | [BUG-427](BUG-427-embark-rank-90-tiles-25-min-no-output.md) | fixed (offline, live-untested) | medium | `embark rank` over ~90 world tiles took ~25 min and printed nothing at the 590 s timeout; per-tile progress, `--budget` partial rank, `--resume`, early-out on dead tiles | tools/embark/embark.py |
 | [BUG-428](BUG-428-embark-hover-scan-no-lx-ly-variants.md) | fixed (offline, live-untested) | low | the hover scan proposes LX/LY variants itself when the brook is edge-only | tools/embark/embark.py:variant_lines |
+| [BUG-429](BUG-429-aqshaft-not-drafted-for-standing-core.md) | fixed (offline, live-untested) | critical | `plan propose` never drafts the aqshaft for a fortcore that stands (stage 3 stopped on breach:water, projects cancelled) although the aquifer is known | dfpilot/plan.py:surface_facts, aquifer_late |
+| [BUG-430](BUG-430-stone-wood-famine-no-quarry.md) | fixed (offline, live-untested) | high | with 0 boulders and 0 logs the plan drafts no stone dig (a parked explore counts as one) and no wood/block request | dfpilot/plan.py:stone_digs, quarry_fallback |
+| [BUG-431](BUG-431-stranded-food-farm-option-unsolvable.md) | fixed (offline, live-untested) | high | DECISION stranded_food offers `bp sites farms surface=1`, which finds nothing off the fort's soil | lua/dfllm/siege.lua:dry_decision |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

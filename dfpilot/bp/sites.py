@@ -1599,6 +1599,15 @@ def surface_core_why(snap: dict, manifest: dict | None, site: dict | None, p: di
     near = sorted((z for z in known_aquifer(snap, manifest) if z >= lo), reverse=True)
     if near:
         return f"aquifer known at z{near[0]}, {max(az - near[0], 0)} level(s) under the fortcore anchor (z{az})"
+    # BUG-429 (Run 16b i2 Glendagger: the core at z137 dug to z129, aquifer z123-129 known; 'within 3 levels' never said so): a known
+    # aquifer level inside the whole dig (the core digs SURFACE_DIG levels under its anchor, or down to its recorded dig box)
+    dig_lo = az - SURFACE_DIG
+    if site.get("dig"):
+        dig_lo = min(dig_lo, int(site["dig"][2]))
+    inside = sorted((z for z in known_aquifer(snap, manifest) if dig_lo <= z < lo), reverse=True)
+    if inside:
+        return (f"aquifer known at z{inside[0]}, {max(az - inside[0], 0)} level(s) under the fortcore anchor (z{az}), inside its "
+                f"dig (z{dig_lo}..z{az})")
     # a wet layer a breach recorded (heavy_aquifer, damp stops) inside the whole dig range: `_dry` only rules out digs near its
     # stops, a farther site would dig into the same aquifer (Run 16 i1/i3), so the core goes on the surface
     reach = az - SURFACE_DIG
