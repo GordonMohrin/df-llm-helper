@@ -4116,6 +4116,37 @@ def core_probe_args(save_dir: Path, snap: dict | None) -> tuple[dict | None, str
     return {"tpl": AQSHAFT, "site": "S1", "p": {k: col[k] for k in ("x", "y", "top", "depth")}}, col["why"]
 
 
+def core_deepest(anchor: list, prm: dict | None) -> int:
+    """BUG-441 / BUG-501: the deepest level (z) of a fortcore at `anchor`: anchor z - 2 - depth - refuge."""
+    prm = prm or {}
+    depth = prm.get("depth") if _nat(prm.get("depth")) else 3
+    refuge = prm.get("refuge") if _nat(prm.get("refuge")) else 3
+    return anchor[2] - 2 - depth - refuge
+
+
+def core_refusal(save_dir: Path, doc: dict | None, snap: dict | None = None) -> str:
+    """BUG-501 (Run 16a i1 Basementflew y396: `bp.place tpl=fortcore site=S1` was accepted and follow's BUG-441 re-site cancelled it
+    20 s later, only a PROJECT_STALE the player did not read): the reason a hand-placed fortcore stage 1 (no p.aquifer / retrofit)
+    is refused AT ONCE, the same test core_over_aquifer makes later: its deepest level is not under the lowest known aquifer level.
+    '' when the placement stands (a later stage, a retrofit, p.aquifer=above|pass, no aquifer known)."""
+    if not isinstance(doc, dict) or doc.get("tpl") != "fortcore" or not isinstance(doc.get("anchor"), list):
+        return ""
+    prm = doc.get("params") or {}
+    if prm.get("retrofit") or prm.get("aquifer") or (_stage_of(prm) or 1) != 1:
+        return ""
+    levels = known_aquifer_levels(save_dir, snap)
+    if not levels:
+        return ""
+    z_deep = core_deepest(doc["anchor"], prm)
+    if z_deep + 1 < levels[0]:
+        return ""
+    return (f"BUG-501: fortcore stage 1 at {doc['anchor']} reaches down to z{z_deep}, the aquifer is known at "
+            f"{', '.join(f'z{z}' for z in reversed(levels))}: follow would take it back (BUG-441 re-site) within a minute. "
+            "Pass the aquifer: `dfllm plan propose` (aqshaft@S1, then the core with p.aquifer=pass), or place the core with "
+            "p.aquifer=above (keep the fort over it) / a site that lies under the lowest level; `bp sites fortcore aquifer=pass` "
+            "names the sites")
+
+
 def core_over_aquifer(save_dir: Path, state: dict | None) -> dict | None:
     """BUG-441: a fortcore stage 1 (state.proj row s1.*, no PROJECT_DONE, no p.aquifer / retrofit) while the aquifer is known and its
     levels (anchor z - 2 - depth - refuge .. anchor z) lie above or in it, i.e. the deepest core level + 1 is not below the lowest known
@@ -4138,9 +4169,7 @@ def core_over_aquifer(save_dir: Path, state: dict | None) -> dict | None:
         if row is None or not str(row[1]).startswith("s1.") or not isinstance(row[2], int):
             continue                                   # unknown to the state or past stage 1
         started = row[2] > CORE_UNSTARTED_PCT          # review of round 28: any dug tile = started: never cancelled, but said
-        depth = prm.get("depth") if _nat(prm.get("depth")) else 3
-        refuge = prm.get("refuge") if _nat(prm.get("refuge")) else 3
-        z_deep = d["anchor"][2] - 2 - depth - refuge
+        z_deep = core_deepest(d["anchor"], prm)
         if z_deep + 1 < levels[0]:
             continue                                   # the core's deepest level lies under the lowest known aquifer level
         return {"proj": p.stem, "anchor": list(d["anchor"]), "levels": levels, "started": started, "pct": row[2],

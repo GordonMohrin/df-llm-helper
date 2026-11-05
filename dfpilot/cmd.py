@@ -379,22 +379,41 @@ def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):
         return None
     occ = occupancy(save_dir)
     held: set[str] = set()
+    why: dict[str, int] = {}                              # BUG-502: reason -> candidates (the message names them)
+    first: dict[str, str] = {}
 
     def free(c: dict) -> bool:
         try:
             doc = emit_at(tpl, site_params(tpl, params, c) or {}, {"id": "S0", "anchor": list(c["anchor"]),
                                                                     "rot": c.get("rot", 0)}, "S0", "rank")
-        except BpError:
+        except BpError as e:
+            why["emit"] = why.get("emit", 0) + 1
+            first.setdefault("emit", str(e)[:160])
             return False
         if tpl == "aqshaft":
             top = occ.owner.get(tuple(c["anchor"]))      # the shaft starts in a corridor, never in a placed room
-            if not (top is None or top[1] == "fortcore"):
+            if not aq_top_ok(top):
+                held.add(top[0])                          # BUG-502: the owner of the top tile is a holder too
+                why["top"] = why.get("top", 0) + 1
                 return False
         hit = occ.clash(doc)
         held.update(hit)
+        if hit:
+            why["clash"] = why.get("clash", 0) + 1
         return not hit
     free.held = held                                      # type: ignore[attr-defined]  # ids of the holding projects
+    free.why = why                                        # type: ignore[attr-defined]
+    free.first = first                                    # type: ignore[attr-defined]
     return free
+
+
+AQ_TOP_OK_TPLS = ("fortcore", "aqshaft", "explore")       # BUG-502: the floors a shaft may start on: corridors and shafts
+
+
+def aq_top_ok(top) -> bool:
+    """BUG-292 / BUG-502: an aqshaft column starts on unowned ground or on the floor of a fortcore / aqshaft / explore tunnel (a
+    corridor), never on a placed room's floor. The ranking (`free`) and a hand-named anchor (`_place`) use this one test."""
+    return top is None or top[1] in AQ_TOP_OK_TPLS
 
 
 def _rank_v():
@@ -612,13 +631,31 @@ def occupancy(save_dir: Path, skip=()) -> Occupancy:
     BUG-350: a project of a discarded timeline only (stale_bps) is no project: left out."""
     occ = Occupancy()
     skip = set(skip) | stale_bps(save_dir)
+    bottoms: dict[str, int] | None = None
     for p in bp_files(save_dir):
         if p.stem in skip:
             continue
         doc = files.read_json(p)
         if isinstance(doc, dict) and not schema.validate("bp", doc):
+            if doc.get("tpl") == "aqshaft":            # BUG-502: a finished shaft holds the levels it dug, not the rest of its plan
+                bottoms = aq_bottoms(save_dir) if bottoms is None else bottoms
+                bot = bottoms.get(p.stem)
+                if bot is not None:
+                    occ.add(doc, {c for c in footprint(doc) if c[2] >= bot})
+                    continue
             occ.add(doc)
     return occ
+
+
+def aq_bottoms(save_dir: Path) -> dict[str, int]:
+    """BUG-502 (Run 16a i1 Basementflew: the old aqshaft c1a1ac68a2 'blocks his area' for 20 levels after AQ_PASS_DONE ended it at
+    z125): project id -> the lowest level a FINISHED aqshaft dug (AQ_PASS_DONE `bot`), from events.jsonl and its rotation."""
+    out: dict[str, int] = {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "AQ_PASS_DONE" and isinstance(d.get("proj"), str) and isinstance(d.get("bot"), int)                 and not isinstance(d.get("bot"), bool):
+            out.setdefault(d["proj"], d["bot"])
+    return out
 
 
 # ---------------------------------------------------------------- emit and place
@@ -1941,6 +1978,9 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
     if ma:      # live L6: an explicit anchor picked by the LLM (the ranking excludes uneven high ground)
         x, y, z = (int(ma.group(i)) for i in (1, 2, 3))
         params = core_params_of(save_dir, tpl, [x, y, z], params)         # BUG-364: the core's depth/refuge
+        anchor_checked(save_dir, tpl, params, [x, y, z], snap, occ)       # BUG-502: the ranking's own tests
+        if tpl == "aqshaft":
+            params = column_checked(save_dir, tpl, params, [x, y, z], snap)       # BUG-433 rules, as `bp sites aqshaft`
         doc = emit_at(tpl, params, {"id": "S0", "anchor": [x, y, z], "rot": int(ma.group(4) or 0)}, label, bp_id)
         # BUG-163: a later stage at the explicit anchor of this template's earlier stage (plan propose names a re-sited
         # fortcore's anchor so) overlaps its own earlier stages, as `same` does
@@ -2009,6 +2049,31 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
     raise BpError(f"site {label}: only {free} free site(s) for {tpl}{fmt_params(params)} on snapshot {snap_id} "
                   f"({ranked} ranked{'; ' + why if why else ''}); try `dfllm bp sites {tpl} --fresh`"
                   + (f"; {hint}" if hint else ""))
+
+
+def anchor_checked(save_dir: Path, tpl: str, params: dict | None, anchor: list[int], snap: dict | None,
+                   occ: Occupancy | None = None) -> None:
+    """BUG-502 (Run 16a i1 Basementflew y398: `bp sites hospital` / `bp sites aqshaft` listed nothing while `bp.place site=A112_100_131_0`
+    was accepted: a hospital dug into the surface soil 14 tiles from the water, 'door: nothing stands' for 881 days): an explicit
+    anchor passes the tests the ranking makes. aqshaft: the top tile lies on unowned ground or a corridor floor (aq_top_ok); a room
+    template with accepted water known (state water, WATER_TPLS): bp.sites.rank(at=anchor), whose ValueError says why no site stands
+    there and where the nearest valid one is. No snapshot / no water state: unchecked, as before. BpError."""
+    if tpl == "aqshaft" and occ is not None:
+        top = occ.owner.get(tuple(anchor))
+        if not aq_top_ok(top):
+            raise BpError(f"aqshaft@{anchor}: the top tile lies on the floor of {top[1]} project {top[0]}; a shaft starts in a "
+                          "corridor (fortcore, aqshaft or explore floor) or on open ground, not in a placed room (BUG-502, the "
+                          f"ranking's test): bp.cancel {top[0]} or name another column")
+        return
+    if tpl not in WATER_TPLS or water_ctx(save_dir, tpl) is None:
+        return
+    snap = snap or sites_snapshot(save_dir)
+    if snap is None:
+        return
+    try:
+        rank_sites(save_dir, tpl, params, snap, n=RANK_N, where={"at": list(anchor)})
+    except BpError as e:
+        raise BpError(f"{tpl}@A{anchor[0]}_{anchor[1]}_{anchor[2]}: not a site the ranking would offer (BUG-502): {e}") from e
 
 
 def column_checked(save_dir: Path, tpl: str, params: dict | None, col: list[int], snap: dict | None) -> dict:
@@ -2451,6 +2516,11 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
                               "plan.surface_core true allows it")
         doc = emit_bp(save_dir, args["tpl"], place_params(args), args["site"], cmd_id, write=False, snap=snap,
                       need=need)
+        if args["tpl"] == "fortcore":              # BUG-501: refused at once what follow's BUG-441 re-site would cancel later
+            from . import plan as _plan
+            why = _plan.core_refusal(save_dir, doc, snap)
+            if why:
+                raise BpError(why)
         prev = write_bp(save_dir, doc)
     try:
         files.write_inbox(save_dir, verb, args, by, cmd_id, ts)

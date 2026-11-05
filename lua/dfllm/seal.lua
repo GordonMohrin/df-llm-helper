@@ -252,6 +252,21 @@ local function rev(x, y, z)
   return des, occ
 end
 
+-- BUG-503 (Run 16a i1 Basementflew y396-y398, 16c/16d surface forts: `seal at=last` closed 1-4 ways, a few days later the entrance
+-- check named new ones 'sapling no door' / 'shrub no door' on open ground far from the fort; BUG-323/375 only moved each piece onto
+-- the plant): a surface tile under a tree crown has `outside` false although only branches roof it, so the "inside" of the
+-- entrance check ran out through the forest and its rim (the "openings") moved with every crown. A tile counts as open sky when
+-- `outside` says so, or when it is no cave tile (subterranean false) and the tile right above it is a tree part (branch, trunk
+-- branch, twig): nothing built roofs it, it is not the fort. The openings are then the fort's real mouths.
+local TREE_ROOF = {BRANCH = true, TRUNK_BRANCH = true, TWIG = true}
+local shape
+local function open_sky(des, x, y, z)
+  if des.outside then return true end
+  if des.subterranean then return false end
+  local s = shape(x, y, z + 1)
+  return s ~= nil and TREE_ROOF[s.shape] == true
+end
+
 -- walk group of a revealed tile: nil = hidden/off-map, 0 = not walkable
 local function grp(x, y, z)
   local des = dfhack.maps.getTileFlags(x, y, z)
@@ -261,7 +276,7 @@ local function grp(x, y, z)
 end
 
 -- {shape = name, mat = name} of a tile's tiletype (callers checked that it is revealed)
-local function shape(x, y, z)
+shape = function(x, y, z)
   local tt = dfhack.maps.getTileType(x, y, z)
   if tt == nil then return nil end
   local c = mem.tt[tt]
@@ -2313,7 +2328,7 @@ local function bfs(K, G, sources, X, Y, trace)
       learned[#learned + 1] = k
       return false
     end
-    o = des.outside and 1 or 0
+    o = open_sky(des, x, y, z) and 1 or 0         -- BUG-503: a tree crown is no roof
     outs[k] = o
     return o
   end
@@ -2460,7 +2475,7 @@ local function opening_doors(B, G, r)
         local x, y, z = dec3(k)
         local des = rev(x, y, z)
         spend(2)
-        if des and not des.outside then
+        if des and not open_sky(des, x, y, z) then
           P.x, P.y, P.z = x, y, z
           o = (dfhack.maps.getWalkableGroup(P) or 0) == G and 0 or false
         else o = false end
@@ -2562,7 +2577,7 @@ local function learn_perimeter(K, B, reps, E, G)
             elseif o == 1 then outer = true
             else
               local des = rev(x + dx, y + dy, z)
-              if des and des.outside then outer = true
+              if des and open_sky(des, x + dx, y + dy, z) then outer = true
               elseif des then
                 local g = grp(x + dx, y + dy, z)
                 if g and g ~= 0 and g ~= G and E[g] then outer = true end
@@ -3700,7 +3715,7 @@ local function plug_eval(K, args)
     end
   end
   st.plug_try, dirty = t, true
-  local ok, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers')
+  local ok, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers', {noreach = true})
   if not (ok and r1 == true and type(id) == 'string') then
     K.log('warn', 'seal: refuge plug not queued: %s', tostring(id or r1))
     return 'wait:runner refused'
@@ -3744,7 +3759,7 @@ local function plug_watch(K, t)
   local cells = {}
   for _, cell in ipairs(p.tiles or {}) do cells[#cells + 1] = {cell[1], cell[2], cell[3], 'Cw'} end
   if #cells == 0 then return end
-  local okr, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers (project lost)')
+  local okr, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers (project lost)', {noreach = true})
   if okr and r1 == true and type(id) == 'string' then
     K.log('warn', 'seal: refuge plug project %s was lost: queued again as %s', tostring(p.id), id)
     p.id = id
@@ -4528,7 +4543,7 @@ function M.opening_ways(K, x, y, z)
   end
   local function closable(o) return o.gate == 1 or #(o.doors or {}) > 0 end
   local r = {known = true, age = math.max(0, now_t(K) - (int(s.tick) or 0)), routes = #s.openings, here = false,
-             here_closable = false, others = 0}
+             here_closable = false, others = 0, where = {}}
   local first
   for i, o in ipairs(s.openings) do
     local core = near(o.pos) or near(o.out)
@@ -4539,6 +4554,12 @@ function M.opening_ways(K, x, y, z)
       r.here, r.here_closable = true, gap and closable(o)
     elseif closable(o) then
       r.others = r.others + 1
+      -- BUG-504: the way that stays (a door of the opening, else its inside tile), for the seal question's text
+      local d1 = type(o.doors) == 'table' and o.doors[1] or nil
+      local p = type(d1) == 'table' and int(d1[2]) and {d1[2], d1[3], d1[4]} or o.pos
+      if #r.where < 3 and type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) then
+        r.where[#r.where + 1] = string.format('%d,%d,%d%s', p[1], p[2], p[3], o.gate == 1 and ' gate' or ' door')
+      end
     end
   end
   return r

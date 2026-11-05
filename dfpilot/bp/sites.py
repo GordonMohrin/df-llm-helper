@@ -306,9 +306,22 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
                 break
     if free is not None and cands and not out:
         held = sorted(getattr(free, "held", None) or ())
+        why = getattr(free, "why", None) or {}
+        first = getattr(free, "first", None) or {}
+        # BUG-502: say which test held the candidates (a placed project's tiles, the floor of a placed room under the shaft's top
+        # tile, a template that would not emit there) and always name the holders, so the player knows what to cancel
+        parts = []
+        if why.get("clash"):
+            parts.append(f"{why['clash']} touch a placed project's tiles")
+        if why.get("top"):
+            parts.append(f"{why['top']} start on the floor of a placed room (a shaft starts in a corridor: fortcore, aqshaft or "
+                         "explore floor, or open ground)")
+        if why.get("emit"):
+            parts.append(f"{why['emit']} cannot be emitted there ({first.get('emit', '')})")
         raise ValueError(f"{tpl}: all {taken} candidate site(s) lie on or beside placed projects"
-                         f"{' (' + ', '.join(held[:4]) + ')' if held else ''} (bp.cancel frees a parked one's tiles; a "
-                         "seal's cancel drops only its unbuilt pieces)")
+                         f"{' (' + ', '.join(held[:6]) + (' +%d more' % (len(held) - 6) if len(held) > 6 else '') + ')' if held else ''}"
+                         f"{': ' + '; '.join(parts) if parts else ''} (bp.cancel frees a parked one's tiles; a "
+                         "seal's cancel drops only its unbuilt pieces; a finished shaft holds only the levels it dug)")
     return [{"id": f"S{i + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"],
              "why": c["why"] + (f"; walk group {c['walk']}" if "walk" in c else ""),
              **({"water": c["water"]} if "water" in c else {}),
@@ -524,7 +537,8 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
         d, c, i = best
         raise ValueError(f"{tpl}: no site within {near} tiles of accepted water (nearest: {src_label(water, i)}; the "
                          f"nearest candidate {_pos(c['anchor'])} rot{c['rot']} is {d} tiles from it){rw}: dig the core "
-                         f"toward that water (bp.place at an explicit anchor A<x>_<y>_<z> within {near} tiles of it) or "
+                         f"toward that water (a surface fort: `bp sites {tpl} surface=1` offers the open ground beside it; an "
+                         f"explicit anchor A<x>_<y>_<z> must pass this same test, BUG-502) or "
                          "bring water nearer (a water zone on deep water, a piped cistern: python -m "
                          "dfpilot.bp.sites cistern)")
     return out
