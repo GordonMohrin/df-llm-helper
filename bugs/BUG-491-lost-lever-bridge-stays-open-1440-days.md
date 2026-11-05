@@ -1,0 +1,24 @@
+# BUG-491 A bridge destroyed once and rebuilt without lever links stays a no-lever gate for 1440 days: PERIMETER OPEN, pop ceiling stuck, three dragons
+Status: fixed (offline, live-untested)
+Severity: high (the outer gate of the fort was open for 1440 days; the pop ceiling held at 57-59; 3 cave dragons came through 84,73,139, Pop 59 -> 44)
+Found: 2026-11-05, Run 16d i4 Trumpetrealms y383-y387 (`runs/run-16d/FR-BUGS.md` "GATE_FAIL Bruecke O1 bleibt unten", "PERIMETER OPEN 175-191 Tage", "Hoehlendrachen kommen jedes Jahr durch denselben Eingang"; runtime `r16d4-trumpetrealms-site97/` events.jsonl #3723 BRIDGE_DESTROYED, #3914 `GATE O1 rebuilt`, #3916-#5630 ACT_FAIL `act.link_lever failed for gate: needs 2 free reachable mechanisms, 0 found` every 9600 ticks, kern.log; read only)
+Module: `lua/dfllm/seal.lua` (`KP.verdict`, `KP.nolink`, `KP.close`, `gates_pass`), `lua/dfllm/economy.lua` (`M.mech_state`)
+
+## Actual
+Tick 154508185 (BREACH) a cave dragon toppled O1 (BRIDGE_DESTROYED, lost 1x). In quiet PEACE the keeper rebuilt it (`GATE O1 rebuilt`, 154566619): a rebuilt building has no lever links (the links went with the old one). `gate.links` queued `act.link_lever` and DF refused it for 1500 days: the fort had no stone, so no mechanisms (`needs 2 free reachable mechanisms, 0 found`, ~100 ACT_FAIL, retry doubling to 9600 ticks). From then on: gate `no_lever` (GATE_FAIL O1 `no_lever` x9), readiness `levers:O1` -> status `PERIMETER OPEN 191 days: levers lost: O1` while `ways in: all with a door or bridge`, `pop_ceiling` held at 57-59, the drill refused (`no lever:O1`), and the next three sieges walked in through the open gate. `bridge.rebuild` said "replaced by wall + door after 2 more losses to building destroyers": the loss count was 1.
+
+## Root cause
+`seal.lua KP.verdict` (the verdict 'rebuild' or 'replace' for a lost bridge) knew only the loss counts (`perimeter.stop_after` 2 by building destroyers, `vanish_after` 3 without) and the "rebuild not built in 60 days" rule. Nothing asked whether the rebuilt bridge could ever get its levers linked (`economy.mech_free`, `plan_mech` route): a fort without stone rebuilt a gate that no lever can move, and a standing bridge leaves the queue (`gates_pass` `s == 'ok'`), so the keeper never looked at it again.
+
+## Fix
+- `KP.nolink(K, g, t)` (new): a lost bridge needs 2 mechanisms per linked lever (two levers); `economy.mech_free()` counts the free ones, the new `economy.mech_state()` says whether anything can make more (`route` `no stone` / `no Mechanics` = no). Verdict `replace` at once (the FIRST loss, whatever the destroyer count) when nothing can make them; else after `CFG.link_wait` (10 days) from the loss while they are still short. `lost_gates` (readiness `lost:<B>`) uses the same verdict.
+- A rebuild already queued (`g.proj`) whose mechanisms do not come within `link_wait` is cancelled (`runner.cancel_proj`) and becomes the closure (`g.force`).
+- `KP.close`: the BUG-458/487 reach check (`seal.wall_cuts`) on the closure's wall tiles; walls that would cut a citizen or a place off, or whose reach cannot be proven (partial / unknown), make every cell of the closure a door (`KP.cells(fp, true)`, persisted `gq[].ad`, `KP.standing` counts a door on a wall cell). A 1-tile footprint (a door only) is unchanged.
+- Not changed: `gate.lua` and the raise/lower logic. The "soldiers on the bridge" half of the FR (GATE_FAIL O1 blocked by soldiers 26082/26635/26637 on the footprint, squad 100/101 on their way to the station) is the fight on the footprint itself: military already re-stations squads standing at a station that holds a raise (BUG-032, `military.restation`) and the raise never goes onto a unit on the footprint (BUG-310); a raise cannot be made safe while they stand there, so nothing was changed (the BREACH walkers' case is BUG-492).
+
+## Tests
+`tests/lua/test_bug491_lost_lever.lua` (5): first loss with no stone -> a door/closure queued, not the bridge, `lost_gates` closing, PERIMETER_BROKEN `replaced`; `no Mechanics` the same, `ordered` mechanisms rebuild; enough mechanisms rebuild; mechanisms still short after 10 days -> the queued rebuild becomes the closure; 3-tile footprint walls + door with a proven reach, all doors with an unknown reach. Existing `test_bridge_rebuild` (the stop rule) unchanged and green.
+
+## Live check
+After a bridge is destroyed in a fort with no stone: kern.log `seal: bridge O1 ... replaced by wall + door as rpN (lost, its 3 levers need 4 mechanisms and 0 are free (no stone))`, event PERIMETER_BROKEN `why replaced` right after the next quiet PEACE day, `status` `lost:O1` closing instead of `levers lost`. In a fort with mechanisms: the old path (gw rebuild, links).
+Open: the wall needs stone or blocks too (a fort with none waits like every seal, "Seal soll Holz nehmen" is a separate wish); a standing bridge that lost its levers for another reason is not touched.

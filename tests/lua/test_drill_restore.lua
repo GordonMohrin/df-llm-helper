@@ -60,8 +60,8 @@ T.test('BUG-251: the drill lowers O1 and B1 while still in DRILL with the civ al
   T.eq(X.call(W, 'gate', 'kpi').double_toggles, 0)
 end)
 
-T.test('BUG-251: a citizen standing 2 tiles from B1 holds the lowering; after RESTORE_MAX PEACE anyway, DRILL_RESULT ' ..
-       'restore -1 names it, kern.log warns', function()
+T.test('BUG-251: a citizen standing 2 tiles from B1 holds the lowering only for the quiet window (BUG-493: QUIET_DRILL 500 ticks), ' ..
+       'then B1 comes down inside RESTORE_MAX and the drill ends in PEACE', function()
   local W = world{units = {X.cit(99, {pos = {51, 42, Z}})}}            -- inside Kern+, 2 tiles from B1
   start(W)
   local t0 = W.K.now().tick
@@ -70,6 +70,25 @@ T.test('BUG-251: a citizen standing 2 tiles from B1 holds the lowering; after RE
   T.eq(X.call(W, 'drill', 'restoring'), true)
   T.eq(X.call(W, 'drill', 'hold'), 'running')
   T.ok(logged(W, 'gate: B1 down waits for 50 quiet ticks: citizen 99 2 tiles from it'))
+  X.run(W, 1200)
+  T.eq(W.K.mode(), 'PEACE')
+  T.eq(last_mode(W).d.why, 'drill done')
+  local r = W.find_events('DRILL_RESULT')
+  T.eq(#r, 1)
+  T.ok(r[1].d.restore >= 400 and r[1].d.restore < 1200, 'restore ' .. tostring(r[1].d.restore))
+  T.ok(logged(W, 'gate: B1 down: no 50 quiet ticks within 3 tiles in 500 ticks; only the 1-tile margin holds it now'))
+end)
+
+T.test('BUG-251: a citizen standing NEXT to B1 holds the lowering for good; after RESTORE_MAX PEACE anyway, DRILL_RESULT ' ..
+       'restore -1 names it, kern.log warns', function()
+  local W = world{units = {X.cit(99, {pos = {51, 44, Z}})}}            -- inside Kern+
+  start(W)
+  local t0 = W.K.now().tick
+  X.run(W, 1100)                                                       -- B1 is up
+  W.move(99, 51, 41, Z)                                                -- ... and he steps next to it (1 tile)
+  X.run(W, 200)
+  T.eq({W.K.mode(), S.bstate(W, 'B1')}, {'DRILL', 'up'}, 'waits for its quiet window')
+  T.eq(X.call(W, 'drill', 'restoring'), true)
   X.run(W, 1200)
   T.eq(W.K.mode(), 'PEACE')
   T.eq(last_mode(W).d.why, 'drill done, restore timeout')

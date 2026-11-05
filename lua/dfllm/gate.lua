@@ -102,6 +102,11 @@ M.MARGIN = 1
 -- not count: fortcore's melee station is 2 tiles from B1), and a taken pull is cancelled when a unit within MARGIN_DOWN
 -- tiles walks toward the footprint. After QUIET_MAX ticks without such a window only the 1-tile margin holds it (logged).
 M.MARGIN_DOWN, M.QUIET_DOWN, M.QUIET_MAX = 3, 50, 2400
+-- BUG-493 (Run 16 i2/i4: DRILL_RESULT 'B1,O1 not down (timeout)'): the drill's restore gives the bridges drill.RESTORE_MAX (1200) ticks
+-- after its measurement, the quiet window waited up to QUIET_MAX (2400) for the crowd that walks home: the lowering of the drill's end
+-- (why drill_end) gives up the quiet window after QUIET_DRILL ticks and keeps only the 1-tile margin (the pull itself still waits
+-- for every unit on or next to the footprint and cancels for a walker)
+M.QUIET_DRILL = 500
 M.QUIET_LOOK = 25         -- BUG-251: a unit near the footprint is 'standing still' after this many ticks on one tile
 M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with a visible hostile this close (cfg)
 -- BUG-027: while one of our pulls is pending gate re-checks it every frame (M.PENDING); the census pass (every FAST
@@ -126,6 +131,12 @@ M.CROSS_REACH = 13
 -- within CROSS_ESCAPE steps (a stream inside CROSS_REACH must not keep the bridge down until GATE_FAIL)
 M.CROSS_HELD = 0.5
 M.CROSS_ESCAPE = 2
+-- BUG-492 (Run 16 round 31, BREACH with the army parked 25 tiles from B1: citizen 323 was 8 steps out and walking when the
+-- escape let the raise go at +540, B1 moved for ~100 ticks and he was on it at +603): the escape releases only units that
+-- STAND (the same tile for STAND_TICKS ticks: a queue at the gate that never leaves); a unit that walks, within CROSS_REACH
+-- steps of the footprint, holds the raise to the end (then GATE_FAIL blocked names it, never a crush). A unit seen for the
+-- first time counts as walking. DRILL times its raise like SIEGE/BREACH now (BUG-493): the drill's own recall streams over B1.
+M.STAND_TICKS = 25
 M.PATH_R = 24
 -- BUG-335 review: a unit on a stair or ramp up to the bridge stands on another z level (fp_dist nil); the census pass
 -- also keeps those within PATH_R tiles (x/y) and PATH_Z levels of the footprint, for their paths only (their path steps
@@ -189,6 +200,7 @@ M.GU_CAP, M.GU_WAIT = 15, 7200
 
 local FAST_MODES = {SIEGE = true, BREACH = true, DRILL = true}
 local FORCE_MODES = {SIEGE = true, BREACH = true}       -- may RAISE onto a unit, only with a hostile at the gate
+local TIMED_MODES = {SIEGE = true, BREACH = true, DRILL = true}   -- BUG-493: a raise is timed (CROSS_REACH), not held by the whole stream
 local LOCK_MODES = {SIEGE = true, BREACH = true}        -- raise the unmanaged bridges even without the reflex module
 local GATE_ROLES = {outer = true, inner = true}         -- the bridges a lockdown and the peace gates hold up
 local FAIL_WHY = {blocked = 'blocked', no_lever = 'no_lever', no_worker = 'no_worker', outside = 'outside_alert',
@@ -1438,18 +1450,28 @@ local function holders(K, name, fp, sc, dir)
   local seen = {}
   -- Review fix (merge20): in a fight a raise waits for the walkers who can reach the footprint while it moves (CROSS_REACH
   -- steps), whether a hostile is in sight or not; after CROSS_HELD of the DEADLINE held only for those ON it or within CROSS_ESCAPE
-  local lim
-  if dir == 'up' and FORCE_MODES[K.mode()] then
+  local lim, esc
+  if dir == 'up' and TIMED_MODES[K.mode()] then
     lim = M.CROSS_REACH
     local r = rt[name]
     if r then
-      local held = (r.held_sum or 0) + (r.block_since and math.max(0, K.now().tick - r.block_since) or 0)
+      local now = K.now().tick
+      local held = (r.held_sum or 0) + (r.block_since and math.max(0, now - r.block_since) or 0)
+      -- BUG-492: where each crosser stood at the last looks (this call replaces the list: units gone from it are forgotten)
+      local pm, pn = r.stand or {}, {}
+      for _, e in ipairs(cross) do
+        local p = string.format('%d,%d,%d', e.x or -1, e.y or -1, e.z or -1)
+        local o = pm[e.id]
+        pn[e.id] = (o and o.p == p) and o or {p = p, t = now}
+      end
+      r.stand = pn
       if held >= M.DEADLINE * M.CROSS_HELD then
+        esc = true
         lim = M.CROSS_ESCAPE
         if not r.esc then
           r.esc = true
-          K.log('info', 'gate: %s raise held %d ticks: only units on the footprint or within %d steps hold it now',
-                name, held, lim)
+          K.log('info', 'gate: %s raise held %d ticks: only units on the footprint, within %d steps or walking within %d ' ..
+                'steps hold it now', name, held, lim, M.CROSS_REACH)
         end
       end
     end
@@ -1458,8 +1480,15 @@ local function holders(K, name, fp, sc, dir)
     seen[e.id] = true
     if cby[e.id] and e.d > 0 then hold[i] = cby[e.id] end   -- beside it AND walking onto it: the crosser (drop_own keeps it)
   end
+  local pn = esc and rt[name] and rt[name].stand
   for _, e in ipairs(cross) do
-    if not seen[e.id] and (not lim or (e.path or 0) <= lim) then hold[#hold + 1] = e end
+    if not seen[e.id] then
+      local walk = false                                     -- BUG-492: past the escape a walker within CROSS_REACH still holds
+      if esc and (e.path or 0) > lim and (e.path or 0) <= M.CROSS_REACH and pn and pn[e.id] then
+        walk = K.now().tick - pn[e.id].t < M.STAND_TICKS
+      end
+      if walk or not lim or (e.path or 0) <= lim then hold[#hold + 1] = e end
+    end
   end
   return hold, nil
 end
@@ -1562,11 +1591,11 @@ end
 function M.quiet_wait(K, name, r, br, sc, now)
   if not br or SIEGE_DOWN[br.why] or not sc then return false end
   r.qw = r.qw or now
-  if now - r.qw >= M.QUIET_MAX then
+  if now - r.qw >= (br.why == 'drill_end' and M.QUIET_DRILL or M.QUIET_MAX) then
     if not r.qlog then
       r.qlog = true
       K.log('info', 'gate: %s down: no %d quiet ticks within %d tiles in %d ticks; only the %d-tile margin holds it now',
-            name, M.QUIET_DOWN, M.MARGIN_DOWN, M.QUIET_MAX, M.MARGIN)
+            name, M.QUIET_DOWN, M.MARGIN_DOWN, br.why == 'drill_end' and M.QUIET_DRILL or M.QUIET_MAX, M.MARGIN)
     end
     return false
   end

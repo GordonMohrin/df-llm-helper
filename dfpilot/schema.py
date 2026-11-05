@@ -743,7 +743,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AQ_PASS_DONE": ("B", "runner", _d("proj:s", "top:i bot:i lv:ia n:i rest:ia")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i task:s")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
-    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i")),
+    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f")),
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),
@@ -1005,6 +1005,7 @@ STATE = Obj(
                       # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
                       # FR-70: pd = game days the perimeter has been open in PEACE (open_perimeter), pw = what is open
                       opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24), "dref": NAT,
+                           "drill_mech_age": Int(-1),          # BUG-493: age of the newest drill whose bridges worked (-1 none)
                            "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60),
                            # review fix merge16 (BUG-349): pn = game days since the newest opening (<= pd)
                            "pn": NAT,
@@ -1432,7 +1433,7 @@ PERSIST_PHASE = Obj(req={"v": Const(V), "phase": PHASE, "since": TICK, "done": A
 PERSIST_MODE = Obj(req={"v": Const(V), "mode": MODE, "since": TICK, "why": Str(maxbytes=200), "prev": MODE})
 PERSIST_DRILL = Obj(req={"v": Const(V), "streak_fail": NAT, "last": Arr(Obj(req={
     "tick": TICK, "pass": FLAG, "raised": Int(-1), "worn": PCT, "outside": NAT, "dbl": NAT,
-    "fails": Arr(Str(maxbytes=40), hi=20)}), hi=5)})
+    "fails": Arr(Str(maxbytes=40), hi=20)}, opt={"mech": FLAG}), hi=5)})      # BUG-493: mech = only the gear failed
 # BUG-071: carry = the last published pop/stock/labor values {key: {at: tick, v: {leaf: int}}}, so the status keeps them
 # (with their age) across a reboot until the module publishes again
 PERSIST_KERN = Obj(req={"v": Const(V), "ev": NAT, "seq": NAT, "boots": NAT, "disabled": Arr(MODULE)},

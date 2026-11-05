@@ -4848,7 +4848,8 @@ local CHECK = {
     return proj_reached(K, dv.tpl, int(dv.stage)) or (dv.tpl == 'farms' and not dv.stage and Q.farm_plots() > 0)
   end,
   squads = function(K, dv) local v = K.view().mil; return v ~= nil and (v.squads or 0) >= dv.n end,
-  drill = function(K) local v = K.view().ready; return v ~= nil and (v.drill_age or -1) >= 0 end,
+  -- BUG-493: a drill whose bridges worked meets the phase (the R2 pass also wants worn >= 90: a fort without metal never gets it)
+  drill = function(K) local v = K.view().ready; return v ~= nil and ((v.drill_age or -1) >= 0 or (v.drill_mech_age or -1) >= 0) end,
   stock = function(K, dv)
     local v = K.view().stock
     return v ~= nil and type(v[dv.key]) == 'number' and v[dv.key] >= dv.min
