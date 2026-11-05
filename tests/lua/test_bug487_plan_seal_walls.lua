@@ -58,7 +58,8 @@ local function world(o)
   W.load({name = 'seal', every = {ticks = 50},
           opening_ways = function() return {known = true, routes = 2, here = true, here_closable = true, others = 1, age = 0} end,
           wall_cuts = function(K, tiles) W.asked[#W.asked + 1] = tiles; return W.cuts end,
-          locked_out = function(K, tiles) return W.lo end})
+          locked_out = function(K, tiles) W.lo_asked = (W.lo_asked or 0) + 1; return W.lo end,
+          plug_state = function() return W.plugst end})
   W.load(runner)
   W.state()
   return W
@@ -193,6 +194,53 @@ T.test('BUG-487: lock_reopen off: the question only (round 28 behaviour)', funct
   local ev = locked_events(W)
   T.eq(#ev, 1)
   T.eq(ev[1].d.reop, nil)
+end)
+
+-- BUG-479 review (pre-deploy blocker): the lockout scan runs in PEACE and RECOVERY and took the walls of the refuge plug (a runner
+-- repair of 'Cw' cells round the stair foot, seal.plug_state) down while the citizens were confined: lock_reopen undid the plug
+-- before plug_lift (PEACE + PLUG.lift quiet ticks) and put doors the trolls break there
+T.test('BUG-479 review: plug + confined citizens (RECOVERY, then PEACE before the lift): the plug project and its cells are never reopened, ' ..
+       'no question; after plug_lift (the plug is gone) a locked-out wall of the same project goes in PEACE', function()
+  local W, id = locked_world('b479a')
+  H.runs(W, 4)
+  W.plugst = {id = id, n = 1, t = 0, tiles = {{SX, SY, Z}}}
+  W.lo = LO
+  local before = #H.qf_calls(W, 'build', 'undo')
+  W.K.set_mode('SIEGE', 'test')
+  W.K.set_mode('RECOVERY', 'test')
+  H.runs(W, 4, 4000)
+  W.K.set_mode('PEACE', 'test')
+  H.runs(W, 4, 4000)
+  T.eq(#H.qf_calls(W, 'build', 'undo'), before, 'old code: lock_reopen undid the plug wall in RECOVERY')
+  T.eq(#locked_events(W), 0, 'no locked-out question for the plug either')
+  T.eq(H.proj(W, id).done, 1)
+  W.plugst = nil                                          -- plug_lift: the plug is gone, the wall is an ordinary wall again
+  H.runs(W, 3, 4000)
+  T.eq(#H.qf_calls(W, 'build', 'undo'), before + 1, 'after the lift a wall that shuts citizens out is reopened (BUG-487 kept)')
+end)
+
+T.test('BUG-479 review: nothing is reopened while the siege episode lasts (SIEGE, BREACH, RECOVERY, a reflex hold); PEACE reopens a real ' ..
+       'locked-out wall behind a non-plug project (BUG-487 behaviour kept)', function()
+  local W, id = locked_world('b479b')
+  H.runs(W, 4)
+  W.lo = LO
+  W.plugst = {id = 'rp99', n = 8, t = 0, tiles = {{SX + 3, SY, Z}}}   -- a plug elsewhere: it exempts only its own project and cells
+  local before = #H.qf_calls(W, 'build', 'undo')
+  W.lo_asked = nil
+  W.load({name = 'reflex', every = {ticks = 1200}, holding = function() return W.hold end})
+  for _, m in ipairs({'SIEGE', 'BREACH', 'RECOVERY'}) do
+    W.K.set_mode(m, 'test')
+    H.runs(W, 3, 4000)
+    T.eq(#H.qf_calls(W, 'build', 'undo'), before, m .. ': no wall is taken down')
+  end
+  T.eq(W.lo_asked, nil, 'the scan does not even ask in an episode')
+  W.K.set_mode('PEACE', 'test')
+  W.hold = 'lockdown'
+  H.runs(W, 3, 4000)
+  T.eq(#H.qf_calls(W, 'build', 'undo'), before, 'a reflex hold keeps the walls')
+  W.hold = nil
+  H.runs(W, 3, 4000)
+  T.eq(#H.qf_calls(W, 'build', 'undo'), before + 1, 'PEACE, no hold, no plug on this wall: the locked-out wall is reopened')
 end)
 
 T.done()

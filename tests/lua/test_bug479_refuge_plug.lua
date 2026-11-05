@@ -38,7 +38,11 @@ local function fort(seal_p)
   W.burrow('Kern+', {5, 5, Z, 15, 15, Z})
   W.burrow('Tiefe+', {5, 5, Z - 4, 8, 8, Z - 4})
   local repairs = {}
-  W.load(SW.fake('runner', {repair = function(K, cells, why) repairs[#repairs + 1] = {cells = cells, why = why}; return true, 'rp' .. #repairs end}))
+  W.cancelled = {}
+  W.pstate = function() return {done = false} end     -- BUG-479 review: the runner's answer for the plug project (nil = lost)
+  W.load(SW.fake('runner', {repair = function(K, cells, why) repairs[#repairs + 1] = {cells = cells, why = why}; return true, 'rp' .. #repairs end,
+                            plug_proj = function(K, id) return W.pstate(id) end,
+                            cancel_proj = function(K, id) W.cancelled[#W.cancelled + 1] = id; return true end}))
   package.loaded['dfllm.seal'] = nil
   local M = require('dfllm.seal')
   M.PLUG.every = 0                                   -- no verdict cache: the tests change the world between asks
@@ -269,6 +273,54 @@ T.test('BUG-479 review (siege traffic with the real seal): a destroyer walks up 
   T.ok(ok and v == nil, 'the refuge is closed by the plug: ' .. tostring(v))
   T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+')
   T.eq(#W.find_events('REFUGE_FAIL'), 0)
+end)
+
+T.test('BUG-479 review: plug_lift cancels the plug project (walls never built are not built later, unremembered), then removes the walls; ' ..
+       'plug_state names the cells', function()
+  local W, M, repairs = fort()
+  hatch(W)
+  refresh(W)
+  census(W, {TROLL})
+  T.eq(plug(W), 'queued')
+  local ps = select(2, W.K.call('seal', 'plug_state'))
+  T.eq({ps.id, ps.n, #ps.tiles, #ps.tiles[1]}, {'rp1', 8, 8, 3}, 'the wall cells are part of plug_state')
+  W.act_result('construction_remove', function() return true end)
+  W.run(200, {skip = 9})
+  T.eq(W.cancelled, {}, 'a fight (or a plug not yet lifted) does not cancel it')
+  W.set_mode('PEACE')
+  census(W, {})
+  W.run(M.PLUG.lift + 3000, {skip = 9})
+  T.eq(W.cancelled, {'rp1'}, 'old code: the project was left running and built the walls later')
+  T.eq(select(2, W.K.call('seal', 'plug_state')), nil)
+end)
+
+T.test('BUG-479 review: the runner lost the plug project while the plug is held in a fight -> queued again from the recorded cells (once per ' ..
+       'PLUG.retry), plug_state follows the new project; in PEACE nothing is re-queued (the lift takes over)', function()
+  local W, M, repairs = fort()
+  hatch(W)
+  refresh(W)
+  census(W, {TROLL})
+  T.eq(plug(W), 'queued')
+  T.eq(#repairs, 1)
+  W.set_mode('SIEGE')
+  W.run(300, {skip = 9})
+  T.eq(#repairs, 1, 'the project is there: nothing queued again')
+  W.pstate = function() return nil end                    -- lost
+  W.run(300, {skip = 9})
+  T.eq(#repairs, 2, 'old code: held forever, no wall ever built')
+  T.eq(#repairs[2].cells, 8)
+  T.eq(repairs[2].cells[1][4], 'Cw')
+  T.eq(select(2, W.K.call('seal', 'plug_state')).id, 'rp2')
+  W.run(300, {skip = 9})
+  T.eq(#repairs, 2, 'not every step: once per PLUG.retry')
+  W.run(M.PLUG.retry, {skip = 9})
+  T.eq(#repairs, 3, 'rp2 is lost as well (the fake knows no project): queued again after PLUG.retry')
+  W.set_mode('RECOVERY')
+  W.set_mode('PEACE')
+  census(W, {})
+  local n = #repairs
+  W.run(M.PLUG.lift * 2, {skip = 9})
+  T.eq(#repairs, n, 'PEACE: not queued again')
 end)
 
 T.done()

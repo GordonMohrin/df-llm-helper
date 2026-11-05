@@ -3676,6 +3676,30 @@ function M.plug(K, args)
   return s, d
 end
 
+-- BUG-479 review: the plug's runner project is looked after while the plug is held. Lost (the runner has no such project any
+-- more; persisted state, a cancel, a reload) in a fight: queued again from the recorded cells, at most every PLUG.retry ticks
+-- (PEACE lifts it instead)
+local function plug_watch(K, t)
+  local p = st.plug
+  if not p or K.mode() == 'PEACE' then return end
+  local ok, ps = K.call('runner', 'plug_proj', p.id)
+  if not ok or ps ~= nil then return end          -- no runner answer, or the project is there
+  local c = plug_cfg(K)
+  if p.rq and t - p.rq < c.retry then return end
+  p.rq, dirty = t, true
+  local cells = {}
+  for _, cell in ipairs(p.tiles or {}) do cells[#cells + 1] = {cell[1], cell[2], cell[3], 'Cw'} end
+  if #cells == 0 then return end
+  local okr, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers (project lost)')
+  if okr and r1 == true and type(id) == 'string' then
+    K.log('warn', 'seal: refuge plug project %s was lost: queued again as %s', tostring(p.id), id)
+    p.id = id
+    save(K)
+  else
+    K.log('warn', 'seal: refuge plug project %s lost and not queued again: %s', tostring(p.id), tostring(id or r1))
+  end
+end
+
 -- the plug in PEACE: after PLUG.lift ticks without a visible hostile its walls are designated for removal
 local function plug_lift(K, t)
   local p = st.plug
@@ -3685,6 +3709,7 @@ local function plug_lift(K, t)
   if type(h) == 'table' and (int(h.vis) or 0) > 0 then p.q, dirty = nil, true; return end
   if not p.q then p.q, dirty = t, true; return end
   if t - p.q < c.lift then return end
+  K.call('runner', 'cancel_proj', p.id)           -- BUG-479 review: walls never built are not built later, unremembered
   local n = 0
   for _, cell in ipairs(p.tiles or {}) do
     local ok, r = K.act.construction_remove(cell[1], cell[2], cell[3])
@@ -3696,7 +3721,12 @@ local function plug_lift(K, t)
   save(K)
 end
 
-function M.plug_state(K) return st.plug and {id = st.plug.id, n = #(st.plug.tiles or {}), t = st.plug.t} or nil end
+function M.plug_state(K)
+  if not st.plug then return nil end
+  local tiles = {}                                -- BUG-479 review: runner's lockout scan leaves these walls alone
+  for _, c in ipairs(st.plug.tiles or {}) do tiles[#tiles + 1] = {c[1], c[2], c[3]} end
+  return {id = st.plug.id, n = #tiles, t = st.plug.t, tiles = tiles}
+end
 
 -- BUG-336 review (runner's seal_stalled question): what else closes the refuge's stair when its hatch at `at` ({x, y, z},
 -- the stalled piece) is not built. {head = the tile seal at=refuge puts the hatch on now (M.refuge_stair: BUG-313 moves a
@@ -5933,7 +5963,7 @@ function M.step(K, budget, ctx)
     schedule_periodic(K, t)
     episode(K, t)
   end
-  if st.plug then plug_lift(K, t) end                           -- BUG-479
+  if st.plug then plug_watch(K, t); plug_lift(K, t) end         -- BUG-479
   local r = run_jobs(K, t)
   if not next(mem.run) then publish(K) end
   if mem.pub then mem.pub.aud = M.audit_overdue(K) end           -- BUG-146: the data's age while it is overdue

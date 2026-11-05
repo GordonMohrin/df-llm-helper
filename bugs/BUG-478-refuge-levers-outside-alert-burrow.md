@@ -28,3 +28,6 @@ Note: the log cannot tell which of the two (a displaced lever tile, or the 6000-
 
 ## Live check
 `status` of a fort without refuge levers: `ready.rg` lists the bridges and one DECISION `refuge_levers`; after the retrofit and the links `gate.refuge_gaps` is empty, no `outside_alert` GATE_FAIL in a deep defense.
+
+## Open (found in the round 30 pre-deploy review, not fixed here)
+A BREACH crush case exists: citizen 323 stood on B1 at +603 ticks while the army was parked 25 tiles away (the bridge was raised under him). It happens on main as well, not only in the merged round 30. Not changed in this round (gate.lua untouched); the siege traffic test (`tests/lua/test_bug478_481_siege_traffic.lua`) does not cover it. To be examined with its own repro.

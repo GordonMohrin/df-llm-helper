@@ -4251,11 +4251,24 @@ end
 -- door cell (PEACE only, buildingplan makes the door; quickfort's refusal walks the BUG-458 guard: the door stays) and the door
 -- task at the workshop. Returns the tiles reopened
 M.CFG.lock_reopen = true
+-- BUG-479 review: the refuge plug (seal.plug_state: the repair project and its 'Cw' cells round the stair foot) is not a wall the
+-- lockout scan may take down: it separates the refuge from the main walk group on purpose and only seal.plug_lift removes it
+-- (PEACE, PLUG.lift quiet ticks). Returns the project id and the set of 'x,y,z' keys (both empty without a plug)
+function Q.plug_guard(K)
+  local ok, ps = K.call('seal', 'plug_state')
+  if not (ok and type(ps) == 'table') then return nil, {} end
+  local set = {}
+  for _, c in ipairs(type(ps.tiles) == 'table' and ps.tiles or {}) do
+    if type(c) == 'table' and int(c[1]) and int(c[2]) and int(c[3]) then set[int(c[1]) .. ',' .. int(c[2]) .. ',' .. int(c[3])] = true end
+  end
+  return type(ps.id) == 'string' and ps.id ~= '' and ps.id or nil, set
+end
 function Q.lock_reopen(K, ats, own)
   local by, order = {}, {}
+  local pid, pset = Q.plug_guard(K)
   for _, at in ipairs(ats) do
     local proj = own[at]
-    if proj then
+    if proj and proj ~= pid and not pset[at] then
       if not by[proj] then by[proj] = {}; order[#order + 1] = proj end
       by[proj][#by[proj] + 1] = at
     end
@@ -4290,16 +4303,21 @@ end
 function Q.lockout_scan(K, c, t)
   S.lo = S.lo or {}
   local m = K.mode()
-  if m ~= 'PEACE' and m ~= 'RECOVERY' then return end
+  -- BUG-479 review: nothing is taken down while a siege episode lasts (SIEGE, BREACH, RECOVERY, ALERT, a reflex hold): the citizens
+  -- are confined on purpose, a wall that 'shuts them out' is the defense (the refuge plug above all); PEACE only
+  if m ~= 'PEACE' then return end
+  local okh, hold = K.call('reflex', 'holding')
+  if okh and type(hold) == 'string' and hold ~= '' then return end
   if t - (S.lo.t or -DAY) < DAY then return end
   S.lo.t = t
   local tiles, own = {}, {}
+  local pid, pset = Q.plug_guard(K)
   -- BUG-487: every project, the finished ones too (sorted() lists the open ones only: the walls a finished seal left in S.rt.ow were
   -- never looked at once the project was done)
   for _, P in ipairs(S.pd.list) do
-    for _, at in ipairs(Q.own_walls(K, P)) do
+    for _, at in ipairs(P.id ~= pid and Q.own_walls(K, P) or {}) do
       local x, y, z = at:match('^(%-?%d+),(%-?%d+),(%-?%d+)$')
-      if x and #tiles < 48 and not own[at] then
+      if x and #tiles < 48 and not own[at] and not pset[at] then
         tiles[#tiles + 1] = {int(x), int(y), int(z)}
         own[at] = P.id
       end
@@ -7180,5 +7198,21 @@ M.verbs = {
 
 -- BUG-329 (tests, read-only): the building on a tile (a finished farm plot too), build_state's answer in one word
 M.bld_at, M.cls_of = Q.bld_at, Q.cls_of
+
+-- BUG-479 review (seal's plug_lift): the state of a project by id, nil when the runner has no such project (lost), else
+-- {done = bool}
+function M.plug_proj(K, id)
+  local P = type(id) == 'string' and find(id)
+  if not P then return nil end
+  return {done = P.done == 1, cancelling = P.blocked == 'cancel' or nil}
+end
+-- the plug's project is cancelled without an undo: its unbuilt pieces and their jobs go, what stands stays (seal removes it).
+-- true when a project was cancelled or is being, false when it is done or unknown
+function M.cancel_proj(K, id)
+  local P = type(id) == 'string' and find(id)
+  if not P or P.done == 1 then return false end
+  if P.blocked ~= 'cancel' then cancel(K, P, false); rows(K); save(K) end
+  return true
+end
 
 return M
