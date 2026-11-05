@@ -594,8 +594,18 @@ local function dry_decision(K, e, now)
                         #e.ids, e.g, pos, own, M.FOOD_R)
     end
   end
+  -- BUG-449 (Run 16d i4 Mazelanterns: 5-6 citizens a day at the only accepted water, 101 tiles out at the map edge, hunger 70-120k, 8
+  -- starved, the decision offered a farm search): they went out to drink because the fort has no accepted water inside. Said first
+  -- (the question is cut at 200), with the commands that bring water inside and show where they can come in
+  local okn, sn = K.call('water', 'src_near', e.pos[1], e.pos[2], e.pos[3], 20)
+  local atw = okn and type(sn) == 'table' and sn.txt or nil
+  if atw then
+    q = string.format('they stand at %s, the only accepted water of the fort (they went out to drink): bring water inside first; ', atw) .. q
+    cmds[#cmds + 1] = 'dfllm bp sites cistern --fresh'
+    cmds[#cmds + 1] = 'dfllm cmd inspect what=entrances'
+  end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = drink and 'stranded_drink' or 'stranded_food', q = q:sub(1, 200),
-         n = #e.ids, cmds = cmds, need = what})
+         n = #e.ids, cmds = cmds, need = what, at_water = atw})
   K.log('warn', 'siege: stranded_%s: %s', what, q)
 end
 

@@ -1,5 +1,16 @@
 # CHANGELOG dfpilot
 
+## Round 28 (water): a brook counts, far water asks, refuge_drink finds its place, the scan follows the builds, patient water on another walk group (BUG-446 to BUG-449, 2026-11-05; offline, live-untested)
+- **Why:** Run 16b i2 Roadvises / 16c i3 Castletongs (brook=in, the scan met a pond 72 tiles off, drink 0 days), i3 (refuge_drink never found a site, refuge_dry held the population at 29-38 for years), i4 Mazelanterns (water scan 7.3 M ticks old after a finished
+  aqshaft + cistern; 5-6 citizens a day starving at the only water outside), i1 Syrupobeyed (two patients dead of thirst under 'GiveWater jobs running').
+- **BUG-446:** `snapshot.liquids` lists brook tiles (BROOK_BED / BROOK_TOP, 1-3/7) with `brook` n; `water.brook_min` (1) reads them in the survey and the boxes, such a body has a bank and counts for `drink_access` but takes no zone or well and gets a cistern recipe.
+  `drink_access.far` (`water.drink_far` 40): no accepted source and the nearest bank farther off; with no brewable plant and drink under `water.drink_far_d` (120) days economy asks `no_water` with the cistern command at that water.
+- **BUG-447:** `bp.sites.aquifer_ok` no longer drops refuge-level rooms for the levels the refuge room itself stands on (the i3 files: 27 sites dropped, now 3 ranked); an aquifer refusal is named instead of ranking nothing.
+- **BUG-448:** PROJECT_DONE of an aqshaft or cistern queues the water scan and a second one `water.ws_redo` (3 days) later; an aquifer cistern answers the cistern request (`plan._piped_cistern`, follow) like a piped one.
+- **BUG-449:** GiveWater verdict `srcreach` (no accepted source on the patient's walk group), `cmds` / `unrel` in patient_thirst and PATIENT_DYING, `siege` stranded questions name the accepted water the citizens stand at and offer water inside / the entrance check.
+- **Contract:** PATIENT_DYING optional `cmds`, `unrel`; water config `brook_min`, `drink_far`, `drink_far_d`, `ws_redo` (CONTRACTS.md, `fairplay.WATER_LIM`, appendix). **Tests:** tests/lua/test_bug446_449_water.lua (8), test_stranded.lua (1), tests/bp/test_bug447_refuge_aquifer.py (4),
+  tests/test_bug446_449_f28.py (2). **Live check:** see the four bug files.
+
 ## Patients' water without a hospital, stale projects, a plan check verdict that says why (BUG-434 to BUG-436, 2026-11-05; offline, live-untested)
 - **Why:** Run 16d i4 Mazelanterns y399-y404: 11 died of thirst with 272 days of barrel drink (8 patients over 60,000, no hospital, accepted water 83-101 tiles away); nine projects set aside 300-900 days
   (traps 912 d 'waits for trapparts', tombs 461 d, fortcore 341 d); `plan check` REJECTED with no ERROR line in the tail.

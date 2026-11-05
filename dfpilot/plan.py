@@ -3409,12 +3409,14 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
 
 
 def _piped_cistern(save_dir: Path, done: bool = False) -> bool:
-    """BUG-424: a cistern project with a pipe (p.path) is placed and not done yet (done=True: or done)."""
+    """BUG-424: a cistern project with a pipe (p.path) is placed and not done yet (done=True: or done). BUG-448 (Run 16d i4 y404: the
+    aquifer cistern y403s1b3 was done and the request for a cistern was drafted again): an aquifer cistern (p.water = aquifer, no pipe,
+    BUG-434) brings its own water into the fort, so it answers the request like a piped one."""
     fin = done_projects(save_dir)
     for p in bp_files(save_dir):
         doc = files.read_json(p)
-        if isinstance(doc, dict) and doc.get("tpl") == CISTERN["tpl"] and (doc.get("params") or {}).get("path") \
-                and (done or p.stem not in fin):
+        prm = doc.get("params") if isinstance(doc, dict) and isinstance(doc.get("params"), dict) else {}
+        if isinstance(doc, dict) and doc.get("tpl") == CISTERN["tpl"] and (prm.get("path") or prm.get("water") == "aquifer")                 and (done or p.stem not in fin):
             return True
     return False
 

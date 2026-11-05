@@ -295,6 +295,10 @@ WATER_LIM: dict = {
     "well_min": (1, 7),
     # BUG-425: with no other source and no bank, a built well over water >= well_emerg/7 is a slow emergency drink source (0 = never)
     "well_emerg": (0, 7),
+    # BUG-446: brook tiles are read from brook_min/7 up (0 = off); water only farther than drink_far tiles is 'far' (0 = off) and, with
+    # drink under drink_far_d days (0 = off), no brewable plant and no accepted source, asks no_water; BUG-448: a second scan ws_redo
+    # ticks after a finished aqshaft / cistern (0 = none)
+    "brook_min": (0, 7), "drink_far": (0, 400), "drink_far_d": (0, 400), "ws_redo": _TICKS,
     # BUG-054: caregivers (Orderlies) per patient, the bounds, the urgent extra, the additions a run, the hold in days;
     # the death-risk line of PATIENT_DYING and its cadence
     "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20),

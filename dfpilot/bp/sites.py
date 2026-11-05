@@ -275,7 +275,12 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     if aqwell:
         cands = aquifer_well(cands, snap, manifest)         # BUG-262: the basin on an aquifer level, the room dry
     elif tpl not in aquifer.BUILD:                          # a shaft passes the aquifer levels: that is its point
+        before = len(cands)
         cands = aquifer_ok(cands, tpl, p, rects, manifest, snap)  # FR-95/BUG-359: the levels known damp or wet
+        if before and not cands and tpl != "fortcore":            # BUG-447: say so, 'none (0 ranked)' hid it for years
+            lv = ",".join(f"z{z}" for z in sorted(known_aquifer(snap, manifest)))
+            raise ValueError(f"{tpl}: all {before} candidate site(s) lie on or right under a known aquifer level ({lv}); rooms keep "
+                             "one dry level between (a refuge-level room may use the levels the refuge room itself stands on)")
     if tpl in WATER_TPLS and water is not None:
         cands = _near_water(cands, tpl, p, water)
     cands = reachable(cands, snap, tpl, near if near is not None else at)    # BUG-352: the citizens' walk group (snapshot wg)
@@ -777,6 +782,14 @@ def aquifer_ok(cands: list, tpl: str, p: dict, rects: dict, manifest: dict | Non
         if mode == "above":
             return [c for c in cands if c["anchor"][2] + low > max(aq)]
         return [c for c in cands if c["anchor"][2] + low + 1 < min(aq)]
+    # BUG-447 (Run 16c i3 Castletongs: refuge_drink 'none (0 ranked)' for years, 27 sites on the refuge level all dropped here): the
+    # refuge room itself stands on aquifer level z119 and right under z120, it was dug there and holds. A refuge-level room dug off
+    # it (refuge_beds, refuge_drink, a refuge cistern) lies on the very levels the refuge occupies, so those levels do not rule it
+    # out (damp and aquifer marks still do, they are marked tiles of the ranking); every other level of the rule stays
+    if manifest and manifest.get("refuge") and on_refuge(tpl, p):
+        aq = aq - {z for b in refuge_rooms(manifest) for z in range(b[2], b[5] + 2)}
+        if not aq:
+            return cands
     out = []
     for c in cands:
         z0, z1 = c["box"][2], c["box"][5]

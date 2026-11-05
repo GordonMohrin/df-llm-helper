@@ -1089,8 +1089,9 @@ class Follower:
         from .cmd import bp_files
         for f in bp_files(self.dir):
             doc = files.read_json(f)
-            if isinstance(doc, dict) and doc.get("tpl") == "cistern" and (doc.get("params") or {}).get("path"):
-                return
+            prm = doc.get("params") if isinstance(doc, dict) and isinstance(doc.get("params"), dict) else {}
+            if isinstance(doc, dict) and doc.get("tpl") == "cistern" and (prm.get("path") or prm.get("water") == "aquifer"):
+                return                       # BUG-448: an aquifer cistern (no pipe) brings its own water as well
         if self._request_place("cistern_water", "cistern", {}, "S1", now, prio=1):
             self.jobs["cistern_water"].update(access=True, at=at)
 
