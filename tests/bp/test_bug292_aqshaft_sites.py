@@ -50,8 +50,8 @@ def test_aqshaft_prefers_a_column_through_a_known_aquifer_level_and_says_why_non
     aq = bp.rank(snap, "aqshaft", {"depth": 4}, manifest={**man, "aquifer_levels": [z - 2]})
     assert aq[0]["why"].endswith(f"passes aquifer level z{z - 2}") and aq[0]["score"] == plain[0]["score"] + sites.AQ_SPAN
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
-    cav = {**snap, "marks": {**snap.get("marks", {}), "cavern": [[cx, cy, zz] for zz in range(z0, z1 + 1) for cx in range(x0, x1 + 1, 6) for cy in range(y0, y1 + 1, 6)]}}
-    with pytest.raises(ValueError, match="a cavern/warm tile near the column"):
+    cav = {**snap, "marks": {**snap.get("marks", {}), "cavern": [[x0, y0, zz] for zz in range(z0, z1 + 1)]}}
+    with pytest.raises(ValueError, match="an avoided cavern/warm level"):
         bp.rank(cav, "aqshaft", {"depth": 4}, manifest=man)
 
 
