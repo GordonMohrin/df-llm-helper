@@ -105,7 +105,7 @@ def test_the_starter_and_plain_requests_do_not_take_the_surface_path(save, monke
     assert used == ["w"]
 
 
-CMDS = ["dfllm cmd trade.want '{\"want\":[\"stone\",\"bar:iron\"]}'",
+CMDS = ["dfllm cmd trade.want '{\"add\":[\"stone\",\"bar:iron\"]}'",
         "dfllm cmd bp.place '{\"tpl\":\"workshops\",\"site\":\"S1\",\"p\":{\"only\":\"Jewelers,Craftsdwarfs\",\"surface\":1}}'"]
 
 

@@ -311,7 +311,7 @@ C.STATE_OWNERS = {
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['pop.hold'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
-  ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy',
+  ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
   ['stock.dwhy'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
@@ -442,6 +442,7 @@ C.STATE_SPEC = obj({
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
+                    rsoil = FLAG,                   -- BUG-438: the stone digs found only soil (plan propose digs down to hard stone)
                     pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
                     dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target
                     bshort = FLAG,                  -- BUG-382: drink below gather.drink_d and too few brewable plants (runner's gather zone)
@@ -573,7 +574,8 @@ C.STATE_SPEC = obj({
                wst = NAT, wsc = str(96)}),
   -- FR-96/97 (traps.lua, daily): armed (n) of the manifest's trap tiles (m); built, ways trapped / listed, full cage traps,
   -- free cages, listed tiles without a trap (lost; lh: some in the hall), the last cage order
-  traps = obj({n = NAT, m = NAT}, {b = NAT, w = NAT, wn = NAT, f = NAT, c = NAT, l = NAT, lh = FLAG, ord = str(40)}),
+  traps = obj({n = NAT, m = NAT}, {b = NAT, w = NAT, wn = NAT, f = NAT, c = NAT, l = NAT, lh = FLAG, ord = str(40),
+                                       ck = NAT}),    -- BUG-437: citizens killed by our own traps within a year
   -- FR-98: the cavern sweep: st = its phase (off, wait, open, muster, kill, recall, close), why = what it waits for or how the
   -- last one ended, n = beasts seen at the plugged shafts, k/l = kills and losses of the running (else the last) sweep, acc =
   -- plugged cavern shafts, clr = 1 the caverns count as clear (the P6 deliverable sweep)

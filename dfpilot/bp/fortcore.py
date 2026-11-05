@@ -23,7 +23,9 @@ scarce mechanisms to the traps and none to the six levers, so the bridges never 
 levers and links now come first and the traps are a project of their own. Live L2/L3: a weapon trap takes any
 free weapon (buildingplan's ANY_WEAPON filter: a spare pick, battle axe or crossbow sat in the traps) and
 quickfort orders 'iron battle axe' for it (28 MakeWeapon orders a fort without bars never runs); a stone-fall
-trap needs only a mechanism (rock), so stage 4 builds no weapon traps. Farm plots (DESIGN §5.2 stage 1) are a
+trap needs only a mechanism (rock), so stage 4 builds no weapon traps. BUG-437 (Run 16a i1 Syrupobeyed y378): a stone-fall trap hits
+a citizen as well, and the hall is the way out of the fort: three citizens died in it (two of them thirsty). Plan propose does not
+draft stage 4 while drink or food is short or a citizen died to our traps (plan.trap_hold), plan check warns. Farm plots (DESIGN §5.2 stage 1) are a
 separate `farms` room project: a farm plot needs soil or mud, which the core level usually is not.
 
 Lever rooms (live L3, the S3 fallback): `dfllm-levers` (stage 2, the Z3 strip with the O1 and B1 levers) and

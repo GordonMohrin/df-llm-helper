@@ -83,6 +83,11 @@ def surface_need(sf: dict | None) -> bool:
 EXPLORE = "explore"                       # bp/mine.py: stair shaft + side tunnels below the core (Run 10: no ore)
 METAL_WORN = 80                           # soldiers' worn % below which metal is a plan goal (P6 deliverable metal 80)
 EXPLORE_DEPTHS = _cmd.EXPLORE_DEPTHS        # propose tries the explore template's default depth first, then shallower
+# BUG-438 (Run 16a i1 Syrupobeyed y375-y379: hard stone 0 for four years, 36 trapparts, levers, the well and the hospital hung; the explore
+# and stockroom digs lay in soil): a fort whose stone digs found no boulder (state stock.rsoil) digs an explore shaft down to the first hard stone
+# layer: deeper than the default, side tunnels only every SOIL_EVERY levels (a tunnel in soil gives no stone), the deepest depth with a site
+SOIL_DEPTHS = (24, 20, 16)
+SOIL_EVERY = 6
 # Run 11 (Kilrudrabed y432: 1 boulder, ~110 orders 'no rock', 2 picks, 1 bar, idle 46-64 %): a stone dig while the free
 # stone is below what the rock orders and walls want (state stock.rock / rock_need) and no dig template is under way;
 # picks first in trade.want while the fort has fewer than the Miners want (stock.picks / pick_want) and no bars
@@ -2221,6 +2226,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
     warn += _traps.gate(doc, fort)                # FR-96: a way in without a trap lane from P5 on
     warn += defense_gate(doc, s, fort or {}, prev)    # BUG-377: the defence before growth
+    warn += trap_hold_gate(doc, s)                    # BUG-437: no stone-fall traps on the citizens' way out
     errs += core_order_gate(doc)                  # review fix (merge20): fortcore stage k never before stage k-1 in the plan
     ce2, cw2 = sweep_gate(doc, s)                 # FR-99: the cavern sweep from P6 on
     errs += ce2
@@ -2443,6 +2449,19 @@ def defense_cap(s: dict | None, cap: int) -> int:
     return min(cap, max(pop if _nat(pop) else 0, DEFENSE_POP))
 
 
+def trap_hold(s: dict | None) -> str | None:
+    """BUG-437 (Run 16a i1 Syrupobeyed y378: three citizens, two of them thirsty, killed by our own stone-fall traps in the hall, the fort's
+    only way out): stone-fall and weapon traps hit citizens (only cage traps pass them). While the fort has to send citizens out for
+    water or food (`emergency`: drink or food days below EMERGENCY_D, no accepted water) or a citizen died to one of our traps within a
+    year (state traps.ck), the hall (fortcore stage 4) and the bridge lanes (stone-fall) are not drafted and a plan that has them
+    gets a warning; the cage lanes at the doors stay. None when no hold applies."""
+    why = emergency(s)
+    ck = ((s or {}).get("traps") or {}).get("ck")
+    if _nat(ck) and ck > 0:
+        why = (why + "; " if why else "") + f"{ck} citizen(s) killed by our own traps within a year"
+    return why
+
+
 def _hall_due(fort: dict | None, done: set, builds: list, info: dict | None) -> bool:
     """BUG-377: the trap hall (fortcore stage 4) is not applied, not drafted and not blocked: a fortcore stands in the plan's
     history, no breach parked it and its stage 1 is dug."""
@@ -2467,6 +2486,23 @@ def defense_order(builds: list, lead: list) -> list:
     core = [b for b in rest[k:] if b["tpl"] == "fortcore" and (_stage_of(b.get("p") or {}) or 1) < 4]
     tail = [b for b in rest[k:] if not any(b is x for x in core)]
     return rest[:k] + core + first + tail
+
+
+def trap_hold_gate(doc: dict, s: dict | None) -> list[str]:
+    """plan check (BUG-437): a warning for each stone-fall trap build (the hall, fortcore stage 4; traps at=bridges / hall) of the plan
+    while trap_hold says citizens walk the hall for water or food (or one died to our traps)."""
+    why = trap_hold(s)
+    if not why:
+        return []
+    out = []
+    for se in doc.get("seasons") or []:
+        for b in se.get("build") or []:
+            at = str((b.get("p") or {}).get("at") or "").strip().lower()
+            if (b.get("tpl") == "fortcore" and _stage_of(b.get("p") or {}) == 4) or (b.get("tpl") == "traps" and (
+                    at == "bridges" or at.startswith("hall"))):
+                out.append(f"traps: {b['tpl']}{_cmd.fmt_params(b.get('p'))} arms stone-fall traps on the way out of the fort while {why} "
+                           "(BUG-437: they kill the citizens who walk it): drop it until drink and food stand inside")
+    return out
 
 
 def defense_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
@@ -2702,8 +2738,31 @@ def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
         fp = _cmd.fmt_params(b.get("p"))
         lines.append(f"BUG-370: {b['tpl']}@{b['site']}{fp} left out: {why}")
     if lines:
-        doc["notes"] += "; " + "; ".join(lines)
+        doc["notes"] += "; " + ("; ".join(lines) if len(lines) <= FIT_NOTE_LINES else
+                                f"BUG-370: {len(lines)} builds left out ({', '.join(dict.fromkeys(b['tpl'] for b, _ in gone))}): "
+                                f"{_cut(gone[0][1], 80)} (the CLI lists each)")
     return lines
+
+
+NOTES_MAX = 1900          # BUG-440: schema plan.notes is Str(maxbytes=2000); propose stays well under it
+FIT_NOTE_LINES = 3        # BUG-440: more fit_placeable lines than this go into the notes as one summary line
+
+
+def cap_notes(doc: dict) -> bool:
+    """BUG-440 (Run 16a i1 Syrupobeyed y372: propose wrote notes of 2110 bytes, its own check said ERROR $.notes: longer than
+    2000 bytes and the player cut them by hand): the notes are cut at the last note boundary under NOTES_MAX bytes with a closing
+    note that says so. True when cut."""
+    n = doc.get("notes")
+    if not isinstance(n, str):
+        return False
+    raw = n.encode("utf-8")
+    if len(raw) <= NOTES_MAX:
+        return False
+    tail = f"; BUG-440: notes cut ({len(raw)} bytes written)"
+    head = raw[:NOTES_MAX - len(tail)].decode("utf-8", "ignore")
+    k = head.rfind("; ")
+    doc["notes"] = (head[:k] if k > NOTES_MAX // 2 else head) + tail
+    return True
 
 
 def explore_room(save_dir: Path, sites: list, params: dict, tpl: str = EXPLORE) -> int | None:
@@ -2743,9 +2802,11 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     if not new:
         return None
     avoid = next(((b.get("p") or {}).get("avoid") for _, b in new if (b.get("p") or {}).get("avoid")), "")   # BUG-430: the quarry
-    for d in EXPLORE_DEPTHS:
+    soil = soil_fort(files.read_state(save_dir))                                   # BUG-438: down to the first hard stone
+    for d in (SOIL_DEPTHS if soil else ()) + tuple(EXPLORE_DEPTHS):
+        extra = {"every": SOIL_EVERY} if d in SOIL_DEPTHS else {}
         try:
-            sites, _ = rank_sites(save_dir, EXPLORE, {"depth": d, **({"avoid": avoid} if avoid else {})})
+            sites, _ = rank_sites(save_dir, EXPLORE, {"depth": d, **extra, **({"avoid": avoid} if avoid else {})})
         except BpUnavailable:
             return None
         except BpError as e:
@@ -2755,9 +2816,9 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
         if sites:
             if d != EXPLORE_DEPTHS[0]:
                 for _, b in new:
-                    b["p"] = {**(b.get("p") or {}), "depth": d}
+                    b["p"] = {**(b.get("p") or {}), "depth": d, **extra}
             line = f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
-            room = explore_room(save_dir, sites, {**({"depth": d} if d != EXPLORE_DEPTHS[0] else {}),
+            room = explore_room(save_dir, sites, {**({"depth": d} if d != EXPLORE_DEPTHS[0] else {}), **extra,
                                                   **({"avoid": avoid} if avoid else {})})
             if room is None or room >= len(new):
                 return line
@@ -2815,17 +2876,22 @@ def fit_stone_dig(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
     return text + (f"; {quarry}" if quarry else "")
 
 
-def quarry_fallback(save_dir: Path, doc: dict, prev: dict | None, si: int | None) -> str:
+def soil_fort(s: dict | None) -> bool:
+    """BUG-438: the kernel marked the fort soil (state stock.rsoil: the stone digs asked rock_soil times gave not one free boulder)."""
+    return ((s or {}).get("stock") or {}).get("rsoil") == 1
+
+
+def quarry_fallback(save_dir: Path, doc: dict, prev: dict | None, si: int | None, soil: bool = False) -> str:
     """BUG-430 (Run 16b i2 Glendagger: 0 boulders and 0 logs for 200-1200 days, 61 pieces suspended; the stone dig bedrooms@S1 needs a
     dug Z4 floor and had no site, so propose only warned): while the fort has no free boulder (material_famine) and the draft has
     no stone dig left, a quarry in its place: `explore` (a 1-wide shaft with short side tunnels from a public core floor, rock or
     unknown around it, never from the refuge level) with p.avoid = every known aquifer / wet level (so its shaft stops above
     them), the first season of the left-out dig, at the deepest depth fit_explore finds a site for (never near water: the ranking
     keeps off revealed water, cavern and damp marks and recorded breaches). '' when there is no famine or the draft has a dig."""
-    if si is None or any(b["tpl"] in STONE_DIGS for se in doc["seasons"] for b in se["build"]):
+    if si is None or any(b["tpl"] in (EXPLORE,) if soil else b["tpl"] in STONE_DIGS for se in doc["seasons"] for b in se["build"]):
         return ""
     fam = material_famine(save_dir, files.read_state(save_dir) or {})
-    if not (fam.get("short") and fam.get("rock0")):
+    if not soil and not (fam.get("short") and fam.get("rock0")):
         return ""
     avoid = ""
     try:
@@ -2842,10 +2908,48 @@ def quarry_fallback(save_dir: Path, doc: dict, prev: dict | None, si: int | None
         k += 1
     doc["seasons"][si]["build"].insert(k, b)
     line = fit_explore(save_dir, doc, prev)
+    if soil and any(x is b for se in doc["seasons"] for x in se["build"]):
+        return (f"BUG-438: the stone digs found only soil: {EXPLORE}@S1 down to the first hard stone" + (f" p.avoid={avoid}" if avoid else "")
+                + f" in seasons[{si}] ({_cut(line or '', 100)}), side tunnels every {SOIL_EVERY} levels")
     if any(x is b for se in doc["seasons"] for x in se["build"]):
         return (f"BUG-430: no free boulder: quarry {EXPLORE}@S1" + (f" p.avoid={avoid}" if avoid else "")
                 + f" in seasons[{si}] ({_cut(line or '', 100)}) digs stone on the citizens' walk group, off the aquifer levels")
-    return "BUG-430: no free boulder and no safe quarry site either: trade.want stone, block, wood (the caravan); dfllm bp sites explore --fresh"
+    return (f"BUG-{'438: the stone digs found only soil' if soil else '430: no free boulder'} and no safe quarry site either: "
+            "trade.want stone, mechanism, block, wood (the caravan); dfllm bp sites explore --fresh")
+
+
+def soil_dig(save_dir: Path, doc: dict, prev: dict | None) -> str:
+    """BUG-438 (Run 16a i1 Syrupobeyed: stone free 0 for four years; the stone digs bedrooms / stockroom / explore lay in soil, no
+    mechanism for 36 traps, the levers, the well and the hospital): in a soil fort (state stock.rsoil) the drafted stone dig
+    bedrooms (a room in the core's soil floor) is replaced by an explore shaft that fit_explore sends down to the first hard stone
+    (SOIL_DEPTHS), off the aquifer levels; with the rock short and no explore drafted or under way, one is added to the current
+    season. Run before fit_explore. Returns the note ('' when none applies)."""
+    s = files.read_state(save_dir) or {}
+    if not soil_fort(s):
+        return ""
+    swapped = [(si, b) for si, _, b in new_builds(doc, prev) if b == STONE_DIG]
+    for si, b in swapped:
+        doc["seasons"][si]["build"] = [x for x in doc["seasons"][si]["build"] if x is not b]
+    if not swapped and not (rock_goal(s) and not any(b["tpl"] == EXPLORE for se in doc["seasons"] for b in se["build"])):
+        return ""
+    if not swapped and explore_open(save_dir):
+        return ""
+    season = (s.get("t") or {}).get("season", 0)
+    si = min(si for si, _ in swapped) if swapped else min(max(season if isinstance(season, int) else 0, 0), len(doc["seasons"]) - 1)
+    note = quarry_fallback(save_dir, doc, prev, si, soil=True)
+    if note:
+        doc["notes"] += "; " + note
+    return note
+
+
+def explore_open(save_dir: Path) -> bool:
+    """BUG-438: an explore project (a bp file without PROJECT_DONE) is under way."""
+    done = done_projects(save_dir)
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") == EXPLORE and p.stem not in done:
+            return True
+    return False
 
 
 def _z_ranges(zs: list[int]) -> str:
@@ -3598,9 +3702,14 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     rq_builds, rq_note = request_drafts(s, fort, done, builds, info, kept_b)    # BUG-418: requests, mood shops, refuge drink
     builds += rq_builds
     gaps = defense_on(s, target)                 # BUG-377: refuge dry / traps short / armor worn: defence before growth
-    tb, tnote = _traps.draft(fort, max(target, _traps.TRAPS_PHASE) if gaps else target, builds, prev, year, info, rb)   # FR-96
+    thold = trap_hold(s)                         # BUG-437: no stone-fall traps on the citizens' way out
+    tb, tnote = _traps.draft(fort, max(target, _traps.TRAPS_PHASE) if gaps else target, builds, prev, year, info, rb,
+                             hold=bool(thold))   # FR-96
     builds += tb                                 # BUG-317: and at=bridges for the bridge ways
-    hall = bool(gaps) and any(g.startswith("traps") for g in gaps) and _hall_due(fort, done, builds, info)
+    hall = bool(gaps) and any(g.startswith("traps") for g in gaps) and _hall_due(fort, done, builds, info) and not thold
+    if thold and bool(gaps) and any(g.startswith("traps") for g in gaps):
+        tnote += (f"; BUG-437: {thold}: the trap hall (fortcore stage 4) and the bridge lanes wait (stone-fall traps hit citizens; "
+                  "cage lanes at the doors only)")
     if hall:                                     # BUG-377: the P6 hall without waiting for the phase list (P5's drill)
         builds.append(copy.deepcopy(HALL))
     if applied is not None:                      # BUG-164: no stage 3 @same without the core's stage 2 (known applied)
@@ -3736,6 +3845,13 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["notes"] += (f"; BUG-430: no {'logs' if famine.get('logs0') else ''}{' and ' if famine.get('logs0') and famine.get('rock0') else ''}"
                          f"{'free boulders' if famine.get('rock0') else ''} (MATERIAL_SHORT): "
                          + (f"trade.want {','.join(add)} first, " if add else "") + "a safe stone dig first")
+    if soil_fort(s):
+        # BUG-438: no hard stone for mechanisms (levers, traps, wells, hospital): the caravans bring mechanisms and stone meanwhile
+        want = doc["trade"].setdefault("want", [])
+        add = [t for t in ("mechanism", "stone") if t not in want]
+        want[0:0] = add
+        if add:
+            doc["notes"] += f"; BUG-438: soil fort (no free boulder): trade.want {','.join(add)} first, an explore shaft down to hard stone"
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
@@ -4180,9 +4296,11 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     doc = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, live=live)
     fit_core(save_dir, doc, prev)                             # BUG-195: never a core stage another project blocks
     fit_core_depth(save_dir, doc, prev)                       # BUG-364: a shallower core where the aquifer is near
+    soil_dig(save_dir, doc, prev)                             # BUG-438: a soil fort digs down to the first hard stone
     fit_explore(save_dir, doc, prev)                          # BUG-367: the explore's depth fits the levels known now
     fit_stone_dig(save_dir, doc, prev)                        # BUG-351: never a stone dig without a free site
     fit_placeable(save_dir, doc, prev)                        # BUG-370: nor a build whose site is out of reach or does not fit
+    cap_notes(doc)                                            # BUG-440: the notes fit the schema's 2000 bytes
     doc["phase_target"] = cur
     doc["orders"] = copy.deepcopy((prev or {}).get("orders") or {"import": []})      # no new library, the old ones stay
     doc = _with_new(doc, prev, [(si, b) for si, _, b in new_builds(doc, prev) if minimal_ok(b)])
@@ -4194,9 +4312,11 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
                        live=live)
         fit_core(save_dir, cand, prev)
         fit_core_depth(save_dir, cand, prev)
+        soil_dig(save_dir, cand, prev)
         fit_explore(save_dir, cand, prev)
         fit_stone_dig(save_dir, cand, prev)
         fit_placeable(save_dir, cand, prev)
+        cap_notes(cand)
         if cand["phase_target"] == nxt:                       # the rebuild policy keeps the phase (propose)
             cerrs, cwarn = _fix_rounds(cand, state, prev, fort, decisions, tp, season, lambda b: True)
             best = (cand, cwarn) if not cerrs else _subset(cand, state, prev, fort, decisions, tp)
@@ -4261,6 +4381,7 @@ def review_note(save_dir: Path, state: dict | None = None) -> str:
             parts.append("NO PLAN yet")
         fort = fort_facts(save_dir, state)
         doc = propose(state, load_phases(), prev, applied=applied_builds(save_dir, state), fort=fort)
+        cap_notes(doc)                                     # BUG-440
         errs, _ = check(doc, state, tpls=templates(), prev=prev, fort=fort)
         if errs:
             fx = fixes_of(errs)
@@ -4351,13 +4472,17 @@ def run(args, save_dir: Path) -> int:
         fort = fort_facts(save_dir, state)
         doc = propose(state, phases, prev, applied=applied_builds(save_dir, state), fort=fort,
                       live=live_trade(save_dir))
+        sdig = soil_dig(save_dir, doc, prev)                  # BUG-438: a soil fort digs down to the first hard stone
         fit = fit_explore(save_dir, doc, prev)                # Run 10: the ore search fits the known levels
         kfit = fit_explore_kept(save_dir, doc, prev)          # BUG-223: kept shafts into a cavern level known now
         cfit = fit_core(save_dir, doc, prev)                  # BUG-195: a later core stage another project blocks
         cfit += fit_core_depth(save_dir, doc, prev)           # BUG-364: a shallower core where the aquifer is near
         sfit = fit_stone_dig(save_dir, doc, prev)             # BUG-351: a stone dig no free bedrooms site takes
         cfit += [sfit] if sfit else []
+        cfit += [sdig] if sdig else []
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
+        if cap_notes(doc):                                    # BUG-440: the notes fit the schema's 2000 bytes
+            cfit.append("BUG-440: notes cut under 2000 bytes (the CLI lines above hold the full reasons)")
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
         sid = (sites_snapshot(save_dir) or {}).get("id")

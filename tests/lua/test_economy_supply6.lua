@@ -174,11 +174,13 @@ T.test('BUG-269 (Guildcleans deep soil: moods missed rock and gems): two stone d
   T.ok(by.stone ~= nil and by.stone.n == 2, 'stone for the rock need')
   T.ok(by.gem ~= nil and by.gem.n == 3, 'gems for moods')
   T.ok(by.mechanism ~= nil)
+  T.eq((W.state().stock or {}).rsoil, 1, 'BUG-438: the soil fort is in the state (plan propose digs down to hard stone)')
   F.item(W, 'BOULDER', {mat_type = 0, mat_index = 7})
   days(W, 1)
   by = {}
   for _, e in ipairs(econ(W, 'supply_wants')) do by[e.buy] = e end
   T.eq({by.stone, by.gem}, {nil, nil}, 'a boulder came: no soil fort')
+  T.eq((W.state().stock or {}).rsoil, nil, 'BUG-438: and the flag is gone')
 end)
 
 T.test('BUG-268/269: trade puts economy.supply_wants after trade_wants and before plan.trade.want; mechanism is a token',

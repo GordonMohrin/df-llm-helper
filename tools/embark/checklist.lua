@@ -17,6 +17,9 @@ C.DEFAULT = {
   stone_fail_soil = {'deep', 'very_deep', 'extremely_deep'},
   -- BUG-248: hard stone must lie within hard_stone_levels levels (soil depth estimate per panel category)
   hard_stone_levels = 6,
+  -- BUG-438 (Run 16a i1 Syrupobeyed: 'stone pass' on a soil category, hard stone 0 for four years): the soil_levels figures are estimates;
+  -- up to stone_pass_levels levels of soil the stone passes, between that and hard_stone_levels it is a warning that names the depth
+  stone_pass_levels = 2,
   soil_levels = {none = 0, little = 1, shallow_sand = 2, shallow_clay = 2, some = 3, deep = 8, very_deep = 15,
     extremely_deep = 25},
   sizes = {{3, 3}, {4, 4}},
@@ -184,6 +187,10 @@ function C.evaluate(rec, rules, ctx)
     put('stone', 'fail', soil .. ' soil: no stone layer in the upper levels' ..
         (aq and ', the first stone lies below the aquifer (Laborkings: no boulders)' or ' (boulders scarce)') ..
         (lv and maxlv and string.format('; about %d levels of soil, hard stone wanted within %d', lv, maxlv) or ''))
+  elseif soil ~= nil and lv ~= nil and (rules.stone_pass_levels or C.DEFAULT.stone_pass_levels) < lv then
+    put('stone', 'warn', string.format('about %d levels of soil above the first hard stone (an estimate from the %s soil category, more than %d ' ..
+        'for a pass): boulders and mechanisms wait for the first dig - plan an explore shaft of at least %d levels in the first season%s',
+        lv, soil, rules.stone_pass_levels or C.DEFAULT.stone_pass_levels, lv + 2, layers and (' (' .. layers .. ')') or ''))
   elseif soil ~= nil then
     put('stone', 'pass', 'stone near the surface (' .. (soil == 'none' and 'no' or soil) .. ' soil' ..
         (layers and (', ' .. layers) or '') .. ')')

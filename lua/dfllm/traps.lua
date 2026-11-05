@@ -16,11 +16,18 @@
 --     a trap for dumping (the trap is reloaded with an empty cage by the game's own job). No mechanism orders here:
 --     quickfort orders a placed project's mechanisms (the runner's existing order path) and economy's supply pass owns
 --     the mechanism stock (M.need tells it how many listed traps have no building).
+--   * BUG-437 (Run 16a i1 Syrupobeyed y378: three citizens, two of them thirsty past 23000, killed by our own stone-fall traps in the
+--     Z2 hall, the fort's only way out): stone-fall and weapon traps hit citizens (only cage traps pass them); a citizen death with
+--     the incident TRAP (care's DEATH, by = trap) is remembered (`ck` = those within a year in state `traps`) and raises
+--     DECISION_NEEDED trap_friendly (A) once a day, with the victims' tiles. plan propose / check hold the hall and the bridge lanes
+--     back while the water or food is short or a citizen died so (dfpilot/plan.py trap_hold).
 -- Fair play: only our own buildings, items and the census; every action is a manager order a player gives on the work
 -- orders screen. Safety: nothing here pulls, forbids, builds or moves anyone; the lanes' safety rules are the template's.
 local M = {name = 'traps', every = {ticks = 1200}, verbs = {}, on = {}}
 
 M.DAY = 1200
+M.YEAR = 403200                -- BUG-437: ticks of a game year (the window of `ck`)
+M.KILL_KEEP = 20               -- BUG-437: citizens killed by our traps remembered
 M.CFG = {cage_spare = 2, cage_batch = 5, order_days = 7}
 M.TAG = 'dfllm:traps'
 local KIND = {CageTrap = 'cage', StoneFallTrap = 'stone', WeaponTrap = 'weapon'}
@@ -199,11 +206,49 @@ local function order_cages(K, c, r, now)
   return 'MakeCage refused'
 end
 
+---------------------------------------------------------------- BUG-437: citizens killed by our own traps
+-- the kills within a year before `now`
+function M.kills(now)
+  local n = 0
+  for _, k in ipairs(st and st.kills or {}) do
+    if now - k.t < M.YEAR then n = n + 1 end
+  end
+  return n
+end
+
+-- care's DEATH (revised: the incident is known) with by = trap for a citizen
+M.on['EV:DEATH'] = function(K, ev)
+  local d = type(ev.d) == 'table' and ev.d or {}
+  local u = int(d.unit)
+  if not st or d.by ~= 'trap' or not u or not (d.citizen == 1 or d.citizen == true) then return end
+  st.kills = st.kills or {}
+  for _, k in ipairs(st.kills) do if k.u == u then return end end
+  local now = int(ev.tick) or K.now().tick
+  local pos = type(d.pos) == 'table' and d.pos or {}
+  st.kills[#st.kills + 1] = {u = u, t = now, x = int(pos[1]), y = int(pos[2]), z = int(pos[3]), th = int(d.thirst), hu = int(d.hunger)}
+  while #st.kills > M.KILL_KEEP do table.remove(st.kills, 1) end
+  local n = M.kills(now)
+  local at = pos[1] and string.format('%d,%d,%d', pos[1], pos[2], pos[3]) or '?'
+  K.log('warn', 'traps: citizen %d killed by our own trap at %s (thirst %s, hunger %s): %d within a year', u, at,
+        tostring(d.thirst), tostring(d.hunger), n)
+  if not st.dt or now - st.dt >= M.DAY then
+    st.dt = now
+    local q = string.format('%d killed by our own traps in a year (latest %d at %s, thirst %s): stone-fall traps hit citizens, only ' ..
+                            'cage traps pass them; drink and food inside first, no new stone-fall traps (hall, bridge lanes)',
+                            n, u, at, tostring(d.thirst))
+    K.emit('DECISION_NEEDED', 'A', ('trap_friendly: ' .. q):sub(1, 200),
+           {id = 'trap_friendly', q = q:sub(1, 200), n = n, unit = u, pos = pos,
+            cmds = {'dfllm cmd inspect what=reach', 'dfllm cmd inspect what=water_sources', 'dfllm plan propose y.json'},
+            opts = {'drink inside', 'no new stone-fall traps', 'B1 up'}})
+  end
+  save(K)
+end
+
 ---------------------------------------------------------------- module
 function M.init(K)
   local p = K.persist.get('m.traps')
   p = type(p) == 'table' and p or {}
-  st = {v = 2, ot = int(p.ot), oid = int(p.oid), on = int(p.on)}
+  st = {v = 2, ot = int(p.ot), oid = int(p.oid), on = int(p.on), dt = int(p.dt), kills = type(p.kills) == 'table' and p.kills or nil}
   pub, last = nil, nil
 end
 
@@ -228,7 +273,8 @@ function M.step(K)
   last = r
   if r.m == 0 then pub = nil; return end
   local ord = order_cages(K, c, r, now)
-  pub = {n = r.n, m = r.m, b = r.b, w = r.w, wn = r.wn, f = r.f, c = r.c, l = r.l, lh = r.lh, ord = ord}
+  local ck = M.kills(now)
+  pub = {n = r.n, m = r.m, b = r.b, w = r.w, wn = r.wn, f = r.f, c = r.c, l = r.l, lh = r.lh, ord = ord, ck = ck > 0 and ck or nil}
 end
 
 function M.state() return pub and {traps = pub} or {} end

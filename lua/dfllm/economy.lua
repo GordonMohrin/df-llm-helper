@@ -4970,7 +4970,7 @@ function M.no_water(K, c, r)
   local cmds = {}
   for _, x in ipairs(okf and type(wcmds) == 'table' and wcmds or {}) do cmds[#cmds + 1] = x end
   cmds[#cmds + 1] = 'dfllm cmd inspect what=reach'
-  cmds[#cmds + 1] = [[dfllm cmd trade.want '{"want":["plant","drink","seeds"]}']]
+  cmds[#cmds + 1] = [[dfllm cmd trade.want '{"add":["plant","drink","seeds"]}']]
   local head = string.format('%d bodies of water, %d with a bank the citizens reach%s, no brewable plant, drink %d d', acc.bodies,
                              acc.bank, acc.partial > 0 and ' (scan partial)' or '', dd)
   local q = string.format('no water the citizens reach: %s; what to do: d.water, d.cmds', head)
@@ -11453,7 +11453,10 @@ function M.state(K)
     if o.mood_miss and #o.mood_miss > 0 then r.stock.mood_miss = {table.unpack(o.mood_miss)} end
     -- Run 11 (plan propose/check: a stone dig, picks in trade.want): free stone and what the open rock orders, walls
     -- and needs want of it; picks in the fort and the Miners' demand
-    if st.rock then r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0) end
+    if st.rock then
+      r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0)
+      if st.rock.soil then r.stock.rsoil = 1 end       -- BUG-438: the stone digs found only soil (plan propose digs deeper)
+    end
     if st.picks then r.stock.picks, r.stock.pick_want = st.picks.have, st.picks.want end
     -- Run 11: metal short for the soldiers (M.metal_plan: plan check's metal route gate) and the metal items marked for
     -- melting (the invaders' gear in the melt pile)

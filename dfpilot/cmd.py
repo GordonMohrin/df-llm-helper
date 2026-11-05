@@ -2137,6 +2137,24 @@ def place_params(args: dict) -> dict:
 
 
 # ---------------------------------------------------------------- send
+def stone_fall_refusal(save_dir: Path, tpl: str, params: dict | None) -> str:
+    """BUG-437 (Run 16a i1 Syrupobeyed y378: three citizens killed by our own stone-fall traps in the hall, the way out of the fort): the
+    trap hall (fortcore stage 4) and the stone lanes (traps at=hall / bridges) are not placed while plan.trap_hold says citizens go
+    out for water or food, or one died to our traps. '' when the placement is not a stone-fall one or no hold applies."""
+    params = params or {}
+    if tpl == "fortcore" and _stage_param(params) == 4:
+        what = "the trap hall (fortcore stage 4)"
+    elif tpl == "traps" and re.match(r"(hall|bridges|b\d)", str(params.get("at") or "").strip().lower()):
+        what = f"traps at={str(params.get('at'))[:12]} (stone-fall lanes)"
+    else:
+        return ""
+    from . import plan as _plan                          # plan imports this module: late, at call time
+    why = _plan.trap_hold(files.read_state(save_dir))
+    return (f"{what} is held back: {why}. Stone-fall traps hit citizens and this one is on their way out of the fort "
+            "(BUG-437); get drink and food inside first (dfllm cmd inspect what=water_sources), cage lanes at the doors "
+            "(traps at=ways) stay allowed") if why else ""
+
+
 def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float = 5.0,
          cmd_id: str | None = None, snap: dict | None = None, need: list | tuple = ()) -> tuple[str, dict | None]:
     """Validate + write the inbox file (+ bp/<id>.json first for bp.place, sited on `snap` if given; `need`: see
@@ -2155,6 +2173,9 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
         doc = repair_doc(save_dir, args["tpl"], args["repair"], args.get("keys"), cmd_id)
         files.write_json_atomic(Path(save_dir) / "bp" / f"{cmd_id}.json", doc)
     elif verb == "bp.place":
+        hold = stone_fall_refusal(save_dir, args["tpl"], place_params(args))
+        if hold:                                   # BUG-437: not on the citizens' way out while they need to go
+            raise BpError(hold)
         doc = emit_bp(save_dir, args["tpl"], place_params(args), args["site"], cmd_id, write=False, snap=snap,
                       need=need)
         prev = write_bp(save_dir, doc)

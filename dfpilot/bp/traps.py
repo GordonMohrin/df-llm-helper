@@ -20,8 +20,11 @@ Template `traps` (absolute tiles like `seal`; the CLI fills them in, dfpilot/tra
   depth = 1..3 (tiles straight out from the door).
 Safety (citizens): the lanes lie OUTSIDE a door the arrival lockdown forbids (reflex door_forbid), never on the door, on a
 stair, ramp or bridge, in the fort's own geometry (the manifest zones Z1-Z4 with the bailey, depot and trap hall, rooms,
-killboxes, stations, stairs, the refuge) or on a manifest edge tile; DF's traps do not fire on citizens or their animals,
-and in a fight the closed door is the citizens' bypass. A way without a door (an open way in) gets no lane: `seal` closes
+killboxes, stations, stairs, the refuge) or on a manifest edge tile. BUG-437 (Run 16a i1 Syrupobeyed y378: three citizens killed by
+our own stone-fall traps in the hall): only CAGE traps pass the fort's own citizens and animals (they catch what is not theirs);
+stone-fall and weapon traps hit anyone who steps on them, so the stone lanes (hall, bridges) lie only where no citizen has to walk
+(behind the bridges, which are raised when a hostile is in sight) and plan propose holds them back while citizens go out for water or
+food (plan.trap_hold). In a fight the closed door is the citizens' bypass. A way without a door (an open way in) gets no lane: `seal` closes
 it first. The kernel's siege/lockdown logic is unchanged; lua/dfllm/traps.lua only reads and, in PEACE, orders cages.
 Manifest: `traps` [{id 'T<x>_<y>_<z>' (the way), kind, way, tiles}] (merged per id); fortcore stage 4 writes id 'Z2'.
 """

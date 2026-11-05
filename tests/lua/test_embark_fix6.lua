@@ -243,6 +243,7 @@ T.test('BUG-247: scan --hover reads 16 hovered panels per site without any recta
 end)
 
 ---------------------------------------------------------------- BUG-248
+local function has_id(l, id) for _, v in ipairs(l) do if v == id then return true end end return false end
 T.test('BUG-248: stone fails when the soil above it is deeper than hard_stone_levels', function()
   local good = P.parse(V.from_lines((function()
     local out = {}
@@ -252,7 +253,13 @@ T.test('BUG-248: stone fails when the soil above it is deeper than hard_stone_le
   good.soil = 'some'
   local ctx = {world = {8, 30}, size = {4, 4}}
   local r = C.evaluate(good, {dark_fortresses_seen = far_df}, ctx)
-  T.eq(item(r, 'stone').res, 'pass', 'some soil (about 3 levels) within the shipped 6')
+  T.eq(item(r, 'stone').res, 'warn', 'BUG-438: some soil (about 3 levels) is within the shipped 6 but over the 2 of a pass')
+  T.ok(item(r, 'stone').why:find('about 3 levels of soil above the first hard stone', 1, true) and
+       item(r, 'stone').why:find('explore shaft of at least 5 levels', 1, true), item(r, 'stone').why)
+  T.ok(not has_id(r.fails, 'stone'), 'a warning is no fail')
+  good.soil = 'little'
+  T.eq(item(C.evaluate(good, {dark_fortresses_seen = far_df}, ctx), 'stone').res, 'pass', 'little soil (about 1 level) passes')
+  good.soil = 'some'
   r = C.evaluate(good, {dark_fortresses_seen = far_df, hard_stone_levels = 2}, ctx)
   T.eq(item(r, 'stone').res, 'fail')
   T.ok(item(r, 'stone').why:find('about 3 levels of soil, hard stone wanted within 2', 1, true), item(r, 'stone').why)
