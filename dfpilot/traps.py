@@ -199,10 +199,11 @@ def _planned(doc: dict, word: str | None = None) -> bool:
                for se in doc.get("seasons") or [] for b in se.get("build") or [])
 
 
-def draft(fort: dict | None, target: str, builds: list, prev: dict | None, year, info, rb) -> tuple[list[dict], str]:
+def draft(fort: dict | None, target: str, builds: list, prev: dict | None, year, info, rb, hold: bool = False) -> tuple[list[dict], str]:
     """plan propose: `traps@S1 at=ways` from TRAPS_PHASE on while a door way in wants a lane (fort.traps.open) and
     `traps@S1 at=bridges` while a bridge way wants one (BUG-317: fort.traps.bopen), each when none of its kind is in the
-    drafted builds or the same year's plan, and the fort is not rebuilding; (builds, note)."""
+    drafted builds or the same year's plan, and the fort is not rebuilding; (builds, note). BUG-437: `hold` (plan.trap_hold: the
+    citizens walk the hall for water or food, or one died to our traps) drafts no stone-fall lane (at=bridges); the cage lanes stay."""
     tr = (fort or {}).get("traps") or {}
     if rb or target < TRAPS_PHASE or (info is not None and TRAPS not in info):
         return [], ""
@@ -210,6 +211,8 @@ def draft(fort: dict | None, target: str, builds: list, prev: dict | None, year,
     same = prev if prev and prev.get("year") == year else None
     for word, n, base in (("ways", tr.get("open"), TRAPS_WAYS), (BRIDGE_WORD, tr.get("bopen"), TRAPS_BRIDGES)):
         if not n or any(b.get("tpl") == TRAPS and _word(b) == word for b in builds) or (same and _planned(same, word)):
+            continue
+        if hold and word == BRIDGE_WORD:               # BUG-437: stone-fall traps hit citizens
             continue
         out.append(copy.deepcopy(base))
         if word == "ways":

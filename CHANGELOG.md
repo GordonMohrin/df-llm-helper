@@ -1,5 +1,19 @@
 # CHANGELOG dfpilot
 
+## Round 27 (i1 Syrupobeyed): own traps kill citizens, soil fort without hard stone, a big wild beast inside, trade.want adds (BUG-437 to BUG-440, 2026-11-05; offline, live-untested)
+- **Why:** Run 16a i1 Syrupobeyed (R5): three citizens killed by our own stone-fall traps in the hall (y378); hard stone 0 for four years (36 trapparts, levers, well, hospital hung; the digs lay in soil); a woolly mammoth
+  killed two inside the fort with no PREDATOR wake; `trade.want` replaced the wish list; `propose` notes of 2110 bytes broke its own check.
+- **BUG-437:** stone-fall and weapon traps hit citizens (only cage traps pass them); `plan.trap_hold` (drink / food < 30 d, no accepted water, or state `traps.ck` > 0) keeps the hall (fortcore stage 4) and
+  `traps at=bridges` out of `propose`, `check` warns, `bp.place` refuses them (`cmd.stone_fall_refusal`); `traps.lua` counts citizens killed by our traps (`traps.ck`) and raises DECISION_NEEDED `trap_friendly` (A).
+- **BUG-438:** state `stock.rsoil` (the kernel's soil-fort mark); `plan.soil_dig` swaps the bedrooms stone dig for an `explore` shaft of 24/20/16 levels (side tunnels every 6, off the aquifer levels), `mechanism`, `stone` first in
+  trade.want; the embark `stone` item passes up to 2 estimated levels of soil, warns from 3 (`stone_pass_levels`), fails over 6.
+- **BUG-439:** `sense.big_wild`: a wild unit of body size >= 300000 cm3 on a tile that is not open to the sky counts as a predator before it kills (BUG-421 marks only after).
+- **BUG-440:** `trade.want` `add` / `remove` / `sell_add` / `sell_remove` (the kernel's suggested commands use `add`), the reply names `ignored` tokens (`bone`); `plan.cap_notes` keeps the plan notes under 2000 bytes,
+  more than 3 BUG-370 lines become one summary line.
+- **Contract:** `traps.ck`, `stock.rsoil`, `inbox.args.trade.want`, DECISION_NEEDED `trap_friendly` (CONTRACTS.md, schema appendix, `util/contract.lua`).
+- **Tests:** tests/test_bug437_440_f27.py (12), tests/lua/test_bug437_trap_friendly.lua (2), test_bug439_big_wild.lua (2), test_bug440_trade_add.lua (3), test_economy_supply6.lua / test_embark_fix6.lua extended. **Live check:** see the four bug files.
+
+
 ## aqshaft: a cavern below the refuge level refuses nothing, refusals name level and coordinate, an explicit column is checked (BUG-432, BUG-433, 2026-11-05; offline, live-untested)
 - **Why:** Run 16c i3 Yawninggilt (aquifer z120-127): `bp sites aqshaft` (any depth) refused all 1271 columns for a cavern/warm level, `plan propose` drafted no aqshaft; the fort stayed above the aquifer.
 - **BUG-432:** the default shaft depth (20) ran far below the core into a recorded cavern. Without p.depth the ranking goes down to AQ_REACH (2) levels under the shallowest known aquifer level = the core's top level

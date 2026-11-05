@@ -372,8 +372,32 @@ local function killer(u)
   return true
 end
 
+-- BUG-439 (Run 16a i1 Syrupobeyed y373: a wild WOOLLY MAMMOTH, no LARGE_PREDATOR flag, walked into the fort and struck down two
+-- citizens in one step; no PREDATOR, no INTRUDER, threat 0: BUG-421's killer mark only exists AFTER the first death): a wild
+-- unit of a large body (size_cur >= BIG_WILD cm3, a dwarf is 60000: a mammoth, rhino, elk, bear, camel) on a tile that is not
+-- open to the sky (inside the rock of the fort, a roofed room) is a wild danger before it killed anyone. Never a tame or
+-- fort-controlled unit, a citizen, resident, merchant (the caravan's pack animals), diplomat, visitor, a caged or chained one,
+-- or an invader (its own rules). Outside under the sky a grazer stays wildlife until it kills (mark_killer).
+M.BIG_WILD = 300000
+local function big_wild(u)
+  local ok, yes = pcall(function()
+    local sz = u.body.size_info.size_cur                    -- a field read first: only a big body costs API calls
+    if math.type(sz) ~= 'integer' or sz < M.BIG_WILD then return false end
+    local U = dfhack.units
+    if U.isTame(u) or U.isFortControlled(u) or U.isCitizen(u, true) or U.isResident(u, true) or U.isInvader(u) then
+      return false
+    end
+    if U.isMerchant and U.isMerchant(u) then return false end
+    local f1, f2 = u.flags1, u.flags2
+    if f1.merchant or f1.diplomat or f1.caged or f1.chained or f2.visitor then return false end
+    local des = dfhack.maps.getTileFlags(u.pos)
+    return des ~= nil and not des.hidden and not des.outside
+  end)
+  return ok and yes == true
+end
+
 local function predator(u, hs)
-  if not (large_predator(u) or killer(u)) then return false end
+  if not (large_predator(u) or killer(u) or big_wild(u)) then return false end
   local ok, yes = pcall(function()
     -- off-map units (pos -30000) crashed DF 53 in getWalkableGroup (live L6): validate first
     if not dfhack.maps.isValidTilePos(u.pos) then return false end
@@ -584,7 +608,7 @@ local function consider(hs, u)
   if an then entry.an = 1 end
   -- BUG-065 (Run 14, a gremlin in the caves): the unit's own body size (cm3; a dwarf is 60000) and the large-predator
   -- flag go to the census, so reflex can tell a small harmless intruder from a dangerous one [size field: ? live]
-  if rf.p or killer(u) then entry.pr = 1 end             -- BUG-421: a wild killer is dangerous whatever its raws say
+  if rf.p or killer(u) or big_wild(u) then entry.pr = 1 end   -- BUG-421: a wild killer is dangerous whatever its raws say; BUG-439: a big wild beast inside
   if killer(u) then entry.kl = 1 end
   if (try_num(function() return u.counters.unconscious end) or 0) > 0 then entry.uc = 1 end    -- M3: it wakes up
   local okz, sz = pcall(function() return u.body.size_info.size_cur end)

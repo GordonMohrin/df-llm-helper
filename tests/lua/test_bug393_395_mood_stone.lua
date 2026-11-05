@@ -160,7 +160,7 @@ T.test('BUG-395: within 15 days of insanity a mood short of stone gets DECISION_
   local line = d.cmds[1]
   T.ok(line:find("^dfllm cmd trade.want '"), line)
   local arg = json.decode(line:match("'(.*)'$"))
-  T.ok(arg.want[1] == 'stone', 'the caravans are asked for stone')
+  T.ok(arg.add[1] == 'stone' and arg.want == nil, 'the caravans are asked for stone (BUG-440: added, not replacing)')
   T.eq(d.opts[1], 'trade.want')
   for _, c in ipairs(d.cmds) do T.ok(#c <= 200) end
   T.ok(#json.encode(d) < 1024, 'd stays under the kernel limit')

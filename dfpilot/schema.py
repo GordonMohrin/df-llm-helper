@@ -110,7 +110,7 @@ STATE_OWNERS = {
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "pop.hold": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
-    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy",
+    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy",
@@ -883,7 +883,9 @@ VERB_ARGS: dict[str, Obj] = {
     # FR-94 (Run 14 note 100): release a pause DF set (pause:df, pause:popup) with the pause key; the reply names the old
     # reason and the new state (data.was / data.now) and every popup it read (data.popups)
     "resume": Obj(opt={"why": Str(maxbytes=200)}),
-    "trade.want": Obj(opt={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
+    # BUG-440: want / sell REPLACE a list; add (put in front of the current list), remove, sell_add, sell_remove change it
+    "trade.want": Obj(opt={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40), "add": Arr(TOKEN, hi=40),
+                           "remove": Arr(TOKEN, hi=40), "sell_add": Arr(TOKEN, hi=40), "sell_remove": Arr(TOKEN, hi=40)}),
     "trade.retry": Obj(opt={"civ": Str(maxbytes=40), "want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
     # gate (Gordon 2026-10-16): a sortie through that outer bridge (siege: gather in the bailey, open, kill, recall)
     "squad.sortie": Obj(req={"squad": Str(enum=["A", "B", "C"]), "target": AnyOf(ID, POS),
@@ -1007,6 +1009,9 @@ STATE = Obj(
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG, "ore": NAT, "bars": NAT,
                            "leather": NAT, "metal": Str(maxbytes=24), "mood_miss": Arr(Str(maxbytes=12), hi=8),
                            "rock": NAT, "rock_need": NAT, "picks": NAT, "pick_want": NAT,
+                           # BUG-438: 1 = the stone digs gave no free boulder (the fort sits in soil): plan propose digs an explore
+                           # shaft down to the first hard stone and asks the caravans for mechanisms and stone
+                           "rsoil": FLAG,
                            # Run 11: metal short for the soldiers (economy.metal: plan check's metal route gate) and the
                            # metal items marked for melting (the invaders' gear in the melt pile)
                            "mshort": FLAG, "melt": NAT,
@@ -1210,9 +1215,11 @@ STATE = Obj(
                            "wst": NAT, "wsc": Str(maxbytes=96)}),
          # FR-96/97 (lua/dfllm/traps.lua, daily): armed traps on the manifest's trap tiles (n) of all listed (m); built (b),
          # ways in with every lane tile trapped (w) of the ways listed (wn), cage traps holding a caught creature (f), free
-         # empty cages (c), listed tiles without a trap building (l; lh 1: some in the hall), the last cage order (ord)
+         # empty cages (c), listed tiles without a trap building (l; lh 1: some in the hall), the last cage order (ord), citizens killed by
+         # our own traps within a year (ck, BUG-437)
          "traps": Obj(req={"n": NAT, "m": NAT},
-                      opt={"b": NAT, "w": NAT, "wn": NAT, "f": NAT, "c": NAT, "l": NAT, "lh": FLAG, "ord": Str(maxbytes=40)}),
+                      opt={"b": NAT, "w": NAT, "wn": NAT, "f": NAT, "c": NAT, "l": NAT, "lh": FLAG, "ord": Str(maxbytes=40),
+                           "ck": NAT}),     # BUG-437: citizens killed by our own traps within a year
          # FR-98: the cavern sweep: st = its phase, why = what it waits for or how the last one ended, n = beasts seen at the
          # plugged shafts, k/l = kills and losses of the running (else the last) sweep, acc = plugged cavern shafts, clr = 1
          # the caverns count as clear (the P6 deliverable `sweep`)

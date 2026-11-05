@@ -1987,24 +1987,69 @@ end
 
 local function srcs(l) local r = {} for _, t in ipairs(l) do r[#r + 1] = t.src end return json.array(r) end
 
+-- BUG-440 (Run 16a i1 Syrupobeyed y376: `trade.want '{"want":["bone"]}'` REPLACED the list (bar:iron, anvil, cloth gone; the mood tokens
+-- the kernel's own DECISION_NEEDED suggests did the same)): `add` puts tokens in front of the current list (priority = list
+-- order), `remove` takes some out, `sell_add` / `sell_remove` the same for the sell list; `want` / `sell` still replace. A
+-- list holds at most 40 tokens (the schema's limit): the rest of the old list falls off the end. The current list is the
+-- override's, else the plan's, else the default
+local LIST_MAX = 40
+local function patch(base, put, add, rm)
+  local out, seen, drop = {}, {}, {}
+  for _, t in ipairs(rm or {}) do drop[t] = true end
+  for _, l in ipairs({add or {}, put or base or {}}) do
+    for _, t in ipairs(l) do
+      if not seen[t] and not drop[t] and #out < LIST_MAX then seen[t] = true; out[#out + 1] = t end
+    end
+  end
+  return out
+end
+
 -- the trade.want override (until the next plan.reload)
 local function override(K, args)
-  if args.want == nil and args.sell == nil then return end
+  if args.want == nil and args.sell == nil and args.add == nil and args.remove == nil
+     and args.sell_add == nil and args.sell_remove == nil then return end
   local pp, ov = K.persist.get('plan'), st.ov or {}
-  st.ov = {want = args.want or ov.want, sell = args.sell or ov.sell,
-           loaded = type(pp) == 'table' and int(pp.loaded) or 0}
+  local cur = (K.plan or {}).trade or {}
+  local w = ov.want or cur.want
+  if type(w) ~= 'table' or #w == 0 then w = M.DEFAULT_WANT end
+  local s = ov.sell or cur.sell or {}
+  local want, sell = args.want or ov.want, args.sell or ov.sell
+  if args.add ~= nil or args.remove ~= nil then want = patch(w, args.want, args.add, args.remove) end
+  if args.sell_add ~= nil or args.sell_remove ~= nil then sell = patch(s, args.sell, args.sell_add, args.sell_remove) end
+  st.ov = {want = want, sell = sell, loaded = type(pp) == 'table' and int(pp.loaded) or 0}
   dirty = true
 end
 
-local BAD_TOKENS = 'want/sell must be token lists (cloth/thread subs: plant, silk, yarn)'
+local BAD_TOKENS = 'want/sell/add/remove must be token lists (cloth/thread subs: plant, silk, yarn)'
 
--- inbox trade.want {want?, sell?}: overrides plan.trade until the next plan.reload; {} = query
+-- BUG-440: the tokens of the lists the trade runs by that match no item type (`bone` is no trade token), so a command that
+-- names one is told so instead of looking accepted
+local function ignored_tokens(K)
+  local p = (K.plan or {}).trade or {}
+  local ov = st.ov
+  local known = function(n) return df.item_type ~= nil and df.item_type[n] ~= nil end
+  local out = {}
+  for _, l in ipairs({(ov and ov.want) or p.want or {}, (ov and ov.sell) or p.sell or {}}) do
+    for _, t in ipairs(l) do
+      if L.token(t, known) == nil then out[#out + 1] = t end
+    end
+  end
+  return out
+end
+
+-- inbox trade.want {want?, sell?, add?, remove?, sell_add?, sell_remove?}: overrides plan.trade until the next plan.reload;
+-- {} = query. want / sell replace a list; add / remove (BUG-440) change the current one; the reply names tokens that match nothing
 M.verbs['trade.want'] = function(K, args, cmd)
-  if not valid_tokens(args.want) or not valid_tokens(args.sell) then return false, BAD_TOKENS end
+  for _, k in ipairs({'want', 'sell', 'add', 'remove', 'sell_add', 'sell_remove'}) do
+    if not valid_tokens(args[k]) then return false, BAD_TOKENS end
+  end
   override(K, args)
   save(K)
   local want, sell = wants(K)
-  return true, string.format('want %d, sell %d', #want, #sell), {want = srcs(want), sell = srcs(sell)}
+  local ign = ignored_tokens(K)
+  return true, string.format('want %d, sell %d', #want, #sell) ..
+                 (#ign > 0 and ('; ignored (no item type): ' .. table.concat(ign, ',')) or ''),
+         {want = srcs(want), sell = srcs(sell), ignored = #ign > 0 and json.array(ign) or nil}
 end
 
 -- inbox trade.retry {civ?, want?, sell?} (Run 10 y418: after a trade the caravan stayed 2,700 ticks more and the wants

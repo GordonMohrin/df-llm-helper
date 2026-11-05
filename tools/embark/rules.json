@@ -20,6 +20,8 @@
  "stone_fail_soil": ["deep", "very_deep", "extremely_deep"],
  "hard_stone_note": "BUG-248 (Run 15 Guildcleans 'stone free 0', Earthboat 'Mechanismen fehlen: kein Hartgestein'): hard stone must lie within hard_stone_levels levels; soil_levels estimates the soil levels per panel soil depth (calibrate live). 'stone' may be waived or accepted only with an explore-first plan: embark.py --explore-first TEXT (how the fort reaches stone in its first season).",
  "hard_stone_levels": 6,
+ "stone_pass_levels": 2,
+ "stone_pass_note": "BUG-438 (Run 16a i1 Syrupobeyed: stone pass, then hard stone 0 for four years): the soil_levels figures are estimates; up to stone_pass_levels levels of soil the stone criterion passes, between that and hard_stone_levels it warns with the estimated depth and asks for an explore shaft of that depth plus 2 in the first season.",
  "soil_levels": {"none": 0, "little": 1, "shallow_sand": 2, "shallow_clay": 2, "some": 3, "deep": 8, "very_deep": 15,
                  "extremely_deep": 25},
  "sizes": [[3, 3], [4, 4]],

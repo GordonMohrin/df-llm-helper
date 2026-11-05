@@ -817,7 +817,7 @@ function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, w
   if #want > 0 then
     local q = {}
     for _, t in ipairs(want) do q[#q + 1] = '"' .. t .. '"' end
-    cmds[#cmds + 1] = [[dfllm cmd trade.want '{"want":[]] .. table.concat(q, ',') .. [[]}']]
+    cmds[#cmds + 1] = [[dfllm cmd trade.want '{"add":[]] .. table.concat(q, ',') .. [[]}']]
     opts[#opts + 1] = 'trade.want'
   end
   local ask = {}
