@@ -160,6 +160,9 @@ rectangle decides. `rank` (BUG-410) is a SWEEP: per world tile `goto`, `Embark`,
 corners of the 4x4) and one compact row; only the site panel text of the vanilla UI is read (no world data, section 1). The output is
 the verdict counts, the failed criteria counted, the best `--top` tiles and the `scan ... --hover` line for them; a missing brook in
 the few sampled tiles is a warning. At most 400 world tiles per run (`--step`, or several boxes); `rank --last` ranks again.
+**BUG-426..428.** A brook on a bare mountain (every read tile mountain, no soil, no aquifer) fails `water` (`brook=in a gully ... MOUNTAIN`): no well, no farm,
+the bank is unreachable. `rank` prints a line per world tile, stops waiting after `--budget` s (540) with the partial pre-rank, `rank --resume` skips tiles
+already read, `rank --last` also reads a running sweep. A hover row with an edge-only brook prints `variant: LX,LY a,b ...` with the scan command.
 The scan summary appends to each row `brook=...` (see above) or `brook=N tiles at x,y (tag)` (nearest hovered tile with water within
 16 tiles) and, when no rectangle is `ok`, a line `best compromise: <tag> ... : embark WX,WY,LX,LY --accept ... --reason TEXT`.
 `WX,WY` is the world tile, optional `LX,LY` (0-15) the local tile of the rectangle's top-left

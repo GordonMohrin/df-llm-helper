@@ -396,6 +396,7 @@ local function merge_tiles(rec, tiles, opts)
   local near = {}
   for _, n in ipairs(rec.neighbors or {}) do near[n.race] = n end
   local nw, nt, nmw, nter = 0, 0, 0, 0
+  local nmt, nsoil = 0, 0   -- BUG-426: mountain tiles, tiles with any soil (a bare mountain has no well and no farm)
   local aq_lo
   local wat = {}   -- BUG-250: the hovered tiles that showed a brook or river (the scan summary's brook distance)
   for _, t in ipairs(tiles) do
@@ -403,7 +404,9 @@ local function merge_tiles(rec, tiles, opts)
     if t.terrain then   -- BUG-229: tiles whose biome DF does not embark on (mountain, lake, ocean)
       nter = nter + 1
       if t.terrain == 'mountain' or t.terrain == 'water' then nmw = nmw + 1 end
+      if t.terrain == 'mountain' then nmt = nmt + 1 end
     end
+    if t.soil and t.soil ~= 'none' then nsoil = nsoil + 1 end
     for _, r in ipairs(t.rivers or {}) do
       if not seen_r[r] then seen_r[r] = true; rec.rivers[#rec.rivers + 1] = r end
     end
@@ -438,7 +441,7 @@ local function merge_tiles(rec, tiles, opts)
   table.sort(nb, function(a, b) return (a.rank or 99) < (b.rank or 99) end)
   if #nb > 0 then rec.neighbors = nb end
   rec.tiles = {n = #tiles, water = nw, wood = nt}
-  if nter > 0 then rec.tiles.terrain, rec.tiles.mw = nter, nmw end
+  if nter > 0 then rec.tiles.terrain, rec.tiles.mw, rec.tiles.mountain, rec.tiles.soiled = nter, nmw, nmt, nsoil end
   if #wat > 0 then rec.tiles.water_at = wat end
   local hi = AQ_RANK[rec.aquifer or 'none'] or 0
   if aq_lo ~= nil and aq_lo < hi then   -- BUG-411: the tiles differ; the row shows the worst
@@ -567,12 +570,16 @@ function S.enter_placing()
     done = function(v) return kind_in(v, 'placing'), v:kind() end}
 end
 
-function S.hover_tile(n, tx, ty, cfg)
+function S.hover_tile(n, tx, ty, cfg, sweep)
   local s = cfg.local_tile_px or 16
   return {id = 'site.hover.' .. n, live = 'untested', optional = true, timeout_ms = 20000, tries = 6,
     wait = function(v) return kind_in(v, 'placing') end,
     act = function(ui, v, ctx, w, mem)
       if popup_abort(v) then ui:release(); tap(ui, v, 'Abort', {exact = true}) mem.held = nil return nil, 'closing popup' end
+      -- BUG-427: a sweep reads the first tile of a world tile; a tile that cannot be an embark (see S.sweep_dead) spares
+      -- the other hovers (each costs the camera move and two panel reads)
+      if n == 1 then ctx.sweep_dead = nil end
+      if sweep and n > 1 and ctx.sweep_dead then return 'skip', 'world tile rejected by its first tile: ' .. ctx.sweep_dead end
       if not mem.held then
         local busy, msg = mouse_ready(ui, ctx, w, cfg)
         if busy then return nil, msg end
@@ -598,12 +605,24 @@ function S.hover_tile(n, tx, ty, cfg)
         return 'wait', 'waiting for the panel of ' .. tx .. ',' .. ty
       end
       rec.at = {tx, ty}
+      if sweep and n == 1 then ctx.sweep_dead = S.sweep_dead(rec) end
       ctx.tile_recs = ctx.tile_recs or {}
       ctx.tile_recs[#ctx.tile_recs + 1] = rec
       return 'done', 'tile ' .. tx .. ',' .. ty .. ': ' .. tostring(rec.trees) .. '/' .. tostring(rec.water or '-') ..
         '/' .. tostring(rec.aquifer) .. '/' .. tostring(rec.soil)
     end,
     done = function() return false, 'reading tile' end}
+end
+
+-- BUG-427: why the first sampled tile already rules the world tile out (nil = read on): ocean/lake, ice, heavy aquifer,
+-- evil or high savagery are properties of the whole region of a hovered tile and fail the checklist at once
+function S.sweep_dead(rec)
+  if rec.ice then return 'ice' end
+  if rec.terrain == 'water' then return 'water' end
+  if rec.aquifer == 'heavy' then return 'heavy aquifer' end
+  if rec.evil == 'evil' then return 'evil' end
+  if rec.savagery == 'high' then return 'savagery' end
+  return nil
 end
 
 -- BUG-410: the few fields of a panel record a pre-rank row keeps
@@ -615,7 +634,10 @@ function S.sweep_rec(rec)
   for _, n in ipairs(rec.neighbors or {}) do
     if n.race == 'goblins' then o.goblins = n.travel end
   end
-  if rec.tiles then o.tiles = {n = rec.tiles.n, water = rec.tiles.water, aq_best = rec.tiles.aq_best} end
+  if rec.tiles then
+    o.tiles = {n = rec.tiles.n, water = rec.tiles.water, aq_best = rec.tiles.aq_best, terrain = rec.tiles.terrain,
+      mountain = rec.tiles.mountain, soiled = rec.tiles.soiled}   -- BUG-426: the rank row says 'mountain: no soil'
+  end
   return o
 end
 
@@ -650,7 +672,7 @@ local function hover_cand(out, c, cfg, tag, sweep)
     for dy = 0, 3 do for dx = 0, 3 do offs[#offs + 1] = {dx, dy} end end
   end
   for n, o in ipairs(offs) do
-    out[#out + 1] = S.hover_tile(n, ex + o[1], ey + o[2], cfg)
+    out[#out + 1] = S.hover_tile(n, ex + o[1], ey + o[2], cfg, sweep and true or nil)
   end
   out[#out + 1] = S.hover_record(tag, c[1], c[2], ex, ey, SWEEP_OFFSETS[sweep or 0] and true or nil)
 end
