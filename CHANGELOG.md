@@ -35,6 +35,19 @@
 - **BUG-419:** `plan.wet_core_guard` in `wake._place`: follow's fortcore stage 1 at `S<k>` is not placed when the best free site has score 0 or
   an `aquifer at z..` reason, unless a shallower depth is dry (BUG-364); AUTO_FAIL names the aqshaft route (BUG-412) `plan propose` drafts, or
   that none exists. No contract change.
+## Siege soldiers without stations, a wild killer, one dehydrating citizen (BUG-420 to BUG-422, 2026-11-05; offline, live-untested)
+- **Why:** Run 16b i2 Ostgate fell (83 -> 0) in a 40-goblin siege; Run 16d i4 Mazelanterns lost 2 citizens to a wild platybelodon with threat 0 and one to
+  thirst with 766 days of drink and no wake.
+- **BUG-420:** the alarm was not late (civ alert, recall and ARRIVAL at the announcement, 5 ticks before SIEGE_START, the breach came 10,000 ticks later; the 26
+  outside workers were in after 6666). The hole: a fort without a fortcore manifest has no station, `military.pick` resolved nothing and ordered no squad
+  (0 of 15 at stations, nost 15). `pick` with `core_floor` (ready postures) now falls back to the nearest Kern+ floor to the middle of the burrow; STATION_MOVED `core`.
+- **BUG-421:** `care` hands the killer of a citizen to `sense.mark_killer`; for 30 game days a wild unit that killed counts as a large predator
+  (`pr 1`, `kl 1` in the census list): PREDATOR / PREDATOR_FAR and the lockdown rules as for any wild danger.
+- **BUG-422:** `economy.solo_check`: one citizen over thirst 50000 or hunger 70000 -> DECISION_NEEDED `thirst_unit` (A, urgent in follow) with his job, caged/unconscious
+  flags, position and the drink days; again every 3 days. `wake.py` URGENT_DECISIONS, CONTRACTS.
+- **Tests:** tests/lua/test_stations.lua (+1), tests/lua/test_bug420_422_alarm.lua (3).
+- **Live check:** a fort without a fortcore in a siege: `events --type STATION_MOVED` `why core`, soldiers on a Kern+ floor; a citizen killed by a wild animal:
+  kern.log `killed a citizen: a wild danger from now on`, PREDATOR; one citizen at thirst > 50000: `thirst_unit` in `events --cls A`.
 
 ## Water the citizens can reach: ice, an early drink check, a thirst line (BUG-400 to BUG-402, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a i1 Mansionlauded (and the first i1 fort Bachwald) died of thirst, 13 of 16 in y372-373: `bp sites fortcore` ranked S1 110,62,159

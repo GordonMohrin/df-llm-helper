@@ -521,6 +521,37 @@ T.test('BUG-214: nothing on the soldiers\' group within 24 tiles -> the nearest 
   W2.restore()
 end)
 
+---------------------------------------------------------------- BUG-420: a fort without any station
+T.test('BUG-420 (Ostgate y401: "every squad at the core station (none in the manifest)", 0 of 15 soldiers at a station, ' ..
+       'nost 15): a manifest without stations or zones -> the squads of a ready posture stand on a Kern+ floor; the ' ..
+       'peace-time posture keeps no order; STATION_MOVED core', function()
+  local m = S.manifest()
+  m.stations, m.zones = {}, {}
+  local W = world{manifest = m, tag = 'b420'}
+  local real = dfhack.burrows.listBlocks
+  dfhack.burrows.listBlocks = function(b)
+    if not b or not b._bbox then return {} end
+    local r, bb = {}, b._bbox
+    for z = bb[3], bb[6] do
+      for by = bb[2] // 16, bb[5] // 16 do
+        for bx = bb[1] // 16, bb[4] // 16 do r[#r + 1] = {map_pos = {x = bx * 16, y = by * 16, z = z}} end
+      end
+    end
+    return r
+  end
+  T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end), 'SIEGE')
+  run(W, 300)
+  local o = orders_of(W, 'A')
+  T.ok(o:find('^station@') ~= nil, 'old code: no station order (nost); now ' .. o)
+  local x, y, z = o:match('station@(%d+),(%d+),(%d+)')
+  T.ok(x and tonumber(y) >= 41 and tonumber(z) >= S.KERN[3] and tonumber(z) <= S.KERN[6], 'in Kern+ (behind B1): ' .. o)
+  local mv = evs(W, 'STATION_MOVED', 'core')
+  T.ok(#mv >= 1 and mv[1].msg:find('no station in the manifest', 1, true), mv[1] and mv[1].msg or 'no STATION_MOVED core')
+  local _, k = W.K.call('military', 'kpi')
+  T.ok((k.off and k.off.nost or 0) == 0, 'no soldier is off for lack of a station')
+  dfhack.burrows.listBlocks = real
+end)
+
 ---------------------------------------------------------------- BUG-335 review: our squads and a busy bridge
 -- Run 15b Earthboat y385 #7504-#7515: squads 99-101 on their way to station 62,82,138 across B2 were crushed by it; the
 -- inner station flips from melee to b2 the moment B2 moves, and nothing kept a squad off a bridge whose pull was taken.
