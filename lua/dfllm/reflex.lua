@@ -2107,6 +2107,9 @@ local function cause_scan(K, h)
     local e = best.a.e
     -- BUG-452 (Run 16a i1 Syrupobeyed y385: the brief said 'harmless' for the nearest of 33 goblins): harmless is a lone
     -- picture (at most confine.lone_max counted hostiles, as confine_picture and lone_picture count); a larger group is a group
+    -- BUG-463: the group counts every hostile in sight (h.vis, the expired-far ones too), not only the counted ones: 39 goblins
+    -- beyond lockdown_near and one harmless-sized unit near read 'harmless' for 100+ days in an arrival:invasion lockdown
+    n = math.max(n, int(h.vis) or 0)
     local group = n > c.lone_max
     rt.cause = {id = e.id, k = e.an == 1 and 'animal' or e.k, pos = {e.x, e.y, e.z}, dc = best.a.dc, de = best.a.de,
                 hl = (harmless(e, c) and not group) and 1 or 0, n = n, near = best.a.near == true, sz = int(e.sz),

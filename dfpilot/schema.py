@@ -592,7 +592,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-107: a potential refuge (Kern+, the refuge) holds less food or drink than refuge.floor_pct % of the siege need;
     # short = food | drink | food+drink, fneed/dneed = the floor in units, cmd = the existing command that builds the store
     "REFUGE_STOCK": ("A", "seal", _d("burrow:s short:s food:i fneed:i drink:i dneed:i pct:i cit:i",
-                                     "total_f:i total_d:i cmd:s also:s")),
+                                     "total_f:i total_d:i cmd:s also:s fight:i")),
     "AUTOLABOR_LEGACY": ("A", "baseline", _d("fixed:f", "why:s after:s")),
     # FR-64: >= 2 citizens died of dehydration or starvation within a month (the class-A twin of DEATH_CLUSTER)
     "DEATHS_PREVENTABLE": ("A", "care", _CLUSTER),

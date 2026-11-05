@@ -927,8 +927,29 @@ local function breach_stuck(K, g, a, now)
   return list
 end
 
+-- BUG-462 (Run 16a i1 Syrupobeyed y387: two trolls broke O1 (d29) and B2 (d39) although both stood up, ~40 dead in 5 days, the
+-- civ alert still held Kern+ or was off): a raised bridge is no barrier to building destroyers. The first destroyed outer or
+-- inner bridge of a fight tells seal at once (seal.lost: the refuge is the retreat of the episode, a few dry citizens do not
+-- refuse it), in the same pass as the alert is applied, whatever the mode already is (SIEGE goes to BREACH below, a BREACH
+-- that began for another reason had no such trigger). Every M.LOST_EVERY ticks at most
+M.LOST_EVERY = 100
+local function lost_step(K, g, now)
+  if mem.lost_b then return end                          -- told for this fight (MODE clears it with the episode)
+  if mem.lost_t and now >= mem.lost_t and now - mem.lost_t < M.LOST_EVERY then return end
+  mem.lost_t = now
+  local db = destroyed_gate(K, g)
+  if not db then return end
+  local ok, fresh = K.call('seal', 'lost', db)
+  if ok then mem.lost_b = db end
+  if ok and fresh == true then
+    K.log('warn', 'siege: %s destroyed in the %s: the civilians retreat to the refuge now, the squads hold the core', db, K.mode())
+    mem.kill_sig, mem.kill_set = nil, nil      -- the posture re-issues every squad's orders
+  end
+end
+
 local function decide(K, a, g, now)
   local mode = K.mode()
+  if mode == 'SIEGE' or mode == 'BREACH' then lost_step(K, g, now) end
   if mode == 'PEACE' then
     if not a then return end
     if a.siege then
@@ -2634,7 +2655,7 @@ M.on = {
     if to == 'SIEGE' or to == 'DRILL' then st.t0, st.req = now, {} end
     if to == 'BREACH' then st.tb = now end
     st.str.bs = nil                              -- BUG-028 (b): the sealed clock starts again in every mode
-    if to ~= 'SIEGE' and to ~= 'BREACH' then st.stuck, st.stuck_txt = nil, nil end    -- M3: the episode is over
+    if to ~= 'SIEGE' and to ~= 'BREACH' then st.stuck, st.stuck_txt, mem.lost_b = nil, nil, nil end    -- M3: the episode is over
     if to == 'RECOVERY' then st.rq, st.rl, st.b1low = 0, now, false end
     if to == 'ALERT' then st.civ, st.far, st.civ_at = false, nil, nil end
     if (to == 'SIEGE' or to == 'BREACH') and not st.ep then

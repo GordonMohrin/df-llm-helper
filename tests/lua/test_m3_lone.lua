@@ -284,4 +284,28 @@ T.test('BUG-452: 20 small goblins far away: the cause is not harmless (group of 
   T.eq(W.K.mode(), 'SIEGE', 'the kernel ends nothing itself')
 end)
 
+-- BUG-463 (Run 16a i1 Syrupobeyed y387: 33-40 goblins read 'harmless (+39 more)' for 100+ days in an arrival:invasion lockdown, no sortie
+-- offer): the INVASION announcement path. The cause is a group (not harmless) with the hostiles in sight counted, also when most of
+-- them are cleared (expired far) and one small goblin is counted; the lockdown_long decision follows past max_days
+T.test('BUG-463: an INVASION lockdown with 33 small goblins in sight: not harmless (group of 33), lockdown_long past max_days with the ' ..
+       'sortie command; the same with 32 of them cleared far', function()
+  for _, cleared in ipairs({false, true}) do
+    local W = setup{tag = 'inv463' .. (cleared and 'c' or ''), cfg = CF}
+    raws()
+    W.event('INVASION', {id = 9})
+    for i = 1, 33 do goblin(W, 300 + i, 150 + i % 5, 150 + i // 5, Z, 6486) end
+    S.run(W, 600)
+    if cleared then for i = 1, 32 do W.K.call('reflex', 'ignore', 300 + i, 'expired far test') end end
+    S.run(W, 600)
+    local st = W.state().alarm
+    T.ok(st.lock == 1 and st.by, 'a lockdown with a named cause')
+    T.ok(st.why and st.why:find('invasion', 1, true), 'the lockdown is the invasion: ' .. tostring(st.why))
+    T.eq({st.by.hl, st.by.hw, st.by.n}, {0, 'group of 33', 33}, 'not harmless')
+    S.run(W, 4800)
+    local dn = decisions(W, 'lockdown_long')
+    T.eq(#dn, 1, 'one lockdown_long decision')
+    T.ok(dn[1].d.cmd and dn[1].d.cmd:find('squad.sortie', 1, true), tostring(dn[1].d.cmd))
+  end
+end)
+
 T.done()
