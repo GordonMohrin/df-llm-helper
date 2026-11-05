@@ -147,7 +147,7 @@ def test_the_minimal_plan_adds_the_repairs_the_errors_name_and_nothing_else(save
     doc, errs, _ = plan.minimal_plan(save, state, phases, tinfo=TINFO, decisions={}, tpls=[*TINFO, "seal"])
     assert [b["tpl"] for se in doc["seasons"] for b in se["build"]][:1] == ["seal"]       # the repair went in, first
     assert "temple" not in [b["tpl"] for se in doc["seasons"] for b in se["build"]]       # a non-minimal repair did not
-    assert len(errs) == 1 and "temple" in errs[0] and len(rounds) == 2                    # and its error stays: not applied
+    assert len(errs) == 1 and "temple" in errs[0] and rounds[:2] == [["fortcore", "tombs"], ["seal", "fortcore", "tombs"]]   # and its error stays: not applied (BUG-477: after the subset tries found nothing)
     errs2, msg = plan.apply_minimal(save, wait_s=0)
     assert errs2 and msg == "not applied" and not (save / "bp" / "y6s1b0.json").exists()
 

@@ -479,4 +479,61 @@ T.test('BUG-467: a stone-0 fort asks the caravans for the stone, gems, bars and 
 end)
 
 
+-- BUG-476 (Run 16b i2 Roadvises y378/y381: the temple's offering place "waits for tool x1" 58 and 240 days): the tool a planned
+-- building asks for by use (job_item.has_tool_use PLACE_OFFERING) is an altar; it is ordered at the Masons' (MakeTool
+-- ITEM_TOOL_ALTAR) while stone covers it, else MATERIAL_SHORT names why; a free tool without that use is no altar.
+local function altar_world(o)
+  local function altar_job(id, use)
+    local j = planned(id, 'TOOL', 1, 20, 'OfferingPlace')
+    j.job_items = {elements = kmock.vec{{item_type = df.item_type.TOOL, mat_type = -1, mat_index = -1, quantity = 1,
+                                         has_tool_use = use or 7}}}
+    return j
+  end
+  o.jobs = function()
+    df.tool_uses = {PLACE_OFFERING = 7, DISPLAY_OBJECT = 8, [7] = 'PLACE_OFFERING', [8] = 'DISPLAY_OBJECT'}   -- after the world is built
+    add_jobs({'MakeTool'})
+    return {altar_job(1, o.use)}
+  end
+  o.setup = function(W)
+    W.act_result('workorder', function(spec)
+      local mo = df.global.world.manager_orders
+      local id = mo.manager_order_next_id
+      mo.manager_order_next_id = id + 1
+      mo.all:insert('#', {id = id, job_type = df.job_type[spec.job], reaction_name = '', item_subtype = 5,
+                          amount_left = spec.amount_total, amount_total = spec.amount_total, _spec = spec,
+                          mat_type = -1, mat_index = -1})
+      return true, id
+    end)
+  end
+  return world(o)
+end
+
+T.test('BUG-476: a planned offering place waits for a tool by use: the altar is ordered at the Masons (MakeTool ITEM_TOOL_ALTAR)',
+       function()
+  local W = altar_world{boulders = 30, logs = 0}
+  days(W, 1)
+  local d = orders(W, 'dfllm:piece_altar')
+  T.eq(#d, 1, 'one altar order')
+  T.eq({d[1].job, d[1].item_subtype, d[1].material, d[1].amount_total}, {'MakeTool', 'ITEM_TOOL_ALTAR', 'INORGANIC', 1})
+  days(W, 2)
+  T.eq(#orders(W, 'dfllm:piece_altar'), 1, 'the open order covers it: never twice')
+  T.eq(W.find_events('MATERIAL_SHORT'), {})
+end)
+
+T.test('BUG-476: no Masons or no stone: MATERIAL_SHORT says "no material for altar" (the temple does not wait unseen)', function()
+  local W = altar_world{boulders = 30, logs = 0, shops = {'Carpenters'}}
+  days(W, 1)
+  T.eq(orders(W, 'dfllm:piece_altar'), {})
+  local ev = W.find_events('MATERIAL_SHORT')
+  T.eq(#ev, 1)
+  T.ok(ev[1].msg:find('altar', 1, true) and ev[1].msg:find('no Masons', 1, true), ev[1].msg)
+end)
+
+T.test('BUG-476: a tool of another use (a display case) is no altar: nothing is ordered for it', function()
+  local W = altar_world{boulders = 30, logs = 0, use = 8}
+  days(W, 1)
+  T.eq(orders(W, 'dfllm:piece_altar'), {})
+  T.eq(W.find_events('MATERIAL_SHORT'), {})
+end)
+
 T.done()

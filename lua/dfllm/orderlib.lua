@@ -81,6 +81,7 @@ O.WS = {
   MakeWeapon = {metal = FORGE, wood = {W'Bowyers', W'Carpenters'}},
   MakeAmmo = {metal = FORGE, wood = {W'Bowyers', W'Craftsdwarfs'}, bone = {W'Bowyers', W'Craftsdwarfs'}},
   MakeTrapComponent = {metal = FORGE},
+  MakeTool = {rock = MASONS, wood = CARP, metal = FORGE},        -- BUG-476: the altar of the offering place (hard stone)
   MakeQuiver = any(LEATHER), MakeBackpack = any(LEATHER),
   BrewDrink = any({W'Still'}), PrepareMeal = any({W'Kitchen'}),
   PrepareRawFish = any({W'Fishery'}), ExtractFromRawFish = any({W'Fishery'}),

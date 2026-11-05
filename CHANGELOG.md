@@ -25,6 +25,15 @@
 - **BUG-473:** the aqshaft asks for the Masons (PROJECT_REQUEST workshops `why=masonry`) when a level needs soil walls and no mason's workshop stands; the surface depot is drafted with a core that waits for the aqshaft.
 - **Contract:** `runner.seal_first.lead_days` (CONTRACTS.md, fairplay.RUNNER_LIM, baseline.json), PROJECT_REQUEST `why=masonry`; no schema.py change. **Tests:** tests/test_bug469_473_f29.py, tests/lua/test_bug469_473.lua, test_bug412_aqshaft_order.lua (+1), test_trade_act.lua (+3 asserts). **Live check:** see the five bug files.
 
+## Round 29 (ops): follow takes over after a deploy, game-time stall wake, the altar of the temple, a minimal plan that applies (BUG-474 to BUG-477, 2026-11-05; offline, live-untested)
+- **Why:** Run 16 i1/i3/i4: `follow --takeover` was refused after a deploy and the forts kept OLD CODE; the game tick stood at Pop 1-2 with nobody told; the temple waited 240 days for a tool; the applied plan stood for 9-10 years.
+- **BUG-474:** `acquire_lock`: an owner on other code (`other_code`) is displaced by a takeover whatever the cool-down and the start id say (they judged the deploy start as the displaced one: the start id is the shared parent pid), unless it took the save over from MY code (`took_code`);
+  the old follow exits at its next beat, no kill. `_Lock._dup_check`: a foreign pid still beating `.follow.hb` beside the owner is said once (`follow dup`, `Stop-Process -Id`).
+- **BUG-475:** `Follower._check_stall`: fresh heartbeat, tick standing 120 s, not paused by the player / inbox -> TICK_STALL (pause owner, logged popup text, `resume` for pause:df / pause:popup, else Gordon presses Esc / Enter in DF); read-only, nothing is clicked.
+- **BUG-476:** economy: a tool a planned building asks for by use (`has_tool_use` PLACE_OFFERING) is the class "altar"; `MakeTool ITEM_TOOL_ALTAR` is ordered in stone at the Masons or MATERIAL_SHORT says why; `orderlib.WS` knows MakeTool.
+- **BUG-477:** `plan.auto_plan`: a minimal plan that still has ERRORs after the repair rounds becomes the error-free subset of its builds (`_subset`), the dropped ERRORs are `held` and named; follow no longer AUTO_FAILs every year on a parked fortcore stage.
+- **Contract:** follow's own wake TICK_STALL (CONTRACTS.md, wake.SYNTH / PRIO / NEXT). **Tests:** tests/test_bug474_477_f29ops.py, test_bug385_follow_lock.py (1 adapted), tests/lua/test_economy_pieces.lua (+3). **Live check:** see the four bug files.
+
 ## Round 28 (propose): neighbouring doors no longer crash plan propose, a failing template drops itself, military.pct passes D-12 (BUG-457, 2026-11-05; offline, live-untested)
 - **Why:** Run 16b i2 Roadvises y376-y385: `plan propose` died every year with `traps.at: tile 60,100,121 named twice`; the player copied last year's plan ten times, and the copy failed `plan check` with `military.pct 15 < 20 (D-12 at pop 62)`.
 - **BUG-457:** two doors side by side share outside lane tiles; `bp.traps.dedupe` (used by `format_at` and `traps.expand`) keeps a tile with the first way that names it and notes it; `plan.fit_placeable` drops any build whose placement raises (`BUG-457: ERROR <tpl>@<site> left out: ...`)

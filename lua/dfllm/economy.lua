@@ -5487,8 +5487,9 @@ local function job_missing(j)
       local miss = q - (att[i] or 0)
       if miss > 0 and #out < 8 then
         local okb, bm = pcall(function() return ji.flags2.building_material == true end)
+        local oku, tu = pcall(function() return int(ji.has_tool_use) end)     -- BUG-476: which tool (an offering place waits for an altar)
         out[#out + 1] = {t = int(ji.item_type) or -1, mt = int(ji.mat_type) or -1, mi = int(ji.mat_index) or -1,
-                         n = math.min(miss, 50), bm = okb and bm or false}
+                         n = math.min(miss, 50), bm = okb and bm or false, tu = oku and tu or nil}
       end
     end
   end)
@@ -7253,6 +7254,27 @@ function T.jmake(K, c, r)
         if e.def and wait then
           short[#short + 1] = {kind = e.kind, n = need, pre = 'stone queued for', why = 'behind the other rock orders, ' ..
                                ((r.f or {})['workshop:Carpenters'] and 'no logs' or 'no Carpenters'), queued = true}
+        end
+      end
+      -- BUG-476: a tool the planned building waits for by use (an altar for the temple's offering place) is ordered at the Masons'
+      -- while the stone covers it, else the reason is MATERIAL_SHORT's (the temple waits and says why, not for a year unseen)
+      local tp = M.TOOL_BY_LABEL[q.label]
+      if tp and q.free == 0 and q.forb == 0 then
+        local need = math.min(q.n, pc.max_n or 6)
+        local made = M.tool_orders(tp)
+        if made < need then
+          local k = need - made
+          local masons = (r.f or {})['workshop:Masons'] == true
+          local tag = (pc.tag or 'dfllm:piece_') .. tp.kind
+          if masons and (M.rock_left(c, r) >= k or stone_free(c, r) - (r.planned.rock or 0) >= k) then
+            if not open(r, tag) then
+              add(r, {tag = tag, spec = {job = tp.job, item_subtype = tp.sub, material = 'INORGANIC'}, n = k,
+                      uses = {rock = 1}, why = tp.kind .. ' for a planned building'})
+            end
+          else
+            short[#short + 1] = {kind = tp.kind, n = k, why = string.format('no material for %s: %s', tp.kind,
+                                                                           masons and 'no rock' or 'no Masons')}
+          end
         end
       end
     end
@@ -10238,9 +10260,52 @@ end
 
 -- one class a planned building waits for: the items.other vectors and a label
 local BM_VECS = {'BOULDER', 'BLOCKS', 'WOOD', 'BAR'}
+-- BUG-476 (Run 16b i2 Roadvises y378/y381: the temple's offering place 'waits for tool x1' 58 and 240 days, no order made the tool):
+-- a TOOL a planned building asks for by use (job_item.has_tool_use) has its own class; M.TOOL_PIECES: tool_uses name ->
+-- {label (the class), kind (MATERIAL_SHORT name), sub (the raws id of the tool), job}
+M.TOOL_PIECES = {PLACE_OFFERING = {label = 'altar', kind = 'altar', sub = 'ITEM_TOOL_ALTAR', job = 'MakeTool'}}
+M.TOOL_BY_LABEL = {altar = M.TOOL_PIECES.PLACE_OFFERING}
+-- whether the tool item's definition lists the use (itemdef_toolst.tool_use)
+function M.tool_has_use(it, tu)
+  local ok, yes = pcall(function()
+    local def = dfhack.items.getSubtypeDef(it:getType(), it:getSubtype())
+    for _, u in ipairs(def.tool_use) do if u == tu then return true end end
+    return false
+  end)
+  return ok and yes == true
+end
+
+-- the open manager orders (amount left) that make this tool piece, by the tool's raws index
+function M.tool_orders(tp)
+  local idx
+  pcall(function()
+    for i, d in ipairs(df.global.world.raws.itemdefs.tools) do
+      if d.id == tp.sub then idx = i - 1; break end
+    end
+  end)
+  local n = 0
+  pcall(function()
+    local jt = df.job_type[tp.job]
+    for _, o in ipairs(df.global.world.manager_orders.all) do
+      -- idx unknown (the raws cannot be read): every open order of the job counts, fewer orders rather than a flood
+      if o.job_type == jt and (idx == nil or o.item_subtype == idx) and (math.tointeger(o.amount_left) or 0) > 0 then
+        n = n + math.tointeger(o.amount_left)
+      end
+    end
+  end)
+  return n
+end
+
+function M.tool_use_name(tu)
+  if math.type(tu) ~= 'integer' or tu < 0 then return nil end
+  local n = df.tool_uses and df.tool_uses[tu]
+  return type(n) == 'string' and n or nil
+end
 local function need_class(nd)
   if nd.t >= 0 then
     local n = df.item_type[nd.t]
+    local tp = n == 'TOOL' and M.TOOL_PIECES[M.tool_use_name(nd.tu) or '']
+    if tp then return {n}, tp.label end
     if type(n) == 'string' then return {n}, n:lower() end
   elseif nd.bm then return BM_VECS, 'building material' end
 end
@@ -10549,6 +10614,7 @@ local function mat_item(K, jb, it, nd)
   local f = it.flags
   for _, k in ipairs(MAT_BUSY) do if f[k] then return nil end end
   if nd.mt >= 0 and (it.mat_type ~= nd.mt or (nd.mi >= 0 and it.mat_index ~= nd.mi)) then return nil end
+  if nd.tu and not M.tool_has_use(it, nd.tu) then return nil end         -- BUG-476
   if CORPSE_T[tname(it) or ''] then return nil end
   if not f.forbid then return 'free' end
   if held_set(K, jb)[it.id] or jb.queued[it.id] then return nil end
@@ -10574,7 +10640,8 @@ function T.jmat(K, c, r)
           local key = string.format('%s:%d:%d%s', label, nd.mt, nd.mi, fire and ':fire' or '')
           local q = by[key]
           if not q then
-            q = {key = key, label = label, vecs = vecs, mt = nd.mt, mi = nd.mi, n = 0, free = 0, forb = 0, jobs = {}, fire = fire}
+            q = {key = key, label = label, vecs = vecs, mt = nd.mt, mi = nd.mi, n = 0, free = 0, forb = 0, jobs = {}, fire = fire,
+                 tu = M.TOOL_BY_LABEL[label] and nd.tu or nil}      -- BUG-476: a tool class counts only tools of that use
             by[key] = q
             jb.mq[#jb.mq + 1] = q
           end

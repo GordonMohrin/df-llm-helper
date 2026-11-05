@@ -70,7 +70,7 @@ from .events import clip, est_tokens, fmt_tick
 
 WAKE_TOKENS = 150
 WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
-SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK", "PLAN_AUTO", "PROJECT_STALE"}   # follower's own wake reasons (not kern events)
+SYNTH = {"HB_STALE", "TICK_STALL", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK", "PLAN_AUTO", "PROJECT_STALE"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP",
@@ -79,7 +79,7 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "DEATHS_3PLUS", "NO_DEPOT", "CURSE_MOON",
         "NEEDS_CLICK",                        # K2: no fort runs at all; nothing else in the burst can be acted on first
         "PATIENT_DYING", "PATIENTS_OUT", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
-        "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "SUPERVISE", "QUICKSAVE_FAILED",
+        "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "TICK_STALL", "SUPERVISE", "QUICKSAVE_FAILED",
         "PAUSED_BY_DF",                       # FR-94: the game stands (a load, a popup); one `dfllm cmd resume` runs it again
         "SIEGE_END",
         "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
@@ -103,6 +103,9 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         "PAUSED_BY_DF": "dfllm cmd resume (the reply names what it released and every popup it read); then dfllm status",
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
+        # BUG-475: the clock stands with the kernel alive; the line says whether `resume` can release it
+        "TICK_STALL": "dfllm status; pause:df / pause:popup: dfllm cmd resume (refuses threat or curse popups); else tell Gordon "
+                      "(a screen the kernel cannot close; nothing is clicked from here)",
         "SUPERVISE": "dfllm supervise --once --dry-run",
         # K2/BUG-099: the restart chain loaded nothing; the msg names the save, the DFHack version and the screen rows
         "NEEDS_CLICK": "tell Gordon at once (DF waits at the title screen, no fort runs): he clicks Continue and the save "
@@ -207,6 +210,9 @@ SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's by
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
 AUTO_PHASES = ("P0", "P1")                    # PLAN_EXHAUSTED auto-start only for the basic infrastructure
 PRUNE_EVERY_S = 60
+STALL_S = 120                                  # BUG-475: real seconds the game tick may stand while the kernel beats and nothing is paused
+STALL_AGAIN_S = 1800                           # BUG-475: a stall that goes on is said again after this long
+STALL_HB_MAX_S = 30                            # BUG-475: the heartbeat must be this fresh (the kernel runs; HB_STALE is the other case)
 PLAN_CHECK_EVERY_S = 300                       # FR-86: how often follow looks at the age of the applied plan
 PLAN_AUTO_KEYS = ("first_y", "tried_y", "applied_y")
 AUDIT_PREFIX = "aud"                           # snapshot ids of `dfllm audit` (it audits them itself, follow does not)
@@ -734,6 +740,7 @@ class Follower:
         self._core_site_read = 0.0                   # BUG-441: wall of the last core-site look
         self._core_site_tried: dict[str, float] = {}     # BUG-441: project id -> wall of the last re-site cancel
         self._beat = -1e18
+        self._stall: dict = {}                       # BUG-475: tick (heartbeat), since (wall it was first seen), told (wall of the wake)
 
     @staticmethod
     def _print(line: str) -> None:
@@ -838,6 +845,7 @@ class Follower:
             self._on_event(e, now)
         self._heartbeat(now)
         self._check_heartbeat(now)
+        self._check_stall(now)
         self._check_supervise(now)
         self._check_quicksave(now)
         self._check_plan(now)
@@ -997,6 +1005,71 @@ class Follower:
                 self._synth("HB_STALE", f"heartbeat {int(age)}s old, ACTIVE={self.dir.name}", now)
         elif age is not None:
             self.hb_woken = False
+
+    def _popup_words(self) -> str:
+        """BUG-475: the newest popup text the kernel logged (PAUSED_BY_DF popup, POPUP_GONE text), read-only; '' when none."""
+        try:
+            for e in reversed(files.tail_events(self.dir, 0, limit=3, types={"PAUSED_BY_DF", "POPUP_GONE"})):
+                d = e.get("d") if isinstance(e.get("d"), dict) else {}
+                t = d.get("popup") or d.get("text")
+                if isinstance(t, str) and t:
+                    return f'{e["type"]} #{e.get("n")}: "{clip(t, 60)}"'
+        except Exception:                      # noqa: BLE001 - a courtesy to the wake line
+            pass
+        return ""
+
+    def _check_stall(self, now: float) -> None:
+        """BUG-475 (Run 16 i1 Syrupobeyed Pop 1, i4 Mazelanterns Pop 1-2: '0 t/s, not paused', heartbeat ok; i2: status 'pause:popup'
+        with no wording): the kernel beats but the game tick has not moved for STALL_S real seconds although nothing of ours
+        (the player's pause, the inbox hold, a load) explains it. One TICK_STALL wake per stall (again after STALL_AGAIN_S) names
+        the owner of the pause (state owners.pause), the popup text the kernel logged, and what may be done: pause:df / pause:popup
+        -> `dfllm cmd resume` (the kernel reads the popup, refuses threat or curse words, presses the pause key); a stall with
+        no pause and no popup the kernel can list is a screen the kernel cannot see or close (read-only here, nothing is
+        clicked): the player presses Esc / Enter in DF. A paused game by the player (gordon) or the inbox is no stall."""
+        if self.dir is None or paths.active_save() != self.dir.name:
+            self._stall = {}
+            return
+        hb, age = files.read_heartbeat(self.dir, now)
+        tick = (hb or {}).get("tick")
+        if hb is None or age is None or not isinstance(tick, int) or isinstance(tick, bool):
+            self._stall = {}
+            return
+        try:
+            mt = (self.dir / "heartbeat").stat().st_mtime
+        except OSError:
+            self._stall = {}
+            return
+        st = self._stall
+        if st.get("tick") != tick:
+            self._stall = {"tick": tick, "since": now, "mt": mt, "mt_at": now}
+            return
+        if mt != st.get("mt"):                 # the kernel rewrote the heartbeat: it runs (the file's age is no clock of ours)
+            st["mt"], st["mt_at"] = mt, now
+        if now - st.get("mt_at", now) > STALL_HB_MAX_S:
+            st.pop("told", None)               # the kernel does not beat: HB_STALE's case, not a stall of the game
+            st["since"] = now
+            return
+        state = files.read_state(self.dir) or {}
+        owner = ((state.get("owners") or {}).get("pause")) if isinstance(state.get("owners"), dict) else None
+        paused = bool(hb.get("paused"))
+        if paused and owner not in ("df", "popup"):
+            st["since"] = now                  # the player's or the inbox's own pause: not ours to report
+            return
+        cap = (state.get("clock") or {}).get("cap") if isinstance(state.get("clock"), dict) else None
+        if cap == 0 or now - st.get("since", now) < STALL_S:
+            return
+        told = st.get("told")
+        if told is not None and now - told < STALL_AGAIN_S:
+            return
+        st["told"] = now
+        secs = int(now - st["since"])
+        words = self._popup_words()
+        if owner in ("df", "popup"):
+            what, hint = f"paused by {owner}", "dfllm cmd resume may release it"
+        else:
+            what, hint = "not paused", "no popup the kernel lists: Gordon presses Esc/Enter in DF"
+        self._synth("TICK_STALL", f"BUG-475 tick {tick} static {secs} s, {what}, kernel beats; "
+                    f"{words or 'no popup text logged'}; {hint}", now)
 
     def _check_supervise(self, now: float) -> None:
         """A supervisor alert supervise logged (said[key] moved) since the last look -> one SUPERVISE wake."""
@@ -1882,6 +1955,13 @@ def old_code_owner(save_dir: Path, now: float, alive: Callable[[int], bool] | No
     return (owner, code) if owner is not None and code is not None and code != CODE else None
 
 
+def other_code(save_dir: Path, owner: dict | None, now: float) -> bool:
+    """BUG-474: the lock's owner runs other dfpilot code than this process (its lock `code`, else its .follow.hb code), or
+    says nothing about its code at all (a follower from before BUG-334: older than any code of ours)."""
+    c = owner_code(save_dir, owner, now)
+    return c is None or c != CODE
+
+
 def recent_takeover(owner: dict | None, now: float) -> bool:
     """BUG-385: the lock's owner took the save over itself less than FOLLOW_TAKEOVER_COOL_S ago."""
     t = (owner or {}).get("took_at")
@@ -1902,16 +1982,24 @@ def acquire_lock(save_dir: Path, now: float, takeover: bool = False,
     owner = lock_owner(save_dir, now, alive)
     if owner is not None and not takeover:
         return False, owner
-    if owner is not None and took_from_me(owner):         # BUG-385: the displaced start restarts: never, whatever the time
+    # BUG-474 (Run 16 i1/i3/i4: after a deploy `follow --takeover` was refused 'another follow owns this instance (pid N)' and the
+    # fort kept running OLD CODE for hours): the BUG-385 ping-pong guards (cool-down, 'took from my start id') apply to two starts
+    # of the SAME code. The start id is the parent pid, and every follow an agent starts from one shell shares it, so the
+    # deploy's new follow looked like the displaced start for ever. An owner on other code is displaced by a takeover, unless it
+    # took the save over from a follower of MY code (took_code == CODE: the old code coming back, the real ping-pong).
+    deploy = owner is not None and other_code(save_dir, owner, now) and owner.get("took_code") != CODE
+    if owner is not None and not deploy and took_from_me(owner):    # BUG-385: the displaced start restarts: never, whatever the time
         return False, {**owner, "cooldown": 0, "mine": True}
-    if owner is not None and recent_takeover(owner, now):
+    if owner is not None and not deploy and recent_takeover(owner, now):
         return False, {**owner, "cooldown": int(FOLLOW_TAKEOVER_COOL_S - (now - owner["took_at"]))}
     path = Path(save_dir) / FOLLOW_LOCK
     files.write_json_atomic(path, {"v": 1, "pid": os.getpid(), "start": int(now), "hb": int(now),
                                    "code": CODE,          # BUG-334
                                    "sid": start_id(),
                                    **({"took": owner.get("pid"), "took_at": int(now),
-                                       **({"took_sid": owner["sid"]} if isinstance(owner.get("sid"), str) else {})}
+                                       **({"took_sid": owner["sid"]} if isinstance(owner.get("sid"), str) else {}),
+                                       **({"took_code": owner_code(save_dir, owner, now)}
+                                          if owner_code(save_dir, owner, now) else {})}         # BUG-474
                                       if owner else {})})
     back = files.read_json(path, retry=False)
     if isinstance(back, dict) and back.get("pid") not in (None, os.getpid()):
@@ -1927,7 +2015,7 @@ def refresh_lock(save_dir: Path, now: float, alive: Callable[[int], bool] | None
     doc = files.read_json(Path(save_dir) / FOLLOW_LOCK, retry=False)
     mine = isinstance(doc, dict) and doc.get("pid") == os.getpid()
     start = doc.get("start") if mine else None
-    kept = {k: doc[k] for k in ("took", "took_at", "took_sid") if k in doc} if mine else {}      # BUG-385: the cool-down outlives the beats
+    kept = {k: doc[k] for k in ("took", "took_at", "took_sid", "took_code") if k in doc} if mine else {}      # BUG-385: the cool-down outlives the beats
     files.write_json_atomic(Path(save_dir) / FOLLOW_LOCK, {"v": 1, "pid": os.getpid(),
                                                            "start": start if isinstance(start, int) else int(now),
                                                            "hb": int(now), "code": CODE, "sid": start_id(), **kept})       # BUG-334
@@ -1953,6 +2041,8 @@ class _Lock:
         # BUG-334 review fix: auto=False (follow --once / --max-s, a one-shot) never takes over an owner on old code by
         # itself: it would poll beside the long-running follow, end it at its beat, then release the lock and exit too.
         self.takeover, self.auto, self.dir, self.beat = takeover, auto, None, -1e18
+        self.dup_seen: dict[int, float] = {}    # BUG-474: foreign pid beating .follow.hb -> wall it was first seen
+        self.dup_said: set[int] = set()
 
     def step(self, d: Path | None) -> str | None:
         """None to go on; the line to print before exiting when another follow holds or took the lock."""
@@ -1972,6 +2062,7 @@ class _Lock:
             self.dir = None
             old = None if self.takeover or not self.auto else old_code_owner(d, now)   # BUG-334: old code is taken over
             ok, owner = acquire_lock(d, now, self.takeover or old is not None)
+            self.dup_seen, self.dup_said = {}, set()
             if not ok and owner.get("cooldown") is not None:      # BUG-385: no ping-pong
                 return (f"follow: another follow owns this instance (pid {owner.get('pid')}); do not restart. It took {d.name} "
                         f"over from pid {owner.get('took')}: this one exits and does not take it back; two starts with "
@@ -1997,7 +2088,33 @@ class _Lock:
                 self.dir = None                     # not ours any more: never delete it
                 return (f"follow: another follow owns this instance (pid {owner.get('pid')}); do not restart. It took over "
                         f"{d.name} (--takeover): this one (pid {os.getpid()}) exits and does not take it back")
+            self._dup_check(d, now)
         return None
+
+    def _dup_check(self, d: Path, now: float) -> None:
+        """BUG-474 (Run 16b i2: 'zwei follow parallel (pid 25008 + neuer)', every event answered twice): the lock only holds back a
+        follow that reads it. A foreign pid that keeps beating <save>/.follow.hb beside this owner for FOLLOW_LOCK_STALE_S is a
+        follow that ignores the lock (code from before BUG-238) or a second copy: said once per pid, with the command that ends it
+        (no kill from here: the owner of that process decides)."""
+        try:
+            doc, age = files.read_follow_hb(d, now)
+            pid = (doc or {}).get("pid")
+            if (age is None or age > files.FOLLOW_STALE_S or not isinstance(pid, int) or isinstance(pid, bool)
+                    or pid == os.getpid() or not pid_alive(pid)):
+                self.dup_seen.clear()
+                return
+            first = self.dup_seen.setdefault(pid, now)
+            if now - first < FOLLOW_LOCK_STALE_S or pid in self.dup_said:
+                return
+            self.dup_said.add(pid)
+            msg = (f"follow: BUG-474 a second follow (pid {pid}, code {(doc or {}).get('code') or '?'}) keeps beating {files.FOLLOW_HB} "
+                   f"beside this owner (pid {os.getpid()}) for {int(now - first)} s although the lock names this one: it ignores "
+                   f".follow.lock (code from before BUG-238) or is a second copy, and every event is answered twice; stop it "
+                   f"(PowerShell: Stop-Process -Id {pid})")
+            print(msg, flush=True)
+            files.log_cli(d, "follow", "dup", {"pid": pid}, msg)
+        except Exception as e:             # noqa: BLE001 - a check must never stop the follower
+            sys.stderr.write(f"follow: dup check: {type(e).__name__}: {e}\n")
 
 
 def run(args) -> int:

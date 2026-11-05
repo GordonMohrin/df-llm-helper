@@ -4660,6 +4660,15 @@ def auto_plan(save_dir: Path, state: dict | None, phases: dict | None = None, ti
     doc = _with_new(doc, prev, [(si, b) for si, _, b in new_builds(doc, prev) if minimal_ok(b)])
     errs, warn = _fix_rounds(doc, state, prev, fort, decisions, tp, season, minimal_ok)
     out = {"doc": doc, "errs": errs, "warn": warn, "held": [], "raised": None}
+    if errs:
+        # BUG-477 (Run 16a i1 y379 -> y388, 16b i2 y386 -> y397: AUTO_FAIL 'minimal plan: fortcore ... parked' every year, the applied plan
+        # stood still for 9-10 years): the ERROR belongs to one drafted build whose repair the minimal plan may not add (a fortcore
+        # stage 3 behind a parked stage 1; the repair is a stage-1 re-site). The minimal plan is the error-free subset of its own
+        # builds (the raise's rule, _subset), down to no new build at all; what was dropped is `held` and the wake names it.
+        sub = _subset(doc, state, prev, fort, decisions, tp)
+        if sub is not None:
+            out.update(doc=sub[0], errs=[], warn=sub[1], held=list(errs))
+            doc = sub[0]
     nxt = next_phase(ph, cur) if raise_due(save_dir, state, prev) else None
     if nxt:
         cand = propose(state, ph, prev, decisions=decisions, tinfo=tinfo, applied=applied, fort=fort, upto=nxt,
