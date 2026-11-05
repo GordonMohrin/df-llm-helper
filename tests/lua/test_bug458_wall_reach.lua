@@ -274,15 +274,79 @@ T.test('BUG-458: bp.place of a seal with a constructed wall that would cut the f
   local W2 = rworld{tag = 'b458h', cuts = CUT}
   r = H.place(W2, SEAL, seal_doc())
   T.eq(r.ok, true, r.msg)
-  -- walls that cut nothing, an unknown reach, a partial flood: placed
-  for i, cuts in ipairs({{known = true, n = 0, cuts = {}, total = 3, visited = 9, partial = false},
-                         {known = false, why = 'x'}, {known = true, n = 1, cuts = {}, partial = true}}) do
-    local Wn = rworld{tag = 'b458i' .. i, cuts = cuts}
-    local d2 = seal_doc()
-    d2.stages[1].chunks[1].cells[1][4] = 'Cw'
-    d2.materials = {wall = 1}
-    r = H.place(Wn, SEAL, d2)
-    T.eq(r.ok, true, 'case ' .. i .. ': ' .. tostring(r.msg))
+  -- walls that cut nothing: placed
+  local Wn = rworld{tag = 'b458i1', cuts = {known = true, n = 0, cuts = {}, total = 3, visited = 9, partial = false}}
+  local d2 = seal_doc()
+  d2.stages[1].chunks[1].cells[1][4] = 'Cw'
+  d2.materials = {wall = 1}
+  r = H.place(Wn, SEAL, d2)
+  T.eq(r.ok, true, tostring(r.msg))
+  -- review: an unknown reach and a partial flood fail closed, as the runner's fallback does
+  for i, cuts in ipairs({{known = false, why = 'x'}, {known = true, n = 1, cuts = {}, partial = true}}) do
+    local W3 = rworld{tag = 'b458j' .. i, cuts = cuts}
+    local d3 = seal_doc()
+    d3.stages[1].chunks[1].cells[1][4] = 'Cw'
+    d3.materials = {wall = 1}
+    r = H.place(W3, SEAL, d3)
+    T.eq(r.ok, false, 'case ' .. i .. ': ' .. tostring(r.msg))
+    T.ok(r.msg:find('cannot be proven safe', 1, true) and r.msg:find('close with doors', 1, true), r.msg)
   end
+  -- a repair closure with walls is checked too
+  local W4 = rworld{tag = 'b458k', cuts = CUT}
+  local d4 = seal_doc()
+  d4.tpl, d4.class = 'repair', 'defense'
+  d4.stages[1].chunks[1].cells[1][4] = 'Cw'
+  d4.materials = {wall = 1}
+  r = H.place(W4, 'rp458', d4)
+  T.eq(r.ok, false, tostring(r.msg))
+  T.ok(r.msg:find('refused: the repair walls (1) would cut 2', 1, true), r.msg)
+end)
+
+T.test('BUG-458 review: the second wall path (door_walls: quickfort refused the door) holds the same reach check: the ' ..
+       'door stays, a door task is asked for; with nothing to cut the wall goes up', function()
+  local W = rworld{tag = 'b458l', cuts = CUT}
+  W.unsuitable[AT] = true
+  H.place(W, SEAL, seal_doc())
+  stuck(W, 3)
+  T.eq(logs(W, 'door unsuitable at ' .. SX .. ',' .. SY .. ',' .. Z .. ': wall instead'), 0, 'old code: a wall instead')
+  T.eq(logs(W, 'stays a door: a wall would cut off 2 (farm 98,75,138, citizen 112,72,138)') >= 1, true)
+  T.ok(#W.door_calls >= 1, 'the door is asked for as a workshop task')
+  local W2 = rworld{tag = 'b458m', cuts = {known = true, n = 0, cuts = {}, total = 2, visited = 4, partial = false}}
+  W2.unsuitable[AT] = true
+  H.place(W2, SEAL, seal_doc())
+  stuck(W2, 3)
+  T.eq(logs(W2, 'door unsuitable at ' .. SX .. ',' .. SY .. ',' .. Z .. ': wall instead'), 1, 'nothing to cut: the wall instead')
+  -- an unknown reach holds the wall back too
+  local W3 = rworld{tag = 'b458n', cuts = {known = false, why = 'no citizen on a walk group'}}
+  W3.unsuitable[AT] = true
+  H.place(W3, SEAL, seal_doc())
+  stuck(W3, 3)
+  T.eq(logs(W3, ': wall instead'), 0)
+end)
+
+T.test('BUG-458 review: LOCKED_OUT also finds a wall that came in through bp.place close=wall (no sw / dw record, the project done), and reopen takes it down',
+       function()
+  local W = rworld{tag = 'b458o', cuts = {known = true, n = 0, cuts = {}, total = 2, visited = 4, partial = false}}
+  local d = seal_doc()
+  d.stages[1].chunks[1].cells[1][4] = 'Cw'
+  d.materials = {wall = 1}
+  local r = H.place(W, SEAL, d)
+  T.eq(r.ok, true, tostring(r.msg))
+  stuck(W, 14)
+  T.ok(W.bld_at[AT], 'the wall is under construction')
+  W.buildings[W.bld_at[AT]], W.bld_at[AT] = nil, nil           -- built: a finished construction is no building, the snapshot shows 'C'
+  W.tile(SX, SY, Z).c = 'C'
+  W.lo = {known = true, n = 1, cits = {{id = 7, x = 112, y = 72, z = 138}}, places = {{kind = 'farm', x = 98, y = 75, z = 138}},
+          at = {AT}}
+  stuck(W, 4)
+  local ev = {}
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'locked_out' then ev[#ev + 1] = e end end
+  T.eq(#ev, 1, 'old code: only the sw / dw records were looked at')
+  T.eq(ev[1].d.at, {AT})
+  T.eq(H.proj(W, SEAL).done, 1, 'the project is done: forget() dropped its records and the document, the wall stays')
+  r = W.inbox('bp.cancel', {proj = SEAL, reopen = AT})
+  T.eq(r.ok, true, tostring(r.msg))
+  r = W.inbox('bp.cancel', {proj = SEAL, reopen = AT})
+  T.eq(r.ok, false, 'the record is gone with the wall')
 end)
 T.done()

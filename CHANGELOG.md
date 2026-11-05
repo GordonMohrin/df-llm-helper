@@ -8,8 +8,9 @@
 - **BUG-459:** `food_more` offers `butcher.mark` only while an animal can be marked and `trade.want food, seeds` always; `wake.workable_food_cmds` drops the farm command when no farm site stands and adds the trade fallback.
 - **BUG-460:** `_farm_kinds(urgent)`: food below 60 days looks the surface plots up (the surface fort stays off); `farm_tries`/`_place_farms`/`_waive_farms` too; the surface farm is drafted with `plots = ceil(citizens / 10)`; a pop_ceiling under the policy's cap names its blocker in the notes and the summary line.
 - **BUG-461:** `plan.reserve_shop_room`: Still, Kitchen, Butchers, Farmers, Masons, Carpenters, Mechanics (those missing) are drafted before dining, furnaces, tavern, temple, captives.
+- **BUG-458 review pass:** the kernel's second wall path (`door_walls`, a door quickfort refused) has the same reach check; `bp.place` of a seal / repair with walls fails closed on an unknown or partial reach; LOCKED_OUT and `bp.cancel reopen` also see the walls of finished projects (`S.rt.ow`), of `bp.place close=wall` and past the 8-record cap.
 - **Contract:** `bp.cancel` `reopen`, `appoint` `replace` (schema.py, appendix), `seal.wall_cuts`, `seal.locked_out`, `economy.seal_doors`, DECISION_NEEDED `locked_out`, `manager_stuck` `out` / `replace` (CONTRACTS.md). gate.lua and the bridge logic are untouched.
-- **Tests:** tests/lua/test_bug458_wall_reach.lua (11), test_manager_bypass.lua (+2), test_economy_drink.lua (+2), tests/test_bug458_461_f28d.py (14). **Live check:** see the four bug files.
+- **Tests:** tests/lua/test_bug458_wall_reach.lua (13), test_manager_bypass.lua (+2), test_economy_drink.lua (+2), tests/test_bug458_461_f28d.py (14). **Live check:** see the four bug files.
 
 ## Fort core under the aquifer, orphan bp files, ring without boulders, stall announcement (BUG-441 to BUG-445, 2026-11-05; offline, live-untested)
 - **Why:** Run 16b i2 Roadvises / 16c i3 Castletongs: follow queued the fortcore 1 minute after adopt, before the aquifer was known (i2: z120/z119 light, z115 and z112 heavy), so the core sat above / in it and `bp sites aqshaft` found

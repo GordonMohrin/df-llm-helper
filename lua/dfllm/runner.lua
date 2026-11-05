@@ -1641,20 +1641,41 @@ end
 -- become constructed walls in the project's copy; returns how many
 local function door_walls(K, P, d, st, ch, n)
   if P.tpl ~= 'seal' or n <= 0 or type(d) ~= 'table' then return 0 end
-  local got = 0
+  local got, seen, asked = 0, 0, false
   for _, c in ipairs(ch.cells) do
-    if got >= n then break end
+    if seen >= n then break end
     if c[4]:match('^[^{(:/]*') == 'd' then
       local x, y, z = ch.pos[1] + c[1], ch.pos[2] + c[2], ch.pos[3] + c[3]
       local here, tile = cell_present(K, {x, y, z})
       if not here and tile then
-        c[4], got = 'Cw', got + 1
-        local l = type(S.rt.dw[P.id]) == 'table' and S.rt.dw[P.id] or {}
-        if #l < 8 then l[#l + 1] = tkey(x, y, z) end
-        S.rt.dw[P.id] = l
-        local why = door_unsupported(K, x, y, z)
-        K.log('warn', '%s %s: door unsuitable at %d,%d,%d: wall instead (quickfort refused the door%s)', P.id,
-              st.label, x, y, z, why ~= '' and ('; ' .. why) or '')
+        seen = seen + 1
+        -- BUG-458 (review): the second wall path needs the same reach check as the stuck fallback: a wall that would cut a
+        -- citizen, farm, shop, depot or office off (or cannot be proven safe) is not built; the door stays, is asked for as a
+        -- workshop task (economy.seal_doors) and seal_stalled names it
+        local refuse = Q.wall_refuse(K, P, d, {x, y, z})
+        if refuse then
+          local r = S.rt.sf and S.rt.sf[P.id]
+          if type(r) == 'table' then
+            r.nw = type(r.nw) == 'table' and r.nw or {}
+            r.nw[tkey(x, y, z)] = refuse
+          end
+          K.log('warn', '%s %s: door unsuitable at %d,%d,%d stays a door: %s', P.id, st.label, x, y, z, refuse)
+          if not asked then
+            asked = true
+            local okd, nd = K.call('economy', 'seal_doors', 1)
+            if okd and int(nd) and int(nd) > 0 then
+              K.log('warn', '%s: %d door task(s) added at the workshops (no wall: %s)', P.id, int(nd), refuse)
+            end
+          end
+        else
+          c[4], got = 'Cw', got + 1
+          local l = type(S.rt.dw[P.id]) == 'table' and S.rt.dw[P.id] or {}
+          if #l < 8 then l[#l + 1] = tkey(x, y, z) end
+          S.rt.dw[P.id] = l
+          local why = door_unsupported(K, x, y, z)
+          K.log('warn', '%s %s: door unsuitable at %d,%d,%d: wall instead (quickfort refused the door%s)', P.id,
+                st.label, x, y, z, why ~= '' and ('; ' .. why) or '')
+        end
       end
     end
   end
@@ -2083,6 +2104,8 @@ local function finish(K, P, d)
   local xr = note_shaft(K, P, d)              -- Run 11: a finished explore's shaft stays open: the shaft check watches it
   if xr then xr.fin = 'done' end
   local wn, wl = walled_note(P.id)            -- Run 11: the seal doors quickfort refused stand as walls
+  local okw, errw = pcall(Q.keep_walls, K, P)  -- BUG-458: forget() drops the records, the walls stay: LOCKED_OUT still looks at them
+  if not okw then K.log('warn', '%s: wall record not kept: %s', P.id, trunc(errw, 120)) end
   K.persist.set('bp.' .. P.id, nil)
   S.rt.p[P.id] = nil
   forget(P.id)
@@ -3977,6 +4000,76 @@ end
 -- places outside, the wall tiles and the command that takes our wall down (bp.cancel reopen=, below). The kernel takes no wall
 -- down itself. PEACE and RECOVERY only (a lockdown or a siege holds doors on purpose)
 Q.LOCK_AGAIN = 30 * DAY
+-- the built 'Cw' cells of a seal or repair document (a wall that came in through bp.place close=wall, or past the record cap of
+-- sw / dw): {'x,y,z', ...}, {['x,y,z'] = the cell}
+function Q.doc_walls(K, P, d)
+  local out, cells = {}, {}
+  if not (P.tpl == 'seal' or P.tpl == 'repair') then return out, cells end
+  for _, st in ipairs(type(d) == 'table' and d.stages or {}) do
+    if st.mode == 'build' then
+      for _, ch in ipairs(st.chunks or {}) do
+        for _, cell in ipairs(ch.cells or {}) do
+          if #out >= 48 then return out, cells end
+          if type(cell[4]) == 'string' and cell[4]:match('^[^{(:/]*') == 'Cw' then
+            local tl = {}
+            cell_tiles(ch, cell, tl)
+            if tl[1] and piece_built(K, tl[1]) then
+              local at = tkey(tl[1][1], tl[1][2], tl[1][3])
+              cells[at] = cell
+              out[#out + 1] = at
+            end
+          end
+        end
+      end
+    end
+  end
+  return out, cells
+end
+-- a finished project forgets its sw / dw records and drops its document: the walls it leaves are kept (S.rt.ow) for the LOCKED_OUT
+-- scan and reopen
+function Q.keep_walls(K, P)
+  local d = doc(K, P.id)
+  local list, seen = {}, {}
+  local function add(at)
+    if not seen[at] and #list < 48 then seen[at] = true; list[#list + 1] = at end
+  end
+  for _, src in ipairs({S.rt.sw, S.rt.dw}) do
+    local l = type(src) == 'table' and src[P.id]
+    for _, at in ipairs(type(l) == 'table' and l or {}) do add(tostring(at)) end
+  end
+  for _, at in ipairs((Q.doc_walls(K, P, d))) do add(at) end
+  if #list > 0 then S.rt.ow[P.id] = list end
+end
+-- the walls of ours at a project: the records of the kernel's own fallbacks (sw, dw: capped at 8 per project), the walls a finished
+-- project left (ow, only while they stand) and the built Cw cells of a running seal / repair document.
+-- {'x,y,z', ...} (at most 48), {['x,y,z'] = the document cell} for the document's walls, and the document
+function Q.own_walls(K, P)
+  local out, seen = {}, {}
+  local function add(at)
+    if not seen[at] and #out < 48 then seen[at] = true; out[#out + 1] = at end
+  end
+  for _, src in ipairs({S.rt.sw, S.rt.dw}) do
+    local l = type(src) == 'table' and src[P.id]
+    for _, at in ipairs(type(l) == 'table' and l or {}) do add(tostring(at)) end
+  end
+  local kept = type(S.rt.ow) == 'table' and S.rt.ow[P.id]
+  if type(kept) == 'table' then
+    local keep = {}
+    for _, at in ipairs(kept) do
+      local x, y, z = tostring(at):match('^(%-?%d+),(%-?%d+),(%-?%d+)$')
+      if x and piece_built(K, {int(x), int(y), int(z)}) then keep[#keep + 1] = at; add(at) end
+    end
+    if #keep ~= #kept then
+      S.rt.ow[P.id] = #keep > 0 and keep or nil
+      dirty()
+    end
+  end
+  local d = P.done ~= 1 and doc(K, P.id) or nil
+  local dl, cells = Q.doc_walls(K, P, d)
+  for _, at in ipairs(dl) do add(at) end
+  return out, cells, d
+end
+
 function Q.lockout_scan(K, c, t)
   S.lo = S.lo or {}
   local m = K.mode()
@@ -3985,14 +4078,11 @@ function Q.lockout_scan(K, c, t)
   S.lo.t = t
   local tiles, own = {}, {}
   for _, P in ipairs(sorted()) do
-    for _, src in ipairs({S.rt.sw, S.rt.dw}) do
-      local l = type(src) == 'table' and src[P.id]
-      for _, at in ipairs(type(l) == 'table' and l or {}) do
-        local x, y, z = tostring(at):match('^(%-?%d+),(%-?%d+),(%-?%d+)$')
-        if x and #tiles < 48 and not own[at] then
-          tiles[#tiles + 1] = {int(x), int(y), int(z)}
-          own[at] = P.id
-        end
+    for _, at in ipairs(Q.own_walls(K, P)) do
+      local x, y, z = at:match('^(%-?%d+),(%-?%d+),(%-?%d+)$')
+      if x and #tiles < 48 and not own[at] then
+        tiles[#tiles + 1] = {int(x), int(y), int(z)}
+        own[at] = P.id
       end
     end
   end
@@ -4024,15 +4114,13 @@ function Q.lockout_scan(K, c, t)
 end
 
 -- BUG-458: bp.cancel {proj, reopen = 'x,y,z;...'}: takes down walls the kernel built itself where a door stayed unbuilt (the
--- project's sw / dw records only, never another wall): quickfort undo of a constructed wall on the tile (the player's
+-- project's sw / dw records and the built Cw cells of its finished seal / repair document, never another wall): quickfort undo of a constructed wall on the tile (the player's
 -- remove construction). The project may be done; its door can then be placed again (bp.place seal at=last)
 function Q.reopen(K, P, args)
   if type(args.reopen) ~= 'string' or args.reopen == '' then return false, 'reopen: name tiles as x,y,z;x,y,z' end
   local own = {}
-  for _, src in ipairs({S.rt.sw, S.rt.dw}) do
-    local l = type(src) == 'table' and src[P.id]
-    for _, at in ipairs(type(l) == 'table' and l or {}) do own[at] = true end
-  end
+  local mine, dcells, d = Q.own_walls(K, P)
+  for _, at in ipairs(mine) do own[at] = true end
   local got, bad = {}, {}
   for seg in args.reopen:gmatch('[^;]+') do
     local x, y, z = seg:match('^%s*(%-?%d+),(%-?%d+),(%-?%d+)%s*$')
@@ -4048,13 +4136,24 @@ function Q.reopen(K, P, args)
     local ok = K.act.quickfort({mode = 'build', data = {[0] = {[0] = {[0] = 'Cw'}}}, pos = {g[1], g[2], g[3]}, command = 'undo'})
     if ok then
       n = n + 1
-      for _, src in ipairs({S.rt.sw, S.rt.dw}) do
+      for _, src in ipairs({S.rt.sw, S.rt.dw, S.rt.ow}) do
         local l = type(src) == 'table' and src[P.id]
         if type(l) == 'table' then
           for i = #l, 1, -1 do if l[i] == g[4] then table.remove(l, i) end end
         end
       end
       K.log('warn', '%s: wall at %s taken down by bp.cancel reopen (quickfort undo)', P.id, g[4])
+      local cell = dcells[g[4]]
+      if cell and d then                 -- a wall of the document: it is a door there now, so no later step builds the wall again
+        cell[4] = 'd'
+        local m = d.materials
+        if type(m) == 'table' and int(m.wall) then
+          m.wall, m.door = int(m.wall) > 1 and int(m.wall) - 1 or nil, (int(m.door) or 0) + 1
+        end
+        K.persist.set('bp.' .. P.id, d)
+        for k in pairs(S.tiles) do if k:sub(1, #P.id + 1) == P.id .. '/' then S.tiles[k] = nil end end
+        if S.own then S.own[P.id] = nil end
+      end
     end
   end
   S.lo = nil
@@ -4070,6 +4169,22 @@ end
 -- farm, well, depot, workshop or office off the main walk group (seal.wall_cuts, a flood with the tiles closed). The reason
 -- starts with 'a wall ' (Q.wall_text); the door stays and the missing doors are made at the workshops (economy.seal_doors).
 -- nil = no objection (also when the seal module has no such check)
+-- the reach answer for walls on `tiles`: nil (no objection, or the seal module has no such check), else 'unknown' (why),
+-- 'partial' (the flood ran out of tiles) or 'cut', with the places count and the raw answer
+function Q.wall_reach(K, tiles)
+  local ok, w = K.call('seal', 'wall_cuts', tiles)
+  if not (ok and type(w) == 'table') then return nil end
+  if w.known ~= true then return 'unknown', 0, w end
+  if (int(w.n) or 0) > 0 then return w.partial and 'partial' or 'cut', int(w.n), w end
+  return nil
+end
+function Q.cut_parts(w, max)
+  local parts = {}
+  for i, cut in ipairs(w.cuts or {}) do
+    if i <= max then parts[#parts + 1] = string.format('%s %d,%d,%d', cut.kind, cut.x, cut.y, cut.z) end
+  end
+  return table.concat(parts, ', ')
+end
 function Q.wall_refuse(K, P, d, tile)
   local tiles = {{tile[1], tile[2], tile[3]}}
   for _, st in ipairs(d.stages or {}) do
@@ -4085,26 +4200,20 @@ function Q.wall_refuse(K, P, d, tile)
       end
     end
   end
-  local ok, w = K.call('seal', 'wall_cuts', tiles)
-  if not (ok and type(w) == 'table') then return nil end
-  if w.known ~= true then return string.format("a wall cannot be proven safe: the citizens' reach is not known (%s)", trunc(w.why or '?', 60)) end
-  local parts = {}
-  for i, cut in ipairs(w.cuts or {}) do
-    if i <= 3 then parts[#parts + 1] = string.format('%s %d,%d,%d', cut.kind, cut.x, cut.y, cut.z) end
+  local kind, n, w = Q.wall_reach(K, tiles)
+  if kind == 'unknown' then return string.format("a wall cannot be proven safe: the citizens' reach is not known (%s)", trunc(w.why or '?', 60)) end
+  if kind == 'partial' then
+    return string.format('a wall cannot be proven safe: the reach check ran out of tiles (%d places not met: %s)', n, Q.cut_parts(w, 3))
   end
-  if (int(w.n) or 0) > 0 then
-    if w.partial then
-      return string.format('a wall cannot be proven safe: the reach check ran out of tiles (%d places not met: %s)', int(w.n),
-                           table.concat(parts, ', '))
-    end
-    return string.format('a wall would cut off %d (%s)', int(w.n), table.concat(parts, ', '))
-  end
+  if kind == 'cut' then return string.format('a wall would cut off %d (%s)', n, Q.cut_parts(w, 3)) end
   return nil
 end
 function Q.wall_text(s) return type(s) == 'string' and s:sub(1, 7) == 'a wall ' end
--- BUG-458: a seal document with constructed walls (close=wall, a nodoor opening) is refused when those walls would cut a citizen or a
--- farm, well, depot, workshop or office off the main walk group (seal.wall_cuts with all its wall tiles closed); the doors of
--- the same seal are no objection. nil = placed (also when the check cannot run or does not know: the runner's fallback asks again)
+-- BUG-458: a seal or repair document with constructed walls (close=wall, a nodoor opening) is refused when those walls would cut a
+-- citizen or a farm, well, depot, workshop or office off the main walk group (seal.wall_cuts with all its wall tiles closed), and
+-- fails closed like the runner's fallback (Q.wall_refuse): a reach check that does not know the citizens or ran out of tiles refuses
+-- too (a repair outside PEACE/RECOVERY only on a proven cut: a breach is closed in a siege). The doors of the same seal are no
+-- objection. nil = placed (also when the seal module has no such check)
 function Q.place_walls(K, d)
   local tiles = {}
   for _, st in ipairs(d.stages or {}) do
@@ -4121,15 +4230,18 @@ function Q.place_walls(K, d)
     end
   end
   if #tiles == 0 then return nil end
-  local ok, w = K.call('seal', 'wall_cuts', tiles)
-  if not (ok and type(w) == 'table' and w.known == true and (int(w.n) or 0) > 0 and not w.partial) then return nil end
-  local parts = {}
-  for i, cut in ipairs(w.cuts or {}) do
-    if i <= 4 then parts[#parts + 1] = string.format('%s %d,%d,%d', cut.kind, cut.x, cut.y, cut.z) end
+  local kind, n, w = Q.wall_reach(K, tiles)
+  if not kind then return nil end
+  local m = K.mode()
+  if kind ~= 'cut' and d.tpl == 'repair' and m ~= 'PEACE' and m ~= 'RECOVERY' then return nil end
+  local way = 'close with doors (close=door: the kernel orders them at the workshop) or wall once they are in (BUG-458)'
+  if kind == 'cut' then
+    return string.format('refused: the %s walls (%d) would cut %d off the main walk group (%s); %s', d.tpl, #tiles, n,
+                         Q.cut_parts(w, 4), way)
   end
-  return string.format('refused: the seal walls (%d) would cut %d off the main walk group (%s); close with doors ' ..
-                       '(close=door: the kernel orders them at the workshop) or wall once they are in (BUG-458)', #tiles, int(w.n),
-                       table.concat(parts, ', '))
+  local why = kind == 'unknown' and string.format("the citizens' reach is not known (%s)", trunc(w.why or '?', 60))
+              or string.format('the reach check ran out of tiles (%d places not met: %s)', n, Q.cut_parts(w, 4))
+  return string.format('refused: the %s walls (%d) cannot be proven safe: %s; %s', d.tpl, #tiles, why, way)
 end
 -- the reason the wall fallback holds the door at `tile` back (r = the seal's S.rt.sf record), else nil
 function Q.wall_refused(r, tile)
@@ -5842,6 +5954,7 @@ function M.init(K)
   rt.cav, rt.br, rt.xs = obj(rt.cav), obj(rt.br), obj(rt.xs)       -- Run 11: cavern plugs, breach records, shafts
   rt.dw = obj(rt.dw)                                                 -- Run 11: seal doors planned as walls
   rt.sw = obj(rt.sw)                                                 -- BUG-044: stuck seal doors replaced by walls
+  rt.ow = obj(rt.ow)                                                 -- BUG-458: walls of finished seals / repairs (LOCKED_OUT, reopen)
   rt.so = obj(rt.so)                                                 -- BUG-044: door/hatch order items per seal project
   rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
   rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box
@@ -6708,7 +6821,7 @@ M.verbs = {
     if not d then return false, 'bp/' .. id .. '.json: ' .. err end
     local bad = check_doc(d, args.tpl)
     if bad then return false, bad end
-    local walls = d.tpl == 'seal' and Q.place_walls(K, d) or nil     -- BUG-458: no seal wall that cuts citizens or places off
+    local walls = (d.tpl == 'seal' or d.tpl == 'repair') and Q.place_walls(K, d) or nil   -- BUG-458: no wall that cuts citizens or places off
     if walls then return false, walls end
     -- FR-27: never a second tomb zone on a tile (Run 9: up to 3 stacked on one coffin)
     local cut, total, at = tomb_dups(d)
