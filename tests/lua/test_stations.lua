@@ -636,4 +636,69 @@ T.test('BUG-380: BREACH with stations.b2 two tiles from B2 on a level three belo
   T.eq({mv[1].d.station, mv[1].d.from, mv[1].d.to, mv[1].d.bridge, mv[1].d.d}, {'b2', {51, 62, Z - 3}, {51, 63, Z - 3}, 'B2', 2})
 end)
 
+-- BUG-451 (Run 16a i1 Syrupobeyed y386 spring: three soldiers on station in the lockdown at hunger 70,657-73,815 of 75,000, 'job none',
+-- food in Kern+, no STRANDED): a squad on a station order with a soldier over the hunger mark and no job is released to eat (order cleared),
+-- kern.log names the soldier; back at its station once he is fed, or after FEED_HOLD ticks; never in a BREACH, never twice in FEED_COOL ticks.
+T.test('BUG-451: a soldier at hunger 70,000 with no job releases his squad from its station; fed, the station is ordered again', function()
+  local W = world{tag = 'st451'}
+  X.call(W, 'military', 'posture', 'B2_HOLD', true)
+  run(W, 100)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), orders_of(W, 'A'))
+  local sq = X.squad_of(W, 'A')
+  local uid
+  for _, p in ipairs(sq.positions) do
+    if p.occupant >= 0 then uid = W.hfs[p.occupant].unit_id end
+  end
+  local u = W.unit(uid)
+  u.counters2 = {hunger_timer = 70000, thirst_timer = 0}
+  u.job = {}
+  run(W, 700)
+  T.eq(orders_of(W, 'A'), '', 'released: no order, the soldiers may eat')
+  T.ok(#logs(W, 'released from its station to eat and drink') >= 1, 'kern.log names it')
+  u.counters2.hunger_timer = 100                                  -- he ate
+  run(W, 700)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'back at the station: ' .. orders_of(W, 'A'))
+  T.ok(#logs(W, 'back to its station after the meal') >= 1)
+  u.counters2.hunger_timer = 70000                                -- hungry again within the cool-down: not released again
+  run(W, 700)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'FEED_COOL: ' .. orders_of(W, 'A'))
+end)
+
+T.test('BUG-451: a hungry soldier who has a job (he is eating) and a BREACH release nobody', function()
+  local W = world{tag = 'st451b'}
+  X.call(W, 'military', 'posture', 'B2_HOLD', true)
+  run(W, 100)
+  local uid
+  for _, p in ipairs(X.squad_of(W, 'A').positions) do
+    if p.occupant >= 0 then uid = W.hfs[p.occupant].unit_id end
+  end
+  local u = W.unit(uid)
+  u.counters2 = {hunger_timer = 70000, thirst_timer = 0}
+  u.job = {current_job = {id = 77}}
+  run(W, 700)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'on a job: kept ' .. orders_of(W, 'A'))
+  u.job = {}
+  W.K.set_mode('BREACH', 'test')
+  run(W, 700)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'a BREACH: the fight comes first ' .. orders_of(W, 'A'))
+end)
+
+T.test('BUG-451: a BREACH ends the release at once (the station is ordered again, not after FEED_HOLD)', function()
+  local W = world{tag = 'st451c'}
+  X.call(W, 'military', 'posture', 'B2_HOLD', true)
+  run(W, 100)
+  local uid
+  for _, p in ipairs(X.squad_of(W, 'A').positions) do
+    if p.occupant >= 0 then uid = W.hfs[p.occupant].unit_id end
+  end
+  local u = W.unit(uid)
+  u.counters2 = {hunger_timer = 70000, thirst_timer = 0}
+  u.job = {}
+  run(W, 700)
+  T.eq(orders_of(W, 'A'), '', 'released')
+  W.K.set_mode('BREACH', 'test')
+  run(W, 700)
+  T.ok(orders_of(W, 'A'):find('station@', 1, true), 'BREACH: the release ended, station ordered ' .. orders_of(W, 'A'))
+end)
+
 T.done()

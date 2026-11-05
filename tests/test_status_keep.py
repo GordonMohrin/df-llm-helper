@@ -76,7 +76,7 @@ def test_the_idle_clause_names_the_classes(save):
             "projects: dfllm cmd inspect what=workload splits the rest)") in text, text
     # an older kernel's labor (no breakdown) reads as before
     put_state(save, labor={"starving": 0, "idle": 20})
-    assert "idle 20% starving 0" in brief.status_text(save)
+    assert "idle 20% unfilled labor postings 0" in brief.status_text(save)
 
 
 def test_perf_config_mirrors_kern_lua():

@@ -186,7 +186,9 @@ def test_plan_years_place_every_stage_in_order(tmp_path):
     snap["id"] = "s1"
     files.write_json_atomic(sv / "manifest.json", man)
     files.write_json_atomic(sv / "snap" / "s1.json", snap)
-    doc = bp.emit("explore", {"depth": 11}, bp.rank(snap, "explore", {"depth": 11}, manifest=man)[0])
+    # BUG-453: tunnel levels keep 3 tiles from any opening, which moves the best tunnelled explore onto the grand sites of this small map;
+    # the finished shaft of this fort is a plain one (arm 0)
+    doc = bp.emit("explore", {"depth": 11, "arm": 0}, bp.rank(snap, "explore", {"depth": 11, "arm": 0}, manifest=man)[0])
     doc["id"] = "y4s0b0"
     cmd.write_bp(sv, doc)
     n = [0]

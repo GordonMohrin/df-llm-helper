@@ -41,13 +41,18 @@ T.test('trade.want remove, sell_add / sell_remove, want replaces, the list stays
   T.eq(W.inbox('trade.want', {add = 'bar'}).ok, false)
 end)
 
-T.test('trade.want: a token that matches no item type is named as ignored (bone is none)', function()
+T.test('trade.want: a token that matches no item type is named as ignored; bone is a token since BUG-456', function()
   local W = setup(PLAN)
-  local r = W.inbox('trade.want', {add = {'bone'}})
+  local r = W.inbox('trade.want', {add = {'qwertz'}})
   T.ok(r.ok, r.msg)
-  T.eq(r.data.ignored, {'bone'})
-  T.ok(r.msg:find('ignored', 1, true) and r.msg:find('bone', 1, true), r.msg)
-  T.eq(r.data.want, {'bar:iron', 'anvil', 'cloth'}, 'the list stands, bone is not a trade token')
+  T.eq(r.data.ignored, {'qwertz'})
+  T.ok(r.msg:find('ignored', 1, true) and r.msg:find('qwertz', 1, true), r.msg)
+  T.eq(r.data.want, {'bar:iron', 'anvil', 'cloth'}, 'the list stands, qwertz is no trade token')
+  local W2 = setup(PLAN)
+  local r2 = W2.inbox('trade.want', {add = {'bone'}})              -- BUG-456 (moods that need bone): a corpse piece whose description says bone
+  T.ok(r2.ok, r2.msg)
+  T.eq(r2.data.ignored, nil, 'bone matches an item type')
+  T.eq(r2.data.want, {'bone', 'bar:iron', 'anvil', 'cloth'})
 end)
 
 T.done()

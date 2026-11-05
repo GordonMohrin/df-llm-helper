@@ -12,7 +12,7 @@
 -- revealed (a player cannot draw on an unexplored tile; fair play: never hidden tiles), a box over rock, open air or (for
 -- everything but fishing) water, a box over more than zones.max_tiles tiles (config/baseline.json "zones", default 400), a
 -- box that overlaps a conflicting zone (below), a sand box without a bare sand floor (BUG-303, Z.sand_ok), and any fight
--- mode (kern: PEACE, ALERT, RECOVERY only).
+-- mode (kern: PEACE, ALERT, RECOVERY; SIEGE for the office only, BUG-450).
 -- Conflicts: a zone of the same type; any zone that is a location (hospital, temple, tavern, library, guildhall: it has a
 -- location_id); a room zone (bedroom, dining hall, barracks, dormitory, office, archery range, tomb, dungeon) for a pen, a
 -- pit or a pond; a pond or pit under a pen or a meeting area and the other way round. Sand, clay and fishing zones conflict
@@ -250,6 +250,11 @@ end
 function Z.verb(K, args, cmd)
   local spec, why = Z.spec(args, Z.max_tiles(K))
   if not spec then return false, 'zone.place: ' .. why end
+  -- BUG-450 (Run 16a i1 Syrupobeyed y386: the manager's office could not be fixed in a siege, 149 days of unvalidated orders): a siege
+  -- allows the office zone only; every other type waits for the end of the fight
+  if K.mode() == 'SIEGE' and spec.type ~= 'office' then
+    return false, "zone.place: only type=office in SIEGE (the manager's office); " .. spec.type .. ' waits for the end of the siege'
+  end
   local reader = true
   local function tile(x, y, z)
     local okc, t = K.call('snapshot', 'tile', x, y, z)

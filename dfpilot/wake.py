@@ -358,6 +358,10 @@ def next_hint(etype: str, e: dict) -> str:
         return MOOD_WS_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "manager_office":
         return MANAGER_HINT
+    if etype == "DECISION_NEEDED" and d.get("id") == "manager_stuck":
+        return manager_stuck_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "lockdown_long":
+        return lockdown_long_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
         return rebuild_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "intruder_sortie":
@@ -450,6 +454,30 @@ def seal_stalled_hint(d: dict) -> str:
             + (f"; {how}" if how else "") + (f"; fix (safe: the bp.cancel drops only unbuilt pieces): {cmd}" if cmd else "")
             + "; until it stands that way in is open (max-pop held; the phase may rise past it after "
               f"{plan_mod.PERIMETER_WAIVE_D} d, BUG-349)")
+
+
+def manager_stuck_hint(d: dict) -> str:
+    """BUG-450 (Run 16a i1 y386: 35 orders unvalidated for 149 days with an appointed manager and a complete office): the manager
+    holds the office and the kernel finds nothing wrong; d.cmds look at him, the orders and the offices. zone.place type=office works in
+    a siege too (a second office zone for him over a chair and a table)."""
+    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    look = f"; look: {cmds[0]}" + (f" ; {cmds[1]}" if len(cmds) > 1 else "") if cmds else ""
+    return ("tell Gordon: the manager validates nothing for "
+            f"{d.get('days', '?')} days ({d.get('n', '?')} orders: brewing and cooking stop){look}; the kernel adds the office's chair and "
+            "table and the items the orders wait for as workshop tasks; another office zone for him: dfllm cmd zone.place type=office "
+            "(allowed in SIEGE); the nobles screen's replacement is the player's call")
+
+
+def lockdown_long_hint(d: dict) -> str:
+    """BUG-452 (Run 16a i1 y385: a lockdown held 151 days at 30 t/s, 'past the limit' and nothing followed): a lockdown past
+    confine.max_days in SIEGE/BREACH (d.calm 1: nothing near or inside Kern+, the hostiles stand far); the sortie when a squad is
+    able, else the wait."""
+    cmd = d.get("cmd")
+    how = (f"; to send the squad{armour_note(d)}: {cmd} (approve:true is a logged decision, only if the squad can win)" if cmd
+           else "; no squad to send")
+    return (f"tell Gordon: the lockdown has held {d.get('days', '?')} days in {d.get('mode', 'SIEGE')} "
+            f"(hostiles counted: {d.get('n', '?')}, inside Kern+: {d.get('inside', 0)}{', all far' if d.get('calm') else ''}){how}; "
+            "otherwise it ends with the siege (the kernel never ends it alone: threat's quiet clock takes over then)")
 
 
 def siege_long_hint(d: dict) -> str:

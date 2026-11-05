@@ -199,8 +199,13 @@ T.test('FR-78: zone.place refusals: modes, hidden/rock/water tiles, size, confli
   refused({type = 'sand', bbox = {133, 103, 7, 134, 104, 7}}, 'is a location')
   T.ok(W.inbox('zone.place', {type = 'pen', bbox = {112, 100, 7, 118, 105, 7}}).ok, 'beside the barracks is fine')
   -- fights and bad arguments
+  W.set_mode('BREACH')
+  refused({type = 'pen', bbox = {200, 200, 5, 201, 201, 5}}, 'zone.place not allowed in BREACH')
+  refused({type = 'office', bbox = {200, 200, 5, 201, 201, 5}}, 'zone.place not allowed in BREACH')
+  -- BUG-450: a siege allows the manager's office zone and nothing else
   W.set_mode('SIEGE')
-  refused({type = 'pen', bbox = {200, 200, 5, 201, 201, 5}}, 'zone.place not allowed in SIEGE')
+  refused({type = 'pen', bbox = {200, 200, 5, 201, 201, 5}}, 'only type=office in SIEGE')
+  T.ok(W.inbox('zone.place', {type = 'office', bbox = {200, 200, 5, 201, 201, 5}}).ok, 'the office zone goes in a siege')
   W.set_mode('PEACE')
   refused({type = 'garden', bbox = {200, 200, 5, 201, 201, 5}}, 'type must be one of')
   -- config zones.max_tiles

@@ -256,7 +256,8 @@ C.VERBS = {
   ['squad.add'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   ['squad.uniform'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
   -- FR-78 (Run 14 note 65): a civzone (pen, pit, pond, sand, clay, fishing, meeting, dump) in a box, quickfort zone mode
-  ['zone.place'] = {mod = 'runner', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
+  -- BUG-450: SIEGE too, for the manager's office only (zonelib refuses every other type in a siege)
+  ['zone.place'] = {mod = 'runner', modes = {PEACE = true, ALERT = true, RECOVERY = true, SIEGE = true}},
   -- FR-88 (Run 14 note 95): the camera; no mode list (a fight needs by=gordon, viewlib refuses it)
   ['view'] = {mod = 'arbiter'},
   -- BUG-131 (Run 14): the zones screen's remove for one hospital zone outside Kern+/Tiefe+ (no patient in it; a finished

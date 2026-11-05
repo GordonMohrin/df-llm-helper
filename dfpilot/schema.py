@@ -869,7 +869,7 @@ VERB_ARGS: dict[str, Obj] = {
     "bp.resume": Obj(req={"proj": ID}),       # BUG-328: a project set aside for want of progress takes a slot again
     # BUG-300: a deliverable of the current phase that cannot be made (tpl = its template, `workshops`, the kind, or
     # stock_<key> / orders_<lib> for those; stage for a staged template), waived with the reason
-    "phase.waive": Obj(req={"tpl": Str(r"^[a-z_0-9]{1,24}$"), "why": Str(maxbytes=80)}, opt={"stage": Int(1, 9)}),
+    "phase.waive": Obj(req={"tpl": Str(r"^[a-z_0-9]{1,24}$"), "why": Str(maxbytes=200)}, opt={"stage": Int(1, 9)}),
     "drill": Obj(opt={"why": Str(maxbytes=200)}),
     "snapshot": Obj(opt={"bbox": BBOX, "purpose": Str(enum=["audit", "sites", "debug"])}),
     "audit": Obj(req={"snap": ID, "ok": Bool(), "fails": Arr(Str(maxbytes=80), hi=50), "min_traps": NAT,
@@ -962,7 +962,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "appoint": ("economy", None, False),
     "squad.create": ("military", SQUAD_MODES, False), "squad.leader": ("military", SQUAD_MODES, False),
     "squad.add": ("military", SQUAD_MODES, False), "squad.uniform": ("military", SQUAD_MODES, False),
-    "zone.place": ("runner", SQUAD_MODES, False),
+    "zone.place": ("runner", SQUAD_MODES + ["SIEGE"], False),      # BUG-450: SIEGE for type=office only (zonelib)
     "view": ("arbiter", None, False),      # FR-88: modes are the verb's own rule (a fight needs by=gordon)
     "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)
 }

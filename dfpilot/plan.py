@@ -241,6 +241,33 @@ def stable_ids(doc: dict, prev: dict | None) -> list[str]:
     return errs
 
 
+def rebase_on_applied(doc: dict, prev: dict | None) -> tuple[dict, str]:
+    """BUG-454 (Run 16a i1 y384: follow applied a MINIMAL plan, then the player's draft, written before it, checked with 3 ERRORs 'is applied as
+    y384s0b1; keep it'): a draft for the year of the applied plan that drops or changes an applied build is rebuilt on that plan: the applied
+    builds stand at their ids, the draft's other builds follow them in their seasons. (doc, note); the note is '' when nothing was needed."""
+    if not prev or prev.get("year") != doc.get("year") or not stable_ids(doc, prev):
+        return doc, ""
+    out = copy.deepcopy(doc)
+    seasons = copy.deepcopy(prev["seasons"])
+    while len(seasons) < 4:
+        seasons.append({"build": []})
+    rest = [b for se in prev["seasons"] for b in se["build"]]            # applied builds, to match the draft's against (multiset)
+    added = 0
+    for si, se in enumerate(doc["seasons"]):
+        for b in se["build"]:
+            hit = next((i for i, x in enumerate(rest) if _same_build(b, x)), None)
+            if hit is not None:
+                del rest[hit]
+            else:
+                seasons[min(si, len(seasons) - 1)]["build"].append(copy.deepcopy(b))
+                added += 1
+    out["seasons"] = seasons
+    n = sum(len(se["build"]) for se in prev["seasons"])
+    return out, (f"BUG-454: the draft did not match the plan applied for y{doc['year']} ({n} build{'s' if n != 1 else ''}, follow's MINIMAL plan "
+                 f"or an earlier apply); rebuilt on it: the applied builds stand at their ids, {added} new build"
+                 f"{'s' if added != 1 else ''} follow")
+
+
 def sieged(save_dir: Path, state: dict | None = None) -> bool:
     """The fort has seen a siege: a SIEGE_START/SIEGE_END/BREACH event or a MODE change to SIEGE/BREACH in the event
     log (events.jsonl and its rotation), or the state's mode is SIEGE/BREACH/RECOVERY now."""
@@ -3932,7 +3959,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                                 "xbow": max(1 if target >= "P5" else 0, pm["squads"]["xbow"] if prev else 0)},
                      "cv_min": pm["cv_min"], "training": pm.get("training", True) is not False},   # FR-100
         "supply": dict((prev or {}).get("supply") or schema.PLAN_DEFAULTS["supply"]),
-        "orders": {"import": libs},
+        # BUG-456 (Run 16d i4 y407: after phase.waive hospital the draft read "orders -" although y406 imported basic, rockstock and furnace):
+        # a draft that has no library of its own phases (the waive jumped past them) keeps the applied plan's; otherwise the new ones, as before
+        "orders": {"import": libs if libs else [x for x in ((prev or {}).get("orders") or {}).get("import") or []
+                                                if isinstance(x, str)]},
         "trade": dict((prev or {}).get("trade") or {"want": ["bar:iron", "anvil", "cloth"], "sell": ["crafts"]}),
         "notes": (f"draft from phases {cur}..{target}" + (f"; {star} needs approval: set phase_target {star}"
                                                           if star else "")
@@ -4597,6 +4627,10 @@ def run(args, save_dir: Path) -> int:
             cfit.append("BUG-440: notes cut under 2000 bytes (the CLI lines above hold the full reasons)")
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
+        if prev and prev.get("year") == doc.get("year"):       # BUG-454: the applied plan of this year is the base, whoever applied it
+            kept_n = sum(len(se["build"]) for se in prev["seasons"])
+            print(f"  built on the plan applied for y{prev['year']} ({kept_n} build{'s' if kept_n != 1 else ''} kept"
+                  + (", follow's MINIMAL plan" if is_minimal(prev) else "") + "); new builds follow them")
         sid = (sites_snapshot(save_dir) or {}).get("id")
         if sid:                                       # BUG-436: the map this draft was ranked on (plan check names its own)
             print(f"  ranked on sites snapshot {sid}")
@@ -4617,6 +4651,14 @@ def run(args, save_dir: Path) -> int:
     if doc is None:
         print(f"cannot read {path}")
         return 2
+    if isinstance(doc, dict) and isinstance(doc.get("seasons"), list) and len(doc["seasons"]) >= 1             and all(isinstance(se, dict) and isinstance(se.get("build"), list) for se in doc["seasons"]):
+        try:
+            doc, rnote = rebase_on_applied(doc, prev)
+        except (KeyError, TypeError, ValueError):           # a malformed draft: check reports it
+            rnote = ""
+        if rnote:                                         # BUG-454: the file keeps the rebuilt draft, so the next edit starts from it
+            files.write_json_atomic(path, doc)
+            print(f"  {rnote}")
     if args.action == "check":
         state = files.read_state(save_dir)
         fort = fort_facts(save_dir, state)

@@ -22,6 +22,18 @@
 - **BUG-449:** GiveWater verdict `srcreach` (no accepted source on the patient's walk group), `cmds` / `unrel` in patient_thirst and PATIENT_DYING, `siege` stranded questions name the accepted water the citizens stand at and offer water inside / the entrance check.
 - **Contract:** PATIENT_DYING optional `cmds`, `unrel`; water config `brook_min`, `drink_far`, `drink_far_d`, `ws_redo` (CONTRACTS.md, `fairplay.WATER_LIM`, appendix). **Tests:** tests/lua/test_bug446_449_water.lua (8), test_stranded.lua (1), tests/bp/test_bug447_refuge_aquifer.py (4),
   tests/test_bug446_449_f28.py (2). **Live check:** see the four bug files.
+## Round 28 (operations): a stuck manager, soldiers who starve on station, a lockdown without an end, explore bypass, plans and small ones (BUG-450 to BUG-456, 2026-11-05; offline, live-untested)
+- **Why:** Run 16a i1 Syrupobeyed y384-y386: the manager validated nothing for 149 days (drink 291 -> 123 d), three soldiers on station reached hunger 70,000+, a lockdown held 151 days at 30 t/s with "harmless" 33 goblins, our explore shaft made an R0 bypass, follow's MINIMAL plan
+  contradicted the player's draft; Run 16c/16d/16b: status vs seal, brief wording, `trade.want bone`, `orders.import`, `phase.waive` reason length, a planned slot named as taken.
+- **BUG-450:** `economy.mgr_stuck`: `orders.mgr_stuck_days` (14, 0 = off) of unvalidated orders with an able manager and a complete office raise DECISION_NEEDED `manager_stuck` (facts about him, the office, a candidate, `cmds`); a manager in a squad is named; `zone.place` works in SIEGE for `type=office` only.
+- **BUG-451:** `military.feed_pass`: a squad on a station order with a member over hunger 50,000 / thirst 40,000 and no job is released (order cleared) for up to a game day, then re-stationed; never in a BREACH, never on a kill order or sortie.
+- **BUG-452:** `reflex.cause_scan`: harmless is a lone picture (a group of N reads `dangerous (group of N)`); `reflex.overlimit_step`: a lockdown past `confine.max_days` in SIEGE/BREACH raises DECISION_NEEDED `lockdown_long` (sortie command when a squad can go). The kernel ends nothing itself; gate and bridge logic untouched.
+- **BUG-453:** explore tunnel levels keep `EXPLORE_RING` (3) tiles from any revealed opening; the stair-bypass advice names the explore shaft.
+- **BUG-454:** `plan.rebase_on_applied`: `plan check` / `apply` rebuild a draft of the applied plan's year on that plan; `propose` says it builds on it.
+- **BUG-455:** `seal at=last` 'nothing to close' names the entrance check's count status still shows and how it is refreshed.
+- **BUG-456:** brief says `unfilled labor postings N` (status HUNGRY names citizens); `trade.want` knows `bone`; `propose` keeps the applied plan's `orders.import`; `phase.waive` `why` up to 200 bytes (the reply says when it cut to 80); the no-site hint names a planned slot of the same template.
+- **Contract:** `zone.place` modes (+SIEGE), `phase.waive` `why` 200 bytes, DECISION_NEEDED ids `manager_stuck` and `lockdown_long`, config `economy.orders.mgr_stuck_days` (CONTRACTS.md, RULES.md, schema appendix, `fairplay.ECONOMY_LIM`).
+- **Tests:** tests/test_bug450_456_ops.py (11), tests/lua/test_economy_drink.lua, test_stations.lua (2), test_m3_lone.lua, test_zone_place.lua, test_bug440_trade_add.lua extended. **Live check:** see the seven bug files.
 
 ## Patients' water without a hospital, stale projects, a plan check verdict that says why (BUG-434 to BUG-436, 2026-11-05; offline, live-untested)
 - **Why:** Run 16d i4 Mazelanterns y399-y404: 11 died of thirst with 272 days of barrel drink (8 patients over 60,000, no hospital, accepted water 83-101 tiles away); nine projects set aside 300-900 days

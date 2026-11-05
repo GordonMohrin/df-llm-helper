@@ -396,8 +396,12 @@ M.DEFAULTS = {
   -- BUG-315 (Run 15 Drillchamber: 192-194 open orders, 73-95 stuck, the mood's bag and charcoal behind them for 30 days):
   -- the daily prune (M.order_prune) removes duplicates of a stuck order after stuck_days and, above `cap` open orders,
   -- the longest stuck ones past prune_days, at most prune_per_day a day; never a piece, mood, seal or care order
+  -- BUG-450 (Run 16a i1 Syrupobeyed y386: 35 orders unvalidated for 149 days with an appointed manager, a complete office and
+  -- 'none vacant'): mgr_stuck_days (0 = off) of validation that does not happen with an able manager and a complete office is
+  -- DECISION_NEEDED manager_stuck with the facts about him and the commands that look further (M.mgr_stuck)
   orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2,
-            bypass_days = 5, bypass_max = 4, bypass_open = 8, cap = 120, prune_days = 30, prune_per_day = 30},
+            bypass_days = 5, bypass_max = 4, bypass_open = 8, cap = 120, prune_days = 30, prune_per_day = 30,
+            mgr_stuck_days = 14},
   -- BUG-042: the manager's Office zone needs a chair (and a table: the live fix was both) to validate work orders; a
   -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
   -- item) at most every retry_days; zones larger than max_tiles are searched only that far. BUG-232: `zone` = with no
@@ -3123,6 +3127,54 @@ function M.unval_why(K)
   return who .. ' validates nothing (his office has a chair and a table)', ': inspect the manager (job, path to the office)'
 end
 
+-- BUG-450 (Run 16a i1 Syrupobeyed y386: the manager validated nothing for 149 days, 35 orders, brewing and cooking stopped, drink 291 -> 123 days;
+-- `inspect offices` said 'none vacant', his office had a chair and a table, zone.place was locked in SIEGE): orders unvalidated for
+-- orders.mgr_stuck_days with a manager who is able (manager_watch said nothing) and a complete office (st.office nil) are
+-- DECISION_NEEDED manager_stuck (A, util/cadence: again after mgr_stuck_days): what he is doing and where, his squad, the office zone
+-- and what DF asks of it (position.required_office), a candidate for the nobles screen, and the commands that look at him; zone.place
+-- type=office is allowed in SIEGE (a second office zone for him). The kernel replaces nobody: the nobles screen's removal is the player's.
+function M.mgr_stuck(K, p, c, days, n, why)
+  local lim = math.tointeger(((c or {}).orders or M.DEFAULTS.orders).mgr_stuck_days) or 14
+  if lim <= 0 or days < lim or st.office then return end
+  local mg = M.manager_state(K)
+  if type(mg) ~= 'table' or not mg.unit or mg.why then return end
+  local now = K.now()
+  if not CAD.due(p.mstuck, now, {mg.hf}, {}, {ticks = lim * DAY, wall_s = CAD.WALL_S}) then return end
+  p.mstuck = CAD.mark(now, {mg.hf}, {})
+  local u = df.unit.find(mg.unit)
+  local facts = {}
+  local okj, jn = pcall(function()
+    local j = u.job and u.job.current_job
+    return j and df.job_type[j.job_type] or nil
+  end)
+  facts[#facts + 1] = okj and jn and ('job ' .. jn) or 'no job'
+  local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+  if okp then facts[#facts + 1] = string.format('at %d,%d,%d', x, y, z) end
+  local rec = M.office_of(K, mg.unit)
+  if rec then facts[#facts + 1] = string.format('office zone %d at %d,%d z%d', rec.zone, rec.box[1], rec.box[2], rec.box[5]) end
+  local okr, req = pcall(function()
+    local ent = df.global.plotinfo.main.fortress_entity
+    for _, pp in ipairs(ent.positions.own) do if pp.code == 'MANAGER' then return pp.required_office end end
+  end)
+  if okr and math.tointeger(req) and req > 0 then facts[#facts + 1] = 'DF asks the office for room value ' .. req end
+  local best, bscore
+  for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do
+    local v = df.unit.find(id)
+    if v and id ~= mg.unit and M.citizen(v) and dfhack.units.isAdult(v) and (v.military.squad_id or -1) < 0 then
+      local sc = skill_score(v, {'ORGANIZATION'})
+      if not bscore or sc > bscore then best, bscore = id, sc end
+    end
+  end
+  local q = string.format('manager %s validates nothing for %d days (%d orders, brews %s) with a complete office: %s%s', mg.name, days, n,
+                          (st.brew or {}).unval and tostring(st.brew.unval) or '?', table.concat(facts, ', '),
+                          best and ('; acting manager candidate unit ' .. best) or '')
+  K.log('warn', '%s', q)
+  local cmds = {'dfllm cmd inspect what=unit key=' .. mg.unit, 'dfllm cmd inspect what=orders', 'dfllm cmd inspect what=offices'}
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'manager_stuck', q = q:sub(1, 400), n = n, days = days,
+         units = {mg.unit}, cmds = cmds})
+  K.persist.touch('m.economy')
+end
+
 -- BUG-042: orders waiting for validation by age (the 8 lowest order ids, first seen in p.uv): any unvalidated one for
 -- orders.unval_days while a manager is appointed and able (manager_watch said nothing) is DECISION_NEEDED
 -- manager_office (A, util/cadence: once per reason, again after 7 days and 10 min); st.unval = {n, d, why}
@@ -3159,6 +3211,8 @@ function M.unval_watch(K, p, c)
   if not okv or type(vac) ~= 'table' or vac.MANAGER then return end   -- no manager yet: appoint first
   local why, fix = M.unval_why(K)
   st.unval.why = why
+  local oks, errs = pcall(M.mgr_stuck, K, p, c, days, #ids, why)          -- BUG-450
+  if not oks then K.log('warn', 'manager stuck: %s', tostring(errs)) end
   if not CAD.due(p.unval_ann, now, {}, {why}, {ticks = 7 * DAY, wall_s = CAD.WALL_S}) then return end
   p.unval_ann = CAD.mark(now, {}, {why})
   local b = st.brew or M.brew_orders()
@@ -3207,6 +3261,7 @@ end
 -- he stands) and the drink stock, with the commands that look at him. Dying alone looks like this: stranded, stuck on a
 -- job, locked in, unconscious, a lever puller no one relieves
 M.SOLO_THIRST, M.SOLO_HUNGER, M.SOLO_EVERY, M.SOLO_MAX = 50000, 70000, 3 * DAY, 5
+M.try_squad = function(u) local ok, v = pcall(function() return u.military.squad_id end) return ok and v or nil end
 function M.solo_check(K, p, days)
   local cu = K.census.u
   local now = K.now().tick
@@ -3232,6 +3287,8 @@ function M.solo_check(K, p, days)
             return j and df.job_type[j.job_type] or nil
           end)
           why[#why + 1] = okj and jn and ('job ' .. jn) or 'no job'
+          -- BUG-451: a soldier on a station order does not leave it to eat; military's feed pass releases the squad
+          if (M.try_squad(u) or -1) >= 0 then why[#why + 1] = 'squad member' end
           local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
           rows[#rows + 1] = {id = id, th = th, hu = hu, why = table.concat(why, ', '),
                              pos = okp and {x, y, z} or nil}
@@ -3396,7 +3453,11 @@ function M.manager_state(K)
       return j ~= nil and rest ~= nil and j.job_type == rest
     end)
     if okp and pat then r.why = 'manager ' .. r.name .. ' resting/injured'
-    elseif (u.mood or -1) >= 0 then r.why = 'manager ' .. r.name .. ' in a strange mood' end
+    elseif (u.mood or -1) >= 0 then r.why = 'manager ' .. r.name .. ' in a strange mood'
+    elseif (u.military.squad_id or -1) >= 0 then
+      -- BUG-450: a squad member on duty (a station, a drill) does not walk to the office to validate
+      r.why = 'manager ' .. r.name .. ' is a soldier on duty'
+    end
     return r
   end)
   return ok and r or nil
