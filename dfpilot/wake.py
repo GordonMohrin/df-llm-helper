@@ -26,6 +26,8 @@ not wake; the follower acts on two of them without the LLM:
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=farms why=drink|drink_surface -> BUG-406/408: one plot of the kind the stock's brewable seeds
                                   fit (drink_surface: p.surface = 1), prio 1
+  PROJECT_REQUEST tpl=cistern why=patient_water -> BUG-434: the same for patients lying far from any accepted water (d.at only when a
+                                  body without a bank is known; without it `plan propose` drafts the cistern)
   PROJECT_REQUEST tpl=cistern why=no_water -> BUG-424: no water the citizens reach, drink running low: the cistern template with its pipe
                                   from the water nearest to the fort (d.at; a bank intake or a sealed rock intake, safe plans only; a
                                   plan that needs water above the well room is AUTO_FAIL for Gordon), never free digging at the water
@@ -68,7 +70,7 @@ from .events import clip, est_tokens, fmt_tick
 
 WAKE_TOKENS = 150
 WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
-SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK", "PLAN_AUTO"}   # follower's own wake reasons (not kern events)
+SYNTH = {"HB_STALE", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK", "PLAN_AUTO", "PROJECT_STALE"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
 PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP",
@@ -81,7 +83,7 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "PAUSED_BY_DF",                       # FR-94: the game stands (a load, a popup); one `dfllm cmd resume` runs it again
         "SIEGE_END",
         "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
-        "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "PLAN_AUTO", "YEAR_REVIEW", "AUTO_FAIL"]
+        "PROJECT_BLOCKED", "PLAN_EXHAUSTED", "PROJECT_STALE", "PLAN_AUTO", "YEAR_REVIEW", "AUTO_FAIL"]
 URGENT = {"BREACH", "SIEGE_START", "INVASION", "LOCKDOWN"} | set(schema.INTERRUPTS)
 URGENT_REPEAT_S = 60
 _IRQ_NEXT = "dfllm ack; dfllm status (the kernel already locked down)"
@@ -173,6 +175,12 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
 NEXT["PLAN_AUTO"] = ("tell Gordon (nobody approved a plan for years; follow applied the minimal one: seal, tombs, hospital, "
                      "food/drink, refuge, no star phase; after each quiet year one phase more, BUG-132; `ERROR held back` "
                      "= what it left out: fix those); then dfllm plan propose y.json, plan check, plan apply replaces it")
+# BUG-435: follow cancelled a project set aside plan.stale_project_days days (plan.STALE_CANCEL_TPLS); `plan propose` drafts it again
+NEXT["PROJECT_STALE"] = ("tell Gordon what follow cancelled (d.msg: project, template, days, what it waited for; the kernel orders the "
+                         "missing mechanisms itself); dfllm plan propose y.json draws the template again with the material in reach, "
+                         "plan check, plan apply; a core, seal or water project is never cancelled this way (PROJECT_BLOCKED why=stale)")
+STALE_CHECK_EVERY_S = 600                      # BUG-435: how often follow looks at the set-aside projects
+STALE_RETRY_S = 21600                          # BUG-435: a refused cancel is tried again after this long
 SUPERVISE_EVERY_S = 15                         # supervise.json read cadence
 SUPERVISE_FRESH_S = 3600                       # alerts logged longer ago than this never wake
 CLICK_KEY = "needs_click"                      # supervise.CLICK_KEY (K2): the alarm for a save only a human can load now
@@ -635,6 +643,8 @@ class Follower:
         self._qs_read = 0.0
         self.plan_auto: dict = {}              # FR-86: first_y (the year follow first saw no plan), tried_y, applied_y
         self._plan_read = 0.0
+        self._stale_read = 0.0
+        self._stale_tried: dict[str, float] = {}     # BUG-435: project id -> wall of the last cancel try
         self._beat = -1e18
 
     @staticmethod
@@ -741,6 +751,7 @@ class Follower:
         self._check_supervise(now)
         self._check_quicksave(now)
         self._check_plan(now)
+        self._check_stale(now)
         if self.auto or self.audit:
             self._run_jobs(now)
         if now - self._pruned >= PRUNE_EVERY_S:
@@ -806,7 +817,7 @@ class Follower:
                 if d.get("why") == "drink_surface":
                     fp["surface"] = 1
                 self._request_place("farms", "farms", fp, "S1", now, prio=1)
-            elif t == "PROJECT_REQUEST" and d.get("tpl") == "cistern" and d.get("why") == "no_water":
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "cistern" and d.get("why") in ("no_water", "patient_water"):
                 self._request_access(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "fishery":
                 # Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days: the fishery alone
@@ -986,6 +997,35 @@ class Follower:
         except Exception as ex:                        # noqa: BLE001 - the plan check must never stop the follower
             self._fail("minimal plan", f"{type(ex).__name__}: {ex}", now)
 
+    def _check_stale(self, now: float) -> None:
+        """BUG-435 (Run 16d i4 Mazelanterns y401: traps 912 d, tombs 461 d 'waits for trapparts', fortcore 341 d, nine projects set aside
+        for ever and clogging the brief): in PEACE a project that says `set aside N d` with N >= plan.stale_project_days (0 = off;
+        follow --no-auto never) and is a plan.STALE_CANCEL_TPLS template gets a plain bp.cancel (only what is not built goes; the
+        file moves to bp/.cancelled) and PROJECT_STALE says what and why: `plan propose` then draws the template again, and the
+        kernel orders the mechanisms its planned traps wait for (economy.plan_mech). A refused cancel is tried again after
+        STALE_RETRY_S. The core, the seals and the water builds are never cancelled here (the kernel's PROJECT_BLOCKED why=stale)."""
+        if not self.auto or self.dir is None or now - self._stale_read < STALE_CHECK_EVERY_S:
+            return
+        self._stale_read = now
+        try:
+            days = plan_mod.stale_project_days()
+            state = files.read_state(self.dir)
+            if days <= 0 or (state or {}).get("mode") != "PEACE":
+                return
+            rows = plan_mod.stale_projects(self.dir, state, days)
+            sent = []
+            for r in rows:
+                if now - self._stale_tried.get(r["proj"], -1e18) < STALE_RETRY_S:
+                    continue
+                self._stale_tried[r["proj"]] = now
+                self._send("bp.cancel", {"proj": r["proj"]}, f"stale cancel {r['proj']}", now)
+                sent.append(f"{r['proj']} ({r['tpl']}, {r['days']} d: {r['why']})")
+            if sent:
+                self._synth("PROJECT_STALE", f"cancelled after {days}+ days set aside: " + "; ".join(sent[:4])
+                            + (f" (+{len(sent) - 4} more)" if len(sent) > 4 else ""), now)
+        except Exception as ex:                        # noqa: BLE001 - the stale check must never stop the follower
+            self._fail("stale projects", f"{type(ex).__name__}: {ex}", now)
+
     def _send(self, verb: str, args: dict, what: str | None, now: float, snap: dict | None = None,
               need: list | None = None) -> str:
         """Send without waiting; with `what`, the reply is read in _run_jobs (refusal/timeout -> AUTO_FAIL)."""
@@ -993,7 +1033,7 @@ class Follower:
         cid, _ = send(self.dir, verb, args, by="follow", wait_s=0, snap=snap, need=tuple(need or ()))
         if what:
             self.jobs.setdefault("replies", {})[cid] = {"verb": verb, "what": what, "since": now,
-                                                        "tpl": args.get("tpl")}
+                                                        "tpl": args.get("tpl"), "proj": args.get("proj")}
         return cid
 
     def _fail(self, what: str, err, now: float) -> None:
@@ -1158,6 +1198,9 @@ class Follower:
             files.log_cli(self.dir, "follow", f"reply:{r['verb']}", {"id": cid},
                           ("ok " if reply.get("ok") else "ERR ") + str(reply.get("msg", "")))
             if reply.get("ok"):
+                if r["verb"] == "bp.cancel" and isinstance(r.get("proj"), str):
+                    from .cmd import retire        # BUG-435: the file moves to bp/.cancelled (send(wait_s>0) does it for the CLI)
+                    retire(self.dir, r["proj"])
                 continue
             if r["verb"] == "bp.place" and r.get("tpl"):
                 from .cmd import unplace

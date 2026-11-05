@@ -94,6 +94,7 @@ STONE_DIG = {"tpl": "bedrooms", "site": "S1", "p": {"n": 4}}
 HOSPITAL = "hospital"                     # bp/rooms.py: beds, traction bench, its own well spot (location=hospital)
 HOSPITAL_SURFACE_P = {"surface": 1}       # BUG-384: the same on open surface floor (no fortcore, no dug Z4)
 CISTERN = {"tpl": "cistern", "site": "S1"}    # bp/rooms.py: a well over real water (a pipe from a brook, or bucket-fed)
+CISTERN_AQ = {"tpl": "cistern", "site": "S1", "p": {"water": "aquifer"}}    # BUG-434: the basin on a known aquifer level, no brook needed
 # WATER_NEAR, water_near(): water.lua `near` (config/baseline.json water.near), in cmd (the site ranking uses it too)
 # Run 11 siege 8 (y441, pop 52 -> 3: the seal c1a147c261 placed two days before the attack was not finished): the runner
 # runs seal projects first and, while one is open in PEACE, pauses the housing/work builds; below rebuild.pop citizens
@@ -106,6 +107,7 @@ FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
 SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)
 EMERGENCY_D = 30              # BUG-243: drink or food days below this (or no accepted water): water and food builds first
 FOOD_DRAFT_D = 60             # BUG-297: food below this: a farms build is drafted when no farms project is under way
+CISTERN_WHY = ("no_water", "patient_water")     # BUG-434: the PROJECT_REQUEST cistern reasons follow and propose answer
 AQWELL = "aqwell"             # BUG-243: the aquifer well template (fix6-water), drafted only when the bp package has it
 STUCK_SHORT_D = 28            # BUG-041: a seal stuck this long (a game month) gets one short plan check line
 REBUILD_KINDS = {"seal", "tombs", "supply", "beds", "depot", "repair"}
@@ -515,6 +517,10 @@ def hospital_facts(save_dir: Path, state: dict | None, rooms: list) -> dict:
     try:
         out["fill"] = load_bp("sites").fill_source(snap, fort_manifest(save_dir))
     except Exception:                          # noqa: BLE001 - an older bp package or a bad snapshot: not checked
+        pass
+    try:                                       # BUG-434: an aquifer level is known: the aquifer cistern needs no brook
+        out["aq"] = bool(load_bp("sites").known_aquifer(snap, fort_manifest(save_dir)))
+    except Exception:                          # noqa: BLE001
         pass
     return out
 
@@ -929,7 +935,8 @@ def cistern_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]
         return []
     out = []
     for si, _, b in new_builds(doc, prev):
-        if b["tpl"] == CISTERN["tpl"] and not str((b.get("p") or {}).get("path") or ""):
+        if b["tpl"] == CISTERN["tpl"] and not str((b.get("p") or {}).get("path") or "") \
+                and (b.get("p") or {}).get("water") != "aquifer":          # BUG-434: the aquifer fills it, no brook
             out.append(f"cistern (seasons[{si}]): bucket-fed (no p.path) and no fill source: {fill.get('why')}; it stays "
                        "dry like y450s0b0/y452s1b0 (BUG-040): leave it out; a piped cistern needs revealed water too "
                        "(python -m dfpilot.bp.sites cistern); the refuge drink store (tpl refuge_drink, FR-69) "
@@ -3260,10 +3267,13 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
                 if tpl not in reqs:                          # newest first
                     reqs[tpl] = {"tpl": tpl, "n": d.get("n") if _nat(d.get("n")) else None, "why": str(d.get("why") or ""),
                                  "tick": tick}
-            elif tpl == CISTERN["tpl"] and d.get("why") == "no_water" and isinstance(d.get("at"), list) and len(d["at"]) == 3 \
-                    and all(_nat(v) for v in d["at"]):
-                reqs.setdefault(tpl, {"tpl": tpl, "why": "no_water", "at": d["at"], "n": d.get("n") if _nat(d.get("n")) else None,
-                                      "tick": tick})                     # BUG-424: the water nearest to the fort, newest first
+            elif tpl == CISTERN["tpl"] and d.get("why") in CISTERN_WHY and (
+                    (isinstance(d.get("at"), list) and len(d["at"]) == 3 and all(_nat(v) for v in d["at"]))
+                    or d.get("why") == "patient_water"):
+                at = d["at"] if isinstance(d.get("at"), list) and len(d["at"]) == 3 and all(_nat(v) for v in d["at"]) else None
+                # BUG-424: the water nearest to the fort, newest first; BUG-434: patient_water has no tile when no body is known
+                reqs.setdefault(tpl, {"tpl": tpl, "why": d["why"], "at": at, "n": d.get("n") if _nat(d.get("n")) else None,
+                                      "tick": tick})
             elif tpl == "workshops" and isinstance(d.get("types"), list):
                 r = reqs.setdefault("workshops", {"tpl": "workshops", "types": [], "why": str(d.get("why") or ""),
                                                   "tick": tick})
@@ -3277,7 +3287,8 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
         if tpl == CISTERN["tpl"]:                                   # BUG-424: only a cistern WITH a pipe answers this request
             if _piped_cistern(save_dir, done=True):
                 continue
-            r["access"] = water_access(save_dir, r["at"])
+            r["access"] = water_access(save_dir, r["at"]) if r.get("at") else {"why": "no water tile known (no body of water "
+                                                                              "without a bank on the water scan)"}
             out.append({k: v for k, v in r.items() if k != "tick"})
             continue
         if r["tick"] <= done_t.get(tpl, -1) or tpl in under:
@@ -3346,6 +3357,14 @@ def request_drafts(s: dict | None, fort: dict | None, done: set, builds: list[di
                 if not have(b):
                     out.append(b)
                     why.append(f"cistern piped from the water at {at}" + (" (sealed rock intake)" if acc.get("rock") else ""))
+            elif r.get("why") == "patient_water" and (_cistern_due(fort, done, [*builds, *out], info)
+                                                      or _aq_cistern_due(fort, done, [*builds, *out], info)):
+                # BUG-434: patients lie far from any accepted water (GiveWater needs water, not a hospital zone): the cistern the
+                # fort can fill (a brook within reach), else the aquifer basin
+                b = copy.deepcopy(CISTERN if _cistern_due(fort, done, [*builds, *out], info) else CISTERN_AQ)
+                out.append(b)
+                why.append("cistern for the patients' water" + (" (aquifer basin)" if b.get("p") else "")
+                           + (f"; no safe pipe from the water at {at}: {_cut(str(acc.get('why') or 'no route'))}" if at else ""))
             else:
                 why.append(f"cistern access to the water at {at}: " + (
                     "the only route needs water above the well room, Gordon decides (python -m dfpilot.bp.sites cistern --near "
@@ -3543,7 +3562,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
             sdrafts.append(b["tpl"])
     # BUG-034: the hospital only with accepted water near its site; else the cistern in its place (once), noted
     hw = hospital_water(s, fort)
-    held, cistern = None, False
+    held, cistern, aq_cis = None, False, False
     lib_top = next((p["id"] for p in plist if p["id"] > cur), cur)     # BUG-198: order libraries up to the next phase
     gnotes: list[str] = []
     ewhy0 = emergency(s)
@@ -3568,6 +3587,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                             if _cistern_due(fort, done, builds, info):
                                 builds.append(copy.deepcopy(CISTERN))
                                 cistern = True
+                            elif _aq_cistern_due(fort, done, builds, info):    # BUG-434: no brook to fill a bucket-fed one
+                                builds.append(copy.deepcopy(CISTERN_AQ))
+                                cistern = aq_cis = True
                             continue
                         builds.append(b)
                 elif d["k"] == "orders" and d["lib"] not in libs and p["id"] <= lib_top:
@@ -3770,7 +3792,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         under = hosp.get("cistern")
         fill = hosp.get("fill") if isinstance(hosp.get("fill"), dict) else {}
         doc["notes"] += (f"; hospital held back (BUG-034): {held['why']}"
-                         + ("; cistern@S1 in its place" if cistern else "; the cistern under way or standing must hold "
+                         + ("; cistern@S1 water=aquifer in its place (BUG-434: no brook a bucket-fed cistern could be filled "
+                            "from, the aquifer level is known)" if aq_cis else
+                            "; cistern@S1 in its place" if cistern else "; the cistern under way or standing must hold "
                             "water first" if under else f"; no cistern either (BUG-040: {fill.get('why')}): water "
                             "first (a well or a water zone on deep water: dfllm cmd inspect water_sources)"
                             if fill.get("ok") is False else "; water first (a cistern, a well or a water zone on deep "
@@ -3838,6 +3862,8 @@ def emergency_drafts(s: dict | None, fort: dict | None, done: set, builds: list,
     has = {b["tpl"] for b in builds}
     if dry and _cistern_due(fort, done, builds, info):
         out.append(copy.deepcopy(CISTERN))
+    elif dry and _aq_cistern_due(fort, done, builds, info):       # BUG-434
+        out.append(copy.deepcopy(CISTERN_AQ))
     elif dry and info is not None and AQWELL in info and (AQWELL, None) not in done and AQWELL not in has:
         out.append({"tpl": AQWELL, "site": "S1"})
     if hungry and ("farms", None) not in done and "farms" not in has and (info is None or "farms" in info):
@@ -3860,6 +3886,18 @@ def _cistern_due(fort: dict | None, done: set, builds: list, info: dict | None) 
     fill = hosp.get("fill") if isinstance(hosp.get("fill"), dict) else {}
     return not hosp.get("cistern") and fill.get("ok") is not False and (CISTERN["tpl"], None) not in done \
         and (info is None or CISTERN["tpl"] in info) and all(x["tpl"] != CISTERN["tpl"] for x in builds)
+
+
+def _aq_cistern_due(fort: dict | None, done: set, builds: list, info: dict | None) -> bool:
+    """BUG-434 (Run 16d i4 Mazelanterns: the hospital held back at 75-101 tiles from the accepted water, no cistern in the draft
+    because no brook fill source existed, 11 patients died of thirst): the aquifer cistern (p.water = aquifer, the basin on a known
+    aquifer level) where `_cistern_due` is false only for want of a fill source: an aquifer level is known (fort.hosp.aq), no
+    cistern under way or standing, none drafted or applied before, the template exists."""
+    hosp = (fort or {}).get("hosp") or {}
+    fill = hosp.get("fill") if isinstance(hosp.get("fill"), dict) else {}
+    return bool(hosp.get("aq")) and fill.get("ok") is False and not hosp.get("cistern") \
+        and (CISTERN["tpl"], None) not in done and (info is None or CISTERN["tpl"] in info) \
+        and all(x["tpl"] != CISTERN["tpl"] for x in builds)
 
 
 # ---------------------------------------------------------------- apply
@@ -3963,6 +4001,44 @@ def stale_years() -> int:
     from .fairplay import PLAN_LIM
     lo, hi = PLAN_LIM["stale_apply_years"]
     return v if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi else STALE_DEF
+
+
+STALE_PROJECT_DEF = 300                         # BUG-435: days a project may stay set aside before follow cancels it
+# BUG-435: the templates follow may cancel (a plain bp.cancel drops only what is not built) and `plan propose` drafts again; the
+# core, the seals, the water and the supply builds are the fort's life: they are announced (PROJECT_BLOCKED why=stale), never cancelled
+STALE_CANCEL_TPLS = ("traps", "tombs", "bedrooms", "dining", "tavern", "temple", "gallery", "office", "barracks", "hall",
+                     "workshops", "depot", "captives")
+STALE_ROW = re.compile(r"set aside (\d+) d")
+
+
+def stale_project_days() -> int:
+    """BUG-435 (Run 16d i4 Mazelanterns: traps 912 d, tombs 461 d, fortcore 341 d 'waits for trapparts' set aside for ever):
+    config/baseline.json plan.stale_project_days; 0 = off; a missing or bad value keeps STALE_PROJECT_DEF."""
+    doc = files.read_json(paths.config_dir() / "baseline.json", retry=False)
+    sec = doc.get("plan") if isinstance(doc, dict) else None
+    v = sec.get("stale_project_days") if isinstance(sec, dict) else None
+    from .fairplay import PLAN_LIM
+    lo, hi = PLAN_LIM["stale_project_days"]
+    return v if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi else STALE_PROJECT_DEF
+
+
+def stale_projects(save_dir: Path, state: dict | None, days: int) -> list[dict]:
+    """BUG-435: the state.proj rows that say `set aside N d` with N >= days and whose bp file is a STALE_CANCEL_TPLS template:
+    [{proj, tpl, days, why}] (why = the row's own words: 'no progress' / 'stalled', the part it waits for)."""
+    out = []
+    if days <= 0:
+        return out
+    for row in (state or {}).get("proj") or []:
+        if not (isinstance(row, list) and len(row) >= 4 and isinstance(row[0], str)):
+            continue
+        m = STALE_ROW.search(str(row[3]))
+        if not m or int(m.group(1)) < days:
+            continue
+        doc = files.read_json(Path(save_dir) / "bp" / f"{row[0]}.json")
+        tpl = doc.get("tpl") if isinstance(doc, dict) else None
+        if tpl in STALE_CANCEL_TPLS:
+            out.append({"proj": row[0], "tpl": tpl, "days": int(m.group(1)), "why": str(row[3])[:120]})
+    return out
 
 
 def is_minimal(plan: dict | None) -> bool:
@@ -4227,6 +4303,19 @@ def _print_check(errs: list[str], warn: list[str]) -> None:
         print(f"warn {w}")
 
 
+def reject_tail(errs: list[str], snap: dict | None, refreshed: str = "") -> str:
+    """BUG-436 (Run 16d i4 Mazelanterns y400: 'plan REJECTED' right after propose with no ERROR line in the tail, then 'plan OK' on the
+    next call): the ERROR lines come before the placement lines, so a `| tail` showed only the verdict; and the placement dry run ranks on
+    the sites snapshot of this very call (a stage that finished after the propose's snapshot refreshes it, BUG-369). The verdict line
+    now names the number of errors, the first one, the snapshot it ranked on and a refresh this call made."""
+    sid = (snap or {}).get("id") if isinstance(snap, dict) else None
+    out = f": {len(errs)} error(s), first: {_cut(errs[0], 220)}" if errs else ""
+    out += f"; placement ranked on sites snapshot {sid}" if sid else "; no sites snapshot"
+    if refreshed:
+        out += f" ({refreshed}: the map changed since the draft; propose again if the first error is a placement)"
+    return out
+
+
 def _dry_place(save_dir: Path, doc: dict, prev: dict | None, errs: list[str], warn: list[str]) -> list[str]:
     """plan check's placement dry run (what apply would emit), shared by propose (BUG-197): only when check found no
     ERROR; a BpError becomes an ERROR, an unavailable bp package a warning. Returns the placement lines."""
@@ -4250,10 +4339,12 @@ def run(args, save_dir: Path) -> int:
     prev = applied_plan(save_dir)
     snap0 = sites_snapshot(save_dir)
     why = _cmd.snapshot_stale(save_dir, snap0) if snap0 is not None else None
+    refreshed = ""
     if why:                                           # BUG-369: drafts, checks and placements never rank on an old map
         note = _cmd.auto_refresh(save_dir, why)[1]
         if note:
             print(note)
+            refreshed = note
     if args.action == "propose":
         phases = load_phases(Path(args.phases) if args.phases else None)
         state = files.read_state(save_dir)
@@ -4269,6 +4360,9 @@ def run(args, save_dir: Path) -> int:
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
         files.write_json_atomic(path, doc)
         print(f"draft {path}: {_summary(doc)}")
+        sid = (sites_snapshot(save_dir) or {}).get("id")
+        if sid:                                       # BUG-436: the map this draft was ranked on (plan check names its own)
+            print(f"  ranked on sites snapshot {sid}")
         for ln in ([fit] if fit else []) + kfit + cfit:
             print(f"  {ln}")
         order = core_order_note(doc, state, fort)
@@ -4297,7 +4391,8 @@ def run(args, save_dir: Path) -> int:
         order = core_order_note(doc, state, fort) if errs else None   # BUG-067: why a room build may have found no site
         if order:
             print(f"  {order}")
-        print(f"plan {'OK' if not errs else 'REJECTED'}: {path}" + (f" ({_summary(doc)})" if not errs else ""))
+        print(f"plan {'OK' if not errs else 'REJECTED'}: {path}" + (f" ({_summary(doc)})" if not errs else "")
+              + ("" if not errs else reject_tail(errs, sites_snapshot(save_dir), refreshed)))
         return 1 if errs else 0
     errs, msg = apply(save_dir, doc, by=args.by, wait_s=args.wait, dry_run=args.dry_run)
     _print_check(errs, [])
