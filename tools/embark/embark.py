@@ -47,6 +47,10 @@ PRIOR_FILES, PRIOR_ROWS = 30, 200      # embark --here: the newest result files 
 SWEEP_SAMPLES = (1, 4, 9)
 SWEEP_MAX = 400
 SWEEP_SECONDS = (5.0, 1.5)             # per world tile: base + per hovered tile
+# BUG-427: rank returns after this many seconds with the partial pre-rank (em.sh killed the whole call at 590 s and
+# printed nothing; the sweep itself goes on in DF and is read later with rank --last, or resumed with rank --resume)
+RANK_BUDGET = 540.0
+VARIANT_SHIFT = 3                      # BUG-428: LX/LY variants within this many tiles of the hovered 4x4
 # BUG-409: an embark tile is 48 map cells (steps); a brook farther than this from every other scanned rectangle is not
 # 'near' it (BUG-250 searched all scanned sites: 'brook=47 tiles at 390,391' for a site 160 tiles away)
 TILE_STEPS = 48
@@ -327,6 +331,8 @@ def brook_text(r: dict, pts: list[tuple[int, int, str]]) -> str:
     if not isinstance(rec, dict):
         return ""
     if rec.get("water"):
+        if mountain_dry(r):   # BUG-426
+            return f" brook=in a gully ({rec['water']}) but MOUNTAIN: no soil, no aquifer (no well, no farm, bank not reachable)"
         g = brook_geometry(r)
         if g is None:
             return f" brook=in ({rec['water']}) (tile positions not read: scan --tiles)"
@@ -356,6 +362,52 @@ def aquifer_text(r: dict) -> str:
     if tl.get("aq_best") and rec.get("aquifer"):
         return f" aq={rec['aquifer']} (tiles differ, best {tl['aq_best']})"
     return ""
+
+
+def mountain_dry(r: dict) -> bool:
+    """BUG-426: a bare mountain (every read tile mountain, no soil, no aquifer): no well and no farm for dfpilot, and its
+    brook runs in a gully behind rock (= checklist.lua mountain_dry)."""
+    rec = r.get("rec") if isinstance(r.get("rec"), dict) else {}
+    if rec.get("aquifer") not in (None, "none"):
+        return False
+    tl = rec.get("tiles") if isinstance(rec.get("tiles"), dict) else {}
+    if tl.get("terrain"):
+        return tl.get("mountain") == tl["terrain"] and not tl.get("soiled")
+    return rec.get("terrain") == "mountain" and rec.get("soil") in (None, "none")
+
+
+def variant_lines(r: dict) -> list[str]:
+    """BUG-428: a hover row reads one fixed 4x4 (LX,LY = 6,6 unless given); when its brook is not in the core of that
+    rectangle (EDGE ONLY, i1 Manorsubtle: moved to 7,6 by hand), propose the LX,LY within VARIANT_SHIFT tiles that
+    puts the most of the brook tiles seen into the core (not on the outer ring). The tiles beyond the hovered 4x4 are
+    unread: the line is a scan command, not a verdict."""
+    rec = r.get("rec") if isinstance(r.get("rec"), dict) else {}
+    tl = rec.get("tiles") if isinstance(rec.get("tiles"), dict) else {}
+    at = [p for p in tl.get("water_at") or [] if isinstance(p, list) and len(p) == 2]
+    w, e = r.get("world"), r.get("emb")
+    if not (r.get("hover") and not r.get("sweep") and at and isinstance(w, list) and isinstance(e, list) and len(e) == 2):
+        return []
+
+    def core(x0: int, y0: int) -> tuple[int, int]:
+        inner = [p for p in at if x0 < p[0] < x0 + 3 and y0 < p[1] < y0 + 3]
+        d2 = min((max(abs(2 * p[0] - (2 * x0 + 3)), abs(2 * p[1] - (2 * y0 + 3))) for p in inner), default=99)
+        return len(inner), -d2
+
+    cur = core(e[0], e[1])
+    best = None
+    for dy in range(-VARIANT_SHIFT, VARIANT_SHIFT + 1):
+        for dx in range(-VARIANT_SHIFT, VARIANT_SHIFT + 1):
+            lx, ly = e[0] + dx - 16 * w[0], e[1] + dy - 16 * w[1]
+            if not (0 <= lx <= 12 and 0 <= ly <= 12) or (dx, dy) == (0, 0):
+                continue
+            c = core(e[0] + dx, e[1] + dy)
+            key = (c, -(abs(dx) + abs(dy)), -dy, -dx)
+            if c > cur and (best is None or key > best[0]):
+                best = (key, lx, ly, c[0])
+    if best is None:
+        return []
+    return [f"    variant: LX,LY {best[1]},{best[2]} puts {best[3]} brook tile(s) in the core (now {cur[0]}): "
+            f"scan {w[0]},{w[1]},{best[1]},{best[2]} --hover   (the tiles beyond the hovered 4x4 are unread)"]
 
 
 def best_compromise(rows: list[dict]) -> str | None:
@@ -417,12 +469,14 @@ def rank_lines(rows: list[dict], top: int = 8) -> list[str]:
     return lines
 
 
-def last_sweep(out: Path) -> dict | None:
-    """BUG-410: the newest finished result file that holds sweep rows (rank --last)."""
+def _sweep_docs(out: Path) -> list[dict]:
+    """BUG-427: the result files and the (maybe still running) status.json that hold sweep rows, newest first."""
     try:
-        paths = sorted(out.glob("result-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        paths = [p for p in list(out.glob("result-*.json")) + [out / "status.json"] if p.exists()]
+        paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     except OSError:
-        return None
+        return []
+    docs = []
     for p in paths:
         try:
             doc = json.loads(p.read_text(encoding="utf-8"))
@@ -430,8 +484,26 @@ def last_sweep(out: Path) -> dict | None:
             continue
         res = doc.get("results") if isinstance(doc, dict) else None
         if isinstance(res, list) and any(isinstance(r, dict) and r.get("sweep") for r in res):
-            return doc
-    return None
+            docs.append(doc)
+    return docs
+
+
+def last_sweep(out: Path) -> dict | None:
+    """BUG-410: the newest result file (BUG-427: or the running status.json) that holds sweep rows (rank --last)."""
+    docs = _sweep_docs(out)
+    return docs[0] if docs else None
+
+
+def sweep_rows(out: Path, extra: list[dict] | None = None) -> dict[tuple[int, int], dict]:
+    """BUG-427: every world tile any sweep read so far, the newest read of a tile wins (rank --resume skips them)."""
+    rows: dict[tuple[int, int], dict] = {}
+    docs = _sweep_docs(out)
+    for res in [d["results"] for d in reversed(docs)] + ([extra] if extra else []):
+        for r in res:
+            w = r.get("world") if isinstance(r, dict) and r.get("sweep") else None
+            if isinstance(w, list) and len(w) == 2:
+                rows[(w[0], w[1])] = r
+    return rows
 
 
 def summarize(doc: dict | None, top: int = 8) -> list[str]:
@@ -452,6 +524,7 @@ def summarize(doc: dict | None, top: int = 8) -> list[str]:
                      f" fail={','.join(r.get('fails') or []) or '-'} warn={','.join(r.get('warns') or []) or '-'}"
                      f" unknown={','.join(r.get('unknown') or []) or '-'}" + brook_text(r, wpts) + aquifer_text(r)
                      + (" (hover read, no rectangle placed)" if r.get("hover") else ""))
+        lines.extend(variant_lines(r))   # BUG-428
     if any(r.get("hover") for r in rows):   # BUG-411
         lines.append("  note: a hover row merges the WORST aquifer and the DEEPEST soil of its hovered tiles, but covers "
                      "only the tiles it hovered; the rectangle you place may differ: its Confirm popup (embark gate) decides")
@@ -614,7 +687,12 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--sample", type=int, default=4, choices=SWEEP_SAMPLES,
                     help="panels hovered per world tile (default 4: the corners of the 4x4; ~5 s + 1.5 s each, a guess)")
     sp.add_argument("--top", type=int, default=8, help="how many tiles to propose (default 8)")
-    sp.add_argument("--last", action="store_true", help="rank the newest finished sweep again (no DF call)")
+    sp.add_argument("--last", action="store_true", help="rank the newest sweep (finished or still running) again (no DF call)")
+    sp.add_argument("--resume", action="store_true",
+                    help="BUG-427: skip the world tiles an earlier sweep already read and rank old and new together")
+    sp.add_argument("--budget", type=float, default=RANK_BUDGET,
+                    help="BUG-427: seconds to wait, then print the partial pre-rank (the sweep goes on in DF); 0 = wait "
+                         "for the whole sweep (default %(default)s, below em.sh's 590 s)")
     sp = sub.add_parser("save-as", help="BUG-250: Esc menu > 'Save and continue playing' under the name NAME")
     sp.add_argument("name", help="the new save folder name (letters, digits, space, _ -)")
     sp.add_argument("--no-post", action="store_true", help="do not post the Esc key to DF's window (press it yourself)")
@@ -651,6 +729,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "rank" and a.last:   # BUG-410: no DF call
         doc = last_sweep(out)
         print("\n".join(rank_lines(doc["results"], a.top) if doc else ["  rank: no finished sweep result in " + str(out)]))
+        if doc and doc.get("state") == "running":   # BUG-427
+            print(f"  (the sweep is still running: {sum(1 for r in doc['results'] if r.get('sweep'))} world tiles read "
+                  "so far; ask again later)")
         return 0 if doc else 1
     here = getattr(a, "here", False)
     try:
@@ -658,9 +739,18 @@ def main(argv: list[str] | None = None) -> int:
             if not a.box:
                 ap.error("rank needs --box X0,Y0,X1,Y1 (or --last)")
             cands = box_cands(a.box, a.step)
+            if a.resume:   # BUG-427
+                old = sweep_rows(out)
+                cands = [c for c in cands if (c[0], c[1]) not in old]
+                print(f"  resume: {len(old)} world tile(s) read before, {len(cands)} left in the box")
+                if not cands:
+                    print("\n".join(rank_lines(list(old.values()), a.top)))
+                    return 0
             spec = make_spec("scan", cands=cands, hover=True, sweep=a.sample)
             if a.timeout == 1800:
                 a.timeout = max(1800.0, 2 * len(cands) * (SWEEP_SECONDS[0] + SWEEP_SECONDS[1] * a.sample))
+            if a.budget > 0:
+                a.timeout = min(a.timeout, a.budget)
         else:
             spec = make_spec("saveas" if a.cmd == "save-as" else a.cmd, world=getattr(a, "world", None),
                              cands=getattr(a, "sites", None),
@@ -684,6 +774,34 @@ def main(argv: list[str] | None = None) -> int:
     if a.no_wait:
         return 0
     hook = esc_poster(df_dir()) if spec["mode"] == "saveas" and not a.no_post else None
+    if a.cmd == "rank":   # BUG-427: one flushed line per world tile, the partial pre-rank at the budget or on ^C
+        old = sweep_rows(out) if a.resume else {}
+        seen = [0]
+        total = len(spec["cands"])
+
+        def progress(d):
+            rows = [r for r in d.get("results") or [] if isinstance(r, dict) and r.get("sweep")]
+            for i, r in enumerate(rows[seen[0]:], seen[0] + 1):
+                w = r.get("world") or ["?", "?"]
+                print(f"  [{i}/{total}] {w[0]},{w[1]} {r.get('verdict')} {r.get('score')}"
+                      f" fail={','.join(r.get('fails') or []) or '-'}", flush=True)
+            seen[0] = len(rows)
+        try:
+            doc = wait(spec["id"], out, a.timeout, on_doc=progress, echo=lambda *_: None)
+        except KeyboardInterrupt:
+            doc = read_status(out)
+        if doc and doc.get("id") == spec["id"] and isinstance(doc.get("results"), list):
+            progress(doc)
+            if a.resume:
+                doc["results"] = list({**old, **sweep_rows(out, doc["results"])}.values())
+            lines = summarize(doc, a.top)
+            if doc.get("state") == "running":
+                lines.append(f"  PARTIAL: {seen[0]} of {total} world tiles read, the sweep still runs in DF. Later: "
+                             "rank --last (no DF call), or after it ends the same command with --resume")
+            print("\n".join(lines), flush=True)
+        else:
+            print("\n".join(summarize(doc)))
+        return 0 if doc and doc.get("state") in ("done", "running") else 1
     doc = wait(spec["id"], out, a.timeout, on_doc=hook)
     print("\n".join(summarize(doc)))
     if a.cmd == "load":

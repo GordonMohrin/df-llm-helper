@@ -1,5 +1,11 @@
 # CHANGELOG dfpilot
 
+## Embark: bare mountains are waterless, rank prints progress and resumes, LX/LY variants (BUG-426 to BUG-428, 2026-11-05; offline, live-untested)
+- **Why:** Run 16a i1 Manorsubtle died of thirst on `brook=in ~24 steps` (the brook ran in a gully behind rock); `em.sh rank` over ~90 world tiles ran ~25 min and printed nothing at the 590 s timeout.
+- **BUG-426:** `checklist.mountain_dry`: all read tiles mountain without soil and no aquifer + a brook = `water` FAIL (`mountain: no soil, brook in a gully`), so such a rectangle ranks below soil + brook bank or a light aquifer; `brook_text` says `MOUNTAIN`.
+- **BUG-427:** `rank` prints one line per world tile, `--budget` (540 s) returns the partial pre-rank, `--resume` skips tiles already read, `rank --last` also reads a running sweep; a first tile with ice/ocean/heavy aquifer/evil/savagery skips the other hovers.
+- **BUG-428:** hover rows with an edge-only brook get `variant: LX,LY a,b ... scan WX,WY,a,b --hover`.
+- **Tests:** tests/lua/test_embark_fix24.lua, tests/test_bug426_428_embark.py. **Live check:** see the three bug files.
 ## A heavy aquifer is walled from above; the running core stays; a bounded sites export (BUG-414, BUG-415, 2026-11-05; offline, live-untested)
 - **Why:** Gordon: "generell durch den Aquifer graben, so sicher wie moeglich". BUG-412 passed light aquifers per level but only contained a heavy one
   (stop + plug): Run 16c i3 Yawninggilt hit heavy water at all three core sites and had no core after 20 years. Its propose also redrafted

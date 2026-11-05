@@ -138,7 +138,12 @@ function C.evaluate(rec, rules, ctx)
   tiered('savagery', sav, {'low', 'medium'}, {})
   tiered('trees', rec.trees, rules.trees_ok, rules.trees_warn)
   local wt = rec.tiles
-  if rec.water and wt and (wt.water_n or 0) > 0 and (wt.water_core or 0) == 0 then
+  if rec.water and C.mountain_dry(rec) then
+    -- BUG-426 (i1 Manorsubtle 18,22,7,6 died of thirst): a bare mountain (no soil, no aquifer) leaves dfpilot no well and no
+    -- farm, the brook runs in a gully behind rock that free digging may not reach (nothing within 3 tiles of open water)
+    put('water', 'fail', 'mountain: no soil, brook in a gully (' .. rec.water .. ') - no aquifer well, no farm, the bank ' ..
+      'cannot be reached; prefer soil and a brook bank, or a light aquifer')
+  elseif rec.water and wt and (wt.water_n or 0) > 0 and (wt.water_core or 0) == 0 then
     -- BUG-409 (i1 18,22: 'brook=in', the brook on the rectangle's top row, the only water 95 steps away at the map
     -- edge): a brook on the outer ring only may lie at the map edge, far from where the fort digs
     put('water', 'warn', string.format('%s only on the edge tiles of the rectangle (%d tile(s), nearest %.1f tiles = about %d ' ..
@@ -220,6 +225,15 @@ function C.evaluate(rec, rules, ctx)
   out.score = math.max(0, 100 - 12 * #out.warns - 4 * #out.unknown - 30 * #out.fails)
   out.verdict = (#out.fails > 0 and 'reject') or (#out.unknown > 0 and 'review') or 'ok'
   return out
+end
+
+-- BUG-426: every read tile is mountain without soil and no tile shows an aquifer (a single panel: its own biome, soil, aquifer)
+function C.mountain_dry(rec)
+  local aq = rec.aquifer
+  if aq ~= nil and aq ~= 'none' then return false end
+  local wt = rec.tiles
+  if wt and (wt.terrain or 0) > 0 then return wt.mountain == wt.terrain and (wt.soiled or 0) == 0 end
+  return rec.terrain == 'mountain' and (rec.soil == nil or rec.soil == 'none')
 end
 
 -- rank results: ok before review before reject, then score
