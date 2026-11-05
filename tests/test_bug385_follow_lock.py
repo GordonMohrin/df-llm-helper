@@ -68,7 +68,7 @@ def test_bug385_run_exits_clean_and_names_the_owner(save, monkeypatch, capsys):
 def test_bug385_old_code_takeover_obeys_the_cool_down_too(save, monkeypatch, capsys):
     monkeypatch.setattr(wake.Follower, "poll", lambda self: None)
     monkeypatch.setattr(wake, "pid_alive", lambda p: p in (333, os.getpid()))
-    put(save, 333, code="0ld0c0de0000", took=1, took_at=int(time.time()) - 5)
+    put(save, 333, code="0ld0c0de0000", took=1, took_at=int(time.time()) - 5, took_code=wake.CODE)   # BUG-474: it took over from MY code
     args = type("A", (), {"save_pin": None, "since": None, "no_auto": False, "once": False, "max_s": 0, "interval": 0.02})()
     monkeypatch.setattr(wake.Follower, "poll", lambda self: (_ for _ in ()).throw(KeyboardInterrupt))
     assert wake.run(args) == wake.FOLLOW_OWNED_EXIT
