@@ -154,6 +154,7 @@ M.DOWN_GUARD = 30          -- 'down' refused while a visible hostile is this clo
 M.RESOLVE = 6000           -- ticks between re-resolving a complete bridge (findAtTile is a linear scan)
 M.RESOLVE_RETRY = 100      -- incomplete (no bridge or no linked lever): retry this often ...
 M.RESOLVE_URGENT = 20      -- ... and this often while the bridge is not in its wanted state
+M.RESOLVE_REF = 1200       -- BUG-478: a bridge with no known linked lever in the refuge burrow looks for one this often
 M.FAIL_REPEAT = 1200       -- the same bridge's GATE_FAIL at most once per day
 M.EXTRA_EVERY = 1200       -- ticks between scans for lever-linked bridges outside the manifest
 M.EXTRA_MAX = 16           -- at most this many of them are handled
@@ -344,6 +345,8 @@ end
 -- (never re-found mid-siege). A complete resolution (bridge + a linked lever) is refreshed every
 -- M.RESOLVE ticks; an incomplete one is never trusted for long, because linking a lever is a
 -- separate job that often finishes after the bridge exists. r.resolved = nil forces a refresh.
+local ref_name                          -- runtime: the manifest's refuge burrow name (BUG-478), set by every pass
+local lever_in_name                      -- forward: a linked lever of the bridge lies on the named burrow
 local function resolve(r, spec, now, urgent)
   local parts = {table.concat(spec.fp, ',')}
   for _, p in ipairs(spec.levers or {}) do parts[#parts + 1] = table.concat(p, ',') end
@@ -371,8 +374,13 @@ local function resolve(r, spec, now, urgent)
     local lv = find_at(p)
     if lv and is_lever(lv) then add(lv, targets(lv), p) end
   end
-  -- stale manifest positions: levers linked to this bridge (one vector scan per RESOLVE_RETRY at most)
-  if r.bid and not any_linked(r) and now - (r.scan_tick or -M.RESOLVE_RETRY) >= M.RESOLVE_RETRY then
+  -- stale manifest positions: levers linked to this bridge (one vector scan per RESOLVE_RETRY at most). BUG-478 (Run 16c
+  -- i3 Castletongs y403: O1's refuge lever never stood in the list, 'its levers lie outside the alert burrow Tiefe+'):
+  -- also while none of the known linked levers lies in the refuge burrow, a lever linked to the bridge elsewhere (a
+  -- refuge lever built beside its manifest tile) is found by the same scan, at most once per RESOLVE_REF ticks then
+  local want_ref = r.bid and any_linked(r) and ref_name ~= nil and now - (r.scan_tick or -M.RESOLVE_REF) >= M.RESOLVE_REF
+                   and not lever_in_name(r, ref_name)
+  if r.bid and (not any_linked(r) or want_ref) and now - (r.scan_tick or -M.RESOLVE_RETRY) >= M.RESOLVE_RETRY then
     r.scan_tick = now
     for _, lv in ipairs(df.global.world.buildings.other.TRAP) do      -- lever.lua:103
       if is_lever(lv) then
@@ -768,6 +776,31 @@ local function lever_in(r, bs, usable)
     if r.linked[lid] and not (usable and r.bad[lid]) and at_in(r, lid, bs) then return true end
   end
   return false
+end
+
+function lever_in_name(r, name)
+  local b = burrow(name)
+  if not b then return true end                 -- no burrow to judge by: nothing to look for
+  return lever_in(r, {b})
+end
+
+-- BUG-478 (Run 16c i3 Castletongs y403: SIEGE_DEEP sent the civilians to Tiefe+, O1's pull went to a lever nobody confined
+-- could take: GATE_FAIL 'no worker: its levers lie outside the alert burrow Tiefe+', BREACH, the fort fell): every bridge
+-- gate holds needs a linked lever inside the refuge burrow, the one place the confined civilians can always pull from.
+-- {bridge name, ...} sorted: the managed bridges (manifest) without one; empty with no refuge burrow or no linked lever
+-- at all (levers: is readiness' own blocker). Public gate.refuge_gaps
+function M.refuge_gaps(K)
+  local man = K.manifest()
+  local _, rn = core_burrows(man)
+  local b = burrow(rn)
+  local out = {}
+  if not b then return out end
+  for name, r in pairs(rt) do
+    local spec = type(man.bridges) == 'table' and man.bridges[name]
+    if spec and not st.gone[name] and any_linked(r) and not lever_in(r, {b}) then out[#out + 1] = name end
+  end
+  table.sort(out)
+  return out
 end
 
 -- the bridge still needs a pull: its wanted state is not reached and it has a linked lever; a bridge waiting for a
@@ -2623,6 +2656,8 @@ end
 local function pass(K, force)
   local now = K.now().tick
   local man = K.manifest()
+  local _, rname = core_burrows(man)
+  ref_name = type(man.refuge) == 'table' and rname or nil     -- BUG-478: only a fort with a refuge looks for its levers
   local states = {}
   local gone = {}                                -- forget bridges the manifest no longer lists (not the unmanaged)
   for name in pairs(rt) do gone[name] = true end

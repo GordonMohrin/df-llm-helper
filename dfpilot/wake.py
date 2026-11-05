@@ -73,7 +73,7 @@ WAKE_TYPES = {t for t, (c, _, _) in schema.EVENTS.items() if c == "A"}
 SYNTH = {"HB_STALE", "TICK_STALL", "AUTO_FAIL", "SUPERVISE", "QUICKSAVE_FAILED", "NEEDS_CLICK", "PLAN_AUTO", "PROJECT_STALE"}   # follower's own wake reasons (not kern events)
 # Run 9: an army walked in while SIEGE_START/INVASION waited in the digest; they and the interrupts come right
 # after BREACH and wake at once (URGENT: no merge wait, no hourly limit, one per type per URGENT_REPEAT_S)
-PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP",
+PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", "LOCKDOWN", "SIEGE_DEEP", "REFUGE_PLUG",
         "BRIDGE_DESTROYED", "GATE_FAIL",
         "TRANSFORM", "CURSED",                # BUG-115: a were-form among the citizens, then a curse (interrupts)
         "DEATHS_3PLUS", "NO_DEPOT", "CURSE_MOON",
@@ -119,6 +119,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         # Run 11: seal at=last reads SEAL_LEAK (a wall per leak) and REFUGE_FAIL (its open entrances) too
         "SEAL_LEAK": "dfllm cmd inspect '{\"what\":\"entrances\"}'; dfllm cmd bp.place tpl=seal site=S1 at=last "
                      "(walls); tell Gordon",
+        # BUG-479: building destroyers are at the refuge; the kernel walled the stair foot (a hatch/door is broken by them)
+        "REFUGE_PLUG": "dfllm status; tell Gordon: the refuge stair foot is walled against the building destroyers; the kernel lifts it in PEACE",
         "REFUGE_FAIL": "dfllm cmd inspect '{\"what\":\"refuge\"}'; dfllm cmd bp.place tpl=seal site=S1 at=refuge "
                        "(its stair hatch and the line's tiles); next plan: refuge pieces first",
         # BUG-107: a potential refuge holds less food/drink than refuge.floor_pct % of the siege need; d.cmd is the existing

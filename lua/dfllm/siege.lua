@@ -1176,7 +1176,12 @@ end
 local function alert_plan(K, a, g, now)
   local held = alert_held(K)
   local mode = K.mode()
-  local deep = mode == 'SIEGE' and st.deep ~= nil
+  -- BUG-480 (Run 16c i3 Castletongs y403: the alert sounded on Kern+, the census saw the trolls 9 ticks later and moved it to
+  -- Tiefe+: 83 citizens crossed the bridges' footprints a second time while the gates waited for them, O1 was not up at
+  -- T+900): a siege popup that names siege engineers sends the first alert to the refuge already (in the lockdown, before
+  -- SIEGE begins)
+  local deep = (mode == 'SIEGE' and st.deep ~= nil) or
+               (st.bdx ~= nil and (mode == 'PEACE' or mode == 'ALERT' or mode == 'SIEGE'))
   local on, burrow = alert_wanted(K, a, g, now, held), (mode == 'BREACH' or deep) and g.refuge or g.kern
   local note, brief, audited, flee
   if on then
@@ -1413,7 +1418,7 @@ local function so_cfg(K) return cfg_block(K, 'sortie', M.SO, M.SO_LIM) end
 function M.so_conf(K) return so_cfg(K) end
 
 -- BUG-030: the deep defense's reasons, in a fixed order ('destroyers,army,weak'), '' while it is off
-local DEEP_WHY = {'destroyers', 'army', 'weak'}
+local DEEP_WHY = {'destroyers', 'announced', 'army', 'weak'}   -- BUG-480: announced = the siege popup names the engineers
 local function deep_txt()
   local r = {}
   for _, w in ipairs(DEEP_WHY) do if st.deep and st.deep.why[w] then r[#r + 1] = w end end
@@ -2038,6 +2043,28 @@ local function wave_abort(K, to, now, why)
   st.wd, st.wu, dirty = {}, {}, true
 end
 
+---------------------------------------------------------------- BUG-481: what this fort's sieges looked like
+-- The largest army (visible hostiles at once) any SIEGE/BREACH of this fort met, the sieges counted and whether building
+-- destroyers came with one (persisted m.siege.hist = {peak, n, bd}). readiness sizes the trap shortfall by it, seal asks
+-- it before the refuge's second line (BUG-479), plan propose reads it from the state (siege.hist). Public M.history
+local function note_hist(K, a)
+  if not (a and a.fresh) then return end
+  local mode = K.mode()
+  if mode ~= 'SIEGE' and mode ~= 'BREACH' then return end
+  local h = st.hist
+  if not h then h = {peak = 0, n = 0, bd = 0}; st.hist = h end
+  local vis, bd = int(a.vis) or 0, int(a.bd) or 0
+  if st.hist_ep ~= st.t0 then st.hist_ep, h.n, dirty = st.t0, h.n + 1, true end
+  if vis > h.peak then h.peak, dirty = vis, true end
+  if bd > 0 and h.bd == 0 then h.bd, dirty = 1, true end
+end
+
+function M.history(K)
+  local h = st and st.hist
+  if not h then return {peak = 0, n = 0, bd = 0} end
+  return {peak = h.peak, n = h.n, bd = h.bd}
+end
+
 ---------------------------------------------------------------- the deep defense (BUG-030, plan B)
 -- Run 10 y421 (Handlelock): 58 goblins and 6 trolls (building destroyers) destroyed O1, B1 and B2; 19 recruits (worn 53
 -- %, no metal) at the melee (130,128,122) and gallery (123,123,122) stations between O1 and B2 died first, then 40+
@@ -2067,6 +2094,7 @@ local function st_cfg(K) return cfg_block(K, 'stations', M.ST, M.ST_LIM) end
 local function deep_reasons(K, a)
   local why, d = {}, {bd = int(a.bd) or 0, vis = int(a.vis) or 0}
   if d.bd > 0 then why[#why + 1] = 'destroyers' end
+  if st.bdx then why[#why + 1] = 'announced' end        -- BUG-480: the popup said 'siege engineers' before the census saw one
   local k = mil_kpi(K, M.IK_IDLE_TTL)
   local sol = k and int(k.soldiers) or 0
   if sol > 0 then
@@ -2132,8 +2160,9 @@ local function deep_step(K, a, g, now)
   end
   if dp.clear then dp.clear = nil end
   for _, w in ipairs(why) do dp.why[w] = true end
-  if d.bd > 0 then dp.bd = true end
+  if d.bd > 0 or st.bdx then dp.bd = true end
   dirty = true
+  if dp.bd then K.call('seal', 'plug', {bd = true}) end      -- BUG-479: the refuge's second line (a wall round the stair foot)
   local races, ids, near, kinds = destroyers(K)
   -- BUG-336/337 (Run 15b Earthboat y387: 'civilians to Tiefe+ (the separated refuge)' while its hatch was never built;
   -- 5 trolls followed the citizens down the open stair): an open refuge is named first (seal refuses it in a fight),
@@ -2154,6 +2183,9 @@ local function deep_step(K, a, g, now)
     parts[#parts + 1] = string.format('%d building destroyer%s in sight (%s%s): the bridges are no barrier', d.bd,
                                       d.bd == 1 and '' or 's', #races > 0 and table.concat(races, ', ') or '?',
                                       near >= 0 and string.format(', %d tiles from O1', near) or '')
+  end
+  if has.announced and not has.destroyers then
+    parts[#parts + 1] = 'the siege popup announced siege engineers (building destroyers): the bridges are no barrier'
   end
   if has.army then
     parts[#parts + 1] = string.format('army %d > %d x %d soldiers', d.vis, d.c.core_ratio, d.sol)
@@ -2485,6 +2517,20 @@ end
 
 -- public (BUG-013, gate): the burrows the sounding civ alert holds the civilians in (the list siege set last); {} while
 -- it is silent. gate counts a pull whose levers all lie outside them as blocked
+-- public (reflex.announce, BUG-480): the siege popup named siege engineers / trolls (building destroyers: the bridges and the
+-- refuge hatch are no barrier). The first alert goes to the refuge at once, SIEGE_DEEP follows with why `announced`
+M.BDX_HOLD = 3600
+function M.expect_destroyers(K, text)
+  local now = K.now().tick
+  if st.bdx then return false end
+  st.bdx, dirty = {t = now, txt = tostring(text or ''):sub(1, 60)}, true
+  K.log('warn', 'siege: the popup announces building destroyers ("%s"): the first alert goes to the refuge', st.bdx.txt)
+  local a, g = assess(K), geometry(K)
+  apply(K, a, g, now)
+  save(K)
+  return true
+end
+
 function M.alert_names(K)
   local idx = alert_idx()
   if idx == nil or idx == 0 or type(mem.alist) ~= 'table' then return {} end
@@ -2597,6 +2643,12 @@ function M.init(K)
     if not next(st.deep.why) then st.deep = nil end
   end
   st.deep_rec = type(p.deep_rec) == 'table' and p.deep_rec or nil
+  if type(p.bdx) == 'table' and int(p.bdx.t) then st.bdx = {t = int(p.bdx.t), txt = tostring(p.bdx.txt or ''):sub(1, 60)} end   -- BUG-480
+  -- BUG-481: the sieges this fort has seen survive a reload
+  if type(p.hist) == 'table' then
+    st.hist = {peak = int(p.hist.peak) or 0, n = int(p.hist.n) or 0, bd = int(p.hist.bd) == 1 and 1 or 0}
+    st.hist_ep = int(p.hist_ep)
+  end
   -- BUG-331: the calm clock and the easing survive a reload within the SIEGE
   st.lc = int(p.lc)
   if type(p.lg) == 'table' and int(p.lg.t) then st.lg = {t = int(p.lg.t), d = int(p.lg.d) or 0} end
@@ -2630,12 +2682,17 @@ function M.step(K, budget, ctx)
   local g = geometry(K)
   decide(K, a, g, now)
   track(K, g, now, dt)
+  note_hist(K, a)                                          -- BUG-481
   local mode = K.mode()
+  if st.bdx and mode ~= 'SIEGE' and mode ~= 'BREACH' and now - st.bdx.t > M.BDX_HOLD then   -- BUG-480: the announcement came to nothing
+    st.bdx, dirty = nil, true
+  end
   prune_holds(K)                                           -- BUG-030
   if mode == 'SIEGE' then
     long_step(K, a, g, now)                                -- BUG-331: a long calm siege eases first
     deep_step(K, a, g, now)
   end
+  if mode == 'BREACH' and st.deep and st.deep.bd then K.call('seal', 'plug', {bd = true}) end   -- BUG-479
   -- BUG-028 (a); a wave or a sortie brings its soldiers back itself (it owns B1 meanwhile)
   if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) and not wave_busy() then rescue_step(K, a, g, now) end
   if mode == 'SIEGE' then                                  -- Gordon 2026-10-16: the sortie, then the intake waves
@@ -2668,6 +2725,7 @@ M.on = {
     mem.kill_sig, mem.kill_set = nil, nil      -- a posture change re-issues every squad's orders
     if to ~= 'SIEGE' then wave_abort(K, to, now, ev.why) end   -- intake waves and the sortie run in SIEGE only
     if to == 'PEACE' or to == 'DRILL' then st.ep = nil end
+    if to == 'PEACE' or to == 'DRILL' then st.bdx = nil end     -- BUG-480: the episode is over
     if to ~= 'SIEGE' and to ~= 'BREACH' then st.deep, st.deep_rec = nil, nil end   -- BUG-030: the episode is over
     if to ~= 'SIEGE' then st.lc, st.lg = nil, nil end   -- BUG-331: calm counts in one SIEGE only
     dirty = true

@@ -3544,6 +3544,138 @@ local function refuge_closure(K)
 end
 M.refuge_closure = refuge_closure
 
+-- BUG-479 (Run 16c i3 Castletongs y403, Pop 100 -> 7: 5 trolls broke the refuge hatch 122,127,122, hostile inside Tiefe+ at
+-- 122,127,121, 50 children and the adults died in the room they had fled to; Run 16a i1 Syrupobeyed y387 the same with two
+-- trolls and the bridges). A hatch, a door or a raised bridge is a building: building destroyers break it, the refuge's way
+-- in is no barrier to them (SIEGE_DEEP says 'nor the refuge hatch'). A constructed wall is none. The second line: once the
+-- army has building destroyers and the way in is only a hatch or a door, the open tiles round the stair foot on the refuge
+-- level (refuge_foot) are walled up, a runner repair project of 'Cw' cells the confined citizens build from inside (the
+-- foot ring is on the refuge level, inside Tiefe+); a troll that breaks the hatch and walks down the stair stands on a
+-- foot with walls on every side. When: building destroyers latched for the episode (siege's deep defense), the way in
+-- 'soft', the refuge holds no hostile, and the last responsible moment has come: the fight is a BREACH (a hostile inside
+-- Kern+) or a destroyer stands within PLUG.near tiles of the stair head; nobody stands on the stair column or the foot
+-- ring (the walls would shut him out or build on him). Lifted in PEACE after PLUG.lift ticks without a hostile: the
+-- walls are designated for removal (act.construction_remove), the refuge is enterable again.
+-- Public M.plug (siege asks), M.plug_state
+M.PLUG = {on = true, near = 30, lift = 2400, retry = 1200}
+local function plug_cfg(K)
+  return M.PLUG                                  -- constants of the module (no config key: tests set M.PLUG)
+end
+-- someone stands on the refuge stair column or on a tile of the foot ring (citizens, residents: they may be on their way)
+local function plug_occupied(K, col, tiles)
+  local mark = {}
+  for _, tk in ipairs(tiles) do mark[tk] = true end
+  local cu = K.census and K.census.u
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    local x, y, z
+    if u then x, y, z = dfhack.units.getPosition(u) end
+    if x then
+      if x == col[1] and y == col[2] and z >= col[3] and z <= col[4] then return true end
+      if mark[kstr(x, y, z)] then return true end
+      if math.abs(x - col[1]) <= 1 and math.abs(y - col[2]) <= 1 and z == col[3] then return true end
+    end
+  end
+  return false
+end
+
+-- args {bd = destroyers latched for the episode}; returns a state ('queued' | 'held' | 'off' | 'wait:<why>') and a detail
+local function plug_eval(K, args)
+  local c = plug_cfg(K)
+  if not c.on then return 'off' end
+  if st.plug then return 'held', st.plug.id end
+  if not (type(args) == 'table' and args.bd) then return 'wait:no destroyers' end
+  local t = now_t(K)
+  if st.plug_try and t - st.plug_try < c.retry then return 'wait:retry' end
+  local h = K.census and K.census.h
+  if type(h) ~= 'table' or t - (int(h.tick) or -1e9) > 200 then return 'wait:no census' end
+  local _, refuge = burrow_names(K)
+  local rv, cl = M.refuge_open(K)
+  if rv then return 'wait:open way in' end                               -- an open stair needs a hatch first (BUG-336)
+  if type(cl) ~= 'table' or cl.kind == 'bridge' or cl.kind == 'wall' then
+    return 'wait:' .. tostring(cl and cl.kind or 'no closer')
+  end
+  if hostile_in(K, refuge, t) > 0 then return 'wait:hostile inside' end
+  local col = refuge_column(K)
+  local foot = refuge_foot(K)
+  if not (col and foot) then return 'wait:no foot' end
+  if foot.bad then return 'wait:foot has a stair or ramp' end
+  if #foot.tiles == 0 then return 'wait:foot closed already' end
+  -- the last responsible moment: a hostile inside Kern+ (BREACH) or a destroyer near the stair head
+  local late = K.mode() == 'BREACH' or (int(h.inside) or 0) > 0
+  local near = -1
+  local hd = M.refuge_stair(K)
+  local head = hd and hd.pos or {col[1], col[2], col[4]}
+  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+    if type(e) == 'table' and e.bd == 1 and int(e.x) and int(e.y) and int(e.z) then
+      local d = math.max(math.abs(e.x - head[1]), math.abs(e.y - head[2]), math.abs(e.z - head[3]))
+      if near < 0 or d < near then near = d end
+    end
+  end
+  if not late and not (near >= 0 and near <= c.near) then return 'wait:destroyers far' end
+  local tk, cells = {}, {}
+  for _, line in ipairs(foot.tiles) do
+    local x, y, z = line:match('^(%-?%d+),(%-?%d+),(%-?%d+) ')
+    x, y, z = int(tonumber(x)), int(tonumber(y)), int(tonumber(z))
+    if x then
+      tk[#tk + 1] = kstr(x, y, z)
+      cells[#cells + 1] = {x, y, z, 'Cw'}
+    end
+  end
+  if plug_occupied(K, col, tk) then return 'wait:someone on the stair' end
+  st.plug_try, dirty = t, true
+  local ok, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers')
+  if not (ok and r1 == true and type(id) == 'string') then
+    K.log('warn', 'seal: refuge plug not queued: %s', tostring(id or r1))
+    return 'wait:runner refused'
+  end
+  st.plug = {t = t, id = id, tiles = cells}
+  local txt = string.format('refuge plug: %d wall%s round the stair foot %d,%d,%d (project %s) against building ' ..
+                            'destroyers: the %s on the stair can be broken, a constructed wall cannot', #cells,
+                            #cells == 1 and '' or 's', foot.pos[1], foot.pos[2], foot.pos[3], id, cl.kind)
+  K.emit('REFUGE_PLUG', 'A', txt:sub(1, 200), {proj = id, n = #cells, pos = foot.pos, closer = cl.kind,
+                                               near = near >= 0 and near or nil, breach = late and 1 or 0})
+  K.log('warn', 'seal: %s', txt:sub(1, 200))
+  save(K)
+  return 'queued', id
+end
+
+-- cheap to ask every pass: the verdict of a 'wait:' is kept PLUG.every ticks (the foot is read, citizens scanned otherwise)
+M.PLUG.every = 100
+function M.plug(K, args)
+  local t = now_t(K)
+  local bd = type(args) == 'table' and args.bd or nil
+  local m = mem.plug_m
+  if m and t - m.t < M.PLUG.every and tostring(m.s):sub(1, 5) == 'wait:' and not st.plug and m.bd == bd then
+    return m.s, m.d
+  end
+  local s, d = plug_eval(K, args)
+  mem.plug_m = {t = t, s = s, d = d, bd = bd}
+  return s, d
+end
+
+-- the plug in PEACE: after PLUG.lift ticks without a visible hostile its walls are designated for removal
+local function plug_lift(K, t)
+  local p = st.plug
+  if not p or K.mode() ~= 'PEACE' then return end
+  local c = plug_cfg(K)
+  local h = K.census and K.census.h
+  if type(h) == 'table' and (int(h.vis) or 0) > 0 then p.q, dirty = nil, true; return end
+  if not p.q then p.q, dirty = t, true; return end
+  if t - p.q < c.lift then return end
+  local n = 0
+  for _, cell in ipairs(p.tiles or {}) do
+    local ok, r = K.act.construction_remove(cell[1], cell[2], cell[3])
+    if ok and r ~= false then n = n + 1 end
+  end
+  K.emit('REFUGE_PLUG', 'A', string.format('refuge plug lifted: %d of %d walls designated for removal', n, #(p.tiles or {})),
+         {proj = p.id, n = n, lifted = 1})
+  st.plug, st.plug_try, dirty = nil, nil, true
+  save(K)
+end
+
+function M.plug_state(K) return st.plug and {id = st.plug.id, n = #(st.plug.tiles or {}), t = st.plug.t} or nil end
+
 -- BUG-336 review (runner's seal_stalled question): what else closes the refuge's stair when its hatch at `at` ({x, y, z},
 -- the stalled piece) is not built. {head = the tile seal at=refuge puts the hatch on now (M.refuge_stair: BUG-313 moves a
 -- boxed head up the stair), moved = true when that is not `at` (placing it again is a different, buildable tile), boxed
@@ -5649,6 +5781,14 @@ function M.init(K)
       st.dry[name] = {t = int(d.t), drink = d.drink == true, food = d.food == true, n = int(d.n) or 1}
     end
   end
+  if type(p.plug) == 'table' and int(p.plug.t) and type(p.plug.tiles) == 'table' then   -- BUG-479: the refuge plug stands
+    st.plug = {t = int(p.plug.t), id = tostring(p.plug.id or ''), q = int(p.plug.q), tiles = {}}
+    for _, c in ipairs(p.plug.tiles) do
+      if type(c) == 'table' and int(c[1]) and int(c[2]) and int(c[3]) then
+        st.plug.tiles[#st.plug.tiles + 1] = {c[1], c[2], c[3], 'Cw'}
+      end
+    end
+  end
   if type(p.lostb) == 'table' and int(p.lostb.t) then      -- BUG-462: an outer or inner bridge destroyed in this episode
     st.lostb = {t = int(p.lostb.t), name = type(p.lostb.name) == 'string' and p.lostb.name:sub(1, 24) or ''}
   end
@@ -5771,6 +5911,7 @@ function M.step(K, budget, ctx)
     schedule_periodic(K, t)
     episode(K, t)
   end
+  if st.plug then plug_lift(K, t) end                           -- BUG-479
   local r = run_jobs(K, t)
   if not next(mem.run) then publish(K) end
   if mem.pub then mem.pub.aud = M.audit_overdue(K) end           -- BUG-146: the data's age while it is overdue

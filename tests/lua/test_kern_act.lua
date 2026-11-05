@@ -730,6 +730,24 @@ T.test('door_forbid (FR-49/52, BUG-015): the door sheet lock; `close` also close
   T.eq({d.door_flags.forbidden, d.door_flags.closed}, {false, true}, 'close only with on')
 end)
 
+T.test('construction_remove (BUG-479): the remove-construction designation of one tile; integers only; seal only; the game refusing is no ok',
+       function()
+  local W = H.world{tag = 'crem'}
+  local asked = {}
+  dfhack.constructions = {designateRemove = function(x, y, z)
+    asked[#asked + 1] = {x, y, z}
+    return not (x == 9)                                  -- DFHack: false when there is no construction on the tile
+  end}
+  local env = mk()
+  env.who_v = 'gate'
+  T.eq({env.api.construction_remove(1, 2, 3)}, {false, 'not owner'})
+  env.who_v = 'seal'
+  T.eq({env.api.construction_remove(1.5, 2, 3)}, {false, 'need integer x, y, z'})
+  T.eq({env.api.construction_remove(1, 2, 3)}, {true})
+  T.eq({env.api.construction_remove(9, 2, 3)}, {false, 'no construction at 9,2,3'})
+  T.eq(asked, {{1, 2, 3}, {9, 2, 3}})
+end)
+
 T.test('zone_remove (live L6): only the zones of that dfllm-* name are deconstructed', function()
   local W = H.world{tag = 'zrm'}
   local gone = {}

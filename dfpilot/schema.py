@@ -85,6 +85,7 @@ ACT = {
     "mood_task": ["care"],                         # BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
+    "construction_remove": ["seal"],              # BUG-479: the refuge plug's walls come down in PEACE
     "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
     "burrow_tiles": ["seal", "runner", "water"],  # BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
                                                   # water paints its care burrow Pflege+ (exact)
@@ -587,6 +588,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # burrow, at = where the first one stands
     # BUG-107 (Run 14 note 78): sup = the supply counts of the pick and the others ("Innen+ food 40/30, drink 40/30; Kern+
     # food 1/30, drink 0/30"), set when the pick holds the food and drink but lacks the area (level FED) or no burrow is fed
+    # BUG-479: the refuge plug (queued, and lifted in PEACE): proj = the runner repair project of the walls, n = wall
+    # tiles, pos = the stair foot, closer = what closes the stair head (hatch | door | ...), near = the nearest building
+    # destroyer's distance to the head, breach = 1 when queued in a BREACH; lifted = 1 on the PEACE event
+    "REFUGE_PLUG": ("A", "seal", _d("proj:s", "n:i pos:p closer:s near:i breach:i lifted:i")),
     "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa "
                                                 "fix:s dry:f hostile:i at:p sup:s")),
     # BUG-107: a potential refuge (Kern+, the refuge) holds less food or drink than refuge.floor_pct % of the siege need;
@@ -604,7 +609,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # (R0 `office`), with its fix
     # BUG-096: blost = Kern+ or the refuge lost a well or the refuge's tiles (blocker burrow_lost) and what the kernel does
     "SIEGE_UNREADY": ("A", "readiness", _d(opt="fails:sa afails:sa routes:i open:i ents:sa traps:i age:i rdry:s "
-                                               "hout:s pd:i pw:s office:s blost:s mws:s")),
+                                               "hout:s pd:i pw:s office:s blost:s mws:s ts:s")),
     # BUG-015: an entrance door the lockdown forbade lost its forbidden flag before the next pass (refused)
     "LOCKDOWN_PARTIAL": ("A", "reflex", _d("doors:i", "refused:ia pos:p retry:f items:i units:i")),
     # BUG-023 / Run 10: tool detail members without their pick or axe while its jobs wait and free tools exist; Run 11:
@@ -1002,7 +1007,10 @@ STATE = Obj(
                            # BUG-055: the vacant office (or squad leader post) R0 `office` names, with its fix
                            "office": Str(maxbytes=200),
                            # BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command
-                           "mws": Str(maxbytes=200)}),
+                           "mws": Str(maxbytes=200),
+                           # BUG-481: ts = the trap shortfall R0 `traps_short` names, tt = the trap target for the siege the fort
+                           # expects; BUG-478: rg = the bridges with no linked lever inside the refuge (no R0 blocker)
+                           "ts": Str(maxbytes=200), "tt": NAT, "rg": Arr(Str(maxbytes=24), hi=8)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
          # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the

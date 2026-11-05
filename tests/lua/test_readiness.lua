@@ -523,7 +523,8 @@ T.test('FR-65 SIEGE_UNREADY (A): R0 in PEACE names blockers, ways in without doo
   day(W)
   u = unready(W)
   T.eq(#u, 3)
-  T.eq({u[3].d.fails, u[3].d.traps, u[3].d.afails}, {{'audit_fail', 'bypass', 'no_outer'}, 0,
+  -- BUG-481: 0 armed traps on the weakest path at 50 citizens is also `traps_short` (target 20 at least)
+  T.eq({u[3].d.fails, u[3].d.traps, u[3].d.afails}, {{'audit_fail', 'bypass', 'no_outer', 'traps_short'}, 0,
                                                       {'bypass: edge->Z3/Z4 avoids the trap hall'}})
   T.ok(u[3].msg:find('; traps 0$') ~= nil, u[3].msg)
   -- PEACE only; due again at once when PEACE returns
