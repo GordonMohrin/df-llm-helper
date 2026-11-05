@@ -346,12 +346,13 @@ def test_plan_cli_propose_check_apply(save, monkeypatch, capsys):
     assert main(["--runtime", rt, "plan", "propose", "--phases", str(FIX / "phases.json")]) == 0
     out = capsys.readouterr().out
     assert "draft" in out and "target P5" in out and "dfllm plan check" in out
+    assert "BUG-461: workshops only=" in out, "BUG-461: the fake fort has no Still/Kitchen/..., so their shops go before dining"
     assert (save / "plan.draft.json").exists()
     assert main(["--runtime", rt, "plan", "check"]) == 0
     out = capsys.readouterr().out
     assert "plan OK" in out and "tombs@S1 -> y3s1b2 at [" in out and "kept y3s0b0" in out   # placement dry run
     assert main(["--runtime", rt, "plan", "apply", "--dry-run"]) == 0
-    assert "dry run ok: 3 blueprint(s)" in capsys.readouterr().out
+    assert "dry run ok: 4 blueprint(s)" in capsys.readouterr().out      # the three of the phases + BUG-461's workshops
     bad = json.loads((save / "plan.draft.json").read_text("utf-8"))
     bad["policy"]["pop_ceiling"] = 101
     files.write_json_atomic(save / "bad.json", bad)

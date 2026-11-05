@@ -267,4 +267,41 @@ T.test('BUG-396: no Office zone and unvalidated manager orders: PROJECT_REQUEST 
   T.eq(n, 0, 'an Office zone for the manager stands: no request')
 end)
 
+-- BUG-458 (Run 16d Orbblock y375-y376: the seal's doors 'wait for door x1 (0 free, 5 ordered)', orders 'no job for 12 days'; the wall
+-- fallback walled the door spots): the runner holds a wall back that would cut citizens off and asks economy for the door itself:
+-- a workshop task whatever the manager does, deduped by the shop queue, none when a door stands free, the workshop request
+-- when no Carpenters or Masons shop stands
+T.test('BUG-458: economy.seal_doors adds the door as a workshop task (wood at the Carpenters), deduped, none with a free door',
+       function()
+  local W, ctl = world{}
+  days(W, 1)
+  local ok, n = W.K.call('economy', 'seal_doors', 2)
+  T.ok(ok, tostring(n))
+  T.eq(n, 2)
+  T.eq(tasks_of(ctl, 'ConstructDoor'), 2)
+  T.eq({ctl.tasks[1].id, ctl.tasks[1].mat}, {ctl.shops.Carpenters.id, 'wood'})
+  ok, n = W.K.call('economy', 'seal_doors', 2)
+  T.eq(n, 0, 'the two queued tasks count')
+  T.eq(tasks_of(ctl, 'ConstructDoor'), 2)
+  ok, n = W.K.call('economy', 'seal_doors', 3)
+  T.eq(n, 1, 'one more for the third')
+  -- a door stands free in the census: nothing to make
+  local W2, ctl2 = world{}
+  days(W2, 1)
+  W2.set_census('i', {doors = 1})
+  ok, n = W2.K.call('economy', 'seal_doors', 1)
+  T.eq({ok, n, #ctl2.tasks}, {true, 0, 0})
+end)
+
+T.test('BUG-458: no Carpenters or Masons workshop: no task, the workshop is requested (PROJECT_REQUEST why=manager)', function()
+  local W, ctl = world{shops = {}}
+  days(W, 1)
+  local ok, n = W.K.call('economy', 'seal_doors', 1)
+  T.eq({ok, n, #ctl.tasks}, {true, 0, 0})
+  local rq = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.why == 'manager' then rq[#rq + 1] = e end end
+  T.eq(#rq, 1)
+  T.eq(rq[1].d.types, {'Carpenters'})
+end)
+
 T.done()

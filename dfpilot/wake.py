@@ -342,7 +342,7 @@ def _prio(t: str) -> int:
     return PRIO.index(t) if t in PRIO else len(PRIO)
 
 
-def next_hint(etype: str, e: dict) -> str:
+def next_hint(etype: str, e: dict, save_dir=None) -> str:
     """The wake line's `next:` for an event: NEXT[type]; a SIEGE_UNREADY whose audit fails name a wall (Run 10) gets
     the seal that builds it."""
     d = e.get("d") if isinstance(e.get("d"), dict) else {}
@@ -360,6 +360,8 @@ def next_hint(etype: str, e: dict) -> str:
         return MANAGER_HINT
     if etype == "DECISION_NEEDED" and d.get("id") == "manager_stuck":
         return manager_stuck_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "locked_out":
+        return locked_out_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "lockdown_long":
         return lockdown_long_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "bridge_rebuild":
@@ -376,7 +378,7 @@ def next_hint(etype: str, e: dict) -> str:
         return seal_stalled_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline", "no_water",
                                                                          "thirst_unit") and d.get("cmds"):
-        return food_hint(d)
+        return food_hint(d, save_dir)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)
     if etype == "PAUSED_BY_DF" and d.get("deny"):
@@ -415,19 +417,48 @@ def sortie_hint(d: dict) -> str:
             "dfllm status shows the cause")
 
 
-def food_hint(d: dict) -> str:
+FARM_CMD = re.compile(r'"tpl":\s*"farms"')
+SURFACE_FARM_CMD = re.compile(r'"surface":\s*1')
+TRADE_FOOD_CMD = """dfllm cmd trade.want '{"add":["food","seeds"]}'"""
+
+
+def workable_food_cmds(d: dict, save_dir=None) -> tuple[list[str], list[str]]:
+    """BUG-459 (Run 16d Orbblock y377: the famine decision offered `bp.place farms surface=1` with no second farm site, butcher.mark 'no
+    animal to mark', fishing on frozen water, cooking with 156 inedible leaves): only commands that can work now. The kernel filters
+    what it knows (butcher.mark only while an animal can be marked); here the farm command is dropped when the newest sites snapshot
+    has no farm site (plan.farm_site, the surface plots included), and a decision left with no command gets trade.want food, seeds
+    (the caravans bring what the list names; always valid). Returns (cmds, dropped: why-lines)."""
+    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    dropped: list[str] = []
+    if save_dir is not None and any(FARM_CMD.search(c) for c in cmds):
+        try:
+            from .plan import farm_site
+            site = farm_site(save_dir, urgent=True)
+        except Exception:                               # noqa: BLE001 - no bp package / snapshot: the command stays
+            site = None
+        if site == "none":
+            keep = [c for c in cmds if not FARM_CMD.search(c)]
+            dropped.append("bp.place farms: no farm site on the newest sites snapshot (bp sites farms surface=1 finds none)")
+            cmds = keep
+    if not cmds or not any("trade.want" in c for c in cmds):
+        cmds = cmds + [TRADE_FOOD_CMD]
+    return cmds, dropped
+
+
+def food_hint(d: dict, save_dir=None) -> str:
     """BUG-340 (Run 15c/15d: the famine options `gather` and `trade.want food` could not be sent): food_low/famine carry
     d.cmds, the command lines of the options (in d.opts order); what the kernel does itself is d.auto (caravans asked for
     food and seeds, gatherers, the fishery request). The wake line is short (WAKE_TOKENS): the first command in full, the
     rest by name; `dfllm events --cls A` shows every line of d.cmds."""
-    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    cmds, dropped = workable_food_cmds(d, save_dir)
     if not cmds:
         return NEXT["DECISION_NEEDED"]
     auto = ", ".join(str(a) for a in d.get("auto") or [])
     head = f"the kernel already: {auto}; " if auto else ""
     opts = [str(o) for o in d.get("opts") or []]
-    more = f"; also {', '.join(opts[1:len(cmds)])} (d.cmds: dfllm events --cls A)" if len(cmds) > 1 else ""
-    return f"{head}tell Gordon, send the option he picks as d.cmds has it: {cmds[0]}{more}"
+    more = f"; also {', '.join(opts[1:len(cmds)])} (d.cmds: dfllm events --cls A)" if len(cmds) > 1 and opts else ""
+    gone = f" [not offered: {dropped[0]}]" if dropped else ""
+    return f"{head}tell Gordon, send the option he picks as d.cmds has it: {cmds[0]}{more}{gone}"
 
 
 def lone_hint(d: dict) -> str:
@@ -456,11 +487,30 @@ def seal_stalled_hint(d: dict) -> str:
               f"{plan_mod.PERIMETER_WAIVE_D} d, BUG-349)")
 
 
+def locked_out_hint(d: dict) -> str:
+    """BUG-458 (Run 16d Orbblock y376-y377: walls the kernel put up where the doors stayed unbuilt shut the only surface farm, the manager
+    and the broker outside, 23 starved): citizens (d.units) and places (d.places) stand off the main walk group beside the kernel's wall
+    (d.at). d.cmd = bp.cancel reopen (quickfort undo of our wall only); then a door goes there (the kernel adds the workshop task)."""
+    cmd = d.get("cmd")
+    return (f"act now: our wall at {', '.join(str(a) for a in (d.get('at') or [])[:4])} shuts {d.get('n', '?')} citizens "
+            + (f"and {', '.join(d['places'][:3])} " if d.get("places") else "")
+            + "off the fort (they starve outside)"
+            + (f"; take the wall down: {cmd}" if cmd else "")
+            + "; then dfllm cmd bp.place seal at=last (a door, made at the workshop; no wall again while they are out)")
+
+
 def manager_stuck_hint(d: dict) -> str:
     """BUG-450 (Run 16a i1 y386: 35 orders unvalidated for 149 days with an appointed manager and a complete office): the manager
     holds the office and the kernel finds nothing wrong; d.cmds look at him, the orders and the offices. zone.place type=office works in
     a siege too (a second office zone for him over a chair and a table)."""
     cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    if d.get("out") is not None:
+        # BUG-458 (Run 16d Orbblock y377: the seal's walls left the manager outside, 'MANAGER has no vacant assignment', 145 days):
+        # he stands off the citizens' walk group; after economy.OUT_DAYS days appoint replace gives the post to a citizen who is inside
+        rep = d.get("replace")
+        return (f"tell Gordon: the manager is OUTSIDE the fort for {d.get('out')} days ({d.get('n', '?')} orders unvalidated: nothing is brewed or cooked)"
+                + (f"; fix (a reachable citizen takes the post): {rep}" if rep else f"; look: {cmds[0]}" if cmds else "")
+                + "; also take the walls that shut him out down (a locked_out question names them) or build the door")
     look = f"; look: {cmds[0]}" + (f" ; {cmds[1]}" if len(cmds) > 1 else "") if cmds else ""
     return ("tell Gordon: the manager validates nothing for "
             f"{d.get('days', '?')} days ({d.get('n', '?')} orders: brewing and cooking stop){look}; the kernel adds the office's chair and "
@@ -612,7 +662,7 @@ def show_hint(burst: dict[str, dict], state: dict | None) -> str:
 
 
 def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, auto: bool = True,
-              review: str = "") -> str:
+              review: str = "", save_dir=None) -> str:
     """'WAKE y3 sum d20 PEACE | SIEGE_END: msg | GATE_FAIL x2: msg | next: ...' within WAKE_TOKENS. DECISIONS 2: with
     follow --no-auto (auto False) and ways in without door or bridge, every wake line says 'auto-seal off, N openings'.
     FR-86: `review` (plan.review_note: PLAN STALE, the ERROR fixes of this year's draft) rides on the YEAR_REVIEW item."""
@@ -621,7 +671,7 @@ def wake_line(burst: dict[str, dict], state: dict | None, held_s: float = 0, aut
     head = f"WAKE {when} {(state or {}).get('mode', '?')}"
     types = sorted(burst, key=_prio)
     ns = [p["n0"] for p in burst.values() if isinstance(p.get("n0"), int)]
-    hint = next_hint(types[0], burst[types[0]]["e"])
+    hint = next_hint(types[0], burst[types[0]]["e"], save_dir)
     openings = ((state or {}).get("ready") or {}).get("open")
     if not auto and isinstance(openings, int) and openings > 0:     # the follow process places nothing: say so every time
         head += f" | AUTO-SEAL OFF, {openings} opening{'s' if openings != 1 else ''} (follow --no-auto)"
@@ -804,7 +854,7 @@ class Follower:
         if burst:
             state = files.read_state(self.dir)
             review = plan_mod.review_note(self.dir, state) if "YEAR_REVIEW" in burst else ""     # FR-86
-            line = wake_line(burst, state, auto=self.auto, review=review)
+            line = wake_line(burst, state, auto=self.auto, review=review, save_dir=self.dir)
             self.out(line)
             printed.append(line)
             files.log_cli(self.dir, "follow", "wake", sorted(burst), line)
@@ -1416,7 +1466,7 @@ class Follower:
         from .cmd import BpError
         st = files.read_state(self.dir) or {}
         first = None
-        for p in farm_tries(args.get("p") or {}, st.get("mode")):
+        for p in farm_tries(args.get("p") or {}, st.get("mode"), urgent=food_urgent(st)):
             try:
                 cid = self._send("bp.place", {**args, "p": p}, "farms", now, snap=snap)
             except BpError as e:
@@ -1445,7 +1495,7 @@ class Follower:
         last = self.jobs.get("waive")
         if isinstance(last, dict) and now - (last.get("since") or 0) < WAIVE_COOLDOWN_S:
             return
-        if farm_site(self.dir) != "none":
+        if farm_site(self.dir, urgent=food_urgent(st)) != "none":
             return
         self.jobs["waive"] = {"since": now}
         try:
@@ -1471,16 +1521,24 @@ def _surface_core_on() -> bool:
     return surface_core_on()
 
 
-def farm_tries(params: dict, mode: str | None) -> list[dict]:
+def food_urgent(st: dict | None) -> bool:
+    """BUG-460: the food days are below plan.FOOD_DRAFT_D (60): a surface farm is tried although plan.surface_core is off."""
+    from .plan import FOOD_DRAFT_D
+    fd = (((st or {}).get("stock") or {}).get("food_d"))
+    return isinstance(fd, int) and not isinstance(fd, bool) and fd < FOOD_DRAFT_D
+
+
+def farm_tries(params: dict, mode: str | None, urgent: bool = False) -> list[dict]:
     """BUG-340: the farms params follow tries in order: the request's (a farms room at its plots), the same room with fewer
     plots (plots - 1 .. 1), and in PEACE (BUG-302: builders on the surface only then) a surface farm p.surface = 1 at the
-    request's plots. A surface request stays as it is (cmd.place falls back to fewer plots, BUG-316)."""
+    request's plots. A surface request stays as it is (cmd.place falls back to fewer plots, BUG-316). BUG-460: `urgent` (food
+    below plan.FOOD_DRAFT_D) tries the surface farm with plan.surface_core off too."""
     p = dict(params or {})
     if p.get("surface"):
         return [p]
     n = p.get("plots") if isinstance(p.get("plots"), int) and not isinstance(p.get("plots"), bool) else 2
     out = [p] + [{**p, "plots": k} for k in range(n - 1, 0, -1)]
-    if mode == "PEACE" and _surface_core_on():          # BUG-413: surface farm plots only when plan.surface_core allows them
+    if mode == "PEACE" and (urgent or _surface_core_on()):   # BUG-413: surface farm plots only when plan.surface_core allows them
         out.append({**p, "plots": n, "surface": 1})
     return out
 

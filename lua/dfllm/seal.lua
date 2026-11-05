@@ -4238,6 +4238,177 @@ function M.opening_ways(K, x, y, z)
   return r
 end
 
+-- BUG-458 (Run 16d Orbblock y376-y377: the seal's door spots became walls, the only surface farm, the manager and the broker
+-- stayed outside, no order validated for 145-234 days, 23 starved): the places a citizen needs that must stay reachable
+-- from the citizens' main walk group when a closer goes up. {kind, x, y, z, id, keys = {tile keys that count as reached}}:
+-- every citizen on the main group (his own tile), the built farm plots, wells, trade depots, workshops, furnaces and the
+-- office zones (the tiles of the building and the eight round its corner tile on its level; a building is no walkable tile)
+function M.reach_assets(K, main)
+  local out = {}
+  local function add(kind, x, y, z, id, wide, b)
+    if not (int(x) and int(y) and int(z)) then return end
+    local keys = {}
+    if wide then
+      local x2, y2 = int(b and b.x2) or x, int(b and b.y2) or y
+      for yy = y - 1, y2 + 1 do for xx = x - 1, x2 + 1 do keys[#keys + 1] = key3(xx, yy, z) end end
+    else keys[1] = key3(x, y, z) end
+    out[#out + 1] = {kind = kind, x = x, y = y, z = z, id = id, keys = keys}
+  end
+  for _, c in ipairs(citizens(K)) do
+    if c.g == main then add('citizen', c.x, c.y, c.z, c.id, false) end
+  end
+  for _, e in ipairs({{'FARM_PLOT', 'farm'}, {'WELL', 'well'}, {'TRADE_DEPOT', 'depot'}, {'WORKSHOP_ANY', 'workshop'},
+                      {'FURNACE_ANY', 'furnace'}}) do
+    local v = vec('buildings', e[1])
+    for i = 0, vlen(v) - 1 do
+      local b = v[i]
+      if #out >= 2000 then break end
+      if b and built(b) and b.z then add(e[2], b.x1 or b.centerx, b.y1 or b.centery, b.z, b.id, true, b) end
+    end
+  end
+  pcall(function()
+    local ot = df.civzone_type and df.civzone_type.Office
+    for _, z in ipairs(df.global.world.buildings.other.ANY_ZONE) do
+      if ot ~= nil and z.type == ot and z.x1 and z.z then add('office', z.x1, z.y1, z.z, z.id, true, z) end
+    end
+  end)
+  return out
+end
+
+-- BUG-458 (public, runner's wall fallback and its decision): would walls on `tiles` ({{x, y, z}}) cut a citizen or a place
+-- the citizens need off the main walk group? A flood over the revealed walkable tiles of the main group from a citizen,
+-- the tiles blocked, until every asset (M.reach_assets) that stands on the group now is met or bfs_max tiles are visited.
+-- A place met by no tile is `cut`. {known = false, why} without citizens or tiles; else {known = true, n (assets cut),
+-- cuts = {{kind, x, y, z, id}} (at most 8), total (assets on the main group now), visited, partial (the flood ran out of
+-- tiles with places left: nothing is proven)}. Read-only, never yields; a fault answers known = false.
+function M.wall_cuts(K, tiles)
+  if not mem or type(tiles) ~= 'table' or #tiles == 0 then return {known = false, why = 'no tile'} end
+  local left = mem.left
+  mem.left = math.huge
+  local ok, r = pcall(function()
+    local cits = citizens(K)
+    local _, main = group_counts(cits)
+    if not main then return {known = false, why = 'no citizen on a walk group'} end
+    local blocked = {}
+    for _, t in ipairs(tiles) do
+      if int(t[1]) and int(t[2]) and int(t[3]) then blocked[key3(t[1], t[2], t[3])] = true end
+    end
+    local live, want = {}, {}
+    for _, a in ipairs(M.reach_assets(K, main)) do
+      local alive = false
+      for _, k in ipairs(a.keys) do
+        local x, y, z = dec3(k)
+        if grp(x, y, z) == main then alive = true; break end
+      end
+      if alive then
+        live[#live + 1] = a
+        for _, k in ipairs(a.keys) do
+          want[k] = want[k] or {}
+          want[k][#want[k] + 1] = a
+        end
+      end
+    end
+    local from
+    for _, c in ipairs(cits) do
+      if c.g == main and not blocked[key3(c.x, c.y, c.z)] then from = c; break end
+    end
+    if not from then return {known = false, why = 'every citizen stands on a tile to be closed'} end
+    local memo, seen, q, head, visited, todo, met = {}, {}, {}, 1, 0, #live, {}
+    local function walk(k)
+      local m = memo[k]
+      if m ~= nil then return m end
+      m = false
+      if not blocked[k] then
+        local x, y, z = dec3(k)
+        m = grp(x, y, z) == main
+      end
+      memo[k] = m
+      return m
+    end
+    local nb = {}
+    local sk = key3(from.x, from.y, from.z)
+    seen[sk], q[1] = true, sk
+    local partial = false
+    while head <= #q and todo > 0 do
+      if visited >= CFG.bfs_max then partial = true; break end
+      local k = q[head]
+      head, visited = head + 1, visited + 1
+      for _, a in ipairs(want[k] or {}) do
+        if not met[a] then met[a] = true; todo = todo - 1 end
+      end
+      local x, y, z = dec3(k)
+      local n = steps(x, y, z, nb, nil)
+      for i = 1, n do
+        local nk = nb[i]
+        local go
+        if not seen[nk] then
+          if walk(nk) then go = nk
+          elseif i <= 8 and not blocked[nk] and ramp_top(nk) and walk(nk - 16777216) then go = nk - 16777216 end
+        end
+        if go and not seen[go] then seen[go] = true; q[#q + 1] = go end
+      end
+    end
+    local cuts, ncut = {}, 0
+    for _, a in ipairs(live) do
+      if not met[a] then
+        ncut = ncut + 1
+        if #cuts < 8 then cuts[#cuts + 1] = {kind = a.kind, x = a.x, y = a.y, z = a.z, id = a.id} end
+      end
+    end
+    return {known = true, n = ncut, cuts = cuts, total = #live, visited = visited, partial = partial}
+  end)
+  mem.left = left
+  if not ok then return {known = false, why = trunc(r, 80)} end
+  return r
+end
+
+-- BUG-458 (public, the runner's LOCKED_OUT scan): citizens and places off the main walk group right beside a closer of ours
+-- (`tiles`, the walls the runner put up where a door stayed unbuilt): {known, n (citizens outside), cits = {{id, x, y, z}}
+-- (at most 8), places = {{kind, x, y, z}} (at most 8), at = {'x,y,z'} (the tiles of `tiles` with the main group and a group
+-- that holds a citizen or a place beside them)}. Read-only, one frame.
+function M.locked_out(K, tiles)
+  if not mem or type(tiles) ~= 'table' or #tiles == 0 then return {known = false} end
+  local left = mem.left
+  mem.left = math.huge
+  local ok, r = pcall(function()
+    local cits = citizens(K)
+    local by, main = group_counts(cits)
+    if not main then return {known = false} end
+    local has, outc, noutc = {}, {}, 0
+    for _, c in ipairs(cits) do
+      if c.g ~= main then
+        has[c.g], noutc = true, noutc + 1
+        if #outc < 8 then outc[#outc + 1] = {id = c.id, x = c.x, y = c.y, z = c.z} end
+      end
+    end
+    local places = {}
+    for _, a in ipairs(M.reach_assets(K, -1)) do
+      if a.kind ~= 'citizen' then
+        local g
+        for _, k in ipairs(a.keys) do
+          local x, y, z = dec3(k)
+          local h = grp(x, y, z)
+          if h and h ~= 0 then g = h; break end
+        end
+        if g and g ~= main then
+          has[g] = true
+          if #places < 8 then places[#places + 1] = {kind = a.kind, x = a.x, y = a.y, z = a.z} end
+        end
+      end
+    end
+    local at = {}
+    for _, t in ipairs(tiles) do
+      if int(t[1]) and int(t[2]) and int(t[3]) and separates(t[1], t[2], t[3], main, has) then
+        at[#at + 1] = string.format('%d,%d,%d', t[1], t[2], t[3])
+      end
+    end
+    return {known = true, n = noutc, cits = outc, places = places, at = at}
+  end)
+  mem.left = left
+  if not ok then return {known = false, why = trunc(r, 80)} end
+  return r
+end
+
 -- public (reflex, the lockdown's doors): the citizens (soldiers excluded, as for the gates) on the outside side of
 -- each door in `ids`: on a revealed open-sky tile of the door's walk group, on the porch of an opening the door closes
 -- (the last entrance check), or in the doorway. A door is forbidden only once nobody is left there, so nobody is

@@ -2878,9 +2878,30 @@ M.verbs.appoint = function(K, args, cmd)
   if not M.SQUAD_POSTS[args.code] and (u.military.squad_id or -1) >= 0 then
     return false, string.format('unit %d is a squad member: a soldier on duty is no candidate for %s', args.unit, args.code)
   end
-  local ok, res = K.act.appoint(args.code, args.unit)
-  if not ok then return false, 'appoint: ' .. tostring(res) end
   local p = pstate(K)
+  local replace = nil
+  if args.replace ~= nil then
+    -- BUG-458: the post is taken from a holder who stands outside the fort (days counted by out_watch), not from a reachable one
+    local okr = M.replace_ok(K, p, args.code)
+    if okr ~= true then return false, 'appoint replace refused: ' .. okr end
+    local holder = M.office_holder(K, args.code)
+    if holder and holder.id == args.unit then return false, 'appoint replace refused: unit ' .. args.unit .. ' is the holder' end
+    replace = true
+  end
+  local ok, res = K.act.appoint(args.code, args.unit, replace)
+  if not ok then
+    local why = tostring(res)
+    if why:find('no vacant assignment', 1, true) and M.OUT_CODES[args.code] then
+      local d, o = M.out_days(K, p, args.code)
+      why = why .. string.format('; %s is alive%s', args.code, o and string.format(' and has stood outside the fort for %d days ' ..
+                                 '(appoint with replace:true after %d days)', d, M.OUT_DAYS) or ' and among the citizens (no replacement)')
+    end
+    return false, 'appoint: ' .. why
+  end
+  if replace then
+    p.out = nil
+    K.log('warn', '%s taken from the holder outside the fort: unit %d appointed (appoint replace)', args.code, args.unit)
+  end
   if type(p.vac) == 'table' then p.vac[args.code] = nil end
   if st.offices then st.offices[args.code] = nil end
   K.log('info', '%s appointed by verb: unit %d (assignment %s)', args.code, args.unit, tostring(res))
@@ -2936,6 +2957,8 @@ local function validation_watch(K, p, c)
     local oko, err = pcall(M.office_check, K, c, p)
     if not oko then K.log('warn', 'office check: %s', tostring(err)) end
   end
+  local ow, owe = pcall(M.out_watch, K, p)             -- BUG-458: the holders of MANAGER / BROKER outside the walk group
+  if not ow then K.log('warn', 'office holders out: %s', tostring(owe)) end
   if M.manager_watch(K, p, c) then p.uv, st.unval = nil, nil      -- Run 11: injured, in a mood, gone
   else M.unval_watch(K, p, c) end
   local okb, err = pcall(M.mgr_bypass, K, p, c)        -- BUG-231: the items the validation holds back, as workshop tasks
@@ -3127,6 +3150,85 @@ function M.unval_why(K)
   return who .. ' validates nothing (his office has a chair and a table)', ': inspect the manager (job, path to the office)'
 end
 
+-- BUG-458 (Run 16d Orbblock y377: the seal's walls left the manager (and the broker) outside, `appoint code=MANAGER` said 'MANAGER
+-- has no vacant assignment', nothing was validated for 145 days): once a day the holders of MANAGER and BROKER are read; one who
+-- stands on a walk group that is none of the citizens' home groups (snapshot.far) keeps p.out[code] = {since, unit, x, y, z};
+-- standing among the citizens again clears it. appoint {replace = true} takes the post from a holder who has been outside for
+-- M.OUT_DAYS days (M.replace_ok) and gives it to a citizen who is not; manager_stuck names the case and the command.
+M.OUT_DAYS = 7
+M.OUT_CODES = {MANAGER = true, BROKER = true}
+function M.office_holder(K, code)
+  local ent = df.global.plotinfo.main.fortress_entity
+  local pid
+  for _, ps in ipairs(ent.positions.own) do if ps.code == code and ps.flags.ACTIVE then pid = ps.id end end
+  if not pid then return nil end
+  local hf
+  for _, a in ipairs(ent.positions.assignments) do
+    if a.position_id == pid and (a.histfig or -1) >= 0 then hf = a.histfig end
+  end
+  if not hf then return nil end
+  local cu = K.census.u
+  for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u and u.hist_figure_id == hf then return u, hf end
+  end
+  local h = df.historical_figure.find(hf)
+  local u = h and df.unit.find(h.unit_id) or nil
+  if u and not dfhack.units.isDead(u) then return u, hf end
+end
+function M.out_watch(K, p)
+  p.out = type(p.out) == 'table' and p.out or {}
+  local now = K.now().tick
+  for code in pairs(M.OUT_CODES) do
+    local u = M.office_holder(K, code)
+    local x, y, z
+    if u then x, y, z = dfhack.units.getPosition(u) end
+    local okf, far = false, false
+    if x then okf, far = K.call('snapshot', 'far', x, y, z) end
+    if x and okf and far == true then
+      local o = type(p.out[code]) == 'table' and p.out[code] or {since = now}
+      o.unit, o.x, o.y, o.z = u.id, x, y, z
+      p.out[code] = o
+    else
+      p.out[code] = nil
+    end
+  end
+  if next(p.out) == nil then p.out = nil end
+end
+-- the days the holder of `code` has stood outside (0 = not outside, or not known), and the record
+function M.out_days(K, p, code)
+  local o = type(p.out) == 'table' and p.out[code] or nil
+  if type(o) ~= 'table' then return 0, nil end
+  return math.max(0, (K.now().tick - (math.tointeger(o.since) or K.now().tick)) // DAY), o
+end
+-- true when `code`'s holder may be replaced (outside for M.OUT_DAYS days), else the reason it may not
+function M.replace_ok(K, p, code)
+  if not M.OUT_CODES[code] then return 'only MANAGER and BROKER can be replaced' end
+  local d, o = M.out_days(K, p, code)
+  if not o then return code .. ' lives and stands among the citizens (or his place is not known): nobody is replaced' end
+  if d < M.OUT_DAYS then
+    return string.format('%s has stood outside for %d of %d days', code, d, M.OUT_DAYS)
+  end
+  return true
+end
+-- a citizen who could take the post: adult, no squad, not outside (snapshot.far), not `skip`; the best ORGANIZATION skill
+function M.reachable_candidate(K, skip)
+  local best, bscore
+  for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do
+    local v = df.unit.find(id)
+    if v and id ~= skip and M.citizen(v) and dfhack.units.isAdult(v) and (v.military.squad_id or -1) < 0 then
+      local x, y, z = dfhack.units.getPosition(v)
+      local okf, far = false, false
+      if x then okf, far = K.call('snapshot', 'far', x, y, z) end
+      if x and not (okf and far == true) then
+        local sc = skill_score(v, {'ORGANIZATION'})
+        if not bscore or sc > bscore then best, bscore = id, sc end
+      end
+    end
+  end
+  return best
+end
+
 -- BUG-450 (Run 16a i1 Syrupobeyed y386: the manager validated nothing for 149 days, 35 orders, brewing and cooking stopped, drink 291 -> 123 days;
 -- `inspect offices` said 'none vacant', his office had a chair and a table, zone.place was locked in SIEGE): orders unvalidated for
 -- orders.mgr_stuck_days with a manager who is able (manager_watch said nothing) and a complete office (st.office nil) are
@@ -3135,7 +3237,9 @@ end
 -- type=office is allowed in SIEGE (a second office zone for him). The kernel replaces nobody: the nobles screen's removal is the player's.
 function M.mgr_stuck(K, p, c, days, n, why)
   local lim = math.tointeger(((c or {}).orders or M.DEFAULTS.orders).mgr_stuck_days) or 14
-  if lim <= 0 or days < lim or st.office then return end
+  local outd, outrec = M.out_days(K, p, 'MANAGER')                  -- BUG-458: he stands outside the fort
+  if lim <= 0 or st.office then return end
+  if days < lim and not (outrec and outd >= M.OUT_DAYS) then return end
   local mg = M.manager_state(K)
   if type(mg) ~= 'table' or not mg.unit or mg.why then return end
   local now = K.now()
@@ -3158,20 +3262,35 @@ function M.mgr_stuck(K, p, c, days, n, why)
   end)
   if okr and math.tointeger(req) and req > 0 then facts[#facts + 1] = 'DF asks the office for room value ' .. req end
   local best, bscore
-  for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do
-    local v = df.unit.find(id)
-    if v and id ~= mg.unit and M.citizen(v) and dfhack.units.isAdult(v) and (v.military.squad_id or -1) < 0 then
-      local sc = skill_score(v, {'ORGANIZATION'})
-      if not bscore or sc > bscore then best, bscore = id, sc end
+  if outrec then best = M.reachable_candidate(K, mg.unit)             -- BUG-458: one who is not outside himself
+  else
+    for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do
+      local v = df.unit.find(id)
+      if v and id ~= mg.unit and M.citizen(v) and dfhack.units.isAdult(v) and (v.military.squad_id or -1) < 0 then
+        local sc = skill_score(v, {'ORGANIZATION'})
+        if not bscore or sc > bscore then best, bscore = id, sc end
+      end
     end
   end
   local q = string.format('manager %s validates nothing for %d days (%d orders, brews %s) with a complete office: %s%s', mg.name, days, n,
                           (st.brew or {}).unval and tostring(st.brew.unval) or '?', table.concat(facts, ', '),
                           best and ('; acting manager candidate unit ' .. best) or '')
+  if outrec then                                    -- BUG-458: the case in one line (d.q is 200 bytes at most)
+    q = string.format('manager %s OUTSIDE the fort for %d days (off the main walk group), %d orders unvalidated%s',
+                      mg.name, outd, n, best and ('; reachable candidate unit ' .. best) or '')
+  end
   K.log('warn', '%s', q)
   local cmds = {'dfllm cmd inspect what=unit key=' .. mg.unit, 'dfllm cmd inspect what=orders', 'dfllm cmd inspect what=offices'}
-  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'manager_stuck', q = q:sub(1, 400), n = n, days = days,
-         units = {mg.unit}, cmds = cmds})
+  local replace
+  if outrec and outd >= M.OUT_DAYS and best then
+    -- BUG-458: outside for days: a reachable citizen takes the post (appoint replace), the first command
+    replace = string.format('dfllm cmd appoint \'{"code":"MANAGER","unit":%d,"replace":true}\'', best)
+    table.insert(cmds, 1, replace)
+  elseif outrec then
+    table.insert(cmds, 1, 'dfllm cmd inspect what=reach')
+  end
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'manager_stuck', q = q:sub(1, outrec and 200 or 400), n = n, days = days,
+         units = {mg.unit}, cmds = cmds, out = outrec and outd or nil, replace = replace})
   K.persist.touch('m.economy')
 end
 
@@ -6686,6 +6805,42 @@ function M.mgr_bypass(K, p, c)
   if noshop then M.bypass_shop(K, p, noshop, what) end
 end
 
+-- BUG-458 (Run 16d Orbblock y375-y376: the seal's doors 'wait for door x1 (0 free, 5 ordered)', the orders 'no job for 12 days', and
+-- the fallback walled the door spots): the runner holds a wall that would cut citizens off (seal.wall_cuts) and asks for the
+-- door itself. n doors as workshop tasks at a built Carpenter's (wood) or Mason's (rock), whatever the manager does (a task
+-- needs no validation), when no door item stands free and fewer than n door tasks are queued; no shop: the workshop request of
+-- the bypass. Returns the tasks added (0 = none needed or none possible)
+function M.seal_doors(K, n)
+  n = math.tointeger(n) or 1
+  local e = M.BYPASS.door
+  local inv = K.census.i or {}
+  if (math.tointeger(inv[e.inv]) or 0) >= n then return 0 end
+  local c, r = M.conf(K), M.view_run(K)
+  local shops, queued = M.bypass_shops()
+  local jt = df.job_type[e.job]
+  local k = n - (jt ~= nil and (queued[jt] or 0) or 0)
+  if k <= 0 then return 0 end
+  local wood, rock = M.wood_left(c, r, true), stone_free(c, r)
+  local added, noshop = 0, nil
+  for _ = 1, k do
+    local mat = (#shops.Carpenters > 0 and wood > 0) and 'wood' or (#shops.Masons > 0 and rock > 0) and 'rock' or nil
+    if not mat then
+      if #shops.Carpenters == 0 and (wood > 0 or rock <= 0) then noshop = 'Carpenters'
+      elseif #shops.Masons == 0 and rock > 0 then noshop = 'Masons' end
+      break
+    end
+    local list = mat == 'wood' and shops.Carpenters or shops.Masons
+    table.sort(list, function(a, b) return #(a.jobs or {}) < #(b.jobs or {}) end)
+    if not K.act.ws_task(list[1].id, e.job, mat) then break end
+    if mat == 'wood' then wood = wood - 1 else rock = rock - 1 end
+    added = added + 1
+    K.log('warn', 'seal door: workshop task ConstructDoor (%s) at %d (the seal holds a wall back: it would cut citizens off)', mat,
+          list[1].id)
+  end
+  if noshop then M.bypass_shop(K, pstate(K), noshop, 'door') end
+  return added
+end
+
 -- no Carpenter's (or Mason's) workshop for the bypass: PROJECT_REQUEST workshops why=manager types {t}, at most every
 -- 7 days, never while a workshops project builds one (M.ws_queued) or runner's mandatory request asks for it
 function M.bypass_shop(K, p, t, what)
@@ -8540,8 +8695,13 @@ end
 -- verb keeps breeding pairs, pets and war animals), popcap.lower to the citizens now until food recovers
 function M.food_more(K, r)
   local out = {}
+  -- BUG-459 (Run 16d Orbblock y377: famine 7 -> 4 -> 1 day, the decision offered butcher.mark 'no animal to mark (7 tame ... stay)'):
+  -- the options are the ones that can work now. trade.want food and seeds always can (the caravans bring what the list names; the
+  -- kernel asks for them itself, the list is the player's word); butcher.mark only while the verb would mark an animal (pets, war and
+  -- hunting animals, marked ones and one breeding pair per race stay)
+  out[#out + 1] = {'trade.want', [[dfllm cmd trade.want '{"add":["food","seeds"]}']], true}
   local ca = K.census.a
-  if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 then
+  if type(ca) == 'table' and type(ca.list) == 'table' and #M.slaughter_pick(ca.list, {keep_f = 1, keep_m = 1, max = 1}) > 0 then
     out[#out + 1] = {'butcher.mark', [[dfllm cmd butcher.mark '{"n":2}']]}
   end
   local cit = math.tointeger(r and r.cit) or 0
@@ -8590,7 +8750,7 @@ M.FOOD_CMD = {
   farms = [[dfllm cmd bp.place '{"tpl":"farms","site":"S1","p":{"surface":1}}']],
   farms_room = [[dfllm cmd bp.place '{"tpl":"farms","site":"S1"}']],         -- outside PEACE: an underground farm room
 }
-M.FOOD_CMDS_BYTES = 420                         -- d stays under kern's 1,024 bytes with q, block, opts and auto (JSON escapes)
+M.FOOD_CMDS_BYTES = 480                         -- d stays under kern's 1,024 bytes with q, block, opts and auto (JSON escapes); BUG-459: +trade.want
 function M.food_q(fd, r, inv, bl, auto, more)
   local parts, opts, au, cmds, bytes = {}, {}, {}, {}, 0
   local function offer(o, cmd)
@@ -8602,7 +8762,10 @@ function M.food_q(fd, r, inv, bl, auto, more)
     if M.FOOD_OPTS[b[1]] then offer(M.FOOD_OPTS[b[1]], b[3]) end
   end
   local names = {}
-  for _, o in ipairs(more or {}) do names[#names + 1] = o[1]; offer(o[1], o[2]) end
+  for _, o in ipairs(more or {}) do
+    if not o[3] then names[#names + 1] = o[1] end        -- BUG-459: a quiet option (trade.want) is in `auto` already
+    offer(o[1], o[2])
+  end
   for _, a in ipairs(auto or {}) do au[#au + 1] = a[2]:sub(1, 44) end
   local ap = #au > 0 and ('; auto: ' .. table.concat(au, ', ')) or ''
   local q = string.format('food %d d (%d cit, %s%d meals)', fd, r and r.cit or 0,

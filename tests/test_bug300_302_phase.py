@@ -96,17 +96,17 @@ def test_follow_waives_farms_when_no_site_exists_at_all(save, monkeypatch):
     f.dir = save
     sent = []
     monkeypatch.setattr(f, "_send", lambda verb, args, what, now, **kw: sent.append((verb, args)) or "c1")
-    monkeypatch.setattr(plan, "farm_site", lambda d: "none")
+    monkeypatch.setattr(plan, "farm_site", lambda d, urgent=False: "none")
     err = "site S1: only 0 free site(s) for farms (plots 1) on snapshot s1"
     f._waive_farms(err, 1000.0)
     assert sent == [("phase.waive", {"tpl": "farms", "why": "bp sites farms: 0 room and 0 surface sites"})]
     f._waive_farms(err, 1500.0)
     assert len(sent) == 1, "once per WAIVE_COOLDOWN_S"
     f.jobs.clear()
-    monkeypatch.setattr(plan, "farm_site", lambda d: "surface")
+    monkeypatch.setattr(plan, "farm_site", lambda d, urgent=False: "surface")
     f._waive_farms(err, 9000.0)
     assert len(sent) == 1, "a surface site is free: no waiver"
-    monkeypatch.setattr(plan, "farm_site", lambda d: "none")
+    monkeypatch.setattr(plan, "farm_site", lambda d, urgent=False: "none")
     f._waive_farms("site S1: only 0 free site(s) for tombs", 9000.0)
     assert len(sent) == 1
     put_state(save, phase="P1")

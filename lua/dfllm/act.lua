@@ -1545,7 +1545,11 @@ local function impls(state)
   -- the figure gets a position link to the fortress entity (the same records as the expedition leader's,
   -- read live in L1, and hack/scripts/make-monarch.lua for the civ). Candidates as in the screen: an adult
   -- citizen, alive; the position must be offered (flags.ACTIVE: population and market requirements met).
-  function I.appoint(code, unit_id)
+  -- BUG-458 (Run 16d Orbblock y377: 'MANAGER has no vacant assignment' while the manager stood outside the sealed fort and
+  -- validated nothing): `replace` (economy checked that the holder stood off the citizens' walk group for days) takes the
+  -- assignment from its holder: the assignment is vacated (histfig -1) and the position link of the old figure removed, then
+  -- the new figure is seated as for a vacant one
+  function I.appoint(code, unit_id, replace)
     if type(code) ~= 'string' or not code:match('^[A-Z_]+$') then return false, 'bad position code' end
     local ent = fort_entity()
     if not ent then return false, 'no fortress entity' end
@@ -1564,6 +1568,25 @@ local function impls(state)
       if a.position_id == pos.id then
         if a.histfig == hf.id then return true, a.id end
         if a.histfig == -1 and not asg then asg, idx = a, i end
+      end
+    end
+    if not asg and replace == true then
+      for i, a in ipairs(ent.positions.assignments) do
+        if a.position_id == pos.id and a.histfig ~= -1 and a.histfig ~= hf.id then
+          local okv, err = pcall(function()
+            local old = df.historical_figure.find(a.histfig)
+            if old then
+              for j = #old.entity_links - 1, 0, -1 do
+                local l = old.entity_links[j]
+                if l and l.assignment_id == a.id and l.entity_id == ent.id then old.entity_links:erase(j) end
+              end
+            end
+            a.histfig, a.histfig2 = -1, -1
+          end)
+          if not okv then return false, code .. ' could not be taken from its holder: ' .. tostring(err) end
+          asg, idx = a, i
+          break
+        end
       end
     end
     if not asg then return false, code .. ' has no vacant assignment' end
