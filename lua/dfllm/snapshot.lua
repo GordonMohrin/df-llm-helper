@@ -477,26 +477,29 @@ end
 -- there feeds nobody (live L7: 117 of 137 fruit in cut-off caves, 101 "food days", 35 of 42 starving). The
 -- citizens' group is read once per tick; unknown answers false so nothing is under-counted on a fault.
 local home_grp
+-- BUG-416 (Run 16d Mazelanterns y391: '133 logs out of his reach (another walk group)' and 'none reachable' while the fort's
+-- logs lay in the fort): the old test compared the tile's group with the first citizen's, and the first citizen is often a
+-- stranded one (a woodcutter out at the brook) or a different part of the fort. The home groups are now the set of
+-- home_set (the group most citizens stand on plus every one with a fifth of them), read from the citizens' tiles in the same
+-- tick as the tile, so a renumbering between ticks changes nothing.
 function M.far(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return false end
   local now = K.now().tick
   if not home_grp or home_grp.tick ~= now then
-    local g = false
+    local set
     local ok = pcall(function()
-      for _, c in ipairs(dfhack.units.getCitizens(true)) do
-        local cg = dfhack.maps.isValidTilePos(c.pos) and dfhack.maps.getWalkableGroup(c.pos)
-        if cg and cg ~= 0 then g = cg; break end
-      end
+      local probes = M.home_probes()
+      if probes then set = M.home_now(probes) end
     end)
-    home_grp = {tick = now, g = ok and g or false}
+    home_grp = {tick = now, set = ok and set or false}
   end
-  if not home_grp.g then return false end
+  if not home_grp.set then return false end
   local ok, grp = pcall(function()
     local pos = xyz2pos(x, y, z)
     return dfhack.maps.isValidTilePos(pos) and dfhack.maps.getWalkableGroup(pos) or 0
   end)
-  return ok and grp ~= 0 and grp ~= home_grp.g
+  return ok and grp ~= 0 and not home_grp.set[grp]
 end
 
 -- groups(K, pts, near): the walkable group of each point {x, y, z} (economy's inspect workload: which open jobs and idle

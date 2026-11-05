@@ -205,7 +205,7 @@ ERR_EVERY_S = 60                               # stderr 'poll error' at most onc
 # are never held by the hourly limit longer than URGENT_GAME_TICKS of game time (merged first, one per type per
 # URGENT_REPEAT_S); DECISION_NEEDED only for the ids in URGENT_DECISIONS (a fort running out of drink or food, a thirsty one)
 URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
-URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst", "stranded_drink",
+URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst", "stranded_drink", "stranded_food",
                     "mood_deadline", "no_water"}   # BUG-340: famine too; BUG-391; BUG-395: a mood about to fail; BUG-401
 URGENT_GAME_TICKS = schema.TICKS["DAY"]
 HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often

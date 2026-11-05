@@ -532,4 +532,27 @@ T.test('BUG-391: citizens on a cut-off group over the thirst mark, no bridge bri
   T.eq(g2, nil, 'gone with the thirst')
 end)
 
+T.test('BUG-417: citizens on a cut-off group over the hunger mark, no bridge brings food: DECISION_NEEDED stranded_food with ' ..
+       'the commands (once)', function()
+  -- old code: STRANDED 'no rescue (no raised ... bridge leads to food)' and nothing else (Run 16d y389: hunger 72,249 of 75,000)
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  trapped(W, {{11, 10, 20, 0}, {12, 11, 21, 0}})
+  W.unit(11).counters2.hunger_timer, W.unit(12).counters2.hunger_timer = 72000, 70000
+  local n = 0
+  while n < 40 and #evs(W, 'STRANDED') == 0 do run(W, 100); n = n + 1 end
+  local e = evs(W, 'STRANDED')[1]
+  T.ok(e and e.d.phase == 'refused' and e.msg:find('leads to food', 1, true), e and e.msg or 'no STRANDED')
+  local ds = {}
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_food' then ds[#ds + 1] = x end end
+  T.eq(#ds, 1, 'one decision')
+  T.eq({ds[1].cls, ds[1].d.n}, {'A', 2})
+  T.ok(ds[1].d.q:find('hunger 72000', 1, true) and ds[1].d.q:find('10,20,5', 1, true), ds[1].d.q)
+  local cmds = table.concat(ds[1].d.cmds, ' | ')
+  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('bp sites farms surface=1 --near 10,20,5 --within 20', 1, true), cmds)
+  run(W, 1500)
+  local again = 0
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_food' then again = again + 1 end end
+  T.eq(again, 1, 'not again for the same set')
+end)
+
 T.done()
