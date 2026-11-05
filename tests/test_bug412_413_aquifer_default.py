@@ -156,6 +156,13 @@ def test_core_shaft_keeps_off_water_non_rock_unreachable_ground_and_the_aquifer_
     bad = copy.deepcopy(snap)
     bad["rows"][f"z{Z - 3}"] = ["".join(r) for r in rows]
     assert sites.core_shaft(bad, man, anchor, 0, 5)["x"] != 147
+    # BUG-432: a cavern breach recorded inside the aquifer span (live i3: caverns [[50,63,122]] in aquifer z120-127) refuses only
+    # the offsets next to it; far from the column it changes nothing
+    far = {**man, "caverns": [[20, 20, Z - 2]]}
+    assert sites.core_shaft(snap, far, anchor, 0, 5)["x"] == 147
+    hit = {**man, "caverns": [[150, 141, Z - 2]]}
+    with pytest.raises(ValueError, match="cavern/warm tile within"):
+        sites.core_shaft(snap, hit, anchor, 0, 5)
     # a core that would still meet the aquifer is refused with the depth to ask for
     with pytest.raises(ValueError, match="meet the aquifer"):
         sites.core_shaft(snap, man, anchor, 0, 1)

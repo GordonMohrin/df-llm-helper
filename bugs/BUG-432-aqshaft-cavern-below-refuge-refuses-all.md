@@ -19,10 +19,12 @@ but with depth 20 from z127 every one of the 1271 columns "reached" it. `core_sh
 - `shaft_why`: a cavern/warm level refuses a column only within the shaft's own levels and the ONE level right below its bottom (never open into one); deeper ones do not matter. `core_shaft`
   uses the same window.
 - A given `p.depth` is still checked as given.
+- Verifier round: the window was still level-wide (i3: breach (50,63,122) inside the aquifer z120-127, every shaft passes z122). Now local: `CavernPoints` keeps the
+  revealed cavern/warm marks and manifest `caverns` as points; a column is blocked only by one within `AQ_CAV_R` (8) tiles (x/y) on its levels or the one below its bottom
+  (`shaft_why`, `core_shaft`).
 
 ## Tests
-`tests/bp/test_bug432_433_aqshaft_depth.py` (aquifer z5, cavern at z-10: ranks with depth 6; depth 20 refused naming z-10; cavern 1 level below the bottom refused, 2 below fine).
+`tests/bp/test_bug432_433_aqshaft_depth.py` (aquifer z5, cavern at z-10: ranks with depth 6; depth 20 refused naming z-10; cavern 1 level below the bottom refused, 2 below fine; i3 case: a breach at z3 inside the aquifer span refuses only columns within 8 tiles), `tests/test_bug412_413_aquifer_default.py` (core_shaft).
 
 ## Live check
-i3: `dfllm bp sites aqshaft --fresh` ranks columns (`p.depth N`); `plan propose` drafts `aqshaft` (route or `aquifer_late`). Residual: the manifest's recorded cavern breach (50,63,122)
-lies INSIDE the aquifer span; a shaft whose own levels include z122 is still refused (a cavern is level-wide here); if i3 shows that, the breach needs a position-radius rule (open question).
+i3: `dfllm bp sites aqshaft --fresh` ranks columns (`p.depth N`); `plan propose` drafts `aqshaft` (route or `aquifer_late`).

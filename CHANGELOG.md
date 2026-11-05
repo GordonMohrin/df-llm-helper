@@ -3,9 +3,9 @@
 ## aqshaft: a cavern below the refuge level refuses nothing, refusals name level and coordinate, an explicit column is checked (BUG-432, BUG-433, 2026-11-05; offline, live-untested)
 - **Why:** Run 16c i3 Yawninggilt (aquifer z120-127): `bp sites aqshaft` (any depth) refused all 1271 columns for a cavern/warm level, `plan propose` drafted no aqshaft; the fort stayed above the aquifer.
 - **BUG-432:** the default shaft depth (20) ran far below the core's refuge level into a recorded cavern. Without p.depth the ranking goes down to 5 levels under the shallowest known aquifer level
-  (`shaft_depth_auto`, site key `depth`, `site_params` hands it to the emitted shaft, RANK_V 8); a cavern/warm level refuses a column only within the shaft's levels and the one below its bottom (`shaft_why`, `core_shaft` too).
+  (`shaft_depth_auto`, site key `depth`, `site_params` hands it to the emitted shaft, RANK_V 8); a cavern/warm tile or recorded cavern breach refuses a column only within AQ_CAV_R (8) tiles of it, on the shaft's levels and the one below its bottom (`CavernPoints`, `shaft_why`, `core_shaft` too): i3's breach (50,63,z122) inside the aquifer no longer refuses every column.
 - **BUG-433:** the refusal lists the first 3 examples per reason (level / coordinate), the ranking refuses open water within 3 tiles; `bp.place aqshaft` with p.x/p.y/p.top(/depth) is checked by the same rules (`check_column`, `cmd.column_checked`).
-- **Tests:** tests/bp/test_bug432_433_aqshaft_depth.py (7). No contract change. **Live check:** see the two bug files; open question: a breach inside the aquifer span (i3: 50,63,z122) still refuses a shaft that includes z122.
+- **Tests:** tests/bp/test_bug432_433_aqshaft_depth.py (7). No contract change. **Live check:** see the two bug files.
 
 ## The aqshaft for a core that stands, a quarry in a stone and wood famine, stranded food options that work (BUG-429 to BUG-431, 2026-11-05; offline, live-untested)
 - **Why:** Run 16b i2 Glendagger: aquifer z123-129 known, fortcore stage 3 stopped on breach:water three times, `plan propose` never drafted an aqshaft (the player placed one by hand); 0 boulders
