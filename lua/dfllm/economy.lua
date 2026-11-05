@@ -6735,6 +6735,21 @@ function M.mat_for(K, kind, n)
   return M.piece_route(c, r, e, n)
 end
 
+-- BUG-443 (Run 16c i3 Castletongs: an aqshaft ring on a heavy level hung 60 % for a year in very deep soil, 74 of 181 orders stuck,
+-- the mood reserve held the 5 boulders): mat_for answers yes for ONE log or boulder; the ring needs a count. wall_stock(K) =
+-- {have, blocks, rock (free boulders: the moods' floor and ore/flux not counted), logs (above the wood floor), soil (the
+-- stone digs found only soil: the caravans are asked for stone)} or nil before the first census
+function M.wall_stock(K)
+  if not K.census.i then return nil end
+  local c, r = M.conf(K), M.view_run(K)
+  local inv = r.inv
+  local blocks = math.max(0, math.tointeger(inv.blocks_free) or 0)
+  local rock = stone_free(c, r)
+  local logs = math.max(0, (math.tointeger(inv.wood) or 0) - floor_of(c, r.p, r, 'wood'))
+  local rk = st.rock
+  return {have = blocks + rock + logs, blocks = blocks, rock = rock, logs = logs, soil = type(rk) == 'table' and rk.soil == true}
+end
+
 -- the open orders of a piece's job: what they make (n). A rock order the free stone cannot cover with the other rock
 -- orders is re-entered in wood where logs allow (act.order_material; the carpenter is not behind them); without logs
 -- it still counts while stone is free (it queues), else it makes nothing (its "Needs rock" cancel removes it: M.no_rock)

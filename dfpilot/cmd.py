@@ -2155,6 +2155,77 @@ def stone_fall_refusal(save_dir: Path, tpl: str, params: dict | None) -> str:
             "(traps at=ways) stay allowed") if why else ""
 
 
+ORPHAN_AGE_S = 300          # BUG-442: a bp file younger than this may still be on its way to the kernel (bp.place just sent)
+
+
+def no_such_project(reply: dict | None) -> bool:
+    """BUG-442: a bp.cancel / bp.resume reply that says the kernel has no such project ('no project y372s0b0')."""
+    return isinstance(reply, dict) and not reply.get("ok") and "no project " in str(reply.get("msg", ""))
+
+
+def orphan_candidates(save_dir: Path, now: float | None = None, limit: int = 8) -> list[str]:
+    """BUG-442 (Run 16b i2 Roadvises: the dead bp/y372s0b0.json the kernel did not know blocked every new fortcore stage 1 for a
+    year; retire() fired only on an ok bp.cancel): the bp files that MAY be orphans, to be asked of the kernel one by one
+    (`inspect persist key=bp.<id>`): older than ORPHAN_AGE_S, no PROJECT_DONE (a done project's tiles are dug), not a row of the
+    state's project list. At most `limit`, oldest first."""
+    from . import plan as _plan                              # plan imports this module: late, at call time
+    now = time.time() if now is None else now
+    st = files.read_state(Path(save_dir)) or {}
+    rows = {r[0] for r in st.get("proj") or [] if isinstance(r, list) and r and isinstance(r[0], str)}
+    t = st.get("t") if isinstance(st.get("t"), dict) else {}
+    plan = files.read_json(Path(save_dir) / "plan.json")
+    py = plan.get("year") if isinstance(plan, dict) else None
+    out: list[tuple[float, str]] = []
+    done = None
+    for p in bp_files(save_dir):
+        try:
+            age = now - p.stat().st_mtime
+        except OSError:
+            continue
+        if age < ORPHAN_AGE_S or p.stem in rows:
+            continue
+        m = re.fullmatch(r"y(\d+)s(\d)b\d+", p.stem)
+        if m and int(m.group(1)) == py:
+            # a plan build of the applied plan is queued only from its season on (runner.sync_plan): before that no kernel project
+            # is expected; with no clock in the state none is judged
+            ty, ts = t.get("y"), t.get("season")
+            if not (isinstance(ty, int) and isinstance(ts, int)) or (ty, ts) < (py, int(m.group(2))):
+                continue
+        if done is None:
+            done = _plan.done_projects(save_dir)
+        if p.stem not in done:
+            out.append((p.stat().st_mtime, p.stem))
+    return [i for _, i in sorted(out)[:limit]]
+
+
+def kernel_knows(reply: dict | None) -> bool | None:
+    """BUG-442: whether an `inspect persist key=bp.<id> field=tpl` reply says the kernel holds that project's document: True
+    (data.value), False (ok, 'none'), None (no reply, a refusal or any other shape: unknown, nothing is retired)."""
+    if not (isinstance(reply, dict) and reply.get("ok")):
+        return None
+    data = reply.get("data")
+    if isinstance(data, dict) and isinstance(data.get("value"), str) and data["value"]:
+        return True
+    if isinstance(data, dict) and not data and str(reply.get("msg", "")).rstrip().endswith(": none"):
+        return False
+    return None
+
+
+def retire_orphans(save_dir: Path, wait_s: float = 5.0, by: str = "cli") -> list[str]:
+    """BUG-442: ask the kernel about every orphan_candidates() bp file and retire (bp/.cancelled) those it does not know. Used
+    where the CLI may wait for a reply (plan apply); follow does the same without waiting (wake._sweep_orphans). Returns the ids."""
+    gone = []
+    for pid in orphan_candidates(save_dir):
+        try:
+            _, rep = send(save_dir, "inspect", {"what": "persist", "key": f"bp.{pid}", "field": "tpl"}, by=by, wait_s=wait_s)
+        except Exception:                                    # noqa: BLE001 - a sweep never stops the caller
+            return gone
+        if kernel_knows(rep) is False and retire(save_dir, pid):
+            files.log_cli(save_dir, by, "retire:orphan", {"proj": pid}, "the kernel does not know this project: bp file retired")
+            gone.append(pid)
+    return gone
+
+
 def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float = 5.0,
          cmd_id: str | None = None, snap: dict | None = None, need: list | tuple = ()) -> tuple[str, dict | None]:
     """Validate + write the inbox file (+ bp/<id>.json first for bp.place, sited on `snap` if given; `need`: see
@@ -2176,6 +2247,12 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
         hold = stone_fall_refusal(save_dir, args["tpl"], place_params(args))
         if hold:                                   # BUG-437: not on the citizens' way out while they need to go
             raise BpError(hold)
+        if args["tpl"] == "surfacecore":           # BUG-445: Gordon's goal is a fort UNDER the aquifer, never a surface fort
+            from . import plan as _plan
+            if not _plan.surface_core_on():
+                raise BpError("BUG-445: surfacecore is not a fallback: the fort goes under the aquifer (dfllm plan propose drafts "
+                              "aqshaft@S1 and the core below the lowest aquifer level; dfllm bp sites aqshaft --fresh); config "
+                              "plan.surface_core true allows it")
         doc = emit_bp(save_dir, args["tpl"], place_params(args), args["site"], cmd_id, write=False, snap=snap,
                       need=need)
         prev = write_bp(save_dir, doc)
@@ -2196,8 +2273,8 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
                       + str(reply.get("msg", "")))
         if verb == "bp.place" and not reply.get("ok"):
             unplace(save_dir, cmd_id, args["tpl"], prev)
-        if verb == "bp.cancel" and reply.get("ok") and isinstance(args.get("proj"), str):
-            retire(save_dir, args["proj"])
+        if verb == "bp.cancel" and (reply.get("ok") or no_such_project(reply)) and isinstance(args.get("proj"), str):
+            retire(save_dir, args["proj"])          # BUG-442: 'no project X' = already gone in the kernel: the file goes too
         if verb == "inspect" and args.get("what") == "manifest" and reply.get("ok"):
             cache_manifest(save_dir, reply.get("data"))
     return cmd_id, reply

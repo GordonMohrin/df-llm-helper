@@ -139,6 +139,12 @@ M.CFG = {
   -- what it waits for and the commands, again every stale_every days; follow cancels the replaceable templates itself
   -- (plan.stale_project_days); the kernel never cancels. 0 = never announced. config "runner": {queue: {stale_days, stale_every}}
   stale_days = 300, stale_every = 90,
+  -- BUG-444 (Run 16c i3 Castletongs: aqshaft S1 kept a runner slot 556 days at 7 %, no event; bp.resume 'not set aside'): the
+  -- projects idle_keep exempts from the set-aside rule (an aqshaft watching a level, the refuge drink, a seal in a siege, a mood
+  -- or care project, supply in an emergency) and every other RUNNING project that holds a slot are watched too: no progress
+  -- (R.ps) for stall_days is announced (PROJECT_BLOCKED why=stalled, A) with the cause and a command, again every stall_every
+  -- days. Announcement only: the project keeps its slot. 0 = off. config "runner": {queue: {stall_days, stall_every}}
+  stall_days = 60, stall_every = 60,
   -- BUG-352 (Run 16c site97: fortcore stage 1 on soil beyond the brook, 30 d at s1.dig 0 %, 'unreachable DigChannel'): a
   -- dig stage without own progress (R.ps) for reach_days whose revealed tiles (or their neighbours) lie in no walk group a
   -- citizen stands in is announced (PROJECT_BLOCKED d.why 'unreachable', row 'unreachable N d', Q.reach_scan): the
@@ -2146,6 +2152,13 @@ function Q.aqx(K)
       if not ok then return nil, 'no economy' end
       return via, why
     end,
+    wall_stock = function()                    -- BUG-443: the COUNT of free blocks, boulders and logs for walls (nil: unknown)
+      local ok, st = K.call('economy', 'wall_stock')
+      return ok and type(st) == 'table' and st or nil
+    end,
+    need = function(n, who)                    -- BUG-443: the ring's walls are a rock need (a stone dig, the caravans, trade.want)
+      return K.call('economy', 'need', 'rock', n, who, 14)
+    end,
     own = function(id)
       local P = find(id)
       local d = P and P.done ~= 1 and doc(K, id)
@@ -3283,6 +3296,8 @@ local function conf(K)
              idle = nat(q.idle_days, 1, 400, M.CFG.idle_days) * DAY,               -- BUG-328
              stale = nat(q.stale_days, 0, 3000, M.CFG.stale_days) * DAY,           -- BUG-435
              stale_every = nat(q.stale_every, 1, 400, M.CFG.stale_every) * DAY,
+             runstall = nat(q.stall_days, 0, 3000, M.CFG.stall_days) * DAY,        -- BUG-444
+             runstall_every = nat(q.stall_every, 1, 400, M.CFG.stall_every) * DAY,
              reach = nat(q.reach_days, 1, 60, M.CFG.reach_days) * DAY}             -- BUG-352
   -- BUG-066 / FR-76: the manifest follows the workshops that stand (reclaim = config runner.reclaim)
   local rc = type(c.reclaim) == 'table' and c.reclaim or {}
@@ -5339,6 +5354,51 @@ function Q.stale_scan(K, c, t)
   end
 end
 
+-- BUG-444 (Run 16c i3 Castletongs: aqshaft S1 held a runner slot 556 days at 7 %, no event, 'bp.resume' said 'not set aside (it runs)'):
+-- idle_keep exempts a shaft watching a level (and the refuge drink, a seal in a siege, ...) from the set-aside rule for good. A
+-- project that is neither done, halted nor set aside and whose own progress (R.ps) is stall_days old says so (PROJECT_BLOCKED
+-- why=stalled, A): the cause (the aqshaft's level and ring state, what its stage waits for, why it is kept) and the commands; again
+-- every stall_every days (R.sks). Informative: the project keeps its slot, nothing is cancelled
+function Q.stall_scan(K, c, t)
+  local sd = c.runstall
+  if not sd or sd <= 0 or K.mode() ~= 'PEACE' then return end
+  for _, P in ipairs(sorted()) do
+    local R = S.rt.p[P.id]
+    local ps = type(R) == 'table' and R.si == P.stage and int(R.ps) or nil
+    local sn = type(R) == 'table' and int(R.sks) or nil
+    if ps and P.done ~= 1 and not halted(P) and not Q.idle(P) and t - ps >= sd and (not sn or t - sn >= c.runstall_every) then
+      R.sks = t
+      dirty()
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      local label = trunc(st and st.label or '', 24)
+      local cause = {}
+      local keep = Q.idle_keep(K, P)
+      if P.tpl == 'aqshaft' then
+        local w = M.AQ.where(S.rt, P.id)
+        if w ~= '' then cause[#cause + 1] = w end
+        local sx = M.AQ.stall_text(S.rt, P.id)
+        if sx ~= '' then cause[#cause + 1] = sx end
+      end
+      if d then
+        local okp, parts = pcall(Q.parts, K, P, d)
+        if okp and type(parts) == 'table' and #parts > 0 then cause[#cause + 1] = 'waits: ' .. trunc(parts[1], 80) end
+      end
+      if keep then cause[#cause + 1] = 'kept (' .. keep .. ')' end
+      if P.blocked ~= '' then cause[#cause + 1] = P.blocked end
+      local why = #cause > 0 and table.concat(cause, '; ') or 'no cause found (dfllm cmd inspect what=workload)'
+      local days = (t - ps) // DAY
+      local cmds = string.format("dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm cmd bp.cancel '{\"proj\":\"%s\"}' (only what is "
+                                 .. 'not built goes)%s', P.id, P.tpl == 'aqshaft' and '; dfllm bp sites aqshaft --fresh' or '')
+      local msg = string.format('%s (%s) stalled: no progress for %d d at %s %d%%: %s; %s', P.id, P.tpl, days, label,
+                                int(P.pct) or 0, why, cmds)
+      K.log('warn', '%s', msg)
+      K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), {proj = P.id, tpl = P.tpl, stage = label, why = 'stalled', ticks = t - ps,
+                                                       idle = days, parts = trunc(why, 120), cmd = trunc(cmds, 200)})
+    end
+  end
+end
+
 -- BUG-352: does a citizen reach the dig stage of P? Up to 30 pending tiles of the stage (walls to cut: a tile without a
 -- walk group answers its neighbours' first, snapshot.groups near) against the walk groups of up to 50 citizens. Claims
 -- only when some tile has a known group, none shares a citizen's group and a citizen stands somewhere (a hidden tile is
@@ -5493,6 +5553,8 @@ local function begin_run(K)
   if not oki then K.log('error', 'runner set-aside failed: %s', trunc(erri, 160)) end
   local oks, errs = pcall(Q.stale_scan, K, f.c, now(K))   -- BUG-435: own pcall, a fault costs only this announcement
   if not oks then K.log('error', 'runner stale scan failed: %s', trunc(errs, 160)) end
+  local okk, errk = pcall(Q.stall_scan, K, f.c, now(K))   -- BUG-444: own pcall, a fault costs only this announcement
+  if not okk then K.log('error', 'runner stall scan failed: %s', trunc(errk, 160)) end
   local okr, errr = pcall(Q.reach_scan, K, f.c, now(K))  -- BUG-352: own pcall, a fault costs only this announcement
   if not okr then K.log('error', 'runner reach scan failed: %s', trunc(errr, 160)) end
   local tasks, n, t, c = {}, 0, now(K), f.c

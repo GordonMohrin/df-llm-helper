@@ -158,6 +158,16 @@ function C.evaluate(rec, rules, ctx)
   elseif (rec.read or 0) > 0 then put('water', 'fail', 'no brook or river shown')
   else put('water', 'unknown', 'not shown') end
   tiered('aquifer', rec.aquifer, rules.aquifer_ok, rules.aquifer_warn)
+  if rec.aquifer == 'light' or rec.aquifer == 'varied' then
+    -- BUG-445 (Run 16b i2 Roadvises 25,21: the panel said 'light aquifer', the site holds four aquifer levels, z112 and z115 heavy):
+    -- the embark panel names a class, never the number of levels or their weight; the fort goes UNDER every one of them by aqshaft
+    for _, it in ipairs(items) do
+      if it.id == 'aquifer' then
+        it.why = it.why .. ' (the panel shows a class, not the span: several aquifer levels, heavy ones too, may lie above the ' ..
+          'stone; the fort passes each by aqshaft, one level at a time, before its core is dug)'
+      end
+    end
+  end
   if wt and wt.aq_best then   -- BUG-411: the hovered tiles differ; the item shows the worst, say so
     for _, it in ipairs(items) do
       if it.id == 'aquifer' then it.why = it.why .. ' (worst of the hovered tiles, best ' .. wt.aq_best .. ')' end

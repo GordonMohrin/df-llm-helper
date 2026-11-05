@@ -3539,6 +3539,111 @@ def wet_core_guard(save_dir: Path, params: dict | None, snap: dict | None = None
                   "dfllm plan propose says more")
 
 
+CORE_PROBE_DEF = True                 # BUG-441: follow places an aqshaft probe before its fortcore while the aquifer span is unknown
+CORE_PROBE_DEPTH = 12                 # ... as deep as that (levels); the aquifer layers of a site lie within ~16 levels of the surface
+CORE_UNSTARTED_PCT = 20               # BUG-441: a fortcore stage 1 at most this far dug counts as not started (a re-site cancels it)
+
+
+def core_probe_on() -> bool:
+    """config/baseline.json plan.core_probe (BUG-441): no automatic fortcore before the aquifer span is known; a bad value keeps the
+    default (on)."""
+    doc = files.read_json(paths.config_dir() / "baseline.json", retry=False)
+    sec = doc.get("plan") if isinstance(doc, dict) else None
+    v = sec.get("core_probe") if isinstance(sec, dict) else None
+    return v if isinstance(v, bool) else CORE_PROBE_DEF
+
+
+def known_aquifer_levels(save_dir: Path, snap: dict | None = None) -> list[int]:
+    """BUG-441: every level the fort knows wet without digging (sites.known_aquifer: manifest aquifer_levels, the snapshot's aqz,
+    the recorded breaches) plus a level two fortcore projects stopped on (fortcore_stops); sorted, deepest (lowest z) first.
+    [] when none is known or the bp package is unavailable."""
+    try:
+        aq = set(load_bp("sites").known_aquifer(snap if snap is not None else sites_snapshot(save_dir), fort_manifest(save_dir)))
+        by_z: dict[int, set] = {}
+        for r in fortcore_stops(save_dir):
+            by_z.setdefault(r["pos"][2], set()).add(r["proj"])
+    except (BpError, BpUnavailable, AttributeError):
+        return []
+    aq |= {z for z, ids in by_z.items() if len(ids) >= 2}
+    return sorted(aq)
+
+
+def probe_state(save_dir: Path) -> str | None:
+    """BUG-441: the aquifer probe of this fort: 'done' (an aqshaft or explore project with PROJECT_DONE), 'running' (one is placed, not
+    cancelled), None (none). The shaft digs down through the rock the fort will sit in: it shows every aquifer level before a core is."""
+    done = None
+    out = None
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if not (isinstance(d, dict) and d.get("tpl") in (AQSHAFT, EXPLORE)):
+            continue
+        done = done_projects(save_dir) if done is None else done
+        if p.stem in done:
+            return "done"
+        out = "running"
+    return out
+
+
+def core_span_gate(save_dir: Path, params: dict | None, snap: dict | None = None) -> dict:
+    """BUG-441 (Run 16b i2 Roadvises, 16c i3 Castletongs: follow queued fortcore stage 1 itself at adopt, 1 minute after the embark,
+    before any plan; the aquifer was unknown, so the core landed above and in it and `bp sites aqshaft` said every column lay beside
+    the placed core; i2 later found aquifer levels z120/z119 light, z115 and z112 heavy): follow's own fortcore stage 1 (starter,
+    request) is placed only once the aquifer span is known.
+      {action: 'refuse'}  a level is known: the core goes below the lowest of them by the aqshaft (plan propose drafts both),
+      {action: 'probe'}   nothing known and no probe yet: place an aqshaft probe (depth CORE_PROBE_DEPTH) first,
+      {action: 'wait'}    the probe digs: nothing is placed,
+      {action: 'place'}   the probe is done and found no aquifer, or plan.core_probe is off.
+    + why (the text for the AUTO_FAIL / log line)."""
+    if not core_probe_on():
+        return {"action": "place", "why": ""}
+    levels = known_aquifer_levels(save_dir, snap)
+    if levels:
+        low = levels[0]
+        return {"action": "refuse", "levels": levels,
+                "why": (f"BUG-441: aquifer known at {', '.join(f'z{z}' for z in reversed(levels))}: follow places no fortcore of its own "
+                        f"(it would sit above or in it); the core goes below the lowest level (z{low}) and the aqshaft pierces every "
+                        "level down to it: dfllm plan propose drafts aqshaft@S1 then fortcore p.aquifer=pass")}
+    pr = probe_state(save_dir)
+    if pr == "done":
+        return {"action": "place", "why": ""}
+    if pr == "running":
+        return {"action": "wait",
+                "why": "BUG-441: the aquifer probe shaft digs: follow places the fortcore once it is done and shows no aquifer "
+                       "(dfllm plan propose drafts the aqshaft route when it finds one)"}
+    return {"action": "probe", "why": f"BUG-441: aquifer span unknown: an aqshaft probe of {CORE_PROBE_DEPTH} levels first"}
+
+
+def core_over_aquifer(save_dir: Path, state: dict | None) -> dict | None:
+    """BUG-441: a fortcore stage 1 that is queued but not started (state.proj row s1.* at most CORE_UNSTARTED_PCT %, no PROJECT_DONE,
+    no p.aquifer / retrofit) while the aquifer is known and its levels (anchor z - 2 - depth - refuge .. anchor z) lie above or in
+    it, i.e. the deepest core level + 1 is not below the lowest known level. {proj, anchor, levels, why} or None. Re-sited by follow:
+    cancelled (only the designations not dug yet go), `plan propose` then draws aqshaft@S1 and the core below the aquifer."""
+    levels = known_aquifer_levels(save_dir)
+    if not levels:
+        return None
+    done = done_projects(save_dir)
+    rows = {r[0]: r for r in (state or {}).get("proj") or [] if isinstance(r, list) and len(r) >= 3 and isinstance(r[0], str)}
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if not (isinstance(d, dict) and d.get("tpl") == "fortcore") or p.stem in done:
+            continue
+        prm = d.get("params") or {}
+        if prm.get("retrofit") or prm.get("aquifer") or (_stage_of(prm) or 1) != 1 or not isinstance(d.get("anchor"), list):
+            continue
+        row = rows.get(p.stem)
+        if row is None or not str(row[1]).startswith("s1.") or not isinstance(row[2], int) or row[2] > CORE_UNSTARTED_PCT:
+            continue                                   # unknown to the state, past stage 1 or already dug: not "not started"
+        depth = prm.get("depth") if _nat(prm.get("depth")) else 3
+        refuge = prm.get("refuge") if _nat(prm.get("refuge")) else 3
+        z_deep = d["anchor"][2] - 2 - depth - refuge
+        if z_deep + 1 < levels[0]:
+            continue                                   # the core's deepest level lies under the lowest known aquifer level
+        return {"proj": p.stem, "anchor": list(d["anchor"]), "levels": levels,
+                "why": (f"{p.stem} (fortcore stage 1, {row[2]} % dug) reaches down to z{z_deep}, the aquifer is known at "
+                        f"{', '.join(f'z{z}' for z in reversed(levels))}")}
+    return None
+
+
 def propose(state: dict | None, phases: dict | None, prev: dict | None, decisions: dict | None = None,
             tinfo: dict | None = None, applied: set | None = None, fort: dict | None = None,
             upto: str | None = None, live: dict | None = None) -> dict:
@@ -4076,6 +4181,11 @@ def place_all(save_dir: Path, doc: dict, prev: dict | None,
 def apply(save_dir: Path, doc: dict, by: str = "llm", wait_s: float = 5.0, dry_run: bool = False) -> tuple[list[str], str]:
     """(errors, message). Writes the new bp files, then plan.json, then inbox plan.reload.
     Builds kept from the applied same-year plan are not emitted again (their projects exist)."""
+    if wait_s > 0 and not dry_run:
+        try:
+            _cmd.retire_orphans(save_dir, wait_s=wait_s, by=by)    # BUG-442: a bp file the kernel does not know blocks no site
+        except Exception:                                          # noqa: BLE001 - a sweep never stops the apply
+            pass
     prev = applied_plan(save_dir)
     state = files.read_state(save_dir)
     errs, _ = check(doc, state, tpls=templates(), prev=prev, fort=fort_facts(save_dir, state))
