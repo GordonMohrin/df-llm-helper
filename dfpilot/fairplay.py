@@ -849,7 +849,7 @@ def burrow_errors(path: str | Path | None = None) -> list[str]:
 # test (tests/lua/test_economy.lua: config/baseline.json == economy.DEFAULTS).
 ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG-424: access_d 0 = no cistern request
                      # BUG-231: bypass_days 0 = the kernel never adds the held items as workshop tasks
-                     "orders": {"unval_days": (1, 60), "bypass_days": (0, 112), "bypass_max": (0, 20),
+                     "orders": {"unval_days": (1, 60), "mgr_stuck_days": (0, 400), "bypass_days": (0, 112), "bypass_max": (0, 20),
                                 "bypass_open": (0, 40),
                                 # BUG-315: cap 0 = no cap (duplicates still go); prune_per_day 0 = the prune is off
                                 "cap": (0, 2000), "prune_days": (1, 1000), "prune_per_day": (0, 200)},

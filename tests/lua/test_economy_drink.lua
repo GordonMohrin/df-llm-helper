@@ -27,6 +27,7 @@ local function world(opts)
   local units = {}
   for i = 1, cit do units[i] = {id = i, citizen = true, name = 'Urist ' .. i} end
   local cfg = F.cfg()
+  if opts.mgr_stuck_days then cfg.economy.orders = {mgr_stuck_days = opts.mgr_stuck_days} end   -- BUG-450
   cfg.economy.standing = false                   -- FR-73's standing orders would be unvalidated orders of their own here
   local W = F.world{cfg = {baseline = cfg}, units = units}
   df.unit_labor = {BREWER = BREWER, [BREWER] = 'BREWER'}
@@ -355,6 +356,25 @@ T.test('BUG-206 (live Earthboat spr d43): no still but a pending fortcore stage 
   W.K.persist.set('projects', {v = 2, list = {}})
   days(W, 1)
   T.eq(#decisions(W, 'drink_low'), 1, 'no project builds the Still any more: the question as before')
+end)
+
+-- BUG-450 (Run 16a i1 Syrupobeyed y386: 35 orders unvalidated for 149 days with an appointed manager, a complete office and 'none vacant'):
+-- orders.mgr_stuck_days (14) of it is DECISION_NEEDED manager_stuck with the commands that look at him; once per period; 0 = off.
+T.test('BUG-450: a manager with a complete office who validates nothing for 14 days: DECISION_NEEDED manager_stuck, once', function()
+  local W = world{chair = {128, 74}, table = {127, 74}, plants = 40}
+  days(W, 10)
+  T.eq(#decisions(W, 'manager_stuck'), 0, 'not before mgr_stuck_days')
+  days(W, 6)
+  local dn = decisions(W, 'manager_stuck')
+  T.eq(#dn, 1)
+  T.ok(dn[1].msg:find('manager Astesh validates nothing for', 1, true) and dn[1].msg:find('complete office', 1, true), dn[1].msg)
+  T.ok(dn[1].d.cmds[1]:find('inspect what=unit key=', 1, true) and #dn[1].d.cmds == 3, table.concat(dn[1].d.cmds, '|'))
+  T.ok(dn[1].d.days >= 14 and dn[1].d.n >= 1)
+  days(W, 6)
+  T.eq(#decisions(W, 'manager_stuck'), 1, 'once per mgr_stuck_days (util/cadence)')
+  local W2 = world{chair = {128, 74}, table = {127, 74}, plants = 40, mgr_stuck_days = 0}
+  days(W2, 18)
+  T.eq(#decisions(W2, 'manager_stuck'), 0, 'mgr_stuck_days 0 is off')
 end)
 
 T.done()

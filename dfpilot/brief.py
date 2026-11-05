@@ -815,12 +815,14 @@ IDLE_NAMES = (("rest", "rest"), ("hurt", "hurt"), ("mood", "mood"), ("free", "no
 
 def idle_clause(lb: dict) -> str:
     """FR-77: 'idle 54% = 7 of 13 adults (rest 2, hurt 1, mood 1, no job 3; 6 soldiers not counted; the kernel holds 2
-    projects: dfllm cmd inspect what=workload splits the rest) starving 0'. The kernel's daily scan knows a unit's own state
+    projects: dfllm cmd inspect what=workload splits the rest) unfilled labor postings 0'. BUG-456 (Run 16c i3: brief 'starving 53' while status said
+    'HUNGRY 1'): labor.starving counts labormanager's postings that no one takes, not citizens; only 'HUNGRY' (status) and 'hungry' name
+    citizens past DF's hungry line. The kernel's daily scan knows a unit's own state
     (rest, hurt, mood); `no job` is the rest, which `inspect workload` splits further (held by a kernel rule, no labor
-    holder, no reachable work). Without the breakdown (an older kernel): 'idle 20% starving 0'."""
+    holder, no reachable work). Without the breakdown (an older kernel): 'idle 20% unfilled labor postings 0'."""
     why, n = lb.get("why"), lb.get("n")
     if not isinstance(why, dict) or not isinstance(n, int):
-        return f"idle {lb['idle']}% starving {lb['starving']}"
+        return f"idle {lb['idle']}% unfilled labor postings {lb['starving']}"
     parts = [f"{label} {why[k]}" for k, label in IDLE_NAMES if why.get(k)]
     idle_n = sum(v for v in why.values() if isinstance(v, int))
     extra = []
@@ -832,7 +834,7 @@ def idle_clause(lb: dict) -> str:
     inner = ", ".join(parts) or "no reason of its own state"
     tail = "; ".join(([inner] if not extra else [inner] + extra))
     hint = ": dfllm cmd inspect what=workload splits the rest" if why.get("free") or held else ""
-    return f"idle {lb['idle']}% = {idle_n} of {n} adults ({tail}{hint}) starving {lb['starving']}"
+    return f"idle {lb['idle']}% = {idle_n} of {n} adults ({tail}{hint}) unfilled labor postings {lb['starving']}"
 
 
 def supply_items(ctx: Ctx) -> list[tuple[int, str]]:

@@ -191,7 +191,7 @@ def test_zone_place_args(args, ok):
 
 
 def test_zone_place_is_a_registered_verb_outside_fights_with_its_act_and_rules_row():
-    assert schema.VERBS["zone.place"] == ("runner", ["PEACE", "ALERT", "RECOVERY"], False)
+    assert schema.VERBS["zone.place"] == ("runner", ["PEACE", "ALERT", "RECOVERY", "SIEGE"], False)   # BUG-450: SIEGE for the office
     assert schema.ACT["zone_place"] == ["runner", "economy"]     # BUG-232: the manager office zone
     text = (ROOT / "RULES.md").read_text(encoding="utf-8")
     assert "`zone.place`" in text and "--near" in text

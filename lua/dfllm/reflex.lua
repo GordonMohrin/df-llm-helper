@@ -2105,9 +2105,13 @@ local function cause_scan(K, h)
   end
   if best then
     local e = best.a.e
+    -- BUG-452 (Run 16a i1 Syrupobeyed y385: the brief said 'harmless' for the nearest of 33 goblins): harmless is a lone
+    -- picture (at most confine.lone_max counted hostiles, as confine_picture and lone_picture count); a larger group is a group
+    local group = n > c.lone_max
     rt.cause = {id = e.id, k = e.an == 1 and 'animal' or e.k, pos = {e.x, e.y, e.z}, dc = best.a.dc, de = best.a.de,
-                hl = harmless(e, c) and 1 or 0, n = n, near = best.a.near == true, sz = int(e.sz),
-                hw = M.danger_why(e, c)}                  -- BUG-144: why it is not harmless
+                hl = (harmless(e, c) and not group) and 1 or 0, n = n, near = best.a.near == true, sz = int(e.sz),
+                hw = (group and harmless(e, c)) and string.format('group of %d', n):sub(1, 24)
+                     or M.danger_why(e, c)}                  -- BUG-144: why it is not harmless
     local rc = rt.cause_race
     if not rc or rc.id ~= e.id then rc = {id = e.id, race = race_of(e.id)}; rt.cause_race = rc end
     rt.cause.race = rc.race:upper():gsub('[^%w]+', '_'):sub(1, 24)
@@ -2182,6 +2186,55 @@ local function offer_step(K, h, now)
   if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end        -- BUG-348
   K.emit('DECISION_NEEDED', 'A', q, d)
   K.log('info', 'reflex: %s', q)
+end
+
+-- BUG-452 (Run 16a i1 Syrupobeyed y385: SIEGE_START with 13, then 32 invaders; the lockdown held 151 days at 30 t/s, the brief said 'past the
+-- limit' and nothing followed: the limit above runs in PEACE/ALERT and the offer needs ALERT): in SIEGE/BREACH a lockdown past
+-- confine.max_days leads to a decision: DECISION_NEEDED lockdown_long (A, every max_days days): the group, the nearest hostile, whether
+-- anything is inside Kern+ or near, the ready squad.sortie command and the armour verdict when a squad is able, or that none is. The
+-- kernel does not end the lockdown itself: ending it hands the mode to threat's quiet clock (a real SIEGE would fall to RECOVERY, test_m3_lone).
+function M.overlimit_step(K, h, now)
+  local hd = st.hold
+  local mode = K.mode()
+  if not hd or (mode ~= 'SIEGE' and mode ~= 'BREACH') then return end
+  local c = cfg(K).confine
+  local lim = c.max_days * 1200
+  if lim <= 0 or now - hd.since < lim then return end
+  if rt.ol_t and now >= rt.ol_t and now - rt.ol_t < M.CF_EVERY then return end
+  rt.ol_t = now
+  if type(h) ~= 'table' or now - (h.tick or -1e9) > M.FRESH then return end
+  local pic = confine_picture(K, h)
+  local oka, a = K.call('threat', 'assess')
+  local inside = oka and type(a) == 'table' and (a.inside or 0) or 1
+  local calm = pic and #pic.near == 0 and not pic.dangerous and inside == 0 and (h.great or 0) == 0 and (h.undead or 0) == 0
+  local cs = rt.cause
+  local T = K.now()
+  local tok = cs and tostring(cs.n or 0) or 'none'
+  if not CAD.due(rt.ol, T, {}, {mode, tok}, {ticks = math.max(1, c.max_days) * 1200, wall_s = 60}) then return end
+  rt.ol = CAD.mark(T, {}, {mode, tok})
+  local days = NUM.dec((now - hd.since) / 1200)
+  local cmd, key, n, adv
+  if cs then
+    cmd, key, n = sortie_cmd(K, cs)
+    if cmd then
+      local oks, av = K.call('military', 'sortie_advice', key)
+      adv = oks and type(av) == 'table' and av or nil
+    end
+  end
+  local q = string.format('lockdown %s held %s days in %s (limit %d): %s%s; %s', hd.why, days, mode, c.max_days,
+                          cs and string.format('%d hostiles counted, nearest %s', cs.n or 1, cause_txt(cs)) or 'hostiles in sight',
+                          inside > 0 and string.format(', %d inside Kern+', inside) or '',
+                          cmd and string.format('send squad %s (%d soldiers)%s: %s', key, n,
+                                                adv and (' (' .. adv.txt .. ')') or '', cmd)
+                          or 'no squad can go; ' .. (calm and 'nothing is near or inside Kern+: wait for the siege to end'
+                                                     or 'the lockdown stays while they are near'))
+  local d = {id = 'lockdown_long', q = q:sub(1, 200), days = NUM.dec((now - hd.since) / 1200), lim = lim, mode = mode,
+             n = cs and cs.n or nil, inside = inside, calm = calm and 1 or 0}
+  if cs then d.unit, d.pos, d.race = cs.id, cs.pos, cs.race end
+  if cmd then d.squad, d.cmd = key, cmd end
+  if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), d)
+  K.log('warn', 'reflex: %s', q)
 end
 
 -- the lockdown's own clock: confine.max_days after it began it ends in PEACE/ALERT unless a dangerous hostile is near
@@ -2640,6 +2693,7 @@ function M.step(K, budget, ctx)
   cause_scan(K, h)                                         -- BUG-065: the cause for state/status, then the limit
   offer_step(K, h, now)
   confine_step(K, h, now)
+  M.overlimit_step(K, h, now)                              -- BUG-452: SIEGE/BREACH past the limit
   lone_step(K, h, now)                                     -- M3 (BUG-112)
   need_step(K, h, now)
   ack_step(K, now)

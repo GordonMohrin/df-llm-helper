@@ -721,6 +721,9 @@ NO_HALL = "manifest: no Z2 trap hall"      # bp.topo.audit: the fort has no trap
 ROUTE_VIA = re.compile(r"via (door|stair|bridge) (-?\d+),(-?\d+),(-?\d+)")
 
 
+EXPLORE_RING_NOTE = "3 tiles from any revealed opening"       # bp.sites EXPLORE_RING
+
+
 def route_advice(route: str) -> str:
     """BUG-376: what to do about an audit route that has no wall tile ('bypass: via stair 1,2,3 -> 4,5,6'): a concrete
     placeable fix or the waiver, never 'look at it'. '' when the route names no such tile (the old finding text)."""
@@ -735,7 +738,9 @@ def route_advice(route: str) -> str:
                 f"(remove the building), then dfllm cmd bp.place tpl=seal site=S1 at=\"{at} floor wall\"; {waived}")
     if kind == "stair":
         return (f"the route passes the stair {at}: a wall cannot stand on a stair and the audit counts a hatch open, so "
-                f"no seal piece closes it; {waived}")
+                f"no seal piece closes it; BUG-453: when it is the head of one of our own explore shafts (`dfllm bp list`, tpl explore, "
+                f"anchor beside it), its tunnels broke out below: bp.cancel that explore (no more digging) and place no explore "
+                f"on that side again (sites keep tunnels {EXPLORE_RING_NOTE}); {waived}")
     return (f"the route passes the bridge {at}: the audit counts a bridge lowered; no wall tile; rebuild it as wall + "
             f"door (dfllm cmd inspect what=defense) or {waived}")
 
@@ -1375,12 +1380,19 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
                      + dmod.format_openings(rest[:4]))
     if not keep:
         closed = _all_closed(notes, key, entries)
-        counted = _counted_open(save_dir) if key in SEAL_LAST and not entries else 0
-        if counted:                                        # BUG-374: status counts ways in the seal could not read
+        counted = _counted_open(save_dir) if key in SEAL_LAST else 0
+        if counted and not entries:                        # BUG-374: status counts ways in the seal could not read
             closed = False
             notes.append(f"status counts {counted} way{'s' if counted != 1 else ''} in but no tile is on file (state "
                          "ready.ents empty, no SIEGE_UNREADY list, no leak): dfllm cmd inspect what=entrances "
                          "key=refresh, then again, or name the tiles: at=\"x,y,z floor\"")
+        elif counted and closed:
+            # BUG-455 (Run 16c i3 y374-y404: status 'PERIMETER OPEN, 3 ways in', `seal at=last` 'nothing to close'): every way the entrance
+            # check names is closed on the newer snapshot or has a seal; the count in status is the check's, older than that reading.
+            # One truth: the seal says so in the reply, and how the count is brought up to date
+            notes.append(f"status still counts {counted} way{'s' if counted != 1 else ''} in: that is the last entrance check, the "
+                         "snapshot or a seal project is newer and has them closed; the check runs again within a game day "
+                         "(dfllm cmd inspect what=entrances key=refresh asks now)")
         why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
                                    else "the last audit names no wall" if key == "audit"
                                    else "no refuge stair head in the manifest and no REFUGE_FAIL tile"
@@ -1421,6 +1433,17 @@ def _proj_status(save_dir: Path, pid: str) -> str:
     return f"{pid} ({what})"
 
 
+def _planned_only(save_dir: Path, pid: str, tpl: str) -> bool:
+    """BUG-456: project `pid` is a `tpl` project the kernel has no state row for (not begun, or beyond the first 8 rows) and whose
+    first stage shows no progress."""
+    doc = files.read_json(Path(save_dir) / "bp" / f"{pid}.json")
+    if not isinstance(doc, dict) or doc.get("tpl") != tpl:
+        return False
+    rows = (files.read_state(save_dir) or {}).get("proj") or []
+    row = next((r for r in rows if isinstance(r, list) and r and r[0] == pid), None)
+    return row is None or (len(row) > 2 and row[2] == 0)
+
+
 def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: list[str],
                  params: dict | None = None) -> str:
     """BUG-067 (Run 12/13, notes 5, 31, 41): why a placement found no free site and what to do. Taken: the projects that
@@ -1433,6 +1456,12 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
         out.append("taken by " + ", ".join(_proj_status(save_dir, h) for h in holders[:4])
                    + (f" +{len(holders) - 4}" if len(holders) > 4 else "")
                    + "; a parked or blocked project keeps its tiles: `dfllm cmd bp.cancel proj=<id>` frees them")
+        # BUG-456 (Run 16b i2 y372: an emergency `bp.place workshops only=Kitchen` said '0 free sites ... taken by y372s3b2', a project of the
+        # plan that had not begun): a holder of the same template with no kernel row yet is a planned slot, not a working project
+        planned = [h for h in holders if _planned_only(save_dir, h, tpl)]
+        if planned:
+            out.append(f"{', '.join(planned[:3])} {'is' if len(planned) == 1 else 'are'} planned {tpl} (not begun): that slot is yours, "
+                       f"`dfllm cmd bp.cancel proj={planned[0]}` frees it at once, then place again (the plan's next propose draws it again)")
     if ranked == 0 and tpl == "workshops" and (params or {}).get("surface"):
         # BUG-356: the startup shops need no fortcore, only open flat ground the citizens reach
         out.append("no ranked site: the startup shops need a flat block of open surface floor (no trees, rocks, water or "

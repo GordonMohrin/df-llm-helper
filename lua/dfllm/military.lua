@@ -2210,6 +2210,7 @@ local function apply_squad(K, k, force)
   local s = e and squad(e.id)
   if not s then return true end
   if rt.held[k] then return true end                 -- siege holds this squad's sortie order (hold_order)
+  if rt.feed and rt.feed[k] and rt.feed[k].on then return true end   -- BUG-451: released to eat (feed_pass puts the station back)
   local so = rt.so[k]
   if so and so.keep then return true end             -- M3 (BUG-113): a sortie against a lone harmless intruder is kept until sortie_pass ends it
   local man = K.manifest()
@@ -3718,6 +3719,8 @@ function M.step(K, budget, ctx)
     if not open then rt.create_why, rt.create_since = nil, nil end
   end
   if st.posture == nil then st.posture, st.pt, dirty = 'TRAIN', now, true end
+  local okf, errf = pcall(M.feed_pass, K, now, mode)                   -- BUG-451
+  if not okf then K.log('warn', 'military feed: %s', tostring(errf)) end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
   release_tools(K)                                                     -- BUG-023: after the specs settled
   rt.kpi, rt.kpi_tick = compute(K), now
@@ -3725,6 +3728,65 @@ function M.step(K, budget, ctx)
   local okl, err = pcall(loot, K)
   if not okl then K.log('warn', 'loot: %s', tostring(err)) end
   save(K)
+end
+
+-- BUG-451 (Run 16a i1 Syrupobeyed y386 spring d27-d31: three soldiers on station in the lockdown stood at hunger 70,657-73,815 of 75,000
+-- with 'job none', food and drink in Kern+ and the siege burrow around them; no STRANDED because they stood on the group that has
+-- stock, `status` said 'starving 0'): a soldier at a station order does not leave it to eat. A squad on a station order with a
+-- member over FEED_HUNGER / FEED_THIRST and no job is released (order 'clear', the squads screen's) for FEED_HOLD ticks, or until every
+-- such member is back under the marks; then the posture's station is ordered again (apply_squad force). At most once per FEED_COOL ticks
+-- per squad, never a squad on a kill order or a sortie, never in a BREACH (a hostile inside Kern+: the fight comes first). kern.log names
+-- the soldiers; rt only (no state, no event: the squad stands at its station again within a game day).
+M.FEED_HUNGER, M.FEED_THIRST, M.FEED_HOLD, M.FEED_COOL = 50000, 40000, 1200, 2400
+M.FEED_EVERY = 600         -- ticks between two looks at the soldiers' hunger and thirst
+function M.feed_pass(K, now, mode)
+  rt.feed = rt.feed or {}
+  if rt.feed_t and now >= rt.feed_t and now - rt.feed_t < M.FEED_EVERY then return end
+  rt.feed_t = now
+  for _, sp in ipairs(M.SQUADS) do
+    local k = sp.key
+    local e = st.sq[k]
+    local s = e and squad(e.id)
+    local f = rt.feed[k]
+    local cur0 = rt.order[k] or ''
+    if s and (cur0:sub(1, 8) == 'station:' or (f and f.on)) then      -- only a squad on a station order (or one released to eat)
+      local hungry = {}
+      for _, m in ipairs(members(s)) do
+        local u = m.unit
+        local hu = try(function() return u.counters2.hunger_timer end) or 0
+        local th = try(function() return u.counters2.thirst_timer end) or 0
+        if hu >= M.FEED_HUNGER or th >= M.FEED_THIRST then hungry[#hungry + 1] = {u = u, hu = hu, th = th} end
+      end
+      if f and f.on then
+        if #hungry == 0 or now < f.t or now - f.t >= M.FEED_HOLD then
+          f.on, f.end_t = false, now
+          K.log('info', 'military: squad %s back to its station after %s (%d still hungry or thirsty)', k,
+                #hungry == 0 and 'the meal' or 'FEED_HOLD ticks', #hungry)
+          apply_squad(K, k, true)
+        end
+      else
+        local cur = rt.order[k] or ''
+        local stationed = cur:sub(1, 8) == 'station:' and order_count(s) > 0
+        local busy = rt.held[k] or cur:sub(1, 5) == 'kill:' or cur:sub(1, 7) == 'sortie:' or (rt.so[k] ~= nil)
+        local cool = f and f.end_t and now >= f.end_t and now - f.end_t < M.FEED_COOL
+        if #hungry > 0 and stationed and not busy and not cool and mode ~= 'BREACH' then
+          local idle = {}
+          for _, h in ipairs(hungry) do
+            if not try(function() return h.u.job.current_job end) then idle[#idle + 1] = h end
+          end
+          if #idle > 0 and K.act.squad_order(s.id, {kind = 'clear'}) then
+            rt.feed[k] = {on = true, t = now}
+            rt.order[k] = 'feed'
+            local txt = {}
+            for i, h in ipairs(idle) do
+              if i <= 3 then txt[#txt + 1] = string.format('%d (hunger %d, thirst %d)', h.u.id, h.hu, h.th) end
+            end
+            K.log('warn', 'military: squad %s released from its station to eat and drink: %s', k, table.concat(txt, ', '))
+          end
+        end
+      end
+    end
+  end
 end
 
 -- Run 11: kern.log names the gear cap when it changes (rt.gear: state mil.cap)

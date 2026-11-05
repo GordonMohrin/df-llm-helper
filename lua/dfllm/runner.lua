@@ -6394,7 +6394,9 @@ function Q.waive_verb(K, args, cmd)
   phases(K)
   rows(K)
   save(K)
-  return true, string.format('%s waived in %s (%s); phase now %s', key, from, trunc(why, 80), tostring(S.phase)),
+  -- BUG-456: the verb takes 200 bytes, the waiver keeps 80 (the status line): a longer reason is cut and the reply says so
+  return true, string.format('%s waived in %s (%s%s); phase now %s', key, from, trunc(why, 80),
+                             #why > 80 and string.format(', reason cut from %d to 80 bytes', #why) or '', tostring(S.phase)),
          {phase = S.phase}
 end
 

@@ -260,4 +260,28 @@ T.test('BUG-111: a goblin child inside Kern+ is no hostile: no lockdown, no BREA
   T.eq(W.state().alarm.ben, {'300:child'}, 'status names the unit and why')
 end)
 
+-- BUG-452 (Run 16a i1 Syrupobeyed y385: SIEGE_START with 13 and then 32 invaders, 'harmless' in the brief for the nearest of 33 goblins, the
+-- lockdown held 151 days at 30 t/s and 'past the limit' had no consequence): a group is no harmless picture, and a lockdown past
+-- confine.max_days in SIEGE/BREACH asks DECISION_NEEDED lockdown_long (the sortie command when a squad can go), every max_days days.
+T.test('BUG-452: 20 small goblins far away: the cause is not harmless (group of 20); past max_days DECISION_NEEDED lockdown_long with '
+       .. 'the sortie command, again only after another max_days', function()
+  local W = setup{tag = 'long452', cfg = CF}
+  raws()
+  for i = 1, 20 do goblin(W, 300 + i, 150 + i % 5, 150 + i // 5, Z, 6486) end
+  S.run(W, 2000)
+  local by = W.state().alarm.by
+  T.ok(by, 'a cause is named')
+  T.eq({by.hl, by.hw}, {0, 'group of 20'}, 'not harmless: a group of twenty')
+  T.eq(#decisions(W, 'lockdown_long'), 0, 'inside the limit (3 days = 3600 ticks)')
+  S.run(W, 2400)
+  local dn = decisions(W, 'lockdown_long')
+  T.eq(#dn, 1)
+  T.eq({dn[1].d.n, dn[1].d.mode, dn[1].d.calm}, {20, 'SIEGE', 1})
+  T.ok(dn[1].d.cmd and dn[1].d.cmd:find('squad.sortie', 1, true), tostring(dn[1].d.cmd))
+  T.ok(dn[1].d.q:find('20 hostiles counted', 1, true), dn[1].d.q)
+  S.run(W, 2000)
+  T.eq(#decisions(W, 'lockdown_long'), 1, 'not again inside max_days')
+  T.eq(W.K.mode(), 'SIEGE', 'the kernel ends nothing itself')
+end)
+
 T.done()

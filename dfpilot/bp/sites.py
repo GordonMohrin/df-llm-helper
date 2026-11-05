@@ -1167,6 +1167,9 @@ EXPLORE_LEVEL = 10                    # explore: score per level below the top o
 AVOID_MARKS = ("cavern", "damp", "warm")
 
 
+EXPLORE_RING = 3                      # BUG-453: tiles a side tunnel keeps from any revealed opening, water or mark
+
+
 def explore_rects(p: dict) -> dict[int, list[tuple[int, int, int, int]]]:
     """Local check rects of an explore shaft: per level the dug tiles' bbox grown by the wall ring (the shaft top level
     not toward the anchor row, as rooms; below it all round: a tunnel must not break into an open space there)."""
@@ -1175,6 +1178,19 @@ def explore_rects(p: dict) -> dict[int, list[tuple[int, int, int, int]]]:
         us, vs = [t[0] for t in tiles], [t[1] for t in tiles]
         rects[w] = [(min(us) - 1, max(1, min(vs) - 1) if w == 0 else min(vs) - 1, max(us) + 1, max(vs) + 1)]
     return rects
+
+
+def explore_wide_rects(p: dict) -> dict[int, list[tuple[int, int, int, int]]]:
+    """BUG-453 (Run 16a i1 Syrupobeyed y384: our own explore shaft made an R0 bypass, the route came up its stair 40,86,138 and no seal piece
+    closes a stair): the levels with side tunnels, grown by EXPLORE_RING tiles all round, so an arm never ends within three tiles of a
+    revealed floor, ramp, water or mark. Only checked (the project's footprint box stays the one-tile ring of explore_rects)."""
+    tun = set(mine.tunnel_levels(p)) if p.get("arm") else set()
+    out: dict[int, list] = {}
+    for w, tiles in mine.explore(p).dug().items():
+        if w in tun:
+            us, vs = [t[0] for t in tiles], [t[1] for t in tiles]
+            out[w] = [(min(us) - EXPLORE_RING, min(vs) - EXPLORE_RING, max(us) + EXPLORE_RING, max(vs) + EXPLORE_RING)]
+    return out
 
 
 def avoid_levels(snap: dict, p: dict, manifest: dict | None = None) -> set[int]:
@@ -1230,6 +1246,7 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     ref = manifest.get("refuge")
     zr = ref["anchor"][2] if ref else None
     avoid = avoid_levels(snap, p, manifest)
+    wide = explore_wide_rects(p)
     out, hit, redo = [], set(), []
     pts, failed = breach_points(manifest), failed_explores(manifest)
     for i in _anchor_tiles(g, "explore", p, manifest):
@@ -1251,8 +1268,8 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
             if door is None or g.t[door] not in GOOD:
                 continue
             res = _check(rects, ax, ay, az, rot, bad, hid, mk, True, wet)
-            if res is None:
-                continue
+            if res is None or (wide and _check(wide, ax, ay, az, rot, bad, hid, mk, True, wet) is None):
+                continue                                     # BUG-453: the tunnels also keep EXPLORE_RING tiles from any opening
             unknown, missing, box = res
             if any(_overlap(r, b) for r in _rect_boxes(rects, ax, ay, az, rot) for b in keep_out):
                 continue
