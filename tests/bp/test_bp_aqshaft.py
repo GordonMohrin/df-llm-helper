@@ -78,7 +78,9 @@ def test_fortcore_aquifer_above_and_pass():
     assert plain, "without p.aquifer the ranking is as before"
     assert bp.rank(land, "fortcore", {"aquifer": "above"}, manifest={"v": 2, "aquifer_levels": [low]}) == []
     assert bp.rank(land, "fortcore", {"aquifer": "above"}, manifest={"v": 2, "aquifer_levels": [low - 1]})
-    assert bp.rank(land, "fortcore", {"aquifer": "pass"}, manifest={"v": 2, "aquifer_levels": [low + 1]}) == []
+    assert bp.rank(land, "fortcore", {"aquifer": "pass", "depth": 3}, manifest={"v": 2, "aquifer_levels": [low + 1]}) == []
+    with pytest.raises(ValueError, match="no site puts the core under the aquifer"):       # BUG-484: no p.depth = every depth is tried, and says why
+        bp.rank(land, "fortcore", {"aquifer": "pass"}, manifest={"v": 2, "aquifer_levels": [low + 1]})
     assert bp.rank(land, "fortcore", {"aquifer": "pass"}, manifest={"v": 2, "aquifer_levels": [low + 2]})
     with pytest.raises(ValueError, match="aquifer"):
         bp.emit("fortcore", {"aquifer": "below"}, {"id": "S1", "anchor": [50, 50, 10], "rot": 0})

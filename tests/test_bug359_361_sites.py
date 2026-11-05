@@ -73,9 +73,12 @@ def test_a_known_aquifer_level_under_the_shaft_is_named_and_costs_score(land):
 def test_one_heavy_aquifer_stop_makes_the_level_a_wet_layer_around_its_stop(land):
     man = {"v": 2, "breaches": [_breach([5, 5, 6], "heavy_aquifer")]}
     assert sites._breach_layers(man) == {6: "wet level z6 (heavy aquifer: breach heavy_aquifer 5,5,6 p1)"}
-    # BUG-388: the wet layer rules out the dig near its stop (LAYER_R), not the level for every site of the map
-    got = bp.rank(land, "fortcore", manifest=man, n=10)
+    # BUG-388: the wet layer rules out the dig near its stop (LAYER_R), not the level for every site of the map (`_dry`, under
+    # p.aquifer=pass); BUG-484: a stage 1 with no p.aquifer never digs through a level a dig of ours met a heavy aquifer on
+    got = bp.rank(land, "fortcore", {"aquifer": "pass"}, manifest=man, n=10)
     assert got and all(max(abs(s["anchor"][0] - 5), abs(s["anchor"][1] - 5)) > sites.LAYER_R for s in got)
+    with pytest.raises(ValueError, match=r"heavy aquifer known at z6.*p\.aquifer=pass"):
+        bp.rank(land, "fortcore", manifest=man, n=10)
     grid = {"v": 2, "breaches": [_breach([x, y, 6], "heavy_aquifer") for x in range(0, 100, 15) for y in range(0, 100, 15)][:32]}
     with pytest.raises(ValueError, match=r"no dry fortcore site.*wet level z6 \(heavy aquifer"):
         bp.rank(land, "fortcore", manifest=grid)                        # stops all over the map: nothing dry is left

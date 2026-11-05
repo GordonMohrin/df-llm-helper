@@ -517,6 +517,12 @@ class Occupancy:
         self.meta[tag[0]] = (tag[1], tuple(an) if isinstance(an, list) and len(an) == 3 else None, fp,
                              bp_cells(doc) if cells is None else set(cells))
 
+    def discard(self, bp_id: str) -> None:
+        """BUG-483: forget a reservation (a document added only to hold its tiles back)."""
+        self.meta.pop(bp_id, None)
+        for c in [c for c, t in self.owner.items() if t[0] == bp_id]:
+            del self.owner[c]
+
     def own_cells(self, tpl: str, anchor) -> set:
         """BUG-195: the tiles the placed projects of `tpl` at `anchor` dig or build (their own earlier or later stages,
         not the reserved rest): a later stage that emits them again never clashes over them."""
@@ -1981,7 +1987,8 @@ def column_checked(save_dir: Path, tpl: str, params: dict | None, col: list[int]
 
 def site_params(tpl: str, params: dict | None, site: dict) -> dict | None:
     """BUG-432: a ranked aqshaft site names its own depth (down to the core's refuge level); p.depth given stays."""
-    if tpl == "aqshaft" and site.get("depth") and "depth" not in (params or {}):
+    pass_core = tpl == "fortcore" and (params or {}).get("aquifer") == "pass"        # BUG-484: a pass core names its depth too
+    if (tpl == "aqshaft" or pass_core) and site.get("depth") and "depth" not in (params or {}):
         return {**(params or {}), "depth": site["depth"]}
     return params
 

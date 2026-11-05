@@ -2461,6 +2461,15 @@ function M.held_projects(K, queued)
   return n
 end
 
+-- BUG-486 (Run 16d i4 Trumpetrealms: 'set aside, no runner slot' on many projects, 2 digs at once, 15 of 16 adults idle): the free idle
+-- adults (no job and no state that explains it: not resting, hurt or in a mood) and the adults counted, as of the last daily scan
+-- (idle_pct); nil before the first scan. The runner raises its parallel slots by them (runner Q.slot_cap).
+function M.idle_free(K)
+  local iw = st and st.idle_why
+  if type(iw) ~= 'table' or type(iw.why) ~= 'table' then return nil end
+  return math.tointeger(iw.why.free) or 0, math.tointeger(iw.n) or 0
+end
+
 local function idle_pct(K)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then st.idle_why = nil; return nil end
@@ -2839,9 +2848,12 @@ end
 M.MOOD_SHOPS = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsForge', 'Bowyers', 'Clothiers',
                 'Leatherworks', 'Tanners', 'Loom', 'GlassFurnace', 'Mechanics'}
 M.MOOD_ALT = {MetalsmithsForge = 'MagmaForge', GlassFurnace = 'MagmaGlassFurnace'}
-function M.mood_shops(K)
+-- BUG-486 (Run 16d i4 Trumpetrealms y375: 'mood shops missing 45 days', a Secretive mood at phase P0 got no PROJECT_REQUEST: the typed
+-- request needs this answer, and the plan's P1 waited for the very shops): `now` (a strange mood is in the fort now, care passes it)
+-- answers at any phase; the readiness blocker keeps the phase gate
+function M.mood_shops(K, now)
   local c = M.conf(K)
-  if not phase_ok(K, c.mood_from_phase or 'P1') then return nil end
+  if now ~= true and not phase_ok(K, c.mood_from_phase or 'P1') then return nil end
   local have = {}
   local ok1 = pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do

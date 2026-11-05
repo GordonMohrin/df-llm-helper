@@ -53,10 +53,12 @@ def test_bug304_trade_tokens_are_no_command(base):
 def test_bug304_token_runs_in_notes_only_of_the_plans_own_tokens():
     doc = {"trade": {"want": ["cloth:plant", "gem"], "sell": ["crafts"]}, "notes": "x: cloth:plant,gem; plant seeds"}
     assert plan.trade_tokens(doc) == {"cloth:plant", "gem", "crafts"}
-    assert plan.fair_play_hits(doc, ["plant"]) == [("$.notes", "plant")], "prose 'plant seeds' stays a warning"
+    assert plan.fair_play_hits(doc, ["plant"]) == [], "BUG-485: prose 'plant seeds' is no command"
+    doc["notes"] = "x: cloth:plant,gem; then dfhack-run plant create"
+    assert plan.fair_play_hits(doc, ["plant"]) == [("$.notes", "plant")], "a command stays a warning"
     doc["notes"] = "x: cloth:plant,gem"
     assert plan.fair_play_hits(doc, ["plant"]) == []
-    doc["notes"] = "x: cloth:plant,thread:plant"                           # thread:plant is not in the plan's lists
+    doc["notes"] = "x: cloth:plant,thread:plant; `plant`"                   # thread:plant is not in the plan's lists; a command in backticks
     assert plan.fair_play_hits(doc, ["plant"]) == [("$.notes", "plant")]
     doc["trade"]["want"] = ["cloth:wool"]                                   # no schema token (cloth subs plant/silk/yarn)
     assert plan.trade_tokens(doc) == {"crafts"}

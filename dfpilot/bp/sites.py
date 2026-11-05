@@ -22,6 +22,10 @@ revealed body of water (>= 8 tiles: a brook, river or lake, not a puddle or a su
 walking steps of the anchor, minus 1 per step beyond, -80 when no revealed water is reachable at all. BUG-130: a
 fortcore's dig keeps BREACH_R tiles from every breach the kernel recorded (manifest `breaches`, `caverns`) on its levels
 (+-1) and out of a wet layer (damp/water stops of LAYER_MIN projects on one level); ValueError when nothing dry is left.
+BUG-482: a room (refuge-level rooms among them) keeps CAV_KEEP tiles from known cavern water (`cavern_water`: the manifest's recorded
+cavern stops and cavern_lake breaches, revealed water with a cavern mark); BUG-484: a fortcore with no p.aquifer is dropped where its dig
+passes a level a dig of ours met a heavy aquifer on (`_flooded`), and `aquifer=pass` without p.depth is ranked at the depth that puts the core
+under the known aquifer (`_rank_pass`, each site names its depth; the ValueError says why when no depth up to 12 does).
 Refuge beds (`rooms.refuge_beds`, Run 10): anchors on the floor of the fortcore refuge room (no lever tile), the
 dormitory dug into the rock beside it (footprint and wall ring rock or unknown: it opens no new way in). The refuge drink
 store (`rooms.refuge_drink`, FR-69) the same way; BUG-319: also from the floor of those refuge-level rooms (the refuge grows
@@ -62,7 +66,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 8                            # BUG-346/359/400/407: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 9                            # BUG-346/359/400/407: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -229,6 +233,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     explore and fortcore sites; the defense builds have the one site the manifest fixes. `free` (BUG-292): a callable
     candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
     p = check_params(tpl, params)
+    if tpl == "fortcore" and p.get("aquifer") == "pass" and "depth" not in (params or {}):
+        return _rank_pass(snap, params, manifest, n, water, near, within, at, free)       # BUG-484: the depth that clears the aquifer
     if tpl in aquifer.BUILD:
         p["depth_auto"] = "depth" not in (params or {})     # BUG-432: no p.depth = down to the core level, not 20
     if tpl in defense.BUILD:
@@ -272,6 +278,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
         if not cands and tpl == "refuge_drink":
             raise ValueError(_no_store(snap, p, manifest, bad, hid, mk, wet))
+        cands = cavern_keep(cands, tpl, snap, manifest)    # BUG-482: never beside known cavern water
     if aqwell:
         cands = aquifer_well(cands, snap, manifest)         # BUG-262: the basin on an aquifer level, the room dry
     elif tpl not in aquifer.BUILD:                          # a shaft passes the aquifer levels: that is its point
@@ -307,6 +314,50 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
              **({"water": c["water"]} if "water" in c else {}),
              **({"depth": c["depth"]} if "depth" in c else {}),          # BUG-432: an aqshaft site names its own depth
              **({"walk": c["walk"]} if "walk" in c else {})} for i, c in enumerate(out)]
+
+
+PASS_DEPTH_MAX = fortcore.PARAMS["depth"][2]
+
+
+def _rank_pass(snap, params, manifest, n, water, near, within, at, free) -> list[dict]:
+    """BUG-484 (Run 16a i1 Basementflew y388-y390: `bp sites fortcore aquifer=pass` = 0 sites, known aquifer z116-z127 with heavy
+    layers under a light one; the default depth 3 can never put the core under a level 12 below the surface): without p.depth
+    the pass core is ranked at the shallowest depth, from the one that clears the shallowest anchor level, to PASS_DEPTH_MAX, whose
+    core levels all lie under the deepest known aquifer level (`aquifer_ok`); every site names its depth (`site_params` hands it to
+    bp.place, a later stage takes it from the stage 1 file, BUG-364). ValueError with the levels and the depth that was
+    short when none fits at any depth."""
+    aq = known_aquifer(snap, manifest)
+    top = snap["bbox"][5] - 1
+    d0 = fortcore.PARAMS["depth"][0]
+    if aq:
+        for d in range(d0, PASS_DEPTH_MAX + 1):
+            lo = min(footprint("fortcore", {**check_params("fortcore", {"aquifer": "pass"}), "depth": d}))
+            d0 = d
+            if top + lo + 1 < min(aq):
+                break
+    errs: list[str] = []
+    for d in range(d0, PASS_DEPTH_MAX + 1):
+        try:
+            sites = rank(snap, "fortcore", {**(params or {}), "depth": d}, manifest, n=n, water=water, near=near, within=within,
+                         at=at, free=free)
+        except ValueError as e:
+            errs.append(f"depth {d}: {str(e).removeprefix('fortcore: ')[:120]}")
+            continue
+        if not sites:
+            errs.append(f"depth {d}: every site meets a known aquifer level or has no room")
+            continue
+        low = min(footprint("fortcore", {**check_params("fortcore", {"aquifer": "pass"}), "depth": d}))
+        return [{**s, "depth": d, "why": s["why"] + f"; depth {d}: the core's deepest level z{s['anchor'][2] + low}"
+                 + (f" under the aquifer levels z{min(aq)}-z{max(aq)}" if aq else "")} for s in sites]
+    heavy = sorted(heavy_breach_levels(manifest), reverse=True)
+    raise ValueError(
+        f"fortcore: no site puts the core under the aquifer (known levels {', '.join('z' + str(z) for z in sorted(aq, reverse=True)) or 'none'}"
+        + (f", heavy at {', '.join('z' + str(z) for z in heavy)}" if heavy else "")
+        + f") at any depth {d0}..{PASS_DEPTH_MAX} from the surface z{top}: " + "; ".join(errs[:2])
+        + f". The template digs at most {PASS_DEPTH_MAX} levels under the surface: no core fits under these layers from here. "
+          "What to do: another part of the map (a lower start), an aqshaft with its heavy ring down to the deepest layer and "
+          "`bp sites fortcore aquifer=pass --fresh` again once it is done (the shaft shows what lies under), or stone and goods by "
+          "caravan (trade.want stone, mechanism); no core is dug through a known layer without p.aquifer")
 
 
 def walk_at(snap: dict, pos) -> str | None:
@@ -378,7 +429,12 @@ def _no_store(snap, p, manifest, bad, hid, mk, wet) -> str:
             continue
         tried.add(wh)
         q = {**p, "n": k}
-        if _rooms(snap, "refuge_drink", q, footprint("refuge_drink", q), bad, hid, mk, manifest, wet):
+        c = _rooms(snap, "refuge_drink", q, footprint("refuge_drink", q), bad, hid, mk, manifest, wet)
+        try:
+            c = cavern_keep(c, "refuge_drink", snap, manifest)       # BUG-482: a smaller store beside cavern water is none
+        except ValueError:
+            c = []
+        if c:
             return (f"{head}: no wall of it has rock or unknown tiles for that room and its wall ring; a smaller store "
                     f"fits: n={k} ({wh[0]}x{wh[1]}): dfllm bp sites refuge_drink n={k}")
     return (f"{head}, not even a 3x1 store (2 barrels): no wall of it has rock or unknown tiles behind it for a room "
@@ -802,6 +858,53 @@ def aquifer_ok(cands: list, tpl: str, p: dict, rects: dict, manifest: dict | Non
         z0, z1 = c["box"][2], c["box"][5]
         if not any(z0 <= z <= z1 + 1 for z in aq):
             out.append(c)
+    return out
+
+
+CAV_KEEP = 4        # BUG-482: tiles (x/y/z) a room or refuge site keeps from known cavern water
+
+
+def cavern_water(snap: dict | None, manifest: dict | None) -> list[tuple[int, int, int]]:
+    """BUG-482 (Run 16b i2 Roadvises y398-y400: the refuge z107 lay beside a cavern lake at 91,110,107, refuge_beds was drafted there
+    twice and `plan check` demanded it again): the tiles known to be cavern water or an opening into a cavern: the manifest's
+    recorded cavern stops (`caverns`), the recorded breaches that were a cavern lake, and the revealed water tiles that carry a
+    cavern mark on the snapshot. Hidden rock is unknown and never listed."""
+    out: set[tuple[int, int, int]] = set()
+    for q in (manifest or {}).get("caverns") or []:
+        if isinstance(q, (list, tuple)) and len(q) == 3 and all(isinstance(v, int) for v in q):
+            out.add((q[0], q[1], q[2]))
+    for b in (manifest or {}).get("breaches") or []:
+        pos = b.get("pos") if isinstance(b, dict) else None
+        if str((b or {}).get("why", "")).startswith("cavern") and isinstance(pos, (list, tuple)) and len(pos) == 3:
+            out.add((int(pos[0]), int(pos[1]), int(pos[2])))
+    if snap and snap.get("rows"):
+        at = _At(snap)
+        for q in (snap.get("marks") or {}).get("cavern", []):
+            if isinstance(q, (list, tuple)) and len(q) == 3 and at(*q) in WET:
+                out.add((int(q[0]), int(q[1]), int(q[2])))
+    return sorted(out)
+
+
+def cavern_keep(cands: list, tpl: str, snap: dict, manifest: dict | None) -> list:
+    """BUG-482: room sites (a refuge-level room among them) keep CAV_KEEP tiles from known cavern water: a site whose box, grown
+    by CAV_KEEP in x/y and one level in z, holds a `cavern_water` tile is dropped. ValueError naming the water when that leaves
+    nothing (the refuge room cannot move: plan check then warns instead of demanding the template)."""
+    pts = cavern_water(snap, manifest)
+    if not pts or not cands:
+        return cands
+    out, hit = [], None
+    for c in cands:
+        x0, y0, z0, x1, y1, z1 = c["box"]
+        w = next((q for q in pts if x0 - CAV_KEEP <= q[0] <= x1 + CAV_KEEP and y0 - CAV_KEEP <= q[1] <= y1 + CAV_KEEP
+                  and z0 - 1 <= q[2] <= z1 + 1), None)
+        if w is None:
+            out.append(c)
+        elif hit is None:
+            hit = w
+    if not out:
+        raise ValueError(f"{tpl}: all {len(cands)} candidate site(s) lie within {CAV_KEEP} tiles of known cavern water "
+                         f"(e.g. {_pos(hit)}); a room keeps off it (a breach into a cavern floods or lets the invaders in): "
+                         "another quadrant, or none now")
     return out
 
 
@@ -1707,9 +1810,19 @@ def _flooded(cands: list, snap: dict, manifest: dict | None, p: dict, rects: dic
     wet = _Pref(snap, lambda c: c in WET)
     cav = _Pref(snap, points=[tuple(q) for q in (snap.get("marks") or {}).get("cavern", [])])
     deep = [(w, lst) for w, lst in rects.items() if w <= FLOOD_W]
+    heavy = heavy_breach_levels(manifest)               # BUG-484: levels a dig of ours met a heavy aquifer on
     out, hit = [], []
     for c in cands:
         ax, ay, az = c["anchor"]
+        hv = sorted((z for z in heavy if az + wmin <= z <= az + wmax), reverse=True)
+        if hv:
+            # BUG-484 (Run 16a i1 Basementflew y388: plan propose drew fortcore @A46_61_131 stage 1 without p.aquifer, its dig met the
+            # heavy z116 again, AQ_HEAVY): a stage 1 with no p.aquifer never digs through a level a dig of ours met a heavy aquifer on;
+            # only p.aquifer=pass (the aqshaft with its heavy ring first, the core under the aquifer) or above (the fort over it) does
+            lbl = f"heavy aquifer known at z{','.join(str(z) for z in hv)}"
+            if lbl not in hit:
+                hit.append(lbl)
+            continue
         wat, cvz = set(), set()
         for w, lst in deep:
             for r in lst:
@@ -1737,9 +1850,10 @@ def _flooded(cands: list, snap: dict, manifest: dict | None, p: dict, rects: dic
         out.append({**c, "score": max(c["score"] - AQ_PENALTY * len(aq) - CAV_PENALTY * len(cvz), 0),
                     "why": c["why"] + "; " + "; ".join(notes)})
     if not out:
-        raise ValueError(f"fortcore: no site clear of water below: every site's deep dig lies within {FLOOD_R} tiles of "
-                         f"revealed water ({'; '.join(hit[:3])}{' +more' if len(hit) > 3 else ''}); another part of the "
-                         "map, or p.aquifer=pass (core below the aquifer)")
+        raise ValueError(f"fortcore: no site clear of water below: every site's dig lies within {FLOOD_R} tiles of "
+                         f"revealed water or meets a heavy aquifer ({'; '.join(hit[:3])}{' +more' if len(hit) > 3 else ''}); another "
+                         "part of the map, or p.aquifer=pass (the aqshaft with its ring first, the core under the aquifer: "
+                         "`bp sites fortcore aquifer=pass`, p.depth is chosen for it)")
     return out
 
 
