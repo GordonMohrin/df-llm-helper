@@ -26,6 +26,16 @@
 --    next level is designated only when every side tile stands sealed and the flow was watched; a plug reserve (wall
 --    material) must exist before the shaft goes below its top; a heavy aquifer stops the shaft and plugs it, the core below
 --    waits for a PASSED shaft and is never dug blind. Every wait is visible: stall() names why and the command.
+-- 1b. BUG-414 (Gordon 04.11.2026: every fort under the aquifer, a heavy layer too): a level known to be heavy (a breach
+--    heavy_aquifer recorded within heavy_span levels, or p.heavy = all) is NOT opened by a miner standing in it. The ring is
+--    walled from ABOVE first: per side tile (one at a time) the tile on the level above is channelled (the dwarf stands on the
+--    shaft's dry stair tile), which leaves an open ramp tile in the heavy level, and a constructed wall is built on that ramp
+--    from the stair tile (the way the cavern plug walls a channelled tile from the tile above it, lower tile first). A
+--    constructed wall is never an aquifer. Only when all 4 side tiles of the level stand as constructed walls is the shaft tile
+--    dug, so the heavy level's shaft tile touches no rough aquifer wall. The window of one open ring tile is watched: water on
+--    the dry level above (the shaft tile or a channelled ring top) = AQ_HEAVY + plug at once; a ring wall not standing after
+--    ring_wait does the same. A level whose ring tiles lie below a ring already walled (a heavy layer thicker than one level)
+--    cannot be channelled again: the shaft stops BEFORE opening it (AQ_HEAVY, nothing open, nothing to plug).
 -- Persist m.runner.aq[proj] (shaft): {k = 'shaft', mode, x, y, top, cur_z, aqn, dry, heavy, dz = {[z] = 1} damp levels,
 -- levels = {[z] = {state = dig|seal|watch|passed|dry|heavy, opened, samples, seal_tiles = {{x, y, z, kind, st}},
 -- material, ws, rd, seep}}}; (observe): {k = 'obs', mode = 'observe', t, n, pts = {{x, y, z, st}}, wet = {['x,y,z'] =
@@ -47,8 +57,12 @@ A.CFG = {
   stall = 3 * DAY,       -- BUG-412: a designated dig / unfinished seal this long without progress is a visible stall
   pre_ring = true,       -- BUG-412: the seal of a level that looks like an aquifer is designated with its dig
   plug_walls = 2,        -- BUG-412: wall material the plug needs (X.mat) before the shaft goes below its top
+  heavy_ring = true,     -- BUG-414: a known heavy level is ringed from above before its shaft tile is dug
+  heavy_span = 1,        -- ... a recorded heavy level makes the levels this close to it ring levels too
+  ring_wait = 2 * DAY,   -- ... a designated ring wall not standing this long: the shaft is stopped and plugged
 }
 A.MODES = {auto = true, stone = true, soil = true, all = true}
+A.HEAVY = {ring = true, all = true, off = true}     -- BUG-414: p.heavy: ring known heavy levels | every aquifer level | never
 local ORTH = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 local OPENED = {S = 'smooth', C = 'wall'}
 
@@ -74,7 +88,7 @@ function A.shaft(X, P, d)
   local p = type(d.params) == 'table' and d.params or {}
   local an = type(d.anchor) == 'table' and d.anchor or {}
   local mode = A.MODES[p.mode] and p.mode or 'auto'
-  r = {k = 'shaft', mode = mode, x = int(p.x) or int(an[1]), y = int(p.y) or int(an[2]),
+  r = {k = 'shaft', mode = mode, hmode = A.HEAVY[p.heavy] and p.heavy or 'ring', x = int(p.x) or int(an[1]), y = int(p.y) or int(an[2]),
        top = int(p.top) or int(an[3]), dry_levels = math.max(1, int(p.dry_levels) or 2), cur_z = int(p.top) or int(an[3]),
        aqn = 0, dry = 0, heavy = false, dz = json.object{}, levels = json.object{}, lv = {}}
   if (int(r.x) or -1) < 0 then r.x, r.y, r.top, r.cur_z = int(an[1]), int(an[2]), int(an[3]), int(an[3]) end
@@ -114,6 +128,7 @@ end
 ---------------------------------------------------------------- the lined shaft
 local function heavy(X, P, d, r, z, L, f, why, pos)
   r.heavy, L.state = true, 'heavy'
+  if type(X.hv) == 'function' then X.hv(z) end      -- BUG-414: the level is recorded as heavy for the next shaft
   X.block(P, 'breach:heavy_aquifer')
   local plug = X.plug(P, d, pos)
   local msg = string.format('%s: heavy aquifer at z%d (flow %d/7%s): stopped for good, shaft plugged (%s)', P.id, z, f,
@@ -160,12 +175,14 @@ local STALL_CMD = {
   no_stone = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm bp sites workshops surface=1 --fresh (Masons) and a stone dig",
   no_mason = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm bp sites workshops surface=1 --fresh (Masons)",
   no_smoother = "dfllm cmd inspect '{\"what\":\"workload\"}' (stone detailing / smoothing labor)",
+  ring_dig = "dfllm cmd inspect '{\"what\":\"workload\"}' (mining labor); dfllm cmd inspect '{\"what\":\"reach\"}'",
 }
 local STALL_TXT = {
   unreachable = 'no citizen reaches the shaft tile',
   no_stone = 'no stone for the plug and the soil walls',
   no_mason = 'no mason builds the soil walls',
   no_smoother = 'nobody smooths the side walls',
+  ring_dig = 'nobody channels the ring tile above the heavy level',
 }
 local function stall(X, P, r, z, L, why, days)
   local first = type(L.stall) ~= 'table' or L.stall.why ~= why
@@ -195,9 +212,9 @@ end
 
 -- the plug reserve: wall material for CAVERN_PLUG / the soil walls (economy.mat_for 'wall'); nil = fine or unknown (no
 -- economy in a mock), else the stall cause
-local function plug_missing(X)
+local function plug_missing(X, n)
   if type(X.mat) ~= 'function' then return nil end
-  local via, why = X.mat(A.CFG.plug_walls)
+  local via, why = X.mat(n or A.CFG.plug_walls)
   if via ~= nil or why == nil or why == 'no economy' then return nil end
   return tostring(why):find('mason', 1, true) and 'no_mason' or 'no_stone'
 end
@@ -210,7 +227,7 @@ local function designate(X, P, x, y, z, k, marker, data)
 end
 
 local function aquifer_here(X, r, z, L, v)
-  if r.mode == 'all' then return true end
+  if r.mode == 'all' or type(L.ring) == 'table' then return true end      -- BUG-414: a ringed level is an aquifer level
   if L.damp or (type(r.dz) == 'table' and r.dz[tostring(z)]) or flow_of(v) > 0 then return true end
   for _, o in ipairs(ORTH) do
     local n = X.tile(r.x + o[1], r.y + o[2], z)
@@ -262,6 +279,10 @@ local function dig_step(X, P, d, r, z, L)
   local st = d.stages[P.stage + 1]
   local ch = st.chunks[1]
   local k = ch.cells[1][4]
+  if not L.des and P.stage >= 1 and A.ring_level(X, r, z, L) then
+    local res = A.ring_step(X, P, d, r, z, L)                -- BUG-414: a known heavy level is ringed from above first
+    if res ~= nil then return res end
+  end
   if not L.des then
     local dx, dy, dz = ch.pos[1] + ch.cells[1][1], ch.pos[2] + ch.cells[1][2], ch.pos[3] + ch.cells[1][3]
     -- BUG-412: the plug reserve first. Below the top level the shaft may meet water at any level; without wall material
@@ -357,6 +378,162 @@ local function dig_step(X, P, d, r, z, L)
   check_level(X, P, d, r, z, L)
   if r.heavy then return 'done' end
   return A.seal_step(X, P, d, r, z, L)
+end
+
+---------------------------------------------------------------- BUG-414: the heavy level's ring, walled from above
+-- does level z get the ring-from-above method? A known heavy level (a recorded breach heavy_aquifer within heavy_span levels,
+-- X.heavy_known) or p.heavy = all; never with p.heavy = off. The top level (stage 0) has nothing above to stand on
+function A.ring_level(X, r, z, L)
+  if not A.CFG.heavy_ring or r.hmode == 'off' or L.noring then return false end
+  if type(L.ring) == 'table' then return L.ring.done ~= 1 end
+  if r.hmode == 'all' then return true end
+  return type(X.heavy_known) == 'function' and X.heavy_known(z, A.CFG.heavy_span) == true
+end
+
+local function open_tile(v) return type(v) == 'table' and v.c ~= '#' and v.c ~= 'S' end
+
+-- water on the dry level above while a ring tile is open (the shaft's stair tile, a channelled ring top): the heavy level
+-- has climbed out of its ring tile. true when the shaft was stopped and plugged (handled)
+local function ring_leak(X, P, d, r, z, L)
+  local R = L.ring
+  if type(R) ~= 'table' or R.done == 1 or L.state ~= 'dig' then return false end
+  local spots = {{r.x, r.y, z + 1}}
+  for _, p in ipairs(R.pieces) do spots[#spots + 1] = {p[1], p[2], z + 1} end
+  for _, s in ipairs(spots) do
+    local f = flow_of(X.tile(s[1], s[2], s[3]))
+    if f > 0 then
+      X.log('warn', '%s: ring of z%d: water %d/7 on the dry level above at %d,%d,%d', P.id, z, f, s[1], s[2], s[3])
+      return heavy(X, P, d, r, z, L, f, 'ring_leak', s)
+    end
+  end
+  return false
+end
+
+-- a heavy level whose ring tiles lie under constructed walls of the ring above (a layer thicker than one level): nothing
+-- can be channelled there. A level KNOWN to be heavy stops the shaft before anything is opened; true when handled
+local function ring_stacked(X, P, d, r, z, L)
+  for _, o in ipairs(ORTH) do
+    local t = X.tile(r.x + o[1], r.y + o[2], z + 1)
+    if t and t.c == 'C' then
+      L.noring = 'stacked'
+      if type(X.heavy_known) == 'function' and X.heavy_known(z, 0) == true then
+        r.heavy, L.state = true, 'heavy'
+        X.block(P, 'breach:heavy_aquifer')
+        local msg = string.format('%s: z%d is a heavy aquifer level under a ringed one (the layer is thicker than one level): '
+                                  .. 'its ring tiles cannot be channelled again, stopped before opening it (nothing open to plug)',
+                                  P.id, z)
+        X.emit('AQ_HEAVY', 'A', msg, {proj = P.id, z = z, flow = 0, why = 'stacked', pos = {r.x, r.y, z}})
+        X.log('warn', '%s', msg)
+        X.dirty()
+        return true
+      end
+      X.log('info', '%s: z%d: no ring possible (walls above), the usual method with the heavy stop', P.id, z)
+      X.dirty()
+      return false
+    end
+  end
+  return false
+end
+
+-- one pass of the ring of level z: nil = the ring stands (the shaft tile may be dug), else the work result
+function A.ring_step(X, P, d, r, z, L)
+  local R = L.ring
+  if not dug(X.tile(r.x, r.y, z + 1)) then return 'done' end                 -- the stair above is not dug yet
+  if type(R) ~= 'table' then
+    if ring_stacked(X, P, d, r, z, L) then return 'done' end
+    if L.noring then return nil end
+    local miss = plug_missing(X, A.CFG.plug_walls + #ORTH)
+    if miss then stall(X, P, r, z, L, miss); return 'done' end
+    unstall(X, L)
+    R = {pieces = {}, t = X.now()}
+    for _, o in ipairs(ORTH) do R.pieces[#R.pieces + 1] = {r.x + o[1], r.y + o[2], 'new', 0} end
+    L.ring = R
+    X.log('info', '%s: z%d is a heavy aquifer level: its %d side tiles are walled from above (channel on z%d, wall on z%d) '
+          .. 'before the shaft tile is dug', P.id, z, #ORTH, z + 1, z)
+    X.dirty()
+  end
+  if R.done == 1 then return nil end
+  local t = X.now()
+  for _, pc in ipairs(R.pieces) do
+    if pc[3] ~= 'done' then
+      local top, bot = X.tile(pc[1], pc[2], z + 1), X.tile(pc[1], pc[2], z)
+      if not bot or not top then return 'done' end                           -- hidden: wait
+      if pc[3] == 'new' then
+        if bot.c == 'C' then pc[3] = 'done'; X.moved(P)
+        elseif open_tile(bot) then pc[3] = 'open'                            -- an open tile already: only the wall is missing
+        else
+          local got = designate(X, P, pc[1], pc[2], z + 1, 'h', true)        -- one tile at a time: one open ring tile at most
+          if got == nil then return 'yield' end
+          if not got then
+            L.nd = (int(L.nd) or 0) + 1
+            X.log('warn', '%s: ring of z%d: quickfort designated no channel at %d,%d,%d (refused %d/%d)', P.id, z, pc[1], pc[2],
+                  z + 1, L.nd, A.CFG.refuse_max)
+            if L.nd >= A.CFG.refuse_max then X.block(P, 'apply_fail') end
+            X.dirty()
+            return 'done'
+          end
+          pc[3], pc[5] = 'chan', t
+          X.moved(P)
+        end
+        X.dirty()
+      end
+      if pc[3] == 'chan' then
+        if not open_tile(top) or top.dig ~= '' then                          -- the channel is not dug yet
+          if top.c == '#' and top.dig == '' then                             -- DF took the designation: again
+            pc[3], pc[4] = 'new', (int(pc[4]) or 0) + 1
+            if pc[4] >= A.CFG.redig then X.block(P, 'breach:damp') end
+          elseif t - (int(pc[5]) or t) >= A.CFG.stall then
+            stall(X, P, r, z, L, (type(X.unreachable) == 'function' and X.unreachable(P, d)) and 'unreachable' or 'ring_dig',
+                  (t - (int(pc[5]) or t)) // DAY)
+          end
+          X.dirty()
+          return 'done'
+        end
+        if not open_tile(bot) then return 'done' end                         -- the ramp below shows once it is revealed
+        pc[3] = 'open'
+        unstall(X, L)
+        X.moved(P)
+        X.dirty()
+      end
+      if pc[3] == 'open' then
+        local ok, st = X.qf{mode = 'build', data = cell1('Cw'), pos = {pc[1], pc[2], z}}
+        local n = ok and type(st) == 'table' and int(st.build_designated) or nil
+        if not ok or (n ~= nil and n <= 0) then
+          L.nb = (int(L.nb) or 0) + 1
+          X.log('warn', '%s: ring of z%d: no wall could be designated on %d,%d,%d (refused %d/%d)', P.id, z, pc[1], pc[2], z,
+                L.nb, A.CFG.refuse_max)
+          X.dirty()
+          if L.nb >= A.CFG.refuse_max then             -- an open ring tile nobody can wall: contain it
+            heavy(X, P, d, r, z, L, flow_of(bot), 'ring_refused', {pc[1], pc[2], z})
+          end
+          return 'done'
+        end
+        pc[3], pc[6] = 'wall', t
+        X.moved(P)
+        X.dirty()
+        return 'done'
+      end
+      if pc[3] == 'wall' then
+        if bot.c == 'C' then
+          pc[3] = 'done'
+          X.moved(P)
+          X.dirty()
+        else
+          if t - (int(pc[6]) or t) >= A.CFG.ring_wait then
+            X.log('warn', '%s: ring of z%d: the wall on %d,%d,%d stands unbuilt for %d d', P.id, z, pc[1], pc[2], z,
+                  (t - (int(pc[6]) or t)) // DAY)
+            heavy(X, P, d, r, z, L, flow_of(bot), 'ring_late', {pc[1], pc[2], z})
+          end
+          return 'done'
+        end
+      end
+    end
+  end
+  R.done = 1
+  L.ring_n = #R.pieces
+  X.log('info', '%s: z%d: the %d side tiles stand as constructed walls: the shaft tile is dug now', P.id, z, #R.pieces)
+  X.dirty()
+  return nil
 end
 
 -- one quickfort call for the pieces in `list` (cells relative to the shaft centre on z): true when it went through
@@ -489,7 +666,8 @@ function A.seal_step(X, P, d, r, z, L)
   local n = 0
   for _, p in ipairs(L.seal_tiles) do if p[4] == 'stone' or p[4] == 'soil' then n = n + 1 end end
   local f = L.samples[#L.samples] or 0
-  local how = L.material == 'stone' and 'stone' or L.material
+  local how = L.ring_n and 'ring' or L.material == 'stone' and 'stone' or L.material
+  n = L.ring_n or n
   X.emit('AQ_LEVEL_SEALED', 'B', string.format('%s: z%d sealed (%s, %d walls), flow %d/7: watching %d day%s', P.id, z, how,
                                                n, f, A.CFG.watch // DAY, A.CFG.watch // DAY == 1 and '' or 's'),
          {proj = P.id, z = z, how = how, n = n, flow = f, mat = L.mat})
@@ -524,6 +702,7 @@ function A.work(X, P, d, meas, hold)
   -- level the miners dug is open in every pass, read-only (nothing designated), so its flow is sampled below
   if L.state == 'dig' and L.des and not L.opened and dug(X.tile(r.x, r.y, z)) then L.opened = X.now(); X.dirty() end
   if check_level(X, P, d, r, z, L) then return 'done' end
+  if ring_leak(X, P, d, r, z, L) then return 'done' end            -- BUG-414: water above an open ring tile
   if meas or hold then return 'done' end
   if L.state == 'dig' then return dig_step(X, P, d, r, z, L)
   elseif L.state == 'seal' then return A.seal_step(X, P, d, r, z, L)
@@ -539,6 +718,7 @@ function A.holds(rt, id)
   local L = r.levels[tostring(r.cur_z)]
   if type(L) ~= 'table' then return false end
   return L.state == 'seal' or L.state == 'watch' or (L.state == 'dig' and (L.des or L.opened) ~= nil)
+         or (L.state == 'dig' and type(L.ring) == 'table' and L.ring.done ~= 1)       -- BUG-414: an open ring tile is watched
 end
 
 -- a damp report at pos for an aqshaft: that level is an aquifer level (sealed even without a revealed aquifer wall)

@@ -172,15 +172,21 @@ def kern_running(save_dir: Path) -> bool:
     return hb is not None and age is not None and age <= AUTO_SNAP_HB_S
 
 
-def wait_snapshot(save_dir: Path, cid: str, timeout: float) -> dict | None:
-    t0 = time.monotonic()
+def wait_snapshot(save_dir: Path, cid: str, timeout: float, progress=None, every: float = 15.0) -> dict | None:
+    """The snapshot file of `cid`, None after `timeout` seconds. BUG-415: progress(elapsed_s) is called about every `every`
+    seconds while waiting (a long export shows it is alive)."""
+    t0 = last = time.monotonic()
     while True:
         for p in [Path(save_dir) / "snap" / f"{cid}.json", *sorted((Path(save_dir) / "snap").glob(f"{cid}-*.json"))]:
             doc = files.read_snapshot(p) if p.exists() else None
             if doc:
                 return doc
-        if time.monotonic() - t0 >= timeout:
+        now = time.monotonic()
+        if now - t0 >= timeout:
             return None
+        if progress is not None and now - last >= every:
+            last = now
+            progress(now - t0)
         time.sleep(0.5)
 
 
@@ -1628,7 +1634,14 @@ def fewer_plots_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict 
 CORE_PAD = 52
 CORE_UP = 3
 CORE_DOWN = 3
-CORE_TILES = 300000          # under the kernel's snapshot cap (config snapshot.max_tiles, default 400000)
+# BUG-415 (Run 16c i3 after round 22: `bp sites fortcore --fresh` 'no snapshot within 60s' every time): the export reads more per
+# tile since round 22 (ice, mud, the open-sky level above, walk groups), so a 300000-tile box did not finish in a minute on a
+# busy kernel. The box is bounded to CORE_TILES, a box that does not fit round all pieces is cut round their median (never the
+# kernel's own default box, which may be larger), and the wait follows the box (fresh_wait).
+CORE_TILES = 150000          # tiles of one fortcore sites export (the kernel's snapshot cap is 400000)
+CORE_BOX_MIN = 90            # side of the smallest box (a fortcore needs 35 x 52 round its anchor, box_hint: 88)
+SNAP_TILES_PER_S = 1500      # the export's pace the wait is sized for (1000 tiles a frame, a busy kernel runs ~1.5 frames/s)
+SNAP_WAIT_MAX_S = 300.0
 
 
 def sites_box(save_dir: Path, tpl: str) -> list[int] | None:
@@ -1656,7 +1669,28 @@ def sites_box(save_dir: Path, tpl: str) -> list[int] | None:
         y0, y1 = max(0, min(q[1] for q in pts) - pad), max(q[1] for q in pts) + pad
         if (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) <= CORE_TILES:
             return [x0, y0, max(0, z0), x1, y1, z1]
-    return None                                           # pieces spread over the map: the kernel's own box
+    # BUG-415: the pieces are spread too far: a square round their median (the fort's middle), as large as CORE_TILES allows
+    xs, ys = sorted(q[0] for q in pts), sorted(q[1] for q in pts)
+    cx, cy = xs[len(xs) // 2], ys[len(ys) // 2]
+    side = max(CORE_BOX_MIN, int((CORE_TILES / max(1, z1 - z0 + 1)) ** 0.5))
+    x0, y0 = max(0, cx - side // 2), max(0, cy - side // 2)
+    return [x0, y0, max(0, z0), x0 + side - 1, y0 + side - 1, z1]
+
+
+def box_tiles(box: list[int] | None) -> int | None:
+    """Tiles in a [x0, y0, z0, x1, y1, z1] box, None for no box (the kernel's own)."""
+    if not (isinstance(box, list) and len(box) == 6):
+        return None
+    return max(0, box[3] - box[0] + 1) * max(0, box[4] - box[1] + 1) * max(0, box[5] - box[2] + 1)
+
+
+def fresh_wait(box: list[int] | None, timeout: float) -> float:
+    """BUG-415: how long `bp sites --fresh` waits for its export: `timeout` (the flag, default 60 s) at least, longer for a
+    big box (box_tiles / SNAP_TILES_PER_S plus 30 s, at most SNAP_WAIT_MAX_S)."""
+    n = box_tiles(box)
+    if n is None:
+        return float(timeout)
+    return float(max(timeout, min(SNAP_WAIT_MAX_S, 30.0 + n / SNAP_TILES_PER_S)))
 
 
 def box_hint(snap: dict | None, tpl: str) -> str:

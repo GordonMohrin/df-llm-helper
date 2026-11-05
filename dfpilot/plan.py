@@ -577,6 +577,19 @@ AQ_DEPTHS = tuple(range(1, 13))                            # fortcore.PARAMS dep
 AQSHAFT_DRY = 2                                           # aqshaft p.dry_levels in a core draft (the default)
 
 
+def heavy_levels(man: dict | None) -> list[int]:
+    """BUG-414: the absolute z of every breach the kernel recorded as heavy_aquifer (manifest `breaches`, any template): the
+    levels an aqshaft rings from above instead of opening them with a miner standing in them (aqshaft.lua)."""
+    out = set()
+    for b in (man or {}).get("breaches") or []:
+        pos = b.get("pos") if isinstance(b, dict) else None
+        if not (isinstance(b, dict) and b.get("why") == "heavy_aquifer" and isinstance(pos, list) and len(pos) == 3):
+            continue
+        if isinstance(pos[2], int) and not isinstance(pos[2], bool):
+            out.add(pos[2])
+    return sorted(out, reverse=True)
+
+
 def aquifer_route(save_dir: Path) -> dict:
     """BUG-412 (Gordon 04.11.2026: the fort belongs under the aquifer): the way through it for a core that would cut an aquifer
     level: {ok, why, depth (the fortcore's p.depth), site: {anchor, rot, label}, col: {x, y, top, depth, why}, aquifers}. The
@@ -596,6 +609,7 @@ def aquifer_route(save_dir: Path) -> dict:
         out["why"] = f"aquifer route not looked up ({_cut(str(e))})"
         return out
     out["aquifers"] = aq
+    out["heavy"] = heavy_levels(man)
     if not aq:
         out["why"] = "no aquifer level is known: nothing to pass (bp sites fortcore says why no core ranks)"
         return out
@@ -684,9 +698,13 @@ def aquifer_core_swap(builds: list[dict], af: dict, have_shaft: bool) -> tuple[l
         k += 1
     levels = ", ".join(f"z{z}" for z in sorted(af.get("aquifers", []), reverse=True))
     how = ("by the shaft placed already" if not first else f"by aqshaft@{col['x']},{col['y']} z{col['top']}")
+    hv = af.get("heavy") or []
+    ring = (f"; BUG-414: heavy aquifer recorded at {', '.join(f'z{z}' for z in hv)}: the shaft walls the 4 side tiles of those "
+            "levels (and the ones next to them) from above before it digs them (channel, constructed wall; AQ_HEAVY plugs it if "
+            "water climbs or a wall is not built in 2 days)") if hv else ""
     note = (f"; BUG-412: the core would cut the aquifer ({levels}): passed {how} ({col['why']}), then fortcore p.aquifer=pass "
             f"depth={af['depth']} at {site['anchor']} rot{site['rot']}: per level the shaft digs one tile, designates the seal "
-            "of the side tiles with the dig, seals and watches a day before the next; the core waits for a PASSED shaft")
+            "of the side tiles with the dig, seals and watches a day before the next; the core waits for a PASSED shaft" + ring)
     return out[:k] + first + out[k:], note
 
 
@@ -1763,8 +1781,9 @@ def core_resite(save_dir: Path, state: dict | None, br: list[dict]) -> dict | No
     if not br:
         return None
     anchors = {tuple(b["anchor"]) for b in br if b["anchor"]}      # BUG-162: a manifest-only row has no anchor
+    stopped = {b["proj"] for b in br}
     done = done_projects(save_dir)
-    at, moved, rest = [], None, []
+    at, moved, rest, live = [], None, [], None
     cur = core_anchor(save_dir)
     for p in bp_files(save_dir):
         d = files.read_json(p)
@@ -1772,16 +1791,31 @@ def core_resite(save_dir: Path, state: dict | None, br: list[dict]) -> dict | No
             continue
         a, st = list(d.get("anchor") or []), _stage_of(d.get("params")) or 1
         if tuple(a) in anchors:
-            at.append((p.stem, st, p.stem in done))
+            at.append((p.stem, st, p.stem in done, a))
+            # BUG-415 (Run 16c i3 y388: stage 3 stopped on breach:water, stage 1 y387s2b0 still digging, and every propose
+            # drafted fortcore@S1 stage 1-3 again, `plan check` refused it, 'is the fort's fortcore already'): a stage 1 on a
+            # breach anchor that is itself neither stopped nor done is the running core; a breach of a later stage does not move it
+            if st == 1 and p.stem not in stopped and p.stem not in done and (live is None or a == cur):
+                live = {"proj": p.stem, "anchor": a, "rot": d.get("rot", 0)}
             continue
         rest.append((a, st))
         if st == 1 and (moved is None or a == cur):         # the re-site was applied already (the current core first)
             moved = {"proj": p.stem, "anchor": a, "rot": d.get("rot", 0)}
+    stuck: list[int] = []
+    if live and not (moved and moved["anchor"] == cur):
+        moved = live
+        stuck = sorted({b["stage"] for b in br if b["anchor"] and list(b["anchor"]) == live["anchor"]})
+        for pid, st, dn, a in list(at):                     # its own later stages that run are part of it, not to cancel
+            if a == live["anchor"] and pid not in stopped:
+                at.remove((pid, st, dn, a))
+                rest.append((a, st))
     if moved:   # BUG-163: the stages that stand on the moved anchor (its missing later stages are drafted there)
         moved["stages"] = sorted({st for a, st in rest if a == moved["anchor"]})
-    dug = sorted(pid for pid, st, dn in at if st == 1 and dn)
-    out = {"br": br, "ids": sorted({pid for pid, _, dn in at if not dn} | {b["proj"] for b in br}),
-           "stages": sorted({st for _, st, _ in at} | {b["stage"] for b in br}), "resite": not dug, "ok": None,
+        if stuck:
+            moved["stuck"] = stuck
+    dug = sorted(pid for pid, st, dn, _ in at if st == 1 and dn)
+    out = {"br": br, "ids": sorted({pid for pid, _, dn, _ in at if not dn} | {b["proj"] for b in br}),
+           "stages": sorted({st for _, st, _, _ in at} | {b["stage"] for b in br}), "resite": not dug, "ok": None,
            "why": "", "site": None, "moved": moved}
     if dug:
         out["ok"], out["why"] = False, f"stage 1 {dug[0]} is dug there: its later stages cannot move"
@@ -1895,7 +1929,9 @@ def core_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[s
     if mv:                                     # re-sited already: @same is the new anchor; a second stage 1 is not
         errs += [f"{head}; seasons[{si}].build[{bi}] fortcore stage 1 would be a second fortcore: it was re-sited "
                  f"to {mv['proj']} already (BUG-130): leave it out" for si, bi, b in adds if _resite(b)]
-        warn.append(f"{head}: re-sited to {mv['proj']}; free its tiles: dfllm cmd bp.cancel proj={core['ids'][0]}")
+        warn.append(f"{head}: re-sited to {mv['proj']}; free its tiles: dfllm cmd bp.cancel proj={core['ids'][0]}"
+                    + (f" (BUG-415: {mv['proj']} runs; stage(s) {', '.join(map(str, mv['stuck']))} stopped on its anchor)"
+                       if mv.get("stuck") else ""))
         return errs, warn
     movable = core_movable(core)
     stopped = {b["stage"] for b in core["br"]}
@@ -2923,6 +2959,26 @@ def live_trade(save_dir: Path) -> dict | None:
     return out or None
 
 
+def no_core_route(fort: dict | None, s: dict | None, done: set) -> str:
+    """BUG-415: why a fort with no fortcore and no refuge cannot get one ('' when it can, or has one): no fortcore project
+    placed or drafted before (fort.core_any, done), no refuge burrow (state alert.ref.ex), and the core has no way: the sites
+    ranking finds no fortcore site (surface_facts.need) and neither the aquifer route (plan.surface_core off) nor the surface core
+    (on) has one."""
+    f = fort or {}
+    ref = ((s or {}).get("alert") or {}).get("ref")
+    if f.get("core_any") is not False or any(t == "fortcore" for t, _ in done) or (isinstance(ref, dict) and ref.get("ex")):
+        return ""
+    sf = f.get("surface") or {}
+    if not sf.get("need") or sf.get("have"):
+        return ""
+    if surface_core_on():
+        return "no site for the surface core" if sf.get("site") is False else ""
+    aq = sf.get("aq")
+    if isinstance(aq, dict) and not aq.get("ok"):
+        return aq.get("why") or sf.get("why") or "no safe way through the aquifer"
+    return ""
+
+
 def stale_core_keys(prev: dict | None, applied: set | None, fort: dict | None, state: dict | None = None) -> set[tuple]:
     """BUG-366 (Run 16b i2: after bp.cancel of both fortcores the draft kept `fortcore@same st3` and `plan check` refused it,
     'site same: fortcore was never placed'; the player counted the year up to get rid of it): the (tpl, stage) keys of the
@@ -2993,12 +3049,16 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         mv = core.get("moved")
         if mv:                                   # the re-site was applied: never a second fortcore
             # BUG-163: the later stages the moved core lacks, at its explicit anchor (`same` may still name the old one)
-            lack = [k for k in need if k not in (mv.get("stages") or [])]
+            stuck = mv.get("stuck") or []          # BUG-415: a stage that stopped on this very anchor is not drafted there again
+            lack = [k for k in need if k not in (mv.get("stages") or []) and k not in stuck]
             label = _cmd.anchor_label(mv["anchor"], mv.get("rot", 0)) if len(mv.get("anchor") or []) == 3 else SAME
             builds += [{"tpl": "fortcore", "site": label, "p": {"stage": k}} for k in lack]
             core_note = (f"; BUG-130: fortcore {b0['proj']} stopped on breach:{b0['why']}{where} was re-sited to "
                          f"{mv['proj']}" + (f" (stages {', '.join(map(str, lack))} drafted there @{label})" if lack
-                                            else "") + f"; free its tiles: {cancel}")
+                                            else "") + f"; free its tiles: {cancel}"
+                         + (f"; BUG-415: the core {mv['proj']} runs, stage(s) {', '.join(map(str, stuck))} stopped on its own "
+                            "anchor and are not drafted there again (take them back, then the next site or a decision)"
+                            if stuck else ""))
         elif core_movable(core):
             for k in range(1, STAGES_MAX + 1):     # BUG-163: the new core needs every stage, whatever stood elsewhere
                 done.discard(("fortcore", k))
@@ -3019,6 +3079,18 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
                          + ("" if seal_n != 0 else ": nothing left to close") + "); readiness keeps "
                          f"R0 no_outer/no_inner and the drill stays refused (only bridges of role outer/inner count)"
                          + (f"; phase_target held at {target} (no refuge)" if core["resite"] else "") + f"; the parked: {cancel}")
+    # BUG-415 (Run 16c i3 y391: target P5, ERROR 'no refuge burrow' with no fortcore, no free fortcore site and no way through
+    # the aquifer; the player lowered it to P2 every year): a fort without a fortcore that no core route can build stays below the
+    # refuge phase, and the notes say why
+    cap_note = ""
+    if target >= REFUGE_PHASE and not core and no_core_route(fort, s, done):
+        below = max((p["id"] for p in plist if p["id"] < REFUGE_PHASE), default=cur)
+        capped = max(cur, below) if cur < REFUGE_PHASE else cur
+        if capped < target:
+            cap_note = (f"; BUG-415: phase_target {target} -> {capped}: no fortcore stands and none can be built "
+                        f"({_cut(no_core_route(fort, s, done))}), so no refuge can follow (refuge_gate would refuse it); "
+                        "see `dfllm bp sites fortcore --fresh` and `plan check`; the target rises once a core is placed")
+            target = capped
     # Run 10: then the refuge (refuge_gate refuses P3+ without a separated one with beds); Run 11: from the fort's
     # start once the refuge burrow exists, before every other new build
     for b in refuge_drafts(s, fort or {}, done, early=target < REFUGE_PHASE):
@@ -3205,7 +3277,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + depot_note + hosp_note + sc_note + aq_note + office_note
+    doc["notes"] += core_note + cap_note + depot_note + hosp_note + sc_note + aq_note + office_note
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
         if armor and not _bar_want(doc["trade"]["want"]):

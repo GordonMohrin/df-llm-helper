@@ -182,10 +182,15 @@ def test_a_far_flung_fort_shrinks_the_pad_or_leaves_the_box_to_the_kernel(save):
     _bp(save, "a", tpl="farms", anchor=(100, 100, 100))
     _bp(save, "b", tpl="farms", anchor=(200, 160, 104))
     box = cmd.sites_box(save, "fortcore")
-    assert box is not None and box[0] == 100 - 40                                  # 52 is over the cap, 40 fits
+    assert box is not None                                                         # 52, 40, 30 and 20 are over the cap (BUG-415)
     assert (box[3] - box[0] + 1) * (box[4] - box[1] + 1) * (box[5] - box[2] + 1) <= cmd.CORE_TILES
+    assert box[0] <= 200 <= box[3] and box[1] <= 160 <= box[4]                     # round the median piece
     _bp(save, "c", tpl="farms", anchor=(700, 700, 110))
-    assert cmd.sites_box(save, "fortcore") is None                                 # spread over the map: the kernel's box
+    # BUG-415: spread over the map: a bounded box round the median, never the kernel's own (bigger) default box
+    box = cmd.sites_box(save, "fortcore")
+    assert box is not None and (box[3] - box[0] + 1) * (box[4] - box[1] + 1) * (box[5] - box[2] + 1) <= cmd.CORE_TILES
+    assert box[3] - box[0] + 1 >= cmd.CORE_BOX_MIN and box[4] - box[1] + 1 >= cmd.CORE_BOX_MIN
+    assert box[0] <= 200 <= box[3] and box[1] <= 160 <= box[4]                     # the median piece (200, 160)
 
 
 def _prev(year, builds):

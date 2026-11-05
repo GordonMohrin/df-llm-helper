@@ -1,4 +1,4 @@
-aqshaft {'x': -1, 'y': -1, 'top': -1, 'dry_levels': 2, 'depth': 20, 'mode': 'auto'} anchor [70, 70, 100] rot 0
+aqshaft {'x': -1, 'y': -1, 'top': -1, 'dry_levels': 2, 'depth': 20, 'mode': 'auto', 'heavy': 'ring'} anchor [70, 70, 100] rot 0
   infra: l0.dig(1), l1.dig(1), l2.dig(1), l3.dig(1), l4.dig(1), l5.dig(1), l6.dig(1), l7.dig(1), l8.dig(1), l9.dig(1), l10.dig(1), l11.dig(1), l12.dig(1), l13.dig(1), l14.dig(1), l15.dig(1), l16.dig(1), l17.dig(1), l18.dig(1), l19.dig(1)
   materials: {}
 z100  (x 69..71, y 69..71)

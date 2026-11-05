@@ -19,7 +19,7 @@ def test_aqshaft_document():
     cells = [(s["chunks"][0]["pos"], s["chunks"][0]["cells"]) for s in d["stages"]]
     assert cells[0] == ([40, 41, 100], [[0, 0, 0, "j"]])
     assert cells[1] == ([40, 41, 99], [[0, 0, 0, "i"]]) and cells[3] == ([40, 41, 97], [[0, 0, 0, "i"]])
-    assert d["params"] == {"x": 40, "y": 41, "top": 100, "dry_levels": 2, "depth": 4, "mode": "auto"}
+    assert d["params"] == {"x": 40, "y": 41, "top": 100, "dry_levels": 2, "depth": 4, "mode": "auto", "heavy": "ring"}
     assert d["materials"] == {} and "zones" not in d["manifest"]          # a shaft is no room
     assert schema.validate("bp", {**d, "id": "aq1"}) == []
 
