@@ -124,10 +124,21 @@ T.test('BUG-444: a shaft that holds a level and makes no progress for stall_days
        ev[1].msg .. ' / ' .. tostring(ev[1].d.parts))
   T.ok(ev[1].d.cmd:find('bp.cancel', 1, true) and ev[1].d.cmd:find('bp sites aqshaft', 1, true), ev[1].d.cmd)
   local t1 = ev[1].tick
+  local R = rt(W).p['aq']
+  T.ok(R and R.sks and R.sk == nil, 'the announcement stamp is R.sks; the skipped-tile counter R.sk (-> lost) is untouched: ' .. T.show(R))
   for _ = 1, 2 * 12 do H.runs(W, 1) end
   local ev2 = blocked(W, 'stalled')
   T.ok(#ev2 >= 2 and ev2[2].tick - t1 >= 5 * 1200, 'again after stall_every: ' .. #ev2)
   T.ok(H.proj(W, 'aq') and H.proj(W, 'aq').blocked ~= 'cancel', 'announcement only: nothing is cancelled')
+  -- a real skip count of 2 is not read as a timestamp: the first announcement is not suppressed or repeated at once
+  local W2 = fresh{tag = 'b444sk', cfg = CFGQ}
+  know_heavy(W2, 99)
+  start(W2)
+  W2.tile(AX + 1, AY, 99).hidden = true
+  rt(W2).p['aq'].sk = 2
+  for _ = 1, 2 * 12 do H.runs(W2, 1) end
+  T.eq(#blocked(W2, 'stalled'), 1, 'a skip count does not repeat the announcement')
+  T.eq(rt(W2).p['aq'].sk, 2, 'lost stays the real skip count')
   local W0 = fresh{tag = 'b444off', cfg = {baseline = {v = 2, runner = {queue = {idle_days = 5, stall_days = 0}}}}}
   know_heavy(W0, 99)
   start(W0)

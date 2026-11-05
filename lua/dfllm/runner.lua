@@ -5358,16 +5358,16 @@ end
 -- idle_keep exempts a shaft watching a level (and the refuge drink, a seal in a siege, ...) from the set-aside rule for good. A
 -- project that is neither done, halted nor set aside and whose own progress (R.ps) is stall_days old says so (PROJECT_BLOCKED
 -- why=stalled, A): the cause (the aqshaft's level and ring state, what its stage waits for, why it is kept) and the commands; again
--- every stall_every days (R.sk). Informative: the project keeps its slot, nothing is cancelled
+-- every stall_every days (R.sks). Informative: the project keeps its slot, nothing is cancelled
 function Q.stall_scan(K, c, t)
   local sd = c.runstall
   if not sd or sd <= 0 or K.mode() ~= 'PEACE' then return end
   for _, P in ipairs(sorted()) do
     local R = S.rt.p[P.id]
     local ps = type(R) == 'table' and R.si == P.stage and int(R.ps) or nil
-    local sn = type(R) == 'table' and int(R.sk) or nil
+    local sn = type(R) == 'table' and int(R.sks) or nil
     if ps and P.done ~= 1 and not halted(P) and not Q.idle(P) and t - ps >= sd and (not sn or t - sn >= c.runstall_every) then
-      R.sk = t
+      R.sks = t
       dirty()
       local d = doc(K, P.id)
       local st = d and d.stages[P.stage + 1]

@@ -18,3 +18,5 @@ PROJECT_BLOCKED (A) `why=stalled`, `idle` days, `parts` = the cause (the aqshaft
 
 ## Live check
 A shaft that holds a level without progress: after 60 days `PROJECT_BLOCKED ... stalled: no progress for N d at l7.dig 60%: z113 dig, ring wall/new/new/new; ...`, again after 60.
+
+Note: the announcement stamp lives in the runtime field `R.sks` (not `R.sk`, which is the skipped-tile counter behind `lost`); a stalled stage that later completes keeps its real `lost`.
