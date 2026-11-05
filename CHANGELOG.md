@@ -1,5 +1,21 @@
 # CHANGELOG dfpilot
 
+## Water behind rock: the nearest tile, a sealed-rock cistern intake, an emergency well (BUG-423 to BUG-425, 2026-11-05; offline, live-untested)
+- **Why:** Run 16a i1 Manorsubtle died of thirst (13 of 15) with a brook in a rock gully 8 tiles from the start room: `water_sources` knew one body by its
+  first tile in y order (`10,0,158`, the map edge), `bp sites cistern --near 10,0,158` found no site, the cistern template wanted bank floor, the wells read 1-2/7.
+  The water rule (no free digging within 3 tiles of open water) stays; dfpilot's own cistern template with its pipe and floodgate is the way in.
+- **BUG-423:** `scan_group` sorts a body's tiles nearest-first (to the fort's reference box or a citizen's walk origin): `at` is the water tile nearest to
+  the fort (`nd`, `ext` new), the bank / dig / well-spot search starts there (it spent its reads at the far end); `drink_access.near`; the `no_water` decision
+  carries `near`, `nd` and `bp.sites cistern --near <that tile>`.
+- **BUG-424:** `sites._rock_top_ok`: a sealed rock intake (shaft top and breach dug in rock by the template); `plan_cistern(rock=None)` tries bank then rock;
+  `cistern_access` (safe first, an unsafe route only flagged). `no_water` also emits `PROJECT_REQUEST cistern why=no_water` (`at`, `economy.drink.access_d` 400);
+  follow plans and places it (AUTO_FAIL with the reason for no or an unsafe plan), `plan propose` drafts it. Contract: PROJECT_REQUEST `at`, schema appendix.
+- **BUG-425:** `water.well_emerg` (2, 0 = off): with no other source and no bank, a built well over >= 2/7 is a slow, flagged drink source (no hospital water, not in
+  `water.src`, kern.log and the decision say EMERGENCY); a thirsty citizen beside it revokes it.
+- **Tests:** tests/lua/test_bug423_425_water.lua (13), tests/bp/test_bug424_rock_intake.py (4), tests/test_bug423_425_access.py (8).
+- **Live check:** see BUG-423 / BUG-424 / BUG-425 (a gully brook: `no_water` -> `auto:cistern_water` -> `cistern-check`; the first live question is whether the
+  breach channel on a rock tile is accepted).
+
 ## A heavy aquifer is walled from above; the running core stays; a bounded sites export (BUG-414, BUG-415, 2026-11-05; offline, live-untested)
 - **Why:** Gordon: "generell durch den Aquifer graben, so sicher wie moeglich". BUG-412 passed light aquifers per level but only contained a heavy one
   (stop + plug): Run 16c i3 Yawninggilt hit heavy water at all three core sites and had no core after 20 years. Its propose also redrafted

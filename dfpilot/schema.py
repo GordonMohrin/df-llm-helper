@@ -482,7 +482,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-340: food_low/famine opts only with a command; cmds = their command lines in opts order (`dfllm cmd ...`); auto
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -741,7 +741,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # counted as delivered)
     "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s walled:sa pre:i")),       # Run 11: walled as PROJECT_BLOCKED
     # FR-76: types = the mandatory workshops a reclaimed fort lacks (why mandatory)
-    "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i types:sa")),
+    "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i types:sa at:ia")),   # BUG-424: why=no_water at = the nearest water tile
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "

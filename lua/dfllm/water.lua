@@ -112,6 +112,11 @@ M.DEFAULTS = {
   -- as accepted drink only over water >= well_min/7; shallower is 'shallow' (no source for hospital, refuge, served).
   -- DF's own line for a well is not documented in this repo (the Water Source zone's is 4/7, deep): 3 is conservative
   well_min = 3,
+  -- BUG-425 (Run 16a i1 Manorsubtle: the fortcore wells read 1-2/7 and were never accepted, 13 of 15 died of thirst with no other
+  -- water): when NO other source is accepted and no body of water has a bank the citizens reach, a built well over water of at least
+  -- well_emerg/7 counts as a (slow) drink source, flagged `emerg`: it is no hospital source and not in the state's water.src (plan
+  -- keeps asking for real water), and kern.log / the decision say so. 0 = never (only well_min wells count)
+  well_emerg = 2,
   -- BUG-054 (Run 11 y497: 5 patients dead of thirst at once with 4 caregivers, 24-27 free buckets and "hospital ok"):
   -- caregivers (the FEED_WATER_CIVILIANS labor, the Orderlies work detail) scale with the patients: carers_per_patient
   -- each (at least carers_min while there is a patient, at most carers_max), carers_urgent more while a patient is over
@@ -393,6 +398,32 @@ local function phase_units(K, c, r)
   return r.idx >= #r.ids
 end
 
+-- BUG-425: the emergency drink wells (see DEFAULTS well_emerg): when nothing else is accepted (no wet zone or well) and the last scan
+-- knows no body with a bank the citizens reach, the shallow built wells over water >= well_emerg/7 become sources flagged `emerg`.
+-- An unknown scan accepts nothing on a guess; a well a citizen over well_thirst stands beside (`thirsty`) is no source: the trickle
+-- demonstrably does not reach him (`emerg_no` = his thirst). Returns the wells made sources
+function M.emerg_wells(c, sources, ws, thirsty)
+  local out = {}
+  local mn = math.tointeger(c.well_emerg) or 0
+  if mn <= 0 or not ws then return out end
+  for _, b in ipairs(ws.bodies or {}) do
+    if b.cavern ~= 1 and b.bank then return out end
+  end
+  for _, s in ipairs(sources) do if s.wet then return out end end
+  for _, s in ipairs(sources) do
+    local bl = s.below
+    if s.kind == 'well' and s.built ~= false and bl and bl.why == 'shallow' and (math.tointeger(bl.flow) or 0) >= mn then
+      -- proof against it (Run 15d: a citizen beside a 1-2/7 well went on thirsting, 13 dead): one standing at it over well_thirst
+      local proof
+      for _, t in ipairs(thirsty or {}) do
+        if t.z == s.z and math.max(math.abs(t.x - s.x), math.abs(t.y - s.y)) <= 1 then proof = t; break end
+      end
+      if proof then s.emerg_no = proof.thirst else s.wet, s.emerg = true, true; out[#out + 1] = s end
+    end
+  end
+  return out
+end
+
 -- wells, Water Source zones, hospital zones
 local function phase_sites(K, c, r)
   local other = df.global.world.buildings.other
@@ -433,6 +464,19 @@ local function phase_sites(K, c, r)
       r.sources[#r.sources + 1] = {kind = 'zone', id = zn.id, x = (zn.x1 + zn.x2) // 2, y = (zn.y1 + zn.y2) // 2,
                                    z = zn.z, wet = zone_wet(K, c, zn), box = {x1 = zn.x1, y1 = zn.y1, x2 = zn.x2,
                                                                                 y2 = zn.y2, z = zn.z}}
+    end
+  end
+  local em = M.emerg_wells(c, r.sources, st.ws, r.thirsty)
+  if #em > 0 then
+    local p = pstate(K)
+    p.emg = json.object(type(p.emg) == 'table' and p.emg or {})
+    for _, s in ipairs(em) do
+      if not p.emg[tostring(s.id)] then
+        p.emg[tostring(s.id)] = K.now().tick
+        K.log('warn', 'water: EMERGENCY: no other drink source, well %d at %d,%d,%d over only %d/7 (< well_min %d/7) is accepted as a '
+              .. 'slow drink source (well_emerg %d): dig or pipe real water', s.id, s.x, s.y, s.z, s.below.flow or 0, c.well_min,
+              c.well_emerg)
+      end
     end
   end
   return true
@@ -483,7 +527,7 @@ end
 local function served(K, c, r, h)
   local best
   for _, s in ipairs(r.sources) do
-    if s.wet then
+    if s.wet and not s.emerg then                       -- BUG-425: an emergency well is no hospital water
       local d = dist_box(s.x, s.y, s.z, h)
       if not best or d < best.d then best = {d = d, s = s} end
     end
@@ -1054,8 +1098,38 @@ local function scan_group(c, sc)
           if sc.tiles[nk] and not seen[nk] then seen[nk] = true; stack[#stack + 1] = sc.tiles[nk] end
         end
       end
-      table.sort(body.tiles, function(a, b) return a[2] < b[2] or (a[2] == b[2] and a[1] < b[1]) end)
+      -- BUG-423 (Run 16a i1 Manorsubtle: one body of 1229 tiles, `at` 10,0,158 = its first tile in y order at the map edge, 80 tiles
+      -- from the brook in the gully beside the start room; 'bp sites cistern --near 10,0,158' found no site, and the bank search
+      -- spent its 400 reads at the far end): the tiles run nearest first (to the reference box or to a citizen's walk origin,
+      -- then y, x) so `at` is the water tile NEAREST to the fort and the bank / dig / well-spot search starts there
+      local function near_d(t)             -- Chebyshev distance (the scan's measure) and, to break the many ties, the squared one
+        local rx = t[1] < sc.ref.x1 and sc.ref.x1 - t[1] or (t[1] > sc.ref.x2 and t[1] - sc.ref.x2 or 0)
+        local ry = t[2] < sc.ref.y1 and sc.ref.y1 - t[2] or (t[2] > sc.ref.y2 and t[2] - sc.ref.y2 or 0)
+        local rz = math.abs(t[3] - sc.ref.z)
+        local d, d2 = math.max(rx, ry, rz), rx * rx + ry * ry + rz * rz
+        for _, f in ipairs(sc.froms or {}) do
+          local fx, fy, fz = math.abs(t[1] - f.x), math.abs(t[2] - f.y), math.abs(t[3] - f.z)
+          local df = math.max(fx, fy, fz)
+          if df < d or (df == d and fx * fx + fy * fy + fz * fz < d2) then d, d2 = df, fx * fx + fy * fy + fz * fz end
+        end
+        return d, d2
+      end
+      for _, t in ipairs(body.tiles) do t.nd, t.n2 = near_d(t) end
+      table.sort(body.tiles, function(a, b)
+        if a.nd ~= b.nd then return a.nd < b.nd end
+        if a.n2 ~= b.n2 then return a.n2 < b.n2 end
+        return a[2] < b[2] or (a[2] == b[2] and a[1] < b[1])
+      end)
       body.at = {body.tiles[1][1], body.tiles[1][2], body.z}
+      body.nd = body.tiles[1].nd
+      local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+      for _, t in ipairs(body.tiles) do
+        if t[1] < x0 then x0 = t[1] end
+        if t[1] > x1 then x1 = t[1] end
+        if t[2] < y0 then y0 = t[2] end
+        if t[2] > y1 then y1 = t[2] end
+      end
+      body.ext = {x0, y0, x1, y1}
       bodies[#bodies + 1] = body
     end
   end
@@ -1086,7 +1160,7 @@ end
 -- BUG-291: a revealed tile with the aquifer flag in or beside the body marks its level (sc.aqz)
 local function scan_body(K, c, sc, body)
   local z, deepset = body.z, sc.tiles
-  local res = {z = z, n = #body.tiles, max = body.max, at = body.at, d = body.d, zone = -1, well = -1, reach = 0}
+  local res = {z = z, n = #body.tiles, max = body.max, at = body.at, d = body.d, nd = body.nd, ext = body.ext, zone = -1, well = -1, reach = 0}
   -- BUG-031 (Run 11: a 7/7 cavern lake 1146 tiles on z127 below an aborted shaft): caverns stay sealed (DOCTRINE: every
   -- breach of caverns through a 2-wall airlock), so cavern water is listed but never looked at for a bank or a dig
   if body.cav == 1 then res.cavern = 1; return res end
@@ -1420,7 +1494,7 @@ local function remove_dry(K, c, r, p, T)
   for i = 1, math.min(8, #over) do ids[i] = over[i].id end
   local best
   for _, s in ipairs(r.sources) do
-    if s.wet then
+    if s.wet and not s.emerg then
       local d = dist_box(s.x, s.y, s.z, first)
       if not best or d < best.d then best = {d = d, s = s} end
     end
@@ -1457,7 +1531,7 @@ local function src_list(r)
   end
   local l = {}
   for _, s in ipairs(r.sources) do
-    if s.wet then l[#l + 1] = {s = s, d = ref and dist_box(s.x, s.y, s.z, ref) or 0} end
+    if s.wet and not s.emerg then l[#l + 1] = {s = s, d = ref and dist_box(s.x, s.y, s.z, ref) or 0} end   -- BUG-425
   end
   table.sort(l, function(a, b)
     if a.d ~= b.d then return a.d < b.d end
@@ -3228,10 +3302,10 @@ end
 function M.drink_fix(K)
   local src = st.src
   if not src then return nil end
-  local acc, at
+  local acc, at, em
   for _, s in ipairs(src) do
     local shallow = s.kind == 'well' and s.below and s.below.why == 'shallow'
-    if s.wet then acc = acc or s end
+    if s.wet and s.emerg then em = em or s elseif s.wet then acc = acc or s end
     if s.kind == 'well' and (s.wet or shallow) and not at then
       for _, t in ipairs(st.thirsty or {}) do
         if t.z == s.z and math.max(math.abs(t.x - s.x), math.abs(t.y - s.y)) <= 1 then at = {s = s, u = t}; break end
@@ -3250,6 +3324,11 @@ function M.drink_fix(K)
                          at.u.id, at.u.thirst, at.s.id, at.s.x, at.s.y, at.s.z, at.s.below.flow or 0, c.well_min)
   end
   cmds[#cmds + 1] = 'dfllm bp sites cistern'
+  if em then                       -- BUG-425: the one thing that gives a trickle, said first
+    head = string.format('EMERGENCY: well %d at %d,%d,%d over only %d/7 is accepted as a slow drink source (water.well_emerg %d, '
+                         .. 'normal minimum %d/7); %s', em.id, em.x, em.y, em.z, em.below and em.below.flow or 0, c.well_emerg,
+                         c.well_min, head)
+  end
   return head .. '; ' .. M.recipe(c, nil, K, true, true), cmds
 end
 
@@ -3261,13 +3340,22 @@ end
 function M.drink_access(K)
   local ws = st.ws
   if not st.src or not ws then return {known = false, ok = true, acc = 0, bank = 0, bodies = 0} end
-  local acc, bank, partial = 0, 0, 0
-  for _, s in ipairs(st.src) do if s.wet then acc = acc + 1 end end
+  local acc, bank, partial, emerg = 0, 0, 0, 0
+  for _, s in ipairs(st.src) do
+    if s.wet and s.emerg then emerg = emerg + 1 elseif s.wet then acc = acc + 1 end       -- BUG-425: a slow emergency well is no source
+  end
   for _, b in ipairs(ws.bodies or {}) do
     if b.cavern ~= 1 and b.bank then bank = bank + 1 end
     if b.partial == 1 then partial = partial + 1 end
   end
-  return {known = true, ok = acc + bank > 0, acc = acc, bank = bank, bodies = #(ws.bodies or {}), partial = partial}
+  -- BUG-423/424: `near` = the water nearest to the fort or a citizen (b.at is that tile, b.nd its distance) of the bodies without
+  -- a bank, with `rock` 1 when no bank exists within ws_dig walls either (the brook lies behind rock)
+  local near
+  for _, b in ipairs(ws.bodies or {}) do
+    if b.cavern ~= 1 and not b.bank and (not near or (b.nd or b.d) < (near.nd or near.d)) then near = b end
+  end
+  return {known = true, ok = acc + bank > 0, acc = acc, bank = bank, bodies = #(ws.bodies or {}), partial = partial, emerg = emerg,
+          near = near and {near.at[1], near.at[2], near.at[3]} or nil, nd = near and (near.nd or near.d) or nil}
 end
 
 -- public (BUG-036, readiness): the hospital zones outside Kern+ and the refuge by the last run: {n, total, zones = {{id,

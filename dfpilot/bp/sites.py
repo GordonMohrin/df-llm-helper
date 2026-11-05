@@ -689,11 +689,32 @@ class _At:
         return self.rows[f"z{z}"][y - self.y0][x - self.x0]
 
 
+def _rock_top_ok(at, B, G) -> bool:
+    """BUG-424 (Run 16a i1 Manorsubtle: the brook ran in a rock gully 8 tiles from the start room, no bank floor beside it, so the
+    cistern had no intake): the shaft top B and the breach tile G (absolute x, y, z at the intake level) may be rock when the whole
+    intake is sealed rock: both tiles and every tile round B are rock or unknown, the ring of G is rock, unknown or water, and
+    rock or unknown lies right above both. The template digs them (shaft, breach); nobody frees-digs beside the water."""
+    if at(*B) not in GOOD or at(*G) not in GOOD:
+        return False
+    for x, y, z in (B, G):
+        if (at(x, y, z + 1) or "?") not in GOOD:
+            return False
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if at(B[0] + dx, B[1] + dy, B[2]) not in GOOD:
+                return False
+            c = at(G[0] + dx, G[1] + dy, G[2])
+            if c not in GOOD and c not in WATER:
+                return False
+    return True
+
+
 def intake_ok(at, L: dict, X: Xform) -> str:
     """'' if the cistern's intake fits the revealed terrain at this placement, else the reason."""
     (bu, bv), (du, dv), wt = L["shaft"], L["side"], L["w_top"]
     G, W = (bu + du, bv + dv), (bu + 2 * du, bv + 2 * dv)
-    if at(*X.pos(bu, bv, wt)) != "." or at(*X.pos(*G, wt)) != ".":
+    if (at(*X.pos(bu, bv, wt)) != "." or at(*X.pos(*G, wt)) != ".") \
+            and not _rock_top_ok(at, X.pos(bu, bv, wt), X.pos(*G, wt)):       # BUG-424: a sealed rock intake is one too
         return "shaft top or breach tile is not revealed bank floor"
     if at(*X.pos(*G, wt - 1)) not in GOOD:
         return "no rock under the breach tile"
@@ -1738,10 +1759,11 @@ def _water_components(snap: dict, min_tiles: int, edge: bool = False) -> list[li
 
 
 def _intake_targets(at, snap: dict, near=None, radius: int | None = None, manifest: dict | None = None,
-                    min_tiles: int = 8) -> dict:
+                    min_tiles: int = 8, rock: bool = False, marks=()) -> dict:
     """{(x, y): [((dx, dy), T, kind)]}: shaft columns B two tiles from revealed water W with the breach tile
     G between them (B -> G -> W along (dx, dy)), as `intake_ok` wants them. Only water of a body of at least
-    `min_tiles` tiles counts, and nothing inside the fort's own geometry (a sump or a cistern is no source)."""
+    `min_tiles` tiles counts, and nothing inside the fort's own geometry (a sump or a cistern is no source).
+    `rock` (BUG-424): also the sealed rock intakes (B and G rock or unknown, `_rock_top_ok`) of water that lies in a gully."""
     fort = [(b[0] - 1, b[1] - 1, b[2] - 1, b[3] + 1, b[4] + 1, b[5] + 1) for b in topo.fort_boxes(manifest or {})]
 
     def inside(x, y, z):
@@ -1755,6 +1777,10 @@ def _intake_targets(at, snap: dict, near=None, radius: int | None = None, manife
             for kind, t in (("bed", z + 1), ("bank", z)):
                 if at(bx, by, t) == "." and at(gx, gy, t) == "." and at(gx, gy, t - 1) in GOOD                         and not inside(x, y, z) and not inside(gx, gy, t) and not inside(bx, by, t):
                     out.setdefault((bx, by), []).append(((dx, dy), t, kind))
+                elif rock and at(gx, gy, t - 1) in GOOD and not inside(x, y, z) and not inside(gx, gy, t) \
+                        and not inside(bx, by, t) and (bx, by, t) not in marks and (gx, gy, t) not in marks \
+                        and _rock_top_ok(at, (bx, by, t), (gx, gy, t)):
+                    out.setdefault((bx, by), []).append(((dx, dy), t, kind))     # BUG-424: the brook in a rock gully
     return out
 
 
@@ -1781,13 +1807,23 @@ def _waypoints(tiles) -> list[tuple[int, int]]:
 
 
 def plan_cistern(snap: dict, manifest: dict, level: str = "refuge", near=None, radius: int | None = None,
-                 burrow: str | None = None, max_tiles: int = 400, safe: bool = True) -> dict:
+                 burrow: str | None = None, max_tiles: int = 400, safe: bool = True, rock: bool | None = None) -> dict:
     """Route a cistern pipe on `snap` from a well room (refuge room or public Z4) to revealed water, the way
     a player designates it: only revealed tiles decide, hidden rock is diggable unknown. `safe` (default) takes
     only water whose level is not above the well room: pressure lifts water at most to one level below its
     source, so the well room stays dry even if the breaker failed (a pond above the fort is refused; pass
     safe=False to rely on the breaker alone). Returns {params, site:{id, anchor, rot}, tiles, cost, why};
-    raises ValueError when no route exists (export a 'sites' snapshot over well room, route and water first)."""
+    raises ValueError when no route exists (export a 'sites' snapshot over well room, route and water first).
+    BUG-424: `rock` None = bank intakes first, then (when none fits) sealed rock intakes for water in a gully, the result says
+    `rock` 1 for the latter; True / False take only that kind."""
+    if rock is None:
+        try:
+            return plan_cistern(snap, manifest, level, near, radius, burrow, max_tiles, safe, rock=False)
+        except ValueError as first:
+            try:
+                return plan_cistern(snap, manifest, level, near, radius, burrow, max_tiles, safe, rock=True)
+            except ValueError:
+                raise first from None
     if level not in rooms.LEVELS:
         raise ValueError(f"level {level!r} not one of {list(rooms.LEVELS)}")
     if not ((manifest or {}).get("zones") or {}).get("Z4"):
@@ -1797,7 +1833,7 @@ def plan_cistern(snap: dict, manifest: dict, level: str = "refuge", near=None, r
     keep_out = _keep_out(manifest)
     ref = manifest.get("refuge")
     zr = ref["anchor"][2] if ref else None
-    targets = _intake_targets(at, snap, near, radius, manifest)
+    targets = _intake_targets(at, snap, near, radius, manifest, rock=bool(rock), marks=marks)
     if not targets:
         raise ValueError("no revealed water with two tiles of revealed bank floor beside it in the snapshot")
     base = check_params("cistern", {"level": level, **({"burrow": burrow} if burrow else {})})
@@ -1870,9 +1906,37 @@ def plan_cistern(snap: dict, manifest: dict, level: str = "refuge", near=None, r
                 best = {"params": p, "site": {"id": "S1", "anchor": [ax, ay, az], "rot": rot},
                         "tiles": len(tiles), "cost": cost,
                         "why": f"pipe {len(tiles)} tiles at z{P}, intake {kind} water, rise {t - P}, side {side}"}
+                if rock:                                   # BUG-424: shaft top and breach are dug in rock
+                    best["rock"] = 1
+                    best["why"] += ", sealed rock intake (the brook lies in a gully)"
     if best is None:
         raise ValueError(f"no pipe route from a {level} well room to revealed water ({tried} anchors tried)")
     return best
+
+
+def cistern_access(snap: dict, manifest: dict, near=None, radius: int | None = 20, level: str | None = None) -> dict:
+    """BUG-424 (Run 16a i1 Manorsubtle, Mansionlauded, Bachwald: three forts died of thirst with a brook 8-15 tiles away behind
+    rock): the safe way to water the cistern template offers, no free digging at the water: its pipe with the breaker, fortification
+    and floodgate does the last tiles (a bank intake, else a sealed rock intake). `near` = the water tile nearest to the fort
+    (water_sources `at`), the well room on the core level (the refuge level when the manifest has a refuge). Tries the safe plan first
+    (no water above the well room); a plan that only exists for water above the well room is returned as `unsafe` and is never
+    placed by itself. Returns {plan: plan_cistern's dict | None, unsafe, level, site (the explicit A<x>_<y>_<z>_<rot> label of its
+    anchor), why (the refusal)}."""
+    lv = level or ("refuge" if (manifest or {}).get("refuge") else "core")
+    burrow = "Tiefe+" if lv == "refuge" else None
+    out: dict = {"plan": None, "unsafe": False, "level": lv, "site": None, "why": ""}
+    errs: list[str] = []
+    for safe in (True, False):
+        try:
+            plan = plan_cistern(snap, manifest, lv, near, radius if near else None, burrow, safe=safe)
+        except ValueError as e:
+            errs.append(str(e))
+            continue
+        a = plan["site"]
+        out.update(plan=plan, unsafe=not safe, site=f"A{a['anchor'][0]}_{a['anchor'][1]}_{a['anchor'][2]}_{a['rot']}")
+        return out
+    out["why"] = errs[0] if errs else "no plan"
+    return out
 
 
 def _astar(at, S, P, goals, dist, ok, blocked, max_cost):

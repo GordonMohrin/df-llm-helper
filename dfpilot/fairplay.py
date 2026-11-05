@@ -293,6 +293,8 @@ WATER_LIM: dict = {
     "cistern_dry_days": (1, 400),
     # BUG-344 review: a well counts as drink only over water >= well_min/7 (shallower: why shallow, no source)
     "well_min": (1, 7),
+    # BUG-425: with no other source and no bank, a built well over water >= well_emerg/7 is a slow emergency drink source (0 = never)
+    "well_emerg": (0, 7),
     # BUG-054: caregivers (Orderlies) per patient, the bounds, the urgent extra, the additions a run, the hold in days;
     # the death-risk line of PATIENT_DYING and its cadence
     "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20),
@@ -843,7 +845,7 @@ def burrow_errors(path: str | Path | None = None) -> list[str]:
 # manager's office and the drink gatherers ("bool", else an int range); economy.conf takes the file's part as it is,
 # so a bad value here would reach the kernel: lint --config refuses it. Other economy keys are checked by the mirror
 # test (tests/lua/test_economy.lua: config/baseline.json == economy.DEFAULTS).
-ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400)},
+ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG-424: access_d 0 = no cistern request
                      # BUG-231: bypass_days 0 = the kernel never adds the held items as workshop tasks
                      "orders": {"unval_days": (1, 60), "bypass_days": (0, 112), "bypass_max": (0, 20),
                                 "bypass_open": (0, 40),

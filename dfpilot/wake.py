@@ -26,6 +26,9 @@ not wake; the follower acts on two of them without the LLM:
                                   tiles fall short of the citizens and food is low or falling; live L5)
   PROJECT_REQUEST tpl=farms why=drink|drink_surface -> BUG-406/408: one plot of the kind the stock's brewable seeds
                                   fit (drink_surface: p.surface = 1), prio 1
+  PROJECT_REQUEST tpl=cistern why=no_water -> BUG-424: no water the citizens reach, drink running low: the cistern template with its pipe
+                                  from the water nearest to the fort (d.at; a bank intake or a sealed rock intake, safe plans only; a
+                                  plan that needs water above the well room is AUTO_FAIL for Gordon), never free digging at the water
   PROJECT_REQUEST tpl=bedrooms why=mood_rock|rock -> a bedrooms dig (p.n = n, 1-6) at prio 1: a strange mood waits
                                   for a boulder (care), or the free stone is below what the rock orders and walls
                                   want while the miners have nothing to dig (economy, Run 11)
@@ -183,7 +186,8 @@ CODE = files.code_stamp()                      # BUG-042: the dfpilot code this 
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery", "farmers",
               "mandatory", "slabs",           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
               "busy",                         # BUG-224: busy = one more Carpenters/Masons beside a full one
-              "mood")                         # BUG-283: the shops a strange mood waits for (care's typed request)
+              "mood",                         # BUG-283: the shops a strange mood waits for (care's typed request)
+              "cistern_water")                # BUG-424: the piped cistern from the water nearest to a fort without drink
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -802,6 +806,8 @@ class Follower:
                 if d.get("why") == "drink_surface":
                     fp["surface"] = 1
                 self._request_place("farms", "farms", fp, "S1", now, prio=1)
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "cistern" and d.get("why") == "no_water":
+                self._request_access(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "fishery":
                 # Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days: the fishery alone
                 from .cmd import _moodable
@@ -1032,6 +1038,22 @@ class Follower:
             self.jobs[key]["need"] = list(need)
         return True
 
+    def _request_access(self, d: dict, now: float) -> None:
+        """BUG-424 (Run 16a i1 Manorsubtle: the brook lay in a rock gully 8 tiles from the start room, 13 of 15 died of thirst, the
+        player could not dig there by the water rule): economy's PROJECT_REQUEST cistern why=no_water carries the water tile nearest
+        to the fort (d.at). One piped cistern per fort (a cistern project with a pipe stands or is placed: nothing more); the
+        snapshot decides the route in `_place` (sites.cistern_access)."""
+        at = d.get("at")
+        if not (isinstance(at, list) and len(at) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in at)):
+            return
+        from .cmd import bp_files
+        for f in bp_files(self.dir):
+            doc = files.read_json(f)
+            if isinstance(doc, dict) and doc.get("tpl") == "cistern" and (doc.get("params") or {}).get("path"):
+                return
+        if self._request_place("cistern_water", "cistern", {}, "S1", now, prio=1):
+            self.jobs["cistern_water"].update(access=True, at=at)
+
     def _request_seal(self, now: float) -> None:
         """Run 10: the audit named the bypass for months and nobody walled it. In PEACE, the walls of the newest audit
         that no seal project builds yet (cmd.audit_routes) get the seal at=audit (cmd.place resolves the tiles).
@@ -1167,6 +1189,19 @@ class Follower:
             args = {"tpl": tpl, "site": job.get("site") or "S1"}   # S1 = best free site on this snapshot
             if job.get("params"):
                 args["p"] = job["params"]
+            if job.get("access"):
+                # BUG-424: the cistern's pipe and intake from the water nearest to the fort, planned on this snapshot
+                from .cmd import fort_manifest, load_bp
+                acc = load_bp("sites").cistern_access(snap, fort_manifest(self.dir), near=job.get("at"), radius=20)
+                at = ",".join(str(v) for v in job.get("at") or [])
+                if acc["plan"] is None:
+                    raise BpError(f"BUG-424: no safe access to the water at {at}: {acc['why']} (dfllm cmd inspect what=water_sources; "
+                                  "bp sites cistern --near; dig the core toward the water; trade for drink and plants)")
+                if acc["unsafe"]:
+                    raise BpError(f"BUG-424: the only cistern route to the water at {at} needs water above the well room (the "
+                                  "floodgate and breaker alone keep it out): tell Gordon; python -m dfpilot.bp.sites cistern --near "
+                                  f"{at} --unsafe prints it")
+                args["p"], args["site"] = acc["plan"]["params"], acc["site"]
             if isinstance(job.get("prio"), int):
                 args["prio"] = job["prio"]
             prev = files.read_json(_placed(self.dir, tpl))
