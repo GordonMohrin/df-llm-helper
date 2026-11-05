@@ -1206,15 +1206,30 @@ def explore_wide_rects(p: dict) -> dict[int, list[tuple[int, int, int, int]]]:
     return out
 
 
+def heavy_breach_levels(manifest: dict | None) -> set[int]:
+    """BUG-468 (Run 16c i3 Castletongs: an explore to z110 every year through the heavy z113, the shaft stopped at z112/z110 as breach:
+    heavy_aquifer three times; Run 16a i1 Basementflew: explore depth 24 from z129 through heavy z123 and z120 with `p.avoid` empty): the
+    levels where a dig of ours met a heavy aquifer (manifest `breaches` why heavy_aquifer, any template). An aquifer spans a whole level,
+    so the whole level counts, not the tiles around the stop."""
+    out = set()
+    for b in (manifest or {}).get("breaches") or []:
+        pos = b.get("pos") if isinstance(b, dict) else None
+        if isinstance(b, dict) and b.get("why") == "heavy_aquifer" and isinstance(pos, (list, tuple)) and len(pos) == 3                 and isinstance(pos[2], int) and not isinstance(pos[2], bool):
+            out.add(pos[2])
+    return out
+
+
 def avoid_levels(snap: dict, p: dict, manifest: dict | None = None) -> set[int]:
     """Levels an explore shaft must not reach: params.avoid plus every level with a revealed cavern, damp or warm mark
     (a cavern layer or a wet/hot stone layer: the vanilla UI shows those tiles too), plus (Run 11: explores kept
     breaking into the cavern lakes on z127, below the sites snapshot) the level of every cavern breach the kernel
-    recorded (manifest `caverns`)."""
+    recorded (manifest `caverns`), plus (BUG-468) every level a dig of ours met a heavy aquifer on (heavy_breach_levels): an explore
+    stops above it (an aqshaft passes it with its ring, an explore never)."""
     out = mine.parse_avoid(p.get("avoid", ""))
     for k in AVOID_MARKS:
         out |= {int(q[2]) for q in snap.get("marks", {}).get(k, []) if isinstance(q, (list, tuple)) and len(q) == 3}
     out |= {int(q[2]) for q in (manifest or {}).get("caverns", []) if isinstance(q, (list, tuple)) and len(q) == 3}
+    out |= heavy_breach_levels(manifest)
     return out
 
 
@@ -1293,8 +1308,8 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
                                f"{steps} steps to a stair, {unknown} unknown tiles, {missing} levels below the snapshot"})
     if not out and hit:
         raise ValueError(f"explore: every anchor's shaft of depth {p['depth']} reaches an avoided level "
-                         f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark or a cavern "
-                         "breach); "
+                         f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark, a cavern "
+                         "breach or a heavy aquifer breach); "
                          "give a smaller depth (p.depth)")
     if not out and redo:
         raise ValueError(f"explore: every anchor lies within {EXPLORE_REDO_R} tiles of a dig that already stopped "

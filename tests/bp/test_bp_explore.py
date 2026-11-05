@@ -112,3 +112,22 @@ def test_explore_hidden_rock_is_diggable_revealed_space_is_not(deep):
     w.set(tun[0], tun[1] - 1 if tun[1] > 0 else tun[1] + 1, tun[2], ".")    # a revealed open tile beside a tunnel
     again = bp.rank(w.snapshot(purpose="sites") | {"bridges": snap["bridges"]}, "explore", {}, manifest=man)
     assert all((s["anchor"], s["rot"]) != (best["anchor"], best["rot"]) for s in again)
+
+
+def test_explore_stops_above_a_heavy_aquifer_breach_level(deep):
+    """BUG-468 (Run 16c i3: an explore to z110 every year through the heavy z113; Run 16a i1: depth 24 from z129 through the heavy z123 and z120
+    with p.avoid empty): a level a dig of ours met a heavy aquifer on (manifest `breaches` why heavy_aquifer, any template) is avoided
+    level-wide; other breach reasons and the stop of a damp level are not."""
+    snap, man = deep
+    z_top = max(s["anchor"][2] for s in bp.rank(snap, "explore", {"depth": 6}, manifest=man))
+    heavy = {**man, "breaches": [{"pos": [90, 10, z_top - 4], "proj": "y1s0b0", "tpl": "explore", "why": "heavy_aquifer"},
+                                 {"pos": [91, 10, 3], "proj": "y1s0b1", "tpl": "fortcore", "why": "damp"}]}
+    assert schema.validate("manifest", heavy) == []
+    assert sites.heavy_breach_levels(heavy) == {z_top - 4} and sites.heavy_breach_levels(man) == set()
+    assert sites.avoid_levels(snap, {}, heavy) == {z_top - 4}
+    with pytest.raises(ValueError, match=r"avoided level.*heavy aquifer breach"):
+        bp.rank(snap, "explore", {"depth": 12}, manifest=heavy)
+    best = bp.rank(snap, "explore", {"depth": 3}, manifest=heavy)             # stops above the heavy level
+    assert best and all(int(s["why"].split("shaft to z")[1].split(",")[0]) > z_top - 4 for s in best)
+    assert bp.rank(snap, "explore", {"depth": 12}, manifest=man)             # without the record the long shaft fits
+    assert sites.heavy_breach_levels({"breaches": [{"why": "heavy_aquifer", "pos": [1, 2]}, {"why": "heavy_aquifer", "pos": [1, 2, True]}]}) == set()

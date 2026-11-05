@@ -140,7 +140,7 @@ python tools/embark/embark.py rank --last --top 12         # BUG-410: rank the n
 python tools/embark/embark.py embark 7,23,6,6              # read -> gate -> confirm -> prepare -> Embark!
 python tools/embark/embark.py embark 7,23,6,6 --waive dark_fortress   # one criterion checked by eye
 python tools/embark/embark.py embark 7,23,6,6 --accept ore --reason "copper/tin listed, iron by trade"   # FR-08
-python tools/embark/embark.py embark 7,23 --accept stone --reason "deep soil" --explore-first "shaft to stone in spring"
+python tools/embark/embark.py embark 7,23 --waive stone --explore-first "shaft to stone in spring"   # only for an UNKNOWN soil depth (BUG-465: a failed stone is never accepted)
 python tools/embark/embark.py embark --here --play-now     # BUG-250: the rectangle placed by hand, popup open
 python tools/embark/embark.py save-as r15d-drillchamber    # BUG-250: Esc menu > Save and continue playing as NAME
 python tools/embark/embark.py state | check | screen NAME | status | stop
@@ -234,7 +234,7 @@ and the run goes on; the final `status.json` lists them under `warnings`.
 | flux | "Flux stone layer" | missing warn |
 | ore | a line of metal names, if DF shows one | iron pass, bronze only / no iron warn, not shown skip |
 | soil | "Little soil"/"Some soil" … "Extremely deep soil" | little/some pass, deeper or none warn |
-| stone | the soil depth | deep, very deep or extremely deep soil, or more than `hard_stone_levels` (6) estimated soil levels (`soil_levels`; BUG-248), fail: no stone layer in the upper levels, with a light aquifer the first stone lies below the water (live L6, Laborkings: no boulders for a year); unknown when soil is not shown. Waive/accept only with `--explore-first TEXT` (BUG-248) |
+| stone | the soil depth | deep, very deep or extremely deep soil, or more than `hard_stone_levels` (6) estimated soil levels (`soil_levels`; BUG-248), fail: no stone layer in the upper levels, with a light aquifer the first stone lies below the water (live L6, Laborkings: no boulders for a year); unknown when soil is not shown. A FAILED stone is a hard reject that `--accept` refuses (BUG-465: all four forts of Run 16's world region1 had no hard stone); the item names the estimated levels down to the hard stone (soil + the aquifer class's `aquifer_span`), `rank` sorts the nearest hard stone first and the scan summary shows the aquifer tile spread and span. Waive (unknown depth) only with `--explore-first TEXT` (BUG-248) |
 | temperature | "Temperature:", "Ice" | Temperate pass, Warm/Cold warn, else fail |
 | size | rectangle | 3x3 or 4x4 pass (DF default is 4x4; size is not changed by these steps) |
 | popup | other warning sentences | `fail_popups` fail, `warn_popups` warn |

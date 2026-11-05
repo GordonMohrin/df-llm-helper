@@ -311,6 +311,7 @@
   "coffin_entrance_r": 10,
   "coffin_retry": 3600,
   "coffin_wood_keep": 20,
+  "coffin_wood_floor": 5,
   "coffin_wake": 2400,
   "coffin_prio": 3,
   "coffin_stale": 18000,

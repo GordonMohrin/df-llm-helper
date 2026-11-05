@@ -68,6 +68,9 @@ def test_fit_explore_drafts_only_as_many_as_free_sites(save, base, monkeypatch):
     s = noore(dict(state, t=dict(state["t"], y=4, season=0)))
     monkeypatch.setattr(plan, "rank_sites", lambda *a, **k: ([site(45, 56), site(46, 56)], "c1"))
     doc = plan.propose(s, phases(), prev, decisions={}, tinfo=tinfo())
+    assert [b for x in doc["seasons"] for b in x["build"] if b["tpl"] == "explore"] == [EX]     # BUG-468: one at a time
+    for x in doc["seasons"][1:]:                       # a hand-made or MINIMAL plan with an explore in every season (BUG-241 still fits it)
+        x["build"].insert(0, copy.deepcopy(EX))
     assert [b for x in doc["seasons"] for b in x["build"] if b["tpl"] == "explore"] == [EX] * 4
     line = plan.fit_explore(save, doc, prev)
     ex = [si for si, x in enumerate(doc["seasons"]) for b in x["build"] if b["tpl"] == "explore"]

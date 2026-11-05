@@ -200,7 +200,9 @@ T.test('checklist (Run 9 lesson 1): a metal ore must be listed; iron passes, oth
   local r = ev_rec(rec)
   T.eq({item(r, 'ore').res, item(r, 'ore').why, r.verdict}, {'fail', 'no metal ore shown', 'reject'})
   T.eq(item(C.evaluate(P.parse(fixture('title')), RULES, {}), 'ore').res, 'unknown', 'panel not read')
-  for _, id in ipairs({'ore', 'stone'}) do T.ok(C.ACCEPTABLE_SET[id] and C.WAIVABLE_SET[id], id) end
+  T.ok(C.ACCEPTABLE_SET.ore and C.WAIVABLE_SET.ore, 'ore')
+  -- BUG-465: a failed stone is a hard reject, only an unknown soil depth can be waived
+  T.ok(C.WAIVABLE_SET.stone and not C.ACCEPTABLE_SET.stone and C.HARD_REJECT.stone ~= nil, 'stone')
   T.ok(not C.ACCEPTABLE_SET.panel and not C.ACCEPTABLE_SET.popup, 'never the panel or a failing popup')
 end)
 
@@ -300,7 +302,8 @@ T.test('steps: merge_tiles keeps the best water/trees/metals and the worst evil/
   local m = S.merge_tiles(rec, {t1, t2})
   T.eq(m.water, 'brook'); T.eq(m.trees, 'heavily_forested'); T.eq(m.metals, {'iron'}); T.eq(m.flux, true)
   T.eq(m.evil, 'evil'); T.eq(m.savagery, 'high'); T.eq(m.aquifer, 'light')
-  T.eq(m.neighbors[1].race, 'goblins'); T.eq(m.tiles, {n = 2, water = 1, wood = 1, aq_best = 'none'}, 'BUG-411: the tiles differ, the best aquifer is kept')
+  T.eq(m.neighbors[1].race, 'goblins'); T.eq(m.tiles, {n = 2, water = 1, wood = 1, aq_best = 'none', aq_n = {light = 1, none = 1}},
+       'BUG-411: the tiles differ, the best aquifer is kept; BUG-465: and the tile count per class')
   local deep = P.parse(fixture('site_aquifer_popup'))                      -- very deep soil on the hovered tile
   local d = S.merge_tiles(deep, {{rivers = {}, soil = 'some', layers = {'granite'}}, {rivers = {}, soil = 'deep'}})
   T.eq({d.soil, d.stone_soil, d.layers}, {'very_deep', 'some', {'granite'}}, 'stone: the shallowest tile counts')

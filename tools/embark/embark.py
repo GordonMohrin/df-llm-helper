@@ -34,8 +34,11 @@ WAIVABLE = ("old_sites", "dark_fortress", "evil", "savagery", "trees", "water", 
             "temperature", "size")
 # FR-08: criteria that may be accepted although they FAILED, one by one, with a logged reason
 # (= checklist.lua C.ACCEPTABLE; never the unreadable panel or a failing warning popup)
-ACCEPTABLE = ("old_sites", "dark_fortress", "evil", "savagery", "trees", "water", "aquifer", "soil", "stone", "ore",
+ACCEPTABLE = ("old_sites", "dark_fortress", "evil", "savagery", "trees", "water", "aquifer", "soil", "ore",
               "temperature", "size")
+# BUG-465 (all four forts of Run 16's world region1 had no hard stone): a FAILED criterion of this list is a hard reject, never accepted
+# (= checklist.lua C.HARD_REJECT; `stone` may still be waived when the soil depth is unknown, with --explore-first)
+HARD_REJECT = {"stone": "no hard stone within reach: a failed stone criterion cannot be accepted, choose another site"}
 ACCEPT_LOG = "accept.log"
 # BUG-248: criteria a new fort may waive or accept only with --explore-first (= checklist.lua C.NEEDS_PLAN)
 NEEDS_PLAN = ("stone",)
@@ -170,6 +173,9 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
                 raise ValueError("embark needs a site WX,WY[,LX,LY] (or --here)")
             spec["site"] = list(site)
         spec["waive"] = sorted(set(waive))
+        hard = sorted(set(accept) & set(HARD_REJECT))
+        if hard:                                      # BUG-465
+            raise ValueError(f"cannot accept {hard}: {'; '.join(HARD_REJECT[h] for h in hard)}")
         plan = " ".join(str(explore_first or "").split())
         need = sorted((set(waive) | set(accept)) & set(NEEDS_PLAN))
         if need and len(plan) < 10:
@@ -356,12 +362,27 @@ def brook_text(r: dict, pts: list[tuple[int, int, str]]) -> str:
 
 
 def aquifer_text(r: dict) -> str:
-    """BUG-411: ' aq=heavy (tiles differ, best none)' when the merged hovered tiles disagree (the row shows the worst)."""
+    """BUG-411: ' aq=heavy (tiles differ, best none)' when the merged hovered tiles disagree (the row shows the worst).
+    BUG-465: the spread of the hovered tiles (`aq=light 9 none, 6 light, 1 heavy`) and, with an aquifer, the estimated span and the
+    estimated levels down to the hard stone (soil + aquifer): the panel class hides how many aquifer levels there are and that
+    the heavy ones lie under the light ones (Basementflew: light z126/127 over heavy z120-123)."""
     rec = r.get("rec") if isinstance(r.get("rec"), dict) else {}
     tl = rec.get("tiles") if isinstance(rec.get("tiles"), dict) else {}
+    out = ""
     if tl.get("aq_best") and rec.get("aquifer"):
-        return f" aq={rec['aquifer']} (tiles differ, best {tl['aq_best']})"
-    return ""
+        out = f" aq={rec['aquifer']} (tiles differ, best {tl['aq_best']})"
+    n = tl.get("aq_n") if isinstance(tl.get("aq_n"), dict) else {}
+    if len(n) > 1 or (n and "none" not in n and rec.get("aquifer") in ("light", "varied", "heavy")):
+        order = ("none", "light", "varied", "heavy")
+        out += " aq tiles: " + ", ".join(f"{n[k]} {k}" for k in order if n.get(k))
+    span = r.get("aquifer_span")
+    if isinstance(span, (int, float)) and span:
+        reach = r.get("reach")
+        out += (f" aq span ~{int(span)} levels incl. heavy ones under the light (panel class only; real span known after the "
+                "first aqshaft)" + (f", hard stone ~{int(reach)} levels down" if isinstance(reach, (int, float)) else ""))
+    elif isinstance(r.get("reach"), (int, float)) and r.get("reach"):
+        out += f" hard stone ~{int(r['reach'])} levels down"
+    return out
 
 
 def mountain_dry(r: dict) -> bool:
@@ -437,10 +458,21 @@ def best_compromise(rows: list[dict]) -> str | None:
     return f"  best compromise: {r['tag']} score {r.get('score')} fails {lacks}: {cmd}"
 
 
+def stone_tier(r: dict) -> int:
+    """BUG-465: how far the hard stone is, as a rank tier: 0 pass, 1 warn (the estimated levels count within it), 2 unknown, 3 fail
+    (a hard reject). Run 16: every fort of world region1 sat on 8-15 levels of soil under an aquifer and had no stone for years."""
+    for key, tier in (("fails", 3), ("unknown", 2), ("warns", 1)):
+        if "stone" in (r.get(key) or []):
+            return tier
+    return 0
+
+
 def rank_key(r: dict) -> tuple:
-    """BUG-410: best first: verdict, then fewest failed criteria, fewest unknown, highest score."""
-    return (ORDER.get(r.get("verdict"), 3), len(r.get("fails") or []), len(r.get("unknown") or []),
-            -(r.get("score") or 0), str(r.get("tag")))
+    """BUG-410: best first: verdict, then (BUG-465) the nearest hard stone, then fewest failed criteria, fewest unknown, highest score.
+    A site with a reachable hard stone beats any site that needs an explore shaft first, whatever else it lacks."""
+    lv = r.get("reach") if isinstance(r.get("reach"), (int, float)) else r.get("stone_levels")
+    return (ORDER.get(r.get("verdict"), 3), stone_tier(r), lv if isinstance(lv, (int, float)) else 99,
+            len(r.get("fails") or []), len(r.get("unknown") or []), -(r.get("score") or 0), str(r.get("tag")))
 
 
 def rank_lines(rows: list[dict], top: int = 8) -> list[str]:
@@ -513,7 +545,7 @@ def summarize(doc: dict | None, top: int = 8) -> list[str]:
     if doc.get("fort"):   # BUG-355: the new fort's name, readable right after embark (before save-as)
         lines.append(f"  fort name: {doc['fort']}")
     res = doc.get("results")
-    rows = sorted(res, key=lambda r: (ORDER.get(r.get("verdict"), 3), -r.get("score", 0))) if isinstance(res, list) else []
+    rows = sorted(res, key=rank_key) if isinstance(res, list) else []   # BUG-465: reachable hard stone first
     if any(r.get("sweep") for r in rows):   # BUG-410: one line per world tile would be hundreds
         lines.extend(rank_lines(rows, top))
         rows = [r for r in rows if not r.get("sweep")]
@@ -708,7 +740,7 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--waive", action="append", default=[], choices=WAIVABLE, metavar="ID",
                             help="accept this one criterion although the panel did not show it (checked by eye); "
                                  "repeatable; " + ", ".join(WAIVABLE))
-            sp.add_argument("--accept", action="append", default=[], choices=ACCEPTABLE, metavar="ID",
+            sp.add_argument("--accept", action="append", default=[], choices=ACCEPTABLE + tuple(HARD_REJECT), metavar="ID",
                             help="FR-08: embark although this criterion FAILED (a known trade-off); repeatable, "
                                  "needs --reason; logged to dfllm-runtime/embark/accept.log; " + ", ".join(ACCEPTABLE))
             sp.add_argument("--reason", help="why the accepted criteria are acceptable (logged with the run)")

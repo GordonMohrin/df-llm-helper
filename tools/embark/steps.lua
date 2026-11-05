@@ -398,6 +398,7 @@ local function merge_tiles(rec, tiles, opts)
   local nw, nt, nmw, nter = 0, 0, 0, 0
   local nmt, nsoil = 0, 0   -- BUG-426: mountain tiles, tiles with any soil (a bare mountain has no well and no farm)
   local aq_lo
+  local aq_n = {}   -- BUG-465: hovered tiles per aquifer class (the scan summary shows the spread, not only the worst)
   local wat = {}   -- BUG-250: the hovered tiles that showed a brook or river (the scan summary's brook distance)
   for _, t in ipairs(tiles) do
     if t.water and type(t.at) == 'table' and #wat < 16 then wat[#wat + 1] = {t.at[1], t.at[2]} end
@@ -427,6 +428,7 @@ local function merge_tiles(rec, tiles, opts)
     if (SAV_RANK[t.savagery] or -1) > (SAV_RANK[rec.savagery] or -1) then rec.savagery = t.savagery end
     if (AQ_RANK[t.aquifer] or -1) > (AQ_RANK[rec.aquifer] or -1) then rec.aquifer = t.aquifer end
     local aq = AQ_RANK[t.aquifer or 'none'] or 0   -- a panel without an aquifer line shows none
+    aq_n[t.aquifer or 'none'] = (aq_n[t.aquifer or 'none'] or 0) + 1
     if aq_lo == nil or aq < aq_lo then aq_lo = aq end
     for _, n in ipairs(t.neighbors or {}) do
       local o = near[n.race]
@@ -448,6 +450,7 @@ local function merge_tiles(rec, tiles, opts)
     for name, r in pairs(AQ_RANK) do if r == aq_lo then rec.tiles.aq_best = name end end
   end
   if opts.worst_stone then rec.tiles.worst_stone = true end
+  rec.tiles.aq_n = aq_n
   return rec
 end
 S.merge_tiles = merge_tiles
@@ -543,7 +546,8 @@ local function record(ctx, tag, v, rec, where)
   ctx.results = ctx.results or {}
   local row = {tag = tag, world = where.world, emb = where.emb, size = where.size, hover = where.hover,
     verdict = verdict.verdict, score = verdict.score, fails = verdict.fails, warns = verdict.warns,
-    unknown = verdict.unknown, items = verdict.items, rec = rec, parts = parts}
+    unknown = verdict.unknown, items = verdict.items, rec = rec, parts = parts,
+    stone_levels = verdict.stone_levels, aquifer_span = verdict.aquifer_span, reach = verdict.reach}   -- BUG-465
   if where.sweep then   -- BUG-410: one compact row per world tile (status.json is rewritten after every step)
     row.sweep, row.items, row.parts = true, nil, nil
     row.rec = S.sweep_rec(rec)
@@ -636,7 +640,8 @@ function S.sweep_rec(rec)
   end
   if rec.tiles then
     o.tiles = {n = rec.tiles.n, water = rec.tiles.water, aq_best = rec.tiles.aq_best, terrain = rec.tiles.terrain,
-      mountain = rec.tiles.mountain, soiled = rec.tiles.soiled}   -- BUG-426: the rank row says 'mountain: no soil'
+      mountain = rec.tiles.mountain, soiled = rec.tiles.soiled,   -- BUG-426: the rank row says 'mountain: no soil'
+      aq_n = rec.tiles.aq_n}                                      -- BUG-465
   end
   return o
 end
@@ -853,6 +858,7 @@ function S.gate(waive, accept, plan)
         if not checklist.WAIVABLE_SET[id] then return 'fail', 'cannot waive ' .. tostring(id) end
       end
       for id in pairs(took) do
+        if checklist.HARD_REJECT[id] then return 'fail', 'cannot accept ' .. id .. ': ' .. checklist.HARD_REJECT[id] end   -- BUG-465
         if not checklist.ACCEPTABLE_SET[id] then return 'fail', 'cannot accept ' .. tostring(id) end
         if type(why[id]) ~= 'string' or #why[id]:gsub('^[ \t]+', '') < 3 then
           return 'fail', 'accepting ' .. id .. ' needs a reason'

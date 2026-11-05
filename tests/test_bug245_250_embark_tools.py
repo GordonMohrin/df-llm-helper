@@ -62,16 +62,18 @@ def test_bug247_scan_hover_spec(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- BUG-248
 def test_bug248_stone_needs_an_explore_first_plan(tmp_path, monkeypatch):
-    for kw in ({"accept": ["stone"], "reason": "deep soil"}, {"waive": ["stone"]},
-               {"accept": ["stone"], "reason": "deep soil", "explore_first": "dig"}):
+    for kw in ({"waive": ["stone"]}, {"waive": ["stone"], "explore_first": "dig"}):
         with pytest.raises(ValueError, match="explore-first"):
             drv.make_spec("embark", site=[7, 23], **kw)
-    e = drv.make_spec("embark", site=[7, 23], accept=["stone", "ore"], reason="deep soil",
+    for kw in ({"accept": ["stone"], "reason": "deep soil"},      # BUG-465: a failed stone is never accepted
+               {"accept": ["stone", "ore"], "reason": "deep soil", "explore_first": "explore shaft to stone in spring"}):
+        with pytest.raises(ValueError, match="cannot accept.*hard stone"):
+            drv.make_spec("embark", site=[7, 23], **kw)
+    e = drv.make_spec("embark", site=[7, 23], accept=["ore"], waive=["stone"], reason="deep soil",
                       explore_first="  explore shaft   to stone in spring ", now=3)
-    assert e["explore_first"] == "explore shaft to stone in spring"
+    assert e["explore_first"] == "explore shaft to stone in spring" and e["waive"] == ["stone"]
     log = drv.log_accept(e, tmp_path, now=0).read_text(encoding="utf-8").splitlines()
-    assert [x.split("\t")[3:] for x in log] == [["ore", "deep soil"],
-                                               ["stone", "deep soil", "explore first: explore shaft to stone in spring"]]
+    assert [x.split("	")[3:] for x in log] == [["ore", "deep soil"]]
     assert drv.NEEDS_PLAN == ("stone",)
     r = json.loads((EMB / "rules.json").read_text(encoding="utf-8"))
     assert r["hard_stone_levels"] == 6 and r["soil_levels"]["deep"] > r["hard_stone_levels"] >= r["soil_levels"]["some"]
@@ -134,7 +136,7 @@ def test_bug250_summary_brook_distance_and_best_compromise():
                     "--accept water --reason TEXT"], lines
     rows[0]["fails"] = ["dark_fortress", "stone"]
     best = drv.best_compromise(rows)
-    assert best.endswith("--accept stone --reason TEXT --explore-first TEXT"), best
+    assert "cannot be accepted" in best and "--accept stone" not in best, best    # BUG-465: a failed stone has no compromise
     assert drv.best_compromise(rows + [{"tag": "ok", "verdict": "ok", "world": [1, 1], "emb": [16, 16]}]) is None
     hov = {"tag": "h", "world": [9, 7], "emb": [150, 118], "hover": True, "verdict": "reject", "score": 50,
            "fails": [], "warns": [], "unknown": ["size"], "rec": {}}
