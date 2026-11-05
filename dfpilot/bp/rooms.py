@@ -55,6 +55,7 @@ PARAMS = {
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
     "workshops": {"skip": ("", None, None), "add": ("", None, None), "surface": (0, 0, 1)},
     "depot": {},                      # BUG-368: SURFACE, not BUILD: no room (nothing dug, no Z4, no burrow)
+    "tradepost": {},                  # BUG-488: SURFACE too: the trade pile beside the depot (no fortcore needed)
     # BUG-297: surface = 1 builds the plots on soil floor that stands already (no dig, no door, no burrow): sites.rank
     # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
     "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1)},
@@ -346,6 +347,20 @@ def depot(p: dict) -> Plan:
     P = Plan("depot", "infra")
     P.stage("build", "build").ent(0, 0, DEPOT_SIDE - 1, DEPOT_SIDE - 1, 0, "D")   # orders=0: buildingplan, like the keeper's depot
     P.manifest["depot"] = (DEPOT_SIDE // 2, DEPOT_SIDE // 2, 0)
+    return P
+
+
+TRADEPOST = (4, 2)       # BUG-488: the trade pile's block (width, height)
+
+
+def tradepost(p: dict) -> Plan:
+    """Trade pile (4x2 stockpile dfllm-trade) beside the depot on open surface floor, no fortcore needed (BUG-488)."""
+    # BUG-488 (Run 16a i1 Basementflew: 'nothing_listed' for four years, no stone or iron ever bought): the stockpile `dfllm-trade` was
+    # only made by fortcore stage 1 (s1.place) and the surface core, so a fort with a depot and no (finished) core had no pile that
+    # logistics could send to the depot (baseline: 'no trade pile yet'). This is that pile alone: nothing dug, no door, no burrow;
+    # sites.rank offers open surface floor beside the manifest depot; autotrade=true, and baseline registers it by name (logistics add trade).
+    P = Plan("tradepost", "infra")
+    P.stage("place", "place").ent(0, 0, TRADEPOST[0] - 1, TRADEPOST[1] - 1, 0, "g", "name=dfllm-trade autotrade=true")
     return P
 
 
@@ -816,7 +831,7 @@ BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hos
          "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks,
          "stockroom": stockroom, "refuge_beds": refuge_beds, "refuge_drink": refuge_drink}
 
-SURFACE = {"depot": depot}            # BUG-368: templates that build on open surface floor and join no room set
+SURFACE = {"depot": depot, "tradepost": tradepost}            # BUG-368: templates that build on open surface floor and join no room set
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:

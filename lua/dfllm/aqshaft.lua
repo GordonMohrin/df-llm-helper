@@ -298,8 +298,30 @@ local function seal_pieces(X, r, z)
   return out, mat, soil
 end
 
+-- BUG-490 (Run 16a i1 Basementflew: p.depth 16, the shaft ended at z125 after the first light level z127 and two dry levels while
+-- the heavy levels z123/z120/z116 lay below): known aquifer levels under z within the shaft's depth. The shaft is not passed while
+-- one is left; the levels below the depth are said in AQ_PASS_DONE (rest)
+function A.below(X, r, z, depth)
+  local all = type(X.aq_below) == 'function' and X.aq_below(z) or {}
+  local lowest = r.top - (depth or 0) + 1
+  local within, rest = {}, {}
+  for _, v in ipairs(all) do
+    if v >= lowest then within[#within + 1] = v else rest[#rest + 1] = v end
+  end
+  return within, rest
+end
+
 function A.next_level(X, P, d, r, z)
-  if r.aqn > 0 and r.dry >= r.dry_levels then return A.pass_done(X, P, d, r, z) end
+  if r.aqn > 0 and r.dry >= r.dry_levels then
+    local within = A.below(X, r, z, #d.stages)
+    if #within == 0 then return A.pass_done(X, P, d, r, z) end
+    if r.cont ~= within[1] then
+      r.cont = within[1]
+      X.log('info', '%s: z%d is dry but the aquifer level z%d lies below within the depth (%d levels): the shaft goes on',
+            P.id, z, within[1], #d.stages)
+      X.dirty()
+    end
+  end
   X.next(P, d)
   return 'done'
 end
@@ -308,11 +330,19 @@ function A.pass_done(X, P, d, r, z)
   r.done, r.bot = 1, z
   local lv = {}
   for _, v in ipairs(type(r.lv) == 'table' and r.lv or {}) do lv[#lv + 1] = v end
+  local _, rest = A.below(X, r, z, #d.stages)
   local dd = {proj = P.id, top = r.top, bot = z, n = #lv}
   if #lv > 0 then dd.lv = lv end
-  X.emit('AQ_PASS_DONE', 'B', string.format('%s: the shaft %d,%d z%d-%d passed %s', P.id, r.x, r.y, r.top, z,
+  local tail = ''
+  if #rest > 0 then
+    dd.rest = {}
+    for i = 1, math.min(#rest, 6) do dd.rest[i] = rest[i] end
+    tail = string.format('; NOT passed: the known aquifer level%s %s lie%s below the depth (%d levels): place another aqshaft from z%d',
+                         #rest > 1 and 's' or '', table.concat(dd.rest, ','), #rest > 1 and '' or 's', #d.stages, z)
+  end
+  X.emit('AQ_PASS_DONE', 'B', string.format('%s: the shaft %d,%d z%d-%d passed %s%s', P.id, r.x, r.y, r.top, z,
                                             #lv > 0 and ('the aquifer (levels ' .. table.concat(lv, ',') .. ')')
-                                            or 'no aquifer'), dd)
+                                            or 'no aquifer', tail), dd)
   X.dirty()
   X.finish(P, d)
   return 'done'

@@ -1,0 +1,44 @@
+[
+ {
+  "anchor": [
+   70,
+   70,
+   100
+  ],
+  "class": "infra",
+  "manifest": {
+   "v": 2
+  },
+  "materials": {},
+  "params": {},
+  "rot": 0,
+  "site": "S1",
+  "stages": [
+   {
+    "chunks": [
+     {
+      "cells": [
+       [
+        0,
+        0,
+        0,
+        "g{name=dfllm-trade autotrade=true}(4x2)"
+       ]
+      ],
+      "pos": [
+       70,
+       70,
+       100
+      ]
+     }
+    ],
+    "defense": 0,
+    "label": "place",
+    "mode": "place",
+    "orders": 0
+   }
+  ],
+  "tpl": "tradepost",
+  "v": 2
+ }
+]

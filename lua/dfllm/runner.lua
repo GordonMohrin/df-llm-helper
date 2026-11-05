@@ -2165,6 +2165,7 @@ function Q.aqx(K)
       return false
     end,
     heavy_known = function(z, span) return Q.heavy_known(z, span) end,      -- BUG-414: a recorded heavy level near z
+    aq_below = function(z) return Q.aq_below(z) end,                        -- BUG-490: every known aquifer level under z
     hv = function(z) Q.hv_level(K, z) end,                                  -- BUG-414: record z as a heavy level
     unreachable = function(P, d)               -- BUG-412: no citizen reaches the stage's dig (BUG-352's test)
       local ok, tl = pcall(Q.unreachable, K, P, d, S.rt.p[P.id])
@@ -2197,6 +2198,7 @@ end
 function Q.hv_level(K, z)
   z = int(z)
   if not z then return end
+  Q.aq_level(K, z)                          -- BUG-490: a heavy level is an aquifer level of the manifest too (one list)
   S.rt.hvl = type(S.rt.hvl) == 'table' and S.rt.hvl or {}
   for _, v in ipairs(S.rt.hvl) do if v == z then return end end
   table.insert(S.rt.hvl, z)
@@ -2216,6 +2218,25 @@ function Q.heavy_known(z, span)
        and math.abs(int(c.pos[3]) - z) <= span then return true end
   end
   return false
+end
+
+-- BUG-490 (Run 16a i1 Basementflew: the manifest said aquifer_levels [119,126,127] while bp sites named z123 and the heavy rings
+-- z120/z116): the ONE list of aquifer levels is the manifest's (m.runner aql) joined with every recorded heavy level (hvl and the
+-- heavy_aquifer breaches); aq_below(z) = those under z, descending (the next ones a shaft meets)
+function Q.aq_below(z)
+  z = int(z)
+  local seen, out = {}, {}
+  local function add(v)
+    v = int(v)
+    if v and z and v < z and not seen[v] then seen[v] = true; out[#out + 1] = v end
+  end
+  for _, v in ipairs(type(S.rt.aql) == 'table' and S.rt.aql or {}) do add(v) end
+  for _, v in ipairs(type(S.rt.hvl) == 'table' and S.rt.hvl or {}) do add(v) end
+  for _, c in ipairs(type(S.rt.dz) == 'table' and S.rt.dz or {}) do
+    if type(c) == 'table' and c.why == 'heavy_aquifer' and type(c.pos) == 'table' then add(c.pos[3]) end
+  end
+  table.sort(out, function(a, b) return a > b end)
+  return out
 end
 
 -- the manifest's `aquifer_levels` (levels seen damp or wet, revealed tiles only; bp sites keeps rooms off them and off
@@ -2245,6 +2266,9 @@ function M.aq_seen(K, z)
   Q.aq_level(K, z)
   return true
 end
+
+function M.hv_level(K, z) return Q.hv_level(K, z) end       -- BUG-490: tests / callers record a heavy level
+function M.aq_below(z) return Q.aq_below(z) end
 
 function Q.aq_marker(P) return (P.tpl == 'aqshaft' or M.AQ.observing(S.rt, P.id)) and {damp = true} or nil end
 
@@ -3318,6 +3342,7 @@ local function kind_of(P, d)
   local t = P.tpl
   if SEALS[t] then return 'seal' end
   if t == 'tombs' or t == 'depot' or t == 'explore' then return t end   -- DECISIONS 4: the ore search never rests
+  if t == 'tradepost' then return 'depot' end                           -- BUG-488: the trade pile is part of the depot (no seal pauses it)
   if SUPPLY[t] or (t == 'workshops' and (food_shops(d) or Q.startup_shops(d))) then return 'supply' end
   if t == 'office' and Q.startup_shops(d) then return 'supply' end    -- BUG-396: the surface office; the manager validates the brews
   if t == 'workshops' and Q.tomb_shops(d) then return 'tomb_shops' end

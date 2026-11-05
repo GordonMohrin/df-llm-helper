@@ -238,7 +238,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     # BUG-356/368/384: no fort manifest needed (the startup shops, the trade depot, the surface hospital)
     # BUG-387: the surface core and the surface variants of dining, bedrooms, tavern and office need none either
     surface_shops = (tpl in ("workshops", "hospital", *rooms.SURFACE_ROOMS) and bool(p.get("surface"))) \
-        or tpl in ("depot", "surfacecore")
+        or tpl in ("depot", "tradepost", "surfacecore")
     surface_farm = tpl == "farms" and bool(p.get("surface"))      # BUG-407: needs no fort manifest either (ground anywhere)
     if tpl != "fortcore" and not surface_shops and not surface_farm and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
@@ -1126,6 +1126,9 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
     if tpl == "depot":
         W = H = rooms.DEPOT_SIDE
         what = "a trade depot"
+    elif tpl == "tradepost":                 # BUG-488: the trade pile beside the depot (4x2 open surface floor)
+        W, H = rooms.TRADEPOST
+        what = "the trade pile"
     elif tpl == "surfacecore":               # BUG-387: the walled compound, depot apron included
         W, H = surfacecore.block(p)
         what = "the surface core"
@@ -1151,11 +1154,11 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
              and len(w["pos"]) == 3]
     keep += [(e[0] - 2, e[1] - 2, e[2], e[0] + 2, e[1] + 2, e[2]) for e in edge]
     cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
-    if tpl in rooms.SURFACE_ROOMS and isinstance(manifest.get("depot"), (list, tuple)) and len(manifest["depot"]) == 3:
-        cx, cy = manifest["depot"][0], manifest["depot"][1]      # BUG-387: a room stands beside the surface core's depot
+    if (tpl in rooms.SURFACE_ROOMS or tpl == "tradepost") and isinstance(manifest.get("depot"), (list, tuple))             and len(manifest["depot"]) == 3:
+        cx, cy = manifest["depot"][0], manifest["depot"][1]      # BUG-387: a room stands beside the surface core's depot (BUG-488: the pile too)
     keep += [tuple(b) for b in (manifest.get("zones") or {}).get("Z4", []) if isinstance(b, (list, tuple)) and len(b) == 6]
     rect = rect or (0, 0, W - 1, H - 1)
-    step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 and tpl not in rooms.SURFACE_ROOMS else 1
+    step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 and tpl not in rooms.SURFACE_ROOMS and tpl != "tradepost" else 1
     out = []
     for z in range(z0, z1):
         cur, up = snap["rows"][f"z{z}"], snap["rows"][f"z{z + 1}"]
