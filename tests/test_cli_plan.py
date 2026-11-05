@@ -164,7 +164,8 @@ def test_propose_from_phases(save, base):
     assert {("hospital", None), ("bedrooms", None), ("tavern", None), ("workshops", None)} <= applied
     assert ("fortcore", 2) in applied                     # proj 'fortcore' at s2.build (no bp file)
     assert doc["policy"] == {"option": "B", "pop_ceiling": 100, "beauty": "used_rooms"}  # D-01 = B: R1 cap 100 (BUG-132)
-    assert doc["military"]["squads"] == {"melee": 2, "xbow": 1} and doc["military"]["pct"] == 15
+    assert doc["military"]["squads"] == {"melee": 2, "xbow": 1}
+    assert doc["military"]["pct"] == 20                                      # BUG-457: 52 citizens >= MIL_MARGIN_POP (50): the D-12 share of pop 60
     assert errs_of(doc, state)[0] == []
 
 
