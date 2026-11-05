@@ -85,7 +85,7 @@ T.test('BUG-478: a refuge lever built BESIDE its manifest tile (and linked) is f
   day(W)
   T.eq(gaps(W), {'B1', 'B2', 'O1'})
   extra_lever(W, 'O1', 71, 71, Z - 6, 9001)                  -- inside Tiefe+ (60..80, 60..80, z 3..5)
-  W.run(7000, {skip = 9})                                    -- M.RESOLVE (a complete resolution is kept 6000 ticks)
+  W.run(1500, {skip = 9})                                    -- M.RESOLVE_REF (1200), not M.RESOLVE (6000), BUG-478 review
   W.state()
   T.eq(gaps(W), {'B1', 'B2'}, 'O1 now has its refuge lever')
 end)

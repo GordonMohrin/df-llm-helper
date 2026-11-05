@@ -10,6 +10,7 @@ local T = require('testlib')
 local SW = require('seal_world')
 
 local Z = 9
+local INSIDE = {{1, 8, 8, Z - 4}, {2, 8, 7, Z - 4}, {3, 8, 6, Z - 4}}   -- the citizens already in the refuge room
 local function fort(seal_p)
   local W = SW.new{persist = {['m.seal'] = seal_p, manifest = {v = 2, burrows = {['Kern+'] = {role = 'kern'}, ['Tiefe+'] = {role = 'refuge'}},
                                             refuge = {anchor = {5, 5, Z - 4}, burrow = 'Tiefe+'},
@@ -31,10 +32,11 @@ local function fort(seal_p)
   SW.fill(W, Z - 4, 5, 5, 8, 8, '.')
   SW.draw(W, Z - 4, {'<'}, 6, 6)
   SW.regroup(W)
-  SW.citizens(W, {{1, 9, 9, Z}, {2, 10, 9, Z}, {3, 11, 9, Z}})
+  SW.citizens(W, INSIDE)
   SW.item(W, 'DRINK', 9, 13, Z, 20)
   SW.item(W, 'PLANT', 9, 14, Z, 20)
   W.burrow('Kern+', {5, 5, Z, 15, 15, Z})
+  W.burrow('Tiefe+', {5, 5, Z - 4, 8, 8, Z - 4})
   local repairs = {}
   W.load(SW.fake('runner', {repair = function(K, cells, why) repairs[#repairs + 1] = {cells = cells, why = why}; return true, 'rp' .. #repairs end}))
   package.loaded['dfllm.seal'] = nil
@@ -117,7 +119,7 @@ T.test('BUG-479: no wall before the last responsible moment (destroyers 32 tiles
   -- a citizen on the stair column
   SW.citizens(W, {{1, 9, 9, Z}, {2, 6, 6, Z - 2}, {3, 11, 9, Z}})
   T.eq(plug(W), 'wait:someone on the stair')
-  SW.citizens(W, {{1, 9, 9, Z}, {2, 10, 9, Z}, {3, 11, 9, Z}})
+  SW.citizens(W, INSIDE)
   -- a hostile inside the refuge
   census(W, {TROLL, {7, 6, Z - 4}})
   W.run(9)
@@ -177,6 +179,96 @@ T.test('BUG-479: a plug survives a reload (persisted m.seal.plug): asking again 
   census(W2, {})
   W2.run(M2.PLUG.lift + 3000, {skip = 9})
   T.eq(removed, 8)
+end)
+
+T.test('BUG-479 review: the plug walls stand and the hatch is broken (the very case the plug is for) -> the refuge is NOT open ' ..
+       '(refuge_open nil, closer kind wall, soft), the alert stays on Tiefe+ in BREACH; without the walls the same world is open',
+       function()
+  local W, M, repairs = fort()
+  refresh(W)                                                     -- no hatch at all (broken)
+  local ok, v = W.K.call('seal', 'refuge_open')
+  T.ok(ok and type(v) == 'string' and v:find('open: no hatch', 1, true), 'without walls: open ' .. tostring(v))
+  for dy = -1, 1 do
+    for dx = -1, 1 do
+      if dx ~= 0 or dy ~= 0 then SW.build_wall(W, 6 + dx, 6 + dy, Z - 4) end
+    end
+  end
+  refresh(W)
+  local ok2, v2, cl = W.K.call('seal', 'refuge_open')
+  T.ok(ok2 and v2 == nil, 'walls round the foot: not open, got ' .. tostring(v2))
+  T.eq(cl and cl.kind, 'wall')
+  T.eq(cl and cl.foot, true)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = {{id = 300, x = 10, y = 12, z = Z, bd = 1}}})
+  W.set_mode('BREACH')
+  local okb, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq({okb, pick}, {true, 'Tiefe+'}, 'the alert stays on the refuge')
+  T.eq(W.state().alert.burrow, 'Tiefe+')
+  T.eq(#W.find_events('REFUGE_FAIL'), 0)
+end)
+
+T.test('BUG-479 review: a citizen still outside the refuge (on his way) holds the plug back until the BREACH or a destroyer within ' ..
+       'PLUG.close tiles of the stair head; then it is built', function()
+  local W, M, repairs = fort()
+  hatch(W)
+  refresh(W)
+  census(W, {TROLL})
+  SW.citizens(W, {{1, 8, 8, Z - 4}, {2, 10, 9, Z}, {3, 8, 6, Z - 4}})      -- one walker in the hall
+  T.eq(plug(W), 'wait:citizens not inside')
+  T.eq(#repairs, 0)
+  census(W, {{6, 14, Z, bd = 1}})                                          -- 8 tiles from the head (6,6,6): last moment
+  T.eq(plug(W), 'queued')
+  local W2, M2, repairs2 = fort()
+  hatch(W2)
+  refresh(W2)
+  census(W2, {FAR}, 1)
+  SW.citizens(W2, {{1, 8, 8, Z - 4}, {2, 10, 9, Z}, {3, 8, 6, Z - 4}})
+  W2.set_mode('BREACH')
+  T.eq(plug(W2), 'queued', 'a BREACH walls whatever is on the way')
+end)
+
+T.test('BUG-479 review (siege traffic with the real seal): a destroyer walks up while two citizens are still heading for the stair; the plug waits ' ..
+       'for them, is queued once they stand in the refuge (nobody walled out, nobody on the foot), the troll then breaks the hatch: ' ..
+       'refuge_open stays nil and the alert stays on Tiefe+', function()
+  local W, M, repairs = fort()
+  hatch(W)
+  refresh(W)
+  local walkers = {{1, 8, 8, Z - 4}, {2, 12, 9, Z}, {3, 13, 9, Z}}        -- 2 and 3 are in the hall, three steps from the stair
+  local route = {{10, 8, Z}, {7, 7, Z}, {6, 6, Z - 2}, {7, 7, Z - 4}, {8, 6, Z - 4}}   -- hall, stair head, down, refuge room
+  local queued_at
+  for step = 0, 12 do
+    local ty = 38 - step * 3                                              -- the troll comes down from the north: 38 -> 2
+    census(W, {{6, ty, Z, bd = 1}})
+    local i = math.min(math.max(step - 2, 0), #route)                     -- the walkers start late and need five steps
+    local w = {walkers[1]}
+    for k = 2, 3 do
+      local r = i == 0 and walkers[k] or route[i]
+      w[#w + 1] = {k, r[1], r[2], r[3]}
+    end
+    SW.citizens(W, w)
+    local st1 = plug(W)
+    if st1 == 'queued' then
+      queued_at = queued_at or step
+      for _, c in ipairs(repairs[1].cells) do
+        for _, u in ipairs(w) do
+          T.ok(not (u[4] == c[3] and u[2] == c[1] and u[3] == c[2]), 'a wall is queued on a citizen at step ' .. step)
+        end
+      end
+    end
+  end
+  T.ok(queued_at, 'the plug was queued')
+  T.ok(queued_at >= 7, 'not before the walkers are in (step ' .. tostring(queued_at) .. ')')
+  T.eq(#repairs, 1)
+  -- the walls stand, the troll breaks the hatch
+  for _, c in ipairs(repairs[1].cells) do SW.build_wall(W, c[1], c[2], c[3]) end
+  W.dyn[SW.key(6, 6, Z - 3)] = nil
+  W.tiles[SW.key(6, 6, Z - 3)].occ.building = 0
+  refresh(W)
+  W.set_census('h', {tick = W.K.now().tick, vis = 1, armed = 1, inside = 1, list = {{id = 501, x = 6, y = 6, z = Z, bd = 1}}})
+  W.set_mode('BREACH')
+  local ok, v = W.K.call('seal', 'refuge_open')
+  T.ok(ok and v == nil, 'the refuge is closed by the plug: ' .. tostring(v))
+  T.eq(select(2, W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')), 'Tiefe+')
+  T.eq(#W.find_events('REFUGE_FAIL'), 0)
 end)
 
 T.done()

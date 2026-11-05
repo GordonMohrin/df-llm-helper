@@ -3401,7 +3401,7 @@ local function refuge_foot(K)
   local fs = shape(x, y, zr)
   spend(1)
   if not (fs and STAIR_KIND[fs.shape]) then return nil end
-  local r = {tiles = {}}
+  local r = {tiles = {}, doors = 0, walls = 0}
   local closed = 0
   for dy = -1, 1 do
     for dx = -1, 1 do
@@ -3411,7 +3411,12 @@ local function refuge_foot(K)
         local sh = shape(nx, ny, zr)
         spend(1)
         if sh == nil then return nil end
-        if sep_closer(key3(nx, ny, zr)) then closed = closed + 1
+        if sep_closer(key3(nx, ny, zr)) then closed, r.doors = closed + 1, r.doors + 1
+        elseif (sh.shape == 'WALL' or sh.shape == 'FORTIFICATION') and sh.mat == 'CONSTRUCTION' then
+          -- BUG-479 review: a constructed wall (the refuge plug) closes the foot as a door does; without it the plug
+          -- made the foot invisible (all eight neighbours walls: closed 0, tiles 0, 'unknown') and a broken hatch read
+          -- as 'open: no hatch', so the alert left the refuge exactly when the plug was the only barrier
+          closed, r.walls = closed + 1, r.walls + 1
         elseif M.STAND[sh.shape] then
           local k = FOOT_KIND[sh.shape]
           if k then r.tiles[#r.tiles + 1] = string.format('%d,%d,%d %s', nx, ny, zr, k)
@@ -3520,7 +3525,10 @@ end
 function M.refuge_open(K)
   local v, foot = refuge_open(K, now_t(K))
   if v then return v end
-  if foot and foot.closed then return nil, {kind = 'door', pos = foot.pos, foot = true} end
+  if foot and foot.closed then
+    -- doors break under building destroyers, constructed walls do not (BUG-479: the plug)
+    return nil, {kind = foot.doors > 0 and 'door' or 'wall', pos = foot.pos, foot = true}
+  end
   local rs = M.refuge_stair(K)
   local h = rs and rs.pos
   if not h then return nil end
@@ -3557,7 +3565,7 @@ M.refuge_closure = refuge_closure
 -- ring (the walls would shut him out or build on him). Lifted in PEACE after PLUG.lift ticks without a hostile: the
 -- walls are designated for removal (act.construction_remove), the refuge is enterable again.
 -- Public M.plug (siege asks), M.plug_state
-M.PLUG = {on = true, near = 30, lift = 2400, retry = 1200}
+M.PLUG = {on = true, near = 30, close = 10, lift = 2400, retry = 1200}
 local function plug_cfg(K)
   return M.PLUG                                  -- constants of the module (no config key: tests set M.PLUG)
 end
@@ -3623,6 +3631,20 @@ local function plug_eval(K, args)
     end
   end
   if plug_occupied(K, col, tk) then return 'wait:someone on the stair' end
+  -- BUG-479 review: a citizen still on his way to the stair would be walled out. Before the BREACH, and while no
+  -- destroyer is within PLUG.close tiles of the stair head, a citizen outside the refuge burrow holds the plug back
+  if not late and (near < 0 or near > c.close) then
+    local rb = burrow(refuge)
+    local cu = K.census and K.census.u
+    if rb then
+      for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+        local u = df.unit.find(id)
+        local x, y, z
+        if u then x, y, z = dfhack.units.getPosition(u) end
+        if x and not in_burrow(rb, x, y, z) then return 'wait:citizens not inside' end
+      end
+    end
+  end
   st.plug_try, dirty = t, true
   local ok, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers')
   if not (ok and r1 == true and type(id) == 'string') then

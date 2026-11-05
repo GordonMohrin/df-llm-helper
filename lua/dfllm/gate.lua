@@ -357,7 +357,11 @@ local function resolve(r, spec, now, urgent)
   if same and r.resolved then
     local age = now - r.resolved
     if cached and any_linked(r) then
-      if age < M.RESOLVE then return end
+      -- BUG-478 review: the refuge-lever scan below must not wait for M.RESOLVE (6000): the early return also opens
+      -- every RESOLVE_REF ticks while no known linked lever lies in the refuge burrow
+      local look = ref_name ~= nil and now - (r.scan_tick or -M.RESOLVE_REF) >= M.RESOLVE_REF
+                   and not lever_in_name(r, ref_name)
+      if age < M.RESOLVE and not look then return end
     elseif age < (urgent and M.RESOLVE_URGENT or M.RESOLVE_RETRY) then return end
   end
   r.sig, r.resolved = sig, now
@@ -382,7 +386,7 @@ local function resolve(r, spec, now, urgent)
                    and not lever_in_name(r, ref_name)
   if r.bid and (not any_linked(r) or want_ref) and now - (r.scan_tick or -M.RESOLVE_RETRY) >= M.RESOLVE_RETRY then
     r.scan_tick = now
-    for _, lv in ipairs(df.global.world.buildings.other.TRAP) do      -- lever.lua:103
+    for _, lv in ipairs(df.global.world.buildings.other.TRAP or {}) do      -- lever.lua:103
       if is_lever(lv) then
         local t = targets(lv)
         if t and t[r.bid] then add(lv, t, {lv.x1, lv.y1, lv.z}) end

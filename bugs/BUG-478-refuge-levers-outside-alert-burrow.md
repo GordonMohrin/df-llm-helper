@@ -17,7 +17,7 @@ Note: the log cannot tell which of the two (a displaced lever tile, or the 6000-
 - Nothing checked, in PEACE, that every bridge has a linked lever inside the refuge burrow (readiness counted only `levers:<B>` < 2 linked anywhere), so a fort could live for years with levers only where nobody confined can pull.
 
 ## Fix
-- `gate.resolve`: while no known linked lever of the bridge lies in the refuge burrow, the lever scan (`buildings.other.TRAP`, links to this bridge) runs at most every `M.RESOLVE_REF` (1200) ticks even if other levers are linked.
+- `gate.resolve`: while no known linked lever of the bridge lies in the refuge burrow, the lever scan (`buildings.other.TRAP`, links to this bridge) runs at most every `M.RESOLVE_REF` (1200) ticks even if other levers are linked. (Review: the early return for a complete resolution, `M.RESOLVE` = 6000, now also opens when no known linked lever lies in the refuge burrow, so a late-linked refuge lever is found within about `RESOLVE_REF` + `RESOLVE_RETRY`, not after up to 6000 ticks.)
 - `gate.refuge_gaps(K)` (public): the managed bridges with a linked lever and none inside the refuge burrow.
 - readiness: `ready.rg` in PEACE (SIEGE_UNREADY "no refuge lever: B1,B2,O1"); deliberately NOT an R0 blocker (R0 stops the automatic drills, and a soil fort without mechanisms could never build the levers) and `DECISION_NEEDED refuge_levers` (A, every `DEF.ask_days` = 30 days) with `cmds = ['bp.place tpl=fortcore site=same stage=3 retrofit=2']` (the fortcore retrofit that builds the refuge levers; their links are gate's jobs, the mechanisms the economy's).
 - Placement already existed (fortcore stage 3 `REFUGE_LEVERS`); this is the check and the repair for forts that lack them.
