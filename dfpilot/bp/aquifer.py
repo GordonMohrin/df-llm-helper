@@ -9,8 +9,16 @@ with no damp report, no revealed aquifer wall and no water is dry and needs no s
 `dry_levels` dry levels below the last aquifer level, or at `depth`. Water >= 4/7 or a rising flow in its own tiles is a
 heavy aquifer: stopped for good (breach:heavy_aquifer) and plugged (CAVERN_PLUG).
 
+BUG-414 (Gordon 04.11.2026: every fort under the aquifer, a heavy layer too): a level the fort knows to be heavy (a breach
+heavy_aquifer recorded within one level, or `heavy=all`) is not opened by a miner. Its 4 side tiles are walled from above first,
+one at a time: the tile on the dry level above is channelled (the dwarf stands on the shaft's stair tile) and a constructed wall
+is built on the open ramp below it, the way the cavern plug walls a channelled tile from above; only when all 4 stand is the shaft
+tile dug. Water on the dry level above, or a ring wall not built in time, stops the shaft and plugs it (AQ_HEAVY). A heavy layer
+thicker than one level is stopped BEFORE its second heavy level is opened (nothing open to plug). `heavy=off` keeps the old method.
+
 Params: x, y, top = the shaft column (absolute; -1: the site anchor), dry_levels, depth (levels at most), mode = auto (seal
-per wall: stone smoothed, soil walled) | stone | soil (every wall that way) | all (seal every level, damp or not).
+per wall: stone smoothed, soil walled) | stone | soil (every wall that way) | all (seal every level, damp or not), heavy =
+ring (known heavy levels) | all (every level below the top) | off.
 Fair play: nothing here reads the map; the player (or the orchestrator) names the column, a revealed tile the miners
 reach, or `bp sites aqshaft` ranks the columns on the revealed snapshot (BUG-292: public Z4 floor, rock with rock on its
 4 sides below). The kernel reads the aquifer flag of revealed tiles only (DECISIONS 2026-10-28).
@@ -20,8 +28,9 @@ from __future__ import annotations
 from .primitives import Plan
 
 MODES = ("auto", "stone", "soil", "all")
+HEAVY = ("ring", "all", "off")           # BUG-414: ring known heavy levels from above | every level | never
 PARAMS = {"aqshaft": {"x": (-1, -1, 9999), "y": (-1, -1, 9999), "top": (-1, -1, 9999), "dry_levels": (2, 1, 6),
-                      "depth": (20, 2, 60), "mode": ("auto", None, None)}}
+                      "depth": (20, 2, 60), "mode": ("auto", None, None), "heavy": ("ring", None, None)}}
 
 
 def column(p: dict) -> list[int] | None:
@@ -39,6 +48,8 @@ def aqshaft(p: dict) -> Plan:
     """Aquifer pass: a lined stair shaft, one level per stage, each sealed and watched before the next (FR-95)."""
     if p["mode"] not in MODES:
         raise ValueError(f"aqshaft.mode: {p['mode']!r} is not one of {', '.join(MODES)}")
+    if p["heavy"] not in HEAVY:
+        raise ValueError(f"aqshaft.heavy: {p['heavy']!r} is not one of {', '.join(HEAVY)}")
     column(p)
     P = Plan("aqshaft", "infra")
     for i in range(p["depth"]):

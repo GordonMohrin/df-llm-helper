@@ -2130,6 +2130,8 @@ function Q.aqx(K)
       for _, v in ipairs(type(S.rt.aql) == 'table' and S.rt.aql or {}) do if v == z then return true end end
       return false
     end,
+    heavy_known = function(z, span) return Q.heavy_known(z, span) end,      -- BUG-414: a recorded heavy level near z
+    hv = function(z) Q.hv_level(K, z) end,                                  -- BUG-414: record z as a heavy level
     unreachable = function(P, d)               -- BUG-412: no citizen reaches the stage's dig (BUG-352's test)
       local ok, tl = pcall(Q.unreachable, K, P, d, S.rt.p[P.id])
       return ok and tl ~= nil
@@ -2146,6 +2148,33 @@ function Q.aqx(K)
     end,
     live = function(id) local P = find(id); return P ~= nil and P.done ~= 1 end,
   }
+end
+
+-- BUG-414: heavy aquifer levels. m.runner hvl (<= 32 absolute z, sorted) keeps every level a dig met heavy water on; the
+-- breach records (m.runner dz, why heavy_aquifer: a fortcore that stopped on one counts) are read too. A level is heavy-known
+-- for z when a recorded one lies within `span` levels (an aquifer layer is rarely one level thick)
+function Q.hv_level(K, z)
+  z = int(z)
+  if not z then return end
+  S.rt.hvl = type(S.rt.hvl) == 'table' and S.rt.hvl or {}
+  for _, v in ipairs(S.rt.hvl) do if v == z then return end end
+  table.insert(S.rt.hvl, z)
+  table.sort(S.rt.hvl)
+  while #S.rt.hvl > 32 do table.remove(S.rt.hvl, 1) end
+  dirty()
+end
+
+function Q.heavy_known(z, span)
+  z, span = int(z), int(span) or 0
+  if not z then return false end
+  for _, v in ipairs(type(S.rt.hvl) == 'table' and S.rt.hvl or {}) do
+    if math.abs(v - z) <= span then return true end
+  end
+  for _, c in ipairs(type(S.rt.dz) == 'table' and S.rt.dz or {}) do
+    if type(c) == 'table' and c.why == 'heavy_aquifer' and type(c.pos) == 'table' and int(c.pos[3])
+       and math.abs(int(c.pos[3]) - z) <= span then return true end
+  end
+  return false
 end
 
 -- the manifest's `aquifer_levels` (levels seen damp or wet, revealed tiles only; bp sites keeps rooms off them and off
@@ -2476,6 +2505,7 @@ function breach(K, P, why, pos, src, ex)
   if was then dd.was, dd.n = was, n end
   if ex then dd.state, dd.n = trunc(ex.state, 40), n or 0 end
   S.rt.br[P.id] = {why = why, pos = dd.pos, t = now(K), c = now(K)}   -- the recheck looks there first
+  if why == 'heavy_aquifer' and dd.pos then Q.hv_level(K, dd.pos[3]) end   -- BUG-414: the next shaft rings that level
   M.note_breach(K, P.id, P.tpl, why, dd.pos)                              -- BUG-130: manifest.breaches
   K.emit('BREACH_STOP', 'B', breach_msg(P.id, why, src, was, n, ex and ex.state), dd)
   K.flush()

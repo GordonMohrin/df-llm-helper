@@ -1,5 +1,19 @@
 # CHANGELOG dfpilot
 
+## A heavy aquifer is walled from above; the running core stays; a bounded sites export (BUG-414, BUG-415, 2026-11-05; offline, live-untested)
+- **Why:** Gordon: "generell durch den Aquifer graben, so sicher wie moeglich". BUG-412 passed light aquifers per level but only contained a heavy one
+  (stop + plug): Run 16c i3 Yawninggilt hit heavy water at all three core sites and had no core after 20 years. Its propose also redrafted
+  `fortcore@S1` while a core ran, drafted P5 with no core to build, and `bp sites fortcore --fresh` timed out.
+- **BUG-414:** a level the fort knows to be heavy (a breach `heavy_aquifer` within one level, m.runner `hvl`, or `aqshaft p.heavy=all`) is not opened by a miner
+  standing in it: per side tile, one at a time, the tile on the dry level above is channelled and a constructed wall is built on the open ramp below it
+  (the cavern plug's channel + wall from above), then the shaft tile is dug beside 4 constructed walls. Water on the dry level above, a wall not standing
+  after 2 days, or a refused wall: AQ_HEAVY + plug; a known heavy level under a ringed one: stopped before it is opened (`stacked`). `p.heavy` ring|all|off.
+  The known DF methods (cave-in, wall ring from above, pump stack, wall on a damp tile) are weighed in `bugs/BUG-414-*.md`.
+- **BUG-415:** `core_resite`: a stage 1 that is neither stopped nor done on a breach anchor is the running core (no second `fortcore@S1`, the stopped stage is
+  not drafted there again); `no_core_route`: no core and no route holds `phase_target` below P3 with a note; `sites_box` bounded to 150000 tiles (a square round
+  the median when the pieces are spread), `fresh_wait` sizes the wait to the box, `wait_snapshot` prints progress.
+- **Tests:** tests/lua/test_bug414_heavy_ring.lua (10), tests/test_bug414_415_heavy_core.py (11), test_bug364_367 (far-flung box), test_bp_aqshaft + golden (param).
+- **Live check:** see BUG-414 (the ring cycle on a heavy level; the first ring tile decides the three open questions) and BUG-415.
 ## Water the citizens can reach: ice, an early drink check, a thirst line (BUG-400 to BUG-402, 2026-11-04; offline, live-untested)
 - **Why:** Run 16a i1 Mansionlauded (and the first i1 fort Bachwald) died of thirst, 13 of 16 in y372-373: `bp sites fortcore` ranked S1 110,62,159
   `water 1 steps` (score 1029) while `inspect reach` had drink empty and `water_sources` knew one body with reach 0; the questions that came

@@ -13,6 +13,7 @@
   "params": {
    "depth": 20,
    "dry_levels": 2,
+   "heavy": "ring",
    "mode": "auto",
    "top": -1,
    "x": -1,

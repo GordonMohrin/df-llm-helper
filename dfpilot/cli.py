@@ -173,7 +173,8 @@ def _preview(save_dir: Path, tpl: str, params: dict, label: str | None) -> str:
 
 def _wait_snapshot(save_dir: Path, cid: str, timeout: float) -> dict | None:
     from .cmd import wait_snapshot
-    return wait_snapshot(save_dir, cid, timeout)
+    return wait_snapshot(save_dir, cid, timeout,
+                         progress=lambda s: print(f"  waiting for snapshot {cid}: {s:.0f}s of {timeout:.0f}s", flush=True))
 
 
 def run_bp(args, save_dir: Path | None) -> int:
@@ -201,9 +202,15 @@ def run_bp(args, save_dir: Path | None) -> int:
             if reply is not None and not reply.get("ok"):
                 print(f"snapshot refused: {reply.get('msg')}")
                 return 1
-            snap = _wait_snapshot(save_dir, cid, args.timeout)
+            from .cmd import box_tiles, fresh_wait
+            wait = fresh_wait(box, args.timeout)               # BUG-415: a big box takes longer than the default minute
+            if wait > args.timeout:
+                print(f"snapshot {cid}: {box_tiles(box)} tiles requested, waiting up to {wait:.0f}s (--timeout raises it)",
+                      flush=True)
+            snap = _wait_snapshot(save_dir, cid, wait)
             if snap is None:
-                print(f"no snapshot {cid} within {args.timeout:.0f}s")
+                print(f"no snapshot {cid} within {wait:.0f}s (the export may still finish: `dfllm bp sites {args.tpl}` ranks the "
+                      "newest snapshot once it is written)")
                 return 3
         where = _where(args)
         held: list = []
