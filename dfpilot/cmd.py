@@ -1075,6 +1075,33 @@ def _unboxed_head(snap: dict | None, x: int, y: int, zr: int, top: int) -> int |
     return None
 
 
+BOXED_UP = 40        # BUG-538: levels up a stair that stair_piece looks at
+
+
+def stair_piece(snap: dict | None, x: int, y: int, z: int) -> tuple:
+    """BUG-538 (Run 16d i4 Trumpetrealms y391-y399: `seal at=last` put a hatch on the stair 94,94,140, 'walled in on its level', three
+    times, each 300 days of DECISION): where a hatch on the stair tile x,y,z can be built. ('ok',) when a builder can stand beside it
+    (or the snapshot cannot tell: a hidden neighbour, no snapshot); ('moved', zz, kind) when the tile is walled in on all 8 sides and the
+    same stair has a level above with a tile beside it to build from; ('closed', zz) when a door/hatch stands higher up; ('boxed',) when
+    every level above is walled in too (or the stair ends): no builder takes a hatch anywhere on it."""
+    if stair_boxed(snap, x, y, z) is not True:
+        return ("ok",)
+    for zz in range(z + 1, z + 1 + BOXED_UP):
+        c = _snap_char(snap, x, y, zz)
+        if c == "+":
+            return ("closed", zz)
+        if c is None or c == "?":
+            return ("ok",)                       # unknown above: as given
+        if c not in STAIR_CHARS:
+            return ("boxed",)
+        b = stair_boxed(snap, x, y, zz)
+        if b is False:
+            return ("moved", zz, HEAD_KIND.get(c, "stair_updown"))
+        if b is None:
+            return ("ok",)
+    return ("boxed",)
+
+
 FOOT_NOTE = ("refuge: doors close every tile beside the stair foot {} (BUG-336): the stair is closed off the refuge, no "
              "hatch is demanded on its head")
 
@@ -1291,6 +1318,7 @@ def _geo_try(fn, notes: list[str], label: str, *a):
 CLOSED_NOTES = ("(closed)", "(closed, or no floor/ramp/stair)", "left out, sealed by", "builds its piece",
                 "a seal under way closes its route", "(a seal project builds them)",
                 "no stair found (not dug)", "is not revealed: look at the tile", "hatch moved to",
+                "no builder can reach a hatch there",
                 "(a fortcore tile, the fort's own way)")
 
 
@@ -1406,6 +1434,22 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
         if kind is None:
             continue
         label = f"{x},{y},{z} {'open route' if kind == dmod.OPEN_ROUTE else kind or '?'}"
+        if dmod.piece_kind(kind) and kind in dmod.STAIR_KINDS and e["src"] != "at" and snap:
+            # BUG-538: never propose a hatch no builder can reach (BUG-313's rule, now for every opening on a stair)
+            sp = stair_piece(snap, x, y, z)
+            if sp[0] == "closed":
+                notes.append(f"{label}: left out, a door or hatch already closes the stair at {x},{y},{sp[1]} (closed)")
+                continue
+            if sp[0] == "boxed":
+                notes.append(f"{label}: left out, the tile is walled in on its level and so is every level above it on the stair: "
+                             "no builder can reach a hatch there (BUG-538), nothing to build")
+                continue
+            if sp[0] == "moved":
+                notes.append(f"{label}: walled in on its level (no tile beside it to build from); hatch moved to "
+                             f"{x},{y},{sp[1]} (same stair, the first level with a floor beside it)")
+                e = dict(e, pos=(x, y, sp[1]))
+                kind = sp[2]
+                x, y, z = e["pos"]
         if dmod.piece_kind(kind):
             keep.append({"pos": e["pos"], "kind": kind, "piece": e["piece"], "nodoor": e.get("nodoor", False)})
         elif kind == "sapling":

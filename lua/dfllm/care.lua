@@ -502,6 +502,8 @@ local function slot_text(name, left, bk, nd, ex)
   if ex.kind and ex.kind > src then cnt = cnt .. ' of ' .. ex.kind end
   if (nd.frb or 0) > 0 then cnt = cnt .. string.format(', %d forbidden', nd.frb) end
   if (nd.unseen or 0) > 0 then cnt = cnt .. string.format(', %d unseen', nd.unseen) end
+  if (nd.carry or 0) > 0 then cnt = cnt .. string.format(', %d carried/in a claimed bin', nd.carry) end
+  if ex.other then cnt = cnt .. ', ' .. ex.other end
   if ex.thread then cnt = cnt .. ', thread ' .. ex.thread end
   return trunc(string.format('%s x%d: %s [%s]', name, left, bk, cnt), 110)
 end
@@ -3459,7 +3461,13 @@ end
 -- not reach (outside Kern+ without the walk-group hook) is not counted: nd.far tells MOOD_NEED about it.
 local function need_item(K, c, r, p, t, it)
   local nd, alt = t.nd, t.alt
-  if nd.avail >= nd.n or t.m.att[it.id] or R.gone(it) or R.carried(it) then return end
+  if nd.avail >= nd.n or t.m.att[it.id] or R.gone(it) then return end
+  if R.carried(it) then
+    -- BUG-535: an item a unit wears or a claimed container holds is no stock, but the report counts it (it was invisible: 'none in the fort')
+    nd.kind = nd.kind + 1
+    if R.match(alt, it) then nd.carry = (nd.carry or 0) + 1 end
+    return
+  end
   -- K3 (BUG-100): three numbers per need besides avail, counted at the real filter (R.match: type, material, the job_item's
   -- own veto): src = items the fort holds and knows of, free = of those not in use, owned, claimed or forbidden, avail =
   -- of those the dwarf can walk to. kind = every item of the vector, whatever the filter (225 stone blocks for a metal
@@ -3717,6 +3725,8 @@ local function mood_report(K, c, r, p)
       local blocked, fetch = {}, {}                 -- K3: every open slot with its blocker; the blocked ones go first
       local glassy = false                          -- Run 11: a missing "cut gems" filter (cut glass serves it)
       local open = open_filters(m)
+      local acqmap = {}                             -- BUG-535: class -> acquisition ways of its slots
+      local gf                                      -- BUG-535: rough / cut gems of the fort, read once per mood
       for _, nd in ipairs(m.needs) do               -- wants: the hook entries (care.mood_wants)
         local left = nd.n
         if open and nd.nd and nd.nd.idx then left = math.min(nd.n, open[nd.nd.idx] or 0) end
@@ -3726,6 +3736,14 @@ local function mood_report(K, c, r, p)
           local name = nd.legacy or a0.legacy or R.slot_name(a0)
           local ex = {kind = (#nd.alts == 1 and not a0.part) and nd.kind or nil,
                       thread = (a0.cls == 'cloth' and bk ~= BK_HAVE) and (math.tointeger(inv.thread) or 0) or nil}
+          if a0.cls == 'gems' and not a0.legacy and bk ~= BK_HAVE and (a0.tname == 'ROUGH' or a0.tname == 'SMALLGEM') then
+            gf = gf or R.gem_forms() or false   -- BUG-535: the census counts rough and cut gems together
+            if gf and a0.tname == 'ROUGH' and gf.cut > 0 then
+              ex.other = string.format('%d cut gems exist, a rough one is needed', gf.cut)
+            elseif gf and a0.tname == 'SMALLGEM' and gf.rough > 0 then
+              ex.other = string.format('%d rough gems exist, a jeweler cuts them', gf.rough)
+            end
+          end
           local e = {i = (nd.nd and nd.nd.idx) or -1, t = slot_text(name, left, bk, nd, ex), b = name .. ':' .. bk,
                      h = bk ~= BK_HAVE}
           if e.h then blocked[#blocked + 1] = e else fetch[#fetch + 1] = e end
@@ -3752,6 +3770,14 @@ local function mood_report(K, c, r, p)
             local cls = alt.cls or 'other'
             if R.ACQ[cls] then path = true end
             if not seen[cls] then seen[cls] = true; classes[#classes + 1] = cls end
+            -- BUG-535: the ways to get a class by its slots (a rough-gem slot is no CutGems job); a second slot adds its own
+            local am = acqmap[cls] or {}
+            acqmap[cls] = am
+            for _, w in ipairs(R.acq(alt)) do
+              local dup = false
+              for _, x in ipairs(am) do if x == w then dup = true end end
+              if not dup then am[#am + 1] = w end
+            end
           end
           nopath = nopath or not path
           local a = nd.alts[1]                      -- an any-of need (workshop classes): its primary material
@@ -3762,7 +3788,7 @@ local function mood_report(K, c, r, p)
           if #wants < 20 then
             -- BUG-341: far = the free items of this need the dwarf cannot reach (economy counts them as no stock)
             wants[#wants + 1] = {unit = int(m.sid), cls = a.cls or 'other', n = short, label = labels[#labels],
-                                 acq = table.concat(R.ACQ[a.cls or ''] or {}, ','), buy = R.token(a) or '', glass = g,
+                                 acq = table.concat(R.acq(a), ','), buy = R.token(a) or '', glass = g,
                                  far = (nd.far or 0) > 0 and nd.far or nil}
           end
         end
@@ -3812,7 +3838,7 @@ local function mood_report(K, c, r, p)
         local u = rec.unres
         if type(u) ~= 'table' then u = {since = now, sig = ''}; rec.unres = u end
         local acq = {}
-        for _, cls in ipairs(classes) do acq[#acq + 1] = cls .. ':' .. table.concat(R.ACQ[cls] or {'none'}, '+') end
+        for _, cls in ipairs(classes) do acq[#acq + 1] = cls .. ':' .. table.concat(#(acqmap[cls] or {}) > 0 and acqmap[cls] or {'none'}, '+') end
         -- MOOD_NEED when the list of filters changes (as always) and, K3, when a slot's blocker changed (none in the fort
         -- -> none reachable): the blocker change waits max(mood_risk_every, wake_wall_s) after the last MOOD_NEED
         local changed = sig ~= u.sig
@@ -3890,7 +3916,7 @@ local function phase_needs(K, c, r, p)
     for _, m in ipairs(r.mood_list) do
       for _, nd in ipairs(m.needs) do
         nd.avail, nd.fixes, nd.far, nd.src = 0, 0, 0, 0
-        nd.free, nd.kind, nd.unseen, nd.frb = 0, 0, 0, 0
+        nd.free, nd.kind, nd.unseen, nd.frb, nd.carry = 0, 0, 0, 0, 0
         for _, alt in ipairs(nd.alts) do
           for _, v in ipairs(alt.vecs or {}) do r.nq[#r.nq + 1] = {m = m, nd = nd, alt = alt, vec = v} end
         end

@@ -357,6 +357,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "surface": surface_facts(save_dir, state, applied, core),  # BUG-387/389: the core on the surface
             "startup": startup_placed(save_dir),                     # BUG-356: the surface still/kitchen/carpenter/mason set
             "depot": depot_planned(save_dir, state),                 # BUG-368: a trade depot stands or is under way
+            "depot_lost": depot_lost(save_dir),                      # BUG-536: the newest word on the depot is that it was toppled
             "trade_pile": trade_pile_planned(save_dir, core),        # BUG-488: the dfllm-trade pile stands or is under way
             "core2": ("fortcore", 2) in applied,                     # BUG-244: stage 2 applied (core2_dug)
             "food_shops": _food_shops_missing(save_dir),             # BUG-243: Still/Kitchen the manifest lacks
@@ -3744,15 +3745,49 @@ TRADEPOST_BUILD = {"tpl": TRADEPOST, "site": "S1"}                # BUG-488: the
 DEPOT_BUILD = {"tpl": DEPOT, "site": "S1"}                       # BUG-368: the trade depot on the surface, no fortcore needed
 
 
+def depot_lost(save_dir: Path) -> bool:
+    """BUG-536 (Run 16d i4 Trumpetrealms y385: a tantrum / a cave dragon toppled the Trade Depot; the manifest still named it and the
+    finished depot project stayed in bp/, so `plan propose` never drafted a new one): the newest word on the depot is that it is gone, a
+    BUILDING_TOPPLED of a trade depot or a DEPOT_MISSING (a caravan on the map and none standing), and no depot / core project has
+    finished since."""
+    done_ids = set()
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        if isinstance(doc, dict) and doc.get("tpl") in (DEPOT, "fortcore", SURFACE_CORE):
+            done_ids.add(p.stem)
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        t = e.get("type")
+        if t == "PROJECT_DONE" and d.get("proj") in done_ids:
+            return False
+        if t == "DEPOT_MISSING" or (t == "BUILDING_TOPPLED" and "depot" in str(d.get("what", "")).lower()):
+            return True
+    return False
+
+
+def _parked_ids(state: dict | None) -> set[str]:
+    """BUG-536: ids of the projects the kernel parked (state.proj row `parked: <why>`): blocked for good, no plan stands on them."""
+    out = set()
+    for r in (state or {}).get("proj") or []:
+        if isinstance(r, list) and len(r) >= 4 and isinstance(r[0], str) and str(r[3]).startswith("parked"):
+            out.add(r[0])
+    return out
+
+
 def depot_planned(save_dir: Path, state: dict | None) -> bool:
     """BUG-368 (Run 16b i2 Ostgate: NO_DEPOT / DEPOT_MISSING every year, no caravan ever traded, no metal or leather): a
     trade depot stands or is under way: the kernel's manifest names one, a `depot` project is in <save>/bp (placed, running
-    or done), or a fortcore's stage 1 is digging (its bailey builds the depot). A fortcore a breach stopped is not one."""
-    if _kern_manifest(save_dir).get("depot"):
+    or done), or a fortcore's stage 1 is digging (its bailey builds the depot). A fortcore a breach stopped is not one.
+    BUG-536: a depot that was toppled (depot_lost) is no depot: the manifest and the finished projects do not count, and a
+    project the kernel parked (build_lost for good) never did; only a depot project still running does."""
+    lost = depot_lost(save_dir)
+    if not lost and _kern_manifest(save_dir).get("depot"):
         return True
+    parked = _parked_ids(state)
+    done = done_projects(save_dir) if lost else set()
     for p in bp_files(save_dir):
         doc = files.read_json(p)
-        if isinstance(doc, dict) and doc.get("tpl") == DEPOT:
+        if isinstance(doc, dict) and doc.get("tpl") == DEPOT and p.stem not in parked and p.stem not in done:
             return True
     return core_digging(save_dir, state)
 
@@ -4584,7 +4619,10 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         builds.append(copy.deepcopy(DEPOT_BUILD))
         depot_note = ("; BUG-368: no trade depot and " + ("a fortcore that waits for the aquifer shaft" if aq_wait
                                                           else "no fortcore stage 1 to build one")
-                      + ": depot@S1 on the surface before the first caravan (bp sites depot --fresh --near <wagon x,y,z>)")
+                      + ": depot@S1 on the surface before the first caravan (bp sites depot --fresh --near <wagon x,y,z>)"
+                      + ("; BUG-536: the last depot was toppled (BUILDING_TOPPLED / DEPOT_MISSING since its project finished), the old one "
+                         "is not counted"
+                         if (fort or {}).get("depot_lost") else ""))
     # BUG-488: a depot (standing, placed or drafted now) and no dfllm-trade pile (made by fortcore stage 1 / the surface core only) =
     # the caravans find nothing to buy with: the pile alone, beside the depot, before the first caravan season
     trade_note = ""

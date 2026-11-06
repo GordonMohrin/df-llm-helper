@@ -92,6 +92,11 @@ M.DEFAULTS = {
   alarm_every = 7 * DAY, hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
   deep = 4, zone_below = false, gate_every = 28 * DAY, wake_wall_s = 600,
+  -- BUG-537 (Run 16c i3 Sealcertain: HOSPITAL_DRY ~10 times a year beside a well that read 3/7 and 1/7 in turn): the dry episode ends
+  -- only after the hospital has had accepted water for gate_clear ticks in a row; a flicker is the same episode
+  gate_clear = 3 * DAY,
+  -- BUG-537: DECISION_NEEDED hospital_supply (table, traction bench, splints, thread, cloth missing while a patient lies): again after
+  hosp_sup_every = 28 * DAY,
   -- BUG-265 (Run 15 Earthboat: 6 bodies 10-29 tiles from the hospital, all reach 0): ws_dig 8 -> 16 walls (ws_reads still
   -- caps the tile reads per body)
   ws_dz = 3, ws_tiles = 1500, ws_every = 7 * DAY, ws_bodies = 12, ws_dig = 16, ws_reach = 6, ws_reads = 400,
@@ -2788,6 +2793,45 @@ function M.audit(K, c, r, ctx)
   return a
 end
 
+---------------------------------------------------------------- BUG-537: the hospital's missing furniture and supplies
+-- Run 16c i3 Sealcertain / i2: a hospital with patients and no table, no splints, no thread or cloth (the audit listed them, nobody was
+-- asked). A hospital with a patient in it and one of the gaps below raises DECISION_NEEDED hospital_supply (A) with the commands
+-- that make or buy what is missing (a table is the bp template's now: `hospital` places one); once per hosp_sup_every and again when
+-- the set of gaps changes (util/cadence).
+M.SUPPLY_FIX = {
+  no_table = {'a table in the zone (the hospital template places one; build it in the zone otherwise)', nil},
+  no_traction = {'a traction bench in the zone (bone setting)', nil},
+  no_splints = {'splints', 'dfllm cmd order.add \'{"job":"ConstructSplint","amount":4}\''},
+  no_thread = {'thread', 'dfllm cmd trade.want \'{"add":["thread"]}\''},
+  no_cloth = {'cloth', 'dfllm cmd trade.want \'{"add":["cloth"]}\''},
+}
+M.SUPPLY_ORDER = {'no_table', 'no_traction', 'no_splints', 'no_thread', 'no_cloth'}
+function M.supply_ask(K, c, p, a)
+  local have = {}
+  for _, g in ipairs(a.gaps or {}) do have[g.tok] = true end
+  local toks, names, cmds = {}, {}, {}
+  if (a.patients or 0) > 0 and (a.zones or 0) > 0 then
+    for _, tk in ipairs(M.SUPPLY_ORDER) do
+      if have[tk] then
+        local e = M.SUPPLY_FIX[tk]
+        toks[#toks + 1] = tk
+        names[#names + 1] = e[1]
+        if e[2] then cmds[#cmds + 1] = e[2] end
+      end
+    end
+  end
+  if #toks == 0 then
+    p.hsup = CAD.quiet(p.hsup)
+    return
+  end
+  local T = K.now()
+  if not CAD.due(p.hsup, T, {}, toks, {ticks = c.hosp_sup_every, wall_s = c.wake_wall_s}) then return end
+  p.hsup = CAD.mark(T, {}, toks)
+  local q = trunc(string.format('hospital with %d patient(s) lacks %s', a.patients, table.concat(names, '; ')), 200)
+  K.emit('DECISION_NEEDED', 'A', trunc('hospital_supply: ' .. q, 200),
+         {id = 'hospital_supply', q = q, gaps = {table.unpack(toks)}, cmds = #cmds > 0 and cmds or nil})
+end
+
 ---------------------------------------------------------------- BUG-131: stale hospital zones outside the core
 -- Run 14 (site90): R0 hospital_out stayed red the whole run over an old zone (24422 at 88,28, "1 of 3 zones") while a
 -- hospital inside the core stood or was being built; the playbook forbids the session to delete zones, so goal G3 never
@@ -3280,6 +3324,7 @@ local function finish(K, c, r, p)
   -- accepted water scans weekly too (the recipe, the well spots, the aquifer level come from it)
   if wet == 0 and (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end
   if gate then
+    p.hosp_ok = nil                                        -- BUG-537: the water is gone again: the clear clock restarts
     if (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end
     local every = #r.patients > 0 and c.hosp_every or c.gate_every
     local start = p.hosp == nil
@@ -3317,8 +3362,13 @@ local function finish(K, c, r, p)
       K.emit('PROJECT_REQUEST', 'B', 'cistern: the hospital has no accepted water within ' .. c.near .. ' tiles',
              {tpl = 'cistern', n = 1, why = 'hospital_water'})
     end
-  else
-    p.hosp, p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks = nil, nil, nil, nil, nil   -- a new dry episode wakes at once
+  elseif p.hosp ~= nil then
+    -- BUG-537: accepted water for the first time since the episode began starts the clear clock; the episode (and with it the
+    -- wake at its start) ends after gate_clear ticks of it. A well that reads 3/7 and 1/7 in turn is one episode.
+    p.hosp_ok = p.hosp_ok or now
+    if now - p.hosp_ok >= (math.tointeger(c.gate_clear) or 0) then
+      p.hosp, p.hosp_t, p.hosp_w, p.hosp_ids, p.hosp_toks, p.hosp_ok = nil, nil, nil, nil, nil, nil   -- a new dry episode wakes at once
+    end
   end
   -- BUG-434: patients thirsty with no accepted water within patient_far tiles of them: the cistern is asked for whatever hospital zone
   -- there is (or not: the gate above needs a hospital zone or project). Nothing while a cistern project is pending
@@ -3432,6 +3482,8 @@ local function finish(K, c, r, p)
   if oka then
     st.audit = audit
     st.audit.give = st.gv and {tick = st.gv.tick, key = st.gv.key, txt = st.gv.txt} or nil
+    local oks, errs = pcall(M.supply_ask, K, c, p, audit)     -- BUG-537
+    if not oks then K.log('warn', 'water: hospital supply ask failed: %s', tostring(errs)) end
   else
     K.log('warn', 'water: hospital audit failed: %s', tostring(audit))
   end

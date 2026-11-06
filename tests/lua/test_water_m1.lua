@@ -471,3 +471,35 @@ T.test('BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought S
 end)
 
 T.done()
+
+---------------------------------------------------------------- BUG-537
+T.test('BUG-537: a hospital with a patient and no table, no splints, no thread, no cloth raises DECISION_NEEDED hospital_supply once ' ..
+       'with the commands; no patient: nothing; the same gaps do not repeat before hosp_sup_every', function()
+  local sup = {}
+  for k, v in pairs(FULL) do sup[k] = v end
+  sup.desired_splints, sup.count_splints = 5, 0
+  sup.desired_thread, sup.count_thread = 0, 0
+  sup.desired_cloth, sup.count_cloth = 5, 0
+  local W = audit_world{furniture = {bed = 2, table = 0, bench = 1}, doctors = ALL_DOC, skilled = {1}, supplies = sup,
+                        patients = {{id = 5, thirst = 1000, care = true, pos = {11, 11, 5}}}}
+  day(W)
+  local function asks()
+    local r = {}
+    for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'hospital_supply' then r[#r + 1] = e end end
+    return r
+  end
+  local a = asks()
+  T.eq(#a, 1)
+  T.eq(a[1].d.gaps, {'no_table', 'no_splints', 'no_thread', 'no_cloth'})
+  T.ok(a[1].d.q:find('lacks a table in the zone', 1, true) and a[1].d.q:find('splints; thread; cloth', 1, true), a[1].d.q)
+  T.eq(a[1].d.cmds, {'dfllm cmd order.add \'{"job":"ConstructSplint","amount":4}\'',
+                     'dfllm cmd trade.want \'{"add":["thread"]}\'', 'dfllm cmd trade.want \'{"add":["cloth"]}\''})
+  T.ok(#a[1].msg <= 200, #a[1].msg)
+  day(W, 3)
+  T.eq(#asks(), 1, 'the same gaps: not again')
+  local W2 = audit_world{furniture = {bed = 2, table = 0, bench = 1}, doctors = ALL_DOC, skilled = {1}, supplies = sup}
+  day(W2)
+  local n = 0
+  for _, e in ipairs(W2.find_events('DECISION_NEEDED')) do if e.d.id == 'hospital_supply' then n = n + 1 end end
+  T.eq(n, 0, 'no patient lies there: no question')
+end)
