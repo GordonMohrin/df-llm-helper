@@ -33,6 +33,7 @@ O1_PHASE = "P3"                           # DECISIONS 1: plans/year1.json: fortc
 GALLERY_PHASE = "P5"                      # plans/year1.json: the outward gallery over O1 comes with P5 (Run 10)
 PERIMETER_GATE_FROM = "P2"                # FR-70: phase raises are refused while the perimeter is open from this phase on
 PERIMETER_WAIVE_D = 365                   # BUG-349: open this long while the seal cannot close it: the raise is waived
+PERIMETER_FRESH_D = 2                     # BUG-567: an opening this young (a dig, a seal not yet built) does not refuse a raise
 STAGE3_PHASE = O1_PHASE                   # no phase_target at or above it without O1, B2 and the refuge (stage3_gate)
 BRIDGE_STANDING = ("up", "down", "moving", "replaced")      # state.bridges: a gate that stands (BUG-048: or a wall + door)
 GALLERY = "gallery_o1"                    # bp/defense.py: the outward crossbow gallery over the O1 approach (Run 10)
@@ -1735,7 +1736,17 @@ def perimeter_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[l
         return [], []
     days, pw = r.get("pd"), r.get("pw") or "?"
     open_for = f" for {days} day{'s' if days != 1 else ''}" if isinstance(days, int) else ""
+    # BUG-567 (Run 16c i3 y372-y375: every gallery / explore dig opened 3-10 ways in, `plan check` refused the raise to P5 with an
+    # ERROR that named no tile): the refusal says which tiles (ready.ents, the entrance check's list), and a spell younger than
+    # PERIMETER_FRESH_D days is a warning: the seal runs first anyway (seal first pauses the other projects), the raise is a document
+    ents = [e for e in (r.get("ents") or []) if isinstance(e, str)]
+    where = f" at {', '.join(ents)}" + (", ..." if isinstance(r.get("open"), int) and r["open"] > len(ents) else "") if ents else ""
+    pw = f"{pw}{where}"
     cur = s.get("phase") or "P0"
+    if isinstance(days, int) and days <= PERIMETER_FRESH_D and doc["phase_target"] > cur and cur >= PERIMETER_GATE_FROM:
+        return [], [f"perimeter: open{open_for} ({pw}; readiness R0 open_perimeter): a fresh opening (a dig, a seal not built "
+                    f"yet; older than {PERIMETER_FRESH_D} d it refuses the raise {cur} -> {doc['phase_target']}): seal first "
+                    "(dfllm cmd bp.place tpl=seal site=S1 at=last); the raise goes on, max-pop stays held (BUG-567)"]
     waiver = perimeter_waiver(doc, s, fort, prev)
     # Before P2 the entrance tunnel is open by design (B1, the first gate, is the P2 build: fortcore stage 2), so a raise
     # from P0 or P1 is the way to close it and is never refused; the days still count in the warning

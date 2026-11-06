@@ -315,22 +315,30 @@ def choke_pick(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -
 VIA_KIND = {"+": "door", "<": "stair", ">": "stair", "X": "stair", "=": "bridge", "H": "bridge"}
 
 
-def route_via(g: Graph, m: dict, path: list[int], attack) -> str:
-    """BUG-376 (Run 16d/16b: 'bypass: edge->Z3/Z4 avoids the trap hall (reaches ...)' for years, 'no wall tile on the
-    route' and no way out): the foreign part of the route (as in choke_pick) holds no floor or ramp tile a wall can
-    stand on. Name what it does pass instead, the tile nearest the target: 'via door|stair|bridge x,y,z' (a wall cannot
-    stand on a stair or a building, the worst-case audit counts doors, hatches and bridges open); '' when the route
-    has no such tile (the target lies on the attack side itself)."""
+def via_tile(g: Graph, m: dict, path: list[int], attack) -> int | None:
+    """BUG-564: the index of the tile route_via names (the foreign tile nearest the target that is a door, hatch,
+    stair or bridge), None when the route has none."""
     fort = g.mask(fort_boxes(m))
     route = path[:-1]
     last = max((k for k, i in enumerate(route) if attack[i]), default=-1)
     foreign = route[last + 1:]
     own = [i for i in reversed(foreign) if not fort[i]] or list(reversed(foreign))
     for i in own:
-        kind = VIA_KIND.get(g.t[i])
-        if kind:
-            return "via %s %d,%d,%d" % ((kind,) + g.pos(i))
-    return ""
+        if VIA_KIND.get(g.t[i]):
+            return i
+    return None
+
+
+def route_via(g: Graph, m: dict, path: list[int], attack) -> str:
+    """BUG-376 (Run 16d/16b: 'bypass: edge->Z3/Z4 avoids the trap hall (reaches ...)' for years, 'no wall tile on the
+    route' and no way out): the foreign part of the route (as in choke_pick) holds no floor or ramp tile a wall can
+    stand on. Name what it does pass instead, the tile nearest the target: 'via door|stair|bridge x,y,z' (a wall cannot
+    stand on a stair or a building, the worst-case audit counts doors, hatches and bridges open); '' when the route
+    has no such tile (the target lies on the attack side itself)."""
+    i = via_tile(g, m, path, attack)
+    if i is None:
+        return ""
+    return "via %s %d,%d,%d" % ((VIA_KIND[g.t[i]],) + g.pos(i))
 
 
 def choke(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -> str:
@@ -453,22 +461,34 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     # path), read only while R1 is green, is unchanged.
     walls = bytearray(g.N)                 # with a bypass: the walls its findings name, assumed built
     nwalls = 0
+    vias = bytearray(g.N)                  # BUG-564: bypass tiles no wall fits (stair, hatch, door, bridge), counted as shut
+    nvias = 0
     if res["bypass"]:
         side = _or(Z["Z1"], Z["Z2"], kill, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
         for _ in range(CHOKE_TRY):
             bp_par: dict = {}
-            _, h = g.bfs(src, blocked=_or(Z["Z2"], walls), stop=T, parents=bp_par)
+            _, h = g.bfs(src, blocked=_or(Z["Z2"], walls, vias), stop=T, parents=bp_par)
             if h is None:
                 break
-            ch = choke_pick(g, m, g.path(bp_par, h), src, _or(Z["Z2"], walls), T, side)
+            ch = choke_pick(g, m, g.path(bp_par, h), src, _or(Z["Z2"], walls, vias), T, side)
             if ch is None:
-                break
+                # BUG-564 (Run 16c i3 Sealcertain y388-y406: `traps 0` beside 61 armed traps, the pop cap held at 40 by
+                # `traps_short` for years): the bypass runs over a stair, hatch, door or bridge no wall can stand on. The
+                # traps of the OTHER ways are still the fort's traps: that tile is counted as shut (min_traps = the fewest
+                # an attacker meets on every way that does not use it) and the bypass stays its own finding (fails,
+                # R0 `bypass`, info.traps.via), so it is no longer paid for twice
+                vi = via_tile(g, m, g.path(bp_par, h), side)
+                if vi is None or vias[vi]:
+                    break
+                vias[vi], nvias = 1, nvias + 1
+                continue
             walls[ch[0]], nwalls = 1, nwalls + 1
-    closed = bool(nwalls) and g.bfs(src, blocked=_or(Z["Z2"], walls), stop=T)[1] is None
+    shut = _or(walls, vias)
+    closed = bool(nwalls or nvias) and g.bfs(src, blocked=_or(Z["Z2"], shut), stop=T)[1] is None
     best = mt
     if closed:
         par = {}
-        best = g.min_cost(src, cost, T, blocked=walls, parents=par)
+        best = g.min_cost(src, cost, T, blocked=shut, parents=par)
     res["min_traps"] = best or 0
     route = g.path(par, par["hit"]) if "hit" in par else []
     entry = None                           # the first tile of the last trap-hall stretch the counted route uses
@@ -479,6 +499,8 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     if info is not None:
         info["traps"] = {"armed": len(armed), "hall": sum(1 for i in armed if Z["Z2"][i]), "any_route": mt or 0,
                          "walls": nwalls if closed else 0, "enters": list(entry) if entry else None}
+        if closed and nvias:                   # BUG-564: bypass tiles no wall fits, counted shut
+            info["traps"]["via"] = nvias
     # 3. refuge separation
     ref = m.get("refuge")
     rpts = ([ref["anchor"]] if ref else []) + list(snap.get("marks", {}).get("refuge", []))

@@ -16,7 +16,8 @@ local EXTRA = {   -- tiletype ids appended to snapshot_world's
 }
 local T = {floor = 1, wall = 2, cwall = 4, open = 5, stair = 6, ramp = 10, up = 11, down = 12, top = 13, cfort = 14}
 SW.T = T
-local WALK = {FLOOR = true, STAIR_UP = true, STAIR_DOWN = true, STAIR_UPDOWN = true, RAMP = true}
+local WALK = {FLOOR = true, STAIR_UP = true, STAIR_DOWN = true, STAIR_UPDOWN = true, RAMP = true,
+              SAPLING = true, SHRUB = true}      -- BUG-566: plants are walked
 local UP = {STAIR_UP = true, STAIR_UPDOWN = true}
 local DOWN = {STAIR_DOWN = true, STAIR_UPDOWN = true}
 

@@ -101,6 +101,7 @@ M.CFG = {
   quick_min = 300,            -- ticks between two re-checks it triggers
   seal_every = 7 * DAY,       -- periodic entrance check (walk groups) ...
   bfs_every = 28 * DAY,       -- ... and its BFS in PEACE while the open gates leak by design and nothing changed
+  open_every = DAY,           -- BUG-566: ... but a check that names a way in without a door is looked at again every game day (cheap: its BFS runs when a way's tile changed)
   edges_every = 28 * DAY,     -- map-edge scan
   edge_run = 64,              -- one edge tile per walkable run along the border, and one more per this many tiles
   scan_every = 14 * DAY,      -- flood over the citizens' groups: stairs without counterpart, interior tiles
@@ -260,11 +261,20 @@ end
 -- branch, twig): nothing built roofs it, it is not the fort. The openings are then the fort's real mouths.
 local TREE_ROOF = {BRANCH = true, TRUNK_BRANCH = true, TWIG = true}
 local shape
+-- BUG-566 (BUG-503 'Open: only the tile directly above is read'; Run 16b i2 / 16d i4: PERIMETER OPEN 123 d from changing sapling / shrub
+-- tiles): a crown is up to TREE_UP levels above the ground. The column above the tile is read while it is empty air; the first tile that
+-- is not empty decides (a tree part: open sky; a floor, wall or anything built: a roof)
+local TREE_UP = 4
 local function open_sky(des, x, y, z)
   if des.outside then return true end
   if des.subterranean then return false end
-  local s = shape(x, y, z + 1)
-  return s ~= nil and TREE_ROOF[s.shape] == true
+  for dz = 1, TREE_UP do
+    local s = shape(x, y, z + dz)
+    if s == nil then return false end
+    if TREE_ROOF[s.shape] == true then return true end
+    if s.shape ~= 'EMPTY' then return false end
+  end
+  return false
 end
 
 -- walk group of a revealed tile: nil = hidden/off-map, 0 = not walkable
@@ -2238,6 +2248,59 @@ local function describe_tile(x, y, z)
   return s and s.shape and s.shape:lower() or '?', 'no door'
 end
 
+-- BUG-566 (Run 16b i2 y398 'PERIMETER OPEN 123 d' from changing sapling / shrub tiles, Run 16d i4 y397 'SEAL_LEAK shrub'): an opening whose
+-- tile is a sapling or a shrub on the surface (no cave tile) is the rim of a crown or a meadow, not a mouth of the fort: vegetation
+-- only. It stays on inspect entrances' list (`ways`, `veg` 1) but the perimeter check (readiness open_perimeter, PERIMETER OPEN, the
+-- pop hold) and SEAL_LEAK leave it out. A plant in a real doorway of the rock (a subterranean tile) still counts.
+M.VEG = {sapling = true, shrub = true}
+function M.veg_way(x, y, z, kind)
+  if not M.VEG[tostring(kind)] then return false end
+  local des = rev(x, y, z)
+  return des ~= nil and not des.subterranean
+end
+
+-- BUG-566: every way in of a complete check that has no door or bridge is vegetation (and there is one): SEAL_LEAK stays quiet
+function M.veg_only(res)
+  if not (res and type(res.openings) == 'table' and #res.openings > 0) or res.partial then return false end
+  if (int(res.routes) or 0) > #res.openings then return false end
+  local n = 0
+  for _, o in ipairs(res.openings) do
+    if o.gate ~= 1 and #(o.doors or {}) == 0 then
+      if o.veg ~= 1 then return false end
+      n = n + 1
+    end
+  end
+  return n > 0
+end
+
+-- BUG-566: the check names a way in that has neither a door nor a bridge
+local function plain_open(s)
+  if not (s and not s.sealed and type(s.openings) == 'table') then return false end
+  for _, o in ipairs(s.openings) do
+    if o.gate ~= 1 and #(o.doors or {}) == 0 then return true end
+  end
+  return false
+end
+
+-- BUG-566 (Run 16b i2 y398: 'PERIMETER OPEN 123 d' from changing sapling / shrub tiles, `inspect entrances key=refresh` cleared it): in
+-- PEACE the periodic check re-used its BFS for bfs_every (28) days unless a known opening was closed; a sapling that grew, a shrub that
+-- died or a crown that fell changed the way's tile and the answer stayed. A way without door or bridge is compared with its tile now
+-- (what stands there, open sky): a change runs the BFS. A few reads per way, no BFS otherwise.
+local function openings_changed(prev)
+  for _, o in ipairs(prev and prev.openings or {}) do
+    if o.gate ~= 1 and #(o.doors or {}) == 0 and type(o.pos) == 'table' then
+      local x, y, z = o.pos[1], o.pos[2], o.pos[3]
+      local des = rev(x, y, z)
+      spend(3)
+      if des then
+        if open_sky(des, x, y, z) then return true end          -- no inside tile any more
+        if tostring(describe_tile(x, y, z)) ~= tostring(o.bld) then return true end
+      end
+    end
+  end
+  return false
+end
+
 -- union of entries whose inside tiles touch (Chebyshev <= 1): the independent openings of the interior
 local function routes_of(entries)
   local parent = {}
@@ -2940,6 +3003,7 @@ local function seal_pass(K, why, last)
         if not opening_open(o, G) then need = true; break end
       end
     end
+    if not need and openings_changed(prev) then need = true end    -- BUG-566: a way's tile changed (a plant grew, a crown fell)
     if not need then
       -- FR-62: the gates stand open in PEACE, the fort leaks by design and no known opening changed: the last BFS
       -- answer stands
@@ -2962,7 +3026,8 @@ local function seal_pass(K, why, last)
         local doors, gated, porch, brs = opening_doors(B, G, r)   -- BUG-012: {{id, x, y, z}}, a bridge on it, porch
         res.openings[i] = {pos = {r.x, r.y, r.z}, out = {r.ox, r.oy, r.oz}, n = r.n, d = r.d,
                            bld = bt, state = bs, out_bld = ot, out_state = os_, doors = doors, br = brs,
-                           gate = (gated or bt == 'Bridge' or ot == 'Bridge') and 1 or 0}
+                           gate = (gated or bt == 'Bridge' or ot == 'Bridge') and 1 or 0,
+                           veg = M.veg_way(r.x, r.y, r.z, bt) and 1 or 0}
         for _, dr in ipairs(doors) do
           if not dseen[dr[1]] and #all < CFG.doors_max then dseen[dr[1]] = true; all[#all + 1] = dr end
           local ops = door_ops[dr[1]] or {}
@@ -3037,7 +3102,7 @@ local function seal_pass(K, why, last)
   res.expect = expect
   mem.seal = res
   local pos = res.first and res.first.pos or nil
-  if not res.sealed and expect then
+  if not res.sealed and expect and not M.veg_only(res) then      -- BUG-566: a plant at the rim of a crown is no alarm
     -- BUG-008: the same leak is announced once per episode; a new leak tile or state is news and goes out at once
     -- (a new way in during a siege must not wait for the cadence). A sealed check ends the episode.
     local ids = {pos and table.concat(pos, ',') or '?'}
@@ -4521,10 +4586,11 @@ function M.entrance_doors(K, refresh)
         -- BUG-031: the tiles the exposure flood entered by (a door on the opening that leaves them open included)
         for _, g in ipairs(o.gap) do
           x.open[#x.open + 1] = {pos = {g[1], g[2], g[3]}, kind = tostring(g[4]),
-                                 door = #(o.doors or {}) > 0 and 1 or nil, note = g[5]}
+                                 door = #(o.doors or {}) > 0 and 1 or nil, note = g[5],
+                                 veg = o.veg == 1 and M.VEG[tostring(g[4])] and 1 or nil}   -- BUG-566
         end
       elseif #(o.doors or {}) == 0 then
-        x.open[#x.open + 1] = {pos = {o.pos[1], o.pos[2], o.pos[3]}, kind = tostring(o.bld)}
+        x.open[#x.open + 1] = {pos = {o.pos[1], o.pos[2], o.pos[3]}, kind = tostring(o.bld), veg = o.veg == 1 and 1 or nil}
       end
     end
   end
@@ -5784,7 +5850,7 @@ local function schedule_periodic(K, t)
   end
   per('audit', mem.last_audit, peace and CFG.audit_every or CFG.audit_alert)
   if mem.items then per('items', mem.items.seen, peace and CFG.items_every or CFG.items_alert) end
-  per('seal', mem.seal and mem.seal.tick, CFG.seal_every)
+  per('seal', mem.seal and mem.seal.tick, plain_open(mem.seal) and CFG.open_every or CFG.seal_every)   -- BUG-566
   per('edges', mem.edges and mem.edges.tick, CFG.edges_every)
   per('scan', mem.scan and mem.scan.tick, CFG.scan_every)
   -- BUG-096: the burrow guard, a game day and every_s real seconds after the last reading ended
