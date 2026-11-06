@@ -274,7 +274,7 @@ local function hscan_begin(K, now, armed)
   st.geo = g
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
            zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0, an = 0, rin = 0,
-           near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick, nben = 0, benign = {},
+           near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick, nben = 0, benign = {}, herb = 0, herb_d = -1,
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {}, civ_pos = st.civ_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
@@ -387,8 +387,8 @@ end
 local function raw_read(race, caste)
   local r = df.creature_raw.find(race)
   local c = r ~= nil and r.caste[caste]
-  if not c then return {p = false, dz = false, bd = false, an = false} end
-  local e = {p = c.flags.LARGE_PREDATOR == true, dz = false, bd = false, an = false}
+  if not c then return {p = false, dz = false, bd = false, an = false, cv = false} end
+  local e = {p = c.flags.LARGE_PREDATOR == true, dz = false, bd = false, an = false, cv = flag(c, 'CARNIVORE') == true}
   for _, f in ipairs(DZ_FLAGS) do
     if flag(c, f) == true then
       e.dz = true
@@ -402,7 +402,7 @@ local function raw_read(race, caste)
          or (learn ~= true and speak ~= true and (flag(c, 'MOUNT') == true or flag(c, 'MOUNT_EXOTIC') == true))
   return e
 end
-local NO_RAW = {p = false, dz = false, bd = false, an = false}
+local NO_RAW = {p = false, dz = false, bd = false, an = false, cv = false}
 local function raw_flags(u)
   local race, caste = u.race, u.caste
   if race == nil then return NO_RAW end
@@ -456,6 +456,17 @@ local function big_wild(u)
     return des ~= nil and not des.hidden and not des.outside
   end)
   return ok and yes == true
+end
+
+-- BUG-532 (Run 16a i1 Basementflew y408-y409: wild JURASSIC_STEGOSAURUS / DIPLODOCUS, BENIGN plant eaters of 315,000 to
+-- 1,180,000 cm3 that BUG-439 counts as big wild beasts on a roofed tile, 47-76 tiles from the nearest citizen: PREDATOR after
+-- PREDATOR, each a Kern+ lockdown with the clock at 30 t/s instead of 250): a big wild HERBIVORE (no LARGE_PREDATOR, no
+-- CARNIVORE, no killer mark) is wildlife while it is farther than HERB_NEAR tiles from every citizen; it counts (BUG-439) once
+-- it is within HERB_NEAR of one or inside Kern+ / past B1. census.h.herb = how many stood by, herb_d the nearest one's distance
+M.HERB_NEAR = 20
+local function herbivore(u)
+  local rf = raw_flags(u)
+  return not (rf.p or rf.cv or killer(u)) and big_wild(u)
 end
 
 local function predator(u, hs)
@@ -651,6 +662,31 @@ local function consider(hs, u)
     end)
     if okg and other then return 7 end
   end
+  local herb_in = false                          -- BUG-532: inside Kern+ or past B1 a plant eater always counts
+  if hs.kb then
+    P.x, P.y, P.z = x, y, z
+    herb_in = dfhack.burrows.isAssignedTile(hs.kb, P) == true
+  end
+  if not (inv or great or undead or herb_in or in_boxes(hs.geo.zpast, x, y, z)) and herbivore(u) then
+    -- BUG-532: a far plant eater is wildlife; the distance is the nearest citizen (outside Kern+ or on its levels)
+    local dh = -1
+    for _, p in ipairs(hs.out_pos) do
+      local d = math.max(math.abs(x - p.x), math.abs(y - p.y), math.abs(z - p.z))
+      if dh < 0 or d < dh then dh = d end
+    end
+    for _, p in ipairs(hs.civ_pos) do
+      local dzc = math.abs(z - p.z)
+      if dzc <= M.DA_DZ then
+        local d = math.max(math.abs(x - p.x), math.abs(y - p.y), dzc)
+        if dh < 0 or d < dh then dh = d end
+      end
+    end
+    if dh < 0 or dh > M.HERB_NEAR then
+      hs.herb = hs.herb + 1
+      if dh >= 0 and (hs.herb_d < 0 or dh < hs.herb_d) then hs.herb_d = dh end
+      return 7
+    end
+  end
   hs.vis = hs.vis + 1
   if great then hs.great = hs.great + 1 end
   if undead then hs.undead = hs.undead + 1 end
@@ -841,7 +877,7 @@ local function hscan_finish(K)
                 rin = hs.rin,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
-                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign}
+                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign, herb = hs.herb, herb_d = hs.herb_d}
   wild_publish(K, hs)                            -- BUG-494
 end
 

@@ -388,6 +388,38 @@ function L.ledger(want, buys, sells, plan)
   return r
 end
 
+-- BUG-534 (Run 16a i1 / 16d i4: stone, mechanisms and bars on trade.want for years, no caravan ever brought them and nothing
+-- said so): the wants the merchants had NONE of in every kept visit that asked for them (at least NOSUPPLY_MIN visits, each
+-- one a ledger entry with the want unmet 'none' or bought never). A caravan brings what its civ makes and what the liaison's
+-- trade agreement asks for; the kernel does not write the agreement (it lives on the diplomacy screen of the liaison's
+-- meeting, caravan.tradeagreement), so such a want cannot be paid for by trade: state `trade.nb` names it (status: dig,
+-- smelt, make it yourself)
+M.NOSUPPLY_MIN = 2
+M.NOSUPPLY_MAX = 5
+function L.unsupplied(ledger, min)
+  local asked, none, bought = {}, {}, {}
+  for _, e in ipairs(ledger or {}) do
+    local seen = {}
+    for _, u in ipairs(type(e.unmet) == 'table' and e.unmet or {}) do
+      if type(u) == 'table' and type(u[1]) == 'string' and not seen[u[1]] then
+        seen[u[1]] = true
+        asked[u[1]] = (asked[u[1]] or 0) + 1
+        if u[2] == 'none' then none[u[1]] = (none[u[1]] or 0) + 1 end
+      end
+    end
+    for _, b in ipairs(type(e.bought) == 'table' and e.bought or {}) do
+      if type(b) == 'table' and type(b[1]) == 'string' then bought[b[1]] = true end
+    end
+  end
+  local r = {}
+  for src, n in pairs(none) do
+    if n >= (min or 2) and n == asked[src] and not bought[src] then r[#r + 1] = src end
+  end
+  table.sort(r)
+  while #r > M.NOSUPPLY_MAX do table.remove(r) end
+  return r
+end
+
 -- FR-18: the want token that names a merchant good (type, material token, description), or nil
 local TYPE_TOKEN = {BAR = 'bar', ANVIL = 'anvil', CLOTH = 'cloth', THREAD = 'thread', SKIN_TANNED = 'leather',
                     WOOD = 'wood', BLOCKS = 'block', SMALLGEM = 'gem', ROUGH = 'rough', BOULDER = 'stone',
@@ -1822,6 +1854,11 @@ function M.step(K, budget, ctx)
   end
   if r ~= 'more' then r = nil end
   pub = {trade = {caravan = #cars > 0 and 1 or 0, ratio = st.ratio, done = st.done}}
+  local nb = L.unsupplied(st.ledger, M.NOSUPPLY_MIN)       -- BUG-534
+  if #nb > 0 then
+    for i, t in ipairs(nb) do nb[i] = t:sub(1, 24) end
+    pub.trade.nb = nb
+  end
   sync_boost(K, cars, now)
   set_every()
   save(K)

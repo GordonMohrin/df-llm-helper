@@ -155,6 +155,18 @@ end
 --                 get them (trade.want mechanism, hard stone). A shortfall older than DEF.grace_days game days in a fort of
 --                 DEF.hold_pop citizens or more holds max-pop where it stands (ceiling why 'defense_short'); R0 only
 --                 blocks R1, the cap itself is R0's 100 as before.
+-- BUG-533 (Run 16b-d i2/i3/i4: no migrant wave for years; max-pop sat on the citizens: 'max-pop 33 (plan)' / '32 (open_perimeter)'
+-- / defense_short, and pop-control's game cap is min(max-pop, citizens + wave-size): a cap on the citizens lets no wave in): a
+-- hold that keeps max-pop ON the citizens gives GROW.room_min (at least GROW.room_pct % of the citizens) tiles of room while the
+-- fort is safe enough: a trap shortfall of at least GROW.trap_pct % of its target (not a hole), or a perimeter with no way in
+-- without door or bridge (a lost lever or bridge only). Each wave uses the room up, the shortfall grows with the population
+-- (the target is 0.35 x citizens), so the room closes itself. M.growth_room is the same rule as plan.growth_room (Python)
+M.GROW = {room_min = 4, room_pct = 10, trap_pct = 50}
+
+function M.growth_room(cit)
+  return math.max(M.GROW.room_min, ((cit or 0) * M.GROW.room_pct) // 100)
+end
+
 M.DEF = {trap_pop = 40, traps_floor = 20, traps_cap = 40, per_invader = 2, grace_days = 20, hold_pop = 30,
          ask_days = 30}
 
@@ -615,6 +627,12 @@ local function evaluate(K, why)
     if not st.dhold then st.dhold, dirty = cit1, true end
   end
   rt.dhold_pop = st.dhold
+  -- BUG-533: a shortfall of at least GROW.trap_pct % of the target is a soft gap: the hold leaves room for one wave
+  rt.dsoft = nil
+  if st.dhold and ts and ts.target > 0 and ts.have * 100 >= ts.target * M.GROW.trap_pct then
+    rt.dhold_pop = math.max(st.dhold, (cit1 or st.dhold) + M.growth_room(cit1 or st.dhold))
+    rt.dsoft = true
+  end
   -- FR-70: the open perimeter. A bridge seen whole with 2 linked levers is remembered (a lost lever is news)
   for _, name in ipairs(rt.lev.good or {}) do
     st.lvok = st.lvok or {}
@@ -682,6 +700,12 @@ local function evaluate(K, why)
     if not st.phold then st.phold, dirty = cit0, true end
   elseif st.phold and not (st.pt and hp > 0 and cit0 and cit0 >= hp and not rt.sealq) then st.phold, dirty = nil, true end
   rt.phold = st.phold
+  -- BUG-533: no way in without door or bridge (only a lost lever or bridge keeps the perimeter open): room for one wave
+  rt.psoft = nil
+  if st.phold and (rt.open or -1) == 0 and cit0 then
+    rt.phold = math.max(st.phold, cit0 + M.growth_room(cit0))
+    rt.psoft = true
+  end
   -- R2
   local f2 = {}
   local pass, last, mech = drills(K)
@@ -805,6 +829,11 @@ function M.hold_text(K)
     if parts[1] then parts[1] = string.format('player %d', ib.cap) end      -- both: the short form
     parts[#parts + 1] = string.format('famine %d (food %d d)', st.fam.cap, int(st.fam.fd) or 0)
   end
+  -- BUG-533: the other holds (the plan's ceiling, an open perimeter, the defence, a freeze) name themselves too: 'plan 33'
+  local w = rt and rt.cap_why
+  if (w == 'plan' or w == 'open_perimeter' or w == 'defense_short') and st.cap then
+    parts[#parts + 1] = string.format('%s %d%s', w, st.cap, ((w == 'open_perimeter' and rt.psoft) or (w == 'defense_short' and rt.dsoft)) and '+' or '')
+  end
   return #parts > 0 and cut(table.concat(parts, ', '), 40) or nil
 end
 
@@ -826,6 +855,7 @@ end
 local function apply_cap(K)
   local gate, why = M.ceiling(K, st.lvl or 0)
   rt.gate_cap = gate
+  rt.gate_why = why
   local cu = K.census.u
   local cit = type(cu) == 'table' and cu.cit or nil
   local c, last = gate, st.cap
@@ -836,6 +866,7 @@ local function apply_cap(K)
   end
   if last and c > last and K.mode() ~= 'PEACE' then c, why = last, 'frozen' end
   c = math.max(1, c)                                          -- pop-control needs a positive number
+  rt.cap_why = c < (M.CAPS[st.lvl or 0] or M.CAPS[0]) and why or nil      -- BUG-533: what holds max-pop below the level cap
   if c == last and rt.applied then return end
   if not K.act.popcap(c) then return end
   rt.applied = true

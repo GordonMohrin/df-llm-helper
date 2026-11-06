@@ -353,4 +353,17 @@ T.test('FR-43: a standing depot is remembered and rebuilt there when the manifes
   T.eq(W.K.persist.get('bp.depot1').stages[1].chunks[1].pos, {28, 29, 99})
 end)
 
+-- BUG-534 (Run 16a i1 / 16d i4: stone, mechanisms, bars wanted for years, never brought): the wants the merchants had none of in
+-- every visit that asked (at least twice) and that were never bought are listed
+T.test('BUG-534 unsupplied: a want unmet none in every asking visit is named; one bought once, one met by value, one asked once are not', function()
+  local ledger = {
+    {unmet = {{'stone', 'none'}, {'mechanism', 'none'}, {'anvil', 'value'}, {'bar:iron', 'none'}}, bought = {}},
+    {unmet = {{'stone', 'none'}, {'mechanism', 'none'}, {'anvil', 'none'}}, bought = {{'bar:iron', 'BAR', 5, 100}}},
+    {unmet = {{'stone', 'none'}, {'cloth', 'none'}}, bought = {}},
+  }
+  T.eq(L.unsupplied(ledger, 2), {'mechanism', 'stone'}, 'anvil: asked 2x, one value; bar:iron bought once; cloth asked once')
+  T.eq(L.unsupplied({ledger[1]}, 2), {}, 'one visit proves nothing')
+  T.eq(L.unsupplied(nil, 2), {})
+end)
+
 T.done()
