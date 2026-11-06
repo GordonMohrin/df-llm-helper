@@ -366,7 +366,23 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "grand": _grand_facts(save_dir, state),                  # FR-102/103: large rooms, the deep core
             "seals": open_seals(save_dir, state),
             "requests": request_facts(save_dir, state),             # BUG-418: PROJECT_REQUESTs nobody placed yet
+            "stock_site": stock_site(save_dir, state),               # BUG-550: a stockroom site exists (None: not asked or unknown)
             "mood_ws": mood_ws_missing(save_dir, state)}            # BUG-418: R0 mood_ws: the moodable shops missing
+
+
+def stock_site(save_dir: Path, state: dict | None) -> bool | None:
+    """BUG-550: whether a free stockroom site exists, asked only while the core's drink or food is below CORE_DAYS (the one check that
+    needs it; the ranking is not cheap). None: not asked, or the sites cannot be ranked (no snapshot, no template)."""
+    al = (state or {}).get("alert") or {}
+    if not any(isinstance(al.get(k), int) and al[k] < CORE_DAYS for k in ("core_d", "core_f")):
+        return None
+    try:
+        free, _, _ = free_sites(save_dir, STOCKROOM, {}, n=1)
+    except BpUnavailable:
+        return None
+    except BpError as e:
+        return None if str(e).startswith("no snapshot") else False
+    return bool(free)
 
 
 OFFICE_SURFACE_P = {"surface": 1}
@@ -1828,7 +1844,7 @@ def stage3_due(s: dict, fort: dict, done: set, builds: list) -> bool:
         return False
     return any(br.get(n) not in BRIDGE_STANDING for n in ("O1", "B2")) and bool(f.get("fortcore")) \
         and not f.get("stage3") and ("fortcore", 3) not in done and not fort.get("o1") \
-        and not any(_refuge_stage(b) for b in builds)
+        and not any(_refuge_stage(b) for b in builds) and not no_core_why(fort)       # BUG-551: no stage 3 that cannot be built
 
 
 def refuge_drafts(s: dict, fort: dict, done: set, early: bool = False) -> list[dict]:
@@ -1843,7 +1859,7 @@ def refuge_drafts(s: dict, fort: dict, done: set, early: bool = False) -> list[d
         return []
     f = fort.get("refuge") or {}
     if not r["ex"]:
-        if not early and f.get("fortcore") and not f.get("stage3") and ("fortcore", 3) not in done:
+        if not early and f.get("fortcore") and not f.get("stage3") and ("fortcore", 3) not in done and not no_core_why(fort):
             return [copy.deepcopy(REFUGE_STAGE)]
         return []
     out = []
@@ -2356,6 +2372,12 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     f = fort or {}
     builds = [b for se in doc["seasons"] for b in se["build"]]
     stocked = bool(f.get("stockroom")) or any(b["tpl"] == STOCKROOM for b in builds)
+    # BUG-550 (Run 16b i2 Brotherarrow y400/y401: ERROR 'drink inside Kern+ lasts 50 d < 90' demanded a stockroom while `bp sites stockroom`
+    # had 0 sites and 3194 drinks lay in the fort, so the year plan could not be applied): a refuge drink store (standing, done or in
+    # this plan) is the barrel store for drink, and where no stockroom site exists the demand cannot be met by this plan: a warning
+    ref = f.get("refuge") if isinstance(f.get("refuge"), dict) else {}
+    drink_store = stocked or bool(ref.get("drink_room") or ref.get("drink")) or any(b["tpl"] == REFUGE_DRINK for b in builds)
+    no_site = f.get("stock_site") is False
     after_siege = bool(f.get("sieged")) or s.get("mode") in SIEGE_MODES
     low = False
     for key, cls, fix in (("core_d", "drink", "a still and a barrel stockpile"), ("core_f", "food", "a food stockpile")):
@@ -2364,11 +2386,17 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
             low = True
             text = (f"{cls} inside Kern+/the refuge lasts {v} d < {CORE_DAYS}: build {fix} inside the core "
                     "(a siege cuts the rest off)")
-            if after_siege and not stocked:
+            have = drink_store if key == "core_d" else stocked
+            if after_siege and not have and no_site:
+                total = (s.get("stock") or {}).get("drink_d" if key == "core_d" else "food_d")
+                warn.append(text + f"; no {STOCKROOM} site exists (BUG-550: `dfllm bp sites {STOCKROOM}` is empty"
+                            + (f", the fort holds {total} d of {cls} in all" if isinstance(total, int) else "")
+                            + f"), so this is no error: open room sites first (deepcore, or explore) and add {STOCKROOM}")
+            elif after_siege and not have:
                 errs.append(text + "; the doctrine minimum since the fort's first siege")
             else:
                 warn.append(text)
-    if low and not stocked:
+    if low and not stocked and not no_site:
         warn.append(f"core stock: add tpl {STOCKROOM} to a season (site S1; barrel stockpile + still behind B2)")
     gw = _outer_gallery(doc, s, fort or {})
     if gw:
@@ -3755,12 +3783,24 @@ def depot_lost(save_dir: Path) -> bool:
         doc = files.read_json(p)
         if isinstance(doc, dict) and doc.get("tpl") in (DEPOT, "fortcore", SURFACE_CORE):
             done_ids.add(p.stem)
+    # BUG-552 (Run 16b i2 Brotherarrow y399-y404: a cave dragon toppled the depot at 94,74,139 long after the fort's depot at 84,88,137
+    # was rebuilt and four caravans had traded at it; the manifest named 84,88,137 and the draft still added a surface depot @S1 every
+    # year, the player struck it each time): a caravan that traded since proves a depot stands, and a topple at a tile other than the
+    # manifest's depot is another building (the manifest's depot is not the one that fell)
+    man = _kern_manifest(save_dir).get("depot")
     for e in files.iter_events_rev(save_dir):
         d = e.get("d") if isinstance(e.get("d"), dict) else {}
         t = e.get("type")
         if t == "PROJECT_DONE" and d.get("proj") in done_ids:
             return False
-        if t == "DEPOT_MISSING" or (t == "BUILDING_TOPPLED" and "depot" in str(d.get("what", "")).lower()):
+        if t == "CARAVAN" and d.get("phase") == "traded":
+            return False
+        if t == "DEPOT_MISSING":
+            return True
+        if t == "BUILDING_TOPPLED" and "depot" in str(d.get("what", "")).lower():
+            pos = d.get("pos")
+            if isinstance(man, list) and isinstance(pos, list) and len(pos) == 3 and list(pos) != list(man):
+                continue                                   # a depot other than the one the manifest names fell
             return True
     return False
 
@@ -3895,13 +3935,25 @@ def no_core_why(fort: dict | None) -> str:
     """BUG-523: why no fortcore can be built at this fort ('' when one can, or one stands): the sites ranking finds none
     (surface_facts.need) and neither the aquifer route (plan.surface_core off) nor the surface core (on) has a way."""
     sf = (fort or {}).get("surface") or {}
-    if not sf.get("need") or sf.get("have"):
+    if sf.get("have"):
         return ""
-    if surface_core_on():
-        return "no site for the surface core" if sf.get("site") is False else ""
-    aq = sf.get("aq")
-    if isinstance(aq, dict) and not aq.get("ok"):
-        return aq.get("why") or sf.get("why") or "no safe way through the aquifer"
+    if sf.get("need"):
+        if surface_core_on():
+            return "no site for the surface core" if sf.get("site") is False else ""
+        aq = sf.get("aq")
+        if isinstance(aq, dict) and not aq.get("ok"):
+            return aq.get("why") or sf.get("why") or "no safe way through the aquifer"
+        return ""
+    # BUG-551 (Run 16a i1 Basementflew y415: fortcore stage 2 stood, stage 3 (refuge, O1, B2) lay under aquifer z114-z127 with heavy levels
+    # and `bp sites aqshaft` ranked no column, yet every P3+ plan was refused for O1 and B2 and the fort sat on P2 with a pop ceiling of
+    # 29: BUG-523 looked only at forts with no core at all): a core that stands whose stage 3 meets the known aquifer with no aqshaft route
+    # left has the same dead end; nothing is under way for stage 3 and the core is not stopped on a breach (that has its own re-site)
+    late = sf.get("aq_late")
+    f = fort or {}
+    if isinstance(late, dict) and not late.get("ok") and not f.get("core") and not (f.get("refuge") or {}).get("stage3"):
+        lv = ", ".join(f"z{z}" for z in sorted(late.get("aquifers") or [], reverse=True)[:6])
+        return (f"the core's stage 3 meets the aquifer ({lv or '?'}) and no aqshaft column is free"
+                + (f": {late['why']}" if late.get("why") else ""))
     return ""
 
 

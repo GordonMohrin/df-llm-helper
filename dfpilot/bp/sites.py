@@ -66,7 +66,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 9                            # BUG-346/359/400/407: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 10                           # BUG-346/359/400/407/553: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -232,6 +232,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     first; `at`: [x, y, z], only the sites anchored exactly there (the reason when there is none). Both apply to room,
     explore and fortcore sites; the defense builds have the one site the manifest fixes. `free` (BUG-292): a callable
     candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
+    if tpl in mine.BUILD and "depth" not in (params or {}):
+        return _rank_depths(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-553: a smaller depth when 12 has none
     if tpl in mine.BUILD and "arm" not in (params or {}):
         return _rank_arms(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-528: shorter side tunnels
     p = check_params(tpl, params)
@@ -1351,6 +1353,42 @@ def _rank_arms(snap, tpl, params, manifest, n, water, near, within, at, free) ->
     if last is not None:
         raise ValueError(f"{last} (arm {top}, " + ", ".join(str(a) for a in EXPLORE_ARMS if a < top) + " tried)") from None
     return []
+
+
+EXPLORE_DEPTHS = (9, 6, 4, 2)         # BUG-553: depths tried (deepest that fits first) when the template's own depth has no site
+EXPLORE_NO_SITE = ("avoided level", "no safe explore site", "explore: no site at depth")
+
+
+def _rank_depths(snap, tpl, params, manifest, n, water, near, within, at, free) -> list[dict]:
+    """BUG-553 (Run 16d i4 Trumpetrealms y399-y405: `bp sites explore` without p.depth said 'depth 12 reaches avoided level' and ranked
+    nothing for years while `depth=6` had 3 sites, and plan propose / bp.place explore S1 never found them): when the template's own
+    depth (no p.depth = 12) has no site because every shaft of that depth reaches an avoided level, meets a dig that stopped or the
+    core's rooms, the deepest smaller depth of EXPLORE_DEPTHS that has a site is ranked; every site then carries it (`depth`, applied to
+    the document by cmd.site_params) and says so. p.depth given is never changed. A site at the template's depth stays as it was
+    (no `depth` key). All depths empty: the error of the template's own depth, with the depths tried."""
+    base = dict(params or {})
+    top = mine.PARAMS[tpl]["depth"][0]
+
+    def at_depth(d):                               # p.arm given is the player's: no arm search then
+        q = {**base, "depth": d}
+        return rank(snap, tpl, q, manifest, n, water, near, within, at, free) if "arm" in q             else _rank_arms(snap, tpl, q, manifest, n, water, near, within, at, free)
+    try:
+        return at_depth(top)
+    except ValueError as e:
+        first = e
+    if not any(w in str(first) for w in EXPLORE_NO_SITE):
+        raise first
+    for d in EXPLORE_DEPTHS:
+        if d >= top:
+            continue
+        try:
+            got = at_depth(d)
+        except ValueError:
+            continue
+        if got:
+            note = f"shaft cut to depth {d} (the template's {top} reaches an avoided level or meets something; BUG-553)"
+            return [{**s, "depth": d, "why": s["why"] + "; " + note} for s in got]
+    raise ValueError(f"{first} (depth {top}, " + ", ".join(str(d) for d in EXPLORE_DEPTHS if d < top) + " tried)") from None
 
 
 EXPLORE_LEVEL = 10                    # explore: score per level below the top of Z4 (a deeper start searches deeper)
