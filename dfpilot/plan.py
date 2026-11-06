@@ -3013,6 +3013,47 @@ def essential_shops(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     return [line]
 
 
+GONE_SHOPS_MAX = 4          # BUG-562: shop types drafted as a rebuild at most per propose
+
+
+def gone_shops(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
+    """BUG-562 (Run 16b i2 Brotherarrow: Craftsdwarfs and Clothiers 'no longer stands' (manifest.gone) and nothing built them again for
+    417 days: propose drafted no workshops build, `bp sites workshops` ranks room sites and had none): a workshop type of manifest.gone
+    that no workshop of the fort manifest has any more, and no workshops build of the draft makes, is drafted as
+    `workshops only=<Type> rebuild=1` (one build a type, at its old place) at the end of seasons[0]. Returns the note lines ([] when
+    nothing changed or the manifest cannot tell)."""
+    try:
+        man = _cmd.fort_manifest(save_dir)
+    except Exception:                                   # noqa: BLE001 - no bp package or manifest: not judged
+        return []
+    have = {w.get("type") for w in man.get("workshops") or [] if isinstance(w, dict)}
+    lost: list[str] = []
+    for g in man.get("gone") or []:
+        t = g.get("type") if isinstance(g, dict) else None
+        if isinstance(t, str) and t not in have and t not in lost:
+            lost.append(t)
+    if not lost:
+        return []
+    made: set[str] = set()
+    for _, _, b in new_builds(doc, prev):
+        if b["tpl"] == "workshops":
+            made |= _shop_set(b.get("p") or {})
+    if prev and prev.get("year") == doc["year"]:
+        for se in prev["seasons"]:
+            for b in se["build"]:
+                if b["tpl"] == "workshops":
+                    made |= _shop_set(b.get("p") or {})
+    lost = [t for t in lost if t not in made][:GONE_SHOPS_MAX]
+    if not lost:
+        return []
+    for t in lost:
+        doc["seasons"][0]["build"].append({"tpl": "workshops", "site": "S1", "p": {"only": t, "rebuild": 1}})
+    line = (f"BUG-562: {', '.join(lost)} stood once and are gone from the manifest: workshops only=<type> rebuild=1 drafted in seasons[0] "
+            "(each at its old place)")
+    doc["notes"] += "; " + line
+    return [line]
+
+
 RESERVE_ID = "reserve-hospital"
 HOSPITAL_FIRST = ("captives",)          # BUG-483: the templates that never take the hospital's site while the fort has none
 
@@ -5361,6 +5402,7 @@ def run(args, save_dir: Path) -> int:
         cfit += [simp] if simp else []
         cfit += reserve_shop_room(save_dir, doc, prev)        # BUG-461: Still, Kitchen, Butchers ... before dining and furnaces
         cfit += essential_shops(save_dir, doc, prev)          # BUG-527: Still and Kitchen whenever the manifest lacks them
+        cfit += gone_shops(save_dir, doc, prev)               # BUG-562: a shop that stood and is gone, again at its old place
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
         offer = offer_growth(save_dir, doc, prev, state)      # BUG-530: an empty draft offers rooms, beds, stockpiles, workshops
         cfit += [offer] if offer else []

@@ -5702,8 +5702,8 @@ function Q.sync(K, t)
         S.rt.wm[key] = nil
         pruned, changed = pruned + 1, true
         gone[#gone + 1] = {type = tostring(w.type), pos = p, w = K.now().wall}
-        K.log('warn', 'manifest: workshop %s at %d,%d,%d no longer stands (%d scans): out of the manifest', tostring(w.type),
-              p[1], p[2], p[3], n)
+        K.log('warn', 'manifest: workshop %s at %d,%d,%d no longer stands (%d scans): out of the manifest; `bp.place workshops ' ..
+              'only=%s rebuild=1` builds it again there (BUG-562)', tostring(w.type), p[1], p[2], p[3], n, tostring(w.type))
       else
         S.rt.wm[key] = n
         keep[#keep + 1] = w

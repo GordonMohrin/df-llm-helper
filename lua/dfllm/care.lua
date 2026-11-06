@@ -496,11 +496,19 @@ end
 -- 'blocks(metal) x2: none in the fort [0/0/0 of 225]': slot, count, blocker, [in the fort/free/reachable of every item of
 -- the type, N forbidden, N unseen, thread N (a cloth slot)]; a slot the dwarf can fill needs no numbers
 local function slot_text(name, left, bk, nd, ex)
-  if bk == BK_HAVE then return string.format('%s x%d: %s', name, left, bk) end
+  if bk == BK_HAVE then
+    -- BUG-560: say that care freed forbidden items for it
+    if (nd.fixes or 0) > 0 then return string.format('%s x%d: %s (unforbade %d)', name, left, bk, nd.fixes) end
+    return string.format('%s x%d: %s', name, left, bk)
+  end
   local src = nd.src or 0
   local cnt = string.format('%d/%d/%d', src, nd.free or 0, nd.avail or 0)
   if ex.kind and ex.kind > src then cnt = cnt .. ' of ' .. ex.kind end
-  if (nd.frb or 0) > 0 then cnt = cnt .. string.format(', %d forbidden', nd.frb) end
+  if (nd.frb or 0) > 0 then
+    cnt = cnt .. string.format(', %d forbidden', nd.frb)
+    if nd.frb_why then cnt = cnt .. ' (' .. nd.frb_why .. ')' end         -- BUG-560: why care could not free them
+  end
+  if (nd.fixes or 0) > 0 then cnt = cnt .. string.format(', unforbade %d', nd.fixes) end
   if (nd.unseen or 0) > 0 then cnt = cnt .. string.format(', %d unseen', nd.unseen) end
   if (nd.carry or 0) > 0 then cnt = cnt .. string.format(', %d carried/in a claimed bin', nd.carry) end
   if ex.other then cnt = cnt .. ', ' .. ex.other end
@@ -3493,9 +3501,18 @@ local function need_item(K, c, r, p, t, it)
     end
     return
   end
-  if nd.fixes >= math.max(c.unforbid_per_need, nd.n) or not inside(r, x, y, z) or not revealed(K, x, y, z)
-     or not reachable(K, r, t.m.upos, x, y, z) then
+  -- BUG-560 (Run 16d i4 Trumpetrealms y407: two moods died with '12 forbidden' leather beside them, in PEACE): `inside` knows
+  -- Kern+ only (clean_ok counts when the fort has no Kern+ burrow), so forbidden material outside Kern+ stayed forbidden even
+  -- with no danger; every other clean-up here reads `r.clean_ok or inside`. A mood is also no danger in a DRILL.
+  local safe = r.clean_ok or K.mode() == 'DRILL' or inside(r, x, y, z)
+  local why
+  if nd.fixes >= math.max(c.unforbid_per_need, nd.n) then why = 'cap'
+  elseif not safe then why = 'Kern+ only, ' .. tostring(K.mode())
+  elseif not revealed(K, x, y, z) then why = 'unseen'
+  elseif not reachable(K, r, t.m.upos, x, y, z) then why = 'far' end
+  if why then
     nd.frb = nd.frb + 1                           -- forbidden and care cannot free it: not free
+    nd.frb_why = nd.frb_why or why
     return
   end
   -- live L4: a Possessed mood (bone x2, then a block and a boulder) found no bone; care freed one held boulder
@@ -3517,6 +3534,8 @@ local function need_item(K, c, r, p, t, it)
     nd.fixes, nd.avail, nd.free = nd.fixes + 1, nd.avail + 1, nd.free + 1
     r.claimed[it.id] = true
     release_held(r, p, it.id)
+    K.log('info', 'care: mood unit %s: unforbade item %d for %s (%s)', tostring(t.m.sid), it.id, tostring(nd.legacy or alt.cls or '?'),
+          inside(r, x, y, z) and 'inside Kern+' or 'outside Kern+, no danger')   -- BUG-560
   else
     nd.frb = nd.frb + 1
   end
@@ -3917,6 +3936,7 @@ local function phase_needs(K, c, r, p)
       for _, nd in ipairs(m.needs) do
         nd.avail, nd.fixes, nd.far, nd.src = 0, 0, 0, 0
         nd.free, nd.kind, nd.unseen, nd.frb, nd.carry = 0, 0, 0, 0, 0
+        nd.frb_why = nil
         for _, alt in ipairs(nd.alts) do
           for _, v in ipairs(alt.vecs or {}) do r.nq[#r.nq + 1] = {m = m, nd = nd, alt = alt, vec = v} end
         end

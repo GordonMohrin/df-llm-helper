@@ -996,8 +996,25 @@ end
 local function lists_job(K, ui, mer)
   local want, sell = wants(K)
   local ea, ew = ethics(mer)
-  return {kind = 'lists', i0 = 0, i1 = 0, n0 = #ui.good[0], n1 = #ui.good[1], buys = {}, sells = {},
+  return {kind = 'lists', i0 = 0, i1 = 0, n0 = #ui.good[0], n1 = #ui.good[1], buys = {}, sells = {}, skip = {},
           want = want, sell = sell, ea = ea, ew = ew}
+end
+
+-- BUG-561: a bin (any container with contents) is a sale entry when every item in it passes the sale filter; returns
+-- {stack = units inside, t = the type of its contents ('BIN' if mixed)}, nil otherwise
+function M.bin_sale(it, mer, ea, ew, sell)
+  local ok, subs = pcall(dfhack.items.getContainedItems, it)
+  if not ok or type(subs) ~= 'table' or #subs == 0 then return nil end
+  local units, t = 0, nil
+  for _, x in ipairs(subs) do
+    local oki, si = pcall(item_info, x, mer, ea, ew)
+    if not oki then return nil end
+    if si.container or si.artifact or si.forbid or si.owned or si.banned or si.unethical then return nil end
+    if #sell > 0 and not L.first_match(sell, si) then return nil end
+    units = units + (si.stack or 1)
+    if t == nil then t = si.type elseif t ~= si.type then t = 'BIN' end
+  end
+  return {stack = units, t = t or 'BIN'}
 end
 
 -- trade.good[0] = merchant goods, [1] = ours (internal/caravan/trade.lua:328-332)
@@ -1023,9 +1040,27 @@ local function lists_slice(j, ui, mer)
     j.i1, budget = i + 1, budget - 1
     local gf = ui.goodflag[1][i]
     if not gf.filtered_off then
-      local info = item_info(ui.good[1][i], mer, j.ea, j.ew)
-      if not (info.container or info.artifact or info.forbid or info.owned or info.banned or info.unethical)
-         and info.value >= M.CFG.SELL_MIN and (#j.sell == 0 or L.first_match(j.sell, info)) then
+      local it = ui.good[1][i]
+      local info = item_info(it, mer, j.ea, j.ew)
+      -- BUG-561: counted by reason (nothing_to_sell names them); a bin counts as one entry
+      local sk = j.skip
+      local function skip(why) sk[why] = (sk[why] or 0) + 1 end
+      if info.artifact or info.forbid or info.owned or info.banned or info.unethical then
+        skip(info.artifact and 'artifact' or info.forbid and 'forbid' or info.owned and 'owned' or info.banned and 'banned'
+             or 'unethical')
+      elseif info.container then
+        -- BUG-561 (Run 16d i4: 'nothing_to_sell' beside 40 crafts; finished goods lie in bins and a bin was never offered): a bin
+        -- is offered when everything in it is a sale item (the sell list, no forbidden / owned / artifact / banned / unethical
+        -- content, no container within); its value is the perceived value of bin and contents, as the trade list shows it
+        local sub = M.bin_sale(it, mer, j.ea, j.ew, j.sell)
+        if sub and info.value >= M.CFG.SELL_MIN then
+          j.sells[#j.sells + 1] = {i = i, value = info.value, stack = sub.stack, t = sub.t}
+        else
+          skip(sub and 'value' or 'bin_mixed')
+        end
+      elseif info.value < M.CFG.SELL_MIN then skip('value')
+      elseif #j.sell > 0 and not L.first_match(j.sell, info) then skip('kind')
+      else
         j.sells[#j.sells + 1] = {i = i, value = info.value, stack = info.stack, t = info.type}
       end
     end
@@ -1511,10 +1546,15 @@ local function step_wait(K, cars, now)
       if short then for _, tn in ipairs(L.KINDS.crafts.t) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end end
       table.sort(types)
       if #types > 0 then
-        local ok, n = act_trade(K, 'bring', {depot = d.id, types = types,
-                                             max = short and M.CFG.BRING_METAL or M.CFG.BRING_MAX})
-        K.log('info', 'trade: %s sale items sent to the depot%s', ok and tostring(n) or ('no (' .. tostring(n) .. ')'),
-              short and ' (metal short for the soldiers: crafts too)' or '')
+        local req = {depot = d.id, types = types, max = short and M.CFG.BRING_METAL or M.CFG.BRING_MAX}
+        local ok, n = act_trade(K, 'bring', req)
+        -- BUG-561: what the haul left out, by reason (act.trade bring fills req.skipped)
+        local sk = {}
+        for k, v in pairs(type(req.skipped) == 'table' and req.skipped or {}) do sk[#sk + 1] = string.format('%s %s', tostring(v), k) end
+        table.sort(sk)
+        K.log('info', 'trade: %s sale items sent to the depot%s%s', ok and tostring(n) or ('no (' .. tostring(n) .. ')'),
+              short and ' (metal short for the soldiers: crafts too)' or '',
+              #sk > 0 and (', left out: ' .. table.concat(sk, ', ')) or '')
       end
     elseif at_for >= M.CFG.NOGOODS_WAIT then
       K.log('info', 'trade: the merchants of %s brought nothing to sell; no sale items are hauled', civ_name(rt.ent))
@@ -1674,7 +1714,17 @@ local function step_mark(K, cars)
   local j = rt.job
   rt.job = nil
   if #j.buys == 0 then return finish(K, false, 'nothing_wanted') end
-  if #j.sells == 0 then return finish(K, false, 'nothing_to_sell') end
+  if #j.sells == 0 then
+    -- BUG-561: say why none of ours was offered (the list is only what lies in the depot; 'sent' counts what was hauled there)
+    local parts = {}
+    for _, k in ipairs({'forbid', 'owned', 'artifact', 'banned', 'unethical', 'bin_mixed', 'value', 'kind'}) do
+      if (j.skip[k] or 0) > 0 then parts[#parts + 1] = string.format('%d %s', j.skip[k], k) end
+    end
+    K.log('info', 'trade: nothing to sell: %d of ours listed at the depot%s (sale value from %d, kinds %s)', j.n1,
+          #parts > 0 and (', not offered: ' .. table.concat(parts, ', ')) or '', M.CFG.SELL_MIN,
+          #j.sell == 0 and 'any' or tostring(#j.sell))
+    return finish(K, false, 'nothing_to_sell')
+  end
   f.cand = {buys = j.buys, sells = j.sells, want = j.want}
   return mark(K)
 end

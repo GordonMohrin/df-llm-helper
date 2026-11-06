@@ -423,7 +423,7 @@ T.test('BUG-017: a class without any item in the fort is named: leather x1: none
   local r = W.find_events('MOOD_RISK')
   T.eq(#r, 1)
   T.eq({r[1].d.missing, r[1].d.nosrc}, {{'leather', 'bone'}, {'leather'}})
-  T.ok(r[1].msg:find('starts without leather x1: none in the fort [0/0/0]; bone x1: none free [1/0/0, 1 forbidden]', 1, true),
+  T.ok(r[1].msg:find('starts without leather x1: none in the fort [0/0/0]; bone x1: none free [1/0/0, 1 forbidden (far)]', 1, true),
        r[1].msg)
   local n = W.find_events('MOOD_NEED')[1]
   T.ok(n.msg:find('leather x1: none in the fort', 1, true), n.msg)
@@ -431,7 +431,7 @@ T.test('BUG-017: a class without any item in the fort is named: leather x1: none
   W.unit(1).counters2.thirst_timer = 31000
   CW.day(W)
   r = W.find_events('MOOD_RISK')
-  T.ok(r[2] and r[2].msg:find('missing leather x1: none in the fort [0/0/0]; bone x1: none free', 1, true) and
+  T.ok(r[2] and r[2].msg:find('missing leather x1: none in the fort [0/0/0]; bone x1: none free [1/0/0, 1 forbidden (far)]', 1, true) and
        r[2].msg:find('a mood job cannot be cancelled', 1, true), r[2] and r[2].msg)
   CW.day(W, 2)
   local dn = decisions(W)
@@ -453,7 +453,7 @@ T.test('BUG-017 (Run 10 y418): a plant-cloth mood next to wool cloth: the kind i
   T.eq(#r, 1)
   -- K3: seven wool cloth are in the fort but fit no plant filter ('of 7'); the thread is in the fort, forbidden and out of reach
   T.ok(r[1].msg:find('starts without cloth(plant) x1: none in the fort [0/0/0 of 7, thread 0]; thread(yarn) x1: none free ' ..
-       '[1/0/0, 1 forbidden]', 1, true), r[1].msg)
+       '[1/0/0, 1 forbidden (far)]', 1, true), r[1].msg)
   T.eq({r[1].d.missing, r[1].d.nosrc}, {{'cloth', 'thread'}, {'cloth(plant)'}})
   local w = Cm.mood_wants(W.K)
   T.eq({w[1].cls, w[1].buy, w[2].cls, w[2].buy}, {'cloth', 'cloth:plant', 'thread', 'thread:yarn'})

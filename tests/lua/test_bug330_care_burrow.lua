@@ -183,17 +183,19 @@ local function fresh(W, foe, unlisted)
   W.set_census('h', {tick = W.K.now().tick, vis = #list + (unlisted or 0), inv = #list, inside = 0, list = list})
 end
 
-T.test('BUG-330 review (1): never in BREACH: an open care burrow closes as soon as the mode is BREACH, and none opens ' ..
-       'in BREACH (the BREACH list is Tiefe+ alone)', function()
+T.test('BUG-330 review (1) / BUG-559: BREACH with care_breach off: none opens and an open one closes (by default it ' ..
+       'opens on Kern+, tests/lua/test_bug559_care_breach.lua)', function()
   local W, M = world{foe = {5, 95, 5}}
+  W.K.cfg.baseline.water = {care_breach = false}
   day(W)
   T.eq(M.care_rooms(W.K), {'Pflege+'})
   W.set_mode('BREACH')
-  T.eq(M.care_rooms(W.K), {}, 'old code: Pflege+ stays in the BREACH alert list')
+  T.eq(M.care_rooms(W.K), {}, 'care_breach off: Pflege+ leaves the BREACH alert list')
   T.ok(logged(W, 'care burrow Pflege+ closed: BREACH: nobody is drawn out toward a seal that may be down'), 'kern.log')
   local W2, M2 = world{foe = {5, 95, 5}, mode = 'BREACH'}
+  W2.K.cfg.baseline.water = {care_breach = false}
   day(W2)
-  T.eq(#W2.find_acts('burrow_tiles'), 0, 'old code: painted in BREACH')
+  T.eq(#W2.find_acts('burrow_tiles'), 0, 'painted in BREACH with care_breach off')
   T.eq(M2.care_rooms(W2.K), {})
 end)
 

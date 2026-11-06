@@ -1022,4 +1022,29 @@ T.test('screen reads at 240x90: a sliced whole-screen fallback finds a sheet but
   T.ok(worst <= 1000, 'reads per frame ' .. worst)
 end)
 
+-- BUG-561 (Run 16d i4 Trumpetrealms: 'nothing_to_sell' beside 40 crafts): finished goods lie in bins and a bin was never offered
+T.test('BUG-561: a bin whose contents are all sale items is offered as one entry; a mixed one is not; nothing_to_sell says why', function()
+  local W, _, d, c = setup{ours = {}, before_load = function(W, d)
+    local function fig(v, flags) return F.item(W, {type = 'FIGURINE', value = v, flags = flags}) end
+    F.goods(W, d, {{type = 'BIN', value = 600, contents = {fig(200), fig(200), fig(200)}},
+                   {type = 'BIN', value = 500, contents = {fig(250), F.item(W, {type = 'DRINK', value = 250})}}})
+  end}
+  W.frame(1)
+  to_depot(W, d, c)
+  F.until_(W, function() return first_mark(W) ~= nil end, 600)
+  local m = first_mark(W)
+  T.ok(m, 'something is marked')
+  T.eq(m.sell, {'BIN:600'}, 'the full bin of figurines (old code: bins are never offered); the mixed bin stays')
+  local W2, _, d2, c2 = setup{ours = {}, plan = plan_want({'cloth'}, {'ring'}), before_load = function(W, d)
+    F.goods(W, d, {{type = 'FIGURINE', value = 500, flags = {forbid = true}}, {type = 'FIGURINE', value = 3}})
+  end}
+  W2.frame(1)
+  to_depot(W2, d2, c2)
+  F.until_(W2, function() return #F.events(W2, 'failed') > 0 end, 600)
+  T.eq(F.events(W2, 'failed')[1].d.why, 'nothing_to_sell')
+  local said
+  for _, l in ipairs(W2.logs) do if l.msg:find('trade: nothing to sell: 2 of ours listed at the depot', 1, true) then said = l.msg end end
+  T.ok(said and said:find('1 forbid', 1, true) and said:find('1 value', 1, true), said or 'no log line')
+end)
+
 T.done()

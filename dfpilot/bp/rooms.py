@@ -53,7 +53,8 @@ PARAMS = {
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40), "surface": (0, 0, 1)},
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
-    "workshops": {"skip": ("", None, None), "add": ("", None, None), "surface": (0, 0, 1)},
+    # BUG-562: rebuild = 1 builds ONE shop type (only=<Type>) again where manifest.gone says it stood (no dig, no door, no room)
+    "workshops": {"skip": ("", None, None), "add": ("", None, None), "surface": (0, 0, 1), "rebuild": (0, 0, 1)},
     "depot": {},                      # BUG-368: SURFACE, not BUILD: no room (nothing dug, no Z4, no burrow)
     "tradepost": {},                  # BUG-488: SURFACE too: the trade pile beside the depot (no fortcore needed)
     # BUG-297: surface = 1 builds the plots on soil floor that stands already (no dig, no door, no burrow): sites.rank
@@ -282,6 +283,8 @@ def workshops(p: dict) -> Plan:
     if not todo:
         raise ValueError("workshops: nothing left to build")
     P = Plan("workshops", "infra")
+    if p.get("rebuild"):
+        return _rebuild_shop(P, todo)
     if p.get("surface"):
         return _surface_shops(P, todo)
     # BUG-118: 3x3 cells in rows of six, 4 apart; a 1x1 shop sits in the middle of its cell; the 5x5 shops (Kennels, Siege)
@@ -310,6 +313,25 @@ def workshops(p: dict) -> Plan:
 
 
 SURFACE_COLS = 4
+
+
+def _rebuild_shop(P: Plan, todo: list) -> Plan:
+    """BUG-562 (Run 16b i2 Brotherarrow: Craftsdwarfs 99,119,134 and Clothiers 107,116,134 'no longer stands', the places free, mood_ws
+    417 days, `bp sites workshops` '0 free sites' because it ranks room sites only): the shop again where it stood. One type, its
+    footprint centred on the anchor (the old position of manifest.gone); nothing dug, no door, no burrow, no room."""
+    if len(todo) != 1:
+        raise ValueError("workshops rebuild=1: exactly one shop type (only=<Type>): a shop is rebuilt where it stood, "
+                         f"{len(todo)} types asked")
+    key, name = todo[0]
+    side = SHOP_SIZE.get(name, 3)
+    h = side // 2
+    b = P.stage("build", "build", orders=1)
+    if side == 1:
+        b.tile(0, 0, 0, key)
+    else:
+        b.ent(-h, -h, h, h, 0, key)
+    P.workshops.append((name, (0, 0, 0)))
+    return P
 
 
 def surface_block(n: int) -> tuple[int, int]:

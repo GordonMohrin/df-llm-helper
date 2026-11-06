@@ -464,4 +464,41 @@ T.test('dispatcher: unknown ops refused, missing args tolerated', function()
   T.eq({E.I.trade('close')}, {true, 0})
 end)
 
+-- BUG-561 (Run 16d i4 Trumpetrealms: 'nothing_to_sell' beside 40 crafts, i1 '0 sale items sent'): crafts lie in bins, a contained
+-- item has in_inventory and markForTrade refuses it; the free bin is marked when all of it is a sale type, the rest is counted
+T.test('BUG-561: bring marks the bin of contained sale items once, skips mixed / forbidden bins and counts the reasons', function()
+  local E = env()
+  df.item_type = {FIGURINE = 1, RING = 2, DRINK = 3, [1] = 'FIGURINE', [2] = 'RING', [3] = 'DRINK'}
+  local function item(id, ty, flags)
+    local it = {id = id, flags = flags or {on_ground = true}}
+    function it.getType() return df.item_type[ty] end
+    return it
+  end
+  local function bin(id, subs, flags)
+    local b = item(id, 'RING', flags or {on_ground = true})
+    b._subs = subs
+    for _, x in ipairs(subs) do x.flags = {in_inventory = true}; x._c = b end
+    return b
+  end
+  local b1 = bin(500, {item(1, 'FIGURINE'), item(2, 'FIGURINE'), item(3, 'FIGURINE')})            -- all crafts: marked once
+  local b2 = bin(501, {item(4, 'FIGURINE'), item(5, 'DRINK')})                                    -- mixed: left
+  local b3 = bin(502, {item(6, 'FIGURINE')}, {on_ground = true, forbid = true})                   -- forbidden bin
+  local loose = item(7, 'FIGURINE')
+  local worn = item(8, 'FIGURINE', {in_inventory = true})                                         -- carried by a unit: no container
+  local forb = item(9, 'FIGURINE', {on_ground = true, forbid = true})
+  df.global.world = {items = {other = {FIGURINE = {b1._subs[1], b1._subs[2], b1._subs[3], b2._subs[1], b3._subs[1], loose, worn, forb}}}}
+  local marked = {}
+  dfhack.items = dfhack.items or {}
+  dfhack.items.markForTrade = function(it, d) marked[#marked + 1] = it.id; return true end
+  dfhack.items.getContainer = function(it) return it._c end
+  dfhack.items.getContainedItems = function(c) return c._subs or {} end
+  local a = {depot = 50, types = {'FIGURINE'}, max = 60}
+  local ok, n = E.I.trade('bring', a)
+  T.ok(ok)
+  table.sort(marked)
+  T.eq(marked, {7, 500}, 'the loose figurine and the one full bin of crafts (not once per content)')
+  T.eq(n, 4, 'the bin counts its three crafts')
+  T.eq(a.skipped, {bin_mixed = 1, bin_forbid = 1, in_inventory = 1, forbid = 1}, 'the reasons')
+end)
+
 T.done()
