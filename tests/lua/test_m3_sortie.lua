@@ -17,7 +17,7 @@ local function stubs(conf)
   return {sg, rf}
 end
 
-local function setup(units, conf)
+local function setup(units, conf, bare)
   local u = X.citizens(50)
   for _, x in ipairs(units or {}) do u[#u + 1] = x end
   local W = X.world{units = u}
@@ -29,6 +29,7 @@ local function setup(units, conf)
   X.load(W, {'military'}, mods, {'sense'})
   W.state()
   W.run(9, {skip = 9})
+  if not bare then X.equip_all(W) end  -- BUG-510: unequipped soldiers are not sent out in a SIEGE / BREACH
   W.K.set_mode('SIEGE', 'test')
   W.K.set_mode('BREACH', 'test')
   W.run(30, {skip = 9})
@@ -211,7 +212,7 @@ end)
 
 T.test('BUG-113: kill_lone (the kernel\'s own order): the best squad, only at worn >= sortie.worn, refused with the reason otherwise',
        function()
-  local W = setup({X.S.inv(201, 100, 100, Z)}, {worn = 100, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800})
+  local W = setup({X.S.inv(201, 100, 100, Z)}, {worn = 100, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800}, true)
   lone_ids = {201}
   local ok, msg = X.call(W, 'military', 'kill_lone', {201}, 'reflex')
   T.eq(ok, false)

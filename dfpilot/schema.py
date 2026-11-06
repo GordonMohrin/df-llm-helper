@@ -484,7 +484,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     # BUG-487: locked_out reop = the walls of ours the kernel took down itself (quickfort undo; a door goes there)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i cause:s")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -754,7 +754,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AQ_PASS_DONE": ("B", "runner", _d("proj:s", "top:i bot:i lv:ia n:i rest:ia")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i task:s")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
-    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f")),
+    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f settle:i")),
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),

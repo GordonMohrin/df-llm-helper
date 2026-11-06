@@ -30,6 +30,7 @@ for _, sp in ipairs(M.SQUADS) do                          -- Gordon made the squ
   X.set_uniform(s, M.UNIFORM[sp.kind])
 end
 package.loaded['dfllm.drill'].SETTLE = 1e9               -- drills only on request in this scenario
+package.loaded['dfllm.drill'].SETTLE_MAX = 0             -- BUG-512: its soldiers never walk to a station: no settle phase (the old clock)
 mods[#mods + 1] = X.economy()
 mods[#mods + 1] = X.snapshot()
 mods[#mods + 1] = X.runner('P5')

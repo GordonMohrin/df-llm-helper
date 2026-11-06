@@ -426,6 +426,9 @@ function X.load(W, wp6, extra, wp5)
     W.load(require('dfllm.' .. n))
   end
   for _, m in ipairs(extra or {}) do W.load(m) end
+  -- BUG-512: the drill's settle phase (recall and the squads' march before its clock starts) is off in the worlds whose soldiers never
+  -- walk to a station (X.drill_settle_max = the tests of the settle phase set it before X.load)
+  if package.loaded['dfllm.drill'] then package.loaded['dfllm.drill'].SETTLE_MAX = X.drill_settle_max or 0 end
   W.state()          -- live L6: the view carries a fake runner's phase before military's first upkeep
   return W
 end

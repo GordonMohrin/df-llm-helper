@@ -43,6 +43,13 @@
 -- carries `fails`; a result has `mech = 1` when only the gear is missing (the bridges rose, nobody outside, no double toggle):
 -- readiness `drill_mech_age`, the P5 deliverable 'drill' is met by it (the R2 pass still wants worn >= 90). The retries back off
 -- as before (a month, x2, at most a season).
+-- BUG-512 (Run 16d i4 Trumpetrealms y389-y395: 40 more DRILL_RESULT 'up:B1, slow:O1, worn<90' after the round-31 fix; kern.log of the drill at
+-- tick 157624424: B1 'up waits for citizen ... walking onto it in 1 steps, soldier 26747 walking onto it in 2 steps (squad 99 ...)', the
+-- pullers walking to the lever room 3 tiles from B1, 'B1 not up by the drill's T+900: no late raise'): the drill started its clock at
+-- T0, the very tick the alert sends everybody home and the squads to their stations over B1, so the raise waited for the march and the
+-- measurement missed. Now the drill SETTLES first: the raise is not asked for, and the clock (T+600 goal, T+900 pass, T+1,200 measurement)
+-- does not run, until nobody is outside Kern+ and half of the soldiers stand at their stations, or SETTLE_MAX ticks after T0 (then the
+-- ones still outside count as outside:N, as before). `settle` (DRILL_RESULT) says how long that took; siege asks M.settle.
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')
 
@@ -67,6 +74,7 @@ M.RETRY_CAP = 100800     -- at most a season between retries
 M.RETRY_ABORT = 6000     -- 5 days after a drill a real threat interrupted
 M.SETTLE = 2400          -- no automatic drill in the first 2 days after a load
 M.KEEP = 5
+M.SETTLE_MAX = 1200      -- BUG-512: the drill waits this long at most for the recall and the squads' march before its clock starts
 M.RESTORE_MAX = 1200     -- BUG-251: the drill's bridges must be down this many ticks after the measurement, else PEACE anyway
 local R1_CAP = 55
 
@@ -237,7 +245,7 @@ function M.start(K, why)
   if M.trading(K) then return false, 'a trade session is under way (the broker would be called home)' end
   local now = K.now().tick
   K.call('gate', 'reset_kpi')                     -- raise ticks and double toggles count from T0
-  st.t0, st.why, st.try, rt.home, rt.skip = now, cut(why or 'drill', 40), now, nil, nil
+  st.t0, st.ts, st.why, st.try, rt.home, rt.skip = now, nil, cut(why or 'drill', 40), now, nil, nil
   rt.home0 = home_sample(K)                       -- who is outside at T0, and how far from the entry
   save(K)
   local ok, err = K.set_mode('DRILL', 'drill: ' .. st.why)
@@ -324,7 +332,8 @@ local function finish(K, now)
             d = {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl, why = st.why,
                  walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers, fails = r.fails, mech = r.mech}}
   if r.pass == 0 and rec.streak_fail == 2 then st.res.fail = {streak = rec.streak_fail, fails = r.fails, fl = fl} end
-  st.t0, rt.home, rt.home0 = nil, nil, nil
+  st.res.d.settle = math.max(0, (st.ts or st.t0 or 0) - (st.t0 or 0))      -- BUG-512
+  st.t0, st.ts, rt.home, rt.home0 = nil, nil, nil, nil
   st.rs = now
   local okg, low = K.call('gate', 'drill_end')
   st.rl = okg and type(low) == 'table' and low or {}
@@ -373,7 +382,7 @@ end
 
 local function abort(K, why)
   K.log('info', 'drill: aborted (%s)', why)
-  st.t0, st.try, rt.home, rt.home0 = nil, K.now().tick, nil, nil
+  st.t0, st.ts, st.try, rt.home, rt.home0 = nil, nil, K.now().tick, nil, nil
   save(K)
   M.every = {ticks = M.SLOW}
 end
@@ -539,7 +548,7 @@ end
 function M.init(K)
   local p = K.persist.get('m.drill')
   p = type(p) == 'table' and p or {}
-  st = {v = 2, t0 = int(p.t0), why = p.why, try = int(p.try), siege = int(p.siege), ref = int(p.ref),
+  st = {v = 2, t0 = int(p.t0), ts = int(p.ts), why = p.why, try = int(p.try), siege = int(p.siege), ref = int(p.ref),
         rrec = type(p.rrec) == 'table' and p.rrec or nil, refp = int(p.refp),
         rs = int(p.rs), rl = type(p.rl) == 'table' and p.rl or nil,                 -- BUG-251: the restore phase
         res = type(p.res) == 'table' and type(p.res.msg) == 'string' and type(p.res.d) == 'table' and p.res or nil,
@@ -560,6 +569,27 @@ function M.init(K)
   end
   rt = {boot = K.now().tick, ending = false}
   M.every = {ticks = (st.t0 or st.rs) and M.FAST or M.SLOW}
+end
+
+-- BUG-512: the drill is settling (T0 passed, the clock not started): siege asks before it requests a raise. Returns settling (bool),
+-- the tick the clock runs from (the settle tick, else T0; nil without a drill)
+function M.settle_max(K) return M.SETTLE_MAX end
+function M.settle(K)
+  if st.t0 and not st.ts and M.SETTLE_MAX > 0 then return true, st.t0 end
+  return false, st.ts or st.t0
+end
+
+-- BUG-512: has the recall (nobody outside Kern+ in a census taken after T0) and the squads' march (half of the soldiers that do not
+-- stand down on purpose at their stations, or none) finished? true, or false with the numbers for kern.log
+local function settled(K, now)
+  local cu = K.census.u
+  local outside = type(cu) == 'table' and (cu.tick or -1) >= st.t0 and int(cu.outside) or -1
+  local ok, k = K.call('military', 'kpi')
+  local sol, on, sd = 0, 0, 0
+  if ok and type(k) == 'table' then sol, on, sd = int(k.soldiers) or 0, int(k.on_station) or 0, int(k.sd) or 0 end
+  sol = math.max(0, sol - sd)
+  local home, posted = outside == 0, sol == 0 or on * 2 >= sol
+  return home and posted, outside, on, sol
 end
 
 -- BUG-251: at T+900 the outer/inner bridges that are not up and not being pulled are dropped (no late raise)
@@ -583,10 +613,25 @@ function M.step(K, budget, ctx)
   end
   if st.t0 then
     if mode ~= 'DRILL' then abort(K, 'mode ' .. mode); return end
-    if now - st.t0 >= M.MEASURE then finish(K, now)
+    if not st.ts then                                -- BUG-512: settling
+      local done, outside, on, sol = 1, 0, 0, 0
+      if M.SETTLE_MAX > 0 then
+        done, outside, on, sol = settled(K, now)
+        if not done and now - st.t0 < M.SETTLE_MAX then return end
+      end
+      st.ts = M.SETTLE_MAX > 0 and now or st.t0          -- SETTLE_MAX 0: no settle phase, the clock runs from T0 (tests)
+      if M.SETTLE_MAX > 0 then
+        K.log('info', 'drill: %s after %d ticks (outside Kern+ %d, soldiers on station %d of %d): the clock starts',
+              done and 'settled' or 'settle cap reached', now - st.t0, outside, on, sol)
+        K.call('gate', 'reset_kpi')                      -- raise ticks and double toggles count from here
+        save(K)
+        return
+      end
+    end
+    if now - st.ts >= M.MEASURE then finish(K, now)
     else
-      if not rt.skip and now - st.t0 >= M.RAISE_MAX then rt.skip = true; skip_late(K) end
-      if not rt.home and now - st.t0 >= M.MEASURE - M.HOME_WINDOW then rt.home = home_sample(K) end
+      if not rt.skip and now - st.ts >= M.RAISE_MAX then rt.skip = true; skip_late(K) end
+      if not rt.home and now - st.ts >= M.MEASURE - M.HOME_WINDOW then rt.home = home_sample(K) end
     end
     return
   end

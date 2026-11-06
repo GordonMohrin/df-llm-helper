@@ -33,6 +33,7 @@ local function msetup(units)
   X.load(W, {'military'}, mods, {'sense'})
   W.state()
   W.run(9, {skip = 9})
+  X.equip_all(W)                       -- BUG-510: unequipped soldiers are not sent out in a SIEGE / BREACH
   W.K.set_mode('SIEGE', 'test')
   W.K.set_mode('BREACH', 'test')
   W.run(30, {skip = 9})

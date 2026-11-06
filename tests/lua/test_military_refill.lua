@@ -202,17 +202,30 @@ T.test('Run 11 siege 8: metal short: the positions the gear cannot fill go to th
   T.eq({g2.xbow, g2.fill.C}, {0, 2})
 end)
 
-T.test('Run 11 siege 8: in a SIEGE the first melee squad is still refilled to HOLD_MIN beyond the gear; B stays capped',
-       function()
+T.test('BUG-510 (Run 11 siege 8 changed): in a SIEGE the first melee squad is refilled only as far as the melee sets go ' ..
+       '(3 sets: 3, not HOLD_MIN 5): no recruit without armor and weapon; B stays capped', function()
+  -- old code: A refilled to HOLD_MIN (5) beyond the gear (Run 16a i1 Basementflew: 2 of 19 soldiers equipped, 47 killed)
   local W = gear_world(50, GEAR)
   local A = X.squad_of(W, 'A')
   T.eq(alive(W, A), 3)
   W.K.set_mode('SIEGE', 'test')
   kill_squad(W, A)
   W.run(1300, {skip = 9})
-  T.eq(alive(W, A), 5, 'the core stations need bodies at the choke: HOLD_MIN from healthy core civilians')
+  T.eq(alive(W, A), 3, 'refilled to the 3 gear sets, not to HOLD_MIN')
   T.eq(count(W, 'B'), 0, 'no gear for B: not drafted')
   T.ok(#logs(W, 'military: SIEGE refill: squad A ') >= 1)
+end)
+
+T.test('BUG-510: with gear for HOLD_MIN (6 sets) the first melee squad is refilled to HOLD_MIN (5) in a SIEGE', function()
+  local c = {}
+  for k, v in pairs(GEAR) do c[k] = v end
+  c.g_weapon = 6
+  local W = gear_world(50, c)
+  local A = X.squad_of(W, 'A')
+  W.K.set_mode('SIEGE', 'test')
+  kill_squad(W, A)
+  W.run(1300, {skip = 9})
+  T.eq(alive(W, A), 5, 'the core stations need bodies at the choke, and the gear is there')
 end)
 
 T.done()

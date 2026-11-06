@@ -62,7 +62,7 @@ M.STATUS, M.RETRY, M.POSTURE_REASSERT, M.KILL_EVERY = 600, 600, 3600, 100
 -- never); looked at every STATION_LOOK ticks. Still under half STATION_WAIT ticks in, the posture is issued again (every
 -- STATION_WAIT while it lasts) and kern.log names the soldiers' causes once per episode (military.kpi off).
 M.STATION_LOOK, M.STATION_WAIT = 100, 1800
-M.DRILL_MAX = 3600         -- a drill normally ends at T+1,200 (drill module)
+M.DRILL_MAX = 3600         -- a drill normally ends at T+1,200 (drill module); BUG-512: plus its settle phase (drill.settle_max)
 
 -- BUG-029: SIEGE stands the squads at the inner station (READY_IN; INTAKE only while a wave runs)
 local POSTURE = {PEACE = 'TRAIN', ALERT = 'STATION_B1', SIEGE = 'READY_IN', DRILL = 'READY_STATION',
@@ -85,6 +85,12 @@ local function sorted_keys(t)
 end
 
 -- bridge names by role and burrow names from the manifest
+-- BUG-512: the longest settle phase of a drill (drill.settle_max), 0 without the module
+local function drill_settle_max(K)
+  local ok, n = K.call('drill', 'settle_max')
+  return ok and int(n) or 0
+end
+
 local function geometry(K)
   local man = K.manifest()
   local g = {outer = {}, inner = {}, core = {}, all = {}, man = man}
@@ -997,7 +1003,7 @@ local function decide(K, a, g, now)
     if a and (a.siege or a.inside > 0) then
       if go(K, 'SIEGE', a.siege or 'inside', a) and a.inside > 0 then go(K, 'BREACH', 'inside', a) end
     elseif a and a.hostile then go(K, 'ALERT', 'hostile in drill', a)
-    elseif not K.enabled('drill') or now - st.t0 >= M.DRILL_MAX then
+    elseif not K.enabled('drill') or now - st.t0 >= M.DRILL_MAX + drill_settle_max(K) then
       go(K, 'PEACE', 'drill timeout')          -- nobody else will end it (drill missing or stuck)
     end
   end
@@ -1214,7 +1220,16 @@ end
 -- census taken at or after T0 (sense rescans inside the mode change); an older one may miss a
 -- citizen who just walked out, and the reason is latched in st.req.
 local function raise(K, g, now)
-  local t = now - st.t0
+  -- BUG-512: a DRILL settles first (the recall and the squads' march over the bridges); its clock runs from the settle tick
+  local origin = st.t0
+  if K.mode() == 'DRILL' then
+    local okd, settling, o = K.call('drill', 'settle')
+    if okd then
+      if settling then return end
+      origin = int(o) or origin
+    end
+  end
+  local t = now - origin
   local cu, h = K.census.u, K.census.h
   local outside = type(cu) == 'table' and (cu.tick or -1) >= st.t0 and cu.outside or -1
   -- BUG-338: civilians in the killing field (Kern+ may cover it) or outside are no "nobody outside" for an inner bridge
@@ -1241,7 +1256,7 @@ local function raise(K, g, now)
     for _, b in ipairs(list) do
       local why = whys[b]
       if why and not held[b] and not rescuing(b) and not wave_skip(b, now)
-         and want(K, b, 'up', why, st.t0 + M.BREACH_AT) and not st.req[b] then
+         and want(K, b, 'up', why, origin + M.BREACH_AT) and not st.req[b] then
         st.req[b], dirty = why, true
       end
     end
@@ -1998,6 +2013,8 @@ function M.sortie(K, args, cmd_id)
   if (info.worn or 0) < c.worn then
     return false, string.format('squad %s not in uniform: worn %d%% < %d%% (%s)', key, info.worn or 0, c.worn, cmp)
   end
+  local okf, unfit = K.call('military', 'unfit_text', key)        -- BUG-510: unequipped soldiers do not go out
+  if okf and type(unfit) == 'string' then return false, unfit end
   if (info.cv or 0) < est then return false, string.format('squad %s too weak: %s', key, cmp) end
   st.so = {sq = key, gate = gname, ph = 'gather', t = now, t0 = now, tgt = tgt, at = at, cmd = tostring(cmd_id or '?'),
            lost0 = st.ep and st.ep.lost or 0, killed0 = st.ep and st.ep.killed or 0}
@@ -2408,6 +2425,7 @@ local function station_watch(K, now)
   local ok, k = K.call('military', 'kpi')
   if not (ok and type(k) == 'table') then return end
   local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
+  sol = math.max(0, sol - (int(k.sd) or 0))         -- BUG-510: the squads that stand down on purpose (unequipped) are no station miss
   if (ep.sol0 or 0) == 0 and sol > 0 then ep.sol0, dirty = sol, true end
   if on > (ep.onmax or 0) then ep.onmax, dirty = on, true end
   if sol > 0 and on * 2 >= sol and (ep.ont or -1) < 0 then ep.ont, dirty = now - ep.start, true end

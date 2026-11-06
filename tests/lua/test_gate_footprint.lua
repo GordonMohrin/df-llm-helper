@@ -262,13 +262,16 @@ T.test('BUG-027: a merchant (and his pack animal) on B1 hold the SIEGE raise (ce
                                 {id = 902, pos = {52, 41, Z}, animal = true}})}
   W.event('INVASION', {id = 11})
   run(W, 200)
-  T.eq(#S.pulls(W, 'B1'), 0, 'held for the merchant')
+  -- BUG-510: the tame animal beside the footprint no longer holds a SIEGE raise: the first pull is queued before sense has listed the
+  -- merchant (his scan comes with the watch box) and is cancelled by the merchant at once; B1 never moves under him
+  T.eq(#S.flips(W, 'B1'), 0, 'held for the merchant: B1 never moved')
+  T.ok(S.bstate(W, 'B1') ~= 'up', 'held for the merchant')
   local f = {}
   for _, e in ipairs(W.K.census.h.friends or {}) do f[e.id] = e.k end
   T.eq(f, {[900] = 'merchant', [901] = 'animal'}, 'sense lists the friends near the watched footprint, no wild animal')
-  local said                                   -- the first GATE line named the animal (census.a); the merchant came
-  for _, l in ipairs(W.logs) do                -- with sense's next scan of the watch box: the kern.log line
-    if tostring(l.msg):find('B1 up still waits for merchant 900 on the footprint, animal 901 next to it', 1, true) then
+  local said                                   -- the merchant came with sense's scan of the watch box: the kern.log line
+  for _, l in ipairs(W.logs) do
+    if tostring(l.msg):find('B1 up waits for merchant 900 on the footprint', 1, true) then
       said = true
     end
   end
