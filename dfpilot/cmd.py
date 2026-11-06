@@ -634,6 +634,7 @@ def occupancy(save_dir: Path, skip=()) -> Occupancy:
     occ = Occupancy()
     skip = set(skip) | stale_bps(save_dir)
     bottoms: dict[str, int] | None = None
+    done: dict[str, int] | None = None
     for p in bp_files(save_dir):
         if p.stem in skip:
             continue
@@ -645,8 +646,30 @@ def occupancy(save_dir: Path, skip=()) -> Occupancy:
                 if bot is not None:
                     occ.add(doc, {c for c in footprint(doc) if c[2] >= bot})
                     continue
+            if doc.get("tpl") in SHAFT_PROBES:         # BUG-549: a finished ore probe holds its shaft, not its side tunnels
+                done = done_ticks(save_dir) if done is None else done
+                if p.stem in done:
+                    occ.add(doc, shaft_column(bp_cells(doc)))
+                    continue
             occ.add(doc)
     return occ
+
+
+SHAFT_PROBES = ("explore",)       # BUG-549: templates that are a stair shaft with side tunnels (bp/mine.py)
+
+
+def shaft_column(cells: set) -> set:
+    """BUG-549 (Run 16b i2 Brotherarrow: 25 finished explore probes of 85 tiles each held every room site of the fort for years, and
+    `bp.cancel` answers 'no project' for a finished one): the stair column of an explore document, the (x, y) that most of its levels
+    share (the side tunnels lie at a few levels only). The tunnels are dug open floor the next snapshot shows (the ranking meets them
+    as open tiles); only the shaft is a corridor other projects must keep a rock tile from. No column of at least 2 levels: all cells."""
+    count: dict[tuple[int, int], int] = {}
+    for x, y, _ in cells:
+        count[(x, y)] = count.get((x, y), 0) + 1
+    top = max(count.values(), default=0)
+    if top < 2:
+        return set(cells)
+    return {c for c in cells if count[(c[0], c[1])] == top}
 
 
 def aq_bottoms(save_dir: Path) -> dict[str, int]:
@@ -657,6 +680,10 @@ def aq_bottoms(save_dir: Path) -> dict[str, int]:
         d = e.get("d") if isinstance(e.get("d"), dict) else {}
         if e.get("type") == "AQ_PASS_DONE" and isinstance(d.get("proj"), str) and isinstance(d.get("bot"), int)                 and not isinstance(d.get("bot"), bool):
             out.setdefault(d["proj"], d["bot"])
+        # BUG-549: a shaft stopped for good on a heavy aquifer (AQ_HEAVY z, project parked breach:heavy_aquifer, then cancelled or
+        # forgotten) never dug below z: it holds the levels down to z, not its whole plan
+        if e.get("type") == "AQ_HEAVY" and isinstance(d.get("proj"), str) and isinstance(d.get("z"), int)                 and not isinstance(d.get("z"), bool):
+            out.setdefault(d["proj"], d["z"])
     return out
 
 
@@ -1573,7 +1600,14 @@ def _proj_status(save_dir: Path, pid: str) -> str:
     what = str(tpl or "?")
     if row:
         what += f" {row[1]} {row[2]}%" + (f", blocked {row[3]}" if len(row) > 3 and row[3] else "")
+    elif _finished_event(save_dir, pid):
+        what += " finished"                              # BUG-549: dug space, the kernel has no project left to cancel
     return f"{pid} ({what})"
+
+
+def _on_state(save_dir: Path, pid: str) -> bool:
+    """BUG-549: the kernel's state lists project `pid` (one of its first 8 rows)."""
+    return any(isinstance(r, list) and r and r[0] == pid for r in (files.read_state(save_dir) or {}).get("proj") or [])
 
 
 def _planned_only(save_dir: Path, pid: str, tpl: str) -> bool:
@@ -1596,9 +1630,15 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
     none; the order is bp.place fortcore -> wait for s1.dig -> `bp sites <tpl> --fresh` -> plan propose / check."""
     out = []
     if holders:
+        # BUG-549 (Run 16b i2: 'bp.cancel frees them' for finished explore probes, which answered 'no project'): a finished holder is
+        # dug space, no bp.cancel frees it (an explore probe holds only its shaft column); the advice names the others
+        fin = [h for h in holders if _finished_event(save_dir, h) and not _on_state(save_dir, h)]
+        live = [h for h in holders if h not in fin]
         out.append("taken by " + ", ".join(_proj_status(save_dir, h) for h in holders[:4])
                    + (f" +{len(holders) - 4}" if len(holders) > 4 else "")
-                   + "; a parked or blocked project keeps its tiles: `dfllm cmd bp.cancel proj=<id>` frees them")
+                   + ("; a parked or blocked project keeps its tiles: `dfllm cmd bp.cancel proj=<id>` frees them" if live or not fin else "")
+                   + ("; a finished project is dug space the kernel no longer has (bp.cancel answers 'no project'; a finished "
+                      "explore holds only its shaft column, an aqshaft only the levels it dug)" if fin else ""))
         # BUG-456 (Run 16b i2 y372: an emergency `bp.place workshops only=Kitchen` said '0 free sites ... taken by y372s3b2', a project of the
         # plan that had not begun): a holder of the same template with no kernel row yet is a planned slot, not a working project
         planned = [h for h in holders if _planned_only(save_dir, h, tpl)]
@@ -2155,9 +2195,12 @@ def site_params(tpl: str, params: dict | None, site: dict) -> dict | None:
     pass_core = tpl == "fortcore" and (params or {}).get("aquifer") == "pass"        # BUG-484: a pass core names its depth too
     if (tpl == "aqshaft" or pass_core) and site.get("depth") and "depth" not in (params or {}):
         return {**(params or {}), "depth": site["depth"]}
+    out = params
+    if tpl == "explore" and isinstance(site.get("depth"), int) and "depth" not in (params or {}):      # BUG-553: the depth the site was ranked at
+        out = {**(out or {}), "depth": site["depth"]}
     if tpl == "explore" and isinstance(site.get("arm"), int) and "arm" not in (params or {}):      # BUG-528: the arm the site was ranked at
-        return {**(params or {}), "arm": site["arm"]}
-    return params
+        out = {**(out or {}), "arm": site["arm"]}
+    return out
 
 
 def own_anchor(tpl: str, params: dict | None) -> list[int] | None:
@@ -2646,6 +2689,9 @@ def run(args, save_dir: Path) -> int:
         return EXIT_BAD
     print(fmt_reply(cmd_id, args.verb, reply, save_dir)
           + (" (blueprint removed)" if args.verb == "bp.place" and reply is not None and not reply.get("ok") else ""))
+    if args.verb == "bp.cancel" and isinstance(a.get("proj"), str) and no_such_project(reply) and _finished_event(save_dir, a["proj"]):
+        print(f"  note (BUG-549): {a['proj']} is finished (PROJECT_DONE): its rooms are dug, there is nothing to cancel; it holds only what "
+              "it dug (an explore probe its shaft column) and `bp sites` ranks beside it")
     if args.verb == "bp.place" and a.get("tpl") == "seal" and (reply is None or reply.get("ok")):
         for ln in seal_lines(files.read_json(Path(save_dir) / "bp" / f"{cmd_id}.json") or {}):
             print(f"  seal {ln}")

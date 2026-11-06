@@ -77,11 +77,11 @@ def test_explore_sites_below_the_core_never_from_the_refuge(deep):
 def test_explore_sites_keep_off_avoided_and_cavern_levels(deep):
     snap, man = deep
     with pytest.raises(ValueError, match=r"avoided level \(z20"):
-        bp.rank(snap, "explore", {"avoid": "20"}, manifest=man)
+        bp.rank(snap, "explore", {"avoid": "20", "depth": 12}, manifest=man)       # BUG-553: without p.depth a smaller one is ranked
     assert bp.rank(snap, "explore", {"avoid": "20", "depth": 2}, manifest=man)       # z25 -> z23: clear of z20
     cave = {**snap, "marks": {**snap.get("marks", {}), "cavern": [[10, 90, 16]]}}    # a revealed cavern tile at z16
     with pytest.raises(ValueError, match=r"avoided level \(z16"):
-        bp.rank(cave, "explore", {}, manifest=man)
+        bp.rank(cave, "explore", {"depth": 12}, manifest=man)
     assert [s["why"].split(", ")[2] for s in bp.rank(cave, "explore", {"depth": 6}, manifest=man)][0] == "shaft to z19"
 
 
@@ -94,7 +94,7 @@ def test_explore_sites_stop_above_a_recorded_cavern_breach(deep):
     assert schema.validate("manifest", cav) == []
     assert sites.avoid_levels(snap, {}, cav) == {16} and sites.avoid_levels(snap, {}) == set()
     with pytest.raises(ValueError, match=r"avoided level \(z16.*cavern breach"):
-        bp.rank(snap, "explore", {}, manifest=cav)
+        bp.rank(snap, "explore", {"depth": 12}, manifest=cav)
     best = bp.rank(snap, "explore", {"depth": 6}, manifest=cav)
     assert best and all(int(s["why"].split("shaft to z")[1].split(",")[0]) > 16 for s in best)
     assert bp.rank(snap, "explore", {}, manifest=man)             # without the record depth 12 still fits
@@ -131,3 +131,23 @@ def test_explore_stops_above_a_heavy_aquifer_breach_level(deep):
     assert best and all(int(s["why"].split("shaft to z")[1].split(",")[0]) > z_top - 4 for s in best)
     assert bp.rank(snap, "explore", {"depth": 12}, manifest=man)             # without the record the long shaft fits
     assert sites.heavy_breach_levels({"breaches": [{"why": "heavy_aquifer", "pos": [1, 2]}, {"why": "heavy_aquifer", "pos": [1, 2, True]}]}) == set()
+
+
+def test_bug553_explore_without_depth_falls_back_to_a_smaller_depth(deep):
+    """BUG-553 (Run 16d i4 Trumpetrealms: `bp sites explore` without p.depth said 'depth 12 reaches avoided level' for years while depth=6 had
+    3 sites): no p.depth and the template's 12 has no site -> the deepest smaller depth that has one is ranked, the site carries it."""
+    snap, man = deep
+    got = bp.rank(snap, "explore", {"avoid": "20"}, manifest=man)             # z20 is reached by every shaft of depth 12 down to 6
+    assert got and all(s["depth"] == 4 and "BUG-553" in s["why"] and "shaft to z21" in s["why"] for s in got), [s["why"] for s in got]
+    # a site at the template's depth stays as it was: no depth key, no note
+    plain = bp.rank(snap, "explore", {}, manifest=man)
+    assert plain and all("depth" not in s and "BUG-553" not in s["why"] for s in plain)
+    # p.depth given is never changed: the error stays
+    with pytest.raises(ValueError, match=r"avoided level \(z20"):
+        bp.rank(snap, "explore", {"avoid": "20", "depth": 12}, manifest=man)
+    # nothing at any depth: the template's reason with the depths tried
+    with pytest.raises(ValueError, match=r"avoided level \(z2[0-9].*depth 12, 9, 6, 4, 2 tried"):
+        bp.rank(snap, "explore", {"avoid": "20-28"}, manifest=man)
+    # a given arm is the player's: kept at every depth
+    arm0 = bp.rank(snap, "explore", {"avoid": "20", "arm": 2}, manifest=man)
+    assert arm0 and all(s["depth"] == 4 and "arm" not in s for s in arm0)
