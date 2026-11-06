@@ -38,4 +38,4 @@ def test_hospital_sites_name_the_restore_verb_while_a_removed_zone_waits():
     with pytest.raises(ValueError) as e:
         sites.rank(snap, "hospital", None, {"zones": {"Z4": [[0, 0, 0, 1, 1, 1]]}}, water={"src": [[1, 2, 3]], "near": 30, "hrm": 1})
     msg = str(e.value)
-    assert "hospital.restore" in msg and "no second hospital" in msg and "1 zone remembered" in msg, msg
+    assert "hospital.restore" in msg and "no second hospital" in msg and "1 zone" in msg, msg

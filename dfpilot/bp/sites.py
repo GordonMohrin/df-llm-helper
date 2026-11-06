@@ -239,10 +239,13 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         # BUG-539 (Run 16b i2 Brotherarrow: water.unstick removed the hospital zone, the room with its beds stood on, the site search
         # then found 'no valid site' and a second hospital would have been built beside the first): the kernel remembers
         # removed hospital zones; the room is the hospital, its zone comes back with the verb
+        # BUG-540: water.hrm counts only what can come back (not expired; a dry memory only with accepted water near the old room;
+        # a zoneless hospital room of the manifest too): a dry memory does not block a site that has water
         n = int(water["hrm"])
-        raise ValueError(f"{tpl}: the fort's hospital room still stands, only its zone was removed by the kernel ({n} zone"
-                         f"{'' if n == 1 else 's'} remembered: water.unstick, a dry hospital): `dfllm cmd hospital.restore` draws "
-                         "it again at its old location (beds and tables keep their place); no second hospital until then")
+        raise ValueError(f"{tpl}: the fort's hospital room still stands, only its zone is missing ({n} zone"
+                         f"{'' if n == 1 else 's'} to draw again: a removed or lost zone, accepted water near): "
+                         "`dfllm cmd hospital.restore` draws it again at its old location (beds and tables keep their place); "
+                         "no second hospital until then")
     if tpl == "fortcore" and p.get("aquifer") == "pass" and "depth" not in (params or {}):
         return _rank_pass(snap, params, manifest, n, water, near, within, at, free)       # BUG-484: the depth that clears the aquifer
     if tpl in aquifer.BUILD:

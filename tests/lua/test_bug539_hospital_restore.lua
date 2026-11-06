@@ -116,6 +116,15 @@ local function restores(W)
   return r
 end
 
+-- BUG-542: water.unstick no longer removes the zone; the kernel's own third stall round does (stall_dying 45,000), as it always could
+local function auto_remove(W)
+  for _ = 1, 10 do
+    for _, x in ipairs(W.removed) do if tostring(x):sub(1, 1) == 'h' then return end end
+    day(W, 1)
+  end
+  error('the stalled GiveWater job never reached the hospital rung')
+end
+
 -- a patient (5) at thirst 50,000 in the hospital, a stalled GiveWater job on carrier 1: water.unstick unit=1 removes the zone
 local function stalled(extra)
   extra = extra or {}
@@ -134,13 +143,11 @@ local function stalled(extra)
   return W
 end
 
-T.test('BUG-539: water.unstick removes the stalled patient\'s hospital zone and the kernel draws it again at the SAME location ' ..
+T.test('BUG-539: the stall ladder (third round) removes the stalled patient\'s hospital zone and the kernel draws it again at the SAME location ' ..
        'and rectangle once the patient drinks (thirst under patient_thirst) and restore_wait has passed', function()
   local W = stalled()
   local loc = W.hosp.location_id
-  local r = W.inbox('water.unstick', {unit = 1})
-  T.ok(r.ok, r.msg)
-  T.ok(r.msg:find('hospital zone(s) ' .. W.hosp.id, 1, true) and r.msg:find('hospital.restore', 1, true), r.msg)
+  auto_remove(W)
   T.eq(W.restored, {}, 'not in the same pass: the patient must drink first')
   T.eq(W.state().water.hrm, 1, 'the state names the remembered zone')
   -- the patient drinks (no zone: GiveWater or his own drink)
@@ -156,7 +163,7 @@ end)
 
 T.test('BUG-539: while the patient is still over patient_thirst the zone waits, at the latest restore_max (5 days) it comes back', function()
   local W = stalled()
-  W.inbox('water.unstick', {unit = 1})
+  auto_remove(W)
   day(W, 3)
   T.eq(#W.restored, 0, 'patient still at 50,000 after 3 days: wait')
   day(W, 3)
@@ -169,7 +176,7 @@ T.test('BUG-539: verb hospital.restore draws the remembered zone at once (any mo
   local r = W.inbox('hospital.restore', {})
   T.eq(r.ok, false)
   T.ok(r.msg:find('no removed hospital zone is remembered', 1, true), r.msg)
-  W.inbox('water.unstick', {unit = 1})
+  auto_remove(W)
   W.set_mode('ALERT')
   r = W.inbox('hospital.restore', {loc = 12345})
   T.eq(r.ok, false)
@@ -181,7 +188,7 @@ T.test('BUG-539: verb hospital.restore draws the remembered zone at once (any mo
   r = W.inbox('hospital.restore', {})
   T.eq(r.ok, false, 'drawn: nothing left')
   local W2 = stalled{fail = 'quickfort designated no zone there'}
-  W2.inbox('water.unstick', {unit = 1})
+  auto_remove(W2)
   r = W2.inbox('hospital.restore', {})
   T.eq(r.ok, false)
   T.ok(r.msg:find('quickfort designated no zone there', 1, true), r.msg)
@@ -190,7 +197,7 @@ end)
 
 T.test('BUG-539: a hospital location that is gone drops the memory (nothing to come back to)', function()
   local W = stalled{fail = 'no hospital location 600'}
-  W.inbox('water.unstick', {unit = 1})
+  auto_remove(W)
   local r = W.inbox('hospital.restore', {})
   T.eq(r.ok, false)
   T.eq(W.state().water.hrm, nil)

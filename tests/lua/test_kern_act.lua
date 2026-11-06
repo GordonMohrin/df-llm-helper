@@ -765,6 +765,25 @@ T.test('zone_remove (live L6): only the zones of that dfllm-* name are deconstru
   T.eq({env.api.zone_remove('dfllm-none')}, {true, 0})
 end)
 
+T.test('well_remove (BUG-541): one well by id (the water module only), a refused deconstruct is told, an unknown id too', function()
+  H.world{tag = 'wrm'}
+  local gone = {}
+  local other = df.global.world.buildings.other
+  other.WELL = kmock.vec{{id = 970}, {id = 971}}
+  dfhack.buildings = dfhack.buildings or {}
+  dfhack.buildings.deconstruct = function(w) gone[#gone + 1] = w.id; return w.id ~= 971 end
+  local env = mk()
+  env.who_v = 'care'
+  T.eq({env.api.well_remove(970)}, {false, 'not owner'})
+  env.who_v = 'water'
+  T.eq({env.api.well_remove('x')}, {false, 'bad well id'})
+  T.eq({env.api.well_remove(999)}, {false, 'no such well'})
+  T.eq({env.api.well_remove(970)}, {true, 1})
+  T.eq({env.api.well_remove(971)}, {false, 'deconstruct refused'})
+  T.eq(gone, {970, 971})
+  T.eq(env.lines[#env.lines][2], 'act.well_remove')
+end)
+
 T.test('hospital_remove (BUG-034): one zone of a hospital location, never another zone or the one on the zone sheet', function()
   H.world{tag = 'hrm'}
   local gone, sel = {}, nil

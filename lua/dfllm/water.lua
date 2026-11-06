@@ -158,6 +158,16 @@ M.DEFAULTS = {
   -- once restore_wait passed and no patient is over patient_thirst (at the latest after restore_max), a dry zone as soon as an
   -- accepted source is within near of it. hosp_restore false: only the verb hospital.restore
   hosp_restore = true, restore_wait = DAY // 2, restore_max = 5 * DAY,
+  -- BUG-540 (the verifier of BUG-539: a 'dry' entry had no timeout, blocked bp sites hospital for good and hospital.restore on it
+  -- flapped with remove_dry): an entry older than hrm_expire is forgotten; a dry one is neither drawn again (the verb refuses)
+  -- nor counted as a block for a new site while no accepted water stands within near of the old room
+  hrm_expire = 20 * DAY,
+  -- BUG-541 (Run 16b i2 y386/y390, Run 16d i4 y404: 3 patients dead, the GiveWater carriers stood 26-28 days at a DRY well beside
+  -- the hospital instead of filling at the pond zone): a GiveWater worker who has stood trap_days within trap_near tiles of a
+  -- built well with no water below it while a patient is over thirst_watch is a case at once (no stall_need, no stall_days); the
+  -- DECISION dry_well names the well and `well.retire`; from the second round the zone of a patient over trap_dying goes (the
+  -- game's own recipe: he then fetches his own drink). trap false: off
+  trap = true, trap_days = 1, trap_near = 2, trap_dying = 35000,
   -- BUG-325: the scan asks the walk from up to ws_from citizens (the nearest the reference); a tile is reachable from any
   ws_from = 3,
   -- BUG-324: while no water is accepted, the kernel zones the scan's best reachable, safe water as a Water Source (wz false:
@@ -496,6 +506,11 @@ local function phase_sites(K, c, r)
     end
     if wsrc and zn.type == wsrc and not seen[zn.id] then zones[#zones + 1] = zn; seen[zn.id] = true end
   end
+  local has_zone = {}
+  for _, h in ipairs(r.hosp) do has_zone[h.loc] = true end
+  r.orph = {}                                                -- BUG-540: hospital locations without a zone (ids, ascending)
+  for id in pairs(locs) do if not has_zone[id] then r.orph[#r.orph + 1] = id end end
+  table.sort(r.orph)
   for _, zn in ipairs(zones) do
     local active = true
     pcall(function() active = zn.spec_sub_flag.active end)
@@ -1528,31 +1543,106 @@ function M.remember(p, h, now, why)
   p.hrm = list
 end
 
+-- BUG-540 (Run 16b i2 Brotherarrow: the zone 18030 was removed before BUG-539 remembered anything; the hospital LOCATION and the
+-- room with its beds stood on, `bp sites hospital` found no site): the manifest's hospital rooms that no live hospital zone covers
+-- are paired with the zoneless hospital locations of the last run (r.orph) -- entries like p.hrm's, why 'room', never stored.
+function M.orphan_rooms(K, r)
+  local out = {}
+  if not r or type(r.orph) ~= 'table' or #r.orph == 0 then return out end
+  local used = {}
+  local ok, man = pcall(K.manifest)
+  for _, rm in ipairs(ok and man and man.rooms or {}) do
+    local b = rm.bbox
+    if rm.tpl == 'hospital' and type(b) == 'table' and #b >= 6 then
+      local covered = false
+      for _, h in ipairs(r.hosp) do
+        if h.z == b[3] and h.x1 <= b[4] and h.x2 >= b[1] and h.y1 <= b[5] and h.y2 >= b[2] then covered = true end
+      end
+      if not covered then
+        for _, loc in ipairs(r.orph) do
+          if not used[loc] then
+            used[loc] = true
+            out[#out + 1] = {id = 0, loc = loc, x1 = b[1], y1 = b[2], x2 = b[4], y2 = b[5], z = b[3], why = 'room', orph = true}
+            break
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- the remembered zones that still count (BUG-540): not expired, and a dry one only while accepted water stands within near of the
+-- old room; the zoneless hospital rooms (M.orphan_rooms) while no hospital zone stands, served likewise. This is what bp sites
+-- reads (state water.hrm): a dry memory must not block a site that has water
+function M.hrm_count(K, c, r, p, now)
+  local n = 0
+  for _, e in ipairs(type(p.hrm) == 'table' and p.hrm or {}) do
+    if now - (math.tointeger(e.t) or now) < c.hrm_expire and (e.why ~= 'dry' or (r ~= nil and (served(K, c, r, e)) == true)) then
+      n = n + 1
+    end
+  end
+  if r and #r.hosp == 0 then
+    for _, e in ipairs(M.orphan_rooms(K, r)) do if (served(K, c, r, e)) == true then n = n + 1 end end
+  end
+  return n
+end
+
 -- Draws the remembered zones again (act.hospital_restore: the same location, the same rectangle). opt.force: all of them (or
 -- those of opt.loc) now, whatever the rules; else the rules of conf (hosp_restore, restore_wait, restore_max). r = the last
--- water run (its patients and sources). Returns {done = {zone ids drawn}, left = n, fail = {text}}.
+-- water run (its patients and sources). BUG-540: entries older than hrm_expire are forgotten; a 'dry' entry and a zoneless
+-- hospital room ('room') come back only with accepted water within near of the old room, force or not (without it
+-- remove_dry would take the zone away again under a new id). Returns {done = {zone ids drawn}, left = n, fail = {text}}.
 function M.restore(K, c, r, p, now, opt)
   opt = opt or {}
   local res = {done = {}, left = 0, fail = {}}
-  local list = type(p.hrm) == 'table' and p.hrm or {}
-  if #list == 0 or not M.can('hospital_restore') then res.left = #list; return res end
+  local list = json.array({})
+  for _, e in ipairs(type(p.hrm) == 'table' and p.hrm or {}) do
+    if now - (math.tointeger(e.t) or now) < c.hrm_expire then
+      list[#list + 1] = e
+    else
+      K.log('info', 'water: remembered hospital zone %s (location %s, %s) forgotten after %d days (BUG-540)', tostring(e.id),
+            tostring(e.loc), tostring(e.why), c.hrm_expire // DAY)
+    end
+  end
+  if type(p.hrm) == 'table' and #list ~= #p.hrm then p.hrm = list end
+  local rooms = {}
+  if r and (opt.force or #r.hosp == 0) and (opt.force or c.hosp_restore ~= false) then rooms = M.orphan_rooms(K, r) end
+  if #rooms == 0 then p.ot = nil elseif not opt.force then p.ot = p.ot or now end
+  if (#list == 0 and #rooms == 0) or not M.can('hospital_restore') then res.left = #list; return res end
   if not opt.force and c.hosp_restore == false then res.left = #list; return res end
   local worst = 0
   for _, pt in ipairs(r and r.patients or {}) do if pt.thirst > worst then worst = pt.thirst end end
+  local all = {}
+  for _, e in ipairs(list) do all[#all + 1] = e end
+  for _, e in ipairs(rooms) do all[#all + 1] = e end
   local keep = json.array({})
-  for _, e in ipairs(list) do
+  for _, e in ipairs(all) do
     local take = opt.loc == nil or e.loc == opt.loc
-    local age = now - (math.tointeger(e.t) or now)
+    local age = now - (math.tointeger(e.t) or (e.orph and p.ot) or now)
+    local dry = e.why == 'dry' or e.why == 'room'
+    local wet_ok, nearest = true, nil
+    if dry then
+      if r ~= nil then wet_ok, nearest = served(K, c, r, e) else wet_ok = false end
+      wet_ok = wet_ok == true
+    end
     local ready = opt.force == true
     if not ready and age >= c.restore_wait then
-      if e.why == 'dry' then
-        ready = r ~= nil and (served(K, c, r, e)) == true
+      if dry then
+        ready = wet_ok
       else
         ready = worst <= c.patient_thirst or age >= c.restore_max
       end
     end
     local drawn = false
-    if take and ready then
+    local label = e.orph and 'of the hospital room' or tostring(e.id)
+    if take and ready and dry and not wet_ok then
+      res.fail[#res.fail + 1] = string.format('zone %s (location %d): dry: no accepted water within %d tiles of the old room (nearest: %s); '
+                                              .. 'it comes back once water stands near%s', label, e.loc, c.near,
+                                              nearest and string.format('%s %d at %d,%d,%d, %d tiles', nearest.s.kind, nearest.s.id,
+                                                                        nearest.s.x, nearest.s.y, nearest.s.z, nearest.d) or 'none accepted',
+                                              e.orph and '' or string.format(', the memory is forgotten after %d d', c.hrm_expire // DAY))
+    elseif take and ready then
       local ok, got = K.act.hospital_restore(e)
       if ok then
         drawn = true
@@ -1562,11 +1652,11 @@ function M.restore(K, c, r, p, now, opt)
           for _, id in ipairs(type(got) == 'table' and got.ids or {}) do res.done[#res.done + 1] = id end
         end
       else
-        res.fail[#res.fail + 1] = string.format('zone %d (location %d): %s', e.id, e.loc, tostring(got))
+        res.fail[#res.fail + 1] = string.format('zone %s (location %d): %s', label, e.loc, tostring(got))
         if tostring(got):find('^no hospital location') then drawn = true end   -- the location is gone: nothing to come back to
       end
     end
-    if not drawn then keep[#keep + 1] = e end
+    if not drawn and not e.orph then keep[#keep + 1] = e end
   end
   p.hrm = keep
   res.left = #keep
@@ -2239,10 +2329,11 @@ function M.stall_scan(p, now)
 end
 
 -- step 3: the hospital zones the patients over stall_dying lie in (at most remove_per_run); returns the zone ids
-local function stall_hospital(K, c, r, p, now)
+local function stall_hospital(K, c, r, p, now, need)
   if not c.stall_hosp or not removes(c) then return nil end
   local over, zones, locs, seen, failed = {}, {}, {}, {}, 0
-  for _, pt in ipairs(r.patients) do if pt.thirst >= c.stall_dying then over[#over + 1] = pt end end
+  need = need or c.stall_dying                                -- BUG-541: trap_dying while the carriers stand at a dry well
+  for _, pt in ipairs(r.patients) do if pt.thirst >= need then over[#over + 1] = pt end end
   if #over == 0 then return nil end
   table.sort(over, function(a, b) return a.thirst > b.thirst end)
   for _, pt in ipairs(over) do
@@ -2272,6 +2363,20 @@ local function stall_hospital(K, c, r, p, now)
         over[1].id, over[1].thirst)
   p.rm = {t = now, zones = zones, locs = locs, n = #over, tmax = over[1].thirst, give = r.give}
   return zones
+end
+
+-- BUG-541: the built well with no water below it that a GiveWater worker stands at (within trap_near tiles); nil when none. Only
+-- a source that is not wet (an emergency well counts wet): the carriers' bucket cannot fill there
+function M.trap_well(c, r, e)
+  if c.trap == false or not e.x then return nil end
+  local near, best = c.trap_near or 2, nil
+  for _, s in ipairs(r.sources) do
+    if s.kind == 'well' and s.built ~= false and not s.wet and s.x then
+      local d = math.max(math.abs(s.x - e.x), math.abs(s.y - e.y), math.abs(s.z - e.z))
+      if d <= near and (not best or d < best.d) then best = {s = s, d = d} end
+    end
+  end
+  return best and best.s
 end
 
 -- the ladder for one stalled worker; returns the list of what was done
@@ -2311,7 +2416,7 @@ function M.stalls(K, c, r, p, now, opt)
   if not list then p.sa = json.object(); return nil end
   local ptop = 0
   for _, pt in ipairs(r.patients) do if pt.thirst > ptop then ptop = pt.thirst end end
-  local res, live, acted, deep = {rows = {}, acted = 0}, {}, 0, false
+  local res, live, acted, deep, trapdeep = {rows = {}, acted = 0}, {}, 0, false, false
   local min_age = c.stall_days * DAY
   for _, e in ipairs(list) do
     live[fmt(e.uid)] = true
@@ -2324,11 +2429,16 @@ function M.stalls(K, c, r, p, now, opt)
     local give = e.jt ~= 'FillPond'
     local case = age >= min_age and (th >= c.stall_need or hu >= M.STARVE_HUNGER or (give and ptop >= c.thirst_alarm))
     if opt.unit ~= nil then case = (opt.unit == e.uid) elseif opt.force then case = age >= min_age end
+    -- BUG-541: a GiveWater worker at a dry well is a case after trap_days, whatever his own thirst, once a patient is thirsty
+    local well = give and e.jt == 'GiveWater' and M.trap_well(c, r, e) or nil
+    if well and age >= (c.trap_days or 1) * DAY and ptop >= c.thirst_watch and (opt.unit == nil or opt.unit == e.uid) then
+      case = true
+    end
     if case then
       local key = fmt(e.uid)
       local rec = type(p.sa[key]) == 'table' and p.sa[key] or nil
       local row = {uid = e.uid, jt = e.jt, days = age // DAY, th = th, hu = hu, child = child, x = e.x, y = e.y, z = e.z,
-                   job = e.job, did = {}, give = give}
+                   job = e.job, did = {}, give = give, well = well}
       local due = opt.force or not rec or now - (math.tointeger(rec.t) or -c.stall_every) >= c.stall_every
       if due and (opt.force or acted < c.stall_max) then
         acted = acted + 1
@@ -2336,7 +2446,11 @@ function M.stalls(K, c, r, p, now, opt)
         local n = (rec and math.tointeger(rec.n) or 0) + 1
         p.sa[key] = {t = now, n = n}
         row.round = n
-        if give and n >= 3 then deep = true end
+        -- BUG-542: the verb (opt.force) never reaches the hospital zone: it cancels the stuck job (off Orderlies) and keeps the zone
+        if give and not opt.force then
+          if n >= 3 then deep = true end
+          if well and n >= 2 then deep, trapdeep = true, true end                  -- BUG-541: the second round is enough at a dry well
+        end
       end
       res.rows[#res.rows + 1] = row
     end
@@ -2344,7 +2458,9 @@ function M.stalls(K, c, r, p, now, opt)
   for key in pairs(p.sa) do if not live[key] then p.sa[key] = nil end end       -- his job ended
   res.acted = acted
   if #res.rows == 0 then return res end
-  if deep or opt.force then res.hosp = stall_hospital(K, c, r, p, now) end
+  if deep and not opt.force then
+    res.hosp = stall_hospital(K, c, r, p, now, trapdeep and math.min(c.stall_dying, c.trap_dying) or nil)
+  end
   local parts, ids, cmds = {}, {}, {}
   for _, row in ipairs(res.rows) do
     ids[#ids + 1] = row.uid
@@ -2358,7 +2474,45 @@ function M.stalls(K, c, r, p, now, opt)
   K.log('warn', 'water: %s%s', q, res.hosp and ('; hospital zone(s) ' .. table.concat(res.hosp, ',') .. ' removed') or '')
   local sv = type(p.sv) == 'table' and p.sv or {}
   local key = table.concat(ids, ',')
-  if not opt.force and (sv.key ~= key or now - (math.tointeger(sv.t) or -1e12) >= 3 * DAY) then
+  -- BUG-541: the carriers that stand at a DRY well get their own decision, early (a patient over thirst_watch, trap_days), with the
+  -- command that takes the well away and the nearest accepted water they should fill at
+  local tw, twu, twids, seenw = {}, {}, {}, {}
+  for _, row in ipairs(res.rows) do
+    if row.well then
+      twu[#twu + 1] = row.uid
+      if not seenw[row.well.id] then seenw[row.well.id] = true; tw[#tw + 1] = row.well; twids[#twids + 1] = row.well.id end
+    end
+  end
+  if #tw > 0 and not opt.force then
+    local w1 = tw[1]
+    local best
+    for _, s in ipairs(r.sources) do
+      if s.wet and not s.emerg and s.x then
+        local d = dist_box(s.x, s.y, s.z, {x1 = w1.x, y1 = w1.y, x2 = w1.x, y2 = w1.y, z = w1.z})
+        if not best or d < best.d then best = {d = d, s = s} end
+      end
+    end
+    local wkey = table.concat(twids, ',')
+    local sw = type(p.sw) == 'table' and p.sw or {}
+    if sw.key ~= wkey or now - (math.tointeger(sw.t) or -1e12) >= 3 * DAY then
+      p.sw = {key = wkey, t = now}
+      local wq = string.format('%d GiveWater carrier(s) stand at the DRY well %d (%d,%d,%d, no water below) while a patient is at thirst %d: '
+                               .. 'a bucket cannot fill there; nearest accepted water: %s',
+                               #twu, w1.id, w1.x, w1.y, w1.z, ptop,
+                               best and string.format('%s %d at %d,%d,%d, %d tiles', best.s.kind, best.s.id, best.s.x, best.s.y, best.s.z, best.d)
+                               or 'none accepted')
+      local wcmds = {}
+      for i = 1, math.min(2, #tw) do wcmds[#wcmds + 1] = string.format('dfllm cmd well.retire id=%d', tw[i].id) end
+      wcmds[#wcmds + 1] = string.format('dfllm cmd water.unstick unit=%d', twu[1])
+      K.emit('DECISION_NEEDED', 'A', trunc('dry_well: ' .. wq, 200),
+             {id = 'dry_well', q = trunc(wq, 200), units = twu, cmds = wcmds,
+              did = res.rows[1] and #res.rows[1].did > 0 and trunc(table.concat(res.rows[1].did, ', '), 120) or nil})
+      K.log('warn', 'water: %s', wq)
+    end
+  end
+  local plain = false
+  for _, row in ipairs(res.rows) do if not row.well then plain = true end end
+  if plain and not opt.force and (sv.key ~= key or now - (math.tointeger(sv.t) or -1e12) >= 3 * DAY) then
     p.sv = {key = key, t = now}
     K.emit('DECISION_NEEDED', 'A', trunc('job_stalled: ' .. q, 200),
            {id = 'job_stalled', q = trunc(q, 200), units = ids, cmds = cmds, did = res.rows[1] and #res.rows[1].did > 0 and trunc(table.concat(res.rows[1].did, ', '), 120) or nil})
@@ -2387,10 +2541,8 @@ M.verbs['water.unstick'] = function(K, args, cmd)
     out[#out + 1] = string.format('%d %s %dd%s', row.uid, row.jt, row.days,
                                   #row.did > 0 and (': ' .. table.concat(row.did, ', ')) or ': nothing to take away')
   end
-  local msg = 'unstick: ' .. table.concat(out, '; ') .. (res.hosp and ('; hospital zone(s) ' .. table.concat(res.hosp, ',')
-                                                         .. ' removed, drawn again when no patient is over ' .. c.patient_thirst
-                                                         .. ' thirst (at the latest ' .. (c.restore_max // DAY) .. ' d) or by '
-                                                         .. '`hospital.restore`') or '')
+  -- BUG-542: the verb never removes a hospital zone (Brotherarrow y395: it did, and 'hospital none' followed for 15+ days)
+  local msg = 'unstick: ' .. table.concat(out, '; ') .. '; the hospital zone stays'
   K.log('warn', 'water: %s', msg)
   return true, trunc(msg, 400), {n = #res.rows, units = ids}
 end
@@ -2401,9 +2553,9 @@ M.verbs['hospital.restore'] = function(K, args, cmd)
   local loc = args.loc ~= nil and math.tointeger(args.loc) or nil
   if args.loc ~= nil and not loc then return false, 'hospital.restore: loc must be a location id' end
   local c, p = M.conf(K), pstate(K)
-  if type(p.hrm) ~= 'table' or #p.hrm == 0 then
-    return false, 'hospital.restore: no removed hospital zone is remembered (a hospital that never lost its zone here: '
-                  .. 'bp sites hospital, or the zones screen)'
+  if (type(p.hrm) ~= 'table' or #p.hrm == 0) and #M.orphan_rooms(K, st.last) == 0 then
+    return false, 'hospital.restore: no removed hospital zone is remembered and no hospital room stands without a zone (a hospital '
+                  .. 'that never lost its zone here: bp sites hospital, or the zones screen)'
   end
   local res = M.restore(K, c, st.last, p, K.now().tick, {force = true, loc = loc})
   if #res.done == 0 then
@@ -3809,8 +3961,9 @@ function M.state(K)
   if type(last) == 'table' and math.tointeger(last.t) and C.STATE_SPEC.opt.water.opt.wst then w.wst = last.t end
   local wsc = st.ws and M.way_text(M.best_way(st.ws))
   if wsc and C.STATE_SPEC.opt.water.opt.wsc then w.wsc = wsc end
-  local hrm = type(pstate(K).hrm) == 'table' and #pstate(K).hrm or 0
-  if hrm > 0 and C.STATE_SPEC.opt.water.opt.hrm then w.hrm = hrm end     -- BUG-539
+  -- BUG-539/540: the zones bp sites must not build a second hospital beside (a dry memory without water near does not count)
+  local hrm = M.hrm_count(K, M.conf(K), st.last, pstate(K), K.now().tick)
+  if hrm > 0 and C.STATE_SPEC.opt.water.opt.hrm then w.hrm = hrm end
   local a = st.audit
   if a and #a.gaps > 0 and (a.zones > 0 or a.patients > 0) and C.STATE_SPEC.opt.water.opt.gaps then
     w.gaps = json.array{}
@@ -4014,6 +4167,45 @@ M.verbs['hospital.retire'] = function(K, args, cmd)
   K.log('info', 'water: %s; %d zone(s) outside %s still block', msg, ho.n, core)
   return true, msg, {zone = id, at = json.array{(h.x1 + h.x2) // 2, (h.y1 + h.y2) // 2, h.z}, loc = loc, left = left,
                      approve = approve and 1 or 0, why = z.why, blocking = ho.n}
+end
+
+-- verb well.retire {id, approve?} (BUG-541, Run 16b i2 y386/y390, Run 16d i4 y404: the GiveWater carriers stood 26-28 days at a
+-- DRY well beside the hospital, the patients died): the building screen's remove for ONE built well that has no water below it
+-- (the last water run's sources: `wet` false, not an emergency well). A well of a cistern room of the manifest is meant to fill:
+-- it goes only on approve:true (the player's word). Wet wells are never touched. Any mode (a dying patient does not wait).
+M.verbs['well.retire'] = function(K, args, cmd)
+  local id = math.tointeger(args.id)
+  if not id then return false, 'well.retire: id must be a well id' end
+  if not st.last or not st.out then return false, 'well.retire: no water run finished yet; try again in a game day' end
+  local w
+  for _, s in ipairs(st.last.sources) do if s.kind == 'well' and s.id == id then w = s end end
+  if not w then return false, string.format('well.retire: no well %d in the last water run (inspect what=water_sources lists them)', id) end
+  local at = string.format('%d,%d,%d', w.x, w.y, w.z)
+  if w.wet then return false, string.format('well.retire: well %d at %s has water below it: it stays', id, at) end
+  if w.built == false then
+    return false, string.format('well.retire: well %d at %s is not built yet: cancel its project instead', id, at)
+  end
+  local approve = args.approve == true
+  if not approve then
+    for _, rm in ipairs(K.manifest().rooms or {}) do
+      local b = rm.bbox
+      if rm.tpl == 'cistern' and type(b) == 'table' and #b >= 6 and w.z == b[3] and w.x >= b[1] and w.x <= b[4]
+         and w.y >= b[2] and w.y <= b[5] then
+        return false, string.format("well.retire: well %d at %s belongs to the cistern room %s (a cistern's well fills with its pond): "
+                                    .. "approve:true on the player's word", id, at, tostring(rm.id))
+      end
+    end
+  end
+  if not M.can('well_remove') then return false, 'well.retire: this kernel build has no well_remove act' end
+  local ok, err = K.act.well_remove(id)
+  if not ok then return false, string.format('well.retire: well %d at %s: %s', id, at, tostring(err)) end
+  local out = {}
+  for _, s in ipairs(st.last.sources) do if not (s.kind == 'well' and s.id == id) then out[#out + 1] = s end end
+  st.last.sources = out
+  local msg = string.format('retired the dry well %d at %s (building screen remove%s): the carriers fill at the accepted water',
+                            id, at, approve and ', approved by the player' or '')
+  K.log('warn', 'water: %s', msg)
+  return true, trunc(msg, 400), {well = id, at = json.array{w.x, w.y, w.z}, approve = approve and 1 or 0}
 end
 
 return M

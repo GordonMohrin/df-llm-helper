@@ -1217,6 +1217,21 @@ local function impls(state)
     return false, 'no such zone'
   end
 
+  -- BUG-541 (Run 16b i2 / Run 16d i4: GiveWater carriers stood for weeks at a DRY well, 3 patients died): the building screen's
+  -- remove for ONE well by id (dfhack.buildings.deconstruct, as pond_remove does for a zone). The caller (water's well.retire)
+  -- has checked that it is dry. Returns ok, 1. [live-untested]
+  function I.well_remove(id)
+    id = math.tointeger(id)
+    if not id then return false, 'bad well id' end
+    for _, w in ipairs(df.global.world.buildings.other.WELL) do
+      if w.id == id then
+        if dfhack.buildings.deconstruct(w) then return true, 1 end
+        return false, 'deconstruct refused'
+      end
+    end
+    return false, 'no such well'
+  end
+
   -- BUG-034 (Run 11, Kilrudrabed y439: 5 bedridden patients died of thirst in a hospital without water; the game session
   -- removed its 5 zones by hand and GiveWater jobs brought water again): zones screen > select the zone > remove, for ONE
   -- activity zone of a hospital location (its location_id names a HOSPITAL abstract building of the site, as water

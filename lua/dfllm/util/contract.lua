@@ -284,6 +284,8 @@ C.VERBS = {
   -- BUG-539 (Run 16b i2: unstick removed the hospital zone, nothing drew it again): the removed hospital zone(s) again at their old
   -- location and rectangle (any mode: patients lie there)
   ['hospital.restore'] = {mod = 'water'},
+  -- BUG-541 (Run 16b i2 / 16d i4: carriers stood weeks at a dry well, 3 patients died): the building screen's remove for one dry well
+  ['well.retire'] = {mod = 'water'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -300,6 +302,7 @@ C.ACT = {
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   hospital_remove = {'water'},                     -- BUG-034: a dry hospital's zones; BUG-131: hospital.retire
+  well_remove = {'water'},                         -- BUG-541: the dry well the GiveWater carriers stand at (well.retire)
   hospital_restore = {'water'},                    -- BUG-539: the removed hospital zone drawn again at its old location
   water_zone = {'water'},                          -- BUG-324: a Water Source zone on the water the scan found reachable
   sand_zone = {'economy'}, fish_zone = {'economy'},

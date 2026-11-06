@@ -79,6 +79,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
+    "well_remove": ["water"],                      # BUG-541: the dry well the GiveWater carriers stand at (well.retire)
     "hospital_restore": ["water"],                 # BUG-539: the removed hospital zone drawn again at its old location
     "water_zone": ["water"],                       # BUG-324: a Water Source zone on the water the scan found reachable
     "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
@@ -980,6 +981,9 @@ VERB_ARGS: dict[str, Obj] = {
     # BUG-539 (Run 16b i2: water.unstick removed the hospital zone and nothing drew it again): the removed hospital zone(s)
     # drawn again at their old location and rectangle; loc = only that hospital location
     "hospital.restore": Obj(opt={"loc": NAT}),
+    # BUG-541 (Run 16b i2 / 16d i4: GiveWater carriers stood weeks at a DRY well, 3 patients died): the building screen's remove for one
+    # built well with no water below it; a cistern room's well only with approve:true; a wet well is never touched
+    "well.retire": Obj(req={"id": NAT}, opt={"approve": Bool()}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -1008,6 +1012,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)
     "water.unstick": ("water", None, False),            # BUG-507: any mode (a dying patient does not wait for the peace)
     "orders.cancel": ("economy", None, False),                # BUG-526: any mode (taking an order off the list is harmless)
+    "well.retire": ("water", None, False),              # BUG-541: any mode (a dying patient does not wait)
     "hospital.restore": ("water", None, False),         # BUG-539: any mode (the patients lie there)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)

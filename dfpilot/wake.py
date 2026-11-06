@@ -239,7 +239,7 @@ ERR_EVERY_S = 60                               # stderr 'poll error' at most onc
 # URGENT_REPEAT_S); DECISION_NEEDED only for the ids in URGENT_DECISIONS (a fort running out of drink or food, a thirsty one)
 URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
 URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst", "stranded_drink", "stranded_food",
-                    "mood_deadline", "no_water", "thirst_unit", "job_stalled", "mood_thirst"}   # BUG-340; BUG-391; BUG-395; BUG-401; BUG-416; BUG-422; BUG-507; BUG-509
+                    "mood_deadline", "no_water", "thirst_unit", "job_stalled", "mood_thirst", "dry_well"}   # BUG-340; BUG-391; BUG-395; BUG-401; BUG-416; BUG-422; BUG-507; BUG-509; BUG-541
 URGENT_GAME_TICKS = schema.TICKS["DAY"]
 HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often
 
@@ -396,6 +396,8 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
         return seal_stalled_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "job_stalled":
         return stalled_job_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "dry_well":
+        return dry_well_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "mood_thirst":
         return mood_thirst_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "project_released":
@@ -525,13 +527,25 @@ def mood_thirst_hint(d: dict) -> str:
 def stalled_job_hint(d: dict) -> str:
     """BUG-507 (Run 16b i2 Brotherarrow: a GiveWater job hung 26 days on a child while the patient died of thirst, the player had no
     command): water found a GiveWater / GiveFood / FillPond job whose worker has not moved for days. The kernel already took the
-    worker off Orderlies and removed the pond zone beside him; d.cmds has `water.unstick unit=<id>` (the same ladder at once, and
-    the patient's hospital zone when he is over water.stall_dying) and inspect what=unit."""
+    worker off Orderlies and removed the pond zone beside him; d.cmds has `water.unstick unit=<id>` (the same ladder at once; BUG-542:
+    it never removes the hospital zone, the kernel does that itself only from the third round for a patient over water.stall_dying)
+    and inspect what=unit."""
     cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
     first = cmds[0] if cmds else "dfllm cmd water.unstick"
-    return (f"a water job is stalled: send {first} yourself (it takes the worker off Orderlies, removes the pond zone beside him and, "
-            "for a patient near death, his hospital zone: the zones screen, no job is removed); dfllm cmd inspect what=unit "
+    return (f"a water job is stalled: send {first} yourself (it takes the worker off Orderlies and removes the pond zone beside him so "
+            "the game posts the job anew; the hospital zone stays, no job is removed); dfllm cmd inspect what=unit "
             "key=<id> shows what he holds")
+
+
+def dry_well_hint(d: dict) -> str:
+    """BUG-541 (Run 16b i2 y386/y390, Run 16d i4 y404: 3 patients dead, the GiveWater carriers stood 26-28 days at a DRY well beside
+    the hospital): water.stalls found GiveWater workers standing at a built well with no water below it while a patient is thirsty.
+    d.q names the well and the nearest accepted water; d.cmds[0] = `well.retire id=<well>` (the building screen's remove; a
+    cistern room's well needs approve:true), then `water.unstick unit=<id>` (the worker off Orderlies so the game posts the job anew)."""
+    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    return (f"{d.get('q', 'GiveWater carriers stand at a dry well')}. Send " + (f"{cmds[0]}" if cmds else "dfllm cmd well.retire id=<well>")
+            + " (takes the dry well away so the carriers fill at the accepted water; a cistern's well only with approve:true)"
+            + (f", then {cmds[-1]}" if len(cmds) > 1 else ""))
 
 
 def released_hint(d: dict) -> str:
