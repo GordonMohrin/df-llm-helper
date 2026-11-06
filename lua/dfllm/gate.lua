@@ -137,6 +137,15 @@ M.CROSS_ESCAPE = 2
 -- steps of the footprint, holds the raise to the end (then GATE_FAIL blocked names it, never a crush). A unit seen for the
 -- first time counts as walking. DRILL times its raise like SIEGE/BREACH now (BUG-493): the drill's own recall streams over B1.
 M.STAND_TICKS = 25
+-- BUG-543 (Run 16c i3 Sealcertain y406 autumn d65, DRILL: soldier 26591 'crushed: bridge B1 up (pulled at 163978076), last seen on it at
+-- 63,116,140'; kern.log: nobody held B1 from the pull at +0 to the lever done at +252, the bridge moved then and he stood on it at
+-- +343; two of the seven soldiers were still marching to their stations, a squad's soldiers shuffle about their station point and a
+-- unit with no readable path onto the footprint is invisible to M.crossers): a raise that is not an emergency (every mode but SIEGE
+-- and BREACH: DRILL, and the PEACE / ALERT / RECOVERY gate raises) is never pulled with a MOVING unit within RAISE_R tiles of the
+-- footprint either, path or no path: a unit that has not stood on one tile for RAISE_STILL ticks holds it (M.raise_movers; a tame
+-- animal, a unit standing still and the bridge's own pullers in their room do not), and the deadline escape below does not exist for
+-- it (no hostile is coming; a raise that never finds a gap ends as GATE_FAIL `blocked`, the drill's T+900 drop as `occupied:<B>`).
+M.RAISE_R, M.RAISE_STILL = 3, 60
 M.PATH_R = 24
 -- BUG-335 review: a unit on a stair or ramp up to the bridge stands on another z level (fp_dist nil); the census pass
 -- also keeps those within PATH_R tiles (x/y) and PATH_Z levels of the footprint, for their paths only (their path steps
@@ -1204,7 +1213,8 @@ local function who(list, fp)
   for i, e in ipairs(list) do
     if i > M.NAME_MAX then parts[#parts + 1] = string.format('+%d more', #list - M.NAME_MAX); break end
     local s = string.format('%s %d %s', e.k, e.id, e.d == 0 and 'on the footprint'
-                            or (e.path and string.format('walking onto it in %d steps', e.path)) or 'next to it')
+                            or (e.path and string.format('walking onto it in %d steps', e.path))
+                            or (e.d > M.MARGIN and string.format('moving %d tiles from it', e.d)) or 'next to it')
     local q = e.k == 'soldier' and fp and squad_note(e.id, fp, e)
     parts[#parts + 1] = q and (s .. ' (' .. q .. ')') or s
   end
@@ -1458,6 +1468,35 @@ function M.drop_animals(list, all)
   return n > 0 and keep or list
 end
 
+-- BUG-543: `hold` plus the units within RAISE_R tiles of the footprint (scan `sc`) that are not standing still: not on the same
+-- tile for RAISE_STILL ticks (a unit seen for the first time counts as moving), no tame animal. A soldier standing at his squad
+-- station holds nothing (he stands), one who shuffles about it holds for RAISE_STILL ticks after each step.
+-- The positions of the last looks are kept per bridge (rt[name].rq: the call replaces them, units gone from the scan are forgotten).
+function M.raise_movers(K, name, sc, hold)
+  local r = rt[name]
+  if not r or not sc then return hold end
+  local now = K.now().tick
+  local pm, pn, have, out = r.rq or {}, {}, {}, nil
+  for _, e in ipairs(hold) do have[e.id] = true end
+  for _, e in ipairs(sc.list or {}) do
+    if (e.d or 99) <= M.RAISE_R and e.k ~= 'animal' then
+      local p = string.format('%d,%d,%d', e.x or -1, e.y or -1, e.z or -1)
+      local o = pm[e.id]
+      if not (o and o.p == p) then o = {p = p, t = now} end
+      pn[e.id] = o
+      if not have[e.id] and now - o.t < M.RAISE_STILL then
+        if not out then
+          out = {unknown = hold.unknown}
+          for _, h in ipairs(hold) do out[#out + 1] = h end
+        end
+        out[#out + 1] = e
+      end
+    end
+  end
+  r.rq = pn
+  return out or hold
+end
+
 -- BUG-027: who holds a pull of `name` toward `dir` now: {units within MARGIN} (empty = clear), and the force: a raise
 -- in SIEGE/BREACH with a visible hostile within force_near tiles goes ahead past the units next to the footprint
 -- (returns the holders, the hostile's distance and the units beside it). BUG-310: a unit ON the footprint holds a forced
@@ -1507,7 +1546,7 @@ local function holders(K, name, fp, sc, dir)
         pn[e.id] = (o and o.p == p) and o or {p = p, t = now}
       end
       r.stand = pn
-      if held >= M.DEADLINE * M.CROSS_HELD then
+      if held >= M.DEADLINE * M.CROSS_HELD and FORCE_MODES[K.mode()] then       -- BUG-543: no escape for a non-emergency raise
         esc = true
         lim = M.CROSS_ESCAPE
         cross, hold = M.drop_animals(cross, true), M.drop_animals(hold, true)     -- BUG-510: no animal holds past the escape
@@ -1519,6 +1558,7 @@ local function holders(K, name, fp, sc, dir)
       end
     end
   end
+  if dir == 'up' and not FORCE_MODES[K.mode()] then hold = M.raise_movers(K, name, sc, hold) end       -- BUG-543
   for i, e in ipairs(hold) do
     seen[e.id] = true
     if cby[e.id] and e.d > 0 then hold[i] = cby[e.id] end   -- beside it AND walking onto it: the crosser (drop_own keeps it)
@@ -3176,6 +3216,7 @@ end
 
 function M.reset_kpi(K)
   st.kpi = new_kpi(K.now().tick)
+  for _, r in pairs(rt) do r.occ = nil end           -- BUG-543
   dirty = true
   flush(K)
 end
@@ -3346,9 +3387,25 @@ function M.drill_skip(K, name)
   local r = rt[name]
   if K.mode() ~= 'DRILL' or not r or r.last ~= 'down' or (r.job and r.job.taken)
      or K.now().tick < (r.settle or 0) then return false end      -- (a pull just done: it may start to move now)
+  -- BUG-543: who kept it down (the raise waited for them, never onto them): the drill reports `occupied:<bridge>`, not `up:`
+  local occ
+  if (r.stuck == 'blocked' or r.block_since) and type(r.block) == 'table' and #r.block > 0 then occ = who(r.block, r.foot)
+  elseif (r.ap or 0) > 0 and r.ap_last then
+    occ = string.format('%s %d %d tiles from it and walking toward it', r.ap_last.k, r.ap_last.id, r.ap_last.d)
+  end
   local ok = M.want(K, name, 'down', 'drill_end')
-  if ok then K.log('info', 'gate: %s not up by the drill\'s T+900: no late raise', name) end
+  if ok then
+    r.occ = occ
+    K.log('info', 'gate: %s not up by the drill\'s T+900: no late raise%s', name, occ and (' (occupied: ' .. occ .. ')') or '')
+  end
   return ok == true
+end
+
+-- public (BUG-543, drill): why bridge `name`'s raise was dropped at T+900 when units kept it from rising ("citizen 5 on the
+-- footprint, soldier 7 moving 3 tiles from it"), nil when none did (cleared by reset_kpi: the drill's start and settle)
+function M.occupied(K, name)
+  local r = rt[name]
+  return r and r.occ or nil
 end
 
 -- public (BUG-237, drill): how many linked levers manifest bridge `name` has (0: no pull can move it)

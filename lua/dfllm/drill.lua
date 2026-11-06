@@ -50,6 +50,10 @@
 -- measurement missed. Now the drill SETTLES first: the raise is not asked for, and the clock (T+600 goal, T+900 pass, T+1,200 measurement)
 -- does not run, until nobody is outside Kern+ and half of the soldiers stand at their stations, or SETTLE_MAX ticks after T0 (then the
 -- ones still outside count as outside:N, as before). `settle` (DRILL_RESULT) says how long that took; siege asks M.settle.
+-- BUG-543 (Run 16c i3 Sealcertain y406: the drill pulled B1 with soldier 26591 about to step onto it, crushed): gate never pulls a
+-- non-emergency raise (the drill's included) while a unit within RAISE_R tiles of the footprint is moving or one is on it / walking
+-- onto it. A bridge the drill could not raise for that reason at T+900 is dropped as before and the result says `occupied:<bridge>`
+-- (kern.log names the units) instead of `up:<bridge>`; nobody is crushed, the retry back-off is the one of any failed drill.
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')
 
@@ -275,7 +279,12 @@ local function measure(K, now)
       if t > M.RAISE_MAX then fails[#fails + 1] = 'slow:' .. name end
     else
       raised = -1
-      fails[#fails + 1] = 'up:' .. name
+      -- BUG-543: units kept it from rising (gate waited for them, never raised onto them): `occupied`, not a mechanics failure
+      local oko, occ = K.call('gate', 'occupied', name)
+      if oko and occ then
+        fails[#fails + 1] = 'occupied:' .. name
+        K.log('info', 'drill: %s not raised: occupied by %s', name, tostring(occ))
+      else fails[#fails + 1] = 'up:' .. name end
     end
   end
   local okm, mk = K.call('military', 'kpi')
