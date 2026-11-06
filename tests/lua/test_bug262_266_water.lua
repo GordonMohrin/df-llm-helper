@@ -235,6 +235,7 @@ T.test('BUG-264: hard-metal bars and a forge: a MakeChain order of that metal, n
   T.eq(#o, 1)
   T.eq({o[1].args[1].job, o[1].args[1].material, o[1].args[1].tag, o[1].args[1].amount_total},
        {'MakeChain', 'INORGANIC:IRON', 'dfllm:chain', 1})
+  T.eq(o[1].args[1].top, true, 'BUG-515: first in the work orders, not behind the forge jam')
   day(W, 20)
   T.eq(#chains(W), 1, 'the live order is not doubled')
   -- cloth, a Clothier's shop and a live rope order of somebody else's: no new order

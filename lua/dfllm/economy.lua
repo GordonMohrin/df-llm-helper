@@ -9459,6 +9459,16 @@ function M.jam_scan(K, c, oq)
     if text then
       jam[key] = text
       st.jam = st.jam or text:sub(1, 80)
+      -- BUG-515: the orders whose jobs fill the slots (blocked by a missing input, a job of theirs in this shop) are the
+      -- jam's culprits; order_prune takes the one-time ones away
+      oq.jamc = oq.jamc or {}
+      local seen = {}
+      for _, j in ipairs(e.list) do
+        if blocked[j.order] and not seen[j.order] then
+          seen[j.order] = true
+          oq.jamc[#oq.jamc + 1] = {id = j.order, key = key}
+        end
+      end
     end
   end
   if next(jam) then oq.ctx.jam = jam end
@@ -9620,7 +9630,7 @@ function M.mood_top(p, tag)
   return false
 end
 
-function M.order_prune(K, c, p, now)
+function M.order_prune(K, c, p, now, oq)
   local oc = c.orders or M.DEFAULTS.orders
   local cap, pdays = math.tointeger(oc.cap) or 120, math.tointeger(oc.prune_days) or 30
   local per = math.tointeger(oc.prune_per_day) or 30
@@ -9667,6 +9677,23 @@ function M.order_prune(K, c, p, now)
       for i = 2, #g do drop[#drop + 1] = g[i]; dropped[g[i].id] = 'duplicate' end
     end
   end
+  -- BUG-515 (Run 16c i3 Sealcertain y385-y386: 'JAM forges slots full of cancelling jobs (MakeWeapon x3: no bars BRONZE)', the
+  -- hospital well's chain (order 576) waited 99 days behind bronze weapons that never had bars): the orders whose jobs fill a
+  -- jammed shop's slots and cannot run (jam_scan, p.ostuck for stuck_days) go, one-time ones only and under the same keep
+  -- rules as the rest of the prune; a standing order stays and is named in the event
+  local jamk = {}
+  if oq and type(oq.jamc) == 'table' then
+    local byid = {}
+    for _, e in ipairs(cands) do byid[e.id] = e end
+    for _, jc in ipairs(oq.jamc) do
+      local e = byid[jc.id]
+      if e and not dropped[e.id] then
+        drop[#drop + 1] = e
+        dropped[e.id] = 'jam'
+        jamk[jc.key] = (jamk[jc.key] or 0) + 1
+      end
+    end
+  end
   table.sort(drop, function(a, b) return a.id < b.id end)
   if cap > 0 and open_n - #drop > cap then
     table.sort(cands, function(a, b) if a.days ~= b.days then return a.days > b.days end return a.id < b.id end)
@@ -9693,8 +9720,12 @@ function M.order_prune(K, c, p, now)
     end
   end
   if #gone == 0 then return 0 end
-  local msg = string.format('order queue: %d of %d open orders removed (stuck duplicates%s): %s', #gone, open_n,
+  local jt = {}
+  for key, n in pairs(jamk) do jt[#jt + 1] = string.format('%s %d', key:match(':(.+)$') or key, n) end
+  table.sort(jt)
+  local msg = string.format('order queue: %d of %d open orders removed (stuck duplicates%s%s): %s', #gone, open_n,
                             cap > 0 and string.format(', above the cap of %d', cap) or '',
+                            #jt > 0 and ('; jam: ' .. table.concat(jt, ', ')) or '',
                             table.concat(gone, ', ', 1, math.min(#gone, 8)) .. (#gone > 8 and ', ...' or ''))
   K.log('warn', '%s', msg)
   K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = first.id, job = first.job,
@@ -9771,7 +9802,7 @@ function T.ocheck(K, c, r)
   M.ws_stuck(K, p, oq, oc)
   local okm, errm = pcall(M.ws_missing, K, p, oq)   -- BUG-267: ask for the missing shops, drop the hopeless orders
   if not okm then K.log('warn', 'missing workshops: %s', tostring(errm)) end
-  local okp, errp = pcall(M.order_prune, K, c, p, r.now)   -- BUG-315: stuck duplicates and the queue above its cap
+  local okp, errp = pcall(M.order_prune, K, c, p, r.now, oq)   -- BUG-315: stuck duplicates and the queue above its cap; BUG-515: jam culprits
   if not okp then K.log('warn', 'order prune: %s', tostring(errp)) end
   st.jobord = oq.shops and oq.shops.by_order or st.jobord   -- BUG-315: the orders whose jobs are out (scan_orders)
   local wl = {}

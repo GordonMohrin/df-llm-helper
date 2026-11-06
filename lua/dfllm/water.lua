@@ -2954,6 +2954,7 @@ function M.chain(K, c, r, p, now)
   local done = live and 'on order' or nil
   if due and spec and not live and M.can('workorder') then
     spec.tag, spec.amount_total, spec.frequency = 'dfllm:chain', #wells, 'OneTime'
+    spec.top = true                        -- BUG-515: first in the work orders, not behind the weapons that fill the forge
     local ok, id = K.act.workorder(spec)
     if ok then done = 'ordered'; p.chain_o = id end
   end

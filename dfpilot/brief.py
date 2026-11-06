@@ -299,6 +299,10 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
         out.append("ways in: not checked yet" if n < 0 else "ways in: all with a door or bridge")
     t = a.get("min_traps", 0)
     why = "" if "bypass" not in fails else " (counted as if the bypass were walled)" if t else " (a bypass skips the hall)"
+    tr = ctx.s.get("traps")
+    built = tr.get("n") if isinstance(tr, dict) and isinstance(tr.get("n"), int) else 0
+    if "bypass" in fails and not t and built > 0:      # BUG-516: 'traps 0' beside 63 armed traps reads as 'no hall'
+        why = f" of {built} armed (a bypass skips the hall)"
     out.append(f"traps {t}{why}" if a.get("age", -1) >= 0 else "traps ? (no audit)")
     route = r.get("route") if isinstance(r.get("route"), str) else ""
     if route:                                  # Run 10: the bypass stood for months; name it and its wall

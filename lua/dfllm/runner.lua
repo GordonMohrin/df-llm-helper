@@ -1759,6 +1759,35 @@ function Q.pile_part(K, P, st, ch, R)
   return {pos = ch.pos, cells = calls[pc + 1] or {}}, {k = pc + 1, n = #calls}
 end
 
+-- BUG-514 (Run 16a i1 Basementflew y403-y405, fortcore aquifer=pass: the core level lay in damp rock, the beds at 34,92,117 stood on
+-- water, DF cancelled their jobs 'Building site submerged' and the stage hung at 35 % for 400 days): beds are not queued on a tile
+-- that holds water (Q.WET_BUILD/7 or more, snapshot flow); they are left out as a refused part (R.uns), the stage goes on.
+-- Returns the chunk without those cells and their number.
+Q.WET_KEYS = {b = true}
+Q.WET_BUILD = 4
+function Q.wet_cells(K, P, st, ch)
+  local keep, n = {}, 0
+  for _, cell in ipairs(ch.cells) do
+    local key = tostring(cell[4]):match('^[^{(:/]*')
+    local wet
+    if Q.WET_KEYS[key] then
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      for _, t in ipairs(tl) do
+        local v = tile_at(K, t[1], t[2], t[3])
+        if v and HAZARD[v.c] == 'water' and (int(v.flow) or 7) >= Q.WET_BUILD then wet = {t[1], t[2], t[3], int(v.flow) or 7}; break end
+      end
+    end
+    if wet then
+      n = n + 1
+      K.log('warn', '%s %s: bed at %d,%d,%d left out: the tile holds water %d/7 (DF would cancel it as submerged)', P.id, st.label,
+            wet[1], wet[2], wet[3], wet[4])
+    else keep[#keep + 1] = cell end
+  end
+  if n == 0 then return ch, 0 end
+  return {pos = ch.pos, cells = keep}, n
+end
+
 local function apply(K, P, st, R)
   local ch = st.chunks[P.chunk + 1]
   if P.tpl == 'plug' then
@@ -1790,6 +1819,14 @@ local function apply(K, P, st, R)
     local skip
     ch, skip = Q.nogather(P, ch)
     if skip > 0 and #ch.cells == 0 then P.chunk = P.chunk + 1; moved(K, R); dirty(); return true end
+  end
+  local wet = 0
+  if st.mode == 'build' and P.tpl ~= 'plug' then              -- BUG-514: no bed on a tile that holds water
+    ch, wet = Q.wet_cells(K, P, st, ch)
+    if wet > 0 and #ch.cells == 0 then
+      if R.ra ~= 1 then R.uns = R.uns + wet end
+      P.chunk = P.chunk + 1; moved(K, R); dirty(); return true
+    end
   end
   local part                                  -- BUG-072: a place chunk with several food piles, one call per pile
   if st.mode == 'place' then
@@ -1878,7 +1915,7 @@ local function apply(K, P, st, R)
         end
       end
       if R.ra == 1 then R.uns = math.max(0, R.uns - (n1 - n0))
-      else R.uns = R.uns + math.max(0, (int(stats.build_unsuitable) or 0) - pre - walls) + bad end
+      else R.uns = R.uns + math.max(0, (int(stats.build_unsuitable) or 0) - pre - walls) + bad + wet end
     end
     if walls > 0 then moved(K, R); dirty(); return true end
   end

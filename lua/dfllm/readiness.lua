@@ -438,7 +438,14 @@ local function open_perimeter(K, man)
   for _, b in ipairs(lostb) do isl[b] = true end
   for _, f in ipairs(rt.lev and rt.lev.fails or {}) do
     local b = f:match('^levers:(.+)$')
-    if b and st.lvok and st.lvok[b] and not isl[b] and not rep[b] then lostl[#lostl + 1] = b end
+    if b and st.lvok and st.lvok[b] and not isl[b] and not rep[b] then
+      -- BUG-517 (Run 16d i4 y393: a wall in front of O1 closed the way, 'levers lost: O1' kept the perimeter open for
+      -- 3279 days): a bridge without its levers is a way in only while an opening of the entrance check runs over it
+      -- before any door; a wall or door in front of it (or a sealed fort) ends that route. nil (not proven) keeps it.
+      local bb = man.bridges[b]
+      local okw, way = K.call('seal', 'bridge_way', type(bb) == 'table' and bb.fp or nil)
+      if not (okw and way == false) then lostl[#lostl + 1] = b end
+    end
   end
   local open = rt.open or -1
   if open > 0 then why[#why + 1] = string.format('%d way%s in', open, open == 1 and '' or 's') end
