@@ -149,7 +149,7 @@ T.test('K3: none free - the items exist but are in use, owned, claimed or forbid
     item(W, 'BLOCKS', 102, GRANITE, {owned = true})
     item(W, 'BLOCKS', 103, GRANITE, {forbid = true}, {100, 100, 5})        -- forbidden outside Kern+: care leaves it
   end}
-  T.ok(n.msg:find('blocks x2: none free [3/0/0, 1 forbidden]', 1, true), n.msg)
+  T.ok(n.msg:find('blocks x2: none free [3/0/0, 1 forbidden (far)]', 1, true), n.msg)
   -- an item the fort lost sight of is not counted as stock
   local _, n2 = need_of{filters = {filter('BLOCKS', {mat_type = 0, quantity = 1})},
                         items = function(W) item(W, 'BLOCKS', 101, GRANITE, {removed = true}); item(W, 'BLOCKS', 102, GRANITE, {in_building = true}) end}

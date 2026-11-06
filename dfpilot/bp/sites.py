@@ -258,10 +258,12 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         return traps.site(snap, p, _At(snap))[:n]
     # BUG-356/368/384: no fort manifest needed (the startup shops, the trade depot, the surface hospital)
     # BUG-387: the surface core and the surface variants of dining, bedrooms, tavern and office need none either
-    surface_shops = (tpl in ("workshops", "hospital", *rooms.SURFACE_ROOMS) and bool(p.get("surface"))) \
+    rebuild = tpl == "workshops" and bool(p.get("rebuild"))       # BUG-562: the old place of a shop manifest.gone lists
+    surface_shops = (tpl in ("workshops", "hospital", *rooms.SURFACE_ROOMS) and bool(p.get("surface")) and not rebuild) \
         or tpl in ("depot", "tradepost", "surfacecore")
     surface_farm = tpl == "farms" and bool(p.get("surface"))      # BUG-407: needs no fort manifest either (ground anywhere)
-    if tpl != "fortcore" and not surface_shops and not surface_farm and not ((manifest or {}).get("zones") or {}).get("Z4"):
+    if tpl != "fortcore" and not surface_shops and not surface_farm and not rebuild \
+            and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
         from . import deep
@@ -277,6 +279,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _aqshaft(snap, p, manifest)
     elif tpl == "farms" and p.get("surface"):               # BUG-297: plots on soil floor that stands already
         cands = _surface_farms(snap, p, manifest or {})
+    elif rebuild:                                            # BUG-562: where the shop stood
+        cands = _rebuild_shops(snap, p, manifest or {})
     elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
         cands = _surface_shops(snap, p, manifest or {}, tpl)
         if not cands and surface_top_floor(snap) >= SURFACE_TOP_MIN and not sky_over_floor(snap):
@@ -1315,6 +1319,48 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
                     out.append({"anchor": [ax, ay, z], "rot": rot, "score": max(0, 1000 - d + (60 if near else 0)), "box": box,
                                 "why": f"rot{rot}, {W}x{H} open surface floor for {what}, {d} tiles from the middle "
                                        "of the snapshot" + (f", {de} from the entrance" if near else "") + ", nothing dug"})
+    return out
+
+
+def _rebuild_shops(snap: dict, p: dict, manifest: dict) -> list[dict]:
+    """BUG-562 (Run 16b i2 Brotherarrow y398-y404: Craftsdwarfs 99,119,134 and Clothiers 107,116,134 left the manifest as 'no longer
+    stands' (manifest.gone), their places in the fortcore's workshop rooms stayed free, `bp sites workshops` ranks whole workshop rooms
+    and said '0 free sites' / 'no valid site' for 417 days): workshops p.rebuild = 1 (one type, `only=`) ranks the entries of
+    manifest.gone of that type, newest first: the shop's own footprint (3x3, 1x1 Quern / Millstone, 5x5 Kennels / Siege) centred on
+    the old position, every tile a revealed floor ('.'), clear of the standing workshops of the manifest, on the citizens' walk group.
+    The anchor is the old position; the doc's manifest lists the shop there again (the kernel then drops it from gone)."""
+    name = rooms.workshops(p).workshops[0][0]
+    side = rooms.SHOP_SIZE.get(name, 3)
+    h = side // 2
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    floor = _Pref(snap, lambda c: c == ".")
+    gone = [g for g in manifest.get("gone") or []
+            if isinstance(g, dict) and g.get("type") == name and isinstance(g.get("pos"), (list, tuple)) and len(g["pos"]) == 3]
+    if not gone:
+        raise ValueError(f"workshops rebuild=1: no {name} in manifest.gone (the kernel lists a shop there once it found it gone for "
+                         "rec_scans daily scans; a shop that never stood is a plain `workshops only=" + name + "`)")
+    keep = [(w["pos"][0] - 2, w["pos"][1] - 2, w["pos"][2], w["pos"][0] + 2, w["pos"][1] + 2, w["pos"][2])
+            for w in manifest.get("workshops") or [] if isinstance(w, dict) and isinstance(w.get("pos"), (list, tuple))
+            and len(w["pos"]) == 3]
+    out: list[dict] = []
+    why_not: list[str] = []
+    for rank_i, g in enumerate(reversed(gone)):
+        x, y, z = (int(v) for v in g["pos"])
+        box = (x - h, y - h, z, x + h, y + h, z)
+        if not (x0 <= box[0] and box[3] <= x1 and y0 <= box[1] and box[4] <= y1 and z0 <= z <= z1):
+            why_not.append(f"{x},{y},{z} lies outside the snapshot")
+        elif floor.count(box[0], box[1], box[3], box[4], z) != side * side:
+            why_not.append(f"{x},{y},{z}: the {side}x{side} footprint is not all open floor now")
+        elif any(_overlap(box, k) for k in keep):
+            why_not.append(f"{x},{y},{z}: a standing workshop of the manifest overlaps it")
+        elif walk_at(snap, (x, y, z)) == "0":
+            why_not.append(f"{x},{y},{z}: another walk group than the citizens'")
+        else:
+            out.append({"anchor": [x, y, z], "rot": 0, "score": 1000 - rank_i, "box": box,
+                        "why": f"rebuild {name} where it stood ({x},{y},{z}), {side}x{side} open floor, gone from the manifest"})
+    if not out:
+        raise ValueError(f"workshops rebuild=1: no old place of {name} can be built again: " + "; ".join(why_not[:3])
+                         + " (`dfllm bp sites workshops only=" + name + "` ranks a new room instead)")
     return out
 
 

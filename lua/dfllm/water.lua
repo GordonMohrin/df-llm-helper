@@ -177,6 +177,10 @@ M.DEFAULTS = {
   -- care_near tiles gets his tile, the nearest accepted water and a free bucket painted into the care burrow M.CARE, which
   -- siege lists in the alert (care false: off)
   care = true, care_thirst = 30000, care_near = 20,
+  -- BUG-559 (Run 16b i2 Brotherarrow y402: 3 patients in a hospital on Kern+, outside the BREACH alert burrow Tiefe+, died of
+  -- thirst beside 47 caregivers): in BREACH the care burrow opens too (care_breach false: never) when every painted tile lies
+  -- on Kern+ and no visible hostile is within care_breach_near tiles of one (the census must be fresh and complete)
+  care_breach = true, care_breach_near = 30,
   -- BUG-344: a citizen (no patient) at this thirst within 1 tile of an accepted well tells economy's thirst decision that
   -- the well gives him no water (M.drink_fix)
   well_thirst = 50000,
@@ -1868,8 +1872,8 @@ end
 
 local function patients_out(K, r, kern, refuge, kname, rname, ho)
   local mode = K.mode()
-  if not FIGHT[mode] then st.pout = nil; return end
-  if st.pout or #r.patients == 0 then return end
+  if not FIGHT[mode] then st.pout = nil; st.pdec = nil; return end
+  if #r.patients == 0 then return end
   local okn, names = K.call('siege', 'alert_names')
   names = okn and type(names) == 'table' and names or {}
   local b1 = type(names[1]) == 'string' and burrow_named(names[1]) or nil
@@ -1886,23 +1890,47 @@ local function patients_out(K, r, kern, refuge, kname, rname, ho)
     end
   end
   if #out == 0 then return end
-  st.pout = K.now().tick
-  local tail = ho.n > 0 and string.format('; the hospital lies outside %s/%s: move it into %s next to accepted water',
-                                          kname, rname, rname)
-               or '; plan the hospital inside the refuge'
-  -- BUG-330: what the care burrow does for them (open, or why not; it opens for a patient over care_thirst)
   local cs = st.care
-  local care
-  if cs and cs.on then care = M.CARE .. ' open to them'
-  elseif cs and cs.why == M.NOT_YET then
-    care = string.format('%s opens to one over thirst %d with no hostile near', M.CARE, cs.th or 0)
-  elseif cs then care = 'no ' .. M.CARE .. ': ' .. tostring(cs.why) end
-  local msg = string.format('%s: %d of %d patients lie outside the alert burrow %s (%s): they cannot walk there, only a '
-                            .. 'rescue moves them%s', mode, #out, #r.patients, label, table.concat(at, ', '), tail)
-  if care and #msg + #care + 2 <= 200 then msg = msg .. '; ' .. care end
-  K.emit('PATIENTS_OUT', 'B', trunc(msg, 200), {n = #out, patients = #r.patients, burrow = trunc(label, 60), units = ids,
-                                                mode = mode, hosp_out = ho.n, care = care and trunc(care, 80) or nil})
-  K.log('warn', 'water: %s', msg)
+  if not st.pout then                                   -- the plain event: once per fight
+    st.pout = K.now().tick
+    local tail = ho.n > 0 and string.format('; the hospital lies outside %s/%s: move it into %s next to accepted water',
+                                            kname, rname, rname)
+                 or '; plan the hospital inside the refuge'
+    -- BUG-330: what the care burrow does for them (open, or why not; it opens for a patient over care_thirst)
+    local care
+    if cs and cs.on then care = M.CARE .. ' open to them'
+    elseif cs and cs.why == M.NOT_YET then
+      care = string.format('%s opens to one over thirst %d with no hostile near', M.CARE, cs.th or 0)
+    elseif cs then care = 'no ' .. M.CARE .. ': ' .. tostring(cs.why) end
+    local msg = string.format('%s: %d of %d patients lie outside the alert burrow %s (%s): they cannot walk there, only a '
+                              .. 'rescue moves them%s', mode, #out, #r.patients, label, table.concat(at, ', '), tail)
+    if care and #msg + #care + 2 <= 200 then msg = msg .. '; ' .. care end
+    K.emit('PATIENTS_OUT', 'B', trunc(msg, 200), {n = #out, patients = #r.patients, burrow = trunc(label, 60), units = ids,
+                                                  mode = mode, hosp_out = ho.n, care = care and trunc(care, 80) or nil})
+    K.log('warn', 'water: %s', msg)
+  end
+  -- BUG-559 (Run 16b i2 y402: 3 patients outside the BREACH alert burrow died of thirst, PATIENTS_OUT was a plain event): a
+  -- patient over care_thirst whom the care burrow does not reach is a decision (urgent): the reason it is closed, the commands.
+  -- Judged EVERY pass, not at the first one only: in y402 the patients were not yet thirsty when the siege began and died of
+  -- thirst later; each patient is decided once per fight (st.pdec), a new one gets his own decision
+  local c = M.conf(K)
+  st.pdec = st.pdec or {}
+  local dry, dids = {}, {}
+  for _, pt in ipairs(out) do
+    if (pt.thirst or 0) >= c.care_thirst and not st.pdec[pt.id] then
+      dry[#dry + 1] = pt; if #dids < 20 then dids[#dids + 1] = pt.id end
+    end
+  end
+  if #dry > 0 and not (cs and cs.on) then
+    for _, pt in ipairs(dry) do st.pdec[pt.id] = K.now().tick end
+    local why = cs and cs.why or 'water has not planned it yet'
+    local q = string.format('%s: %d patient(s) over thirst %d lie outside %s and no water reaches them (%s): a rescue, or '
+                            .. 'the hospital water inside the burrow', mode, #dry, c.care_thirst, label, why)
+    local cmds = {'dfllm cmd inspect what=hospital', 'dfllm cmd inspect what=water_sources'}
+    for i = 1, math.min(#dids, 2) do cmds[#cmds + 1] = 'dfllm cmd inspect what=unit key=' .. fmt(dids[i]) end
+    K.emit('DECISION_NEEDED', 'A', trunc('patient_out: ' .. q, 200),
+           {id = 'patient_out', q = trunc(q, 200), units = dids, cmds = cmds, mode = mode, why = trunc(tostring(why), 80)})
+  end
 end
 
 ---------------------------------------------------------------- BUG-054: caregivers scale with the patients
@@ -2661,10 +2689,16 @@ function M.foe_dist(K, x, y, z)
   return best
 end
 
-local function care_safe(K, c, x, y, z)
+-- BUG-559: the distance a hostile must keep from a care tile: care_near, in BREACH (a hostile is on Kern+) care_breach_near
+local function near_for(c, mode)
+  if mode == 'BREACH' then return math.max(c.care_near, math.tointeger(c.care_breach_near) or 0) end
+  return c.care_near
+end
+
+local function care_safe(K, c, x, y, z, near)
   local d = M.foe_dist(K, x, y, z)
   if d == nil then return false, 'no fresh hostile census' end
-  if d >= 0 and d <= c.care_near then return false, string.format('a hostile %d tiles from it', d) end
+  if d >= 0 and d <= (near or c.care_near) then return false, string.format('a hostile %d tiles from it', d) end
   return true
 end
 
@@ -2681,9 +2715,11 @@ function M.care_step(K, c, r, now)
   if not c.care or not M.can('burrow_tiles') then st.care = nil; return nil end
   local bs = alert_set(K)
   if not bs then return close('the civ alert is off') end
-  -- review fix: never in BREACH; outside PEACE/ALERT only tiles on Kern+ (unforbid_ok's rule)
+  -- review fix: outside PEACE/ALERT only tiles on Kern+ (unforbid_ok's rule); BUG-559: BREACH only with care_breach, on Kern+
+  -- and with every hostile care_breach_near tiles off (before: never, 3 patients on Kern+ died of thirst in the y402 BREACH)
   local mode = K.mode()
-  if mode == 'BREACH' then return close('BREACH: nobody is drawn out toward a seal that may be down') end
+  if mode == 'BREACH' and not c.care_breach then return close('BREACH: nobody is drawn out toward a seal that may be down') end
+  local near = near_for(c, mode)
   local strict = mode ~= 'PEACE' and mode ~= 'ALERT'
   local kern, kname = burrow(K, 'kern', 'Kern+')
   if strict and not kern then return close(string.format('%s: no %s burrow to keep it inside', mode, kname)) end
@@ -2696,7 +2732,7 @@ function M.care_step(K, c, r, now)
   local tiles, ids, sig, why = {}, {}, {}, nil
   local function add(x, y, z) tiles[#tiles + 1] = {x, y, z}; sig[#sig + 1] = string.format('%d,%d,%d', x, y, z) end
   for _, pt in ipairs(out) do
-    local ok, w = care_safe(K, c, pt.x, pt.y, pt.z)
+    local ok, w = care_safe(K, c, pt.x, pt.y, pt.z, near)
     if ok and not inside(pt.x, pt.y, pt.z) then ok, w = false, string.format('outside %s in %s', kname, mode) end
     if ok then ids[pt.id] = true; add(pt.x, pt.y, pt.z) else why = why or string.format('patient %d: %s', pt.id, w) end
   end
@@ -2719,7 +2755,7 @@ function M.care_step(K, c, r, now)
     if s.wet then
       wet = true
       if in_set(bs, s.x, s.y, s.z) then near_w = 'in'; break end
-      local ok, kin = care_safe(K, c, s.x, s.y, s.z), true
+      local ok, kin = care_safe(K, c, s.x, s.y, s.z, near), true
       for _, t in ipairs(src_tiles(s)) do
         if not on_burrow(kern, t[1], t[2], t[3]) then kin = false end
         if not inside(t[1], t[2], t[3]) then ok = false end
@@ -2743,7 +2779,7 @@ function M.care_step(K, c, r, now)
   for _, q in ipairs(r.bpos or {}) do
     if in_set(bs, q.x, q.y, q.z) then bin = true; break end
     local d = cheb(ref, q.x, q.y, q.z)
-    if inside(q.x, q.y, q.z) and care_safe(K, c, q.x, q.y, q.z) and (not bd or d < bd) then bk, bd = q, d end
+    if inside(q.x, q.y, q.z) and care_safe(K, c, q.x, q.y, q.z, near) and (not bd or d < bd) then bk, bd = q, d end
   end
   if bk and not bin then add(bk.x, bk.y, bk.z) end
   local s = table.concat(sig, ' ')
@@ -2769,15 +2805,18 @@ function M.care_check(K)
   local cs = st and st.care
   if not (cs and cs.on) then return false end
   local now, mode = K.now().tick, K.mode()
+  local c = M.conf(K)
   local why
-  if mode == 'BREACH' then why = 'BREACH: nobody is drawn out toward a seal that may be down'
-  elseif cs.mode and mode ~= cs.mode then why = string.format('the mode changed (%s -> %s)', cs.mode, mode)
+  if mode == 'BREACH' and not c.care_breach then why = 'BREACH: nobody is drawn out toward a seal that may be down'
+  elseif cs.mode and mode ~= cs.mode and not (FIGHT[mode] and FIGHT[cs.mode]) then
+    why = string.format('the mode changed (%s -> %s)', cs.mode, mode)
   else
-    local c = M.conf(K)
+    -- BUG-559: SIEGE <-> BREACH keeps it (both paint Kern+ tiles only), checked against the new mode's distance
     for _, t in ipairs(cs.tiles or {}) do
-      local ok, w = care_safe(K, c, t[1], t[2], t[3])
+      local ok, w = care_safe(K, c, t[1], t[2], t[3], near_for(c, mode))
       if not ok then why = string.format('%d,%d,%d: %s', t[1], t[2], t[3], w); break end
     end
+    if not why then cs.mode = mode end
   end
   if not why then return true end
   K.log('info', 'water: care burrow %s closed: %s', M.CARE, why)

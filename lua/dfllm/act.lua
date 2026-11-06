@@ -431,21 +431,65 @@ function A.install_trade(I, gui, int)
   -- free items of the given item types (a.types = {'AMULET', ...}) for the haulers.
   local BRING_SKIP = {'foreign', 'forbid', 'in_job', 'in_building', 'trader', 'owned', 'artifact', 'garbage_collect',
                       'removed', 'dump', 'melt', 'construction', 'in_inventory'}
+  -- BUG-561 (Run 16d i4 Trumpetrealms: 'nothing_to_sell' beside 40 crafts, Run 16a i1 '0 sale items sent'): finished goods lie in
+  -- bins, a contained item has in_inventory (skipped here, and DFHack's markForTrade refuses it), the trade list shows the bin as one
+  -- entry. So the bin is marked when it is free and everything in it is a sale type. The skipped items are counted by reason in
+  -- a.skipped (the caller logs them): a '0 sent' no longer says nothing.
+  local function free_of(it, skip)
+    for _, fl in ipairs(skip) do if it.flags[fl] then return false, fl end end
+    return true
+  end
+  local BIN_SKIP = {}
+  for _, fl in ipairs(BRING_SKIP) do if fl ~= 'in_inventory' then BIN_SKIP[#BIN_SKIP + 1] = fl end end
   function TR.bring(a)
     local d = tr_depot(a.depot)
     if not d then return false, 'no trade depot ' .. tostring(a.depot) end
     if not dfhack.items.markForTrade then return false, 'markForTrade not implemented' end
     local n, max = 0, tonumber(a.max) or 60
+    local sk, binned = {}, {}
+    local want = {}
+    for _, tn in ipairs(type(a.types) == 'table' and a.types or {}) do want[tn] = true end
+    local function skip(why) sk[why] = (sk[why] or 0) + 1 end
+    -- the free bin of a contained item whose contents are all of the sale types; nil + the reason otherwise
+    local function bin_of(it)
+      local okc, c = pcall(dfhack.items.getContainer, it)
+      if not okc or not c then return nil, 'in_inventory' end
+      local fine, why = free_of(c, BIN_SKIP)
+      if not fine then return nil, 'bin_' .. why end
+      if not c.flags.on_ground then return nil, 'bin_not_on_ground' end
+      local okk, subs = pcall(dfhack.items.getContainedItems, c)
+      if not okk or type(subs) ~= 'table' then return nil, 'in_inventory' end
+      for _, x in ipairs(subs) do
+        if not want[df.item_type[x:getType()]] then return nil, 'bin_mixed' end
+        local fx, wx = free_of(x, BRING_SKIP)
+        if not fx and wx ~= 'in_inventory' then return nil, 'bin_' .. wx end
+      end
+      return c, #subs
+    end
     for _, tn in ipairs(type(a.types) == 'table' and a.types or {}) do
       local t = df.item_type[tn]
       local list = t and df.global.world.items.other[tn]
       for _, it in ipairs(list or {}) do
         if n >= max then break end
-        local skip = false
-        for _, fl in ipairs(BRING_SKIP) do if it.flags[fl] then skip = true; break end end
-        if not skip and it.flags.on_ground and dfhack.items.markForTrade(it, d) then n = n + 1 end
+        local fine, why = free_of(it, BRING_SKIP)
+        if fine then
+          if it.flags.on_ground and dfhack.items.markForTrade(it, d) then n = n + 1 else skip(it.flags.on_ground and 'refused' or 'not_on_ground') end
+        elseif why == 'in_inventory' then
+          local c, cnt = bin_of(it)
+          if c and binned[c.id] then
+            -- counted with its bin
+          elseif c then
+            binned[c.id] = true
+            if dfhack.items.markForTrade(c, d) then n = n + cnt else skip('refused') end
+          else
+            skip(cnt)
+          end
+        else
+          skip(why)
+        end
       end
     end
+    a.skipped = sk
     return true, n
   end
 

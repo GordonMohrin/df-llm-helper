@@ -827,7 +827,7 @@ def adopt_line(s: dict) -> str:
     if a.get("new"):
         bits.append(f"{a['new']} adopted")
     if a.get("gone"):
-        bits.append(f"{a['gone']} destroyed, out of the manifest")
+        bits.append(f"{a['gone']} destroyed, out of the manifest (BUG-562: `bp.place workshops only=<Type> rebuild=1` builds one again where it stood; propose drafts it)")
     bits += [f"{a[k]} {k}" for k in ("stock", "wells", "beds", "doors") if k in a]
     txt = ("adopted fort: " if a.get("rec") else "manifest: ") + ", ".join(bits)
     miss = a.get("miss") or []

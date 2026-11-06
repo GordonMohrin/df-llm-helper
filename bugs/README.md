@@ -568,6 +568,10 @@ Related: FR-xx, BUG-xx
 | [BUG-555](BUG-555-refit-only-in-quiet-peace-unequipped-squads-refused-the-sortie.md) | fixed (offline, live-untested) | high | Run 16a i1 y422: 0 of 6 soldiers equipped with 18 free body armors and 17 free weapons; the armor refit ran in quiet PEACE only; the refusal now names what is missing | `lua/dfllm/military.lua` |
 | [BUG-556](BUG-556-a-stale-metal-gear-order-never-falls-back-to-leather.md) | fixed (offline, live-untested) | high | Run 16c i3 y395-y401: a metal gear order that makes nothing for days is never given up for leather (a manual leather order raised worn 11 -> 87 %) | `lua/dfllm/economy.lua` |
 | [BUG-557](BUG-557-idle-why-hurt-counts-healed-scars.md) | fixed (offline, live-untested) | medium | Run 16d i4 y404: idle_why hurt counted every dwarf with a healed scar (13-20 of 25 adults); only wounds that need treatment count | `lua/dfllm/economy.lua`, `lua/dfllm/util/wound.lua` |
+| [BUG-559](BUG-559-patients-die-of-thirst-outside-the-breach-alert-burrow.md) | fixed (offline, live-untested) | critical | patients on Kern+ outside the BREACH alert burrow die of thirst beside 47 caregivers (Run 16b i2 y402) | lua/dfllm/water.lua |
+| [BUG-560](BUG-560-mood-items-stay-forbidden-outside-kern.md) | fixed (offline, live-untested) | high | forbidden mood material outside Kern+ stays forbidden in PEACE ('12 forbidden' leather, two moods died, Run 16d i4 y407) | lua/dfllm/care.lua |
+| [BUG-561](BUG-561-trade-offers-no-crafts-from-bins.md) | fixed (offline, live-untested) | medium | `nothing_to_sell` / '0 sale items sent' beside 40 crafts: goods in bins are never hauled or offered (Run 16d i4, 16a i1) | lua/dfllm/act.lua, trade.lua |
+| [BUG-562](BUG-562-gone-workshops-are-never-built-again.md) | fixed (offline, live-untested) | high | workshops `no longer stands` are never built again at the old place (mood_ws 417 d, Run 16b i2) | dfpilot/bp/sites.py, plan.py |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
