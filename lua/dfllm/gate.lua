@@ -2340,6 +2340,11 @@ end
 -- refuge burrow; t = the tick it has been in that state since. gate.refuge_levers publishes the refuge ones, readiness' question names
 -- the real blocker instead of asking for the retrofit again.
 M.LINK_STALE = 14400       -- a link job queued this long (12 game days) and not done is named a stale link job
+-- BUG-546 (Run 16d i4 Trumpetrealms: the link jobs of the refuge levers O1/B2 hung more than 1000 days, nothing re-issued them): a
+-- link job nobody works on is taken down after LINK_REISSUE ticks (act.cancel_link_job) and the lever is linked again with the
+-- mechanisms that stand now; after LINK_MECH ticks of a queued job gate asks economy for a dwarf with the Mechanics labor (once per
+-- LINK_MECH). Neither runs in SIEGE / BREACH / DRILL (LINK_MODES), neither pulls or raises anything.
+M.LINK_REISSUE, M.LINK_MECH = 14400, 1200
 M.LR_EVERY = 120           -- ticks a read of the manifest levers stays current (the fast cadence of a SIEGE does not read them every pass)
 local function lever_report(K, spec, r, now)
   local man = K.manifest()
@@ -2394,12 +2399,44 @@ function M.refuge_levers(K)
   return out
 end
 
+-- BUG-546: the link jobs queued on this bridge's manifest levers (rep.list entries in state 'job', e.t = since when): a Mechanic is
+-- asked for once a job has waited LINK_MECH ticks; one that has waited LINK_REISSUE ticks is taken down (an unworked one) so the lever
+-- is read as 'built' on the next pass and linked again. True when a job was taken down (one per pass).
+function M.link_watch(K, name, r, rep, now)
+  for _, e in ipairs(rep.list) do
+    if e.st == 'job' then
+      local age = now - e.t
+      if age >= M.LINK_MECH and now >= (r.mech_at or 0) then
+        r.mech_at = now + M.LINK_MECH
+        K.call('economy', 'mechanic_labor')                  -- 'set' is said in kern.log by economy
+      end
+      if age >= M.LINK_REISSUE and now >= (r.reissue_at or 0) then
+        local lv = find_at(e.p)
+        if lv and is_lever(lv) and link_pending(lv) then
+          r.reissue_at = now + M.LINK_MECH                    -- a job with a worker, or a refusal: looked at again in a day
+          local ok, n = K.act.cancel_link_job(lv.id)
+          if ok and (math.tointeger(n) or 0) > 0 then
+            r.relinks, r.lr = (r.relinks or 0) + 1, nil
+            r.link_at, r.link_wait = nil, nil
+            K.log('warn', 'gate: %s lever %d: link job unworked for %d days, taken down (%s), the lever is linked again', name, lv.id,
+                  age // 1200, tostring(n))
+            K.emit('LEVER', 'C', 'relink ' .. name, {bridge = name, lever = lv.id, job = -1})
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
 local function links(K, name, spec, r, now)
   -- BUG-513: the manifest levers are read whatever the mode (at most every LR_EVERY ticks)
   local rep = (r.lr and now >= r.lr.tick and now - r.lr.tick < M.LR_EVERY) and r.lr or lever_report(K, spec, r, now)
   if not LINK_MODES[K.mode()] or now < (r.link_at or 0) then return end
   local b = r.bid and df.building.find(r.bid)
   if not b or not built(b) then return end
+  if M.link_watch(K, name, r, rep, now) then return end
   -- BUG-513: mechanisms are scarce (a link takes 2): the refuge lever comes first, and while one of this bridge's refuge levers waits
   -- for its link, no other lever of a bridge that has a linked lever already is linked
   local order, ref_wait, any_linked_lv = {}, false, false

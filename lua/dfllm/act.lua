@@ -28,6 +28,9 @@ A.TOOL_LABOR_DETAILS = {Miners = true, Woodcutters = true, Hunters = true, Fishe
 A.TOOL_EXCL = {Miners = 'MINE', Woodcutters = 'CUTWOOD', Hunters = 'HUNT'}
 -- the doctor labors act.medic switches and the hospital posts act.hospital_post fills (FR-48)
 A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
+-- BUG-546/547: the one labor each way act.labor_set switches (the labors screen): mechanic on (a lever's link job needs a Mechanic),
+-- farm off (the manager at the fields validates no order)
+A.LABOR_SETS = {mechanic = {name = 'MECHANIC', on = true}, farm = {name = 'PLANT', on = false}}
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
@@ -1623,6 +1626,19 @@ local function impls(state)
     return true, job.id
   end
 
+  -- BUG-546 (Run 16d i4 Trumpetrealms: the link jobs of the refuge levers O1/B2 hung more than 1000 days): the kernel's own link job that
+  -- nobody works on is taken down (the lever sheet's cancel job), so gate links the lever again with the mechanisms that stand now.
+  -- A job with a worker is left alone. Returns true, number of jobs removed (0: all have a worker)
+  function I.cancel_link_job(lever_id)
+    local lever = df.building.find(int(lever_id) or -1)
+    if not lever or not is_lever(lever) then return false, 'not a lever' end
+    local n = 0
+    for _, j in ipairs(link_jobs(lever)) do
+      if dfhack.job.getWorker(j) == nil and dfhack.job.removeJob(j) then n = n + 1 end
+    end
+    return true, n
+  end
+
   -- nobles screen (info > administrators > choose a candidate for a vacant fort position). The screen's
   -- result is two records: the assignment names the citizen's historical figure (histfig, histfig2), and
   -- the figure gets a position link to the fortress entity (the same records as the expedition leader's,
@@ -2095,6 +2111,25 @@ local function impls(state)
       end
     end
     return true, n == 0 and 'already' or (on and 'enabled' or 'disabled')
+  end
+
+  -- labors screen, one labor of one citizen (BUG-546 Run 16d i4 Trumpetrealms: the refuge levers' link jobs waited 1000 days and nobody was
+  -- known to hold the Mechanics labor; BUG-547: the manager worked as a farmer and validated no order for 14 days): `which` = mechanic
+  -- (only on) or farm (only off), A.LABOR_SETS; a citizen who is no living adult cannot take a labor
+  function I.labor_set(unit_id, which, on)
+    local spec = A.LABOR_SETS[tostring(which)]
+    if not spec then return false, 'which must be mechanic or farm' end
+    if (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
+    local u = df.unit.find(int(unit_id) or -1)
+    if not u then return false, 'no unit ' .. tostring(unit_id) end
+    if on and (not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) or dfhack.units.isDead(u)) then
+      return false, 'not an adult living citizen'
+    end
+    local l = df.unit_labor[spec.name]
+    if l == nil then return false, 'no labor ' .. spec.name end
+    if (u.status.labors[l] == true) == (on == true) then return true, 'already' end
+    u.status.labors[l] = on and true or false
+    return true, on and 'enabled' or 'disabled'
   end
 
   -- location sheet > occupations (FR-48; v1 FEATURE-004 live note: with no hospital post filled the game posts

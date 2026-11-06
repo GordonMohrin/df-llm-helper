@@ -46,7 +46,7 @@ local function world()
     W.calls[#W.calls + 1] = {lid, bid}
     if W.lmode == 'fail' then return false, 'needs 2 free reachable mechanisms, 1 found' end
     local lv = W.buildings[lid]
-    lv.jobs:insert('#', {id = 9000 + #W.calls, job_type = df.job_type.LinkBuildingToTrigger})
+    lv.jobs:insert('#', {id = 9000 + #W.calls, job_type = df.job_type.LinkBuildingToTrigger, _worker = W.lworker and {id = 7} or nil})
     return true, 9000 + #W.calls
   end)
   for _, b in pairs(W.bridges) do built(b, true) end
@@ -99,10 +99,12 @@ T.test('BUG-513: built but not linked: refused for the mechanisms; the question 
   T.ok(q[1].d.q:find('last refusal: needs 2 free reachable mechanisms, 1 found', 1, true), q[1].d.q)
 end)
 
-T.test('BUG-513: a link job queued for days that nobody does is named (stale after 12 days); a lever that is not there asks for the ' ..
+-- BUG-546: an unworked link job is taken down after gate.LINK_REISSUE (= LINK_STALE) and linked again, so a stale job is one a dwarf
+-- holds (a worker): the dwarf with the job is the case the question still names, now with a command
+T.test('BUG-513: a link job queued for days that a dwarf holds is named (stale after 12 days); a lever that is not there asks for the ' ..
        'retrofit as before', function()
   local W = world()
-  W.lmode = 'ok'
+  W.lmode, W.lworker = 'ok', true
   day(W, 2)
   local r = refuge(W)
   T.eq(r.B1.job, 1, 'the link job is queued: ' .. T.show(r))
@@ -116,6 +118,8 @@ T.test('BUG-513: a link job queued for days that nobody does is named (stale aft
   T.eq(q[1].d.cause, 'link_job', 'the first question: a job is queued')
   T.eq(last.d.cause, 'link_stale')
   T.ok(last.d.q:find('Mechanics labor', 1, true), last.d.q)
+  -- BUG-546: the diagnosis names a command (no free mechanisms: the caravans)
+  T.eq(last.d.cmds, {[[dfllm cmd trade.want '{"add":["mechanism","stone"]}']]})
   -- no lever stands there: the retrofit
   local W2 = world()
   for _, lv in ipairs(W2.levers) do

@@ -155,7 +155,7 @@ LUA_RULES = {
     "unit-iter": "unit iteration outside sense.lua/snapshot.lua (use K.census or df.unit.find(id))",
     "tile-read": "tile/map read outside sense.lua/snapshot.lua/seal.lua (use K.call('snapshot','tile',...))",
     "create": "item/unit creation (armok)",
-    "remove-job": "removeJob outside act.cancel_own_lever_job",
+    "remove-job": "removeJob outside act.cancel_own_lever_job / act.cancel_link_job",
     "hidden-write": "writing a hidden flag (reveals tiles/units)",
     "hidden-read": "reading hidden knowledge (water_table, aquifer, features, caverns)",
     "instant": "--instant / leverPullInstant (armok)",
@@ -165,7 +165,7 @@ LUA_RULES = {
     "body-write": "writing body, wounds or attributes",
     "timer-write": "writing unit timers/counters",
     "labor-write": "writing labors or work details (labormanager owns them; economy only the builtin tool "
-                   "details, through act.work_detail; care only the doctor labors, through act.medic)",
+                   "details, through act.work_detail; care only the doctor labors, through act.medic; act.labor_set: mechanic on, farm off)",
     "armok": "armok/memory API",
     "blocked-command": "blocked command (config/allowlist.json 'blocked', inline lua or claude/*)",
     "not-allowlisted": "act.run command or arguments not in config/allowlist.json",
@@ -617,10 +617,10 @@ class _Lint:
             hits.append("timer-write")
         if (("labors" in names and (dfroot or "status" in every)) or
                 ("work_details" in names and (dfroot or "labor_info" in names))) and \
-                not (self.role == "act" and (self.in_func("work_detail") or self.in_func("medic"))):
+                not (self.role == "act" and (self.in_func("work_detail") or self.in_func("medic") or self.in_func("labor_set"))):
             # live L1b: economy owns the builtin tool details; act.work_detail (the work details screen)
             # is the one writer of their membership and the labors that follow it; act.medic (the labors
-            # screen) the one writer of the doctor labors (FR-48)
+            # screen) the one writer of the doctor labors (FR-48); act.labor_set one labor each way (BUG-546/547)
             hits.append("labor-write")
         for r in hits:
             self.add(line, r)
@@ -767,7 +767,7 @@ class _Lint:
             self.add(line, "create")
         if q == "df.new" and called and self.role != "act":
             self.add(line, "df-alloc")
-        if v == "removeJob" and not (self.role == "act" and self.in_func("cancel_own_lever_job")):
+        if v == "removeJob" and not (self.role == "act" and (self.in_func("cancel_own_lever_job") or self.in_func("cancel_link_job"))):
             self.add(line, "remove-job")
         if self.role != "act" and (q in COMMAND_FNS or (v == "simulateInput" and not bare)):
             self.add(line, "command", f"{LUA_RULES['command']}: {q}")
