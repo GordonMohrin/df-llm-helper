@@ -17,6 +17,8 @@ local function setup(units)
   local snap = X.snapshot()
   snap.groups = function(K, pts) local r = {}; for i = 1, #pts do r[i] = 1 end; return r end
   X.load(W, {'military'}, {sg, rf, snap, X.runner('P5')}, {'sense'})
+  -- the fixture's soldiers carry no kit: BUG-510's stand-down of unequipped squads is not what this file tests
+  X.mod('military').UNFIT_PCT = 0
   W.state()
   W.run(9, {skip = 9})
   W.K.set_mode('SIEGE', 'test')

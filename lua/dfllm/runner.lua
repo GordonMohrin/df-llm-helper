@@ -1759,7 +1759,6 @@ function Q.pile_part(K, P, st, ch, R)
   return {pos = ch.pos, cells = calls[pc + 1] or {}}, {k = pc + 1, n = #calls}
 end
 
-<<<<<<< HEAD
 -- BUG-514 (Run 16a i1 Basementflew y403-y405, fortcore aquifer=pass: the core level lay in damp rock, the beds at 34,92,117 stood on
 -- water, DF cancelled their jobs 'Building site submerged' and the stage hung at 35 % for 400 days): beds are not queued on a tile
 -- that holds water (Q.WET_BUILD/7 or more, snapshot flow); they are left out as a refused part (R.uns), the stage goes on.
@@ -1787,7 +1786,8 @@ function Q.wet_cells(K, P, st, ch)
   end
   if n == 0 then return ch, 0 end
   return {pos = ch.pos, cells = keep}, n
-=======
+end
+
 -- BUG-522 (Run 16c i3 Sealcertain y385 d11: two citizens 'found dead: crushed (incident CAVEIN)' at 15,13,141, the brief said only
 -- 'crushed 2', no event named a project or a tile): a floor tile that hangs free above a hole a dig chunk opens is what a cave-in
 -- drops on whoever stands there or below. Of every dug tile (key d, h, u, j, i, r; a channel also opens the tile below) the roof tile
@@ -1881,7 +1881,6 @@ function M.dig_near(K, pos, r)
   table.sort(out, function(a, b) if a.dist ~= b.dist then return a.dist < b.dist end return a.proj < b.proj end)
   while #out > 5 do table.remove(out) end
   return out
->>>>>>> fix32-misc
 end
 
 local function apply(K, P, st, R)
