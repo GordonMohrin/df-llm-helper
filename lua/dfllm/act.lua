@@ -1244,6 +1244,54 @@ local function impls(state)
     return false, 'no such zone'
   end
 
+  -- BUG-539 (Run 16b i2 Brotherarrow: water.unstick removed the hospital zone 18030 and nothing built it again, 6-10 patients
+  -- lay in a fort 'hospital none' for 15+ days): the zones screen's add zone > Meeting Area drawn over the old rectangle and
+  -- attached to the EXISTING hospital location `spec.loc` (quickfort's `location=hospital` would open a second location,
+  -- zone.lua set_location: site.next_building_id), as hospital_remove took it away: the same location, the same room,
+  -- beds and tables keep their place. spec = {loc, x1, y1, x2, y2, z}. Idempotent: a live zone of that location on exactly
+  -- that rectangle is ok ('present'). Returns ok, {ids} | 'present' | the reason. [live-untested: set_location's own
+  -- uncategorize/categorize(true) is repeated here for a zone made without the `location` key]
+  function I.hospital_restore(spec)
+    if type(spec) ~= 'table' then return false, 'spec must be a table' end
+    local loc, x1, y1, x2, y2, z = int(spec.loc), int(spec.x1), int(spec.y1), int(spec.x2), int(spec.y2), int(spec.z)
+    if not (loc and x1 and y1 and x2 and y2 and z) then return false, 'spec needs loc, x1, y1, x2, y2, z' end
+    if x2 < x1 or y2 < y1 or x2 - x1 >= 40 or y2 - y1 >= 40 then return false, 'bad rectangle' end
+    local site = dfhack.world.getCurrentSite()
+    local bld
+    for _, l in ipairs(site and site.buildings or {}) do
+      if l.id == loc and l:getType() == df.abstract_building_type.HOSPITAL then bld = l end
+    end
+    if not bld then return false, 'no hospital location ' .. loc end
+    for _, zn in ipairs(df.global.world.buildings.other.ANY_ZONE) do
+      if zn.location_id == loc and zn.z == z and zn.x1 == x1 and zn.y1 == y1 and zn.x2 == x2 and zn.y2 == y2 then
+        return true, 'present'
+      end
+    end
+    local cell = string.format('m{name=Hospital}(%dx%d)', x2 - x1 + 1, y2 - y1 + 1)
+    local ok, res = I.zone_place({cell = cell, pos = {x1, y1, z}})
+    if not ok then return false, res end
+    local okat, err = pcall(function()
+      for _, id in ipairs(res.ids) do
+        local zn = df.building.find(id)
+        zn.site_id = site.id
+        zn.location_id = loc
+        zn:uncategorize()
+        zn:categorize(true)
+        local has = false
+        for _, b in ipairs(bld.contents.building_ids) do if b == id then has = true end end
+        if not has then bld.contents.building_ids:insert('#', id) end
+      end
+    end)
+    if not okat then
+      for _, id in ipairs(res.ids) do
+        local zn = df.building.find(id)
+        if zn then pcall(dfhack.buildings.deconstruct, zn) end
+      end
+      return false, 'attach to location ' .. loc .. ' failed: ' .. tostring(err)
+    end
+    return true, {ids = res.ids}
+  end
+
   -- live L6 (reclaimed Paddletribes): the office zone had no owner, so the manager validated no order
   -- (117 of 118 waiting, the stills idle, drink 0). Assigns an unowned Office zone to the manager, as the
   -- zone sheet's "Assign" does (dfhack.buildings.setOwner). Never takes an office someone owns.

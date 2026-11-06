@@ -278,6 +278,9 @@ C.VERBS = {
   -- BUG-507 (Run 16b i2: a GiveWater job hung 26 days on a child, the player had no command): the stalled water job of one
   -- worker (or every stalled one) goes through the ladder at once: off Orderlies, the pond zone beside him, the patient's hospital zone
   ['water.unstick'] = {mod = 'water'},
+  -- BUG-539 (Run 16b i2: unstick removed the hospital zone, nothing drew it again): the removed hospital zone(s) again at their old
+  -- location and rectangle (any mode: patients lie there)
+  ['hospital.restore'] = {mod = 'water'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -294,6 +297,7 @@ C.ACT = {
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   hospital_remove = {'water'},                     -- BUG-034: a dry hospital's zones; BUG-131: hospital.retire
+  hospital_restore = {'water'},                    -- BUG-539: the removed hospital zone drawn again at its old location
   water_zone = {'water'},                          -- BUG-324: a Water Source zone on the water the scan found reachable
   sand_zone = {'economy'}, fish_zone = {'economy'},
   tool_pile = {'economy'},                         -- BUG-053: a weapons stockpile for the miners' picks near the mines
@@ -592,7 +596,9 @@ C.STATE_SPEC = obj({
                -- (hospital.retire needs no approve), pat = patients lying in it
                hout = obj({z = NAT, at = {t = 'tup', items = {NAT, NAT, NAT}}, ok = FLAG}, {pat = NAT}),
                -- BUG-288/289/290: the tick the water scan last finished, the best way to water it found (any distance)
-               wst = NAT, wsc = str(96)}),
+               wst = NAT, wsc = str(96),
+               -- BUG-539: hospital zones the kernel removed that wait to be drawn again (hospital.restore)
+               hrm = NAT}),
   -- FR-96/97 (traps.lua, daily): armed (n) of the manifest's trap tiles (m); built, ways trapped / listed, full cage traps,
   -- free cages, listed tiles without a trap (lost; lh: some in the hall), the last cage order
   traps = obj({n = NAT, m = NAT}, {b = NAT, w = NAT, wn = NAT, f = NAT, c = NAT, l = NAT, lh = FLAG, ord = str(40),

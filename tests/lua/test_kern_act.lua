@@ -802,6 +802,57 @@ T.test('hospital_remove (BUG-034): one zone of a hospital location, never anothe
   dfhack.gui.getSelectedCivZone, dfhack.world.getCurrentSite, df.abstract_building_type = old_sel, old_site, old_abt
 end)
 
+T.test('hospital_restore (BUG-539): a meeting zone over the old rectangle joins the EXISTING hospital location; present is ok; ' ..
+       'a failed attach deconstructs the new zone', function()
+  local W = H.world{tag = 'hrs'}
+  local old_abt = df.abstract_building_type
+  df.abstract_building_type = {TEMPLE = 2, HOSPITAL = 13}
+  local hosp = {id = 6, getType = function() return 13 end, contents = {building_ids = kmock.vec{}}}
+  local site = {id = 1, buildings = kmock.vec{hosp, {id = 7, getType = function() return 2 end}}}
+  dfhack.world = dfhack.world or {}
+  local old_site = dfhack.world.getCurrentSite
+  dfhack.world.getCurrentSite = function() return site end
+  local made, cells, gone = {}, {}, {}
+  local boom
+  local function zone(id)
+    return {id = id, uncategorize = function() end, categorize = function(self, v) if boom then error('boom') end self.cat = v end}
+  end
+  W.scripts['quickfort'] = {apply_blueprint = function(p)
+    cells[#cells + 1] = {p.data[0][0][0], p.pos.x, p.pos.y, p.pos.z}
+    local z = zone(960 + #cells)
+    made[z.id] = z
+    df.global.world.buildings.other.ACTIVITY_ZONE:insert('#', z)
+    df.global.world.buildings.other.ANY_ZONE:insert('#', z)
+    return {zone_designated = {label = 'zones', value = 1}}
+  end}
+  local old_find = df.building.find
+  df.building.find = function(id) return made[id] end
+  dfhack.buildings = dfhack.buildings or {}
+  dfhack.buildings.deconstruct = function(z) gone[#gone + 1] = z.id; return true end
+  local env = mk()
+  env.who_v = 'care'
+  local spec = {loc = 6, x1 = 10, y1 = 20, x2 = 14, y2 = 23, z = 5}
+  T.eq({env.api.hospital_restore(spec)}, {false, 'not owner'})
+  env.who_v = 'water'
+  T.eq({env.api.hospital_restore({loc = 7, x1 = 1, y1 = 1, x2 = 2, y2 = 2, z = 3})}, {false, 'no hospital location 7'}, 'a temple')
+  T.eq({env.api.hospital_restore({loc = 6})}, {false, 'spec needs loc, x1, y1, x2, y2, z'})
+  local ok, res = env.api.hospital_restore(spec)
+  T.ok(ok)
+  T.eq(res.ids, {961})
+  T.eq(cells, {{'m{name=Hospital}(5x4)', 10, 20, 5}}, 'a meeting zone over the old rectangle, no location key (that opens a new location)')
+  T.eq({made[961].location_id, made[961].site_id, made[961].cat}, {6, 1, true}, 'the existing location')
+  T.eq(hosp.contents.building_ids[0], 961, 'and its building list')
+  made[961].x1, made[961].y1, made[961].x2, made[961].y2, made[961].z = 10, 20, 14, 23, 5
+  T.eq({env.api.hospital_restore(spec)}, {true, 'present'}, 'idempotent')
+  T.eq(#cells, 1)
+  boom = true
+  local ok2, err = env.api.hospital_restore({loc = 6, x1 = 30, y1 = 30, x2 = 31, y2 = 31, z = 5})
+  T.eq(ok2, false)
+  T.ok(tostring(err):find('attach to location 6 failed', 1, true), err)
+  T.eq(gone, {962}, 'the new zone is taken away again')
+  dfhack.world.getCurrentSite, df.abstract_building_type, df.building.find = old_site, old_abt, old_find
+end)
+
 T.test('link_lever [S3, live L2]: one LinkBuildingToTrigger job with two free reachable mechanisms', function()
   local W = H.world{tag = 'link'}
   local vec = kmock.vec

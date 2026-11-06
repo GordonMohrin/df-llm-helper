@@ -311,6 +311,8 @@ WATER_LIM: dict = {
     # that make it a case (stall_need thirst), the round cadence and size, the hospital rung and the patient's thirst for it
     "stall": "bool", "stall_days": (1, 60), "stall_need": _THIRST, "stall_every": _TICKS, "stall_max": (1, 8),
     "stall_hosp": "bool", "stall_dying": _THIRST,
+    # BUG-539: a removed hospital zone is drawn again (hosp_restore) after restore_wait ticks once no patient is thirsty, at the latest after restore_max
+    "hosp_restore": "bool", "restore_wait": _TICKS, "restore_max": _TICKS,
     # BUG-288/289: the scan's read budget and slices, the boxes round citizens and remembered bodies, the surface survey
     # (levels per column, lattice, budget) and the boxes round its hits; BUG-290: a pit as a well spot
     "ws_read_max": (1000, 400000), "ws_slices": (1, 200), "ws_body_slices": (1, 50), "ws_cit": (0, 60), "ws_mem": (0, 32),
