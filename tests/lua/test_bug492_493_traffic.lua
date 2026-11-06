@@ -199,7 +199,8 @@ T.test('BUG-493 (5): the drill lowers a bridge after QUIET_DRILL ticks of a busy
   -- QUIET_DRILL ticks on the 1-tile margin
   local r = {}
   for i = 1, 200 do r[#r + 1] = {i % 2 == 0 and 48 or 49, 42} end
-  local W = build{walkers = {{id = 700, kind = 'citizen', route = r, start = 0}}}
+  -- (BUG-543: the pacer starts after B1 is up: a unit moving within 3 tiles of the footprint holds a raise, not a lowering's 1-tile margin)
+  local W = build{walkers = {{id = 700, kind = 'citizen', route = r, start = 380}}}
   W.load(S.drill())                                    -- siege ends a DRILL at once without a drill module
   W.K.set_mode('DRILL', 'test drill')
   run(W, 400)

@@ -254,7 +254,7 @@ add{name = 'DRILL: a soldier on the footprint blocks the raise until he steps of
     T.eq(W.drill.kpi.fails, {'B1:blocked'})
   end}
 
-add{name = 'DRILL (live L4): a soldier next to the B1 footprint holds the raise; two tiles away he does not',
+add{name = 'DRILL (live L4): a soldier next to the B1 footprint holds the raise; two tiles away he does not (once he has stood still RAISE_STILL ticks, BUG-543)',
   units = function()
     local r = S.fort_units()
     r[5].pos = {51, 41, Z}                                       -- adjacent to the footprint (y 40)
@@ -264,7 +264,7 @@ add{name = 'DRILL (live L4): a soldier next to the B1 footprint holds the raise;
   run = 2000, modes = {'PEACE>DRILL', 'DRILL>PEACE'},
   check = function(W)
     local b1 = S.pulls(W, 'B1')
-    between(rel(W, b1[1].tick), 900, 930, 'B1 pull once he stands two tiles off')
+    between(rel(W, b1[1].tick), 900, 1000, 'B1 pull once he stands two tiles off')
     T.eq(#evs(W, 'GATE_FAIL') + #evs(W, 'BREACH'), 0)
   end}
 

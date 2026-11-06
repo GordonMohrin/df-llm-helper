@@ -192,7 +192,8 @@ T.test('BUG-311 (Earthboat y376 #2182, RECOVERY: a soldier walked onto B2 while 
   W.move(12, 40, 17, Z)                                                    -- 2 tiles, walking toward B1
   run(W, 18)
   T.ok(job(W, 'B1') == nil or job(W, 'B1').id ~= jid, 'cancelled (old: done, B1 rose with him walking onto it)')
-  T.ok(logged(W, 'gate: B1 up pull cancelled: citizen 12 2 tiles from it and walking toward it'), 'kern.log')
+  -- BUG-543: a unit moving within 3 tiles holds the raise (gate.raise_movers), named as such
+  T.ok(logged(W, 'gate: B1 up waits for citizen 12 moving'), 'kern.log')
   T.eq(up(W, 'B1'), false)
   run(W, 400)
   T.eq({up(W, 'B1'), pulls(W, 'B1', 'up')}, {true, 2}, 'queued again, raised while he stands still')
