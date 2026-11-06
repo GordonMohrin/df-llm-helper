@@ -398,6 +398,8 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
         return stalled_job_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "dry_well":
         return dry_well_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "no_hard_stone":
+        return no_hard_stone_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "mood_thirst":
         return mood_thirst_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "project_released":
@@ -546,6 +548,17 @@ def dry_well_hint(d: dict) -> str:
     return (f"{d.get('q', 'GiveWater carriers stand at a dry well')}. Send " + (f"{cmds[0]}" if cmds else "dfllm cmd well.retire id=<well>")
             + " (takes the dry well away so the carriers fill at the accepted water; a cistern's well only with approve:true)"
             + (f", then {cmds[-1]}" if len(cmds) > 1 else ""))
+
+
+def no_hard_stone_hint(d: dict) -> str:
+    """BUG-545 (Run 16d i4 Trumpetrealms: 101 boulders, none of them non-economic hard stone; Run 16a i1 Basementflew: every boulder out of
+    reach): DF cancels rock jobs with "Needs non-economic hard stone boulders" (or the census shows boulders and none usable). The kernel
+    counts stone as 0 (no rock order is queued for it) and the caravans are asked. d.cause = none | denied, d.cmds = trade.want stone and
+    mechanisms, plan propose (a dig to hard stone), inspect workload. Yours to decide: wood serves doors, chests, tables, beds, coffins;
+    mechanisms, stone traps and levers have no wooden form."""
+    cmds = [str(c) for c in d.get("cmds") or []]
+    return (f"{d.get('q', 'no non-economic hard stone')}. Decide yourself: buy it ({cmds[0] if cmds else 'dfllm cmd trade.want'}), dig to hard "
+            f"stone ({cmds[1] if len(cmds) > 1 else 'dfllm plan propose'}), or go on without mechanisms and stone traps")
 
 
 def released_hint(d: dict) -> str:

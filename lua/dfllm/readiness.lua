@@ -1207,6 +1207,15 @@ local function ask_reflevers(K, now)
     q = string.format('bridge%s %s: a link job for a refuge lever has waited %d days: it needs a dwarf with the Mechanics labor and a ' ..
                       'Mechanics workshop%s', #rt.rlg == 1 and '' or 's', names, t.age // 1200,
                       cause == 'link_stale' and ' (stale)' or '')
+    -- BUG-546 (Run 16d i4 Trumpetrealms: "link_stale" offered no command): gate switches a Mechanic on and takes an unworked
+    -- job down by itself (gate.LINK_REISSUE); what is left for the player is the missing mechanism (no hard stone: the caravans)
+    -- or the workshop; the command is the one that shows which
+    if cause == 'link_stale' then
+      q = string.format('bridge%s %s: a link job for a refuge lever waits %d days (%d free mechanisms): gate switches a Mechanic on and ' ..
+                        'links again by itself (Mechanics labor); no Mechanics workshop or no hard stone for mechanisms?',
+                        #rt.rlg == 1 and '' or 's', names, t.age // 1200, free)
+      cmd = free < 2 and [[dfllm cmd trade.want '{"add":["mechanism","stone"]}']] or [[dfllm cmd inspect '{"what":"workload"}']]
+    end
   end
   K.emit('DECISION_NEEDED', 'A', cut(cmd and (q .. ': ' .. cmd) or q, 200),
          {id = 'refuge_levers', q = cut(q, 200), bridge = rt.rlg[1], cmds = cmd and {cmd} or nil, cause = cause, n = free})

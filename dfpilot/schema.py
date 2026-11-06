@@ -87,6 +87,8 @@ ACT = {
     "mood_task": ["care"],                         # BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
+    "cancel_link_job": ["gate"],                   # BUG-546: the kernel's own unworked link job of a lever, taken down to link again
+    "labor_set": ["economy"],                      # BUG-546/547: Mechanic labor on for one citizen, farming off for the manager
     "construction_remove": ["seal"],              # BUG-479: the refuge plug's walls come down in PEACE
     "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
     "burrow_tiles": ["seal", "runner", "water"],  # BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:

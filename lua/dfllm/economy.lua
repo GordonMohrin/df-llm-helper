@@ -1068,7 +1068,14 @@ local function classify(it, a, cat)
   elseif M.PIECE_INV[cat] then
     -- Run 11: free doors, hatch covers, grates and blocks (not built in, not taken by a job): what a seal piece or a
     -- planned building can use now (T.jmake, economy.mat_for)
-    if not f.in_job then a[M.PIECE_INV[cat]] = a[M.PIECE_INV[cat]] + n end
+    -- BUG-544 (Run 16a i1 Basementflew: 13 'free' blocks lay in the flooded z117 complex, the aqshaft ring waited 600 days beside 255
+    -- logs): a piece on another walk group than the citizens' is no piece anybody can carry; `<key>_far` counts it
+    if not f.in_job then
+      local key = M.PIECE_INV[cat]
+      local fk = key:gsub('_free$', '') .. '_far'
+      if a.far and a.far(it) then a[fk] = a[fk] + n
+      else a[key] = a[key] + n end
+    end
   elseif cat == 'BARREL' or cat == 'BIN' then  -- live L1b: brewing stalled for want of an empty barrel
     local empty = #dfhack.items.getContainedItems(it) == 0
     if cat == 'BARREL' then
@@ -1079,6 +1086,9 @@ local function classify(it, a, cat)
       if empty then a.bins_empty = a.bins_empty + 1 end
     end
   elseif cat == 'BOULDER' then
+    -- BUG-544 (Basementflew: census rock 32, every boulder in the flooded z117 complex, masons and mechanics never worked): a
+    -- boulder on another walk group than the citizens' is no stone for any job; `rock_far` counts it, `rock` and `ore` do not
+    if a.far and a.far(it) then a.rock_far = a.rock_far + n; return end       -- (no flag read: the census reads one flag word)
     a.rock = a.rock + n
     if it.mat_type == 0 then
       local r = ore_of(it.mat_index)
@@ -1180,7 +1190,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'cook_ban_x', 'food_inedible', 'food_far',
               'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt',
               'w_pick_far', 'w_axe_far', 'w_pick_use', 'w_axe_use',
-              'brew_p', 'brew_g', 'chairs', 'tables'}
+              'brew_p', 'brew_g', 'chairs', 'tables',
+              'rock_far', 'doors_far', 'hatches_far', 'grates_far', 'blocks_far', 'chairs_far', 'tables_far'}   -- BUG-544
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -2362,6 +2373,7 @@ end
 -- from furniture and blocks; care's reserve counts the same way), minus the rock floor
 local function stone_free(c, r)
   local inv = r.inv
+  if M.hard_denied(inv, r.now) then return 0 end        -- BUG-545: DF itself says the fort has no non-economic hard stone
   local n = (inv.rock or 0) - math.max((inv.ore or 0) + (inv.flux or 0), inv.rock_bad or 0)
   return math.max(0, n - floor_of(c, r.p, r, 'rock'))
 end
@@ -2750,6 +2762,10 @@ local function cancel(K, ev)
     if not oks then K.log('warn', 'sand cancel: %s', tostring(errs)) end
   end
   M.cancel_note(key, wk, ev.tick)                 -- BUG-308: every cancel of a job kind since the load (care's webs)
+  if M.hard_words(why) then                       -- BUG-545: "Needs non-economic hard stone boulders"
+    local okh, errh = pcall(M.hard_cancel, K, c, job, ev.tick or K.now().tick)
+    if not okh then K.log('warn', 'hard stone cancel: %s', tostring(errh)) end
+  end
   st.cancels[key] = (st.cancels[key] or 0) + 1
   local n = st.cancels[key]
   if key == 'dump item' then st.dump = {n = n, why = wk, day = day} end   -- FR-90: the game's own words, for inspect items trash
@@ -3340,6 +3356,9 @@ function M.manager_facts(K, p, c)
     f.pos = {u.pos.x, u.pos.y, u.pos.z}
   end)
   if f.squad then f.causes[#f.causes + 1] = 'he is in squad ' .. tostring(f.squad) .. ': soldiers on duty do not walk to the office' end
+  if f.job == 'HarvestPlants' or f.job == 'PlantSeeds' or f.job == 'GatherPlants' then      -- BUG-547
+    f.causes[#f.causes + 1] = 'he works as a farmer (' .. f.job .. '): the kernel switches his Farming labor off while orders wait'
+  end
   local outd, outrec = M.out_days(K, p or pstate(K), 'MANAGER')
   if outrec then
     f.out = outd
@@ -3501,6 +3520,34 @@ function M.mgr_stuck(K, p, c, days, n, why)
   K.persist.touch('m.economy')
 end
 
+-- BUG-547 (Run 16d i4 Trumpetrealms y397: the manager worked as HarvestPlants, "ConstructDoor unvalidated 14 days", the mechanisms and doors
+-- of the refuge waited behind him): the orders are unvalidated past orders.unval_days and the manager (able, not a patient or in a mood) has
+-- the Farming labor on: it goes off for him (act.labor_set, the labors screen), at most once a day; the work details give it back to the
+-- others only. The first line of `inspect what=manager` names it while it stands.
+function M.labor_flag(u, name)                       -- a labor of the labors screen is on (by enum index, else by name)
+  local ok, v = pcall(function()
+    local l = df.unit_labor and df.unit_labor[name]
+    return u.status.labors[l or name]
+  end)
+  return ok and v == true
+end
+
+function M.manager_farm_off(K, p)
+  local mg = M.manager_state(K)
+  if type(mg) ~= 'table' or not mg.unit or mg.why then return end
+  local u = df.unit.find(mg.unit)
+  if not (u and M.labor_flag(u, 'PLANT')) then return end
+  local now = K.now().tick
+  if now - (math.tointeger(p.mgr_farm) or -DAY) < DAY then return end
+  p.mgr_farm = now
+  local ok, res = K.act.labor_set(mg.unit, 'farm', false)
+  if ok and res == 'disabled' then
+    K.persist.touch('m.economy')
+    K.log('warn', 'manager %s (unit %d): Farming labor off: %d orders unvalidated, a manager at the fields validates none',
+          mg.name or '?', mg.unit, (st.unval or {}).n or 0)
+  end
+end
+
 -- BUG-042: orders waiting for validation by age (the 8 lowest order ids, first seen in p.uv): any unvalidated one for
 -- orders.unval_days while a manager is appointed and able (manager_watch said nothing) is DECISION_NEEDED
 -- manager_office (A, util/cadence: once per reason, again after 7 days and 10 min); st.unval = {n, d, why}
@@ -3535,6 +3582,8 @@ function M.unval_watch(K, p, c)
   if days < (oc.unval_days or 2) then return end
   local okv, vac = pcall(positions)
   if not okv or type(vac) ~= 'table' or vac.MANAGER then return end   -- no manager yet: appoint first
+  local okf, errf = pcall(M.manager_farm_off, K, p)                    -- BUG-547: a manager at the fields validates nothing
+  if not okf then K.log('warn', 'manager farm labor: %s', tostring(errf)) end
   local why, fix = M.unval_why(K)
   st.unval.why = why
   local oks, errs = pcall(M.mgr_stuck, K, p, c, days, #ids, why)          -- BUG-450
@@ -7258,10 +7307,13 @@ function M.bm_route(r, s, kind, fire)
       if e[1] == k and (inv[e[2]] or 0) > 0 and not (fire and k == 'logs') then return nil, nil, k end
     end
   end
+  -- BUG-544: the census counts what the citizens can reach; stone on another walk group is named, not counted
+  local far = (inv.rock_far or 0) + (inv.blocks_far or 0)
+  local tail = far > 0 and string.format(' (%d boulders and blocks lie on another walk group)', far) or ''
   if fire then
-    return nil, 'no material for ' .. (kind or 'furnace') .. ': no rock, no blocks (logs burn: a furnace or forge needs stone)'
+    return nil, 'no material for ' .. (kind or 'furnace') .. ': no rock, no blocks (logs burn: a furnace or forge needs stone)' .. tail
   end
-  return nil, 'no material for ' .. (kind or 'wall') .. ': no rock, no blocks, no logs'
+  return nil, 'no material for ' .. (kind or 'wall') .. ': no rock, no blocks, no logs' .. tail
 end
 
 -- what a building waiting for building material is called in MATERIAL_SHORT: a wall (construction), the trade depot
@@ -7384,6 +7436,11 @@ function M.rock_dig(K, c, r, walls)
   if free > 0 then r.p.rock0 = nil
   elseif int(r.p.rock0) == nil then r.p.rock0 = r.now end
   local zero = int(r.p.rock0) ~= nil and (r.now - int(r.p.rock0)) >= M.SUPPLY.zero_days * DAY or nil
+  -- BUG-545: boulders but none usable (ore, flux, economic or soft stone, out of reach) while stone is wanted: a decision, not a queue
+  if free == 0 and need > 0 and (math.tointeger(r.inv.boulders) or 0) >= M.HARD.min_boulders and K.mode() ~= 'SIEGE' then
+    local okh, errh = pcall(M.hard_report, K, c, r, 0)
+    if not okh then K.log('warn', 'hard stone report: %s', tostring(errh)) end
+  end
   st.rock = {free = free, need = need, open = r.rk or 0, gems = math.tointeger(r.inv.gems) or 0,
              soil = (int(r.p.rocksoil) or 0) >= M.ROCK_SOIL or nil, zero = zero,
              bars = math.tointeger(r.inv.bars) or 0, cloth = math.tointeger(r.inv.cloth) or 0}
@@ -7470,6 +7527,42 @@ function M.plan_mech(K, c, r)
           why = string.format('levers: %d unlinked, traps waiting: %d; need %d mechanisms, %d free', lv, tp, need, free)})
   m.route = 'stone'
   return nil
+end
+
+-- BUG-546 (Run 16d i4 Trumpetrealms: refuge-lever link jobs waited 1000 days, the question said "needs a dwarf with the Mechanics labor" and
+-- named nobody): gate asks for a Mechanic while a link job waits. Returns 'have', unit id (an adult citizen off duty holds the labor),
+-- 'set', unit id (act.labor_set switched it on for the best candidate: idle first, then Mechanics skill; no soldier, patient, moody
+-- or noble), 'none' (no candidate) or 'wait' (switched on less than a day ago)
+function M.mechanic_labor(K)
+  local cu = K.census.u
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 'none' end
+  local sid = df.job_skill and df.job_skill.MECHANICS
+  local cands = {}
+  for _, id in ipairs(cu.ids) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) and M.citizen(u) and (u.military.squad_id or -1) < 0
+       and (u.mood or -1) < 0 then
+      if M.labor_flag(u, 'MECHANIC') then return 'have', id end
+      if not M.patient(u) and not noble(u) then
+        cands[#cands + 1] = {id = id, idle = (u.job == nil or u.job.current_job == nil) and 1 or 0,
+                             sk = sid and dfhack.units.getNominalSkill(u, sid, true) or 0}
+      end
+    end
+  end
+  if #cands == 0 then return 'none' end
+  local p, now = pstate(K), K.now().tick
+  if now - (math.tointeger(p.mechl) or -DAY) < DAY then return 'wait' end
+  table.sort(cands, function(a, b)
+    if a.idle ~= b.idle then return a.idle > b.idle end
+    if a.sk ~= b.sk then return a.sk > b.sk end
+    return a.id < b.id
+  end)
+  p.mechl = now
+  K.persist.touch('m.economy')
+  local ok = K.act.labor_set(cands[1].id, 'mechanic', true)
+  if not ok then return 'none' end
+  K.log('warn', 'Mechanics labor on for unit %d: a lever link job waits and nobody had it', cands[1].id)
+  return 'set', cands[1].id
 end
 
 -- BUG-268/269: what the caravans are asked for besides economy.trade_wants (trade.lua puts these after them, before
@@ -7654,6 +7747,72 @@ function M.no_rock(K, c, oid, job, why)
          {order = oid, job = tostring(jn):sub(1, 40), why = ('no rock: ' .. tostring(why)):sub(1, 60), n = n,
           dropped = 1})
   return true
+end
+
+-- BUG-545 (Run 16d i4 Trumpetrealms y404: 101 boulders in a mudstone fort, gamelog "cancels Make rock mechanisms / Load stone trap: Needs
+-- non-economic hard stone boulders" from several dwarves for years, the refuge levers' link jobs waiting on mechanisms nobody could make;
+-- Run 16a i1 Basementflew the same with every boulder out of reach): economy queued the rock orders on `free boulders > 0` and said nothing.
+-- DF's own cancel is the proof: M.HARD.n of them within M.HARD.window_days days make the fort stone-less for M.HARD.hold_days days
+-- (stone_free 0 until the census shows more than M.HARD.new boulders beyond the count at the last cancel): no rock order is queued
+-- for it, the caravans are asked for stone and mechanisms (supply_wants, plan_mech 'no stone'), and DECISION_NEEDED no_hard_stone names
+-- the counts (usable, economic or soft, ore and flux, out of reach) and the way out. A census with boulders but none usable says the same.
+M.HARD = {n = 3, window_days = 7, hold_days = 14, new = 5, min_boulders = 10, repeat_days = 28}
+function M.hard_words(why)
+  local s = tostring(why or ''):lower()
+  return s:find('non-economic', 1, true) ~= nil or s:find('hard stone', 1, true) ~= nil
+end
+function M.hard_denied(inv, now)
+  local h = st.hard
+  if type(h) ~= 'table' or not h.denied then return false end
+  if now and h.last and now - h.last >= M.HARD.hold_days * DAY then return false end
+  return (math.tointeger(type(inv) == 'table' and inv.rock) or 0) <= (h.rock or 0) + M.HARD.new
+end
+
+-- the stone census in one table: usable = the free boulders a mason may take by the census (ore, flux, economic and soft stone
+-- out; out of reach is not in `rock` at all), cause 'none' (no usable boulder) or 'denied' (usable by the census, DF cancels anyway)
+function M.hard_diag(inv)
+  local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
+  local rock, bad, orf = g('rock'), g('rock_bad'), g('ore') + g('flux')
+  local usable = math.max(0, rock - math.max(orf, bad))
+  return {boulders = g('boulders'), rock = rock, usable = usable, bad = bad, orf = orf, far = g('rock_far'),
+          cause = usable == 0 and 'none' or 'denied'}
+end
+
+function M.hard_report(K, c, r, cancels)
+  local p = r.p
+  local d = M.hard_diag(r.inv)
+  if (cancels or 0) == 0 and d.usable > 0 then return end        -- the census alone: usable boulders may be the moods' floor
+  local now = K.now()
+  if not (CAD.due(p.hard_ann, now, {}, {d.cause}, {ticks = M.HARD.repeat_days * DAY, wall_s = CAD.WALL_S}) or CAD.elapsed(p.hard_ann, now, M.HARD.repeat_days * DAY, CAD.WALL_S)) then return end
+  p.hard_ann = CAD.mark(now, {}, {d.cause})
+  local q
+  if d.cause == 'none' then
+    q = string.format('no non-economic hard stone: %d boulders, 0 usable (%d economic/soft, %d ore/flux, %d out of reach); no ' ..
+                      'mechanisms, stone traps, levers; wood serves doors, chests, beds', d.boulders, d.bad, d.orf, d.far)
+  else
+    q = string.format('DF cancels rock jobs x%d "Needs non-economic hard stone" beside %d boulders counted usable: stone counts 0 ' ..
+                      'for %d d; levers, mechanisms, stone traps need it; wood serves doors, beds', cancels, d.usable, M.HARD.hold_days)
+  end
+  local cmds = {[[dfllm cmd trade.want '{"add":["stone","mechanism"]}']], 'dfllm plan propose',
+                [[dfllm cmd inspect '{"what":"workload"}']]}
+  K.log('warn', '%s', q)
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200),
+         {id = 'no_hard_stone', q = q:sub(1, 200), cause = d.cause, n = d.usable, cmds = cmds})
+  K.persist.touch('m.economy')
+end
+
+function M.hard_cancel(K, c, job, tick)
+  local h = type(st.hard) == 'table' and st.hard or {t = {}}
+  st.hard = h
+  local keep, lim = {}, tick - M.HARD.window_days * DAY
+  for _, t in ipairs(h.t) do if t >= lim then keep[#keep + 1] = t end end
+  keep[#keep + 1] = tick
+  while #keep > 20 do table.remove(keep, 1) end
+  h.t, h.last = keep, tick
+  if #keep < M.HARD.n then return end
+  local r = M.view_run(K)
+  h.denied, h.rock = true, math.tointeger(r.inv.rock) or 0
+  M.hard_report(K, c, r, #keep)
 end
 
 -- Run 11: picks for the Miners (their demand before the tool cap, BUG-023, against every pick in the fort): a pick

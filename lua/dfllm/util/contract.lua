@@ -311,6 +311,7 @@ C.ACT = {
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
+  cancel_link_job = {'gate'}, labor_set = {'economy'},          -- BUG-546, BUG-547
   construction_remove = {'seal'},                  -- BUG-479: the refuge plug's walls come down in PEACE
   door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
   burrow_tiles = {'seal', 'runner', 'water'},     -- BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
