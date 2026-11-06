@@ -136,4 +136,29 @@ T.test('BUG-559: a patient outside Kern+ in BREACH gets no care burrow, and a DE
   T.eq(#needed(W, 'patient_out'), 1, 'once per fight')
 end)
 
+T.test('BUG-559: a patient who is not yet thirsty when the siege begins and passes care_thirst later still gets his ' ..
+       'decision; one in a second walk group gets his own, and neither repeats', function()
+  local W, M = world{foe = {5, 95, 5}, patient = {5, 1000, {74, 83, 5}}}
+  day(W)
+  T.eq(#needed(W, 'patient_out'), 0, 'not thirsty yet: PATIENTS_OUT only')
+  T.eq(#W.find_events('PATIENTS_OUT'), 1)
+  W.unit(5).counters2.thirst_timer = 58000
+  W.set_census('u', F.census_u({1, 2, 3, 4, 5, 6, 7, 8}))
+  day(W)
+  local e = needed(W, 'patient_out')
+  T.eq(#e, 1, 'the later thirst raises the decision')
+  T.eq(e[1].d.units, {5})
+  day(W)
+  T.eq(#needed(W, 'patient_out'), 1, 'not repeated for the same patient')
+  W.unit(6).health = {flags = {needs_healthcare = true}}
+  W.unit(6).counters2.thirst_timer = 59000
+  W.move(6, 66, 125, 5)
+  W.set_census('u', F.census_u({1, 2, 3, 4, 5, 6, 7, 8}))
+  day(W)
+  local e2 = needed(W, 'patient_out')
+  T.eq(#e2, 2, 'the second patient (other walk group) gets his own')
+  T.eq(e2[2].d.units, {6})
+  T.eq(#W.find_events('PATIENTS_OUT'), 1, 'the plain event stays once per fight')
+end)
+
 T.done()

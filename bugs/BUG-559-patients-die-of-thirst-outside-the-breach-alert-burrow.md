@@ -21,7 +21,7 @@ fight), not a question: nothing asked the player for a rescue.
 the nearest accepted water, a free bucket) but only while no visible hostile is within `care_breach_near` tiles of any painted tile (fresh, complete census as before). A
 SIEGE -> BREACH change keeps an open burrow and re-checks it at the BREACH distance (`care_check`); other mode changes still close it. A patient over `care_thirst` that
 the care burrow does not reach (outside Kern+ in a fight, a hostile near, no accepted water, `care_breach` off) is a DECISION_NEEDED `patient_out` (A, urgent in
-`wake.URGENT_DECISIONS`) with the reason the burrow is closed and `inspect hospital / water_sources / unit` commands, once per fight with PATIENTS_OUT.
+`wake.URGENT_DECISIONS`) with the reason the burrow is closed and `inspect hospital / water_sources / unit` commands, judged every pass (not only at the first PATIENTS_OUT): a patient who passes care_thirst later in the fight, or lies in another walk group, gets his own decision, each patient once per fight.
 
 ## Tests
 tests/lua/test_bug559_care_breach.lua (3), tests/lua/test_bug330_care_burrow.lua (the BREACH test now covers `care_breach` off), tests/test_bug559_563_care.py

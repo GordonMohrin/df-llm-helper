@@ -1872,8 +1872,8 @@ end
 
 local function patients_out(K, r, kern, refuge, kname, rname, ho)
   local mode = K.mode()
-  if not FIGHT[mode] then st.pout = nil; return end
-  if st.pout or #r.patients == 0 then return end
+  if not FIGHT[mode] then st.pout = nil; st.pdec = nil; return end
+  if #r.patients == 0 then return end
   local okn, names = K.call('siege', 'alert_names')
   names = okn and type(names) == 'table' and names or {}
   local b1 = type(names[1]) == 'string' and burrow_named(names[1]) or nil
@@ -1890,31 +1890,39 @@ local function patients_out(K, r, kern, refuge, kname, rname, ho)
     end
   end
   if #out == 0 then return end
-  st.pout = K.now().tick
-  local tail = ho.n > 0 and string.format('; the hospital lies outside %s/%s: move it into %s next to accepted water',
-                                          kname, rname, rname)
-               or '; plan the hospital inside the refuge'
-  -- BUG-330: what the care burrow does for them (open, or why not; it opens for a patient over care_thirst)
   local cs = st.care
-  local care
-  if cs and cs.on then care = M.CARE .. ' open to them'
-  elseif cs and cs.why == M.NOT_YET then
-    care = string.format('%s opens to one over thirst %d with no hostile near', M.CARE, cs.th or 0)
-  elseif cs then care = 'no ' .. M.CARE .. ': ' .. tostring(cs.why) end
-  local msg = string.format('%s: %d of %d patients lie outside the alert burrow %s (%s): they cannot walk there, only a '
-                            .. 'rescue moves them%s', mode, #out, #r.patients, label, table.concat(at, ', '), tail)
-  if care and #msg + #care + 2 <= 200 then msg = msg .. '; ' .. care end
-  K.emit('PATIENTS_OUT', 'B', trunc(msg, 200), {n = #out, patients = #r.patients, burrow = trunc(label, 60), units = ids,
-                                                mode = mode, hosp_out = ho.n, care = care and trunc(care, 80) or nil})
-  K.log('warn', 'water: %s', msg)
+  if not st.pout then                                   -- the plain event: once per fight
+    st.pout = K.now().tick
+    local tail = ho.n > 0 and string.format('; the hospital lies outside %s/%s: move it into %s next to accepted water',
+                                            kname, rname, rname)
+                 or '; plan the hospital inside the refuge'
+    -- BUG-330: what the care burrow does for them (open, or why not; it opens for a patient over care_thirst)
+    local care
+    if cs and cs.on then care = M.CARE .. ' open to them'
+    elseif cs and cs.why == M.NOT_YET then
+      care = string.format('%s opens to one over thirst %d with no hostile near', M.CARE, cs.th or 0)
+    elseif cs then care = 'no ' .. M.CARE .. ': ' .. tostring(cs.why) end
+    local msg = string.format('%s: %d of %d patients lie outside the alert burrow %s (%s): they cannot walk there, only a '
+                              .. 'rescue moves them%s', mode, #out, #r.patients, label, table.concat(at, ', '), tail)
+    if care and #msg + #care + 2 <= 200 then msg = msg .. '; ' .. care end
+    K.emit('PATIENTS_OUT', 'B', trunc(msg, 200), {n = #out, patients = #r.patients, burrow = trunc(label, 60), units = ids,
+                                                  mode = mode, hosp_out = ho.n, care = care and trunc(care, 80) or nil})
+    K.log('warn', 'water: %s', msg)
+  end
   -- BUG-559 (Run 16b i2 y402: 3 patients outside the BREACH alert burrow died of thirst, PATIENTS_OUT was a plain event): a
-  -- patient over care_thirst whom the care burrow does not reach is a decision (urgent): the reason it is closed, the commands
+  -- patient over care_thirst whom the care burrow does not reach is a decision (urgent): the reason it is closed, the commands.
+  -- Judged EVERY pass, not at the first one only: in y402 the patients were not yet thirsty when the siege began and died of
+  -- thirst later; each patient is decided once per fight (st.pdec), a new one gets his own decision
   local c = M.conf(K)
+  st.pdec = st.pdec or {}
   local dry, dids = {}, {}
   for _, pt in ipairs(out) do
-    if (pt.thirst or 0) >= c.care_thirst then dry[#dry + 1] = pt; if #dids < 20 then dids[#dids + 1] = pt.id end end
+    if (pt.thirst or 0) >= c.care_thirst and not st.pdec[pt.id] then
+      dry[#dry + 1] = pt; if #dids < 20 then dids[#dids + 1] = pt.id end
+    end
   end
   if #dry > 0 and not (cs and cs.on) then
+    for _, pt in ipairs(dry) do st.pdec[pt.id] = K.now().tick end
     local why = cs and cs.why or 'water has not planned it yet'
     local q = string.format('%s: %d patient(s) over thirst %d lie outside %s and no water reaches them (%s): a rescue, or '
                             .. 'the hospital water inside the burrow', mode, #dry, c.care_thirst, label, why)
