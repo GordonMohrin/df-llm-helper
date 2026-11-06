@@ -261,7 +261,7 @@ INTAKE_LIM: dict = {"on": "bool", "wave": (1, 40), "min_soldiers": (1, 30), "wor
                     "muster": (100, 33600), "fight": (300, 100800)}
 SORTIE_LIM: dict = {"worn": (0, 100), "losses": (1, 30), "max_ticks": (300, 33600), "gather": (100, 33600),
                     "foe_cv": (0, 100), "near": (1, 50), "kill_near": (0, 50), "idle_ticks": (300, 33600),
-                    "hold_ticks": (300, 100800)}
+                    "hold_ticks": (300, 100800), "track_near": (0, 100)}
 # BUG-030: the deep defense (siege.lua M.ST / M.ST_LIM): an army over core_ratio x soldiers, worn % or the iron/steel
 # share below worn / metal; BUG-032: spread = tiles around its station point a squad stands on (military.lua M.SPREAD:
 # a station lies more than gate's margin + spread tiles from every bridge footprint)

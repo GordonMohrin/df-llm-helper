@@ -171,6 +171,7 @@ C.EVENTS = {
   DRILL_RESULT = {cls = 'B', by = 'drill'}, READY_CHANGE = {cls = 'B', by = 'readiness'},
   POPCAP = {cls = 'B', by = 'readiness'}, AUDIT = {cls = 'B', by = 'readiness'},
   PROJECT_DONE = {cls = 'B', by = 'runner'}, PROJECT_REQUEST = {cls = 'B', by = 'any'},
+  PROJECTS_REQUEUED = {cls = 'B', by = 'runner'},       -- BUG-521: an older save was loaded; the projects of the discarded timeline placed again
   PHASE = {cls = 'B', by = 'runner'}, PAUSE = {cls = 'B', by = 'arbiter'},
   DEATH = {cls = 'B', by = 'care'}, ACT_FAIL = {cls = 'B', by = 'kern'},
   DEATH_CLUSTER = {cls = 'B', by = 'care'},      -- FR-64: deaths of one cause (or 3 of any) within a month

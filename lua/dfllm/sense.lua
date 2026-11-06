@@ -799,7 +799,7 @@ local function wild_publish(K, hs)
   local cmd
   local ok, key = K.call('military', 'sortie_squad')
   if ok and type(key) == 'string' then
-    cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z)
+    cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, e.x, e.y, e.z, e.id)
   end
   local d = {n = #fresh, id = e.id, race = e.rn, pos = {e.x, e.y, e.z}, dc = e.dc, wet = e.wt, fish = hold,
              reach = e.rc, cmd = cmd}

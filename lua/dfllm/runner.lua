@@ -1759,6 +1759,7 @@ function Q.pile_part(K, P, st, ch, R)
   return {pos = ch.pos, cells = calls[pc + 1] or {}}, {k = pc + 1, n = #calls}
 end
 
+<<<<<<< HEAD
 -- BUG-514 (Run 16a i1 Basementflew y403-y405, fortcore aquifer=pass: the core level lay in damp rock, the beds at 34,92,117 stood on
 -- water, DF cancelled their jobs 'Building site submerged' and the stage hung at 35 % for 400 days): beds are not queued on a tile
 -- that holds water (Q.WET_BUILD/7 or more, snapshot flow); they are left out as a refused part (R.uns), the stage goes on.
@@ -1786,6 +1787,101 @@ function Q.wet_cells(K, P, st, ch)
   end
   if n == 0 then return ch, 0 end
   return {pos = ch.pos, cells = keep}, n
+=======
+-- BUG-522 (Run 16c i3 Sealcertain y385 d11: two citizens 'found dead: crushed (incident CAVEIN)' at 15,13,141, the brief said only
+-- 'crushed 2', no event named a project or a tile): a floor tile that hangs free above a hole a dig chunk opens is what a cave-in
+-- drops on whoever stands there or below. Of every dug tile (key d, h, u, j, i, r; a channel also opens the tile below) the roof tile
+-- one level up is read (snapshot.tile, at most CFG.cave_probe a chunk): a revealed FLOOR tile that the chunk does not dig itself and
+-- that has no revealed WALL tile among its eight neighbours on its level is a free-hanging floor (an unrevealed neighbour is no
+-- verdict). CFG.cave_check: 'off', 'warn' (default: kern.log line naming project, chunk and tile, once a chunk, and the project's
+-- `cave` record that care's CAVEIN death report reads: dig_near) or 'block' (the project is blocked `cavein_risk` before the
+-- designation; bp.cancel it or place it again somewhere else). Returns true when the chunk was not designated.
+M.CFG.cave_check, M.CFG.cave_probe = 'warn', 30
+Q.CAVE_KEYS = {d = true, h = true, u = true, j = true, i = true, r = true}
+function Q.cave_risk(K, ch)
+  local tiles, own = {}, {}
+  for _, cell in ipairs(ch.cells) do cell_tiles(ch, cell, tiles) end
+  for _, t in ipairs(tiles) do own[tkey(t[1], t[2], t[3])] = true end
+  local seen, n, out = {}, 0, {}
+  for _, t in ipairs(tiles) do
+    if Q.CAVE_KEYS[t[4]] then
+      local x, y, z = t[1], t[2], t[3] + 1
+      local k = tkey(x, y, z)
+      if not seen[k] and not own[k] then
+        seen[k] = true
+        n = n + 1
+        if n > M.CFG.cave_probe then break end
+        local rt = tile_at(K, x, y, z)
+        if rt and rt.shape == 'FLOOR' and (rt.bld or '') == '' then
+          local wall, unknown = false, false
+          for dy = -1, 1 do
+            for dx = -1, 1 do
+              if (dx ~= 0 or dy ~= 0) and not wall then          -- the first wall holds it: no more reads
+                local nt = own[tkey(x + dx, y + dy, z)] and false or tile_at(K, x + dx, y + dy, z)
+                if nt == nil then unknown = true elseif nt and nt.shape == 'WALL' then wall = true end
+              end
+            end
+          end
+          if not wall and not unknown then out[#out + 1] = {x, y, z} end
+        end
+      end
+    end
+  end
+  return out
+end
+
+function Q.cave_guard(K, P, st, R, ch)
+  local mode = M.CFG.cave_check
+  if mode == 'off' or mode == false or mode == nil then return false end
+  local ok, isl = pcall(Q.cave_risk, K, ch)
+  if not ok or type(isl) ~= 'table' or #isl == 0 then return false end
+  local at = isl[1]
+  local rec = S.rt.cv[P.id]
+  if type(rec) ~= 'table' then rec = {}; S.rt.cv[P.id] = rec end
+  rec.chunk, rec.n, rec.at, rec.t = P.chunk, #isl, string.format('%d,%d,%d', at[1], at[2], at[3]), now(K)
+  rec.pos = {ch.pos[1], ch.pos[2], ch.pos[3]}
+  if R.cave_c ~= P.chunk then
+    R.cave_c = P.chunk
+    K.log('warn', '%s %s chunk %d: %d free-hanging floor tile(s) (first %s) lie above the hole this dig opens: a cave-in risk%s',
+          P.id, st.label, P.chunk, #isl, rec.at, mode == 'block' and '; the project is blocked (bp.cancel or place it elsewhere)' or '')
+  end
+  dirty()
+  if mode == 'block' then
+    set_blocked(K, P, 'cavein_risk')
+    return true
+  end
+  return false
+end
+
+-- BUG-522 (care's DEATH report of a CAVEIN): the projects whose dig lay within `r` tiles (xy) and one level of pos, newest first:
+-- {{proj, stage, chunk, dist, days, risk}}; risk = a free-hanging floor was seen above one of its chunks. Read-only.
+function M.dig_near(K, pos, r)
+  local out = {}
+  if type(pos) ~= 'table' then return out end
+  local px, py, pz = int(pos[1] or pos.x), int(pos[2] or pos.y), int(pos[3] or pos.z)
+  if not (px and py and pz) then return out end
+  r = int(r) or 12
+  local t = now(K)
+  for _, P in ipairs(S.pd.list) do
+    local d = doc(K, P.id)
+    if d and P.done ~= 1 or (d and (t - (int(P.since) or t)) < 30 * DAY) then
+      local bb = project_bbox(P.id, d)
+      if bb and pz >= bb[3] - 1 and pz <= bb[6] + 1 then
+        local dx = math.max(bb[1] - px, 0, px - bb[4])
+        local dy = math.max(bb[2] - py, 0, py - bb[5])
+        local dist = math.max(dx, dy)
+        if dist <= r then
+          local cv = S.rt.cv[P.id]
+          out[#out + 1] = {proj = P.id, tpl = P.tpl, stage = P.stage, dist = dist, risk = type(cv) == 'table' and cv.at or nil,
+                           days = (t - (int(P.since) or t)) // DAY}
+        end
+      end
+    end
+  end
+  table.sort(out, function(a, b) if a.dist ~= b.dist then return a.dist < b.dist end return a.proj < b.proj end)
+  while #out > 5 do table.remove(out) end
+  return out
+>>>>>>> fix32-misc
 end
 
 local function apply(K, P, st, R)
@@ -1819,6 +1915,7 @@ local function apply(K, P, st, R)
     local skip
     ch, skip = Q.nogather(P, ch)
     if skip > 0 and #ch.cells == 0 then P.chunk = P.chunk + 1; moved(K, R); dirty(); return true end
+    if Q.cave_guard(K, P, st, R, ch) then return false end    -- BUG-522
   end
   local wet = 0
   if st.mode == 'build' and P.tpl ~= 'plug' then              -- BUG-514: no bed on a tile that holds water
@@ -6339,6 +6436,7 @@ function M.init(K)
   rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box
   rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
   rt.ip = obj(rt.ip)                                                 -- BUG-328: projects set aside (no progress)
+  rt.cv = obj(rt.cv)                                                 -- BUG-522: chunks with a free-hanging floor above (cave-in risk)
   rt.aq = obj(rt.aq)                                                 -- FR-95: aquifer shafts and observe mode
   if type(rt.cz) ~= 'table' then rt.cz = {} end                      -- Run 11: cavern breach tiles
   if type(rt.exh) ~= 'string' then rt.exh = '' end
@@ -6396,6 +6494,10 @@ end
 
 function M.step(K, budget, ctx)
   S.slice = {qf = 0, probes = 0, qf_max = M.CFG.qf_per_slice}
+  if K.reset and not S.rq_done then
+    local okr, err = pcall(Q.requeue_reset, K)                 -- BUG-521
+    if not okr then K.log('warn', 'runner: timeline reset re-queue: %s', tostring(err)) end
+  end
   if not (ctx and ctx.cont) or not S.run then S.dtask, S.doing = nil, 'begin run'; begin_run(K) end
   pcall(Q.mood_boost, K)
   local run = S.run
@@ -6439,6 +6541,91 @@ end
 
 -- BUG-039: what the runner's last slice did (kern asks right after a slow or huge step or handler)
 function M.doing() return S.doing end
+
+-- BUG-521 (Run 16d i4 Trumpetrealms y389: "TIMELINE RESET: older save loaded", the fortcore st3 retrofit placed and finished in the
+-- discarded timeline was gone from the loaded save; the player noticed only at the next `inspect defense`): the runner's projects live
+-- in the save, the runtime folder (bp files, commands.log) does not. At the first step after a boot that found the clock jumped back
+-- (K.reset kind clock) the bp.place commands of the discarded timeline (commands.log lines after the older save's tick, newest
+-- stretch of the file, result ok, not cancelled by a later bp.cancel) whose project the loaded save does not have are placed again,
+-- in their order, through the bp.place verb itself (every placement check runs again), at most M.CFG.requeue_max. PROJECTS_REQUEUED
+-- (B) names the ones queued and the ones refused with the reason; a project the player does not want is cancelled as any other.
+-- Plan builds (y<Y>s<S>b<I>) are not read here: the plan lives in the save and plan.reload makes them again.
+M.CFG.requeue_max = 12
+function Q.read_lines(path)
+  local f = io.open(path, 'rb')
+  if not f then return {} end
+  local s = f:read('a') or ''
+  f:close()
+  local out = {}
+  for ln in (s .. '\n'):gmatch('([^\r\n]*)\r?\n') do if ln ~= '' then out[#out + 1] = ln end end
+  return out
+end
+
+function Q.reset_cmds(K, tick_neu)
+  local dir = K.cfg.paths.save
+  local lines = Q.read_lines(fio.rotated(dir .. '/commands.log'))
+  for _, ln in ipairs(Q.read_lines(dir .. '/commands.log')) do lines[#lines + 1] = ln end
+  local rows_ = {}
+  for i, ln in ipairs(lines) do
+    local ts, tk, origin, verb, args, res = ln:match('^(%d+)\t(%d+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t?(.*)$')
+    if tk then rows_[#rows_ + 1] = {tick = tonumber(tk), origin = origin, verb = verb, args = args, res = res} end
+  end
+  -- this boot's own lines come last and their ticks start at the loaded clock: the last place where the tick falls going forward is
+  -- the border between the discarded timeline and this boot (ticks never fall inside one boot)
+  local border = #rows_ + 1
+  for i = #rows_, 2, -1 do
+    if rows_[i - 1].tick > rows_[i].tick then border = i; break end
+  end
+  local seg = {}
+  for i = border - 1, 1, -1 do
+    if rows_[i].tick <= tick_neu then break end                -- the stretch both timelines share begins here
+    seg[#seg + 1] = rows_[i]
+  end
+  local out, cancelled = {}, {}
+  for i = #seg, 1, -1 do                                     -- oldest first
+    local e = seg[i]
+    local id = e.origin:match('^inbox:([A-Za-z0-9_-]+):')
+    if id and e.res:sub(1, 2) == 'ok' then
+      local a = json.try_decode(e.args)
+      if e.verb == 'verb:bp.place' and type(a) == 'table' and type(a.tpl) == 'string' then
+        out[#out + 1] = {id = id, args = a}
+      elseif e.verb == 'verb:bp.cancel' and type(a) == 'table' and type(a.proj) == 'string' and a.reopen == nil then
+        cancelled[a.proj] = true
+      end
+    end
+  end
+  return out, cancelled
+end
+
+function Q.requeue_reset(K)
+  local R = K.reset
+  S.rq_done = true
+  if not (type(R) == 'table' and R.kind == 'clock' and math.type(R.tick_neu) == 'integer') or M.CFG.requeue_max <= 0 then return end
+  local ok, cmds, cancelled = pcall(Q.reset_cmds, K, R.tick_neu)
+  if not ok then K.log('warn', 'runner: timeline reset: commands.log unreadable (%s)', tostring(cmds)); return end
+  local queued, failed, skipped = {}, {}, 0
+  for _, c in ipairs(cmds) do
+    if not find(c.id) and not cancelled[c.id] then
+      if #queued + #failed >= M.CFG.requeue_max then skipped = skipped + 1
+      else
+        local okv, vok, msg = pcall(M.verbs['bp.place'], K, c.args, {id = c.id})
+        if okv and vok == true then queued[#queued + 1] = c.id
+        else failed[#failed + 1] = c.id .. ': ' .. trunc(okv and msg or vok, 60) end
+      end
+    end
+  end
+  if #queued + #failed + skipped == 0 then return end
+  local txt = string.format('timeline reset (older save loaded): %d project(s) placed in the discarded timeline queued again: %s%s%s',
+                            #queued, table.concat(queued, ', '),
+                            #failed > 0 and ('; refused: ' .. table.concat(failed, '; ')) or '',
+                            skipped > 0 and string.format('; %d more not queued (limit %d)', skipped, M.CFG.requeue_max) or '')
+  K.log('warn', 'runner: %s', txt)
+  K.emit('PROJECTS_REQUEUED', 'B', trunc(txt, 200),
+         {ids = {table.unpack(queued, 1, math.min(#queued, 12))}, n = #queued, failed = #failed > 0 and {table.unpack(failed, 1, math.min(#failed, 4))} or nil,
+          skipped = skipped > 0 and skipped or nil, tick_alt = R.tick_alt, tick_neu = R.tick_neu})
+  rows(K)
+  save(K)
+end
 
 -- BUG-037: no run ended for run_idle_d days (or since the boot): {d, i, n, task, sl, age} of the run in hand, else nil
 function Q.run_state(K)

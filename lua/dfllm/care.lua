@@ -589,15 +589,26 @@ end
 -- rough-gem route: glass is no rough gem)
 local ROUTE_CLS = {leather = true, bars = true, bone = true, shell = true, cloth = true, thread = true, gems = true,
                    glass = true}
+-- BUG-520: economy.mood_hint names what the fort's own means cannot make (a bone with no animal to slaughter and no hunter, glass with
+-- no furnace and no stone, bars with no ore, nothing to melt and no smelter); an impossible class leads the note (the MOOD_RISK text cuts
+-- the tail) with IMPOSSIBLE and the way left, so the player knows at the mood's start and not at its deadline
 local function route_note(K, classes, glassy)
-  local out = {}
+  local out, imp = {}, {}
   for _, cls in ipairs(classes or {}) do
-    if ROUTE_CLS[cls] and #out < 2 then
+    if ROUTE_CLS[cls] and #out + #imp < 2 then
       local ok, txt = K.call('economy', 'route', cls, (cls == 'gems' and glassy) and 'glass' or nil)
-      if ok and type(txt) == 'string' and txt ~= '' then out[#out + 1] = 'route ' .. cls .. ': ' .. txt end
+      local okh, hint, impossible = K.call('economy', 'mood_hint', cls)
+      if okh and type(hint) == 'string' and hint ~= '' and impossible == true then
+        imp[#imp + 1] = 'IMPOSSIBLE ' .. cls .. ': ' .. hint
+      elseif ok and type(txt) == 'string' and txt ~= '' then
+        out[#out + 1] = 'route ' .. cls .. ': ' .. txt
+      elseif okh and type(hint) == 'string' and hint ~= '' then
+        out[#out + 1] = 'route ' .. cls .. ': ' .. hint
+      end
     end
   end
-  return table.concat(out, '; ')
+  for _, t in ipairs(out) do imp[#imp + 1] = t end
+  return table.concat(imp, '; ')
 end
 
 local mood_relief   -- forward: BUG-063, defined after occ_index (the drink nook beside the claimed workshop)
@@ -859,11 +870,19 @@ function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, w
   local auto = {}
   if rec.sdig_txt and M.rock_short(rec) then auto[#auto + 1] = 'stone dig' end
   if #want > 0 then auto[#auto + 1] = 'caravans asked' end
+  -- BUG-520: the classes the fort cannot make at all (bone with no animal and no hunter, glass without a furnace or stone, bars without
+  -- ore, melt or smelter) are said exactly, with the way left (d.imp), and the q leads with them
+  local imp = {}
+  for _, cls in ipairs(miss or {}) do
+    local okh, hint, impossible = K.call('economy', 'mood_hint', cls)
+    if okh and impossible == true and type(hint) == 'string' and #imp < 3 then imp[#imp + 1] = trunc(cls .. ': ' .. hint, 160) end
+  end
   local q = string.format('%s %s: %d d to insanity, still short: %s; if it fails he turns on others: send these, the squad is the last line',
                           M.MD.short_name(name), kind or '?', days, table.concat(lack, ', '))
+  if #imp > 0 then q = string.format('%s %s: %d d, IMPOSSIBLE here: %s', M.MD.short_name(name), kind or '?', days, imp[1]) end
   K.emit('DECISION_NEEDED', 'A', trunc('strange mood deadline: ' .. q, 200),
          {id = 'mood_deadline', q = trunc(q, 200), cmds = #cmds > 0 and cmds or nil, opts = #opts > 0 and opts or nil,
-          auto = #auto > 0 and auto or nil})
+          auto = #auto > 0 and auto or nil, imp = #imp > 0 and imp or nil})
 end
 
 -- BUG-509 (Run 16d i4 Trumpetrealms y389: the Fey mood child Urvad and 23 other strange-mood dwarves in the same fort died of thirst at
@@ -1900,6 +1919,11 @@ local function tomb_report(src)
   out.locked = #free_zones(T, true)
   out.far_n = src.far_n or 0
   out.unreach_n = src.unr_n or 0                       -- BUG-105: of them, on a tile nobody can path to
+  if #(st.unr_ids or {}) > 0 then                      -- BUG-518: with the state of their memorial slabs
+    local by, ul = st.mem and st.mem.by or {}, {}
+    for i = 1, math.min(20, #st.unr_ids) do ul[i] = {st.unr_ids[i], by[st.unr_ids[i]] or 'none'} end
+    out.unreach = ul
+  end
   if src.lock then out.lock = src.lock end
   local lks = M.lockstate()
   out.again = {free = lks.again_free, owned = lks.again_owned, by_entomb = lks.by_entomb, churn = lks.churn}
@@ -3085,12 +3109,38 @@ function MEM.place(K, c, r, p, g, now, mem, G)
   return G, true
 end
 
+-- BUG-518 (Run 16b i2 Brotherarrow y385: a ghost scared a citizen to death, five corpses lay in tree crowns without a walk group, so no
+-- coffin, zone or hauler could bury them and the ghosts walked on for years): the dead citizens whose body lies on a tile nobody can path
+-- to (r.unr, BUG-105) and who have a historical figure get a memorial slab BEFORE the ghost comes, as a ghost gets one: the same order,
+-- build and placement states. Returns the sorted ids.
+function MEM.unreach(r)
+  local out = {}
+  for uid in pairs(r and r.unr or {}) do
+    local u = df.unit.find(uid)
+    local hf = u and num(u.hist_figure_id) or -1
+    if hf >= 0 then out[#out + 1] = uid end
+  end
+  table.sort(out)
+  return out
+end
+
 local function phase_memorials_run(K, c, r, p)
   local now = K.now().tick
   local mem = {by = {}, n = {}}
   for _, s in ipairs(MEM.STATES) do mem.n[s] = 0 end
   r.mem = mem
   local ids = MEM.ghosts(K, p, now)
+  local unr = MEM.unreach(r)
+  st.unr_ids = unr
+  local have = {}
+  for _, id in ipairs(ids) do have[id] = true end
+  for _, id in ipairs(unr) do if not have[id] then ids[#ids + 1] = id end end
+  local ukey = table.concat(unr, ',')
+  if ukey ~= '' and ukey ~= p.unr_key then
+    p.unr_key = ukey
+    K.log('warn', 'care: %d citizen bod%s on tiles nobody can path to (tree crowns, no walk group), units %s: no coffin, zone or ' ..
+          'hauler can bury them; a memorial slab is ordered for each', #unr, #unr == 1 and 'y lies' or 'ies lie', trunc(ukey, 80))
+  elseif ukey == '' then p.unr_key = nil end
   if #ids == 0 then p.mem_nosite = nil; return end         -- BUG-217: no slab waits, the episode ends
   local sl, ords, loose = MEM.OF.slabs(4000), MEM.orders(), {}
   for _, id in ipairs(ids) do
@@ -4359,6 +4409,27 @@ local function death_d(id, res, revised)
   return d
 end
 
+-- BUG-522 (Run 16c i3 Sealcertain y385: two citizens 'crushed (incident CAVEIN)', the report named no dig): a CAVEIN death names the
+-- dfpilot digs within 12 tiles of the body (runner.dig_near: project, template, stage, distance, a free-hanging floor seen above
+-- one of its chunks) in d.dig and the text, or says that none lies near (then the cause is not one of ours)
+local function cave_attr(K, d, txt)
+  if d.dtype ~= 'CAVEIN' then return txt end
+  local near = {}
+  if type(d.pos) == 'table' then
+    local ok, l = K.call('runner', 'dig_near', d.pos, 12)
+    if ok and type(l) == 'table' then near = l end
+  end
+  local rows, parts = {}, {}
+  for i, e in ipairs(near) do
+    local row = string.format('%s %s s%s %dt%s', e.proj, e.tpl, tostring(e.stage), e.dist, e.risk and (' risk ' .. e.risk) or '')
+    rows[i] = trunc(row, 60)
+    if i <= 2 then parts[#parts + 1] = string.format('%s %d tiles%s', e.proj, e.dist, e.risk and ' (free-hanging floor above)' or '') end
+  end
+  d.dig = rows
+  if #parts > 0 then return trunc(txt .. '; dig near: ' .. table.concat(parts, ', '), 200) end
+  return trunc(txt .. '; no dfpilot dig within 12 tiles', 200)
+end
+
 -- one record of p.died: cause, pending (not found yet), killer, patient, position, last job
 local function died_set(e, res)
   e.c = res.cause
@@ -4509,7 +4580,8 @@ local function death_recheck(K, c, p)
             local l = p.dlog[i]
             if type(l) == 'table' and l.u == e.u then l.c, l.fl = tostring(res.cause), e.fl; break end
           end
-          K.emit('DEATH', 'B', DT.text(e.u, res, true), death_d(e.u, res, true))
+          local dd = death_d(e.u, res, true)
+          K.emit('DEATH', 'B', cave_attr(K, dd, DT.text(e.u, res, true)), dd)
           drowned_event(K, e.u, res, true)          -- BUG-496
         end
       end
@@ -4983,7 +5055,8 @@ M.on.UNIT_DEATH = function(K, ev)
   p.died[#p.died + 1] = rec
   p.dlog[#p.dlog + 1] = {t = now, u = id, c = res.found and tostring(res.cause) or 'unknown', fl = rec.fl}   -- FR-74: a year of deaths
   died_prune(c, p, now)
-  K.emit('DEATH', 'B', DT.text(id, res, false), death_d(id, res, false))
+  local dd = death_d(id, res, false)
+  K.emit('DEATH', 'B', cave_attr(K, dd, DT.text(id, res, false)), dd)
   drowned_event(K, id, res, false)                  -- BUG-496
   local recent = {}
   for _, d in ipairs(p.deaths) do if now - d[1] < DAY then recent[#recent + 1] = d end end
@@ -5156,7 +5229,32 @@ M.verbs['tombs.repair'] = function(K, args, cmd)
   local p = pstate(K)
   p.burial = json.object{}
   K.persist.touch('m.care')
-  return true, 'queued: the next care run repairs the tombs and retries entomb for every unburied citizen', {queued = 1}
+  local msg = 'queued: the next care run repairs the tombs and retries entomb for every unburied citizen'
+  local d = {queued = 1}
+  -- BUG-518: bodies nobody can walk to are no burial work (the retry cannot help them): said, with the state of their memorial slabs
+  local unr = st.unr_ids or {}
+  if #unr > 0 then
+    local by = st.mem and st.mem.by or {}
+    local list, n = {}, {}
+    for i, id in ipairs(unr) do
+      local s = by[id] or 'none'
+      n[s] = (n[s] or 0) + 1
+      if i <= 8 then list[#list + 1] = {id, s} end
+    end
+    d.unreach, d.unreach_n, d.mem = list, #unr, MEM.text(n)
+    msg = msg .. string.format('; %d citizen bod%s lie%s where nobody can walk (tree crown, no walk group, units %s): not repairable, a ' ..
+                               'memorial slab is their burial (slabs: %s)', #unr, #unr == 1 and 'y' or 'ies', #unr == 1 and 's' or '',
+                               table.concat((function() local t = {} for i = 1, math.min(5, #unr) do t[i] = tostring(unr[i]) end return t end)(), ','),
+                               MEM.text(n))
+  end
+  return true, trunc(msg, 400), d
+end
+
+-- BUG-518 (economy's slab pass): the ids of the dead whose bodies nobody can walk to, with a historical figure (care's last run)
+function M.unreach_ids(K)
+  local out = {}
+  for i, id in ipairs(st.unr_ids or {}) do out[i] = id end
+  return out
 end
 
 -- last summary (tests, doctors for the brief): the state values plus the doctor count of the last run

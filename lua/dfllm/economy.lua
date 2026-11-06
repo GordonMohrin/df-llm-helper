@@ -6734,6 +6734,44 @@ function M.glass_plan(K, c, r)
   M.glass_report(K, c, r, g)
 end
 
+-- BUG-520 (Run 16a y375/y376, 16d i4 y383: a Fey mood 'bone x1 none in the fort' with butcher.mark 'no animal to mark', a Secretive mood
+-- 'glass x1' in a soil fort without a furnace or sand, a Secretive mood 'bars(metal) x1' without ore, three or more mood deaths): what
+-- supplies a mood class here and what is impossible, said when the mood begins (MOOD_RISK route) and at the deadline (mood_deadline `imp`).
+-- Returns text, impossible: the text names the exact blocker and the way left (trade.want, a furnace, melting), impossible = true when
+-- the fort's own means cannot make it at all (only a caravan can). nil for a class this does not judge or when the facts are unknown.
+-- Never judges a pet or a war / hunting animal slaughterable (M.slaughter_pick keeps them).
+function M.mood_hint(K, cls)
+  cls = key_of(cls)
+  local inv, f, c = K.census.i or {}, st.f or {}, M.conf(K)
+  if cls == 'bone' or cls == 'shell' or cls == 'leather' then
+    local ca = K.census.a
+    if type(ca) ~= 'table' or type(ca.list) ~= 'table' then return nil end
+    local tame = math.tointeger(ca.n) or #ca.list
+    local pick = M.slaughter_pick(ca.list, {keep_f = 0, keep_m = 0, max = 50, adult_first = true})
+    local butcher = ws_any(f, (c.slaughter or {}).ws)
+    if #pick > 0 then
+      return string.format('%d tame animal%s can be slaughtered (butcher.mark)%s', #pick, #pick == 1 and '' or 's',
+                           butcher and '' or "; no Butcher's shop stands"), false
+    end
+    local shoot = (inv.w_xbow or 0) + (inv.w_bow or 0) > 0 and not st.no_ammo
+    local why = string.format('no animal can be slaughtered (%d tame: pets, war and hunting animals stay)', tame)
+    if cls == 'leather' then return why .. (shoot and '; hunting is the way' or '; no hunter can shoot'), not shoot end
+    return why .. (shoot and '; hunting is the way' or '; no hunter can shoot (crossbow, bolts)'), not shoot
+  elseif cls == 'glass' then
+    local fur = ws_any(f, ((c.glass or {}).furnace) or {})
+    if fur then return nil end
+    if M.stone_zero() then
+      return 'no glass furnace and no stone to build one (a boulder is needed): trade.want glass, or quarry stone first', true
+    end
+    return 'no glass furnace: place one (bp.place workshops only=GlassFurnace), then sand and fuel (economy starts the chain)', false
+  elseif cls == 'bars' or cls == 'bar' then
+    if (inv.ore or 0) > 0 or (inv.melt or 0) > 0 then return nil end
+    local smelter = ws_any(f, (c.metal or {}).smelter)
+    return string.format('no ore and no metal marked for melting%s: trade.want bar:iron, an explore dig for ore, or mark metal items ' ..
+                         '(weapons, tools, armour) for melting', smelter and '' or ', and no smelter'), not smelter and M.stone_zero()
+  end
+end
+
 -- economy.route for gems and raw glass (care's MOOD_RISK): via 'glass' = the missing gems filter takes cut glass; any
 -- other gems need is a rough gem, which no glass replaces
 function M.glass_route(K, key, via)
@@ -9846,6 +9884,20 @@ M.slab_ghosts = function(K, now)
   return nil
 end
 
+-- BUG-518 (Run 16b i2 Brotherarrow y385: five corpses in tree crowns could not be buried, a ghost scared a citizen to death): the
+-- dead citizens whose bodies nobody can walk to (care.unreach_ids, with a historical figure) want a memorial slab too, before the
+-- ghost comes; the ones that are ghosts already are in census.g and not counted twice
+function M.slab_extra(K)
+  local ok, ul = K.call('care', 'unreach_ids')
+  if not (ok and type(ul) == 'table') then return {} end
+  local isg = {}
+  local cg = K.census.g
+  for _, id in ipairs(type(cg) == 'table' and type(cg.ids) == 'table' and cg.ids or {}) do isg[math.tointeger(id) or id] = true end
+  local out = {}
+  for _, id in ipairs(ul) do if not isg[id] then out[#out + 1] = id end end
+  return out
+end
+
 function M.slab_pass(K, c, r)
   local sc, OF = c.slabs, M.OF
   local jt = df.job_type.EngraveSlab
@@ -9867,7 +9919,7 @@ function M.slab_pass(K, c, r)
   local sl = OF.slabs(sc.scan_max)
   local ghosts = M.slab_ghosts(K, now)
   local gunk = ghosts == nil
-  ghosts = ghosts or 0
+  ghosts = (ghosts or 0) + (gunk and 0 or #M.slab_extra(K))      -- BUG-518: + the unreachable bodies
   local sb = {blank = sl.blank, busy = sl.busy, held = sl.held, built = sl.built, memorial = sl.memorial, engrave = #eng,
               cons = cons, ghosts = ghosts, removed = 0, ordered = 0, engraved = 0, unserved = 0}
   st.slab, st.slab_t = sb, now
@@ -10019,6 +10071,15 @@ function M.slab_engrave(K, c, r, sl, sb, eng, engf, removed)
     isghost[sid] = true
     ids[#ids + 1] = {id = math.tointeger(id), sid = sid}
     if seen[sid] == nil then seen[sid] = now end
+  end
+  -- BUG-518: the dead whose bodies nobody can walk to are served like ghosts (their slab before the haunting)
+  for _, id in ipairs(M.slab_extra(K)) do
+    local sid = tostring(math.tointeger(id) or id)
+    if not isghost[sid] then
+      isghost[sid] = true
+      ids[#ids + 1] = {id = math.tointeger(id), sid = sid}
+      if seen[sid] == nil then seen[sid] = now end
+    end
   end
   for sid in pairs(seen) do if not isghost[sid] then seen[sid] = nil end end
   for sid in pairs(skip) do if not isghost[sid] then skip[sid] = nil end end
@@ -11927,7 +11988,13 @@ function M.route(K, key, via)
       return ws_any(f, (c.metal or {}).smelter) and string.format('smelt %d ore', inv.ore)
              or string.format('%d ore, no smelter', inv.ore)
     end
-    return 'no ore: explore dig (plan), trade.want bar:iron'
+    -- BUG-520: no ore: melting metal items is a second source (a Smelter melts what is marked for melt)
+    return string.format('no ore: explore dig (plan), trade.want bar:iron, or melt metal items (%d marked, %s)', inv.melt or 0,
+                         ws_any(f, (c.metal or {}).smelter) and 'a smelter stands' or 'no smelter')
+  elseif key == 'bone' or key == 'shell' then
+    -- BUG-520 (Run 16a-d: bone moods died with 'butcher.mark: no animal to mark'): route 'hunt' hid that nothing can be slaughtered
+    local txt = M.mood_hint(K, key)
+    return txt and (txt .. '; trade.want bone') or 'butcher, hunt, trade.want bone'
   end
   local _, txt = route_of(key, inv, f)
   return tostring(sup.route[key] or txt)

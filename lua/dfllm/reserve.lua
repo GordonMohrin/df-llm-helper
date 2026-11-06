@@ -42,7 +42,7 @@ R.ACQ = {bone = {'butcher', 'hunt'}, shell = {'butcher', 'hunt'}, leather = {'bu
          boulders = {'dig'}, logs = {'chop'}, cloth = {'order:WeaveCloth', 'buy'}, thread = {'order:SpinThread', 'buy'},
          gems = {'order:CutGems', 'buy'}, glass = {'order:MakeRawGlass'}, bars = {'order:SmeltOre', 'buy'}}
 -- trade.lua token kinds (L.KINDS) per class
-R.BUY = {cloth = 'cloth', thread = 'thread', leather = 'leather', gems = 'gem', bars = 'bar', boulders = 'stone',
+R.BUY = {bone = 'bone', cloth = 'cloth', thread = 'thread', leather = 'leather', gems = 'gem', bars = 'bar', boulders = 'stone',
          logs = 'wood'}
 -- what the LLM can do about a class (DECISION_NEEDED q)
 R.HINT = {boulders = 'dig stone (bp.place bedrooms prio=1)', logs = 'cut trees', bone = 'butcher/hunt',

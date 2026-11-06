@@ -513,7 +513,7 @@ T.test('Run 10: no ore and 8 iron bars for 20 soldiers: exploration request and 
   local s = W.state()
   T.eq({s.stock.ore, s.stock.bars, s.stock.metal}, {0, 8, 'explore'})
   T.eq(W.K.call('economy', 'route', 'bars') and select(2, W.K.call('economy', 'route', 'bars')),
-       'no ore: explore dig (plan), trade.want bar:iron')
+       'no ore: explore dig (plan), trade.want bar:iron, or melt metal items (0 marked, a smelter stands)')   -- BUG-520: + the melt route
   -- ore came in: no exploration route any more
   for _ = 1, 2 do F.item(W, 'BOULDER', {mat_type = 0, mat_index = 62}) end      -- hematite
   days(W, 1)
