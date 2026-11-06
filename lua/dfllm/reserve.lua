@@ -198,8 +198,35 @@ function R.slot_name(nd)
   if nd.part == 'part' then base = 'body part' elseif nd.part == 'horn' then base = 'horn'
   elseif nd.part == 'tooth' then base = 'ivory' elseif nd.part == 'pearl' then base = 'pearl' end
   local w = nd.words
+  -- BUG-535 (Run 16d i4 Trumpetrealms: 'gems x1: none in the fort' beside 39 gems in the census; the slot wanted a ROUGH gem and
+  -- the fort held only cut ones): a gem slot says which form it wants
+  if nd.cls == 'gems' and not nd.legacy and (nd.tname == 'ROUGH' or nd.tname == 'SMALLGEM') then
+    local form = nd.tname == 'ROUGH' and 'rough' or 'cut'
+    w = (type(w) == 'string' and w ~= '') and (form .. '/' .. w) or form
+  end
   if type(w) == 'string' and w ~= '' then base = base .. '(' .. w .. ')' end
   return base
+end
+
+-- BUG-535: how to get a class; a rough-gem slot is no CutGems job (cutting only turns the rough gems into cut ones)
+function R.acq(nd)
+  if nd and nd.cls == 'gems' and nd.tname == 'ROUGH' and not nd.legacy then return {'buy'} end
+  return R.ACQ[(nd and nd.cls) or ''] or {}
+end
+
+-- BUG-535: the gems of the fort by form, for a slot of the other form: {rough = n (inorganic), cut = n}, without those that are
+-- gone; nil when the vectors cannot be read
+function R.gem_forms()
+  local out = {rough = 0, cut = 0}
+  local ok = pcall(function()
+    for _, it in ipairs(df.global.world.items.other.ROUGH) do
+      if it.mat_type == 0 and not R.gone(it) then out.rough = out.rough + 1 end
+    end
+    for _, it in ipairs(df.global.world.items.other.SMALLGEM) do
+      if not R.gone(it) then out.cut = out.cut + 1 end
+    end
+  end)
+  return ok and out or nil
 end
 
 -- one filter -> a need, or nil when the job already holds enough. got = items attached for this filter.

@@ -179,6 +179,7 @@ T.test('hospital gate: water ends the episode, a dry hospital again wakes at onc
   well(W, 20, 12, 5)
   day(W)
   T.eq(M.kpi(W.K).gate, 0)
+  for _ = 1, 4 do day(W) end                                   -- BUG-537: water for gate_clear (3 days) ends the episode
   W.cmap['20,12,3'] = '.'                                      -- the sump ran dry
   day(W)
   T.eq(#W.find_events('HOSPITAL_DRY'), 2)
@@ -190,6 +191,27 @@ T.test('hospital gate: water ends the episode, a dry hospital again wakes at onc
   T.eq(#hd, 1)
   T.ok(hd[1].msg:find('planned hospital', 1, true), hd[1].msg)
   T.eq(hd[1].d.zone, -1)
+end)
+
+T.test('BUG-537 (Run 16c i3: HOSPITAL_DRY ~10 times a year beside a well that flickered): water for less than gate_clear days ' ..
+       'does not end the dry episode, so the alarm does not start again', function()
+  local W, M = world{tiles = {['20,12,4'] = '_', ['20,12,3'] = '~'},
+                     setup = function(W) F.hospital(W, {10, 10, 14, 14, 5}) end}
+  day(W)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1)
+  well(W, 20, 12, 5)
+  day(W)                                                       -- accepted water for one day
+  T.eq(M.kpi(W.K).gate, 0)
+  W.cmap['20,12,3'] = '.'                                      -- and dry again
+  day(W)
+  T.eq(M.kpi(W.K).gate, 1)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1, 'one episode, one alarm (the weekly repeat or a new cause aside)')
+  -- the clear clock restarts: a second flicker still is the same episode
+  W.cmap['20,12,3'] = '~'
+  day(W)
+  W.cmap['20,12,3'] = '.'
+  day(W)
+  T.eq(#W.find_events('HOSPITAL_DRY'), 1)
 end)
 
 T.test('needs_healthcare marks a patient too; a thirsty dwarf at work is no patient', function()

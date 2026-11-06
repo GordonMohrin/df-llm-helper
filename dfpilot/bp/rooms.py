@@ -215,7 +215,7 @@ def tombs(p: dict) -> Plan:
 
 
 def hospital(p: dict) -> Plan:
-    """Beds, traction bench, chests and its own well spot (well + pond hole over a sump below)."""
+    """Beds, traction bench, a table, chests and its own well spot (well + pond hole over a sump below)."""
     P = Plan("hospital", "living")
     if p.get("surface"):
         return _surface_hospital(P, p)
@@ -226,6 +226,7 @@ def hospital(p: dict) -> Plan:
     for i in range(p["beds"]):
         b.tile(u0 + i if i < 7 else u0 + i - 7, v1 if i < 7 else v1 - 1, 0, "b")
     b.tile(u0, v0 + 2, 0, "R").tile(u0, v0, 0, "h").tile(u0 + 1, v0, 0, "h").tile(2, v0 + 1, 0, "l")
+    b.tile(u1, v0, 0, "t")                         # BUG-537: the table of surgery and suturing (inspect hospital: no_table)
     P.stage("zone", "zone").ent(3, v0 + 1, 3, v0 + 1, 0, "p", "pond=true")
     _finish(P, p, box, "m", "location=hospital name=Hospital allow=residents")
     return P
@@ -245,6 +246,7 @@ def _surface_hospital(P: Plan, p: dict) -> Plan:
     for i in range(p["beds"]):
         b.tile(i if i < 7 else i - 7, H - 1 if i < 7 else H - 2, 0, "b")
     b.tile(0, 2, 0, "R").tile(0, 0, 0, "h").tile(1, 0, 0, "h")
+    b.tile(W - 1, 0, 0, "t")                       # BUG-537: the table of surgery and suturing
     P.stage("zone", "zone").ent(0, 0, W - 1, H - 1, 0, "m", "location=hospital name=Hospital allow=residents")
     P.room("", "hospital", USE.get("hospital", "utility"), (0, 0, 0, W - 1, H - 1, 0), 0)
     return P

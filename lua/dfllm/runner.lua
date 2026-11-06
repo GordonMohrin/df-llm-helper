@@ -4717,9 +4717,63 @@ function Q.wall_refused(r, tile)
   return Q.wall_text(w) and w or nil
 end
 
+-- BUG-538 (Run 16d i4 Trumpetrealms y391-y399: the seal hatch on the stair 94,94,140 'walled in on its level' stayed stalled and
+-- stale 300+ days under a seal_stalled decision, and `seal at=last` placed it again each time): a seal whose every open piece is
+-- boxed (economy.build_state: no tile beside it on its level to build from, nobody takes it) for seal_boxed_days since its clock
+-- stopped is cancelled by the kernel (a plain cancel drops only the unbuilt pieces and their jobs; what stands stays), with the
+-- reason in kern.log and PROJECT_BLOCKED why boxed_cancel. Never the refuge's seal (it moves up its stair, BUG-313), never a piece
+-- that is not boxed, one project a run. `seal at=last` no longer offers such a piece (cmd.stair_piece).
+M.CFG.seal_boxed_days = 30
+function Q.all_boxed(K, P, d)
+  local st = d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') or P.stage + 1 < #d.stages then return false, 0 end
+  local n, names = 0, {}
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      local t = tl[1]
+      if t and not piece_built(K, t) then
+        local ok, bs = K.call('economy', 'build_state', t[1], t[2], t[3])
+        if not (ok and Q.cls_of(bs) == 'boxed') then return false, 0 end
+        n = n + 1
+        if #names < 3 then names[#names + 1] = string.format('%s %d,%d,%d', PIECE_NAME[cell[4]] or cell[4], t[1], t[2], t[3]) end
+      end
+    end
+  end
+  return n > 0, n, names
+end
+
+function Q.boxed_cancel(K, c)
+  if not c.on or K.mode() ~= 'PEACE' then return end
+  local t = now(K)
+  for _, P in ipairs(sorted()) do
+    local r = P.tpl == 'seal' and P.done ~= 1 and P.blocked ~= 'cancel' and S.rt.sf[P.id]
+    if type(r) == 'table' and r.st == 1 and r.why == 'boxed' and t - r.t >= M.CFG.seal_boxed_days * DAY
+       and not Q.refuge_seal(K, P) then
+      local d = doc(K, P.id)
+      local all, n, names = Q.all_boxed(K, P, d)
+      if all then
+        local msg = string.format('%s (seal) cancelled by the kernel: %s walled in on its level (no tile beside it to build from), ' ..
+                                  'no builder can take it; open %d d. Nothing built is removed. dfllm bp sites seal --fresh shows ' ..
+                                  'what is still open', P.id, table.concat(names, ', '), (t - r.t) // DAY)
+        K.log('warn', 'seal first: %s', msg)
+        K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), {proj = P.id, tpl = P.tpl, why = 'boxed_cancel', ticks = t - r.t,
+                                                          parts = trunc(table.concat(names, '; '), 200)})
+        cancel(K, P, false)
+        rows(K)
+        save(K)
+        return
+      end
+    end
+  end
+end
+
 function Q.stuck_walls(K, c)
   local okr, er = pcall(Q.stuck_replace, K, c)                 -- BUG-274: own pcall
   if not okr then K.log('error', 'seal re-place failed: %s', trunc(er, 160)) end
+  local okb, eb = pcall(Q.boxed_cancel, K, c)                  -- BUG-538: own pcall
+  if not okb then K.log('error', 'boxed seal cancel failed: %s', trunc(eb, 160)) end
   if not (c.on and c.wall) or K.mode() ~= 'PEACE' then return end
   local okh, hold = K.call('reflex', 'holding')            -- a lockdown holds the doors: citizens may be coming in
   if okh and type(hold) == 'string' and hold ~= '' then return end
@@ -5689,6 +5743,10 @@ Q.MANDATORY = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Still', 'Kitchen'}
 
 ---------------------------------------------------------------- build_lost: missing pieces and the retry (BUG-022)
 
+-- BUG-536 (Run 16d i4 Trumpetrealms: 'blocked: build_lost at build, missing D' for a depot, 16 retries, no reason): the name of a
+-- multi-tile building's key
+M.BIG_PIECE = {D = 'trade depot'}
+
 -- the name of a piece: the manifest bridge whose footprint holds the cell (B1), a bridge's lever ('lever B1'),
 -- 'trap' for a trap key, else the key
 local function piece_name(d, t, key)
@@ -5706,7 +5764,7 @@ local function piece_name(d, t, key)
   end
   if key:sub(1, 1) == 'T' and key ~= 'Tl' then return 'trap' end
   if key == 'Tl' then return 'lever' end
-  return key
+  return M.BIG_PIECE[key] or key
 end
 
 -- the pieces of the blocked build stage still missing: {'B1', 'lever B1 x2', 'trap x3'} (<= 8, first-seen order) and
@@ -5901,6 +5959,56 @@ function Q.parts(K, P, d)
   return out
 end
 
+-- BUG-536: why a multi-tile building of the blocked build stage (the depot's 5x5) was not placed: the tiles of its footprint that
+-- are no open floor on the revealed map (wall, tree, ramp, stair, open air, water, another building, hidden), and for the depot the
+-- material economy cannot make. Text, or nil when the stage has no such building. A footprint that looks clear and a material that
+-- exists say so: the cause is then not on the revealed map.
+Q.FOOT_BAD = {['#'] = 'wall', S = 'wall', C = 'wall', F = 'wall', T = 'tree', ['<'] = 'stair', ['>'] = 'stair', X = 'stair',
+                  r = 'ramp', v = 'ramp', ['_'] = 'open air'}
+function Q.lost_why(K, P, d)
+  local st = d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') then return nil end
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local w, h = cell[4]:match('%((%-?[0-9]+)x(%-?[0-9]+)%)')
+      if w and h and (math.abs(int(w) or 1) > 1 or math.abs(int(h) or 1) > 1) then
+        local tl = {}
+        cell_tiles(ch, cell, tl)
+        if not cell_present(K, tl[1]) then
+          local bad, hidden, n = {}, 0, 0
+          for _, t in ipairs(tl) do
+            local ok, v = K.call('snapshot', 'tile', t[1], t[2], t[3])
+            local why
+            if not (ok and type(v) == 'table') or v.c == nil or v.c == '?' then hidden = hidden + 1
+            elseif type(v.bld) == 'string' and v.bld ~= '' then why = 'a ' .. v.bld
+            elseif Q.FOOT_BAD[v.c] then why = Q.FOOT_BAD[v.c]
+            elseif (int(v.flow) or 0) >= 4 then why = 'water'
+            elseif v.magma then why = 'magma' end
+            if why then
+              n = n + 1
+              if #bad < 3 then bad[#bad + 1] = string.format('%d,%d,%d %s', t[1], t[2], t[3], why) end
+            end
+          end
+          local parts = {}
+          if n > 0 then parts[#parts + 1] = string.format('%d of %d footprint tiles are no open floor (%s)', n, #tl, table.concat(bad, ', ')) end
+          if hidden > 0 then parts[#parts + 1] = string.format('%d hidden', hidden) end
+          if P.tpl == 'depot' then
+            local okm, via, mw = K.call('economy', 'mat_for', 'depot', 3)
+            if okm and not via and mw then parts[#parts + 1] = 'no building material: ' .. trunc(tostring(mw), 60) end
+          end
+          if #parts == 1 and n == 0 and hidden > 0 then return nil end   -- only hidden tiles: the retry text says so already
+          if #parts == 0 then
+            parts[1] = string.format('the %dx%d footprint at %d,%d,%d looks clear and material exists: quickfort refused the site; ' ..
+                                     'place it elsewhere', math.abs(int(w) or 1), math.abs(int(h) or 1), tl[1][1], tl[1][2], tl[1][3])
+          end
+          return table.concat(parts, '; ')
+        end
+      end
+    end
+  end
+  return nil
+end
+
 -- PROJECT_BLOCKED (A) after blocked_a; util/cadence per project: once per stage and cause (a stall that clears and
 -- comes back at the same stage is no news; Run 10: "PROJECT_BLOCKED stalled every few days" for two game years);
 -- build_lost names the missing pieces and the retry, and a spent retry budget is one more (final) announcement
@@ -5926,6 +6034,8 @@ local function blocked_event(K, P, t)
     msg = msg .. ' at ' .. label .. (#miss > 0 and (', missing ' .. table.concat(miss, ', ')) or '')
     local _, mw = M.remake_why(K, P, d)      -- Run 11: why economy cannot make a seal's pieces
     if mw then msg, dd.mat = msg .. ' (' .. mw .. ')', trunc(mw, 80) end
+    local lw = Q.lost_why(K, P, d)           -- BUG-536: why the depot (a 5x5 building) was not placed
+    if lw then msg, dd.parts = msg .. ': ' .. lw, trunc(lw, 200) end
     if wn then msg = msg .. '; ' .. wn end
     if final then msg = msg .. string.format('; %d retries spent: bp.cancel and place it again', nr)
     else
@@ -5958,8 +6068,10 @@ function Q.park_event(K, P, t)
   local days = (t - P.since) // DAY
   local keep = P.tpl == 'explore' and 'its shaft stays watched' or P.blocked == 'build_lost' and 'what it built stays'
                or 'nothing is undone'
-  local msg = string.format('%s (%s) blocked %d d: %s at %s; parked; cancel: dfllm cmd bp.cancel \'{"proj":"%s"}\' '
-                            .. '(no undo: %s)', P.id, P.tpl, days, P.blocked, label, P.id, keep)
+  local lw = P.blocked == 'build_lost' and Q.lost_why(K, P, d) or nil     -- BUG-536
+  local msg = string.format('%s (%s) blocked %d d: %s at %s%s; parked; cancel: dfllm cmd bp.cancel \'{"proj":"%s"}\' '
+                            .. '(no undo: %s)', P.id, P.tpl, days, P.blocked, label, lw and (' (' .. trunc(lw, 70) .. ')') or '',
+                            P.id, keep)
   K.log('warn', '%s', msg)
   K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200),
          {proj = P.id, tpl = P.tpl, stage = label, why = P.blocked, ticks = t - P.since, park = days})
@@ -7468,6 +7580,7 @@ M.verbs = {
 
 -- BUG-329 (tests, read-only): the building on a tile (a finished farm plot too), build_state's answer in one word
 M.bld_at, M.cls_of = Q.bld_at, Q.cls_of
+M.lost_why, M.all_boxed, M.boxed_cancel = Q.lost_why, Q.all_boxed, Q.boxed_cancel     -- BUG-536 / BUG-538 (tests)
 
 -- BUG-479 review (seal's plug_lift): the state of a project by id, nil when the runner has no such project (lost), else
 -- {done = bool}

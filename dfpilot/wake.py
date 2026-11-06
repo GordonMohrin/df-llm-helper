@@ -398,6 +398,8 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
         return stalled_job_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "mood_thirst":
         return mood_thirst_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "hospital_supply":
+        return hospital_supply_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline", "no_water",
                                                                          "thirst_unit") and d.get("cmds"):
         return food_hint(d, save_dir)
@@ -493,6 +495,16 @@ def lone_hint(d: dict) -> str:
     return (f"tell Gordon{how}{kill}; otherwise the kernel releases it at confine.max_days when the soldiers stand at "
             "their stations (LOCKDOWN_END limit); dfllm events --type SORTIE says whether the soldiers arrived, killed it or "
             "stood beside it (not_attackable: DF does not treat it as an enemy)")
+
+
+def hospital_supply_hint(d: dict) -> str:
+    """BUG-537 (Run 16c i3: a hospital with patients and no table, splints, thread or cloth): d.gaps = the missing parts (no_table,
+    no_traction, no_splints, no_thread, no_cloth), d.cmds the commands that make or buy the supplies. Yours to decide (no need to ask)."""
+    gaps = ", ".join(str(g) for g in d.get("gaps") or [])
+    cmds = [str(c) for c in d.get("cmds") or []]
+    furn = " ; a table / traction bench: build it inside the hospital zone (the hospital template places one)"         if any(g in ("no_table", "no_traction") for g in d.get("gaps") or []) else ""
+    send = f"send: {cmds[0]}" + (f" (+{len(cmds) - 1} more in d.cmds)" if len(cmds) > 1 else "") if cmds else "no command makes it"
+    return f"hospital lacks {gaps}: decide yourself; {send}{furn}"
 
 
 def mood_thirst_hint(d: dict) -> str:
