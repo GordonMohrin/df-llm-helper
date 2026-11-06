@@ -534,7 +534,7 @@ C.STATE_SPEC = obj({
              kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}),
              -- FR-79: the militia rotation per squad key (schema.py _ROT)
              rot = obj(nil, {A = ROT_ONE, B = ROT_ONE, C = ROT_ONE})}),
-  trade = obj({caravan = FLAG, ratio = NAT, done = NAT}),
+  trade = obj({caravan = FLAG, ratio = NAT, done = NAT}, {nb = arr(str(24), 0, 5)}),   -- BUG-534: wants no caravan ever had
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
               {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT, far = NAT,

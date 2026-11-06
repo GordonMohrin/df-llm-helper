@@ -2629,10 +2629,43 @@ def defense_on(s: dict | None, target: str) -> list[str]:
     return defense_gaps(s)
 
 
+# BUG-533 (Run 16b-d i2/i3/i4: no migrant wave for years, `max-pop 33 (plan)` on 33 citizens: pop-control's game cap is
+# min(max-pop, citizens + wave-size), a ceiling ON the citizens lets no wave in): while every gap is SOFT (a trap shortfall of
+# at least GROWTH_TRAP_PCT % of its target, soldiers in armor worn at least GROWTH_WORN %) the ceiling leaves room for one
+# wave: growth_room(pop) citizens. A hole (refuge_dry, traps 0, armor 0, thin traps, bare armor) keeps the ceiling ON the
+# citizens. Same numbers as readiness.lua M.GROW (the kernel's defense_short / open_perimeter holds)
+GROWTH_ROOM_MIN = 4
+GROWTH_ROOM_PCT = 10
+GROWTH_TRAP_PCT = 50
+GROWTH_WORN = 40
+_TRAPS_SHORT_RE = re.compile(r"^traps short (\d+)<(\d+)$")
+_ARMOR_WORN_RE = re.compile(r"^armor worn (\d+) %$")
+
+
+def growth_room(pop: int) -> int:
+    """BUG-533: citizens a held ceiling still lets in (one migrant wave's worth, at least GROWTH_ROOM_MIN)."""
+    return max(GROWTH_ROOM_MIN, (pop or 0) * GROWTH_ROOM_PCT // 100)
+
+
+def gap_soft(gap: str) -> bool:
+    """BUG-533: a defence gap that is a shortfall, not a hole."""
+    m = _TRAPS_SHORT_RE.match(gap)
+    if m:
+        have, tt = int(m.group(1)), int(m.group(2))
+        return tt > 0 and have * 100 >= tt * GROWTH_TRAP_PCT
+    m = _ARMOR_WORN_RE.match(gap)
+    return bool(m) and int(m.group(1)) >= GROWTH_WORN
+
+
 def defense_cap(s: dict | None, cap: int) -> int:
-    """BUG-377: the population ceiling while the defence is short: the citizens now (at least DEFENSE_POP), never above `cap`."""
+    """BUG-377: the population ceiling while the defence is short: the citizens now (at least DEFENSE_POP), never above `cap`.
+    BUG-533: plus growth_room(pop) while every gap is soft (gap_soft), so a wave can still come."""
     pop = ((s or {}).get("pop") or {}).get("cit", 0)
-    return min(cap, max(pop if _nat(pop) else 0, DEFENSE_POP))
+    base = max(pop if _nat(pop) else 0, DEFENSE_POP)
+    gaps = defense_gaps(s)
+    if gaps and all(gap_soft(g) for g in gaps):
+        base += growth_room(base)
+    return min(cap, base)
 
 
 def trap_hold(s: dict | None) -> str | None:
@@ -4630,7 +4663,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         if armor and not _bar_want(doc["trade"]["want"]):
             doc["trade"]["want"].insert(0, "bar:iron")
         ph = [str(x) for x in (s.get("phw") or {}).get("wait") or []]
-        doc["notes"] += (f"; BUG-377: defence short ({', '.join(gaps)}): pop_ceiling {cap} (the citizens now, no growth), "
+        doc["notes"] += (f"; BUG-377: defence short ({', '.join(gaps)}): pop_ceiling {cap} ({'the citizens now, no growth' if cap <= max(pop, DEFENSE_POP) else f'the citizens now + {cap - max(pop, DEFENSE_POP)} room for a migrant wave: every gap is soft, BUG-533'}), "
                          "traps and the hall before the growth builds (the refuge's pieces first)"
                          + (", bar:iron first in trade.want" if armor else "")
                          + ((f"; phase {cur} waits for {', '.join(ph)}: " if ph else "; ")
@@ -5205,7 +5238,7 @@ def ceiling_held_note(cap: int, policy_cap: int, gaps: list) -> str:
     if cap >= policy_cap or not gaps:
         return ""
     return (f"; pop_ceiling {cap} held (policy {policy_cap}): defence short ({', '.join(gaps)}), BUG-377: no growth past the "
-            "citizens now until they are closed")
+            "citizens now (BUG-533: but one wave's room while every gap is soft) until they are closed")
 
 
 HELD_RE = re.compile(r"pop_ceiling (\d+) held \(policy (\d+)\): ([^;]*?)(?:, BUG-377|;|$)")

@@ -138,6 +138,22 @@ T.test('BUG-481: traps_short: 8 armed traps on the weakest path against the sieg
   T.eq(W.state().pop.cap, 120, 'the hold is lifted')
 end)
 
+-- BUG-533 (Run 16b-d i2/i3/i4: no migrant wave for years, max-pop on the citizens): a shortfall of at least half the target is a soft
+-- gap; the hold leaves room for a wave (10 % of 100 citizens), a thinner one still holds max-pop ON the citizens
+T.test('BUG-533: a soft trap shortfall (16 of 29) holds max-pop at the population + a wave room, named in pop.hold; 8 of 29 holds it on the citizens', function()
+  local W = world{n = 100, hist = {peak = 50, n = 2, bd = 1}, cap = 120}
+  day(W, 3)
+  audit(W, {min_traps = 16})
+  day(W, 24)
+  T.ok(has(W.state().ready.fail, 'traps_short'), T.show(W.state().ready.fail))
+  T.eq(W.state().pop.cap, 110, 'soft: 100 citizens + growth_room 10')
+  T.eq(W.state().pop.hold, 'defense_short 110+', 'status names the hold and that it leaves room')
+  audit(W, {min_traps = 8})
+  day(W, 3)
+  T.eq(W.state().pop.cap, 100, 'a hole holds it on the citizens')
+  T.eq(W.state().pop.hold, 'defense_short 100')
+end)
+
 T.test('BUG-481: no history: 0.35 x citizens is the expected army (100 citizens -> 35 -> target 22); a small fort (30) asks nothing; ' ..
        'the target is clamped to 20..40', function()
   local W = world{n = 100, cap = 120}

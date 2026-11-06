@@ -481,7 +481,25 @@ def pop_diag(ctx: Ctx) -> str:
     out = (f"pop trend: {cit} of peak {pd['peak']}, {ad if isinstance(ad, int) else '?'} adults + {pd['kids']} children/babies"
            f" + {pd['res']} residents; deaths in 365 d: {pd['dy']}" + (f" ({by})" if by else "")
            + f"; migrants in 365 d: {pd['waves']} waves, {pd['mig']} people ({last})")
-    return out + ("; " + MIGRANT_RULES if ctx.full and (shrunk or quiet) else "")
+    return out + migrant_cap_note(ctx, cit) + ("; " + MIGRANT_RULES if ctx.full and (shrunk or quiet) else "")
+
+
+def migrant_cap_note(ctx: Ctx, cit: int) -> str:
+    """BUG-533 (Run 16b-d i2/i3/i4: no migrant wave for years, nobody could say whether max-pop was the cause): pop-control's game
+    cap is min(max-pop, citizens + wave-size), so a max-pop at or under the citizens lets no wave in. Names the hold that binds
+    (pop.hold: 'plan 33', 'open_perimeter 32+', 'defense_short 33', 'player 25 ...') or says max-pop is NOT the cause."""
+    p = ctx.s.get("pop") or {}
+    cap = p.get("cap")
+    if not isinstance(cap, int):
+        return ""
+    hold = p.get("hold") if isinstance(p.get("hold"), str) and p.get("hold") else ""
+    if cap <= cit:                             # status too: the one cause that blocks the waves, kept short (token budget)
+        return f"; migrants blocked: max-pop {cap} on {cit} citizens ({hold or 'level cap'})"
+    if not ctx.full:
+        return ""
+    if hold:
+        return f"; max-pop {cap} leaves room for {cap - cit} ({hold})"
+    return f"; max-pop {cap} is not what keeps migrants out ({cit} citizens)"
 
 
 def curse_items(ctx: Ctx) -> list[tuple[int, str]]:
@@ -936,7 +954,25 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
                    # BUG-061: a workshop type's slots are full of jobs that cancel at once
                    + (f" JAM {od['jam']}" if od.get("jam") else ""))
     # three rank-4 lines (each as before: parts joined by ' | '); the last goes first, a line that does not fit goes whole
+    nb = (s.get("trade") or {}).get("nb")
+    if nb:
+        out.append((2, trade_nb_note(nb, ctx.full)))
     return out + [(4, _join(g)) for g in (fort, care, work) if g]
+
+
+NB_ALT = {"stone": "dig it (explore quarry, bedrooms)", "block": "cut it from stone (mason)", "mechanism": "mechanic's workshop from stone",
+          "bar": "smelt ore / melt metal gear", "wood": "fell trees", "gem": "mine / cut rough gems", "bone": "slaughter animals"}
+
+
+def trade_nb_note(nb: list, full: bool = True) -> str:
+    """BUG-534 (Run 16a i1 / 16d i4: stone, mechanisms and bars on trade.want for years, nothing ever came and nothing said so): the wants
+    the merchants had none of in every visit that asked (state trade.nb). The kernel does not write the liaison's trade agreement (the
+    diplomacy screen of its meeting), so trade cannot supply them: make them (alternatives per token) or ask the liaison by hand."""
+    if not full:                               # status: the tokens only (token budget); the brief has the reason and the alternatives
+        return f"trade cannot supply {', '.join(nb)} (no merchant had it; make it)"
+    alts = "; ".join(f"{t.split(':')[0]}: {NB_ALT[t.split(':')[0]]}" for t in nb if t.split(":")[0] in NB_ALT)
+    return (f"trade cannot supply {', '.join(nb)} (the merchants had none in every visit; trade.want does not change it, the kernel "
+            "does not write the liaison's trade agreement)" + (f"; make it: {alts}" if alts else ""))
 
 
 def line_supply(ctx: Ctx) -> str:
