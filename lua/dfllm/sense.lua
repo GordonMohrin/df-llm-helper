@@ -667,12 +667,18 @@ local function consider(hs, u)
     P.x, P.y, P.z = x, y, z
     herb_in = dfhack.burrows.isAssignedTile(hs.kb, P) == true
   end
-  if not (inv or great or undead or herb_in or in_boxes(hs.geo.zpast, x, y, z)) and herbivore(u) then
+  local hbeast = not (inv or great or undead) and herbivore(u)       -- BUG-554: entry.hb marks it for reflex
+  if hbeast and not (herb_in or in_boxes(hs.geo.zpast, x, y, z)) then
     -- BUG-532: a far plant eater is wildlife; the distance is the nearest citizen (outside Kern+ or on its levels)
+    -- BUG-554: on its levels (DA_DZ) for both lists: a miner 14 levels down in a shaft is no neighbour of a stegosaurus on the
+    -- surface (Run 16a i1 y416: PREDATOR for a stegosaurus 50 and more tiles from the fort, every 2,000 ticks)
     local dh = -1
     for _, p in ipairs(hs.out_pos) do
-      local d = math.max(math.abs(x - p.x), math.abs(y - p.y), math.abs(z - p.z))
-      if dh < 0 or d < dh then dh = d end
+      local dzc = math.abs(z - p.z)
+      if dzc <= M.DA_DZ then
+        local d = math.max(math.abs(x - p.x), math.abs(y - p.y), dzc)
+        if dh < 0 or d < dh then dh = d end
+      end
     end
     for _, p in ipairs(hs.civ_pos) do
       local dzc = math.abs(z - p.z)
@@ -773,6 +779,7 @@ local function consider(hs, u)
   if an then entry.an = 1 end
   -- BUG-065 (Run 14, a gremlin in the caves): the unit's own body size (cm3; a dwarf is 60000) and the large-predator
   -- flag go to the census, so reflex can tell a small harmless intruder from a dangerous one [size field: ? live]
+  if hbeast then entry.hb = 1 end                  -- BUG-554: a big wild plant eater (see reflex inside_scan: no lockdown outside Kern+)
   if rf.p or killer(u) or big_wild(u) then entry.pr = 1 end   -- BUG-421: a wild killer is dangerous whatever its raws say; BUG-439: a big wild beast inside
   if killer(u) then entry.kl = 1 end
   if (try_num(function() return u.counters.unconscious end) or 0) > 0 then entry.uc = 1 end    -- M3: it wakes up

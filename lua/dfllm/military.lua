@@ -454,7 +454,7 @@ end
 
 -- healthy enough to fight now: no wound, awake, not thirsty or hungry (fields a fake unit lacks read as fine)
 local function healthy(u)
-  local wounds = try(function() return #u.body.wounds end) or 0
+  local wounds = require('dfllm.util.wound').needs_treatment(u) and 1 or 0     -- BUG-557: a healed scar is no wound
   local out = try(function() return u.counters.unconscious end) or 0
   local th = try(function() return u.counters2.thirst_timer end) or 0
   local hu = try(function() return u.counters2.hunger_timer end) or 0
@@ -1448,7 +1448,7 @@ M.ROT_LABORS = {'MASON', 'CARPENTER', 'BREWER', 'PLANT', 'COOK', 'MECHANIC', 'DI
 local function patient(u)
   return try(function()
     if u.health and u.health.flags.needs_healthcare then return true end
-    return #u.body.wounds > 0
+    return require('dfllm.util.wound').needs_treatment(u)             -- BUG-557: a healed scar is no patient
   end) == true
 end
 
@@ -2229,10 +2229,47 @@ function M.unfit_text(K, key)
   if mode ~= 'SIEGE' and mode ~= 'BREACH' then return nil end
   local n, fit = M.squad_fit(K, key)
   if n > 0 and fit * 100 < M.UNFIT_PCT * n then
-    return string.format('squad %s is not equipped: %d of %d soldiers hold a real weapon and wear body armor (< %d %%)', key, fit, n,
-                         M.UNFIT_PCT)
+    return string.format('squad %s is not equipped: %d of %d soldiers hold a real weapon and wear body armor (< %d %%)%s', key, fit, n,
+                         M.UNFIT_PCT, M.kit_missing(K, key))
   end
   return nil
+end
+
+-- BUG-555: what the unequipped soldiers of squad `key` lack and what lies free in the fort, as a suffix for the refusal and the
+-- stand-down line: ' (missing: weapon 3, wooden weapon only 2, body armor 6; free: 17 melee weapons, 18 body armors: ...)'; '' when
+-- nothing can be read
+M.KIT_HINT = 'the pieces lie free but are not worn: the uniform specs do not match them or nobody fetched them; military re-specs '
+             .. 'the empty slots (refit) once a game day, `uniform-unstick --all --free` can hand them out'
+function M.free_weapons()
+  local n = 0
+  try(function()
+    for _, it in ipairs(df.global.world.items.other.WEAPON) do
+      if free_item(it) then
+        local w = weapon_kind(it:getSubtype())
+        if w and w.k == 'melee' and not tostring(w.token):find('_TRAINING$') then n = n + 1 end
+      end
+    end
+  end)
+  return n
+end
+function M.kit_missing(K, key)
+  local e = type(key) == 'string' and st.sq[key]
+  local s = e and squad(e.id)
+  if not s then return '' end
+  local nowpn, wood, nobody = 0, 0, 0
+  for _, m in ipairs(members(s)) do
+    local x = M.KIT.soldier(m.p, m.unit, roles(), nil)
+    if not x.weapon then nowpn = nowpn + 1 elseif x.wood then wood = wood + 1 end
+    if x.empty and x.empty.body then nobody = nobody + 1 end
+  end
+  local miss = {}
+  if nowpn > 0 then miss[#miss + 1] = 'weapon ' .. nowpn end
+  if wood > 0 then miss[#miss + 1] = 'wooden training weapon only ' .. wood end
+  if nobody > 0 then miss[#miss + 1] = 'body armor ' .. nobody end
+  if #miss == 0 then return '' end
+  local fw, fb = M.free_weapons(), M.stock_mats('body').any
+  local hint = ((nowpn + wood > 0 and fw > 0) or (nobody > 0 and fb > 0)) and ('; ' .. M.KIT_HINT) or ''
+  return string.format(' (missing: %s; free: %d melee weapons, %d body armors%s)', table.concat(miss, ', '), fw, fb, hint)
 end
 
 -- squad `k` stands down now (see M.UNFIT_PCT); the first look of an episode names it in kern.log (rt.sd_note)
@@ -2247,8 +2284,8 @@ local function standdown(K, k)
   rt.sd_note = rt.sd_note or {}
   if down and not rt.sd_note[k] then
     K.log('warn', 'military: %s: squad %s stands down: %d of %d soldiers hold a real weapon and wear body armor (< %d %%); '
-          .. 'unequipped soldiers are not stationed against the enemy, they stay with the civilians in the refuge', mode, k, fit,
-          n, M.UNFIT_PCT)
+          .. 'unequipped soldiers are not stationed against the enemy, they stay with the civilians in the refuge%s', mode, k, fit,
+          n, M.UNFIT_PCT, M.kit_missing(K, k))
   elseif not down and rt.sd_note[k] then
     K.log('info', 'military: %s: squad %s is equipped again (%d of %d): it takes its station', mode, k, fit, n)
   end
@@ -3673,13 +3710,28 @@ function M.train_default(K, k)
   end
 end
 
--- FR-100: the material refit of squad k (dfllm.kit refit_plan): PEACE without danger, every refit_days per squad
+-- FR-100: the material refit of squad k (dfllm.kit refit_plan): every refit_days per squad in quiet PEACE.
+-- BUG-555 (Run 16a i1 Basementflew y416-y422: a wild stegosaurus put the fort into ALERT for 1,375 of every 2,000 ticks, then a
+-- ceratosaurus into BREACH; 'squad.sortie refused: 0 of 6 soldiers hold a real weapon and wear body armor' with 18 free metal
+-- weapons and 18 body armors in stock, worn 19-35 %): the refit ran in PEACE without any danger only, so empty slots whose spec
+-- the free pieces did not match stayed empty for ever. With a danger about (an alert, a lockdown, a hostile in sight, a
+-- recovery, a drill) it runs after one game day; in a SIEGE or BREACH only for a squad below UNFIT_PCT (the one that is refused
+-- the sortie), also after one day.
 function M.refit(K, k, s, now)
   local e = st.sq[k]
   local days = M.tconf(K).refit_days
   if not e or days == 0 then return end
   if not e.rf or now < e.rf then e.rf, dirty = now, true; return end   -- first sight: DF gets refit_days to hand out the kit
-  if now - e.rf < days * M.KIT.DAY or M.danger(K) then return end
+  local wait = days * M.KIT.DAY
+  if M.danger(K) then
+    local mode = K.mode()
+    if mode == 'SIEGE' or mode == 'BREACH' then
+      local n, fit = M.squad_fit(K, k)
+      if not (n > 0 and fit * 100 < M.UNFIT_PCT * n) then return end
+    end
+    wait = math.min(wait, M.KIT.DAY)
+  end
+  if now - e.rf < wait then return end
   local mems = {}
   for _, m in ipairs(members(s)) do
     mems[#mems + 1] = {pos = m.pos, p = m.p, kit = M.KIT.soldier(m.p, m.unit, roles(), is_metal)}
@@ -3820,7 +3872,7 @@ function M.step(K, budget, ctx)
         M.train_default(K, sp.key)                                        -- FR-100 (G18)
         ensure_uniform(K, sp.key, s, want)
         ensure_weapons(K, sp.key, s)
-        if mode == 'PEACE' then M.refit(K, sp.key, s, now) end            -- FR-100: the armor's material fallback
+        M.refit(K, sp.key, s, now)                                        -- FR-100: the armor's material fallback (BUG-555: in any mode)
         local rot = want > 0 and M.rot_on(K, sp.key)                      -- FR-79: the rotation owns the militia squad
         if rot then
           if M.rot_step(K, sp, s, want, now) then ensure_uniform(K, sp.key, s, want); ensure_weapons(K, sp.key, s) end

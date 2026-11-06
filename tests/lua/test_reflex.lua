@@ -242,6 +242,32 @@ T.test('Run 10: a roofed wild danger far from every citizen is PREDATOR_FAR (B),
   T.eq({#p, p[1].d.id}, {1, 400})
 end)
 
+-- BUG-554 (Run 16a i1 Basementflew y416-y422: a wild stegosaurus, BENIGN plant eater of 342,595 cm3, 14 PREDATOR interrupts, each a Kern+
+-- lockdown with the clock at 30 t/s): a big wild plant eater (sense hb) outside Kern+ is PREDATOR_FAR (B) however near a citizen it walks
+T.test('BUG-554: a big wild plant eater beside a woodcutter outside Kern+ is PREDATOR_FAR (hb), no PREDATOR, no lockdown; the facts name dc/zn', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 150, 30, Z, {race = 'STEGOSAURUS'})
+  local W = setup{tag = 'herbfar', manifest = false, units = units}
+  W.unit(400).body = {size_info = {size_cur = 342595}}
+  dfhack.maps.getWalkableGroup = function() return 7 end
+  W.tiles = W.tiles or {}
+  W.tiles['150,30,' .. Z] = {des = {outside = false, hidden = false}}      -- roofed (BUG-439: a big wild unit counts there)
+  S.run(W, 200)
+  W.move(2, 138, 30, Z)                              -- a woodcutter 12 tiles from it (the Run 10 case: a PREDATOR for a fox)
+  S.run(W, 400)
+  T.eq(#events(W, 'PREDATOR'), 0, 'a plant eater is no lockdown')
+  T.eq(#events(W, 'LOCKDOWN'), 0)
+  T.eq(W.state().alarm.unacked, 0, 'nothing to ack, no clock hold')
+  local f = events(W, 'PREDATOR_FAR')
+  T.ok(#f >= 1 and f[1].d.hb == 1 and f[1].d.id == 400, 'PREDATOR_FAR names the plant eater')
+  T.ok(f[1].msg:find('plant eater', 1, true), f[1].msg)
+  -- a unit of the same body that is marked a killer (BUG-421) is a danger again
+  T.eq({W.K.call('sense', 'mark_killer', 400)}, {true, true})
+  S.run(W, 4000)
+  local p = events(W, 'PREDATOR')
+  T.eq({#p >= 1, p[1] and p[1].d.id, p[1] and p[1].d.hb}, {true, 400, nil}, 'after it killed: PREDATOR (hb gone)')
+end)
+
 T.test('BUG-495: PREDATOR and INTRUDER name race, size, reach and offer the sortie command (Run 16c i3: no species, no size)',
        function()
   local units = S.fort_units()

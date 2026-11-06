@@ -574,7 +574,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-495: the unit's race, body size (cm3, a dwarf is 60000), reach (1 on the citizens' walk group, 2 from a bank,
     # 0 out of reach) and the sortie command that would go for it
     "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f race:s sz:i reach:i cmd:s")),
-    "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p race:s sz:i reach:i cmd:s")),
+    "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p race:s sz:i reach:i cmd:s dc:i da:i zn:i hb:i")),   # BUG-554: dc da zn hb
     # BUG-494 (Run 16b i2 Brotherarrow: a Hibbertopterus pack at the brook drowned five citizens, threat 0): a large or
     # predatory wild unit in or beside water within reach of the citizens; n = beasts announced now, race/sz/pos = the nearest,
     # dc = tiles to the nearest citizen, wet = the tile ('water 3/7', 'beside water 3/7'), stream brook | river, reach as
@@ -711,7 +711,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11: cause far (ended with hostiles in sight beyond reflex.lockdown_near; far names <= 3, nfar) or quiet
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i cause:s far:sa nfar:i")),
     # Run 10: a roofed wild danger on the citizens' group but beyond reflex.predator_near of every citizen (no lockdown)
-    "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i")),
+    "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i hb:i")),   # BUG-554: hb = a plant eater
     # Run 11 (siege 8: 16 citizens outside Kern+ at the arrival): the lockdown's recall; why done (all came in), late
     # (reflex.RECALL_MAX passed: the doors stop waiting), end (the lockdown ended first); n = outside at the alert,
     # left = still outside, ticks since the alert, units = those still out (<= 20), called = the alert really confined

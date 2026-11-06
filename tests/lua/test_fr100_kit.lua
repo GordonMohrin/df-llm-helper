@@ -160,7 +160,7 @@ T.test('FR-100: state mil.kit counts soldiers fully equipped (every armor slot w
 end)
 
 T.test('FR-100: the refit: a metal slot that stays empty while other pieces lie free goes to any material after '
-       .. 'refit_days, never in an alert, never for the positions the free metal covers', function()
+       .. 'refit_days in quiet PEACE (one game day in an alert, BUG-555), never for the positions the free metal covers', function()
   local W = world()
   local M = mil()
   local A = X.squad_of(W, 'A')
@@ -181,12 +181,16 @@ T.test('FR-100: the refit: a metal slot that stays empty while other pieces lie 
   T.ok(n >= 3, 'A has at least 3 soldiers')
   W.run(3 * DAY, {skip = 9})
   T.eq(body_mats()[1], 'metal', 'not before refit_days')
+  -- BUG-555 (Run 16a i1: the stegosaurus kept the fort in ALERT, the refit never ran, 0 of 6 soldiers in body armor with 18 free): in an
+  -- alert the refit waits one game day, not refit_days
   W.set_mode('ALERT')
   W.run(5 * DAY, {skip = 9})
-  T.eq(body_mats()[1], 'metal', 'never in an alert')
+  local m = body_mats()
+  T.eq(m[1], 'metal', 'the first position: the one free metal breastplate is his')
+  T.eq(m[2], 'any', 'an alert no longer holds the refit back')
   W.set_mode('PEACE')
   W.run(4 * DAY, {skip = 9})
-  local m = body_mats()
+  m = body_mats()
   T.eq(m[1], 'metal', 'the first position: the one free metal breastplate is his')
   for i = 2, math.min(#m, 5) do T.eq(m[i], 'any', 'position ' .. i .. ': any material') end
   T.ok(logged(W, 'squad A: body of'), 'kern.log names the refit')
