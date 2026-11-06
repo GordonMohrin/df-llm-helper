@@ -668,12 +668,12 @@ add{name = 'BUG-027: a pending SIEGE raise is cancelled when a miner steps on B1
 add{name = 'BUG-027: a tame animal on B1 holds the raise like a citizen (census.a)',
   units = function() return units({id = 400, pos = {50, 40, Z}, tame = true, animal = true}, S.army(6, 150, 150)) end,
   at = {{20, function(W) W.set_census('a', {tick = 0, n = 1, list = {{id = 400, race = 1}}}) end},
-        {500, mv(400, 70, 70)}},
+        {300, mv(400, 70, 70)}},                -- BUG-510: it holds until the deadline escape (450) at the latest
   run = 1200, modes = {'PEACE>SIEGE'},
   check = function(W)
     local b1 = S.pulls(W, 'B1')
     T.eq(#b1, 1)
-    T.ok(rel(W, b1[1].tick) >= 500, 'pulled after the animal left: ' .. rel(W, b1[1].tick))
+    T.ok(rel(W, b1[1].tick) >= 300, 'pulled after the animal left: ' .. rel(W, b1[1].tick))
     T.eq(gate_blocked(W, 'B1')[1].msg, 'B1 up waits: animal 400 on the footprint')
   end}
 

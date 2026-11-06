@@ -164,7 +164,7 @@ T.test('BUG-342 review: a puller in his room whose walk path crosses the footpri
     pul = select(2, W.K.call('gate', 'puller_of'))
   until (pul and pul[6]) or n >= 1500
   T.eq(pul and pul[6], 'dfllm-levers', 'citizen 6 a puller in his room')
-  run(W, 100)
+  run(W, 700)         -- BUG-511: he is chosen at once now (standing in the room), the timer raise (T+450) comes after him
   T.ok(S.bstate(W, 'O1') ~= 'up', 'old code: dropped as a puller in his room, raised onto his path')
   local ok, nu = W.K.call('gate', 'not_up')
   local why

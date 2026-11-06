@@ -446,6 +446,11 @@ end
 M.ROOM_PREFIX = 'dfllm-levers'
 M.PULLERS = 2
 M.PULLER_ARRIVE = 600
+-- BUG-511 (Run 16a i1 Basementflew y405/y406: the nearest citizens lay 40+ tiles from the lever room, three pairs of pullers in a row
+-- were 'let go ... away' after 600 ticks while still walking, each replaced by another far pair, and B1's pull was never taken for
+-- 1,300 ticks): the allowance to reach the room is PULLER_ARRIVE or, for a far puller, PULLER_BASE + PULLER_STEP ticks per tile of
+-- his distance at the assignment (z counts double, as in fill), at most PULLER_MAX
+M.PULLER_BASE, M.PULLER_STEP, M.PULLER_MAX = 300, 12, 1800
 M.PULLER_RETRY = 600       -- a refused assignment is tried again after this
 M.PULLER_FILL = 100        -- a room that found too few candidates looks again after this (a census scan each time)
 M.PULLER_THIRST = 20000    -- counters2 thirst_timer / hunger_timer at which a puller is let go (economy's supply
@@ -672,6 +677,7 @@ local function fill(K, rm, want, p, taken, now, home)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return end
   local c, cand = rm.c, {}
+  local rb = burrow(rm.name)
   for _, id in ipairs(cu.ids) do
     if not taken[id] and not p.skip[id] then
       local u = df.unit.find(id)
@@ -679,8 +685,10 @@ local function fill(K, rm, want, p, taken, now, home)
         local x, y, z = unit_pos(u)
         if x then
           local d = math.max(math.abs(x - c.x), math.abs(y - c.y)) + 2 * math.abs(z - c.z)
-          if not (on_tile(home.kern, x, y, z) or on_tile(home.refuge, x, y, z)) then d = d + 1000 end
-          cand[#cand + 1] = {id = id, d = d}
+          local raw = d
+          if on_tile(rb, x, y, z) then d, raw = -1, 0                 -- BUG-511: already standing in the room: first choice
+          elseif not (on_tile(home.kern, x, y, z) or on_tile(home.refuge, x, y, z)) then d = d + 1000 end
+          cand[#cand + 1] = {id = id, d = d, raw = raw}
         end
       end
     end
@@ -690,13 +698,31 @@ local function fill(K, rm, want, p, taken, now, home)
     if #want >= M.PULLERS then break end
     want[#want + 1] = e.id
     taken[e.id], p.at[e.id] = rm.name, now
+    p.dist = p.dist or {}
+    p.dist[e.id] = e.raw                                -- BUG-511: the walk he has before him
   end
 end
 
--- level-triggered: every room's unit list = the pullers the mode wants (none outside SIEGE/DRILL/BREACH)
+-- BUG-511: ticks a puller assigned at `now - p.at[id]` may take to stand in his room before he is let go as 'away'
+local function arrive_allow(p, id)
+  local d = p.dist and p.dist[id]
+  if not d then return M.PULLER_ARRIVE end
+  return math.min(M.PULLER_MAX, math.max(M.PULLER_ARRIVE, M.PULLER_BASE + M.PULLER_STEP * d))
+end
+
+-- BUG-511 (Run 16a i1 Basementflew y405: INVASION at tick 163694133, SIEGE 492 ticks later, the pullers were chosen then and the first
+-- pair needed 600+ ticks to walk 45 tiles): a reflex lockdown that wants the gates up (arrival, invasion) sends the pullers to their
+-- rooms like a SIEGE does; the lever rooms are in the lockdown's alert list already (gate.rooms is mode-free outside BREACH)
+local function puller_mode(K)
+  local mode = K.mode()
+  if not PULL_ROLES[mode] and (mode == 'PEACE' or mode == 'ALERT') and lock_why(K) then return 'SIEGE' end
+  return mode
+end
+
+-- level-triggered: every room's unit list = the pullers the mode wants (none outside SIEGE/DRILL/BREACH and a gate lockdown)
 local function pullers_step(K, now)
   local set = rawget(K.act, 'burrow_units')   -- [S3]: act + contract.ACT entry pending (live engineer)
-  local mode = K.mode()
+  local mode = puller_mode(K)
   if not set then
     if PULL_ROLES[mode] and not pl.warned and #room_list(K, now) > 0 then
       pl.warned = true
@@ -726,7 +752,7 @@ local function pullers_step(K, now)
       for _, id in ipairs(p.ids) do
         local u = df.unit.find(id)
         local why = unfit(u)
-        if not why and not on_tile(b, unit_pos(u)) and now - (p.at[id] or now) >= M.PULLER_ARRIVE then why = 'away' end
+        if not why and not on_tile(b, unit_pos(u)) and now - (p.at[id] or now) >= arrive_allow(p, id) then why = 'away' end
         if why then
           if why ~= 'needs' then p.skip[id] = true end   -- thirsty/hungry: may serve again after a drink and a meal
           taken[id], why_of[id] = nil, why
@@ -739,7 +765,7 @@ local function pullers_step(K, now)
         p.fill_at = #want < M.PULLERS and now + M.PULLER_FILL or nil   -- too few candidates: no scan per step
       end
     elseif next(p.skip) or next(p.at) or p.fill_at then
-      p.skip, p.at, p.fill_at = {}, {}, nil       -- the next episode starts afresh
+      p.skip, p.at, p.fill_at, p.dist = {}, {}, nil, nil       -- the next episode starts afresh
     end
     if not same_set(want, p.ids) and now >= (p.retry or now) then
       local ok = set(rm.name, want)
@@ -1422,6 +1448,16 @@ local function hostile_dist(K, name, fp)
   return d
 end
 
+-- BUG-510: `list` (scan entries) without the tame animals (k 'animal'): the ones not ON the footprint (d > 0, walking onto it or
+-- beside it); `all`: also those on it (the deadline escape). The list's own fields (unknown) are kept; the same list when none goes.
+function M.drop_animals(list, all)
+  local keep, n = {unknown = list.unknown}, 0
+  for _, e in ipairs(list) do
+    if e.k == 'animal' and (all or (e.d or 0) > 0) then n = n + 1 else keep[#keep + 1] = e end
+  end
+  return n > 0 and keep or list
+end
+
 -- BUG-027: who holds a pull of `name` toward `dir` now: {units within MARGIN} (empty = clear), and the force: a raise
 -- in SIEGE/BREACH with a visible hostile within force_near tiles goes ahead past the units next to the footprint
 -- (returns the holders, the hostile's distance and the units beside it). BUG-310: a unit ON the footprint holds a forced
@@ -1431,6 +1467,12 @@ local function holders(K, name, fp, sc, dir)
   if not sc then hold.unknown = true end
   -- BUG-335: a unit walking onto the footprint holds it like one on it (forced or not)
   local cross, cby = sc and M.crossers(fp, sc.far) or {}, {}
+  -- BUG-510 (Run 16a i1 Basementflew y406: B1 held 1,242 ticks by ONE animal 'walking onto it in 13 steps' / '3 tiles from it and
+  -- walking toward it' until BREACH 'B1 not up at T+900', the goblins came in meanwhile): a tame animal never holds a timed raise
+  -- (SIEGE, BREACH, DRILL) by walking or standing beside it; one ON the footprint holds it only until the deadline escape
+  if dir == 'up' and TIMED_MODES[K.mode()] then
+    cross, hold = M.drop_animals(cross), M.drop_animals(hold)
+  end
   for _, e in ipairs(cross) do cby[e.id] = e end
   if dir == 'up' and FORCE_MODES[K.mode()] then
     local fn = gcfg(K)
@@ -1468,6 +1510,7 @@ local function holders(K, name, fp, sc, dir)
       if held >= M.DEADLINE * M.CROSS_HELD then
         esc = true
         lim = M.CROSS_ESCAPE
+        cross, hold = M.drop_animals(cross, true), M.drop_animals(hold, true)     -- BUG-510: no animal holds past the escape
         if not r.esc then
           r.esc = true
           K.log('info', 'gate: %s raise held %d ticks: only units on the footprint, within %d steps or walking within %d ' ..
@@ -1631,14 +1674,15 @@ end
 -- an unforced raise too)
 -- Review fix (merge15, BUG-342): `own` {[id] = true}, the bridge's lever pullers in their room (raises): they step about
 -- in it, that is no walk toward the bridge; on the footprint they count (a path onto it holds them already: crossers)
-function M.approach(br, sc, prev, wid, own)
+function M.approach(br, sc, prev, wid, own, tame)
   if not br or SIEGE_DOWN[br.why] or not sc then return nil end
   local before = {}
   for _, e in ipairs(prev and prev.list or {}) do before[e.id] = e.d end
   for _, e in ipairs(within(sc, M.MARGIN_DOWN)) do
     local d0 = before[e.id]
     if e.id ~= wid and (d0 == nil or e.d < d0) and not M.at_station(e)
-       and not (own and own[e.id] and e.d > 0 and not e.path) then return e end
+       and not (own and own[e.id] and e.d > 0 and not e.path)
+       and not (tame and e.k == 'animal' and e.d > 0) then return e end        -- BUG-510: a timed raise ignores a tame animal
   end
   return nil
 end
@@ -2101,7 +2145,7 @@ local function control(K, name, spec, now)
         elseif w0 then
           -- BUG-251: someone walks toward it while the pull is being done; BUG-311 (Earthboat y376 #2182, RECOVERY: soldier
           -- 26588 on his way to his station walked onto B2 while it rose): a raise too (not a forced one)
-          local e = M.approach(br, sc, prev, wid, own)   -- Review fix (merge15): its pullers in their room neither
+          local e = M.approach(br, sc, prev, wid, own, dir == 'up' and TIMED_MODES[K.mode()])   -- Review fix (merge15): its pullers in their room neither
           if e then
             stale = 'approach'
             if dir == 'down' then r.qd = now end
@@ -2248,22 +2292,96 @@ local function link_pending(lv)
   for _, j in ipairs(lv.jobs) do if j.job_type == LINK then return j end end
 end
 
+-- BUG-513 (Run 16d i4 Trumpetrealms y388-y389: the fortcore refuge-lever retrofit stood at 100 %, `inspect defense` showed the three refuge
+-- levers `linked 0`, DECISION_NEEDED refuge_levers asked for the retrofit again every 30 days, three retrofits were placed, and no
+-- ACT_FAIL and no LEVER event followed for 3.5 million ticks): nothing said what a manifest lever waits for. Every pass now reads each
+-- manifest lever of the bridge into r.lr = {list = {{p, st, ref, t}}}: st 'none' (no lever there), 'site' (placed, not built: it waits
+-- for a mechanism), 'built' (stands, not linked to this bridge), 'job' (a link job is queued), 'linked'; ref = it lies on a tile of the
+-- refuge burrow; t = the tick it has been in that state since. gate.refuge_levers publishes the refuge ones, readiness' question names
+-- the real blocker instead of asking for the retrofit again.
+M.LINK_STALE = 14400       -- a link job queued this long (12 game days) and not done is named a stale link job
+M.LR_EVERY = 120           -- ticks a read of the manifest levers stays current (the fast cadence of a SIEGE does not read them every pass)
+local function lever_report(K, spec, r, now)
+  local man = K.manifest()
+  local _, rn = core_burrows(man)
+  local rb = burrow(rn)
+  local prev, list = r.lk or {}, {}
+  r.lk = {}
+  local b = r.bid and df.building.find(r.bid)
+  for _, p in ipairs(spec.levers or {}) do
+    local key = string.format('%d,%d,%d', p[1], p[2], p[3])
+    local lv = find_at(p)
+    local state = 'none'
+    if lv and is_lever(lv) then
+      if not built(lv) then state = 'site'
+      else
+        local t = targets(lv)
+        if b and t and t[b.id] then state = 'linked'
+        elseif link_pending(lv) then state = 'job'
+        else state = 'built' end
+      end
+    end
+    local o = prev[key]
+    local t0 = (o and o.st == state) and o.t or now
+    r.lk[key] = {st = state, t = t0}
+    list[#list + 1] = {p = p, st = state, ref = rb ~= nil and on_tile(rb, p[1], p[2], p[3]), t = t0}
+  end
+  r.lr = {tick = now, list = list}
+  return r.lr
+end
+
+-- BUG-513 (gate -> readiness): per manifest bridge the levers on a tile of the refuge burrow by state, as of the last pass:
+-- {[bridge] = {n, none, site, built, job, linked, age}} (age = ticks the oldest unlinked one has been in its state); only bridges
+-- with such a lever in the manifest
+function M.refuge_levers(K)
+  local out = {}
+  local now = K.now().tick
+  local man = K.manifest()
+  for _, name in ipairs(bridge_names(man)) do
+    local rep = rt[name] and rt[name].lr
+    if rep then
+      local e = {n = 0, none = 0, site = 0, built = 0, job = 0, linked = 0, age = 0, why = rt[name].link_why}
+      for _, l in ipairs(rep.list) do
+        if l.ref then
+          e.n, e[l.st] = e.n + 1, e[l.st] + 1
+          if l.st ~= 'linked' then e.age = math.max(e.age, now - l.t) end
+        end
+      end
+      e.stale = e.job > 0 and e.age >= M.LINK_STALE
+      if e.n > 0 then out[name] = e end
+    end
+  end
+  return out
+end
+
 local function links(K, name, spec, r, now)
+  -- BUG-513: the manifest levers are read whatever the mode (at most every LR_EVERY ticks)
+  local rep = (r.lr and now >= r.lr.tick and now - r.lr.tick < M.LR_EVERY) and r.lr or lever_report(K, spec, r, now)
   if not LINK_MODES[K.mode()] or now < (r.link_at or 0) then return end
   local b = r.bid and df.building.find(r.bid)
   if not b or not built(b) then return end
-  for _, p in ipairs(spec.levers or {}) do
-    local lv = find_at(p)
-    if lv and is_lever(lv) and built(lv) and not link_pending(lv) then
+  -- BUG-513: mechanisms are scarce (a link takes 2): the refuge lever comes first, and while one of this bridge's refuge levers waits
+  -- for its link, no other lever of a bridge that has a linked lever already is linked
+  local order, ref_wait, any_linked_lv = {}, false, false
+  for _, e in ipairs(rep.list) do
+    if e.st == 'linked' then any_linked_lv = true end
+    if e.ref and e.st == 'built' then ref_wait = true end
+    if e.st == 'built' then order[#order + 1] = e end
+  end
+  table.sort(order, function(a, c) return (a.ref and 1 or 0) > (c.ref and 1 or 0) end)
+  for _, e in ipairs(order) do
+    local lv = find_at(e.p)
+    if (e.ref or not (ref_wait and any_linked_lv)) and lv and is_lever(lv) and built(lv) and not link_pending(lv) then
       local t = targets(lv)
       if t and not t[b.id] then
         local ok, res = K.act.link_lever(lv.id, b.id)
         if not ok then
           r.link_wait = math.min(M.LINK_RETRY_MAX, r.link_wait and r.link_wait * 2 or M.LINK_RETRY)
           r.link_at = now + r.link_wait
+          r.link_why = tostring(res):sub(1, 80)               -- BUG-513: why the last link was refused (readiness' question)
           return
         end
-        r.link_wait = nil
+        r.link_wait, r.link_why = nil, nil
         if math.type(res) == 'integer' then
           st.kpi.links, dirty = (st.kpi.links or 0) + 1, true
           local L = st.lost[name]                   -- loss history: a link for a rebuilt bridge (mechanisms)

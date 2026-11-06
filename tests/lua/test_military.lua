@@ -320,6 +320,7 @@ T.test('posture is idempotent; upkeep repairs drift (lost order, routine changed
   T.eq(#W.acts, n, 'same posture: no acts')
   A.orders = kmock_vec{}
   A.cur_routine_idx = 0
+  X.equip_all(W)                              -- BUG-510: unequipped soldiers are not stationed in a SIEGE
   W.K.set_mode('SIEGE', 'test')
   W.run(700, {skip = 9})                      -- upkeep every 600 outside PEACE
   T.eq(A.cur_routine_idx, 3)
@@ -392,6 +393,7 @@ T.test('squad.sortie needs approval, runs only in combat modes, kills in a killb
   X.load(W, {'military'}, {X.snapshot(), X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(W.inbox('squad.sortie', {squad = 'A', target = 'K1', approve = true}).ok, false, 'PEACE')
+  X.equip_all(W)                              -- BUG-510: unequipped soldiers are not sent out in a SIEGE
   W.K.set_mode('SIEGE', 'test')
   W.run(30, {skip = 9})
   T.eq(W.inbox('squad.sortie', {squad = 'A', target = 'K1'}).msg, 'approval required')

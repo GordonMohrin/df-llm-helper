@@ -1115,16 +1115,63 @@ end
 -- BUG-478: DECISION_NEEDED refuge_levers (A), once per DEF.ask_days game days while a bridge has no linked lever inside the
 -- refuge burrow in PEACE: what happens in a fight, and the command that builds them (the fortcore retrofit; their links
 -- are gate's own jobs once the levers stand)
+-- BUG-513 (Run 16d i4 Trumpetrealms y388-y389: the retrofit stood at 100 %, the refuge levers were `linked 0`, the question asked for the
+-- retrofit again every 30 days): what the refuge levers of the bridges in `names` wait for, from gate.refuge_levers: 'none' (no lever
+-- stands there: the retrofit is the answer), 'unbuilt' (placed, a mechanism is missing), 'unlinked' (built, a link takes 2 free
+-- mechanisms), 'link_job' / 'link_stale' (a link job is queued, since LINK_STALE ticks); the summed counts
+local function reflever_cause(K, names)
+  local ok, rl = K.call('gate', 'refuge_levers')
+  rl = ok and type(rl) == 'table' and rl or {}
+  local t = {site = 0, built = 0, job = 0, none = 0, age = 0, stale = false}
+  for _, b in ipairs(names) do
+    local e = rl[b]
+    if type(e) == 'table' then
+      t.site, t.built, t.job, t.none = t.site + (e.site or 0), t.built + (e.built or 0), t.job + (e.job or 0), t.none + (e.none or 0)
+      t.age = math.max(t.age, e.age or 0)
+      t.stale = t.stale or e.stale == true
+      t.why = t.why or e.why
+    end
+  end
+  if t.site > 0 then return 'unbuilt', t end
+  if t.job > 0 then return t.stale and 'link_stale' or 'link_job', t end
+  if t.built > 0 then return 'unlinked', t end
+  return 'none', t
+end
+
 local function ask_reflevers(K, now)
   if not rt.rlg or K.mode() ~= 'PEACE' or now - rt.boot < M.UNREADY_SETTLE then return end
   if st.rlq and now - st.rlq < M.DEF.ask_days * 1200 then return end
   st.rlq, dirty = now, true
-  local q = string.format('bridge%s %s: no linked lever inside the refuge: in a fight the civilians are confined there and ' ..
-                          'nobody can pull %s (GATE_FAIL outside_alert); build the refuge levers',
-                          #rt.rlg == 1 and '' or 's', table.concat(rt.rlg, ','), #rt.rlg == 1 and 'it' or 'them')
-  local cmd = 'bp.place tpl=fortcore site=same stage=3 retrofit=2'
-  K.emit('DECISION_NEEDED', 'A', cut(q .. ': ' .. cmd, 200),
-         {id = 'refuge_levers', q = cut(q, 200), bridge = rt.rlg[1], cmds = {cmd}})
+  local names = table.concat(rt.rlg, ',')
+  local cause, t = reflever_cause(K, rt.rlg)
+  local okm, ms = K.call('economy', 'mech_state')
+  local free, route = 0, nil
+  if okm and type(ms) == 'table' then free, route = int(ms.free) or 0, type(ms.route) == 'string' and ms.route or nil
+  else
+    local okf, fr = K.call('economy', 'mech_free')
+    free = okf and int(fr) or 0
+  end
+  local q, cmd
+  if cause == 'none' then
+    q = string.format('bridge%s %s: no linked lever inside the refuge: in a fight the civilians are confined there and ' ..
+                      'nobody can pull %s (GATE_FAIL outside_alert); build the refuge levers',
+                      #rt.rlg == 1 and '' or 's', names, #rt.rlg == 1 and 'it' or 'them')
+    cmd = 'bp.place tpl=fortcore site=same stage=3 retrofit=2'
+  elseif cause == 'unbuilt' then
+    q = string.format('bridge%s %s: %d refuge lever%s placed, not built: each waits for a mechanism (%d free%s); do not place the ' ..
+                      'retrofit again: mechanisms need a Mechanics workshop and stone, or a caravan', #rt.rlg == 1 and '' or 's',
+                      names, t.site, t.site == 1 and '' or 's', free, route and (', ' .. route) or '')
+  elseif cause == 'unlinked' then
+    q = string.format('bridge%s %s: the refuge levers stand but are not linked: a link takes 2 free mechanisms, %d free%s%s; gate ' ..
+                      'links them as soon as there are', #rt.rlg == 1 and '' or 's', names, free, route and (', ' .. route) or '',
+                      t.why and (' (last refusal: ' .. t.why .. ')') or '')
+  else
+    q = string.format('bridge%s %s: a link job for a refuge lever has waited %d days: it needs a dwarf with the Mechanics labor and a ' ..
+                      'Mechanics workshop%s', #rt.rlg == 1 and '' or 's', names, t.age // 1200,
+                      cause == 'link_stale' and ' (stale)' or '')
+  end
+  K.emit('DECISION_NEEDED', 'A', cut(cmd and (q .. ': ' .. cmd) or q, 200),
+         {id = 'refuge_levers', q = cut(q, 200), bridge = rt.rlg[1], cmds = cmd and {cmd} or nil, cause = cause, n = free})
 end
 
 function M.step(K, budget, ctx)

@@ -159,6 +159,10 @@ local function down_pulls(W, bridge)
   for _, f in ipairs(S.flips(W, bridge)) do if f.to == 'down' then n = n + 1 end end
   return n
 end
+local function logged(W, pat)
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find(pat, 1, true) then return true end end
+  return false
+end
 local function orders_of(W, alias)
   local o = X.squad_of(W, alias).orders[0]
   return o and (o.kind .. (o.pos and string.format('@%d,%d,%d', o.pos.x, o.pos.y, o.pos.z) or '')) or ''
@@ -487,12 +491,18 @@ T.test('BUG-030: weak squads (worn 0 < 60): the deep defense (weak) at the manif
   T.ok(e.d.why[1] == 'weak' and e.msg:find('worn 0% < 60%', 1, true), e.msg)
   T.ok(e.msg:find('core station 60,70,10', 1, true) and e.d.pos[1] == 60, e.msg)
   run(W, 300)
-  T.eq({orders_of(W, 'A'), orders_of(W, 'B'), orders_of(W, 'C')},
-       {'station@60,70,10', 'station@60,70,10', 'station@60,70,10'})
+  -- BUG-510 (Run 16a i1 Basementflew y406: the squads stood at the core station with 2 of 19 soldiers equipped): squads in which
+  -- fewer than 30 % hold a real weapon and wear body armor are not stationed at all (old: all three at the core station)
+  T.eq({orders_of(W, 'A'), orders_of(W, 'B'), orders_of(W, 'C')}, {'', '', ''}, 'unequipped: they stay with the civilians')
+  T.ok(logged(W, 'squad A stands down: 0 of '), 'kern.log names the stand-down')
   W = world{equip = false, reflex = {v = 2, stations = {worn = 0}}}
   run(W, 1500)
   T.eq(#evs(W, 'SIEGE_DEEP'), 0, 'stations.worn 0: no weak reason')
-  T.eq(orders_of(W, 'A'), 'station@51,44,10', 'the inner station')
+  T.eq(orders_of(W, 'A'), '', 'no station for unequipped soldiers either')
+  W = world{reflex = {v = 2, stations = {worn = 0}}}        -- equipped: stationed as before
+  run(W, 1500)
+  T.eq(#evs(W, 'SIEGE_DEEP'), 0, 'stations.worn 0: no weak reason')
+  T.ok(orders_of(W, 'A') ~= '', 'an order: the equipped squad is stationed (or on a kill order)')
 end)
 
 ---------------------------------------------------------------- BUG-336/337 (Run 15b Earthboat y387)

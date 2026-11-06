@@ -2204,6 +2204,58 @@ local function crosses_busy(K, man, s, pos)
   return nil
 end
 
+-- BUG-510 (Run 16a i1 Basementflew y406: the squads stood at the core station with 2 of 19 soldiers equipped, metal 0, worn 0 %,
+-- soldiers 21 -> 2): in a SIEGE or BREACH a squad of which fewer than UNFIT_PCT percent hold a real weapon AND wear body armor is
+-- not stationed against the enemy (and never sent on a sortie: siege's sortie check wants worn >= sortie.worn): its order is
+-- cleared and it goes off duty, so the civ alert keeps it in the refuge with the civilians. {n soldiers, fit}
+M.UNFIT_PCT = 30
+function M.squad_fit(K, key)
+  local e = type(key) == 'string' and st.sq[key]
+  local s = e and squad(e.id)
+  if not s then return 0, 0 end
+  local n, fit = 0, 0
+  for _, m in ipairs(members(s)) do
+    n = n + 1
+    local x = M.KIT.soldier(m.p, m.unit, roles(), nil)
+    if x.weapon and not x.wood and not (x.empty and x.empty.body) then fit = fit + 1 end
+  end
+  return n, fit
+end
+
+-- BUG-510: why squad `key` may not go out (nil: it may): in a SIEGE / BREACH fewer than UNFIT_PCT percent of its soldiers hold a real
+-- weapon and wear body armor
+function M.unfit_text(K, key)
+  local mode = K.mode()
+  if mode ~= 'SIEGE' and mode ~= 'BREACH' then return nil end
+  local n, fit = M.squad_fit(K, key)
+  if n > 0 and fit * 100 < M.UNFIT_PCT * n then
+    return string.format('squad %s is not equipped: %d of %d soldiers hold a real weapon and wear body armor (< %d %%)', key, fit, n,
+                         M.UNFIT_PCT)
+  end
+  return nil
+end
+
+-- squad `k` stands down now (see M.UNFIT_PCT); the first look of an episode names it in kern.log (rt.sd_note)
+local function standdown(K, k)
+  local mode = K.mode()
+  if mode ~= 'SIEGE' and mode ~= 'BREACH' then
+    if rt.sd_note then rt.sd_note[k] = nil end
+    return false
+  end
+  local n, fit = M.squad_fit(K, k)
+  local down = n > 0 and fit * 100 < M.UNFIT_PCT * n
+  rt.sd_note = rt.sd_note or {}
+  if down and not rt.sd_note[k] then
+    K.log('warn', 'military: %s: squad %s stands down: %d of %d soldiers hold a real weapon and wear body armor (< %d %%); '
+          .. 'unequipped soldiers are not stationed against the enemy, they stay with the civilians in the refuge', mode, k, fit,
+          n, M.UNFIT_PCT)
+  elseif not down and rt.sd_note[k] then
+    K.log('info', 'military: %s: squad %s is equipped again (%d of %d): it takes its station', mode, k, fit, n)
+  end
+  rt.sd_note[k] = down or nil
+  return down
+end
+
 -- bring one squad to the posture; force = re-issue even if it looks applied. Returns ok.
 local function apply_squad(K, k, force)
   local e = st.sq[k]
@@ -2227,7 +2279,11 @@ local function apply_squad(K, k, force)
   if ov then
     if ov.P == st.posture and ov.src == src then pos = ov.pos else rt.over[k] = nil end
   end
-  local off = not pos and off_season(K, k)
+  local down = pos ~= nil and standdown(K, k)                   -- BUG-510: unequipped soldiers are not stationed
+  rt.sd = rt.sd or {}
+  rt.sd[k] = down or nil
+  if down then pos = nil end
+  local off = not pos and (down or off_season(K, k))
   if off then which = 'off' end
   local ok = true
   local idx, name = resolve_routine(which)
@@ -2683,6 +2739,8 @@ function M.kill_lone(K, ids, by)
   local info = s and M.squad_info(K, key)
   if not info or info.n == 0 then return false, 'squad ' .. key .. ' has no members' end
   if info.worn < c.worn then return false, string.format('squad %s worn %d%% < %d%%', key, info.worn, c.worn) end
+  local unfit = M.unfit_text(K, key)                            -- BUG-510
+  if unfit then return false, unfit end
   -- BUG-169 (live i3: the kill list held 42739 at zone 0, 149 tiles out, and the squad marched there in the BREACH): only
   -- targets the census shows inside (zone 2: Kern+ and the zones past the intake)
   local seen = {}
@@ -2728,6 +2786,8 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   if not s or #members(s) == 0 then return false, 'no squad ' .. tostring(k) end
   local target, order, what = args.target, nil, nil
   local c = so_conf(K)
+  local unfit = M.unfit_text(K, k)                              -- BUG-510: no sortie of unequipped soldiers in a SIEGE / BREACH
+  if unfit then return false, 'sortie refused: ' .. unfit end
   local pos_target
   if type(target) == 'string' then
     local x, y, z = target:match('^%s*(-?%d+)%s*,%s*(-?%d+)%s*,%s*(-?%d+)%s*$')     -- "77,67,128" is a position
@@ -3466,10 +3526,11 @@ local function compute(K)
       local unr = spos and #mem > 0 and M.off_group(K, spos, M.home_group(K, s)) or false
       -- the posture names a station for this squad and none was found (no manifest station): all of them are off it
       local want = false
-      if not spos and #mem > 0 and st.posture then
+      if not spos and #mem > 0 and st.posture and not (rt.sd and rt.sd[sp.key]) then
         local _, chain = station_of(K, man, st.posture, e.kind, sp.key == first, stations)
         want = chain ~= nil
       end
+      if rt.sd and rt.sd[sp.key] then k.sd = (k.sd or 0) + #mem end        -- BUG-510: standing down on purpose
       for _, m in ipairs(mem) do
         local u = m.unit
         k.soldiers = k.soldiers + 1
@@ -3634,12 +3695,17 @@ end
 -- Run 11 siege 3: the wants in a siege: the first melee squad (by the plan, the tools-first rule ignored) at least
 -- HOLD_MIN, the others their targets
 SIEGE_FILL = {SIEGE = true, BREACH = true}
+-- BUG-510 (Run 16a i1 Basementflew y406: 'SIEGE refill: squad A 1 -> 5 of 5 with healthy civilians', worn 61 % -> 0 %, 2 of 19
+-- soldiers equipped, 47 killed): the floor reaches HOLD_MIN only as far as the melee sets go (M.gear_sets, at least GEAR_FLOOR);
+-- a recruit without armor, weapon and shield is a body for the enemy, not a defender. Unknown gear (no census): HOLD_MIN as before.
 function hold_floor(K, per)
   local r = {}
   for k, v in pairs(per) do r[k] = v end
+  local sets = M.gear_sets(K)
+  local floor = sets and math.min(M.HOLD_MIN, math.max(sets, M.GEAR_FLOOR)) or M.HOLD_MIN
   for _, sp in ipairs(active(K)) do
     if sp.kind == 'melee' then
-      if (r[sp.key] or 0) < M.HOLD_MIN then r[sp.key] = M.HOLD_MIN end
+      if (r[sp.key] or 0) < floor then r[sp.key] = floor end
       break
     end
   end
