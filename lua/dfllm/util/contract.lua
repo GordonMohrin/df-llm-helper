@@ -274,6 +274,9 @@ C.VERBS = {
   -- BUG-131 (Run 14): the zones screen's remove for one hospital zone outside Kern+/Tiefe+ (no patient in it; a finished
   -- hospital inside or approve:true from the player)
   ['hospital.retire'] = {mod = 'water', modes = {PEACE = true}},
+  -- BUG-507 (Run 16b i2: a GiveWater job hung 26 days on a child, the player had no command): the stalled water job of one
+  -- worker (or every stalled one) goes through the ladder at once: off Orderlies, the pond zone beside him, the patient's hospital zone
+  ['water.unstick'] = {mod = 'water'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
@@ -326,7 +329,7 @@ C.STATE_OWNERS = {
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
-  ['stock.dwhy'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy',
+  ['stock.dwhy'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy', ['stock.dfd'] = 'economy', ['stock.dfwhy'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
@@ -463,7 +466,8 @@ C.STATE_SPEC = obj({
                     dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target
                     bshort = FLAG,                  -- BUG-382: drink below gather.drink_d and too few brewable plants (runner's gather zone)
                     hungry = NAT,                   -- BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
-                    dforb = NAT, fforb = NAT}),     -- FR-76: drink / food units the census counts as forbidden
+                    dforb = NAT, fforb = NAT,       -- FR-76: drink / food units the census counts as forbidden
+                    dfd = NAT, dfwhy = str(40)}),   -- BUG-506: daily runs that stock stood, what held the unforbid back
   care = obj({stressed_pct = PCT, naked = NAT, ghosts = NAT, corpses_old = NAT, tombs_free = NAT, moods = NAT},
              {coffins = obj({want = NAT, short = NAT, stock = NAT, order = NAT, proj = str(40)},
                             {stuck = NAT, stale = NAT}),     -- BUG-126: orders that cannot run; days the project stands still

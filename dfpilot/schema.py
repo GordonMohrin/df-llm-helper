@@ -114,7 +114,7 @@ STATE_OWNERS = {
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
-    "stock.dforb": "economy", "stock.fforb": "economy",
+    "stock.dforb": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
     "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "mood": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
@@ -962,6 +962,10 @@ VERB_ARGS: dict[str, Obj] = {
     # one hospital zone outside Kern+/Tiefe+; refused while a patient lies in it and, without approve:true (the player's
     # word), while no finished hospital (a zone with a bed) stands inside
     "hospital.retire": Obj(req={"zone": NAT}, opt={"approve": Bool()}),
+    # BUG-507 (Run 16b i2: a GiveWater job hung 26 days on a child, the player had no command): the stalled water job of one
+    # worker (or of every stalled one) goes through the ladder at once: off Orderlies, the pond zone beside him, the zone of
+    # the patient over water.stall_dying
+    "water.unstick": Obj(opt={"unit": NAT}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -988,6 +992,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "zone.place": ("runner", SQUAD_MODES + ["SIEGE"], False),      # BUG-450: SIEGE for type=office only (zonelib)
     "view": ("arbiter", None, False),      # FR-88: modes are the verb's own rule (a fight needs by=gordon)
     "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)
+    "water.unstick": ("water", None, False),            # BUG-507: any mode (a dying patient does not wait for the peace)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
@@ -1050,7 +1055,9 @@ STATE = Obj(
                            # BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
                            "hungry": NAT,
                            # FR-76: drink / food units the census counts as forbidden (a reclaimed fort's stock)
-                           "dforb": NAT, "fforb": NAT}),
+                           "dforb": NAT, "fforb": NAT,
+                           # BUG-506: daily runs that forbidden stock stood, and what held the unforbid back
+                           "dfd": NAT, "dfwhy": Str(maxbytes=40)}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,
                           "tombs_free": NAT, "moods": NAT},
                      # FR-61 coffin provisioner: wanted free coffins, missing slots, coffin items, open orders, project

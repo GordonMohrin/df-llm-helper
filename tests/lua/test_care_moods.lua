@@ -15,6 +15,13 @@ local function filter(t, spec)
   return f
 end
 
+-- BUG-509: DECISION_NEEDED mood_thirst (one per step of a moody dwarf's thirst) is tested in test_bug507_509_water.lua
+local function decisions(W)
+  local r = {}
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id ~= 'mood_thirst' then r[#r + 1] = e end end
+  return r
+end
+
 local function reqs(W, tpl)                     -- PROJECT_REQUEST events of one template (tombs come too)
   local r = {}
   for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.tpl == tpl then r[#r + 1] = e end end
@@ -427,7 +434,7 @@ T.test('BUG-017: a class without any item in the fort is named: leather x1: none
   T.ok(r[2] and r[2].msg:find('missing leather x1: none in the fort [0/0/0]; bone x1: none free', 1, true) and
        r[2].msg:find('a mood job cannot be cancelled', 1, true), r[2] and r[2].msg)
   CW.day(W, 2)
-  local dn = W.find_events('DECISION_NEEDED')
+  local dn = decisions(W)
   T.ok(dn[1] and dn[1].d.q:find('leather x1: none in the fort', 1, true), dn[1] and dn[1].d.q)
 end)
 
@@ -544,7 +551,7 @@ T.test('BUG-117: a moody dwarf without a workshop: MOOD_RISK and the decision ca
   T.ok(#r >= 1, 'MOOD_RISK')
   T.eq(r[1].d.fix, 'dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"Loom"}}', 'only the shop of his skill')
   T.ok(r[1].msg:find('no shop: dfllm cmd bp.place', 1, true) and #r[1].msg <= 200, r[1].msg)
-  local dn = W.find_events('DECISION_NEEDED')
+  local dn = decisions(W)
   T.eq(dn[1].d.id, 'mood_workshop')
   T.eq(dn[1].d.q, 'unit 1 (WEAVING) has no workshop: dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"Loom"}}')
 end)
@@ -572,7 +579,7 @@ T.test('BUG-117: no skill names the first three missing types; a queued shop is 
   end}
   CW.day(W2, 2)
   T.eq(W2.find_events('MOOD_RISK')[1].d.fix, nil, 'the Loom stands: nothing to place')
-  T.eq(W2.find_events('DECISION_NEEDED')[1].d.q, 'unit 1 needs a workshop for WEAVING now (workshops template or one shop)')
+  T.eq(decisions(W2)[1].d.q, 'unit 1 needs a workshop for WEAVING now (workshops template or one shop)')
   local W3 = CW.world{setup = function(W)
     local u = W.unit(1)
     u.mood = df.mood_type.Fey

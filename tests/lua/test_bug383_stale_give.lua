@@ -83,6 +83,7 @@ local function world(opts)
   for i = 1, (opts.buckets == false) and 0 or 6 do F.item(W, 'BUCKET', {_pos = {20, 13 + i, 5}}) end
   W.act_result('work_detail', function(name, id, on) W.unit(id).status.labors[FEED] = on; return true, 'added' end)
   jobs(opts.jobs or {})
+  W.K.cfg.baseline.water = {stall = false}                -- BUG-507: this file tests the noeffect release alone (test_bug507_508 the stalls)
   if opts.setup then opts.setup(W) end
   local M = fresh()
   W.load(M)
@@ -156,7 +157,7 @@ T.test('BUG-383: a carrier outside the Orderlies detail is left alone; restale f
   W2 = world{patients = {{id = 5, thirst = 61000, care = true, pos = {12, 12, 5}}}, carers = {1, 2},
              jobs = {{id = 501, worker = 1}}, setup = function(W)
                calls2 = detail(W, {1, 2})
-               W.K.cfg.baseline.water = {restale = false}
+               W.K.cfg.baseline.water = {restale = false, stall = false}      -- BUG-507: the stall release is its own switch
              end}
   day(W2)
   grow(W2, W2.unit(5), 3)
