@@ -230,7 +230,7 @@ and the run goes on; the final `status.json` lists them under `warnings`.
 | evil, savagery | "Surroundings:" (Serene/Mirthful/Calm/Wilderness pass), popups "evil area"/"savage area" | evil or high savagery fail |
 | trees | "Trees:" | Heavily Forested/Woodland pass, Sparse warn, else fail |
 | water | "Brook:"/"Stream:"/"Minor River:"/"River:"/"Major River:" | none fail |
-| aquifer | "Light/Heavy/Varied aquifer" line and popup | none pass, light warn (probe protocol), heavy/varied fail |
+| aquifer | "Light/Heavy/Varied aquifer" line and popup | none pass, light warn (probe protocol), heavy/varied fail. BUG-531: the core goes UNDER every aquifer level; soil levels + the worst span seen for the class (`core_span`: light 8, varied 10, heavy 14) above `core_reach_warn` (9) warns ("the core must go under the aquifer: up to N levels ..."), above `core_reach_max` (13) fails with "no core below the aquifer within reach" (acceptable with `--accept aquifer --reason`; not twice when the stone item fails already). The panel shows a class, never the real span (Basementflew: light panel, z114-z127, heavy layers inside): a warning, the first aqshaft measures |
 | flux | "Flux stone layer" | missing warn |
 | ore | a line of metal names, if DF shows one | iron pass, bronze only / no iron warn, not shown skip |
 | soil | "Little soil"/"Some soil" … "Extremely deep soil" | little/some pass, deeper or none warn |

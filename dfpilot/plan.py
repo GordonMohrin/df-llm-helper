@@ -3065,6 +3065,52 @@ def fit_placeable(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     return lines
 
 
+# BUG-530 (Run 16d i4 Trumpetrealms y393/y396/y398/y399: "Plan leer", Run 16a i1 y407 "0 Bauten", Run 16c i3 y387+: the year's plan held nothing
+# for years because explore and aqshaft found no site and the other drafts were done or out of reach): the builds a draft offers instead
+# when it would add nothing, best first: beds for growth, a stockroom (stockpiles), a dining room, a tavern, the workshops. Each is placed
+# the way `apply` would (fit_placeable) and dropped when it finds no site; at most OFFER_MAX stay. Not under the rebuild policy.
+OFFER_ALTS = (("bedrooms", {"n": 4}, "beds for growth"), ("stockroom", None, "a stockpile room"), ("dining", None, "a dining room"),
+              ("tavern", None, "a tavern"), ("workshops", None, "the workshops"))
+OFFER_MAX = 2
+
+
+def offer_growth(save_dir: Path, doc: dict, prev: dict | None, state: dict | None, tpls: list[str] | None = None) -> str:
+    """BUG-530: a draft that adds no build at all offers rooms, stockpiles, beds and workshops that have a free site (see OFFER_ALTS),
+    in the current season, so the year is not lost while explore / aqshaft wait for a site. Returns the line for the CLI and the notes
+    ('' when the draft has a build, the fort rebuilds, or nothing finds a site)."""
+    if new_builds(doc, prev) or rebuild_state(state):
+        return ""
+    names = tpls if tpls is not None else templates()
+    if names is None:
+        names = [t for t, _, _ in OFFER_ALTS]
+    season = min(max(int(((state or {}).get("t") or {}).get("season", 0) or 0), 0), len(doc["seasons"]) - 1)
+    have = {_build_key(b) for se in doc["seasons"] for b in se["build"]}
+    cand = []
+    for tpl, prm, what in OFFER_ALTS:
+        if tpl not in names or (tpl, None) in have:
+            continue
+        b = {"tpl": tpl, "site": "S1", **({"p": dict(prm)} if prm else {})}
+        doc["seasons"][season]["build"].append(b)
+        cand.append((b, what))
+    if not cand:
+        return ""
+    fit_placeable(save_dir, doc, prev)                    # the ones that find no site go again (their reasons are fit_placeable's)
+    kept = [(b, what) for b, what in cand if any(x is b for se in doc["seasons"] for x in se["build"])]
+    for b, _ in kept[OFFER_MAX:]:
+        for se in doc["seasons"]:
+            if any(x is b for x in se["build"]):
+                se["build"] = [x for x in se["build"] if x is not b]
+    kept = kept[:OFFER_MAX]
+    if not kept:
+        return ("BUG-530: the draft adds no build (explore / aqshaft / rooms found no site) and no room, stockpile, bed or workshop "
+                "finds one either: `dfllm bp sites bedrooms --fresh`, trade.want stone, block, wood")
+    line = ("BUG-530: the draft would add nothing (explore / aqshaft found no site): offered instead "
+            + ", ".join(f"{b['tpl']}@S1{_cmd.fmt_params(b.get('p'))} ({what})" for b, what in kept)
+            + f" in season {season}; strike what you do not want")
+    doc["notes"] += "; " + line
+    return line
+
+
 MIL_MARGIN_POP = 50       # BUG-457: propose drafts military.pct 20 from this many citizens (check demands it at 60, D-12)
 NOTES_MAX = 1900          # BUG-440: schema plan.notes is Str(maxbytes=2000); propose stays well under it
 FIT_NOTE_LINES = 3        # BUG-440: more fit_placeable lines than this go into the notes as one summary line
@@ -3099,7 +3145,7 @@ def explore_room(save_dir: Path, sites: list, params: dict, tpl: str = EXPLORE) 
     n = 0
     for s in sites:
         try:
-            doc = _cmd.emit_at(tpl, params, s, "S0", "probe")
+            doc = _cmd.emit_at(tpl, _cmd.site_params(tpl, params, s) or {}, s, "S0", "probe")      # BUG-528: the arm of the site
         except BpUnavailable:
             return None
         except BpError:
@@ -3165,11 +3211,15 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
         except BpUnavailable:
             return None
         except BpError as e:
-            if "avoided level" in str(e):
+            # BUG-528: a depth with no site (avoided level, a dig that stopped near, the core's rooms in the way) tries the next one
+            if "avoided level" in str(e) or "no safe explore site" in str(e) or "explore: no site at depth" in str(e):
                 continue
             return None
         if sites:
-            if d != EXPLORE_DEPTHS[0]:
+            arm = sites[0].get("arm") if isinstance(sites[0].get("arm"), int) else None       # BUG-528: shorter side tunnels
+            if arm is not None:
+                extra = {**extra, "arm": arm}
+            if d != EXPLORE_DEPTHS[0] or arm is not None:
                 for _, b in new:
                     b["p"] = {**(b.get("p") or {}), "depth": d, **extra}
             line = f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
@@ -3178,7 +3228,7 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
                 hz = ",".join(f"z{z}" for z in heavy)
                 doc["notes"] += f"; BUG-468: the explore stops above the known heavy aquifer level(s) {hz} (depth {d})"
                 line += f"; stops above the heavy aquifer {hz}"
-            room = explore_room(save_dir, sites, {**({"depth": d} if d != EXPLORE_DEPTHS[0] else {}), **extra,
+            room = explore_room(save_dir, sites, {**({"depth": d} if d != EXPLORE_DEPTHS[0] or arm is not None else {}), **extra,
                                                   **({"avoid": avoid} if avoid else {})})
             if room is None or room >= len(new):
                 return line
@@ -3190,7 +3240,8 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
             return line + f"; {room} free site(s): {room} of {len(new)} drafted, the next one: propose next season"
     for si, b in new:
         doc["seasons"][si]["build"].remove(b)
-    doc["notes"] += f"; no {EXPLORE} site at any depth (avoided levels or no free rock): trade.want bar:iron only"
+    doc["notes"] += (f"; no {EXPLORE} site at any depth or arm (avoided levels, a dig that stopped near, the core's rooms in the way; "
+                     f"`dfllm bp sites explore --fresh` names which, BUG-528): trade.want bar:iron, stone, block only")
     return f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
 
 
@@ -5240,6 +5291,8 @@ def run(args, save_dir: Path) -> int:
         cfit += reserve_shop_room(save_dir, doc, prev)        # BUG-461: Still, Kitchen, Butchers ... before dining and furnaces
         cfit += essential_shops(save_dir, doc, prev)          # BUG-527: Still and Kitchen whenever the manifest lacks them
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
+        offer = offer_growth(save_dir, doc, prev, state)      # BUG-530: an empty draft offers rooms, beds, stockpiles, workshops
+        cfit += [offer] if offer else []
         if cap_notes(doc):                                    # BUG-440: the notes fit the schema's 2000 bytes
             cfit.append("BUG-440: notes cut under 2000 bytes (the CLI lines above hold the full reasons)")
         files.write_json_atomic(path, doc)

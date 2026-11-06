@@ -232,6 +232,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     first; `at`: [x, y, z], only the sites anchored exactly there (the reason when there is none). Both apply to room,
     explore and fortcore sites; the defense builds have the one site the manifest fixes. `free` (BUG-292): a callable
     candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
+    if tpl in mine.BUILD and "arm" not in (params or {}):
+        return _rank_arms(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-528: shorter side tunnels
     p = check_params(tpl, params)
     if tpl == "fortcore" and p.get("aquifer") == "pass" and "depth" not in (params or {}):
         return _rank_pass(snap, params, manifest, n, water, near, within, at, free)       # BUG-484: the depth that clears the aquifer
@@ -1303,6 +1305,43 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
     return out
 
 
+EXPLORE_ARMS = (4, 3, 2, 1, 0)        # BUG-528: side-tunnel lengths tried (longest that fits first) when the template's own arm has no site
+
+
+def _rank_arms(snap, tpl, params, manifest, n, water, near, within, at, free) -> list[dict]:
+    """BUG-528 (Run 16d i4 Trumpetrealms y375-y400: a soil fort with its core at z136/z139, caverns at z124-z127: explore depth 4 to 12 found
+    no site for 25 years, no ore and no hard stone, because the default 6-tile side tunnels (W, E, S) met the core's own rooms on
+    every anchor; a bare shaft to z131 and z128 had 12 free anchors): when the asked arm (no p.arm = the template's default) has no
+    site, the longest shorter arm of EXPLORE_ARMS that has one is ranked, every site carries it (`arm`, applied to the document
+    by cmd.site_params) and says so. p.arm given is never changed. All arms empty: the error of the bare shaft (arm 0), the most
+    permissive, so its reason is the real one."""
+    base = dict(params or {})
+    first = None
+    try:
+        got = rank(snap, tpl, {**base, "arm": mine.PARAMS[tpl]["arm"][0]}, manifest, n, water, near, within, at, free)
+        if got:
+            return got
+    except ValueError as e:
+        first = e
+    last = first
+    top = mine.PARAMS[tpl]["arm"][0]
+    for arm in EXPLORE_ARMS:
+        if arm >= top:
+            continue
+        try:
+            got = rank(snap, tpl, {**base, "arm": arm}, manifest, n, water, near, within, at, free)
+        except ValueError as e:
+            last = e
+            continue
+        if got:
+            note = (f"side tunnels cut to {arm} tiles (the template's {top} meet the core's rooms, water or a mark; "
+                    "BUG-528)")
+            return [{**s, "arm": arm, "why": s["why"] + "; " + note} for s in got]
+    if last is not None:
+        raise ValueError(f"{last} (arm {top}, " + ", ".join(str(a) for a in EXPLORE_ARMS if a < top) + " tried)") from None
+    return []
+
+
 EXPLORE_LEVEL = 10                    # explore: score per level below the top of Z4 (a deeper start searches deeper)
 AVOID_MARKS = ("cavern", "damp", "warm")
 
@@ -1404,24 +1443,31 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     wide = explore_wide_rects(p)
     out, hit, redo = [], set(), []
     pts, failed = breach_points(manifest), failed_explores(manifest)
+    n_all = n_ref = n_hit = n_redo = n_geom = 0                # BUG-528: how many anchors each test took out (the message says so)
     for i in _anchor_tiles(g, "explore", p, manifest):
         ax, ay, az = g.pos(i)
+        n_all += 1
         if zr is not None and az <= zr:
+            n_ref += 1
             continue
         lv = {z for z in avoid if az - p["depth"] <= z <= az}
         if lv:
             hit |= lv
+            n_hit += 1
             continue
         why = _explore_redo(ax, ay, az, p["depth"], pts, failed) if (pts or failed) else None
         if why:                                              # BUG-392: not again where a dig already stopped
+            n_redo += 1
             if why not in redo:
                 redo.append(why)
             continue
+        n_out, n_door = len(out), 0
         for rot in range(4):
             du, dv = rot_uv(0, 1, rot)
             door = g.idx((ax + du, ay + dv, az))
             if door is None or g.t[door] not in GOOD:
                 continue
+            n_door += 1
             res = _check(rects, ax, ay, az, rot, bad, hid, mk, True, wet)
             if res is None or (wide and _check(wide, ax, ay, az, rot, bad, hid, mk, True, wet) is None):
                 continue                                     # BUG-453: the tunnels also keep EXPLORE_RING tiles from any opening
@@ -1433,16 +1479,48 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
                         "score": max(0, 1000 - 5 * steps + EXPLORE_LEVEL * (top - az)),
                         "why": f"rot{rot}, {top - az} levels below the top of the core, shaft to z{az - p['depth']}, "
                                f"{steps} steps to a stair, {unknown} unknown tiles, {missing} levels below the snapshot"})
-    if not out and hit:
-        raise ValueError(f"explore: every anchor's shaft of depth {p['depth']} reaches an avoided level "
-                         f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark, a cavern "
-                         "breach or a heavy aquifer breach); "
-                         "give a smaller depth (p.depth)")
-    if not out and redo:
-        raise ValueError(f"explore: every anchor lies within {EXPLORE_REDO_R} tiles of a dig that already stopped "
-                         f"({'; '.join(redo[:3])}{' +more' if len(redo) > 3 else ''}); no safe explore site: trade for ore "
-                         "and bars, or open a new core level first")
+        if len(out) == n_out and n_door:
+            n_geom += 1                                      # a floor to dig from, but the shaft or its tunnels meet something
+    if not out:
+        raise ValueError(_explore_none(p, hit, redo, (n_all, n_ref, n_hit, n_redo, n_geom)))
     return out
+
+
+def _explore_none(p: dict, hit: set, redo: list, n: tuple) -> str:
+    """BUG-528 (Run 16d i4 Trumpetrealms y399: a cavern breach 78,127,127 'locked' the soil fort out of explore for years; the message said
+    'every anchor lies within 6 tiles of a dig that already stopped' while 12 anchors were free of it and the side tunnels (arm 6) met
+    the core's own rooms): why no anchor took the shaft of this depth and arm, with the number of anchors each test removed. The
+    wording a caller matches stays ('avoided level (z..', 'no safe explore site')."""
+    n_all, n_ref, n_hit, n_redo, n_geom = n
+    parts = []
+    if n_ref:
+        parts.append(f"{n_ref} lie on or under the refuge level (the refuge stays a sealed dead end)")
+    if n_hit:
+        parts.append(f"{n_hit} have a shaft that reaches an avoided level")
+    if n_redo:
+        parts.append(f"{n_redo} lie within {EXPLORE_REDO_R} tiles of a dig that already stopped")
+    if n_geom:
+        parts.append(f"{n_geom} have a shaft or side tunnels (arm {p.get('arm')}) that meet the core's own open rooms, water or a "
+                     "mark (a smaller arm= or depth= can fit between them)")
+    tally = f" [{n_all} anchor tile(s): {'; '.join(parts)}]" if parts else f" [{n_all} anchor tile(s)]"
+    if hit and not n_redo and not n_geom:
+        return (f"explore: every anchor's shaft of depth {p['depth']} reaches an avoided level "
+                f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark, a cavern "
+                "breach or a heavy aquifer breach); give a smaller depth (p.depth)" + (tally if n_ref else ""))
+    head = f"explore: no site at depth {p['depth']} arm {p.get('arm')}"
+    if hit:
+        head += (f"; avoided level (z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark, a cavern breach or a "
+                 "heavy aquifer breach)")
+    if redo:
+        head += (f"; {'every anchor lies' if n_redo and n_redo == n_all - n_ref else 'some anchors lie'} within {EXPLORE_REDO_R} tiles "
+                 f"of a dig that already stopped ({'; '.join(redo[:3])}{' +more' if len(redo) > 3 else ''}); no safe explore site "
+                 "there")
+    if n_geom or not (hit or redo):
+        head += ("; no free rock for it beside the core: p.arm=0..3 (shorter side tunnels) or a smaller p.depth may fit, else open a "
+                 "new core level first and trade for ore, bars and stone")
+    else:
+        head += ": trade for ore and bars, or open a new core level first"
+    return head + tally
 
 
 AQ_ORTH = ((1, 0), (-1, 0), (0, 1), (0, -1))

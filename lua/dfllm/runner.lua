@@ -151,6 +151,13 @@ M.CFG = {
   -- (R.ps) for stall_days is announced (PROJECT_BLOCKED why=stalled, A) with the cause and a command, again every stall_every
   -- days. Announcement only: the project keeps its slot. 0 = off. config "runner": {queue: {stall_days, stall_every}}
   stall_days = 60, stall_every = 60,
+  -- BUG-529 (Run 16a i1 Basementflew y402-y403: aqshaft c1a1ada7 stood 425 days at z124 / 38 % 'ring has not moved', kept as a level it
+  -- watches, and the hospital and the fortcore stayed 'queued behind c1a1ada7' until the player cancelled it; the kernel only reported): a
+  -- shaft that holds a level and has made no progress (R.ps) for release_days gives up its FIRST-pass slot: it queues with the stalled
+  -- projects (second pass: the slots the others leave, its level still measured), and one DECISION_NEEDED project_released (A) names the
+  -- cause and the cancel command, again every stall_every days while it stays so. It comes back by itself on progress. Never cancelled by
+  -- the kernel. 0 = off. config "runner": {queue: {release_days}}
+  release_days = 60,
   -- BUG-352 (Run 16c site97: fortcore stage 1 on soil beyond the brook, 30 d at s1.dig 0 %, 'unreachable DigChannel'): a
   -- dig stage without own progress (R.ps) for reach_days whose revealed tiles (or their neighbours) lie in no walk group a
   -- citizen stands in is announced (PROJECT_BLOCKED d.why 'unreachable', row 'unreachable N d', Q.reach_scan): the
@@ -3627,6 +3634,7 @@ local function conf(K)
              stale_every = nat(q.stale_every, 1, 400, M.CFG.stale_every) * DAY,
              runstall = nat(q.stall_days, 0, 3000, M.CFG.stall_days) * DAY,        -- BUG-444
              runstall_every = nat(q.stall_every, 1, 400, M.CFG.stall_every) * DAY,
+             release = nat(q.release_days, 0, 3000, M.CFG.release_days) * DAY,     -- BUG-529
              reach = nat(q.reach_days, 1, 60, M.CFG.reach_days) * DAY,             -- BUG-352
              slots_idle = nat(q.slots_idle, 0, 50, M.CFG.slots_idle),              -- BUG-486
              slots_pop = nat(q.slots_pop, 1, 250, M.CFG.slots_pop),
@@ -6149,6 +6157,48 @@ function Q.stale_scan(K, c, t)
   end
 end
 
+-- BUG-529: has this shaft (it holds a level, so idle_keep never sets it aside) made no progress for c.release? Then its slot is the
+-- others' (second pass in the scheduler). R.ps is its last own progress (waiting for a slot never sets it in the second pass)
+function Q.slot_release(P, R, t, c)
+  if not c or not c.release or c.release <= 0 or type(R) ~= 'table' or R.si ~= P.stage then return false end
+  local ps = int(R.ps)
+  return ps ~= nil and t - ps >= c.release
+end
+
+-- BUG-529: the DECISION that goes with the release (PEACE only, once, again every stall_every days while it stays so; R.rls = the last one)
+function Q.release_scan(K, c, t)
+  if not c.release or c.release <= 0 or K.mode() ~= 'PEACE' then return end
+  for _, P in ipairs(sorted()) do
+    local R = S.rt.p[P.id]
+    if P.tpl == 'aqshaft' and P.done ~= 1 and not halted(P) and type(R) == 'table' and M.AQ.holds(S.rt, P.id)
+       and Q.slot_release(P, R, t, c) then
+      local sn = int(R.rls)
+      if not sn or sn < int(R.ps) or t - sn >= c.runstall_every then
+        R.rls = t
+        dirty()
+        local d = doc(K, P.id)
+        local st = d and d.stages[P.stage + 1]
+        local label = trunc(st and st.label or '', 24)
+        local cause = {}
+        local w = M.AQ.where(S.rt, P.id)
+        if w ~= '' then cause[#cause + 1] = w end
+        local sx = M.AQ.stall_text(S.rt, P.id)
+        if sx ~= '' then cause[#cause + 1] = sx end
+        if P.blocked ~= '' then cause[#cause + 1] = P.blocked end
+        local why = #cause > 0 and table.concat(cause, '; ') or 'no cause found (dfllm cmd inspect what=workload)'
+        local days = (t - int(R.ps)) // DAY
+        local cancel = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}'", P.id)
+        local q = string.format('%s (aqshaft) has not moved for %d d at %s %d%% (%s): its runner slot is released, the other projects run ' ..
+                                'first (hospital, fortcore, ...); cancel it with %s (only what is not built goes), or fix the cause',
+                                P.id, days, label, int(P.pct) or 0, trunc(why, 80), cancel)
+        K.log('warn', '%s', q)
+        K.emit('DECISION_NEEDED', 'A', trunc(q, 200), {id = 'project_released', q = trunc(q, 200), proj = P.id, n = days,
+                                                       cause = trunc(why, 120), cmds = {cancel, 'dfllm bp sites aqshaft --fresh'}})
+      end
+    end
+  end
+end
+
 -- BUG-444 (Run 16c i3 Castletongs: aqshaft S1 held a runner slot 556 days at 7 %, no event, 'bp.resume' said 'not set aside (it runs)'):
 -- idle_keep exempts a shaft watching a level (and the refuge drink, a seal in a siege, ...) from the set-aside rule for good. A
 -- project that is neither done, halted nor set aside and whose own progress (R.ps) is stall_days old says so (PROJECT_BLOCKED
@@ -6352,6 +6402,8 @@ local function begin_run(K)
   if not oks then K.log('error', 'runner stale scan failed: %s', trunc(errs, 160)) end
   local okk, errk = pcall(Q.stall_scan, K, f.c, now(K))   -- BUG-444: own pcall, a fault costs only this announcement
   if not okk then K.log('error', 'runner stall scan failed: %s', trunc(errk, 160)) end
+  local okq, errq = pcall(Q.release_scan, K, f.c, now(K))  -- BUG-529: own pcall, a fault costs only this announcement
+  if not okq then K.log('error', 'runner release scan failed: %s', trunc(errq, 160)) end
   local okr, errr = pcall(Q.reach_scan, K, f.c, now(K))  -- BUG-352: own pcall, a fault costs only this announcement
   if not okr then K.log('error', 'runner reach scan failed: %s', trunc(errr, 160)) end
   local okl, errl = pcall(Q.lockout_scan, K, f.c, now(K))  -- BUG-458: own pcall, a fault costs only this announcement
@@ -6372,7 +6424,7 @@ local function begin_run(K)
   local function second(P, R)
     if Q.idle(P) and not Q.idle_keep(K, P) then return true end                   -- BUG-328: set aside
     if SEALS[P.tpl] and c.on and not f.stk[P.id] then return false end
-    if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return false end        -- BUG-191: an open aquifer level
+    if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return Q.slot_release(P, R, t, c) end  -- BUG-191: an open level; BUG-529: not for ever
     if S.care_id == P.id and P.blocked ~= 'stalled' then return false end         -- BUG-116: the hospital never yields
     if Q.mood_proj(P) and P.blocked ~= 'stalled' then return false end             -- BUG-306: nor a mood project
     if P.blocked == 'stalled' or (SEALS[P.tpl] and f.stk[P.id]) then return true end

@@ -398,6 +398,8 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
         return stalled_job_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "mood_thirst":
         return mood_thirst_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "project_released":
+        return released_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline", "no_water",
                                                                          "thirst_unit") and d.get("cmds"):
         return food_hint(d, save_dir)
@@ -518,6 +520,16 @@ def stalled_job_hint(d: dict) -> str:
     return (f"a water job is stalled: send {first} yourself (it takes the worker off Orderlies, removes the pond zone beside him and, "
             "for a patient near death, his hospital zone: the zones screen, no job is removed); dfllm cmd inspect what=unit "
             "key=<id> shows what he holds")
+
+
+def released_hint(d: dict) -> str:
+    """BUG-529 (Run 16a i1 Basementflew: an aqshaft stood 425 days at z124 and held the runner slot the hospital and the fortcore waited
+    for): the shaft made no progress for runner.queue.release_days; the kernel gave its slot to the others (it is still measured) and
+    asks. d.cmds[0] = bp.cancel (only what is not built goes), then `bp sites aqshaft --fresh` for another column."""
+    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    return (f"project {d.get('proj', '?')} (aqshaft) has not moved for {d.get('n', '?')} days ({d.get('cause', '?')}); the other projects "
+            "run first now. Decide: fix the cause, or cancel it" + (f" ({'; then '.join(cmds[:2])})" if cmds else "")
+            + " and place another column")
 
 
 def seal_stalled_hint(d: dict) -> str:
