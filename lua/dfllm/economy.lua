@@ -3563,19 +3563,41 @@ function M.solo_check(K, p, days)
   end
   p.solo = next(nxt) ~= nil and nxt or nil
   if #rows == 0 then return 0 end
+  -- BUG-509 (Run 16d i4: 24 strange-mood dwarves, children among them, died of thirst under this line with two inspect commands): the
+  -- mood of such a unit (care's record: kind, what is short, the commands that can still help) goes into the text and the cmds
+  for _, r in ipairs(rows) do
+    local okm, mh = K.call('care', 'mood_help', r.id)
+    if okm and type(mh) == 'table' then r.mood = mh end
+  end
   local parts = {}
   for _, r in ipairs(rows) do
-    parts[#parts + 1] = string.format('%d (thirst %d, hunger %d, %s%s)', r.id, r.th, r.hu, r.why,
-                                      r.pos and string.format(' at %d,%d,%d', r.pos[1], r.pos[2], r.pos[3]) or '')
+    local mt = ''
+    if r.mood then
+      mt = string.format(', strange mood %s%s: %s', tostring(r.mood.kind), r.mood.child and ' (child)' or '',
+                         #r.mood.lack > 0 and ('short ' .. table.concat(r.mood.lack, ', ')) or 'nothing missing')
+    end
+    parts[#parts + 1] = string.format('%d (thirst %d, hunger %d, %s%s%s)', r.id, r.th, r.hu, r.why,
+                                      r.pos and string.format(' at %d,%d,%d', r.pos[1], r.pos[2], r.pos[3]) or '', mt)
   end
   local q = string.format('%d citizen%s dehydrating or starving with drink %d d: %s', #rows, #rows == 1 and '' or 's',
                           days.drink_d, table.concat(parts, '; '))
   K.log('warn', 'solo thirst: %s', q)
-  local cmds = {}
-  for i, r in ipairs(rows) do if i <= 3 then cmds[#cmds + 1] = 'dfllm cmd inspect what=unit key=' .. r.id end end
+  local cmds, moods = {}, {}
+  for i, r in ipairs(rows) do
+    if i <= 3 then cmds[#cmds + 1] = 'dfllm cmd inspect what=unit key=' .. r.id end
+    if r.mood then
+      moods[#moods + 1] = r.id
+      for _, cm in ipairs(r.mood.cmds or {}) do
+        local dup = false
+        for _, x in ipairs(cmds) do if x == cm then dup = true end end
+        if not dup and #cmds < 7 then cmds[#cmds + 1] = cm end
+      end
+    end
+  end
   cmds[#cmds + 1] = 'dfllm cmd inspect what=reach'
-  K.emit('DECISION_NEEDED', 'A', ('thirst_unit: ' .. q):sub(1, 200), {id = 'thirst_unit', q = q:sub(1, 400),
-         units = (function() local l = {} for _, r in ipairs(rows) do l[#l + 1] = r.id end return l end)(), cmds = cmds})
+  K.emit('DECISION_NEEDED', 'A', ('thirst_unit: ' .. q):sub(1, 200), {id = 'thirst_unit', q = q:sub(1, 200),
+         units = (function() local l = {} for _, r in ipairs(rows) do l[#l + 1] = r.id end return l end)(), cmds = cmds,
+         mood = #moods > 0 and moods or nil})
   return #rows
 end
 
@@ -11385,8 +11407,27 @@ end
 
 -- FR-23/FR-50 (daily, PEACE/RECOVERY): forbidden containers of drink/food/seeds and forbidden seeds on revealed,
 -- reachable tiles are unforbidden; in a starvation forbidden food too (FR-25)
+-- BUG-506 (Run 16a i1 Basementflew y406, 2015 drink units forbidden for ~100 days, 'drink 4-15 d' beside 736 d): after
+-- the siege the mode flipped PEACE <-> ALERT for a wandering predator (events: MODE PEACE>ALERT hostile / ALERT>PEACE
+-- quiet, ~129k ticks); this daily task ran only in PEACE / RECOVERY, so the one unforbid came at the first quiet day.
+-- ALERT and DRILL (the fort is inside, nothing hostile is near the stock) unforbid too; SIEGE / BREACH still do not.
+-- The forbidden stock's age (dfd, days) and what held the unforbid back (dfwhy) go into the state's stock.
+M.FORBID_MODES = {PEACE = true, RECOVERY = true, ALERT = true, DRILL = true}
+function M.forbid_note(inv, mode, skipped, d)
+  local forb = (math.tointeger(inv.drink_forb) or 0) + (math.tointeger(inv.food_forb) or 0)
+  if forb <= 0 then return 0, nil end
+  d = (d or 0) + 1
+  if not M.FORBID_MODES[mode] then return d, ('mode ' .. tostring(mode)):sub(1, 40) end
+  if (skipped or 0) > 0 then return d, string.format('%d off the walk group', skipped) end
+  return d, nil
+end
 function T.forbid(K, c, r)
-  if not HUNT_MODES[K.mode()] then return true end
+  local inv0 = K.census.i or {}
+  if not r.dfd_done then
+    r.dfd_done = true
+    st.dfd, st.dfwhy = M.forbid_note(inv0, K.mode(), st.forb_skip, st.dfd)
+  end
+  if not M.FORBID_MODES[K.mode()] then return true end
   local fc, dfl = c.forbid or M.DEFAULTS.forbid, M.DEFAULTS.forbid
   if not r.fx then
     r.fx, r.fx_n, r.fx_why = {}, 0, {}
@@ -11424,9 +11465,12 @@ function T.forbid(K, c, r)
           r.fx_why[e.why] = (r.fx_why[e.why] or 0) + 1
         end
         if #r.fx > 0 and r.fx_n < lim and did >= per_call then return false end
+      else
+        r.fx_skip = (r.fx_skip or 0) + 1                 -- BUG-506: forbidden but hidden / off the walk group
       end
     end
   end
+  st.forb_skip = r.fx_skip
   if r.fx_n > 0 then
     K.log('info', 'unforbidden: %s%s', why_line(r.fx_why, 4),
           r.burst and string.format(' (a forbidden stock: %d drink + food units, up to %d a day)', r.burst, lim) or '')
@@ -12046,6 +12090,11 @@ function M.state(K)
     -- FR-76: drink and food units the census counts as forbidden (a reclaimed fort's stock: the status says so)
     if (math.tointeger(inv.drink_forb) or 0) > 0 then r.stock.dforb = math.tointeger(inv.drink_forb) end
     if (math.tointeger(inv.food_forb) or 0) > 0 then r.stock.fforb = math.tointeger(inv.food_forb) end
+    -- BUG-506: how many daily runs the forbidden stock has stood and what held the unforbid back
+    if (st.dfd or 0) > 0 and (r.stock.dforb or r.stock.fforb) then
+      r.stock.dfd = math.tointeger(st.dfd)
+      if st.dfwhy then r.stock.dfwhy = tostring(st.dfwhy):sub(1, 40) end
+    end
   end
   local od = st.orders
   if od then r.orders = {n = od.n or 0, bad = od.bad or 0, stuck = od.stuck or 0} end   -- FR-01/FR-39

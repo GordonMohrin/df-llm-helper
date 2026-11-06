@@ -239,7 +239,7 @@ ERR_EVERY_S = 60                               # stderr 'poll error' at most onc
 # URGENT_REPEAT_S); DECISION_NEEDED only for the ids in URGENT_DECISIONS (a fort running out of drink or food, a thirsty one)
 URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
 URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst", "stranded_drink", "stranded_food",
-                    "mood_deadline", "no_water", "thirst_unit"}   # BUG-340; BUG-391; BUG-395; BUG-401; BUG-416; BUG-422
+                    "mood_deadline", "no_water", "thirst_unit", "job_stalled", "mood_thirst"}   # BUG-340; BUG-391; BUG-395; BUG-401; BUG-416; BUG-422; BUG-507; BUG-509
 URGENT_GAME_TICKS = schema.TICKS["DAY"]
 HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often
 
@@ -394,6 +394,10 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
         return siege_long_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "seal_stalled":
         return seal_stalled_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "job_stalled":
+        return stalled_job_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "mood_thirst":
+        return mood_thirst_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline", "no_water",
                                                                          "thirst_unit") and d.get("cmds"):
         return food_hint(d, save_dir)
@@ -489,6 +493,31 @@ def lone_hint(d: dict) -> str:
     return (f"tell Gordon{how}{kill}; otherwise the kernel releases it at confine.max_days when the soldiers stand at "
             "their stations (LOCKDOWN_END limit); dfllm events --type SORTIE says whether the soldiers arrived, killed it or "
             "stood beside it (not_attackable: DF does not treat it as an enemy)")
+
+
+def mood_thirst_hint(d: dict) -> str:
+    """BUG-509 (Run 16d i4: 24 strange-mood dwarves died of thirst, children among them): a moody dwarf drinks nothing at his shop and
+    his job cannot be cancelled; d.days = days to 75,000, d.missing the slots still short, d.cmds what can still be sent (the
+    caravans asked, the shops on the surface). No such command: only his own finish saves him."""
+    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str) and "inspect" not in c]
+    days = d.get("days")
+    head = f"a strange-mood dwarf dies of thirst in ~{days} days" if days is not None else "a strange-mood dwarf is dying of thirst"
+    if not cmds:
+        return head + " and nothing is missing for his mood: nothing to send (dfllm cmd inspect what=unit key=<id>)"
+    return head + "; send the commands that bring his material yourself: " + cmds[0] + (
+        f" (+{len(cmds) - 1} more in d.cmds: dfllm events --cls A)" if len(cmds) > 1 else "")
+
+
+def stalled_job_hint(d: dict) -> str:
+    """BUG-507 (Run 16b i2 Brotherarrow: a GiveWater job hung 26 days on a child while the patient died of thirst, the player had no
+    command): water found a GiveWater / GiveFood / FillPond job whose worker has not moved for days. The kernel already took the
+    worker off Orderlies and removed the pond zone beside him; d.cmds has `water.unstick unit=<id>` (the same ladder at once, and
+    the patient's hospital zone when he is over water.stall_dying) and inspect what=unit."""
+    cmds = [c for c in d.get("cmds") or [] if isinstance(c, str)]
+    first = cmds[0] if cmds else "dfllm cmd water.unstick"
+    return (f"a water job is stalled: send {first} yourself (it takes the worker off Orderlies, removes the pond zone beside him and, "
+            "for a patient near death, his hospital zone: the zones screen, no job is removed); dfllm cmd inspect what=unit "
+            "key=<id> shows what he holds")
 
 
 def seal_stalled_hint(d: dict) -> str:

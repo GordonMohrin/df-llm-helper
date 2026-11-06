@@ -872,7 +872,14 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
         # above do not count, and what the kernel does about it
         if st.get("dforb") or st.get("fforb"):
             parts = [f"{st[k]} {name} items forbidden" for k, name in (("dforb", "drink"), ("fforb", "food")) if st.get(k)]
-            out.append((1, ", ".join(parts) + " (not in the days above; the kernel unforbids them)"))
+            # BUG-506 (Run 16a i1: 2015 drink units forbidden ~100 days, mode ALERT): the age and what holds the unforbid
+            # back; a stock that stands 3+ days is a warning, the kernel did not free it
+            age, why = st.get("dfd"), st.get("dfwhy")
+            tail = " (not in the days above; the kernel unforbids them)"
+            if age and age >= 3:
+                tail = (f" for {age} days, NOT in the days above (the drink days understate the stock)"
+                        + (f"; the unforbid is held back: {why}" if why else "; the kernel has not freed them"))
+            out.append((1, ", ".join(parts) + tail + ("!" if age and age >= 3 else "")))
     ad = adopt_line(s)
     if ad:
         fort.append(ad)

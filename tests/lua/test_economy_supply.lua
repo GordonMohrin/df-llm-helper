@@ -416,4 +416,36 @@ T.test('BUG-058: a wrong-kind crop is replaced only when the right kind has usab
   T.eq({under.plant_id[0], under.plant_id[1], under.plant_id[3]}, {4, 2, 1}, 'no cave seeds: the crops stay as they are')
 end)
 
+T.test('BUG-506 (Run 16a i1 Basementflew y406: 2015 drink units forbidden ~100 days, the mode flipped PEACE <-> ALERT for a wandering ' ..
+       'predator): the daily unforbid runs in ALERT and DRILL too, not in SIEGE / BREACH; the state says how many runs the stock ' ..
+       'stood (stock.dfd) and what held it back (stock.dfwhy)', function()
+  local function run(mode, ndays)
+    local drinks = {}
+    local W = world{mode = mode, setup = function(W)
+      for i = 1, 150 do
+        drinks[#drinks + 1] = F.item(W, 'DRINK', {stack_size = 20, flags = {forbid = true}, _pos = {5 + i % 20, 5, 100}})
+      end
+    end}
+    days(W, ndays or 1)
+    local left = 0
+    for _, it in ipairs(drinks) do if it.flags.forbid then left = left + 1 end end
+    return W, left
+  end
+  local W, left = run('ALERT')
+  T.eq(left, 0, 'ALERT: all 150 unforbidden within the day (old code: none while the mode is not PEACE / RECOVERY)')
+  W, left = run('DRILL')
+  T.eq(left, 0, 'DRILL too')
+  local W2, left2 = run('SIEGE', 3)
+  T.eq(left2, 150, 'SIEGE: the stock stays forbidden')
+  local s = W2.state().stock
+  T.eq(s.dforb, 150 * 20)
+  T.ok(s.dfd >= 3, 'the runs it stood: ' .. tostring(s.dfd))
+  T.eq(s.dfwhy, 'mode SIEGE')
+  local W3, left3 = run('ALERT', 1)
+  T.eq(W3.state().stock.dfwhy, nil, 'nothing holds the unforbid back in ALERT')
+  local M = require('dfllm.economy')
+  T.eq({M.forbid_note({drink_forb = 0, food_forb = 0}, 'SIEGE', 0, 5)}, {0, nil}, 'nothing forbidden: the count restarts')
+  T.eq({M.forbid_note({drink_forb = 10}, 'PEACE', 4, 2)}, {3, '4 off the walk group'}, 'items the kernel cannot reach')
+end)
+
 T.done()

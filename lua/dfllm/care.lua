@@ -799,23 +799,12 @@ function M.rock_short(rec)
   return out
 end
 
--- BUG-395 (Run 16 i2/i3: 9 failed moods, 4 deaths, the kernel's last word was MOOD_CRITICAL 'none in the fort' with the days
--- ticking; nothing ready to send): within mood_decide days of DF's insanity line a mood that is still short of a workshop, a
--- material (none in the fort, out of reach, waiting for days) gets DECISION_NEEDED mood_deadline with the commands that can
--- still help, again at each step of days left (10, 5, 2): the caravans asked for the tokens (trade.want), the shops placed on
--- the surface (bp.place workshops only= surface=1: no fortcore needed). The mood cannot be cancelled and no verb confines one
--- dwarf: if it fails he turns insane, so the text says it and the soldiers' sortie is the last line (squad.sortie).
-function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, ws)
-  local lim = math.tointeger(tonumber(c.mood_decide)) or 15
-  if not days or days > lim then return end
-  local why = {}
-  for _, w in ipairs(reasons) do why[w] = true end
-  if not (why.workshop or why.material or why.reach or why.waiting) then return end
-  local T, sid = K.now(), fmt(u.id)
-  local toks = {M.MD.step(days) or 'unknown'}
-  if not CAD.due(rec.dl, T, {sid}, toks, {ticks = DAY, wall_s = c.mood_crit_wall_s}) then return end
-  rec.dl = CAD.mark(T, {sid}, toks)
-  local cmds, opts, short = {}, {}, {}
+-- BUG-509: the commands that can still help a mood whose material or shop is short (shared by mood_deadline and the thirst
+-- decisions): the caravans asked for the tokens (trade.want, from rec.buy and the stone / blocks classes none in the fort) and the
+-- missing shop types on the surface (bp.place workshops only= surface=1; `types` from the mood's request, `shop` the shop of a
+-- dwarf without a claimed one). Returns cmds, opts (their names, same order), the tokens asked, the shop types.
+function M.mood_cmds(rec, types, shop)
+  local cmds, opts = {}, {}
   local want, seen = {}, {}
   for _, t in ipairs(type(rec.buy) == 'table' and rec.buy or {}) do
     if not seen[t] and #want < 6 then seen[t] = true; want[#want + 1] = t end
@@ -832,12 +821,32 @@ function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, w
   end
   local ask = {}
   for _, t in ipairs(types or {}) do if #ask < 3 and t:match('^%w+$') then ask[#ask + 1] = t end end
-  if #ask == 0 and why.workshop and not ws then ask[1] = M.SKILL_WS[best_skill(u)] or 'Craftsdwarfs' end
+  if #ask == 0 and shop then ask[1] = shop end
   if #ask > 0 then
     cmds[#cmds + 1] = [[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"]] .. table.concat(ask, ',') ..
                       [[","surface":1}}']]
     opts[#opts + 1] = 'workshops'
   end
+  return cmds, opts, want, ask
+end
+
+-- BUG-395 (Run 16 i2/i3: 9 failed moods, 4 deaths, the kernel's last word was MOOD_CRITICAL 'none in the fort' with the days
+-- ticking; nothing ready to send): within mood_decide days of DF's insanity line a mood that is still short of a workshop, a
+-- material (none in the fort, out of reach, waiting for days) gets DECISION_NEEDED mood_deadline with the commands that can
+-- still help, again at each step of days left (10, 5, 2): the caravans asked for the tokens (trade.want), the shops placed on
+-- the surface (bp.place workshops only= surface=1: no fortcore needed). The mood cannot be cancelled and no verb confines one
+-- dwarf: if it fails he turns insane, so the text says it and the soldiers' sortie is the last line (squad.sortie).
+function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, ws)
+  local lim = math.tointeger(tonumber(c.mood_decide)) or 15
+  if not days or days > lim then return end
+  local why = {}
+  for _, w in ipairs(reasons) do why[w] = true end
+  if not (why.workshop or why.material or why.reach or why.waiting) then return end
+  local T, sid = K.now(), fmt(u.id)
+  local toks = {M.MD.step(days) or 'unknown'}
+  if not CAD.due(rec.dl, T, {sid}, toks, {ticks = DAY, wall_s = c.mood_crit_wall_s}) then return end
+  rec.dl = CAD.mark(T, {sid}, toks)
+  local cmds, opts, want, ask = M.mood_cmds(rec, types, (why.workshop and not ws) and (M.SKILL_WS[best_skill(u)] or 'Craftsdwarfs') or nil)
   local lack = {}
   for _, sl in ipairs(rec.sl or {}) do
     local nm, bk = M.MD.slot_parts(sl)
@@ -855,6 +864,70 @@ function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, w
   K.emit('DECISION_NEEDED', 'A', trunc('strange mood deadline: ' .. q, 200),
          {id = 'mood_deadline', q = trunc(q, 200), cmds = #cmds > 0 and cmds or nil, opts = #opts > 0 and opts or nil,
           auto = #auto > 0 and auto or nil})
+end
+
+-- BUG-509 (Run 16d i4 Trumpetrealms y389: the Fey mood child Urvad and 23 other strange-mood dwarves in the same fort died of thirst at
+-- 75,000 with 130-480 days of drink in the fort; the only line was economy's thirst_unit with two inspect commands; the child's
+-- MOOD_RISK came at thirst 50,179, 25,000 ticks after he passed mood_thirst, held back by the wall-clock cadence): a dwarf in a
+-- strange mood neither drinks nor eats at his shop (the nook beside it did not draw him away in these deaths), and a mood job
+-- cannot be cancelled, so the only ways out are the mood's material (the deadline) or nothing. What the kernel can do is say so
+-- in time with what can still be sent: at every step of the dwarf's thirst or hunger (mood_thirst, mood_act, mood_crit, 60,000;
+-- hunger mood_hunger, 50,000, mood_crit_hunger, 70,000), whatever the cadence, DECISION_NEEDED mood_thirst (A) with the days to 75,000, the
+-- missing slots, what the kernel did (the drink nook, the caravans asked) and the commands of mood_cmds. M.mood_help is the same
+-- picture for economy's thirst_unit.
+M.THIRST_STEPS = {{'mood_thirst', 'mood_act', 'mood_crit', 60000}, {'mood_hunger', 50000, 'mood_crit_hunger', 70000}}
+function M.thirst_step(c, th, hu)
+  local best = 0
+  for i, steps in ipairs(M.THIRST_STEPS) do
+    local v = i == 1 and th or hu
+    for n, key in ipairs(steps) do
+      local lim = type(key) == 'string' and math.tointeger(tonumber(c[key])) or key
+      if lim and v >= lim and n > best then best = n end
+    end
+  end
+  return best
+end
+
+-- the picture of a mood the kernel keeps for a dwarf: {kind, child, line, left (days to DF's insanity, -1 unknown), lack (slots),
+-- nook (text), buy, cmds, opts}; nil for a dwarf without a mood record
+function M.mood_help(K, uid)
+  local sid = fmt(uid)
+  local p = pstate(K)
+  local rec = p.moods[sid]
+  if type(rec) ~= 'table' then return nil end
+  local u = df.unit.find(uid)
+  local mv = st.mview and st.mview[sid]
+  local types = {}
+  for t in tostring(rec.wsq or ''):gmatch('[^,]+') do types[#types + 1] = t end
+  local cmds, opts, want = M.mood_cmds(rec, types, nil)
+  local lack = {}
+  for _, sl in ipairs(type(rec.sl) == 'table' and rec.sl or {}) do
+    local nm, bk = M.MD.slot_parts(sl)
+    if bk ~= M.MD.BK_HAVE then lack[#lack + 1] = nm .. (bk ~= '' and (' (' .. bk .. ')') or '') end
+  end
+  if #lack == 0 then
+    for _, cl in ipairs(type(rec.missing) == 'table' and rec.missing or {}) do lack[#lack + 1] = tostring(cl) end
+  end
+  local nk = type(p.nook[sid]) == 'table' and p.nook[sid].txt or nil
+  return {kind = rec.kind, child = u and is_child(u) or false, line = mv and mv.t, left = mv and mv.left or -1,
+          lack = lack, nook = nk, buy = want, cmds = cmds, opts = opts}
+end
+
+local function mood_thirst_decision(K, c, u, rec, kind, child, ws, th, hu, nook)
+  local h = M.mood_help(K, u.id)
+  local worst = math.max(th, hu)
+  local days = math.max(0, (75000 - worst) // DAY)
+  local lack = h and #h.lack > 0 and table.concat(h.lack, ', ') or nil
+  local q = string.format('mood unit %d (%s%s) thirst %d hunger %d: dead in ~%d d, drinks nothing at his shop, the job cannot be '
+                          .. 'cancelled; %s', u.id, kind, child and ', child' or '', th, hu, days,
+                          lack and ('short ' .. lack) or 'nothing missing')
+  local cmds = {}
+  for _, cm in ipairs(h and h.cmds or {}) do cmds[#cmds + 1] = cm end
+  cmds[#cmds + 1] = string.format('dfllm cmd inspect what=unit key=%d', u.id)
+  K.emit('DECISION_NEEDED', 'A', trunc('mood_thirst: ' .. q, 200),
+         {id = 'mood_thirst', q = trunc(q, 200), unit = u.id, units = {u.id}, kind = kind, child = child and 1 or 0,
+          thirst = th, hunger = hu, days = days, cmds = cmds, ws = ws, nook = nook ~= '' and trunc(nook, 120) or nil,
+          missing = h and #h.lack > 0 and h.lack or nil})
 end
 
 local function mood_seen(K, c, r, p, u, kind)
@@ -898,6 +971,13 @@ local function mood_seen(K, c, r, p, u, kind)
   local crit = th >= c.mood_crit or hu >= c.mood_crit_hunger           -- FR-82: the bar MOOD_CRITICAL uses
   local nook = ''
   if act then nook = mood_relief(K, c, p, u, rec, job, ws, crit) or '' end
+  -- BUG-509: one decision per step of his thirst / hunger, whatever the wall-clock cadence of MOOD_RISK
+  local step = M.thirst_step(c, th, hu)
+  if step > (math.tointeger(rec.dth) or 0) then
+    rec.dth = step
+    local okd, errd = pcall(mood_thirst_decision, K, c, u, rec, kind, child, ws, th, hu, nook)
+    if not okd then K.log('warn', 'care mood thirst decision %s: %s', sid, tostring(errd)) end
+  end
   if risk and CAD.due(last, T, {sid}, {risk}, {ticks = c.mood_risk_every, wall_s = c.wake_wall_s}) then
     rec.risk, rec.risk_why, rec.risk_w = now, risk, T.wall
     local miss = still_missing(job, rec)

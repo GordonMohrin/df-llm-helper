@@ -224,7 +224,8 @@ T.test('K3: the texts fit the 200-byte limit of d and the 1,024 bytes of an even
   T.ok(seen >= 4, seen)
   local n = W.find_events('MOOD_NEED')[1]
   T.ok(n.msg:find('+', 1, true) and n.msg:find(' more', 1, true), 'slots that do not fit are counted: ' .. n.msg)
-  local q = W.find_events('DECISION_NEEDED')[1].d.q
+  local q
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id ~= 'mood_thirst' then q = q or e.d.q end end   -- BUG-509
   T.ok(q:find('smelt ore or trade.want bar', 1, true), 'the hint survives the slot list: ' .. q)
 end)
 

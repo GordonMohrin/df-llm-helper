@@ -59,6 +59,9 @@
 --     only climbs is `noeffect` (M.give_effect), and PATIENT_DYING's `lie` says why he lies (M.lie: wounds, counters,
 --     liquid, hunger, syndromes); BUG-344: M.drink_fix tells economy's thirst decision which well a thirsty citizen
 --     stands at without drinking, or the recipe when no water is accepted (report only);
+--   * BUG-507/508: a GiveWater / GiveFood / FillPond worker who has not moved for stall_days is stalled (M.stalls): off Orderlies for a
+--     run, the pond zone beside him removed, from the third round the hospital zone of a patient over stall_dying removed; DECISION
+--     job_stalled and the verb water.unstick (no job is ever removed);
 --   * BUG-106: `inspect what=hospital` and the state's water.gaps list the gaps of the wound care (M.audit), once per run.
 --   * BUG-131: a hospital zone outside the core that is idle or superseded does not count in hosp_out (M.hosp_sort); the
 --     verb hospital.retire removes one such zone (the zones screen's remove, act.hospital_remove; M.verbs).
@@ -138,6 +141,13 @@ M.DEFAULTS = {
   -- `noeffect` verdict releases the carriers of the running GiveWater jobs from the Orderlies detail for one run (at most
   -- restale_max of them, again after restale_every) so the game drops the stale job and posts a new one; restale false: off
   restale = true, restale_max = 2, restale_every = 2 * DAY,
+  -- BUG-507/508 (Run 16b i2 Brotherarrow y386: a child hung 26 days in a GiveWater job at a dry well while the patient died of
+  -- thirst; the captain hung in FillPond there at thirst 53,360): a water job (GiveWater, GiveFood, FillPond) whose worker has
+  -- not moved for stall_days, with the worker over stall_need thirst (or DF's hungry line), or a patient over thirst_alarm for
+  -- a Give job, is stalled (M.stalls). Each stalled worker gets a round at most every stall_every, stall_max workers a run:
+  -- he leaves the Orderlies detail for a run, a Pond zone within pond_near of him goes (the zones screen's remove), and from
+  -- the third round (stall_hosp) the hospital zone of a patient over stall_dying goes (BUG-034's recipe). stall false: report only
+  stall = true, stall_days = 3, stall_need = 25000, stall_every = DAY, stall_max = 2, stall_hosp = true, stall_dying = 45000,
   -- BUG-325: the scan asks the walk from up to ws_from citizens (the nearest the reference); a tile is reachable from any
   ws_from = 3,
   -- BUG-324: while no water is accepted, the kernel zones the scan's best reachable, safe water as a Water Source (wz false:
@@ -2092,6 +2102,223 @@ function M.restale(K, c, r, p, now, gv, sc)
   return string.format('stale job released: carrier %s off %s (round %d)', table.concat(out, ','), M.CARER_DETAIL, p.rs.n)
 end
 
+---------------------------------------------------------------- BUG-507/508: stalled water jobs
+-- Run 16b i2 Brotherarrow y386: patient 26371 died of thirst in a hospital bed under 'a GiveWater job running 26+ days without
+-- effect'; the job hung on a CHILD (26505) who stood 26 days at 81,118,134 beside the dry well 82,119,134, no member of
+-- Orderlies (BUG-383 found 'nothing to release'), and the captain (thirst 53,360) hung in FillPond at the same well. The
+-- player had no command. A water job (GiveWater, GiveFood, FillPond) is tracked by job id with its worker and his tile
+-- (p.sj, at most STALL_TRACK); a worker who has not moved for stall_days game days under the same job is STALLED -- no honest
+-- water job keeps a dwarf on one tile for days. It is a case when the worker is over stall_need thirst (or DF's hungry
+-- line), or for a Give job when a patient is over thirst_alarm. The kernel never removes a job (DESIGN 5.9, a removed job
+-- crashed DF); per stalled worker, at most every stall_every and stall_max workers a run, it takes what the screens give:
+--   1. the worker leaves the Orderlies detail for a run (the BUG-383 release, now for every stalled worker; p.rs puts him back),
+--   2. a Pond zone within pond_near + 1 tiles of him is removed (the zones screen; the FillPond loop at a dry well),
+--   3. from the third round (stall_hosp), the hospital zone a patient over stall_dying lies in is removed (BUG-034's recipe:
+--      without the zone the patient fetches his own drink or the carriers bring it).
+-- A DECISION_NEEDED job_stalled (A) names the workers and what was done, with the verb `water.unstick unit=<id>` (all
+-- steps at once, whatever the age) and inspect what=unit.
+M.STALL_JOBS = {'GiveWater', 'GiveWater2', 'GiveFood', 'FillPond'}
+M.STALL_TRACK = 60
+
+-- one pass over the job list: [{job, jt, uid, x, y, z, since}] of the tracked jobs that have a worker; nil when this DF
+-- knows none of the job types or the list is unreadable
+function M.stall_scan(p, now)
+  local types = {}
+  for _, n in ipairs(M.STALL_JOBS) do
+    local v = df.job_type and df.job_type[n]
+    if type(v) == 'number' then types[v] = n end
+  end
+  if next(types) == nil then return nil end
+  p.sj = json.object(type(p.sj) == 'table' and p.sj or {})
+  local seen, out, n, i = {}, {}, 0, 0
+  for _ in pairs(p.sj) do n = n + 1 end
+  local ok = pcall(function()
+    local link = df.global.world.jobs.list.next
+    while link and i < 20000 do
+      local j = link.item
+      local name = j and types[j.job_type]
+      if name and math.type(j.id) == 'integer' then
+        local okw, w = pcall(dfhack.job.getWorker, j)
+        if okw and w ~= nil then
+          local wid = math.type(w) == 'integer' and w or w.id
+          local wu = math.type(w) == 'integer' and df.unit.find(w) or w
+          local x, y, z
+          if wu then x, y, z = dfhack.units.getPosition(wu) end
+          local key = fmt(j.id)
+          local rec = p.sj[key]
+          local same = type(rec) == 'table' and rec.u == wid and rec.x == x and rec.y == y and rec.z == z
+          if not same and (type(rec) == 'table' or n < M.STALL_TRACK) then
+            if type(rec) ~= 'table' then n = n + 1 end
+            rec = {t = now, u = wid, x = x, y = y, z = z, jt = name}
+            p.sj[key] = rec
+          end
+          if type(rec) == 'table' then
+            seen[key] = true
+            out[#out + 1] = {job = j.id, jt = name, uid = wid, x = x, y = y, z = z, since = rec.t}
+          end
+        end
+      end
+      link, i = link.next, i + 1
+    end
+  end)
+  if not ok then return nil end
+  for key in pairs(p.sj) do if not seen[key] then p.sj[key] = nil end end      -- done, cancelled or taken over
+  return out
+end
+
+-- step 3: the hospital zones the patients over stall_dying lie in (at most remove_per_run); returns the zone ids
+local function stall_hospital(K, c, r, p, now)
+  if not c.stall_hosp or not removes(c) then return nil end
+  local over, zones, locs, seen, failed = {}, {}, {}, {}, 0
+  for _, pt in ipairs(r.patients) do if pt.thirst >= c.stall_dying then over[#over + 1] = pt end end
+  if #over == 0 then return nil end
+  table.sort(over, function(a, b) return a.thirst > b.thirst end)
+  for _, pt in ipairs(over) do
+    for _, h in ipairs(r.hosp) do
+      if not seen[h.id] and #zones + failed < c.remove_per_run and M.zone_patients({pt}, h) > 0 then
+        seen[h.id] = true
+        if K.act.hospital_remove(h.id) then
+          zones[#zones + 1] = h.id
+          locs[#locs + 1] = h.loc
+        else
+          failed = failed + 1
+        end
+      end
+    end
+  end
+  if #zones == 0 then return nil end
+  local ids = {}
+  for i = 1, math.min(8, #over) do ids[i] = over[i].id end
+  K.emit('HOSPITAL_REMOVED', 'A',
+         trunc(string.format('removed hospital zone(s) %s: a GiveWater job stalled, patient %d at thirst %d (the zones screen: '
+                             .. 'he fetches his own drink or the carriers bring it)', table.concat(zones, ','), over[1].id,
+                             over[1].thirst), 200),
+         {zones = zones, locs = locs, units = ids, n = #over, thirst = over[1].thirst, patients = #r.patients,
+          give = r.give, failed = failed, near = c.near, stalled = 1})
+  K.log('warn', 'water: stalled GiveWater job: hospital zone(s) %s removed for patient %d (thirst %d)', table.concat(zones, ','),
+        over[1].id, over[1].thirst)
+  p.rm = {t = now, zones = zones, locs = locs, n = #over, tmax = over[1].thirst, give = r.give}
+  return zones
+end
+
+-- the ladder for one stalled worker; returns the list of what was done
+local function unstick(K, c, r, p, e)
+  local done = {}
+  local held = false                                      -- BUG-383's release took him off this very run
+  for _, id in ipairs(type(p.rs) == 'table' and type(p.rs.ids) == 'table' and p.rs.ids or {}) do
+    if math.tointeger(id) == e.uid then held = true end
+  end
+  if not held and M.can('work_detail') and detail_member(M.CARER_DETAIL, e.uid) == true
+     and K.act.work_detail(M.CARER_DETAIL, e.uid, false) then
+    local rs = type(p.rs) == 'table' and p.rs or {n = 0}
+    rs.ids = json.array(type(rs.ids) == 'table' and rs.ids or {})
+    rs.ids[#rs.ids + 1] = e.uid
+    rs.t, rs.n = rs.t or K.now().tick, math.tointeger(rs.n) or 0
+    p.rs = rs
+    done[#done + 1] = 'off ' .. M.CARER_DETAIL .. ' for a run'
+  end
+  if e.x and M.can('pond_remove') then
+    for _, pd in ipairs(r.ponds or {}) do
+      if dist_box(e.x, e.y, e.z, pd) <= (c.pond_near or 3) + 1 and K.act.pond_remove(pd.id) then
+        done[#done + 1] = string.format('pond zone %d removed', pd.id)
+        break
+      end
+    end
+  end
+  return done
+end
+
+-- opt: {force = the rules of need, cadence and cap do not apply, unit = only this worker}. Returns
+-- {rows = [{uid, jt, days, th, hu, child, x, y, z, did = {text}}], acted = n, hosp = {zones}} or nil
+function M.stalls(K, c, r, p, now, opt)
+  opt = opt or {}
+  if not c.stall and not opt.force then return nil end
+  local list = M.stall_scan(p, now)
+  p.sa = json.object(type(p.sa) == 'table' and p.sa or {})
+  if not list then p.sa = json.object(); return nil end
+  local ptop = 0
+  for _, pt in ipairs(r.patients) do if pt.thirst > ptop then ptop = pt.thirst end end
+  local res, live, acted, deep = {rows = {}, acted = 0}, {}, 0, false
+  local min_age = c.stall_days * DAY
+  for _, e in ipairs(list) do
+    live[fmt(e.uid)] = true
+    local age = now - e.since
+    local u = df.unit.find(e.uid)
+    local th, hu, child = 0, 0, false
+    pcall(function() th = math.tointeger(u.counters2.thirst_timer) or 0 end)
+    pcall(function() hu = math.tointeger(u.counters2.hunger_timer) or 0 end)
+    pcall(function() child = not dfhack.units.isAdult(u) end)
+    local give = e.jt ~= 'FillPond'
+    local case = age >= min_age and (th >= c.stall_need or hu >= M.STARVE_HUNGER or (give and ptop >= c.thirst_alarm))
+    if opt.unit ~= nil then case = (opt.unit == e.uid) elseif opt.force then case = age >= min_age end
+    if case then
+      local key = fmt(e.uid)
+      local rec = type(p.sa[key]) == 'table' and p.sa[key] or nil
+      local row = {uid = e.uid, jt = e.jt, days = age // DAY, th = th, hu = hu, child = child, x = e.x, y = e.y, z = e.z,
+                   job = e.job, did = {}, give = give}
+      local due = opt.force or not rec or now - (math.tointeger(rec.t) or -c.stall_every) >= c.stall_every
+      if due and (opt.force or acted < c.stall_max) then
+        acted = acted + 1
+        row.did = unstick(K, c, r, p, e)
+        local n = (rec and math.tointeger(rec.n) or 0) + 1
+        p.sa[key] = {t = now, n = n}
+        row.round = n
+        if give and n >= 3 then deep = true end
+      end
+      res.rows[#res.rows + 1] = row
+    end
+  end
+  for key in pairs(p.sa) do if not live[key] then p.sa[key] = nil end end       -- his job ended
+  res.acted = acted
+  if #res.rows == 0 then return res end
+  if deep or opt.force then res.hosp = stall_hospital(K, c, r, p, now) end
+  local parts, ids, cmds = {}, {}, {}
+  for _, row in ipairs(res.rows) do
+    ids[#ids + 1] = row.uid
+    parts[#parts + 1] = string.format('%d%s %s %dd at %s thirst %d%s', row.uid, row.child and ' (child)' or '', row.jt, row.days,
+                                      row.x and string.format('%d,%d,%d', row.x, row.y, row.z) or '?', row.th,
+                                      #row.did > 0 and (' [' .. table.concat(row.did, ', ') .. ']') or '')
+    if #cmds < 3 then cmds[#cmds + 1] = string.format('dfllm cmd water.unstick unit=%d', row.uid) end
+  end
+  cmds[#cmds + 1] = string.format('dfllm cmd inspect what=unit key=%d', ids[1])
+  local q = string.format('%d water job(s) stalled (the worker has not moved): %s', #ids, table.concat(parts, '; '))
+  K.log('warn', 'water: %s%s', q, res.hosp and ('; hospital zone(s) ' .. table.concat(res.hosp, ',') .. ' removed') or '')
+  local sv = type(p.sv) == 'table' and p.sv or {}
+  local key = table.concat(ids, ',')
+  if not opt.force and (sv.key ~= key or now - (math.tointeger(sv.t) or -1e12) >= 3 * DAY) then
+    p.sv = {key = key, t = now}
+    K.emit('DECISION_NEEDED', 'A', trunc('job_stalled: ' .. q, 200),
+           {id = 'job_stalled', q = trunc(q, 200), units = ids, cmds = cmds, did = res.rows[1] and #res.rows[1].did > 0 and trunc(table.concat(res.rows[1].did, ', '), 120) or nil})
+  end
+  return res
+end
+
+-- verb water.unstick {unit?} (BUG-507): the ladder at once for the stalled water job of ONE worker (a unit that holds a
+-- GiveWater, GiveFood or FillPond job and has stood still since the kernel first saw it), or for every stalled worker;
+-- the need, cadence and cap rules do not apply, the player's word does
+M.verbs['water.unstick'] = function(K, args, cmd)
+  local r = st.last
+  if not r or not st.out then return false, 'water.unstick: no water run finished yet; try again in a game day' end
+  local uid = args.unit ~= nil and math.tointeger(args.unit) or nil
+  if args.unit ~= nil and not uid then return false, 'water.unstick: unit must be a unit id' end
+  local c, p = M.conf(K), pstate(K)
+  local res = M.stalls(K, c, r, p, K.now().tick, {force = true, unit = uid})
+  if not res or #res.rows == 0 then
+    return false, uid and string.format('water.unstick: unit %d holds no water job the kernel has watched (GiveWater, GiveFood, '
+                                        .. 'FillPond)', uid)
+                      or 'water.unstick: no stalled water job (no worker stood still for ' .. c.stall_days .. ' days)'
+  end
+  local out, ids = {}, {}
+  for _, row in ipairs(res.rows) do
+    ids[#ids + 1] = row.uid
+    out[#out + 1] = string.format('%d %s %dd%s', row.uid, row.jt, row.days,
+                                  #row.did > 0 and (': ' .. table.concat(row.did, ', ')) or ': nothing to take away')
+  end
+  local msg = 'unstick: ' .. table.concat(out, '; ') .. (res.hosp and ('; hospital zone(s) ' .. table.concat(res.hosp, ',') .. ' removed') or '')
+  K.log('warn', 'water: %s', msg)
+  return true, trunc(msg, 400), {n = #res.rows, units = ids}
+end
+
 -- BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought 'Syndrome'): why a patient lies, as the unit
 -- sheet would show it: wounds, the body counters that hold him down (DFHack unit.counters: unconscious, stunned, webbed,
 -- suffocation; unit.counters2: paralysis, numbness; scripts/full-heal.lua:112-130 resets the same fields), liquid on his
@@ -2896,6 +3123,9 @@ local function finish(K, c, r, p)
   end
   local rel = M.restale(K, c, r, p, now, gv, sc)                      -- BUG-383
   if rel and gv then gv.reason = rel .. '; ' .. gv.reason end              -- first: the lines are cut at 200
+  local okst, errst = pcall(M.stalls, K, c, r, p, now)                -- BUG-507/508
+  if not okst then K.log('warn', 'water stalls: %s', tostring(errst)) end
+  st.last = r
   -- patients over the alarm: one class-A line for all of them, with the cause (cadence: M.DEFAULTS)
   local thirsty, tmax = 0, 0
   local dry = not hosp_ok and #r.hosp > 0
