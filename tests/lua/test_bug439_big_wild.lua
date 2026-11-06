@@ -5,7 +5,7 @@ local S = require('siege_world')
 local SW = require('seal_world')
 
 local function world(spec)
-  local W = S.world{units = {S.cit(1, 60, 70), {id = 300, pos = {60, spec.y or 60, S.Z}, animal = true},
+  local W = S.world{units = {S.cit(1, 60, spec.cy or 70, spec.cz), {id = 300, pos = {60, spec.y or 60, S.Z}, animal = true},
                              {id = 301, pos = {61, 25, S.Z}, animal = true, tame = true},
                              {id = 302, pos = {62, 25, S.Z}, animal = true, merchant = true}}}
   df.creature_raw = {find = function() return {caste = {[0] = {flags = {CARNIVORE = spec.cv}}}} end}      -- no LARGE_PREDATOR
@@ -55,6 +55,18 @@ end)
 T.test('BUG-532 sense: a far wild carnivore of a big body still counts', function()
   local W = world{size = 4000000, y = 25, cv = true}
   T.eq({W.K.mode(), W.K.census.h.vis, W.K.census.h.herb}, {'ALERT', 1, 0}, 'CARNIVORE: a real predator whatever the distance')
+end)
+
+-- BUG-554 (Run 16a i1 y416-y422): the plant eater is marked hb for reflex, and only a citizen on its own levels (DA_DZ) is a neighbour
+T.test('BUG-554 sense: a near plant eater carries hb; a citizen 14 levels below is no neighbour of a plant eater on the surface', function()
+  local W = world{size = 4000000, y = 25, cy = 35}                       -- 10 tiles from a citizen outside Kern+, same level
+  local e = W.K.census.h.list[1]
+  T.eq({e and e.id, e and e.hb, e and e.pr}, {300, 1, 1}, 'near: a hostile, marked hb')
+  W = world{size = 4000000, y = 25, cy = 35, cz = S.Z - 14}                  -- the citizen stands 14 levels down
+  T.eq({W.K.mode(), W.K.census.h.vis, W.K.census.h.herb}, {'PEACE', 0, 1}, 'on another level it is wildlife')
+  W = world{size = 4000000, y = 25, cy = 35, cv = true}
+  e = W.K.census.h.list[1]
+  T.eq({e and e.hb, e and e.pr}, {nil, 1}, 'a carnivore is no hb')
 end)
 
 T.done()

@@ -1895,7 +1895,12 @@ local function inside_scan(K, h, now)
           -- fort (sense pd: its path ends there). A cavern troll far below the fort keeps the Run 10 PREDATOR_FAR rule
           local bdn = e.bd == 1 and ((e.zn or 0) >= 1 or e.pd == 1
                                      or ((math.tointeger(e.db) or -1) >= 0 and math.tointeger(e.db) <= M.BD_NEAR))
-          if lim > 0 and dc and (e.zn or 0) < 2 and not bdn and (dc < 0 or dc > lim) then
+          -- BUG-554 (Run 16a i1 Basementflew y416-y422: a wild stegosaurus, BENIGN, 342,595 cm3, PREDATOR 14 times, each a Kern+
+          -- lockdown and the clock at 30 t/s, unacked it held the clock 16x slower): a big wild plant eater (sense hb) outside
+          -- Kern+ and the intake zones is wildlife however near a citizen it walks: PREDATOR_FAR (B), no lockdown, no clock
+          -- hold; inside Kern+, in the intake area or after it killed (BUG-421 clears hb) it stays the BUG-439 PREDATOR
+          local herb = e.hb == 1 and (e.zn or 0) == 0 and e.ik ~= 1
+          if (lim > 0 and dc and (e.zn or 0) < 2 and not bdn and (dc < 0 or dc > lim)) or herb then
             nf = nf + 1
             if not far_one or (dc >= 0 and (far_dc < 0 or dc < far_dc)) then far_one, far_dc = e, dc end
           else np = np + 1; predator = predator or e end
@@ -1927,13 +1932,17 @@ local function inside_scan(K, h, now)
     rt.pfar_last = now
     K.emit('PREDATOR_FAR', 'B', string.format('%d wild dangers on the citizens\' walkable group but far from the citizens '
            .. '(%d at %d,%d,%d, %s): no lockdown', nf, far_one.id, far_one.x, far_one.y, far_one.z,
-           far_dc >= 0 and ('nearest citizen ' .. far_dc .. ' tiles') or 'no citizen near'),
-           {n = nf, id = far_one.id, pos = {far_one.x, far_one.y, far_one.z}, dc = far_dc})
+           (far_dc >= 0 and ('nearest citizen ' .. far_dc .. ' tiles') or 'no citizen near')
+           .. (far_one.hb == 1 and '; plant eater' or '')),
+           {n = nf, id = far_one.id, pos = {far_one.x, far_one.y, far_one.z}, dc = far_dc, hb = far_one.hb})
   end
   if predator then
     if now - (rt.pred_last or -M.REARM) >= M.REARM then
       local facts, ftxt = unit_facts(K, predator)
       facts.n, facts.id, facts.pos = np, predator.id, {predator.x, predator.y, predator.z}
+      -- BUG-554: what decided it (nearest citizen outside Kern+ / anywhere on its levels, zone 2 = inside, hb = plant eater)
+      facts.dc, facts.da, facts.zn, facts.hb = math.tointeger(predator.dc), math.tointeger(predator.da),
+                                              math.tointeger(predator.zn), math.tointeger(predator.hb)
       interrupt(K, 'PREDATOR', string.format('%d wild dangers inside the fort (%d at %d,%d,%d)%s', np, predator.id,
                 predator.x, predator.y, predator.z, ftxt), facts)
     end

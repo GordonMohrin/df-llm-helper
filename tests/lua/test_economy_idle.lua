@@ -40,6 +40,10 @@ local function world(spec, opts)
     if sp.hurt then u.health, u.body = {flags = {needs_healthcare = true}}, {wounds = {{id = 1}}} end
     if sp.care then u.health, u.body = {flags = {needs_healthcare = true}}, {wounds = {}, blood_count = 100, blood_max = 100} end
     if sp.bled then u.health, u.body = {flags = {needs_healthcare = true}}, {wounds = {}, blood_count = 60, blood_max = 100} end
+    -- BUG-557: scar = a healed wound on the list (parts with bleeding 0); open = a wound whose part bleeds; flagged = scar + the care flag
+    if sp.scar then u.health, u.body = {flags = {needs_healthcare = false}}, {wounds = {{id = 1, parts = {{bleeding = 0}}}}, blood_count = 100, blood_max = 100} end
+    if sp.open then u.health, u.body = {flags = {needs_healthcare = false}}, {wounds = {{id = 1, parts = {{bleeding = 0}, {bleeding = 4}}}}, blood_count = 90, blood_max = 100} end
+    if sp.flagged then u.health, u.body = {flags = {needs_healthcare = true}}, {wounds = {{id = 1, parts = {{bleeding = 0}}}}, blood_count = 100, blood_max = 100} end
     if sp.sleepy then u.counters2 = {sleepiness_timer = sp.sleepy} end
   end
   W.set_census('u', F.census_u(ids, {soldiers = #sids, soldier_ids = sids}))
@@ -132,6 +136,23 @@ T.test('BUG-271 (live Earthboat: idle_why hurt 14, units without a wound, blood 
   T.eq({r.data.idle_why.hurt, r.data.idle_why.rest, r.data.idle_why.nowork}, {2, 1, 1}, r.msg)
   local E = require('dfllm.economy')
   T.eq(E.idle_flags(W.unit(2)).care, true, 'the flag alone is kept apart')
+end)
+
+T.test('BUG-557 (Run 16d i4 y404: idle_why hurt 20 of 25 adults, each with one healed scar): only a wound that needs treatment is hurt',
+       function()
+  local W = world{{idle = true, scar = true}, {idle = true, scar = true}, {idle = true, open = true},
+                  {idle = true, flagged = true}, {idle = true}}
+  jobs({})
+  days(W, 1)
+  local r = W.inbox('inspect', {what = 'workload'})
+  T.eq(r.ok, true, r.msg)
+  T.eq(r.data.idle_why.hurt, 2, 'the bleeding wound and the one the health care flag names; two scars are not hurt: ' .. r.msg)
+  local E = require('dfllm.economy')
+  T.eq({E.idle_flags(W.unit(1)).hurt, E.idle_flags(W.unit(3)).hurt, E.idle_flags(W.unit(4)).hurt}, {false, true, true})
+  local WD = require('dfllm.util.wound')
+  T.eq(WD.state(W.unit(1)).n, 1, 'the scar is still on the list')
+  T.eq(WD.needs_treatment(W.unit(1)), false)
+  T.eq(WD.needs_treatment(W.unit(2)), false)
 end)
 
 T.done()

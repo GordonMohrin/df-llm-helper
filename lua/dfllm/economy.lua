@@ -2239,6 +2239,45 @@ function M.gear_wrong_metal(K, c, r, it, tag)
   return true
 end
 
+-- BUG-556 (Run 16c i3 Sealcertain y395-y401: 'body 0/5+1 ordered', a metal order that never ran; a manual leather order.add raised worn
+-- 11 -> 87 %): the planner tried leather only when no metal route existed at all. An open metal order of a slot that made no piece
+-- for gear.stale_days (12) game days is removed when leather and a Leatherworks are at hand, and that slot is planned in leather first
+-- for gear.leather_days (30) days (kern.log: `gear <cat>: metal order N made nothing in D days: leather`). Progress = the pieces at hand
+-- rose. Module fields, not locals (this file sits at Lua's 200-locals limit).
+M.GEAR_STALE_DAYS, M.GEAR_LEATHER_DAYS = 12, 30
+function M.gear_leather_hold(c, r, it, lw)
+  local e = r.p.gstale and r.p.gstale[it.cat]
+  local lh = type(e) == 'table' and e.lh
+  if not (lh and it.leather and lw and r.now >= lh) then return false end
+  if r.now - lh >= ((c.gear or {}).leather_days or M.GEAR_LEATHER_DAYS) * DAY then return false end
+  return left(c, r, 'leather') >= (it.leather.n or 1)
+end
+function M.gear_stale(K, c, r, it, tag, rec, lw)
+  if type(r.p.gstale) ~= 'table' then r.p.gstale = {} end
+  local gs = r.p.gstale
+  local e = gs[it.cat]
+  if type(e) ~= 'table' then e = {}; gs[it.cat] = e end
+  if not e.t or r.now < e.t or r.now - (e.seen or r.now) > 3 * DAY then e.t, e.h = r.now, rec.have end    -- a gap in the watch: new look
+  e.seen = r.now
+  if rec.have > (e.h or 0) then e.t = r.now end
+  e.h = rec.have
+  if not (it.leather and lw) then return false end
+  if r.now - e.t < ((c.gear or {}).stale_days or M.GEAR_STALE_DAYS) * DAY then return false end
+  local oid = r.p.orders[tag]
+  local o = oid and order_by_id(oid)
+  if not o then return false end
+  local okm, tok = pcall(function() return mat_token(o.mat_type, o.mat_index) end)
+  if not okm or type(tok) ~= 'string' or tok:sub(1, 10) ~= 'INORGANIC:' then return false end     -- only a metal order gives way
+  if left(c, r, 'leather') < (it.leather.n or 1) or not K.act.order_remove(oid) then return false end
+  r.p.orders[tag] = nil
+  r.s.live[tag] = nil
+  e.lh, e.t = r.now, r.now
+  K.log('warn', 'gear %s: metal order %d (%s) made nothing in %d days, %d leather at hand: leather first for %d days', it.cat, oid,
+        tok:gsub('^INORGANIC:', ''), ((c.gear or {}).stale_days or M.GEAR_STALE_DAYS), left(c, r, 'leather'),
+        ((c.gear or {}).leather_days or M.GEAR_LEATHER_DAYS))
+  return true
+end
+
 local function plan_gear(K, c, r)
   local g = c.gear
   local forge, lw = ws_any(r.f, g.forge), ws_any(r.f, g.leatherworks)
@@ -2250,8 +2289,14 @@ local function plan_gear(K, c, r)
   for _, it in ipairs(g.items or {}) do
     local rec = r.gear.cats[it.cat]
     local tag = 'dfllm:gear_' .. it.cat
+    if rec and rec.miss == 0 and rec.open > 0 and open(r, tag) and M.gear_stale(K, c, r, it, tag, rec, lw) then
+      rec.miss, rec.open, rec.route = rec.open, 0, 'none'      -- BUG-556: the order covered the want and made nothing: leather
+    end
     if rec and rec.miss > 0 then
       if open(r, tag) and M.gear_wrong_metal(K, c, r, it, tag) then   -- BUG-525: the wrong-metal order's pieces are missing again
+        rec.miss, rec.open, rec.route = rec.miss + rec.open, 0, 'none'
+      end
+      if M.gear_stale(K, c, r, it, tag, rec, lw) then                  -- BUG-556: a metal order that made nothing for days
         rec.miss, rec.open, rec.route = rec.miss + rec.open, 0, 'none'
       end
       if open(r, tag) then rec.route = 'ordered'
@@ -2264,7 +2309,8 @@ local function plan_gear(K, c, r)
         end
         if it.metal then
           if not forge then why[#why + 1] = 'forge' end
-          for _, m in ipairs(forge and g.metals or {}) do
+          local skip_metal = M.gear_leather_hold(c, r, it, lw)                -- BUG-556: leather first after a stale metal order
+          for _, m in ipairs((forge and not skip_metal) and g.metals or {}) do
             local tok, b = 'INORGANIC:' .. m, it.metal.bars
             local n = math.min(jobs, left(c, r, 'bars:' .. tok) // b, left(c, r, 'bars') // b,
                                magma and maxj or left(c, r, 'fuel'), maxj)
@@ -2478,7 +2524,7 @@ local function stale_filter(K, c, p, n, age, job)
 end
 
 -- FR-77 (Run 13: "N of M adults without a job (0 without reachable work)" with 40-70 % idle): why an adult has no job.
--- flags: mood (a strange mood or insanity), hurt (a wound, or needs health care while bled), rest (drowsy: sleepiness_timer at DF's
+-- flags: mood (a strange mood or insanity), hurt (a wound that needs treatment, BUG-557: not a healed scar; or needs health care while bled), rest (drowsy: sleepiness_timer at DF's
 -- "drowsy" mark, or lying down); idle_class names the first that holds (mood, hurt, rest) or nil. Every read is guarded:
 -- a field the game does not have is no flag. Module fields, not locals (this file sits at Lua's 200-locals limit).
 M.IDLE_SLEEPY = 57600
@@ -2491,14 +2537,13 @@ function M.idle_flags(u)
   pcall(function() f.mood = type(u.mood) == 'number' and u.mood >= 0 end)
   -- BUG-271 (live Earthboat: idle_why hurt 14; units 26374/26371/21852 had 0 wounds, blood 100 %, were hungry and
   -- sleepy): needs_healthcare alone is no hurt; it counts with a wound or blood below its maximum (f.care: the flag alone)
+  -- BUG-557 (Run 16d i4 Trumpetrealms y404: idle_why hurt 20 of 25 adults, each with a healed scar, bleed 0, blood 100 %):
+  -- a wound counts while it needs treatment (dfllm.util.wound), not because it is on the list
   pcall(function()
-    local b = u.body
-    local wounds = b ~= nil and #b.wounds > 0
-    local care = u.health ~= nil and u.health.flags.needs_healthcare == true
-    local bled = b ~= nil and type(b.blood_count) == 'number' and type(b.blood_max) == 'number' and
-                 b.blood_count < b.blood_max
-    f.hurt = wounds or (care and bled)
-    f.care = care and not f.hurt or nil
+    local WD = require('dfllm.util.wound')
+    local s = WD.state(u)
+    f.hurt = WD.needs_treatment(u)
+    f.care = s ~= nil and s.care and not f.hurt or nil
   end)
   pcall(function()
     local t = u.counters2 and u.counters2.sleepiness_timer

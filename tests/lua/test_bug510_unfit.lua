@@ -93,4 +93,24 @@ T.test('BUG-510: military.unfit_text names the squad in a SIEGE / BREACH only', 
   T.eq(X.call(W, 'military', 'unfit_text', 'A'), nil, 'equipped: no refusal')
 end)
 
+-- BUG-555 (Run 16a i1 y422: 'squad.sortie refused: 0 of 6 soldiers hold a real weapon and wear body armor' with 17 free metal weapons
+-- and 18 body armors in stock): the refusal says what is missing and what lies free
+T.test('BUG-555: the refusal names what the soldiers lack and the free pieces; the refusal in a SIEGE', function()
+  local W = boot()
+  local M = X.mod('military')
+  local real_sm, real_fw = M.stock_mats, M.free_weapons
+  M.stock_mats = function(cat) return {metal = cat == 'body' and 18 or 0, leather = 0, any = cat == 'body' and 18 or 0} end
+  M.free_weapons = function() return 17 end
+  W.K.set_mode('SIEGE', 'test')
+  X.call(W, 'military', 'posture', 'READY_STATION', true)
+  W.run(30, {skip = 9})
+  local r = W.inbox('squad.sortie', {squad = 'A', target = {58, 36, X.Z}, approve = true})
+  T.eq(r.ok, false)
+  local msg = tostring(r.msg)
+  T.ok(msg:find('sortie refused: squad A is not equipped: 0 of 3 soldiers', 1, true), msg)
+  T.ok(msg:find('missing: weapon 3, body armor 3; free: 17 melee weapons, 18 body armors; the pieces lie free but are not worn', 1, true),
+       msg)
+  M.stock_mats, M.free_weapons = real_sm, real_fw
+end)
+
 T.done()
