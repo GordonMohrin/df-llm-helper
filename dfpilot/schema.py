@@ -760,13 +760,16 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),
     # FR-76: pre = the stage before this one that never ran (a follow-up stage finished without its predecessor: not
     # counted as delivered)
+    # BUG-521: after TIMELINE_RESET the bp.place projects of the discarded timeline placed again (ids, n), refused ones (failed), the rest
+    # beyond the limit (skipped), the two clocks
+    "PROJECTS_REQUEUED": ("B", "runner", _d("n:i", "ids:sa failed:sa skipped:i tick_alt:i tick_neu:i")),
     "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s walled:sa pre:i")),       # Run 11: walled as PROJECT_BLOCKED
     # FR-76: types = the mandatory workshops a reclaimed fort lacks (why mandatory)
     "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i types:sa at:ia")),   # BUG-424: why=no_water at = the nearest water tile
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "
-                                  "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s fight:s")),
+                                  "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s fight:s dig:sa")),   # BUG-522: dig = digs near a CAVEIN
     "DEATH_CLUSTER": ("B", "care", _CLUSTER),
     # BUG-068: cmd = the command line of a failed act.run (<= 80 bytes), err 'raised an error without a message' when
     # the command raised error(nil)
@@ -913,7 +916,9 @@ VERB_ARGS: dict[str, Obj] = {
     "trade.retry": Obj(opt={"civ": Str(maxbytes=40), "want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40)}),
     # gate (Gordon 2026-10-16): a sortie through that outer bridge (siege: gather in the bailey, open, kill, recall)
     "squad.sortie": Obj(req={"squad": Str(enum=["A", "B", "C"]), "target": AnyOf(ID, POS),
-                             "approve": Const(True)}, opt={"gate": BRIDGE}),
+                             "approve": Const(True)},
+                      # BUG-519: unit = the hostile to follow (the INTRUDER's id); move = walk to an empty place anyway
+                      opt={"gate": BRIDGE, "unit": NAT, "move": Bool()}),
     "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",

@@ -1686,7 +1686,7 @@ function M.boot(opts)
       ev_save, ev_disk, ev_disk), d)
     st.current = nil
     fio.remove(paths.save .. '/alarm.txt')
-    st.K.reset = {kind = kind, n_alt = d.n_alt}
+    st.K.reset = {kind = kind, n_alt = d.n_alt, tick_alt = d.tick_alt, tick_neu = d.tick_neu}   -- BUG-521: runner re-queues
     st.log_as('kern', 'warn', string.format('timeline reset (%s): tick %d -> %d, event numbers continue after #%d',
                                             kind, d.tick_alt, st.now.tick, st.ev_n))
   end

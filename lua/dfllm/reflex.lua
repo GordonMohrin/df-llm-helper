@@ -1863,7 +1863,7 @@ local function unit_facts(K, e)
   if e.k == 'danger' or e.k == 'inv' then
     local ok, key = K.call('military', 'sortie_squad')
     if ok and type(key) == 'string' then
-      f.cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z)
+      f.cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, e.x, e.y, e.z, e.id)
     end
   end
   return f, #bits > 0 and (' [' .. table.concat(bits, ', ') .. ']') or ''
@@ -2169,8 +2169,8 @@ end
 local function sortie_cmd(K, cs)
   local ok, key, n = K.call('military', 'sortie_squad')
   if not (ok and type(key) == 'string') then return nil, nil, 0 end
-  return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, cs.pos[1],
-                       cs.pos[2], cs.pos[3]), key, int(n) or 0
+  return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, cs.pos[1],
+                       cs.pos[2], cs.pos[3], cs.id), key, int(n) or 0
 end
 
 -- DECISION_NEEDED intruder_sortie (A): a harmless intruder that holds the lockdown (after offer_days) or a dangerous one
@@ -2365,7 +2365,7 @@ local function lone_cmd(K, pic)
   local ok, key, n = K.call('military', 'sortie_squad')
   if not (ok and type(key) == 'string') then return nil, nil, 0 end
   local oka, adv = K.call('military', 'sortie_advice', key)      -- BUG-348: the armour against sortie.worn (80 %)
-  return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z),
+  return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, e.x, e.y, e.z, e.id),
          key, int(n) or 0, oka and type(adv) == 'table' and adv or nil
 end
 

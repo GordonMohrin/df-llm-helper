@@ -1387,9 +1387,12 @@ M.IK = {on = true, wave = 6, min_soldiers = 4, worn = 80, army_ratio = 4, cooldo
         stable = 600, losses = 1, muster = 1200, fight = 4800}
 M.IK_LIM = {wave = {1, 40}, min_soldiers = {1, 30}, worn = {0, 100}, army_ratio = {1, 50}, cooldown = {0, 33600},
             danger_dist = {0, 200}, stable = {0, 33600}, losses = {1, 30}, muster = {100, 33600}, fight = {300, 100800}}
-M.SO = {worn = 80, losses = 1, max_ticks = 2400, gather = 1200, foe_cv = 10, near = 10, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800}
+-- BUG-519: track_near = how far from the reported tile a visible hostile still is the sortie's target
+M.SO = {worn = 80, losses = 1, max_ticks = 2400, gather = 1200, foe_cv = 10, near = 10, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800,
+        track_near = 25}
 M.SO_LIM = {worn = {0, 100}, losses = {1, 30}, max_ticks = {300, 33600}, gather = {100, 33600}, foe_cv = {0, 100},
-            near = {1, 50}, kill_near = {0, 50}, idle_ticks = {300, 33600}, hold_ticks = {300, 100800}}
+            near = {1, 50}, kill_near = {0, 50}, idle_ticks = {300, 33600}, hold_ticks = {300, 100800},
+            track_near = {0, 100}}
 M.IK_OPEN_MAX, M.IK_BACK_MAX, M.IK_TRAPS_EVERY, M.SO_RETARGET = 2400, 1200, 600, 100
 M.IK_IDLE_TTL, M.IK_STRAY_EVERY = 300, 100     -- idle: the KPI and the stray check are read this often at most
 local IK_BUSY = {muster = true, open = true, fight = true, back = true, stray = true}
@@ -2296,7 +2299,7 @@ local function long_step(K, a, g, now)
   local okq, k, nn = K.call('military', 'sortie_squad')
   if okq and type(k) == 'string' and e then
     key, n = k, int(nn) or 0
-    cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"approve":true}\'', key, e.x, e.y, e.z)
+    cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, e.x, e.y, e.z, e.id)
     local oka, av = K.call('military', 'sortie_advice', key)     -- BUG-348: the armour against sortie.worn (80 %)
     adv = oka and type(av) == 'table' and av or nil
   end

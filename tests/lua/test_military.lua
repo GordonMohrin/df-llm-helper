@@ -398,7 +398,7 @@ T.test('squad.sortie needs approval, runs only in combat modes, kills in a killb
   local r = W.inbox('squad.sortie', {squad = 'A', target = 'K1', approve = true})
   T.ok(r.ok, r.msg)
   T.eq(X.squad_of(W, 'A').orders[0].units, {201})
-  r = W.inbox('squad.sortie', {squad = 'B', target = {58, 36, Z}, approve = true})     -- M3: > 5 tiles from the hostile
+  r = W.inbox('squad.sortie', {squad = 'B', target = {58, 36, Z}, approve = true, move = true})     -- M3: > 5 tiles from the hostile; BUG-519: move=true
   T.ok(r.ok, r.msg)
   T.eq(X.squad_of(W, 'B').orders[0].pos, {x = 58, y = 36, z = Z})
   r = W.inbox('squad.sortie', {squad = 'B', target = 'K9', approve = true})     -- M3: the one hostile in sight is the target

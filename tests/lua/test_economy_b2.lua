@@ -49,6 +49,7 @@ local function world(opts)
           req_types = function(K, key) return (opts.req or {})[key] end,        -- BUG-200
           state = function() return {phase = ctl.phase} end})
   W.load({name = 'care', every = {ticks = 1200},
+          unreach_ids = function() return ctl.unreach or {} end,          -- BUG-518: bodies nobody can walk to
           state = function()
             if ctl.nocare then return {} end            -- BUG-177: care's first run since the boot is not done
             return {care = {stressed_pct = 0, naked = 0, ghosts = ctl.ghosts, corpses_old = 0, tombs_free = 0, moods = 0}}
@@ -685,6 +686,21 @@ T.test('BUG-078: ghosts older than slabs.engrave_days with blank slabs and no en
   gdays(W, ctl, 4)
   T.eq(#acts(W, 'engrave_order'), n, 'B2 does not trim them (they are within the blank slabs), none is ordered twice')
   T.eq(#acts(W, 'order_remove'), 0)
+end)
+
+T.test('BUG-518: the dead whose bodies nobody can walk to get an EngraveSlab order like a ghost, once, and are not counted twice as ghosts',
+       function()
+  local W, ctl = ghost_world{n = 3, setup = function(W) end}
+  ctl.ids = {1}                                   -- unit 1 is a ghost (census.g); 2 and 3 lie in tree crowns
+  ctl.unreach = {1, 2, 3}                         -- care lists the ghost's unreachable body too
+  gdays(W, ctl, 2)
+  T.eq(#acts(W, 'engrave_order'), 0, 'the plugin has its days first')
+  gdays(W, ctl, 3)
+  T.eq(engraved_for(), {6001, 6002, 6003}, 'one order per figure, the ghost too, no second order for it')
+  T.ok(logged(W, 'for ghost unit 2 (hf 6002'), 'the log names the unit')
+  local n = #acts(W, 'engrave_order')
+  gdays(W, ctl, 3)
+  T.eq(#acts(W, 'engrave_order'), n, 'none twice')
 end)
 
 T.test('BUG-078: no order for a ghost the plugin served (order for its figure), a memorial exists, or no blank slab', function()

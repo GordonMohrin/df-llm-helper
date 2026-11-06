@@ -2392,7 +2392,10 @@ end
 -- the target `idle_ticks` without an attack (DF does not treat it as an enemy) end it as `not_attackable` and the
 -- reflex clears the unit; a target on another walk group is refused with the groups named. `no killbox` falls back to a
 -- kill order on the one hostile in sight. military.kill_lone is the kernel's own order (reflex, BREACH).
-M.SO_DEF = {worn = 80, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800}
+-- BUG-519 (Run 16a i1 Basementflew y404: the INTRUDER's sortie against a goblin snatcher reached the reported tile 1,212 ticks later and
+-- "no visible hostile within 5 tiles" / "nobody within 5 tiles to attack" ended it, the snatcher had walked on): `track_near` tiles
+-- is how far from the reported tile a visible hostile is still taken for the target (a kill order follows the unit, not the tile)
+M.SO_DEF = {worn = 80, kill_near = 5, idle_ticks = 1200, hold_ticks = 4800, track_near = 25}
 M.SO_EVERY = 100           -- ticks between two looks at a running position sortie
 M.SO_ARRIVE, M.SO_ADJ = 3, 2   -- tiles: a member this close to the target has arrived / stands beside the unit
 M.SO_REISSUE = 3           -- a kill order DF dropped while the target lives is given again this often
@@ -2622,8 +2625,20 @@ local function sortie_pass(K, now)
                          #ids, #ids == 1 and '' or 's', c.kill_near, so_ids_txt(ids)), {units = ids, why = 'kill', pos = {tp.x, tp.y, tp.z}})
               end
             else
-              so_end(K, key, 'done', 'no_target', string.format('sortie %s ended at %s: nobody within %d tiles to attack', key,
-                     pstr(tp), c.kill_near))
+              -- BUG-519: the reported tile is empty: the nearest visible hostile within track_near is the target (the unit walked on)
+              local tn = c.track_near or M.SO_DEF.track_near
+              local tr = hostiles_near(K, tp, tn)
+              local ok2
+              if #tr > 0 then
+                ok2 = so_begin(K, key, s, {kind = 'kill', units = {tr[1].id}}, {cmd = so.cmd, by = so.by, keep = so.keep})
+              end
+              if ok2 then
+                so_event(K, key, 'go', string.format('sortie %s: nobody within %d tiles of %s, but hostile %d stands %d tiles on: kill order',
+                         key, c.kill_near, pstr(tp), tr[1].id, tr[1].d), {units = {tr[1].id}, why = 'kill', pos = {tp.x, tp.y, tp.z}})
+              else
+                so_end(K, key, 'done', 'no_target', string.format('sortie %s ended at %s: nobody within %d tiles to attack%s', key,
+                       pstr(tp), c.kill_near, #tr == 0 and string.format(' and no hostile in sight within %d (the target is gone)', tn) or ''))
+              end
             end
           end
         else
@@ -2729,11 +2744,37 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   local target, order, what = args.target, nil, nil
   local c = so_conf(K)
   local pos_target
-  if type(target) == 'string' then
+  -- BUG-519: `unit` names the hostile the report named: the kill order follows that unit (the census gives its place now), the
+  -- tile only says where it was; a unit that is not in sight is refused with its last tile, not sent to an empty place
+  if args.unit ~= nil then
+    local uid = int(args.unit)
+    if not uid then return false, 'unit must be a unit id' end
+    local cur
+    for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do if h.id == uid then cur = h end end
+    if not cur then
+      if args.move == true and target ~= nil and posp(target) then
+        args.unit = nil
+      else
+        return false, string.format('unit %d is not in sight: it is gone or out of view (reported at %s); a sortie to an empty place ' ..
+                                    'would find nobody; give the new position, or move=true to move the squad there anyway', uid,
+                                    type(target) == 'table' and pstr(posp(target) or {x = 0, y = 0, z = 0}) or tostring(target))
+      end
+    else
+      local p = {x = cur.x, y = cur.y, z = cur.z}
+      local why = unreachable(K, s, p)
+      if why then return false, why end
+      order = {kind = 'kill', units = {uid}}
+      what = string.format('kill order on %d (follows the unit; now at %s)', uid, pstr(p))
+      pos_target = p
+    end
+  end
+  if type(target) == 'string' and not order then
     local x, y, z = target:match('^%s*(-?%d+)%s*,%s*(-?%d+)%s*,%s*(-?%d+)%s*$')     -- "77,67,128" is a position
     if x then pos_target = posp({tonumber(x), tonumber(y), tonumber(z)}) end
   end
-  if type(target) == 'string' and not pos_target then
+  if order then
+    -- the unit branch above decided
+  elseif type(target) == 'string' and not pos_target then
     local man = K.manifest()
     local box
     for _, kb in ipairs(type(man.killboxes) == 'table' and man.killboxes or {}) do if kb.id == target then box = kb end end
@@ -2776,7 +2817,21 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
       what = string.format('kill order on %s (%d visible hostile%s within %d tiles of %s)', so_ids_txt(ids), #ids,
                            #ids == 1 and '' or 's', c.kill_near, pstr(p))
     else
-      order, what = {kind = 'station', pos = p}, string.format('move to %s (no visible hostile within %d tiles)', pstr(p), c.kill_near)
+      -- BUG-519: the reported tile is empty. The nearest visible hostile within track_near is the target (a kill order follows the
+      -- unit); with nobody in sight the target is gone: the squad would walk there for nothing, so it is refused unless move=true
+      local tn = c.track_near or M.SO_DEF.track_near
+      local tr = args.move == true and {} or hostiles_near(K, p, tn)
+      if #tr > 0 then
+        order = {kind = 'kill', units = {tr[1].id}}
+        pos_target = {x = tr[1].e.x, y = tr[1].e.y, z = tr[1].e.z}
+        what = string.format('kill order on %d (nobody within %d tiles of %s; it stands %d tiles on, at %s)', tr[1].id, c.kill_near,
+                             pstr(p), tr[1].d, pstr(pos_target))
+      elseif args.move == true then
+        order, what = {kind = 'station', pos = p}, string.format('move to %s (no visible hostile within %d tiles)', pstr(p), c.kill_near)
+      else
+        return false, string.format('no hostile in sight within %d tiles of %s: the target is gone; the squad would find nobody ' ..
+                                    '(move=true moves it there anyway)', tn, pstr(p))
+      end
     end
   end
   local keep = false

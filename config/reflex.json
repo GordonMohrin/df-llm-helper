@@ -17,7 +17,7 @@
  "refuge": {"bed_pct": 25, "breach_days": 7, "floor_pct": 100, "floor_pop": 30, "supply_switch": 50},
  "intake": {"on": true, "wave": 6, "min_soldiers": 4, "worn": 80, "army_ratio": 4, "cooldown": 1200,
             "danger_dist": 20, "stable": 600, "losses": 1, "muster": 1200, "fight": 4800},
- "sortie": {"worn": 80, "losses": 1, "max_ticks": 2400, "gather": 1200, "foe_cv": 10, "near": 10, "kill_near": 5, "idle_ticks": 1200, "hold_ticks": 4800},
+ "sortie": {"worn": 80, "losses": 1, "max_ticks": 2400, "gather": 1200, "foe_cv": 10, "near": 10, "kill_near": 5, "idle_ticks": 1200, "hold_ticks": 4800, "track_near": 25},
  "stations": {"core_ratio": 3, "worn": 60, "metal": 0, "spread": 1},
  "perimeter": {"stop_after": 2, "vanish_after": 3, "escalate_days": 2, "escalate_every": 5, "hold_pop": 30},
  "confine": {"max_days": 10, "harmless_size": 20000, "harmless_races": [], "lone_max": 2, "offer_days": 1,
