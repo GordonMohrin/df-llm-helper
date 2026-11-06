@@ -3403,6 +3403,33 @@ function Q.quarry_first(P)
   return S.stone0 == true and P ~= nil and P.tpl == 'explore'
 end
 
+-- BUG-527 (Run 16b i2 Brotherarrow y392-y393: Still and Kitchen missing for years, 89 orders stuck, 7 working adults and every project
+-- 'set aside, no runner slot'): a live workshops project that builds a Still or a Kitchen no standing workshop of the map has is an
+-- ESSENTIAL shop (S.ess_ids, set each scheduling pass by Q.ess_scan): it sorts with the hospital before the rest, takes a slot even when
+-- the fort is short of hands, and is never set aside (idle_keep)
+Q.ESSENTIAL = {Still = true, Kitchen = true}
+function Q.ess_proj(P) return P ~= nil and (S.ess_ids or {})[P.id] == true end
+function Q.ess_scan(K)
+  local ids, have = {}, {}
+  local okh = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      if built(b) then have[df.workshop_type[b.type] or ''] = true end
+    end
+  end)
+  if okh then
+    for _, P in ipairs(S.pd and S.pd.list or {}) do
+      if P.tpl == 'workshops' and Q.live(K, P) then
+        local d = doc(K, P.id)
+        local m = type(d) == 'table' and type(d.manifest) == 'table' and d.manifest.workshops
+        for _, w in ipairs(type(m) == 'table' and m or {}) do
+          if type(w) == 'table' and Q.ESSENTIAL[w.type] and not have[w.type] then ids[P.id] = true end
+        end
+      end
+    end
+  end
+  S.ess_ids = ids
+end
+
 local function sorted()
   local r = {}
   for _, P in ipairs(S.pd.list) do if P.done ~= 1 then r[#r + 1] = P end end
@@ -3411,8 +3438,8 @@ local function sorted()
   -- (M.mood_types marks them while care's mood check runs); BUG-306: the mood drink nook sorts with them
   table.sort(r, function(a, b)
     -- BUG-497: with no free boulder in the fort the explore shaft that digs to hard stone runs with the hospital, before the rest
-    local sa = SEALS[a.tpl] and 0 or (care == a.id or Q.mood_proj(a) or Q.quarry_first(a)) and 1 or 2
-    local sb = SEALS[b.tpl] and 0 or (care == b.id or Q.mood_proj(b) or Q.quarry_first(b)) and 1 or 2
+    local sa = SEALS[a.tpl] and 0 or (care == a.id or Q.mood_proj(a) or Q.quarry_first(a) or Q.ess_proj(a)) and 1 or 2
+    local sb = SEALS[b.tpl] and 0 or (care == b.id or Q.mood_proj(b) or Q.quarry_first(b) or Q.ess_proj(b)) and 1 or 2
     if sa ~= sb then return sa < sb end
     if a.prio ~= b.prio then return a.prio < b.prio end
     if a.created ~= b.created then return a.created < b.created end
@@ -5077,7 +5104,10 @@ function Q.dv_text(K, dv)
     return trunc(k .. ' ' .. table.concat(m, ',', 1, math.min(#m, 4)) .. (#m > 4 and ('+' .. (#m - 4)) or ''), 40)
   end
   if dv.k == 'stock' then return trunc(string.format('%s>=%s', k, tostring(dv.min)), 40) end
-  if dv.k == 'orders' then return trunc(k, 40) end
+  if dv.k == 'orders' then   -- BUG-524: the library's stage gate says what is missing (economy.held_why)
+    local ok, why = K.call('economy', 'held_why', dv.lib)
+    return trunc(k .. ((ok and type(why) == 'string' and why ~= '') and (' ' .. why) or ''), 40)
+  end
   local n = dv.n or dv.lvl or dv.pct or dv.lib
   return trunc(n ~= nil and (k .. ' ' .. tostring(n)) or k, 40)
 end
@@ -6022,6 +6052,7 @@ function Q.idle(P) return type(S.rt.ip) == 'table' and type(S.rt.ip[P.id]) == 't
 -- SIEGE/BREACH and a food/drink project (SUPPLY) while a food/drink emergency holds
 function Q.idle_keep(K, P)
   if Q.mood_proj(P) then return 'a strange mood waits for it' end
+  if Q.ess_proj(P) then return 'an essential shop (Still, Kitchen) is missing' end      -- BUG-527
   if S.care_id == P.id then return 'care leads it' end
   if P.tpl == 'aqshaft' and M.AQ.holds(S.rt, P.id) then return 'an open aquifer level' end
   if P.tpl == 'refuge_drink' then return 'the refuge drink' end
@@ -6313,6 +6344,8 @@ local function begin_run(K)
       if S.werr ~= err then S.werr = err; K.log('error', 'seal wall fallback failed: %s', err) end
     else S.werr = nil end
   end
+  local oke, erre = pcall(Q.ess_scan, K)                  -- BUG-527: own pcall, a fault costs only the priority
+  if not oke then S.ess_ids = {}; K.log('error', 'runner essential shops scan failed: %s', trunc(erre, 160)) end
   local oki, erri = pcall(Q.idle_scan, K, f.c, now(K))   -- BUG-328: own pcall, a fault costs only the set-aside rule
   if not oki then K.log('error', 'runner set-aside failed: %s', trunc(erri, 160)) end
   local oks, errs = pcall(Q.stale_scan, K, f.c, now(K))   -- BUG-435: own pcall, a fault costs only this announcement

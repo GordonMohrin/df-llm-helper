@@ -1701,6 +1701,15 @@ def stage3_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
                     "in quiet PEACE or replaces it by wall + door (dfllm cmd inspect what=defense)"]
     if ((fort or {}).get("refuge") or {}).get("stage3"):
         return [], []                                   # being built
+    nocore = no_core_why(fort)
+    if nocore:
+        # BUG-523 (Run 16a i1 Basementflew y408-y411: aquifer z114-z127, stone 0, `bp sites fortcore aquifer=pass` 0 sites for
+        # four years: every P3+ plan was refused for O1 and B2 that no stage 3 could ever build, the fort sat on P2 and a
+        # pop ceiling of 29): where no core can be built the gate asks for what can stand instead and no longer for the gates
+        return [], [f"stage 3: {names} {'does' if len(miss) == 1 else 'do'} not stand and no fortcore can be built "
+                    f"({_cut(nocore)}): phase_target {pt} (P3+) is not held for them; what it requires instead is a "
+                    "separated refuge with beds for refuge.bed_pct of the citizens (refuge_gate), the seal on every way in "
+                    "(seal at=last) and, from P5, the drill; O1 and B2 are asked for again once a core is placed"]
     adds = new_builds(doc, prev)
     planned = min((si for si, _, b in adds if _refuge_stage(b)), default=None)
     limit = min((si for si, _, b in adds if not _refuge_fix(b)), default=3)
@@ -2935,6 +2944,41 @@ def reserve_shop_room(save_dir: Path, doc: dict, prev: dict | None) -> list[str]
     return [line]
 
 
+PROPOSE_SHOPS = ("Still", "Kitchen")      # BUG-527: the shops without which brewing / cooking orders never start
+
+
+def essential_shops(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
+    """BUG-527 (Run 16b i2 Brotherarrow y392: 'orders 180 stuck 89 (workshop missing 4: Still x3, Kitchen x1)' for years, neither plan
+    nor kernel built them; propose drafted a shop only under an emergency (drink / food days low) or ahead of a dining / furnaces build):
+    a Still or a Kitchen that no workshop of the fort manifest has, built or planned, and no workshops build of the draft makes, is
+    drafted as `workshops only=<missing>` at the end of seasons[0] (the runner puts such a project ahead of the rest). Returns the note
+    lines ([] when nothing changed or the manifest cannot tell)."""
+    try:
+        missing = _cmd.workshops_missing(save_dir, list(PROPOSE_SHOPS))
+    except Exception:                                   # noqa: BLE001 - no bp package or manifest: not judged
+        return []
+    if not missing:
+        return []
+    made: set[str] = set()
+    for _, _, b in new_builds(doc, prev):
+        if b["tpl"] == "workshops":
+            made |= _shop_set(b.get("p") or {})
+    missing = [n for n in missing if n not in made]
+    if not missing:
+        return []
+    if prev and prev.get("year") == doc["year"]:
+        kept = {n for se in prev["seasons"] for b in se["build"] if b["tpl"] == "workshops" for n in _shop_set(b.get("p") or {})}
+        missing = [n for n in missing if n not in kept]      # an applied workshops build makes it (a stale project is stale_scan's)
+        if not missing:
+            return []
+    b = {"tpl": "workshops", "site": "S1", "p": {"only": ",".join(missing)}}
+    doc["seasons"][0]["build"].append(b)
+    line = (f"BUG-527: {', '.join(missing)} missing (no workshop of the manifest, built or planned): workshops only={','.join(missing)} "
+            "drafted in seasons[0]; without them brewing / cooking orders stay stuck")
+    doc["notes"] += "; " + line
+    return [line]
+
+
 RESERVE_ID = "reserve-hospital"
 HOSPITAL_FIRST = ("captives",)          # BUG-483: the templates that never take the hospital's site while the fort has none
 
@@ -3725,7 +3769,13 @@ def no_core_route(fort: dict | None, s: dict | None, done: set) -> str:
     ref = ((s or {}).get("alert") or {}).get("ref")
     if f.get("core_any") is not False or any(t == "fortcore" for t, _ in done) or (isinstance(ref, dict) and ref.get("ex")):
         return ""
-    sf = f.get("surface") or {}
+    return no_core_why(f)
+
+
+def no_core_why(fort: dict | None) -> str:
+    """BUG-523: why no fortcore can be built at this fort ('' when one can, or one stands): the sites ranking finds none
+    (surface_facts.need) and neither the aquifer route (plan.surface_core off) nor the surface core (on) has a way."""
+    sf = (fort or {}).get("surface") or {}
     if not sf.get("need") or sf.get("have"):
         return ""
     if surface_core_on():
@@ -5188,6 +5238,7 @@ def run(args, save_dir: Path) -> int:
         simp = drop_impossible(doc, prev, fort)               # BUG-500: no temple / cistern while stone is out of reach
         cfit += [simp] if simp else []
         cfit += reserve_shop_room(save_dir, doc, prev)        # BUG-461: Still, Kitchen, Butchers ... before dining and furnaces
+        cfit += essential_shops(save_dir, doc, prev)          # BUG-527: Still and Kitchen whenever the manifest lacks them
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
         if cap_notes(doc):                                    # BUG-440: the notes fit the schema's 2000 bytes
             cfit.append("BUG-440: notes cut under 2000 bytes (the CLI lines above hold the full reasons)")

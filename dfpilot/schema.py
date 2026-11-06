@@ -971,6 +971,11 @@ VERB_ARGS: dict[str, Obj] = {
     # worker (or of every stalled one) goes through the ladder at once: off Orderlies, the pond zone beside him, the zone of
     # the patient over water.stall_dying
     "water.unstick": Obj(opt={"unit": NAT}),
+    # BUG-526 (Run 16c i3 Sealcertain: 36 stuck orders and a forge jammed by cancelling ones, no verb to remove an order): one manager
+    # order by id (`inspect what=orders` lists them) or up to 40 of the stuck ones; brewing / meals / barrels / raw fish only with force
+    "orders.cancel": Checked(Obj(opt={"id": NAT, "stuck": Bool(), "force": Bool()}),
+                             lambda a: None if ("id" in a) != bool(a.get("stuck")) else "give either id=<order> or stuck=true",
+                             "exactly one of id and stuck=true (BUG-526)"),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -998,6 +1003,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "view": ("arbiter", None, False),      # FR-88: modes are the verb's own rule (a fight needs by=gordon)
     "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)
     "water.unstick": ("water", None, False),            # BUG-507: any mode (a dying patient does not wait for the peace)
+    "orders.cancel": ("economy", None, False),                # BUG-526: any mode (taking an order off the list is harmless)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
