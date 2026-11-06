@@ -27,6 +27,12 @@ C.DEFAULT = {
   -- below them, so the reach is soil levels + span. stone_score_per_level = score points a warning loses per level beyond a pass
   aquifer_span = {light = 4, varied = 6, heavy = 8},
   stone_score_per_level = 3,
+  -- BUG-531 (Run 16a i1 Basementflew: 'light' panel, soil 'some', the real aquifer ran z114-z127 = 14 levels with heavy layers at z116/120/123,
+  -- so no core could be dug under it, the fort never had one and fell at y406): the core goes UNDER every aquifer level. The panel gives a
+  -- class, never the span; core_span = the worst span seen per class (BUG-465's aquifer_span is the usual one), core reach = soil levels +
+  -- core_span. core_reach_warn: above it the aquifer item warns and says so; core_reach_max: above it it fails (acceptable with a reason)
+  core_span = {light = 8, varied = 10, heavy = 14},
+  core_reach_warn = 9, core_reach_max = 13,
   sizes = {{3, 3}, {4, 4}},
   fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot',
     'water_mountain'},
@@ -227,6 +233,39 @@ function C.evaluate(rec, rules, ctx)
   elseif layers then put('stone', 'pass', 'stone layers ' .. layers)
   else put('stone', 'unknown', 'soil depth not shown') end
   out.stone_pen = pen
+  -- BUG-531: with an aquifer the core must go under it; say when that may not be possible. A site the stone item already rejects (soil too
+  -- deep) says the same there
+  local stone_failed = false
+  for _, it in ipairs(items) do if it.id == 'stone' and it.res == 'fail' then stone_failed = true end end
+  local cspan = (aqc == 'light' or aqc == 'varied' or aqc == 'heavy') and (rules.core_span or C.DEFAULT.core_span)[aqc] or 0
+  if cspan > 0 and lv ~= nil and not stone_failed then
+    local cmax, cwarn = rules.core_reach_max or C.DEFAULT.core_reach_max, rules.core_reach_warn or C.DEFAULT.core_reach_warn
+    local creach = lv + cspan
+    local res, txt
+    if creach > cmax then
+      res, txt = 'fail', string.format('no core below the aquifer within reach: up to %d levels from the surface to the hard stone under it ' ..
+        '(%d soil + up to %d of the %s aquifer, more than the %d a shaft and a core can do)', creach, lv, cspan, aqc, cmax)
+    elseif creach > cwarn then
+      res, txt = 'warn', string.format('the core must go under the aquifer: up to %d levels to the hard stone below it (%d soil + up to %d of the ' ..
+        '%s aquifer); the panel shows a class, not the span (Basementflew: 14 levels, heavy layers inside, no core below it ever) - the ' ..
+        'first aqshaft shows the real span; plan a stone source above it', creach, lv, cspan, aqc)
+    end
+    if res then
+      for _, it in ipairs(items) do
+        if it.id == 'aquifer' and it.res ~= 'fail' then
+          if it.res ~= res then
+            local old = it.res == 'warn' and out.warns or out.unknown
+            for i = #old, 1, -1 do if old[i] == 'aquifer' then table.remove(old, i) end end
+            local new = res == 'fail' and out.fails or out.warns
+            new[#new + 1] = 'aquifer'
+            it.res = res
+          end
+          it.why = it.why .. ' - ' .. txt
+          out.core_reach = creach
+        end
+      end
+    end
+  end
   if wt and wt.worst_stone then   -- BUG-411: a hover row judges stone on the deepest soil of its tiles
     for _, it in ipairs(items) do
       if it.id == 'stone' then it.why = it.why .. ' [deepest soil of the hovered tiles]' end

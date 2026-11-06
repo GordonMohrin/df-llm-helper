@@ -1634,7 +1634,7 @@ def depth_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None,
             continue
         for s in sites:
             try:
-                doc = emit_at(tpl, {**(params or {}), "depth": d}, s, "S0", "probe")
+                doc = emit_at(tpl, site_params(tpl, {**(params or {}), "depth": d}, s) or {}, s, "S0", "probe")
             except BpError:
                 continue
             if not occ.clash(doc):
@@ -2109,6 +2109,8 @@ def site_params(tpl: str, params: dict | None, site: dict) -> dict | None:
     pass_core = tpl == "fortcore" and (params or {}).get("aquifer") == "pass"        # BUG-484: a pass core names its depth too
     if (tpl == "aqshaft" or pass_core) and site.get("depth") and "depth" not in (params or {}):
         return {**(params or {}), "depth": site["depth"]}
+    if tpl == "explore" and isinstance(site.get("arm"), int) and "arm" not in (params or {}):      # BUG-528: the arm the site was ranked at
+        return {**(params or {}), "arm": site["arm"]}
     return params
 
 
