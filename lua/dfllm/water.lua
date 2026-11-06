@@ -153,6 +153,11 @@ M.DEFAULTS = {
   -- he leaves the Orderlies detail for a run, a Pond zone within pond_near of him goes (the zones screen's remove), and from
   -- the third round (stall_hosp) the hospital zone of a patient over stall_dying goes (BUG-034's recipe). stall false: report only
   stall = true, stall_days = 3, stall_need = 25000, stall_every = DAY, stall_max = 2, stall_hosp = true, stall_dying = 45000,
+  -- BUG-539 (Run 16b i2: water.unstick removed the hospital zone and nothing drew it again for 15+ days): a zone this module
+  -- removed (remove_dry, stall_hospital) is remembered (p.hrm) and drawn again at its old location by M.restore: a stall zone
+  -- once restore_wait passed and no patient is over patient_thirst (at the latest after restore_max), a dry zone as soon as an
+  -- accepted source is within near of it. hosp_restore false: only the verb hospital.restore
+  hosp_restore = true, restore_wait = DAY // 2, restore_max = 5 * DAY,
   -- BUG-325: the scan asks the walk from up to ws_from citizens (the nearest the reference); a tile is reachable from any
   ws_from = 3,
   -- BUG-324: while no water is accepted, the kernel zones the scan's best reachable, safe water as a Water Source (wz false:
@@ -1511,6 +1516,67 @@ local function scan_step(K, c, p)
   return false
 end
 
+---------------------------------------------------------------- hospital zones drawn again (BUG-539)
+-- p.hrm: the hospital zones this module removed and has not drawn again: {id, loc, x1, y1, x2, y2, z, t, why 'dry'|'stall'}
+-- (at most HRM_MAX, the oldest go first). Persisted: a reload keeps them.
+local HRM_MAX = 12
+function M.remember(p, h, now, why)
+  local list = json.array(type(p.hrm) == 'table' and p.hrm or {})
+  for _, e in ipairs(list) do if e.id == h.id then return end end
+  list[#list + 1] = {id = h.id, loc = h.loc, x1 = h.x1, y1 = h.y1, x2 = h.x2, y2 = h.y2, z = h.z, t = now, why = why}
+  while #list > HRM_MAX do table.remove(list, 1) end
+  p.hrm = list
+end
+
+-- Draws the remembered zones again (act.hospital_restore: the same location, the same rectangle). opt.force: all of them (or
+-- those of opt.loc) now, whatever the rules; else the rules of conf (hosp_restore, restore_wait, restore_max). r = the last
+-- water run (its patients and sources). Returns {done = {zone ids drawn}, left = n, fail = {text}}.
+function M.restore(K, c, r, p, now, opt)
+  opt = opt or {}
+  local res = {done = {}, left = 0, fail = {}}
+  local list = type(p.hrm) == 'table' and p.hrm or {}
+  if #list == 0 or not M.can('hospital_restore') then res.left = #list; return res end
+  if not opt.force and c.hosp_restore == false then res.left = #list; return res end
+  local worst = 0
+  for _, pt in ipairs(r and r.patients or {}) do if pt.thirst > worst then worst = pt.thirst end end
+  local keep = json.array({})
+  for _, e in ipairs(list) do
+    local take = opt.loc == nil or e.loc == opt.loc
+    local age = now - (math.tointeger(e.t) or now)
+    local ready = opt.force == true
+    if not ready and age >= c.restore_wait then
+      if e.why == 'dry' then
+        ready = r ~= nil and (served(K, c, r, e)) == true
+      else
+        ready = worst <= c.patient_thirst or age >= c.restore_max
+      end
+    end
+    local drawn = false
+    if take and ready then
+      local ok, got = K.act.hospital_restore(e)
+      if ok then
+        drawn = true
+        if got == 'present' then
+          res.done[#res.done + 1] = e.id
+        else
+          for _, id in ipairs(type(got) == 'table' and got.ids or {}) do res.done[#res.done + 1] = id end
+        end
+      else
+        res.fail[#res.fail + 1] = string.format('zone %d (location %d): %s', e.id, e.loc, tostring(got))
+        if tostring(got):find('^no hospital location') then drawn = true end   -- the location is gone: nothing to come back to
+      end
+    end
+    if not drawn then keep[#keep + 1] = e end
+  end
+  p.hrm = keep
+  res.left = #keep
+  if #res.done > 0 then
+    K.log('warn', 'water: hospital zone(s) %s drawn again at their old location (BUG-539)%s', table.concat(res.done, ','),
+          #keep > 0 and (', ' .. #keep .. ' still waiting') or '')
+  end
+  return res
+end
+
 ---------------------------------------------------------------- dry hospital removal (BUG-034)
 -- Run 11 (Kilrudrabed site98, y439 spring): 5 bedridden patients died of thirst (75,000) and 8 more were over 40,000 in a
 -- hospital of 4 locations and 5 zones without accepted water, while HOSPITAL_DRY had said so for a long time and nothing
@@ -1532,6 +1598,7 @@ local function remove_dry(K, c, r, p, T)
   for _, h in ipairs(r.hosp) do
     if not wet_loc[h.loc] and #zones + failed < c.remove_per_run then
       if K.act.hospital_remove(h.id) then             -- a refusal is an ACT_FAIL (B); the next run tries again
+        M.remember(p, h, K.now().tick, 'dry')
         zones[#zones + 1], first = h.id, first or h
         if not seen[h.loc] then seen[h.loc], locs[#locs + 1] = true, h.loc end
       else
@@ -2183,6 +2250,7 @@ local function stall_hospital(K, c, r, p, now)
       if not seen[h.id] and #zones + failed < c.remove_per_run and M.zone_patients({pt}, h) > 0 then
         seen[h.id] = true
         if K.act.hospital_remove(h.id) then
+          M.remember(p, h, now, 'stall')
           zones[#zones + 1] = h.id
           locs[#locs + 1] = h.loc
         else
@@ -2319,9 +2387,32 @@ M.verbs['water.unstick'] = function(K, args, cmd)
     out[#out + 1] = string.format('%d %s %dd%s', row.uid, row.jt, row.days,
                                   #row.did > 0 and (': ' .. table.concat(row.did, ', ')) or ': nothing to take away')
   end
-  local msg = 'unstick: ' .. table.concat(out, '; ') .. (res.hosp and ('; hospital zone(s) ' .. table.concat(res.hosp, ',') .. ' removed') or '')
+  local msg = 'unstick: ' .. table.concat(out, '; ') .. (res.hosp and ('; hospital zone(s) ' .. table.concat(res.hosp, ',')
+                                                         .. ' removed, drawn again when no patient is over ' .. c.patient_thirst
+                                                         .. ' thirst (at the latest ' .. (c.restore_max // DAY) .. ' d) or by '
+                                                         .. '`hospital.restore`') or '')
   K.log('warn', 'water: %s', msg)
   return true, trunc(msg, 400), {n = #res.rows, units = ids}
+end
+
+-- verb hospital.restore {loc?} (BUG-539): the hospital zones this module removed (remove_dry, stall_hospital, so water.unstick)
+-- drawn again at once at their old location and rectangle; loc = only that location. Any mode (patients lie there).
+M.verbs['hospital.restore'] = function(K, args, cmd)
+  local loc = args.loc ~= nil and math.tointeger(args.loc) or nil
+  if args.loc ~= nil and not loc then return false, 'hospital.restore: loc must be a location id' end
+  local c, p = M.conf(K), pstate(K)
+  if type(p.hrm) ~= 'table' or #p.hrm == 0 then
+    return false, 'hospital.restore: no removed hospital zone is remembered (a hospital that never lost its zone here: '
+                  .. 'bp sites hospital, or the zones screen)'
+  end
+  local res = M.restore(K, c, st.last, p, K.now().tick, {force = true, loc = loc})
+  if #res.done == 0 then
+    return false, 'hospital.restore: ' .. (#res.fail > 0 and table.concat(res.fail, '; ') or 'no remembered zone for that location')
+  end
+  local msg = string.format('hospital zone(s) %s drawn again%s%s', table.concat(res.done, ','),
+                            res.left > 0 and (', ' .. res.left .. ' still remembered') or '',
+                            #res.fail > 0 and ('; failed: ' .. table.concat(res.fail, '; ')) or '')
+  return true, trunc(msg, 400), {zones = res.done, left = res.left}
 end
 
 -- BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought 'Syndrome'): why a patient lies, as the unit
@@ -3170,6 +3261,8 @@ local function finish(K, c, r, p)
   if rel and gv then gv.reason = rel .. '; ' .. gv.reason end              -- first: the lines are cut at 200
   local okst, errst = pcall(M.stalls, K, c, r, p, now)                -- BUG-507/508
   if not okst then K.log('warn', 'water stalls: %s', tostring(errst)) end
+  local okrs, errrs = pcall(M.restore, K, c, r, p, now)                   -- BUG-539
+  if not okrs then K.log('warn', 'water restore: %s', tostring(errrs)) end
   st.last = r
   -- patients over the alarm: one class-A line for all of them, with the cause (cadence: M.DEFAULTS)
   local thirsty, tmax = 0, 0
@@ -3716,6 +3809,8 @@ function M.state(K)
   if type(last) == 'table' and math.tointeger(last.t) and C.STATE_SPEC.opt.water.opt.wst then w.wst = last.t end
   local wsc = st.ws and M.way_text(M.best_way(st.ws))
   if wsc and C.STATE_SPEC.opt.water.opt.wsc then w.wsc = wsc end
+  local hrm = type(pstate(K).hrm) == 'table' and #pstate(K).hrm or 0
+  if hrm > 0 and C.STATE_SPEC.opt.water.opt.hrm then w.hrm = hrm end     -- BUG-539
   local a = st.audit
   if a and #a.gaps > 0 and (a.zones > 0 or a.patients > 0) and C.STATE_SPEC.opt.water.opt.gaps then
     w.gaps = json.array{}

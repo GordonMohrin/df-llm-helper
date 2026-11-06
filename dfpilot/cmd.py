@@ -333,6 +333,8 @@ def water_ctx(save_dir: Path, tpl: str, state: dict | None = None) -> dict | Non
     lbl = w.get("src_l")                       # the first ones (water.lua SRC_LBL), in src order
     if isinstance(lbl, list):
         out["lbl"] = [str(x) for x in lbl[:len(src)]]
+    if isinstance(w.get("hrm"), int) and w["hrm"] > 0:   # BUG-539: removed hospital zones the kernel waits to draw again
+        out["hrm"] = w["hrm"]
     if isinstance(w.get("wsc"), str) and w["wsc"]:   # BUG-289/290: the best way to water the kernel's scan found
         out["cand"] = w["wsc"]
     ref = ((s.get("alert") or {}).get("ref") or {}) if isinstance(s.get("alert"), dict) else {}

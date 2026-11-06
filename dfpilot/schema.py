@@ -79,6 +79,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
+    "hospital_restore": ["water"],                 # BUG-539: the removed hospital zone drawn again at its old location
     "water_zone": ["water"],                       # BUG-324: a Water Source zone on the water the scan found reachable
     "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
     "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager
@@ -976,6 +977,9 @@ VERB_ARGS: dict[str, Obj] = {
     "orders.cancel": Checked(Obj(opt={"id": NAT, "stuck": Bool(), "force": Bool()}),
                              lambda a: None if ("id" in a) != bool(a.get("stuck")) else "give either id=<order> or stuck=true",
                              "exactly one of id and stuck=true (BUG-526)"),
+    # BUG-539 (Run 16b i2: water.unstick removed the hospital zone and nothing drew it again): the removed hospital zone(s)
+    # drawn again at their old location and rectangle; loc = only that hospital location
+    "hospital.restore": Obj(opt={"loc": NAT}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -1004,6 +1008,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)
     "water.unstick": ("water", None, False),            # BUG-507: any mode (a dying patient does not wait for the peace)
     "orders.cancel": ("economy", None, False),                # BUG-526: any mode (taking an order off the list is harmless)
+    "hospital.restore": ("water", None, False),         # BUG-539: any mode (the patients lie there)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
@@ -1259,7 +1264,9 @@ STATE = Obj(
                       # found at any distance (a bank, a well spot over a flooded pit, a dig; bp sites hospital names it)
                       opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8),
                            "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT}),
-                           "wst": NAT, "wsc": Str(maxbytes=96)}),
+                           "wst": NAT, "wsc": Str(maxbytes=96),
+                           # BUG-539: removed hospital zones waiting to be drawn again (hospital.restore)
+                           "hrm": NAT}),
          # FR-96/97 (lua/dfllm/traps.lua, daily): armed traps on the manifest's trap tiles (n) of all listed (m); built (b),
          # ways in with every lane tile trapped (w) of the ways listed (wn), cage traps holding a caught creature (f), free
          # empty cages (c), listed tiles without a trap building (l; lh 1: some in the hall), the last cage order (ord), citizens killed by
