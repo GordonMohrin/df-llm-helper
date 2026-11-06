@@ -2585,7 +2585,12 @@ def defense_gaps(s: dict | None) -> list[str]:
     tr = s.get("traps")
     if _nat(mt):
         if mt < TRAPS_HOLE:
-            out.append("traps 0")
+            # BUG-516 (Run 16c i3 Sealcertain y388-y390: 'traps 63/63' built, fortcore stage 4 done twice, and the plan warned 'no trap
+            # hall: add stage 4' every year): with a bypass the audit counts 0 on the cheapest route whatever stands in the hall; armed
+            # traps that stand (state traps.n) beside the R0 blocker `bypass` are a seal's job, no hole for the hall to fill
+            built = isinstance(tr, dict) and _nat(tr.get("n")) and tr["n"] >= TRAPS_HOLE
+            if not (built and "bypass" in (r.get("fail") or [])):
+                out.append("traps 0")
         else:
             # BUG-481: fewer armed traps than the siege this fort expects (readiness ready.tt: its largest army, 0.35 x citizens)
             tt = r.get("tt")

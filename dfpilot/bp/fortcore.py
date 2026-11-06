@@ -202,6 +202,10 @@ def _stage2(P: Plan) -> None:
 
 def _stage3(P: Plan, zr: int) -> None:
     d = P.stage("s3.dig", "dig", defense=1)
+    # BUG-514 (Run 16a i1 Basementflew y404-y405, aquifer=pass: stage 1 was cancelled at the core level, stage 3 dug the refuge room at
+    # z114 and its stair foot, the stair head 31,101,115 was never dug and the refuge hung in the air): the civilians' stair comes first
+    # and is whole in this stage too (tiles dug already are done for the runner)
+    d.stair(*CIV, zr, ZE)
     d.rect(-4, 42, 4, 48, zr).tile(*CIV, zr, "u")
     d.tile(-2, 43, zr, "h").tile(-1, 43, zr, "h")                             # refuge well spot
     b = P.stage("s3.build", "build", orders=1, defense=1)

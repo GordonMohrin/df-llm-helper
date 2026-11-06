@@ -582,7 +582,8 @@ due = function(name, tick, why, arg)
   local d = mem.due[name]
   if not d then mem.due[name] = {tick = tick, why = why, arg = arg}; return end
   if tick < d.tick then d.tick = tick end
-  if why == 'post' or (WEAK[d.why] and not WEAK[why] and d.why ~= 'post') then d.why = why end
+  if why == 'post' or (WEAK[d.why] and not WEAK[why] and d.why ~= 'post')
+     or (why == 'sealdone' and d.why == 'construction') then d.why = why end       -- BUG-517: the fresh BFS beats 'construction'
   if arg ~= nil and d.arg == nil then d.arg = arg end
 end
 
@@ -2450,15 +2451,19 @@ end
 -- tiles it reached are the porch, the inside between the opening and its doors, where a citizen is still outside them
 -- (the lockdown waits for him before it forbids them). Revealed tiles only. Returns {{id, x, y, z}} (at most
 -- CFG.doors_per), whether a bridge stands on the opening or on that route before any door (the gates close it: no
--- "partial lockdown" for it), and the porch {key = true} (nil without doors).
+-- "partial lockdown" for it), and the porch {key = true} (nil without doors). BUG-517: a fourth value, the bridge tiles
+-- {{x, y, z}} (at most 4) that route crosses before any door: the opening runs over that bridge (M.bridge_way).
 local function opening_doors(B, G, r)
-  local found, list, inside_c, nb, gated = {}, {}, {}, {}, false
+  local found, list, inside_c, nb, gated, brs = {}, {}, {}, {}, false, {}
   -- a door: listed (if `keep`), true; a bridge: true on the route (it closes it)
   local function take(k, route, keep)
     local b, t, x, y, z = door_at(k)
     if not b then return false end
     if t == 'Bridge' then
-      if route then gated = true end
+      if route then
+        gated = true
+        if #brs < 4 then brs[#brs + 1] = {x, y, z} end
+      end
       return route == true
     end
     if keep ~= false and not found[b.id] and #list < CFG.doors_per then
@@ -2521,7 +2526,7 @@ local function opening_doors(B, G, r)
       rim = {}
     end
   end
-  return list, gated, #list > 0 and porch or nil
+  return list, gated, #list > 0 and porch or nil, brs
 end
 
 -- BFS and scan sources on the groups `on` (nil = any): the citizens, plus (`inner`) beds and stock tiles of the last
@@ -2875,7 +2880,8 @@ end
 
 -- the BFS runs when its answer can change; in PEACE the open gates (D-14) leak by design, so a periodic or a
 -- construction check there re-uses the last answer unless a known opening closed or CFG.bfs_every passed
-local BFS_WHY = {inspect = true, record = true, lever = true, siege = true, lockdown = true, refuge = true}
+local BFS_WHY = {inspect = true, record = true, lever = true, siege = true, lockdown = true, refuge = true,
+                 sealdone = true}       -- BUG-517
 
 -- BUG-021: DF renumbers the walk groups while constructions run (live Run 10: 3276 -> 3293 -> 3302 within minutes); a
 -- sliced job whose reads straddle a renumbering compares two numberings. True when the tiles the citizens stood on
@@ -2953,9 +2959,9 @@ local function seal_pass(K, why, last)
         local r = reps[i]
         local bt, bs = describe_tile(r.x, r.y, r.z)
         local ot, os_ = describe_tile(r.ox, r.oy, r.oz)
-        local doors, gated, porch = opening_doors(B, G, r)   -- BUG-012: {{id, x, y, z}}, a bridge on it, porch
+        local doors, gated, porch, brs = opening_doors(B, G, r)   -- BUG-012: {{id, x, y, z}}, a bridge on it, porch
         res.openings[i] = {pos = {r.x, r.y, r.z}, out = {r.ox, r.oy, r.oz}, n = r.n, d = r.d,
-                           bld = bt, state = bs, out_bld = ot, out_state = os_, doors = doors,
+                           bld = bt, state = bs, out_bld = ot, out_state = os_, doors = doors, br = brs,
                            gate = (gated or bt == 'Bridge' or ot == 'Bridge') and 1 or 0}
         for _, dr in ipairs(doors) do
           if not dseen[dr[1]] and #all < CFG.doors_max then dseen[dr[1]] = true; all[#all + 1] = dr end
@@ -4524,6 +4530,27 @@ function M.entrance_doors(K, refresh)
   end
   mem.door_x = {src = s, sep = mem.sepr, x = x}
   return x
+end
+
+-- BUG-517 (Run 16d i4 Trumpetrealms y393: a wall at 84,72,139 in front of the lever-less bridge O1 closed the way, status went on
+-- with 'PERIMETER OPEN 3279 days: levers lost: O1'): does an opening of the last entrance check run over a bridge whose footprint is
+-- `fp` {x1,y1,z1,x2,y2,z2} before it meets any door? true / false; nil when the answer is not proven (no check yet, a check that left
+-- openings out or ran out of tiles). A wall or door in front of the bridge ends that route, so false: the bridge is no way in.
+function M.bridge_way(K, fp)
+  local s = mem.seal
+  if not (s and type(fp) == 'table' and #fp == 6) then return nil end
+  if s.sealed then return false end                         -- 'seal verified: no route' from the citizens to the map edge
+  if not (s.bfs and type(s.openings) == 'table') then return nil end
+  if s.partial or (int(s.routes) or 0) > #s.openings then return nil end
+  for _, o in ipairs(s.openings) do
+    if o.br == nil then return nil end
+    for _, p in ipairs(o.br) do
+      if p[1] >= fp[1] and p[1] <= fp[4] and p[2] >= fp[2] and p[2] <= fp[5] and p[3] >= fp[3] and p[3] <= fp[6] then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 -- BUG-044 (public, runner's wall fallback for a seal door that stays stuck): the ways a citizen has around the tile of a
@@ -6129,8 +6156,13 @@ M.on['EV:PROJECT_STAGE'] = function(K, ev)
   local d = type(ev.d) == 'table' and ev.d or {}
   if d.defense == 1 then due('seal', now_t(K), 'construction') end
 end
-M.on['EV:PROJECT_DONE'] = function(K)
+M.on['EV:PROJECT_DONE'] = function(K, ev)
   local t = now_t(K)
+  -- BUG-517 (Run 16b i2 y381/y383/y384, 16d i4 y393: 'PERIMETER OPEN 11-16 d' beside a finished seal wall or door; only
+  -- `inspect entrances key=refresh` showed it closed): in PEACE the periodic check re-uses its answer for bfs_every days, so
+  -- a finished seal (or a stage of the core) is followed by a fresh entrance check, the one status and seal at=last read
+  local tpl = type(ev) == 'table' and type(ev.d) == 'table' and ev.d.tpl or nil
+  if tpl == 'seal' then due('seal', t, 'sealdone') end
   due('scan', math.max(t, (mem.scan and mem.scan.tick or -CFG.scan_min) + CFG.scan_min), 'project')
 end
 M.on.UNLOAD = function(K) save(K) end
