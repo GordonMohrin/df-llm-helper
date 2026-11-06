@@ -897,6 +897,22 @@ local function measure_build(K, P, d, R)
   end
   local lost = #R.b - #keep + R.uns
   local total = #R.b + #R.c + R.uns
+  -- BUG-565: a seal whose every piece tile holds a building of another kind (pre_occupied, R.occ) built nothing and stands for nothing:
+  -- it is blocked for good with the reason, never 'done' at 100 % (the bypass it was placed for would stay and nobody would know why)
+  if type(R.occ) == 'table' and #R.occ > 0 and P.tpl == 'seal' then
+    if done == 0 and pend == 0 then
+      if P.blocked ~= 'occupied' then
+        K.log('warn', '%s (seal): nothing built: %s; the project is blocked (cancel it; a wall cannot stand there)', P.id,
+              table.concat(R.occ, ', '))
+      end
+      set_blocked(K, P, 'occupied')
+      dirty()
+      return 'done'
+    elseif R.occw ~= #R.occ then
+      R.occw = #R.occ
+      K.log('warn', '%s (seal): a piece tile holds another building: %s', P.id, table.concat(R.occ, ', '))
+    end
+  end
   progress(K, P, d, R, done, total)
   -- one re-apply: quickfort places only what is missing (Run 11: a seal again while economy can make its pieces).
   -- BUG-046 (Run 12 note 32: the workshops project stood at 62% 'stalled', its forge never built, and its kitchen, a part
@@ -1527,19 +1543,42 @@ end
 -- finished construction are counted (returned) and their buildings tracked like ours (an unbuilt one keeps
 -- the stage pending).
 local OCCUPIED = {C = true, F = true, ['='] = true, H = true, B = true, ['^'] = true, ['+'] = true}
-local function pre_occupied(K, ch, R)
+-- BUG-565 (Run 16c i3 Sealcertain y405 `bp.place seal at=55,132,137 close=wall` behind the hatch 54,132,137: 'done' at 100 %, nothing
+-- built, SEAL_STUCK '0 pieces open', the bypass stayed): a seal piece cell on a tile that already holds a building of ANOTHER kind (a
+-- hatch or door where a wall is wanted, a trap, a bridge) was adopted as the project's own piece below ("tracked like ours"), so the
+-- stage measured it as built. What a seal key wants on its tile: Cw a constructed wall, d a door, H a hatch. A mismatch is not adopted
+-- and is named (R.occ, 'Hatch 55,132,137 (a wall was wanted)'); measure_build blocks the seal when nothing else of it stands
+Q.SEAL_WANT = {Cw = 'Construction', d = 'Door', H = 'Hatch'}
+Q.SNAP_NAME = {['+'] = 'door or hatch', ['^'] = 'trap', ['='] = 'bridge', H = 'hatch', B = 'building'}
+function Q.seal_mismatch(P, cell_key, b, c)
+  local want = Q.SEAL_WANT[tostring(cell_key):match('^[^{(:/]*')]
+  if not (want and P and P.tpl == 'seal') then return nil end
+  if b then
+    local ty = df.building_type[b:getType()]
+    if ty == want then return nil end
+    return ty or '?'
+  end
+  if want == 'Construction' and Q.SNAP_NAME[c] then return Q.SNAP_NAME[c] end
+  return nil
+end
+local function pre_occupied(K, ch, R, P)
   local tiles, n, seen = {}, 0, {}
   for _, cell in ipairs(ch.cells) do cell_tiles(ch, cell, tiles) end
   for _, id in ipairs(R.b) do seen[id] = true end
   for _, t in ipairs(tiles) do
     local b = Q.bld_at(t[1], t[2], t[3])            -- findAtTile (Lua API.txt:2484); BUG-329: a finished farm plot too
-    if b then
+    local okt, tile
+    if not b then okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3]) end
+    local mis = Q.seal_mismatch(P, t[4], b, okt and type(tile) == 'table' and tile.c or nil)
+    if mis then
+      n = n + 1
+      R.occ = type(R.occ) == 'table' and R.occ or {}
+      if #R.occ < 3 then R.occ[#R.occ + 1] = string.format('%s %d,%d,%d (%s wanted)', mis, t[1], t[2], t[3],
+                                                           t[4] == 'Cw' and 'a wall' or t[4] == 'd' and 'a door' or 'a hatch') end
+    elseif b then
       n = n + 1
       if not seen[b.id] and not is_construction(b) then seen[b.id] = true; R.b[#R.b + 1] = b.id end
-    else
-      local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
-      if okt and type(tile) == 'table' and OCCUPIED[tile.c] then n = n + 1 end
-    end
+    elseif okt and type(tile) == 'table' and OCCUPIED[tile.c] then n = n + 1 end
   end
   return n
 end
@@ -1942,7 +1981,7 @@ local function apply(K, P, st, R)
   Q.doing(P, st, part and string.format('chunk %d/%d call %d/%d', P.chunk + 1, #st.chunks, part.k, part.n)
                   or string.format('chunk %d/%d', P.chunk + 1, #st.chunks))
   if st.mode == 'dig' then p.priority, p.marker = dprio(P), Q.aq_marker(P) end    -- FR-95: damp marker in observe mode
-  local pre = st.mode == 'build' and pre_occupied(K, ch, R) or 0
+  local pre = st.mode == 'build' and pre_occupied(K, ch, R, P) or 0
   -- FR-22: seal remembers the closing cells (walls, doors, bridges) and takes a reach baseline before they are queued
   if st.mode == 'build' then K.call('seal', 'closing', P.id, P.tpl, P.class, ch) end
   -- quickfort allocates the ids of the buildings it places (build.lua:1259 constructBuilding)
@@ -3672,7 +3711,7 @@ end
 
 -- BUG-037: blocked for good (nothing in the kernel clears it: build_lost with its retries spent, a breach stop, quickfort
 -- failing, the document gone, the plug refused); parked once it stood park_days (pt: conf(K).park)
-Q.FINAL = {apply_fail = true, bp_missing = true, plug_refused = true}
+Q.FINAL = {apply_fail = true, bp_missing = true, plug_refused = true, occupied = true}
 function Q.terminal(P)
   local b = P.blocked
   if b:sub(1, 7) == 'breach:' or Q.FINAL[b] then return true end
@@ -6081,6 +6120,12 @@ local function blocked_event(K, P, t)
                                  nr + 1, M.CFG.retry_max)
     end
   elseif wn then msg = msg .. ' at ' .. label .. '; ' .. wn end
+  if P.blocked == 'occupied' then               -- BUG-565: the tile holds a building of another kind
+    local R = S.rt.p[P.id]
+    local occ = type(R) == 'table' and type(R.occ) == 'table' and table.concat(R.occ, ', ') or '?'
+    dd.parts = trunc(occ, 200)
+    msg = msg .. ' at ' .. label .. ': nothing built, ' .. occ .. '; cancel it: dfllm cmd bp.cancel ' .. string.format('{"proj":"%s"}', P.id)
+  end
   if P.blocked == 'stalled' then                -- BUG-046: which part waits (the rest of the stage is not frozen by it)
     local parts = Q.parts(K, P, d)
     if #parts > 0 then

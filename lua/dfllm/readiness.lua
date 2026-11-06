@@ -192,8 +192,11 @@ local function trap_shortfall(K, cit)
   need = okn and int(need) or 0
   local tail = need > 0 and string.format('; %d listed tiles lack a trap: a mechanism each (trade.want mechanism, hard stone)',
                                           need) or ''
-  return {have = have, target = target, short = string.format('traps short %d<%d', have, target), text = cut(string.format('traps short: %d armed on the weakest path < %d for ~%d invaders%s%s',
-          have, target, expected, peak > 0 and string.format(' (largest army %d)', peak) or '', tail), 200)}
+  -- BUG-564 (Run 16c i3 y388-y406: 'traps 0' beside 61 armed traps held the pop cap at 40): a bypass over a stair / hatch / door is its
+  -- own blocker (R0 bypass, the audit route in status); the count above is the fewest traps on the ways that do not use it. Say so
+  local byp = st.audit.bypass ~= 0 and ' (the bypass is its own item: audit route in status)' or ''
+  return {have = have, target = target, short = string.format('traps short %d<%d', have, target), text = cut(string.format('traps short: %d armed on the weakest path < %d for ~%d invaders%s%s%s',
+          have, target, expected, peak > 0 and string.format(' (largest army %d)', peak) or '', tail, byp), 200)}
 end
 
 -- bridges and levers: outer + inner exist, every bridge known to gate, >= 2 linked levers each
@@ -275,14 +278,26 @@ local function entrances(K)
   local ok, x = K.call('seal', 'entrance_doors')
   if not ok or type(x) ~= 'table' then return -1, -1, {} end
   local open = type(x.open) == 'table' and x.open or {}
-  local ents = {}
+  local ents, nveg, plain = {}, 0, 0
   for _, o in ipairs(open) do
-    local p = type(o) == 'table' and o.pos
-    if type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) and #ents < M.ENTS then
-      ents[#ents + 1] = cut(string.format('%d,%d,%d %s', p[1], p[2], p[3], tostring(o.kind or '?')), 24)
+    if type(o) == 'table' and o.veg == 1 then
+      nveg = nveg + 1                                  -- BUG-566: a sapling / shrub at the rim of a crown is no way in
+    else
+      plain = plain + 1
+      local p = type(o) == 'table' and o.pos
+      if type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) and #ents < M.ENTS then
+        ents[#ents + 1] = cut(string.format('%d,%d,%d %s', p[1], p[2], p[3], tostring(o.kind or '?')), 24)
+      end
     end
   end
-  return math.max(0, int(x.routes) or 0), #open, ents
+  if nveg ~= M.veg_logged then
+    M.veg_logged = nveg
+    if nveg > 0 then
+      K.log('info', 'readiness: %d way%s in on a surface sapling or shrub only (the rim of a crown or a meadow) left out of the ' ..
+            'perimeter check (inspect entrances still lists %s)', nveg, nveg == 1 and '' or 's', nveg == 1 and 'it' or 'them')
+    end
+  end
+  return math.max(0, int(x.routes) or 0), plain, ents
 end
 
 -- the last audit's first attacker-route finding (bp.topo.audit: a bypass of the trap hall, a refuge on the attack

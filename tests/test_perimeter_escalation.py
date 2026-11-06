@@ -178,7 +178,7 @@ def test_plan_check_refuses_a_phase_raise_while_the_perimeter_is_open(save):
     doc = copy.deepcopy(prev)                                         # phase_target P4
     errs, warn = plan.check(doc, st, decisions={}, banned=plan.BANNED, prev=prev)
     mine = [e for e in errs if e.startswith("perimeter")]
-    assert mine == ["perimeter: raising phase_target P2 -> P4 while the perimeter is open for 12 days (2 ways in; "
+    assert mine == ["perimeter: raising phase_target P2 -> P4 while the perimeter is open for 12 days (2 ways in at 55,62,117 floor, 61,55,117 floor; "
                     "readiness R0 open_perimeter): seal first (dfllm cmd bp.place tpl=seal site=S1 at=last; a lost "
                     "bridge: dfllm cmd inspect what=defense); after 365 d open (in 353 d) with a seal stuck, set aside "
                     "or first in this plan's due season the raise is waived (BUG-349)"]

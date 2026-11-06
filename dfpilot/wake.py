@@ -1783,6 +1783,9 @@ def trap_note(info: dict, args: dict) -> str:
     if t.get("walls"):
         out.append(f"counted with the {t['walls']} bypass wall(s) the findings name; the bypass itself meets "
                    f"{t.get('any_route', 0)}")
+    if t.get("via"):                           # BUG-564: a stair / hatch / door / bridge no wall fits
+        out.append(f"counted with {t['via']} bypass tile(s) of a stair, hatch, door or bridge shut; the bypass itself "
+                   f"meets {t.get('any_route', 0)} (its own finding: R0 bypass, status audit route)")
     e = t.get("enters")
     if args.get("min_traps", 0) < t.get("hall", 0) // 2 and e:
         out.append("the counted route enters the hall at %d,%d,%d" % tuple(e))
