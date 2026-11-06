@@ -2366,12 +2366,12 @@ local function stall_hospital(K, c, r, p, now, need)
 end
 
 -- BUG-541: the built well with no water below it that a GiveWater worker stands at (within trap_near tiles); nil when none. Only
--- a source that is not wet (an emergency well counts wet): the carriers' bucket cannot fill there
+-- a source that is not wet (an emergency well counts wet; a loop well holds its pond's water, BUG-263): the carriers' bucket cannot fill there
 function M.trap_well(c, r, e)
   if c.trap == false or not e.x then return nil end
   local near, best = c.trap_near or 2, nil
   for _, s in ipairs(r.sources) do
-    if s.kind == 'well' and s.built ~= false and not s.wet and s.x then
+    if s.kind == 'well' and s.built ~= false and not s.wet and not s.loop and not s.water and s.x then   -- a loop well holds water (BUG-263)
       local d = math.max(math.abs(s.x - e.x), math.abs(s.y - e.y), math.abs(s.z - e.z))
       if d <= near and (not best or d < best.d) then best = {s = s, d = d} end
     end
@@ -4181,7 +4181,10 @@ M.verbs['well.retire'] = function(K, args, cmd)
   for _, s in ipairs(st.last.sources) do if s.kind == 'well' and s.id == id then w = s end end
   if not w then return false, string.format('well.retire: no well %d in the last water run (inspect what=water_sources lists them)', id) end
   local at = string.format('%d,%d,%d', w.x, w.y, w.z)
-  if w.wet then return false, string.format('well.retire: well %d at %s has water below it: it stays', id, at) end
+  if w.wet or w.loop or w.water then
+    return false, string.format('well.retire: well %d at %s has water below it%s: it stays', id, at,
+                                w.loop and ' (a loop well holds its own pond store)' or '')
+  end
   if w.built == false then
     return false, string.format('well.retire: well %d at %s is not built yet: cancel its project instead', id, at)
   end

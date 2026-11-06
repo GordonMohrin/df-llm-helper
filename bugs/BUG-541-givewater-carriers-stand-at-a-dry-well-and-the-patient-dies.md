@@ -17,10 +17,11 @@ The hospital counted as served (a pond zone within `near` = 30 tiles), so `remov
 - DECISION_NEEDED `dry_well` (urgent in wake.py) instead of `job_stalled` for those workers: the well, the patient's thirst, the nearest accepted water and the distance, `cmds` = `well.retire id=<well>`, `water.unstick unit=<id>`; again after 3 days for another set.
 - Verb `well.retire {id, approve?}` (any mode) and act `well_remove` (`dfhack.buildings.deconstruct` of the well by id, as `pond_remove` does for a zone): only a built well that the last run read as dry; a wet well is refused; a well in a manifest cistern room (meant to fill) only with `approve:true`.
 - Conf `trap`, `trap_days`, `trap_near`, `trap_dying`, `hrm_expire` (fairplay `WATER_LIM`).
+- A LOOP well (BUG-263: water below, fed only by its own pond; `s.wet` false, `s.loop` set, `s.water` true) is no dry well: `M.trap_well` (water.lua) requires `not s.loop and not s.water`, `well.retire` refuses when `loop` or `water` is set (found by the verifier).
 - Not done on purpose: no automatic well removal (a cistern's or a planned well may be dry for a while); no barrel fallback (no such job in DF, BUG-470).
 
 ## Tests
-`tests/lua/test_bug540_542_hospital.lua` (decision at a dry well after 2 days, none at a wet well or without a thirsty patient; the zone goes from round 2 at 40,000 and stays at 30,000; `well.retire`: dry well retired, unknown id and wet well refused, cistern room only with approve), `tests/lua/test_kern_act.lua` (`well_remove`), `tests/test_bug540_542_hospital.py` (registry, contract, config keys, wake line, hook).
+`tests/lua/test_bug540_542_hospital.lua` (decision at a dry well after 2 days, none at a wet well or without a thirsty patient; the zone goes from round 2 at 40,000 and stays at 30,000; `well.retire`: dry well retired, unknown id and wet well refused, cistern room only with approve; a loop well gives no decision and is refused by `well.retire`, also with approve), `tests/lua/test_kern_act.lua` (`well_remove`), `tests/test_bug540_542_hospital.py` (registry, contract, config keys, wake line, hook).
 
 ## Live check
 A patient over 25,000 and GiveWater workers at a dry well: kern.log "N GiveWater carrier(s) stand at the DRY well ..." within a day, the decision `dry_well` with the command; `dfllm cmd well.retire id=<well>` removes the building, the next GiveWater trip should go to the pond zone / a wet well. Unknown until then: whether the game then really picks the other source.

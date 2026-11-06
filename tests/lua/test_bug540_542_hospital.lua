@@ -289,6 +289,31 @@ T.test('BUG-541: well.retire takes a dry well away; a wet well and an unknown id
   T.eq(Wet.wells, nil)
 end)
 
+-- a LOOP well: wet below, fed only by its own pond beside it (BUG-263: s.wet false, s.loop set, s.water true)
+local function loop_world()
+  return world{patients = {{id = 5, thirst = 40000, care = true, pos = {12, 12, 5}}}, carers = {1, 2},
+               jobs = {{id = 501, worker = 1}}, wet = true,
+               setup = function(W)
+                 detail(W, {1, 2})
+                 W.act_result('well_remove', function(id) W.wells = (W.wells or 0) + 1; return true, 1 end)
+                 F.building(W, 'ANY_ZONE', {id = 77, type = df.civzone_type.Pond, x1 = 21, y1 = 12, x2 = 22, y2 = 13, z = 5})
+               end}
+end
+
+T.test('BUG-541: a LOOP well (water below, only its own pond) is no dry well: no dry_well decision, well.retire refuses', function()
+  local W = loop_world()
+  W.move(1, 21, 13, 5)
+  day(W, 4)
+  T.eq(#needed(W, 'dry_well'), 0, 'the loop well holds water: no dry_well decision')
+  -- (the zone may still go as DRY: a loop well is no accepted source; only the trap rung and decision are the dry-well case)
+  local r = W.inbox('well.retire', {id = W.well.id})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('has water below it', 1, true), r.msg)
+  r = W.inbox('well.retire', {id = W.well.id, approve = true})
+  T.eq(r.ok, false, 'approve does not retire a well that holds water')
+  T.eq(W.wells, nil)
+end)
+
 T.test('BUG-541: a cistern room\'s dry well is retired only with approve:true', function()
   local W = world{wet = false, rooms = {{tpl = 'cistern', id = 'cistern18_10_5r0', bbox = {18, 10, 5, 22, 14, 5}, tier = 0, use = 'utility'}},
                   setup = function(W) W.act_result('well_remove', function(id) W.wells = (W.wells or 0) + 1; return true, 1 end) end}
