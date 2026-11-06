@@ -278,6 +278,9 @@ C.VERBS = {
   -- BUG-507 (Run 16b i2: a GiveWater job hung 26 days on a child, the player had no command): the stalled water job of one
   -- worker (or every stalled one) goes through the ladder at once: off Orderlies, the pond zone beside him, the patient's hospital zone
   ['water.unstick'] = {mod = 'water'},
+  -- BUG-526 (Run 16c i3: 36 stuck orders, a jammed forge, no verb to take an order off the list): one order by id, or the stuck
+  -- ones; the supply orders only with force
+  ['orders.cancel'] = {mod = 'economy'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.

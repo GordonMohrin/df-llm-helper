@@ -1349,6 +1349,38 @@ function M.lib_ready(K, c, lib, f, cit)
   return true
 end
 
+-- BUG-524 (Run 16c i3 Sealcertain: phase P3 'waits for orders_rockstock' for 8+ years, the status said nothing more): the gate
+-- of a library's config stage is why it is not imported (library/rockstock: Masons + 60 free furniture-grade boulders). Returns
+-- the short text of what is missing ('no Masons,stone 12/60'), or nil when the library is imported, has no stage, or its stage
+-- is ready (then the plan simply does not list it)
+function M.held_why(K, lib)
+  local ok, res = pcall(function()
+    local p = K.persist.get('m.economy')
+    if type(p) ~= 'table' or (type(p.imported) == 'table' and p.imported[lib] ~= nil) then return nil end
+    local c = M.conf(K)
+    for _, s in ipairs(c.stages or {}) do
+      if s.lib == lib then
+        local f, cit = facts(K, p), math.tointeger(p.cit) or 0
+        if M.stage_ready(s, f, cit) then return nil end
+        local i = K.census.i or {}
+        local miss = {}
+        for _, cond in ipairs(s.all or s.any or {}) do
+          if not holds(f, cit, cond) then
+            local n = tostring(cond):match('^cit>=([0-9]+)$')
+            if cond == 'stone' then
+              miss[#miss + 1] = string.format('stone %d/60', math.max(0, (i.rock or 0) - math.max((i.ore or 0) + (i.flux or 0), i.rock_bad or 0)))
+            elseif n then miss[#miss + 1] = string.format('cit %d/%s', cit, n)
+            else miss[#miss + 1] = 'no ' .. tostring(cond):gsub('^%a+:', '') end
+          end
+        end
+        return table.concat(miss, ',')
+      end
+    end
+    return nil
+  end)
+  return ok and res or nil
+end
+
 local function ws_any(f, list)
   for _, w in ipairs(list or {}) do if f[w] then return true end end
   return false
@@ -2181,6 +2213,32 @@ end
 -- was ever asked for): a slot that has no route because no Leatherworks stands asks for it (and for the Tanners when none
 -- stands), BUG-268: mechanisms the manifest levers miss without a Mechanic's workshop ask for that one; one
 -- PROJECT_REQUEST workshops why=gear (M.ws_ask, follow places only those)
+-- BUG-525 (Run 16c i3 Sealcertain y395-y397: body 0/5 'ordered' for years, 37 x 'cancels Forge bismuth bronze breastplate: Needs 3
+-- bismuth bronze bars' while iron bars lay in the stores): the open order of a gear slot keeps the metal it was entered in. When
+-- that metal's bars are gone (fewer in the stores than one piece takes) and another metal of gear.metals has the bars, the order
+-- is removed and the slot is planned again (iron first) in the same pass. Returns true when it removed the order.
+function M.gear_wrong_metal(K, c, r, it, tag)
+  if not it.metal or not (c.gear or {}).metals then return false end
+  local oid = r.p.orders[tag]
+  local o = oid and order_by_id(oid)
+  if not o then return false end
+  local okm, tok = pcall(function() return mat_token(o.mat_type, o.mat_index) end)
+  if not okm or type(tok) ~= 'string' or tok:sub(1, 10) ~= 'INORGANIC:' then return false end
+  local b = it.metal.bars
+  if (st.bars_by[tok] or 0) >= b then return false end
+  local alt
+  for _, m in ipairs(c.gear.metals) do
+    local t = 'INORGANIC:' .. m
+    if t ~= tok and (st.bars_by[t] or 0) >= b and left(c, r, 'bars:' .. t) >= b and left(c, r, 'bars') >= b then alt = m; break end
+  end
+  if not alt or not K.act.order_remove(oid) then return false end
+  r.p.orders[tag] = nil
+  r.s.live[tag] = nil
+  K.log('warn', 'gear %s: order %d in %s removed, %d bar(s) of it left and %s has them: planned again', it.cat, oid,
+        tok:gsub('^INORGANIC:', ''), st.bars_by[tok] or 0, alt)
+  return true
+end
+
 local function plan_gear(K, c, r)
   local g = c.gear
   local forge, lw = ws_any(r.f, g.forge), ws_any(r.f, g.leatherworks)
@@ -2193,6 +2251,9 @@ local function plan_gear(K, c, r)
     local rec = r.gear.cats[it.cat]
     local tag = 'dfllm:gear_' .. it.cat
     if rec and rec.miss > 0 then
+      if open(r, tag) and M.gear_wrong_metal(K, c, r, it, tag) then   -- BUG-525: the wrong-metal order's pieces are missing again
+        rec.miss, rec.open, rec.route = rec.miss + rec.open, 0, 'none'
+      end
       if open(r, tag) then rec.route = 'ordered'
       else
         local jobs = (rec.miss + (it.out or 1) - 1) // (it.out or 1)
@@ -12262,6 +12323,65 @@ M.verbs['order.add'] = function(K, args, cmd)
   if not ok then return false, 'workorder: ' .. tostring(id) end
   K.log('info', 'order %s x%d added by %s (order %s)', job, amount, tostring(cmd and cmd.by), tostring(id))
   return true, string.format('order %s %s x%d', tostring(id), job, amount), {order = math.tointeger(id) or -1}
+end
+
+-- orders.cancel {id? | stuck?, force?} (BUG-526, Run 16c i3 Sealcertain: 36 stuck orders and a jammed forge, no verb to remove one):
+-- takes ONE manager order off the work orders screen (id; list them with `inspect what=orders`) or, with stuck=true, up to
+-- CANCEL_MAX of the orders the kernel's ledger calls stuck (p.ostuck, ORDER_STUCK). The supply orders (brewing, meals, barrels,
+-- raw fish: keep_order) are refused unless force=true. A kernel-owned order (one with a tag) is not entered again for
+-- orders.backoff_days; jobs it already made keep running (act.order_remove).
+M.CANCEL_MAX = 40
+M.verbs['orders.cancel'] = function(K, args, cmd)
+  local p = pstate(K)
+  local id = math.tointeger(args.id)
+  if args.id ~= nil and (not id or id < 0) then return false, 'orders.cancel: id must be an order id (dfllm cmd inspect what=orders)' end
+  if args.force ~= nil and type(args.force) ~= 'boolean' then return false, 'orders.cancel: force must be true or false' end
+  if args.stuck ~= nil and type(args.stuck) ~= 'boolean' then return false, 'orders.cancel: stuck must be true or false' end
+  if (id ~= nil) == (args.stuck == true) then return false, 'orders.cancel: give either id=<order> or stuck=true' end
+  local ids = {}
+  if id then ids[1] = id
+  else
+    for key in pairs(p.ostuck or {}) do
+      local n = math.tointeger(tonumber(key))
+      if n then ids[#ids + 1] = n end
+    end
+    table.sort(ids)
+    while #ids > M.CANCEL_MAX do table.remove(ids) end
+    if #ids == 0 then return true, 'orders.cancel: no order is stuck', {removed = 0, kept = 0} end
+  end
+  local c = M.conf(K)
+  local backoff = ((c.orders or {}).backoff_days or 10) * DAY
+  local now = K.now().tick
+  local gone, kept = {}, {}
+  for _, oid in ipairs(ids) do
+    local o = order_by_id(oid)
+    if not o then
+      if id then return false, string.format('orders.cancel: no order %d (it is done or gone)', oid) end
+      p.ostuck[tostring(oid)] = nil
+    elseif keep_order(o) and args.force ~= true then
+      kept[#kept + 1] = oid
+      if id then
+        return false, string.format('orders.cancel: order %d is a supply order (brewing, meals, barrels, fish): add force=true to remove it', oid)
+      end
+    else
+      local okn, jn = pcall(job_name, o)
+      local left = math.tointeger(o.amount_left) or 0
+      if K.act.order_remove(oid) then
+        gone[#gone + 1] = oid
+        p.ostuck[tostring(oid)], p.ocancel[tostring(oid)], p.ostale[tostring(oid)] = nil, nil, nil
+        for tag, oi in pairs(p.orders) do
+          if oi == oid then p.orders[tag], st.backoff[tag] = nil, now + backoff end
+        end
+        K.log('warn', 'order %d %s x%d removed by %s (orders.cancel)', oid, okn and tostring(jn) or '?', left,
+              tostring(cmd and cmd.by))
+      elseif id then return false, 'orders.cancel: the work orders screen refused to remove order ' .. oid end
+    end
+  end
+  K.persist.touch('m.economy')
+  return true, string.format('orders.cancel: %d order%s removed%s%s', #gone, #gone == 1 and '' or 's',
+                             #gone > 0 and (' (' .. table.concat(gone, ',', 1, math.min(#gone, 12)) .. (#gone > 12 and ',..' or '') .. ')') or '',
+                             #kept > 0 and (', ' .. #kept .. ' supply order(s) kept (force=true)') or ''),
+         {removed = #gone, kept = #kept, ids = json.array({table.unpack(gone, 1, math.min(#gone, 40))})}
 end
 
 -- jobs.release {all?, preventblocking?} (FR-16): resumes suspended construction jobs (all = also the ones
