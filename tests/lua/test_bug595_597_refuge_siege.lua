@@ -3,11 +3,12 @@
 -- with an ogre on the stair; patients lay in a hospital outside Tiefe+ and 'Pflege+ not opened: no fresh hostile census' 14 times; 640 drinks and
 -- 14 food stayed forbidden in the BREACH). The siege traffic tests of this round (the world of test_bug588_589_refuge_destroyers.lua: the
 -- Kern+ hall, the civilians' stair at 6,6 from z9 down to Tiefe+ at z5, a hatch on its head, the citizens walking in over time):
---   (1) BUG-595: destroyers in sight 107 tiles out (SIEGE_DEEP), one patient lying outside Tiefe+ the whole siege: the plug used to wait for
---       ever ('wait:destroyers far'); now it waits PLUG.out_wait ticks for the walkers and then walls the foot (REFUGE_PLUG early, out=1),
---       before the destroyers are anywhere near; the destroyers announced by the popup only (nothing in sight) count too;
---   (2) BUG-595: the access is walled before the destroyers arrive: a queued but unfinished plug with a destroyer on the stair is no wall (the
---       separated Innen+ far from them holds the citizens), the finished plug is (Tiefe+ again);
+--   (1) BUG-595 (with walking units: citizens stream to the stair while a destroyer walks in from 100 tiles): a bedridden patient outside
+--       Tiefe+ does not hold the plug (old: wait:destroyers far for ever), walkers do until the last is in (nobody walled out, nobody on the
+--       stair when the walls are ordered), a walker who never comes holds it out_wait + out_each ticks from the last arrival and is then
+--       walled out while the destroyer is still far; the destroyers announced by the popup only (nothing in sight) count too;
+--   (2) BUG-595 (same traffic): the access is walled before the destroyers arrive: every pick on the way is Tiefe+ when the walls stand; a
+--       queued but unfinished plug with the destroyer on the stair is no wall (the separated Innen+ holds the citizens);
 --   (3) BUG-596: the care burrow (patient water in a long siege): a census that lists 40 of 57 hostiles used to give 'no fresh hostile census'
 --       for ever; with the cut's lower bound (h.lo, h.o1) a patient and a well far from O1 open it, one near O1 stay closed; the repeated
 --       patient_thirst line comes at ALERT_REPEAT times the interval while the alert alone keeps the carers away;
@@ -95,24 +96,127 @@ local function ask(W, mode, want, cur)
   return pick, flee, note
 end
 
-T.test('BUG-595 (1): destroyers in sight far away, a patient lying outside Tiefe+ all siege: the plug waits PLUG.out_wait ticks for the walkers, then ' ..
-       'walls the foot (old: wait:destroyers far for ever); the destroyers of the popup alone (none in sight) count', function()
+-- one walker's route into Tiefe+: diagonally over the hall to the stair head, down the stair, one step into the burrow
+local function route(x, y)
+  local r = {{x, y, Z}}
+  while x ~= 6 or y ~= 6 do
+    if x > 6 then x = x - 1 elseif x < 6 then x = x + 1 end
+    if y > 6 then y = y - 1 elseif y < 6 then y = y + 1 end
+    r[#r + 1] = {x, y, Z}
+  end
+  for z = Z - 1, Z - 4, -1 do r[#r + 1] = {6, 6, z} end
+  r[#r + 1] = {7, 6, Z - 4}
+  r[#r + 1] = {8, 6, Z - 4}               -- (out of the foot ring: 2 tiles from the stair)
+  return r
+end
+local function in_refuge(p) return p[3] == Z - 4 and p[1] >= 5 and p[1] <= 8 and p[2] >= 5 and p[2] <= 8 end
+
+-- The siege traffic world. o.walkers = {{id, x, y, start, stuck = true}} walk to the stair one tile per 9 ticks from `start` (stuck: never);
+-- o.patient lies bedridden (needs_healthcare) in the hall; the destroyer walks in from 100 tiles out (y = 106) toward the stair head, one tile
+-- per o.per ticks, then down the stair. After every step the plug is asked (bd = true); o.ask: the alert is asked too once the plug is queued;
+-- o.finish: the builders need that many ticks after the order; o.unfinished: never. Returns the log:
+-- queued = {rel, dist, outside, stair} at the tick the plug was ordered, picks, arrive = the tick the destroyer is on the stair.
+local function traffic(o)
+  local cits, walkers = {{1, 8, 8, Z - 4}, {2, 8, 7, Z - 4}}, {}
+  for _, w in ipairs(o.walkers) do
+    cits[#cits + 1] = {w.id, w.x, w.y, Z}
+    walkers[#walkers + 1] = {id = w.id, route = route(w.x, w.y), i = 1, start = w.start, stuck = w.stuck}
+  end
+  if o.patient then cits[#cits + 1] = {o.patient, 10, 9, Z} end
+  local W, M, repairs = fort{cits = cits, room = o.room, stock = o.room}
+  hatch(W)
+  refresh(W)
+  W.set_mode('SIEGE')
+  if o.patient then W.unit(o.patient).health = {flags = {needs_healthcare = true}} end
+  local log = {picks = {}, repairs = repairs, walkers = walkers}
+  local rel, finish_at = 0, nil
+  while rel < o.ticks do
+    W.run(9, {skip = 9})
+    rel = rel + 9
+    for _, w in ipairs(walkers) do
+      if rel >= w.start and not w.stuck and w.i < #w.route then
+        w.i = w.i + 1
+        local p = w.route[w.i]
+        W.move(w.id, p[1], p[2], p[3])
+      end
+    end
+    local steps = rel // o.per
+    local dy, dz = 106 - steps, Z
+    if dy < 6 then dy, dz = 6, math.max(Z - 2, Z - (steps - 100)) end
+    census(W, {{6, dy, dz, bd = 1}})
+    local _, s = W.K.call('seal', 'plug', {bd = true})
+    if s == 'queued' and not log.queued then
+      local out, stair = 0, 0
+      for _, w in ipairs(walkers) do
+        local p = w.route[w.i]
+        if not in_refuge(p) then out = out + 1 end
+        if p[1] == 6 and p[2] == 6 and p[3] < Z and p[3] > Z - 4 then stair = stair + 1 end
+      end
+      log.queued = {rel = rel, dist = (dy - 6) + (Z - dz), outside = out, stair = stair}
+      if o.finish then finish_at = rel + o.finish end
+    end
+    if finish_at and rel >= finish_at then W.pstate = function() return {done = true} end end
+    if log.queued and o.ask then
+      local pick = ask(W, 'BREACH', 'Tiefe+')
+      log.picks[#log.picks + 1] = {rel = rel, pick = pick, on_stair = dz < Z}
+    end
+    if dz < Z and not log.arrive then log.arrive = rel end
+  end
+  return log, W, M
+end
+
+T.test('BUG-595 (1): traffic: four citizens stream toward the stair while a destroyer walks in from 100 tiles; a bedridden patient lies in the hall ' ..
+       '(old: the plug waited for every walker AND the patient to be inside, then came with the BREACH): nobody is walled out, nobody is on the ' ..
+       'stair when the walls are ordered, the plug is queued long before the destroyer is within PLUG.close', function()
+  local log, W, M = traffic{ticks = 1900, per = 20, patient = 20,
+                            walkers = {{id = 11, x = 12, y = 12, start = 0}, {id = 12, x = 11, y = 12, start = 200},
+                                       {id = 13, x = 12, y = 11, start = 400}, {id = 14, x = 10, y = 12, start = 600}}}
+  T.ok(log.queued, 'the plug was queued')
+  T.eq({log.queued.outside, log.queued.stair}, {0, 0}, 'every walker inside the burrow, nobody on the stair when the walls were ordered')
+  T.ok(log.queued.dist > M.PLUG.close + 20, 'queued with the destroyer ' .. log.queued.dist .. ' tiles out (old: never before the BREACH)')
+  T.ok(log.queued.rel >= 600, 'not before the last walker was in: ' .. log.queued.rel)
+  T.eq(#log.repairs, 1)
+  for _, w in ipairs(log.walkers) do T.ok(in_refuge(w.route[w.i]), 'walker ' .. w.id .. ' ended inside') end
+  local ev = W.find_events('REFUGE_PLUG')
+  T.eq({#ev, ev[1].d.early, ev[1].d.breach, ev[1].d.out}, {1, 1, 0, nil}, 'early; the patient is no walker on his way')
+end)
+
+T.test('BUG-595 (1b): traffic: a walker who stops for good (stuck in the hall) holds the plug out_wait + out_each ticks from the last one that got ' ..
+       'in, then it is walled anyway while the destroyer is still far; the walkers of the stream are not cut off', function()
+  local log, W, M = traffic{ticks = 4400, per = 60, patient = 20,
+                            walkers = {{id = 11, x = 12, y = 12, start = 0}, {id = 12, x = 11, y = 12, start = 300},
+                                       {id = 15, x = 10, y = 10, start = 0, stuck = true}}}
+  T.ok(log.queued, 'the plug was queued')
+  T.ok(log.queued.rel >= M.PLUG.out_wait + M.PLUG.out_each, 'not before the clock ran (' .. log.queued.rel .. ')')
+  T.ok(log.queued.dist > M.PLUG.near, 'queued with the destroyer ' .. log.queued.dist .. ' tiles out (old: at the BREACH)')
+  T.eq(log.queued.stair, 0)
+  for i = 1, 2 do T.ok(in_refuge(log.walkers[i].route[log.walkers[i].i]), 'the streaming walker ' .. i .. ' was not cut off') end
+  local ev = W.find_events('REFUGE_PLUG')
+  T.eq({#ev, ev[1].d.early, ev[1].d.out}, {1, 1, 1}, 'one straggler counted, the patient not')
+end)
+
+T.test('BUG-595 (1c): a bedridden patient outside Tiefe+ does not hold the plug; a walker who does not come holds it out_wait + out_each; the ' ..
+       'destroyers announced by the popup alone (none in sight) count', function()
   local W, M, repairs = fort{cits = {{1, 8, 8, Z - 4}, {2, 8, 7, Z - 4}, {3, 10, 9, Z}}}   -- 3: the patient in the hall
   hatch(W)
   refresh(W)
   W.set_mode('SIEGE')
+  W.unit(3).health = {flags = {needs_healthcare = true}}
   census(W, {{6, 60, Z, bd = 1}})                      -- 54 tiles from the stair head
-  T.eq(select(2, W.K.call('seal', 'plug', {bd = true})), 'wait:destroyers far', 'the walker is given its time')
-  W.run(M.PLUG.out_wait // 2, {skip = 9})
-  census(W, {{6, 60, Z, bd = 1}})
-  T.eq(select(2, W.K.call('seal', 'plug', {bd = true})), 'wait:destroyers far', 'half of it')
-  W.run(M.PLUG.out_wait // 2 + 100, {skip = 9})
-  census(W, {{6, 60, Z, bd = 1}})
-  local _, st = W.K.call('seal', 'plug', {bd = true})
-  T.eq(st, 'queued', 'old: wait:destroyers far')
+  T.eq(select(2, W.K.call('seal', 'plug', {bd = true})), 'queued', 'old: wait:destroyers far (for the patient)')
   T.eq(#repairs, 1)
-  local ev = W.find_events('REFUGE_PLUG')
-  T.eq({#ev, ev[1].d.early, ev[1].d.breach, ev[1].d.out}, {1, 1, 0, 1})
+  local W1, M1 = fort{cits = {{1, 8, 8, Z - 4}, {2, 8, 7, Z - 4}, {3, 10, 9, Z}}}   -- 3: a walker who does not come
+  hatch(W1)
+  refresh(W1)
+  W1.set_mode('SIEGE')
+  census(W1, {{6, 60, Z, bd = 1}})
+  T.eq(select(2, W1.K.call('seal', 'plug', {bd = true})), 'wait:destroyers far', 'the walker is given its time')
+  W1.run(M1.PLUG.out_wait, {skip = 9})
+  census(W1, {{6, 60, Z, bd = 1}})
+  T.eq(select(2, W1.K.call('seal', 'plug', {bd = true})), 'wait:destroyers far', 'out_wait alone is not enough: out_each per walker')
+  W1.run(M1.PLUG.out_each + 100, {skip = 9})
+  census(W1, {{6, 60, Z, bd = 1}})
+  T.eq(select(2, W1.K.call('seal', 'plug', {bd = true})), 'queued')
   -- the popup announced engineers, nothing in sight yet, everybody inside: walled at once
   local W2, _, repairs2 = fort()
   hatch(W2)
@@ -125,21 +229,27 @@ T.test('BUG-595 (1): destroyers in sight far away, a patient lying outside Tiefe
   T.eq(#repairs2, 1)
 end)
 
-T.test('BUG-595 (2): the access is a wall before the destroyers come: a queued, unfinished plug with a destroyer on the stair is no wall ' ..
-       '(Innen+ holds the citizens), the finished one is (Tiefe+)', function()
-  local W, M, repairs = fort{room = true, stock = true}
-  hatch(W)
-  refresh(W)
-  W.set_mode('SIEGE')
-  census(W, {{6, 60, Z, bd = 1}})
-  T.eq(select(2, W.K.call('seal', 'plug', {bd = true})), 'queued')
-  T.eq(ask(W, 'BREACH', 'Tiefe+'), 'Tiefe+', 'the destroyers far: the refuge, its foot walled by the citizens inside')
-  census(W, {{6, 6, Z - 2, bd = 1}})                  -- a destroyer on the stair column before the walls stand
-  local pick, flee = ask(W, 'BREACH', 'Tiefe+')
-  T.eq({pick, flee}, {'Innen+', false}, 'old: Tiefe+ (a queued plug counted as a wall)')
-  W.pstate = function() return {done = true} end      -- the walls stand
-  pick = ask(W, 'BREACH', 'Tiefe+')
-  T.eq(pick, 'Tiefe+', 'built: a hatch broken, the wall stays')
+T.test('BUG-595 (2): traffic: the walls (builders inside, 600 ticks) stand long before the destroyer reaches the stair: every pick while it ' ..
+       'approaches is Tiefe+; built, a hatch broken on top is no way in', function()
+  local log = traffic{ticks = 2300, per = 20, room = true, ask = true, finish = 600,
+                      walkers = {{id = 11, x = 12, y = 12, start = 0}, {id = 12, x = 11, y = 12, start = 200}}}
+  T.ok(log.queued and log.queued.dist > 50, 'queued with the destroyer far')
+  T.ok(log.arrive, 'the destroyer came down the stair')
+  T.ok(#log.picks > 50, 'asked all along: ' .. #log.picks)
+  for _, p in ipairs(log.picks) do T.eq(p.pick, 'Tiefe+', 'at +' .. p.rel .. (p.on_stair and ' (destroyer on the stair, walls built)' or '')) end
+end)
+
+T.test('BUG-595 (2b): traffic: the walls are not finished when the destroyer is on the stair (no builders in time): the citizens hold the ' ..
+       'separated area, not a refuge it can walk into (old: a queued plug counted as a wall)', function()
+  local log = traffic{ticks = 2300, per = 20, room = true, ask = true,
+                      walkers = {{id = 11, x = 12, y = 12, start = 0}}}
+  T.ok(log.queued and log.arrive, 'queued, and it arrived')
+  local far, near = {}, {}
+  for _, p in ipairs(log.picks) do
+    if p.on_stair then near[p.pick] = true else far[p.pick] = true end
+  end
+  T.ok(far['Tiefe+'], 'Tiefe+ while it was far')
+  T.ok(near['Innen+'] and not near['Tiefe+'], 'the separated area with it on the stair and no walls')
 end)
 
 -- (3) BUG-596: census.h cut at 40 of 57 hostiles (the world of test_bug571_care_siege_out.lua)

@@ -3734,8 +3734,9 @@ M.refuge_closure = refuge_closure
 -- walls are designated for removal (act.construction_remove), the refuge is enterable again.
 -- Public M.plug (siege asks), M.plug_state
 -- BUG-595 (Run 16b i2 Brotherarrow y414): out_wait = the ticks citizens outside the refuge burrow (patients in the hospital, carers on their
--- way) may hold the early plug back once destroyers are known; after that the foot is walled anyway
-M.PLUG = {on = true, near = 30, close = 10, lift = 2400, retry = 1200, out_wait = 1800}
+-- way) may hold the early plug back once destroyers are known; bedridden patients do not count (they cannot walk in); walkers get
+-- out_wait + out_each per walker from the last one that got in, then the foot is walled anyway
+M.PLUG = {on = true, near = 30, close = 10, lift = 2400, retry = 1200, out_wait = 1800, out_each = 600}
 local function plug_cfg(K)
   return M.PLUG                                  -- constants of the module (no config key: tests set M.PLUG)
 end
@@ -3762,7 +3763,7 @@ local function plug_eval(K, args)
   local c = plug_cfg(K)
   if not c.on then return 'off' end
   if st.plug then return 'held', st.plug.id end
-  if not (type(args) == 'table' and args.bd) then mem.plug_since = nil; return 'wait:no destroyers' end
+  if not (type(args) == 'table' and args.bd) then mem.plug_since, mem.plug_prog, mem.plug_nout = nil, nil, nil; return 'wait:no destroyers' end
   local t = now_t(K)
   -- BUG-595: since when the plug has been wanted (destroyers known), the clock of PLUG.out_wait
   mem.plug_since = mem.plug_since or t
@@ -3807,10 +3808,23 @@ local function plug_eval(K, args)
       local u = df.unit.find(id)
       local x, y, z
       if u then x, y, z = dfhack.units.getPosition(u) end
-      if x and not in_burrow(rb0, x, y, z) then outside, nout = true, nout + 1 end
+      if x and not in_burrow(rb0, x, y, z) then
+        -- a bedridden patient cannot walk in however long the plug waits (BUG-595 review): he is not a walker on his way
+        local bed = u.health and u.health.flags and u.health.flags.needs_healthcare
+        if not bed then outside, nout = true, nout + 1 end
+      end
     end
   end
-  local waited = outside and t - mem.plug_since >= c.out_wait
+  -- walkers still on their way: the clock runs from the last time one more of them got in (progress), and a longer line of walkers is
+  -- given longer (out_wait + out_each per walker outside); no progress for that long = they are not coming (carers at work, stuck)
+  if not outside then
+    mem.plug_prog, mem.plug_nout = nil, nil
+  elseif mem.plug_nout == nil or nout < mem.plug_nout or not mem.plug_prog then
+    mem.plug_prog, mem.plug_nout = t, nout
+  else
+    mem.plug_nout = nout
+  end
+  local waited = outside and t - (mem.plug_prog or mem.plug_since) >= c.out_wait + (c.out_each or 0) * nout
   local sight = bd_sight(K) > 0 or args.announced == true
   local early = false
   if not late and not (near >= 0 and near <= c.near) then
@@ -3903,7 +3917,7 @@ local function plug_lift(K, t)
   end
   K.emit('REFUGE_PLUG', 'A', string.format('refuge plug lifted: %d of %d walls designated for removal', n, #(p.tiles or {})),
          {proj = p.id, n = n, lifted = 1})
-  st.plug, st.plug_try, mem.plug_since, dirty = nil, nil, nil, true
+  st.plug, st.plug_try, mem.plug_since, mem.plug_prog, mem.plug_nout, dirty = nil, nil, nil, nil, nil, true
   save(K)
 end
 
