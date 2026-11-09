@@ -843,11 +843,126 @@ local function true_armor(cat, it)
   end
   return v
 end
+-- BUG-598 (Run 16a i1 Basementflew y441-y447, 16b i2 Brotherarrow y413, 16d i4 Trumpetrealms y428: 'free usable body 18, weapons 12' and the
+-- squads fit 0-1 of 9 for years after the round-38 reload, 'body of 2 positions to any material' logged every day for the same slots): a
+-- piece that passes free_item is not yet a piece a soldier can take. The reasons the stock now tells apart (nil = usable):
+--   worn      a squad member wears / holds it (never stock for a slot that is empty)
+--   bin       it lies in a forbidden bin or chest (DF treats the contents of a forbidden container as forbidden: FR-50 for drink and food)
+--   far       it lies on another walk group than the citizens' (flooded levels, cut-off caves): nobody fetches it
+--   alien     made by another race than the fortress' (loot: armor sized for goblins does not fit a dwarf)
+--   reserved  DF keeps it assigned to a squad position (items_assigned); the soldier of an occupied position is fetching it, a vacant
+--             position or no position at all holds it for good (M.release_kit gives those back)
+--   stuck     released from a reservation STUCK_AFTER times and still lying there: DF does not hand it out
+M.PEND_MAX, M.ORPHAN_MIN, M.STUCK_AFTER = 2400, 1200, 2
+M.REL_EVERY, M.REL_MAX = 1200, 30
+local RES_KEYS = {'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD'}
+local RES_CATS = {'body', 'head', 'pants', 'gloves', 'shoes', 'shield', 'weapon'}
+local function tick_of() return rt and rt.K and now_tick(rt.K) or nil end
+
+-- is the item (or the container it lies in) forbidden or dumped? Two levels, as economy's FR-50 reads drink
+local function container_blocked(it)
+  local ok, r = pcall(function()
+    local c = dfhack.items.getContainer(it)
+    for _ = 1, 2 do
+      if not c then return false end
+      if c.flags.forbid or c.flags.dump then return true end
+      c = dfhack.items.getContainer(c)
+    end
+    return false
+  end)
+  return ok and r == true
+end
+
+-- {item id = {occ = n, vac = n, orphan = bool}}: the gear DF keeps assigned to a fort squad position (occ: an occupied position,
+-- vac: a vacant one), and what items_assigned lists with no position behind it (orphan). Cached for one tick
+local function reservations()
+  local now = tick_of()
+  if now and rt.resv and rt.resv.t == now then return rt.resv.map end
+  local map = {}
+  try(function()
+    local gid = df.global.plotinfo.group_id
+    for _, s in ipairs(df.global.world.squads.all) do
+      if s.entity_id == gid then
+        for _, p in ipairs(s.positions) do
+          local occ = (int(p.occupant) or -1) >= 0
+          local seen = {}
+          local function mark(id)
+            if seen[id] then return end
+            seen[id] = true
+            local r = map[id]
+            if not r then r = {occ = 0, vac = 0}; map[id] = r end
+            if occ then
+              r.occ = r.occ + 1
+              r.sqs = r.sqs or {}
+              r.sqs[s.id] = true
+            else r.vac = r.vac + 1 end
+          end
+          for _, id in ipairs(p.equipment.assigned_items) do mark(id) end
+          for _, c in ipairs(RES_CATS) do
+            for _, sp in ipairs(p.equipment.uniform[c] or {}) do
+              for _, id in ipairs(sp.assigned or {}) do mark(id) end
+            end
+          end
+        end
+      end
+    end
+  end)
+  try(function()
+    local eq = df.global.plotinfo.equipment
+    for _, key in ipairs(RES_KEYS) do
+      for _, id in ipairs(eq.items_assigned[key] or {}) do
+        if not map[id] then map[id] = {occ = 0, vac = 0, orphan = true} end
+      end
+    end
+  end)
+  if now then rt.resv = {t = now, map = map} end
+  return map
+end
+
+local function piece_far(it)
+  local K = rt and rt.K
+  if not K then return false end
+  local okp, x, y, z = pcall(dfhack.items.getPosition, it)
+  if not (okp and x) then return false end
+  local ok, far = K.call('snapshot', 'far', x, y, z)
+  return ok == true and far == true
+end
+
+local function alien_make(it)
+  return try(function()
+    local mr, race = it.maker_race, df.global.plotinfo.race_id
+    return mr ~= nil and race ~= nil and mr >= 0 and race >= 0 and mr ~= race
+  end) == true
+end
+
+-- why a piece that passed free_item still is no stock (see above); `weapon`: no race / reservation test (a weapon spec claims its
+-- weapon already: weapon_plan subtracts the claims, a second count here would take it twice)
+local function piece_block(it, weapon)
+  if it.flags.in_inventory then                       -- (a piece in a bin has the flag too: worn = a unit holds it)
+    if try(function() return dfhack.items.getHolderUnit(it) end) then return 'worn' end
+  end
+  if container_blocked(it) then return 'bin' end
+  if rt and rt.stuck and rt.stuck[it.id] then return 'stuck' end
+  if piece_far(it) then return 'far' end
+  if weapon then return nil end
+  if alien_make(it) then return 'alien' end
+  if reservations()[it.id] then return 'reserved' end
+  return nil
+end
+M.piece_block = piece_block
+
+-- a weapon a soldier can be handed (free_item + reachable, in no forbidden bin; worn weapons count: their specs are claims)
+local function free_weapon(it)
+  if not free_item(it) then return false end
+  local b = piece_block(it, true)
+  return b == nil or b == 'worn'
+end
+
 function M.stock_mats(cat)
   local n = {metal = 0, leather = 0, any = 0}
   try(function()
     for _, it in ipairs(df.global.world.items.other[CAT_ITEMS[cat]]) do
-      if free_item(it) and true_armor(cat, it) then
+      if free_item(it) and true_armor(cat, it) and piece_block(it) == nil then
         n.any = n.any + 1
         local mi = dfhack.matinfo.decode(it)
         local fl = mi and mi.material and mi.material.flags
@@ -858,16 +973,20 @@ function M.stock_mats(cat)
   return n
 end
 -- BUG-591: what lies in one armor category and why it is not stock: {free (true armor a soldier may take), soft (clothes), forbid
--- (true armor marked forbidden), held (true armor owned, in a building or carried by a civilian)}
+-- (true armor marked forbidden), held (true armor owned, in a building or carried by a civilian)}. BUG-598 adds worn (a soldier wears
+-- it), bin (in a forbidden bin), far (another walk group), alien (made by another race), reserved (assigned to a squad position) and
+-- stuck (released twice, still lying): none of these counts in free
 function M.stock_detail(cat)
-  local d = {free = 0, soft = 0, forbid = 0, held = 0}
+  local d = {free = 0, soft = 0, forbid = 0, held = 0, worn = 0, bin = 0, far = 0, alien = 0, reserved = 0, stuck = 0}
   try(function()
     for _, it in ipairs(df.global.world.items.other[CAT_ITEMS[cat]]) do
       local f = it.flags
       if not f.removed and not f.garbage_collect and not f.melt and not f.dump and not f.trader then
         if not true_armor(cat, it) then
           if free_item(it) then d.soft = d.soft + 1 end
-        elseif free_item(it) then d.free = d.free + 1
+        elseif free_item(it) then
+          local b = piece_block(it)
+          if b then d[b] = d[b] + 1 else d.free = d.free + 1 end
         elseif f.forbid then d.forbid = d.forbid + 1
         else d.held = d.held + 1 end
       end
@@ -1099,7 +1218,7 @@ local function weapon_plan(g, n, release)
   local stock, tool_tok = {}, {}
   try(function()
     for _, it in ipairs(df.global.world.items.other.WEAPON) do
-      local w = free_item(it) and weapon_kind(it:getSubtype())
+      local w = free_weapon(it) and weapon_kind(it:getSubtype())      -- BUG-598: reachable, in no forbidden bin
       if w then
         if w.k == 'melee' then
           if not tostring(w.token):find('_TRAINING$') then stock[w.token] = (stock[w.token] or 0) + 1 end   -- review: no wooden spare
@@ -1160,7 +1279,7 @@ local function stale_weapons(s, marked)
   local stock, claims = {}, {}
   try(function()
     for _, it in ipairs(df.global.world.items.other.WEAPON) do
-      local w = free_item(it) and weapon_kind(it:getSubtype())
+      local w = free_weapon(it) and weapon_kind(it:getSubtype())
       if w and w.k == 'melee' and not tostring(w.token):find('_TRAINING$') then stock[w.token] = (stock[w.token] or 0) + 1 end
     end
   end)
@@ -1252,18 +1371,79 @@ end
 -- of their class, one act call per weapon (the same act as every uniform kind); positions with a class that has no training
 -- raw stay as they are. Returns set = positions changed, held = positions that carried a training weapon already, left =
 -- {{pos, cls}} unchanged, counts = {AXE = n, ...}, fail = the act's refusal
-function M.train_apply(K, s, only)
+-- BUG-598 (Run 16a i1 Basementflew y441-y447 'squad A 5, B 2: weapon 0, wood 0' beside 12 free melee weapons; 16b i2 'weapon 0/4' beside 27;
+-- kern.log 'squad A: 5 positions changed to the training weapon of their class' every few days): the training policy put every melee
+-- position on a wooden training weapon the fort did not have (the carpenters make them from wood: need + spare, a soil fort without
+-- wood or without a workshop never does), so the soldiers stood with empty hands in PEACE and fit stayed 0. train_pool = the training
+-- weapons of the fort a position can still be given (free ones and the ones soldiers carry, none in a forbidden bin, far, ...) minus
+-- the training specs of the other squads, per raw id; train_apply with a pool gives a position the wooden spec only while the pool holds
+-- one, and reports the positions whose training spec has no weapon behind it (`unfilled`: ensure_weapons gives them a real one back).
+function M.train_pool(K, skip)
+  local pool = {}
+  try(function()
+    for _, it in ipairs(df.global.world.items.other.WEAPON) do
+      local f = it.flags
+      if not (f.removed or f.garbage_collect or f.melt or f.dump or f.trader) then
+        local w = weapon_kind(it:getSubtype())
+        if w and w.k == 'melee' and tostring(w.token):find('_TRAINING$') and free_weapon(it) then
+          pool[w.token] = (pool[w.token] or 0) + 1
+        end
+      end
+    end
+  end)
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s2 = sp.key ~= skip and e and squad(e.id)
+    if s2 then
+      for _, m in ipairs(members(s2)) do
+        for _, sub in ipairs(weapon_specs(m.p)) do
+          local w = weapon_kind(sub)
+          if w and w.k == 'melee' and tostring(w.token):find('_TRAINING$') and (pool[w.token] or 0) > 0 then
+            pool[w.token] = pool[w.token] - 1
+          end
+        end
+      end
+    end
+  end
+  return pool
+end
+
+-- the training raw id of a position's weapon spec, nil without one
+local function train_spec(p)
+  for _, sub in ipairs(weapon_specs(p)) do
+    local w = sub >= 0 and weapon_kind(sub)
+    if w and tostring(w.token):find('_TRAINING$') then return w.token end
+  end
+  return nil
+end
+
+-- the squads screen's weapon slot of the positions `only` (a set of 0-based positions, nil = all) to the training weapon
+-- of their class, one act call per weapon (the same act as every uniform kind); positions with a class that has no training
+-- raw stay as they are. Returns set = positions changed, held = positions that carried a training weapon already, left =
+-- {{pos, cls}} unchanged, counts = {AXE = n, ...}, fail = the act's refusal. BUG-598: with `pool` ({raw id = n}, M.train_pool) a
+-- position takes a training spec only while the pool holds that weapon; nowood = positions left on a real weapon for want of one,
+-- unfilled = {pos = true} positions whose training spec the pool cannot fill
+function M.train_apply(K, s, only, pool)
   local by, order, held, left, counts, set, fail = {}, {}, 0, {}, {}, {}, nil
+  local nowood, unfilled = {}, {}
+  local function take(tok)
+    if not pool then return true end
+    if (pool[tok] or 0) > 0 then pool[tok] = pool[tok] - 1; return true end
+    return false
+  end
   for _, m in ipairs(members(s)) do
     if not only or only[m.pos] then
       local cls = M.weapon_class(m)
       local tok = M.train_token(K, cls)                 -- FR-101: a class without a variant takes the fallback's
-      if cls == 'TRAINING' then held = held + 1
+      if cls == 'TRAINING' then
+        if take(train_spec(m.p) or '') then held = held + 1 else unfilled[m.pos] = true end
       elseif tok then
-        if not by[tok] then by[tok] = {}; order[#order + 1] = tok end
-        table.insert(by[tok], m.pos)
-        local tc = tok:match('^ITEM_WEAPON_(%u+)') or 'AXE'           -- counted by the training weapon's class
-        counts[tc] = (counts[tc] or 0) + 1
+        if take(tok) then
+          if not by[tok] then by[tok] = {}; order[#order + 1] = tok end
+          table.insert(by[tok], m.pos)
+          local tc = tok:match('^ITEM_WEAPON_(%u+)') or 'AXE'           -- counted by the training weapon's class
+          counts[tc] = (counts[tc] or 0) + 1
+        else nowood[#nowood + 1] = m.pos end
       else left[#left + 1] = {pos = m.pos, cls = cls or 'none'} end
     end
   end
@@ -1277,7 +1457,7 @@ function M.train_apply(K, s, only)
     end
   end
   table.sort(set)
-  return {set = set, held = held, left = left, counts = counts, fail = fail}
+  return {set = set, held = held, left = left, counts = counts, fail = fail, nowood = nowood, unfilled = unfilled}
 end
 
 -- melee positions get a weapon spec: while guarded every occupied position without one or with an individual-choice
@@ -1294,12 +1474,24 @@ local function ensure_weapons(K, k, s)
   -- again once PEACE returns: a squad never meets an army with wooden weapons
   local mode = K.mode()
   local trn = e.tr == 1 and (mode == 'PEACE' or mode == 'DRILL')
+  local unfilled = {}
   if trn then
-    local tr = M.train_apply(K, s, nil)
+    local tr = M.train_apply(K, s, nil, M.train_pool(K, k))        -- BUG-598: only as many wooden specs as wooden weapons exist
     for _, p in ipairs(tr.set) do nw_set(e, p, false) end
+    unfilled = tr.unfilled
     if #tr.set > 0 then
       K.log('info', 'military: squad %s: %d positions changed to the training weapon of their class', k, #tr.set)
     end
+    local nu = #tr.nowood
+    for _ in pairs(unfilled) do nu = nu + 1 end
+    rt.nowood_t = rt.nowood_t or {}
+    if nu > 0 then
+      if rt.nowood_t[k] ~= nu then
+        rt.nowood_t[k] = nu
+        K.log('warn', 'military: squad %s: %d positions keep a real weapon: the fort holds no free training weapon for them (the '
+              .. 'carpenters make them from wood, economy.training); a soldier with empty hands is no soldier', k, nu)
+      end
+    else rt.nowood_t[k] = nil end
     if tr.fail then                                   -- the act refused (e.g. a world without the training raws): not every upkeep
       backoff(K, 'wpn' .. k)
       if not rt.no_train then rt.no_train = {} end
@@ -1316,6 +1508,7 @@ local function ensure_weapons(K, k, s)
     local bad = #ws == 0 and (g ~= nil or nw_has(e, m.pos))
     if g and not bad then for _, sub in ipairs(ws) do if sub < 0 then bad = true end end end
     if untrain and not trn and not bad and M.weapon_class(m) == 'TRAINING' then bad = true; wooden = wooden + 1 end
+    if unfilled[m.pos] and not bad then bad = true end                -- BUG-598: a training spec with no wooden weapon behind it
     if bad then need[#need + 1] = m.pos; marked[m.pos] = true end
   end
   if e.un == 1 and wooden == 0 then e.un, dirty = nil, true end
@@ -2351,7 +2544,7 @@ function M.free_weapons()
   local n = 0
   try(function()
     for _, it in ipairs(df.global.world.items.other.WEAPON) do
-      if free_item(it) then
+      if free_item(it) and piece_block(it, true) == nil then      -- BUG-598: no worn, far, binned piece
         local w = weapon_kind(it:getSubtype())
         if w and w.k == 'melee' and not tostring(w.token):find('_TRAINING$') then n = n + 1 end
       end
@@ -2362,7 +2555,7 @@ end
 -- BUG-591: the weapons of the fort by what keeps them from a soldier: {melee (free, true weapons), tools (free picks and axes: the
 -- miners' and woodcutters'), wood (free training weapons), forbid (melee forbidden), held (melee owned, in a building, carried by a civilian)}
 function M.weapon_detail()
-  local d = {melee = 0, tools = 0, wood = 0, forbid = 0, held = 0}
+  local d = {melee = 0, tools = 0, wood = 0, forbid = 0, held = 0, bin = 0, far = 0, stuck = 0, reserved = 0}
   try(function()
     for _, it in ipairs(df.global.world.items.other.WEAPON) do
       local w = weapon_kind(it:getSubtype())
@@ -2370,7 +2563,14 @@ function M.weapon_detail()
       if w and w.k ~= 'ranged' and not f.removed and not f.garbage_collect and not f.melt and not f.dump and not f.trader then
         local wood = tostring(w.token):find('_TRAINING$') ~= nil
         if free_item(it) then
-          if wood then d.wood = d.wood + 1 elseif w.k == 'melee' then d.melee = d.melee + 1 else d.tools = d.tools + 1 end
+          local b = piece_block(it, true)
+          if b == 'worn' then
+            -- a soldier holds it: neither stock nor lack
+          elseif b then
+            if not wood and w.k == 'melee' then d[b] = d[b] + 1 end        -- BUG-598: bin, far, stuck
+          elseif wood then d.wood = d.wood + 1
+          elseif reservations()[it.id] then if w.k == 'melee' then d.reserved = d.reserved + 1 else d.tools = d.tools + 1 end
+          elseif w.k == 'melee' then d.melee = d.melee + 1 else d.tools = d.tools + 1 end
         elseif not wood and w.k == 'melee' then
           if f.forbid then d.forbid = d.forbid + 1 else d.held = d.held + 1 end
         end
@@ -2410,6 +2610,11 @@ function M.kit_missing(K, key)
     if wd.forbid > 0 then parts[#parts + 1] = wd.forbid .. ' forbidden' end
     if wd.held > 0 then parts[#parts + 1] = wd.held .. ' owned or carried' end
     if wd.wood > 0 then parts[#parts + 1] = wd.wood .. ' wooden' end
+    -- BUG-598: the weapons that lie free by their flags but out of a soldier's reach
+    if wd.bin > 0 then parts[#parts + 1] = wd.bin .. ' in forbidden bins' end
+    if wd.far > 0 then parts[#parts + 1] = wd.far .. ' on another walk group' end
+    if wd.reserved > 0 then parts[#parts + 1] = wd.reserved .. ' reserved for a squad position' end
+    if wd.stuck > 0 then parts[#parts + 1] = wd.stuck .. ' released and still lying' end
     if #parts > 0 then det[#det + 1] = 'weapons ' .. fw .. ' usable (' .. table.concat(parts, ', ') .. ')' end
   end
   local lack = {}
@@ -2422,7 +2627,13 @@ function M.kit_missing(K, key)
       if sd.soft > 0 then parts[#parts + 1] = sd.soft .. ' clothes' end
       if sd.forbid > 0 then parts[#parts + 1] = sd.forbid .. ' forbidden' end
       if sd.held > 0 then parts[#parts + 1] = sd.held .. ' owned or carried' end
-      if c[1] == 'body' and (sd.soft > 0 or sd.forbid > 0 or sd.held > 0) then
+      -- BUG-598: free by their flags, out of a soldier's reach
+      if sd.bin > 0 then parts[#parts + 1] = sd.bin .. ' in forbidden bins' end
+      if sd.far > 0 then parts[#parts + 1] = sd.far .. ' on another walk group' end
+      if sd.alien > 0 then parts[#parts + 1] = sd.alien .. ' made by another race' end
+      if sd.reserved > 0 then parts[#parts + 1] = sd.reserved .. ' reserved for a squad position' end
+      if sd.stuck > 0 then parts[#parts + 1] = sd.stuck .. ' released and still lying' end
+      if c[1] == 'body' and #parts > 0 then
         det[#det + 1] = c[2] .. ' ' .. sd.free .. ' usable (' .. table.concat(parts, ', ') .. ')'
       elseif c[1] ~= 'body' then
         det[#det + 1] = c[2] .. ' ' .. sd.free .. ' usable' .. (#parts > 0 and (' (' .. table.concat(parts, ', ') .. ')') or '')
@@ -4015,6 +4226,108 @@ function M.refit(K, k, s, now)
   if #plan > 0 then rt.kpi, rt.kit = nil, nil end
 end
 
+-- BUG-598: a piece DF keeps assigned to a squad position that does not wear it is no stock and no fetch: the position is vacant (the
+-- squad has 10 positions, few occupied), items_assigned lists it for no position at all, or the soldier of an occupied position has
+-- not picked it up for PEND_MAX ticks (an off-duty militia squad keeps its kit reserved: not looked at). Such pieces are given back
+-- (act.squad_release: the squads screen's unassign, they return to items_unassigned and DF hands them out at its next equipment
+-- update), at most REL_MAX a pass and one pass per REL_EVERY ticks. A piece released STUCK_AFTER times that still lies there is written
+-- off (rt.stuck: not stock, the missing-text names it). Armor and melee weapons only (release_tools owns the picks and axes).
+function M.release_kit(K)
+  local now = now_tick(K)
+  if rt.rel_t and now >= rt.rel_t and now - rt.rel_t < M.REL_EVERY then return end
+  rt.rel_t = now
+  rt.pend, rt.krel, rt.stuck = rt.pend or {}, rt.krel or {}, rt.stuck or {}
+  local ARMOR_TYPE = {ARMOR = true, HELM = true, PANTS = true, GLOVES = true, SHOES = true, SHIELD = true}
+  local keep, ids, n_occ, n_vac = {}, {}, 0, 0
+  for id, r in pairs(reservations()) do
+    local it = df.item.find(id)
+    local f = it and it.flags
+    if it and f and not f.in_inventory and not f.removed and not f.garbage_collect then
+      local typ = df.item_type[it:getType()]
+      local gear = ARMOR_TYPE[typ] == true
+      if typ == 'WEAPON' then
+        local w = weapon_kind(it:getSubtype())
+        gear = w ~= nil and w.k == 'melee'
+      end
+      local waiting = false                              -- an occupied position of a squad that is on duty
+      if r.occ > 0 then
+        for sid in pairs(r.sqs or {}) do
+          local key = key_of(sid)
+          if not (key and off_season(K, key)) then waiting = true end
+        end
+        if not waiting then gear = false end              -- off duty: the kit stays reserved for the return
+      end
+      if gear then
+        keep[id] = true
+        local rec = rt.pend[id]
+        if not rec then rec = {t = now}; rt.pend[id] = rec end
+        if now - rec.t >= (waiting and M.PEND_MAX or M.ORPHAN_MIN) and #ids < M.REL_MAX then
+          ids[#ids + 1] = id
+          if waiting then n_occ = n_occ + 1 else n_vac = n_vac + 1 end
+        end
+      end
+    end
+  end
+  for id in pairs(rt.pend) do if not keep[id] then rt.pend[id] = nil end end
+  if #ids == 0 then return end
+  table.sort(ids)
+  local ok, n = K.act.squad_release(ids)
+  if not ok then
+    K.log('warn', 'military: %d reserved gear pieces could not be released: %s', #ids, tostring(n))
+    return
+  end
+  for _, id in ipairs(ids) do
+    rt.pend[id] = nil
+    rt.krel[id] = (rt.krel[id] or 0) + 1
+    if rt.krel[id] >= M.STUCK_AFTER then rt.stuck[id] = true end
+  end
+  rt.resv, rt.kpi, rt.kit = nil, nil, nil
+  K.log('info', 'military: %d gear pieces DF kept assigned to a squad position that does not wear them given back (%d for a vacant '
+        .. 'position or none, %d unfetched for %d ticks by the soldier of an occupied one)', #ids, n_vac, n_occ, M.PEND_MAX)
+end
+
+-- BUG-598: gear lying in a forbidden bin or chest is forbidden for DF (the soldiers never fetch it). In PEACE, and in RECOVERY with no
+-- hostile in sight, a forbidden container that holds nothing but gear (weapons, armor, ammo, quivers) on a tile the citizens reach is
+-- unforbidden, at most BIN_MAX a pass (the loot pass' rule for the items themselves, BUG-050). Returns the number unforbidden.
+M.BIN_MAX, M.BIN_EVERY = 10, 3600
+function M.kit_bins(K)
+  local now = now_tick(K)
+  if rt.bin_t and now >= rt.bin_t and now - rt.bin_t < M.BIN_EVERY then return 0 end
+  rt.bin_t = now
+  local mode = K.mode()
+  local h = K.census.h
+  local quiet = type(h) == 'table' and (int(h.vis) or 0) == 0
+  if not (mode == 'PEACE' or (mode == 'RECOVERY' and quiet)) then return 0 end
+  local GEAR = {WEAPON = true, ARMOR = true, HELM = true, PANTS = true, GLOVES = true, SHOES = true, SHIELD = true, AMMO = true,
+                QUIVER = true}
+  local seen, n = {}, 0
+  for _, key in ipairs(RES_KEYS) do
+    for _, it in ipairs(try(function() return df.global.world.items.other[key] end) or {}) do
+      if n >= M.BIN_MAX then break end
+      local f = it.flags
+      if f.in_inventory and not f.forbid and not f.removed and not f.owned and free_item(it) and container_blocked(it) then
+        local c = try(function() return dfhack.items.getContainer(it) end)
+        if c and not seen[c.id] then
+          seen[c.id] = true
+          local pure = try(function()
+            for _, x in ipairs(dfhack.items.getContainedItems(c)) do
+              if not GEAR[df.item_type[x:getType()]] then return false end
+            end
+            return true
+          end)
+          local x, y, z = dfhack.items.getPosition(c)
+          if pure and c.flags.forbid and x and reachable_tile(K, x, y, z) and K.act.item_flag(c.id, 'forbid', false) then
+            n = n + 1
+            rt.resv = nil
+          end
+        end
+      end
+    end
+  end
+  if n > 0 then K.log('info', 'military: %d forbidden bins or chests of gear unforbidden (DF never fetches forbidden contents)', n) end
+  return n
+end
+
 -- BUG-591: `inspect what=military` (read only): per squad the soldiers and what each lacks, the material of the specs, whether it stands down,
 -- and per category what lies in the fort (usable, clothes, forbidden, owned / carried) with the weapons by what keeps them from a soldier.
 -- {squads = {{key, id, n, fit, weapon, wood, armor, empty = {cat = n}, mats = {cat = 'metal'|'leather'|'any'}, down}}, stock = {cat = {...}},
@@ -4060,14 +4373,37 @@ function M.inspect.military(K, args)
   local wd = M.weapon_detail()
   local mu = manager_unit()
   local mem = mu and (int(try(function() return mu.military.squad_id end)) or -1) >= 0 or false
-  return true, string.format('military: %s; free usable: body %d, weapons %d (%d clothes, %d axes/picks for the workers)%s',
+  -- BUG-598: the pieces that lie free by their flags and still are no stock, over all five armor categories and the weapons
+  local out_of_reach = {bin = wd.bin, far = wd.far, alien = 0, reserved = wd.reserved, stuck = wd.stuck}
+  for _, c in ipairs(M.KIT.ARMOR) do
+    for k in pairs(out_of_reach) do out_of_reach[k] = out_of_reach[k] + (stock[c][k] or 0) end
+  end
+  local oor = {}
+  for _, k in ipairs({'bin', 'far', 'alien', 'reserved', 'stuck'}) do
+    if out_of_reach[k] > 0 then oor[#oor + 1] = string.format('%d %s', out_of_reach[k], k) end
+  end
+  local npend, nrel, nstuck = 0, 0, 0
+  for _ in pairs(rt.pend or {}) do npend = npend + 1 end
+  for _ in pairs(rt.krel or {}) do nrel = nrel + 1 end
+  for _ in pairs(rt.stuck or {}) do nstuck = nstuck + 1 end
+  local tp = M.train_pool(K, nil)
+  local wood = 0
+  for _, n in pairs(tp) do wood = wood + n end
+  return true, string.format('military: %s; free usable: body %d, weapons %d (%d clothes, %d axes/picks for the workers)%s%s',
                              #lines > 0 and table.concat(lines, ', ') or 'no squads', stock.body.free, wd.melee, stock.body.soft, wd.tools,
+                             #oor > 0 and ('; lying free but out of reach: ' .. table.concat(oor, ', ')) or '',
                              mem and '; the manager is in a squad' or ''),
          {squads = out, stock = stock, weapons = wd, manager_in_squad = mem,
+          out_of_reach = out_of_reach, reserved = {pending = npend, released = nrel, stuck = nstuck},
+          training_free = wood,
           note = 'fit = a real weapon in hand and body armor worn (a squad under military.UNFIT_PCT percent fit stands down in a SIEGE / '
-                 .. 'BREACH); stock.<cat>.free = true armor (raws [ARMORLEVEL] >= 1) no soldier wears, metal / leather its material, soft = '
-                 .. 'clothes (no uniform slot takes them), forbid / held = true armor forbidden / owned or carried; weapons.melee = free melee '
-                 .. 'weapons, tools = free picks and axes (stay with the workers), wood = training weapons'}
+                 .. 'BREACH); stock.<cat>.free = true armor (raws [ARMORLEVEL] >= 1) no soldier wears, reachable, in no forbidden bin, '
+                 .. 'made by the fortress race and not reserved for a squad position, metal / leather its material, soft = clothes (no '
+                 .. 'uniform slot takes them), forbid / held = true armor forbidden / owned or carried, worn / bin / far / alien / reserved / '
+                 .. 'stuck = free by its flags but worn, in a forbidden bin, on another walk group, made by another race, reserved for a '
+                 .. 'squad position (DF keeps it assigned) or released twice and still lying; weapons.melee = free melee weapons, tools = '
+                 .. 'free picks and axes (stay with the workers), wood = training weapons; training_free = training weapons no position '
+                 .. 'has a spec for yet (a squad on the training policy takes a wooden spec only while one is free)'}
 end
 
 ---------------------------------------------------------------- module
@@ -4113,7 +4449,7 @@ function M.init(K)
   end
   rt = {retry = {}, order = {}, station = {}, kpi = nil, kpi_tick = 0, create_fails = 0, mats = {}, wk = {},
         no_wpn = {}, held = {}, over = {}, rot = {}, add_bad = {}, add_note = {}, rot_why = {}, rot_t = {}, rot_last = {},
-        so = {}}
+        so = {}, K = K}
   dirty = false
   M.every = {ticks = K.mode() == 'PEACE' and M.SLOW or M.FAST}
 end
@@ -4157,6 +4493,7 @@ end
 function M.step(K, budget, ctx)
   local now = now_tick(K)
   local mode = K.mode()
+  rt.K = K                                                          -- BUG-598: the piece reads (far, ticks) need the kernel
   local want_every = mode == 'PEACE' and M.SLOW or M.FAST
   local so_run = sortie_pass(K, now)                                -- M3 (BUG-113)
   if so_run and want_every > M.SO_EVERY then want_every = M.SO_EVERY end
@@ -4224,6 +4561,10 @@ function M.step(K, budget, ctx)
   if not okf then K.log('warn', 'military feed: %s', tostring(errf)) end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
   release_tools(K)                                                     -- BUG-023: after the specs settled
+  local okk, errk = pcall(M.release_kit, K)                            -- BUG-598: reserved gear nobody wears goes back
+  if not okk then K.log('warn', 'military release_kit: %s', tostring(errk)) end
+  local okb, errb = pcall(M.kit_bins, K)                               -- BUG-598: gear in forbidden bins
+  if not okb then K.log('warn', 'military kit_bins: %s', tostring(errb)) end
   rt.kpi, rt.kpi_tick = compute(K), now
   M.rot_look(K, now)                                                   -- FR-79
   local okl, err = pcall(loot, K)

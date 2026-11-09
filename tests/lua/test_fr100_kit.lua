@@ -15,6 +15,11 @@ local function world(opts)
   if opts.training == nil then opts.training = true end     -- the shipped defaults (on, fallback SPEAR, refit 7 days)
   local W = X.world(opts)
   X.load(W, {'military'}, {X.runner('P5')}, {'sense'})
+  if opts.wood ~= false then          -- BUG-599: a squad takes a wooden spec only while the fort holds a wooden weapon: plenty of them
+    for _, tok in ipairs({'ITEM_WEAPON_AXE_TRAINING', 'ITEM_WEAPON_SWORD_SHORT_TRAINING', 'ITEM_WEAPON_SPEAR_TRAINING'}) do
+      for _ = 1, 12 do X.weapon(W, tok) end
+    end
+  end
   W.state()
   W.run(9, {skip = 9})
   return W

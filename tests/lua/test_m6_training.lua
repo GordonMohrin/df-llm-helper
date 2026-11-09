@@ -15,6 +15,9 @@ end
 local function mil_world(opts)
   local W = X.world(opts)
   X.load(W, {'military'}, {X.runner('P5')}, {'sense'})
+  for _, tok in ipairs({'ITEM_WEAPON_AXE_TRAINING', 'ITEM_WEAPON_SWORD_SHORT_TRAINING', 'ITEM_WEAPON_SPEAR_TRAINING'}) do
+    for _ = 1, 12 do X.weapon(W, tok) end       -- BUG-599: a wooden spec only while the fort holds a wooden weapon
+  end
   W.state()
   W.run(9, {skip = 9})
   return W
