@@ -191,7 +191,7 @@ local function scan_citizens(K, now)
     local b = B.findByName(n)
     if b then awb = awb or {}; awb[#awb + 1] = b end
   end
-  local away, aw = 0, {}
+  local away, aw, ain, awi = 0, {}, 0, {}      -- BUG-621: ain / awi = the away ones that stand inside Kern+ or the refuge walls
   -- include_insane (API.txt:1696); the sane ones are exactly getCitizens() (isCitizen/isResident
   -- default to sane only, API.txt:1464-1470). Insane ones only count on bridge footprints.
   local all = U.getCitizens(false, true)
@@ -241,7 +241,10 @@ local function scan_citizens(K, now)
         for _, b in ipairs(awb) do
           if B.isAssignedTile(b, P) then inb = true; break end
         end
-        if not inb then away = away + 1; aw[#aw + 1] = id end
+        if not inb then
+          away = away + 1; aw[#aw + 1] = id
+          if kb and not is_out then ain = ain + 1; awi[#awi + 1] = id end
+        end
       end
     end
   end
@@ -264,6 +267,12 @@ local function scan_citizens(K, now)
     for i = 1, math.min(#aw, M.AWAY_MAX) do l[i] = aw[i] end
     for i, n in ipairs(st.aw_to) do to[i] = n end
     K.census.u.away, K.census.u.away_ids, K.census.u.away_to = away, l, to
+    -- BUG-621 (Run 16d i4 Trumpetrealms y431: 'recall: 5 of 7 still outside Tiefe+, +41 more out since' 9 ticks after the alert moved from
+    -- Kern+ to Tiefe+: those 41 stood inside Kern+ and had not yet walked down, no one had gone out): the away ones inside the walls
+    table.sort(awi)
+    local li = {}
+    for i = 1, math.min(#awi, M.AWAY_MAX) do li[i] = awi[i] end
+    K.census.u.away_in, K.census.u.away_in_ids = ain, li
   end
   st.pub = {pop = {cit = cit, adults = adults, soldiers = soldiers}}
 end

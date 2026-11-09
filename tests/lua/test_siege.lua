@@ -373,7 +373,7 @@ add{name = 'RECOVERY: 2,400 quiet ticks; B1 down at +1,200, O1 at +2,400; PEACE 
 -- squad stood down unequipped, BUG-510): the end line and the status say how many stood down
 add{name = 'BUG-593: squads standing down unequipped: SIEGE_STATUS sd, SIEGE_END stood_down and the text, not a bare "never half"',
   units = function() return units(S.army(6, 51, 0)) end,
-  at = {{10, function(W) W.mil.kpi_x = {squads = 3, soldiers = 8, worn = 4, cv = 13, metal_pct = 0, on_station = 0, sd = 8} end},
+  at = {{0, function(W) W.mil.kpi_x = {squads = 3, soldiers = 8, worn = 4, cv = 13, metal_pct = 0, on_station = 0, sd = 8} end},
         {1000, kill_all(army_ids(6))}}, run = 12200,
   modes = {'PEACE>SIEGE', 'SIEGE>RECOVERY', 'RECOVERY>PEACE'},
   check = function(W)
@@ -382,6 +382,8 @@ add{name = 'BUG-593: squads standing down unequipped: SIEGE_STATUS sd, SIEGE_END
     local se = ev1(W, 'SIEGE_END')
     T.eq(se.d.stood_down, 8)
     T.ok(se.msg:find('; 8 stood down unequipped (no station order)', 1, true), se.msg)
+    -- BUG-622: all of them stood down: no station order is the design (off duty, the alert keeps them in the refuge), not 'never half'
+    T.ok(se.msg:find('on station 0 (by design: stood down, they stay in the refuge)', 1, true) and not se.msg:find('never half', 1, true), se.msg)
   end}
 
 add{name = 'RECOVERY re-entry: a new visible invader sends the FSM straight back to SIEGE and re-raises',

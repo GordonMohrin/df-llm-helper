@@ -220,9 +220,14 @@ local function go(K, to, why, a, bridge)
     -- squad stood down on purpose (BUG-510: fewer than military.UNFIT_PCT percent hold a real weapon and wear body armor, free: 0-2 melee
     -- weapons), so there was no station order and on station stayed 0; the line said nothing of it. `sd` = the most soldiers that stood down
     local sdn = ep.sdmax or 0
+    -- BUG-622 (Run 16d i4 Trumpetrealms y411-y433: 'on station 0 (never half); 10 stood down unequipped' in every siege): no station order is the
+    -- design there, not a station bug: an unequipped squad (BUG-510) is cleared and off duty, the civ alert keeps its soldiers in the refuge with
+    -- the civilians (siege's deep defense for building destroyers sends only the squads that are fit to the core station); with half of the
+    -- soldiers or more stood down the line says so instead of 'never half'
+    local allsd = ont < 0 and sdn > 0 and sdn * 2 >= math.max(sol0, 1)
     K.emit('SIEGE_END', 'A', string.format('%d hostiles, %d killed, %d lost, sealed %d ticks; soldiers %d -> %d, on station %d%s%s',
            hostiles, ep.killed, ep.lost, ep.sealed, sol0, sol, ep.onmax or 0,
-           ont >= 0 and (' (half after ' .. ont .. ' ticks)') or ' (never half)',
+           ont >= 0 and (' (half after ' .. ont .. ' ticks)') or (allsd and ' (by design: stood down, they stay in the refuge)' or ' (never half)'),
            sdn > 0 and string.format('; %d stood down unequipped (no station order)', sdn) or ''),
            {hostiles = hostiles, killed = ep.killed, lost = ep.lost, captures = ep.caps, sealed_ticks = ep.sealed,
             sol0 = sol0, soldiers = sol, on_station = ep.onmax or 0, on_t = ont, stood_down = sdn > 0 and sdn or nil})

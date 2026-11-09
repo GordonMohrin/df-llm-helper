@@ -121,6 +121,9 @@ M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with 
 -- APPROACH_NEAR tiles the hostile must be CLOSING (4 tiles nearer than 150-900 ticks ago), within APPROACH_CLOSE tiles it need not.
 M.APPROACH_NEAR, M.APPROACH_HOLD, M.APPROACH_CLOSE = 30, 300, 12
 M.CLOSING_TILES, M.CLOSING_AGE, M.CLOSING_KEEP = 4, 150, 900
+-- BUG-621: a raise forced by an approach stays forced this many ticks after the hostile last qualified (it may step out of view or halt while
+-- the slow lever pull is under way); a unit ON the footprint still holds it
+M.APPROACH_STICKY = 900
 -- BUG-027: while one of our pulls is pending gate re-checks it every frame (M.PENDING); the census pass (every FAST
 -- ticks) keeps the units within SCAN_R tiles of the footprint, and the frames in between re-read only their positions
 -- (a dwarf walks about a tile per 9-tick frame, so nobody reaches the margin unseen within FAST ticks)
@@ -1560,7 +1563,23 @@ local function holders(K, name, fp, sc, dir)
       if d > fn then
         local an, ah, ac = M.approach_cfg(K)
         local held = (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
-        if held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl)) then fn, rr.fz_b = d, held end
+        if held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl)) then
+          fn, rr.fz_b = d, held
+          rr.fz_until, rr.fz_d = now + M.APPROACH_STICKY, d
+        end
+      end
+    end
+    -- BUG-621 (Run 16d i4 Trumpetrealms y431: the forced pull of B1 queued with a hostile 26-29 tiles out, the lever worker took it 200-400
+    -- ticks later, the hostile had stepped out of view or stopped closing by then, the force was gone and a citizen pacing 2 tiles from B1
+    -- cancelled the pull 'walking toward it' again and again: BREACH 'B1 not up at T+900'): once an approach forced a raise, it stays forced
+    -- for APPROACH_STICKY ticks whatever the hostile does (out of sight, stopped); only a unit ON the footprint still holds it
+    if fn > 0 and rr and rr.fz_until and not (d >= 0 and d <= fn) then
+      local now = K.now().tick
+      if now < rr.fz_until and rr.fz_until - now <= M.APPROACH_STICKY then
+        d = math.max(0, rr.fz_d or 0)
+        fn, rr.fz_b = math.max(fn, d), (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
+      else
+        rr.fz_until, rr.fz_d = nil, nil
       end
     end
     if d >= 0 and d <= fn then
@@ -1786,7 +1805,7 @@ end
 local function new_epoch(r)
   r.nw, r.nw_out, r.bad, r.fail_at, r.switch, r.held_sum, r.block_since = 0, nil, {}, nil, nil, nil, nil
   r.ap, r.ap_last, r.ap_ask = 0, nil, nil            -- BUG-342: the pulls cancelled for a unit walking toward it
-  r.esc = nil
+  r.esc, r.fz_until, r.fz_d = nil, nil, nil          -- BUG-621: the approach force of the old epoch
 end
 
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
@@ -2324,6 +2343,7 @@ local function control(K, name, spec, now)
   r.fj = nil
   if w == nil or w == s then
     unblock(r, now); r.block_ev = nil
+    r.fz_until, r.fz_d = nil, nil                   -- BUG-621: the approach force ends with the want
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
     r.bpark = nil
     r.nec, r.bc = nil, nil                            -- BUG-141: the blocked-cancel count of the want ends too

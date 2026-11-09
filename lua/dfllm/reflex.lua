@@ -1050,10 +1050,18 @@ local function measure(rc, cu)
     if inl[id] then still[#still + 1] = id
     elseif cut and id > maxl then maybe = maybe + 1 end
   end
-  local new = {}
-  for _, id in ipairs(list) do if int(id) and not start[id] then new[#new + 1] = id end end
+  -- BUG-621 (Run 16d i4 Trumpetrealms y431: '+41 more out since' 9 ticks after the alert moved from Kern+ to Tiefe+): a citizen who stands
+  -- inside Kern+ / the refuge walls but not yet in the alert's burrow is on his way in, not out (sense: away_in, away_in_ids)
+  local inside, nin = {}, 0
+  if list == cu.away_ids then
+    for _, id in ipairs(type(cu.away_in_ids) == 'table' and cu.away_in_ids or {}) do if int(id) then inside[id] = true end end
+    nin = int(cu.away_in) or 0
+  end
+  local new, tr0 = {}, 0
+  for _, id in ipairs(rc.ids) do if inside[id] then tr0 = tr0 + 1 end end
+  for _, id in ipairs(list) do if int(id) and not start[id] and not inside[id] then new[#new + 1] = id end end
   local extra = math.min(maybe + math.max(0, rc.n - #rc.ids), math.max(0, tot - #list))
-  return {still = still, new = new, tot = tot, extra = extra}
+  return {still = still, new = new, tot = tot, extra = extra, tr = math.max(0, nin - tr0)}
 end
 
 ---------------------------------------------------------------- BUG-035: why a citizen is not in (read-only)
@@ -1301,6 +1309,7 @@ local function recall_text(K, h, now, out)
   if now - rc.t < M.RECALL_POLL and left >= rc.n then return string.format('recall: %d outside %s', rc.n, where), true end
   local s = string.format('recall: %d of %d still outside %s after %d t', left, rc.n, where, now - rc.t)
   if (rc.nnew or 0) > 0 then s = s .. string.format(', +%d more out since', rc.nnew) end
+  if (rc.ntr or 0) > 0 then s = s .. string.format(', %d more inside on the way', rc.ntr) end     -- BUG-621: not out
   if (rc.stuck or 0) > 0 then s = s .. string.format(', %d cannot come', rc.stuck) end
   return s, true
 end
@@ -1400,8 +1409,8 @@ local function recall_step(K, now, force)
     rt.dg, rt.pq_since = {}, now                             -- every diagnosis and path check against the new burrows
     local cu = K.census.u
     K.log('warn', 'reflex: recall: the civ alert moved from %s to %s %d ticks after it sounded: %d citizens not in %s ' ..
-          'now; the recall follows its %d', from, rc.burrow, now - rc.t, type(cu) == 'table' and int(cu.away) or -1,
-          rc.burrow, rc.n)
+          'now (%d of them inside the walls, on the way in, no one is out); the recall follows its %d', from, rc.burrow, now - rc.t,
+          type(cu) == 'table' and int(cu.away) or -1, rc.burrow, type(cu) == 'table' and int(cu.away_in) or 0, rc.n)
   elseif #to > 0 and rt.aw_sig ~= sig(to) then
     recount(K, to)                                           -- after a reload: sense counts against them again
   end
@@ -1436,7 +1445,8 @@ local function recall_step(K, now, force)
     if M.NOHOLD[key_kind(rt.dg[id] and rt.dg[id].key)] then rt.nohold[id] = true end
   end
   local left = #m.still - pull - gone + m.extra
-  local nnew = math.max(0, m.tot - #m.still - m.extra)
+  local nnew = math.max(0, m.tot - #m.still - m.extra - (m.tr or 0))
+  if (m.tr or 0) ~= (rc.ntr or 0) then rc.ntr, dirty = m.tr, true end                -- BUG-621: inside the walls, on the way in
   if left ~= rc.left or nnew ~= rc.nnew or stuck ~= (rc.stuck or 0) or pull ~= (rc.pull or 0) then
     rc.left, rc.nnew, rc.stuck, rc.pull, dirty = left, nnew, stuck, pull, true
   end
