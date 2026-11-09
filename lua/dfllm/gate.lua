@@ -109,6 +109,18 @@ M.MARGIN_DOWN, M.QUIET_DOWN, M.QUIET_MAX = 3, 50, 2400
 M.QUIET_DRILL = 500
 M.QUIET_LOOK = 25         -- BUG-251: a unit near the footprint is 'standing still' after this many ticks on one tile
 M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with a visible hostile this close (cfg)
+-- BUG-587 (Run 16c i3 Sealcertain y422 summer, SIEGE: 2 cave dragons and a goblin army came from 61 tiles out; the recall streamed 27 citizens
+-- over B1 and B2 and both raises waited for 'walking onto it in 1-13 steps' for 2268 and 2800 ticks - the hostile was 30 tiles out
+-- after +1450, 10 tiles after +1750, 0 tiles at +2040 (force_near 3) - and the fort fell, 61 -> 1): the wait for people merely beside
+-- or walking toward the footprint is BOUNDED once a hostile approaches. In SIEGE/BREACH with a visible hostile within APPROACH_NEAR
+-- tiles (cfg gate.approach_near, 0 = off) a raise held for APPROACH_HOLD ticks (cfg gate.approach_hold) is forced like one with a
+-- hostile at the gate: only a unit ON the footprint (or its path's first step) still holds it, GATE_FORCED names the rest. The
+-- footprint itself being clear is the pull's only condition then; nothing waits for movers any more (the BUG-543 hold of the
+-- non-emergency raises ends for a hostile this near, too).
+-- A parked army is no approach (Run 15 BUG-492: 25 tiles out, a walker 8 steps from B1 was crushed when a hold was dropped): within
+-- APPROACH_NEAR tiles the hostile must be CLOSING (4 tiles nearer than 150-900 ticks ago), within APPROACH_CLOSE tiles it need not.
+M.APPROACH_NEAR, M.APPROACH_HOLD, M.APPROACH_CLOSE = 30, 300, 12
+M.CLOSING_TILES, M.CLOSING_AGE, M.CLOSING_KEEP = 4, 150, 900
 -- BUG-027: while one of our pulls is pending gate re-checks it every frame (M.PENDING); the census pass (every FAST
 -- ticks) keeps the units within SCAN_R tiles of the footprint, and the frames in between re-read only their positions
 -- (a dwarf walks about a tile per 9-tick frame, so nobody reaches the margin unseen within FAST ticks)
@@ -1236,6 +1248,29 @@ local function gcfg(K)
   return fn, type(r.manual) == 'table' and r.manual or {}
 end
 
+-- BUG-587: config/reflex.json gate.approach_near (0..80 tiles, 0 = no bounded hold) and gate.approach_hold (0..3000 ticks); bad values
+-- fall back to the defaults
+function M.approach_cfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+  local n, h, c = math.tointeger(r.approach_near), math.tointeger(r.approach_hold), math.tointeger(r.approach_close)
+  if not n or n < 0 or n > 80 then n = M.APPROACH_NEAR end
+  if not h or h < 0 or h > 3000 then h = M.APPROACH_HOLD end
+  if not c or c < 0 or c > 80 then c = M.APPROACH_CLOSE end
+  return n, h, c
+end
+
+-- BUG-587: is the nearest hostile of bridge runtime `rr` (distance d now) closing? Samples every 30 ticks, kept CLOSING_KEEP ticks
+local function closing(rr, d, now)
+  local hs = rr.hs or {}
+  rr.hs = hs
+  if #hs == 0 or now - hs[#hs].t >= 30 then hs[#hs + 1] = {t = now, d = d} end
+  while #hs > 0 and now - hs[1].t > M.CLOSING_KEEP do table.remove(hs, 1) end
+  for _, x in ipairs(hs) do
+    if now - x.t >= M.CLOSING_AGE and x.d - d >= M.CLOSING_TILES then return true end
+  end
+  return false
+end
+
 local function manual(K, name, bid)
   local _, list = gcfg(K)
   for _, v in ipairs(list) do
@@ -1516,6 +1551,18 @@ local function holders(K, name, fp, sc, dir)
   if dir == 'up' and FORCE_MODES[K.mode()] then
     local fn = gcfg(K)
     local d = fn > 0 and hostile_dist(K, name, fp) or -1
+    local rr = rt[name]
+    if rr then rr.fz_b = nil end
+    -- BUG-587: a hostile approaching (within approach_near) and the raise held for approach_hold ticks: forced like one at the gate
+    if fn > 0 and d >= 0 and rr then
+      local now = K.now().tick
+      local cl = closing(rr, d, now)
+      if d > fn then
+        local an, ah, ac = M.approach_cfg(K)
+        local held = (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
+        if held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl)) then fn, rr.fz_b = d, held end
+      end
+    end
     if d >= 0 and d <= fn then
       local on, beside, seen = {unknown = hold.unknown}, {}, {}
       for _, e in ipairs(hold) do
@@ -1558,7 +1605,13 @@ local function holders(K, name, fp, sc, dir)
       end
     end
   end
-  if dir == 'up' and not FORCE_MODES[K.mode()] then hold = M.raise_movers(K, name, sc, hold) end       -- BUG-543
+  if dir == 'up' and not FORCE_MODES[K.mode()] then
+    -- BUG-587: with a hostile within approach_near tiles nobody waits for movers (ALERT / RECOVERY raises): a unit beside the footprint
+    -- or walking onto it still holds (above), a unit merely moving within RAISE_R tiles does not
+    local an, _, ac = M.approach_cfg(K)
+    local hd0 = (an > 0 or ac > 0) and hostile_dist(K, name, fp) or -1
+    if not (hd0 >= 0 and hd0 <= math.max(an, ac)) then hold = M.raise_movers(K, name, sc, hold) end       -- BUG-543
+  end
   for i, e in ipairs(hold) do
     seen[e.id] = true
     if cby[e.id] and e.d > 0 then hold[i] = cby[e.id] end   -- beside it AND walking onto it: the crosser (drop_own keeps it)
@@ -1875,6 +1928,10 @@ local function forced_event(K, name, fp, hold, hd, job)
   r.forced_ev = job
   local txt = string.format('%s raised with %s: a hostile %d tiles from it (force_near %d)', name, who(hold, fp), hd,
                             (gcfg(K)))
+  if r.fz_b then          -- BUG-587: the bounded hold of an approaching hostile
+    txt = string.format('%s raised with %s: a hostile %d tiles from it and closing, held %d ticks (approach_near %d)', name,
+                        who(hold, fp), hd, r.fz_b, (M.approach_cfg(K)))
+  end
   K.emit('GATE_FORCED', 'A', cut(txt, 200), {bridge = name, units = ids_of(hold), hostile = hd,
                                              pos = {hold[1].x, hold[1].y, hold[1].z}, job = job})
   K.log('warn', 'gate: %s', txt)
@@ -3460,6 +3517,10 @@ end
 -- public (BUG-577, siege): the config's force_near (tiles a visible hostile must be from the footprint before a raise goes ahead past
 -- the units beside it; 0 = never)
 function M.force_near(K) return (gcfg(K)) end
+
+-- public (BUG-587, siege): the tiles a hostile must be within and the ticks a raise must have been held before the hold is bounded
+-- (gate.approach_near / approach_hold; 0 tiles = no bounded hold)
+function M.approach_range(K) return M.approach_cfg(K) end   -- near, hold, close
 
 -- public (BUG-543, drill): why bridge `name`'s raise was dropped at T+900 when units kept it from rising ("citizen 5 on the
 -- footprint, soldier 7 moving 3 tiles from it"), nil when none did (cleared by reset_kpi: the drill's start and settle)

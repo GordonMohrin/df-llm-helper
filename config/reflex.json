@@ -5,7 +5,7 @@
  "predator_near": 40,
  "lockdown_near": 40,
  "ack_timeout_s": 60,
- "gate": {"force_near": 3, "manual": [], "noeffect_max": 3, "noeffect_wait": 1200, "pull_cap": 15, "giveup_wait": 7200, "lever_hold_days": 3},
+ "gate": {"force_near": 3, "approach_near": 30, "approach_hold": 300, "approach_close": 12, "manual": [], "noeffect_max": 3, "noeffect_wait": 1200, "pull_cap": 15, "giveup_wait": 7200, "lever_hold_days": 3},
  "inner": ["DEATHS_3PLUS"],
  "defaults": {"ARRIVAL": ["clock", "gates", "doors", "alert"],
               "INTRUDER": ["clock", "gates", "doors", "alert"],

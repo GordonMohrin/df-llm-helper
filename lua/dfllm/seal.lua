@@ -3426,10 +3426,30 @@ local function hostile_in(K, name, t)
       end
       local _, refuge = burrow_names(K)
       if name == refuge and (int(h.rin) or 0) > v[1] then v[1] = int(h.rin) end
+      -- BUG-588: the refuge held a hostile this tick (the latch `rate` reads)
+      if name == refuge and v[1] > 0 then mem.rlatch = {t = t, at = v[2], n = v[1]} end
     end
     c.by[name] = v
   end
   return v[1], v[2]
+end
+
+-- BUG-588 (Run 16c i3 Sealcertain y422 summer, BREACH: a cave dragon sat at the refuge's stair foot 62,127,136 on and off for 15,000 ticks;
+-- every time it left the census Tiefe+ passed again and the citizens were walked back ('Innen+ -> Tiefe+ ... deeper'), REFUGE_SWITCH /
+-- REFUGE_FAIL 'hostile inside at 62,127,136' ten times in a row, and each walk met the dragon): a hostile seen in the refuge
+-- keeps it refused in a fight for RLATCH ticks after the last sighting (a visible hostile is only seen while it is in view).
+-- Public M.rlatched(K[, name, t]): the latched sighting {t, at, n} or nil (a local of this size would break the 200-local limit)
+M.RLATCH = 1200
+M.ALT_MARGIN = 10     -- BUG-589: tiles a burrow must lie farther from the destroyers than the refuge's stair head to be preferred
+function M.rlatched(K, name, t)
+  name, t = name or (select(2, burrow_names(K))), t or now_t(K)
+  local L = mem.rlatch
+  if not L or t < L.t or t - L.t >= M.RLATCH then return nil end
+  local _, refuge = burrow_names(K)
+  if name ~= refuge then return nil end
+  local m = K.mode()
+  if m ~= 'SIEGE' and m ~= 'BREACH' then return nil end
+  return L
 end
 
 -- 'hostile inside at 7,6,5 (2 hostiles)' (no position when only sense's count says so)
@@ -3695,7 +3715,8 @@ end
 local function refuge_closure(K)
   local v, cl = M.refuge_open(K)
   if v or type(cl) ~= 'table' then return nil end
-  return cl.kind == 'bridge' and 'hard' or 'soft', cl
+  -- BUG-589: a raised bridge is a building too (Run 16c i3 Sealcertain y422: B2, up, toppled by a cave dragon): soft like a hatch
+  return 'soft', cl
 end
 M.refuge_closure = refuge_closure
 
@@ -3747,7 +3768,7 @@ local function plug_eval(K, args)
   local _, refuge = burrow_names(K)
   local rv, cl = M.refuge_open(K)
   if rv then return 'wait:open way in' end                               -- an open stair needs a hatch first (BUG-336)
-  if type(cl) ~= 'table' or cl.kind == 'bridge' or cl.kind == 'wall' then
+  if type(cl) ~= 'table' or cl.kind == 'wall' then
     return 'wait:' .. tostring(cl and cl.kind or 'no closer')
   end
   if hostile_in(K, refuge, t) > 0 then return 'wait:hostile inside' end
@@ -3767,7 +3788,24 @@ local function plug_eval(K, args)
       if near < 0 or d < near then near = d end
     end
   end
-  if not late and not (near >= 0 and near <= c.near) then return 'wait:destroyers far' end
+  -- BUG-589 (Run 16c i3 Sealcertain y422: the plug waited for a destroyer within 30 tiles of the stair head and for every citizen to be inside; the
+  -- dragons were 61 tiles out when the alert sounded, the citizens streamed in for 2000 ticks, the plug came with the BREACH and a dragon on the
+  -- stair foot): destroyers in sight NOW and nobody outside the refuge burrow walls the foot at once, however far they are
+  local rb0 = burrow(refuge)
+  local outside = false
+  if rb0 then
+    local cu0 = K.census and K.census.u
+    for _, id in ipairs(type(cu0) == 'table' and type(cu0.ids) == 'table' and cu0.ids or {}) do
+      local u = df.unit.find(id)
+      local x, y, z
+      if u then x, y, z = dfhack.units.getPosition(u) end
+      if x and not in_burrow(rb0, x, y, z) then outside = true; break end
+    end
+  end
+  local early = false
+  if not late and not (near >= 0 and near <= c.near) then
+    if bd_sight(K) > 0 and rb0 and not outside then early = true else return 'wait:destroyers far' end
+  end
   local tk, cells = {}, {}
   for _, line in ipairs(foot.tiles) do
     local x, y, z = line:match('^(%-?%d+),(%-?%d+),(%-?%d+) ')
@@ -3780,18 +3818,7 @@ local function plug_eval(K, args)
   if plug_occupied(K, col, tk) then return 'wait:someone on the stair' end
   -- BUG-479 review: a citizen still on his way to the stair would be walled out. Before the BREACH, and while no
   -- destroyer is within PLUG.close tiles of the stair head, a citizen outside the refuge burrow holds the plug back
-  if not late and (near < 0 or near > c.close) then
-    local rb = burrow(refuge)
-    local cu = K.census and K.census.u
-    if rb then
-      for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
-        local u = df.unit.find(id)
-        local x, y, z
-        if u then x, y, z = dfhack.units.getPosition(u) end
-        if x and not in_burrow(rb, x, y, z) then return 'wait:citizens not inside' end
-      end
-    end
-  end
+  if not late and (near < 0 or near > c.close) and outside then return 'wait:citizens not inside' end
   st.plug_try, dirty = t, true
   local ok, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers', {noreach = true})
   if not (ok and r1 == true and type(id) == 'string') then
@@ -3803,7 +3830,7 @@ local function plug_eval(K, args)
                             'destroyers: the %s on the stair can be broken, a constructed wall cannot', #cells,
                             #cells == 1 and '' or 's', foot.pos[1], foot.pos[2], foot.pos[3], id, cl.kind)
   K.emit('REFUGE_PLUG', 'A', txt:sub(1, 200), {proj = id, n = #cells, pos = foot.pos, closer = cl.kind,
-                                               near = near >= 0 and near or nil, breach = late and 1 or 0})
+                                               near = near >= 0 and near or nil, breach = late and 1 or 0, early = early and 1 or nil})
   K.log('warn', 'seal: %s', txt:sub(1, 200))
   save(K)
   return 'queued', id
@@ -3945,6 +3972,10 @@ local function rate(K, au, name, lvl, t, lenient)
   if s and s.exp and not (lvl == 'DEAD' and (s.d or 0) >= CFG.dead_gap) then return false, s.why, true end
   local hn, hat = hostile_in(K, name, t)
   if hn > 0 then return false, hostile_txt(hn, hat), true end
+  local L = M.rlatched(K, name, t)
+  if L then          -- BUG-588: out of sight is not gone
+    return false, string.format('%s, last seen %d ticks ago', hostile_txt(L.n, L.at), t - L.t), true
+  end
   if a.reach == 0 then return false, 'out of the citizens\' reach' end
   if lvl == 'BREACH' or lvl == 'DEAD' or lvl == 'WET' or lvl == 'FED' then
     if a.tiles < CFG.breach_tiles then return false, string.format('%d tiles<%d', a.tiles, CFG.breach_tiles) end
@@ -3959,6 +3990,40 @@ local function rate(K, au, name, lvl, t, lenient)
   if lvl == 'HOLD' then return a.room == true, a.why end
   if not a.sup then return false, a.why end
   if lvl == 'SIEGE' and a.bed_short then return false, a.why end
+  return true
+end
+
+-- BUG-589: the nearest visible hostile's distance (chebyshev) to a box {x0, y0, z0, x1, y1, z1} or a point {x, y, z}; `bdonly`: building
+-- destroyers only; -1 none visible (a stale census counts as none)
+function M.hostile_gap(K, box, bdonly)
+  local h = K.census and K.census.h
+  if type(h) ~= 'table' or type(box) ~= 'table' or (int(h.vis) or 0) <= 0 then return -1 end
+  local x0, y0, z0 = box[1], box[2], box[3]
+  local x1, y1, z1 = box[4] or x0, box[5] or y0, box[6] or z0
+  local best = -1
+  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+    if type(e) == 'table' and int(e.x) and int(e.y) and int(e.z) and (not bdonly or e.bd == 1) then
+      local dx = e.x < x0 and x0 - e.x or (e.x > x1 and e.x - x1 or 0)
+      local dy = e.y < y0 and y0 - e.y or (e.y > y1 and e.y - y1 or 0)
+      local dz = e.z < z0 and z0 - e.z or (e.z > z1 and e.z - z1 or 0)
+      local d = math.max(dx, dy, dz)
+      if best < 0 or d < best then best = d end
+    end
+  end
+  return best
+end
+
+-- BUG-588: a burrow that can still hold the citizens in a fight whatever it lacks: it exists, is reachable, big enough, separated (no opening
+-- reaches it), has no hostile in it (and the refuge no latched one) and, for the refuge, a way in that is not open
+function M.area_ok(K, au, name, refuge, ropen, t, win)
+  local a = au[name]
+  if not (a and a.exists) or a.reach == 0 or (int(a.tiles) or 0) < CFG.breach_tiles then return false end
+  local s = sep_of(name)
+  if not s or s.exp then return false end
+  if hostile_in(K, name, t) > 0 or M.rlatched(K, name, t) then return false end
+  if name == refuge and (ropen or not (win or a.wet)) then return false end   -- (the refuge: not after the days without counts are spent)
+  local dw, few = dry_why(name, a)      -- citizens went thirsty or hungry there: not again (BUG-031), a few in the refuge's retreat excepted
+  if dw and not (name == refuge and few and st.lostb) then return false end
   return true
 end
 
@@ -4053,6 +4118,30 @@ local function choose(K, mode, want, hold)
   end
   local bwin = breach_open(K, t)
   local rwet = au[refuge] ~= nil and au[refuge].wet == true      -- Run 11: its drink frees it from the window
+  -- BUG-589 (Run 16c i3 Sealcertain y422: two cave dragons reached the refuge hatch 62,127,137 while it was the only thing between them and
+  -- the citizens): building destroyers within PLUG.near tiles of the refuge's stair head, its way in a building they break (no constructed
+  -- wall yet, M.plug): another burrow that is separated, reachable, without a hostile and farther from them than the stair head by
+  -- ALT_MARGIN tiles is the confinement (the burrow farthest from their path). The switch rule still keeps a burrow the citizens are in.
+  if fight and au[refuge] and au[refuge].exists and not st.plug and bd_sight(K) > 0 and refuge_closure(K) == 'soft' then
+    local hd = M.refuge_stair(K)
+    local dh = hd and hd.pos and M.hostile_gap(K, hd.pos, true) or -1
+    if dh >= 0 and dh <= M.PLUG.near then
+      local alt, ad
+      for _, n in ipairs({kern, CFG.interior}) do
+        if n ~= refuge and au[n] and M.area_ok(K, au, n, refuge, ropen, t, true) then
+          local g = M.hostile_gap(K, au[n].box, true)
+          if (g < 0 or g > dh + M.ALT_MARGIN) and (not ad or g > ad) then alt, ad = n, g end
+        end
+      end
+      if alt then
+        r.pick, r.level, r.destroyer = alt, 'BREACH', true
+        r.rwhy = string.format('%s: building destroyers %d tiles from its stair head, the way in can be broken; %s lies %s tiles from them',
+                               refuge, dh, alt, ad < 0 and 'far' or tostring(ad))
+        r.why = r.why or r.rwhy
+        return r
+      end
+    end
+  end
   local held_refuge = want == refuge and (mode == 'BREACH' or st.swap ~= nil)
   if held_refuge and try(refuge, 'WET') then return r end
   for _, lvl in ipairs({'SIEGE', 'SOFT'}) do
@@ -4116,6 +4205,25 @@ local function choose(K, mode, want, hold)
       local why = r.dryok or r.dwhy or r.rwhy
       r.why = r.why or why
       r.rwhy = r.rwhy or why
+      return r
+    end
+  end
+  -- BUG-588 (Run 16c i3 Sealcertain y422: 'no separated burrow ... civ alert off, citizens flee on their own' while the fight went on): in a
+  -- fight never no confinement while a burrow stands that is separated, reachable and holds no hostile - whatever it lacks (counts, window,
+  -- dry marks): the one farthest from the visible hostiles, the best supplied among equals
+  if fight and (mode == 'BREACH' or r.danger) then      -- (a quiet SIEGE with no drink anywhere: the citizens fetch it, BUG-031)
+    local best, bg, bs
+    for _, n in ipairs(chain) do
+      if M.area_ok(K, au, n, refuge, ropen, t, bwin or rwet) then
+        local g = M.hostile_gap(K, au[n].box)
+        if g < 0 then g = 999 end
+        local sc = RF.score(au[n])
+        if not best or g > bg or (g == bg and sc > bs) then best, bg, bs = n, g, sc end
+      end
+    end
+    if best then
+      r.pick, r.level, r.last, r.area = best, 'AREA', true, true
+      r.why = r.why or r.rwhy or (best .. ': the only separated burrow without a hostile')
       return r
     end
   end
@@ -4359,6 +4467,10 @@ function M.alert_burrow(K, mode, default, hold, cur, release)
   if forced then tail = string.format('; %s kept for the lockdown although %s', CFG.interior, forced)
   elseif r.level == 'FED' then
     tail = string.format('; %s has the food and drink (%s) but not the area or beds: confining to it', pick, RF.txt(pa))
+  elseif r.area then
+    tail = string.format('; %s is the farthest separated burrow without a hostile: confining to it, whatever it lacks', pick)
+  elseif r.destroyer then
+    tail = string.format('; building destroyers near the refuge hatch: %s holds the citizens, away from their path', pick)
   elseif r.short then
     tail = string.format('; no burrow has its food and drink: confining to the best supplied, %s (%s)%s', pick, RF.txt(pa),
                          others ~= '' and ('; ' .. others) or '')
@@ -4454,7 +4566,7 @@ function M.alert_burrow(K, mode, default, hold, cur, release)
     brief = (why and ('REFUGE_FAIL ' .. want) or (want .. ' missing')) .. (forced and ', lockdown fallback' or '')
     if r.flee and r.dry and not r.danger and mode ~= 'BREACH' then brief = brief .. ', alert off (no drink/food in it)'
     elseif r.flee then brief = brief .. ', citizens flee'
-    elseif r.level == 'BREACH' or r.level == 'DEAD' or r.level == 'WET' or r.level == 'FED' then
+    elseif r.level == 'BREACH' or r.level == 'DEAD' or r.level == 'WET' or r.level == 'FED' or r.level == 'AREA' then
       brief = brief .. (r.level == 'DEAD' and ', dead end ' or ', ') .. tostring(pick) .. (r.short and ' (short)' or '')
     elseif tail and not forced then
       brief = brief .. ', ' .. CFG.interior .. ((ia and ia.exists) and ' too small' or ' missing')

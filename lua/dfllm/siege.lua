@@ -892,6 +892,12 @@ local function citizen_held(K, b, d)
   if (on or 0) > 0 then return false end                  -- BUG-310: a unit ON the footprint stays a failure of the gate (as before)
   local okf, fn = K.call('gate', 'force_near')
   if okf and math.type(fn) == 'integer' and fn > 0 and d and d >= 0 and d <= fn then return false end   -- a hostile this close: a real breach
+  -- BUG-587: a hostile within approach_near tiles and the hold older than approach_hold: gate raises past our own people now (GATE_FORCED),
+  -- the hold is no excuse for a bridge that is still down (a unit on the footprint was handled above)
+  local oka, an, ah, ac = K.call('gate', 'approach_range')
+  if oka and math.type(ah) == 'integer' and held >= ah and d and d >= 0 and math.type(ac) == 'integer' and ac > 0 and d <= ac then
+    return false      -- (a hostile only closing in, 'approach_near', is not known here: gate raises for it at once anyway)
+  end
   mem.ch = mem.ch or {}
   if not mem.ch[b] then
     mem.ch[b] = true
@@ -2238,7 +2244,7 @@ local function deep_step(K, a, g, now)
   -- one closed only by a hatch or a door is named as no barrier for building destroyers
   local okr, rop, rcl = K.call('seal', 'refuge_open')
   rop = okr and type(rop) == 'string' and rop or nil
-  local soft = not rop and d.bd > 0 and okr and type(rcl) == 'table' and (rcl.kind == 'hatch' or rcl.kind == 'door')
+  local soft = not rop and d.bd > 0 and okr and type(rcl) == 'table' and (rcl.kind == 'hatch' or rcl.kind == 'door' or rcl.kind == 'bridge')
                and rcl or nil
   local toks = {}
   for _, w in ipairs(why) do toks[#toks + 1] = w end
