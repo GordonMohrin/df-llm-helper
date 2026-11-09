@@ -168,6 +168,12 @@ M.DEFAULTS = {
   -- DECISION dry_well names the well and `well.retire`; from the second round the zone of a patient over trap_dying goes (the
   -- game's own recipe: he then fetches his own drink). trap false: off
   trap = true, trap_days = 1, trap_near = 2, trap_dying = 35000,
+  -- BUG-615 (Run 16c i3 Wallfree y380: 2 children died of thirst at the shallow well 94,51,146 with two Pond zones beside it; the FillPond
+  -- worker stood 3 days, the one zone the stall ladder took left the other): a built well with no accepted water (dry or shallow, no loop)
+  -- with a Pond zone within pond_near + 1 tiles while a citizen at pond_thirst or more stands within pond_reach tiles of it loses ALL
+  -- its Pond zones at once (the zones screen's remove; a cistern room's well only gets the decision) and a DECISION pond_blocks_well
+  -- names it. pond_block false: off
+  pond_block = true, pond_thirst = 25000, pond_reach = 4, pond_block_every = 3 * DAY,
   -- BUG-325: the scan asks the walk from up to ws_from citizens (the nearest the reference); a tile is reachable from any
   ws_from = 3,
   -- BUG-324: while no water is accepted, the kernel zones the scan's best reachable, safe water as a Water Source (wz false:
@@ -422,10 +428,14 @@ local function phase_units(K, c, r)
       local x, y, z = dfhack.units.getPosition(u)
       r.patients[#r.patients + 1] = {id = id, thirst = th, hunger = hu, x = x, y = y, z = z}
     elseif u then
-      if #r.thirsty < M.THIRSTY_MAX then                   -- BUG-344: where the thirsty citizens stand (M.drink_fix)
+      if #r.thirsty < M.THIRSTY_MAX or #r.athirst < M.THIRSTY_MAX then   -- BUG-344: where the thirsty citizens stand (M.drink_fix)
         local th = 0
         pcall(function() th = math.tointeger(u.counters2.thirst_timer) or 0 end)
-        if th >= c.well_thirst then
+        if th >= (c.pond_thirst or c.well_thirst) and #r.athirst < M.THIRSTY_MAX then     -- BUG-615: the earlier mark, M.pond_block
+          local x, y, z = dfhack.units.getPosition(u)
+          if x then r.athirst[#r.athirst + 1] = {id = id, thirst = th, x = x, y = y, z = z} end
+        end
+        if th >= c.well_thirst and #r.thirsty < M.THIRSTY_MAX then
           local x, y, z = dfhack.units.getPosition(u)
           if x then r.thirsty[#r.thirsty + 1] = {id = id, thirst = th, x = x, y = y, z = z} end
         end
@@ -491,8 +501,14 @@ local function phase_sites(K, c, r)
     pcall(function() done = w:getBuildStage() >= w:getMaxBuildStage() end)
     local wet, info = false, nil
     if done then wet, info = M.well_wet(K, w.x1, w.y1, w.z, c.shaft, c.well_min) end   -- BUG-344 review: well_min
+    local removing = false                                   -- BUG-617: a Remove Building job stands (well.retire queued it)
+    if done then
+      local okm, marked = pcall(function() return dfhack.buildings.markedForRemoval(w) end)
+      removing = okm and marked == true
+    end
     r.sources[#r.sources + 1] = {kind = 'well', id = w.id, x = w.x1, y = w.y1, z = w.z, wet = wet,
                                  built = done, below = info,                  -- BUG-031: what the shaft ends on
+                                 removing = removing or nil,
                                  chain = not done and M.chain_wait(w) or nil} -- BUG-264: its job waits for a chain
   end
   local locs = hospital_locations()
@@ -676,6 +692,80 @@ local function pond_loops(K, c, r, p)
     end
   end
   return n
+end
+
+-- BUG-615: a Pond zone beside a well that gives no water while citizens thirst beside it (the FillPond loop of a sump that never fills:
+-- Wallfree y380, two children dead at 94,50,146). Returns the rows {well, who = thirsty citizens, ponds, removed, failed, held}; acts
+-- (act.pond_remove, remembered in p.prm like pond_loops) and emits DECISION_NEEDED pond_blocks_well, once per well per pond_block_every
+-- unless a zone went. Report only for the well of a cistern room (it fills by its pond) or without the act.
+function M.pond_block(K, c, r, p, now)
+  if c.pond_block == false or #r.ponds == 0 or #(r.athirst or {}) == 0 then return nil end
+  p.pb = json.object(type(p.pb) == 'table' and p.pb or {})
+  local rows = {}
+  for _, s in ipairs(r.sources) do
+    if s.kind == 'well' and s.built ~= false and not s.wet and not s.loop and not s.water and not s.removing and s.x then
+      local who, top = {}, 0
+      for _, t in ipairs(r.athirst) do
+        if t.z == s.z and math.max(math.abs(t.x - s.x), math.abs(t.y - s.y)) <= (c.pond_reach or 4) then
+          who[#who + 1] = t
+          if t.thirst > top then top = t.thirst end
+        end
+      end
+      local ponds = {}
+      for _, pd in ipairs(r.ponds) do
+        if #who > 0 and dist_box(s.x, s.y, s.z, pd) <= (c.pond_near or 3) + 1 then ponds[#ponds + 1] = pd end
+      end
+      if #ponds > 0 then rows[#rows + 1] = {well = s, who = who, top = top, ponds = ponds, removed = {}, failed = 0} end
+    end
+  end
+  if #rows == 0 then return nil end
+  for _, row in ipairs(rows) do
+    local s = row.well
+    row.held = M.cistern_room(K, s) ~= nil or not M.can('pond_remove')
+    if not row.held then
+      for _, pd in ipairs(row.ponds) do
+        if K.act.pond_remove(pd.id) then
+          row.removed[#row.removed + 1] = pd.id
+          p.prm = type(p.prm) == 'table' and p.prm or json.array{}
+          p.prm[#p.prm + 1] = json.array{pd.id, (pd.x1 + pd.x2) // 2, (pd.y1 + pd.y2) // 2, pd.z, now}
+          while #p.prm > 8 do table.remove(p.prm, 1) end
+          for i = #r.ponds, 1, -1 do if r.ponds[i].id == pd.id then table.remove(r.ponds, i) end end
+        else
+          row.failed = row.failed + 1
+        end
+      end
+    end
+    local key = fmt(s.id)
+    local last = math.tointeger(p.pb[key]) or -1e12
+    if #row.removed > 0 or now - last >= (c.pond_block_every or 3 * DAY) then
+      p.pb[key] = now
+      local ids = {}
+      for i, id in ipairs(row.removed) do ids[i] = fmt(id) end
+      local pids = {}
+      for i, pd in ipairs(row.ponds) do pids[i] = fmt(pd.id) end
+      local why = s.below and s.below.why == 'shallow' and string.format('shallow, %d/7 below', s.below.flow or 0) or 'dry'
+      local act
+      if #row.removed > 0 then
+        act = string.format('pond zone(s) %s removed (the zones screen); the carriers stop filling the sump', table.concat(ids, ','))
+      elseif row.held then
+        act = string.format("pond zone(s) %s beside a cistern room's well stay (it fills by them)%s", table.concat(pids, ','),
+                            M.can('pond_remove') and '' or '; this build cannot remove them')
+      else
+        act = string.format('pond zone(s) %s could not be removed', table.concat(pids, ','))
+      end
+      local q = string.format('%d citizen(s) at thirst %d stand at the %s well %d (%d,%d,%d): %s', #row.who, row.top, why, s.id,
+                              s.x, s.y, s.z, act)
+      local cmds = json.array{'dfllm cmd inspect what=water_sources',
+                              string.format('dfllm bp sites cistern --near %d,%d,%d --within 20 --fresh', s.x, s.y, s.z)}
+      local units = json.array{}
+      for i = 1, math.min(8, #row.who) do units[i] = row.who[i].id end
+      K.emit('DECISION_NEEDED', 'A', trunc('pond_blocks_well: ' .. q, 200),
+             {id = 'pond_blocks_well', q = trunc(q, 200), units = units, cmds = cmds, well = s.id, ponds = json.array(row.removed),
+              held = row.held and 1 or nil})
+      K.log('warn', 'water: %s', q)
+    end
+  end
+  return rows
 end
 
 ---------------------------------------------------------------- BUG-263: a well fed only by its own pond
@@ -2399,6 +2489,17 @@ local function stall_hospital(K, c, r, p, now, need)
   return zones
 end
 
+-- BUG-617: the manifest's cistern room that holds source `s` (a well), nil when none (well.retire asks approve for such a well)
+function M.cistern_room(K, s)
+  for _, rm in ipairs(K.manifest().rooms or {}) do
+    local b = rm.bbox
+    if rm.tpl == 'cistern' and type(b) == 'table' and #b >= 6 and s.z == b[3] and s.x >= b[1] and s.x <= b[4]
+       and s.y >= b[2] and s.y <= b[5] then
+      return rm
+    end
+  end
+end
+
 -- BUG-541: the built well with no water below it that a GiveWater worker stands at (within trap_near tiles); nil when none. Only
 -- a source that is not wet (an emergency well counts wet; a loop well holds its pond's water, BUG-263): the carriers' bucket cannot fill there
 function M.trap_well(c, r, e)
@@ -2430,10 +2531,13 @@ local function unstick(K, c, r, p, e)
     done[#done + 1] = 'off ' .. M.CARER_DETAIL .. ' for a run'
   end
   if e.x and M.can('pond_remove') then
+    local n = 0
     for _, pd in ipairs(r.ponds or {}) do
-      if dist_box(e.x, e.y, e.z, pd) <= (c.pond_near or 3) + 1 and K.act.pond_remove(pd.id) then
+      -- BUG-615 (Wallfree: two Pond zones beside the well, the first removal left the second, the next FillPond worker stood again):
+      -- every Pond zone within reach goes, at most pond_per_run
+      if n < (c.pond_per_run or 2) and dist_box(e.x, e.y, e.z, pd) <= (c.pond_near or 3) + 1 and K.act.pond_remove(pd.id) then
         done[#done + 1] = string.format('pond zone %d removed', pd.id)
-        break
+        n = n + 1
       end
     end
   end
@@ -2511,8 +2615,11 @@ function M.stalls(K, c, r, p, now, opt)
   -- BUG-541: the carriers that stand at a DRY well get their own decision, early (a patient over thirst_watch, trap_days), with the
   -- command that takes the well away and the nearest accepted water they should fill at
   local tw, twu, twids, seenw = {}, {}, {}, {}
+  local pending = 0                       -- BUG-617: carriers at a well whose Remove Building job already stands (no decision for them)
   for _, row in ipairs(res.rows) do
-    if row.well then
+    if row.well and row.well.removing then
+      pending = pending + 1
+    elseif row.well then
       twu[#twu + 1] = row.uid
       if not seenw[row.well.id] then seenw[row.well.id] = true; tw[#tw + 1] = row.well; twids[#twids + 1] = row.well.id end
     end
@@ -2536,7 +2643,10 @@ function M.stalls(K, c, r, p, now, opt)
                                best and string.format('%s %d at %d,%d,%d, %d tiles', best.s.kind, best.s.id, best.s.x, best.s.y, best.s.z, best.d)
                                or 'none accepted')
       local wcmds = {}
-      for i = 1, math.min(2, #tw) do wcmds[#wcmds + 1] = string.format('dfllm cmd well.retire id=%d', tw[i].id) end
+      -- BUG-617: only a command that works: the well of a cistern room (a cistern's well fills with its pond) goes on the player's word
+      for i = 1, math.min(2, #tw) do
+        wcmds[#wcmds + 1] = string.format('dfllm cmd well.retire id=%d%s', tw[i].id, M.cistern_room(K, tw[i]) and ' approve=true' or '')
+      end
       wcmds[#wcmds + 1] = string.format('dfllm cmd water.unstick unit=%d', twu[1])
       K.emit('DECISION_NEEDED', 'A', trunc('dry_well: ' .. wq, 200),
              {id = 'dry_well', q = trunc(wq, 200), units = twu, cmds = wcmds,
@@ -2546,6 +2656,7 @@ function M.stalls(K, c, r, p, now, opt)
   end
   local plain = false
   for _, row in ipairs(res.rows) do if not row.well then plain = true end end
+  if pending > 0 then K.log('info', 'water: %d GiveWater carrier(s) stand at a dry well that is marked for removal', pending) end
   if plain and not opt.force and (sv.key ~= key or now - (math.tointeger(sv.t) or -1e12) >= 3 * DAY) then
     p.sv = {key = key, t = now}
     K.emit('DECISION_NEEDED', 'A', trunc('job_stalled: ' .. q, 200),
@@ -3439,6 +3550,8 @@ local function finish(K, c, r, p)
   local T = K.now()
   pond_loops(K, c, r, p)
   M.loops(K, c, r, p)                                   -- BUG-263: a well fed only by its own pond is no accepted source
+  local okpb, errpb = pcall(M.pond_block, K, c, r, p, now)     -- BUG-615: a pond zone beside a dry well, citizens thirsting at it
+  if not okpb then K.log('warn', 'water: pond_block failed: %s', tostring(errpb)) end
   local hosp_ok, best_h, dry_h = #r.hosp > 0, nil, nil
   for _, h in ipairs(r.hosp) do
     local ok, b = served(K, c, r, h)
@@ -3848,7 +3961,7 @@ local function new_run(K)
   for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do ids[#ids + 1] = id end
   return {ph = 1, idx = 0, ids = ids, patients = {}, sources = {}, hosp = {}, buckets = 0, free = 0, full = 0,
           forbidden = {}, ponds = {}, carers = {}, home = {}, give = 0, pool = {}, carers_idle = 0, cpos = {}, doc = {},
-          outsiders = 0, bpos = {}, thirsty = {}}
+          outsiders = 0, bpos = {}, thirsty = {}, athirst = {}}
 end
 
 function M.init(K)
@@ -4109,7 +4222,25 @@ function M.drink_fix(K)
     end
   end
   local cmds = json.array{'dfllm cmd inspect what=water_sources'}
-  if acc and not at then return 'accepted water: ' .. M.label(K, acc.x, acc.y, acc.z), cmds end
+  if acc and not at then
+    local txt = 'accepted water: ' .. M.label(K, acc.x, acc.y, acc.z)
+    -- BUG-616 (Run 16c i3 Wallfree y373-y380: drink 0 d for years, the only accepted water a zone 40 tiles out; the decision only
+    -- offered a farm): every accepted source lies outside Kern+ / Tiefe+ (the citizens walk out for each drink, a siege or a closed
+    -- gate leaves them dry): say so and name the way in
+    local core = burrow(K, 'kern', 'Kern+')
+    if core then
+      local inside = false
+      for _, s in ipairs(src) do if s.wet and not s.emerg and s.inn then inside = true end end
+      if not inside then
+        local a = M.label(K, acc.x, acc.y, acc.z)
+        txt = string.format('accepted water: %s lies OUTSIDE the core (the citizens walk out for every drink): bring water inside, '
+                            .. 'a cistern piped from it (dfllm bp sites cistern --near %d,%d,%d --fresh)%s', a, acc.x, acc.y, acc.z,
+                            M.aq_level(K) and ' or an aquifer well (dfllm bp sites cistern water=aquifer)' or '')
+        cmds[#cmds + 1] = string.format('dfllm bp sites cistern --near %d,%d,%d --fresh', acc.x, acc.y, acc.z)
+      end
+    end
+    return txt, cmds
+  end
   local c = M.conf(K)
   local head = 'no accepted water'
   if at and at.s.wet then
@@ -4145,6 +4276,41 @@ function M.src_near(K, x, y, z, r)
   local inside = s.inn ~= nil                                   -- a source inside Kern+ / Tiefe+ is no reason to walk out
   if inside then return nil end
   return {d = best.d, txt = string.format('%s %s at %d,%d,%d, %d tiles', s.kind, tostring(s.id), s.x, s.y, s.z, best.d)}
+end
+
+-- public (BUG-616, siege's STRANDED / stranded_drink): the concrete way to drink for citizens standing at `pos` on a walk group no
+-- bridge serves, from the last run and scan only (no tile reads): the nearest accepted source and how far it is, else the nearest
+-- scan body with a bank, else the cistern. Returns one line (<= 200 bytes), nil before the first run. Report only
+function M.stranded_fix(K, pos)
+  if not st.src or type(pos) ~= 'table' or not pos[1] then return nil end
+  local x, y, z = pos[1], pos[2], pos[3]
+  local best
+  for _, s in ipairs(st.src) do
+    if s.wet and not s.emerg and s.x then
+      local d = math.max(math.abs(s.x - x), math.abs(s.y - y), math.abs(s.z - z))
+      if not best or d < best.d then best = {d = d, s = s} end
+    end
+  end
+  local txt
+  if best then
+    txt = string.format('%s %d at %d,%d,%d is %d tiles off, not on their walk group: open a walk path (ramp or stair) to it, or a cistern '
+                        .. 'beside them (bp sites cistern --near %d,%d,%d)', best.s.kind, best.s.id, best.s.x, best.s.y, best.s.z,
+                        best.d, x, y, z)
+  else
+    local body
+    for _, b in ipairs(st.ws and st.ws.bodies or {}) do
+      if b.cavern ~= 1 and b.bank and b.at and (not body or (b.nd or b.d) < (body.nd or body.d)) then body = b end
+    end
+    if body then
+      txt = string.format('no accepted water; the water at %d,%d,%d has a bank at %d,%d,%d (%d tiles): open a walk path to the bank and '
+                          .. 'zone it as Water Source', body.at[1], body.at[2], body.at[3], body.bank[1], body.bank[2], body.bank[3],
+                          body.nd or body.d)
+    else
+      txt = string.format('no accepted water and no reachable bank: a cistern beside them (bp sites cistern --near %d,%d,%d --fresh), '
+                          .. 'or an aquifer well', x, y, z)
+    end
+  end
+  return trunc(txt, 200)
 end
 
 -- public (BUG-401, Run 16a Mansionlauded and Bachwald: two forts without a drop of reachable water died of thirst, 13 of 16):
@@ -4286,16 +4452,22 @@ M.verbs['well.retire'] = function(K, args, cmd)
       end
     end
   end
+  if w.removing then      -- BUG-617: the Remove Building job stands; a second call would only say 'refused' again
+    return true, trunc(string.format('well.retire: well %d at %s is already marked for removal (a builder takes the job); nothing more '
+                                     .. 'to send', id, at), 400), {well = id, at = json.array{w.x, w.y, w.z}, queued = 1}
+  end
   if not M.can('well_remove') then return false, 'well.retire: this kernel build has no well_remove act' end
   local ok, err = K.act.well_remove(id)
   if not ok then return false, string.format('well.retire: well %d at %s: %s', id, at, tostring(err)) end
+  local queued = err == 'queued'          -- BUG-617: a built well goes by a Remove Building job, not at once
   local out = {}
   for _, s in ipairs(st.last.sources) do if not (s.kind == 'well' and s.id == id) then out[#out + 1] = s end end
   st.last.sources = out
-  local msg = string.format('retired the dry well %d at %s (building screen remove%s): the carriers fill at the accepted water',
-                            id, at, approve and ', approved by the player' or '')
+  local msg = string.format('%s the dry well %d at %s (building screen remove%s): the carriers fill at the accepted water',
+                            queued and 'removal of' or 'retired', id, at, approve and ', approved by the player' or '')
+  if queued then msg = msg .. '; a Remove Building job is queued, a builder takes it' end
   K.log('warn', 'water: %s', msg)
-  return true, trunc(msg, 400), {well = id, at = json.array{w.x, w.y, w.z}, approve = approve and 1 or 0}
+  return true, trunc(msg, 400), {well = id, at = json.array{w.x, w.y, w.z}, approve = approve and 1 or 0, queued = queued and 1 or nil}
 end
 
 return M

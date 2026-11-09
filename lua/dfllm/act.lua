@@ -1285,13 +1285,19 @@ local function impls(state)
 
   -- BUG-541 (Run 16b i2 / Run 16d i4: GiveWater carriers stood for weeks at a DRY well, 3 patients died): the building screen's
   -- remove for ONE well by id (dfhack.buildings.deconstruct, as pond_remove does for a zone). The caller (water's well.retire)
-  -- has checked that it is dry. Returns ok, 1. [live-untested]
+  -- has checked that it is dry. Returns ok, 1 (gone at once) or ok, 'queued' (BUG-617). [live-untested]
+  -- BUG-617 (Run 16d i4 Trumpetrealms y428: well.retire id=17824 'deconstruct refused', the offered fix of dry_well never worked, the
+  -- same decision came back for 10 years): dfhack.buildings.deconstruct returns true only when the building was destroyed at once (a zone);
+  -- for a BUILT building it queues a Remove Building job and returns false (Lua API: "Destroys the building, or queues a deconstruction
+  -- job. Returns true if the building was destroyed and deallocated immediately"). That is no refusal: markedForRemoval says the job stands.
   function I.well_remove(id)
     id = math.tointeger(id)
     if not id then return false, 'bad well id' end
     for _, w in ipairs(df.global.world.buildings.other.WELL) do
       if w.id == id then
         if dfhack.buildings.deconstruct(w) then return true, 1 end
+        local okm, marked = pcall(function() return dfhack.buildings.markedForRemoval(w) end)
+        if okm and marked then return true, 'queued' end
         return false, 'deconstruct refused'
       end
     end

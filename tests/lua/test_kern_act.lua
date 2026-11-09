@@ -784,6 +784,22 @@ T.test('well_remove (BUG-541): one well by id (the water module only), a refused
   T.eq(env.lines[#env.lines][2], 'act.well_remove')
 end)
 
+T.test('well_remove (BUG-617): a built well goes by a queued Remove Building job: deconstruct false + markedForRemoval is ok (queued), not a refusal', function()
+  H.world{tag = 'wrq'}
+  local other = df.global.world.buildings.other
+  other.WELL = kmock.vec{{id = 980}, {id = 981}, {id = 982}}
+  dfhack.buildings = dfhack.buildings or {}
+  local gone, marked = {}, {}
+  dfhack.buildings.deconstruct = function(w) gone[#gone + 1] = w.id; return false end   -- DFHack: false = a job was queued
+  dfhack.buildings.markedForRemoval = function(w) return w.id ~= 982 end
+  local env = mk()
+  env.who_v = 'water'
+  T.eq({env.api.well_remove(980)}, {true, 'queued'})
+  T.eq({env.api.well_remove(982)}, {false, 'deconstruct refused'}, 'not marked: a real refusal')
+  T.eq(gone, {980, 982})
+  dfhack.buildings.markedForRemoval = nil
+end)
+
 T.test('hospital_remove (BUG-034): one zone of a hospital location, never another zone or the one on the zone sheet', function()
   H.world{tag = 'hrm'}
   local gone, sel = {}, nil

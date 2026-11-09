@@ -649,7 +649,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-235: peace = 1 a rescue in quiet PEACE (outer bridges too, no sealed outside; ends by handing the bridges back
     # to the mode default, never a raise)
     "STRANDED": ("A", "siege", _d("phase:s", "n:i units:ia grp:i thirst:i hunger:i bridges:sa why:s need:s pos:p "
-                                             "left:i hostile:i burrow:s peace:i")),
+                                             "left:i hostile:i burrow:s peace:i fix:s")),
     # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
     "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
     # BUG-096/FR-80 (Run 14 note 70: Kern+ shrank to about one tile and Tiefe+ vanished): the burrow guard of seal read Kern+ or
