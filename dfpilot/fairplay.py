@@ -164,7 +164,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     else:
         for k, v in ref.items():
             lim = {"bed_pct": (0, 100), "breach_days": (0, 60), "floor_pct": (0, 300), "floor_pop": (0, 1000),
-                   "supply_switch": (0, 100)}.get(k)
+                   "supply_switch": (0, 100), "deep_pct": (0, 100)}.get(k)
             if lim is None:
                 errs.append(f"{name}: refuge.{k}: unknown key")
             elif not is_int(v, *lim):
@@ -217,7 +217,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     # intake waves and the sortie through O1 (Gordon 2026-10-16; lua/dfllm/siege.lua M.IK_LIM / M.SO_LIM)
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
                       ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM),
-                      ("breach", BREACH_LIM), ("resume", RESUME_LIM), ("siege_long", SIEGE_LONG_LIM)):
+                      ("breach", BREACH_LIM), ("resume", RESUME_LIM), ("siege_long", SIEGE_LONG_LIM),
+                      ("siege_starve", SIEGE_STARVE_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -250,9 +251,13 @@ BREACH_LIM: dict = {"stuck_ticks": (0, 4032000)}
 # BUG-331: siege.lua M.LG / M.LG_LIM: a SIEGE calm for `days` game days (nobody inside Kern+, every hostile beyond `near` tiles)
 # is eased (the deep defense lifted, DECISION_NEEDED siege_long); on false = off
 SIEGE_LONG_LIM: dict = {"on": "bool", "days": (1, 336), "near": (5, 200)}
+# BUG-570: siege.lua M.SV / M.SV_LIM: `min` citizens over `mark` of hunger or thirst (or one after a preventable death of the last
+# `death_days`) in a SIEGE lockdown: relief (the civilians to Kern+) while no hostile is inside Kern+ or within `near` tiles, food and
+# drink unforbidden, DECISION_NEEDED starve_lockdown; on false = off
+SIEGE_STARVE_LIM: dict = {"on": "bool", "min": (1, 100), "mark": (25000, 100000), "near": (5, 200), "death_days": (0, 336)}
 # FR-94 (Run 14 note 100): arbiter.lua resume_cfg: real minutes a pause by DF may stand before the wake PAUSED_BY_DF (0 = no wake)
 RESUME_LIM: dict = {"wake_min": (0, 240)}
-REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long")
+REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)
@@ -329,6 +334,9 @@ WATER_LIM: dict = {
     "care": "bool", "care_thirst": _THIRST, "care_near": (1, 200),
     # BUG-559: the care burrow in BREACH (Kern+ tiles, every hostile care_breach_near tiles off)
     "care_breach": "bool", "care_breach_near": (1, 200),
+    # BUG-571: in a SIEGE the care burrow reaches water / bucket / patient tiles outside Kern+ inside sealed walls, every hostile
+    # care_siege_near tiles off
+    "care_siege_out": "bool", "care_siege_near": (1, 200),
     # BUG-344: a thirsty citizen beside an accepted well (water.drink_fix, economy's thirst decision)
     "well_thirst": _THIRST,
 }

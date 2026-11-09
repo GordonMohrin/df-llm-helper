@@ -130,7 +130,7 @@ T.test('BUG-019: in BREACH (a goblin inside Kern+) the dead end Tiefe+ is taken 
   T.eq(#evs(W, 'REFUGE_FAIL'), 0)
   T.eq(W.state().alert, {want = 'Tiefe+', burrow = 'Tiefe+', tiles = 19, inside = 0, ok = 1, why = '',
                          ref = {ex = 1, sep = 1, beds = 0, need = 1, box = {5, 5, 5, 8, 8, 8}, wd = -1,   -- BUG-040
-                                dr = 0, dn = 3, st = 0, tr = 1}})                                           -- FR-69, BUG-049
+                                dr = 0, dn = 3, st = 0, fd = 0, fn = 3, tr = 1}})                            -- FR-69, BUG-049, BUG-569 (food)
 end)
 
 T.test('BUG-019 live (Run 10 y419: "REFUGE_FAIL Tiefe+: 63 tiles<109, beds 8<28 -> confining to Kern+"): 30 ' ..
@@ -201,10 +201,10 @@ T.test('Run 10 (Tiefe+ open to the entrance, beds 8<27): the state carries the r
   -- BUG-040: plus where it lies (box) and its nearest accepted water (wd -1: none known)
   -- FR-69: its drink, the drink it wants, its drink store's tiles
   T.eq(W.state().alert.ref, {ex = 1, sep = 0, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1, dr = 0, dn = 9,
-                             st = 0, tr = 0, trw = 'exposed: open to 1 entrance 20,10,9 stai'})   -- BUG-049
+                             st = 0, fd = 0, fn = 9, tr = 0, trw = 'exposed: open to 1 entrance 20,10,9 stai'})   -- BUG-049
   local W2 = fort{door = true, citizens = 9}
   T.eq(W2.state().alert.ref, {ex = 1, sep = 1, beds = 0, need = 3, box = {5, 5, 5, 8, 8, 8}, wd = -1, dr = 0, dn = 9,
-                              st = 0, tr = 1})
+                              st = 0, fd = 0, fn = 9, tr = 1})
   local W3 = fort{shaft = false}                     -- no dead end: no refuge burrow at all
   T.eq(W3.state().alert.ref, {ex = 0, sep = -1, beds = 0, need = 1})
   local W4 = fort{door = true, citizens = 9, cfg = {bed_pct = 50}}

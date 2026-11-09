@@ -1468,6 +1468,47 @@ def _drink_room(save_dir: Path) -> bool:
     return any(isinstance(r, dict) and r.get("tpl") == REFUGE_DRINK for r in rooms)
 
 
+def _refuge_food_room(save_dir: Path) -> bool:
+    """BUG-572: the fort manifest has a refuge_drink room that was built as a food store (room id ends in _food)."""
+    man = files.read_manifest(save_dir) or files.read_json(Path(save_dir) / ".manifest.json") or {}
+    rooms = man.get("rooms") if isinstance(man, dict) and isinstance(man.get("rooms"), list) else []
+    return any(isinstance(r, dict) and r.get("tpl") == REFUGE_DRINK and str(r.get("id") or "").endswith("_food") for r in rooms)
+
+
+def fit_pct() -> int:
+    """BUG-569/572: config/reflex.json refuge.deep_pct (default 90): the share of its food, drink and beds the refuge must hold for
+    the kernel to send the civilians there in a deep defense."""
+    rf = files.read_json(paths.config_dir() / "reflex.json")
+    v = ((rf.get("refuge") or {}) if isinstance(rf, dict) else {}).get("deep_pct")
+    return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100 else 90
+
+
+def refuge_food_short(s: dict | None) -> bool:
+    """BUG-572 (Run 16b i2 Brotherarrow y406: Tiefe+ held food 1 for 95 citizens, the deep defense sent them there, ~26 dead): seal's
+    refuge audit (state alert.ref fd / fn: food units on its tiles, food wanted) is under fit_pct() % of the food wanted."""
+    r = ((s or {}).get("alert") or {}).get("ref") or {}
+    fd, fn = r.get("fd"), r.get("fn")
+    ints = all(isinstance(v, int) and not isinstance(v, bool) for v in (fd, fn))
+    return bool(r.get("ex")) and ints and fn > 0 and fit_pct() > 0 and fd * 100 < fn * fit_pct()
+
+
+def refuge_food_want(s: dict | None) -> int | None:
+    """BUG-572: barrels the refuge FOOD and drink store wants (bp.rooms.refuge_store_n, the same settings as drink_want); None
+    without the bp package."""
+    cit = ((s or {}).get("pop") or {}).get("cit")
+    try:
+        rooms = load_bp("rooms")
+    except BpUnavailable:
+        return None
+    rf = files.read_json(paths.config_dir() / "reflex.json")
+    bl = files.read_json(paths.config_dir() / "baseline.json")
+    days = ((rf.get("refuge") or {}) if isinstance(rf, dict) else {}).get("breach_days")
+    milli = ((((bl.get("economy") or {}) if isinstance(bl, dict) else {}).get("seed_milli")) or {}).get("drink")
+    ok = [isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (days, milli)]
+    return rooms.refuge_store_n(cit if isinstance(cit, int) else 0, days if ok[0] else rooms.BREACH_DAYS,
+                                milli if ok[1] else rooms.DRINK_MILLI)
+
+
 def refuge_dry(s: dict | None) -> bool:
     """FR-69: readiness names the R0 blocker refuge_dry (the refuge holds drink < citizens and no wet well)."""
     return "refuge_dry" in (((s or {}).get("ready") or {}).get("fail") or [])
@@ -1537,13 +1578,15 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
            "refuge_n": None if ref is None else len(ref), "open": op, "burrow": burrow, "head": head,
            "head_open": bool(head and ref and any(x.split()[0] == head.split()[0] for x in ref)),
            "head_state": rs["state"], "head_man": rs["man"], "head_note": rs["note"],
-           "bed_site": _bed_site(save_dir, state), "drink": 0, "drink_room": _drink_room(save_dir)}
+           "bed_site": _bed_site(save_dir, state), "drink": 0, "drink_room": _drink_room(save_dir),
+           "food": 0, "food_room": _refuge_food_room(save_dir)}
     for p in bp_files(save_dir):
         doc = files.read_json(p)
         if not isinstance(doc, dict) or not isinstance(doc.get("tpl"), str) or p.stem in skip:
             continue                               # BUG-130: a fortcore stopped on a breach is not under way
         if p.stem in done:
             out["drink_room"] = out["drink_room"] or doc["tpl"] == REFUGE_DRINK    # FR-69: a store done
+            out["food_room"] = out["food_room"] or (doc["tpl"] == REFUGE_DRINK and bool((doc.get("params") or {}).get("food")))
             continue
         if _refuge_stage(doc):
             out["stage3"] = True
@@ -1551,6 +1594,8 @@ def refuge_projects(save_dir: Path, state: dict | None = None, applied: set | No
             n = (doc.get("params") or {}).get("n")
             out["beds" if doc["tpl"] == REFUGE_BEDS else "drink"] += \
                 n if isinstance(n, int) and not isinstance(n, bool) else 0
+            if doc["tpl"] == REFUGE_DRINK and (doc.get("params") or {}).get("food"):
+                out["food"] += n if isinstance(n, int) and not isinstance(n, bool) else 1       # BUG-572: a food store under way
         elif doc["tpl"] == "seal":
             out["seal"] = True
     out["drink_fit"], out["drink_why"] = _drink_site(save_dir, state, out)
@@ -1951,6 +1996,42 @@ def drink_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
             + (f" for {cit} citizens" if isinstance(cit, int) else "") + "; ") if isinstance(n, int) else ""
     return [f"{head}: add {_compact(b)} (FR-69: a drink store dug off the refuge room, {size}dfllm plan propose drafts "
             "it)"]
+
+
+def _has_refuge_food_store(builds) -> bool:
+    return any(b.get("tpl") == REFUGE_DRINK and (b.get("p") or {}).get("food") for b in builds)
+
+
+def refuge_food_draft(s: dict, fort: dict, builds=()) -> dict | None:
+    """BUG-572 (Run 16b i2 Brotherarrow y406: the year plan built refuge_beds and refuge_drink, never a refuge food store; the deep
+    defense held 95 citizens in a Tiefe+ with food 1): while the refuge holds under fit_pct() % of its food need (state alert.ref
+    fd / fn) and no food store stands, is under way or is in `builds`, the refuge store as a FOOD and drink store (refuge_drink
+    food=1), sized from the citizens (refuge_food_want), without the take_from link when the fort has no core stockroom."""
+    f = (fort or {}).get("refuge") or {}
+    if not refuge_food_short(s) or f.get("food") or f.get("food_room") or _has_refuge_food_store(builds):
+        return None
+    n = refuge_food_want(s)
+    p: dict = {"food": 1}
+    if isinstance(n, int):
+        p["n"] = n
+    if (fort or {}).get("stockroom") is False:
+        p["take"] = ""
+    return {"tpl": REFUGE_DRINK, "site": "S1", "p": p}
+
+
+def refuge_food_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
+    """BUG-572: the refuge holds under fit_pct() % of its food need and the plan brings no refuge food store: a warning with the draft
+    (the kernel's deep defense keeps the civilians in Kern+ meanwhile, BUG-569; the refuge is the hold of a BREACH only)."""
+    if not refuge_food_short(s):
+        return []
+    f = (fort or {}).get("refuge") or {}
+    if f.get("food") or f.get("food_room") or _has_refuge_food_store([b for _, _, b in new_builds(doc, prev)]):
+        return []
+    r = (s.get("alert") or {}).get("ref") or {}
+    b = refuge_food_draft(s, fort) or {"tpl": REFUGE_DRINK, "site": "S1", "p": {"food": 1}}
+    return [f"refuge: Tiefe+ holds food {r.get('fd')}<{r.get('fn')} (under {fit_pct()} % of the need): the deep defense will not send the "
+            f"civilians there (BUG-569) and a BREACH finds them hungry; add {_compact(b)} (BUG-572: a food and drink store dug off the "
+            "refuge room; dfllm plan propose drafts it)"]
 
 
 def new_builds(doc: dict, prev: dict | None) -> list[tuple[int, int, dict]]:
@@ -2428,6 +2509,7 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     errs += ce
     warn += cw
     warn += drink_gate(doc, s, fort or {}, prev)            # FR-69: refuge_dry -> the refuge drink store
+    warn += refuge_food_gate(doc, s, fort or {}, prev)      # BUG-572: a refuge short of food -> the refuge food store
     he, hw_ = hospital_gate(doc, s, fort or {}, prev)       # BUG-034: no hospital without accepted water near it
     errs += he
     warn += hw_
@@ -4198,9 +4280,16 @@ def request_drafts(s: dict | None, fort: dict | None, done: set, builds: list[di
             out.append(b)
             why.append("workshops " + ",".join(want))
     dd = drink_draft(s or {}, fort, done, force=True)
+    fd = refuge_food_draft(s or {}, fort, (*builds, *out, *(kept or ())))      # BUG-572: the refuge's food store
     if dd and (info is None or REFUGE_DRINK in info) and not any(x["tpl"] == REFUGE_DRINK for x in (*builds, *out)):
+        if fd:                                       # one store for both: the food and drink pile, sized for both
+            dd = {**dd, "p": {**(dd.get("p") or {}), **(fd.get("p") or {})}}
+            fd = None
         out.append(dd)
-        why.append("refuge_drink (R0 refuge_dry)")
+        why.append("refuge_drink (R0 refuge_dry)" + (" as a food and drink store (BUG-572)" if (dd.get("p") or {}).get("food") else ""))
+    if fd and (info is None or REFUGE_DRINK in info) and not _has_refuge_food_store((*builds, *out)):
+        out.append(fd)
+        why.append(f"refuge_drink food=1 (the refuge holds under {fit_pct()} % of its food)")
     note = ("; BUG-418: open requests and R0 blockers drafted: " + "; ".join(why)) if why else ""
     return out, note
 

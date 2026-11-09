@@ -570,6 +570,8 @@ C.STATE_SPEC = obj({
                           ws = {t = 'tup', items = {NAT, NAT, NAT}},
                           -- FR-69: drink units on its tiles, drink wanted, tiles of its drink store (0 none)
                           dr = NAT, dn = NAT, st = NAT,
+                          -- BUG-569/572: food units on its tiles, food wanted (citizens x food_per_cit)
+                          fd = NAT, fn = NAT,
                           -- BUG-049: trusted (1) or not (0) and the first reason
                           tr = FLAG, trw = str(40),
                           -- BUG-336: its own way in (the stair head) is open: never the alert burrow in a fight
@@ -583,7 +585,8 @@ C.STATE_SPEC = obj({
   -- deep = the deep defense's reasons ('destroyers,army,weak')
   -- M3 (BUG-114): in BREACH ba = ticks since it began, bw = what it waits for (the bridges not up and why, the quiet clock)
   -- BUG-331: lg = ticks since a long calm SIEGE was eased (the deep defense lifted, DECISION_NEEDED siege_long)
-  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24), ba = NAT, bw = str(100), lg = NAT}),
+  -- BUG-570: sv = a hunger or thirst emergency in the SIEGE lockdown (1 relief on: the civilians in Kern+, 2 no relief)
+  wave = obj({ph = str(8), n = NAT}, {why = str(40), so = str(24), deep = str(24), ba = NAT, bw = str(100), lg = NAT, sv = NAT}),
   -- BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s), exports
   -- written and requests dropped this boot; the running (else the first waiting) export: id, purpose, who asked,
   -- progress, why it waits

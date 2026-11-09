@@ -705,7 +705,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-336/337: ropen = the refuge's open way in (seal.refuge_open: it is not the civilians' burrow), soft = what alone
     # closes its stair head with building destroyers in sight (hatch | door: they break it)
     "SIEGE_DEEP": ("A", "siege", _d("why:sa", "bd:i races:sa units:ia vis:i soldiers:i worn:i metal:i refuge:s "
-                                              "pos:p ropen:s soft:s")),
+                                              "pos:p ropen:s soft:s unfit:s")),
     "ALERT_START": ("B", "siege", _d(opt="vis:i")),
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     # Run 11: cause far (ended with hostiles in sight beyond reflex.lockdown_near; far names <= 3, nfar) or quiet
@@ -1227,6 +1227,9 @@ STATE = Obj(
                                                              # (citizens x drink_per_cit), tiles of its drink store
                                                              # (stockpiles dfllm-drink on it; 0 none)
                                                              "dr": NAT, "dn": NAT, "st": NAT,
+                                                             # BUG-569/572: food units on its tiles, food wanted
+                                                             # (citizens x food_per_cit)
+                                                             "fd": NAT, "fn": NAT,
                                                              # BUG-049: trusted (1) or not (0) and the first reason
                                                              # (separation fresh, hatch stands, nobody inside)
                                                              "tr": FLAG, "trw": Str(maxbytes=40),
@@ -1247,9 +1250,10 @@ STATE = Obj(
          # BUG-030: deep = the deep defense's reasons ("destroyers,army,weak")
          # M3 (BUG-114): in BREACH ba = ticks since it began, bw = what it waits for (bridges not up and why, quiet clock)
          # BUG-331: lg = ticks since a long calm SIEGE was eased (deep defense lifted, DECISION_NEEDED siege_long)
+         # BUG-570: sv = a hunger or thirst emergency in the SIEGE lockdown (1 relief on: the civilians in Kern+, 2 no relief)
          "wave": Obj(req={"ph": Str(maxbytes=8), "n": NAT}, opt={"why": Str(maxbytes=40), "so": Str(maxbytes=24),
                                                                  "deep": Str(maxbytes=24), "ba": NAT,
-                                                                 "bw": Str(maxbytes=100), "lg": NAT}),
+                                                                 "bw": Str(maxbytes=100), "lg": NAT, "sv": NAT}),
          # BUG-033: the snapshot export queue: requests waiting (the running one included), the oldest one's age (s),
          # exports written and requests dropped this boot; the running (else the first waiting) export: id, purpose,
          # who asked, progress, why it waits ('busy trade', 'paced 3 min', 'not started 2 min')

@@ -1028,7 +1028,11 @@ def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
         out.append(f"intake {wv['ph']} (waves {wv['n']})" + (f": {wv['why']}" if wv.get("why") else "")
                    + (f", sortie {wv['so']}" if wv.get("so") else "")
                    # BUG-030: the deep defense (civilians in the refuge, squads at the core station)
-                   + (f", DEEP {wv['deep']}: civilians in the refuge, squads in the core" if wv.get("deep") else "")
+                   + (f", DEEP {wv['deep']}: civilians in "
+                      + (f"{(s.get('alert') or {}).get('burrow') or 'Kern+'} (BUG-570 starvation relief)" if wv.get("sv") == 1
+                         else "the refuge") + ", squads in the core" if wv.get("deep") else "")
+                   # BUG-570: hunger or thirst in the lockdown without relief (a hostile is near): food is unforbidden, see the decision
+                   + (", HUNGER: no relief, a hostile is near (DECISION starve_lockdown)" if wv.get("sv") == 2 else "")
                    # BUG-331: a long calm siege, eased (the bridges up); review fix: the burrow seal really holds
                    + (f", eased {wv['lg'] / 1200:.1f} d: calm, civilians in "
                       f"{(s.get('alert') or {}).get('burrow') or 'Kern+'}" if "lg" in wv else ""))

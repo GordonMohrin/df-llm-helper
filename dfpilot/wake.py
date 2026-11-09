@@ -392,6 +392,8 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
         return lone_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "siege_long":
         return siege_long_hint(d)
+    if etype == "DECISION_NEEDED" and d.get("id") == "starve_lockdown":
+        return starve_lockdown_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "seal_stalled":
         return seal_stalled_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") == "job_stalled":
@@ -642,6 +644,22 @@ def siege_long_hint(d: dict) -> str:
            else "; no squad to send")
     return (f"tell Gordon: the siege has been calm for {d.get('days', '?')} days (nearest hostile {d.get('n', '?')} tiles), "
             f"the kernel eased it ({where}, the bridges stay up){how}; otherwise wait")
+
+
+def starve_lockdown_hint(d: dict) -> str:
+    """BUG-570: citizens over the hunger / thirst mark in a SIEGE lockdown. With relief the kernel put the civilians in Kern+ (the burrow
+    with the stock) and unforbade food and drink; without it a hostile is near (d.near tiles, d.inside in Kern+) and only an attack
+    or the refuge's own stock helps."""
+    n, cmd = d.get("n", "?"), d.get("cmd")
+    head = f"tell Gordon: {n} citizens are hungry or thirsty in the siege (hunger {d.get('hunger', '?')}, thirst {d.get('thirst', '?')})"
+    if d.get("relief"):
+        return (f"{head}; the kernel put the civilians in {d.get('to') or 'Kern+'} (food, drink) and unforbade the stock, no hostile "
+                f"within reach ({d.get('near', '?')} tiles): nothing to do unless it repeats; dfllm cmd inspect what=refuge shows "
+                "why the refuge could not feed them (plan: refuge_drink food=1)")
+    how = (f"; to attack: {cmd} (approve:true is a logged decision, only if the squad can win)" if cmd
+           else "; no squad can go: carry food to them by hand (stockpile in the refuge: bp refuge_drink food=1)")
+    return (f"{head}; NOT widened: a hostile is {'inside Kern+' if d.get('inside') else str(d.get('near', '?')) + ' tiles from the fort'}"
+            f"{how}")
 
 
 PATIENTS_OUT_HINT = ("patients lie outside the alert burrow and cannot walk there: only a rescue moves them. Tell Gordon; "

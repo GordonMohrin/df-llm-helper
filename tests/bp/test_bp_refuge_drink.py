@@ -62,11 +62,11 @@ def test_layout_a_drink_only_pile_with_barrels_in_the_refuge_burrow():
     assert texts(small, "place") == ["f{name=dfllm-drink barrels=6}:=booze(3x2)"]
     assert [len(texts(bp.emit("refuge_drink", {"n": n}, SITE), "place")) for n in (2, 9, 10, 24)] == [1] * 4
     assert texts(bp.emit("refuge_drink", {"n": 24}, SITE), "place")[0].endswith("(5x5)")
-    for bad in ({"n": 1}, {"n": 25}, {"take": "a b"}, {"take": "x" * 12}):     # 12 chars: the cell > 64 bytes
+    for bad in ({"n": 1}, {"n": 41}, {"take": "a b"}, {"take": "x" * 12}):     # 12 chars: the cell > 64 bytes
         with pytest.raises(ValueError):
             bp.emit("refuge_drink", bad, SITE)
     assert "refuge_drink" in rooms.REFUGE_LEVEL and sites.on_refuge("refuge_drink", {})
-    assert bp.check_params("refuge_drink", {}) == {"n": 12, "take": "dfllm-stock", "burrow": "Tiefe+"}
+    assert bp.check_params("refuge_drink", {}) == {"n": 12, "take": "dfllm-stock", "burrow": "Tiefe+", "food": 0}
 
 
 def test_quickfort_stockpile_configuration_only_in_place_mode():
