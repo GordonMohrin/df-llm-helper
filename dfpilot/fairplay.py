@@ -918,8 +918,9 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      # BUG-053: stale tools, the tool pile (the part's other keys are checked by the mirror test)
                      "tools": {"stale_days": (1, 400), "keep_days": (0, 400), "pile": "bool", "pile_days": (1, 400), "pile_w": (1, 5),
                                "pile_h": (1, 5), "pile_r": (2, 40), "pile_reads": (20, 2000), "pile_every": (1, 400)},
-                     # FR-76: a forbidden stock (>= burst_min drink + food units) is unforbidden burst_per_day a day
-                     "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000)}}
+                     # FR-76: a forbidden stock (>= burst_min drink + food units) is unforbidden burst_per_day a day; BUG-594: after_days days
+                     # after the last SIEGE / BREACH day loose forbidden food is unforbidden too
+                     "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000), "after_days": (0, 365)}}
 ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale")   # parts whose every key is listed above
 _PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")

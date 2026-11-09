@@ -454,7 +454,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-052: sol0/soldiers = soldiers at the start/end of the episode, on_station = the best count seen, on_t = ticks
     # until half of them stood at their stations (-1 never)
     "SIEGE_END": ("A", "siege", _d(opt="hostiles:i killed:i lost:i captures:i sealed_ticks:i sol0:i soldiers:i "
-                                       "on_station:i on_t:i")),
+                                       "on_station:i on_t:i stood_down:i")),
     # M3 (BUG-114): a give-up after gate.pull_cap pulls without effect adds pulls (how many), wait (no pull for this many
     # ticks) and lever (the first lever pulled)
     "GATE_FAIL": ("A", "gate", _d("bridge:s", "want:s why:s units:ia pos:p pulls:i wait:i lever:i")),
@@ -855,7 +855,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # last adult of its breeding pair; pets and war animals never)
     "ANIMAL_MARKED": ("B", "economy", _d("need:s animal:i", "race:s adult:f last:f")),
     # BUG-052: off = why soldiers are off their station ('equip 5, far 2': equip, hurt, level, far, nost)
-    "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i off:s")),
+    "SIEGE_STATUS": ("C", "siege", _d(opt="vis:i worn:i on_station:i deaths:i captures:i off:s sd:i")),
     "SEASON": ("C", "kern", _d(opt="year:i season:i")),
     "PROJECT_STAGE": ("C", "runner", _d("proj:s", "stage:s pct:i")),
     # FR-87 (Run 14 y707: a private script deleted the curse popup): a popup left the screen and the kernel did not dismiss
@@ -927,7 +927,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
-                                          "offices", "curse", "unit", "items", "cavern", "manager"])},
+                                          "offices", "curse", "unit", "items", "cavern", "manager", "military"])},
                    # BUG-137: `key=39052` arrives as an int from the CLI (cmd.parse_kv); a unit id or a name
                    opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),

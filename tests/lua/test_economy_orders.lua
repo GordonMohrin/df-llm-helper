@@ -324,6 +324,35 @@ T.test('Run 11: an unvalidated order while the manager rests injured says so (OR
   T.eq(st[#st].d.why, 'unvalidated: no manager available (the manager is gone)')
 end)
 
+-- BUG-592 (Run 16b i2 Brotherarrow y406-y407: "manager Erush is a soldier on duty" for 58 days, DECISION_NEEDED manager_absent asked for the nobles
+-- screen): military takes the manager out of his squad (military.manager_pull); only when it cannot, the question stands
+T.test('BUG-592: the manager is a squad member on duty: economy asks military to take him out; no DECISION when it did', function()
+  local function setup(W)
+    F.workshop(W, 'Carpenters')
+    for _ = 1, 40 do F.item(W, 'WOOD', {}) end
+    F.order(W, {job_type = df.job_type.ConstructCoffin, mat_type = -1, mat_index = -1, amount_left = 4,
+                material_category = {wood = true}, status = {validated = false}, _name = 'Construct wooden coffin'})
+  end
+  local W = world{masons = false, setup = setup}
+  local mg = manager(W, 2)
+  mg.military = {squad_id = 4, squad_position = 2}
+  local pulled = 0
+  W.load({name = 'military', every = {ticks = 100000},
+          manager_pull = function(K, force) pulled = pulled + 1; mg.military.squad_id = -1; return true end})
+  days(W, 5)
+  T.ok(pulled >= 1, 'military was asked')
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do T.ok(e.d.id ~= 'manager_absent', 'no manager_absent: ' .. e.msg) end
+  -- military cannot (refused): the question stands, naming the cause
+  local W2 = world{masons = false, setup = setup}
+  local mg2 = manager(W2, 2)
+  mg2.military = {squad_id = 4, squad_position = 2}
+  W2.load({name = 'military', every = {ticks = 100000}, manager_pull = function() return false end})
+  days(W2, 5)
+  local dn = W2.find_events('DECISION_NEEDED')
+  T.eq(#dn, 1)
+  T.ok(dn[1].msg:find('is a soldier on duty', 1, true), dn[1].msg)
+end)
+
 -- BUG-042: an order unvalidated past orders.unval_days with an available manager is held by the validation, not by its
 -- material: the reason names why the manager validates nothing (here: he has no office zone)
 T.test('Run 11/BUG-042: an unvalidated order with an available manager names why he validates nothing', function()

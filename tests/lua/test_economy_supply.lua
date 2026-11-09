@@ -483,4 +483,50 @@ T.test('BUG-570 (Run 16b i2 Brotherarrow y406: forbidden food "unforbid held bac
   T.eq({M.forbid_note({drink_forb = 10}, 'SIEGE', 0, 2)}, {3, 'mode SIEGE'}, 'forbid_note: the old answer without it')
 end)
 
+-- BUG-594 (Run 16b i2 Brotherarrow y405, Run 16a i1: 5 forbidden food items "the kernel has not freed them" 21-30 days after SIEGE_END and
+-- PEACE): loose forbidden food (not drink, not a container) was freed in a starvation only; after a fight (SIEGE / BREACH) it is freed for
+-- forbid.after_days days too; before any fight (or after that window) it stays, and the state says why instead of nothing
+T.test('BUG-594: loose forbidden food is unforbidden after a SIEGE (RECOVERY, PEACE), not before one; the held food names its cause', function()
+  local foods, drinks = {}, {}
+  local W = world{setup = function(W)
+    for i = 1, 5 do
+      foods[#foods + 1] = F.item(W, 'FOOD', {stack_size = 2, subtype = 1, flags = {forbid = true}, _pos = {5 + i, 6, 100}})
+    end
+    drinks[1] = F.item(W, 'DRINK', {stack_size = 20, flags = {forbid = true}, _pos = {5, 5, 100}})
+  end}
+  local function left(list) local n = 0; for _, it in ipairs(list) do if it.flags.forbid then n = n + 1 end end return n end
+  days(W, 2)
+  T.eq({left(foods), left(drinks)}, {5, 1}, 'PEACE, no fight: loose forbidden food and drink stay (they may be the player own)')
+  T.eq(W.state().stock.dfwhy, '6 food/drink kept (forbidden by hand?)', 'and the state names the cause')
+  W.K.set_mode('SIEGE', 'test')
+  days(W, 2)
+  T.eq(left(foods), 5, 'SIEGE: still forbidden')
+  W.K.set_mode('RECOVERY', 'test')
+  days(W, 2)
+  T.eq({left(foods), left(drinks)}, {0, 0}, 'RECOVERY: freed (old code: never)')
+  T.eq(W.state().stock.dfwhy, nil, 'nothing holds it back')
+  -- a food item forbidden by hand long after the fight stays
+  W.K.set_mode('PEACE', 'test')
+  days(W, 16)
+  local late = F.item(W, 'FOOD', {stack_size = 2, subtype = 1, flags = {forbid = true}, _pos = {9, 6, 100}})
+  days(W, 3)
+  T.eq(left({late}), 1, 'after forbid.after_days (14) the loose food is the player own again')
+end)
+
+T.test('BUG-594: forbid.after_days = 0 keeps the old rule', function()
+  local foods = {}
+  local W = world{cfg = function(cfg) cfg.economy.forbid = {after_days = 0} end, setup = function(W)
+    for i = 1, 3 do
+      foods[#foods + 1] = F.item(W, 'FOOD', {stack_size = 2, subtype = 1, flags = {forbid = true}, _pos = {5 + i, 6, 100}})
+    end
+  end}
+  W.K.set_mode('SIEGE', 'test')
+  days(W, 1)
+  W.K.set_mode('RECOVERY', 'test')
+  days(W, 3)
+  local n = 0
+  for _, it in ipairs(foods) do if it.flags.forbid then n = n + 1 end end
+  T.eq(n, 3, 'off: stays forbidden')
+end)
+
 T.done()

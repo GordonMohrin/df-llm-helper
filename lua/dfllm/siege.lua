@@ -216,11 +216,16 @@ local function go(K, to, why, a, bridge)
     local sol = okm and type(mk) == 'table' and int(mk.soldiers) or 0
     local sol0 = (ep.sol0 or 0) > 0 and ep.sol0 or sol
     local ont = ep.ont or -1
-    K.emit('SIEGE_END', 'A', string.format('%d hostiles, %d killed, %d lost, sealed %d ticks; soldiers %d -> %d, on station %d%s',
+    -- BUG-593 (Run 16b i2 Brotherarrow y406, Run 16d i4 Trumpetrealms y411-y418: 'soldiers 11 -> 11, on station 0 (never half)' three times): every
+    -- squad stood down on purpose (BUG-510: fewer than military.UNFIT_PCT percent hold a real weapon and wear body armor, free: 0-2 melee
+    -- weapons), so there was no station order and on station stayed 0; the line said nothing of it. `sd` = the most soldiers that stood down
+    local sdn = ep.sdmax or 0
+    K.emit('SIEGE_END', 'A', string.format('%d hostiles, %d killed, %d lost, sealed %d ticks; soldiers %d -> %d, on station %d%s%s',
            hostiles, ep.killed, ep.lost, ep.sealed, sol0, sol, ep.onmax or 0,
-           ont >= 0 and (' (half after ' .. ont .. ' ticks)') or ' (never half)'),
+           ont >= 0 and (' (half after ' .. ont .. ' ticks)') or ' (never half)',
+           sdn > 0 and string.format('; %d stood down unequipped (no station order)', sdn) or ''),
            {hostiles = hostiles, killed = ep.killed, lost = ep.lost, captures = ep.caps, sealed_ticks = ep.sealed,
-            sol0 = sol0, soldiers = sol, on_station = ep.onmax or 0, on_t = ont})
+            sol0 = sol0, soldiers = sol, on_station = ep.onmax or 0, on_t = ont, stood_down = sdn > 0 and sdn or nil})
   end
   return true
 end
@@ -2617,6 +2622,7 @@ local function station_watch(K, now)
   local ok, k = K.call('military', 'kpi')
   if not (ok and type(k) == 'table') then return end
   local sol, on = int(k.soldiers) or 0, int(k.on_station) or 0
+  if (int(k.sd) or 0) > (ep.sdmax or 0) then ep.sdmax, dirty = int(k.sd), true end     -- BUG-593
   sol = math.max(0, sol - (int(k.sd) or 0))         -- BUG-510: the squads that stand down on purpose (unequipped) are no station miss
   if (ep.sol0 or 0) == 0 and sol > 0 then ep.sol0, dirty = sol, true end
   if on > (ep.onmax or 0) then ep.onmax, dirty = on, true end
@@ -2673,6 +2679,7 @@ local function status(K, a, now)
   if ok and type(k) == 'table' then
     d.worn, d.on_station = int(k.worn), int(k.on_station)
     d.off = off_text(k.off)                                  -- BUG-052: why soldiers are off their station
+    if (int(k.sd) or 0) > 0 then d.sd = int(k.sd) end         -- BUG-593: the soldiers standing down (unequipped) are no station miss
   end
   K.emit('SIEGE_STATUS', 'C', string.format('%s: %d visible, %d lost', K.mode(), d.vis, ep.lost), d)
 end
@@ -2866,7 +2873,7 @@ function M.init(K)
   if type(p.lg) == 'table' and int(p.lg.t) then st.lg = {t = int(p.lg.t), d = int(p.lg.d) or 0} end
   if type(p.ep) == 'table' then
     st.ep = {}
-    for _, f in ipairs({'start', 'hmax', 'seen', 'killed', 'lost', 'caps', 'sealed', 'sol0', 'onmax'}) do
+    for _, f in ipairs({'start', 'hmax', 'seen', 'killed', 'lost', 'caps', 'sealed', 'sol0', 'onmax', 'sdmax'}) do
       st.ep[f] = int(p.ep[f]) or 0
     end
     st.ep.ont = int(p.ep.ont) or -1
@@ -2929,7 +2936,7 @@ M.on = {
     if to == 'RECOVERY' then st.rq, st.rl, st.b1low = 0, now, false end
     if to == 'ALERT' then st.civ, st.far, st.civ_at = false, nil, nil end
     if (to == 'SIEGE' or to == 'BREACH') and not st.ep then
-      st.ep = {start = now, hmax = 0, seen = 0, killed = 0, lost = 0, caps = 0, sealed = 0, sol0 = 0, onmax = 0, ont = -1}
+      st.ep = {start = now, hmax = 0, seen = 0, killed = 0, lost = 0, caps = 0, sealed = 0, sol0 = 0, onmax = 0, sdmax = 0, ont = -1}
       mem.stn_t, mem.stn_re, mem.stn_warn = nil, nil, nil
       mem.hseen, mem.nseen, mem.caps, mem.caged0 = {}, 0, {}, nil
       mem.cit_ever, mem.cit_src = {}, nil

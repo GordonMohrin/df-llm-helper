@@ -11,7 +11,9 @@
 --            spec asks for metal (or leather) and free pieces of that category in another material lie in the fort gets
 --            that category re-specced to any material (best available: bone, leather, cloth-free kits fill); a position
 --            wearing a non-metal piece in an any-material slot goes back to metal once free metal pieces cover them.
---            Only in PEACE without danger, at most once per refit_days per squad (military M.refit).
+--            Only in PEACE without danger, at most once per refit_days per squad (military M.refit). BUG-591: a slot that
+--            stayed empty over two looks with true armor free in its category goes to any material whatever the stock count of
+--            its own material says.
 local KIT = {}
 
 KIT.ARMOR = {'body', 'head', 'pants', 'gloves', 'shoes'}
@@ -112,9 +114,16 @@ function KIT.spec_mat(sp)
 end
 
 -- the refit plan of one squad: {{cat, mat, positions}} from the members' kit and the free stock per category
--- (`stock(cat)` = {metal, leather, any}: military.stock_mats). mems = {{pos, p, kit}}
-function KIT.refit_plan(mems, stock)
-  local down, up = {}, {}
+-- (`stock(cat)` = {metal, leather, any}: military.stock_mats, true armor only). mems = {{pos, p, kit}}
+-- BUG-591 (Run 16c i3 Sealcertain y422, 16b i2 Brotherarrow y406: 'body armor 3' missing beside 21-54 free pieces, squads stood down): the
+-- stock count alone cannot tell a metal piece the spec accepts from one it does not (copper or silver is metal, but the entity's armor
+-- class is not), so a slot that was empty at the last look too (`opts.prev[cat][pos]`) while free pieces lie in the category goes to any
+-- material whatever the own-material count says. Returns the plan, the positions empty now (`opts.prev` of the next look) and the
+-- positions this plan frees from a material class for being stuck (`opts.hold` keeps them from going back up to metal)
+function KIT.refit_plan(mems, stock, opts)
+  opts = type(opts) == 'table' and opts or {}
+  local prev, hold = opts.prev or {}, opts.hold or {}
+  local down, up, now_empty, stuck = {}, {}, {}, {}
   for _, c in ipairs(KIT.ARMOR) do
     local per = (c == 'gloves' or c == 'shoes') and 2 or 1          -- worn in pairs
     local empty, soft = {metal = {}, leather = {}}, {}
@@ -123,8 +132,12 @@ function KIT.refit_plan(mems, stock)
       -- (#specs first: a DF vector raises on an index out of range, the empty categories of a fresh position)
       local sp = specs and #specs > 0 and (specs[0] or specs[1]) or nil
       local mat = sp and KIT.spec_mat(sp)
+      if sp and m.kit.empty[c] then
+        now_empty[c] = now_empty[c] or {}
+        now_empty[c][m.pos] = true
+      end
       if sp and m.kit.empty[c] and empty[mat] then table.insert(empty[mat], m.pos)
-      elseif sp and m.kit.soft[c] and mat == 'any' then soft[#soft + 1] = m.pos end
+      elseif sp and m.kit.soft[c] and mat == 'any' and not (hold[c] and hold[c][m.pos]) then soft[#soft + 1] = m.pos end
     end
     local n
     for _, mat in ipairs({'metal', 'leather'}) do
@@ -134,11 +147,26 @@ function KIT.refit_plan(mems, stock)
         -- the free pieces of the spec's own material go to the first ones (DF hands them out); the rest take any other
         local own = (n[mat] or 0) // per
         local other = ((n.any or 0) - (n[mat] or 0)) // per
+        local chosen = {}
         for i = own + 1, #list do
           if other <= 0 then break end
           down[c] = down[c] or {}
           table.insert(down[c], list[i])
+          chosen[list[i]] = true
           other = other - 1
+        end
+        -- BUG-591: empty at the last look as well, with pieces free in the category: the spec's material does not match them
+        local budget = (n.any or 0) // per - #(down[c] or {})
+        for i = 1, math.min(own, #list) do
+          local pos = list[i]
+          if budget <= 0 then break end
+          if not chosen[pos] and prev[c] and prev[c][pos] then
+            down[c] = down[c] or {}
+            table.insert(down[c], pos)
+            stuck[c] = stuck[c] or {}
+            stuck[c][pos] = true
+            budget = budget - 1
+          end
         end
       end
     end
@@ -152,7 +180,7 @@ function KIT.refit_plan(mems, stock)
     if down[c] then out[#out + 1] = {cat = c, mat = 'any', positions = down[c]} end
     if up[c] then out[#out + 1] = {cat = c, mat = 'metal', positions = up[c]} end
   end
-  return out
+  return out, now_empty, stuck
 end
 
 return KIT
