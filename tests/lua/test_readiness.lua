@@ -49,6 +49,7 @@ local function world(opts)
   for _, m in ipairs(opts.extra or {}) do extra[#extra + 1] = m end
   X.load(W, {'military', 'readiness'}, extra, {'sense', 'gate'})
   X.mod('readiness').CAPS = {[0] = 55, [1] = 55, [2] = 75, [3] = 250}
+  X.mod('readiness').OPEN_CONFIRM, X.mod('readiness').DEF.worn_pct = 0, 0     -- BUG-600 / BUG-601 have their own tests
   return W
 end
 
@@ -513,6 +514,7 @@ T.test('FR-65 SIEGE_UNREADY (A): R0 in PEACE names blockers, ways in without doo
   W.mods.readiness = nil
   package.loaded['dfllm.readiness'] = nil
   W.load(require('dfllm.readiness'))
+  X.mod('readiness').OPEN_CONFIRM, X.mod('readiness').DEF.worn_pct = 0, 0
   day(W, 3)
   T.eq(#unready(W), 2, 'no repeat after a reload')
   -- worse (a failed audit: new blockers): after a month and only 10 real minutes

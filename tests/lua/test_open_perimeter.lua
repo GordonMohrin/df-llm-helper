@@ -25,6 +25,7 @@ local function world(opts)
   W.econ, W.snap = X.economy(), X.snapshot()
   X.load(W, {'military', 'readiness'}, {W.econ, W.snap, runner, W.seal}, {'sense', 'gate'})
   X.mod('readiness').CAPS = {[0] = 55, [1] = 55, [2] = 75, [3] = 250}     -- fixtures use the pre-2026-10-24 caps (shipped: 100, see test_readiness)
+  X.mod('readiness').OPEN_CONFIRM, X.mod('readiness').DEF.worn_pct = 0, 0     -- BUG-600 / BUG-601 have their own tests
   return W
 end
 
@@ -191,6 +192,7 @@ T.test('the signal survives a reload (the days keep counting) and outside PEACE 
   W.mods.readiness = nil
   package.loaded['dfllm.readiness'] = nil
   W.load(require('dfllm.readiness'))
+  X.mod('readiness').OPEN_CONFIRM, X.mod('readiness').DEF.worn_pct = 0, 0
   day(W)
   T.ok(ready(W).pd >= pd2, 'the days survive a reload: ' .. tostring(ready(W).pd) .. ' vs ' .. pd2)
   W.seal.x = SEALED

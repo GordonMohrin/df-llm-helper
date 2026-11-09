@@ -161,14 +161,14 @@ end
 -- fort is safe enough: a trap shortfall of at least GROW.trap_pct % of its target (not a hole), or a perimeter with no way in
 -- without door or bridge (a lost lever or bridge only). Each wave uses the room up, the shortfall grows with the population
 -- (the target is 0.35 x citizens), so the room closes itself. M.growth_room is the same rule as plan.growth_room (Python)
-M.GROW = {room_min = 4, room_pct = 10, trap_pct = 50}
+M.GROW = {room_min = 4, room_pct = 10, trap_pct = 50, worn_pct = 40}
 
 function M.growth_room(cit)
   return math.max(M.GROW.room_min, ((cit or 0) * M.GROW.room_pct) // 100)
 end
 
 M.DEF = {trap_pop = 40, traps_floor = 20, traps_cap = 40, per_invader = 2, grace_days = 20, hold_pop = 30,
-         ask_days = 30, stuck_days = 360}
+         ask_days = 30, stuck_days = 360, worn_pct = 60, armor_pop = 20}
 
 function M.trap_target(K, cit)
   local d = M.DEF
@@ -197,6 +197,20 @@ local function trap_shortfall(K, cit)
   local byp = st.audit.bypass ~= 0 and ' (the bypass is its own item: audit route in status)' or ''
   return {have = have, target = target, short = string.format('traps short %d<%d', have, target), text = cut(string.format('traps short: %d armed on the weakest path < %d for ~%d invaders%s%s%s',
           have, target, expected, peak > 0 and string.format(' (largest army %d)', peak) or '', tail, byp), 200)}
+end
+
+-- BUG-601 (Run 16b i2 Brotherarrow y405-y414: Pop 81 -> 88 -> 86 with the soldiers in armor worn 7-39 %, 'Ceiling 88 (armor 56 %)' was the
+-- plan's, set once a year when worn stood at 56; the invasion of 57 took the fort 86 -> 2): the armor part of the defence gap lived in the
+-- year plan only (plan.defense_cap), so a fort whose soldiers lost their kit during the year kept the ceiling of the day the plan was
+-- made. The kernel holds it itself now, as it does for the traps: soldiers in a fort of DEF.armor_pop citizens or more wearing under
+-- DEF.worn_pct percent of their uniform slots (the military KPI) is a shortfall; older than DEF.grace_days it holds max-pop at the population
+-- (ceiling why 'defense_short'), with room for one wave while worn is at least GROW.worn_pct (the same soft rule as plan.gap_soft).
+-- {worn, text} or nil (no soldiers, a small fort, worn at the mark)
+local function armor_shortfall(K, cit, kpi)
+  if not cit or cit < M.DEF.armor_pop or type(kpi) ~= 'table' then return nil end
+  local soldiers, worn = int(kpi.soldiers) or 0, int(kpi.worn)
+  if soldiers <= 0 or not worn or worn >= M.DEF.worn_pct then return nil end
+  return {worn = worn, text = cut(string.format('armor worn %d %% < %d %% (%d soldiers)', worn, M.DEF.worn_pct, soldiers), 120)}
 end
 
 -- bridges and levers: outer + inner exist, every bridge known to gate, >= 2 linked levers each
@@ -274,27 +288,52 @@ end
 
 -- FR-65: seal's last entrance check (CONTRACTS §7 seal.entrance_doors): independent routes from the map edge to
 -- the citizens, those with neither a door nor a bridge, and those as 'x,y,z kind'; -1, -1 before the first check
+-- BUG-600 (Run 16a i1 Basementflew y413, 16b i2 Brotherarrow y405/y412: 'perimeter OPEN 7 d (1 way in)' with floor / pebbles tiles that
+-- were gone at the next check, `seal at=last` 'nothing to close', the pop ceiling lowered by open_perimeter for a day beside a seal that
+-- was built; BUG-566 left out the sapling / shrub tiles, but a plant that dies or grows leaves a plain floor / pebbles tile for one
+-- check): in PEACE a way in without door or bridge counts for the perimeter once the SAME tile has been in the check's answer for
+-- M.OPEN_CONFIRM ticks (two game days); one that is gone at the next look never counts. An open spell that is running (ready.pt) counts
+-- its ways at once, and so does every other mode (a new way in a siege is news at once).
+M.OPEN_CONFIRM = 2400
 local function entrances(K)
   local ok, x = K.call('seal', 'entrance_doors')
   if not ok or type(x) ~= 'table' then return -1, -1, {} end
   local open = type(x.open) == 'table' and x.open or {}
-  local ents, nveg, plain = {}, 0, 0
+  local now = K.now().tick
+  local peace = K.mode() == 'PEACE'
+  local seen, nxt = rt.entseen or {}, {}
+  local ents, nveg, plain, young = {}, 0, 0, 0
   for _, o in ipairs(open) do
     if type(o) == 'table' and o.veg == 1 then
       nveg = nveg + 1                                  -- BUG-566: a sapling / shrub at the rim of a crown is no way in
     else
-      plain = plain + 1
       local p = type(o) == 'table' and o.pos
-      if type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) and #ents < M.ENTS then
-        ents[#ents + 1] = cut(string.format('%d,%d,%d %s', p[1], p[2], p[3], tostring(o.kind or '?')), 24)
+      local key = type(p) == 'table' and string.format('%s,%s,%s', tostring(p[1]), tostring(p[2]), tostring(p[3])) or nil
+      local first = key and (seen[key] or now) or nil
+      if key then nxt[key] = first end
+      if peace and key and not st.pt and now - first < M.OPEN_CONFIRM then
+        young = young + 1                              -- BUG-600: not yet two days in the answer
+      else
+        plain = plain + 1
+        if type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) and #ents < M.ENTS then
+          ents[#ents + 1] = cut(string.format('%d,%d,%d %s', p[1], p[2], p[3], tostring(o.kind or '?')), 24)
+        end
       end
     end
   end
+  rt.entseen, rt.eyoung = nxt, young
   if nveg ~= M.veg_logged then
     M.veg_logged = nveg
     if nveg > 0 then
       K.log('info', 'readiness: %d way%s in on a surface sapling or shrub only (the rim of a crown or a meadow) left out of the ' ..
             'perimeter check (inspect entrances still lists %s)', nveg, nveg == 1 and '' or 's', nveg == 1 and 'it' or 'them')
+    end
+  end
+  if young ~= M.young_logged then
+    M.young_logged = young
+    if young > 0 then
+      K.log('info', 'readiness: %d way%s in younger than %d ticks left out of the perimeter until the same tile stays in the check ' ..
+            '(plants that grow or die change the tiles of the rim)', young, young == 1 and '' or 's', M.OPEN_CONFIRM)
     end
   end
   return math.max(0, int(x.routes) or 0), plain, ents
@@ -658,17 +697,25 @@ local function evaluate(K, why)
     f1[#f1 + 1] = 'traps_short'
     rt.tshort, rt.tshort_s = ts.text, ts.short
   end
-  if ts and not st.dt then st.dt, dirty = now, true
-  elseif not ts and st.dt and K.mode() == 'PEACE' then st.dt, st.dhold, dirty = nil, nil, true end
+  -- BUG-601: the armor part of the shortfall (no R0 blocker: R0 stops the drills, the soldiers' kit is military's business)
+  local as = K.mode() == 'PEACE' and armor_shortfall(K, cit1, kpi) or nil
+  rt.ashort = as and as.text or nil
+  local gap = ts or as
+  if gap and not st.dt then st.dt, dirty = now, true
+  elseif not gap and st.dt and K.mode() == 'PEACE' then st.dt, st.dhold, dirty = nil, nil, true end
   if st.dt and cit1 and cit1 >= M.DEF.hold_pop and now - st.dt >= M.DEF.grace_days * 1200 then
     if not st.dhold then st.dhold, dirty = cit1, true end
   end
   rt.dhold_pop = st.dhold
   -- BUG-533: a shortfall of at least GROW.trap_pct % of the target is a soft gap: the hold leaves room for one wave
   rt.dsoft = nil
-  if st.dhold and ts and ts.target > 0 and ts.have * 100 >= ts.target * M.GROW.trap_pct then
-    rt.dhold_pop = math.max(st.dhold, (cit1 or st.dhold) + M.growth_room(cit1 or st.dhold))
-    rt.dsoft = true
+  if st.dhold and gap then
+    local soft_t = ts == nil or (ts.target > 0 and ts.have * 100 >= ts.target * M.GROW.trap_pct)
+    local soft_a = as == nil or as.worn >= M.GROW.worn_pct                  -- BUG-601: bare soldiers leave no room
+    if soft_t and soft_a then
+      rt.dhold_pop = math.max(st.dhold, (cit1 or st.dhold) + M.growth_room(cit1 or st.dhold))
+      rt.dsoft = true
+    end
   end
   -- FR-70: the open perimeter. A bridge seen whole with 2 linked levers is remembered (a lost lever is news)
   for _, name in ipairs(rt.lev.good or {}) do
@@ -1313,6 +1360,7 @@ function M.state(K)
   if rt.office then r.office = rt.office end                  -- BUG-055: the vacant office R0 `office` names
   if rt.mws then r.mws = rt.mws end                           -- BUG-117: the moodable shops R0 `mood_ws` names
   if rt.tshort then r.ts = rt.tshort end                      -- BUG-481: the trap shortfall R0 `traps_short` names
+  if rt.ashort then r.as = rt.ashort end                      -- BUG-601: the armor shortfall that holds max-pop
   if rt.ttarget then r.tt = rt.ttarget end                    -- BUG-481: the trap target for the expected siege
   if rt.rlg then r.rg = rt.rlg end                            -- BUG-478: the bridges without a refuge lever
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
@@ -1321,6 +1369,13 @@ end
 M.on.MODE = function(K, ev)
   if ev.to == 'SIEGE' or ev.to == 'BREACH' then st.siege, dirty = ev.tick or K.now().tick, true end
   refresh(K, 'mode ' .. tostring(ev.to))
+end
+-- BUG-600: the entrance check that follows a finished seal (seal's `sealdone`) or that counts another number of independent routes is read
+-- at once: the status, the pop ceiling and SIEGE_UNREADY lagged a game day behind a wall that stood
+M.on['EV:SEAL'] = function(K, ev)
+  local d = type(ev) == 'table' and ev.d
+  if type(d) ~= 'table' then return end
+  if d.why == 'sealdone' or (int(d.routes) and int(d.routes) ~= rt.routes) then refresh(K, 'seal') end
 end
 M.on['EV:DRILL_RESULT'] = function(K, ev) refresh(K, 'drill') end
 M.on['EV:CAVERN_PLUG'] = function(K, ev) refresh(K, 'cavern') end     -- Run 11: a shaft opened or plugged
