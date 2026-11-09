@@ -437,6 +437,43 @@ T.test('BUG-348: sortie_advice says whether the offered sortie is recommended (s
   T.eq(select(2, W.K.call('military', 'sortie_advice', 'Q')), nil, 'no such squad')
 end)
 
+T.test('BUG-578: sortie_advice adds the odds against the hostiles it would face (squad cv against body-size weight x foe_cv), poor odds are never recommended',
+       function()
+  local units = {}
+  for i = 1, 50 do units[i] = X.cit(i, {skills = {AXE = 6, SHIELD = 3, ARMOR = 2, DODGING = 2}}) end
+  local W = X.world{units = units}
+  X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
+  W.run(9, {skip = 9})
+  X.equip_all(W)
+  W.run(30, {skip = 9})
+  local K = W.K
+  local info = select(2, K.call('military', 'squad_info', 'A'))
+  T.ok(info.cv > 0, 'the equipped squad has a combat value: ' .. tostring(info.cv))
+  K.census.h = {list = {{id = 701, sz = 1000000}, {id = 702, sz = 60000}, {id = 703, sz = 45000}}, tick = K.now().tick}
+  -- one dwarf-sized foe: weight 1 x foe_cv 10 = 10, far under the squad: good odds, still recommended, the text names both numbers
+  local a = select(2, K.call('military', 'sortie_advice', 'A', {702}))
+  T.eq({a.rec, a.odds, a.foes, a.est}, {true, 'good', 1, 10})
+  T.ok(a.txt:find('sortie recommended: worn 100% >= 80%, odds good (cv ' .. info.cv .. ' vs ~10)', 1, true), a.txt)
+  -- a cave dragon (1,000,000 cm3 = 17 dwarves, capped at 12): 120
+  a = select(2, K.call('military', 'sortie_advice', 'A', {701}))
+  T.eq({a.foes, a.est}, {1, 120})
+  T.eq(a.odds, info.cv * 2 >= 360 and 'good' or (info.cv >= 120 and 'even') or (info.cv * 2 >= 120 and 'poor') or 'hopeless')
+  -- many foes make it hopeless whatever the armour says: not recommended although worn 100 %
+  K.census.h.list = {}
+  local ids = {}
+  for i = 1, 40 do K.census.h.list[i] = {id = 800 + i, sz = 1000000}; ids[i] = 800 + i end
+  a = select(2, K.call('military', 'sortie_advice', 'A', ids))
+  T.eq({a.rec, a.odds, a.foes}, {false, 'hopeless', 40})
+  T.ok(a.txt:find('sortie NOT recommended: worn 100% ok, but, odds hopeless', 1, true), a.txt)
+  -- no foes named (the old call): the answer is the armour rule alone
+  a = select(2, K.call('military', 'sortie_advice', 'A'))
+  T.eq({a.rec, a.odds, a.txt}, {true, nil, 'sortie recommended: worn 100% >= 80%'})
+  -- a foe the census does not list weighs one dwarf
+  T.eq(mil().foe_weight(nil), 1)
+  T.eq(mil().foe_weight(60001), 2)
+  T.eq(mil().foe_weight(99999999), mil().FOE_W_MAX)
+end)
+
 ---------------------------------------------------------------- KPIs
 T.test('worn %: worn assigned uniform items / uniform slots; assigned-only and unassigned do not count', function()
   local W = setup(50)

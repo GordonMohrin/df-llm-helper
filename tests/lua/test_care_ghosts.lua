@@ -140,6 +140,19 @@ T.test('BUG-133: a ghost\'s loose memorial is placed on a free roofed tile insid
   T.eq(d.mem, {none = 0, order = 0, loose = 0, build = 0, placed = 1})
 end)
 
+T.test('BUG-579: a tile the last audit route names (and its neighbours) takes no memorial: the slab goes to the next free 3x3 tile ' ..
+       '(Run 16a i1: a slab stood on the bypass wall tile for years and the seal could never be built)', function()
+  local W = world{ghosts = {[7] = 7007}, setup = function(W)
+    W.slab = memorial(W, 7007)
+    W.load{name = 'readiness', every = {ticks = 100000}, route_tiles = function(K) return {{25, 25, 5}} end}
+  end}
+  CW.day(W)
+  T.eq(#W.slabs_placed, 1)
+  local p = W.slabs_placed[1]
+  T.ok(math.max(math.abs(p[2] - 25), math.abs(p[3] - 25)) >= 2, 'not on or beside 25,25,5: ' .. table.concat({p[2], p[3], p[4]}, ','))
+  T.eq({p[2], p[3], p[4]}, {25, 23, 5}, 'the inner tile nearest the seed that keeps its distance from the route tile')
+end)
+
 T.test('BUG-133: never on a way: a corridor or a hall narrower than 3 gets no slab; the reason is said', function()
   local W = world{ghosts = {[7] = 7007}, floor = {{10, 25, 40, 25, 5}, {30, 20, 31, 30, 5}},
                   setup = function(W) memorial(W, 7007) end}

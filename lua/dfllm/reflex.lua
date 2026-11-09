@@ -2204,7 +2204,7 @@ local function offer_step(K, h, now)
   local cmd, key, n = sortie_cmd(K, cs)
   local adv                                              -- BUG-348: the armour against sortie.worn (80 %)
   if cmd then
-    local oka, av = K.call('military', 'sortie_advice', key)
+    local oka, av = K.call('military', 'sortie_advice', key, {cs.id})        -- BUG-578: and the odds against that intruder
     adv = oka and type(av) == 'table' and av or nil
   end
   local days = NUM.dec(age / 1200)                       -- BUG-143: never the locale's comma
@@ -2227,7 +2227,10 @@ local function offer_step(K, h, now)
   local d = {id = 'intruder_sortie', q = q:sub(1, 200), unit = cs.id, pos = cs.pos, race = cs.race, hl = cs.hl, dc = cs.dc,
              de = cs.de, age = age, lim = lim}
   if cmd then d.squad, d.cmd = key, cmd end
-  if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end        -- BUG-348
+  if adv then
+    d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0
+    if adv.odds then d.odds, d.ours, d.est, d.foes = adv.odds, adv.ours, adv.est, adv.foes end      -- BUG-578
+  end        -- BUG-348
   K.emit('DECISION_NEEDED', 'A', q, d)
   K.log('info', 'reflex: %s', q)
 end
@@ -2261,7 +2264,7 @@ function M.overlimit_step(K, h, now)
   if cs then
     cmd, key, n = sortie_cmd(K, cs)
     if cmd then
-      local oks, av = K.call('military', 'sortie_advice', key)
+      local oks, av = K.call('military', 'sortie_advice', key, {cs.id})      -- BUG-578
       adv = oks and type(av) == 'table' and av or nil
     end
   end
@@ -2284,7 +2287,10 @@ function M.overlimit_step(K, h, now)
   if sv then d.starving, d.relief = sv.n or 0, sv.relief and 1 or 0 end        -- BUG-570
   if cs then d.unit, d.pos, d.race = cs.id, cs.pos, cs.race end
   if cmd then d.squad, d.cmd = key, cmd end
-  if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end
+  if adv then
+    d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0
+    if adv.odds then d.odds, d.ours, d.est, d.foes = adv.odds, adv.ours, adv.est, adv.foes end      -- BUG-578
+  end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), d)
   K.log('warn', 'reflex: %s', q)
 end
@@ -2381,7 +2387,7 @@ local function lone_cmd(K, pic)
   local e = pic.ents[1]
   local ok, key, n = K.call('military', 'sortie_squad')
   if not (ok and type(key) == 'string') then return nil, nil, 0 end
-  local oka, adv = K.call('military', 'sortie_advice', key)      -- BUG-348: the armour against sortie.worn (80 %)
+  local oka, adv = K.call('military', 'sortie_advice', key, {e.id})      -- BUG-578: the odds against it; BUG-348: the armour against sortie.worn (80 %)
   return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, e.x, e.y, e.z, e.id),
          key, int(n) or 0, oka and type(adv) == 'table' and adv or nil
 end
@@ -2441,7 +2447,10 @@ local function lone_step(K, h, now)
       local d = {id = 'kill_lone_intruder', q = q:sub(1, 200), unit = e.id, pos = {e.x, e.y, e.z}, race = race,
                  hl = 1, age = age, mode = mode, inside = pic.inside and 1 or 0}
       if cmd then d.squad, d.cmd = key, cmd end
-      if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end      -- BUG-348
+      if adv then
+    d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0
+    if adv.odds then d.odds, d.ours, d.est, d.foes = adv.odds, adv.ours, adv.est, adv.foes end      -- BUG-578
+  end      -- BUG-348
       if kl then d.kill = kl.msg end
       K.emit('DECISION_NEEDED', 'A', q, d)
       K.log('info', 'reflex: %s', q)

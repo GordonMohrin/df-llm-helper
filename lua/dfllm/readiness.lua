@@ -311,6 +311,28 @@ local function route_of(a)
   end
 end
 
+-- public (BUG-579, care): the tiles the last audit's attacker-route findings name before their ' -> ' ('bypass: wall 98,89,129 floor (+more)
+-- -> 97,85,129' gives 98,89,129; 'bypass: via door 54,132,137 -> ...' gives 54,132,137): {{x, y, z}}, at most 8, {} without a finding.
+-- A memorial slab stood on 98,89,129 for years (Run 16a i1 y414-y430): the seal for that wall could never be built there.
+function M.route_tiles(K)
+  local out, seen = {}, {}
+  local a = st.audit
+  for _, f in ipairs(type(a) == 'table' and type(a.fails) == 'table' and a.fails or {}) do
+    if type(f) == 'string' then
+      for _, pat in ipairs(M.ROUTES) do
+        if f:find(pat) then
+          local head = f:match('^(.-) %->') or f
+          local x, y, z = head:match('(%-?%d+),(%-?%d+),(%-?%d+)')
+          x, y, z = int(tonumber(x)), int(tonumber(y)), int(tonumber(z))
+          local k = x and string.format('%d,%d,%d', x, y, z)
+          if k and not seen[k] and #out < 8 then seen[k] = true; out[#out + 1] = {x, y, z} end
+        end
+      end
+    end
+  end
+  return out
+end
+
 ---------------------------------------------------------------- BUG-040: where the refuge lies
 -- Run 11 (y453: 'Tiefe+ has no drink' for months, and nobody knew where Tiefe+ lies or how far the one wet well was):
 -- seal.refuge_drink's bbox and nearest tile to an accepted source (seal's burrow audit, no scan of its own) as

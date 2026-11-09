@@ -62,6 +62,12 @@ M.STATUS, M.RETRY, M.POSTURE_REASSERT, M.KILL_EVERY = 600, 600, 3600, 100
 -- never); looked at every STATION_LOOK ticks. Still under half STATION_WAIT ticks in, the posture is issued again (every
 -- STATION_WAIT while it lasts) and kern.log names the soldiers' causes once per episode (military.kpi off).
 M.STATION_LOOK, M.STATION_WAIT = 100, 1800
+-- BUG-577 (Run 16c i3 Sealcertain y405-y407: 'breach: B1 not up at T+900' with GATE_FAIL 'blocked: citizen 26133 next to it, citizen
+-- 26577 next to it, never raised onto them' - four BREACHes (DEFCON 1, the civilians sent to the refuge) for a bridge that waited for
+-- two dwarves and rose a moment later): a bridge held down only by our own people (gate.held_by) BESIDE it (none on the footprint), with no hostile within
+-- force_near tiles of it, is no breach for CIT_HOLD ticks of that hold (a hostile 4 to NEAR_RAISE tiles away no longer makes it one; the
+-- queued pull right after the hold ended counts as held for gate.HOLD_GRACE ticks); longer, or with a hostile that close, it is one as before.
+M.CIT_HOLD = 1800
 M.DRILL_MAX = 3600         -- a drill normally ends at T+1,200 (drill module); BUG-512: plus its settle phase (drill.settle_max)
 
 -- BUG-029: SIEGE stands the squads at the inner station (READY_IN; INTAKE only while a wave runs)
@@ -879,6 +885,22 @@ local function wave_skip(b, now)
   return st.wd[b] == true or (st.wu[b] ~= nil and now < st.wu[b])
 end
 
+-- BUG-577: bridge `b` waits for our own people (not for a failed lever or a hostile) and the hold is young: true. Logged once.
+local function citizen_held(K, b, d)
+  local okh, held, txt, on = K.call('gate', 'held_by', b)
+  if not (okh and math.type(held) == 'integer' and held < M.CIT_HOLD) then return false end
+  if (on or 0) > 0 then return false end                  -- BUG-310: a unit ON the footprint stays a failure of the gate (as before)
+  local okf, fn = K.call('gate', 'force_near')
+  if okf and math.type(fn) == 'integer' and fn > 0 and d and d >= 0 and d <= fn then return false end   -- a hostile this close: a real breach
+  mem.ch = mem.ch or {}
+  if not mem.ch[b] then
+    mem.ch[b] = true
+    K.log('info', 'siege: %s is held down for our own people (%s), held %d ticks: no BREACH for it before %d ticks (a raise never goes onto them)',
+          b, tostring(txt), held, M.CIT_HOLD)
+  end
+  return true
+end
+
 local function failed_bridge(K, g)
   local h = K.census.h
   local nb = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge or {}
@@ -888,12 +910,15 @@ local function failed_bridge(K, g)
       local d0 = nb[b]
       if st.stuck and st.stuck[b] and not (d0 and d0 >= 0 and d0 <= M.STUCK_NEAR) then
         -- M3: a bridge that stayed down with nobody near: no BREACH for it again
-      elseif gate_state(K, b) ~= 'up' and not wave_skip(b, now) then
+      elseif gate_state(K, b) == 'up' then
+        if mem.ch then mem.ch[b] = nil end
+      elseif not wave_skip(b, now) then
         local d = nb[b]
         local okw, wait = K.call('gate', 'waiting', b)
         -- BUG-028: a raise held for citizens it would cut off (no hostile within CUT_NEAR), or a rescue's bridge
         local held = (st.str.hold[b] and not (d and d >= 0 and d <= M.CUT_NEAR)) or rescuing(b)
                      or (mem.rs_grace and (mem.rs_grace[b] or -1) > now)
+        if not held and citizen_held(K, b, d) then held = true end    -- BUG-577
         if not held and not (okw and wait and not (d and d >= 0 and d <= M.NEAR_RAISE)) then return b end
       end
     end
@@ -2350,7 +2375,8 @@ local function long_step(K, a, g, now)
   if okq and type(k) == 'string' and e then
     key, n = k, int(nn) or 0
     cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, e.x, e.y, e.z, e.id)
-    local oka, av = K.call('military', 'sortie_advice', key)     -- BUG-348: the armour against sortie.worn (80 %)
+    -- BUG-348: the armour against sortie.worn (80 %); BUG-578: and the odds against the hostiles the sortie itself would face
+    local oka, av = K.call('military', 'sortie_advice', key, foes(K, {e.x, e.y, e.z}, (so_cfg(K)).near))
     adv = oka and type(av) == 'table' and av or nil
   end
   local q = string.format('SIEGE %d days, %d calm: no hostile inside Kern+ or within %d tiles (nearest %d, %d visible)%s; '
@@ -2362,7 +2388,10 @@ local function long_step(K, a, g, now)
               to = lifted and tostring(to or '') or nil}
   if e then dd.unit, dd.pos = e.id, {e.x, e.y, e.z} end
   if cmd then dd.squad, dd.cmd = key, cmd end
-  if adv then dd.worn, dd.need, dd.rec = adv.worn, adv.need, adv.rec and 1 or 0 end
+  if adv then
+    dd.worn, dd.need, dd.rec = adv.worn, adv.need, adv.rec and 1 or 0
+    if adv.odds then dd.odds, dd.ours, dd.est, dd.foes = adv.odds, adv.ours, adv.est, adv.foes end      -- BUG-578
+  end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), dd)
   K.log('warn', 'siege: %s', q)
 end

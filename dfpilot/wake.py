@@ -433,9 +433,16 @@ def armour_note(d: dict) -> str:
     80 % rule): the kernel's word on the sortie it offers, from d.worn / d.need / d.rec (military.sortie_advice)."""
     if not isinstance(d.get("worn"), int) or not isinstance(d.get("need"), int):
         return ""
+    # BUG-578 (Run 16c i3 Sealcertain: the sortie against cave dragons said only 'worn 85 % >= 80 %'): odds = good | even | poor |
+    # hopeless (cv = the squad's combat value, est = the foes' weight x sortie.foe_cv); poor / hopeless is never recommended
+    odds = ""
+    if isinstance(d.get("odds"), str) and isinstance(d.get("ours"), int) and isinstance(d.get("est"), int):
+        odds = f", odds {d['odds']} (cv {d['ours']} vs ~{d['est']}, {d.get('foes', '?')} hostile(s))"
     if d.get("rec") == 1:
-        return f" (sortie recommended: worn {d['worn']}% >= {d['need']}%)"
-    return f" (sortie NOT recommended: worn {d['worn']}% < {d['need']}%; wait)"
+        return f" (sortie recommended: worn {d['worn']}% >= {d['need']}%{odds})"
+    if odds and d["worn"] >= d["need"]:
+        return f" (sortie NOT recommended: worn {d['worn']}% ok, but{odds[1:]}; wait)"
+    return f" (sortie NOT recommended: worn {d['worn']}% < {d['need']}%{odds}; wait)"
 
 
 def sortie_hint(d: dict) -> str:

@@ -758,7 +758,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AQ_PASS_DONE": ("B", "runner", _d("proj:s", "top:i bot:i lv:ia n:i rest:ia")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i task:s")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
-    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f settle:i")),
+    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f settle:i retries:i")),
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),

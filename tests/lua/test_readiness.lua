@@ -793,6 +793,8 @@ T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY a
   T.ok(has(r.fail, 'bypass') and has(r.fail, 'refuge_sep'), table.concat(r.fail, ','))
   -- old code: no route in the state, SIEGE_UNREADY said only 'bypass'
   T.eq(r.route, 'bypass: wall 100,127,122 floor -> 139,128,117')
+  -- BUG-579: care keeps its memorial slabs off the tiles the route findings name (the target after '->' is not one of them)
+  T.eq(W.mods.readiness.M.route_tiles(W.K), {{100, 127, 122}}, 'one tile for the bypass and the refuge finding naming the same wall')
   local u = unready(W)
   T.eq(#u, 1)
   T.ok(u[1].msg:find('; bypass: wall 100,127,122 floor -> 139,128,117 (fix: seal at=audit); ', 1, true), u[1].msg)
@@ -811,6 +813,7 @@ T.test('Run 10: the last audit names a bypass with its wall: R0, SIEGE_UNREADY a
                       true), u[#u].msg)
   -- BUG-376: a route through a stair/door/bridge (bp.topo.route_via): status names the way out, the wake line says so
   audit(W, {ok = false, bypass = true, min_traps = 0, fails = {'bypass: via stair 1,2,3 -> 4,5,6'}})
+  T.eq(W.mods.readiness.M.route_tiles(W.K), {{1, 2, 3}}, 'BUG-579: a stair / door the route passes is a tile too')
   W.ms = W.ms + 3600 * 1000
   day(W, 31)
   u = unready(W)

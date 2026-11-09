@@ -917,12 +917,52 @@ def wall_refusals(save_dir: Path) -> dict[tuple[int, int, int], int]:
     return out
 
 
+WALL_BUILT_LAG = 1200               # BUG-579: a seal that finished this long before an audit (a snapshot's lag) is read by it
+
+
+OCC_TILE = re.compile(r"(\w+) (-?\d+),(-?\d+),(-?\d+) \(")      # runner R.occ: 'Slab 98,89,129 (a door wanted)'
+
+
+def seal_occupied(save_dir: Path) -> dict[tuple[int, int, int], tuple[int, str]]:
+    """BUG-579 (Run 16a i1 Basementflew y414-y430: `seal at=audit` for 98,89,129 every year, the tile held a memorial Slab; BUG-565 blocks
+    such a seal as `occupied` and names the building): {tile: (tick, building)} of the newest PROJECT_BLOCKED why=occupied naming the
+    tile (at most WALL_CUT_AGE ticks before the newest event). A seal project of ours that finished after it clears the tile (the
+    building is gone and the piece stands)."""
+    out: dict = {}
+    done: dict[str, int] = {}
+    newest = None
+    for e in files.iter_events_rev(save_dir):
+        t = e.get("type")
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        tick = e.get("tick") if isinstance(e.get("tick"), int) else 0
+        if newest is None:
+            newest = tick
+        if tick < newest - WALL_CUT_AGE:
+            break
+        if t == "PROJECT_DONE" and isinstance(d.get("proj"), str):
+            done.setdefault(d["proj"], tick)
+        elif t == "PROJECT_BLOCKED" and d.get("why") == "occupied":
+            for mt in OCC_TILE.finditer(str(d.get("parts") or "")):
+                out.setdefault((int(mt.group(2)), int(mt.group(3)), int(mt.group(4))), (tick, mt.group(1)))
+    if out:
+        seals = seal_records(save_dir)
+        for pos in list(out):
+            pid = (seals.get(pos) or (None, None))[0]
+            if pid is not None and pid in done and done[pid] > out[pos][0]:
+                del out[pos]
+    return out
+
+
 def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
     """The newest audit's attacker routes (Run 10: `bypass: wall x,y,z floor -> X` stood for months and the trap hall
     stayed unused): {found (an audit event was read), tick, routes (the bypass / refuge-on-the-attack-path findings),
     walls ('x,y,z kind wall', bp.topo.choke), open (the walls no seal project builds: none names the tile, or the one
     that does finished before this audit and the audit still names it), pending {wall: seal project id}, core {wall:
-    fortcore project id} (BUG-211: walls on a fortcore tile, never placed), fails (the audit's findings)}.
+    fortcore project id} (BUG-211: walls on a fortcore tile, never placed), fails (the audit's findings)}. BUG-579: `built`
+    {tile: seal project id} (a seal project finished a snapshot's lag before this audit and the audit still names its tile: building
+    it again changes nothing), `jammed` {wall: building} (another building stands on the tile, PROJECT_BLOCKED occupied: no seal can),
+    `via_built` {tile: seal project id} (a route 'via door|stair x,y,z' over a hatch or door a finished seal project built: the audit
+    counts those open); none of them is drafted or placed again.
     Source: the newest AUDIT event (or SIEGE_UNREADY `afails`, if newer); without either, the state's ready.route."""
     audit, done = None, {}
     for e in files.iter_events_rev(save_dir):
@@ -948,25 +988,39 @@ def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
             w = f"{mt.group(1)},{mt.group(2)},{mt.group(3)} {mt.group(4)} wall"
             if w not in walls:
                 walls.append(w)
-    recs = seal_records(save_dir) if walls else {}
+    recs = seal_records(save_dir) if (walls or routes) else {}
     seals = {t: pid for t, (pid, _) in recs.items()}
     core = core_cells(save_dir) if walls else set()
     refused = wall_refusals(save_dir) if walls else {}
-    pending, open_, on_core, doored = {}, [], {}, {}
+    occupied = seal_occupied(save_dir) if walls else {}
+    pending, open_, on_core, doored, built, jammed = {}, [], {}, {}, {}, {}
     for w in walls:
         pid = seals.get(_wall_pos(w))
         piece = (recs.get(_wall_pos(w)) or (None, {}))[1].get("piece")
-        if pid is not None and (pid not in done or done[pid] > tick):
+        occ = occupied.get(_wall_pos(w))
+        if occ is not None and (pid is None or pid not in done or done[pid] < occ[0]):
+            jammed[w] = occ[1]                 # BUG-579: a Slab / door / trap stands on the tile: the seal is blocked, not pending
+        elif pid is not None and (pid not in done or done[pid] > tick):
             pending[w] = pid
         elif pid is not None and pid in done and piece not in (None, "wall") and _wall_pos(w) in refused:
             doored[w] = pid                    # BUG-487: a door stands where the wall would cut citizens off: no wall again
+        elif pid is not None and pid in done and done[pid] + WALL_BUILT_LAG <= tick:
+            built[w] = pid                     # BUG-579: built, read by a later audit, named again: not the same seal a year later
         elif _wall_pos(w) in core:             # BUG-211: never wall a tile of the fortcore (its corridor, later stages)
             on_core[w] = core[_wall_pos(w)]
         else:
             open_.append(w)
     cut = [w for w in open_ if _wall_pos(w) in refused]    # BUG-487: the kernel refused a wall there: close=door
+    via_built: dict[str, str] = {}
+    for f in routes:                           # BUG-579: 'via door 54,132,137': a hatch / door a finished seal built there
+        for mt in ROUTE_VIA.finditer(f):
+            at = "%s,%s,%s" % mt.group(2, 3, 4)
+            pid = seals.get(tuple(int(x) for x in at.split(",")))
+            if pid is not None and pid in done and done[pid] + WALL_BUILT_LAG <= tick:
+                via_built[at] = pid
     return {"found": found, "tick": tick, "routes": routes, "walls": walls, "open": open_, "pending": pending,
-            "core": on_core, "fails": fails, "cut": cut, "doored": doored}
+            "core": on_core, "fails": fails, "cut": cut, "doored": doored, "built": built, "jammed": jammed,
+            "via_built": via_built}
 
 
 def core_cells(save_dir: Path) -> dict[tuple[int, int, int], str]:

@@ -54,6 +54,13 @@
 -- non-emergency raise (the drill's included) while a unit within RAISE_R tiles of the footprint is moving or one is on it / walking
 -- onto it. A bridge the drill could not raise for that reason at T+900 is dropped as before and the result says `occupied:<bridge>`
 -- (kern.log names the units) instead of `up:<bridge>`; nobody is crushed, the retry back-off is the one of any failed drill.
+-- BUG-580 (Run 16c i3 Sealcertain y406-y410: after BUG-543 most drills ended 'occupied:B1' - a soldier or citizen moving beside the bridge
+-- at T+900 - and every one counted as a failed drill: the retry waited a month, doubled, `drill never` kept R2 and the pop ceiling shut):
+-- a bridge the raise waits for our own people at (gate.held_by) at T+900 is no failure yet. The drill re-arms instead of dropping it:
+-- the clock restarts from that tick (gate.reset_kpi, the raise still wanted, it goes up the moment the units clear) up to OCC_RETRIES
+-- times and only while the whole drill fits siege's DRILL_MAX (the first look no later than OCC_WINDOW after T0). A drill whose only
+-- failures are `occupied:*` after that is a traffic failure, not a mechanics one: it does not count toward the failure streak (no
+-- DRILL_FAIL, no doubling) and the next try comes after RETRY_OCC ticks, not a month.
 local geom = require('dfllm.util.geom')
 local CAD = require('dfllm.util.cadence')
 
@@ -79,6 +86,9 @@ M.RETRY_ABORT = 6000     -- 5 days after a drill a real threat interrupted
 M.SETTLE = 2400          -- no automatic drill in the first 2 days after a load
 M.KEEP = 5
 M.SETTLE_MAX = 1200      -- BUG-512: the drill waits this long at most for the recall and the squads' march before its clock starts
+M.OCC_RETRIES = 2        -- BUG-580: clock restarts for a bridge our own people keep down at T+900
+M.OCC_WINDOW = 2100      -- BUG-580: ... only when T+900 of the attempt lies at most this long after T0 (siege.DRILL_MAX 3600 + SETTLE_MAX 1200 - MEASURE - RESTORE_MAX - 300)
+M.RETRY_OCC = 7200       -- BUG-580: the next automatic drill after a drill whose only failure was `occupied:*` (6 days; the 5-day "just drilled" hold runs from its start)
 M.RESTORE_MAX = 1200     -- BUG-251: the drill's bridges must be down this many ticks after the measurement, else PEACE anyway
 local R1_CAP = 55
 
@@ -249,7 +259,7 @@ function M.start(K, why)
   if M.trading(K) then return false, 'a trade session is under way (the broker would be called home)' end
   local now = K.now().tick
   K.call('gate', 'reset_kpi')                     -- raise ticks and double toggles count from T0
-  st.t0, st.ts, st.why, st.try, rt.home, rt.skip = now, nil, cut(why or 'drill', 40), now, nil, nil
+  st.t0, st.ts, st.why, st.try, rt.home, rt.skip, st.occ, st.ts1 = now, nil, cut(why or 'drill', 40), now, nil, nil, nil, nil
   rt.home0 = home_sample(K)                       -- who is outside at T0, and how far from the entry
   save(K)
   local ok, err = K.set_mode('DRILL', 'drill: ' .. st.why)
@@ -324,6 +334,15 @@ local function measure(K, now)
           extra = {walking = walking, outer = outer or -1, take = take, pullers = pullers}}
 end
 
+-- BUG-580: a failed drill whose every failure is `occupied:<bridge>` (our own people kept a bridge down, the mechanics never failed)
+function M.traffic_only(fails)
+  if type(fails) ~= 'table' or #fails == 0 then return false end
+  for _, f in ipairs(fails) do
+    if tostring(f):sub(1, 9) ~= 'occupied:' then return false end
+  end
+  return true
+end
+
 local function finish(K, now)
   local r = measure(K, now)
   local x = r.extra
@@ -331,7 +350,7 @@ local function finish(K, now)
   local last = rec.last
   last[#last + 1] = r
   while #last > M.KEEP do table.remove(last, 1) end
-  rec.streak_fail = r.pass == 1 and 0 or rec.streak_fail + 1
+  rec.streak_fail = r.pass == 1 and 0 or (M.traffic_only(r.fails) and rec.streak_fail or rec.streak_fail + 1)   -- BUG-580
   K.persist.set('drill', rec)
   local fl = table.concat(r.fails, ', ')
   -- BUG-251: DRILL_RESULT waits for the restore (persisted: a reload mid-restore still reports it)
@@ -341,7 +360,9 @@ local function finish(K, now)
             d = {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl, why = st.why,
                  walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers, fails = r.fails, mech = r.mech}}
   if r.pass == 0 and rec.streak_fail == 2 then st.res.fail = {streak = rec.streak_fail, fails = r.fails, fl = fl} end
-  st.res.d.settle = math.max(0, (st.ts or st.t0 or 0) - (st.t0 or 0))      -- BUG-512
+  st.res.d.settle = math.max(0, (st.ts1 or st.ts or st.t0 or 0) - (st.t0 or 0))      -- BUG-512
+  st.res.d.retries = st.occ or 0                                              -- BUG-580: clock restarts for people beside a bridge
+  st.occ, st.ts1 = nil, nil
   st.t0, st.ts, rt.home, rt.home0 = nil, nil, nil, nil
   st.rs = now
   local okg, low = K.call('gate', 'drill_end')
@@ -531,7 +552,8 @@ local function check(K, now)
   if newest.pass == 0 then
     rt.blocked = structural(K, mk)
     if rt.blocked then return nil, 'blocked:' .. rt.blocked end
-    if now - newest.tick < retry_wait() then return nil, 'retry wait' end
+    local wait = M.traffic_only(newest.fails) and M.RETRY_OCC or retry_wait()      -- BUG-580
+    if now - newest.tick < wait then return nil, 'retry wait' end
     return 'retry'
   end
   rt.blocked = nil
@@ -602,6 +624,19 @@ local function settled(K, now)
 end
 
 -- BUG-251: at T+900 the outer/inner bridges that are not up and not being pulled are dropped (no late raise)
+-- BUG-580: the outer/inner bridges not up whose raise waits for our own people now: {name = who}
+local function occupied_now(K)
+  local r = {}
+  for _, name in ipairs(gate_bridges(K.manifest())) do
+    local ok, s = K.call('gate', 'state', name)
+    if ok and s ~= 'up' then
+      local oko, held, who = K.call('gate', 'held_by', name)
+      if oko and math.type(held) == 'integer' then r[name] = tostring(who) end
+    end
+  end
+  return r
+end
+
 local function skip_late(K)
   for _, name in ipairs(gate_bridges(K.manifest())) do
     local ok, s = K.call('gate', 'state', name)
@@ -639,7 +674,24 @@ function M.step(K, budget, ctx)
     end
     if now - st.ts >= M.MEASURE then finish(K, now)
     else
-      if not rt.skip and now - st.ts >= M.RAISE_MAX then rt.skip = true; skip_late(K) end
+      if not rt.skip and now - st.ts >= M.RAISE_MAX then
+        local occ = (st.occ or 0) < M.OCC_RETRIES and now - (st.t0 or now) <= M.OCC_WINDOW and occupied_now(K) or {}
+        if next(occ) then                            -- BUG-580: our own people hold a raise: the clock starts again, nothing is dropped
+          local names = {}
+          for name, who in pairs(occ) do names[#names + 1] = name .. ' (' .. who .. ')' end
+          table.sort(names)
+          st.ts1 = st.ts1 or st.ts                   -- the first clock start: `settle` stays the settle phase
+          st.occ, st.ts = (st.occ or 0) + 1, now
+          rt.skip, rt.home = nil, nil
+          K.call('gate', 'reset_kpi')                -- raise ticks and double toggles count from here (the wants stay)
+          K.log('info', 'drill: T+%d, %s kept down by our own people: the clock starts again (%d of %d)', M.RAISE_MAX,
+                table.concat(names, ', '), st.occ, M.OCC_RETRIES)
+          save(K)
+          return
+        end
+        rt.skip = true
+        skip_late(K)
+      end
       if not rt.home and now - st.ts >= M.MEASURE - M.HOME_WINDOW then rt.home = home_sample(K) end
     end
     return

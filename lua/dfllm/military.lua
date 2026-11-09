@@ -3358,15 +3358,57 @@ end
 -- command and no word on the armour; the player held back by the 80 % rule, worn 43 %): whether the kernel recommends the
 -- sortie it offers. {worn, need (sortie.worn, 80), rec = true/false, txt} for squad `key`, nil without that squad. The
 -- same threshold the gate sortie refuses below (siege.sortie)
-function M.sortie_advice(K, key)
+-- BUG-578 (Run 16c i3 Sealcertain y405-y409: the sortie offered against cave dragons said 'worn 85 % >= 80 %, recommended' and nothing about
+-- whether three soldiers can win): with the ids of the hostiles it would face (`foes`), the advice adds the odds the siege sortie itself
+-- applies (siege.sortie: the squad's combat value against foe_cv per hostile), each foe weighted by its body size (census sz, cm3) in
+-- dwarves, a dwarf = 60,000, at least 1, at most FOE_W_MAX: {ours = squad cv, est = the foes' weight x foe_cv, foes, odds = good (cv >= 1.5 x
+-- est) | even (>= est) | poor (>= half) | hopeless | none (no foe known)}. A sortie the siege would refuse as too weak (cv < est) is not
+-- recommended, whatever the armour says.
+M.FOE_DWARF, M.FOE_W_MAX = 60000, 12
+function M.foe_weight(sz)
+  local n = int(sz)
+  if not n or n <= 0 then return 1 end
+  return math.max(1, math.min(M.FOE_W_MAX, (n + M.FOE_DWARF - 1) // M.FOE_DWARF))
+end
+local function foe_odds(K, info, ids)
+  local sz, found = {}, 0
+  local h = K.census.h
+  for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do sz[e.id] = e.sz end
+  local weight, n = 0, 0
+  for _, id in ipairs(ids) do
+    if math.type(id) == 'integer' then
+      n = n + 1
+      weight = weight + M.foe_weight(sz[id])
+    end
+  end
+  if n == 0 then return nil end
+  local ok, c = K.call('siege', 'so_conf')
+  local fcv = ok and type(c) == 'table' and int(c.foe_cv) or 10
+  local est, ours = weight * fcv, int(info.cv) or 0
+  local odds = est <= 0 and 'good' or (ours * 2 >= est * 3 and 'good') or (ours >= est and 'even')
+               or (ours * 2 >= est and 'poor') or 'hopeless'
+  return {ours = ours, est = est, foes = n, odds = odds}
+end
+function M.sortie_advice(K, key, foes)
   local info = M.squad_info(K, key)
   if not info then return nil end
   local need = so_conf(K).worn
   local w = int(info.worn) or 0
   local rec = w >= need
-  return {worn = w, need = need, rec = rec,
-          txt = rec and string.format('sortie recommended: worn %d%% >= %d%%', w, need)
-                or string.format('sortie not recommended: worn %d%% < %d%%', w, need)}
+  local r = {worn = w, need = need, rec = rec,
+             txt = rec and string.format('sortie recommended: worn %d%% >= %d%%', w, need)
+                   or string.format('sortie not recommended: worn %d%% < %d%%', w, need)}
+  local o = type(foes) == 'table' and foe_odds(K, info, foes) or nil
+  if o then
+    local weak = o.odds == 'poor' or o.odds == 'hopeless'
+    r.ours, r.est, r.foes, r.odds = o.ours, o.est, o.foes, o.odds
+    if weak then r.rec = false end
+    local cmp = string.format('odds %s (cv %d vs ~%d)', o.odds, o.ours, o.est)
+    r.txt = (r.rec and string.format('sortie recommended: worn %d%% >= %d%%', w, need)
+             or rec and string.format('sortie NOT recommended: worn %d%% ok, but', w)
+             or string.format('sortie not recommended: worn %d%% < %d%%', w, need)) .. ', ' .. cmp
+  end
+  return r
 end
 
 ---------------------------------------------------------------- loot and free metal gear (FR-46)
