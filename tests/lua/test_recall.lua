@@ -347,4 +347,34 @@ T.test('BUG-035: a reload keeps the recall\'s burrows and its stuck report (sens
   T.eq({al.rto, al.rstuck, al.rn}, {'Tiefe+', 1, 5})
 end)
 
+T.test('BUG-621 (Run 16d i4 Trumpetrealms y431: "5 of 7 still outside Tiefe+, +41 more out since" 9 ticks after the alert moved from Kern+ ' ..
+       'to Tiefe+): the citizens who stand inside Kern+ and have not yet walked down are on their way in, not out; one who steps out is', function()
+  local W = fort{units = {{id = 9, pos = {24, 9, Z + 1}, citizen = true, adult = true}}}
+  settle(W)
+  local arr = lockdown(W, 5)
+  T.ok(arr.msg:find('recall: 1 outside Kern+', 1, true), arr.msg)
+  local siege = W.mods.siege.M
+  siege.alert_names = function() return {'Tiefe+'} end          -- siege's deep defense: the civilians to the refuge
+  run(W, 60)                                                     -- the four of the hall still stand in Kern+
+  W.event('REPORT', {type = 'AMBUSH_AMBUSHER', text = ''})
+  run(W, 20)
+  local a = W.find_events('ARRIVAL')
+  local last = a[#a].msg
+  T.ok(last:find('recall: 1 of 1 still outside Tiefe+', 1, true), last)
+  T.ok(not last:find('more out since', 1, true), 'old: "+4 more out since" for people inside Kern+: ' .. last)
+  T.ok(last:find('4 more inside on the way', 1, true), last)
+  T.ok(logged(W, '(4 of them inside the walls, on the way in, no one is out)'), 'kern.log says nobody went out')
+  T.ok(not logged(W, 'more citizens out of Tiefe+ since the alert') and not logged(W, 'more citizen out of Tiefe+ since the alert'),
+       'no "went out" line for them')
+  T.eq(a[#a].d.rc_new, nil)
+  local al = W.state().alarm
+  T.eq({al.rn, al.rleft, al.rnew}, {1, 1, 0})
+  -- one of the four really steps out into the corridor (no burrow): that one is "out since"
+  W.move(1, 14, 10, Z)
+  run(W, 200)
+  al = W.state().alarm
+  T.eq({al.rn, al.rleft, al.rnew}, {1, 1, 1}, 'the one in the corridor is out since the alert')
+  T.ok(logged(W, 'reflex: recall: 1 more citizen out of Tiefe+ since the alert'), 'kern.log names the one who went out')
+end)
+
 T.done()
