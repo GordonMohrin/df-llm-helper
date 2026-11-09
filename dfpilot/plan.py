@@ -115,6 +115,7 @@ FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
 SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)
 EMERGENCY_D = 30              # BUG-243: drink or food days below this (or no accepted water): water and food builds first
 FOOD_DRAFT_D = 60             # BUG-297: food below this: a farms build is drafted when no farms project is under way
+DRINK_DRAFT_D = 30            # BUG-605: drink below this (no brewable plants: the still has nothing to brew) counts the same
 CISTERN_WHY = ("no_water", "patient_water")     # BUG-434: the PROJECT_REQUEST cistern reasons follow and propose answer
 AQWELL = "aqwell"             # BUG-243: the aquifer well template (fix6-water), drafted only when the bp package has it
 STUCK_SHORT_D = 28            # BUG-041: a seal stuck this long (a game month) gets one short plan check line
@@ -423,6 +424,19 @@ def _grand_facts(save_dir: Path, state: dict | None) -> dict:
         return {}
 
 
+def farm_low(state: dict | None) -> tuple[str, int] | None:
+    """BUG-297 / BUG-605 (Run 16c i3 Wallfree y373-y377: food 143-331 days, drink 0 days for four years, 'no brewable plants (56 seeds fit no
+    farm plot: a plot is required)', follow tried the surface farm only below FOOD_DRAFT_D food days, so none was ever placed): the stock
+    that calls for a farm now: ('food', days) below FOOD_DRAFT_D, else ('drink', days) below DRINK_DRAFT_D; None when neither is low."""
+    st = (state or {}).get("stock") or {}
+    fd, dd = st.get("food_d"), st.get("drink_d")
+    if _nat(fd) and fd < FOOD_DRAFT_D:
+        return "food", fd
+    if _nat(dd) and dd < DRINK_DRAFT_D:
+        return "drink", dd
+    return None
+
+
 def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
     """BUG-297 (Run 15c Inkintense y376: food 1-9 d, one farm plot, `plan propose` drafted no farm because a farms project
     had been applied once, and `bp sites farms --fresh` ranked 0): while state.stock.food_d is below FOOD_DRAFT_D,
@@ -430,8 +444,7 @@ def farm_facts(save_dir: Path, state: dict | None) -> dict | None:
     (only a surface farm site on soil floor, p.surface = 1), 'none', or None (no snapshot or no bp package)}; None
     otherwise (not looked up: the site ranking renders the template, plan apply must stay free of it). BUG-302: propose
     leaves out the farms builds no site can take (farm_site_fix)."""
-    fd = ((state or {}).get("stock") or {}).get("food_d")
-    if not _nat(fd) or fd >= FOOD_DRAFT_D:
+    if farm_low(state) is None:                                   # BUG-605: low drink calls for the farm too
         return None
     done = done_projects(save_dir)
     rows = {r[0]: str(r[3] if len(r) > 3 else "") for r in (state or {}).get("proj") or []
@@ -526,20 +539,23 @@ def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | Non
     """BUG-297: food below FOOD_DRAFT_D and no farms build drafted or under way (fort.farms.open): farms@S1, p.surface = 1
     when only a surface site is free (fort.farms.site), also when farms were applied before; the note says why or why
     not. (None, '') when food is not low or the bp package has no farms template."""
-    fd = ((s or {}).get("stock") or {}).get("food_d")
+    low = farm_low(s)
     ff = (fort or {}).get("farms")
-    if not _nat(fd) or fd >= FOOD_DRAFT_D or not isinstance(ff, dict) or (info is not None and "farms" not in info):
+    if low is None or not isinstance(ff, dict) or (info is not None and "farms" not in info):
         return None, ""
+    kind, fd = low                              # BUG-605: ('food'|'drink', days)
+    lim = FOOD_DRAFT_D if kind == "food" else DRINK_DRAFT_D
+    what = "food" if kind == "food" else "drink (no farm plot, nothing to brew)"
     if any(b["tpl"] == "farms" for b in builds):
         return None, ""
     if ff.get("open"):
-        return None, f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): a farms project is under way, no new one"
+        return None, f"; BUG-297: {what} {fd} d (< {lim}): a farms project is under way, no new one"
     site = ff.get("site")
     if site == "none":
-        return None, (f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): no farm site (no room site on soil, no soil floor inside "
+        return None, (f"; BUG-297: {what} {fd} d (< {lim}): no farm site (no room site on soil, no soil floor inside "
                       "the fort or by its entrance): trade.want food, seeds; fishing; butcher.mark")
     if site == "surface" and (s or {}).get("mode") != "PEACE":      # citizen safety: plots by the door only in PEACE
-        return None, (f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): only a surface farm site, drafted in PEACE only "
+        return None, (f"; BUG-297: {what} {fd} d (< {lim}): only a surface farm site, drafted in PEACE only "
                       f"(mode {(s or {}).get('mode')})")
     # BUG-316: fort.farms.plots = the fewer plots that have a surface site (trees cut the default block)
     plots = ff.get("plots") if site == "surface" and _nat(ff.get("plots")) else None
@@ -552,7 +568,7 @@ def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | Non
     if site == "surface":
         why = (f" p.surface=1{f' p.plots={plots}' if plots else ''} (no room site on soil: plots on the soil floor by the "
                "entrance" + (f", BUG-316: trees or buildings leave room for {plots} plot(s) only" if plots else "") + ")")
-    return b, f"; BUG-297: food {fd} d (< {FOOD_DRAFT_D}): farms@S1{why} drafted"
+    return b, f"; BUG-297: {what} {fd} d (< {lim}): farms@S1{why} drafted"
 
 
 def _food_shops_missing(save_dir: Path) -> list[str] | None:
@@ -5128,6 +5144,19 @@ def applied_plan(save_dir: Path) -> dict | None:
     return prev if isinstance(prev, dict) and not schema.validate("plan", prev) else None
 
 
+def _kept_core(save_dir: Path, b: dict, bid: str) -> dict | None:
+    """BUG-604: the fortcore stage 1 project that stands ({id, anchor, rot}) when build `b` (an applied same-year build whose project
+    file is gone) is a fortcore stage 1 and the bp folder holds another one; None otherwise (a retrofit and later stages are not)."""
+    prm = b.get("p") or {}
+    if b.get("tpl") != "fortcore" or prm.get("retrofit") or (_stage_of(prm) or 1) != 1:
+        return None
+    core = _cmd.first_core(save_dir, bid)
+    if not core:
+        return None
+    d = files.read_json(Path(save_dir) / "bp" / f"{core[0]}.json")
+    return {"id": core[0], "anchor": list(core[1]), "rot": d.get("rot", 0) if isinstance(d, dict) else 0}
+
+
 def place_all(save_dir: Path, doc: dict, prev: dict | None,
               left_out: list[str] | None = None) -> tuple[list[dict], int, list[str]]:
     """Emit every new build of doc in plan order (all or nothing; raises BpError/BpUnavailable).
@@ -5162,6 +5191,15 @@ def place_all(save_dir: Path, doc: dict, prev: dict | None,
             if held and b["tpl"] == HOSPITAL:
                 occ.discard(held)
                 held = None
+            core = _kept_core(save_dir, b, bid) if (si, bi) in keep else None
+            if core:
+                # BUG-604 (Run 16c i3 Wallfree y372: bp.cancel of the plan's fortcore, bp.place fortcore aquifer=pass by hand, every draft
+                # then failed 'is the fort's fortcore already' until the year changed): a kept fortcore stage 1 whose project was
+                # cancelled is the core that stands now; the later stages at `same` build on it
+                placed["fortcore"] = {"anchor": core["anchor"], "rot": core["rot"]}
+                lines.append(f"s{si} fortcore@{b['site']} kept {core['id']} at {core['anchor']} (BUG-604: {bid} was cancelled, "
+                             "this core stands in its place)")
+                continue
             try:
                 d = place(save_dir, b["tpl"], b.get("p") or {}, b["site"], bid, occ=occ, snap=snap,
                           same=placed.get(b["tpl"]) if b["site"] == SAME else None)

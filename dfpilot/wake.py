@@ -1773,10 +1773,11 @@ def _surface_core_on() -> bool:
 
 
 def food_urgent(st: dict | None) -> bool:
-    """BUG-460: the food days are below plan.FOOD_DRAFT_D (60): a surface farm is tried although plan.surface_core is off."""
-    from .plan import FOOD_DRAFT_D
-    fd = (((st or {}).get("stock") or {}).get("food_d"))
-    return isinstance(fd, int) and not isinstance(fd, bool) and fd < FOOD_DRAFT_D
+    """BUG-460: the food days are below plan.FOOD_DRAFT_D (60): a surface farm is tried although plan.surface_core is off.
+    BUG-605 (Run 16c i3 Wallfree: drink 0 days for four years, 56 seeds and no plot, food 331 days): so are the drink days below
+    plan.DRINK_DRAFT_D (30), a still with nothing to brew."""
+    from .plan import farm_low
+    return farm_low(st) is not None
 
 
 def farm_tries(params: dict, mode: str | None, urgent: bool = False) -> list[dict]:

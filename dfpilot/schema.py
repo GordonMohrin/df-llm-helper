@@ -906,7 +906,7 @@ VERB_ARGS: dict[str, Obj] = {
                       "bypass": Bool(), "refuge_sep": Bool(), "civ_sep": Bool(), "caverns": Bool()}),
     "popcap.lower": Obj(req={"cap": Int(0, 250)}, opt={"until": Str(enum=["food", "raise"])}),
     # BUG-293: lift the player's ceiling (and a famine hold); set it to exactly cap (raise or lower), held until a raise
-    "popcap.raise": Obj(),
+    "popcap.raise": Obj(opt={"cap": Int(1, 250)}),         # BUG-606: raise TO cap (never lowers)
     "popcap.set": Obj(req={"cap": Int(1, 250)}),
     "tempo.lower": Obj(req={"fps": Int(10, 1000), "ttl_s": Int(1, 3600)}),
     "pause": Obj(req={"ttl_s": Int(1, 600)}, opt={"why": Str(maxbytes=200)}),

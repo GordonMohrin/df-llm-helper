@@ -66,7 +66,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 11                           # BUG-346/359/400/407/553/584: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 12                           # BUG-346/359/400/407/553/584/602: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -1825,6 +1825,69 @@ def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
     return out
 
 
+CORE_BOX_R = 6                    # BUG-602: tiles round a waiting fortcore's anchor that an open-ground column keeps off (its stage 1 box)
+OPEN_COLS = 24                    # BUG-602: open-ground aqshaft columns offered at most (the caller drops the ones a placed project holds)
+
+
+def open_columns(snap: dict, params: dict | None, manifest: dict | None, near=None, want: int = OPEN_COLS) -> list[dict]:
+    """BUG-602 (Run 16c i3 Wallfree y372: the fortcore with p.aquifer=pass waited for an aqshaft and `bp sites aqshaft` refused all 40-143
+    columns 'start on the floor of a placed room'; Run 16a i1 Basementflew 917 columns the same: the public Z4 floor of a fort that
+    has no corridor yet is the floor of its first placed rooms): the shaft columns on OPEN GROUND, the ranking `_aqshaft` falls back to
+    when every public-floor column is held. The top is an open surface floor tile (`.` with open sky `_` above) in the citizens' walk
+    group, nearest to `near` (x, y: the waiting fortcore; default the depot / the middle of the snapshot); the column's rock rules
+    are `_aqshaft`'s (shaft_why), the depth is its own (p.depth, else down to the core under the known aquifer). Same dicts as
+    `_aqshaft` (anchor, rot, score, depth, box, why); [] when nothing fits. The caller tests the placed projects."""
+    p = check_params("aqshaft", params)
+    p["depth_auto"] = "depth" not in (params or {})
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    at = _At(snap)
+    cx, cy = (int(near[0]), int(near[1])) if near else ((x0 + x1) // 2, (y0 + y1) // 2)
+    dep = (manifest or {}).get("depot")
+    if not near and isinstance(dep, (list, tuple)) and len(dep) == 3 and all(isinstance(v, int) for v in dep):
+        cx, cy = dep[0], dep[1]
+    avoid = shaft_avoid(snap, manifest)
+    keep_out = _keep_out(manifest or {})
+    aq = aquifer_levels(manifest)
+    ref = (manifest or {}).get("refuge")
+    zr = ref["anchor"][2] if ref else None
+    tops = []
+    step = 2 if (x1 - x0 + 1) * (y1 - y0 + 1) > 2500 else 1
+    for z in range(z0, z1):
+        if zr is not None and z <= zr:
+            continue
+        cur, up = snap["rows"][f"z{z}"], snap["rows"][f"z{z + 1}"]
+        for yy in range(0, len(cur), step):
+            for xx in range(0, len(cur[yy]), step):
+                if cur[yy][xx] == "." and up[yy][xx] == "_":
+                    tops.append((max(abs(x0 + xx - cx), abs(y0 + yy - cy)), -z, x0 + xx, y0 + yy, z))
+    tops.sort()
+    out = []
+    for d, _, ax, ay, az in tops[:PROBE_TRIES]:
+        if near and len(near) > 2 and az == int(near[2]) and max(abs(ax - int(near[0])), abs(ay - int(near[1]))) <= CORE_BOX_R:
+            continue                                  # the waiting fortcore's own box: its entrance, tunnel and shops
+        if walk_at(snap, (ax, ay, az)) == "0":
+            continue
+        reach = shaft_depth_auto(snap, manifest, az) if p["depth_auto"] else None
+        depth = reach or p["depth"]
+        z_lo = az - depth + 1
+        got = shaft_why(at, ax, ay, az, z_lo, avoid, keep_out, wet=False)
+        if got is None:
+            got = shaft_why(at, ax, ay, az, z_lo, (), (), wet=True)
+        if got:
+            continue
+        unknown = sum(1 for z in range(az - 1, z_lo - 1, -1) if at(ax, ay, z) in (None, "?"))
+        span = sorted(z for z in aq if z_lo <= z < az)
+        out.append({"anchor": [ax, ay, az], "rot": 0, "score": max(0, 1000 - d - 2 * unknown + (AQ_SPAN if span else 0)),
+                    "depth": depth, "box": (ax - 1, ay - 1, z_lo, ax + 1, ay + 1, az),
+                    "why": f"BUG-602: open-ground column {ax},{ay} z{az}-z{z_lo}, {d} tiles from {'the waiting fortcore' if near else 'the entrance'}, "
+                           f"{unknown} unknown column tiles"
+                           + (f", passes aquifer level z{span[-1]}" if span else "")
+                           + (f", p.depth {depth} (down to the core level)" if reach else "")})
+        if len(out) >= want:
+            break
+    return out
+
+
 PROBE_WATER_KEEP = 4                  # BUG-441: the probe shaft keeps one tile more from open water than any aqshaft (WATER_KEEP)
 PROBE_TRIES = 600                     # BUG-441: surface tiles probe_column checks, nearest to the embark centre first
 
@@ -2033,6 +2096,9 @@ AQ_PENALTY = 250            # BUG-359: score per known aquifer level the dig pas
 CAV_PENALTY = 150           # BUG-359: score per level with a revealed cavern within FLOOD_R of the dig
 
 
+PASS_HINT = "`bp sites fortcore aquifer=pass` puts the aqshaft first and the core under the aquifer"      # BUG-603
+
+
 def _flooded(cands: list, snap: dict, manifest: dict | None, p: dict, rects: dict) -> list:
     """BUG-359 (Run 16c i3: every fortcore site broke into water, 'breach:heavy_aquifer' at A74_92_125_3, 'breach:cavern_lake'
     at A88_92_125_3, the ranking only said 'light aquifer'): the levels under the anchor down to the core are rated from
@@ -2081,11 +2147,15 @@ def _flooded(cands: list, snap: dict, manifest: dict | None, p: dict, rects: dic
         aq = sorted(z for z in light if az + wmin <= z <= az + wmax)
         notes = []
         if aq:
-            notes.append("aquifer at " + ",".join(f"z{z}" for z in aq))
+            # BUG-603 (Run 16c i3 Wallfree y372: the embark panel said 'light aquifer', the site was ranked without a word, the dig met a
+            # heavy level and sat parked 30 d): a site the dig of which meets a known aquifer level says so and names the way past it
+            notes.append("aquifer at " + ",".join(f"z{z}" for z in aq)
+                         + f" MEETS the dig (a heavy level stops it for 30 days, AQ_HEAVY; {PASS_HINT})")
         if cvz:
             notes.append("cavern near " + ",".join(f"z{z}" for z in sorted(cvz)))
         if not notes:
-            notes.append(f"no aquifer or water known on z{az + wmin}-{az + wmax} (hidden rock is unknown)")
+            notes.append(f"no aquifer or water known on z{az + wmin}-{az + wmax} (hidden rock is unknown; an embark whose panel shows "
+                         f"an aquifer hides its levels until they are dug: {PASS_HINT})")
         out.append({**c, "score": max(c["score"] - AQ_PENALTY * len(aq) - CAV_PENALTY * len(cvz), 0),
                     "why": c["why"] + "; " + "; ".join(notes)})
     if not out:

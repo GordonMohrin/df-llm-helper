@@ -87,6 +87,29 @@ T.test('BUG-293: until=raise holds through good food; popcap.raise lifts it; pop
   T.eq(W.inbox('popcap.raise', {}).msg:sub(1, 22), 'no player ceiling held')
 end)
 
+T.test('BUG-606: popcap.raise cap=N raises the player ceiling TO N (after popcap.lower), never lowers, the level cap binds', function()
+  local W = world{n = 20, plan = plan(55)}
+  day(W)
+  T.ok(W.inbox('popcap.lower', {cap = 17}).ok)
+  day(W, 2)
+  T.eq(pop(W).gate_cap, 17)
+  local r = W.inbox('popcap.raise', {cap = 25})
+  T.ok(r.ok and r.msg:find('raised 17 -> 25', 1, true), r.msg)
+  T.eq(pop(W).gate_cap, 25, 'the held ceiling moved up to the asked cap')
+  T.eq(pop(W).hold, 'player 25 until popcap.raise', 'and is held the same way')
+  r = W.inbox('popcap.raise', {cap = 20})
+  T.ok(r.ok and r.msg:find('player ceiling 25 stays', 1, true), r.msg)
+  T.eq(pop(W).gate_cap, 25, 'raise never lowers')
+  r = W.inbox('popcap.raise', {cap = 90})
+  T.ok(r.ok and r.msg:find('lifted player 25', 1, true), r.msg)
+  T.eq(pop(W).gate_cap, 55, 'a cap at or above the level cap lifts the hold; the level cap binds')
+  r = W.inbox('popcap.raise', {cap = 30})
+  T.ok(r.ok and r.msg:find('no player ceiling held', 1, true), r.msg)
+  T.eq(pop(W).gate_cap, 55, 'no held ceiling: nothing is set')
+  T.eq(W.inbox('popcap.raise', {cap = 0}).ok, false)
+  T.eq(W.inbox('popcap.raise', {cap = 300}).ok, false)
+end)
+
 ---------------------------------------------------------------- BUG-293 the kernel's famine hold
 T.test('BUG-293: food below 15 days and falling holds max-pop at the population (POPCAP why famine) until food is back ' ..
        'at 30 days; popcap.raise lifts it for the episode', function()

@@ -370,7 +370,13 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
     manifest = manifest if manifest is not None else fort_manifest(save_dir)
     water = water_ctx(save_dir, tpl)
-    sites = _rank(snap, tpl, params, n, manifest, water, where, _free_of_projects(save_dir, tpl, params))
+    free = _free_of_projects(save_dir, tpl, params)
+    try:
+        sites = _rank(snap, tpl, params, n, manifest, water, where, free)
+    except BpError:
+        sites = _aq_open_sites(save_dir, tpl, params, snap, manifest, n, where, free)      # BUG-602
+        if not sites:
+            raise
     if where:
         return sites, snap["id"]
     files.write_json_atomic(_sites_cache(save_dir, tpl), {"v": 2, "rv": _rank_v(), "tpl": tpl, "snap": snap["id"],
@@ -420,6 +426,62 @@ def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):
     free.why = why                                        # type: ignore[attr-defined]
     free.first = first                                    # type: ignore[attr-defined]
     return free
+
+
+def waiting_core(save_dir: Path) -> dict | None:
+    """BUG-602: {anchor, rot, depth} of a fortcore stage 1 placed with p.aquifer=pass whose project is not done: it waits for a passed
+    aqshaft (runner Q.aq_wait). None without one."""
+    done = None
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if not isinstance(d, dict) or d.get("tpl") != "fortcore" or schema.validate("bp", d):
+            continue
+        par = d.get("params") or {}
+        if par.get("aquifer") != "pass" or par.get("retrofit") or _stage_param(par) != 1 or not isinstance(d.get("anchor"), list):
+            continue
+        if done is None:
+            done = done_ticks(save_dir)
+        if p.stem not in done:
+            dep = par.get("depth")
+            return {"anchor": list(d["anchor"]), "rot": d.get("rot", 0) if isinstance(d.get("rot"), int) else 0,
+                    "depth": dep if isinstance(dep, int) and not isinstance(dep, bool) else 3}
+    return None
+
+
+def _aq_open_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict, manifest: dict | None, n: int,
+                   where: dict | None, free) -> list:
+    """BUG-602 (Run 16c i3 Wallfree y372 / 16a i1 Basementflew: `bp sites aqshaft` refused 40-917 columns 'start on the floor of a placed
+    room / beside placed projects' while the fortcore p.aquifer=pass waited for an aqshaft: nothing was dug yet, the public floor
+    the ranking reads is the floor of the first placed rooms): when the ranking finds no free column, (1) the column BUG-412 puts
+    beside the waiting fortcore's entrance (bp.sites.core_shaft: two tiles from its tunnel), then (2) the columns on OPEN GROUND
+    (bp.sites.open_columns: surface floor under open sky, the ranking's rock / cavern / water rules) nearest to it, never within
+    its own box; the free ones as ranked sites. [] when none (the caller re-raises the ranking's own reason)."""
+    if tpl != "aqshaft" or where or (params or {}).get("x") is not None:
+        return []
+    core = waiting_core(save_dir)
+    try:
+        sm = load_bp("sites")
+        cols = []
+        if core:
+            try:
+                col = sm.core_shaft(snap, manifest or {}, core["anchor"], core["rot"], core["depth"])
+                dep = (params or {}).get("depth") or col["depth"]
+                cols.append({"anchor": [col["x"], col["y"], col["top"]], "rot": 0, "score": 1500, "depth": dep,
+                             "why": f"BUG-602: {col['why']} (beside the waiting fortcore {core['anchor']})"})
+            except ValueError:
+                pass
+        cols += sm.open_columns(snap, params, manifest, near=core["anchor"] if core else None)
+    except (BpUnavailable, AttributeError, ValueError, KeyError, TypeError):
+        return []
+    out: list = []
+    for c in sorted(cols, key=lambda c: (-c["score"], c["anchor"][2], c["anchor"][1], c["anchor"][0])):
+        if free is not None and not free(c):
+            continue
+        out.append({"id": f"S{len(out) + 1}", "anchor": c["anchor"], "rot": c["rot"], "score": c["score"], "why": c["why"],
+                    "depth": c["depth"]})
+        if len(out) >= n:
+            break
+    return out
 
 
 AQ_TOP_OK_TPLS = ("fortcore", "aqshaft", "explore")       # BUG-502: the floors a shaft may start on: corridors and shafts
