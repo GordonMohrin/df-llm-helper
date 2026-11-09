@@ -1167,17 +1167,39 @@ M.verbs['popcap.lower'] = function(K, args, cmd)
   return true, string.format('ceiling already %d (lower only; popcap.set raises)', cur), {cap = M.cap(K)}
 end
 
--- BUG-293: the player lifts his ceiling (and the kernel's famine hold until the next famine episode)
+-- BUG-293: the player lifts his ceiling (and the kernel's famine hold until the next famine episode).
+-- BUG-606 (Run 16c i3 Wallfree y376: `popcap.raise cap=25` after `popcap.lower 17` was refused as an unknown key): with `cap` the
+-- player's ceiling is raised TO cap (never lowered; the level's own cap still binds): a held ceiling below cap moves up to it
+-- (same hold), one at or above cap stays, cap at or above the level's own ceiling lifts it, no held ceiling stays none
 M.verbs['popcap.raise'] = function(K, args, cmd)
+  local cap = args.cap
+  if cap ~= nil then
+    cap = int(cap)
+    if not cap or cap < 1 or cap > 250 then return false, 'cap must be an integer 1..250' end
+  end
   local had = type(st.inbox) == 'table' and int(st.inbox.cap) or nil
+  local hu = had and st.inbox.u or nil
   local fam = st.fam and st.fam.cap or nil
   st.inbox, dirty = nil, true
   if fam then st.fam, st.fskip = nil, 1 end
+  local keep
+  if cap and had and cap > had and cap < (M.ceiling(K, st.lvl or 0)) then
+    st.inbox, keep = {cap = cap, u = hu or 'raise', t = K.now().tick}, true
+  elseif cap and had and cap <= had then
+    st.inbox, keep = {cap = had, u = hu or 'raise', t = K.now().tick}, true     -- raise never lowers: the held ceiling stays
+  end
   refresh(K, 'raise')
   local c, why = M.ceiling(K, st.lvl or 0)
-  return true, string.format('%s; ceiling %d (%s), max-pop %d', (had or fam) and string.format('lifted%s%s',
-                             had and (' player ' .. had) or '', fam and (' famine ' .. fam) or '') or 'no player ceiling held',
-                             c, why, M.cap(K)), {cap = M.cap(K), ceiling = c}
+  local head
+  if keep and had and cap > had then
+    head = string.format('player ceiling raised %d -> %d%s', had, cap, fam and (' (famine ' .. fam .. ' lifted)') or '')
+  elseif keep then
+    head = string.format('player ceiling %d stays (cap %d is not above it; popcap.lower lowers, popcap.set sets)', had, cap)
+  else
+    head = (had or fam) and string.format('lifted%s%s', had and (' player ' .. had) or '', fam and (' famine ' .. fam) or '')
+           or 'no player ceiling held'
+  end
+  return true, string.format('%s; ceiling %d (%s), max-pop %d', head, c, why, M.cap(K)), {cap = M.cap(K), ceiling = c}
 end
 
 -- BUG-293: the player's ceiling set to exactly `cap` (raise or lower), held until popcap.raise; never above the level's

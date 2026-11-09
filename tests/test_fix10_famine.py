@@ -14,6 +14,8 @@ from dfpilot.bp.emit import check_params
 # ---------------------------------------------------------------- BUG-293
 def test_bug293_popcap_verbs_and_pop_hold_in_the_contract():
     assert schema.validate_args("popcap.raise", {}) == []
+    assert schema.validate_args("popcap.raise", {"cap": 25}) == []                 # BUG-606: raise TO cap
+    assert schema.validate_args("popcap.raise", {"cap": 0}) != [] and schema.validate_args("popcap.raise", {"cap": 251}) != []
     assert schema.validate_args("popcap.set", {"cap": 25}) == []
     assert schema.validate_args("popcap.set", {"cap": 0}) != []
     assert schema.validate_args("popcap.lower", {"cap": 25, "until": "food"}) == []

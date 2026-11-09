@@ -239,7 +239,7 @@ C.VERBS = {
   ['snapshot']     = {mod = 'snapshot'},
   ['audit']        = {mod = 'readiness'},
   ['popcap.lower'] = {mod = 'readiness'},
-  ['popcap.raise'] = {mod = 'readiness'},       -- BUG-293: lifts the player's ceiling (and a famine hold)
+  ['popcap.raise'] = {mod = 'readiness'},       -- BUG-293: lifts the player's ceiling (and a famine hold); BUG-606: cap= raises it TO cap
   ['popcap.set']   = {mod = 'readiness'},       -- BUG-293: the player's ceiling exactly cap (raise or lower)
   ['tempo.lower']  = {mod = 'arbiter'},
   ['pause']        = {mod = 'arbiter'},
