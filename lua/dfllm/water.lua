@@ -2659,6 +2659,7 @@ end
 M.CARE = 'Pflege+'
 M.CARE_FRESH = 200                     -- ticks a hostile census may be old for the distance check (siege's fresh rule)
 M.NOT_YET = 'no thirsty patient outside the alert burrows'
+M.ALERT_REPEAT = 4                    -- BUG-596: patient_thirst repeats this much slower while the alert alone keeps the carers away
 
 -- the burrows the sounding civ alert holds the citizens in, the care burrow left out; nil while it is silent
 local function alert_set(K)
@@ -2690,8 +2691,18 @@ function M.foe_dist(K, x, y, z)
       if best < 0 or d < best then best = d end
     end
   end
-  -- in sight but not listed (BUG-330 review: sense lists only the LIST_MAX nearest O1): unknown, never 'far'
-  if (math.tointeger(h.vis) or 0) > #(type(h.list) == 'table' and h.list or {}) then return nil end
+  -- in sight but not listed (BUG-330 review: sense lists only the LIST_MAX nearest O1): unknown, never 'far'.
+  -- BUG-596 (Run 16b i2 Brotherarrow y406-y414: 57 hostiles in sight for 100+ days, 40 listed, 'Pflege+ not opened: no fresh hostile census'
+  -- for 14 DECISIONs, 2 patients dead of thirst): the unlisted ones lie at least h.lo tiles from O1 (sense: the last listed one's distance),
+  -- so by the triangle inequality at least lo - d(tile, O1) from the tile; that bound (when it is positive) stands in for them
+  if (math.tointeger(h.vis) or 0) > #(type(h.list) == 'table' and h.list or {}) then
+    local lo, o1 = math.tointeger(h.lo), type(h.o1) == 'table' and h.o1 or nil
+    local ox, oy, oz = o1 and math.tointeger(o1[1]), o1 and math.tointeger(o1[2]), o1 and math.tointeger(o1[3])
+    if not (lo and ox and oy and oz) then return nil end
+    local lb = lo - math.max(math.abs(ox - x), math.abs(oy - y), math.abs(oz - z))
+    if lb <= 0 then return nil end
+    if best < 0 or lb < best then best = lb end
+  end
   return best
 end
 
@@ -3556,11 +3567,16 @@ local function finish(K, c, r, p)
     if not keep then p.alarm[sid] = nil end
   end
   local woke = false
+  -- BUG-596 (Brotherarrow y406-y414: the same patient_thirst line 14 times, 'the civ alert holds the caregivers in Tiefe+, the patient lies outside;
+  -- Pflege+ not opened', nothing a decision could change): while the cause is the alert and the care burrow stays closed the weekly reminder
+  -- comes at ALERT_REPEAT times the interval; a patient crossing the alarm still wakes at once
+  local alarm_gap = c.alarm_every
+  if gv and gv.key == 'alert' and not (st.care and st.care.on) then alarm_gap = c.alarm_every * M.ALERT_REPEAT end
   -- BUG-008: the weekly reminder also waits wake_wall_s wall seconds (a game week is 21 s at timestream speed); a
   -- patient crossing the alarm still wakes at once
   if removed then
     p.alarm_t, p.alarm_w, woke = now, T.wall, true            -- HOSPITAL_REMOVED named them (BUG-034)
-  elseif #over > 0 and (fresh or CAD.elapsed({t = p.alarm_t or -c.alarm_every, w = p.alarm_w}, T, c.alarm_every,
+  elseif #over > 0 and (fresh or CAD.elapsed({t = p.alarm_t or -c.alarm_every, w = p.alarm_w}, T, alarm_gap,
                                              c.wake_wall_s)) then
     p.alarm_t, p.alarm_w, woke = now, T.wall, true
     table.sort(over, function(a, b) return a.thirst > b.thirst end)

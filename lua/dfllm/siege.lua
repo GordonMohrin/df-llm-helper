@@ -2242,7 +2242,7 @@ local function deep_step(K, a, g, now)
   for _, w in ipairs(why) do dp.why[w] = true end
   if d.bd > 0 or st.bdx then dp.bd = true end
   dirty = true
-  if dp.bd then K.call('seal', 'plug', {bd = true}) end      -- BUG-479: the refuge's second line (a wall round the stair foot)
+  if dp.bd then K.call('seal', 'plug', {bd = true, announced = st.bdx ~= nil}) end      -- BUG-479: the refuge's second line (a wall round the stair foot); BUG-595: also for destroyers the popup announced
   local races, ids, near, kinds = destroyers(K)
   -- BUG-336/337 (Run 15b Earthboat y387: 'civilians to Tiefe+ (the separated refuge)' while its hatch was never built;
   -- 5 trolls followed the citizens down the open stair): an open refuge is named first (seal refuses it in a fight),
@@ -2918,7 +2918,7 @@ function M.step(K, budget, ctx)
     deep_step(K, a, g, now)
     starve_step(K, a, g, now)                              -- BUG-570: hunger and thirst in the lockdown
   elseif mem.sv then mem.sv = nil end
-  if mode == 'BREACH' and st.deep and st.deep.bd then K.call('seal', 'plug', {bd = true}) end   -- BUG-479
+  if mode == 'BREACH' and st.deep and st.deep.bd then K.call('seal', 'plug', {bd = true, announced = st.bdx ~= nil}) end   -- BUG-479
   -- BUG-028 (a); a wave or a sortie brings its soldiers back itself (it owns B1 meanwhile)
   if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) and not wave_busy() then rescue_step(K, a, g, now) end
   if mode == 'SIEGE' then                                  -- Gordon 2026-10-16: the sortie, then the intake waves
