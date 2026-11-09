@@ -3727,6 +3727,74 @@ local function open_filters(m)
   return open
 end
 
+-- BUG-575 (Run 16a i1 y429 Possessed 27099 'gems(rough) x1 none reachable', i3 y416-y417 Possessed 26827 'boulders(hard) x2 none in the
+-- fort', i4 y377 'cloth(silk) x1 none in the fort', Looms and webs gone): a slot the fort's own means cannot fill in the days a mood
+-- has. Returns 'rough' (a rough gem: nothing makes one, only a caravan or a dig), 'stone' (hard stone: a dig; early only where care's own
+-- dig found no site), 'silk' (no web the citizens reach and no silk thread: only a caravan), else nil
+local function early_kind(a, inv)
+  if type(a) ~= 'table' or a.legacy then return nil end
+  if a.cls == 'gems' and a.tname == 'ROUGH' then return 'rough' end
+  if a.cls == 'boulders' and a.non_economic then return 'stone' end
+  if (a.cls == 'cloth' or a.cls == 'thread') and a.sub == 'silk' and (math.tointeger(inv.webs_near) or 0) <= 0
+     and (math.tointeger(inv.thread_silk) or 0) <= 0 then return 'silk' end
+  return nil
+end
+
+-- BUG-573: a new want of a mood is told to economy at once (economy.need = a rush run), not at its next cycle: i3 y416 economy
+-- saw the Fey mood's cut-gem want 17,000 ticks after care's MOOD_NEED. rec.pushed = {class = n} (the largest n told); a class economy
+-- has no key for answers false and costs nothing
+function M.mood_push(K, rec, wants, sid)
+  rec.pushed = type(rec.pushed) == 'table' and rec.pushed or {}
+  local per = {}
+  for _, w in ipairs(wants) do
+    if w.unit == int(sid) and w.cls and w.cls ~= 'other' then per[w.cls] = (per[w.cls] or 0) + (math.tointeger(w.n) or 1) end
+  end
+  for cls, n in pairs(per) do
+    if n > (math.tointeger(rec.pushed[cls]) or 0) then
+      rec.pushed[cls] = n
+      K.call('economy', 'need', cls, n, 'care', 2)
+    end
+  end
+end
+
+-- BUG-575: the early decision. Mood slots the fort cannot fill itself (early_kind) get DECISION_NEEDED mood_deadline (A, `early` 1) the
+-- first time care sees them, not at 15 days from the insanity line nor after the 2-day mood_material wait: the commands that can
+-- still help (trade.want of the mood's tokens, an explore dig for a gem vein or stone, the unit's inspect) and what is in the way.
+-- Once per set of kinds per mood; a stone slot only when care's own stone dig is not under way (no site, or none left to try).
+function M.mood_early(K, c, m, rec, early, far)
+  local list, kinds, seen = {}, {}, {}
+  for _, e in ipairs(early) do
+    if not (e.k == 'stone' and rec.sdig_txt) then
+      list[#list + 1] = e
+      if not seen[e.k] then seen[e.k] = true; kinds[#kinds + 1] = e.k end
+    end
+  end
+  if #list == 0 then return end
+  table.sort(kinds)
+  local sig = table.concat(kinds, '|')
+  if rec.early_sig == sig then return end
+  rec.early_sig = sig
+  local cmds, opts = M.mood_cmds(rec, {}, nil)
+  if seen.rough or seen.stone then
+    cmds[#cmds + 1] = [[dfllm cmd bp.place '{"tpl":"explore","site":"S1"}']]
+    opts[#opts + 1] = 'explore'
+  end
+  cmds[#cmds + 1] = string.format('dfllm cmd inspect what=unit key=%s', tostring(m.sid))
+  local names, ways = {}, {}
+  for i, e in ipairs(list) do if i <= 3 then names[#names + 1] = e.t end end
+  if seen.rough then ways[#ways + 1] = 'a rough gem is made by no work order: trade.want gem or dig for a gem vein' end
+  if seen.stone then
+    ways[#ways + 1] = 'hard stone: ' .. (rec.sdig_why and ('no stone dig (' .. trunc(tostring(rec.sdig_why), 50) .. ')') or 'dig for it')
+  end
+  if seen.silk then ways[#ways + 1] = 'no web within reach and no silk thread: trade.want cloth:silk' end
+  if (far or 0) > 0 then ways[#ways + 1] = string.format('%d out of his reach: open the way', far) end
+  local q = string.format('unit %s (%s): %s cannot be made in time here; %s', tostring(m.sid), tostring(rec.kind or '?'),
+                          table.concat(names, ', '), table.concat(ways, '; '))
+  K.log('warn', 'mood unit %s: %s', m.sid, q)
+  K.emit('DECISION_NEEDED', 'A', trunc('strange mood early: ' .. q, 200),
+         {id = 'mood_deadline', early = 1, q = trunc(q, 200), unit = int(m.sid), kind = rec.kind, cmds = cmds, opts = opts})
+end
+
 -- after the scan: per mood the needs still short (BUG-017: and still without an attached item); MOOD_NEED (B) with
 -- the concrete list whenever it changes, the acquisitions, and DECISION_NEEDED (A) once unresolved for wake_ticks (at
 -- once without any path), again every rewake_ticks. A class without any item in the fort is named
@@ -3746,6 +3814,7 @@ local function mood_report(K, c, r, p)
       local open = open_filters(m)
       local acqmap = {}                             -- BUG-535: class -> acquisition ways of its slots
       local gf                                      -- BUG-535: rough / cut gems of the fort, read once per mood
+      local early = {}                              -- BUG-575: slots the fort cannot fill itself ({k = kind, t = slot text})
       for _, nd in ipairs(m.needs) do               -- wants: the hook entries (care.mood_wants)
         local left = nd.n
         if open and nd.nd and nd.nd.idx then left = math.min(nd.n, open[nd.nd.idx] or 0) end
@@ -3783,6 +3852,8 @@ local function mood_report(K, c, r, p)
             end
           end
           labels[#labels + 1] = nd.legacy or R.label(nd.nd, short)
+          local ek = #nd.alts == 1 and early_kind(a0, inv) or nil
+          if ek then early[#early + 1] = {k = ek, t = trunc(R.slot_name(a0) .. ' x' .. short, 40)} end   -- BUG-575
           if (name == 'boulders' or name == 'blocks') and (nd.src or 0) == 0 then rockn = rockn + short end   -- BUG-393
           local path = false
           for _, alt in ipairs(nd.alts) do
@@ -3808,7 +3879,8 @@ local function mood_report(K, c, r, p)
             -- BUG-341: far = the free items of this need the dwarf cannot reach (economy counts them as no stock)
             wants[#wants + 1] = {unit = int(m.sid), cls = a.cls or 'other', n = short, label = labels[#labels],
                                  acq = table.concat(R.acq(a), ','), buy = R.token(a) or '', glass = g,
-                                 far = (nd.far or 0) > 0 and nd.far or nil}
+                                 far = (nd.far or 0) > 0 and nd.far or nil,
+                                 sub = (#nd.alts == 1 and R.KINDED[a.cls or '']) and a.sub or nil}   -- BUG-574: silk cloth / thread
           end
         end
       end
@@ -3885,6 +3957,8 @@ local function mood_report(K, c, r, p)
         end
         acquire(K, r, p, primary)
         M.stone_dig(K, c, m, rec, rockn)          -- BUG-393: the dig that needs no fortcore room
+        M.mood_push(K, rec, wants, m.sid)         -- BUG-573: economy hears of a new want at once
+        M.mood_early(K, c, m, rec, early, far)    -- BUG-575: what cannot be made in time is said now, with the commands
         local age = now - (u.since or now)
         -- DECISION_NEEDED once the need stood for wake_ticks (at once without any path); again when a blocker is new
         -- (after max(mood_risk_every, wake_wall_s)) and as the weekly reminder (rewake_ticks and wake_wall_s, util/cadence)
@@ -4018,7 +4092,8 @@ end
 -- which the reserve never holds; census.boulders is the whole BOULDER vector (built-in, economic and cavern
 -- stone too) and would let the reserve take the coffins' stone. Thread: economy's collected thread (`thread`,
 -- no webs); the THREAD vector counts cavern webs and would let it take the loom's thread.
-local CENSUS_KEY = {logs = 'wood', bone = 'bone', shell = 'shell', leather = 'leather', cloth = 'cloth', gems = 'gems',
+-- BUG-573: gems = the cut ones (census `gems_cut`; an older census without it: `gems`, rough ones included)
+local CENSUS_KEY = {logs = 'wood', bone = 'bone', shell = 'shell', leather = 'leather', cloth = 'cloth', gems = 'gems_cut',
                     bars = 'bars', thread = 'thread'}
 local function class_total(inv, cls, nheld)
   if cls == 'boulders' then
@@ -4027,6 +4102,7 @@ local function class_total(inv, cls, nheld)
     return math.max(0, rock - (math.tointeger(inv.ore) or 0) - (math.tointeger(inv.flux) or 0)) + nheld
   end
   local n = math.tointeger(inv[CENSUS_KEY[cls] or ''])
+  if n == nil and cls == 'gems' then n = math.tointeger(inv.gems) end
   return n and n + nheld or nil
 end
 
@@ -4076,7 +4152,22 @@ local function reserve_begin(K, c, r, p)
     for _, id in ipairs(type(held[cls]) == 'table' and held[cls] or {}) do
       local it = math.type(id) == 'integer' and df.item.find(id)
       local f = it and it.flags
-      if f and f.forbid and not (f.removed or f.garbage_collect or f.in_building or f.construction)
+      -- BUG-573: a ROUGH gem an older run held under `gems` is no reserve stock any more: it is let go (kept in the list, tried again
+      -- next run, while it cannot be freed now)
+      local stale_rough = cls == 'gems' and f and f.forbid and R.tname(it) == 'ROUGH'
+      if stale_rough then
+        local x, y, z = item_pos(it)
+        if rs.acts < rc.per_run and (r.clean_ok or inside(r, x, y, z)) and revealed(K, x, y, z)
+           and K.act.item_flag(id, 'forbid', false) then
+          r.res_ids[id] = nil
+          rs.acts = rs.acts + 1
+          st.wrote = st.wrote or {}
+          st.wrote[cls] = r.now
+          K.log('info', 'mood reserve: rough gem %d released (the gems class holds cut gems only)', id)
+        else
+          keep[#keep + 1] = id
+        end
+      elseif f and f.forbid and not (f.removed or f.garbage_collect or f.in_building or f.construction)
          and R.item_class(it) == cls then
         local x, y, z = item_pos(it)
         if #rs.sites > 0 and on_site(rs.sites, x, y, z) and rs.acts < rc.per_run
@@ -4787,7 +4878,7 @@ local function finish(K, c, r, p)
     held[cls] = #(p.reserve.held[cls] or {})
     if r.res_hold[cls] then
       local ks = r.kstock and r.kstock[cls]
-      parts[#parts + 1] = string.format('%s %d/%d', cls, held[cls], r.res_hold[cls]) ..
+      parts[#parts + 1] = string.format('%s %d/%d', cls == 'gems' and 'gems(cut)' or cls, held[cls], r.res_hold[cls]) ..
         (ks and string.format(' (plant %d, silk %d, yarn %d in stock)', ks.plant, ks.silk, ks.yarn) or '')
     end
   end

@@ -890,6 +890,8 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      "barrels": {"brew_wait": (0, 200)},
                      # BUG-117: free cloth the kernel keeps itself (0 = off); the part's other keys: the mirror test
                      "cloth": {"floor": (0, 500)},
+                     # BUG-573: rough gems kept uncut for the rough-gem filters; the CutGems order cuts the rest
+                     "glass": {"rough_keep": (0, 50)},
                      # FR-89: training weapons for the squads on the training policy (the part's other keys: the mirror test)
                      "training": {"on": "bool", "spare": (0, 50), "max_jobs": (1, 20), "from_phase": "phase"},
                      # BUG-058: the running season's slots at once, autofarm 'auto' | 'off' | 'keep' and its food-day lines
