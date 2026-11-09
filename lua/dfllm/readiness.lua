@@ -168,7 +168,7 @@ function M.growth_room(cit)
 end
 
 M.DEF = {trap_pop = 40, traps_floor = 20, traps_cap = 40, per_invader = 2, grace_days = 20, hold_pop = 30,
-         ask_days = 30}
+         ask_days = 30, stuck_days = 360}
 
 function M.trap_target(K, cit)
   local d = M.DEF
@@ -1197,12 +1197,25 @@ local function ask_reflevers(K, now)
   st.rlq, dirty = now, true
   local names = table.concat(rt.rlg, ',')
   local cause, t = reflever_cause(K, rt.rlg)
+  -- BUG-583 (Run 16d i4 Trumpetrealms y411-y415: the link_stale question came 10 times a year, the counter grew 4 -> 2173 days, nothing
+  -- the player could do): a cause that waits on a material (a lever placed / built / linked, a link job queued) is asked again after
+  -- DEF.stuck_days (360) game days, at once only when the cause changes; 'none' (the retrofit) keeps the ask_days cadence
+  if cause ~= 'none' and st.rlc == cause and st.rlt and now - st.rlt < M.DEF.stuck_days * 1200 then return end
+  st.rlc, st.rlt = cause, now
   local okm, ms = K.call('economy', 'mech_state')
   local free, route = 0, nil
   if okm and type(ms) == 'table' then free, route = int(ms.free) or 0, type(ms.route) == 'string' and ms.route or nil
   else
     local okf, fr = K.call('economy', 'mech_free')
     free = okf and int(fr) or 0
+  end
+  -- BUG-583: the real cause when the fort cannot make a mechanism: no stone for the Mechanics workshop (DF refuses the rock jobs: no
+  -- non-economic hard stone, or no boulder at all) or no Mechanics workshop; named once in the text and the command
+  local why
+  if okm and type(ms) == 'table' and (free or 0) < 2 then
+    if ms.hard then why = 'no mechanisms: DF refuses the rock jobs (no non-economic hard stone in this fort)'
+    elseif ms.route == 'no stone' then why = 'no mechanisms: no usable stone'
+    elseif ms.route == 'no Mechanics' then why = 'no mechanisms: no Mechanics workshop' end
   end
   local q, cmd
   if cause == 'none' then
@@ -1232,8 +1245,14 @@ local function ask_reflevers(K, now)
       cmd = free < 2 and [[dfllm cmd trade.want '{"add":["mechanism","stone"]}']] or [[dfllm cmd inspect '{"what":"workload"}']]
     end
   end
+  if why and cause ~= 'none' then
+    q = cut(why .. ': ' .. q, 200)                           -- the cause first, d.q holds 200 bytes
+    cmd = why:find('Mechanics workshop', 1, true) and [[dfllm cmd inspect '{"what":"workload"}']]
+          or [[dfllm cmd trade.want '{"add":["mechanism","stone"]}']]
+  end
   K.emit('DECISION_NEEDED', 'A', cut(cmd and (q .. ': ' .. cmd) or q, 200),
-         {id = 'refuge_levers', q = cut(q, 200), bridge = rt.rlg[1], cmds = cmd and {cmd} or nil, cause = cause, n = free})
+         {id = 'refuge_levers', q = cut(q, 200), bridge = rt.rlg[1], cmds = cmd and {cmd} or nil, cause = cause, n = free,
+          why = why})
 end
 
 function M.step(K, budget, ctx)

@@ -245,6 +245,56 @@ function Z.zones(z)
   return ok and out or {}
 end
 
+-- BUG-585 (Run 16b i2 Brotherarrow y406: `zone.place type=office` in the refuge made an empty zone, nothing put a chair and a table in it,
+-- the manager validated nothing for 48 days): the chair and the table the office zone over `box` lacks are placed on free floor tiles of it
+-- through runner.repair (quickfort build: buildingplan waits for the items, economy's T.jmake orders them), as economy.office_check does for
+-- an office it finds. tile = the reader (x, y, z) -> {c, bld, dig}. Returns the text of what was placed ('' none lacks), or nil, why.
+function Z.office_furniture(K, box, tile)
+  local have = {chair = false, table = false}
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  local free = {}
+  for y = box.y0, box.y1 do
+    for x = box.x0, box.x1 do
+      local b
+      if find then
+        local okb, bb = pcall(find, x, y, box.z)
+        b = okb and bb or nil
+      end
+      if b ~= nil then
+        local okt, ty = pcall(function() return b:getType() end)
+        if okt and df.building_type then
+          if ty == df.building_type.Chair then have.chair = true
+          elseif ty == df.building_type.Table then have.table = true end
+        end
+      else
+        local t = tile(x, y, box.z)
+        if type(t) == 'table' and t.c == '.' and (t.bld or '') == '' and (t.dig or '') == '' then free[#free + 1] = {x, y, box.z} end
+      end
+    end
+  end
+  local need = {}
+  if not have.chair then need[#need + 1] = 'chair' end
+  if not have.table then need[#need + 1] = 'table' end
+  if #need == 0 then return '' end
+  if #free < #need then return nil, string.format('no free floor tile for a %s in the zone', table.concat(need, ' and a ')) end
+  if #need == 2 then                                    -- the chair beside its table
+    local a = free[1]
+    for k = 2, #free do
+      local q = free[k]
+      if math.max(math.abs(q[1] - a[1]), math.abs(q[2] - a[2])) == 1 then free[2], free[k] = q, free[2]; break end
+    end
+  end
+  local cells, at = {}, {}
+  for k, kind in ipairs(need) do
+    local q = free[k]
+    cells[#cells + 1] = {q[1], q[2], q[3], kind == 'chair' and 'c' or 't'}
+    at[#at + 1] = string.format('%s at %d,%d,%d', kind, q[1], q[2], q[3])
+  end
+  local okr, r1, r2 = K.call('runner', 'repair', cells, 'office furniture')
+  if not (okr and r1) then return nil, 'not placed: ' .. tostring(okr and r2 or r1) end
+  return table.concat(at, ', ')
+end
+
 -- the inbox verb zone.place {type, bbox, name?} (runner; kern: PEACE, ALERT, RECOVERY): ok, msg, {zone, zones, type, bbox,
 -- cell, pond?}
 function Z.verb(K, args, cmd)
@@ -282,10 +332,20 @@ function Z.verb(K, args, cmd)
   local ids = type(res) == 'table' and res.ids or {}
   K.log('info', 'zone.place %s %d,%d-%d,%d z%d: zone %s%s', spec.type, spec.box.x0, spec.box.y0, spec.box.x1, spec.box.y1,
         spec.box.z, tostring(ids[1]), res.pond ~= nil and (res.pond and ' (kept filled)' or ' (a pit: not kept filled)') or '')
-  return true, string.format('%s zone %s at %d,%d-%d,%d z%d', spec.type, tostring(ids[1]), spec.box.x0, spec.box.y0, spec.box.x1,
-                             spec.box.y1, spec.box.z),
+  local furn, ffail
+  if spec.type == 'office' then                      -- BUG-585: the zone with its chair and table
+    local okf, f1, f2 = pcall(Z.office_furniture, K, spec.box, tile)
+    if okf then furn, ffail = f1, f2 else ffail = tostring(f1) end
+    if furn and furn ~= '' then K.log('info', 'zone.place office: %s placed in zone %s (BUG-585)', furn, tostring(ids[1]))
+    elseif ffail then K.log('warn', 'zone.place office: zone %s has no chair/table: %s (BUG-585)', tostring(ids[1]), ffail) end
+  end
+  local msg = string.format('%s zone %s at %d,%d-%d,%d z%d', spec.type, tostring(ids[1]), spec.box.x0, spec.box.y0, spec.box.x1,
+                            spec.box.y1, spec.box.z)
+  if furn and furn ~= '' then msg = msg .. '; ' .. furn .. ' placed'
+  elseif ffail then msg = msg .. '; no chair/table: ' .. ffail end
+  return true, msg,
          {zone = ids[1], zones = ids, type = spec.type, bbox = {spec.box.x0, spec.box.y0, spec.box.z, spec.box.x1, spec.box.y1,
-          spec.box.z}, cell = cell, pond = res.pond}
+          spec.box.z}, cell = cell, pond = res.pond, furniture = (furn and furn ~= '') and furn or nil}
 end
 
 return Z

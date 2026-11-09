@@ -115,7 +115,7 @@ STATE_OWNERS = {
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "pop.hold": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
-    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy",
+    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
@@ -488,7 +488,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     # BUG-487: locked_out reop = the walls of ours the kernel took down itself (quickfort undo; a door goes there)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i cause:s")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i cause:s why:s")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -767,7 +767,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-521: after TIMELINE_RESET the bp.place projects of the discarded timeline placed again (ids, n), refused ones (failed), the rest
     # beyond the limit (skipped), the two clocks
     "PROJECTS_REQUEUED": ("B", "runner", _d("n:i", "ids:sa failed:sa skipped:i tick_alt:i tick_neu:i")),
-    "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s walled:sa pre:i")),       # Run 11: walled as PROJECT_BLOCKED
+    "PROJECT_DONE": ("B", "runner", _d("proj:s", "tpl:s walled:sa pre:i rocks:sa")),       # Run 11: walled as PROJECT_BLOCKED
     # FR-76: types = the mandatory workshops a reclaimed fort lacks (why mandatory)
     "PROJECT_REQUEST": ("B", "any", _d("tpl:s", "n:i why:s bars:i short:i types:sa at:ia")),   # BUG-424: why=no_water at = the nearest water tile
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
@@ -1068,6 +1068,9 @@ STATE = Obj(
                            # BUG-438: 1 = the stone digs gave no free boulder (the fort sits in soil): plan propose digs an explore
                            # shaft down to the first hard stone and asks the caravans for mechanisms and stone
                            "rsoil": FLAG,
+                           # BUG-586: 1 = DF cancels the rock jobs 'Needs non-economic hard stone' (BUG-545 hard_denied): no mechanisms
+                           # come from the stone at hand (plan: no traps, no traction bench)
+                           "rhard": FLAG,
                            # Run 11: metal short for the soldiers (economy.metal: plan check's metal route gate) and the
                            # metal items marked for melting (the invaders' gear in the melt pile)
                            "mshort": FLAG, "melt": NAT,

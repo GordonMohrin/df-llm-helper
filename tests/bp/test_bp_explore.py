@@ -151,3 +151,20 @@ def test_bug553_explore_without_depth_falls_back_to_a_smaller_depth(deep):
     # a given arm is the player's: kept at every depth
     arm0 = bp.rank(snap, "explore", {"avoid": "20", "arm": 2}, manifest=man)
     assert arm0 and all(s["depth"] == 4 and "arm" not in s for s in arm0)
+
+
+def test_bug584_a_new_explore_probe_ranks_farther_from_the_earlier_ones(deep):
+    """BUG-584 (Run 16d i4 Trumpetrealms y412-y415): four probes round the core of a mudstone fort found no ore and the ranking offered that
+    neighbourhood again: manifest `explored` (the anchors of the earlier probes) lifts the sites farther from them."""
+    snap, man = deep
+    plain = bp.rank(snap, "explore", {}, manifest=man, n=40)
+    assert len(plain) >= 2
+    best = plain[0]["anchor"]
+    far = [s for s in plain if (s["anchor"][0] - best[0]) ** 2 + (s["anchor"][1] - best[1]) ** 2 > 16]
+    if not far:
+        pytest.skip("the fixture has no second anchor away from the first")
+    again = bp.rank(snap, "explore", {}, manifest=dict(man, explored=[best[:2] + [best[2]]]), n=40)
+    assert again[0]["anchor"] != best, "the site beside the earlier probe is no longer first"
+    assert "tiles from the nearest of 1 earlier probe" in again[0]["why"]
+    none = bp.rank(snap, "explore", {}, manifest=dict(man, explored=[]), n=40)
+    assert [s["anchor"] for s in none] == [s["anchor"] for s in plain], "no earlier probe: the ranking as before"

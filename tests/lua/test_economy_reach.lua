@@ -193,6 +193,7 @@ T.test('Run 10: without flux the steel orders name the missing input once (DECIS
   T.eq(#dec, 1)
   T.ok(dec[1].msg:find('2 orders (262,263) wait for steel bars; missing flux', 1, true), dec[1].msg)
   T.ok(dec[1].d.q:find('limestone', 1, true), dec[1].d.q)
+  T.ok(dec[1].d.q:find('trade.want add "flux"', 1, true), dec[1].d.q)       -- BUG-583: the command that brings it
   T.eq(wo(W, 'dfllm:pig_iron'), nil)
   days(W, 10)
   local n = 0

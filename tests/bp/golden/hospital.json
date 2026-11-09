@@ -47,7 +47,9 @@
   },
   "params": {
    "beds": 4,
+   "bench": 1,
    "burrow": "Kern+",
+   "furnish": 0,
    "surface": 0
   },
   "rot": 0,
