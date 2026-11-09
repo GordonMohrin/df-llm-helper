@@ -265,7 +265,7 @@ function S.military()
     M.postures[#M.postures + 1] = {P = P, tick = K.now().tick, force = force}
     return true
   end
-  function M.kpi(K) return {squads = 3, soldiers = 8, worn = 95, cv = 13, metal_pct = 0, on_station = 7} end
+  function M.kpi(K) return M.kpi_x or {squads = 3, soldiers = 8, worn = 95, cv = 13, metal_pct = 0, on_station = 7} end   -- kpi_x: a test's reading
   function M.kill(K, ids)
     if #ids == 0 then M.withdrawn[#M.withdrawn + 1] = K.now().tick; return true, 0 end
     M.kills[#M.kills + 1] = {ids = ids, tick = K.now().tick}

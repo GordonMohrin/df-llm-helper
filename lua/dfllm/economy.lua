@@ -490,7 +490,11 @@ M.DEFAULTS = {
             -- status said "drink 46d!"): from burst_min forbidden drink + food units the items themselves are
             -- unforbidden whatever their reason (the 30 a day and "food only in a starvation" kept them forbidden for
             -- ever), burst_per_day a day, M.BURST_SLICE per frame; 0 = never a burst
-            burst_per_day = 400, burst_min = 100},
+            burst_per_day = 400, burst_min = 100,
+            -- BUG-594 (Run 16b i2 Brotherarrow y405, Run 16a i1: 5 forbidden food items 'the kernel has not freed them' 21-30 days after SIEGE_END):
+            -- loose forbidden food (not drink, not a container) was freed only in a starvation; for after_days days after the last SIEGE / BREACH
+            -- day it is freed too (a lockdown and the invaders' fights leave it forbidden), 0 = off
+            after_days = 14},
   -- FR-25: below `days` food days with citizens over `hunger` (DF's "hungry" is 50000)
   starve = {days = 0, hunger = 50000, plants_max = 200, plants_per_slice = 400, report_days = 2, gatherers = 4,
             planters = 4, plants = {'GRASS_WHEAT_CAVE', 'MUSHROOM_HELMET_PLUMP', 'POD_SWEET', 'BUSH_QUARRY',
@@ -2912,6 +2916,11 @@ end
 -- leaving PEACE while hunters (or fishers) are out: the next run (tool details) within rush_ticks takes them off
 -- the detail, not up to a day later (drills check "nobody outside" at T+1,200)
 M.on.MODE = function(K, ev)
+  -- BUG-594: a fight (however short) opens the window in which loose forbidden food is freed after it (T.forbid)
+  if type(ev) == 'table' and (ev.to == 'SIEGE' or ev.to == 'BREACH') then
+    local okp, pp = pcall(pstate, K)
+    if okp and type(pp) == 'table' then pp.fought = K.now().tick end
+  end
   -- BUG-295, BUG-326: the hunters and fishers a real siege took off return as soon as the mode is no SIEGE or BREACH
   -- any more (RECOVERY too: the siege is over; p.drill_off)
   if type(ev) == 'table' and ev.from ~= ev.to and not M.HUNT_OFF[ev.to] then
@@ -4044,6 +4053,15 @@ function M.manager_watch(K, p, c)
       p.mabs = p.mabs.ann and {ann = CAD.quiet(p.mabs.ann)} or nil
     end
     return false
+  end
+  -- BUG-592 (Run 16b i2 Brotherarrow: 'manager Erush is a soldier on duty' for 58 days, the DECISION asked Gordon for the nobles screen): the
+  -- manager is taken out of his squad (military.manager_pull); the orders validate at his next walk to the office
+  if mg.unit and mg.why:find('soldier on duty', 1, true) then
+    local okp, pulled = K.call('military', 'manager_pull', true)
+    if okp and pulled == true then
+      p.mabs = nil
+      return true
+    end
   end
   local now = K.now()
   local rec = type(p.mabs) == 'table' and p.mabs or {}
@@ -11980,8 +11998,18 @@ function T.forbid(K, c, r)
     r.dfd_done = true
     st.dfd, st.dfwhy = M.forbid_note(inv0, K.mode(), st.forb_skip, st.dfd, sv ~= nil)
   end
-  if not (M.FORBID_MODES[K.mode()] or sv) then return true end
+  -- BUG-594: the day of the last fight (SIEGE / BREACH) and the days after it in which loose forbidden food is freed too
   local fc, dfl = c.forbid or M.DEFAULTS.forbid, M.DEFAULTS.forbid
+  local nowt = K.now().tick
+  local mode0 = K.mode()
+  if mode0 == 'SIEGE' or mode0 == 'BREACH' then r.p.fought = nowt end
+  local after = math.tointeger(fc.after_days) or dfl.after_days
+  local post = false
+  if math.tointeger(r.p.fought) then
+    post = after > 0 and mode0 ~= 'SIEGE' and mode0 ~= 'BREACH' and nowt - r.p.fought <= after * DAY
+    if nowt - r.p.fought > math.max(after, 0) * DAY then r.p.fought = nil end
+  end
+  if not (M.FORBID_MODES[K.mode()] or sv) then return true end
   if not r.fx then
     r.fx, r.fx_n, r.fx_why = {}, 0, {}
     -- FR-76: a fort whose stock was forbidden in bulk (a reclaimed one: 3026 of 3058 drinks) is not a player's choice
@@ -11989,9 +12017,12 @@ function T.forbid(K, c, r)
     local nf = (inv.drink_forb or 0) + (inv.food_forb or 0)
     local bmin = math.tointeger(fc.burst_min) or dfl.burst_min
     r.burst = bmin > 0 and nf >= bmin and nf or nil
+    local held = 0
     for _, e in ipairs(st.fix or {}) do
-      if e.why ~= 'food' or r.p.starve or r.burst or sv then r.fx[#r.fx + 1] = e end
+      if e.why ~= 'food' or r.p.starve or r.burst or sv or post then r.fx[#r.fx + 1] = e else held = held + 1 end
     end
+    -- BUG-594: loose food / drink items that stay forbidden say so (the brief read 'the kernel has not freed them' without a cause)
+    if held > 0 and not st.dfwhy then st.dfwhy = string.format('%d food/drink kept (forbidden by hand?)', held):sub(1, 40) end
     -- BUG-023 (Run 11): forbidden picks/axes nobody carries, as many as members of a tool detail lack that tool while
     -- its jobs wait (tool_check's st.tneed)
     for kind, n in pairs(st.tneed or {}) do

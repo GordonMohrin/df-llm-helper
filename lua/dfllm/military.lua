@@ -48,7 +48,7 @@ local C = require('dfllm.util.contract')
 local SL = require('dfllm.stations')       -- BUG-032: stations clear of the bridge footprints (library, no module)
 local ROT = require('dfllm.rotation')      -- FR-79: window edges, fairness ranking, swap plan (library, no module)
 
-local M = {name = 'military', every = {ticks = 3600}, verbs = {}, on = {}}
+local M = {name = 'military', every = {ticks = 3600}, verbs = {}, on = {}, inspect = {}}
 M.KIT = require('dfllm.kit')               -- FR-100/101 (G18): per-soldier kit, training default, material refit (library)
 
 M.SQUADS = {{key = 'A', kind = 'melee'}, {key = 'B', kind = 'melee'}, {key = 'C', kind = 'xbow'}}
@@ -819,11 +819,35 @@ local function free_item(it)
   end
   return true
 end
+-- BUG-591 (Run 16c i3 Sealcertain y422: '96 body armors free' beside squads in no armor; Run 16b i2 Brotherarrow: 'free: 54 body armors'):
+-- world.items.other.ARMOR / HELM / PANTS also hold the clothes (tunics, robes, caps, trousers: raws [ARMORLEVEL] 0), which no uniform
+-- slot is for; economy's census (g_body) already counts true armor only, the refit and the missing-text counted everything. An unknown
+-- itemdef counts (never hide a real piece).
+local ARMOR_LEVEL_CATS = {body = 'ARMOR', head = 'HELM', pants = 'PANTS'}
+local function true_armor(cat, it)
+  local typ = ARMOR_LEVEL_CATS[cat]
+  if not typ then return true end
+  local sub = try(function() return it:getSubtype() end)
+  if sub == nil then return true end
+  rt.adef = rt.adef or {}
+  local row = rt.adef[cat]
+  if not row then row = {}; rt.adef[cat] = row end
+  local v = row[sub]
+  if v == nil then
+    local lvl = try(function()
+      local d = dfhack.items.getSubtypeDef(df.item_type[typ], sub)
+      return d and d.armorlevel or nil
+    end)
+    v = lvl == nil or (int(lvl) or 0) >= 1
+    row[sub] = v
+  end
+  return v
+end
 function M.stock_mats(cat)
   local n = {metal = 0, leather = 0, any = 0}
   try(function()
     for _, it in ipairs(df.global.world.items.other[CAT_ITEMS[cat]]) do
-      if free_item(it) then
+      if free_item(it) and true_armor(cat, it) then
         n.any = n.any + 1
         local mi = dfhack.matinfo.decode(it)
         local fl = mi and mi.material and mi.material.flags
@@ -832,6 +856,24 @@ function M.stock_mats(cat)
     end
   end)
   return n
+end
+-- BUG-591: what lies in one armor category and why it is not stock: {free (true armor a soldier may take), soft (clothes), forbid
+-- (true armor marked forbidden), held (true armor owned, in a building or carried by a civilian)}
+function M.stock_detail(cat)
+  local d = {free = 0, soft = 0, forbid = 0, held = 0}
+  try(function()
+    for _, it in ipairs(df.global.world.items.other[CAT_ITEMS[cat]]) do
+      local f = it.flags
+      if not f.removed and not f.garbage_collect and not f.melt and not f.dump and not f.trader then
+        if not true_armor(cat, it) then
+          if free_item(it) then d.soft = d.soft + 1 end
+        elseif free_item(it) then d.free = d.free + 1
+        elseif f.forbid then d.forbid = d.forbid + 1
+        else d.held = d.held + 1 end
+      end
+    end
+  end)
+  return d
 end
 local function best_mats(need)
   local r = {}
@@ -1053,7 +1095,7 @@ end
 
 -- up to n weapon tokens for bare melee positions: free melee weapons that are no tools (minus the explicit specs
 -- that already claim them), then the spare axes, then the spare picks
-local function weapon_plan(g, n)
+local function weapon_plan(g, n, release)
   local stock, tool_tok = {}, {}
   try(function()
     for _, it in ipairs(df.global.world.items.other.WEAPON) do
@@ -1081,6 +1123,9 @@ local function weapon_plan(g, n)
       end)
     end
   end
+  for tok, c in pairs(release or {}) do        -- BUG-591: the specs about to be replaced claim nothing
+    if stock[tok] then stock[tok] = stock[tok] + c end
+  end
   local toks = {}
   for t in pairs(stock) do toks[#toks + 1] = t end
   table.sort(toks)
@@ -1094,6 +1139,58 @@ local function weapon_plan(g, n)
     r[#r + 1] = best
   end
   return r
+end
+
+-- BUG-591 (Run 16c i3 Sealcertain y422: 8 free melee weapons, squads A / B / C with 'weapon 5 / 3 / 3' missing and every squad stood down): a
+-- position whose explicit weapon spec names a subtype that more specs claim than the fort holds weapons of (carried ones included) is
+-- never filled, and ensure_weapons only re-planned positions without a spec, so weapons of the other subtypes lay unused. The positions of
+-- squad `s` whose soldier holds no weapon and whose spec is over-claimed, as many as spare melee weapons of another subtype exist:
+-- {positions, {token = specs given up}}
+local function stale_weapons(s, marked)
+  local cand = {}                                    -- the weaponless soldiers with an explicit melee spec (the item scan is the cost)
+  for _, m in ipairs(members(s)) do
+    if not marked[m.pos] and not M.KIT.soldier(m.p, m.unit, roles(), nil).weapon then
+      for _, sub in ipairs(weapon_specs(m.p)) do
+        local w = weapon_kind(sub)
+        if w and w.k == 'melee' and not tostring(w.token):find('_TRAINING$') then cand[#cand + 1] = {m = m, w = w}; break end
+      end
+    end
+  end
+  if #cand == 0 then return {}, {} end
+  local stock, claims = {}, {}
+  try(function()
+    for _, it in ipairs(df.global.world.items.other.WEAPON) do
+      local w = free_item(it) and weapon_kind(it:getSubtype())
+      if w and w.k == 'melee' and not tostring(w.token):find('_TRAINING$') then stock[w.token] = (stock[w.token] or 0) + 1 end
+    end
+  end)
+  for _, sp in ipairs(M.SQUADS) do
+    local e2 = st.sq[sp.key]
+    local s2 = e2 and squad(e2.id)
+    if s2 then
+      try(function()
+        for _, p in ipairs(s2.positions) do
+          for _, sub in ipairs(weapon_specs(p)) do
+            local w = weapon_kind(sub)
+            if w and w.k == 'melee' and not tostring(w.token):find('_TRAINING$') then claims[w.token] = (claims[w.token] or 0) + 1 end
+          end
+        end
+      end)
+    end
+  end
+  local spare, over = 0, {}
+  for tok, n in pairs(stock) do spare = spare + math.max(0, n - (claims[tok] or 0)) end
+  for tok, c in pairs(claims) do if c > (stock[tok] or 0) then over[tok] = c - (stock[tok] or 0) end end
+  local out, rel = {}, {}
+  if spare <= 0 or next(over) == nil then return out, rel end
+  for _, c in ipairs(cand) do
+    if #out >= spare then break end
+    if (over[c.w.token] or 0) > 0 then
+      over[c.w.token] = over[c.w.token] - 1
+      out[#out + 1], rel[c.w.token] = c.m.pos, (rel[c.w.token] or 0) + 1
+    end
+  end
+  return out, rel
 end
 
 -- e.nw: positions dfllm left without a weapon spec while guarded (persisted; a UI uniform without a weapon is
@@ -1240,6 +1337,16 @@ local function ensure_weapons(K, k, s)
     K.log('info', 'military: squad %s: %d positions give up their pick/axe spec (the Miners/Woodcutters need the tools; '
           .. 'a reserved tool is never handed out as a work tool)', k, given)
   end
+  local release                                      -- BUG-591: specs nothing can fill, replaced while spare weapons exist
+  if not trn then
+    local stale, rel = stale_weapons(s, marked)
+    if #stale > 0 then
+      for _, pos in ipairs(stale) do need[#need + 1], marked[pos] = pos, true end
+      release = rel
+      K.log('info', 'military: squad %s: %d positions hold a weapon spec no free weapon fills (more specs than weapons of that kind); '
+            .. 'spare weapons of other kinds lie free: re-planned', k, #stale)
+    end
+  end
   if #need == 0 then cleared('wpn' .. k); return end
   table.sort(need)
   if not g then
@@ -1250,7 +1357,7 @@ local function ensure_weapons(K, k, s)
     backoff(K, 'wpn' .. k)
     return
   end
-  local plan = weapon_plan(g, #need)
+  local plan = weapon_plan(g, #need, release)
   local by, order = {}, {}
   for i, tok in ipairs(plan) do
     if not by[tok] then by[tok] = {}; order[#order + 1] = tok end
@@ -2252,15 +2359,40 @@ function M.free_weapons()
   end)
   return n
 end
+-- BUG-591: the weapons of the fort by what keeps them from a soldier: {melee (free, true weapons), tools (free picks and axes: the
+-- miners' and woodcutters'), wood (free training weapons), forbid (melee forbidden), held (melee owned, in a building, carried by a civilian)}
+function M.weapon_detail()
+  local d = {melee = 0, tools = 0, wood = 0, forbid = 0, held = 0}
+  try(function()
+    for _, it in ipairs(df.global.world.items.other.WEAPON) do
+      local w = weapon_kind(it:getSubtype())
+      local f = it.flags
+      if w and w.k ~= 'ranged' and not f.removed and not f.garbage_collect and not f.melt and not f.dump and not f.trader then
+        local wood = tostring(w.token):find('_TRAINING$') ~= nil
+        if free_item(it) then
+          if wood then d.wood = d.wood + 1 elseif w.k == 'melee' then d.melee = d.melee + 1 else d.tools = d.tools + 1 end
+        elseif not wood and w.k == 'melee' then
+          if f.forbid then d.forbid = d.forbid + 1 else d.held = d.held + 1 end
+        end
+      end
+    end
+  end)
+  return d
+end
+local KIT_CATS = {{'body', 'body armor'}, {'head', 'helmet'}, {'pants', 'pants'}, {'gloves', 'gloves'}, {'shoes', 'shoes'}}
 function M.kit_missing(K, key)
   local e = type(key) == 'string' and st.sq[key]
   local s = e and squad(e.id)
   if not s then return '' end
   local nowpn, wood, nobody = 0, 0, 0
+  local other = {}
   for _, m in ipairs(members(s)) do
     local x = M.KIT.soldier(m.p, m.unit, roles(), nil)
     if not x.weapon then nowpn = nowpn + 1 elseif x.wood then wood = wood + 1 end
     if x.empty and x.empty.body then nobody = nobody + 1 end
+    for _, c in ipairs(KIT_CATS) do
+      if c[1] ~= 'body' and x.empty and x.empty[c[1]] then other[c[1]] = (other[c[1]] or 0) + 1 end
+    end
   end
   local miss = {}
   if nowpn > 0 then miss[#miss + 1] = 'weapon ' .. nowpn end
@@ -2269,7 +2401,37 @@ function M.kit_missing(K, key)
   if #miss == 0 then return '' end
   local fw, fb = M.free_weapons(), M.stock_mats('body').any
   local hint = ((nowpn + wood > 0 and fw > 0) or (nobody > 0 and fb > 0)) and ('; ' .. M.KIT_HINT) or ''
-  return string.format(' (missing: %s; free: %d melee weapons, %d body armors%s)', table.concat(miss, ', '), fw, fb, hint)
+  -- BUG-591: what the free pieces are that do not fill the slots (clothes, forbidden, owned; tools held back for the workers)
+  local det = {}
+  if nowpn + wood > 0 then
+    local wd = M.weapon_detail()
+    local parts = {}
+    if wd.tools > 0 then parts[#parts + 1] = wd.tools .. ' axes/picks stay with the workers' end
+    if wd.forbid > 0 then parts[#parts + 1] = wd.forbid .. ' forbidden' end
+    if wd.held > 0 then parts[#parts + 1] = wd.held .. ' owned or carried' end
+    if wd.wood > 0 then parts[#parts + 1] = wd.wood .. ' wooden' end
+    if #parts > 0 then det[#det + 1] = 'weapons ' .. fw .. ' usable (' .. table.concat(parts, ', ') .. ')' end
+  end
+  local lack = {}
+  for _, c in ipairs(KIT_CATS) do
+    local n = c[1] == 'body' and nobody or other[c[1]]
+    if n and n > 0 then
+      lack[#lack + 1] = c[2] .. ' ' .. n
+      local sd = M.stock_detail(c[1])
+      local parts = {}
+      if sd.soft > 0 then parts[#parts + 1] = sd.soft .. ' clothes' end
+      if sd.forbid > 0 then parts[#parts + 1] = sd.forbid .. ' forbidden' end
+      if sd.held > 0 then parts[#parts + 1] = sd.held .. ' owned or carried' end
+      if c[1] == 'body' and (sd.soft > 0 or sd.forbid > 0 or sd.held > 0) then
+        det[#det + 1] = c[2] .. ' ' .. sd.free .. ' usable (' .. table.concat(parts, ', ') .. ')'
+      elseif c[1] ~= 'body' then
+        det[#det + 1] = c[2] .. ' ' .. sd.free .. ' usable' .. (#parts > 0 and (' (' .. table.concat(parts, ', ') .. ')') or '')
+      end
+    end
+  end
+  if next(other) then det[#det + 1] = 'slots empty: ' .. table.concat(lack, ', ') end
+  return string.format(' (missing: %s; free: %d melee weapons, %d body armors%s%s)', table.concat(miss, ', '), fw, fb, hint,
+                       #det > 0 and ('; ' .. table.concat(det, '; ')) or '')
 end
 
 -- squad `k` stands down now (see M.UNFIT_PCT); the first look of an episode names it in kern.log (rt.sd_note)
@@ -2286,6 +2448,11 @@ local function standdown(K, k)
     K.log('warn', 'military: %s: squad %s stands down: %d of %d soldiers hold a real weapon and wear body armor (< %d %%); '
           .. 'unequipped soldiers are not stationed against the enemy, they stay with the civilians in the refuge%s', mode, k, fit,
           n, M.UNFIT_PCT, M.kit_missing(K, k))
+    -- BUG-593: the kit is looked at at once, not after the next refit_days / backoff (the squad is useless to the siege until then)
+    local e = st.sq[k]
+    if e then e.rf, dirty = 0, true end
+    cleared('wpn' .. k)
+    cleared('uni' .. k)
   elseif not down and rt.sd_note[k] then
     K.log('info', 'military: %s: squad %s is equipped again (%d of %d): it takes its station', mode, k, fit, n)
   end
@@ -3752,6 +3919,48 @@ function M.train_default(K, k)
   end
 end
 
+-- BUG-592 (Run 16b i2 Brotherarrow y406-y407: 'no manager available (manager Erush is a soldier on duty) for 58 days', ConstructCoffin x4, 27
+-- corpses): the manager validates work orders only from his office; a squad member on duty is at his station or drill, and nothing took him
+-- out of the squad (recruits() leaves nobles out of a squad, but a soldier who becomes manager after he was seated stayed). The MANAGER's
+-- holder, a unit or nil
+local function manager_unit()
+  return try(function()
+    local ent = df.global.plotinfo.main.fortress_entity
+    local pid
+    for _, p in ipairs(ent.positions.own) do if p.code == 'MANAGER' then pid = p.id end end
+    if not pid then return nil end
+    for _, a in ipairs(ent.positions.assignments) do
+      if a.position_id == pid and (int(a.histfig) or -1) >= 0 then
+        local h = df.historical_figure.find(a.histfig)
+        return h and df.unit.find(h.unit_id) or nil
+      end
+    end
+    return nil
+  end)
+end
+
+-- public: the manager leaves his squad (squads screen: remove from squad); once per MGR_EVERY ticks unless `force` (economy's
+-- manager_absent asks). Returns true when he was taken out, false when he is in no squad / could not be, nil unreadable
+M.MGR_EVERY = 1200
+function M.manager_pull(K, force)
+  local now = now_tick(K)
+  if not force and rt.mgr_t and now >= rt.mgr_t and now - rt.mgr_t < M.MGR_EVERY then return nil end
+  rt.mgr_t = now
+  local u = manager_unit()
+  if not u or dfhack.units.isDead(u) then return nil end
+  local sid = int(try(function() return u.military.squad_id end)) or -1
+  if sid < 0 then return false end
+  local ok, err = K.act.squad_remove(sid, u.id)
+  if ok then
+    rt.kpi, rt.kit = nil, nil
+    K.log('warn', 'military: the manager (unit %d) was a member of squad %d: taken out so he can validate work orders (a soldier on duty '
+          .. 'does not walk to his office)', u.id, sid)
+    return true
+  end
+  K.log('warn', 'military: the manager (unit %d) is a member of squad %d and could not be taken out: %s', u.id, sid, tostring(err))
+  return false
+end
+
 -- FR-100: the material refit of squad k (dfllm.kit refit_plan): every refit_days per squad in quiet PEACE.
 -- BUG-555 (Run 16a i1 Basementflew y416-y422: a wild stegosaurus put the fort into ALERT for 1,375 of every 2,000 ticks, then a
 -- ceratosaurus into BREACH; 'squad.sortie refused: 0 of 6 soldiers hold a real weapon and wear body armor' with 18 free metal
@@ -3778,19 +3987,87 @@ function M.refit(K, k, s, now)
   for _, m in ipairs(members(s)) do
     mems[#mems + 1] = {pos = m.pos, p = m.p, kit = M.KIT.soldier(m.p, m.unit, roles(), is_metal)}
   end
-  local plan = M.KIT.refit_plan(mems, M.stock_mats)
+  -- BUG-591: the slots empty at the last look and the ones this refit freed from a material class (rt only: a reload primes them)
+  rt.rfe, rt.rfh = rt.rfe or {}, rt.rfh or {}
+  local plan, empty, stuck = M.KIT.refit_plan(mems, M.stock_mats, {prev = rt.rfe[k], hold = rt.rfh[k]})
+  rt.rfe[k] = empty
+  if next(stuck or {}) then
+    rt.rfh[k] = rt.rfh[k] or {}
+    for c, set in pairs(stuck) do
+      rt.rfh[k][c] = rt.rfh[k][c] or {}
+      for pos in pairs(set) do rt.rfh[k][c][pos] = true end
+    end
+  end
   e.rf, dirty = now, true
   for _, r in ipairs(plan) do
     local ok, res = K.act.squad_uniform(s.id, {mode = 'replace', positions = r.positions,
                                                items = {{cat = r.cat, type = M.KIT.TYPE[r.cat], mat = r.mat}}})
     if ok then
+      local sk = r.mat == 'any' and stuck and stuck[r.cat]
       K.log('info', 'military: squad %s: %s of %d positions to %s material (%s)', k, r.cat, #r.positions, r.mat,
-            r.mat == 'metal' and 'free metal pieces cover them' or 'the slot stayed empty, other pieces lie free')
+            r.mat == 'metal' and 'free metal pieces cover them'
+            or sk and next(sk) and 'the slot stayed empty over two looks, free pieces of its material class do not fill it'
+            or 'the slot stayed empty, other pieces lie free')
     else
       K.log('warn', 'military: squad %s: refit %s refused: %s', k, r.cat, tostring(res))
     end
   end
   if #plan > 0 then rt.kpi, rt.kit = nil, nil end
+end
+
+-- BUG-591: `inspect what=military` (read only): per squad the soldiers and what each lacks, the material of the specs, whether it stands down,
+-- and per category what lies in the fort (usable, clothes, forbidden, owned / carried) with the weapons by what keeps them from a soldier.
+-- {squads = {{key, id, n, fit, weapon, wood, armor, empty = {cat = n}, mats = {cat = 'metal'|'leather'|'any'}, down}}, stock = {cat = {...}},
+-- weapons = {...}, manager_in_squad}
+function M.inspect.military(K, args)
+  local out, lines = {}, {}
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    if s then
+      local r = {key = sp.key, id = e.id, n = 0, fit = 0, weapon = 0, wood = 0, armor = 0, empty = {}, mats = {}}
+      for _, m in ipairs(members(s)) do
+        local x = M.KIT.soldier(m.p, m.unit, roles(), nil)
+        r.n = r.n + 1
+        if x.weapon then r.weapon = r.weapon + 1 end
+        if x.wood then r.wood = r.wood + 1 end
+        if x.armor then r.armor = r.armor + 1 end
+        if x.weapon and not x.wood and not (x.empty and x.empty.body) then r.fit = r.fit + 1 end
+        for c in pairs(x.empty or {}) do r.empty[c] = (r.empty[c] or 0) + 1 end
+        for _, c in ipairs(M.KIT.ARMOR) do
+          local specs = m.p.equipment.uniform[c]
+          local sp1 = specs and #specs > 0 and (specs[0] or specs[1]) or nil
+          if sp1 then
+            local mat = M.KIT.spec_mat(sp1)
+            local cur = r.mats[c]
+            r.mats[c] = (cur == nil or cur == mat) and mat or 'mixed'
+          end
+        end
+      end
+      r.down = (rt.sd and rt.sd[sp.key]) == true
+      out[#out + 1] = r
+      lines[#lines + 1] = string.format('%s %d (fit %d, weapon %d, wood %d, armor %d%s)', sp.key, r.n, r.fit, r.weapon, r.wood, r.armor,
+                                        r.down and ', standing down' or '')
+    end
+  end
+  local stock = {}
+  for _, c in ipairs(M.KIT.ARMOR) do
+    local d = M.stock_detail(c)
+    local n = M.stock_mats(c)
+    d.metal, d.leather = n.metal, n.leather
+    stock[c] = d
+  end
+  local wd = M.weapon_detail()
+  local mu = manager_unit()
+  local mem = mu and (int(try(function() return mu.military.squad_id end)) or -1) >= 0 or false
+  return true, string.format('military: %s; free usable: body %d, weapons %d (%d clothes, %d axes/picks for the workers)%s',
+                             #lines > 0 and table.concat(lines, ', ') or 'no squads', stock.body.free, wd.melee, stock.body.soft, wd.tools,
+                             mem and '; the manager is in a squad' or ''),
+         {squads = out, stock = stock, weapons = wd, manager_in_squad = mem,
+          note = 'fit = a real weapon in hand and body armor worn (a squad under military.UNFIT_PCT percent fit stands down in a SIEGE / '
+                 .. 'BREACH); stock.<cat>.free = true armor (raws [ARMORLEVEL] >= 1) no soldier wears, metal / leather its material, soft = '
+                 .. 'clothes (no uniform slot takes them), forbid / held = true armor forbidden / owned or carried; weapons.melee = free melee '
+                 .. 'weapons, tools = free picks and axes (stay with the workers), wood = training weapons'}
 end
 
 ---------------------------------------------------------------- module
@@ -3890,6 +4167,8 @@ function M.step(K, budget, ctx)
   if type(K.census.u) ~= 'table' then return end
   local soldiers = rt.kpi and rt.kpi.soldiers or 0
   if mode == 'PEACE' and soldiers > 0 then M.unstick(K, now) end    -- BUG-050
+  local okm, errm = pcall(M.manager_pull, K)                        -- BUG-592: the manager is no squad member
+  if not okm then K.log('warn', 'military manager_pull: %s', tostring(errm)) end
   M.windows(K)                                                      -- FR-71
   local _, per, zero, short, gear = M.targets(K)
   if zero and mode == 'PEACE' then release(K, zero) end              -- BUG-327: never for the tools (`short`)

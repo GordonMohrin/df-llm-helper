@@ -184,16 +184,17 @@ T.test('FR-100: the refit: a metal slot that stays empty while other pieces lie 
   -- BUG-555 (Run 16a i1: the stegosaurus kept the fort in ALERT, the refit never ran, 0 of 6 soldiers in body armor with 18 free): in an
   -- alert the refit waits one game day, not refit_days
   W.set_mode('ALERT')
-  W.run(5 * DAY, {skip = 9})
+  W.run(3 * DAY, {skip = 9})
   local m = body_mats()
   T.eq(m[1], 'metal', 'the first position: the one free metal breastplate is his')
   T.eq(m[2], 'any', 'an alert no longer holds the refit back')
-  W.set_mode('PEACE')
-  W.run(4 * DAY, {skip = 9})
+  -- BUG-591: nobody ever wears that breastplate (the mock soldiers stay bare, as a spec the free piece does not fit would): at the second look the
+  -- slot, empty twice with a piece free in the category, goes to any material too
+  W.run(2 * DAY, {skip = 9})
   m = body_mats()
-  T.eq(m[1], 'metal', 'the first position: the one free metal breastplate is his')
-  for i = 2, math.min(#m, 5) do T.eq(m[i], 'any', 'position ' .. i .. ': any material') end
+  T.eq(m[1], 'any', 'empty over two looks with pieces free: any material')
   T.ok(logged(W, 'squad A: body of'), 'kern.log names the refit')
+  T.ok(logged(W, 'the slot stayed empty over two looks'), 'and the stuck slot')
   M.stock_mats = real
 end)
 
