@@ -339,7 +339,7 @@ C.STATE_OWNERS = {
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['pop.hold'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
-  ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy', ['stock.rhard'] = 'economy',
+  ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy', ['stock.rhard'] = 'economy', ['stock.mfree'] = 'economy', ['stock.mroute'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
   ['stock.dwhy'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy', ['stock.dfd'] = 'economy', ['stock.dfwhy'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
@@ -474,6 +474,7 @@ C.STATE_SPEC = obj({
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
                     rhard = FLAG,                   -- BUG-586: DF refuses the rock jobs (BUG-545 hard_denied)
+                    mfree = NAT, mroute = str(16),   -- BUG-611: free mechanisms and plan_mech's route (plan: no traps without parts)
                     rsoil = FLAG,                   -- BUG-438: the stone digs found only soil (plan propose digs down to hard stone)
                     pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
                     dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target

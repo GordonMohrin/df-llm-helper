@@ -143,7 +143,10 @@ M.DEFAULTS = {
   -- report_days). rock: a "Needs rock" cancel while the stone is short of the rock orders re-enters the order in wood,
   -- with no free stone at all removes it (drop_per_day); no orders recheck for a rock cancel loop then; rock below the
   -- need while the miners have nothing to dig: PROJECT_REQUEST bedrooms why=rock (rooms) at most every request_days
-  pieces = {max_n = 6, report_days = 28, tag = 'dfllm:piece_'},
+  -- BUG-607 (Run 16c i3 Wallfree: an embark without a tree, doors and beds waited 32 days for logs): treeless_days with no log (or no tree on
+  -- the map) is a treeless fort: doors, chests, tables ... are made of stone even while DF denies hard stone (a bounded probe, M.HARD.sticky),
+  -- a bed (wood only) is named and the caravans are asked for logs
+  pieces = {max_n = 6, report_days = 28, tag = 'dfllm:piece_', treeless_days = 20},
   rock = {drop_per_day = 20, request_days = 7, rooms = 4},
   -- Run 11: 2 picks for the Miners' target and 1 iron bar: a pick from the first metal with a spare bar at a forge,
   -- else economy.trade_wants asks the caravans for picks (trade puts it before plan.trade.want)
@@ -6558,6 +6561,12 @@ function T.days(K, c, r)
               mood_miss = {}, early = true}
   end
   p.days_t, p.meals = now.tick, math.tointeger((r.inv or {}).meal_kinds)
+  -- BUG-607: since when the fort has had no log (M.treeless); no tree on the map at all counts as of the first day
+  if (math.tointeger((r.inv or {}).wood) or 0) > 0 then p.nowood = nil
+  elseif math.tointeger(p.nowood) == nil then
+    p.nowood = now.tick
+    if M.count_trees() == 0 then p.nowood = now.tick - (math.tointeger((c.pieces or {}).treeless_days) or 20) * DAY end
+  end
   if st.first then st.first = false; M.first_boost(K) end
   M.hungry_warn(K, c, r)
   local sup = K.plan.supply or {}
@@ -7183,6 +7192,22 @@ end
 -- orders too), 'wood' (Carpenters), 'rock' again when stone is free but the rock orders want more (the order queues
 -- behind them; live y432: 34 boulders and the refuge door still open), or nil, why ('no material for door: no rock,
 -- no logs'). A door item comes first: buildingplan waits for the item, never for raw rock or logs.
+-- BUG-607: a fort without logs for `pieces.treeless_days` days (p.nowood, kept by T.days) or without a tree on the map (st.trees) is treeless
+function M.count_trees()
+  local n
+  pcall(function()
+    local pl = df.global.world.plants
+    n = #pl.tree_dry + #pl.tree_wet
+  end)
+  return n
+end
+function M.treeless(c, r)
+  local days = math.tointeger((c.pieces or {}).treeless_days) or 20
+  if days <= 0 or (math.tointeger(r.inv.wood) or 0) > 0 then return false end
+  local since = math.tointeger(r.p.nowood)
+  return since ~= nil and r.now - since >= days * DAY
+end
+
 function M.piece_route(c, r, e, n)
   local inv, f = r.inv, r.f or {}
   if e.inv and (inv[e.inv] or 0) >= n then return 'item' end
@@ -7193,9 +7218,17 @@ function M.piece_route(c, r, e, n)
   if not e.wood and rock >= n and masons then return 'rock' end
   if wood >= n and carp then return 'wood' end
   if not e.wood and free >= n and masons then return 'rock', nil, true end
+  -- BUG-607: a treeless fort has no wood to wait for: the piece goes to the Masons even while DF's hard stone denial holds the stone at 0
+  -- (the cancel is counted: the second episode turns the probe off, M.HARD.sticky); only boulders the census calls usable
+  if not e.wood and masons and free <= 0 and M.treeless(c, r) and M.hard_denied(inv, r.now)
+     and (math.tointeger(type(st.hard) == 'table' and st.hard.eps) or 1) < M.HARD.sticky then
+    local d = M.hard_diag(inv)
+    if d.usable >= n then return 'rock', nil, true end
+  end
   local why = {}
   if not e.wood then why[#why + 1] = free >= n and 'no Masons' or 'no rock' end
-  why[#why + 1] = wood >= n and 'no Carpenters' or 'no logs'
+  why[#why + 1] = wood >= n and 'no Carpenters' or (M.treeless(c, r) and 'no logs, the fort has no trees' or 'no logs')
+  if e.wood and M.treeless(c, r) then why[#why + 1] = 'a bed is wood only: trade.want wood' end
   return nil, string.format('no material for %s: %s', e.kind, table.concat(why, ', '))
 end
 
@@ -7779,6 +7812,11 @@ function M.supply_wants(K)
   for _, e in ipairs(okc and type(cw) == 'table' and cw or {}) do
     if type(e) == 'table' and type(e.buy) == 'string' then w[#w + 1] = {buy = e.buy, n = e.n, why = e.why} end
   end
+  -- BUG-607: a treeless fort whose beds (wood only) or wood pieces wait for logs: the caravans bring logs
+  local ws = math.tointeger(st.wood_short) or 0
+  if ws > 0 then
+    w[#w + 1] = {buy = 'wood', n = math.min(60, ws * 4), why = string.format('treeless fort: %d wood-only pieces (beds) wait for logs', ws)}
+  end
   local rk = st.rock
   -- BUG-466: a furnace or forge waits for fire-safe building material and the fort has no stone or block: the caravans bring stone
   local fn = math.tointeger(st.fire_n) or 0
@@ -7823,6 +7861,7 @@ function T.jmake(K, c, r)
   st.fire_n = nil                                     -- BUG-466: furnaces / forges waiting for fire-safe material, none in the fort
   if not jb or type(pc) ~= 'table' then return true end
   local short, walls, s = {}, 0, nil
+  st.wood_short = nil                                 -- BUG-607: wood-only pieces (beds) waiting in a treeless fort (supply_wants)
   for _, q in ipairs(jb.mq or {}) do
     if q.label == 'building material' then
       s = s or M.bp_settings()
@@ -7860,7 +7899,10 @@ function T.jmake(K, c, r)
               spec.material_category, spec.item_conditions = {'wood'}, {cond(fl + 1, 'WOOD')}
             end
             add(r, {tag = tag, spec = spec, n = k, uses = {[via] = 1}, why = e.kind .. ' for a planned building'})
-          elseif not via then short[#short + 1] = {kind = e.kind, n = k, why = why} end
+          elseif not via then
+            short[#short + 1] = {kind = e.kind, n = k, why = why}
+            if e.wood and M.treeless(c, r) then st.wood_short = (st.wood_short or 0) + k end       -- BUG-607
+          end
         end
         -- a seal piece whose stone order queues behind the other rock orders (no logs for wood): the player hears it
         if e.def and wait then
@@ -7955,7 +7997,10 @@ end
 -- (stone_free 0 until the census shows more than M.HARD.new boulders beyond the count at the last cancel): no rock order is queued
 -- for it, the caravans are asked for stone and mechanisms (supply_wants, plan_mech 'no stone'), and DECISION_NEEDED no_hard_stone names
 -- the counts (usable, economic or soft, ore and flux, out of reach) and the way out. A census with boulders but none usable says the same.
-M.HARD = {n = 3, window_days = 7, hold_days = 14, new = 5, min_boulders = 10, repeat_days = 28}
+-- BUG-610 (Run 16a i1 Basementflew y426-y429: the 14-day hold ran out, the rock orders were queued again, DF cancelled them 3 times, 14 more
+-- days; boulders all out of reach): a second denial with no new boulders in between (`sticky` episodes) is held until more than
+-- `new` boulders come, with no time limit, and the question is asked once
+M.HARD = {n = 3, window_days = 7, hold_days = 14, new = 5, min_boulders = 10, repeat_days = 28, sticky = 2}
 function M.hard_words(why)
   local s = tostring(why or ''):lower()
   return s:find('non-economic', 1, true) ~= nil or s:find('hard stone', 1, true) ~= nil
@@ -7963,7 +8008,7 @@ end
 function M.hard_denied(inv, now)
   local h = st.hard
   if type(h) ~= 'table' or not h.denied then return false end
-  if now and h.last and now - h.last >= M.HARD.hold_days * DAY then return false end
+  if now and h.last and now - h.last >= M.HARD.hold_days * DAY and (math.tointeger(h.eps) or 1) < M.HARD.sticky then return false end
   return (math.tointeger(type(inv) == 'table' and inv.rock) or 0) <= (h.rock or 0) + M.HARD.new
 end
 
@@ -7982,8 +8027,11 @@ function M.hard_report(K, c, r, cancels)
   local d = M.hard_diag(r.inv)
   if (cancels or 0) == 0 and d.usable > 0 then return end        -- the census alone: usable boulders may be the moods' floor
   local now = K.now()
+  local sticky = type(st.hard) == 'table' and (math.tointeger(st.hard.eps) or 1) >= M.HARD.sticky
+  if sticky and p.hard_ann_eps == M.HARD.sticky then return end        -- BUG-610: reported once, then quiet until boulders come
   if not (CAD.due(p.hard_ann, now, {}, {d.cause}, {ticks = M.HARD.repeat_days * DAY, wall_s = CAD.WALL_S}) or CAD.elapsed(p.hard_ann, now, M.HARD.repeat_days * DAY, CAD.WALL_S)) then return end
   p.hard_ann = CAD.mark(now, {}, {d.cause})
+  p.hard_ann_eps = sticky and M.HARD.sticky or nil
   local q
   if d.cause == 'none' then
     q = string.format('no non-economic hard stone: %d boulders, 0 usable (%d economic/soft, %d ore/flux, %d out of reach); no ' ..
@@ -7991,6 +8039,11 @@ function M.hard_report(K, c, r, cancels)
   else
     q = string.format('DF cancels rock jobs x%d "Needs non-economic hard stone" beside %d boulders counted usable: stone counts 0 ' ..
                       'for %d d; levers, mechanisms, stone traps need it; wood serves doors, beds', cancels, d.usable, M.HARD.hold_days)
+    if sticky then      -- BUG-610: the second denial in a row (the boulders may be out of DF's reach): no more rock orders until new boulders come
+      q = string.format('DF cancels rock jobs again "Needs non-economic hard stone" beside %d boulders counted usable (%d out of reach ' ..
+                        'by the census): no rock order is queued until more than %d new boulders come; mechanisms, stone traps, levers need it; ' ..
+                        'wood serves doors, beds', d.usable, d.far, M.HARD.new)
+    end
   end
   local cmds = {[[dfllm cmd trade.want '{"add":["stone","mechanism"]}']], 'dfllm plan propose',
                 [[dfllm cmd inspect '{"what":"workload"}']]}
@@ -8007,9 +8060,14 @@ function M.hard_cancel(K, c, job, tick)
   for _, t in ipairs(h.t) do if t >= lim then keep[#keep + 1] = t end end
   keep[#keep + 1] = tick
   while #keep > 20 do table.remove(keep, 1) end
+  -- BUG-610: a first cancel after the hold ran out (the rock orders were queued again) starts another episode of the same denial
+  if h.denied and h.last and tick - h.last >= M.HARD.hold_days * DAY then h.lapsed = true end
   h.t, h.last = keep, tick
   if #keep < M.HARD.n then return end
   local r = M.view_run(K)
+  if not h.denied or (math.tointeger(r.inv.rock) or 0) > (h.rock or 0) + M.HARD.new then h.eps = 1       -- new boulders: a fresh denial
+  elseif h.lapsed then h.eps = (math.tointeger(h.eps) or 1) + 1 end
+  h.lapsed = nil
   h.denied, h.rock = true, math.tointeger(r.inv.rock) or 0
   M.hard_report(K, c, r, #keep)
 end
@@ -12672,6 +12730,10 @@ function M.state(K)
     do                                                 -- BUG-586: DF itself refuses the rock jobs (BUG-545): no mechanism, no stone trap, no traction bench
       local okh, hd = pcall(M.hard_denied, K.census.i or {}, K.now().tick)
       if okh and hd then r.stock.rhard = 1 end
+    end
+    if type(st.mech) == 'table' then                   -- BUG-611: free mechanisms and what plan_mech found for the shortfall (plan: no traps without parts)
+      r.stock.mfree = math.max(0, math.tointeger(st.mech.free) or 0)
+      if type(st.mech.route) == 'string' then r.stock.mroute = st.mech.route:sub(1, 16) end
     end
     if st.picks then r.stock.picks, r.stock.pick_want = st.picks.have, st.picks.want end
     -- Run 11: metal short for the soldiers (M.metal_plan: plan check's metal route gate) and the metal items marked for

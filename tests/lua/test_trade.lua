@@ -1047,4 +1047,23 @@ T.test('BUG-561: a bin whose contents are all sale items is offered as one entry
   T.ok(said and said:find('1 forbid', 1, true) and said:find('1 value', 1, true), said or 'no log line')
 end)
 
+-- BUG-609 (Run 16a i1 Basementflew: 'kind' 148-245 in nothing_to_sell and no word which kinds): the log and the ledger name the item types
+-- the sell list leaves out
+T.test('BUG-609: nothing_to_sell names the item types that do not match the sell list (log line and the ledger cause)', function()
+  local W, _, d, c = setup{ours = {}, plan = plan_want({'cloth'}, {'ring'}), before_load = function(W, d)
+    F.goods(W, d, {{type = 'FIGURINE', value = 200}, {type = 'FIGURINE', value = 210}, {type = 'GOBLET', value = 150},
+                   {type = 'FIGURINE', value = 3}})
+  end}
+  W.frame(1)
+  to_depot(W, d, c)
+  F.until_(W, function() return #F.events(W, 'failed') > 0 end, 600)
+  T.eq(F.events(W, 'failed')[1].d.why, 'nothing_to_sell')
+  local said
+  for _, l in ipairs(W.logs) do if l.msg:find('trade: nothing to sell: 4 of ours listed at the depot', 1, true) then said = l.msg end end
+  T.ok(said and said:find('; off the sell list: 2 FIGURINE, 1 GOBLET', 1, true), said or 'no log line')
+  local led
+  for _, e in ipairs(W.find_events('TRADE_LEDGER')) do led = e end
+  T.ok(led and table.concat(led.d.unmet, ' '):find('nothing_to_sell[value=1,kind=3(FIGURINE2+GOBLET1)]', 1, true), led and T.show(led.d.unmet) or 'no ledger')
+end)
+
 T.done()

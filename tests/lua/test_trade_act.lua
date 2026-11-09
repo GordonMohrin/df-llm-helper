@@ -501,4 +501,53 @@ T.test('BUG-561: bring marks the bin of contained sale items once, skips mixed /
   T.eq(a.skipped, {bin_mixed = 1, bin_forbid = 1, in_inventory = 1, forbid = 1}, 'the reasons')
 end)
 
+-- BUG-609 (Run 16a i1 Basementflew: bin_forbid 136 on every haul, 0 sent): with a.unforbid a forbidden bin (or craft in a free bin) is
+-- unforbidden and marked; a loose forbidden craft, a mixed bin and the old call (no a.unforbid) stay as they were
+T.test('BUG-609: bring with unforbid frees a forbidden bin of crafts before marking it, never a loose forbidden craft or a mixed bin', function()
+  local E = env()
+  df.item_type = {FIGURINE = 1, RING = 2, DRINK = 3, [1] = 'FIGURINE', [2] = 'RING', [3] = 'DRINK'}
+  local function item(id, ty, flags)
+    local it = {id = id, flags = flags or {on_ground = true}}
+    function it.getType() return df.item_type[ty] end
+    return it
+  end
+  local function bin(id, subs, flags)
+    local b = item(id, 'RING', flags or {on_ground = true})
+    b._subs = subs
+    for _, x in ipairs(subs) do x.flags = x.flags or {}; x.flags.in_inventory = true; x._c = b end
+    return b
+  end
+  local function world()
+    local b1 = bin(500, {item(1, 'FIGURINE'), item(2, 'FIGURINE')}, {on_ground = true, forbid = true})            -- the forbidden bin
+    local b2 = bin(501, {item(3, 'FIGURINE', {forbid = true}), item(4, 'FIGURINE')})                              -- a forbidden craft in a free bin
+    local b3 = bin(502, {item(5, 'FIGURINE'), item(6, 'DRINK')}, {on_ground = true, forbid = true})              -- mixed and forbidden
+    local forb = item(9, 'FIGURINE', {on_ground = true, forbid = true})
+    df.global.world = {items = {other = {FIGURINE = {b1._subs[1], b1._subs[2], b2._subs[1], b2._subs[2], b3._subs[1], forb}}}}
+    return b1, b2, b3, forb
+  end
+  local marked = {}
+  dfhack.items = dfhack.items or {}
+  dfhack.items.markForTrade = function(it, d) marked[#marked + 1] = it.id; return true end
+  dfhack.items.getContainer = function(it) return it._c end
+  dfhack.items.getContainedItems = function(c) return c._subs or {} end
+  local b1, b2, b3, forb = world()
+  local a = {depot = 50, types = {'FIGURINE'}, max = 60}
+  local ok, n = E.I.trade('bring', a)
+  T.ok(ok)
+  T.eq(marked, {}, 'old call: nothing is freed, nothing marked')
+  T.eq(a.skipped, {bin_forbid = 4, forbid = 2}, T.show(a.skipped))
+  b1, b2, b3, forb = world()
+  a = {depot = 50, types = {'FIGURINE'}, max = 60, unforbid = true}
+  ok, n = E.I.trade('bring', a)
+  T.ok(ok)
+  table.sort(marked)
+  T.eq(marked, {500, 501}, 'the forbidden bin and the free bin with a forbidden craft')
+  T.eq(b1.flags.forbid, false)
+  T.eq(b2._subs[1].flags.forbid, false)
+  T.eq({forb.flags.forbid, b3.flags.forbid}, {true, true})
+  T.eq(a.freed, 2, 'the bin and the one craft')
+  T.eq(a.skipped.bin_mixed, 1)
+  T.eq(a.skipped.forbid, 1, 'a loose forbidden craft stays forbidden (somebody may have meant it)')
+end)
+
 T.done()

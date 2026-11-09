@@ -5633,6 +5633,48 @@ local function depot_seen()
   return have, c
 end
 
+-- BUG-612 (Run 16c i3 Wallfree y375-y376: DEPOT_MISSING 'no known depot site (no fortcore depot)', a caravan unloaded nothing, drink 201 -> 15 d,
+-- the template `depot` and `bp sites depot` found no site): a fort with no fortcore and no manifest depot looks for a flat 5x5 block of walkable
+-- open floor around its citizens on their own walk group (snapshot.groups, 25 tiles in one call), nearest first, at most DEPOT_TRIES blocks, and
+-- tries again only after DEPOT_RETRY ticks. Returns {x, y, z} (the middle) or nil, why.
+M.CFG.depot_tries, M.CFG.depot_radius, M.CFG.depot_retry = 220, 30, 36000
+function Q.depot_fallback(K)
+  local cu, pts = K.census.u, {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    if #pts >= 50 then break end
+    local u = df.unit.find(id)
+    local ok, x, y, z
+    if u then ok, x, y, z = pcall(dfhack.units.getPosition, u) end
+    if ok and int(x) then pts[#pts + 1] = {x, y, z} end
+  end
+  if #pts == 0 then return nil, 'no citizen position' end
+  local home = Q.home_group(K)
+  if not home then return nil, 'the walk group of the citizens is unknown' end
+  local sx, sy, sz, zs = 0, 0, {}, nil
+  for _, q in ipairs(pts) do sx, sy = sx + q[1], sy + q[2]; sz[q[3]] = (sz[q[3]] or 0) + 1 end
+  for z, n in pairs(sz) do if not zs or n > sz[zs] or (n == sz[zs] and z > zs) then zs = z end end
+  local cx, cy = sx // #pts, sy // #pts
+  local R, cand = M.CFG.depot_radius, {}
+  for dx = -R, R, 3 do for dy = -R, R, 3 do cand[#cand + 1] = {dx, dy, dx * dx + dy * dy} end end
+  table.sort(cand, function(a, b) if a[3] ~= b[3] then return a[3] < b[3] end if a[1] ~= b[1] then return a[1] < b[1] end return a[2] < b[2] end)
+  for i = 1, math.min(#cand, M.CFG.depot_tries) do
+    local x0, y0 = cx + cand[i][1] - 2, cy + cand[i][2] - 2
+    if on_map(x0, y0, zs) and on_map(x0 + 4, y0 + 4, zs) then
+      local block = {}
+      for y = y0, y0 + 4 do for x = x0, x0 + 4 do block[#block + 1] = {x, y, zs} end end
+      if S.slice then S.slice.probes = S.slice.probes + 1 end
+      local okg, gr = K.call('snapshot', 'groups', block, false)
+      local all = okg and type(gr) == 'table'
+      for k = 1, #block do if not (all and int(gr[k]) == home) then all = false; break end end
+      if all then
+        local okt, t = K.call('snapshot', 'tile', x0 + 2, y0 + 2, zs)
+        if okt and type(t) == 'table' and t.c == '.' then return {x0 + 2, y0 + 2, zs} end
+      end
+    end
+  end
+  return nil, string.format('no flat 5x5 block of open floor within %d tiles of the citizens', R)
+end
+
 -- the one-stage depot project around a centre pos
 local function depot_doc(pos)
   local at = {pos[1] - 2, pos[2] - 2, pos[3]}
@@ -5656,15 +5698,31 @@ function M.depot_keep(K, why)
   local m = K.manifest().depot
   local pos = type(m) == 'table' and int(m[1]) and int(m[2]) and int(m[3]) and {int(m[1]), int(m[2]), int(m[3])}
               or (type(S.rt.depot) == 'table' and int(S.rt.depot[1]) and S.rt.depot) or nil
-  if not pos then return false, 'no known depot site' end
+  local fb
+  if not pos then
+    -- BUG-612: no fortcore, no manifest depot: a flat block of open floor beside the citizens (looked for every depot_retry ticks)
+    local t = now(K)
+    if S.rt.dfb_t and t - S.rt.dfb_t < M.CFG.depot_retry then return false, 'no known depot site' end
+    S.rt.dfb_t = t
+    dirty()
+    local why2
+    pos, why2 = Q.depot_fallback(K)
+    if not pos then
+      K.log('warn', 'trade depot missing, no site: %s', tostring(why2))
+      return false, 'no known depot site'
+    end
+    fb = true
+  end
   local n = (int(S.rt.depot_n) or 0) + 1
   local id = string.format('depot%d', n)
   local ok, err = register(K, id, depot_doc(pos), M.CFG.depot_prio, 'depot')
   if not ok then return false, err end
   S.rt.depot_n = n
+  if fb then S.rt.depot = pos end
   dirty()
   save(K)
-  K.log('warn', 'trade depot missing (%s): project %s at %d,%d,%d', tostring(why or 'keeper'), id, pos[1], pos[2], pos[3])
+  K.log('warn', 'trade depot missing (%s): project %s at %d,%d,%d%s', tostring(why or 'keeper'), id, pos[1], pos[2], pos[3],
+        fb and ' (surface fallback beside the citizens: no fortcore, no manifest depot)' or '')
   return true, id
 end
 
@@ -5999,6 +6057,42 @@ function M.remake(K, P, d, R)
   return true
 end
 
+-- BUG-608 (Run 16a i1 Basementflew y426-y429: the hospital stayed build_lost, 7 parts 'buildingplan: waiting for materials', 8 retries; its
+-- boulders, blocks and logs lay in the flooded z117 complex on another walk group): the pieces of the blocked build stage that economy cannot make
+-- now (economy.mat_for per piece kind: 'no material for bed: no logs'), with the stock that lies out of the citizens' reach
+-- (census rock_far / blocks_far / doors_far ...). Text or nil (all can be made, or nothing is known). build_lost names it, and
+-- retry_step does not repeat a season-old retry while it stands (the pieces would wait for the same material again).
+Q.KEY_KIND = {b = 'bed', t = 'table', h = 'chest', c = 'chair', f = 'cabinet', d = 'door', H = 'hatch', W = 'grate', G = 'grate'}
+function Q.mat_why(K, P, d)
+  local st = d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') then return nil end
+  local need, order = {}, {}
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      local t = tl[1]
+      local kind = t and Q.KEY_KIND[t[4]]
+      if kind and not cell_present(K, t) then
+        if not need[kind] then need[kind] = 0; order[#order + 1] = kind end
+        need[kind] = need[kind] + 1
+      end
+    end
+  end
+  local bad = {}
+  for _, kind in ipairs(order) do
+    local ok, via, w = K.call('economy', 'mat_for', kind, need[kind])
+    if ok and not via and type(w) == 'string' then bad[#bad + 1] = string.format('%s x%d: %s', kind, need[kind], (w:gsub('^no material for %S+ ?%S*: ', ''))) end
+  end
+  if #bad == 0 then return nil end
+  local far, inv = {}, K.census.i or {}
+  for _, k in ipairs({'rock_far', 'blocks_far', 'doors_far', 'chairs_far', 'tables_far'}) do
+    local n = int(inv[k]) or 0
+    if n > 0 then far[#far + 1] = string.format('%d %s', n, k:gsub('_far$', '')) end
+  end
+  return trunc(table.concat(bad, '; ') .. (#far > 0 and ('; out of reach (another walk group): ' .. table.concat(far, ', ')) or ''), 160)
+end
+
 -- Run 11 (c1a147087d, build_lost before the door_walls fix): 'x,y,z' of a missing door of a blocked seal stage that the
 -- revealed tiles show without a wall or fortification beside it (door_unsupported), else nil: the retry lets quickfort
 -- refuse it once more, and door_walls plans it as a wall
@@ -6052,7 +6146,16 @@ local function retry_step(K, P, t)
     q.cant = P.tpl == 'seal' and not M.remake_why(K, P, d)      -- Run 11: blocked for want of material
     dirty()
   end
-  if t - (int(q.t) or t) >= M.CFG.retry_every then why = 'a season passed'
+  -- BUG-608: a build_lost room (not a seal: M.remake_why has those) whose pieces cannot be made is not re-dug every season: it waits for
+  -- the map (more tiles revealed or open) or for the material
+  local aged = t - (int(q.t) or t) >= M.CFG.retry_every
+  local nomat = aged and P.tpl ~= 'seal' and Q.mat_why(K, P, d) or nil
+  if nomat and q.hold ~= nomat then
+    q.hold = nomat
+    K.log('warn', '%s: build_lost retry held, the pieces cannot be made: %s', P.id, nomat)
+    dirty()
+  end
+  if aged and not nomat then why = 'a season passed'
   elseif t - (int(q.c) or 0) >= M.CFG.retry_check then
     q.c = t
     local sig = retry_sig(K, P, d)
@@ -6070,7 +6173,7 @@ local function retry_step(K, P, t)
   if not why then return end
   local from = retry_from(d, P.stage)
   local blocked = d.stages[P.stage + 1] and d.stages[P.stage + 1].label or '?'
-  q.n, q.t, q.c, q.sig, q.cant = q.n + 1, t, t, nil, nil
+  q.n, q.t, q.c, q.sig, q.cant, q.hold = q.n + 1, t, t, nil, nil, nil
   P.stage, P.chunk, P.orders_done = from, 0, 0
   set_blocked(K, P, '')
   P.pct = pct_of(P, d, 0)
@@ -6182,6 +6285,7 @@ local function blocked_event(K, P, t)
     dd.missing, dd.retry = miss, nr
     msg = msg .. ' at ' .. label .. (#miss > 0 and (', missing ' .. table.concat(miss, ', ')) or '')
     local _, mw = M.remake_why(K, P, d)      -- Run 11: why economy cannot make a seal's pieces
+    if not mw and P.tpl ~= 'seal' then mw = Q.mat_why(K, P, d) end     -- BUG-608: the same for a room (a hospital)
     if mw then msg, dd.mat = msg .. ' (' .. mw .. ')', trunc(mw, 80) end
     local lw = Q.lost_why(K, P, d)           -- BUG-536: why the depot (a 5x5 building) was not placed
     if lw then msg, dd.parts = msg .. ': ' .. lw, trunc(lw, 200) end
@@ -7783,6 +7887,7 @@ M.verbs = {
 -- BUG-329 (tests, read-only): the building on a tile (a finished farm plot too), build_state's answer in one word
 M.bld_at, M.cls_of = Q.bld_at, Q.cls_of
 M.lost_why, M.all_boxed, M.boxed_cancel = Q.lost_why, Q.all_boxed, Q.boxed_cancel     -- BUG-536 / BUG-538 (tests)
+M.mat_why, M.depot_fallback = Q.mat_why, Q.depot_fallback          -- BUG-608 / BUG-612 (tests)
 
 -- BUG-479 review (seal's plug_lift): the state of a project by id, nil when the runner has no such project (lost), else
 -- {done = bool}

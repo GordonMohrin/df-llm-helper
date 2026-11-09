@@ -63,7 +63,7 @@ def test_state_slots_validate_and_carry_wp8_keys(run):
     # items marked for melting; BUG-042: dwhy while drink is below the target with a cause; BUG-382: bshort
     keys = {"drink_d", "food_d", "meals", "hosp_water", "ore", "bars", "leather", "metal", "picks", "pick_want",
             "mshort", "melt"}
-    assert keys <= set(best["stock"]) <= keys | {"mood_miss", "rock", "rock_need", "dwhy", "bshort"}
+    assert keys <= set(best["stock"]) <= keys | {"mood_miss", "rock", "rock_need", "dwhy", "bshort", "mfree", "mroute"}   # BUG-611
     assert set(best["labor"]) - {"n", "sold", "held", "why"} == {"starving", "idle"}      # FR-77: the idle breakdown
     # FR-74 / BUG-062: src, pop and died_y once a run finished, tombs_locked while a zone stays closed
     assert set(best["care"]) - {"coffins", "died", "src", "pop", "died_y", "tombs_locked", "s0"} == {

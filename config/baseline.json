@@ -39,7 +39,7 @@
                   "jobs": ["ConstructDoor", "ConstructCabinet", "ConstructChest", "ConstructCoffin", "ConstructTable",
                            "ConstructThrone", "ConstructArmorStand", "ConstructWeaponRack", "ConstructHatchCover",
                            "ConstructGrate", "ConstructFloodgate"]},
-  "pieces": {"max_n": 6, "report_days": 28, "tag": "dfllm:piece_"},
+  "pieces": {"max_n": 6, "report_days": 28, "tag": "dfllm:piece_", "treeless_days": 20},
   "rock": {"drop_per_day": 20, "request_days": 7, "rooms": 4},
   "picks": {"tag": "dfllm:pick", "metals": ["COPPER", "BISMUTH_BRONZE", "BRONZE", "IRON", "STEEL"], "max_jobs": 2},
   "trade_goods": {"min": 30, "jobs": 10, "bone_keep": 10, "tag": "dfllm:trade_goods", "ws": ["workshop:Craftsdwarfs"]},

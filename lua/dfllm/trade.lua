@@ -91,6 +91,7 @@ M.CFG = {
   UNLOAD_WAIT = 600, UNLOAD_MAX = 10,
   NOGOODS_WAIT = 1200,  -- ticks at the depot without any merchant goods (caravan.goods and the depot's trader items): the visit ends, nothing is hauled
   BRING_MAX = 100,      -- sale items marked for the depot per visit (BUG-016; was the reused ITEMS)
+  UNFORBID_BINS = true, -- BUG-609: a forbidden bin of crafts is unforbidden when it is hauled to the depot (false = left, counted bin_forbid)
   RETRY_WAIT = 1200, MAX_TRIES = 2,
   -- BUG-026: a retry waits at most the ticks left before the trade screen may no longer open (time_remaining down to
   -- OPEN_MIN) minus RETRY_KEEP, never less than RETRY_MIN; with less room than RETRY_MIN there is no retry
@@ -1017,7 +1018,7 @@ local function lists_job(K, ui, mer)
   local want, sell = wants(K)
   local ea, ew = ethics(mer)
   return {kind = 'lists', i0 = 0, i1 = 0, n0 = #ui.good[0], n1 = #ui.good[1], buys = {}, sells = {}, skip = {},
-          want = want, sell = sell, ea = ea, ew = ew}
+          want = want, sell = sell, ea = ea, ew = ew, kinds = {}}
 end
 
 -- BUG-561: a bin (any container with contents) is a sale entry when every item in it passes the sale filter; returns
@@ -1079,7 +1080,9 @@ local function lists_slice(j, ui, mer)
           skip(sub and 'value' or 'bin_mixed')
         end
       elseif info.value < M.CFG.SELL_MIN then skip('value')
-      elseif #j.sell > 0 and not L.first_match(j.sell, info) then skip('kind')
+      elseif #j.sell > 0 and not L.first_match(j.sell, info) then
+        skip('kind')
+        j.kinds[info.type] = (j.kinds[info.type] or 0) + 1       -- BUG-609: which item types the sell list does not take
       else
         j.sells[#j.sells + 1] = {i = i, value = info.value, stack = info.stack, t = info.type}
       end
@@ -1205,7 +1208,9 @@ local function ledger(K, ent, ok, why, ratio, f)
   local want = cand and cand.want or wants(K)
   local lg = L.ledger(want, cand and cand.buys, cand and cand.sells, ok and f.plan or nil)
   if not ok then        -- a failed visit (nothing bought): a want the merchants had (or nobody looked) fails for `why`
-    for _, u in ipairs(lg.unmet) do if u[2] ~= 'none' or not cand then u[2] = tostring(why) end end
+    -- BUG-609: nothing_to_sell carries what kept our items off the list ([forbid=3,kind=148(BAR90+CLOTH40)], no spaces)
+    local tail = (why == 'nothing_to_sell' and type(f.nts) == 'string' and f.nts ~= '') and ('[' .. f.nts .. ']') or ''
+    for _, u in ipairs(lg.unmet) do if u[2] ~= 'none' or not cand then u[2] = tostring(why) .. tail end end
   end
   local function head(list, n) local r = {} for i = 1, math.min(n, #list) do r[i] = list[i] end return r end
   local e = {tick = K.now().tick, civ = civ_name(ent), ok = ok and 1 or 0, ratio = int(ratio), why = ok and '' or tostring(why),
@@ -1351,7 +1356,7 @@ local function track_visits(K, cars, now)
       elseif okc and type(res) == 'string' and res:find('^not in ') then
         tail = string.format(': the kernel queues one in PEACE or RECOVERY (now %s)', tostring(K.mode()))
       else
-        tail = ': no known depot site (no fortcore depot): place one by hand'
+        tail = ': no depot site (no fortcore, no flat 5x5 floor by the citizens): plan propose (depot) or by hand'
       end
       if mat and not (dp and dp.going) then tail = tail .. '; ' .. mat end
       local d = {civ = civ_name(c.ent), planned = dp and dp.going and 1 or 0, proj = proj:sub(1, 40)}
@@ -1566,15 +1571,17 @@ local function step_wait(K, cars, now)
       if short then for _, tn in ipairs(L.KINDS.crafts.t) do if not seen[tn] then seen[tn] = true; types[#types + 1] = tn end end end
       table.sort(types)
       if #types > 0 then
-        local req = {depot = d.id, types = types, max = short and M.CFG.BRING_METAL or M.CFG.BRING_MAX}
+        local req = {depot = d.id, types = types, max = short and M.CFG.BRING_METAL or M.CFG.BRING_MAX,
+                      unforbid = M.CFG.UNFORBID_BINS ~= false}
         local ok, n = act_trade(K, 'bring', req)
         -- BUG-561: what the haul left out, by reason (act.trade bring fills req.skipped)
         local sk = {}
         for k, v in pairs(type(req.skipped) == 'table' and req.skipped or {}) do sk[#sk + 1] = string.format('%s %s', tostring(v), k) end
         table.sort(sk)
-        K.log('info', 'trade: %s sale items sent to the depot%s%s', ok and tostring(n) or ('no (' .. tostring(n) .. ')'),
+        K.log('info', 'trade: %s sale items sent to the depot%s%s%s', ok and tostring(n) or ('no (' .. tostring(n) .. ')'),
               short and ' (metal short for the soldiers: crafts too)' or '',
-              #sk > 0 and (', left out: ' .. table.concat(sk, ', ')) or '')
+              #sk > 0 and (', left out: ' .. table.concat(sk, ', ')) or '',
+              (req.freed or 0) > 0 and string.format('; %d forbidden bin(s) / crafts unforbidden for the depot', req.freed) or '')
       end
     elseif at_for >= M.CFG.NOGOODS_WAIT then
       K.log('info', 'trade: the merchants of %s brought nothing to sell; no sale items are hauled', civ_name(rt.ent))
@@ -1740,9 +1747,26 @@ local function step_mark(K, cars)
     for _, k in ipairs({'forbid', 'owned', 'artifact', 'banned', 'unethical', 'bin_mixed', 'value', 'kind'}) do
       if (j.skip[k] or 0) > 0 then parts[#parts + 1] = string.format('%d %s', j.skip[k], k) end
     end
-    K.log('info', 'trade: nothing to sell: %d of ours listed at the depot%s (sale value from %d, kinds %s)', j.n1,
+    -- BUG-609 (Run 16a i1: 'kind' 148-245 and no word which): the item types the sell list leaves out, most first
+    local kl = {}
+    for tn, cnt in pairs(j.kinds or {}) do kl[#kl + 1] = {tn, cnt} end
+    table.sort(kl, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
+    local kt = {}
+    for i = 1, math.min(#kl, 6) do kt[#kt + 1] = string.format('%d %s', kl[i][2], kl[i][1]) end
+    local np = {}
+    for _, k in ipairs({'forbid', 'owned', 'artifact', 'banned', 'unethical', 'bin_mixed', 'value', 'kind'}) do
+      local cnt = j.skip[k] or 0
+      if cnt > 0 then
+        local det = {}
+        if k == 'kind' then for i = 1, math.min(#kl, 3) do det[#det + 1] = kl[i][1] .. kl[i][2] end end
+        np[#np + 1] = k .. '=' .. cnt .. (#det > 0 and ('(' .. table.concat(det, '+') .. ')') or '')
+      end
+    end
+    f.nts = table.concat(np, ','):sub(1, 90)
+    K.log('info', 'trade: nothing to sell: %d of ours listed at the depot%s (sale value from %d, kinds %s)%s', j.n1,
           #parts > 0 and (', not offered: ' .. table.concat(parts, ', ')) or '', M.CFG.SELL_MIN,
-          #j.sell == 0 and 'any' or tostring(#j.sell))
+          #j.sell == 0 and 'any' or tostring(#j.sell),
+          #kt > 0 and ('; off the sell list: ' .. table.concat(kt, ', ')) or '')
     return finish(K, false, 'nothing_to_sell')
   end
   f.cand = {buys = j.buys, sells = j.sells, want = j.want}

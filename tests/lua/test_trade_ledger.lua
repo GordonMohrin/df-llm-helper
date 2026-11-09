@@ -271,7 +271,7 @@ T.test('Run 11 (siege 3 destroyed the depot): DEPOT_MISSING names what the kerne
   e = run('RECOVERY', {true, 'depot2'}, 'logs')
   T.ok(e.msg:find(': project depot2 queued; building material: logs', 1, true), e.msg)
   e = run('PEACE', {false, 'no known depot site'}, 'unknown')
-  T.ok(e.msg:find(': no known depot site (no fortcore depot): place one by hand', 1, true), e.msg)
+  T.ok(e.msg:find(': no depot site (no fortcore, no flat 5x5 floor by the citizens): plan propose (depot) or by hand', 1, true), e.msg)
   T.eq(e.d.mat, nil, 'before the first census nothing is said about the material')
 end)
 
