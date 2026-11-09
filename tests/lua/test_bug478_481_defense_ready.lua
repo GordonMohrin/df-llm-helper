@@ -48,6 +48,7 @@ local function world(o)
   W.econ, W.snap, W.runner = X.economy(), snap, runner
   X.load(W, {'military', 'readiness'}, {W.econ, snap, runner}, {'sense', 'threat', 'siege', 'gate'})
   X.mod('readiness').CAPS = {[0] = o.cap or 120, [1] = o.cap or 120, [2] = o.cap or 120, [3] = 250}
+  X.mod('readiness').OPEN_CONFIRM, X.mod('readiness').DEF.worn_pct = 0, 0     -- BUG-600 / BUG-601 have their own tests
   return W
 end
 

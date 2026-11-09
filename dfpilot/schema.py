@@ -1057,7 +1057,9 @@ STATE = Obj(
                            "mws": Str(maxbytes=200),
                            # BUG-481: ts = the trap shortfall R0 `traps_short` names, tt = the trap target for the siege the fort
                            # expects; BUG-478: rg = the bridges with no linked lever inside the refuge (no R0 blocker)
-                           "ts": Str(maxbytes=200), "tt": NAT, "rg": Arr(Str(maxbytes=24), hi=8)}),
+                           "ts": Str(maxbytes=200), "tt": NAT, "rg": Arr(Str(maxbytes=24), hi=8),
+                           # BUG-601: as = the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
+                           "as": Str(maxbytes=120)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
          # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the
