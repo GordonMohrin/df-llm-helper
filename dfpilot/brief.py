@@ -129,6 +129,18 @@ def line_head(ctx: Ctx) -> str:
             + f" hb {fmt_age(ctx.hb_age)}" + plan_flag(ctx))
 
 
+def line_paused(ctx: Ctx) -> str:
+    """BUG-614 (Run 16 i1/i2/i4: after a DF restart the kernel stays pause:df and nothing in `status` said what runs the game
+    again): the game stands paused by DF (a load, a restart) or by a popup -> the command. '' for the player's own pause."""
+    own = (ctx.s.get("owners") or {}).get("pause")
+    if own not in ("df", "popup"):
+        return ""
+    if not ((ctx.s.get("t") or {}).get("paused") or (ctx.hb or {}).get("paused")):
+        return ""
+    return (f"PAUSED by {own}: the game stands, nothing runs (a DF restart or a load leaves it so): run `dfllm cmd resume`"
+            + (" (it reads the popup and refuses threat or curse words)" if own == "popup" else ""))
+
+
 def line_phase(s: dict, hint: bool = False) -> str:
     """BUG-301 (Run 15 Drillchamber: P0 for six game years and nothing said which deliverable held it): state phw as
     'phase P0: waits for farms, workshops Still (fortcore 2 impossible: why -> waived)'; '' when nothing holds or was
@@ -1258,6 +1270,7 @@ def status_text(save_dir: Path) -> str:
     if ctx.state is None:
         lines.append((1, _no_state(ctx)))
     else:
+        lines.insert(1, (0, line_paused(ctx)))               # BUG-614: right under the clock line, never dropped
         lines[1:1] = thirst_items(ctx) + mood_items(ctx)     # BUG-402: dying of thirst first; BUG-285: a strange mood is an emergency: the top line under the clock
         # BUG-154 (live i4): the mood_ws command and the care-first line are short and say what to do next and what
         # runs: rank 1 (never dropped); the long UNREADY line and the other sched parts are clipped or dropped first.
@@ -1415,6 +1428,9 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
     if ctx.state is None:
         head.append(_no_state(ctx))
     else:
+        pz = line_paused(ctx)                      # BUG-614
+        if pz:
+            head.insert(1, pz)
         core, extra = def_parts(ctx)                   # J3: the army's detail last: it goes first
         head[1:1] = [t for _, t in thirst_items(ctx) + mood_items(ctx, 4)]  # BUG-402, BUG-285: the open strange moods under the clock line
         head += [x for x in (line_unready(ctx), _join(t for _, t in curse_items(ctx)), line_alarm(ctx), line_pop(ctx),
