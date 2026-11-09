@@ -290,6 +290,57 @@ def _with_explored(save_dir: Path, m: dict) -> dict:
     return dict(m, explored=out) if out else m
 
 
+_ROCK = re.compile(r"^([A-Za-z_ ]+?) z(\d+)(?:-z(\d+))?$")
+_FLUX_ROCKS = ("LIMESTONE", "DOLOMITE", "MARBLE", "CHALK", "CALCITE")
+_ROCK_CACHE: dict = {}
+
+
+def explore_rocks(save_dir: Path) -> dict[str, list]:
+    """BUG-625: {rock: [lowest z, highest z, probes]} from the `rocks` of the PROJECT_DONE events of finished explore probes
+    (runner: `["MUDSTONE z138-z134", "LIMESTONE z130"]`, the layer rock along the stair column). {} without such an event."""
+    try:
+        ev = Path(save_dir) / "events.jsonl"
+        st = ev.stat()
+        key = (str(save_dir), st.st_size, int(st.st_mtime))
+    except OSError:
+        return {}
+    if key in _ROCK_CACHE:
+        return _ROCK_CACHE[key]
+    out: dict[str, list] = {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") != "PROJECT_DONE" or d.get("tpl") != "explore" or not isinstance(d.get("rocks"), list):
+            continue
+        for r in d["rocks"]:
+            m = _ROCK.match(str(r))
+            if not m:
+                continue
+            z0 = int(m.group(2))
+            z1 = int(m.group(3)) if m.group(3) else z0
+            lo, hi = min(z0, z1), max(z0, z1)
+            row = out.setdefault(m.group(1).strip().upper(), [lo, hi, 0])
+            row[0], row[1], row[2] = min(row[0], lo), max(row[1], hi), row[2] + 1
+    _ROCK_CACHE.clear()
+    _ROCK_CACHE[key] = out
+    return out
+
+
+def explore_rock_note(save_dir: Path) -> str:
+    """BUG-625 (Run 16d i4 Trumpetrealms y430+: `explore: no site at depth 2..12` for years in a mudstone fort, nothing said what the 40
+    probes had seen): the rock the finished probes passed, per level, and whether a flux stone was among it. '' without data."""
+    rocks = explore_rocks(save_dir)
+    if not rocks:
+        return ""
+    rows = sorted(rocks.items(), key=lambda kv: -kv[1][1])
+    txt = ", ".join(f"{n} z{v[0]}-z{v[1]}" if v[0] != v[1] else f"{n} z{v[0]}" for n, v in rows[:8])
+    flux = [f"{n} z{v[0]}-z{v[1]}" if v[0] != v[1] else f"{n} z{v[0]}" for n, v in rows if n in _FLUX_ROCKS]
+    low = min(v[0] for v in rocks.values())
+    note = f"the finished probes saw (PROJECT_DONE rocks): {txt}; none went below z{low}"
+    note += (f"; flux stone seen: {', '.join(flux)} (dig there for flux, or trade.want flux)" if flux
+             else "; no flux stone and no ore seen: trade.want ore, bars, flux")
+    return note
+
+
 def _digest(doc) -> str:
     return hashlib.sha1(files.dumps(doc).encode("utf-8")).hexdigest()[:16]
 
@@ -373,9 +424,12 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
     free = _free_of_projects(save_dir, tpl, params)
     try:
         sites = _rank(snap, tpl, params, n, manifest, water, where, free)
-    except BpError:
+    except BpError as e:
         sites = _aq_open_sites(save_dir, tpl, params, snap, manifest, n, where, free)      # BUG-602
         if not sites:
+            note = explore_rock_note(save_dir) if tpl == "explore" and "explore" in str(e) else ""
+            if note and note not in str(e):
+                raise BpError(f"{e}; {note}") from e                                       # BUG-625
             raise
     if where:
         return sites, snap["id"]
@@ -592,6 +646,14 @@ def attached_to(tpl: str) -> str | None:
         return None
 
 
+HOSPITAL_TPL = "hospital"
+
+
+def is_furnish(doc: dict) -> bool:
+    """BUG-623: a `hospital furnish=1` document (one table in a hospital room that stands)."""
+    return doc.get("tpl") == HOSPITAL_TPL and bool((doc.get("params") or {}).get("furnish"))
+
+
 class Occupancy:
     """Tiles of placed projects. A new project may neither share a tile with another project nor touch one
     (same z, 8-neighbourhood: one rock tile stays between them), except next to its own anchor, where a
@@ -603,9 +665,12 @@ class Occupancy:
     def __init__(self):
         self.owner: dict[tuple[int, int, int], tuple[str, str]] = {}      # tile -> (bp id, tpl)
         self.meta: dict[str, tuple[str, tuple | None, set, set]] = {}     # bp id -> (tpl, anchor, footprint, bp cells)
+        self.furnish: set[str] = set()                                    # BUG-623: ids of hospital furnish=1 documents (one table)
 
     def add(self, doc: dict, cells: set | None = None) -> None:
         tag = (str(doc.get("id")), str(doc.get("tpl")))
+        if is_furnish(doc):
+            self.furnish.add(tag[0])
         fp = footprint(doc) if cells is None else set(cells)
         for c in fp:
             self.owner.setdefault(c, tag)
@@ -641,6 +706,11 @@ class Occupancy:
         att = attached_to(str(doc.get("tpl")))
         if att:
             skip.add(att)
+        # BUG-623 (Run 16d i4 Trumpetrealms y426-y428: `hospital furnish=1` 'taken by y373s2b1 (hospital finished)'): the table goes INSIDE
+        # a hospital room, so the room's own project never holds it back; another furnish project at the tile still does
+        rooms = {i for i, m in self.meta.items() if m[0] == HOSPITAL_TPL and i not in self.furnish} if is_furnish(doc) else set()
+        if rooms:                                        # the room owns the tile in `owner`: a furnish project on the same tile is looked up by id
+            hit.update(i for i in self.furnish if self.meta[i][2] & (footprint(doc) if cells is None else cells))
         a = self.owner.get((ax, ay, az))
         if a and a[1] in WET_TPLS and a[1] not in skip:
             hit.add(a[0])
@@ -663,7 +733,7 @@ class Occupancy:
                         continue
                     if (dx or dy) and near_anchor and not (o and o[1] in WET_TPLS):
                         continue
-                    if o and o[1] not in skip and not ((dx or dy) and self._opened_off(o, (x + dx, y + dy, z), corr)):
+                    if o and o[1] not in skip and o[0] not in rooms and not ((dx or dy) and self._opened_off(o, (x + dx, y + dy, z), corr)):
                         hit.add(o[0])
         return sorted(hit)
 
@@ -1747,6 +1817,8 @@ def _planned_only(save_dir: Path, pid: str, tpl: str) -> bool:
         return False
     rows = (files.read_state(save_dir) or {}).get("proj") or []
     row = next((r for r in rows if isinstance(r, list) and r and r[0] == pid), None)
+    if row is None and _finished_event(save_dir, pid):
+        return False                                     # BUG-623: PROJECT_DONE: finished, not 'not begun'
     return row is None or (len(row) > 2 and row[2] == 0)
 
 

@@ -519,7 +519,14 @@ def hospital_supply_hint(d: dict) -> str:
     no_traction, no_splints, no_thread, no_cloth), d.cmds the commands that make or buy the supplies. Yours to decide (no need to ask)."""
     gaps = ", ".join(str(g) for g in d.get("gaps") or [])
     cmds = [str(c) for c in d.get("cmds") or []]
-    furn = " ; a table / traction bench: build it inside the hospital zone (the hospital template places one)"         if any(g in ("no_table", "no_traction") for g in d.get("gaps") or []) else ""
+    gaps_l = d.get("gaps") or []
+    if "no_table" in gaps_l and any("furnish" in c for c in cmds):
+        # BUG-623: the table is the `hospital furnish=1` project (one table inside the room that stands, a finished room project does not hold it)
+        furn = " ; the table: that bp.place command puts one table inside the hospital room (plan propose drafts it too)"
+    elif any(g in ("no_table", "no_traction") for g in gaps_l):
+        furn = " ; a table / traction bench: build it inside the hospital zone (the hospital template places one)"
+    else:
+        furn = ""
     send = f"send: {cmds[0]}" + (f" (+{len(cmds) - 1} more in d.cmds)" if len(cmds) > 1 else "") if cmds else "no command makes it"
     return f"hospital lacks {gaps}: decide yourself; {send}{furn}"
 

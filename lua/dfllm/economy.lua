@@ -7824,7 +7824,7 @@ end
 -- BUG-268/269: what the caravans are asked for besides economy.trade_wants (trade.lua puts these after them, before
 -- plan.trade.want): `mechanism` while levers miss mechanisms and no stone or no Mechanic's workshop makes them; in a soil
 -- fort (st.rock.soil) `stone` for the rock need and `gem` up to SUPPLY.gems (strange moods, Guildcleans #665-#672)
-M.SUPPLY = {gems = 3, stone_cap = 30, zero_days = 14, mood_stone = 5, mood_bars = 2, mood_cloth = 2, fire_cap = 6}
+M.SUPPLY = {gems = 3, stone_cap = 30, zero_days = 14, mood_stone = 5, mood_bars = 2, mood_cloth = 2, fire_cap = 6, flux_cap = 10}
 function M.supply_wants(K)
   local w = {}
   local m = st.mech
@@ -7840,6 +7840,18 @@ function M.supply_wants(K)
   local ws = math.tointeger(st.wood_short) or 0
   if ws > 0 then
     w[#w + 1] = {buy = 'wood', n = math.min(60, ws * 4), why = string.format('treeless fort: %d wood-only pieces (beds) wait for logs', ws)}
+  end
+  -- BUG-624 (Run 16d i4 Trumpetrealms y426-y428: the steel DECISION named flux but the want list never held it, `trade.want flux` was
+  -- accepted by hand only): orders wait for steel bars and the chain (plan_steel) lacks flux stone, the smelting of pig iron and steel
+  -- needs one boulder per job: the caravans bring flux (a mudstone fort has none), two per steel order up to SUPPLY.flux_cap
+  local sm = type(st.steel) == 'table' and st.steel.missing
+  for _, m in ipairs(type(sm) == 'table' and sm or {}) do
+    if m == 'flux' then
+      local left_n = math.tointeger(st.steel.left) or math.tointeger(st.steel.n) or 1
+      w[#w + 1] = {buy = 'flux', n = math.min(M.SUPPLY.flux_cap, math.max(2, left_n * 2)),
+                   why = string.format('steel: %d order(s) wait for steel bars, no flux stone in the fort', math.tointeger(st.steel.n) or 0)}
+      break
+    end
   end
   local rk = st.rock
   -- BUG-466: a furnace or forge waits for fire-safe building material and the fort has no stone or block: the caravans bring stone

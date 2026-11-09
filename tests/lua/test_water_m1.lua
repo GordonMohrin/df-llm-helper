@@ -492,7 +492,8 @@ T.test('BUG-537: a hospital with a patient and no table, no splints, no thread, 
   T.eq(#a, 1)
   T.eq(a[1].d.gaps, {'no_table', 'no_splints', 'no_thread', 'no_cloth'})
   T.ok(a[1].d.q:find('lacks a table in the zone', 1, true) and a[1].d.q:find('splints; thread; cloth', 1, true), a[1].d.q)
-  T.eq(a[1].d.cmds, {'dfllm cmd order.add \'{"job":"ConstructSplint","amount":4}\'',
+  T.eq(a[1].d.cmds, {'dfllm cmd bp.place \'{"tpl":"hospital","site":"S1","p":{"furnish":1}}\'',     -- BUG-623
+                     'dfllm cmd order.add \'{"job":"ConstructSplint","amount":4}\'',
                      'dfllm cmd trade.want \'{"add":["thread"]}\'', 'dfllm cmd trade.want \'{"add":["cloth"]}\''})
   T.ok(#a[1].msg <= 200, #a[1].msg)
   day(W, 3)

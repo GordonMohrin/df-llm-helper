@@ -1563,6 +1563,41 @@ def _explore_redo(ax: int, ay: int, az: int, depth: int, pts: list, failed: list
     return None
 
 
+def _fail_why(rects, ax, ay, az, rot, bad, mk, wet) -> tuple[str, int] | None:
+    """BUG-625: what `_check` refuses first for these rects: ('open', w) a revealed open / non-rock tile on level az+w, ('mark', w) a
+    cavern / damp / warm mark there, ('wet', w) liquid right above, ('map', w) the map's edge; None when nothing is refused."""
+    for w, lst in rects.items():
+        for r in lst:
+            x0, y0, x1, y1 = _rot_rect(r, ax, ay, rot)
+            if az + w < 0:
+                return ("map", w)
+            b = bad.count(x0, y0, x1, y1, az + w)
+            if b is None:
+                if bad.inside(x0, y0, x1, y1) and az + w < min(bad.p):
+                    continue
+                return ("map", w)
+            if b:
+                return ("open", w)
+            if mk.count(x0, y0, x1, y1, az + w):
+                return ("mark", w)
+            if wet is not None and (wet.count(x0, y0, x1, y1, az + w + 1) or 0):
+                return ("wet", w)
+    return None
+
+
+_WHY_KIND = {"open": "an open or built tile", "mark": "a cavern/damp/warm mark", "wet": "liquid right above", "map": "the map's edge"}
+
+
+def _geo_text(geo: dict, p: dict) -> str:
+    """BUG-625: the anchors the geometry took out, by what met the shaft and on which level of the shaft (w = 0 the anchor's own level,
+    w = -d the d-th level down): 'z136: 400 meet an open or built tile on the anchor level; 120 two levels down'."""
+    parts = []
+    for (az, kind, w), n in sorted(geo.items(), key=lambda kv: (-kv[1], kv[0])):
+        where = "on the anchor level" if w == 0 else f"{-w} level(s) below it (z{az + w})"
+        parts.append(f"{n} anchor(s) of z{az}: {_WHY_KIND.get(kind, kind)} {where}")
+    return "; ".join(parts[:4]) + (" +more" if len(parts) > 4 else "")
+
+
 def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     """explore (Run 10): public Z4 anchors like a room whose shaft (depth levels) reaches no avoided level; footprint and
     ring rock or unknown (levels below the snapshot count as unknown); never from the refuge level or below it (the
@@ -1583,6 +1618,7 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     # fort knows; a new probe scores higher the farther it lies from the nearest of them
     done_at = [(int(a[0]), int(a[1])) for a in (manifest.get("explored") or []) if isinstance(a, (list, tuple)) and len(a) == 3]
     n_all = n_ref = n_hit = n_redo = n_geom = 0                # BUG-528: how many anchors each test took out (the message says so)
+    geo: dict = {}                                             # BUG-625: (anchor z, what met the shaft, shaft level w) -> anchors
     for i in _anchor_tiles(g, "explore", p, manifest):
         ax, ay, az = g.pos(i)
         n_all += 1
@@ -1600,7 +1636,7 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
             if why not in redo:
                 redo.append(why)
             continue
-        n_out, n_door = len(out), 0
+        n_out, n_door, fail = len(out), 0, None
         for rot in range(4):
             du, dv = rot_uv(0, 1, rot)
             door = g.idx((ax + du, ay + dv, az))
@@ -1609,6 +1645,8 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
             n_door += 1
             res = _check(rects, ax, ay, az, rot, bad, hid, mk, True, wet)
             if res is None or (wide and _check(wide, ax, ay, az, rot, bad, hid, mk, True, wet) is None):
+                if fail is None:                             # BUG-625: the first rotation's refusal names the anchor's reason
+                    fail = _fail_why(rects, ax, ay, az, rot, bad, mk, wet) or (wide and _fail_why(wide, ax, ay, az, rot, bad, mk, wet))
                 continue                                     # BUG-453: the tunnels also keep EXPLORE_RING tiles from any opening
             unknown, missing, box = res
             if any(_overlap(r, b) for r in _rect_boxes(rects, ax, ay, az, rot) for b in keep_out):
@@ -1625,12 +1663,15 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
                                f"{steps} steps to a stair, {unknown} unknown tiles, {missing} levels below the snapshot{far_why}"})
         if len(out) == n_out and n_door:
             n_geom += 1                                      # a floor to dig from, but the shaft or its tunnels meet something
+            if fail:
+                key = (az, fail[0], fail[1])
+                geo[key] = geo.get(key, 0) + 1
     if not out:
-        raise ValueError(_explore_none(p, hit, redo, (n_all, n_ref, n_hit, n_redo, n_geom)))
+        raise ValueError(_explore_none(p, hit, redo, (n_all, n_ref, n_hit, n_redo, n_geom), geo))
     return out
 
 
-def _explore_none(p: dict, hit: set, redo: list, n: tuple) -> str:
+def _explore_none(p: dict, hit: set, redo: list, n: tuple, geo: dict | None = None) -> str:
     """BUG-528 (Run 16d i4 Trumpetrealms y399: a cavern breach 78,127,127 'locked' the soil fort out of explore for years; the message said
     'every anchor lies within 6 tiles of a dig that already stopped' while 12 anchors were free of it and the side tunnels (arm 6) met
     the core's own rooms): why no anchor took the shaft of this depth and arm, with the number of anchors each test removed. The
@@ -1647,6 +1688,10 @@ def _explore_none(p: dict, hit: set, redo: list, n: tuple) -> str:
         parts.append(f"{n_geom} have a shaft or side tunnels (arm {p.get('arm')}) that meet the core's own open rooms, water or a "
                      "mark (a smaller arm= or depth= can fit between them)")
     tally = f" [{n_all} anchor tile(s): {'; '.join(parts)}]" if parts else f" [{n_all} anchor tile(s)]"
+    if geo:                                                  # BUG-625: exactly what met the shaft, on which level
+        lv = sorted({k[0] for k in geo})
+        tally += (f" [BUG-625: explore starts only from the public floor of the core, level(s) {', '.join('z' + str(z) for z in lv)}; "
+                  f"the shaft was refused by: {_geo_text(geo, p)}]")
     if hit and not n_redo and not n_geom:
         return (f"explore: every anchor's shaft of depth {p['depth']} reaches an avoided level "
                 f"(z{','.join(str(z) for z in sorted(hit)[:6])}: avoid, a cavern/damp/warm mark, a cavern "
