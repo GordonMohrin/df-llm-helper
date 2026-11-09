@@ -165,8 +165,8 @@ local function siege_world(o)
   return W
 end
 
-T.test('BUG-577 (1): SIEGE, a citizen next to B1 for ~1000 ticks, a hostile 8 tiles from it: B1 waits for him, no BREACH, B1 rises after he stops, ' ..
-       'nobody is crushed', function()
+T.test('BUG-577 (1) / BUG-587: SIEGE, a citizen next to B1 for ~1000 ticks, a hostile 8 tiles from it: the hold for him is bounded (old: B1 waited ' ..
+       'for him), B1 is raised past him after gate.approach_hold ticks (GATE_FORCED names him), no BREACH, nobody is crushed', function()
   local W = siege_world{walkers = {stander(830, 115)}}
   run(W, 3600)
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
@@ -174,21 +174,21 @@ T.test('BUG-577 (1): SIEGE, a citizen next to B1 for ~1000 ticks, a hostile 8 ti
   T.eq(#W.find_events('BREACH'), 0)
   local up = flips_to(W, 'B1', 'up')
   T.eq(#up, 1, 'B1 rose once')
-  T.ok(up[1] >= 100 * 9, 'not while he paced (+' .. tostring(up[1]) .. ')')
+  local hold = require('dfllm.gate').APPROACH_HOLD
+  T.ok(up[1] >= hold and up[1] < 100 * 9, 'after the approach hold, not after his stay (+' .. tostring(up[1]) .. ')')
   T.eq(S.bstate(W, 'B1'), 'up')
-  T.ok(logged(W, 'B1 is held down for our own people'), 'kern.log says why there is no BREACH')
+  local f = W.find_events('GATE_FORCED')
+  T.ok(#f >= 1 and tostring(f[1].msg):find('citizen 830', 1, true) and tostring(f[1].msg):find('approach_near', 1, true), T.show(f))
 end)
 
-T.test('BUG-577 (2): SIEGE, a citizen who never leaves: nobody crushed, B1 stays down, and the BREACH comes once the hold is older than CIT_HOLD', function()
-  local W = siege_world{walkers = {stander(831, 700)}}
+T.test('BUG-577 (2) / BUG-587: SIEGE, a citizen who never leaves and the army 110 tiles out (not approaching): nobody crushed, B1 stays down (a hold ' ..
+       'for our own people is bounded only by an approaching hostile), no GATE_FORCED, no BREACH', function()
+  local W = siege_world{walkers = {stander(831, 700)}, army = S.army(5, 50, 150)}
   run(W, 4400)
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
   T.eq(#flips_to(W, 'B1', 'up'), 0, 'B1 never rose')
-  local br = W.find_events('BREACH')
-  T.ok(#br >= 1, 'a hold longer than CIT_HOLD is a breach as before: ' .. modes(W))
-  local t = S.mode_tick(W, 'SIEGE>BREACH')
-  local hold = require('dfllm.siege').CIT_HOLD
-  T.ok(t - W.t_start >= hold, 'not before the hold passed ' .. hold .. ': +' .. tostring(t - W.t_start))
+  T.eq(#W.find_events('GATE_FORCED'), 0, 'not forced: no hostile near')
+  T.eq(#W.find_events('BREACH'), 0, 'a far army makes no breach of a bridge held for a citizen')
 end)
 
 T.test('BUG-577 (3): SIEGE, a citizen standing ON the footprint of B1 and a hostile 8 tiles out: that is no hold for a citizen next to it, the ' ..

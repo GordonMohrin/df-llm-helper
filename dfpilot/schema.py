@@ -607,7 +607,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-479: the refuge plug (queued, and lifted in PEACE): proj = the runner repair project of the walls, n = wall
     # tiles, pos = the stair foot, closer = what closes the stair head (hatch | door | ...), near = the nearest building
     # destroyer's distance to the head, breach = 1 when queued in a BREACH; lifted = 1 on the PEACE event
-    "REFUGE_PLUG": ("A", "seal", _d("proj:s", "n:i pos:p closer:s near:i breach:i lifted:i")),
+    "REFUGE_PLUG": ("A", "seal", _d("proj:s", "n:i pos:p closer:s near:i breach:i lifted:i early:i")),
     "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa "
                                                 "fix:s dry:f hostile:i at:p sup:s")),
     # BUG-107: a potential refuge (Kern+, the refuge) holds less food or drink than refuge.floor_pct % of the siege need;

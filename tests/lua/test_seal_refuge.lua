@@ -654,7 +654,7 @@ end
 
 T.test('BUG-049: REFUGE_FAIL "hostile inside" names where (x,y,z, how many) and the choice moves at once: the refuge ' ..
        'with a goblin in it is refused in BREACH, Kern+ is taken (old: no position)', function()
-  local W = fort{door = true}
+  local W, M = fort{door = true}
   -- a goblin in the dead end behind the stair (room x5-8 y5-8 z5), another in the shaft
   refuge_h(W, {{id = 300, x = 7, y = 6, z = Z - 4}, {id = 301, x = 6, y = 6, z = Z - 2}})
   W.set_mode('BREACH')
@@ -665,7 +665,12 @@ T.test('BUG-049: REFUGE_FAIL "hostile inside" names where (x,y,z, how many) and 
   T.eq({f[1].d.burrow, f[1].d.fallback, f[1].d.hostile, f[1].d.at}, {'Tiefe+', 'Kern+', 2, {7, 6, Z - 4}})
   T.ok(f[1].msg:find('hostile inside at 7,6,5 (2 hostiles)', 1, true), f[1].msg)
   T.ok(note:find('hostile inside at 7,6,5', 1, true), note)
-  -- a goblin in Kern+ instead: the refuge is the BREACH pick again at once
+  -- a goblin in Kern+ instead: BUG-588: the refuge stays refused while the sighting is young (out of sight is not gone) ...
+  refuge_h(W, {{id = 300, x = 10, y = 12, z = Z}}, {inside = 1})
+  ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
+  T.eq(pick, nil, 'old: Tiefe+ at once')
+  -- ... and is the BREACH pick again RLATCH ticks after the last sighting inside it
+  W.run(M.RLATCH + 100, {skip = 9})
   refuge_h(W, {{id = 300, x = 10, y = 12, z = Z}}, {inside = 1})
   ok, pick = W.K.call('seal', 'alert_burrow', 'BREACH', 'Tiefe+')
   T.eq(pick, 'Tiefe+')
@@ -992,7 +997,7 @@ T.test('BUG-336 review: a stair foot with two floor tiles beside it: refuge_alt 
 end)
 
 T.test('BUG-337 review (c): building destroyers in sight and only a hatch closes the refuge: state alert.ref.sf 1 (the ' ..
-       'status names it); a raised bridge on the head: no flag', function()
+       'status names it); a raised bridge on the head: soft too (BUG-587)', function()
   local W = fort{door = true}
   with_manifest(W, 6, 6)
   hatch_on_head(W)
@@ -1006,8 +1011,8 @@ T.test('BUG-337 review (c): building destroyers in sight and only a hatch closes
   SW.draw(W, Z - 3, {'H'}, 6, 6)
   inspect(W, 'refuge', 'refresh')
   _, kind = W.K.call('seal', 'refuge_closure')
-  T.eq(kind, 'hard')
-  T.eq(W.state().alert.ref.sf, nil)
+  T.eq(kind, 'soft', 'BUG-587: a raised bridge is a building the destroyers break too (old: hard)')
+  T.eq(W.state().alert.ref.sf, 1)
 end)
 
 T.test('BUG-336 review: before the first audit (boot) a BREACH ask for the open refuge gets Kern+ (old: Tiefe+, want ' ..

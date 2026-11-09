@@ -192,6 +192,15 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             if k == "force_near":
                 if not is_int(v, 0, 30):
                     errs.append(f"{name}: gate.force_near: int 0..30 expected, got {v!r}")
+            elif k == "approach_near":             # BUG-587: tiles a hostile must be within before the hold of a raise is bounded
+                if not is_int(v, 0, 80):
+                    errs.append(f"{name}: gate.approach_near: int 0..80 expected, got {v!r}")
+            elif k == "approach_close":            # BUG-587: tiles within which a hostile bounds the hold even when it is not closing
+                if not is_int(v, 0, 80):
+                    errs.append(f"{name}: gate.approach_close: int 0..80 expected, got {v!r}")
+            elif k == "approach_hold":             # BUG-587: ticks a raise is held before an approaching hostile forces it
+                if not is_int(v, 0, 3000):
+                    errs.append(f"{name}: gate.approach_hold: int 0..3000 expected, got {v!r}")
             elif k == "noeffect_max":              # BUG-068: pulls in a row without effect before a lever is parked
                 if not is_int(v, 1, 20):
                     errs.append(f"{name}: gate.noeffect_max: int 1..20 expected, got {v!r}")
