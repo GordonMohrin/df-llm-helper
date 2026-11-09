@@ -413,4 +413,26 @@ T.test('BUG-340 second review fix: every exit (mood, squad, removal, food back, 
   T.ok(not has(W3.K.persist.get('m.economy').fcrew.ids, dead), 'the dead one is dropped')
 end)
 
+-- BUG-618 (Run 16b i2 Valleyhame y373: the crew came at 8 food days, the fort was at 0 six days later)
+T.test('BUG-618: the food crew starts below famine_crew.pre_days (20) of food, not only below famine_days; pre_days 0 keeps the old line; '
+       .. 'the crew goes back at off_days', function()
+  local W, ctl = world{food = 6}                                   -- about 15 food days: the pre-alarm, no famine yet
+  days(W, 2)
+  local add = crew_calls(ctl, 'Planters', true)
+  T.eq(#add, 3, '15 days: the farmers are named')
+  T.eq(W.K.persist.get('m.economy').famine, nil, 'no famine')
+  local W2, ctl2 = world{food = 10}                                -- about 25 days: above the line
+  days(W2, 2)
+  T.eq(#ctl2.calls, 0, '25 days: no crew')
+  local W3, ctl3 = world{food = 6, crew = {pre_days = 0}}
+  days(W3, 2)
+  T.eq(#ctl3.calls, 0, 'pre_days 0: the crew waits for the famine')
+  ctl.food.stack_size = 2000                                       -- food back at off_days: they go back
+  days(W, 5)
+  local off, gone = crew_calls(ctl, 'Planters', false), {}
+  for _, id in ipairs(off) do gone[id] = true end
+  for _, id in ipairs(add) do T.ok(gone[id], 'back: ' .. id) end
+  T.eq(#(W.K.persist.get('m.economy').fcrew or {ids = {}}).ids, 0, 'nobody stays on the crew')
+end)
+
 T.done()

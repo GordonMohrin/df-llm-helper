@@ -535,7 +535,8 @@ M.DEFAULTS = {
   -- PEACE/RECOVERY; each goes back once the shortage he was named for (food; drink for a brewer named below famine_days of
   -- drink) stands at `off_days` (review fix merge15: not food AND drink), at once when drafted, moody, off his detail,
   -- above `share` or `on` false
-  famine_crew = {on = true, farmers = 3, cooks = 1, brewers = 1, gatherers = 2, share = 25, step = 2, off_days = 30},
+  famine_crew = {on = true, farmers = 3, cooks = 1, brewers = 1, gatherers = 2, share = 25, step = 2, off_days = 30,
+                 pre_days = 20},      -- BUG-618: the food crew starts below pre_days of food, not only in the famine (0 = famine only)
 }
 
 local st = {}
@@ -1431,14 +1432,19 @@ end
 -- the input check): 'cook ingredient (883 raw fish need a fishery, 1566 inedible (OAK:LEAF), 30 cut off, 11
 -- cook-banned)'
 function M.cook_why(inv, f)
-  local parts, raw = {}, inv.fish_raw or 0
+  local parts, raw, ined_at = {}, inv.fish_raw or 0, nil
   if raw > 0 then
     parts[1] = string.format('%d raw fish %s', raw, ws_any(f or {}, M.FISHERY) and 'to clean' or 'need a fishery')
   end
   if (inv.food_inedible or 0) > 0 then
     local t = st.ined and st.ined[1]
-    parts[#parts + 1] = string.format('%d inedible%s', inv.food_inedible,
-                                      t and (' (' .. tostring(t[1]):gsub('^PLANT:', '') .. ')') or '')
+    -- BUG-618 (Run 16b i2 Valleyhame: '135 inedible (CABBAGE:LEAF)' beside 0 food days): a leaf, flower or bud of a crop is a plant growth
+    -- with no EDIBLE flag (vanilla CABBAGE: the cabbage itself, STRUCTURAL, is edible; its LEAF has no flag, no ALCOHOL, no MILL reaction):
+    -- no kitchen, still or quern can use it; the food is the crop the farm plot grows
+    local tok = t and tostring(t[1]):gsub('^PLANT:', '') or nil
+    local soft = tok and (tok:find(':LEAF$') or tok:find(':FLOWER$') or tok:find(':BUD$'))
+    parts[#parts + 1] = string.format('%d inedible%s', inv.food_inedible, tok and (' (' .. tok .. ')') or '')
+    if soft then ined_at = #parts end
   end
   if (inv.food_far or 0) > 0 then parts[#parts + 1] = string.format('%d cut off', inv.food_far) end
   if (inv.food_forb or 0) > 0 then parts[#parts + 1] = string.format('%d forbidden', inv.food_forb) end
@@ -1446,6 +1452,8 @@ function M.cook_why(inv, f)
     local t = st.cban and st.cban[1]                -- BUG-345: 'D-09 MUSHROOM_HELMET_PLUMP' or the exclusion's material
     parts[#parts + 1] = string.format('%d cook-banned%s', inv.cook_ban, t and (' (' .. tostring(t[1]) .. ')') or '')
   end
+  -- the note only while the whole text stays under the 120 characters the stuck-order reasons keep
+  if ined_at and #table.concat(parts, ', ') + #': no food use' <= 90 then parts[ined_at] = parts[ined_at]:gsub('%)$', ': no food use)') end
   return 'cook ingredient' .. (#parts > 0 and (' (' .. table.concat(parts, ', ') .. ')') or '')
 end
 
@@ -2432,7 +2440,15 @@ local function plan_gear(K, c, r)
             add(r, {tag = tag, spec = wood_spec(c, r, base(it.wood)), n = n, out = it.out or 1, cat = it.cat,
                     uses = {wood = 1}, why = 'gear'})
             rec.route = 'wood'
-          else why[#why + 1] = 'wood' end
+          else
+            why[#why + 1] = 'wood'
+            -- BUG-618 (Run 16b i2 Valleyhame: 'hunt: no crossbow, no Bowyer's workshop' through three famines): the crossbows and bolts
+            -- of the hunters are made at a Bowyer's; with logs in the fort and no shop that makes them, the shop is asked for
+            if (it.cat == 'xbow' or it.cat == 'bolts') and left(c, r, 'wood') > 0 and type(it.wood.ws) == 'table' then
+              local sh = tostring(it.wood.ws[#it.wood.ws]):gsub('^workshop:', '')
+              if not r.f['workshop:' .. sh] then shops[#shops + 1] = sh end
+            end
+          end
         end
         if rec.route == 'none' and it.bone then
           local n = ws_any(r.f, it.bone.ws) and math.min(jobs, left(c, r, 'bone'), maxj) or 0
@@ -5570,6 +5586,13 @@ function M.fd_wants(K, c, r)
     local have = false
     for _, w in ipairs(out) do if w.buy == 'seeds' then have = true end end
     if not have then out[#out + 1] = {buy = 'seeds', n = 10, why = string.format('food %d d: more farm crops', fd)} end
+    -- BUG-618: hunters wanted, a crossbow in the fort, no free bolts and nothing to make them of (no logs, no bone): the caravans bring bolts
+    if st.no_ammo == true and (inv.w_xbow or 0) + (inv.w_bow or 0) > 0 and (inv.wood or 0) == 0 and (inv.bone or 0) == 0 then
+      out[#out + 1] = {buy = 'bolts', n = 25, why = string.format('food %d d: hunters have no bolts, no logs or bone to make them', fd)}
+    end
+  elseif M.food_early(c, r) then
+    -- BUG-618: food falling below twice the pre-alarm line: the caravans are asked now, not at 29 days (a caravan comes once a season)
+    out[#out + 1] = {buy = 'food', n = 20, why = string.format('food %d d and falling', (r.days or {}).food_d or 0)}
   end
   st.fdwants = #out > 0 and out or nil
   return out
@@ -6590,6 +6613,7 @@ function T.watch(K, c, r)
   M.no_water(K, c, r)                              -- BUG-401: first, alarm_check and drink_low read st.nowater
   validation_watch(K, r.p, c)
   alarm_check(K, c, r.p, r.days)
+  M.food_shops(K, c, r)                            -- BUG-618: before the decisions, so they list it under auto
   famine(K, c, r.p, r.days, r.inv, r)
   food_pre(K, c, r.p, r.days, r.inv, r)
   M.food_unban(K, c, r, r.inv)
@@ -9224,6 +9248,15 @@ function M.farm_plots_any()
   return ok and (math.tointeger(n) or 0) or 0
 end
 
+-- BUG-618 (Run 16b i2 Valleyhame y373: the food crew came at 8 food days, the third famine of the fort; 'no cook ingredient', 'hunt: no
+-- bolts', food 8 -> 0 within 6 days): the food days below which the crew starts: famine_days or famine_crew.pre_days (20), whichever is
+-- higher (the crew goes back at off_days 30, so the band 20..30 is a hysteresis, not a flutter)
+function M.fcrew_line(c)
+  local cf = type(c.famine_crew) == 'table' and c.famine_crew or M.DEFAULTS.famine_crew
+  local pre = math.tointeger(cf.pre_days) or 0
+  return math.max(c.famine_days or 10, pre)
+end
+
 -- how many crew members a spec wants now (0: none), and why
 function M.fcrew_want(K, c, r, s, wd)
   local cf = c.famine_crew or M.DEFAULTS.famine_crew
@@ -9231,7 +9264,7 @@ function M.fcrew_want(K, c, r, s, wd)
   if n <= 0 or not wd then return 0 end
   local p, inv, days = r.p, r.inv or {}, r.days or {}
   local lim = c.famine_days or 10
-  local fam = p.famine ~= nil or (days.food_d or 9999) < lim
+  local fam = p.famine ~= nil or (days.food_d or 9999) < M.fcrew_line(c)      -- BUG-618: before the famine
   local f = M.facts_now(K, r)
   if s.key == 'farm' then return fam and M.farm_plots_any() > 0 and n or 0 end
   if s.key == 'cook' then return fam and ws_any(f, {'workshop:Kitchen'}) and M.cook_n(inv) > 0 and n or 0 end
@@ -9414,7 +9447,7 @@ function M.fcrew_run(K, c, r)
     K.log('info', 'famine crew: food %d days, drink %d days (off at %d): %d specialists back to every labor (%s)', fd, dd,
           off, #out, table.concat(out, ', '):sub(1, 160))
   end
-  local active = p.famine ~= nil or fd < lim or dd < lim
+  local active = p.famine ~= nil or fd < M.fcrew_line(c) or dd < lim
   if not active then xmap = {} end
   local rows, names = {}, {}
   if active and HUNT_MODES[K.mode()] then
@@ -9520,7 +9553,9 @@ function M.food_block(K, c, r, inv)
   if type(fcw) == 'table' and (fcw.n or 0) > 0 then
     auto[#auto + 1] = {'crew', string.format('food crew %d (%s)', fcw.n, tostring(fcw.text or ''))}
   end
-  if not ws_any(f, {'workshop:Kitchen'}) then put('kitchen', 'no kitchen', M.FOOD_CMD.kitchen)
+  if not ws_any(f, {'workshop:Kitchen'}) then
+    if M.shop_asked(r.p, 'Kitchen') then auto[#auto + 1] = {'kitchen', 'Kitchen requested'}      -- BUG-618: the kernel asks itself
+    else put('kitchen', 'no kitchen', M.FOOD_CMD.kitchen) end
   elseif M.cook_n(inv) <= 0 then put('cook', 'no ' .. M.cook_why(inv, f))
   elseif not M.labor_holder(K, 'COOK') then put('cook', 'nobody holds the COOK labor') end
   -- BUG-258 (live Inkintense: block [cook, fish_zone, hunt, farms] in a fort without a brook, 175 bolts and no
@@ -9538,7 +9573,9 @@ function M.food_block(K, c, r, inv)
       if r.s and r.s.live and (r.s.live['dfllm:gear_xbow'] or 0) > 0 then
         auto[#auto + 1] = {'xbow', string.format('crossbows ordered (%d bolts)', bolts)}
       elseif not ws_any(f, {'workshop:Bowyers'}) then
-        put('xbow', string.format("hunt: no crossbow, no Bowyer's workshop (%d bolts)", bolts), M.FOOD_CMD.bowyer)
+        -- BUG-618: with logs the gear plan asks for the shop itself (plan_gear); without, the player's command stays
+        if M.shop_asked(r.p, 'Bowyers', 'gear') then auto[#auto + 1] = {'bowyer', "Bowyer's workshop requested"}
+        else put('xbow', string.format("hunt: no crossbow, no Bowyer's workshop (%d bolts)", bolts), M.FOOD_CMD.bowyer) end
       else put('xbow', string.format('hunt: no crossbow (%d bolts)', bolts)) end
     elseif st.no_ammo or (inv.bolts_free or 0) == 0 then put('hunt', 'hunt: no bolts')
     elseif h.why == 'siege' or h.why == 'hold' then put('hunt', 'hunt: not in ' .. tostring(K.mode())) end
@@ -9553,9 +9590,35 @@ function M.food_block(K, c, r, inv)
   end
   local ca = K.census.a
   if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 and not ws_any(f, (c.slaughter or {}).ws) then
-    put('butcher', "no butcher's shop", M.FOOD_CMD.butcher)
+    if M.shop_asked(r.p, 'Butchers') then auto[#auto + 1] = {'butcher', "Butcher's shop requested"}
+    else put('butcher', "no butcher's shop", M.FOOD_CMD.butcher) end
   end
   return out, auto
+end
+
+-- BUG-618: the shop type was asked for by the kernel (p.wsask[why].s lists the types of the last request) and no shop stands yet
+function M.shop_asked(p, t, why)
+  local w = type(p.wsask) == 'table' and p.wsask[why or 'mandatory'] or nil
+  return type(w) == 'table' and (',' .. tostring(w.s or '') .. ','):find(',' .. t .. ',', 1, true) ~= nil
+end
+
+-- BUG-618 (Run 16b i2 Valleyhame y372-y373: food 0-4 days with no kitchen and no butcher's shop, the famine decision only offered
+-- the bp.place command lines and the fort waited for the player): below the pre-alarm line or in a famine the kernel asks for the
+-- missing Kitchen (a meal feeds, raw plants do not) and, with tame animals standing, the Butchers itself (workshops why=mandatory,
+-- follow places them; M.ws_ask paces the repeats); the decisions then list them under `auto`, not as the player's blockers
+function M.food_shops(K, c, r)
+  local p = r.p
+  if not M.food_low(c, r) then return end
+  local f, want = M.facts_now(K, r), {}
+  if not ws_any(f, {'workshop:Kitchen'}) then want[#want + 1] = 'Kitchen' end
+  local ca = K.census.a
+  if type(ca) == 'table' and (math.tointeger(ca.n) or 0) > 0 and not ws_any(f, (c.slaughter or {}).ws) then want[#want + 1] = 'Butchers' end
+  if #want == 0 then
+    if type(p.wsask) == 'table' then p.wsask.mandatory = nil end
+    return
+  end
+  M.ws_ask(K, p, 'mandatory', want, (c.food or {}).request_days or 14,
+           string.format('workshops: food %d days and no %s', (r.days or {}).food_d or 0, table.concat(want, '/')))
 end
 
 -- BUG-340: the player's options besides the blockers' fixes, as command lines: butcher.mark while tame animals stand (the
@@ -11916,6 +11979,14 @@ function T.farmslots(K, c, r)
   r.cmds = r.cmds + 1
   if K.act.farm_crop(f.id, f.s, f.crop) then r.filled = r.filled + 1; M.af_note(r.p, f) end
   return #r.fills == 0 and r.filled == 0
+end
+
+-- BUG-618: food that fell over food.trend_days (food_plan's st.food.falling) and stands under twice the pre-alarm line, before the
+-- pre-alarm itself: only the caravans' wants use it
+function M.food_early(c, r)
+  local pre = (c.food or {}).pre_days or 30
+  local fd = (r.days or {}).food_d or 9999
+  return pre > 0 and fd >= pre and fd < 2 * pre and type(st.food) == 'table' and st.food.falling == true
 end
 
 -- food below the pre-alarm line (or a famine): the slots take the edible crops first, autofarm steps aside

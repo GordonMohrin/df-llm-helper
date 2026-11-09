@@ -255,6 +255,42 @@ T.test('BUG-575: a silk slot with no web and no silk thread: early decision (tra
   T.eq(#run(12), 0, 'webs on the walk group: the chain collects them')
 end)
 
+-- BUG-619 (Run 16c i3 Wallfree y378: Possessed 26275 wanted bars x3 in a fort with no ore, no metal marked for melting and no smelter; the
+-- 'IMPOSSIBLE' line came 66 days before the death only with his thirst, the deadline decision 15 days out; he died): a bars slot the fort
+-- cannot fill (economy.mood_hint('bars') has a text) is said at the first report, and says so when it is impossible
+T.test('BUG-619: a bars slot with no ore and nothing to melt: early decision; IMPOSSIBLE without a smelter (no explore dig), else the ways', function()
+  local function run(hint, imp)
+    local W = CW.world{census_i = {bars = 0, ore = 0, melt = 0}, setup = function(W)
+      moody(W, 1, 'Possessed', {filter('BAR', {})})
+      W.unit(1).counters2 = {thirst_timer = 1000, hunger_timer = 0}
+      W.load({name = 'economy', every = {ticks = 1200}, mood_hint = function(K, cls)
+        if cls == 'bars' then return hint, imp end
+        return nil
+      end})
+    end}
+    W.run(6)
+    local ds = {}
+    for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'mood_deadline' and e.d.early == 1 then ds[#ds + 1] = e end end
+    return ds
+  end
+  local ds = run('no ore and no metal marked for melting, and no smelter: trade.want bar:iron', true)
+  T.eq(#ds, 1, 'one early decision')
+  T.ok(ds[1].d.q:find('IMPOSSIBLE here', 1, true) and ds[1].d.q:find('only a caravan', 1, true), ds[1].d.q)
+  T.ok(not table.concat(ds[1].d.cmds, '\n'):find('"tpl":"explore"', 1, true), 'impossible: no dig is offered')
+  local ds2 = run('no ore and no metal marked for melting: trade.want bar:iron, an explore dig for ore, or mark metal items', false)
+  T.eq(#ds2, 1)
+  T.ok(ds2[1].d.q:find('bars: no ore and no metal', 1, true) and not ds2[1].d.q:find('IMPOSSIBLE', 1, true), ds2[1].d.q)
+  T.ok(table.concat(ds2[1].d.cmds, '\n'):find('"tpl":"explore"', 1, true), 'a smelter stands: the dig for ore is offered')
+  -- ore or marked metal in the fort: economy has no hint, the chain makes the bars
+  local W3 = CW.world{census_i = {bars = 0, ore = 4}, setup = function(W)
+    moody(W, 1, 'Possessed', {filter('BAR', {})})
+    W.unit(1).counters2 = {thirst_timer = 1000, hunger_timer = 0}
+    W.load({name = 'economy', every = {ticks = 1200}, mood_hint = function() return nil end})
+  end}
+  W3.run(6)
+  for _, e in ipairs(W3.find_events('DECISION_NEEDED')) do T.ok(not (e.d.id == 'mood_deadline' and e.d.early), 'no early decision') end
+end)
+
 T.test('BUG-573: care tells economy a new mood want at once (economy.need, once per class and count)', function()
   local calls = {}
   local W = CW.world{census_i = {gems = 0, gems_cut = 0}, setup = function(W)

@@ -732,4 +732,28 @@ T.test('BUG-341 review: far items count once per class (max, not the sum of the 
   T.eq(sup.wood.floor >= 93 and sup.wood.floor < 120, true, 'need 1+2+1 + far 89 once (floor ' .. tostring(sup.wood.floor) .. ')')
 end)
 
+-- BUG-618 (Run 16b i2 Valleyhame: 'hunt: no crossbow, no Bowyer's workshop' through three famines): the crossbows and bolts the
+-- wanted ranged positions lack are made at a Bowyer's; logs in the fort and no such shop: the shop is asked for (workshops why=gear)
+T.test('BUG-618: crossbows and bolts wanted, logs at hand, no Bowyer: the gear plan asks for the Bowyers; no logs: no request', function()
+  local function asked(W)
+    local r = {}
+    for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do
+      if e.d.tpl == 'workshops' and e.d.why == 'gear' then for _, t in ipairs(e.d.types or {}) do r[#r + 1] = t end end
+    end
+    table.sort(r)
+    return r
+  end
+  local W = world{phase = 'P5', per = {C = 1}, wood = 100, shops = {'Carpenters'}, eco = {orders_per_day = 20}}
+  days(W, 1)
+  T.ok(F.has(asked(W), 'Bowyers'), 'the Bowyers are asked for: ' .. table.concat(asked(W), ','))
+  T.eq(order(W, 'dfllm:gear_xbow'), nil, 'no shop, no order yet')
+  local W2 = world{phase = 'P5', per = {C = 1}, wood = 0, shops = {'Carpenters'}, eco = {orders_per_day = 20}}
+  days(W2, 1)
+  T.ok(not F.has(asked(W2), 'Bowyers'), 'no logs: nothing to make them of: ' .. table.concat(asked(W2), ','))
+  local W3 = world{phase = 'P5', per = {C = 1}, wood = 100, shops = {'Carpenters', 'Bowyers', 'Craftsdwarfs'}, eco = {orders_per_day = 20}}
+  days(W3, 1)
+  T.ok(not F.has(asked(W3), 'Bowyers'), 'a Bowyer stands: no request')
+  T.ok(order(W3, 'dfllm:gear_xbow') ~= nil, 'and the crossbow is ordered')
+end)
+
 T.done()

@@ -22,7 +22,9 @@ local function world(opts)
                zones = {}, liq = 0}
   local units = {}
   for i = 1, cit do units[i] = {id = i, citizen = true, pos = opts.pos or {50, 50, 100}} end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units, mode = opts.mode,
+  local bc = F.cfg()
+  if opts.trend then bc.economy.food = bc.economy.food or {}; bc.economy.food.trend_days = opts.trend end
+  local W = F.world{cfg = {baseline = bc}, units = units, mode = opts.mode,
                     persist = opts.manifest and {manifest = opts.manifest} or nil}
   local ids = {}
   for i = 1, cit do ids[i] = i; W.unit(i).job = {current_job = {id = 900 + i}} end
@@ -307,12 +309,14 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   T.ok(q:find('. Also: popcap.lower', 1, true), q)        -- BUG-459: trade.want is a quiet option (the q has it as auto)
   -- BUG-258: no crossbow is the blocker 'xbow' (option crossbow), not bolts; frozen water still names the fishing zone
   -- BUG-340: every option has its command line (d.cmds in opts order); no animals: no butcher.mark
-  T.eq(d[1].d.opts, {'kitchen', 'bowyer', 'farms', 'trade.want', 'popcap.lower'}, 'the kernel paints the fishing zone: no option')
-  T.eq(#d[1].d.cmds, 5)
-  T.ok(d[1].d.cmds[2]:find('"only":"Bowyers"', 1, true) and d[1].d.cmds[5]:find('"cap":20', 1, true), d[1].d.cmds[5])
-  T.ok(d[1].d.cmds[4]:find('trade.want', 1, true) and d[1].d.cmds[4]:find('"food"', 1, true), d[1].d.cmds[4])
+  -- BUG-618: the kernel asks for the missing Kitchen itself (workshops why=mandatory): no 'kitchen' option for the player
+  T.eq(d[1].d.opts, {'bowyer', 'farms', 'trade.want', 'popcap.lower'}, 'the kernel paints the fishing zone: no option')
+  T.eq(#d[1].d.cmds, 4)
+  T.ok(d[1].d.cmds[1]:find('"only":"Bowyers"', 1, true) and d[1].d.cmds[4]:find('"cap":20', 1, true), d[1].d.cmds[4])
+  T.ok(d[1].d.cmds[3]:find('trade.want', 1, true) and d[1].d.cmds[3]:find('"food"', 1, true), d[1].d.cmds[3])
   T.eq(d[1].d.food, 20)
-  T.eq(d[1].d.block, {'kitchen', 'fish_zone', 'xbow', 'farms'}, 'no animals: no butcher blocker')
+  T.eq(d[1].d.block, {'fish_zone', 'xbow', 'farms'}, 'no animals: no butcher blocker; the Kitchen is asked for (auto)')
+  T.eq(d[1].d.auto, {'trade', 'kitchen'})
   -- the same blockers: never again (BUG-008 cadence); a new blocker after 7 days and 10 minutes: again
   days(W, 8)
   T.eq(#decisions(W, 'food_low'), 1)
@@ -324,18 +328,14 @@ T.test('Run 11: no safe fishing water (frozen, cavern) -> no zone; food_low name
   W.set_census('a', {n = 3, list = {{id = 1, race = 5, adult = true, female = true}, {id = 2, race = 5, adult = true, female = true},
                                     {id = 3, race = 5, adult = true, female = true}}})   -- tame animals and no butcher's shop: a new blocker; BUG-459: two can be marked
   days(W, 1)
+  -- BUG-618: the kernel asks for the Butchers itself (workshops why=mandatory, types Kitchen+Butchers): no new blocker, no new decision
   d = decisions(W, 'food_low')
-  T.eq(#d, 2)
-  T.eq(d[2].d.auto, {'fishery', 'trade'})
-  T.ok(not F.has(d[2].d.block, 'fishery') and F.has(d[2].d.block, 'butcher'), table.concat(d[2].d.block, ','))
-  T.ok(not F.has(d[2].d.opts, 'fishery'), table.concat(d[2].d.opts, ','))
-  T.ok(d[2].d.q:find('; auto: fishery asked (10 raw fish), caravans asked for food, seeds. Also: butcher.mark', 1, true),
-       d[2].d.q)
-  T.eq(d[2].d.opts, {'kitchen', 'bowyer', 'farms', 'butcher', 'trade.want', 'butcher.mark', 'popcap.lower'})
-  local enc = require('dfllm.util.json').encode(d[2].d)
-  T.ok(#enc <= 1024, 'BUG-340: the d with its command lines stays under the kernel 1,024 bytes: ' .. #enc)
-  T.eq(#d[2].d.opts, #d[2].d.cmds)
-  T.ok(d[2].msg:find('food low: 20 food days (famine below 10): no kitchen; auto: fishery', 1, true), d[2].msg)
+  T.eq(#d, 1)
+  local mand = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do
+    if e.d.why == 'mandatory' then mand[#mand + 1] = table.concat(e.d.types, '+') end
+  end
+  T.eq(mand, {'Kitchen', 'Butchers+Kitchen'}, 'the Kitchen first, then the Butchers with it once tame animals stood')
   -- the winter ends: the next search (scan_days) finds the river thawed
   ctl.water = {{60, 50, 100, 7}}
   days(W, 7)
@@ -436,6 +436,25 @@ T.test('BUG-341 review: the farms option is a surface farm only in PEACE, a farm
     if m == 'PEACE' then T.ok(cmd:find('"surface":1', 1, true), cmd)
     else T.ok(not cmd:find('surface', 1, true) and cmd:find('"tpl":"farms"', 1, true), m .. ': ' .. cmd) end
   end
+end)
+
+-- BUG-618: food that falls over food.trend_days and stands under twice pre_days (30..60 days) asks the caravans for food now, not at 29 days
+T.test('BUG-618: falling food between pre_days and twice pre_days asks the caravans for food; steady food does not', function()
+  local function food_want(W)
+    local _, tw = W.K.call('economy', 'trade_wants')
+    for _, w in ipairs(tw or {}) do if w.buy == 'food' then return w.n end end
+  end
+  local W = world{cit = 20, food = 50, trend = 3}                 -- 100 food days at the seeded rate
+  days(W, 3)
+  T.eq(food_want(W), nil, 'steady: nothing yet')
+  local stack = df.global.world.items.other.FOOD[0]
+  for _ = 1, 4 do stack.stack_size = stack.stack_size - 1; days(W, 1) end           -- the stack falls a unit a day: about 46 days
+  T.eq(food_want(W), 20, 'falling at 40 days: the caravans are asked for food')
+  local W2 = world{cit = 20, food = 200, trend = 3}               -- about 190 days: far above
+  days(W2, 3)
+  local s2 = df.global.world.items.other.FOOD[0]
+  for _ = 1, 4 do s2.stack_size = s2.stack_size - 1; days(W2, 1) end
+  T.eq(food_want(W2), nil, 'falling at 170 days: not yet')
 end)
 
 T.done()
