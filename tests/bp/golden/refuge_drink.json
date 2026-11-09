@@ -28,6 +28,7 @@
   "materials": {},
   "params": {
    "burrow": "Tiefe+",
+   "food": 0,
    "n": 12,
    "take": "dfllm-stock"
   },

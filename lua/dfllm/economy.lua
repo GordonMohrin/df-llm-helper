@@ -3279,9 +3279,53 @@ function M.office_check(K, c, p)
           why = why:sub(1, 80)})
 end
 
+-- BUG-572 (Run 16b i2 Brotherarrow y406: the manager sat in the refuge for 48 days validating nothing, nine orders open, no meals
+-- cooked, `inspect manager`: 'nothing the kernel can read is wrong'; his office zone lay outside Tiefe+): the civ alert sounds, the
+-- unit stands in one of its burrows and no tile of his office zone lies in any of them. Returns the alert burrows' names, else nil.
+function M.office_gap(zobj, u)
+  local ok, res = pcall(function()
+    local idx = df.global.plotinfo.alerts.civ_alert_idx
+    if not idx or idx == 0 then return nil end
+    local ids = {}
+    for _, id in ipairs(df.global.plotinfo.alerts.list[idx].burrows) do ids[id] = true end
+    local names, bs = {}, {}
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+      if ids[b.id] then names[#names + 1] = tostring(b.name); bs[#bs + 1] = b end
+    end
+    if #bs == 0 then return nil end
+    local held = false
+    for _, b in ipairs(bs) do
+      if dfhack.burrows.isAssignedTile(b, {x = u.pos.x, y = u.pos.y, z = u.pos.z}) then held = true end
+    end
+    if not held then return nil end                       -- the alert does not hold him
+    for y = zobj.y1, zobj.y2 do
+      for x = zobj.x1, zobj.x2 do
+        if M.in_zone(zobj, x, y, zobj.z) then
+          for _, b in ipairs(bs) do
+            if dfhack.burrows.isAssignedTile(b, {x = x, y = y, z = zobj.z}) then return nil end
+          end
+        end
+      end
+    end
+    table.sort(names)
+    return names
+  end)
+  return ok and type(res) == 'table' and res or nil
+end
+
 -- BUG-042: why an available manager validates nothing: the office (st.office) and its fix tail, else the manager by
--- name
+-- name. BUG-572: first the civ alert that holds him away from his office
 function M.unval_why(K)
+  local mg0 = M.manager_state(K)
+  if type(mg0) == 'table' and mg0.unit then
+    local u0, rec0 = df.unit.find(mg0.unit), M.office_of(K, mg0.unit)
+    local names = u0 and rec0 and M.office_gap(rec0.zobj, u0)
+    if names then
+      return string.format('the civ alert holds the manager in %s and his office zone %d lies outside it', table.concat(names, '+'),
+                           rec0.zone),
+             ': an office inside it (dfllm cmd zone.place type=office there, with chair and table), or the alert widened (siege_starve relief)'
+    end
+  end
   local o = st.office
   if type(o) == 'table' and o.why then
     local tail = (o.at and (': ' .. o.at .. ' placed') or '') .. (o.fix and ((o.at and '; ' or ': ') .. o.fix) or '')
@@ -3418,6 +3462,12 @@ function M.manager_facts(K, p, c)
   else
     f.office.zone, f.office.box, f.office.chair, f.office.table = rec.zone, rec.box, rec.chair, rec.table
     f.office.chair_p, f.office.table_p = rec.chair_p, rec.table_p
+    local gap = M.office_gap(rec.zobj, u)                    -- BUG-572
+    if gap then
+      f.causes[#f.causes + 1] = string.format('the civ alert holds him in %s and his office zone %d lies outside it', table.concat(gap, '+'),
+                                              rec.zone)
+      f.next[#f.next + 1] = 'dfllm cmd zone.place type=office (inside the alert burrow, with chair and table)'
+    end
     if rec.chair == 0 then f.causes[#f.causes + 1] = string.format('office %d has no chair (%d planned)', rec.zone, rec.chair_p) end
     if oc.table ~= false and rec.table == 0 then
       f.causes[#f.causes + 1] = string.format('office %d has no table (%d planned)', rec.zone, rec.table_p)
@@ -11768,23 +11818,32 @@ end
 -- the siege the mode flipped PEACE <-> ALERT for a wandering predator (events: MODE PEACE>ALERT hostile / ALERT>PEACE
 -- quiet, ~129k ticks); this daily task ran only in PEACE / RECOVERY, so the one unforbid came at the first quiet day.
 -- ALERT and DRILL (the fort is inside, nothing hostile is near the stock) unforbid too; SIEGE / BREACH still do not.
+-- BUG-570 (Run 16b i2 Brotherarrow y406: forbidden food 'unforbid held back: mode SIEGE' beside 78-82 hungry, 9 dead): ... except in a
+-- SIEGE whose lockdown has a hunger or thirst emergency (siege.starve_state): food and drink are unforbidden then, up to 200 a day.
 -- The forbidden stock's age (dfd, days) and what held the unforbid back (dfwhy) go into the state's stock.
 M.FORBID_MODES = {PEACE = true, RECOVERY = true, ALERT = true, DRILL = true}
-function M.forbid_note(inv, mode, skipped, d)
+M.FORBID_STARVE_PER_DAY = 200
+function M.siege_starving(K)
+  if K.mode() ~= 'SIEGE' then return nil end
+  local ok, sv = K.call('siege', 'starve_state')
+  return ok and type(sv) == 'table' and sv or nil
+end
+function M.forbid_note(inv, mode, skipped, d, starving)
   local forb = (math.tointeger(inv.drink_forb) or 0) + (math.tointeger(inv.food_forb) or 0)
   if forb <= 0 then return 0, nil end
   d = (d or 0) + 1
-  if not M.FORBID_MODES[mode] then return d, ('mode ' .. tostring(mode)):sub(1, 40) end
+  if not (M.FORBID_MODES[mode] or starving) then return d, ('mode ' .. tostring(mode)):sub(1, 40) end
   if (skipped or 0) > 0 then return d, string.format('%d off the walk group', skipped) end
   return d, nil
 end
 function T.forbid(K, c, r)
   local inv0 = K.census.i or {}
+  local sv = M.siege_starving(K)                                 -- BUG-570
   if not r.dfd_done then
     r.dfd_done = true
-    st.dfd, st.dfwhy = M.forbid_note(inv0, K.mode(), st.forb_skip, st.dfd)
+    st.dfd, st.dfwhy = M.forbid_note(inv0, K.mode(), st.forb_skip, st.dfd, sv ~= nil)
   end
-  if not M.FORBID_MODES[K.mode()] then return true end
+  if not (M.FORBID_MODES[K.mode()] or sv) then return true end
   local fc, dfl = c.forbid or M.DEFAULTS.forbid, M.DEFAULTS.forbid
   if not r.fx then
     r.fx, r.fx_n, r.fx_why = {}, 0, {}
@@ -11794,7 +11853,7 @@ function T.forbid(K, c, r)
     local bmin = math.tointeger(fc.burst_min) or dfl.burst_min
     r.burst = bmin > 0 and nf >= bmin and nf or nil
     for _, e in ipairs(st.fix or {}) do
-      if e.why ~= 'food' or r.p.starve or r.burst then r.fx[#r.fx + 1] = e end
+      if e.why ~= 'food' or r.p.starve or r.burst or sv then r.fx[#r.fx + 1] = e end
     end
     -- BUG-023 (Run 11): forbidden picks/axes nobody carries, as many as members of a tool detail lack that tool while
     -- its jobs wait (tool_check's st.tneed)
@@ -11806,6 +11865,7 @@ function T.forbid(K, c, r)
     end
   end
   local lim = r.burst and (math.tointeger(fc.burst_per_day) or dfl.burst_per_day) or fc.per_day or 30
+  if sv then lim = math.max(lim, M.FORBID_STARVE_PER_DAY) end     -- BUG-570
   local per_call = r.burst and M.BURST_SLICE or 1               -- FR-76: item flags are cheap, a burst takes many a frame
   local did = 0
   while #r.fx > 0 and r.fx_n < lim do

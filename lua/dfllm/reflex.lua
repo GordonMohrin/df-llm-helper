@@ -2265,15 +2265,23 @@ function M.overlimit_step(K, h, now)
       adv = oks and type(av) == 'table' and av or nil
     end
   end
-  local q = string.format('lockdown %s held %s days in %s (limit %d): %s%s; %s', hd.why, days, mode, c.max_days,
+  -- BUG-570 (Run 16b i2 Brotherarrow y406: 77 days past the limit, ~26 dead of hunger and thirst, the offer was a hopeless sortie): a hunger
+  -- or thirst emergency of the lockdown (siege.starve_state) is named with what the kernel did about it, and 'wait' is not offered
+  local oks, sv = K.call('siege', 'starve_state')
+  sv = oks and type(sv) == 'table' and sv or nil
+  local svt = sv and string.format('; %d citizens hungry or thirsty (hunger %d, thirst %d): %s', sv.n or 0, sv.hunger or 0, sv.thirst or 0,
+                                   sv.relief and 'the civilians are in Kern+ with food unforbidden (starvation relief)'
+                                   or 'no relief while a hostile is near: food unforbidden, see DECISION starve_lockdown') or ''
+  local q = string.format('lockdown %s held %s days in %s (limit %d): %s%s%s; %s', hd.why, days, mode, c.max_days,
                           cs and string.format('%d hostiles counted, nearest %s', cs.n or 1, cause_txt(cs)) or 'hostiles in sight',
-                          inside > 0 and string.format(', %d inside Kern+', inside) or '',
+                          inside > 0 and string.format(', %d inside Kern+', inside) or '', svt,
                           cmd and string.format('send squad %s (%d soldiers)%s: %s', key, n,
                                                 adv and (' (' .. adv.txt .. ')') or '', cmd)
-                          or 'no squad can go; ' .. (calm and 'nothing is near or inside Kern+: wait for the siege to end'
+                          or 'no squad can go; ' .. ((calm and not sv) and 'nothing is near or inside Kern+: wait for the siege to end'
                                                      or 'the lockdown stays while they are near'))
   local d = {id = 'lockdown_long', q = q:sub(1, 200), days = NUM.dec((now - hd.since) / 1200), lim = lim, mode = mode,
              n = cs and cs.n or nil, inside = inside, calm = calm and 1 or 0}
+  if sv then d.starving, d.relief = sv.n or 0, sv.relief and 1 or 0 end        -- BUG-570
   if cs then d.unit, d.pos, d.race = cs.id, cs.pos, cs.race end
   if cmd then d.squad, d.cmd = key, cmd end
   if adv then d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0 end

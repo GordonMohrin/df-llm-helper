@@ -448,4 +448,39 @@ T.test('BUG-506 (Run 16a i1 Basementflew y406: 2015 drink units forbidden ~100 d
   T.eq({M.forbid_note({drink_forb = 10}, 'PEACE', 4, 2)}, {3, '4 off the walk group'}, 'items the kernel cannot reach')
 end)
 
+T.test('BUG-570 (Run 16b i2 Brotherarrow y406: forbidden food "unforbid held back: mode SIEGE" beside 78-82 hungry, 9 dead): a SIEGE ' ..
+       'whose lockdown has a hunger or thirst emergency (siege.starve_state) unforbids food and drink too, relief or not; without the ' ..
+       'emergency (or after it) SIEGE keeps the stock forbidden', function()
+  local function run(state, ndays)
+    local drinks, foods = {}, {}
+    local W = world{mode = 'SIEGE', setup = function(W)
+      for i = 1, 20 do
+        drinks[#drinks + 1] = F.item(W, 'DRINK', {stack_size = 20, flags = {forbid = true}, _pos = {5 + i % 20, 5, 100}})
+      end
+      for i = 1, 5 do
+        foods[#foods + 1] = F.item(W, 'FOOD', {stack_size = 2, subtype = 1, flags = {forbid = true}, _pos = {5 + i % 20, 6, 100}})
+      end
+    end}
+    if state ~= false then
+      W.load({name = 'siege', every = {ticks = 100000}, starve_state = function(K) return state end})
+    end
+    days(W, ndays or 1)
+    local nd, nf = 0, 0
+    for _, it in ipairs(drinks) do if it.flags.forbid then nd = nd + 1 end end
+    for _, it in ipairs(foods) do if it.flags.forbid then nf = nf + 1 end end
+    return W, nd, nf
+  end
+  local W, nd, nf = run(false, 2)
+  T.eq({nd, nf}, {20, 5}, 'SIEGE without the emergency: all stay forbidden')
+  T.eq(W.state().stock.dfwhy, 'mode SIEGE')
+  W, nd, nf = run({n = 5, hunger = 90000, thirst = 0, relief = false}, 2)
+  T.eq({nd, nf}, {0, 0}, 'the emergency (no relief, a hostile near): drink and the 5 forbidden food items are unforbidden (old code: none)')
+  T.eq(W.state().stock.dfwhy, nil, 'nothing holds it back')
+  W, nd, nf = run({n = 5, hunger = 90000, thirst = 0, relief = true}, 2)
+  T.eq({nd, nf}, {0, 0}, 'with the relief too')
+  local M = require('dfllm.economy')
+  T.eq({M.forbid_note({drink_forb = 10}, 'SIEGE', 0, 2, true)}, {3, nil}, 'forbid_note: the emergency lifts the mode hold')
+  T.eq({M.forbid_note({drink_forb = 10}, 'SIEGE', 0, 2)}, {3, 'mode SIEGE'}, 'forbid_note: the old answer without it')
+end)
+
 T.done()

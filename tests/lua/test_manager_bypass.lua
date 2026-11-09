@@ -304,4 +304,31 @@ T.test('BUG-458: no Carpenters or Masons workshop: no task, the workshop is requ
   T.eq(rq[1].d.types, {'Carpenters'})
 end)
 
+T.test('BUG-572 (Brotherarrow y406: the manager sat in the refuge 48 days validating nothing, his office zone lay outside Tiefe+; `inspect ' ..
+       'manager`: nothing the kernel can read is wrong): the civ alert holds him in Tiefe+ and no tile of his office is inside it: the ' ..
+       'manager_office decision and inspect manager name the alert and the office', function()
+  local W = world{office = true, orders = 3, setup = function(W)
+    local b = W.burrow('Tiefe+', {76, 115, 130, 90, 125, 135})
+    df.global.plotinfo.alerts.list = kmock.vec{{id = 0, burrows = kmock.vec{}}, {id = 1, burrows = kmock.vec{b.id}}}
+    df.global.plotinfo.alerts.civ_alert_idx = 1
+    W.move(2, 84, 121, 133)                                -- the manager at the stair head in the refuge
+  end}
+  days(W, 4)
+  local d = decisions(W, 'manager_office')
+  T.ok(#d >= 1, 'a decision after unval_days')
+  T.ok(d[1].d.q:find('the civ alert holds the manager in Tiefe+ and his office zone 18631 lies outside it', 1, true), d[1].d.q)
+  T.ok(d[1].d.q:find('zone.place type=office', 1, true) or #d[1].d.q >= 190, d[1].d.q)
+  local r = W.inbox('inspect', {what = 'manager'})
+  T.ok(r.ok and tostring(r.msg):find('the civ alert holds him in Tiefe+ and his office zone 18631 lies outside it', 1, true), T.show(r))
+  T.ok(not tostring(r.msg):find('nothing the kernel can read is wrong', 1, true), 'old code: that was the only cause')
+  -- the alert off, or his office inside the burrow: no such cause
+  df.global.plotinfo.alerts.civ_alert_idx = 0
+  local r2 = W.inbox('inspect', {what = 'manager'})
+  T.ok(not tostring(r2.msg):find('the civ alert holds him', 1, true), T.show(r2))
+  df.global.plotinfo.alerts.civ_alert_idx = 1
+  W.burrow('Tiefe+', {76, 70, 130, 130, 125, 141})         -- now the office (127-129, 73-75, z141) is inside
+  local r3 = W.inbox('inspect', {what = 'manager'})
+  T.ok(not tostring(r3.msg):find('the civ alert holds him', 1, true), T.show(r3))
+end)
+
 T.done()

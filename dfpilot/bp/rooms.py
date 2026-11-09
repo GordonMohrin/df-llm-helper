@@ -77,7 +77,10 @@ PARAMS = {
     "refuge_beds": {"n": (8, 2, 30), "burrow": ("Tiefe+", None, None)},
     # FR-69 (Run 11 y477: Tiefe+ drink 0, 1199 of 1493 drinks in the Kern+ pile dfllm-stock): a drink store dug from the
     # refuge room; n = barrels (refuge_drink_n), take = the stockpile it takes drink from ('' none)
-    "refuge_drink": {"n": (12, 2, 24), "take": ("dfllm-stock", None, None), "burrow": ("Tiefe+", None, None)},
+    # BUG-572 (Run 16b i2 Brotherarrow y406: the refuge held drink and 23 beds but food 1 for 95 citizens, ~26 dead): food = 1 makes the
+    # store a food AND drink pile (no booze preset), sized by refuge_store_n (up to REFUGE_STORE_MAX barrels)
+    "refuge_drink": {"n": (12, 2, 40), "take": ("dfllm-stock", None, None), "burrow": ("Tiefe+", None, None),
+                     "food": (0, 0, 1)},
 }
 # templates that sit on the refuge level (anchors in the fortcore refuge room, sites.rank): they never join Z4 (the
 # civilian core; a Z4 box beside the refuge would let the audit's core -> refuge check start next to it)
@@ -580,6 +583,7 @@ DRINK_PILE = "dfllm-drink"            # the store's stockpile name (seal.CFG.sto
 DRINK_PER_CIT, DRINK_MILLI, BREACH_DAYS = 1, 53, 7
 DRINKS_PER_BARREL = 5
 REFUGE_DRINK_MAX = 24
+FOOD_PER_CIT, REFUGE_STORE_MAX = 1, 40   # BUG-572: seal.CFG.food_per_cit; a 5x8 room beside the refuge room
 CELL_MAX = 64                         # schema CHUNK cell text bytes (CONTRACTS §9.8)
 _PILE_NAME = re.compile(r"[A-Za-z0-9_+-]{0,20}")
 
@@ -590,6 +594,16 @@ def refuge_drink_n(cit: int, days: int = BREACH_DAYS, milli: int = DRINK_MILLI) 
     cit = max(0, int(cit or 0))
     units = max(cit * DRINK_PER_CIT, -(-cit * max(0, days) * max(0, milli) // 1000))
     return min(REFUGE_DRINK_MAX, max(2, -(-units // DRINKS_PER_BARREL)))
+
+
+def refuge_store_n(cit: int, days: int = BREACH_DAYS, milli: int = DRINK_MILLI) -> int:
+    """BUG-572: barrels for the refuge FOOD and drink store (refuge_drink food=1): the drink units of refuge_drink_n plus
+    citizens x FOOD_PER_CIT food units (the SIEGE level's food need, seal.refuge_fit) at DRINKS_PER_BARREL a barrel,
+    2..REFUGE_STORE_MAX."""
+    cit = max(0, int(cit or 0))
+    drink = max(cit * DRINK_PER_CIT, -(-cit * max(0, days) * max(0, milli) // 1000))
+    units = drink + cit * FOOD_PER_CIT
+    return min(REFUGE_STORE_MAX, max(2, -(-units // DRINKS_PER_BARREL)))
 
 
 def drink_room(n: int) -> tuple[int, int]:
@@ -614,12 +628,14 @@ def refuge_drink(p: dict) -> Plan:
     box = _box(P, *drink_room(n), door=False)
     u0, v0, u1, v1 = box
     props = f"name={DRINK_PILE} barrels={n}" + (f" take_from={take}" if take else "")
-    cell = f"f{{{props}}}:=booze({u1 - u0 + 1}x{v1 - v0 + 1})"
+    # BUG-572: food = 1 leaves the pile at its food default (drink and prepared food, as the stockroom's), no booze preset
+    cfg = "" if p.get("food") else "=booze"
+    cell = f"f{{{props}}}" + (f":{cfg}" if cfg else "") + f"({u1 - u0 + 1}x{v1 - v0 + 1})"
     if len(cell.encode("utf-8")) > CELL_MAX:
         raise ValueError(f"refuge_drink.take: {take!r} makes the stockpile cell {len(cell)} > {CELL_MAX} bytes "
                          f"(a name of at most {CELL_MAX - len(cell) + len(take)} characters)")
-    P.stage("place", "place").ent(u0, v0, u1, v1, 0, "f", props, cfg="=booze")
-    _finish(P, p, box)
+    P.stage("place", "place").ent(u0, v0, u1, v1, 0, "f", props, cfg=cfg)
+    _finish(P, p, box, sfx="food" if p.get("food") else "")      # BUG-572: the manifest room id ends in _food (plan finds it)
     return P
 
 

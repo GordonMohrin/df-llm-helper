@@ -701,7 +701,8 @@ def test_refuge_projects_under_way(save, base):
     assert f == {"stage3": False, "beds": 0, "seal": False, "fortcore": True, "ents": 0,   # fixture: fortcore at s2
                  "seal_n": 0, "refuge_n": 0, "open": [], "burrow": "", "head": None, "head_open": False,
                  "head_state": None, "head_man": None, "head_note": "",             # BUG-123/124
-                 "bed_site": None, "drink": 0, "drink_room": False, "drink_fit": None, "drink_why": None}   # FR-69
+                 "bed_site": None, "drink": 0, "drink_room": False, "drink_fit": None, "drink_why": None,
+                 "food": 0, "food_room": False}   # FR-69, BUG-572
     assert plan.fort_facts(save, {**state, "proj": []})["refuge"]["fortcore"] is False
     cmd.write_bp(save, stub("c1", "fortcore", {"stage": 3, "depth": 3, "refuge": 3, "beds": 8, "retrofit": 0}))
     cmd.write_bp(save, stub("c2", "refuge_beds", {"n": 12, "burrow": "Tiefe+"}))

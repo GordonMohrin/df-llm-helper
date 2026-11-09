@@ -1179,6 +1179,14 @@ local function sounding_burrow(g)
   return ok and name or nil
 end
 
+-- BUG-569: why the refuge cannot hold the civilians of a deep defense ('food 1<86, beds 18<22'), nil while it can or seal has no
+-- audit yet (siege asks as before)
+function M.refuge_unfit(K)
+  local ok, fit, why = K.call('seal', 'refuge_fit')
+  if ok and fit == false then return type(why) == 'string' and why ~= '' and why or 'unfit' end
+  return nil
+end
+
 local function alert_plan(K, a, g, now)
   local held = alert_held(K)
   local mode = K.mode()
@@ -1188,12 +1196,28 @@ local function alert_plan(K, a, g, now)
   -- SIEGE begins)
   local deep = (mode == 'SIEGE' and st.deep ~= nil) or
                (st.bdx ~= nil and (mode == 'PEACE' or mode == 'ALERT' or mode == 'SIEGE'))
+  -- BUG-569 / BUG-570 (Run 16b i2 Brotherarrow y406): the deep defense sends the civilians to the refuge only while it can feed them
+  -- (seal.refuge_fit: food, drink, beds at refuge.deep_pct of the need; not for building destroyers, which break the line
+  -- in minutes), and never while a hunger or thirst emergency of the lockdown has the relief on (no hostile near Kern+): the
+  -- squads keep the core station (apply), the civilians stay in or go back to Kern+, which holds the stock
+  local out
+  if deep and mode == 'SIEGE' then
+    local sv = mem.sv
+    if sv and sv.relief then
+      out = string.format('starvation relief: %d citizens hungry or thirsty and no hostile near Kern+', sv.n or 0)
+    elseif st.deep and not st.deep.bd and not st.bdx then
+      local unfit = M.refuge_unfit(K)
+      if unfit then out = string.format('%s cannot hold the civilians (%s)', g.refuge, unfit) end
+    end
+    if out then deep = false end
+  end
   local on, burrow = alert_wanted(K, a, g, now, held), (mode == 'BREACH' or deep) and g.refuge or g.kern
   local note, brief, audited, flee
   if on then
     local cur = (alert_idx() or 0) ~= 0 and (mem.burrow or sounding_burrow(g)) or nil
-    -- BUG-331 review: an eased siege without the deep defense releases the refuge (seal's fight_rule kept it: KEEP)
-    local release = mode == 'SIEGE' and not deep and st.lg ~= nil
+    -- BUG-331 review: an eased siege without the deep defense releases the refuge (seal's fight_rule kept it: KEEP);
+    -- BUG-569/570: so does a refuge that cannot feed them or a starvation relief (the reason text)
+    local release = mode == 'SIEGE' and not deep and (out or (st.lg ~= nil and true or nil)) or nil
     local okb, pick, why, short, fl = K.call('seal', 'alert_burrow', deep and 'BREACH' or mode, burrow, held, cur,
                                              release)
     if okb then
@@ -2195,6 +2219,9 @@ local function deep_step(K, a, g, now)
   for _, w in ipairs(why) do toks[#toks + 1] = w end
   for _, r in ipairs(kinds) do toks[#toks + 1] = r end
   if rop then toks[#toks + 1] = 'open' elseif soft then toks[#toks + 1] = 'soft' end
+  -- BUG-569: the refuge cannot feed the civilians (no building destroyers): they stay in Kern+ (alert_plan); a change is news
+  local unfit = not dp.bd and not st.bdx and M.refuge_unfit(K) or nil
+  if unfit then toks[#toks + 1] = 'unfit' end
   if not CAD.due(st.deep_rec, K.now(), {}, toks, {ticks = 0, wall_s = 0}) then return end
   st.deep_rec = CAD.mark(K.now(), {}, toks)
   local parts, has = {}, {}
@@ -2221,6 +2248,11 @@ local function deep_step(K, a, g, now)
   local txt = string.format('deep defense: %s; civilians to %s (the separated refuge), every squad at the core station '
                             .. '%s, no intake waves', table.concat(parts, '; '), g.refuge,
                             p and string.format('%d,%d,%d', p[1], p[2], p[3]) or '(none in the manifest)')
+  if unfit and not rop then
+    txt = string.format('deep defense: %s; the civilians STAY in %s (%s cannot hold them: %s), every squad at the core station %s',
+                        table.concat(parts, '; '), g.kern, g.refuge, unfit,
+                        p and string.format('%d,%d,%d', p[1], p[2], p[3]) or '(none in the manifest)')
+  end
   if rop then        -- first, so the 200-byte event keeps it
     txt = string.format("deep defense: %s %s, NOT the civilians' burrow: they stay in the best closed one; %s; every " ..
                         'squad at the core station %s', g.refuge, rop, table.concat(parts, '; '),
@@ -2230,6 +2262,7 @@ local function deep_step(K, a, g, now)
   for _, w in ipairs(DEEP_WHY) do if dp.why[w] then all[#all + 1] = w end end
   K.emit('SIEGE_DEEP', 'A', txt:sub(1, 200), {why = all, bd = d.bd, races = races, units = ids, vis = d.vis,
                                               soldiers = d.sol, worn = d.worn, metal = d.metal, refuge = g.refuge,
+                                              unfit = unfit and unfit:sub(1, 60) or nil,
                                               pos = p, ropen = rop and rop:sub(1, 80) or nil,
                                               soft = soft and soft.kind or nil})
   K.log('warn', 'siege: %s', txt:sub(1, 200))
@@ -2332,6 +2365,133 @@ local function long_step(K, a, g, now)
   if adv then dd.worn, dd.need, dd.rec = adv.worn, adv.need, adv.rec and 1 or 0 end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), dd)
   K.log('warn', 'siege: %s', q)
+end
+
+---------------------------------------------------------------- BUG-570: hunger and thirst in a lockdown
+-- Run 16b i2 Brotherarrow y406: a goblin siege of 36-37 lasted 115+ days; the deep defense held 95 citizens in a Tiefe+ with food 1
+-- (BUG-569) while Kern+ held 4987 food: Eat jobs stood at the stair head for 10+ days, 28 doors forbidden, the forbidden food
+-- 'unforbid held back: mode SIEGE', the lockdown_long limit (10 days) long passed with nothing but a hopeless sortie on offer, ~26
+-- dead (hunger 100k-132k, thirst). A hunger or thirst emergency in a SIEGE lockdown now escalates by itself: siege_starve.min (3)
+-- citizens over siege_starve.mark (50,000) of hunger or thirst (patients are water's business), or one such citizen after a
+-- DEATHS_PREVENTABLE (starved or dehydrated) of the last siege_starve.death_days days. Then
+--   * relief (mem.sv.relief) while nobody hostile is inside Kern+ and none is within siege_starve.near (25) tiles of O1, a bridge or a
+--     citizen outside (the distances of long_step; no hostile in sight at all counts as far): alert_plan drops the deep defense's
+--     refuge for the civilians and asks seal for Kern+ (the burrow with the stock) with the reason 'released' (the squads keep their
+--     core station, the bridges stay up: the burrow is the only thing that widens). A hostile coming within near or inside ends it
+--     at once (kern.log) and the burrow goes back to the deep defense's pick; it also ends a game day after the last citizen over
+--     the mark, never earlier (no flapping while they eat);
+--   * economy unforbids food and drink in SIEGE while the emergency stands (starve_state, T.forbid), relief or not;
+--   * DECISION_NEEDED starve_lockdown (A, again after 3 game days or when the relief changes) says what was done and, with no relief, why
+--     not (the hostile and its distance) and the ready squad.sortie command.
+M.SV = {on = true, min = 3, mark = 50000, near = 25, death_days = 10}
+M.SV_LIM = {min = {1, 100}, mark = {25000, 100000}, near = {5, 200}, death_days = {0, 336}}
+M.SV_EVERY, M.SV_ASK = 100, 3600
+local function sv_cfg(K) return cfg_block(K, 'siege_starve', M.SV, M.SV_LIM) end
+
+-- citizens (soldiers too, patients excluded) over `mark` of hunger or thirst: n, the worst hunger, the worst thirst, ids
+local function sv_count(K, mark)
+  local cu = K.census.u
+  local n, hmax, tmax, ids = 0, 0, 0, {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u and not patient(u) then
+      local hu, th = counter(u, 'hunger_timer'), counter(u, 'thirst_timer')
+      if hu > mark or th > mark then
+        n = n + 1
+        if #ids < 12 then ids[#ids + 1] = id end
+        hmax, tmax = math.max(hmax, hu), math.max(tmax, th)
+      end
+    end
+  end
+  return n, hmax, tmax, ids
+end
+
+-- the sortie offer of long_step: the ready squad's command at the census hostile nearest to O1 (nil without one)
+local function sortie_offer(K)
+  local e = lg_target(K)
+  local okq, k, nn = K.call('military', 'sortie_squad')
+  if not (okq and type(k) == 'string' and e) then return nil end
+  return string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', k, e.x, e.y, e.z, e.id),
+         k, int(nn) or 0, e
+end
+
+local function starve_step(K, a, g, now)
+  local c = sv_cfg(K)
+  local sv = mem.sv
+  if not c.on or K.mode() ~= 'SIEGE' then
+    if sv then mem.sv = nil end
+    return
+  end
+  if not (a and a.fresh) then return end
+  if not mem.sv_cnt or now < mem.sv_cnt.t or now - mem.sv_cnt.t >= M.SV_EVERY then
+    local n, hmax, tmax, ids = sv_count(K, c.mark)
+    mem.sv_cnt = {t = now, n = n, hmax = hmax, tmax = tmax, ids = ids}
+  end
+  local cn = mem.sv_cnt
+  local died = mem.sv_death ~= nil and c.death_days > 0 and now >= mem.sv_death and now - mem.sv_death <= c.death_days * M.LG_DAY
+  local need = cn.n >= c.min or (died and cn.n >= 1)
+  if not need then
+    if sv then
+      sv.quiet = sv.quiet or now
+      if now - sv.quiet >= M.LG_DAY then
+        K.log('info', 'siege: the starvation emergency is over (nobody over %d of hunger or thirst for a game day)%s', c.mark,
+              sv.relief and ': the civilians follow the deep defense again' or '')
+        mem.sv = nil
+      end
+    end
+    return
+  end
+  local d = lg_nearest(a)
+  local inside = int(a.inside) or 0
+  local calm = inside == 0 and ((d < 0 and (int(a.vis) or 0) == 0) or d > c.near)
+  local was = sv and sv.relief
+  if not sv then
+    sv = {t = now}
+    mem.sv = sv
+    K.log('warn', 'siege: starvation in the lockdown: %d citizens over %d of hunger or thirst (hunger %d, thirst %d, units %s)%s',
+          cn.n, c.mark, cn.hmax, cn.tmax, table.concat(cn.ids, ','), died and ' after a preventable death' or '')
+  end
+  sv.quiet = nil
+  sv.n, sv.hunger, sv.thirst, sv.ids, sv.d, sv.inside = cn.n, cn.hmax, cn.tmax, cn.ids, d, inside
+  sv.relief = calm
+  if calm ~= (was == true) then
+    mem.sv_rec = nil                                              -- the relief changed: news at once
+    if calm then
+      K.log('warn', 'siege: starvation relief ON: no hostile inside Kern+ or within %d tiles (nearest %d, %d visible): the civilians to %s '
+            .. '(food, drink)', c.near, d, int(a.vis) or 0, g.kern)
+    elseif was ~= nil then
+      K.log('warn', 'siege: starvation relief OFF: %s', inside > 0 and 'a hostile inside Kern+'
+            or string.format('a hostile %d tiles from the fort (near %d)', d, c.near))
+    end
+  end
+  local toks = {calm and 'relief' or (inside > 0 and 'inside' or 'near')}
+  if not CAD.due(mem.sv_rec, K.now(), {}, toks, {ticks = M.SV_ASK, wall_s = 60}) then return end
+  mem.sv_rec = CAD.mark(K.now(), {}, toks)
+  local cmd, key, nsq, e
+  if not calm then cmd, key, nsq, e = sortie_offer(K) end
+  local q = string.format('SIEGE lockdown: %d citizens hungry or thirsty (hunger %d, thirst %d)%s; ', cn.n, cn.hmax, cn.tmax,
+                          died and ' after a death of it' or '')
+  if calm then
+    q = q .. string.format('no hostile inside Kern+ or within %d tiles (nearest %d): the civilians go to %s (food, drink), food and drink '
+                           .. 'are unforbidden, the bridges stay up', c.near, d, g.kern)
+  else
+    q = q .. string.format('NOT widened to %s: %s; food and drink are unforbidden%s', g.kern,
+                           inside > 0 and 'a hostile is inside Kern+' or string.format('a hostile %d tiles from the fort (near %d)', d, c.near),
+                           cmd and string.format('; attack: squad %s (%d soldiers) %s', key, nsq, cmd) or '; no squad can go')
+  end
+  local dd = {id = 'starve_lockdown', q = q:sub(1, 200), n = cn.n, hunger = cn.hmax, thirst = cn.tmax, units = cn.ids,
+              relief = calm and 1 or 0, near = d, inside = inside, to = calm and g.kern or nil}
+  if e then dd.unit, dd.pos = e.id, {e.x, e.y, e.z} end
+  if cmd then dd.squad, dd.cmd = key, cmd end
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), dd)
+  K.log('warn', 'siege: %s', q)
+end
+
+-- public (economy.forbid, reflex.overlimit_step): the starvation emergency of the SIEGE lockdown now: {n, hunger, thirst, relief} or nil
+function M.starve_state(K)
+  local sv = mem and mem.sv
+  if not sv or sv.quiet or K.mode() ~= 'SIEGE' then return nil end
+  return {n = sv.n or 0, hunger = sv.hunger or 0, thirst = sv.thirst or 0, relief = sv.relief == true}
 end
 
 -- BUG-030: a raise hold (BUG-028 c) on a bridge that is gone holds nothing
@@ -2598,6 +2758,8 @@ function M.state(K)
   if so then w.so = (so.sq .. ' ' .. so.ph):sub(1, 24) end
   if st.deep and K.mode() == 'SIEGE' then w.deep = deep_txt():sub(1, 24) end    -- BUG-030: the deep defense
   if st.lg and K.mode() == 'SIEGE' then w.lg = math.max(0, K.now().tick - st.lg.t) end   -- BUG-331: eased since
+  local sv = M.starve_state(K)                             -- BUG-570: the starvation emergency (sv 1 = relief on, 2 = no relief)
+  if sv then w.sv = sv.relief and 1 or 2 end
   return {wave = w}
 end
 
@@ -2712,7 +2874,8 @@ function M.step(K, budget, ctx)
   if mode == 'SIEGE' then
     long_step(K, a, g, now)                                -- BUG-331: a long calm siege eases first
     deep_step(K, a, g, now)
-  end
+    starve_step(K, a, g, now)                              -- BUG-570: hunger and thirst in the lockdown
+  elseif mem.sv then mem.sv = nil end
   if mode == 'BREACH' and st.deep and st.deep.bd then K.call('seal', 'plug', {bd = true}) end   -- BUG-479
   -- BUG-028 (a); a wave or a sortie brings its soldiers back itself (it owns B1 meanwhile)
   if mode ~= 'DRILL' and (mode ~= 'RECOVERY' or st.str.rescue) and not wave_busy() then rescue_step(K, a, g, now) end
@@ -2763,6 +2926,12 @@ M.on = {
     if to == 'SIEGE' then deep_step(K, a, g, now) end     -- BUG-030: destroyers at T0 send the civilians deep at once
     apply(K, a, g, now)                      -- T0 actions in the detecting step
     save(K)
+  end,
+  -- BUG-570: a preventable death (care's DEATHS_PREVENTABLE: starved, dehydrated) arms the starvation emergency of the lockdown
+  ['EV:DEATHS_PREVENTABLE'] = function(K, ev)
+    local d = type(ev) == 'table' and ev.d or nil
+    local cause = type(d) == 'table' and d.cause or nil
+    if cause == 'starved' or cause == 'dehydrated' or cause == 'mixed' then mem.sv_death = K.now().tick end
   end,
   UNIT_DEATH = function(K, ev)
     if not st.ep then return end

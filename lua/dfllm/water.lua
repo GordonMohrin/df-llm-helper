@@ -181,6 +181,12 @@ M.DEFAULTS = {
   -- thirst beside 47 caregivers): in BREACH the care burrow opens too (care_breach false: never) when every painted tile lies
   -- on Kern+ and no visible hostile is within care_breach_near tiles of one (the census must be fresh and complete)
   care_breach = true, care_breach_near = 30,
+  -- BUG-571 (Run 16b i2 Brotherarrow y406: patient 27722 died of thirst in a 115-day SIEGE, the only accepted water, the pond zone 17696 at
+  -- 102,108,138, lay one level above Kern+ and care_safe wanted every tile on Kern+): in a SIEGE the care burrow may take a patient, water or
+  -- bucket tile OUTSIDE Kern+ (care_siege_out false: never) when seal's entrance check says the fort is sealed (no route from the map
+  -- edge to a citizen, after the last change), the tile lies on the citizens' own walk groups (snapshot.far: not outside the walls) and no
+  -- visible hostile is within care_siege_near tiles of it (the census must be fresh and complete)
+  care_siege_out = true, care_siege_near = 40,
   -- BUG-344: a citizen (no patient) at this thirst within 1 tile of an accepted well tells economy's thirst decision that
   -- the well gives him no water (M.drink_fix)
   well_thirst = 50000,
@@ -2695,6 +2701,20 @@ local function near_for(c, mode)
   return c.care_near
 end
 
+-- BUG-571: may the SIEGE care burrow reach outside Kern+: the fort is sealed (seal's entrance check, fresh) and care_siege_out
+local function care_ext(K, c, mode)
+  if mode ~= 'SIEGE' or c.care_siege_out == false then return false end
+  local ok, G = K.call('seal', 'groups')
+  return ok and type(G) == 'table' and not G.stale and G.sealed == true
+end
+
+-- BUG-571: a tile outside Kern+ that the SIEGE care burrow may use: on the citizens' walk groups (inside the walls)
+local function care_out_ok(K, ext, x, y, z)
+  if not ext then return false end
+  local ok, far = K.call('snapshot', 'far', x, y, z)
+  return ok and far == false
+end
+
 local function care_safe(K, c, x, y, z, near)
   local d = M.foe_dist(K, x, y, z)
   if d == nil then return false, 'no fresh hostile census' end
@@ -2723,7 +2743,11 @@ function M.care_step(K, c, r, now)
   local strict = mode ~= 'PEACE' and mode ~= 'ALERT'
   local kern, kname = burrow(K, 'kern', 'Kern+')
   if strict and not kern then return close(string.format('%s: no %s burrow to keep it inside', mode, kname)) end
-  local function inside(x, y, z) return not strict or on_burrow(kern, x, y, z) end
+  local ext = strict and care_ext(K, c, mode)                -- BUG-571
+  local far_near = math.max(near, math.tointeger(c.care_siege_near) or 0)
+  local function inside(x, y, z) return not strict or on_burrow(kern, x, y, z) or care_out_ok(K, ext, x, y, z) end
+  -- BUG-571: a tile outside Kern+ keeps the wider distance from every hostile
+  local function dist_for(x, y, z) return (strict and not on_burrow(kern, x, y, z)) and far_near or near end
   local out = {}
   for _, pt in ipairs(r.patients) do
     if pt.x and pt.thirst >= c.care_thirst and not in_set(bs, pt.x, pt.y, pt.z) then out[#out + 1] = pt end
@@ -2732,7 +2756,7 @@ function M.care_step(K, c, r, now)
   local tiles, ids, sig, why = {}, {}, {}, nil
   local function add(x, y, z) tiles[#tiles + 1] = {x, y, z}; sig[#sig + 1] = string.format('%d,%d,%d', x, y, z) end
   for _, pt in ipairs(out) do
-    local ok, w = care_safe(K, c, pt.x, pt.y, pt.z, near)
+    local ok, w = care_safe(K, c, pt.x, pt.y, pt.z, dist_for(pt.x, pt.y, pt.z))
     if ok and not inside(pt.x, pt.y, pt.z) then ok, w = false, string.format('outside %s in %s', kname, mode) end
     if ok then ids[pt.id] = true; add(pt.x, pt.y, pt.z) else why = why or string.format('patient %d: %s', pt.id, w) end
   end
@@ -2755,10 +2779,11 @@ function M.care_step(K, c, r, now)
     if s.wet then
       wet = true
       if in_set(bs, s.x, s.y, s.z) then near_w = 'in'; break end
-      local ok, kin = care_safe(K, c, s.x, s.y, s.z, near), true
+      local ok, kin = care_safe(K, c, s.x, s.y, s.z, dist_for(s.x, s.y, s.z)), true
       for _, t in ipairs(src_tiles(s)) do
         if not on_burrow(kern, t[1], t[2], t[3]) then kin = false end
         if not inside(t[1], t[2], t[3]) then ok = false end
+        if ok and not care_safe(K, c, t[1], t[2], t[3], dist_for(t[1], t[2], t[3])) then ok = false end    -- BUG-571
       end
       -- review fix: a well on Kern+ first, then the nearest (a Water Source zone may lie outside the walls)
       local rank, d = (s.kind ~= 'zone' and kin) and 0 or 1, cheb(ref, s.x, s.y, s.z)
@@ -2768,7 +2793,9 @@ function M.care_step(K, c, r, now)
   if not wet then return close('no accepted water (nothing to carry)') end
   if not near_w then
     return close(strict and string.format('every accepted water outside the alert burrows has a hostile near it or ' ..
-                                          'lies outside %s', kname)
+                                          'lies outside %s%s', kname,
+                                          (mode == 'SIEGE' and not ext and c.care_siege_out ~= false)
+                                          and ' (outside it only with the walls verified sealed, BUG-571)' or '')
                  or 'every accepted water outside the alert burrows has a hostile near it')
   end
   if near_w ~= 'in' then
@@ -2779,12 +2806,12 @@ function M.care_step(K, c, r, now)
   for _, q in ipairs(r.bpos or {}) do
     if in_set(bs, q.x, q.y, q.z) then bin = true; break end
     local d = cheb(ref, q.x, q.y, q.z)
-    if inside(q.x, q.y, q.z) and care_safe(K, c, q.x, q.y, q.z, near) and (not bd or d < bd) then bk, bd = q, d end
+    if inside(q.x, q.y, q.z) and care_safe(K, c, q.x, q.y, q.z, dist_for(q.x, q.y, q.z)) and (not bd or d < bd) then bk, bd = q, d end
   end
   if bk and not bin then add(bk.x, bk.y, bk.z) end
   local s = table.concat(sig, ' ')
   local cs = {on = true, ids = ids, sig = s, t = now, n = #tiles, th = c.care_thirst,
-              tiles = tiles, mode = mode}                    -- review fix: care_check re-checks these tiles
+              tiles = tiles, mode = mode, ext = ext == true}  -- review fix: care_check re-checks these tiles
   if not (prev and prev.on and prev.sig == s) then
     local ok, res = K.act.burrow_tiles(M.CARE, tiles, true, true)
     if not ok then return close('act.burrow_tiles: ' .. trunc(tostring(res), 60)) end
@@ -2812,8 +2839,13 @@ function M.care_check(K)
     why = string.format('the mode changed (%s -> %s)', cs.mode, mode)
   else
     -- BUG-559: SIEGE <-> BREACH keeps it (both paint Kern+ tiles only), checked against the new mode's distance
-    for _, t in ipairs(cs.tiles or {}) do
-      local ok, w = care_safe(K, c, t[1], t[2], t[3], near_for(c, mode))
+    -- BUG-571: a tile outside Kern+ (care_siege_out) keeps the wider care_siege_near, and the walls must still be verified sealed
+    local kern = cs.ext and burrow(K, 'kern', 'Kern+') or nil
+    if cs.ext and not care_ext(K, c, mode) then why = 'the walls are not verified sealed any more (outside Kern+ needs a SIEGE with sealed walls)' end
+    for _, t in ipairs(why and {} or cs.tiles or {}) do
+      local near = near_for(c, mode)
+      if cs.ext and not on_burrow(kern, t[1], t[2], t[3]) then near = math.max(near, math.tointeger(c.care_siege_near) or 0) end
+      local ok, w = care_safe(K, c, t[1], t[2], t[3], near)
       if not ok then why = string.format('%d,%d,%d: %s', t[1], t[2], t[3], w); break end
     end
     if not why then cs.mode = mode end

@@ -1,4 +1,4 @@
-refuge_drink {'n': 12, 'take': 'dfllm-stock', 'burrow': 'Tiefe+'} anchor [70, 70, 100] rot 0
+refuge_drink {'n': 12, 'take': 'dfllm-stock', 'burrow': 'Tiefe+', 'food': 0} anchor [70, 70, 100] rot 0
   infra: dig(4), place(1), burrow(2)
   materials: {}
 z100  (x 67..73, y 69..75)

@@ -129,6 +129,10 @@ M.CFG = {
   -- (floor_pct), for forts of floor_pop citizens or more; a siege leaves a burrow whose food or drink is under
   -- supply_switch % of the need (0 = never) for a fed one. config/reflex.json refuge.floor_pct / floor_pop / supply_switch
   floor_pct = 100, floor_pop = 30, supply_switch = 50,
+  -- BUG-569 (Run 16b i2 Brotherarrow y406: SIEGE_DEEP held 95 citizens in a Tiefe+ with food 1, 23 beds, ~26 dead of hunger and
+  -- thirst while Kern+ held 4987 food): the refuge is the civilians' burrow for the deep defense only when it holds this share (%)
+  -- of the SIEGE need in food, drink (a wet well covers it) and beds (M.refuge_fit); 0 = no check. config/reflex.json refuge.deep_pct
+  deep_pct = 90,
   -- BUG-019/FR-67: the BREACH level (separated and reachable, no drink, food or bed counts) and the dead end hold for
   -- breach_days after the first such pick of an episode (a dwarf goes thirsty after about 20 days without a drink;
   -- config/reflex.json refuge.breach_days), on a burrow of breach_tiles tiles at least
@@ -629,7 +633,7 @@ end
 -- holds both (0 = never)
 local function rcfg(K)
   local c = {bed_pct = CFG.bed_pct, breach_days = CFG.breach_days, floor_pct = CFG.floor_pct,
-             floor_pop = CFG.floor_pop, supply_switch = CFG.supply_switch}
+             floor_pop = CFG.floor_pop, supply_switch = CFG.supply_switch, deep_pct = CFG.deep_pct}
   local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.refuge or nil
   if type(r) == 'table' then
     local b, d = int(r.bed_pct), int(r.breach_days)
@@ -639,6 +643,8 @@ local function rcfg(K)
     if fp and fp >= 0 and fp <= 300 then c.floor_pct = fp end
     if fo and fo >= 0 and fo <= 1000 then c.floor_pop = fo end
     if sw and sw >= 0 and sw <= 100 then c.supply_switch = sw end
+    local dp = int(r.deep_pct)                                   -- BUG-569
+    if dp and dp >= 0 and dp <= 100 then c.deep_pct = dp end
   end
   return c
 end
@@ -699,6 +705,7 @@ local function burrow_audit(K, ncit, a)
   -- Run 11 (siege 8: Tiefe+ had no drink): the SIEGE level's drink rule alone (drink >= citizens or a well)
   a.wet = a.exists == true and (a.drink >= need.drink or (a.wwet ~= nil and a.wwet or a.wells) > 0)
   a.dneed = need.drink
+  a.bneed = need.beds                                    -- BUG-569: the beds wanted (refuge_fit)
   a.fneed = need.food                                    -- BUG-107: fed = the food need held and the drink covered
   a.fed = a.wet and a.food >= need.food
   a.why = table.concat(why, ', ')
@@ -4165,6 +4172,7 @@ local function publish(K)
     -- FR-69: its drink, the drink it wants (refuge_dry's rule) and its drink store's tiles (plan check/propose)
     if ex then
       mem.pub.ref.dr, mem.pub.ref.dn = math.max(0, int(ra.drink) or 0), math.max(0, int(ra.dneed) or 0)
+      mem.pub.ref.fd, mem.pub.ref.fn = math.max(0, int(ra.food) or 0), math.max(0, int(ra.fneed) or 0)   -- BUG-569/572
       mem.pub.ref.st = type(ra.store) == 'table' and math.max(0, int(ra.store.tiles) or 0) or 0
     end
     -- BUG-040: where the refuge lies and its nearest tile's distance to the nearest accepted source (status, plan)
@@ -4204,7 +4212,8 @@ local function leave_why(K, au, cur, refuge, t, r)
   local a = au[cur]
   if not (a and a.exists) then return 'gone', 'missing' end
   if r and r.release and cur == refuge and r.pick and r.pick ~= refuge then
-    return 'released', 'the eased siege lifted the deep defense'
+    -- BUG-569 / BUG-570: siege names its reason (the refuge cannot feed them, the starvation relief); true = the eased siege
+    return 'released', type(r.release) == 'string' and r.release or 'the eased siege lifted the deep defense'
   end
   -- BUG-336: the refuge the alert holds them in has an open way in (one room with Kern+): to the free pick; review: with
   -- no other usable burrow to none (the citizens flee, fight_rule), never kept in the open refuge. Review fix (merge15):
@@ -4310,7 +4319,7 @@ function M.alert_burrow(K, mode, default, hold, cur, release)
   local r = choose(K, mode, default, hold)
   local au0 = mem.audit and mem.audit.burrows
   if FIGHT[K.mode()] and type(cur) == 'string' and cur ~= '' and cur ~= r.pick and au0 then
-    r.release = release == true and mode == 'SIEGE' or nil       -- BUG-331 review: the eased siege's release
+    r.release = (release == true or type(release) == 'string') and mode == 'SIEGE' and release or nil   -- BUG-331 review: the eased siege's release; BUG-569/570: a reason text
     r = fight_rule(K, r, cur, refuge, au0, t)                    -- Run 11: no switch without a reason
   elseif not (FIGHT[K.mode()] and cur == r.pick) then mem.keep_sig = nil end
   local pick, want, why, forced = r.pick, r.want, r.why, r.forced
@@ -4452,6 +4461,32 @@ function M.alert_burrow(K, mode, default, hold, cur, release)
     end
   end
   return pick, note, brief, r.flee == true
+end
+
+-- BUG-569 (Run 16b i2 Brotherarrow y406: SIEGE_DEEP 'army 37 > 3 x 12 soldiers; worn 40 % < 60 %' held 95 citizens in a Tiefe+ with
+-- food 1, drink 23 and 23 beds for 115+ days while Kern+ held 4987 food, ~26 dead, most of hunger and thirst): can the refuge be
+-- the civilians' burrow of a deep defense that is no BREACH? It must exist and hold refuge.deep_pct (90 %) of the SIEGE need in food
+-- (citizens x food_per_cit), in drink (a wet well covers it) and in beds (bed_pct of the citizens asleep at once). Returns true or
+-- false and why ('food 1<86, beds 18<22'), and the shares {food, fneed, drink, dneed, beds, bneed, pct}; nil before the first audit
+-- (no verdict: siege asks as before). deep_pct 0 = no check
+function M.refuge_fit(K)
+  local au = mem and mem.audit and mem.audit.burrows
+  if not au then return nil end
+  local _, refuge = burrow_names(K)
+  local a = au[refuge]
+  local pct = rcfg(K).deep_pct
+  if not (a and a.exists) then return false, refuge .. ' missing', {pct = pct} end
+  local why = {}
+  local function lack(name, have, need)
+    local want = (need * pct + 99) // 100
+    if pct > 0 and need > 0 and have < want then why[#why + 1] = string.format('%s %d<%d', name, have, want) end
+  end
+  lack('food', int(a.food) or 0, int(a.fneed) or 0)
+  if not a.wet then lack('drink', int(a.drink) or 0, int(a.dneed) or 0) end
+  lack('beds', int(a.beds) or 0, int(a.bneed) or 0)
+  return #why == 0, table.concat(why, ', '),
+         {food = int(a.food) or 0, fneed = int(a.fneed) or 0, drink = int(a.drink) or 0, dneed = int(a.dneed) or 0,
+          beds = int(a.beds) or 0, bneed = int(a.bneed) or 0, pct = pct}
 end
 
 -- public (Run 11, readiness: siege 8's Tiefe+ had no drink): the refuge burrow's drink by the last audit: {name,
