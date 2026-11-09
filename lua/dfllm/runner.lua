@@ -855,6 +855,28 @@ local function built(b) return b:getBuildStage() >= b:getMaxBuildStage() end
 -- shop makes the item), and the mandatory shops are requested (Q.sync). Seals, plugs and repairs keep their doors: a way in
 -- is not left open on that account. nil = unreadable (no claim).
 Q.DOOR_KEEP = {seal = true, plug = true, repair = true}
+-- BUG-581 (Run 16a i1 Basementflew y423-y426: the hospital project stood 'build_lost at build' at 28 % for 8 retries, 300 days, patients
+-- dying of thirst: its traction bench needs a mechanism and the fort had no reachable hard stone): the pieces below are optional. A
+-- planned one nobody can build yet is not awaited, a missing one (quickfort refused it, its tile is empty) does not count as lost; the
+-- rest of the room is built and the project is done. The bench stays on the map where it was placed and DF builds it once a mechanism
+-- exists. Keys of the stage's cells (the build key of the template: R = traction bench).
+Q.OPTIONAL = {hospital = {R = true}}
+Q.OPT_TYPE = {hospital = {TractionBench = true}}
+function Q.optional_missing(K, P, d)
+  local opt = Q.OPTIONAL[P.tpl]
+  local st = opt and d and d.stages and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') then return 0 end
+  local n = 0
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      if tl[1] and opt[tl[1][4]] and not Q.bld_at(tl[1][1], tl[1][2], tl[1][3]) then n = n + 1 end
+    end
+  end
+  return n
+end
+
 function Q.no_door_shop()
   local have = false
   local ok = pcall(function()
@@ -870,7 +892,7 @@ end
 local function measure_build(K, P, d, R)
   if R.noid == 1 then return 'complete' end
   local pend, done, keep = 0, 0, {}
-  local noshop, deferred = nil, 0
+  local noshop, deferred, nopt = nil, 0, 0
   for _, id in ipairs(R.b) do
     local b = df.building.find(id)
     if b then
@@ -879,7 +901,12 @@ local function measure_build(K, P, d, R)
       else
         local door = P.class ~= 'defense' and not Q.DOOR_KEEP[P.tpl] and b:getType() == df.building_type.Door
         if door and noshop == nil then noshop = Q.no_door_shop() end
-        if door and noshop then deferred = deferred + 1; done = done + 1 else pend = pend + 1 end   -- BUG-357
+        local ot = Q.OPT_TYPE[P.tpl]
+        local optional = ot ~= nil and ot[df.building_type[b:getType()] or ''] == true       -- BUG-581
+        if optional then
+          done = done + 1
+          nopt = nopt + 1
+        elseif door and noshop then deferred = deferred + 1; done = done + 1 else pend = pend + 1 end   -- BUG-357
       end
     end
   end
@@ -931,14 +958,22 @@ local function measure_build(K, P, d, R)
     return 'reapply'
   end
   if pend > 0 then return 'done' end
-  if lost * 100 > total * M.CFG.lost_pct then
+  -- BUG-581: an optional piece (the hospital's traction bench) that was never placed or is not built is no loss of the room
+  local nmiss = Q.optional_missing(K, P, d)
+  local lost_eff = math.max(0, lost - nmiss)
+  if (nmiss > 0 or nopt > 0) and R.opt ~= nmiss + nopt then
+    R.opt = nmiss + nopt
+    K.log('warn', '%s (%s): %d optional piece(s) not built (%s): the stage goes on without them; DF builds a placed one once its ' ..
+          'material exists (BUG-581)', P.id, P.tpl, nmiss + nopt, P.tpl == 'hospital' and 'traction bench: needs a mechanism' or '?')
+  end
+  if lost_eff * 100 > total * M.CFG.lost_pct then
     set_blocked(K, P, 'build_lost')
     local q = obj(S.rt.rty[P.id])          -- BUG-022: the retry record (count kept across retries)
     q.n, q.t, q.sig, q.c = int(q.n) or 0, now(K), nil, now(K)
     S.rt.rty[P.id] = q
     return 'done'
   end
-  R.lost = lost
+  R.lost = lost_eff
   return 'complete'
 end
 
@@ -1204,6 +1239,41 @@ local function note_shaft(K, P, d)
   S.rt.xs[P.id] = r
   dirty()
   return r
+end
+
+-- BUG-584 (Run 16d i4 Trumpetrealms y412-y415: four explore probes in a mudstone fort, 'no ore, no hard stone' and nobody could tell which rock
+-- the shafts had passed): the rock layers of a finished explore's stair column, top down, one entry per run of one stone ('MUDSTONE z136-z131').
+-- DFHack's tile-material GetLayerMat reads the layer of the biome at x, y, z (M.layer_mat: tests replace it); nil = not readable.
+function M.layer_mat(x, y, z)
+  if Q.tilemat == nil then
+    local ok, tm = pcall(require, 'tile-material')
+    Q.tilemat = ok and type(tm) == 'table' and tm or false
+  end
+  if not Q.tilemat then return nil end
+  local ok, mi = pcall(Q.tilemat.GetLayerMat, x, y, z)
+  local id = ok and mi ~= nil and mi.inorganic ~= nil and mi.inorganic.id
+  return type(id) == 'string' and id or nil
+end
+function Q.shaft_rocks(xr)
+  if type(xr) ~= 'table' or not (xr.x and xr.y and xr.top and xr.low) then return nil end
+  local out, cur = {}, nil
+  for z = xr.top, math.max(xr.low, xr.top - 40), -1 do
+    local id = M.layer_mat(xr.x, xr.y, z)
+    if id then
+      if cur and cur.id == id then cur.z1 = z
+      else
+        if #out >= 6 then break end
+        cur = {id = id, z0 = z, z1 = z}
+        out[#out + 1] = cur
+      end
+    end
+  end
+  if #out == 0 then return nil end
+  local names = {}
+  for i, e in ipairs(out) do
+    names[i] = e.z0 == e.z1 and string.format('%s z%d', e.id, e.z0) or string.format('%s z%d-z%d', e.id, e.z0, e.z1)
+  end
+  return names
 end
 
 -- quickfort keys that wall one shaft tile: walls cannot stand on stairs (quickfort build.lua
@@ -2308,10 +2378,12 @@ local function finish(K, P, d)
   K.persist.set('bp.' .. P.id, nil)
   S.rt.p[P.id] = nil
   forget(P.id)
+  local rocks = P.tpl == 'explore' and Q.shaft_rocks(xr) or nil           -- BUG-584: the rock the probe passed
   K.emit('PROJECT_DONE', 'B', trunc(P.id .. ' (' .. P.tpl .. ') done' .. (wn and ('; ' .. wn) or '') ..
                                     (P.refused and ('; refused by quickfort at ' .. P.refused .. ' (tile occupied)') or '') ..
+                                    (rocks and ('; rock: ' .. table.concat(rocks, ', ')) or '') ..
                                     (pre and '' or ('; stage ' .. (first - 1) .. ' never ran: not counted')), 200),
-         {proj = P.id, tpl = P.tpl, walled = wl, pre = (not pre) and (first - 1) or nil})
+         {proj = P.id, tpl = P.tpl, walled = wl, pre = (not pre) and (first - 1) or nil, rocks = rocks and json.array(rocks) or nil})
   K.log('info', '%s (%s) done', P.id, P.tpl)  -- BUG-039: kern.log names every project that leaves the open list
   K.flush()
   dirty()

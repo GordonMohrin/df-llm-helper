@@ -259,7 +259,7 @@ def fort_manifest(save_dir: Path) -> dict:
                 m = merge(m, _without_gone(frag, gone, mtime(p)))
             except Exception:                  # noqa: BLE001 - one malformed fragment must not block ranking
                 continue
-    return _with_failed_explores(save_dir, m)
+    return _with_explored(save_dir, _with_failed_explores(save_dir, m))
 
 
 def _with_failed_explores(save_dir: Path, m: dict) -> dict:
@@ -275,6 +275,19 @@ def _with_failed_explores(save_dir: Path, m: dict) -> dict:
         if isinstance(a, list) and len(a) == 3 and all(isinstance(v, int) for v in a):
             out.append({"anchor": a, "why": b.get("why", "breach"), "proj": b["proj"]})
     return dict(m, failed_explore=out) if out else m
+
+
+def _with_explored(save_dir: Path, m: dict) -> dict:
+    """BUG-584 (Run 16d i4 Trumpetrealms y412-y415: four explore probes at depth 2-6 beside the core of a mudstone fort, none found ore or hard
+    stone, the ranking offered the same neighbourhood): m["explored"] = [[x, y, z], ...] the anchors of every explore project the bp folder
+    holds (open, done or stopped); bp.sites ranks a new probe farther from them (`_explore`)."""
+    out = []
+    for p in bp_files(save_dir):
+        doc = files.read_json(p)
+        a = doc.get("anchor") if isinstance(doc, dict) and doc.get("tpl") == "explore" else None
+        if isinstance(a, list) and len(a) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in a):
+            out.append(a)
+    return dict(m, explored=out) if out else m
 
 
 def _digest(doc) -> str:

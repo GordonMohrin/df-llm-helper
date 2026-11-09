@@ -239,6 +239,34 @@ T.test('BUG-303: zone.place type=sand: refused without a bare sand floor in the 
   T.ok(#r.msg < 200, #r.msg)
 end)
 
+-- BUG-585 (Run 16b i2 Brotherarrow y406: `zone.place type=office` in the refuge made an empty zone, no command put a chair and a table in it, the
+-- manager validated nothing for 48 days): the verb places the chair and the table the zone lacks (runner.repair, quickfort build)
+T.test('BUG-585: zone.place type=office also places a chair and a table on free floor tiles of the zone', function()
+  local W = zworld{tiles = {['82,120,131'] = {c = '.', bld = 'Wall'}}}
+  W.repairs = {}
+  W.mods.runner.M.repair = function(K, cells, why) W.repairs[#W.repairs + 1] = {cells, why}; return true, 'rp1' end
+  local r = W.inbox('zone.place', {type = 'office', bbox = {82, 120, 131, 84, 121, 131}})
+  T.ok(r.ok, r.msg)
+  T.eq(#W.repairs, 1, 'one repair project')
+  local cells = W.repairs[1][1]
+  T.eq(#cells, 2)
+  local kinds = {cells[1][4], cells[2][4]}
+  table.sort(kinds)
+  T.eq(kinds, {'c', 't'}, 'a chair and a table')
+  T.ok(not (cells[1][1] == 82 and cells[1][2] == 120) and not (cells[2][1] == 82 and cells[2][2] == 120), 'not on the occupied tile')
+  T.eq(math.max(math.abs(cells[1][1] - cells[2][1]), math.abs(cells[1][2] - cells[2][2])), 1, 'the chair beside its table')
+  T.ok(r.msg:find('chair at', 1, true) and r.msg:find('table at', 1, true) and r.msg:find('placed', 1, true), r.msg)
+  T.ok(r.data.furniture and r.data.furniture:find('table at', 1, true), 'data.furniture')
+  -- a box with no free tile: the zone stands, the answer says why there is no furniture
+  local W2 = zworld{tiles = {['5,5,5'] = {c = '.', bld = 'Wall'}}}
+  W2.mods.runner.M.repair = function() error('nothing to place') end
+  local r2 = W2.inbox('zone.place', {type = 'office', bbox = {5, 5, 5, 5, 5, 5}})
+  T.ok(r2.ok and r2.msg:find('no chair/table: no free floor tile', 1, true), r2.msg)
+  -- other zone types place no furniture
+  local r3 = W.inbox('zone.place', {type = 'pen', bbox = {10, 20, 5, 11, 21, 5}})
+  T.ok(r3.ok and r3.data.furniture == nil and #W.repairs == 1, r3.msg)
+end)
+
 T.test('FR-78: no tile reader: nothing is drawn on tiles nobody read', function()
   local W = F.world{cfg = {baseline = F.cfg()}, units = {{id = 1, citizen = true}}}
   local runner = {name = 'runner', every = {ticks = 600}, verbs = {}}

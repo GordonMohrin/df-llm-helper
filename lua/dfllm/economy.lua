@@ -154,6 +154,11 @@ M.DEFAULTS = {
   -- (M.metal_plan). Then trade_wants asks every caravan for `wants` in this order (n = the bars short, or that slot's
   -- missing pieces) after picks and axes up to `tools` (military's tools-first minimum), and the fort keeps `crafts`
   -- crafts to sell for it (MakeCrafts in free stone, else wood above idle.wood_min; at most `craft_jobs` an order)
+  -- BUG-582 (Run 16a i1 Basementflew y426-y428: three caravans 'nothing_to_sell' beside 511 bones and a Craftsdwarfs shop, `sell: crafts` in the
+  -- plan and no MakeCrafts order anywhere; Run 16d i4 the same): a trade depot stands and crafts are on the sell list: the fort keeps `min`
+  -- crafts to sell (M.trade_goods), made of bone (a corpse leftover; `bone_keep` stay for the gear), else wood above idle.wood_min, else
+  -- free stone (not while stone is short of the rock orders), at most `jobs` an order; the metal-short rule below has its own order
+  trade_goods = {min = 30, jobs = 10, bone_keep = 10, tag = 'dfllm:trade_goods', ws = {'workshop:Craftsdwarfs'}},
   metal_short = {worn = 80, tools = 3, crafts = 40, craft_jobs = 10, craft_tag = 'dfllm:trade_crafts',
                  craft_ws = {'workshop:Craftsdwarfs'},
                  wants = {{buy = 'bar:iron', n = 'bars'}, {buy = 'bar:steel', n = 'bars'},
@@ -406,7 +411,7 @@ M.DEFAULTS = {
   -- DECISION_NEEDED manager_stuck with the facts about him and the commands that look further (M.mgr_stuck)
   orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2,
             bypass_days = 5, bypass_max = 4, bypass_open = 8, cap = 120, prune_days = 30, prune_per_day = 30,
-            mgr_stuck_days = 14},
+            mgr_stuck_days = 5},      -- BUG-585: 14 -> 5 (Run 16b i2 Brotherarrow y406: the warning came after 24 days)
   -- BUG-042: the manager's Office zone needs a chair (and a table: the live fix was both) to validate work orders; a
   -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
   -- item) at most every retry_days; zones larger than max_tiles are searched only that far. BUG-232: `zone` = with no
@@ -2244,12 +2249,13 @@ local function plan_steel(K, c, r)
     if CAD.due(p.steel, now, ids, missing) then
       p.steel = CAD.mark(now, ids, missing)
       local words = {}
-      for i, m in ipairs(missing) do words[i] = STEEL_WORDS[m] or m end
+      local flux_gone = false
+      for i, m in ipairs(missing) do words[i] = STEEL_WORDS[m] or m; if m == 'flux' then flux_gone = true end end
       K.emit('DECISION_NEEDED', 'A', string.format('steel: %d orders (%s) wait for steel bars; missing %s', need.n,
                                                    table.concat(ids, ',', 1, math.min(4, #ids)),
                                                    table.concat(missing, ', ')),
-             {id = 'steel', q = ('missing ' .. table.concat(words, '; ') .. ': dig or trade for it (trade.want bar:steel), ' ..
-                                 'or remove the steel orders?'):sub(1, 200)})
+             {id = 'steel', q = ('missing ' .. table.concat(words, '; ') .. ': dig or trade for it (trade.want add ' ..
+                                 (flux_gone and '"flux" (BUG-583), ' or '') .. '"bar:steel"), or remove the steel orders?'):sub(1, 240)})
     end
     return
   end
@@ -3610,7 +3616,7 @@ end
 -- and what DF asks of it (position.required_office), a candidate for the nobles screen, and the commands that look at him; zone.place
 -- type=office is allowed in SIEGE (a second office zone for him). The kernel replaces nobody: the nobles screen's removal is the player's.
 function M.mgr_stuck(K, p, c, days, n, why)
-  local lim = math.tointeger(((c or {}).orders or M.DEFAULTS.orders).mgr_stuck_days) or 14
+  local lim = math.tointeger(((c or {}).orders or M.DEFAULTS.orders).mgr_stuck_days) or 5
   local outd, outrec = M.out_days(K, p, 'MANAGER')                  -- BUG-458: he stands outside the fort
   if lim <= 0 or st.office then return end
   if days < lim and not (outrec and outd >= M.OUT_DAYS) then return end
@@ -7678,7 +7684,9 @@ end
 function M.mech_state(K)
   local m = st.mech
   if type(m) ~= 'table' then return nil end
-  return {need = m.need or 0, free = m.free or 0, short = m.short or 0, route = m.route}
+  -- BUG-583: hard = DF itself refused the rock jobs ('Needs non-economic hard stone', BUG-545): no mechanism can be made from the stone at hand
+  return {need = m.need or 0, free = m.free or 0, short = m.short or 0, route = m.route,
+          hard = type(st.hard) == 'table' and st.hard.denied == true or nil}
 end
 function M.plan_mech(K, c, r)
   local need, lv = M.mech_need(K)
@@ -8072,6 +8080,57 @@ function M.metal_plan(K, c, r)
       add(r, {tag = tag, spec = wood_spec(c, r, {job = 'MakeCrafts'}), n = math.min(n, wood), uses = {wood = 1},
               why = 'crafts to trade for metal'})
     end
+  end
+end
+
+-- BUG-582: a built trade depot stands (a caravan has a place to unload and trade)
+function M.depot_built()
+  local ok, res = pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.TRADE_DEPOT) do
+      if b:getBuildStage() >= b:getMaxBuildStage() then return true end
+    end
+    return false
+  end)
+  return ok and res == true
+end
+
+-- BUG-582: trade goods for the caravans. Crafts are on the trade module's sell list and a depot stands, but the fort holds fewer than
+-- c.trade_goods.min crafts (the census counts the finished craft items): MakeCrafts in bone, else wood, else stone, at most `jobs` an order
+-- (tag c.trade_goods.tag, one open at a time). st.tgoods = {crafts, min, route} for the log and the state.
+function M.trade_goods(K, c, r)
+  local tg = c.trade_goods
+  if type(tg) ~= 'table' then st.tgoods = nil; return end
+  local okt, sells = K.call('trade', 'sells')
+  local sell = false
+  for _, t in ipairs(okt and type(sells) == 'table' and sells or {}) do
+    if tostring(t):match('^crafts') then sell = true end
+  end
+  if not (sell and M.depot_built()) then st.tgoods = nil; return end
+  local have = r.inv.crafts or 0
+  local tgs = {crafts = have, min = tg.min or 30, route = '', logged = type(st.tgoods) == 'table' and st.tgoods.logged or nil}
+  st.tgoods = tgs
+  local want = tgs.min - have
+  if want <= 0 or open(r, tg.tag) or not ws_any(r.f, tg.ws or {'workshop:Craftsdwarfs'}) then return end
+  local n = math.min(want, tg.jobs or 10)
+  local bone = left(c, r, 'bone') - (tg.bone_keep or 10)
+  local rk = st.rock
+  local rock = math.min(stone_free(c, r), left(c, r, 'rock'))
+  local wood = left(c, r, 'wood') - ((c.idle or {}).wood_min or 60)
+  if bone > 0 then
+    local spec = {job = 'MakeCrafts', material_category = {'bone'},
+                  item_conditions = {cond(floor_of(c, r.p, r, 'bone') + 1, nil, {flags = {'unrotten', 'bone', 'body_part'}})}}
+    if add(r, {tag = tg.tag, spec = spec, n = math.min(n, bone), uses = {bone = 1}, why = 'crafts for the caravans'}) then tgs.route = 'bone' end
+  elseif wood > 0 then
+    if add(r, {tag = tg.tag, spec = wood_spec(c, r, {job = 'MakeCrafts'}), n = math.min(n, wood), uses = {wood = 1},
+               why = 'crafts for the caravans'}) then tgs.route = 'wood' end
+  elseif rock >= 10 and not (type(rk) == 'table' and (rk.need or 0) > (rk.free or 0)) then
+    if add(r, {tag = tg.tag, spec = {job = 'MakeCrafts', material = 'INORGANIC'}, n = math.min(n, rock // 2), uses = {rock = 1},
+               why = 'crafts for the caravans'}) then tgs.route = 'stone' end
+  end
+  if tgs.route ~= '' and tgs.logged ~= tgs.route then
+    tgs.logged = tgs.route
+    K.log('info', 'trade goods: %d crafts < %d, a depot stands and crafts are on the sell list: MakeCrafts in %s queued (BUG-582)',
+          have, tgs.min, tgs.route)
   end
 end
 
@@ -9593,7 +9652,7 @@ function T.plan(K, c, r)
                 {urgent.leather and 1 or 4, plan_leather}, {urgent.cloth and 1 or 3.5, plan_cloth},
                 {2.9, M.plan_picks}, {3.4, M.plan_training},
                 {urgent.bars and 1 or 3, plan_metal}, {urgent.bars and 1.1 or 3.1, plan_steel}, {3.2, plan_gear},
-                {3.25, M.metal_plan}, {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
+                {3.25, M.metal_plan}, {3.26, M.trade_goods}, {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
   table.sort(list, function(a, b) return a[1] < b[1] end)
   for _, e in ipairs(list) do e[2](K, c, r) end
   if r.day then
@@ -12578,6 +12637,10 @@ function M.state(K)
     if st.rock then
       r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0)
       if st.rock.soil then r.stock.rsoil = 1 end       -- BUG-438: the stone digs found only soil (plan propose digs deeper)
+    end
+    do                                                 -- BUG-586: DF itself refuses the rock jobs (BUG-545): no mechanism, no stone trap, no traction bench
+      local okh, hd = pcall(M.hard_denied, K.census.i or {}, K.now().tick)
+      if okh and hd then r.stock.rhard = 1 end
     end
     if st.picks then r.stock.picks, r.stock.pick_want = st.picks.have, st.picks.want end
     -- Run 11: metal short for the soldiers (M.metal_plan: plan check's metal route gate) and the metal items marked for

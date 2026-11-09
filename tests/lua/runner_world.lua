@@ -86,7 +86,8 @@ local function building(W, x, y, z, key)
   local hatch = key == 'H'                         -- FR-98: a hatch cover (over a stair)
   local door = key == 'd' and W.real_doors == true     -- BUG-357: opt in, a door is a Door building (else a Bed as before)
   W.add_building{id = id, _t = cons and df.building_type.Construction or hatch and df.building_type.Hatch
-                               or door and df.building_type.Door or df.building_type.Bed,
+                               or door and df.building_type.Door
+                               or (key == 'R' and W.real_bench == true) and df.building_type.TractionBench or df.building_type.Bed,
                  _st = 0, _pos = {x, y, z}, _key = key, _bld = hatch and 'Hatch' or nil, _under = hatch and W.tile(x, y, z).c or nil,
                  getType = function(self) return self._t end,
                  getBuildStage = function(self) return self._st end,
@@ -205,7 +206,7 @@ function H.world(opts)
   W.map, W.unsuitable, W.bld_at, W.qf, W.orders, W.applied, W.undone = {}, {}, {}, {}, {}, {}, 0
   W.soil = {}
   df.global.building_next_id = opts.next_id or 1
-  df.building_type = kmock.enum{'Chair', 'Bed', 'Table', 'Door', 'Construction', 'Trap', 'Workshop', 'Hatch'}
+  df.building_type = kmock.enum{'Chair', 'Bed', 'Table', 'Door', 'Construction', 'Trap', 'Workshop', 'Hatch', 'TractionBench'}
   function W.tile(x, y, z)
     local k = x .. ',' .. y .. ',' .. z
     local t = W.map[k]

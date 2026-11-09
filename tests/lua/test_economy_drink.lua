@@ -359,20 +359,20 @@ T.test('BUG-206 (live Earthboat spr d43): no still but a pending fortcore stage 
 end)
 
 -- BUG-450 (Run 16a i1 Syrupobeyed y386: 35 orders unvalidated for 149 days with an appointed manager, a complete office and 'none vacant'):
--- orders.mgr_stuck_days (14) of it is DECISION_NEEDED manager_stuck with the commands that look at him; once per period; 0 = off.
-T.test('BUG-450: a manager with a complete office who validates nothing for 14 days: DECISION_NEEDED manager_stuck, once', function()
+-- orders.mgr_stuck_days (5, BUG-585; 14 before) of it is DECISION_NEEDED manager_stuck with the commands that look at him; once per period; 0 = off.
+T.test('BUG-450/585: a manager with a complete office who validates nothing for 5 days: DECISION_NEEDED manager_stuck, once', function()
   local W = world{chair = {128, 74}, table = {127, 74}, plants = 40}
-  days(W, 10)
+  days(W, 3)
   T.eq(#decisions(W, 'manager_stuck'), 0, 'not before mgr_stuck_days')
-  days(W, 6)
+  days(W, 5)
   local dn = decisions(W, 'manager_stuck')
   T.eq(#dn, 1)
   T.ok(dn[1].msg:find('manager Astesh validates nothing for', 1, true) and dn[1].msg:find('complete office', 1, true), dn[1].msg)
   T.ok(dn[1].d.cmds[1]:find('inspect what=manager', 1, true) and dn[1].d.cmds[2]:find('inspect what=unit key=', 1, true)
        and #dn[1].d.cmds == 4, table.concat(dn[1].d.cmds, '|'))     -- BUG-499: the manager's facts first
-  T.ok(dn[1].d.days >= 14 and dn[1].d.n >= 1)
+  T.ok(dn[1].d.days >= 5 and dn[1].d.n >= 1, 'BUG-585: after 5 days, not 14')
   T.ok(tostring(dn[1].d.cause):find('nothing the kernel can read is wrong', 1, true), 'BUG-499: ' .. tostring(dn[1].d.cause))
-  days(W, 6)
+  days(W, 4)
   T.eq(#decisions(W, 'manager_stuck'), 1, 'once per mgr_stuck_days (util/cadence)')
   local W2 = world{chair = {128, 74}, table = {127, 74}, plants = 40, mgr_stuck_days = 0}
   days(W2, 18)
@@ -404,7 +404,7 @@ end)
 -- (p.out, snapshot.far); manager_stuck names the case from orders.unval_days with a replacement who is not outside and the
 -- command appoint {replace = true}, which works after OUT_DAYS (7) days outside and for nobody who stands among the citizens
 local function far_world(extra)
-  local o = {chair = {128, 74}, table = {127, 74}, plants = 40}
+  local o = {chair = {128, 74}, table = {127, 74}, plants = 40, mgr_stuck_days = 14}      -- BUG-585: these tests keep the old 14
   for k, v in pairs(extra or {}) do o[k] = v end
   o.setup = function(W)
     W.mods.snapshot.M.far = function(K, x, y, z) return x >= 500 end

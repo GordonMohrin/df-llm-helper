@@ -156,12 +156,19 @@ L.KINDS = {
   axe = {t = {'WEAPON'}, word = 'axe'},
   mechanism = {t = {'TRAPPARTS'}}, mechanisms = {t = {'TRAPPARTS'}},    -- BUG-268: lever links (2 a lever)
   coffin = {t = {'COFFIN'}}, coffins = {t = {'COFFIN'}},                -- BUG-466: bodies without a coffin in a fort with no stone
+  -- BUG-583 (Run 16d i4 Trumpetrealms: the steel DECISION waited on flux for 14 orders and `trade.want flux` was ignored, flux is no item
+  -- type): flux = a boulder of a flux stone (reaction class FLUX: limestone, dolomite, marble, chalk, calcite); `flux:limestone` narrows it
+  -- to one stone, `stone:flux` / `boulder:flux` mean the same as `flux`
+  flux = {t = {'BOULDER'}, flux = true},
   -- BUG-456 (Run 16a/16d moods that needed bone, `trade.want bone` was ignored without a word): a bone is a corpse piece whose description
   -- says so
   bone = {t = {'CORPSEPIECE'}, word = 'bone'}, bones = {t = {'CORPSEPIECE'}, word = 'bone'},
   crafts = {t = {'FIGURINE', 'AMULET', 'SCEPTER', 'CROWN', 'RING', 'EARRING', 'BRACELET', 'TOTEM', 'GOBLET',
                  'INSTRUMENT', 'TOY'}},
 }
+-- BUG-583: the flux stones by name, when the raws are not at hand (item_info sets info.flux from the reaction class FLUX)
+L.FLUX_STONES = {limestone = true, dolomite = true, marble = true, chalk = true, calcite = true}
+
 -- units (stack sizes) bought per token at most; default otherwise
 L.CAPS = {default = 10, anvil = 1, bar = 20, cloth = 20, thread = 20, leather = 15, wood = 30, log = 30, logs = 30,
           block = 30, blocks = 30, seeds = 20, meat = 30, fish = 30, cheese = 30, egg = 20, meal = 30, food = 30,
@@ -214,7 +221,8 @@ function L.token(s, known)
   end
   local types = {}
   for _, n in ipairs(spec.t) do types[n] = true end
-  return {kind = kind, sub = sub, types = types, word = spec.word, mat = spec.mat == true, flag = flag,
+  local flux = spec.flux == true or (sub == 'flux' and (kind == 'stone' or kind == 'boulder'))      -- BUG-583
+  return {kind = kind, sub = sub, types = types, word = spec.word, mat = spec.mat == true, flag = flag, flux = flux or nil,
           metal = sub == L.METAL or nil, cap = L.CAPS[kind] or L.CAPS.default, src = s}
 end
 
@@ -257,6 +265,12 @@ function L.match(tk, info)
   if tk.word and not L.has_word(info.desc, tk.word) then return false end
   if tk.types.WEAPON and L.has_word(info.desc, 'training') then return false end   -- wooden training axes cannot chop
   if tk.metal then return info.metal == true end
+  if tk.flux then                                          -- BUG-583: a flux boulder, `flux:limestone` that stone only
+    local ok = info.flux == true
+    if not ok then for part in tostring(info.mat or ''):gmatch('[^:]+') do if L.FLUX_STONES[part] then ok = true end end end
+    if ok and tk.sub and tk.sub ~= 'flux' and tk.kind == 'flux' then ok = mat_part(info.mat, tk.sub) end
+    return ok
+  end
   if tk.flag then return L.fibre_of(info) == tk.sub end
   if tk.sub then
     if mat_part(info.mat, tk.sub) then return true end
@@ -823,6 +837,12 @@ local function item_info(it, mer, ea, ew)
   pcall(function()                                         -- Run 11: armor:metal, weapon:metal, ...
     info.metal = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material.flags.IS_METAL == true
   end)
+  if info.type == 'BOULDER' then                           -- BUG-583: flux stone (reaction class FLUX)
+    pcall(function()
+      local mat = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material
+      for _, rc in ipairs(mat.reaction_class) do if rc.value == 'FLUX' then info.flux = true end end
+    end)
+  end
   if info.type == 'CLOTH' or info.type == 'THREAD' then    -- fibre kind (cloth:plant / silk / yarn)
     pcall(function()
       local fl = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material.flags
@@ -1924,6 +1944,14 @@ function M.clock(K)
 end
 
 function M.state(K) return pub or {} end
+
+-- public (BUG-582): the sources of the current sell list ('crafts', 'gems', ...), economy asks whether crafts are sold
+function M.sells(K)
+  local ok, _, sell = pcall(wants, K)
+  local out = {}
+  for _, t in ipairs(ok and type(sell) == 'table' and sell or {}) do out[#out + 1] = tostring(t.src) end
+  return out
+end
 
 -- public (CONTRACTS §7): caravans traded this fort
 function M.done(K) return st and st.done or 0 end

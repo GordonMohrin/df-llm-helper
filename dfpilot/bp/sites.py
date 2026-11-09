@@ -66,7 +66,7 @@ from .primitives import Xform, rot_uv
 from .rooms import NO_THROUGH, plot_rects
 from .topo import Graph, N8
 
-RANK_V = 10                           # BUG-346/359/400/407/553: the ranking rules' version (cmd's sites cache re-ranks older ones)
+RANK_V = 11                           # BUG-346/359/400/407/553/584: the ranking rules' version (cmd's sites cache re-ranks older ones)
 GOOD = frozenset("#?")
 WET = frozenset("~w%")
 WATER = frozenset("~w")               # drinkable: not magma
@@ -237,7 +237,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     if tpl in mine.BUILD and "arm" not in (params or {}):
         return _rank_arms(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-528: shorter side tunnels
     p = check_params(tpl, params)
-    if tpl in WATER_TPLS and water is not None and water.get("hrm"):
+    furnish = tpl == "hospital" and bool(p.get("furnish"))      # BUG-581: one table in a hospital room that stands
+    if tpl in WATER_TPLS and water is not None and water.get("hrm") and not furnish:
         # BUG-539 (Run 16b i2 Brotherarrow: water.unstick removed the hospital zone, the room with its beds stood on, the site search
         # then found 'no valid site' and a second hospital would have been built beside the first): the kernel remembers
         # removed hospital zones; the room is the hospital, its zone comes back with the verb
@@ -262,7 +263,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     surface_shops = (tpl in ("workshops", "hospital", *rooms.SURFACE_ROOMS) and bool(p.get("surface")) and not rebuild) \
         or tpl in ("depot", "tradepost", "surfacecore")
     surface_farm = tpl == "farms" and bool(p.get("surface"))      # BUG-407: needs no fort manifest either (ground anywhere)
-    if tpl != "fortcore" and not surface_shops and not surface_farm and not rebuild \
+    if tpl != "fortcore" and not surface_shops and not surface_farm and not rebuild and not furnish \
             and not ((manifest or {}).get("zones") or {}).get("Z4"):
         raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
@@ -281,6 +282,8 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         cands = _surface_farms(snap, p, manifest or {})
     elif rebuild:                                            # BUG-562: where the shop stood
         cands = _rebuild_shops(snap, p, manifest or {})
+    elif furnish:                                            # BUG-581: a free floor tile inside the hospital room
+        cands = _furnish_hospital(snap, manifest or {})
     elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
         cands = _surface_shops(snap, p, manifest or {}, tpl)
         if not cands and surface_top_floor(snap) >= SURFACE_TOP_MIN and not sky_over_floor(snap):
@@ -307,7 +310,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
             lv = ",".join(f"z{z}" for z in sorted(known_aquifer(snap, manifest)))
             raise ValueError(f"{tpl}: all {before} candidate site(s) lie on or right under a known aquifer level ({lv}); rooms keep "
                              "one dry level between (a refuge-level room may use the levels the refuge room itself stands on)")
-    if tpl in WATER_TPLS and water is not None:
+    if tpl in WATER_TPLS and water is not None and not furnish:
         cands = _near_water(cands, tpl, p, water)
     cands = reachable(cands, snap, tpl, near if near is not None else at)    # BUG-352: the citizens' walk group (snapshot wg)
     if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
@@ -1364,6 +1367,39 @@ def _rebuild_shops(snap: dict, p: dict, manifest: dict) -> list[dict]:
     return out
 
 
+def _furnish_hospital(snap: dict, manifest: dict) -> list[dict]:
+    """BUG-581 (Run 16d i4 Trumpetrealms y411-y415: `no_table` for years in a hospital room that stood with four beds, the older template
+    placed no table and no command put one there): hospital p.furnish = 1 ranks the open floor tiles ('.') of the manifest's hospital
+    rooms for ONE table. A tile with more wall neighbours is better (a corner blocks no way), a tile with none (the middle of the
+    room: beds and the pond hole stand there) is left out, a tile of another walk group than the citizens' too. The anchor is the tile."""
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    floor = _Pref(snap, lambda c: c == ".")
+    wall = _Pref(snap, lambda c: c in "#SF")
+    out: list[dict] = []
+    seen = 0
+    for r in manifest.get("rooms") or []:
+        if not (isinstance(r, dict) and r.get("tpl") == "hospital" and isinstance(r.get("bbox"), (list, tuple)) and len(r["bbox"]) == 6):
+            continue
+        seen += 1
+        bx0, by0, bz0, bx1, by1, bz1 = (int(v) for v in r["bbox"])
+        if not (x0 <= bx0 and bx1 <= x1 and y0 <= by0 and by1 <= y1 and z0 <= bz0 <= z1):
+            continue
+        for y in range(by0, by1 + 1):
+            for x in range(bx0, bx1 + 1):
+                if (floor.count(x, y, x, y, bz0) or 0) != 1 or walk_at(snap, (x, y, bz0)) == "0":
+                    continue
+                walls = sum((wall.count(x + dx, y + dy, x + dx, y + dy, bz0) or 0) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+                if walls == 0:
+                    continue                                   # the middle of the room: beds and the pond hole stand there
+                out.append({"anchor": [x, y, bz0], "rot": 0, "score": 100 * walls - abs(x - bx0) - abs(y - by0), "box": (x, y, bz0, x, y, bz0),
+                            "why": f"a table inside the hospital room {r.get('id', '?')} at {x},{y},{bz0} ({walls} wall side(s))"})
+    if not seen:
+        raise ValueError("hospital furnish=1: no hospital room in the fort manifest (a hospital that is built is `hospital`, not furnish)")
+    if not out:
+        raise ValueError("hospital furnish=1: no open floor tile beside a wall inside the hospital room of the manifest")
+    return out
+
+
 EXPLORE_ARMS = (4, 3, 2, 1, 0)        # BUG-528: side-tunnel lengths tried (longest that fits first) when the template's own arm has no site
 
 
@@ -1439,6 +1475,10 @@ def _rank_depths(snap, tpl, params, manifest, n, water, near, within, at, free) 
 
 EXPLORE_LEVEL = 10                    # explore: score per level below the top of Z4 (a deeper start searches deeper)
 AVOID_MARKS = ("cavern", "damp", "warm")
+
+
+EXPLORE_FAR = 8                       # BUG-584: score per tile (x/y) a new probe lies from the nearest earlier one, up to EXPLORE_FAR_MAX tiles
+EXPLORE_FAR_MAX = 30
 
 
 EXPLORE_RING = 3                      # BUG-453: tiles a side tunnel keeps from any revealed opening, water or mark
@@ -1538,6 +1578,10 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     wide = explore_wide_rects(p)
     out, hit, redo = [], set(), []
     pts, failed = breach_points(manifest), failed_explores(manifest)
+    # BUG-584 (Run 16d i4 Trumpetrealms y412-y415: probes of depth 2-6 round the core of a mudstone fort found no ore, no hard stone, and the
+    # ranking kept offering that neighbourhood): the earlier probes of the fort (manifest `explored`, cmd._with_explored) are rock the
+    # fort knows; a new probe scores higher the farther it lies from the nearest of them
+    done_at = [(int(a[0]), int(a[1])) for a in (manifest.get("explored") or []) if isinstance(a, (list, tuple)) and len(a) == 3]
     n_all = n_ref = n_hit = n_redo = n_geom = 0                # BUG-528: how many anchors each test took out (the message says so)
     for i in _anchor_tiles(g, "explore", p, manifest):
         ax, ay, az = g.pos(i)
@@ -1570,10 +1614,15 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
             if any(_overlap(r, b) for r in _rect_boxes(rects, ax, ay, az, rot) for b in keep_out):
                 continue
             steps = min(steps_of.get(i, 99), 99)
+            far, far_why = 0, ""
+            if done_at:
+                dist = int(min(((ax - px) ** 2 + (ay - py) ** 2) ** 0.5 for px, py in done_at))
+                far = EXPLORE_FAR * min(dist, EXPLORE_FAR_MAX)
+                far_why = f", {dist} tiles from the nearest of {len(done_at)} earlier probe(s)"
             out.append({"anchor": [ax, ay, az], "rot": rot, "box": box,
-                        "score": max(0, 1000 - 5 * steps + EXPLORE_LEVEL * (top - az)),
+                        "score": max(0, 1000 - 5 * steps + EXPLORE_LEVEL * (top - az) + far),
                         "why": f"rot{rot}, {top - az} levels below the top of the core, shaft to z{az - p['depth']}, "
-                               f"{steps} steps to a stair, {unknown} unknown tiles, {missing} levels below the snapshot"})
+                               f"{steps} steps to a stair, {unknown} unknown tiles, {missing} levels below the snapshot{far_why}"})
         if len(out) == n_out and n_door:
             n_geom += 1                                      # a floor to dig from, but the shaft or its tunnels meet something
     if not out:

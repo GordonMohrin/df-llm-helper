@@ -3189,6 +3189,58 @@ def gone_shops(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
     return [line]
 
 
+HOSPITAL_FURNISH_MAX = 2     # BUG-581: furnish projects (one table each) drafted for one fort, done or not
+# BUG-581: the hospital gaps the plan cannot close, with what closes them (reported in the notes, not drafted)
+HOSPITAL_REST = {"no_diag": "the Diagnose labor", "no_surgery": "the Surgery labor", "no_bone": "the Bone setting labor",
+                 "no_suture": "the Suturing labor and thread", "no_dress": "the Dressing wounds labor and cloth",
+                 "no_plaster": "plaster powder (a caravan brings it: trade.want)", "no_soap": "soap (a caravan brings it: trade.want)"}
+
+
+def hospital_table(save_dir: Path, doc: dict, prev: dict | None, fort: dict | None = None) -> list[str]:
+    """BUG-581 (Run 16d i4 Trumpetrealms y411-y415 `hospital ok`, 4 beds, gaps no_table / no_diag / no_bone / no_suture / no_dress / no_plaster /
+    no_soap for years: a hospital room of an older template has no table and no command put one there; Run 16a i1 Basementflew: the
+    hospital project hung 300 days at 28 % because its traction bench needs a mechanism and the fort had no reachable hard stone):
+    (1) the kernel's hospital audit (state water.gaps) says `no_table` and a hospital room stands in the manifest: `hospital furnish=1`
+    (one table on a free floor tile of the room) is drafted at the end of seasons[0], unless a furnish project is open or
+    HOSPITAL_FURNISH_MAX exist; (2) a NEW hospital build gets bench=0 while stone is out of reach (fort.nostone): a traction bench
+    needs a mechanism. The other gaps (a doctor's labor, plaster, soap) are reported, not drafted. Returns the note lines."""
+    out: list[str] = []
+    if (fort or {}).get("nostone"):
+        for _, _, b in new_builds(doc, prev):
+            p = b.get("p") or {}
+            if b["tpl"] == HOSPITAL and not p.get("furnish") and p.get("bench", 1):
+                b["p"] = {**p, "bench": 0}
+                out.append(f"BUG-581: hospital bench=0 ({(fort or {}).get('nostone')}): the traction bench needs a mechanism; it can be placed later")
+    s = files.read_state(save_dir) or {}
+    gaps = [g for g in ((s.get("water") or {}).get("gaps") or []) if isinstance(g, str)]
+    if "no_table" in gaps:
+        try:
+            man = _cmd.fort_manifest(save_dir)
+        except Exception:                               # noqa: BLE001 - no bp package or manifest: not judged
+            man = {}
+        stands = any(isinstance(r, dict) and r.get("tpl") == HOSPITAL for r in (man or {}).get("rooms") or [])
+        furn = 0
+        openp = False
+        done = done_projects(save_dir)
+        for pth in bp_files(save_dir):
+            d = files.read_json(pth)
+            if isinstance(d, dict) and d.get("tpl") == HOSPITAL and (d.get("params") or {}).get("furnish"):
+                furn += 1
+                openp = openp or pth.stem not in done
+        drafted = any(b["tpl"] == HOSPITAL and (b.get("p") or {}).get("furnish") for se in doc["seasons"] for b in se["build"])
+        # a hospital build of the draft that is not a furnish has its table (BUG-537), so does a hospital project not done yet
+        built_new = any(b["tpl"] == HOSPITAL and not (b.get("p") or {}).get("furnish") for _, _, b in new_builds(doc, prev))
+        if stands and not (drafted or built_new or openp or furn >= HOSPITAL_FURNISH_MAX):
+            doc["seasons"][0]["build"].append({"tpl": HOSPITAL, "site": "S1", "p": {"furnish": 1}})
+            out.append("BUG-581: the hospital audit says no_table: hospital furnish=1 (one table in the hospital room) drafted in seasons[0]")
+    rest = [f"{g} ({HOSPITAL_REST[g]})" for g in gaps if g in HOSPITAL_REST]
+    if rest:
+        out.append("BUG-581: hospital gaps the plan cannot build: " + "; ".join(rest))
+    for ln in out:
+        doc["notes"] += "; " + ln
+    return out
+
+
 RESERVE_ID = "reserve-hospital"
 HOSPITAL_FIRST = ("captives",)          # BUG-483: the templates that never take the hospital's site while the fort has none
 
@@ -3566,7 +3618,9 @@ def soil_dig(save_dir: Path, doc: dict, prev: dict | None) -> str:
 # BUG-500 (Run 16a i1 Basementflew y388-y391, Run 16d i4 Trumpetrealms: a fort with no free boulder and no hard stone; propose drafted the temple
 # and the cistern again after the player had cancelled them: the temple's offering place is a stone altar, the well, the lever and the floodgate
 # of a cistern are mechanisms (stone); they hung at 37 % for years): while stone is out of reach these templates are left out and the notes say why
-NEEDS_STONE = {"temple": "its offering place is a stone altar", "cistern": "its well, lever and floodgate need mechanisms (made of stone)"}
+# BUG-586 (Run 16a i1 Basementflew: `traps@S1` drafted every year without stone, the project stalled 300+ days on mechanisms): the traps too
+NEEDS_STONE = {"temple": "its offering place is a stone altar", "cistern": "its well, lever and floodgate need mechanisms (made of stone)",
+               "traps": "every trap is built from a mechanism (made of stone)"}
 
 
 def cancelled_ids(save_dir: Path) -> set[str]:
@@ -3583,6 +3637,8 @@ def nostone_reason(s: dict | None, famine: dict | None) -> str:
     (state stock.rock 0) with a current MATERIAL_SHORT event (material_famine)."""
     if soil_fort(s):
         return "the stone digs found only soil (no hard stone yet)"
+    if ((s or {}).get("stock") or {}).get("rhard"):                  # BUG-586: DF refuses the rock jobs (BUG-545)
+        return "DF cancels the rock jobs: no non-economic hard stone (no mechanisms)"
     rock = ((s or {}).get("stock") or {}).get("rock")
     if _nat(rock) and rock == 0 and (famine or {}).get("rock0"):
         return "no free boulder and a current MATERIAL_SHORT"
@@ -5569,6 +5625,7 @@ def run(args, save_dir: Path) -> int:
         cfit += reserve_shop_room(save_dir, doc, prev)        # BUG-461: Still, Kitchen, Butchers ... before dining and furnaces
         cfit += essential_shops(save_dir, doc, prev)          # BUG-527: Still and Kitchen whenever the manifest lacks them
         cfit += gone_shops(save_dir, doc, prev)               # BUG-562: a shop that stood and is gone, again at its old place
+        cfit += hospital_table(save_dir, doc, prev, fort)     # BUG-581: a table in the hospital room, no traction bench without a mechanism
         cfit += fit_placeable(save_dir, doc, prev)            # BUG-370: no build whose placement fails on its site
         offer = offer_growth(save_dir, doc, prev, state)      # BUG-530: an empty draft offers rooms, beds, stockpiles, workshops
         cfit += [offer] if offer else []

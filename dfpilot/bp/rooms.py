@@ -49,7 +49,9 @@ PARAMS = {
     "tombs": {"n": (10, 1, 60), "tier": (0, 0, 100000)},
     # BUG-384: surface = 1 is a hospital on open surface floor beside the wagon and the water (no fortcore needed): no dig,
     # no door, no burrow, no well; the sites follow the kernel's accepted water as the dug one does
-    "hospital": {"beds": (4, 1, 10), "surface": (0, 0, 1)},
+    # BUG-581: bench = 0 leaves the traction bench out (it needs a mechanism; a fort with no hard stone cannot make one); furnish = 1 is
+    # ONE table inside a hospital room that stands (no beds, no dig, no zone): the room of an older template had no table
+    "hospital": {"beds": (4, 1, 10), "surface": (0, 0, 1), "bench": (1, 0, 1), "furnish": (0, 0, 1)},
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40), "surface": (0, 0, 1)},
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
@@ -221,6 +223,8 @@ def tombs(p: dict) -> Plan:
 def hospital(p: dict) -> Plan:
     """Beds, traction bench, a table, chests and its own well spot (well + pond hole over a sump below)."""
     P = Plan("hospital", "living")
+    if p.get("furnish"):
+        return _furnish_hospital(P, p)
     if p.get("surface"):
         return _surface_hospital(P, p)
     box = _box(P, 7, 5)
@@ -229,10 +233,20 @@ def hospital(p: dict) -> Plan:
     b = P.stage("build", "build", orders=1)
     for i in range(p["beds"]):
         b.tile(u0 + i if i < 7 else u0 + i - 7, v1 if i < 7 else v1 - 1, 0, "b")
-    b.tile(u0, v0 + 2, 0, "R").tile(u0, v0, 0, "h").tile(u0 + 1, v0, 0, "h").tile(2, v0 + 1, 0, "l")
+    if p.get("bench", 1):
+        b.tile(u0, v0 + 2, 0, "R")
+    b.tile(u0, v0, 0, "h").tile(u0 + 1, v0, 0, "h").tile(2, v0 + 1, 0, "l")
     b.tile(u1, v0, 0, "t")                         # BUG-537: the table of surgery and suturing (inspect hospital: no_table)
     P.stage("zone", "zone").ent(3, v0 + 1, 3, v0 + 1, 0, "p", "pond=true")
     _finish(P, p, box, "m", "location=hospital name=Hospital allow=residents")
+    return P
+
+
+def _furnish_hospital(P: Plan, p: dict) -> Plan:
+    """BUG-581 (Run 16d i4 Trumpetrealms y411-y415: the hospital room of an older template stood with 4 beds and no table in its zone,
+    `no_table` for years, no command put one there): one table on the anchor tile, inside a hospital room of the manifest (sites picks
+    a free floor tile of the room). Nothing is dug, no zone, no room: the zone and the beds are the room's own."""
+    P.stage("build", "build", orders=1).tile(0, 0, 0, "t")
     return P
 
 
@@ -249,7 +263,9 @@ def _surface_hospital(P: Plan, p: dict) -> Plan:
     b = P.stage("build", "build", orders=1)
     for i in range(p["beds"]):
         b.tile(i if i < 7 else i - 7, H - 1 if i < 7 else H - 2, 0, "b")
-    b.tile(0, 2, 0, "R").tile(0, 0, 0, "h").tile(1, 0, 0, "h")
+    if p.get("bench", 1):
+        b.tile(0, 2, 0, "R")
+    b.tile(0, 0, 0, "h").tile(1, 0, 0, "h")
     b.tile(W - 1, 0, 0, "t")                       # BUG-537: the table of surgery and suturing
     P.stage("zone", "zone").ent(0, 0, W - 1, H - 1, 0, "m", "location=hospital name=Hospital allow=residents")
     P.room("", "hospital", USE.get("hospital", "utility"), (0, 0, 0, W - 1, H - 1, 0), 0)
