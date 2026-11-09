@@ -91,6 +91,9 @@ M.CFG = {
   UNLOAD_WAIT = 600, UNLOAD_MAX = 10,
   NOGOODS_WAIT = 1200,  -- ticks at the depot without any merchant goods (caravan.goods and the depot's trader items): the visit ends, nothing is hauled
   BRING_MAX = 100,      -- sale items marked for the depot per visit (BUG-016; was the reused ITEMS)
+  SURPLUS = true,       -- BUG-627: bone / food / drink above their floors are added to a non-empty sell list (false = the list as given)
+  SURPLUS_FOOD_D = 300, -- ... food (plant, meal) while it lasts this many days
+  SURPLUS_DRINK_D = 600,-- ... drink only while it lasts this many days
   UNFORBID_BINS = true, -- BUG-609: a forbidden bin of crafts is unforbidden when it is hauled to the depot (false = left, counted bin_forbid)
   RETRY_WAIT = 1200, MAX_TRIES = 2,
   -- BUG-026: a retry waits at most the ticks left before the trade screen may no longer open (time_remaining down to
@@ -992,6 +995,38 @@ function L.metal_sell(want, sell, known)
   return r, short
 end
 
+-- BUG-627 (Run 16a i1 Basementflew y443-y453: `trade.sell crafts/thread/drink`, every caravan 'nothing_to_sell' beside 169 items of
+-- other kinds; only after bone, food, meal and plant were added by hand did the first trade since y426 happen, and drink in the list cut
+-- the stock from 944 to 396 days): a NON-EMPTY sell list (an empty one sells whatever lies at the depot) gets the fort's surplus kinds
+-- added by the kernel: bone always, food (its types include plant and meal) while the food lasts SURPLUS_FOOD_D days, drink only while
+-- it lasts SURPLUS_DRINK_D days. A kind the list names stays whatever the stock; cfg.SURPLUS = false leaves the list alone.
+-- days = {food_d, drink_d} (economy.surplus_days) | nil (none known: nothing is added). Returns the list and the sources added.
+function L.surplus_sell(sell, days, known, cfg, noauto)
+  local added = {}
+  if #sell == 0 or cfg.SURPLUS == false or type(days) ~= 'table' then return sell, added end     -- no stock reading: the list as given
+  local named = {}
+  for _, s in ipairs(type(noauto) == 'table' and noauto or {}) do          -- the player took it out of the list
+    local tk = L.token(s, known)
+    if tk then named[tk.kind] = true end
+  end
+  for _, tk in ipairs(sell) do named[tk.kind] = true end
+  local fd, dd = days.food_d, days.drink_d
+  local cand = {'bone'}
+  if fd and fd >= cfg.SURPLUS_FOOD_D then cand[#cand + 1] = 'food' end
+  if dd and dd >= cfg.SURPLUS_DRINK_D then cand[#cand + 1] = 'drink' end
+  local r
+  for _, src in ipairs(cand) do
+    local tk = L.token(src, known)
+    if tk and not named[tk.kind] then
+      r = r or {table.unpack(sell)}
+      r[#r + 1] = tk
+      named[tk.kind] = true
+      added[#added + 1] = src
+    end
+  end
+  return r or sell, added
+end
+
 local function wants(K)
   local p = (K.plan or {}).trade or {}
   local w, s = p.want, p.sell
@@ -1011,7 +1046,10 @@ local function wants(K)
     if m then m.cap = math.max(m.short and m.cap or 0, tk.cap) else want[#want + 1] = tk end
   end
   local sell, short = L.metal_sell(want, L.tokens(s, known), known)
-  return want, sell, short
+  local okd, days = K.call('economy', 'surplus_days')      -- BUG-627: bone, food, drink above their floors join a non-empty list
+  local added
+  sell, added = L.surplus_sell(sell, okd and type(days) == 'table' and days or nil, known, M.CFG, ov and ov.noauto)
+  return want, sell, short, added
 end
 
 local function lists_job(K, ui, mer)
@@ -1903,7 +1941,7 @@ function M.init(K)
         st.visits[tostring(key)] = nv
       end
     end
-    if type(p.ov) == 'table' then st.ov = {want = p.ov.want, sell = p.ov.sell, loaded = int(p.ov.loaded)} end
+    if type(p.ov) == 'table' then st.ov = {want = p.ov.want, sell = p.ov.sell, noauto = p.ov.noauto, loaded = int(p.ov.loaded)} end
     if type(p.ledger) == 'table' then st.ledger = p.ledger end
     if type(p.ui) == 'table' then st.ui = {cms = int(p.ui.cms), n = int(p.ui.n), closed = int(p.ui.closed), ems = -1} end
   end
@@ -2159,7 +2197,13 @@ local function override(K, args)
   local want, sell = args.want or ov.want, args.sell or ov.sell
   if args.add ~= nil or args.remove ~= nil then want = patch(w, args.want, args.add, args.remove) end
   if args.sell_add ~= nil or args.sell_remove ~= nil then sell = patch(s, args.sell, args.sell_add, args.sell_remove) end
-  st.ov = {want = want, sell = sell, loaded = type(pp) == 'table' and int(pp.loaded) or 0}
+  -- BUG-627: a token the player takes out of the sell list (sell_remove) stays out of the automatic surplus kinds too
+  local noauto = ov.noauto
+  if args.sell_remove ~= nil then
+    noauto = {table.unpack(noauto or {})}
+    for _, tk in ipairs(args.sell_remove) do noauto[#noauto + 1] = tk end
+  end
+  st.ov = {want = want, sell = sell, noauto = noauto, loaded = type(pp) == 'table' and int(pp.loaded) or 0}
   dirty = true
 end
 

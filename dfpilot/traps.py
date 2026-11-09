@@ -255,6 +255,11 @@ def draft(fort: dict | None, target: str, builds: list, prev: dict | None, year,
     if rb or target < TRAPS_PHASE or (info is not None and TRAPS not in info):
         return [], ""
     out, note = [], ""
+    # BUG-628 (Run 16a i1 Basementflew y455: `plan propose` drew traps@S1 with no trap part free; the gate of round 39 sat only behind the
+    # draft, in drop_impossible): every trap is built from a mechanism, so no lane is drafted while stone / parts are out of reach
+    why = (fort or {}).get("nostone") or (fort or {}).get("noparts")
+    if why and (tr.get("open") or tr.get("bopen")):
+        return [], f"; BUG-628: trap lanes not drafted, every trap needs a mechanism ({why})"
     same = prev if prev and prev.get("year") == year else None
     for word, n, base in (("ways", tr.get("open"), TRAPS_WAYS), (BRIDGE_WORD, tr.get("bopen"), TRAPS_BRIDGES)):
         if not n or any(b.get("tpl") == TRAPS and _word(b) == word for b in builds) or (same and _planned(same, word)):

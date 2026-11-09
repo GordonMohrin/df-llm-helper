@@ -664,6 +664,10 @@ def surface_facts(save_dir: Path, state: dict | None, applied: set | None, core:
         late = aquifer_late(save_dir, applied)
         if late:
             out["aq_late"] = late
+        # BUG-626: an aqshaft that is placed and not passed yet (under way, or its bottom unknown) is the route stage 3 waits for
+        shafts = aq_shafts(save_dir, applied)
+        if shafts["placed"] and (shafts["live"] or shafts["bottom"] is None):
+            out["aq_wait"] = {"live": bool(shafts["live"])}
     if any(t == "fortcore" for t, _ in (applied or ())) and not (core and not core_movable(core)):
         return out                                         # a fortcore stands or digs (a re-site is the other fix)
     if core:
@@ -1793,6 +1797,15 @@ def stage3_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
     adds = new_builds(doc, prev)
     planned = min((si for si, _, b in adds if _refuge_stage(b)), default=None)
     limit = min((si for si, _, b in adds if not _refuge_fix(b)), default=3)
+    if planned is None:
+        wait = stage3_waits(fort, adds)
+        if wait:
+            # BUG-626 (Run 16a i1 Basementflew y455, after round 39: BUG-602 gave `bp sites aqshaft` open-ground columns, so the aqshaft route
+            # was 'ok' and no_core_why went quiet; every P3 / P5 plan was then refused for a stage 3 that waits for the shaft anyway, only P2
+            # applied): stage 3 of a core that meets the aquifer follows the PASSED shaft (p.aquifer=pass), it is no build of this plan
+            return [], [f"stage 3: {names} {'does' if len(miss) == 1 else 'do'} not stand and fortcore stage 3 waits for the aqshaft "
+                        f"({wait}): phase_target {pt} (P3+) is not held for O1 and B2 until the shaft passed; they are asked for "
+                        "again then (dfllm plan propose drafts stage 3 after the pass)"]
     text = (f"stage 3: phase_target {pt} (P3+) needs O1, B2 and the refuge standing or being built first (fortcore stage "
             f"3 builds all three): {names} {'does' if len(miss) == 1 else 'do'} not stand; add {_compact(REFUGE_STAGE)} "
             "as the first build (dfllm plan propose drafts it)")
@@ -1802,6 +1815,19 @@ def stage3_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list
         return [f"stage 3: planned in seasons[{planned}]: move it to seasons[{limit}], before the other new builds "
                 f"(phase_target {pt} needs {names} first)"], []
     return [], []
+
+
+def stage3_waits(fort: dict | None, adds: list) -> str:
+    """BUG-626: why fortcore stage 3 cannot be dug before a later plan ('' when it can): an aqshaft is placed and not passed
+    (surface.aq_wait: it digs, or waits, or its end is unknown), or the aquifer route is due and this plan builds the shaft
+    (surface.aq_late.ok, an aqshaft among its new builds: aquifer_late_swap)."""
+    sf = (fort or {}).get("surface") or {}
+    if sf.get("aq_wait"):
+        return "an aqshaft is placed and has not passed the aquifer yet"
+    late = sf.get("aq_late")
+    if isinstance(late, dict) and late.get("ok") and any(b["tpl"] == AQSHAFT for _, _, b in adds):
+        return "this plan builds the aqshaft past the known aquifer levels"
+    return ""
 
 
 def perimeter_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[str], list[str]]:
@@ -2552,7 +2578,9 @@ def check(doc, state: dict | None, decisions: dict | None = None, tpls: list[str
     warn += aquifer_gate(doc, s, fort or {})      # FR-95: a breach:damp park, a heavy aquifer, fortcore p.aquifer pass
     warn += stress_gate(doc, s, fort)             # FR-74: stress at care.stress_high: a temple and a tavern
     warn += stone_gate(doc, prev, fort)           # BUG-500: no temple / cistern while stone is out of reach
-    warn += _traps.gate(doc, fort)                # FR-96: a way in without a trap lane from P5 on
+    # FR-96: a way in without a trap lane from P5 on; BUG-628: the lane is no advice while every trap lacks its mechanism
+    twhy = _gate_why(fort, "traps")
+    warn += [w + f" - not buildable now: {twhy}" if twhy else w for w in _traps.gate(doc, fort)]
     warn += defense_gate(doc, s, fort or {}, prev)    # BUG-377: the defence before growth
     warn += trap_hold_gate(doc, s)                    # BUG-437: no stone-fall traps on the citizens' way out
     errs += core_order_gate(doc)                  # review fix (merge20): fortcore stage k never before stage k-1 in the plan
@@ -3675,6 +3703,13 @@ def noparts_reason(s: dict | None) -> str:
         return "no trap parts (mechanisms) and no Mechanics workshop to make them"
     if route == "no stone":
         return "no trap parts (mechanisms) and no stone to make them from"
+    # BUG-628 (Run 16a i1 Basementflew y455: `plan propose` drew traps@S1 again with no trap part free; the kernel clears mroute when no
+    # trap waits for a part, and 'ordered' / 'stone' (an order is open) held the gate off while the earlier traps project hung at 'waits for
+    # trapparts x1' for years): stock.mtp = the parts the planned traps wait for; traps that already wait with none free make a new lane
+    # pointless (it would wait behind them), whatever the route
+    waits = stock.get("mtp")
+    if _nat(waits) and waits > 0:
+        return f"no free trap part and {waits} planned trap(s) already wait for parts (route {route or 'none'}): more lanes would wait behind them"
     return ""
 
 

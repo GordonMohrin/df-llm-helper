@@ -7730,6 +7730,12 @@ function M.mech_need(K)
   end
   return lv * M.MECH.per_lever, lv
 end
+-- BUG-627 (trade): the stock days the sell list's automatic surplus kinds follow {food_d, drink_d}; nil before the first stock pass
+function M.surplus_days(K)
+  local o = st and st.out
+  if type(o) ~= 'table' then return nil end
+  return {food_d = math.tointeger(o.food_d), drink_d = math.tointeger(o.drink_d)}
+end
 -- BUG-491 (seal): what the last plan_mech pass found {need, free, short, route ('ordered' | 'stone' | 'no stone' | 'no Mechanics' |
 -- nil: none short)}; nil before the first pass
 function M.mech_state(K)
@@ -12760,6 +12766,7 @@ function M.state(K)
     if type(st.mech) == 'table' then                   -- BUG-611: free mechanisms and what plan_mech found for the shortfall (plan: no traps without parts)
       r.stock.mfree = math.max(0, math.tointeger(st.mech.free) or 0)
       if type(st.mech.route) == 'string' then r.stock.mroute = st.mech.route:sub(1, 16) end
+      r.stock.mtp = math.max(0, math.tointeger(st.mech.traps) or 0)       -- BUG-628: trap parts the planned traps wait for
     end
     if st.picks then r.stock.picks, r.stock.pick_want = st.picks.have, st.picks.want end
     -- Run 11: metal short for the soldiers (M.metal_plan: plan check's metal route gate) and the metal items marked for
