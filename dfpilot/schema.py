@@ -115,7 +115,7 @@ STATE_OWNERS = {
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "pop.hold": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
-    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy",
+    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.mfree": "economy", "stock.mroute": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
@@ -1073,6 +1073,9 @@ STATE = Obj(
                            # BUG-586: 1 = DF cancels the rock jobs 'Needs non-economic hard stone' (BUG-545 hard_denied): no mechanisms
                            # come from the stone at hand (plan: no traps, no traction bench)
                            "rhard": FLAG,
+                           # BUG-611: free trap parts (mechanisms) in the fort and what plan_mech found for the shortfall ('no stone' | 'no
+                           # Mechanics' | 'ordered' | 'stone'): plan propose / check leave the traps out while none is free and none can be made
+                           "mfree": NAT, "mroute": Str(maxbytes=16),
                            # Run 11: metal short for the soldiers (economy.metal: plan check's metal route gate) and the
                            # metal items marked for melting (the invaders' gear in the melt pile)
                            "mshort": FLAG, "melt": NAT,

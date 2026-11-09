@@ -347,6 +347,7 @@ def fort_facts(save_dir: Path, state: dict | None = None) -> dict:
             "stone_dig": stone_digs(save_dir, state),               # BUG-430: a dead dig is none
             "famine": famine,                                        # BUG-430: no boulders and no logs
             "nostone": nostone_reason(state, famine),                # BUG-500: temple / cistern cannot be made
+            "noparts": noparts_reason(state),                        # BUG-611: no trap parts and none can be made
             "cancelled": sorted(cancelled_ids(save_dir)),            # BUG-500: bp.cancel'ed project ids (the plan may end before them)
             "hosp": hospital_facts(save_dir, state, rooms),
             "office": office_facts(save_dir, rooms, applied),         # BUG-396: an office stands or is planned; a surface site
@@ -3221,12 +3222,13 @@ def hospital_table(save_dir: Path, doc: dict, prev: dict | None, fort: dict | No
     HOSPITAL_FURNISH_MAX exist; (2) a NEW hospital build gets bench=0 while stone is out of reach (fort.nostone): a traction bench
     needs a mechanism. The other gaps (a doctor's labor, plaster, soap) are reported, not drafted. Returns the note lines."""
     out: list[str] = []
-    if (fort or {}).get("nostone"):
+    nobench = (fort or {}).get("nostone") or (fort or {}).get("noparts")           # BUG-611: no mechanism to be had either
+    if nobench:
         for _, _, b in new_builds(doc, prev):
             p = b.get("p") or {}
             if b["tpl"] == HOSPITAL and not p.get("furnish") and p.get("bench", 1):
                 b["p"] = {**p, "bench": 0}
-                out.append(f"BUG-581: hospital bench=0 ({(fort or {}).get('nostone')}): the traction bench needs a mechanism; it can be placed later")
+                out.append(f"BUG-581: hospital bench=0 ({nobench}): the traction bench needs a mechanism; it can be placed later")
     s = files.read_state(save_dir) or {}
     gaps = [g for g in ((s.get("water") or {}).get("gaps") or []) if isinstance(g, str)]
     if "no_table" in gaps:
@@ -3661,31 +3663,62 @@ def nostone_reason(s: dict | None, famine: dict | None) -> str:
     return ""
 
 
+def noparts_reason(s: dict | None) -> str:
+    """BUG-611 (Run 16a i1 Basementflew y426-y429: `traps@S1` every year with no trapparts, BUG-586 did not hold because the fort had free boulders):
+    why no trap can be built ('' when one can): the kernel's mechanism state (state stock.mfree = free mechanisms, stock.mroute = what
+    plan_mech found for the shortfall) says none is free and none can be made ('no stone', 'no Mechanics' workshop)."""
+    stock = (s or {}).get("stock") or {}
+    free, route = stock.get("mfree"), stock.get("mroute")
+    if not _nat(free) or free > 0:
+        return ""
+    if route == "no Mechanics":
+        return "no trap parts (mechanisms) and no Mechanics workshop to make them"
+    if route == "no stone":
+        return "no trap parts (mechanisms) and no stone to make them from"
+    return ""
+
+
+def _gate_why(fort: dict | None, tpl: str) -> str:
+    """BUG-611: why a NEEDS_STONE template cannot be built now: stone out of reach (BUG-500) or, for the traps, no trap parts (BUG-611)."""
+    why = (fort or {}).get("nostone") or ""
+    if not why and tpl == "traps":
+        why = (fort or {}).get("noparts") or ""
+    return why
+
+
 def drop_impossible(doc: dict, prev: dict | None, fort: dict | None) -> str:
     """BUG-500: the builds of NEEDS_STONE templates are left out of the draft while fort.nostone holds: the new ones, and the cancelled ones at the
     end of the applied plan's season (stable_ids lets the plan end before a cancelled tail; a build in the middle would shift the ids behind
     it). Returns the note ('' when nothing was left out)."""
-    why = (fort or {}).get("nostone")
-    if not why:
+    if not ((fort or {}).get("nostone") or (fort or {}).get("noparts")):
         return ""
     year = doc["year"]
     same = bool(prev) and prev.get("year") == year
     free = set((fort or {}).get("cancelled") or ())
     out: list[str] = []
+    whys: list[str] = []
+
+    def gated(b: dict) -> bool:
+        return b["tpl"] in NEEDS_STONE and bool(_gate_why(fort, b["tpl"]))
+
     for si, se in enumerate(doc["seasons"]):
         n = len(prev["seasons"][si]["build"]) if same else 0
         head, tail = se["build"][:n], se["build"][n:]
         for b in tail:
-            if b["tpl"] in NEEDS_STONE:
+            if gated(b):
                 out.append(f"{b['tpl']} ({NEEDS_STONE[b['tpl']]})")
-        tail = [b for b in tail if b["tpl"] not in NEEDS_STONE]
-        while not tail and head and head[-1]["tpl"] in NEEDS_STONE and bp_id(year, si, len(head) - 1) in free:
+                if _gate_why(fort, b["tpl"]) not in whys:
+                    whys.append(_gate_why(fort, b["tpl"]))
+        tail = [b for b in tail if not gated(b)]
+        while not tail and head and gated(head[-1]) and bp_id(year, si, len(head) - 1) in free:
             b = head.pop()
             out.append(f"{b['tpl']} {bp_id(year, si, len(head))} (cancelled; {NEEDS_STONE[b['tpl']]})")
+            if _gate_why(fort, b["tpl"]) not in whys:
+                whys.append(_gate_why(fort, b["tpl"]))
         se["build"] = head + tail
     if not out:
         return ""
-    note = (f"BUG-500: stone is out of reach ({why}): left out {', '.join(out)}; trade.want stone, mechanism and a dig to hard stone "
+    note = (f"BUG-500: stone / trap parts are out of reach ({'; '.join(whys)}): left out {', '.join(out)}; trade.want stone, mechanism and a dig to hard stone "
             "first, then propose again")
     doc["notes"] += "; " + note
     return note
@@ -3694,12 +3727,11 @@ def drop_impossible(doc: dict, prev: dict | None, fort: dict | None) -> str:
 def stone_gate(doc: dict, prev: dict | None, fort: dict | None) -> list[str]:
     """check (BUG-500): a warning for each NEW temple / cistern build while fort.nostone holds: it would wait for a stone altar / mechanisms
     for years (the applied one: bp.cancel it; the plan may then end before it)."""
-    why = (fort or {}).get("nostone")
-    if not why:
+    if not ((fort or {}).get("nostone") or (fort or {}).get("noparts")):
         return []
-    return [f"{b['tpl']} (seasons[{si}]): {NEEDS_STONE[b['tpl']]}, and stone is out of reach ({why}): leave it out until stone arrives "
+    return [f"{b['tpl']} (seasons[{si}]): {NEEDS_STONE[b['tpl']]}, and stone is out of reach ({_gate_why(fort, b['tpl'])}): leave it out until stone arrives "
             "(trade.want stone,mechanism; a dig to hard stone)"
-            for si, _, b in new_builds(doc, prev) if b["tpl"] in NEEDS_STONE]
+            for si, _, b in new_builds(doc, prev) if b["tpl"] in NEEDS_STONE and _gate_why(fort, b["tpl"])]
 
 
 def stone_first(save_dir: Path, doc: dict, prev: dict | None) -> str:

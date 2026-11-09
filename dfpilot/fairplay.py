@@ -929,7 +929,9 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                                "pile_h": (1, 5), "pile_r": (2, 40), "pile_reads": (20, 2000), "pile_every": (1, 400)},
                      # FR-76: a forbidden stock (>= burst_min drink + food units) is unforbidden burst_per_day a day; BUG-594: after_days days
                      # after the last SIEGE / BREACH day loose forbidden food is unforbidden too
-                     "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000), "after_days": (0, 365)}}
+                     "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000), "after_days": (0, 365)},
+                     # BUG-607: days without a log before a fort counts as treeless (0 = never; the part's other keys: the mirror test)
+                     "pieces": {"treeless_days": (0, 400)}}
 ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale")   # parts whose every key is listed above
 _PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")

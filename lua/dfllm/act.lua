@@ -451,10 +451,20 @@ function A.install_trade(I, gui, int)
     for _, tn in ipairs(type(a.types) == 'table' and a.types or {}) do want[tn] = true end
     local function skip(why) sk[why] = (sk[why] or 0) + 1 end
     -- the free bin of a contained item whose contents are all of the sale types; nil + the reason otherwise
+    -- BUG-609 (Run 16a i1 Basementflew: 'bin_forbid' 136 on every haul, 0 sent, no code of the kernel forbids a bin or a craft): with
+    -- a.unforbid a bin (and the crafts in it) that is forbidden and otherwise free is a sale bin too; it is unforbidden only when
+    -- it is marked (the second return value of bin_of lists them). a.freed counts the unforbidden items.
     local function bin_of(it)
       local okc, c = pcall(dfhack.items.getContainer, it)
       if not okc or not c then return nil, 'in_inventory' end
       local fine, why = free_of(c, BIN_SKIP)
+      local thaw = {}
+      if not fine and why == 'forbid' and a.unforbid then
+        local rest = {}
+        for _, fl in ipairs(BIN_SKIP) do if fl ~= 'forbid' then rest[#rest + 1] = fl end end
+        fine, why = free_of(c, rest)
+        if fine then thaw[#thaw + 1] = c end
+      end
       if not fine then return nil, 'bin_' .. why end
       if not c.flags.on_ground then return nil, 'bin_not_on_ground' end
       local okk, subs = pcall(dfhack.items.getContainedItems, c)
@@ -462,9 +472,15 @@ function A.install_trade(I, gui, int)
       for _, x in ipairs(subs) do
         if not want[df.item_type[x:getType()]] then return nil, 'bin_mixed' end
         local fx, wx = free_of(x, BRING_SKIP)
+        if not fx and wx == 'forbid' and a.unforbid then
+          local rest = {}
+          for _, fl in ipairs(BRING_SKIP) do if fl ~= 'forbid' and fl ~= 'in_inventory' then rest[#rest + 1] = fl end end
+          fx = free_of(x, rest)
+          if fx then thaw[#thaw + 1] = x; wx = nil end
+        end
         if not fx and wx ~= 'in_inventory' then return nil, 'bin_' .. wx end
       end
-      return c, #subs
+      return c, #subs, thaw
     end
     for _, tn in ipairs(type(a.types) == 'table' and a.types or {}) do
       local t = df.item_type[tn]
@@ -472,14 +488,17 @@ function A.install_trade(I, gui, int)
       for _, it in ipairs(list or {}) do
         if n >= max then break end
         local fine, why = free_of(it, BRING_SKIP)
+        -- BUG-609: a forbidden craft inside a bin is the bin's business (bin_of), not a loose forbidden item
+        if not fine and why == 'forbid' and a.unforbid and it.flags.in_inventory then why = 'in_inventory' end
         if fine then
           if it.flags.on_ground and dfhack.items.markForTrade(it, d) then n = n + 1 else skip(it.flags.on_ground and 'refused' or 'not_on_ground') end
         elseif why == 'in_inventory' then
-          local c, cnt = bin_of(it)
+          local c, cnt, thaw = bin_of(it)
           if c and binned[c.id] then
             -- counted with its bin
           elseif c then
             binned[c.id] = true
+            for _, x in ipairs(thaw or {}) do x.flags.forbid = false; a.freed = (a.freed or 0) + 1 end
             if dfhack.items.markForTrade(c, d) then n = n + cnt else skip('refused') end
           else
             skip(cnt)
