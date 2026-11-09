@@ -232,4 +232,34 @@ T.test('FR-100 kit library: conf limits and the plan; refit_plan upgrades soft s
   T.eq(KIT.refit_plan({d}, function() return {metal = 3, leather = 0, any = 3} end), {}, 'no spec, no index')
 end)
 
+-- BUG-620 (Run 16a i1 Basementflew y449: squad.uniform melee on A, B and C took worn from 43 % to 11 %, 'metal 0 %': every position's
+-- specs were replaced by metal ones the soldiers had to fetch, and what they wore was dropped): what a soldier wears stays
+T.test('BUG-620: squad.uniform keeps every spec a soldier wears; only the unfilled categories and vacant positions are re-specced', function()
+  local W = world()
+  local A = X.squad_of(W, 'A')
+  arm(W, A, {{skills = {AXE = 8}, spec = 'ITEM_WEAPON_AXE_BATTLE'}, {skills = {AXE = 4}, spec = 'ITEM_WEAPON_AXE_BATTLE'}})
+  local armor = {}
+  for _, c in ipairs({'body', 'head', 'pants', 'gloves', 'shoes'}) do
+    armor[#armor + 1] = {cat = c, type = X.CAT_TYPE[c], mat = 'leather'}
+  end
+  X.set_uniform(A, {positions = {0, 1}, items = armor})
+  X.equip(W, 41)                                        -- position 0 wears all it has a spec for; position 1 wears nothing
+  local before = {}
+  for _, c in ipairs(X.CATS) do before[c] = A.positions[0].equipment.uniform[c][0] end
+  local old1 = A.positions[1].equipment.uniform.body[0]
+  local n0 = #X.acts(W, 'squad_uniform')
+  local r = W.inbox('squad.uniform', {squad = 'A', kind = 'melee'})
+  T.ok(r.ok, r.msg)
+  T.ok(r.msg:find('kept 7 worn specs on 1 positions', 1, true), r.msg)
+  for _, c in ipairs(X.CATS) do
+    T.ok(A.positions[0].equipment.uniform[c][0] == before[c], 'position 0 keeps its ' .. c .. ' spec')
+  end
+  T.ok(A.positions[1].equipment.uniform.body[0] ~= old1, 'position 1 (nothing worn) is re-specced')
+  for i = n0 + 1, #X.acts(W, 'squad_uniform') do
+    for _, pos in ipairs(X.acts(W, 'squad_uniform')[i].args[2].positions or {}) do T.ok(pos ~= 0, 'no uniform call touches position 0') end
+  end
+  T.ok(#A.positions[5].equipment.uniform.body > 0, 'a vacant position gets the template')
+  T.eq(rec(W, 'A').tr, 0, 'the verb still ends the training policy')
+end)
+
 T.done()

@@ -923,7 +923,8 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                                "labors": "labors"},
                      # BUG-340: the famine crew (food specialists) per spec, its share of the adults, adds a day, way back
                      "famine_crew": {"on": "bool", "farmers": (0, 20), "cooks": (0, 10), "brewers": (0, 10),
-                                     "gatherers": (0, 20), "share": (5, 60), "step": (1, 10), "off_days": (10, 400)},
+                                     "gatherers": (0, 20), "share": (5, 60), "step": (1, 10), "off_days": (10, 400),
+                                     "pre_days": (0, 400)},   # BUG-618: 0 = the crew starts in the famine only
                      # BUG-053: stale tools, the tool pile (the part's other keys are checked by the mirror test)
                      "tools": {"stale_days": (1, 400), "keep_days": (0, 400), "pile": "bool", "pile_days": (1, 400), "pile_w": (1, 5),
                                "pile_h": (1, 5), "pile_r": (2, 40), "pile_reads": (20, 2000), "pile_every": (1, 400)},

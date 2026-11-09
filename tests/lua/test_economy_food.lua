@@ -187,9 +187,15 @@ T.test('famine pre-alarm: below 30 food days one class-A DECISION_NEEDED food_lo
   for _ = 1, 6 do F.item(W, 'FISH_RAW', {}) end              -- raw fish and no fishery: asked by itself (BUG-038)
   days(W, 1)
   T.eq(decisions(W, 'food_low'), 1, 'the fishery request is no news for the player')
-  W.set_census('a', {n = 2})                                 -- tame animals and no butcher's shop: a new blocker
+  W.set_census('a', {n = 2})                                 -- tame animals and no butcher's shop
   days(W, 1)
-  T.eq(decisions(W, 'food_low'), 2)
+  -- BUG-618: the kernel asks for the Butchers itself (workshops why=mandatory) like the fishery: no new blocker, no new decision
+  T.eq(decisions(W, 'food_low'), 1)
+  local mand = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do
+    if e.d.why == 'mandatory' then mand[#mand + 1] = table.concat(e.d.types, '+') end
+  end
+  T.ok(#mand >= 1 and mand[#mand]:find('Butchers', 1, true), table.concat(mand, ' | '))
   local W2 = world{cit = 53}
   settle(W2)
   days(W2, 2)

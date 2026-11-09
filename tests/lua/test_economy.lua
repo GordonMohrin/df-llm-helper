@@ -121,7 +121,7 @@ T.test('raw fish (live L4): with a fishery one PrepareRawFish order; without, th
   local q, d
   for _, e in ipairs(W2.find_events('DECISION_NEEDED')) do if e.d.id == 'famine' then q, d = e.d.q, e.d end end
   T.ok(q and q:find('auto: fishery asked (12 raw fish)', 1, true), tostring(q))   -- BUG-038: requested by itself
-  T.eq(d.auto, {'fishery', 'trade'}, 'BUG-340: the caravans are asked for food by the kernel')
+  T.eq(d.auto, {'fishery', 'trade', 'kitchen'}, 'BUG-340: the caravans are asked for food by the kernel; BUG-618: and the Kitchen')
   T.ok(#q <= 200 and q:find('Also: popcap.lower', 1, true) and not q:find('trade.want', 1, true), q)
   local W3 = run(true)
   for _, e in ipairs(W3.find_events('DECISION_NEEDED')) do if e.d.id == 'famine' then q = e.d.q end end

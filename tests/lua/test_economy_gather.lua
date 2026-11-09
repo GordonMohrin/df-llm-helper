@@ -145,7 +145,7 @@ T.test('BUG-038: food_low with unclaimed GatherPlants jobs -> plant gatherers (i
   T.ok(gl[1]:find('30 unclaimed GatherPlants jobs', 1, true), gl[1])
   local d = food_low(W)
   T.eq(#d, 1)
-  T.eq(d[1].d.auto, {'gather', 'trade'})
+  T.eq(d[1].d.auto, {'gather', 'trade', 'kitchen'}, 'BUG-618: the kernel asks for the Kitchen itself')
   T.ok(d[1].d.q:find('auto: 4 gatherers added (30 gather jobs)', 1, true), d[1].d.q)
   T.ok(#d[1].d.q <= 200, d[1].d.q)
   T.ok(d[1].msg:find('auto: gather', 1, true), d[1].msg)
@@ -199,7 +199,7 @@ T.test('BUG-038: a detail on "nobody does this" is set to only selected; too few
   local d = food_low(W5)
   T.eq(#d, 1)
   T.ok(d[1].d.q:find('gather: no plant gathering detail', 1, true), d[1].d.q)
-  T.eq(d[1].d.auto, {'trade'}, 'BUG-340: only the caravans asked for food')
+  T.eq(d[1].d.auto, {'trade', 'kitchen'}, 'BUG-340: the caravans asked for food; BUG-618: and the Kitchen')
 end)
 
 -- BUG-042 (Run 11, y471: drink 93 -> 32 days, 14 of 32 adults idle beside 241 unclaimed GatherPlants jobs; the

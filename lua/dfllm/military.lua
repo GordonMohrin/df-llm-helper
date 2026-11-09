@@ -347,6 +347,30 @@ local function uniform_counts(p, u, kind)
   return slots, filled, slots
 end
 
+-- BUG-620: the uniform categories of a position whose spec is filled now (the soldier wears one of its items, as uniform_counts
+-- counts it): {cat = true}. squad.uniform leaves these alone
+local function filled_cats(p, u)
+  local out, on = {}, {}
+  try(function()
+    local R = roles()
+    for _, inv in ipairs(u.inventory) do
+      if R[inv.mode] and inv.item then on[inv.item.id] = true end
+    end
+  end)
+  try(function()
+    for _, c in ipairs(UNIFORM_CATS) do
+      for _, sp in ipairs(p.equipment.uniform[c]) do
+        local hit = int(sp.item) ~= nil and on[sp.item] == true
+        if not hit and sp.assigned then
+          for _, id in ipairs(sp.assigned) do if on[id] then hit = true; break end end
+        end
+        if hit then out[c] = true end
+      end
+    end
+  end)
+  return out
+end
+
 local function iron_or_steel(u)
   return try(function()
     local R, armor = roles(), df.item_type.ARMOR
@@ -3388,16 +3412,60 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
     for k2, v in pairs(base) do b[k2] = v end
     b.no_weapon, base = true, b
   end
-  rt.mats[key] = rt.mats[key] or best_mats(math.max(1, #members(s)))
-  local ok, res = K.act.squad_uniform(s.id, with_mats(base, rt.mats[key]))
-  if not ok then return false, 'squad.uniform: ' .. tostring(res) end
+  -- BUG-620 (Run 16a i1 Basementflew y449: squad.uniform melee on A, B, C took worn from 43 % to 11 %: every position's specs were
+  -- replaced with metal ones, the soldiers dropped what they wore and the free metal was not theirs to fill): a category whose spec
+  -- a soldier wears now stays as it is; only the unfilled categories (and vacant positions) are re-specced, with the material the
+  -- free stock can fill (best_mats of the positions to fill, not of the whole squad)
+  local filled = {}
+  for _, m in ipairs(members(s)) do filled[m.pos] = filled_cats(m.p, m.unit) end
+  local groups, order, todo, kept, keptpos = {}, {}, 0, 0, 0
+  try(function()
+    for i in ipairs(s.positions) do
+      local keep, set = filled[i] or {}, {}
+      for _, it in ipairs(base.items) do
+        if keep[it.cat] then kept = kept + 1 else set[#set + 1] = it.cat end
+      end
+      if next(keep) then keptpos = keptpos + 1 end
+      if #set > 0 then
+        local gk = table.concat(set, ',')
+        if not groups[gk] then groups[gk] = {cats = set, pos = {}}; order[#order + 1] = gk end
+        table.insert(groups[gk].pos, i)
+        todo = todo + 1
+      end
+    end
+  end)
+  rt.mats[key] = best_mats(math.max(1, todo))
+  local full = with_mats(base, rt.mats[key])
+  local first = true
+  for _, gk in ipairs(order) do
+    local g, items = groups[gk], {}
+    local want = {}
+    for _, c in ipairs(g.cats) do want[c] = true end
+    for _, it in ipairs(full.items) do if want[it.cat] then items[#items + 1] = it end end
+    if #items > 0 then
+      local spec = {}
+      for k2, v in pairs(full) do spec[k2] = v end
+      spec.items, spec.positions = items, g.pos
+      if not first then spec.ammo = nil end                 -- (the quiver's ammo spec once)
+      first = false
+      local ok, res = K.act.squad_uniform(s.id, spec)
+      if not ok then return false, 'squad.uniform: ' .. tostring(res) end
+    end
+  end
   if guarded then
-    for _, m in ipairs(members(s)) do nw_set(e, m.pos, true) end
+    for _, m in ipairs(members(s)) do
+      if not (filled[m.pos] or {}).weapon then nw_set(e, m.pos, true) end
+    end
   end
   e.uni, dirty = 1, true                  -- (the squad keeps its kind: military's own plan names it)
   if kind ~= 'xbow' then e.tr, e.td = 0, nil end   -- FR-89: a metal kind ends the training policy (FR-100: for good)
   rt.kpi = nil
-  return true, string.format('squad %s: %s uniform on %s positions', key, kind, tostring(res)), {squad = s.id}
+  local msg = string.format('squad %s: %s uniform on %d positions', key, kind, todo)
+  if kept > 0 then
+    msg = msg .. string.format('; kept %d worn specs on %d positions (squad.uniform never takes off what a soldier wears; the rest '
+                               .. 'is specced for the material the free stock can fill)', kept, keptpos)
+  end
+  return true, msg, {squad = s.id, kept = kept, positions = todo}
 end
 
 -- FR-89: `squad.uniform kind=training`: the weapon slot of every position to the training weapon of its class (M.train_apply),

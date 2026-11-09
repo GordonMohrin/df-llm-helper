@@ -3735,9 +3735,13 @@ end
 -- BUG-575 (Run 16a i1 y429 Possessed 27099 'gems(rough) x1 none reachable', i3 y416-y417 Possessed 26827 'boulders(hard) x2 none in the
 -- fort', i4 y377 'cloth(silk) x1 none in the fort', Looms and webs gone): a slot the fort's own means cannot fill in the days a mood
 -- has. Returns 'rough' (a rough gem: nothing makes one, only a caravan or a dig), 'stone' (hard stone: a dig; early only where care's own
--- dig found no site), 'silk' (no web the citizens reach and no silk thread: only a caravan), else nil
-local function early_kind(a, inv)
+-- dig found no site), 'silk' (no web the citizens reach and no silk thread: only a caravan), else nil. BUG-619 (Run 16c i3 Wallfree y378:
+-- Possessed 26275 wanted bars x3 in a fort with no ore, no metal marked for melting and no smelter, died 37 days later; the 'IMPOSSIBLE'
+-- line came with his thirst, the deadline decision at 15 days): 'bars' = a bars slot short while economy.mood_hint('bars') says the
+-- fort has neither ore nor metal marked for melting (`bh` = {hint, impossible})
+local function early_kind(a, inv, bh)
   if type(a) ~= 'table' or a.legacy then return nil end
+  if a.cls == 'bars' and bh then return 'bars' end
   if a.cls == 'gems' and a.tname == 'ROUGH' then return 'rough' end
   if a.cls == 'boulders' and a.non_economic then return 'stone' end
   if (a.cls == 'cloth' or a.cls == 'thread') and a.sub == 'silk' and (math.tointeger(inv.webs_near) or 0) <= 0
@@ -3780,7 +3784,9 @@ function M.mood_early(K, c, m, rec, early, far)
   if rec.early_sig == sig then return end
   rec.early_sig = sig
   local cmds, opts = M.mood_cmds(rec, {}, nil)
-  if seen.rough or seen.stone then
+  local bh
+  for _, e in ipairs(list) do if e.k == 'bars' then bh = e.h end end
+  if seen.rough or seen.stone or (seen.bars and not (bh and bh.imp)) then
     cmds[#cmds + 1] = [[dfllm cmd bp.place '{"tpl":"explore","site":"S1"}']]
     opts[#opts + 1] = 'explore'
   end
@@ -3790,6 +3796,11 @@ function M.mood_early(K, c, m, rec, early, far)
   if seen.rough then ways[#ways + 1] = 'a rough gem is made by no work order: trade.want gem or dig for a gem vein' end
   if seen.stone then
     ways[#ways + 1] = 'hard stone: ' .. (rec.sdig_why and ('no stone dig (' .. trunc(tostring(rec.sdig_why), 50) .. ')') or 'dig for it')
+  end
+  if seen.bars then
+    -- BUG-619: bars are smelted from ore or melted from metal items; with neither there, only a caravan brings them
+    ways[#ways + 1] = bh and bh.imp and ('IMPOSSIBLE here: ' .. trunc(bh.hint, 120) .. ' (only a caravan can bring bars)')
+                      or ('bars: ' .. trunc(bh and bh.hint or 'no ore and nothing marked for melting', 120))
   end
   if seen.silk then ways[#ways + 1] = 'no web within reach and no silk thread: trade.want cloth:silk' end
   if (far or 0) > 0 then ways[#ways + 1] = string.format('%d out of his reach: open the way', far) end
@@ -3820,6 +3831,7 @@ local function mood_report(K, c, r, p)
       local acqmap = {}                             -- BUG-535: class -> acquisition ways of its slots
       local gf                                      -- BUG-535: rough / cut gems of the fort, read once per mood
       local early = {}                              -- BUG-575: slots the fort cannot fill itself ({k = kind, t = slot text})
+      local bh                                      -- BUG-619: economy.mood_hint('bars'): nil unread, false none, {hint, imp}
       for _, nd in ipairs(m.needs) do               -- wants: the hook entries (care.mood_wants)
         local left = nd.n
         if open and nd.nd and nd.nd.idx then left = math.min(nd.n, open[nd.nd.idx] or 0) end
@@ -3857,8 +3869,12 @@ local function mood_report(K, c, r, p)
             end
           end
           labels[#labels + 1] = nd.legacy or R.label(nd.nd, short)
-          local ek = #nd.alts == 1 and early_kind(a0, inv) or nil
-          if ek then early[#early + 1] = {k = ek, t = trunc(R.slot_name(a0) .. ' x' .. short, 40)} end   -- BUG-575
+          if bh == nil then      -- BUG-619: what economy says of bars, read once per mood (false: it can make them)
+            local okb, hint, imp = K.call('economy', 'mood_hint', 'bars')
+            bh = (okb and type(hint) == 'string' and hint ~= '') and {hint = hint, imp = imp == true} or false
+          end
+          local ek = #nd.alts == 1 and early_kind(a0, inv, bh or nil) or nil
+          if ek then early[#early + 1] = {k = ek, t = trunc(R.slot_name(a0) .. ' x' .. short, 40), h = bh or nil} end   -- BUG-575
           if (name == 'boulders' or name == 'blocks') and (nd.src or 0) == 0 then rockn = rockn + short end   -- BUG-393
           local path = false
           for _, alt in ipairs(nd.alts) do
