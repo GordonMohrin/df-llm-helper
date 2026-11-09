@@ -623,4 +623,22 @@ T.test('BUG-449 (Run 16d i4 Mazelanterns: 5-6 citizens a day at the only accepte
   T.eq(d.at_water, 'zone 17696 at 164,170,137, 9 tiles')
 end)
 
+T.test('BUG-616 (Wallfree: 150 x STRANDED no rescue, no raised bridge leads to drink): a drink case names the way to water in the event '
+       .. '(d.fix, the text) and in the stranded_drink decision; a food case has none', function()
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12)}}
+  W.load({name = 'water', every = {ticks = 100000},
+          stranded_fix = function(K, pos) return string.format('zone 17718 at 91,59,142 is 40 tiles off: open a walk path (from %d,%d,%d)', pos[1], pos[2], pos[3]) end})
+  trapped(W, {{11, 10, 20, 40000}, {12, 11, 21, 41000}})
+  local n = 0
+  while n < 40 and #evs(W, 'STRANDED') == 0 do run(W, 100); n = n + 1 end
+  local e = evs(W, 'STRANDED')[1]
+  T.ok(e and e.d.phase == 'refused' and e.msg:find('leads to drink', 1, true), e and e.msg or 'no STRANDED')
+  T.ok(e.d.fix and e.d.fix:find('open a walk path (from 10,20,5)', 1, true), tostring(e.d.fix))
+  T.ok(e.msg:find('; fix: zone 17718', 1, true), e.msg)
+  local ds = {}
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_drink' then ds[#ds + 1] = x end end
+  T.eq(#ds, 1)
+  T.ok(ds[1].d.q:find('way to drink: zone 17718', 1, true) and ds[1].d.fix:find('walk path', 1, true), ds[1].d.q)
+end)
+
 T.done()

@@ -616,13 +616,18 @@ local function dry_decision(K, e, now)
   -- (the question is cut at 200), with the commands that bring water inside and show where they can come in
   local okn, sn = K.call('water', 'src_near', e.pos[1], e.pos[2], e.pos[3], 20)
   local atw = okn and type(sn) == 'table' and sn.txt or nil
+  -- BUG-616: the concrete way to drink (a walk path to the nearest accepted water, a cistern beside them), also in d.fix
+  local okf, fx = false, nil
+  if drink then okf, fx = K.call('water', 'stranded_fix', e.pos) end
+  fx = okf and type(fx) == 'string' and fx or nil
+  if fx and not atw then q = 'way to drink: ' .. fx .. '; ' .. q end
   if atw then
     q = string.format('they stand at %s, the only accepted water of the fort (they went out to drink): bring water inside first; ', atw) .. q
     cmds[#cmds + 1] = 'dfllm bp sites cistern --fresh'
     cmds[#cmds + 1] = 'dfllm cmd inspect what=entrances'
   end
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = drink and 'stranded_drink' or 'stranded_food', q = q:sub(1, 200),
-         n = #e.ids, cmds = cmds, need = what, at_water = atw})
+         n = #e.ids, cmds = cmds, need = what, at_water = atw, fix = fx})
   K.log('warn', 'siege: stranded_%s: %s', what, q)
 end
 
@@ -748,7 +753,14 @@ local function rescue_step(K, a, g, now)
     if calm then M.rescue_close(K, {list = low, pz = true}, now)
     else for _, b in ipairs(bs or {}) do want(K, b, 'up', 'rescue_end', now + M.BREACH_AT) end end
     d.why, d.bridges = why, bs
-    stranded(K, 'refused', string.format('%s: no rescue (%s)', base, why), d, e.ids, {'refused', why})
+    -- BUG-616: 'no rescue (no raised bridge leads to drink)' alone repeated 150 times in Wallfree: a drink case names the way to water
+    local fix
+    if e.need.drink then
+      local okf, fx = K.call('water', 'stranded_fix', e.pos)
+      fix = okf and type(fx) == 'string' and fx or nil
+      d.fix = fix
+    end
+    stranded(K, 'refused', string.format('%s: no rescue (%s)%s', base, why, fix and ('; fix: ' .. fix) or ''), d, e.ids, {'refused', why})
     -- BUG-417: no bridge brings it (drink or food), or the bridge rescue is refused while they are past the fight mark
     if (e.need.drink or e.need.food) and (not bs or e.thirst >= M.FIGHT_THIRST or e.hunger >= M.FIGHT_HUNGER) then
       dry_decision(K, e, now)
