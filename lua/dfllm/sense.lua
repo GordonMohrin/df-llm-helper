@@ -880,7 +880,15 @@ local function hscan_finish(K)
       K.log('info', 'sense: unit %d is an invader by DF\'s flag but no hostile to the player: %s (not counted)', b.id, b.why)
     end
   end
-  K.census.h = {tick = hs.tick, vis = hs.vis, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
+  -- BUG-596: a list cut at LIST_MAX says how far from O1 the cut hostiles are at least (`lo`, the last listed one's distance, only when it
+  -- lies outside both zones and O1 is known) and where O1 is (`o1`): water.foe_dist bounds a tile's distance to the unlisted ones with it
+  local lo, o1c
+  local lastl = #hs.keys > M.LIST_MAX and list[M.LIST_MAX] or nil
+  if lastl and lastl.zn == 0 and (lastl.d_o1 or -1) >= 0 and hs.geo and hs.geo.o1 then
+    local c = hs.geo.o1.c
+    lo, o1c = lastl.d_o1, {c.x, c.y, c.z}
+  end
+  K.census.h = {tick = hs.tick, vis = hs.vis, lo = lo, o1 = o1c, inv = hs.inv, great = hs.great, undead = hs.undead, inside = hs.inside,
                 rin = hs.rin,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,

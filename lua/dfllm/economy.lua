@@ -11983,6 +11983,26 @@ function M.siege_starving(K)
   local ok, sv = K.call('siege', 'starve_state')
   return ok and type(sv) == 'table' and sv or nil
 end
+-- BUG-597 (Run 16b i2 Brotherarrow y414, BREACH: 640 drinks and 14 food forbidden, `unforbid held back: mode BREACH`, round 36's unforbid ran in a
+-- SIEGE hunger emergency only): in a SIEGE or BREACH with the civ alert sounding, the food and drink INSIDE the burrows that confine the citizens
+-- (siege.alert_names: Tiefe+, Kern+) is unforbidden like in PEACE; the hostile is not in those burrows (seal refuses a burrow with one), what lies
+-- outside them stays forbidden. Returns the burrow ids, or nil (another mode, the alert silent, no such burrow)
+function M.confine_burrows(K)
+  local mode = K.mode()
+  if mode ~= 'SIEGE' and mode ~= 'BREACH' then return nil end
+  local ok, names = K.call('siege', 'alert_names')
+  if not (ok and type(names) == 'table' and #names > 0) then return nil end
+  local ids = {}
+  pcall(function()
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+      local nm = dfhack.df2utf(b.name)
+      for _, n in ipairs(names) do
+        if n == nm and nm ~= 'Pflege+' then ids[#ids + 1] = b.id end
+      end
+    end
+  end)
+  return #ids > 0 and ids or nil
+end
 function M.forbid_note(inv, mode, skipped, d, starving)
   local forb = (math.tointeger(inv.drink_forb) or 0) + (math.tointeger(inv.food_forb) or 0)
   if forb <= 0 then return 0, nil end
@@ -11994,9 +12014,10 @@ end
 function T.forbid(K, c, r)
   local inv0 = K.census.i or {}
   local sv = M.siege_starving(K)                                 -- BUG-570
+  local conf = not sv and M.confine_burrows(K) or nil            -- BUG-597
   if not r.dfd_done then
     r.dfd_done = true
-    st.dfd, st.dfwhy = M.forbid_note(inv0, K.mode(), st.forb_skip, st.dfd, sv ~= nil)
+    st.dfd, st.dfwhy = M.forbid_note(inv0, K.mode(), st.forb_skip, st.dfd, sv ~= nil or conf ~= nil)
   end
   -- BUG-594: the day of the last fight (SIEGE / BREACH) and the days after it in which loose forbidden food is freed too
   local fc, dfl = c.forbid or M.DEFAULTS.forbid, M.DEFAULTS.forbid
@@ -12009,7 +12030,7 @@ function T.forbid(K, c, r)
     post = after > 0 and mode0 ~= 'SIEGE' and mode0 ~= 'BREACH' and nowt - r.p.fought <= after * DAY
     if nowt - r.p.fought > math.max(after, 0) * DAY then r.p.fought = nil end
   end
-  if not (M.FORBID_MODES[K.mode()] or sv) then return true end
+  if not (M.FORBID_MODES[K.mode()] or sv or conf) then return true end
   if not r.fx then
     r.fx, r.fx_n, r.fx_why = {}, 0, {}
     -- FR-76: a fort whose stock was forbidden in bulk (a reclaimed one: 3026 of 3058 drinks) is not a player's choice
@@ -12019,7 +12040,7 @@ function T.forbid(K, c, r)
     r.burst = bmin > 0 and nf >= bmin and nf or nil
     local held = 0
     for _, e in ipairs(st.fix or {}) do
-      if e.why ~= 'food' or r.p.starve or r.burst or sv or post then r.fx[#r.fx + 1] = e else held = held + 1 end
+      if e.why ~= 'food' or r.p.starve or r.burst or sv or post or conf then r.fx[#r.fx + 1] = e else held = held + 1 end
     end
     -- BUG-594: loose food / drink items that stay forbidden say so (the brief read 'the kernel has not freed them' without a cause)
     if held > 0 and not st.dfwhy then st.dfwhy = string.format('%d food/drink kept (forbidden by hand?)', held):sub(1, 40) end
@@ -12033,7 +12054,7 @@ function T.forbid(K, c, r)
     end
   end
   local lim = r.burst and (math.tointeger(fc.burst_per_day) or dfl.burst_per_day) or fc.per_day or 30
-  if sv then lim = math.max(lim, M.FORBID_STARVE_PER_DAY) end     -- BUG-570
+  if sv or conf then lim = math.max(lim, M.FORBID_STARVE_PER_DAY) end     -- BUG-570, BUG-597
   local per_call = r.burst and M.BURST_SLICE or 1               -- FR-76: item flags are cheap, a burst takes many a frame
   local did = 0
   while #r.fx > 0 and r.fx_n < lim do
@@ -12042,7 +12063,9 @@ function T.forbid(K, c, r)
     local f = it and it.flags
     if f and f.forbid and not (f.trader or f.in_building or f.garbage_collect or f.removed) then
       local x, y, z = dfhack.items.getPosition(it)
-      if x and known_tile(K, x, y, z) and not far(K, x, y, z) then
+      if x and conf and not sv and not M.td_in_burrows(conf, {x, y, z}) then
+        r.fx_out = (r.fx_out or 0) + 1                   -- BUG-597: a lockdown frees what lies inside the confinement burrows only
+      elseif x and known_tile(K, x, y, z) and not far(K, x, y, z) then
         r.cmds = r.cmds + 1
         did = did + 1
         if K.act.item_flag(e.id, 'forbid', false) then
@@ -12056,6 +12079,9 @@ function T.forbid(K, c, r)
     end
   end
   st.forb_skip = r.fx_skip
+  if conf and (r.fx_out or 0) > 0 and not st.dfwhy then
+    st.dfwhy = string.format('%d kept outside %s', r.fx_out, 'the confinement burrows'):sub(1, 40)
+  end
   if r.fx_n > 0 then
     K.log('info', 'unforbidden: %s%s', why_line(r.fx_why, 4),
           r.burst and string.format(' (a forbidden stock: %d drink + food units, up to %d a day)', r.burst, lim) or '')

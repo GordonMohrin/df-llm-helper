@@ -3733,7 +3733,9 @@ M.refuge_closure = refuge_closure
 -- ring (the walls would shut him out or build on him). Lifted in PEACE after PLUG.lift ticks without a hostile: the
 -- walls are designated for removal (act.construction_remove), the refuge is enterable again.
 -- Public M.plug (siege asks), M.plug_state
-M.PLUG = {on = true, near = 30, close = 10, lift = 2400, retry = 1200}
+-- BUG-595 (Run 16b i2 Brotherarrow y414): out_wait = the ticks citizens outside the refuge burrow (patients in the hospital, carers on their
+-- way) may hold the early plug back once destroyers are known; after that the foot is walled anyway
+M.PLUG = {on = true, near = 30, close = 10, lift = 2400, retry = 1200, out_wait = 1800}
 local function plug_cfg(K)
   return M.PLUG                                  -- constants of the module (no config key: tests set M.PLUG)
 end
@@ -3760,8 +3762,10 @@ local function plug_eval(K, args)
   local c = plug_cfg(K)
   if not c.on then return 'off' end
   if st.plug then return 'held', st.plug.id end
-  if not (type(args) == 'table' and args.bd) then return 'wait:no destroyers' end
+  if not (type(args) == 'table' and args.bd) then mem.plug_since = nil; return 'wait:no destroyers' end
   local t = now_t(K)
+  -- BUG-595: since when the plug has been wanted (destroyers known), the clock of PLUG.out_wait
+  mem.plug_since = mem.plug_since or t
   if st.plug_try and t - st.plug_try < c.retry then return 'wait:retry' end
   local h = K.census and K.census.h
   if type(h) ~= 'table' or t - (int(h.tick) or -1e9) > 200 then return 'wait:no census' end
@@ -3792,19 +3796,25 @@ local function plug_eval(K, args)
   -- dragons were 61 tiles out when the alert sounded, the citizens streamed in for 2000 ticks, the plug came with the BREACH and a dragon on the
   -- stair foot): destroyers in sight NOW and nobody outside the refuge burrow walls the foot at once, however far they are
   local rb0 = burrow(refuge)
-  local outside = false
+  -- BUG-595 (Run 16b i2 Brotherarrow y414, Pop 86 -> 2: two Blind Cave Ogres in sight 107 tiles out at the alert, the plug was queued 119,000
+  -- ticks later with a BREACH and an ogre on the stair foot; 4-8 citizens (the patients of a hospital outside Tiefe+, carers on the way)
+  -- stood outside the refuge burrow the whole siege and held `outside` true): citizens outside hold the plug back for PLUG.out_wait ticks
+  -- only; the destroyers announced by the popup (args.announced) count as in sight
+  local outside, nout = false, 0
   if rb0 then
     local cu0 = K.census and K.census.u
     for _, id in ipairs(type(cu0) == 'table' and type(cu0.ids) == 'table' and cu0.ids or {}) do
       local u = df.unit.find(id)
       local x, y, z
       if u then x, y, z = dfhack.units.getPosition(u) end
-      if x and not in_burrow(rb0, x, y, z) then outside = true; break end
+      if x and not in_burrow(rb0, x, y, z) then outside, nout = true, nout + 1 end
     end
   end
+  local waited = outside and t - mem.plug_since >= c.out_wait
+  local sight = bd_sight(K) > 0 or args.announced == true
   local early = false
   if not late and not (near >= 0 and near <= c.near) then
-    if bd_sight(K) > 0 and rb0 and not outside then early = true else return 'wait:destroyers far' end
+    if sight and rb0 and (not outside or waited) then early = true else return 'wait:destroyers far' end
   end
   local tk, cells = {}, {}
   for _, line in ipairs(foot.tiles) do
@@ -3818,7 +3828,7 @@ local function plug_eval(K, args)
   if plug_occupied(K, col, tk) then return 'wait:someone on the stair' end
   -- BUG-479 review: a citizen still on his way to the stair would be walled out. Before the BREACH, and while no
   -- destroyer is within PLUG.close tiles of the stair head, a citizen outside the refuge burrow holds the plug back
-  if not late and (near < 0 or near > c.close) and outside then return 'wait:citizens not inside' end
+  if not late and (near < 0 or near > c.close) and outside and not waited then return 'wait:citizens not inside' end
   st.plug_try, dirty = t, true
   local ok, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers', {noreach = true})
   if not (ok and r1 == true and type(id) == 'string') then
@@ -3830,7 +3840,8 @@ local function plug_eval(K, args)
                             'destroyers: the %s on the stair can be broken, a constructed wall cannot', #cells,
                             #cells == 1 and '' or 's', foot.pos[1], foot.pos[2], foot.pos[3], id, cl.kind)
   K.emit('REFUGE_PLUG', 'A', txt:sub(1, 200), {proj = id, n = #cells, pos = foot.pos, closer = cl.kind,
-                                               near = near >= 0 and near or nil, breach = late and 1 or 0, early = early and 1 or nil})
+                                               near = near >= 0 and near or nil, breach = late and 1 or 0, early = early and 1 or nil,
+                                               out = nout > 0 and nout or nil})
   K.log('warn', 'seal: %s', txt:sub(1, 200))
   save(K)
   return 'queued', id
@@ -3841,12 +3852,13 @@ M.PLUG.every = 100
 function M.plug(K, args)
   local t = now_t(K)
   local bd = type(args) == 'table' and args.bd or nil
+  local an = type(args) == 'table' and args.announced or nil
   local m = mem.plug_m
-  if m and t - m.t < M.PLUG.every and tostring(m.s):sub(1, 5) == 'wait:' and not st.plug and m.bd == bd then
+  if m and t - m.t < M.PLUG.every and tostring(m.s):sub(1, 5) == 'wait:' and not st.plug and m.bd == bd and m.an == an then
     return m.s, m.d
   end
   local s, d = plug_eval(K, args)
-  mem.plug_m = {t = t, s = s, d = d, bd = bd}
+  mem.plug_m = {t = t, s = s, d = d, bd = bd, an = an}
   return s, d
 end
 
@@ -3891,7 +3903,7 @@ local function plug_lift(K, t)
   end
   K.emit('REFUGE_PLUG', 'A', string.format('refuge plug lifted: %d of %d walls designated for removal', n, #(p.tiles or {})),
          {proj = p.id, n = n, lifted = 1})
-  st.plug, st.plug_try, dirty = nil, nil, true
+  st.plug, st.plug_try, mem.plug_since, dirty = nil, nil, nil, true
   save(K)
 end
 
@@ -4122,10 +4134,22 @@ local function choose(K, mode, want, hold)
   -- the citizens): building destroyers within PLUG.near tiles of the refuge's stair head, its way in a building they break (no constructed
   -- wall yet, M.plug): another burrow that is separated, reachable, without a hostile and farther from them than the stair head by
   -- ALT_MARGIN tiles is the confinement (the burrow farthest from their path). The switch rule still keeps a burrow the citizens are in.
-  if fight and au[refuge] and au[refuge].exists and not st.plug and bd_sight(K) > 0 and refuge_closure(K) == 'soft' then
+  -- BUG-595: a plug queued but not finished is no wall yet: with a destroyer within PLUG.close tiles of the stair head it counts as none
+  local function walled(dh)
+    if not st.plug then return false end
+    if dh >= 0 and dh <= M.PLUG.close then
+      local okp, ps = K.call('runner', 'plug_proj', st.plug.id)
+      if okp and type(ps) == 'table' and ps.done ~= true then return false end
+    end
+    return true
+  end
+  local dh = -1
+  if fight and au[refuge] and au[refuge].exists and bd_sight(K) > 0 and refuge_closure(K) == 'soft' then
     local hd = M.refuge_stair(K)
-    local dh = hd and hd.pos and M.hostile_gap(K, hd.pos, true) or -1
-    if dh >= 0 and dh <= M.PLUG.near then
+    dh = hd and hd.pos and M.hostile_gap(K, hd.pos, true) or -1
+  end
+  if dh >= 0 and not walled(dh) then
+    if dh <= M.PLUG.near then
       local alt, ad
       for _, n in ipairs({kern, CFG.interior}) do
         if n ~= refuge and au[n] and M.area_ok(K, au, n, refuge, ropen, t, true) then

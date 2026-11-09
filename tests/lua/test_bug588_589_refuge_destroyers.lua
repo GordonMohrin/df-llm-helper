@@ -186,6 +186,7 @@ T.test('BUG-589 (3): destroyers at the refuge stair head, only a hatch on it, no
   -- the wall plug is queued (a BREACH is the last responsible moment): the refuge is the pick again
   local _, st = W.K.call('seal', 'plug', {bd = true})
   T.eq(st, 'queued')
+  W.pstate = function() return {done = true} end      -- BUG-595: a queued plug is no wall yet, the finished one is
   pick = ask(W, 'BREACH', 'Tiefe+')
   T.eq(pick, 'Tiefe+', 'the foot is walled: a hatch broken, the wall stays')
 end)
