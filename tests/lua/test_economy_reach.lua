@@ -201,4 +201,20 @@ T.test('Run 10: without flux the steel orders name the missing input once (DECIS
   T.eq(n, 1, 'unchanged: not repeated')
 end)
 
+-- BUG-624: the steel orders lack flux -> the caravans are asked for flux by the kernel itself (economy.supply_wants), none when flux stands
+T.test('BUG-624: steel orders without flux ask the caravans for flux (supply_wants), with flux they do not', function()
+  local W = steel_world{flux = 0}
+  days(W, 1)
+  local ok, w = W.K.call('economy', 'supply_wants')
+  local got
+  for _, e in ipairs(ok and w or {}) do if e.buy == 'flux' then got = e end end
+  T.ok(got, 'flux is wanted')
+  T.eq(got.n, 8, 'two per steel bar still to make (2 orders x 2 left = 4)')
+  T.ok(got.why:find('no flux stone', 1, true), got.why)
+  local W2 = steel_world{}
+  days(W2, 1)
+  local ok2, w2 = W2.K.call('economy', 'supply_wants')
+  for _, e in ipairs(ok2 and w2 or {}) do T.ok(e.buy ~= 'flux', 'flux stands: not asked') end
+end)
+
 T.done()

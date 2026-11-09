@@ -3124,7 +3124,9 @@ end
 -- that make or buy what is missing (a table is the bp template's now: `hospital` places one); once per hosp_sup_every and again when
 -- the set of gaps changes (util/cadence).
 M.SUPPLY_FIX = {
-  no_table = {'a table in the zone (the hospital template places one; build it in the zone otherwise)', nil},
+  -- BUG-623: `hospital furnish=1` = one table inside the hospital room that stands (bp.place; a finished room project holds nothing back)
+  no_table = {'a table in the zone (the hospital template places one; build it in the zone otherwise)',
+              'dfllm cmd bp.place \'{"tpl":"hospital","site":"S1","p":{"furnish":1}}\''},
   no_traction = {'a traction bench in the zone (bone setting)', nil},
   no_splints = {'splints', 'dfllm cmd order.add \'{"job":"ConstructSplint","amount":4}\''},
   no_thread = {'thread', 'dfllm cmd trade.want \'{"add":["thread"]}\''},

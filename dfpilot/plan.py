@@ -3483,6 +3483,7 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
                          f"dfllm cmd bp.cancel proj=<id> if it is dead)")
         return f"{EXPLORE}: {', '.join(run[:3])} under way: no second explore drafted"
     avoid = next(((b.get("p") or {}).get("avoid") for _, b in new if (b.get("p") or {}).get("avoid")), "")   # BUG-430: the quarry
+    last_err = ""
     soil = soil_fort(files.read_state(save_dir))                                   # BUG-438: down to the first hard stone
     for d in (SOIL_DEPTHS if soil else ()) + tuple(EXPLORE_DEPTHS):
         extra = {"every": SOIL_EVERY} if d in SOIL_DEPTHS else {}
@@ -3493,6 +3494,7 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
         except BpError as e:
             # BUG-528: a depth with no site (avoided level, a dig that stopped near, the core's rooms in the way) tries the next one
             if "avoided level" in str(e) or "no safe explore site" in str(e) or "explore: no site at depth" in str(e):
+                last_err = str(e)
                 continue
             return None
         if sites:
@@ -3520,9 +3522,16 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
             return line + f"; {room} free site(s): {room} of {len(new)} drafted, the next one: propose next season"
     for si, b in new:
         doc["seasons"][si]["build"].remove(b)
+    # BUG-625 (Run 16d i4 Trumpetrealms y430+: 'no site at depth 2..12' with no word why): the last depth's reason (what met the shaft, on
+    # which level) and the rock the finished probes saw
+    geo = " ".join(re.findall(r"\[BUG-625: [^\]]*\]", last_err))
+    probes = ("the finished probes saw" + last_err.split("; the finished probes saw", 1)[1]) if "; the finished probes saw" in last_err else ""
+    why = "; ".join(x for x in (geo, probes) if x)
     doc["notes"] += (f"; no {EXPLORE} site at any depth or arm (avoided levels, a dig that stopped near, the core's rooms in the way; "
-                     f"`dfllm bp sites explore --fresh` names which, BUG-528): trade.want bar:iron, stone, block only")
-    return f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
+                     f"`dfllm bp sites explore --fresh` names which, BUG-528): trade.want bar:iron, stone, block only"
+                     + (f"; {why}"[:600] if why else ""))
+    return (f"{EXPLORE}: no site at depth {EXPLORE_DEPTHS[-1]}..{EXPLORE_DEPTHS[0]}: not drafted"
+            + (f" ({why[:300]})" if why else ""))
 
 
 def fit_stone_dig(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
