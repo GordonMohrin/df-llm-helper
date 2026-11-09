@@ -304,6 +304,8 @@ M.DEFAULTS = {
   -- = free cloth the kernel itself keeps from from_phase on, whatever the mood stock target says (0 = off); it moves the weave
   -- orders only, the fiber crops follow the target
   cloth = {from_phase = 'P1', per_naked = 3, max_jobs = 10, floor = 20, loom = {'workshop:Loom'},
+           -- BUG-574: a silk mood (cloth or thread) with no silk thread: a CollectWebs work order at the Loom (webs the citizens reach)
+           webs = {tag = 'dfllm:webs', max_jobs = 5, extra = 2},
            weave = {{kind = 'plant', tag = 'dfllm:cloth'}, {kind = 'silk', tag = 'dfllm:cloth_silk'},
                     {kind = 'yarn', tag = 'dfllm:cloth_yarn'}},
            thread = {tag = 'dfllm:thread', ws = {'workshop:Farmers'},
@@ -317,7 +319,10 @@ M.DEFAULTS = {
   -- Run 11 (Kilrudrabed, no gem vein: every year the first mood that wanted gems died): raw green glass from sand for
   -- the moods' raw-glass and cut-gem filters (M.glass_plan): from_phase = the standing stock without a mood miss, raw =
   -- raw glass kept, bags = empty bags made for CollectSand, report_days = the GLASS_BLOCKED cadence
-  glass = {from_phase = 'P3', raw = 3, bags = 2, max_jobs = 5, request_days = 14, report_days = 28,
+  -- BUG-573: gems = the CutGems order for the rough gems beyond rough_keep (cut gems below the reserve's gems target or a mood's
+  -- cut-gem want), the glass chain only for what no rough gem covers
+  glass = {from_phase = 'P3', raw = 3, bags = 2, max_jobs = 5, request_days = 14, report_days = 28, rough_keep = 2,
+           gems = {tag = 'dfllm:cutgems', spec = {job = 'CutGems'}},
            furnace = {'furnace:GlassFurnace', 'furnace:MagmaGlassFurnace'}, magma = 'furnace:MagmaGlassFurnace',
            jeweler = {'workshop:Jewelers'}, fuel_tag = 'dfllm:glass_fuel',
            sand = {tag = 'dfllm:sand', spec = {job = 'CollectSand'}},
@@ -1036,11 +1041,16 @@ local function classify(it, a, cat)
   -- inorganic); cut glass is a cut gem ("cut gems" filters take any material) and also counted as gems_glass
   elseif cat == 'SMALLGEM' then
     a.gems = a.gems + n
+    a.gems_cut = a.gems_cut + n                    -- BUG-573: the cut form alone (the reserve's `gems`, the glass chain's stock)
     local mt = it.mat_type
     if mt == 3 or mt == 4 or mt == 5 then a.gems_glass = a.gems_glass + n end
   elseif cat == 'ROUGH' then
     local mt = it.mat_type
-    if mt == 3 or mt == 4 or mt == 5 then a.glass = a.glass + n; reach_mark(a, it, 'glass') else a.gems = a.gems + n end
+    if mt == 3 or mt == 4 or mt == 5 then a.glass = a.glass + n; reach_mark(a, it, 'glass')
+    else
+      a.gems = a.gems + n
+      a.gems_rough = a.gems_rough + n              -- BUG-573: rough gems apart: economy cuts those beyond glass.rough_keep
+    end
   elseif cat == 'BAG' then
     -- Run 11: a bag of sand (the glass furnace's input; item:isSandBearing, DF's "glassable") or an empty bag (CollectSand)
     local okb, sandy = pcall(M.sandy, it)
@@ -1186,7 +1196,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
-              'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'sand',
+              'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'gems_cut', 'gems_rough', 'sand',
               'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'cook_ban_x', 'food_inedible', 'food_far',
               'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt',
               'w_pick_far', 'w_axe_far', 'w_pick_use', 'w_axe_use',
@@ -1576,6 +1586,7 @@ local function care_hooks(K, r)
   end
   local wants, farmax = {}, {}
   r.glass_cut = 0                                -- Run 11: "cut gems" the moods miss (cut glass serves them)
+  r.silk_cloth, r.silk_thread = 0, 0             -- BUG-574: silk cloth / silk thread the moods miss (webs -> thread -> cloth)
   local w = care_hook(K, 'mood_wants')
   if type(w) == 'table' then
     for k, v in pairs(w) do
@@ -1594,6 +1605,9 @@ local function care_hooks(K, r)
       if KEYS[key] and n and n > 0 then
         wants[key] = (wants[key] or 0) + n
         if type(v) == 'table' and v.glass == 'cut' then r.glass_cut = r.glass_cut + n end
+        if type(v) == 'table' and v.sub == 'silk' then
+          if key == 'cloth' then r.silk_cloth = r.silk_cloth + n elseif key == 'thread' then r.silk_thread = r.silk_thread + n end
+        end
       end
     end
   end
@@ -1933,6 +1947,48 @@ local function plan_leather(K, c, r)
   end
 end
 
+-- BUG-574 (Run 16a i1 Basementflew y429: a Fey mood needed cloth(silk) x1 with 4003 webs in the fort, 116 on the citizens' walk group, thread
+-- 2271 of the other kinds and cloth 18 of the others: the kernel's only step was the Loom sheet's CollectWebs task, DF cancelled it seven times
+-- 'Needs undisturbed thread', and plan_cloth wove nothing because the cloth stock of plant and yarn was over the target; the player's
+-- manual CollectWebs x3 work order came two days before the death). The chain for a silk mood (care.mood_wants `sub` silk): with no silk thread,
+-- a CollectWebs work order at the Loom (the manager's job, not the sheet task; webs the citizens reach, `cloth.webs`); with silk thread
+-- and a cloth(silk) want, a WeaveCloth silk order, ahead of the kinds in stock. Needs a Loom (care asks for it with the mood's shops).
+-- r.silk_woven = the silk weave order is among this run's candidates (plan_cloth leaves it out of its own loop).
+function M.silk_chain(K, c, r, Cc)
+  r.silk_woven = false
+  local want_c, want_t = r.silk_cloth or 0, r.silk_thread or 0
+  if want_c + want_t <= 0 then st.silk = nil; return end
+  local W = Cc.webs or {}
+  local have_t = r.inv.thread_silk or 0
+  local g = {cloth = want_c, thread = want_t, have = have_t, webs = r.inv.webs_near or 0}
+  st.silk = g
+  if not ws_any(r.f, Cc.loom) then g.why = 'no Loom'; return end
+  local short_t = math.max(0, want_c + want_t - have_t)
+  if short_t > 0 then
+    if (r.inv.webs_near or 0) <= 0 then
+      g.why = (r.inv.webs or 0) > 0 and 'webs off the citizens walk group' or 'no webs'
+    elseif W.tag and not open(r, W.tag) then
+      local n = math.min(r.inv.webs_near, short_t + (W.extra or 2), W.max_jobs or 5)
+      if add(r, {tag = W.tag, spec = {job = 'CollectWebs'}, n = n, why = 'webs'}) then g.ord = 'CollectWebs' end
+    elseif W.tag then g.ord = 'CollectWebs' end
+  end
+  if want_c > 0 and have_t > 0 then
+    for _, w in ipairs(Cc.weave or {}) do
+      if w.kind == 'silk' then
+        if open(r, w.tag) then r.silk_woven = true
+        else
+          local n = math.min(want_c, left(c, r, 'thread_silk'), left(c, r, 'thread'), Cc.max_jobs or 10)
+          local spec = {job = 'WeaveCloth', material_category = {'silk'}, item_conditions = {cond(1, 'THREAD', {flags = {'collected', 'silk'}})}}
+          if add(r, {tag = w.tag, spec = spec, n = n, uses = {thread_silk = 1, thread = 1}, why = 'silk cloth'}) then
+            r.silk_woven = true
+            g.weave = n
+          end
+        end
+      end
+    end
+  end
+end
+
 local function plan_cloth(K, c, r)
   local Cc = c.cloth
   local naked = 0
@@ -1957,12 +2013,14 @@ local function plan_cloth(K, c, r)
           'them (WEAVER labor, webs not forbidden)', deficit, near, wp and string.format(' (e.g. %d,%d,%d)', wp[1], wp[2], wp[3]) or '')
   end
   if r.day then st.web_hint = (deficit > 0 and thread == 0 and near > 0) and near or nil end
+  M.silk_chain(K, c, r, Cc)                        -- BUG-574: a silk mood: webs -> silk thread -> silk cloth, whatever the cloth stock
   deficit = orders_deficit
   if deficit <= 0 then return end
   if ws_any(r.f, Cc.loom) then
     for _, w in ipairs(Cc.weave or {}) do
       if deficit <= 0 then break end
-      if not open(r, w.tag) then
+      if w.kind == 'silk' and r.silk_woven then deficit = deficit - ((st.silk and st.silk.weave) or r.s.live[w.tag] or 0)   -- BUG-574: planned by the chain
+      elseif not open(r, w.tag) then
         local key = 'thread_' .. w.kind
         local n = math.min(deficit, left(c, r, key), left(c, r, 'thread'), Cc.max_jobs or 10)
         local spec = {job = 'WeaveCloth', material_category = {w.kind},
@@ -6885,23 +6943,42 @@ function M.glass_plan(K, c, r)
   local G, p, inv, now = c.glass, r.p, r.inv, r.now
   st.glass = nil
   if type(G) ~= 'table' or not phase_ok(K, c.mood_from_phase or 'P1') then return end
-  local nat = math.max(0, (inv.gems or 0) - (inv.gems_glass or 0))          -- natural gems (no glass)
+  -- BUG-573 (Run 16c i3 Sealcertain y416: a Fey mood wanted 'gems(cut) x1', the reserve said 'gems 5/5' (rough gems), 93 rough gems lay
+  -- in the fort and a jeweler stood: nobody cut one, and the glass chain started 26 days before the deadline): the stock is the CUT
+  -- form (census gems_cut: cut glass counts, care's held cut gems too). A cut-gem want (a mood's, or the reserve's gems target) is
+  -- covered first by CutGems on the rough gems beyond glass.rough_keep (the rough-gem filters keep those); only where the fort has no
+  -- rough gem to cut does the glass chain (sand -> raw glass -> cut glass) make them, as before for a fort without a gem vein.
   local raw_need, cut_need, res = need_n(p, 'glass', now), r.glass_cut or 0, M.gem_reserve(K)
   local missed = M.mood_missed(c, p, 'gems', now) or M.mood_missed(c, p, 'glass', now)
-  local standing = nat == 0 and (missed or (phase_ok(K, G.from_phase) and have(r, 'gems') < res))
-  if raw_need + cut_need <= 0 and not standing then
+  local cutn = (inv.gems_cut or 0) + (r.held.gems or 0)
+  -- the census count, not left(): an open CutGems order of ours uses these gems up, and the stock it is about to make must not
+  -- count as missing (it would start the glass chain on the next run for the same standing stock)
+  local spare = math.max(0, (inv.gems_rough or 0) - (G.rough_keep or 2))
+  local standing = missed or phase_ok(K, G.from_phase)
+  local stand_short = standing and math.max(0, res - cutn) or 0
+  local by_gems = math.min(cut_need + stand_short, spare)
+  local cut_stand = spare == 0 and stand_short or 0           -- a standing stock is made of glass only where no rough gem is spare
+  local cut = math.max(0, cut_need - by_gems) + cut_stand
+  local glass_stand = cut_stand > 0
+  if raw_need + cut + by_gems <= 0 then
     p.glass_rep = CAD.quiet(p.glass_rep)         -- the chain is off: a blocker that comes back is news
     return
   end
-  local cut = cut_need + (standing and math.max(0, res - have(r, 'gems')) or 0)
-  local raw = raw_need + (standing and (G.raw or 3) or 0) + cut
+  local raw = raw_need + (glass_stand and (G.raw or 3) or 0) + cut
   r.targets.glass = raw
-  local g = {raw = raw, cut = cut, have = inv.glass or 0, block = {}, ord = {}}
+  local g = {raw = raw, cut = cut, have = inv.glass or 0, block = {}, ord = {}, gems = by_gems}
   st.glass = g
   local f, mx = r.f, G.max_jobs or 5
   local fur, magma, jew = ws_any(f, G.furnace), f[G.magma] == true, ws_any(f, G.jeweler)
-  if not fur then M.glass_shop(K, c, r, g, 'no glass furnace')
-  elseif cut > 0 and not jew then M.glass_shop(K, c, r, g, "no jeweler's") end
+  if (raw_need + cut > 0) and not fur then M.glass_shop(K, c, r, g, 'no glass furnace')
+  elseif cut + by_gems > 0 and not jew then M.glass_shop(K, c, r, g, "no jeweler's") end
+  if jew and by_gems > 0 and not open(r, G.gems.tag) then       -- BUG-573: CutGems on the spare rough gems
+    local spec = copy(G.gems.spec)
+    spec.item_conditions = {cond(1, 'ROUGH')}
+    if add(r, {tag = G.gems.tag, spec = spec, n = math.min(by_gems, mx), uses = {gems_rough = 1}, why = 'cut gems'}) then
+      g.ord[#g.ord + 1] = 'CutGems'
+    end
+  elseif open(r, G.gems.tag) then g.ord[#g.ord + 1] = 'CutGems' end
   local raw_short = math.max(0, raw - (inv.glass or 0) - (r.s.live[G.make.tag] or 0))
   local sand_short = math.max(0, raw_short - (inv.sand or 0) - (r.s.live[G.sand.tag] or 0))
   if sand_short > 0 then
@@ -6992,7 +7069,8 @@ function M.glass_route(K, key, via)
     if #g.ord > 0 then parts[#parts + 1] = table.concat(g.ord, '+') end
     parts[#parts + 1] = string.format('raw %d/%d', g.have, g.raw) .. (g.cut > 0 and string.format(', cut %d', g.cut) or '')
   end
-  local s = (key == 'gems' and 'cut glass: ' or 'raw glass: ') .. table.concat(parts, ', ')
+  local by_rough = type(g) == 'table' and (g.gems or 0) > 0 and (g.cut or 0) == 0     -- BUG-573: CutGems on rough gems, no glass
+  local s = (key == 'gems' and (by_rough and 'cut gems: ' or 'cut glass: ') or 'raw glass: ') .. table.concat(parts, ', ')
   return key == 'gems' and (s .. '; trade.want gem') or s
 end
 
@@ -9962,16 +10040,16 @@ end
 -- removed own order clears its tag and waits backoff_days. kern.log and one ORDER_STUCK (B, kind prune) a day
 M.PRUNE_KEEP = {ConstructBlocks = true, ConstructCoffin = true, ConstructMechanisms = true, MakeChain = true,
                 MakeBucket = true, MakeCage = true, ConstructSlab = true, EngraveSlab = true, MakeBag = true,
-                MakeCharcoal = true, CollectSand = true, MakeRawGlass = true, CutGlass = true, SpinThread = true,
+                MakeCharcoal = true, CollectSand = true, MakeRawGlass = true, CutGlass = true, CutGems = true, SpinThread = true,
                 WeaveCloth = true, TanAHide = true, ProcessPlants = true, PrepareMeal = true, CustomReaction = true,
                 CollectWebs = true, MakeBarrel = true}
 for _, e in pairs(M.PIECES) do M.PRUNE_KEEP[e.job] = true end
 M.PRUNE_KEEP_TAG = {'dfllm:piece_', 'dfllm:redo_', 'dfllm:slab', 'dfllm:mech', 'dfllm:sand', 'dfllm:bag', 'dfllm:charcoal',
-                    'dfllm:glass', 'dfllm:cutglass', 'dfllm:thread', 'dfllm:cloth', 'dfllm:tan', 'dfllm:drink',
+                    'dfllm:glass', 'dfllm:cutglass', 'dfllm:cutgems', 'dfllm:webs', 'dfllm:thread', 'dfllm:cloth', 'dfllm:tan', 'dfllm:drink',
                     'dfllm:food', 'dfllm:stand_', 'dfllm:cmd', 'dfllm:coffin', 'dfllm:chain', 'dfllm:bucket'}
 -- BUG-315: while a strange mood wants a material (care's need, p.needs[key].care), the orders of the chains that make it
 -- (sand, bags, charcoal, glass, thread, cloth, leather) go first in the work orders (act.workorder top), not behind the queue
-M.MOOD_TOP = {'dfllm:sand', 'dfllm:bag', 'dfllm:charcoal', 'dfllm:glass', 'dfllm:cutglass', 'dfllm:thread', 'dfllm:cloth',
+M.MOOD_TOP = {'dfllm:sand', 'dfllm:bag', 'dfllm:charcoal', 'dfllm:glass', 'dfllm:cutglass', 'dfllm:cutgems', 'dfllm:webs', 'dfllm:thread', 'dfllm:cloth',
               'dfllm:tan'}
 function M.mood_top(p, tag)
   local on = false

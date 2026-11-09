@@ -175,8 +175,9 @@ T.test('item_class, busy, carried', function()
   local function cls(cat, spec) return R.item_class(F.item(W, cat, spec or {})) end
   T.eq({cls('BOULDER'), cls('WOOD'), cls('CORPSEPIECE', {corpse_flags = {bone = true}}),
         cls('CORPSEPIECE', {corpse_flags = {shell = true}}), cls('SKIN_TANNED'), cls('CLOTH'), cls('THREAD'),
-        cls('SMALLGEM'), cls('ROUGH'), cls('BAR')},
-       {'boulders', 'logs', 'bone', 'shell', 'leather', 'cloth', 'thread', 'gems', 'gems', 'bars'})
+        cls('SMALLGEM'), cls('BAR')},
+       {'boulders', 'logs', 'bone', 'shell', 'leather', 'cloth', 'thread', 'gems', 'bars'})
+  T.eq(cls('ROUGH'), nil, 'BUG-573: a rough gem is no reserve stock (the class gems is the cut form)')
   T.eq({cls('ROUGH', {mat_type = 3}), cls('BAR', {mat_type = 7}), cls('CORPSEPIECE', {corpse_flags = {unbutchered = true,
         bone = true}}), cls('DOOR')}, {nil, nil, nil, nil})
   local bin = F.item(W, 'BIN', {flags = {}})

@@ -70,18 +70,21 @@ T.test('mood filters: concrete items per filter, forbidden ones freed, MOOD_NEED
   T.eq(F.runs(W), {}, 'cloth needs no butcher')
   local w = Cm.mood_wants(W.K)
   -- BUG-017 (Run 10 y418): the filter names the kind, so trade is asked for silk cloth
-  T.eq(w, {{unit = 1, cls = 'cloth', n = 1, label = 'cloth(silk) x1', acq = 'order:WeaveCloth,buy', buy = 'cloth:silk'}})
+  T.eq(w, {{unit = 1, cls = 'cloth', n = 1, label = 'cloth(silk) x1', acq = 'order:WeaveCloth,buy', buy = 'cloth:silk',
+              sub = 'silk'}})   -- BUG-574: the kind goes to economy
   w[1].n = 99
   T.eq(Cm.mood_wants(W.K)[1].n, 1, 'a fresh copy each call')
   T.ok(#json.encode(w) < 1024)
-  T.eq(W.find_events('DECISION_NEEDED'), {})
+  -- BUG-575: silk with no web and no silk thread is said at once (early mood_deadline), once
+  local dn0 = W.find_events('DECISION_NEEDED')
+  T.eq({#dn0, dn0[1].d.id, dn0[1].d.early}, {1, 'mood_deadline', 1})
   CW.day(W)
   T.eq(#W.find_events('MOOD_NEED'), 1, 'same list: not repeated')
-  T.eq(W.find_events('DECISION_NEEDED'), {}, 'one game day: not yet')
+  T.eq(#W.find_events('DECISION_NEEDED'), 1, 'one game day: the early decision is not repeated')
   CW.day(W)
   local dn = W.find_events('DECISION_NEEDED')
-  T.eq({#dn, dn[1].d.id}, {1, 'mood_material'}, 'unresolved for 2 game days: class A')
-  T.ok(dn[1].d.q:find('cloth(silk) x1', 1, true) and dn[1].d.q:find('trade.want cloth', 1, true), dn[1].d.q)
+  T.eq({#dn, dn[2].d.id}, {2, 'mood_material'}, 'unresolved for 2 game days: class A')
+  T.ok(dn[2].d.q:find('cloth(silk) x1', 1, true) and dn[2].d.q:find('trade.want cloth', 1, true), dn[2].d.q)
   T.eq(W.bad_vectors, {})
 end)
 

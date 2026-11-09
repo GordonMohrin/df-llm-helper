@@ -90,7 +90,7 @@ O.WS = {
   -- B2 (BUG-061, FR-73): memorial slabs are engraved at the masons', thread is spun at the farmer's workshop
   -- (ShearCreature is a Gathering job in df.job_type: no workshop is claimed for it)
   EngraveSlab = any(MASONS), SpinThread = any({W'Farmers'}),
-  WeaveCloth = any({W'Loom'}), MakeCharcoal = any({F'WoodFurnace'}), MakeAsh = any({F'WoodFurnace'}),
+  WeaveCloth = any({W'Loom'}), CollectWebs = any({W'Loom'}), MakeCharcoal = any({F'WoodFurnace'}), MakeAsh = any({F'WoodFurnace'}),
   SmeltOre = any({F'Smelter', F'MagmaSmelter'}), CutGems = any({W'Jewelers'}),
   ConstructCatapultParts = any({W'Siege'}), ConstructBallistaParts = any({W'Siege'}),
   ButcherAnimal = any({W'Butchers'}), TanHide = any({W'Tanners'}),

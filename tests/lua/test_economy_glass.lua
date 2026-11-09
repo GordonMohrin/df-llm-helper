@@ -181,12 +181,13 @@ T.test('Run 11: natural gems in the fort and no glass need: no chain; a raw-glas
   T.eq(W.find_acts('sand_zone'), {})
   T.eq(#orders(W, 'dfllm:glass') + #orders(W, 'dfllm:glass_fuel') + #orders(W, 'dfllm:bag'), 0)
   T.eq(route(W, 'gems'), 'rough gems: mine a gem vein or trade.want gem (glass is no rough gem)')
-  T.eq(route(W, 'gems', 'glass'), 'cut glass: glass furnace, sand zone, bags, fuel (economy starts the chain); ' ..
-       'trade.want gem')
+  -- BUG-573: 6 rough gems beyond rough_keep are cut (CutGems), no glass; the standing stock is not made of glass
+  T.eq(#orders(W, 'dfllm:cutgems'), 1)
+  T.eq(route(W, 'gems', 'glass'), 'cut gems: CutGems, raw 0/0; trade.want gem')
   ctl.wants = {{cls = 'glass', n = 1, glass = 'raw', unit = 2}}             -- a glassmaker's mood
   days(W, 1)
   T.eq(#W.find_acts('sand_zone'), 1)
-  T.eq(route(W, 'glass'), 'raw glass: no bags, MakeCharcoal, raw 0/1', 'no natural-gem shortage: no standing stock')
+  T.eq(route(W, 'glass'), 'raw glass: no bags, CutGems+MakeCharcoal, raw 0/1', 'the raw glass alone; the spare rough gems are cut (BUG-573)')
   T.eq(#orders(W, 'dfllm:cutglass'), 0)
 end)
 

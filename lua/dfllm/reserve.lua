@@ -415,8 +415,11 @@ end
 function R.is_container(it) return get(it.flags, 'container') == true end
 
 -- the reserve class of a stored item, or nil (only plain stock: butchered bones and shells, cut gems (cut glass among
--- them: a "cut gems" filter takes any material), rough inorganic gems and metal bars; raw glass, coal and soap are no
--- mood stock)
+-- them: a "cut gems" filter takes any material) and metal bars; raw glass, coal and soap are no mood stock).
+-- BUG-573 (Run 16c i3 Sealcertain y416: a Fey mood wanted 'gems(cut) x1' and the reserve line said 'gems 5/5', five ROUGH gems it
+-- held forbidden beside 93 more; the cutter never got one): the class `gems` is the cut form only, the form a "cut gems" filter
+-- takes. A rough gem is no reserve stock (the fort cannot make one; economy keeps `glass.rough_keep` of them uncut for a
+-- rough-gem filter and cuts the rest, economy.glass_plan)
 function R.item_class(it)
   local t = tname_of(it)
   if t == 'BOULDER' then return 'boulders'
@@ -428,7 +431,6 @@ function R.item_class(it)
   elseif t == 'CLOTH' then return 'cloth'
   elseif t == 'THREAD' then return 'thread'
   elseif t == 'SMALLGEM' then return 'gems'
-  elseif t == 'ROUGH' then return it.mat_type == 0 and 'gems' or nil
   elseif t == 'BAR' then return it.mat_type == 0 and 'bars' or nil
   end
   return nil
