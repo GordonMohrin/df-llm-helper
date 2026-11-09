@@ -2971,12 +2971,17 @@ function MEM.grid(K, c, r, R, cap)
   local T = r.tomb_src and r.tomb_src.T or {coffins = {}, zones = {}}
   local cs = {ents = entrance_list(K), boxes = r.boxes, er = c.coffin_entrance_r}
   R = R or num(c.coffin_scan_r) or 16
+  -- BUG-579 (Run 16a i1 Basementflew y414-y430: a memorial slab stood on 98,89,129, the tile the audit's bypass named; every
+  -- `seal at=audit` there was blocked `occupied` and the bypass stayed): the tiles the last audit's route findings name take no slab
+  local taken = {}
+  local okr, rts = K.call('readiness', 'route_tiles')
+  for _, t in ipairs(okr and type(rts) == 'table' and rts or {}) do taken[key3(t[1], t[2], t[3])] = 'route' end
   local G, where = {levels = {}, reads = 0, R = R}, {}
   for _, sd in ipairs(coffin_seeds(K, r, T)) do
     if cap and G.reads >= cap then G.cut = true; break end
     where[#where + 1] = string.format('%s %d,%d,%d', sd.why, sd.x, sd.y, sd.z)
     local L = {x0 = sd.x - R, y0 = sd.y - R, w = 2 * R + 1, h = 2 * R + 1, z = sd.z, g = {}}
-    local occ = occ_index({L.x0, L.y0, L.z, L.x0 + L.w - 1, L.y0 + L.h - 1, L.z}, {})
+    local occ = occ_index({L.x0, L.y0, L.z, L.x0 + L.w - 1, L.y0 + L.h - 1, L.z}, taken)
     local nosky = false
     for j = 0, L.h - 1 do
       if cap and G.reads >= cap then G.cut = true; break end

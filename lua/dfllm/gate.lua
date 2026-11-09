@@ -1739,7 +1739,7 @@ end
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
 local function held_ticks(r, now) return (r.held_sum or 0) + (r.block_since and math.max(0, now - r.block_since) or 0) end
 local function unblock(r, now)
-  if r.block_since then r.held_sum = held_ticks(r, now) end
+  if r.block_since then r.held_sum, r.ub = held_ticks(r, now), now end      -- BUG-577: r.ub = when the hold ended
   r.block_since, r.block = nil, nil
 end
 local function allow() return math.max(M.PULL_ALLOW, st.lat and st.lat.t or 0) end
@@ -3437,6 +3437,29 @@ function M.drill_skip(K, name)
   end
   return ok == true
 end
+
+-- public (BUG-577, siege + drill): bridge `name`'s wanted raise waits for our own people now: (ticks held in all this want, who, n on the
+-- footprint) while units (the census lists no hostile) on or beside the footprint or moving near it hold the pull, else nil. For
+-- HOLD_GRACE ticks after the last of them left it still answers (held so far, 'released', 0): the pull is queued and taken then, the bridge
+-- is not up yet and is no failure. A raise held for a citizen is no gate failure of the mechanics (siege: no BREACH for it within its
+-- allowance; drill: the clock restarts instead of `occupied`).
+M.HOLD_GRACE = 600
+function M.held_by(K, name)
+  local r, br = rt[name], st.br[name]
+  if not (r and br and br.want == 'up' and r.last ~= 'up') then return nil end
+  local now = K.now().tick
+  if not (type(r.block) == 'table' and #r.block > 0 and r.block_since) then
+    if r.ub and (r.held_sum or 0) > 0 and now - r.ub < M.HOLD_GRACE then return r.held_sum, 'released', 0 end
+    return nil
+  end
+  local on = 0
+  for _, e in ipairs(r.block) do if (e.d or 0) == 0 then on = on + 1 end end
+  return held_ticks(r, now), who(r.block, r.foot), on
+end
+
+-- public (BUG-577, siege): the config's force_near (tiles a visible hostile must be from the footprint before a raise goes ahead past
+-- the units beside it; 0 = never)
+function M.force_near(K) return (gcfg(K)) end
 
 -- public (BUG-543, drill): why bridge `name`'s raise was dropped at T+900 when units kept it from rising ("citizen 5 on the
 -- footprint, soldier 7 moving 3 tiles from it"), nil when none did (cleared by reset_kpi: the drill's start and settle)

@@ -1996,6 +1996,11 @@ def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[
     if _cmd.no_trap_hall(a.get("fails") or []):     # BUG-211: no trap hall yet: the walls are room doors, no gaps
         return [], [f"audit: {route}: no trap hall yet, the bypass waits for fortcore stage 2; no seal at=audit before it"]
     if not a.get("walls"):
+        vb = a.get("via_built") or {}
+        if vb:           # BUG-579: the hatch / door the route passes is a seal piece of ours that stands; the audit counts it open
+            return [], [f"audit: {route}: the {', '.join(sorted(vb))} piece of seal {', '.join(sorted(set(vb.values())))} stands "
+                        "(finished before this audit) and the audit counts a door or hatch open (worst case): another seal changes "
+                        "nothing; accept it (WAIVED, R0 `bypass` stays) or give the route a wall tile with a second way"]
         adv = _cmd.route_advice(routes[0])                 # BUG-376: a placeable fix or the waiver, not 'look at it'
         if adv:
             return [], [f"audit: {route}: {adv}"]
@@ -2003,6 +2008,15 @@ def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[
                     "inspect '{\"what\":\"entrances\"}' and close it; readiness stays R0 until then"]
     open_ = a.get("open") or []
     if not open_:
+        if a.get("jammed"):                      # BUG-579: a building of another kind stands on the tile (PROJECT_BLOCKED occupied)
+            return [], [f"audit: {route}: {', '.join(f'{w.rsplit(chr(32), 1)[0]} holds a {b}' for w, b in sorted(a['jammed'].items()))}: "
+                        "no seal can stand there (the project is blocked `occupied`, not redrafted); take that building away by hand "
+                        "or accept the route; readiness stays R0 until then"]
+        if a.get("built"):                       # BUG-579: built and read by a later audit, the route still names the tile
+            return [], [f"audit: {route}: seal {', '.join(sorted(set(a['built'].values())))} finished at "
+                        f"{', '.join(w.rsplit(chr(32), 1)[0] for w in a['built'])} before this audit and the route is named again: "
+                        "building it a second time changes nothing (not redrafted); `dfllm audit` once more, then "
+                        "inspect entrances for what stands on the tile"]
         if a.get("doored"):                      # BUG-487: a door stands where the wall would cut citizens off
             return [], [f"audit: {route}: a door stands at {', '.join(w.rsplit(' ', 1)[0] for w in a['doored'])} (seal "
                         f"{', '.join(sorted(set(a['doored'].values())))}): a wall there cut citizens off (the kernel refused it), "
