@@ -203,10 +203,11 @@ def run_bp(args, save_dir: Path | None) -> int:
                 print(f"snapshot refused: {reply.get('msg')}")
                 return 1
             from .cmd import box_tiles, fresh_wait
-            wait = fresh_wait(box, args.timeout)               # BUG-415: a big box takes longer than the default minute
+            wait = fresh_wait(box, args.timeout, save_dir)     # BUG-415 / BUG-639: a big box takes longer than the default minute
             if wait > args.timeout:
-                print(f"snapshot {cid}: {box_tiles(box)} tiles requested, waiting up to {wait:.0f}s (--timeout raises it)",
-                      flush=True)
+                n = box_tiles(box)
+                print(f"snapshot {cid}: {f'{n} tiles' if n else 'the default box'} requested, waiting up to {wait:.0f}s "
+                      "(--timeout raises it)", flush=True)
             snap = _wait_snapshot(save_dir, cid, wait)
             if snap is None:
                 print(f"no snapshot {cid} within {wait:.0f}s (the export may still finish: `dfllm bp sites {args.tpl}` ranks the "

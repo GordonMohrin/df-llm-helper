@@ -124,6 +124,13 @@ M.CFG = {
   -- task that yields task_slices times in a row is skipped this run (kern.log); state sched.run once no run ended for
   -- run_idle_d days
   yield_days = 7, park_days = 30, task_slices = 600, run_idle_d = 3,
+  -- BUG-637 (Run 16b i2 Valleyhame y376: bedrooms 58 %, hospital 25 % and a seal stood build_lost 300+ days, parked, holding their
+  -- tiles ('taken by'), the plan's builds and the DECISIONs, until the player cancelled each by hand; Run 16a i1 hospital c1a1c154 the
+  -- same): a project parked for good (build_lost with the retries spent) is cancelled by the kernel itself lost_days after the block
+  -- began (no undo: what it built stays, its unbuilt pieces and jobs go), PROJECT_BLOCKED d.autocancel names why and the command that
+  -- places it again; at most lost_max times per template, then it stays parked (the reason in the park event). 0 = off.
+  -- config "runner": {queue: {lost_days}}
+  lost_days = 60, lost_max = 2,
   -- BUG-328 (Run 15c Inkintense y377: 'runner: no run ended for 176 d, 78 slices': a task yielding every slice, the runner
   -- paced and demoted to a few slices a game day, so 600 slices took 130 game days and every project and the seal waited
   -- that long): a task yielding for task_days game days is skipped too, whatever its slice count. A project without own
@@ -3740,6 +3747,7 @@ local function conf(K)
              pop = nat(rb.pop, 0, 250, M.CFG.rebuild_pop), off = nat(rb.off, 0, 250, M.CFG.rebuild_off),
              yield = nat(q.yield_days, 1, 60, M.CFG.yield_days) * DAY,     -- BUG-037
              park = nat(q.park_days, 1, 400, M.CFG.park_days) * DAY,
+             lost = nat(q.lost_days, 0, 3000, M.CFG.lost_days) * DAY,            -- BUG-637
              idle = nat(q.idle_days, 1, 400, M.CFG.idle_days) * DAY,               -- BUG-328
              stale = nat(q.stale_days, 0, 3000, M.CFG.stale_days) * DAY,           -- BUG-435
              stale_every = nat(q.stale_every, 1, 400, M.CFG.stale_every) * DAY,
@@ -6337,6 +6345,137 @@ function Q.park_event(K, P, t)
   dirty()
 end
 
+-- BUG-638 (Run 16b i2 Valleyhame y376-y377: seal y376s0b1 / y377s0b1 'hatch 107,88,126: nothing stands there' twice build_lost, the stalled
+-- decision offering the same cancel / place for 64 days; Run 16c i3 Wallfree y374-y376: seal y374s0b0 / y376s0b0 for the hatch 67,44,139 of a
+-- stair that was never dug, SEAL_STUCK and DECISION_NEEDED every month): a seal piece is built on an existing open tile. A piece whose
+-- tile is SOLID rock on the revealed map (snapshot legend '#' or smoothed 'S'; hidden tiles say nothing) has nothing to stand on: a
+-- phantom. The seal whose unbuilt pieces are all phantoms is cancelled at once (PROJECT_BLOCKED d.phantom, once; follow's plan check reads the
+-- tiles: cmd.refuge_stair), bp.place refuses such a document (the same tiles, with the reason).
+Q.PHANTOM = {['#'] = true, S = true}
+-- the unbuilt build-stage cells of document d (stages from `from` on) as {phantom 'x,y,z c' tiles, unbuilt count}; hatch, door and wall
+-- cells alike, gather ('p') cells and tiles holding a building not counted
+function Q.phantom_cells(K, d, from, built)
+  local ph, n, seen = {}, 0, {}
+  for si = from or 0, #d.stages - 1 do
+    local st = d.stages[si + 1]
+    if st.mode == 'build' and not is_free(st) then
+      for _, ch in ipairs(st.chunks) do
+        for _, cell in ipairs(ch.cells) do
+          local tl = {}
+          cell_tiles(ch, cell, tl)
+          local t = tl[1]
+          if t and t[4]:match('^[^{(:/]*') ~= 'p' then
+            local k = tkey(t[1], t[2], t[3])
+            if not seen[k] and not (built and built(t)) then
+              seen[k] = true
+              n = n + 1
+              local ok, v = K.call('snapshot', 'tile', t[1], t[2], t[3])
+              if ok and type(v) == 'table' and Q.PHANTOM[v.c] and not (type(v.bld) == 'string' and v.bld ~= '') then
+                ph[#ph + 1] = k .. ' ' .. v.c
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return ph, n
+end
+
+-- bp.place of a seal: refused when every piece lies on solid rock (text), else nil
+function Q.phantom_doc(K, d)
+  if type(d) ~= 'table' or d.tpl ~= 'seal' or type(d.stages) ~= 'table' then return nil end
+  local ph, n = Q.phantom_cells(K, d, 0)
+  if n == 0 or #ph < n then return nil end
+  return string.format('refused: nothing to build on: %s %s solid rock on the revealed map (a seal piece stands on an open tile; no stair or ' ..
+                       'floor was dug there). Name the tile that is really open: dfllm bp sites seal --fresh, then at="x,y,z floor"',
+                       table.concat(ph, ', '), #ph == 1 and 'is' or 'are')
+end
+
+-- the open seal projects whose unbuilt pieces are all phantoms: cancelled (no undo; their jobs and planned buildings go), one event
+function Q.phantom_scan(K, t)
+  for _, P in ipairs(sorted()) do
+    local r = P.tpl == 'seal' and P.done ~= 1 and P.blocked ~= 'cancel' and S.rt.sf[P.id]
+    if P.tpl == 'seal' and P.done ~= 1 and P.blocked ~= 'cancel' and (P.blocked == 'build_lost' or (type(r) == 'table' and r.st == 1)) then
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      if st and st.mode == 'build' then
+        local ph, n = Q.phantom_cells(K, d, P.stage, function(tl) return piece_built(K, tl) end)
+        if n > 0 and #ph == n then
+          local msg = string.format('%s (seal) cancelled: %s %s solid rock, nothing to build on (no stair or floor was dug there); ' ..
+                                    'a seal for it is not placed again (BUG-638)', P.id, table.concat(ph, ', '), #ph == 1 and 'is' or 'are')
+          K.log('warn', '%s', msg)
+          K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200),
+                 {proj = P.id, tpl = 'seal', stage = trunc(st.label or '', 24), why = P.blocked ~= '' and P.blocked or 'phantom',
+                  ticks = t - (int(P.since) or t), phantom = ph})
+          cancel(K, P, false)
+          rows(K)
+          save(K)
+          return                          -- one a run
+        end
+      end
+    end
+  end
+end
+
+-- BUG-637: the templates the kernel never cancels for a lost build: the cores and shafts (the manifest, the audit box and the shaft
+-- check hang on them), the plug, the depot (its keeper replaces it) and the mood projects (a mood is on the clock)
+Q.LOST_KEEP = {fortcore = true, surfacecore = true, aqshaft = true, explore = true, plug = true, depot = true, repair = true,
+               mood_drink = true, stonedig = true}
+-- the bp.place command for the same template and params at the best site (`site` S1 is resolved by the CLI against `bp sites`), nil for
+-- a seal (its entrance comes from the next audit, not from a copy of the lost one)
+function Q.replace_cmd(K, P)
+  if P.tpl == 'seal' then return nil end
+  local prm = M.bp_params(K, P.id)
+  local items = {}
+  for k, v in pairs(type(prm) == 'table' and prm or {}) do
+    if type(v) == 'number' or type(v) == 'boolean' or (type(v) == 'string' and not v:find('[^%w_.,:+ -]')) then
+      items[#items + 1] = string.format('%q:%s', k, type(v) == 'string' and string.format('%q', v) or tostring(v))
+    end
+  end
+  table.sort(items)
+  return string.format("dfllm cmd bp.place '{\"tpl\":\"%s\",\"site\":\"S1\"%s}'", P.tpl,
+                       #items > 0 and (',"p":{' .. table.concat(items, ',') .. '}') or '')
+end
+
+-- BUG-637: a project parked for good by build_lost for lost_days: cancelled (no undo), one a run, PEACE only. A template that was
+-- cancelled lost_max times without one of its projects finishing meanwhile stays parked (the park event has the reason).
+function Q.lost_cancel(K, c, t)
+  if not c.lost or c.lost <= 0 then return end
+  for _, P in ipairs(S.pd.list) do        -- a template with a finished project starts its count again
+    if P.done == 1 and (int(S.rt.lostc[P.tpl]) or 0) > 0 then S.rt.lostc[P.tpl] = nil; dirty() end
+  end
+  for _, P in ipairs(sorted()) do
+    if P.done ~= 1 and P.blocked == 'build_lost' and not Q.LOST_KEEP[P.tpl] and not Q.mood_proj(P) and Q.terminal(P)
+       and t - (int(P.since) or t) >= c.lost then
+      local n = int(S.rt.lostc[P.tpl]) or 0
+      if n >= M.CFG.lost_max then return end
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      local label = trunc(st and st.label or '', 24)
+      local miss = missing_pieces(K, P, d)
+      local mw
+      if P.tpl == 'seal' then local _, w = M.remake_why(K, P, d); mw = w else mw = Q.mat_why(K, P, d) end
+      local lw = Q.lost_why(K, P, d)
+      local why = (#miss > 0 and ('missing ' .. table.concat(miss, ', ')) or 'pieces missing')
+                  .. (mw and (' (' .. trunc(tostring(mw), 70) .. ')') or '') .. (lw and ('; ' .. trunc(lw, 70)) or '')
+      local cmd = Q.replace_cmd(K, P)
+      local days = (t - (int(P.since) or t)) // DAY
+      S.rt.lostc[P.tpl] = n + 1
+      local msg = string.format('%s (%s) build_lost for %d d at %s, retries spent (%s): cancelled by the kernel (no undo: what it built ' ..
+                                'stays, its unbuilt pieces go); %s', P.id, P.tpl, days, label, why,
+                                cmd and ('place it again: ' .. cmd) or 'the next audit places a seal again if one is still needed')
+      K.log('warn', '%s', msg)
+      K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200),
+             {proj = P.id, tpl = P.tpl, stage = label, why = 'build_lost', ticks = t - (int(P.since) or t), autocancel = days, cmd = cmd})
+      cancel(K, P, false)
+      rows(K)
+      save(K)
+      return                              -- one a run
+    end
+  end
+end
+
 ---------------------------------------------------------------- runs
 local function end_run(K)
   local t = now(K)
@@ -6349,6 +6488,10 @@ local function end_run(K)
         blocked_event(K, P, t)
       end
     end
+    local okp, errp = pcall(Q.phantom_scan, K, t)                -- BUG-638
+    if not okp then K.log('error', 'phantom seal scan failed: %s', trunc(errp, 160)) end
+    local okl, errl = pcall(Q.lost_cancel, K, conf(K), t)       -- BUG-637
+    if not okl then K.log('error', 'lost-project cancel failed: %s', trunc(errl, 160)) end
   end
   for id, r in pairs(S.rt.park) do              -- a park record whose project left (or runs again): quiet
     local P = find(id)
@@ -6852,6 +6995,7 @@ function M.init(K)
   rt.kk = obj(rt.kk)                                                 -- BUG-043: the template of a kept seal/explore box
   rt.kp = obj(rt.kp)                                                 -- BUG-129: the tile clusters of a kept box
   rt.park = obj(rt.park)                                             -- BUG-037: parked projects announced
+  rt.lostc = obj(rt.lostc)                                           -- BUG-637: auto-cancelled build_lost projects per template
   rt.ip = obj(rt.ip)                                                 -- BUG-328: projects set aside (no progress)
   rt.cv = obj(rt.cv)                                                 -- BUG-522: chunks with a free-hanging floor above (cave-in risk)
   rt.aq = obj(rt.aq)                                                 -- FR-95: aquifer shafts and observe mode
@@ -7823,6 +7967,8 @@ M.verbs = {
     if bad then return false, bad end
     local walls = (d.tpl == 'seal' or d.tpl == 'repair') and Q.place_walls(K, d) or nil   -- BUG-458: no wall that cuts citizens or places off
     if walls then return false, walls end
+    local phantom = Q.phantom_doc(K, d)                                                  -- BUG-638: no seal onto solid rock
+    if phantom then return false, phantom end
     -- FR-27: never a second tomb zone on a tile (Run 9: up to 3 stacked on one coffin)
     local cut, total, at = tomb_dups(d)
     if total > 0 and cut == total then

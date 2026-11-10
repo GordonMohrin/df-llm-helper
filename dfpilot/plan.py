@@ -1143,7 +1143,10 @@ def hospital_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[li
     HOSPITAL_REMOVED). Water comes first: a cistern or a Water Source zone on deep water; `plan propose` drafts the
     cistern and holds the hospital back. An older kernel (no state.water) is not checked, as the supply goals; a
     source without a site to measure from (no sites snapshot) is a warning."""
-    adds = [si for si, _, b in new_builds(doc, prev) if b["tpl"] == HOSPITAL]
+    # BUG-640 (Run 16d i4 Trumpetrealms y437: `hospital furnish=1` drafted for no_table, plan check ERROR 'no valid site ... its patients would
+    # die of thirst' with the hospital (zone 17697, hospital ok) standing): a furnish build puts a table into the room that stands; it
+    # needs no site, no water and no place in Kern+ of its own, so it is no new hospital here
+    adds = [si for si, _, b in new_builds(doc, prev) if b["tpl"] == HOSPITAL and not (b.get("p") or {}).get("furnish")]
     out = hospital_outside(s, adds)                        # BUG-036: the hospital belongs inside Tiefe+/Kern+
     hw = hospital_water(s, fort) if adds else None
     if hw is None:

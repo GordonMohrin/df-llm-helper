@@ -401,6 +401,7 @@ RUNNER_LIM: dict = {"seal_first": {"on": "bool", "stuck_days": (1, 60), "food_d"
                               "reach_days": (1, 60), "stale_days": (0, 3000), "stale_every": (1, 400),
                               "stall_days": (0, 3000), "stall_every": (1, 400),   # BUG-328, BUG-352, BUG-435, BUG-444
                               "release_days": (0, 3000),                           # BUG-529: a stalled shaft gives up its slot
+                              "lost_days": (0, 3000),                              # BUG-637: a parked build_lost project is cancelled
                               # BUG-486: parallel slots = active + free idle adults // slots_idle + adults // slots_pop, at most slots_max
                               "slots_idle": (0, 50), "slots_pop": (1, 250), "slots_max": (1, 20)},
                     # BUG-066 / FR-76: the manifest follows the standing workshops (runner.lua Q.sync)

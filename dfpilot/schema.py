@@ -497,11 +497,13 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
     # BUG-037: park = days a project blocked for good stood before it was parked (its cancel command is in msg)
+    # BUG-638: phantom = the tiles ('x,y,z #') of a seal's unbuilt pieces that lie on solid rock; the seal is cancelled
+    # BUG-637: autocancel = days a parked build_lost project stood before the kernel cancelled it (cmd = the bp.place that places it again)
     # BUG-046: parts = the parts of a stalled build stage that wait (<= 3, joined by '; ': 'MetalsmithsForge x,y,z: job
     # 22236 suspended by buildingplan: waits for building material x1'); walled also lists the doors replaced by walls
     # (BUG-044)
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
-                                                    "park:i parts:s idle:i unreach:i cmd:s")),
+                                                    "park:i parts:s idle:i unreach:i cmd:s autocancel:i phantom:sa")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
     # BUG-105: unreach = of the far bodies, those on a tile nobody can path to (corpse_unreachable, not in old)
