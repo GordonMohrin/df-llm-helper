@@ -879,7 +879,7 @@ def lua(paths, allowlist: dict | None = None, exempt: bool = True) -> list[dict]
 
 
 # ================================================================ command policy (hook, DESIGN §11.5)
-DFLLM_SUBS = {"boot", "adopt", "stop", "status", "selftest", "restore", "inspect", "help"}
+DFLLM_SUBS = {"boot", "adopt", "stop", "status", "selftest", "restore", "inspect", "help", "reload"}  # Gordon 10.11.: kernel reload allowed
 _SHELL_WORDS = {"source", "ls", "help", "enable", "disable", "set", "alias", "type", "time", "clean", "force",
                 "launch", "plant", "feature", "points", "tags", "dfllm"}
 # words before the command word; options and durations after them are skipped too (timeout 30, nice -n 5)

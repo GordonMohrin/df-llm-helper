@@ -7,7 +7,7 @@ takes no result args and sends what bp.topo.audit computes from a kernel snapsho
 PowerShell, Monitor and the desktop terminal (TOOLS, matched in .claude/settings.json); any other tool
 whose input carries a command string is judged the same way. File tools (FILE_TOOLS: Write, Edit,
 MultiEdit, NotebookEdit) may not write under dfllm-runtime/ or to config/decisions.yaml.
-  allowed  dfhack-run dfllm boot|adopt|stop|status|selftest|restore|inspect, load-save <folder>,
+  allowed  dfhack-run dfllm boot|adopt|stop|status|selftest|restore|inspect|reload, load-save <folder>,
            read-only allowlist entries (help, ls, tags); with DFLLM_DEV=1 also allowlisted write
            commands and `dfllm selftest --exec <file>` after the file passes the Lua lint
   blocked  claude/*, inline lua, everything on the allowlist's blocked list, commands owned by an act
