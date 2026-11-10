@@ -257,6 +257,17 @@ T.test('economy actions: orders import/sort, workorder tag and id, kitchen exclu
   T.eq({env.api.stone_economic(7, false)}, {true, 'unchanged'})
   T.eq({env.api.stone_economic(8, true)}, {true, 'marked'})
   T.eq((env.api.stone_economic(-1, false)), false)
+  -- BUG-665: the game's own verdict on a boulder material (job_item BOULDER + non_economic + hard through isSuitableMaterial)
+  T.eq(env.api.mat_refused(7), false, 'no API in the fake: the old census stands')
+  local seen
+  df.job_item = {new = function() return {flags1 = {}, flags2 = {}, flags3 = {}} end}
+  dfhack.job = dfhack.job or {}
+  dfhack.job.isSuitableMaterial = function(ji, mt, mi, it) seen = {ji = ji, mt = mt, mi = mi}; return mi ~= 9 end
+  T.eq({env.api.mat_refused(9), env.api.mat_refused(7)}, {true, false})
+  T.ok(seen.ji.flags2.non_economic == true and seen.mt == 0, 'the filter carries non_economic, material type 0')
+  T.eq(env.api.mat_refused(-1), false)
+  dfhack.job.isSuitableMaterial = function() error('boom') end
+  T.eq(env.api.mat_refused(9), false, 'a fault is not a refusal')
   T.eq((env.api.order_suspend(1, true)), false, 'no verified suspend flag')
   local cmds = {}
   for _, c in ipairs(W.commands) do cmds[#cmds + 1] = table.concat(c, ' ', 1, math.min(c.n, 3)) end

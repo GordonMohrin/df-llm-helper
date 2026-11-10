@@ -443,7 +443,7 @@ end)
 
 T.test('economy: one flag-word read per item instead of eight; a disagreeing mask falls back to flag reads', function()
   local BITS = {trader = 1, garbage_collect = 2, removed = 3, dump = 4, hostile = 5, in_building = 6,
-                construction = 7, rotten = 8, forbid = 9, in_inventory = 10}
+                construction = 7, rotten = 8, forbid = 9, in_inventory = 10, in_job = 11}
   local function census(liar)
     local W = F.world{cfg = {baseline = F.cfg()}, units = {{id = 1, citizen = true}}}
     W.set_census('u', F.census_u({1}))

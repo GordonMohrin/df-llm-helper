@@ -46,4 +46,13 @@ T.test('BUG-416: a part of the fort with a fifth of the citizens is home too (a 
   T.eq({snap.far(W.K, 2, 1, Z), snap.far(W.K, 9, 1, Z)}, {false, false})
 end)
 
+T.test('BUG-665: snapshot.far strict also calls a tile with no walkable group far (the stone census); the plain read keeps it near', function()
+  local units = {}
+  for i = 1, 6 do units[#units + 1] = {id = i, citizen = true, pos = {i, 0, Z}} end
+  local W = world(units)
+  local snap = require('dfllm.snapshot')
+  T.eq({snap.far(W.K, 7, 1, Z), snap.far(W.K, 7, 1, Z, true)}, {false, true}, 'x 7 has no group: near plain, far strict')
+  T.eq({snap.far(W.K, 3, 1, Z, true), snap.far(W.K, 9, 1, Z, true)}, {false, true}, 'a fort tile and the far bank as before')
+end)
+
 T.done()

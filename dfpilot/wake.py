@@ -590,8 +590,10 @@ def no_hard_stone_hint(d: dict) -> str:
     mechanisms, plan propose (a dig to hard stone), inspect workload. Yours to decide: wood serves doors, chests, tables, beds, coffins;
     mechanisms, stone traps and levers have no wooden form."""
     cmds = [str(c) for c in d.get("cmds") or []]
+    wood = next((c for c in cmds if "order.add" in c), "")              # BUG-666: the wooden door has a verb (mat=wood)
     return (f"{d.get('q', 'no non-economic hard stone')}. Decide yourself: buy it ({cmds[0] if cmds else 'dfllm cmd trade.want'}), dig to hard "
-            f"stone ({cmds[1] if len(cmds) > 1 else 'dfllm plan propose'}), or go on without mechanisms and stone traps")
+            f"stone ({cmds[1] if len(cmds) > 1 else 'dfllm plan propose'}), or go on without mechanisms and stone traps"
+            + (f"; doors from wood: {wood}" if wood else ""))
 
 
 def released_hint(d: dict) -> str:

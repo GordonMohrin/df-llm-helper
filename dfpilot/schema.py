@@ -99,6 +99,7 @@ ACT = {
     "order_suspend": ["economy"], "engrave_order": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "kitchen_include": ["economy"],                       # BUG-345: lift a Cook exclusion
     "stone_economic": ["economy"],                        # BUG-648: clear the stone-use screen's economic mark of a building stone
+    "mat_refused": ["economy"],                           # BUG-665: the game's verdict on a boulder material (read only)
     "work_detail": ["economy", "water"], "order_material": ["economy"], "order_remove": ["economy"],
     "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
     "work_detail_prune": ["economy"],
@@ -946,6 +947,7 @@ VERB_ARGS: dict[str, Obj] = {
     "order.add": Checked(Obj(req={"job": Str(r"^[A-Za-z]{2,40}$"), "amount": Int(1, 999)},
                              opt={"item_subtype": Str(r"^ITEM_[A-Z0-9_]{1,60}$"), "material": Str(r"^[A-Z0-9_:]{1,80}$"),
                                   "material_category": Arr(Str(r"^[a-z0-9_]{1,20}$"), lo=1, hi=8),
+                                  "mat": Str(enum=["wood", "rock"]),
                                   "reaction": Str(r"^[A-Z0-9_]{1,60}$"),
                                   "hf": Int(0, 2147483647),
                                   "frequency": Str(enum=["OneTime", "Daily", "Monthly", "Seasonally", "Yearly"])}),
@@ -954,8 +956,10 @@ VERB_ARGS: dict[str, Obj] = {
                                     "EngraveSlab needs hf (the ghost's historical figure) and amount 1 (BUG-078)"
                                     if a["job"] == "EngraveSlab" and ("hf" not in a or a["amount"] != 1) else
                                     "hf belongs to EngraveSlab only (BUG-078)"
-                                    if "hf" in a and a["job"] != "EngraveSlab" else None),
-                         "item-definition jobs need item_subtype (FR-39); EngraveSlab needs hf (BUG-078)"),
+                                    if "hf" in a and a["job"] != "EngraveSlab" else
+                                    "mat replaces material and material_category: give one of them (BUG-666)"
+                                    if "mat" in a and ("material" in a or "material_category" in a) else None),
+                         "item-definition jobs need item_subtype (FR-39); EngraveSlab needs hf (BUG-078); mat is wood or rock (BUG-666)"),
     "jobs.release": Obj(opt={"all": Bool(), "preventblocking": Bool()}),
     # BUG-260 (Run 15 Inkintense famine: breeding pairs the famine slaughter keeps were marked by hand): the animal sheet's
     # slaughter toggle for n tame animals (pets, war and hunting animals never; one pair per race stays unless keep_pairs false)
