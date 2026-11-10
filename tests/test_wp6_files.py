@@ -106,7 +106,7 @@ def test_commands_log_owners_and_orders(run):
     for origin, fn, _ in acts:
         assert origin in schema.ACT[fn], (origin, fn)
     mil = [(fn, args) for origin, fn, args in acts if origin == "military"]
-    assert {fn for fn, _ in mil} <= {"squad_add", "squad_routine", "squad_order", "run"}, "adopted: no create"
+    assert {fn for fn, _ in mil} <= {"squad_add", "squad_routine", "squad_order", "squad_unequip", "run"}, "adopted: no create (BUG-688: squad_unequip clears the vacant positions)"
     assert len([1 for fn, _ in mil if fn == "squad_add"]) == 5, "3 leaders from the UI + 5 recruits = 8"
     routines = {json.loads(a)[1] for fn, a in mil if fn == "squad_routine"}
     # Gordon 11.10.: off duty only in PEACE for the seasons (elite free months 9-11, militia off the rest of the year)

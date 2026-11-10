@@ -131,11 +131,13 @@ T.test('setup: squads A/B/C created with a leader, uniforms, Constant training b
   T.ok(creates[1].args[2].leader ~= nil, 'leader passed to act')
   T.eq(creates[3].args[2].kind, 'xbow')
   local unis = X.acts(W, 'squad_uniform')
-  T.eq(#unis, 3)
+  T.eq(#unis, 6, 'BUG-688: per squad the leader first, the members seated by the same upkeep right after (no spec on a vacant position)')
   T.eq(unis[1].args[2].mode, 'replace')
+  T.eq(unis[1].args[2].positions, {0}, 'the leader')
+  T.eq(unis[2].args[2].positions, {1, 2}, 'the members')
   T.eq(unis[1].args[2].items[6], {cat = 'shield', type = 'SHIELD', mat = 'any'}, 'no armor in stock: any material')
-  T.eq(unis[3].args[2].items[6].subtype, 'ITEM_WEAPON_CROSSBOW')
-  T.ok(unis[3].args[2].quiver and unis[3].args[2].ammo.subtype == 'ITEM_AMMO_BOLTS')
+  T.eq(unis[5].args[2].items[6].subtype, 'ITEM_WEAPON_CROSSBOW')
+  T.ok(unis[5].args[2].quiver and unis[5].args[2].ammo.subtype == 'ITEM_AMMO_BOLTS')
   -- month 0 of the fake clock: A and C (elite) train; B (militia) is off duty, which a new squad already is
   T.eq(names(X.acts(W, 'squad_routine'), 2), {'Constant training', 'Constant training'})
   T.eq(X.members(X.squad_of(W, 'A')), 3)
@@ -154,6 +156,7 @@ end)
 
 T.test('setup is idempotent: a second upkeep changes nothing; reload keeps the squads', function()
   local W = setup(50)
+  W.run(3600, {skip = 9})                           -- BUG-688: the members seated after the squad was made get their specs one upkeep later
   local n = #W.acts
   W.run(3600, {skip = 9})
   local new = {}
@@ -182,7 +185,10 @@ T.test('adopts a squad named A from the UI and keeps its uniform', function()
   X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
   T.eq(names(X.acts(W, 'squad_create')), {'B', 'C'})
-  for _, a in ipairs(X.acts(W, 'squad_uniform')) do T.ok(a.args[1] ~= s.id, 'adopted uniform kept') end
+  for _, a in ipairs(X.acts(W, 'squad_uniform')) do
+    -- (BUG-688: the members seated by military get their specs at once, the bare positions only: the UI uniform of the leader is kept)
+    if a.args[1] == s.id then for _, pos in ipairs(a.args[2].positions or {}) do T.ok(pos ~= 0, 'adopted uniform kept') end end
+  end
   T.eq(mil().squads(W.K).A, s.id)
   T.eq(X.members(s), 3)
 end)
@@ -428,6 +434,7 @@ end)
 T.test('BUG-348: sortie_advice says whether the offered sortie is recommended (squad worn against sortie.worn 80 %)',
        function()
   local W = setup(50)
+  W.run(3600, {skip = 9})                           -- BUG-688: every seated soldier has specs (a vacant position has none)
   local a = select(2, W.K.call('military', 'sortie_advice', 'A'))
   T.eq({a.worn, a.need, a.rec, a.txt}, {0, 80, false, 'sortie not recommended: worn 0% < 80%'}, 'old code: no such call')
   X.equip_all(W)
@@ -444,6 +451,7 @@ T.test('BUG-578: sortie_advice adds the odds against the hostiles it would face 
   local W = X.world{units = units}
   X.load(W, {'military'}, {X.runner('P5')}, {'sense'}); W.state()
   W.run(9, {skip = 9})
+  W.run(3600, {skip = 9})                           -- BUG-688: every seated soldier has specs (a vacant position has none)
   X.equip_all(W)
   W.run(30, {skip = 9})
   local K = W.K
@@ -477,6 +485,7 @@ end)
 ---------------------------------------------------------------- KPIs
 T.test('worn %: worn assigned uniform items / uniform slots; assigned-only and unassigned do not count', function()
   local W = setup(50)
+  W.run(3600, {skip = 9})                           -- BUG-688: every seated soldier has specs (a vacant position has none)
   local A = X.squad_of(W, 'A')
   local ids = {}
   for _, p in ipairs(A.positions) do if p.occupant >= 0 then ids[#ids + 1] = W.hfs[p.occupant].unit_id end end
@@ -517,28 +526,29 @@ T.test('worn %: an occupied position without uniform specs counts as missing; th
              policy = {option = 'A', pop_ceiling = 55, beauty = 'none'}, military = {pct = 15, squads = {melee = 1, xbow = 0}, cv_min = 12}}
   W.run(9, {skip = 9})
   T.eq(X.members(s), 6, 'leader + 5')
-  T.eq(#X.acts(W, 'squad_uniform'), 0, 'the leader had a uniform when it was checked')
+  T.eq(#X.acts(W, 'squad_uniform'), 1, 'the leader had a uniform when it was checked; the 5 seated now get theirs at once (BUG-688)')
+  T.eq(X.acts(W, 'squad_uniform')[1].args[2].positions, {1, 2, 3, 4, 5}, 'only the bare occupied positions')
+  for pos = 1, 5 do                                                      -- (soldiers the player seated on the squads screen: no uniform)
+    for _, c in ipairs(X.CATS) do s.positions[pos].equipment.uniform[c] = kmock_vec{} end
+  end
   X.equip(W, 5)
   W.run(30, {skip = 9})
   local k = kpi(W)
   T.eq({k.slots, k.specs, k.worn}, {42, 7, 17}, '1 equipped leader + 5 soldiers without a uniform')
   W.run(3600, {skip = 9})
   local u = X.acts(W, 'squad_uniform')
-  T.eq(#u, 1)
-  T.eq(u[1].args[2].positions, {1, 2, 3, 4, 5}, 'only the bare occupied positions')
-  T.eq(#u[1].args[2].items, #M.UNIFORM.melee.items)
-  for i, it in ipairs(u[1].args[2].items) do
+  T.eq(#u, 3, 'the 5 again, then the 2 seated last upkeep')
+  T.eq(u[2].args[2].positions, {1, 2, 3, 4, 5}, 'only the bare occupied positions')
+  T.eq(#u[2].args[2].items, #M.UNIFORM.melee.items)
+  for i, it in ipairs(u[2].args[2].items) do
     T.eq({it.cat, it.type, it.mat}, {M.UNIFORM.melee.items[i].cat, M.UNIFORM.melee.items[i].type, 'any'})
   end
   T.ok(s.positions[0].equipment.uniform.body[0] == ui_spec, 'the UI uniform of the leader is kept')
   T.eq(M.UNIFORM.melee.positions, nil, 'the template is not modified')
   T.eq(X.members(s), 8)
+  T.eq(u[3].args[2].positions, {6, 7}, 'the members added last upkeep')
   W.run(3600, {skip = 9})
-  u = X.acts(W, 'squad_uniform')
-  T.eq(#u, 2)
-  T.eq(u[2].args[2].positions, {6, 7}, 'the members added last upkeep')
-  W.run(3600, {skip = 9})
-  T.eq(#X.acts(W, 'squad_uniform'), 2, 'every occupied position has a uniform')
+  T.eq(#X.acts(W, 'squad_uniform'), 3, 'every occupied position has a uniform')
   T.eq(json.decode(W.persist_raw['dfllm.m.military']).sq.A.uni, 1)
 end)
 

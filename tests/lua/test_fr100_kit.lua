@@ -61,7 +61,7 @@ T.test('FR-100: a melee squad goes on wooden training weapons by default; FR-101
   local w = X.WIDX
   T.eq({subs(A, 0), subs(A, 1), subs(A, 2), subs(A, 3), subs(A, 4), subs(A, 5)},
        {{w.ITEM_WEAPON_AXE_TRAINING}, {w.ITEM_WEAPON_SPEAR_TRAINING}, {w.ITEM_WEAPON_SPEAR_TRAINING},
-        {w.ITEM_WEAPON_SWORD_SHORT_TRAINING}, {w.ITEM_WEAPON_SPEAR_TRAINING}, {w.ITEM_WEAPON_SWORD_SHORT_TRAINING}})
+        {w.ITEM_WEAPON_SWORD_SHORT_TRAINING}, {}, {w.ITEM_WEAPON_SWORD_SHORT_TRAINING}})   -- BUG-688: position 4's soldier left (over the target), no spec on a vacant position
   for i = 0, 9 do
     for _, sub in ipairs(subs(C, i)) do T.ok(not X.WEAPONS[sub + 1][1]:find('TRAINING', 1, true), 'C keeps its crossbows') end
   end
@@ -258,7 +258,7 @@ T.test('BUG-620: squad.uniform keeps every spec a soldier wears; only the unfill
   for i = n0 + 1, #X.acts(W, 'squad_uniform') do
     for _, pos in ipairs(X.acts(W, 'squad_uniform')[i].args[2].positions or {}) do T.ok(pos ~= 0, 'no uniform call touches position 0') end
   end
-  T.ok(#A.positions[5].equipment.uniform.body > 0, 'a vacant position gets the template')
+  T.eq(#A.positions[8].equipment.uniform.body, 0, 'BUG-688: a vacant position gets no spec (DF would reserve free gear for it)')
   T.eq(rec(W, 'A').tr, 0, 'the verb still ends the training policy')
 end)
 
