@@ -1354,6 +1354,26 @@ def foot_closed(snap: dict | None, x: int, y: int, zr: int) -> bool:
     return n > 0
 
 
+PHANTOM_WINDOW_YEARS = 2          # BUG-638: how far back a kernel PROJECT_BLOCKED phantom still counts
+
+
+def phantom_tiles(save_dir: Path) -> set[str]:
+    """BUG-638 (Run 16b i2 y377 / Run 16c i3 y374-y378: a seal for a refuge hatch on a tile that is solid rock, 'nothing stands at', the plan
+    check demanding it again): the tiles ('x,y,z') the kernel cancelled a seal for because they are solid rock on the revealed map
+    (PROJECT_BLOCKED d.phantom, newest PHANTOM_WINDOW_YEARS game years)."""
+    now = files.current_tick(save_dir)
+    mt = now - PHANTOM_WINDOW_YEARS * schema.TICKS["YEAR"] if isinstance(now, int) else None
+    out: set[str] = set()
+    for e in files.iter_events_rev(save_dir, min_tick=mt):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "PROJECT_BLOCKED" and isinstance(d.get("phantom"), list):
+            for s in d["phantom"]:
+                m = re.match(r"^\s*(-?\d+,-?\d+,-?\d+)", str(s))
+                if m:
+                    out.add(m.group(1))
+    return out
+
+
 def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
     """BUG-123/124 (Run 14 note 102: `seal at=refuge` was demanded for a manifest stair on undug rock, then failed with "the
     tile is not revealed"): the refuge's stair head as the map shows it, from revealed tiles only (the newest snapshot; fair
@@ -1378,6 +1398,9 @@ def refuge_stair(save_dir: Path, snap: dict | None = None) -> dict:
     man = "%d,%d,%d %s" % (x, y, zr + 1, "stair_down" if top == zr + 1 else "stair_updown")
     xyz = "%d,%d,%d" % (x, y, zr + 1)
     out = {"state": "ok", "head": man, "man": man, "note": ""}
+    if (c0 is None or c0 not in STAIR_CHARS + "+") and xyz in phantom_tiles(save_dir):
+        # BUG-638: the kernel found solid rock where the manifest has the stair head: never dug, no hatch is demanded
+        return {"state": "nostair", "head": None, "man": man, "note": NOSTAIR.format(xyz)}
     if c0 != "+" and foot_closed(snap, x, y, zr):     # BUG-336 review: the doors round the foot close it instead
         return {"state": "foot", "head": None, "man": man, "note": FOOT_NOTE.format("%d,%d,%d" % (x, y, zr))}
     if c0 is not None and c0 in STAIR_CHARS:            # BUG-313: a head walled in on its level moves up the stair
@@ -1867,6 +1890,17 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
         out.append(f"no ranked site: the surface {tpl} needs its walls' footprint of open surface floor (no trees, rocks, water or "
                    f"hill) on the citizens' walk group, beside the surface core: `dfllm bp sites {tpl} surface=1 --fresh "
                    "--near <depot x,y,z> --within 40`")
+    elif ranked == 0 and surface_alt(save_dir, tpl, params) is not None:
+        # BUG-639: no fortcore, no Z4 floor: bp.place falls back to the surface variant itself; `bp sites` names it
+        out.append(f"no ranked site: {tpl} rooms hang on the dug Z4 floor of a fortcore, and this fort has none; bp.place {tpl} then "
+                   f"uses the surface variant itself: `dfllm bp sites {tpl} surface=1 --fresh --near <depot x,y,z> --within 40` lists "
+                   "its sites")
+    elif ranked == 0 and tpl == "tombs" and no_core_floor(save_dir):
+        # BUG-639: tombs have no surface variant: the dug floor of a core or of the aquifer shaft pass is what they need
+        out.append("no ranked site: tombs dig into rock off the Z4 floor of a fortcore and have no surface variant (a surface core does "
+                   "not carry them either, plan.SURFACE_DUG_ONLY); this fort has no dug core: bp.place fortcore (aquifer=pass under "
+                   "a wet level) first, then `dfllm bp sites tombs --fresh`; until then the dead lie unburied (dfllm cmd inspect "
+                   "what=ghosts)")
     elif ranked == 0 and tpl == "depot":
         # BUG-368: the trade depot needs no fortcore, only a 5x5 block of open flat ground the citizens reach
         out.append("no ranked site: the trade depot needs a 5x5 block of open surface floor (no trees, rocks, water or hill) "
@@ -2055,6 +2089,9 @@ CORE_TILES = 150000          # tiles of one fortcore sites export (the kernel's 
 CORE_BOX_MIN = 90            # side of the smallest box (a fortcore needs 35 x 52 round its anchor, box_hint: 88)
 SNAP_TILES_PER_S = 1500      # the export's pace the wait is sized for (1000 tiles a frame, a busy kernel runs ~1.5 frames/s)
 SNAP_WAIT_MAX_S = 300.0
+# BUG-639: the kernel's default box (no explicit one) was waited for at the CLI's 60 s; Run 16b i2's 168,480-tile export took 59 s to 3 min.
+# Its size is the newest sites snapshot's box, else this many tiles (a default box of the fort's pieces plus a margin)
+SNAP_DEFAULT_TILES = 170000
 
 
 def sites_box(save_dir: Path, tpl: str) -> list[int] | None:
@@ -2097,12 +2134,15 @@ def box_tiles(box: list[int] | None) -> int | None:
     return max(0, box[3] - box[0] + 1) * max(0, box[4] - box[1] + 1) * max(0, box[5] - box[2] + 1)
 
 
-def fresh_wait(box: list[int] | None, timeout: float) -> float:
+def fresh_wait(box: list[int] | None, timeout: float, save_dir: Path | None = None) -> float:
     """BUG-415: how long `bp sites --fresh` waits for its export: `timeout` (the flag, default 60 s) at least, longer for a
-    big box (box_tiles / SNAP_TILES_PER_S plus 30 s, at most SNAP_WAIT_MAX_S)."""
+    big box (box_tiles / SNAP_TILES_PER_S plus 30 s, at most SNAP_WAIT_MAX_S). BUG-639: without a box (the kernel's default one)
+    the newest sites snapshot's box tells the size, else SNAP_DEFAULT_TILES."""
     n = box_tiles(box)
     if n is None:
-        return float(timeout)
+        if save_dir is None:
+            return float(timeout)
+        n = box_tiles((sites_snapshot(save_dir) or {}).get("bbox")) or SNAP_DEFAULT_TILES
     return float(max(timeout, min(SNAP_WAIT_MAX_S, 30.0 + n / SNAP_TILES_PER_S)))
 
 
@@ -2120,6 +2160,32 @@ def box_hint(snap: dict | None, tpl: str) -> str:
             "`dfllm cmd snapshot '{\"bbox\":[x0,y0,z0,x1,y1,z1],\"purpose\":\"sites\"}'` with a box you choose")
 
 
+def surface_alt(save_dir: Path, tpl: str, params: dict | None) -> dict | None:
+    """BUG-639 (Run 16b i2 Valleyhame y375-y378, no fortcore for 700 days: `bp sites bedrooms` / `tombs` 0 sites, farms and bedrooms
+    AUTO_FAIL, 'bp.place fortcore first'): the params of the surface variant (BUG-387: dining, bedrooms, tavern, office stand on open
+    surface floor with no Z4) for a room template asked without p.surface in a fort that has neither a dug Z4 floor in the manifest nor a
+    fortcore project that will dig one; None otherwise (also for a template without a surface variant: tombs hang on the Z4 floor)."""
+    p = dict(params or {})
+    if p.get("surface"):
+        return None
+    try:
+        if tpl not in load_bp("rooms").SURFACE_ROOMS:
+            return None
+    except BpUnavailable:
+        return None
+    return {**p, "surface": 1} if no_core_floor(save_dir) else None
+
+
+def no_core_floor(save_dir: Path) -> bool:
+    """BUG-639: the fort has no dug Z4 floor in the manifest and no fortcore project that will dig one."""
+    try:
+        if (fort_manifest(save_dir).get("zones") or {}).get("Z4"):
+            return False
+    except BpUnavailable:
+        return False
+    return first_core(save_dir) is None
+
+
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
           same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
     """_place; BUG-316: a surface farm (farms p.surface) at a ranked label S<k> that finds no free site for its plots
@@ -2129,6 +2195,15 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
         return _place(save_dir, tpl, params, label, bp_id, occ, same, snap, need)
     except BpError as e:
         ranked = bool(_LABEL.fullmatch(str(label)))
+        alt = surface_alt(save_dir, tpl, params) if ranked else None
+        if alt is not None:                               # BUG-639: no Z4 floor and no core coming: the surface variant
+            try:
+                doc = _place(save_dir, tpl, alt, label, bp_id, occ, same, snap, need)
+            except BpError as e2:
+                raise BpError(f"{e}; BUG-639: the surface variant (p.surface=1) has no site either: {e2}") from e2
+            PLACE_NOTES[bp_id] = (f"BUG-639: no room site for {tpl} (the fort has no dug Z4 floor and no fortcore project): placed on the "
+                                  "open surface floor (p.surface=1)")
+            return doc
         steps = fewer_plots(tpl, params) if ranked else []
         shallow = shallower_core(tpl, params) if ranked else []
         if not steps and not shallow:

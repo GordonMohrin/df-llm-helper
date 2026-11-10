@@ -206,6 +206,11 @@ CLICK_PASS_S = 600                             # a standing needs_click wakes a 
 HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
 AUTO_TIMEOUT_S = 60
+# BUG-639 (Run 16b i2 Valleyhame y375-y378: `AUTO_FAIL farms / tombs / bedrooms: no sites snapshot` over and over while kern.log said 'snapshot:
+# ... (sites, 168480 tiles, by inbox:follow) written 1 min / 2 min / 3 min after the request'): the sites export of a default box takes one to
+# three minutes on a busy kernel (it paces itself, waits for the yearly autosave), AUTO_TIMEOUT_S gave up after 60 s and asked again, so the
+# queue held a request nobody waited for. A job that waits for its snapshot waits AUTO_SNAP_TIMEOUT_S (cmd.SNAP_WAIT_MAX_S).
+AUTO_SNAP_TIMEOUT_S = 300
 TOMBS_COOLDOWN_S = 600
 WAIVE_COOLDOWN_S = 3600                         # BUG-300: one phase.waive farms per hour of follow at most
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
@@ -411,7 +416,7 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
     if etype == "DECISION_NEEDED" and d.get("id") == "hospital_supply":
         return hospital_supply_hint(d)
     if etype == "DECISION_NEEDED" and d.get("id") in ("famine", "food_low", "mood_deadline", "no_water",
-                                                                         "thirst_unit") and d.get("cmds"):
+                                                                         "thirst_unit", "thirst") and d.get("cmds"):
         return food_hint(d, save_dir)
     if etype == "PATIENTS_OUT":
         return patients_hint(d)
@@ -425,6 +430,8 @@ def next_hint(etype: str, e: dict, save_dir=None) -> str:
         return unreach_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("idle") is not None and d.get("proj"):
         return idle_hint(d)
+    if etype == "PROJECT_BLOCKED" and d.get("autocancel") is not None and d.get("proj"):
+        return autocancel_hint(d)
     if etype == "PROJECT_BLOCKED" and d.get("park") is not None and d.get("proj"):
         return park_hint(d)
     return NEXT.get(etype, "dfllm brief")
@@ -458,9 +465,10 @@ def sortie_hint(d: dict) -> str:
             "dfllm status shows the cause")
 
 
-FARM_CMD = re.compile(r'"tpl":\s*"farms"')
+FARM_CMD = re.compile(r'"tpl":\s*"farms"|bp sites farms')       # BUG-641: `bp sites farms surface=1 ...` is a farm command too
 SURFACE_FARM_CMD = re.compile(r'"surface":\s*1')
 TRADE_FOOD_CMD = """dfllm cmd trade.want '{"add":["food","seeds"]}'"""
+TRADE_DRINK_CMD = """dfllm cmd trade.want '{"add":["plant","drink","seeds"]}'"""      # BUG-641: what the thirst decision falls back to
 
 
 def workable_food_cmds(d: dict, save_dir=None) -> tuple[list[str], list[str]]:
@@ -482,7 +490,9 @@ def workable_food_cmds(d: dict, save_dir=None) -> tuple[list[str], list[str]]:
             dropped.append("bp.place farms: no farm site on the newest sites snapshot (bp sites farms surface=1 finds none)")
             cmds = keep
     if not cmds or not any("trade.want" in c for c in cmds):
-        cmds = cmds + [TRADE_FOOD_CMD]
+        # BUG-641 (Run 16c i3 Wallfree y387: the thirst decision offered the farm command in a fort whose `bp sites farms surface=1` is 0
+        # for good): a thirst decision with nothing left falls back to the caravans' drink and plants, not to food
+        cmds = cmds + [TRADE_DRINK_CMD if d.get("id") == "thirst" else TRADE_FOOD_CMD]
     return cmds, dropped
 
 
@@ -702,6 +712,15 @@ def park_hint(d: dict) -> str:
             "it again elsewhere if still wanted")
 
 
+def autocancel_hint(d: dict) -> str:
+    """BUG-637: the kernel cancelled a project that stood build_lost for good (no undo: what it built stays, the tiles of its unbuilt
+    pieces are free). d.cmd is the bp.place for the same template; check `bp sites` first, the lost site may be the cause."""
+    cmd = d.get("cmd")
+    again = (f"place it again: {cmd} (after dfllm bp sites {d.get('tpl') or '<tpl>'} --fresh shows a site; surface=1 without a "
+             "fortcore floor)") if cmd else "the next audit places a seal again if one is still needed"
+    return f"tell Gordon what was cancelled and why (d.msg); {again}"
+
+
 def unreach_hint(d: dict) -> str:
     """BUG-352: a dig stage no citizen reaches (its tiles lie in another walk group, e.g. across a brook) stands still. The
     cancel drops only the unbuilt pieces; `bp sites` lists the sites the citizens reach (it shows the walk group)."""
@@ -917,7 +936,7 @@ class Follower:
         now, out = self.clock(), {}
 
         def fresh(j):
-            return isinstance(j, dict) and now - (j.get("since") or 0) <= AUTO_TIMEOUT_S
+            return isinstance(j, dict) and now - (j.get("since") or 0) <= AUTO_SNAP_TIMEOUT_S
         for key in ("audits", "replies"):
             group = jobs.get(key) if isinstance(jobs.get(key), dict) else {}
             kept = {k: j for k, j in group.items() if fresh(j)}
@@ -1469,7 +1488,7 @@ class Follower:
                        need: list | None = None) -> bool:
         """True when the snapshot for the placement was requested (False: cooldown, or the request failed)."""
         job = self.jobs.get(key)
-        if job and now - job.get("since", 0) < (AUTO_TIMEOUT_S if not job.get("placed") else TOMBS_COOLDOWN_S):
+        if job and now - job.get("since", 0) < (AUTO_SNAP_TIMEOUT_S if not job.get("placed") else TOMBS_COOLDOWN_S):
             return False
         try:
             cid = self._send("snapshot", {"purpose": "sites"}, f"{tpl} snapshot", now)
@@ -1589,16 +1608,17 @@ class Follower:
             if job and not job.get("placed"):
                 if job.get("ready"):
                     self._place(key, job, now)
-                elif now - job["since"] > AUTO_TIMEOUT_S:
+                elif now - job["since"] > AUTO_SNAP_TIMEOUT_S:
                     del self.jobs[key]
-                    self._fail(job.get("tpl", key), "no sites snapshot", now)
+                    self._fail(job.get("tpl", key), f"no sites snapshot within {AUTO_SNAP_TIMEOUT_S}s (BUG-639: the export of a big box "
+                               "takes minutes; dfllm cmd inspect what=snapshot, then dfllm bp sites <tpl> --fresh)", now)
 
     def _read_replies(self, now: float) -> None:
         """Outbox replies of auto commands: ok -> done; ok:false or none in time -> AUTO_FAIL."""
         replies = self.jobs.get("replies") or {}
         for cid, r in list(replies.items()):
             reply = files.read_outbox(self.dir, cid)
-            if reply is None and now - r.get("since", 0) <= AUTO_TIMEOUT_S:
+            if reply is None and now - r.get("since", 0) <= (AUTO_SNAP_TIMEOUT_S if r.get("verb") == "snapshot" else AUTO_TIMEOUT_S):
                 continue
             del replies[cid]
             key = next((k for k in PLACE_KEYS if self.jobs.get(k) is not None
@@ -1610,7 +1630,8 @@ class Follower:
                     continue                   # BUG-442: no kernel answer (DF closed): asked again at the next sweep, no AUTO_FAIL
                 if mine and r["verb"] == "snapshot":
                     del self.jobs[key]         # no second 'no sites snapshot' fail for the same cause
-                self._fail(r["what"], f"no reply to {r['verb']} {cid} within {AUTO_TIMEOUT_S}s", now)
+                self._fail(r["what"], f"no reply to {r['verb']} {cid} within "
+                           f"{AUTO_SNAP_TIMEOUT_S if r['verb'] == 'snapshot' else AUTO_TIMEOUT_S}s", now)
                 continue
             files.log_cli(self.dir, "follow", f"reply:{r['verb']}", {"id": cid},
                           ("ok " if reply.get("ok") else "ERR ") + str(reply.get("msg", "")))
