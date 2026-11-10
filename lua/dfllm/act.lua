@@ -2060,6 +2060,20 @@ local function impls(state)
     return true, 'removed'
   end
 
+  -- BUG-648: the stone-use screen's economic mark of an inorganic material (plotinfo.economic_stone[mat_index], a byte vector;
+  -- gui/advfort.lua writes 0): cleared = the stone may be furniture; idempotent. Only a plain building stone (the caller checks
+  -- ITEMS_HARD, no ore, no flux)
+  function I.stone_economic(mat_index, on)
+    if math.type(mat_index) ~= 'integer' or mat_index < 0 then return false, 'bad material index' end
+    local es = df.global.plotinfo.economic_stone
+    if es == nil then return false, 'no economic_stone vector' end
+    local was = es[mat_index]
+    local want = on and 1 or 0
+    if was == want or (was == true and on) or (was == false and not on) then return true, 'unchanged' end
+    es[mat_index] = want
+    return true, on and 'marked' or 'cleared'
+  end
+
   -- forbid/dump toggles; melt through dfhack.items.markForMelting/cancelMelting (Lua API.txt:2135-2141)
   function I.item_flag(item_id, flag, on)
     if not ITEM_FLAGS[flag] then return false, 'flag must be forbid, dump or melt' end

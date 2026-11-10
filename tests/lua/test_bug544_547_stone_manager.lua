@@ -115,6 +115,10 @@ local function world(opts)
     end
     F.mat(W, 0, 7, {token = 'INORGANIC:MUDSTONE', flags = {ITEMS_HARD = true}})
     df.global.plotinfo.economic_stone = {[7] = 1}
+    W.act_result('stone_economic', function(idx, on)               -- BUG-648: act.stone_economic
+      df.global.plotinfo.economic_stone[idx] = on and 1 or 0
+      return true, on and 'marked' or 'cleared'
+    end)
   end
   if opts.setup then opts.setup(W, ctl) end
   job_list(opts.jobs and opts.jobs() or {})
@@ -212,6 +216,7 @@ end)
 
 T.test('BUG-545: 20 boulders, all economic stone (no usable one), 40 rock orders waiting: the decision comes from the census alone', function()
   local W = world{boulders = 20, econ = true, logs = 0, rock_orders = 40}
+  F.mat(W, 0, 7, {token = 'INORGANIC:CHALK', flags = {}})          -- BUG-648: soft stone; a hard economic one is cleared instead
   days(W, 1)
   local d = decisions(W, 'no_hard_stone')
   T.eq(#d, 1, 'asked')
@@ -269,6 +274,25 @@ T.test('BUG-546: economy.mechanic_labor: nobody has the Mechanics labor: the bes
   ok, res, uid = call()
   T.eq({ok, res}, {true, 'have'})
   T.eq(#ctl.labor, 1, 'a holder is enough: nothing more')
+end)
+
+T.test('BUG-648 (Wallfree): 20 boulders of a hard stone marked economic: the mark is cleared, the Masons take them, no question', function()
+  local W = world{boulders = 20, econ = true, logs = 0, rock_orders = 40}
+  days(W, 3)
+  T.eq(#decisions(W, 'no_hard_stone'), 0, 'no question: the stone-use mark was cleared')
+  T.eq(tonumber(df.global.plotinfo.economic_stone[7]), 0)
+  T.eq(stock(W).rock, 20, 'the census counts the stone usable now')
+  local found
+  for _, l in ipairs(W.logs) do if l.msg:find('marked economic (stone-use screen)', 1, true) then found = l.msg end end
+  T.ok(found and found:find('MUDSTONE', 1, true), found)
+end)
+
+T.test('BUG-648: soft stone (no ITEMS_HARD) stays out: the question comes, the flag is untouched', function()
+  local W = world{boulders = 20, econ = true, logs = 0, rock_orders = 40}
+  F.mat(W, 0, 7, {token = 'INORGANIC:CHALK', flags = {}})
+  days(W, 1)
+  T.eq(#decisions(W, 'no_hard_stone'), 1)
+  T.eq(tonumber(df.global.plotinfo.economic_stone[7]), 1)
 end)
 
 T.done()

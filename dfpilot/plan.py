@@ -2762,13 +2762,26 @@ DEFENSE_FIRST = ("traps",)                # builds that come before the growth b
                                           # drink store included, are first already (refuge_drafts, _refuge_fix)
 
 
-def defense_gaps(s: dict | None) -> list[str]:
+def refuge_unbuilt(s: dict | None, fort: dict | None) -> str | None:
+    """BUG-650 (Run 16a i1 Basementflew y455-y458: the ceiling held 'defence short (refuge_dry)' for years, `refuge_drink` found no site because
+    it hangs on a refuge room of the manifest, which only fortcore stage 3 makes and the aquifer made impossible): the reason why a dry refuge
+    cannot be fixed by a build, None when it can (a store stands, is under way, has a site, a refuge stage is under way) or is not known. The
+    fort's `refuge` facts say it: drink_fit 0 (no site for a store: no refuge room, no space) with no store and no stage 3 under way."""
+    f = (fort or {}).get("refuge") if isinstance(fort, dict) else None
+    if not isinstance(f, dict) or not refuge_dry(s):
+        return None
+    if f.get("drink_fit") != 0 or f.get("drink") or f.get("drink_room") or f.get("stage3"):
+        return None
+    return str(f.get("drink_why") or "no site for a refuge drink store (no refuge room in the manifest)")
+
+
+def defense_gaps(s: dict | None, fort: dict | None = None) -> list[str]:
     """BUG-377: the defence gaps of the fort now, each a short text: 'refuge_dry' (readiness R0), 'traps 0' (the audit's
     fewest armed traps on an attacker path is under TRAPS_HOLE, or no audit and no trap in state `traps`), 'armor worn N %'
     (soldiers and the worn share, mil.worn) or 'armor 0' (no armor at all in mil.kit). [] when none or nothing is known."""
     s = s or {}
     out: list[str] = []
-    if refuge_dry(s):
+    if refuge_dry(s) and refuge_unbuilt(s, fort) is None:       # BUG-650: no ceiling hold for a gap no build can close
         out.append("refuge_dry")
     r = s.get("ready") or {}
     mt = (r.get("audit") or {}).get("min_traps")
@@ -2801,13 +2814,13 @@ def defense_gaps(s: dict | None) -> list[str]:
     return out
 
 
-def defense_on(s: dict | None, target: str) -> list[str]:
+def defense_on(s: dict | None, target: str, fort: dict | None = None) -> list[str]:
     """BUG-377: the defence gaps that hold growth: [] below DEFENSE_FROM, in a fort below DEFENSE_POP citizens and while the
     fort rebuilds (the rebuild policy drafts only its own kinds)."""
     pop = ((s or {}).get("pop") or {}).get("cit", 0)
     if target < DEFENSE_FROM or not _nat(pop) or pop < DEFENSE_POP or rebuild_state(s):
         return []
-    return defense_gaps(s)
+    return defense_gaps(s, fort)
 
 
 # BUG-533 (Run 16b-d i2/i3/i4: no migrant wave for years, `max-pop 33 (plan)` on 33 citizens: pop-control's game cap is
@@ -2838,12 +2851,12 @@ def gap_soft(gap: str) -> bool:
     return bool(m) and int(m.group(1)) >= GROWTH_WORN
 
 
-def defense_cap(s: dict | None, cap: int) -> int:
+def defense_cap(s: dict | None, cap: int, fort: dict | None = None) -> int:
     """BUG-377: the population ceiling while the defence is short: the citizens now (at least DEFENSE_POP), never above `cap`.
     BUG-533: plus growth_room(pop) while every gap is soft (gap_soft), so a wave can still come."""
     pop = ((s or {}).get("pop") or {}).get("cit", 0)
     base = max(pop if _nat(pop) else 0, DEFENSE_POP)
-    gaps = defense_gaps(s)
+    gaps = defense_gaps(s, fort)
     if gaps and all(gap_soft(g) for g in gaps):
         base += growth_room(base)
     return min(cap, base)
@@ -2908,12 +2921,12 @@ def trap_hold_gate(doc: dict, s: dict | None) -> list[str]:
 def defense_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> list[str]:
     """plan check (BUG-377): warnings while the defence is short (defense_on): the population ceiling above what the fort has,
     no trap hall or traps build in the plan while traps are short, no iron in trade.want while the armor is."""
-    gaps = defense_on(s, doc["phase_target"])
+    gaps = defense_on(s, doc["phase_target"], fort)
     if not gaps:
         return []
     out: list[str] = []
     pop = (s.get("pop") or {}).get("cit", 0)
-    hold = defense_cap(s, 10 ** 6)
+    hold = defense_cap(s, 10 ** 6, fort)
     head = f"defense: {', '.join(gaps)}"
     if doc["policy"]["pop_ceiling"] > hold:
         out.append(f"{head}: pop_ceiling {doc['policy']['pop_ceiling']} lets the fort grow past {pop} citizens before it "
@@ -4871,7 +4884,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     kept_b = [b for se in prev["seasons"] for b in se["build"]] if prev and prev.get("year") == year else []
     rq_builds, rq_note = request_drafts(s, fort, done, builds, info, kept_b)    # BUG-418: requests, mood shops, refuge drink
     builds += rq_builds
-    gaps = defense_on(s, target)                 # BUG-377: refuge dry / traps short / armor worn: defence before growth
+    gaps = defense_on(s, target, fort)           # BUG-377: refuge dry / traps short / armor worn: defence before growth
     thold = trap_hold(s)                         # BUG-437: no stone-fall traps on the citizens' way out
     tb, tnote = _traps.draft(fort, max(target, _traps.TRAPS_PHASE) if gaps else target, builds, prev, year, info, rb,
                              hold=bool(thold))   # FR-96
@@ -5000,7 +5013,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     cap = min(level_cap(lvl, d01), OPTION_A_MAX if d01 != "B" else R_CAPS[3])
     policy_cap = cap
     if gaps:
-        cap = defense_cap(s, cap)                # BUG-377: no growth past the citizens now while the defence is short
+        cap = defense_cap(s, cap, fort)          # BUG-377: no growth past the citizens now while the defence is short
     pop = (s.get("pop") or {}).get("cit", 0)
     pm = (prev or {}).get("military") or schema.PLAN_DEFAULTS["military"]
     melee = 2 if target >= "P5" else 1 if target >= "P2" else 0
@@ -5021,7 +5034,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         "orders": {"import": libs if libs else [x for x in ((prev or {}).get("orders") or {}).get("import") or []
                                                 if isinstance(x, str)]},
         "trade": dict((prev or {}).get("trade") or {"want": ["bar:iron", "anvil", "cloth"], "sell": ["crafts"]}),
-        "notes": (f"draft from phases {cur}..{target}" + ceiling_held_note(cap, policy_cap, gaps)
+        "notes": (f"draft from phases {cur}..{target}" + ceiling_held_note(cap, policy_cap, gaps) + refuge_free_note(s, fort)
                   + (f"; {star} needs approval: set phase_target {star}" if star else "")
                   + "; site S<k> = k-th free site at apply time (never overlaps other projects or earlier"
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
@@ -5654,6 +5667,15 @@ def ceiling_held_note(cap: int, policy_cap: int, gaps: list) -> str:
         return ""
     return (f"; pop_ceiling {cap} held (policy {policy_cap}): defence short ({', '.join(gaps)}), BUG-377: no growth past the "
             "citizens now (BUG-533: but one wave's room while every gap is soft) until they are closed")
+
+
+def refuge_free_note(s: dict | None, fort: dict | None) -> str:
+    """BUG-650: the ceiling is not held for a dry refuge no build can fix; the note says so (and why), '' otherwise."""
+    why = refuge_unbuilt(s, fort)
+    if not why:
+        return ""
+    return (f"; BUG-650: refuge_dry holds no ceiling: no refuge drink store can be built ({why}); the drink stays in Kern+ and the "
+            "citizens' wells, a refuge room (fortcore stage 3 or a refuge_beds site) comes first")
 
 
 HELD_RE = re.compile(r"pop_ceiling (\d+) held \(policy (\d+)\): ([^;]*?)(?:, BUG-377|;|$)")

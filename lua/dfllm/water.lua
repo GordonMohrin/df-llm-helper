@@ -1920,13 +1920,18 @@ local function cistern_dry(K, c, r, p, now)
                                              best.s.x, best.s.y, best.s.z, best.d)
                       or 'no accepted water to carry from (no revealed water source)'
         local days = (now - (math.tointeger(rec.t) or now)) // DAY
+        -- BUG-647 (Run 16c i3 Wallfree y385: 'no buckets (no wood)'): a bucket-fed cistern needs a free bucket to be filled at all
+        local nb = math.tointeger(r.free) or 0
+        if (fill == 'pond' or fill == 'pond_removed' or fill == 'none') and nb == 0 then
+          how = how .. '; no free bucket in the fort (MakeBucket needs wood)'
+        end
         local msg = string.format('cistern %s done, its well %d at %d,%d,%d dry for %d days: %s; %s', proj or rm.id,
                                   well.id, well.x, well.y, well.z, days, how, carry)
         local tail = '; no drink for a hospital or the refuge'
         if #msg + #tail <= 200 then msg = msg .. tail end
         K.emit('CISTERN_DRY', 'B', trunc(msg, 200),
                {room = trunc(rm.id, 60), proj = proj, well = well.id, pos = {well.x, well.y, well.z}, days = days,
-                fill = fill, pond = pond, src = best and {best.s.x, best.s.y, best.s.z} or nil, d = best and best.d or nil})
+                fill = fill, pond = pond, buckets = nb, src = best and {best.s.x, best.s.y, best.s.z} or nil, d = best and best.d or nil})
         K.log('warn', 'water: %s', msg)
       end
     end

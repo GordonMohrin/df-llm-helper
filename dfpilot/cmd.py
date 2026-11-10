@@ -2352,6 +2352,21 @@ def anchor_checked(save_dir: Path, tpl: str, params: dict | None, anchor: list[i
                           "corridor (fortcore, aqshaft or explore floor) or on open ground, not in a placed room (BUG-502, the "
                           f"ranking's test): bp.cancel {top[0]} or name another column")
         return
+    if tpl == "cistern" and (params or {}).get("water") == "aquifer":
+        # BUG-647 (Run 16c i3 Wallfree y383-y385: `bp.place cistern site=S1` was refused (no site with its basin on an aquifer
+        # level), the label A106_48_146_3 passed with p.water=aquifer, the basin lay on z145, the well stayed dry, CISTERN_DRY 'nothing
+        # fills it'): an aquifer cistern at an explicit anchor passes the ranking's own test (basin on a known aquifer level under a
+        # dry room level, bp.sites.aquifer_well); the BpError says why, and where the ranking would put it
+        snap = snap or sites_snapshot(save_dir)
+        if snap is None:
+            return
+        try:
+            rank_sites(save_dir, tpl, params, snap, n=RANK_N, where={"at": list(anchor)})
+        except BpError as e:
+            raise BpError(f"cistern@A{anchor[0]}_{anchor[1]}_{anchor[2]}: p.water=aquifer needs the basin (one level below the "
+                          f"well room) on a known aquifer level, and this anchor is none (BUG-647: the cistern would stay dry): {e}; "
+                          "`dfllm bp sites cistern water=aquifer` lists the sites that fill") from e
+        return
     if tpl not in WATER_TPLS or water_ctx(save_dir, tpl) is None:
         return
     snap = snap or sites_snapshot(save_dir)

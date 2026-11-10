@@ -23,6 +23,7 @@ M.ACTIVE_KEY = 'dfllm.active'   -- BUG-149: world data, the fort booted last {sa
 M.BY = {llm = true, gordon = true, cli = true, follow = true, supervise = true, test = true}
 M.CAD = {state_ms = 2000, events_ms = 1000, inbox_ms = 500, heartbeat_ms = 5000, persist_ms = 10000,
          inbox_per_frame = 4, slow_ms = 5, fault_window_ms = 600000, eventq_max = 2000, gap_ms = 3000,
+         sleep_gap_ms = 600000,                 -- BUG-645: a gap this long that is not ours is the host asleep (no save takes 10 min)
          evbuf_max = 5000, logbuf_max = 2000,   -- lines kept while a file cannot be written
          load_ms = 5000,                        -- fort-size load refresh (units from sense, #items.all)
          persist_big_bytes = 8192, persist_big_ms = 60000}   -- big site-data keys: written at most every 60 s
@@ -1222,6 +1223,9 @@ function M.note_gap(st, gap, prev_cost, prev_year)
   if prev_cost * 2 >= gap then
     cause = st.prev_top or 'kern'
     if st.prev_task then extra = ' in ' .. st.prev_task end
+  elseif gap >= CAD.sleep_gap_ms then
+    -- BUG-645 (Run 16 all four: 'frame freeze 35186xxx ms' after the PC slept ~10 h): DF's clock ran on through the sleep
+    cause, extra = 'sleep', string.format(' (host slept ~%d min: sleep/suspend of the PC, no freeze)', gap // 60000)
   elseif sname and st.save_seen and sname ~= st.save_seen then
     cause, extra = 'save', string.format(' (save folder %s > %s)', st.save_seen, sname)
   elseif now.year ~= prev_year then
@@ -1237,6 +1241,7 @@ function M.note_gap(st, gap, prev_cost, prev_year)
   if #ring > 12 then table.remove(ring, 1) end
   st.log_as('kern', 'warn', string.format('frame gap %d ms (blame %s)%s', gap, cause, extra))
   if cause == 'save' then M.quiet(st, 'after a DF save') end
+  return cause
 end
 
 -- BUG-070: heavy background work waits for config perf.quiet_s after a new year or a DF-save gap (K.busy() answers 'save':
@@ -1261,18 +1266,21 @@ local function frame(st)
   local b = bucket(st)
   st.frame_paced = 0
   local dt_frame = 0
+  local slept_gap = 0
   if prev_start then   -- frame-to-frame gap; blame our own previous frame if it took most of it
     local gap = t0 - prev_start
     dt_frame = gap
     if gap > b.gap then b.gap = gap end
     if gap >= CAD.gap_ms then
       st.p.gaps3 = st.p.gaps3 + 1
-      M.note_gap(st, gap, prev_cost, prev_year)
+      if M.note_gap(st, gap, prev_cost, prev_year) == 'sleep' then
+        st.p.slept, slept_gap = true, gap          -- BUG-645: the sleep is no run time (perf tps) and no pacing debt
+      end
     elseif gap > st.p.gap_max then st.p.gap_max = gap end
   end
   st.frame_top_ms, st.frame_top = 0, nil
   local ticking = now.tick > prev_tick
-  if ticking and prev_start then st.p.unpaused_ms = st.p.unpaused_ms + (t0 - prev_start) end   -- perf tps
+  if ticking and prev_start then st.p.unpaused_ms = st.p.unpaused_ms + (t0 - prev_start - slept_gap) end   -- perf tps (BUG-645: not the sleep)
   if now.tick < prev_tick then   -- older save state or clock reset: restart cadences
     for _, e in ipairs(st.entries) do e.last_tick = nil end
   end

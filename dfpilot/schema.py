@@ -98,6 +98,7 @@ ACT = {
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care", "traps"],
     "order_suspend": ["economy"], "engrave_order": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "kitchen_include": ["economy"],                       # BUG-345: lift a Cook exclusion
+    "stone_economic": ["economy"],                        # BUG-648: clear the stone-use screen's economic mark of a building stone
     "work_detail": ["economy", "water"], "order_material": ["economy"], "order_remove": ["economy"],
     "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
     "work_detail_prune": ["economy"],

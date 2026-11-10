@@ -167,7 +167,16 @@ function C.evaluate(rec, rules, ctx)
     put('water', 'warn', string.format('%s only on the edge tiles of the rectangle (%d tile(s), nearest %.1f tiles = about %d ' ..
       'steps from the centre)', rec.water, wt.water_n, (wt.water_d2 or 0) / 2, (wt.water_d2 or 0) * 24))
   elseif rec.water then put('water', 'pass', rec.water)
-  elseif rec.aquifer == 'light' then put('water', 'warn', 'no stream shown; light aquifer as well source')
+  elseif rec.aquifer == 'light' and (rec.read or 0) > 0 and not ctx.sweep then
+    -- BUG-649 (Run 16b i2 Valleyhame y372: 'no stream shown; light aquifer as well source' was only a warning, the brook lay 13 embark tiles
+    -- away, the fort had no water source but its aquifer: drink 0 d on day 78, STRANDED; the panel's 'light' was 8 heavy layers): no brook in
+    -- the rectangle is a FAIL, accepted only with a reason (--accept water=...); the aquifer well it relies on is a class, not a span
+    local cs = (rules.core_span or C.DEFAULT.core_span).light or 8
+    put('water', 'fail', string.format('no brook or river in the rectangle (the nearest one lies outside it, scan prints brook=...); ' ..
+      'the only water would be the aquifer as a well source, and the panel class "light aquifer" is a class, not a span (Valleyhame: ' ..
+      '%d heavy layers to pass before any well water; Basementflew 14 levels): accept only with a reason', cs))
+  elseif rec.aquifer == 'light' then put('water', 'warn', 'no stream shown; light aquifer as well source (the panel class is not a ' ..
+      'span: up to ' .. tostring((rules.core_span or C.DEFAULT.core_span).light or 8) .. ' heavy layers)')
   elseif ctx.sweep then   -- BUG-410: a sweep hovers a few tiles; a brook on the others is not excluded
     put('water', 'warn', 'no brook in the ' .. tostring(wt and wt.n or '?') .. ' sampled tiles (scan --hover reads all 16)')
   elseif (rec.read or 0) > 0 then put('water', 'fail', 'no brook or river shown')

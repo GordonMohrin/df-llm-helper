@@ -165,12 +165,19 @@ function M.step(K)
     for n, ms in pairs(take.via or {}) do acc.via[n] = (acc.via[n] or 0) + ms end
     for n, ms in pairs(take.gapby or {}) do acc.gapby[n] = (acc.gapby[n] or 0) + ms end
     for n, c in pairs(take.gapn or {}) do acc.gapn[n] = (acc.gapn[n] or 0) + c end
+    if take.slept then acc.slept = true end
     if take.gap_max >= M.FREEZE_MS and (not st.freeze_tick or now.tick - st.freeze_tick >= 1200) then
       st.freeze_tick = now.tick
       local cause = take.gap_cause or 'external'
-      K.emit('PERF_DEGRADED', 'A', string.format('frame freeze %d ms (%s)', take.gap_max,
-                                                 cause == 'save' and 'DF save' or cause == 'external' and 'not ours, cause unknown'
-                                                 or 'ours: ' .. cause), {why = 'freeze', cause = cause})
+      if cause == 'sleep' then
+        -- BUG-645: the PC slept (Run 16: 'frame freeze 35186xxx ms' on all four instances): said as what it is, nothing follows
+        K.emit('PERF_DEGRADED', 'A', string.format('host slept ~%d min (PC sleep/suspend, DF was not running)',
+                                                   take.gap_max // 60000), {why = 'sleep', cause = cause})
+      else
+        K.emit('PERF_DEGRADED', 'A', string.format('frame freeze %d ms (%s)', take.gap_max,
+                                                   cause == 'save' and 'DF save' or cause == 'external' and 'not ours, cause unknown'
+                                                   or 'ours: ' .. cause), {why = 'freeze', cause = cause})
+      end
     end
   end
   local dt_ms = now.ms - st.t0.ms
@@ -189,7 +196,8 @@ function M.step(K)
   st.repeat0 = rep
   write_row(K, row)
   local paused_pct = 100 - run_ms * 100 // dt_ms
-  if row.tps > 0 and paused_pct <= M.MAX_PAUSED_PCT and not st.target_mixed then
+  -- BUG-645: a window with the host asleep in it is no tps evidence (the sleep would read as a collapse)
+  if row.tps > 0 and paused_pct <= M.MAX_PAUSED_PCT and not st.target_mixed and not acc.slept then
     row.target, row.key = st.target, row.mode .. ':' .. st.target
     degraded_check(K, row)
   end
