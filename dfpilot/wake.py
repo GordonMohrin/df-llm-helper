@@ -663,6 +663,11 @@ def lockdown_long_hint(d: dict) -> str:
     cmd = d.get("cmd")
     how = (f"; to send the squad{armour_note(d)}: {cmd} (approve:true is a logged decision, only if the squad can win)" if cmd
            else "; no squad to send")
+    if d.get("rel"):
+        # BUG-676: only wild animals are counted: the release clears that animal (it counts for nothing until it kills), the mode and
+        # the lockdown then end by their own quiet clock; `ack` clears the plant eaters the same way
+        how += (f"; nothing but wild animals is counted, to let the fort go on: {d['rel']} (a logged decision: the animal is no "
+                "invader; if it killed a citizen the verb refuses and the squad is the way)")
     return (f"tell Gordon: the lockdown has held {d.get('days', '?')} days in {d.get('mode', 'SIEGE')} "
             f"(hostiles counted: {d.get('n', '?')}, inside Kern+: {d.get('inside', 0)}{', all far' if d.get('calm') else ''}){how}; "
             "otherwise it ends with the siege (the kernel never ends it alone: threat's quiet clock takes over then)")

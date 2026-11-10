@@ -120,8 +120,12 @@ M.CFG = {
   -- BUG-065: the confinement limit and the harmless-intruder picture (see the header)
   -- M3 (BUG-112): a lone harmless intruder in SIEGE/BREACH: ask_days = the kill_lone_intruder question, kill_hours =
   -- the kernel's own kill order for one inside Kern+ (BREACH; 0 = off), siege_release = the lockdown limit applies there too
+  -- BUG-672 / BUG-673 (Run 16b i2 Whirledrampart: four woolly mammoths at the well held BREACH 380 days; Run 16d i4 Trumpetrealms: goblins
+  -- on a cave level no citizen can walk to held a lockdown 50 days): passive_days = game days a big wild plant eater (sense hb, never
+  -- killed) may stand in the count before it is cleared as passive; unreach_days = game days a hostile no citizen can reach (census rc 0)
+  -- may stand in the count before it is cleared (0 = off)
   confine = {max_days = 10, harmless_size = 20000, lone_max = 2, offer_days = 1, need_thirst = 40000, need_hunger = 60000,
-             ask_days = 3, kill_hours = 24, siege_release = true},
+             ask_days = 3, kill_hours = 24, siege_release = true, passive_days = 3, unreach_days = 5},
   defaults = {ARRIVAL = {'clock', 'gates', 'doors', 'alert'}, INTRUDER = {'clock', 'gates', 'doors', 'alert'},
               PREDATOR = {'clock', 'alert'}, DEATHS_3PLUS = {'clock'}, NO_DEPOT = {},
               -- BUG-115: a curse changes nothing at once (the full moon is days away); a were-form unit inside the fort slows the
@@ -202,7 +206,7 @@ local function cfg(K)
   local cf = type(r.confine) == 'table' and r.confine or {}
   for k, lim in pairs({max_days = {0, 365}, harmless_size = {0, 5000000}, lone_max = {1, 10}, offer_days = {0, 365},
                        need_thirst = {10000, 75000}, need_hunger = {10000, 100000}, ask_days = {0, 365},
-                       kill_hours = {0, 720}}) do
+                       kill_hours = {0, 720}, passive_days = {0, 365}, unreach_days = {0, 365}}) do
     local v = int(cf[k])
     if v and v >= lim[1] and v <= lim[2] then c.confine[k] = v end
   end
@@ -596,22 +600,27 @@ end
 M.FAR_MAX = 40             -- hostiles kept as expired far (st.far), the newest
 M.FAR_SHOWN = 3            -- named in LOCKDOWN_END
 M.FAR_PRUNE = 1200         -- ticks between looks at expired-far units not listed: dead or gone ones are dropped
+M.PV_MAX = 80              -- BUG-672/673: units whose time in the count is kept (st.pv)
+M.PV_GAP = 2400            -- BUG-672/673: ticks a unit may be out of the census before its time in the count starts again
 local FAR_MODES = {PEACE = true, ALERT = true}   -- the quiet clock runs past far invaders only there (never in a siege)
 
 local function far_set()
-  local f, hl, ig = {}, {}, {}
+  local f, hl, ig, pv = {}, {}, {}, {}
   for _, id in ipairs(st.far and st.far.ids or {}) do f[id] = true end
   for _, id in ipairs(st.far and st.far.hl or {}) do if f[id] then hl[id] = true end end   -- BUG-065: cleared harmless ones
   for _, id in ipairs(st.far and st.far.ig or {}) do if hl[id] then ig[id] = true end end  -- M3: stay cleared inside Kern+ too
-  rt.fset, rt.hlset, rt.igset = f, hl, ig
+  for _, id in ipairs(st.far and st.far.pv or {}) do if hl[id] then pv[id] = true end end  -- BUG-672/673: cleared as passive / unreachable
+  rt.fset, rt.hlset, rt.igset, rt.pvset = f, hl, ig, pv
 end
 
 local function far_drop(gone)
-  local keep, khl, kig = {}, {}, {}
+  local keep, khl, kig, kpv = {}, {}, {}, {}
   for _, id in ipairs(st.far.ids) do if not gone[id] then keep[#keep + 1] = id end end
   for _, id in ipairs(st.far.hl or {}) do if not gone[id] then khl[#khl + 1] = id end end
   for _, id in ipairs(st.far.ig or {}) do if not gone[id] then kig[#kig + 1] = id end end
-  st.far.ids, st.far.hl, st.far.ig, dirty = keep, khl, kig, true
+  for _, id in ipairs(st.far.pv or {}) do if not gone[id] then kpv[#kpv + 1] = id end end
+  for id in pairs(gone) do if st.pv then st.pv[tostring(id)] = nil end end            -- BUG-672/673: its timer starts again
+  st.far.ids, st.far.hl, st.far.ig, st.far.pv, dirty = keep, khl, kig, kpv, true
   far_set()
 end
 
@@ -644,6 +653,30 @@ local function nearest(e, pts)
   return best
 end
 
+-- BUG-672 (Run 16b i2 Whirledrampart y414-y431: four woolly mammoths at the well inside Kern+, 380 days, never an attack: BREACH, the
+-- PREDATOR lockdown, the clock at 30 t/s, every project frozen, the squads never equipped) and BUG-673 (Run 16d i4 Trumpetrealms y447-
+-- y450: an ambush of goblins on a cave level no citizen can walk to held the lockdown 50 days): a unit that has stood in the count for
+-- confine.passive_days (a big wild plant eater: sense hb, no kill) or confine.unreach_days (no walk group of the citizens reaches it
+-- and none of an entrance's outer side either) is cleared like BUG-065's harmless intruder (far.ids + far.hl), with these differences:
+--   * st.far.pv marks it: another hostile coming into sight does NOT make it count again (a real siege beside a mammoth is a siege
+--     of its own, the mammoth stays cleared);
+--   * a passive one is cleared inside Kern+ too (far.ig, threat subtracts it from `inside`: no BREACH); an unreachable one only
+--     outside Kern+ (the walk groups are re-read every census: one that can be reached counts at once);
+--   * it counts again the moment it no longer fits: a plant eater that killed (sense drops hb, marks kl), an unreachable unit with
+--     a walk group of the citizens, one that flies / destroys buildings (dz) or came inside (zn 2).
+-- st.pv[tostring(id)] = {k = 'p' passive | 'u' unreachable | 'o' released by the operator, t = first tick in the count}
+local function pv_kind(e, c)
+  if e.k == 'danger' and e.hb == 1 and e.kl ~= 1 then return c.passive_days > 0 and 'p' or nil end
+  if (e.k == 'inv' or e.k == 'danger') and e.rc == 0 and e.dz ~= 1 and e.bd ~= 1 and (e.zn or 0) < 2 then
+    return c.unreach_days > 0 and 'u' or nil
+  end
+end
+local function pv_holds(e, k)                  -- does a unit cleared as kind k still fit
+  if k == 'p' then return e.k == 'danger' and e.hb == 1 and e.kl ~= 1 end
+  if k == 'u' then return (e.k == 'inv' or e.k == 'danger') and e.rc == 0 and e.dz ~= 1 and e.bd ~= 1 and (e.zn or 0) < 2 end
+  return e.k == 'danger' and e.kl ~= 1         -- 'o': the operator's word, until it kills
+end
+
 -- BUG-348 (Run 15 Guildcleans y386-390, i2: goblin 24649 stood at 1,136,117, 101-114 tiles out, for years; each new
 -- invasion (13, 16, 17) put it back in the count through BUG-065's 'another hostile is in sight' rule, the newcomers died
 -- or left within days, and the lone static goblin held SIEGE and lockdown 11-13 more days every time, LOCKDOWN_END cause
@@ -663,7 +696,7 @@ local function rc_note(list, now)
   for _, r in ipairs(st.far.rc) do have[r.id] = true end
   for _, e in ipairs(list) do if int(e.x) and int(e.y) and int(e.z) then by[e.id] = e end end
   local ids = {}
-  for id in pairs(rt.hlset) do if not have[id] then ids[#ids + 1] = id end end
+  for id in pairs(rt.hlset) do if not have[id] and not rt.pvset[id] then ids[#ids + 1] = id end end
   table.sort(ids)
   for _, id in ipairs(ids) do
     local e = by[id] or {}                     -- not listed (cut off the census list): its spot is taken when listed
@@ -745,6 +778,14 @@ local function far_scan(K, h, now)
     elseif de >= 0 and de <= L then r.near, r.how = true, 'entrance'
     elseif r.d < 0 then r.unknown = true end
     ap[e.id] = r
+    local pvk = st.pv[tostring(e.id)]
+    if rt.pvset[e.id] and pvk and not pv_holds(e, pvk.k) then          -- BUG-672/673: it no longer fits: it counts again
+      gone = gone or {}
+      gone[e.id] = true
+      K.log('info', 'reflex: %s %d (cleared as %s) %s: it counts again', e.k, e.id,
+            pvk.k == 'p' and 'passive' or (pvk.k == 'u' and 'unreachable' or 'released'),
+            e.kl == 1 and 'killed' or (pvk.k == 'u' and (e.rc ~= 0 and 'can be reached now' or 'moved') or 'changed'))
+    end
     -- BUG-065: a cleared harmless intruder stays cleared when it is near (only inside Kern+ it counts again)
     if fs[e.id] and r.near and not (rt.hlset[e.id] and (r.how ~= 'inside' or rt.igset[e.id])) then
       gone = gone or {}
@@ -766,9 +807,9 @@ local function far_scan(K, h, now)
     if others then
       gone = gone or {}
       local n = 0
-      for id in pairs(rt.hlset) do gone[id] = true; n = n + 1 end
+      for id in pairs(rt.hlset) do if not rt.pvset[id] then gone[id] = true; n = n + 1 end end     -- BUG-672/673: not the passive ones
       rc_note(list, now)
-      K.log('info', 'reflex: another hostile is in sight: %d cleared harmless intruder%s count again', n, n == 1 and '' or 's')
+      if n > 0 then K.log('info', 'reflex: another hostile is in sight: %d cleared harmless intruder%s count again', n, n == 1 and '' or 's') end
     end
   end
   if not gone and #st.far.ids > 0 and (now - (rt.fprune or -M.FAR_PRUNE) >= M.FAR_PRUNE or now < (rt.fprune or now)) then
@@ -811,7 +852,8 @@ local function far_now(K, h)
     if e.k == 'inv' then
       listed = listed + 1
       local a = rt.ap and rt.ap[e.id]
-      if not a or a.near or a.unknown then return false end
+      -- BUG-673: an invader cleared as unreachable (reflex.pv) counts for nothing here, near or not
+      if not rt.pvset[e.id] and (not a or a.near or a.unknown) then return false end
     end
   end
   return listed >= (h.inv or 0)
@@ -2064,7 +2106,9 @@ local function quiet_block(K, h, now)
   local ign = 0
   for _, e in ipairs(h.list or {}) do if e.ik == 1 and rt.igset[e.id] then ign = ign + 1 end end   -- M3
   if (h.inside or 0) - ign > 0 then return 'inside' end
-  if (h.inv or 0) > 0 and not far_now(K, h) then return 'near' end
+  local invn = h.inv or 0
+  for _, e in ipairs(h.list or {}) do if e.k == 'inv' and rt.pvset[e.id] then invn = invn - 1 end end    -- BUG-673: cleared as unreachable
+  if invn > 0 and not far_now(K, h) then return 'near' end
   if (h.great or 0) > 0 then
     local ok, a = K.call('threat', 'assess')
     if not (ok and type(a) == 'table' and (a.great_rel or 0) == 0) then return 'great' end
@@ -2317,6 +2361,12 @@ function M.overlimit_step(K, h, now)
   if sv then d.starving, d.relief = sv.n or 0, sv.relief and 1 or 0 end        -- BUG-570
   if cs then d.unit, d.pos, d.race = cs.id, cs.pos, cs.race end
   if cmd then d.squad, d.cmd = key, cmd end
+  -- BUG-676 (Run 16b i2 Whirledrampart: the limit passed with 'no squad can go' and nothing to type): when nothing but wild animals is counted
+  -- (no invader, great danger or undead in sight, the nearest one no killer) the release the kernel runs itself for plant eaters is also a
+  -- command: it clears that one animal, the mode and the lockdown then end by their own quiet clock
+  if cs and (cs.k == 'danger' or cs.k == 'animal') and (h.inv or 0) == 0 and (h.great or 0) == 0 and (h.undead or 0) == 0 then
+    d.rel = string.format('dfllm cmd lockdown.release \'{"unit":%d,"approve":true}\'', cs.id)
+  end
   if adv then
     d.worn, d.need, d.rec = adv.worn, adv.need, adv.rec and 1 or 0
     if adv.odds then d.odds, d.ours, d.est, d.foes = adv.odds, adv.ours, adv.est, adv.foes end      -- BUG-578
@@ -2421,6 +2471,158 @@ function M.ignore(K, id, why)
   far_set()
   K.log('info', 'reflex: unit %d cleared (%s): it counts for nothing until another hostile is in sight', id, tostring(why))
   return true
+end
+
+---------------------------------------------------------------- BUG-672 / BUG-673: passive plant eaters, unreachable hostiles
+M.OG_R = 4                 -- BUG-673: tiles (xy) round an entrance point read for the groups of its outer side
+M.OG_MAX = 6000            -- ... at most this many tile reads per scan
+local PV_MODES = {PEACE = true, ALERT = true, RECOVERY = true}    -- the unreachable ones are cleared there only, never in a SIEGE / BREACH
+
+-- the walk groups of the outer side of the entrances: every group the tiles round the entrance points (gate's bridge centres, the
+-- lockdown's doors, seal's entrance tiles) stand in, except the citizens' own. A hostile on one of them waits at a door the fort keeps
+-- shut (a raised bridge cuts the citizens' group off the army outside): it is a siege, never "unreachable". nil = no entrance point known
+-- or a fault (then nothing is cleared as unreachable)
+local function outer_groups(K, now)
+  if rt.og and now >= rt.og.t and now - rt.og.t < M.PV_GAP then return rt.og.set end
+  local pts = entry_pts(K)
+  local set = nil
+  if #pts > 0 then
+    local ok, res = K.call('snapshot', 'outer_groups', pts, M.OG_R, M.OG_MAX)
+    if ok and type(res) == 'table' then set = res end
+  end
+  rt.og = {t = now, set = set}
+  return set
+end
+
+local function unit_group(K, e)
+  local ok, g = K.call('snapshot', 'group_at', e.x, e.y, e.z)
+  return ok and int(g) or nil
+end
+
+-- public (seal.groups): the ids cleared as passive / unreachable / by the operator ({[id] = true}, read only)
+function M.pv_ids(K) return rt and rt.pvset or {} end
+
+-- put the units of `list` ({e, k, t}) on the cleared list as passive (k 'p': also inside Kern+), unreachable ('u') or released by the
+-- operator ('o': inside too); HOSTILE_RELEASED (B) says it once per call
+local function pv_mark(K, now, list, who)
+  if #list == 0 then return end
+  local have, hl, ig, pv = {}, {}, {}, {}
+  for _, v in ipairs(st.far.ids) do have[v] = true end
+  for _, v in ipairs(st.far.hl) do hl[v] = true end
+  for _, v in ipairs(st.far.ig) do ig[v] = true end
+  for _, v in ipairs(st.far.pv) do pv[v] = true end
+  local names, inside = {}, 0
+  for _, r in ipairs(list) do
+    local id = r.e.id
+    if not have[id] then have[id] = true; st.far.ids[#st.far.ids + 1] = id end
+    if not hl[id] then hl[id] = true; st.far.hl[#st.far.hl + 1] = id end
+    if r.k ~= 'u' and not ig[id] then ig[id] = true; st.far.ig[#st.far.ig + 1] = id end
+    if not pv[id] then pv[id] = true; st.far.pv[#st.far.pv + 1] = id end
+    st.pv[tostring(id)] = {k = r.k, t = r.t or now}
+    if r.e.ik == 1 then inside = inside + 1 end
+    if #names < M.FAR_SHOWN then
+      names[#names + 1] = string.format('%d %s at %d,%d,%d%s', id, (race_of(id):upper():gsub('[^%w]+', '_')):sub(1, 24), r.e.x, r.e.y, r.e.z,
+                                        r.e.ik == 1 and ' inside Kern+' or '')
+    end
+  end
+  while #st.far.ids > M.FAR_MAX do table.remove(st.far.ids, 1) end
+  st.far.t, dirty = now, true
+  far_set()
+  local first = list[1]
+  local why = who and 'operator' or (first.k == 'p' and 'passive' or (first.k == 'u' and 'unreachable' or 'operator'))
+  local days = first.t and (now - first.t) // 1200 or 0
+  local msg = string.format('%d %s cleared (%s%s): %s%s; %s', #list, #list == 1 and 'hostile' or 'hostiles',
+                            why, who and (', ' .. who) or string.format(', %d days in the count', days), table.concat(names, ', '),
+                            #list > #names and string.format(' +%d', #list - #names) or '',
+                            first.k == 'u' and 'it counts again the moment a citizen can walk to it or it comes inside'
+                            or 'it counts again the moment it kills (a plant eater is cleared inside Kern+ too)')
+  K.emit('HOSTILE_RELEASED', 'B', msg:sub(1, 200), {n = #list, id = first.e.id, why = why, days = days, mode = K.mode(),
+                                                     inside = inside})
+  K.log('info', 'reflex: %s', msg)
+end
+
+-- every fresh census: the time each plant eater / unreachable hostile stands in the count (st.pv); one that has stood confine.passive_days /
+-- unreach_days is cleared (pv_mark)
+local function pv_step(K, h, now)
+  if type(h) ~= 'table' or now - (h.tick or -1e9) > M.FRESH or h.tick == rt.pv_tick then return end
+  rt.pv_tick = h.tick
+  local c = cfg(K).confine
+  rt.pvs = rt.pvs or {}
+  if not rt.pv_init then
+    rt.pv_init = true
+    for key in pairs(st.pv) do local id = int(tonumber(key)); if id then rt.pvs[id] = now end end    -- a reload starts the gap clock
+  end
+  local mode, due, n = K.mode(), {}, 0
+  for _ in pairs(st.pv) do n = n + 1 end
+  for _, e in ipairs(h.list or {}) do
+    local k, key = pv_kind(e, c), tostring(e.id)
+    local rec = st.pv[key]
+    if k and not rt.pvset[e.id] then
+      local last = rt.pvs[e.id]
+      if not rec or rec.k ~= k or now < rec.t or (last and now - last > M.PV_GAP) then
+        if rec or n < M.PV_MAX then
+          if not rec then n = n + 1 end
+          rec = {k = k, t = now}
+          st.pv[key], dirty = rec, true
+        else rec = nil end
+      end
+      rt.pvs[e.id] = now
+      if rec and now - rec.t >= (k == 'p' and c.passive_days or c.unreach_days) * 1200 and (k == 'p' or PV_MODES[mode]) then
+        due[#due + 1] = {e = e, k = k, t = rec.t}
+      end
+    elseif rec and not rt.pvset[e.id] then
+      st.pv[key], dirty = nil, true                                  -- it no longer fits: the time starts again
+    elseif rt.pvset[e.id] then
+      rt.pvs[e.id] = now
+    end
+  end
+  for key in pairs(st.pv) do                                         -- out of sight for good: forgotten (the cleared ones go with far_drop)
+    local id = int(tonumber(key))
+    if id and not rt.pvset[id] and now - (rt.pvs[id] or now) > M.PV_GAP then st.pv[key], dirty = nil, true end
+  end
+  if #due == 0 then return end
+  local by, og = {p = {}, u = {}}, nil
+  for _, r in ipairs(due) do
+    if r.k == 'p' then by.p[#by.p + 1] = r
+    else
+      -- an unreachable one is cleared only when its own walk group is none of the entrances' outer sides (a besieger at a raised bridge)
+      if og == nil then og = outer_groups(K, now) or false end
+      local g = unit_group(K, r.e)
+      if og and g and not og[g] then by.u[#by.u + 1] = r end
+    end
+  end
+  pv_mark(K, now, by.p)
+  pv_mark(K, now, by.u)
+end
+
+-- verb `lockdown.release {unit?, approve}` and `ack` (BUG-676): the operator's word. Without `unit` every plant eater of the census
+-- (sense hb: a big wild plant eater that never killed) is cleared as passive; with `unit` that one wild animal (never an invader,
+-- undead or great danger, never one that killed). Returns the number cleared and a text
+local function release_units(K, want)
+  local h = K.census.h
+  local now = K.now().tick
+  if type(h) ~= 'table' or now - (h.tick or -1e9) > M.FRESH then return 0, 'no fresh census (wait a moment and send it again)' end
+  local list, why = {}, nil
+  for _, e in ipairs(h.list or {}) do
+    if (want and e.id == want) or (not want and e.hb == 1) then
+      if rt.pvset[e.id] then why = why or string.format('unit %d is cleared already', e.id)
+      elseif e.k ~= 'danger' then
+        why = string.format('unit %d is a %s: only wild animals can be released, an invader is dealt with by squad.sortie', e.id,
+                            e.k == 'inv' and 'invader' or e.k)
+      elseif e.kl == 1 then why = string.format('unit %d killed a citizen: it must be killed, not released (squad.sortie)', e.id)
+      else
+        local rec = st.pv[tostring(e.id)]
+        list[#list + 1] = {e = e, k = e.hb == 1 and 'p' or 'o', t = rec and rec.t or nil}
+      end
+    end
+  end
+  if #list == 0 then
+    return 0, why or (want and string.format('unit %d is not in the census now', want)
+                      or 'no plant eater (hb) in the census to release; give unit=<id> for another wild animal')
+  end
+  pv_mark(K, now, list, 'the operator')
+  return #list, string.format('%d wild animal%s cleared: %s for nothing until one kills; the mode and the lockdown end by their own quiet clock',
+                              #list, #list == 1 and '' or 's', #list == 1 and 'it counts' or 'they count')
 end
 
 -- BUG-215 (live t4: on_station 0 of 8 with no station order, the release never came): dfllm.stations.stationed,
@@ -2668,7 +2870,7 @@ end
 ---------------------------------------------------------------- module
 function M.init(K)
   local p = K.persist.get('m.reflex')
-  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}, vfy = {}, ref = {}, far = {t = 0, ids = {}, hl = {}, ig = {}}}
+  st = {v = 2, doors = {}, ack = {n = 0, wall = 0}, irq = {}, vfy = {}, ref = {}, far = {t = 0, ids = {}, hl = {}, ig = {}, pv = {}}, pv = {}}
   if type(p) == 'table' then
     for _, id in ipairs(type(p.doors) == 'table' and p.doors or {}) do
       if int(id) then st.doors[#st.doors + 1] = int(id) end
@@ -2753,6 +2955,9 @@ function M.init(K)
       for _, id in ipairs(type(f.ig) == 'table' and f.ig or {}) do      -- M3: cleared even inside Kern+
         if int(id) and inh[int(id)] then st.far.ig[#st.far.ig + 1] = int(id) end
       end
+      for _, id in ipairs(type(f.pv) == 'table' and f.pv or {}) do      -- BUG-672/673: cleared as passive / unreachable
+        if int(id) and inh[int(id)] then st.far.pv[#st.far.pv + 1] = int(id) end
+      end
       for _, r in ipairs(type(f.rc) == 'table' and f.rc or {}) do      -- BUG-348: counted again by a newcomer
         local spot = type(r) == 'table' and int(r.x) and int(r.y) and int(r.z)   -- none yet: noted while cut off the list
         if type(r) == 'table' and int(r.id) and (spot or r.x == nil) and #(st.far.rc or {}) < M.FAR_MAX then
@@ -2761,6 +2966,12 @@ function M.init(K)
                                        t = int(r.t) or 0,
                                        ig = int(r.ig) == 1 and 1 or nil}
         end
+      end
+    end
+    local npv = 0
+    for id, r in pairs(type(p.pv) == 'table' and p.pv or {}) do        -- BUG-672/673: since when a unit stood in the count (string keys)
+      if int(tonumber(id)) and type(r) == 'table' and (r.k == 'p' or r.k == 'u') and int(r.t) and npv < M.PV_MAX then
+        st.pv[tostring(int(tonumber(id)))], npv = {k = r.k, t = int(r.t)}, npv + 1
       end
     end
     local cf = p.cf                                      -- BUG-065: the offer and need cadences
@@ -2794,6 +3005,7 @@ function M.step(K, budget, ctx)
   if fresh and h.tick ~= rt.htick then
     rt.htick = h.tick
     if rt.ftick ~= h.tick then far_scan(K, h, now) end      -- Run 11 (threat may have asked far_ids first)
+    pv_step(K, h, now)                                      -- BUG-672/673: the passive and the unreachable ones, before the scans use the list
     eta(K, h, now)                                          -- Run 11: the first sighting's ARRIVAL and recall carry it
     sighting(K, h, now)
     inside_scan(K, h, now)
@@ -2859,16 +3071,32 @@ M.on = {
 }
 
 -- verb `ack {n?}`: the operator saw the interrupts up to n (default: all); the timeout default no longer applies
+-- BUG-676 (Run 16b i2 Whirledrampart: 'ack' had no effect on a PREDATOR lockdown of four woolly mammoths for 380 days): an ack that
+-- leaves a lockdown standing for a PREDATOR default (why unacked:PREDATOR) also clears the plant eaters of the census (release_units: no
+-- kill, never an invader); the text says how many
 M.verbs.ack = function(K, args, cmd)
   local last = st.irq[#st.irq] and st.irq[#st.irq].n or 0
   local n = args.n == nil and last or int(args.n)
   if not n or n < 0 then return false, 'n must be an event number >= 0' end
   if n > (st.ack.n or 0) then st.ack = {n = n, wall = K.now().wall}; dirty = true end
+  local rel, relt = 0, nil
+  if st.hold and st.hold.why:find('^unacked:PREDATOR') then rel, relt = release_units(K, nil) end
   local open = unacked(K)
   alarm_write(K, true)
   save(K)
-  return true, string.format('acked up to #%d (%d interrupts open, DEFCON %d)', st.ack.n, open, rt.defcon or 5),
+  return true, string.format('acked up to #%d (%d interrupts open, DEFCON %d)%s', st.ack.n, open, rt.defcon or 5,
+                             rel > 0 and ('; ' .. relt) or ''),
          {n = st.ack.n, open = open, defcon = rt.defcon or 5}
+end
+
+-- verb `lockdown.release {unit?, approve:true}` (BUG-676): see release_units
+M.verbs['lockdown.release'] = function(K, args, cmd)
+  local want = args.unit ~= nil and int(args.unit) or nil
+  if args.unit ~= nil and not want then return false, 'unit must be a unit id' end
+  local n, txt = release_units(K, want)
+  save(K)
+  if n == 0 then return false, txt end
+  return true, txt, {n = n}
 end
 
 function M.state(K)

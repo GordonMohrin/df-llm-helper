@@ -95,7 +95,7 @@ def test_office_and_squad_verb_args(verb, args, ok):
 def test_office_and_squad_verbs_are_registered_outside_fights_only():
     assert schema.VERBS["appoint"] == ("economy", None, False)
     for v in ("squad.create", "squad.leader", "squad.add", "squad.uniform"):
-        assert schema.VERBS[v] == ("military", ["PEACE", "ALERT", "RECOVERY"], False), v
+        assert schema.VERBS[v] == ("military", ["PEACE", "ALERT", "RECOVERY", "SIEGE", "BREACH"], False), v    # BUG-674: SIEGE/BREACH while animals only
     text = (ROOT / "RULES.md").read_text(encoding="utf-8")
     for v in ("appoint", "squad.create", "squad.leader", "squad.add", "squad.uniform"):
         assert f"`{v}`" in text, v

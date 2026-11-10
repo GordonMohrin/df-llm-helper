@@ -411,6 +411,8 @@ TPL = named("tpl", Str(TPL_RE))
 BRIDGE = Str(BRIDGE_RE)
 SQUAD = AnyOf(NAT, Str(enum=["A", "B", "C"]))                  # BUG-055: a squad key or the game's squad id
 SQUAD_MODES = ["PEACE", "ALERT", "RECOVERY"]                   # the squads screen is not touched in a fight
+# BUG-674: ... except in a SIEGE / BREACH with no invader, undead or great danger counted (military.fight_free): wild animals only
+SQUAD_FIGHT_FREE_MODES = SQUAD_MODES + ["SIEGE", "BREACH"]
 ZONE_TYPES = ["pen", "pit", "pond", "sand", "clay", "fishing", "meeting", "dump", "office"]    # FR-78: zonelib Z.TYPES (BUG-232)
 MODULE = named("module", Str(MODULE_RE))
 MODE = named("mode", Str(enum=MODES))
@@ -721,6 +723,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11: cause far (ended with hostiles in sight beyond reflex.lockdown_near; far names <= 3, nfar) or quiet
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i cause:s far:sa nfar:i")),
     "LOCKDOWN_CLOCK": ("B", "reflex", _d("why:s days:i")),   # BUG-671: a PREDATOR lockdown released its clock clamp
+    # BUG-672/673/676: hostiles cleared as passive (a plant eater that never killed), unreachable or by the operator
+    "HOSTILE_RELEASED": ("B", "reflex", _d("n:i id:i why:s", "days:i mode:s inside:i")),
     # Run 10: a roofed wild danger on the citizens' group but beyond reflex.predator_near of every citizen (no lockdown)
     "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i hb:i")),   # BUG-554: hb = a plant eater
     # Run 11 (siege 8: 16 citizens outside Kern+ at the arrival): the lockdown's recall; why done (all came in), late
@@ -945,6 +949,8 @@ VERB_ARGS: dict[str, Obj] = {
     "module.enable": Obj(req={"module": MODULE}),
     "tombs.repair": Obj(),
     "ack": Obj(opt={"n": NAT}),
+    # BUG-676: clear the plant eaters (no unit) or one wild animal (unit) a lockdown stands for; they count for nothing until one kills
+    "lockdown.release": Obj(req={"approve": Const(True)}, opt={"unit": NAT}),
     "order.add": Checked(Obj(req={"job": Str(r"^[A-Za-z]{2,40}$"), "amount": Int(1, 999)},
                              opt={"item_subtype": Str(r"^ITEM_[A-Z0-9_]{1,60}$"), "material": Str(r"^[A-Z0-9_:]{1,80}$"),
                                   "material_category": Arr(Str(r"^[a-z0-9_]{1,20}$"), lo=1, hi=8),
@@ -1011,18 +1017,19 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "pause": ("arbiter", None, False), "unpause": ("arbiter", None, False),
     "resume": ("arbiter", None, False),
     "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
-    "squad.sortie": ("military", ["ALERT", "SIEGE", "BREACH", "RECOVERY"], True),
+    "squad.sortie": ("military", ["PEACE", "ALERT", "SIEGE", "BREACH", "RECOVERY"], True),     # BUG-675: PEACE for one wild animal inside
     "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),
     "tombs.repair": ("care", None, False),
     "ack": ("reflex", None, False),
+    "lockdown.release": ("reflex", None, True),         # BUG-676
     "order.add": ("economy", None, False), "jobs.release": ("economy", None, False),
     "butcher.mark": ("economy", None, False),          # BUG-260
     "perimeter.record": ("seal", None, False), "bridge.rebuild": ("seal", None, False),
     # BUG-055: office appointments any time; the squads screen only outside a fight
     "appoint": ("economy", None, False),
-    "squad.create": ("military", SQUAD_MODES, False), "squad.leader": ("military", SQUAD_MODES, False),
-    "squad.add": ("military", SQUAD_MODES, False), "squad.uniform": ("military", SQUAD_MODES, False),
+    "squad.create": ("military", SQUAD_FIGHT_FREE_MODES, False), "squad.leader": ("military", SQUAD_FIGHT_FREE_MODES, False),
+    "squad.add": ("military", SQUAD_FIGHT_FREE_MODES, False), "squad.uniform": ("military", SQUAD_FIGHT_FREE_MODES, False),
     "zone.place": ("runner", SQUAD_MODES + ["SIEGE"], False),      # BUG-450: SIEGE for type=office only (zonelib)
     "view": ("arbiter", None, False),      # FR-88: modes are the verb's own rule (a fight needs by=gordon)
     "hospital.retire": ("water", ["PEACE"], False),     # BUG-131: approve is optional (the verb's own rule)

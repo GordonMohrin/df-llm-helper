@@ -2977,7 +2977,8 @@ local function so_begin(K, key, s, order, meta)
   local old = rt.so[key]
   rt.so[key] = {cmd = tostring(meta.cmd or '?'), by = meta.by or 'verb', t0 = old and old.t0 or now, last = now, kind = order.kind,
                 ids = order.units, tgt = order.pos or (old and old.tgt), keep = meta.keep == true, adj = 0, re = 0,
-                arrived = old and old.arrived or false, unseen = 0, mode = K.mode(), w0 = nil}
+                arrived = old and old.arrived or false, unseen = 0, mode = K.mode(), w0 = nil,
+                pe = meta.pe == true or (old and old.pe == true) or nil}      -- BUG-675: a sortie of the PEACE (one wild animal) outlives the mode
   if order.kind == 'kill' then
     rt.so[key].tgt = rt.so[key].tgt or unit_xyz(order.units[1])
     -- BUG-169: every target of the kill order (so.ids keeps the living ones), for the end event; a new kill order on the
@@ -3054,7 +3055,7 @@ local function sortie_pass(K, now)
                now - so.t0))
       elseif not s or not info or info.n == 0 then
         so_end(K, key, 'abort', 'no_squad', 'sortie ' .. key .. ' ended: the squad has no members')
-      elseif mode == 'PEACE' then
+      elseif mode == 'PEACE' and not so.pe then
         so_end(K, key, 'abort', 'mode', 'sortie ' .. key .. ' ended: the mode is PEACE')
       elseif now - so.t0 >= c.hold_ticks then
         so_end(K, key, 'abort', 'timeout', string.format('sortie %s ended after %d ticks: %s', key, now - so.t0,
@@ -3224,12 +3225,44 @@ function M.sortie_of(K, key)
   return {kind = so.kind, ids = so.ids, keep = so.keep, arrived = so.arrived, by = so.by, t0 = so.t0}
 end
 
+-- BUG-675 (Run 16d i4 Trumpetrealms y447: a giant bat killed two patients inside the fort while the mode was PEACE, the sortie offer said
+-- 'not allowed in PEACE'; the bat was PREDATOR_FAR, nothing counted): in PEACE a sortie is allowed against ONE wild animal on the
+-- citizens' ground (the census names it: k danger, never an invader, undead, great danger or building destroyer, out of reach = not),
+-- when it is the only hostile counted in sight and the squad is fit to win (sortie_advice: worn >= sortie.worn and odds good or even).
+-- Returns nil (allowed) or the reason
+function M.peace_sortie(K, k, args)
+  if args.gate ~= nil then return 'a gate sortie needs a siege' end
+  local uid = int(args.unit)
+  if not uid then return 'in PEACE a sortie needs unit=<id>, the one wild animal it is for' end
+  local h = K.census.h
+  if type(h) ~= 'table' or now_tick(K) - (int(h.tick) or -1e9) > 200 then return 'no fresh census' end
+  local okf, far = K.call('reflex', 'far_ids')
+  far = okf and type(far) == 'table' and far or {}
+  local cur, n = nil, 0
+  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+    if not far[e.id] then
+      n = n + 1
+      if e.id == uid then cur = e end
+    end
+  end
+  if not cur then return string.format('unit %d is not in sight', uid) end
+  if n ~= 1 or (int(h.vis) or 0) > #h.list then return 'more than one hostile is counted: PEACE has no sortie for a group' end
+  if cur.k ~= 'danger' then return string.format('unit %d is %s, not a wild animal', uid, tostring(cur.k)) end
+  if cur.bd == 1 then return string.format('unit %d is a building destroyer', uid) end
+  if cur.rc == 0 then return string.format('unit %d is out of reach (no walk group of the citizens)', uid) end
+  local adv = M.sortie_advice(K, k, {uid})
+  if not adv then return 'no squad ' .. tostring(k) end
+  if not adv.rec then return adv.txt end
+  return nil
+end
+
 -- inbox squad.sortie (approval checked by kern): kill the visible hostiles in a killbox, else move there. A position
 -- with a visible hostile within sortie.kill_near tiles is a kill order on it (M3, BUG-113); a killbox id the manifest does
 -- not have falls back to a kill order on the one hostile in sight (M3). args.gate (Gordon 2026-10-16): a sortie through that
 -- outer bridge; siege runs it (gather in the bailey, open, kill, recall, close) and answers
 M.verbs['squad.sortie'] = function(K, args, cmd)
   if args.gate ~= nil then
+    if K.mode() == 'PEACE' then return false, 'squad.sortie not allowed in PEACE' end       -- BUG-675: the gate sortie is a siege's
     local ok, r, msg = K.call('siege', 'sortie', args, cmd and cmd.id)
     if not ok then return false, 'siege: ' .. tostring(r) end
     return r == true, tostring(msg)
@@ -3238,6 +3271,11 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   local e = type(k) == 'string' and st.sq[k]
   local s = e and squad(e.id)
   if not s or #members(s) == 0 then return false, 'no squad ' .. tostring(k) end
+  local peace = K.mode() == 'PEACE'
+  if peace then                                                -- BUG-675
+    local why = M.peace_sortie(K, k, args)
+    if why then return false, 'squad.sortie not allowed in PEACE (only for one wild animal inside the fort): ' .. why end
+  end
   local target, order, what = args.target, nil, nil
   local c = so_conf(K)
   local unfit = M.unfit_text(K, k)                              -- BUG-510: no sortie of unequipped soldiers in a SIEGE / BREACH
@@ -3353,7 +3391,11 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   end
   local keep = false
   if order.kind == 'kill' then keep = M.lone_of(K, order.units) ~= nil end
-  local ok, err = so_begin(K, k, s, order, {cmd = cmd and cmd.id, by = 'verb', keep = keep})
+  if peace and not (order.kind == 'kill' and #order.units == 1 and order.units[1] == int(args.unit)) then
+    return false, 'squad.sortie not allowed in PEACE (only for one wild animal inside the fort): the order would not be a kill order on unit ' ..
+                  tostring(args.unit)
+  end
+  local ok, err = so_begin(K, k, s, order, {cmd = cmd and cmd.id, by = 'verb', keep = keep, pe = peace})
   if not ok then return false, err end
   rt.so[k].tgt = pos_target or rt.so[k].tgt
   so_event(K, k, 'go', string.format('sortie %s: %s%s', k, what, keep and '; kept against the posture while the squad is worn >= ' ..
@@ -3376,7 +3418,25 @@ local function squad_arg(a)
   return s, key
 end
 
+-- BUG-674 (Run 16b i2 Whirledrampart: four woolly mammoths at the well made a BREACH for 380 days, every squads-screen verb said 'not
+-- allowed in BREACH', the soldiers were never equipped): the squads-screen verbs (create, leader, add, uniform) are also allowed in a
+-- SIEGE or BREACH while nothing but wild animals is counted, i.e. no invader, no undead, no great danger and no building destroyer
+-- (threat.assess, which already leaves out the hostiles reflex cleared). In a real fight the old answer stands, word for word.
+-- Returns nil (go ahead) or false, text
+function M.fight_free(K, verb)
+  local mode = K.mode()
+  if mode ~= 'SIEGE' and mode ~= 'BREACH' then return nil end
+  local ok, a = K.call('threat', 'assess')
+  if ok and type(a) == 'table' and a.fresh and (a.inv or 0) == 0 and (a.great or 0) == 0 and (a.undead or 0) == 0 and (a.bd or 0) == 0
+     and not a.siege then
+    return nil
+  end
+  return false, verb .. ' not allowed in ' .. mode
+end
+
 M.verbs['squad.create'] = function(K, args, cmd)
+  local no, why = M.fight_free(K, 'squad.create')
+  if no == false then return false, why end
   if type(args.name) ~= 'string' or args.name == '' then return false, 'squad.create needs a name' end
   local ok, id = K.act.squad_create(args.name, {assignment_id = args.assignment or free_assignment(), leader = args.leader})
   if not ok then return false, 'squad.create: ' .. tostring(id) end
@@ -3388,6 +3448,8 @@ M.verbs['squad.create'] = function(K, args, cmd)
 end
 
 M.verbs['squad.leader'] = function(K, args, cmd)
+  local no, why = M.fight_free(K, 'squad.leader')
+  if no == false then return false, why end
   if not int(args.unit) then return false, 'squad.leader needs {squad, unit}' end
   local s = squad_arg(args.squad)
   if not s then return false, 'no squad ' .. tostring(args.squad) end
@@ -3398,6 +3460,8 @@ M.verbs['squad.leader'] = function(K, args, cmd)
 end
 
 M.verbs['squad.add'] = function(K, args, cmd)
+  local no, why = M.fight_free(K, 'squad.add')
+  if no == false then return false, why end
   if not int(args.unit) then return false, 'squad.add needs {squad, unit}' end
   local s = squad_arg(args.squad)
   if not s then return false, 'no squad ' .. tostring(args.squad) end
@@ -3417,6 +3481,8 @@ end
 -- to a fresh squad; the weapon guard (BUG-023: the soldiers never take the Miners' and Woodcutters' tools) applies; a
 -- `kind` other than the squad's is applied once, the squad stays what military's plan says
 M.verbs['squad.uniform'] = function(K, args, cmd)
+  local no, why = M.fight_free(K, 'squad.uniform')
+  if no == false then return false, why end
   local s, key = squad_arg(args.squad)
   local e = key and st.sq[key]
   if not s or not e then return false, 'squad ' .. tostring(args.squad) .. ' is not one of A, B, C (squad.create name A|B|C first)' end
