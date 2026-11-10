@@ -60,7 +60,9 @@ A.CFG = {
   plug_walls = 2,        -- BUG-412: wall material the plug needs (X.mat) before the shaft goes below its top
   heavy_ring = true,     -- BUG-414: a known heavy level is ringed from above before its shaft tile is dug
   heavy_span = 1,        -- ... a recorded heavy level makes the levels this close to it ring levels too
-  ring_wait = 2 * DAY,   -- ... a designated ring wall not standing this long: the shaft is stopped and plugged
+  ring_wait = 2 * DAY,   -- ... a designated ring wall not standing this long is a visible stall (BUG-662: it no longer stops the shaft)
+  ring_stop = 30 * DAY,  -- BUG-662: ... and this long, with no water in the ring tile, the shaft stops as `ring_wall` (NOT a heavy aquifer)
+  ring_stop_mat = 90 * DAY, -- BUG-677: ... but when the wall only waits for MATERIAL (no usable stone, no blocks, no logs) this long: the stall says so meanwhile
 }
 A.MODES = {auto = true, stone = true, soil = true, all = true}
 A.HEAVY = {ring = true, all = true, off = true}     -- BUG-414: p.heavy: ring known heavy levels | every aquifer level | never
@@ -140,6 +142,30 @@ local function heavy(X, P, d, r, z, L, f, why, pos)
   return true
 end
 
+-- BUG-662 (Run 16c i3 Wallfree y400-y402: five shafts, each 'heavy aquifer at z14x (flow 0/7): stopped for good', z142 then z143 then z144 then
+-- z145, the ring wall unbuilt for lack of hard stone; Run 16a i1 z125, 16b i2 z135 the same): a ring wall that nobody builds is a MATERIAL or
+-- labor problem, not water. The stop is its own (AQ_RING_STOP, block `ring_wall`), it records NO heavy level (X.hv would extend heavy_span by
+-- one level and the next shaft stopped one level lower for the same reason), and bp sites aqshaft refuses new columns after two of them until
+-- a ring wall stood (X.ring_stop notes the manifest breach `ring_wall`, X.ring_ok drops them)
+local function ring_stop(X, P, d, r, z, L, why, pos, days, detail, miss)
+  r.heavy, r.ringstop, L.state = true, why, 'heavy'
+  local nostone = miss == 'no_boulders' or miss == 'no_stone'          -- BUG-677: the cause is named, not 'the ring has not moved'
+  X.block(P, nostone and 'ring_nostone' or 'ring_wall')
+  if type(X.ring_stop) == 'function' then X.ring_stop(P, pos) end
+  local plug = X.plug(P, d, pos, 'ring_wall')
+  local what = why == 'ring_refused' and 'refused by quickfort' or ('unbuilt for ' .. tostring(days or 0) .. ' d')
+  local cause = nostone and 'NO STONE: nothing the builders accept (hard stone boulders, blocks or logs): dig hard stone or trade for stone / blocks'
+                or 'the walls need hard stone or blocks and a mason'
+  local msg = string.format('%s: z%d ring wall %s, no water (flow 0/7): shaft stopped and plugged (%s), NOT a heavy aquifer: %s%s', P.id, z,
+                            what, plug or 'see CAVERN_PLUG', cause, detail and (' [' .. detail .. ']') or '')
+  X.emit('AQ_RING_STOP', 'A', msg, {proj = P.id, z = z, flow = 0, why = why, pos = pos, plug = plug, days = days, miss = miss,
+                                     cmd = nostone and "dfllm cmd trade.want '{\"add\":[\"stone\",\"block\"]}'; dfllm plan propose; dfllm cmd inspect '{\"what\":\"workload\"}'"
+                                           or ("dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm cmd bp.cancel proj=" .. P.id)})
+  X.log('warn', '%s', msg)
+  X.dirty()
+  return true
+end
+
 -- the flow in our own dug tiles of this level (the centre, the dug arms of a soil seal), sampled at most every sample
 -- ticks; true when it is a heavy aquifer (handled)
 local function check_level(X, P, d, r, z, L)
@@ -180,6 +206,8 @@ local STALL_CMD = {
   -- BUG-443: no free boulder or block for the ring walls (a soil fort): the caravans, a stone dig down to hard stone (plan propose)
   no_boulders = "dfllm cmd trade.want '{\"add\":[\"stone\",\"block\"]}'; dfllm plan propose (a stone dig to hard stone); dfllm cmd inspect '{\"what\":\"workload\"}'",
   ring_stuck = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm cmd inspect '{\"what\":\"reach\"}'; dfllm cmd bp.cancel proj=%s",
+  -- BUG-662: the ring wall is designated and nobody builds it (no hard stone the builders accept, no mason, a suspended job)
+  ring_wall = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm cmd inspect '{\"what\":\"orders\"}'; dfllm cmd bp.cancel proj=%s",
 }
 local STALL_TXT = {
   unreachable = 'no citizen reaches the shaft tile',
@@ -189,6 +217,7 @@ local STALL_TXT = {
   ring_dig = 'nobody channels the ring tile above the heavy level',
   no_boulders = 'no free boulders, blocks or logs for the ring walls (soil: the stone lies deeper)',   -- BUG-443, BUG-631: logs count too
   ring_stuck = 'the ring has not moved',                                                        -- BUG-443
+  ring_wall = 'the ring wall is designated and not built',                                      -- BUG-662
 }
 -- BUG-473 (Run 16a i1 Basementflew y374: the level z127 waited 4 days for a mason, then the player placed the Masons by hand): soil
 -- walls (and a plug) need a Mason's workshop; it is asked for (PROJECT_REQUEST workshops why=masonry, types Masons; follow places it
@@ -234,6 +263,15 @@ function A.stall_text(rt, id)
                        type(L.stall.extra) == 'string' and (' (' .. L.stall.extra .. ')') or '')   -- BUG-631
 end
 
+-- BUG-664: the cause of a stalled shaft as one word (the level's stall why, '' when it has none): the dedupe key of the stalled / released
+-- announcements (the text carries day counts that change every time)
+function A.stall_key(rt, id)
+  local r = type(rt) == 'table' and type(rt.aq) == 'table' and rt.aq[id] or nil
+  if type(r) ~= 'table' or r.k ~= 'shaft' or type(r.levels) ~= 'table' then return '' end
+  local L = r.levels[tostring(r.cur_z)]
+  return type(L) == 'table' and type(L.stall) == 'table' and tostring(L.stall.why) or ''
+end
+
 -- BUG-444: where a shaft stands, for the stall announcement: 'z113 dig, ring wall/new/new/new' ('' when it is no live shaft)
 function A.where(rt, id)
   local r = type(rt) == 'table' and type(rt.aq) == 'table' and rt.aq[id] or nil
@@ -264,9 +302,10 @@ local function plug_missing(X, n, P)
     local s = X.wall_stock()
     if type(s) == 'table' and (tonumber(s.have) or 0) < n then
       -- BUG-631: the count the fort can reach (blocks, free boulders, logs above the wood floor), not a bare 'no boulders'
-      return 'no_boulders', string.format('%d of %d walls: %d blocks, %d free boulders, %d logs reachable',
+      return 'no_boulders', string.format('%d of %d walls: %d blocks, %d free boulders, %d logs reachable%s',
                                           tonumber(s.have) or 0, n, tonumber(s.blocks) or 0, tonumber(s.rock) or 0,
-                                          tonumber(s.logs) or 0)
+                                          tonumber(s.logs) or 0,
+                                          s.none and '; the fort has no stone a job may take (hard stone: dig or trade)' or '')
     end
   end
   return nil
@@ -620,7 +659,12 @@ function A.ring_step(X, P, d, r, z, L)
                 L.nb, A.CFG.refuse_max)
           X.dirty()
           if L.nb >= A.CFG.refuse_max then             -- an open ring tile nobody can wall: contain it
-            heavy(X, P, d, r, z, L, flow_of(bot), 'ring_refused', {pc[1], pc[2], z})
+            local f = flow_of(bot)                     -- BUG-662: water in the ring tile is heavy; no wall without water is a ring stop
+            if f >= A.CFG.heavy then heavy(X, P, d, r, z, L, f, 'ring_refused', {pc[1], pc[2], z})
+            else
+              local miss, detail = plug_missing(X, 1, P)
+              ring_stop(X, P, d, r, z, L, 'ring_refused', {pc[1], pc[2], z}, nil, detail, miss)
+            end
           end
           return 'done'
         end
@@ -632,13 +676,36 @@ function A.ring_step(X, P, d, r, z, L)
       if pc[3] == 'wall' then
         if bot.c == 'C' then
           pc[3] = 'done'
+          if type(X.ring_ok) == 'function' then X.ring_ok() end                -- BUG-662: a ring wall stood: the material exists
           X.moved(P)
           X.dirty()
         else
-          if t - (int(pc[6]) or t) >= A.CFG.ring_wait then
-            X.log('warn', '%s: ring of z%d: the wall on %d,%d,%d stands unbuilt for %d d', P.id, z, pc[1], pc[2], z,
-                  (t - (int(pc[6]) or t)) // DAY)
-            heavy(X, P, d, r, z, L, flow_of(bot), 'ring_late', {pc[1], pc[2], z})
+          -- BUG-662 (Wallfree: 'unbuilt for 2 d' at flow 0/7 was reported as a heavy aquifer and recorded as a heavy level, five shafts one
+          -- level lower each): water in the ring tile (flow >= heavy, or climbing out of it: ring_leak) is the heavy stop; an unbuilt wall
+          -- is a stall that names the missing material after ring_wait and stops the shaft (ring_wall, no heavy level) after ring_stop
+          local waited = t - (int(pc[6]) or t)
+          local f = flow_of(bot)
+          if f >= A.CFG.heavy then
+            heavy(X, P, d, r, z, L, f, 'flow', {pc[1], pc[2], z})
+          elseif waited >= A.CFG.ring_wait then
+            local miss, detail = plug_missing(X, 1, P)
+            -- BUG-677 (Wallfree: four shafts each stopped after the wall stood unbuilt for 2 d, the fort had only claystone): a wall that waits
+            -- for MATERIAL is given ring_stop_mat; one the builders merely have not taken (material there) ring_stop
+            -- the verifier: material that arrives late (trade, hard-stone dig) restarts the clock: pc[7] is the last tick the wall lacked material
+            local limit = A.CFG.ring_stop_mat
+            if miss == 'no_boulders' or miss == 'no_stone' then
+              pc[7] = t
+            else
+              limit = A.CFG.ring_stop
+              if pc[7] ~= nil then waited = t - math.max(int(pc[6]) or t, int(pc[7]) or t) end
+            end
+            if waited >= limit then
+              X.log('warn', '%s: ring of z%d: the wall on %d,%d,%d stands unbuilt for %d d', P.id, z, pc[1], pc[2], z, waited // DAY)
+              ring_stop(X, P, d, r, z, L, 'ring_late', {pc[1], pc[2], z}, waited // DAY, detail, miss)
+              return 'done'
+            end
+            stall(X, P, r, z, L, miss or 'ring_wall', waited // DAY,
+                  detail or string.format('the wall on %d,%d,%d is designated and nobody builds it', pc[1], pc[2], z))
           end
           return 'done'
         end

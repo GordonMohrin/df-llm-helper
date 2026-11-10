@@ -410,12 +410,43 @@ def water_ctx(save_dir: Path, tpl: str, state: dict | None = None) -> dict | Non
     return out
 
 
+def aq_wall_gate(save_dir: Path, tpl: str, params: dict | None = None, state: dict | None = None) -> None:
+    """BUG-677 (Run 16c i3 Wallfree y400-y404: four aqshafts placed one after the other, each stopped after its ring wall stood unbuilt; the fort
+    had only claystone, 121 of 200 orders 'Needs non-economic hard stone'; Run 16a i1 kern.log 'need rock 4' for the ring walls): an aqshaft
+    needs wall material for its ring (heavy levels) and its plug: BpError with the reason and the fix when state.stock.wall (usable blocks,
+    boulders a job may take, logs; economy.wall_stock) is below sites.AQ_WALL_NEED (one wall less with p.heavy=off). No lockout: it follows
+    the live stock, so a stone dig, a trade or a mason clears it at once, and a shaft on another layer is not blocked by an old stop. Silent
+    without a state or a `stock.wall` (an older kernel, a mock)."""
+    if tpl != "aqshaft":
+        return
+    st = state if state is not None else files.read_state(save_dir)
+    have = ((st or {}).get("stock") or {}).get("wall") if isinstance(st, dict) else None
+    if not isinstance(have, int) or isinstance(have, bool):
+        return
+    try:
+        sm = load_bp("sites")
+        need = int(getattr(sm, "AQ_WALL_NEED", 3))
+        stops = sm.ring_wall_stops(fort_manifest(save_dir))
+    except (BpUnavailable, AttributeError, OSError, ValueError):
+        need, stops = 3, []
+    if (params or {}).get("heavy") == "off":
+        need = max(1, need - 1)
+    if have >= need:
+        return
+    past = f"; {len(stops)} earlier shaft(s) stopped at an unbuilt ring wall" if stops else ""
+    raise BpError(f"aqshaft: no wall material for its ring and plug (usable blocks + stone a job may take + logs: {have}, need {need}){past}; "
+                  "that is the cause of a ring wall nobody builds, not water: dig hard stone (`dfllm plan propose` drafts a stone dig), "
+                  "`dfllm cmd trade.want '{\"add\":[\"stone\",\"block\"]}'`, check `dfllm cmd inspect '{\"what\":\"workload\"}'`, or "
+                  "place it with p.heavy=off where no ring is needed; it is offered again as soon as the stock covers it")
+
+
 def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | None = None,
                n: int = RANK_N, manifest: dict | None = None, where: dict | None = None) -> tuple[list, str]:
     """Rank tpl on `snap` (default: sites_snapshot) with the fort manifest (and, BUG-040, the accepted water for a
     hospital); cache the raw ranking with its params, snapshot id, manifest and water digests. `where` (FR-78):
     {near: [x, y, z], within?: int, at?: [x, y, z]}: a ranking for one spot, never cached (the S labels of
     `bp.place` stay the general ranking's; this one is placed by its explicit anchor label A<x>_<y>_<z>_<rot>)."""
+    aq_wall_gate(save_dir, tpl, params)                    # BUG-677
     snap = snap or sites_snapshot(save_dir)
     if snap is None:
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
@@ -560,6 +591,7 @@ def ranking(save_dir: Path, tpl: str, params: dict | None = None, snap: dict | N
     """The cached ranking only if it was made for these params, on the snapshot ranking would use now, with the
     same fort manifest and (BUG-040) the same accepted water (a cache for other params, an older snapshot or other
     water skips rank's safety checks)."""
+    aq_wall_gate(save_dir, tpl, params)                    # BUG-677: before the cache (the stock changes, the ranking's inputs do not)
     snap = snap or sites_snapshot(save_dir)
     if snap is None:
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
@@ -827,7 +859,7 @@ def aq_bottoms(save_dir: Path) -> dict[str, int]:
             out.setdefault(d["proj"], d["bot"])
         # BUG-549: a shaft stopped for good on a heavy aquifer (AQ_HEAVY z, project parked breach:heavy_aquifer, then cancelled or
         # forgotten) never dug below z: it holds the levels down to z, not its whole plan
-        if e.get("type") == "AQ_HEAVY" and isinstance(d.get("proj"), str) and isinstance(d.get("z"), int)                 and not isinstance(d.get("z"), bool):
+        if e.get("type") in ("AQ_HEAVY", "AQ_RING_STOP") and isinstance(d.get("proj"), str) and isinstance(d.get("z"), int)                 and not isinstance(d.get("z"), bool):
             out.setdefault(d["proj"], d["z"])
     return out
 
@@ -2281,6 +2313,7 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
     """_place; BUG-316: a surface farm (farms p.surface) at a ranked label S<k> that finds no free site for its plots
     falls back to fewer plots (down to 1); PLACE_NOTES[bp_id] says so, the document's params carry the plots placed."""
     PLACE_NOTES.pop(bp_id, None)
+    aq_wall_gate(save_dir, tpl, params)                    # BUG-677
     try:
         return _place(save_dir, tpl, params, label, bp_id, occ, same, snap, need)
     except BpError as e:

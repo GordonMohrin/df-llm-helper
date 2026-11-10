@@ -518,7 +518,7 @@ T.test('BUG-391: citizens on a cut-off group over the thirst mark, no bridge bri
   T.ok(ds[1].d.q:find('2 citizens on walk group', 1, true) and ds[1].d.q:find('10,20,5', 1, true) and
        ds[1].d.q:find('thirst 41000', 1, true), ds[1].d.q)
   local cmds = table.concat(ds[1].d.cmds, ' | ')
-  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('bp sites cistern --near 10,20,5 --within 20', 1, true), cmds)
+  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('bp sites cistern --near 10,20,5 --within 999', 1, true), cmds)
   run(W, 1500)
   local again = 0
   for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_drink' then again = again + 1 end end
@@ -639,6 +639,56 @@ T.test('BUG-616 (Wallfree: 150 x STRANDED no rescue, no raised bridge leads to d
   for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_drink' then ds[#ds + 1] = x end end
   T.eq(#ds, 1)
   T.ok(ds[1].d.q:find('way to drink: zone 17718', 1, true) and ds[1].d.fix:find('walk path', 1, true), ds[1].d.q)
+end)
+
+T.test('BUG-661 (Wallfree: zone 17718 "7 / 25 / 35 / 69 tiles off" for one group, a STRANDED and a decision every few days at a stable thirst): '
+       .. 'the fix point is the stranded citizen nearest to the water and only gets nearer, one alarm per episode, again when MORE citizens '
+       .. 'are stranded', function()
+  local W = fort{units = {S.cit(11, 53, 12), S.cit(12, 54, 12), S.cit(13, 55, 12)}}
+  local fixpos = {}
+  W.load({name = 'water', every = {ticks = 100000},
+          src_dist = function(K, x, y, z) return {d = math.max(math.abs(x - 10), math.abs(y - 40), math.abs(z - Z)), id = 1, kind = 'zone'} end,
+          stranded_fix = function(K, pos)
+            fixpos[#fixpos + 1] = pos[1] .. ',' .. pos[2]
+            return string.format('zone 17718 is %d tiles off', math.max(math.abs(pos[1] - 10), math.abs(pos[2] - 40)))
+          end})
+  trapped(W, {{11, 10, 20, 40000}, {12, 11, 21, 41000}})      -- 20 and 19 tiles from the zone at 10,40
+  local n = 0
+  while n < 40 and #evs(W, 'STRANDED') == 0 do run(W, 100); n = n + 1 end
+  local e = evs(W, 'STRANDED')[1]
+  T.ok(e and e.d.fix == 'zone 17718 is 19 tiles off', e and tostring(e.d.fix) or 'no STRANDED')
+  T.eq({e.d.pos[1], e.d.pos[2]}, {11, 21}, 'the anchor is the citizen nearest to the water')
+  W.move(11, 10, 3, Z); W.move(12, 3, 3, Z)                   -- they wander off: 37 and 37 tiles from the zone
+  run(W, 2400)
+  W.move(11, 2, 2, Z); run(W, 1200)
+  for _, fp in ipairs(fixpos) do T.eq(fp, '11,21', 'one point for the whole episode') end
+  T.eq(#evs(W, 'STRANDED'), 1, 'one STRANDED for the episode: ' .. table.concat(phases(W), ','))
+  local ds = {}
+  for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_drink' then ds[#ds + 1] = x end end
+  T.eq(#ds, 1, 'one decision')
+  W.unit(13).counters2 = {thirst_timer = 42000, hunger_timer = 0}
+  W.move(13, 12, 22, Z)                                       -- a third stranded citizen: worse
+  run(W, 2400)
+  T.ok(#evs(W, 'STRANDED') >= 2, 'worse (3 citizens): announced again: ' .. #evs(W, 'STRANDED'))
+  T.eq(evs(W, 'STRANDED')[2].d.n, 3)
+end)
+
+T.test('BUG-677: the anchor is kept per walk group (two groups taking turns as the worst one do not make the distance flap)', function()
+  local SG = require('dfllm.siege')
+  local K = {call = function(mod, fn, x, y, z)
+    return true, {d = math.abs(x - 10) + math.abs(y - 40) + math.abs(z - 5)}
+  end}
+  local function e(g, cits) return {g = g, need = {drink = true}, cits = cits, pos = nil} end
+  local a1 = e(1, {{1, 12, 40, 5}, {2, 30, 40, 5}})                -- group 1: nearest is 2 tiles off
+  SG.anchor(K, a1)
+  local b1 = e(2, {{3, 60, 40, 5}})                                -- group 2: 50 tiles off
+  SG.anchor(K, b1)
+  local a2 = e(1, {{2, 30, 40, 5}})                                -- group 1 again, only the far one in view: still its own nearest
+  SG.anchor(K, a2)
+  T.eq({a1.pos[1], a2.pos[1], b1.pos[1]}, {12, 12, 60}, 'each group keeps its own nearest point')
+  local b2 = e(2, {{4, 50, 40, 5}})                                -- group 2 gets nearer: the point follows
+  SG.anchor(K, b2)
+  T.eq(b2.pos[1], 50)
 end)
 
 T.done()

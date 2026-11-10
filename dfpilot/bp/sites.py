@@ -2123,12 +2123,26 @@ SURFACE_AQ = 3              # BUG-387: an aquifer level this close (or closer) u
 SURFACE_DIG = 8             # BUG-387: a fortcore digs this deep under its anchor (depth 3 reaches az-8): a breach-recorded wet level inside
 
 
+RING_WALL = "ring_wall"          # BUG-662: manifest breach why of an aqshaft stopped by a ring wall nobody built (AQ_RING_STOP; no water)
+AQ_WALL_NEED = 3                # BUG-677: wall material (usable blocks + boulders + logs) a shaft needs before it is placed: 1 ring wall + 2 plug walls
+
+
+def ring_wall_stops(manifest: dict | None) -> list[dict]:
+    """BUG-662 (Run 16c i3 Wallfree y400-y402: five aqshafts in a row stopped at the ring wall of the next level, each reported as a heavy
+    aquifer at flow 0/7; the cause was no wall material the builders accept): the manifest `breaches` rows of shafts that stopped at an
+    unbuilt ring wall. The kernel drops them all once any ring wall stands (runner Q.ring_ok). BUG-677: no lockout of columns on them (the first
+    attempt refused every column for good after two): the cause is the stone, and cmd.aq_wall_gate reads it live."""
+    return [b for b in (manifest or {}).get("breaches") or [] if isinstance(b, dict) and b.get("why") == RING_WALL]
+
+
 def breach_points(manifest: dict | None) -> list[tuple[tuple[int, int, int], str]]:
     """BUG-130: the tiles where a dig was stopped by a breach (manifest `breaches`: damp, water, warm, cavern seepage) and
     the cavern breaches (manifest `caverns`), each with a short label for the reason line."""
     out = []
     for b in (manifest or {}).get("breaches") or []:
         pos = b.get("pos") if isinstance(b, dict) else None
+        if isinstance(b, dict) and b.get("why") == RING_WALL:       # BUG-662: a shaft that stopped at an unbuilt ring wall met no water
+            continue
         if isinstance(pos, (list, tuple)) and len(pos) == 3:
             out.append((tuple(int(v) for v in pos), f"{b.get('why', 'breach')} {_pos(pos)}"
                         + (f" {b['proj']}" if b.get("proj") else "")))

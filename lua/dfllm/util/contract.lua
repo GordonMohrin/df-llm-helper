@@ -142,6 +142,9 @@ C.EVENTS = {
   -- FR-95: a heavy aquifer (water >= 4/7 or a rising flow in our own dug tiles): the dig stopped for good
   -- (breach:heavy_aquifer), a shaft plugged (CAVERN_PLUG); d.proj, z, flow, why flow | rising, pos, plug
   AQ_HEAVY = {cls = 'A', by = 'runner'},
+  -- BUG-662: a ring wall nobody built (no hard stone, no mason) stopped a shaft with NO water (flow 0): block `ring_wall`, plugged, no heavy
+  -- level recorded; d.proj, z, flow, why ring_late | ring_refused, pos, plug, days, cmd, miss (BUG-677: no_boulders | no_stone = NO STONE)
+  AQ_RING_STOP = {cls = 'A', by = 'runner'},
   -- Run 11 siege 8: an open seal or plug built nothing for runner seal_first.stuck_days; the others run again (d.proj,
   -- tpl, stage, days, n, pieces 'door x,y,z', mat, blocked; BUG-041 wait: the job and its labor, a piece no citizen
   -- reaches)
@@ -352,7 +355,7 @@ C.STATE_OWNERS = {
   ['pop.cap'] = 'readiness', ['pop.gate_cap'] = 'readiness', ['pop.hold'] = 'readiness', ['ready.*'] = 'readiness',
   ['stock.drink_d'] = 'economy', ['stock.food_d'] = 'economy', ['stock.meals'] = 'economy',
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
-  ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy', ['stock.rhard'] = 'economy', ['stock.mfree'] = 'economy', ['stock.mroute'] = 'economy', ['stock.mtp'] = 'economy',
+  ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.wall'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy', ['stock.rhard'] = 'economy', ['stock.mfree'] = 'economy', ['stock.mroute'] = 'economy', ['stock.mtp'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
   ['stock.dwhy'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy', ['stock.dfd'] = 'economy', ['stock.dfwhy'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
@@ -488,7 +491,7 @@ C.STATE_SPEC = obj({
                rp = str(120)}),            -- BUG-653: the refuge has no pre-plug (no R0 blocker): not trusted against building destroyers
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
-                    metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
+                    metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, wall = NAT, picks = NAT,
                     rhard = FLAG,                   -- BUG-586: DF refuses the rock jobs (BUG-545 hard_denied)
                     mfree = NAT, mroute = str(16), mtp = NAT,   -- BUG-611: free mechanisms and plan_mech's route (plan: no traps without parts)
                     rsoil = FLAG,                   -- BUG-438: the stone digs found only soil (plan propose digs down to hard stone)

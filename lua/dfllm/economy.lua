@@ -4000,8 +4000,16 @@ local function alarm_check(K, c, p, days)
   pcall(M.solo_check, K, p, days)                  -- BUG-422: one dehydrating citizen is no 'units' crowd
   st.water = days.drink_d < a.days and not dry or nil
   local now = K.now().tick
-  if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY then
-    p.thirst_woke = now
+  -- BUG-661 (Run 16c i3 Wallfree: this question every 7 days for 1-2 citizens at a stable thirst ~26,000 who drank at the cavern lake): one
+  -- question per episode, again only when MORE citizens are thirsty than the last one announced; the episode is over once nothing was
+  -- dry or thirsty for 30 days (p.thirst_seen)
+  if thirsty >= a.units or dry then
+    if now - (p.thirst_seen or -1e9) > 30 * DAY then p.thirst_ann = nil end
+    p.thirst_seen = now
+  end
+  if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY
+     and (p.thirst_ann == nil or thirsty > p.thirst_ann) then
+    p.thirst_woke, p.thirst_ann = now, thirsty
     -- BUG-344 (Run 15d Drillchamber y379-y397: this question 271 times, 37 dead of thirst, 13 beside well 18324): water
     -- says what its last run found (a well a thirsty citizen stands at, no accepted water: the recipe) with the commands
     local okw, wtxt, wcmds = K.call('water', 'drink_fix')
@@ -7727,7 +7735,13 @@ function M.wall_stock(K)
   local rock = stone_free(c, r)
   local logs = math.max(0, (math.tointeger(inv.wood) or 0) - floor_of(c, r.p, r, 'wood'))
   local rk = st.rock
-  return {have = blocks + rock + logs, blocks = blocks, rock = rock, logs = logs, soil = type(rk) == 'table' and rk.soil == true}
+  -- BUG-677 (Run 16c i3 Wallfree: 37-53 claystone boulders 'free', every wall order 'Needs non-economic hard stone'): boulders no job may take
+  -- (M.stone_none: DF refused them, or ore / flux / soft only) are no wall material; `none` says so in the stall text
+  local okn, none = pcall(M.stone_none, K.census.i or {}, K.now().tick)
+  none = okn and none == true
+  if none then rock = 0 end
+  return {have = blocks + rock + logs, blocks = blocks, rock = rock, logs = logs, none = none,
+          soil = type(rk) == 'table' and rk.soil == true}
 end
 
 -- the open orders of a piece's job: what they make (n). A rock order the free stone cannot cover with the other rock
@@ -13396,6 +13410,10 @@ function M.state(K)
     if st.rock then
       r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0)
       if st.rock.soil then r.stock.rsoil = 1 end       -- BUG-438: the stone digs found only soil (plan propose digs deeper)
+    end
+    do                                                 -- BUG-677: the wall material a ring / plug can use (bp sites / bp.place aqshaft refuse without it)
+      local okw, ws = pcall(M.wall_stock, K)
+      if okw and type(ws) == 'table' then r.stock.wall = math.max(0, math.tointeger(ws.have) or 0) end
     end
     do                                                 -- BUG-586: DF itself refuses the rock jobs (BUG-545): no mechanism, no stone trap, no traction bench
       local okh, hd = pcall(M.hard_denied, K.census.i or {}, K.now().tick)

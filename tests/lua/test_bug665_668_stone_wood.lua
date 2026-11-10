@@ -283,4 +283,18 @@ T.test('BUG-667: usable stone, logs beside it: the wall keeps its boulders (noth
   T.ok(via == 'blocks' or via == 'boulders', tostring(via))
 end)
 
+T.test('BUG-677: wall_stock counts no boulder when every one is refused (stone_none), says so, and publishes stock.wall', function()
+  local W = world{boulders = 6, chert = 4, refuse = {[7] = true, [9] = true}, logs = 40, rock_orders = 40}
+  days(W, 1)
+  cancel(W, 3)
+  local s = stock(W)
+  T.eq({s.rock, s.none}, {0, true}, T.show(s))
+  T.ok(s.logs > 0, T.show(s))
+  T.eq(s.have, s.blocks + s.logs, 'only blocks and logs are wall material')
+  local W2 = world{boulders = 6, logs = 40}
+  days(W2, 1)
+  T.eq(stock(W2).none, false, 'a fort with usable stone')
+  T.eq(stock(W2).have >= 6, true)
+end)
+
 T.done()

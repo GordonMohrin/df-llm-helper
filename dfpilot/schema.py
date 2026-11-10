@@ -117,7 +117,7 @@ STATE_OWNERS = {
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "pop.hold": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
-    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy",
+    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.wall": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
@@ -696,6 +696,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # FR-95: a heavy aquifer: water >= 4/7 (why flow) or a rising flow (why rising) in our own dug tiles at level z; the
     # dig stopped for good (breach:heavy_aquifer), a shaft plugged (plug = its plug project; CAVERN_PLUG why heavy_aquifer)
     "AQ_HEAVY": ("A", "runner", _d("proj:s z:i", "flow:i why:s pos:p plug:s")),
+    # BUG-662: a ring wall nobody built stopped a shaft with no water (flow 0): block ring_wall, plugged, no heavy level recorded
+    "AQ_RING_STOP": ("A", "runner", _d("proj:s z:i", "flow:i why:s pos:p plug:s days:i cmd:s miss:s")),
     # Run 11 siege 8 (seal first): an open seal or plug built nothing for runner seal_first.stuck_days: it stops pausing
     # the other projects; pieces = the first 6 open ones ('door x,y,z'), n = all open, mat = why economy cannot make
     # them, blocked = the project's block (build_lost ...); BUG-041: wait = why the first open piece waits, as far as the
@@ -1092,7 +1094,9 @@ STATE = Obj(
          # Miners' demand (pick_want): plan propose/check draft a stone dig and picks in trade.want
          "stock": Obj(opt={"drink_d": NAT, "food_d": NAT, "meals": NAT, "hosp_water": FLAG, "ore": NAT, "bars": NAT,
                            "leather": NAT, "metal": Str(maxbytes=24), "mood_miss": Arr(Str(maxbytes=12), hi=8),
-                           "rock": NAT, "rock_need": NAT, "picks": NAT, "pick_want": NAT,
+                           "rock": NAT, "rock_need": NAT,
+                           # BUG-677: wall material a ring / plug can use (usable blocks + boulders + logs; boulders no job may take count 0)
+                           "wall": NAT, "picks": NAT, "pick_want": NAT,
                            # BUG-438: 1 = the stone digs gave no free boulder (the fort sits in soil): plan propose digs an explore
                            # shaft down to the first hard stone and asks the caravans for mechanisms and stone
                            "rsoil": FLAG,

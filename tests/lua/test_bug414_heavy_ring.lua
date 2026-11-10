@@ -136,7 +136,7 @@ T.test('BUG-414 safety: water on the dry level above while a ring tile is open s
   T.ok(rt(W).hvl and rt(W).hvl[1] == 99, 'the level is recorded heavy')
 end)
 
-T.test('BUG-414 safety: a ring wall that nobody builds stops and plugs the shaft after ring_wait', function()
+T.test('BUG-414/662 safety: a ring wall that nobody builds is a stall after ring_wait, a ring stop (not heavy) after ring_stop', function()
   local W = fresh{tag = 'b414late'}
   know_heavy(W, 99)
   start(W)
@@ -146,9 +146,20 @@ T.test('BUG-414 safety: a ring wall that nobody builds stops and plugs the shaft
   H.runs(W, 3)
   T.eq(#ev(W, 'AQ_HEAVY'), 0, 'not yet: ring_wait is 2 days')
   H.runs(W, 3)
-  T.eq(#ev(W, 'AQ_HEAVY'), 1)
-  T.eq(ev(W, 'AQ_HEAVY')[1].d.why, 'ring_late')
+  T.eq(#ev(W, 'AQ_HEAVY'), 0, 'BUG-662: no water, so never a heavy aquifer')
+  T.eq(#ev(W, 'AQ_RING_STOP'), 0, 'a stall first: ring_stop is 30 days')
   T.eq(W.tile(AX, AY, 99).dig, '')
+  local hv = rt(W).hvl and #rt(W).hvl or 0
+  T.eq(hv, 0, 'no heavy level is recorded for an unbuilt wall')
+  H.runs(W, 70)                                                  -- 35 days
+  T.eq(#ev(W, 'AQ_HEAVY'), 0)
+  T.eq(#ev(W, 'AQ_RING_STOP'), 1)
+  T.eq(ev(W, 'AQ_RING_STOP')[1].d.why, 'ring_late')
+  T.eq(H.proj(W, 'aq').blocked, 'ring_wall')
+  T.eq(rt(W).hvl and #rt(W).hvl or 0, 0, 'still no heavy level (the next shaft is not pushed one level lower)')
+  local rw = 0
+  for _, b in ipairs(rt(W).dz or {}) do if b.why == 'ring_wall' then rw = rw + 1 end end
+  T.eq(rw, 1, 'the stop is a manifest breach ring_wall')
 end)
 
 T.test('BUG-414 safety: a channel quickfort refuses stops the shaft (apply_fail) with nothing open', function()
