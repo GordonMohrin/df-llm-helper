@@ -6400,7 +6400,11 @@ end
 Q.PHANTOM = {['#'] = true, S = true}
 -- the unbuilt build-stage cells of document d (stages from `from` on) as {phantom 'x,y,z c' tiles, unbuilt count}; hatch, door and wall
 -- cells alike, gather ('p') cells and tiles holding a building not counted
-function Q.phantom_cells(K, d, from, built)
+-- BUG-657 (Run 16c i3 Wallfree y400-y404 / Run 16b i2 Valleyhame y378: the phantom seal came back every year, no PROJECT_BLOCKED phantom
+-- ever): the hatch of a stair that was never dug lies on a HIDDEN tile (snapshot.tile answers nil), not on a revealed '#', so BUG-638's
+-- scan found nothing. `hidden` (the scan of a seal already build_lost / SEAL_STUCK, never bp.place) counts a hidden tile with no building
+-- on it, placed again 4 times and never standing, as a phantom too ('x,y,z ?')
+function Q.phantom_cells(K, d, from, built, hidden)
   local ph, n, seen = {}, 0, {}
   for si = from or 0, #d.stages - 1 do
     local st = d.stages[si + 1]
@@ -6418,6 +6422,8 @@ function Q.phantom_cells(K, d, from, built)
               local ok, v = K.call('snapshot', 'tile', t[1], t[2], t[3])
               if ok and type(v) == 'table' and Q.PHANTOM[v.c] and not (type(v.bld) == 'string' and v.bld ~= '') then
                 ph[#ph + 1] = k .. ' ' .. v.c
+              elseif hidden and ok and v == nil and not Q.bld_at(t[1], t[2], t[3]) then
+                ph[#ph + 1] = k .. ' ?'                       -- BUG-657: never dug, never revealed, nothing planned there
               end
             end
           end
@@ -6446,10 +6452,11 @@ function Q.phantom_scan(K, t)
       local d = doc(K, P.id)
       local st = d and d.stages[P.stage + 1]
       if st and st.mode == 'build' then
-        local ph, n = Q.phantom_cells(K, d, P.stage, function(tl) return piece_built(K, tl) end)
+        local ph, n = Q.phantom_cells(K, d, P.stage, function(tl) return piece_built(K, tl) end, true)
         if n > 0 and #ph == n then
-          local msg = string.format('%s (seal) cancelled: %s %s solid rock, nothing to build on (no stair or floor was dug there); ' ..
-                                    'a seal for it is not placed again (BUG-638)', P.id, table.concat(ph, ', '), #ph == 1 and 'is' or 'are')
+          local msg = string.format('%s (seal) cancelled: %s %s solid rock or never revealed, nothing to build on (no stair or floor was dug ' ..
+                                    'there); a seal for it is not placed again (BUG-638, BUG-657)', P.id, table.concat(ph, ', '),
+                                    #ph == 1 and 'is' or 'are')
           K.log('warn', '%s', msg)
           K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200),
                  {proj = P.id, tpl = 'seal', stage = trunc(st.label or '', 24), why = P.blocked ~= '' and P.blocked or 'phantom',

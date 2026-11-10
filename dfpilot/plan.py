@@ -2148,6 +2148,12 @@ def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[
             return [], [f"audit: {route}: a door stands at {', '.join(w.rsplit(' ', 1)[0] for w in a['doored'])} (seal "
                         f"{', '.join(sorted(set(a['doored'].values())))}): a wall there cut citizens off (the kernel refused it), "
                         "the audit counts walls only; decide by hand (a second way for them, then the wall)"]
+        if a.get("core") and not a.get("pending"):
+            # BUG-658 (Run 16d i4 Trumpetrealms y437-y441: 'seal project  builds the wall' with no project, `seal at=audit` 'nothing to close'):
+            # the wall tile lies in a fortcore project, the fort's own corridor; no seal is built there, so none is drafted
+            return [], [f"audit: {route}: the wall {', '.join(w.rsplit(' ', 2)[0] for w in a['core'])} lies on a tile of the fortcore "
+                        f"{', '.join(sorted(set(a['core'].values())))} (the fort's own way): no seal is built there; the next audit names "
+                        "another tile of the route or none (`dfllm audit`); readiness stays R0 `bypass` until then"]
         pend = ", ".join(sorted(set((a.get("pending") or {}).values())))
         return [], [f"audit: {route}: seal project {pend} builds the wall; dfllm audit once it stands"]
     due = due_season(doc, s)

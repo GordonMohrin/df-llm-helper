@@ -1912,7 +1912,15 @@ def compute_audit(save_dir: Path, sid: str, rel: str, reply: dict, info: dict | 
         takes_info = "info" in inspect.signature(fn).parameters
     except (TypeError, ValueError):
         takes_info = False
-    res = fn(snap, manifest, info=info) if takes_info and info is not None else fn(snap, manifest)
+    kw: dict = {"info": info} if takes_info and info is not None else {}
+    try:
+        if "avoid" in inspect.signature(fn).parameters:
+            # BUG-658: no audit wall on a fortcore tile or a finished seal's tile: seal at=audit would leave it out
+            from .cmd import audit_avoid
+            kw["avoid"] = audit_avoid(save_dir, snap.get("tick"))
+    except (TypeError, ValueError):
+        pass
+    res = fn(snap, manifest, **kw)
     return audit_args(sid, res)
 
 
