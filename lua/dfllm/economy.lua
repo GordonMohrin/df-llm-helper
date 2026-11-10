@@ -9999,7 +9999,8 @@ end
 -- (p.cutws[Type] = {t, at, grp, home, n}); facts() then counts the type as missing (f['cut:Type']), so the shop requests, the stall
 -- reports and the piece routes treat it as missing. M.cut_scan (daily): ORDER_STUCK (B, kind workshop) once, and PROJECT_REQUEST
 -- workshops why=cut (M.ws_ask, paced) for the types M.WS_PLACE can place: follow places a new one on the citizens' walk group.
--- A shop is judged by tiles: all ring tiles hidden, unwalkable or unread (a fully walled shop) is unknown, never cut.
+-- A shop is judged by tiles: a ring tile on a walk group g > 0 off the citizens' is cut; a ring read in full with every tile unwalkable
+-- (walls, deep water: group 0) is cut as walk group 0 (the flooded level); any hidden or unread ring tile with none walkable is unknown, never cut.
 M.CUT = {days = 3, max_pts = 1500, citizens = 150}
 
 function M.shop_ring(b)
@@ -10051,8 +10052,17 @@ function M.shop_reach(K)
   for k = 1, #pts do
     local s, g = owner[k], math.tointeger(jg[k]) or -1
     if g > 0 then
-      if home[g] then s.ok = true elseif not s.seen then s.seen = g end
+      if home[g] then s.ok = true elseif not s.seen or s.seen == 0 then s.seen = g end
+    elseif g == 0 then
+      s.blocked = (s.blocked or 0) + 1           -- read, and no walkable group: a wall or water 4-7 deep (snapshot WALKCH excludes '~')
+    else
+      s.unk = (s.unk or 0) + 1                   -- hidden, off the map or a fault: could be floor
     end
+  end
+  -- a fully flooded or walled ring (every tile read, none walkable, none hidden) is cut off too, as group 0: Basementflew's z117
+  -- kitchen stood in 4-7 deep water, whose tiles have no walk group at all (the first pass judged only g > 0 and called it unknown)
+  for _, s in ipairs(shops) do
+    if not s.ok and not s.seen and (s.blocked or 0) > 0 and (s.unk or 0) == 0 then s.seen = 0 end
   end
   local by = {}
   for _, s in ipairs(shops) do
@@ -10087,7 +10097,7 @@ function M.cut_text(p, t)
   if type(rec) ~= 'table' then return nil end
   local at = type(rec.at) == 'table' and rec.at or {}
   return string.format('%s at %s,%s,%s (walk group %s, the citizens on %s)', t, tostring(at[1]), tostring(at[2]), tostring(at[3]),
-                       tostring(rec.grp), tostring(rec.home))
+                       tostring(rec.grp) == '0' and '0: no walkable tile round it' or tostring(rec.grp), tostring(rec.home))
 end
 
 function M.cut_scan(K, c, r)

@@ -10,8 +10,8 @@ local function fresh(mod) package.loaded['dfllm.' .. mod] = nil; return require(
 local function settle(W) for _ = 1, 40 do W.run(1) end end
 local function days(W, n) for _ = 1, n do W.run(1200, {skip = 100}); settle(W) end end
 
--- walk groups by x: 0..60 the fort (group 7), 100+ a flooded level (group 9), the rest no walkable tile
-local function group_at(x) return x <= 60 and 7 or (x >= 100 and 9 or 0) end
+-- walk groups by x: 0..60 the fort (group 7), 100..199 another level (group 9), 200+ hidden/unread (-1), the rest no walkable tile (0)
+local function group_at(x) return x <= 60 and 7 or (x >= 200 and -1 or (x >= 100 and 9 or 0)) end
 local SNAP = {name = 'snapshot', every = {ticks = 1200},
               groups = function(_K, pts)
                 local out = {}
@@ -136,9 +136,26 @@ T.test('BUG-654: a Kitchen on the citizens\' walk group is no cut; a second one 
   T.eq(requests(W2, 'cut'), before, 'no more requests')
 end)
 
-T.test('BUG-654: a shop with no walkable tile read round it (a walled-in one) is unknown, not cut; no walk-group module: nothing judged', function()
+T.test('BUG-654 flooded: a shop whose ring is read in full and has NO walkable tile (group 0: water 4-7, walls) is cut off like a shop on another group', function()
+  local W = setup{growth = 200, hungry = 2}
+  shop(W, 'Kitchen', 80, 20)                 -- x 79..81 and its ring: group 0 (Basementflew z117, all '~' and '#')
+  econ(W)
+  days(W, 2)
+  T.eq(#cut_events(W), 0, 'two days: not yet')
+  days(W, 4)
+  local ev = cut_events(W)
+  T.eq(#ev, 1, 'told once')
+  T.ok(ev[1].msg:find('Kitchen at 80,20,5 (walk group 0: no walkable tile round it, the citizens on 7)', 1, true), ev[1].msg)
+  local n, req = requests(W, 'cut')
+  T.ok(n >= 1, 'PROJECT_REQUEST why=cut')
+  T.eq(req.d.types, {'Kitchen'})
+  local p = W.K.persist.get('m.economy')
+  T.ok(p.cutws and p.cutws.Kitchen and p.cutws.Kitchen.grp == 0, 'persisted for the facts')
+end)
+
+T.test('BUG-654: a shop with a hidden or unread ring (-1) and no walkable tile is unknown, not cut; no walk-group module: nothing judged', function()
   local W = setup{growth = 200}
-  shop(W, 'Kitchen', 80, 20)                 -- x 79..81 and its ring: group 0 (no walkable tile)
+  shop(W, 'Kitchen', 220, 20)                -- ring all -1: unexplored
   econ(W)
   days(W, 8)
   T.eq(#cut_events(W), 0)
