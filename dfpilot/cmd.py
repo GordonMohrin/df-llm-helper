@@ -1168,6 +1168,25 @@ def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
             "via_built": via_built}
 
 
+def audit_avoid(save_dir: Path, tick: int | None = None) -> set[tuple[int, int, int]]:
+    """BUG-658 (Run 16d i4 Trumpetrealms y437-y441: `bypass: wall 89,100,139 floor` on a fortcore tile; Run 16a i1 Basementflew y414-y441:
+    `bypass: wall 98,89,129 floor (+more)` for 28 years of seals that finished and a door that stands where a wall cut citizens off): the
+    tiles the audit's finding must not name a wall on, since `seal at=audit` leaves them out ('nothing to close') and the finding then
+    stands for ever: the footprint of every fortcore project (the fort's own corridor) and the tiles of the seal projects finished
+    WALL_BUILT_LAG before the snapshot (audit_routes `built` / `doored`). The finding names the next closable tile of the route."""
+    out: set[tuple[int, int, int]] = set(core_cells(save_dir))
+    recs = seal_records(save_dir)
+    if not recs:
+        return out
+    if not isinstance(tick, int) or isinstance(tick, bool):
+        tick = files.current_tick(save_dir)
+    done = done_ticks(save_dir)
+    for t, (pid, _) in recs.items():
+        if pid in done and isinstance(tick, int) and done[pid] + WALL_BUILT_LAG <= tick:
+            out.add(t)
+    return out
+
+
 def core_cells(save_dir: Path) -> dict[tuple[int, int, int], str]:
     """{tile: fortcore project id} over the footprint of every fortcore project in <save>/bp, its later stages
     included (cmd.footprint). BUG-211 (live round 3, Earthboat: follow's seal at=audit put a wall on 54,80,138, a
@@ -1354,7 +1373,10 @@ def foot_closed(snap: dict | None, x: int, y: int, zr: int) -> bool:
     return n > 0
 
 
-PHANTOM_WINDOW_YEARS = 2          # BUG-638: how far back a kernel PROJECT_BLOCKED phantom still counts
+# BUG-638: how far back a kernel PROJECT_BLOCKED phantom still counts. BUG-657 (Run 16c i3 Wallfree y400-y404: the hatch of a stair that
+# was never dug came back with the plan every game year): a stair dug later brings the demand back by itself (refuge_stair reads the
+# revealed tile first), so the record need not age out
+PHANTOM_WINDOW_YEARS = 20
 
 
 def phantom_tiles(save_dir: Path) -> set[str]:
