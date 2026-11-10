@@ -1845,6 +1845,13 @@ def _aqshaft(snap: dict, p: dict, manifest: dict) -> list[dict]:
     (shaft_depth_auto), else 20. Score: 1000 - 5 per step to a stair - 2 per unknown column tile + AQ_SPAN when it passes a
     known aquifer level (manifest aquifer_levels). ValueError with the reason (first 3 examples per rule: level / coordinate)
     when no column is left."""
+    rw = ring_wall_stops(manifest)
+    if len(rw) >= RING_STOP_MAX:
+        zs = ", ".join(f"z{b['pos'][2]} ({b.get('proj', '?')})" for b in rw[:4] if isinstance(b.get("pos"), (list, tuple)) and len(b["pos"]) == 3)
+        raise ValueError(f"aqshaft: {len(rw)} shafts stopped at a ring wall nobody built ({zs}); that is a missing-material stop, not water "
+                         "(AQ_RING_STOP, flow 0/7), and the next shaft would stop the same way. No column is offered until a ring wall stands: "
+                         "get wall material the builders accept (hard stone boulders or blocks: a stone dig, trade.want stone/block) and a "
+                         "mason, check `dfllm cmd inspect what=workload`, or place a shaft with `p.heavy=off` where no ring is needed")
     g = Graph(snap)
     steps_of = _stair_steps(g)
     keep_out = _keep_out(manifest)
@@ -1903,6 +1910,8 @@ def open_columns(snap: dict, params: dict | None, manifest: dict | None, near=No
     group, nearest to `near` (x, y: the waiting fortcore; default the depot / the middle of the snapshot); the column's rock rules
     are `_aqshaft`'s (shaft_why), the depth is its own (p.depth, else down to the core under the known aquifer). Same dicts as
     `_aqshaft` (anchor, rot, score, depth, box, why); [] when nothing fits. The caller tests the placed projects."""
+    if len(ring_wall_stops(manifest)) >= RING_STOP_MAX:             # BUG-662: the same refusal as `_aqshaft`
+        return []
     p = check_params("aqshaft", params)
     p["depth_auto"] = "depth" not in (params or {})
     x0, y0, z0, x1, y1, z1 = snap["bbox"]
@@ -2123,12 +2132,25 @@ SURFACE_AQ = 3              # BUG-387: an aquifer level this close (or closer) u
 SURFACE_DIG = 8             # BUG-387: a fortcore digs this deep under its anchor (depth 3 reaches az-8): a breach-recorded wet level inside
 
 
+RING_WALL = "ring_wall"          # BUG-662: manifest breach why of an aqshaft stopped by a ring wall nobody built (AQ_RING_STOP; no water)
+RING_STOP_MAX = 2               # ... this many such stops (and no ring wall standing since): `bp sites aqshaft` offers no column
+
+
+def ring_wall_stops(manifest: dict | None) -> list[dict]:
+    """BUG-662 (Run 16c i3 Wallfree y400-y402: five aqshafts in a row stopped at the ring wall of the next level, each reported as a heavy
+    aquifer at flow 0/7; the cause was no wall material the builders accept): the manifest `breaches` rows of shafts that stopped at an
+    unbuilt ring wall. The kernel drops them all once any ring wall stands (runner Q.ring_ok)."""
+    return [b for b in (manifest or {}).get("breaches") or [] if isinstance(b, dict) and b.get("why") == RING_WALL]
+
+
 def breach_points(manifest: dict | None) -> list[tuple[tuple[int, int, int], str]]:
     """BUG-130: the tiles where a dig was stopped by a breach (manifest `breaches`: damp, water, warm, cavern seepage) and
     the cavern breaches (manifest `caverns`), each with a short label for the reason line."""
     out = []
     for b in (manifest or {}).get("breaches") or []:
         pos = b.get("pos") if isinstance(b, dict) else None
+        if isinstance(b, dict) and b.get("why") == RING_WALL:       # BUG-662: a shaft that stopped at an unbuilt ring wall met no water
+            continue
         if isinstance(pos, (list, tuple)) and len(pos) == 3:
             out.append((tuple(int(v) for v in pos), f"{b.get('why', 'breach')} {_pos(pos)}"
                         + (f" {b['proj']}" if b.get("proj") else "")))

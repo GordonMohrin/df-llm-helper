@@ -356,6 +356,39 @@ local function way(K, g, G, from, need, outer)
 end
 
 -- (a) the citizens over the thresholds on a group without what they need, the worst group first
+-- BUG-661 (Run 16c i3 Wallfree y391-y405: the STRANDED / stranded_drink fix said 'zone 17718 at 91,59,142 is 7 / 25 / 35 / 39 / 40 / 69 tiles off' for
+-- the same group at the same thirst: e.pos was the first stranded citizen the walk-group list gave, who walks about the whole group): the
+-- position of a drink case is the stranded citizen NEAREST to the nearest accepted water, and the nearest one seen for the group while the
+-- episode lasts (mem.str_anc, until the group has drink): the distance in the fix is one number that only falls, and the cistern command
+-- is asked at a point of their own walk group
+function M.anchor(K, e)
+  if not e.need.drink or type(e.cits) ~= 'table' then return end
+  local bd, bp, bid
+  for _, c in ipairs(e.cits) do
+    local ok, sd = K.call('water', 'src_dist', c[2], c[3], c[4])
+    local d = ok and type(sd) == 'table' and math.tointeger(sd.d) or nil
+    if d and (not bd or d < bd or (d == bd and c[1] < bid)) then bd, bp, bid = d, {c[2], c[3], c[4]}, c[1] end
+  end
+  if not bd then return end
+  local a = mem.str_anc
+  if type(a) == 'table' and a.g == e.g and type(a.pos) == 'table' and (a.d or math.huge) <= bd then
+    e.pos = {a.pos[1], a.pos[2], a.pos[3]}
+  else
+    mem.str_anc = {g = e.g, d = bd, pos = bp}
+    e.pos = bp
+  end
+end
+
+-- BUG-661: one STRANDED / stranded_drink announcement per episode of a group without drink: the set is the group (the citizens come and
+-- go with every drink they take outside, a new id is no news), the news is the number of stranded citizens beyond the most the episode had,
+-- and the thirst crossing DF's dehydration line (FIGHT_THIRST). The episode ends when the group has drink (step)
+local function episode(e)
+  mem.str_nmax = type(mem.str_nmax) == 'table' and mem.str_nmax or {}
+  local k = tostring(e.g)
+  if (mem.str_nmax[k] or 0) < #e.ids then mem.str_nmax[k] = #e.ids end
+  return {'g' .. e.g}, {'n' .. mem.str_nmax[k], e.thirst >= M.FIGHT_THIRST and 'fight' or 'mild'}
+end
+
 local function cut_off(K, G)
   local by = {}
   local now = K.now().tick
@@ -385,9 +418,10 @@ local function cut_off(K, G)
         end
       end
       if nd or nf then
-        local e = by[gid] or {g = gid, ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}}
+        local e = by[gid] or {g = gid, ids = {}, thirst = 0, hunger = 0, need = {}, pos = {c[2], c[3], c[4]}, cits = {}}
         by[gid] = e
         e.ids[#e.ids + 1] = c[1]
+        e.cits[#e.cits + 1] = {c[1], c[2], c[3], c[4]}
         e.thirst, e.hunger = math.max(e.thirst, th), math.max(e.hunger, hu)
         if nd then e.need.drink = true end
         if nf then e.need.food = true end
@@ -404,6 +438,7 @@ local function cut_off(K, G)
   local best
   for _, e in pairs(by) do
     table.sort(e.ids)
+    M.anchor(K, e)
     if not best or #e.ids > #best.ids or (#e.ids == #best.ids and e.g < best.g) then best = e end
   end
   return best
@@ -555,6 +590,9 @@ end
 -- M.FOOD_R tiles, nearest first: a soil floor (a farm plot can stand there: bp sites farms surface=1) and a tile beside water
 -- (a fishing zone, fish is food). Neither: only the reads are offered and the question says so. Returns soil {x,y}, shore {x,y}.
 M.FOOD_R = 10
+-- BUG-661: `bp sites cistern --near <their point> --within 20` answered 'the nearest candidate is 62 tiles away': the ranking returns the sites
+-- nearest first within this radius, so the command that names the stranded point finds the nearest site, however far (it says how far)
+M.CISTERN_WITHIN = 80
 local function food_spots(K, e)
   local x0, y0, z = e.pos[1], e.pos[2], e.pos[3]
   local pts, at = {{x0, y0, z}}, {}
@@ -596,9 +634,10 @@ local function dry_decision(K, e, now)
   local T = K.now()
   local drink = e.need.drink == true
   local what = drink and 'drink' or 'food'
-  local toks = {what}
-  if not CAD.due(rec, T, e.ids, toks, {ticks = 2 * M.STRAND_CONFIRM, wall_s = 120}) then return end
-  mem.dry_rec = CAD.mark(T, e.ids, toks)
+  local eids, toks = episode(e)                            -- BUG-661: the group and its worst count, not the citizens of the day
+  table.insert(toks, 1, what)
+  if not CAD.due(rec, T, eids, toks, {ticks = 2 * M.STRAND_CONFIRM, wall_s = 120}) then return end
+  mem.dry_rec = CAD.mark(T, eids, toks)
   local own = drink and string.format('thirst %d', e.thirst) or string.format('hunger %d', e.hunger)
   local q = string.format('%d citizens on walk group %d at %s have no %s they can reach (%s): no bridge rescue is possible '
                           .. 'now; stock elsewhere does not help them. Open a way (ramp, stair, bridge), %s on their side, or '
@@ -607,7 +646,7 @@ local function dry_decision(K, e, now)
   local cmds = {'dfllm cmd inspect what=reach'}
   if drink then
     cmds[#cmds + 1] = 'dfllm cmd inspect what=water_sources'
-    cmds[#cmds + 1] = string.format('dfllm bp sites cistern --near %s --within 20 --fresh', pos)
+    cmds[#cmds + 1] = string.format('dfllm bp sites cistern --near %s --within %d --fresh', pos, M.CISTERN_WITHIN)   -- BUG-661
   else
     cmds[#cmds + 1] = 'dfllm cmd inspect what=items'
     -- BUG-431: only what can work where they stand (food_spots); the question names what is missing
@@ -735,6 +774,15 @@ local function rescue_step(K, a, g, now)
   local G = groups(K)
   if not G then return end
   relax_step(K, G)                                         -- (e) BUG-031: the confinement, not a bridge
+  -- BUG-661: a group that has drink ends its episode (the anchor, the most stranded counted, the announcement record)
+  for gid in pairs(G.cit) do
+    if G.drink[gid] and (type(mem.str_nmax) == 'table' and mem.str_nmax[tostring(gid)]
+                         or (mem.str_anc and mem.str_anc.g == gid)) then
+      if type(mem.str_nmax) == 'table' then mem.str_nmax[tostring(gid)] = nil end
+      if mem.str_anc and mem.str_anc.g == gid then mem.str_anc = nil end
+      st.str.rec, mem.dry_rec, dirty = nil, nil, true      -- a later lack of drink is a new episode: announced at once
+    end
+  end
   local e = cut_off(K, G)
   if not (e and e.need.drink) then mem.dry = nil end
   if not e then return end
@@ -785,7 +833,10 @@ local function rescue_step(K, a, g, now)
       fix = okf and type(fx) == 'string' and fx or nil
       d.fix = fix
     end
-    stranded(K, 'refused', string.format('%s: no rescue (%s)%s', base, why, fix and ('; fix: ' .. fix) or ''), d, e.ids, {'refused', why})
+    local eids, etoks = episode(e)                         -- BUG-661: one alarm per episode, unless it is worse
+    table.insert(etoks, 1, why)
+    table.insert(etoks, 1, 'refused')
+    stranded(K, 'refused', string.format('%s: no rescue (%s)%s', base, why, fix and ('; fix: ' .. fix) or ''), d, eids, etoks)
     -- BUG-417: no bridge brings it (drink or food), or the bridge rescue is refused while they are past the fight mark
     if (e.need.drink or e.need.food) and (not bs or e.thirst >= M.FIGHT_THIRST or e.hunger >= M.FIGHT_HUNGER) then
       dry_decision(K, e, now)

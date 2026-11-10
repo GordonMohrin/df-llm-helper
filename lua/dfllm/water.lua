@@ -4285,6 +4285,19 @@ function M.src_near(K, x, y, z, r)
   return {d = best.d, txt = string.format('%s %s at %d,%d,%d, %d tiles', s.kind, tostring(s.id), s.x, s.y, s.z, best.d)}
 end
 
+-- public (BUG-661, siege's stranded anchor): the accepted source (wet well or Water Source zone, last run, not an emergency well)
+-- nearest to a position: {d, id, kind} (Chebyshev, z included, as stranded_fix), nil before the first run or without a source
+function M.src_dist(K, x, y, z)
+  local best
+  for _, s in ipairs(st.src or {}) do
+    if s.wet and not s.emerg and s.x then
+      local d = math.max(math.abs(s.x - x), math.abs(s.y - y), math.abs(s.z - z))
+      if not best or d < best.d then best = {d = d, id = s.id, kind = s.kind} end
+    end
+  end
+  return best
+end
+
 -- public (BUG-616, siege's STRANDED / stranded_drink): the concrete way to drink for citizens standing at `pos` on a walk group no
 -- bridge serves, from the last run and scan only (no tile reads): the nearest accepted source and how far it is, else the nearest
 -- scan body with a bank, else the cistern. Returns one line (<= 200 bytes), nil before the first run. Report only
@@ -4301,8 +4314,8 @@ function M.stranded_fix(K, pos)
   local txt
   if best then
     txt = string.format('%s %d at %d,%d,%d is %d tiles off, not on their walk group: open a walk path (ramp or stair) to it, or a cistern '
-                        .. 'beside them (bp sites cistern --near %d,%d,%d)', best.s.kind, best.s.id, best.s.x, best.s.y, best.s.z,
-                        best.d, x, y, z)
+                        .. 'beside them (bp sites cistern --near %d,%d,%d --within 80)', best.s.kind, best.s.id, best.s.x, best.s.y,
+                        best.s.z, best.d, x, y, z)       -- BUG-661: --within 80 (siege CISTERN_WITHIN): the nearest site, however far
   else
     local body
     for _, b in ipairs(st.ws and st.ws.bodies or {}) do

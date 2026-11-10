@@ -486,7 +486,10 @@ T.test('supply alarm: >= 2 thirsty citizens or drink < 10 days -> alarm(), DECIS
   T.eq(select(2, W.K.call('economy', 'alarm')), 'drink 0 d', 'no drink at all: still an alarm')
   T.eq(thirst(), 1, 'weekly')
   days(W, 7)
-  T.eq(thirst(), 2)
+  T.eq(thirst(), 1, 'BUG-661: the same episode (fewer thirsty than announced) is not asked again every week')
+  W.unit(2).counters2.thirst_timer, W.unit(3).counters2.thirst_timer = 45000, 46000
+  days(W, 1)
+  T.eq(thirst(), 2, 'more thirsty citizens than announced (3 > 2): asked again')
 end)
 
 T.test('supply alarm: plain "hungry" (50000-64999) is no alarm, >= 2 near starving (65000) is (live L3)', function()

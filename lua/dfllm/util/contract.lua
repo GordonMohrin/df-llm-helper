@@ -142,6 +142,9 @@ C.EVENTS = {
   -- FR-95: a heavy aquifer (water >= 4/7 or a rising flow in our own dug tiles): the dig stopped for good
   -- (breach:heavy_aquifer), a shaft plugged (CAVERN_PLUG); d.proj, z, flow, why flow | rising, pos, plug
   AQ_HEAVY = {cls = 'A', by = 'runner'},
+  -- BUG-662: a ring wall nobody built (no hard stone, no mason) stopped a shaft with NO water (flow 0): block `ring_wall`, plugged, no heavy
+  -- level recorded; d.proj, z, flow, why ring_late | ring_refused, pos, plug, days, cmd
+  AQ_RING_STOP = {cls = 'A', by = 'runner'},
   -- Run 11 siege 8: an open seal or plug built nothing for runner seal_first.stuck_days; the others run again (d.proj,
   -- tpl, stage, days, n, pieces 'door x,y,z', mat, blocked; BUG-041 wait: the job and its labor, a piece no citizen
   -- reaches)

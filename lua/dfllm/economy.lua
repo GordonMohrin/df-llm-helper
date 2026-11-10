@@ -3966,8 +3966,16 @@ local function alarm_check(K, c, p, days)
   pcall(M.solo_check, K, p, days)                  -- BUG-422: one dehydrating citizen is no 'units' crowd
   st.water = days.drink_d < a.days and not dry or nil
   local now = K.now().tick
-  if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY then
-    p.thirst_woke = now
+  -- BUG-661 (Run 16c i3 Wallfree: this question every 7 days for 1-2 citizens at a stable thirst ~26,000 who drank at the cavern lake): one
+  -- question per episode, again only when MORE citizens are thirsty than the last one announced; the episode is over once nothing was
+  -- dry or thirsty for 30 days (p.thirst_seen)
+  if thirsty >= a.units or dry then
+    if now - (p.thirst_seen or -1e9) > 30 * DAY then p.thirst_ann = nil end
+    p.thirst_seen = now
+  end
+  if (thirsty >= a.units or dry) and now - (p.thirst_woke or -1e9) >= 7 * DAY
+     and (p.thirst_ann == nil or thirsty > p.thirst_ann) then
+    p.thirst_woke, p.thirst_ann = now, thirsty
     -- BUG-344 (Run 15d Drillchamber y379-y397: this question 271 times, 37 dead of thirst, 13 beside well 18324): water
     -- says what its last run found (a well a thirsty citizen stands at, no accepted water: the recipe) with the commands
     local okw, wtxt, wcmds = K.call('water', 'drink_fix')

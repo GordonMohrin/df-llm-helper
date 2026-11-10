@@ -693,6 +693,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # FR-95: a heavy aquifer: water >= 4/7 (why flow) or a rising flow (why rising) in our own dug tiles at level z; the
     # dig stopped for good (breach:heavy_aquifer), a shaft plugged (plug = its plug project; CAVERN_PLUG why heavy_aquifer)
     "AQ_HEAVY": ("A", "runner", _d("proj:s z:i", "flow:i why:s pos:p plug:s")),
+    # BUG-662: a ring wall nobody built stopped a shaft with no water (flow 0): block ring_wall, plugged, no heavy level recorded
+    "AQ_RING_STOP": ("A", "runner", _d("proj:s z:i", "flow:i why:s pos:p plug:s days:i cmd:s")),
     # Run 11 siege 8 (seal first): an open seal or plug built nothing for runner seal_first.stuck_days: it stops pausing
     # the other projects; pieces = the first 6 open ones ('door x,y,z'), n = all open, mat = why economy cannot make
     # them, blocked = the project's block (build_lost ...); BUG-041: wait = why the first open piece waits, as far as the

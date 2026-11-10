@@ -512,6 +512,11 @@ def _aq_open_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict, ma
     its own box; the free ones as ranked sites. [] when none (the caller re-raises the ranking's own reason)."""
     if tpl != "aqshaft" or where or (params or {}).get("x") is not None:
         return []
+    try:                                                   # BUG-662: two shafts stopped at an unbuilt ring wall: no column, the ranking says why
+        if len(load_bp("sites").ring_wall_stops(manifest)) >= load_bp("sites").RING_STOP_MAX:
+            return []
+    except (BpUnavailable, AttributeError):
+        pass
     core = waiting_core(save_dir)
     try:
         sm = load_bp("sites")
@@ -827,7 +832,7 @@ def aq_bottoms(save_dir: Path) -> dict[str, int]:
             out.setdefault(d["proj"], d["bot"])
         # BUG-549: a shaft stopped for good on a heavy aquifer (AQ_HEAVY z, project parked breach:heavy_aquifer, then cancelled or
         # forgotten) never dug below z: it holds the levels down to z, not its whole plan
-        if e.get("type") == "AQ_HEAVY" and isinstance(d.get("proj"), str) and isinstance(d.get("z"), int)                 and not isinstance(d.get("z"), bool):
+        if e.get("type") in ("AQ_HEAVY", "AQ_RING_STOP") and isinstance(d.get("proj"), str) and isinstance(d.get("z"), int)                 and not isinstance(d.get("z"), bool):
             out.setdefault(d["proj"], d["z"])
     return out
 

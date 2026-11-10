@@ -129,7 +129,11 @@ T.test('BUG-444: a shaft that holds a level and makes no progress for stall_days
   T.ok(R and R.sks and R.sk == nil, 'the announcement stamp is R.sks; the skipped-tile counter R.sk (-> lost) is untouched: ' .. T.show(R))
   for _ = 1, 2 * 12 do H.runs(W, 1) end
   local ev2 = blocked(W, 'stalled')
-  T.ok(#ev2 >= 2 and ev2[2].tick - t1 >= 5 * 1200, 'again after stall_every: ' .. #ev2)
+  T.eq(#ev2, 1, 'BUG-664: the same cause is not announced again every stall_every days: ' .. #ev2)
+  rt(W).aq['aq'].levels['99'].stall = {why = 'no_mason', t = 0}              -- the cause changed: announced again after stall_every
+  for _ = 1, 2 * 12 do H.runs(W, 1) end
+  ev2 = blocked(W, 'stalled')
+  T.ok(#ev2 >= 2 and ev2[2].tick - t1 >= 5 * 1200, 'a changed cause is announced after stall_every: ' .. #ev2)
   T.ok(H.proj(W, 'aq') and H.proj(W, 'aq').blocked ~= 'cancel', 'announcement only: nothing is cancelled')
   -- a real skip count of 2 is not read as a timestamp: the first announcement is not suppressed or repeated at once
   local W2 = fresh{tag = 'b444sk', cfg = CFGQ}

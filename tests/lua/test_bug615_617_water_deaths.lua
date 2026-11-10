@@ -267,6 +267,10 @@ T.test('BUG-616: stranded_fix names the nearest accepted water and the way (a wa
   T.ok(fx:find('well ' .. W.well.id .. ' at 20,12,5 is 58 tiles off', 1, true) and fx:find('walk path', 1, true)
        and fx:find('bp sites cistern --near 70,70,5', 1, true), fx)
   T.ok(#fx <= 200, #fx)
+  T.ok(fx:find('--near 70,70,5 --within 80', 1, true), 'BUG-661: the cistern command reaches the nearest site, however far: ' .. fx)
+  local sd = M.src_dist(W.K, 70, 70, 5)                      -- BUG-661: the distance siege anchors its fix on
+  T.ok(sd and sd.d == 58 and sd.id == W.well.id, T.show(sd))
+  T.eq(M.src_dist(W.K, 20, 12, 5).d, 0)
 end)
 
 T.done()

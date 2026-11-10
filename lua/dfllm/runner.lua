@@ -2432,8 +2432,8 @@ function Q.aqx(K)
     block = function(P, why) set_blocked(K, P, why) end,
     next = function(P, d) stage_done(K, P, d, d.stages[P.stage + 1], R_of(K, P)) end,
     finish = function(P, d) finish(K, P, d) end,
-    plug = function(P, d, pos)
-      plug(K, P, d, 'heavy_aquifer', pos, 0)
+    plug = function(P, d, pos, why)
+      plug(K, P, d, why or 'heavy_aquifer', pos, 0)
       local r = S.rt.cav[P.id]
       return type(r) == 'table' and r.plug ~= '' and r.plug or nil
     end,
@@ -2445,6 +2445,10 @@ function Q.aqx(K)
     heavy_known = function(z, span) return Q.heavy_known(z, span) end,      -- BUG-414: a recorded heavy level near z
     aq_below = function(z) return Q.aq_below(z) end,                        -- BUG-490: every known aquifer level under z
     hv = function(z) Q.hv_level(K, z) end,                                  -- BUG-414: record z as a heavy level
+    -- BUG-662: a ring wall nobody built stopped the shaft: manifest breach `ring_wall` (bp sites aqshaft counts them, NOT a heavy level);
+    -- a ring wall that stood drops them all (the material exists)
+    ring_stop = function(P, pos) M.note_breach(K, P.id, P.tpl, 'ring_wall', pos) end,
+    ring_ok = function() Q.ring_ok(K) end,
     unreachable = function(P, d)               -- BUG-412: no citizen reaches the stage's dig (BUG-352's test)
       local ok, tl = pcall(Q.unreachable, K, P, d, S.rt.p[P.id])
       return ok and tl ~= nil
@@ -2543,6 +2547,16 @@ function M.aq_seen(K, z)
   for _, v in ipairs(type(S.rt.aql) == 'table' and S.rt.aql or {}) do if v == z then return false end end
   Q.aq_level(K, z)
   return true
+end
+
+-- BUG-662: the `ring_wall` breach records (an aqshaft whose ring wall nobody built) are dropped once any ring wall stands
+function Q.ring_ok(K)
+  if type(S.rt.dz) ~= 'table' then return end
+  local n = 0
+  for i = #S.rt.dz, 1, -1 do
+    if type(S.rt.dz[i]) == 'table' and S.rt.dz[i].why == 'ring_wall' then table.remove(S.rt.dz, i); n = n + 1 end
+  end
+  if n > 0 then M.publish_breaches(K); dirty() end
 end
 
 function M.hv_level(K, z) return Q.hv_level(K, z) end       -- BUG-490: tests / callers record a heavy level
@@ -3791,7 +3805,7 @@ end
 
 -- BUG-037: blocked for good (nothing in the kernel clears it: build_lost with its retries spent, a breach stop, quickfort
 -- failing, the document gone, the plug refused); parked once it stood park_days (pt: conf(K).park)
-Q.FINAL = {apply_fail = true, bp_missing = true, plug_refused = true, occupied = true}
+Q.FINAL = {apply_fail = true, bp_missing = true, plug_refused = true, occupied = true, ring_wall = true}   -- BUG-662: ring_wall
 function Q.terminal(P)
   local b = P.blocked
   if b:sub(1, 7) == 'breach:' or Q.FINAL[b] then return true end
@@ -6641,6 +6655,24 @@ function Q.slot_release(P, R, t, c)
   return ps ~= nil and t - ps >= c.release
 end
 
+-- BUG-664 (Run 16a i1 Basementflew y455-y463: 83 `project_released` decisions and a `stalled` PROJECT_BLOCKED every 60 d for two shafts, the
+-- same words and only the day count changed): an aqshaft's stalled / released announcement is made again only when its cause changed (the
+-- level's stall why, the block, the stage); R[key] is the record of the last one. true = it would repeat unchanged
+function Q.aq_repeat(K, P, R, key)
+  if P.tpl ~= 'aqshaft' or type(R) ~= 'table' then return false end
+  local d = doc(K, P.id)
+  local st = d and d.stages[P.stage + 1]
+  local ids = {P.id .. ':' .. (st and st.label or '')}
+  local toks = {P.blocked ~= '' and P.blocked or 'run', M.AQ.stall_key(S.rt, P.id)}
+  local T = K.now()
+  if CAD.due(R[key], T, ids, toks, {ticks = 0, wall_s = 0}) then
+    R[key] = CAD.mark(T, ids, toks)
+    dirty()
+    return false
+  end
+  return true
+end
+
 -- BUG-529: the DECISION that goes with the release (PEACE only, once, again every stall_every days while it stays so; R.rls = the last one)
 function Q.release_scan(K, c, t)
   if not c.release or c.release <= 0 or K.mode() ~= 'PEACE' then return end
@@ -6649,7 +6681,7 @@ function Q.release_scan(K, c, t)
     if P.tpl == 'aqshaft' and P.done ~= 1 and not halted(P) and type(R) == 'table' and M.AQ.holds(S.rt, P.id)
        and Q.slot_release(P, R, t, c) then
       local sn = int(R.rls)
-      if not sn or sn < int(R.ps) or t - sn >= c.runstall_every then
+      if (not sn or sn < int(R.ps) or t - sn >= c.runstall_every) and not Q.aq_repeat(K, P, R, 'rlc') then
         R.rls = t
         dirty()
         local d = doc(K, P.id)
@@ -6687,7 +6719,8 @@ function Q.stall_scan(K, c, t)
     local R = S.rt.p[P.id]
     local ps = type(R) == 'table' and R.si == P.stage and int(R.ps) or nil
     local sn = type(R) == 'table' and int(R.sks) or nil
-    if ps and P.done ~= 1 and not halted(P) and not Q.idle(P) and t - ps >= sd and (not sn or t - sn >= c.runstall_every) then
+    if ps and P.done ~= 1 and not halted(P) and not Q.idle(P) and t - ps >= sd and (not sn or t - sn >= c.runstall_every)
+       and not Q.aq_repeat(K, P, R, 'skc') then
       R.sks = t
       dirty()
       local d = doc(K, P.id)
