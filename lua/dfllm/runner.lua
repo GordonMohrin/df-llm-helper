@@ -5961,6 +5961,9 @@ Q.MANDATORY = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Still', 'Kitchen'}
 -- BUG-536 (Run 16d i4 Trumpetrealms: 'blocked: build_lost at build, missing D' for a depot, 16 retries, no reason): the name of a
 -- multi-tile building's key
 M.BIG_PIECE = {D = 'trade depot'}
+-- BUG-655 (Run 16a i1 Basementflew y442-y466: hospital 'build_lost at build, missing b x4' in six projects, nobody knew what b was): the
+-- furniture keys of a build stage by name. Doors, plots and walls keep their key (d, p, Cw): the older messages and tests read them.
+M.PIECE_WORD = {b = 'bed', h = 'chest', t = 'table', c = 'chair', R = 'traction bench'}
 
 -- the name of a piece: the manifest bridge whose footprint holds the cell (B1), a bridge's lever ('lever B1'),
 -- 'trap' for a trap key, else the key
@@ -5979,7 +5982,7 @@ local function piece_name(d, t, key)
   end
   if key:sub(1, 1) == 'T' and key ~= 'Tl' then return 'trap' end
   if key == 'Tl' then return 'lever' end
-  return M.BIG_PIECE[key] or key
+  return M.BIG_PIECE[key] or M.PIECE_WORD[key] or key
 end
 
 -- the pieces of the blocked build stage still missing: {'B1', 'lever B1 x2', 'trap x3'} (<= 8, first-seen order) and
@@ -6099,6 +6102,38 @@ function Q.mat_why(K, P, d)
     if n > 0 then far[#far + 1] = string.format('%d %s', n, k:gsub('_far$', '')) end
   end
   return trunc(table.concat(bad, '; ') .. (#far > 0 and ('; out of reach (another walk group): ' .. table.concat(far, ', ')) or ''), 160)
+end
+
+-- BUG-655 (Run 16a i1 Basementflew: the hospital's four beds 'missing b x4' for 8 retries in six projects, 283 logs in the fort, no order for
+-- them, no word why): per missing piece kind (bed, chest, table, ...) what its supply lacks, from economy.piece_supply ('bed x4: no
+-- ConstructBed order open, Carpenters cut off at ...'). Text (<= 160) and the command lines that fix it, or nil when every kind is
+-- supplied (an order is open and the shop stands: the wait is the shop's)
+function Q.supply_why(K, P, d)
+  local st = d and d.stages[P.stage + 1]
+  if not (st and st.mode == 'build') then return nil end
+  local need, order = {}, {}
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      local t = tl[1]
+      local kind = t and Q.KEY_KIND[t[4]]
+      if kind and not cell_present(K, t) then
+        if not need[kind] then need[kind] = 0; order[#order + 1] = kind end
+        need[kind] = need[kind] + 1
+      end
+    end
+  end
+  local parts, cmds = {}, {}
+  for _, kind in ipairs(order) do
+    local ok, txt, cmd = K.call('economy', 'piece_supply', kind, need[kind])
+    if ok and type(txt) == 'string' then
+      parts[#parts + 1] = txt
+      if type(cmd) == 'string' and #cmds < 3 then cmds[#cmds + 1] = cmd end
+    end
+  end
+  if #parts == 0 then return nil end
+  return trunc(table.concat(parts, '; '), 160), cmds
 end
 
 -- Run 11 (c1a147087d, build_lost before the door_walls fix): 'x,y,z' of a missing door of a blocked seal stage that the
@@ -6293,7 +6328,9 @@ local function blocked_event(K, P, t)
     dd.missing, dd.retry = miss, nr
     msg = msg .. ' at ' .. label .. (#miss > 0 and (', missing ' .. table.concat(miss, ', ')) or '')
     local _, mw = M.remake_why(K, P, d)      -- Run 11: why economy cannot make a seal's pieces
-    if not mw and P.tpl ~= 'seal' then mw = Q.mat_why(K, P, d) end     -- BUG-608: the same for a room (a hospital)
+    local sw, scmds
+    if P.tpl ~= 'seal' then sw, scmds = Q.supply_why(K, P, d) end       -- BUG-655
+    if not mw and P.tpl ~= 'seal' then mw = Q.mat_why(K, P, d) or sw end     -- BUG-608: the same for a room (a hospital)
     if mw then msg, dd.mat = msg .. ' (' .. mw .. ')', trunc(mw, 80) end
     local lw = Q.lost_why(K, P, d)           -- BUG-536: why the depot (a 5x5 building) was not placed
     if lw then msg, dd.parts = msg .. ': ' .. lw, trunc(lw, 200) end
@@ -6318,6 +6355,15 @@ local function blocked_event(K, P, t)
     end
   end
   K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), dd)
+  -- BUG-655: the retries are spent and a piece's supply is what lacks: the input is a DECISION with the fix, once (this branch is cadence-gated)
+  if final and P.blocked == 'build_lost' and P.tpl ~= 'seal' then
+    local sw, scmds = Q.supply_why(K, P, d)
+    if sw and scmds and #scmds > 0 then
+      local q = trunc(string.format('%s (%s) lost its pieces %d times: %s', P.id, P.tpl, nr, sw), 200)
+      K.log('warn', 'decision: %s: %s', q, table.concat(scmds, ' | '))
+      K.emit('DECISION_NEEDED', 'A', q, {id = 'piece_missing', q = q, n = nr, mat = trunc(sw, 40), cmds = scmds, why = 'supply'})
+    end
+  end
   dirty()
 end
 
@@ -6455,7 +6501,7 @@ function Q.lost_cancel(K, c, t)
       local label = trunc(st and st.label or '', 24)
       local miss = missing_pieces(K, P, d)
       local mw
-      if P.tpl == 'seal' then local _, w = M.remake_why(K, P, d); mw = w else mw = Q.mat_why(K, P, d) end
+      if P.tpl == 'seal' then local _, w = M.remake_why(K, P, d); mw = w else mw = Q.mat_why(K, P, d) or Q.supply_why(K, P, d) end
       local lw = Q.lost_why(K, P, d)
       local why = (#miss > 0 and ('missing ' .. table.concat(miss, ', ')) or 'pieces missing')
                   .. (mw and (' (' .. trunc(tostring(mw), 70) .. ')') or '') .. (lw and ('; ' .. trunc(lw, 70)) or '')
@@ -8034,6 +8080,7 @@ M.verbs = {
 M.bld_at, M.cls_of = Q.bld_at, Q.cls_of
 M.lost_why, M.all_boxed, M.boxed_cancel = Q.lost_why, Q.all_boxed, Q.boxed_cancel     -- BUG-536 / BUG-538 (tests)
 M.mat_why, M.depot_fallback = Q.mat_why, Q.depot_fallback          -- BUG-608 / BUG-612 (tests)
+M.supply_why = Q.supply_why                                         -- BUG-655 (tests)
 
 -- BUG-479 review (seal's plug_lift): the state of a project by id, nil when the runner has no such project (lost), else
 -- {done = bool}

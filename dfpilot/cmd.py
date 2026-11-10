@@ -1890,6 +1890,16 @@ def _on_state(save_dir: Path, pid: str) -> bool:
     return any(isinstance(r, list) and r and r[0] == pid for r in (files.read_state(save_dir) or {}).get("proj") or [])
 
 
+def rebuild_free(save_dir: Path, tpl: str, params: dict | None, hit: list[str]) -> list[str]:
+    """BUG-656 (Run 16a i1 Basementflew y464: `bp.place workshops only=Kitchen rebuild=1` was refused 'taken [78,100,131] by c1a1ab437a0e153311
+    (workshops finished)' for the surface kitchen that manifest.gone lists, and the kernel's own hint (BUG-562) sends the player to exactly that
+    command): a rebuild digs nothing, it puts ONE shop back where it stood, so a project that is FINISHED (PROJECT_DONE, no row in the kernel's
+    state) holds nothing back: its room is dug already and the shop is the gap in it. A project still under way keeps its tiles."""
+    if tpl != "workshops" or not (params or {}).get("rebuild"):
+        return hit
+    return [h for h in hit if not (_finished_event(save_dir, h) and not _on_state(save_dir, h))]
+
+
 def _planned_only(save_dir: Path, pid: str, tpl: str) -> bool:
     """BUG-456: project `pid` is a `tpl` project the kernel has no state row for (not begun, or beyond the first 8 rows) and whose
     first stage shows no progress."""
@@ -2407,7 +2417,8 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
         st = params.get("stage") if isinstance(params, dict) else None
         own = tpl if isinstance(st, int) and not isinstance(st, bool) and st >= 2 \
             and stage_anchor(save_dir, tpl, [x, y, z]) else None
-        hit = occ.clash(doc, cells=footprint(doc) - occ.own_cells(tpl, doc["anchor"]) if own else None, ignore_tpl=own)
+        hit = rebuild_free(save_dir, tpl, params, occ.clash(doc, cells=footprint(doc) - occ.own_cells(tpl, doc["anchor"]) if own else None,
+                                                            ignore_tpl=own))                # BUG-656
         if hit:
             raise BpError(f"{tpl}{label} overlaps project(s) {', '.join(hit[:4])}")
         return doc
@@ -2445,7 +2456,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
             except BpError as e:
                 bad.append(f"{s.get('anchor')}: {e}")
                 continue
-            hit = occ.clash(doc)
+            hit = rebuild_free(save_dir, tpl, params, occ.clash(doc))        # BUG-656
             if hit:
                 taken.append(f"{s.get('anchor')}~{hit[0]}")
                 continue

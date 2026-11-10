@@ -1353,6 +1353,12 @@ local function facts(K, p)
       if n and built(b) then f['furnace:' .. n] = true end
     end
   end)
+  -- BUG-654: a workshop type whose every shop stands off the citizens' walk groups (M.cut_scan, confirmed) is no workshop: its jobs
+  -- sit at a shop nobody walks to; f['cut:<Type>'] says why the type is missing
+  local cw = type(p) == 'table' and type(p.cutws) == 'table' and p.cutws or nil
+  for t in pairs(cw or {}) do
+    if f['workshop:' .. t] then f['workshop:' .. t], f['cut:' .. t] = nil, true end
+  end
   return f
 end
 
@@ -6647,6 +6653,8 @@ function T.kitchen(K, c, r) pcall(kitchen, K, c, r.days.food_d) end
 function T.appoint(K, c, r) M.appoint_vacant(K) end
 function T.food(K, c, r) if r.day then food_plan(K, c, r) end end
 function T.watch(K, c, r)
+  local okc, errc = pcall(M.cut_scan, K, c, r)     -- BUG-654: first, the shop facts below read p.cutws
+  if not okc then K.log('warn', 'cut-off shop scan failed: %s', tostring(errc)) end
   M.no_water(K, c, r)                              -- BUG-401: first, alarm_check and drink_low read st.nowater
   validation_watch(K, r.p, c)
   alarm_check(K, c, r.p, r.days)
@@ -7632,6 +7640,47 @@ function M.mat_for(K, kind, n)
   local e = M.PIECE_KIND[kind]
   if not e then return nil, 'unknown piece ' .. tostring(kind) end
   return M.piece_route(c, r, e, n)
+end
+
+-- BUG-655 (Run 16a i1 Basementflew y442-y466: the hospital stage lost its four beds ('missing b x4') in six projects, 283 logs in the
+-- fort, mat_for said 'wood', and no ConstructBed order ever stood: the pieces are not planned buildings, so nothing waited for a bed
+-- item and T.jmake made no order): what the supply of n pieces of `kind` lacks, from the orders and the shops the kernel sees now.
+-- Returns text, command line, code: no_shop (no workshop of the kind stands), cut (it stands, no citizen can walk to it), no_logs, no_order
+-- (nothing makes the pieces: order.add), ordered (an order stands: the shop has not made them), item (free ones stand). nil, unknown kind.
+function M.piece_supply(K, kind, n)
+  local e = M.PIECE_KIND[kind]
+  n = math.max(1, math.tointeger(n) or 1)
+  if not e or not K.census.i then return nil end
+  local c, r = M.conf(K), M.view_run(K)
+  local inv, f, p = r.inv or {}, r.f or {}, r.p or {}
+  local jt, open = df.job_type[e.job], 0
+  for _, o in ipairs(orders_all()) do
+    if jt ~= nil and o.job_type == jt then open = open + (math.tointeger(o.amount_left) or 0) end
+  end
+  local logs = math.tointeger(inv.wood) or 0
+  local shops = e.wood and {'Carpenters'} or {'Carpenters', 'Masons'}
+  local stands, cutl = false, nil
+  for _, t in ipairs(shops) do
+    if f['workshop:' .. t] then stands = true end
+    if f['cut:' .. t] then cutl = cutl or M.cut_text(p, t) end
+  end
+  local head = string.format('%s x%d: %s x%d open', e.kind, n, e.job, open)
+  local free = e.inv and (math.tointeger(inv[e.inv]) or 0) or 0
+  if free >= n then return head .. string.format(', %d free in stock: the planned pieces take them', free), nil, 'item' end
+  local function order_cmd(k) return string.format([[dfllm cmd order.add '{"job":"%s","amount":%d}']], e.job, k) end
+  local ws_cmd = string.format([[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"%s"}}']], shops[1])
+  if not stands then
+    if cutl then return head .. ', ' .. shops[1] .. ' cut off (' .. cutl .. '): a new one is asked for', ws_cmd, 'cut' end
+    return head .. ', no ' .. shops[1] .. (e.wood and '' or ' or Masons') .. ' workshop stands', ws_cmd, 'no_shop'
+  end
+  if e.wood and logs < n then
+    return head .. string.format(', %s stands, logs %d < %d: no wood to make them', shops[1], logs, n),
+           [[dfllm cmd trade.want '{"add":["wood"]}']], 'no_logs'
+  end
+  if open < n then
+    return head .. string.format(', %s stands, logs %d: nothing makes the missing %d', shops[1], logs, n - open), order_cmd(n - open), 'no_order'
+  end
+  return head .. ', ' .. shops[1] .. ' stands: not made yet (dfllm cmd inspect orders)', nil, 'ordered'
 end
 
 -- BUG-443 (Run 16c i3 Castletongs: an aqshaft ring on a heavy level hung 60 % for a year in very deep soil, 74 of 181 orders stuck,
@@ -9687,8 +9736,10 @@ function M.food_block(K, c, r, inv)
     auto[#auto + 1] = {'crew', string.format('food crew %d (%s)', fcw.n, tostring(fcw.text or ''))}
   end
   if not ws_any(f, {'workshop:Kitchen'}) then
-    if M.shop_asked(r.p, 'Kitchen') then auto[#auto + 1] = {'kitchen', 'Kitchen requested'}      -- BUG-618: the kernel asks itself
-    else put('kitchen', 'no kitchen', M.FOOD_CMD.kitchen) end
+    local cut = f['cut:Kitchen'] and M.cut_text(r.p, 'Kitchen') or nil      -- BUG-654: it stands, nobody can walk to it
+    if M.shop_asked(r.p, 'Kitchen') or M.shop_asked(r.p, 'Kitchen', 'cut') then
+      auto[#auto + 1] = {'kitchen', cut and ('new Kitchen requested, the old one is cut off: ' .. cut) or 'Kitchen requested'}      -- BUG-618: the kernel asks itself
+    else put('kitchen', cut and ('Kitchen cut off: ' .. cut) or 'no kitchen', M.FOOD_CMD.kitchen) end
   elseif M.cook_n(inv) <= 0 then put('cook', 'no ' .. M.cook_why(inv, f))
   elseif not M.labor_holder(K, 'COOK') then put('cook', 'nobody holds the COOK labor') end
   -- BUG-258 (live Inkintense: block [cook, fish_zone, hunt, farms] in a fort without a brook, 175 bolts and no
@@ -9793,7 +9844,8 @@ function M.hungry_warn(K, c, r)
   K.log('warn', 'food %d days but %d citizens hungry and no prepared meal: raw plants and seeds are not cooked (%d cook ' ..
         'ingredients%s, kitchen %s, COOK labor %s)', fd, n, M.cook_n(inv),
         t and string.format(', %d cook-banned: %s', inv.cook_ban, tostring(t[1])) or '',
-        ws_any(M.facts_now(K, r), {'workshop:Kitchen'}) and 'built' or 'missing',
+        ws_any(M.facts_now(K, r), {'workshop:Kitchen'}) and 'built' or
+          (M.facts_now(K, r)['cut:Kitchen'] and 'cut off (' .. tostring(M.cut_text(r.p, 'Kitchen')) .. ')' or 'missing'),
         M.labor_holder(K, 'COOK') and 'held' or 'on nobody')
 end
 
@@ -9936,6 +9988,154 @@ function M.cook_labor(K)
   if not ok then return 'none' end
   K.log('warn', 'Cooking labor on for unit %d: a kitchen stands, cook ingredients lie there, no meal and nobody had the labor', cands[1].id)
   return 'set', cands[1].id
+end
+
+-- BUG-654 (Run 16a i1 Basementflew y459-y466: meals 0 for years beside 3,323 food days, `inspect workload` 'unreachable PrepareMeal x1'
+-- (and ConstructChest, ConstructMechanisms): the fort's only Kitchen, Carpenters, Masons and Mechanics stood in the flooded level z117, on
+-- a walk group no citizen is on; every fact here said 'workshop:Kitchen' = true, so cook_watch switched labors and remade orders, the food
+-- decision said 'raw food is not cooked', nothing asked for a second kitchen; the manager gives a shop one job at a time, so the cut-off
+-- Carpenters held the chest and the four hospital beds behind it): a workshop type whose EVERY built shop has no walkable tile on a
+-- citizens' walk group round it (M.shop_reach, the ring of tiles a worker stands on) for CUT.days days in PEACE is cut off
+-- (p.cutws[Type] = {t, at, grp, home, n}); facts() then counts the type as missing (f['cut:Type']), so the shop requests, the stall
+-- reports and the piece routes treat it as missing. M.cut_scan (daily): ORDER_STUCK (B, kind workshop) once, and PROJECT_REQUEST
+-- workshops why=cut (M.ws_ask, paced) for the types M.WS_PLACE can place: follow places a new one on the citizens' walk group.
+-- A shop is judged by tiles: all ring tiles hidden, unwalkable or unread (a fully walled shop) is unknown, never cut.
+M.CUT = {days = 3, max_pts = 1500, citizens = 150}
+
+function M.shop_ring(b)
+  local x1, x2, y1, y2, z = math.tointeger(b.x1), math.tointeger(b.x2), math.tointeger(b.y1), math.tointeger(b.y2), math.tointeger(b.z)
+  if not (x1 and x2 and y1 and y2 and z) then return nil end
+  local pts = {}
+  for x = x1 - 1, x2 + 1 do
+    for y = y1 - 1, y2 + 1 do
+      if x < x1 or x > x2 or y < y1 or y > y2 then pts[#pts + 1] = {x, y, z} end
+    end
+  end
+  return pts, {x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2, z}
+end
+
+-- {Type = {n shops, ok (on a citizens' walk group), cutn (off them), cut = {at, grp}}}, the sorted home group ids; nil when the walk
+-- groups cannot be read (no snapshot module, no citizen)
+function M.shop_reach(K)
+  local cpts = {}
+  for _, id in ipairs((K.census.u or {}).ids or {}) do
+    if #cpts >= M.CUT.citizens then break end
+    local u = df.unit.find(id)
+    local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+    if u and okp and math.tointeger(x) then cpts[#cpts + 1] = {x, y, z} end
+  end
+  if #cpts == 0 then return nil end
+  local okc, cg = K.call('snapshot', 'groups', cpts, false)
+  if not (okc and type(cg) == 'table') then return nil end
+  local home = M.home_groups(K, cg)
+  if next(home) == nil then return nil end
+  local pts, owner, shops = {}, {}, {}
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local n = df.workshop_type[b.type]
+      if n and built(b) then
+        local ring, mid = M.shop_ring(b)
+        if ring then
+          local s = {type = n, at = mid}
+          shops[#shops + 1] = s
+          for _, pt in ipairs(ring) do
+            if #pts < M.CUT.max_pts then pts[#pts + 1] = pt; owner[#pts] = s end
+          end
+        end
+      end
+    end
+  end)
+  if #pts == 0 then return {}, {} end
+  local okj, jg = K.call('snapshot', 'groups', pts, false)
+  if not (okj and type(jg) == 'table') then return nil end
+  for k = 1, #pts do
+    local s, g = owner[k], math.tointeger(jg[k]) or -1
+    if g > 0 then
+      if home[g] then s.ok = true elseif not s.seen then s.seen = g end
+    end
+  end
+  local by = {}
+  for _, s in ipairs(shops) do
+    local e = by[s.type]
+    if not e then e = {n = 0, ok = 0, cutn = 0}; by[s.type] = e end
+    e.n = e.n + 1
+    if s.ok then e.ok = e.ok + 1
+    elseif s.seen then
+      e.cutn = e.cutn + 1
+      e.cut = e.cut or {at = s.at, grp = s.seen}
+    end
+  end
+  local hg = {}
+  for g in pairs(home) do hg[#hg + 1] = g end
+  table.sort(hg)
+  return by, hg
+end
+
+-- the cut-off types the kernel may ask a new shop of: {Type, ...} sorted
+function M.cut_types(p)
+  local out = {}
+  for t in pairs(type(p.cutws) == 'table' and p.cutws or {}) do
+    if M.WS_PLACE[t] then out[#out + 1] = t end
+  end
+  table.sort(out)
+  return out
+end
+
+-- 'Kitchen at 29,112,117 (walk group 4, the citizens on 7)' for a confirmed cut-off type, else nil
+function M.cut_text(p, t)
+  local rec = type(p.cutws) == 'table' and p.cutws[t] or nil
+  if type(rec) ~= 'table' then return nil end
+  local at = type(rec.at) == 'table' and rec.at or {}
+  return string.format('%s at %s,%s,%s (walk group %s, the citizens on %s)', t, tostring(at[1]), tostring(at[2]), tostring(at[3]),
+                       tostring(rec.grp), tostring(rec.home))
+end
+
+function M.cut_scan(K, c, r)
+  if not r.day or K.mode() ~= 'PEACE' then return end      -- a lockdown or a raised bridge splits the walk groups for a while
+  local p, now = r.p, r.now
+  local by, hg = M.shop_reach(K)
+  if not by then return end
+  local seen = type(p.cutseen) == 'table' and p.cutseen or {}
+  local conf = type(p.cutws) == 'table' and p.cutws or {}
+  local changed, fresh = false, {}
+  for t, e in pairs(by) do
+    if e.ok == 0 and e.cutn == e.n and e.cut then
+      local s = seen[t]
+      if type(s) ~= 'table' then
+        s = {t = now, at = e.cut.at, grp = e.cut.grp}
+        seen[t], changed = s, true
+      end
+      if not conf[t] and now - (math.tointeger(s.t) or now) >= M.CUT.days * DAY then
+        conf[t] = {t = now, at = s.at, grp = s.grp, home = hg[1], n = e.n}
+        fresh[#fresh + 1] = t
+        changed = true
+      end
+    elseif seen[t] or conf[t] then
+      seen[t], conf[t], changed = nil, nil, true             -- a shop of the type is on the citizens' walk group again
+    end
+  end
+  for t in pairs(conf) do
+    if not by[t] then conf[t], seen[t], changed = nil, nil, true end    -- no shop of the type stands any more: plainly missing
+  end
+  if changed then
+    p.cutseen, p.cutws = next(seen) and seen or nil, next(conf) and conf or nil
+    K.persist.touch('m.economy')
+    r.f = facts(K, p)
+  end
+  table.sort(fresh)
+  for _, t in ipairs(fresh) do
+    local msg = string.format('workshop %s: no way for the citizens (%d shop%s), counted as missing: a new one is asked for',
+                              M.cut_text(p, t), by[t].n, by[t].n == 1 and '' or 's')
+    K.log('warn', '%s', msg)
+    K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = t, n = by[t].n, why = msg:sub(1, 100), kind = 'workshop'})
+  end
+  local want = M.cut_types(p)
+  if #want == 0 then
+    if type(p.wsask) == 'table' then p.wsask.cut = nil end
+    return
+  end
+  M.ws_ask(K, p, 'cut', want, (c.food or {}).request_days or 14,
+           'workshops: cut off from the citizens (' .. (M.cut_text(p, want[1]) or want[1]) .. ')')
 end
 
 -- BUG-629 (see M.cook_labor): the stall watch (daily, T.watch). Stalled = the kitchen stands, the cook ingredients reach the planner's floor and
@@ -13620,6 +13820,17 @@ M.inspect.workload = function(K, args)
   -- BUG-037 (Run 11 y449: '15 without reachable work, 0 unclaimed jobs' while six projects stood queued for months): the
   -- runner's queue is named as the reason ('runner: 6 projects queued behind 3 slot holders without progress (...)')
   data.runner = rd
+  -- BUG-654: workshop types no citizen can walk to (p.cutws, M.cut_scan) and the jobs posted at them: the reason of an 'unreachable
+  -- PrepareMeal' (a Kitchen in a flooded level), not only the count
+  local pc, cut_l, cut_t = pstate(K), {}, {}
+  for _, t in ipairs(M.cut_types(pc)) do
+    local rec = pc.cutws[t]
+    cut_l[#cut_l + 1] = {type = t, at = rec.at, grp = rec.grp, home = rec.home, n = rec.n,
+                         days = math.max(0, (K.now().tick - (math.tointeger(rec.t) or K.now().tick)) // DAY)}
+    cut_t[#cut_t + 1] = M.cut_text(pc, t)
+  end
+  data.shops_cut = json.array(cut_l)
+  local cut_s = #cut_t > 0 and ('workshops cut off: ' .. table.concat(cut_t, '; ')) or nil
   -- the clause names the classes that are not zero (the reply is cut at 300 bytes; all numbers are in data.idle_why)
   local CL = {rest = 'rest', hurt = 'hurt', mood = 'mood', held = 'held by the kernel', nolabor = 'no labor holder',
               noreach = 'no reachable work', nowork = 'no work', free = 'free'}
@@ -13640,7 +13851,7 @@ M.inspect.workload = function(K, args)
   if sold_n > 0 then parts[#parts + 1] = string.format('%d soldiers not counted', sold_n) end
   return true, string.format('%d of %d adults without a job (%s), %d unclaimed jobs, %d unreachable', #idle, adults,
                              #parts > 0 and table.concat(parts, ', ') or 'none', n_open, n_far)
-                .. (rq and ('; ' .. rq) or ''), data
+                .. (cut_s and ('; ' .. cut_s) or '') .. (rq and ('; ' .. rq) or ''), data
 end
 
 return M
