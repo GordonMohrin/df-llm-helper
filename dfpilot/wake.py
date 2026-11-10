@@ -1372,7 +1372,6 @@ class Follower:
         except Exception as ex:                        # noqa: BLE001 - the plan check must never stop the follower
             self._fail("minimal plan", f"{type(ex).__name__}: {ex}", now)
 
-<<<<<<< HEAD
     def _check_ceiling(self, now: float) -> None:
         """BUG-680 (Run 16d i4 Trumpetrealms y447: the plan's pop ceiling 31 'held: defence short, armor worn 10 %' stayed a year after worn
         rose to 57 %, 'migrants blocked'): in PEACE the applied plan's HELD ceiling is compared with the defence gaps of now and raised
@@ -1388,7 +1387,7 @@ class Follower:
                                          "(the defence gaps that held it are closed or soft now)", now)
         except Exception as ex:                        # noqa: BLE001 - the ceiling look must never stop the follower
             self._fail("held ceiling", f"{type(ex).__name__}: {ex}", now)
-=======
+
     def _check_perimeter(self, now: float) -> None:
         """BUG-686 (Run 16a i1 Basementflew z131, 16d i4 Trumpetrealms y450-y454: ten ways in on the surface rim in five years, every one
         closed by hand with `seal at=last` two to four weeks after it opened, `plan check` refusing P5 and the pop ceiling held by
@@ -1420,7 +1419,6 @@ class Follower:
                               f"the entrance check names {len(ents)} way(s) in without a door ({at[:120]}): placing the seal at=ents")
         except Exception as ex:                        # noqa: BLE001 - the perimeter check must never stop the follower
             self._fail("perimeter seal", f"{type(ex).__name__}: {ex}", now)
->>>>>>> fix44-perim
 
     def _check_stale(self, now: float) -> None:
         """BUG-435 (Run 16d i4 Mazelanterns y401: traps 912 d, tombs 461 d 'waits for trapparts', fortcore 341 d, nine projects set aside
