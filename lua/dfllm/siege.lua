@@ -269,6 +269,11 @@ end
 -- reads STRAND_CONFIRM ticks apart (a game day) find him off the stock, and a citizen on a job that takes him outside
 -- (seal.trip: gathering, hunting, fishing, felling) is on a trip, not stranded (kern.log names him, once per set)
 M.STRAND_THIRST, M.STRAND_HUNGER, M.STRAND_CONFIRM = 25000, 50000, 1200
+-- BUG-646 (Run 16c i3 Wallfree y390-y391: 228 STRANDED 'no raised bridge leads to drink' for citizens walking outside at thirst
+-- ~26,300 that drank at the cavern lake zone 17718, 0 dead in two years): a thirst that FELL by DRANK_DROP between two reads is
+-- a drink taken outside the walk group's stock - proof that this citizen reaches drink. Such a citizen below STRAND_DRINK_HARD
+-- (a quarter day short of DF's 'Dehydrated' line) is no stranded citizen; a thirst past it, or one that never fell, still is.
+M.DRANK_DROP, M.DRANK_KEEP, M.STRAND_DRINK_HARD = 3000, 403200, 40000
 M.RESCUE_EVERY, M.RESCUE_MAX = 100, 2400
 M.CUT_NEAR, M.SEALED_HOLD, M.SPLIT_WAIT = 30, 600, 300
 local CAD = require('dfllm.util.cadence')
@@ -355,6 +360,7 @@ local function cut_off(K, G)
   local by = {}
   local now = K.now().tick
   local seen, was, trip = {}, type(mem.str_seen) == 'table' and mem.str_seen or {}, {}
+  local drank = type(mem.str_drank) == 'table' and mem.str_drank or {}
   for gid, list in pairs(G.cit) do
     for _, c in ipairs(list) do
       local u = df.unit.find(c[1])
@@ -363,6 +369,10 @@ local function cut_off(K, G)
         th, hu = counter(u, 'thirst_timer'), counter(u, 'hunger_timer')
         nd = th > M.STRAND_THIRST and not G.drink[gid]
         nf = hu > M.STRAND_HUNGER and not G.food[gid]
+        if nd and not nf and drank[c[1]] and th <= M.STRAND_DRINK_HARD then
+          trip[#trip + 1] = c[1] .. ':drinks outside'
+          nd = false
+        end
       end
       if nd or nf then                                     -- BUG-278: a trip job, then the second read a day later
         local ok, j = K.call('seal', 'trip', c[1])
@@ -704,13 +714,23 @@ local function rescue_step(K, a, g, now)
   -- a new one: only when somebody is over a threshold (the counters are cheap; seal's group reads are not)
   local cu = K.census.u
   local any = false
+  -- BUG-646: every step reads the thirst of each citizen (cheap) so that a drink taken outside is seen: a thirst that fell by
+  -- DRANK_DROP since the last read is a drink he reached; `str_drank[id]` = the tick, kept DRANK_KEEP ticks
+  local th_was = type(mem.str_th) == 'table' and mem.str_th or {}
+  local th_now, drank = {}, {}
+  for id, t in pairs(type(mem.str_drank) == 'table' and mem.str_drank or {}) do
+    if now - t < M.DRANK_KEEP then drank[id] = t end
+  end
   for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
     local u = df.unit.find(id)
-    if u and (counter(u, 'thirst_timer') > M.STRAND_THIRST or counter(u, 'hunger_timer') > M.STRAND_HUNGER) then
-      any = true
-      break
+    if u then
+      local th = counter(u, 'thirst_timer')
+      th_now[id] = th
+      if th_was[id] and th_was[id] - th >= M.DRANK_DROP then drank[id] = now end
+      if th > M.STRAND_THIRST or counter(u, 'hunger_timer') > M.STRAND_HUNGER then any = true end
     end
   end
+  mem.str_th, mem.str_drank = th_now, drank
   if not any then mem.str_seen, mem.dry = nil, nil; return end   -- BUG-278: nobody over a mark: the next one starts afresh
   local G = groups(K)
   if not G then return end

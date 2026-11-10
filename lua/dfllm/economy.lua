@@ -8102,11 +8102,72 @@ function M.hard_diag(inv)
           cause = usable == 0 and 'none' or 'denied'}
 end
 
+-- BUG-648 (Run 16c i3 Wallfree y384-y386: Masons 8-11 shops, 0 jobs, doors / tables / chests / thrones waiting 24-44 days beside 350
+-- blocks and 37-53 boulders, DF cancelling "Needs non-economic hard stone boulders"; the rock there was CLAYSTONE, 16d i4 MUDSTONE):
+-- the stone-use screen (plotinfo.economic_stone[mat_index]) keeps a plain building stone out of furniture while it is marked economic.
+-- A free boulder material that is hard (ITEMS_HARD), no ore and no flux and marked economic is cleared to 0 (gui/advfort.lua does the
+-- same write: the player's own stone-use setting, no memory trick); soft stone (no ITEMS_HARD) is DF's own refusal and stays out. The
+-- material cache is dropped so the census counts the stone usable at its next read, and the denial memory goes with it.
+-- Returns the list of {tok, n} cleared and the list of every free boulder material {tok, n, hard, econ, ore, flux} (for the log).
+function M.stone_unmark(K)
+  local mats, order = {}, {}
+  pcall(function()
+    local v = df.global.world.items.other.BOULDER
+    for i = 0, #v - 1 do
+      local it = v[i]
+      local f = it and it.flags
+      if f and not f.removed and not f.garbage_collect and not f.trader and not f.in_job and it.mat_type == 0 then
+        local m = mats[it.mat_index]
+        if not m then m = {idx = it.mat_index, n = 0}; mats[it.mat_index] = m; order[#order + 1] = m end
+        m.n = m.n + 1
+      end
+    end
+  end)
+  local cleared, seen = {}, {}
+  for _, m in ipairs(order) do
+    orec[m.idx] = nil                                        -- read the raws and the stone-use flag afresh
+    local o = ore_of(m.idx)
+    m.tok, m.econ, m.hard = o.token or ('mat ' .. tostring(m.idx)), o.econ == true, o.soft ~= true
+    m.ore, m.flux = o.metals ~= nil, o.flux == true
+    seen[#seen + 1] = {tok = m.tok, n = m.n, hard = m.hard, econ = m.econ, ore = m.ore, flux = m.flux}
+    if m.econ and m.hard and not m.ore and not m.flux then
+      local ok, done = pcall(K.act.stone_economic, m.idx, false)
+      if ok and done then
+        orec[m.idx] = nil
+        cleared[#cleared + 1] = {tok = m.tok, n = m.n}
+      end
+    end
+  end
+  return cleared, seen
+end
+
 function M.hard_report(K, c, r, cancels)
   local p = r.p
   local d = M.hard_diag(r.inv)
   if (cancels or 0) == 0 and d.usable > 0 then return end        -- the census alone: usable boulders may be the moods' floor
   local now = K.now()
+  -- BUG-648: building stone marked economic is cleared (the player's stone-use setting), soft stone and ore stay; the masons take it
+  -- at the next census; what the free boulders are is in kern.log
+  local okc, cleared, seen = pcall(M.stone_unmark, K)
+  if okc and type(seen) == 'table' and #seen > 0 then
+    local parts = {}
+    for i, m in ipairs(seen) do
+      if i <= 6 then
+        parts[#parts + 1] = string.format('%s x%d (%s%s%s%s)', m.tok, m.n, m.hard and 'hard' or 'soft', m.econ and ', economic' or '',
+                                          m.ore and ', ore' or '', m.flux and ', flux' or '')
+      end
+    end
+    K.log('warn', 'economy: free boulders by material: %s', table.concat(parts, '; '))
+  end
+  if okc and type(cleared) == 'table' and #cleared > 0 then
+    local names, n = {}, 0
+    for _, m in ipairs(cleared) do names[#names + 1] = m.tok; n = n + m.n end
+    st.hard = nil
+    K.log('warn', 'economy: %s marked economic (stone-use screen) kept %d boulders from doors, tables and chests ("Needs ' ..
+          'non-economic hard stone"): the mark is cleared, the Masons take it again', table.concat(names, ', '), n)
+    K.persist.touch('m.economy')
+    return
+  end
   local sticky = type(st.hard) == 'table' and (math.tointeger(st.hard.eps) or 1) >= M.HARD.sticky
   if sticky and p.hard_ann_eps == M.HARD.sticky then return end        -- BUG-610: reported once, then quiet until boulders come
   if not (CAD.due(p.hard_ann, now, {}, {d.cause}, {ticks = M.HARD.repeat_days * DAY, wall_s = CAD.WALL_S}) or CAD.elapsed(p.hard_ann, now, M.HARD.repeat_days * DAY, CAD.WALL_S)) then return end

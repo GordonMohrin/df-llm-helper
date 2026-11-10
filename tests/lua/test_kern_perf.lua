@@ -164,4 +164,26 @@ T.test('frame gap caused by our own module is blamed on it', function()
   T.ok(H.read(W.sd .. '/kern.log'):find('frame gap 40%d%d ms %(blame economy%)'), 'blamed on economy')
 end)
 
+-- BUG-645 (Run 16, all four instances: 'frame freeze 35186xxx ms (not ours, cause unknown)' after the PC slept ~10 h)
+T.test('BUG-645: a 10 h gap is the host asleep: PERF_DEGRADED why=sleep, no freeze, no tps collapse, no quiet window', function()
+  local W = H.world{tag = 'sleep'}
+  perf.ROW_MS = 3000
+  H.boot(W, {modules = {perf}})
+  H.run(W, 400)
+  H.frame(W, 1, 35186000)
+  H.run(W, 800)
+  perf.ROW_MS = 30000
+  H.inbox(W, 'p1', 'inspect', {what = 'perf'})
+  H.run(W, 80)
+  local d = H.outbox(W, 'p1').data
+  kern.stop()
+  local pd = H.find(H.events(W), 'PERF_DEGRADED')
+  T.eq(#pd, 1)
+  T.eq({pd[1].d.why, pd[1].d.cause}, {'sleep', 'sleep'})
+  T.ok(pd[1].msg:find('host slept ~586 min', 1, true), pd[1].msg)
+  T.ok(not pd[1].msg:find('freeze', 1, true), pd[1].msg)
+  T.ok(H.read(W.sd .. '/kern.log'):find('(blame sleep)', 1, true))
+  T.eq(d.quiet_s, 0)
+end)
+
 T.done()

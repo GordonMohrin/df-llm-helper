@@ -251,6 +251,12 @@ T.test('economy actions: orders import/sort, workorder tag and id, kitchen exclu
   T.eq({env.api.kitchen_include('PLANT', -1, 420, 0, 'Cook')}, {true, 'removed'}, 'BUG-345')
   T.eq({env.api.kitchen_include('PLANT', -1, 420, 0, 'Cook')}, {true, 'absent'})
   T.eq((env.api.kitchen_include('PLANT', -1, 420, 0, 'Eat')), false)
+  df.global.plotinfo.economic_stone = {[7] = 1, [8] = 0}                  -- BUG-648: the stone-use screen's economic mark
+  T.eq({env.api.stone_economic(7, false)}, {true, 'cleared'})
+  T.eq(df.global.plotinfo.economic_stone[7], 0)
+  T.eq({env.api.stone_economic(7, false)}, {true, 'unchanged'})
+  T.eq({env.api.stone_economic(8, true)}, {true, 'marked'})
+  T.eq((env.api.stone_economic(-1, false)), false)
   T.eq((env.api.order_suspend(1, true)), false, 'no verified suspend flag')
   local cmds = {}
   for _, c in ipairs(W.commands) do cmds[#cmds + 1] = table.concat(c, ' ', 1, math.min(c.n, 3)) end

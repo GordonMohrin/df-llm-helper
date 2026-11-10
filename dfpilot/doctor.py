@@ -126,7 +126,7 @@ def gap_problems(s: dict) -> list[str]:
     """BUG-070: what is the kernel's to fix. Gaps ours (a module) or unknown (external, or an older kernel's rows without
     a cause) are a problem; DF's own save freeze only past SAVE_FREEZE_BAD_MS (the target is 15 s, DESIGN §10)."""
     by = s.get("gap_by", [])
-    ours = [(c, n, ms) for c, n, ms in by if c not in ("save", "external")]
+    ours = [(c, n, ms) for c, n, ms in by if c not in ("save", "external", "sleep")]   # BUG-645: `sleep` = the host slept
     ext = sum(n for c, n, _ in by if c == "external") + s.get("gap_unattributed", 0)
     out = []
     if ours or ext:

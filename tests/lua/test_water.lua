@@ -796,8 +796,8 @@ T.test('BUG-040 (Run 11 y453: the cisterns y450s0b0 and y452s1b0 were PROJECT_DO
        {'y450s0b0', 'cistern50_50_2r0', 'pond', 77, wid, 30})
   T.eq(e[1].d.pos, {50, 53, 2})
   local want = string.format('cistern y450s0b0 done, its well %d at 50,53,2 dry for 30 days: bucket-fed (pond zone ' ..
-                             '77); no accepted water to carry from (no revealed water source); no drink for a ' ..
-                             'hospital or the refuge', wid)
+                             '77); no free bucket in the fort (MakeBucket needs wood); no accepted water to carry from ' ..
+                             '(no revealed water source)', wid)       -- BUG-647: no free bucket in this world; the tail no longer fits 200 chars
   T.eq(e[1].msg, want)
   T.ok(logged(W, 'water: ' .. want), 'kern.log')
   day(W, 40)

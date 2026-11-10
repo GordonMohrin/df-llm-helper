@@ -221,4 +221,27 @@ T.test('BUG-277 (review): one citizen cut off long since (CUTOFF told), a second
   T.ok(logged(W, 'on a job outside (2:GatherPlants)'), 'kern.log')
 end)
 
+---------------------------------------------------------------- BUG-646: a citizen who drinks outside
+-- Run 16c i3 Wallfree y390-y391: 228 STRANDED for citizens at thirst ~26,300 walking outside and drinking at the cavern lake
+T.test('BUG-646: thirst 26000 outside, but his thirst fell before (he drank): no STRANDED; a thirst past 40,000 still is', function()
+  local W = outside(0, 30000)
+  run(W, 100)
+  W.unit(11).counters2 = {thirst_timer = 200, hunger_timer = 0}       -- he drank at the lake
+  run(W, 100)
+  W.unit(11).counters2 = {thirst_timer = 26000, hunger_timer = 0}     -- and is thirsty again, a day on
+  run(W, 4000)
+  T.eq(#evs(W, 'STRANDED'), 0)
+  T.ok(logged(W, 'on a job outside: 11:drinks outside'), 'kern.log names him')
+  W.unit(11).counters2 = {thirst_timer = 41000, hunger_timer = 0}     -- past the hard mark: stranded after all
+  run(W, 3000)
+  local e = evs(W, 'STRANDED')
+  T.ok(#e >= 1 and e[1].d.need == 'drink', e[1] and e[1].msg)
+end)
+
+T.test('BUG-646: thirst 26000 outside that never fell is still STRANDED (no proof that he reaches drink)', function()
+  local W = outside(0, 26000)
+  run(W, 4000)
+  T.ok(#evs(W, 'STRANDED') >= 1)
+end)
+
 T.done()
