@@ -187,7 +187,7 @@ local STALL_TXT = {
   no_mason = 'no mason builds the soil walls',
   no_smoother = 'nobody smooths the side walls',
   ring_dig = 'nobody channels the ring tile above the heavy level',
-  no_boulders = 'no free boulders or blocks for the ring walls (soil: the stone lies deeper)',   -- BUG-443
+  no_boulders = 'no free boulders, blocks or logs for the ring walls (soil: the stone lies deeper)',   -- BUG-443, BUG-631: logs count too
   ring_stuck = 'the ring has not moved',                                                        -- BUG-443
 }
 -- BUG-473 (Run 16a i1 Basementflew y374: the level z127 waited 4 days for a mason, then the player placed the Masons by hand): soil
@@ -202,15 +202,19 @@ local function ask_masons(X, P, r, z)
   X.emit('PROJECT_REQUEST', 'B', msg, {tpl = 'workshops', n = 1, why = 'masonry', types = {'Masons'}})
   X.dirty()
 end
-local function stall(X, P, r, z, L, why, days)
+-- BUG-631 (Run 16 round 19, i1 z125 / i2 z132-z135: 'the ring has not moved' for 900-1400 days, the cause never named): `extra` is the
+-- exact thing the stall waits for (the hidden tile with its coordinates, the count of wall material found); it goes into the message
+-- and the row text, so the DECISION_NEEDED cause of a released slot repeats it
+local function stall(X, P, r, z, L, why, days, extra)
   local first = type(L.stall) ~= 'table' or L.stall.why ~= why
-  if first then L.stall = {why = why, t = X.now()} end
+  if first then L.stall = {why = why, t = X.now(), extra = extra}
+  elseif extra ~= nil and L.stall.extra ~= extra then L.stall.extra = extra; X.dirty() end
   if L.said ~= why then
     L.said = why
     if why == 'no_mason' then ask_masons(X, P, r, z) end                    -- BUG-473
     local cmd = string.format(STALL_CMD[why] or STALL_CMD.unreachable, P.id)
-    local msg = string.format('%s: shaft z%d waits (%s)%s: %s', P.id, z, STALL_TXT[why] or why,
-                              days and (' ' .. days .. ' d') or '', cmd)
+    local msg = string.format('%s: shaft z%d waits (%s)%s%s: %s', P.id, z, STALL_TXT[why] or why,
+                              days and (' ' .. days .. ' d') or '', extra and (' [' .. extra .. ']') or '', cmd)
     X.log('warn', '%s', msg)
     X.emit('PROJECT_BLOCKED', 'A', msg, {proj = P.id, tpl = 'aqshaft', stage = 'l' .. (r.top - z) .. '.dig',
                                          why = 'aq_stall:' .. why, cmd = #cmd <= 200 and cmd or nil})
@@ -226,7 +230,8 @@ function A.stall_text(rt, id)
   if type(r) ~= 'table' or r.k ~= 'shaft' or r.heavy or r.done == 1 or type(r.levels) ~= 'table' then return '' end
   local L = r.levels[tostring(r.cur_z)]
   if type(L) ~= 'table' or type(L.stall) ~= 'table' then return '' end
-  return string.format('stall z%d: %s', r.cur_z, STALL_TXT[L.stall.why] or tostring(L.stall.why))
+  return string.format('stall z%d: %s%s', r.cur_z, STALL_TXT[L.stall.why] or tostring(L.stall.why),
+                       type(L.stall.extra) == 'string' and (' (' .. L.stall.extra .. ')') or '')   -- BUG-631
 end
 
 -- BUG-444: where a shaft stands, for the stall announcement: 'z113 dig, ring wall/new/new/new' ('' when it is no live shaft)
@@ -257,7 +262,12 @@ local function plug_missing(X, n, P)
   if type(X.wall_stock) == 'function' and n then
     if type(X.need) == 'function' and P then X.need(n, 'aqshaft ' .. tostring(P.id)) end
     local s = X.wall_stock()
-    if type(s) == 'table' and (tonumber(s.have) or 0) < n then return 'no_boulders' end
+    if type(s) == 'table' and (tonumber(s.have) or 0) < n then
+      -- BUG-631: the count the fort can reach (blocks, free boulders, logs above the wood floor), not a bare 'no boulders'
+      return 'no_boulders', string.format('%d of %d walls: %d blocks, %d free boulders, %d logs reachable',
+                                          tonumber(s.have) or 0, n, tonumber(s.blocks) or 0, tonumber(s.rock) or 0,
+                                          tonumber(s.logs) or 0)
+    end
   end
   return nil
 end
@@ -361,9 +371,9 @@ local function dig_step(X, P, d, r, z, L)
     -- BUG-412: the plug reserve first. Below the top level the shaft may meet water at any level; without wall material
     -- the CAVERN_PLUG (and a soil seal) cannot be built, so nothing deeper is designated until the fort can make walls
     if P.stage >= 1 then
-      local miss = plug_missing(X, A.CFG.plug_walls, P)      -- BUG-443: the count of walls, not one log
+      local miss, detail = plug_missing(X, A.CFG.plug_walls, P)      -- BUG-443: the count of walls, not one log
       if miss then
-        stall(X, P, r, z, L, miss)
+        stall(X, P, r, z, L, miss, nil, detail)
         return 'done'
       end
       unstall(X, L)
@@ -516,8 +526,8 @@ function A.ring_step(X, P, d, r, z, L)
   if type(R) ~= 'table' then
     if ring_stacked(X, P, d, r, z, L) then return 'done' end
     if L.noring then return nil end
-    local miss = plug_missing(X, A.CFG.plug_walls + #ORTH, P)
-    if miss then stall(X, P, r, z, L, miss); return 'done' end
+    local miss, detail = plug_missing(X, A.CFG.plug_walls + #ORTH, P)
+    if miss then stall(X, P, r, z, L, miss, nil, detail); return 'done' end
     unstall(X, L)
     R = {pieces = {}, t = X.now()}
     for _, o in ipairs(ORTH) do R.pieces[#R.pieces + 1] = {r.x + o[1], r.y + o[2], 'new', 0} end
@@ -533,20 +543,35 @@ function A.ring_step(X, P, d, r, z, L)
   local sig = {}
   for _, pc in ipairs(R.pieces) do sig[#sig + 1] = tostring(pc[3]) end
   sig = table.concat(sig, ',')
-  if R.sig ~= sig then R.sig, R.sigt = sig, t; X.dirty()
-  elseif t - (int(R.sigt) or t) >= A.CFG.stall and L.stall == nil then
-    stall(X, P, r, z, L, 'ring_stuck', (t - (int(R.sigt) or t)) // DAY)
+  -- BUG-631: R.wait = what the last pass waited for in silence (a hidden tile, no quickfort call); it clears when a piece moves
+  local function waits(s)
+    if R.wait ~= s then R.wait = s; X.dirty() end
+  end
+  if R.sig ~= sig then R.sig, R.sigt, R.wait = sig, t, nil; X.dirty()
+  elseif t - (int(R.sigt) or t) >= A.CFG.stall and (L.stall == nil or L.stall.why == 'ring_stuck') then
+    stall(X, P, r, z, L, 'ring_stuck', (t - (int(R.sigt) or t)) // DAY, R.wait or 'a ring piece waits for its tile, a dig job or a wall')
   end
   for _, pc in ipairs(R.pieces) do
     if pc[3] ~= 'done' then
       local top, bot = X.tile(pc[1], pc[2], z + 1), X.tile(pc[1], pc[2], z)
-      if not bot or not top then return 'done' end                           -- hidden: wait
+      -- BUG-631 (Run 16 round 19, i1 z125 two sites 900-1400 d, i2 z132/z135 540 d: 'new/new/new/new' for ever): the ring tile on the
+      -- heavy level z lies diagonally below the open stair tile of z+1 and stays HIDDEN until the channel above it is dug, which only
+      -- this ring step designates: waiting for it here was a deadlock (no log, no event). The channel needs the tile ABOVE (beside the
+      -- open stair, revealed by the dig); the ring tile is read once the channel is dug
+      if not top then
+        waits(string.format('the channel tile %d,%d,%d is hidden', pc[1], pc[2], z + 1))
+        return 'done'
+      end
+      if not bot and (pc[3] == 'open' or pc[3] == 'wall') then
+        waits(string.format('the ring tile %d,%d,%d is hidden', pc[1], pc[2], z))
+        return 'done'
+      end
       if pc[3] == 'new' then
-        if bot.c == 'C' then pc[3] = 'done'; X.moved(P)
+        if bot and bot.c == 'C' then pc[3] = 'done'; X.moved(P)
         elseif open_tile(bot) then pc[3] = 'open'                            -- an open tile already: only the wall is missing
         else
           local got = designate(X, P, pc[1], pc[2], z + 1, 'h', true)        -- one tile at a time: one open ring tile at most
-          if got == nil then return 'yield' end
+          if got == nil then waits('no quickfort call left in the slice for the channel'); return 'yield' end
           if not got then
             L.nd = (int(L.nd) or 0) + 1
             X.log('warn', '%s: ring of z%d: quickfort designated no channel at %d,%d,%d (refused %d/%d)', P.id, z, pc[1], pc[2],
@@ -572,7 +597,10 @@ function A.ring_step(X, P, d, r, z, L)
           X.dirty()
           return 'done'
         end
-        if not open_tile(bot) then return 'done' end                         -- the ramp below shows once it is revealed
+        if not open_tile(bot) then                                           -- the ramp below shows once it is revealed
+          waits(string.format('the ramp %d,%d,%d below the dug channel is %s', pc[1], pc[2], z, bot and 'not open' or 'hidden'))
+          return 'done'
+        end
         pc[3] = 'open'
         unstall(X, L)
         X.moved(P)
@@ -581,8 +609,8 @@ function A.ring_step(X, P, d, r, z, L)
       if pc[3] == 'open' then
         local left = 0
         for _, q in ipairs(R.pieces) do if q[3] ~= 'done' and q[3] ~= 'wall' then left = left + 1 end end
-        local miss = plug_missing(X, left, P)     -- BUG-443: an open ring tile with no wall material: said, not designated blind
-        if miss == 'no_boulders' then stall(X, P, r, z, L, miss); return 'done' end
+        local miss, detail = plug_missing(X, left, P)     -- BUG-443: an open ring tile with no wall material: said, not designated blind
+        if miss == 'no_boulders' then stall(X, P, r, z, L, miss, nil, detail); return 'done' end
         if L.stall ~= nil and L.stall.why == 'no_boulders' then unstall(X, L) end
         local ok, st = X.qf{mode = 'build', data = cell1('Cw'), pos = {pc[1], pc[2], z}}
         local n = ok and type(st) == 'table' and int(st.build_designated) or nil
@@ -744,8 +772,10 @@ function A.seal_step(X, P, d, r, z, L)
           if p[4] == 'soil' then wall = true; nwall = nwall + 1 elseif p[4] == 'stone' then smooth_left = true end
         end
       end
-      local why = wall and (plug_missing(X, nwall, P) or 'no_mason') or smooth_left and 'no_smoother' or nil   -- BUG-443
-      if why then stall(X, P, r, z, L, why, (X.now() - (int(L.sealt) or X.now())) // DAY) end
+      local why, detail
+      if wall then why, detail = plug_missing(X, nwall, P); why = why or 'no_mason'            -- BUG-443
+      elseif smooth_left then why = 'no_smoother' end
+      if why then stall(X, P, r, z, L, why, (X.now() - (int(L.sealt) or X.now())) // DAY, detail) end
     end
     return 'done'
   end

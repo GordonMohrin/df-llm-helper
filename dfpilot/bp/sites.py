@@ -1717,6 +1717,8 @@ AQ_SPAN = 40                          # aqshaft: score for a column that passes 
 AQ_REACH = 2                          # BUG-432: levels below the shallowest aquifer level the shaft reaches: the core's top level (the aquifer
                                       # level and the one right under it are forbidden for a core, aquifer_ok), not the refuge room 3 deeper
 WATER_KEEP = 3                        # BUG-412: no open water within this many tiles of the shaft (any level it passes)
+AQ_LAKE_R = 8                         # BUG-633: a cavern breach on a known aquifer level, with no cavern mark there, is a LOCAL flood of our own
+                                      # dug rooms: a shaft column keeps this many tiles (x/y, both ways) from it; farther columns pass
 MARKS_CAP = 500                       # snapshot.lua CFG.marks_max: a mark list this long was cut off (scan order: low z first)
 AQ_BREACH = ("heavy_aquifer", "damp", "water")      # breach stops that are the aquifer itself (manifest `breaches` why)
 
@@ -1727,14 +1729,27 @@ class CavernLevels:
     is refused level-wide. `zcap`: the cavern mark list hit MARKS_CAP, so the levels from the last mark up were not fully
     scanned; a shaft touching one of them is refused as well (coverage incomplete)."""
 
-    def __init__(self, levels: dict[int, str], zcap: int | None = None):
+    def __init__(self, levels: dict[int, str], zcap: int | None = None, local: dict | None = None):
         self.levels, self.zcap = levels, zcap
+        # BUG-633 (Run 16c i3 Wallfree y376-y383: manifest.caverns cavern_lake 97,59,143 -- a breach into a flooded room we dug on the
+        # aquifer level z143 -- refused all 297 / 478 columns of the fort for the level z143, 'avoided cavern level'): a breach on a
+        # known aquifer level that no revealed cavern mark confirms is water in OUR rooms, not a cavern volume. {z: [(x, y, label)]}:
+        # it only refuses the columns within AQ_LAKE_R tiles of the point (hits() with x/y); without x/y it stays level-wide
+        self.local = local or {}
 
     def __bool__(self) -> bool:
-        return bool(self.levels) or self.zcap is not None
+        return bool(self.levels) or self.zcap is not None or bool(self.local)
 
-    def hits(self, lo: int, hi: int) -> list[tuple[int, str]]:
+    def hits(self, lo: int, hi: int, x: int | None = None, y: int | None = None) -> list[tuple[int, str]]:
         out = [(z, self.levels[z]) for z in sorted(self.levels) if lo <= z <= hi]
+        for z in sorted(self.local):
+            if z in self.levels or not lo <= z <= hi:
+                continue
+            for bx, by, label in self.local[z]:
+                if x is None or y is None or (abs(x - bx) <= AQ_LAKE_R + 1 and abs(y - by) <= AQ_LAKE_R + 1):
+                    out.append((z, label if x is None else f"{label}, {max(abs(x - bx), abs(y - by))} tiles from the column; "
+                                f"a column more than {AQ_LAKE_R + 1} tiles away passes"))
+                    break
         if self.zcap is not None:
             out += [(z, f"cavern marks capped at {MARKS_CAP}, z{z} not fully scanned") for z in range(max(lo, self.zcap + 1), hi + 1)
                     if z not in self.levels]
@@ -1757,10 +1772,16 @@ def shaft_avoid(snap: dict, manifest: dict | None) -> CavernLevels:
     wet = {tuple(int(v) for v in b["pos"]) for b in (manifest or {}).get("breaches") or []
            if isinstance(b, dict) and b.get("why") in AQ_BREACH and isinstance(b.get("pos"), (list, tuple)) and len(b["pos"]) == 3}
     span = known_aquifer(snap, manifest)
+    local: dict[int, list] = {}
     for q in (manifest or {}).get("caverns", []):
         if isinstance(q, (list, tuple)) and len(q) == 3 and not (tuple(int(v) for v in q) in wet and int(q[2]) in span):
-            lv.setdefault(int(q[2]), f"cavern breach at {int(q[0])},{int(q[1])},{int(q[2])}")
-    return CavernLevels(lv, zcap)
+            x, y, z = (int(v) for v in q)
+            label = f"cavern breach at {x},{y},{z}"
+            if z in span:                    # BUG-633: an aquifer level: flooded rooms of ours, local (a revealed mark still makes the level whole)
+                local.setdefault(z, []).append((x, y, label + " on the aquifer level z%d" % z))
+            else:
+                lv.setdefault(z, label)
+    return CavernLevels(lv, zcap, {z: v for z, v in local.items() if z not in lv})
 
 
 def shaft_depth_auto(snap: dict, manifest: dict | None, top: int) -> int | None:
@@ -1779,7 +1800,7 @@ def shaft_why(at, x: int, y: int, top: int, z_lo: int, avoid, keep_out, wet: boo
     level right below its bottom hold no cavern/warm level (never open into one); deeper ones do not matter. The column and its 4
     side tiles on every level below the top are rock or unknown; no keep-out box; no open water within WATER_KEEP tiles on any
     level it passes (`wet` False skips this slow scan)."""
-    hit = avoid.hits(z_lo - 1, top) if avoid else []
+    hit = avoid.hits(z_lo - 1, top, x, y) if avoid else []       # BUG-633: x/y, so a local flood only refuses the columns beside it
     if hit:
         return "avoid", (f"{x},{y}: cavern/warm level z{hit[-1][0]} ({hit[-1][1]}) lies within the shaft's z{top}-z{z_lo} "
                          "or the level below it")
@@ -2020,7 +2041,7 @@ def core_shaft(snap: dict, manifest: dict, anchor, rot: int, depth: int, n_level
         if walk_at(snap, (x, y, az)) == "0":
             why.append(f"{tag}: not in the citizens' walk group")
             continue
-        hit = avoid.hits(z_lo - 1, az) if avoid else []     # BUG-432: the shaft's levels and the one below its bottom, level-wide
+        hit = avoid.hits(z_lo - 1, az, x, y) if avoid else []     # BUG-432: the shaft's levels and the one below its bottom, level-wide (BUG-633: a flood of ours: local)
         if hit:
             why.append(f"{tag}: cavern/warm level z{hit[-1][0]} ({hit[-1][1]}) within the shaft's z{az}-z{z_lo} or the level below it")
             continue

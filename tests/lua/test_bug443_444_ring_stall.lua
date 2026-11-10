@@ -90,7 +90,7 @@ T.test('BUG-443: a ring with no free boulders or blocks (one log is not enough) 
   local seen
   for _, n in ipairs(NEEDS) do if n[1] == 'rock' and n[2] == 6 and n[3] == 'aqshaft aq' then seen = true end end
   T.ok(seen, 'the 6 walls (2 plug + 4 ring) are a rock need: ' .. T.show(NEEDS))
-  T.ok(AQ.stall_text(rt(W), 'aq'):find('no free boulders or blocks', 1, true), AQ.stall_text(rt(W), 'aq'))
+  T.ok(AQ.stall_text(rt(W), 'aq'):find('no free boulders, blocks or logs', 1, true), AQ.stall_text(rt(W), 'aq'))
   STOCK.have, STOCK.rock = 20, 20                     -- the caravan brought stone / the dig found hard stone
   T.ok(until_(W, function() return tops_designated(W, 99) == 1 end, 8), 'the ring starts: one tile channelled')
   T.eq(AQ.stall_text(rt(W), 'aq'), '', 'the stall is cleared')
@@ -100,11 +100,12 @@ T.test('BUG-443: a ring that does not move for A.CFG.stall says aq_stall:ring_st
   local W = fresh{tag = 'b443stuck', cfg = CFGQ}
   know_heavy(W, 99)
   start(W)
-  W.tile(AX + 1, AY, 99).hidden = true               -- the ring tile stays hidden: the old code waited for it in silence
+  W.tile(AX + 1, AY, AT).hidden = true               -- BUG-631: the channel tile above stays hidden (the ring tile below hides by itself)
   for _ = 1, 2 * 6 do H.runs(W, 1) end
   local ev = blocked(W, 'aq_stall:ring_stuck')
   T.eq(#ev, 1, 'one PROJECT_BLOCKED: ' .. T.show(W.find_events('PROJECT_BLOCKED')))
   T.ok(ev[1].d.cmd:find('bp.cancel', 1, true), T.show(ev[1].d))
+  T.ok(ev[1].msg:find('channel tile 51,50,100 is hidden', 1, true), ev[1].msg)        -- BUG-631: the exact reason
 end)
 
 T.test('BUG-444: a shaft that holds a level and makes no progress for stall_days is announced (PROJECT_BLOCKED why=stalled, A) with its ' ..
@@ -112,7 +113,7 @@ T.test('BUG-444: a shaft that holds a level and makes no progress for stall_days
   local W = fresh{tag = 'b444', cfg = CFGQ}
   know_heavy(W, 99)
   start(W)
-  W.tile(AX + 1, AY, 99).hidden = true
+  W.tile(AX + 1, AY, AT).hidden = true
   for _ = 1, 2 * 12 do H.runs(W, 1) end
   local row
   for _, r in ipairs(W.state().proj) do if r[1] == 'aq' then row = r end end
@@ -134,7 +135,7 @@ T.test('BUG-444: a shaft that holds a level and makes no progress for stall_days
   local W2 = fresh{tag = 'b444sk', cfg = CFGQ}
   know_heavy(W2, 99)
   start(W2)
-  W2.tile(AX + 1, AY, 99).hidden = true
+  W2.tile(AX + 1, AY, AT).hidden = true
   rt(W2).p['aq'].sk = 2
   for _ = 1, 2 * 12 do H.runs(W2, 1) end
   T.eq(#blocked(W2, 'stalled'), 1, 'a skip count does not repeat the announcement')
@@ -142,7 +143,7 @@ T.test('BUG-444: a shaft that holds a level and makes no progress for stall_days
   local W0 = fresh{tag = 'b444off', cfg = {baseline = {v = 2, runner = {queue = {idle_days = 5, stall_days = 0}}}}}
   know_heavy(W0, 99)
   start(W0)
-  W0.tile(AX + 1, AY, 99).hidden = true
+  W0.tile(AX + 1, AY, AT).hidden = true
   for _ = 1, 2 * 30 do H.runs(W0, 1) end
   T.eq(#blocked(W0, 'stalled'), 0, 'stall_days 0 = never announced')
 end)

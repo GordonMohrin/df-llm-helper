@@ -158,8 +158,14 @@ def test_an_aquifer_breach_inside_the_aquifer_span_is_not_a_cavern(fort):
         assert bp.rank(snap, "aqshaft", {}, manifest=m), why
     m = _man(man, caverns=[(500, 500, 4)], aq=(4, 5))                        # the same point recorded as a cavern lake: a cavern
     m["breaches"] = [{"pos": [500, 500, 4], "why": "cavern_lake"}]
+    # BUG-633: on a known aquifer level it is a flood of our rooms, LOCAL: the columns far from it pass, the ones beside it do not
+    assert bp.rank(snap, "aqshaft", {}, manifest=m)
     with pytest.raises(ValueError, match="cavern breach at 500,500,4"):
-        bp.rank(snap, "aqshaft", {}, manifest=m)
+        sites.check_column(snap, m, 502, 500, 5, 3)
+    m2 = _man(man, caverns=[(500, 500, 2)], aq=(4, 5))                       # off the aquifer levels: a cavern, level-wide as before
+    m2["breaches"] = [{"pos": [500, 500, 2], "why": "cavern_lake"}]
+    with pytest.raises(ValueError, match="cavern breach at 500,500,2"):
+        bp.rank(snap, "aqshaft", {}, manifest=m2)
 
 
 def test_capped_cavern_marks_mean_incomplete_coverage(fort):
