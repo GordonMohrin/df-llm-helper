@@ -224,6 +224,17 @@ T.test('BUG-435: free mechanisms cover the need; no Mechanic\'s workshop asks fo
   T.ok(gear and gear.d.types[1] == 'Mechanics', 'the Mechanic\'s workshop is requested')
 end)
 
+T.test('BUG-628: the state carries the trap parts free and the parts planned traps wait for (plan propose draws no new lane behind them)', function()
+  local W = eworld{shops = {'Masons', 'Mechanics'}, boulders = 20, traps = 3}
+  edays(W, 2)
+  local s = W.state().stock or {}
+  T.eq({s.mfree, s.mtp}, {0, 3}, 'three planned traps wait for parts, none is free')
+  local W2 = eworld{shops = {'Masons', 'Mechanics'}, boulders = 20, traps = 3, mechs = 3}
+  edays(W2, 2)
+  local s2 = W2.state().stock or {}
+  T.eq({s2.mfree, s2.mtp}, {3, 0}, 'three mechanisms cover the three traps')
+end)
+
 ---------------------------------------------------------------- BUG-435: the runner announces a stale set-aside project
 
 local H = require('runner_world')
