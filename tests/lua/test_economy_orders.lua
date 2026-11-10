@@ -474,4 +474,24 @@ T.test("BUG-059: a missing Farmer's Workshop is told as a workshop (kind worksho
   T.eq({od2.stuck, od2.stuck_ws, od2.ws, od2.stuck_lab}, {1, nil, nil, 1})
 end)
 
+T.test('BUG-666: order.add mat=wood / rock is the short way to a wooden or a stone order (a wooden door), and refuses a clash', function()
+  local W = world{}
+  settle(W)
+  local r = W.inbox('order.add', {job = 'ConstructDoor', amount = 4, mat = 'wood'})
+  T.eq(r.ok, true, r.msg)
+  local wo = W.find_acts('workorder')
+  local spec = wo[#wo].args[1]
+  T.eq({spec.job, spec.amount_total, spec.material_category, spec.material}, {'ConstructDoor', 4, {'wood'}, nil})
+  r = W.inbox('order.add', {job = 'ConstructDoor', amount = 2, mat = 'rock'})
+  T.eq(r.ok, true, r.msg)
+  wo = W.find_acts('workorder')
+  spec = wo[#wo].args[1]
+  T.eq({spec.material, spec.material_category}, {'INORGANIC', nil})
+  r = W.inbox('order.add', {job = 'ConstructDoor', amount = 2, mat = 'wood', material = 'INORGANIC'})
+  T.eq(r.ok, false)
+  T.ok(r.msg:find('mat replaces', 1, true), r.msg)
+  r = W.inbox('order.add', {job = 'ConstructDoor', amount = 2, mat = 'glass'})
+  T.eq(r.ok, false)
+end)
+
 T.done()

@@ -491,7 +491,10 @@ local home_grp
 -- stranded one (a woodcutter out at the brook) or a different part of the fort. The home groups are now the set of
 -- home_set (the group most citizens stand on plus every one with a fifth of them), read from the citizens' tiles in the same
 -- tick as the tile, so a renumbering between ticks changes nothing.
-function M.far(K, x, y, z)
+-- BUG-665 (Run 16a i1 / 16b i2: 30 and 46 boulders "counted usable" for hundreds of days, DF cancelling every rock job): `strict` also
+-- calls a tile with NO walkable group "far" (a flooded or walled-in tile, a raised bridge: nobody can stand there or walk to it). The
+-- plain call keeps group 0 = near (food, drink and logs are not judged by it); the stone census asks strict.
+function M.far(K, x, y, z, strict)
   x, y, z = int(x), int(y), int(z)
   if not (x and y and z) then return false end
   local now = K.now().tick
@@ -508,7 +511,21 @@ function M.far(K, x, y, z)
     local pos = xyz2pos(x, y, z)
     return dfhack.maps.isValidTilePos(pos) and dfhack.maps.getWalkableGroup(pos) or 0
   end)
+  if ok and grp == 0 then return strict == true end
   return ok and grp ~= 0 and not home_grp.set[grp]
+end
+
+-- BUG-665: where one tile stands for the stone census' probe: {g = walkable group (0 = none), hidden}; nil on a fault
+function M.spot(K, x, y, z)
+  x, y, z = int(x), int(y), int(z)
+  if not (x and y and z) then return nil end
+  local ok, r = pcall(function()
+    local pos = xyz2pos(x, y, z)
+    if not dfhack.maps.isValidTilePos(pos) then return nil end
+    local des = dfhack.maps.getTileFlags(pos)
+    return {g = int(dfhack.maps.getWalkableGroup(pos)) or 0, hidden = des and des.hidden == true or false}
+  end)
+  return ok and r or nil
 end
 
 -- groups(K, pts, near): the walkable group of each point {x, y, z} (economy's inspect workload: which open jobs and idle
