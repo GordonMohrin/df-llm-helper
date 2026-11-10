@@ -691,7 +691,14 @@ function A.ring_step(X, P, d, r, z, L)
             local miss, detail = plug_missing(X, 1, P)
             -- BUG-677 (Wallfree: four shafts each stopped after the wall stood unbuilt for 2 d, the fort had only claystone): a wall that waits
             -- for MATERIAL is given ring_stop_mat; one the builders merely have not taken (material there) ring_stop
-            local limit = (miss == 'no_boulders' or miss == 'no_stone') and A.CFG.ring_stop_mat or A.CFG.ring_stop
+            -- the verifier: material that arrives late (trade, hard-stone dig) restarts the clock: pc[7] is the last tick the wall lacked material
+            local limit = A.CFG.ring_stop_mat
+            if miss == 'no_boulders' or miss == 'no_stone' then
+              pc[7] = t
+            else
+              limit = A.CFG.ring_stop
+              if pc[7] ~= nil then waited = t - math.max(int(pc[6]) or t, int(pc[7]) or t) end
+            end
             if waited >= limit then
               X.log('warn', '%s: ring of z%d: the wall on %d,%d,%d stands unbuilt for %d d', P.id, z, pc[1], pc[2], z, waited // DAY)
               ring_stop(X, P, d, r, z, L, 'ring_late', {pc[1], pc[2], z}, waited // DAY, detail, miss)

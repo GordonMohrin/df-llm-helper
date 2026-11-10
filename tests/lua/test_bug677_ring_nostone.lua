@@ -88,4 +88,18 @@ T.test('BUG-677: a wall the builders just have not taken (material there) stops 
   T.eq(H.proj(W, 'aq').blocked, 'ring_wall')
 end)
 
+T.test('BUG-677: stone arriving after ring_stop restarts the clock (no instant stop), a wall still unbuilt then stops ring_stop later', function()
+  local W = fresh{tag = 'b677late'}
+  start_wall(W)
+  STOCK.have, STOCK.rock, STOCK.none = 0, 0, true
+  H.runs(W, 2 * 14)                                              -- 14 d without stone (ring_stop 10 d would have fired with material)
+  T.eq(#ev(W, 'AQ_RING_STOP'), 0)
+  STOCK.have, STOCK.rock, STOCK.none = 20, 20, nil               -- a trade brings stone
+  H.runs(W, 2 * 6)                                               -- 6 d later: 20 d since the designation, but only 6 d with stone
+  T.eq(#ev(W, 'AQ_RING_STOP'), 0, 'the clock restarted when the stone came')
+  H.runs(W, 2 * 8)                                               -- 14 d with stone: past ring_stop
+  T.eq(#ev(W, 'AQ_RING_STOP'), 1, T.show(ev(W, 'PROJECT_BLOCKED')))
+  T.eq(ev(W, 'AQ_RING_STOP')[1].d.miss, nil)
+end)
+
 T.done()
