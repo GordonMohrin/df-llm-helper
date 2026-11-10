@@ -39,6 +39,10 @@ not wake; the follower acts on two of them without the LLM:
                                   when the audit names a wall (bypass, refuge on the attack path; bp.topo.choke)
                                   that no seal project builds yet, the seal (tpl seal, p.at audit) is placed the
                                   same way (a player's blueprint, never refused for touching a project)
+  state ready.ents (a way in without door or bridge, two game days old: readiness) in PEACE -> BUG-686: the seal at=last is
+                                  placed the same way (cmd.seal_openings picks door or wall per rule, the kernel's reach check
+                                  refuses a wall that would cut citizens off); once per PERIM_COOLDOWN_S, never while a seal
+                                  project builds those tiles
   PLAN_EXHAUSTED phase P0/P1   -> the phase's first proj deliverable without a project (plans/year1.json),
                                   placed the same way (S1, or 'same' for a later fortcore stage): the fort
                                   never idles while it waits for an LLM (live L0/L1: a year idled, a dwarf
@@ -217,6 +221,7 @@ TOMBS_COOLDOWN_S = 600
 WAIVE_COOLDOWN_S = 3600                         # BUG-300: one phase.waive farms per hour of follow at most
 CODE = files.code_stamp()                      # BUG-042: the dfpilot code this follow process imported
 PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "seal", "fishery", "farmers",
+              "perim",                        # BUG-686: seal at=last for the ways in the entrance check names (_check_perimeter)
               "mandatory", "slabs",           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
               "busy",                         # BUG-224: busy = one more Carpenters/Masons beside a full one
               "mood",                         # BUG-283: the shops a strange mood waits for (care's typed request)
@@ -234,6 +239,11 @@ STALL_S = 120                                  # BUG-475: real seconds the game 
 STALL_AGAIN_S = 1800                           # BUG-475: a stall that goes on is said again after this long
 STALL_HB_MAX_S = 30                            # BUG-475: the heartbeat must be this fresh (the kernel runs; HB_STALE is the other case)
 PAUSED_HINT_S = 30                             # BUG-614: real seconds follow sees pause:df / pause:popup before it says `cmd resume`
+# BUG-686 (Run 16a i1 Basementflew, 16d i4 Trumpetrealms: new 'floor' ways in on the rim every season, each closed by hand with `seal at=last`,
+# plan check refusing P5 meanwhile, the pop ceiling held by open_perimeter): in PEACE follow looks at the state's ready.ents this often
+# (real seconds) and places the seal at=last itself; PERIM_COOLDOWN_S is the least time between two such placements (a seal builds for days)
+PERIM_CHECK_EVERY_S = 120
+PERIM_COOLDOWN_S = 1800
 PLAN_CHECK_EVERY_S = 300                       # FR-86: how often follow looks at the age of the applied plan
 PLAN_AUTO_KEYS = ("first_y", "tried_y", "applied_y")
 AUDIT_PREFIX = "aud"                           # snapshot ids of `dfllm audit` (it audits them itself, follow does not)
@@ -893,6 +903,8 @@ class Follower:
         self._qs_read = 0.0
         self.plan_auto: dict = {}              # FR-86: first_y (the year follow first saw no plan), tried_y, applied_y
         self._plan_read = 0.0
+        self._perim_read = 0.0
+        self._perim_tried = -1e18
         self._stale_read = 0.0
         self._ceiling_read = 0.0                     # BUG-680: wall of the last held-ceiling look
         self._stale_tried: dict[str, float] = {}     # BUG-435: project id -> wall of the last cancel try
@@ -1012,6 +1024,7 @@ class Follower:
         self._check_supervise(now)
         self._check_quicksave(now)
         self._check_plan(now)
+        self._check_perimeter(now)
         self._check_stale(now)
         self._check_ceiling(now)
         self._sweep_orphans(now)
@@ -1359,6 +1372,7 @@ class Follower:
         except Exception as ex:                        # noqa: BLE001 - the plan check must never stop the follower
             self._fail("minimal plan", f"{type(ex).__name__}: {ex}", now)
 
+<<<<<<< HEAD
     def _check_ceiling(self, now: float) -> None:
         """BUG-680 (Run 16d i4 Trumpetrealms y447: the plan's pop ceiling 31 'held: defence short, armor worn 10 %' stayed a year after worn
         rose to 57 %, 'migrants blocked'): in PEACE the applied plan's HELD ceiling is compared with the defence gaps of now and raised
@@ -1374,6 +1388,39 @@ class Follower:
                                          "(the defence gaps that held it are closed or soft now)", now)
         except Exception as ex:                        # noqa: BLE001 - the ceiling look must never stop the follower
             self._fail("held ceiling", f"{type(ex).__name__}: {ex}", now)
+=======
+    def _check_perimeter(self, now: float) -> None:
+        """BUG-686 (Run 16a i1 Basementflew z131, 16d i4 Trumpetrealms y450-y454: ten ways in on the surface rim in five years, every one
+        closed by hand with `seal at=last` two to four weeks after it opened, `plan check` refusing P5 and the pop ceiling held by
+        open_perimeter meanwhile): in PEACE, when the state's ready.ents names a way in without door or bridge (readiness lists a tile
+        only after two game days in the check's answer, never a sapling or shrub rim), follow places the seal at=last itself, as the
+        player did: cmd.seal_openings picks door or wall per tile (a wall only where the kernel's reach check did not refuse it:
+        WALL_REFUSED -> door, BUG-487), the project's wall + door run through the runner's reach check, so no citizen is cut off. Not in
+        a siege (builders outside in a fight), never while a seal project builds those tiles or a snapshot-newer reading shows them
+        closed (seal_openings raises: nothing to place, no snapshot is asked for), at most once per PERIM_COOLDOWN_S."""
+        if not self.auto or self.dir is None or now - self._perim_read < PERIM_CHECK_EVERY_S:
+            return
+        self._perim_read = now
+        try:
+            st = files.read_state(self.dir) or {}
+            ready = st.get("ready") if isinstance(st.get("ready"), dict) else {}
+            ents = [x for x in ready.get("ents") or [] if isinstance(x, str)]
+            if st.get("mode") != "PEACE" or not ents or not isinstance(ready.get("open"), int) or ready["open"] <= 0:
+                return
+            if now - self._perim_tried < PERIM_COOLDOWN_S:
+                return
+            from .cmd import BpError, seal_openings
+            try:
+                at, _ = seal_openings(self.dir, "ents")
+            except BpError:
+                return                         # closed on a newer reading, or a seal builds them: nothing to place
+            if self._request_place("perim", "seal", {"at": "ents"}, "S1", now):
+                self._perim_tried = now        # a refused or failed placement is not asked again for PERIM_COOLDOWN_S either
+                files.log_cli(self.dir, "follow", "auto:perim", {"ents": ents[:6]},
+                              f"the entrance check names {len(ents)} way(s) in without a door ({at[:120]}): placing the seal at=ents")
+        except Exception as ex:                        # noqa: BLE001 - the perimeter check must never stop the follower
+            self._fail("perimeter seal", f"{type(ex).__name__}: {ex}", now)
+>>>>>>> fix44-perim
 
     def _check_stale(self, now: float) -> None:
         """BUG-435 (Run 16d i4 Mazelanterns y401: traps 912 d, tombs 461 d 'waits for trapparts', fortcore 341 d, nine projects set aside
@@ -1705,7 +1752,7 @@ class Follower:
         files.prune_snaps(self.dir)
 
     def _place(self, key: str, job: dict, now: float) -> None:
-        from .cmd import BpError, _placed
+        from .cmd import BpError, SealClosed, _placed
         tpl = job.get("tpl") or key
         try:
             snap = files.read_snapshot(self.dir / str(job["path"]))
@@ -1770,6 +1817,10 @@ class Follower:
                 cid = self._send("bp.place", args, tpl, now, snap=snap, need=need)
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped
             self.jobs.pop(key, None)
+            if key == "perim" and isinstance(e, SealClosed):
+                # BUG-686: the openings were closed (or a seal took them) between the check and the snapshot: nothing to say
+                files.log_cli(self.dir, "follow", "auto:perim", {}, f"nothing to place: {e}")
+                return
             self._fail(tpl, e, now)
             if tpl == "farms" and isinstance(e, BpError):
                 self._waive_farms(str(e), now)
