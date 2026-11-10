@@ -1059,7 +1059,9 @@ STATE = Obj(
                            # expects; BUG-478: rg = the bridges with no linked lever inside the refuge (no R0 blocker)
                            "ts": Str(maxbytes=200), "tt": NAT, "rg": Arr(Str(maxbytes=24), hi=8),
                            # BUG-601: as = the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
-                           "as": Str(maxbytes=120)}),
+                           "as": Str(maxbytes=120),
+                           # BUG-634: lw = what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
+                           "lw": Str(maxbytes=200)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
          # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the

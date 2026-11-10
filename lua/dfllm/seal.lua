@@ -1762,6 +1762,11 @@ end
 -- destroyer in sight: the loop breaker) is replaced by a wall and a door; a rebuild nobody built in gq_keep days too.
 local KP = {}
 
+-- BUG-634: 1st, 2nd, 3rd, 11th (the texts that name the loss that replaces a bridge)
+function KP.ordinal(n)
+  return string.format('%d%s', n, (n % 100 >= 11 and n % 100 <= 13) and 'th' or ({[1] = 'st', [2] = 'nd', [3] = 'rd'})[n % 10] or 'th')
+end
+
 -- config/reflex.json perimeter.vanish_after (0-20, default CFG.vanish_after; 0 = always rebuilt)
 function KP.vanish(K)
   local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.perimeter or nil
@@ -6475,6 +6480,17 @@ M.verbs['bridge.rebuild'] = function(K, args, cmd)
   local L = losses(K, name)
   local bd, stop = L and L.bd or 0, stop_after(K)
   local nd = (L and L.n or 0) - bd
+  -- BUG-634 (Run 16d i4 Trumpetrealms y383-y437: three `bridge.rebuild O1` with no lost bridge waiting stored the answer, the counts
+  -- started again from 1 and O1 was lost a third time to the cave dragons before the wall + door rule fired): an order with nothing to
+  -- rebuild changes nothing; the counts start again only when a lost bridge waits for this order
+  if not g then
+    local after0 = stop > 0 and string.format('replaced by wall + door at the %s loss to building destroyers (%d so far)',
+                                              KP.ordinal(stop + (int(st.ans[name]) or 0)), bd)
+                   or 'perimeter.stop_after 0: always rebuilt'
+    return true, string.format('%s: no lost bridge waits for a rebuild (lost %d times, %d with building destroyers); nothing stored: '
+                               .. 'the counts stay, %s', name, L and L.n or 0, bd, after0),
+           {bridge = name, bd = bd, stop = stop, queued = 0, wait = 0}
+  end
   st.ans[name], st.ansv[name], dirty = bd, nd, true
   local t = now_t(K)
   local res, projs = {}, {}
@@ -6487,10 +6503,7 @@ M.verbs['bridge.rebuild'] = function(K, args, cmd)
   local after = stop > 0 and string.format('replaced by wall + door after %d more losses to building destroyers',
                                            stop) or 'perimeter.stop_after 0: always rebuilt'
   local msg
-  if not g then
-    msg = string.format('%s: no lost bridge waits for a rebuild (lost %d times, %d with building destroyers); '
-                        .. 'answer stored: %s', name, L and L.n or 0, bd, after)
-  elseif res[key] == 'queued' or g.proj then
+  if res[key] == 'queued' or g.proj then
     msg = string.format('%s: rebuild queued as %s (built in quiet PEACE only); %s', name, tostring(g.proj), after)
   else
     msg = string.format('%s: rebuild queued for the next quiet PEACE (mode %s now); %s', name, K.mode(), after)

@@ -470,7 +470,8 @@ C.STATE_SPEC = obj({
                mws = str(200),             -- BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command
                ts = str(200), tt = NAT,    -- BUG-481: the trap shortfall R0 `traps_short` names, the trap target for the expected siege
                rg = arr(str(24), 0, 8),    -- BUG-478: the bridges with no linked lever inside the refuge (no R0 blocker)
-               as = str(120)}),            -- BUG-601: the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
+               as = str(120),              -- BUG-601: the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
+               lw = str(200)}),            -- BUG-634: what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,

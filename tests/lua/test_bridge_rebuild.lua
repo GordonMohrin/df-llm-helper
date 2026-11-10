@@ -352,4 +352,28 @@ T.test('a footprint the player walled is retired (never rebuilt); stop_after 0 a
   T.eq(#W5.cells, 0, 'not queued twice')
 end)
 
+-- BUG-634 (Run 16d i4 Trumpetrealms): three `bridge.rebuild O1` orders with no lost bridge waiting stored the answer; the count
+-- started again from 1 and the second destruction (3rd loss) was rebuilt: O1 fell a third time before the wall + door rule fired
+T.test('BUG-634: bridge.rebuild with no lost bridge waiting stores nothing: the second loss to destroyers is replaced', function()
+  local W = fort()
+  stub_materials()
+  record(W)
+  siege(W)
+  W.K.set_mode('PEACE', 'test')
+  run(W, 300)
+  rebuild(W)
+  run(W, 9000)                                       -- O1 stands again: no lost bridge waits
+  local r = W.inbox('bridge.rebuild', {bridge = 'O1'})
+  T.ok(r.ok and r.msg:find('no lost bridge waits for a rebuild (lost 1 times, 1 with building destroyers); nothing stored', 1, true), r.msg)
+  T.ok(r.msg:find('the counts stay, replaced by wall + door at the 2nd loss to building destroyers (1 so far)', 1, true), r.msg)
+  local n = #W.cells
+  siege(W)
+  W.K.set_mode('PEACE', 'test')
+  run(W, 300)
+  T.eq(#W.cells, n + 1)
+  T.eq(W.cells[n + 1].cells, {{20, 25, G, 'd'}}, 'the second loss: a door in place of the gate, no third bridge')
+  local ok, lost = W.K.call('seal', 'lost_gates')
+  T.ok(ok and lost.O1 and lost.O1.bd == 2 and lost.O1.cl ~= nil, T.show(lost))
+end)
+
 T.done()
