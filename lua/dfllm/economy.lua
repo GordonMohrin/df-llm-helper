@@ -264,9 +264,13 @@ M.DEFAULTS = {
   -- crops_max] in steps of crops_step (autofarm's default 50 stopped planting with 40 helmets for 53 dwarves).
   -- Cooking: meals_per_dwarf prepared meals per citizen (meals keep; raw fruit and meat rot), the dfllm:food
   -- order's job cap grows with the citizens (one job per cit_per_job).
+  -- BUG-629 (Run 16a/16b y459-y377: meals 0 beside 2,398 cook ingredients / beside 1-9 of them and 13 hungry): the meal order waits for
+  -- cook_floor cook ingredients (the planner's gate and the order's DF item condition) only while nobody is hungry and food lasts
+  -- (M.cook_floor: 2, the ingredients of one meal, otherwise); a food order without a meal for cook_stall_days days while the kitchen
+  -- stands and cook ingredients lie there is taken down and made again without any item condition (M.cook_watch).
   food = {yield = 1, per_dwarf = 3, plot_tiles = 35, plots_max = 4, want_days = 90, trend_days = 14,
           request_days = 14, pre_days = 30, crops_per_dwarf = 4, crops_min = 50, crops_max = 400, crops_step = 10,
-          status_days = 7, meals_per_dwarf = 2, cit_per_job = 2},
+          status_days = 7, meals_per_dwarf = 2, cit_per_job = 2, cook_floor = 10, cook_stall_days = 6},
   -- BUG-042 (Run 11, y471: 3079 plant growths, 275 plants, drink 93 -> 32 days): the drink deficit is brewed from what
   -- the census finds brewable (`src`: brew_p = PLANT with DRINK_MAT, plump helmets always; brew_g = PLANT_GROWTH with
   -- DRINK_MAT, fruit), split by their stock (M.brew_share); with neither in the fort the plant order takes it all
@@ -1693,6 +1697,39 @@ end
 
 -- cooking keeps food (live L5: gathered fruit and butchered meat rot; meals keep): meals_per_dwarf prepared meals
 -- per citizen, and the job cap of the food order grows with the fort
+-- BUG-629 (Run 16b i2 Valleyhame y377: 'kitchen has 4 cook ingredients and 0 meals', 13 hungry, food 0 days; the order waited for 10 of them):
+-- the ingredients the meal order waits for. cook_floor (10) keeps the cooks from a job per handful while the fort eats well; a hungry
+-- citizen, a food stock below the pre-alarm line or a famine cooks what is there (the 2 ingredients of one meal)
+M.COOK_MIN = 2
+function M.cook_urgent(c, r)
+  local fc = type(c.food) == 'table' and c.food or M.DEFAULTS.food
+  if (st.hungry_n or 0) > 0 or r.p.famine ~= nil then return true end
+  return ((r.days or {}).food_d or 9999) < (fc.pre_days or 30)
+end
+function M.cook_floor(c, r)
+  local fc = type(c.food) == 'table' and c.food or M.DEFAULTS.food
+  if M.cook_urgent(c, r) then return M.COOK_MIN end
+  return math.max(M.COOK_MIN, math.tointeger(fc.cook_floor) or 10)
+end
+
+-- BUG-629: the food order's spec for this run: the DF item condition 'cookable' waits for the same floor as the planner (a spec from
+-- the config still says 10), and after a cook stall (M.cook_watch: p.cookw.relax) the order carries no item condition at all and goes first
+function M.food_spec(c, r, e)
+  local spec = copy(e.spec)
+  local cw = r.p.cookw
+  if type(cw) == 'table' and cw.relax then
+    spec.item_conditions, spec.top = nil, true
+    return spec
+  end
+  local floor = M.cook_floor(c, r)
+  for _, x in ipairs(spec.item_conditions or {}) do
+    if type(x.flags) == 'table' then
+      for _, f in ipairs(x.flags) do if f == 'cookable' then x.value = floor end end
+    end
+  end
+  return spec
+end
+
 local function meal_jobs(c, r, e)
   local fc = c.food
   if e.key ~= 'food_d' or type(fc) ~= 'table' then return 0, e.max_jobs or 20 end
@@ -1700,7 +1737,7 @@ local function meal_jobs(c, r, e)
   local want = cit * (fc.meals_per_dwarf or 0) - (inv.meals or 0)
   -- what a cook may use: EDIBLE_COOKED food that is no meal and not on the kitchen's Cook ban (plump helmets)
   local ingredients = M.cook_n(inv)
-  local jobs = (want > 0 and ingredients >= 10) and (math.min(want, ingredients) + e.per_job - 1) // e.per_job or 0
+  local jobs = (want > 0 and ingredients >= M.cook_floor(c, r)) and (math.min(want, ingredients) + e.per_job - 1) // e.per_job or 0
   return jobs, math.max(e.max_jobs or 20, (cit + (fc.cit_per_job or 2) - 1) // math.max(1, fc.cit_per_job or 2))
 end
 
@@ -1721,7 +1758,7 @@ local function plan_supply(K, c, r)
       local mj, cap = meal_jobs(c, r, e)
       local why = e.key
       if mj > jobs then jobs, why = mj, 'meals' end
-      add(r, {tag = e.tag, spec = e.spec, n = math.min(jobs, cap), why = why})
+      add(r, {tag = e.tag, spec = e.key == 'food_d' and M.food_spec(c, r, e) or e.spec, n = math.min(jobs, cap), why = why})
     end
   end
 end
@@ -6618,6 +6655,7 @@ function T.watch(K, c, r)
   food_pre(K, c, r.p, r.days, r.inv, r)
   M.food_unban(K, c, r, r.inv)
   M.cook_repair(K, c, r, r.inv)                    -- BUG-345
+  M.cook_watch(K, c, r)                            -- BUG-629
   M.drink_low(K, c, r)                             -- BUG-042
   M.fd_wants(K, c, r)                              -- BUG-256, BUG-259
 end
@@ -8223,12 +8261,24 @@ function M.trade_goods(K, c, r)
   for _, t in ipairs(okt and type(sells) == 'table' and sells or {}) do
     if tostring(t):match('^crafts') then sell = true end
   end
+  -- BUG-630: an empty sell list sells whatever lies at the depot, crafts too
+  if okt and type(sells) == 'table' and #sells == 0 then sell = true end
   if not (sell and M.depot_built()) then st.tgoods = nil; return end
   local have = r.inv.crafts or 0
   local tgs = {crafts = have, min = tg.min or 30, route = '', logged = type(st.tgoods) == 'table' and st.tgoods.logged or nil}
   st.tgoods = tgs
   local want = tgs.min - have
-  if want <= 0 or open(r, tg.tag) or not ws_any(r.f, tg.ws or {'workshop:Craftsdwarfs'}) then return end
+  if want <= 0 or open(r, tg.tag) then return end
+  -- BUG-630 (Run 16b i2 Valleyhame y376-y383: a depot, a caravan, 'nothing_to_sell' and no Craftsdwarf's workshop, so no craft was ever made):
+  -- the depot stands, the fort holds fewer crafts than it would sell and no Craftsdwarf's workshop stands: the shop is asked for (workshops
+  -- why=trade; M.ws_ask paces the repeats), the crafts come with it
+  if not ws_any(r.f, tg.ws or {'workshop:Craftsdwarfs'}) then
+    local t = tostring((tg.ws or {'workshop:Craftsdwarfs'})[1]):gsub('^workshop:', '')
+    tgs.route = 'no shop'
+    M.ws_ask(K, r.p, 'trade', {t}, (c.food or {}).request_days or 14,
+             string.format('trade: %d crafts < %d to sell and no Craftsdwarf workshop', have, tgs.min))
+    return
+  end
   local n = math.min(want, tg.jobs or 10)
   local bone = left(c, r, 'bone') - (tg.bone_keep or 10)
   local rk = st.rock
@@ -9548,7 +9598,11 @@ function M.food_block(K, c, r, inv)
   local function put(id, txt, cmd) out[#out + 1] = {id, txt, cmd} end
   -- BUG-059: hungry citizens and no prepared meal: the food days count raw food nobody cooks, say so first
   if (st.hungry_n or 0) > 0 and (inv.meals or 0) == 0 then
-    put('hungry', string.format('%d hungry, 0 meals: raw food is not cooked', st.hungry_n))
+    local cw = st.cookw
+    -- BUG-629: the kitchen stands and the cook ingredients lie there (M.cook_watch made the order again): not 'raw food is not cooked'
+    if type(cw) == 'table' and cw.relax then
+      put('hungry', string.format('%d hungry, 0 meals: kitchen idle with %d cook ingredients (order made again)', st.hungry_n, cw.ing or 0))
+    else put('hungry', string.format('%d hungry, 0 meals: raw food is not cooked', st.hungry_n)) end
   end
   local raw = inv.fish_raw or 0
   if raw > 0 and not ws_any(f, M.FISHERY) then
@@ -9784,6 +9838,112 @@ function M.cook_repair(K, c, r, inv)
   if done > 0 then
     K.log('warn', 'kitchen: nothing to cook, %d food items on kitchen exclusions (seedwatch or the kitchen screen; ' ..
           'farmed crops and D-09 stay): cooking allowed again for %s', inv.cook_ban_x, table.concat(names, ', '):sub(1, 200))
+  end
+end
+
+-- BUG-629 (Run 16a i1 Basementflew y459: food 2,000+ days, 2,398 cook ingredients, the kitchen built, COOK held, meals 0 for 14 million ticks,
+-- ONE dfllm:food order in the whole log; Run 16b i2 Valleyhame y377: 13 hungry, the order placed only with 10 ingredients at hand): a cook
+-- labor on nobody is switched on for the best candidate (act.labor_set `cook`, idle first, then Cooking skill; no soldier, patient,
+-- moody or noble), at most once a day. Returns 'have' (+ unit id), 'set' (+ unit id), 'none' or 'wait'
+function M.cook_labor(K)
+  local cu = K.census.u
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 'none' end
+  local sid = df.job_skill and df.job_skill.COOK
+  local cands = {}
+  for _, id in ipairs(cu.ids) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) and M.citizen(u) and (u.military.squad_id or -1) < 0
+       and (u.mood or -1) < 0 then
+      if M.labor_flag(u, 'COOK') then return 'have', id end
+      if not M.patient(u) and not noble(u) then
+        cands[#cands + 1] = {id = id, idle = (u.job == nil or u.job.current_job == nil) and 1 or 0,
+                             sk = sid and dfhack.units.getNominalSkill(u, sid, true) or 0}
+      end
+    end
+  end
+  if #cands == 0 then return 'none' end
+  local p, now = pstate(K), K.now().tick
+  if now - (math.tointeger(p.cookl) or -DAY) < DAY then return 'wait' end
+  table.sort(cands, function(a, b)
+    if a.idle ~= b.idle then return a.idle > b.idle end
+    if a.sk ~= b.sk then return a.sk > b.sk end
+    return a.id < b.id
+  end)
+  p.cookl = now
+  K.persist.touch('m.economy')
+  local ok = K.act.labor_set(cands[1].id, 'cook', true)
+  if not ok then return 'none' end
+  K.log('warn', 'Cooking labor on for unit %d: a kitchen stands, cook ingredients lie there, no meal and nobody had the labor', cands[1].id)
+  return 'set', cands[1].id
+end
+
+-- BUG-629 (see M.cook_labor): the stall watch (daily, T.watch). Stalled = the kitchen stands, the cook ingredients reach the planner's floor and
+-- no meal stands. The days count while no own food order is open or the open one has not moved (amount left); at cook_stall_days
+-- (6): a COOK labor on nobody is switched on, the open food order (a DF item condition that never holds, a job out that nobody
+-- finishes: PrepareMeal is a KEEP_JOBS order, T.stale never looks at it) is taken down and the next one is made without any item
+-- condition and at the top of the manager's list (p.cookw.relax, M.food_spec); one ORDER_STUCK (B) says so. Still no meal after
+-- twice the days: the diagnosis is told again, once a month. The relax ends when meals reach the citizens' number.
+function M.cook_watch(K, c, r)
+  if not r.day then return end
+  local p, inv = r.p, r.inv or {}
+  local fc = type(c.food) == 'table' and c.food or M.DEFAULTS.food
+  local need = math.max(1, math.tointeger(fc.cook_stall_days) or 6)
+  local cw = type(p.cookw) == 'table' and p.cookw or nil
+  local f = M.facts_now(K, r)
+  local ing, meals = M.cook_n(inv), math.tointeger(inv.meals) or 0
+  local kitchen = ws_any(f, {'workshop:Kitchen'})
+  if not (kitchen and ing >= M.cook_floor(c, r) and meals == 0) then
+    if cw then
+      cw.d, cw.left = 0, nil
+      if meals >= math.max(1, r.cit or 0) then p.cookw = nil end
+      K.persist.touch('m.economy')
+    end
+    st.cookw = nil
+    return
+  end
+  if not cw then cw = {d = 0, n = 0}; p.cookw = cw end
+  local o = order_by_id(p.orders['dfllm:food'])
+  local left = o and math.tointeger(o.amount_left) or nil
+  local today = r.now // DAY
+  if cw.day ~= today then
+    cw.day = today
+    if left and left > 0 and cw.left ~= left then cw.d = 0                    -- the order moved: the cooks are at work
+    else cw.d = (cw.d or 0) + 1 end
+    cw.left = left
+  end
+  st.cookw = {d = cw.d, n = cw.n or 0, relax = cw.relax ~= nil, ing = ing}
+  K.persist.touch('m.economy')
+  local holder = M.labor_holder(K, 'COOK')
+  if cw.d < need then return end
+  local act = {}
+  if not holder then
+    local how, uid = M.cook_labor(K)
+    act[#act + 1] = how == 'set' and ('Cooking labor on for unit ' .. tostring(uid)) or 'nobody holds the COOK labor'
+  end
+  if not cw.relax then
+    cw.relax, cw.n, cw.told = r.now, (cw.n or 0) + 1, r.now
+    local dropped = 0
+    if left and left > 0 and K.act.order_remove(o.id) then
+      dropped = 1
+      p.orders['dfllm:food'], st.backoff['dfllm:food'] = nil, nil
+    end
+    act[#act + 1] = dropped == 1 and 'the food order was taken down, the next one has no item condition' or
+                    'the next food order has no item condition'
+    cw.d = 0
+    local msg = string.format('cooking stalled %d days: kitchen built, %d cook ingredients, no meal, COOK labor %s, food order %s: %s',
+                              need, ing, holder and 'held' or 'on nobody', left and ('x' .. left .. ' open') or 'none open',
+                              table.concat(act, '; '))
+    K.log('warn', '%s', msg)
+    K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = o and o.id or 0, job = 'PrepareMeal', n = left or 0, days = need,
+           why = ('cook stall: ' .. table.concat(act, '; ')):sub(1, 100), dropped = dropped, kind = holder and 'input' or 'worker'})
+  elseif cw.d >= 2 * need and r.now - (math.tointeger(cw.told) or 0) >= 30 * DAY then
+    cw.told = r.now
+    local msg = string.format('cooking still stalled %d days after the order was made again: kitchen built, %d cook ingredients, no meal, ' ..
+                              'COOK labor %s, food order %s (the kitchen may be cut off or its jobs cancel: inspect orders)',
+                              cw.d, ing, holder and 'held' or 'on nobody', left and ('x' .. left .. ' open') or 'none open')
+    K.log('warn', '%s', msg)
+    K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = o and o.id or 0, job = 'PrepareMeal', n = left or 0, days = cw.d,
+           why = 'cook stall: order without condition, still no meal', dropped = 0, kind = holder and 'input' or 'worker'})
   end
 end
 
