@@ -5515,8 +5515,12 @@ function M.groups(K)
   end
   local hos = {}
   local h = K.census.h
+  -- BUG-672/673: the plant eaters and the unreachable hostiles reflex cleared (reflex.pv_ids) are no hostile group: a BREACH made by them
+  -- alone fell back to SIEGE never while they stood on the citizens' ground
+  local okp, pv = K.call('reflex', 'pv_ids')
+  pv = okp and type(pv) == 'table' and pv or {}
   for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
-    if type(e) == 'table' and int(e.x) and int(e.y) and int(e.z) then
+    if type(e) == 'table' and int(e.x) and int(e.y) and int(e.z) and not pv[e.id] then
       local g = grp(e.x, e.y, e.z)
       if g and g ~= 0 then hos[g] = (hos[g] or 0) + 1 end
     end

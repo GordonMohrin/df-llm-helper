@@ -151,6 +151,9 @@ C.EVENTS = {
   -- Run 11: d.cause far (it ended with hostiles in sight beyond reflex.lockdown_near; d.far names them, d.nfar) | quiet
   LOCKDOWN_END = {cls = 'B', by = 'reflex'}, LOCKDOWN_CLOCK = {cls = 'B', by = 'reflex'},
   PREDATOR_FAR = {cls = 'B', by = 'reflex'},
+  -- BUG-672/673/676: hostiles cleared as passive (a plant eater that never killed), unreachable (no walk group of the citizens or of an
+  -- entrance's outer side reaches them) or by the operator: d.n, id (the first), why passive | unreachable | operator, days, mode, inside
+  HOSTILE_RELEASED = {cls = 'B', by = 'reflex'},
   -- Run 11 (siege 8): the lockdown's recall of the citizens outside Kern+ (d.why done | late | end; n, left, ticks,
   -- units still out, called, burrow, eta; BUG-035: why stuck, reasons, stuck, pull, nnew, newu); a switch of the civ
   -- alert's burrow during a fight (d.from, to, why, mode)
@@ -249,14 +252,17 @@ C.VERBS = {
   ['resume']       = {mod = 'arbiter'},       -- FR-94: releases a pause DF set (pause:df, pause:popup) with the pause key
   ['trade.want']   = {mod = 'trade'},
   ['trade.retry']  = {mod = 'trade', modes = {PEACE = true}},   -- a second trade in the same visit (Run 10 y418)
+  -- BUG-675: PEACE too, for one wild animal inside the fort (the verb's own rule: military.peace_sortie)
   ['squad.sortie'] = {mod = 'military', approve = true,
-                      modes = {ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}},
+                      modes = {PEACE = true, ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}},
   ['lever']        = {mod = 'gate', modes = {PEACE = true}},
   ['inspect']      = {mod = 'kern'},
   ['selftest']     = {mod = 'selftest'},
   ['module.enable'] = {mod = 'kern'},
   ['tombs.repair'] = {mod = 'care'},
   ['ack']          = {mod = 'reflex'},
+  -- BUG-676: clear the plant eaters (or one wild animal) a lockdown stands for; any mode, approve:true
+  ['lockdown.release'] = {mod = 'reflex', approve = true},
   ['order.add']    = {mod = 'economy'},
   ['jobs.release'] = {mod = 'economy'},
   ['butcher.mark'] = {mod = 'economy'},     -- BUG-260: the animal sheet's slaughter toggle for n tame animals
@@ -265,10 +271,13 @@ C.VERBS = {
   ['bridge.rebuild'] = {mod = 'seal'},
   -- BUG-055: the nobles screen and the squads screen (outside a fight) as verbs
   ['appoint'] = {mod = 'economy'},
-  ['squad.create'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
-  ['squad.leader'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
-  ['squad.add'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
-  ['squad.uniform'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true}},
+  -- BUG-674 (Run 16b i2 Whirledrampart: 'not allowed in BREACH' for 380 days of a BREACH made by four woolly mammoths, the soldiers never
+  -- equipped): SIEGE and BREACH too; military.fight_free refuses them there (with the old text) while an invader, an undead or a great
+  -- danger is counted, i.e. in a real fight
+  ['squad.create'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true, SIEGE = true, BREACH = true}},
+  ['squad.leader'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true, SIEGE = true, BREACH = true}},
+  ['squad.add'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true, SIEGE = true, BREACH = true}},
+  ['squad.uniform'] = {mod = 'military', modes = {PEACE = true, ALERT = true, RECOVERY = true, SIEGE = true, BREACH = true}},
   -- FR-78 (Run 14 note 65): a civzone (pen, pit, pond, sand, clay, fishing, meeting, dump) in a box, quickfort zone mode
   -- BUG-450: SIEGE too, for the manager's office only (zonelib refuses every other type in a siege)
   ['zone.place'] = {mod = 'runner', modes = {PEACE = true, ALERT = true, RECOVERY = true, SIEGE = true}},

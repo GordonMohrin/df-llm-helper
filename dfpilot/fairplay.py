@@ -253,7 +253,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
 # lua/dfllm/arbiter.lua `popup_cfg`; a bad value = the default)
 CONFINE_LIM: dict = {"max_days": (0, 365), "harmless_size": (0, 5000000), "lone_max": (1, 10), "offer_days": (0, 365),
                      "need_thirst": (10000, 75000), "need_hunger": (10000, 100000), "ask_days": (0, 365),
-                     "kill_hours": (0, 720), "siege_release": "bool"}
+                     "kill_hours": (0, 720), "siege_release": "bool",
+                     "passive_days": (0, 365), "unreach_days": (0, 365)}      # BUG-672 / BUG-673
 POPUPS_LIM: dict = {"other": "bool", "other_s": (5, 600), "log_s": (60, 86400)}
 # M3 (BUG-114): siege.lua breach_stuck: ticks of a BREACH whose failed bridges stay down before it falls back to SIEGE (0 = off)
 BREACH_LIM: dict = {"stuck_ticks": (0, 4032000)}

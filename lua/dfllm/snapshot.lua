@@ -515,6 +515,52 @@ function M.far(K, x, y, z, strict)
   return ok and grp ~= 0 and not home_grp.set[grp]
 end
 
+-- BUG-673 (reflex: an ambush on a cave level no citizen can walk to is not a siege, an army at a raised bridge is): the walk groups on the
+-- outer side of the entrance points `pts` ({x, y, z} or {x, y, z} arrays): every group the tiles within r (xy) and one level of a point
+-- stand in (at most `max` tile reads), except the citizens' home groups. {[group] = true}, or nil on a fault / without a citizen or point
+function M.outer_groups(K, pts, r, max)
+  local ok, res = pcall(function()
+    local probes = M.home_probes()
+    if not probes or type(pts) ~= 'table' or #pts == 0 then return nil end
+    local home = M.home_now(probes)
+    if not home then return nil end
+    r, max = int(r) or 4, int(max) or 6000
+    local out, reads = {}, 0
+    for _, p in ipairs(pts) do
+      local px, py, pz = int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])
+      if px and py and pz then
+        for dz = -1, 1 do
+          for dx = -r, r do
+            for dy = -r, r do
+              if reads >= max then return out end
+              local pos = xyz2pos(px + dx, py + dy, pz + dz)
+              if dfhack.maps.isValidTilePos(pos) then
+                reads = reads + 1
+                local g = int(dfhack.maps.getWalkableGroup(pos)) or 0
+                if g > 0 and not home[g] then out[g] = true end
+              end
+            end
+          end
+        end
+      end
+    end
+    return out
+  end)
+  return ok and type(res) == 'table' and res or nil
+end
+
+-- BUG-673: the walkable group of one tile (0 = none), nil for an invalid tile or a fault
+function M.group_at(K, x, y, z)
+  x, y, z = int(x), int(y), int(z)
+  if not (x and y and z) then return nil end
+  local ok, g = pcall(function()
+    local pos = xyz2pos(x, y, z)
+    if not dfhack.maps.isValidTilePos(pos) then return nil end
+    return int(dfhack.maps.getWalkableGroup(pos)) or 0
+  end)
+  return ok and g or nil
+end
+
 -- BUG-665: where one tile stands for the stone census' probe: {g = walkable group (0 = none), hidden}; nil on a fault
 function M.spot(K, x, y, z)
   x, y, z = int(x), int(y), int(z)
