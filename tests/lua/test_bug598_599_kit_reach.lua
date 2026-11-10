@@ -118,12 +118,15 @@ T.test('BUG-598: gear DF keeps assigned to a vacant position or to none is given
   T.ok(#acts > before, 'released')
   local ids = {}
   for _, a in ipairs(acts) do for _, id in ipairs(a.args[1]) do ids[id] = true end end
-  T.ok(ids[vac.id] and ids[orph.id] and not ids[free.id], T.show(ids))
+  -- BUG-688: the vacant position's claim is cleared with its specs (squad_unequip, the squads screen's remove uniform); release_kit
+  -- keeps the piece DF lists for no position at all
+  T.ok(ids[orph.id] and not ids[free.id], T.show(ids))
+  T.eq(#A.positions[9].equipment.assigned_items, 0, 'the vacant position holds no gear any more')
   T.ok(logged(W, 'gear pieces DF kept assigned to a squad position that does not wear them given back'), 'kern.log says so')
   -- still assigned a second time: written off
   W.run(3600 * 6, {skip = 9})
-  T.ok(M.stock_detail('body').stuck >= 2, T.show(M.stock_detail('body')))
-  T.eq(M.stock_mats('body').any, 1, 'the stuck ones are no stock either')
+  T.ok(M.stock_detail('body').stuck >= 1, T.show(M.stock_detail('body')))
+  T.eq(M.stock_mats('body').any, 2, 'the stuck one is no stock, the vacant position gave its piece back')
   unfake()
 end)
 
@@ -248,7 +251,8 @@ T.test('BUG-598/599: the live state of Run 16a i1 (12 free melee weapons, no woo
   local d = M.stock_detail('body')
   T.eq(d.bin, 6, 'six in the forbidden bin (the bin holds no gear list in this fake: not unforbidden)')
   T.eq(d.free + d.reserved + d.stuck, 12, 'the six of the vacant positions were given back or written off')
-  T.ok(#X.acts(W, 'squad_release') >= 1, 'squad_release was sent for the reserved pieces')
+  T.ok(#X.acts(W, 'squad_unequip') >= 1, 'BUG-688: the vacant positions of A were cleared (squad_unequip), their claims with them')
+  T.eq(#A.positions[9].equipment.assigned_items + #A.positions[8].equipment.assigned_items + #A.positions[7].equipment.assigned_items, 0)
   unfake()
 end)
 

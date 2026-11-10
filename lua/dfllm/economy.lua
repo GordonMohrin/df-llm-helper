@@ -806,6 +806,21 @@ local function gear_ok(it)
   return u == nil or (u.military.squad_id or -1) >= 0
 end
 
+-- BUG-689 (Run 16d i4 Trumpetrealms y447-y456: 'gear: body 28/10 ok' with 24 pieces made by another race (loot sized for goblins) among the
+-- 36 + 24 + 29 pieces 'lying free but out of reach', B at armor 0, no armor order beside 32 bars; Run 16a i1: every slot 'ok', 'metal: 0 forge
+-- jobs'): the gear count was every piece a soldier holds or nobody owns, wearable or not. A piece made by another race than the fortress'
+-- (armor is sized for its maker) or lying on another walk group than the citizens' (flooded levels, cut-off caves: nobody fetches it) is no
+-- piece of the fort's gear: the slot counts it missing and the forge or the leatherworks makes one (`g_unusable` counts what was left out).
+-- Worn pieces always count.
+function M.wearable(a, it)
+  local f = it.flags
+  if f.in_inventory then return true end
+  local mr, race = it.maker_race, df.global.plotinfo.race_id
+  if mr ~= nil and race ~= nil and mr >= 0 and race >= 0 and mr ~= race then return false end
+  if a.far and a.far(it) then return false end
+  return true
+end
+
 -- an item (or its container) to unforbid later (FR-23/FR-25/FR-50): ids only, the flags are read again then
 M.BURST_SLICE = 25                -- FR-76: unforbids per frame in a burst (T.forbid)
 local FIX_MAX = 500                -- FR-76: a reclaimed fort's forbidden stock (T.forbid burst) needs more than 200
@@ -1223,9 +1238,10 @@ local function classify(it, a, cat)
     local g = GEAR_CAT[cat]
     if gear_ok(it) and is_armor(it, cat) then
       if g == 'shield' or g == 'quiver' then a['g_' .. g] = a['g_' .. g] + 1
+      elseif not M.wearable(a, it) then a.g_unusable = a.g_unusable + 1     -- BUG-689
       else
         local mf = mat_flags(it)
-        if mf and mf.IS_METAL then a['g_' .. g] = a['g_' .. g] + 1; a.g_metal = a.g_metal + 1
+        if mf and mf.IS_METAL then a['g_' .. g] = a['g_' .. g] + 1; a['gm_' .. g] = a['gm_' .. g] + 1; a.g_metal = a.g_metal + 1
         elseif mf and mf.LEATHER then a['g_' .. g] = a['g_' .. g] + 1 end
       end
     end
@@ -1236,7 +1252,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'rock', 'ore', 'rock_bad',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
-              'g_quiver', 'g_metal', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
+              'g_quiver', 'g_metal', 'gm_body', 'gm_head', 'gm_pants', 'gm_gloves', 'gm_shoes', 'g_unusable', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
               'w_pick_bin', 'w_axe_bin', 'w_pick_res', 'w_axe_res', 'webs', 'webs_near', 'glass', 'gems_glass', 'gems_cut', 'gems_rough', 'sand',
               'bags', 'doors', 'hatches', 'grates', 'blocks_free', 'cook_in', 'cook_ban', 'cook_ban_g', 'cook_ban_x', 'food_inedible', 'food_far',
               'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt',
@@ -1875,6 +1891,9 @@ local function gear_pre(K, c, r, hunt)
     local opened = (r.s.live[tag] or 0) * (it.out or 1)
     local miss = math.max(0, want - hv - opened)
     local rec = {want = want, sw = sw, have = hv, open = opened, miss = miss, route = miss > 0 and 'none' or 'ok'}
+    -- BUG-689: the pieces of the slot that are metal (armor slots with a leather alternative): the metal top-up of plan_gear
+    local mh = it.metal and it.leather and r.inv['gm_' .. it.cat] or nil
+    rec.mmiss = mh and math.max(0, want - mh) or 0
     res.cats[it.cat] = rec
     if miss > 0 then
       local jobs = (miss + (it.out or 1) - 1) // (it.out or 1)
@@ -2436,6 +2455,39 @@ function M.gear_stale(K, c, r, it, tag, rec, lw)
   return true
 end
 
+-- BUG-689 (Run 16d i4 Trumpetrealms y455: 'metal 0 %', 32 metal bars, body 28/10 ok in leather and loot, nothing ordered; Run 16a i1 'metal: no ore,
+-- 3 bars; 0 forge jobs'): the slot count takes a leather piece for a piece, so a fort whose soldiers wear leather never forged the metal set
+-- while the bars lay there. After every slot's own needs were planned (weapons, shields and the missing pieces first), the bars that are left
+-- (floors of the mood stock kept) make metal pieces for the armor slots that hold fewer metal pieces than soldiers (gm_<cat> < want): one order a
+-- slot, at most gear.max_jobs jobs, never while the slot's order is open, in the first metal of gear.metals that has the bars. Needs a forge.
+function M.gear_metal_topup(K, c, r, forge, magma, fc)
+  local g = c.gear
+  if not forge then return end
+  for _, it in ipairs(g.items or {}) do
+    local rec = r.gear.cats[it.cat]
+    local tag = 'dfllm:gear_' .. it.cat
+    if rec and it.metal and it.leather and rec.miss == 0 and (rec.mmiss or 0) > 0 and not open(r, tag) then
+      local jobs = (rec.mmiss + (it.out or 1) - 1) // (it.out or 1)
+      for _, m in ipairs(g.metals or {}) do
+        local tok, b = 'INORGANIC:' .. m, it.metal.bars
+        local n = math.min(jobs, left(c, r, 'bars:' .. tok) // b, left(c, r, 'bars') // b, magma and (g.max_jobs or 5) or left(c, r, 'fuel'),
+                           g.max_jobs or 5)
+        if n > 0 then
+          local spec = {job = it.metal.job, item_subtype = it.metal.sub, material = tok}
+          spec.item_conditions = {cond(b + floor_of(c, r.p, r, 'bars'), 'BAR', {material = tok}), fc}
+          if add(r, {tag = tag, spec = spec, n = n, out = it.out or 1, cat = it.cat, why = 'gear',
+                     uses = {['bars:' .. tok] = b, bars = b, fuel = magma and 0 or 1}}) then
+            rec.route = 'metal+:' .. m
+            if r.day then K.log('info', 'gear: %s: %d of %d slots hold a metal piece, bars lie there: %d %s jobs in %s', it.cat,
+                                (rec.want or 0) - rec.mmiss, rec.want or 0, n, it.metal.job, m) end
+          end
+          break
+        end
+      end
+    end
+  end
+end
+
 local function plan_gear(K, c, r)
   local g = c.gear
   local forge, lw = ws_any(r.f, g.forge), ws_any(r.f, g.leatherworks)
@@ -2532,6 +2584,7 @@ local function plan_gear(K, c, r)
       end
     end
   end
+  M.gear_metal_topup(K, c, r, forge, magma, fc)
   if #shops > 0 then
     M.ws_ask(K, r.p, 'gear', shops, (c.food or {}).request_days or 14, "workshops: soldiers' gear and levers miss a shop")
   elseif type(r.p.wsask) == 'table' then r.p.wsask.gear = nil end

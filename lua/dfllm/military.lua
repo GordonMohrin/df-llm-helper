@@ -398,6 +398,22 @@ local function bare_positions(s)
   return bare, any
 end
 
+-- BUG-688: the vacant positions (0-based as bare_positions) of a squad that still hold uniform specs or assigned gear; DF reserves
+-- gear for the specs of a vacant position as it does for an occupied one
+function M.vacant_with_specs(s)
+  local vac = {}
+  try(function()
+    for i, p in ipairs(s.positions) do
+      if (int(p.occupant) or -1) < 0 then
+        local n = #p.equipment.assigned_items
+        for _, c in ipairs(UNIFORM_CATS) do n = n + #p.equipment.uniform[c] end
+        if n > 0 then vac[#vac + 1] = i end
+      end
+    end
+  end)
+  return vac
+end
+
 -- a vacant squad-leader position assignment of the fort entity (MILITIA_COMMANDER/CAPTAIN) [S2]
 local function free_assignment()
   return try(function()
@@ -1619,16 +1635,20 @@ local function ensure_uniform(K, k, s, want)
       b.no_weapon, base = true, b
     end
     local spec = with_mats(base, rt.mats[k])
-    if any then spec.positions = bare end
+    -- BUG-688 (Run 16d i4 Trumpetrealms: 'squad.uniform B melee: 10 positions', 3-4 soldiers, B at armor 0 beside 12-22 free body armors):
+    -- only the occupied bare positions get specs, a first uniform included (it went to all 10 positions; DF reserved the free gear
+    -- for the 6-7 vacant ones, which took it from the soldiers). A position gets its specs the upkeep it is occupied (bare_positions)
+    spec.positions = bare
     if K.act.squad_uniform(s.id, spec) then
       uni = 1
       if guarded then
         for _, m in ipairs(members(s)) do
-          if not any or nw_has({nw = bare}, m.pos) then nw_set(e, m.pos, true) end
+          if nw_has({nw = bare}, m.pos) then nw_set(e, m.pos, true) end
         end
       end
     end
-    backoff(K, 'uni' .. k)                            -- re-checked next upkeep either way
+    -- BUG-688: a success needs no backoff (a soldier seated within the backoff window waited for his specs); a refusal backs off
+    if uni == 1 then cleared('uni' .. k) else backoff(K, 'uni' .. k) end
   end
   if e.uni ~= uni then e.uni, dirty = uni, true end
 end
@@ -3438,17 +3458,20 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
   for _, m in ipairs(members(s)) do filled[m.pos] = filled_cats(m.p, m.unit) end
   local groups, order, todo, kept, keptpos = {}, {}, 0, 0, 0
   try(function()
-    for i in ipairs(s.positions) do
+    for i, p in ipairs(s.positions) do
+      -- BUG-688: a vacant position gets no spec (DF reserves free gear for it: the soldiers of the squad go without)
       local keep, set = filled[i] or {}, {}
-      for _, it in ipairs(base.items) do
-        if keep[it.cat] then kept = kept + 1 else set[#set + 1] = it.cat end
-      end
-      if next(keep) then keptpos = keptpos + 1 end
-      if #set > 0 then
-        local gk = table.concat(set, ',')
-        if not groups[gk] then groups[gk] = {cats = set, pos = {}}; order[#order + 1] = gk end
-        table.insert(groups[gk].pos, i)
-        todo = todo + 1
+      if (int(p.occupant) or -1) >= 0 then
+        for _, it in ipairs(base.items) do
+          if keep[it.cat] then kept = kept + 1 else set[#set + 1] = it.cat end
+        end
+        if next(keep) then keptpos = keptpos + 1 end
+        if #set > 0 then
+          local gk = table.concat(set, ',')
+          if not groups[gk] then groups[gk] = {cats = set, pos = {}}; order[#order + 1] = gk end
+          table.insert(groups[gk].pos, i)
+          todo = todo + 1
+        end
       end
     end
   end)
@@ -4372,6 +4395,124 @@ function M.release_kit(K)
         .. 'position or none, %d unfetched for %d ticks by the soldier of an occupied one)', #ids, n_vac, n_occ, M.PEND_MAX)
 end
 
+-- BUG-688 (Run 16d i4 Trumpetrealms y447-y456: 'squad.uniform B melee: 10 positions' and B stays at armor 0 / fit 0 beside 12-22 free body
+-- armors; kern.log 'N gear pieces DF kept assigned ... given back' every 160 s with the same ids, 5-12 of them 'for a vacant position'):
+-- the squads have 10 positions each and 3-11 soldiers; every vacant position kept its uniform specs (the first uniform went to all 10, a dead
+-- soldier's position keeps hers), DF reserved the free pieces for those specs as for a soldier's, and release_kit gave them back only for
+-- them to be reserved again at DF's next equipment update. The specs (and the gear assigned to them) of every vacant position of squads
+-- A, B, C are removed (act.squad_unequip, the squads screen's remove uniform); a position gets its specs the upkeep it is occupied
+-- (bare_positions -> ensure_uniform). Once per REL_EVERY ticks. Returns the number of positions cleared.
+function M.vacant_sweep(K)
+  local now = now_tick(K)
+  if rt.vac_t and now >= rt.vac_t and now - rt.vac_t < M.REL_EVERY then return 0 end
+  rt.vac_t = now
+  local total = 0
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    local vac = s and M.vacant_with_specs(s) or {}
+    if #vac > 0 then
+      local ok, res = K.act.squad_unequip(s.id, vac)
+      if ok then
+        total = total + #vac
+        rt.resv, rt.kpi, rt.kit = nil, nil, nil
+        K.log('info', 'military: squad %s: %d vacant positions held uniform specs and the gear DF reserved for them: cleared (a position '
+              .. 'is specced when a soldier takes it)', sp.key, #vac)
+      else
+        K.log('warn', 'military: squad %s: vacant positions could not be cleared: %s', sp.key, tostring(res))
+      end
+    end
+  end
+  return total
+end
+
+-- BUG-688: why one uniform slot of a soldier is empty. Returns code, text (+ the item id when DF assigned one). Codes: nospec (no uniform spec on the
+-- position), assigned (DF assigned a piece, the soldier has not picked it up: the text says what is wrong with the piece, if anything),
+-- unlisted (a free piece lies there and DF assigned none), mat (the spec's material class matches none of the free pieces), none (no free piece in
+-- the category: the text names what keeps the lying ones back)
+M.ITEM_WHY = {{'forbid', 'forbidden'}, {'owned', 'owned by a dwarf'}, {'in_building', 'in a building'}, {'melt', 'marked for melting'},
+                  {'dump', 'marked for dumping'}, {'trader', "a merchant's"}}
+function M.item_why(K, it, unit)
+  local f, w = it.flags, {}
+  for _, x in ipairs(M.ITEM_WHY) do if f[x[1]] then w[#w + 1] = x[2] end end
+  local h = f.in_inventory and try(function() return dfhack.items.getHolderUnit(it) end) or nil
+  if h and h ~= unit then w[#w + 1] = 'carried by unit ' .. tostring(h.id) end
+  if container_blocked(it) then w[#w + 1] = 'in a forbidden bin' end
+  if piece_far(it) then w[#w + 1] = 'on another walk group' end
+  if alien_make(it) then w[#w + 1] = 'made by another race' end
+  local r = reservations()[it.id]
+  if r and (r.occ or 0) + (r.vac or 0) > 1 then w[#w + 1] = string.format('claimed by %d positions', (r.occ or 0) + (r.vac or 0)) end
+  local rec = rt.pend and rt.pend[it.id]
+  local now = tick_of()
+  if rec and now then w[#w + 1] = string.format('unfetched for %d ticks', now - rec.t) end
+  return w
+end
+function M.slot_why(K, m, c, ctx)
+  local specs = m.p.equipment.uniform[c]
+  local sp
+  for _, x in ipairs(specs or {}) do sp = sp or x end
+  if not sp then return 'nospec', 'no uniform spec on the position (ensure_uniform specs it)' end
+  local ids = {}
+  if (int(sp.item) or -1) >= 0 then ids[#ids + 1] = sp.item end
+  for _, id in ipairs(sp.assigned or {}) do ids[#ids + 1] = id end
+  for _, id in ipairs(ids) do
+    local it = df.item.find(id)
+    if it then
+      local w = M.item_why(K, it, m.unit)
+      return 'assigned', string.format('DF assigned piece %d, not worn: %s', id, #w > 0 and table.concat(w, ', ')
+                                       or 'nothing wrong with it, the soldier has not picked it up yet'), id
+    end
+  end
+  local mat = M.KIT.spec_mat(sp)
+  if c == 'weapon' then
+    ctx.wd = ctx.wd or M.weapon_detail()
+    local wd = ctx.wd
+    if wd.melee > 0 then
+      return 'unlisted', string.format('%d free melee weapons lie there and DF assigned none (equipment update pending)', wd.melee)
+    end
+    return 'none', string.format('no free melee weapon (%d forbidden, %d owned or carried, %d in bins, %d on another walk group, %d reserved, '
+                                 .. '%d stuck, %d axes/picks stay with the workers)', wd.forbid, wd.held, wd.bin, wd.far, wd.reserved,
+                                 wd.stuck, wd.tools)
+  end
+  ctx.n = ctx.n or {}
+  local n = ctx.n[c]
+  if not n then n = {m = M.stock_mats(c), d = M.stock_detail(c)}; ctx.n[c] = n end
+  if n.m.any > 0 then
+    if (mat == 'metal' or mat == 'leather') and (n.m[mat] or 0) == 0 then
+      return 'mat', string.format('spec %s, 0 free %s pieces, %d of other material lie free (refit moves the slot to any material)', mat,
+                                  mat, n.m.any)
+    end
+    return 'unlisted', string.format('%d free pieces lie there and DF assigned none (equipment update pending)', n.m.any)
+  end
+  local d, w = n.d, {}
+  for _, k in ipairs({{'soft', 'clothes only'}, {'forbid', 'forbidden'}, {'held', 'owned or carried'}, {'bin', 'in forbidden bins'},
+                      {'far', 'on another walk group'}, {'alien', 'made by another race'}, {'reserved', 'reserved for squad positions'},
+                      {'stuck', 'released twice and still lying'}, {'worn', 'worn'}}) do
+    if (d[k[1]] or 0) > 0 then w[#w + 1] = d[k[1]] .. ' ' .. k[2] end
+  end
+  return 'none', 'no free piece' .. (#w > 0 and (' (' .. table.concat(w, ', ') .. ')') or ' in the fort')
+end
+
+-- BUG-688: per squad member the uniform slots (body, head, pants, gloves, shoes, shield, weapon) that are empty: {unit, pos, slots = {cat = {code,
+-- why, item?}}}, and per slot the codes counted: {cat = {code = n}}
+function M.slot_report(K, s)
+  local ctx, out, counts = {}, {}, {}
+  for _, m in ipairs(members(s)) do
+    local on = filled_cats(m.p, m.unit)
+    local r = {unit = m.unit.id, pos = m.pos, slots = {}}
+    for _, c in ipairs(UNIFORM_CATS) do
+      if not on[c] then
+        local code, why, item = M.slot_why(K, m, c, ctx)
+        r.slots[c] = {code = code, why = why, item = item}
+        counts[c] = counts[c] or {}
+        counts[c][code] = (counts[c][code] or 0) + 1
+      end
+    end
+    out[#out + 1] = r
+  end
+  return out, counts
+end
+
 -- BUG-598: gear lying in a forbidden bin or chest is forbidden for DF (the soldiers never fetch it). In PEACE, and in RECOVERY with no
 -- hostile in sight, a forbidden container that holds nothing but gear (weapons, armor, ammo, quivers) on a tile the citizens reach is
 -- unforbidden, at most BIN_MAX a pass (the loot pass' rule for the items themselves, BUG-050). Returns the number unforbidden.
@@ -4444,6 +4585,22 @@ function M.inspect.military(K, args)
         end
       end
       r.down = (rt.sd and rt.sd[sp.key]) == true
+      -- BUG-688: per soldier and empty slot the reason, per slot the reasons counted
+      local oks, slots, counts = pcall(M.slot_report, K, s)
+      if oks then
+        r.members, r.why = slots, counts
+        local parts = {}
+        for _, c in ipairs(UNIFORM_CATS) do
+          local cc = counts[c]
+          if cc then
+            local one = {}
+            for code, n in pairs(cc) do one[#one + 1] = string.format('%d %s', n, code) end
+            table.sort(one)
+            parts[#parts + 1] = c .. ' ' .. table.concat(one, '/')
+          end
+        end
+        if #parts > 0 then r.lack = table.concat(parts, ', ') end          -- (not in the text: the reply is cut at 300 characters)
+      end
       out[#out + 1] = r
       lines[#lines + 1] = string.format('%s %d (fit %d, weapon %d, wood %d, armor %d%s)', sp.key, r.n, r.fit, r.weapon, r.wood, r.armor,
                                         r.down and ', standing down' or '')
@@ -4623,6 +4780,7 @@ function M.step(K, budget, ctx)
         else rot_idle(K, sp.key, 'target 0') end
         local own = rot and not siege                                      -- (in a siege the fill rules stay as they were)
         fill(K, sp.key, s, want, own and M.rot_source(K, s, want) or recruits, siege, own)
+        ensure_uniform(K, sp.key, s, want)                                 -- BUG-688: the recruits just seated have no specs yet
         if own and list then drop_seated(list) end
         if siege then siege_short(K, sp.key, s, want, recruits, why) end
       else rot_idle(K, sp.key, 'no squad yet') end
@@ -4647,6 +4805,8 @@ function M.step(K, budget, ctx)
   if not okf then K.log('warn', 'military feed: %s', tostring(errf)) end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
   release_tools(K)                                                     -- BUG-023: after the specs settled
+  local okv, errv = pcall(M.vacant_sweep, K)                           -- BUG-688: no specs (no gear claims) on vacant positions
+  if not okv then K.log('warn', 'military vacant_sweep: %s', tostring(errv)) end
   local okk, errk = pcall(M.release_kit, K)                            -- BUG-598: reserved gear nobody wears goes back
   if not okk then K.log('warn', 'military release_kit: %s', tostring(errk)) end
   local okb, errb = pcall(M.kit_bins, K)                               -- BUG-598: gear in forbidden bins
