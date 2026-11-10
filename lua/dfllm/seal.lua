@@ -268,17 +268,29 @@ local shape
 -- BUG-566 (BUG-503 'Open: only the tile directly above is read'; Run 16b i2 / 16d i4: PERIMETER OPEN 123 d from changing sapling / shrub
 -- tiles): a crown is up to TREE_UP levels above the ground. The column above the tile is read while it is empty air; the first tile that
 -- is not empty decides (a tree part: open sky; a floor, wall or anything built: a roof)
-local TREE_UP = 4
+-- BUG-685 (Run 16a i1 Basementflew z131, 16d i4 Trumpetrealms y450-y454: ten new 'floor' / 'pebbles' ways in on the surface in five years, each
+-- one sealed by hand, plan check refusing P5 while the perimeter was open): BUG-566's four levels are too few. A grown tree's crown starts
+-- five to eight levels above the ground (trunk 6-10 high); a floor tile beside the trunk has only empty air for four levels, the old
+-- loop ran out and called it a roof, so the shaded patch under every tall crown was 'inside' the fort, wherever it touched the
+-- citizens' group, and its rim was a new way in; the rim moved with every sapling that grew into a tree, every tree that died or was
+-- felled. The column is read up to TREE_UP levels; a tile with nothing but empty air in all of them has no roof (open sky, counted in
+-- stats.crown_hi when a crown above the old four levels decided it). A built floor / wall anywhere in the column still roofs it.
+local TREE_UP = 12
+local TREE_UP_OLD = 4
 local function open_sky(des, x, y, z)
   if des.outside then return true end
   if des.subterranean then return false end
   for dz = 1, TREE_UP do
     local s = shape(x, y, z + dz)
     if s == nil then return false end
-    if TREE_ROOF[s.shape] == true then return true end
+    if TREE_ROOF[s.shape] == true then
+      if dz > TREE_UP_OLD and mem then mem.stats.crown_hi = (mem.stats.crown_hi or 0) + 1 end
+      return true
+    end
     if s.shape ~= 'EMPTY' then return false end
   end
-  return false
+  if mem then mem.stats.crown_hi = (mem.stats.crown_hi or 0) + 1 end
+  return true
 end
 
 -- walk group of a revealed tile: nil = hidden/off-map, 0 = not walkable
@@ -5354,7 +5366,8 @@ function M.door_outside(K, ids, skip)
     if not sold[c.id] and not skip[c.id] then
       local des = rev(c.x, c.y, c.z)
       local k = key3(c.x, c.y, c.z)
-      cits[#cits + 1] = {id = c.id, g = c.g, k = k, out = des and des.outside == true,
+      -- BUG-685: the same open sky as the entrance check (a woodcutter in the shade of a tall crown is outside: the door waits for him)
+      cits[#cits + 1] = {id = c.id, g = c.g, k = k, out = des and open_sky(des, c.x, c.y, c.z) == true,
                          porch = s and s.porch and s.porch[k]}
     end
   end
