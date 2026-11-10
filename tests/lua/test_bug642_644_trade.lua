@@ -73,7 +73,7 @@ T.test('BUG-642: a stale Leaving caravan opens no O1 window', function()
   W.frame(1)
   W.run(100, {skip = 9})
   T.eq(W.gate_wants, {{'O1', 'down', 'trade'}}, 'a fresh Leaving caravan still gets its window')
-  for _ = 1, 40 do W.set_census('h', {tick = W.K.now().tick, vis = 0}); W.run(250, {skip = 10}) end
+  for _ = 1, CFG.LEAVE_STALE // 250 + 8 do W.set_census('h', {tick = W.K.now().tick, vis = 0}); W.run(250, {skip = 10}) end   -- BUG-670: relative
   T.eq(#F.events(W, 'stale'), 1)
   local n = #W.gate_wants
   W.bridge_state.O1 = 'up'

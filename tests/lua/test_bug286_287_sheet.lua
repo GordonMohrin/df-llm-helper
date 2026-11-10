@@ -103,7 +103,7 @@ T.test('BUG-287: a player screen that blocks the trade asks the player once with
   local e = asks(W)[1]
   T.eq(e.cls, 'A')
   T.eq(e.d.screen, UNIT)
-  T.ok(e.d.n >= 3, 'after BUSY_ASK tries: ' .. tostring(e.d.n))
+  T.ok(e.d.n >= 1, 'tries: ' .. tostring(e.d.n))        -- BUG-669: the question follows BUSY_TICKS, not a try count
   T.ok(#e.msg <= 200 and e.msg:find(UNIT, 1, true) ~= nil, e.msg)
   W.run(3000, {skip = 9})
   T.eq(#asks(W), 1, 'once per visit')

@@ -1168,4 +1168,77 @@ T.test('BUG-338: threat counts a building destroyer in Z3 off Kern+ as inside (B
   T.eq(W.K.mode(), 'BREACH')
 end)
 
+-- BUG-671 (Run 16a i1 Basementflew y460: PREDATOR offers 'not in sight' when sent; a lockdown for wild animals held the clock at 30 t/s for days)
+T.test('BUG-671: the PREDATOR offer is made for a unit in reach only and carries exp; out of reach none; last_seen answers for the verb', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 45, 7)
+  local W = setup{tag = 'predoffer', manifest = false, units = units, sortie = 'A'}
+  dfhack.maps.getWalkableGroup = function() return 7 end
+  W.move(400, 62, 72, Z)
+  S.run(W, 200)
+  local p = events(W, 'PREDATOR')
+  T.eq(#p, 1)
+  T.ok(p[1].d.cmd and math.type(p[1].d.exp) == 'integer' and p[1].d.exp > W.K.now().tick - 1 - 1200 and p[1].d.exp <= W.K.now().tick + 1200,
+       'the offer carries its expiry: ' .. tostring(p[1].d.exp))
+  local ok, ls = W.K.call('reflex', 'last_seen', 400)
+  T.ok(ok and ls.fresh and ls.x == 62 and ls.y == 72 and ls.age <= 300, 'last_seen names the place it stood at')
+  local ok2, none = W.K.call('reflex', 'last_seen', 12345)
+  T.eq({ok2, none}, {true, nil})
+  -- out of reach (a walk group of its own): PREDATOR without an offer
+  local units2 = S.fort_units()
+  units2[#units2 + 1] = S.danger(400, 150, 30)
+  local W2 = setup{tag = 'predoffer0', manifest = false, units = units2, sortie = 'A', cfg = {reflex = {v = 2, predator_near = 0}}}
+  dfhack.maps.getWalkableGroup = function(q) return q.x >= 100 and 9 or 7 end
+  S.run(W2, 200)
+  local p2 = events(W2, 'PREDATOR')
+  T.eq(#p2, 1)
+  T.eq({p2[1].d.reach, p2[1].d.cmd, p2[1].d.exp}, {0, nil, nil})
+end)
+
+T.test('BUG-671: a PREDATOR lockdown releases its clock after PRED_CLOCK_DAYS with nothing inside Kern+; a new default of it brings the alert only', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 150, 30)
+  local W = setup{tag = 'predclock', manifest = false, ms_per_frame = 500, units = units, cfg = {reflex = {v = 2, ack_timeout_s = 10, hold_quiet_days = 30}}}
+  W.move(2, 138, 30, Z)                              -- a woodcutter 12 tiles from it: PREDATOR
+  S.run(W, 200)
+  T.eq(#events(W, 'PREDATOR'), 1)
+  S.run(W, 9 * 30)                                   -- 15 s unacked
+  local l = events(W, 'LOCKDOWN')
+  T.eq({#l, l[1].d.type, cap(W)}, {1, 'PREDATOR', 30})
+  local days = require('dfllm.reflex').PRED_CLOCK_DAYS
+  S.run(W, days * 1200 - 900)
+  T.eq({#events(W, 'LOCKDOWN_CLOCK'), cap(W)}, {0, 30}, 'the clock is held until the days are over')
+  S.run(W, 1000)
+  local c = events(W, 'LOCKDOWN_CLOCK')
+  T.eq({#c, c[1] and c[1].cls, c[1] and c[1].d.days}, {1, 'B', days}, 'said once')
+  T.ok(cap(W) ~= 30, 'the clock is free again: ' .. tostring(cap(W)))
+  T.ok(c[1].msg:find('the civ alert and the recall stay', 1, true), c[1].msg)
+  -- the same lockdown gets another PREDATOR: its default is the alert, never the clock again
+  T.eq(W.state().alarm.lock, 1, 'the lockdown itself stands (alert, recall)')
+  W.inbox('ack', {})
+  W.move(400, 150, 100, Z)                           -- it walks off for more than REARM ticks and comes back
+  S.run(W, 1500)
+  W.move(400, 150, 30, Z)
+  S.run(W, 200)
+  S.run(W, 9 * 30)
+  local l2 = events(W, 'LOCKDOWN')
+  T.eq(#l2, 2, 'the second default ran')
+  T.ok(not l2[2].msg:find('clock 30 t/s', 1, true), l2[2].msg)
+  T.ok(cap(W) ~= 30, 'the second default does not take the clock again: ' .. tostring(cap(W)))
+  T.eq(#events(W, 'LOCKDOWN_CLOCK'), 1)
+end)
+
+T.test('BUG-671: a hostile inside Kern+ keeps the clock clamp of a PREDATOR lockdown', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.danger(400, 62, 72)           -- inside the fort, beside a citizen in Kern+
+  local W = setup{tag = 'predclock2', manifest = false, ms_per_frame = 500, units = units}
+  S.run(W, 200)
+  S.run(W, 9 * 140)
+  T.eq(cap(W), 30)
+  S.run(W, require('dfllm.reflex').PRED_CLOCK_DAYS * 1200 + 2400)
+  T.eq(#events(W, 'LOCKDOWN_CLOCK'), 0)
+  T.eq(cap(W), 30, 'held while it stands inside')
+end)
+
 T.done()
+

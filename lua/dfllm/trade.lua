@@ -111,7 +111,10 @@ M.CFG = {
   -- wandered ownerless on the map): a caravan that is Leaving this long has not left; its visit is over (nothing more to trade, no
   -- O1 window, no 'caravan on the map' for the gate and the supervisor), and it is said once. OVERDUE_TICKS = no caravan listed
   -- at all this long (a year is 403,200 ticks) -> CARAVAN overdue with the depot's access
-  LEAVE_STALE = 7200,
+  -- BUG-670 (Run 16a i1 Basementflew y1xx: every caravan was 'stale' 7,200 ticks after it began to leave, DECISION_NEEDED caravan_stale each time, and
+  -- left on its own 8,000-18,000 ticks later: 662 goods to pack up take the merchants about 25,000 ticks; Wallfree's stale one stood for years):
+  -- a month and a bit (36 days), well over the longest real leave seen
+  LEAVE_STALE = 43200,
   OVERDUE_TICKS = 504000,
   O1_EVERY = 600,       -- ticks between two gate.want('down') for the same bridge
   FRESH = 200,          -- census.h older than this = unknown (no O1 window)
@@ -125,7 +128,8 @@ M.CFG = {
   -- from opening the depot sheet until the map has stood SETTLE_MS (real) after our close, a sheet or trade screen on top is
   -- the kernel's own and is closed with Esc (at most LEFT_TRIES times, then it counts as the player's)
   SETTLE_MS = 3000, LEFT_TRIES = 4,
-  BUSY_ASK = 3,         -- BUG-287: ui_busy tries of one visit before DECISION_NEEDED trade_screen (once per visit)
+  BUSY_ASK = 3,         -- BUG-287: (kept for the contract; BUG-669: the question now waits BUSY_TICKS)
+  BUSY_TICKS = 1200,    -- BUG-669: ticks a player screen stands over the blocked trade before DECISION_NEEDED trade_screen (once per visit)
   MIS_MAX = 2,          -- BUG-305: Trade clicks of one attempt that opened another screen (a unit sheet) before it ends 'misclick'
   READS = 1000,         -- screen tiles read per frame (CONTRACTS §3.2: <= 2,000 tiles per slice)
   REPLY_ROWS = 12,      -- top interface rows read for the merchant reply [live-untested: position]
@@ -1389,24 +1393,12 @@ local function finish(K, ok, why, ratio)
       caravan_ev(K, 'blocked', ent, {why = why, focus = fc},
                  'trade with ' .. civ_name(ent) .. ' blocked: a player screen is open (' .. fc .. '); close it')
     end
-    -- BUG-287 (Run 15: x7-x14 'blocked' log lines, then the caravan left untraded): after BUSY_ASK tries the player is asked
-    -- once per visit with the screen's name; only he closes his screen (the kernel never touches it)
+    -- BUG-669 (Run 16a i1 Basementflew: a unit sheet of the player stood over 27,000 ticks of three caravans, every retry was a 6 s OPEN phase with
+    -- the trade clock on): the block is remembered (v.sb, tick) and step_wait looks at the focus only; the trade is tried again at once when
+    -- the map is back. The kernel never closes the screen (BUG-287). The question follows BUSY_TICKS later (screen_ask)
     if v then
       v.busy, dirty = (v.busy or 0) + 1, true
-      if v.busy >= M.CFG.BUSY_ASK and (v.asked or 0) == 0 then
-        v.asked = 1
-        local fc = 'unknown'
-        pcall(function() fc = table.concat(dfhack.gui.getCurFocus(true), '|') end)
-        fc = fc:sub(1, 80)
-        local car = car_of(read_caravans(), ent)
-        local left = car and int(car.tr) * M.CFG.TR_TICKS or -1
-        K.emit('DECISION_NEEDED', 'A', string.format('trade with %s blocked %d times by the screen %s: close it in DF (Esc)',
-                                                     civ_name(ent), v.busy, fc):sub(1, 200),
-               {id = 'trade_screen', screen = fc, n = v.busy,
-                q = string.format('the screen %s stands over the map, so the kernel cannot open the trade with %s ' ..
-                                  '(%d ticks left): close it in DF (Esc); the kernel never closes a player screen',
-                                  fc, civ_name(ent), left):sub(1, 200)})
-      end
+      if (v.sb or 0) == 0 then v.sb = K.now().tick end
     end
   else
     -- BUG-026: which phase ran how long (a ui_timeout used to name nothing): real ms (ph_ms), ms on the module's own
@@ -1423,7 +1415,9 @@ local function finish(K, ok, why, ratio)
     if room then wait = math.min(wait, math.max(M.CFG.RETRY_MIN, room - M.CFG.RETRY_KEEP)) end
     v.retry = K.now().tick + wait
     local nf = {ph_ms = K.now().ms, ph_tick = K.now().tick}
-    for _, k in ipairs({'req', 'anyone', 'fb', 'fs', 'g_val', 'g_up', 'g_tick', 'need', 'ui'}) do nf[k] = f and f[k] end
+    for _, k in ipairs({'req', 'anyone', 'fb', 'fs', 'g_val', 'g_up', 'g_tick', 'need', 'ui'}) do
+      if not (k == 'ui' and why == 'ui_busy') then nf[k] = f and f[k] end      -- BUG-669: waiting for the player's screen holds no trade clock
+    end
     rt.f = nf
     return set_phase(K, 'WAIT', why)
   end
@@ -1677,7 +1671,8 @@ local function time_out(K, c, d, now)
   K.log('warn', 'trade: time out in %s: %d time left, at depot %d ticks, trader %s, goods %s, broker req %s anyone %s',
         tostring(rt.phase), c.tr or -1, (v and v.at >= 0) and (now - v.at) or -1,
         tostring(d and trader_at(d) or false), tostring(f.g_val), tostring(f.req), tostring(f.anyone))
-  return finish(K, false, 'time')
+  -- BUG-669: a visit the player's screen blocked ends 'screen', not 'time' (the ledger and the unmet list say who held it up)
+  return finish(K, false, (v and (v.busy or 0) > 0 and (v.traded or 0) == 0) and 'screen' or 'time')
 end
 
 -- live L4: with "Broker requested" and "Anyone can Trade" set, DF 53 posted no TradeAtDepot job in 27,500
@@ -1712,12 +1707,37 @@ local function broker_job(K, d, f, now, at_for)
   end
 end
 
+-- BUG-669 (BUG-287): a player screen has stood over the blocked trade for BUSY_TICKS: the player is asked once per visit with the
+-- screen's name; only he closes his screen (the kernel never touches it)
+local function screen_ask(K, ent, v, fl, now)
+  if (v.asked or 0) ~= 0 or now - v.sb < M.CFG.BUSY_TICKS then return end
+  v.asked = 1
+  local fc = table.concat(fl, '|'):sub(1, 80)
+  if fc == '' then fc = 'unknown' end
+  local car = car_of(read_caravans(), ent)
+  local left = car and int(car.tr) * M.CFG.TR_TICKS or -1
+  K.emit('DECISION_NEEDED', 'A', string.format('trade with %s blocked for %d ticks by the screen %s: close it in DF (Esc)',
+                                               civ_name(ent), now - v.sb, fc):sub(1, 200),
+         {id = 'trade_screen', screen = fc, n = v.busy or 1,
+          q = string.format('the screen %s stands over the map, so the kernel cannot open the trade with %s ' ..
+                            '(%d ticks left): close it in DF (Esc); the kernel never closes a player screen and tries the trade ' ..
+                            'again by itself the moment the map is back', fc, civ_name(ent), left):sub(1, 200)})
+end
+
 local function step_wait(K, cars, now)
   local f, c = rt.f, car_of(cars, rt.ent)
   local v = visit(rt.ent)
   if not c or not v then return finish(K, false, 'gone') end
   if c.bad then return finish(K, false, 'offended') end
   if c.state == 'Leaving' then return finish(K, false, 'leaving') end
+  -- BUG-669: blocked by the player's screen: nothing is tried (no 6 s OPEN phase, no trade clock) until the map is back, then at once
+  if (v.sb or 0) > 0 then
+    if c.state == 'AtDepot' and c.tr < M.CFG.OPEN_MIN then return time_out(K, c, nil, now) end
+    local fl = focus_list()
+    if not on_map(fl) then return screen_ask(K, c.ent, v, fl, now) end
+    K.log('info', 'trade: the screen over the trade of %s is gone after %d ticks: trying again now', civ_name(c.ent), now - v.sb)
+    v.sb, v.retry, dirty = 0, -1, true
+  end
   if v.retry > now or (f.unload_until or -1) > now or K.mode() ~= 'PEACE' then return end
   local d = find_depot(K)
   if not d then
@@ -2077,7 +2097,7 @@ end
 
 ---------------------------------------------------------------- module
 local VISIT_KEYS = {'first', 'at', 'tries', 'traded', 'stuck', 'set', 'orig_r', 'orig_a', 'retry', 'ratio',
-                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered', 'dep', 'busy', 'asked', 'lv', 'stale'}
+                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered', 'dep', 'busy', 'asked', 'lv', 'stale', 'sb'}
 local NEG_DEFAULT = {at = true, retry = true, stuck_since = true, dep = true, lv = true}
 
 -- BUG-026: the kernel boost while this visit is on: begun (WAIT, a pending retry included) with the caravan at the

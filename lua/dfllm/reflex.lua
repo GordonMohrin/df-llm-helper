@@ -137,6 +137,8 @@ M.KEEP = 20                -- interrupts kept for alarm.txt and the ack bookkeep
 M.DOOR_EVERY = 2400        -- ticks between entrance-door scans (a trigger without a fresh list scans at once)
 M.DOOR_MAX = 400           -- doors looked at per scan
 M.REARM = 1200             -- INTRUDER/PREDATOR again only after this many ticks without one
+M.OFFER_TTL = 1200         -- BUG-671: ticks a sortie offer (event field `exp`) stays valid for a unit that went out of sight since
+M.PRED_CLOCK_DAYS = 3      -- BUG-671: game days a PREDATOR default may hold the clock at the lockdown cap with nothing inside Kern+
 M.BD_NEAR = 30             -- BUG-338: a wild building destroyer this close (xy) to a bridge on its levels is never far
 M.ETA_TILE = 6             -- ticks per tile for the ETA (dwarves and goblins walk ~9, fast beasts less)
 M.FRESH = 200              -- census.h older than this is unknown (never quiet, no sighting)
@@ -1870,13 +1872,28 @@ local function unit_facts(K, e)
   if type(e.rn) == 'string' and e.rn ~= '' then f.race = e.rn; bits[#bits + 1] = e.rn end
   if math.type(e.sz) == 'integer' then f.sz = e.sz; bits[#bits + 1] = e.sz .. ' cm3' end
   if math.type(e.rc) == 'integer' then f.reach = e.rc; bits[#bits + 1] = REACH_TXT[e.rc] end
-  if e.k == 'danger' or e.k == 'inv' then
+  -- BUG-671 (Run 16a i1 Basementflew y460: a Dimetrodon walking through the fort, three PREDATOR offers, each 'not in sight' when sent): the
+  -- offer is made for a unit that is in sight now (it is in this census) and not out of reach (rc 0); `exp` is the tick up to which
+  -- the verb still takes it when the unit has gone out of sight meanwhile (M.last_seen); later it is refused with that reason
+  if (e.k == 'danger' or e.k == 'inv') and e.rc ~= 0 then
     local ok, key = K.call('military', 'sortie_squad')
     if ok and type(key) == 'string' then
       f.cmd = string.format('dfllm cmd squad.sortie \'{"squad":"%s","target":[%d,%d,%d],"unit":%d,"approve":true}\'', key, e.x, e.y, e.z, e.id)
+      f.exp = K.now().tick + M.OFFER_TTL
     end
   end
   return f, #bits > 0 and (' [' .. table.concat(bits, ', ') .. ']') or ''
+end
+
+-- public (military, squad.sortie): where a hostile of the census stood the last time inside_scan saw it, and how long ago:
+-- {x, y, z, age, fresh, ttl} (fresh = within OFFER_TTL), nil when it was never seen (or long ago). A sortie on a unit that went out of sight
+-- since the offer is taken while fresh (the sortie's own unseen clock, sortie.idle_ticks, ends it); after that it is refused
+function M.last_seen(K, id)
+  local e = rt.seen and rt.seen[id]
+  if not e then return nil end
+  local age = K.now().tick - e.t
+  if age < 0 then return nil end
+  return {x = e.x, y = e.y, z = e.z, age = age, fresh = age <= M.OFFER_TTL, ttl = M.OFFER_TTL}
 end
 
 local function inside_scan(K, h, now)
@@ -1884,7 +1901,10 @@ local function inside_scan(K, h, now)
   local near, nf, far_one, far_dc = cfg(K).predator_near, 0, nil, -1
   local okx, expects = K.call('siege', 'expects')
   local wave = okx and expects == true
+  rt.seen = rt.seen or {}
+  for id, e in pairs(rt.seen) do if now < e.t or now - e.t > 4 * M.OFFER_TTL then rt.seen[id] = nil end end
   for _, e in ipairs(h.list or {}) do
+    rt.seen[e.id] = {x = e.x, y = e.y, z = e.z, t = now}               -- BUG-671: the place a unit in sight stood at (M.last_seen)
     local ok, far = true, false
     if (e.k ~= 'danger' or rt.hlset[e.id]) and rt.fset[e.id] then far = true
     elseif wave and (e.zn or 0) < 2 then far = true
@@ -2305,6 +2325,24 @@ function M.overlimit_step(K, h, now)
   K.log('warn', 'reflex: %s', q)
 end
 
+-- BUG-671 (Run 16a i1 Basementflew y460: a Dimetrodon, then others, one PREDATOR lockdown after the other: the clock at 30 t/s for days
+-- although nothing came near Kern+): a lockdown that only an unacked PREDATOR default made holds the CLOCK at most PRED_CLOCK_DAYS game
+-- days, while nothing stands inside Kern+ (PEACE/ALERT, a fresh census). The civ alert, the recall and the doors go on; a later PREDATOR
+-- default of the same lockdown brings the alert back without the clock (hold.clk_off). LOCKDOWN_CLOCK (B) says it once
+local function clock_step(K, h, now)
+  local hd = st.hold
+  if not hd or not hd.acts.clock or not hd.why:find('^unacked:PREDATOR') or not FAR_MODES[K.mode()] then return end
+  for k in pairs(hd.kinds) do if k ~= 'unacked' then return end end
+  if now - hd.since < M.PRED_CLOCK_DAYS * 1200 then return end
+  if type(h) ~= 'table' or now - (h.tick or -1e9) > M.FRESH or (h.inside or 0) > 0 then return end
+  hd.acts.clock, hd.clk_off, dirty = nil, now, true
+  K.call('arbiter', 'hold')
+  local msg = string.format('lockdown %s: the clock is released after %d days; no hostile inside Kern+ (the civ alert and the recall stay)',
+                            hd.why, (now - hd.since) // 1200)
+  K.emit('LOCKDOWN_CLOCK', 'B', msg, {why = hd.why, days = (now - hd.since) // 1200})
+  K.log('info', 'reflex: %s', msg)
+end
+
 -- the lockdown's own clock: confine.max_days after it began it ends in PEACE/ALERT unless a dangerous hostile is near
 local function confine_step(K, h, now)
   local hd = st.hold
@@ -2575,6 +2613,11 @@ local function ack_step(K, now)
     if r.n > (st.ack.n or 0) and r.done == 0 and age >= c.ack_timeout_s then
       r.done, dirty = 1, true
       local acts = c.defaults[r.type] or {}
+      if r.type == 'PREDATOR' and st.hold and st.hold.clk_off then            -- BUG-671: this lockdown's clock was released
+        local keep = {}
+        for _, a in ipairs(acts) do if a ~= 'clock' then keep[#keep + 1] = a end end
+        acts = keep
+      end
       -- Run 11: no default for an INTRUDER/PREDATOR whose unit is far now (expired far, or listed beyond lockdown_near):
       -- the same far unit never re-applies the lockdown; it re-arms once it comes within lockdown_near
       local far = #acts > 0 and (r.type == 'INTRUDER' or r.type == 'PREDATOR') and unit_far(K, r.u)
@@ -2674,7 +2717,7 @@ function M.init(K)
     if type(h) == 'table' and type(h.why) == 'string' then
       st.hold = {why = h.why, kinds = {}, acts = {}, since = int(h.since) or 0, last = int(h.last) or 0, qs = nil,
                  alert_on = h.alert_on == true, alert_at = int(h.alert_at), doors_at = int(h.doors_at),
-                 alert_t = int(h.alert_t), wait = int(h.wait), fresh = int(h.fresh)}
+                 alert_t = int(h.alert_t), wait = int(h.wait), fresh = int(h.fresh), clk_off = int(h.clk_off)}
       for k, v in pairs(type(h.kinds) == 'table' and h.kinds or {}) do if v == true then st.hold.kinds[k] = true end end
       for k, v in pairs(type(h.acts) == 'table' and h.acts or {}) do if v == true then st.hold.acts[k] = true end end
       local rc = h.rc                                      -- Run 11: an open recall survives a reload
@@ -2764,6 +2807,7 @@ function M.step(K, budget, ctx)
   cause_scan(K, h)                                         -- BUG-065: the cause for state/status, then the limit
   offer_step(K, h, now)
   confine_step(K, h, now)
+  clock_step(K, h, now)                                    -- BUG-671
   M.overlimit_step(K, h, now)                              -- BUG-452: SIEGE/BREACH past the limit
   lone_step(K, h, now)                                     -- M3 (BUG-112)
   need_step(K, h, now)
