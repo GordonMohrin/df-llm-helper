@@ -1479,6 +1479,13 @@ AVOID_MARKS = ("cavern", "damp", "warm")
 
 EXPLORE_FAR = 8                       # BUG-584: score per tile (x/y) a new probe lies from the nearest earlier one, up to EXPLORE_FAR_MAX tiles
 EXPLORE_FAR_MAX = 30
+# BUG-683 (Run 16d i4 Trumpetrealms y452-y456: probes 4, 2, 2, 1 tiles from the nearest of 47-51 earlier ones, every one found mudstone / soil):
+# an earlier probe within EXPLORE_NEAR tiles (x/y) whose anchor lies less than EXPLORE_NEAR_Z levels from the new one has seen the same rock;
+# each such probe costs EXPLORE_REPEAT score (up to EXPLORE_REPEAT_MAX of them), so a start beside none, or on another layer, always ranks first
+EXPLORE_NEAR = 8
+EXPLORE_NEAR_Z = 3
+EXPLORE_REPEAT = 150
+EXPLORE_REPEAT_MAX = 6
 
 
 EXPLORE_RING = 3                      # BUG-453: tiles a side tunnel keeps from any revealed opening, water or mark
@@ -1617,6 +1624,7 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
     # ranking kept offering that neighbourhood): the earlier probes of the fort (manifest `explored`, cmd._with_explored) are rock the
     # fort knows; a new probe scores higher the farther it lies from the nearest of them
     done_at = [(int(a[0]), int(a[1])) for a in (manifest.get("explored") or []) if isinstance(a, (list, tuple)) and len(a) == 3]
+    done_z = [(int(a[0]), int(a[1]), int(a[2])) for a in (manifest.get("explored") or []) if isinstance(a, (list, tuple)) and len(a) == 3]
     n_all = n_ref = n_hit = n_redo = n_geom = 0                # BUG-528: how many anchors each test took out (the message says so)
     geo: dict = {}                                             # BUG-625: (anchor z, what met the shaft, shaft level w) -> anchors
     for i in _anchor_tiles(g, "explore", p, manifest):
@@ -1657,6 +1665,12 @@ def _explore(snap, p, rects, bad, hid, mk, manifest, wet=None):
                 dist = int(min(((ax - px) ** 2 + (ay - py) ** 2) ** 0.5 for px, py in done_at))
                 far = EXPLORE_FAR * min(dist, EXPLORE_FAR_MAX)
                 far_why = f", {dist} tiles from the nearest of {len(done_at)} earlier probe(s)"
+                same = sum(1 for px, py, pz in done_z if abs(az - pz) < EXPLORE_NEAR_Z
+                           and ((ax - px) ** 2 + (ay - py) ** 2) ** 0.5 <= EXPLORE_NEAR)
+                if same:                                     # BUG-683: the rock round it is known; another start sees more
+                    far -= EXPLORE_REPEAT * min(same, EXPLORE_REPEAT_MAX)
+                    far_why += (f"; REPEAT: {same} earlier probe(s) within {EXPLORE_NEAR} tiles on this layer saw its rock already "
+                                f"(a start {EXPLORE_NEAR}+ tiles away or {EXPLORE_NEAR_Z}+ levels off ranks first)")
             out.append({"anchor": [ax, ay, az], "rot": rot, "box": box,
                         "score": max(0, 1000 - 5 * steps + EXPLORE_LEVEL * (top - az) + far),
                         "why": f"rot{rot}, {top - az} levels below the top of the core, shaft to z{az - p['depth']}, "

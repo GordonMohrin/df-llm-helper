@@ -754,6 +754,10 @@ def pop_items(ctx: Ctx) -> list[tuple[int, str]]:
         gap = bool(r.get("dref")) or any(w in str(r.get("dhold") or "") for w in ("no_outer", "no_inner", "no bridges"))
         if r["drill_age"] < 0:                 # FR-65: say why no drill ran and how to run one
             how = "" if r.get("dref") else ("; build fortcore stage 2/3 first" if gap else "; run dfllm cmd drill")
+            br = s.get("bridges") if isinstance(s.get("bridges"), dict) else {}
+            rep = [n for n in ("O1", "B1") if br.get(n) == "replaced"]
+            if rep and not r.get("dref"):         # BUG-682: a gate given up for wall + door: stage 3 does not bring it back
+                how = f"; {', '.join(rep)} replaced by wall + door after repeated losses: no gate, no drill until one stands"
             if r.get("dhold"):
                 drill += f" (auto: {r['dhold']}{how})"
             elif not r.get("dref"):                # (with dref the [N refused: ...] below says what to do)

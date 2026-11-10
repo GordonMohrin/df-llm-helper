@@ -196,6 +196,7 @@ NEXT["PROJECT_STALE"] = ("tell Gordon what follow cancelled (d.msg: project, tem
                          "missing mechanisms itself); dfllm plan propose y.json draws the template again with the material in reach, "
                          "plan check, plan apply; a core, seal or water project is never cancelled this way (PROJECT_BLOCKED why=stale)")
 STALE_CHECK_EVERY_S = 600                      # BUG-435: how often follow looks at the set-aside projects
+CEILING_EVERY_S = 300                          # BUG-680: how often follow re-reads the held pop ceiling of the applied plan
 CORE_SITE_EVERY_S = 300                        # BUG-441: how often follow looks for a queued core above / in the aquifer
 ORPHAN_FIRST_S = 120                           # BUG-442: the first sweep of a save folder comes this long after follow saw it
 ORPHAN_EVERY_S = 900                           # BUG-442: how often follow asks the kernel about bp files it may not know
@@ -893,6 +894,7 @@ class Follower:
         self.plan_auto: dict = {}              # FR-86: first_y (the year follow first saw no plan), tried_y, applied_y
         self._plan_read = 0.0
         self._stale_read = 0.0
+        self._ceiling_read = 0.0                     # BUG-680: wall of the last held-ceiling look
         self._stale_tried: dict[str, float] = {}     # BUG-435: project id -> wall of the last cancel try
         self._orphan_read = 0.0                      # BUG-442: wall of the last orphan sweep
         self._core_gate_said: dict[str, int] = {}    # BUG-441: how often the core gate said DECISION_NEEDED, per kind
@@ -1011,6 +1013,7 @@ class Follower:
         self._check_quicksave(now)
         self._check_plan(now)
         self._check_stale(now)
+        self._check_ceiling(now)
         self._sweep_orphans(now)
         self._check_core_site(now)
         if self.auto or self.audit:
@@ -1355,6 +1358,22 @@ class Follower:
                                          f"({msg})", now)
         except Exception as ex:                        # noqa: BLE001 - the plan check must never stop the follower
             self._fail("minimal plan", f"{type(ex).__name__}: {ex}", now)
+
+    def _check_ceiling(self, now: float) -> None:
+        """BUG-680 (Run 16d i4 Trumpetrealms y447: the plan's pop ceiling 31 'held: defence short, armor worn 10 %' stayed a year after worn
+        rose to 57 %, 'migrants blocked'): in PEACE the applied plan's HELD ceiling is compared with the defence gaps of now and raised
+        when they are closed or soft (plan.ceiling_refresh writes plan.json, plan.reload follows); never lowered, never with --no-auto."""
+        if not self.auto or self.dir is None or now - self._ceiling_read < CEILING_EVERY_S:
+            return
+        self._ceiling_read = now
+        try:
+            hit = plan_mod.ceiling_refresh(self.dir)
+            if hit:
+                self._send("plan.reload", {}, "plan reload (ceiling)", now)
+                self._synth("PLAN_AUTO", f"BUG-680: the applied plan's held pop ceiling was raised by follow: ceiling {hit[0]} -> {hit[1]} "
+                                         "(the defence gaps that held it are closed or soft now)", now)
+        except Exception as ex:                        # noqa: BLE001 - the ceiling look must never stop the follower
+            self._fail("held ceiling", f"{type(ex).__name__}: {ex}", now)
 
     def _check_stale(self, now: float) -> None:
         """BUG-435 (Run 16d i4 Mazelanterns y401: traps 912 d, tombs 461 d 'waits for trapparts', fortcore 341 d, nine projects set aside

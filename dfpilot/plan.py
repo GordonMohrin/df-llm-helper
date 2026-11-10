@@ -1936,6 +1936,28 @@ def perimeter_waiver(doc: dict, s: dict, fort: dict | None, prev: dict | None) -
     return None
 
 
+def r0_roles(s: dict | None) -> list[str]:
+    """BUG-682: the gate roles readiness R0 misses now ('no_outer', 'no_inner' of state ready.fail)."""
+    fails = ((s or {}).get("ready") or {}).get("fail")
+    return [f for f in fails if f in ("no_outer", "no_inner")] if isinstance(fails, list) else []
+
+
+def replaced_gate_note(s: dict | None, fort: dict | None) -> str:
+    """BUG-682 (Run 16d i4 Trumpetrealms y451-y453: O1 lost three times, the kernel put wall + door in its place, fortcore stage 3 @same was
+    100 % and R0 `no_outer` stayed for weeks, the drill 'never'): when readiness misses a gate role and the bridge of that role is 'replaced'
+    (state bridges) no stage is drafted for it and the notes say so; '' otherwise."""
+    roles = r0_roles(s)
+    br = (s or {}).get("bridges")
+    if not roles or not isinstance(br, dict):
+        return ""
+    rep = [n for n in ("O1", "B1") if br.get(n) == "replaced"]
+    if not rep:
+        return ""
+    return (f"; BUG-682: R0 {', '.join(roles)} stays: {', '.join(rep)} {'was' if len(rep) == 1 else 'were'} replaced by wall + door "
+            "after repeated losses (the keeper gives a destroyed gate up), so fortcore stage 3 does not bring it back and none is "
+            "drafted for it; no automatic drill runs until a gate stands again (dfllm cmd inspect what=defense)")
+
+
 def stage3_due(s: dict, fort: dict, done: set, builds: list) -> bool:
     """propose (DECISIONS 1): O1 or B2 does not stand (state bridges) while the refuge burrow exists, a fortcore stands to
     anchor stage 3 on, and no stage 3 is applied, under way or drafted already (a fort without a refuge burrow gets it
@@ -1944,7 +1966,9 @@ def stage3_due(s: dict, fort: dict, done: set, builds: list) -> bool:
     f = fort.get("refuge") or {}
     if not isinstance(br, dict) or not isinstance(ref, dict) or not ref.get("ex"):
         return False
-    return any(br.get(n) not in BRIDGE_STANDING for n in ("O1", "B2")) and bool(f.get("fortcore")) \
+    # BUG-682 (Run 16d i4 Trumpetrealms y451: R0 `no_outer` for weeks, propose drafted only explore): a bridge 'replaced' by wall + door counts as
+    # standing above (open_perimeter) but clears no R0 role: while readiness lists no_outer / no_inner, stage 3 is still the build that makes the gate
+    return (any(br.get(n) not in BRIDGE_STANDING for n in ("O1", "B2")) or bool(r0_roles(s))) and bool(f.get("fortcore")) \
         and not f.get("stage3") and ("fortcore", 3) not in done and not fort.get("o1") \
         and not any(_refuge_stage(b) for b in builds) and not no_core_why(fort)       # BUG-551: no stage 3 that cannot be built
 
@@ -3555,6 +3579,12 @@ def fit_explore(save_dir: Path, doc: dict, prev: dict | None) -> str | None:
                 for _, b in new:
                     b["p"] = {**(b.get("p") or {}), "depth": d, **extra}
             line = f"{EXPLORE}: depth {d} at {sites[0]['anchor']} ({sites[0]['why']})"
+            if "REPEAT" in str(sites[0].get("why")):
+                # BUG-683 (Run 16d i4 Trumpetrealms y452-y456: probes 1-4 tiles from 47-51 earlier ones, mudstone every time): the best start left
+                # lies on rock the fort's probes saw; the plan says so and the stone comes from the caravans meanwhile
+                doc["notes"] += (f"; BUG-683: the best {EXPLORE} site lies within {sites[0].get('why').split('REPEAT: ')[1].split(' ')[0]} "
+                                 "earlier probe(s) on this layer (their rock is known): another shaft there probably shows the same stone; "
+                                 "p.depth for another layer, trade.want stone, or open a new core level first")
             heavy = heavy_explore_levels(save_dir)
             if heavy:                                    # BUG-468: the shaft stops above a level a dig of ours met a heavy aquifer on
                 hz = ",".join(f"z{z}" for z in heavy)
@@ -3738,6 +3768,11 @@ def noparts_reason(s: dict | None) -> str:
     # trap waits for a part, and 'ordered' / 'stone' (an order is open) held the gate off while the earlier traps project hung at 'waits for
     # trapparts x1' for years): stock.mtp = the parts the planned traps wait for; traps that already wait with none free make a new lane
     # pointless (it would wait behind them), whatever the route
+    # BUG-681 (Run 16a i1 Basementflew y470-y486: 19 mechanisms 'free', all in the flooded level, the traps project 'waits for trapparts' 300 d and
+    # propose drew traps@S1 every year): stock.mfree counts the parts a citizen can walk to; stock.mfar the free ones that lie out of reach
+    far = stock.get("mfar")
+    if _nat(far) and far > 0 and route not in ("ordered", "stone"):
+        return f"no trap part a citizen can reach: {far} free mechanism(s) lie out of reach (flooded or another walk group), none is being made"
     waits = stock.get("mtp")
     if _nat(waits) and waits > 0:
         return f"no free trap part and {waits} planned trap(s) already wait for parts (route {route or 'none'}): more lanes would wait behind them"
@@ -5076,7 +5111,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     tp = None if info is None else set(info)
     draft_supply(doc, s, kept, season, set(tp or ()) - {EXPLORE} if rb or fresh is not None else tp,  # rebuild: no explore
                  lead=front)
-    doc["notes"] += core_note + cap_note + depot_note + trade_note + hosp_note + sc_note + aq_note + office_note + (
+    doc["notes"] += core_note + cap_note + depot_note + trade_note + hosp_note + sc_note + aq_note + office_note + replaced_gate_note(s, fort) + (
         rq_note if any(b is x for b in builds for x in rq_builds) else "")
     if gaps:                                     # BUG-377: iron first for the armor, the reasons in the notes
         armor = any(g.startswith("armor") for g in gaps)
@@ -5693,6 +5728,51 @@ def refuge_free_note(s: dict | None, fort: dict | None) -> str:
 
 
 HELD_RE = re.compile(r"pop_ceiling (\d+) held \(policy (\d+)\): ([^;]*?)(?:, BUG-377|;|$)")
+
+
+# BUG-680 (Run 16d i4 Trumpetrealms y447: 'ceiling 31 (held, policy 100: defence short, armor worn 10 %)' at the plan's apply, a month later
+# worn 57 % and 'migrants blocked: max-pop 31 on 32 citizens (plan 31)' until a second propose + apply): the plan's policy.pop_ceiling is
+# set once, when the plan is drafted; the gaps that held it close during the year and nothing looked at it again. follow re-reads the held
+# ceiling of the applied plan (HELD_RE) against the defence gaps of now and raises it when they are gone or have grown soft (never lowers:
+# the kernel holds armor and traps itself, readiness BUG-481 / BUG-601, and the next propose draws a lower one)
+LIFTED_TAG = "BUG-680"
+
+
+def ceiling_refresh(save_dir: Path, state: dict | None = None, apply_it: bool = True) -> tuple[int, int] | None:
+    """(old, new) ceiling when the applied plan's held pop_ceiling is raised to what the defence gaps of now allow (written to plan.json,
+    plan.reload is the caller's); None when nothing is held, nothing changes, or the fort is not in PEACE."""
+    state = state if state is not None else files.read_state(save_dir)
+    if not isinstance(state, dict) or state.get("mode") != "PEACE":
+        return None
+    doc = applied_plan(save_dir)
+    if doc is None:
+        return None
+    m = HELD_RE.search(doc.get("notes") or "")
+    cur = doc["policy"]["pop_ceiling"]
+    if not m or int(m.group(1)) != cur:
+        return None
+    policy_cap = int(m.group(2))
+    fort = fort_facts(save_dir, state)
+    gaps = defense_on(state, doc["phase_target"], fort)
+    new = defense_cap(state, policy_cap, fort) if gaps else policy_cap
+    lvl = (state.get("ready") or {}).get("lvl", 0)
+    new = min(new, level_cap(lvl, schema.decision("D-01", load_decisions())), policy_cap)
+    if new <= cur:
+        return None
+    if not apply_it:
+        return cur, new
+    if new >= policy_cap:
+        doc["notes"] = doc["notes"].replace(f"pop_ceiling {cur} held (policy {policy_cap})",
+                                            f"pop_ceiling {new} lifted (policy {policy_cap}, {LIFTED_TAG}: the gaps are closed)", 1)
+    else:
+        doc["notes"] = doc["notes"].replace(f"pop_ceiling {cur} held (policy {policy_cap})",
+                                            f"pop_ceiling {new} held (policy {policy_cap})", 1)
+    doc["notes"] += (f"; {LIFTED_TAG}: ceiling {cur} -> {new} by follow (defence now: {', '.join(gaps) if gaps else 'no gap'})")
+    doc["policy"]["pop_ceiling"] = new
+    if schema.validate("plan", doc):
+        return None
+    files.write_json_atomic(Path(save_dir) / "plan.json", doc)       # the caller sends plan.reload (follow: _send)
+    return cur, new
 
 
 def _summary(doc: dict) -> str:

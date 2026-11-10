@@ -933,9 +933,12 @@ function M.hold_text(K)
     parts[#parts + 1] = string.format('famine %d (food %d d)', st.fam.cap, int(st.fam.fd) or 0)
   end
   -- BUG-533: the other holds (the plan's ceiling, an open perimeter, the defence, a freeze) name themselves too: 'plan 33'
+  -- BUG-680 (Run 16d i4 Trumpetrealms y455: the plan applied with ceiling 66, the status said 'plan 60'): the number is the ceiling that holds
+  -- (rt.gate_cap, set with cap_why), not st.cap, the max-pop last written, which is the old one until the next apply_cap
   local w = rt and rt.cap_why
-  if (w == 'plan' or w == 'open_perimeter' or w == 'defense_short') and st.cap then
-    parts[#parts + 1] = string.format('%s %d%s', w, st.cap, ((w == 'open_perimeter' and rt.psoft) or (w == 'defense_short' and rt.dsoft)) and '+' or '')
+  local n = rt and rt.gate_cap or st.cap
+  if (w == 'plan' or w == 'open_perimeter' or w == 'defense_short') and n then
+    parts[#parts + 1] = string.format('%s %d%s', w, n, ((w == 'open_perimeter' and rt.psoft) or (w == 'defense_short' and rt.dsoft)) and '+' or '')
   end
   return #parts > 0 and cut(table.concat(parts, ', '), 40) or nil
 end
@@ -1068,6 +1071,12 @@ end
 
 ---------------------------------------------------------------- public API (CONTRACTS §7)
 function M.level(K) return st.lvl or 0 end
+-- BUG-680: a plan.reload (kern.lua) brings a new policy.pop_ceiling: max-pop and the hold text follow at once, not at the next step
+function M.plan_changed(K)
+  if not st or not rt then return false end
+  refresh(K, 'plan')
+  return true
+end
 -- public (BUG-035): the refuge_dry text of the last evaluation (nil while the refuge has drink or a wet well)
 function M.refuge_dry(K) return rt.rdry end
 -- public (BUG-049, seal.refuge_trust): what the last Python audit said about the refuge's separation in the worst case
