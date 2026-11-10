@@ -518,7 +518,7 @@ T.test('BUG-391: citizens on a cut-off group over the thirst mark, no bridge bri
   T.ok(ds[1].d.q:find('2 citizens on walk group', 1, true) and ds[1].d.q:find('10,20,5', 1, true) and
        ds[1].d.q:find('thirst 41000', 1, true), ds[1].d.q)
   local cmds = table.concat(ds[1].d.cmds, ' | ')
-  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('bp sites cistern --near 10,20,5 --within 80', 1, true), cmds)
+  T.ok(cmds:find('inspect what=reach', 1, true) and cmds:find('bp sites cistern --near 10,20,5 --within 999', 1, true), cmds)
   run(W, 1500)
   local again = 0
   for _, x in ipairs(evs(W, 'DECISION_NEEDED')) do if x.d.id == 'stranded_drink' then again = again + 1 end end

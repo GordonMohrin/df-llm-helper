@@ -17,10 +17,10 @@ Module: `lua/dfllm/siege.lua` (`cut_off`, `M.anchor`, `episode`, `dry_decision`,
 - `siege.M.anchor`: a drink case's position is the stranded citizen nearest to the nearest accepted water (`water.src_dist`), and the nearest one seen for the group in the episode (`mem.str_anc`): one distance that only falls, and `--near` is a point of their own walk group.
 - `siege.episode`: the announcement set is the group (`g<id>`) and the tokens are `n<most stranded in the episode>` and `fight` (thirst over `FIGHT_THIRST`): one STRANDED `refused` and one `stranded_drink` per episode, again when MORE are stranded or the thirst crosses the dehydration line. The episode ends (record cleared) when the group has drink.
 - `economy.alarm_check`: the `thirst` decision once per episode (`p.thirst_ann`), again only when more citizens are thirsty than the last one announced; the episode is over after 30 days without thirst.
-- The cistern command carries `--within 80` (`siege.CISTERN_WITHIN`, `water.stranded_fix`): `bp sites` ranks nearest first within the radius, so it returns the nearest site however far (with its distance in `why`).
+- The cistern command carries `--within 999` (`siege.CISTERN_WITHIN`, `water.stranded_fix`): `bp sites` ranks nearest first within the radius, so it returns the nearest site however far (with its distance in `why`).
 
 ## Tests
-`tests/lua/test_stranded.lua` (BUG-661: anchor, one alarm, worse = announced; BUG-391 adapted), `tests/lua/test_economy.lua` (thirst once per episode), `tests/lua/test_bug615_617_water_deaths.lua` (`src_dist`, `--within 80`).
+`tests/lua/test_stranded.lua` (BUG-661: anchor, one alarm, worse = announced; BUG-391 adapted), `tests/lua/test_economy.lua` (thirst once per episode), `tests/lua/test_bug615_617_water_deaths.lua` (`src_dist`, `--within 999`).
 
 ## Live check
 Wallfree-like fort: one STRANDED `refused` and one `stranded_drink` per episode, `fix` with one distance; the cistern command prints a site (the nearest, maybe far). Open: no template digs the walk path (ramp/stair) to the water, so the fix text still says "open a walk path" without a command; `thirst` still offers the `farms surface=1` command whether or not `bp sites` has a site; the anchor is runtime memory (a reload may announce once more).

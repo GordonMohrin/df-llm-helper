@@ -592,7 +592,7 @@ end
 M.FOOD_R = 10
 -- BUG-661: `bp sites cistern --near <their point> --within 20` answered 'the nearest candidate is 62 tiles away': the ranking returns the sites
 -- nearest first within this radius, so the command that names the stranded point finds the nearest site, however far (it says how far)
-M.CISTERN_WITHIN = 80
+M.CISTERN_WITHIN = 999   -- bigger than any map: the command is executable for the nearest site wherever it is
 local function food_spots(K, e)
   local x0, y0, z = e.pos[1], e.pos[2], e.pos[3]
   local pts, at = {{x0, y0, z}}, {}

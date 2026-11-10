@@ -287,4 +287,14 @@ T.test('fortcore aquifer=pass waits for a passed shaft, then digs in observe mod
   T.eq(rec(W, 'fc').mode, 'observe')
 end)
 
+T.test('BUG-662: a shaft plugged for an unbuilt ring wall (cav why=ring_wall, open/failed) is no open cavern', function()
+  local W = fresh{tag = 'aqringcav'}
+  local cav = W.K.persist.get('m.runner').cav
+  cav.rw1 = {st = 'failed', why = 'ring_wall', s0 = {AX, AY, 100}, bot = 96}
+  cav.rw2 = {st = 'open', why = 'ring_wall', s0 = {AX + 3, AY, 100}, bot = 96}
+  T.eq((select(2, W.K.call('runner', 'cavern_open'))), 0, 'ring_wall records do not keep R0 caverns')
+  cav.rw3 = {st = 'open', why = 'explore', s0 = {AX + 6, AY, 100}, bot = 96}
+  T.eq((select(2, W.K.call('runner', 'cavern_open'))), 1, 'a real open cavern shaft still counts')
+end)
+
 T.done()

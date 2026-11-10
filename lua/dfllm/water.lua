@@ -4314,8 +4314,8 @@ function M.stranded_fix(K, pos)
   local txt
   if best then
     txt = string.format('%s %d at %d,%d,%d is %d tiles off, not on their walk group: open a walk path (ramp or stair) to it, or a cistern '
-                        .. 'beside them (bp sites cistern --near %d,%d,%d --within 80)', best.s.kind, best.s.id, best.s.x, best.s.y,
-                        best.s.z, best.d, x, y, z)       -- BUG-661: --within 80 (siege CISTERN_WITHIN): the nearest site, however far
+                        .. 'beside them (bp sites cistern --near %d,%d,%d --within 999)', best.s.kind, best.s.id, best.s.x, best.s.y,
+                        best.s.z, best.d, x, y, z)       -- BUG-661: --within 999 (siege CISTERN_WITHIN): the nearest site, however far
   else
     local body
     for _, b in ipairs(st.ws and st.ws.bodies or {}) do

@@ -7565,7 +7565,7 @@ function M.cavern_open(K)
   for id, r in pairs(S.rt and S.rt.cav or {}) do
     -- FR-98: a shaft the cavern sweep opened counts as open once no sweep runs on it (the sweep module gone or lost it)
     if type(r) == 'table' and (r.st == 'open' or r.st == 'failed' or (r.st == 'sweep' and not M.swept(K, id)))
-       and r.why ~= 'heavy_aquifer' then   -- FR-95
+       and r.why ~= 'heavy_aquifer' and r.why ~= 'ring_wall' then   -- FR-95; BUG-662: an unbuilt ring wall is no open cavern
       n = n + 1
       if type(r.s0) == 'table' then list[#list + 1] = {r.s0[1], r.s0[2], r.s0[3], int(r.bot) or r.s0[3]} end
     end
