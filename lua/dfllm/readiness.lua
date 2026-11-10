@@ -215,7 +215,7 @@ end
 
 -- bridges and levers: outer + inner exist, every bridge known to gate, >= 2 linked levers each
 local function check_levers(K, man)
-  local fails, roles, good = {}, {}, {}
+  local fails, roles, good, why = {}, {}, {}, {}
   -- BUG-048: a bridge seal replaced by a wall and a door is no gate: no bridge:/levers: blocker, and its role is
   -- missing (no_outer / no_inner say so: the doctrine wants a gate there)
   local okr, rep = K.call('seal', 'replaced')
@@ -230,13 +230,18 @@ local function check_levers(K, man)
       for _, p in ipairs(type(b.levers) == 'table' and b.levers or {}) do
         if type(p) == 'table' and lever_ok(p, b.fp) then n = n + 1 end
       end
-      if n < M.MIN_LEVERS then fails[#fails + 1] = 'levers:' .. name
+      if n < M.MIN_LEVERS then
+        fails[#fails + 1] = 'levers:' .. name
+        -- BUG-634 (Run 16d i4 y436-y437: `levers:O1` for years, no reason): what the levers of this bridge wait for
+        local okw, w = K.call('gate', 'lever_why', name)
+        why[name] = cut(okw and type(w) == 'string' and w
+                        or string.format('%d of %d manifest levers linked to it', n, type(b.levers) == 'table' and #b.levers or 0), 200)
       elseif ok and s ~= 'unknown' then good[#good + 1] = name end      -- FR-70: once seen whole, losing one is news
     end
   end
   if not roles.outer then table.insert(fails, 1, 'no_outer') end
   if not roles.inner then table.insert(fails, 1, 'no_inner') end
-  return {tick = K.now().tick, fails = fails, good = good}
+  return {tick = K.now().tick, fails = fails, good = good, why = why}
 end
 
 ---------------------------------------------------------------- audit requests
@@ -676,6 +681,16 @@ local function evaluate(K, why)
   for _, f in ipairs(rt.lev.fails) do
     local b = f:match('^bridge:(.+)$') or f:match('^levers:(.+)$')
     if not (b and lost[b]) then f1[#f1 + 1] = f end
+  end
+  -- BUG-634: why `levers:<B>` stands (state ready.lw): per failing bridge the gate's reading of its levers
+  rt.lw = nil
+  do
+    local lw = {}
+    for _, f in ipairs(rt.lev.fails) do
+      local b = f:match('^levers:(.+)$')
+      if b and not lost[b] and rt.lev.why and rt.lev.why[b] then lw[#lw + 1] = b .. ': ' .. rt.lev.why[b] end
+    end
+    if #lw > 0 then rt.lw = cut(table.concat(lw, ' | '), 200) end
   end
   -- BUG-478: a bridge with no linked lever inside the refuge burrow (PEACE only: a fight changes the lists)
   rt.rlg = nil
@@ -1384,6 +1399,7 @@ function M.state(K)
   if rt.tshort then r.ts = rt.tshort end                      -- BUG-481: the trap shortfall R0 `traps_short` names
   if rt.ashort then r.as = rt.ashort end                      -- BUG-601: the armor shortfall that holds max-pop
   if rt.ttarget then r.tt = rt.ttarget end                    -- BUG-481: the trap target for the expected siege
+  if rt.lw then r.lw = rt.lw end                              -- BUG-634: what the levers of `levers:<B>` wait for
   if rt.rlg then r.rg = rt.rlg end                            -- BUG-478: the bridges without a refuge lever
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
 end

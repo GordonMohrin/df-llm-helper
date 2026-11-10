@@ -2476,6 +2476,48 @@ function M.refuge_levers(K)
   return out
 end
 
+-- BUG-634 (Run 16d i4 Trumpetrealms y436-y437: R0 `levers:O1` for years beside a bridge that was rebuilt and worked, nothing said what its
+-- levers wait for): the reason a manifest bridge has fewer than two linked levers, one short text from the last read of its manifest levers
+-- (lever_report): per lever its state ('none' no lever there, 'site' placed not built, 'built' stands and is not linked to this bridge,
+-- 'job' a link job waits) with the days, the last refused link, and when a state needs mechanisms how many are free and whether anything
+-- makes more (economy mech_free / mech_state). nil when every manifest lever is linked (or the bridge has none).
+function M.lever_why(K, name)
+  local man = K.manifest()
+  local spec = type(man.bridges) == 'table' and man.bridges[name]
+  if not valid_spec(spec) then return nil end
+  local r = rt[name]
+  if st.gone[name] then return 'the bridge is destroyed: its levers are linked again after the rebuild (or its wall + door)' end
+  local rep = r and r.lr
+  if not rep then return 'its levers were not read yet (a pass reads them within a minute)' end
+  local now = K.now().tick
+  local parts, need_mech, linked = {}, false, 0
+  for _, l in ipairs(rep.list) do
+    local at = string.format('%d,%d,%d', l.p[1], l.p[2], l.p[3])
+    local d = math.max(0, (now - l.t) // 1200)
+    if l.st == 'linked' then linked = linked + 1
+    elseif l.st == 'none' then parts[#parts + 1] = string.format('no lever at %s', at)
+    elseif l.st == 'site' then
+      parts[#parts + 1] = string.format('lever %s is placed, not built (%d d)', at, d); need_mech = true
+    elseif l.st == 'job' then
+      parts[#parts + 1] = string.format('lever %s waits for its link job (%d d)', at, d); need_mech = true
+    else
+      parts[#parts + 1] = string.format('lever %s stands, not linked to this bridge (%d d, no link job)', at, d); need_mech = true
+    end
+  end
+  if #parts == 0 then return nil end
+  local out = string.format('%d of %d levers linked: %s', linked, #rep.list, table.concat(parts, '; '))
+  if need_mech then
+    local okf, free = K.call('economy', 'mech_free')
+    local oks, ms = K.call('economy', 'mech_state')
+    local route = oks and type(ms) == 'table' and ms.route or nil
+    if okf and math.tointeger(free) then
+      out = out .. string.format('; %d mechanisms free%s', free, route and (' (' .. tostring(route) .. ')') or '')
+    end
+  end
+  if r.link_why then out = out .. '; last link refused: ' .. r.link_why end
+  return out:sub(1, 200)
+end
+
 -- BUG-546: the link jobs queued on this bridge's manifest levers (rep.list entries in state 'job', e.t = since when): a Mechanic is
 -- asked for once a job has waited LINK_MECH ticks; one that has waited LINK_REISSUE ticks is taken down (an unworked one) so the lever
 -- is read as 'built' on the next pass and linked again. True when a job was taken down (one per pass).

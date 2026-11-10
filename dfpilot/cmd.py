@@ -1557,6 +1557,58 @@ def _counted_open(save_dir: Path) -> int:
     return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
 
 
+WANDER_SEALS = 4                    # BUG-634: seal projects finished within WANDER_AGE ticks that make the perimeter 'wander'
+WANDER_AGE = 2 * 403200             # two game years
+
+
+def _wander_note(save_dir: Path) -> str:
+    """BUG-634 (Run 16d i4 Trumpetrealms y431-y437: after every seal a new 'floor way in' at 72,86 / 79,68 / 65,121 / 78,57 / 24,2,143, 27
+    finished seals in the run): the seal projects finished within two game years (PROJECT_DONE tpl seal, newest event = now) and
+    their tiles. From WANDER_SEALS on a single door per wake is outrun by the surface (plants, new openings): the note offers the
+    continuous wall (`close=wall`, not a door the building destroyers break) and the audit. '' below the mark."""
+    newest, places = None, []
+    for e in files.iter_events_rev(save_dir):
+        tick = e.get("tick")
+        if not isinstance(tick, int):
+            continue
+        newest = tick if newest is None else newest
+        if newest - tick > WANDER_AGE:
+            break
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "PROJECT_DONE" and d.get("tpl") == "seal":
+            m = re.search(r"(?:door|wall|hatch) (-?\d+,-?\d+,-?\d+)", str(e.get("msg", "")))
+            places.append(m.group(1) if m else "?")
+    if len(places) < WANDER_SEALS:
+        return ""
+    return (f"the perimeter wanders: {len(places)} seals finished in the last 2 game years, each closed one place and the next "
+            "opening appeared elsewhere; single doors are outrun: place the next ones as constructed walls "
+            "(bp.place tpl=seal at=last close=wall: no door the building destroyers break, reach-checked) and read "
+            "`dfllm cmd inspect what=entrances` for the whole rim, then `seal at=audit` for the route the audit names")
+
+
+def _open_other(save_dir: Path) -> str:
+    """BUG-634 (Run 16d i4 y437: status 'perimeter open 37 days (levers lost O1)', `seal at=last` 'nothing to close' and no word why):
+    the open perimeter (ready.pd / ready.pw) that is NOT a way in: a lost bridge or lever. The seal has no tile for it; the text
+    says what is open and what to do (the lever reason ready.lw when the kernel gave one). '' when the perimeter is closed or the
+    only thing open is the ways in the entrance check counts."""
+    r = (files.read_state(save_dir) or {}).get("ready")
+    if not isinstance(r, dict) or not isinstance(r.get("pd"), int) or "open_perimeter" not in (r.get("fail") or []):
+        return ""
+    parts = [p.strip() for p in str(r.get("pw") or "").split(";") if p.strip() and not re.match(r"^\d+ ways? in$", p.strip())]
+    if not parts:
+        return ""
+    text = f"the open perimeter ({r['pd']} d) is not a way in but '{'; '.join(parts)}': a seal has no tile for it"
+    lw = r.get("lw")
+    if isinstance(lw, str) and lw:
+        text += f"; {lw}"
+    if any(p.startswith("levers lost") for p in parts):
+        text += ("; link the levers (they wait for mechanisms) or let the keeper close the bridge: dfllm cmd inspect what=defense, "
+                 "bridge.rebuild only for a bridge that is lost")
+    else:
+        text += "; the keeper rebuilds a lost bridge in quiet PEACE or replaces it by wall + door: dfllm cmd inspect what=defense"
+    return text
+
+
 def _all_closed(notes: list[str], key: str, entries: list) -> bool:
     """Nothing is left to close because every opening is closed (or a seal has it), or none is open now (`last`, `all`,
     `audit` name none): the seal is done, not impossible."""
@@ -1762,11 +1814,17 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
             notes.append(f"status still counts {counted} way{'s' if counted != 1 else ''} in: that is the last entrance check, the "
                          "snapshot or a seal project is newer and has them closed; the check runs again within a game day "
                          "(dfllm cmd inspect what=entrances key=refresh asks now)")
+        other = _open_other(save_dir) if key in SEAL_LAST and not counted else ""     # BUG-634
+        if other:                   # the answer of a seal that is done stays 'done' (plan check passes it): only the text is richer
+            notes.append(other)
         why = "; ".join(notes) or ("the last entrance check names no open way in" if key in SEAL_LAST
                                    else "the last audit names no wall" if key == "audit"
                                    else "no refuge stair head in the manifest and no REFUGE_FAIL tile"
                                    if key in SEAL_REFUGE else "no opening named")
         raise (SealClosed if closed else BpError)(f"seal: nothing to close ({why})")
+    wander = _wander_note(save_dir) if key in SEAL_LAST and close == "auto" else ""      # BUG-634
+    if wander:
+        notes.append(wander)
     return dmod.format_openings(keep), notes
 
 

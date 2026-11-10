@@ -300,6 +300,9 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     pd = r.get("pd")
     if isinstance(pd, int):                    # FR-70: an open perimeter in PEACE is a stop signal; count the days
         out.append(f"PERIMETER OPEN {pd} day{'s' if pd != 1 else ''}: {r.get('pw') or '?'}")
+    lw = r.get("lw") if isinstance(r.get("lw"), str) else ""
+    if lw and any(f.startswith("levers:") for f in fails):     # BUG-634: what the levers of `levers:<B>` wait for
+        out.append(f"levers: {lw}")
     off = files.auto_seal_off(ctx.dir, n if isinstance(n, int) else 0) if getattr(ctx, "dir", None) else None
                                                # DECISIONS 2: follow --no-auto places nothing
     if off:
