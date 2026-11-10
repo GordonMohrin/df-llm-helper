@@ -251,9 +251,12 @@ function C.evaluate(rec, rules, ctx)
   for _, it in ipairs(items) do
     if it.id == 'trees' then tr_res = it.res elseif it.id == 'stone' then st_res = it.res end
   end
-  if tr_res == 'fail' and (st_res == 'warn' or st_res == 'fail') then
-    put('timber', 'fail', string.format('trees %s and the stone is not near the surface (%s): no logs and no stone for the first workshops ' ..
-      '- hard reject, accepting trees cannot clear it (BUG-690)', tostring(rec.trees), tostring(soil)))
+  -- the reach counts too (soil levels + the aquifer span): Rocksblush (light aquifer, little soil) had stone 'pass' (1 soil level) and a reach of 5
+  local deep_reach = out.reach ~= nil and out.reach > (rules.stone_pass_levels or C.DEFAULT.stone_pass_levels)
+  if tr_res == 'fail' and (st_res == 'warn' or st_res == 'fail' or deep_reach) then
+    put('timber', 'fail', string.format('trees %s and the stone is not near the surface (%s soil%s): no logs and no stone for the first workshops ' ..
+      '- hard reject, accepting trees cannot clear it (BUG-690)', tostring(rec.trees), tostring(soil),
+      deep_reach and string.format(', about %d levels to the hard stone', out.reach) or ''))
   end
   -- BUG-531: with an aquifer the core must go under it; say when that may not be possible. A site the stone item already rejects (soil too
   -- deep) says the same there

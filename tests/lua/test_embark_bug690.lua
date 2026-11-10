@@ -31,6 +31,17 @@ T.test('BUG-690: no trees and the stone 3+ levels down is a hard reject nobody c
   T.eq({item(sc, 'timber').res, item(sc, 'stone').res}, {'fail', 'fail'})
 end)
 
+T.test('BUG-690: Rocksblush (light aquifer, little soil, no trees): stone passes on soil, the reach 5 still rejects', function()
+  local r = C.evaluate(rec{trees = 'none', soil = 'little', aquifer = 'light'}, nil, ctx)
+  T.eq(item(r, 'stone').res, 'pass')
+  T.eq(r.reach, 5)
+  T.eq(item(r, 'timber').res, 'fail')
+  T.ok(has(r.fails, 'timber') and not C.ACCEPTABLE_SET.timber, 'accepting trees and the aquifer alone still refuses')
+  T.eq(r.verdict, 'reject')
+  local ok = C.evaluate(rec{trees = 'woodland', soil = 'little', aquifer = 'light'}, nil, ctx)
+  T.eq(item(ok, 'timber'), nil)
+end)
+
 T.test('BUG-690: stone near the surface, or any forest, leaves trees as it was (acceptable with a reason)', function()
   local near = C.evaluate(rec{trees = 'none', soil = 'little'}, nil, ctx)
   T.eq(item(near, 'stone').res, 'pass')
