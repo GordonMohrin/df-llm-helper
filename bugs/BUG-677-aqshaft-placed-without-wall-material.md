@@ -1,0 +1,24 @@
+# BUG-677 `bp sites aqshaft` / `bp.place` offer a shaft in a fort with no wall material; its ring wall waits 2 d and the shaft stops "for good"
+Status: fixed (offline, live-untested)
+Severity: high (4 shafts placed and plugged in a row; the round-43 lockout refused every column forever)
+Found: 2026-11-10, Run 16c i3 Wallfree y400-y404: four shafts each stopped after the heavy layer's ring wall stood "unbuilt for 2 d" (events.jsonl:5300, 5522, 5587, 5753); the fort had only claystone, 121 of 200 orders "Needs non-economic hard stone"; Run 16a i1 Basementflew kern.log "need rock 4" for the ring walls 89,96,125 / 89,100,125. Verifier of the first attempt (BUG-662): `dfpilot/bp/sites.py:1848`, `:1913`, `dfpilot/cmd.py:516` refused every column for good after two ring-wall stops (no way to clear it, columns on other layers blocked too).
+Module: `dfpilot/cmd.py` (`aq_wall_gate`, `ranking`, `rank_sites`, `place`), `dfpilot/bp/sites.py` (lockout removed, `AQ_WALL_NEED`), `lua/dfllm/economy.lua` (`wall_stock`, `stock.wall`), `lua/dfllm/aqshaft.lua` (`ring_stop`, `ring_step`, `plug_missing`, `A.CFG.ring_stop_mat`), `lua/dfllm/runner.lua` (`Q.FINAL`, `Q.aq_repeat`), `dfpilot/schema.py`, `lua/dfllm/util/contract.lua`
+
+## Actual
+- Nothing checked the stone before a shaft was placed: the cause (no hard stone the builders accept, only claystone) is known to economy, the ranking never asked.
+- The first attempt's answer, a count of manifest `ring_wall` stops (2) that blocked `_aqshaft` / `open_columns` / `_aq_open_sites`, could not be cleared by a stone dig, a trade, `bp.resume` or time, and a column on another layer was refused for a stop on this one.
+- Economy's `wall_stock` counted free boulders although DF refused every one of them (`stone_none`): `plug_missing` said enough material, the wall was designated and nobody built it.
+- The stop and the park said "ring wall unbuilt, the walls need hard stone or blocks and a mason" and the stall row "the ring has not moved": no mention of the missing stone.
+- 2 d (`ring_wait`) / 30 d (`ring_stop`) for a wall that only waits for material is short: the shaft is plugged while the fort digs for stone.
+
+## Fix
+- `economy.wall_stock`: boulders count 0 when `stone_none` (DF refused them / ore, flux, soft only); `none` says so; the daily state publishes `stock.wall` (usable blocks + boulders + logs).
+- `cmd.aq_wall_gate` (BpError with reason and the way out: dig hard stone / `plan propose`, `trade.want stone,block`, `inspect workload`, or `p.heavy=off`): an aqshaft needs `sites.AQ_WALL_NEED` (3: one ring wall + two plug walls; 2 with `p.heavy=off`) of `stock.wall`. It runs at the top of `ranking` (before the cache), `rank_sites` and `place`, so `bp sites aqshaft`, `plan propose` and `bp.place` (also with an explicit anchor) refuse. No lockout: it follows the live stock, so stone arriving clears it at once and no other layer is blocked; silent without `stock.wall` (older kernel, mock). The `ring_wall` manifest stops stay (told in the reason) and are dropped by `Q.ring_ok`.
+- `aqshaft.ring_step`: a wall that waits for MATERIAL (`plug_missing` says no_boulders / no_stone) is given `ring_stop_mat` (90 d) instead of `ring_stop` (30 d); the stall names the missing stone and counts (`...; the fort has no stone a job may take (hard stone: dig or trade)`); the stop (`AQ_RING_STOP`, new `d.miss`) says "NO STONE" with the commands (trade.want, plan propose, inspect workload) and blocks `ring_nostone` (final, parked after `park_days`: the park line names it) instead of `ring_wall`; the 3-refusal branch reports the same.
+- `Q.aq_repeat` (BUG-664): the progress stamp is a token too (see that file).
+
+## Tests
+`tests/test_bug661_664_f43_water.py` (gate refuses at 0, clears at 3, need 2 with heavy=off, silent without stock, other templates untouched, ranking / rank_sites / place all refuse; ranking no longer locks), `tests/lua/test_bug677_ring_nostone.lua` (material missing: no stop at ring_stop, stop at ring_stop_mat naming NO STONE, block ring_nostone; material present: stop at ring_stop as before), `tests/lua/test_bug665_668_stone_wood.lua` (`wall_stock` none / `stock.wall`), `tests/lua/test_bug443_444_ring_stall.lua` (same cause after progress announced again), `tests/lua/test_bug414_heavy_ring.lua`.
+
+## Live check
+Wallfree-like fort (claystone only): `dfllm bp sites aqshaft` answers "no wall material ... need 3" with the fix; after a stone dig / trade it ranks again with no manual step. A placed shaft whose wall is unbuilt: `PROJECT_BLOCKED aq_stall:no_boulders` after 2 d, `AQ_RING_STOP miss=no_boulders` only after 90 d. Open: `AQ_WALL_NEED` is a constant (a thick layer may need more walls: `plug_missing` asks the real count at the stage); a fort with plenty of logs passes the gate and the walls are wooden (as the ring already allows); `stock.wall` is one daily reading.

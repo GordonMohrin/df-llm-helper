@@ -3805,7 +3805,7 @@ end
 
 -- BUG-037: blocked for good (nothing in the kernel clears it: build_lost with its retries spent, a breach stop, quickfort
 -- failing, the document gone, the plug refused); parked once it stood park_days (pt: conf(K).park)
-Q.FINAL = {apply_fail = true, bp_missing = true, plug_refused = true, occupied = true, ring_wall = true}   -- BUG-662: ring_wall
+Q.FINAL = {apply_fail = true, bp_missing = true, plug_refused = true, occupied = true, ring_wall = true, ring_nostone = true}   -- BUG-662: ring_wall; BUG-677: ring_nostone (no stone for it)
 function Q.terminal(P)
   local b = P.blocked
   if b:sub(1, 7) == 'breach:' or Q.FINAL[b] then return true end
@@ -6716,7 +6716,8 @@ function Q.aq_repeat(K, P, R, key)
   local d = doc(K, P.id)
   local st = d and d.stages[P.stage + 1]
   local ids = {P.id .. ':' .. (st and st.label or '')}
-  local toks = {P.blocked ~= '' and P.blocked or 'run', M.AQ.stall_key(S.rt, P.id)}
+  -- BUG-677: the project's progress stamp is a token too: a shaft that moved (and stalls again for the same cause later) is news again
+  local toks = {P.blocked ~= '' and P.blocked or 'run', M.AQ.stall_key(S.rt, P.id), 'p' .. tostring(int(R.ps) or 0)}
   local T = K.now()
   if CAD.due(R[key], T, ids, toks, {ticks = 0, wall_s = 0}) then
     R[key] = CAD.mark(T, ids, toks)

@@ -673,4 +673,22 @@ T.test('BUG-661 (Wallfree: zone 17718 "7 / 25 / 35 / 69 tiles off" for one group
   T.eq(evs(W, 'STRANDED')[2].d.n, 3)
 end)
 
+T.test('BUG-677: the anchor is kept per walk group (two groups taking turns as the worst one do not make the distance flap)', function()
+  local SG = require('dfllm.siege')
+  local K = {call = function(mod, fn, x, y, z)
+    return true, {d = math.abs(x - 10) + math.abs(y - 40) + math.abs(z - 5)}
+  end}
+  local function e(g, cits) return {g = g, need = {drink = true}, cits = cits, pos = nil} end
+  local a1 = e(1, {{1, 12, 40, 5}, {2, 30, 40, 5}})                -- group 1: nearest is 2 tiles off
+  SG.anchor(K, a1)
+  local b1 = e(2, {{3, 60, 40, 5}})                                -- group 2: 50 tiles off
+  SG.anchor(K, b1)
+  local a2 = e(1, {{2, 30, 40, 5}})                                -- group 1 again, only the far one in view: still its own nearest
+  SG.anchor(K, a2)
+  T.eq({a1.pos[1], a2.pos[1], b1.pos[1]}, {12, 12, 60}, 'each group keeps its own nearest point')
+  local b2 = e(2, {{4, 50, 40, 5}})                                -- group 2 gets nearer: the point follows
+  SG.anchor(K, b2)
+  T.eq(b2.pos[1], 50)
+end)
+
 T.done()

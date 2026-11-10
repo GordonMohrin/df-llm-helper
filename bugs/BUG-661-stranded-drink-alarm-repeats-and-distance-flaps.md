@@ -14,7 +14,7 @@ Module: `lua/dfllm/siege.lua` (`cut_off`, `M.anchor`, `episode`, `dry_decision`,
 `siege.lua` `cut_off` (e.pos = first citizen), `dry_decision` / refused `stranded` (ids = the citizens), `economy.lua` `alarm_check` (weekly only), `siege.lua` `dry_decision` (`--within 20`).
 
 ## Fix
-- `siege.M.anchor`: a drink case's position is the stranded citizen nearest to the nearest accepted water (`water.src_dist`), and the nearest one seen for the group in the episode (`mem.str_anc`): one distance that only falls, and `--near` is a point of their own walk group.
+- `siege.M.anchor`: a drink case's position is the stranded citizen nearest to the nearest accepted water (`water.src_dist`), and the nearest one seen for the group in the episode (`mem.str_anc[group]`, one anchor PER GROUP since BUG-678): one distance that only falls, and `--near` is a point of their own walk group.
 - `siege.episode`: the announcement set is the group (`g<id>`) and the tokens are `n<most stranded in the episode>` and `fight` (thirst over `FIGHT_THIRST`): one STRANDED `refused` and one `stranded_drink` per episode, again when MORE are stranded or the thirst crosses the dehydration line. The episode ends (record cleared) when the group has drink.
 - `economy.alarm_check`: the `thirst` decision once per episode (`p.thirst_ann`), again only when more citizens are thirsty than the last one announced; the episode is over after 30 days without thirst.
 - The cistern command carries `--within 999` (`siege.CISTERN_WITHIN`, `water.stranded_fix`): `bp sites` ranks nearest first within the radius, so it returns the nearest site however far (with its distance in `why`).

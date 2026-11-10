@@ -370,11 +370,13 @@ function M.anchor(K, e)
     if d and (not bd or d < bd or (d == bd and c[1] < bid)) then bd, bp, bid = d, {c[2], c[3], c[4]}, c[1] end
   end
   if not bd then return end
-  local a = mem.str_anc
-  if type(a) == 'table' and a.g == e.g and type(a.pos) == 'table' and (a.d or math.huge) <= bd then
+  mem.str_anc = type(mem.str_anc) == 'table' and mem.str_anc.g == nil and mem.str_anc or {}   -- BUG-677: one anchor PER GROUP (two groups alternating as the worst one made it flap)
+  local k = tostring(e.g)
+  local a = mem.str_anc[k]
+  if type(a) == 'table' and type(a.pos) == 'table' and (a.d or math.huge) <= bd then
     e.pos = {a.pos[1], a.pos[2], a.pos[3]}
   else
-    mem.str_anc = {g = e.g, d = bd, pos = bp}
+    mem.str_anc[k] = {d = bd, pos = bp}
     e.pos = bp
   end
 end
@@ -777,9 +779,9 @@ local function rescue_step(K, a, g, now)
   -- BUG-661: a group that has drink ends its episode (the anchor, the most stranded counted, the announcement record)
   for gid in pairs(G.cit) do
     if G.drink[gid] and (type(mem.str_nmax) == 'table' and mem.str_nmax[tostring(gid)]
-                         or (mem.str_anc and mem.str_anc.g == gid)) then
+                         or (type(mem.str_anc) == 'table' and mem.str_anc[tostring(gid)])) then
       if type(mem.str_nmax) == 'table' then mem.str_nmax[tostring(gid)] = nil end
-      if mem.str_anc and mem.str_anc.g == gid then mem.str_anc = nil end
+      if type(mem.str_anc) == 'table' then mem.str_anc[tostring(gid)] = nil end
       st.str.rec, mem.dry_rec, dirty = nil, nil, true      -- a later lack of drink is a new episode: announced at once
     end
   end

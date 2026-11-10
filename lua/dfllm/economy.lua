@@ -7735,7 +7735,13 @@ function M.wall_stock(K)
   local rock = stone_free(c, r)
   local logs = math.max(0, (math.tointeger(inv.wood) or 0) - floor_of(c, r.p, r, 'wood'))
   local rk = st.rock
-  return {have = blocks + rock + logs, blocks = blocks, rock = rock, logs = logs, soil = type(rk) == 'table' and rk.soil == true}
+  -- BUG-677 (Run 16c i3 Wallfree: 37-53 claystone boulders 'free', every wall order 'Needs non-economic hard stone'): boulders no job may take
+  -- (M.stone_none: DF refused them, or ore / flux / soft only) are no wall material; `none` says so in the stall text
+  local okn, none = pcall(M.stone_none, K.census.i or {}, K.now().tick)
+  none = okn and none == true
+  if none then rock = 0 end
+  return {have = blocks + rock + logs, blocks = blocks, rock = rock, logs = logs, none = none,
+          soil = type(rk) == 'table' and rk.soil == true}
 end
 
 -- the open orders of a piece's job: what they make (n). A rock order the free stone cannot cover with the other rock
@@ -13404,6 +13410,10 @@ function M.state(K)
     if st.rock then
       r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0)
       if st.rock.soil then r.stock.rsoil = 1 end       -- BUG-438: the stone digs found only soil (plan propose digs deeper)
+    end
+    do                                                 -- BUG-677: the wall material a ring / plug can use (bp sites / bp.place aqshaft refuse without it)
+      local okw, ws = pcall(M.wall_stock, K)
+      if okw and type(ws) == 'table' then r.stock.wall = math.max(0, math.tointeger(ws.have) or 0) end
     end
     do                                                 -- BUG-586: DF itself refuses the rock jobs (BUG-545): no mechanism, no stone trap, no traction bench
       local okh, hd = pcall(M.hard_denied, K.census.i or {}, K.now().tick)

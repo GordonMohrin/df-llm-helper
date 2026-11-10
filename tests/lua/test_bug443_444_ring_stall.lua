@@ -134,6 +134,12 @@ T.test('BUG-444: a shaft that holds a level and makes no progress for stall_days
   for _ = 1, 2 * 12 do H.runs(W, 1) end
   ev2 = blocked(W, 'stalled')
   T.ok(#ev2 >= 2 and ev2[2].tick - t1 >= 5 * 1200, 'a changed cause is announced after stall_every: ' .. #ev2)
+  local n2 = #ev2
+  for _ = 1, 2 * 12 do H.runs(W, 1) end
+  T.eq(#blocked(W, 'stalled'), n2, 'BUG-677: the unchanged cause stays quiet')
+  rt(W).p['aq'].ps = rt(W).p['aq'].ps + 1                                    -- the shaft moved in between, then stalls again for the same cause
+  for _ = 1, 2 * 12 do H.runs(W, 1) end
+  T.eq(#blocked(W, 'stalled'), n2 + 1, 'BUG-677: the same cause after progress is announced again')
   T.ok(H.proj(W, 'aq') and H.proj(W, 'aq').blocked ~= 'cancel', 'announcement only: nothing is cancelled')
   -- a real skip count of 2 is not read as a timestamp: the first announcement is not suppressed or repeated at once
   local W2 = fresh{tag = 'b444sk', cfg = CFGQ}
