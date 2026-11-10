@@ -2754,6 +2754,25 @@ def _nat(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
+START_DRY_PHASE = "P2"                    # BUG-691: a fort up to this phase still builds from what it carried; no stone then is a dead start
+
+
+def start_dry(s: dict | None) -> str:
+    """BUG-691 (Run 16b i2 Rocksblush y414: 0 trees, 0 free boulders, 0 blocks; the first plan drafted aqshaft + depot, every workshop,
+    the depot and the shaft waited for 'no rock, no blocks, no logs', 6 of 7 adults idle; Whirledrampart: 34 boulders, 0 usable, 21
+    economic / soft and 21 ore / flux): in the first phases a fort with not one free usable boulder (state stock.rock 0, which the census
+    counts only for stone a job can take, BUG-665) has nothing to build the first workshop or the shaft's plug from, whether or not a
+    MATERIAL_SHORT was logged yet (it needs the first build to wait). Returns why ('' when it is not a dry start): the plan drafts the
+    stone dig first (propose, quarry_fallback), the caravan list asks wood and blocks first."""
+    st = (s or {}).get("stock") or {}
+    if str((s or {}).get("phase") or "P0") > START_DRY_PHASE:
+        return ""
+    if not (_nat(st.get("rock")) and st["rock"] == 0):
+        return ""
+    return ("start: no free usable boulder (stock.rock 0) in phase " + str((s or {}).get("phase") or "P0")
+            + ": nothing to build the first workshop, the depot or a shaft's plug from")
+
+
 def rock_goal(s: dict | None) -> str | None:
     """Run 11: why the fort needs a stone dig, or None: the free stone (state stock.rock) is below what the open rock
     orders, the walls without material and the needs want (stock.rock_need). Unknown (an older kernel) -> None."""
@@ -3671,7 +3690,7 @@ def quarry_fallback(save_dir: Path, doc: dict, prev: dict | None, si: int | None
     if si is None or any(b["tpl"] in (EXPLORE,) if soil else b["tpl"] in STONE_DIGS for se in doc["seasons"] for b in se["build"]):
         return ""
     fam = material_famine(save_dir, files.read_state(save_dir) or {})
-    if not soil and not (fam.get("short") and fam.get("rock0")):
+    if not soil and not (fam.get("short") and fam.get("rock0")) and not start_dry(files.read_state(save_dir) or {}):   # BUG-691
         return ""
     avoid = ""
     try:
@@ -4885,7 +4904,8 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         builds.append({"tpl": STOCKROOM, "site": "S1", **({"p": {"still": 0}} if low == ["core_f"] else {})})
     # Run 11: rock below the rock orders' need and no dig under way: a bedrooms dig (boulders, rooms the fort needs)
     famine = (fort or {}).get("famine") or {}
-    stone = (rock_goal(s) or ("rock: 0 free boulders and material short (BUG-430)" if famine.get("rock0") else None)) \
+    stone = (rock_goal(s) or ("rock: 0 free boulders and material short (BUG-430)" if famine.get("rock0") else None)
+             or start_dry(s) or None) \
         if not (fort or {}).get("stone_dig") and (info is None or "bedrooms" in info) and \
         all(b["tpl"] not in STONE_DIGS for b in builds) else None
     if stone:
@@ -5101,6 +5121,15 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         doc["notes"] += (f"; BUG-430: no {'logs' if famine.get('logs0') else ''}{' and ' if famine.get('logs0') and famine.get('rock0') else ''}"
                          f"{'free boulders' if famine.get('rock0') else ''} (MATERIAL_SHORT): "
                          + (f"trade.want {','.join(add)} first, " if add else "") + "a safe stone dig first")
+    dry = start_dry(s)
+    if dry and not famine.get("short"):
+        # BUG-691: the first season has no material at all: wood and blocks from the caravan first (as BUG-430 does once the shortage is
+        # logged), the stone dig of this draft goes before the shaft and the depot (stone_first)
+        want = doc["trade"].setdefault("want", [])
+        add = [t for t in ("wood", "block") if t not in want]
+        want[0:0] = add
+        doc["notes"] += (f"; BUG-691: {dry}: " + (f"trade.want {','.join(add)} first, " if add else "")
+                         + "a hard-stone dig before the shaft and the depot (the woodcutters work on autochop's target as set at boot)")
     if soil_fort(s):
         # BUG-438: no hard stone for mechanisms (levers, traps, wells, hospital): the caravans bring mechanisms and stone meanwhile
         want = doc["trade"].setdefault("want", [])
