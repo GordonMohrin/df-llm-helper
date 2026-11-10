@@ -931,6 +931,7 @@ local function kern_verb(st, verb, args, cmd)
     st.as_kern(K.persist.set, 'plan', {v = 2, plan = doc, phases = phases or json.null, loaded = st.now.tick})
     local n = 0
     for _, s in ipairs(doc.seasons) do n = n + #(s.build or {}) end
+    K.call('readiness', 'plan_changed')      -- BUG-680: the new pop ceiling binds max-pop and the status now (a module that is off: ignored)
     return true, 'plan y' .. tostring(doc.year) .. ' loaded', {year = doc.year, builds = n}
   end
   if verb == 'module.enable' then        -- CONTRACTS §3.3.5: re-enable now, reset the doubling

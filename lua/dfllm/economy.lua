@@ -7861,6 +7861,26 @@ function M.mech_free()
   end)
   return ok and n or 0
 end
+-- BUG-681 (Run 16a i1 Basementflew y470-y486: 19 mechanisms 'free' by this count, the traps project 'waits for trapparts x1' 300 days, the
+-- ConstructMechanisms orders 'no job for 64 days' (the Mechanics' shops lie in the flooded level), `plan propose` drew traps@S1 every year
+-- because stock.mfree said 19): the free parts a citizen can walk to. A part on a tile with no walkable group (flooded, walled in) or on a group
+-- the citizens do not stand on is counted apart. n_reach, n_far. mech_free itself stays the raw count the lever flows (gate, seal, readiness) use
+function M.mech_reach(K)
+  local n, far_n = 0, 0
+  pcall(function()
+    for _, it in ipairs(df.global.world.items.other.TRAPPARTS) do
+      local bad = false
+      for _, k in ipairs(M.MECH_SKIP) do if it.flags[k] then bad = true; break end end
+      if not bad then
+        local x, y, z = dfhack.items.getPosition(it)
+        local okf, fr = false, false
+        if x then okf, fr = K.call('snapshot', 'far', x, y, z, true) end
+        if okf and fr == true then far_n = far_n + 1 else n = n + 1 end
+      end
+    end
+  end)
+  return n, far_n
+end
 function M.mech_need(K)
   local man = K.manifest()
   local lv = 0
@@ -7895,7 +7915,8 @@ function M.plan_mech(K, c, r)
   local tp = math.min(math.tointeger((st.jneed or {}).trapparts) or 0, M.MECH.max_traps)
   need = need + tp
   local free = M.mech_free()
-  local m = {need = need, levers = lv, traps = tp, free = free, short = math.max(0, need - free), route = 'none'}
+  local rfree, ffar = M.mech_reach(K)
+  local m = {need = need, levers = lv, traps = tp, free = free, short = math.max(0, need - free), route = 'none', rfree = rfree, ffar = ffar}
   st.mech = m
   if m.short == 0 then m.route = nil; return nil end
   if open(r, M.MECH.tag) then m.route = 'ordered'; return nil end
@@ -11984,6 +12005,13 @@ function M.build_state(K, x, y, z)
       end
       local okn, why = pcall(M.nobuilder_why, K, rec, j)      -- BUG-329: the labor, the items, the job board
       if okn and type(why) == 'table' and #why > 0 then rec.line = rec.line .. ': ' .. table.concat(why, '; ') end
+      -- BUG-679 (Run 16d i4 Trumpetrealms y444-y456: 'Door 65,121,141: job 1191999 not suspended, no builder has taken it: outside the' - the
+      -- projects cut the line at 80 characters, the cause came last and never showed): the same answer, the cause first
+      local cause = {}
+      if rec.bwhy then cause[#cause + 1] = (rec.line:match(': (outside the burrow[^:;]*)')) or ('outside the burrow ' .. tostring(rec.burrow)) end
+      if rec.boxed then cause[#cause + 1] = 'walled in on its level' end
+      if okn and type(why) == 'table' then for _, w in ipairs(why) do cause[#cause + 1] = w end end
+      rec.short = string.format('no builder%s', #cause > 0 and (': ' .. table.concat(cause, '; ')) or ' has taken it (no cause readable)')
     end
     return rec
   end
@@ -12076,10 +12104,36 @@ function M.build_state(K, x, y, z)
         bits[#bits + 1] = string.format('%d citizen%s on the site now (a walked tile: DF suspends it)', nu,
                                         nu == 1 and '' or 's')
       end
+      -- BUG-679 (Run 16d i4 Trumpetrealms: depot4 / depot5 'suspended by DF ... no cause readable' 32-53 days while the stuck merchants of the
+      -- last caravan stood at 84,77,139, on the depot's own footprint): a creature of any kind on the site suspends it, not only a citizen
+      local oko, tot, names = pcall(function()
+        local rc, kinds, n = rec.rect, {}, 0
+        local okq, us = K.call('snapshot', 'units_at', rc.x1, rc.y1, rc.x2, rc.y2, rc.z)       -- the visible living units there
+        for _, e in ipairs(okq and type(us) == 'table' and us or {}) do
+          local u = df.unit.find(e[1])
+          if u and not dfhack.units.isCitizen(u) then
+            local k = dfhack.units.isMerchant(u) and 'merchant' or dfhack.units.isInvader(u) and 'invader'
+                      or dfhack.units.isAnimal(u) and 'animal' or 'other'
+            kinds[k] = (kinds[k] or 0) + 1
+            n = n + 1
+          end
+        end
+        local list = {}
+        for k, c in pairs(kinds) do list[#list + 1] = string.format('%d %s', c, k) end
+        table.sort(list)
+        return n, table.concat(list, ', ')
+      end)
+      if oko and int(tot) and tot > 0 then
+        rec.foreign = tot
+        bits[#bits + 1] = string.format('%d other creature%s on the site now (%s): DF suspends a construction a creature stands on', tot,
+                                        tot == 1 and '' or 's', names)
+      end
     end
     rec.line = string.format('%s suspended by DF (not buildingplan, not suspendmanager): %s', head,
                              #bits > 0 and table.concat(bits, '; ') or 'no cause readable')
+    rec.short = 'suspended by DF: ' .. (#bits > 0 and table.concat(bits, '; ') or 'no cause readable (resumed daily)')   -- BUG-679: cause first
   end
+  if rec.who == 'buildingplan' or rec.who == 'suspendmanager' then rec.short = (rec.line:gsub('^job %S+ ', '')) end   -- BUG-679: no job id first
   return rec
 end
 
@@ -13402,7 +13456,9 @@ function M.state(K)
       if okh and hd then r.stock.rhard = 1 end
     end
     if type(st.mech) == 'table' then                   -- BUG-611: free mechanisms and what plan_mech found for the shortfall (plan: no traps without parts)
-      r.stock.mfree = math.max(0, math.tointeger(st.mech.free) or 0)
+      -- BUG-681: the parts a citizen can walk to (mech.rfree), not every free one in the world; an older save's state has none: the raw count
+      r.stock.mfree = math.max(0, math.tointeger(st.mech.rfree) or math.tointeger(st.mech.free) or 0)
+      if (math.tointeger(st.mech.ffar) or 0) > 0 then r.stock.mfar = math.tointeger(st.mech.ffar) end
       if type(st.mech.route) == 'string' then r.stock.mroute = st.mech.route:sub(1, 16) end
       r.stock.mtp = math.max(0, math.tointeger(st.mech.traps) or 0)       -- BUG-628: trap parts the planned traps wait for
     end

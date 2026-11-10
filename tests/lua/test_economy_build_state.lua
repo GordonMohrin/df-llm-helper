@@ -30,7 +30,8 @@ local function world(opts)
   dfhack.buildings = dfhack.buildings or {}
   dfhack.buildings.findAtTile = function(x, y, z) return (opts.blds or {})[x .. ',' .. y .. ',' .. z] end
   W.load({name = 'snapshot', every = {ticks = 100},
-          items_at = function(K, x0, y0, x1, y1, z) return opts.items or {} end})
+          items_at = function(K, x0, y0, x1, y1, z) return opts.items or {} end,
+          units_at = opts.units_at})
   W.set_census('i', opts.inv or {})
   W.economy = fresh('economy')
   W.load(W.economy)
@@ -138,6 +139,41 @@ T.test('BUG-044: the same answer on demand: inspect workload key build:x,y,z (re
   T.eq({r.data.who, r.data.job, r.data.planned, r.data.pos}, {'buildingplan', 4711, true, nil})
   local none = W.inbox('inspect', {what = 'workload', key = 'build:1,2,3'})
   T.eq({none.ok, none.msg, none.data.none}, {true, 'nothing stands at 1,2,3', true})
+end)
+
+-- BUG-679 (Run 16d i4 Trumpetrealms: 'Door 65,121,141: job 1191999 not suspended, no builder has taken it: outside the' - the projects cut the
+-- line at 80 characters and the cause never showed): `short` is the same answer cause first, no job id up front
+T.test('BUG-679: the short answer names the cause first (a builder that took nothing, DF suspended with nothing readable, buildingplan)', function()
+  local b = door({flags = {suspend = false}})
+  local W = world{blds = {['115,73,143'] = b}}
+  T.eq(state(W).short, 'no builder has taken it (no cause readable)')
+  local b1 = door({flags = {suspend = false}})
+  local W1 = world{blds = {['115,73,143'] = b1}}
+  local r1 = state(W1)
+  T.ok(r1.short:find('^no builder'), r1.short)
+  T.ok(#r1.short <= 110, 'short enough for the 110 characters the events keep: ' .. #r1.short)
+  local W2 = world{blds = {['115,73,143'] = door()}, bp = {isPlannedBuilding = function() return false end},
+                   sm = {isKeptSuspended = function() return false end}}
+  T.eq(state(W2).short, 'suspended by DF: no cause readable (resumed daily)')
+  local W3 = world{blds = {['115,73,143'] = door()}, bp = {isPlannedBuilding = function(x) return x.id == 900 end}, inv = {doors = 0}}
+  local r3 = state(W3)
+  T.ok(r3.short:find('^suspended by buildingplan: waits for ') and not r3.short:find('^job'), r3.short)
+end)
+
+T.test('BUG-679: a merchant standing on the site is named as the cause DF suspends the construction for', function()
+  local merchant = {id = 31927}
+  local W = world{blds = {['115,73,143'] = door()}, bp = {isPlannedBuilding = function() return false end},
+                  sm = {isKeptSuspended = function() return false end},
+                  units_at = function(K, x0, y0, x1, y1, z) return {{31927, X, Y}} end}
+  local oldf, oldc, oldm = df.unit.find, dfhack.units.isCitizen, dfhack.units.isMerchant
+  df.unit.find = function(id) if id == 31927 then return merchant end end
+  dfhack.units.isCitizen = function(u) return false end
+  dfhack.units.isMerchant = function(u) return true end
+  local r = state(W)
+  df.unit.find, dfhack.units.isCitizen, dfhack.units.isMerchant = oldf, oldc, oldm
+  T.eq(r.foreign, 1)
+  T.ok(r.line:find('1 other creature on the site now (1 merchant)', 1, true), r.line)
+  T.ok(r.short:find('^suspended by DF: 1 other creature on the site now %(1 merchant%)'), r.short)
 end)
 
 T.done()

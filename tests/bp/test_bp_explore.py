@@ -168,3 +168,17 @@ def test_bug584_a_new_explore_probe_ranks_farther_from_the_earlier_ones(deep):
     assert "tiles from the nearest of 1 earlier probe" in again[0]["why"]
     none = bp.rank(snap, "explore", {}, manifest=dict(man, explored=[]), n=40)
     assert [s["anchor"] for s in none] == [s["anchor"] for s in plain], "no earlier probe: the ranking as before"
+
+
+def test_bug683_many_earlier_probes_on_the_same_layer_rank_a_start_beside_them_last(deep):
+    """BUG-683 (Run 16d i4 Trumpetrealms y452-y456: probes 1-4 tiles from 47-51 earlier ones, all mudstone): each earlier probe within
+    EXPLORE_NEAR tiles on the anchor's layer costs score and the reason says REPEAT; a probe on another layer does not count."""
+    snap, man = deep
+    plain = bp.rank(snap, "explore", {}, manifest=man, n=40)
+    best = plain[0]["anchor"]
+    crowded = bp.rank(snap, "explore", {}, manifest=dict(man, explored=[[best[0] + 2, best[1], best[2]]] * 3), n=40)
+    rep = [s for s in crowded if "REPEAT: 3 earlier probe(s)" in s["why"]]
+    assert rep, [s["why"] for s in crowded]
+    assert "REPEAT" not in crowded[0]["why"] and crowded[0]["score"] > max(s["score"] for s in rep)
+    other = bp.rank(snap, "explore", {}, manifest=dict(man, explored=[[best[0] + 2, best[1], best[2] + 20]] * 3), n=40)
+    assert not any("REPEAT" in s["why"] for s in other)

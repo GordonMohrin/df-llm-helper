@@ -58,6 +58,18 @@ T.test('BUG-486: no economy answer, slots_idle 0 or no idle hands keep the 3 slo
   T.eq(n4, 4, 'slots_max 4 caps the growth')
 end)
 
+-- BUG-679 (Run 16d i4 Trumpetrealms y444: a Cook and a Dyer idle, 3 slots, 6 projects 'set aside'): one free idle adult is one more slot
+T.test('BUG-679: two free idle adults of 39 are one slot more (the count rounds up), not none', function()
+  local W = fresh({tag = 'b679a'}, 2, 39)
+  five(W)
+  local _, n = started(W)
+  T.eq(n, 4, 'old code: 2 // 3 = 0 extra, 3 projects at once')
+  local W2 = fresh({tag = 'b679b'}, 1, 39)
+  five(W2)
+  local _, n2 = started(W2)
+  T.eq(n2, 4, 'one idle adult: one more')
+end)
+
 local F = require('wp8_world')
 local CW = require('care_world')
 local function fresh_mod(mod) package.loaded['dfllm.' .. mod] = nil; return require('dfllm.' .. mod) end

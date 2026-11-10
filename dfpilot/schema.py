@@ -117,7 +117,7 @@ STATE_OWNERS = {
     "pop.cap": "readiness", "pop.gate_cap": "readiness", "pop.hold": "readiness", "ready.*": "readiness",
     "stock.drink_d": "economy", "stock.food_d": "economy", "stock.meals": "economy",
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
-    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy",
+    "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy", "stock.mfar": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
@@ -1094,7 +1094,7 @@ STATE = Obj(
                            "rhard": FLAG,
                            # BUG-611: free trap parts (mechanisms) in the fort and what plan_mech found for the shortfall ('no stone' | 'no
                            # Mechanics' | 'ordered' | 'stone'): plan propose / check leave the traps out while none is free and none can be made
-                           "mfree": NAT, "mroute": Str(maxbytes=16),
+                           "mfree": NAT, "mfar": NAT, "mroute": Str(maxbytes=16),
                            # BUG-628: trap parts the planned traps wait for (plan_mech: the traps project that hangs at "waits for trapparts")
                            "mtp": NAT,
                            # Run 11: metal short for the soldiers (economy.metal: plan check's metal route gate) and the

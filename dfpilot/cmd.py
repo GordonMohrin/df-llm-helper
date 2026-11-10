@@ -419,6 +419,7 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
     snap = snap or sites_snapshot(save_dir)
     if snap is None:
         raise BpError("no snapshot: run `dfllm bp sites <tpl> --fresh` (or `dfllm cmd snapshot purpose=sites`)")
+    params = translate_only(tpl, params)[0] if params and params.get("only") else params     # BUG-683: `bp sites workshops only=Kitchen`
     manifest = manifest if manifest is not None else fort_manifest(save_dir)
     water = water_ctx(save_dir, tpl)
     free = _free_of_projects(save_dir, tpl, params)
@@ -1379,6 +1380,34 @@ def foot_closed(snap: dict | None, x: int, y: int, zr: int) -> bool:
 PHANTOM_WINDOW_YEARS = 20
 
 
+# BUG-684 (Run 16c i3 Wallfree y414-y419: `plan propose` drafted `seal at=refuge` for the hatch 67,44,139 of a stair nobody dug in every plan
+# although Round 43 cancels such a seal and remembers it: the kernel that wrote the plan had not been reloaded, so no PROJECT_BLOCKED
+# phantom existed, and the tile lies below the sites snapshot (z139 under its bbox z143-153), so the map could not say either): the
+# same seal stuck 'not placed' / 'nothing stands at <tile>' on the same tile in SEAL_STUCK events (or the DECISION seal_stalled that
+# goes with them) at least PHANTOM_STUCK_EVENTS times over PHANTOM_STUCK_DAYS game days counts as the record. Only a tile the map does not
+# show as a stair (refuge_stair reads the revealed tile first) is ever treated so
+PHANTOM_STUCK_EVENTS = 3
+PHANTOM_STUCK_DAYS = 10
+_STUCK_TILE = re.compile(r"hatch (-?\d+,-?\d+,-?\d+)")
+
+
+def _stuck_hatch_events(e: dict) -> list[tuple[str, int]]:
+    """[(tile, tick)] a SEAL_STUCK / seal_stalled event names for a hatch no building ever stood on ('not placed')."""
+    d = e.get("d") if isinstance(e.get("d"), dict) else {}
+    tick = e.get("tick")
+    if not isinstance(tick, int):
+        return []
+    if e.get("type") == "SEAL_STUCK" and d.get("why") == "not placed":
+        text = [str(x) for x in d.get("pieces") or []] if isinstance(d.get("pieces"), list) else []
+        if "nothing stands at" not in str(d.get("wait") or ""):
+            return []
+    elif e.get("type") == "DECISION_NEEDED" and d.get("id") == "seal_stalled" and "(not placed)" in str(d.get("q") or ""):
+        text = [str(d.get("mat") or "")]
+    else:
+        return []
+    return [(m.group(1), tick) for t in text for m in [_STUCK_TILE.match(t.strip())] if m]
+
+
 def phantom_tiles(save_dir: Path) -> set[str]:
     """BUG-638 (Run 16b i2 y377 / Run 16c i3 y374-y378: a seal for a refuge hatch on a tile that is solid rock, 'nothing stands at', the plan
     check demanding it again): the tiles ('x,y,z') the kernel cancelled a seal for because they are solid rock on the revealed map
@@ -1386,6 +1415,7 @@ def phantom_tiles(save_dir: Path) -> set[str]:
     now = files.current_tick(save_dir)
     mt = now - PHANTOM_WINDOW_YEARS * schema.TICKS["YEAR"] if isinstance(now, int) else None
     out: set[str] = set()
+    seen: dict[str, set] = {}
     for e in files.iter_events_rev(save_dir, min_tick=mt):
         d = e.get("d") if isinstance(e.get("d"), dict) else {}
         if e.get("type") == "PROJECT_BLOCKED" and isinstance(d.get("phantom"), list):
@@ -1393,6 +1423,13 @@ def phantom_tiles(save_dir: Path) -> set[str]:
                 m = re.match(r"^\s*(-?\d+,-?\d+,-?\d+)", str(s))
                 if m:
                     out.add(m.group(1))
+        # BUG-684: the kernel's own memory is the PROJECT_BLOCKED above; a kernel without it (not reloaded) leaves the stuck seals as the record
+        for tile, tick in _stuck_hatch_events(e):
+            seen.setdefault(tile, set()).add(tick)
+    day = schema.TICKS["DAY"]
+    for tile, ticks in seen.items():
+        if len(ticks) >= PHANTOM_STUCK_EVENTS and max(ticks) - min(ticks) >= PHANTOM_STUCK_DAYS * day:
+            out.add(tile)
     return out
 
 
@@ -2009,7 +2046,31 @@ def no_site_hint(save_dir: Path, tpl: str, snap_id: str, ranked: int, holders: l
         else:
             out.append(f"no ranked site: no fortcore project placed (room sites hang on its Z4 floor): bp.place fortcore "
                        f"first, then `dfllm bp sites {tpl} --fresh`")
+    if tpl == "workshops" and not (params or {}).get("surface"):
+        # BUG-683 (Run 16a i1 Basementflew y470-y472: `bp.place workshops only=Kitchen` refused '0 free sites' for the Kitchen of a fort whose
+        # only room sites were in the flooded level; `surface=1` placed it in minutes and no message said so): the shops also stand on open
+        # surface floor
+        only = _only_names(params)
+        out.append("the shops also stand on open surface floor outside the core: "
+                   f"`dfllm cmd bp.place tpl=workshops site=S1 {('only=' + only + ' ') if only else ''}surface=1 --by llm` "
+                   f"(`dfllm bp sites workshops {('only=' + only + ' ') if only else ''}surface=1 --fresh` lists the sites; BUG-683)")
     return "; ".join(out)
+
+
+def _only_names(params: dict | None) -> str:
+    """BUG-683: the `only=` list a translated workshops params dict (skip / add) stands for ('' = every moodable type)."""
+    p = params or {}
+    if p.get("only"):
+        return str(p["only"])
+    if "skip" not in p and not p.get("add"):
+        return ""
+    skip = {t.strip() for t in str(p.get("skip") or "").split(",") if t.strip()}
+    try:
+        keep = [t for t in _moodable() if t not in skip]
+    except Exception:                                            # no bp package: the names are only a hint
+        keep = []
+    keep += [t.strip() for t in str(p.get("add") or "").split(",") if t.strip()]
+    return ",".join(keep)
 
 
 def farm_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None, ranked: int) -> str:
@@ -2641,6 +2702,8 @@ def free_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
         from . import traps as _traps
         params = dict(params or {})
         params["at"] = _traps.expand(save_dir, params, snap)[0]
+    if params and params.get("only"):                      # BUG-683: workshops only=<types> as the template's skip / add
+        params = translate_only(tpl, params)[0]
     if where:
         sites, snap_id = rank_sites(save_dir, tpl, params, snap, n=RANK_N, where=where)
     else:

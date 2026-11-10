@@ -3779,7 +3779,9 @@ function Q.slot_cap(K, c)
   if not c or c.slots_idle <= 0 then return base end
   local ok, free, adults = K.call('economy', 'idle_free')
   if not (ok and math.type(free) == 'integer' and math.type(adults) == 'integer') then return base end
-  local cap = math.max(base, math.min(c.slots_max, base + free // c.slots_idle + adults // c.slots_pop))
+  -- BUG-679 (Run 16d i4 Trumpetrealms y444: a Cook and a Dyer idle, 3 slots held, 6 projects 'set aside'): one free idle adult is one hand more
+  -- than the slots feed, so the idle count rounds up (2 idle adults were 0 extra slots with slots_idle 3)
+  local cap = math.max(base, math.min(c.slots_max, base + (free + c.slots_idle - 1) // c.slots_idle + adults // c.slots_pop))
   if cap ~= S.cap_seen then
     S.cap_seen = cap
     if cap > base then
@@ -6245,8 +6247,9 @@ function Q.parts(K, P, d)
         looked = looked + 1
         local ok, bs = K.call('economy', 'build_state', t[1], t[2], t[3])
         if ok and type(bs) == 'table' and type(bs.line) == 'string' then
+          -- BUG-679: the cause first (economy.build_state `short`), so the 80-110 characters the events keep name it
           out[#out + 1] = trunc(string.format('%s %d,%d,%d: %s', bs.sub or bs.kind or PIECE_NAME[t[4]] or t[4], t[1], t[2],
-                                              t[3], bs.line), 120)
+                                              t[3], type(bs.short) == 'string' and bs.short or bs.line), 140)
         end
       end
     end
@@ -6639,7 +6642,7 @@ function Q.idle_scan(K, c, t)
       local wait
       if P.blocked == 'stalled' and d then
         local okp, parts = pcall(Q.parts, K, P, d)
-        if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 80) end
+        if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 110) end
       end
       S.rt.ip[P.id] = {t = t, ps = ps, si = P.stage, why = why}
       dirty()
@@ -6672,7 +6675,7 @@ function Q.stale_scan(K, c, t)
       local wait
       if d then
         local okp, parts = pcall(Q.parts, K, P, d)
-        if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 80) end
+        if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 110) end
       end
       local days = (t - ps) // DAY
       local cmds = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}', then dfllm plan propose (follow cancels traps, tombs and "
@@ -6756,7 +6759,7 @@ function Q.stall_scan(K, c, t)
       end
       if d then
         local okp, parts = pcall(Q.parts, K, P, d)
-        if okp and type(parts) == 'table' and #parts > 0 then cause[#cause + 1] = 'waits: ' .. trunc(parts[1], 80) end
+        if okp and type(parts) == 'table' and #parts > 0 then cause[#cause + 1] = 'waits: ' .. trunc(parts[1], 110) end
       end
       if keep then cause[#cause + 1] = 'kept (' .. keep .. ')' end
       if P.blocked ~= '' then cause[#cause + 1] = P.blocked end
