@@ -476,6 +476,7 @@ function M.new(opts)
     end,
     run = function(cmd, ...) return true, W.cmd_outputs[cmd] or '' end,
     quickfort = function(p) return true, {} end,
+    mat_refused = function(idx) return false end,         -- BUG-665: the game refuses no stone unless a test says so (W.act_result)
   }
   local act = {}
   for fn, owners in pairs(C.ACT) do

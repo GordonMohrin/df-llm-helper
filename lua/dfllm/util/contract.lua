@@ -152,7 +152,7 @@ C.EVENTS = {
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   -- Run 11: d.cause far (it ended with hostiles in sight beyond reflex.lockdown_near; d.far names them, d.nfar) | quiet
-  LOCKDOWN_END = {cls = 'B', by = 'reflex'},
+  LOCKDOWN_END = {cls = 'B', by = 'reflex'}, LOCKDOWN_CLOCK = {cls = 'B', by = 'reflex'},
   PREDATOR_FAR = {cls = 'B', by = 'reflex'},
   -- Run 11 (siege 8): the lockdown's recall of the citizens outside Kern+ (d.why done | late | end; n, left, ticks,
   -- units still out, called, burrow, eta; BUG-035: why stuck, reasons, stuck, pull, nnew, newu); a switch of the civ
@@ -326,6 +326,7 @@ C.ACT = {
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care', 'traps'},
   order_suspend = {'economy'}, engrave_order = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy', 'water'},
   stone_economic = {'economy'},                    -- BUG-648: clear the stone-use screen's economic mark of a building stone
+  mat_refused = {'economy'},                       -- BUG-665: the game's verdict on a boulder material as non-economic hard stone (read only)
   kitchen_include = {'economy'},                   -- BUG-345: lift a Cook exclusion (seedwatch leftovers, D-09 in a famine)
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
   plant_gather = {'economy'}, plant_ungather = {'economy'}, work_detail_prune = {'economy'},

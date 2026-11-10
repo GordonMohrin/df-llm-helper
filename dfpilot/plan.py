@@ -2148,6 +2148,12 @@ def audit_gate(doc: dict, s: dict, fort: dict, prev: dict | None) -> tuple[list[
             return [], [f"audit: {route}: a door stands at {', '.join(w.rsplit(' ', 1)[0] for w in a['doored'])} (seal "
                         f"{', '.join(sorted(set(a['doored'].values())))}): a wall there cut citizens off (the kernel refused it), "
                         "the audit counts walls only; decide by hand (a second way for them, then the wall)"]
+        if a.get("core") and not a.get("pending"):
+            # BUG-658 (Run 16d i4 Trumpetrealms y437-y441: 'seal project  builds the wall' with no project, `seal at=audit` 'nothing to close'):
+            # the wall tile lies in a fortcore project, the fort's own corridor; no seal is built there, so none is drafted
+            return [], [f"audit: {route}: the wall {', '.join(w.rsplit(' ', 2)[0] for w in a['core'])} lies on a tile of the fortcore "
+                        f"{', '.join(sorted(set(a['core'].values())))} (the fort's own way): no seal is built there; the next audit names "
+                        "another tile of the route or none (`dfllm audit`); readiness stays R0 `bypass` until then"]
         pend = ", ".join(sorted(set((a.get("pending") or {}).values())))
         return [], [f"audit: {route}: seal project {pend} builds the wall; dfllm audit once it stands"]
     due = due_season(doc, s)
@@ -4343,6 +4349,9 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
                 r = reqs.setdefault("workshops", {"tpl": "workshops", "types": [], "why": str(d.get("why") or ""),
                                                   "tick": tick})
                 r["types"] += [t for t in d["types"] if isinstance(t, str) and t not in r["types"]]
+                if d.get("why") == "cut":              # BUG-654: the manifest lists these (they stand, cut off): a new one is asked for
+                    r.setdefault("cut", [])
+                    r["cut"] += [t for t in d["types"] if isinstance(t, str) and t not in r["cut"]]
     done = done_projects(save_dir)
     rows = {r[0]: str(r[3] if len(r) > 3 else "") for r in (state or {}).get("proj") or []
             if isinstance(r, list) and r and isinstance(r[0], str)}
@@ -4359,10 +4368,12 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
         if r["tick"] <= done_t.get(tpl, -1) or tpl in under:
             continue
         if tpl == "workshops":
+            cut = [t for t in r.pop("cut", [])]
             try:
                 r["types"] = _cmd.workshops_missing(save_dir, r["types"])
             except Exception:                           # noqa: BLE001
                 r["types"] = []
+            r["types"] += [t for t in cut if t not in r["types"]]      # BUG-654: cut off = standing in the manifest, no use to the citizens
             if not r["types"]:
                 continue
         out.append({k: v for k, v in r.items() if k != "tick"})

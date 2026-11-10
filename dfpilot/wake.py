@@ -20,7 +20,8 @@ not wake; the follower acts on two of them without the LLM:
                                   the missing types of d.types, at prio 1; why=slabs (economy, BUG-133: ghosts
                                   and no mason's workshop, d.types [Masons]) -> the same; why=manager (BUG-231),
                                   why=missing (BUG-267), gear (BUG-270), well;
-                                  why=mood with d.types (BUG-283: the shops a strange mood and its materials need) -> the same
+                                  why=mood with d.types (BUG-283: the shops a strange mood and its materials need) -> the same;
+                                  why=cut (BUG-654: the shop types no citizen can walk to) -> the same, a NEW shop of the type
   PROJECT_REQUEST tpl=office why=office -> BUG-396: the manager's office (the surface variant without a dug core), prio 1
   PROJECT_REQUEST tpl=farms why=food -> the same with p.plots = n (1-4) at prio 1 (economy asks when the farm
                                   tiles fall short of the citizens and food is low or falling; live L5)
@@ -218,7 +219,11 @@ PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "se
               "mandatory", "slabs",           # automatic placements (one each); BUG-133: slabs = the masons for the ghosts
               "busy",                         # BUG-224: busy = one more Carpenters/Masons beside a full one
               "mood",                         # BUG-283: the shops a strange mood waits for (care's typed request)
-              "cistern_water")                # BUG-424: the piped cistern from the water nearest to a fort without drink
+              "cistern_water",                # BUG-424: the piped cistern from the water nearest to a fort without drink
+              # BUG-654 (Run 16a i1 Basementflew): the workshops requests are keyed by their `why` (_on_event), and these six were not listed:
+              # their snapshot came, `_on_snapshot` matched no job and nothing was ever placed (BUG-231 manager, BUG-267 missing, BUG-270 gear,
+              # well, BUG-473 masonry, BUG-630 trade); cut = BUG-654's own, the shop types no citizen can walk to
+              "manager", "missing", "gear", "well", "masonry", "trade", "cut")
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -585,8 +590,10 @@ def no_hard_stone_hint(d: dict) -> str:
     mechanisms, plan propose (a dig to hard stone), inspect workload. Yours to decide: wood serves doors, chests, tables, beds, coffins;
     mechanisms, stone traps and levers have no wooden form."""
     cmds = [str(c) for c in d.get("cmds") or []]
+    wood = next((c for c in cmds if "order.add" in c), "")              # BUG-666: the wooden door has a verb (mat=wood)
     return (f"{d.get('q', 'no non-economic hard stone')}. Decide yourself: buy it ({cmds[0] if cmds else 'dfllm cmd trade.want'}), dig to hard "
-            f"stone ({cmds[1] if len(cmds) > 1 else 'dfllm plan propose'}), or go on without mechanisms and stone traps")
+            f"stone ({cmds[1] if len(cmds) > 1 else 'dfllm plan propose'}), or go on without mechanisms and stone traps"
+            + (f"; doors from wood: {wood}" if wood else ""))
 
 
 def released_hint(d: dict) -> str:
@@ -1082,7 +1089,7 @@ class Follower:
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and (
-                    d.get("why") in ("mandatory", "slabs", "busy", "manager", "missing", "gear", "well", "masonry", "trade")
+                    d.get("why") in ("mandatory", "slabs", "busy", "manager", "missing", "gear", "well", "masonry", "trade", "cut")
                     or (d.get("why") == "mood" and d.get("types"))):
                 # BUG-283 (Run 15 Drillchamber: the glass furnace a fey mood waited for came 30 days late in a plain
                 # 12-shop placement at prio 4): why=mood with types = only the shops the mood and its materials need, prio 1
@@ -1094,6 +1101,9 @@ class Follower:
                 # BUG-267: why=missing (orders wait 14+ days for these shops); BUG-270: why=gear (Leatherworks, Tanners,
                 # Mechanics for gear and lever mechanisms); why=well (fix6-water: the hospital well's shop); BUG-473 why=masonry
                 # (an aqshaft level with soil walls and no Masons workshop: the Masons alone, prio 1)
+                # BUG-654 (Run 16a i1 Basementflew: the only Kitchen, Carpenters and Mechanics stood in a flooded level, meals 0 for years):
+                # why=cut = the shop types whose every shop stands off the citizens' walk groups; a new one, kept although the manifest
+                # lists the cut-off one (`need`), on the citizens' walk group (the surface ranking reads it; BUG-394 tries it too)
                 from .cmd import _extra_shops, _moodable
                 mood, extra = _moodable(), set(_extra_shops())
                 want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]
@@ -1904,7 +1914,15 @@ def compute_audit(save_dir: Path, sid: str, rel: str, reply: dict, info: dict | 
         takes_info = "info" in inspect.signature(fn).parameters
     except (TypeError, ValueError):
         takes_info = False
-    res = fn(snap, manifest, info=info) if takes_info and info is not None else fn(snap, manifest)
+    kw: dict = {"info": info} if takes_info and info is not None else {}
+    try:
+        if "avoid" in inspect.signature(fn).parameters:
+            # BUG-658: no audit wall on a fortcore tile or a finished seal's tile: seal at=audit would leave it out
+            from .cmd import audit_avoid
+            kw["avoid"] = audit_avoid(save_dir, snap.get("tick"))
+    except (TypeError, ValueError):
+        pass
+    res = fn(snap, manifest, **kw)
     return audit_args(sid, res)
 
 

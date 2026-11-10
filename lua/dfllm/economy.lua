@@ -697,6 +697,19 @@ local function mat_token(t, i)                  -- 'INORGANIC:IRON', 'PLANT:GRAS
   return s or nil
 end
 
+-- BUG-665 (Run 16b i2 Valleyhame: CONGLOMERATE, SANDSTONE, CHERT, SHALE 'hard, not economic' by the raws and the stone-use screen, every rock
+-- job and every mood still 'none hard stone'; Run 16d i4 MUDSTONE / CLAYSTONE / KAOLINITE the same): the census does not guess what DF takes
+-- as 'non-economic hard stone', it asks the game. A job_item for a BOULDER with the flags the rock furniture and mechanism jobs carry (non_economic,
+-- hard) goes through dfhack.job.isSuitableMaterial (act.mat_refused; the check the strange-mood filters already use, reserve.lua R.match); a material it refuses
+-- is counted `rock_bad` (and named in kern.log 'free boulders by material': refused by the game). `M.ASK_DF = false` skips the question.
+-- Returns true only on a definite 'no'; any fault, an unknown field or a missing API answers false (the old census stands).
+M.ASK_DF = true
+function M.df_refuses(idx)
+  if not M.ASK_DF or not M.act then return false end
+  local ok, yes = pcall(function() return M.act.mat_refused(idx) end)         -- act.lua I.mat_refused
+  return ok and yes == true
+end
+
 -- an inorganic boulder material: ore (token, metal tokens) and flux; raws only (the item is in the fort)
 local function ore_of(idx)
   local r = orec[idx]
@@ -718,6 +731,8 @@ local function ore_of(idx)
     local es = df.global.plotinfo.economic_stone
     if es and es[idx] ~= nil and es[idx] ~= 0 and es[idx] ~= false then r.econ = true end
     if mi.material.flags.ITEMS_HARD ~= true then r.soft = true end
+    -- BUG-665: the game's own verdict on a plain building stone (hard, not economic, no ore, no flux) as furniture / mechanism stone
+    if not (r.econ or r.soft or r.metals or r.flux) and M.df_refuses(idx) then r.refused = true end
   end)
   orec[idx] = r
   return r
@@ -958,6 +973,7 @@ end
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
+  a.fw = w                                       -- BUG-665: the boulder branch reads in_job from the same word
   if math.type(w) == 'integer' then
     local skip = w & skip_mask ~= 0
     if mask_check > 0 then
@@ -1115,7 +1131,15 @@ local function classify(it, a, cat)
   elseif cat == 'BOULDER' then
     -- BUG-544 (Basementflew: census rock 32, every boulder in the flooded z117 complex, masons and mechanics never worked): a
     -- boulder on another walk group than the citizens' is no stone for any job; `rock_far` counts it, `rock` and `ore` do not
-    if a.far and a.far(it) then a.rock_far = a.rock_far + n; return end       -- (no flag read: the census reads one flag word)
+    -- BUG-665 (Run 16a i1 Basementflew: 30 boulders 'usable' beside DF's "Needs non-economic hard stone" for 100+ days, they lay in the flooded
+    -- z117; Run 16b i2 Valleyhame: 46 of 84 for 200 days): DF's job picker takes a boulder that no job holds and that a worker can walk to.
+    -- A boulder on a tile with NO walkable group (flooded, walled in; the plain `far` read calls group 0 near) is out of reach, one a job
+    -- already holds (`in_job`: a hauler's or a builder's claim that never ends) is no free stone: both are counted apart, not in `rock`
+    if a.far and a.far(it, true) then a.rock_far = a.rock_far + n; return end   -- (no flag read: the census reads one flag word)
+    -- (the in_job bit comes from the flag word the census already read; one more flag read only without the mask)
+    local busy
+    if math.type(a.fw) == 'integer' and M.JOB_BIT then busy = a.fw & M.JOB_BIT ~= 0 else busy = f.in_job == true end
+    if busy then a.rock_busy = a.rock_busy + n; return end
     a.rock = a.rock + n
     if it.mat_type == 0 then
       local r = ore_of(it.mat_index)
@@ -1127,7 +1151,7 @@ local function classify(it, a, cat)
         reach_mark(a, it, 'ore:' .. r.token)
       end
       if r.flux then a.flux = a.flux + n end
-      if r.econ or r.soft then a.rock_bad = (a.rock_bad or 0) + n
+      if r.econ or r.soft or r.refused then a.rock_bad = (a.rock_bad or 0) + n
       elseif not (r.metals or r.flux) then reach_mark(a, it, 'rock') end
     end
   elseif cat == 'THREAD' then
@@ -1218,7 +1242,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'w_pick_forb', 'w_axe_forb', 'w_pick_melt', 'w_axe_melt', 'w_pick_own', 'w_axe_own', 'melt',
               'w_pick_far', 'w_axe_far', 'w_pick_use', 'w_axe_use',
               'brew_p', 'brew_g', 'chairs', 'tables',
-              'rock_far', 'doors_far', 'hatches_far', 'grates_far', 'blocks_far', 'chairs_far', 'tables_far'}   -- BUG-544
+              'rock_far', 'doors_far', 'hatches_far', 'grates_far', 'blocks_far', 'chairs_far', 'tables_far',   -- BUG-544
+              'rock_busy'}   -- BUG-665
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -1353,6 +1378,12 @@ local function facts(K, p)
       if n and built(b) then f['furnace:' .. n] = true end
     end
   end)
+  -- BUG-654: a workshop type whose every shop stands off the citizens' walk groups (M.cut_scan, confirmed) is no workshop: its jobs
+  -- sit at a shop nobody walks to; f['cut:<Type>'] says why the type is missing
+  local cw = type(p) == 'table' and type(p.cutws) == 'table' and p.cutws or nil
+  for t in pairs(cw or {}) do
+    if f['workshop:' .. t] then f['workshop:' .. t], f['cut:' .. t] = nil, true end
+  end
   return f
 end
 
@@ -2566,12 +2597,15 @@ local function wood_orders(K, c, r)
   end
   local keep = math.max(w.wood_min or 30, floor_of(c, r.p, r, 'wood'))
   local budget = (r.inv.wood or 0) - keep - (r.s.used.wood or 0) - (r.planned.wood or 0)
+  -- BUG-666 (Run 16d i4 Trumpetrealms y438: the only door order 'Make rock door', 371 days old, beside 99 logs and 0 usable stone): an order
+  -- T.stale made again in rock keeps its material only while stone is free (stale_mark); with no stone at all it can never run in rock, so it
+  -- goes to the Carpenters like any other rock order
   local n = 0
   for _, o in ipairs(orders_all()) do
     if n >= (w.per_day or 8) or budget <= 0 then break end
     -- BUG-224 (live i3 Earthboat: order 650 ConstructChest went rock -> wood one day after T.stale made it again in
     -- stone): an order T.stale switched or made again (p.ostale sw/redo, M.stale_mark) keeps its material
-    if open_of(o) and o.mat_type == 0 and o.amount_left <= budget and not M.stale_mark(r.p, o.id) then
+    if open_of(o) and o.mat_type == 0 and o.amount_left <= budget and (rock <= 0 or not M.stale_mark(r.p, o.id)) then
       local amount = o.amount_left
       if K.act.order_material(o.id, 'wood') then
         n, budget = n + 1, budget - amount
@@ -6655,6 +6689,8 @@ function T.kitchen(K, c, r) pcall(kitchen, K, c, r.days.food_d) end
 function T.appoint(K, c, r) M.appoint_vacant(K) end
 function T.food(K, c, r) if r.day then food_plan(K, c, r) end end
 function T.watch(K, c, r)
+  local okc, errc = pcall(M.cut_scan, K, c, r)     -- BUG-654: first, the shop facts below read p.cutws
+  if not okc then K.log('warn', 'cut-off shop scan failed: %s', tostring(errc)) end
   M.no_water(K, c, r)                              -- BUG-401: first, alarm_check and drink_low read st.nowater
   validation_watch(K, r.p, c)
   alarm_check(K, c, r.p, r.days)
@@ -7599,12 +7635,16 @@ end
 -- switch on (only that material is there), or nil, why. BUG-466: fire = a furnace or forge: no logs
 function M.bm_route(r, s, kind, fire)
   local inv = r.inv
+  -- BUG-667 (Run 16d i4 Trumpetrealms y439: pop 12, stone 0 usable, 99 logs; the trade depot 'building material: blocks' and a seal wall 'no item' for
+  -- 90 days, so no caravan could trade for stone: a vicious circle): once DF has refused the fort's stone (M.hard_denied), a building takes
+  -- its logs, not the boulders the game will not hand out; the boulders are not the building's material while logs are there
+  local deny = not fire and (inv.wood or 0) > 0 and M.stone_none(inv, r.now)
   for _, e in ipairs(M.BM) do
-    if s[e[1]] and (inv[e[2]] or 0) > 0 and not (fire and e[1] == 'logs') then return e[1] end
+    if s[e[1]] and (inv[e[2]] or 0) > 0 and not (fire and e[1] == 'logs') and not (deny and e[1] == 'boulders') then return e[1] end
   end
   for _, k in ipairs(M.BM_ON) do
     for _, e in ipairs(M.BM) do
-      if e[1] == k and (inv[e[2]] or 0) > 0 and not (fire and k == 'logs') then return nil, nil, k end
+      if e[1] == k and (inv[e[2]] or 0) > 0 and not (fire and k == 'logs') and not (deny and k == 'boulders') then return nil, nil, k end
     end
   end
   -- BUG-544: the census counts what the citizens can reach; stone on another walk group is named, not counted
@@ -7640,6 +7680,47 @@ function M.mat_for(K, kind, n)
   local e = M.PIECE_KIND[kind]
   if not e then return nil, 'unknown piece ' .. tostring(kind) end
   return M.piece_route(c, r, e, n)
+end
+
+-- BUG-655 (Run 16a i1 Basementflew y442-y466: the hospital stage lost its four beds ('missing b x4') in six projects, 283 logs in the
+-- fort, mat_for said 'wood', and no ConstructBed order ever stood: the pieces are not planned buildings, so nothing waited for a bed
+-- item and T.jmake made no order): what the supply of n pieces of `kind` lacks, from the orders and the shops the kernel sees now.
+-- Returns text, command line, code: no_shop (no workshop of the kind stands), cut (it stands, no citizen can walk to it), no_logs, no_order
+-- (nothing makes the pieces: order.add), ordered (an order stands: the shop has not made them), item (free ones stand). nil, unknown kind.
+function M.piece_supply(K, kind, n)
+  local e = M.PIECE_KIND[kind]
+  n = math.max(1, math.tointeger(n) or 1)
+  if not e or not K.census.i then return nil end
+  local c, r = M.conf(K), M.view_run(K)
+  local inv, f, p = r.inv or {}, r.f or {}, r.p or {}
+  local jt, open = df.job_type[e.job], 0
+  for _, o in ipairs(orders_all()) do
+    if jt ~= nil and o.job_type == jt then open = open + (math.tointeger(o.amount_left) or 0) end
+  end
+  local logs = math.tointeger(inv.wood) or 0
+  local shops = e.wood and {'Carpenters'} or {'Carpenters', 'Masons'}
+  local stands, cutl = false, nil
+  for _, t in ipairs(shops) do
+    if f['workshop:' .. t] then stands = true end
+    if f['cut:' .. t] then cutl = cutl or M.cut_text(p, t) end
+  end
+  local head = string.format('%s x%d: %s x%d open', e.kind, n, e.job, open)
+  local free = e.inv and (math.tointeger(inv[e.inv]) or 0) or 0
+  if free >= n then return head .. string.format(', %d free in stock: the planned pieces take them', free), nil, 'item' end
+  local function order_cmd(k) return string.format([[dfllm cmd order.add '{"job":"%s","amount":%d}']], e.job, k) end
+  local ws_cmd = string.format([[dfllm cmd bp.place '{"tpl":"workshops","site":"S1","p":{"only":"%s"}}']], shops[1])
+  if not stands then
+    if cutl then return head .. ', ' .. shops[1] .. ' cut off (' .. cutl .. '): a new one is asked for', ws_cmd, 'cut' end
+    return head .. ', no ' .. shops[1] .. (e.wood and '' or ' or Masons') .. ' workshop stands', ws_cmd, 'no_shop'
+  end
+  if e.wood and logs < n then
+    return head .. string.format(', %s stands, logs %d < %d: no wood to make them', shops[1], logs, n),
+           [[dfllm cmd trade.want '{"add":["wood"]}']], 'no_logs'
+  end
+  if open < n then
+    return head .. string.format(', %s stands, logs %d: nothing makes the missing %d', shops[1], logs, n - open), order_cmd(n - open), 'no_order'
+  end
+  return head .. ', ' .. shops[1] .. ' stands: not made yet (dfllm cmd inspect orders)', nil, 'ordered'
 end
 
 -- BUG-443 (Run 16c i3 Castletongs: an aqshaft ring on a heavy level hung 60 % for a year in very deep soil, 74 of 181 orders stuck,
@@ -7946,6 +8027,15 @@ end
 function T.jmake(K, c, r)
   local jb, pc = r.jb, c.pieces
   st.jneed = M.jneed(jb)                              -- BUG-231: what the planned buildings wait for (M.mgr_bypass)
+  -- BUG-667: the boulders go back on in buildingplan once the stone is usable again (more boulders came, or DF took them)
+  if r.p.bpoff and not M.stone_none(r.inv, r.now) then
+    r.cmds = r.cmds + 1
+    if K.act.run('buildingplan', 'set', 'boulders', 'true') then
+      r.p.bpoff = nil
+      K.persist.touch('m.economy')
+      K.log('info', 'buildingplan boulders on again: the stone is usable')
+    end
+  end
   st.fire_n = nil                                     -- BUG-466: furnaces / forges waiting for fire-safe material, none in the fort
   if not jb or type(pc) ~= 'table' then return true end
   local short, walls, s = {}, 0, nil
@@ -7955,6 +8045,16 @@ function T.jmake(K, c, r)
       s = s or M.bp_settings()
       local kind = M.bm_kind(q)
       local via, why, set = M.bm_route(r, s, kind, q.fire)
+      -- BUG-667: logs are the material (stone is refused): buildingplan's boulders go off so no wall or depot reserves a boulder nobody may take
+      if via == 'logs' and s.boulders and not q.fire and M.stone_none(r.inv, r.now) and not r.p.bpoff then
+        r.cmds = r.cmds + 1
+        if K.act.run('buildingplan', 'set', 'boulders', 'false') then
+          r.p.bpoff = r.now
+          K.persist.touch('m.economy')
+          K.log('warn', 'buildingplan boulders off: DF refuses the stone of the fort, %d walls/buildings wait for building material, %d logs', q.n,
+                r.inv.wood or 0)
+        end
+      end
       st.bp_on = st.bp_on or {}
       if set and not st.bp_on[set] then
         st.bp_on[set] = true
@@ -8100,13 +8200,21 @@ function M.hard_denied(inv, now)
   return (math.tointeger(type(inv) == 'table' and inv.rock) or 0) <= (h.rock or 0) + M.HARD.new
 end
 
+-- BUG-667: the fort has no stone a job may take (M.stone_none): DF refused it (hard_denied) or the census holds boulders and none usable (ore, flux,
+-- economic, soft or refused stone; out of reach is not counted at all)
+function M.stone_none(inv, now)
+  if M.hard_denied(inv, now) then return true end
+  local d = M.hard_diag(inv)
+  return d.rock > 0 and d.usable == 0
+end
+
 -- the stone census in one table: usable = the free boulders a mason may take by the census (ore, flux, economic and soft stone
 -- out; out of reach is not in `rock` at all), cause 'none' (no usable boulder) or 'denied' (usable by the census, DF cancels anyway)
 function M.hard_diag(inv)
   local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
   local rock, bad, orf = g('rock'), g('rock_bad'), g('ore') + g('flux')
   local usable = math.max(0, rock - math.max(orf, bad))
-  return {boulders = g('boulders'), rock = rock, usable = usable, bad = bad, orf = orf, far = g('rock_far'),
+  return {boulders = g('boulders'), rock = rock, usable = usable, bad = bad, orf = orf, far = g('rock_far'), busy = g('rock_busy'),
           cause = usable == 0 and 'none' or 'denied'}
 end
 
@@ -8137,7 +8245,7 @@ function M.stone_unmark(K)
     local o = ore_of(m.idx)
     m.tok, m.econ, m.hard = o.token or ('mat ' .. tostring(m.idx)), o.econ == true, o.soft ~= true
     m.ore, m.flux = o.metals ~= nil, o.flux == true
-    seen[#seen + 1] = {tok = m.tok, n = m.n, hard = m.hard, econ = m.econ, ore = m.ore, flux = m.flux}
+    seen[#seen + 1] = {tok = m.tok, n = m.n, hard = m.hard, econ = m.econ, ore = m.ore, flux = m.flux, refused = o.refused == true}
     if m.econ and m.hard and not m.ore and not m.flux then
       local ok, done = pcall(K.act.stone_economic, m.idx, false)
       if ok and done then
@@ -8149,6 +8257,47 @@ function M.stone_unmark(K)
   return cleared, seen
 end
 
+-- BUG-665: where the boulders the census counts usable lie, for the question and kern.log when DF refuses them anyway ('denied'): per level, per
+-- walkable group, and the flags a job picker looks at; the first MAX probe items of the vector. Returns the text ('' when nothing is readable)
+-- and the number of boulders read.
+M.PROBE_MAX = 400
+function M.boulder_probe(K)
+  local zs, gs, fl, n = {}, {}, {}, 0
+  pcall(function()
+    local v = df.global.world.items.other.BOULDER
+    for i = 0, #v - 1 do
+      if n >= M.PROBE_MAX then break end
+      local it = v[i]
+      local f = it and it.flags
+      if f and it.mat_type == 0 and not (f.removed or f.garbage_collect or f.trader or f.dump or f.forbid or f.in_building or f.construction
+                                       or f.hostile or f.in_job) then
+        local o = ore_of(it.mat_index)
+        if not (o.metals or o.flux or o.econ or o.soft or o.refused) then
+          local x, y, z = dfhack.items.getPosition(it)
+          if x then
+            n = n + 1
+            M.tally(zs, 'z' .. tostring(z), 1)
+            local oks, spot = K.call('snapshot', 'spot', x, y, z)             -- {g = walkable group, hidden}
+            spot = oks and type(spot) == 'table' and spot or {}
+            M.tally(gs, 'g' .. tostring(spot.g or '?'), 1)
+            if spot.hidden then M.tally(fl, 'hidden', 1) end
+            if f.owned then M.tally(fl, 'owned', 1) end
+            if f.in_inventory then M.tally(fl, 'carried', 1) end
+          end
+        end
+      end
+    end
+  end)
+  if n == 0 then return '', 0 end
+  local function list(t)
+    local out = {}
+    for _, e in ipairs(M.top(t, 3)) do out[#out + 1] = string.format('%s x%d', e[1], e[2]) end
+    return table.concat(out, ', ')
+  end
+  local fs = list(fl)
+  return string.format('%d usable boulders lie at %s; walk groups %s%s', n, list(zs), list(gs), fs ~= '' and ('; ' .. fs) or ''), n
+end
+
 function M.hard_report(K, c, r, cancels)
   local p = r.p
   local d = M.hard_diag(r.inv)
@@ -8157,15 +8306,20 @@ function M.hard_report(K, c, r, cancels)
   -- BUG-648: building stone marked economic is cleared (the player's stone-use setting), soft stone and ore stay; the masons take it
   -- at the next census; what the free boulders are is in kern.log
   local okc, cleared, seen = pcall(M.stone_unmark, K)
+  local mats
   if okc and type(seen) == 'table' and #seen > 0 then
     local parts = {}
     for i, m in ipairs(seen) do
       if i <= 6 then
-        parts[#parts + 1] = string.format('%s x%d (%s%s%s%s)', m.tok, m.n, m.hard and 'hard' or 'soft', m.econ and ', economic' or '',
-                                          m.ore and ', ore' or '', m.flux and ', flux' or '')
+        parts[#parts + 1] = string.format('%s x%d (%s%s%s%s%s)', m.tok, m.n, m.hard and 'hard' or 'soft', m.econ and ', economic' or '',
+                                          m.ore and ', ore' or '', m.flux and ', flux' or '', m.refused and ', refused by the game' or '')
       end
     end
     K.log('warn', 'economy: free boulders by material: %s', table.concat(parts, '; '))
+    mats = {}
+    for _, m in ipairs(seen) do
+      if m.refused or m.econ or not m.hard then mats[#mats + 1] = (m.tok:gsub('^INORGANIC:', '')):lower() end
+    end
   end
   if okc and type(cleared) == 'table' and #cleared > 0 then
     local names, n = {}, 0
@@ -8182,9 +8336,19 @@ function M.hard_report(K, c, r, cancels)
   p.hard_ann = CAD.mark(now, {}, {d.cause})
   p.hard_ann_eps = sticky and M.HARD.sticky or nil
   local q
+  -- BUG-665: the way out names the cause: which rock the fort sits on (the materials the game or the stone-use screen refuses) and where the
+  -- boulders it counts usable lie (level, walk group, flags) when DF cancels anyway
+  local probe = ''
+  if d.cause == 'denied' then
+    local okp, pt = pcall(M.boulder_probe, K)
+    probe = okp and pt or ''
+    if probe ~= '' then K.log('warn', 'economy: DF refuses boulders the census counts usable: %s', probe) end
+  end
   if d.cause == 'none' then
-    q = string.format('no non-economic hard stone: %d boulders, 0 usable (%d economic/soft, %d ore/flux, %d out of reach); no ' ..
-                      'mechanisms, stone traps, levers; wood serves doors, chests, beds', d.boulders, d.bad, d.orf, d.far)
+    local rock = mats and #mats > 0 and (' (' .. table.concat(mats, ', ', 1, math.min(#mats, 4)) .. ' refused)') or ''
+    q = string.format('no non-economic hard stone: %d boulders, 0 usable (%d economic/soft, %d ore/flux, %d out of reach)%s; dig ' ..
+                      'another rock layer (bp sites explore) or trade for stone; wood serves doors, chests, beds', d.boulders, d.bad,
+                      d.orf, d.far, rock)
   else
     q = string.format('DF cancels rock jobs x%d "Needs non-economic hard stone" beside %d boulders counted usable: stone counts 0 ' ..
                       'for %d d; levers, mechanisms, stone traps need it; wood serves doors, beds', cancels, d.usable, M.HARD.hold_days)
@@ -8196,6 +8360,10 @@ function M.hard_report(K, c, r, cancels)
   end
   local cmds = {[[dfllm cmd trade.want '{"add":["stone","mechanism"]}']], 'dfllm plan propose',
                 [[dfllm cmd inspect '{"what":"workload"}']]}
+  if (math.tointeger(r.inv.wood) or 0) > 0 then          -- BUG-666: the wooden door has a verb now
+    cmds[#cmds + 1] = [[dfllm cmd order.add '{"job":"ConstructDoor","amount":4,"mat":"wood"}']]
+  end
+  if probe ~= '' then q = q .. '; ' .. probe end
   K.log('warn', '%s', q)
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200),
          {id = 'no_hard_stone', q = q:sub(1, 200), cause = d.cause, n = d.usable, cmds = cmds})
@@ -9695,8 +9863,10 @@ function M.food_block(K, c, r, inv)
     auto[#auto + 1] = {'crew', string.format('food crew %d (%s)', fcw.n, tostring(fcw.text or ''))}
   end
   if not ws_any(f, {'workshop:Kitchen'}) then
-    if M.shop_asked(r.p, 'Kitchen') then auto[#auto + 1] = {'kitchen', 'Kitchen requested'}      -- BUG-618: the kernel asks itself
-    else put('kitchen', 'no kitchen', M.FOOD_CMD.kitchen) end
+    local cut = f['cut:Kitchen'] and M.cut_text(r.p, 'Kitchen') or nil      -- BUG-654: it stands, nobody can walk to it
+    if M.shop_asked(r.p, 'Kitchen') or M.shop_asked(r.p, 'Kitchen', 'cut') then
+      auto[#auto + 1] = {'kitchen', cut and ('new Kitchen requested, the old one is cut off: ' .. cut) or 'Kitchen requested'}      -- BUG-618: the kernel asks itself
+    else put('kitchen', cut and ('Kitchen cut off: ' .. cut) or 'no kitchen', M.FOOD_CMD.kitchen) end
   elseif M.cook_n(inv) <= 0 then put('cook', 'no ' .. M.cook_why(inv, f))
   elseif not M.labor_holder(K, 'COOK') then put('cook', 'nobody holds the COOK labor') end
   -- BUG-258 (live Inkintense: block [cook, fish_zone, hunt, farms] in a fort without a brook, 175 bolts and no
@@ -9801,7 +9971,8 @@ function M.hungry_warn(K, c, r)
   K.log('warn', 'food %d days but %d citizens hungry and no prepared meal: raw plants and seeds are not cooked (%d cook ' ..
         'ingredients%s, kitchen %s, COOK labor %s)', fd, n, M.cook_n(inv),
         t and string.format(', %d cook-banned: %s', inv.cook_ban, tostring(t[1])) or '',
-        ws_any(M.facts_now(K, r), {'workshop:Kitchen'}) and 'built' or 'missing',
+        ws_any(M.facts_now(K, r), {'workshop:Kitchen'}) and 'built' or
+          (M.facts_now(K, r)['cut:Kitchen'] and 'cut off (' .. tostring(M.cut_text(r.p, 'Kitchen')) .. ')' or 'missing'),
         M.labor_holder(K, 'COOK') and 'held' or 'on nobody')
 end
 
@@ -9944,6 +10115,164 @@ function M.cook_labor(K)
   if not ok then return 'none' end
   K.log('warn', 'Cooking labor on for unit %d: a kitchen stands, cook ingredients lie there, no meal and nobody had the labor', cands[1].id)
   return 'set', cands[1].id
+end
+
+-- BUG-654 (Run 16a i1 Basementflew y459-y466: meals 0 for years beside 3,323 food days, `inspect workload` 'unreachable PrepareMeal x1'
+-- (and ConstructChest, ConstructMechanisms): the fort's only Kitchen, Carpenters, Masons and Mechanics stood in the flooded level z117, on
+-- a walk group no citizen is on; every fact here said 'workshop:Kitchen' = true, so cook_watch switched labors and remade orders, the food
+-- decision said 'raw food is not cooked', nothing asked for a second kitchen; the manager gives a shop one job at a time, so the cut-off
+-- Carpenters held the chest and the four hospital beds behind it): a workshop type whose EVERY built shop has no walkable tile on a
+-- citizens' walk group round it (M.shop_reach, the ring of tiles a worker stands on) for CUT.days days in PEACE is cut off
+-- (p.cutws[Type] = {t, at, grp, home, n}); facts() then counts the type as missing (f['cut:Type']), so the shop requests, the stall
+-- reports and the piece routes treat it as missing. M.cut_scan (daily): ORDER_STUCK (B, kind workshop) once, and PROJECT_REQUEST
+-- workshops why=cut (M.ws_ask, paced) for the types M.WS_PLACE can place: follow places a new one on the citizens' walk group.
+-- A shop is judged by tiles: a ring tile on a walk group g > 0 off the citizens' is cut; a ring read in full with every tile unwalkable
+-- (walls, deep water: group 0) is cut as walk group 0 (the flooded level); any hidden or unread ring tile with none walkable is unknown, never cut.
+M.CUT = {days = 3, max_pts = 1500, citizens = 150}
+
+function M.shop_ring(b)
+  local x1, x2, y1, y2, z = math.tointeger(b.x1), math.tointeger(b.x2), math.tointeger(b.y1), math.tointeger(b.y2), math.tointeger(b.z)
+  if not (x1 and x2 and y1 and y2 and z) then return nil end
+  local pts = {}
+  for x = x1 - 1, x2 + 1 do
+    for y = y1 - 1, y2 + 1 do
+      if x < x1 or x > x2 or y < y1 or y > y2 then pts[#pts + 1] = {x, y, z} end
+    end
+  end
+  return pts, {x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2, z}
+end
+
+-- {Type = {n shops, ok (on a citizens' walk group), cutn (off them), cut = {at, grp}}}, the sorted home group ids; nil when the walk
+-- groups cannot be read (no snapshot module, no citizen)
+function M.shop_reach(K)
+  local cpts = {}
+  for _, id in ipairs((K.census.u or {}).ids or {}) do
+    if #cpts >= M.CUT.citizens then break end
+    local u = df.unit.find(id)
+    local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+    if u and okp and math.tointeger(x) then cpts[#cpts + 1] = {x, y, z} end
+  end
+  if #cpts == 0 then return nil end
+  local okc, cg = K.call('snapshot', 'groups', cpts, false)
+  if not (okc and type(cg) == 'table') then return nil end
+  local home = M.home_groups(K, cg)
+  if next(home) == nil then return nil end
+  local pts, owner, shops = {}, {}, {}
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local n = df.workshop_type[b.type]
+      if n and built(b) then
+        local ring, mid = M.shop_ring(b)
+        if ring then
+          local s = {type = n, at = mid}
+          shops[#shops + 1] = s
+          for _, pt in ipairs(ring) do
+            if #pts < M.CUT.max_pts then pts[#pts + 1] = pt; owner[#pts] = s end
+          end
+        end
+      end
+    end
+  end)
+  if #pts == 0 then return {}, {} end
+  local okj, jg = K.call('snapshot', 'groups', pts, false)
+  if not (okj and type(jg) == 'table') then return nil end
+  for k = 1, #pts do
+    local s, g = owner[k], math.tointeger(jg[k]) or -1
+    if g > 0 then
+      if home[g] then s.ok = true elseif not s.seen or s.seen == 0 then s.seen = g end
+    elseif g == 0 then
+      s.blocked = (s.blocked or 0) + 1           -- read, and no walkable group: a wall or water 4-7 deep (snapshot WALKCH excludes '~')
+    else
+      s.unk = (s.unk or 0) + 1                   -- hidden, off the map or a fault: could be floor
+    end
+  end
+  -- a fully flooded or walled ring (every tile read, none walkable, none hidden) is cut off too, as group 0: Basementflew's z117
+  -- kitchen stood in 4-7 deep water, whose tiles have no walk group at all (the first pass judged only g > 0 and called it unknown)
+  for _, s in ipairs(shops) do
+    if not s.ok and not s.seen and (s.blocked or 0) > 0 and (s.unk or 0) == 0 then s.seen = 0 end
+  end
+  local by = {}
+  for _, s in ipairs(shops) do
+    local e = by[s.type]
+    if not e then e = {n = 0, ok = 0, cutn = 0}; by[s.type] = e end
+    e.n = e.n + 1
+    if s.ok then e.ok = e.ok + 1
+    elseif s.seen then
+      e.cutn = e.cutn + 1
+      e.cut = e.cut or {at = s.at, grp = s.seen}
+    end
+  end
+  local hg = {}
+  for g in pairs(home) do hg[#hg + 1] = g end
+  table.sort(hg)
+  return by, hg
+end
+
+-- the cut-off types the kernel may ask a new shop of: {Type, ...} sorted
+function M.cut_types(p)
+  local out = {}
+  for t in pairs(type(p.cutws) == 'table' and p.cutws or {}) do
+    if M.WS_PLACE[t] then out[#out + 1] = t end
+  end
+  table.sort(out)
+  return out
+end
+
+-- 'Kitchen at 29,112,117 (walk group 4, the citizens on 7)' for a confirmed cut-off type, else nil
+function M.cut_text(p, t)
+  local rec = type(p.cutws) == 'table' and p.cutws[t] or nil
+  if type(rec) ~= 'table' then return nil end
+  local at = type(rec.at) == 'table' and rec.at or {}
+  return string.format('%s at %s,%s,%s (walk group %s, the citizens on %s)', t, tostring(at[1]), tostring(at[2]), tostring(at[3]),
+                       tostring(rec.grp) == '0' and '0: no walkable tile round it' or tostring(rec.grp), tostring(rec.home))
+end
+
+function M.cut_scan(K, c, r)
+  if not r.day or K.mode() ~= 'PEACE' then return end      -- a lockdown or a raised bridge splits the walk groups for a while
+  local p, now = r.p, r.now
+  local by, hg = M.shop_reach(K)
+  if not by then return end
+  local seen = type(p.cutseen) == 'table' and p.cutseen or {}
+  local conf = type(p.cutws) == 'table' and p.cutws or {}
+  local changed, fresh = false, {}
+  for t, e in pairs(by) do
+    if e.ok == 0 and e.cutn == e.n and e.cut then
+      local s = seen[t]
+      if type(s) ~= 'table' then
+        s = {t = now, at = e.cut.at, grp = e.cut.grp}
+        seen[t], changed = s, true
+      end
+      if not conf[t] and now - (math.tointeger(s.t) or now) >= M.CUT.days * DAY then
+        conf[t] = {t = now, at = s.at, grp = s.grp, home = hg[1], n = e.n}
+        fresh[#fresh + 1] = t
+        changed = true
+      end
+    elseif seen[t] or conf[t] then
+      seen[t], conf[t], changed = nil, nil, true             -- a shop of the type is on the citizens' walk group again
+    end
+  end
+  for t in pairs(conf) do
+    if not by[t] then conf[t], seen[t], changed = nil, nil, true end    -- no shop of the type stands any more: plainly missing
+  end
+  if changed then
+    p.cutseen, p.cutws = next(seen) and seen or nil, next(conf) and conf or nil
+    K.persist.touch('m.economy')
+    r.f = facts(K, p)
+  end
+  table.sort(fresh)
+  for _, t in ipairs(fresh) do
+    local msg = string.format('workshop %s: no way for the citizens (%d shop%s), counted as missing: a new one is asked for',
+                              M.cut_text(p, t), by[t].n, by[t].n == 1 and '' or 's')
+    K.log('warn', '%s', msg)
+    K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = t, n = by[t].n, why = msg:sub(1, 100), kind = 'workshop'})
+  end
+  local want = M.cut_types(p)
+  if #want == 0 then
+    if type(p.wsask) == 'table' then p.wsask.cut = nil end
+    return
+  end
+  M.ws_ask(K, p, 'cut', want, (c.food or {}).request_days or 14,
+           'workshops: cut off from the citizens (' .. (M.cut_text(p, want[1]) or want[1]) .. ')')
 end
 
 -- BUG-629 (see M.cook_labor): the stall watch (daily, T.watch). Stalled = the kitchen stands, the cook ingredients reach the planner's floor and
@@ -12990,8 +13319,13 @@ function M.init(K)
   st = {census = nil, run = nil, rate = {}, cancels = {}, looped = {}, backoff = {}, bars_by = {}, ores = {},
         seeds = {}, f = {}}
   orec, wdef, adef = {}, {}, {}
+  M.act = K.act
   rcache, pinfo, pidx, ecache, plugins = {}, {}, nil, {}, {}
   skip_mask, mask_check, mask_bad = make_skip_mask(), M.MASK_CHECK, nil
+  do                                             -- BUG-665: the in_job bit of the flag word (nil: per-flag read)
+    local okb, bit = pcall(function() return df.item_flags.in_job end)
+    M.JOB_BIT = okb and math.type(bit) == 'integer' and bit >= 0 and bit <= 31 and (1 << bit) or nil
+  end
   M.every = {ticks = EVERY}
   M.boot_out(K, pstate(K))
   local ok, err = pcall(kitchen, K, M.conf(K), nil)
@@ -13003,10 +13337,10 @@ function M.step(K, budget, ctx)
   M.first_boost(K)
   if not (ctx and ctx.cont) or not (st.census or st.run) then
     st.census, st.run = {acc = new_acc(c), ci = 1, idx = 0, errs = 0, start = K.now().tick}, nil
-    st.census.acc.far = function(it)
+    st.census.acc.far = function(it, strict)
       local x, y, z = dfhack.items.getPosition(it)
       if not x then return false end
-      local ok, far = K.call('snapshot', 'far', x, y, z)
+      local ok, far = K.call('snapshot', 'far', x, y, z, strict == true or nil)   -- BUG-665: strict = no walkable group counts as far
       return ok == true and far == true
     end
     mcache, tcache, bolt_sub = {}, {}, {}
@@ -13152,6 +13486,13 @@ M.verbs['order.add'] = function(K, args, cmd)
       if type(args[k]) ~= 'string' or #args[k] > 80 then return false, k .. ' must be a string' end
       spec[k] = args[k]
     end
+  end
+  -- BUG-666 (Run 16d i4 Trumpetrealms y438: the only door order was 'Make rock door' beside 99 logs and 0 usable stone, the player found no verb for
+  -- a wooden door): `mat` is the short way: wood = material_category [wood] (the Carpenters), rock = material INORGANIC (the Masons)
+  if args.mat ~= nil then
+    if args.mat ~= 'wood' and args.mat ~= 'rock' then return false, 'mat must be wood or rock' end
+    if args.material ~= nil or args.material_category ~= nil then return false, 'mat replaces material and material_category: give one of them' end
+    if args.mat == 'wood' then spec.material_category = {'wood'} else spec.material = 'INORGANIC' end
   end
   if args.material_category ~= nil then
     if type(args.material_category) ~= 'table' or #args.material_category == 0 then return false, 'material_category must be a list' end
@@ -13628,6 +13969,17 @@ M.inspect.workload = function(K, args)
   -- BUG-037 (Run 11 y449: '15 without reachable work, 0 unclaimed jobs' while six projects stood queued for months): the
   -- runner's queue is named as the reason ('runner: 6 projects queued behind 3 slot holders without progress (...)')
   data.runner = rd
+  -- BUG-654: workshop types no citizen can walk to (p.cutws, M.cut_scan) and the jobs posted at them: the reason of an 'unreachable
+  -- PrepareMeal' (a Kitchen in a flooded level), not only the count
+  local pc, cut_l, cut_t = pstate(K), {}, {}
+  for _, t in ipairs(M.cut_types(pc)) do
+    local rec = pc.cutws[t]
+    cut_l[#cut_l + 1] = {type = t, at = rec.at, grp = rec.grp, home = rec.home, n = rec.n,
+                         days = math.max(0, (K.now().tick - (math.tointeger(rec.t) or K.now().tick)) // DAY)}
+    cut_t[#cut_t + 1] = M.cut_text(pc, t)
+  end
+  data.shops_cut = json.array(cut_l)
+  local cut_s = #cut_t > 0 and ('workshops cut off: ' .. table.concat(cut_t, '; ')) or nil
   -- the clause names the classes that are not zero (the reply is cut at 300 bytes; all numbers are in data.idle_why)
   local CL = {rest = 'rest', hurt = 'hurt', mood = 'mood', held = 'held by the kernel', nolabor = 'no labor holder',
               noreach = 'no reachable work', nowork = 'no work', free = 'free'}
@@ -13648,7 +14000,7 @@ M.inspect.workload = function(K, args)
   if sold_n > 0 then parts[#parts + 1] = string.format('%d soldiers not counted', sold_n) end
   return true, string.format('%d of %d adults without a job (%s), %d unclaimed jobs, %d unreachable', #idle, adults,
                              #parts > 0 and table.concat(parts, ', ') or 'none', n_open, n_far)
-                .. (rq and ('; ' .. rq) or ''), data
+                .. (cut_s and ('; ' .. cut_s) or '') .. (rq and ('; ' .. rq) or ''), data
 end
 
 return M

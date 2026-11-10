@@ -1173,6 +1173,25 @@ def audit_routes(save_dir: Path, state: dict | None = None) -> dict:
             "via_built": via_built}
 
 
+def audit_avoid(save_dir: Path, tick: int | None = None) -> set[tuple[int, int, int]]:
+    """BUG-658 (Run 16d i4 Trumpetrealms y437-y441: `bypass: wall 89,100,139 floor` on a fortcore tile; Run 16a i1 Basementflew y414-y441:
+    `bypass: wall 98,89,129 floor (+more)` for 28 years of seals that finished and a door that stands where a wall cut citizens off): the
+    tiles the audit's finding must not name a wall on, since `seal at=audit` leaves them out ('nothing to close') and the finding then
+    stands for ever: the footprint of every fortcore project (the fort's own corridor) and the tiles of the seal projects finished
+    WALL_BUILT_LAG before the snapshot (audit_routes `built` / `doored`). The finding names the next closable tile of the route."""
+    out: set[tuple[int, int, int]] = set(core_cells(save_dir))
+    recs = seal_records(save_dir)
+    if not recs:
+        return out
+    if not isinstance(tick, int) or isinstance(tick, bool):
+        tick = files.current_tick(save_dir)
+    done = done_ticks(save_dir)
+    for t, (pid, _) in recs.items():
+        if pid in done and isinstance(tick, int) and done[pid] + WALL_BUILT_LAG <= tick:
+            out.add(t)
+    return out
+
+
 def core_cells(save_dir: Path) -> dict[tuple[int, int, int], str]:
     """{tile: fortcore project id} over the footprint of every fortcore project in <save>/bp, its later stages
     included (cmd.footprint). BUG-211 (live round 3, Earthboat: follow's seal at=audit put a wall on 54,80,138, a
@@ -1359,7 +1378,10 @@ def foot_closed(snap: dict | None, x: int, y: int, zr: int) -> bool:
     return n > 0
 
 
-PHANTOM_WINDOW_YEARS = 2          # BUG-638: how far back a kernel PROJECT_BLOCKED phantom still counts
+# BUG-638: how far back a kernel PROJECT_BLOCKED phantom still counts. BUG-657 (Run 16c i3 Wallfree y400-y404: the hatch of a stair that
+# was never dug came back with the plan every game year): a stair dug later brings the demand back by itself (refuge_stair reads the
+# revealed tile first), so the record need not age out
+PHANTOM_WINDOW_YEARS = 20
 
 
 def phantom_tiles(save_dir: Path) -> set[str]:
@@ -1895,6 +1917,16 @@ def _on_state(save_dir: Path, pid: str) -> bool:
     return any(isinstance(r, list) and r and r[0] == pid for r in (files.read_state(save_dir) or {}).get("proj") or [])
 
 
+def rebuild_free(save_dir: Path, tpl: str, params: dict | None, hit: list[str]) -> list[str]:
+    """BUG-656 (Run 16a i1 Basementflew y464: `bp.place workshops only=Kitchen rebuild=1` was refused 'taken [78,100,131] by c1a1ab437a0e153311
+    (workshops finished)' for the surface kitchen that manifest.gone lists, and the kernel's own hint (BUG-562) sends the player to exactly that
+    command): a rebuild digs nothing, it puts ONE shop back where it stood, so a project that is FINISHED (PROJECT_DONE, no row in the kernel's
+    state) holds nothing back: its room is dug already and the shop is the gap in it. A project still under way keeps its tiles."""
+    if tpl != "workshops" or not (params or {}).get("rebuild"):
+        return hit
+    return [h for h in hit if not (_finished_event(save_dir, h) and not _on_state(save_dir, h))]
+
+
 def _planned_only(save_dir: Path, pid: str, tpl: str) -> bool:
     """BUG-456: project `pid` is a `tpl` project the kernel has no state row for (not begun, or beyond the first 8 rows) and whose
     first stage shows no progress."""
@@ -2412,7 +2444,8 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
         st = params.get("stage") if isinstance(params, dict) else None
         own = tpl if isinstance(st, int) and not isinstance(st, bool) and st >= 2 \
             and stage_anchor(save_dir, tpl, [x, y, z]) else None
-        hit = occ.clash(doc, cells=footprint(doc) - occ.own_cells(tpl, doc["anchor"]) if own else None, ignore_tpl=own)
+        hit = rebuild_free(save_dir, tpl, params, occ.clash(doc, cells=footprint(doc) - occ.own_cells(tpl, doc["anchor"]) if own else None,
+                                                            ignore_tpl=own))                # BUG-656
         if hit:
             raise BpError(f"{tpl}{label} overlaps project(s) {', '.join(hit[:4])}")
         return doc
@@ -2450,7 +2483,7 @@ def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str
             except BpError as e:
                 bad.append(f"{s.get('anchor')}: {e}")
                 continue
-            hit = occ.clash(doc)
+            hit = rebuild_free(save_dir, tpl, params, occ.clash(doc))        # BUG-656
             if hit:
                 taken.append(f"{s.get('anchor')}~{hit[0]}")
                 continue

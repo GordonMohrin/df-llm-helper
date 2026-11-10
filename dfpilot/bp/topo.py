@@ -275,7 +275,7 @@ def _vertical_source(g: Graph, i: int, x: int, y: int) -> bool:
 CHOKE_TRY = 4           # candidate tiles a choke search re-checks with a BFS (the first that closes every route wins)
 
 
-def choke_pick(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -> tuple | None:
+def choke_pick(g: Graph, m: dict, path: list[int], src, blocked, stop, attack, avoid=None) -> tuple | None:
     """What to build where on an attacker route (Run 10: 'bypass ... reaches 139,128,117' named no fix). Only the
     part of the route after its last tile in the fort's attack side (`attack`: Z1, Z2, kill boxes, bridges) is the
     foreign way in; walking it back from the target, its tiles outside the fort's own geometry (fort_boxes; else any
@@ -283,7 +283,8 @@ def choke_pick(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -
     wall goes on its top, as the seal template builds it). The first of up to CHOKE_TRY candidates whose wall closes
     every such route wins (closes True); else the first (closes False). None when none fits (a target on the attack
     side itself, or stairs, doors and bridges only). Doors are never proposed: the worst-case audit counts them
-    open. Returns (tile index, kind, closes)."""
+    open. Returns (tile index, kind, closes). BUG-658: `avoid` (a set of (x, y, z)) are tiles no wall may be named on (the footprint
+    of a fortcore project: the fort's own corridor, which no seal builds on); the search goes on to the next tile of the route."""
     fort = g.mask(fort_boxes(m))
     route = path[:-1]
     last = max((k for k, i in enumerate(route) if attack[i]), default=-1)
@@ -291,6 +292,8 @@ def choke_pick(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -
     own = [i for i in reversed(foreign) if not fort[i]] or list(reversed(foreign))
     cands = []
     for i in own:
+        if avoid and g.pos(i) in avoid:
+            continue
         c = g.t[i]
         if c == ".":
             cands.append((i, "floor"))
@@ -341,9 +344,9 @@ def route_via(g: Graph, m: dict, path: list[int], attack) -> str:
     return "via %s %d,%d,%d" % ((VIA_KIND[g.t[i]],) + g.pos(i))
 
 
-def choke(g: Graph, m: dict, path: list[int], src, blocked, stop, attack) -> str:
+def choke(g: Graph, m: dict, path: list[int], src, blocked, stop, attack, avoid=None) -> str:
     """choke_pick as finding text: 'wall x,y,z floor', 'wall x,y,z ramp (+more)'; '' when none fits."""
-    ch = choke_pick(g, m, path, src, blocked, stop, attack)
+    ch = choke_pick(g, m, path, src, blocked, stop, attack, avoid)
     if ch is None:
         return ""
     i, kind, closes = ch
@@ -402,12 +405,15 @@ def _faces(g: Graph, p, seen_out, outer) -> bool:
     return False
 
 
-def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: dict | None = None) -> dict:
+def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: dict | None = None, avoid=None) -> dict:
     """{ok, fails, min_traps, bypass, refuge_sep, civ_sep, caverns} (= the `audit` verb args minus `snap`). `info`
     (a dict, optional) receives `traps` {armed, hall, any_route, walls, enters}: armed traps in the snapshot and in
     Z2, the fewest any route meets now, the bypass walls min_traps assumes built, where the counted route enters the
     hall (for `dfllm audit` and follow's log; never sent), and `pending` (BUG-280: the parts a later fortcore stage
-    brings, no fail)."""
+    brings, no fail). BUG-658 (Run 16d i4 Trumpetrealms y437-y441, Run 16a i1 y414-y427: `bypass: wall 89,100,139 floor` in every audit for
+    years while `seal at=audit` answered 'nothing to close': the wall tile lay in a fortcore project, the fort's own corridor): `avoid`
+    (a set of (x, y, z), cmd.core_cells) are tiles the FINDING never names a wall on; it names the next closable tile of the route, else
+    'via ...' / the plain route text. min_traps still assumes the first tile shut (the route stays the fort's own way)."""
     g = graph or Graph(snap)
     m = manifest or {}
     # BUG-048: a bridge the kernel replaced by a wall and a door (snapshot bridges: `replaced`) is a door entrance now:
@@ -437,7 +443,7 @@ def audit(snap: dict, manifest: dict | None, graph: Graph | None = None, info: d
     res["bypass"] = hit is not None
     if hit is not None:
         side = _or(Z["Z1"], Z["Z2"], kill, g.mask([b["fp"] for b in m.get("bridges", {}).values()]))
-        ch = choke(g, m, g.path(par, hit), src, Z["Z2"], T, side)
+        ch = choke(g, m, g.path(par, hit), src, Z["Z2"], T, side, avoid)
         via = "" if ch else route_via(g, m, g.path(par, hit), side)        # BUG-376: no wall tile: what it passes
         fails.append(_msg(("bypass: %s -> %d,%d,%d" % ((ch,) + g.pos(hit))) if ch else
                           ("bypass: %s -> %d,%d,%d" % ((via,) + g.pos(hit))) if via else

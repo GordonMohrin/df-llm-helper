@@ -3250,13 +3250,31 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
     if not uid then return false, 'unit must be a unit id' end
     local cur
     for _, h in ipairs(type(K.census.h) == 'table' and K.census.h.list or {}) do if h.id == uid then cur = h end end
+    -- BUG-671 (Run 16a i1 Basementflew y460: the PREDATOR offer of a Dimetrodon was 'not in sight' by the time it was sent, three times):
+    -- the offer (event field `exp`) is good for reflex.OFFER_TTL ticks: a unit seen that recently and alive is followed from where it
+    -- was last seen; the sortie ends by itself after sortie.idle_ticks unseen (so_step). Later the refusal says the offer is stale
+    local ls
     if not cur then
+      local okl, l = K.call('reflex', 'last_seen', uid)
+      ls = okl and type(l) == 'table' and l or nil
+    end
+    if not cur and ls and ls.fresh and not unit_dead(uid) then
+      local p = {x = ls.x, y = ls.y, z = ls.z}
+      local why = unreachable(K, s, p)
+      if why then return false, why end
+      order = {kind = 'kill', units = {uid}}
+      what = string.format('kill order on %d (out of sight for %d ticks, last seen at %s; the squad follows the unit and the sortie ends ' ..
+                           'after %d ticks unseen)', uid, ls.age, pstr(p), c.idle_ticks)
+      pos_target = p
+    elseif not cur then
       if args.move == true and target ~= nil and posp(target) then
         args.unit = nil
       else
-        return false, string.format('unit %d is not in sight: it is gone or out of view (reported at %s); a sortie to an empty place ' ..
+        return false, string.format('unit %d is not in sight: it is gone or out of view (reported at %s%s); a sortie to an empty place ' ..
                                     'would find nobody; give the new position, or move=true to move the squad there anyway', uid,
-                                    type(target) == 'table' and pstr(posp(target) or {x = 0, y = 0, z = 0}) or tostring(target))
+                                    type(target) == 'table' and pstr(posp(target) or {x = 0, y = 0, z = 0}) or tostring(target),
+                                    ls and string.format('; last seen %d ticks ago at %s: the offer is stale (it holds %d ticks), wait for ' ..
+                                    'the next PREDATOR/INTRUDER event, it carries a fresh command', ls.age, pstr(ls), ls.ttl or 0) or '')
       end
     else
       local p = {x = cur.x, y = cur.y, z = cur.z}

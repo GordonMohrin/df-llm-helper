@@ -1054,6 +1054,8 @@ def def_parts(ctx: Ctx) -> tuple[list[str], list[str]]:
     tr = s.get("trade")
     if tr and tr["caravan"]:
         out.append("CARAVAN on map")
+    elif tr and tr.get("stale"):          # BUG-670: listed Leaving past LEAVE_STALE (36 d): not on the map for the gate, said here
+        out.append(f"caravan stale ({tr['stale']} listed Leaving over 36 d, not counted): dfllm cmd inspect what=trade")
     return out, extra
 
 

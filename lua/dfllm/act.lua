@@ -2096,6 +2096,33 @@ local function impls(state)
     return true, on and 'marked' or 'cleared'
   end
 
+  -- BUG-665: does the game itself refuse an inorganic boulder material as non-economic hard stone (the filter rock furniture and mechanism
+  -- jobs carry: BOULDER, flags2.non_economic, hard)? dfhack.job.isSuitableMaterial, the check the mood filters use (reserve.lua R.match).
+  -- Read only (the job_item is built once and never linked into the world). true only on a definite 'no'; a fault, an unknown flag name or a
+  -- build without the API answers false
+  local refuse_ji
+  function I.mat_refused(mat_index)
+    if math.type(mat_index) ~= 'integer' or mat_index < 0 then return false end
+    local api = dfhack.job and dfhack.job.isSuitableMaterial
+    if not api then return false end
+    if refuse_ji == nil then
+      refuse_ji = false
+      pcall(function()
+        local ji = df.job_item:new()
+        ji.item_type = df.item_type.BOULDER
+        ji.item_subtype, ji.mat_type, ji.mat_index, ji.quantity = -1, -1, -1, 1
+        ji.flags2.non_economic = true
+        for _, fl in ipairs({'flags1', 'flags2', 'flags3'}) do
+          if pcall(function() ji[fl].hard = true end) then break end
+        end
+        refuse_ji = ji
+      end)
+    end
+    if not refuse_ji then return false end
+    local ok, yes = pcall(api, refuse_ji, 0, mat_index, df.item_type.BOULDER)
+    return ok and yes == false
+  end
+
   -- forbid/dump toggles; melt through dfhack.items.markForMelting/cancelMelting (Lua API.txt:2135-2141)
   function I.item_flag(item_id, flag, on)
     if not ITEM_FLAGS[flag] then return false, 'flag must be forbid, dump or melt' end
