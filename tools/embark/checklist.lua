@@ -60,7 +60,10 @@ C.WAIVABLE_SET = set(C.WAIVABLE)
 C.ACCEPTABLE = {'old_sites', 'dark_fortress', 'evil', 'savagery', 'trees', 'water', 'aquifer', 'soil',
   'ore', 'temperature', 'size'}
 C.ACCEPTABLE_SET = set(C.ACCEPTABLE)
-C.HARD_REJECT = {stone = 'no hard stone within reach: a failed stone criterion cannot be accepted, choose another site'}
+C.HARD_REJECT = {stone = 'no hard stone within reach: a failed stone criterion cannot be accepted, choose another site',
+  -- BUG-690 (Run 16b i2 Rocksblush: --accept trees on a site with no trees and its hard stone 5 levels down: 0 logs, 0 stone, 0 blocks, every
+  -- workshop and the depot waited, depot6 build_lost): 'trees' may be accepted only while stone lies near the surface
+  timber = 'no trees and no stone near the surface: nothing to build the first workshop from, accepting trees cannot fix it, choose another site'}
 -- warning popups judged by their own criterion, not by 'popup' ("difficult to obtain stone" is the stone rule)
 C.POPUP_OWNER = {no_stone = 'stone', water_mountain = 'terrain'}
 -- BUG-248 (Run 15 Guildcleans 'stone free 0', Earthboat 'no hard stone' for mechanisms): criteria a new fort may
@@ -242,6 +245,16 @@ function C.evaluate(rec, rules, ctx)
   elseif layers then put('stone', 'pass', 'stone layers ' .. layers)
   else put('stone', 'unknown', 'soil depth not shown') end
   out.stone_pen = pen
+  -- BUG-690: no trees (the best tile is none / scarce) and the hard stone is not near the surface (a warning or a fail on the stone item):
+  -- the first logs and blocks do not exist, a start needs a dig first - a hard reject that '--accept trees' does not clear
+  local tr_res, st_res
+  for _, it in ipairs(items) do
+    if it.id == 'trees' then tr_res = it.res elseif it.id == 'stone' then st_res = it.res end
+  end
+  if tr_res == 'fail' and (st_res == 'warn' or st_res == 'fail') then
+    put('timber', 'fail', string.format('trees %s and the stone is not near the surface (%s): no logs and no stone for the first workshops ' ..
+      '- hard reject, accepting trees cannot clear it (BUG-690)', tostring(rec.trees), tostring(soil)))
+  end
   -- BUG-531: with an aquifer the core must go under it; say when that may not be possible. A site the stone item already rejects (soil too
   -- deep) says the same there
   local stone_failed = false

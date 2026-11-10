@@ -38,7 +38,10 @@ ACCEPTABLE = ("old_sites", "dark_fortress", "evil", "savagery", "trees", "water"
               "temperature", "size")
 # BUG-465 (all four forts of Run 16's world region1 had no hard stone): a FAILED criterion of this list is a hard reject, never accepted
 # (= checklist.lua C.HARD_REJECT; `stone` may still be waived when the soil depth is unknown, with --explore-first)
-HARD_REJECT = {"stone": "no hard stone within reach: a failed stone criterion cannot be accepted, choose another site"}
+HARD_REJECT = {"stone": "no hard stone within reach: a failed stone criterion cannot be accepted, choose another site",
+               # BUG-690 (= checklist.lua C.HARD_REJECT.timber): no trees and no stone near the surface
+               "timber": "no trees and no stone near the surface: nothing to build the first workshop from, accepting trees cannot fix it, "
+                         "choose another site"}
 ACCEPT_LOG = "accept.log"
 # BUG-248: criteria a new fort may waive or accept only with --explore-first (= checklist.lua C.NEEDS_PLAN)
 NEEDS_PLAN = ("stone",)

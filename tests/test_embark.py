@@ -225,8 +225,8 @@ def test_waivable_ids_match_checklist_lua():
     assert "panel" not in drv.ACCEPTABLE and "popup" not in drv.ACCEPTABLE
     assert "ore" in drv.ACCEPTABLE
     # BUG-465: a failed stone is a hard reject, not a trade-off (waiving an unknown one stays)
-    assert "stone" not in drv.ACCEPTABLE and "stone" in drv.WAIVABLE and set(drv.HARD_REJECT) == {"stone"}
-    assert re.search(r"C\.HARD_REJECT = \{stone =", text)
+    assert "stone" not in drv.ACCEPTABLE and "stone" in drv.WAIVABLE and set(drv.HARD_REJECT) == {"stone", "timber"}
+    assert re.search(r"C\.HARD_REJECT = \{stone =", text) and "timber = " in text
 
 
 def test_rules_json_requires_metal_and_stone():
