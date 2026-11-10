@@ -1063,7 +1063,7 @@ class Follower:
                 self._request_place("farmers", "workshops", {"add": "Farmers", "skip": ",".join(_moodable())}, "S1",
                                     now, prio=1, need=["Farmers"])
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and (
-                    d.get("why") in ("mandatory", "slabs", "busy", "manager", "missing", "gear", "well", "masonry")
+                    d.get("why") in ("mandatory", "slabs", "busy", "manager", "missing", "gear", "well", "masonry", "trade")
                     or (d.get("why") == "mood" and d.get("types"))):
                 # BUG-283 (Run 15 Drillchamber: the glass furnace a fey mood waited for came 30 days late in a plain
                 # 12-shop placement at prio 4): why=mood with types = only the shops the mood and its materials need, prio 1

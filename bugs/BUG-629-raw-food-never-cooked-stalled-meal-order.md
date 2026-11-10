@@ -1,0 +1,32 @@
+# BUG-629 Meals 0 for years beside thousands of cook ingredients, and 13 hungry beside a kitchen: the meal order waits for 10 ingredients, a stalled food order is never looked at
+Status: fixed (offline, live-untested)
+Severity: high (hungry citizens beside a built kitchen; prepared meals are the only food that keeps, the stock days count raw plants nobody cooks)
+Found: 2026-11-10, Run 16a i1 Basementflew y459 (`food 2496 days`, `meals 0`, `HUNGRY 1`, kern.log `no prepared meal: raw plants and seeds are not cooked (2398 cook ingredients, kitchen built, COOK labor held)` once a week for years) and Run 16b i2 Valleyhame y377 (13 hungry, food 0 days, `0 meals: raw food is not cooked`, `kitchen has 4 cook ingredients and 0 meals for 14 citizens`)
+Module: `lua/dfllm/economy.lua` (`meal_jobs`, `M.cook_floor`, `M.cook_urgent`, `M.food_spec`, `M.cook_watch`, `M.cook_labor`, `M.food_block`), `lua/dfllm/act.lua` (`A.LABOR_SETS`), `config/baseline.json` (`food.cook_floor`, `food.cook_stall_days`)
+
+## Actual
+Round 40 (BUG-618) only changed the cook text and the kernel's kitchen requests; the live forts still showed `raw food is not cooked`. The logs show two different things behind the one sentence:
+- **Valleyhame (i2):** the kitchen stands, a cook is there (`COOK` is not in the decision's `block` list), `act.workorder` placed 20 `dfllm:food` orders x3..x18 and meals reached 20 at times. But every order was placed only when 10 or more ingredients lay in the fort (`kern.log` 1402: `kitchen has 4 cook ingredients and 0 meals`, 2956: `26 cook ingredients and 0 meals`): below 10 the planner made no order and the DF item condition of an older one (`AtLeast 10 cookable`) waited, while 13 citizens were hungry. The `raw food is not cooked` line was only the generic sentence for `hungry > 0 and meals == 0`.
+- **Basementflew (i1):** `commands.1.log` has ONE `act.workorder dfllm:food x2` (tick 171181879) in the whole run, nothing after it for 14 million ticks beside 1,700 to 2,931 cook ingredients (not cook-banned), a built kitchen and the COOK labor held. The planner enters a food order only when no own one is open (`open(r, tag)`); that one stayed open (a DF item condition that never holds, or a job out that nobody finishes) and nothing ever looked at it.
+
+## Root cause
+1. `economy.lua` `meal_jobs`: `ingredients >= 10` hard gate, and the spec's DF item condition `{AtLeast, unrotten+cookable, value 10}` (config `supply[dfllm:food]`): a fort with 2..9 ingredients and hungry citizens makes no meal, whatever its food days say.
+2. `T.stale` (BUG-060) skips orders with item conditions and `keep_order` (KEEP_JOBS holds PrepareMeal): a stalled `dfllm:food` order is never stale, never removed, and it blocks every new one (`plan_supply`: `not open(r, e.tag)`).
+3. Nothing looked at "kitchen built, ingredients at hand, no meal for days" as one symptom: `hungry_warn` and the food decisions only printed the sentence.
+4. A COOK labor on nobody was a blocker text only (`nobody holds the COOK labor`), nothing switched it on.
+5. The cabbage leaves of Valleyhame (`CABBAGE:LEAF`, 298 of them): checked against `data/vanilla/vanilla_plants/objects/plant_garden.txt` of the DF folder (`[PLANT:CABBAGE]`, line 329): the LEAF material (`LEAF_TEMPLATE`, growth `LEAVES`) has no `EDIBLE_RAW` / `EDIBLE_COOKED`, no `ALCOHOL`, no `MILL`; only `LEAF_DYE` is a powder. DF does not allow cooking or brewing them; nothing to change (BUG-618 stands).
+
+## Fix
+- `M.cook_urgent(c, r)` (a citizen past the hunger line, a famine, or food below `food.pre_days`) and `M.cook_floor(c, r)`: 2 (`M.COOK_MIN`, the ingredients of one meal) when urgent, else `food.cook_floor` (10). `meal_jobs` gates on it; `M.food_spec` writes it into the order's `cookable` item condition, so the DF side waits for the same number.
+- `M.cook_watch` (daily, `T.watch`): kitchen built, ingredients >= the floor, meals 0 for `food.cook_stall_days` (6) days with no own food order open or the open one not moving (`amount_left` unchanged): switches the COOK labor on when nobody holds it (`M.cook_labor`: idle first, then Cooking skill, no soldier/patient/moody/noble, once a day, `act.labor_set(.., 'cook', true)`), takes the open food order down (`act.order_remove`) and sets `p.cookw.relax`: the next `dfllm:food` order carries NO item condition and goes to the top of the manager's list. One ORDER_STUCK (B, job PrepareMeal, `kind` worker or input) says so; still no meal after twice the days: told again once a month (`cooking still stalled`). The relax ends when meals reach the citizens' number.
+- `M.food_block`: after the watch the hungry blocker reads `kitchen idle with N cook ingredients (order made again)`, not `raw food is not cooked`.
+- `A.LABOR_SETS.cook` (on only), error text `which must be mechanic, farm or cook`.
+
+## Tests
+`tests/lua/test_bug629_630_cook.lua` (8 for this bug: Valleyhame state 4 ingredients + 5 hungry -> order at floor 2; 4 ingredients, no hunger, much food -> no order, 40 -> condition 10; food below the pre-alarm -> floor 2; Basementflew state 400 ingredients, 300 helmets, order never moves -> after 6 days a second order without conditions and `top`, the first removed, ORDER_STUCK; a moving order is no stall; no kitchen / a meal at hand -> no watch; COOK on nobody -> `labor_set` cook for the idle citizen; the food decision text). `tests/lua/test_bug546_547_acts.lua` adapted (error text). Seven of the ten tests of the file fail without the fix.
+
+## Live check
+A fort with a kitchen, fewer than 10 cook ingredients and a hungry citizen: `act.workorder dfllm:food` with `value` 2 in `commands.log`. A fort with meals 0 and a standing kitchen: after 6 days `kern.log` `cooking stalled 6 days: kitchen built, N cook ingredients ...`, an ORDER_STUCK PrepareMeal, a new `act.workorder dfllm:food` with no `item_conditions` and `top`, meals > 0 within a few days. If meals stay 0 after that, the order itself runs into DF (kitchen cut off, ingredients forbidden or unreachable): `cooking still stalled` after 12 days names it; look at `inspect orders` and `inspect reach`.
+
+## Open
+The live DF reason in Basementflew is not proven (the item-condition hypothesis and the open-job hypothesis both fit the log; what was read are the logs, not the running game). The watch makes the order again either way; if it is a cut-off kitchen the second message says so but nothing moves the kitchen. A fort whose cooks are all soldiers or nobles gets no cook switched on.
