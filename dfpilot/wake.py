@@ -1386,13 +1386,13 @@ class Follower:
                 return
             from .cmd import BpError, seal_openings
             try:
-                at, _ = seal_openings(self.dir, "last")
+                at, _ = seal_openings(self.dir, "ents")
             except BpError:
                 return                         # closed on a newer reading, or a seal builds them: nothing to place
-            if self._request_place("perim", "seal", {"at": "last"}, "S1", now):
+            if self._request_place("perim", "seal", {"at": "ents"}, "S1", now):
                 self._perim_tried = now        # a refused or failed placement is not asked again for PERIM_COOLDOWN_S either
                 files.log_cli(self.dir, "follow", "auto:perim", {"ents": ents[:6]},
-                              f"the entrance check names {len(ents)} way(s) in without a door ({at[:120]}): placing the seal at=last")
+                              f"the entrance check names {len(ents)} way(s) in without a door ({at[:120]}): placing the seal at=ents")
         except Exception as ex:                        # noqa: BLE001 - the perimeter check must never stop the follower
             self._fail("perimeter seal", f"{type(ex).__name__}: {ex}", now)
 

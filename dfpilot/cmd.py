@@ -1677,11 +1677,18 @@ def seal_openings(save_dir: Path, at, snap: dict | None = None, close: str = "au
     dmod = load_bp("defense")
     text = str(at if at is not None else "").strip()
     key = text.lower()
+    # BUG-686: at=ents is at=last restricted to the ways in of the last entrance check (the confirmed plain ways in, current_openings
+    # src 'ents'): follow's automatic perimeter seal never touches a leak or refuge tile or an unconfirmed rim entry
+    ents_only = key == "ents"
+    if ents_only:
+        key = "last"
     notes: list[str] = []
     entries: list[dict] = []
     snap = snap if snap is not None else sites_snapshot(save_dir)
     if key in SEAL_LAST + ("all",):
         entries = current_openings(save_dir)
+        if ents_only:
+            entries = [e for e in entries if e["src"] == "ents"]
     if key in SEAL_REFUGE + ("all",):
         rs = refuge_stair(save_dir, snap)                  # BUG-123/124: the head as the revealed map shows it
         head = rs["head"]

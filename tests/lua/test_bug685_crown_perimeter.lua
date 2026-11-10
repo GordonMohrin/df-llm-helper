@@ -17,6 +17,7 @@ local G = 9
 local MAN = {v = 2, bridges = {O1 = {role = 'outer', fp = {20, 25, G, 20, 25, G}, levers = {{25, 22, G}, {26, 22, G}}}},
              burrows = {['Kern+'] = {role = 'kern'}}}
 local BRANCH = 30
+local TRUNK = 31
 local function seal()
   package.loaded['dfllm.seal'] = nil
   return require('dfllm.seal')
@@ -25,6 +26,7 @@ local function gatehouse(opts)
   opts = opts or {}
   local W = SW.new{persist = {manifest = MAN}, mode = opts.mode}
   df.tiletype.attrs[BRANCH] = {shape = df.tiletype_shape.BRANCH, material = df.tiletype_material.TREE, special = df.tiletype_special.NONE}
+  df.tiletype.attrs[TRUNK] = {shape = df.tiletype_shape.WALL, material = df.tiletype_material.TREE, special = df.tiletype_special.NONE}
   SW.fill(W, G, 0, 0, 63, 63, ',')
   SW.fill(W, G, 20, 20, 40, 30, '#')
   SW.fill(W, G, 21, 21, 39, 29, '.')
@@ -37,6 +39,8 @@ local function gatehouse(opts)
   for dz = 1, opts.crown - 1 do SW.fill(W, G + dz, 15, 27, 19, 27, '_') end
   SW.fill(W, G + opts.crown, 15, 27, 19, 27, '.')
   for x = 15, 19 do W.tiles[SW.key(x, 27, G + opts.crown)].tt = BRANCH end
+  -- a trunk (WALL of tree material) standing directly over (dz = 1) or higher over some strip tiles: the live pattern, column '?+T.'
+  for _, tr in ipairs(opts.trunks or {}) do W.tiles[SW.key(tr[1], 27, G + tr[2])].tt = TRUNK end
   if opts.roof then for x = 15, 19 do W.tiles[SW.key(x, 27, G + opts.roof)].tt = SW.T.floor end end
   W.o1 = W.dyn[SW.key(20, 25, G)]
   SW.regroup(W)
@@ -77,6 +81,23 @@ T.test('BUG-685 (2): crowns twelve and thirteen levels up, no roof in the column
   T.ok(rim, 'a built floor six levels up is a roof: the strip stays inside, its rim is a way in: ' .. T.show(x.open))
 end)
 
+T.test('BUG-685 (2c): a trunk directly above a strip tile (dz = 1, live pattern) is a tree part: open sky, no rim way in at the trunk',
+       function()
+  for _, trunks in ipairs({{{17, 1}}, {{16, 1}, {18, 1}}, {{17, 3}}, {{15, 1}, {19, 1}}}) do
+    local W = gatehouse{crown = 13, trunks = trunks}
+    W.run(400, {skip = 9})
+    local rim, x = rim_open(W)
+    T.ok(not rim, 'trunk(s) ' .. T.show(trunks) .. ': no rim way in at the trunk: ' .. T.show(x.open))
+    local r = W.inbox('inspect', {what = 'entrances'})
+    T.eq(r.data.first.pos, {35, 20, G}, 'the north wall gap is still the first mouth')
+  end
+  -- a built floor above the trunk's level still roofs the tile (the trunk does not open a roofed tile)
+  local W = gatehouse{crown = 13, trunks = {{17, 1}}, roof = 6}
+  W.run(400, {skip = 9})
+  local rim = rim_open(W)
+  T.ok(rim, 'a built floor six levels up is still a roof over a trunk')
+end)
+
 T.test('BUG-685 (2b): the stats count the tiles only the longer read decided', function()
   local function crown_hi(WW)
     local rr = WW.inbox('inspect', {what = 'reach'})
@@ -108,6 +129,14 @@ local function fort(opts)
   SW.fill(W, FZ, 23, 20, 30, 20, ',')              -- the field in front of it
   SW.fill(W, FZ, 2, 17, 12, 20, '.')
   SW.fill(W, FZ, 12, 16, 12, 20, '.')
+  if opts.trunk then
+    -- the live pattern: a trunk tile directly over the shaded field tile 26,20 (a WALL of tree material), air above it
+    df.tiletype.attrs[TRUNK] = {shape = df.tiletype_shape.WALL, material = df.tiletype_material.TREE, special = df.tiletype_special.NONE}
+    for x = 23, 30 do W.tiles[SW.key(x, 20, FZ)].des.outside = false end
+    for dz = 1, 12 do SW.fill(W, FZ + dz, 23, 20, 30, 20, '_') end
+    W.tiles[SW.key(26, 20, FZ + 1)].tt = TRUNK
+    W.tiles[SW.key(27, 20, FZ + 1)].tt = TRUNK
+  end
   if opts.crown then
     -- the field x 23..30 lies in the shade of a tall tree: no `outside`, air for crown-1 levels, branches at FZ + crown
     for x = 23, 30 do W.tiles[SW.key(x, 20, FZ)].des.outside = false end
@@ -161,6 +190,24 @@ T.test('BUG-685 (3): arrival lockdown, the field mouth under a seven-level crown
   W.move(9, 9, 12, FZ)                             -- he is in the hall now
   W.run(60, {skip = 9})
   T.eq(W.stair_door.door_flags.forbidden, true, 'forbidden once nobody is left outside')
+end)
+
+T.test('BUG-685 (3c): the siege traffic with a trunk right above the shaded field (live pattern): the woodcutter under the trunk is outside, '
+       .. 'the door waits for him, the mouth is the way in, nobody is shut out', function()
+  local W = fort{trunk = true, units = {{id = 9, pos = {26, 20, FZ}, citizen = true, adult = true}}}
+  local _, x = W.K.call('seal', 'entrance_doors')
+  local mouth
+  for _, o in ipairs(x.open) do if o.pos[1] == 22 and o.pos[2] == 20 then mouth = o end end
+  T.ok(mouth, 'the corridor mouth 22,20 is the way in: ' .. T.show(x.open))
+  for _, o in ipairs(x.open) do T.ok(o.pos[1] <= 22, 'no way in at the rim of the trunk shade: ' .. T.show(o.pos)) end
+  W.event('INVASION', {id = 4})
+  W.run(30, {skip = 9})
+  W.inbox('ack', {})
+  T.ok(W.find_events('ARRIVAL')[1], 'ARRIVAL')
+  T.eq(W.stair_door.door_flags.forbidden, false, 'not locked out: the woodcutter under the trunk is still outside')
+  W.move(9, 9, 12, FZ)
+  W.run(60, {skip = 9})
+  T.eq(W.stair_door.door_flags.forbidden, true, 'forbidden once nobody is left outside (the fort still seals)')
 end)
 
 T.test('BUG-685 (3b): the plain floor mouth still counts in a siege (the fort still seals): listed as a way in, the lockdown names it', function()

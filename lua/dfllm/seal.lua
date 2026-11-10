@@ -277,13 +277,18 @@ local shape
 -- stats.crown_hi when a crown above the old four levels decided it). A built floor / wall anywhere in the column still roofs it.
 local TREE_UP = 12
 local TREE_UP_OLD = 4
+-- BUG-685 (verifier, snapshots of Run 16d i4 s184011239-109 and 16a i1 s196380449-123: every one of eight sealed rim tiles and both
+-- listed ones had a TRUNK tile directly above it, column '?+T.'): the rim tile is the floor under a leaning or growing trunk, a WALL
+-- of tree material (snapshot 'T'), neither EMPTY nor a branch. It read as a roof, so a floor tile under a trunk was 'inside' while its
+-- neighbours were open sky, and the rim moved with every tree that grew, fell or was felled. A trunk (tree or root material) is a
+-- tree part like a branch: nothing built roofs the tile, on the surface (subterranean false).
 local function open_sky(des, x, y, z)
   if des.outside then return true end
   if des.subterranean then return false end
   for dz = 1, TREE_UP do
     local s = shape(x, y, z + dz)
     if s == nil then return false end
-    if TREE_ROOF[s.shape] == true then
+    if TREE_ROOF[s.shape] == true or (s.shape == 'WALL' and (s.mat == 'TREE' or s.mat == 'ROOT')) then
       if dz > TREE_UP_OLD and mem then mem.stats.crown_hi = (mem.stats.crown_hi or 0) + 1 end
       return true
     end

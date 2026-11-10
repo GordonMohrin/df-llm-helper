@@ -70,7 +70,7 @@ def test_follow_seals_the_open_rim_in_peace_once(save):
     _answer_snapshot(save, f)
     (place,) = inbox_docs(save)
     assert place["verb"] == "bp.place" and place["by"] == "follow"
-    assert place["args"] == {"tpl": "seal", "site": "S1", "p": {"at": "last"}}
+    assert place["args"] == {"tpl": "seal", "site": "S1", "p": {"at": "ents"}}
     bp = json.loads((save / "bp" / f"{place['id']}.json").read_text("utf-8"))
     assert bp["tpl"] == "seal" and bp["params"]["at"].startswith("100,127,122 floor")
     assert "auto:perim" in (save / "cli.log").read_text("utf-8")
@@ -128,3 +128,18 @@ def test_a_placement_that_finds_nothing_to_close_is_no_auto_fail(save, monkeypat
     assert inbox_docs(save) == []
     assert not any("AUTO_FAIL" in ln for ln in out), out
     assert "nothing to place" in (save / "cli.log").read_text("utf-8")
+
+
+def test_at_ents_seals_only_the_confirmed_ways_in_not_a_leak_or_an_unconfirmed_tile(save):
+    """BUG-686 (verifier): follow's seal is at=ents: the tiles of the entrance check's ents, never a SEAL_LEAK tile nor a refuge tile."""
+    pytest.importorskip("dfpilot.bp.sites")
+    from dfpilot import cmd
+    _state(save)
+    append_events(save, [{"n": 9200, "tick": TICK, "type": "SEAL_LEAK", "cls": "B", "msg": "leak via a floor",
+                          "d": {"pos": [50, 60, 122], "bld": "floor"}}])
+    both = cmd.current_openings(save)
+    assert {e["src"] for e in both} >= {"ents", "leak"}, both
+    at_last, _ = cmd.seal_openings(save, "last")
+    assert "50,60,122" in at_last and "100,127,122" in at_last
+    at_ents, _ = cmd.seal_openings(save, "ents")
+    assert "100,127,122" in at_ents and "50,60,122" not in at_ents, at_ents
