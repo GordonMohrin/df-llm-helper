@@ -94,6 +94,9 @@ M.CFG = {
   SURPLUS = true,       -- BUG-627: bone / food / drink above their floors are added to a non-empty sell list (false = the list as given)
   SURPLUS_FOOD_D = 300, -- ... food (plant, meal) while it lasts this many days
   SURPLUS_DRINK_D = 600,-- ... drink only while it lasts this many days
+  EXTRA = true,         -- BUG-644: crafts / spare backpacks, flasks, quivers at the depot are sold too when the list leaves a wanted good unpaid
+                        -- (or takes nothing); false = the list as given
+  XKEEP = 806400,       -- ... and the kinds learned that way stay on the sell list this many ticks (two years)
   UNFORBID_BINS = true, -- BUG-609: a forbidden bin of crafts is unforbidden when it is hauled to the depot (false = left, counted bin_forbid)
   RETRY_WAIT = 1200, MAX_TRIES = 2,
   -- BUG-026: a retry waits at most the ticks left before the trade screen may no longer open (time_remaining down to
@@ -104,6 +107,12 @@ M.CFG = {
                         -- for the merchants' depot this many ticks at the depot, then go to the manifest depot
   STUCK_APPROACH = 4800,-- ticks Approaching without reaching the depot -> fix/stuck-merchants
   STUCK_STATE = 1200,   -- ticks in trade_state Stuck -> fix/stuck-merchants
+  -- BUG-642 (Run 16c i3 Wallfree y376-y389: the Catten caravan stood as 'Leaving, time_remaining 0' for years while merchant 26506
+  -- wandered ownerless on the map): a caravan that is Leaving this long has not left; its visit is over (nothing more to trade, no
+  -- O1 window, no 'caravan on the map' for the gate and the supervisor), and it is said once. OVERDUE_TICKS = no caravan listed
+  -- at all this long (a year is 403,200 ticks) -> CARAVAN overdue with the depot's access
+  LEAVE_STALE = 7200,
+  OVERDUE_TICKS = 504000,
   O1_EVERY = 600,       -- ticks between two gate.want('down') for the same bridge
   FRESH = 200,          -- census.h older than this = unknown (no O1 window)
   -- real-time waits: the arbiter runs gfps 30, so one render takes <= 34 ms; the UI part of a trade
@@ -169,6 +178,13 @@ L.KINDS = {
   bone = {t = {'CORPSEPIECE'}, word = 'bone'}, bones = {t = {'CORPSEPIECE'}, word = 'bone'},
   crafts = {t = {'FIGURINE', 'AMULET', 'SCEPTER', 'CROWN', 'RING', 'EARRING', 'BRACELET', 'TOTEM', 'GOBLET',
                  'INSTRUMENT', 'TOY'}},
+  -- BUG-643 (Run 16a i1 Basementflew y457: 'kind=100(BACKPACK22+FLASK21+PANTS11)' and the note "BACKPACK / FLASK are no sell tokens"): the
+  -- spare gear types by name (they matched only as the item_type fallback, and nothing said so); clothing = pants, shoes, gloves; junk =
+  -- all of them
+  backpack = {t = {'BACKPACK'}}, backpacks = {t = {'BACKPACK'}}, flask = {t = {'FLASK'}}, flasks = {t = {'FLASK'}},
+  quiver = {t = {'QUIVER'}}, quivers = {t = {'QUIVER'}},
+  clothing = {t = {'PANTS', 'SHOES', 'GLOVES'}},
+  junk = {t = {'BACKPACK', 'FLASK', 'QUIVER', 'PANTS', 'SHOES', 'GLOVES'}},
 }
 -- BUG-583: the flux stones by name, when the raws are not at hand (item_info sets info.flux from the reaction class FLUX)
 L.FLUX_STONES = {limestone = true, dolomite = true, marble = true, chalk = true, calcite = true}
@@ -406,6 +422,27 @@ function L.ledger(want, buys, sells, plan)
   return r
 end
 
+-- BUG-644 (Run 16d i4 Trumpetrealms y432: 'armor:metal:value', our sale 281 against a metal armor worth more, and no word how much more):
+-- per want token with merchant goods, the sale value our side must offer for its cheapest entry (display ratio and margin included)
+-- against the sale value on offer. buys {i, k, value, stack}, sells {value}, want = token list, fac = {ratio, margin, buy, sell}.
+-- Returns {[src] = {need, pool}} for the wants whose cheapest entry costs more than the whole pool pays
+function L.gaps(buys, sells, want, fac)
+  local pool = 0
+  for _, s in ipairs(sells or {}) do pool = pool + int(s.value) end
+  local low = {}
+  for _, b in ipairs(buys or {}) do
+    if b.value > 0 and (not low[b.k] or b.value < low[b.k]) then low[b.k] = b.value end
+  end
+  local nf = fac.ratio * (1 + fac.margin)
+  local r = {}
+  for k, v in pairs(low) do
+    local need = math.ceil(v * fac.buy * nf / math.max(0.01, fac.sell) - 1e-6)
+    local tk = want[k]
+    if tk and need > pool then r[tk.src] = {need = need, pool = pool} end
+  end
+  return r
+end
+
 -- BUG-534 (Run 16a i1 / 16d i4: stone, mechanisms and bars on trade.want for years, no caravan ever brought them and nothing
 -- said so): the wants the merchants had NONE of in every kept visit that asked for them (at least NOSUPPLY_MIN visits, each
 -- one a ledger entry with the want unmet 'none' or bought never). A caravan brings what its civ makes and what the liaison's
@@ -462,6 +499,18 @@ function L.token_for(t, mat, desc, mf)
   local low = tostring(t or ''):lower()
   return low:match('^[a-z_]+$') and low or nil
 end
+
+-- BUG-643: the sell token that takes an item type (`crafts` for the craft types, else the want token of the type: backpack, flask,
+-- pants, tool, splint, ...), what nothing_to_sell names instead of the raw df.item_type
+function L.sell_name(tn)
+  for _, c in ipairs(L.KINDS.crafts.t) do if c == tn then return 'crafts' end end
+  return L.token_for(tn) or tostring(tn):lower()
+end
+
+-- BUG-644: item types the kernel itself may sell when the list leaves the fort short of value (trade goods and spare gear that no
+-- system of the kernel counts on): the craft types and spare backpacks, flasks and quivers. {TYPE = token name}
+L.EXTRA = {BACKPACK = 'backpack', FLASK = 'flask', QUIVER = 'quiver'}
+for _, tn in ipairs(L.KINDS.crafts.t) do L.EXTRA[tn] = 'crafts' end
 
 -- plain substring search over screen rows {[y]=string}; case-insensitive when ci
 function L.find_text(rows, needle, ci)
@@ -1001,19 +1050,26 @@ end
 -- added by the kernel: bone always, food (its types include plant and meal) while the food lasts SURPLUS_FOOD_D days, drink only while
 -- it lasts SURPLUS_DRINK_D days. A kind the list names stays whatever the stock; cfg.SURPLUS = false leaves the list alone.
 -- days = {food_d, drink_d} (economy.surplus_days) | nil (none known: nothing is added). Returns the list and the sources added.
-function L.surplus_sell(sell, days, known, cfg, noauto)
+-- BUG-644: `extra` = further kinds (sources) the kernel learned to sell (L.EXTRA names merged after a value gap or an empty list), added
+-- the same way, without a stock reading
+function L.surplus_sell(sell, days, known, cfg, noauto, extra)
   local added = {}
-  if #sell == 0 or cfg.SURPLUS == false or type(days) ~= 'table' then return sell, added end     -- no stock reading: the list as given
+  if #sell == 0 or cfg.SURPLUS == false then return sell, added end
+  if type(days) ~= 'table' and not (type(extra) == 'table' and #extra > 0) then return sell, added end     -- no stock reading: the list as given
   local named = {}
   for _, s in ipairs(type(noauto) == 'table' and noauto or {}) do          -- the player took it out of the list
     local tk = L.token(s, known)
     if tk then named[tk.kind] = true end
   end
   for _, tk in ipairs(sell) do named[tk.kind] = true end
-  local fd, dd = days.food_d, days.drink_d
-  local cand = {'bone'}
-  if fd and fd >= cfg.SURPLUS_FOOD_D then cand[#cand + 1] = 'food' end
-  if dd and dd >= cfg.SURPLUS_DRINK_D then cand[#cand + 1] = 'drink' end
+  local cand = {}
+  if type(days) == 'table' then
+    local fd, dd = days.food_d, days.drink_d
+    cand[1] = 'bone'
+    if fd and fd >= cfg.SURPLUS_FOOD_D then cand[#cand + 1] = 'food' end
+    if dd and dd >= cfg.SURPLUS_DRINK_D then cand[#cand + 1] = 'drink' end
+  end
+  for _, src in ipairs(type(extra) == 'table' and extra or {}) do cand[#cand + 1] = src end
   local r
   for _, src in ipairs(cand) do
     local tk = L.token(src, known)
@@ -1047,16 +1103,28 @@ local function wants(K)
   end
   local sell, short = L.metal_sell(want, L.tokens(s, known), known)
   local okd, days = K.call('economy', 'surplus_days')      -- BUG-627: bone, food, drink above their floors join a non-empty list
+  local extra = {}                                         -- BUG-644: kinds learned from a value gap / an empty list (st.x[src] = tick)
+  if M.CFG.EXTRA ~= false then
+    for src, t in pairs(type(st.x) == 'table' and st.x or {}) do
+      if K.now().tick - int(t) <= M.CFG.XKEEP then extra[#extra + 1] = src end
+    end
+    table.sort(extra)
+  end
   local added
-  sell, added = L.surplus_sell(sell, okd and type(days) == 'table' and days or nil, known, M.CFG, ov and ov.noauto)
+  sell, added = L.surplus_sell(sell, okd and type(days) == 'table' and days or nil, known, M.CFG, ov and ov.noauto, extra)
   return want, sell, short, added
 end
 
 local function lists_job(K, ui, mer)
   local want, sell = wants(K)
   local ea, ew = ethics(mer)
+  local xno = {}                                           -- BUG-644: a kind the player took out of the list is never added again
+  for _, src in ipairs(st.ov and type(st.ov.noauto) == 'table' and st.ov.noauto or {}) do
+    local tk = L.token(src, function(n) return df.item_type ~= nil and df.item_type[n] ~= nil end)
+    if tk then xno[tk.kind] = true end
+  end
   return {kind = 'lists', i0 = 0, i1 = 0, n0 = #ui.good[0], n1 = #ui.good[1], buys = {}, sells = {}, skip = {},
-          want = want, sell = sell, ea = ea, ew = ew, kinds = {}}
+          want = want, sell = sell, ea = ea, ew = ew, kinds = {}, extra = {}, xno = xno}
 end
 
 -- BUG-561: a bin (any container with contents) is a sale entry when every item in it passes the sale filter; returns
@@ -1121,6 +1189,10 @@ local function lists_slice(j, ui, mer)
       elseif #j.sell > 0 and not L.first_match(j.sell, info) then
         skip('kind')
         j.kinds[info.type] = (j.kinds[info.type] or 0) + 1       -- BUG-609: which item types the sell list does not take
+        local xn = M.CFG.EXTRA ~= false and L.EXTRA[info.type]    -- BUG-644: candidates for a value gap
+        if xn and not (j.xno or {})[xn] then
+          j.extra[#j.extra + 1] = {i = i, value = info.value, stack = info.stack, t = info.type, x = xn}
+        end
       else
         j.sells[#j.sells + 1] = {i = i, value = info.value, stack = info.stack, t = info.type}
       end
@@ -1250,6 +1322,14 @@ local function ledger(K, ent, ok, why, ratio, f)
     local tail = (why == 'nothing_to_sell' and type(f.nts) == 'string' and f.nts ~= '') and ('[' .. f.nts .. ']') or ''
     for _, u in ipairs(lg.unmet) do if u[2] ~= 'none' or not cand then u[2] = tostring(why) .. tail end end
   end
+  -- BUG-644: a want that costs more than the whole sale value on offer says by how much ([need=N,pool=M], sale value, no spaces)
+  if cand and cand.buys and cand.sells then
+    local g = L.gaps(cand.buys, cand.sells, want, {ratio = M.CFG.RATIO, margin = M.CFG.MARGIN, buy = f.fb or M.CFG.BUY_F, sell = f.fs or 1.0})
+    for _, u in ipairs(lg.unmet) do
+      local e = g[u[1]]
+      if e and (u[2] == 'value' or u[2] == 'ratio') then u[2] = string.format('%s[need=%d,pool=%d]', u[2], e.need, e.pool) end
+    end
+  end
   local function head(list, n) local r = {} for i = 1, math.min(n, #list) do r[i] = list[i] end return r end
   local e = {tick = K.now().tick, civ = civ_name(ent), ok = ok and 1 or 0, ratio = int(ratio), why = ok and '' or tostring(why),
              sold = head(lg.sold, 8), bought = head(lg.bought, 8), unmet = head(lg.unmet, 10),
@@ -1355,6 +1435,63 @@ local function finish(K, ok, why, ratio)
   set_phase(K, 'LEAVE', why)
 end
 
+-- BUG-642: the merchants of a civ on the map (sense.merchants): {n, off, ids, pos}; zeros when sense cannot answer
+local function merchants_on_map(K, ent)
+  local ok, r = K.call('sense', 'merchants', ent)
+  if ok and type(r) == 'table' then return r end
+  return {n = 0, off = 0, ids = {}, pos = {}}
+end
+
+-- BUG-642: can the wagons reach a built depot? seal.depot_access (the last reach audit) as a short text
+local function depot_access_text(K)
+  local ok, a = K.call('seal', 'depot_access')
+  if not ok or type(a) ~= 'table' then return 'depot access unknown' end
+  if not a.known then return 'depot access unknown (' .. tostring(a.why) .. ')' end
+  if a.depots == 0 then return 'no built depot' end
+  if a.ok then return a.cut > 0 and ('a depot reaches the map edge, ' .. a.cut .. ' does not') or 'the depot reaches the map edge' end
+  return 'NO depot shares a walk group with a map edge tile: walls or doors of ours may keep the wagons out (seal audit)'
+end
+
+-- BUG-642: a caravan listed as Leaving for LEAVE_STALE ticks has not left (Wallfree: a merchant ownerless on the map kept it listed for
+-- years, and DF sends no new caravan of that civ meanwhile). Said once per visit; fix/stuck-merchants dismisses the flagged merchants
+-- that are off the map; the visit counts as over (step: LEAVE ends, pub caravan = 0, no O1 window). The merchants still on the
+-- map are named: the kernel sets no left flag on a unit (D-08), a lone stray one is the player's to kill (squad.sortie)
+local function stale_visit(K, c, v, now)
+  v.stale, dirty = 1, true
+  local okr, out = K.act.run('fix/stuck-merchants')
+  local m = merchants_on_map(K, c.ent)
+  local days = (now - v.lv) // 1200
+  local where = #m.ids > 0 and (' (units ' .. table.concat(m.ids, ',') .. ' at ' .. table.concat(m.pos, ' ') .. ')') or ''
+  local msg = string.format('caravan %s still listed Leaving after %d days (time left %d): %d merchants on the map%s, %d off it; %s; ' ..
+                            'fix/stuck-merchants %s; this visit is over', civ_name(c.ent), days, int(c.tr), m.n, where, m.off,
+                            depot_access_text(K), okr and 'ran' or ('failed: ' .. tostring(out)))
+  caravan_ev(K, 'stale', c.ent, {why = 'leaving', left = int(c.tr) * M.CFG.TR_TICKS}, msg:sub(1, 200))
+  K.log('warn', 'trade: %s', msg)
+  if m.n > 0 then
+    K.emit('DECISION_NEEDED', 'A', string.format('caravan %s cannot leave: %d of its merchants stand on the map', civ_name(c.ent), m.n):sub(1, 200),
+           {id = 'caravan_stale', n = m.n,
+            q = string.format('A lone stray merchant: kill it (squad.sortie). DF lists %s as Leaving for %d d and sends no new caravan until ' ..
+                              'its merchants are gone; %d on the map%s', civ_name(c.ent), days, m.n, where):sub(1, 200)})
+  end
+end
+
+-- BUG-642: no caravan listed for OVERDUE_TICKS (a year and a quarter): once per period, with the depot's access (our walls? no
+-- depot?). `live` = caravans on the list that are not stale
+local function overdue_check(K, live, now)
+  if st.seen == nil or now < st.seen or (live > 0 and now - st.seen >= 600) then      -- first look, a clock that went back, a caravan here
+    st.seen, dirty = now, true
+    return
+  end
+  if live > 0 then return end
+  local idle = now - st.seen
+  if idle < M.CFG.OVERDUE_TICKS or now - (st.overdue or -M.CFG.OVERDUE_TICKS) < M.CFG.OVERDUE_TICKS then return end
+  st.overdue, dirty = now, true
+  local nd = depot_scan(K).n
+  local msg = string.format('no caravan for %d days; %s', idle // 1200, nd > 0 and depot_access_text(K) or 'no built trade depot')
+  K.emit('CARAVAN', 'B', msg:sub(1, 200), {phase = 'overdue', civ = '-', why = 'none'})
+  K.log('warn', 'trade: %s', msg)
+end
+
 local function track_visits(K, cars, now)
   local present = {}
   for _, c in ipairs(cars) do
@@ -1363,7 +1500,7 @@ local function track_visits(K, cars, now)
     local v = st.visits[key]
     if not v then
       v = {first = now, at = -1, tries = 0, traded = 0, stuck = 0, set = 0, orig_r = 0, orig_a = 0, retry = -1,
-           ratio = 0, stuck_since = -1, nodepot = 0, dep = -1}
+           ratio = 0, stuck_since = -1, nodepot = 0, dep = -1, lv = -1, stale = 0}
       st.visits[key], dirty = v, true
       caravan_ev(K, 'arrive', c.ent, nil, 'caravan from ' .. civ_name(c.ent) .. ' ' .. c.state)
     end
@@ -1406,6 +1543,13 @@ local function track_visits(K, cars, now)
     if c.state == 'Stuck' then
       if v.stuck_since < 0 then v.stuck_since, dirty = now, true end
     elseif v.stuck_since >= 0 then v.stuck_since, dirty = -1, true end
+    -- BUG-642: Leaving since (the first look), and the stale visit once it has lasted LEAVE_STALE ticks
+    if c.state == 'Leaving' then
+      if v.lv < 0 then v.lv, dirty = now, true end
+      if v.stale == 0 and now - v.lv >= M.CFG.LEAVE_STALE then stale_visit(K, c, v, now) end
+    elseif v.lv >= 0 or v.stale ~= 0 then
+      v.lv, v.stale, dirty = -1, 0, true
+    end
   end
   for key, v in pairs(st.visits) do
     if not present[key] then
@@ -1779,6 +1923,40 @@ local function step_mark(K, cars)
   local j = rt.job
   rt.job = nil
   if #j.buys == 0 then return finish(K, false, 'nothing_wanted') end
+  -- BUG-644 (Run 16d i4 y432: 'armor:metal:value', only mugs and rings sold; Run 16a i1: every caravan 'nothing_to_sell' beside 100 backpacks
+  -- and flasks): the crafts / spare gear that lie at the depot but off the sell list are offered too when a wanted good costs more than
+  -- the whole sale value on offer, or when the list takes nothing here; the plan sells only as many as it needs, most valuable first.
+  -- The kinds are remembered (st.x) so the next haul brings them to the depot
+  if #j.extra > 0 then
+    local gap
+    if #j.sells == 0 then gap = 'the sell list takes nothing here'
+    else
+      local fac = {ratio = M.CFG.RATIO, margin = M.CFG.MARGIN, buy = f.fb or M.CFG.BUY_F, sell = f.fs or 1.0}
+      local g = L.gaps(j.buys, j.sells, j.want, fac)
+      local src = next(g)
+      if src then
+        local srcs_ = {}
+        for k, e in pairs(g) do srcs_[#srcs_ + 1] = string.format('%s needs %d of %d', k, e.need, e.pool) end
+        table.sort(srcs_)
+        gap = 'value gap: ' .. table.concat(srcs_, ', ')
+      end
+    end
+    if gap then
+      local names, add_v = {}, 0
+      st.x = type(st.x) == 'table' and st.x or {}
+      for _, e in ipairs(j.extra) do
+        j.sells[#j.sells + 1] = e
+        add_v = add_v + int(e.value)
+        if not names[e.x] then names[e.x] = 0; st.x[e.x], dirty = K.now().tick, true end
+        names[e.x] = names[e.x] + 1
+      end
+      local nl = {}
+      for n, c in pairs(names) do nl[#nl + 1] = string.format('%s %d', n, c) end
+      table.sort(nl)
+      f.xmerged = table.concat(nl, ', ')
+      K.log('info', 'trade: %s: %d more items of the depot are offered (%s; value %d)', gap, #j.extra, f.xmerged, add_v)
+    end
+  end
   if #j.sells == 0 then
     -- BUG-561: say why none of ours was offered (the list is only what lies in the depot; 'sent' counts what was hauled there)
     local parts = {}
@@ -1786,8 +1964,13 @@ local function step_mark(K, cars)
       if (j.skip[k] or 0) > 0 then parts[#parts + 1] = string.format('%d %s', j.skip[k], k) end
     end
     -- BUG-609 (Run 16a i1: 'kind' 148-245 and no word which): the item types the sell list leaves out, most first
-    local kl = {}
-    for tn, cnt in pairs(j.kinds or {}) do kl[#kl + 1] = {tn, cnt} end
+    -- BUG-643 (Run 16a i1: 'kind=100(BACKPACK22+FLASK21+PANTS11)' and no sell token named): by the sell token that takes the type
+    local kl, byname = {}, {}
+    for tn, cnt in pairs(j.kinds or {}) do
+      local nm = L.sell_name(tn)
+      if not byname[nm] then byname[nm] = {nm, 0}; kl[#kl + 1] = byname[nm] end
+      byname[nm][2] = byname[nm][2] + cnt
+    end
     table.sort(kl, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
     local kt = {}
     for i = 1, math.min(#kl, 6) do kt[#kt + 1] = string.format('%d %s', kl[i][2], kl[i][1]) end
@@ -1894,8 +2077,8 @@ end
 
 ---------------------------------------------------------------- module
 local VISIT_KEYS = {'first', 'at', 'tries', 'traded', 'stuck', 'set', 'orig_r', 'orig_a', 'retry', 'ratio',
-                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered', 'dep', 'busy', 'asked'}
-local NEG_DEFAULT = {at = true, retry = true, stuck_since = true, dep = true}
+                    'stuck_since', 'nodepot', 'brought', 'blocked', 'ledgered', 'dep', 'busy', 'asked', 'lv', 'stale'}
+local NEG_DEFAULT = {at = true, retry = true, stuck_since = true, dep = true, lv = true}
 
 -- BUG-026: the kernel boost while this visit is on: begun (WAIT, a pending retry included) with the caravan at the
 -- depot or still approaching (at most STUCK_APPROACH ticks: the first steps of a visit carry `logistics now` and the
@@ -1934,6 +2117,12 @@ function M.init(K)
   local p = K.persist.get('m.trade')
   if type(p) == 'table' then
     st.done, st.ratio = int(p.done), int(p.ratio)
+    if p.seen ~= nil then st.seen = int(p.seen) end                      -- BUG-642
+    if p.overdue ~= nil then st.overdue = int(p.overdue) end
+    if type(p.x) == 'table' then                                         -- BUG-644: the kinds learned for the sell list
+      st.x = {}
+      for src, t in pairs(p.x) do if type(src) == 'string' and L.valid(src) then st.x[src] = int(t) end end
+    end
     for key, v in pairs(type(p.visits) == 'table' and p.visits or {}) do
       if type(v) == 'table' then
         local nv = {}
@@ -1962,7 +2151,14 @@ function M.step(K, budget, ctx)
   local now = K.now().tick
   local cars = read_caravans()
   track_visits(K, cars, now)
-  if #cars > 0 then
+  -- BUG-642: a stale Leaving caravan is no caravan on the map (no O1 window, no gate/supervisor 'caravan' flag, no LEAVE hold)
+  local live, nstale = 0, 0
+  for _, c in ipairs(cars) do
+    local v = visit(c.ent)
+    if c.state == 'Leaving' and v and v.stale == 1 then nstale = nstale + 1 else live = live + 1 end
+  end
+  overdue_check(K, live, now)
+  if live > 0 then
     o1_window(K, now)
     stuck_check(K, cars, now)
   end
@@ -1978,14 +2174,19 @@ function M.step(K, budget, ctx)
   elseif ph == 'CHECK' then r = step_check(K)
   elseif ph == 'OFFER' then step_offer(K)
   elseif ph == 'RESULT' then r = step_result(K, sliced)
-  elseif ph == 'LEAVE' and not car_of(cars, rt.ent) then rt.phase, rt.ent, rt.f = 'IDLE', nil, nil end
+  elseif ph == 'LEAVE' then
+    local c = car_of(cars, rt.ent)
+    local v = c and visit(rt.ent)
+    -- BUG-642: a stale Leaving caravan no longer holds the phase (it blocked every caravan of another civ for years)
+    if not c or (c.state == 'Leaving' and v and v.stale == 1) then rt.phase, rt.ent, rt.f = 'IDLE', nil, nil end
+  end
   -- BUG-026: the limit runs on the module's own clock: a run that waited (paced, demoted) adds at most RUN_MS
   if UI_PHASES[rt.phase] and rt.f and not sliced and ph_age(rt.f) > M.CFG.PHASE_MS * 2 then
     finish(K, false, 'ui_timeout')
     r = nil
   end
   if r ~= 'more' then r = nil end
-  pub = {trade = {caravan = #cars > 0 and 1 or 0, ratio = st.ratio, done = st.done}}
+  pub = {trade = {caravan = live > 0 and 1 or 0, ratio = st.ratio, done = st.done, stale = nstale > 0 and nstale or nil}}
   local nb = L.unsupplied(st.ledger, M.NOSUPPLY_MIN)       -- BUG-534
   if #nb > 0 then
     for i, t in ipairs(nb) do nb[i] = t:sub(1, 24) end
@@ -2060,7 +2261,14 @@ M.inspect.trade = function(K, args)
   dcache = nil
   for _, c in ipairs(cars) do
     -- time_left = caravan.time_remaining (10-tick units), left_ticks the same in ticks (BUG-026 review)
-    list[#list + 1] = {civ = civ_name(c.ent), state = c.state, time_left = int(c.tr), left_ticks = int(c.tr) * M.CFG.TR_TICKS}
+    local row = {civ = civ_name(c.ent), state = c.state, time_left = int(c.tr), left_ticks = int(c.tr) * M.CFG.TR_TICKS}
+    local v = visit(c.ent)
+    if c.state == 'Leaving' and v and v.stale == 1 then     -- BUG-642: listed Leaving for years, the visit is over
+      local m = merchants_on_map(K, c.ent)
+      row.stale, row.leaving_days, row.merchants_on_map, row.merchants_off_map = 1, (K.now().tick - v.lv) // 1200, m.n, m.off
+      if #m.ids > 0 then row.merchant_ids, row.merchant_pos = json.array(m.ids), json.array(m.pos) end
+    end
+    list[#list + 1] = row
     if c.state == 'AtDepot' and not at then at = c end
   end
   local want, sell = wants(K)
@@ -2123,7 +2331,8 @@ M.inspect.trade = function(K, args)
                                          or '')) or 'no caravan') or 'no built trade depot')
   local ledger = {}
   for i, e in ipairs(st.ledger or {}) do ledger[i] = e end
-  local data = {caravans = json.array(list), depot = d and d.id or -1, goods = json.array(goods), goods_items = n,
+  local data = {caravans = json.array(list), depot = d and d.id or -1, depot_access = depot_access_text(K),
+                last_caravan_days = st.seen and ((K.now().tick - st.seen) // 1200) or nil, goods = json.array(goods), goods_items = n,
                 carried_items = carried, wanted_matches = json.array(matches), wanted_more = more,
                 wanted_scan = capped and ('capped at ' .. scanned) or nil,
                 want = srcs(want), sell = srcs(sell), ledger = json.array(ledger), done = st.done}
