@@ -149,7 +149,7 @@ C.EVENTS = {
   -- B: digest
   ALERT_START = {cls = 'B', by = 'siege'}, ALERT_END = {cls = 'B', by = 'siege'},
   -- Run 11: d.cause far (it ended with hostiles in sight beyond reflex.lockdown_near; d.far names them, d.nfar) | quiet
-  LOCKDOWN_END = {cls = 'B', by = 'reflex'},
+  LOCKDOWN_END = {cls = 'B', by = 'reflex'}, LOCKDOWN_CLOCK = {cls = 'B', by = 'reflex'},
   PREDATOR_FAR = {cls = 'B', by = 'reflex'},
   -- Run 11 (siege 8): the lockdown's recall of the citizens outside Kern+ (d.why done | late | end; n, left, ticks,
   -- units still out, called, burrow, eta; BUG-035: why stuck, reasons, stuck, pull, nnew, newu); a switch of the civ

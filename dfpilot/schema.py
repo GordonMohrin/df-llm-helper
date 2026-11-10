@@ -484,7 +484,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # years, perimeter.stop_after
     # BUG-042: drink_low adds drink (days), block (still, brew, unvalidated, plants, barrels, brewer) and auto (brew,
     # office, barrels, gather); manager_office names why the manager validates nothing (orders older than unval_days)
-    # BUG-287: trade_screen = a player screen blocked the caravan's trade n times (trade.BUSY_ASK); screen = its focus
+    # BUG-287: trade_screen = a player screen blocked the caravan's trade (BUG-669: for trade.BUSY_TICKS, n = tries); screen = its focus
     # BUG-340: food_low/famine opts only with a command; cmds = their command lines in opts order (`dfllm cmd ...`); auto
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     # BUG-487: locked_out reop = the walls of ours the kernel took down itself (quickfort undo; a door goes there)
@@ -576,8 +576,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # Run 11: dist = tiles from the nearest citizen outside Kern+ or entrance (-1 unknown), far = beyond lockdown_near
     # BUG-495: the unit's race, body size (cm3, a dwarf is 60000), reach (1 on the citizens' walk group, 2 from a bank,
     # 0 out of reach) and the sortie command that would go for it
-    "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f race:s sz:i reach:i cmd:s")),
-    "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p race:s sz:i reach:i cmd:s dc:i da:i zn:i hb:i")),   # BUG-554: dc da zn hb
+    "INTRUDER": ("A", "reflex", _d(opt="n:i id:i pos:p k:s dist:i far:f race:s sz:i reach:i cmd:s exp:i")),   # BUG-671: exp = the tick the cmd offer holds
+    "PREDATOR": ("A", "reflex", _d(opt="n:i id:i pos:p race:s sz:i reach:i cmd:s exp:i dc:i da:i zn:i hb:i")),   # BUG-554: dc da zn hb
     # BUG-494 (Run 16b i2 Brotherarrow: a Hibbertopterus pack at the brook drowned five citizens, threat 0): a large or
     # predatory wild unit in or beside water within reach of the citizens; n = beasts announced now, race/sz/pos = the nearest,
     # dc = tiles to the nearest citizen, wet = the tile ('water 3/7', 'beside water 3/7'), stream brook | river, reach as
@@ -719,6 +719,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "ALERT_END": ("B", "siege", _d(opt="vis:i")),
     # Run 11: cause far (ended with hostiles in sight beyond reflex.lockdown_near; far names <= 3, nfar) or quiet
     "LOCKDOWN_END": ("B", "reflex", _d(opt="why:s ticks:i doors:i refused:i cause:s far:sa nfar:i")),
+    "LOCKDOWN_CLOCK": ("B", "reflex", _d("why:s days:i")),   # BUG-671: a PREDATOR lockdown released its clock clamp
     # Run 10: a roofed wild danger on the citizens' group but beyond reflex.predator_near of every citizen (no lockdown)
     "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i hb:i")),   # BUG-554: hb = a plant eater
     # Run 11 (siege 8: 16 citizens outside Kern+ at the arrival): the lockdown's recall; why done (all came in), late
