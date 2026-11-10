@@ -231,6 +231,21 @@ T.test('BUG-049 (Run 13 y525: the refuge was reachable and occupied): seal.refug
   T.eq(X.call(W0, 'readiness', 'refuge_audit'), nil, 'no audit yet')
 end)
 
+T.test('BUG-653 (Run 16d i4 Trumpetrealms y438): a refuge with no pre-plug round its stair foot is told in state ready.rp (not an R0 blocker, not ' ..
+       'refuge_trust: a foot no ring can be built round must not hold the growth); a trusted one with the pre-plug says nothing', function()
+  local s = seal_fake({tick = 1, sealed = 1, routes = 1, doors = {}, open = {}})
+  s.trust = {ok = true, sep = 1, why = {}, bd = {ok = false, why = 'no pre-plug: foot has a stair or ramp'}}
+  function s.refuge_trust(K) return s.trust end
+  local W = world{seal = s}
+  day(W)
+  audit(W)
+  for _, f in ipairs(ready(W).fail) do T.ok(f ~= 'refuge_trust', 'not a refuge_trust blocker') end
+  T.eq(ready(W).rp, 'no pre-plug: foot has a stair or ramp')
+  s.trust = {ok = true, sep = 1, why = {}, bd = {ok = true, why = ''}}
+  day(W)
+  T.eq(ready(W).rp, nil)
+end)
+
 ---------------------------------------------------------------- R2 / R3 and caps
 T.test('R2: drill, army share, >= 8 soldiers, cv, traps, stock; cap 75 only if the plan ceiling allows', function()
   local W = world{drill = NOW0 - 500}

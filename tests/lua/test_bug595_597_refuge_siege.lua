@@ -64,6 +64,7 @@ local function fort(o)
   package.loaded['dfllm.seal'] = nil
   local M = require('dfllm.seal')
   M.PLUG.every = 0
+  M.PLUG.pre = false                              -- BUG-651: the round-39 fallback of a fort without a pre-plug
   W.load(M)
   W.run(2400, {skip = 9})
   return W, M, repairs

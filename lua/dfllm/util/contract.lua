@@ -134,6 +134,8 @@ C.EVENTS = {
   BRIDGE_DESTROYED = {cls = 'A', by = 'gate'}, SIEGE_DEEP = {cls = 'A', by = 'siege'},
   -- BUG-479: the refuge's second line, a wall round the stair foot, queued against building destroyers / lifted in PEACE
   REFUGE_PLUG = {cls = 'A', by = 'seal'},
+  -- BUG-652: the pre-plug's states (pre_queued, pre_done, pre_lost, pre_cannot, pre_wait) and the reason the last wall waits (wait)
+  PLUG_NOTE = {cls = 'C', by = 'seal'},
   -- Run 11: a dig broke into a cavern (lake): the explore shaft's plug (queued, done, failed) or none (by hand); the
   -- daily shaft check (any explore state, field state) queues it too
   CAVERN_PLUG = {cls = 'A', by = 'runner'},
@@ -324,7 +326,7 @@ C.ACT = {
   kitchen_include = {'economy'},                   -- BUG-345: lift a Cook exclusion (seedwatch leftovers, D-09 in a famine)
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
   plant_gather = {'economy'}, plant_ungather = {'economy'}, work_detail_prune = {'economy'},
-  item_flag = {'care', 'water', 'economy', 'military'}, zone_assign = {'care'},
+  item_flag = {'care', 'water', 'economy', 'military', 'seal'}, zone_assign = {'care'},   -- BUG-651: seal keeps the last plug wall's block back
   tomb_zone = {'care'}, medic = {'care'}, hospital_post = {'care'},
   slab_place = {'care'},                           -- BUG-133: Build > Furniture > Slab with a ghost's engraved slab
   trade = {'trade'},
@@ -472,7 +474,8 @@ C.STATE_SPEC = obj({
                ts = str(200), tt = NAT,    -- BUG-481: the trap shortfall R0 `traps_short` names, the trap target for the expected siege
                rg = arr(str(24), 0, 8),    -- BUG-478: the bridges with no linked lever inside the refuge (no R0 blocker)
                as = str(120),              -- BUG-601: the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
-               lw = str(200)}),            -- BUG-634: what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
+               lw = str(200),              -- BUG-634: what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
+               rp = str(120)}),            -- BUG-653: the refuge has no pre-plug (no R0 blocker): not trusted against building destroyers
   -- Run 10: ore/bars/leather stock, the metal route and the classes moods missed (plan propose/check supply goals)
   stock = obj(nil, {drink_d = NAT, food_d = NAT, meals = NAT, hosp_water = FLAG, ore = NAT, bars = NAT, leather = NAT,
                     metal = str(24), mood_miss = arr(str(12), 0, 8), rock = NAT, rock_need = NAT, picks = NAT,
@@ -579,6 +582,8 @@ C.STATE_SPEC = obj({
                           fd = NAT, fn = NAT,
                           -- BUG-049: trusted (1) or not (0) and the first reason
                           tr = FLAG, trw = str(40),
+                          -- BUG-653: the pre-plug round the stair foot: 0 none (ppw: why), 1 building, 2 ready
+                          pp = int(0, 2), ppw = str(40),
                           -- BUG-336: its own way in (the stair head) is open: never the alert burrow in a fight
                           op = FLAG,
                           -- BUG-337 review: building destroyers in sight and only a hatch or door closes it

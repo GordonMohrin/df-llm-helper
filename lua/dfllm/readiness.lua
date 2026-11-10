@@ -749,6 +749,10 @@ local function evaluate(K, why)
       rt.rtrust = cut(why, 80)
     end
   end
+  -- BUG-653: no pre-plug round the refuge's stair foot: a hatch or door is broken by building destroyers (a note, not an R0 blocker: a foot
+  -- no ring can be built round must not hold the growth)
+  rt.rp = nil
+  if okt and type(tr) == 'table' and type(tr.bd) == 'table' and tr.bd.ok == false then rt.rp = cut(tr.bd.why, 120) end
   local peace = K.mode() == 'PEACE'
   if peace then
     rt.pw = open_perimeter(K, man)
@@ -1400,6 +1404,7 @@ function M.state(K)
   if rt.ashort then r.as = rt.ashort end                      -- BUG-601: the armor shortfall that holds max-pop
   if rt.ttarget then r.tt = rt.ttarget end                    -- BUG-481: the trap target for the expected siege
   if rt.lw then r.lw = rt.lw end                              -- BUG-634: what the levers of `levers:<B>` wait for
+  if rt.rp then r.rp = rt.rp end                              -- BUG-653: the refuge has no pre-plug against building destroyers
   if rt.rlg then r.rg = rt.rlg end                            -- BUG-478: the bridges without a refuge lever
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
 end

@@ -1086,6 +1086,10 @@ def line_alert(al: dict) -> str:
     ref = al.get("ref") if isinstance(al.get("ref"), dict) else {}
     if ref.get("tr") == 0:                     # BUG-049: Tiefe+ is trusted only while separated (fresh), hatched, empty
         txt += f" | refuge NOT TRUSTED: {ref.get('trw') or '?'}"
+    if ref.get("pp") == 0:                     # BUG-653: no pre-plug round the stair foot: building destroyers break a hatch or door
+        txt += f" | refuge NOT TRUSTED against building destroyers: no pre-plug ({ref.get('ppw') or '?'})"
+    elif ref.get("pp") == 1:
+        txt += f" | refuge pre-plug under way ({ref.get('ppw') or '?'})"
     if ref.get("op") == 1:                     # BUG-336: its way in is open: seal never confines to it in a fight
         txt += " | REFUGE OPEN: not used in a siege or breach, close its stair head (bp.place tpl=seal site=S1 at=refuge)"
     elif ref.get("sf") == 1:                   # BUG-337 review: building destroyers in sight break its hatch or door

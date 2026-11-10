@@ -46,6 +46,7 @@ local function fort(seal_p)
   package.loaded['dfllm.seal'] = nil
   local M = require('dfllm.seal')
   M.PLUG.every = 0                                   -- no verdict cache: the tests change the world between asks
+  M.PLUG.pre = false                                 -- BUG-651: these tests are the fallback of a fort without a pre-plug (round 39)
   W.load(M)
   W.run(2400, {skip = 9})
   return W, M, repairs

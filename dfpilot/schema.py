@@ -102,7 +102,7 @@ ACT = {
     "work_detail": ["economy", "water"], "order_material": ["economy"], "order_remove": ["economy"],
     "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
     "work_detail_prune": ["economy"],
-    "item_flag": ["care", "water", "economy", "military"],
+    "item_flag": ["care", "water", "economy", "military", "seal"],
     "zone_assign": ["care"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
     "slab_place": ["care"],                        # BUG-133: Build > Furniture > Slab with a ghost's engraved slab
     "trade": ["trade"],
@@ -610,7 +610,13 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-479: the refuge plug (queued, and lifted in PEACE): proj = the runner repair project of the walls, n = wall
     # tiles, pos = the stair foot, closer = what closes the stair head (hatch | door | ...), near = the nearest building
     # destroyer's distance to the head, breach = 1 when queued in a BREACH; lifted = 1 on the PEACE event
-    "REFUGE_PLUG": ("A", "seal", _d("proj:s", "n:i pos:p closer:s near:i breach:i lifted:i early:i out:i")),
+    # BUG-651: the pre-plug (the ring but one gap tile, built in PEACE; the last wall ordered at once): pre = 1 when the order was the
+    # single last wall, eta = ticks the nearest destroyer needs to the head, wt = the wall's build time plus the margin
+    "REFUGE_PLUG": ("A", "seal", _d("proj:s", "n:i pos:p closer:s near:i breach:i lifted:i early:i out:i pre:i eta:i wt:i")),
+    # BUG-652: what = pre_queued | pre_done | pre_lost | pre_cannot | pre_wait (the pre-plug in PEACE) | wait (the reason the walls are not
+    # ordered in a fight, once per change: why = plug_eval's wait text); n = ring walls, gap = the open tile, ticks = build time,
+    # near / eta / need / out / pre = what the decision saw
+    "PLUG_NOTE": ("C", "seal", _d("what:s why:s mode:s", "n:i proj:s gap:p ticks:i near:i eta:i need:i out:i pre:i")),
     "REFUGE_FAIL": ("A", "seal", _d("burrow:s", "fallback:s why:s tiles:i inside:i mode:s level:s flee:f open:sa "
                                                 "fix:s dry:f hostile:i at:p sup:s")),
     # BUG-107: a potential refuge (Kern+, the refuge) holds less food or drink than refuge.floor_pct % of the siege need;
@@ -1064,7 +1070,10 @@ STATE = Obj(
                            # BUG-601: as = the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                            "as": Str(maxbytes=120),
                            # BUG-634: lw = what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
-                           "lw": Str(maxbytes=200)}),
+                           "lw": Str(maxbytes=200),
+                           # BUG-653: rp = the refuge has no pre-plug round its stair foot (no R0 blocker): a hatch or door is
+                           # broken by building destroyers, so it is not trusted against them
+                           "rp": Str(maxbytes=120)}),
          # Run 10: ore/bars/leather stock, the metal route ('explore' = no ore, metal wanted), the classes strange
          # moods missed within a year (plan propose/check supply goals)
          # Run 11: free stone and what the open rock orders, walls and needs want (rock_need); picks in the fort and the
@@ -1255,7 +1264,10 @@ STATE = Obj(
                                                              "op": FLAG,
                                                              # BUG-337 review: building destroyers in sight and only
                                                              # a hatch or door closes it (they break it)
-                                                             "sf": FLAG}),
+                                                             "sf": FLAG,
+                                                             # BUG-653: the pre-plug round the stair foot: 0 none (ppw:
+                                                             # why), 1 building, 2 ready
+                                                             "pp": Int(0, 2), "ppw": Str(maxbytes=40)}),
                                              # BUG-096/FR-80: the worst open burrow episode: how many, the burrow, its tiles
                                              # at the last good reading and now, the cause (load | runtime), the tiles
                                              # painted again, what the repair does ('repairing', 'waits for peace', 'repair

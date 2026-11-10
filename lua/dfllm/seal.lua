@@ -3663,6 +3663,10 @@ function M.refuge_trust(K)
     why[#why + 1] = hat and string.format('hostile inside at %d,%d,%d', hat[1], hat[2], hat[3]) or 'hostile inside'
   end
   r.ok, r.why = #why == 0, why
+  -- BUG-653: against building destroyers a hatch or door is no barrier; the pre-plug is (not part of `ok`: a foot no ring can be built
+  -- round must not hold the fort's growth). bd = {ok, why}: nil when the pre-plug is off
+  local pps, ppw = M.PP.status(K)
+  if pps then r.bd = {ok = pps == 2, why = pps == 2 and '' or ('no pre-plug: ' .. tostring(ppw))} end
   return r
 end
 
@@ -3741,9 +3745,265 @@ M.refuge_closure = refuge_closure
 -- BUG-595 (Run 16b i2 Brotherarrow y414): out_wait = the ticks citizens outside the refuge burrow (patients in the hospital, carers on their
 -- way) may hold the early plug back once destroyers are known; bedridden patients do not count (they cannot walk in); walkers get
 -- out_wait + out_each per walker from the last one that got in, then the foot is walled anyway
-M.PLUG = {on = true, near = 30, close = 10, lift = 2400, retry = 1200, out_wait = 1800, out_each = 600}
+-- BUG-651 (Run 16d i4 Trumpetrealms y438, Pop 77 -> 12: two cave dragons covered 82 tiles in ~2,300 ticks and broke the refuge hatch at the
+-- stair foot; the same 8-wall plug had taken 14,230 and 14,266 ticks to build in two earlier sieges, so a plug ordered at the alarm can never
+-- be finished in time): the PRE-PLUG. In PEACE the ring round the stair foot is built except ONE gap tile on the walking route (the stair
+-- stays usable), and one free block/boulder is kept back (forbidden) for the last wall. When destroyers are known the single last wall is ordered
+-- at once (a walker still outside holds it only while the destroyers' ETA leaves room for the wall's MEASURED build time): one wall takes
+-- `wall_ticks` (1,800: the two measured 8-wall builds / 8 = 1,780 per wall, an upper bound for the marginal wall; the fort learns its own
+-- from the PROJECT_DONE times of its ring and its last wall, st.wt), `margin` more as a reserve; `eta_tile` = ticks a destroyer needs per tile
+-- (2,300 / 82 = 28). A fort without a pre-plug keeps the round-39 behaviour (all eight walls at the last responsible moment).
+M.PLUG = {on = true, near = 30, close = 10, lift = 2400, retry = 1200, out_wait = 1800, out_each = 600,
+          pre = true, pre_every = 1200, wall_ticks = 1800, margin = 600, eta_tile = 28, occ_max = 900, note_every = 300}
 local function plug_cfg(K)
   return M.PLUG                                  -- constants of the module (no config key: tests set M.PLUG)
+end
+M.PP = {}                                        -- the pre-plug's helpers (a table: this file is at Lua's 200-local limit)
+-- 'x,y,z kind' (refuge_foot's tile line) -> x, y, z
+function M.PP.tile(line)
+  local x, y, z = tostring(line):match('^(%-?%d+),(%-?%d+),(%-?%d+)')
+  x, y, z = int(tonumber(x)), int(tonumber(y)), int(tonumber(z))
+  if x then return x, y, z end
+end
+-- ticks one wall takes: what this fort measured (the last wall, else the ring per wall), else the default
+function M.PP.wall_ticks(K)
+  local w = st.wt
+  return (w and (w.one or w.per)) or plug_cfg(K).wall_ticks
+end
+-- learn a build time: kind 'one' (the last wall alone) or 'per' (a ring of n walls: total / n); slow average, clamped
+function M.PP.learn(kind, ticks, n)
+  if not (ticks and ticks > 0 and n and n >= 1) then return end
+  local v = math.max(300, math.min(30000, math.floor(ticks / n + 0.5)))
+  st.wt = st.wt or {}
+  local old = st.wt[kind]
+  st.wt[kind] = old and (old * 3 + v) // 4 or v
+  dirty = true
+end
+-- a PLUG_NOTE (class C) once per change of what/why (the pre-plug's states and the reason plug_eval waits)
+function M.PP.note(K, what, why, d)
+  local sig = what .. '|' .. tostring(why):gsub('%s*%(.*$', '')       -- (the numbers in brackets change every look: not a new reason)
+  local t = now_t(K)
+  if mem.pp_sig == sig then return end
+  if mem.pp_nt and t - mem.pp_nt < plug_cfg(K).note_every and what == 'wait' then return end
+  mem.pp_sig, mem.pp_nt = sig, t
+  d = d or {}
+  d.what, d.why, d.mode = what, trunc(why, 80), K.mode()
+  K.emit('PLUG_NOTE', 'C', string.format('refuge plug %s: %s', what, trunc(why, 120)), d)
+end
+-- the ring plan: the open tiles round the stair foot except one gap on the walking route. {gap = {x,y,z}, ring = {{x,y,z,'Cw'}, ...},
+-- foot = {x,y,z}} or nil, why. The gap is an orthogonal neighbour (else any) with another standable tile behind it, the nearest to the
+-- refuge's anchor; nothing but the gap keeps the foot connected
+function M.PP.plan(K)
+  local col, foot = refuge_column(K), refuge_foot(K)
+  if not (col and foot) then return nil, 'no stair foot read' end
+  if foot.bad then return nil, 'foot has a stair or ramp' end
+  if #foot.tiles == 0 then return nil, 'foot closed already' end
+  local fx, fy, zr = col[1], col[2], col[3]
+  local tiles = {}
+  for _, line in ipairs(foot.tiles) do
+    local x, y, z = M.PP.tile(line)
+    if x then tiles[#tiles + 1] = {x, y, z} end
+  end
+  local man = K.manifest()
+  local a = type(man.refuge) == 'table' and man.refuge.anchor
+  local ax, ay = a and int(a[1]) or fx, a and int(a[2]) or fy
+  local best, bs
+  for i, g in ipairs(tiles) do
+    local onward = false
+    for dy = -1, 1 do
+      for dx = -1, 1 do
+        local nx, ny = g[1] + dx, g[2] + dy
+        if (dx ~= 0 or dy ~= 0) and not (nx == fx and ny == fy) and not onward then
+          local ring = false
+          for j, o in ipairs(tiles) do if j ~= i and o[1] == nx and o[2] == ny then ring = true end end
+          if not ring and rev(nx, ny, zr) then
+            local sh = shape(nx, ny, zr)
+            spend(1)
+            if sh and M.STAND[sh.shape] then onward = true end
+          end
+        end
+      end
+    end
+    if onward then
+      local s = ((g[1] == fx or g[2] == fy) and 0 or 1000) + math.max(math.abs(g[1] - ax), math.abs(g[2] - ay))
+      if not bs or s < bs then best, bs = i, s end
+    end
+  end
+  if not best then return nil, 'no gap tile with a way on' end
+  local ring = {}
+  for i, g in ipairs(tiles) do if i ~= best then ring[#ring + 1] = {g[1], g[2], g[3], 'Cw'} end end
+  return {gap = tiles[best], ring = ring, foot = foot.pos}
+end
+-- the nearest free block or boulder that can walk to the gap, forbidden so the ring's walls take others (the last wall's material).
+-- Returns the item id and the distance, nil when the fort has none
+function M.PP.pick(K, gap)
+  local gg = grp(gap[1], gap[2], gap[3])
+  local best, bd, seen = nil, nil, 0
+  for _, cat in ipairs({'BLOCKS', 'BOULDER'}) do
+    local v = vec('items', cat)
+    for i = 0, vlen(v) - 1 do
+      local it = v[i]
+      seen = seen + 1
+      if seen > 6000 then break end
+      if it and not it.flags.in_job and usable(it) then
+        local x, y, z = item_pos(it)
+        if x and x >= 0 and (gg == nil or gg == 0 or grp(x, y, z) == gg) then
+          local d = math.abs(x - gap[1]) + math.abs(y - gap[2]) + 10 * math.abs(z - gap[3])
+          if not bd or d < bd then best, bd = it.id, d end
+        end
+      end
+    end
+  end
+  return best, bd
+end
+function M.PP.reserve(K, pp)
+  local id, d = M.PP.pick(K, pp.gap)
+  if not id then return false end
+  local ok = K.act.item_flag(id, 'forbid', true)
+  if not ok then return false end
+  pp.mat, pp.md, dirty = id, d, true
+  return true
+end
+function M.PP.release(K, pp)
+  if pp and pp.mat then
+    if df.item.find(pp.mat) then K.act.item_flag(pp.mat, 'forbid', false) end
+    pp.mat, dirty = nil, true
+  end
+end
+-- 0 none (why), 1 building (the ring is queued, or the last wall's material is missing), 2 ready (or the last wall is ordered); nil off
+function M.PP.status(K)
+  local c = plug_cfg(K)
+  if not (c.on and c.pre) then return nil end
+  local pp = st.pp
+  if st.plug and (pp or st.plug.pre) then return 2 end
+  if pp and pp.done then
+    if pp.mat then return 2 end
+    return 1, 'no spare block or boulder for the last wall'
+  end
+  if pp then return 1, string.format('ring of %d walls under way', #pp.tiles) end
+  return 0, mem.pp_why or 'not built yet'
+end
+-- does the foot show exactly the gap open (the ring stands)?
+function M.PP.ring_stands(K, pp)
+  local f = refuge_foot(K)
+  if not f then return nil end
+  if f.bad then return false end
+  if #f.tiles == 0 then return nil end                 -- the gap is walled (the last wall, or being removed): unknown, not lost
+  if #f.tiles ~= 1 then return false end
+  local x, y, z = M.PP.tile(f.tiles[1])
+  return x == pp.gap[1] and y == pp.gap[2] and z == pp.gap[3]
+end
+-- the ring walls queued (PEACE): one runner repair of 'Cw' cells (noreach: it confines on purpose), then the last wall's block kept back
+function M.PP.queue(K, t, c)
+  local h = K.census and K.census.h
+  if type(h) == 'table' and (int(h.vis) or 0) > 0 then mem.pp_why = 'a hostile in sight'; return end
+  local _, refuge = burrow_names(K)
+  if not burrow(refuge) then mem.pp_why = 'no refuge burrow'; return end
+  local rv, cl = M.refuge_open(K)
+  if rv then mem.pp_why = 'its way in is open (a hatch first)'; return M.PP.note(K, 'pre_wait', mem.pp_why) end
+  if type(cl) ~= 'table' or cl.kind == 'wall' then
+    mem.pp_why = type(cl) == 'table' and 'foot walled already' or 'no closer on the stair head'
+    return M.PP.note(K, 'pre_wait', mem.pp_why)
+  end
+  local plan, why = M.PP.plan(K)
+  if not plan then mem.pp_why = why; return M.PP.note(K, 'pre_cannot', why) end
+  local pp = {t = t, id = '', gap = plan.gap, tiles = plan.ring}
+  if #plan.ring == 0 then
+    pp.done = t                                       -- the gap is the only open tile: nothing to build in peace
+  else
+    local ok, r1, id = K.call('runner', 'repair', plan.ring, 'refuge pre-plug: the stair foot walled except one gap tile', {noreach = true})
+    if not (ok and r1 == true and type(id) == 'string') then
+      mem.pp_why = 'runner refused: ' .. trunc(id or r1, 40)
+      K.log('warn', 'seal: refuge pre-plug not queued: %s', tostring(id or r1))
+      return M.PP.note(K, 'pre_cannot', mem.pp_why)
+    end
+    pp.id = id
+  end
+  st.pp, dirty = pp, true
+  mem.pp_why = nil
+  M.PP.reserve(K, pp)
+  local txt = string.format('%d wall%s round the stair foot %d,%d,%d, gap %d,%d,%d%s', #plan.ring, #plan.ring == 1 and '' or 's',
+                            plan.foot[1], plan.foot[2], plan.foot[3], plan.gap[1], plan.gap[2], plan.gap[3],
+                            pp.mat and '' or ' (no spare block for the last wall yet)')
+  M.PP.note(K, #plan.ring == 0 and 'pre_done' or 'pre_queued', txt, {n = #plan.ring, proj = pp.id ~= '' and pp.id or nil,
+                                                                      gap = {plan.gap[1], plan.gap[2], plan.gap[3]}})
+  K.log('info', 'seal: refuge pre-plug: %s', txt)
+  save(K)
+end
+-- every step: look after the ring (done? lost? still standing?), the reserved block, the last wall's time; queue the ring in PEACE
+function M.PP.step(K, t)
+  local c = plug_cfg(K)
+  if not (c.on and c.pre) then return end
+  local pp = st.pp
+  if st.plug and not st.plug.dn and not (mem.pp_w and t - mem.pp_w < 100) then   -- the last wall: its build time is learned
+    local ok, ps = K.call('runner', 'plug_proj', st.plug.id)
+    if ok and type(ps) == 'table' and ps.done then
+      st.plug.dn, dirty = t, true
+      M.PP.learn(#(st.plug.tiles or {}) <= 1 and 'one' or 'per', t - st.plug.t, math.max(1, #(st.plug.tiles or {})))
+    end
+  end
+  if pp and not pp.done and not (mem.pp_w and t - mem.pp_w < 100) then
+    mem.pp_w = t
+    if pp.id ~= '' then
+      local ok, ps = K.call('runner', 'plug_proj', pp.id)
+      if ok and ps == nil then
+        if K.mode() == 'PEACE' and not (pp.rq and t - pp.rq < c.retry) then          -- lost (a cancel, a reload): queued again
+          pp.rq, dirty = t, true
+          local okr, r1, id = K.call('runner', 'repair', pp.tiles, 'refuge pre-plug (project lost)', {noreach = true})
+          if okr and r1 == true and type(id) == 'string' then pp.id, pp.t = id, t end
+          M.PP.note(K, 'pre_lost', 'project lost, queued again')
+        end
+      elseif ok and type(ps) == 'table' and ps.done then
+        pp.done, dirty = t, true
+        M.PP.learn('per', t - pp.t, #pp.tiles)
+        M.PP.note(K, 'pre_done', string.format('the ring of %d walls stands after %d ticks', #pp.tiles, t - pp.t),
+                  {n = #pp.tiles, ticks = t - pp.t})
+      end
+    end
+  end
+  if K.mode() ~= 'PEACE' or st.pep or st.plug then return end
+  if mem.pp_t and t - mem.pp_t < c.pre_every then return end
+  mem.pp_t = t
+  if not pp then return M.PP.queue(K, t, c) end
+  if pp.done then
+    local stands = M.PP.ring_stands(K, pp)                    -- a wall taken down by hand: the ring is planned again
+    if stands == false then
+      M.PP.release(K, pp)
+      st.pp, dirty = nil, true
+      M.PP.note(K, 'pre_lost', 'the ring no longer shows only the gap open')
+      return M.PP.queue(K, t, c)
+    end
+    if not pp.mat or not df.item.find(pp.mat) then pp.mat = nil; M.PP.reserve(K, pp) end
+  end
+end
+-- the nearest building destroyer's distance to the stair head (-1 none listed)
+function M.PP.near(K, head)
+  local h = K.census and K.census.h
+  local near = -1
+  for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
+    if type(e) == 'table' and e.bd == 1 and int(e.x) and int(e.y) and int(e.z) then
+      local d = math.max(math.abs(e.x - head[1]), math.abs(e.y - head[2]), math.abs(e.z - head[3]))
+      if near < 0 or d < near then near = d end
+    end
+  end
+  return near
+end
+-- hostiles inside the refuge burrow that are past the ring: one on the stair column ABOVE the foot is in the shaft (the ring keeps it out)
+function M.PP.inside(K, refuge, t, col)
+  local n, at = hostile_in(K, refuge, t)
+  if n == 0 or not col then return n, at end
+  local h, b = K.census.h, burrow(refuge)
+  local listed, shaft = 0, 0
+  local first
+  for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
+    if b and type(e) == 'table' and int(e.x) and int(e.y) and int(e.z) and in_burrow(b, e.x, e.y, e.z) then
+      listed = listed + 1
+      if e.x == col[1] and e.y == col[2] and e.z > col[3] then shaft = shaft + 1
+      else first = first or {e.x, e.y, e.z} end
+    end
+  end
+  local left = n - shaft                                      -- the unlisted ones (sense's count) stay inside
+  return left, left > 0 and (first or at) or nil
 end
 -- someone stands on the refuge stair column or on a tile of the foot ring (citizens, residents: they may be on their way)
 local function plug_occupied(K, col, tiles)
@@ -3770,6 +4030,7 @@ local function plug_eval(K, args)
   if st.plug then return 'held', st.plug.id end
   if not (type(args) == 'table' and args.bd) then mem.plug_since, mem.plug_prog, mem.plug_nout = nil, nil, nil; return 'wait:no destroyers' end
   local t = now_t(K)
+  mem.pl_info = nil                                        -- BUG-652: what the decision saw, for the wait event
   -- BUG-595: since when the plug has been wanted (destroyers known), the clock of PLUG.out_wait
   mem.plug_since = mem.plug_since or t
   if st.plug_try and t - st.plug_try < c.retry then return 'wait:retry' end
@@ -3777,26 +4038,34 @@ local function plug_eval(K, args)
   if type(h) ~= 'table' or t - (int(h.tick) or -1e9) > 200 then return 'wait:no census' end
   local _, refuge = burrow_names(K)
   local rv, cl = M.refuge_open(K)
+  -- BUG-652 (Run 16d i4 Trumpetrealms y438): in a BREACH the hatch the destroyers broke is no reason to wait for a new one (it breaks again):
+  -- the walls are the answer there
+  if rv and K.mode() == 'BREACH' then
+    rv, cl = nil, {kind = 'broken hatch'}
+  end
   if rv then return 'wait:open way in' end                               -- an open stair needs a hatch first (BUG-336)
   if type(cl) ~= 'table' or cl.kind == 'wall' then
     return 'wait:' .. tostring(cl and cl.kind or 'no closer')
   end
-  if hostile_in(K, refuge, t) > 0 then return 'wait:hostile inside' end
   local col = refuge_column(K)
+  -- BUG-652: a hostile on the stair column above the foot is in the shaft, not past the ring (Trumpetrealms: dragons stood on 84,111,135 for
+  -- thousands of ticks, 'hostile inside' held the walls back while the ring would have kept them out)
+  if M.PP.inside(K, refuge, t, col) > 0 then return 'wait:hostile inside' end
   local foot = refuge_foot(K)
   if not (col and foot) then return 'wait:no foot' end
   if foot.bad then return 'wait:foot has a stair or ramp' end
   if #foot.tiles == 0 then return 'wait:foot closed already' end
   -- the last responsible moment: a hostile inside Kern+ (BREACH) or a destroyer near the stair head
   local late = K.mode() == 'BREACH' or (int(h.inside) or 0) > 0
-  local near = -1
   local hd = M.refuge_stair(K)
   local head = hd and hd.pos or {col[1], col[2], col[4]}
-  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
-    if type(e) == 'table' and e.bd == 1 and int(e.x) and int(e.y) and int(e.z) then
-      local d = math.max(math.abs(e.x - head[1]), math.abs(e.y - head[2]), math.abs(e.z - head[3]))
-      if near < 0 or d < near then near = d end
-    end
+  local near = M.PP.near(K, head)
+  -- BUG-651: the pre-plug stands (the ring but the gap): the last wall is ONE wall
+  local pre = false
+  local pp = st.pp
+  if pp and pp.done and #foot.tiles == 1 then
+    local gx, gy, gz = M.PP.tile(foot.tiles[1])
+    pre = gx == pp.gap[1] and gy == pp.gap[2] and gz == pp.gap[3]
   end
   -- BUG-589 (Run 16c i3 Sealcertain y422: the plug waited for a destroyer within 30 tiles of the stair head and for every citizen to be inside; the
   -- dragons were 61 tiles out when the alert sounded, the citizens streamed in for 2000 ticks, the plug came with the BREACH and a dragon on the
@@ -3832,7 +4101,20 @@ local function plug_eval(K, args)
   local waited = outside and t - (mem.plug_prog or mem.plug_since) >= c.out_wait + (c.out_each or 0) * nout
   local sight = bd_sight(K) > 0 or args.announced == true
   local early = false
-  if not late and not (near >= 0 and near <= c.near) then
+  local eta, need
+  mem.pl_info = {near = near >= 0 and near or nil, out = nout, pre = pre and 1 or nil}
+  if pre then
+    -- BUG-651: ordered at once when the destroyers are known; walkers outside hold it only while the destroyers' ETA leaves room for the
+    -- wall's measured build time plus the margin (an unknown ETA, announced only, holds nothing)
+    if not late and not (near >= 0 and near <= c.near) and not (sight and rb0) then return 'wait:destroyers far' end
+    need = M.PP.wall_ticks(K) + c.margin
+    eta = near >= 0 and near * c.eta_tile or nil
+    mem.pl_info.eta, mem.pl_info.need = eta, need
+    if not late and outside and eta and eta > need and not waited then
+      return string.format('wait:walkers outside (destroyers %d ticks out, the wall needs %d)', eta, need)
+    end
+    early = not late and not (near >= 0 and near <= c.near)
+  elseif not late and not (near >= 0 and near <= c.near) then
     if sight and rb0 and (not outside or waited) then early = true else return 'wait:destroyers far' end
   end
   local tk, cells = {}, {}
@@ -3844,23 +4126,41 @@ local function plug_eval(K, args)
       cells[#cells + 1] = {x, y, z, 'Cw'}
     end
   end
-  if plug_occupied(K, col, tk) then return 'wait:someone on the stair' end
+  -- BUG-652: a stream of citizens keeps someone on the stair for thousands of ticks (Trumpetrealms: 77 citizens, 17 to recall, the plug waited
+  -- for an empty stair while the dragons walked in). The pre-plug looks only at the gap tile; in a BREACH nobody holds the order; otherwise
+  -- the stair may be busy for PLUG.occ_max ticks, then the walls are ordered (a builder cannot build on a tile somebody stands on)
+  if pre then
+    if not late and plug_occupied(K, {-10, -10, -10, -11}, tk) then
+      mem.plug_occ = mem.plug_occ or t
+      if t - mem.plug_occ < c.occ_max then return 'wait:someone on the gap tile' end
+    else
+      mem.plug_occ = nil
+    end
+  elseif not late and plug_occupied(K, col, tk) then
+    mem.plug_occ = mem.plug_occ or t
+    if t - mem.plug_occ < c.occ_max then return 'wait:someone on the stair' end
+  else
+    mem.plug_occ = nil
+  end
   -- BUG-479 review: a citizen still on his way to the stair would be walled out. Before the BREACH, and while no
   -- destroyer is within PLUG.close tiles of the stair head, a citizen outside the refuge burrow holds the plug back
-  if not late and (near < 0 or near > c.close) and outside and not waited then return 'wait:citizens not inside' end
+  if not pre and not late and (near < 0 or near > c.close) and outside and not waited then return 'wait:citizens not inside' end
   st.plug_try, dirty = t, true
-  local ok, r1, id = K.call('runner', 'repair', cells, 'refuge plug against building destroyers', {noreach = true})
+  local ok, r1, id = K.call('runner', 'repair', cells, pre and 'refuge pre-plug: the last wall against building destroyers'
+                                                          or 'refuge plug against building destroyers', {noreach = true})
   if not (ok and r1 == true and type(id) == 'string') then
     K.log('warn', 'seal: refuge plug not queued: %s', tostring(id or r1))
     return 'wait:runner refused'
   end
-  st.plug = {t = t, id = id, tiles = cells}
+  st.plug = {t = t, id = id, tiles = cells, pre = pre or nil}
+  if pre then M.PP.release(K, pp) end                  -- the block kept back for this wall is free for the builders now
+  mem.plug_occ = nil
   local txt = string.format('refuge plug: %d wall%s round the stair foot %d,%d,%d (project %s) against building ' ..
                             'destroyers: the %s on the stair can be broken, a constructed wall cannot', #cells,
                             #cells == 1 and '' or 's', foot.pos[1], foot.pos[2], foot.pos[3], id, cl.kind)
   K.emit('REFUGE_PLUG', 'A', txt:sub(1, 200), {proj = id, n = #cells, pos = foot.pos, closer = cl.kind,
                                                near = near >= 0 and near or nil, breach = late and 1 or 0, early = early and 1 or nil,
-                                               out = nout > 0 and nout or nil})
+                                               out = nout > 0 and nout or nil, pre = pre and 1 or nil, eta = eta, wt = need})
   K.log('warn', 'seal: %s', txt:sub(1, 200))
   save(K)
   return 'queued', id
@@ -3878,6 +4178,12 @@ function M.plug(K, args)
   end
   local s, d = plug_eval(K, args)
   mem.plug_m = {t = t, s = s, d = d, bd = bd, an = an}
+  -- BUG-652: the reason the walls are not ordered is an event field (once per change), so the next run shows the cause
+  if bd and tostring(s):sub(1, 5) == 'wait:' and s ~= 'wait:no destroyers' then
+    M.PP.note(K, 'wait', tostring(s):sub(6), mem.pl_info)
+  elseif s == 'queued' or s == 'held' then
+    mem.pp_sig = nil
+  end
   return s, d
 end
 
@@ -3927,10 +4233,12 @@ local function plug_lift(K, t)
 end
 
 function M.plug_state(K)
-  if not st.plug then return nil end
+  if not st.plug and not st.pp then return nil end
   local tiles = {}                                -- BUG-479 review: runner's lockout scan leaves these walls alone
-  for _, c in ipairs(st.plug.tiles or {}) do tiles[#tiles + 1] = {c[1], c[2], c[3]} end
-  return {id = st.plug.id, n = #tiles, t = st.plug.t, tiles = tiles}
+  for _, c in ipairs(st.plug and st.plug.tiles or {}) do tiles[#tiles + 1] = {c[1], c[2], c[3]} end
+  for _, c in ipairs(st.pp and st.pp.tiles or {}) do tiles[#tiles + 1] = {c[1], c[2], c[3]} end   -- BUG-651: the pre-plug's ring too
+  return {id = st.plug and st.plug.id or '', n = #tiles, t = st.plug and st.plug.t or st.pp.t, tiles = tiles,
+          pre = st.pp and st.pp.id ~= '' and st.pp.id or nil, gap = st.pp and {st.pp.gap[1], st.pp.gap[2], st.pp.gap[3]} or nil}
 end
 
 -- BUG-336 review (runner's seal_stalled question): what else closes the refuge's stair when its hatch at `at` ({x, y, z},
@@ -4319,6 +4627,14 @@ local function publish(K)
     if ex and refuge_open(K, now_t(K)) then mem.pub.ref.op = 1 end   -- BUG-336: never the alert burrow in a fight
     -- BUG-337 review (c): building destroyers in sight and only a hatch or door closes the refuge: they break it
     if ex and not mem.pub.ref.op and bd_sight(K) > 0 and refuge_closure(K) == 'soft' then mem.pub.ref.sf = 1 end
+    -- BUG-653: the pre-plug (0 none, 1 building, 2 ready) and why not: a refuge without one is not trusted against building destroyers
+    if ex then
+      local pps, ppw = M.PP.status(K)
+      if pps then
+        mem.pub.ref.pp = pps
+        if ppw and pps < 2 then mem.pub.ref.ppw = trunc(ppw, 40) end
+      end
+    end
     M.hatch_ask(K, ex and M.refuge_stair(K) or nil)                 -- BUG-124: once, a real stair with a hidden head
     -- FR-69: its drink, the drink it wants (refuge_dry's rule) and its drink store's tiles (plan check/propose)
     if ex then
@@ -6210,13 +6526,23 @@ function M.init(K)
     end
   end
   if type(p.plug) == 'table' and int(p.plug.t) and type(p.plug.tiles) == 'table' then   -- BUG-479: the refuge plug stands
-    st.plug = {t = int(p.plug.t), id = tostring(p.plug.id or ''), q = int(p.plug.q), tiles = {}}
+    st.plug = {t = int(p.plug.t), id = tostring(p.plug.id or ''), q = int(p.plug.q), tiles = {}, dn = int(p.plug.dn),
+               pre = p.plug.pre == true or nil}
     for _, c in ipairs(p.plug.tiles) do
       if type(c) == 'table' and int(c[1]) and int(c[2]) and int(c[3]) then
         st.plug.tiles[#st.plug.tiles + 1] = {c[1], c[2], c[3], 'Cw'}
       end
     end
   end
+  if type(p.pp) == 'table' and int(p.pp.t) and type(p.pp.gap) == 'table' and int(p.pp.gap[1]) then   -- BUG-651: the pre-plug
+    local q = p.pp
+    st.pp = {t = int(q.t), id = tostring(q.id or ''), gap = {q.gap[1], q.gap[2], q.gap[3]}, tiles = {}, done = int(q.done),
+             mat = int(q.mat), md = int(q.md), rq = int(q.rq)}
+    for _, c in ipairs(type(q.tiles) == 'table' and q.tiles or {}) do
+      if type(c) == 'table' and int(c[1]) and int(c[2]) and int(c[3]) then st.pp.tiles[#st.pp.tiles + 1] = {c[1], c[2], c[3], 'Cw'} end
+    end
+  end
+  if type(p.wt) == 'table' then st.wt = {per = int(p.wt.per), one = int(p.wt.one)} end   -- BUG-651: measured wall build times
   if type(p.lostb) == 'table' and int(p.lostb.t) then      -- BUG-462: an outer or inner bridge destroyed in this episode
     st.lostb = {t = int(p.lostb.t), name = type(p.lostb.name) == 'string' and p.lostb.name:sub(1, 24) or ''}
   end
@@ -6341,6 +6667,7 @@ function M.step(K, budget, ctx)
     episode(K, t)
   end
   if st.plug then plug_watch(K, t); plug_lift(K, t) end         -- BUG-479
+  M.PP.step(K, t)                                               -- BUG-651: the pre-plug
   local r = run_jobs(K, t)
   if not next(mem.run) then publish(K) end
   if mem.pub then mem.pub.aud = M.audit_overdue(K) end           -- BUG-146: the data's age while it is overdue
