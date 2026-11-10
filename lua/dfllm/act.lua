@@ -482,24 +482,36 @@ function A.install_trade(I, gui, int)
       end
       return c, #subs, thaw
     end
+    -- BUG-644 (Run 16d i4 Trumpetrealms y432: only mugs and rings reached the depot beside a metal armor that cost more): the cap `max`
+    -- used to fill with the first types in the alphabet. Every free item / bin is read first, then the most valuable go to the depot
+    -- (a bin by the sum of its contents), the rest as before
+    local entries = {}
+    local function worth(it)
+      local okv, v = pcall(dfhack.items.getValue, it)
+      return okv and tonumber(v) or 0
+    end
     for _, tn in ipairs(type(a.types) == 'table' and a.types or {}) do
       local t = df.item_type[tn]
       local list = t and df.global.world.items.other[tn]
       for _, it in ipairs(list or {}) do
-        if n >= max then break end
         local fine, why = free_of(it, BRING_SKIP)
         -- BUG-609: a forbidden craft inside a bin is the bin's business (bin_of), not a loose forbidden item
         if not fine and why == 'forbid' and a.unforbid and it.flags.in_inventory then why = 'in_inventory' end
         if fine then
-          if it.flags.on_ground and dfhack.items.markForTrade(it, d) then n = n + 1 else skip(it.flags.on_ground and 'refused' or 'not_on_ground') end
+          if it.flags.on_ground then entries[#entries + 1] = {it = it, v = worth(it), cnt = 1}
+          else skip('not_on_ground') end
         elseif why == 'in_inventory' then
-          local c, cnt, thaw = bin_of(it)
+          local okc0, c0 = pcall(dfhack.items.getContainer, it)
+          local c, cnt, thaw
+          if okc0 and c0 and binned[c0.id] then c = c0 else c, cnt, thaw = bin_of(it) end      -- the rest of an accepted bin costs nothing
           if c and binned[c.id] then
             -- counted with its bin
           elseif c then
             binned[c.id] = true
-            for _, x in ipairs(thaw or {}) do x.flags.forbid = false; a.freed = (a.freed or 0) + 1 end
-            if dfhack.items.markForTrade(c, d) then n = n + cnt else skip('refused') end
+            local sum = 0
+            local okk, subs = pcall(dfhack.items.getContainedItems, c)
+            for _, x in ipairs(okk and type(subs) == 'table' and subs or {}) do sum = sum + worth(x) end
+            entries[#entries + 1] = {it = c, v = sum, cnt = cnt, thaw = thaw, bin = true}
           else
             skip(cnt)
           end
@@ -507,6 +519,16 @@ function A.install_trade(I, gui, int)
           skip(why)
         end
       end
+    end
+    for i, e in ipairs(entries) do e.o = i end
+    table.sort(entries, function(x, y) if x.v ~= y.v then return x.v > y.v end return x.o < y.o end)
+    for _, e in ipairs(entries) do
+      if n >= max then break end
+      if e.bin then
+        for _, x in ipairs(e.thaw or {}) do x.flags.forbid = false; a.freed = (a.freed or 0) + 1 end
+        if dfhack.items.markForTrade(e.it, d) then n = n + e.cnt else skip('refused') end
+      elseif dfhack.items.markForTrade(e.it, d) then n = n + 1
+      else skip('refused') end
     end
     a.skipped = sk
     return true, n

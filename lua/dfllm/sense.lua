@@ -1063,4 +1063,25 @@ function M.own_ids(K)
   return out
 end
 
+-- public (BUG-642, trade; Run 16c i3 Wallfree: a merchant ownerless on the map kept its caravan listed Leaving for years): the merchants of
+-- one civ (units flagged merchant with civ_id = the caravan's entity). {n = on the map, off = flagged but not active (fix/stuck-merchants
+-- dismisses these), ids and pos ('x,y,z') of the first three on the map}. Read-only, no census written
+function M.merchants(K, civ)
+  local r = {n = 0, off = 0, ids = {}, pos = {}}
+  for _, u in ipairs(df.global.world.units.active) do
+    if u.flags1.merchant and u.civ_id == civ then
+      if dfhack.units.isActive(u) then
+        r.n = r.n + 1
+        if #r.ids < 3 then
+          r.ids[#r.ids + 1] = u.id
+          r.pos[#r.pos + 1] = string.format('%d,%d,%d', u.pos.x, u.pos.y, u.pos.z)
+        end
+      else
+        r.off = r.off + 1
+      end
+    end
+  end
+  return r
+end
+
 return M

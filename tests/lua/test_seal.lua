@@ -188,6 +188,25 @@ T.test('entrances: a lowered O1 is the first leak (one route); raised: seal veri
   T.eq(W.hidden_wg, 0)
 end)
 
+-- BUG-642 (Run 16c i3 Wallfree: no caravan came for years and nothing said whether our own walls kept the wagons out): seal.depot_access
+-- reads the last reach audit: does a built depot share a walk group with a map-edge tile?
+T.test('BUG-642: depot_access: a depot in the field reaches the map edge, one behind a raised O1 does not', function()
+  for _, case in ipairs({{x = 50, y = 25, ok = true, name = 'field'}, {x = 30, y = 22, ok = false, name = 'hall'}}) do
+    local W = gatehouse{raised = true}
+    SW.draw(W, G, {'D'}, case.x, case.y)
+    SW.regroup(W)
+    W.run(400, {skip = 9})
+    local okc, a = W.K.call('seal', 'depot_access')
+    T.ok(okc and a.known, case.name .. ': ' .. T.show(a))
+    T.eq({a.depots, a.ok}, {1, case.ok}, case.name .. ': ' .. T.show(a))
+    T.eq(a.cut, case.ok and 0 or 1)
+  end
+  local W = SW.new{}
+  W.load(seal())
+  local okc, a = W.K.call('seal', 'depot_access')
+  T.eq({okc, a.known}, {true, false}, 'no audit yet')
+end)
+
 T.test('after a lever pull: sealed -> SEAL (B); a bypass door with O1 up -> SEAL_LEAK (A) naming the door', function()
   local W = gatehouse{raised = true}
   W.run(400, {skip = 9})

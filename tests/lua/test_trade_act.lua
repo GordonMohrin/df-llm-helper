@@ -501,6 +501,44 @@ T.test('BUG-561: bring marks the bin of contained sale items once, skips mixed /
   T.eq(a.skipped, {bin_mixed = 1, bin_forbid = 1, in_inventory = 1, forbid = 1}, 'the reasons')
 end)
 
+-- BUG-644 (Run 16d i4 Trumpetrealms y432: only mugs and rings reached the depot beside a metal armor that cost more): the cap `max` filled with
+-- the first types of the alphabet. The most valuable items (a bin by the sum of its contents) go first, whatever their type
+T.test('BUG-644: bring with a cap sends the most valuable items first, a bin by the value of its contents', function()
+  local E = env()
+  df.item_type = {AMULET = 1, GOBLET = 2, RING = 3, [1] = 'AMULET', [2] = 'GOBLET', [3] = 'RING'}
+  local vals = {}
+  local function item(id, ty, v, flags)
+    local it = {id = id, flags = flags or {on_ground = true}}
+    function it.getType() return df.item_type[ty] end
+    vals[it] = v
+    return it
+  end
+  local a1, a2 = item(1, 'AMULET', 10), item(2, 'AMULET', 12)
+  local g1 = item(3, 'GOBLET', 400)
+  local r1 = item(4, 'RING', 90)
+  local c1, c2 = item(5, 'RING', 1, {in_inventory = true}), item(6, 'RING', 1, {in_inventory = true})
+  local bin = item(7, 'RING', 5)
+  bin._subs = {c1, c2}
+  c1._c, c2._c = bin, bin
+  vals[c1], vals[c2] = 150, 200
+  df.global.world = {items = {other = {AMULET = {a1, a2}, GOBLET = {g1}, RING = {r1, c1, c2}}}}
+  local marked = {}
+  dfhack.items = dfhack.items or {}
+  dfhack.items.markForTrade = function(it, d) marked[#marked + 1] = it.id; return true end
+  dfhack.items.getContainer = function(it) return it._c end
+  dfhack.items.getContainedItems = function(c) return c._subs or {} end
+  dfhack.items.getValue = function(it) return vals[it] or 0 end
+  local ok, n = E.I.trade('bring', {depot = 50, types = {'AMULET', 'GOBLET', 'RING'}, max = 4})
+  T.ok(ok)
+  table.sort(marked)
+  T.eq(marked, {3, 4, 7}, 'goblet 400, the bin 350 (as one entry of 2 items), the ring 90 - not the amulets of the first type')
+  T.eq(n, 4)
+  marked = {}
+  ok, n = E.I.trade('bring', {depot = 50, types = {'AMULET', 'GOBLET', 'RING'}, max = 60})
+  table.sort(marked)
+  T.eq(marked, {1, 2, 3, 4, 7}, 'without the cap everything goes as before')
+end)
+
 -- BUG-609 (Run 16a i1 Basementflew: bin_forbid 136 on every haul, 0 sent): with a.unforbid a forbidden bin (or craft in a free bin) is
 -- unforbidden and marked; a loose forbidden craft, a mixed bin and the old call (no a.unforbid) stay as they were
 T.test('BUG-609: bring with unforbid frees a forbidden bin of crafts before marking it, never a loose forbidden craft or a mixed bin', function()

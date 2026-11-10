@@ -1186,7 +1186,9 @@ STATE = Obj(
                          # what holds it or how the last one ended
                          "rot": Obj(opt={k: _ROT for k in ("A", "B", "C")})}),
          "trade": Obj(req={"caravan": FLAG, "ratio": NAT, "done": NAT},
-                      opt={"nb": Arr(Str(maxbytes=24), hi=5)}),     # BUG-534: wants the merchants never had (trade cannot supply them)
+                      # BUG-534: wants the merchants never had (trade cannot supply them); BUG-642: stale = caravans listed Leaving
+                      # past trade.LEAVE_STALE (their visit is over, `caravan` does not count them)
+                      opt={"nb": Arr(Str(maxbytes=24), hi=5), "stale": NAT}),
          # FR-51 clock governor (arbiter): the vanilla FPS cap it drives, the captured original, timestream fps
          "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),
          # FR-53 interrupt channel (reflex): DEFCON 1 (worst) .. 5, unacked interrupts, last/acked event n

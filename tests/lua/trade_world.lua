@@ -12,7 +12,7 @@ F.REPO = (arg and arg[0] or ''):match('^(.*)/tests/lua/[^/]+$') or '.'
 F.ITEM_TYPES = {'BAR', 'SMALLGEM', 'BLOCKS', 'ROUGH', 'BOULDER', 'WOOD', 'DOOR', 'BED', 'CHAIR', 'CAGE', 'BARREL',
   'BIN', 'BOX', 'WEAPON', 'ARMOR', 'SHOES', 'SHIELD', 'HELM', 'GLOVES', 'PANTS', 'FIGURINE', 'AMULET', 'SCEPTER',
   'AMMO', 'CROWN', 'RING', 'EARRING', 'BRACELET', 'ANVIL', 'MEAT', 'FISH', 'SEEDS', 'PLANT', 'SKIN_TANNED', 'THREAD',
-  'CLOTH', 'TOTEM', 'DRINK', 'CHEESE', 'FOOD', 'TOOL', 'EGG', 'GOBLET', 'INSTRUMENT', 'TOY', 'SPLINT', 'LIQUID_MISC'}
+  'CLOTH', 'TOTEM', 'DRINK', 'CHEESE', 'FOOD', 'TOOL', 'EGG', 'GOBLET', 'INSTRUMENT', 'TOY', 'SPLINT', 'LIQUID_MISC', 'BACKPACK', 'FLASK', 'QUIVER', 'CRUTCH'}
 -- df.builtin_mats in DF's order (0 = INORGANIC); other materials get fake codes from 100
 F.BUILTIN = {'INORGANIC', 'AMBER', 'CORAL', 'GLASS_GREEN', 'GLASS_CLEAR', 'GLASS_CRYSTAL', 'WATER', 'COAL', 'POTASH',
   'ASH', 'PEARLASH', 'LYE', 'MUD', 'VOMIT', 'SALT', 'FILTH_B', 'FILTH_Y', 'UNKNOWN_SUBSTANCE', 'GRIME'}

@@ -5222,6 +5222,24 @@ function M.groups(K)
   return r
 end
 
+-- public (BUG-642, trade; Run 16c i3 Wallfree y376-y383: no caravan came and nothing said whether our own walls kept the wagons out):
+-- do the built trade depots and a map-edge tile share a walk group in the last audit (the wagons' way in)? Read-only, from the audit
+-- numbers (R.cls.depot / R.cls.exit per group). {known = false, why} before the first audit or without an edge sample; else
+-- {known = true, depots = n built depots, ok = a depot shares a group with the map edge, cut = depots on a group without an edge
+-- tile, main = a depot stands on the citizens' main group, age = ticks since the audit}.
+function M.depot_access(K)
+  local R = mem and mem.reach
+  if not R then return {known = false, why = 'no reach audit yet'} end
+  local D, E = R.cls.depot, R.cls.exit
+  if not R.edge_known then return {known = false, why = 'no map edge sampled'} end
+  local ok, cut = false, 0
+  for g, n in pairs(D.by) do
+    if (E.by[g] or 0) > 0 then ok = true else cut = cut + n end
+  end
+  return {known = true, depots = D.n, ok = ok, cut = cut, main = R.main ~= nil and (D.by[R.main] or 0) > 0,
+          age = math.max(0, now_t(K) - (R.tick or 0))}
+end
+
 -- the revealed walkable tiles around a footprint on its level (its ring), as keys
 local function ring_keys(fp)
   local r = {}
