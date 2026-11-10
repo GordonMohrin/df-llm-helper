@@ -4343,6 +4343,9 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
                 r = reqs.setdefault("workshops", {"tpl": "workshops", "types": [], "why": str(d.get("why") or ""),
                                                   "tick": tick})
                 r["types"] += [t for t in d["types"] if isinstance(t, str) and t not in r["types"]]
+                if d.get("why") == "cut":              # BUG-654: the manifest lists these (they stand, cut off): a new one is asked for
+                    r.setdefault("cut", [])
+                    r["cut"] += [t for t in d["types"] if isinstance(t, str) and t not in r["cut"]]
     done = done_projects(save_dir)
     rows = {r[0]: str(r[3] if len(r) > 3 else "") for r in (state or {}).get("proj") or []
             if isinstance(r, list) and r and isinstance(r[0], str)}
@@ -4359,10 +4362,12 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
         if r["tick"] <= done_t.get(tpl, -1) or tpl in under:
             continue
         if tpl == "workshops":
+            cut = [t for t in r.pop("cut", [])]
             try:
                 r["types"] = _cmd.workshops_missing(save_dir, r["types"])
             except Exception:                           # noqa: BLE001
                 r["types"] = []
+            r["types"] += [t for t in cut if t not in r["types"]]      # BUG-654: cut off = standing in the manifest, no use to the citizens
             if not r["types"]:
                 continue
         out.append({k: v for k, v in r.items() if k != "tick"})
