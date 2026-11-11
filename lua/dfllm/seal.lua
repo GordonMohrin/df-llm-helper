@@ -1474,7 +1474,7 @@ function M.cut_confirm(K, R, t, cls, cits, main, by_cls, prev)
   local has, off, trip = {}, {}, {}
   for g in pairs(by_cls[cls]) do has[g] = true end
   -- BUG-751 (Run 16c i3 Doorwings y388-y391: a HuntVermin job kept bookkeeper 26276 'on a trip' on a wall top for days): a trip excuses a
-  -- citizen for CFG.trip_max ticks; one who is still off the group after that is cut off, whatever his job
+  -- citizen without limit only while his group has no known drop to a group with the class (see below)
   local seen_trip = {}
   mem.tripped = mem.tripped or {}
   for _, c in ipairs(cits) do
@@ -1486,7 +1486,13 @@ function M.cut_confirm(K, R, t, cls, cits, main, by_cls, prev)
         if not tr or t - tr.last > 5 * DAY then tr = {since = t}; mem.tripped[c.id] = tr end   -- a stale record is a new trip
         tr.last = t
       end
-      if j and t - mem.tripped[c.id].since < CFG.trip_max then trip[#trip + 1] = c.id .. ':' .. j else off[#off + 1] = c end
+      -- a trip longer than CFG.trip_max still excuses him unless his group is a pocket over a drop to a group that has the class
+      -- (wall top, cliff top): that one has no way back, whatever the job
+      local stuck = false
+      if j and t - mem.tripped[c.id].since >= CFG.trip_max then
+        stuck = M.edge_blame(c.g, has, {c.x, c.y, c.z}, true) ~= nil
+      end
+      if j and not stuck then trip[#trip + 1] = c.id .. ':' .. j else off[#off + 1] = c end
     end
   end
   for id in pairs(mem.tripped) do if not seen_trip[id] then mem.tripped[id] = nil end end
