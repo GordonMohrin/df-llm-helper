@@ -79,6 +79,10 @@ UNREACHABLE_RE = re.compile(r"could\s*not\s*connect|cannot\s*connect|can't\s*con
                             r"failed\s*to\s*connect|connection\s*(?:refused|reset|failed)|timeoutexpired|"
                             r"filenotfounderror|^missing ", re.I | re.M)   # dfhack-run cannot reach DFHack (yet)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# BUG-700: the DF start must outlive the caller (a `timeout 200 python -m dfpilot supervise --once` from Git Bash
+# killed the job's children); DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, and BREAKAWAY where the job allows it
+DETACHED = (getattr(subprocess, "DETACHED_PROCESS", 0x8) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200))
+BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
 
 
 # ---------------------------------------------------------------- environment
@@ -176,7 +180,7 @@ class WinOS:
 
     def start_df(self) -> tuple[bool, str]:
         try:
-            os.startfile(STEAM_URL)      # Steam is logged in; no password involved
+            detached_start(STEAM_URL)    # Steam is logged in; no password involved
         except OSError as e:
             return False, f"{type(e).__name__}: {e}"
         return True, STEAM_URL
@@ -274,6 +278,52 @@ def _win() -> _Win32:
     if _WIN is None:
         _WIN = _Win32()
     return _WIN
+
+
+def detached_start(url: str, popen: Callable = subprocess.Popen) -> Any:
+    """BUG-700: open a Steam URL through `cmd /c start` as a process detached from the caller: own process group,
+    no console, no inherited handles, out of the caller's job object when the job allows breakaway (else the same
+    start without that flag; a job that forbids it makes Popen raise PermissionError)."""
+    cmd = ["cmd.exe", "/c", "start", "", url]
+    kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    try:
+        return popen(cmd, creationflags=DETACHED | BREAKAWAY, **kw)
+    except OSError:
+        return popen(cmd, creationflags=DETACHED, **kw)
+
+
+def pid_alive(pid: int) -> bool:
+    """BUG-701: is the process running (Windows: exit code STILL_ACTIVE; elsewhere: signal 0)."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            w = _win()
+            h = w.k32.OpenProcess(0x1000, False, pid)
+            if not h:
+                return w.c.get_last_error() == 5        # ACCESS_DENIED: exists, not ours
+            try:
+                code = w.w.DWORD()
+                w.k32.GetExitCodeProcess.argtypes = [w.w.HANDLE, w.c.POINTER(w.w.DWORD)]
+                return bool(w.k32.GetExitCodeProcess(h, w.c.byref(code))) and code.value == 259
+            finally:
+                w.k32.CloseHandle(h)
+        except Exception:
+            return True                                  # cannot tell: keep the lock
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def lock_pid(p: Path) -> int | None:
+    try:
+        return int(p.read_text(encoding="ascii", errors="replace").split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def proc_start(pid: int) -> float | None:
@@ -1330,7 +1380,10 @@ def _run_lock(env: Env, now: float) -> Path | None:
             return p
         except FileExistsError:
             mt = _mtime(p)
-            if mt is not None and abs(now - mt) < LOCK_STALE_S:
+            pid = lock_pid(p)
+            # BUG-701: a lock whose owner is gone is stale at once (an hour of 'a restart chain is running')
+            dead = pid is not None and pid != os.getpid() and not pid_alive(pid)
+            if mt is not None and abs(now - mt) < LOCK_STALE_S and not dead:
                 return None
             try:
                 p.unlink()

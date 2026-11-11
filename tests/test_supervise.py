@@ -833,10 +833,59 @@ def test_tail_lines_drops_torn_line(tmp_path):
 
 def test_run_lock(W):
     live(W)
-    put(W.env.runtime / "supervise.lock", "1 2", W.clock() - 10)
+    put(W.env.runtime / "supervise.lock", f"{os.getpid()} 2", W.clock() - 10)
     assert "another supervise run" in run(W)["why"]
     os.utime(W.env.runtime / "supervise.lock", (W.clock() - 4000, W.clock() - 4000))
     assert run(W)["live"]
+
+
+def test_run_lock_dead_pid_is_stale_at_once(W, monkeypatch):
+    """BUG-701: a fresh lock whose pid is not running does not block; a live one does; no pid keeps the age rule."""
+    live(W)
+    lock = W.env.runtime / "supervise.lock"
+    monkeypatch.setattr(sv, "pid_alive", lambda pid: False)
+    put(lock, "40628 1794348642", W.clock() - 10)
+    assert run(W)["live"]
+    put(lock, "40628 1794348642", W.clock() - 10)
+    monkeypatch.setattr(sv, "pid_alive", lambda pid: True)
+    assert "another supervise run" in run(W)["why"]
+    put(lock, "garbage", W.clock() - 10)
+    monkeypatch.setattr(sv, "pid_alive", lambda pid: False)
+    assert "another supervise run" in run(W)["why"]
+
+
+def test_pid_alive_real_processes():
+    assert sv.pid_alive(os.getpid())
+    assert not sv.pid_alive(0) and not sv.pid_alive(-5)
+    p = sv.subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    import time
+    time.sleep(0.2)
+    assert not sv.pid_alive(p.pid)
+
+
+def test_detached_start_flags():
+    """BUG-700: the Steam start is detached (flags only; no real process is started)."""
+    calls = []
+
+    def popen(cmd, **kw):
+        calls.append((cmd, kw))
+        if len(calls) == 1 and kw["creationflags"] & sv.BREAKAWAY:
+            raise PermissionError("job forbids breakaway")
+        return "proc"
+
+    assert sv.detached_start("steam://x", popen=popen) == "proc"
+    (c1, k1), (c2, k2) = calls
+    assert c1[:3] == ["cmd.exe", "/c", "start"] and c1[-1] == "steam://x"
+    assert k1["creationflags"] == sv.DETACHED | sv.BREAKAWAY and k2["creationflags"] == sv.DETACHED
+    assert sv.DETACHED & 0x8 and sv.DETACHED & 0x200 and sv.BREAKAWAY == 0x01000000
+    assert k2["close_fds"] is True and k2["stdin"] is sv.subprocess.DEVNULL and k2["stdout"] is sv.subprocess.DEVNULL
+
+
+def test_winos_start_df_uses_detached(monkeypatch):
+    seen = []
+    monkeypatch.setattr(sv, "detached_start", lambda url: seen.append(url))
+    assert sv.WinOS(Path("."), Path(".")).start_df() == (True, sv.STEAM_URL) and seen == [sv.STEAM_URL]
 
 
 def test_main_once_json_and_reset(W, capsys):
