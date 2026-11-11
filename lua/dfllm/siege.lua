@@ -558,7 +558,8 @@ end
 -- RESCUE_MAX: the doors stay open while one still starves) or abort (a threat) gate.release hands each bridge back to the
 -- mode default instead of a raise. The rescue record carries pz = true. A threat mode keeps the BUG-028 rules.
 function M.calm(K, a)
-  if K.mode() ~= 'PEACE' or not a or (a.vis or 0) > 0 or (a.inside or 0) > 0 then return false end
+  -- BUG-702: a cleared plant eater in sight (census.h.vpp) is no hostile: it kept B1 raised between 25-31 citizens and their food and drink
+  if K.mode() ~= 'PEACE' or not a or (a.vis or 0) - (a.vpp or 0) > 0 or (a.inside or 0) > 0 then return false end
   local ok, why = K.call('reflex', 'holding', 'gates')
   return not (ok and type(why) == 'string' and why ~= '')
 end

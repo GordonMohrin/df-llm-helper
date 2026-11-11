@@ -917,7 +917,7 @@ local function breach_safe(K, bs)
         local p = r.pos[lid]
         if r.linked[lid] and type(p) == 'table' then
           for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
-            if math.max(math.abs(e.x - p[1]), math.abs(e.y - p[2]), math.abs(e.z - p[3])) <= M.LEVER_SAFE then
+            if e.pp ~= 1 and math.max(math.abs(e.x - p[1]), math.abs(e.y - p[2]), math.abs(e.z - p[3])) <= M.LEVER_SAFE then
               return false
             end
           end
@@ -1477,11 +1477,13 @@ end
 local function list_dist(h, f)
   local best = -1
   for _, e in ipairs(type(h) == 'table' and h.list or {}) do
-    local dx = e.x < f[1] and f[1] - e.x or (e.x > f[4] and e.x - f[4] or 0)
-    local dy = e.y < f[2] and f[2] - e.y or (e.y > f[5] and e.y - f[5] or 0)
-    local dz = e.z < f[3] and f[3] - e.z or (e.z > f[6] and e.z - f[6] or 0)
-    local d = math.max(dx, dy, dz)
-    if best < 0 or d < best then best = d end
+    if e.pp ~= 1 then                            -- BUG-702: a cleared plant eater is no hostile of a bridge
+      local dx = e.x < f[1] and f[1] - e.x or (e.x > f[4] and e.x - f[4] or 0)
+      local dy = e.y < f[2] and f[2] - e.y or (e.y > f[5] and e.y - f[5] or 0)
+      local dz = e.z < f[3] and f[3] - e.z or (e.z > f[6] and e.z - f[6] or 0)
+      local d = math.max(dx, dy, dz)
+      if best < 0 or d < best then best = d end
+    end
   end
   return best
 end
@@ -2680,7 +2682,7 @@ end
 -- is visible or the census is stale. Closes WIN_CLOSE ticks after its last reason.
 local function window_open(K, name, now)
   local h = K.census.h
-  if not (type(h) == 'table' and (h.vis or 0) == 0 and now - (h.tick or -1e9) <= 200) then return false end
+  if not (type(h) == 'table' and (h.vis or 0) - (h.vpp or 0) <= 0 and now - (h.tick or -1e9) <= 200) then return false end   -- BUG-702
   if now < ((st.winb or {})[name] or -1) then return true end
   local v = K.view()
   local tr = type(v) == 'table' and v.trade

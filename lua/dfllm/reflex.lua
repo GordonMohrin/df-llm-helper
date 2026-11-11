@@ -2502,6 +2502,18 @@ end
 -- public (seal.groups): the ids cleared as passive / unreachable / by the operator ({[id] = true}, read only)
 function M.pv_ids(K) return rt and rt.pvset or {} end
 
+-- public (sense, BUG-702): the cleared plant eaters and operator releases, {[id] = true}: the units a bridge, the refuge and a rescue
+-- take for no hostile. An unreachable hostile (kind 'u') is not among them: it may still stand at a raised bridge
+function M.pv_plant(K)
+  local r = {}
+  if not (rt and st and st.pv) then return r end
+  for id in pairs(rt.pvset or {}) do
+    local rec = st.pv[tostring(id)]
+    if type(rec) == 'table' and rec.k ~= 'u' then r[id] = true end
+  end
+  return r
+end
+
 -- put the units of `list` ({e, k, t}) on the cleared list as passive (k 'p': also inside Kern+), unreachable ('u') or released by the
 -- operator ('o': inside too); HOSTILE_RELEASED (B) says it once per call
 local function pv_mark(K, now, list, who)
