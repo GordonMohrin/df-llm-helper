@@ -790,6 +790,34 @@ def aq_shafts(save_dir: Path, applied: set | None = None) -> dict:
     return {"placed": placed, "live": live, "bottom": min(bottoms) if bottoms else None}
 
 
+def aq_done_shaft(save_dir: Path) -> dict | None:
+    """BUG-724: the finished aqshaft that reached the lowest level: {anchor: [x, y, z], bottom} (AQ_PASS_DONE bot, else top - depth + 1;
+    cancelled shafts have no bp file). None without one. Where the shaft stands is where a core under the aquifer is wanted."""
+    done = done_projects(save_dir)
+    passed: dict[str, int] = {}
+    for e in files.iter_events_rev(save_dir):
+        d = e.get("d") if isinstance(e.get("d"), dict) else {}
+        if e.get("type") == "AQ_PASS_DONE" and isinstance(d.get("proj"), str) and _nat(d.get("bot")) and d["proj"] not in passed:
+            passed[d["proj"]] = d["bot"]
+    best: dict | None = None
+    for p in bp_files(save_dir):
+        d = files.read_json(p)
+        if not (isinstance(d, dict) and d.get("tpl") == AQSHAFT) or p.stem not in done:
+            continue
+        prm, anc = d.get("params") or {}, d.get("anchor")
+        if not (isinstance(anc, list) and len(anc) == 3 and all(isinstance(v, int) for v in anc)):
+            continue
+        if p.stem in passed:
+            bot = passed[p.stem]
+        elif _nat(prm.get("depth")):
+            bot = (prm["top"] if isinstance(prm.get("top"), int) else anc[2]) - prm["depth"] + 1
+        else:
+            continue
+        if best is None or bot < best["bottom"]:
+            best = {"anchor": list(anc), "bottom": bot}
+    return best
+
+
 def core_stands(save_dir: Path) -> bool:
     """BUG-489: a fortcore stage 1 (or an unstaged one) is finished (PROJECT_DONE): the core is dug. False: nothing was ever dug of it
     (parked on a breach, cancelled): its stage 2 / 3 builds and the refuge seal are phantoms."""
@@ -904,6 +932,72 @@ def aquifer_late_swap(builds: list[dict], late: dict) -> str:
                if later else "") + drop_note)
 
 
+AQ_CORE_NEAR = 24                                         # BUG-724: the core is ranked within this many tiles of the finished shaft first
+
+
+def _pass_sites(save_dir: Path, prm: dict, shaft: dict | None, n: int = 5) -> list[dict]:
+    """BUG-724 (Run 16c i3 Doorwings: the shaft stood at 94,98 and the core was ranked 30 tiles away): the free fortcore sites for `prm`;
+    with a finished shaft the ones within AQ_CORE_NEAR tiles of it first, else (none there) the plain ranking."""
+    if shaft:
+        try:
+            free, _, _ = free_sites(save_dir, "fortcore", prm, n=n, where={"near": list(shaft["anchor"]), "within": AQ_CORE_NEAR})
+        except BpError:
+            free = []
+        if free:
+            return free
+    free, _, _ = free_sites(save_dir, "fortcore", prm, n=n)
+    return free
+
+
+def _route_unknown(save_dir: Path, out: dict, snap: dict, sm, man: dict | None, shaft: dict | None) -> dict:
+    """BUG-724 (Run 16d i4 Pagedsculpture y372/y373: no aquifer level known, `plan propose` said 'no aquifer level is known: nothing to
+    pass' and left the fortcore out for good, also after an aqshaft was done and found none): the route when nothing is known wet.
+      - a shaft is under way: wait (nothing is drafted, the core follows its end),
+      - a finished shaft that found no aquifer: the core is ranked with p.aquifer=pass at the shallowest depth whose deepest level
+        the shaft reached (the runner digs it in observe mode and only once the shaft reached that level), near the shaft,
+      - no shaft: the probe column (BUG-441 core_probe_args) first, then the core with p.aquifer=pass behind it.
+    out.ok False with the reason when none of that is left."""
+    shafts = aq_shafts(save_dir)
+    if shafts["placed"] and shafts["live"]:
+        out["why"] = "an aqshaft is under way: the core is drafted when it is done (no aquifer level is known yet)"
+        return out
+    occ = _cmd.occupancy(save_dir)
+    col = None
+    if shaft is None:
+        probe, why = core_probe_args(save_dir, snap)
+        if probe is None:
+            out["why"] = f"no aquifer level is known and no probe shaft column: {_cut(why)}"
+            return out
+        col = {**probe["p"], "why": why}
+    notes: list[str] = []
+    for depth in (3, 2, 1):
+        prm = {"stage": 1, "aquifer": "pass", "depth": depth}
+        try:
+            free = _pass_sites(save_dir, prm, shaft)
+        except BpUnavailable:
+            break
+        except BpError as e:
+            notes.append(f"depth {depth}: {_cut(str(e).split(': ', 1)[-1])}")
+            continue
+        for site in free:
+            if shaft and core_deepest(site["anchor"], {"depth": depth}) < shaft["bottom"]:
+                notes.append(f"{site['anchor']}: the core reaches z{core_deepest(site['anchor'], {'depth': depth})}, the shaft ended at "
+                             f"z{shaft['bottom']}")
+                continue
+            if col:
+                clash = _shaft_clash(site, depth, col, occ)
+                if clash:
+                    notes.append(f"{site['anchor']}: shaft {col['x']},{col['y']} clashes with {clash}")
+                    continue
+            out.update(ok=True, depth=depth, col=col, shaft=shaft, unknown=True,
+                       site={"anchor": list(site["anchor"]), "rot": site.get("rot", 0),
+                             "label": _cmd.anchor_label(site["anchor"], site.get("rot", 0))})
+            return out
+    out["why"] = ("no aquifer level is known; " + (f"the finished aqshaft ended at z{shaft['bottom']}: " if shaft else "")
+                  + "no fortcore site fits behind it (" + _cut("; ".join(notes[:3]) or "no site ranks") + ")")
+    return out
+
+
 def aquifer_route(save_dir: Path) -> dict:
     """BUG-412 (Gordon 04.11.2026: the fort belongs under the aquifer): the way through it for a core that would cut an aquifer
     level: {ok, why, depth (the fortcore's p.depth), site: {anchor, rot, label}, col: {x, y, top, depth, why}, aquifers}. The
@@ -924,10 +1018,11 @@ def aquifer_route(save_dir: Path) -> dict:
         return out
     out["aquifers"] = aq
     out["heavy"] = heavy_levels(man)
+    shaft = aq_done_shaft(save_dir)
     if not aq:
-        out["why"] = "no aquifer level is known: nothing to pass (bp sites fortcore says why no core ranks)"
-        return out
-    # the shallowest depth that can clear the aquifer: the core level (anchor z - 2 - depth) two levels under its shallowest level
+        return _route_unknown(save_dir, out, snap, sm, man, shaft)
+    covered = bool(shaft) and shaft["bottom"] < min(aq)         # BUG-724: a finished shaft that passed every known level
+    # the shallowest depth that can clear the aquifer: the core level zc = anchor - 2 - depth two levels under its shallowest level
     try:
         base, _, _ = free_sites(save_dir, "fortcore", {"stage": 1}, n=3)
     except (BpError, BpUnavailable):
@@ -938,23 +1033,26 @@ def aquifer_route(save_dir: Path) -> dict:
     for depth in [d for d in AQ_DEPTHS if d >= d0]:
         prm = {"stage": 1, "aquifer": "pass", "depth": depth}
         try:
-            free, _, _ = free_sites(save_dir, "fortcore", prm, n=5)
+            free = _pass_sites(save_dir, prm, shaft if covered else None)
         except BpUnavailable:
             break
         except BpError as e:
             notes.append(f"depth {depth}: {_cut(str(e).split(': ', 1)[-1])}")
             continue
         for site in free:
+            col = None
             try:
                 col = sm.core_shaft(snap, man, site["anchor"], site.get("rot", 0), depth)
             except ValueError as e:
-                notes.append(f"{site['anchor']}: {_cut(str(e))}")
-                continue
-            clash = _shaft_clash(site, depth, col, occ)
-            if clash:
-                notes.append(f"{site['anchor']}: shaft {col['x']},{col['y']} clashes with {clash}")
-                continue
-            out.update(ok=True, depth=depth, col=col,
+                if not covered:
+                    notes.append(f"{site['anchor']}: {_cut(str(e))}")
+                    continue
+            if col is not None and not covered:
+                clash = _shaft_clash(site, depth, col, occ)
+                if clash:
+                    notes.append(f"{site['anchor']}: shaft {col['x']},{col['y']} clashes with {clash}")
+                    continue
+            out.update(ok=True, depth=depth, col=col, shaft=shaft if covered else None,
                        site={"anchor": list(site["anchor"]), "rot": site.get("rot", 0),
                              "label": _cmd.anchor_label(site["anchor"], site.get("rot", 0))})
             return out
@@ -992,7 +1090,7 @@ def aquifer_core_swap(builds: list[dict], af: dict, have_shaft: bool) -> tuple[l
         return out, (f"; BUG-412: the core would cut an aquifer and no safe shaft is possible ({_cut(af.get('why') or '?')}): "
                      f"{len(builds) - len(out)} fortcore build(s) left out, nothing is dug blind; see `dfllm bp sites fortcore "
                      "--fresh` and `plan check`")
-    site, col = af["site"], af["col"]
+    site, col = af["site"], af.get("col")
     out = copy.deepcopy(builds)
     for b in out:
         if b["tpl"] == "fortcore":
@@ -1003,7 +1101,7 @@ def aquifer_core_swap(builds: list[dict], af: dict, have_shaft: bool) -> tuple[l
                 b["site"] = site["label"]
             b["p"] = p
     first: list[dict] = []
-    if not have_shaft and not any(b["tpl"] == AQSHAFT for b in out):
+    if not have_shaft and col and not any(b["tpl"] == AQSHAFT for b in out):
         first.append({"tpl": AQSHAFT, "site": "S1",
                       "p": {"x": col["x"], "y": col["y"], "top": col["top"], "depth": col["depth"],
                             "dry_levels": AQSHAFT_DRY}})
@@ -1011,14 +1109,25 @@ def aquifer_core_swap(builds: list[dict], af: dict, have_shaft: bool) -> tuple[l
     while k < len(out) and out[k]["tpl"] == SEAL:        # a seal runs first anyway
         k += 1
     levels = ", ".join(f"z{z}" for z in sorted(af.get("aquifers", []), reverse=True))
-    how = ("by the shaft placed already" if not first else f"by aqshaft@{col['x']},{col['y']} z{col['top']}")
     hv = af.get("heavy") or []
     ring = (f"; BUG-414: heavy aquifer recorded at {', '.join(f'z{z}' for z in hv)}: the shaft walls the 4 side tiles of those "
             "levels (and the ones next to them) from above before it digs them (channel, constructed wall; AQ_HEAVY plugs it if "
             "water climbs or a wall is not built in 2 days)") if hv else ""
-    note = (f"; BUG-412: the core would cut the aquifer ({levels}): passed {how} ({col['why']}), then fortcore p.aquifer=pass "
-            f"depth={af['depth']} at {site['anchor']} rot{site['rot']}: per level the shaft digs one tile, designates the seal "
-            "of the side tiles with the dig, seals and watches a day before the next; the core waits for a PASSED shaft" + ring)
+    if af.get("unknown"):
+        # BUG-724: no aquifer level is known (a probe shaft found none, or none was dug yet): the core waits for a shaft that reached
+        # its deepest level, it is never dug blind
+        sh = af.get("shaft")
+        how = (f"the finished aqshaft (z{sh['anchor'][2]}-z{sh['bottom']}) found no aquifer" if sh
+               else f"the probe aqshaft@{col['x']},{col['y']} z{col['top']} (depth {col['depth']})" if first else "the shaft placed already")
+        note = (f"; BUG-724: no aquifer level is known: {how}; fortcore p.aquifer=pass depth={af['depth']} at {site['anchor']} "
+                f"rot{site['rot']} (the runner digs it only once a shaft reached its deepest level, in observe mode)")
+        return out[:k] + first + out[k:], note
+    how = ("by the shaft placed already" if not first else f"by aqshaft@{col['x']},{col['y']} z{col['top']}")
+    where = (f", beside the finished shaft at {af['shaft']['anchor'][:2]}" if af.get("shaft") else "")
+    note = (f"; BUG-412: the core would cut the aquifer ({levels}): passed {how} ({col['why'] if col else 'the shaft stands'}), then "
+            f"fortcore p.aquifer=pass depth={af['depth']} at {site['anchor']} rot{site['rot']}{where}: per level the shaft digs one tile, "
+            "designates the seal of the side tiles with the dig, seals and watches a day before the next; the core waits for a PASSED "
+            "shaft" + ring)
     return out[:k] + first + out[k:], note
 
 
