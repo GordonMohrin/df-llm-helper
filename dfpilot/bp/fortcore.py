@@ -40,7 +40,7 @@ from .primitives import Plan
 
 STAGES = 4
 PARAMS = {"stage": (1, 1, STAGES), "depth": (3, 1, 12), "refuge": (3, 3, 8), "beds": (8, 4, 16),
-          "retrofit": (0, 0, 2),     # 1: only the lever rooms up to `stage`; 2: + the refuge levers (_lever_retrofit)
+          "retrofit": (0, 0, 3),     # 1: only the lever rooms up to `stage`; 2: + the refuge levers; 3: + the main levers (_lever_retrofit)
           # FR-95: '' (as before) | above (bp sites: the whole fort above the manifest's aquifer_levels) | pass (its deepest
           # level at least one dry level below them; the runner digs it once an aqshaft passed, in observe mode)
           "aquifer": ("", None, None)}
@@ -321,10 +321,14 @@ def _lever_retrofit(stage: int, zc: int, zr: int, kind: int) -> Plan:
     lever list whatever order the projects finish in. Place it first: gate sees the rooms (pullers, the B2 room as
     the BREACH fallback) at once instead of after three mechanisms.
     `retrofit=2` (stage 3): the rooms again (idempotent) plus the refuge levers; its fragment is the stage's full
-    one with the refuge levers (the §11 merge is idempotent), merged when the levers are built."""
-    if stage not in (2, 3) or (kind == 2 and stage != 3):
+    one with the refuge levers (the §11 merge is idempotent), merged when the levers are built.
+    `retrofit=3` (stage 3, BUG-712): as 2, and the main levers of O1, B1 and B2 (the Z3 / Z4 strips) as well: a bridge whose
+    levers are gone (toppled by a tantrum, never built) has no lever gate could pull; a lever that stands is left alone
+    (quickfort skips an occupied tile), the manifest merge keeps every lever already listed (runner.merge_manifest)."""
+    if stage not in (2, 3) or (kind in (2, 3) and stage != 3):
         # stage 4 would mark the trap stage as reached (runner history: params.stage, labels)
-        raise ValueError("fortcore retrofit: 1 = lever rooms (stage 2 or 3), 2 = rooms + refuge levers (stage 3)")
+        raise ValueError("fortcore retrofit: 1 = lever rooms (stage 2 or 3), 2 = rooms + refuge levers, 3 = + the main levers "
+                         "(stage 3)")
     plan = Plan("fortcore", CLASS[stage])
     k = plan.stage(f"s{stage}.lrooms", "burrow")
     for name, (st, (u0, v0, u1, v1)) in LEVER_ROOMS.items():
@@ -334,6 +338,10 @@ def _lever_retrofit(stage: int, zc: int, zr: int, kind: int) -> Plan:
         plan.manifest = {"v": 2, "burrows": {n: {"role": "other"} for n, (st, _) in LEVER_ROOMS.items() if st <= stage}}
         return plan
     lv = plan.stage("s3.lever", "build", orders=1, defense=1)
+    if kind == 3:
+        for n in sorted(LEVERS):
+            for u, v, w in LEVERS[n]:
+                lv.tile(u, v, w, "Tl")
     for u, v, w in refuge_levers(zr).values():
         lv.tile(u, v, w, "Tl")
     plan.manifest = _lever_manifest(_manifest(stage, zc, zr), stage, zr)

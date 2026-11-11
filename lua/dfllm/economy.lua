@@ -8017,7 +8017,11 @@ function M.mech_need(K)
       lv = lv + math.max(0, nl - (ok and int(n) or 0))
     end
   end
-  return lv * M.MECH.per_lever, lv
+  -- BUG-712: a lever that is placed and not built waits for a mechanism of its own (the building takes 1) before its link takes 2
+  local sites = 0
+  local okl, ls = K.call('gate', 'lever_states')
+  for _, e in pairs(okl and type(ls) == 'table' and ls or {}) do sites = sites + (type(e) == 'table' and int(e.site) or 0) end
+  return lv * M.MECH.per_lever + sites, lv
 end
 -- BUG-627 (trade): the stock days the sell list's automatic surplus kinds follow {food_d, drink_d}; nil before the first stock pass
 function M.surplus_days(K)
