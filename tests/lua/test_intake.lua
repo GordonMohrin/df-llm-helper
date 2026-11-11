@@ -493,12 +493,15 @@ T.test('BUG-030: weak squads (worn 0 < 60): the deep defense (weak) at the manif
   run(W, 300)
   -- BUG-510 (Run 16a i1 Basementflew y406: the squads stood at the core station with 2 of 19 soldiers equipped): squads in which
   -- fewer than 30 % hold a real weapon and wear body armor are not stationed at all (old: all three at the core station)
-  T.eq({orders_of(W, 'A'), orders_of(W, 'B'), orders_of(W, 'C')}, {'', '', ''}, 'unequipped: they stay with the civilians')
+  -- BUG-694: they wait on an equip hold at the refuge anchor (a station order, the civilians' ground), not off duty
+  local eq = orders_of(W, 'A')
+  T.ok(eq ~= 'station@60,70,10' and eq:find('^station@') ~= nil, 'unequipped: the equip hold, not the core station: ' .. eq)
+  T.eq({orders_of(W, 'B'), orders_of(W, 'C')}, {eq, eq}, 'unequipped: they stay with the civilians')
   T.ok(logged(W, 'squad A stands down: 0 of '), 'kern.log names the stand-down')
   W = world{equip = false, reflex = {v = 2, stations = {worn = 0}}}
   run(W, 1500)
   T.eq(#evs(W, 'SIEGE_DEEP'), 0, 'stations.worn 0: no weak reason')
-  T.eq(orders_of(W, 'A'), '', 'no station for unequipped soldiers either')
+  T.eq(orders_of(W, 'A'), 'station@70,70,4', 'no station against the enemy for unequipped soldiers either: the equip hold (BUG-694)')
   W = world{reflex = {v = 2, stations = {worn = 0}}}        -- equipped: stationed as before
   run(W, 1500)
   T.eq(#evs(W, 'SIEGE_DEEP'), 0, 'stations.worn 0: no weak reason')

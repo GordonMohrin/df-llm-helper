@@ -560,4 +560,21 @@ T.test('BUG-496: no creature near -> cause water; a dry body -> unknown; a missi
   T.eq(W3.find_events('DROWNED'), {}, 'other causes make no DROWNED')
 end)
 
+-- BUG-692: care.deaths_recent counts the citizens that died of a fight (killed, bled, siege, ...) within one game day; thirst and the rest
+-- do not count, a death older than a day goes
+T.test('BUG-692: deaths_recent counts the fight deaths of the last game day only', function()
+  local W = world{cit = 6}
+  W.run(1)
+  T.eq({W.K.call('care', 'deaths_recent')}, {true, 0})
+  die(W, 1, 'THIRST', {thirst = 60000})
+  W.run(1)
+  T.eq({W.K.call('care', 'deaths_recent')}, {true, 0}, 'thirst is no fight')
+  die(W, 2, 'MURDER', {killer = 77})
+  die(W, 3, 'BLEED')
+  W.run(1)
+  T.eq({W.K.call('care', 'deaths_recent')}, {true, 2}, 'killed + bled')
+  CW.day(W, 2)
+  T.eq({W.K.call('care', 'deaths_recent')}, {true, 0}, 'older than a day: gone')
+end)
+
 T.done()

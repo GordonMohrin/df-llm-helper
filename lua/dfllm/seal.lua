@@ -3434,6 +3434,23 @@ local function hostile_in(K, name, t)
   if not c or c.t ~= t or c.h ~= h then
     c = {t = t, h = h, by = {}}
     mem.hin = c
+    -- BUG-693: a hostile that killed a citizen and stands in one of the fort's burrows is latched there for KLATCH ticks, whichever
+    -- burrow the pick is asking about (the pick stops at the first one that passes, the others would never be looked at)
+    if type(h) == 'table' and (int(h.vis) or 0) > 0 then
+      local kern, refuge = burrow_names(K)
+      for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+        if type(e) == 'table' and e.kl == 1 and int(e.x) and int(e.y) and int(e.z) then
+          for _, bn in ipairs({kern, CFG.interior, refuge}) do
+            local bb = burrow(bn)
+            if bb and in_burrow(bb, e.x, e.y, e.z) then
+              mem.klatch = mem.klatch or {}
+              local L = mem.klatch[bn]
+              if L and L.t == t then L.n = L.n + 1 else mem.klatch[bn] = {t = t, at = {e.x, e.y, e.z}, n = 1} end
+            end
+          end
+        end
+      end
+    end
   end
   local v = c.by[name]
   if v == nil then
@@ -3463,14 +3480,21 @@ end
 -- Public M.rlatched(K[, name, t]): the latched sighting {t, at, n} or nil (a local of this size would break the 200-local limit)
 M.RLATCH = 1200
 M.ALT_MARGIN = 10     -- BUG-589: tiles a burrow must lie farther from the destroyers than the refuge's stair head to be preferred
+-- BUG-693 (Run 16d i4 Trumpetrealms y461 winter: one goblin that had killed 27 citizens in a day left the census for ~1,200 ticks, RLATCH
+-- ran out, 'Innen+ -> Tiefe+ ... WET' walked the survivors back into the shaft it stood in and it killed 22 more): a hostile that KILLED is
+-- latched in every burrow it stood in (not the refuge only) for KLATCH ticks (six game days) after its last sighting there, in a SIEGE /
+-- BREACH; the burrow stays refused, the citizens flee on their own or go to a burrow without it
+M.KLATCH = 7200
 function M.rlatched(K, name, t)
   name, t = name or (select(2, burrow_names(K))), t or now_t(K)
+  local m = K.mode()
+  if m ~= 'SIEGE' and m ~= 'BREACH' then return nil end
+  local KL = mem.klatch and mem.klatch[name]
+  if KL and t >= KL.t and t - KL.t < M.KLATCH then return KL end
   local L = mem.rlatch
   if not L or t < L.t or t - L.t >= M.RLATCH then return nil end
   local _, refuge = burrow_names(K)
   if name ~= refuge then return nil end
-  local m = K.mode()
-  if m ~= 'SIEGE' and m ~= 'BREACH' then return nil end
   return L
 end
 
