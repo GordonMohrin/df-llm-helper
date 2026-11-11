@@ -2513,8 +2513,12 @@ def cistern_fill_guard(save_dir: Path, params: dict | None, snap: dict | None, b
                               "on a known aquifer level, the aquifer fills it)")
         return {**params, "water": "aquifer"}
     raise BpError(f"BUG-469: a bucket-fed cistern (no p.path) would stay dry: {fill.get('why')}, and no aquifer level is known "
-                  "for an aquifer cistern (p.water=aquifer). A piped one needs revealed water (python -m dfpilot.bp.sites cistern); "
-                  "else the refuge drink store (tpl refuge_drink) and barrels")
+                  "for an aquifer cistern (p.water=aquifer). What would pass: (1) p.water=aquifer once an aquifer level is known "
+                  "(a damp mark or manifest aquifer_levels); (2) a piped cistern, p.path = waypoints from revealed water "
+                  "(python -m dfpilot.bp.sites cistern --save <folder> prints them); (3) revealed water the core reaches on foot "
+                  f"within {getattr(sm, 'BUCKET_STEPS_MAX', 40)} steps (not behind a siege line: the snapshot reads the walk graph, not the lockdown). "
+                  "Meanwhile, in a siege: the drink stock reaches the patients when the hospital zone is deleted (the kernel does it "
+                  "for a dry hospital, BUG-708) and the refuge drink store (tpl refuge_drink) with barrels holds the rest")
 
 
 def _place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,

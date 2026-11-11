@@ -328,6 +328,8 @@ WATER_LIM: dict = {
     "stall_hosp": "bool", "stall_dying": _THIRST,
     # BUG-537: the dry episode of the hospital gate ends after gate_clear ticks of accepted water; hospital_supply again after hosp_sup_every
     "gate_clear": _TICKS, "hosp_sup_every": _TICKS,
+    # BUG-708: siege_no_water repeats this often while a lockdown has no accepted water inside the walls
+    "siege_water_every": _TICKS,
     # BUG-540: a remembered hospital zone is forgotten after hrm_expire; BUG-541: GiveWater workers at a dry well (trap, days, tiles,
     # the thirst at which the patient's zone goes from the second round)
     "hrm_expire": _TICKS, "trap": "bool", "trap_days": (1, 60), "trap_near": (0, 10), "trap_dying": _THIRST,

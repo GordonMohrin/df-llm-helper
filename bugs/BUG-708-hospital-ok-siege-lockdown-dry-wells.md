@@ -1,0 +1,24 @@
+# BUG-708 Hospital 'ok' in a SIEGE lockdown with dry core wells and the only water outside the walls: ~20 patients died of thirst
+Status: fixed (offline, live-untested)
+Severity: high
+Found: 2026-11-11, Run 16b i2 Whirledrampart y430 sum d18-d41 (goblin army 49 outside 200+ days, SIEGE lockdown, main 534411e)
+Module: `lua/dfllm/water.lua` (`outer`, `served`, `M.lockdown`, `M.siege_water`, `finish`, DEFAULTS `siege_water_every`), `dfpilot/cmd.py` (`cistern_fill_guard` text), `dfpilot/wake.py` (`URGENT_DECISIONS`), `dfpilot/fairplay.py` (`WATER_LIM`)
+
+## Symptom
+Both wells in the core (19911 at 108,102,137 and 19398 at 121,134,134, later 19611 at 129,127,137 shallow 2/7) were dry. The only accepted water was the Water Source zone 19200 at 88,87,141, 19-41 tiles from the hospital and OUTSIDE the walls. The SIEGE lockdown kept the civilians in Kern+. kern.log said `hospital ok, refuge dry (2 wells, 0 in Tiefe+), 1 wet sources` for the whole siege; GiveWater 6 jobs open / 0 running, the carriers stood at the dry well (dry_well decisions every few days), `water.unstick` found nothing, `bp.place tpl=cistern` was refused (BUG-469, no reachable brook) and `path` wants waypoints. About 20 patients (and babies whose mothers died) died of thirst with 236 days of drink in the stores. The status line said `hospital ok` with 4 beds for 22 patients and no water.
+
+## Root cause
+`water.lua served()` (the hospital's readiness) counted every wet source within `near` (30) tiles of a hospital zone, whatever the lockdown did: the zone 19 tiles away was 'accepted water', so `hosp_ok` was 1, HOSPITAL_DRY never fired, the dry-hospital removal (BUG-034: the zones go and the patients drink from the stock, the Run 9/11 fix) never ran, and `patient_far` looked at the same source. Nothing in `water.lua` knew the civilians cannot leave Kern+ in a lockdown. Dry and shallow wells were already no source (`s.wet` false, `well_wet`/`well_min`), so only the outside zone made the hospital look served.
+
+## Fix
+- `M.lockdown(K)`: SIEGE or BREACH, the civ alert sounding, a Kern+ burrow; keeps the alert burrows and the open care burrow's tiles. `finish` sets `r.lock` after `care_step` (the care burrow it just opened counts) and flags such a source `s.outer`.
+- `outer(r, s)` / `served()`: in a lockdown an accepted source is no hospital water unless it lies on Kern+, the refuge, an alert burrow or a tile of the open care burrow (Pflege+, BUG-330/571, which already opens the way to safe water outside with sealed walls and no hostile within 40 tiles). The hospital is dry: `hosp_ok` 0 (status/brief say DRY), the zones go once a patient is over `patient_thirst` (existing BUG-034 removal, restored by BUG-539 when water stands again), the patients drink from the stock.
+- `M.siege_water`: a lockdown with no accepted water inside raises DECISION_NEEDED `siege_no_water` (A, urgent in `wake.py`): the dry/shallow wells, the water outside with its distance, the drink stock of Kern+ (`seal.refuge_drink`), the patients, the care burrow's answer; `how` says what passes for a cistern (BUG-469: an aquifer level, a pipe path, revealed water within 40 steps); `cmds` = `inspect what=water_sources`, `inspect what=hospital`, `bp sites cistern --near`, `bp.place refuge_drink`. At once, then every `siege_water_every` (7 days); cleared when the lockdown ends or water appears inside.
+- `cistern_fill_guard`: the BUG-469 refusal now lists exactly what would pass (aquifer level, `p.path` waypoints, water within `BUCKET_STEPS_MAX` steps) and what helps meanwhile in a siege.
+- No digging at or near water was added; nothing in the fix moves a bridge, lever, door or burrow.
+
+## Tests
+`tests/lua/test_bug708_siege_thirst.lua` (5): the siege world gives `hosp_ok` 0 and removes the zone (old code: ok); the decision text, the drink stock, `how`, weekly repeat; PEACE and a wet inner well are unchanged; the episode resets after the siege. `tests/lua/test_bug708_siege_traffic.lua`: the siege traffic world of round 35 (real sense / threat / siege / gate / military / readiness, army outside, walkers over the bridges) with the hospital, a dry well and the outside zone: O1 and B1 up, B2 down, nobody crushed or on a footprint, water.lua made no lever / bridge / door / burrow act. `tests/test_bug708_cistern_refusal.py`: the refusal text.
+
+## Live check
+In a SIEGE with the core wells dry: kern.log `water: ... hospital dry`, `water: removed hospital zone(s) ...`, one `siege_no_water` line with the drink stock, `status` DRY. Open: the zone removal needs a patient over `patient_thirst`; whether DF's patients fetch drink from the stock after the zone is gone was shown in Run 9/11 only; the carriers' trip to a dry well is DF's own choice (the existing `dry_well` / `pond_blocks_well` decisions remain the answer); a cistern with water=aquifer in a siege is the player's call.
