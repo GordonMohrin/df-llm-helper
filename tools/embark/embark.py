@@ -82,6 +82,47 @@ def call(args: list[str], df: Path | None = None, timeout: float = 60) -> str:
     return r.stdout
 
 
+def spec_box_text(out: Path, run_id: str | None) -> str:
+    """BUG-726: 'box X0,Y0..X1,Y1 (N world tiles)' of a run's spec file, '' when it has none (the box is named in every start line)."""
+    try:
+        doc = json.loads((out / f"spec-{run_id}.json").read_text(encoding="utf-8"))
+        cands = [c for c in doc.get("cands") or [] if isinstance(c, list) and len(c) >= 2]
+        xs, ys = [c[0] for c in cands], [c[1] for c in cands]
+        return f"box {min(xs)},{min(ys)}..{max(xs)},{max(ys)} ({len(cands)} world tiles)" if cands else ""
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
+def start_run(path: Path, out: Path, echo=print, sleep=time.sleep) -> str:
+    """BUG-726 (Run 16d i4: a `--budget` end leaves the sweep running in DF; the next rank/scan was answered 'run scanNNN is active; use stop'
+    and then showed the result of the OLD sweep): `run`; when an earlier run is still active it is named (with its box), stopped, waited
+    for, and the new run is started once. SystemExit with the reason when it stays active."""
+    def attempt() -> str:
+        try:
+            return call(["run", path.as_posix()]).strip()
+        except SystemExit as e:
+            return str(e)
+    msg = attempt()
+    if "is active" not in msg:
+        if msg.startswith("dfhack-run failed"):
+            raise SystemExit(msg)
+        return msg
+    old = read_status(out) or {}
+    oid = old.get("id")
+    echo(f"  an earlier run {oid or '?'} is still active in DF ({spec_box_text(out, oid) or 'box unknown'}, "
+         f"{old.get('i')}/{old.get('n')}): stopping it before this one starts")
+    call(["stop"])
+    for _ in range(20):
+        st = read_status(out)
+        if not st or st.get("state") != "running":
+            break
+        sleep(1)
+    msg = attempt()
+    if "is active" in msg or msg.startswith("dfhack-run failed"):
+        raise SystemExit(f"run {oid or '?'} is still active in DF and `stop` did not end it: {msg}")
+    return msg
+
+
 def parse_box(text: str) -> list[int]:
     """BUG-410: 'X0,Y0,X1,Y1' world tiles (inclusive, X0<=X1, Y0<=Y1)."""
     parts = [int(p) for p in text.split(",")]
@@ -279,7 +320,8 @@ def wait(run_id: str, out: Path, timeout_s: float, poll_s: float = 1.0,
             if doc.get("state") != "running":
                 return doc
         if clock() >= end:
-            return doc
+            # BUG-726: the status of ANOTHER run (an earlier sweep that still runs) is no result of this one
+            return doc if doc and doc.get("id") == run_id else None
         sleep(poll_s)
 
 
@@ -360,6 +402,14 @@ def brook_text(r: dict, pts: list[tuple[int, int, str]]) -> str:
         if d <= BROOK_NEAR and (best is None or d < best[0]):
             best = (d, x, y, tag)
     if best is None:
+        # BUG-726 (Run 16d i4 Pagedsculpture 19,23: hover said 'brook EDGE ONLY 4 tiles', the rectangle scans said 'brook=none seen' for 5,6 and
+        # 6,6): a rectangle scan reads the panel of ONE hovered tile (the Brook line names the brook of that tile's region only); a hover
+        # row reads up to 16. 'none seen' of a few tiles is no 'none'
+        tl = rec.get("tiles") if isinstance(rec.get("tiles"), dict) else None
+        n = tl.get("n") if tl and isinstance(tl.get("n"), int) else (1 if rec.get("read") else None)
+        if n is not None and n < 16:
+            return (f" brook=none seen on {n} of 16 tiles (a rectangle scan reads one hovered tile, `scan --hover` reads all 16 and can "
+                    "show a brook on the other tiles)")
         return " brook=none seen"
     return f" brook={best[0]} tiles at {best[1]},{best[2]} ({best[3]})"
 
@@ -805,7 +855,9 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"save folder {spec['name']!r} exists already: choose another name (save-as never overwrites)")
     log_accept(spec, out)
     path = write_spec(spec, out)
-    print(call(["run", path.as_posix()]).strip())
+    if a.cmd == "rank":
+        print(f"  rank {spec_box_text(out, spec['id']) or 'box ' + a.box}, sample {a.sample}", flush=True)   # BUG-726: the box is named
+    print(start_run(path, out))
     if a.no_wait:
         return 0
     hook = esc_poster(df_dir()) if spec["mode"] == "saveas" and not a.no_post else None

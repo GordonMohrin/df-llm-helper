@@ -196,8 +196,7 @@ def test_wait_echoes_steps_and_stops(tmp_path):
     doc = drv.wait("r", out, 60, clock=lambda: t["now"], sleep=sleep, echo=lines.append)
     assert doc["state"] == "done" and len(lines) == 3
     other = drv.wait("zzz", out, 3, clock=lambda: t["now"], sleep=sleep, echo=lines.append)
-    assert other["id"] == "r"  # timed out while waiting for another run
-
+    assert other is None  # BUG-726: timed out while waiting for another run: its status is no result of this one
 
 def test_summarize_ranks_results():
     doc = {"id": "s", "state": "done", "step": "", "i": 9, "n": 8, "msg": "all steps done",

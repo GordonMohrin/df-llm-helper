@@ -394,8 +394,16 @@ def _rank_pass(snap, params, manifest, n, water, near, within, at, free) -> list
         return [{**s, "depth": d, "why": s["why"] + f"; depth {d}: the core's deepest level z{s['anchor'][2] + low}"
                  + (f" under the aquifer levels z{min(aq)}-z{max(aq)}" if aq else "")} for s in sites]
     heavy = sorted(heavy_breach_levels(manifest), reverse=True)
+    if not aq:
+        # BUG-724 (Run 16d i4 Pagedsculpture y373: after an aqshaft found no aquifer `aquifer=pass` still said 'no site puts the core under
+        # the aquifer (known levels none)'): nothing is known wet, so there is nothing to pass; the reasons are the plain ranking's
+        raise ValueError(
+            f"fortcore: no site at any depth {d0}..{PASS_DEPTH_MAX} from the surface z{top}, and no aquifer level is known (there is "
+            "nothing for p.aquifer=pass to pass; the sites fail for other reasons: " + "; ".join(errs[:2]) + "). "
+            "`bp sites fortcore` without p.aquifer ranks the same world; a shaft that found no aquifer needs no p.aquifer, a core "
+            "without one is dug in the ordinary mode")
     raise ValueError(
-        f"fortcore: no site puts the core under the aquifer (known levels {', '.join('z' + str(z) for z in sorted(aq, reverse=True)) or 'none'}"
+        f"fortcore: no site puts the core under the aquifer (known levels {', '.join('z' + str(z) for z in sorted(aq, reverse=True))}"
         + (f", heavy at {', '.join('z' + str(z) for z in heavy)}" if heavy else "")
         + f") at any depth {d0}..{PASS_DEPTH_MAX} from the surface z{top}: " + "; ".join(errs[:2])
         + f". The template digs at most {PASS_DEPTH_MAX} levels under the surface: no core fits under these layers from here. "

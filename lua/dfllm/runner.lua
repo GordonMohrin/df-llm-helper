@@ -2625,7 +2625,23 @@ end
 function Q.aq_wait(K, P, d)
   local p = type(d) == 'table' and type(d.params) == 'table' and d.params or {}
   if P.tpl ~= 'fortcore' or p.aquifer ~= 'pass' then return nil end
-  if not M.AQ.passed(S.rt) then return 'aquifer: waits for an aqshaft pass' end
+  -- BUG-723: the shaft must have reached the core's deepest level (a shaft that ended above it has not seen the layers there)
+  local lowest
+  for _, st in ipairs(type(d.stages) == 'table' and d.stages or {}) do
+    for _, ch in ipairs(st.chunks or {}) do
+      for _, c in ipairs(ch.cells or {}) do
+        local z = ch.pos[3] + c[3]
+        if not lowest or z < lowest then lowest = z end
+      end
+    end
+  end
+  local ok, short = M.AQ.passed(S.rt, lowest)
+  if not ok then
+    if short and lowest then
+      return string.format('shaft ends z%d, core z%d', short.bot, lowest)    -- the state row cuts at 40 chars
+    end
+    return 'aquifer: waits for an aqshaft pass'
+  end
   if not M.AQ.observing(S.rt, P.id) then M.AQ.observe(Q.aqx(K), P, nil, 'pass') end
   return nil
 end

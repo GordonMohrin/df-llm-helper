@@ -19,14 +19,19 @@ end
 local ctx = {world = {8, 30}, size = {4, 4}}
 local function has(list, id) for _, v in ipairs(list) do if v == id then return true end end return false end
 
-T.test('BUG-531: a near core under a light aquifer stays a plain warning (as before)', function()
-  local r = C.evaluate(rec{soil = 'little', aquifer = 'light'}, nil, ctx)         -- 1 + 8 = 9: not above core_reach_warn
-  T.eq({item(r, 'aquifer').res, r.reach, r.core_reach}, {'warn', 5, nil})
-  T.ok(not item(r, 'aquifer').why:find('must go under the aquifer', 1, true), item(r, 'aquifer').why)
+T.test('BUG-725: a light panel on little soil (1 + 8 = 9, Doorwings) says the core must go under the aquifer and that heavy layers hide behind it', function()
+  local r = C.evaluate(rec{soil = 'little', aquifer = 'light'}, nil, ctx)         -- 1 + 8 = 9 > core_reach_warn 8 (was: no warning at 9)
+  T.eq({item(r, 'aquifer').res, r.reach, r.core_reach}, {'warn', 5, 9})
+  local why = item(r, 'aquifer').why
+  T.ok(why:find('the core must go under the aquifer: up to 9 levels', 1, true), why)
+  T.ok(why:find('a "light" panel hides heavy layers', 1, true) and why:find('Doorwings', 1, true), why)
+  local bare = C.evaluate(rec{soil = 'none', aquifer = 'light'}, nil, ctx)         -- 0 + 8: still below the warning
+  T.eq({item(bare, 'aquifer').res, bare.core_reach}, {'warn', nil})
+  T.ok(not item(bare, 'aquifer').why:find('must go under the aquifer', 1, true), item(bare, 'aquifer').why)
 end)
 
 T.test('BUG-531: Basementflew (light panel, soil some): the warning says up to 11 levels to the stone below the aquifer', function()
-  local r = C.evaluate(rec{soil = 'some', aquifer = 'light'}, nil, ctx)           -- 3 + 8 = 11 > 9
+  local r = C.evaluate(rec{soil = 'some', aquifer = 'light'}, nil, ctx)           -- 3 + 8 = 11 > 8
   T.eq({item(r, 'aquifer').res, r.core_reach}, {'warn', 11})
   T.ok(item(r, 'aquifer').why:find('the core must go under the aquifer: up to 11 levels to the hard stone below it (3 soil + up to 8 of the light aquifer)', 1, true),
        item(r, 'aquifer').why)

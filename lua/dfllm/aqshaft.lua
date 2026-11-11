@@ -1071,15 +1071,26 @@ function A.tick(X)
 end
 
 ---------------------------------------------------------------- fortcore aquifer=pass
--- the first passed shaft (not heavy): {id, x, y, top, bot} or nil
-function A.passed(rt)
+-- the first passed shaft (not heavy): {id, x, y, top, bot} or nil. BUG-723 (Run 16c i3 Doorwings y372: the first shaft ended at z134 with
+-- no aquifer met, the heavy z131-z133 lay below its depth; the fortcore p.aquifer=pass counted that shaft as passed and dug the core
+-- into heavy aquifer twice, breach:heavy_aquifer): with `lowest` (the deepest z the core digs) only a shaft that reached that level
+-- (bot <= lowest) has shown what lies on the core's levels; a shaft with no recorded bot (an older kernel) still counts.
+-- Second result: the best shaft that was too shallow ({id, bot}), for the wait message.
+function A.passed(rt, lowest)
   local ids = {}
   for id, r in pairs(type(rt) == 'table' and type(rt.aq) == 'table' and rt.aq or {}) do
     if type(r) == 'table' and r.k == 'shaft' and r.done == 1 and not r.heavy then ids[#ids + 1] = id end
   end
   table.sort(ids)
-  local r = ids[1] and rt.aq[ids[1]]
-  return r and {id = ids[1], x = r.x, y = r.y, top = r.top, bot = r.bot} or nil
+  local short
+  for _, id in ipairs(ids) do
+    local r = rt.aq[id]
+    if type(lowest) ~= 'number' or type(r.bot) ~= 'number' or r.bot <= lowest then
+      return {id = id, x = r.x, y = r.y, top = r.top, bot = r.bot}
+    end
+    if not short or r.bot < short.bot then short = {id = id, bot = r.bot} end
+  end
+  return nil, short
 end
 
 return A

@@ -307,6 +307,10 @@ function W.scroll(which, n)
   if not key or type(n) ~= 'number' or n < 0 then return false end
   return (pcall(function() scr[key] = math.floor(n) end))
 end
+function W.world_size()  -- BUG-726: world tiles (width, height); nil when the world data is not there
+  local ok, wd = pcall(function() return df.global.world.world_data end)
+  if ok and wd and wd.world_width and wd.world_height then return wd.world_width, wd.world_height end
+end
 function W.camera(which, x, y)  -- = scrolling the map; changes nothing in the world
   local scr = native()
   if not df.viewscreen_choose_start_sitest:is_instance(scr) then return end
