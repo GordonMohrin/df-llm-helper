@@ -735,7 +735,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-672/673/676: hostiles cleared as passive (a plant eater that never killed), unreachable or by the operator
     "HOSTILE_RELEASED": ("B", "reflex", _d("n:i id:i why:s", "days:i mode:s inside:i")),
     # Run 10: a roofed wild danger on the citizens' group but beyond reflex.predator_near of every citizen (no lockdown)
-    "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i hb:i")),   # BUG-554: hb = a plant eater
+    "PREDATOR_FAR": ("B", "reflex", _d("n:i id:i", "pos:p dc:i hb:i roam:i")),   # BUG-554: hb = a plant eater; BUG-762: roam = PREDATOR raised n times for this roamer
     # Run 11 (siege 8: 16 citizens outside Kern+ at the arrival): the lockdown's recall; why done (all came in), late
     # (reflex.RECALL_MAX passed: the doors stop waiting), end (the lockdown ended first); n = outside at the alert,
     # left = still outside, ticks since the alert, units = those still out (<= 20), called = the alert really confined

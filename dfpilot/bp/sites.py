@@ -223,7 +223,7 @@ def _near_point(cands: list, tpl: str, near, within: int | None, at) -> list:
 
 def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None = None,
          n: int = 3, water: dict | None = None, near=None, within: int | None = None, at=None,
-         free=None) -> list[dict]:
+         free=None, carry: bool | None = None) -> list[dict]:
     """Top `n` sites, best first: [{id:'S1'.., anchor:[x,y,z], rot, score:int, why:str}].
     Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4.
     `water` (BUG-040, WATER_TPLS only): {src: [[x,y,z]..] accepted sources, near, lbl?: labels parallel to src,
@@ -232,6 +232,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     first; `at`: [x, y, z], only the sites anchored exactly there (the reason when there is none). Both apply to room,
     explore and fortcore sites; the defense builds have the one site the manifest fixes. `free` (BUG-292): a callable
     candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
+    if tpl == "hospital" and carry is None and water is not None and not (params or {}).get("surface") \
+            and not (params or {}).get("furnish"):
+        return _rank_hospital(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-763: compact room, water carrier route
     if tpl in mine.BUILD and "depth" not in (params or {}):
         return _rank_depths(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-553: a smaller depth when 12 has none
     if tpl in mine.BUILD and "arm" not in (params or {}):
@@ -320,7 +323,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
         if not cands and water.get("src") and manifest and not surface_shops:                  # BUG-722: no candidate at all: where they fell out, not only 'no valid site'
             why = _rooms_funnel(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
             raise ValueError(f"{tpl}: no valid site on the snapshot ({why}; nearest accepted water: {src_label(water, 0)}){refuge_water(water)}")
-        cands = _near_water(cands, tpl, p, water)
+        cands = _near_water(cands, tpl, p, water, carry=bool(carry))
     cands = reachable(cands, snap, tpl, near if near is not None else at)    # BUG-352: the citizens' walk group (snapshot wg)
     if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
         cands = _near_point(cands, tpl, near, within, at)
@@ -546,7 +549,10 @@ def refuge_water(water: dict) -> str:
     return f"; no accepted water in {name} ({where}; nearest: {src_label(water, i)}, {wd} tiles from {name})"
 
 
-def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
+HOSPITAL_CARRY_MAX = 80       # BUG-763: tiles from accepted water up to which a hospital is ranked with a water carrier route
+
+
+def _near_water(cands: list, tpl: str, p: dict, water: dict, carry: bool = False) -> list:
     """Candidates whose zone lies within `near` of an accepted source (water.lua served()), scored +2 per tile nearer;
     ValueError when there is no accepted source or no candidate near one."""
     src = [list(s) for s in water.get("src") or [] if isinstance(s, (list, tuple)) and len(s) == 3]
@@ -564,6 +570,7 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
                             "dfllm-water itself while none is accepted; the sites follow a game day later)"
                             if water.get("cand") else ""))
     out, best = [], None
+    far = []
     for c in cands:
         zb = zone_box(tpl, p, c["anchor"], c["rot"])
         d, i = min((box_dist(s, zb), k) for k, s in enumerate(src))
@@ -572,6 +579,14 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
         if d <= near:
             out.append({**c, "score": c["score"] + 2 * (near - d), "water": {"d": d, "src": src[i]},
                         "why": c["why"] + f", {src_label(water, i)} {d} tiles"})
+        elif carry and d <= HOSPITAL_CARRY_MAX:
+            # BUG-763 (Run 16a i1 Basementflew y530: 'no valid site', patient 27129 died of thirst, water 91 tiles away): no site within
+            # `near` of accepted water: the caregivers carry the drink from the nearest source (water.lua buckets); nearest site first
+            far.append({**c, "score": c["score"] - d, "water": {"d": d, "src": src[i], "carry": 1},
+                        "why": c["why"] + f", WATER CARRIER ROUTE {d} tiles from {src_label(water, i)} (none within {near}; the "
+                               "caregivers carry the drink, the hospital's own well and pond serve the rest)"})
+    if not out and far:
+        return far
     if not out:
         if best is None:
             raise ValueError(f"{tpl}: no valid site on the snapshot (nearest accepted water: {src_label(water, 0)}){rw}")
@@ -583,6 +598,47 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict) -> list:
                          "bring water nearer (a water zone on deep water, a piped cistern: python -m "
                          "dfpilot.bp.sites cistern)")
     return out
+
+
+def _rank_hospital(snap, tpl, params, manifest, n, water, near, within, at, free) -> list[dict]:
+    """BUG-763 (Run 16a i1 Basementflew y530-y534: 'no valid site (1201 anchors, 4804 placements: 3842 no open door tile, 962 room meets rock,
+    0 fit; nearest water zone 23 tiles from Tiefe+)', patient 27129 died of thirst with the water 91 tiles away): when the 7x5 room has no
+    site (no room fits the rock round the core, or none lies within water.near of accepted water) the ladder goes on: the compact 5x4
+    room (up to 5 beds; p.compact given is the player's and stays); with p.carry = 1 (asked for, `bp sites hospital carry=1`: plan check and the
+    kernel's `served` keep their 30 tiles) also a site up to HOSPITAL_CARRY_MAX tiles from accepted water with a water carrier route
+    (`water.carry`). Order: room near water, compact near water, room with carriers, compact with carriers. A compact
+    site carries `compact` = 1 (cmd.site_params puts it into the document). All empty: the first error, with the others after it."""
+    base = dict(params or {})
+    compacts = [base["compact"]] if "compact" in base else [0, 1]
+    first, notes = None, []
+    for carry in ((False, True) if base.get("carry") else (False,)):      # a carrier route only on request (p.carry = 1)
+        for cp in compacts:
+            try:
+                got = rank(snap, tpl, {**base, "compact": cp}, manifest, n, water, near, within, at, free, carry=carry)
+            except ValueError as e:
+                msg = str(e)
+                if not any(k in msg for k in ("no valid site", "no site within")):
+                    if first is None:
+                        raise
+                    continue
+                if first is None:
+                    first = e
+                elif msg != str(first):
+                    notes.append(f"{'compact room' if cp else 'room'}{' with a carrier route' if carry else ''}: "
+                                 + msg.split(": ", 1)[-1][:160])
+                continue
+            if got:
+                auto = bool(cp) and "compact" not in base
+                tag = ("compact room 5x4, up to 5 beds (no 7x5 room fits" + (" near accepted water" if not carry else "")
+                       + "; BUG-763)") if auto else ""
+                return [{**x, **({"compact": 1} if auto else {}), "why": x["why"] + ("; " + tag if tag else "")} for x in got]
+    if first is None:
+        return []
+    hint = "" if base.get("carry") else (f"; `hospital carry=1` also ranks sites up to {HOSPITAL_CARRY_MAX} tiles from accepted water with a "
+                                         "water carrier route")
+    if notes:
+        raise ValueError(f"{first} (also tried: " + "; ".join(notes[:3]) + f"{hint})") from None
+    raise ValueError(f"{first} (the compact 5x4 room was tried too{hint})") from None
 
 
 BUCKET_STEPS_MAX = 40       # BUG-469: farther than this a bucket-fed cistern stays dry (same as water.patient_far / drink_far)
@@ -799,19 +855,25 @@ def _rooms_funnel(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None) -> str:
     ref = manifest.get("refuge")
     zr = ref["anchor"][2] if ref else None
     refuge_level = on_refuge(tpl, p)
-    n = door = fit = ko = lvl = ok = 0
+    n = door = fit = ko = lvl = ok = door_fit = 0
+    near_miss = None                                       # BUG-763: the placement with the fewest blocked tiles (door tile open, room blocked)
     for i in _anchor_tiles(g, tpl, p, manifest):
         n += 1
         ax, ay, az = g.pos(i)
         for rot in range(4):
             du, dv = rot_uv(0, 1, rot)
             d = g.idx((ax + du, ay + dv, az))
+            res = _check(rects, ax, ay, az, rot, bad, hid, mk, False, wet)
             if d is None or g.t[d] not in GOOD:
                 door += 1
+                if res is not None:
+                    door_fit += 1                          # BUG-763: the room itself fits, only the door tile is open floor
                 continue
-            res = _check(rects, ax, ay, az, rot, bad, hid, mk, False, wet)
             if res is None:
                 fit += 1
+                m = _misses(rects, ax, ay, az, rot, bad, mk, wet)
+                if m is not None and (near_miss is None or m < near_miss[0]):
+                    near_miss = (m, (ax, ay, az), rot)
                 continue
             box = res[2]
             if any(_overlap(box, b) for b in keep_out):
@@ -824,8 +886,33 @@ def _rooms_funnel(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None) -> str:
     if n == 0:
         return ("no anchor tile: the manifest's public Z4 floor has no open floor tile in the snapshot (zones.Z4 "
                 f"{len((manifest.get('zones') or {}).get('Z4') or [])} box(es))")
-    return (f"{n} anchor tile(s) on the Z4 floor, {4 * n} placements: {door} with no open door tile, {fit} whose room meets rock, a wall, liquid or "
-            f"leaves the map, {ko} in a keep-out box (stairs, shafts, refuge), {lvl} on the refuge level, {ok} fit")
+    out = (f"{n} anchor tile(s) on the Z4 floor, {4 * n} placements: {door} with no open door tile, {fit} whose room meets rock, a wall, liquid or "
+           f"leaves the map, {ko} in a keep-out box (stairs, shafts, refuge), {lvl} on the refuge level, {ok} fit")
+    if not ok:                                             # BUG-763: the best near-miss, so the player knows what to move
+        if door_fit:
+            out += f"; {door_fit} of the no-door placements have a room that fits (their door tile is open floor, not rock)"
+        if near_miss:
+            out += (f"; nearest miss: anchor {near_miss[1][0]},{near_miss[1][1]},{near_miss[1][2]} rot{near_miss[2]}, "
+                    f"{near_miss[0]} blocked tile(s) in its room (wall, liquid or a mark)")
+    return out
+
+
+def _misses(rects, ax, ay, az, rot, bad, mk, wet=None):
+    """BUG-763: how many tiles of the placement's rects hold a revealed obstacle, a mark, or liquid on the level above; None when it
+    leaves the map or the snapshot (the near-miss of `_rooms_funnel`)."""
+    cnt = 0
+    for w, lst in rects.items():
+        for r in lst:
+            x0, y0, x1, y1 = _rot_rect(r, ax, ay, rot)
+            if az + w < 0:
+                return None
+            b = bad.count(x0, y0, x1, y1, az + w)
+            if b is None:
+                return None
+            cnt += b + (mk.count(x0, y0, x1, y1, az + w) or 0)
+            if wet is not None:
+                cnt += wet.count(x0, y0, x1, y1, az + w + 1) or 0
+    return cnt
 
 
 def _anchor_tiles(g: Graph, tpl: str, p: dict, manifest: dict) -> list[int]:

@@ -143,6 +143,15 @@ M.DOOR_MAX = 400           -- doors looked at per scan
 M.REARM = 1200             -- INTRUDER/PREDATOR again only after this many ticks without one
 M.OFFER_TTL = 1200         -- BUG-671: ticks a sortie offer (event field `exp`) stays valid for a unit that went out of sight since
 M.PRED_CLOCK_DAYS = 3      -- BUG-671: game days a PREDATOR default may hold the clock at the lockdown cap with nothing inside Kern+
+-- BUG-762 (Run 16a i1 Basementflew y530-y534: one Kelenken roamed the whole map, PREDATOR every 1-2 game days (#26758..26910), a Kern+
+-- lockdown with the clock at 30 t/s in between, the sorties followed it in vain; Run 16b i2 a Megalania and a woolly mammoth the same):
+-- the same wild unit raises PREDATOR again only when it comes closer to a citizen than at its last raise (WANDER_STEP tiles) or, after
+-- the first raise, WANDER_DAYS game days later; from its second raise on a roamer that never came within WANDER_CLOSE tiles is
+-- PREDATOR_FAR (no lockdown). Inside Kern+ / past B1, within WANDER_CLOSE of a citizen, a killer, a building destroyer walking into the
+-- fort: always immediate. WANDER_CLOCK_DAYS: the clock of a lockdown that only an unacked PREDATOR made is released after this many days
+-- while only a roamer stands in the count
+M.WANDER_DAYS, M.WANDER_CLOSE, M.WANDER_STEP, M.WANDER_FORGET, M.WANDER_CLOCK_DAYS = 4, 15, 6, 40, 1
+M.WANDER_CONT = 600       -- ticks a PREDATOR unit may drop out of the count and still be the same episode (it stays a PREDATOR)
 M.BD_NEAR = 30             -- BUG-338: a wild building destroyer this close (xy) to a bridge on its levels is never far
 M.ETA_TILE = 6             -- ticks per tile for the ETA (dwarves and goblins walk ~9, fast beasts less)
 M.FRESH = 200              -- census.h older than this is unknown (never quiet, no sighting)
@@ -1938,6 +1947,29 @@ function M.last_seen(K, id)
   return {x = e.x, y = e.y, z = e.z, age = age, fresh = age <= M.OFFER_TTL, ttl = M.OFFER_TTL}
 end
 
+-- BUG-762: false = a wild danger of the PREDATOR kind that raised PREDATOR before is held back (PREDATOR_FAR), see WANDER_*; dc = nearest
+-- citizen (tiles, nil/-1 unknown = always immediate). Reads rt.wild[id] = {t last raise, d nearest distance at a raise, n raises, s last seen}
+local function wander_raise(e, dc, bdn, now)
+  rt.wild = rt.wild or {}
+  local r = rt.wild[e.id]
+  if r then r.s = now end
+  if not r or (r.c and now - r.c <= M.WANDER_CONT) then return true end         -- new unit, or still the same episode
+  if (e.zn or 0) >= 2 or e.ik == 1 or e.kl == 1 or e.pd == 1 or e.rf == 1 or bdn or not dc or dc < 0 or dc <= M.WANDER_CLOSE then return true end
+  if dc < r.d - M.WANDER_STEP then return true end
+  if r.n < 2 and now - r.t >= M.WANDER_DAYS * 1200 then return true end
+  return false
+end
+
+-- BUG-762: PREDATOR was emitted for this unit
+local function wander_note(e, dc, now)
+  rt.wild = rt.wild or {}
+  local r = rt.wild[e.id]
+  local d = (dc and dc >= 0) and dc or 0
+  if not r then rt.wild[e.id] = {t = now, d = d, n = 1, s = now, c = now}; return end
+  r.t, r.s, r.c, r.n = now, now, now, r.n + 1
+  if d < r.d then r.d = d end
+end
+
 local function inside_scan(K, h, now)
   local hostile, predator, nh, np, hnear = nil, nil, 0, 0, false
   local near, nf, far_one, far_dc = cfg(K).predator_near, 0, nil, -1
@@ -1945,6 +1977,9 @@ local function inside_scan(K, h, now)
   local wave = okx and expects == true
   rt.seen = rt.seen or {}
   for id, e in pairs(rt.seen) do if now < e.t or now - e.t > 4 * M.OFFER_TTL then rt.seen[id] = nil end end
+  rt.wild = rt.wild or {}
+  for id, r in pairs(rt.wild) do if now < r.s or now - r.s > M.WANDER_FORGET * 1200 then rt.wild[id] = nil end end
+  local roam, preddc = {}, {}                   -- BUG-762: units held back this scan; the distance a predator candidate was judged at
   for _, e in ipairs(h.list or {}) do
     rt.seen[e.id] = {x = e.x, y = e.y, z = e.z, t = now}               -- BUG-671: the place a unit in sight stood at (M.last_seen)
     local ok, far = true, false
@@ -1975,7 +2010,14 @@ local function inside_scan(K, h, now)
           if (lim > 0 and dc and (e.zn or 0) < 2 and not bdn and (dc < 0 or dc > lim)) or herb then
             nf = nf + 1
             if not far_one or (dc >= 0 and (far_dc < 0 or dc < far_dc)) then far_one, far_dc = e, dc end
-          else np = np + 1; predator = predator or e end
+          elseif lim > 0 and not wander_raise(e, dc, bdn, now) then       -- BUG-762: a roamer that raised PREDATOR before
+            nf = nf + 1
+            roam[e.id] = rt.wild[e.id].n
+            if not far_one or (dc >= 0 and (far_dc < 0 or dc < far_dc)) then far_one, far_dc = e, dc end
+          else
+            np = np + 1; preddc[e.id] = dc; predator = predator or e
+            if rt.wild[e.id] then rt.wild[e.id].c = now end         -- BUG-762: still the same episode
+          end
         end
       else
         nh = nh + 1
@@ -2005,8 +2047,9 @@ local function inside_scan(K, h, now)
     K.emit('PREDATOR_FAR', 'B', string.format('%d wild dangers on the citizens\' walkable group but far from the citizens '
            .. '(%d at %d,%d,%d, %s): no lockdown', nf, far_one.id, far_one.x, far_one.y, far_one.z,
            (far_dc >= 0 and ('nearest citizen ' .. far_dc .. ' tiles') or 'no citizen near')
-           .. (far_one.hb == 1 and '; plant eater' or '')),
-           {n = nf, id = far_one.id, pos = {far_one.x, far_one.y, far_one.z}, dc = far_dc, hb = far_one.hb})
+           .. (far_one.hb == 1 and '; plant eater' or '')
+           .. (roam[far_one.id] and string.format('; roamer, PREDATOR raised %d times, again only when it comes closer', roam[far_one.id]) or '')),
+           {n = nf, id = far_one.id, pos = {far_one.x, far_one.y, far_one.z}, dc = far_dc, hb = far_one.hb, roam = roam[far_one.id]})
   end
   if predator then
     if now - (rt.pred_last or -M.REARM) >= M.REARM then
@@ -2017,9 +2060,11 @@ local function inside_scan(K, h, now)
                                               math.tointeger(predator.zn), math.tointeger(predator.hb)
       interrupt(K, 'PREDATOR', string.format('%d wild dangers inside the fort (%d at %d,%d,%d)%s', np, predator.id,
                 predator.x, predator.y, predator.z, ftxt), facts)
+      wander_note(predator, preddc[predator.id], now)                   -- BUG-762
     end
     rt.pred_last = now
   end
+  if nf > 0 and not predator and next(roam) then rt.roam_t = now end    -- BUG-762: only roamers stand in the count (clock_step)
 end
 
 -- FR-58: ticks until the nearest visible invader or great danger could reach the nearest entrance; -1 unknown
@@ -2383,7 +2428,8 @@ local function clock_step(K, h, now)
   local hd = st.hold
   if not hd or not hd.acts.clock or not hd.why:find('^unacked:PREDATOR') or not FAR_MODES[K.mode()] then return end
   for k in pairs(hd.kinds) do if k ~= 'unacked' then return end end
-  if now - hd.since < M.PRED_CLOCK_DAYS * 1200 then return end
+  local roamer = rt.roam_t and now - rt.roam_t <= 2 * M.REARM          -- BUG-762: only a roamer is left in the count
+  if now - hd.since < (roamer and M.WANDER_CLOCK_DAYS or M.PRED_CLOCK_DAYS) * 1200 then return end
   if type(h) ~= 'table' or now - (h.tick or -1e9) > M.FRESH or (h.inside or 0) > 0 then return end
   hd.acts.clock, hd.clk_off, dirty = nil, now, true
   K.call('arbiter', 'hold')

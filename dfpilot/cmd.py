@@ -2806,6 +2806,8 @@ def site_params(tpl: str, params: dict | None, site: dict) -> dict | None:
         out = {**(out or {}), "depth": site["depth"]}
     if tpl == "explore" and isinstance(site.get("arm"), int) and "arm" not in (params or {}):      # BUG-528: the arm the site was ranked at
         out = {**(out or {}), "arm": site["arm"]}
+    if tpl == HOSPITAL_TPL and site.get("compact") == 1 and "compact" not in (params or {}):        # BUG-763: the compact room the site was ranked for
+        out = {**(out or {}), "compact": 1}
     return out
 
 

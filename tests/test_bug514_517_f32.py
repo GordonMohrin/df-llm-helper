@@ -95,7 +95,7 @@ def _ready(save, traps, **ready):
 def test_status_names_the_armed_traps_beside_a_bypass(save):
     _ready(save, {"m": 63, "n": 63})
     out = brief.status_text(save)
-    assert "| traps 0 of 63 armed (a bypass skips the hall)" in out, out
+    assert "| traps 0 on the cheapest route, 63 of 63 armed in all (a bypass skips the hall)" in out, out
     _ready(save, None)
     assert "| traps 0 (a bypass skips the hall)" in brief.status_text(save)
     _ready(save, {"m": 63, "n": 63}, audit={"ok": 0, "age": 9000, "min_traps": 4})

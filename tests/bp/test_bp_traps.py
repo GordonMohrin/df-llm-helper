@@ -31,7 +31,7 @@ def test_run10_bypass_no_longer_zeroes_the_trap_count():
     assert info["traps"]["armed"] == info["traps"]["hall"] == 41
     assert info["traps"]["any_route"] == 0 and info["traps"]["walls"] == 1
     note = wake.trap_note(info, res)
-    assert "41 of 41 armed traps in the trap hall" in note and "the bypass itself meets 0" in note
+    assert "41 armed traps, 41 of them in the trap hall" in note and "the bypass itself meets 0" in note
 
 
 def test_side_way_into_the_hall_end_reads_zero_and_says_where():
@@ -47,4 +47,4 @@ def test_side_way_into_the_hall_end_reads_zero_and_says_where():
 def test_plain_fort_counts_the_hall():
     res, info = audit([])
     assert res["ok"] and res["min_traps"] == 35 and info["traps"]["enters"] == list(L(0, 17, -2))
-    assert wake.trap_note(info, res) == " (41 of 41 armed traps in the trap hall)"
+    assert wake.trap_note(info, res) == " (41 armed traps, 41 of them in the trap hall)"
