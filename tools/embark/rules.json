@@ -27,7 +27,7 @@
  "aquifer_span": {"light": 4, "varied": 6, "heavy": 8},
  "stone_score_per_level": 3,
  "core_span": {"light": 8, "varied": 10, "heavy": 14},
- "core_reach_warn": 9,
+ "core_reach_warn": 8,
  "core_reach_max": 13,
  "core_reach_note": "BUG-531 (Run 16a i1 Basementflew: 'light' panel, soil 'some', real aquifer z114-z127 = 14 levels with heavy layers, no core below it ever): the core goes under every aquifer level. core_span = the worst span seen per panel class; core reach = soil levels + core_span; above core_reach_warn the aquifer item warns, above core_reach_max it fails (acceptable with --accept aquifer --reason). A site whose stone item already fails (deep soil) is not failed twice. The panel cannot show the real span: this is a warning, the first aqshaft measures.",
  "aquifer_span_note": "BUG-465 (Run 16a i1 Basementflew: 15 soil levels and a 'light' panel, real light z126/127 over heavy z120-123; Run 16b i2: z112 and z115 heavy, z118-120): the panel names a class, never the span. aquifer_span = estimated aquifer levels per class, the hard stone lies below them (reach = soil levels + span, shown in the stone item and the scan summary). stone_score_per_level = score a stone warning loses per soil level beyond stone_pass_levels; embark.py rank puts the nearest hard stone first.",

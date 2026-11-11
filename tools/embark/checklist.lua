@@ -31,8 +31,10 @@ C.DEFAULT = {
   -- so no core could be dug under it, the fort never had one and fell at y406): the core goes UNDER every aquifer level. The panel gives a
   -- class, never the span; core_span = the worst span seen per class (BUG-465's aquifer_span is the usual one), core reach = soil levels +
   -- core_span. core_reach_warn: above it the aquifer item warns and says so; core_reach_max: above it it fails (acceptable with a reason)
+  -- BUG-725 (Run 16c i3 Doorwings: panel 'light', soil 'little' = reach 1 + 8 = 9, no warning; the real aquifer ran z131-z140 = 10 levels with
+  -- heavy z131-z133, four shafts stopped on the heavy ring, no core ever): the warning starts above 8 (a 'light' panel on little soil warns)
   core_span = {light = 8, varied = 10, heavy = 14},
-  core_reach_warn = 9, core_reach_max = 13,
+  core_reach_warn = 8, core_reach_max = 13,
   sizes = {{3, 3}, {4, 4}},
   fail_popups = {'heavy_aquifer', 'salt_water', 'evil', 'savage', 'necro', 'early_invasion', 'no_stone', 'cannot',
     'water_mountain'},
@@ -272,8 +274,9 @@ function C.evaluate(rec, rules, ctx)
         '(%d soil + up to %d of the %s aquifer, more than the %d a shaft and a core can do)', creach, lv, cspan, aqc, cmax)
     elseif creach > cwarn then
       res, txt = 'warn', string.format('the core must go under the aquifer: up to %d levels to the hard stone below it (%d soil + up to %d of the ' ..
-        '%s aquifer); the panel shows a class, not the span (Basementflew: 14 levels, heavy layers inside, no core below it ever) - the ' ..
-        'first aqshaft shows the real span; plan a stone source above it', creach, lv, cspan, aqc)
+        '%s aquifer); the panel shows a class, not the span or the weight: a "light" panel hides heavy layers (Basementflew: 14 levels, ' ..
+        'heavy inside, no core below it ever; Doorwings: light panel, z131-z140 with heavy z131-z133, four shafts stopped on the ring) - ' ..
+        'the first aqshaft shows the real span; plan a stone source above it', creach, lv, cspan, aqc)
     end
     if res then
       for _, it in ipairs(items) do
