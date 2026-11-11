@@ -93,6 +93,7 @@ local function setup(o)
   end})
   W.mil, W.drill = S.military(), S.drill()
   local mods = {W.mil, W.drill}
+  if o.care then mods[#mods + 1] = o.care end
   if o.reflex then                                  -- BUG-511: the arrival lockdown (reflex) holds the gates up in PEACE
     local snap = {name = 'snapshot', every = {ticks = 100}}
     function snap.tile() return {c = '.', dig = '', bld = ''} end
@@ -199,6 +200,23 @@ T.test('BUG-511: an arrival lockdown (the raiders not in sight yet, PEACE) alrea
     if u and in_box(u.pos, b._bbox) then there = there + 1 end
   end
   T.eq(there, 2, 'both stand in the room')
+end)
+
+T.test('BUG-754: a citizen at extreme stress (care.stress_ids) is no lever puller: the next nearest one is chosen (old: 7 and 8)', function()
+  local care = {name = 'care', every = {ticks = 1200}}
+  function care.stress_ids() return {[7] = true} end
+  local W = setup{care = care}
+  run(W, 300, {{50, drill}})
+  local z3 = assigns(W, 'dfllm-levers')
+  T.ok(#z3 >= 1, 'pullers assigned')
+  for _, a in ipairs(z3) do
+    for _, id in ipairs(a.ids) do T.ok(id ~= 7, 'unit 7 is at extreme stress: not a puller (' .. T.show(a.ids) .. ')') end
+  end
+  local W0 = setup{}
+  run(W0, 300, {{50, drill}})
+  local seen7 = false
+  for _, a in ipairs(assigns(W0, 'dfllm-levers')) do for _, id in ipairs(a.ids) do if id == 7 then seen7 = true end end end
+  T.ok(seen7, 'without the stress set unit 7 is one of the two nearest (the test means something)')
 end)
 
 T.done()

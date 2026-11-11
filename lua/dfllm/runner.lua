@@ -7681,7 +7681,11 @@ function M.repair(K, cells, why, opts)
       end
     end
   end
-  local ok, err = register(K, id, d, cl and 1 or 2, 'repair')
+  -- BUG-754 (Run 16b i2 Whirledrampart y437-y440: B1 and O1 toppled in tantrums, 14-20 days until they stood again, open perimeter): opts.prio
+  -- (1..7, a number) sets the project's priority; seal gives a lost bridge's repair prio 1, ahead of the plan's own projects
+  local prio = type(opts) == 'table' and int(opts.prio) or nil
+  if prio and (prio < 1 or prio > 7) then prio = nil end
+  local ok, err = register(K, id, d, cl and 1 or prio or 2, 'repair')
   if not ok then return false, err end
   save(K)
   K.log('info', 'repair %s queued: %d cells (%s)', id, #list, tostring(why or ''))

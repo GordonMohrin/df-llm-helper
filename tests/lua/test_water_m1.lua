@@ -470,7 +470,6 @@ T.test('BUG-343 (Guildcleans y389: dead patients with wounds 0 and the thought S
   T.eq(M.lie(K, nil), '')
 end)
 
-T.done()
 
 ---------------------------------------------------------------- BUG-537
 T.test('BUG-537: a hospital with a patient and no table, no splints, no thread, no cloth raises DECISION_NEEDED hospital_supply once ' ..
@@ -504,3 +503,19 @@ T.test('BUG-537: a hospital with a patient and no table, no splints, no thread, 
   for _, e in ipairs(W2.find_events('DECISION_NEEDED')) do if e.d.id == 'hospital_supply' then n = n + 1 end end
   T.eq(n, 0, 'no patient lies there: no question')
 end)
+
+T.test('BUG-755: more patients than beds in the zone: the hospital_supply question names no_bed first, with the furnish=2 command', function()
+  local W = audit_world{furniture = {bed = 1, table = 1, bench = 1}, doctors = ALL_DOC, skilled = {1}, supplies = FULL,
+                        patients = {{id = 5, thirst = 1000, care = true, pos = {11, 11, 5}},
+                                    {id = 6, thirst = 1000, care = true, pos = {11, 12, 5}},
+                                    {id = 7, thirst = 1000, care = true, pos = {11, 13, 5}}}}
+  day(W)
+  local a = {}
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'hospital_supply' then a[#a + 1] = e end end
+  T.eq(#a, 1)
+  T.eq(a[1].d.gaps, {'no_bed'})
+  T.eq(a[1].d.cmds, {'dfllm cmd bp.place \'{"tpl":"hospital","site":"S1","p":{"furnish":2}}\''})
+  T.ok(a[1].d.q:find('lacks beds in the zone', 1, true), a[1].d.q)
+end)
+
+T.done()

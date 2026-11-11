@@ -658,7 +658,14 @@ end
 
 -- why a citizen cannot be (or stay) a lever puller: 'gone' = dead, insane (isCitizen is sane only), no citizen,
 -- child, soldier or in a strange mood (df.mood_type None = -1); 'needs' = thirsty or hungry; nil = fit
-local function unfit(u)
+-- BUG-754 (Run 16b i2 Whirledrampart y437-y440: tantrum citizens toppled B1 and O1): `xs` = care's citizens at extreme stress
+-- ({[id] = true}); one of them is no puller ('stress', may serve again once calm). The set is read once per pass (xs_set)
+local function xs_set(K)
+  local ok, xs = K.call('care', 'stress_ids')
+  return ok and type(xs) == 'table' and xs or {}
+end
+
+local function unfit(u, xs)
   if not u then return 'gone' end
   local U = dfhack.units
   local ok, r = pcall(function()
@@ -673,6 +680,7 @@ local function unfit(u)
   if counter(u, 'thirst_timer') >= M.PULLER_THIRST or counter(u, 'hunger_timer') >= M.PULLER_HUNGER then
     return 'needs'
   end
+  if xs and xs[u.id] then return 'stress' end
   return nil
 end
 
@@ -698,6 +706,7 @@ end
 
 -- nearest eligible citizens inside Kern+/Tiefe+ (z counts double: stairs), outside ones only as a last resort
 local function fill(K, rm, want, p, taken, now, home)
+  local xs = xs_set(K)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return end
   local c, cand = rm.c, {}
@@ -705,7 +714,7 @@ local function fill(K, rm, want, p, taken, now, home)
   for _, id in ipairs(cu.ids) do
     if not taken[id] and not p.skip[id] then
       local u = df.unit.find(id)
-      if unfit(u) == nil then
+      if unfit(u, xs) == nil then
         local x, y, z = unit_pos(u)
         if x then
           local d = math.max(math.abs(x - c.x), math.abs(y - c.y)) + 2 * math.abs(z - c.z)
@@ -773,12 +782,13 @@ local function pullers_step(K, now)
     local want, why_of = {}, {}
     if duty(K, rm, mode) then
       local b = burrow(rm.name)
+      local xs = xs_set(K)
       for _, id in ipairs(p.ids) do
         local u = df.unit.find(id)
-        local why = unfit(u)
+        local why = unfit(u, xs)
         if not why and not on_tile(b, unit_pos(u)) and now - (p.at[id] or now) >= arrive_allow(p, id) then why = 'away' end
         if why then
-          if why ~= 'needs' then p.skip[id] = true end   -- thirsty/hungry: may serve again after a drink and a meal
+          if why ~= 'needs' and why ~= 'stress' then p.skip[id] = true end   -- thirsty/hungry: may serve again after a drink and a meal
           taken[id], why_of[id] = nil, why
         else
           want[#want + 1] = id

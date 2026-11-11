@@ -49,7 +49,8 @@ local function fort(o)
   W.cells = {}
   W.load(SW.fake('runner', {repair = function(K, cells, why, opts)
     W.cells[#W.cells + 1] = {cells = cells, why = why, peace = type(opts) == 'table' and opts.peace == true,
-                             closure = type(opts) == 'table' and opts.closure == true}
+                             closure = type(opts) == 'table' and opts.closure == true,
+                             prio = type(opts) == 'table' and opts.prio or nil}
     return true, 'rp' .. #W.cells
   end}))
   W.act_result('link_lever', function(lid, bid)
@@ -317,6 +318,15 @@ T.test('BUG-081: the closure stands when the runner replaced its stuck door by a
   local _, rep = W.K.call('seal', 'replaced')
   T.ok(rep and rep.O1 ~= nil, 'the bridge is replaced')
   T.eq(#W.cells, 2, 'not queued again')
+end)
+
+T.test('BUG-754: the repair of a lost bridge is queued with priority 1 (a tantrum toppled B1 and O1: 14-20 days until they stood)', function()
+  local W = fort()
+  record(W, 'gw(1x1)')
+  destroy(W)
+  run(W, 2600)
+  T.eq(#W.cells, 1)
+  T.eq(W.cells[1].prio, 1, 'old code: no priority, the runner gave 2')
 end)
 
 T.done()
