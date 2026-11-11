@@ -142,6 +142,12 @@ M.DEFAULTS = {
   -- why=patient_water (at most every request_every, none while a cistern project is pending) and the GiveWater verdict names the
   -- distance. 0 = off
   patient_far = 40,
+  -- BUG-708 (Run 16b i2 Whirledrampart y430: a 200-day SIEGE lockdown, both core wells dry, the only accepted water a zone outside the
+  -- walls, ~20 patients dead of thirst under 'hospital ok'): in a lockdown a source outside Kern+/the refuge/the alert burrows is
+  -- no water for the hospital (it is dry: the zones go, patients drink from the stock), and with no source inside at all
+  -- DECISION_NEEDED siege_no_water names the dry wells, the drink stock, why a cistern is refused and what would pass, at once and
+  -- again every siege_water_every ticks
+  siege_water_every = 7 * DAY,
   -- BUG-383 (Run 16b i2 y381: unit 26275 died of thirst at 75,001 with '1 GiveWater job running 25+ days without effect'): a
   -- `noeffect` verdict releases the carriers of the running GiveWater jobs from the Orderlies detail for one run (at most
   -- restale_max of them, again after restale_every) so the game drops the stale job and posts a new one; restale false: off
@@ -604,10 +610,28 @@ local function phase_buckets(K, c, r)
 end
 
 ---------------------------------------------------------------- decisions
+-- BUG-708 (Run 16b i2 Whirledrampart y430, a 200-day SIEGE lockdown: both wells in the core went dry, the only accepted water was a
+-- zone 19-41 tiles outside the walls, 'hospital ok' stood while ~20 patients died of thirst): in a lockdown (r.lock, set by finish:
+-- SIEGE/BREACH, the civ alert sounding, a Kern+ burrow) an accepted source the citizens cannot reach is none for them. It reaches
+-- them when it lies on Kern+, the refuge, an alert burrow, or a tile of the open care burrow (Pflege+, BUG-330/571)
+local function outer(r, s)
+  local lk = r and r.lock
+  if not (lk and s and s.x) then return false end
+  local tiles = {{s.x, s.y, s.z}}
+  if s.box then tiles = {{s.box.x1, s.box.y1, s.box.z}, {s.box.x2, s.box.y2, s.box.z}} end
+  for _, t in ipairs(tiles) do
+    local inside = on_burrow(lk.kern, t[1], t[2], t[3]) or (lk.refuge and on_burrow(lk.refuge, t[1], t[2], t[3])) or false
+    for _, e in ipairs(lk.bs or {}) do if not inside and e.b and on_burrow(e.b, t[1], t[2], t[3]) then inside = true end end
+    for _, q in ipairs(lk.care or {}) do if q[1] == t[1] and q[2] == t[2] and q[3] == t[3] then inside = true end end
+    if not inside then return true end
+  end
+  return false
+end
+
 local function served(K, c, r, h)
   local best
   for _, s in ipairs(r.sources) do
-    if s.wet and not s.emerg then                       -- BUG-425: an emergency well is no hospital water
+    if s.wet and not s.emerg and not outer(r, s) then   -- BUG-425: an emergency well is no hospital water; BUG-708: nor one outside the lockdown
       local d = dist_box(s.x, s.y, s.z, h)
       if not best or d < best.d then best = {d = d, s = s} end
     end
@@ -2796,6 +2820,20 @@ local function in_set(bs, x, y, z)
   return false
 end
 
+-- BUG-708: the lockdown of this run, nil outside one: {kern, refuge, bs (the alert burrows), care (the open care burrow's tiles),
+-- mode}. A lockdown = SIEGE or BREACH, the civ alert sounding and a Kern+ burrow (without one nothing says where the walls are)
+function M.lockdown(K)
+  local mode = K.mode()
+  if not FIGHT[mode] then return nil end
+  local kern = burrow(K, 'kern', 'Kern+')
+  if not kern then return nil end
+  local bs = alert_set(K)
+  if not bs then return nil end
+  local refuge = burrow(K, 'refuge', 'Tiefe+')
+  return {kern = kern, refuge = refuge, bs = bs, mode = mode,
+          care = (st.care and st.care.on and type(st.care.tiles) == 'table') and st.care.tiles or nil}
+end
+
 -- the distance of the nearest visible hostile to x,y,z (Chebyshev, z counted); -1 = none in sight; nil = no fresh census
 function M.foe_dist(K, x, y, z)
   local h = K.census.h
@@ -3552,6 +3590,63 @@ function M.aq_level(K)
   return best
 end
 
+-- BUG-708: a lockdown (r.lock) with no accepted water inside it. The dry wells, the drink stock (seal's audit of Kern+), the nearest
+-- water outside, the care burrow's answer, why `bp.place cistern` is refused (BUG-469) and what would pass. Returns the text or nil
+function M.siege_water(K, c, r, p, now, patients, tmax)
+  if not r.lock then p.sw = nil; return nil end
+  local inner, outside, dry = 0, nil, {}
+  for _, s in ipairs(r.sources) do
+    if s.wet and not s.emerg then
+      if s.outer then
+        if not outside then outside = s end
+      else
+        inner = inner + 1
+      end
+    elseif s.kind == 'well' and s.built ~= false and not s.wet and not s.removing and s.x and #dry < 3 then
+      local b = s.below
+      dry[#dry + 1] = string.format('well %d at %d,%d,%d (%s)', s.id, s.x, s.y, s.z,
+                                    b and b.why == 'shallow' and string.format('shallow, %d/7', b.flow or 0) or 'dry')
+    end
+  end
+  if inner > 0 then p.sw = nil; return nil end
+  p.sw = type(p.sw) == 'table' and p.sw or {}
+  local last = math.tointeger(p.sw.t)
+  if last and now - last < c.siege_water_every then return nil end
+  p.sw.t = now
+  local ref = r.hosp[1] or r.patients[1]
+  local parts = {string.format('%s lockdown with no working water inside the walls', r.lock.mode)}
+  if #dry > 0 then parts[#parts + 1] = table.concat(dry, ', ') end
+  if outside then
+    parts[#parts + 1] = string.format('%s %d at %d,%d,%d outside (%d tiles)', outside.kind, outside.id, outside.x, outside.y,
+                                      outside.z, ref and cheb({ref.x1 and (ref.x1 + ref.x2) // 2 or ref.x, ref.y1 and (ref.y1 + ref.y2) // 2 or ref.y,
+                                                              ref.z}, outside.x, outside.y, outside.z) or -1)
+  else
+    parts[#parts + 1] = 'no accepted water anywhere'
+  end
+  local okd, dr = K.call('seal', 'refuge_drink', 'kern')
+  if okd and type(dr) == 'table' then
+    parts[#parts + 1] = string.format('drink %d for %d citizens', dr.drink or 0, dr.need or 0)
+  end
+  parts[#parts + 1] = string.format('%d patient(s), thirst %d', patients, tmax)
+  local care = st.care and st.care.why
+  if care then parts[#parts + 1] = 'care burrow: ' .. tostring(care) end
+  local recipe = 'hospital zone goes, patients drink the stock; cistern refused (BUG-469) unless aquifer level known (water=aquifer), ' ..
+                 'pipe path given or water within 40 steps'
+  local text = trunc(table.concat(parts, '; '), 200)
+  local cmds = json.array{'dfllm cmd inspect what=water_sources', 'dfllm cmd inspect what=hospital'}
+  if ref and ref.z then
+    local x = ref.x1 and (ref.x1 + ref.x2) // 2 or ref.x
+    local y = ref.y1 and (ref.y1 + ref.y2) // 2 or ref.y
+    cmds[#cmds + 1] = string.format('dfllm bp sites cistern --near %d,%d,%d --within 15 --fresh', x, y, ref.z)
+  end
+  cmds[#cmds + 1] = [[dfllm cmd bp.place '{"tpl":"refuge_drink","site":"S1"}']]
+  K.emit('DECISION_NEEDED', 'A', trunc(text, 200),
+         {id = 'siege_no_water', q = text, how = trunc(recipe, 200), patients = patients, thirst = tmax, wells = #dry,
+          outside = outside and outside.id or nil, drink = okd and type(dr) == 'table' and dr.drink or nil, cmds = cmds})
+  K.log('warn', 'water: %s: %s', text, recipe)
+  return text
+end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   local T = K.now()
@@ -3559,18 +3654,25 @@ local function finish(K, c, r, p)
   M.loops(K, c, r, p)                                   -- BUG-263: a well fed only by its own pond is no accepted source
   local okpb, errpb = pcall(M.pond_block, K, c, r, p, now)     -- BUG-615: a pond zone beside a dry well, citizens thirsting at it
   if not okpb then K.log('warn', 'water: pond_block failed: %s', tostring(errpb)) end
-  local hosp_ok, best_h, dry_h = #r.hosp > 0, nil, nil
-  for _, h in ipairs(r.hosp) do
-    local ok, b = served(K, c, r, h)
-    if not ok then hosp_ok, dry_h = false, dry_h or h end
-    if b and (not best_h or b.d < best_h.d) then best_h = b end
-  end
   local refuge, rname = burrow(K, 'refuge', 'Tiefe+')
   local kern, kname = burrow(K, 'kern', 'Kern+')
   local ho = M.hosp_sort(K, r, hospital_out(r, kern, refuge, kname, rname))    -- BUG-036, BUG-131
   st.hout, st.hz = ho, r.hosp
   M.care_step(K, c, r, now)                             -- BUG-330: the care burrow before the texts that name it
   patients_out(K, r, kern, refuge, kname, rname, ho)
+  -- BUG-708: in a lockdown a source outside the walls is none for the hospital (the care burrow just opened or kept counts: its tiles
+  -- are ones the carriers may walk)
+  local okl, lk = pcall(M.lockdown, K)
+  r.lock = okl and lk or nil
+  if r.lock then
+    for _, s in ipairs(r.sources) do if s.wet and outer(r, s) then s.outer = true end end
+  end
+  local hosp_ok, best_h, dry_h = #r.hosp > 0, nil, nil
+  for _, h in ipairs(r.hosp) do
+    local ok, b = served(K, c, r, h)
+    if not ok then hosp_ok, dry_h = false, dry_h or h end
+    if b and (not best_h or b.d < best_h.d) then best_h = b end
+  end
   local refuge_ok, rwells, rwet = false, 0, 0          -- BUG-035: the wells in the refuge and the wet ones of them
   for _, s in ipairs(r.sources) do
     -- BUG-040: the burrow each source stands on (Kern+ first, else the refuge): state water.src_l, M.label
@@ -3824,6 +3926,8 @@ local function finish(K, c, r, p)
   end
   -- BUG-434: patients thirsty with no accepted water within patient_far tiles of them: the cistern is asked for whatever hospital zone
   -- there is (or not: the gate above needs a hospital zone or project). Nothing while a cistern project is pending
+  local oks, errs = pcall(M.siege_water, K, c, r, p, now, #r.patients, tmax)      -- BUG-708
+  if not oks then K.log('warn', 'water: siege_water failed: %s', tostring(errs)) end
   local pf = math.tointeger(c.patient_far) or 0
   if pf > 0 and thirsty > 0 then
     local worst, wd

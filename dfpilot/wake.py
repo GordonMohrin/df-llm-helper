@@ -262,7 +262,7 @@ ERR_EVERY_S = 60                               # stderr 'poll error' at most onc
 URGENT_GAME = {"YEAR_REVIEW", "MOOD_RISK", "MOOD_CRITICAL", "DEATH", "STRANDED", "PATIENT_DYING"}
 URGENT_DECISIONS = {"drink_low", "food_low", "famine", "thirst", "patient_thirst", "stranded_drink", "stranded_food",
                     "mood_deadline", "no_water", "thirst_unit", "job_stalled", "mood_thirst", "dry_well", "patient_out",
-                    "pond_blocks_well"}   # BUG-340; BUG-391; BUG-395; BUG-401; BUG-416; BUG-422; BUG-507; BUG-509; BUG-541; BUG-559; BUG-615
+                    "pond_blocks_well", "siege_no_water"}   # BUG-340; BUG-391; BUG-395; BUG-401; BUG-416; BUG-422; BUG-507; BUG-509; BUG-541; BUG-559; BUG-615; BUG-708
 URGENT_GAME_TICKS = schema.TICKS["DAY"]
 HELD_NOTE_S = 600                              # BUG-240: the 'HELD' line for wakes the hourly limit holds, at most this often
 
