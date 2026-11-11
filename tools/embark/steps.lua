@@ -219,6 +219,7 @@ local function zoomed_tile(v)
   if not cs then return nil end
   return cs.zoom_world or cs.region
 end
+local WORLD_PROBE = {-1, 1, -2, 2}      -- BUG-726: click shifts (grid cells) tried for an edge tile before an offset is known
 function S.goto_world(wx, wy, cfg)
   return {id = 'world.goto', live = 'L0', tries = 8, timeout_ms = 90000,
     wait = function(v) return kind_in(v, 'world', 'local', 'placing') end,
@@ -227,19 +228,48 @@ function S.goto_world(wx, wy, cfg)
       if w and w.inject and ctx.injected ~= nil then w.inject(false); ctx.injected = nil end
       local r = zoomed_tile(v)
       if kind_in(v, 'local') and r and r[1] == wx and r[2] == wy then return 'done', 'already there' end
-      ctx.w_new = false
+      ctx.w_cam = nil
       if not kind_in(v, 'world') then rclick(ui, cfg) return nil, 'zooming out' end
       local e = ctx.wofs or {0, 0}
-      ctx.w_cam, ctx.w_new = {wx - e[1], wy - e[2]}, true
-      w.camera('world', ctx.w_cam[1], ctx.w_cam[2])
+      -- BUG-726 (Run 16d i4: `rank --box 0,17,...` and a box at y=0 failed 'not zoomed in' x8): the camera is the target minus the learnt
+      -- offset, so at the map edge it went below 0 (or past the last tile) and the click at the window centre hit no region. The camera
+      -- stays inside the map; the tiles the clamp took away are a click shift from the window centre (one grid cell per world tile).
+      -- Before an offset is learnt an edge tile that did not zoom tries the click one cell aside (0, -1, +1, -2, +2)
+      local cam, sx, sy = {wx - e[1], wy - e[2]}, 0, 0
+      if cam[1] < 0 then sx, cam[1] = cam[1], 0 end
+      if cam[2] < 0 then sy, cam[2] = cam[2], 0 end
+      local mw, mh
+      if w.world_size then mw, mh = w.world_size() end
+      if mw and cam[1] > mw - 1 then sx, cam[1] = cam[1] - (mw - 1), mw - 1 end
+      if mh and cam[2] > mh - 1 then sy, cam[2] = cam[2] - (mh - 1), mh - 1 end
+      if not ctx.wofs and (ctx.w_miss or 0) > 0 then
+        local probe = WORLD_PROBE[(ctx.w_miss - 1) % #WORLD_PROBE + 1]
+        if wx <= 1 or (mw and wx >= mw - 2) then sx = sx + probe end
+        if wy <= 1 or (mh and wy >= mh - 2) then sy = sy + probe end
+      end
+      ctx.w_cam, ctx.w_shift = cam, {sx, sy}
+      w.camera('world', cam[1], cam[2])
       ui:wait(cfg.camera_ms)
-      ui:click_pct(cfg.world_click[1], cfg.world_click[2])
+      if sx == 0 and sy == 0 then
+        ui:click_pct(cfg.world_click[1], cfg.world_click[2])
+      else
+        local ww, hh = ui.env.win()
+        local tpx, tpy = ui.env.tile_px()
+        ui:click_px(ww * tpx * cfg.world_click[1] // 100 + sx * tpx, hh * tpy * cfg.world_click[2] // 100 + sy * tpy)
+      end
     end,
     done = function(v, ctx)
       local r = zoomed_tile(v)
-      if not kind_in(v, 'local') or not r then return false, 'not zoomed in' end
+      if not kind_in(v, 'local') or not r then
+        if ctx.w_cam then ctx.w_miss = (ctx.w_miss or 0) + 1 end     -- BUG-726: the click hit no region
+        return false, 'not zoomed in'
+      end
+      ctx.w_miss = nil
       if r[1] == wx and r[2] == wy then return true, 'at world tile ' .. wx .. ',' .. wy end
-      if ctx.w_new then ctx.wofs = {r[1] - ctx.w_cam[1], r[2] - ctx.w_cam[2]} end
+      if ctx.w_cam then
+        local sh = ctx.w_shift or {0, 0}
+        ctx.wofs = {r[1] - ctx.w_cam[1] - sh[1], r[2] - ctx.w_cam[2] - sh[2]}     -- the centre click's offset, a click shift excluded
+      end
       return false, 'landed on ' .. r[1] .. ',' .. r[2]
     end}
 end

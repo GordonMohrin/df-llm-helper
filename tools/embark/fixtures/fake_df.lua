@@ -245,7 +245,9 @@ function F.new(opt)
         end
       end
       if D.screen == 'world' then
-        D.region = {D.cent[1] + D.world_err[1], D.cent[2] + D.world_err[2]}
+        -- BUG-726: a click shifted from the window centre moves the tile one grid cell per tile; no region off the map (no zoom)
+        D.region = {D.cent[1] + D.world_err[1] + (tx - D.w // 2), D.cent[2] + D.world_err[2] + (ty - D.h // 2)}
+        if D.region[1] < 0 or D.region[2] < 0 or D.region[1] >= (D.world_w or 1e9) or D.region[2] >= (D.world_h or 1e9) then return end
         D.zoom = {D.region[1] * 16 + 8, D.region[2] * 16 + 8}  -- live L0: the local view centres the tile
         D.screen = 'local'
       elseif D.screen == 'placing' and not D.popup then
@@ -267,7 +269,12 @@ function F.new(opt)
       if type(keys) == 'table' and keys._MOUSE_L then click('L') elseif type(keys) == 'table' and keys._MOUSE_R then click('R') end
     end,
     tile_px = function() return D.tpx, D.tpy end, win = function() return D.w, D.h end}
-  D.w_api = {camera = function(which, x, y) if which == 'world' then D.cent = {x, y} else D.zoom = {x, y} end end,
+  D.w_api = {camera = function(which, x, y)
+      if which == 'world' then   -- BUG-726: DF keeps the world camera on the map
+        D.cent = {math.max(0, math.min(x, (D.world_w or 1e9) - 1)), math.max(0, math.min(y, (D.world_h or 1e9) - 1))}
+      else D.zoom = {x, y} end
+    end,
+    world_size = function() return D.world_w, D.world_h end,
     select_unit = function(i) D.selected = i end,
     scroll = function(which, n)   -- BUG-230: DF clamps the scroll so the last rows stay filled
       local list = which == 'world' and D.worlds or (D.world and D.worlds[D.world].saves) or {}
