@@ -330,6 +330,7 @@ C.ACT = {
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
+  rescue_ramp = {'seal'},                          -- BUG-769: one ramp on a plain wall tile beside a one-level drop with stranded citizens
   cancel_stray_job = {'seal'},                     -- BUG-751: an outdoor errand whose target has no way back to drink and food
   cancel_link_job = {'gate'}, labor_set = {'economy'},          -- BUG-546, BUG-547
   construction_remove = {'seal'},                  -- BUG-479: the refuge plug's walls come down in PEACE

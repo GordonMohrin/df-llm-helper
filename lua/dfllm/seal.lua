@@ -1399,7 +1399,7 @@ function M.edge_blame(gc, has, from, slice)
               if rev(x, y, z - 1) and s and (s.shape == 'WALL' or s.shape == 'FORTIFICATION') then
                 kind = s.mat == 'CONSTRUCTION' and 'wall top' or 'rock top'
               end
-              return {x, y, z, kind, string.format('drop to %d,%d,%d', x + dx, y + dy, z - dz)}
+              return {x, y, z, kind, string.format('drop to %d,%d,%d', x + dx, y + dy, z - dz), x + dx, y + dy, z - dz}   -- BUG-769: [6..8] the target tile
             end
           end
         end
@@ -1444,6 +1444,174 @@ function M.separator(K, pos, id)
   local b = M.edge_blame(gc, has, pos, false)
   if not b then return nil end
   return {pos = {b[1], b[2], b[3]}, kind = b[4], to = b[5], job = id and M.job_name(id) or nil}
+end
+
+-- BUG-769 (Run 16d i4 Pagedsculpture y407: one citizen on walk group 1778 at 119,109,143, a one-level drop over the fort's group 15, thirst
+-- 39,960 -> 51,860, STRANDED 'no rescue (no raised bridge leads to drink and food)': no bridge serves a one-way drop, nothing dug a way back
+-- and the cistern search found nothing on their group): a safe ramp. The stranded group lies ONE level above a group with drink and food
+-- (edge_blame's drop). A wall tile W on the lower level, beside that group (orthogonally: the ramp's foot) and under a tile of the stranded
+-- group (any of the eight beside W one level up: the ramp's head), is dug as a ramp: the two groups join. Only in quiet PEACE (a way
+-- into the fort opens a way out of it), only where the ground is plain: W natural rock or soil, no building, not designated, revealed;
+-- no revealed liquid within 3 tiles (one level below to two above), no level the manifest knows as aquifer and no open shaft (empty above empty) within 3 tiles
+-- on W's level and the one under it; every tile beside W (up, down, four sides) revealed, never under open sky.
+-- Nothing is dug when no W passes: the answer names the first reason. A hauler cannot cross the drop, so no food or drink is delivered:
+-- the report says so.
+M.RAMP_R, M.RAMP_SAFE, M.RAMP_AGAIN, M.RAMP_MAX = 2, 3, 2 * DAY, 3
+M.RAMP_MAT = {STONE = true, SOIL = true, MINERAL = true}
+function M.ramp_unsafe(x, y, z, aql)
+  local R = M.RAMP_SAFE
+  for zz = z - 1, z + 2 do                                  -- a level the manifest knows as aquifer (seen damp or wet): never
+    if aql and aql[zz] then return string.format('the aquifer level z%d', zz) end
+  end
+  for dx = -R, R do
+    for dy = -R, R do
+      for zz = z - 1, z + 2 do
+        local des = rev(x + dx, y + dy, zz)
+        if des then
+          if (tonumber(des.flow_size) or 0) > 0 then
+            return string.format('water at %d,%d,%d', x + dx, y + dy, zz)
+          end
+          if zz == z or zz == z - 1 then
+            local s, b = shape(x + dx, y + dy, zz), shape(x + dx, y + dy, zz - 1)
+            if s and b and s.shape == 'EMPTY' and b.shape == 'EMPTY' then
+              return string.format('an open shaft at %d,%d,%d', x + dx, y + dy, zz)
+            end
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- the best candidate: {w = {x,y,z}, foot = {x,y,z}, head = {x,y,z}} or nil, the first reason
+function M.ramp_pick(gc, has, s, zl, aql)
+  local best, why, wpri
+  local function note(r, pri)                               -- the most telling reason: a safety reason beats 'no join'
+    pri = pri or 2
+    if not why or pri > wpri then why, wpri = r, pri end
+  end
+  for dx = -M.RAMP_R, M.RAMP_R do
+    for dy = -M.RAMP_R, M.RAMP_R do
+      local x, y = s[1] + dx, s[2] + dy
+      local des, occ = rev(x, y, zl)
+      local sh = des and shape(x, y, zl)
+      if des and sh and sh.shape == 'WALL' and M.RAMP_MAT[sh.mat] then
+        if bld_on(x, y, zl, occ) then
+          note('a building on the wall tile')
+        elseif (tonumber(des.dig) or 0) ~= 0 then
+          note('the wall tile is designated already')
+        else
+          local foot, head
+          for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+            local g = grp(x + d[1], y + d[2], zl)
+            if g and g ~= 0 and has[g] and g ~= gc and not foot then foot = {x + d[1], y + d[2], zl} end
+          end
+          for ex = -1, 1 do
+            for ey = -1, 1 do
+              if (ex ~= 0 or ey ~= 0) and not head then
+                local g = grp(x + ex, y + ey, zl + 1)
+                if g and g == gc then head = {x + ex, y + ey, zl + 1} end
+              end
+            end
+          end
+          if not (foot and head) then
+            note('no wall tile joins the two groups', 1)
+          else
+            local dt = rev(x, y, zl + 1)
+            local st = shape(x, y, zl + 1)
+            local top_ok = dt ~= nil and st ~= nil and st.mat ~= 'CONSTRUCTION' and st.mat ~= 'TREE' and st.mat ~= 'ROOT'
+            local hd = rev(head[1], head[2], head[3])
+            local open = false
+            for _, o in ipairs({{0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}}) do
+              if rev(x + o[1], y + o[2], zl + o[3]) == nil then open = true end
+            end
+            if not top_ok then note('the tile above the wall is not plain ground')
+            elseif open then note('a tile beside the wall tile is not revealed')
+            elseif des.outside or dt.outside or (hd and hd.outside) then
+              note('the way lies under open sky')
+            else
+              local bad = M.ramp_unsafe(x, y, zl, aql)
+              if bad then note(bad, 4)
+              else
+                local dist = math.max(math.abs(dx), math.abs(dy))
+                if not best or dist < best.dist then best = {w = {x, y, zl}, foot = foot, head = head, dist = dist} end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return best, why or 'no wall tile of plain rock beside the drop'
+end
+
+-- public (siege, STRANDED refused): dig the ramp for the citizens of the walk group at `pos` (calm = quiet PEACE). Returns
+-- {state = 'dug' | 'waiting' | 'none' | 'refused', txt (<= 160 bytes), pos = the wall tile}; nil when the case is no drop or there is no audit
+function M.rescue_dig(K, pos, calm)
+  local R = mem and mem.reach
+  if not R or type(pos) ~= 'table' or not pos[1] then return nil end
+  local has = {}
+  for _, cls in ipairs({'drink', 'food'}) do
+    for g in pairs(R.cls[cls] and R.cls[cls].by or {}) do has[g] = true end
+  end
+  local gc = grp(pos[1], pos[2], pos[3])
+  if not gc or gc == 0 or has[gc] then return nil end
+  local b = M.edge_blame(gc, has, pos, false)
+  if not b or not b[6] then return nil end
+  local s = {b[1], b[2], b[3]}
+  if s[3] - b[8] ~= 1 then
+    return {state = 'none', txt = string.format('no ramp: the drop is %d levels deep', s[3] - b[8])}
+  end
+  mem.ramp = mem.ramp or {}
+  local now = now_t(K)
+  local rk = key3(s[1], s[2], s[3])                         -- the stranded tile, not the group id (DF renumbers the groups)
+  local rec = mem.ramp[rk]
+  if rec and now - rec.t < M.RAMP_AGAIN then
+    return {state = rec.state == 'dug' and 'waiting' or rec.state, txt = rec.txt, pos = rec.pos}
+  end
+  if rec and rec.state == 'dug' and rec.pos then            -- still designated: the Miners have not come yet, no second ramp
+    local wd = rev(rec.pos[1], rec.pos[2], rec.pos[3])
+    if wd and (tonumber(wd.dig) or 0) ~= 0 then
+      rec.t = now
+      rec.txt = trunc(string.format('ramp at %d,%d,%d still designated: waiting for a Miner', rec.pos[1], rec.pos[2], rec.pos[3]), 160)
+      return {state = 'waiting', txt = rec.txt, pos = rec.pos}
+    end
+  end
+  if rec and (rec.n or 1) >= M.RAMP_MAX then
+    return {state = 'none', txt = trunc(string.format('no further ramp: %d dug for this drop and the groups are still apart', rec.n), 160)}
+  end
+  if not calm then
+    return {state = 'none', txt = 'no ramp dug: not in quiet PEACE'}
+  end
+  local sdes = rev(s[1], s[2], s[3])
+  if sdes and sdes.outside then
+    return {state = 'none', txt = 'no ramp dug: the stranded stand under open sky (outside the fort)'}
+  end
+  local aql = {}
+  local okm, man = pcall(K.manifest)                        -- the aquifer levels the fort has seen (revealed tiles only)
+  for _, z in ipairs(okm and type(man) == 'table' and type(man.aquifer_levels) == 'table' and man.aquifer_levels or {}) do
+    if math.tointeger(z) then aql[math.tointeger(z)] = true end
+  end
+  local pick, why = M.ramp_pick(gc, has, s, s[3] - 1, aql)
+  local out
+  if not pick then
+    out = {state = 'none', txt = trunc('no safe ramp: ' .. why, 160)}
+  else
+    local ok, res = K.act.rescue_ramp(pick.w)
+    if ok then
+      out = {state = 'dug', pos = pick.w,
+             txt = string.format('ramp designated at %d,%d,%d (foot %d,%d,%d, head %d,%d,%d); nothing is carried across the drop',
+                                 pick.w[1], pick.w[2], pick.w[3], pick.foot[1], pick.foot[2], pick.foot[3],
+                                 pick.head[1], pick.head[2], pick.head[3])}
+    else
+      out = {state = 'refused', pos = pick.w,
+             txt = trunc(string.format('ramp at %d,%d,%d refused: %s', pick.w[1], pick.w[2], pick.w[3], tostring(res)), 160)}
+    end
+  end
+  mem.ramp[rk] = {t = now, state = out.state, txt = out.txt, pos = out.pos, n = (rec and rec.n or 0) + (out.state == 'dug' and 1 or 0)}
+  K.log(out.state == 'dug' and 'info' or 'warn', 'seal: rescue ramp for group %d: %s', gc, out.txt)
+  return out
 end
 
 -- BUG-277 (Run 15 Earthboat y372-y374: CUTOFF 'cause not found' four times for one founder at the map edge 1-4,126,141,

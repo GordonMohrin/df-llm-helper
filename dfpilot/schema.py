@@ -89,6 +89,7 @@ ACT = {
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "cancel_link_job": ["gate"],                   # BUG-546: the kernel's own unworked link job of a lever, taken down to link again
+    "rescue_ramp": ["seal"],                       # BUG-769: one ramp dug on a plain wall tile beside a one-level drop with stranded citizens
     "cancel_stray_job": ["seal"],                  # BUG-751: one outdoor errand of a citizen whose target lies on a walk group with no drink and food
     "labor_set": ["economy"],                      # BUG-546/547: Mechanic labor on for one citizen, farming off for the manager
     "construction_remove": ["seal"],              # BUG-479: the refuge plug's walls come down in PEACE
@@ -668,7 +669,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-235: peace = 1 a rescue in quiet PEACE (outer bridges too, no sealed outside; ends by handing the bridges back
     # to the mode default, never a raise)
     "STRANDED": ("A", "siege", _d("phase:s", "n:i units:ia grp:i thirst:i hunger:i bridges:sa why:s need:s pos:p "
-                                             "left:i hostile:i burrow:s peace:i fix:s sep:p job:s")),
+                                             "left:i hostile:i burrow:s peace:i fix:s sep:p job:s ramp:s ramp_state:s ramp_at:p")),
     # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
     "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
     # BUG-096/FR-80 (Run 14 note 70: Kern+ shrank to about one tile and Tiefe+ vanished): the burrow guard of seal read Kern+ or

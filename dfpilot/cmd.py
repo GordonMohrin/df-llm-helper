@@ -2808,6 +2808,8 @@ def site_params(tpl: str, params: dict | None, site: dict) -> dict | None:
         out = {**(out or {}), "arm": site["arm"]}
     if tpl == HOSPITAL_TPL and site.get("compact") == 1 and "compact" not in (params or {}):        # BUG-763: the compact room the site was ranked for
         out = {**(out or {}), "compact": 1}
+    if tpl == HOSPITAL_TPL and site.get("surface") == 1 and "surface" not in (params or {}):        # BUG-770: the open-floor hospital the site was ranked for
+        out = {**(out or {}), "surface": 1}
     return out
 
 
