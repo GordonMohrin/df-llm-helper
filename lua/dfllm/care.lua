@@ -2150,7 +2150,9 @@ end
 -- furniture stone at hand: economy's free boulders minus ores and flux, economic and soft stone (rock_bad)
 local function hard_stone(inv)
   local rock = num(inv.rock) or 0
-  return math.max(0, rock - math.max((num(inv.ore) or 0) + (num(inv.flux) or 0), num(inv.rock_bad) or 0))
+  local no = num(inv.rock_nouse)                       -- BUG-733: each unusable boulder counted once
+  if no == nil then no = math.max((num(inv.ore) or 0) + (num(inv.flux) or 0), num(inv.rock_bad) or 0) end
+  return math.max(0, rock - no)
 end
 
 -- open ConstructCoffin orders: amount left in orders that can run now (and of those the rock and wood ones, whose

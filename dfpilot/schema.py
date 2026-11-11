@@ -1011,6 +1011,9 @@ VERB_ARGS: dict[str, Obj] = {
     # BUG-541 (Run 16b i2 / 16d i4: GiveWater carriers stood weeks at a DRY well, 3 patients died): the building screen's remove for one
     # built well with no water below it; a cistern room's well only with approve:true; a wet well is never touched
     "well.retire": Obj(req={"id": NAT}, opt={"approve": Bool()}),
+    # BUG-734 (Run 16c i3 Doorwings: chalk 36 and magnetite 25 in the fort, no plain hard stone, the masons refuse them): the stone-use screen's
+    # economic mark of one stone type the fort holds as boulders; economic=false (the default) frees it for furniture and blocks
+    "stone.use": Obj(req={"mat": Str(pattern=r"^[A-Za-z_:]{2,48}$")}, opt={"economic": Bool()}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -1042,6 +1045,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "orders.cancel": ("economy", None, False),                # BUG-526: any mode (taking an order off the list is harmless)
     "well.retire": ("water", None, False),              # BUG-541: any mode (a dying patient does not wait)
     "hospital.restore": ("water", None, False),         # BUG-539: any mode (the patients lie there)
+    "stone.use": ("economy", None, False),              # BUG-734: any mode (a setting of the stone-use screen, nothing moves)
 }
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}

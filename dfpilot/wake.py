@@ -625,7 +625,9 @@ def no_hard_stone_hint(d: dict) -> str:
     wood = next((c for c in cmds if "order.add" in c), "")              # BUG-666: the wooden door has a verb (mat=wood)
     return (f"{d.get('q', 'no non-economic hard stone')}. Decide yourself: buy it ({cmds[0] if cmds else 'dfllm cmd trade.want'}), dig to hard "
             f"stone ({cmds[1] if len(cmds) > 1 else 'dfllm plan propose'}), or go on without mechanisms and stone traps"
-            + (f"; doors from wood: {wood}" if wood else ""))
+            + (f"; doors from wood: {wood}" if wood else "")
+            + (f"; or free the {d['mat']} the fort holds for furniture and blocks (BUG-734: the stone-use setting, the masons may then use it "
+               f"up): {next((c for c in cmds if 'stone.use' in c), 'dfllm cmd stone.use mat=' + str(d['mat']))}" if d.get("mat") else ""))
 
 
 def released_hint(d: dict) -> str:

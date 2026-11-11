@@ -299,6 +299,10 @@ function L.match(tk, info)
     return ok
   end
   if tk.flag then return L.fibre_of(info) == tk.sub end
+  -- BUG-734 (Run 16c i3 Doorwings y385-y386: `trade.want stone` bought 'stone BOULDER x4' every caravan, magnetite / hematite / chalk / clay, and
+  -- the fort's usable stone stayed 0, ConstructBlocks 'Needs non-economic hard stone'): a plain `stone` / `boulder` want is for stone a
+  -- mason may use; an ore, flux, economic or soft boulder is no such stone (`stone:magnetite`, `flux` and `bar:` name them on purpose)
+  if info.nouse and not tk.sub and not tk.sell and (tk.kind == 'stone' or tk.kind == 'boulder') then return false end
   if tk.sub then
     if mat_part(info.mat, tk.sub) then return true end
     if tk.mat then return false end
@@ -899,8 +903,20 @@ local function item_info(it, mer, ea, ew)
   end)
   if info.type == 'BOULDER' then                           -- BUG-583: flux stone (reaction class FLUX)
     pcall(function()
-      local mat = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex()).material
+      local mi = dfhack.matinfo.decode(it:getMaterial(), it:getMaterialIndex())
+      local mat = mi.material
       for _, rc in ipairs(mat.reaction_class) do if rc.value == 'FLUX' then info.flux = true end end
+      -- BUG-734: ore, flux, economic (the stone-use screen) and soft stone are no furniture / block stone (economy.ore_of's reading)
+      local nouse = info.flux == true or mat.flags.ITEMS_HARD ~= true
+      local inorg = mi.inorganic
+      if inorg then
+        local v = inorg.metal_ore.mat_index
+        if v and #v > 0 then nouse = true end
+        local es = df.global.plotinfo.economic_stone
+        local e = es and es[it:getMaterialIndex()]
+        if e ~= nil and e ~= 0 and e ~= false then nouse = true end
+      end
+      if nouse then info.nouse = true end
     end)
   end
   if info.type == 'CLOTH' or info.type == 'THREAD' then    -- fibre kind (cloth:plant / silk / yarn)
@@ -916,6 +932,8 @@ local function item_info(it, mer, ea, ew)
   info.unethical = unethical(it, info, ea, ew)
   return info
 end
+
+M.item_info = item_info                                  -- BUG-734: the tests read it
 
 local function trade_ui() return df.global.game.main_interface.trade end
 
@@ -1109,6 +1127,7 @@ local function wants(K)
     if m then m.cap = math.max(m.short and m.cap or 0, tk.cap) else want[#want + 1] = tk end
   end
   local sell, short = L.metal_sell(want, L.tokens(s, known), known)
+  for _, tk in ipairs(sell) do tk.sell = true end          -- BUG-734: a sell token never filters (only a want skips unusable stone)
   local okd, days = K.call('economy', 'surplus_days')      -- BUG-627: bone, food, drink above their floors join a non-empty list
   local extra = {}                                         -- BUG-644: kinds learned from a value gap / an empty list (st.x[src] = tick)
   if M.CFG.EXTRA ~= false then

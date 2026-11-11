@@ -287,7 +287,13 @@ def _with_explored(save_dir: Path, m: dict) -> dict:
         a = doc.get("anchor") if isinstance(doc, dict) and doc.get("tpl") == "explore" else None
         if isinstance(a, list) and len(a) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in a):
             out.append(a)
-    return dict(m, explored=out) if out else m
+    if not out:
+        return m
+    # BUG-735 (Run 16d i4 Pagedsculpture y384-y388: five probes to depth 20-24, all ended at z113 and saw the same layers, the ranking sent the next one
+    # the same way): the lowest level the finished probes saw (PROJECT_DONE rocks) when none of them met ore or flux stone; bp.sites then ranks the
+    # next probe deeper than that (`_rank_depths`), to the first layer nobody has seen
+    low = explore_low(save_dir)
+    return dict(m, explored=out, **({"explored_low": low} if low is not None else {}))
 
 
 _ROCK = re.compile(r"^([A-Za-z_ ]+?) z(\d+)(?:-z(\d+))?$")
@@ -325,6 +331,45 @@ def explore_rocks(save_dir: Path) -> dict[str, list]:
     return out
 
 
+SOIL_ROCKS = ("CLAY", "SILT", "SAND", "LOAM", "PEAT", "SOIL", "GRAVEL", "FIRE_CLAY")
+
+
+def is_soil_rock(name: str) -> bool:
+    """BUG-735: a soil layer (clay, silt, sand, loam, peat: the digger leaves 'soft' boulders at best), not a stone layer; CLAYSTONE, SILTSTONE
+    and SANDSTONE are stone."""
+    n = str(name).strip().upper().replace(" ", "_")
+    return n in SOIL_ROCKS or any(n.endswith("_" + s) for s in SOIL_ROCKS) or n.startswith("SOIL")
+
+
+def explore_low(save_dir: Path) -> int | None:
+    """BUG-735: the lowest level any finished explore probe saw, only while none of them saw a flux stone (an ore vein is not in the
+    `rocks` text, a probe that found ore is visible by the fort's ore stock, not here); None without data."""
+    rocks = explore_rocks(save_dir)
+    if not rocks or any(n in _FLUX_ROCKS for n in rocks):
+        return None
+    return min(v[0] for v in rocks.values())
+
+
+def explore_summary(save_dir: Path, top_z: int | None = None) -> dict:
+    """BUG-735 (Run 16d i4: 'explore probes to depth 24 found only soil' and nothing said how far down the fort had looked): {low, high,
+    first_stone: (name, z) | None, soil_only, text}: the span the finished probes saw, the first stone layer from the top, and 'no stone
+    within N z' when every layer seen is soil. {} without data."""
+    rocks = explore_rocks(save_dir)
+    if not rocks:
+        return {}
+    low, high = min(v[0] for v in rocks.values()), max(v[1] for v in rocks.values())
+    stone = sorted(((v[1], n) for n, v in rocks.items() if not is_soil_rock(n)), reverse=True)
+    top = top_z if top_z is not None else high
+    span = max(0, top - low + 1)
+    if stone:
+        z, n = stone[0]
+        text = f"first stone layer from the top: {n} at z{z} ({max(0, top - z)} level(s) down); the probes looked down to z{low} ({span} levels)"
+        return {"low": low, "high": high, "first_stone": (n, z), "soil_only": False, "text": text}
+    text = (f"NO STONE within {span} levels: every layer the probes saw (z{high} down to z{low}) is soil; dig deeper than z{low} "
+            f"(`bp sites explore` ranks below it) or trade.want stone / blocks")
+    return {"low": low, "high": high, "first_stone": None, "soil_only": True, "text": text}
+
+
 def explore_rock_note(save_dir: Path) -> str:
     """BUG-625 (Run 16d i4 Trumpetrealms y430+: `explore: no site at depth 2..12` for years in a mudstone fort, nothing said what the 40
     probes had seen): the rock the finished probes passed, per level, and whether a flux stone was among it. '' without data."""
@@ -336,6 +381,9 @@ def explore_rock_note(save_dir: Path) -> str:
     flux = [f"{n} z{v[0]}-z{v[1]}" if v[0] != v[1] else f"{n} z{v[0]}" for n, v in rows if n in _FLUX_ROCKS]
     low = min(v[0] for v in rocks.values())
     note = f"the finished probes saw (PROJECT_DONE rocks): {txt}; none went below z{low}"
+    summ = explore_summary(save_dir)
+    if summ:
+        note += f"; {summ['text']}"                              # BUG-735: where the first stone is, or 'no stone within N levels'
     note += (f"; flux stone seen: {', '.join(flux)} (dig there for flux, or trade.want flux)" if flux
              else "; no flux stone and no ore seen: trade.want ore, bars, flux")
     return note
@@ -478,7 +526,7 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
 # BUG-361 (Run 16c i3: the year plan's seal y373s0b0 stood on the doors of the dead cores' tunnels; the ranked fortcore sites
 # beside them were all 'taken', and `bp.place fortcore` found 0 free): the fortcore ranking keeps only the sites no placed
 # project holds either, and names the holders when none is left
-FREE_RANK_TPLS = ("aqshaft", "fortcore")
+FREE_RANK_TPLS = ("aqshaft", "fortcore", "explore")
 
 
 def _free_of_projects(save_dir: Path, tpl: str, params: dict | None):

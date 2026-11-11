@@ -272,6 +272,11 @@ def run_bp(args, save_dir: Path | None) -> int:
             bh = box_hint(snap or files.latest_snapshot(save_dir, "sites"), args.tpl)                # BUG-366
             print(f"  none ({ranked} ranked, {len(set(held))} project(s) hold them): try --fresh" + (f"; {why}" if why else "")
                   + (f"; {bh}" if bh else ""))
+        if args.tpl == "explore":                          # BUG-735: how far down the finished probes looked, and where the first stone is
+            from .cmd import explore_summary
+            summ = explore_summary(save_dir)
+            if summ:
+                print(f"  probes (BUG-735): {summ['text']}")
         if shallow:                                        # BUG-364: a shallower core clears the aquifer / fits the site
             from .cmd import core_depth
             d, alt, alt_id, alt_n = shallow

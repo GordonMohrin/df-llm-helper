@@ -1176,6 +1176,9 @@ local function classify(it, a, cat)
     a.rock = a.rock + n
     if it.mat_type == 0 then
       local r = ore_of(it.mat_index)
+      -- BUG-733: one boulder counted once as unusable, however many reasons it has (ore and economic, flux and economic: the old
+      -- max(ore + flux, rock_bad) took the larger of two sets that overlap only in part and gave a mason's stone away to the ore)
+      if r.metals or r.flux or r.econ or r.soft or r.refused then a.rock_nouse = (a.rock_nouse or 0) + n end
       if r.metals and r.token then
         a.ore = a.ore + n
         local o = a.ores[r.token]
@@ -1279,6 +1282,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'brew_p', 'brew_g', 'chairs', 'tables',
               'rock_far', 'doors_far', 'hatches_far', 'grates_far', 'blocks_far', 'chairs_far', 'tables_far',   -- BUG-544
               'rock_busy',   -- BUG-665
+              'rock_nouse',  -- BUG-733: boulders no mason may take (ore, flux, economic, soft, refused): each counted once
               'wood_far', 'wood_forb'}   -- BUG-705
 local function new_acc(c)
   local fs = {}
@@ -1401,7 +1405,7 @@ end
 local function facts(K, p)
   local i = K.census.i or {}
   local f = {migrants = p.migrants == 1, fuel = (i.fuel or 0) > 0, ore = (i.ore or 0) > 0,
-             stone = (i.rock or 0) - math.max((i.ore or 0) + (i.flux or 0), i.rock_bad or 0) >= 60}
+             stone = M.usable_n(i) >= 60}
   pcall(function()
     for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
       local n = df.workshop_type[b.type]
@@ -1473,7 +1477,7 @@ function M.held_why(K, lib)
           if not holds(f, cit, cond) then
             local n = tostring(cond):match('^cit>=([0-9]+)$')
             if cond == 'stone' then
-              miss[#miss + 1] = string.format('stone %d/60', math.max(0, (i.rock or 0) - math.max((i.ore or 0) + (i.flux or 0), i.rock_bad or 0)))
+              miss[#miss + 1] = string.format('stone %d/60', M.usable_n(i))
             elseif n then miss[#miss + 1] = string.format('cit %d/%s', cit, n)
             else miss[#miss + 1] = 'no ' .. tostring(cond):gsub('^%a+:', '') end
           end
@@ -2658,13 +2662,51 @@ local function gear_report(K, c, r)
 end
 
 ---------------------------------------------------------------- rock furniture in wood (live L3)
+-- BUG-733: the boulders of the census a mason may take (reachable, not in a job): rock minus the unusable ones, each counted once
+-- (rock_nouse); a census from before the key falls back to the old max(ore + flux, rock_bad)
+function M.usable_n(inv)
+  local rock = math.max(0, math.tointeger(inv.rock) or 0)
+  local no = math.tointeger(inv.rock_nouse)
+  if no == nil then no = math.max((math.tointeger(inv.ore) or 0) + (math.tointeger(inv.flux) or 0), math.tointeger(inv.rock_bad) or 0) end
+  return math.max(0, rock - no)
+end
+
 -- free boulders a mason may take: ores and flux are economic stone (DF's default stone use settings keep them
 -- from furniture and blocks; care's reserve counts the same way), minus the rock floor
 local function stone_free(c, r)
   local inv = r.inv
   if M.hard_denied(inv, r.now) then return 0 end        -- BUG-545: DF itself says the fort has no non-economic hard stone
-  local n = (inv.rock or 0) - math.max((inv.ore or 0) + (inv.flux or 0), inv.rock_bad or 0)
+  local n = M.usable_n(inv)
   return math.max(0, n - floor_of(c, r.p, r, 'rock'))
+end
+
+-- BUG-733 (Run 16b i2 Whirledrampart y431: explore done, CLAYSTONE / CHERT dug, 'stone free 0 need 29-32' for 65 days and nothing said which of
+-- the five things took the boulders out): the census boulders step by step, from every boulder of the fort to the ones a mason is given.
+-- {boulders, far (another walk group / no walkable tile), busy (a job holds it), rock (the rest), nouse (ore, flux, economic, soft, refused),
+-- usable, denied (DF's own refusal memory), floor (reserve of open needs and holders, minus what care holds), free (what stone_free says)}
+function M.stone_why(c, r)
+  local inv, w = r.inv, {}
+  local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
+  w.boulders, w.far, w.busy, w.rock = g('boulders'), g('rock_far'), g('rock_busy'), g('rock')
+  w.nouse, w.usable = w.rock - M.usable_n(inv), M.usable_n(inv)
+  w.denied = M.hard_denied(inv, r.now) or nil
+  w.floor = floor_of(c, r.p, r, 'rock')
+  w.free = stone_free(c, r)
+  return w
+end
+
+-- the same as one line for kern.log and the decisions
+function M.stone_why_text(w)
+  local steps = {}
+  if w.boulders > 0 then steps[#steps + 1] = string.format('%d boulders', w.boulders) end
+  if w.far > 0 then steps[#steps + 1] = string.format('%d out of reach (another walk group or no walkable tile)', w.far) end
+  if w.busy > 0 then steps[#steps + 1] = string.format('%d held by a job', w.busy) end
+  steps[#steps + 1] = string.format('%d free', w.rock)
+  if w.nouse > 0 then steps[#steps + 1] = string.format('%d ore, flux, economic or soft stone', w.nouse) end
+  steps[#steps + 1] = string.format('%d usable by the census', w.usable)
+  if w.denied then steps[#steps + 1] = 'DF refused them (cancel memory)' end
+  if w.floor > 0 then steps[#steps + 1] = string.format('%d kept back for open needs and reserves', w.floor) end
+  return string.format('%s -> %d free for the rock orders', table.concat(steps, ', '), w.free)
 end
 
 -- BUG-224: true when T.stale switched this order's material (sw) or made it again (redo, its dfllm:redo_ tag)
@@ -7964,6 +8006,17 @@ function M.rock_dig(K, c, r, walls)
   st.rock = {free = free, need = need, open = r.rk or 0, gems = math.tointeger(r.inv.gems) or 0,
              soil = (int(r.p.rocksoil) or 0) >= M.ROCK_SOIL or nil, zero = zero,
              bars = math.tointeger(r.inv.bars) or 0, cloth = math.tointeger(r.inv.cloth) or 0}
+  -- BUG-733: where the boulders went when stone is wanted and none is free (workload `stone.why`; kern.log every 3 game days)
+  if free == 0 and need > 0 then
+    local okw, w = pcall(M.stone_why, c, r)
+    if okw and type(w) == 'table' then
+      st.rock.why = w
+      if w.boulders > 0 and (not st.rock_why_t or r.now - st.rock_why_t >= 3 * DAY) then
+        st.rock_why_t = r.now
+        K.log('warn', 'economy: stone free 0 (need %d): %s', need, M.stone_why_text(w))
+      end
+    end
+  end
   if type(rc) ~= 'table' or need <= free or K.mode() ~= 'PEACE' or (r.inv.w_pick or 0) == 0 then return end
   if ((st.jobc or tool_jobs()).dig or 0) > 0 then return end                -- the miners have digging
   local okb, bl = K.call('runner', 'dig_backlog')
@@ -8426,7 +8479,7 @@ end
 function M.hard_diag(inv)
   local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
   local rock, bad, orf = g('rock'), g('rock_bad'), g('ore') + g('flux')
-  local usable = math.max(0, rock - math.max(orf, bad))
+  local usable = M.usable_n(inv)
   return {boulders = g('boulders'), rock = rock, usable = usable, bad = bad, orf = orf, far = g('rock_far'), busy = g('rock_busy'),
           cause = usable == 0 and 'none' or 'denied'}
 end
@@ -8557,6 +8610,23 @@ function M.hard_report(K, c, r, cancels)
     probe = okp and pt or ''
     if probe ~= '' then K.log('warn', 'economy: DF refuses boulders the census counts usable: %s', probe) end
   end
+  -- BUG-734 (Run 16c i3 Doorwings: CHALK 36, MAGNETITE 25 held, no plain hard stone, the caravans' `stone` bought more economic boulders):
+  -- hard stones the fort holds that only the stone-use screen / the flux and ore rules keep from the masons: the player may free one (stone.use)
+  local alts = {}
+  if okc and type(seen) == 'table' then
+    for _, m in ipairs(seen) do
+      if m.hard and not m.refused and (m.econ or m.flux or m.ore) and m.tok then alts[#alts + 1] = m end
+    end
+    table.sort(alts, function(a, b)
+      if (a.ore == true) ~= (b.ore == true) then return not a.ore end                  -- plain economic or flux stone before an ore
+      return a.n > b.n
+    end)
+  end
+  local altcmd, altmat
+  if #alts > 0 and d.cause == 'none' then
+    altmat = (alts[1].tok:gsub('^INORGANIC:', '')):lower()
+    altcmd = string.format([[dfllm cmd stone.use '{"mat":"%s"}']], altmat)      -- last in cmds (wake.no_hard_stone_hint names it)
+  end
   if d.cause == 'none' then
     local rock = mats and #mats > 0 and (' (' .. table.concat(mats, ', ', 1, math.min(#mats, 4)) .. ' refused)') or ''
     q = string.format('no non-economic hard stone: %d boulders, 0 usable (%d economic/soft, %d ore/flux, %d out of reach)%s; dig ' ..
@@ -8576,10 +8646,11 @@ function M.hard_report(K, c, r, cancels)
   if (math.tointeger(r.inv.wood) or 0) > 0 then          -- BUG-666: the wooden door has a verb now
     cmds[#cmds + 1] = [[dfllm cmd order.add '{"job":"ConstructDoor","amount":4,"mat":"wood"}']]
   end
+  if altcmd then cmds[#cmds + 1] = altcmd end
   if probe ~= '' then q = q .. '; ' .. probe end
   K.log('warn', '%s', q)
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200),
-         {id = 'no_hard_stone', q = q:sub(1, 200), cause = d.cause, n = d.usable, cmds = cmds})
+         {id = 'no_hard_stone', q = q:sub(1, 200), cause = d.cause, n = d.usable, cmds = cmds, mat = altmat})
   K.persist.touch('m.economy')
 end
 
@@ -14130,6 +14201,43 @@ M.verbs['orders.cancel'] = function(K, args, cmd)
                              #gone > 0 and (' (' .. table.concat(gone, ',', 1, math.min(#gone, 12)) .. (#gone > 12 and ',..' or '') .. ')') or '',
                              #kept > 0 and (', ' .. #kept .. ' supply order(s) kept (force=true)') or ''),
          {removed = #gone, kept = #kept, ids = json.array({table.unpack(gone, 1, math.min(#gone, 40))})}
+end
+
+-- BUG-734: stone.use {mat, economic?} -- the stone-use screen for one stone type the fort holds as boulders: economic false (the default)
+-- frees it for furniture and blocks (the masons may use it up; an ore or a flux stone is then no reserve), true marks it economic again.
+-- The player's own decision when no plain hard stone exists (the DECISION no_hard_stone names the command); any mode.
+M.verbs['stone.use'] = function(K, args, cmd)
+  local nm = type(args.mat) == 'string' and args.mat:gsub('^[Ii][Nn][Oo][Rr][Gg][Aa][Nn][Ii][Cc]:', ''):lower() or nil
+  if not nm or nm == '' then return false, 'stone.use: mat must be a stone name (the DECISION names it, e.g. chalk)' end
+  if args.economic ~= nil and type(args.economic) ~= 'boolean' then return false, 'stone.use: economic must be true or false' end
+  local eco = args.economic == true
+  local idx, n, tok = nil, 0, nil
+  pcall(function()
+    local v = df.global.world.items.other.BOULDER
+    for i = 0, #v - 1 do
+      local it = v[i]
+      local f = it and it.flags
+      if f and not f.removed and not f.garbage_collect and not f.trader and it.mat_type == 0 then
+        local t = dfhack.matinfo.decode(0, it.mat_index):getToken()
+        if type(t) == 'string' and (t:gsub('^INORGANIC:', '')):lower() == nm then
+          idx, tok = it.mat_index, t
+          n = n + 1
+        end
+      end
+    end
+  end)
+  if not idx then return false, string.format('stone.use: the fort holds no %s boulder (names: dfllm cmd inspect what=workload)', nm) end
+  local o = ore_of(idx)
+  if o.soft and not eco then return false, string.format('stone.use: %s is soft stone (no furniture or blocks from it): the game refuses it, not the stone-use screen', nm) end
+  local ok, done, how = pcall(K.act.stone_economic, idx, eco)
+  if not ok or done ~= true then return false, 'stone.use: ' .. tostring(ok and how or done) end
+  orec[idx] = nil                                        -- the census reads the raws and the mark afresh
+  st.hard = nil                                          -- the denial memory goes with it (BUG-648)
+  K.persist.touch('m.economy')
+  K.log('warn', 'economy: stone.use %s by %s: %s (%d boulders)', tok or nm, tostring(cmd and cmd.by), eco and 'marked economic' or 'cleared for furniture', n)
+  return true, string.format('stone.use: %s %s (%d boulders in the fort); the next census counts it %s', nm,
+                             eco and 'marked economic' or 'freed for furniture and blocks', n, eco and 'unusable' or 'usable'),
+         {mat = nm, boulders = n, economic = eco, ore = o.metals ~= nil or nil, flux = o.flux or nil}
 end
 
 -- jobs.release {all?, preventblocking?} (FR-16): resumes suspended construction jobs (all = also the ones

@@ -329,7 +329,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     taken = 0
     for c in cands:
         if all(not _overlap(c["box"], o["box"]) for o in out):
-            if free is not None and not free(c):            # BUG-292: on or beside a placed project
+            # BUG-732: an explore's shaft depth and arm are the ranking's (rank_depths / rank_arms), not the template's defaults: the clash test
+            # must see the shaft that would be dug
+            if free is not None and not free(dict(c, depth=p["depth"], arm=p["arm"]) if tpl in mine.BUILD else c):   # BUG-292: on or beside a placed project
                 taken += 1
                 continue
             out.append(c)
@@ -1534,7 +1536,24 @@ def _rank_arms(snap, tpl, params, manifest, n, water, near, within, at, free) ->
 
 
 EXPLORE_DEPTHS = (9, 6, 4, 2)         # BUG-553: depths tried (deepest that fits first) when the template's own depth has no site
-EXPLORE_NO_SITE = ("avoided level", "no safe explore site", "explore: no site at depth")
+EXPLORE_NO_SITE = ("avoided level", "no safe explore site", "explore: no site at depth", "lie on or beside placed projects")
+
+
+EXPLORE_DEEPER = 6          # BUG-735: levels a deepened probe goes under the lowest level the earlier probes saw
+
+
+def _explore_deeper(manifest, params, top: int) -> int | None:
+    """BUG-735: the depth of a probe that goes under the earlier probes' lowest level (manifest `explored_low`), counted from the top of the
+    public floor of the core; None when no probe is known, p.depth is given, or the template's own depth already reaches that far."""
+    low = (manifest or {}).get("explored_low")
+    if "depth" in (params or {}) or not isinstance(low, int) or isinstance(low, bool):
+        return None
+    try:
+        top_z = max(b[5] for b in manifest["zones"]["Z4"])
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+    want = min(mine.PARAMS["explore"]["depth"][2], top_z - (low - EXPLORE_DEEPER))
+    return want if want > top else None
 
 
 def _rank_depths(snap, tpl, params, manifest, n, water, near, within, at, free) -> list[dict]:
@@ -1550,6 +1569,20 @@ def _rank_depths(snap, tpl, params, manifest, n, water, near, within, at, free) 
     def at_depth(d):                               # p.arm given is the player's: no arm search then
         q = {**base, "depth": d}
         return rank(snap, tpl, q, manifest, n, water, near, within, at, free) if "arm" in q             else _rank_arms(snap, tpl, q, manifest, n, water, near, within, at, free)
+    # BUG-735 (Run 16d i4 Pagedsculpture y384-y388: five probes of depth 20-24 from the same floors all ended at z113 and saw the same clay / chert /
+    # mudstone, the next ranking sent the sixth the same way): when the finished probes saw no flux stone and their lowest level (manifest
+    # `explored_low`) lies below this template's own depth, the next probe goes EXPLORE_DEEPER levels under it (at most the template's maximum
+    # depth) -- to the first layer nobody has seen. A given p.depth is the player's and stays; no site that deep: the usual ladder
+    deep = _explore_deeper(manifest, params, top)
+    if deep:
+        try:
+            got = at_depth(deep)
+            if got:
+                note = (f"BUG-735: shaft deepened to {deep} levels: the earlier probes ended at z{manifest['explored_low']} and saw no flux "
+                        "stone (the next layer nobody has seen)")
+                return [{**s, "depth": deep, "why": s["why"] + "; " + note} for s in got]
+        except ValueError:
+            pass
     try:
         return at_depth(top)
     except ValueError as e:
