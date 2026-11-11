@@ -843,10 +843,20 @@ local function rescue_step(K, a, g, now)
       fix = okf and type(fx) == 'string' and fx or nil
       d.fix = fix
     end
+    -- BUG-751 (Run 16c i3 Doorwings y388-y391: 'cause not found', no tile, no job): the tile that separates their walk group from the
+    -- groups with drink and food (a wall top, a one-way drop) and the job that took them there
+    local sep
+    local oks, sp = K.call('seal', 'separator', e.pos, e.ids and e.ids[1])
+    if oks and type(sp) == 'table' and type(sp.pos) == 'table' then
+      sep = string.format('%s at %d,%d,%d (%s)%s', sp.kind, sp.pos[1], sp.pos[2], sp.pos[3], sp.to or '?',
+                          sp.job and (', job ' .. sp.job) or '')
+      d.sep, d.job = {sp.pos[1], sp.pos[2], sp.pos[3]}, sp.job
+    end
     local eids, etoks = episode(e)                         -- BUG-661: one alarm per episode, unless it is worse
     table.insert(etoks, 1, why)
     table.insert(etoks, 1, 'refused')
-    stranded(K, 'refused', string.format('%s: no rescue (%s)%s', base, why, fix and ('; fix: ' .. fix) or ''), d, eids, etoks)
+    stranded(K, 'refused', string.format('%s: no rescue (%s)%s%s', base, why, sep and ('; cut off by ' .. sep) or '',
+             fix and ('; fix: ' .. fix) or ''), d, eids, etoks)
     -- BUG-417: no bridge brings it (drink or food), or the bridge rescue is refused while they are past the fight mark
     if (e.need.drink or e.need.food) and (not bs or e.thirst >= M.FIGHT_THIRST or e.hunger >= M.FIGHT_HUNGER) then
       dry_decision(K, e, now)

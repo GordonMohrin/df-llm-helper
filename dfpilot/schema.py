@@ -89,6 +89,7 @@ ACT = {
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "cancel_link_job": ["gate"],                   # BUG-546: the kernel's own unworked link job of a lever, taken down to link again
+    "cancel_stray_job": ["seal"],                  # BUG-751: one outdoor errand of a citizen whose target lies on a walk group with no drink and food
     "labor_set": ["economy"],                      # BUG-546/547: Mechanic labor on for one citizen, farming off for the manager
     "construction_remove": ["seal"],              # BUG-479: the refuge plug's walls come down in PEACE
     "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
@@ -597,7 +598,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "ORDER_BAD": ("A", "economy", _d("order:i job:s", "dropped:f")),
     "DEPOT_MISSING": ("A", "trade", _d(opt="civ:s planned:f proj:s stalled:f why:s mat:s")),
     # BUG-021: unit/upos/grp = a cut-off citizen and his walk group, at/agrp = a stock tile of the class and its group
-    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i unit:i upos:p at:p agrp:i")),
+    "CUTOFF": ("A", "seal", _d("cls:s n:i", "pos:p why:s grp:i main:i unit:i upos:p at:p agrp:i job:s")),   # BUG-751: job = the cut citizen's job
+    # BUG-752 (Run 16d i4 Pagedsculpture y386/y391: citizens died outside, only 'missing in the unit list' before): a citizen away from the
+    # fort for days (why off_map | cut | far), last position, job, days away
+    "MISSING": ("A", "seal", _d("unit:i why:s", "pos:p job:s days:i")),
     # BUG-030 rebuild policy: wait = lost bridges built again only in quiet PEACE; BUG-048: replaced = bridges the keeper
     # replaced by a wall and a door (stop_after losses to building destroyers, vanish_after without one, a rebuild nobody
     # built; no question), held = legacy (the old kernel's DECISION_NEEDED bridge_rebuild)
@@ -664,7 +668,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-235: peace = 1 a rescue in quiet PEACE (outer bridges too, no sealed outside; ends by handing the bridges back
     # to the mode default, never a raise)
     "STRANDED": ("A", "siege", _d("phase:s", "n:i units:ia grp:i thirst:i hunger:i bridges:sa why:s need:s pos:p "
-                                             "left:i hostile:i burrow:s peace:i fix:s")),
+                                             "left:i hostile:i burrow:s peace:i fix:s sep:p job:s")),
     # BUG-028: the main part of a drink or food stock lies outside Kern+ and the refuge; days = what lies inside
     "SUPPLY_OUTSIDE": ("A", "seal", _d("cls:s", "inside:i total:i pct:i days:i want:i hint:s also:s")),
     # BUG-096/FR-80 (Run 14 note 70: Kern+ shrank to about one tile and Tiefe+ vanished): the burrow guard of seal read Kern+ or

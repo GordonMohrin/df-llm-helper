@@ -155,7 +155,7 @@ LUA_RULES = {
     "unit-iter": "unit iteration outside sense.lua/snapshot.lua (use K.census or df.unit.find(id))",
     "tile-read": "tile/map read outside sense.lua/snapshot.lua/seal.lua (use K.call('snapshot','tile',...))",
     "create": "item/unit creation (armok)",
-    "remove-job": "removeJob outside act.cancel_own_lever_job / act.cancel_link_job",
+    "remove-job": "removeJob outside act.cancel_own_lever_job / act.cancel_link_job / act.cancel_stray_job",
     "hidden-write": "writing a hidden flag (reveals tiles/units)",
     "hidden-read": "reading hidden knowledge (water_table, aquifer, features, caverns)",
     "instant": "--instant / leverPullInstant (armok)",
@@ -767,7 +767,7 @@ class _Lint:
             self.add(line, "create")
         if q == "df.new" and called and self.role != "act":
             self.add(line, "df-alloc")
-        if v == "removeJob" and not (self.role == "act" and (self.in_func("cancel_own_lever_job") or self.in_func("cancel_link_job"))):
+        if v == "removeJob" and not (self.role == "act" and (self.in_func("cancel_own_lever_job") or self.in_func("cancel_link_job") or self.in_func("cancel_stray_job"))):
             self.add(line, "remove-job")
         if self.role != "act" and (q in COMMAND_FNS or (v == "simulateInput" and not bare)):
             self.add(line, "command", f"{LUA_RULES['command']}: {q}")

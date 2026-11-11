@@ -110,6 +110,7 @@ M.CFG = {
   lever_delay = 40,           -- ticks after a bridge moved before the entrance check (walk groups settle)
   bfs_max = 60000,            -- tiles the entrance BFS may visit
   blame_max = 4000,           -- tiles the CUTOFF blame search may visit
+  trip_max = 2 * DAY,         -- BUG-751: ticks a citizen off the group of a vital class counts as on a trip (job outside)
   scan_max = 60000,           -- tiles the scan flood may visit
   edges_max = 8000, edges_keep = 2000, entries_max = 400, routes_max = 8, pend_max = 2000, stairs_max = 40,
   -- BUG-012 (Run 9: the door one tile behind the east stair was no "entrance door"): per opening, its first
@@ -603,7 +604,7 @@ end
 
 ---------------------------------------------------------------- scheduling
 -- priority among urgent jobs, then among background ones
-local ORDER = {'perim', 'gates', 'seal', 'split', 'rpath', 'quick', 'audit', 'items', 'scan', 'paint', 'edges', 'bguard'}
+local ORDER = {'perim', 'gates', 'seal', 'split', 'rpath', 'quick', 'audit', 'items', 'scan', 'paint', 'edges', 'bguard', 'stray'}
 
 -- one pending run per job: the earliest tick and the strongest reason (an event beats 'periodic'/'retire', a
 -- post-siege diff beats everything), so no request is lost
@@ -1374,6 +1375,77 @@ function RF.floor(K, R)
           also = #rows > 1 and rows[2].n or nil})
 end
 
+-- BUG-751 (Run 16c i3 Doorwings y388-y391: 'CUTOFF held ... cause not found' for citizens on groups 2715 and 1339, seven dead of thirst):
+-- the group was the walkable top of the unfinished bedroom block (z149 over z148 walls). No closer cut it off: it is a one-way drop, a
+-- walker steps up or falls down but no tile joins it to the group that has drink and food. The blame search walks the cut group (as
+-- far as CFG.blame_max tiles) and names the tile whose neighbour one to three levels down lies on a group in `has`: {x, y, z, kind,
+-- 'drop to x,y,z'} with kind 'wall top' (a constructed wall under it), 'rock top' (a natural wall) or 'drop'. `slice` = the work is
+-- sliced (spend); a synchronous caller (siege's STRANDED text) passes false.
+function M.edge_blame(gc, has, from, slice)
+  local seen, q, h, n = {[key3(from[1], from[2], from[3])] = true}, {key3(from[1], from[2], from[3])}, 1, 0
+  local out = {}
+  while h <= #q and n < CFG.blame_max do
+    local x, y, z = dec3(q[h])
+    h = h + 1
+    n = n + 1
+    for dz = 1, 3 do
+      if z - dz >= 0 then
+        for dy = -1, 1 do
+          for dx = -1, 1 do
+            local g = grp(x + dx, y + dy, z - dz)
+            if g and g ~= 0 and has[g] and g ~= gc then
+              local s = shape(x, y, z - 1)
+              local kind = 'drop'
+              if rev(x, y, z - 1) and s and (s.shape == 'WALL' or s.shape == 'FORTIFICATION') then
+                kind = s.mat == 'CONSTRUCTION' and 'wall top' or 'rock top'
+              end
+              return {x, y, z, kind, string.format('drop to %d,%d,%d', x + dx, y + dy, z - dz)}
+            end
+          end
+        end
+      end
+    end
+    local k = steps(x, y, z, out)
+    for i = 1, k do
+      local nk = out[i]
+      if not seen[nk] then
+        seen[nk] = true
+        local nx, ny, nz = dec3(nk)
+        if grp(nx, ny, nz) == gc then q[#q + 1] = nk end
+      end
+    end
+    if slice then spend(6) end
+  end
+  return nil
+end
+
+-- the name of the unit's current job (df.job_type), or nil
+function M.job_name(id)
+  local u = df.unit.find(id)
+  local ok, name = pcall(function()
+    local j = u and u.job and u.job.current_job
+    if not j then return nil end
+    return tostring(df.job_type[j.job_type] or j.job_type)
+  end)
+  return ok and name or nil
+end
+
+-- public (BUG-751; siege's STRANDED text): what separates the walk group of the tile `pos` from the groups that hold drink and food:
+-- {pos = {x,y,z}, kind, to = 'drop to x,y,z', job = the unit's job or nil}, or nil (no audit yet, a group with a stock, nothing found)
+function M.separator(K, pos, id)
+  local R = mem and mem.reach
+  if not R or type(pos) ~= 'table' or not pos[1] then return nil end
+  local has = {}
+  for _, cls in ipairs({'drink', 'food'}) do
+    for g in pairs(R.cls[cls] and R.cls[cls].by or {}) do has[g] = true end
+  end
+  local gc = grp(pos[1], pos[2], pos[3])
+  if not gc or gc == 0 or has[gc] then return nil end
+  local b = M.edge_blame(gc, has, pos, false)
+  if not b then return nil end
+  return {pos = {b[1], b[2], b[3]}, kind = b[4], to = b[5], job = id and M.job_name(id) or nil}
+end
+
 -- BUG-277 (Run 15 Earthboat y372-y374: CUTOFF 'cause not found' four times for one founder at the map edge 1-4,126,141,
 -- hunger ~30000, never a death; the next read found him back with the others): a citizen on a job that takes him
 -- outside (gathering, hunting, fishing, felling, collecting) is on a trip, not cut off. His job as DF shows it in the
@@ -1401,12 +1473,23 @@ end
 function M.cut_confirm(K, R, t, cls, cits, main, by_cls, prev)
   local has, off, trip = {}, {}, {}
   for g in pairs(by_cls[cls]) do has[g] = true end
+  -- BUG-751 (Run 16c i3 Doorwings y388-y391: a HuntVermin job kept bookkeeper 26276 'on a trip' on a wall top for days): a trip excuses a
+  -- citizen for CFG.trip_max ticks; one who is still off the group after that is cut off, whatever his job
+  local seen_trip = {}
+  mem.tripped = mem.tripped or {}
   for _, c in ipairs(cits) do
     if not has[c.g] then
       local j = M.trip(K, c.id)
-      if j then trip[#trip + 1] = c.id .. ':' .. j else off[#off + 1] = c end
+      if j then
+        seen_trip[c.id] = true
+        local tr = mem.tripped[c.id]
+        if not tr or t - tr.last > 5 * DAY then tr = {since = t}; mem.tripped[c.id] = tr end   -- a stale record is a new trip
+        tr.last = t
+      end
+      if j and t - mem.tripped[c.id].since < CFG.trip_max then trip[#trip + 1] = c.id .. ':' .. j else off[#off + 1] = c end
     end
   end
+  for id in pairs(mem.tripped) do if not seen_trip[id] then mem.tripped[id] = nil end end
   local p = mem.cut_pend
   if p and p.cls ~= cls then p = nil end
   if #off <= (prev or 0) then
@@ -1423,7 +1506,7 @@ function M.cut_confirm(K, R, t, cls, cits, main, by_cls, prev)
   for g, n in pairs(nby) do if not gc or n > nby[gc] or (n == nby[gc] and g < gc) then gc = g end end
   local cz
   for _, c in ipairs(off) do if c.g == gc then cz = c; break end end
-  local b = blame(K, gc, has, {cz.x, cz.y, cz.z})
+  local b = blame(K, gc, has, {cz.x, cz.y, cz.z}) or M.edge_blame(gc, has, {cz.x, cz.y, cz.z}, true)   -- BUG-751
   if not b and not (p and p.tick and t - p.tick >= DAY) then
     if not (p and p.tick) then
       mem.cut_pend = {cls = cls, tick = t}
@@ -1440,11 +1523,13 @@ function M.cut_confirm(K, R, t, cls, cits, main, by_cls, prev)
   if not b then what = what .. string.format(' (%d d)', (t - p.tick) // DAY) end
   -- BUG-021: who stands where: a cut-off citizen and his group, a stock tile of the class on another group (the main
   -- group's first)
-  local where = string.format('; citizen %d at %d,%d,%d on group %d', cz.id, cz.x, cz.y, cz.z, gc)
+  local jn = M.job_name(cz.id)                                -- BUG-751: the job that took him there
+  local where = string.format('; citizen %d at %d,%d,%d on group %d', cz.id, cz.x, cz.y, cz.z, gc) .. (jn and (' job ' .. jn) or '')
                 .. (at and string.format(', %s at %d,%d,%d on group %d', cls, at[1], at[2], at[3], ag) or '')
   local d = {cls = cls, n = n, grp = gc or 0, main = main or 0, why = trunc(b and b[4] or 'unknown', 60)}
   if b then d.pos = {b[1], b[2], b[3]} end
   d.unit, d.upos = cz.id, {cz.x, cz.y, cz.z}
+  d.job = jn
   if at then d.at, d.agrp = {at[1], at[2], at[3]}, ag end
   if b and b.bridge and GATED[K.mode()] then
     K.emit('SEAL', 'B', string.format('%d citizens shut out from %s by a raised bridge at %d,%d,%d', n, cls,
@@ -1577,6 +1662,140 @@ local function job_quick(K)
   for _, cls in ipairs(VITAL) do
     if cut[cls] > (int(st.cut[cls]) or 0) then due('audit', now_t(K), 'quick:' .. cls); return end
   end
+end
+
+---------------------------------------------------------------- errands without a way back (BUG-751), citizens away (BUG-752)
+-- BUG-751 (Run 16c i3 Doorwings y388-y391): the jobs a citizen runs outdoors; the job's target tile (job.pos) on a walk group that holds
+-- no drink and food (a wall top, a tree crown, a pocket past a drop) is a trip nobody comes back from. M.STRAY_JOBS mirrors act's list.
+M.STRAY_JOBS = {'HuntVermin', 'Hunt', 'GatherPlants', 'FellTree', 'Fish', 'CollectSand', 'CollectClay', 'CollectWebs',
+                'GatherHoney', 'PlantSeeds', 'StoreItemInStockpile', 'StoreItemInBarrel', 'StoreItemInBin'}
+CFG.stray_every = 600          -- ticks between two looks at the citizens' errands and at who is away
+CFG.stray_max = 3              -- errands cancelled per look
+CFG.stray_unit_wait = DAY      -- the same unit again not before this
+CFG.missing_after = 3 * DAY    -- BUG-752: a citizen away this long is MISSING
+CFG.missing_again = 14 * DAY   -- ... and reported again (still away) after this
+CFG.missing_far = 40           -- tiles from the nearest citizen inside: an outside citizen farther than this is away
+
+function M.job_target(u)
+  local ok, x, y, z = pcall(function()
+    local j = u.job and u.job.current_job
+    if not j then return nil end
+    local p = j.pos
+    if not p or p.x == nil or p.x < 0 or p.y < 0 or p.z < 0 then return nil end
+    for _, n in ipairs(M.STRAY_JOBS) do
+      local v = df.job_type[n]
+      if v ~= nil and j.job_type == v then return p.x, p.y, p.z end
+    end
+  end)
+  if ok and x then return x, y, z end
+end
+
+-- BUG-751: cancel the errand of a citizen on a group with drink and food whose target lies on a group without
+function M.stray_errands(K, t, cits, good)
+  mem.stray = mem.stray or {}
+  local n = 0
+  for _, c in ipairs(cits) do
+    if n >= CFG.stray_max then break end
+    if good[c.g] and t - (mem.stray[c.id] or -1e12) >= CFG.stray_unit_wait then
+      local u = df.unit.find(c.id)
+      local tx, ty, tz
+      if u then tx, ty, tz = M.job_target(u) end
+      if tx then
+        local tg = grp(tx, ty, tz)
+        if tg and tg ~= 0 and not good[tg] then
+          local jn = M.job_name(c.id)
+          mem.stray[c.id] = t
+          local ok, res = K.act.cancel_stray_job(c.id)
+          if ok and res ~= 'no job' then
+            n = n + 1
+            mem.stats.stray_job = (mem.stats.stray_job or 0) + 1
+            K.log('warn', 'seal: %s of citizen %d cancelled: its target %d,%d,%d lies on walk group %d, which holds no drink and ' ..
+                  'food and has no way back (citizen at %d,%d,%d on group %d)', jn or tostring(res), c.id, tx, ty, tz, tg,
+                  c.x, c.y, c.z, c.g)
+          end
+        end
+      end
+    end
+  end
+  return n
+end
+
+-- BUG-752 (Run 16d i4 Pagedsculpture y386/y391: the militia captain Rovod and 25769 were 'missing in the unit list', then found dead;
+-- nothing said so while they were away): a citizen with no position, on a walk group without drink and food, or outside Kern+ and
+-- farther than CFG.missing_far tiles from every citizen inside, for CFG.missing_after ticks. MISSING (A) with the last position, the
+-- job and since when; once per episode, again every CFG.missing_again ticks.
+function M.missing_watch(K, t, cits, good)
+  mem.away = mem.away or {}
+  local cu = K.census.u
+  local out = {}
+  for _, id in ipairs(type(cu) == 'table' and type(cu.outside_ids) == 'table' and cu.outside_ids or {}) do out[id] = true end
+  local at = {}
+  for _, c in ipairs(cits) do at[c.id] = c end
+  local inside = {}
+  for _, c in ipairs(cits) do if not out[c.id] and good[c.g] then inside[#inside + 1] = c end end
+  local now_away = {}
+  local ids = type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}
+  for _, id in ipairs(ids) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) then
+      local why, x, y, z
+      local c = at[id]
+      if c then
+        x, y, z = c.x, c.y, c.z
+        if not good[c.g] then why = 'cut'
+        elseif out[id] and #inside > 0 then
+          local near = math.huge
+          for _, o in ipairs(inside) do near = math.min(near, math.max(math.abs(o.x - x), math.abs(o.y - y))) end
+          if near > CFG.missing_far then why = 'far' end
+        end
+      else
+        local px, py, pz = dfhack.units.getPosition(u)
+        if not px then why = 'off_map' else why, x, y, z = 'cut', px, py, pz end
+      end
+      if why then now_away[id] = {why = why, pos = x and {x, y, z} or nil} end
+    end
+  end
+  for id in pairs(mem.away) do if not now_away[id] then mem.away[id] = nil end end
+  local rows = {}
+  for _, id in ipairs(sorted_keys(now_away)) do
+    local a, w = mem.away[id], now_away[id]
+    if not a then a = {since = t}; mem.away[id] = a end
+    a.why = w.why
+    a.pos = w.pos or a.pos                                  -- off the map: the last position known
+    a.job = M.job_name(id) or a.job
+    if t - a.since >= CFG.missing_after and (not a.told or t - a.told >= CFG.missing_again) then
+      rows[#rows + 1] = {id = id, a = a}
+    end
+  end
+  for i, r in ipairs(rows) do
+    if i > 3 then break end
+    local a = r.a
+    a.told = t
+    local pos = a.pos and string.format('%d,%d,%d', a.pos[1], a.pos[2], a.pos[3]) or 'unknown'
+    local d = {unit = r.id, why = a.why, days = (t - a.since) // DAY, job = a.job}
+    if a.pos then d.pos = {a.pos[1], a.pos[2], a.pos[3]} end
+    K.emit('MISSING', 'A', trunc(string.format('citizen %d away for %d d (%s): last at %s, job %s', r.id, d.days,
+           a.why == 'off_map' and 'off the map' or a.why == 'cut' and 'on a walk group without drink and food' or
+           'far from the fort', pos, a.job or 'none'), 200), d)
+  end
+  return #rows
+end
+
+function M.job_stray(K)
+  local t = now_t(K)
+  mem.stray_t = t
+  local R = mem.reach
+  if not R then return end
+  local cits, _, _, by = reread_cut(K, R)
+  local good = {}
+  local nd, nf = 0, 0
+  for _ in pairs(by.drink or {}) do nd = nd + 1 end
+  for _ in pairs(by.food or {}) do nf = nf + 1 end
+  if nd == 0 or nf == 0 then return end                    -- no stock to measure against
+  for g in pairs(by.drink) do if by.food[g] then good[g] = true end end
+  if next(good) == nil then return end
+  M.stray_errands(K, t, cits, good)
+  M.missing_watch(K, t, cits, good)
 end
 
 ---------------------------------------------------------------- map edge (FR-54 sources)
@@ -6417,6 +6636,7 @@ local JOBS = {
   split = function(K) job_split(K) end,
   rpath = function(K) job_rpath(K) end,
   bguard = function(K, d) job_bguard(K, d.why) end,
+  stray = function(K) M.job_stray(K) end,                 -- BUG-751/752
 }
 
 local function schedule_periodic(K, t)
@@ -6430,6 +6650,7 @@ local function schedule_periodic(K, t)
   per('seal', mem.seal and mem.seal.tick, plain_open(mem.seal) and CFG.open_every or CFG.seal_every)   -- BUG-566
   per('edges', mem.edges and mem.edges.tick, CFG.edges_every)
   per('scan', mem.scan and mem.scan.tick, CFG.scan_every)
+  if mem.reach then per('stray', mem.stray_t, CFG.stray_every) end        -- BUG-751/752
   -- BUG-096: the burrow guard, a game day and every_s real seconds after the last reading ended
   if not mem.run.bguard and t >= (mem.bg_nt or 0) and ((K.now().ms or 0) // 1000) >= (mem.bg_nw or 0) then
     due('bguard', t, 'periodic')
