@@ -3029,7 +3029,8 @@ function M.carers(K, c, r, p, now, over)
     for _, e in ipairs(pool) do
       if #out.added >= c.carers_per_run or have + #out.added >= want or mine + #out.added >= c.carers_max then break end
       local cu = df.unit.find(e.cd.id)
-      if cu and not p.cw[fmt(e.cd.id)] and M.carer_ok(cu) then      -- (one of ours without the labor: the next one)
+      local okx, xs = K.call('care', 'stress_ids')                  -- BUG-728: a citizen at extreme stress carries no water
+      if cu and not p.cw[fmt(e.cd.id)] and M.carer_ok(cu) and not (okx and type(xs) == 'table' and xs[e.cd.id]) then      -- (one of ours without the labor: the next one)
         local ok, res = K.act.work_detail(M.CARER_DETAIL, e.cd.id, true, {select = true})
         if ok then
           out.added[#out.added + 1] = e.cd.id
@@ -3995,6 +3996,29 @@ end
 
 -- the run (patients, sources, buckets, decisions), then a requested water sources scan in the following frames;
 -- a scan that outlasts the cadence lets the next run go first
+-- BUG-728 (Run 16b i2 Whirledrampart y430: a child at stress 99,880 smothered two bedridden patients): the citizens care names at extreme
+-- stress (care.stress_ids) leave the Orderlies detail, once a XS_REPEAT while they stay so (the hospital is where they hurt the helpless;
+-- the game's own jobs go on without them). Refused (no detail) is tried again after the same time
+M.XS_REPEAT = 7 * DAY
+function M.xs_off(K, p, now)
+  local ok, xs = K.call('care', 'stress_ids')
+  if not ok or type(xs) ~= 'table' then return end
+  p.xo = json.object(type(p.xo) == 'table' and p.xo or {})
+  for id in pairs(xs) do
+    local k = fmt(id)
+    local t = math.tointeger(p.xo[k])
+    if not t or now < t or now - t >= M.XS_REPEAT then
+      local okd, res = K.act.work_detail(M.CARER_DETAIL, id, false)
+      p.xo[k] = now
+      K.persist.touch('m.water')
+      K.log('info', 'water: citizen %d at extreme stress leaves the %s detail (%s)', id, M.CARER_DETAIL, okd and 'done' or tostring(res))
+    end
+  end
+  for k, t in pairs(p.xo) do
+    if now - (math.tointeger(t) or 0) >= 2 * M.XS_REPEAT then p.xo[k] = nil end
+  end
+end
+
 function M.step(K, budget, ctx)
   local c = M.conf(K)
   local p = pstate(K)
@@ -4030,6 +4054,8 @@ function M.step(K, budget, ctx)
     end
     st.run = nil
     finish(K, c, r, p)
+    local okx, errx = pcall(M.xs_off, K, p, now)
+    if not okx then K.log('warn', 'water: stress release: %s', tostring(errx)) end
     if st.ws_want and not st.scan then
       st.ws_want = nil
       st.scan = new_scan(K, c, r, p)

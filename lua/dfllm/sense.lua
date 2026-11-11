@@ -283,7 +283,7 @@ local function hscan_begin(K, now, armed)
   st.geo = g
   st.hs = {i = 0, seen = {}, list = {}, keys = {}, vis = 0, inv = 0, great = 0, undead = 0, inside = 0, crazed = 0,
            zin = 0, zpast = 0, dz = 0, dz_o1 = -1, bd = 0, an = 0, rin = 0,
-           near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick, nben = 0, benign = {}, herb = 0, herb_d = -1,
+           near_o1 = -1, near_cit = -1, near_bridge = {}, caged = {}, units = 0, tick = now.tick, nben = 0, benign = {}, herb = 0, herb_d = -1, wfar = 0, wfar_d = -1,
            armed = armed and 1 or 0, geo = g, out_pos = st.out_pos or {}, civ_pos = st.civ_pos or {},
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
@@ -477,6 +477,7 @@ end
 -- CARNIVORE, no killer mark) is wildlife while it is farther than HERB_NEAR tiles from every citizen; it counts (BUG-439) once
 -- it is within HERB_NEAR of one or inside Kern+ / past B1. census.h.herb = how many stood by, herb_d the nearest one's distance
 M.HERB_NEAR = 20
+M.WILD_WATER_NEAR = 20      -- BUG-729: a wild beast at the water counts as a hostile only within this many tiles of a citizen
 local function herbivore(u)
   local rf = raw_flags(u)
   return not (rf.p or rf.cv or killer(u)) and big_wild(u)
@@ -718,6 +719,25 @@ local function consider(hs, u)
       return 7
     end
   end
+  -- BUG-729 (Run 16c i3 Doorwings y372: alligators and hippos at the river 24-60 tiles from the citizens held ALERT and the clock at 100
+  -- t/s for days, WATER_PREDATOR already named them): a wild beast (no invader, great danger, undead, building destroyer or killer mark)
+  -- in or beside water, outside Kern+ / past B1 and farther than WILD_WATER_NEAR tiles from every citizen, is water wildlife: no hostile
+  -- (census.h.wfar counts it, wfar_d the nearest one's distance; census.w and WATER_PREDATOR keep watching it). Near a citizen it counts
+  if not (inv or great or undead or hbeast or rf.bd) and not herb_in and not killer(u) and not in_boxes(hs.geo.zpast, x, y, z)
+     and WW.near(x, y, z) then
+    local dh = -1
+    for _, l in ipairs({hs.out_pos, hs.civ_pos}) do
+      for _, p in ipairs(l) do
+        local dzc = math.abs(z - p.z)
+        if dzc <= M.DA_DZ then dh = minpos(dh, math.max(math.abs(x - p.x), math.abs(y - p.y), dzc)) end
+      end
+    end
+    if dh < 0 or dh > M.WILD_WATER_NEAR then
+      hs.wfar = hs.wfar + 1
+      if dh >= 0 and (hs.wfar_d < 0 or dh < hs.wfar_d) then hs.wfar_d = dh end
+      return 7
+    end
+  end
   hs.vis = hs.vis + 1
   if great then hs.great = hs.great + 1 end
   if undead then hs.undead = hs.undead + 1 end
@@ -923,7 +943,8 @@ local function hscan_finish(K)
                 rin = hs.rin,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
-                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign, herb = hs.herb, herb_d = hs.herb_d, vpp = hs.vpp}
+                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign, herb = hs.herb, herb_d = hs.herb_d, vpp = hs.vpp,
+                wfar = hs.wfar, wfar_d = hs.wfar_d}
   wild_publish(K, hs)                            -- BUG-494
 end
 

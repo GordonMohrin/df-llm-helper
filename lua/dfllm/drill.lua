@@ -88,6 +88,13 @@ M.KEEP = 5
 M.SETTLE_MAX = 1200      -- BUG-512: the drill waits this long at most for the recall and the squads' march before its clock starts
 M.OCC_RETRIES = 2        -- BUG-580: clock restarts for a bridge our own people keep down at T+900
 M.OCC_WINDOW = 2100      -- BUG-580: ... only when T+900 of the attempt lies at most this long after T0 (siege.DRILL_MAX 3600 + SETTLE_MAX 1200 - MEASURE - RESTORE_MAX - 300)
+-- BUG-730 (Run 16d i4 Trumpetrealms y374: DRILL_FAIL 'worn<90, outside:1/8' several times in a row, the clock 'held 30 t/s reason drill' each time instead
+-- of 450, the plan's projects frozen / stalled behind it): (1) an automatic drill whose last result failed on the gear alone (`mech` 1: the bridges
+-- rose, nobody was outside, only worn < WORN_MIN) is not repeated while the gear is still short: it waits until worn has risen GEAR_STEP points above
+-- that result's, reaches WORN_MIN, or GEAR_RECHECK ticks (a year) have passed (the mechanics are proved, a second 30 t/s hour proves nothing);
+-- (2) no automatic drill starts while a citizen stands outside Kern+ (the recall in the settle phase cannot bring a straggler home that the fort
+-- keeps outside, it ended 'outside:1'), for OUT_FORCE ticks of such holds at most: then the drill starts and recalls as before. The player's `drill` is his choice.
+M.GEAR_STEP, M.GEAR_RECHECK, M.OUT_FORCE = 10, 403200, 7200
 M.RETRY_OCC = 7200       -- BUG-580: the next automatic drill after a drill whose only failure was `occupied:*` (6 days; the 5-day "just drilled" hold runs from its start)
 M.RESTORE_MAX = 1200     -- BUG-251: the drill's bridges must be down this many ticks after the measurement, else PEACE anyway
 local R1_CAP = 55
@@ -523,8 +530,26 @@ function M.dry_hold(K)
   return nil
 end
 
+-- BUG-730 (1): hold text when the newest failed drill was the gear alone and the gear has not improved, else nil
+function M.gear_hold(mk, newest, now)
+  if not (newest and newest.pass == 0 and newest.mech == 1) then return nil end
+  local worn = int(mk.worn) or 0
+  if worn >= M.WORN_MIN or worn >= (newest.worn or 0) + M.GEAR_STEP or now - newest.tick >= M.GEAR_RECHECK then return nil end
+  return cut(string.format('gear: worn %d<%d', worn, M.WORN_MIN), 24)
+end
+
+-- BUG-730 (2): hold text while a citizen stands outside Kern+ (at most OUT_FORCE ticks of it), else nil
+function M.outside_hold(K, now)
+  local cu = K.census.u
+  local outside = type(cu) == 'table' and int(cu.outside) or -1
+  if outside <= 0 then rt.out_since = nil; return nil end
+  rt.out_since = rt.out_since or now
+  if now - rt.out_since >= M.OUT_FORCE then return nil end
+  return cut(string.format('outside: %d', outside), 24)
+end
+
 -- why an automatic drill is due now (1st value), else why it is held (2nd value, <= 24 chars; FR-65 status)
-local function check(K, now)
+local function check0(K, now)
   if st.t0 or st.rs then return nil, 'running' end
   local d = danger(K)
   if d then return nil, d end
@@ -554,6 +579,8 @@ local function check(K, now)
     if rt.blocked then return nil, 'blocked:' .. rt.blocked end
     local wait = M.traffic_only(newest.fails) and M.RETRY_OCC or retry_wait()      -- BUG-580
     if now - newest.tick < wait then return nil, 'retry wait' end
+    local gh = M.gear_hold(mk, newest, now)                                         -- BUG-730
+    if gh then return nil, gh end
     return 'retry'
   end
   rt.blocked = nil
@@ -562,6 +589,18 @@ local function check(K, now)
   if wants_r2(K) and now - pass >= M.KEEP_R2 then return 'keep R2' end
   if now - pass >= M.YEARLY then return 'yearly' end
   return nil, 'passed'
+end
+
+-- BUG-730 (2): a drill that would be due waits while a citizen stands outside Kern+ (OUT_FORCE at most)
+local function check(K, now)
+  local why, held = check0(K, now)
+  if why then
+    local oh = M.outside_hold(K, now)
+    if oh then return nil, oh end
+  else
+    rt.out_since = nil
+  end
+  return why, held
 end
 
 -- why an automatic drill is due now, or nil

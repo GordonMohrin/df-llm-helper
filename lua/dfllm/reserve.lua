@@ -43,7 +43,7 @@ R.ACQ = {bone = {'butcher', 'hunt'}, shell = {'butcher', 'hunt'}, leather = {'bu
          gems = {'order:CutGems', 'buy'}, glass = {'order:MakeRawGlass'}, bars = {'order:SmeltOre', 'buy'}}
 -- trade.lua token kinds (L.KINDS) per class
 R.BUY = {bone = 'bone', cloth = 'cloth', thread = 'thread', leather = 'leather', gems = 'gem', bars = 'bar', boulders = 'stone',
-         logs = 'wood'}
+         logs = 'wood', glass = 'glass'}   -- BUG-727: raw glass (trade.lua kind glass)
 -- what the LLM can do about a class (DECISION_NEEDED q)
 R.HINT = {boulders = 'dig stone (bp.place bedrooms prio=1)', logs = 'cut trees', bone = 'butcher/hunt',
           shell = 'butcher/hunt/fish', leather = 'butcher+tan or trade.want leather', cloth = 'trade.want cloth',
@@ -481,6 +481,7 @@ function R.token(nd)
   local k = R.BUY[nd.cls]
   if not k then return nil end
   if R.KINDED[nd.cls] and nd.sub then return k .. ':' .. nd.sub end
+  if nd.cls == 'gems' and nd.tname == 'ROUGH' then return 'rough' end      -- BUG-727: a rough gem is no cut gem ('gem' = SMALLGEM)
   if nd.cls == 'bars' then
     local m = mat_name(nd.mat_type, nd.mat_index)
     if m and m:match('^[a-z_]+$') then return 'bar:' .. m end

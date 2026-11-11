@@ -55,6 +55,12 @@ M.STUCK_TICKS, M.STUCK_NEAR = 2400, 30
 M.QUIET, M.ALERT_QUIET = 2400, 1200
 M.REC_INNER, M.REC_OUTER, M.REC_PEACE = 1200, 2400, 8400
 M.ALERT_CIV_ON, M.ALERT_CIV_OFF, M.ALERT_CIV_HOLD, M.ALERT_O1 = 30, 40, 600, 30
+-- BUG-729 (Run 16a i1 Basementflew y480-y490: ONE visible enemy 30-45 tiles from a citizen: act.civ_alert true/false five times in 20 real
+-- seconds, ALERT_START / ALERT_END every 3 game days, each one recalling the outside workers): hysteresis. A civ alert stays on at least
+-- CIV_MIN_ON ticks, once off it sounds again within CIV_REARM ticks only for a hostile within ALERT_CIV_ON // 2 of a citizen, and after
+-- an ALERT ended a hostile that is not within ALERT_CIV_ON of a citizen outside or ALERT_O1 of O1 does not start the next ALERT for
+-- ALERT_REENTRY ticks (a siege, an invader inside or a hostile that near still does at once)
+M.CIV_MIN_ON, M.CIV_REARM, M.ALERT_REENTRY = 1200, 1800, 3600
 M.ANCHORS = 20             -- alert anchors kept (positions of citizens outside at alert-on)
 M.STATUS, M.RETRY, M.POSTURE_REASSERT, M.KILL_EVERY = 600, 600, 3600, 100
 -- BUG-052 (Run 11 siege 14, y497: 24 lost, soldiers 16 -> 6, 'on_station=0'): the episode keeps the soldiers it started with
@@ -209,6 +215,7 @@ local function go(K, to, why, a, bridge)
            {why = (why == 'gate_fail' or why == 'destroyed') and why or 'inside', bridge = bridge})
     wealth(K, 'breach')
   elseif to == 'PEACE' and from == 'ALERT' then
+    st.alert_end, dirty = K.now().tick, true
     K.emit('ALERT_END', 'B', 'alert over', {vis = vis})
   elseif to == 'PEACE' and from == 'RECOVERY' and ep then
     local hostiles = math.max(ep.hmax or 0, ep.seen or 0)
@@ -1080,6 +1087,15 @@ local function lost_step(K, g, now)
   end
 end
 
+-- BUG-729: the ALERT that ended less than ALERT_REENTRY ticks ago is not started again by a lone hostile far from the citizens and O1
+local function alert_cooling(a, now)
+  local t = st.alert_end
+  if not t or now < t or now - t >= M.ALERT_REENTRY then return false end
+  if (a.inv or 0) > 1 then return false end                 -- a group of invaders is no lone far hostile
+  local nc, no = a.near_cit or -1, a.near_o1 or -1
+  return (nc < 0 or nc > M.ALERT_CIV_ON) and (no < 0 or no > M.ALERT_O1)
+end
+
 local function decide(K, a, g, now)
   local mode = K.mode()
   if mode == 'SIEGE' or mode == 'BREACH' then lost_step(K, g, now) end
@@ -1089,7 +1105,7 @@ local function decide(K, a, g, now)
       if go(K, 'SIEGE', a.siege, a) and a.inside > 0 then go(K, 'BREACH', 'inside', a) end
     elseif a.inside > 0 then
       if go(K, 'ALERT', 'inside', a) then go(K, 'BREACH', 'inside', a) end
-    elseif a.hostile then go(K, 'ALERT', 'hostile', a) end
+    elseif a.hostile and not alert_cooling(a, now) then go(K, 'ALERT', 'hostile', a) end
   elseif mode == 'ALERT' then
     if not a then return end
     if a.inside > 0 then go(K, 'BREACH', 'inside', a)
@@ -1195,8 +1211,15 @@ local function alert_wanted(K, a, g, now, held)
   -- from a citizen still outside, an anchor or O1; off after 600 ticks beyond that
   if a then
     local d = a.near_cit
-    if d >= 0 and d <= M.ALERT_CIV_ON then
+    local want_on = d >= 0 and d <= M.ALERT_CIV_ON
+    -- BUG-729: a civ alert that just went off sounds again only for a hostile within half the on-distance
+    if want_on and not st.civ and st.civ_off and now >= st.civ_off and now - st.civ_off < M.CIV_REARM
+       and d > M.ALERT_CIV_ON // 2 then
+      want_on = false
+    end
+    if want_on then
       add_anchors(K)
+      if not st.civ then st.civ_on = now end
       st.civ, st.far, dirty = true, nil, true
     elseif st.civ then
       local da = anchor_dist(K, g)
@@ -1205,7 +1228,10 @@ local function alert_wanted(K, a, g, now, held)
         if st.far then st.far, dirty = nil, true end
       else
         st.far = st.far or now
-        if now - st.far >= M.ALERT_CIV_HOLD then st.civ, st.far, st.civ_at = false, nil, nil end
+        -- BUG-729: and never before it sounded CIV_MIN_ON ticks
+        if now - st.far >= M.ALERT_CIV_HOLD and now - (st.civ_on or -M.CIV_MIN_ON) >= M.CIV_MIN_ON then
+          st.civ, st.far, st.civ_at, st.civ_off = false, nil, nil, now
+        end
         dirty = true
       end
     end
@@ -2902,7 +2928,8 @@ function M.init(K)
   local p = K.persist.get('m.siege')
   p = type(p) == 'table' and p or {}
   st = {v = 2, t0 = int(p.t0) or K.mode_since(), tb = int(p.tb) or K.mode_since(), req = {},
-        rq = int(p.rq) or 0, rl = now, civ = p.civ == true, b1low = p.b1low == true, ls = int(p.ls)}
+        rq = int(p.rq) or 0, rl = now, civ = p.civ == true, b1low = p.b1low == true, ls = int(p.ls),
+        civ_on = int(p.civ_on), civ_off = int(p.civ_off), alert_end = int(p.alert_end)}
   for b, why in pairs(type(p.req) == 'table' and p.req or {}) do
     if type(b) == 'string' then st.req[b] = tostring(why) end
   end

@@ -2831,13 +2831,34 @@ end
 -- BUG-108: an inner-cause interrupt (cfg inner: DEATHS_3PLUS) at threat 0 gets none: the event woke the player, and a
 -- clock clamp or civ alert for a cause no enemy shares (patients, moods, a curse) only slows the fort and sends the
 -- carers away from the hospital
+-- BUG-729 (Run 16c i3 Wallfree y373: a smilodon 26832 struck citizen 26523 down while its PREDATOR waited for the player's ack, the 60 s
+-- default came after the kill; at 100-300 ticks a second the 60 real seconds are 6,000-18,000 ticks): a PREDATOR whose unit stands inside
+-- Kern+ / past B1 or within PRED_NEAR tiles of a citizen gets its default after PRED_NEAR_S real seconds (never later than ack_timeout_s)
+M.PRED_NEAR, M.PRED_NEAR_S = 15, 10
+local function pred_close(K, u)
+  u = int(u)
+  local h = K.census.h
+  if not u or type(h) ~= 'table' or K.now().tick - (h.tick or -1e9) > M.FRESH then return false end
+  for _, e in ipairs(h.list or {}) do
+    if e.id == u then
+      local dc, da = int(e.dc) or -1, int(e.da) or -1
+      return (e.zn or 0) == 2 or (dc >= 0 and dc <= M.PRED_NEAR) or (da >= 0 and da <= M.PRED_NEAR)
+    end
+  end
+  return false
+end
+
 local function ack_step(K, now)
   local c = cfg(K)
   local ms = K.now().ms
   for _, r in ipairs(st.irq) do
     if ms < r.ms then r.ms, dirty = ms, true end     -- the real-time clock restarted (reboot): count again
     local age = (ms - r.ms) // 1000
-    if r.n > (st.ack.n or 0) and r.done == 0 and age >= c.ack_timeout_s then
+    local need = c.ack_timeout_s
+    if r.type == 'PREDATOR' and r.done == 0 and r.n > (st.ack.n or 0) and age >= M.PRED_NEAR_S and pred_close(K, r.u) then
+      need = math.min(need, M.PRED_NEAR_S)
+    end
+    if r.n > (st.ack.n or 0) and r.done == 0 and age >= need then
       r.done, dirty = 1, true
       local acts = c.defaults[r.type] or {}
       if r.type == 'PREDATOR' and st.hold and st.hold.clk_off then            -- BUG-671: this lockdown's clock was released

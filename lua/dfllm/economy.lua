@@ -7305,6 +7305,21 @@ function M.mood_hint(K, cls)
   end
 end
 
+-- BUG-727 (Run 16b i2 Whirledrampart y425: a Fey mood 'glass_green x1 none in the fort', 'Make raw glass: no sand', `trade.want glass` ignored,
+-- the dwarf died of thirst in the mood): true, text when the fort's own glass chain cannot make raw glass in time: no furnace and no stone to
+-- build one (mood_hint), or no sand revealed / an invalid sand zone (glass_plan's blockers). care's early mood decision names it.
+function M.glass_stuck(K)
+  local okh, hint, imp = pcall(M.mood_hint, K, 'glass')
+  if okh and type(hint) == 'string' and imp == true then return true, hint end
+  local g = st.glass
+  for _, b in ipairs(type(g) == 'table' and type(g.block) == 'table' and g.block or {}) do
+    if b == 'no_sand' or b == 'sand_invalid' then
+      return true, (M.GLASS_SHORT[b] or b) .. ': raw glass cannot be made here (trade.want glass, or reveal / zone sand)'
+    end
+  end
+  return false
+end
+
 -- economy.route for gems and raw glass (care's MOOD_RISK): via 'glass' = the missing gems filter takes cut glass; any
 -- other gems need is a rough gem, which no glass replaces
 function M.glass_route(K, key, via)
@@ -11266,6 +11281,7 @@ function T.ocheck(K, c, r)
         oq.stuck = oq.stuck + 1
         if kind and kind.ws then oq.sws, oq.wsn[kind.ws] = oq.sws + 1, (oq.wsn[kind.ws] or 0) + 1 end
         if kind and kind.worker then oq.slab = oq.slab + 1 end
+        if kind and kind.worker and rec.job == 'ConstructMechanisms' then M.mech_labor_note(K) end     -- BUG-730: nobody makes the mechanisms
         -- BUG-205 (live Earthboat: ORDER_STUCK x45 in 2 months, one per imported order whose workshop is missing): a
         -- missing workshop is one event per shop type at the end of the pass (M.ws_stuck)
         -- BUG-225 (live i3: 12x 'no bars:INORGANIC:IRON' and 9x 'no rock' in a month, one per order): a missing input
@@ -11639,6 +11655,18 @@ function M.stale_reason(c, r, oq, o, job, mc, days)
   return table.concat(parts, '; '):sub(1, 110)
 end
 
+-- BUG-730 (Run 16d i4 Pagedsculpture y373-y374: the planned traps waited for trapparts for months, ConstructMechanisms x2, x13, x8 'no job for 12 days
+-- (Mechanics: 1 shop, 1 jobs, none from this order; 33 free boulders)': only reported): a mechanism order that cannot run (no worker with the
+-- Mechanics labor) or is stale asks for the dwarf who makes it first: mechanic_labor puts the labor on the best idle candidate when nobody
+-- holds it. The note it adds to the stale reason
+function M.mech_labor_note(K)
+  local ok, lab, uid = pcall(M.mechanic_labor, K)
+  if not ok then return '' end
+  if lab == 'set' then return string.format('; Mechanics labor set on for unit %d', int(uid) or 0) end
+  if lab == 'none' then return '; no citizen can take the Mechanics labor' end
+  return ''
+end
+
 -- BUG-224: the order's shop type (the first built one, as M.stale_reason names it) when its shops hold other jobs, at
 -- least one a shop: {key, e = oq.shops.keys entry}; nil when the shops stand empty (the order itself is the problem)
 function M.shop_busy(oq, r, job, mc)
@@ -11767,6 +11795,7 @@ function T.stale(K, c, r)
       local def = false
       for _, pe in pairs(M.PIECES) do if pe.job == e.job then def = pe.def == true end end
       local why = M.stale_reason(c, r, oq, o, e.job, e.mc, e.days)
+      if e.job == 'ConstructMechanisms' then why = (why .. M.mech_labor_note(K)):sub(1, 150) end     -- BUG-730
       local act, dropped = nil, 0
       if rec.sw ~= 1 and e.mc == 'rock' and wj[e.job] and (r.f or {})['workshop:Carpenters']
          and M.wood_left(c, r, def) >= e.left and K.act.order_material(e.id, 'wood') then
