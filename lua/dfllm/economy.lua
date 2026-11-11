@@ -277,7 +277,8 @@ M.DEFAULTS = {
   -- stands and cook ingredients lie there is taken down and made again without any item condition (M.cook_watch).
   food = {yield = 1, per_dwarf = 3, plot_tiles = 35, plots_max = 4, want_days = 90, trend_days = 14,
           request_days = 14, pre_days = 30, crops_per_dwarf = 4, crops_min = 50, crops_max = 400, crops_step = 10,
-          status_days = 7, meals_per_dwarf = 2, cit_per_job = 2, cook_floor = 10, cook_stall_days = 6},
+          status_days = 7, meals_per_dwarf = 2, cit_per_job = 2, cook_floor = 10, cook_stall_days = 6,
+          gap_days = 110},    -- BUG-716: autumn and winter: below this many food days the fort acts as at food_low (M.gap_low)
   -- BUG-042 (Run 11, y471: 3079 plant growths, 275 plants, drink 93 -> 32 days): the drink deficit is brewed from what
   -- the census finds brewable (`src`: brew_p = PLANT with DRINK_MAT, plump helmets always; brew_g = PLANT_GROWTH with
   -- DRINK_MAT, fruit), split by their stock (M.brew_share); with neither in the fort the plant order takes it all
@@ -6812,6 +6813,7 @@ function T.watch(K, c, r)
   M.food_unban(K, c, r, r.inv)
   M.cook_repair(K, c, r, r.inv)                    -- BUG-345
   M.cook_watch(K, c, r)                            -- BUG-629
+  M.fish_watch(K, c, r)                            -- BUG-716
   M.drink_low(K, c, r)                             -- BUG-042
   M.fd_wants(K, c, r)                              -- BUG-256, BUG-259
 end
@@ -10108,6 +10110,9 @@ function M.food_block(K, c, r, inv)
                                                   or '')}
     else put('fishery', string.format('build a fishery (%d raw fish)', raw), M.FOOD_CMD.fishery) end
   end
+  if type(st.fishw) == 'table' then       -- BUG-716: the fishery stands, the raw fish are not cleaned
+    put('fish_clean', string.format('%d raw fish uncleaned for %d days: %s', st.fishw.raw or raw, st.fishw.d or 0, tostring(st.fishw.text or '')))
+  end
   local sg = st.gather
   if type(sg) == 'table' then
     if (sg.n or 0) > 0 then auto[#auto + 1] = {'gather', string.format('%d gatherers added (%d gather jobs)', sg.n,
@@ -10355,15 +10360,30 @@ end
 -- meals 105 -> 0): `extra` adds a cook beside the holders when every holder has a job (a hunter, a hauler, a soldier's day off: the
 -- labor is on, nobody stands at the kitchen); the holders are left out of the candidates then
 function M.cook_labor(K, extra)
+  return M.labor_assign(K, {labor = 'COOK', which = 'cook', skill = 'COOK', stamp = 'cookl', text = 'Cooking labor',
+                            why = 'a kitchen stands, cook ingredients lie there, no meal and nobody had the labor'}, extra)
+end
+
+-- BUG-716 (Run 16c i3 Wallfree y423-y426: 965 -> 2,616 raw fish uncleaned, Fishery 'jobs 1, working 0', 17 of 33 adults idle, food 618 -> 183 days):
+-- the same pick for the Fish cleaning labor (CLEAN_FISH)
+function M.fish_labor(K, extra)
+  return M.labor_assign(K, {labor = 'CLEAN_FISH', which = 'clean_fish', skill = 'PROCESSFISH', stamp = 'fishl', text = 'Fish cleaning labor',
+                            why = 'a fishery stands, raw fish lie there uncleaned and nobody had the labor'}, extra)
+end
+
+-- the labor `o.labor` (act.labor_set `o.which`) on the best candidate: idle first, then the skill `o.skill`, no soldier, patient, moody or noble;
+-- at most once a day (p[o.stamp]). `extra` adds one beside the holders (the holders are left out of the candidates then).
+-- Returns 'have' (+ unit id), 'set' (+ unit id), 'none' or 'wait'
+function M.labor_assign(K, o, extra)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 'none' end
-  local sid = df.job_skill and df.job_skill.COOK
+  local sid = df.job_skill and df.job_skill[o.skill]
   local cands = {}
   for _, id in ipairs(cu.ids) do
     local u = df.unit.find(id)
     if u and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) and M.citizen(u) and (u.military.squad_id or -1) < 0
        and (u.mood or -1) < 0 then
-      if M.labor_flag(u, 'COOK') then
+      if M.labor_flag(u, o.labor) then
         if not extra then return 'have', id end
       elseif not M.patient(u) and not noble(u) then
         cands[#cands + 1] = {id = id, idle = (u.job == nil or u.job.current_job == nil) and 1 or 0,
@@ -10373,17 +10393,17 @@ function M.cook_labor(K, extra)
   end
   if #cands == 0 then return 'none' end
   local p, now = pstate(K), K.now().tick
-  if now - (math.tointeger(p.cookl) or -DAY) < DAY then return 'wait' end
+  if now - (math.tointeger(p[o.stamp]) or -DAY) < DAY then return 'wait' end
   table.sort(cands, function(a, b)
     if a.idle ~= b.idle then return a.idle > b.idle end
     if a.sk ~= b.sk then return a.sk > b.sk end
     return a.id < b.id
   end)
-  p.cookl = now
+  p[o.stamp] = now
   K.persist.touch('m.economy')
-  local ok = K.act.labor_set(cands[1].id, 'cook', true)
+  local ok = K.act.labor_set(cands[1].id, o.which, true)
   if not ok then return 'none' end
-  K.log('warn', 'Cooking labor on for unit %d: a kitchen stands, cook ingredients lie there, no meal and nobody had the labor', cands[1].id)
+  K.log('warn', '%s on for unit %d: %s', o.text, cands[1].id, o.why)
   return 'set', cands[1].id
 end
 
@@ -10448,7 +10468,7 @@ function M.shop_reach(K)
       if n and built(b) then
         local ring, mid = M.shop_ring(b)
         if ring then
-          local s = {type = n, at = mid}
+          local s = {type = n, at = mid, id = math.tointeger(b.id)}
           shops[#shops + 1] = s
           for _, pt in ipairs(ring) do
             if #pts < M.CUT.max_pts then pts[#pts + 1] = pt; owner[#pts] = s end
@@ -10484,6 +10504,7 @@ function M.shop_reach(K)
     elseif s.seen then
       e.cutn = e.cutn + 1
       e.cut = e.cut or {at = s.at, grp = s.seen}
+      if s.id then e.dead = e.dead or {}; e.dead[#e.dead + 1] = {id = s.id, at = s.at, grp = s.seen} end    -- BUG-715
     end
   end
   local hg = {}
@@ -10509,6 +10530,86 @@ function M.cut_text(p, t)
   local at = type(rec.at) == 'table' and rec.at or {}
   return string.format('%s at %s,%s,%s (walk group %s, the citizens on %s)', t, tostring(at[1]), tostring(at[2]), tostring(at[3]),
                        tostring(rec.grp) == '0' and '0: no walkable tile round it' or tostring(rec.grp), tostring(rec.home))
+end
+
+-- BUG-715 (Run 16a i1 Basementflew y470-y480: a SECOND Kitchen 29,112,117 stood in the flooded level z117 beside a reachable one, the manager
+-- gave it the PrepareMeal job, DF said 'unreachable PrepareMeal x1', meals stayed at 1 beside 1000-3000 food days, and no command removed a
+-- dead workshop; BUG-654 judged only a type whose EVERY shop is cut off): a shop of a type that has a reachable shop and that no citizen can
+-- walk to (walk group off the citizens', or a ring with no walkable tile) for CUT.days days in PEACE is DEAD (p.deadws[id] = {t, at, grp,
+-- type, told}). It is named (ORDER_STUCK kind workshop, kern.log: where, why, which shop takes the jobs now) and retired (act.workshop_retire:
+-- the manager's general orders off it, a Remove Building job); asked again after RETIRE_AGAIN days while it stands, at most
+-- RETIRE_PER_RUN shops a day. A type with no reachable shop is BUG-654's case (a new one is asked for); nothing is removed there.
+M.RETIRE_AGAIN = 30 * DAY
+M.RETIRE_PER_RUN = 2
+
+function M.dead_text(d, home)
+  local at = type(d.at) == 'table' and d.at or {}
+  return string.format('%s %s at %s,%s,%s (%s, the citizens on %s)', tostring(d.type), tostring(d.id), tostring(at[1]), tostring(at[2]), tostring(at[3]),
+                       tostring(d.grp) == '0' and 'walk group 0: no walkable tile round it, flooded or walled' or ('walk group ' .. tostring(d.grp)),
+                       tostring(home))
+end
+
+-- 'dead Kitchen 17 at 29,112,117 (walk group 0 ...), retired' for the first dead shop of the type in p.deadws, else nil (the stall texts)
+function M.dead_note(p, t)
+  local keys = {}
+  for key, d in pairs(type(p.deadws) == 'table' and p.deadws or {}) do
+    if type(d) == 'table' and d.type == t then keys[#keys + 1] = key end
+  end
+  if #keys == 0 then return nil end
+  table.sort(keys)
+  local d = p.deadws[keys[1]]
+  return 'dead ' .. M.dead_text(d, nil):gsub(', the citizens on nil', '') .. (d.done and ', retired' or '')
+end
+
+function M.dead_scan(K, p, by, hg, now)
+  local dead = type(p.deadws) == 'table' and p.deadws or {}
+  local seen, changed = {}, false
+  for t, e in pairs(by) do
+    if e.ok > 0 and e.cutn > 0 then
+      for _, s in ipairs(e.dead or {}) do
+        local key = tostring(s.id)
+        seen[key] = true
+        local d = dead[key]
+        if type(d) ~= 'table' then
+          dead[key] = {t = now, at = s.at, grp = s.grp, type = t, id = s.id}
+          changed = true
+        end
+      end
+    end
+  end
+  for key in pairs(dead) do
+    if not seen[key] then dead[key], changed = nil, true end            -- it stands on a citizens' walk group again, or is gone
+  end
+  local done = 0
+  local keys = {}
+  for key in pairs(dead) do keys[#keys + 1] = key end
+  table.sort(keys)
+  for _, key in ipairs(keys) do
+    local d = dead[key]
+    local age = now - (math.tointeger(d.t) or now)
+    local last = math.tointeger(d.done)
+    if done < M.RETIRE_PER_RUN and age >= M.CUT.days * DAY and not (last and now - last < M.RETIRE_AGAIN) then
+      local ok, res = K.act.workshop_retire(d.id)
+      d.done, d.how = now, ok and (type(res) == 'table' and res.how or 'ok') or tostring(res)
+      done, changed = done + 1, true
+      local text = M.dead_text(d, hg and hg[1])
+      local msg
+      if ok then
+        msg = string.format('dead workshop %s: no citizen can walk there, a reachable %s stands and takes the jobs; retired (%s%s)',
+                            text, tostring(d.type), type(res) == 'table' and res.how or 'ok',
+                            type(res) == 'table' and res.how ~= 'gone' and '; a builder has to reach it for the removal, the manager is off it' or '')
+      else
+        msg = string.format('dead workshop %s: no citizen can walk there, a reachable %s stands; the retire failed: %s', text, tostring(d.type), tostring(res))
+      end
+      K.log('warn', '%s', msg)
+      K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = tostring(d.type), n = 1, why = msg:sub(1, 100), kind = 'workshop',
+             id = d.id, retired = ok and 1 or 0})
+    end
+  end
+  if changed then
+    p.deadws = next(dead) and dead or nil
+    K.persist.touch('m.economy')
+  end
 end
 
 function M.cut_scan(K, c, r)
@@ -10550,6 +10651,7 @@ function M.cut_scan(K, c, r)
     K.log('warn', '%s', msg)
     K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = t, n = by[t].n, why = msg:sub(1, 100), kind = 'workshop'})
   end
+  M.dead_scan(K, p, by, hg, now)
   local want = M.cut_types(p)
   if #want == 0 then
     if type(p.wsask) == 'table' then p.wsask.cut = nil end
@@ -10606,6 +10708,8 @@ function M.cook_watch(K, c, r)
     local how, uid = M.cook_labor(K, true)
     if how == 'set' then act[#act + 1] = 'every COOK holder busy: Cooking labor on for unit ' .. tostring(uid) end
   end
+  local dn = M.dead_note(p, 'Kitchen')
+  if dn then act[#act + 1] = dn end               -- BUG-715: the stall's cause when a second kitchen is unreachable
   if not cw.relax then
     cw.relax, cw.n, cw.told = r.now, (cw.n or 0) + 1, r.now
     local dropped = 0
@@ -10631,6 +10735,80 @@ function M.cook_watch(K, c, r)
     K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = o and o.id or 0, job = 'PrepareMeal', n = left or 0, days = cw.d,
            why = 'cook stall: order without condition, still no meal', dropped = 0, kind = holder and 'input' or 'worker'})
   end
+end
+
+-- BUG-716 (Run 16c i3 Wallfree y423-y426: 965 raw fish -> 2,616 in a year beside 'Fishery jobs 1, working 0', 17 of 33 adults idle, cookable 0,
+-- food 618 -> 183 days, the PrepareRawFish orders made no cleaned fish; the player could only read): the raw fish are the food, the fishery
+-- cleans them. The watch (daily, T.watch): the fishery stands (a cut-off one is counted missing, BUG-654), raw fish lie there (>= fish.stall_raw 40)
+-- and their number has not fallen by a fifth for fish.stall_days (6) days. Then the cause is looked at and told once (ORDER_STUCK, again after
+-- 30 days): nobody holds Fish cleaning (the labor is switched on for an idle adult, act.labor_set clean_fish), every holder has a job (one more),
+-- no PrepareRawFish order is open (the planner makes it at the next run), or a holder is idle and the fishery is just slower than the catch
+-- (the text says so). st.fishw feeds the food decisions ('N raw fish uncleaned: ...').
+M.FISH_STALL = {raw = 40, days = 6, again = 30 * DAY}
+function M.fish_watch(K, c, r)
+  if not r.day then return end
+  local p, inv = r.p, r.inv or {}
+  local F = type(c.fish) == 'table' and c.fish or {}
+  local raw = inv.fish_raw or 0
+  local f = M.facts_now(K, r)
+  local need_raw = math.tointeger(F.stall_raw) or M.FISH_STALL.raw
+  local need_days = math.max(1, math.tointeger(F.stall_days) or M.FISH_STALL.days)
+  local fw = type(p.fishw) == 'table' and p.fishw or nil
+  if not (ws_any(f, M.FISHERY) and raw >= need_raw) then
+    if fw then p.fishw = nil; K.persist.touch('m.economy') end
+    st.fishw = nil
+    return
+  end
+  if not fw then fw = {base = raw, d = 0, day = r.now // DAY}; p.fishw = fw end
+  local today = r.now // DAY
+  if fw.day ~= today then
+    fw.day = today
+    if raw * 5 <= (fw.base or raw) * 4 then fw.base, fw.d = raw, 0         -- it fell by a fifth: the cleaners are at work
+    else
+      fw.d = (fw.d or 0) + 1
+      if raw > (fw.base or 0) * 2 then fw.base = raw end                    -- a bigger catch is a new base
+    end
+  end
+  K.persist.touch('m.economy')
+  st.fishw = nil
+  if fw.d < need_days then return end
+  local holder = M.labor_holder(K, 'CLEAN_FISH')
+  local o = order_by_id(p.orders[F.tag or 'dfllm:fish'])
+  local left = o and math.tointeger(o.amount_left) or nil
+  local act = {}
+  if not holder then
+    local how, uid = M.fish_labor(K)
+    act[#act + 1] = how == 'set' and ('Fish cleaning labor on for unit ' .. tostring(uid)) or 'nobody holds the Fish cleaning labor'
+  elseif (st.idle or 0) > 0 and not M.fish_idle(K) and raw >= 3 * need_raw then
+    local how, uid = M.fish_labor(K, true)
+    if how == 'set' then act[#act + 1] = 'every Fish cleaning holder is busy: the labor on for unit ' .. tostring(uid) end
+  end
+  if not left or left <= 0 then act[#act + 1] = 'no PrepareRawFish order is open' end
+  if #act == 0 then act[#act + 1] = 'the fishery is slower than the catch' end
+  st.fishw = {d = fw.d, raw = raw, text = table.concat(act, '; '):sub(1, 100)}
+  if r.now - (math.tointeger(fw.told) or -M.FISH_STALL.again) >= M.FISH_STALL.again then
+    fw.told = r.now
+    local msg = string.format('raw fish not cleaned for %d days: %d raw fish, fishery built, Fish cleaning %s, order %s, adults idle %d%%: %s',
+                              fw.d, raw, holder and 'held' or 'on nobody', left and ('x' .. left .. ' open') or 'none open', st.idle or 0,
+                              table.concat(act, '; '))
+    K.log('warn', '%s', msg)
+    K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = o and o.id or 0, job = 'PrepareRawFish', n = left or 0, days = fw.d,
+           why = ('fish stall: ' .. table.concat(act, '; ')):sub(1, 100), dropped = 0, kind = holder and 'input' or 'worker'})
+  end
+end
+
+-- some holder of Fish cleaning (an adult citizen, no soldier) has no job right now
+function M.fish_idle(K)
+  local lid = df.unit_labor and df.unit_labor.CLEAN_FISH
+  local cu = K.census.u
+  if type(lid) ~= 'number' or type(cu) ~= 'table' then return true end
+  local sold = {}
+  for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
+  for _, id in ipairs(cu.ids or {}) do
+    local u = not sold[id] and df.unit.find(id)
+    if u and dfhack.units.isAdult(u) and labor_on(u, lid) and (u.job == nil or u.job.current_job == nil) then return true end
+  end
+  return false
 end
 
 function T.plan(K, c, r)
@@ -12888,7 +13066,20 @@ end
 
 -- food below the pre-alarm line (or a famine): the slots take the edible crops first, autofarm steps aside
 function M.food_low(c, r)
-  return ((r.days or {}).food_d or 9999) < ((c.food or {}).pre_days or 30) or (r.p and r.p.famine ~= nil) or false
+  return ((r.days or {}).food_d or 9999) < ((c.food or {}).pre_days or 30) or (r.p and r.p.famine ~= nil) or M.gap_low(c, r) or false
+end
+
+-- BUG-716 (Run 16c i3 Wallfree / Doorwings y377-y380 and y426-y432: the autumn harvest gave 119 food days, the winter froze the water, the fish
+-- were gone, the stock ran out in the spring every year: food 129 -> 0 days before the first spring crop): in AUTUMN and WINTER a stock under
+-- `food.gap_days` (110, 0 = off: about the winter and the spring until the first crop) counts as low, so the edible crops come first, the
+-- caravans are asked for food, the kitchen and butcher are requested and the hunters hunt, long before the 30-day pre-alarm. Never a DECISION
+-- of its own (food_pre and the famine keep their own lines).
+function M.gap_low(c, r)
+  local gd = (c.food or {}).gap_days
+  if gd == nil then gd = 110 end
+  if type(gd) ~= 'number' or gd <= 0 or type(r.now) ~= 'number' then return false end
+  local season = (r.now % 403200) // 100800
+  return (season == 2 or season == 3) and ((r.days or {}).food_d or 9999) < gd
 end
 
 -- BUG-058 (Run 13 y512: the slot of the running season was -1 again 30 s after the kernel set it): the slots the kernel

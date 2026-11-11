@@ -30,7 +30,8 @@ A.TOOL_EXCL = {Miners = 'MINE', Woodcutters = 'CUTWOOD', Hunters = 'HUNT'}
 A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
 -- BUG-546/547: the one labor each way act.labor_set switches (the labors screen): mechanic on (a lever's link job needs a Mechanic),
 -- farm off (the manager at the fields validates no order), BUG-629: cook on (a kitchen, cook ingredients, no meal and nobody with the labor)
-A.LABOR_SETS = {mechanic = {name = 'MECHANIC', on = true}, farm = {name = 'PLANT', on = false}, cook = {name = 'COOK', on = true}}
+A.LABOR_SETS = {mechanic = {name = 'MECHANIC', on = true}, farm = {name = 'PLANT', on = false}, cook = {name = 'COOK', on = true},
+                clean_fish = {name = 'CLEAN_FISH', on = true}}      -- BUG-716: raw fish uncleaned, nobody holds Fish cleaning
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
@@ -1326,6 +1327,30 @@ local function impls(state)
     return false, 'no such well'
   end
 
+  -- BUG-715 (Run 16a i1 Basementflew y470-y480: a second Kitchen 29,112,117 stood in the flooded level z117 beside a reachable one, the manager
+  -- gave it the PrepareMeal job ('unreachable PrepareMeal x1') and meals stayed at 1 beside 1000-3000 food days; no command
+  -- removed a dead workshop): ONE workshop by id is taken out of the manager's reach and removed. (1) the workshop profile's
+  -- max_general_orders 0 (the building sheet's "general orders" setting: the manager's jobs go to another shop of the type),
+  -- (2) dfhack.buildings.deconstruct (queues a Remove Building job; a builder must walk there, so a flooded shop stays marked while (1)
+  -- already holds the manager off). The job already posted there is the order's (economy's stall watch takes the order down and remakes
+  -- it); no job is removed here (lint remove-job). The caller (economy.dead_scan) has checked that the shop is cut off from every citizen
+  -- and that a reachable shop of its type stands. Returns ok, {how = 'gone' | 'queued' | 'held', profile = bool} or false, why. [live-untested]
+  function I.workshop_retire(id)
+    id = math.tointeger(id)
+    if not id then return false, 'bad workshop id' end
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      if b.id == id then
+        local prof = pcall(function() b.profile.max_general_orders = 0 end)
+        if dfhack.buildings.deconstruct(b) then return true, {how = 'gone', profile = prof} end
+        local okm, marked = pcall(function() return dfhack.buildings.markedForRemoval(b) end)
+        if okm and marked then return true, {how = 'queued', profile = prof} end
+        if prof then return true, {how = 'held', profile = prof} end
+        return false, 'deconstruct refused'
+      end
+    end
+    return false, 'no such workshop'
+  end
+
   -- BUG-034 (Run 11, Kilrudrabed y439: 5 bedridden patients died of thirst in a hospital without water; the game session
   -- removed its 5 zones by hand and GiveWater jobs brought water again): zones screen > select the zone > remove, for ONE
   -- activity zone of a hospital location (its location_id names a HOSPITAL abstract building of the site, as water
@@ -2250,7 +2275,7 @@ local function impls(state)
   -- (only on) or farm (only off), A.LABOR_SETS; a citizen who is no living adult cannot take a labor
   function I.labor_set(unit_id, which, on)
     local spec = A.LABOR_SETS[tostring(which)]
-    if not spec then return false, 'which must be mechanic, farm or cook' end
+    if not spec then return false, 'which must be mechanic, farm, cook or clean_fish' end
     if (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
     local u = df.unit.find(int(unit_id) or -1)
     if not u then return false, 'no unit ' .. tostring(unit_id) end

@@ -2397,6 +2397,16 @@ def surface_alt(save_dir: Path, tpl: str, params: dict | None) -> dict | None:
     return {**p, "surface": 1} if no_core_floor(save_dir) else None
 
 
+def farm_alt(tpl: str, params: dict | None) -> dict | None:
+    """BUG-717: the params of the any-soil variant (farms p.surface = 1, BUG-407: plots on soil or mud anywhere on the citizens' walk group
+    outside the fort's own tiles, underground floor included) for a farms room that found no site; None for another template or when the
+    caller asked for p.surface already. A fortcore coming does not hold it back: food does not wait for the dig."""
+    p = dict(params or {})
+    if tpl != "farms" or p.get("surface"):
+        return None
+    return {**p, "surface": 1}
+
+
 def no_core_floor(save_dir: Path) -> bool:
     """BUG-639: the fort has no dug Z4 floor in the manifest and no fortcore project that will dig one."""
     try:
@@ -2408,9 +2418,10 @@ def no_core_floor(save_dir: Path) -> bool:
 
 
 def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str, occ: Occupancy | None = None,
-          same: dict | None = None, snap: dict | None = None, need: list | tuple = ()) -> dict:
+          same: dict | None = None, snap: dict | None = None, need: list | tuple = (), any_soil: bool = False) -> dict:
     """_place; BUG-316: a surface farm (farms p.surface) at a ranked label S<k> that finds no free site for its plots
-    falls back to fewer plots (down to 1); PLACE_NOTES[bp_id] says so, the document's params carry the plots placed."""
+    falls back to fewer plots (down to 1); PLACE_NOTES[bp_id] says so, the document's params carry the plots placed.
+    BUG-717: `any_soil` (a hand command in PEACE, see send): a farms room with no site is placed on soil anywhere reachable too."""
     PLACE_NOTES.pop(bp_id, None)
     aq_wall_gate(save_dir, tpl, params)                    # BUG-677
     try:
@@ -2425,6 +2436,19 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
                 raise BpError(f"{e}; BUG-639: the surface variant (p.surface=1) has no site either: {e2}") from e2
             PLACE_NOTES[bp_id] = (f"BUG-639: no room site for {tpl} (the fort has no dug Z4 floor and no fortcore project): placed on the "
                                   "open surface floor (p.surface=1)")
+            return doc
+        falt = farm_alt(tpl, params) if ranked and any_soil else None
+        if falt is not None:
+            # BUG-717 (Run 16c i3 Doorwings y377-y380, Wallfree y387-y432: 'room sites need manifest zones.Z4', no plot for 68 seeds, no brewing, food
+            # 0 in the winters): a farms room needs the dug Z4 floor of a fortcore; plots stand on soil anywhere on the citizens' walk group
+            # (BUG-407: surface or underground floor, outside the fort's own tiles), so a refused room farm is placed there
+            try:
+                doc = place(save_dir, tpl, falt, label, bp_id, occ, same, snap, need)       # fewer / smaller plots as for any surface farm
+            except BpError as e2:
+                raise BpError(f"{e}; BUG-717: plots on any reachable soil outside Z4 (p.surface=1) have no site either: {e2}") from e2
+            sub = PLACE_NOTES.get(bp_id)
+            PLACE_NOTES[bp_id] = ("BUG-717: no farms room site on the dug Z4 floor (none dug, no soil level or no free place): plots on soil "
+                                  "elsewhere on the citizens' walk group (p.surface=1)" + (f"; {sub}" if sub else ""))
             return doc
         steps = fewer_plots(tpl, params) if ranked else []
         small = smaller_plots(tpl, params) if ranked else []
@@ -2828,10 +2852,10 @@ def resolve_site(save_dir: Path, tpl: str, label: str, params: dict | None = Non
 
 
 def emit_bp(save_dir: Path, tpl: str, params: dict, label: str, bp_id: str, site: dict | None = None,
-            write: bool = True, snap: dict | None = None, need: list | tuple = ()) -> dict:
+            write: bool = True, snap: dict | None = None, need: list | tuple = (), any_soil: bool = False) -> dict:
     """place() (or emit_at an explicit site), then write <save>/bp/<bp_id>.json + bp/.placed-<tpl>.json."""
     doc = emit_at(tpl, params, site, label, bp_id) if site else place(save_dir, tpl, params, label, bp_id, snap=snap,
-                                                                      need=need)
+                                                                      need=need, any_soil=any_soil)
     if write:
         write_bp(save_dir, doc)
     return doc
@@ -3137,8 +3161,10 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
                 raise BpError("BUG-445: surfacecore is not a fallback: the fort goes under the aquifer (dfllm plan propose drafts "
                               "aqshaft@S1 and the core below the lowest aquifer level; dfllm bp sites aqshaft --fresh); config "
                               "plan.surface_core true allows it")
+        # BUG-717: a hand `bp.place farms` (not follow, which has its own PEACE-only ladder, BUG-340; not a plan check) in PEACE: soil anywhere
+        any_soil = by != "follow" and (files.read_state(save_dir) or {}).get("mode") == "PEACE"
         doc = emit_bp(save_dir, args["tpl"], place_params(args), args["site"], cmd_id, write=False, snap=snap,
-                      need=need)
+                      need=need, any_soil=any_soil)
         if args["tpl"] == "fortcore":              # BUG-501: refused at once what follow's BUG-441 re-site would cancel later
             from . import plan as _plan
             why = _plan.core_refusal(save_dir, doc, snap)

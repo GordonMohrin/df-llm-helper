@@ -525,7 +525,28 @@ def food_hint(d: dict, save_dir=None) -> str:
     opts = [str(o) for o in d.get("opts") or []]
     more = f"; also {', '.join(opts[1:len(cmds)])} (d.cmds: dfllm events --cls A)" if len(cmds) > 1 and opts else ""
     gone = f" [not offered: {dropped[0]}]" if dropped else ""
+    none = no_source_note(d, cmds, dropped)
+    if none:
+        return f"{head}{none}{gone}"
     return f"{head}tell Gordon, send the option he picks as d.cmds has it: {cmds[0]}{more}{gone}"
+
+
+SOURCE_CMD = re.compile(r"bp\.place|\"tpl\":\s*\"farms\"|butcher\.mark|gather|zone\.place|order\.add|bp sites farms")
+
+
+def no_source_note(d: dict, cmds: list[str], dropped: list[str]) -> str:
+    """BUG-718 (Run 16c i3 Wallfree y387-y432: 'tell Gordon, send the option he picks: trade.want' for 45 years in a fort with no farm site, no
+    caravan, no animals; the decision offered what could not work and never said that nothing could): when the farm command was dropped (no farm
+    site on the newest sites snapshot, BUG-459) and no command that makes food (a plot, a butcher mark, a gather zone, an order) is left,
+    only the caravan fallback stays; the line then says so honestly: no source is possible by command, the fort lives on its own fishing,
+    gathering and hunting (kernel) or on a caravan that may never come, and the player stops retrying the dropped command."""
+    if d.get("id") not in ("famine", "food_low") or not dropped or any(SOURCE_CMD.search(c) for c in cmds):
+        return ""                                       # thirst: the drink fallback stays as it was (BUG-641)
+    own = ", ".join(str(a) for a in d.get("auto") or []) or "fishing, gathering, hunting as the kernel runs them"
+    return (f"NO FOOD SOURCE POSSIBLE by command: {dropped[0]}; nothing else on the list makes food. What is left: {cmds[0]} (the caravans "
+            f"bring it only when one comes: needs a trade depot and a visit), the kernel's own work ({own}), popcap.lower so the citizens "
+            "fit the stock; tell Gordon plainly that no new source exists, do not retry the dropped command until a sites snapshot shows a "
+            "farm site (dfllm bp sites farms surface=1 --fresh)")
 
 
 def lone_hint(d: dict) -> str:

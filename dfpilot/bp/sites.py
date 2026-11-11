@@ -265,7 +265,13 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     surface_farm = tpl == "farms" and bool(p.get("surface"))      # BUG-407: needs no fort manifest either (ground anywhere)
     if tpl != "fortcore" and not surface_shops and not surface_farm and not rebuild and not furnish \
             and not ((manifest or {}).get("zones") or {}).get("Z4"):
-        raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest)")
+        extra = ""
+        if tpl == "farms":
+            # BUG-717 (Run 16c i3 Doorwings y377-y380: 'room sites need manifest zones.Z4', 68 seeds fit no plot, no brewing): the plots do not
+            # need the dug core, soil anywhere on the citizens' walk group will do
+            extra = ("; a farm needs no Z4: `bp sites farms surface=1 --fresh` lists plots on any reachable soil outside Z4 (surface or "
+                     "underground floor); a hand `bp.place farms` in PEACE falls back to them by itself (BUG-717), follow does in PEACE too (BUG-340)")
+        raise ValueError(f"{tpl}: room sites need the fort manifest with zones.Z4 (inspect manifest){extra}")
     if tpl == "deepcore":                                    # FR-103: its own ranking (shaft + deep level, bp/deep.py)
         from . import deep
         return deep.rank(snap, p, manifest, n=n, near=near, within=within, at=at)
