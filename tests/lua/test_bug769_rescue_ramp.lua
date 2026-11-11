@@ -10,7 +10,7 @@ local S = require('siege_world')
 
 local Z = 5
 local FP = {O1 = {30, 15, Z, 30, 15, Z}, B1 = {40, 15, Z, 40, 15, Z}, B2 = {45, 15, Z, 45, 15, Z}}
-local LEVER = {O1 = {58, 9}, B1 = {59, 9}, B2 = {60, 9}}
+local LEVER = {O1 = {58, 9}, B1 = {59, 9}, B2 = {60, 20}}
 local ROLE = {O1 = 'outer', B1 = 'inner', B2 = 'core'}
 
 -- z5: rock everywhere, the core x46-60 y8-22 (beds, drink, food), a field outside x0-29. z6: a walkable top x61-63 y10-11 (a floor over
@@ -31,7 +31,12 @@ local function fort(opts)
   SW.fill(W, Z, 41, 14, 44, 16, '.')
   SW.fill(W, Z, 46, 8, 60, 22, '.')
   SW.draw(W, Z, {'bb'}, 50, 10)
-  SW.fill(W, Z + 1, 61, 10, 63, 11, '.')
+  SW.fill(W, Z + 1, 61, 10, 63, 11, opts.sky and ',' or '.')
+  if opts.sky then SW.fill(W, Z + 1, 57, 7, 60, 23, '_') end    -- a tree crown over open air: open sky above the core's east edge
+  if opts.solid then                                             -- a one-tile top at 60,10 over the core floor, rock at 61,10 above the wall tile
+    SW.fill(W, Z + 1, 61, 10, 63, 11, ' ')
+    SW.draw(W, Z + 1, {'.#'}, 60, 10)
+  end
   if opts.water then SW.draw(W, Z, {'~'}, opts.water[1], opts.water[2]) end
   W.bridge, W.lever = {}, {}
   for n, fp in pairs(FP) do
@@ -47,7 +52,7 @@ local function fort(opts)
   for i, p in ipairs({{50, 15}, {51, 16}, {52, 17}}) do
     W.add_unit{id = i, pos = {p[1], p[2], Z}, citizen = true, adult = true}
   end
-  W.add_unit{id = 11, pos = {62, 10, Z + 1}, citizen = true, adult = true}
+  W.add_unit{id = 11, pos = {opts.solid and 60 or 62, 10, Z + 1}, citizen = true, adult = true}
   W.unit(11).counters2 = {thirst_timer = 40000, hunger_timer = 0}
   W.burrow('Kern+', {46, 8, Z, 60, 22, Z})
   W.act_result('alert_burrows', function(names) W.alert_burrows = names; return true, #names end)
@@ -55,6 +60,12 @@ local function fort(opts)
   W.act_result('rescue_ramp', function(pos)
     W.ramps[#W.ramps + 1] = {pos[1], pos[2], pos[3]}
     W.tiles[SW.key(pos[1], pos[2], pos[3])].des.dig = 1        -- designated: the Miners dig it later
+    return true, 1
+  end)
+  W.builds = {}
+  W.act_result('rescue_ramp_build', function(pos)
+    W.builds[#W.builds + 1] = {pos[1], pos[2], pos[3]}
+    SW.draw(W, pos[3], {'b'}, pos[1], pos[2])                   -- the planned construction stands on the tile until a Mason builds it
     return true, 1
   end)
   dfhack.job = {getWorker = function(j) return j._worker end}
@@ -163,6 +174,50 @@ T.test('the ramp is done: the groups join and STRANDED ends (no new refusal)', f
   for i = n + 1, #evs(W, 'STRANDED') do
     T.ok(evs(W, 'STRANDED')[i].d.phase ~= 'refused' or evs(W, 'STRANDED')[i].d.thirst > 40000, 'no refusal after the ramp: ' .. evs(W, 'STRANDED')[i].msg)
   end
+end)
+
+T.test('the tile above every wall tile is solid: a ramp would be a dead end, nothing is dug', function()
+  local W = fort{solid = true}
+  run(W, 1200)
+  local e = stranded_refused(W)
+  T.ok(e ~= nil, 'a STRANDED refused')
+  T.eq(#W.ramps, 0, 'no ramp')
+  T.ok(e.d.ramp:find('dead end', 1, true), e.d.ramp)
+end)
+
+-- the i4 shape: the stranded stand on a tree crown (outdoors, z+1), the drop lands on open floor with no wall beside it
+T.test('outdoors on a crown: no dig, ONE ramp is BUILT on the landing floor; once; STRANDED says Mason and boulder', function()
+  local W = fort{sky = true}
+  run(W, 1200)
+  local e = stranded_refused(W)
+  T.ok(e ~= nil, 'a STRANDED refused')
+  T.eq(#W.ramps, 0, 'nothing dug')
+  T.eq(#W.builds, 1, 'one ramp built')
+  T.eq(W.builds[1][3], Z, 'on the lower level')
+  T.eq(e.d.ramp_state, 'dug')
+  T.ok(e.d.ramp:find('outdoor ramp BUILT at', 1, true), e.d.ramp)
+  T.ok(e.d.ramp:find('boulder or block', 1, true), e.d.ramp)
+  run(W, 6000)
+  T.eq(#W.builds, 1, 'once per episode')
+end)
+
+T.test('outdoors with water beside the landing floor: nothing is built, the answer names the water', function()
+  local W = fort{sky = true, water = {58, 9}}
+  run(W, 1200)
+  local e = stranded_refused(W)
+  T.ok(e ~= nil, 'a STRANDED refused')
+  T.eq(#W.builds, 0)
+  T.ok(e.d.ramp:find('no safe ramp outdoors: water at', 1, true), e.d.ramp)
+end)
+
+T.test('outdoors with a solid tile above the landing floor: nothing is built', function()
+  local W = fort{sky = true}
+  SW.fill(W, Z + 1, 57, 7, 60, 23, '#')
+  run(W, 1200)
+  local e = stranded_refused(W)
+  T.ok(e ~= nil, 'a STRANDED refused')
+  T.eq(#W.builds, 0)
+  T.ok(e.d.ramp:find('no open air above the landing tile', 1, true), e.d.ramp)
 end)
 
 T.done()

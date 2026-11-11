@@ -373,6 +373,24 @@ T.test('rescue_ramp: one ramp (quickfort dig key r, priority 2) on the wall tile
   T.eq({env.api.rescue_ramp({62, 10, 5})}, {false, 'quickfort designated no ramp there'})
 end)
 
+T.test('rescue_ramp_build: one ramp construction (quickfort build key Cr) on the landing floor, seal only', function()
+  local W = H.world{tag = 'rb'}
+  local calls = {}
+  local n = 1
+  W.scripts['quickfort'] = {apply_blueprint = function(p)
+    calls[#calls + 1] = p
+    return {build_designated = {label = 'Buildings designated', value = n}}
+  end}
+  local env = mk('seal')
+  T.eq({env.api.rescue_ramp_build({60, 10, 5})}, {true, 1})
+  T.eq({calls[1].mode, calls[1].command, calls[1].pos}, {'build', 'run', {x = 60, y = 10, z = 5}})
+  T.eq(calls[1].data[0][0][0], 'Cr')
+  T.eq((mk('runner').api.rescue_ramp_build({60, 10, 5})), false, 'not owner')
+  T.eq((env.api.rescue_ramp_build({60, 10})), false, 'bad position')
+  n = 0
+  T.eq({env.api.rescue_ramp_build({60, 10, 5})}, {false, 'quickfort designated no ramp there'})
+end)
+
 -- BUG-053 (Run 11/12: 16 and 100 free picks lay loose for 1081 and 144 days): the stockpiles screen's Weapons pile, a
 -- w x h pile named dfllm-tools through quickfort place mode (economy only)
 T.test('tool_pile: a w x h dfllm-tools weapons stockpile (quickfort place key p) at the position; economy only', function()

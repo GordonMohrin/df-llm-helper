@@ -1227,6 +1227,20 @@ local function impls(state)
     return true, n or 1
   end
 
+  -- BUG-769 (verifier): outdoors, where no wall exists to dig, ONE ramp BUILT (quickfort build mode key `Cr`, a construction) on the open floor
+  -- tile pos, the way back up to a citizen on a tree crown one level above. The caller (seal.rescue_build) checked the tile; a Mason needs a
+  -- boulder or block. Returns ok, designated buildings (0 = quickfort skipped the tile: refused).
+  function I.rescue_ramp_build(pos)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    local ok, stats = I.quickfort({mode = 'build', data = {[0] = {[0] = {[0] = 'Cr'}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local n = type(stats) == 'table' and int(stats.build_designated) or nil
+    if n == 0 then return false, 'quickfort designated no ramp there' end
+    return true, n or 1
+  end
+
   -- zones screen > add zone > Water Source (BUG-324, Run 15 Inkintense/Earthboat: the water scan found deep water with a
   -- reachable bank or a reachable floor beside the open tile above it, nobody zoned it, so no water was accepted and the
   -- hospital waited for years): a 1x1 Water Source zone named dfllm-water on the water tile pos, quickfort zone mode

@@ -13,8 +13,11 @@ Reproduced offline on the live snapshot (`snap/s218161359-4.json`, manifest of t
 ## Fix
 After the dug tiers fail with 'no valid site' (no placement at all), `_rank_hospital` ranks the hospital on open surface floor (`surface` = 1, nothing dug, the same ranking as `bp sites hospital surface=1`, water rules included). Its sites carry `surface` = 1 and say in `why`: 'HOSPITAL ON OPEN SURFACE FLOOR (nothing dug ...; the patients lie outside the walls, exposed in a siege; `surface=0` forbids it; BUG-770)'; `cmd.site_params` puts `surface` = 1 into the document at place time (as BUG-763 does for `compact`). A given `surface` or `compact` (the player's choice) and `furnish` forbid it; a dug room is always preferred; 'no site within N tiles of accepted water' (water too far, not rock) is not a trigger (that stays the player's call, `carry=1`).
 
+## Siege guard (verifier)
+`rank(..., calm=False)`: the open-floor tier is NOT offered while the kernel's mode is SIEGE / BREACH / RECOVERY (`cmd.rank_sites` reads `state.mode`, `plan.SIEGE_MODES`); the error names it ('not offered during a siege ... ask again in quiet peace'). In quiet PEACE it is offered; the kernel's existing guards (BUG-036: readiness R0 `hospital_out`, alarm PATIENTS_OUT in a fight) still name patients outside the burrows; nobody is moved (a lying patient cannot walk). `carry=1` is NOT made automatic: 'no valid site' means no placement at all, a carrier route would not create one.
+
 ## Open
-The open-floor hospital is outside the walls: in a siege the patients are exposed (the kernel's recall / care burrow cover water, not a stone roof). A hospital zone over existing beds, and a far carrier route chosen by itself (the kernel still counts a zone more than `water.near` from accepted water as dry), are not done.
+The open-floor hospital is outside the walls: in a siege the patients are exposed (the kernel's recall / care burrow cover water, not a stone roof); there is no lockdown/recall for them. A hospital zone over existing beds, and a far carrier route chosen by itself (the kernel still counts a zone more than `water.near` from accepted water as dry), are not done.
 
 ## Tests
 `tests/test_bug770_hospital_surface_fallback.py` (5), `tests/test_bug763_hospital_site.py` (the dead-end test forbids the open floor). Checked by hand on the live snapshot: `sites.rank(..., "hospital")` returns surface sites 90,105,131 / 92,117,131 / 132,113,131.

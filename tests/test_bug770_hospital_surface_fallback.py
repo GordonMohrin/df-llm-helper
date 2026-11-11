@@ -63,3 +63,25 @@ def test_the_refusal_without_any_open_floor_still_names_the_funnel(fort, monkeyp
     with pytest.raises(ValueError) as e:
         sites.rank(snap, "hospital", manifest=man, water={"src": [WELL], "near": 30})
     assert "no valid site on the snapshot" in str(e.value) and "also tried" in str(e.value), str(e.value)
+
+
+def test_siege_guard_no_open_floor_hospital_in_a_siege(fort, monkeypatch):
+    snap, man = fort
+    monkeypatch.setattr(sites, "_check", lambda *a, **k: None)
+    with pytest.raises(ValueError, match="not offered during a siege"):
+        sites.rank(snap, "hospital", manifest=man, water={"src": [WELL], "near": 30}, calm=False)
+    got = sites.rank(snap, "hospital", manifest=man, water={"src": [WELL], "near": 30}, calm=True)
+    assert got and all(s.get("surface") == 1 for s in got)
+
+
+def test_cmd_passes_calm_false_only_for_a_fort_in_siege(fort, monkeypatch):
+    snap, man = fort
+    seen = []
+
+    def fake(snap_, tpl, params=None, manifest=None, n=3, water=None, near=None, within=None, at=None, free=None, carry=None, calm=True):
+        seen.append(calm)
+        return []
+    monkeypatch.setattr(cmd, "load_bp", lambda name: type("M", (), {"rank": staticmethod(fake)}))
+    cmd._rank(snap, "hospital", None, 3, man, {"src": [WELL], "near": 30}, None, None, False)
+    cmd._rank(snap, "hospital", None, 3, man, {"src": [WELL], "near": 30})
+    assert seen == [False, True]

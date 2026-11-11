@@ -1521,12 +1521,15 @@ function M.ramp_pick(gc, has, s, zl, aql)
             local dt = rev(x, y, zl + 1)
             local st = shape(x, y, zl + 1)
             local top_ok = dt ~= nil and st ~= nil and st.mat ~= 'CONSTRUCTION' and st.mat ~= 'TREE' and st.mat ~= 'ROOT'
+            -- BUG-769 (verifier): a ramp climbs through the tile above its own: under solid rock (or a tree, a fortification) it is a dead end
+            local top_open = st ~= nil and (st.shape == 'FLOOR' or st.shape == 'EMPTY' or st.shape == 'RAMP_TOP' or st.shape == 'RAMP')
             local hd = rev(head[1], head[2], head[3])
             local open = false
             for _, o in ipairs({{0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}}) do
               if rev(x + o[1], y + o[2], zl + o[3]) == nil then open = true end
             end
             if not top_ok then note('the tile above the wall is not plain ground')
+            elseif not top_open then note('the tile above the wall is solid: a ramp there is a dead end', 3)
             elseif open then note('a tile beside the wall tile is not revealed')
             elseif des.outside or dt.outside or (hd and hd.outside) then
               note('the way lies under open sky')
@@ -1544,6 +1547,47 @@ function M.ramp_pick(gc, has, s, zl, aql)
     end
   end
   return best, why or 'no wall tile of plain rock beside the drop'
+end
+
+-- BUG-769 (verifier: the i4 stranded citizen stood on a tree crown, z143 over open air, one level over open grassy floor: no wall to dig, the dig
+-- path refused 'under open sky' and the real y407 case stayed unserved): outdoors a RAMP IS BUILT, not dug (quickfort build `Cr`) on the drop's
+-- target tile T, the floor one level down beside the stranded tile (the ramp's head). T: revealed natural plain FLOOR (no building, not
+-- designated), in a walk group with drink and food, the tile above T open air (a ramp needs open space above), `ramp_unsafe` clear (no
+-- liquid, no aquifer level, no open shaft within 3 tiles: never at water or a chasm edge). A Mason needs a boulder or block: the report says
+-- so. Returns the rescue_dig answer.
+function M.rescue_build(K, gc, has, s, b, aql, rk, rec, now)
+  local tx, ty, tz = b[6], b[7], b[8]
+  local out
+  local function why(r) out = {state = 'none', txt = trunc('no safe ramp outdoors: ' .. r, 160)} end
+  local td, tocc = rev(tx, ty, tz)
+  local ts = td and shape(tx, ty, tz)
+  local up = rev(tx, ty, tz + 1) and shape(tx, ty, tz + 1)
+  local tg = grp(tx, ty, tz)
+  if not td or not ts then why('the landing tile is not revealed')
+  elseif ts.shape ~= 'FLOOR' or ts.mat == 'CONSTRUCTION' or ts.mat == 'TREE' or ts.mat == 'ROOT' then why('the landing tile is no plain floor')
+  elseif bld_on(tx, ty, tz, tocc) then why('a building on the landing tile')
+  elseif (tonumber(td.dig) or 0) ~= 0 then why('the landing tile is designated already')
+  elseif not (tg and tg ~= 0 and has[tg] and tg ~= gc) then why('the landing tile is on no walk group with drink and food')
+  elseif not up or up.shape ~= 'EMPTY' then why('no open air above the landing tile')
+  else
+    local bad = M.ramp_unsafe(tx, ty, tz, aql)
+    if bad then why(bad) end
+  end
+  if not out then
+    local ok, res = K.act.rescue_ramp_build({tx, ty, tz})
+    if ok then
+      out = {state = 'dug', pos = {tx, ty, tz}, kind = 'build',
+             txt = string.format('outdoor ramp BUILT at %d,%d,%d up to the crown tile %d,%d,%d (needs a boulder or block and a Mason); '
+                                 .. 'nothing is carried across the drop', tx, ty, tz, s[1], s[2], s[3])}
+    else
+      out = {state = 'refused', pos = {tx, ty, tz},
+             txt = trunc(string.format('outdoor ramp at %d,%d,%d refused: %s', tx, ty, tz, tostring(res)), 160)}
+    end
+  end
+  mem.ramp[rk] = {t = now, state = out.state, txt = out.txt, pos = out.pos, kind = out.kind,
+                  n = (rec and rec.n or 0) + (out.state == 'dug' and 1 or 0)}
+  K.log(out.state == 'dug' and 'info' or 'warn', 'seal: outdoor rescue ramp for group %d: %s', gc, out.txt)
+  return out
 end
 
 -- public (siege, STRANDED refused): dig the ramp for the citizens of the walk group at `pos` (calm = quiet PEACE). Returns
@@ -1571,10 +1615,11 @@ function M.rescue_dig(K, pos, calm)
     return {state = rec.state == 'dug' and 'waiting' or rec.state, txt = rec.txt, pos = rec.pos}
   end
   if rec and rec.state == 'dug' and rec.pos then            -- still designated: the Miners have not come yet, no second ramp
-    local wd = rev(rec.pos[1], rec.pos[2], rec.pos[3])
-    if wd and (tonumber(wd.dig) or 0) ~= 0 then
+    local wd, wo = rev(rec.pos[1], rec.pos[2], rec.pos[3])
+    if wd and ((tonumber(wd.dig) or 0) ~= 0 or (rec.kind == 'build' and bld_on(rec.pos[1], rec.pos[2], rec.pos[3], wo))) then
       rec.t = now
-      rec.txt = trunc(string.format('ramp at %d,%d,%d still designated: waiting for a Miner', rec.pos[1], rec.pos[2], rec.pos[3]), 160)
+      rec.txt = trunc(string.format('ramp at %d,%d,%d still designated: waiting for a %s', rec.pos[1], rec.pos[2], rec.pos[3],
+                                    rec.kind == 'build' and 'Mason (a boulder or block)' or 'Miner'), 160)
       return {state = 'waiting', txt = rec.txt, pos = rec.pos}
     end
   end
@@ -1585,13 +1630,13 @@ function M.rescue_dig(K, pos, calm)
     return {state = 'none', txt = 'no ramp dug: not in quiet PEACE'}
   end
   local sdes = rev(s[1], s[2], s[3])
-  if sdes and sdes.outside then
-    return {state = 'none', txt = 'no ramp dug: the stranded stand under open sky (outside the fort)'}
-  end
   local aql = {}
   local okm, man = pcall(K.manifest)                        -- the aquifer levels the fort has seen (revealed tiles only)
   for _, z in ipairs(okm and type(man) == 'table' and type(man.aquifer_levels) == 'table' and man.aquifer_levels or {}) do
     if math.tointeger(z) then aql[math.tointeger(z)] = true end
+  end
+  if sdes and open_sky(sdes, s[1], s[2], s[3]) then          -- BUG-769 (verifier): outdoors / on a tree crown there is no wall to dig
+    return M.rescue_build(K, gc, has, s, b, aql, rk, rec, now)
   end
   local pick, why = M.ramp_pick(gc, has, s, s[3] - 1, aql)
   local out
