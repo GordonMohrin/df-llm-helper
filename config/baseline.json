@@ -96,7 +96,7 @@
   "food": {"yield": 1, "per_dwarf": 3, "plot_tiles": 35, "plots_max": 4, "want_days": 90, "trend_days": 14,
            "request_days": 14, "pre_days": 30, "crops_per_dwarf": 4, "crops_min": 50, "crops_max": 400,
            "crops_step": 10, "status_days": 7, "meals_per_dwarf": 2, "cit_per_job": 2,
-           "cook_floor": 10, "cook_stall_days": 6},
+           "cook_floor": 10, "cook_stall_days": 6, "gap_days": 110},
   "supply": [
    {"tag": "dfllm:drink", "key": "drink_d", "per_job": 5, "max_jobs": 30, "src": "brew_p",
     "spec": {"job": "CustomReaction", "reaction": "BREW_DRINK_FROM_PLANT", "frequency": "OneTime",

@@ -316,6 +316,7 @@ C.ACT = {
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   hospital_remove = {'water'},                     -- BUG-034: a dry hospital's zones; BUG-131: hospital.retire
+  workshop_retire = {'economy'},                  -- BUG-715: a workshop no citizen can reach, beside a reachable one of its type
   well_remove = {'water'},                         -- BUG-541: the dry well the GiveWater carriers stand at (well.retire)
   hospital_restore = {'water'},                    -- BUG-539: the removed hospital zone drawn again at its old location
   water_zone = {'water'},                          -- BUG-324: a Water Source zone on the water the scan found reachable

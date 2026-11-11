@@ -32,7 +32,7 @@ T.test('act.labor_set: mechanic goes on for an adult living citizen, farm goes o
   T.eq({env.api.labor_set(7, 'farm', false)}, {true, 'disabled'})
   T.eq(W.unit(7).status.labors, {[1] = false, [2] = true})
   T.eq({env.api.labor_set(7, 'farm', false)}, {true, 'already'})
-  T.eq({env.api.labor_set(7, 'mason', true)}, {false, 'which must be mechanic, farm or cook'})
+  T.eq({env.api.labor_set(7, 'mason', true)}, {false, 'which must be mechanic, farm, cook or clean_fish'})
   T.eq({env.api.labor_set(8, 'mechanic', true)}, {false, 'not an adult living citizen'})
   T.eq({env.api.labor_set(9, 'mechanic', true)}, {false, 'not an adult living citizen'})
   T.eq({env.api.labor_set(99, 'farm', false)}, {false, 'no unit 99'})
