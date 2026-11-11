@@ -221,8 +221,10 @@ M.DEFAULTS = {
                       -- and a fishing zone exists (zones are the runner's or the LLM's); outside PEACE/RECOVERY none
                       -- BUG-057 (Run 13/14): a fishing zone with raw fish or open Fish jobs wants `min` fishers (one per
                       -- `min_per` citizens, at least one) whatever the food stock says
+                      -- BUG-697 (Run 16c i3 Wallfree: 3 fishers for 49 citizens in a famine, 23 of 30 adults idle): in a famine one
+                      -- fisher per `famine_per` citizens up to `famine_max`, never more than the idle adults (M.famine_scale)
                       {name = 'Fisherdwarves', skill = 'FISH', labor = 'FISH', fish = true, per = 15, max = 3,
-                       min = 3, min_per = 6}}},
+                       min = 3, min_per = 6, famine_per = 6, famine_max = 8}}},
   -- live L3: the hunter caught nothing for a year; no visible game is no unit census economy may read, so a
   -- hunt without a new hide, bone, leather or shell for trial_days pauses for backoff_days
   hunt = {trial_days = 10, backoff_days = 20},
@@ -252,8 +254,11 @@ M.DEFAULTS = {
   -- Run 11 (Kilrudrabed: nobody fished, no fishing zone): the fishing zone search (M.fish_start): r tiles around the
   -- citizens' median, at most `levels` levels, `tiles` tiles read a frame, water of depth >= min_flow, a side x side
   -- zone, again after scan_days; `reads` tile reads a frame, `checks` water tiles looked at, `max_water` kept
+  -- BUG-698 (Run 16c i3 Wallfree y431-y433: the fishers stood at the pond with 'job none' for a year, raw fish 2600 -> 6, the zone
+  -- never moved): fishers wanted, a zone standing, no Fish job and no raw fish for dry_days days in a row = the water is fished out
+  -- (p.fishdry): the next scan paints a second zone on another water body, the old zone stays
   fishing = {r = 48, levels = 6, tiles = 1500, min_flow = 2, side = 3, scan_days = 7, reads = 200, checks = 160,
-             max_water = 3000},
+             max_water = 3000, dry_days = 20},
   -- live L5 (Castlerisen y295: pop 41 -> 53 on the same 80 farm tiles, food 105 -> 15 days in a year): food follows
   -- the population. DF gives about `yield` crops per farm tile and season; a citizen uses about `per_dwarf` plants
   -- a season (about 2 eaten, 1 brewed into 5 drinks), so the fort wants cit * per_dwarf / yield farm tiles. Below
@@ -503,7 +508,8 @@ M.DEFAULTS = {
             -- day it is freed too (a lockdown and the invaders' fights leave it forbidden), 0 = off
             after_days = 14},
   -- FR-25: below `days` food days with citizens over `hunger` (DF's "hungry" is 50000)
-  starve = {days = 0, hunger = 50000, plants_max = 200, plants_per_slice = 400, report_days = 2, gatherers = 4,
+  -- BUG-697: gatherers_max = the plant gatherers a starvation adds when many adults are idle (M.famine_scale)
+  starve = {days = 0, hunger = 50000, plants_max = 200, plants_per_slice = 400, report_days = 2, gatherers = 4, gatherers_max = 10,
             planters = 4, plants = {'GRASS_WHEAT_CAVE', 'MUSHROOM_HELMET_PLUMP', 'POD_SWEET', 'BUSH_QUARRY',
                                     'MUSHROOM_CUP_DIMPLE'},
             details = {planters = {'Planters'}, gatherers = {'Plant gatherers', 'Gatherers', 'Herbalists'}}},
@@ -1961,6 +1967,17 @@ local function hunt_want(K, c, r)
   return spec.mood or 0, 'mood stock'
 end
 
+-- BUG-697 (Run 16c i3 Wallfree y431-y433: 49 citizens, 23 of 30 adults idle for a year, three fishers, four gatherers, 28 starved):
+-- how many helpers a famine puts on a food job: at least `base`, one per `per` citizens, never more than the idle adults (idle_pct of
+-- the citizens, but `base` at least) and never over `cap`
+function M.famine_scale(base, cap, cit, per, idle_pct)
+  cit, per = math.tointeger(cit) or 0, math.max(1, math.tointeger(per) or 1)
+  base = math.max(0, math.tointeger(base) or 0)
+  local idle = cit * (math.tointeger(idle_pct) or 0) // 100
+  local want = math.min((cit + per - 1) // per, math.max(base, idle))
+  return clamp(want, base, math.max(base, math.tointeger(cap) or base))
+end
+
 -- a fishing zone exists (the zones screen; zones are the runner's or the LLM's, economy only reads them)
 local function fishing_zone()
   local zt = df.civzone_type and df.civzone_type.FishingArea
@@ -2002,7 +2019,11 @@ local function fish_want(K, c, r)
   end
   if not r.p.famine and d >= (fc.want_days or 90) then return fl, fl > 0 and 'fish' or 'stock' end
   local per = math.max(1, spec.per or 15)
-  return math.max(fl, clamp(((r.cit or 0) + per - 1) // per, 1, spec.max or 3)), r.p.famine and 'famine' or 'food'
+  local n = math.max(fl, clamp(((r.cit or 0) + per - 1) // per, 1, spec.max or 3))
+  if r.p.famine then        -- BUG-697: a famine puts the idle adults on the water, not three
+    n = math.max(n, M.famine_scale(spec.max or 3, spec.famine_max or 8, r.cit, spec.famine_per or 6, st.idle))
+  end
+  return n, r.p.famine and 'famine' or 'food'
 end
 
 -- Run 10 (Handlelock): no tanner's shop stood and a fey mood died for two leather. Without one, while hides lie or a
@@ -5551,7 +5572,10 @@ local function food_plan(K, c, r)
     end
   end
   st.farm_lost = nil
-  if p.farm_req and r.now - (math.tointeger(p.farm_req) or 0) < (fc.request_days or 14) * DAY then return end
+  -- BUG-697: in a famine the farms are asked for every famine_request_days (7), not every request_days (14): the placement may find a
+  -- smaller plot or another spot a week later (BUG-696), and 35 days of food are 35 days
+  local every = p.famine and math.min(fc.request_days or 14, fc.famine_request_days or 7) or (fc.request_days or 14)
+  if p.farm_req and r.now - (math.tointeger(p.farm_req) or 0) < every * DAY then return end
   local plots = clamp((need - tiles + pt - 1) // pt, 1, fc.plots_max or 4)
   p.farm_req = r.now
   if resite then
@@ -8781,6 +8805,40 @@ function M.fishery_request(K, c, r)
          {tpl = 'workshops', n = 1, why = 'fishery'})
 end
 
+-- BUG-698: the fishing zones that stand, {{x, y, z}, ...} (the middle of each)
+function M.fish_zones()
+  local out = {}
+  local zt = df.civzone_type and df.civzone_type.FishingArea
+  if zt == nil then return out end
+  pcall(function()
+    for _, z in ipairs(df.global.world.buildings.other.ANY_ZONE) do
+      if z.type == zt then
+        out[#out + 1] = {(math.tointeger(z.x1) + math.tointeger(z.x2)) // 2, (math.tointeger(z.y1) + math.tointeger(z.y2)) // 2,
+                         math.tointeger(z.z)}
+      end
+    end
+  end)
+  return out
+end
+
+-- BUG-698 (daily, with a fishing zone standing): fishers are wanted and some stand on the detail, yet no Fish job exists and no raw fish
+-- lies in the fort: counted in p.fishdry per day, reset by the first Fish job or raw fish. Returns true once it has lasted dry_days days
+function M.fish_dry(c, r, zone, fishers, fish_jobs)
+  local p, F = r.p, c.fishing or {}
+  local inv = r.inv or {}
+  local fd = (r.days or {}).food_d or 9999
+  local low = p.famine or p.food_pre or fd < ((c.food or {}).want_days or 90)
+  if not (zone and low and (fishers or 0) > 0 and fish_jobs == 0 and (inv.fish_raw or 0) < ((c.fish or {}).min or 5)) then
+    p.fishdry = nil
+    return false
+  end
+  local day = r.now // DAY
+  local fdry = type(p.fishdry) == 'table' and p.fishdry or {since = r.now, days = 0, day = day}
+  if fdry.day ~= day then fdry.days, fdry.day = (fdry.days or 0) + 1, day end
+  p.fishdry = fdry
+  return (fdry.days or 0) >= (F.dry_days or 20)
+end
+
 -- the search of this run: levels and box around the citizens, or nil (a zone stands, nothing wanted, mode, cadence)
 function M.fish_start(K, c, r)
   local F, p = c.fishing, r.p
@@ -8789,10 +8847,22 @@ function M.fish_start(K, c, r)
   for _, d in ipairs((c.tools or {}).details or {}) do if d.fish then spec = d end end
   if not spec then return nil end
   st.fishzone = fishing_zone()                      -- fish_want reads it again in T.plan
-  if st.fishzone then st.fishz = {zone = true}; return nil end
+  local dry = false
+  if st.fishzone then
+    dry = M.fish_dry(c, r, st.fishzone, st.fishers, type(st.jobc) == 'table' and (st.jobc.fish or 0) or nil)      -- BUG-698: fished out: a second zone on another water body
+    if not dry then st.fishz = {zone = true}; return nil end
+    st.fishdry = true
+    local lastd = type(p.fishz) == 'table' and p.fishz or nil
+    if not HUNT_MODES[K.mode()] or (lastd and r.now - (math.tointeger(lastd.t) or 0) < (F.scan_days or 7) * DAY) then
+      st.fishz = {zone = true}
+      return nil
+    end
+  else
+    st.fishdry = nil
+  end
   local fd = (r.days or {}).food_d or 9999
   if not (p.famine or p.food_pre or fd < ((c.food or {}).want_days or 90)) then st.fishz = nil; return nil end
-  local last = type(p.fishz) == 'table' and p.fishz or nil
+  local last = (not dry) and type(p.fishz) == 'table' and p.fishz or nil
   if last then st.fishz = last end
   if not HUNT_MODES[K.mode()] then return nil end
   local cw = K.census and K.census.w
@@ -8809,7 +8879,8 @@ function M.fish_start(K, c, r)
   table.sort(xs)
   table.sort(ys)
   local fz = {stage = 'read', lv = {}, li = 1, mx = xs[(#xs + 1) // 2], my = ys[(#ys + 1) // 2], water = {}, nw = 0,
-              ice = 0, cav = 0, shallow = 0, nobank = 0, path = 0, checked = 0, wi = 1, found = {}}
+              ice = 0, cav = 0, shallow = 0, nobank = 0, path = 0, checked = 0, wi = 1, found = {},
+              old = dry and M.fish_zones() or nil, olds = 0}
   local seen = {}
   local function lv(z)
     if z and z >= 0 and not seen[z] and #fz.lv < (F.levels or 6) then seen[z] = true; fz.lv[#fz.lv + 1] = z end
@@ -8941,6 +9012,12 @@ function M.fish_step(K, c, r)
         local sw = s.water
         if sw[3] == w[3] and math.max(math.abs(sw[1] - w[1]), math.abs(sw[2] - w[2])) <= 8 then dup = true end
       end
+      for _, o in ipairs(fz.old or {}) do      -- BUG-698: the fished-out water (a zone that stands) is no second zone
+        if math.abs(o[3] - w[3]) <= 1 and math.max(math.abs(o[1] - w[1]), math.abs(o[2] - w[2])) <= 8 then
+          dup = true
+          fz.olds = fz.olds + 1
+        end
+      end
       if not dup then
         fz.checked = fz.checked + 1
         local site, n = M.fish_bank(K, w)
@@ -8970,14 +9047,16 @@ function M.fish_step(K, c, r)
     local w, bk = site.water, site.bank
     if ok then
       rec.at, rec.bank, rec.inside, rec.why = w, bk, site.inside and 1 or 0, 'painted'
-      K.log('info', 'fishing: zone dfllm-fish at %d,%d,%d (%s; bank %d,%d,%d), food %d days', w[1], w[2], w[3],
-            site.inside and 'roofed, inside' or 'open sky', bk[1], bk[2], bk[3], (r.days or {}).food_d or 0)
+      K.log('info', 'fishing: %s dfllm-fish at %d,%d,%d (%s; bank %d,%d,%d), food %d days', fz.old and 'SECOND zone (the first is fished out)'
+            or 'zone', w[1], w[2], w[3], site.inside and 'roofed, inside' or 'open sky', bk[1], bk[2], bk[3], (r.days or {}).food_d or 0)
+      if fz.old then p.fishdry = nil end                 -- BUG-698: the fishers have new water
     else
       rec.why = ('fishing zone at %d,%d,%d refused: %s'):format(w[1], w[2], w[3], tostring(n)):sub(1, 80)
       K.log('warn', 'fishing: %s', rec.why)
     end
   else
     rec.why = M.fish_none(fz)
+    if fz.old then rec.why = ('fished out, no second water: ' .. rec.why):sub(1, 80) end      -- BUG-698
     K.log('warn', 'fishing: %s around %d,%d on z %s%s', rec.why, fz.mx, fz.my, table.concat(fz.lv, ','),
           fz.err and (' (' .. fz.err .. ')') or '')
   end
@@ -9952,6 +10031,13 @@ function M.food_block(K, c, r, inv)
   -- BUG-258 (live Inkintense: block [cook, fish_zone, hunt, farms] in a fort without a brook, 175 bolts and no
   -- crossbow): a fishing zone is no option where the scan met no water at all (z.seen 0; frozen or cavern water is
   -- still named), and hunting with no crossbow names the crossbow (its Bowyer's workshop), not bolts
+  if st.fishzone and st.fishdry then      -- BUG-698: fishers stand at a zone with no fish
+    local z = type(st.fishz) == 'table' and st.fishz or {}
+    put('fish_dry', string.format('fishing: %d fishers, no Fish job and no raw fish for %d days: the water is fished out%s',
+                                  st.fishers or 0, (type(r.p.fishdry) == 'table' and r.p.fishdry.days) or 0,
+                                  type(z.why) == 'string' and z.why:find('fished out', 1, true) and (' (' .. z.why .. ')') or
+                                  ' (a second fishing zone is searched)'))
+  end
   if not st.fishzone then
     local z = st.fishz
     local why = type(z) == 'table' and type(z.why) == 'string' and z.why ~= 'painted' and z.why or nil
@@ -10165,7 +10251,10 @@ end
 -- ONE dfllm:food order in the whole log; Run 16b i2 Valleyhame y377: 13 hungry, the order placed only with 10 ingredients at hand): a cook
 -- labor on nobody is switched on for the best candidate (act.labor_set `cook`, idle first, then Cooking skill; no soldier, patient,
 -- moody or noble), at most once a day. Returns 'have' (+ unit id), 'set' (+ unit id), 'none' or 'wait'
-function M.cook_labor(K)
+-- BUG-697 (Run 16c i3 Wallfree y431-y433: 'kitchen idle with 5 cook ingredients (order made again)', COOK labor 'held', 23 adults idle, the
+-- meals 105 -> 0): `extra` adds a cook beside the holders when every holder has a job (a hunter, a hauler, a soldier's day off: the
+-- labor is on, nobody stands at the kitchen); the holders are left out of the candidates then
+function M.cook_labor(K, extra)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 'none' end
   local sid = df.job_skill and df.job_skill.COOK
@@ -10174,8 +10263,9 @@ function M.cook_labor(K)
     local u = df.unit.find(id)
     if u and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) and M.citizen(u) and (u.military.squad_id or -1) < 0
        and (u.mood or -1) < 0 then
-      if M.labor_flag(u, 'COOK') then return 'have', id end
-      if not M.patient(u) and not noble(u) then
+      if M.labor_flag(u, 'COOK') then
+        if not extra then return 'have', id end
+      elseif not M.patient(u) and not noble(u) then
         cands[#cands + 1] = {id = id, idle = (u.job == nil or u.job.current_job == nil) and 1 or 0,
                              sk = sid and dfhack.units.getNominalSkill(u, sid, true) or 0}
       end
@@ -10195,6 +10285,20 @@ function M.cook_labor(K)
   if not ok then return 'none' end
   K.log('warn', 'Cooking labor on for unit %d: a kitchen stands, cook ingredients lie there, no meal and nobody had the labor', cands[1].id)
   return 'set', cands[1].id
+end
+
+-- BUG-697: some holder of the COOK labor (an adult citizen, no soldier) has no job right now (true), or none holds it / all are busy (false)
+function M.cook_idle(K)
+  local lid = df.unit_labor and df.unit_labor.COOK
+  local cu = K.census.u
+  if type(lid) ~= 'number' or type(cu) ~= 'table' then return true end
+  local sold = {}
+  for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
+  for _, id in ipairs(cu.ids or {}) do
+    local u = not sold[id] and df.unit.find(id)
+    if u and dfhack.units.isAdult(u) and labor_on(u, lid) and (u.job == nil or u.job.current_job == nil) then return true end
+  end
+  return false
 end
 
 -- BUG-654 (Run 16a i1 Basementflew y459-y466: meals 0 for years beside 3,323 food days, `inspect workload` 'unreachable PrepareMeal x1'
@@ -10397,6 +10501,10 @@ function M.cook_watch(K, c, r)
   if not holder then
     local how, uid = M.cook_labor(K)
     act[#act + 1] = how == 'set' and ('Cooking labor on for unit ' .. tostring(uid)) or 'nobody holds the COOK labor'
+  elseif not M.cook_idle(K) and (r.p.famine or (st.hungry_n or 0) > 0) then
+    -- BUG-697: every holder is busy elsewhere: one more cook, an idle adult first
+    local how, uid = M.cook_labor(K, true)
+    if how == 'set' then act[#act + 1] = 'every COOK holder busy: Cooking labor on for unit ' .. tostring(uid) end
   end
   if not cw.relax then
     cw.relax, cw.n, cw.told = r.now, (cw.n or 0) + 1, r.now
@@ -12858,7 +12966,9 @@ function T.forbid(K, c, r)
     r.burst = bmin > 0 and nf >= bmin and nf or nil
     local held = 0
     for _, e in ipairs(st.fix or {}) do
-      if e.why ~= 'food' or r.p.starve or r.burst or sv or post or conf then r.fx[#r.fx + 1] = e else held = held + 1 end
+      -- BUG-697 (Run 16c i3 Wallfree y431-y433: 'no cook ingredient (6 raw fish to clean, 5 forbidden)' through the whole famine): a famine
+      -- (food below famine_days) frees the loose forbidden food too, whether or not a citizen is already starving
+      if e.why ~= 'food' or r.p.starve or r.p.famine or r.burst or sv or post or conf then r.fx[#r.fx + 1] = e else held = held + 1 end
     end
     -- BUG-594: loose food / drink items that stay forbidden say so (the brief read 'the kernel has not freed them' without a cause)
     if held > 0 and not st.dfwhy then st.dfwhy = string.format('%d food/drink kept (forbidden by hand?)', held):sub(1, 40) end
@@ -13121,7 +13231,11 @@ function T.starve(K, c, r)
     r.sv = {hungry = hungry, step = 'details', q = {}, vi = 1, idx = 0, cand = {}, added = 0, marked = 0}
     if st.engine ~= 'modern' then
       local planters = farm_tiles() > 0 and (sc.planters or 0) or 0
-      for _, d in ipairs({{key = 'gatherers', labor = 'HERBALIST', skill = 'HERBALISM', n = sc.gatherers or 0},
+      -- BUG-697: with many adults idle a starvation puts more of them on the plants (gatherers_max), not four
+      -- (PEACE / RECOVERY only: the gatherers walk out to the shrubs, a fight holds them at the base number)
+      local gath = sc.gatherers or 0
+      if HUNT_MODES[K.mode()] then gath = M.famine_scale(gath, sc.gatherers_max or gath, r.cit, 5, st.idle) end
+      for _, d in ipairs({{key = 'gatherers', labor = 'HERBALIST', skill = 'HERBALISM', n = (sc.gatherers or 0) > 0 and gath or 0},
                           {key = 'planters', labor = 'PLANT', skill = 'PLANT', n = planters}}) do
         local name, wd = find_detail((sc.details or {})[d.key], d.labor)
         if name and d.n > 0 then

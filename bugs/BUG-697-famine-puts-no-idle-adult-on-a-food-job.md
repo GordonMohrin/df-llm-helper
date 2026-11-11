@@ -1,0 +1,22 @@
+# BUG-697 A famine puts three fishers and four gatherers on the food jobs while 23 of 30 adults idle, frees no forbidden food and asks for farms every 14 days
+Status: fixed (offline, live-untested)
+Severity: high
+Found: 2026-11-11, Run 16c i3 Wallfree y431-y433 (meals 105 -> 0, food 0 d, pop 49 -> 21; the decisions famine / food_low / starvation / thirst_unit repeated 'auto: trade' beside 'no caravan at the depot'; 'kitchen idle with 5 cook ingredients (order made again)'; 'no cook ingredient (6 raw fish to clean, 5 forbidden)')
+Module: `lua/dfllm/economy.lua` (`fish_want`, `M.famine_scale`, `T.starve`, `T.forbid`, `food_plan`, `M.cook_labor`, `M.cook_idle`, `M.cook_watch`), `config/baseline.json`, `dfpilot/fairplay.py`
+
+## Actual
+Every famine automation of the kernel is sized for a fort that still has a few idle hands: the Fisherdwarves detail targets at most 3 (`spec.max`), the starvation handler adds 4 plant gatherers, the farms request waits `request_days` (14) after its last request. Wallfree had 23 of 30 adults idle (`idle_why free 23`, `nolabor 0`) for the whole famine and 49 citizens. Loose forbidden food was freed only while a citizen was already starving (`r.p.starve`), after a fight, or in a burst: 5 forbidden food items stayed in the cook's 'no cook ingredient' text from the first famine day on (kern.log 'unforbidden: food x1' once). The stalled kitchen (`cook_watch`, BUG-629) switched the COOK labor on only when NOBODY held it: a holder with a job elsewhere (a hunter, a hauler) counted as the cook ('COOK labor held') while the kitchen stood idle.
+
+## Root cause
+`economy.lua` `fish_want` (famine branch: `clamp(ceil(cit / per), 1, spec.max)`), `T.starve` (`n = sc.gatherers`), `T.forbid` (`e.why ~= 'food' or r.p.starve or ...`), `food_plan` (`p.farm_req` vs `request_days`), `M.cook_watch` (`if not holder then cook_labor`) all read a fixed number or a signal a famine does not give.
+
+## Fix
+- `M.famine_scale(base, cap, cit, per, idle_pct)`: one helper per `per` citizens, never more than the idle adults, never over `cap`, never under `base`. Fishers: in a famine (PEACE / RECOVERY, a zone standing; `fish_want` keeps its mode gate) up to `Fisherdwarves.famine_max` (8, one per `famine_per` = 6 citizens). Gatherers: `T.starve` aims at `starve.gatherers_max` (10, one per 5 citizens) in PEACE / RECOVERY only (a siege keeps the base 4).
+- `T.forbid`: a famine (`p.famine`, food below `famine_days`) frees the loose forbidden food too, in the modes `FORBID_MODES` already allow.
+- `food_plan`: in a famine the farms are requested every `food.famine_request_days` (7, code default) instead of every `request_days` (14).
+- `M.cook_labor(K, extra)` / `M.cook_idle`: at the cook stall, when every holder of the COOK labor has a job and the fort is hungry or in a famine, one more cook is switched on (an idle adult first, then Cooking skill; no soldier, patient, moody or noble), at most once a day as before.
+- Config: `Fisherdwarves.famine_per / famine_max`, `starve.gatherers_max` in `config/baseline.json` (mirrored in `M.DEFAULTS`), `starve.gatherers_max` and `fishing.dry_days` in `fairplay.ECONOMY_LIM`.
+
+## Tests
+`tests/lua/test_bug697_698_famine.lua` (`famine_scale`; 53 citizens in a famine with 40 idle: 8 fishers, busy citizens 3, no famine 3; 45 citizens, 37 idle: starvation target 9 in PEACE, 4 in a SIEGE; a busy COOK holder gets a second cook, an idle one does not; 5 forbidden food items freed in a famine and kept with food enough; farms asked again after 9 days). Most of them fail on the old economy.lua. No bridge, gate, refuge, lockdown or seal behaviour changed; the one lock-relevant piece (the gatherers walk out to shrubs) stays at the base number outside PEACE / RECOVERY (tested).
+Open: why 5 items stayed forbidden after the famine started is read from `T.forbid` (the old rule), not from the item flags of the live fort; items off the walk group or in a hidden tile stay as before (`forb_skip`). The cook-stall cause 'kitchen idle with ingredients' in Wallfree could also be a kitchen the cook cannot reach or ingredients nobody hauls; the stall text does not name the holder's job. The famine still cannot create food: with no farm plot, no fish and no caravan the numbers above only spread the work (BUG-696 gives the farms). Drink 0 d with a lake nearby: open water the citizens walk to is not counted as drink (`stock.drink_d` counts barrels), the 'nobody thirsty' rule already keeps the supply alarm quiet; brewing needs plants, which a farm plot (BUG-696) gives.

@@ -180,7 +180,7 @@ def _wait_snapshot(save_dir: Path, cid: str, timeout: float) -> dict | None:
 def run_bp(args, save_dir: Path | None) -> int:
     """save_dir None (no fort yet): only `list` and `preview` without --site get here."""
     from . import files
-    from .cmd import BpError, BpUnavailable, fewer_plots_sites, fmt_params, free_sites, parse_kv, send
+    from .cmd import BpError, BpUnavailable, fewer_plots_sites, fmt_params, free_sites, parse_kv, send, smaller_plots_sites
     try:
         if args.action == "list":
             for line in _templates_listing():
@@ -239,6 +239,13 @@ def run_bp(args, save_dir: Path | None) -> int:
                   f"fewer plots fit, plots={k}:")
             params = {**params, "plots": k}
             sites, snap_id, ranked = fewer[1:]
+        small = None if sites else smaller_plots_sites(save_dir, args.tpl, params, snap, where=where)
+        if small:                                          # BUG-696: speckled soil, no 5x7 block: smaller plots
+            o = small[0]
+            print(f"no free site for {args.tpl}{fmt_params(params)} on snapshot {snap_id} ({ranked} ranked); BUG-696: smaller plots "
+                  f"fit, size={o['size']} plots={o['plots']}:")
+            params = {**params, **o}
+            sites, snap_id, ranked = small[1:]
         from .cmd import shallower_core_sites
         shallow = shallower_core_sites(save_dir, args.tpl, params, snap, where=where, have=sites)   # BUG-364
         if where:
