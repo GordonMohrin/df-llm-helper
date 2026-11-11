@@ -118,6 +118,8 @@
               "spec": {"job": "MakeBarrel", "material_category": ["wood"]}},
   "bins": {"tag": "dfllm:bin", "min_empty": 1, "cit_pct": 25, "min_total": 4, "max_total": 20, "max_jobs": 2,
            "ws": ["workshop:Carpenters"], "spec": {"job": "ConstructBin", "material_category": ["wood"]}},
+  "pots": {"tag": "dfllm:pot", "max_total": 24, "max_jobs": 4, "ws": ["workshop:Craftsdwarfs"],
+           "spec": {"job": "MakeTool", "item_subtype": "ITEM_TOOL_LARGE_POT", "material": "INORGANIC"}},
   "leather": {"from_phase": "P1", "tag": "dfllm:tan", "after_days": 2, "max_jobs": 10, "ws": ["workshop:Tanners"],
               "request_days": 14, "memory_days": 336,
               "spec": {"job": "CustomReaction", "reaction": "TAN_A_HIDE",

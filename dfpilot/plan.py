@@ -115,6 +115,7 @@ FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
 SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)
 EMERGENCY_D = 30              # BUG-243: drink or food days below this (or no accepted water): water and food builds first
 FOOD_DRAFT_D = 60             # BUG-297: food below this: a farms build is drafted when no farms project is under way
+FOOD_EARLY_D = 150           # BUG-772: a treeless fort (state stock.nowood: no log, no crossbow, no wood for anything) calls for the farm below this
 DRINK_DRAFT_D = 30            # BUG-605: drink below this (no brewable plants: the still has nothing to brew) counts the same
 CISTERN_WHY = ("no_water", "patient_water")     # BUG-434: the PROJECT_REQUEST cistern reasons follow and propose answer
 AQWELL = "aqwell"             # BUG-243: the aquifer well template (fix6-water), drafted only when the bp package has it
@@ -433,6 +434,10 @@ def farm_low(state: dict | None) -> tuple[str, int] | None:
     fd, dd = st.get("food_d"), st.get("drink_d")
     if _nat(fd) and fd < FOOD_DRAFT_D:
         return "food", fd
+    # BUG-772 (Run 16c i3 Lancemoment y372: no tree, so no bowyer, no crossbow and no hunt; food 64 -> 30 -> 7 days before the farm was
+    # drafted at all): in a treeless fort fish and the caravans are the only other food, the plots go in early, at the first room site
+    if _nat(fd) and fd < FOOD_EARLY_D and st.get("nowood") == 1:
+        return "food", fd
     if _nat(dd) and dd < DRINK_DRAFT_D:
         return "drink", dd
     return None
@@ -540,8 +545,9 @@ def food_draft(s: dict | None, fort: dict | None, builds: list, info: dict | Non
     if low is None or not isinstance(ff, dict) or (info is not None and "farms" not in info):
         return None, ""
     kind, fd = low                              # BUG-605: ('food'|'drink', days)
-    lim = FOOD_DRAFT_D if kind == "food" else DRINK_DRAFT_D
-    what = "food" if kind == "food" else "drink (no farm plot, nothing to brew)"
+    early = kind == "food" and ((s or {}).get("stock") or {}).get("nowood") == 1 and fd >= FOOD_DRAFT_D
+    lim = (FOOD_EARLY_D if early else FOOD_DRAFT_D) if kind == "food" else DRINK_DRAFT_D
+    what = ("food" + (" (treeless fort: no wood, no crossbow, no hunt)" if early else "")) if kind == "food" else "drink (no farm plot, nothing to brew)"
     if any(b["tpl"] == "farms" for b in builds):
         return None, ""
     if ff.get("open"):
@@ -6000,11 +6006,64 @@ def _dry_place(save_dir: Path, doc: dict, prev: dict | None, errs: list[str], wa
     return lines
 
 
+def _pin_path(path: Path) -> Path:
+    return path.with_name(path.name + ".snap")
+
+
+def draft_pin(path: Path, save_dir: Path) -> dict | None:
+    """BUG-773: the sites snapshot the draft at `path` was proposed on ({id, tick}) when that snapshot is still on disk, else None."""
+    doc = files.read_json(_pin_path(path), retry=False)
+    sid = doc.get("id") if isinstance(doc, dict) else None
+    if not (isinstance(sid, str) and sid):
+        return None
+    snap = _cmd.snapshot_by_id(save_dir, sid)
+    if snap is None:
+        return None
+    newest = _cmd.sites_snapshot(save_dir)                     # not pinned yet: the newest one
+    nt, pt = (newest or {}).get("tick"), snap.get("tick")
+    if isinstance(nt, int) and isinstance(pt, int) and nt - pt > schema.TICKS["YEAR"]:
+        return None                                            # a year old: the draft is stale, rank on the map as it is
+    return {"id": sid, "tick": pt}
+
+
 def run(args, save_dir: Path) -> int:
     path = Path(args.file) if args.file else _draft(save_dir)
     prev = applied_plan(save_dir)
+    # BUG-773 (Run 16c i3 Lancemoment y372: `plan apply` said '0 free sites for fortcore' three times, the anchor S1 moved from [101,107] to [147,59]
+    # between propose, check and apply): each call refreshed a stale snapshot and ranked on the newest one. check and apply rank on the snapshot
+    # propose ranked on (the sidecar <draft>.snap) while it is on disk; only a failure on it is retried once on the newest.
+    pinned = None
+    if args.action != "propose" and path.exists():
+        pinned = draft_pin(path, save_dir)
+        if pinned:
+            _cmd.pin_snapshot(save_dir, pinned["id"])
+    try:
+        return _run(args, save_dir, path, prev, pinned)
+    finally:
+        _cmd.pin_snapshot(save_dir, None)
+
+
+def _pin_retry(save_dir: Path, pinned: dict | None, fn):
+    """BUG-773: fn() -> (errs, ...) on the pinned snapshot; a rejection there is tried once more on the newest (refreshed) one. Returns
+    (result, note); the note says which map the answer is from."""
+    res = fn()
+    if not pinned or not res[0]:
+        return res, (f"BUG-773: ranked on the proposed sites snapshot {pinned['id']} (no new ranking between propose and apply)" if pinned else "")
+    _cmd.pin_snapshot(save_dir, None)
+    snap1 = sites_snapshot(save_dir)
+    why = _cmd.snapshot_stale(save_dir, snap1) if snap1 is not None else None
+    if why:
+        _cmd.auto_refresh(save_dir, why)
+    if (sites_snapshot(save_dir) or {}).get("id") == pinned["id"]:
+        return res, f"BUG-773: rejected on the proposed sites snapshot {pinned['id']}; no newer snapshot to try"
+    res2 = fn()
+    return res2, (f"BUG-773: rejected on the proposed sites snapshot {pinned['id']}, ranked again on the newest "
+                  f"{(sites_snapshot(save_dir) or {}).get('id')}" + ("" if res2[0] else ": accepted"))
+
+
+def _run(args, save_dir: Path, path: Path, prev, pinned: dict | None) -> int:
     snap0 = sites_snapshot(save_dir)
-    why = _cmd.snapshot_stale(save_dir, snap0) if snap0 is not None else None
+    why = _cmd.snapshot_stale(save_dir, snap0) if snap0 is not None and not pinned else None
     refreshed = ""
     if why:                                           # BUG-369: drafts, checks and placements never rank on an old map
         note = _cmd.auto_refresh(save_dir, why)[1]
@@ -6047,6 +6106,7 @@ def run(args, save_dir: Path) -> int:
         sid = (sites_snapshot(save_dir) or {}).get("id")
         if sid:                                       # BUG-436: the map this draft was ranked on (plan check names its own)
             print(f"  ranked on sites snapshot {sid}")
+            files.write_json_atomic(_pin_path(path), {"id": sid, "tick": (sites_snapshot(save_dir) or {}).get("tick")})   # BUG-773
         for ln in ([fit] if fit else []) + kfit + cfit:
             print(f"  {ln}")
         order = core_order_note(doc, state, fort)
@@ -6075,19 +6135,26 @@ def run(args, save_dir: Path) -> int:
     if args.action == "check":
         state = files.read_state(save_dir)
         fort = fort_facts(save_dir, state)
-        errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort)
-        lines = _dry_place(save_dir, doc, prev, errs, warn)
+        def _once():
+            errs, warn = check(doc, state, tpls=templates(), prev=prev, fort=fort)
+            lines = _dry_place(save_dir, doc, prev, errs, warn)
+            return errs, warn, lines
+        (errs, warn, lines), pnote = _pin_retry(save_dir, pinned, _once)
         _print_check(errs, warn)
         for ln in lines[:16]:
             print(f"  {ln}")
+        if pnote:
+            print(f"  {pnote}")
         order = core_order_note(doc, state, fort) if errs else None   # BUG-067: why a room build may have found no site
         if order:
             print(f"  {order}")
         print(f"plan {'OK' if not errs else 'REJECTED'}: {path}" + (f" ({_summary(doc)})" if not errs else "")
               + ("" if not errs else reject_tail(errs, sites_snapshot(save_dir), refreshed)))
         return 1 if errs else 0
-    errs, msg = apply(save_dir, doc, by=args.by, wait_s=args.wait, dry_run=args.dry_run)
+    (errs, msg), pnote = _pin_retry(save_dir, pinned, lambda: apply(save_dir, doc, by=args.by, wait_s=args.wait, dry_run=args.dry_run))
     _print_check(errs, [])
+    if pnote:
+        print(f"  {pnote}")
     print(msg)
     return 1 if errs else 0
 
