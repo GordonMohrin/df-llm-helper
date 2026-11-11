@@ -337,6 +337,7 @@
   "carers_min": 2,
   "carers_max": 8,
   "carers_urgent": 2,
+  "carers_far": 2,
   "carers_per_run": 2,
   "carers_hold_days": 14,
   "dying_thirst": 60000,
