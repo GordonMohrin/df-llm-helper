@@ -506,9 +506,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-637: autocancel = days a parked build_lost project stood before the kernel cancelled it (cmd = the bp.place that places it again)
     # BUG-046: parts = the parts of a stalled build stage that wait (<= 3, joined by '; ': 'MetalsmithsForge x,y,z: job
     # 22236 suspended by buildingplan: waits for building material x1'); walled also lists the doors replaced by walls
-    # (BUG-044)
+    # (BUG-044); BUG-748: free = the free idle adults when the project is set aside (the wait is then in DF's job list, not in the runner's slots)
     "PROJECT_BLOCKED": ("A", "runner", _d("proj:s", "tpl:s stage:s why:s ticks:i missing:sa retry:i mat:s walled:sa "
-                                                    "park:i parts:s idle:i unreach:i cmd:s autocancel:i phantom:sa")),
+                                                    "park:i parts:s idle:i unreach:i cmd:s autocancel:i phantom:sa free:i")),
     "YEAR_REVIEW": ("A", "kern", _d(opt="year:i")),
     # BUG-062: far = of them, the bodies lying in another walk group than the citizens' (corpse_far: no coffin helps)
     # BUG-105: unreach = of the far bodies, those on a tile nobody can path to (corpse_unreachable, not in old)

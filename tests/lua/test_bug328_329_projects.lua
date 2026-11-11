@@ -108,7 +108,7 @@ T.test('BUG-328: a project without progress for idle_days is set aside: no slot,
   local ev
   for _, e in ipairs(W.find_events('PROJECT_BLOCKED')) do if e.d.idle then ev = e end end
   T.ok(ev, 'PROJECT_BLOCKED d.idle')
-  T.ok(ev.msg:find('set aside, no runner slot', 1, true) and ev.msg:find('bp.resume', 1, true)
+  T.ok(ev.msg:find('set aside for want of progress, not of slots', 1, true) and ev.msg:find('bp.resume', 1, true)
        and ev.msg:find('bp.cancel', 1, true), ev.msg)
   T.eq(ev.d.why, 'stalled')
   -- the set-aside project is still measured now and then: its beds built -> back by itself
@@ -236,7 +236,8 @@ T.test('BUG-329: a job nobody takes names the labor no free adult has on (old: o
   T.eq(runner.cls_of(r), 'no labor')
   local W2 = bs_world('FarmPlot', {[1] = true})
   local _, r2 = W2.K.call('economy', 'build_state', BX, BY, BZ)
-  T.eq({r2.line, r2.nolabor}, {'job 152960 not suspended, no builder has taken it', nil})
+  -- BUG-747: the idle holder who reaches the site is counted (one adult of the labor, no job, no walk group data = reachable)
+  T.eq({r2.line, r2.nolabor}, {'job 152960 not suspended, no builder has taken it; 1 idle holder reaches it, DF did not assign it', nil})
 end)
 
 T.test('BUG-329: an attached item that is forbidden or off the citizens\' walk group is named', function()
