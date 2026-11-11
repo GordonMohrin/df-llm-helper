@@ -165,7 +165,7 @@ LUA_RULES = {
     "body-write": "writing body, wounds or attributes",
     "timer-write": "writing unit timers/counters",
     "labor-write": "writing labors or work details (labormanager owns them; economy only the builtin tool "
-                   "details, through act.work_detail; care only the doctor labors, through act.medic; act.labor_set: mechanic on, farm off)",
+                   "details, through act.work_detail; care only the doctor labors, through act.medic; act.labor_set: mechanic on, farm and hunt off)",
     "armok": "armok/memory API",
     "blocked-command": "blocked command (config/allowlist.json 'blocked', inline lua or claude/*)",
     "not-allowlisted": "act.run command or arguments not in config/allowlist.json",

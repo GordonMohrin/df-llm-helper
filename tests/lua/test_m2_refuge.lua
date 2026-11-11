@@ -35,6 +35,7 @@ local function fort(opts)
   W.burrow('Kern+', {5, 5, Z, 15, 12, Z})
   if opts.innen ~= false then W.burrow('Innen+', {5, 13, Z, 9, 15, Z}) end
   if opts.tiefe then W.burrow('Tiefe+', {10, 13, Z, 15, 15, Z}) end         -- the refuge: 18 tiles, no stock
+  if opts.tdrink then SW.item(W, 'DRINK', 11, 14, Z, opts.tdrink) end      -- drink in the refuge Tiefe+ (BUG-739)
   if opts.kdrink then SW.item(W, 'DRINK', 10, 6, Z, opts.kdrink) end
   if opts.kfood then SW.item(W, 'PLANT', 10, 7, Z, opts.kfood) end
   if opts.idrink then SW.item(W, 'DRINK', 6, 14, Z, opts.idrink) end
@@ -175,7 +176,15 @@ T.test('BUG-107: no floor event for a young fort, with floor_pct 0, in a fight; 
   local e = evs(W6, 'REFUGE_STOCK')
   T.eq(#e, 1)
   T.eq({e[1].d.burrow, e[1].d.short}, {'Tiefe+', 'food+drink'})
-  T.eq(e[1].d.cmd, 'the refuge level has no food store template: stock it from the next plan (refuge_drink holds drink only)')
+  -- BUG-739: food+drink short (30 + 30 units): the refuge_drink food=1 store of 12 barrels
+  T.eq(e[1].d.cmd, 'dfllm cmd bp.place \'{"tpl":"refuge_drink","site":"S1","p":{"n":12,"food":1}}\'')
+  -- BUG-739 (Whirledrampart y431: Tiefe+ food 62/68, drink fine): food only short -> the same store, sized by the missing food (6 units: 2 barrels)
+  local W8 = fort{kfood = 40, kdrink = 40, tdrink = 40, tiefe = true}
+  local e8 = evs(W8, 'REFUGE_STOCK')
+  T.eq(#e8, 1)
+  local l8 = e8[1]
+  T.eq({l8.d.burrow, l8.d.short}, {'Tiefe+', 'food'})
+  T.eq(l8.d.cmd, 'dfllm cmd bp.place \'{"tpl":"refuge_drink","site":"S1","p":{"n":6,"food":1}}\'')
   local W7 = fort{kfood = 40, kdrink = 40, ifood = 40, idrink = 40, tiefe = true}
   T.eq(#evs(W7, 'REFUGE_STOCK'), 1)
 end)

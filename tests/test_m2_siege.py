@@ -116,7 +116,7 @@ def test_the_refuge_stock_commands_are_valid_bp_place_calls():
 
     src = read("lua/dfllm/seal.lua")
     cmds = re.findall(r"bp\.place \\'(\{[^']*\})\\'", src[src.index("function RF.floor"):src.index("local function commit_audit")])
-    assert len(cmds) == 2, cmds
+    assert len(cmds) == 3, cmds             # BUG-739: drink store, food and drink store (n filled in by seal), stockroom
     for c in cmds:
-        call = json.loads(c)
+        call = json.loads(c.replace("%d", "12"))
         check_params(call["tpl"], call.get("p"))
