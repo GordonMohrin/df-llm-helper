@@ -89,7 +89,15 @@ local DAY = C.TICKS.DAY
 M.DEFAULTS = {
   thirst_alarm = 30000, thirst_watch = 25000, near = 30, shaft = 12, pond_near = 3, pond_per_run = 2,
   buckets_min = 2, bucket_per_patient = 1, buckets_max = 8, unforbid_per_run = 4,
-  alarm_every = 7 * DAY, hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
+  alarm_every = 7 * DAY,
+  -- BUG-744 (Run 16b i2 Whirledrampart y432-y436: 511 DECISION patient_thirst in a few years beside 31 carers, 27 free buckets and GiveWater jobs
+  -- running, 9-11 patients at thirst 25,000-31,500; Run 16a i1 patient 26925: 700 -> 30,200 -> 700, 50 decisions): DF hands a patient water at about
+  -- the alarm line (30,000), so every served patient crosses it once per cycle. A crossing is news only when it lasts alarm_grace ticks (he is not
+  -- served), reaches thirst_alarm + alarm_margin (the climb goes past DF's own service point), or the verdict says nobody is giving (no job, no way to
+  -- the water, a stale job: gv.key not 'run'); and the same patient with the same verdict is announced again only after alarm_repeat. A patient is out of
+  -- the episode only when his thirst fell alarm_clear under the line (he drank), not when a number dips under 30,000
+  alarm_grace = 2 * DAY, alarm_margin = 5000, alarm_clear = 5000, alarm_repeat = 28 * DAY,
+  hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
   deep = 4, zone_below = false, gate_every = 28 * DAY, wake_wall_s = 600,
   -- BUG-537 (Run 16c i3 Sealcertain: HOSPITAL_DRY ~10 times a year beside a well that read 3/7 and 1/7 in turn): the dry episode ends
@@ -2320,6 +2328,16 @@ function M.give_diag(K, c, r, sc, bfree, top)
   return gv
 end
 
+-- BUG-744: is a patient over the alarm for `age` ticks at thirst `th` a case for the LLM? He is when he has been over for alarm_grace ticks (not
+-- served), has climbed alarm_margin past the line, or the verdict says nobody is giving water (a job running is the only verdict that is DF's rhythm)
+-- A fort without a hospital zone gives its patients no GiveWater job by design (they fetch their own drink: BUG-034's recipe), so 'the game posts no
+-- GiveWater job' (`nojob`) is no news for him below the margin.
+function M.alarm_ripe(c, age, th, gv, nohosp)
+  if age >= c.alarm_grace or th >= c.thirst_alarm + c.alarm_margin then return true end
+  if gv == nil or gv.key == 'run' then return false end
+  return not (nohosp and gv.key == 'nojob')
+end
+
 -- BUG-434: the Chebyshev distance from a patient to the nearest accepted source (a wet well or Water Source zone, not an emergency
 -- well) of this run; nil when there is none
 function M.source_dist(r, pt)
@@ -3776,21 +3794,33 @@ local function finish(K, c, r, p)
     K.log('info', 'water: a day after the hospital removal (tick %d): %d GiveWater job(s), %d patient(s), max thirst %d '
           .. '(was %d)', rm.t, r.give, #r.patients, tm, math.tointeger(rm.tmax) or -1)
   end
-  -- p.alarm: patients over the alarm in this episode (id -> tick they crossed it)
-  local over, fresh = {}, false
+  -- p.alarm: patients over the alarm in this episode (id -> tick they crossed it); p.ann: the last patient_thirst line that named a patient
+  -- (id -> {t, k = the verdict key}). BUG-744: see M.DEFAULTS alarm_grace
+  p.ann = json.object(type(p.ann) == 'table' and p.ann or {})
+  local over, fresh, ripe = {}, false, 0
+  local vkey = gv and gv.key or 'none'
   for _, pt in ipairs(r.patients) do
     if pt.thirst >= c.thirst_watch then thirsty = thirsty + 1 end
     if pt.thirst > tmax then tmax = pt.thirst end
     if pt.thirst > c.thirst_alarm then
       over[#over + 1] = pt
       local sid = fmt(pt.id)
-      if not p.alarm[sid] then p.alarm[sid], fresh = now, true end
+      if not p.alarm[sid] then p.alarm[sid] = now end
+      if M.alarm_ripe(c, now - p.alarm[sid], pt.thirst, gv, #r.hosp == 0) then
+        ripe = ripe + 1
+        local a = p.ann[sid]
+        if not a or a.k ~= vkey or now - (math.tointeger(a.t) or 0) >= c.alarm_repeat then fresh = true end
+      end
     end
   end
+  local by_id = {}
+  for _, pt in ipairs(r.patients) do by_id[fmt(pt.id)] = pt end
   for sid in pairs(p.alarm) do
-    local keep = false
-    for _, pt in ipairs(over) do if fmt(pt.id) == sid then keep = true end end
-    if not keep then p.alarm[sid] = nil end
+    local pt = by_id[sid]
+    if not pt or pt.thirst <= c.thirst_alarm - c.alarm_clear then p.alarm[sid] = nil end      -- BUG-744: he drank (or is gone)
+  end
+  for sid, a in pairs(p.ann) do
+    if not by_id[sid] or now - (math.tointeger(a.t) or 0) >= 2 * c.alarm_repeat then p.ann[sid] = nil end
   end
   local woke = false
   -- BUG-596 (Brotherarrow y406-y414: the same patient_thirst line 14 times, 'the civ alert holds the caregivers in Tiefe+, the patient lies outside;
@@ -3802,9 +3832,10 @@ local function finish(K, c, r, p)
   -- patient crossing the alarm still wakes at once
   if removed then
     p.alarm_t, p.alarm_w, woke = now, T.wall, true            -- HOSPITAL_REMOVED named them (BUG-034)
-  elseif #over > 0 and (fresh or CAD.elapsed({t = p.alarm_t or -c.alarm_every, w = p.alarm_w}, T, alarm_gap,
-                                             c.wake_wall_s)) then
+  elseif ripe > 0 and (fresh or CAD.elapsed({t = p.alarm_t or -c.alarm_every, w = p.alarm_w}, T, alarm_gap,
+                                            c.wake_wall_s)) then
     p.alarm_t, p.alarm_w, woke = now, T.wall, true
+    for _, pt in ipairs(over) do p.ann[fmt(pt.id)] = {t = now, k = vkey} end      -- BUG-744
     table.sort(over, function(a, b) return a.thirst > b.thirst end)
     local ids = {}
     for i = 1, math.min(8, #over) do ids[i] = over[i].id end

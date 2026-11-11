@@ -112,6 +112,10 @@ T.test('BUG-689: armor made by another race is no piece of the fort\'s gear: the
   T.eq(E.wearable({}, {flags = {}, maker_race = 7}), false)
   T.eq(E.wearable({}, {flags = {}, maker_race = -1}), true, 'no maker: counts')
   T.eq(E.wearable({far = function() return true end}, {flags = {}, maker_race = 1}), false, 'another walk group')
+  -- BUG-743: a piece military wrote off (released twice and still lying, or reserved out of its soldiers' reach) is no gear either
+  T.eq(E.wearable({stuck = {[77] = true}}, {id = 77, flags = {}, maker_race = 1}), false, 'stuck: counted missing, a fresh one is ordered')
+  T.eq(E.wearable({stuck = {[77] = true}}, {id = 78, flags = {}, maker_race = 1}), true, 'another piece')
+  T.eq(E.wearable({stuck = {[77] = true}}, {id = 77, flags = {in_inventory = true}}), true, 'worn: always counts')
 end)
 
 T.done()

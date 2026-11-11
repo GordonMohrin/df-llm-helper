@@ -1081,6 +1081,7 @@ STATE = Obj(
                       # route: the last audit's first attacker-route finding (bypass / refuge on the attack path)
                       # FR-70: pd = game days the perimeter has been open in PEACE (open_perimeter), pw = what is open
                       opt={"open": Int(-1), "ents": Arr(Str(maxbytes=24), hi=3), "dhold": Str(maxbytes=24), "dref": NAT,
+                           "dage": NAT, "dh": NAT, "wpk": NAT,   # BUG-742: days the defense_short hold stands, the pop it holds, median worn % (45 d)
                            "drill_mech_age": Int(-1),          # BUG-493: age of the newest drill whose bridges worked (-1 none)
                            "route": Str(maxbytes=60), "pd": NAT, "pw": Str(maxbytes=60),
                            # review fix merge16 (BUG-349): pn = game days since the newest opening (<= pd)

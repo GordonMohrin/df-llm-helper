@@ -119,7 +119,8 @@ end
 -- stock count alone cannot tell a metal piece the spec accepts from one it does not (copper or silver is metal, but the entity's armor
 -- class is not), so a slot that was empty at the last look too (`opts.prev[cat][pos]`) while free pieces lie in the category goes to any
 -- material whatever the own-material count says. Returns the plan, the positions empty now (`opts.prev` of the next look) and the
--- positions this plan frees from a material class for being stuck (`opts.hold` keeps them from going back up to metal)
+-- positions this plan frees from a material class for being stuck (`opts.hold` keeps them from going back up to metal). BUG-743: the fourth
+-- result is every position this plan moved down to any material, stuck or not (the caller holds all of them from the climb for a while)
 function KIT.refit_plan(mems, stock, opts)
   opts = type(opts) == 'table' and opts or {}
   local prev, hold = opts.prev or {}, opts.hold or {}
@@ -180,7 +181,13 @@ function KIT.refit_plan(mems, stock, opts)
     if down[c] then out[#out + 1] = {cat = c, mat = 'any', positions = down[c]} end
     if up[c] then out[#out + 1] = {cat = c, mat = 'metal', positions = up[c]} end
   end
-  return out, now_empty, stuck
+  -- BUG-743: every position moved down to any material (the soldier wears what is there; the climb back to metal waits, longer each time)
+  local freed = {}
+  for c, list in pairs(down) do
+    freed[c] = {}
+    for _, pos in ipairs(list) do freed[c][pos] = true end
+  end
+  return out, now_empty, stuck, freed
 end
 
 return KIT

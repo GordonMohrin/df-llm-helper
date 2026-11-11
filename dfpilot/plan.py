@@ -2961,6 +2961,9 @@ def defense_gaps(s: dict | None, fort: dict | None = None) -> list[str]:
     mil = s.get("mil") or {}
     soldiers = mil.get("soldiers") or (s.get("pop") or {}).get("soldiers") or 0
     worn = mil.get("worn", r.get("worn"))
+    wpk = r.get("wpk")                      # BUG-742: the kernel reads the median worn % of 45 days (the instant value swings with every militia turn)
+    if _nat(wpk):
+        worn = wpk
     kit = mil.get("kit") or {}
     if _nat(soldiers) and soldiers > 0:
         if _nat(worn) and worn < DEFENSE_WORN:
@@ -3007,14 +3010,27 @@ def gap_soft(gap: str) -> bool:
     return bool(m) and int(m.group(1)) >= GROWTH_WORN
 
 
+def kernel_defense_hold(s: dict | None) -> int | None:
+    """BUG-742 (Run 16a i1 Basementflew y520-y525: the propose ceiling flipped between 100 and 'held 43' within one year, as the worn % crossed the line
+    between two looks): the population the kernel's defense_short hold stands at now (state ready.dh, readiness.lua: it clears only after DEF.clear_days
+    without a gap and is raised by a wave's room every DEF.relax_days). None when none stands."""
+    dh = ((s or {}).get("ready") or {}).get("dh")
+    return dh if _nat(dh) and dh > 0 else None
+
+
 def defense_cap(s: dict | None, cap: int, fort: dict | None = None) -> int:
     """BUG-377: the population ceiling while the defence is short: the citizens now (at least DEFENSE_POP), never above `cap`.
-    BUG-533: plus growth_room(pop) while every gap is soft (gap_soft), so a wave can still come."""
+    BUG-533: plus growth_room(pop) while every gap is soft (gap_soft), so a wave can still come.
+    BUG-742: never below the kernel's own hold (kernel_defense_hold): the plan's ceiling is the kernel's number, not a second, lower or higher one
+    (a plan 43 under a kernel hold raised to 47 kept the fort at 43; a plan of 100 beside a standing hold said 'no gap')."""
     pop = ((s or {}).get("pop") or {}).get("cit", 0)
     base = max(pop if _nat(pop) else 0, DEFENSE_POP)
     gaps = defense_gaps(s, fort)
     if gaps and all(gap_soft(g) for g in gaps):
         base += growth_room(base)
+    kh = kernel_defense_hold(s)
+    if kh is not None:
+        base = max(base, kh)
     return min(cap, base)
 
 
@@ -5208,8 +5224,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     core_stage_order(seasons, kept)              # BUG-403: stage 2 before 3 before 4 among the builds added now
     cap = min(level_cap(lvl, d01), OPTION_A_MAX if d01 != "B" else R_CAPS[3])
     policy_cap = cap
-    if gaps:
-        cap = defense_cap(s, cap, fort)          # BUG-377: no growth past the citizens now while the defence is short
+    kh = kernel_defense_hold(s)
+    if gaps or kh is not None:
+        cap = defense_cap(s, cap, fort)          # BUG-377: no growth past the citizens now while the defence is short (BUG-742: or the kernel holds)
     pop = (s.get("pop") or {}).get("cit", 0)
     pm = (prev or {}).get("military") or schema.PLAN_DEFAULTS["military"]
     melee = 2 if target >= "P5" else 1 if target >= "P2" else 0
@@ -5230,7 +5247,7 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
         "orders": {"import": libs if libs else [x for x in ((prev or {}).get("orders") or {}).get("import") or []
                                                 if isinstance(x, str)]},
         "trade": dict((prev or {}).get("trade") or {"want": ["bar:iron", "anvil", "cloth"], "sell": ["crafts"]}),
-        "notes": (f"draft from phases {cur}..{target}" + ceiling_held_note(cap, policy_cap, gaps) + refuge_free_note(s, fort)
+        "notes": (f"draft from phases {cur}..{target}" + ceiling_held_note(cap, policy_cap, gaps or ([f"defense_short {kh} (the kernel's hold, state ready.dh)"] if kh is not None else [])) + refuge_free_note(s, fort)
                   + (f"; {star} needs approval: set phase_target {star}" if star else "")
                   + "; site S<k> = k-th free site at apply time (never overlaps other projects or earlier"
                   " builds; `dfllm plan check` lists the anchors), same = anchor of the earlier stage"),
@@ -5913,7 +5930,8 @@ def ceiling_refresh(save_dir: Path, state: dict | None = None, apply_it: bool = 
     policy_cap = int(m.group(2))
     fort = fort_facts(save_dir, state)
     gaps = defense_on(state, doc["phase_target"], fort)
-    new = defense_cap(state, policy_cap, fort) if gaps else policy_cap
+    kh = kernel_defense_hold(state)
+    new = defense_cap(state, policy_cap, fort) if (gaps or kh is not None) else policy_cap
     lvl = (state.get("ready") or {}).get("lvl", 0)
     new = min(new, level_cap(lvl, schema.decision("D-01", load_decisions())), policy_cap)
     if new <= cur:
