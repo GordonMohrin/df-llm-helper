@@ -2272,6 +2272,29 @@ local function impls(state)
     return true, n == 0 and 'already' or (on and 'enabled' or 'disabled')
   end
 
+  -- BUG-751 (Run 16c i3 Doorwings y388-y391: seven citizens, mostly Planters and the bookkeeper 26276, died of thirst on the walkable
+  -- tops of the unfinished bedroom block y379s0b0 (z149 over z148 walls, walk groups 2715 and 1339, no way back) after a HuntVermin
+  -- job led them there): the unit sheet's cancel job for ONE outdoor errand (hunting, gathering, felling, collecting, hauling) of a
+  -- living citizen. The worker is released and the job is taken down; the unit takes another job at once. Any other job is refused.
+  local STRAY_JOBS = {'HuntVermin', 'Hunt', 'GatherPlants', 'FellTree', 'Fish', 'CollectSand', 'CollectClay', 'CollectWebs',
+                      'GatherHoney', 'PlantSeeds', 'StoreItemInStockpile', 'StoreItemInBarrel', 'StoreItemInBin'}
+  function I.cancel_stray_job(unit_id)
+    local u = df.unit.find(int(unit_id) or -1)
+    if not u then return false, 'no unit ' .. tostring(unit_id) end
+    if not dfhack.units.isCitizen(u) or dfhack.units.isDead(u) then return false, 'not a living citizen' end
+    local job = u.job and u.job.current_job
+    if not job then return true, 'no job' end
+    local name
+    for _, n in ipairs(STRAY_JOBS) do
+      local v = df.job_type[n]
+      if v ~= nil and job.job_type == v then name = n; break end
+    end
+    if not name then return false, 'not an outdoor errand' end
+    pcall(dfhack.job.removeWorker, job)
+    if not dfhack.job.removeJob(job) then return false, 'removeJob failed' end
+    return true, name
+  end
+
   -- labors screen, one labor of one citizen (BUG-546 Run 16d i4 Trumpetrealms: the refuge levers' link jobs waited 1000 days and nobody was
   -- known to hold the Mechanics labor; BUG-547: the manager worked as a farmer and validated no order for 14 days): `which` = mechanic
   -- (only on) or farm (only off), A.LABOR_SETS; a citizen who is no living adult cannot take a labor

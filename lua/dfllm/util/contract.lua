@@ -99,6 +99,7 @@ C.EVENTS = {
   LOCKDOWN = {cls = 'A', by = 'reflex'},
   ORDER_BAD = {cls = 'A', by = 'economy'}, DEPOT_MISSING = {cls = 'A', by = 'trade'},
   CUTOFF = {cls = 'A', by = 'seal'}, PERIMETER_BROKEN = {cls = 'A', by = 'seal'},
+  MISSING = {cls = 'A', by = 'seal'},                                -- BUG-752: a citizen away for days (off the map, cut off, far out)
   SEAL_LEAK = {cls = 'A', by = 'seal'}, REFUGE_FAIL = {cls = 'A', by = 'seal'},
   REFUGE_STOCK = {cls = 'A', by = 'seal'},        -- BUG-107: a potential refuge under its food/drink floor
   -- BUG-010: autolabor found enabled in legacy mode (the Run 9 crash engine); baseline set it to monitor
@@ -329,6 +330,7 @@ C.ACT = {
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
+  cancel_stray_job = {'seal'},                     -- BUG-751: an outdoor errand whose target has no way back to drink and food
   cancel_link_job = {'gate'}, labor_set = {'economy'},          -- BUG-546, BUG-547
   construction_remove = {'seal'},                  -- BUG-479: the refuge plug's walls come down in PEACE
   door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft

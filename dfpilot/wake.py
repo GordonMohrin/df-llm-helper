@@ -172,6 +172,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         # BUG-048: replaced = bridges now a wall + door; wait = lost bridges waiting for quiet PEACE
         "PERIMETER_BROKEN": "dfllm status; dfllm cmd inspect what=perimeter; tell Gordon; the kernel rebuilds lost "
                             "walls, doors and bridges in quiet PEACE; nothing tactical",
+        # BUG-752: a citizen away for days (d.why off_map | cut | far, d.pos, d.job); the kernel cancels errands with no way back (BUG-751)
+        "MISSING": "dfllm cmd inspect '{\"what\":\"reach\"}'; tell Gordon who is away, where and on which job; nothing tactical",
         "SIEGE_DEEP": "dfllm status (civilians in the refuge, squads in the core); tell Gordon; nothing tactical",
         # BUG-096/FR-80 (Run 14 note 70): the kernel paints Kern+ / the refuge again in quiet modes (d.fix repair | wait);
         # ask (no tile set known) comes with DECISION_NEEDED burrow_gone; off = burrow.guard.repair_per_day 0
