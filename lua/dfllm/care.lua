@@ -3823,7 +3823,7 @@ function M.mood_early(K, c, m, rec, early, far)
   cmds[#cmds + 1] = string.format('dfllm cmd inspect what=unit key=%s', tostring(m.sid))
   local names, ways = {}, {}
   for i, e in ipairs(list) do if i <= 3 then names[#names + 1] = e.t end end
-  if seen.rough then ways[#ways + 1] = 'a rough gem is made by no work order: trade.want gem or dig for a gem vein' end
+  if seen.rough then ways[#ways + 1] = 'a rough gem is made by no work order: trade.want rough or dig for a gem vein' end
   if seen.stone then
     ways[#ways + 1] = 'hard stone: ' .. (rec.sdig_why and ('no stone dig (' .. trunc(tostring(rec.sdig_why), 50) .. ')') or 'dig for it')
   end

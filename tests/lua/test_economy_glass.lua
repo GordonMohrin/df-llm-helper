@@ -180,7 +180,7 @@ T.test('Run 11: natural gems in the fort and no glass need: no chain; a raw-glas
   days(W, 2)
   T.eq(W.find_acts('sand_zone'), {})
   T.eq(#orders(W, 'dfllm:glass') + #orders(W, 'dfllm:glass_fuel') + #orders(W, 'dfllm:bag'), 0)
-  T.eq(route(W, 'gems'), 'rough gems: mine a gem vein or trade.want gem (glass is no rough gem)')
+  T.eq(route(W, 'gems'), 'rough gems: mine a gem vein or trade.want rough (glass is no rough gem)')
   -- BUG-573: 6 rough gems beyond rough_keep are cut (CutGems), no glass; the standing stock is not made of glass
   T.eq(#orders(W, 'dfllm:cutgems'), 1)
   T.eq(route(W, 'gems', 'glass'), 'cut gems: CutGems, raw 0/0; trade.want gem')

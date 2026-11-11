@@ -47,7 +47,7 @@ R.BUY = {bone = 'bone', cloth = 'cloth', thread = 'thread', leather = 'leather',
 -- what the LLM can do about a class (DECISION_NEEDED q)
 R.HINT = {boulders = 'dig stone (bp.place bedrooms prio=1)', logs = 'cut trees', bone = 'butcher/hunt',
           shell = 'butcher/hunt/fish', leather = 'butcher+tan or trade.want leather', cloth = 'trade.want cloth',
-          thread = 'trade.want thread', gems = 'trade.want gem', glass = 'glass furnace: sand+fuel',
+          thread = 'trade.want thread', gems = 'trade.want rough', glass = 'glass furnace: sand+fuel',
           bars = 'smelt ore or trade.want bar', other = 'trade.want'}
 -- dimension units per item in a mood filter's quantity (DFHack strangemood: bars x150, cloth x10000)
 R.DIM = {BAR = 150, CLOTH = 10000, THREAD = 15000}

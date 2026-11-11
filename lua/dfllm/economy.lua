@@ -7324,7 +7324,7 @@ end
 -- other gems need is a rough gem, which no glass replaces
 function M.glass_route(K, key, via)
   if key == 'gems' and via ~= 'glass' then
-    return 'rough gems: mine a gem vein or trade.want gem (glass is no rough gem)'
+    return 'rough gems: mine a gem vein or trade.want rough (glass is no rough gem)'
   end
   local g, parts = st.glass, {}
   if type(g) ~= 'table' then

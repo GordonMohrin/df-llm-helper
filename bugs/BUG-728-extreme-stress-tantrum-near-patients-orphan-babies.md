@@ -17,3 +17,4 @@ care only counted stress categories (`getStressCategory`, FR-83 s0) and named th
 
 ## Live check
 kern.log 'care: N citizen(s) at stress >= 80000' and the DECISION_NEEDED; 'water: citizen N at extreme stress leaves the Orderlies detail'. Open: the hospital burrow itself is not closed to them (no verb confines one unit); a tantrum already running is not stopped; 80,000 is a judgement (DF's category 0 is above it); the babies get a report, not a feeding job.
+Known limits (verifier): a tantrum child is no Orderly, so `water.xs_off` and the carer-pool skip do not act on a child; the effect is the DECISION stress_extreme and the orphan_babies report. `xs_off` removes the Orderlies labors and nothing restores them when stress drops.
