@@ -2382,7 +2382,7 @@ local function gates_pass(K, t, why)
           end)
           local label = how == 'none' and string.format('bridge %s lost, no destroyer in sight (%s)', g.name or k, why)
                         or string.format('bridge %s after the fight (%s)', g.name or k, why)
-          local ok, r1, r2 = K.call('runner', 'repair', {{x, y, z, q}}, label, {peace = true})
+          local ok, r1, r2 = K.call('runner', 'repair', {{x, y, z, q}}, label, {peace = true, prio = 1})   -- BUG-754: the first project
           if ok and r1 then
             g.proj, g.qt, g.how, dirty, out[k] = tostring(r2), t, how, true, 'queued'
             projs[#projs + 1] = g.proj

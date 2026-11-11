@@ -289,7 +289,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     elif rebuild:                                            # BUG-562: where the shop stood
         cands = _rebuild_shops(snap, p, manifest or {})
     elif furnish:                                            # BUG-581: a free floor tile inside the hospital room
-        cands = _furnish_hospital(snap, manifest or {})
+        cands = _furnish_hospital(snap, manifest or {}, "bed" if p.get("furnish") == 2 else "table")
     elif surface_shops:                                      # BUG-356: the startup shops on open surface floor
         cands = _surface_shops(snap, p, manifest or {}, tpl)
         if not cands and surface_top_floor(snap) >= SURFACE_TOP_MIN and not sky_over_floor(snap):
@@ -1465,7 +1465,7 @@ def _rebuild_shops(snap: dict, p: dict, manifest: dict) -> list[dict]:
     return out
 
 
-def _furnish_hospital(snap: dict, manifest: dict) -> list[dict]:
+def _furnish_hospital(snap: dict, manifest: dict, what: str = "table") -> list[dict]:
     """BUG-581 (Run 16d i4 Trumpetrealms y411-y415: `no_table` for years in a hospital room that stood with four beds, the older template
     placed no table and no command put one there): hospital p.furnish = 1 ranks the open floor tiles ('.') of the manifest's hospital
     rooms for ONE table. A tile with more wall neighbours is better (a corner blocks no way), a tile with none (the middle of the
@@ -1490,7 +1490,7 @@ def _furnish_hospital(snap: dict, manifest: dict) -> list[dict]:
                 if walls == 0:
                     continue                                   # the middle of the room: beds and the pond hole stand there
                 out.append({"anchor": [x, y, bz0], "rot": 0, "score": 100 * walls - abs(x - bx0) - abs(y - by0), "box": (x, y, bz0, x, y, bz0),
-                            "why": f"a table inside the hospital room {r.get('id', '?')} at {x},{y},{bz0} ({walls} wall side(s))"})
+                            "why": f"a {what} inside the hospital room {r.get('id', '?')} at {x},{y},{bz0} ({walls} wall side(s))"})
     if not seen:
         raise ValueError("hospital furnish=1: no hospital room in the fort manifest (a hospital that is built is `hospital`, not furnish)")
     if not out:

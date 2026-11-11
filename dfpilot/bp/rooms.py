@@ -51,7 +51,8 @@ PARAMS = {
     # no door, no burrow, no well; the sites follow the kernel's accepted water as the dug one does
     # BUG-581: bench = 0 leaves the traction bench out (it needs a mechanism; a fort with no hard stone cannot make one); furnish = 1 is
     # ONE table inside a hospital room that stands (no beds, no dig, no zone): the room of an older template had no table
-    "hospital": {"beds": (4, 1, 10), "surface": (0, 0, 1), "bench": (1, 0, 1), "furnish": (0, 0, 1)},
+    # BUG-755: furnish = 2 is ONE bed inside such a room (more patients than beds: Run 16b i2 Whirledrampart, 10 patients, 4 beds)
+    "hospital": {"beds": (4, 1, 10), "surface": (0, 0, 1), "bench": (1, 0, 1), "furnish": (0, 0, 2)},
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40), "surface": (0, 0, 1)},
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
@@ -247,7 +248,7 @@ def _furnish_hospital(P: Plan, p: dict) -> Plan:
     """BUG-581 (Run 16d i4 Trumpetrealms y411-y415: the hospital room of an older template stood with 4 beds and no table in its zone,
     `no_table` for years, no command put one there): one table on the anchor tile, inside a hospital room of the manifest (sites picks
     a free floor tile of the room). Nothing is dug, no zone, no room: the zone and the beds are the room's own."""
-    P.stage("build", "build", orders=1).tile(0, 0, 0, "t")
+    P.stage("build", "build", orders=1).tile(0, 0, 0, "b" if p.get("furnish") == 2 else "t")      # BUG-755: 2 = a bed
     return P
 
 

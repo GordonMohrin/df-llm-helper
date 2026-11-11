@@ -1120,6 +1120,7 @@ function M.xs_look(a, u)
   local okx, sx = pcall(function() return u.status.current_soul.personality.stress end)
   if okx and math.type(sx) == 'integer' and sx >= M.XS.stress and not dfhack.units.isBaby(u) then
     a.xsn = a.xsn + 1
+    if a.xset then a.xset[u.id] = true end                       -- BUG-754: every one of them, not only the named few
     if #a.xs < M.XS.ids then
       local pos = unit_pos(u)
       a.xs[#a.xs + 1] = {id = u.id, name = uname(u), stress = sx, child = is_child(u) or nil, pos = pos and {pos.x, pos.y, pos.z} or nil}
@@ -3263,6 +3264,7 @@ local function may_doctor(u)
     local mood = df.mood_type[u.mood]
     if mood and M.STRANGE[mood] then return false end
     if u.health and u.health.flags.needs_healthcare then return false end
+    if st and st.xs_set and st.xs_set[u.id] then return false end                  -- BUG-756: extreme stress (a tantrum can strike)
     return true
   end)
   return ok and yes == true
@@ -3311,9 +3313,32 @@ local function hospital_posts()
   return posts, holders, stale, n, waiting
 end
 
+-- BUG-756 (Run 16b i2 Whirledrampart y435: DiagnosePatient 11 unclaimed beside 4 doctors, 10-16 patients): a fort with more patients than
+-- DOC_PATIENTS per doctor wants one more doctor per DOC_PATIENTS patients, up to DOC_MAX (the labors DIAGNOSE, SURGERY and BONE_SETTING
+-- of more citizens; the same candidate rule: no soldier, no moody dwarf, no patient, no citizen at extreme stress)
+M.DOC_PATIENTS, M.DOC_MAX = 3, 8
+function M.doctors_want(base, patients)
+  base = num(base) or 0
+  if base <= 0 then return 0 end
+  local more = ((num(patients) or 0) + M.DOC_PATIENTS - 1) // M.DOC_PATIENTS
+  return math.max(base, math.min(M.DOC_MAX, more))
+end
+
 local function phase_doctors_run(K, c, r, p)
   local want = num(c.doctors) or 0
   if want <= 0 or not r.have_units then return end
+  local npat = 0
+  for _, id in ipairs(r.ids) do
+    local u = df.unit.find(id)
+    local okp, yes = pcall(function() return u ~= nil and not dfhack.units.isDead(u) and u.health.flags.needs_healthcare == true end)
+    if okp and yes then npat = npat + 1 end
+  end
+  local base = want
+  want = M.doctors_want(base, npat)
+  if want > base and K.now().tick - (p.doc_more or -1e12) >= 7 * DAY then
+    p.doc_more = K.now().tick
+    K.log('info', 'doctors: %d patients, %d doctors wanted (%d per doctor, base %d)', npat, want, M.DOC_PATIENTS, base)
+  end
   local docs, cands = {}, {}
   for _, id in ipairs(r.ids) do
     local u = df.unit.find(id)
@@ -4405,7 +4430,7 @@ local function new_run(K, c, p)
   end
   local mode, now = K.mode(), K.now().tick
   return {ph = 1, idx = 0, left = 0, ids = ids, have_units = type(cu) == 'table' and type(cu.ids) == 'table',
-          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0, s0n = 0, s0 = {}, xsn = 0, xs = {}, orn = 0, orph = {}},
+          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0, s0n = 0, s0 = {}, xsn = 0, xs = {}, xset = {}, orn = 0, orph = {}},
           moody = {}, mood_list = {},
           mood_cls = {},
           claimed = {}, member = {}, res_ids = res_ids, res_hold = {}, res_floor = {}, rc = R.conf(K.cfg.baseline),
@@ -4879,6 +4904,7 @@ function M.xs_step(K, c, r, p, now)
   local ids = {}
   st.xs_set = {}
   for _, e in ipairs(a.xs) do ids[#ids + 1] = e.id; st.xs_set[e.id] = true end
+  for id in pairs(a.xset or {}) do st.xs_set[id] = true end                  -- BUG-754: the set is all of them
   table.sort(ids)
   local T = K.now()
   if #ids > 0 then

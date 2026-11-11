@@ -3283,11 +3283,14 @@ M.SUPPLY_FIX = {
   no_table = {'a table in the zone (the hospital template places one; build it in the zone otherwise)',
               'dfllm cmd bp.place \'{"tpl":"hospital","site":"S1","p":{"furnish":1}}\''},
   no_traction = {'a traction bench in the zone (bone setting)', nil},
+  -- BUG-755 (Run 16b i2 Whirledrampart y437: 10 patients, 4 beds): `hospital furnish=2` = one bed inside the room that stands
+  no_bed = {'beds in the zone (more patients than beds)',
+            'dfllm cmd bp.place \'{"tpl":"hospital","site":"S1","p":{"furnish":2}}\''},
   no_splints = {'splints', 'dfllm cmd order.add \'{"job":"ConstructSplint","amount":4}\''},
   no_thread = {'thread', 'dfllm cmd trade.want \'{"add":["thread"]}\''},
   no_cloth = {'cloth', 'dfllm cmd trade.want \'{"add":["cloth"]}\''},
 }
-M.SUPPLY_ORDER = {'no_table', 'no_traction', 'no_splints', 'no_thread', 'no_cloth'}
+M.SUPPLY_ORDER = {'no_bed', 'no_table', 'no_traction', 'no_splints', 'no_thread', 'no_cloth'}
 function M.supply_ask(K, c, p, a)
   local have = {}
   for _, g in ipairs(a.gaps or {}) do have[g.tok] = true end

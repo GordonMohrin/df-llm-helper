@@ -2747,6 +2747,8 @@ local function apply_squad(K, k, force)
   if ov then
     if ov.P == st.posture and ov.src == src then pos = ov.pos else rt.over[k] = nil end
   end
+  local rc = rt.rc and rt.rc[k]                       -- BUG-757: a squad idling outside the core in quiet PEACE is called back
+  if rc and rc.pos and K.mode() == 'PEACE' and not (rt.sd and rt.sd[k]) then pos, src = rc.pos, 'recall' end
   local down = pos ~= nil and standdown(K, k)                   -- BUG-510: unequipped soldiers are not stationed
   rt.sd = rt.sd or {}
   rt.sd[k] = down or nil
@@ -2800,6 +2802,76 @@ local function apply_squad(K, k, force)
   end
   rt.station[k] = pos
   return ok
+end
+
+-- BUG-757 (Run 16b i2 Whirledrampart y440: squad A stood outside on walk group 331, so the sortie against the predator in the fort was
+-- 'target unreachable', and nothing called the squads back in PEACE): a squad that is not on a sortie, a kill order, a siege hold, a feed
+-- release or a stand-down and has members outside Kern+ (not in the refuge) for RECALL.after ticks, in quiet PEACE, gets a station order at
+-- the nearest Kern+ floor on its walk group (kern_floor; apply_squad uses rc.pos in place of the posture's station). Not when the posture's
+-- own station lies outside Kern+ (a deliberate post), and not before the squad has a station routine. Ends when every member is inside
+-- (or the mode leaves quiet PEACE): apply_squad's drift puts the posture station back. No Kern+ floor on the squad's group (a raised bridge
+-- or a wall between): kern.log says so once per RECALL.every, the squad stays as it is
+M.RECALL = {after = 2400, every = 3600}
+function M.recall_pass(K, now, mode)
+  local rc = rt.rc or {}
+  rt.rc = rc
+  local quiet = mode == 'PEACE'
+  if quiet then
+    local ok, why = K.call('reflex', 'holding')
+    if ok and type(why) == 'string' and why ~= '' then quiet = false end
+  end
+  local home = quiet and core_home(K) or nil
+  if not (home and home.kern) then
+    for k in pairs(rc) do rc[k] = nil end
+    return
+  end
+  local man = K.manifest()
+  for _, sp in ipairs(M.SQUADS) do
+    local k = sp.key
+    local e = st.sq[k]
+    local s = e and squad(e.id)
+    local cur = rt.order[k]
+    local busy = rt.held[k] or (rt.so[k] ~= nil) or (rt.feed and rt.feed[k] and rt.feed[k].on) or (rt.sd and rt.sd[k])
+                 or (type(cur) == 'string' and (cur:sub(1, 5) == 'kill:' or cur:sub(1, 7) == 'sortie:'))
+    local post = rt.station[k]
+    local intended = post ~= nil and not (rc[k] and rc[k].pos and post == rc[k].pos) and not on_burrow(home.kern, post.x, post.y, post.z)
+    if not s or busy or intended then
+      rc[k] = nil
+    else
+      local out, inside = 0, nil
+      for _, m in ipairs(members(s)) do
+        local okp, x, y, z = pcall(dfhack.units.getPosition, m.unit)
+        local w = core_where(home, m.unit)
+        if w == 'outside' then out = out + 1
+        elseif w == nil and not inside and okp and int(x) and int(y) and int(z) then inside = {x = int(x), y = int(y), z = int(z)} end
+      end
+      local r = rc[k]
+      if out == 0 then
+        rc[k] = nil
+        if r and r.pos then K.log('info', 'military: squad %s is back in Kern+: the posture station is ordered again', k) end
+      else
+        if not r then r = {t0 = now}; rc[k] = r end
+        if not r.pos and now - r.t0 >= M.RECALL.after and (not r.nt or now - r.nt >= M.RECALL.every) then
+          local clear = clearance(K)
+          local ref = inside
+          if not ref then
+            local box = M.kern_box(K, man)
+            ref = box and geom.pos((box[1] + box[4]) // 2, (box[2] + box[5]) // 2, (box[3] + box[6]) // 2) or nil
+          end
+          local q = ref and M.kern_floor(K, man, SL.bridges(man), ref, clear, {group = M.home_group(K, s) or nil}) or nil
+          if q then
+            r.pos, r.nt = q, nil
+            K.log('warn', 'military: squad %s: %d of its soldiers stand outside Kern+ for %d ticks in quiet PEACE: called back to %s',
+                  k, out, now - r.t0, pstr(q))
+          else
+            r.nt = now
+            K.log('warn', 'military: squad %s: %d of its soldiers stand outside Kern+ and no Kern+ floor lies on their walk group '
+                  .. '(a raised bridge, a wall or a closed door between): no recall order', k, out)
+          end
+        end
+      end
+    end
+  end
 end
 
 -- public (CONTRACTS §7): idempotent; a new posture re-issues orders and ends sorties.
@@ -5028,6 +5100,8 @@ function M.step(K, budget, ctx)
   if st.posture == nil then st.posture, st.pt, dirty = 'TRAIN', now, true end
   local okf, errf = pcall(M.feed_pass, K, now, mode)                   -- BUG-451
   if not okf then K.log('warn', 'military feed: %s', tostring(errf)) end
+  local okr, errr = pcall(M.recall_pass, K, now, mode)                 -- BUG-757
+  if not okr then K.log('warn', 'military recall: %s', tostring(errr)) end
   for _, sp in ipairs(M.SQUADS) do apply_squad(K, sp.key, false) end   -- drift only
   release_tools(K)                                                     -- BUG-023: after the specs settled
   local okv, errv = pcall(M.vacant_sweep, K)                           -- BUG-688: no specs (no gear claims) on vacant positions

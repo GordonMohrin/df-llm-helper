@@ -3404,6 +3404,7 @@ def gone_shops(save_dir: Path, doc: dict, prev: dict | None) -> list[str]:
 
 
 HOSPITAL_FURNISH_MAX = 2     # BUG-581: furnish projects (one table each) drafted for one fort, done or not
+HOSPITAL_BED_OPEN, HOSPITAL_BED_MAX = 3, 8     # BUG-755: bed projects (furnish=2) open at once / drafted for one fort, done or not
 # BUG-581: the hospital gaps the plan cannot close, with what closes them (reported in the notes, not drafted)
 HOSPITAL_REST = {"no_diag": "the Diagnose labor", "no_surgery": "the Surgery labor", "no_bone": "the Bone setting labor",
                  "no_suture": "the Suturing labor and thread", "no_dress": "the Dressing wounds labor and cloth",
@@ -3439,15 +3440,37 @@ def hospital_table(save_dir: Path, doc: dict, prev: dict | None, fort: dict | No
         done = done_projects(save_dir)
         for pth in bp_files(save_dir):
             d = files.read_json(pth)
-            if isinstance(d, dict) and d.get("tpl") == HOSPITAL and (d.get("params") or {}).get("furnish"):
+            if isinstance(d, dict) and d.get("tpl") == HOSPITAL and (d.get("params") or {}).get("furnish") == 1:
                 furn += 1
                 openp = openp or pth.stem not in done
-        drafted = any(b["tpl"] == HOSPITAL and (b.get("p") or {}).get("furnish") for se in doc["seasons"] for b in se["build"])
+        drafted = any(b["tpl"] == HOSPITAL and (b.get("p") or {}).get("furnish") == 1 for se in doc["seasons"] for b in se["build"])
         # a hospital build of the draft that is not a furnish has its table (BUG-537), so does a hospital project not done yet
         built_new = any(b["tpl"] == HOSPITAL and not (b.get("p") or {}).get("furnish") for _, _, b in new_builds(doc, prev))
         if stands and not (drafted or built_new or openp or furn >= HOSPITAL_FURNISH_MAX):
             doc["seasons"][0]["build"].append({"tpl": HOSPITAL, "site": "S1", "p": {"furnish": 1}})
             out.append("BUG-581: the hospital audit says no_table: hospital furnish=1 (one table in the hospital room) drafted in seasons[0]")
+    if "no_bed" in gaps:                                # BUG-755: more patients than beds in the hospital zone: a bed per project
+        try:
+            man = _cmd.fort_manifest(save_dir)
+        except Exception:                               # noqa: BLE001 - no bp package or manifest: not judged
+            man = {}
+        stands = any(isinstance(r, dict) and r.get("tpl") == HOSPITAL for r in (man or {}).get("rooms") or [])
+        openb = 0
+        total = 0
+        done = done_projects(save_dir)
+        for pth in bp_files(save_dir):
+            d = files.read_json(pth)
+            if isinstance(d, dict) and d.get("tpl") == HOSPITAL and (d.get("params") or {}).get("furnish") == 2:
+                total += 1
+                openb += pth.stem not in done
+        drafted = sum(1 for se in doc["seasons"] for b in se["build"] if b["tpl"] == HOSPITAL and (b.get("p") or {}).get("furnish") == 2)
+        room = HOSPITAL_BED_OPEN - openb - drafted
+        if stands and room > 0 and total + drafted < HOSPITAL_BED_MAX:
+            n = min(room, HOSPITAL_BED_MAX - total - drafted)
+            for _ in range(n):
+                doc["seasons"][0]["build"].append({"tpl": HOSPITAL, "site": "S1", "p": {"furnish": 2}})
+            out.append(f"BUG-755: the hospital audit says no_bed (more patients than beds): hospital furnish=2 x{n} (one bed each, inside the "
+                       "hospital room) drafted in seasons[0]")
     rest = [f"{g} ({HOSPITAL_REST[g]})" for g in gaps if g in HOSPITAL_REST]
     if rest:
         out.append("BUG-581: hospital gaps the plan cannot build: " + "; ".join(rest))
