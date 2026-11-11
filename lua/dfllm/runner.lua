@@ -6402,6 +6402,17 @@ end
 function Q.parts(K, P, d)
   local st = d and d.stages[P.stage + 1]
   local out = {}
+  -- BUG-749 (Run 16a i1 Basementflew: the explore and tombs digs 'stalled 30 d at dig 6%: set aside' with nothing after it): a dig stage names its dig
+  -- jobs (open, taken, suspended, raised) and the Miners detail (idle or at what job) and the tool answer
+  if st and st.mode == 'dig' then
+    local okb, tiles = pcall(stage_tiles, P.id, d, P.stage)
+    local bb = okb and type(tiles) == 'table' and tiles.bbox or nil
+    if bb and (tiles.n or 0) > 0 then
+      local ok, dw = K.call('economy', 'dig_wait', bb)
+      if ok and type(dw) == 'table' and type(dw.text) == 'string' then out[1] = trunc('dig: ' .. dw.text, 140) end
+    end
+    return out
+  end
   if not (st and st.mode == 'build') then return out end
   local looked = 0
   for _, ch in ipairs(st.chunks) do
@@ -6870,12 +6881,16 @@ function Q.idle_scan(K, c, t)
       end
       S.rt.ip[P.id] = {t = t, ps = ps, si = P.stage, why = why}
       dirty()
-      local msg = string.format('%s (%s) %s %d d at %s %d%%%s: set aside, no runner slot (the others go first); %s', P.id,
+      -- BUG-748 (Run 16b i2 Whirledrampart: 'set aside, no runner slot' beside runner slots 4-6 and 8 free idle adults): the set-aside is the runner's
+      -- answer to a project that does not move; it says nothing about slots. The free idle adults are named: the wait is then in DF's job list
+      local okf, free = K.call('economy', 'idle_free')
+      free = okf and math.type(free) == 'integer' and free > 0 and free or nil
+      local msg = string.format('%s (%s) %s %d d at %s %d%%%s: set aside for want of progress, not of slots%s; %s', P.id,
                                 P.tpl, why, days, label, int(P.pct) or 0, wait and ('; waits: ' .. wait) or '',
-                                Q.idle_cmds(P.id))
+                                free and string.format(' (%d free idle adults)', free) or '', Q.idle_cmds(P.id))
       K.log('warn', '%s', msg)
       K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200), {proj = P.id, tpl = P.tpl, stage = label, why = why,
-                                                       ticks = t - ps, idle = days, parts = wait})
+                                                       ticks = t - ps, idle = days, parts = wait, free = free})
     end
   end
 end
