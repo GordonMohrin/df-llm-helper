@@ -5,6 +5,7 @@ field is `selected` now), writing it moves nothing, so every automatic restart e
 only wrote "no dfllm fort loaded". Here: the stock load-save first, the title-screen run (tools/embark/embark.lua, mode
 load) when it fails, a loud and cadenced `needs_click` alarm when nothing loads, and the DFHack version watch.
 Fake OS and fake DFHack of tests/test_supervise.py; the Lua side is tests/lua/test_loadsave*.lua."""
+import os
 import json
 import re
 
@@ -361,7 +362,7 @@ def test_check_version_on_demand(W, capsys):
 
 def test_check_version_does_not_race_a_running_pass(W, capsys):
     lock = W.env.runtime / "supervise.lock"
-    put(lock, f"1 {int(W.clock())}\n", W.clock())                       # a pass or a restart chain is running
+    put(lock, f"{os.getpid()} {int(W.clock())}\n", W.clock())                       # a pass or a restart chain is running
     assert sv.main(["--check-version"], env=W.env) == 1
     assert "another run holds supervise.lock" in capsys.readouterr().out
     assert W.os.calls == [] and lock.exists()
