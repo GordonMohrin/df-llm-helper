@@ -1975,12 +1975,12 @@ class AuditError(RuntimeError):
 
 
 def trap_note(info: dict, args: dict) -> str:
-    """' (41 armed in the trap hall; 0 on the cheapest route now, a bypass skips them; ...)' from bp.topo.audit's
+    """' (41 armed traps, 41 of them in the trap hall; 0 on the cheapest route now, a bypass skips them; ...)' from bp.topo.audit's
     info (Run 9/10: `traps 0` beside an armed hall needs its reason in plain sight); '' without info."""
     t = info.get("traps") if isinstance(info, dict) else None
     if not isinstance(t, dict):
         return ""
-    out = [f"{t.get('hall', 0)} of {t.get('armed', 0)} armed traps in the trap hall"]
+    out = [f"{t.get('armed', 0)} armed traps, {t.get('hall', 0)} of them in the trap hall"]       # BUG-764: not 'hall of armed' (read as armed of listed)
     if t.get("walls"):
         out.append(f"counted with the {t['walls']} bypass wall(s) the findings name; the bypass itself meets "
                    f"{t.get('any_route', 0)}")

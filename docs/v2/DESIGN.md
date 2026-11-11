@@ -219,7 +219,7 @@ Gameplay modules run on `cur_year_tick` deltas, which stay correct under timestr
   findings name stood (up to 4 routes closed one after the other; if that does not close them all it stays the plain
   minimum, 0); without a bypass it is the plain minimum over every route, so the R2 rule (≥ 30 on every attacker path,
   read only while R1 is green) is unchanged. A way into the hall's trap-free end (no bypass, R1 green) still reads 0:
-  `dfllm audit` prints `traps: (41 of 41 armed traps in the trap hall; the counted route enters the hall at x,y,z)`,
+  `dfllm audit` prints `traps: (41 armed traps, 41 of them in the trap hall; the counted route enters the hall at x,y,z)`,
   follow logs the same; status adds `(counted as if the bypass were walled)` / `(a bypass skips the hall)` at R0 and
   `(dfllm audit: where the cheapest route enters the hall)` while `traps<30` blocks R2.
 - **Siege readiness gate (FR-65):** while R0 fails in PEACE, readiness emits SIEGE_UNREADY (A): the blockers, the ways in without a door or bridge from seal's last entrance check (`x,y,z kind`), the last audit's trap count and its own fail texts; first 2 days after a load at the earliest, then after a game month and 30 real minutes (10 when a blocker or an open way in is new; `util/cadence`). `status` never shows a plain PEACE then: line 1 reads `PEACE UNREADY`, line 2 `SIEGE UNREADY (R0): … | 2 ways in without door or bridge: … | traps 0 | next: …`.

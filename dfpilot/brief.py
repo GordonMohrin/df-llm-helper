@@ -320,8 +320,11 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     why = "" if "bypass" not in fails else " (counted as if the bypass were walled)" if t else " (a bypass skips the hall)"
     tr = ctx.s.get("traps")
     built = tr.get("n") if isinstance(tr, dict) and isinstance(tr.get("n"), int) else 0
+    listed = tr.get("m") if isinstance(tr, dict) and isinstance(tr.get("m"), int) and tr.get("m") >= built else built
     if "bypass" in fails and not t and built > 0:      # BUG-516: 'traps 0' beside 63 armed traps reads as 'no hall'
-        why = f" of {built} armed (a bypass skips the hall)"
+        # BUG-764 (Run 16a i1 Basementflew y525: brief 'traps 3/3', status 'traps 0 of 3 armed'): the first number is the cheapest route's,
+        # the second the armed count of the traps line ('traps n/m'): say which is which
+        why = f" on the cheapest route, {built} of {listed} armed in all (a bypass skips the hall)"
     out.append(f"traps {t}{why}" if a.get("age", -1) >= 0 else "traps ? (no audit)")
     route = r.get("route") if isinstance(r.get("route"), str) else ""
     if route:                                  # Run 10: the bypass stood for months; name it and its wall

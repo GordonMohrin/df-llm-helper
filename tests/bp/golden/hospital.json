@@ -49,6 +49,8 @@
    "beds": 4,
    "bench": 1,
    "burrow": "Kern+",
+   "carry": 0,
+   "compact": 0,
    "furnish": 0,
    "surface": 0
   },
