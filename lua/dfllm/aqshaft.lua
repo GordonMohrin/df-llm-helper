@@ -155,7 +155,7 @@ local function ring_stop(X, P, d, r, z, L, why, pos, days, detail, miss)
   local plug = X.plug(P, d, pos, 'ring_wall')
   local what = why == 'ring_refused' and 'refused by quickfort' or ('unbuilt for ' .. tostring(days or 0) .. ' d')
   local cause = nostone and 'NO STONE: nothing the builders accept (hard stone boulders, blocks or logs): dig hard stone or trade for stone / blocks'
-                or 'the walls need hard stone or blocks and a mason'
+                or 'the walls need stone, blocks or logs (buildingplan) and a builder'
   local msg = string.format('%s: z%d ring wall %s, no water (flow 0/7): shaft stopped and plugged (%s), NOT a heavy aquifer: %s%s', P.id, z,
                             what, plug or 'see CAVERN_PLUG', cause, detail and (' [' .. detail .. ']') or '')
   X.emit('AQ_RING_STOP', 'A', msg, {proj = P.id, z = z, flow = 0, why = why, pos = pos, plug = plug, days = days, miss = miss,
@@ -300,11 +300,17 @@ local function plug_missing(X, n, P)
   if type(X.wall_stock) == 'function' and n then
     if type(X.need) == 'function' and P then X.need(n, 'aqshaft ' .. tostring(P.id)) end
     local s = X.wall_stock()
+    -- BUG-736: ore / flux boulders are the last-resort wall material (no stone, no blocks, no logs): the wall is possible, the text says what it is built of
+    if type(s) == 'table' and (tonumber(s.have) or 0) < n and (tonumber(s.have) or 0) + (tonumber(s.alt) or 0) >= n then
+      return nil, string.format('%d ore / flux boulders are the wall material (no stone, blocks or logs)', tonumber(s.alt) or 0)
+    end
     if type(s) == 'table' and (tonumber(s.have) or 0) < n then
       -- BUG-631: the count the fort can reach (blocks, free boulders, logs above the wood floor), not a bare 'no boulders'
-      return 'no_boulders', string.format('%d of %d walls: %d blocks, %d free boulders, %d logs reachable%s',
+      local held = ((tonumber(s.busy) or 0) > 0 or (tonumber(s.far) or 0) > 0)
+                   and string.format(' (%d blocks held by jobs, %d on another walk group)', tonumber(s.busy) or 0, tonumber(s.far) or 0) or ''
+      return 'no_boulders', string.format('%d of %d walls: %d blocks, %d free boulders, %d logs reachable%s%s',
                                           tonumber(s.have) or 0, n, tonumber(s.blocks) or 0, tonumber(s.rock) or 0,
-                                          tonumber(s.logs) or 0,
+                                          tonumber(s.logs) or 0, held,
                                           s.none and '; the fort has no stone a job may take (hard stone: dig or trade)' or '')
     end
   end
@@ -689,6 +695,12 @@ function A.ring_step(X, P, d, r, z, L)
             heavy(X, P, d, r, z, L, f, 'flow', {pc[1], pc[2], z})
           elseif waited >= A.CFG.ring_wait then
             local miss, detail = plug_missing(X, 1, P)
+            -- BUG-736 (Run 16c i3 Doorwings: the wall at z140 stood unbuilt 31-32 d with 385 logs, stone 0): the wall's material is switched to the
+            -- one the fort has (logs, else ore / flux boulders) and the stall / stop text names it
+            if miss == nil and type(X.wall_alt) == 'function' then
+              local alt = X.wall_alt(P)
+              if alt then detail = alt end
+            end
             -- BUG-677 (Wallfree: four shafts each stopped after the wall stood unbuilt for 2 d, the fort had only claystone): a wall that waits
             -- for MATERIAL is given ring_stop_mat; one the builders merely have not taken (material there) ring_stop
             -- the verifier: material that arrives late (trade, hard-stone dig) restarts the clock: pc[7] is the last tick the wall lacked material

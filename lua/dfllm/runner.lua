@@ -2495,6 +2495,10 @@ function Q.aqx(K)
       if not ok then return nil, 'no economy' end
       return via, why
     end,
+    wall_alt = function(P)                     -- BUG-736: the wall's material when no stone is free: logs (buildingplan boulders off), else ore / flux
+      local ok, t = K.call('economy', 'wall_alt')
+      return ok and type(t) == 'string' and t or nil
+    end,
     wall_stock = function()                    -- BUG-443: the COUNT of free blocks, boulders and logs for walls (nil: unknown)
       local ok, st = K.call('economy', 'wall_stock')
       return ok and type(st) == 'table' and st or nil
