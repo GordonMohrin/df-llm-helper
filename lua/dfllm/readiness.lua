@@ -692,6 +692,20 @@ local function evaluate(K, why)
     end
     if #lw > 0 then rt.lw = cut(table.concat(lw, ' | '), 200) end
   end
+  -- BUG-712: a bridge with no linked lever at all (R0 `levers:<B>`): in PEACE the question names what to build or wait for
+  rt.llg = nil
+  if K.mode() == 'PEACE' then
+    local ll = {}
+    for _, f in ipairs(rt.lev.fails) do
+      local b = f:match('^levers:(.+)$')
+      if b and not lost[b] then
+        local ok, e = K.call('gate', 'lever_states')
+        local x = ok and type(e) == 'table' and e[b] or nil
+        if type(x) == 'table' and (int(x.linked) or 0) < 1 then ll[#ll + 1] = b end
+      end
+    end
+    rt.llg = #ll > 0 and ll or nil
+  end
   -- BUG-478: a bridge with no linked lever inside the refuge burrow (PEACE only: a fight changes the lists)
   rt.rlg = nil
   if man.refuge and K.mode() == 'PEACE' then
@@ -1256,6 +1270,7 @@ function M.init(K)
   st.pt, st.phold = int(p.pt), int(p.phold)
   st.dt, st.dhold = int(p.dt), int(p.dhold)                   -- BUG-481: the trap shortfall since, the pop it holds
   st.rlq = int(p.rlq)                                         -- BUG-478: the last refuge_levers question
+  st.llq = int(p.llq)                                         -- BUG-712: the last bridge_levers question
   st.pw = type(p.pw) == 'string' and p.pw:sub(1, 60) or nil
   st.nt, st.wn = int(p.nt), int(p.wn)                         -- review fix merge16: the newest opening, ways in counted
   for name, v in pairs(type(p.lvok) == 'table' and p.lvok or {}) do
@@ -1291,8 +1306,8 @@ end
 -- retrofit again every 30 days): what the refuge levers of the bridges in `names` wait for, from gate.refuge_levers: 'none' (no lever
 -- stands there: the retrofit is the answer), 'unbuilt' (placed, a mechanism is missing), 'unlinked' (built, a link takes 2 free
 -- mechanisms), 'link_job' / 'link_stale' (a link job is queued, since LINK_STALE ticks); the summed counts
-local function reflever_cause(K, names)
-  local ok, rl = K.call('gate', 'refuge_levers')
+local function reflever_cause(K, names, src)
+  local ok, rl = K.call('gate', src or 'refuge_levers')
   rl = ok and type(rl) == 'table' and rl or {}
   local t = {site = 0, built = 0, job = 0, none = 0, age = 0, stale = false}
   for _, b in ipairs(names) do
@@ -1374,6 +1389,62 @@ local function ask_reflevers(K, now)
           why = why})
 end
 
+-- BUG-712 (Run 16b i2 Whirledrampart y430: B2 and O1 without a linked lever for 1672 days, GATE_FAIL 'no_lever' at every siege, nobody
+-- asked): DECISION_NEEDED bridge_levers (A), once per DEF.ask_days game days in PEACE while a manifest bridge has no linked lever at all
+-- (R0 `levers:<B>`): what its levers wait for (gate.lever_states: 'none' no lever stands: `bp.place fortcore stage=3 retrofit=3` builds the
+-- main and the refuge levers again; 'unbuilt' / 'unlinked' / 'link_job' / 'link_stale' as in the refuge question) and, when the fort
+-- cannot make a mechanism, why. A bridge in this list is no bridge gate can raise: SIEGE / BREACH flicker (bridge_stuck) and every
+-- raise ends as GATE_FAIL no_lever.
+local function ask_leverless(K, now)
+  if not rt.llg or K.mode() ~= 'PEACE' or now - rt.boot < M.UNREADY_SETTLE then return end
+  if st.llq and now - st.llq < M.DEF.ask_days * 1200 then return end
+  st.llq, dirty = now, true
+  local names = table.concat(rt.llg, ',')
+  local cause, t = reflever_cause(K, rt.llg, 'lever_states')
+  if cause ~= 'none' and st.llc == cause and st.llt and now - st.llt < M.DEF.stuck_days * 1200 then return end
+  st.llc, st.llt = cause, now
+  local okm, ms = K.call('economy', 'mech_state')
+  local free, route = 0, nil
+  if okm and type(ms) == 'table' then free, route = int(ms.free) or 0, type(ms.route) == 'string' and ms.route or nil
+  else
+    local okf, fr = K.call('economy', 'mech_free')
+    free = okf and int(fr) or 0
+  end
+  local why
+  if okm and type(ms) == 'table' and (free or 0) < 2 then
+    if ms.hard then why = 'no mechanisms: DF refuses the rock jobs (no non-economic hard stone in this fort)'
+    elseif ms.route == 'no stone' then why = 'no mechanisms: no usable stone'
+    elseif ms.route == 'no Mechanics' then why = 'no mechanisms: no Mechanics workshop' end
+  end
+  local pl = #rt.llg == 1
+  local q, cmd
+  if cause == 'none' then
+    q = string.format('bridge%s %s: no lever stands (%d listed): gate cannot raise or lower %s (GATE_FAIL no_lever, SIEGE flickers); ' ..
+                      'build the levers again, each needs a mechanism and a link takes 2', pl and '' or 's', names, t.none, pl and 'it' or 'them')
+    cmd = 'bp.place tpl=fortcore site=same stage=3 retrofit=3'
+  elseif cause == 'unbuilt' then
+    q = string.format('bridge%s %s: %d lever%s placed, not built: each waits for a mechanism (%d free%s); no linked lever, gate cannot move %s',
+                      pl and '' or 's', names, t.site, t.site == 1 and '' or 's', free, route and (', ' .. route) or '', pl and 'it' or 'them')
+  elseif cause == 'unlinked' then
+    q = string.format('bridge%s %s: the levers stand but are not linked: a link takes 2 free mechanisms, %d free%s%s; gate links them as ' ..
+                      'soon as there are', pl and '' or 's', names, free, route and (', ' .. route) or '',
+                      t.why and (' (last refusal: ' .. t.why .. ')') or '')
+  else
+    q = string.format('bridge%s %s: a link job has waited %d days: it needs a dwarf with the Mechanics labor and a Mechanics workshop%s',
+                      pl and '' or 's', names, t.age // 1200, cause == 'link_stale' and ' (stale)' or '')
+    if cause == 'link_stale' then cmd = free < 2 and [[dfllm cmd trade.want '{"add":["mechanism","stone"]}']] or [[dfllm cmd inspect '{"what":"workload"}']] end
+  end
+  if why and cause ~= 'none' then
+    q = cut(why .. ': ' .. q, 200)
+    cmd = why:find('Mechanics workshop', 1, true) and [[dfllm cmd inspect '{"what":"workload"}']]
+          or [[dfllm cmd trade.want '{"add":["mechanism","stone"]}']]
+  elseif why then
+    q = cut(why .. ': ' .. q, 200)
+  end
+  K.emit('DECISION_NEEDED', 'A', cut(cmd and (q .. ': ' .. cmd) or q, 200),
+         {id = 'bridge_levers', q = cut(q, 200), bridge = rt.llg[1], cmds = cmd and {cmd} or nil, cause = cause, n = free, why = why})
+end
+
 function M.step(K, budget, ctx)
   local now = K.now().tick
   if st.audit_due == 1 or not st.audit_req or now - st.audit_req >= M.AUDIT_EVERY then
@@ -1381,6 +1452,7 @@ function M.step(K, budget, ctx)
   end
   refresh(K, 'check')
   ask_reflevers(K, now)
+  ask_leverless(K, now)
   save(K)
 end
 
@@ -1415,6 +1487,7 @@ function M.state(K)
   if rt.lw then r.lw = rt.lw end                              -- BUG-634: what the levers of `levers:<B>` wait for
   if rt.rp then r.rp = rt.rp end                              -- BUG-653: the refuge has no pre-plug against building destroyers
   if rt.rlg then r.rg = rt.rlg end                            -- BUG-478: the bridges without a refuge lever
+  if rt.llg then r.ll = rt.llg end                            -- BUG-712: the bridges without any linked lever (R0 `levers:`)
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
 end
 

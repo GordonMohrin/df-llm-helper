@@ -1082,7 +1082,7 @@ STATE = Obj(
                            "mws": Str(maxbytes=200),
                            # BUG-481: ts = the trap shortfall R0 `traps_short` names, tt = the trap target for the siege the fort
                            # expects; BUG-478: rg = the bridges with no linked lever inside the refuge (no R0 blocker)
-                           "ts": Str(maxbytes=200), "tt": NAT, "rg": Arr(Str(maxbytes=24), hi=8),
+                           "ts": Str(maxbytes=200), "tt": NAT, "rg": Arr(Str(maxbytes=24), hi=8), "ll": Arr(Str(maxbytes=24), hi=8),
                            # BUG-601: as = the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                            "as": Str(maxbytes=120),
                            # BUG-634: lw = what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)

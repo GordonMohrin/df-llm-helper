@@ -303,6 +303,10 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     lw = r.get("lw") if isinstance(r.get("lw"), str) else ""
     if lw and any(f.startswith("levers:") for f in fails):     # BUG-634: what the levers of `levers:<B>` wait for
         out.append(f"levers: {lw}")
+    ll = r.get("ll") if isinstance(r.get("ll"), list) else []
+    if ll:                                     # BUG-712: bridges no lever of which is linked: gate cannot raise or lower them
+        out.append(f"NO LINKED LEVER on {','.join(str(x) for x in ll)}: gate cannot move them (GATE_FAIL no_lever); "
+                   "DECISION bridge_levers names the cause and the command")
     off = files.auto_seal_off(ctx.dir, n if isinstance(n, int) else 0) if getattr(ctx, "dir", None) else None
                                                # DECISIONS 2: follow --no-auto places nothing
     if off:

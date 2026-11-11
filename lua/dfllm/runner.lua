@@ -524,7 +524,17 @@ function M.merge_manifest(dst, frag)
     if k == 'v' then -- keep
     elseif MAPS[k] and type(v) == 'table' then
       dst[k] = obj(dst[k])
-      for kk, vv in pairs(v) do dst[k][kk] = copy(vv) end
+      for kk, vv in pairs(v) do
+        local old, new = dst[k][kk], copy(vv)
+        -- BUG-713 (Run 16b i2 Whirledrampart y430: after `bp.place fortcore stage=3 retrofit=2` the levers of B2 / O1 that stood read 'no
+        -- lever at ...'): the fragment of a bridge replaces its entry; the levers of the entry it replaces stay in the list (the same
+        -- bridge, same footprint), so a retrofit never drops a lever gate knows (and its link) from the manifest
+        if k == 'bridges' and type(old) == 'table' and type(new) == 'table' and type(old.levers) == 'table'
+           and type(old.fp) == 'table' and key_of(old.fp) == key_of(new.fp) then
+          new.levers = append_unique(old.levers, new.levers, 12)
+        end
+        dst[k][kk] = new
+      end
     elseif LISTS[k] and type(v) == 'table' then
       dst[k] = obj(dst[k])
       for kk, list in pairs(v) do dst[k][kk] = append_unique(dst[k][kk], list, LISTS[k]) end

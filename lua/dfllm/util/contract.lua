@@ -486,6 +486,7 @@ C.STATE_SPEC = obj({
                mws = str(200),             -- BUG-117: the moodable workshops R0 `mood_ws` names, with the bp.place command
                ts = str(200), tt = NAT,    -- BUG-481: the trap shortfall R0 `traps_short` names, the trap target for the expected siege
                rg = arr(str(24), 0, 8),    -- BUG-478: the bridges with no linked lever inside the refuge (no R0 blocker)
+               ll = arr(str(24), 0, 8),    -- BUG-712: the bridges with no linked lever at all (R0 `levers:<B>`)
                as = str(120),              -- BUG-601: the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                lw = str(200),              -- BUG-634: what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
                rp = str(120)}),            -- BUG-653: the refuge has no pre-plug (no R0 blocker): not trusted against building destroyers

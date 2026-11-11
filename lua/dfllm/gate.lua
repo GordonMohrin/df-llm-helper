@@ -2478,6 +2478,31 @@ function M.refuge_levers(K)
   return out
 end
 
+-- BUG-712 (Run 16b i2 Whirledrampart y430: B2 and O1 had no linked lever for 1672 days, GATE_FAIL 'no_lever' at every siege, SIEGE /
+-- BREACH flickering 'bridge_stuck'; the refuge_levers question named only B1, a bridge with a linked lever but none in the refuge, and
+-- refuge_gaps leaves a bridge with no linked lever at all to readiness' `levers:` blocker, which asked nothing): per manifest bridge ALL its
+-- manifest levers by state as of the last pass {[bridge] = {n, none, site, built, job, linked, age, stale, why?}}, whether inside the
+-- refuge or not (same fields as refuge_levers; n 0: the manifest lists no lever for it). A destroyed bridge (rebuilt later) is left out.
+function M.lever_states(K)
+  local out = {}
+  local now = K.now().tick
+  local man = K.manifest()
+  for _, name in ipairs(bridge_names(man)) do
+    local spec = man.bridges[name]
+    local rep = rt[name] and rt[name].lr
+    if rep and not st.gone[name] and valid_spec(spec) then
+      local e = {n = 0, none = 0, site = 0, built = 0, job = 0, linked = 0, age = 0, why = rt[name].link_why}
+      for _, l in ipairs(rep.list) do
+        e.n, e[l.st] = e.n + 1, e[l.st] + 1
+        if l.st ~= 'linked' then e.age = math.max(e.age, now - l.t) end
+      end
+      e.stale = e.job > 0 and e.age >= M.LINK_STALE
+      out[name] = e
+    end
+  end
+  return out
+end
+
 -- BUG-634 (Run 16d i4 Trumpetrealms y436-y437: R0 `levers:O1` for years beside a bridge that was rebuilt and worked, nothing said what its
 -- levers wait for): the reason a manifest bridge has fewer than two linked levers, one short text from the last read of its manifest levers
 -- (lever_report): per lever its state ('none' no lever there, 'site' placed not built, 'built' stands and is not linked to this bridge,
