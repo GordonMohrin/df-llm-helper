@@ -143,7 +143,7 @@ function M.assess(K)
   local h = K.census.h
   if type(h) ~= 'table' then return nil end
   local now = K.now().tick
-  local a = {vis = h.vis or 0, inv = h.inv or 0, great = h.great or 0, undead = h.undead or 0,
+  local a = {vis = h.vis or 0, vpp = h.vpp or 0, inv = h.inv or 0, great = h.great or 0, undead = h.undead or 0,
              inside = h.inside or 0, near_o1 = h.near_o1 or -1, near_cit = h.near_cit or -1,
              near_bridge = h.near_bridge or {}, tick = h.tick or 0,
              -- intake waves (Gordon 2026-10-16, sense): hostiles in the intake area / past B1, dangerous ones

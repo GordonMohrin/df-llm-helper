@@ -288,6 +288,10 @@ local function hscan_begin(K, now, armed)
            count = now.tick - (st.count_tick or -M.COUNT_EVERY) >= M.COUNT_EVERY, animals = {}}
   for _, b in ipairs(g.bridges) do st.hs.near_bridge[b.name] = -1 end
   st.hs.K = K                                   -- FR-33 entrances: fetched on the first predator candidate
+  -- BUG-702: the plant eaters reflex cleared (BUG-672, 3 quiet days, or the operator): no bridge, burrow or water event counts them
+  local okpp, pp = K.call('reflex', 'pv_plant')
+  st.hs.pvp = okpp and type(pp) == 'table' and next(pp) ~= nil and pp or nil
+  st.hs.vpp = 0
   local okw, wb = K.call('gate', 'watch')       -- BUG-027: friendly non-citizens near the footprints with work
   st.hs.watch = okw and type(wb) == 'table' and #wb > 0 and wb or nil
   st.hs.friends, st.hs.fseen = {}, {}
@@ -520,7 +524,7 @@ end
 -- and stands in or beside water is a WATER BEAST: census.w, the event WATER_PREDATOR (once per unit and WATER.rearm
 -- ticks), the fishers released (economy fish_want reads census.w.hold). Never a hostile (no lockdown, no siege mode): the
 -- brook is no entrance; the player decides on the sortie.
-M.WATER = {big = 100000, near = 60, hold = 2400, rearm = 7200, max = 10}
+M.WATER = {big = 100000, near = 60, hold = 2400, rearm = 7200, max = 10, herb = 3600, herb_gap = 2400}
 local function civ_dist(hs, x, y, z)
   local best = -1
   for _, p in ipairs(hs.civ_pos) do
@@ -550,6 +554,18 @@ local function water_beast(hs, u, U)
   local kind = WW.near(x, y, z)
   if not kind then return end
   hs.wseen[u.id] = true
+  -- BUG-702 (Run 16b i2 Whirledrampart y419-y423: WATER_PREDATOR 110 / 123 / 103 times for three woolly mammoths that never attacked, every
+  -- 7,200 ticks, class A: the follow wake budget went on them): a plant eater (no carnivore, no killer mark) that stood at the water for
+  -- WATER.herb ticks without a kill, or one reflex cleared, is wildlife: no WATER_PREDATOR, no fisher hold. It counts again the moment it
+  -- kills (killer mark) or has been out of the water scan for WATER.herb_gap ticks
+  if not (rf.p or rf.cv or killer(u)) then
+    local wh = st.wh
+    if not wh then wh = {}; st.wh = wh end
+    local rec = wh[u.id]
+    if not rec or hs.tick - rec.last > W.herb_gap then rec = {t0 = hs.tick, last = hs.tick}; wh[u.id] = rec end
+    rec.last = hs.tick
+    if (hs.pvp and hs.pvp[u.id]) or hs.tick - rec.t0 >= W.herb then return end
+  end
   local e = {id = u.id, x = x, y = y, z = z, sz = sz, rn = WW.race_name(u), p = rf.p and 1 or nil, wt = kind,
              st = WW.stream(x, y, z), rc = reach_of(u), dc = civ_dist(hs, x, y, z)}
   if killer(u) then e.kl = 1 end
@@ -715,7 +731,12 @@ local function consider(hs, u)
     hs.near_o1 = minpos(hs.near_o1, d_o1)
   end
   local nb, db = hs.near_bridge, -1
-  for _, b in ipairs(g.bridges) do               -- Chebyshev distance to the footprint box
+  -- BUG-702 (Run 16b i2 Whirledrampart y419-y423: cleared woolly mammoths within 30 tiles of B1 refused every 'lever B1 down' and kept the
+  -- raised bridge between 25-31 citizens and their food and drink): a plant eater reflex cleared (and no killer mark) is not a
+  -- hostile of any bridge: it keeps its list entry (pp = 1) but sets no near_bridge distance, and counts in census.h.vpp
+  local clr = hbeast and hs.pvp ~= nil and hs.pvp[id] == true and not killer(u)
+  if clr then hs.vpp = hs.vpp + 1 end
+  for _, b in ipairs(clr and {} or g.bridges) do               -- Chebyshev distance to the footprint box
     local f = b.fp
     local dx = x < f[1] and f[1] - x or (x > f[4] and x - f[4] or 0)
     local dy = y < f[2] and f[2] - y or (y > f[5] and y - f[5] or 0)
@@ -753,7 +774,7 @@ local function consider(hs, u)
   -- BUG-049 (Run 13 y525: the citizens found the refuge occupied): the hostiles inside the refuge burrow are counted
   -- and listed first, so a full list (the 40 nearest to O1) never hides one
   local rin = false
-  if hs.rb then
+  if hs.rb and not clr then
     P.x, P.y, P.z = x, y, z
     if dfhack.burrows.isAssignedTile(hs.rb, P) then rin, hs.rin = true, hs.rin + 1 end
   end
@@ -783,6 +804,7 @@ local function consider(hs, u)
     end
   end
   if rin then entry.rf = 1 end
+  if clr then entry.pp = 1 end                     -- BUG-702: a plant eater reflex cleared (bridge, refuge and rescue checks skip it)
   if ik then entry.ik = 1 end                      -- M3: inside Kern+ itself (zn 2 also covers zones Z3/Z4)
   if rf.bd then entry.bd, hs.bd = 1, hs.bd + 1 end
   if an then entry.an = 1 end
@@ -901,7 +923,7 @@ local function hscan_finish(K)
                 rin = hs.rin,
                 near_o1 = hs.near_o1, near_cit = hs.near_cit, near_bridge = hs.near_bridge, list = list,
                 armed = hs.armed, crazed = hs.crazed, friends = hs.friends, zin = hs.zin, zpast = hs.zpast,
-                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign, herb = hs.herb, herb_d = hs.herb_d}
+                dz = hs.dz, dz_o1 = hs.dz_o1, bd = hs.bd, an = hs.an, nben = hs.nben, benign = hs.benign, herb = hs.herb, herb_d = hs.herb_d, vpp = hs.vpp}
   wild_publish(K, hs)                            -- BUG-494
 end
 

@@ -69,6 +69,8 @@ local function fort(opts)
   dfhack.job = {getWorker = function(j) return j._worker end}
   local mods = {S.military(), SW.fake('economy', {state = function() return {stock = {drink_d = 100, food_d = 100}} end})}
   if opts.lock then mods[#mods + 1] = SW.fake('reflex', {holding = function(_, what) return what == 'gates' and opts.lock.v or nil end}) end
+  -- BUG-702: reflex's cleared plant eaters (pv_plant), by id
+  if opts.pvp then mods[#mods + 1] = SW.fake('reflex', {pv_plant = function() return opts.pvp end, far_ids = function() return opts.pvp end, pv_ids = function() return opts.pvp end}) end
   package.loaded['dfllm.seal'] = nil
   mods[#mods + 1] = require('dfllm.seal')
   if opts.drill then
@@ -309,6 +311,47 @@ T.test('BUG-235 (review): a lockdown raises an outer bridge a quiet-PEACE rescue
   local ab
   for _, e in ipairs(evs(W, 'STRANDED')) do if e.d.phase == 'abort' then ab = e end end
   T.ok(ab ~= nil and ab.d.peace == 1, ab and ab.msg or 'no abort')
+end)
+
+-- BUG-702/703 (Run 16b i2 Whirledrampart y419-y423: cleared woolly mammoths in sight kept the PEACE rescue refused ('an outer bridge is not up') and B1
+-- raised between 25-31 citizens and their food): a wild plant eater reflex cleared is no hostile for siege.calm and for the bridge's guard
+local function mammoth_fort(pvp)
+  local W = fort{up = {O1 = true}, units = {S.cit(11, 10, 15, Z), {id = 300, pos = {42, 15, Z}, animal = true}}, pvp = pvp}
+  df.creature_raw = {find = function() return {caste = {[0] = {flags = {CAN_LEARN = false, CAN_SPEAK = false}}}} end}
+  local m = W.unit(300)
+  m.race, m.caste, m.flags1, m.flags2 = 77, 0, {}, {}
+  m.body = {size_info = {size_cur = 600000}}
+  W.K.cfg.decisions['D-14'] = 'up'
+  W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 55000}
+  return W
+end
+
+T.test('BUG-703: PEACE, a wild mammoth in sight that reflex has NOT cleared: the rescue of the hungry citizen is refused (a hostile in sight), O1 stays up', function()
+  local W = mammoth_fort(nil)
+  run(W, 3000)
+  T.eq(W.K.census.h.vis, 1, 'the mammoth counts')
+  T.eq(up(W, 'O1'), true, 'no PEACE rescue')
+  local why
+  for _, e in ipairs(evs(W, 'STRANDED')) do if e.d.phase == 'refused' then why = e.d.why end end
+  T.ok(why ~= nil, 'refused: ' .. tostring(why))
+end)
+
+T.test('BUG-703: the same mammoth cleared by reflex: the PEACE rescue lowers O1 and B1 for the citizen outside, and the bridge guard does not hold it', function()
+  local W = mammoth_fort({[300] = true})
+  local rescue
+  local n = 0
+  while n < 40 and not rescue do
+    run(W, 100)
+    n = n + 1
+    for _, e in ipairs(evs(W, 'STRANDED')) do if e.d.phase == 'rescue' then rescue = e end end
+  end
+  local ph = {}
+  for _, e in ipairs(evs(W, 'STRANDED')) do ph[#ph + 1] = e.d.phase .. ':' .. tostring(e.d.why) end
+  T.ok(rescue ~= nil, 'a rescue in PEACE with the cleared mammoth in sight (old: refused): ' .. table.concat(ph, ' '))
+  local h = W.K.census.h
+  T.eq({h.vis, h.vpp, h.near_bridge.B1, h.near_bridge.O1}, {1, 1, -1, -1}, 'in sight, cleared, no bridge distance')
+  run(W, 600)
+  T.eq({up(W, 'O1'), up(W, 'B1')}, {false, false}, 'lowered')
 end)
 
 T.done()

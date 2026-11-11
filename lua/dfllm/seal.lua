@@ -3458,7 +3458,7 @@ local function hostile_in(K, name, t)
     local b = type(h) == 'table' and (int(h.vis) or 0) > 0 and burrow(name)
     if b then
       for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
-        if type(e) == 'table' and int(e.x) and int(e.y) and int(e.z) and in_burrow(b, e.x, e.y, e.z) then
+        if type(e) == 'table' and e.pp ~= 1 and int(e.x) and int(e.y) and int(e.z) and in_burrow(b, e.x, e.y, e.z) then   -- BUG-702: no cleared plant eater
           v[1] = v[1] + 1
           v[2] = v[2] or {e.x, e.y, e.z}
         end
