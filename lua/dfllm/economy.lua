@@ -151,6 +151,8 @@ M.DEFAULTS = {
   -- Run 11: 2 picks for the Miners' target and 1 iron bar: a pick from the first metal with a spare bar at a forge,
   -- else economy.trade_wants asks the caravans for picks (trade puts it before plan.trade.want)
   picks = {tag = 'dfllm:pick', metals = {'COPPER', 'BISMUTH_BRONZE', 'BRONZE', 'IRON', 'STEEL'}, max_jobs = 2},
+  -- BUG-707: the same for the Woodcutters' axes (a battle axe)
+  axes = {tag = 'dfllm:axe', metals = {'COPPER', 'BISMUTH_BRONZE', 'BRONZE', 'IRON', 'STEEL'}, max_jobs = 2},
   -- Run 11 (Kilrudrabed y431-y441: no metal ore on the site, bars 0 for ten years, the caravans were never asked for
   -- iron; 10 soldiers at worn 58 % lost siege 8): metal is short while soldiers are wanted, they wear < `worn` %, no ore
   -- boulder of a gear metal lies in the fort and the gear-metal bars are below what the soldiers' metal slots want
@@ -956,16 +958,18 @@ end
 M.TOOL_LIST = 8                       -- tools of each kind the census lists (free first come, forbidden too)
 -- BUG-053: a free tool on another walk group gives its place in the list to one on the citizens' group (the first eight in
 -- the item vector were the unreachable ones: the report and the unforbid saw nothing the members could use)
+-- BUG-706 (Run 16a i1 Basementflew: 20 free axes, 17 usable, the 3 lowest ids reserved by squad uniforms: the list and TOOL_BLOCKED's sample held
+-- those three and the report said 'axes not in DF's free equipment list' for 567 days): a reserved tool gives its place like a far one
 function M.tool_listed(a, k, e, isfar)
   local list = a.tool_items[k]
   if #list < M.TOOL_LIST then list[#list + 1] = e; return end
-  if isfar then return end
+  if isfar or e.res then return end
   for i = #list, 1, -1 do
-    if list[i].far then list[i] = e; return end
+    if list[i].far or list[i].res then list[i] = e; return end
   end
 end
--- the order the diagnosis reads the listed tools in: free on the citizens' group, free on another, forbidden
-function M.tool_rank(e) return e.forb and 3 or (e.far and 2 or 1) end
+-- the order the diagnosis reads the listed tools in: free on the citizens' group, free on another, forbidden, reserved by a squad uniform
+function M.tool_rank(e) return e.res and 4 or (e.forb and 3 or (e.far and 2 or 1)) end
 -- the listed tools of a kind (tests, inspect): copies of {id, forb?, far?, bin?, own?, ...}
 function M.tool_list(kind)
   local r = {}
@@ -1022,7 +1026,8 @@ local function classify(it, a, cat)
       return
     end
   elseif f.forbid then
-    if cat == 'WEAPON' then M.tool_forb(a, it) end
+    if cat == 'WEAPON' then M.tool_forb(a, it)
+    elseif cat == 'WOOD' then a.wood_forb = a.wood_forb + n end     -- BUG-705: forbidden logs, counted apart (not `wood`)
     return
   end
   if f.melt and (cat == 'WEAPON' or cat == 'AMMO' or GEAR_CAT[cat]) then M.melt_mark(a, it) end   -- Run 11
@@ -1128,7 +1133,13 @@ local function classify(it, a, cat)
       end
       if not (u and (u.military.squad_id or -1) >= 0) then a.bolts_free = a.bolts_free + n end
     end
-  elseif cat == 'WOOD' then a.wood = a.wood + n; reach_mark(a, it, 'wood')
+  elseif cat == 'WOOD' then
+    -- BUG-705 (Run 16b i2 Whirledrampart y420-y423: census wood 210 beside DF's "Needs logs" on every carpenter, mason's and bowyer's job, the
+    -- mood unit's own scan said 'none reachable [210/210/0]'): a log on another walk group than the citizens' is no log for any job (DF's
+    -- job picker takes only an item a worker can walk to); it is counted apart (wood_far) and is not `wood`, so floors, orders, treeless
+    -- and the caravans' wood want see the fort's real stock
+    if not f.in_inventory and a.far and a.far(it) then a.wood_far = a.wood_far + n
+    else a.wood = a.wood + n; reach_mark(a, it, 'wood') end
   elseif M.PIECE_INV[cat] then
     -- Run 11: free doors, hatch covers, grates and blocks (not built in, not taken by a job): what a seal piece or a
     -- planned building can use now (T.jmake, economy.mat_for)
@@ -1228,7 +1239,8 @@ local function classify(it, a, cat)
         -- unowned and not marked for melting: _use (what a member could be handed)
         local isfar = a.far ~= nil and a.far(it) == true
         if isfar then a['w_' .. k .. '_far'] = a['w_' .. k .. '_far'] + 1
-        elseif not f.owned and not f.melt then a['w_' .. k .. '_use'] = a['w_' .. k .. '_use'] + 1 end
+        -- BUG-706: a tool a squad uniform reserved is no work tool for a member (DF hands none out): not `use`
+        elseif not f.owned and not f.melt and not res then a['w_' .. k .. '_use'] = a['w_' .. k .. '_use'] + 1 end
         M.tool_listed(a, k, {id = it.id, bin = cont and cont.id or nil, res = res or nil, melt = f.melt or nil,
                              own = f.owned or nil, far = isfar or nil}, isfar)
       end
@@ -1265,7 +1277,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'w_pick_far', 'w_axe_far', 'w_pick_use', 'w_axe_use',
               'brew_p', 'brew_g', 'chairs', 'tables',
               'rock_far', 'doors_far', 'hatches_far', 'grates_far', 'blocks_far', 'chairs_far', 'tables_far',   -- BUG-544
-              'rock_busy'}   -- BUG-665
+              'rock_busy',   -- BUG-665
+              'wood_far', 'wood_forb'}   -- BUG-705
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -3043,6 +3056,10 @@ local function cancel(K, ev)
     local okh, errh = pcall(M.hard_cancel, K, c, job, ev.tick or K.now().tick)
     if not okh then K.log('warn', 'hard stone cancel: %s', tostring(errh)) end
   end
+  if M.logs_words(why) then                      -- BUG-705: "Needs logs" beside census logs
+    local okw, errw = pcall(M.wood_cancel, K, job, wk, ev.tick or K.now().tick)
+    if not okw then K.log('warn', 'wood cancel: %s', tostring(errw)) end
+  end
   st.cancels[key] = (st.cancels[key] or 0) + 1
   local n = st.cancels[key]
   if key == 'dump item' then st.dump = {n = n, why = wk, day = day} end   -- FR-90: the game's own words, for inspect items trash
@@ -4542,7 +4559,7 @@ end
 -- block_days -> TOOL_BLOCKED (A, util/cadence: again only for a new member or cause). Woodcutters never fetched the two
 -- axes from a bin (19 FellTree jobs, a year without logs); six of eight miners held no pick while 4 lay free.
 local function tool_where(kind)               -- where the first free tool of the census lies (a bin: the bin's tile)
-  for pass = 1, 3 do                          -- one on the citizens' group first, a far one, a forbidden one (BUG-023, Run 11) last
+  for pass = 1, 4 do                          -- one on the citizens' group first, a far one, a forbidden one (BUG-023, Run 11), a reserved one last
     for _, e in ipairs((st.tool_items or {})[kind] or {}) do
       if pass == M.tool_rank(e) then
         local it = df.item.find(e.id)
@@ -4645,7 +4662,7 @@ function M.tool_diag(K, spec, kind, without, cur, jc, pop, fresh)
   local members = {}
   for _, u in ipairs(cur or {}) do members[u.id] = true end
   local items, list = {}, (st.tool_items or {})[kind] or {}
-  for pass = 1, 3 do                                        -- the free tools first (BUG-053: those on the citizens' group), then the forbidden ones
+  for pass = 1, 4 do                                        -- the free tools first (BUG-053: those on the citizens' group), then the forbidden ones, the reserved last
     for _, e in ipairs(list) do
       if #items < M.TD_PICKS and pass == M.tool_rank(e) then
         local it = df.item.find(e.id)
@@ -4803,6 +4820,11 @@ function M.td_blockers(dg, spec, kind, nwo)
         add('owned', string.format('%d of %d free %ss are owned by a dwarf (flag owned: no work tool for anybody else)',
                                    pop.own, pop.free, kind))
       end
+      -- BUG-706: every free tool of the kind is reserved by a squad uniform (the equipment screen): DF hands none out as a work tool
+      if (pop.res or 0) > 0 then
+        add('reserved', string.format('%d of %d free %ss are reserved by squad uniforms (squads screen, equipment): DF hands none out as ' ..
+                                      'a work tool', pop.res, pop.free, kind))
+      end
     end
   end
   local nolab = where{U, function(r) return not r.lab end}
@@ -4871,8 +4893,12 @@ function M.td_blockers(dg, spec, kind, nwo)
   local pend = where{U, function(r) return r.upd == true end}
   if #pend > 0 then add('pending', string.format('DF has not processed the equipment request of %d', #pend)) end
   if #dg.keys == 0 then
+    -- BUG-706 (Run 16a i1 Basementflew: 'nothing visible' for 800 days): what the first member does and holds instead
+    local m = U[1]
+    local ctx = m and string.format(' (member %d: job %s, %d items on his pickup list, %d work tool pairs in the fort)', m.id,
+                                    tostring(m.job), m.pk or 0, dg.ww or 0) or ''
     add('none', string.format('nothing visible: the free %ss are in DF\'s list, the members have the labor, reach them '
-                              .. 'and are no work tool pair', kind))
+                              .. 'and are no work tool pair%s', kind, ctx))
   end
   dg.key, dg.why, dg.whys = dg.keys[1], dg.texts[1], table.concat(dg.texts, '; ')
 end
@@ -5022,7 +5048,9 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
     local t = type(rec.ms) == 'table' and math.tointeger(rec.ms[k]) or nil
     if t then pms[k] = t end
   end
+  st.tmiss = st.tmiss or {}
   if #without == 0 or open == 0 or free + forb == 0 then
+    st.tmiss[kind] = nil
     st.tblk[spec.name], st.tdiag[spec.name], st.tstale[kind] = nil, nil, nil
     local keep = (rec.ann or next(pms)) and json.object{ann = rec.ann and CAD.quiet(rec.ann) or nil} or nil
     if keep and next(pms) then keep.ms = json.object(pms) end
@@ -5067,7 +5095,7 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
   -- what keeps DF from handing the tools out (M.tool_diag); its blockers are cause tokens too, so a new one is news
   local pos = tool_where(kind)
   local pop = {free = free, forb = forb, own = inv['w_' .. kind .. '_own'] or 0, far = inv['w_' .. kind .. '_far'] or 0,
-               use = inv['w_' .. kind .. '_use'] or 0, pos = pos}
+               use = inv['w_' .. kind .. '_use'] or 0, res = res, pos = pos}
   local fresh, tnow = {}, K.now().tick
   for _, id in ipairs(without) do
     local t = (st.fixes or {})[spec.name .. ':' .. id]
@@ -5077,6 +5105,13 @@ local function tool_check(K, tc, r, spec, cur, jc, fixed)
   if not okd then K.log('warn', '%s: tool diagnosis failed: %s', spec.name, tostring(dg)); dg = nil end
   local ctoks = {table.unpack(toks)}
   for _, k in ipairs(dg and dg.keys or {}) do ctoks[#ctoks + 1] = 'b:' .. k end
+  -- BUG-707: the members lack the tool and no free one is usable for them (none usable by the census, or the diagnosis' population / walk
+  -- blockers: reserved, forbidden, owned, off the group): plan_axes asks the forge and the caravans for that many
+  local cut = pop.use <= 0                     -- (`use` leaves the reserved, owned, melting and far ones out)
+  for _, k in ipairs(dg and dg.keys or {}) do
+    if k == 'walk' or k == 'off_group' or k == 'reserved' or k == 'forbidden' or k == 'owned' then cut = true end
+  end
+  st.tmiss[kind] = cut and #without or nil
   -- BUG-053: free tools the members lack for stale_days with no member-side cause stop counting as stock; usable ones
   -- that lie loose get a tool pile (T.toolpile) after pile_days
   local memberside = false
@@ -8297,6 +8332,55 @@ function M.hard_words(why)
   local s = tostring(why or ''):lower()
   return s:find('non-economic', 1, true) ~= nil or s:find('hard stone', 1, true) ~= nil
 end
+-- BUG-705 (Run 16b i2 Whirledrampart: every wooden job 'Needs logs' with census wood 210 and no word why): DF's "Needs logs" cancel
+function M.logs_words(why)
+  local s = tostring(why or ''):lower()
+  return s:find('needs', 1, true) ~= nil and (s:find(' logs', 1, true) ~= nil or s:find(' log', 1, true) ~= nil)
+end
+-- where the logs of the fort lie and what holds them (read only, at most PROBE_MAX logs): 'in job x, forbidden x, owned x, carried x, levels zN x'
+M.PROBE_MAX = M.PROBE_MAX or 400
+function M.wood_probe(K)
+  local zs, fl, n = {}, {}, 0
+  pcall(function()
+    local v = df.global.world.items.other.WOOD
+    for i = 0, #v - 1 do
+      if n >= M.PROBE_MAX then break end
+      local it = v[i]
+      local f = it and it.flags
+      if f and not (f.removed or f.garbage_collect or f.trader or f.dump or f.in_building or f.construction or f.hostile) then
+        n = n + 1
+        if f.in_job then M.tally(fl, 'in a job', 1) end
+        if f.forbid then M.tally(fl, 'forbidden', 1) end
+        if f.owned then M.tally(fl, 'owned', 1) end
+        if f.in_inventory then M.tally(fl, 'carried', 1) end
+        local x, y, z = dfhack.items.getPosition(it)
+        if x then M.tally(zs, 'z' .. tostring(z), 1) end
+      end
+    end
+  end)
+  local function list(t)
+    local out = {}
+    for _, e in ipairs(M.top(t, 4)) do out[#out + 1] = string.format('%s x%d', e[1], e[2]) end
+    return table.concat(out, ', ')
+  end
+  return string.format('%d logs sampled: %s; levels %s', n, list(fl) ~= '' and list(fl) or 'none held', list(zs))
+end
+-- a "Needs logs" cancel: the census' split of the logs (free / on another walk group / forbidden) and the probe, once per 3 game days
+function M.wood_cancel(K, job, why, tick)
+  local last = math.tointeger(st.wood_note)
+  if last and tick - last < 3 * DAY then return end
+  st.wood_note = tick
+  local inv = K.census.i or {}
+  local free, far, forb = math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_far) or 0, math.tointeger(inv.wood_forb) or 0
+  local cause
+  if free > 0 then cause = 'DF refuses logs the census counts usable (reachable, not forbidden)'
+  elseif far > 0 then cause = 'every log lies on another walk group than the citizens (open the way, bring them in, or cut trees)'
+  elseif forb > 0 then cause = 'every log is forbidden (the mood reserve forbids some; unforbid the rest on the items screen)'
+  else cause = 'the fort holds no log (cut trees: the Woodcutters need an axe, or ask the caravans: trade.want wood)' end
+  local okp, probe = pcall(M.wood_probe, K)
+  K.log('warn', 'economy: DF cancels %s "%s": census logs free %d, on another walk group %d, forbidden %d: %s; %s', tostring(job),
+        tostring(why), free, far, forb, cause, okp and probe or '?')
+end
 function M.hard_denied(inv, now)
   local h = st.hard
   if type(h) ~= 'table' or not h.denied then return false end
@@ -8502,11 +8586,17 @@ function M.tools_have(inv, kind)
   return math.max(0, (inv['w_' .. kind] or 0) - ((st.tstale or {})[kind] or 0))
 end
 
-function M.plan_picks(K, c, r)
-  local pc = c.picks
-  local want, have = (st.want or {}).pick or 0, M.tools_have(r.inv, 'pick')
+-- BUG-707 (Run 16b i2 Whirledrampart y421: 'axe 1, free 1, forbidden 1, reserved 1', the Woodcutters without an axe, every wooden job 'Needs logs', trade.want held
+-- pick and not axe; Run 16a i1: 17-20 free axes, none handed out for 1229 days): the forge makes axes the way it makes picks (c.axes, a battle axe)
+-- and the caravans are asked for them (trade_wants). The demand is the Woodcutters' target less the axes the fort can hand out, and the members
+-- that lack an axe while no free one is usable for them (all reserved, forbidden, owned, on another walk group, or none: tool_check's st.tmiss)
+function M.plan_picks(K, c, r) return M.plan_tool(K, c, r, 'pick', c.picks, 'ITEM_WEAPON_PICK', 'picks') end
+function M.plan_axes(K, c, r) return M.plan_tool(K, c, r, 'axe', c.axes, 'ITEM_WEAPON_AXE_BATTLE', 'axes') end
+function M.plan_tool(K, c, r, kind, pc, sub, slot)
+  local want, have = (st.want or {})[kind] or 0, M.tools_have(r.inv, kind)
   local pk = {have = have, want = want, short = math.max(0, want - have), route = ''}
-  st.picks = pk
+  if kind == 'axe' then pk.short = math.max(pk.short, (st.tmiss or {}).axe or 0) end
+  st[slot] = pk
   if type(pc) ~= 'table' or pk.short == 0 then return end
   if open(r, pc.tag) then pk.route = 'forge'; return end
   local g = c.gear or {}
@@ -8516,10 +8606,11 @@ function M.plan_picks(K, c, r)
     local n = math.min(pk.short, left(c, r, 'bars:' .. tok), left(c, r, 'bars'), magma and pk.short or left(c, r, 'fuel'),
                        pc.max_jobs or 2)
     if n > 0 then
-      add(r, {tag = pc.tag, spec = {job = 'MakeWeapon', item_subtype = 'ITEM_WEAPON_PICK', material = tok,
+      add(r, {tag = pc.tag, spec = {job = 'MakeWeapon', item_subtype = sub, material = tok,
                                     item_conditions = {cond(1 + floor_of(c, r.p, r, 'bars'), 'BAR', {material = tok}),
                                                        fuel_cond(r)}},
-              n = n, uses = {['bars:' .. tok] = 1, bars = 1, fuel = magma and 0 or 1}, why = 'picks for the miners'})
+              n = n, uses = {['bars:' .. tok] = 1, bars = 1, fuel = magma and 0 or 1},
+              why = kind == 'axe' and 'axes for the woodcutters' or 'picks for the miners'})
       pk.route = 'forge'
       return
     end
@@ -8659,6 +8750,11 @@ function M.trade_wants(K)
   if type(pk) == 'table' and (pk.short or 0) > 0 and pk.route ~= 'forge' then
     r[1] = {buy = 'pick', n = pk.short, why = string.format('miners: %d picks < %d', pk.have, pk.want)}
     by.pick = r[1]
+  end
+  local ak = st.axes                                         -- BUG-707: the woodcutters' axes
+  if type(ak) == 'table' and (ak.short or 0) > 0 and ak.route ~= 'forge' then
+    r[#r + 1] = {buy = 'axe', n = ak.short, why = string.format('woodcutters: %d axes usable < %d wanted', ak.have, ak.short + ak.have)}
+    by.axe = r[#r]
   end
   local mt = st.metal
   for _, w in ipairs(type(mt) == 'table' and mt.short and mt.wants or {}) do
@@ -10553,7 +10649,7 @@ function T.plan(K, c, r)
                   glass = need_n(r.p, 'glass', r.now) + (r.glass_cut or 0) > 0}
   local list = {{1.5, plan_supply}, {2, function() plan_containers(K, c, r, 'barrels') end},
                 {urgent.leather and 1 or 4, plan_leather}, {urgent.cloth and 1 or 3.5, plan_cloth},
-                {2.9, M.plan_picks}, {3.4, M.plan_training},
+                {2.9, M.plan_picks}, {2.91, M.plan_axes}, {3.4, M.plan_training},
                 {urgent.bars and 1 or 3, plan_metal}, {urgent.bars and 1.1 or 3.1, plan_steel}, {3.2, plan_gear},
                 {3.25, M.metal_plan}, {3.26, M.trade_goods}, {urgent.glass and 1.2 or 3.3, M.glass_plan}, {5, function() plan_containers(K, c, r, 'bins') end}}
   table.sort(list, function(a, b) return a[1] < b[1] end)

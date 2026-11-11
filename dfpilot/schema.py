@@ -648,6 +648,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-128: src = the stockpile the tools sit in, g = the guards that applied (kept members, skipped patients/doctors,
     # a fresh request not pending, loose pairs as fetch, the stale cap, the pile's source)
     # BUG-187: bk key patient (a member needs healthcare / rests: fetches no tool, takes no job), before jobs
+    # BUG-706: bk key reserved (every free tool of the kind is reserved by a squad uniform); reserved tools are no `use` and come last in
+    # picks; the `none` text names the first member's job and pickup list
     "TOOL_BLOCKED": ("A", "economy", _d("detail:s tool:s n:i", "members:ia jobs:i days:i free:i bins:i reserved:i "
                                                                "why:s who:s hint:s pos:p eq:i eq_days:i forb:i blk:s "
                                                                "bk:s picks:sa units:sa civ:i ww:i pile:s tell:s care:s src:i g:s")),
