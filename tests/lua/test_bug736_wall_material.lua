@@ -172,6 +172,7 @@ T.test('BUG-736: no logs either, ore / flux boulders only: they are the wall mat
   days(W, 1)
   local i = W.K.census.i
   i.ore, i.flux, i.rock, i.wood = 6, 4, 10, 0
+  i.rock_nouse = 10   -- BUG-733: the census counts the boulders no mason may take (ore + flux here)
   local ok, t = W.K.call('economy', 'wall_alt')
   T.ok(ok and type(t) == 'string' and t:find('ore / flux boulders', 1, true), T.show(t))
   T.ok(F.has(F.runs(W), 'buildingplan set boulders true'), table.concat(F.runs(W), ' | '))
