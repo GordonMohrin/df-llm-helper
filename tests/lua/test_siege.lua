@@ -106,8 +106,8 @@ add{name = 'ALERT civ alert: on near an outside citizen, off 600 ticks after the
     between(rel(W, off[1].tick), 1500, 1570, 'alert off (hysteresis)')
   end}
 
-add{name = 'ALERT: a hostile within 30 tiles of O1 raises only O1; PEACE lowers it again',
-  units = function() return units(S.danger(300, 51, 0)) end,
+add{name = 'ALERT: an invader within 30 tiles of O1 raises only O1; PEACE lowers it again',
+  units = function() return units(S.inv(300, 51, 0)) end,
   at = {{800, hide(300)}}, run = 2600, modes = {'PEACE>ALERT', 'ALERT>PEACE'},
   check = function(W)
     T.eq(#S.pulls(W, 'O1'), 2, 'O1 up, then down in PEACE')
@@ -116,6 +116,14 @@ add{name = 'ALERT: a hostile within 30 tiles of O1 raises only O1; PEACE lowers 
     T.eq(S.flips(W, 'O1')[1].to, 'up')
     T.eq(S.bstate(W, 'O1'), 'down')
     T.ok(S.pulls(W, 'O1')[2].tick >= S.mode_tick(W, 'ALERT>PEACE'))
+  end}
+
+add{name = 'BUG-758 ALERT: a lone wild animal within 30 tiles of O1 raises no bridge',
+  units = function() return units(S.danger(300, 51, 0)) end,
+  at = {{800, hide(300)}}, run = 2600, modes = {'PEACE>ALERT', 'ALERT>PEACE'},
+  check = function(W)
+    T.eq(#S.pulls(W, 'O1') + #S.pulls(W, 'B1') + #S.pulls(W, 'B2'), 0)
+    T.eq(S.bstate(W, 'O1'), 'down')
   end}
 
 add{name = 'six visible invaders: SIEGE and every T0 action in the detecting step',
@@ -942,7 +950,7 @@ add{name = 'footprint in RECOVERY: B1 stays up while a citizen stands on it; ale
   end}
 
 add{name = 'footprint in PEACE after an ALERT: O1 is not lowered onto a citizen',
-  units = function() return units(S.danger(300, 51, 0)) end,
+  units = function() return units(S.inv(300, 51, 0)) end,
   at = {{500, mv(1, 51, 10)}, {800, hide(300)}, {2600, mv(1, 60, 70)}}, run = 3200,
   modes = {'PEACE>ALERT', 'ALERT>PEACE'},
   check = function(W)
