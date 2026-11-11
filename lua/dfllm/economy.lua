@@ -5771,7 +5771,10 @@ function M.drink_block(K, c, r, inv)
   local function put(id, txt) out[#out + 1] = {id, txt} end
   local b = st.brew or M.brew_orders()
   local plants = (inv.brew_p or 0) + (inv.brew_g or 0)
-  if not ws_any(f, {'workshop:Still'}) then put('still', 'no still') end
+  if not ws_any(f, {'workshop:Still'}) then
+    -- BUG-760: a Still every citizen cannot walk to is no Still (M.cut_scan): the brews sit there
+    put('still', f['cut:Still'] and 'Still cut off from the citizens walk groups' or 'no still')
+  end
   if b.n == 0 then put('brew', 'no brew order')
   elseif (b.unval or 0) > 0 and st.unval and st.unval.why then        -- past orders.unval_days (M.unval_watch)
     put('unvalidated', string.format('%d brews wait for validation: %s', b.unval, st.unval.why))
@@ -5789,7 +5792,27 @@ function M.drink_block(K, c, r, inv)
   end
   if (inv.barrels_empty or 0) == 0 then put('barrels', 'no empty barrel') end
   if not M.labor_holder(K, 'BREWER') then put('brewer', 'nobody brews (Brewing on no citizen)') end
-  if b.n > 0 then auto[#auto + 1] = {'brew', string.format('%d brews ordered', b.left)} end
+  -- BUG-760 (Run 16b i2 Whirledrampart y443-445: drink 176 -> 0 days, DECISION 'auto: brew' with 8 brews ordered that never ran):
+  -- 'auto: brew' is said only with a Still the citizens reach and open brews that moved in the last 7 days (their count fell or the
+  -- drink days rose); else the stall is a cause of its own
+  local now = K.now().tick
+  local dd = (r.days or {}).drink_d or 0
+  local noshop = false
+  for _, x in ipairs(out) do if x[1] == 'still' then noshop = true end end
+  if b.n > 0 then
+    local bs = st.bstall
+    if type(bs) ~= 'table' or b.left > bs.left then st.bstall = {left = b.left, dd = dd, t = now}
+    elseif b.left < bs.left or dd > bs.dd + 1 then st.bstall = {left = b.left, dd = dd, t = now} end
+    bs = st.bstall
+    if now - bs.t >= 7 * DAY then
+      put('brewstall', string.format('%d brews ordered, none ran for %d days (still %s, plants %d, empty barrels %d)', b.left,
+                                     (now - bs.t) // DAY, f['workshop:Still'] and 'stands' or 'missing', plants, inv.barrels_empty or 0))
+    elseif not noshop then
+      auto[#auto + 1] = {'brew', string.format('%d brews ordered', b.left)}
+    end
+  else
+    st.bstall = nil
+  end
   local o = st.office
   if type(o) == 'table' and o.at and o.at ~= '' then auto[#auto + 1] = {'office', o.at .. ' placed'} end
   if r.s and r.s.live['dfllm:barrel'] then auto[#auto + 1] = {'barrels', 'barrels ordered'} end
@@ -14433,6 +14456,7 @@ function M.state(K)
 end
 
 ---------------------------------------------------------------- inbox verbs
+M.BREW_JOBS = {Brew = 'BREW_DRINK_FROM_PLANT', BrewDrink = 'BREW_DRINK_FROM_PLANT', BrewFruit = 'BREW_DRINK_FROM_PLANT_GROWTH'}
 local FREQ = {OneTime = true, Daily = true, Monthly = true, Seasonally = true, Yearly = true}
 
 -- order.add {job, amount, item_subtype?, material?, material_category?, reaction?, hf?, frequency?} (FR-39, hf: BUG-078): one
@@ -14440,6 +14464,13 @@ local FREQ = {OneTime = true, Daily = true, Monthly = true, Seasonally = true, Y
 M.verbs['order.add'] = function(K, args, cmd)
   local job = args.job
   if type(job) ~= 'string' or not job:match('^[A-Za-z]+$') then return false, 'job must be a job type name' end
+  -- BUG-760: DF brews through a CustomReaction (BREW_DRINK_FROM_PLANT / _GROWTH), no 'Brew' job type: Brew / BrewDrink / BrewFruit name it
+  local brewing
+  if M.BREW_JOBS[job] then
+    if args.reaction ~= nil then return false, job .. ' names its own reaction: leave reaction out' end
+    args = setmetatable({reaction = M.BREW_JOBS[job]}, {__index = args})
+    job, brewing = 'CustomReaction', true
+  end
   local okj, jt = pcall(function() return df.job_type[job] end)
   if not okj or type(jt) ~= 'number' then return false, 'unknown job ' .. job end
   local amount = math.tointeger(args.amount)
@@ -14489,7 +14520,17 @@ M.verbs['order.add'] = function(K, args, cmd)
   local ok, id = K.act.workorder(spec)
   if not ok then return false, 'workorder: ' .. tostring(id) end
   K.log('info', 'order %s x%d added by %s (order %s)', job, amount, tostring(cmd and cmd.by), tostring(id))
-  return true, string.format('order %s %s x%d', tostring(id), job, amount), {order = math.tointeger(id) or -1}
+  local note = ''
+  if brewing then
+    -- BUG-760: what keeps the order from running, said now (the same checks as the drink block)
+    local okb, bl = pcall(M.drink_block, K, M.conf(K), {p = pstate(K), days = {}, now = K.now().tick}, K.census.i or {})
+    local miss = {}
+    for _, x in ipairs(okb and bl or {}) do
+      if x[1] == 'still' or x[1] == 'plants' or x[1] == 'barrels' or x[1] == 'brewer' then miss[#miss + 1] = x[2] end
+    end
+    if #miss > 0 then note = ' (cannot run yet: ' .. table.concat(miss, '; ') .. ')' end
+  end
+  return true, string.format('order %s %s x%d%s', tostring(id), spec.reaction or job, amount, note), {order = math.tointeger(id) or -1}
 end
 
 -- orders.cancel {id? | stuck?, force?} (BUG-526, Run 16c i3 Sealcertain: 36 stuck orders and a jammed forge, no verb to remove one):
