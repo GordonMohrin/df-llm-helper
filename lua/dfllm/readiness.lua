@@ -171,8 +171,8 @@ M.DEF = {trap_pop = 40, traps_floor = 20, traps_cap = 40, per_invader = 2, grace
          ask_days = 30, stuck_days = 360, worn_pct = 60, armor_pop = 20,
          -- BUG-742 (Run 16a i1 Basementflew y509-y524: max-pop 43 for 15 years beside traps 0 < 20 and armor worn 28 %, no stone, no metal, 'max-pop 100 (R0)'
          -- and '35 / 39 / 43' in between, 539 days without migrants; Run 16d i4 Pagedsculpture: worn 71 -> 21 -> 74 % with every militia
-         -- turn): the hold is stable and it ends. worn_win: the armor gap reads the best worn % of this many game days (the rotation
-         -- and every refit swing the instant value); clear_days: the gap must stay gone this long before the hold (and the population it
+         -- turn): the hold is stable and it ends. worn_win: the armor gap reads the MEDIAN worn % of this many game days (the rotation
+         -- and every refit swing the instant value, down and up alike); clear_days: the gap must stay gone this long before the hold (and the population it
          -- holds) is let go; relax_days: a hold that stands this long with the fort at its ceiling raises it by one wave's room (growth_room),
          -- again after relax_days, whatever the gap (traps and armor, a fort without stone or metal has no other way out) unless the
          -- soldiers are bare (worn_floor %); hold_band: defense_short and open_perimeter within this many citizens are one number
@@ -214,31 +214,33 @@ end
 -- DEF.worn_pct percent of their uniform slots (the military KPI) is a shortfall; older than DEF.grace_days it holds max-pop at the population
 -- (ceiling why 'defense_short'), with room for one wave while worn is at least GROW.worn_pct (the same soft rule as plan.gap_soft).
 -- {worn, text} or nil (no soldiers, a small fort, worn at the mark)
--- BUG-742: `best` = the best worn % of the last DEF.worn_win days (M.worn_best): the instant value swings with every militia turn and refit
+-- BUG-742: `best` = the median worn % of the last DEF.worn_win days (M.worn_best): the instant value swings with every militia turn and refit
 local function armor_shortfall(K, cit, kpi, best)
   if not cit or cit < M.DEF.armor_pop or type(kpi) ~= 'table' then return nil end
   local soldiers, cur = int(kpi.soldiers) or 0, int(kpi.worn)
   if soldiers <= 0 or not cur then return nil end
-  local worn = math.max(cur, int(best) or cur)
+  local worn = int(best) or cur
   if worn >= M.DEF.worn_pct then return nil end
   return {worn = worn, cur = cur, text = cut(string.format('armor worn %d %% < %d %% (%d soldiers%s)', worn, M.DEF.worn_pct, soldiers,
                                                          cur < worn and string.format(', now %d %%', cur) or ''), 120)}
 end
 
--- BUG-742: the best worn % of the military KPI over the last DEF.worn_win game days, sampled at most every 600 ticks (rt only: a reload starts
--- with the value of now). nil without soldiers.
+-- BUG-742: the MEDIAN worn % of the military KPI over the last DEF.worn_win game days, one sample per 600 ticks (rt only: a reload starts with the
+-- value of now). Median, not best or latest: a refit that strips the soldiers for a day (76 -> 21 -> 76 %) and a drill that dresses them for a
+-- day both stay out of the reading, a real change moves it after half the window. nil without soldiers.
 function M.worn_best(now, worn)
   worn = int(worn)
   if not worn then return nil end
   local log = rt.wlog
   if type(log) ~= 'table' or (log[#log] and log[#log].t > now) then log = {}; rt.wlog = log end
   local last = log[#log]
-  if not last or now - last.t >= 600 then log[#log + 1] = {t = now, w = worn}
-  elseif worn > last.w then last.w = worn end
-  local win, best = M.DEF.worn_win * 1200, worn
+  if not last or now - last.t >= 600 then log[#log + 1] = {t = now, w = worn} end
+  local win = M.DEF.worn_win * 1200
   while log[1] and now - log[1].t > win do table.remove(log, 1) end
-  for _, e in ipairs(log) do if e.w > best then best = e.w end end
-  return best
+  local ws = {}
+  for _, e in ipairs(log) do ws[#ws + 1] = e.w end
+  table.sort(ws)
+  return ws[(#ws + 1) // 2]
 end
 
 -- bridges and levers: outer + inner exist, every bridge known to gate, >= 2 linked levers each
@@ -755,7 +757,7 @@ local function evaluate(K, why)
     rt.tshort, rt.tshort_s = ts.text, ts.short
   end
   -- BUG-601: the armor part of the shortfall (no R0 blocker: R0 stops the drills, the soldiers' kit is military's business)
-  -- BUG-742: read from the best worn % of the last DEF.worn_win days, not the instant value
+  -- BUG-742: read from the median worn % of the last DEF.worn_win days, not the instant value
   local wbest = kpi and (int(kpi.soldiers) or 0) > 0 and M.worn_best(now, kpi.worn) or nil
   rt.wpk = wbest
   local as = K.mode() == 'PEACE' and armor_shortfall(K, cit1, kpi, wbest) or nil
@@ -770,6 +772,7 @@ local function evaluate(K, why)
     if not st.dg then st.dg, dirty = now, true
     elseif now - st.dg >= M.DEF.clear_days * 1200 then
       st.dt, st.dhold, st.dg, st.dht, st.drel, dirty = nil, nil, nil, nil, nil, true
+      st.dgq, st.dgk, st.dgh = nil, nil, nil            -- a later hold is a new question
     end
   end
   if st.dt and cit1 and cit1 >= M.DEF.hold_pop and now - st.dt >= M.DEF.grace_days * 1200 then
@@ -778,7 +781,7 @@ local function evaluate(K, why)
   -- a hold persisted before the stamp existed (dhold, no dht) is as old as its gap
   if st.dhold and not st.dht then st.dht, dirty = st.dt or now, true end
   -- BUG-742: the way out. A hold that stands relax_days with the fort at its ceiling is raised by one wave's room and stands again: a fort
-  -- without hard stone (no mechanisms, no traps) or metal (no armor) is not held at one size for ever. Bare soldiers (best worn under
+  -- without hard stone (no mechanisms, no traps) or metal (no armor) is not held at one size for ever. Bare soldiers (median worn under
   -- worn_floor %) are no reason for more mouths: no step, the question says so. A step is one number written once (st.dhold), not a
   -- flip between a high and a low ceiling
   rt.dstep = nil
@@ -1530,32 +1533,30 @@ local function ask_defense(K, now)
   st.dgq, st.dgk, st.dgh, dirty = now, kind, drel, true
   local D = M.DEF
   local room
+  local bare = kind ~= 'traps' and rt.wpk and rt.wpk < D.worn_floor
   if rt.dsoft then
-    room = string.format('one wave fits (max-pop %d on %d citizens)', rt.dhold_pop or st.dhold, int(K.census.u and K.census.u.cit) or st.dhold)
-  elseif rt.dstep == 'bare' then
-    room = string.format('no room: the soldiers are nearly bare (best worn %d %% under %d %%), more mouths would not be defended', rt.wpk or 0, D.worn_floor)
+    room = string.format('one wave fits (max-pop %d)', rt.dhold_pop or st.dhold)
+  elseif bare then
+    room = string.format('no room: soldiers nearly bare (median worn %d %% < %d %%), more mouths would not be defended', rt.wpk, D.worn_floor)
   else
     local left = math.max(0, D.relax_days - rt.dage)
-    room = left > 0 and string.format('no room: max-pop %d stays on the citizens; the next wave room opens in %d days%s', st.dhold, left,
-                                     drel > 0 and string.format(' (raised %d times)', drel) or '')
-           or string.format('no room: max-pop %d on the citizens until they fill it, then one wave opens', st.dhold)
+    room = left > 0 and string.format('no room: the next wave room opens in %d days', left) or 'no room until the citizens fill it, then one wave'
   end
-  local parts, cmds = {}, {}
+  local gaps, cmds, outs = {}, {}, {}
   if kind ~= 'armor' then
-    parts[#parts + 1] = rt.tshort or 'traps short'
-    parts[#parts + 1] = 'traps need a mechanism each (hard stone or trade) and a cage (wood: the carpenters make it)'
+    gaps[#gaps + 1] = rt.tshort_s or 'traps short'
+    outs[#outs + 1] = 'traps: a mechanism each (hard stone or trade), a cage (wood, the carpenters make it)'
     cmds[#cmds + 1] = [[dfllm cmd trade.want '{"add":["mechanism","stone"]}']]
   end
   if kind ~= 'traps' then
-    parts[#parts + 1] = rt.ashort or 'armor short'
-    parts[#parts + 1] = string.format('lifts at best worn %d %%; leather, bone and wooden kit count (the kernel orders it), metal comes by trade or ore', D.worn_pct)
+    gaps[#gaps + 1] = rt.ashort and rt.ashort:gsub('%s*%(.*$', '') or 'armor short'
+    outs[#outs + 1] = 'armor: leather, bone and wooden kit count (the kernel orders it), metal by trade or ore'
     cmds[#cmds + 1] = [[dfllm cmd inspect '{"what":"military"}']]
     cmds[#cmds + 1] = [[dfllm cmd trade.want '{"add":["armor:metal","helm:metal","bar:metal"]}']]
   end
-  local q = string.format('max-pop held at %d for %d days (%s): %s; %s', st.dhold, rt.dage, kind, room, table.concat(parts, '; '))
+  local q = string.format('max-pop held at %d (%s, %d days): %s; %s', st.dhold, kind, rt.dage, room, table.concat(gaps, ', '))
   K.emit('DECISION_NEEDED', 'A', cut(q .. ': ' .. cmds[1], 200),
-         {id = 'defense_gap', q = cut(q, 200), cmds = cmds, cause = kind, n = st.dhold, age = rt.dage, steps = drel,
-          room = rt.dsoft and 1 or 0})
+         {id = 'defense_gap', q = cut(q, 200), cmds = cmds, cause = kind, n = st.dhold, nd = rt.dage, why = cut(table.concat(outs, '; '), 200)})
 end
 
 function M.step(K, budget, ctx)
@@ -1599,7 +1600,7 @@ function M.state(K)
   if rt.ashort then r.as = rt.ashort end                      -- BUG-601: the armor shortfall that holds max-pop
   if rt.dage then r.dage = rt.dage end                        -- BUG-742: game days the defense_short hold stands (since it began or was raised)
   if rt.dhold_pop and st.dhold then r.dh = rt.dhold_pop end   -- BUG-742: the population it holds max-pop at now (plan propose follows it)
-  if rt.wpk then r.wpk = rt.wpk end                           -- BUG-742: the best worn % of the last DEF.worn_win days (the armor gap reads it)
+  if rt.wpk then r.wpk = rt.wpk end                           -- BUG-742: the median worn % of the last DEF.worn_win days (the armor gap reads it)
   if rt.ttarget then r.tt = rt.ttarget end                    -- BUG-481: the trap target for the expected siege
   if rt.lw then r.lw = rt.lw end                              -- BUG-634: what the levers of `levers:<B>` wait for
   if rt.rp then r.rp = rt.rp end                              -- BUG-653: the refuge has no pre-plug against building destroyers

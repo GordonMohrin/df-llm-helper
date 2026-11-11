@@ -1,0 +1,26 @@
+# BUG-742 The defense_short hold flips between 100 and 43 for years and offers no way out
+Status: fixed (offline, live-untested)
+Severity: high
+Found: 2026-11-11, Run 16a i1 Basementflew y509-y525 (POPCAP 'max-pop 100 (R0)' / '35 / 39 / 43 (defense_short)' / '41 / 42 (open_perimeter)' alternating, Pop 43 for 15 years, traps 0 < 20 AND armor worn 28 %, no stone, no metal, no migrants for 539 days); Run 16d i4 Pagedsculpture (worn 71 -> 21 -> 74 % with every militia turn)
+Module: `lua/dfllm/readiness.lua` (`M.DEF`, `M.worn_best`, the shortfall block of `evaluate`, `M.ceiling`, `ask_defense`), `dfpilot/plan.py` (`kernel_defense_hold`, `defense_cap`, `defense_gaps`, `propose`), contract `ready.dage` / `dh` / `wpk`
+
+## Actual
+`events.jsonl` i1: POPCAP 100 (R0) at ticks 187552079, 187777929, 187900159 between 'defense_short 35', '39', '43': the hold lifted for a moment and was set again at the (higher) population of that day. The year plan held 'ceiling 43 held worn 28 %' as well (a second number: 100 when it read no gap, 43 or 47 otherwise). 'open_perimeter 41 / 42' alternated with 'defense_short 43'. Nothing told the player what would end it: no metal, no hard stone in the fort. The first answer to this bug (branch fix47-mil, rejected by the verifier) relaxed only an armor-only hold, so it would not have changed i1 (it has a traps shortfall too), and its question text claimed 'room for a wave is open' when it was not.
+
+## Root cause
+1. `readiness.lua` (shortfall block, was ~731-737): `elseif not gap and st.dt and PEACE then st.dt, st.dhold = nil` lifted the hold at the first evaluation without a gap. The military KPI `worn` is an instant value: it swings with every militia turn, drill start and refit (i4 kern.log: 'worn 76% before, 21% now', 12 % at a drill start, 76 % a day later), so one look over 60 % cleared the hold and the next look set it again at the new, higher population (35 -> 39 -> 43).
+2. `ceiling()` returned the lower of `phold` (open perimeter) and `dhold_pop` (defense_short): two holds a citizen apart flipped the name and the number with the population.
+3. `plan.py` `defense_cap` computed its own ceiling from the gaps it read at that look: 100 (policy) with no gap, 43 with one. It did not know the kernel's hold.
+4. No way out: a hold with a hard gap (traps short, worn under 40 %) stood for ever.
+
+## Fix
+- `readiness.lua`: the armor gap reads the MEDIAN worn % of `DEF.worn_win` (45) game days (`M.worn_best`, one sample per 600 ticks; a refit's dip and a drill's peak both stay out, a real change moves it after half the window), state `ready.wpk`. The hold clears only after `DEF.clear_days` (10) without a gap (`st.dg`). `st.dht` = tick the hold began or was last raised (a hold persisted by an older kernel gets `dht = dt`), `ready.dage` = its age in days, `ready.dh` = the population it holds.
+- The way out (`DEF.relax_days` 180): a hold that stands that long with the citizens at its number is raised by one wave's room (`growth_room`), WHATEVER the gap (traps and armor: a fort without stone or metal has no other way), once per number, never back down; every raise is logged. Bare soldiers (median worn under `DEF.worn_floor` 10 %) get no step. Within `DEF.hold_band` (2) citizens `defense_short` and `open_perimeter` are one number (the higher).
+- `ask_defense`: DECISION_NEEDED `defense_gap` (A; `cause` traps / armor / both, `n`, `nd` age, `cmds`, `why` = the ways out) says what the hold IS now (read from `rt.dsoft` and the median, not assumed: 'no room: the next wave room opens in N days', 'one wave fits', 'soldiers nearly bare'), what lifts it (traps: mechanism from hard stone or trade, wooden cage; armor: leather, bone and wooden kit count, metal by trade or ore) and asks again only when the kind changes, the hold is raised, or after `DEF.stuck_days`.
+- `plan.py`: `kernel_defense_hold` (state `ready.dh`); `defense_cap`, `propose` and `ceiling_refresh` never go below the kernel's hold and use it even when the plan sees no gap at that look; `defense_gaps` reads `ready.wpk` (the kernel's median) for the armor gap.
+
+## Tests
+tests/lua/test_bug742_defense_hold.lua (6: swings of worn do not lift or move the hold; the i1 case traps + armor relaxes once after 180 days and the ceiling never falls back, one question at the hold and one at the raise; bare soldiers get no step and the question says so; the question text is honest and asked once; a hold persisted without `dht` relaxes after a reload; `worn_best` median), tests/test_bug742_defense_hold_plan.py (5, incl. `propose` follows the kernel hold in the same year), tests/lua/test_bug478_481_defense_ready.lua and test_bug600_601_perimeter_armor.lua adapted (the hold stays clear_days more). No bridge, gate, refuge, lockdown, seal or drill behaviour changed (a population ceiling and a question), so no siege traffic test.
+
+## Open
+The 180 days, 10 % floor and 45-day median are judgements. The `open_perimeter` hold keeps its own clear rule (only the number is merged within 2 citizens; no test drives that merge). A hold that stands with a population below its number is not raised (the fort has not filled it). A Kernel reload is needed for the Lua half, a follow reload for the plan half.

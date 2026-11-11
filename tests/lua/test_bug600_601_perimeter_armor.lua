@@ -124,13 +124,11 @@ T.test('BUG-601: soldiers in armor worn under 60 % hold max-pop at the populatio
   T.eq(W.state().pop.cap, 100, 'held at the population: worn 30 % leaves no room')
   T.eq(W.state().pop.hold, 'defense_short 100')
   W.worn = 50
-  day(W, 3)
+  day(W, 30)                                              -- BUG-742: the armor gap reads the median worn % of 45 days: half the window at 50 %
   T.eq(W.state().pop.cap, 110, 'soft: worn 50 %: 100 citizens + growth_room 10')
   T.eq(W.state().pop.hold, 'defense_short 110+')
   W.worn = 70
-  day(W, 3)
-  T.eq(W.state().pop.cap, 100, 'BUG-742: worn again, held for clear_days')
-  day(W, 8)
+  day(W, 60)                                              -- the median is over the line, clear_days without a gap (test_bug742_defense_hold)
   T.eq(W.state().pop.cap, 120, 'armor worn: the hold is lifted')
   T.eq(ready(W).as, nil)
 end)
@@ -139,8 +137,8 @@ T.test('BUG-601: a short dip (under the grace days), a small fort, and no soldie
   local W = world{n = 100, cap = 120, armor = true, worn = 30}
   day(W, 3)
   audit(W)
-  day(W, 10)
-  W.worn = 80
+  day(W, 2)
+  W.worn = 80                                             -- BUG-742: the median of the window follows after a few days
   day(W, 20)
   T.eq(W.state().pop.cap, 120, 'worn again before the grace days: never held')
   local W2 = world{n = 15, cap = 120, armor = true, worn = 10}

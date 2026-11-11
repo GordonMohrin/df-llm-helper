@@ -131,9 +131,11 @@ T.test('one patient_thirst line for all patients; a patient crossing the alarm w
   T.eq(pt[2].d.n, 3)
   W.unit(2).counters2.thirst_timer = 1000                     -- unit 2 got water: its episode ends
   day(W)
-  W.unit(2).counters2.thirst_timer = 32000                    -- and starts again: at once
-  day(W)
-  T.eq(#needed(W, 'patient_thirst'), 3)
+  W.unit(2).counters2.thirst_timer = 32000                    -- and starts again: the same patient, the same verdict (no wet water): BUG-744 the
+  day(W)                                                      -- line says it all within alarm_repeat (28 days), it is no new news
+  T.eq(#needed(W, 'patient_thirst'), 2, 'BUG-744: the same patient and verdict again within alarm_repeat: no wake')
+  day(W, 29)                                                  -- alarm_repeat has passed: the verdict still stands, ask again
+  T.ok(#needed(W, 'patient_thirst') >= 3, 'after alarm_repeat the same patient and verdict are announced again')
 end)
 
 T.test('hospital gate (FR-31/34): HOSPITAL_DRY when the dry episode starts; BUG-008: again only for news, after max(a week, 10 min)', function()

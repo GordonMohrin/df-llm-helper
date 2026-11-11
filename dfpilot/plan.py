@@ -2961,9 +2961,9 @@ def defense_gaps(s: dict | None, fort: dict | None = None) -> list[str]:
     mil = s.get("mil") or {}
     soldiers = mil.get("soldiers") or (s.get("pop") or {}).get("soldiers") or 0
     worn = mil.get("worn", r.get("worn"))
-    wpk = r.get("wpk")                      # BUG-742: the kernel reads the best worn % of 45 days (the instant value swings with every militia turn)
-    if _nat(worn) and _nat(wpk):
-        worn = max(worn, wpk)
+    wpk = r.get("wpk")                      # BUG-742: the kernel reads the median worn % of 45 days (the instant value swings with every militia turn)
+    if _nat(wpk):
+        worn = wpk
     kit = mil.get("kit") or {}
     if _nat(soldiers) and soldiers > 0:
         if _nat(worn) and worn < DEFENSE_WORN:
