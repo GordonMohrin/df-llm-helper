@@ -275,16 +275,32 @@ end)
 
 T.test('fortcore aquifer=pass waits for a passed shaft, then digs in observe mode', function()
   local W = fresh{tag = 'fcpass'}
-  H.place(W, 'fc', H.dig_doc(1, {tpl = 'fortcore', z = 90, params = {stage = 1, aquifer = 'pass'}}))
+  H.place(W, 'fc', H.dig_doc(1, {tpl = 'fortcore', z = 99, params = {stage = 1, aquifer = 'pass'}}))
   H.runs(W, 2)
-  T.eq(W.tile(10, 10, 90).dig, '', 'no dig below the aquifer before the shaft passed')
+  T.eq(W.tile(10, 10, 99).dig, '', 'no dig below the aquifer before the shaft passed')
   local function row(id) for _, r in ipairs(W.state().proj) do if r[1] == id then return r end end end
   T.ok(row('fc')[4]:find('aquifer', 1, true), T.show(row('fc')))
   H.place(W, 'aq6', shaft_doc{depth = 2, dry = 1})
   for _ = 1, 4 do H.runs(W, 1); H.dig(W) end
   T.ok(until_(W, function() return H.proj(W, 'aq6').done == 1 end, 4), 'the shaft passed (no aquifer met)')
-  T.ok(until_(W, function() return W.tile(10, 10, 90).dig == 'd' end, 3), 'the fortcore digs below the passed shaft')
+  T.ok(until_(W, function() return W.tile(10, 10, 99).dig == 'd' end, 3), 'the fortcore digs below the passed shaft')
   T.eq(rec(W, 'fc').mode, 'observe')
+end)
+
+T.test('BUG-723: a shaft that ended above the core deepest level is no pass for fortcore aquifer=pass', function()
+  local W = fresh{tag = 'fcpassdeep'}
+  H.place(W, 'fc', H.dig_doc(1, {tpl = 'fortcore', z = 90, params = {stage = 1, aquifer = 'pass'}}))
+  H.place(W, 'aq6', shaft_doc{depth = 2, dry = 1})                  -- z100-z99, no aquifer met, the core digs at z90
+  for _ = 1, 4 do H.runs(W, 1); H.dig(W) end
+  T.ok(until_(W, function() return H.proj(W, 'aq6').done == 1 end, 4), 'the shaft is done (no aquifer within its depth)')
+  H.runs(W, 3)
+  T.eq(W.tile(10, 10, 90).dig, '', 'the core does not dig: the shaft never saw the levels down to z90')
+  local row
+  for _, r in ipairs(W.state().proj) do if r[1] == 'fc' then row = r end end
+  T.ok(row[4]:find('shaft ends z99, core z90', 1, true), T.show(row))
+  T.eq(AQ.passed(W.K.persist.get('m.runner')), {id = 'aq6', x = AX, y = AY, top = AT, bot = 99}, 'without a depth the shaft still counts')
+  T.eq((AQ.passed(W.K.persist.get('m.runner'), 90)), nil, 'with the core depth it does not')
+  T.eq(select(2, AQ.passed(W.K.persist.get('m.runner'), 90)), {id = 'aq6', bot = 99})
 end)
 
 T.test('BUG-662: a shaft plugged for an unbuilt ring wall (cav why=ring_wall, open/failed) is no open cavern', function()
