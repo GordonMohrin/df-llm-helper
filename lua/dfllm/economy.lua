@@ -7983,6 +7983,22 @@ function M.wall_stock(K)
           soil = type(rk) == 'table' and rk.soil == true}
 end
 
+-- BUG-745: how many active citizens have the Building Construction labor on (the ring walls, plug and seal walls need one); nil before the first
+-- census or when the labor cannot be read
+function M.wall_builders(K)
+  local cu = K.census.u
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return nil end
+  local n, read = 0, false
+  for _, id in ipairs(cu.ids) do
+    local u = df.unit.find(id)
+    if u and not dfhack.units.isDead(u) and dfhack.units.isActive(u) then
+      local ok, v = pcall(function() return u.status.labors[df.unit_labor.BUILD_CONSTRUCTION] end)
+      if ok and v ~= nil then read = true; if v == true then n = n + 1 end end
+    end
+  end
+  return read and n or nil
+end
+
 -- BUG-736 (Run 16c i3 Doorwings y381/y382: the aqshaft ring wall at z140 'unbuilt for 31-32 d' twice, census wood 385-440, blocks 132 with blocks_free 0,
 -- boulders only ore / flux or reserved: the walls waited for a boulder nobody could hand over while buildingplan kept boulders ON, because
 -- the switch to logs needed a stone DF had refused (stone_none) and a planned building in the job scan): a wall (ring, plug, seal, depot) that

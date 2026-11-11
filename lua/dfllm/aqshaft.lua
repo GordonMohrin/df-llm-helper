@@ -208,6 +208,8 @@ local STALL_CMD = {
   ring_stuck = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm cmd inspect '{\"what\":\"reach\"}'; dfllm cmd bp.cancel proj=%s",
   -- BUG-662: the ring wall is designated and nobody builds it (no hard stone the builders accept, no mason, a suspended job)
   ring_wall = "dfllm cmd inspect '{\"what\":\"workload\"}'; dfllm cmd inspect '{\"what\":\"orders\"}'; dfllm cmd bp.cancel proj=%s",
+  -- BUG-745: no citizen has the construction labor for the ring walls: nothing is channelled until one has
+  ring_builder = "dfllm cmd inspect '{\"what\":\"workload\"}' (Building Construction labor, work details); dfllm cmd bp.cancel proj=%s",
 }
 local STALL_TXT = {
   unreachable = 'no citizen reaches the shaft tile',
@@ -218,6 +220,7 @@ local STALL_TXT = {
   no_boulders = 'no free boulders, blocks or logs for the ring walls (soil: the stone lies deeper)',   -- BUG-443, BUG-631: logs count too
   ring_stuck = 'the ring has not moved',                                                        -- BUG-443
   ring_wall = 'the ring wall is designated and not built',                                      -- BUG-662
+  ring_builder = 'no citizen has the construction labor for the ring walls: nothing is channelled yet',   -- BUG-745
 }
 -- BUG-473 (Run 16a i1 Basementflew y374: the level z127 waited 4 days for a mason, then the player placed the Masons by hand): soil
 -- walls (and a plug) need a Mason's workshop; it is asked for (PROJECT_REQUEST workshops why=masonry, types Masons; follow places it
@@ -564,6 +567,25 @@ local function ring_stacked(X, P, d, r, z, L)
   return false
 end
 
+-- BUG-745 (Run 16c i3 Doorwings y392, 7th shaft at z140: the ring tile was channelled open into the heavy layer with buildingplan still on
+-- boulders (stone free 0), the wall 'designated and nobody builds it' for 2 d, wall_alt switched to logs only then, the water came first;
+-- six earlier shafts the same way): the opening of a ring tile (the channel) is allowed only when its wall can be built AT ONCE. Before it:
+-- the material for every wall still missing is counted (plug_missing), the wall's material route is resolved NOW (X.wall_alt: logs / ore /
+-- flux, buildingplan set) and a citizen with the construction labor exists (X.builders). Otherwise the level stalls with NOTHING open:
+-- a dry stopped shaft, never a flooded one. true = the tile may be channelled
+local function ring_ready(X, P, r, z, L, R)
+  local left = 0
+  for _, q in ipairs(R.pieces) do if q[3] ~= 'done' then left = left + 1 end end
+  local miss, detail = plug_missing(X, math.max(left, 1), P)
+  if miss then stall(X, P, r, z, L, miss, nil, detail); return false end
+  if type(X.builders) == 'function' and X.builders() == 0 then
+    stall(X, P, r, z, L, 'ring_builder', nil, nil); return false
+  end
+  if type(X.wall_alt) == 'function' then X.wall_alt(P) end             -- the route is set before anything is open, not after ring_wait
+  if L.stall ~= nil and (L.stall.why == 'ring_builder' or L.stall.why == 'no_boulders') then unstall(X, L) end
+  return true
+end
+
 -- one pass of the ring of level z: nil = the ring stands (the shaft tile may be dug), else the work result
 function A.ring_step(X, P, d, r, z, L)
   local R = L.ring
@@ -615,6 +637,7 @@ function A.ring_step(X, P, d, r, z, L)
         if bot and bot.c == 'C' then pc[3] = 'done'; X.moved(P)
         elseif open_tile(bot) then pc[3] = 'open'                            -- an open tile already: only the wall is missing
         else
+          if not ring_ready(X, P, r, z, L, R) then return 'done' end         -- BUG-745: nothing is opened that cannot be walled at once
           local got = designate(X, P, pc[1], pc[2], z + 1, 'h', true)        -- one tile at a time: one open ring tile at most
           if got == nil then waits('no quickfort call left in the slice for the channel'); return 'yield' end
           if not got then
@@ -657,6 +680,7 @@ function A.ring_step(X, P, d, r, z, L)
         local miss, detail = plug_missing(X, left, P)     -- BUG-443: an open ring tile with no wall material: said, not designated blind
         if miss == 'no_boulders' then stall(X, P, r, z, L, miss, nil, detail); return 'done' end
         if L.stall ~= nil and L.stall.why == 'no_boulders' then unstall(X, L) end
+        if type(X.wall_alt) == 'function' then X.wall_alt(P) end             -- BUG-745: the wall is designated with the usable material
         local ok, st = X.qf{mode = 'build', data = cell1('Cw'), pos = {pc[1], pc[2], z}}
         local n = ok and type(st) == 'table' and int(st.build_designated) or nil
         if not ok or (n ~= nil and n <= 0) then
