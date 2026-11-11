@@ -1117,9 +1117,12 @@ def _marks_of(snap: dict, kind: str) -> set:
     return {tuple(q) for q in (snap.get("marks") or {}).get(kind, []) if isinstance(q, (list, tuple)) and len(q) == 3}
 
 
-def farm_ground_why(snap: dict, manifest: dict | None) -> str:
+def farm_ground_why(snap: dict, manifest: dict | None, params: dict | None = None) -> str:
     """BUG-407 (Run 16a i1 Bachwald: 'only 0 free site(s) for farms surface=1' on a mountain, 13 thirsty citizens died): why a
-    surface farm has no site, with the ground it looked at and what is left to do (the DECISION: trade, or a plot by hand)."""
+    surface farm has no site, with the ground it looked at and what is left to do (the DECISION: trade, or a plot by hand).
+    BUG-696 (Run 16c i3 Wallfree y431-y433: '2836 soil tiles but no plot block fits', which condition cut them was not said, 28
+    starved): the blocks looked at counted per first failing condition (a non-soil floor tile in the block, the fort's own tiles,
+    water beside mud, another walk group), and the smallest plot size (p.size) that does fit, when one does."""
     soil, mud = _marks_of(snap, "soil"), _marks_of(snap, "mud")
     floors = sum(str(r).count(".") for rows in (snap.get("rows") or {}).values() for r in rows)
     if not soil and not mud:
@@ -1128,12 +1131,38 @@ def farm_ground_why(snap: dict, manifest: dict | None) -> str:
                 "(trade.want food seeds), dig down to a soil layer (explore), or wait for rain to mud a floor and run "
                 "`dfllm bp sites farms surface=1 --fresh` again; irrigation by a channel to water is risky, never near the "
                 "fort's wells")
-    return (f"farms surface=1: {len(soil)} soil and {len(mud)} mud floor tiles, but no plot block fits (the blocks overlap the "
-            "fort's own tiles, a wall, a tree or water, or lie on another walk group than the citizens'); DECISION: fewer plots "
-            "(p.plots=1), another spot (`bp sites farms surface=1 --near x,y,z`) or trade for food and seeds")
+    size0 = int((params or {}).get("size") or 0)
+    plots = (params or {}).get("plots")
+    base = {"plots": plots if isinstance(plots, int) and not isinstance(plots, bool) else 1, "surface": 1}
+    try:
+        man = manifest or {}
+        why: dict = {}
+        _surface_farms(snap, {**base, "size": size0}, man, why)
+        fits = []
+        for size in range(size0 + 1, len(rooms.PLOT_SIZES)):
+            n = len(_surface_farms(snap, {**base, "size": size}, man))
+            if n:
+                fits.append((size, n))
+                break
+    except (ValueError, KeyError, TypeError):
+        why, fits = {}, []
+    w, h = rooms.PLOT_SIZES[size0]
+    cut = [f"{why[k]} {txt}" for k, txt in (("gap", "hold a floor tile that is no soil or mud (speckled ground)"),
+                                           ("keep", "overlap the fort's own tiles (rooms, shops, stairs, the way in)"),
+                                           ("wet", "lie by water (mud floods)"),
+                                           ("walk", "lie on another walk group than the citizens'")) if why.get(k)]
+    tail = ""
+    if fits:
+        size, n = fits[0]
+        tail = (f"; a {rooms.PLOT_SIZES[size][0]}x{rooms.PLOT_SIZES[size][1]} plot fits in {n} place(s): "
+                f"`bp.place tpl=farms site=S1 p.surface=1 p.size={size}` (bp.place tries the smaller plots by itself)")
+    return (f"farms surface=1: {len(soil)} soil and {len(mud)} mud floor tiles, but no {w}x{h} plot block fits "
+            f"({why.get('blocks', 0)} blocks looked at: " + ("; ".join(cut) if cut else "none cut by a rule") + ")" + tail +
+            "; DECISION: fewer or smaller plots (p.plots=1, p.size), another spot (`bp sites farms surface=1 --near x,y,z`) or "
+            "trade for food and seeds")
 
 
-def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
+def _surface_farms(snap: dict, p: dict, manifest: dict, why: dict | None = None) -> list[dict]:
     """BUG-297 (Run 15c Inkintense y376: `bp sites farms --fresh` 0 ranked, the BUG-257 soil rule refused every undug site
     and nothing else was offered; one plot for 50 citizens in a famine): farms p.surface = 1 sites. Every plot tile is a
     revealed floor ('.') with a soil mark (the snapshot's revealed soil, as the vanilla UI shows it), nothing is dug; the
@@ -1144,7 +1173,8 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
     as ground (snapshot marks.mud, quickfort's has_mud: farm plots stand on soil or mud) when no tile of the block lies within
     MUD_WET_R of water; (2) when no block lies inside Z4 or near the entrance (no entrance at all without a fortcore), the
     soil or mud anywhere on the citizens' walk group is offered, FAR_SCORE minus the tiles to the entrance, the depot or the
-    middle of the snapshot."""
+    middle of the snapshot. BUG-696: `why` (a dict, filled) counts the blocks looked at and the first condition that
+    cut each one (gap / keep / wet / walk), for farm_ground_why."""
     soil, mud = _marks_of(snap, "soil"), _marks_of(snap, "mud")
     ground = soil | mud
     if not ground:
@@ -1188,13 +1218,21 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
                         break
                 if not ok:
                     break
+            if why is not None:
+                why["blocks"] = why.get("blocks", 0) + 1
             if not ok or not tiles:
+                if why is not None:
+                    why["gap"] = why.get("gap", 0) + 1
                 continue
             box = (min(t[0] for t in tiles), min(t[1] for t in tiles), az, max(t[0] for t in tiles),
                    max(t[1] for t in tiles), az)
             if any(_overlap(box, k) for k in keep):
+                if why is not None:
+                    why["keep"] = why.get("keep", 0) + 1
                 continue
             if nmud and (wet.count(box[0] - MUD_WET_R, box[1] - MUD_WET_R, box[3] + MUD_WET_R, box[4] + MUD_WET_R, az) or 0):
+                if why is not None:
+                    why["wet"] = why.get("wet", 0) + 1
                 continue                                # BUG-407: mud beside water floods (irrigation is risky)
             roofed = any(inside(box, b) for b in z4)
             d = min((box_dist(list(e), list(box)) for e in edge if e[2] == az), default=None)
@@ -1206,6 +1244,8 @@ def _surface_farms(snap: dict, p: dict, manifest: dict) -> list[dict]:
                                  "why": f"rot{rot}, surface farm on {what} {where}, {len(tiles)} plot tiles, nothing dug"})
             else:
                 if "0" in (walk_at(snap, (box[0], box[1], az)), walk_at(snap, (box[3], box[4], az))):
+                    if why is not None:
+                        why["walk"] = why.get("walk", 0) + 1
                     continue                            # another walk group than the citizens'
                 dd = max(abs((box[0] + box[3]) // 2 - cx), abs((box[1] + box[4]) // 2 - cy))
                 far_out.append({"anchor": [ax, ay, az], "rot": rot, "score": max(0, FAR_SCORE - dd - (30 if nmud else 0)),

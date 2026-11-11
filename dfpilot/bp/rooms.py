@@ -61,7 +61,8 @@ PARAMS = {
     "tradepost": {},                  # BUG-488: SURFACE too: the trade pile beside the depot (no fortcore needed)
     # BUG-297: surface = 1 builds the plots on soil floor that stands already (no dig, no door, no burrow): sites.rank
     # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
-    "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1)},
+    # BUG-696: size = the plot's size step of a surface farm (PLOT_SIZES: 0 = 5x7, 1 = 5x4, 2 = 4x4, 3 = 3x3, 4 = 2x2)
+    "farms": {"plots": (2, 1, 4), "surface": (0, 0, 1), "size": (0, 0, 4)},
     "furnaces": {"wood": (1, 0, 2)},
     # BUG-396: surface = 1 is the office on open surface floor beside the wagon (no fortcore, nothing dug, no door, no burrow)
     "office": {"role": ("manager", None, None), "surface": (0, 0, 1)},
@@ -407,20 +408,29 @@ def tradepost(p: dict) -> Plan:
     return P
 
 
+PLOT_SIZES = ((5, 7), (5, 4), (4, 4), (3, 3), (2, 2))     # BUG-696: (width, height) of one farm plot by p.size
+
+
 def farms(p: dict) -> Plan:
     """Underground farm: `plots` 5x7 farm plots (need soil or mud) beside a centre aisle.
     quickfort skips non-soil tiles (build.lua:102-104), so sites.rank prefers soil marks and shallow levels."""
     P = Plan("farms", "infra")
     n = p["plots"]
     cols, rows = min(n, 2), -(-n // 2)
+    size = p.get("size", 0)
+    if size and not p.get("surface"):
+        raise ValueError("farms: p.size (smaller plots) is for a surface farm (p.surface=1); a dug farm room keeps its 5x7 plots")
     if p.get("surface"):
         # BUG-297 (Run 15c Inkintense: no room site on soil, one plot for 50 citizens, a famine): plots on soil floor
         # that is already there, anchor = the plot block's north-west corner; nothing is dug, no door, no burrow paint
-        W, H = 5 if cols == 1 else 11, 8 * rows - 1
+        # BUG-696 (Run 16c i3 Wallfree y431-y433: 2836 soil tiles, speckled with non-soil floor, no 5x7 block, 28 starved): p.size
+        # picks a smaller plot (5x4, 4x4, 3x3, 2x2); a farm plot of any size grows the same crops
+        pw, ph = PLOT_SIZES[size]
+        W, H = pw if cols == 1 else 2 * pw + 1, (ph + 1) * rows - 1
         b = P.stage("build", "build")
         for i in range(n):
             r, c = divmod(i, cols)
-            b.ent(6 * c, 8 * r, 6 * c + 4, 8 * r + 6, 0, "p")
+            b.ent((pw + 1) * c, (ph + 1) * r, (pw + 1) * c + pw - 1, (ph + 1) * r + ph - 1, 0, "p")
         P.room("", "farms", USE.get("farms", "utility"), (0, 0, 0, W - 1, H - 1, 0), 0)
         return P
     box = _box(P, 5 if cols == 1 else 11, 8 * rows - 1)

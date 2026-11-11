@@ -2123,7 +2123,7 @@ def farm_hint(save_dir: Path, tpl: str, params: dict | None, snap: dict | None, 
         if not snap:
             return ""
         if (params or {}).get("surface"):    # BUG-407: the ground a surface farm looked at, and the DECISION
-            return load_bp("sites").farm_ground_why(snap, fort_manifest(save_dir))
+            return load_bp("sites").farm_ground_why(snap, fort_manifest(save_dir), params)
         return load_bp("sites").farm_soil_why(snap, fort_manifest(save_dir))
     except (BpUnavailable, AttributeError):
         return ""
@@ -2188,6 +2188,37 @@ def fewer_plots(tpl: str, params: dict | None) -> list[int]:
     except (BpUnavailable, AttributeError, KeyError, TypeError, ValueError):
         return []
     return list(range(int(n) - 1, 0, -1))
+
+
+def smaller_plots(tpl: str, params: dict | None) -> list[dict]:
+    """BUG-696 (Run 16c i3 Wallfree y431-y433: 2836 soil tiles speckled with non-soil floor, no 5x7 block, 'plots=1' was the end of the
+    ladder, 28 starved): farms p.surface -> the smaller plot sizes (p.size, rooms.PLOT_SIZES) to fall back to once fewer plots (BUG-316)
+    found nothing, as {size, plots} overrides, the largest total area first; [] for anything else."""
+    if tpl != "farms" or not (params or {}).get("surface"):
+        return []
+    try:
+        base = load_bp("emit").check_params(tpl, dict(params or {}))
+        sizes = load_bp("rooms").PLOT_SIZES
+    except (BpUnavailable, AttributeError, KeyError, TypeError, ValueError):
+        return []
+    n, cur = int(base["plots"]), int(base.get("size", 0))
+    steps = [{"size": sz, "plots": k} for sz in range(cur + 1, len(sizes)) for k in range(n, 0, -1)]
+    steps.sort(key=lambda o: (-o["plots"] * sizes[o["size"]][0] * sizes[o["size"]][1], o["size"]))
+    return steps
+
+
+def smaller_plots_sites(save_dir: Path, tpl: str, params: dict | None, snap: dict | None = None, n: int = 3,
+                        where: dict | None = None) -> tuple[dict, list[dict], str, int] | None:
+    """BUG-696: (the {size, plots} override, free sites, snapshot id, ranked) at the first smaller plot size that has a free surface
+    farm site (smaller_plots), None when none has one or `params` is no surface farm."""
+    for o in smaller_plots(tpl, params):
+        try:
+            out, snap_id, ranked = free_sites(save_dir, tpl, {**(params or {}), **o}, snap, n=n, where=where)
+        except (BpError, BpUnavailable, ValueError):
+            continue
+        if out:
+            return o, out, snap_id, ranked
+    return None
 
 
 def core_depth(params: dict | None) -> int:
@@ -2396,8 +2427,9 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
                                   "open surface floor (p.surface=1)")
             return doc
         steps = fewer_plots(tpl, params) if ranked else []
+        small = smaller_plots(tpl, params) if ranked else []
         shallow = shallower_core(tpl, params) if ranked else []
-        if not steps and not shallow:
+        if not steps and not shallow and not small:
             raise
         first = e
     for d in shallow:                                     # BUG-364: a shallower core clears the aquifer or fits the site
@@ -2409,9 +2441,9 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
                               f"level(s) under the defense level; give depth= to every later stage, or place them at "
                               f"site=same, which keeps it)")
         return doc
-    if not steps:
+    if not steps and not small:
         raise BpError(f"{first}; BUG-364: no shallower core (depth {'/'.join(str(d) for d in shallow)}) has a free site either")
-    tried = f"plots={steps[0]}" + (f"..{steps[-1]}" if len(steps) > 1 else "")
+    tried = f"plots={steps[0]}" + (f"..{steps[-1]}" if len(steps) > 1 else "") if steps else ""
     for k in steps:
         try:
             doc = _place(save_dir, tpl, {**(params or {}), "plots": k}, label, bp_id, occ, same, snap, need)
@@ -2420,7 +2452,18 @@ def place(save_dir: Path, tpl: str, params: dict | None, label: str, bp_id: str,
         PLACE_NOTES[bp_id] = (f"BUG-316: no free surface farm site for plots={steps[0] + 1} (trees, buildings or the "
                               f"way in cut the larger block): placed plots={k}")
         return doc
-    raise BpError(f"{first}; BUG-316: no smaller surface farm ({tried}) has a free site either")
+    for o in small:                                       # BUG-696: smaller plots (5x4 .. 2x2) on speckled or cluttered ground
+        try:
+            doc = _place(save_dir, tpl, {**(params or {}), **o}, label, bp_id, occ, same, snap, need)
+        except BpError:
+            continue
+        w, h = load_bp("rooms").PLOT_SIZES[o["size"]]
+        PLACE_NOTES[bp_id] = (f"BUG-696: no free surface farm site for the 5x7 plots (the soil is cut by non-soil floor, trees, "
+                              f"buildings or the way in): placed {o['plots']} plot(s) of {w}x{h} (p.size={o['size']})")
+        return doc
+    raise BpError(f"{first}; " + (f"BUG-316: no smaller surface farm ({tried}) has a free site either" if steps else "")
+                  + ("; " if steps and small else "") +
+                  (f"BUG-696: no smaller plot size ({len(small)} size/plot combinations) has a free site either" if small else ""))
 
 
 def first_core(save_dir: Path, skip: str = "") -> tuple[str, list] | None:

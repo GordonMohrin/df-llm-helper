@@ -44,6 +44,7 @@
   "params": {
    "burrow": "Kern+",
    "plots": 2,
+   "size": 0,
    "surface": 0
   },
   "rot": 0,

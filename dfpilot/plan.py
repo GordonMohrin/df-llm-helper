@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import cmd as _cmd, files, paths, relocate as _reloc, schema, traps as _traps
 from .cmd import (PLACE_NOTES, SAME, SEAL_AUDIT, WATER_NEAR, BpError, BpUnavailable, _moodable, audit_routes, bp_files,
-                  fewer_plots_sites, fmt_reply, fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy,
+                  fewer_plots_sites, smaller_plots_sites, fmt_reply, fort_manifest, free_sites, last_entrances, load_bp, log_seal, occupancy,
                   place, rank_sites, refuge_stair, refuge_open, seal_openings, send, sites_snapshot, template_info,
                   template_names, water_near, write_bp)
 from .cmd import SealClosed
@@ -492,6 +492,9 @@ def farm_site_plots(save_dir: Path, urgent: bool = False) -> tuple[str | None, i
             fewer = fewer_plots_sites(save_dir, "farms", prm, n=1)
             plots = fewer[0] if fewer else None
             free = fewer[1] if fewer else []
+            if not free:                          # BUG-696: speckled soil: smaller plots (bp.place falls back to them itself)
+                small = smaller_plots_sites(save_dir, "farms", prm, n=1)
+                free = small[1] if small else []
         if free:
             return kind, plots
     return "none", None
@@ -500,17 +503,9 @@ def farm_site_plots(save_dir: Path, urgent: bool = False) -> tuple[str | None, i
 def farm_site(save_dir: Path, urgent: bool = False) -> str | None:
     """BUG-297/300: 'room' (a farms room site is free on the newest sites snapshot), 'surface' (only a surface site on
     soil floor, p.surface = 1), 'none' (neither), None (no sites snapshot: unknown). BUG-460: `urgent` looks up the surface
-    plots with plan.surface_core off too."""
-    if sites_snapshot(save_dir) is None:
-        return None
-    for kind, prm in _farm_kinds(urgent):
-        try:
-            free, _, _ = free_sites(save_dir, "farms", prm, n=1)
-        except (BpError, BpUnavailable):
-            free = []
-        if free:
-            return kind
-    return "none"
+    plots with plan.surface_core off too. BUG-696 (Run 16c i3 Wallfree: the famine decision offered no farm command although fewer
+    or smaller plots fit): the surface kind counts the fewer and the smaller plots too (farm_site_plots)."""
+    return farm_site_plots(save_dir, urgent)[0]
 
 
 def farm_site_fix(builds: list, s: dict | None, fort: dict | None) -> tuple[list, str]:
