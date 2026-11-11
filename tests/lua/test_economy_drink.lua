@@ -198,8 +198,12 @@ T.test('BUG-042 live replay: an office without chair and table gets them placed;
   days(W, 10)
   T.eq(#ctl.repairs, 1, 'nothing placed once they stand')
   T.eq(#W.find_events('MANAGER_OFFICE'), 1)
-  T.eq(#decisions(W, 'manager_office'), 1)
+  -- BUG-767: the brews of this replay do not move for 6 days with a Still and plants there, so the brew watch makes the order again; the mock
+  -- leaves the new order unvalidated, which the office check reports once more (at most one more decision)
+  T.ok(#decisions(W, 'manager_office') <= 2)
   T.ok(log_has(W, 'manager office 18631: chair and table stand'), 'the end is logged')
+  for _, o in ipairs(df.global.world.manager_orders.all) do o.status = {validated = true} end    -- the manager validates the order made again
+  days(W, 2)
   s = W.state()
   T.eq({s.orders.mgr, s.orders.unval}, {nil, nil})
   T.ok(not (s.stock.dwhy or ''):find('validation', 1, true), tostring(s.stock.dwhy))
