@@ -2499,6 +2499,10 @@ function Q.aqx(K)
       local ok, t = K.call('economy', 'wall_alt')
       return ok and type(t) == 'string' and t or nil
     end,
+    builders = function()                      -- BUG-745: citizens with the construction labor (nil: unknown)
+      local ok, n = K.call('economy', 'wall_builders')
+      return ok and math.tointeger(n) or nil
+    end,
     wall_stock = function()                    -- BUG-443: the COUNT of free blocks, boulders and logs for walls (nil: unknown)
       local ok, st = K.call('economy', 'wall_stock')
       return ok and type(st) == 'table' and st or nil

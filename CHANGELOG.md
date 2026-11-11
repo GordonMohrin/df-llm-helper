@@ -1,4 +1,9 @@
 # CHANGELOG dfpilot
+## Round 48 (ring): no ring tile is opened before its wall can be built (BUG-745, 2026-11-11; offline, live-untested)
+- **Why:** Run 16c i3 Doorwings y392: the 7th aqshaft at z140 channelled its ring tile open while buildingplan took boulders and stone was 0; the wall waited 2 d, wall_alt switched to logs only then, the water came first (CAVERN_PLUG). Six shafts before failed the same way.
+- **BUG-745:** `aqshaft.ring_ready` before every channel: wall material counted for all missing walls, a citizen with the construction labor (`economy.wall_builders`, hook `X.builders`), the wall route resolved now (`X.wall_alt`); else the level stalls (`no_boulders`, `ring_builder`) with nothing open.
+- **Contract:** economy `wall_builders()`; stall `ring_builder` (PROJECT_BLOCKED `aq_stall:ring_builder`). **Test:** tests/lua/test_bug745_ring_ready.lua (4). No bridge, gate, refuge, lockdown or seal behaviour changed.
+- **Open:** the ramp must still be open while the wall is built; not run live.
 ## Round 47 (stone): explore finds sites again, stone is counted once and explained, `trade.want stone` skips ore, the stone-use setting is a decision, probes go deeper (BUG-732 to BUG-735, 2026-11-11; offline, live-untested)
 - **Why:** stone supply 0 in all four forts (main 5006f415). Run 16a i1 Basementflew: `bp sites explore` "5 ranked, 5 projects hold them (explore finished)". Run 16b i2 Whirledrampart: explore done y431, stone free 0 need 29-32 for 65 days. Run 16c i3 Doorwings: `trade.want stone` bought economic boulders (ledger "bought stone BOULDER x4"). Run 16d i4 Pagedsculpture: five explore probes ended at the same level, soil fort.
 - **BUG-732:** `cmd.FREE_RANK_TPLS` + `explore`; `sites.rank` hands the free test the depth and arm being ranked; the depth ladder goes on when every site of a depth is taken. The i1 save copy: 0 free sites before, 1 after.
