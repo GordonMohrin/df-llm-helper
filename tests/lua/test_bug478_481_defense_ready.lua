@@ -135,6 +135,8 @@ T.test('BUG-481: traps_short: 8 armed traps on the weakest path against the sieg
   T.eq(W.state().pop.cap, 100, 'held at the population after the grace days')
   audit(W, {min_traps = 40})                               -- the hall is built
   day(W, 2)
+  T.eq(W.state().pop.cap, 100, 'BUG-742: held for clear_days more (a dip must not lift it)')
+  day(W, 9)
   T.ok(not has(W.state().ready.fail, 'traps_short'), T.show(W.state().ready.fail))
   T.eq(W.state().pop.cap, 120, 'the hold is lifted')
 end)

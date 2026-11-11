@@ -129,6 +129,8 @@ T.test('BUG-601: soldiers in armor worn under 60 % hold max-pop at the populatio
   T.eq(W.state().pop.hold, 'defense_short 110+')
   W.worn = 70
   day(W, 3)
+  T.eq(W.state().pop.cap, 100, 'BUG-742: worn again, held for clear_days')
+  day(W, 8)
   T.eq(W.state().pop.cap, 120, 'armor worn: the hold is lifted')
   T.eq(ready(W).as, nil)
 end)

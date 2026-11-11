@@ -827,6 +827,9 @@ function M.wearable(a, it)
   local mr, race = it.maker_race, df.global.plotinfo.race_id
   if mr ~= nil and race ~= nil and mr >= 0 and race >= 0 and mr ~= race then return false end
   if a.far and a.far(it) then return false end
+  -- BUG-743: a piece DF keeps assigned to a squad position and nobody fetches (released twice and still lying, or out of the soldiers' reach)
+  -- is no piece of the fort's gear either: the slot counts it missing and a fresh one is ordered
+  if a.stuck and a.stuck[it.id] then return false end
   return true
 end
 
@@ -14084,6 +14087,10 @@ function M.step(K, budget, ctx)
   M.first_boost(K)
   if not (ctx and ctx.cont) or not (st.census or st.run) then
     st.census, st.run = {acc = new_acc(c), ci = 1, idx = 0, errs = 0, start = K.now().tick}, nil
+    do                                             -- BUG-743: the gear pieces military wrote off
+      local okk, ids = K.call('military', 'stuck_ids')
+      st.census.acc.stuck = okk and type(ids) == 'table' and ids or nil
+    end
     st.census.acc.far = function(it, strict)
       local x, y, z = dfhack.items.getPosition(it)
       if not x then return false end

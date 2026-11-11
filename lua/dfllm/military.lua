@@ -56,6 +56,9 @@ M.SIZE = 10                 -- DF squads have 10 positions; position 0 is the le
 M.R2_MIN, M.R2_ADULTS = 8, 40   -- R2 needs >= 8 soldiers; aim for it once 8 is <= 20 % of adults
 M.XBOW_SHARE = 30           -- % of the army in the crossbow squad (doctrine: 4-5 of 15)
 M.FAST, M.SLOW = 600, 3600  -- upkeep cadence outside / in PEACE
+-- BUG-743: a position the refit moved down to any material stays off the climb to metal RF_HOLD ticks (60 game days), twice as long each time
+-- it is moved down again, at most RF_HOLD_MAX (8x)
+M.RF_HOLD, M.RF_HOLD_MAX = 72000, 576000
 M.UNSTICK = 33600           -- uniform-unstick --all --free (BUG-050: --drop only on an opt-in), at most monthly, PEACE only
 M.ADD_PER_STEP = 5
 M.KEEP_EXTRA = 2            -- remove soldiers only when a squad is this far above its target
@@ -894,6 +897,14 @@ end
 --             position or no position at all holds it for good (M.release_kit gives those back)
 --   stuck     released from a reservation STUCK_AFTER times and still lying there: DF does not hand it out
 M.PEND_MAX, M.ORPHAN_MIN, M.STUCK_AFTER = 2400, 1200, 2
+-- BUG-743: the gear pieces nobody will wear: released STUCK_AFTER times and still lying, or reserved for an occupied position out of its soldiers'
+-- reach (economy's gear census counts them as missing, so a fresh piece is ordered). {item id = true}
+function M.stuck_ids()
+  local out = {}
+  for id in pairs(rt and rt.stuck or {}) do out[id] = true end
+  for id in pairs(rt and rt.unreach or {}) do out[id] = true end
+  return out
+end
 M.REL_EVERY, M.REL_MAX = 1200, 30
 local RES_KEYS = {'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD'}
 local RES_CATS = {'body', 'head', 'pants', 'gloves', 'shoes', 'shield', 'weapon'}
@@ -4506,6 +4517,42 @@ function M.manager_pull(K, force)
   return false
 end
 
+-- BUG-743: how long a position moved down n times stays off the climb to metal
+function M.refit_hold_ticks(n)
+  n = math.max(1, math.min(8, int(n) or 1))
+  return math.min(M.RF_HOLD_MAX, M.RF_HOLD * (1 << (n - 1)))
+end
+
+-- BUG-743: the persisted form {cat = {['pos'] = {t, n}}} (string keys: JSON) and back to {cat = {[pos] = {t, n}}}
+function M.refit_hold_save(h)
+  local out
+  for c, set in pairs(h or {}) do
+    for pos, rec in pairs(set) do
+      out = out or {}
+      out[c] = out[c] or {}
+      out[c][tostring(pos)] = {t = rec.t, n = rec.n}
+    end
+  end
+  return out
+end
+function M.refit_hold_load(t)
+  if type(t) ~= 'table' then return nil end
+  local out
+  for c, set in pairs(t) do
+    if type(c) == 'string' and type(set) == 'table' then
+      for pos, rec in pairs(set) do
+        local ps = tonumber(pos)
+        if ps and type(rec) == 'table' and int(rec.t) then
+          out = out or {}
+          out[c] = out[c] or {}
+          out[c][math.floor(ps)] = {t = int(rec.t), n = math.max(1, math.min(8, int(rec.n) or 1))}
+        end
+      end
+    end
+  end
+  return out
+end
+
 -- FR-100: the material refit of squad k (dfllm.kit refit_plan): every refit_days per squad in quiet PEACE.
 -- BUG-555 (Run 16a i1 Basementflew y416-y422: a wild stegosaurus put the fort into ALERT for 1,375 of every 2,000 ticks, then a
 -- ceratosaurus into BREACH; 'squad.sortie refused: 0 of 6 soldiers hold a real weapon and wear body armor' with 18 free metal
@@ -4532,17 +4579,43 @@ function M.refit(K, k, s, now)
   for _, m in ipairs(members(s)) do
     mems[#mems + 1] = {pos = m.pos, p = m.p, kit = M.KIT.soldier(m.p, m.unit, roles(), is_metal)}
   end
-  -- BUG-591: the slots empty at the last look and the ones this refit freed from a material class (rt only: a reload primes them)
+  -- BUG-591: the slots empty at the last look (rt only: a reload primes them). BUG-743: the positions moved down to any material and when / how often
+  -- (rt.rfh[k][cat][pos] = {t, n}, kept in the squad's record e.rh over reloads)
   rt.rfe, rt.rfh = rt.rfe or {}, rt.rfh or {}
-  local plan, empty, stuck = M.KIT.refit_plan(mems, M.stock_mats, {prev = rt.rfe[k], hold = rt.rfh[k]})
-  rt.rfe[k] = empty
-  if next(stuck or {}) then
-    rt.rfh[k] = rt.rfh[k] or {}
-    for c, set in pairs(stuck) do
-      rt.rfh[k][c] = rt.rfh[k][c] or {}
-      for pos in pairs(set) do rt.rfh[k][c][pos] = true end
+  if rt.rfh[k] == nil and e.rh then rt.rfh[k] = M.refit_hold_load(e.rh) end
+  -- BUG-743 (Run 16d i4 Pagedsculpture y384-y388: kern.log 'pants of 3 positions to metal material (free metal pieces cover them)', 11,000 ticks later
+  -- 'to any material (the slot stayed empty ...)', again 'to metal' ..., 20 times in 5 years; worn 71 % -> 21 % -> 74 % each time): a position moved
+  -- down to any material climbed back to metal as soon as the stock counted a free metal piece (the spec's armor class does not take every
+  -- metal), DF dropped what the soldier wore, the metal spec stayed empty. Every position moved down is held from the climb for RF_HOLD ticks,
+  -- twice as long for each repeat
+  local hold = {}
+  for c, set in pairs(rt.rfh[k] or {}) do
+    for pos, rec in pairs(set) do
+      if now - rec.t >= 2 * M.RF_HOLD_MAX then set[pos] = nil
+      elseif now - rec.t < M.refit_hold_ticks(rec.n) then
+        hold[c] = hold[c] or {}
+        hold[c][pos] = true
+      end
     end
   end
+  local plan, empty, stuck, freed = M.KIT.refit_plan(mems, M.stock_mats, {prev = rt.rfe[k], hold = hold})
+  rt.rfe[k] = empty
+  local counted = {}
+  for _, src in ipairs({stuck or {}, freed or {}}) do
+    for c, set in pairs(src) do
+      rt.rfh[k] = rt.rfh[k] or {}
+      rt.rfh[k][c] = rt.rfh[k][c] or {}
+      for pos in pairs(set) do
+        local key = c .. ':' .. tostring(pos)
+        if not counted[key] then
+          counted[key] = true
+          local rec = rt.rfh[k][c][pos]
+          rt.rfh[k][c][pos] = {t = now, n = math.min(8, (rec and rec.n or 0) + 1)}
+        end
+      end
+    end
+  end
+  e.rh = M.refit_hold_save(rt.rfh[k])
   e.rf, dirty = now, true
   for _, r in ipairs(plan) do
     local ok, res = K.act.squad_uniform(s.id, {mode = 'replace', positions = r.positions,
@@ -4571,6 +4644,8 @@ function M.release_kit(K)
   if rt.rel_t and now >= rt.rel_t and now - rt.rel_t < M.REL_EVERY then return end
   rt.rel_t = now
   rt.pend, rt.krel, rt.stuck = rt.pend or {}, rt.krel or {}, rt.stuck or {}
+  rt.unreach = {}                                   -- BUG-743: pieces reserved for an occupied position that lie out of its soldiers' reach
+  local n_grp = 0
   local ARMOR_TYPE = {ARMOR = true, HELM = true, PANTS = true, GLOVES = true, SHOES = true, SHIELD = true}
   local keep, ids, n_occ, n_vac = {}, {}, 0, 0
   for id, r in pairs(reservations()) do
@@ -4595,6 +4670,16 @@ function M.release_kit(K)
         keep[id] = true
         local rec = rt.pend[id]
         if not rec then rec = {t = now}; rt.pend[id] = rec end
+        -- BUG-743: a piece reserved for an occupied position that lies on another walk group than the squad's soldiers: nobody fetches it
+        if waiting and now - rec.t >= M.PEND_MAX then
+          for sid in pairs(r.sqs or {}) do
+            local sq = squad(sid)
+            local hg = sq and M.home_group(K, sq)
+            local okp, x, y, z = pcall(dfhack.items.getPosition, it)
+            local pg = hg and okp and x and M.group_at(K, {x = x, y = y, z = z}) or nil
+            if hg and pg and pg > 0 and pg ~= hg then rt.unreach[id], n_grp = true, n_grp + 1; break end
+          end
+        end
         if now - rec.t >= (waiting and M.PEND_MAX or M.ORPHAN_MIN) and #ids < M.REL_MAX then
           ids[#ids + 1] = id
           if waiting then n_occ = n_occ + 1 else n_vac = n_vac + 1 end
@@ -4617,7 +4702,8 @@ function M.release_kit(K)
   end
   rt.resv, rt.kpi, rt.kit = nil, nil, nil
   K.log('info', 'military: %d gear pieces DF kept assigned to a squad position that does not wear them given back (%d for a vacant '
-        .. 'position or none, %d unfetched for %d ticks by the soldier of an occupied one)', #ids, n_vac, n_occ, M.PEND_MAX)
+        .. 'position or none, %d unfetched for %d ticks by the soldier of an occupied one%s)', #ids, n_vac, n_occ, M.PEND_MAX,
+        n_grp > 0 and string.format('; %d of the unfetched lie on a walk group the squad is not on', n_grp) or '')
 end
 
 -- BUG-688 (Run 16d i4 Trumpetrealms y447-y456: 'squad.uniform B melee: 10 positions' and B stays at armor 0 / fit 0 beside 12-22 free body
@@ -4655,6 +4741,16 @@ end
 -- position), assigned (DF assigned a piece, the soldier has not picked it up: the text says what is wrong with the piece, if anything),
 -- unlisted (a free piece lies there and DF assigned none), mat (the spec's material class matches none of the free pieces), none (no free piece in
 -- the category: the text names what keeps the lying ones back)
+-- BUG-743: the walk group of a unit and of an item (snapshot groups; nil unknown / hidden): {unit group, item group}
+function M.unit_piece_groups(K, it, unit)
+  if not (it and unit) then return nil, nil end
+  local up = try(function() return {x = int(unit.pos.x), y = int(unit.pos.y), z = int(unit.pos.z)} end)
+  local okp, x, y, z = pcall(dfhack.items.getPosition, it)
+  if not (up and up.x and up.x >= 0 and okp and x) then return nil, nil end
+  local gs, gp = M.group_at(K, up), M.group_at(K, {x = x, y = y, z = z})
+  return gs > 0 and gs or nil, gp > 0 and gp or nil
+end
+
 M.ITEM_WHY = {{'forbid', 'forbidden'}, {'owned', 'owned by a dwarf'}, {'in_building', 'in a building'}, {'melt', 'marked for melting'},
                   {'dump', 'marked for dumping'}, {'trader', "a merchant's"}}
 function M.item_why(K, it, unit)
@@ -4664,6 +4760,9 @@ function M.item_why(K, it, unit)
   if h and h ~= unit then w[#w + 1] = 'carried by unit ' .. tostring(h.id) end
   if container_blocked(it) then w[#w + 1] = 'in a forbidden bin' end
   if piece_far(it) then w[#w + 1] = 'on another walk group' end
+  -- BUG-743: the soldier himself may stand on another walk group than the piece (a raised bridge, a cut-off station): he cannot fetch it
+  local gs, gp = M.unit_piece_groups(K, it, unit)
+  if gs and gp and gs ~= gp then w[#w + 1] = string.format('the soldier stands on walk group %d, the piece lies on %d: he cannot reach it', gs, gp) end
   if alien_make(it) then w[#w + 1] = 'made by another race' end
   local r = reservations()[it.id]
   if r and (r.occ or 0) + (r.vac or 0) > 1 then w[#w + 1] = string.format('claimed by %d positions', (r.occ or 0) + (r.vac or 0)) end
@@ -4892,7 +4991,8 @@ function M.init(K)
                        auto = int(e.auto) == 1 and 1 or nil, nw = nw,
                        tr = (int(e.tr) == 1 or int(e.tr) == 0) and int(e.tr) or nil,   -- FR-100: 0 = off by the player
                        td = int(e.td) == 1 and 1 or nil, rf = int(e.rf),              -- td: on by default; rf: last refit
-                       un = int(e.un) == 1 and 1 or nil}                               -- un: withdrawn, wooden ones go
+                       un = int(e.un) == 1 and 1 or nil,                               -- un: withdrawn, wooden ones go
+                       rh = M.refit_hold_load(e.rh) and M.refit_hold_save(M.refit_hold_load(e.rh)) or nil}   -- BUG-743: refit climb holds
     end
   end
   -- FR-79: rot[key] = {c = absolute month of the last window close whose members were credited, e = of the last one whose
