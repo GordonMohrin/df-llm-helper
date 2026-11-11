@@ -744,6 +744,7 @@ Related: FR-xx, BUG-xx
 | [BUG-755](BUG-755-hospital-has-fewer-beds-than-patients.md) | fixed (offline, live-untested) | medium | Run 16b i2: 10 patients, 4 beds; `hospital furnish=2` is one bed in the room that stands, asked by `hospital_supply` and drafted by plan propose | `dfpilot/bp/rooms.py`, `dfpilot/bp/sites.py`, `dfpilot/plan.py` (`hospital_table`), `lua/dfllm/water.lua` (`SUPPLY_FIX`) |
 | [BUG-756](BUG-756-doctors-fixed-at-four-with-many-patients.md) | fixed (offline, live-untested) | medium | Run 16b i2: DiagnosePatient 11 unclaimed beside 4 doctors; one doctor per 3 patients (at most 8), none at extreme stress | `lua/dfllm/care.lua` (`doctors_want`, `may_doctor`) |
 | [BUG-757](BUG-757-squads-idle-outside-the-core-in-peace.md) | fixed (offline, live-untested) | medium | Run 16b i2 y440: squad A idle outside on walk group 331, the sortie "target unreachable"; a quiet-PEACE recall into Kern+ | `lua/dfllm/military.lua` (`recall_pass`, `apply_squad`) |
+| [BUG-760](BUG-760-brew-says-auto-but-nothing-brews.md) | fixed (offline, live-untested) | high | Run 16b i2 y443-445: drink 176 -> 0 days, `auto: brew` with brews that never ran; order.add had no brew job | `lua/dfllm/economy.lua` (`drink_block`, `order.add`) |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

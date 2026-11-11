@@ -1,4 +1,9 @@
 # CHANGELOG dfpilot
+## Round 49 (brew): `auto: brew` is said only when brewing can run, `order.add Brew` (BUG-760, 2026-11-11; offline, live-untested)
+- **Why:** Run 16b i2 Whirledrampart y443-445: drink 176 -> 0 days, DECISION drink_low "auto: brew" (8 brews ordered) that never ran; `order.add` knew no brew job; the player placed the Still by hand.
+- **BUG-760:** `economy.drink_block`: `auto: brew` only with a reachable Still and brews that moved in 7 days, else `brewstall` (still, plants, barrels in the text); a Still cut off from all walk groups is named; `order.add` job Brew / BrewDrink / BrewFruit = CustomReaction BREW_DRINK_FROM_PLANT / _GROWTH and the answer lists what is missing.
+- **Contract:** drink_low block id `brewstall`; `order.add` job aliases. **Test:** tests/lua/test_bug760_brew_honest.lua (2). No digging, bridge, gate, refuge, lockdown or seal code changed.
+- **Open:** the cause of the standing brews in i2 is not readable offline; a Kernel reload is needed.
 ## Round 48 (ring): no ring tile is opened before its wall can be built (BUG-745, 2026-11-11; offline, live-untested)
 - **Why:** Run 16c i3 Doorwings y392: the 7th aqshaft at z140 channelled its ring tile open while buildingplan took boulders and stone was 0; the wall waited 2 d, wall_alt switched to logs only then, the water came first (CAVERN_PLUG). Six shafts before failed the same way.
 - **BUG-745:** `aqshaft.ring_ready` before every channel: wall material counted for all missing walls, a citizen with the construction labor (`economy.wall_builders`, hook `X.builders`), the wall route resolved now (`X.wall_alt`); else the level stalls (`no_boulders`, `ring_builder`) with nothing open.
