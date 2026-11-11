@@ -36,7 +36,8 @@ A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DO
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
                ConstructTable = true, ConstructThrone = true, ConstructArmorStand = true, ConstructWeaponRack = true,
-               ConstructHatchCover = true, ConstructGrate = true, ConstructFloodgate = true}
+               ConstructHatchCover = true, ConstructGrate = true, ConstructFloodgate = true,
+               ConstructBlocks = true}      -- BUG-736: wooden blocks (the carpenters)
 -- BUG-231: the workshop tasks act.ws_task adds (the Carpenter's 'wood' / the Mason's 'rock' variant), and DF's queue limit
 A.WS_TASK = {ConstructThrone = {wood = true, rock = true}, ConstructTable = {wood = true, rock = true},
              ConstructDoor = {wood = true, rock = true}, ConstructBed = {wood = true}, ConstructBlocks = {rock = true}}

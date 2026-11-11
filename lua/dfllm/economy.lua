@@ -1146,11 +1146,15 @@ local function classify(it, a, cat)
     -- planned building can use now (T.jmake, economy.mat_for)
     -- BUG-544 (Run 16a i1 Basementflew: 13 'free' blocks lay in the flooded z117 complex, the aqshaft ring waited 600 days beside 255
     -- logs): a piece on another walk group than the citizens' is no piece anybody can carry; `<key>_far` counts it
+    local key = M.PIECE_INV[cat]
     if not f.in_job then
-      local key = M.PIECE_INV[cat]
       local fk = key:gsub('_free$', '') .. '_far'
       if a.far and a.far(it) then a[fk] = a[fk] + n
       else a[key] = a[key] + n end
+    elseif key == 'blocks_free' then
+      -- BUG-736 (Run 16c i3 Doorwings y382: census blocks 132, blocks_free 0, nobody could say where they were): a block a job holds is counted
+      -- apart (`blocks_busy`), so the wall stock names the claimed ones instead of showing a bare 0
+      a.blocks_busy = a.blocks_busy + n
     end
   elseif cat == 'BARREL' or cat == 'BIN' then  -- live L1b: brewing stalled for want of an empty barrel
     local empty = #dfhack.items.getContainedItems(it) == 0
@@ -1279,6 +1283,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'brew_p', 'brew_g', 'chairs', 'tables',
               'rock_far', 'doors_far', 'hatches_far', 'grates_far', 'blocks_far', 'chairs_far', 'tables_far',   -- BUG-544
               'rock_busy',   -- BUG-665
+              'blocks_busy', -- BUG-736
               'wood_far', 'wood_forb'}   -- BUG-705
 local function new_acc(c)
   local fs = {}
@@ -7771,7 +7776,8 @@ function M.bm_route(r, s, kind, fire)
   -- BUG-667 (Run 16d i4 Trumpetrealms y439: pop 12, stone 0 usable, 99 logs; the trade depot 'building material: blocks' and a seal wall 'no item' for
   -- 90 days, so no caravan could trade for stone: a vicious circle): once DF has refused the fort's stone (M.hard_denied), a building takes
   -- its logs, not the boulders the game will not hand out; the boulders are not the building's material while logs are there
-  local deny = not fire and (inv.wood or 0) > 0 and M.stone_none(inv, r.now)
+  -- BUG-736: r.nostone = the free stone is 0 after the moods' floors (stone_free), not only refused: logs are the wall's material then too
+  local deny = not fire and (inv.wood or 0) > 0 and (M.stone_none(inv, r.now) or r.nostone == true)
   for _, e in ipairs(M.BM) do
     if s[e[1]] and (inv[e[2]] or 0) > 0 and not (fire and e[1] == 'logs') and not (deny and e[1] == 'boulders') then return e[1] end
   end
@@ -7806,6 +7812,7 @@ function M.mat_for(K, kind, n)
   if not K.census.i then return 'unknown' end
   local c, r = M.conf(K), M.view_run(K)
   if kind == 'wall' or kind == 'depot' or kind == 'workshop' or kind == 'furnace' then
+    r.nostone = stone_free(c, r) <= 0 and (r.inv.blocks_free or 0) <= 0          -- BUG-736
     local via, why, set = M.bm_route(r, M.bp_settings(), kind, kind == 'furnace')   -- BUG-466: furnace = fire-safe only
     if set then return 'setting', 'buildingplan ' .. set .. ' goes on' end
     return via, why
@@ -7873,8 +7880,53 @@ function M.wall_stock(K)
   local okn, none = pcall(M.stone_none, K.census.i or {}, K.now().tick)
   none = okn and none == true
   if none then rock = 0 end
-  return {have = blocks + rock + logs, blocks = blocks, rock = rock, logs = logs, none = none,
+  -- BUG-736: ore / flux boulders (no usable stone, no blocks, no logs): the last-resort wall material `alt` (buildingplan's boulders take them);
+  -- blocks the jobs hold (`busy`) and blocks on another walk group (`far`) are named in the stall text, not counted
+  local alt = math.max(0, (math.tointeger(inv.ore) or 0) + (math.tointeger(inv.flux) or 0))
+  return {have = blocks + rock + logs, blocks = blocks, rock = rock, logs = logs, none = none, alt = alt,
+          busy = math.max(0, math.tointeger(inv.blocks_busy) or 0), far = math.max(0, math.tointeger(inv.blocks_far) or 0),
           soil = type(rk) == 'table' and rk.soil == true}
+end
+
+-- BUG-736 (Run 16c i3 Doorwings y381/y382: the aqshaft ring wall at z140 'unbuilt for 31-32 d' twice, census wood 385-440, blocks 132 with blocks_free 0,
+-- boulders only ore / flux or reserved: the walls waited for a boulder nobody could hand over while buildingplan kept boulders ON, because
+-- the switch to logs needed a stone DF had refused (stone_none) and a planned building in the job scan): a wall (ring, plug, seal, depot) that
+-- has waited for its material ring_wait is told where its material is. Returns the sentence for the stall / stop text (nil: stone or blocks are
+-- free, the builders have material). No free stone and no free block, logs above the wood floor: buildingplan's boulders go off (p.bpoff 'wall',
+-- on again when 8 stones are free or the logs are gone) and logs is on; no logs: ore / flux boulders are the material (boulders go on).
+-- A constructed wall of any material stops water: the ring logic reads only the tile's construction state, never its material.
+function M.wall_alt(K)
+  if not K.census.i then return nil end
+  local s = M.wall_stock(K)
+  if type(s) ~= 'table' or (s.rock or 0) > 0 or (s.blocks or 0) > 0 then return nil end
+  local r = M.view_run(K)
+  local c = M.conf(K)
+  local bp = M.bp_settings()
+  local why = string.format('no free stone and no free block (%d blocks held by jobs, %d on another walk group, %d ore and flux boulders)',
+                            s.busy or 0, s.far or 0, s.alt or 0)
+  if (s.logs or 0) > 0 then
+    if bp.boulders and not r.p.bpoff then
+      r.cmds = (r.cmds or 0) + 1
+      if K.act.run('buildingplan', 'set', 'boulders', 'false') then
+        r.p.bpoff = 'wall'
+        K.persist.touch('m.economy')
+        K.log('warn', 'buildingplan boulders off: %s, %d logs are the wall material', why, s.logs)
+      end
+    end
+    if not bp.logs and K.act.run('buildingplan', 'set', 'logs', 'true') then
+      K.log('info', 'buildingplan logs on: the walls take logs')
+    end
+    return string.format('%s: the walls are built of logs (%d reachable), buildingplan boulders are off', why, s.logs)
+  end
+  if (s.alt or 0) > 0 then
+    if not bp.boulders and K.act.run('buildingplan', 'set', 'boulders', 'true') then
+      r.p.bpoff = nil
+      K.persist.touch('m.economy')
+      K.log('warn', 'buildingplan boulders on: %s, no logs: the walls take the ore / flux boulders', why)
+    end
+    return string.format('%s, no logs: the walls are built of the ore / flux boulders (stone the smelters lose)', why)
+  end
+  return nil
 end
 
 -- the open orders of a piece's job: what they make (n). A rock order the free stone cannot cover with the other rock
@@ -8192,7 +8244,8 @@ function T.jmake(K, c, r)
   local jb, pc = r.jb, c.pieces
   st.jneed = M.jneed(jb)                              -- BUG-231: what the planned buildings wait for (M.mgr_bypass)
   -- BUG-667: the boulders go back on in buildingplan once the stone is usable again (more boulders came, or DF took them)
-  if r.p.bpoff and not M.stone_none(r.inv, r.now) then
+  -- BUG-736: boulders switched off for a ring wall / seal wall (no free stone, logs there: p.bpoff == 'wall') stay off until stone is free again
+  if r.p.bpoff and not M.stone_none(r.inv, r.now) and (r.p.bpoff ~= 'wall' or stone_free(c, r) >= 8 or (r.inv.wood or 0) <= 0) then
     r.cmds = r.cmds + 1
     if K.act.run('buildingplan', 'set', 'boulders', 'true') then
       r.p.bpoff = nil
@@ -8208,12 +8261,13 @@ function T.jmake(K, c, r)
     if q.label == 'building material' then
       s = s or M.bp_settings()
       local kind = M.bm_kind(q)
+      r.nostone = stone_free(c, r) <= 0 and (r.inv.blocks_free or 0) <= 0       -- BUG-736
       local via, why, set = M.bm_route(r, s, kind, q.fire)
       -- BUG-667: logs are the material (stone is refused): buildingplan's boulders go off so no wall or depot reserves a boulder nobody may take
-      if via == 'logs' and s.boulders and not q.fire and M.stone_none(r.inv, r.now) and not r.p.bpoff then
+      if via == 'logs' and s.boulders and not q.fire and (M.stone_none(r.inv, r.now) or r.nostone) and not r.p.bpoff then
         r.cmds = r.cmds + 1
         if K.act.run('buildingplan', 'set', 'boulders', 'false') then
-          r.p.bpoff = r.now
+          r.p.bpoff = M.stone_none(r.inv, r.now) and r.now or 'wall'
           K.persist.touch('m.economy')
           K.log('warn', 'buildingplan boulders off: DF refuses the stone of the fort, %d walls/buildings wait for building material, %d logs', q.n,
                 r.inv.wood or 0)
@@ -8320,7 +8374,10 @@ function M.no_rock(K, c, oid, job, why)
   for _, j in ipairs((c.wood_orders or {}).jobs or {}) do wj[j] = true end
   local def = false
   for _, e in pairs(M.PIECES) do if e.job == jn then def = e.def == true end end
-  if wj[jn] and r.f['workshop:Carpenters'] and M.wood_left(c, r, def) >= n and K.act.order_material(oid, 'wood') then
+  -- BUG-736 (Run 16c i3 Doorwings y385-y388: twenty ConstructBlocks orders 'removed: no logs for it (426 logs)'; the carpenters make blocks of logs):
+  -- a rock block order is re-entered in wood like the furniture jobs
+  if (wj[jn] or jn == 'ConstructBlocks') and r.f['workshop:Carpenters'] and M.wood_left(c, r, def) >= n
+     and K.act.order_material(oid, 'wood') then
     K.log('info', 'order %d %s x%d: "%s", %d free stone for %d in rock orders: re-entered in wood (%d logs)', oid, jn,
           n, why, free, r.rk, r.inv.wood or 0)
     return true
@@ -8333,9 +8390,11 @@ function M.no_rock(K, c, oid, job, why)
     if id == oid then p.orders[tag], st.backoff[tag] = nil, now + ((c.orders or {}).backoff_days or 10) * DAY end
   end
   K.persist.touch('m.economy')
-  K.log('warn', 'order %d %s x%d removed: "%s", %d free stone for %d in rock orders, no logs for it (%d logs)', oid,
-        jn, n, why, stone_free(c, r), r.rk, r.inv.wood or 0)
-  K.emit('ORDER_STUCK', 'B', string.format('order %d %s removed: "%s", stone short of the rock orders, no logs for it',
+  local why_w = (r.inv.wood or 0) > 0 and (r.f['workshop:Carpenters'] and 'logs ' .. M.wood_left(c, r, def) .. ' free above the floors < ' .. n
+                  or 'no Carpenters workshop') or 'no logs'                       -- BUG-736: the message named the true cause
+  K.log('warn', 'order %d %s x%d removed: "%s", %d free stone for %d in rock orders, no wood for it (%s; %d logs)', oid,
+        jn, n, why, stone_free(c, r), r.rk, why_w, r.inv.wood or 0)
+  K.emit('ORDER_STUCK', 'B', string.format('order %d %s removed: "%s", stone short of the rock orders, no wood for it',
                                            oid, jn, tostring(why):sub(1, 60)),
          {order = oid, job = tostring(jn):sub(1, 40), why = ('no rock: ' .. tostring(why)):sub(1, 60), n = n,
           dropped = 1})
@@ -11632,7 +11691,13 @@ function M.slab_pass(K, c, r)
   if n > 0 then
     local free = stone_free(c, r)
     if not f['workshop:Masons'] then sb.why = 'no Masons'
-    elseif free < n then sb.why = string.format('%d free boulders for %d slabs', free, n)
+    elseif free < n then
+      -- BUG-736 (Run 16c i3 Doorwings: ghosts 27541 / 28225, bodies in tree crowns, 'no ConstructSlab ... 0 free boulders for 2 slabs' for 100 d beside 400
+      -- logs): DF makes slabs of stone only (a coffin needs a body a hauler reaches); the text says what the fort has and what it takes
+      local i = r.inv or {}
+      sb.why = string.format('%d free boulders for %d slabs (ore %d, flux %d, refused %d, out of reach %d; a slab is stone only, logs make coffins for ' ..
+                             'bodies a hauler reaches: trade.want stone or dig hard stone)', free, n, i.ore or 0, i.flux or 0, i.rock_bad or 0,
+                             i.rock_far or 0)
     else
       local tag = 'dfllm:slab'
       if not live(p.orders[tag]) and now >= (st.backoff[tag] or 0) then
