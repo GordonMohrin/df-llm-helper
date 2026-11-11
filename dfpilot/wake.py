@@ -1454,9 +1454,15 @@ class Follower:
         try:
             days = plan_mod.stale_project_days()
             state = files.read_state(self.dir)
-            if days <= 0 or (state or {}).get("mode") != "PEACE":
+            mode = (state or {}).get("mode")
+            if days <= 0 or not mode:
                 return
             rows = plan_mod.stale_projects(self.dir, state, days)
+            if mode not in ("PEACE", "RECOVERY"):
+                # BUG-721 (Run 16b i2 Whirledrampart y423-y430: a mammoth BREACH flickering with SIEGE for > 370 days, bedrooms 2377 d, tavern
+                # 3315 d, refuge_beds 1685 d set aside for ever, the runner slots and the phases blocked): in a long fight a project set aside
+                # STALE_FIGHT_MULT times the limit goes too (an unbuilt room nobody can work on; the kernel's cancel keeps what stands)
+                rows = [r for r in rows if r["days"] >= plan_mod.STALE_FIGHT_MULT * days]
             sent = []
             for r in rows:
                 if now - self._stale_tried.get(r["proj"], -1e18) < STALE_RETRY_S:

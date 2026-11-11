@@ -1208,6 +1208,10 @@ def audit_avoid(save_dir: Path, tick: int | None = None) -> set[tuple[int, int, 
     stands for ever: the footprint of every fortcore project (the fort's own corridor) and the tiles of the seal projects finished
     WALL_BUILT_LAG before the snapshot (audit_routes `built` / `doored`). The finding names the next closable tile of the route."""
     out: set[tuple[int, int, int]] = set(core_cells(save_dir))
+    # BUG-720 (Run 16a i1 Basementflew y440: a Coffin on the wall tile 97,92,129, the seal blocked `occupied` 40 days, the audit named the tile
+    # again and `seal at=audit` said 'nothing to close'): a tile another building stands on (PROJECT_BLOCKED occupied, BUG-579) takes no wall
+    # now; the finding names the next closable tile of the route
+    out |= set(seal_occupied(save_dir))
     recs = seal_records(save_dir)
     if not recs:
         return out

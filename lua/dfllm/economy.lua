@@ -3253,10 +3253,14 @@ function M.mood_shops(K, now)
     end
   end)
   if not (ok1 and ok2) then return nil end
-  local out = {missing = {}, queued = {}}
+  local out = {missing = {}, queued = {}, gone = {}}
+  local mg = type(K.manifest) == 'function' and K.manifest().gone or nil     -- BUG-722: shops the manifest lists as no longer standing
+  local gone = {}
+  for _, g in ipairs(type(mg) == 'table' and mg or {}) do if type(g) == 'table' and type(g.type) == 'string' then gone[g.type] = true end end
   for _, t in ipairs(M.MOOD_SHOPS) do
     if not have[t] and not (M.MOOD_ALT[t] and have[M.MOOD_ALT[t]]) then
       out.missing[#out.missing + 1] = t
+      if gone[t] then out.gone[t] = true end
       local q = M.fishery_proj(K, {'workshop:' .. t})
       if q then out.queued[t] = q end
     end
@@ -12464,7 +12468,14 @@ function M.build_state(K, x, y, z)
       if rec.bwhy then cause[#cause + 1] = (rec.line:match(': (outside the burrow[^:;]*)')) or ('outside the burrow ' .. tostring(rec.burrow)) end
       if rec.boxed then cause[#cause + 1] = 'walled in on its level' end
       if okn and type(why) == 'table' then for _, w in ipairs(why) do cause[#cause + 1] = w end end
-      rec.short = string.format('no builder%s', #cause > 0 and (': ' .. table.concat(cause, '; ')) or ' has taken it (no cause readable)')
+      -- BUG-721 (Run 16b i2 Whirledrampart: 'no builder has taken it (no cause readable)', 27 ConstructBuilding unclaimed beside 12 idle adults): no
+      -- readable cause is a statement of what was read: the labor holders, the items attached to the job, the one way left (busy or no path)
+      local nneed = 0
+      pcall(function() for _, el in ipairs(j.job_items.elements) do nneed = nneed + (int(el.quantity) or 1) end end)
+      local lab = type(rec.labor) == 'table' and string.format('labor %d/%d', int(rec.labor[2]) or 0, int(rec.labor[3]) or 0) or 'labor unread'
+      rec.short = #cause > 0 and ('no builder: ' .. table.concat(cause, '; '))
+                  or string.format('no builder took it: no cause readable (%s, items %d/%d, in burrow, not walled in); busy or no path: inspect workload, reach',
+                                   lab, rec.items or 0, nneed)
     end
     return rec
   end

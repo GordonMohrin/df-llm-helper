@@ -131,6 +131,7 @@ M.CFG = {
   -- places it again; at most lost_max times per template, then it stays parked (the reason in the park event). 0 = off.
   -- config "runner": {queue: {lost_days}}
   lost_days = 60, lost_max = 2,
+  occupied_days = 3,         -- BUG-720: a seal blocked `occupied` this long is cancelled (0 = off); the audit names another wall tile
   -- BUG-328 (Run 15c Inkintense y377: 'runner: no run ended for 176 d, 78 slices': a task yielding every slice, the runner
   -- paced and demoted to a few slices a game day, so 600 slices took 130 game days and every project and the seal waited
   -- that long): a task yielding for task_days game days is skipped too, whatever its slice count. A project without own
@@ -1657,6 +1658,17 @@ local function pre_occupied(K, ch, R, P)
     local okt, tile
     if not b then okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3]) end
     local mis = Q.seal_mismatch(P, t[4], b, okt and type(tile) == 'table' and tile.c or nil)
+    -- BUG-719 (Run 16c i3 Doorwings / 16d i4 Pagedsculpture: depot1..25 'done' in 5 s, no depot): any building on any of the 25 depot tiles was
+    -- adopted as the depot, built, so the stage was done. Only a trade depot is the depot's; anything else in the footprint is an
+    -- unsuitable tile (quickfort refuses the 5x5) and the stage is build_lost with the reason (lost_why)
+    if t[4] == 'D' and not mis then
+      local isdep = false
+      if b then
+        local okty, ty = pcall(function() return b:getType() end)
+        isdep = okty and (not (df.building_type and df.building_type.TradeDepot ~= nil) or ty == df.building_type.TradeDepot)
+      end
+      if not isdep then goto continue end
+    end
     if mis then
       n = n + 1
       R.occ = type(R.occ) == 'table' and R.occ or {}
@@ -1666,6 +1678,7 @@ local function pre_occupied(K, ch, R, P)
       n = n + 1
       if not seen[b.id] and not is_construction(b) then seen[b.id] = true; R.b[#R.b + 1] = b.id end
     elseif okt and type(tile) == 'table' and OCCUPIED[tile.c] then n = n + 1 end
+    ::continue::
   end
   return n
 end
@@ -1784,7 +1797,21 @@ end
 -- does a cell's tile hold what the stage placed? A building there (findAtTile, else snapshot's bld), or a finished
 -- construction / closing tile (snapshot legend); hidden tiles hold nothing we may know of (BUG-022)
 local function cell_present(K, t)
-  if Q.bld_at(t[1], t[2], t[3]) then return true end          -- BUG-329: a finished farm plot sets no occupancy
+  local b0 = Q.bld_at(t[1], t[2], t[3])
+  if t[4] == 'D' then
+    -- BUG-719 (Run 16c i3 Doorwings / 16d i4 Pagedsculpture: depot1..25 'done' in 5 s each, no depot ever stood): the corner of a depot
+    -- footprint holding ANY other building or construction counted as the depot; only a trade depot is the depot
+    local ty
+    if b0 then local okt, v = pcall(function() return b0:getType() end); if okt then ty = v end end
+    if b0 and ty ~= nil and df.building_type and df.building_type.TradeDepot ~= nil and ty ~= df.building_type.TradeDepot then
+      local _, tile0 = K.call('snapshot', 'tile', t[1], t[2], t[3])
+      return false, type(tile0) == 'table' and tile0 or nil
+    end
+    if b0 then return true end
+    local _, tile0 = K.call('snapshot', 'tile', t[1], t[2], t[3])
+    return false, type(tile0) == 'table' and tile0 or nil
+  end
+  if b0 then return true end          -- BUG-329: a finished farm plot sets no occupancy
   local okt, tile = K.call('snapshot', 'tile', t[1], t[2], t[3])
   if not (okt and type(tile) == 'table') then return false, nil end
   return (tile.bld ~= nil and tile.bld ~= '') or OCCUPIED[tile.c] == true, tile
@@ -5672,6 +5699,45 @@ end
 -- open floor around its citizens on their own walk group (snapshot.groups, 25 tiles in one call), nearest first, at most DEPOT_TRIES blocks, and
 -- tries again only after DEPOT_RETRY ticks. Returns {x, y, z} (the middle) or nil, why.
 M.CFG.depot_tries, M.CFG.depot_radius, M.CFG.depot_retry = 220, 30, 36000
+M.CFG.depot_resite_max = 4
+
+-- BUG-719 (Run 16c i3 Doorwings y372: depot1..25 on the aqshaft anchor 94,98,148; Run 16d i4 Pagedsculpture y372: depot1..15 at 96,95,142 with a
+-- stair, a trap and a door in the footprint): the tiles of the projects still open (an aqshaft, a fortcore ...) and the sites that already failed
+-- are no depot site; a depot footprint is open floor on every one of its 25 tiles (a stair is walkable and shares the walk group, so the walk
+-- group alone proved nothing). Returns the set 'x,y,z' = why of the tiles to keep off.
+function Q.depot_avoid(K)
+  local avoid = {}
+  for _, P in ipairs(S.pd.list) do
+    if P.tpl ~= 'depot' and P.done ~= 1 then
+      local d = doc(K, P.id)
+      if type(d) == 'table' and type(d.stages) == 'table' then
+        local okd, own = pcall(own_tiles, P, d)
+        if okd and type(own) == 'table' then for k in pairs(own) do avoid[k] = P.id end end
+      end
+    end
+  end
+  return avoid
+end
+function Q.depot_bad(pos)
+  local bad = type(S.rt.depot_bad) == 'table' and S.rt.depot_bad or {}
+  return bad[tkey(pos[1], pos[2], pos[3])] == true
+end
+-- nil when the 5x5 block around pos is clear (every tile open floor, nothing built or designated, no tile of another open project), else why
+function Q.depot_block_why(K, pos, avoid)
+  for y = pos[2] - 2, pos[2] + 2 do
+    for x = pos[1] - 2, pos[1] + 2 do
+      local k = tkey(x, y, pos[3])
+      if avoid[k] then return string.format('%s lies in project %s', k, tostring(avoid[k])) end
+      local ok, v = K.call('snapshot', 'tile', x, y, pos[3])
+      if not (ok and type(v) == 'table') or v.c == nil or v.c == '?' then return k .. ' is hidden' end
+      if type(v.bld) == 'string' and v.bld ~= '' then return string.format('%s holds a %s', k, v.bld) end
+      if v.c ~= '.' then return string.format('%s is no open floor (%s)', k, tostring(v.c)) end
+      if type(v.dig) == 'string' and v.dig ~= '' then return k .. ' is designated' end
+    end
+  end
+  return nil
+end
+
 function Q.depot_fallback(K)
   local cu, pts = K.census.u, {}
   for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
@@ -5688,7 +5754,7 @@ function Q.depot_fallback(K)
   for _, q in ipairs(pts) do sx, sy = sx + q[1], sy + q[2]; sz[q[3]] = (sz[q[3]] or 0) + 1 end
   for z, n in pairs(sz) do if not zs or n > sz[zs] or (n == sz[zs] and z > zs) then zs = z end end
   local cx, cy = sx // #pts, sy // #pts
-  local R, cand = M.CFG.depot_radius, {}
+  local R, cand, avoid = M.CFG.depot_radius, {}, nil
   for dx = -R, R, 3 do for dy = -R, R, 3 do cand[#cand + 1] = {dx, dy, dx * dx + dy * dy} end end
   table.sort(cand, function(a, b) if a[3] ~= b[3] then return a[3] < b[3] end if a[1] ~= b[1] then return a[1] < b[1] end return a[2] < b[2] end)
   for i = 1, math.min(#cand, M.CFG.depot_tries) do
@@ -5701,8 +5767,9 @@ function Q.depot_fallback(K)
       local all = okg and type(gr) == 'table'
       for k = 1, #block do if not (all and int(gr[k]) == home) then all = false; break end end
       if all then
-        local okt, t = K.call('snapshot', 'tile', x0 + 2, y0 + 2, zs)
-        if okt and type(t) == 'table' and t.c == '.' then return {x0 + 2, y0 + 2, zs} end
+        local mid = {x0 + 2, y0 + 2, zs}
+        avoid = avoid or Q.depot_avoid(K)
+        if not Q.depot_bad(mid) and not Q.depot_block_why(K, mid, avoid) then return mid end   -- BUG-719: every tile, not only the middle
       end
     end
   end
@@ -5724,15 +5791,70 @@ function M.depot_keep(K, why)
   if have then
     local d = S.rt.depot
     if c and (type(d) ~= 'table' or d[1] ~= c[1] or d[2] ~= c[2] or d[3] ~= c[3]) then S.rt.depot = c; dirty(); save(K) end
+    if c then       -- BUG-719: a site that held a depot is no failed site
+      S.rt.depot_stood = type(S.rt.depot_stood) == 'table' and S.rt.depot_stood or {}
+      local k = tkey(c[1], c[2], c[3])
+      if not S.rt.depot_stood[k] then S.rt.depot_stood[k] = true; dirty() end
+    end
     return true, 'standing'
   end
+  -- BUG-719: a depot project that reported done (or build_lost twice) while no depot stands has a site that cannot take it: that site is
+  -- remembered as bad, the project is dropped and the next site looks elsewhere; after depot_resite_max failed sites the keeper stops and says why
+  S.rt.depot_bad = type(S.rt.depot_bad) == 'table' and S.rt.depot_bad or {}
   for _, P in ipairs(S.pd.list) do
-    if P.tpl == 'depot' and Q.live(K, P) then return true, P.id end   -- BUG-037: a parked one is no depot project
+    if P.tpl == 'depot' then
+      local dd = doc(K, P.id)
+      local c = type(dd) == 'table' and type(dd.manifest) == 'table' and dd.manifest.depot
+      local site = type(c) == 'table' and int(c[1]) and int(c[2]) and int(c[3]) and {int(c[1]), int(c[2]), int(c[3])} or nil
+      local q = S.rt.rty[P.id]
+      local lost = P.blocked == 'build_lost' and type(q) == 'table' and (int(q.n) or 0) >= 2
+      S.rt.depot_chk = type(S.rt.depot_chk) == 'table' and S.rt.depot_chk or {}
+      local stood = type(S.rt.depot_stood) == 'table' and site and S.rt.depot_stood[tkey(site[1], site[2], site[3])]
+      if site and not stood and ((P.done == 1 and not S.rt.depot_chk[P.id]) or lost) then
+        S.rt.depot_chk[P.id] = true
+        local why = (P.done == 1) and 'reported done, no trade depot stands' or 'build_lost twice'
+        if lost then
+          local okl, lw = pcall(Q.lost_why, K, P, dd)
+          if okl and lw then why = why .. ': ' .. trunc(lw, 100) end
+        end
+        S.rt.depot_bad[tkey(site[1], site[2], site[3])] = true
+        S.rt.dfb_t = nil                  -- the next site is searched at once
+        if P.done ~= 1 then cancel(K, P, true) end
+        if type(S.rt.depot) == 'table' and S.rt.depot[1] == site[1] and S.rt.depot[2] == site[2] and S.rt.depot[3] == site[3] then
+          S.rt.depot = nil
+        end
+        K.log('warn', 'trade depot site %d,%d,%d given up (%s: %s)', site[1], site[2], site[3], P.id, why)
+        dirty()
+      elseif Q.live(K, P) then
+        return true, P.id               -- BUG-037: a parked one is no depot project
+      end
+    end
+  end
+  local nb = 0
+  for _ in pairs(S.rt.depot_bad) do nb = nb + 1 end
+  if nb >= M.CFG.depot_resite_max then
+    if not S.rt.depot_stop then
+      S.rt.depot_stop = true
+      dirty()
+      K.log('warn', 'trade depot: %d sites failed (no depot stood after the project), no more projects; place one by hand: bp.place with a site, or cancel the project that holds the tiles', nb)
+    end
+    return false, 'no depot site stood the build'
   end
   local m = K.manifest().depot
   local pos = type(m) == 'table' and int(m[1]) and int(m[2]) and int(m[3]) and {int(m[1]), int(m[2]), int(m[3])}
               or (type(S.rt.depot) == 'table' and int(S.rt.depot[1]) and S.rt.depot) or nil
+  if pos and Q.depot_bad(pos) then pos = nil; S.rt.dfb_t = nil end        -- BUG-719: that site failed; search another
   local fb
+  local stood0 = type(S.rt.depot_stood) == 'table' and pos and S.rt.depot_stood[tkey(pos[1], pos[2], pos[3])]
+  if pos and not stood0 then          -- a site that held a depot is rebuilt where it stood (FR-43), never re-checked
+    local why = Q.depot_block_why(K, pos, Q.depot_avoid(K))
+    if why and (type(m) ~= 'table' or not int(m[1])) then            -- a remembered fallback site: re-checked; a manifest site is the plan's
+      S.rt.depot_bad[tkey(pos[1], pos[2], pos[3])] = true
+      K.log('warn', 'trade depot site %d,%d,%d given up: %s', pos[1], pos[2], pos[3], why)
+      pos, S.rt.depot, S.rt.dfb_t = nil, nil, nil
+      dirty()
+    end
+  end
   if not pos then
     -- BUG-612: no fortcore, no manifest depot: a flat block of open floor beside the citizens (looked for every depot_retry ticks)
     local t = now(K)
@@ -6328,6 +6450,34 @@ function Q.lost_why(K, P, d)
       end
     end
   end
+  -- BUG-721 (Run 16a i1 Basementflew: 'build_lost at build, missing bed x3' with no word why, 8 retries): the one-tile pieces. Those of the
+  -- blocked stage that are not built and whose tile is no open floor (wall, tree, stair, ramp, open air, water, magma, another building) are named
+  local bad, n, tot = {}, 0, 0
+  for _, ch in ipairs(st.chunks) do
+    for _, cell in ipairs(ch.cells) do
+      local tl = {}
+      cell_tiles(ch, cell, tl)
+      local t = tl[1]
+      if t and #tl == 1 and not cell_present(K, t) then
+        tot = tot + 1
+        local ok, v = K.call('snapshot', 'tile', t[1], t[2], t[3])
+        local why
+        if ok and type(v) == 'table' and v.c ~= nil and v.c ~= '?' then
+          if type(v.bld) == 'string' and v.bld ~= '' then why = 'a ' .. v.bld
+          elseif Q.FOOT_BAD[v.c] then why = Q.FOOT_BAD[v.c]
+          elseif (int(v.flow) or 0) >= 4 then why = 'water'
+          elseif v.magma then why = 'magma' end
+        end
+        if why then
+          n = n + 1
+          if #bad < 3 then bad[#bad + 1] = string.format('%d,%d,%d %s (%s)', t[1], t[2], t[3], why, M.PIECE_WORD[t[4]] or t[4]) end
+        end
+      end
+    end
+  end
+  if n > 0 then
+    return string.format('%d of %d missing pieces stand on tiles that are no open floor (%s)', n, tot, table.concat(bad, ', '))
+  end
   return nil
 end
 
@@ -6518,6 +6668,34 @@ function Q.replace_cmd(K, P)
                        #items > 0 and (',"p":{' .. table.concat(items, ',') .. '}') or '')
 end
 
+-- BUG-720 (Run 16a i1 Basementflew y440: seal c1a1c7a48e hung 40 days at 'Coffin 97,92,129 (a wall wanted)', the audit kept naming
+-- 97,92,129 and `seal at=audit` answered 'nothing to close'): a seal blocked `occupied` (another building stands on every piece tile, nothing
+-- built) for occupied_days is cancelled (nothing of it stands, no undo), PEACE only, one a run; the project and its runner slot go, the
+-- PROJECT_BLOCKED (A) names the building and tile (d.parts, as BUG-579 reads it: the audit's avoid set) and d.autocancel. The next
+-- audit names the next closable tile of the route (cmd.audit_avoid), so the seal goes beside the coffin, not on it.
+function Q.occupied_cancel(K, c, t)
+  local days = int(M.CFG.occupied_days) or 0
+  if days <= 0 then return end
+  for _, P in ipairs(sorted()) do
+    if P.done ~= 1 and P.tpl == 'seal' and P.blocked == 'occupied' and t - (int(P.since) or t) >= days * DAY then
+      local R = S.rt.p[P.id]
+      local occ = type(R) == 'table' and type(R.occ) == 'table' and table.concat(R.occ, ', ') or '?'
+      local d = doc(K, P.id)
+      local st = d and d.stages[P.stage + 1]
+      local msg = string.format('%s (seal) blocked occupied for %d d: %s; cancelled by the kernel (nothing of it stands); the next audit names ' ..
+                                'another wall tile of the route', P.id, (t - (int(P.since) or t)) // DAY, occ)
+      K.log('warn', '%s', msg)
+      K.emit('PROJECT_BLOCKED', 'A', trunc(msg, 200),
+             {proj = P.id, tpl = P.tpl, stage = trunc(st and st.label or '', 24), why = 'occupied', parts = trunc(occ, 200),
+              ticks = t - (int(P.since) or t), autocancel = (t - (int(P.since) or t)) // DAY})
+      cancel(K, P, false)
+      rows(K)
+      save(K)
+      return                              -- one a run
+    end
+  end
+end
+
 -- BUG-637: a project parked for good by build_lost for lost_days: cancelled (no undo), one a run, PEACE only. A template that was
 -- cancelled lost_max times without one of its projects finishing meanwhile stays parked (the park event has the reason).
 function Q.lost_cancel(K, c, t)
@@ -6572,6 +6750,8 @@ local function end_run(K)
     if not okp then K.log('error', 'phantom seal scan failed: %s', trunc(errp, 160)) end
     local okl, errl = pcall(Q.lost_cancel, K, conf(K), t)       -- BUG-637
     if not okl then K.log('error', 'lost-project cancel failed: %s', trunc(errl, 160)) end
+    local okq, errq = pcall(Q.occupied_cancel, K, conf(K), t)   -- BUG-720
+    if not okq then K.log('error', 'occupied-seal cancel failed: %s', trunc(errq, 160)) end
   end
   for id, r in pairs(S.rt.park) do              -- a park record whose project left (or runs again): quiet
     local P = find(id)
