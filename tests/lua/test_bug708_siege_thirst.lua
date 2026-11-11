@@ -144,3 +144,5 @@ T.test('BUG-708: the siege ends (PEACE, alert off): the stale episode clears and
   day(W, 1)
   T.eq(#needed(W, 'siege_no_water'), 2, 'p.sw was cleared in PEACE')
 end)
+
+T.done()

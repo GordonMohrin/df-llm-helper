@@ -166,3 +166,5 @@ T.test('BUG-708 traffic: SIEGE with an army outside, a dry hospital well in Kern
   for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'siege_no_water' then d[#d + 1] = e end end
   T.eq(#d, 1, 'one siege_no_water decision')
 end)
+
+T.done()
