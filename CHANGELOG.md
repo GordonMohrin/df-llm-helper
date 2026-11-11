@@ -1,4 +1,8 @@
 # CHANGELOG dfpilot
+## Round 49 (crush): a lone wild animal raises no outer bridge, soldiers hold an ALERT raise (BUG-758, 2026-11-11; offline, live-untested)
+- **Why:** Run 16b i2 Whirledrampart y441: one Megalania within 30 tiles of O1 raised O1 in ALERT, soldier 29764 marching to his station stepped onto it while it moved and was crushed (BRIDGE_CRUSH, tick 178213236).
+- **BUG-758:** `siege.apply` ALERT wants the outer bridges up only for an invader, great danger, undead or building destroyer; `gate.holders` keeps the BUG-543 mover hold for soldiers when a hostile is within approach range (only citizens are let go, BUG-587).
+- **Tests:** tests/lua/test_bug758_alert_predator_crush.lua (5, siege traffic included). **Open:** a unit with no path that enters from beyond 3 tiles inside the ~100 ticks a bridge moves is not held. Offline, live-untested.
 ## Round 48 (ring): no ring tile is opened before its wall can be built (BUG-745, 2026-11-11; offline, live-untested)
 - **Why:** Run 16c i3 Doorwings y392: the 7th aqshaft at z140 channelled its ring tile open while buildingplan took boulders and stone was 0; the wall waited 2 d, wall_alt switched to logs only then, the water came first (CAVERN_PLUG). Six shafts before failed the same way.
 - **BUG-745:** `aqshaft.ring_ready` before every channel: wall material counted for all missing walls, a citizen with the construction labor (`economy.wall_builders`, hook `X.builders`), the wall route resolved now (`X.wall_alt`); else the level stalls (`no_boulders`, `ring_builder`) with nothing open.

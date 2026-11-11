@@ -1522,14 +1522,14 @@ end
 -- tile for RAISE_STILL ticks (a unit seen for the first time counts as moving), no tame animal. A soldier standing at his squad
 -- station holds nothing (he stands), one who shuffles about it holds for RAISE_STILL ticks after each step.
 -- The positions of the last looks are kept per bridge (rt[name].rq: the call replaces them, units gone from the scan are forgotten).
-function M.raise_movers(K, name, sc, hold)
+function M.raise_movers(K, name, sc, hold, soldiers)
   local r = rt[name]
   if not r or not sc then return hold end
   local now = K.now().tick
   local pm, pn, have, out = r.rq or {}, {}, {}, nil
   for _, e in ipairs(hold) do have[e.id] = true end
   for _, e in ipairs(sc.list or {}) do
-    if (e.d or 99) <= M.RAISE_R and e.k ~= 'animal' then
+    if (e.d or 99) <= M.RAISE_R and e.k ~= 'animal' and (not soldiers or e.k == 'soldier') then
       local p = string.format('%d,%d,%d', e.x or -1, e.y or -1, e.z or -1)
       local o = pm[e.id]
       if not (o and o.p == p) then o = {p = p, t = now} end
@@ -1641,7 +1641,10 @@ local function holders(K, name, fp, sc, dir)
     -- or walking onto it still holds (above), a unit merely moving within RAISE_R tiles does not
     local an, _, ac = M.approach_cfg(K)
     local hd0 = (an > 0 or ac > 0) and hostile_dist(K, name, fp) or -1
-    if not (hd0 >= 0 and hd0 <= math.max(an, ac)) then hold = M.raise_movers(K, name, sc, hold) end       -- BUG-543
+    -- BUG-758 (Run 16b i2 Whirledrampart y441: ONE Megalania within 30 tiles of O1 raised it in ALERT, soldier 29764 marching to his
+    -- station stepped onto the moving bridge and was crushed): a soldier moving within RAISE_R tiles still holds the raise then; only the
+    -- citizens' recall stream (BUG-587) is let go
+    hold = M.raise_movers(K, name, sc, hold, hd0 >= 0 and hd0 <= math.max(an, ac))       -- BUG-543
   end
   for i, e in ipairs(hold) do
     seen[e.id] = true

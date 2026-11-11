@@ -2685,7 +2685,10 @@ local function apply(K, a, g, now)
       if not held[b] and not rescuing(b) and not gone[b] then want(K, b, 'up', 'breach', st.tb + M.BREACH_AT) end
     end
   elseif mode == 'ALERT' then
-    if a and a.near_o1 >= 0 and a.near_o1 <= M.ALERT_O1 then
+    -- BUG-758 (Run 16b i2 Whirledrampart y441: one Megalania 7,609 cm3 inside the fort raised O1 in ALERT, soldier 29764 was crushed by it):
+    -- a lone wild animal (no invader, great danger, undead or building destroyer in sight) raises no outer bridge; the soldiers deal with it
+    local real = (a and ((a.inv or 0) + (a.great or 0) + (a.undead or 0) + (a.bd or 0))) or 0
+    if a and a.near_o1 >= 0 and a.near_o1 <= M.ALERT_O1 and real > 0 then
       for _, b in ipairs(g.outer) do want(K, b, 'up', 'alert') end
     end
   elseif mode == 'RECOVERY' then lower(K, g) end
