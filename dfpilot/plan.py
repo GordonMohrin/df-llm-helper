@@ -5433,8 +5433,11 @@ def stale_years() -> int:
 STALE_PROJECT_DEF = 300                         # BUG-435: days a project may stay set aside before follow cancels it
 # BUG-435: the templates follow may cancel (a plain bp.cancel drops only what is not built) and `plan propose` drafts again; the
 # core, the seals, the water and the supply builds are the fort's life: they are announced (PROJECT_BLOCKED why=stale), never cancelled
+# BUG-721 (Run 16a i1 Basementflew y460: the wall repair rp184426767 'nothing stands' 1033 d without progress, follow never cancelled it): "repair"
+# is replaceable too (the kernel's wall check drafts a repair again where a wall is still missing)
 STALE_CANCEL_TPLS = ("traps", "tombs", "bedrooms", "dining", "tavern", "temple", "gallery", "office", "barracks", "hall",
-                     "workshops", "depot", "captives")
+                     "workshops", "depot", "captives", "repair")
+STALE_FIGHT_MULT = 5                            # BUG-721: outside PEACE / RECOVERY only a project set aside this many times stale_project_days
 STALE_ROW = re.compile(r"set aside (\d+) d")
 
 

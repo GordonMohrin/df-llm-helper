@@ -311,6 +311,9 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
             raise ValueError(f"{tpl}: all {before} candidate site(s) lie on or right under a known aquifer level ({lv}); rooms keep "
                              "one dry level between (a refuge-level room may use the levels the refuge room itself stands on)")
     if tpl in WATER_TPLS and water is not None and not furnish:
+        if not cands and water.get("src") and manifest and not surface_shops:                  # BUG-722: no candidate at all: where they fell out, not only 'no valid site'
+            why = _rooms_funnel(snap, tpl, p, rects, bad, hid, mk, manifest, wet)
+            raise ValueError(f"{tpl}: no valid site on the snapshot ({why}; nearest accepted water: {src_label(water, 0)}){refuge_water(water)}")
         cands = _near_water(cands, tpl, p, water)
     cands = reachable(cands, snap, tpl, near if near is not None else at)    # BUG-352: the citizens' walk group (snapshot wg)
     if near is not None or at is not None:                 # FR-78: a position asked for; nearest first
@@ -768,6 +771,45 @@ def civ_stair_tiles(m: dict) -> set[tuple[int, int, int]]:
         if isinstance(c, (list, tuple)) and len(c) == 4 and all(isinstance(v, int) for v in c):
             out |= {(c[0], c[1], z) for z in range(min(c[2], c[3]), max(c[2], c[3]) + 1)}
     return out
+
+
+def _rooms_funnel(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None) -> str:
+    """BUG-722 (Run 16a i1 Basementflew: `bp sites hospital` = 'no valid site on the snapshot' for years, no word why): where the room candidates
+    of `_rooms` fall out, counted per test on the same funnel (anchor tiles on the public Z4 floor, the door tile, the room rects against rock /
+    liquid / hidden tiles, the keep-out boxes, the refuge level). Text, e.g. '312 anchor tiles on the Z4 floor (1248 placements): 0 with a
+    free door tile ..., 1100 leave the open rock ...'."""
+    g = Graph(snap)
+    keep_out = _keep_out(manifest)
+    ref = manifest.get("refuge")
+    zr = ref["anchor"][2] if ref else None
+    refuge_level = on_refuge(tpl, p)
+    n = door = fit = ko = lvl = ok = 0
+    for i in _anchor_tiles(g, tpl, p, manifest):
+        n += 1
+        ax, ay, az = g.pos(i)
+        for rot in range(4):
+            du, dv = rot_uv(0, 1, rot)
+            d = g.idx((ax + du, ay + dv, az))
+            if d is None or g.t[d] not in GOOD:
+                door += 1
+                continue
+            res = _check(rects, ax, ay, az, rot, bad, hid, mk, False, wet)
+            if res is None:
+                fit += 1
+                continue
+            box = res[2]
+            if any(_overlap(box, b) for b in keep_out):
+                ko += 1
+                continue
+            if zr is not None and box[2] <= zr <= box[5] and not refuge_level:
+                lvl += 1
+                continue
+            ok += 1
+    if n == 0:
+        return ("no anchor tile: the manifest's public Z4 floor has no open floor tile in the snapshot (zones.Z4 "
+                f"{len((manifest.get('zones') or {}).get('Z4') or [])} box(es))")
+    return (f"{n} anchor tile(s) on the Z4 floor, {4 * n} placements: {door} with no open door tile, {fit} whose room meets rock, a wall, liquid or "
+            f"leaves the map, {ko} in a keep-out box (stairs, shafts, refuge), {lvl} on the refuge level, {ok} fit")
 
 
 def _anchor_tiles(g: Graph, tpl: str, p: dict, manifest: dict) -> list[int]:

@@ -442,8 +442,11 @@ function M.ws_fix(K, skill)
   end
   local parts = {}
   if #ask > 0 then
-    parts[1] = string.format('dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"%s"}}',
-                             table.concat(ask, ',', 1, math.min(#ask, 3)))
+    -- BUG-722 (Run 16d i4 Trumpetrealms y461: the MOOD line named {only:Jewelers}, refused '0 free sites'; p.rebuild=1 put the shop back): a shop
+    -- the manifest lists as gone is put back with rebuild (one type per call)
+    local gn = type(ms.gone) == 'table' and ms.gone[ask[1]] == true
+    parts[1] = string.format('dfllm cmd bp.place {"tpl":"workshops","site":"S1","p":{"only":"%s"%s}}',
+                             gn and ask[1] or table.concat(ask, ',', 1, math.min(#ask, 3)), gn and ',"rebuild":1' or '')
   end
   if #queued > 0 then parts[#parts + 1] = table.concat(queued, ', ', 1, math.min(#queued, 2)) end
   if #parts == 0 then return nil end

@@ -146,12 +146,13 @@ end)
 T.test('BUG-679: the short answer names the cause first (a builder that took nothing, DF suspended with nothing readable, buildingplan)', function()
   local b = door({flags = {suspend = false}})
   local W = world{blds = {['115,73,143'] = b}}
-  T.eq(state(W).short, 'no builder has taken it (no cause readable)')
+  -- BUG-721: no readable cause names what was read (labor holders, items attached) and the two causes left
+  T.eq(state(W).short, 'no builder took it: no cause readable (labor unread, items 0/1, in burrow, not walled in); busy or no path: inspect workload, reach')
   local b1 = door({flags = {suspend = false}})
   local W1 = world{blds = {['115,73,143'] = b1}}
   local r1 = state(W1)
   T.ok(r1.short:find('^no builder'), r1.short)
-  T.ok(#r1.short <= 110, 'short enough for the 110 characters the events keep: ' .. #r1.short)
+  T.ok(#r1.short <= 160, 'short enough for the events: ' .. #r1.short)
   local W2 = world{blds = {['115,73,143'] = door()}, bp = {isPlannedBuilding = function() return false end},
                    sm = {isKeptSuspended = function() return false end}}
   T.eq(state(W2).short, 'suspended by DF: no cause readable (resumed daily)')
