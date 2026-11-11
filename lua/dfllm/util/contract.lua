@@ -300,6 +300,9 @@ C.VERBS = {
   ['hospital.restore'] = {mod = 'water'},
   -- BUG-541 (Run 16b i2 / 16d i4: carriers stood weeks at a dry well, 3 patients died): the building screen's remove for one dry well
   ['well.retire'] = {mod = 'water'},
+  -- BUG-734 (Run 16c i3 Doorwings: no plain hard stone, chalk and magnetite held, the masons refuse them): the stone-use screen's economic
+  -- mark of one stone type the fort holds (the player's decision, the DECISION no_hard_stone names it)
+  ['stone.use'] = {mod = 'economy'},
 }
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
