@@ -1243,6 +1243,30 @@ def _head(g: _Seg, env: _Env | None) -> tuple[int, bool]:
     return k, k >= n
 
 
+_SH_RUNNERS = {"bash", "sh", "zsh", "dash", "ksh", "source", "."}
+_WRAP_EXT = (".sh", ".bash", ".zsh")
+
+
+def _wrapper_lua(texts: list[str], k: int) -> list[str] | None:
+    """BUG-731: `<name>.sh lua ...` / `bash <name>.sh lua ...`, a wrapper script around the DFHack client (a
+    player's dh.sh): the hook text holds no client word. The words after the script when the first non-option
+    one is `lua` (inline lua), else None."""
+    if k >= len(texts):
+        return None
+    h = texts[k].strip("\"'")
+    j = k
+    if _base(h) in _SH_RUNNERS:
+        j = next((i for i in range(k + 1, len(texts)) if not texts[i].startswith("-")), len(texts))
+        if j >= len(texts):
+            return None
+        h = texts[j].strip("\"'")
+    if not h.lower().endswith(_WRAP_EXT):
+        return None
+    args = [a for a in _strip_redir([a.strip("\"'") for a in texts[j + 1:]]) if a]
+    first = next((a for a in args if not a.startswith("-")), "")
+    return args if first.lstrip(":").lower() == "lua" else None
+
+
 def _lint_cli(words: list[str]) -> bool:
     """`dfllm lint ...` / `python -m dfpilot[.lint] lint ...` only judges its arguments."""
     w = [x.lower() for x in words[:6]]
@@ -1293,6 +1317,10 @@ def _judge(segs: list[_Seg], env: _Env, depth: int, out: list, al: dict, in_sub:
             if rx and _DFR.search(" ".join(texts)) and any(rx.search(t) for t in texts):
                 out.append((texts, "unrecognised"))
             continue
+        wl = _wrapper_lua(texts, k)
+        if wl is not None:                                       # BUG-731: wrapper.sh lua ... is the client's lua
+            out.append((wl[next(i for i, a in enumerate(wl) if not a.startswith("-")):], "ok"))
+            continue
         j, found = None, None
         for idx in range(k, len(texts)):
             found = _dfr_tok(texts[idx], env, head=idx == k)
@@ -1300,7 +1328,8 @@ def _judge(segs: list[_Seg], env: _Env, depth: int, out: list, al: dict, in_sub:
                 j = idx
                 break
         for idx, (t, quoted) in enumerate(g.toks):               # bash -c "...", python -c "...", paths
-            if quoted and (j is None or idx <= j) and _DFR.search(t) and _CODEY.search(t):
+            if quoted and (j is None or idx <= j) and _CODEY.search(t) and (
+                    _DFR.search(t) or re.search(r"\.(sh|bash|zsh)\b", t, re.I)):
                 _judge_text(t, env, depth + 1, out, al)
         if j is not None:
             rest, emb = found

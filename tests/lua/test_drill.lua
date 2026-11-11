@@ -208,6 +208,7 @@ end)
 T.test('automatic drills: P5, settle, soldiers, bridges; first, yearly, keep R2, after a siege, retry', function()
   local W = world{auto = true}
   local M, K = D(), W.K
+  M.GEAR_RECHECK = 0          -- BUG-730: the gear-only hold (gear_hold) is off here: this test is about the schedule
   local now = K.now().tick
   W.state()
   T.eq(M.due(K, now), nil, 'settling after boot')
@@ -262,6 +263,7 @@ end
 
 T.test('4 failed drills in a row: exactly one DRILL_FAIL; retries back off (month, x2, capped at a season)', function()
   local W = world{auto = true, equip = false}    -- uniform specs, nothing worn: worn 0 (not structural)
+  D().GEAR_RECHECK = 0          -- BUG-730: the gear-only hold (gear_hold) is off here: this test is about the back-off schedule
   X.run(W, 215000)
   local starts, res = drills(W)
   T.eq(#res, 4, 'four drills in 215,000 ticks')
@@ -284,6 +286,7 @@ end)
 
 T.test('structural failure (no uniform specs at all): no automatic retry until a uniform exists', function()
   local W = world{auto = true, uniform_mode = 'fail'}   -- act.squad_uniform refused [S2]
+  D().GEAR_RECHECK = 0          -- BUG-730: the gear-only hold (gear_hold) is off here: this test is about the structural block
   X.run(W, 2500)
   local _, res = drills(W)
   T.eq(#res, 1)

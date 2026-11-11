@@ -83,8 +83,8 @@ T.test('job_needs: quantities (bars x150, cloth x10000), attached items, classes
   T.eq(R.job_needs({job_type = df.job_type.StrangeMoodCrafter, items = kmock.vec{{job_item_idx = 0}},
                     job_items = {elements = kmock.vec{ji('WOOD')}}}), {}, 'everything brought')
   T.eq(R.token(needs[1]), 'bar:iron')
-  T.eq({R.token(needs[2]), R.token(needs[3]), R.token(needs[5]), R.token(needs[7])}, {'cloth:silk', nil, 'gem', 'cloth'},
-       'BUG-017: a cloth filter that names its kind asks trade for that kind; plain cloth when any kind fits')
+  T.eq({R.token(needs[2]), R.token(needs[3]), R.token(needs[5]), R.token(needs[7])}, {'cloth:silk', nil, 'rough', 'cloth'},
+       'BUG-017: a cloth filter that names its kind asks trade for that kind; plain cloth when any kind fits; BUG-727: a rough-gem slot asks for `rough`')
 end)
 
 T.test('BUG-017: job_needs matches attached items without a filter index; kinds, kinded tokens, the hold split',

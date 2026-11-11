@@ -1110,9 +1110,38 @@ local function mood_seen(K, c, r, p, u, kind)
   end
 end
 
+-- BUG-728 (Run 16b i2 Whirledrampart y430: a child at stress 99,880 (tantrum 12,186 ticks ago) smothered two bedridden patients in the
+-- hospital, and 'Dwarven Baby' units starved and dried out after their mothers died of thirst there): the scan names the citizens at
+-- raw stress >= M.XS.stress (tantrum risk: a mind this far gone attacks whoever is nearest) and the babies whose mother is dead or gone.
+-- care.finish (xs_step) names them (care.stress_ids); water takes them off the Orderlies detail and adds no caregiver of this kind,
+-- asks the DECISION stress_extreme (the needs: ghosts, no beds, no drink: temple, tavern, bedrooms, tombs) and orphan_babies
+M.XS = {stress = 80000, ids = 6, every = 7 * DAY, wall_s = 600}
+function M.xs_look(a, u)
+  local okx, sx = pcall(function() return u.status.current_soul.personality.stress end)
+  if okx and math.type(sx) == 'integer' and sx >= M.XS.stress and not dfhack.units.isBaby(u) then
+    a.xsn = a.xsn + 1
+    if #a.xs < M.XS.ids then
+      local pos = unit_pos(u)
+      a.xs[#a.xs + 1] = {id = u.id, name = uname(u), stress = sx, child = is_child(u) or nil, pos = pos and {pos.x, pos.y, pos.z} or nil}
+    end
+  end
+  if dfhack.units.isBaby(u) then
+    local okm, mid = pcall(function() return u.relationship_ids.Mother end)
+    if okm and math.type(mid) == 'integer' and mid >= 0 then
+      local mu = df.unit.find(mid)
+      local gone = mu == nil or dfhack.units.isDead(mu) or not dfhack.units.isActive(mu)
+      if gone then
+        a.orn = a.orn + 1
+        if #a.orph < M.XS.ids then a.orph[#a.orph + 1] = {id = u.id, mother = mid} end
+      end
+    end
+  end
+end
+
 local function look_unit(K, c, r, p, u)
   local a = r.acc
   a.n = a.n + 1
+  M.xs_look(a, u)
   local cat = dfhack.units.getStressCategory(u)             -- Lua API.txt:1904: 0 worst .. 6
   if cat <= 1 then
     a.stressed = a.stressed + 1
@@ -3742,8 +3771,9 @@ end
 -- Possessed 26275 wanted bars x3 in a fort with no ore, no metal marked for melting and no smelter, died 37 days later; the 'IMPOSSIBLE'
 -- line came with his thirst, the deadline decision at 15 days): 'bars' = a bars slot short while economy.mood_hint('bars') says the
 -- fort has neither ore nor metal marked for melting (`bh` = {hint, impossible})
-local function early_kind(a, inv, bh)
+local function early_kind(a, inv, bh, gs)
   if type(a) ~= 'table' or a.legacy then return nil end
+  if a.cls == 'glass' and gs then return 'glass' end          -- BUG-727: raw glass the fort cannot make (no sand, no furnace)
   if a.cls == 'bars' and bh then return 'bars' end
   if a.cls == 'gems' and a.tname == 'ROUGH' then return 'rough' end
   if a.cls == 'boulders' and a.non_economic then return 'stone' end
@@ -3796,7 +3826,7 @@ function M.mood_early(K, c, m, rec, early, far)
   cmds[#cmds + 1] = string.format('dfllm cmd inspect what=unit key=%s', tostring(m.sid))
   local names, ways = {}, {}
   for i, e in ipairs(list) do if i <= 3 then names[#names + 1] = e.t end end
-  if seen.rough then ways[#ways + 1] = 'a rough gem is made by no work order: trade.want gem or dig for a gem vein' end
+  if seen.rough then ways[#ways + 1] = 'a rough gem is made by no work order: trade.want rough or dig for a gem vein' end
   if seen.stone then
     ways[#ways + 1] = 'hard stone: ' .. (rec.sdig_why and ('no stone dig (' .. trunc(tostring(rec.sdig_why), 50) .. ')') or 'dig for it')
   end
@@ -3806,6 +3836,11 @@ function M.mood_early(K, c, m, rec, early, far)
                       or ('bars: ' .. trunc(bh and bh.hint or 'no ore and nothing marked for melting', 120))
   end
   if seen.silk then ways[#ways + 1] = 'no web within reach and no silk thread: trade.want cloth:silk' end
+  if seen.glass then
+    local gw
+    for _, e in ipairs(list) do if e.k == 'glass' and e.g then gw = e.g.why end end
+    ways[#ways + 1] = 'raw glass: ' .. trunc(gw ~= '' and gw or 'the glass chain cannot make it here', 110) .. ' (trade.want glass)'
+  end
   if (far or 0) > 0 then ways[#ways + 1] = string.format('%d out of his reach: open the way', far) end
   local q = string.format('unit %s (%s): %s cannot be made in time here; %s', tostring(m.sid), tostring(rec.kind or '?'),
                           table.concat(names, ', '), table.concat(ways, '; '))
@@ -3876,8 +3911,13 @@ local function mood_report(K, c, r, p)
             local okb, hint, imp = K.call('economy', 'mood_hint', 'bars')
             bh = (okb and type(hint) == 'string' and hint ~= '') and {hint = hint, imp = imp == true} or false
           end
-          local ek = #nd.alts == 1 and early_kind(a0, inv, bh or nil) or nil
-          if ek then early[#early + 1] = {k = ek, t = trunc(R.slot_name(a0) .. ' x' .. short, 40), h = bh or nil} end   -- BUG-575
+          local gs
+          if a0.cls == 'glass' and #nd.alts == 1 then      -- BUG-727: economy.glass_stuck, read when a raw glass slot is short
+            local okg, stuck, why = K.call('economy', 'glass_stuck')
+            if okg and stuck == true then gs = {why = tostring(why or '')} end
+          end
+          local ek = #nd.alts == 1 and early_kind(a0, inv, bh or nil, gs) or nil
+          if ek then early[#early + 1] = {k = ek, t = trunc(R.slot_name(a0) .. ' x' .. short, 40), h = bh or nil, g = gs} end   -- BUG-575
           if (name == 'boulders' or name == 'blocks') and (nd.src or 0) == 0 then rockn = rockn + short end   -- BUG-393
           local path = false
           for _, alt in ipairs(nd.alts) do
@@ -4363,7 +4403,7 @@ local function new_run(K, c, p)
   end
   local mode, now = K.mode(), K.now().tick
   return {ph = 1, idx = 0, left = 0, ids = ids, have_units = type(cu) == 'table' and type(cu.ids) == 'table',
-          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0, s0n = 0, s0 = {}},
+          acc = {n = 0, stressed = 0, naked = 0, thoughts = {}, src = {}, kids = 0, res = 0, s0n = 0, s0 = {}, xsn = 0, xs = {}, orn = 0, orph = {}},
           moody = {}, mood_list = {},
           mood_cls = {},
           claimed = {}, member = {}, res_ids = res_ids, res_hold = {}, res_floor = {}, rc = R.conf(K.cfg.baseline),
@@ -4829,6 +4869,65 @@ local function pop_stress(K, c, r, p, now)
   end
 end
 
+-- BUG-728: what finish does with the scan's extreme-stress citizens and orphaned babies (see xs_look). The stressed ones leave the Orderlies
+-- detail in water (the hospital's carers: a patient in a bed cannot run); one DECISION_NEEDED per change of the set (util/cadence), its commands
+-- inspect them; the needs it names are the sources the scan found (pop_stress: ghosts, deaths, no beds, no drink, rooms)
+function M.xs_step(K, c, r, p, now)
+  local a = r.acc
+  local ids = {}
+  st.xs_set = {}
+  for _, e in ipairs(a.xs) do ids[#ids + 1] = e.id; st.xs_set[e.id] = true end
+  table.sort(ids)
+  local T = K.now()
+  if #ids > 0 then
+    if CAD.due(type(p.xsev) == 'table' and p.xsev or nil, T, ids, {}, {ticks = M.XS.every, wall_s = c.wake_wall_s or M.XS.wall_s}) then
+      p.xsev = CAD.mark(T, ids, {})
+      local names, cmds = {}, {}
+      for i, e in ipairs(a.xs) do
+        if i <= 3 then
+          names[#names + 1] = string.format('%s (%d%s, stress %d%s)', e.name ~= '' and e.name or 'unit', e.id, e.child and ', child' or '',
+                                            e.stress, e.pos and string.format(', at %d,%d,%d', e.pos[1], e.pos[2], e.pos[3]) or '')
+          cmds[#cmds + 1] = 'dfllm cmd inspect what=unit key=' .. e.id
+        end
+      end
+      local src = {}
+      for _, g in ipairs({'ghosts', 'deaths', 'beds', 'drink', 'food', 'rooms'}) do
+        if (st.src and st.src[g] or 0) > 0 then src[#src + 1] = (SRC_LABEL[g] or g) .. ' ' .. st.src[g] end
+      end
+      cmds[#cmds + 1] = 'dfllm cmd inspect what=hospital'
+      local q = string.format('%d citizen(s) at stress >= %d, a tantrum can strike the patients: %s; water takes them off the Orderlies detail; '
+                              .. 'sources: %s; a temple, a tavern, bedrooms and tombs ease it (plan propose)', a.xsn, M.XS.stress,
+                              table.concat(names, '; '), #src > 0 and table.concat(src, ', ') or 'none named')
+      K.log('warn', 'care: %s', q)
+      K.emit('DECISION_NEEDED', 'A', trunc('stress_extreme: ' .. q, 200),
+             {id = 'stress_extreme', q = trunc(q, 200), n = a.xsn, cmds = cmds, opts = {'orderlies off'}})
+    end
+  else
+    p.xsev = CAD.quiet(type(p.xsev) == 'table' and p.xsev or nil)
+  end
+  local oids = {}
+  for _, e in ipairs(a.orph) do oids[#oids + 1] = e.id end
+  table.sort(oids)
+  if #oids > 0 then
+    if CAD.due(type(p.orev) == 'table' and p.orev or nil, T, oids, {}, {ticks = 2 * DAY, wall_s = c.wake_wall_s or M.XS.wall_s}) then
+      p.orev = CAD.mark(T, oids, {})
+      local cmds = {}
+      for i = 1, math.min(3, #oids) do cmds[#cmds + 1] = 'dfllm cmd inspect what=unit key=' .. oids[i] end
+      cmds[#cmds + 1] = 'dfllm cmd inspect what=hospital'
+      local q = string.format('%d baby(ies) without a living mother (ids %s): they drink and eat only from a carer; a GiveFood / GiveWater job '
+                             .. 'reaches them when a caregiver stands by; check them now', a.orn, table.concat(oids, ','))
+      K.log('warn', 'care: %s', q)
+      K.emit('DECISION_NEEDED', 'A', trunc('orphan_babies: ' .. q, 200),
+             {id = 'orphan_babies', q = trunc(q, 200), n = a.orn, cmds = cmds})
+    end
+  else
+    p.orev = CAD.quiet(type(p.orev) == 'table' and p.orev or nil)
+  end
+end
+
+-- BUG-728: the ids at extreme stress of the last scan ({[id] = true}); water adds none of them as a caregiver
+function M.stress_ids() return st and st.xs_set or {} end
+
 local function finish(K, c, r, p)
   local now = K.now().tick
   -- open citizen corpses: first seen -> age
@@ -4925,7 +5024,7 @@ local function finish(K, c, r, p)
   died_prune(c, p, now)
   cluster_scan(K, c, p)
   st.died = died_tally(p, now)
-  if r.have_units then pop_stress(K, c, r, p, now) end
+  if r.have_units then pop_stress(K, c, r, p, now); M.xs_step(K, c, r, p, now) end
   -- FR-83: the desperate citizens (stress category 0) of this run, named; BUG-115: curses and transformations
   if r.have_units then st.s0 = {n = r.acc.s0n, list = r.acc.s0} end
   if c.curse then

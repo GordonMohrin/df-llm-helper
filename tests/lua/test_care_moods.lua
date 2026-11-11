@@ -503,7 +503,7 @@ T.test('Run 11: MOOD_RISK names the glass route for cut gems and raw glass, the 
   local function route(K, cls, via)
     asked[#asked + 1] = cls .. ':' .. tostring(via)
     if cls == 'gems' and via == 'glass' then return 'cut glass: no sand revealed, raw 0/9, cut 6; trade.want gem' end
-    if cls == 'gems' then return 'rough gems: mine a gem vein or trade.want gem (glass is no rough gem)' end
+    if cls == 'gems' then return 'rough gems: mine a gem vein or trade.want rough (glass is no rough gem)' end
     if cls == 'glass' then return 'raw glass: CollectSand+MakeRawGlass, raw 1/4' end
     return ''
   end
@@ -518,7 +518,7 @@ T.test('Run 11: MOOD_RISK names the glass route for cut gems and raw glass, the 
   T.ok(by[1] and by[1].d.route == 'route gems: cut glass: no sand revealed, raw 0/9, cut 6; trade.want gem',
        by[1] and by[1].d.route)
   T.ok(by[1].msg:find('route gems: cut glass', 1, true), by[1].msg)
-  T.eq(by[2].d.route, 'route gems: rough gems: mine a gem vein or trade.want gem (glass is no rough gem)')
+  T.eq(by[2].d.route, 'route gems: rough gems: mine a gem vein or trade.want rough (glass is no rough gem)')
   T.eq(by[3].d.route, 'route glass: raw glass: CollectSand+MakeRawGlass, raw 1/4')
   T.eq(asked, {'gems:glass', 'gems:nil', 'glass:nil'})
   local glass = {}
