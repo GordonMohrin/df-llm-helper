@@ -1354,8 +1354,15 @@ function RF.floor(K, R)
   local x = rows[1]
   local cmd
   if x.n == R.names.refuge and x.n ~= R.names.kern then
-    cmd = x.what == 'drink' and 'dfllm cmd bp.place \'{"tpl":"refuge_drink","site":"S1"}\''
-          or 'the refuge level has no food store template: stock it from the next plan (refuge_drink holds drink only)'
+    -- BUG-739 (Run 16b i2 Whirledrampart y431: 'no food store template' for a refuge that held 62 of 68 food): refuge_drink food=1
+    -- (BUG-572) is the refuge's food AND drink store, n barrels of 5 units for what the burrow lacks (2..40)
+    if x.what == 'drink' then
+      cmd = 'dfllm cmd bp.place \'{"tpl":"refuge_drink","site":"S1"}\''
+    else
+      local units = math.max(0, x.nf - x.b.food) + (x.what == 'food+drink' and math.max(0, x.nd - x.b.drink) or 0)
+      local n = math.min(40, math.max(2, (units + 4) // 5))
+      cmd = string.format('dfllm cmd bp.place \'{"tpl":"refuge_drink","site":"S1","p":{"n":%d,"food":1}}\'', n)
+    end
   else
     cmd = 'dfllm cmd bp.place \'{"tpl":"stockroom","site":"S1"}\'' -- (the template has no burrow param: its pile joins Kern+)
   end

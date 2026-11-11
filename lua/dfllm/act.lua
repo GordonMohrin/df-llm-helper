@@ -31,7 +31,8 @@ A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
 -- BUG-546/547: the one labor each way act.labor_set switches (the labors screen): mechanic on (a lever's link job needs a Mechanic),
 -- farm off (the manager at the fields validates no order), BUG-629: cook on (a kitchen, cook ingredients, no meal and nobody with the labor)
 A.LABOR_SETS = {mechanic = {name = 'MECHANIC', on = true}, farm = {name = 'PLANT', on = false}, cook = {name = 'COOK', on = true},
-                clean_fish = {name = 'CLEAN_FISH', on = true}}      -- BUG-716: raw fish uncleaned, nobody holds Fish cleaning
+                clean_fish = {name = 'CLEAN_FISH', on = true},      -- BUG-716: raw fish uncleaned, nobody holds Fish cleaning
+                hunt = {name = 'HUNT', on = false}}                  -- BUG-740: a soldier or captain walks out to hunt and dies there
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
@@ -2275,7 +2276,7 @@ local function impls(state)
   -- (only on) or farm (only off), A.LABOR_SETS; a citizen who is no living adult cannot take a labor
   function I.labor_set(unit_id, which, on)
     local spec = A.LABOR_SETS[tostring(which)]
-    if not spec then return false, 'which must be mechanic, farm, cook or clean_fish' end
+    if not spec then return false, 'which must be mechanic, farm, cook, clean_fish or hunt' end
     if (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
     local u = df.unit.find(int(unit_id) or -1)
     if not u then return false, 'no unit ' .. tostring(unit_id) end

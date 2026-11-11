@@ -1957,6 +1957,10 @@ end
 local function hunt_want(K, c, r)
   local spec = hunters_spec(c)
   if not spec then return 0, 'none' end
+  -- BUG-740 (Run 16d i4 Pagedsculpture y386: the militia captain went hunting and died outside, z110): a large or predatory wild
+  -- unit in or beside water near a citizen (sense census.w.hold, as for the fishers) keeps the hunters inside, a famine too
+  local cw = K.census and K.census.w
+  if type(cw) == 'table' and cw.hold == 1 then return 0, 'predator' end
   local mode = K.mode()
   if not HUNT_MODES[mode] then
     if M.hunt_siege(K) then return 0, 'siege' end
@@ -5296,8 +5300,10 @@ local function tools(K, c, p, inv, engine, r)
         local ok_u = u and dfhack.units.isAdult(u) and u.military.squad_id < 0 and not taken[id]
         local lpat = ok_u and M.tool_long_patient(u, spec, tc, trec, now)       -- BUG-187
         if lpat then npat = npat + 1; pids[tostring(id)] = true end
+        -- BUG-740: a squad member (soldier, captain) never stays on the hunters' detail, the player's entry too
+        local sq = spec.ranged ~= nil and u ~= nil and (u.military.squad_id or -1) >= 0
         if ok_u and not lpat then cur[#cur + 1] = u
-        elseif mine[id] then
+        elseif mine[id] or sq then
           if set(spec, id, false, lpat and 'patient' or taken[id] and ('in ' .. taken[id]) or 'not eligible', tgt) then
             mine[id] = nil
             if lpat then npat, pids[tostring(id)] = npat - 1, nil end     -- off the detail: no longer a member
@@ -5351,7 +5357,7 @@ local function tools(K, c, p, inv, engine, r)
         ps.low = ps.low or now
         -- hunters outside the walls while the fort leaves PEACE: off the detail now (siege reflex, drills); every
         -- member then, also the player's
-        local at_once = r ~= nil and ((spec.ranged ~= nil and r.hunt_why == 'siege') or     -- BUG-326: a real siege only
+        local at_once = r ~= nil and ((spec.ranged ~= nil and (r.hunt_why == 'siege' or r.hunt_why == 'predator')) or  -- BUG-326: a real siege only
                                       (spec.fish ~= nil and (r.fish_why == 'siege' or r.fish_why == 'water beast')))
         if at_once or now - ps.low >= (tc.shrink_days or 3) * DAY then
           local out, stay = {}, {}
@@ -5459,7 +5465,54 @@ local function tools(K, c, p, inv, engine, r)
       end
     end
   end
+  changes = changes + M.soldier_hunt_off(K, cu.soldier_ids, now, adults, wds.Hunters, p)
   return changes
+end
+
+-- BUG-740 (Run 16d i4 Pagedsculpture y386: the militia captain Rovod, a Bone Carver, 'cancels Hunt for small creature: Could not find
+-- path' for days, missing a week, dead of thirst on the surface at z110; the fort held 16 citizens): a squad member (soldier or captain)
+-- with the Hunting labor on walks out of the walls on a vermin or game hunt, also in an alert, on no detail the kernel runs. The labor
+-- goes off for each squad member (act.labor_set 'hunt', the labors screen), at most once a day per unit and 3 a pass; WORK_DETAIL
+-- (B) why 'soldier'. Returns the number switched off.
+-- BUG-741 (Run 16c i3 Doorwings y385: the Gem Cutter 28225, in no detail the kernel runs, on a HuntVermin job 70 tiles from the fort,
+-- STRANDED on a walk group with no way back to drink, dead of thirst; the Hunters detail never held him): the same for a civilian who has
+-- the Hunting labor on and is no member of the Hunters detail (`adults`, `wd`; why 'stray'), except in a famine (the kernel wants
+-- hunters then) and with the detail on 'everybody does this' (the labor is meant for all).
+M.SOLDIER_HUNT_MAX = 3
+function M.soldier_hunt_off(K, ids, now, adults, wd, p)
+  st.fixes = st.fixes or {}
+  local n = 0
+  local function off(u, why, txt)
+    local id = u.id
+    local key = 'soldier_hunt:' .. tostring(id)
+    if n >= M.SOLDIER_HUNT_MAX or now - (st.fixes[key] or -1e12) < DAY then return end
+    if not M.labor_flag(u, 'HUNT') then return end
+    st.fixes[key] = now
+    local ok, res = K.act.labor_set(id, 'hunt', false)
+    if ok and res == 'disabled' then
+      n = n + 1
+      K.emit('WORK_DETAIL', 'B', string.format('Hunting labor - %s (%s)', unit_name(id), txt),
+             {detail = 'Hunters', unit = id, on = 0, n = 0, why = why})
+    end
+  end
+  local sold = {}
+  for _, id in ipairs(type(ids) == 'table' and ids or {}) do
+    local u = math.tointeger(id) and df.unit.find(id)
+    if u and not dfhack.units.isDead(u) and (u.military.squad_id or -1) >= 0 then
+      sold[id] = true
+      off(u, 'soldier', 'squad member: no hunting outside the walls')
+    end
+  end
+  local every = df.work_detail_mode and df.work_detail_mode.EverybodyDoesThis
+  if not wd or (every ~= nil and wd.flags.mode == every) or (type(p) == 'table' and p.famine) then return n end
+  local mem = {}
+  for _, id in ipairs(wd.assigned_units) do mem[id] = true end
+  for _, u in ipairs(type(adults) == 'table' and adults or {}) do
+    if not mem[u.id] and not sold[u.id] and (u.military.squad_id or -1) < 0 then
+      off(u, 'stray', 'in no hunters detail: no hunting outside the walls')
+    end
+  end
+  return n
 end
 
 -- BUG-295 (Run 15c Inkintense y376: every automatic drill took both hunters off their detail, 'mode DRILL', #1408/#1409,
