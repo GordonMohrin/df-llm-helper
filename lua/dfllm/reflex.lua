@@ -2730,6 +2730,19 @@ local function lone_step(K, h, now)
   end
 end
 
+-- BUG-692: in a BREACH with a few hostiles inside Kern+ that kill (a kill mark, or citizens died within a day) the kernel starts the
+-- squads against them itself, unequipped too when they outnumber the hostiles 3 to 1 (military.kill_inside); tried again every
+-- KILL_RETRY ticks (a squad on a sortie is left alone), named once per start. The DEATHS_3PLUS default does the same at once.
+function M.inside_step(K, h, now)
+  if K.mode() ~= 'BREACH' then rt.in_t = nil; return end
+  if rt.in_t and now >= rt.in_t and now - rt.in_t < M.KILL_RETRY then return end
+  rt.in_t = now
+  local ok, started, msg = K.call('military', 'kill_inside', 'reflex')
+  if ok and started == true and not tostring(msg):find('running', 1, true) then
+    K.log('warn', 'reflex: BREACH with a killer inside Kern+: %s', tostring(msg))
+  end
+end
+
 -- a mood dwarf or a patient behind the sounding alert over confine.need_thirst / need_hunger: DECISION_NEEDED
 -- confined_need (CAD) and, with nothing dangerous near, the lockdown ends for him. Soldiers and children are looked at
 -- like the rest; the siege module's relax path (STRANDED) stays the rescue for the others
@@ -2837,10 +2850,25 @@ local function ack_step(K, now)
         r.done = 2
         K.log('info', 'reflex: interrupt #%d TRANSFORM unacked for %d s; no citizen is in were-form now: no default', r.n, age)
       else
+        -- BUG-692 (Run 16d i4 Trumpetrealms y461: three DEATHS_3PLUS defaults in a row re-applied the same lockdown while one goblin
+        -- inside Kern+ killed 49 citizens): the default of DEATHS_3PLUS in a BREACH with a few hostiles inside also sends the squads
+        -- against them (military.kill_inside: unequipped too, when they outnumber 3 to 1); the lockdown still holds the rest
+        local fight
+        if r.type == 'DEATHS_3PLUS' and K.mode() == 'BREACH' then
+          local okk, started, msg = K.call('military', 'kill_inside', 'reflex:deaths')
+          if okk then
+            if started == true then fight = tostring(msg)
+            elseif type(msg) == 'string' and not msg:find('nobody inside', 1, true) and not msg:find('not BREACH', 1, true)
+                   and not msg:find('no fresh census', 1, true) then
+              fight = 'no sortie against the killer inside: ' .. msg
+            end
+          end
+        end
         local parts, d = engage(K, 'unacked', 'unacked:' .. r.type, acts, now)
         d.why, d.n, d.type = 'ack_timeout', r.n, r.type
-        K.emit('LOCKDOWN', 'A', compose(string.format('interrupt #%d %s unacked for %d s: kernel applied its default: ',
-               r.n, r.type, age), parts), d)
+        if fight then d.fight = fight:sub(1, 120) end
+        K.emit('LOCKDOWN', 'A', compose(string.format('interrupt #%d %s unacked for %d s: kernel applied its default%s: ',
+               r.n, r.type, age, fight and (' (' .. fight .. ')') or ''), parts), d)
       end
       alarm_write(K, true)
     end
@@ -3022,6 +3050,7 @@ function M.step(K, budget, ctx)
   clock_step(K, h, now)                                    -- BUG-671
   M.overlimit_step(K, h, now)                              -- BUG-452: SIEGE/BREACH past the limit
   lone_step(K, h, now)                                     -- M3 (BUG-112)
+  M.inside_step(K, h, now)                                 -- BUG-692
   need_step(K, h, now)
   ack_step(K, now)
   depot_visits(K, now)

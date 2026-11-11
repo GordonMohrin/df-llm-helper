@@ -2689,6 +2689,15 @@ function M.kit_missing(K, key)
                        #det > 0 and ('; ' .. table.concat(det, '; ')) or '')
 end
 
+-- BUG-694: where an unequipped squad waits for its kit: the refuge anchor of the manifest (the civilians' ground), when the squad
+-- can walk there (not another walk group); nil without a manifest refuge, then the squad goes off duty as before
+function M.equip_pos(K, man, s)
+  local a = type(man.refuge) == 'table' and posp(man.refuge.anchor)
+  if not a then return nil end
+  if M.off_group(K, a, M.home_group(K, s)) then return nil end
+  return a
+end
+
 -- squad `k` stands down now (see M.UNFIT_PCT); the first look of an episode names it in kern.log (rt.sd_note)
 local function standdown(K, k)
   local mode = K.mode()
@@ -2742,7 +2751,13 @@ local function apply_squad(K, k, force)
   rt.sd = rt.sd or {}
   rt.sd[k] = down or nil
   if down then pos = nil end
-  local off = not pos and (down or off_season(K, k))
+  -- BUG-694 (Run 16d i4 Trumpetrealms y461: 3-13 soldiers stood down 'unequipped' for 56 days with 17-30 pieces assigned and 6-26
+  -- free body armors in stock, 'unfetched for 2400 ticks' every 160 s): an OFF-DUTY squad does not fetch its kit (DF: no orders =
+  -- civilians), so BUG-510's stand-down kept the squad unequipped for ever. A squad that stands down gets an equip hold instead:
+  -- a station order at the refuge anchor (the civilians' ground, no station against the enemy), the squad stays active and its
+  -- soldiers go for their kit; the stand-down itself (no sortie, no station) is unchanged
+  local eq = down and M.equip_pos(K, man, s) or nil
+  local off = not pos and not eq and (down or off_season(K, k))
   if off then which = 'off' end
   local ok = true
   local idx, name = resolve_routine(which)
@@ -2753,28 +2768,35 @@ local function apply_squad(K, k, force)
   elseif force or routine_idx(s) ~= idx then
     ok = K.act.squad_routine(s.id, name) and ok
   end
-  local sig = pos and string.format('station:%d,%d,%d', pos.x, pos.y, pos.z) or (off and 'off' or 'train')
+  local sig = pos and string.format('station:%d,%d,%d', pos.x, pos.y, pos.z) or eq and string.format('equip:%d,%d,%d', eq.x, eq.y, eq.z)
+              or (off and 'off' or 'train')
   local cur = rt.order[k]
   local held = cur and (cur:sub(1, 5) == 'kill:' or cur:sub(1, 7) == 'sortie:') and order_count(s) > 0
   if held and not force then return ok end           -- a kill order or an approved sortie runs
-  local drift = (pos and order_count(s) == 0) or (not pos and order_count(s) > 0)
+  local op = pos or eq
+  local drift = (op and order_count(s) == 0) or (not op and order_count(s) > 0)
   if force or cur ~= sig or drift then
     -- BUG-335 review: a new station across a busy bridge waits (kept as it is; military's next step, SO_EVERY ticks
     -- while one waits, gives it once the bridge has settled)
-    local frz = pos and cur ~= sig and crosses_busy(K, man, s, pos)
+    local frz = op and cur ~= sig and crosses_busy(K, man, s, op)
     if frz then
       rt.frz = rt.frz or {}
       if rt.frz[k] ~= frz then
         K.log('info', 'military: squad %d (%s) to station %s waits: bridge %s is being pulled or moves', s.id, k,
-              pstr(pos), frz)
+              pstr(op), frz)
       end
       rt.frz[k] = frz
       if type(M.every) == 'table' and (M.every.ticks or 0) > M.SO_EVERY then M.every = {ticks = M.SO_EVERY} end
       return ok
     end
     if rt.frz then rt.frz[k] = nil end
-    local r = K.act.squad_order(s.id, pos and {kind = 'station', pos = pos} or {kind = off and 'clear' or 'train'})
-    if r then rt.order[k] = sig else ok = false end
+    local r = K.act.squad_order(s.id, op and {kind = 'station', pos = op} or {kind = off and 'clear' or 'train'})
+    if r then
+      rt.order[k] = sig
+      if eq and cur ~= sig then
+        K.log('info', 'military: %s: squad %s is not equipped: equip hold at %s (an off-duty squad does not fetch its kit)', K.mode(), k, pstr(eq))
+      end
+    else ok = false end
   end
   rt.station[k] = pos
   return ok
@@ -3190,6 +3212,107 @@ local function sortie_pass(K, now)
   return next(rt.so) ~= nil
 end
 
+---------------------------------------------------------------- BUG-692: a small number of hostiles INSIDE the fort
+-- BUG-692 (Run 16d i4 Trumpetrealms y461 winter, INVASION 38: one goblin 32544 walked into Kern+ and the refuge shaft and, in ~56 game
+-- days of BREACH at 30 t/s, killed 49 of 69 citizens; the squads (3-13 soldiers) held no weapon + armor, `squad.sortie` said 'not
+-- equipped: 0 of 3', `squad.uniform` 'not allowed in BREACH', the kernel's own kill order 'worn 0 % < 80 %'): with at most
+-- INSIDE_MAX hostiles inside Kern+ (or the refuge), none of them a great danger, an undead or a building destroyer, and a squad
+-- (all squads together) that has INSIDE_RATIO soldiers per hostile, an unequipped squad may go against them: armed or not, three
+-- dwarves on one goblin beat 49 deaths. Killer = the census marks it (sense kl) or citizens died within a day (care).
+M.INSIDE_MAX, M.INSIDE_RATIO = 3, 3
+
+-- the hostiles of the fresh census inside Kern+ (or the zones past it, zn 2) and not cleared: {ids (sorted), set, n, killer (a
+-- kill mark on one of them), deaths (citizens that died within a day)} or nil, why
+function M.inside_set(K)
+  if K.mode() ~= 'BREACH' then return nil, 'not BREACH' end
+  local h = K.census.h
+  if type(h) ~= 'table' or now_tick(K) - (int(h.tick) or -1e9) > 200 then return nil, 'no fresh census' end
+  local okf, far = K.call('reflex', 'far_ids')
+  far = okf and type(far) == 'table' and far or {}
+  local ids, set, killer = {}, {}, false
+  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+    if not far[e.id] or e.k == 'great' then
+      if e.k == 'great' or e.k == 'undead' or e.bd == 1 then return nil, 'a great danger, an undead or a building destroyer is counted' end
+      if e.ik == 1 or e.zn == 2 then
+        ids[#ids + 1] = e.id
+        set[e.id] = true
+        if e.kl == 1 then killer = true end
+      end
+    end
+  end
+  if #ids == 0 then return nil, 'nobody inside' end
+  if #ids > M.INSIDE_MAX then return nil, string.format('%d hostiles inside (more than %d)', #ids, M.INSIDE_MAX) end
+  if (int(h.vis) or 0) > (type(h.list) == 'table' and #h.list or 0) then return nil, 'the census list is cut' end
+  table.sort(ids)
+  local okd, dn = K.call('care', 'deaths_recent')
+  return {ids = ids, set = set, n = #ids, killer = killer, deaths = okd and int(dn) or 0}
+end
+
+-- the soldiers of every squad that is not held by a siege sortie: {n, squads = {key = members}}
+local function inside_force(K)
+  local n, by = 0, {}
+  for _, sp in ipairs(M.SQUADS) do
+    local e = st.sq[sp.key]
+    local s = e and squad(e.id)
+    local c = s and not rt.held[sp.key] and #members(s) or 0
+    if c > 0 then n, by[sp.key] = n + c, c end
+  end
+  return n, by
+end
+
+-- the exception: nil (none) or {set, n, soldiers}. harmless = the kernel's own kill order against a lone harmless intruder (no death
+-- needed); otherwise a killer inside or a death within a day is
+function M.inside_override(K, harmless)
+  local pic = M.inside_set(K)
+  if not pic then return nil end
+  if not (harmless or pic.killer or pic.deaths > 0) then return nil end
+  local n = inside_force(K)
+  if n < M.INSIDE_RATIO * pic.n then return nil end
+  pic.soldiers = n
+  return pic
+end
+
+-- public (reflex, the DEATHS_3PLUS default and the BREACH step): every squad with members goes against the hostiles inside, equipped or
+-- not (BUG-692). Returns true, text (started or running) or false, why
+function M.kill_inside(K, by)
+  local pic, why = M.inside_set(K)
+  if not pic then return false, why end
+  if not (pic.killer or pic.deaths > 0) then return false, 'no citizen was killed and the hostile has no kill mark' end
+  local n, sqs = inside_force(K)
+  if n == 0 then return false, 'no squad has a member' end
+  if n < M.INSIDE_RATIO * pic.n then
+    return false, string.format('%d soldiers for %d hostile%s inside: fewer than %d per hostile', n, pic.n, pic.n == 1 and '' or 's',
+                                M.INSIDE_RATIO)
+  end
+  local p = unit_xyz(pic.ids[1])
+  local started, running, last = 0, 0, nil
+  for _, sp in ipairs(M.SQUADS) do
+    local k = sp.key
+    if sqs[k] then
+      local s = squad(st.sq[k].id)
+      if rt.so[k] then running = running + 1
+      else
+        local why2 = p and unreachable(K, s, p)
+        if why2 then last = why2
+        else
+          local ok, err = so_begin(K, k, s, {kind = 'kill', units = pic.ids}, {cmd = 'kernel', by = by or 'reflex', keep = false})
+          if ok then
+            started = started + 1
+            rt.so[k].tgt = p
+            so_event(K, k, 'go', string.format('sortie %s: the kernel orders a kill on %s inside the fort (%d soldiers on %d hostile%s, %s)',
+                     k, so_ids_txt(pic.ids), sqs[k], pic.n, pic.n == 1 and '' or 's',
+                     pic.killer and 'it killed' or 'citizens died'), {units = pic.ids, why = 'kill', inside = 1,
+                     pos = p and {p.x, p.y, p.z} or nil, n = sqs[k], worn = (M.squad_info(K, k) or {}).worn})
+          else last = err end
+        end
+      end
+    end
+  end
+  if started > 0 then return true, string.format('%d squad%s sent against %s inside', started, started == 1 and '' or 's', so_ids_txt(pic.ids)) end
+  if running > 0 then return true, 'a sortie is running' end
+  return false, tostring(last or 'no squad could be sent')
+end
+
 -- the ids (of `ids`) when the census shows a lone harmless intruder picture around them, else nil
 function M.lone_of(K, ids)
   if type(ids) ~= 'table' then return nil, 'stale' end
@@ -3213,9 +3336,18 @@ function M.kill_lone(K, ids, by)
   local c = so_conf(K)
   local info = s and M.squad_info(K, key)
   if not info or info.n == 0 then return false, 'squad ' .. key .. ' has no members' end
-  if info.worn < c.worn then return false, string.format('squad %s worn %d%% < %d%%', key, info.worn, c.worn) end
-  local unfit = M.unfit_text(K, key)                            -- BUG-510
-  if unfit then return false, unfit end
+  -- BUG-692: a lone harmless intruder INSIDE Kern+ against which the squads outnumber 3 to 1 is fought unequipped too (the BREACH went
+  -- 43 days on 'worn 0 % < 80 %'; the same goblin then killed 49 citizens)
+  local ov = M.inside_override(K, true)
+  if ov then
+    for _, id in ipairs(ids or {}) do if not ov.set[id] then ov = nil; break end end
+    if ov and info.n < M.INSIDE_RATIO * ov.n then ov = nil end    -- one squad goes: it must outnumber them itself
+  end
+  if not ov then
+    if info.worn < c.worn then return false, string.format('squad %s worn %d%% < %d%%', key, info.worn, c.worn) end
+    local unfit = M.unfit_text(K, key)                            -- BUG-510
+    if unfit then return false, unfit end
+  end
   -- BUG-169 (live i3: the kill list held 42739 at zone 0, 149 tiles out, and the squad marched there in the BREACH): only
   -- targets the census shows inside (zone 2: Kern+ and the zones past the intake)
   local seen = {}
@@ -3229,7 +3361,9 @@ function M.kill_lone(K, ids, by)
   local p = unit_xyz(vis[1])
   local why = p and unreachable(K, s, p)
   if why then return false, why end
-  local ok, err = so_begin(K, key, s, {kind = 'kill', units = vis}, {cmd = 'kernel', by = by or 'reflex', keep = true})
+  -- keep = the sortie is held against the posture and ended by 'worn < sortie.worn' / 'no longer a lone harmless picture'; the
+  -- BUG-692 exception (unequipped, outnumbering) is held by its own order instead (rt.order 'sortie:', see apply_squad)
+  local ok, err = so_begin(K, key, s, {kind = 'kill', units = vis}, {cmd = 'kernel', by = by or 'reflex', keep = not ov})
   if not ok then return false, err end
   rt.so[key].tgt = p
   so_event(K, key, 'go', string.format('sortie %s: the kernel orders a kill on %s %s inside the fort (%d soldiers)', key,
@@ -3299,7 +3433,23 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   local target, order, what = args.target, nil, nil
   local c = so_conf(K)
   local unfit = M.unfit_text(K, k)                              -- BUG-510: no sortie of unequipped soldiers in a SIEGE / BREACH
-  if unfit then return false, 'sortie refused: ' .. unfit end
+  -- BUG-692: unless it is against the few hostiles INSIDE Kern+ (a killer, or citizens dying) that the squads outnumber 3 to 1: then the
+  -- unequipped squad goes too, and only against those (checked on the order below)
+  local ov = unfit and M.inside_override(K, false) or nil
+  if unfit and not ov then return false, 'sortie refused: ' .. unfit end
+  local function inside_only(order)
+    if not ov then return nil end
+    if order.kind ~= 'kill' then
+      return 'sortie refused: ' .. unfit .. ' (an unequipped squad goes only on a kill order against the hostiles inside Kern+)'
+    end
+    for _, id in ipairs(order.units or {}) do
+      if not ov.set[id] then
+        return string.format('sortie refused: %s (an unequipped squad goes only against the hostiles inside Kern+: unit %s is not one of %s)',
+                             unfit, tostring(id), so_ids_txt(ov.ids))
+      end
+    end
+    return nil
+  end
   local pos_target
   -- BUG-519: `unit` names the hostile the report named: the kill order follows that unit (the census gives its place now), the
   -- tile only says where it was; a unit that is not in sight is refused with its last tile, not sent to an empty place
@@ -3371,6 +3521,8 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
       local t = valid_targets(K, ids, target)
       if #t > 0 then order, what = {kind = 'kill', units = t}, 'kill ' .. #t .. ' in ' .. target
       else order, what = {kind = 'station', pos = geom.bbox_center(box.bbox)}, 'move to ' .. target end
+      local blocked = inside_only(order)
+      if blocked then return false, blocked end
       local ok, err = K.act.squad_order(s.id, order)
       if not ok then return false, 'order failed: ' .. tostring(err) end
       rt.order[k] = 'sortie:' .. tostring(cmd and cmd.id or '?')
@@ -3409,8 +3561,10 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
       end
     end
   end
+  local blocked = inside_only(order)
+  if blocked then return false, blocked end
   local keep = false
-  if order.kind == 'kill' then keep = M.lone_of(K, order.units) ~= nil end
+  if order.kind == 'kill' and not ov then keep = M.lone_of(K, order.units) ~= nil end
   if peace and not (order.kind == 'kill' and #order.units == 1 and order.units[1] == int(args.unit)) then
     return false, 'squad.sortie not allowed in PEACE (only for one wild animal inside the fort): the order would not be a kill order on unit ' ..
                   tostring(args.unit)
@@ -3451,6 +3605,11 @@ function M.fight_free(K, verb)
      and not a.siege then
     return nil
   end
+  -- BUG-692 (Run 16d i4 Trumpetrealms y461: 'squad.uniform not allowed in BREACH' while one goblin inside Kern+ killed 49 citizens and the
+  -- soldiers stood unequipped beside free gear): the squads screen is open in a BREACH with a few hostiles inside Kern+ that kill
+  -- (a kill mark, or citizens died within a day): the fight needs the squads equipped and manned
+  local pic = M.inside_set(K)
+  if pic and (pic.killer or pic.deaths > 0) then return nil end
   return false, verb .. ' not allowed in ' .. mode
 end
 

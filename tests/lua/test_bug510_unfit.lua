@@ -3,6 +3,9 @@
 -- which fewer than military.UNFIT_PCT (30) percent hold a real weapon AND wear body armor is not stationed (its order is cleared, it
 -- goes off duty and the civ alert keeps it with the civilians in the refuge) and is not sent out (squad.sortie, kill_lone, siege's
 -- gate sortie); an equipped squad is stationed as before; in PEACE nothing changes.
+-- BUG-694: a squad that stands down is no longer cleared (off duty, DF never fetches the kit of an off-duty squad): it holds a station
+-- order at the refuge anchor (EQUIP), away from the enemy's station, so its soldiers go for their kit.
+local EQ = 'station@70,70,4'
 local T = require('testlib')
 local X = require('wp6_world')
 
@@ -37,7 +40,7 @@ T.test('BUG-510: SIEGE, unequipped squads get no station (order cleared, off dut
   W.K.set_mode('SIEGE', 'test')
   X.call(W, 'military', 'posture', 'READY_STATION', true)
   W.run(30, {skip = 9})
-  T.eq({orders(A), orders(B), orders(C)}, {'', '', ''}, 'stood down')
+  T.eq({orders(A), orders(B), orders(C)}, {EQ, EQ, EQ}, 'stood down: the equip hold at the refuge anchor (BUG-694), no station against the enemy')
   T.ok(logged(W, 'military: SIEGE: squad A stands down: 0 of 3 soldiers hold a real weapon and wear body armor (< 30 %)'),
        'kern.log names the squad')
   local k = kpi(W)
@@ -56,7 +59,7 @@ T.test('BUG-510: equipped again -> the squad takes its station (kern.log); a squ
   W.K.set_mode('SIEGE', 'test')
   X.call(W, 'military', 'posture', 'READY_STATION', true)
   W.run(30, {skip = 9})
-  T.eq(orders(A), '', 'bare squad: stood down')
+  T.eq(orders(A), EQ, 'bare squad: stood down (equip hold)')
   local ids = members(W, A)
   T.eq(#ids, 3)
   X.equip(W, ids[1])                                   -- 1 of 3 = 33 % >= 30 %
@@ -66,7 +69,7 @@ T.test('BUG-510: equipped again -> the squad takes its station (kern.log); a squ
   -- he loses the kit again: 0 of 3
   W.unit(ids[1]).inventory = require('dfllm.util.k_mock').vec{}
   W.run(700, {skip = 9})
-  T.eq(orders(A), '', 'bare again: stood down')
+  T.eq(orders(A), EQ, 'bare again: stood down (equip hold)')
 end)
 
 T.test('BUG-510: PEACE and DRILL are untouched: unequipped squads keep their posture station', function()

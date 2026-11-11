@@ -5238,6 +5238,23 @@ M.on.UNIT_DEATH = function(K, ev)
   K.persist.touch('m.care')
 end
 
+-- BUG-692 (public, military): citizens that died of a fight (killed, bled, a siege death, drowned, suffocated) within the last game day (the
+-- DEATHS_3PLUS window), from the deaths the census saw; old age, thirst and the like do not count
+M.FIGHT_CAUSES = {killed = true, bled = true, siege = true, drowned = true, suffocated = true}
+function M.deaths_recent(K)
+  local p = pstate(K)
+  local now = K.now().tick
+  local by = {}
+  for _, e in ipairs(p.died or {}) do if type(e) == 'table' and e.u then by[e.u] = e end end
+  local n = 0
+  for _, d in ipairs(p.deaths or {}) do
+    if type(d) == 'table' and num(d[1]) and now >= d[1] and now - d[1] < DAY and M.FIGHT_CAUSES[DT.key(by[d[2]] or {c = 'unknown'})] then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 -- FR-74: migrant waves, from economy's MIGRANTS (B) after the census caught up with the arrival report (n may be 0)
 M.on['EV:MIGRANTS'] = function(K, ev)
   local n = type(ev.d) == 'table' and num(ev.d.n) or 0
