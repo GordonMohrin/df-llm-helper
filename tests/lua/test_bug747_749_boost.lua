@@ -174,7 +174,7 @@ T.test('BUG-747: no readable blocker, idle labor holders reach the site: the ans
   local W, b, j = bworld{}
   local r = state(W)
   T.eq({r.hands.holders, r.hands.idle, r.hands.reach}, {2, 2, 2})
-  T.eq(r.short, 'no builder took it: nothing blocks it (labor 2/2, items 0/0, in burrow, not walled in); 2 idle holders reach it, DF did not assign it')
+  T.eq(r.short, 'no builder took it: nothing blocks it (labor 2/2, items 0/0, in burrow, not walled in); 2 idle holders reach it, DF did not assign it [Urist 1 1, Urist 2 2]')
   T.ok(r.line:find('2 idle holders reach it, DF did not assign it', 1, true), r.line)
   df.global.world.jobs = {list = {next = nil}}
   -- the job in the list is the building's own: share the table so the raise lands on it
@@ -215,7 +215,7 @@ T.test('BUG-749: a dig stage names its dig jobs and the Miners detail (open, tak
   local ok, d = W.K.call('economy', 'dig_wait', {45, 45, 100, 55, 55, 100})
   T.ok(ok, tostring(d))
   T.eq({d.jobs, d.open, d.taken, d.susp, d.raised, d.miners, d.idle}, {3, 1, 1, 1, 1, 2, 0})
-  T.eq(d.text, '3 dig jobs here (1 open, 1 taken, 1 suspended, 1 raised); Miners detail 2 (0 idle, 2 at Dig)')
+  T.eq(d.text, '3 dig jobs here (1 open, 1 taken, 1 suspended, 1 raised); Miners detail 2 (0 idle, 2 at Dig) [Urist 1 1 at Dig, Urist 2 2 at Dig]')
 end)
 
 -- the runner's wiring: a dig stage nobody digs is set aside with economy's dig_wait text (stub) as the cause, and the set-aside text does not call it a slot shortage

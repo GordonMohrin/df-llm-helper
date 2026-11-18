@@ -237,7 +237,7 @@ T.test('BUG-329: a job nobody takes names the labor no free adult has on (old: o
   local W2 = bs_world('FarmPlot', {[1] = true})
   local _, r2 = W2.K.call('economy', 'build_state', BX, BY, BZ)
   -- BUG-747: the idle holder who reaches the site is counted (one adult of the labor, no job, no walk group data = reachable)
-  T.eq({r2.line, r2.nolabor}, {'job 152960 not suspended, no builder has taken it; 1 idle holder reaches it, DF did not assign it', nil})
+  T.eq({r2.line, r2.nolabor}, {'job 152960 not suspended, no builder has taken it; 1 idle holder reaches it, DF did not assign it [Unit 1 1]', nil})
 end)
 
 T.test('BUG-329: an attached item that is forbidden or off the citizens\' walk group is named', function()

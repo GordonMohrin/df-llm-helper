@@ -1837,7 +1837,7 @@ local function plan_supply(K, c, r)
       local mj, cap = meal_jobs(c, r, e)
       local why = e.key
       if mj > jobs then jobs, why = mj, 'meals' end
-      add(r, {tag = e.tag, spec = e.key == 'food_d' and M.food_spec(c, r, e) or e.spec, n = math.min(jobs, cap), why = why})
+      add(r, {tag = e.tag, spec = e.key == 'food_d' and M.food_spec(c, r, e) or (e.src and M.brew_spec(r, e)) or e.spec, n = math.min(jobs, cap), why = why})
     end
   end
 end
@@ -5805,8 +5805,9 @@ function M.drink_block(K, c, r, inv)
     elseif b.left < bs.left or dd > bs.dd + 1 then st.bstall = {left = b.left, dd = dd, t = now} end
     bs = st.bstall
     if now - bs.t >= 7 * DAY then
-      put('brewstall', string.format('%d brews ordered, none ran for %d days (still %s, plants %d, empty barrels %d)', b.left,
-                                     (now - bs.t) // DAY, f['workshop:Still'] and 'stands' or 'missing', plants, inv.barrels_empty or 0))
+      put('brewstall', string.format('%d brews ordered, none ran for %d days (still %s, plants %d, empty barrels %d)%s', b.left,
+                                     (now - bs.t) // DAY, f['workshop:Still'] and 'stands' or 'missing', plants, inv.barrels_empty or 0,
+                                     (type(st.brewx) == 'table' and st.brewx.text) and ('; cause: ' .. st.brewx.text) or ''))   -- BUG-767
     elseif not noshop then
       auto[#auto + 1] = {'brew', string.format('%d brews ordered', b.left)}
     end
@@ -6944,6 +6945,7 @@ function T.watch(K, c, r)
   M.cook_repair(K, c, r, r.inv)                    -- BUG-345
   M.cook_watch(K, c, r)                            -- BUG-629
   M.fish_watch(K, c, r)                            -- BUG-716
+  M.brew_watch(K, c, r)                            -- BUG-767
   M.drink_low(K, c, r)                             -- BUG-042
   M.fd_wants(K, c, r)                              -- BUG-256, BUG-259
 end
@@ -10608,6 +10610,226 @@ function M.cook_labor(K, extra)
                             why = 'a kitchen stands, cook ingredients lie there, no meal and nobody had the labor'}, extra)
 end
 
+-- BUG-767 (Run 16b i2 Whirledrampart y449 aut d43: 5 brew orders stood 74 days, a Still, 3,882 brewable plants, 12 empty barrels, drink 243 -> 45 days; BUG-760 made the report
+-- honest and said only 'none ran'): the stall's cause, read off the game. DF's manager gives a brew job to a Still only when (1) the Still's profile lets the order
+-- in (max_general_orders > 0, no permitted-worker list without a brewer, the skill window holds a brewer), (2) the order's item conditions hold ('2 unrotten plants
+-- with DRINK_MAT' and 'an empty food-storage item' count what DF itself counts, not the census), and the job then needs (3) a citizen who holds the Brewer labor
+-- and (4) is free to take it. M.brew_diag reads those (read-only: stills, their jobs / taken / suspended, their profile; brewers named with the job each does;
+-- the open brew orders) and M.brew_cause names the first that fails. M.brew_watch (daily): the open valid brew orders have not moved (amount left) for
+-- BREW_STALL.days (6) days beside a standing Still, plants and an empty barrel: the cause is told once (ORDER_STUCK, kern.log; again after 30 days) and cured
+-- as far as the game lets it be cured: a closed profile is opened (act.ws_profile_open), nobody holding Brewing -> the labor goes on for an idle adult
+-- (act.labor_set brew), every brewer busy -> one more brewer, DF job conditions or no job at the Still -> the open dfllm brew orders are taken down and made
+-- again with no item condition at the top of the manager's list (p.brewx, M.brew_spec; ends when the drink days reach the plan's target), as the cook stall (BUG-629).
+M.BREW_STALL = {days = 6, again = 30 * DAY}
+M.BREW_TAGS = {'dfllm:drink', 'dfllm:drink_fruit'}
+
+
+-- {stills = {{id, at, jobs, taken, susp, orders0, permit, permit_ok, minl, maxl}}, brewers = {n, idle, who = {{id, name, job, idle}}}, orders = {n, valid, pinned, conds}}
+function M.brew_diag(K)
+  local d = {stills = {}, brewers = {n = 0, idle = 0, who = {}}, orders = {n = 0, valid = 0, pinned = 0, conds = 0}}
+  local sid = df.job_skill and df.job_skill.BREWING
+  local cu = K.census.u
+  local sold = {}
+  for _, id in ipairs(type(cu) == 'table' and cu.soldier_ids or {}) do sold[id] = true end
+  local brewer_ids = {}
+  for _, id in ipairs(type(cu) == 'table' and cu.ids or {}) do
+    local u = not sold[id] and df.unit.find(id) or nil
+    local oka, adult = pcall(function() return dfhack.units.isAdult(u) end)
+    if u and oka and adult and (u.mood or -1) < 0 and M.labor_flag(u, 'BREWER') then
+      local e = {id = id, name = unit_name(u.id):sub(1, 40), skill = sid and (dfhack.units.getNominalSkill(u, sid, true) or 0) or 0}
+      local j = u.job and u.job.current_job
+      if j ~= nil then
+        local okt, tn = pcall(function() return df.job_type[j.job_type] end)
+        e.job = okt and type(tn) == 'string' and tn or '?'
+      elseif not M.idle_class(M.idle_flags(u)) then
+        e.idle = true
+        d.brewers.idle = d.brewers.idle + 1
+      end
+      d.brewers.n = d.brewers.n + 1
+      brewer_ids[id] = true
+      if #d.brewers.who < 4 then d.brewers.who[#d.brewers.who + 1] = e end
+    end
+  end
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      if df.workshop_type[b.type] == 'Still' and built(b) then
+        local s = {id = int(b.id), jobs = 0, taken = 0, susp = 0}
+        local _, mid = M.shop_ring(b)
+        s.at = mid
+        pcall(function()
+          for _, j in ipairs(b.jobs) do
+            s.jobs = s.jobs + 1
+            if j.flags.suspend then s.susp = s.susp + 1 end
+            local okw, w = pcall(dfhack.job.getWorker, j)
+            if okw and w ~= nil then s.taken = s.taken + 1 end
+          end
+        end)
+        pcall(function() s.orders0 = int(b.profile.max_general_orders) end)
+        pcall(function()
+          local pw = b.profile.permitted_workers
+          s.permit, s.permit_ok = #pw, 0
+          for _, id in ipairs(pw) do if brewer_ids[id] then s.permit_ok = s.permit_ok + 1 end end
+        end)
+        pcall(function() s.minl, s.maxl = int(b.profile.min_level), int(b.profile.max_level) end)
+        d.stills[#d.stills + 1] = s
+      end
+    end
+  end)
+  local ids = {}
+  for _, s in ipairs(d.stills) do ids[s.id] = true end
+  for _, o in ipairs(orders_all()) do
+    local left = int(o.amount_left) or 0
+    if left > 0 and tostring(o.reaction_name or ''):sub(1, 5) == 'BREW_' then
+      d.orders.n = d.orders.n + 1
+      local okv, v = pcall(function() return o.status.validated end)
+      if not (okv and v == false) then d.orders.valid = d.orders.valid + 1 end
+      local okc, nc = pcall(function() return #o.item_conditions end)
+      if okc then d.orders.conds = d.orders.conds + (int(nc) or 0) end
+      local okw, wid = pcall(function() return o.workshop_id end)
+      wid = okw and int(wid) or -1
+      if wid and wid >= 0 and not ids[wid] then d.orders.pinned, d.orders.pin_id = d.orders.pinned + 1, wid end
+    end
+  end
+  -- the skill window: one brewer at least inside [min, max]
+  for _, s in ipairs(d.stills) do
+    if s.minl and s.maxl and d.brewers.n > 0 and d.brewers.n <= #d.brewers.who then
+      local fit = false
+      for _, e in ipairs(d.brewers.who) do if e.skill >= s.minl and e.skill <= s.maxl then fit = true end end
+      s.window_bad = not fit
+    end
+  end
+  return d
+end
+
+function M.brewer_list(d)
+  local out = {}
+  for _, e in ipairs(d.brewers.who) do
+    if #out < 3 then out[#out + 1] = string.format('%s %d (%s)', e.name, e.id, e.idle and 'idle' or (e.job or 'no job, resting')) end
+  end
+  return table.concat(out, ', ')
+end
+
+function M.at_text(s)
+  return type(s.at) == 'table' and string.format('%s,%s,%s', tostring(s.at[1]), tostring(s.at[2]), tostring(s.at[3])) or '?'
+end
+
+-- the first blocker: id, text, fix ('profile' | 'labor' | 'extra' | 'relax' | nil), still id
+function M.brew_cause(d)
+  if #d.stills == 0 then return 'nostill', 'no Still stands', nil end
+  for _, s in ipairs(d.stills) do
+    if s.orders0 and s.orders0 < 1 then
+      return 'profile', string.format('Still %d at %s takes no general orders (max_general_orders %d): the manager gives it no job', s.id, M.at_text(s), s.orders0),
+             'profile', s.id
+    end
+    if (s.permit or 0) > 0 and (s.permit_ok or 0) == 0 then
+      return 'profile', string.format('Still %d at %s takes only its %d permitted workers and none holds Brewing', s.id, M.at_text(s), s.permit), 'profile', s.id
+    end
+    if s.window_bad then
+      return 'profile', string.format('Still %d at %s takes workers of skill %d-%d and no brewer is in that window', s.id, M.at_text(s), s.minl or 0, s.maxl or 0),
+             'profile', s.id
+    end
+  end
+  if d.brewers.n == 0 then return 'nobrewer', 'nobody holds the Brewer labor (Brewing on no adult)', 'labor' end
+  local jobs, taken, susp = 0, 0, 0
+  for _, s in ipairs(d.stills) do jobs, taken, susp = jobs + s.jobs, taken + s.taken, susp + s.susp end
+  local at = M.at_text(d.stills[1])
+  if jobs > 0 and taken > 0 then
+    return 'working', string.format('a brewer works at the Still (%d of %d jobs taken): the brews are slow, not stuck', taken, jobs), nil
+  end
+  if jobs > 0 and susp == jobs then
+    return 'suspended', string.format('the Still at %s holds %d brew job%s, all suspended (a missing item, a cancelled hauling job)', at, jobs, jobs == 1 and '' or 's'), nil
+  end
+  if jobs > 0 then
+    if d.brewers.idle > 0 then
+      return 'untaken', string.format('the Still at %s holds %d brew job%s nobody works; idle brewers: %s; DF did not assign it (path or burrow?)', at, jobs,
+                                      jobs == 1 and '' or 's', M.brewer_list(d)), nil
+    end
+    return 'busy', string.format('the Still at %s holds %d brew job%s nobody works; all %d brewers are busy: %s', at, jobs, jobs == 1 and '' or 's',
+                                 d.brewers.n, M.brewer_list(d)), 'extra'
+  end
+  if d.orders.pinned > 0 then
+    return 'pinned', string.format('%d brew order%s pinned to workshop %s that is no standing Still: the manager waits for it', d.orders.pinned,
+                                   d.orders.pinned == 1 and '' or 's', tostring(d.orders.pin_id)), 'relax'
+  end
+  return 'nojob', string.format('the manager gave no Still a job (%d valid order%s, %d item condition%s: DF counts items its own way; %d brewers%s)', d.orders.valid,
+                                d.orders.valid == 1 and '' or 's', d.orders.conds, d.orders.conds == 1 and '' or 's', d.brewers.n,
+                                d.brewers.idle > 0 and (', idle: ' .. M.brewer_list(d)) or ''), 'relax'
+end
+
+-- the brew order's spec: after a brew stall (p.brewx) no item condition and the top of the manager's list
+function M.brew_spec(r, e)
+  local bx = r.p.brewx
+  if type(bx) == 'table' and bx.relax then
+    local spec = copy(e.spec)
+    spec.item_conditions, spec.top = nil, true
+    return spec
+  end
+  return e.spec
+end
+
+function M.brew_watch(K, c, r)
+  if not r.day then return end
+  local p, inv = r.p, r.inv or {}
+  local f = M.facts_now(K, r)
+  local b = M.brew_orders()
+  local plants = (inv.brew_p or 0) + (inv.brew_g or 0)
+  local bw = type(p.brewb) == 'table' and p.brewb or nil
+  local bx = type(p.brewx) == 'table' and p.brewx or nil
+  local tgt = math.tointeger((K.plan.supply or {}).drink_d) or 170
+  if bx and ((r.days or {}).drink_d or 0) >= tgt and b.n == 0 then p.brewx, bx = nil, nil; K.persist.touch('m.economy') end
+  if not (ws_any(f, {'workshop:Still'}) and b.valid > 0 and plants > 0 and (inv.barrels_empty or 0) > 0) then
+    if bw then p.brewb = nil; K.persist.touch('m.economy') end
+    st.brewx = nil
+    return
+  end
+  local today = r.now // DAY
+  if not bw then bw = {left = b.left, d = 0, day = today}; p.brewb = bw end
+  if bw.day ~= today then
+    bw.day = today
+    if b.left ~= bw.left then bw.left, bw.d, bw.told, st.brewx = b.left, 0, nil, nil   -- fell: the brewers work; rose: a new order
+    else bw.d = (bw.d or 0) + 1 end
+  end
+  K.persist.touch('m.economy')
+  local need = math.max(1, math.tointeger((c.drink or {}).stall_days) or M.BREW_STALL.days)
+  if bw.d < need then
+    if not bw.told then st.brewx = nil end                    -- a told stall keeps its cause for the decisions until the order moves
+    return
+  end
+  local d = M.brew_diag(K)
+  local id, text, fix, still = M.brew_cause(d)
+  st.brewx = {d = bw.d, id = id, text = text}
+  if id == 'working' then return end
+  if bw.told and r.now - (math.tointeger(bw.told) or 0) < M.BREW_STALL.again then return end
+  local act = {}
+  if fix == 'profile' and still then
+    local ok, how = K.act.ws_profile_open(still)
+    act[#act + 1] = ok and string.format('the Still %d profile was opened', still) or ('the Still profile could not be opened: ' .. tostring(how))
+  elseif fix == 'labor' or fix == 'extra' then
+    local how, uid = M.labor_assign(K, {labor = 'BREWER', which = 'brew', skill = 'BREWING', stamp = 'brewl', text = 'Brewing labor',
+                                        why = 'a Still stands, brews wait and nobody had the labor'}, fix == 'extra')
+    act[#act + 1] = how == 'set' and ('Brewing labor on for unit ' .. tostring(uid)) or 'no citizen to take the Brewing labor'
+  end
+  if (fix or id == 'untaken' or id == 'suspended') and not (bx and bx.relax) then
+    local dropped = 0
+    for _, tag in ipairs(M.BREW_TAGS) do
+      local o = order_by_id(p.orders[tag])
+      if o and (math.tointeger(o.amount_left) or 0) > 0 and K.act.order_remove(o.id) then
+        dropped = dropped + 1
+        p.orders[tag], st.backoff[tag] = nil, nil
+      end
+    end
+    p.brewx = {relax = r.now, n = 1}
+    act[#act + 1] = dropped > 0 and string.format('%d brew order%s taken down, the next ones have no item condition', dropped, dropped == 1 and '' or 's')
+                    or 'the next brew orders have no item condition'
+  end
+  bw.told, bw.d = r.now, 0
+  local msg = string.format('brewing stalled %d days: Still stands, %d plants, %d empty barrels, %d brews open: %s%s', need, plants, inv.barrels_empty or 0, b.left,
+                            text, #act > 0 and ('; ' .. table.concat(act, '; ')) or '')
+  K.log('warn', '%s', msg)
+  K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = 'BrewDrink', n = b.left, days = need, why = ('brew stall: ' .. text):sub(1, 100), dropped = 0,
+         kind = (id == 'nobrewer' or id == 'busy' or id == 'untaken') and 'worker' or 'input'})
+end
+
 -- BUG-716 (Run 16c i3 Wallfree y423-y426: 965 -> 2,616 raw fish uncleaned, Fishery 'jobs 1, working 0', 17 of 33 adults idle, food 618 -> 183 days):
 -- the same pick for the Fish cleaning labor (CLEAN_FISH)
 function M.fish_labor(K, extra)
@@ -12689,7 +12911,7 @@ function M.hands(K, rec)
   local li = ln and df.unit_labor and df.unit_labor[ln]
   local sold = {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
-  local h = {holders = 0, idle = 0, reach = 0, busy = {}}
+  local h = {holders = 0, idle = 0, reach = 0, busy = {}, idle_who = {}, busy_who = {}}
   local pts = {}
   for _, id in ipairs(cu.ids) do
     local u = not sold[id] and df.unit.find(id) or nil
@@ -12707,8 +12929,10 @@ function M.hands(K, rec)
           local okt, tn = pcall(function() return df.job_type[j.job_type] end)
           tn = okt and type(tn) == 'string' and tn or '?'
           h.busy[tn] = (h.busy[tn] or 0) + 1
+          if #h.busy_who < 3 then h.busy_who[#h.busy_who + 1] = {id = id, name = unit_name(u.id):sub(1, 40), job = tn} end     -- BUG-768: named
         elseif not M.idle_class(M.idle_flags(u)) then
           h.idle = h.idle + 1
+          if #h.idle_who < 2 then h.idle_who[#h.idle_who + 1] = {id = id, name = unit_name(u.id):sub(1, 40)} end
           local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
           pts[#pts + 1] = okp and x and {x, y, z} or false
         end
@@ -12737,6 +12961,25 @@ function M.boost_days(K, jid)
   local e = st.nbs and jid and st.nbs[jid]
   if type(e) ~= 'table' then return nil end
   return math.max(0, (K.now().tick - (math.tointeger(e.t) or K.now().tick)) // DAY)
+end
+
+-- BUG-768: ' [Urist 12 at MakeCharcoal, ...]' / ' [Urist 12, ...]' for a report, '' when nobody is named
+function M.who_text(list, with_job)
+  if type(list) ~= 'table' or #list == 0 then return '' end
+  local out = {}
+  for _, e in ipairs(list) do out[#out + 1] = string.format('%s %d%s', e.name, e.id, with_job and e.job and (' at ' .. e.job) or '') end
+  return ' [' .. table.concat(out, ', ') .. ']'
+end
+
+-- BUG-768: a living unit that stands on the site's footprint (a builder does not start while somebody stands there): {id, name} or nil. Read-only
+function M.site_units(K, rc)
+  if type(rc) ~= 'table' then return nil end
+  local out
+  pcall(function()
+    local ok, list = K.call('snapshot', 'units_at', rc.x1, rc.y1, rc.x2, rc.y2, rc.z)
+    if ok and type(list) == 'table' and list[1] then out = {id = list[1][1], name = unit_name(list[1][1]):sub(1, 40)} end
+  end)
+  return out
 end
 
 function M.build_state(K, x, y, z)
@@ -12802,17 +13045,23 @@ function M.build_state(K, x, y, z)
       rec.boost = M.boost_days(K, j.id)
       local okf, dn = pcall(function() return j.flags.do_now == true end)
       rec.do_now = okf and dn or nil
+      local occ = M.site_units(K, rec.rect)                    -- BUG-768: a living unit on the site tile keeps a builder from starting
+      if occ then
+        rec.occupied = occ
+        cause[#cause + 1] = string.format('%s %d stands on the site tile', occ.name, occ.id)
+      end
       local tail
       if hd and hd.idle > 0 and hd.reach == 0 then
         cause[#cause + 1] = string.format('%d idle holder%s of the labor, none on its walk group', hd.idle, hd.idle == 1 and '' or 's')
       elseif hd and hd.reach > 0 then
-        tail = string.format('%d idle holder%s reach%s it, DF did not assign it%s', hd.reach, hd.reach == 1 and '' or 's',
+        tail = string.format('%d idle holder%s reach%s it, DF did not assign it%s%s', hd.reach, hd.reach == 1 and '' or 's',
                              hd.reach == 1 and 'es' or '', rec.boost and string.format(' (priority raised %d d ago)', rec.boost) or
-                             rec.do_now and ' (priority raised)' or '')
+                             rec.do_now and ' (priority raised)' or '', M.who_text(hd.idle_who, false))
       elseif hd then
         local top, tn = nil, 0
         for k, n in pairs(hd.busy) do if n > tn or (n == tn and top and k < top) then top, tn = k, n end end
-        tail = string.format('all %d holder%s busy%s', hd.holders, hd.holders == 1 and '' or 's', top and string.format(' (%d at %s)', tn, top) or '')
+        tail = string.format('all %d holder%s busy%s%s', hd.holders, hd.holders == 1 and '' or 's', top and string.format(' (%d at %s)', tn, top) or '',
+                             M.who_text(hd.busy_who, true))
       end
       if tail then rec.line = rec.line .. '; ' .. tail end
       rec.short = #cause > 0 and ('no builder: ' .. table.concat(cause, '; '))
@@ -13333,6 +13582,7 @@ function T.boost(K, c, r)
   for jid in pairs(st.nb) do if not seen[jid] then st.nb[jid] = nil end end
   for jid in pairs(st.nbs) do if not alive[jid] then st.nbs[jid] = nil end end
   st.boost_live = live
+  if HUNT_MODES[K.mode()] and next(st.nbs) ~= nil then pcall(M.dedicate, K, now) end      -- BUG-768
   if #cand == 0 or not HUNT_MODES[K.mode()] then return true end       -- PEACE and RECOVERY only: no builder is sent toward a threat
   table.sort(cand, function(a, b) if a.first ~= b.first then return a.first < b.first end return a.j.id < b.j.id end)
   local day = now // DAY
@@ -13344,7 +13594,7 @@ function T.boost(K, c, r)
     if ok then
       local okp, x, y, z = pcall(function() return e.j.pos.x, e.j.pos.y, e.j.pos.z end)
       okp = okp and math.tointeger(x) ~= nil and math.tointeger(y) ~= nil and math.tointeger(z) ~= nil
-      st.nbs[e.j.id] = {t = now, k = e.kind, x = okp and x or nil, y = okp and y or nil, z = okp and z or nil}
+      st.nbs[e.j.id] = {t = now, k = e.kind, x = okp and x or nil, y = okp and y or nil, z = okp and z or nil, lab = e.kind == 'build' and M.job_labor(e.j) or nil}
       n, st.boost_n = n + 1, st.boost_n + 1
       names[#names + 1] = string.format('%s %s%s', e.kind, tostring(df.job_type[e.j.job_type] or '?'),
                                         okp and string.format(' %d,%d,%d', x, y, z) or '')
@@ -13356,6 +13606,105 @@ function T.boost(K, c, r)
           n == 1 and '' or 's', B.days, live + n, table.concat(names, '; '):sub(1, 200))
   end
   return true
+end
+
+-- BUG-768 (Run 16b i2 Whirledrampart y447-y449: seal door 79,133,141 without a builder for >80 days, 'all 31 holders busy (13 at Rest)' / '1 idle holder reaches it, DF did
+-- not assign it'; Run 16a i1 y538: seal + explore digs 'dig 0%, 2 dig jobs open 0 taken' for 30 days; Run 16d i4 the explore miner at MakeCharcoal / HarvestPlants): the raise
+-- to top priority (BUG-747) does not take a dwarf off the job he is on, and a dwarf who holds many labors goes from one low-priority job to the next (charcoal, harvest) for
+-- ever. A job raised M.DEDICATE.days days ago and still untaken: (1) the labor nobody holds (a build job's labor, M.BUILD_LABOR) goes on for one idle adult (act.labor_set),
+-- (2) a holder (a Miners detail member for a dig, a holder of the job's labor for a build) who is at MakeCharcoal, HarvestPlants, PlantSeeds or GatherPlants while another citizen
+-- holds that labor too has it switched off (act.labor_set burn / farm / herb): his next job is the raised one. One change a day; the unit is named in kern.log and
+-- ORDER_STUCK (kind worker). An idle holder who reaches the job (DF refused it) and holders at hauling or rest are only named (M.hands, M.dig_wait).
+M.DEDICATE = {days = 3, per_day = 1}
+M.JOB_OFF = {MakeCharcoal = {'burn', 'BURN_WOOD'}, HarvestPlants = {'farm', 'PLANT'}, PlantSeeds = {'farm', 'PLANT'}, GatherPlants = {'herb', 'HERBALIST'}}
+M.LABOR_ON = {HAUL_FURNITURE = 'furniture', MECHANIC = 'mechanic'}
+
+-- the labor of a ConstructBuilding job's building (M.BUILD_LABOR), nil when unknown
+function M.job_labor(j)
+  local ok, b = pcall(dfhack.job.getHolder, j)
+  if not (ok and b) then return nil end
+  local rec = {}
+  pcall(building_info, rec, j, b)
+  return M.BUILD_LABOR[rec.kind or '']
+end
+
+function M.labor_count(K, ln)
+  local lid = df.unit_labor and df.unit_labor[ln]
+  local n = 0
+  if type(lid) ~= 'number' then return 0 end
+  for _, id in ipairs((K.census.u or {}).ids or {}) do
+    local u = df.unit.find(id)
+    if u and labor_on(u, lid) then n = n + 1 end
+  end
+  return n
+end
+
+function M.dedicate(K, now)
+  local B = M.DEDICATE
+  local day = now // DAY
+  if st.ded_day ~= day then st.ded_day, st.ded_n = day, 0 end
+  if st.ded_n >= B.per_day then return end
+  local pick
+  for jid, e in pairs(st.nbs) do
+    if type(e) == 'table' and st.nb[jid] ~= nil and now - (math.tointeger(e.t) or now) >= B.days * DAY then
+      if not pick or e.t < pick.e.t or (e.t == pick.e.t and jid < pick.jid) then pick = {jid = jid, e = e} end
+    end
+  end
+  if not pick then return end
+  local e = pick.e
+  local cu = K.census.u
+  if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return end
+  local sold = {}
+  for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
+  local hold = {}                                        -- the holders of the job's labor (a Miners detail member for a dig)
+  if e.k == 'dig' then
+    pcall(function()
+      for _, w in ipairs(df.global.plotinfo.labor_info.work_details) do
+        if dfhack.df2utf(w.name) == 'Miners' then
+          for _, id in ipairs(w.assigned_units) do
+            local u = not sold[id] and df.unit.find(id) or nil
+            if u and not dfhack.units.isDead(u) then hold[#hold + 1] = u end
+          end
+        end
+      end
+    end)
+  elseif e.lab then
+    local li = df.unit_labor and df.unit_labor[e.lab]
+    for _, id in ipairs(cu.ids) do
+      local u = not sold[id] and df.unit.find(id) or nil
+      local oka, adult = pcall(function() return dfhack.units.isAdult(u) end)
+      if u and oka and adult and type(li) == 'number' and labor_on(u, li) then hold[#hold + 1] = u end
+    end
+    if #hold == 0 and M.LABOR_ON[e.lab] then
+      local how, uid = M.labor_assign(K, {labor = e.lab, which = M.LABOR_ON[e.lab], skill = nil, stamp = 'buildl', text = 'Labor ' .. e.lab,
+                                          why = 'a raised building job waits and nobody holds the labor'})
+      if how == 'set' then
+        st.ded_n = st.ded_n + 1
+        K.emit('ORDER_STUCK', 'B', string.format('job %d at %s,%s,%s untaken %d days: nobody held %s: labor on for unit %d', pick.jid, tostring(e.x), tostring(e.y),
+               tostring(e.z), B.days, e.lab, uid), {order = 0, job = 'ConstructBuilding', why = ('nobody held ' .. e.lab):sub(1, 100), n = 1, days = B.days, kind = 'worker'})
+      end
+      return
+    end
+  end
+  for _, u in ipairs(hold) do
+    local j = u.job and u.job.current_job
+    local okt, tn = pcall(function() return j and df.job_type[j.job_type] end)
+    local off = okt and tn and M.JOB_OFF[tn]
+    if off and M.labor_count(K, off[2]) >= 2 and not (st.ded and st.ded[u.id]) then
+      local ok = K.act.labor_set(u.id, off[1], false)
+      if ok then
+        st.ded = st.ded or {}
+        st.ded[u.id] = now
+        st.ded_n = st.ded_n + 1
+        local msg = string.format('job %d (%s %s,%s,%s) untaken %d days after the raise: %s %d works at %s: labor %s off for him, his next job is the raised one',
+                                  pick.jid, e.k, tostring(e.x), tostring(e.y), tostring(e.z), B.days, unit_name(u.id):sub(1, 40), u.id, tn, off[2])
+        K.log('warn', '%s', msg)
+        K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = e.k == 'dig' and 'Dig' or 'ConstructBuilding', n = 1, days = B.days,
+               why = (unit_name(u.id):sub(1, 40) .. ' ' .. u.id .. ' at ' .. tn):sub(1, 100), dropped = 0, kind = 'worker'})
+        return
+      end
+    end
+  end
 end
 
 -- BUG-749: the dig stage of a project that moves slowly, in words: the dig jobs inside the box {x1, y1, z1, x2, y2, z2} (open = no worker and not
@@ -13397,6 +13746,8 @@ function M.dig_wait(K, bb)
             else
               local tn = tostring(df.job_type[j.job_type] or '?')
               d.busy[tn] = (d.busy[tn] or 0) + 1
+              d.who = d.who or {}
+              if #d.who < 2 then d.who[#d.who + 1] = {id = id, name = unit_name(u.id):sub(1, 40), job = tn} end     -- BUG-768: named
             end
           end
         end
@@ -13409,7 +13760,7 @@ function M.dig_wait(K, bb)
   for tn, n in pairs(d.busy) do busy[#busy + 1] = {tn, n} end
   table.sort(busy, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
   local bs = busy[1] and string.format(', %d at %s', busy[1][2], busy[1][1]) or ''
-  parts[#parts + 1] = string.format('Miners detail %d (%d idle%s)', d.miners, d.idle, bs)
+  parts[#parts + 1] = string.format('Miners detail %d (%d idle%s)%s', d.miners, d.idle, bs, M.who_text(d.who, true))
   local tb = type(st.tblk) == 'table' and st.tblk.Miners
   if type(tb) == 'table' and tb.blk_why then parts[#parts + 1] = 'tools: ' .. tostring(tb.blk_why):sub(1, 80) end
   d.text = table.concat(parts, '; ')

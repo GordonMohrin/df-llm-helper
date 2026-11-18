@@ -31,6 +31,9 @@ A.MEDIC_LABORS = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
 -- BUG-546/547: the one labor each way act.labor_set switches (the labors screen): mechanic on (a lever's link job needs a Mechanic),
 -- farm off (the manager at the fields validates no order), BUG-629: cook on (a kitchen, cook ingredients, no meal and nobody with the labor)
 A.LABOR_SETS = {mechanic = {name = 'MECHANIC', on = true}, farm = {name = 'PLANT', on = false}, cook = {name = 'COOK', on = true},
+                brew = {name = 'BREWER', on = true},                -- BUG-767: a Still stands, brews wait, nobody (idle) holds Brewing
+                herb = {name = 'HERBALIST', on = false}, burn = {name = 'BURN_WOOD', on = false},    -- BUG-768: a dedicated digger / builder
+                furniture = {name = 'HAUL_FURNITURE', on = true},   -- BUG-768: a door, hatch, bed... job and nobody holds Furniture hauling
                 clean_fish = {name = 'CLEAN_FISH', on = true},      -- BUG-716: raw fish uncleaned, nobody holds Fish cleaning
                 hunt = {name = 'HUNT', on = false}}                  -- BUG-740: a soldier or captain walks out to hunt and dies there
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
@@ -1353,6 +1356,35 @@ local function impls(state)
     return false, 'no such workshop'
   end
 
+  -- BUG-767 (Run 16b i2 Whirledrampart y449: 5 brew orders, a Still, 3,882 plants, 12 empty barrels and no brew for 74 days): the workshop sheet of
+  -- ONE Still: its general orders (max_general_orders 0 = the manager gives it no job; the BUG-715 retire sets it), its permitted workers
+  -- (a list that holds no brewer) and its skill window are opened so the manager's brew orders can reach it. No job, no order, no building
+  -- is created or removed. Returns ok, {orders = bool, workers = bool, levels = bool} or false, why. [live-untested]
+  function I.ws_profile_open(id)
+    id = math.tointeger(id)
+    if not id then return false, 'bad workshop id' end
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      if b.id == id then
+        if df.workshop_type[b.type] ~= 'Still' then return false, 'not a Still' end
+        local r = {}
+        r.orders = pcall(function()
+          if b.profile.max_general_orders < 1 then b.profile.max_general_orders = 10 else error('open') end
+        end)
+        r.workers = pcall(function()
+          if #b.profile.permitted_workers > 0 then b.profile.permitted_workers:resize(0) else error('open') end
+        end)
+        r.levels = pcall(function()
+          if b.profile.min_level > 0 or b.profile.max_level < 3000 then
+            b.profile.min_level, b.profile.max_level = 0, 3000
+          else error('open') end
+        end)
+        if r.orders or r.workers or r.levels then return true, r end
+        return false, 'profile already open'
+      end
+    end
+    return false, 'no such workshop'
+  end
+
   -- BUG-034 (Run 11, Kilrudrabed y439: 5 bedridden patients died of thirst in a hospital without water; the game session
   -- removed its 5 zones by hand and GiveWater jobs brought water again): zones screen > select the zone > remove, for ONE
   -- activity zone of a hospital location (its location_id names a HOSPITAL abstract building of the site, as water
@@ -2300,7 +2332,7 @@ local function impls(state)
   -- (only on) or farm (only off), A.LABOR_SETS; a citizen who is no living adult cannot take a labor
   function I.labor_set(unit_id, which, on)
     local spec = A.LABOR_SETS[tostring(which)]
-    if not spec then return false, 'which must be mechanic, farm, cook, clean_fish or hunt' end
+    if not spec then return false, 'which must be mechanic, farm, cook, brew, clean_fish, furniture, herb, burn or hunt' end
     if (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
     local u = df.unit.find(int(unit_id) or -1)
     if not u then return false, 'no unit ' .. tostring(unit_id) end
