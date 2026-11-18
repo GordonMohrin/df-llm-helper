@@ -480,6 +480,18 @@ M.PULLER_FILL = 100        -- a room that found too few candidates looks again a
 M.PULLER_THIRST = 20000    -- counters2 thirst_timer / hunger_timer at which a puller is let go (economy's supply
 M.PULLER_HUNGER = 40000    -- alarm reads the same counters; DF shows 'thirsty' at 25,000 and 'hungry' at 50,000)
 M.ROOM_EVERY = 100         -- ticks between re-reading which manifest levers lie in which room
+-- BUG-765 (Run 16a i1 Basementflew y540 win d76, kern 87b10464: B1's levers lie 5 tiles WEST of its footprint, outside Kern+; the arrival's pullers
+-- were chosen 60 tiles away inside the walls (nearest first), the lever burrow went into the alert, a cave dragon and goblins stood 17-47 tiles
+-- from the levers: the pull took 1,650 ticks (B1 up at +1,650), and the citizens that walked out to the levers or stood at B1 with them were
+-- among the 11 killed outside Kern+): a lever room OUTSIDE Kern+ and the refuge is a race. A citizen walks about RACE_CIV_TPT ticks a tile (1,650
+-- ticks for ~60 tiles in that log), a hostile is assumed to cover a tile in RACE_FOE_TPT ticks; RACE_PULL (0: the fort's own lever rooms lie
+-- behind doors a few tiles from Kern+, test_lockdown_gates) is a margin added to the walker's side. A puller is chosen, kept on his way and the
+-- lever burrow listed in the civ alert only while the hostile needs longer to reach the levers than the puller needs to reach them (RACE_MIN_WALK below; nearest hostile of a census no older than RACE_FRESH ticks, a cleared plant eater
+-- excluded; no fresh census = no verdict, as before). Pullers already standing in their room and rooms inside Kern+ / the refuge are not touched.
+M.RACE_CIV_TPT, M.RACE_FOE_TPT, M.RACE_PULL, M.RACE_FRESH = 24, 8, 0, 300
+-- A walk shorter than RACE_MIN_WALK tiles (480 ticks) is never judged: the fort's own lever rooms lie behind doors a few tiles from Kern+, and a
+-- hostile 'near' by the straight line is still behind walls (test_lockdown_gates); the trip that killed was 60 tiles
+M.RACE_MIN_WALK = 20
 local PULL_ROLES = {SIEGE = {outer = true, inner = true}, DRILL = {outer = true, inner = true}, BREACH = {core = true}}
 local PT = {x = 0, y = 0, z = 0}      -- scratch coord for burrow tile reads
 local pl                              -- runtime: {rooms = {<room> = {ids, at, skip, retry}}, warned}
@@ -502,6 +514,30 @@ local function unit_pos(u)
   if not u then return nil end
   local ok, x, y, z = pcall(dfhack.units.getPosition, u)
   if ok then return x, y, z end
+end
+
+-- BUG-765: tiles from the nearest uncleared hostile of a fresh census to (x, y, z) (Chebyshev on the level, a level counted twice), nil without one
+local function foe_gap(K, x, y, z)
+  local h = K.census.h
+  if type(h) ~= 'table' or K.now().tick - (math.tointeger(h.tick) or -1e9) > M.RACE_FRESH then return nil end
+  local best
+  for _, e in ipairs(type(h.list) == 'table' and h.list or {}) do
+    if e.pp ~= 1 and math.type(e.x) == 'integer' and math.type(e.y) == 'integer' then
+      local d = math.max(math.abs(e.x - x), math.abs(e.y - y)) + 2 * math.abs((math.tointeger(e.z) or z) - z)
+      if not best or d < best then best = d end
+    end
+  end
+  return best
+end
+
+-- BUG-765: the race to a lever room at c = {x,y,z} for a walker `walk` tiles away: true = the hostile is there first (a puller would arrive
+-- after him); also returns the hostile's distance. A room inside Kern+ or the refuge (`home`) is never a race.
+local function race_lost(K, c, walk, home)
+  if walk < M.RACE_MIN_WALK then return false end
+  if on_tile(home.kern, c.x, c.y, c.z) or on_tile(home.refuge, c.x, c.y, c.z) then return false end
+  local d = foe_gap(K, c.x, c.y, c.z)
+  if not d then return false end
+  return d * M.RACE_FOE_TPT < walk * M.RACE_CIV_TPT + M.RACE_PULL, d
 end
 
 -- the manifest's Kern+ and refuge burrow names (as siege/sense: role kern/refuge, refuge.burrow wins)
@@ -645,7 +681,9 @@ local function puller_note(K, name, now)
   for _, rm in ipairs(room_list(K, now)) do
     if rm.bridges[name] then
       local p = pl and pl.rooms[rm.name]
-      parts[#parts + 1] = string.format('%s %d of %d at the levers', rm.name, present(rm), p and #p.ids or 0)
+      parts[#parts + 1] = string.format('%s %d of %d at the levers%s', rm.name, present(rm), p and #p.ids or 0,
+                                        p and p.race and p.race_log and string.format(' (BUG-765: nobody sent, a hostile %s tiles from the levers is there first)',
+                                                                                       tostring(p.race.foe)) or '')
     end
   end
   return #parts > 0 and ('lever pullers: ' .. table.concat(parts, ', ')) or 'no lever room'
@@ -709,7 +747,7 @@ local function fill(K, rm, want, p, taken, now, home)
   local xs = xs_set(K)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return end
-  local c, cand = rm.c, {}
+  local c, cand, nlost = rm.c, {}, 0
   local rb = burrow(rm.name)
   for _, id in ipairs(cu.ids) do
     if not taken[id] and not p.skip[id] then
@@ -719,9 +757,18 @@ local function fill(K, rm, want, p, taken, now, home)
         if x then
           local d = math.max(math.abs(x - c.x), math.abs(y - c.y)) + 2 * math.abs(z - c.z)
           local raw = d
-          if on_tile(rb, x, y, z) then d, raw = -1, 0                 -- BUG-511: already standing in the room: first choice
+          local standing = on_tile(rb, x, y, z)
+          if standing then d, raw = -1, 0                             -- BUG-511: already standing in the room: first choice
           elseif not (on_tile(home.kern, x, y, z) or on_tile(home.refuge, x, y, z)) then d = d + 1000 end
-          cand[#cand + 1] = {id = id, d = d, raw = raw}
+          -- BUG-765: a puller who would arrive after the hostile is no puller (the race to a lever room outside Kern+)
+          local lost, foe = false, nil
+          if not standing then lost, foe = race_lost(K, c, raw, home) end
+          if lost then
+            p.race = {foe = foe, walk = raw, t = now}
+            nlost = nlost + 1
+          else
+            cand[#cand + 1] = {id = id, d = d, raw = raw}
+          end
         end
       end
     end
@@ -733,6 +780,12 @@ local function fill(K, rm, want, p, taken, now, home)
     taken[e.id], p.at[e.id] = rm.name, now
     p.dist = p.dist or {}
     p.dist[e.id] = e.raw                                -- BUG-511: the walk he has before him
+  end
+  if nlost > 0 and #want < M.PULLERS and not p.race_log then
+    p.race_log = true
+    K.log('warn', 'gate: lever room %s: %d citizen(s) not sent as pullers: the lever room lies outside the walls, a hostile %s tiles from it ' ..
+          'is there before them (race: %d ticks a tile for him, %d for them)', rm.name, nlost,
+          p.race and tostring(p.race.foe) or '?', M.RACE_FOE_TPT, M.RACE_CIV_TPT)
   end
 end
 
@@ -787,8 +840,17 @@ local function pullers_step(K, now)
         local u = df.unit.find(id)
         local why = unfit(u, xs)
         if not why and not on_tile(b, unit_pos(u)) and now - (p.at[id] or now) >= arrive_allow(p, id) then why = 'away' end
+        -- BUG-765: a puller still on his way is called back once the hostile would be at the levers first
+        if not why and u and not on_tile(b, unit_pos(u)) then
+          local ux, uy, uz = unit_pos(u)
+          if ux then
+            local walk = math.max(math.abs(ux - rm.c.x), math.abs(uy - rm.c.y)) + 2 * math.abs(uz - rm.c.z)
+            local lost, foe = race_lost(K, rm.c, walk, home)
+            if lost then why, p.race = 'danger', {foe = foe, walk = walk, t = now} end
+          end
+        end
         if why then
-          if why ~= 'needs' and why ~= 'stress' then p.skip[id] = true end   -- thirsty/hungry: may serve again after a drink and a meal
+          if why ~= 'needs' and why ~= 'stress' and why ~= 'danger' then p.skip[id] = true end   -- thirsty/hungry: may serve again after a drink and a meal
           taken[id], why_of[id] = nil, why
         else
           want[#want + 1] = id
@@ -798,8 +860,8 @@ local function pullers_step(K, now)
         fill(K, rm, want, p, taken, now, home)
         p.fill_at = #want < M.PULLERS and now + M.PULLER_FILL or nil   -- too few candidates: no scan per step
       end
-    elseif next(p.skip) or next(p.at) or p.fill_at then
-      p.skip, p.at, p.fill_at, p.dist = {}, {}, nil, nil       -- the next episode starts afresh
+    elseif next(p.skip) or next(p.at) or p.fill_at or p.race_log then
+      p.skip, p.at, p.fill_at, p.dist, p.race, p.race_log = {}, {}, nil, nil, nil, nil       -- the next episode starts afresh
     end
     if not same_set(want, p.ids) and now >= (p.retry or now) then
       local ok = set(rm.name, want)
@@ -947,6 +1009,45 @@ local function refuge_level(K, mode, main)
   return main ~= nil and main == rn
 end
 
+-- BUG-765: every linked lever of a bridge still to pull that lies outside the burrows `bs` (the alert's) and outside Kern+ / the refuge is a
+-- race for the nearest citizen (an adult, no soldier, the census ids; z counted twice): with the hostile there first the lever burrow stays
+-- out of the alert (nobody is drawn out to the levers). No citizen known = the farthest walk the census allows (RACE_NEAR tiles)
+M.RACE_NEAR = 30
+local function nearest_walk(K, p)
+  local cu = K.census.u
+  local best
+  for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+    local u = df.unit.find(id)
+    if u and unfit(u, nil) == nil then
+      local x, y, z = unit_pos(u)
+      if x then
+        local d = math.max(math.abs(x - p[1]), math.abs(y - p[2])) + 2 * math.abs(z - p[3])
+        if not best or d < best then best = d end
+      end
+    end
+  end
+  return best or M.RACE_NEAR
+end
+
+local function race_safe(K, bs)
+  local kn, rn = core_burrows(K.manifest())
+  local home = {kern = burrow(kn), refuge = burrow(rn)}
+  for name, r in pairs(rt) do
+    if needs_pull(name) and not lever_in(r, bs) then
+      for _, lid in ipairs(r.levers or {}) do
+        local p = r.pos[lid]
+        if r.linked[lid] and type(p) == 'table' then
+          local c = {x = p[1], y = p[2], z = p[3]}
+          if not (on_tile(home.kern, c.x, c.y, c.z) or on_tile(home.refuge, c.x, c.y, c.z)) then
+            if race_lost(K, c, nearest_walk(K, p), home) then return false end
+          end
+        end
+      end
+    end
+  end
+  return true
+end
+
 -- the lever burrow for siege's alert list in `mode`, or nil: only while a pull is pending on a bridge none of whose
 -- linked levers lies on `main` (the alert's burrow) or one of `rooms`, or all of those failed this epoch (no worker
 -- took them); seal paints the lever tiles (kept current: a new linked lever is added on the next ask) and answers its
@@ -962,6 +1063,7 @@ local function lever_room(K, mode, main, rooms)
   end
   if not need then return nil end
   if refuge_level(K, mode, main) and not breach_safe(K, bs) then return nil end
+  if not race_safe(K, bs) then return nil end                  -- BUG-765: no lever burrow in the alert while the hostile wins the race
   local ok, n = K.call('seal', 'lever_burrow', lever_tiles())
   if ok and type(n) == 'string' and n ~= '' then
     lb_name = n
@@ -3383,8 +3485,13 @@ end
 function M.rooms(K, mode, main)
   mode = mode or K.mode()
   local r = {}
+  local kn, rn = core_burrows(K.manifest())
+  local home = {kern = burrow(kn), refuge = burrow(rn)}
   for _, rm in ipairs(room_list(K, K.now().tick)) do
-    if allowed(K, rm, mode) then r[#r + 1] = rm.name end
+    -- BUG-765: a room outside Kern+ and the refuge stays out of the alert while the hostile wins the race to it (a puller standing there stays)
+    if allowed(K, rm, mode) and (present(rm) > 0 or not race_lost(K, rm.c, nearest_walk(K, {rm.c.x, rm.c.y, rm.c.z}), home)) then
+      r[#r + 1] = rm.name
+    end
   end
   local lb = lever_room(K, mode, main, r)
   if lb then r[#r + 1] = lb end

@@ -610,7 +610,7 @@ local function evaluate(K, why)
   rt.routes, rt.open, rt.ents = entrances(K)                       -- FR-65 (FR-70: before the blockers)
   local kern, refuge = burrow_names(man)
   if not dfhack.burrows.findByName(kern) then f1[#f1 + 1] = 'no_kern' end
-  rt.rdry = nil
+  rt.rdry, rt.rdq = nil, nil
   if not dfhack.burrows.findByName(refuge) then f1[#f1 + 1] = 'no_refuge'
   else
     -- Run 11 (siege 8: Tiefe+ had no drink; a dry refuge holds the citizens only in a breach, for a week)
@@ -633,6 +633,8 @@ local function evaluate(K, why)
         local fix = sto and string.format('its drink store (%d tiles) waits for barrels', sto.tiles)
                     or np > 0 and string.format('its drink store is under way (%d project%s)', np, np == 1 and '' or 's')
                     or 'plan its drink store (bp sites refuge_drink)'
+        rt.rdq = {name = tostring(rd.name), drink = int(rd.drink) or 0, need = int(rd.need) or 0, wells = nw, store = sto and int(sto.tiles) or 0,
+                  pending = np, manifest = type(man.refuge) == 'table'}
         rt.rdry = cut(string.format('%s has no drink (drink %d<%d, %s%s): %s',
                                     tostring(rd.name), int(rd.drink) or 0, int(rd.need) or 0,
                                     nw == 0 and ('no well in ' .. tostring(rd.name))
@@ -1345,6 +1347,7 @@ function M.init(K)
   st.dgk, st.dgh = type(p.dgk) == 'string' and p.dgk or nil, int(p.dgh)
   st.rlq = int(p.rlq)                                         -- BUG-478: the last refuge_levers question
   st.llq = int(p.llq)                                         -- BUG-712: the last bridge_levers question
+  st.rdt, st.rdq = int(p.rdt), int(p.rdq)                     -- BUG-766: refuge_dry seen since, the last refuge_dry question
   st.pw = type(p.pw) == 'string' and p.pw:sub(1, 60) or nil
   st.nt, st.wn = int(p.nt), int(p.wn)                         -- review fix merge16: the newest opening, ways in counted
   for name, v in pairs(type(p.lvok) == 'table' and p.lvok or {}) do
@@ -1559,6 +1562,42 @@ local function ask_defense(K, now)
          {id = 'defense_gap', q = cut(q, 200), cmds = cmds, cause = kind, n = st.dhold, nd = rt.dage, why = cut(table.concat(outs, '; '), 200)})
 end
 
+-- BUG-766 (Run 16a i1 Basementflew y509-y540: readiness said refuge_dry in 47 events (SIEGE_UNREADY, status) for 30 years and never asked; at the
+-- y540 surprise siege the deep defense wanted Tiefe+, REFUGE_FAIL 'no drink (drink 0<50, no well)' sent the civilians to Kern+ instead, where the
+-- cave dragon and goblins killed 11 of them; the refuge drink store could not be placed (the manifest has no refuge room)): DECISION_NEEDED
+-- refuge_dry (A) once the refuge has stood dry M.RDRY_GRACE ticks in PEACE, again every DEF.ask_days game days while it does. It says what the
+-- fight does without it, what the fort holds (drink and need) and the fix that applies: the drink store template when the manifest has a refuge,
+-- the store that waits for barrels, the project under way, or (no refuge room in the manifest) that Kern+ is the confinement and holds the drink
+M.RDRY_GRACE = 3600
+local function ask_refuge_dry(K, now)
+  if not rt.rdq then st.rdt = nil; return end
+  if K.mode() ~= 'PEACE' or now - rt.boot < M.UNREADY_SETTLE then return end
+  if not st.rdt then st.rdt, dirty = now, true end
+  if now - st.rdt < M.RDRY_GRACE then return end
+  if st.rdq and now - st.rdq < M.DEF.ask_days * 1200 then return end
+  st.rdq, dirty = now, true
+  local x = rt.rdq
+  local fix, cmd
+  if x.store > 0 then
+    fix = string.format('its drink store (%d tiles) stands and waits for barrels: brew and craft barrels', x.store)
+    cmd = [[dfllm cmd inspect '{"what":"refuge"}']]
+  elseif x.pending > 0 then
+    fix = string.format('its drink store is under way (%d project%s)', x.pending, x.pending == 1 and '' or 's')
+  elseif x.manifest then
+    fix = 'place its drink store'
+    cmd = [[dfllm cmd bp.place '{"tpl":"refuge_drink","site":"S1"}']]
+  else
+    fix = 'the fort manifest has no refuge room for a drink store (fortcore stage 3 digs it): the civilians stay in Kern+ in a fight, keep Kern+ stocked'
+    cmd = [[dfllm cmd inspect '{"what":"refuge"}']]
+  end
+  local q = string.format('%s holds no drink (%d<%d): a fight sends nobody there (REFUGE_FAIL), the civilians stay in Kern+, also against a '
+                          .. 'building destroyer; %s', x.name, x.drink, x.need, fix)
+  K.emit('DECISION_NEEDED', 'A', cut(cmd and (q .. ': ' .. cmd) or q, 200),
+         {id = 'refuge_dry', q = cut(q, 200), cmds = cmd and {cmd} or nil, n = x.drink, nd = x.need,
+          cause = x.store > 0 and 'barrels' or (x.pending > 0 and 'pending' or (x.manifest and 'store' or 'no_room')),
+          why = cut(fix, 200)})
+end
+
 function M.step(K, budget, ctx)
   local now = K.now().tick
   if st.audit_due == 1 or not st.audit_req or now - st.audit_req >= M.AUDIT_EVERY then
@@ -1568,6 +1607,7 @@ function M.step(K, budget, ctx)
   ask_reflevers(K, now)
   ask_leverless(K, now)
   ask_defense(K, now)
+  ask_refuge_dry(K, now)
   save(K)
 end
 
