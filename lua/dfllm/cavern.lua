@@ -34,6 +34,9 @@ M.CFG = {
   scan = 200,                -- ticks between two beast scans in the kill
   radius = 40, depth = 12, above = 1,   -- the cavern box: x/y around the shaft, levels below / above its bottom
   open_max = 4 * 33600,      -- the unplug project may take four months
+  open_stall = 6 * 1200,     -- BUG-777: ... but no progress for six days closes the shaft again (a stair nobody builds)
+  near_shaft = 3,            -- BUG-777: a beast this near the shaft column (x/y) while it is opened closes it
+  close_retry = 20,          -- BUG-777: plug refused to start (planned buildings still stand): looks before seal_failed
   muster_max = 2400, kill_max = 24000, recall_max = 2400, close_max = 2 * 33600,
   clear_looks = 3,           -- scans without a beast in sight end the kill as done
   cool = 100800, cool_bad = 2 * 100800,   -- rest after a sweep: a season, two after any other end
@@ -170,6 +173,13 @@ local function to_close(K, why)
   lock(K, true)
   call(K, 'military', 'release', M.SQUAD)
   local ok, pid = call(K, 'runner', 'sweep_close', st.acc)
+  -- BUG-777: 'pending' = a planned stair/hatch of the unplug could not be taken back yet: the plug would be refused on it
+  if not ok and type(pid) == 'string' and pid:sub(1, 7) == 'pending' and (st.cr or 0) < M.CFG.close_retry then
+    st.cr = (st.cr or 0) + 1
+    st.ph, st.plug = 'close', nil                  -- the close phase asks again every look until the plug is queued
+    save(K)
+    return
+  end
   if not ok then return end_sweep(K, 'seal_failed', false, ' (' .. cut(pid, 60) .. '; was ' .. tostring(st.why) .. ')') end
   if pid == '' then return end_sweep(K, st.why or 'done', true) end
   st.plug = pid
@@ -210,7 +220,7 @@ local function start(K, a, b, q)
   local ids = {}
   for _, e in ipairs(b) do ids[#ids + 1] = e.id end
   st = {v = 1, ph = 'open', acc = a.id, pos = {a.s0[1], a.s0[2], a.s0[3]}, bot = a.bot, t0 = t, tp = t, open = pid,
-        ids0 = q.ids or {}, tg = {}, clear = 0, cool = st.cool, ok = st.ok}
+        ids0 = q.ids or {}, tg = {}, clear = 0, cool = st.cool, ok = st.ok, seen = ids}
   local msg = string.format('cavern sweep: squad A (%d, worn %d%%) clears the cavern below %s: %d beast%s in sight; %s opens '
                             .. 'the shaft under a hatch', q.n, q.worn, pstr(st.pos), #b, #b == 1 and '' or 's', pid)
   K.emit('CAVERN_SWEEP_START', 'B', cut(msg, 200), {acc = cut(a.id, 60), n = #b, pos = st.pos, bot = a.bot, sol = q.n,
@@ -327,6 +337,18 @@ local function run_step(K, t)
     if (ps.blocked ~= '' and ps.blocked ~= 'stalled') or t - st.tp >= M.CFG.open_max then
       return to_close(K, 'blocked')
     end
+    -- BUG-777: the shaft is open (or opening) without its hatch: a beast that was not in sight at the start, or any beast at
+    -- the shaft column, closes it at once; so does a project that makes no progress (nobody builds the stair)
+    local b = M.beasts(K, a)
+    local seen = {}
+    for _, id in ipairs(st.seen or {}) do seen[id] = true end
+    for _, e in ipairs(b) do
+      local near = type(e.x) == 'number' and math.max(math.abs(e.x - st.pos[1]), math.abs(e.y - st.pos[2])) <= M.CFG.near_shaft
+      if not seen[e.id] or near then return to_close(K, 'hostile') end
+    end
+    local sig = string.format('%s/%s/%s', tostring(ps.stage), tostring(ps.chunk), tostring(ps.pct))
+    if st.sig ~= sig then st.sig, st.sigt = sig, t; save(K) end
+    if t - (st.sigt or st.tp) >= M.CFG.open_stall then return to_close(K, 'stalled') end
   elseif ph == 'muster' then
     local q = squad(K)
     if type(q) ~= 'table' or (q.n or 0) == 0 then return to_recall(K, 'muster') end
@@ -376,6 +398,7 @@ local function run_step(K, t)
                                          n - nc == 1 and '' or 's', nc, nc == 1 and '' or 's'), {n = n})
     end
   elseif ph == 'close' then
+    if st.plug == nil then return to_close(K, st.why) end        -- BUG-777: the plug did not start yet (pending)
     local s = call(K, 'runner', 'cav_state', st.acc)
     if s == 'done' then return end_sweep(K, st.why or 'done', true) end
     if s == 'failed' or s == nil then return end_sweep(K, 'seal_failed', false, ' (plug ' .. tostring(st.plug) .. ' failed; was '
