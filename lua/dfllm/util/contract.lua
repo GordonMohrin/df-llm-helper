@@ -334,7 +334,7 @@ C.ACT = {
   rescue_ramp_build = {'seal'},                    -- BUG-769: outdoors the ramp is built (quickfort Cr) on the landing floor
   rescue_ramp = {'seal'},                          -- BUG-769: one ramp on a plain wall tile beside a one-level drop with stranded citizens
   cancel_stray_job = {'seal'},                     -- BUG-751: an outdoor errand whose target has no way back to drink and food
-  cancel_link_job = {'gate'}, labor_set = {'economy'},          -- BUG-546, BUG-547
+  cancel_link_job = {'gate'}, labor_set = {'economy', 'seal'},        -- BUG-546, BUG-547
   construction_remove = {'seal'},                  -- BUG-479: the refuge plug's walls come down in PEACE
   door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
   burrow_tiles = {'seal', 'runner', 'water'},     -- BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:

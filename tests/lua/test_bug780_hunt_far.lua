@@ -33,7 +33,8 @@ local function fort(opts)
   SW.item(W, 'DRINK', 6, 6, Z, 10)
   SW.item(W, 'PLANT', 7, 7, Z, 20)
   SW.item(W, 'SEEDS', 16, 7, Z, 5)
-  W.cancelled = {}
+  W.cancelled, W.labors = {}, {}
+  W.act_result('labor_set', function(id, which, on) W.labors[#W.labors + 1] = {id, which, on}; return true, 'disabled' end)
   W.act_result('cancel_stray_job', function(id)
     local u = W.unit(id)
     local j = u.job and u.job.current_job
@@ -63,8 +64,20 @@ T.test('BUG-780: the hunt of a squad member is cancelled wherever it leads, a ci
   T.eq(W.cancelled, {1})
   T.ok(W.unit(2).job.current_job ~= nil, 'the civilian hunt in the fort stays')
   T.ok(logged(W, 'a squad member does not hunt'), 'kern.log names it')
-  W.run(3000, {skip = 9})
-  T.eq(W.cancelled, {1}, 'once a day per unit')
+  T.eq(W.labors, {{1, 'hunt', false}}, 'his Hunting labor goes off, else the next hunt starts at once')
+  W.unit(1).job = {current_job = {id = 75, job_type = HUNT, pos = {x = 14, y = 5, z = Z}}}   -- a new hunt the same day
+  W.run(900, {skip = 9})
+  T.eq(W.cancelled, {1, 1}, 'cancelled again at the next look, not a day later')
+end)
+
+T.test('BUG-780: a squad member on another job (no hunt) is left alone, his labors too', function()
+  local W = fort{setup = function(W)
+    squad(W, 2)
+    W.unit(2).job = {current_job = {id = 81, job_type = df.job_type.Dig or 1, pos = {x = 100, y = 5, z = Z}}}
+  end}
+  W.run(900, {skip = 9})
+  T.ok(W.unit(2).job.current_job ~= nil, 'no hunt, no cancel')
+  T.eq(W.labors, {})
 end)
 
 T.test('BUG-780: a vermin hunt 90 tiles from the citizens inside is cancelled', function()

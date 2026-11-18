@@ -81,12 +81,12 @@ T.test('BUG-779: every barrel full (none free): the stall names it, barrels are 
   local _, p = econ_run(W, ord, 8, inv)
   local ev = stuck(W)
   T.eq(#ev, 1, 'told once')
-  T.ok(ev[1].full:find('no empty barrel or pot for a brew (48 barrels, 0 pots; 0 empty, none free', 1, true), ev[1].full)
+  T.ok(ev[1].full:find('no empty barrel or pot for a brew (48 barrels, 0 pots; 0 empty, 0 free', 1, true), ev[1].full)
   T.ok(ev[1].full:find('Needs empty food storage item', 1, true), ev[1].full)
   T.eq(ev[1].d.kind, 'input')
   T.eq(#W.find_acts('order_remove'), 0, 'the brew orders are not taken down')
   T.eq(#W.find_acts('labor_set'), 0)
-  T.ok(p.contx and p.contx.want >= 4 and p.contx.untl > 108 * DAYT, 'barrels wanted')
+  T.ok(p.contx and p.contx.want >= 8 and p.contx.untl > 108 * DAYT, 'barrels wanted')
   T.ok(p.brewx == nil or not p.brewx.relax, 'no relaxed brew order')
 end)
 
@@ -94,13 +94,13 @@ T.test('BUG-779: empty barrels a job holds are no free container (cont_free 0 be
   local W, _, ord = world{}
   local _, p = econ_run(W, ord, 8, {brew_p = 50, barrels = 10, barrels_empty = 3, cont_free = 0})
   local ev = stuck(W)
-  T.ok(#ev == 1 and ev[1].full:find('3 empty, none free', 1, true), ev[1] and ev[1].full)
+  T.ok(#ev == 1 and ev[1].full:find('3 empty, 0 free', 1, true), ev[1] and ev[1].full)
   T.ok(p.contx ~= nil)
 end)
 
 T.test('BUG-779: a free empty barrel: no container verdict (the old causes apply); the want ends', function()
   local W, _, ord = world{}
-  local _, p = econ_run(W, ord, 8, {brew_p = 50, barrels = 10, barrels_empty = 3, cont_free = 2})
+  local _, p = econ_run(W, ord, 8, {brew_p = 50, barrels = 10, barrels_empty = 3, cont_free = 3})
   local ev = stuck(W)
   T.ok(#ev == 1 and not ev[1].full:find('no empty barrel', 1, true), ev[1] and ev[1].full)
   T.eq(p.contx, nil)
@@ -129,26 +129,35 @@ T.test('BUG-779: census: an empty barrel in a job or far away is not free, the o
   T.eq({W.K.census.i.barrels, W.K.census.i.barrels_empty, W.K.census.i.cont_free}, {3, 2, 1})
 end)
 
-T.test('BUG-779: p.contx makes plan_containers order barrels past the caps while every barrel is full', function()
-  local function run(contx)
+T.test('BUG-779: p.contx makes plan_containers order ONE batch of 15 barrels (not x4) on its own tag, beside an open x4 order', function()
+  local function run(contx, open4)
     local W = plain_world(function(W)
       for _ = 1, 48 do F.item(W, 'BARREL', {_contents = {{id = 1}}}) end
       F.item(W, 'DRINK', {stack_size = 100})
       F.workshop(W, 'Carpenters')
       for _ = 1, 60 do F.item(W, 'WOOD', {}) end
     end)
-    if contx then
-      local p = W.K.persist.get('m.economy')
-      p.contx = {untl = 1e12, want = 6}
-    end
+    local p = W.K.persist.get('m.economy')
+    if contx then p.contx = {untl = 1e12, want = 15} end
     days(W, 2)
-    local b
-    for _, a in ipairs(W.find_acts('workorder')) do if a.args[1].tag == 'dfllm:barrel' then b = a.args[1] end end
-    return b
+    local got = {}
+    for _, a in ipairs(W.find_acts('workorder')) do if tostring(a.args[1].tag):find('dfllm:barrel', 1, true) then got[a.args[1].tag] = a.args[1] end end
+    return got
   end
-  local b, b0 = run(true), run(false)
-  T.ok(b and b.job == 'MakeBarrel', 'a barrel order with contx')
-  T.eq(b0, nil, 'without contx the 48 full barrels (cap 8) order nothing')
+  local g, g0 = run(true), run(false)
+  T.ok(g['dfllm:barrelx'] and g['dfllm:barrelx'].job == 'MakeBarrel', 'a barrel batch with contx')
+  T.eq(g['dfllm:barrelx'].amount_total, 15, 'fifteen at once, not max_jobs 4')
+  T.eq(g0['dfllm:barrelx'], nil, 'without contx no batch')
+  T.eq(g0['dfllm:barrel'], nil, 'and the 48 full barrels (cap 8) order nothing')
+end)
+
+T.test('BUG-779: few free (1 of 3) with brews waiting is a container stall too; with 3 free it is none', function()
+  local W, _, ord = world{}
+  local _, p = econ_run(W, ord, 8, {brew_p = 50, barrels = 20, barrels_empty = 6, cont_free = 1})
+  T.ok(p.contx ~= nil, '1 free, 1 order waiting: wanted')
+  local W2, _, ord2 = world{}
+  local _, p2 = econ_run(W2, ord2, 8, {brew_p = 50, barrels = 20, barrels_empty = 6, cont_free = 3})
+  T.eq(p2.contx, nil)
 end)
 
 T.done()

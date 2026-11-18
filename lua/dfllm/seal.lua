@@ -1893,6 +1893,7 @@ CFG.stray_max = 3              -- errands cancelled per look
 CFG.stray_unit_wait = DAY      -- the same unit again not before this
 CFG.missing_after = 3 * DAY    -- BUG-752: a citizen away this long is MISSING
 CFG.missing_again = 14 * DAY   -- ... and reported again (still away) after this
+CFG.hunt_wait = 600            -- BUG-780: a civilian's far hunt is looked at again after this (a squad member's Hunting labor goes off instead)
 CFG.hunt_far = 30              -- BUG-780: a vermin or game hunt whose target lies farther than this from every citizen inside is cancelled
 CFG.missing_far = 40           -- tiles from the nearest citizen inside: an outside citizen farther than this is away
 
@@ -1966,30 +1967,39 @@ function M.hunt_errands(K, t, cits, good)
   local n = 0
   for _, c in ipairs(cits) do
     if n >= CFG.stray_max then break end
-    if t - (mem.hunt[c.id] or -1e12) >= CFG.stray_unit_wait then
+    if t - (mem.hunt[c.id] or -1e12) >= CFG.hunt_wait then
       local u = df.unit.find(c.id)
       local name = u and M.hunt_job_of(u)
       if name then
         local why
-        local okq, sq = pcall(function() return u.military.squad_id end)
-        if okq and type(sq) == 'number' and sq >= 0 then why = 'a squad member does not hunt'
+        local okq, sqid = pcall(function() return u.military.squad_id end)
+        local sq = okq and type(sqid) == 'number' and sqid >= 0
+        if sq then why = 'a squad member does not hunt'
         elseif name == 'HuntVermin' then
           if good[c.g] then
+            -- the target (job.pos: the vermin's tile, not verified on live data) and the hunter himself: he may have walked far already
             local okp, tx, ty, tz = pcall(function() local p = u.job.current_job.pos; return p.x, p.y, p.z end)
-            if okp and tx and tx >= 0 then
+            local pts = {{c.x, c.y, c.z, true}}
+            if okp and tx and tx >= 0 then pts[#pts + 1] = {tx, ty, tz} end
+            for _, pt in ipairs(pts) do
               local near, dz = math.huge, 0
               for _, o in ipairs(inside) do
-                local d = math.max(math.abs(o.x - tx), math.abs(o.y - ty))
-                if d < near then near, dz = d, math.abs(o.z - tz) end
+                if o.id ~= c.id then
+                  local d = math.max(math.abs(o.x - pt[1]), math.abs(o.y - pt[2]))
+                  if d < near then near, dz = d, math.abs(o.z - pt[3]) end
+                end
               end
-              if near > CFG.hunt_far or dz > 10 then
-                why = string.format('the vermin hunt leads %d tiles from the citizens inside', near == math.huge and -1 or near)
+              if near ~= math.huge and (near > CFG.hunt_far or dz > 10) then
+                why = string.format('the vermin hunt %s %d tiles from the citizens inside', pt[4] and 'has led him' or 'leads', near)
+                break
               end
             end
           end
         end
         if why then
           mem.hunt[c.id] = t
+          -- a squad member keeps no Hunting labor: the hunt would start again the same day, farther out
+          if sq then local okl, el = pcall(function() return K.act.labor_set(c.id, 'hunt', false) end); if not okl then K.log('info', 'seal: hunt labor: %s', tostring(el)) end end
           local ok, res = K.act.cancel_stray_job(c.id)
           if ok and res ~= 'no job' then
             n = n + 1

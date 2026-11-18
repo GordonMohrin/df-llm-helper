@@ -1889,10 +1889,42 @@ function M.plan_pots(K, c, r, want)
   add(r, {tag = b.tag, spec = copy(b.spec), n = n, uses = {rock = 1}, why = 'pots for drink (no logs for barrels)'})
 end
 
+-- BUG-779: brew_watch found too few empty barrels or pots a Still job can take (p.contx, renewed daily): a batch of barrels on a tag of its own (`dfllm:barrelx`,
+-- up to CX_BATCH at once, past every cap, on the wood floor, beside the ordinary x4 order that goes on), pots of rock when no logs lie. True = this run's barrel
+-- planning is done (the batch is planned or still open).
+M.CX_BATCH = 15
+function M.cx_active(p, now, inv)
+  local x = p.contx
+  return type(x) == 'table' and now < (math.tointeger(x.untl) or 0) and (inv.cont_free or 0) < M.CX_FREE
+end
+function M.plan_contx(K, c, r)
+  local b = c.barrels
+  if type(b) ~= 'table' or not M.cx_active(r.p, r.now, r.inv) then return false end
+  local tag = b.tag .. 'x'
+  if open(r, tag) then return true end
+  if not ws_any(r.f, b.ws) then return false end
+  local inv = r.inv
+  local want = math.min(M.CX_BATCH, math.tointeger(r.p.contx.want) or M.CX_BATCH)
+  local wood = math.max(0, (inv.wood or 0) - (r.planned.wood or 0))
+  local n = math.min(want, wood)
+  if n <= 0 then
+    st.cont_short.barrels = want
+    M.plan_pots(K, c, r, want)
+    return true
+  end
+  local spec = wood_spec(c, r, b.spec)
+  spec.item_conditions = {cond(1, 'WOOD')}
+  if add(r, {tag = tag, spec = spec, n = n, uses = {wood = 1}, why = 'barrels: no empty barrel for a brew'}) then
+    K.log('warn', 'brew stall: %d barrels at once (%d free of %d empty, %d logs)', n, inv.cont_free or 0, inv.barrels_empty or 0, inv.wood or 0)
+  end
+  return true
+end
+
 local function plan_containers(K, c, r, which)
   local b = c[which]
   st.cont_short = st.cont_short or {}
   st.cont_short[which] = nil
+  if which == 'barrels' and M.plan_contx(K, c, r) then return end
   if type(b) ~= 'table' or open(r, b.tag) or not ws_any(r.f, b.ws) then return end
   local inv = r.inv
   local short, dry = false, false
@@ -1920,21 +1952,13 @@ local function plan_containers(K, c, r, which)
                           (inv[which] or 0) - (inv[which .. '_empty'] or 0), inv[which] or 0, cap) end
     end
   end
-  -- BUG-779: brew_watch found no empty barrel or pot a Still job can take (every one full, in a job or out of reach): barrels (or, without logs, pots)
-  -- are wanted past the caps, on the wood floor too, for the days brew_watch renews (p.contx)
-  local cx = which == 'barrels' and type(r.p.contx) == 'table' and r.now < (math.tointeger(r.p.contx.untl) or 0) and (inv.cont_free or 0) == 0
-  if cx then
-    empty_miss = math.max(empty_miss, math.tointeger(r.p.contx.want) or 4)
-    cap = math.max(cap, (inv.barrels or 0) + empty_miss)
-    dry = true
-  end
   local want = math.min(empty_miss, cap - (inv[which] or 0))
   -- dry: other open wood orders hold no claim on the logs either (the first job takes them)
   local wood = dry and math.max(0, (inv.wood or 0) - (r.planned.wood or 0)) or left(c, r, 'wood')
   local n = math.min(want, wood, b.max_jobs or 4)
   -- BUG-772: barrels and bins are wood only (DF has no rock or clay barrel or bin): in a treeless fort they wait for logs, the caravans bring
   -- them (supply_wants) and the drink goes into large pots of rock meanwhile
-  if want > 0 and wood <= 0 and (cx or M.treeless(c, r)) then
+  if want > 0 and wood <= 0 and M.treeless(c, r) then
     st.cont_short[which] = want
     if which == 'barrels' then M.plan_pots(K, c, r, want) end
   end
@@ -10707,6 +10731,7 @@ end
 -- as far as the game lets it be cured: a closed profile is opened (act.ws_profile_open), nobody holding Brewing -> the labor goes on for an idle adult
 -- (act.labor_set brew), every brewer busy -> one more brewer, DF job conditions or no job at the Still -> the open dfllm brew orders are taken down and made
 -- again with no item condition at the top of the manager's list (p.brewx, M.brew_spec; ends when the drink days reach the plan's target), as the cook stall (BUG-629).
+M.CX_FREE = 3             -- BUG-779: fewer free containers than this (and brews waiting) is a container stall
 M.BREW_STALL = {days = 6, again = 30 * DAY}
 M.BREW_TAGS = {'dfllm:drink', 'dfllm:drink_fruit'}
 
@@ -10829,9 +10854,9 @@ function M.brew_cause(d)
   end
   -- BUG-779 (Run 16c i3 Lancemoment y379-y380: Still jobs 'Needs empty food storage item', 48 barrels all full of food and drink, 3,444 food, the player ordered
   -- MakeBarrel by hand): no empty barrel or pot a job can take, wherever the brews stand
-  if d.conts and d.conts.free == 0 then
-    return 'nobarrel', string.format('no empty barrel or pot for a brew (%d barrels, %d pots; %d empty, none free: the rest hold food or drink, a job or lie out of reach): '
-                                     .. 'DF says "Needs empty food storage item"', d.conts.barrels, d.conts.pots, d.conts.empty), 'barrels'
+  if d.conts and d.conts.free < M.CX_FREE then
+    return 'nobarrel', string.format('no empty barrel or pot for a brew (%d barrels, %d pots; %d empty, %d free: the rest hold food or drink, a job or lie out of reach): '
+                                     .. 'DF says "Needs empty food storage item"', d.conts.barrels, d.conts.pots, d.conts.empty, d.conts.free), 'barrels'
   end
   if jobs > 0 and susp == jobs then
     return 'suspended', string.format('the Still at %s holds %d brew job%s, all suspended (a missing item, a cancelled hauling job)', at, jobs, jobs == 1 and '' or 's'), nil
@@ -10898,7 +10923,7 @@ function M.brew_watch(K, c, r)
   if id == 'working' then return end
   -- BUG-779: renewed every day while it holds: plan_containers orders barrels (pots without logs) past its caps
   if id == 'nobarrel' then
-    p.contx = {untl = r.now + 3 * DAY, want = math.max(4, math.min(12, b.n))}
+    p.contx = {untl = r.now + 3 * DAY, want = math.min(M.CX_BATCH, math.max(8, b.n))}
     K.persist.touch('m.economy')
   elseif p.contx then
     p.contx = nil
@@ -10915,7 +10940,7 @@ function M.brew_watch(K, c, r)
     act[#act + 1] = how == 'set' and ('Brewing labor on for unit ' .. tostring(uid)) or 'no citizen to take the Brewing labor'
   end
   if fix == 'barrels' then
-    act[#act + 1] = string.format('%d barrels (or rock pots without logs) are ordered past the caps', p.contx and p.contx.want or 4)
+    act[#act + 1] = string.format('%d barrels (or rock pots without logs) are ordered at once, past the caps', p.contx and p.contx.want or M.CX_BATCH)
   end
   if (fix and fix ~= 'barrels' or id == 'untaken' or id == 'suspended') and not (bx and bx.relax) then
     local dropped = 0
