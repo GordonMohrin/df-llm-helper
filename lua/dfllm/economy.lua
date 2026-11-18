@@ -1183,13 +1183,21 @@ local function classify(it, a, cat)
     -- BUG-772: a large pot (rock, clay or any material) holds drink and brews like a barrel: a treeless fort brews in pots
     if M.is_pot(it) and not f.in_job then
       a.pots = a.pots + 1
-      if #dfhack.items.getContainedItems(it) == 0 then a.pots_empty = a.pots_empty + 1 end
+      if #dfhack.items.getContainedItems(it) == 0 then
+        a.pots_empty = a.pots_empty + 1
+        if not (a.far and a.far(it)) then a.cont_free = a.cont_free + 1 end     -- BUG-779
+      end
     end
   elseif cat == 'BARREL' or cat == 'BIN' then  -- live L1b: brewing stalled for want of an empty barrel
     local empty = #dfhack.items.getContainedItems(it) == 0
     if cat == 'BARREL' then
       a.barrels = a.barrels + 1
-      if empty then a.barrels_empty = a.barrels_empty + 1 end
+      if empty then
+        a.barrels_empty = a.barrels_empty + 1
+        -- BUG-779 (Run 16c i3 Lancemoment y379: 'Needs empty food storage item' beside 48 barrels): an empty barrel a job holds or no citizen can walk to
+        -- is no container DF gives a Still job (`barrels_empty` counts it, `cont_free` does not)
+        if not f.in_job and not (a.far and a.far(it)) then a.cont_free = a.cont_free + 1 end
+      end
     else
       a.bins = a.bins + 1
       if empty then a.bins_empty = a.bins_empty + 1 end
@@ -1304,7 +1312,7 @@ local function classify(it, a, cat)
 end
 
 local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'gems', 'bars', 'bolts', 'wood', 'fuel',
-              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'pots', 'pots_empty', 'rock', 'ore', 'rock_bad',
+              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'cont_free', 'bins', 'bins_empty', 'pots', 'pots_empty', 'rock', 'ore', 'rock_bad',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'gm_body', 'gm_head', 'gm_pants', 'gm_gloves', 'gm_shoes', 'g_unusable', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
@@ -1912,13 +1920,21 @@ local function plan_containers(K, c, r, which)
                           (inv[which] or 0) - (inv[which .. '_empty'] or 0), inv[which] or 0, cap) end
     end
   end
+  -- BUG-779: brew_watch found no empty barrel or pot a Still job can take (every one full, in a job or out of reach): barrels (or, without logs, pots)
+  -- are wanted past the caps, on the wood floor too, for the days brew_watch renews (p.contx)
+  local cx = which == 'barrels' and type(r.p.contx) == 'table' and r.now < (math.tointeger(r.p.contx.untl) or 0) and (inv.cont_free or 0) == 0
+  if cx then
+    empty_miss = math.max(empty_miss, math.tointeger(r.p.contx.want) or 4)
+    cap = math.max(cap, (inv.barrels or 0) + empty_miss)
+    dry = true
+  end
   local want = math.min(empty_miss, cap - (inv[which] or 0))
   -- dry: other open wood orders hold no claim on the logs either (the first job takes them)
   local wood = dry and math.max(0, (inv.wood or 0) - (r.planned.wood or 0)) or left(c, r, 'wood')
   local n = math.min(want, wood, b.max_jobs or 4)
   -- BUG-772: barrels and bins are wood only (DF has no rock or clay barrel or bin): in a treeless fort they wait for logs, the caravans bring
   -- them (supply_wants) and the drink goes into large pots of rock meanwhile
-  if want > 0 and wood <= 0 and M.treeless(c, r) then
+  if want > 0 and wood <= 0 and (cx or M.treeless(c, r)) then
     st.cont_short[which] = want
     if which == 'barrels' then M.plan_pots(K, c, r, want) end
   end
@@ -10696,8 +10712,12 @@ M.BREW_TAGS = {'dfllm:drink', 'dfllm:drink_fruit'}
 
 
 -- {stills = {{id, at, jobs, taken, susp, orders0, permit, permit_ok, minl, maxl}}, brewers = {n, idle, who = {{id, name, job, idle}}}, orders = {n, valid, pinned, conds}}
-function M.brew_diag(K)
+function M.brew_diag(K, inv)
   local d = {stills = {}, brewers = {n = 0, idle = 0, who = {}}, orders = {n = 0, valid = 0, pinned = 0, conds = 0}}
+  -- BUG-779: the containers a Still job can take (empty, no job, reachable); nil when the census is not at hand (no verdict then)
+  if type(inv) == 'table' and inv.cont_free ~= nil then
+    d.conts = {free = inv.cont_free or 0, barrels = inv.barrels or 0, empty = (inv.barrels_empty or 0) + (inv.pots_empty or 0), pots = inv.pots or 0}
+  end
   local sid = df.job_skill and df.job_skill.BREWING
   local cu = K.census.u
   local sold = {}
@@ -10807,6 +10827,12 @@ function M.brew_cause(d)
   if jobs > 0 and taken > 0 then
     return 'working', string.format('a brewer works at the Still (%d of %d jobs taken): the brews are slow, not stuck', taken, jobs), nil
   end
+  -- BUG-779 (Run 16c i3 Lancemoment y379-y380: Still jobs 'Needs empty food storage item', 48 barrels all full of food and drink, 3,444 food, the player ordered
+  -- MakeBarrel by hand): no empty barrel or pot a job can take, wherever the brews stand
+  if d.conts and d.conts.free == 0 then
+    return 'nobarrel', string.format('no empty barrel or pot for a brew (%d barrels, %d pots; %d empty, none free: the rest hold food or drink, a job or lie out of reach): '
+                                     .. 'DF says "Needs empty food storage item"', d.conts.barrels, d.conts.pots, d.conts.empty), 'barrels'
+  end
   if jobs > 0 and susp == jobs then
     return 'suspended', string.format('the Still at %s holds %d brew job%s, all suspended (a missing item, a cancelled hauling job)', at, jobs, jobs == 1 and '' or 's'), nil
   end
@@ -10848,7 +10874,7 @@ function M.brew_watch(K, c, r)
   local bx = type(p.brewx) == 'table' and p.brewx or nil
   local tgt = math.tointeger((K.plan.supply or {}).drink_d) or 170
   if bx and ((r.days or {}).drink_d or 0) >= tgt and b.n == 0 then p.brewx, bx = nil, nil; K.persist.touch('m.economy') end
-  if not (ws_any(f, {'workshop:Still'}) and b.valid > 0 and plants > 0 and (inv.barrels_empty or 0) > 0) then
+  if not (ws_any(f, {'workshop:Still'}) and b.valid > 0 and plants > 0 and ((inv.barrels_empty or 0) > 0 or inv.cont_free ~= nil)) then
     if bw then p.brewb = nil; K.persist.touch('m.economy') end
     st.brewx = nil
     return
@@ -10866,10 +10892,18 @@ function M.brew_watch(K, c, r)
     if not bw.told then st.brewx = nil end                    -- a told stall keeps its cause for the decisions until the order moves
     return
   end
-  local d = M.brew_diag(K)
+  local d = M.brew_diag(K, inv)
   local id, text, fix, still = M.brew_cause(d)
   st.brewx = {d = bw.d, id = id, text = text}
   if id == 'working' then return end
+  -- BUG-779: renewed every day while it holds: plan_containers orders barrels (pots without logs) past its caps
+  if id == 'nobarrel' then
+    p.contx = {untl = r.now + 3 * DAY, want = math.max(4, math.min(12, b.n))}
+    K.persist.touch('m.economy')
+  elseif p.contx then
+    p.contx = nil
+    K.persist.touch('m.economy')
+  end
   if bw.told and r.now - (math.tointeger(bw.told) or 0) < M.BREW_STALL.again then return end
   local act = {}
   if fix == 'profile' and still then
@@ -10880,7 +10914,10 @@ function M.brew_watch(K, c, r)
                                         why = 'a Still stands, brews wait and nobody had the labor'}, fix == 'extra')
     act[#act + 1] = how == 'set' and ('Brewing labor on for unit ' .. tostring(uid)) or 'no citizen to take the Brewing labor'
   end
-  if (fix or id == 'untaken' or id == 'suspended') and not (bx and bx.relax) then
+  if fix == 'barrels' then
+    act[#act + 1] = string.format('%d barrels (or rock pots without logs) are ordered past the caps', p.contx and p.contx.want or 4)
+  end
+  if (fix and fix ~= 'barrels' or id == 'untaken' or id == 'suspended') and not (bx and bx.relax) then
     local dropped = 0
     for _, tag in ipairs(M.BREW_TAGS) do
       local o = order_by_id(p.orders[tag])

@@ -1893,6 +1893,7 @@ CFG.stray_max = 3              -- errands cancelled per look
 CFG.stray_unit_wait = DAY      -- the same unit again not before this
 CFG.missing_after = 3 * DAY    -- BUG-752: a citizen away this long is MISSING
 CFG.missing_again = 14 * DAY   -- ... and reported again (still away) after this
+CFG.hunt_far = 30              -- BUG-780: a vermin or game hunt whose target lies farther than this from every citizen inside is cancelled
 CFG.missing_far = 40           -- tiles from the nearest citizen inside: an outside citizen farther than this is away
 
 function M.job_target(u)
@@ -1931,6 +1932,69 @@ function M.stray_errands(K, t, cits, good)
             K.log('warn', 'seal: %s of citizen %d cancelled: its target %d,%d,%d lies on walk group %d, which holds no drink and ' ..
                   'food and has no way back (citizen at %d,%d,%d on group %d)', jn or tostring(res), c.id, tx, ty, tz, tg,
                   c.x, c.y, c.z, c.g)
+          end
+        end
+      end
+    end
+  end
+  return n
+end
+
+-- BUG-780 (Run 16c i3 Lancemoment y380: the militia captain 26415 took a HuntVermin job, walked 90 tiles into the cavern level (10,178,132,
+-- walk group 2815) and died there of thirst; BUG-740's labor switch ran only in the economy's own pass, once a day per unit, and a vermin hunt
+-- is no job the stray rule (BUG-751) cancels for a citizen on a group with drink and food unless its target has no way back): a hunt
+-- (Hunt, HuntVermin) of a squad member is always cancelled; a vermin hunt of anybody else is cancelled when its target lies farther than
+-- CFG.hunt_far tiles from every citizen inside (x, y) or more than ten levels off (a unit already off the groups with drink and food is left to
+-- the rescue and CUTOFF). The same unit again not before CFG.stray_unit_wait.
+M.HUNT_JOBS = {'HuntVermin', 'Hunt'}
+function M.hunt_job_of(u)
+  local ok, name = pcall(function()
+    local j = u.job and u.job.current_job
+    if not j then return nil end
+    for _, n in ipairs(M.HUNT_JOBS) do
+      local v = df.job_type[n]
+      if v ~= nil and j.job_type == v then return n, j.pos end
+    end
+  end)
+  return ok and name or nil
+end
+
+function M.hunt_errands(K, t, cits, good)
+  mem.hunt = mem.hunt or {}
+  local inside = {}
+  for _, c in ipairs(cits) do if good[c.g] then inside[#inside + 1] = c end end
+  local n = 0
+  for _, c in ipairs(cits) do
+    if n >= CFG.stray_max then break end
+    if t - (mem.hunt[c.id] or -1e12) >= CFG.stray_unit_wait then
+      local u = df.unit.find(c.id)
+      local name = u and M.hunt_job_of(u)
+      if name then
+        local why
+        local okq, sq = pcall(function() return u.military.squad_id end)
+        if okq and type(sq) == 'number' and sq >= 0 then why = 'a squad member does not hunt'
+        elseif name == 'HuntVermin' then
+          if good[c.g] then
+            local okp, tx, ty, tz = pcall(function() local p = u.job.current_job.pos; return p.x, p.y, p.z end)
+            if okp and tx and tx >= 0 then
+              local near, dz = math.huge, 0
+              for _, o in ipairs(inside) do
+                local d = math.max(math.abs(o.x - tx), math.abs(o.y - ty))
+                if d < near then near, dz = d, math.abs(o.z - tz) end
+              end
+              if near > CFG.hunt_far or dz > 10 then
+                why = string.format('the vermin hunt leads %d tiles from the citizens inside', near == math.huge and -1 or near)
+              end
+            end
+          end
+        end
+        if why then
+          mem.hunt[c.id] = t
+          local ok, res = K.act.cancel_stray_job(c.id)
+          if ok and res ~= 'no job' then
+            n = n + 1
+            mem.stats.stray_job = (mem.stats.stray_job or 0) + 1
+            K.log('warn', 'seal: %s of citizen %d cancelled: %s (citizen at %d,%d,%d on group %d)', name, c.id, why, c.x, c.y, c.z, c.g)
           end
         end
       end
@@ -2014,6 +2078,7 @@ function M.job_stray(K)
   for g in pairs(by.drink) do if by.food[g] then good[g] = true end end
   if next(good) == nil then return end
   M.stray_errands(K, t, cits, good)
+  M.hunt_errands(K, t, cits, good)
   M.missing_watch(K, t, cits, good)
 end
 
