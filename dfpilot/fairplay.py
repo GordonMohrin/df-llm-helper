@@ -198,6 +198,9 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif k == "approach_close":            # BUG-587: tiles within which a hostile bounds the hold even when it is not closing
                 if not is_int(v, 0, 80):
                     errs.append(f"{name}: gate.approach_close: int 0..80 expected, got {v!r}")
+            elif k == "approach_now":              # BUG-775: tiles within which a hostile ends the hold of a raise at once
+                if not is_int(v, 0, 80):
+                    errs.append(f"{name}: gate.approach_now: int 0..80 expected, got {v!r}")
             elif k == "approach_hold":             # BUG-587: ticks a raise is held before an approaching hostile forces it
                 if not is_int(v, 0, 3000):
                     errs.append(f"{name}: gate.approach_hold: int 0..3000 expected, got {v!r}")

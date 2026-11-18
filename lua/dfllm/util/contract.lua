@@ -332,6 +332,7 @@ C.ACT = {
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
   pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
   rescue_ramp_build = {'seal'},                    -- BUG-769: outdoors the ramp is built (quickfort Cr) on the landing floor
+  lever_build = {'gate'},                         -- BUG-774: one lever (quickfort Tl) on a Kern+ floor tile for a bridge whose levers all lie outside
   rescue_ramp = {'seal'},                          -- BUG-769: one ramp on a plain wall tile beside a one-level drop with stranded citizens
   cancel_stray_job = {'seal'},                     -- BUG-751: an outdoor errand whose target has no way back to drink and food
   cancel_link_job = {'gate'}, labor_set = {'economy'},          -- BUG-546, BUG-547
@@ -497,6 +498,8 @@ C.STATE_SPEC = obj({
                ts = str(200), tt = NAT,    -- BUG-481: the trap shortfall R0 `traps_short` names, the trap target for the expected siege
                rg = arr(str(24), 0, 8),    -- BUG-478: the bridges with no linked lever inside the refuge (no R0 blocker)
                ll = arr(str(24), 0, 8),    -- BUG-712: the bridges with no linked lever at all (R0 `levers:<B>`)
+               lo = arr(str(24), 0, 8),    -- BUG-774: the bridges whose linked levers all lie outside Kern+ and the refuge (R0 `lever_outside`)
+               uh = NAT,                   -- BUG-776: max-pop held at this population (R0 blocked on a deadly blocker, citizens outside Kern+)
                as = str(120),              -- BUG-601: the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                lw = str(200),              -- BUG-634: what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
                rp = str(120)}),            -- BUG-653: the refuge has no pre-plug (no R0 blocker): not trusted against building destroyers

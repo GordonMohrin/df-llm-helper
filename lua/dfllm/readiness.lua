@@ -59,6 +59,12 @@ M.LEVERS_EVERY = 1200    -- FR-70: lost levers are looked for daily (a few findA
 -- days between those wakes, the citizens from which the freeze applies (0 = never), real seconds between the wakes
 M.PERIM = {escalate_days = 2, escalate_every = 5, hold_pop = 30}
 M.PERIM_LIM = {escalate_days = {0, 30}, escalate_every = {1, 30}, hold_pop = {0, 250}}
+-- BUG-776 (Run 16a i1 Basementflew y539-y544: pop 39 -> 52 between two sieges while R0 stood UNREADY with refuge_dry / audit_fail, 35 of 52
+-- citizens outside Kern+ at the next ARRIVAL, 45 lost in the two sieges): while R0 fails in PEACE on a blocker that costs lives in a siege
+-- (UNSAFE_FLAGS) and `outside` citizens (at least UNSAFE.share % of the population, at least UNSAFE.outside) stand outside Kern+, a fort of
+-- UNSAFE.hold_pop citizens or more keeps max-pop where it is (ceiling why 'unsafe'); the hold ends when the blockers are gone
+M.UNSAFE = {hold_pop = 30, outside = 10, share = 25}
+local UNSAFE_FLAGS = {refuge_dry = true, audit_fail = true, lever_outside = true}
 M.PERIM_WALL_S = 300
 M.MIN_LEVERS, M.TRAPS, M.METAL, M.R2_SOLDIERS = 2, 30, 20, 8
 M.STOCK_HYST = 90        -- % of a stock minimum that keeps R2 once reached (no flapping)
@@ -750,6 +756,18 @@ local function evaluate(K, why)
       rt.rlg = #rl > 0 and rl or nil
     end
   end
+  -- BUG-774: a bridge whose linked levers all lie outside Kern+ and the refuge (PEACE only: a fight changes the lists): R0 blocker, the DECISION
+  -- `lever_outside` and gate's own lever inside Kern+ (gate.home_step). Outside PEACE the last answer stands.
+  if K.mode() == 'PEACE' then
+    local okh, lh = K.call('gate', 'lever_home')
+    local lo, loh = {}, {}
+    for b, e in pairs(okh and type(lh) == 'table' and lh or {}) do
+      if not lost[b] and type(e) == 'table' then lo[#lo + 1], loh[b] = b, e end
+    end
+    table.sort(lo)
+    rt.lo, rt.loh = #lo > 0 and lo or nil, #lo > 0 and loh or nil
+  end
+  if rt.lo then f1[#f1 + 1] = 'lever_outside' end
   -- BUG-481: the trap shortfall for the siege this fort expects
   rt.tshort, rt.tshort_s = nil, nil
   local cit1 = type(cu) == 'table' and int(cu.cit) or nil
@@ -889,6 +907,19 @@ local function evaluate(K, why)
     rt.phold = math.max(st.phold, cit0 + M.growth_room(cit0))
     rt.psoft = true
   end
+  -- BUG-776: no growth while R0 fails on a blocker that kills in a siege and a good part of the fort works outside Kern+ (PEACE only)
+  if K.mode() == 'PEACE' then
+    local unsafe = false
+    for _, f in ipairs(f1) do if UNSAFE_FLAGS[f] then unsafe = true; break end end
+    local out = type(cu) == 'table' and int(cu.outside) or nil
+    if not unsafe then
+      if st.uh then st.uh, dirty = nil, true end
+    elseif not st.uh and cit0 and cit0 >= M.UNSAFE.hold_pop and out and out >= M.UNSAFE.outside and out * 100 >= cit0 * M.UNSAFE.share then
+      st.uh, dirty = cit0, true
+      K.log('warn', 'readiness: max-pop held at %d: R0 blocked (%s) and %d of %d citizens stand outside Kern+', cit0, table.concat(f1, ','), out, cit0)
+    end
+  end
+  rt.uhold = st.uh
   -- R2
   local f2 = {}
   local pass, last, mech = drills(K)
@@ -1017,7 +1048,7 @@ function M.hold_text(K)
   -- (rt.gate_cap, set with cap_why), not st.cap, the max-pop last written, which is the old one until the next apply_cap
   local w = rt and rt.cap_why
   local n = rt and rt.gate_cap or st.cap
-  if (w == 'plan' or w == 'open_perimeter' or w == 'defense_short') and n then
+  if (w == 'plan' or w == 'open_perimeter' or w == 'defense_short' or w == 'unsafe') and n then
     parts[#parts + 1] = string.format('%s %d%s', w, n, ((w == 'open_perimeter' and rt.psoft) or (w == 'defense_short' and rt.dsoft)) and '+' or '')
   end
   return #parts > 0 and cut(table.concat(parts, ', '), 40) or nil
@@ -1036,6 +1067,7 @@ function M.ceiling(K, lvl)
   local c0 = c
   if rt and rt.phold and rt.phold < c then c, why = rt.phold, 'open_perimeter' end     -- FR-70
   if rt and rt.dhold_pop and rt.dhold_pop < c then c, why = rt.dhold_pop, 'defense_short' end   -- BUG-481
+  if rt and rt.uhold and rt.uhold < c then c, why, c0 = rt.uhold, 'unsafe', math.min(c0, rt.uhold) end   -- BUG-776
   -- BUG-742 (Run 16a i1 y509-y524: 'max-pop 42 (open_perimeter)' / '43 (defense_short)' / '41' alternating for years as the population moved by
   -- one): two holds within hold_band citizens of each other are one number, the higher (the lower one binds the same growth)
   if rt and rt.phold and rt.dhold_pop and (why == 'open_perimeter' or why == 'defense_short') then
@@ -1347,6 +1379,8 @@ function M.init(K)
   st.dgk, st.dgh = type(p.dgk) == 'string' and p.dgk or nil, int(p.dgh)
   st.rlq = int(p.rlq)                                         -- BUG-478: the last refuge_levers question
   st.llq = int(p.llq)                                         -- BUG-712: the last bridge_levers question
+  st.loq = int(p.loq)                                         -- BUG-774: the last lever_outside question
+  st.uh = int(p.uh)                                           -- BUG-776: the population max-pop is held at (R0 blocked, citizens outside)
   st.rdt, st.rdq = int(p.rdt), int(p.rdq)                     -- BUG-766: refuge_dry seen since, the last refuge_dry question
   st.pw = type(p.pw) == 'string' and p.pw:sub(1, 60) or nil
   st.nt, st.wn = int(p.nt), int(p.wn)                         -- review fix merge16: the newest opening, ways in counted
@@ -1522,6 +1556,41 @@ local function ask_leverless(K, now)
          {id = 'bridge_levers', q = cut(q, 200), bridge = rt.llg[1], cmds = cmd and {cmd} or nil, cause = cause, n = free, why = why})
 end
 
+-- BUG-774: DECISION_NEEDED lever_outside (A), once per DEF.ask_days game days in PEACE while a bridge's linked levers all lie outside Kern+ and the
+-- refuge (R0 `lever_outside`): what happens in a siege and what gate does about it (gate.lever_home: a lever of its own on a Kern+ floor tile,
+-- 1 mechanism + 2 for the link); when gate found no tile or quickfort refused the question names the manual way
+local function ask_leverout(K, now)
+  if not rt.lo or K.mode() ~= 'PEACE' or now - rt.boot < M.UNREADY_SETTLE then return end
+  if st.loq and now - st.loq < M.DEF.ask_days * 1200 then return end
+  local names, cause, e = table.concat(rt.lo, ','), nil, nil
+  for _, b in ipairs(rt.lo) do
+    local x = rt.loh and rt.loh[b]
+    if type(x) == 'table' and (cause == nil or x.cause ~= 'designated') then cause, e = x.cause, x end
+  end
+  if not cause or cause == 'unread' or cause == 'no_act' then return end        -- gate has not looked yet: ask next time
+  st.loq, dirty = now, true
+  local okm, ms = K.call('economy', 'mech_state')
+  local free = okm and type(ms) == 'table' and int(ms.free) or 0
+  local pl = #rt.lo == 1
+  local at = e and type(e.at) == 'table' and table.concat(e.at, ',') or '?'
+  local head = string.format('bridge%s %s: all %s linked lever%s lie%s outside Kern+ (first at %s): in a siege nobody inside the walls can pull %s and ' ..
+                             'the pullers walk out to the hostiles', pl and '' or 's', names, e and tostring(e.n) or '?', (e and e.n == 1) and '' or 's',
+                             (e and e.n == 1) and 's' or '', at, pl and 'it' or 'them')
+  local q, cmd
+  if cause == 'designated' then
+    q = string.format('%s; a lever inside Kern+ is designated: it waits for a mechanism (%d free) and its link for 2 more, gate links it by itself', head, free)
+  elseif cause == 'no_tile' then
+    q = string.format('%s; gate found no free floor tile inside Kern+ near the bridge (%s): build a lever on a Kern+ floor tile by hand and link it, ' ..
+                      'or re-site the core', head, e and tostring(e.why or '') or '')
+    cmd = 'bp.place tpl=fortcore site=same stage=3 retrofit=3'
+  else
+    q = string.format('%s; quickfort refused the lever tile (%s): build one inside Kern+ by hand and link it', head, e and tostring(e.why or '') or '')
+    cmd = [[dfllm cmd inspect '{"what":"defense"}']]
+  end
+  K.emit('DECISION_NEEDED', 'A', cut(cmd and (q .. ': ' .. cmd) or q, 200),
+         {id = 'lever_outside', q = cut(q, 200), bridge = rt.lo[1], cmds = cmd and {cmd} or nil, cause = cause, n = free})
+end
+
 -- BUG-742 (Run 16a i1 Basementflew y509-y524: 'defense_short 43' for 15 years with traps 0 < 20 and armor worn 28 %, no stone, no metal, no
 -- migrants for 539 days; nobody was told what would end it, and the first answer here claimed 'room for a wave is open' when it was not):
 -- DECISION_NEEDED defense_gap (A) once the defence hold has stood DEF.grace_days, in PEACE; again when the kind of gap changes, the hold is raised
@@ -1605,6 +1674,7 @@ function M.step(K, budget, ctx)
   end
   refresh(K, 'check')
   ask_reflevers(K, now)
+  ask_leverout(K, now)
   ask_leverless(K, now)
   ask_defense(K, now)
   ask_refuge_dry(K, now)
@@ -1646,6 +1716,8 @@ function M.state(K)
   if rt.rp then r.rp = rt.rp end                              -- BUG-653: the refuge has no pre-plug against building destroyers
   if rt.rlg then r.rg = rt.rlg end                            -- BUG-478: the bridges without a refuge lever
   if rt.llg then r.ll = rt.llg end                            -- BUG-712: the bridges without any linked lever (R0 `levers:`)
+  if rt.lo then r.lo = rt.lo end                              -- BUG-774: the bridges whose linked levers all lie outside Kern+ (R0 `lever_outside`)
+  if rt.uhold then r.uh = rt.uhold end                        -- BUG-776: max-pop held at this population (R0 blocked, citizens outside)
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
 end
 

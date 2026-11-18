@@ -8020,6 +8020,26 @@ function M.bp_params(K, id)
   return type(d) == 'table' and type(d.params) == 'table' and d.params or nil
 end
 
+-- BUG-774 (gate.lever_home): `tiles` ({{x,y,z},...}) are added to the manifest lever list of the existing bridge `name` (no new
+-- bridge, role and footprint untouched; at most 12 levers, no duplicates). Returns the number of tiles added, or false and why.
+function M.add_levers(K, name, tiles)
+  local man = K.manifest()
+  local b = type(man.bridges) == 'table' and man.bridges[name]
+  if type(b) ~= 'table' or type(b.fp) ~= 'table' then return false, 'no bridge ' .. tostring(name) end
+  local list = type(b.levers) == 'table' and b.levers or {}
+  local before = #list
+  local add = {}
+  for _, p in ipairs(type(tiles) == 'table' and tiles or {}) do
+    if type(p) == 'table' and math.tointeger(p[1]) and math.tointeger(p[2]) and math.tointeger(p[3]) then
+      add[#add + 1] = {math.tointeger(p[1]), math.tointeger(p[2]), math.tointeger(p[3])}
+    end
+  end
+  b.levers = append_unique(list, add, 12)
+  local n = #b.levers - before
+  if n > 0 then K.persist.set('manifest', man) end
+  return n
+end
+
 -- WP7/WP8 (care): projects of a template that are not done yet (capacity requests wait for them; BUG-037: not parked)
 function M.pending(K, tpl)
   local n = 0

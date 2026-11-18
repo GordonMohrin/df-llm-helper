@@ -307,6 +307,10 @@ def line_unready(ctx: Ctx, cmds: bool = True) -> str:
     if ll:                                     # BUG-712: bridges no lever of which is linked: gate cannot raise or lower them
         out.append(f"NO LINKED LEVER on {','.join(str(x) for x in ll)}: gate cannot move them (GATE_FAIL no_lever); "
                    "DECISION bridge_levers names the cause and the command")
+    lo = r.get("lo") if isinstance(r.get("lo"), list) else []
+    if lo:                                     # BUG-774: every linked lever of the bridge lies outside Kern+: nobody inside can pull it
+        out.append(f"LEVERS OUTSIDE Kern+ on {','.join(str(x) for x in lo)}: in a siege nobody inside the walls can pull them; "
+                   "gate builds its own lever inside Kern+ (DECISION lever_outside names the state)")
     off = files.auto_seal_off(ctx.dir, n if isinstance(n, int) else 0) if getattr(ctx, "dir", None) else None
                                                # DECISIONS 2: follow --no-auto places nothing
     if off:
@@ -509,7 +513,7 @@ def pop_diag(ctx: Ctx) -> str:
 def migrant_cap_note(ctx: Ctx, cit: int) -> str:
     """BUG-533 (Run 16b-d i2/i3/i4: no migrant wave for years, nobody could say whether max-pop was the cause): pop-control's game
     cap is min(max-pop, citizens + wave-size), so a max-pop at or under the citizens lets no wave in. Names the hold that binds
-    (pop.hold: 'plan 33', 'open_perimeter 32+', 'defense_short 33', 'player 25 ...') or says max-pop is NOT the cause."""
+    (pop.hold: 'plan 33', 'open_perimeter 32+', 'defense_short 33', 'unsafe 50', 'player 25 ...') or says max-pop is NOT the cause."""
     p = ctx.s.get("pop") or {}
     cap = p.get("cap")
     if not isinstance(cap, int):

@@ -91,6 +91,7 @@ ACT = {
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
     "cancel_link_job": ["gate"],                   # BUG-546: the kernel's own unworked link job of a lever, taken down to link again
     "rescue_ramp_build": ["seal"],                 # BUG-769: outdoors the ramp is built (quickfort `Cr`) on the landing floor under a tree-crown stand
+    "lever_build": ["gate"],                       # BUG-774: one lever (quickfort `Tl`) on a Kern+ floor tile for a bridge whose levers all lie outside
     "rescue_ramp": ["seal"],                       # BUG-769: one ramp dug on a plain wall tile beside a one-level drop with stranded citizens
     "cancel_stray_job": ["seal"],                  # BUG-751: one outdoor errand of a citizen whose target lies on a walk group with no drink and food
     "labor_set": ["economy"],                      # BUG-546/547: Mechanic labor on for one citizen, farming off for the manager
@@ -1096,6 +1097,9 @@ STATE = Obj(
                            # BUG-481: ts = the trap shortfall R0 `traps_short` names, tt = the trap target for the siege the fort
                            # expects; BUG-478: rg = the bridges with no linked lever inside the refuge (no R0 blocker)
                            "ts": Str(maxbytes=200), "tt": NAT, "rg": Arr(Str(maxbytes=24), hi=8), "ll": Arr(Str(maxbytes=24), hi=8),
+                           # BUG-774: lo = the bridges whose linked levers all lie outside Kern+ and the refuge (R0 `lever_outside`);
+                           # BUG-776: uh = max-pop held at this population (R0 blocked, citizens outside Kern+)
+                           "lo": Arr(Str(maxbytes=24), hi=8), "uh": NAT,
                            # BUG-601: as = the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                            "as": Str(maxbytes=120),
                            # BUG-634: lw = what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
