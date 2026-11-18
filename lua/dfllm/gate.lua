@@ -128,6 +128,7 @@ M.APPROACH_NEAR, M.APPROACH_HOLD, M.APPROACH_CLOSE = 30, 300, 12
 -- hostile is at the footprint in ~160 ticks, no citizen beside it gets across and away in that time, so the citizen is locked out (he may live:
 -- the cave dragon needs a door) rather than the whole fort breached (pop 52 -> 7). Only a unit ON the footprint still holds the raise.
 M.APPROACH_NOW = 20
+M.STILL_NOW = 60           -- ... for the units beside the footprint that have stood on one tile this many ticks (a walker beside it is no stander)
 M.CLOSING_TILES, M.CLOSING_AGE, M.CLOSING_KEEP = 4, 150, 900
 -- BUG-621: a raise forced by an approach stays forced this many ticks after the hostile last qualified (it may step out of view or halt while
 -- the slow lever pull is under way); a unit ON the footprint still holds it
@@ -1876,6 +1877,7 @@ end
 -- (returns the holders, the hostile's distance and the units beside it). BUG-310: a unit ON the footprint holds a forced
 -- raise too ('next to' is not 'on'). An unknown census (hold.unknown) holds every pull, forced or not.
 local function holders(K, name, fp, sc, dir)
+  local near_now, drop = false, nil              -- BUG-775: the hold of the units standing beside the footprint ends (below)
   local hold = within(sc, M.MARGIN)
   if not sc then hold.unknown = true end
   -- BUG-335: a unit walking onto the footprint holds it like one on it (forced or not)
@@ -1892,6 +1894,16 @@ local function holders(K, name, fp, sc, dir)
     local d = fn > 0 and hostile_dist(K, name, fp) or -1
     local rr = rt[name]
     if rr then rr.fz_b = nil end
+    local nowt = K.now().tick
+    if rr then                                     -- BUG-775: where each unit beside the footprint stands, and since when
+      local old, new = rr.bst or {}, {}
+      for _, e in ipairs(hold) do
+        local key = string.format('%s,%s,%s', tostring(e.x), tostring(e.y), tostring(e.z))
+        local o = old[e.id]
+        new[e.id] = (o and o.p == key) and o or {p = key, t = nowt}
+      end
+      rr.bst = new
+    end
     -- BUG-587: a hostile approaching (within approach_near) and the raise held for approach_hold ticks: forced like one at the gate
     if fn > 0 and d >= 0 and rr then
       local now = K.now().tick
@@ -1899,10 +1911,14 @@ local function holders(K, name, fp, sc, dir)
       if d > fn then
         local an, ah, ac, aw = M.approach_cfg(K)
         local held = (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
-        -- BUG-775: a hostile within approach_now tiles ends the hold whatever the wait so far and whether it closes
-        if (aw > 0 and d <= aw) or (held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl))) then
+        if held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl)) then
           fn, rr.fz_b = d, held
           rr.fz_until, rr.fz_d = now + M.APPROACH_STICKY, d
+        elseif aw > 0 and d <= aw then
+          -- BUG-775: a hostile within approach_now tiles ends the hold of the units STANDING beside the footprint (STILL_NOW ticks on one
+          -- tile: they cannot cross and get away in the ~160 ticks he needs) whatever the wait so far and whether he closes; a unit ON it, one
+          -- walking onto it (the crossers: CROSS_REACH steps) or one beside it that keeps moving still holds the raise, so nobody is crushed
+          near_now, rr.fz_b = true, held
         end
       end
     end
@@ -1918,6 +1934,15 @@ local function holders(K, name, fp, sc, dir)
       else
         rr.fz_until, rr.fz_d = nil, nil
       end
+    end
+    if near_now and not (d >= 0 and d <= fn) then
+      local keep = {unknown = hold.unknown}
+      drop = {}
+      for _, e in ipairs(hold) do
+        local o = rr and rr.bst and rr.bst[e.id]
+        if e.d == 0 or cby[e.id] or not (o and nowt - o.t >= M.STILL_NOW) then keep[#keep + 1] = e else drop[#drop + 1] = e end
+      end
+      hold = keep
     end
     if d >= 0 and d <= fn then
       local on, beside, seen = {unknown = hold.unknown}, {}, {}
@@ -1985,6 +2010,8 @@ local function holders(K, name, fp, sc, dir)
       if walk or not lim or (e.path or 0) <= lim then hold[#hold + 1] = e end
     end
   end
+  -- BUG-775: the raise goes ahead past the citizens beside the footprint (GATE_FORCED names them once the pull has a worker)
+  if drop and #drop > 0 and #hold == 0 and not hold.unknown then return hold, hostile_dist(K, name, fp), drop end
   return hold, nil
 end
 

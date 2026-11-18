@@ -1016,9 +1016,7 @@ local function citizen_held(K, b, d)
   if okf and math.type(fn) == 'integer' and fn > 0 and d and d >= 0 and d <= fn then return false end   -- a hostile this close: a real breach
   -- BUG-587: a hostile within approach_near tiles and the hold older than approach_hold: gate raises past our own people now (GATE_FORCED),
   -- the hold is no excuse for a bridge that is still down (a unit on the footprint was handled above)
-  local oka, an, ah, ac, aw = K.call('gate', 'approach_range')
-  -- BUG-775: a hostile within approach_now tiles ends the hold at once (gate raises past the citizens beside the footprint): no excuse
-  if oka and math.type(aw) == 'integer' and aw > 0 and d and d >= 0 and d <= aw then return false end
+  local oka, an, ah, ac = K.call('gate', 'approach_range')
   if oka and math.type(ah) == 'integer' and held >= ah and d and d >= 0 and math.type(ac) == 'integer' and ac > 0 and d <= ac then
     return false      -- (a hostile only closing in, 'approach_near', is not known here: gate raises for it at once anyway)
   end

@@ -225,13 +225,13 @@ T.test('BUG-587 (4): a stream of citizens over O1, B1 and B2 and two standing be
   end
 end)
 
-T.test('BUG-587 (5): gate.approach_cfg: bad values fall back to the defaults; approach_near 0 and approach_close 0 end the bounded hold (B1 stays down)', function()
+T.test('BUG-587 (5): gate.approach_cfg: bad values fall back to the defaults; approach_near, approach_close and approach_now 0 end the bounded hold (B1 stays down)', function()
   local g = require('dfllm.gate')
   local K = {cfg = {reflex = {v = 2, gate = {approach_near = 'x', approach_hold = -5, approach_close = 500}}}}
-  local n, h, c = g.approach_cfg(K)
-  T.eq({n, h, c}, {g.APPROACH_NEAR, g.APPROACH_HOLD, g.APPROACH_CLOSE})
+  local n, h, c, w = g.approach_cfg(K)
+  T.eq({n, h, c, w}, {g.APPROACH_NEAR, g.APPROACH_HOLD, g.APPROACH_CLOSE, g.APPROACH_NOW})
   local W = world{x0 = 140, x1 = 59, walkers = {stander(864, 49)}}
-  W.K.cfg.reflex = {v = 2, gate = {approach_near = 0, approach_close = 0}}
+  W.K.cfg.reflex = {v = 2, gate = {approach_near = 0, approach_close = 0, approach_now = 0}}   -- BUG-775: approach_now 0 too
   run2(W, 2400)
   T.eq(#W.crushed, 0)
   T.eq(#flips_to(W, 'B1', 'up'), 0, 'the old rule: B1 waits for the citizen however near the hostile comes')

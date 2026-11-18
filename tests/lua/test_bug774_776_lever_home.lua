@@ -298,6 +298,24 @@ T.test('BUG-775: a hostile 18 tiles from B1 (parked, not closing) and a citizen 
   T.eq(S.bstate(W2, 'B1'), 'up', 'B1 rises once he is away')
 end)
 
+T.test('BUG-775: a citizen PACING beside B1 (a new tile every 27 ticks) keeps the raise held with the hostile 18 tiles out: only a standing citizen is ' ..
+       'dropped (he could step onto the moving bridge); once he stands still 60 ticks B1 rises', function()
+  local units = S.fort_units()
+  units[#units + 1] = S.cit(7, 49, 40)
+  for _, u in ipairs(S.army(3, 50, 22, 300)) do units[#units + 1] = u end
+  local route = {{49, 40}}
+  for k = 1, 30 do route[#route + 1] = (k % 2 == 1) and {49, 41} or {49, 40} end       -- 30 steps = ~810 ticks of pacing, then he stands
+  local W = setup{outside = false, mode = 'PEACE', units = units, noroom = true, walkers = {{id = 7, route = route, i = 1}}}
+  W.event('INVASION', {id = 301})
+  run(W, 700)
+  T.eq(S.bstate(W, 'B1'), 'down', 'he paces: B1 waits')
+  run(W, 1400)
+  T.eq(S.bstate(W, 'B1'), 'up', 'he stands: B1 rises')
+  local f = S.flips(W, 'B1')[1]
+  T.ok(f and f.tick - W.t_start >= 700, 'not before he stopped (+' .. tostring(f and f.tick - W.t_start) .. ')')
+  T.eq(#W.crushed, 0)
+end)
+
 T.test('BUG-775: a citizen ON the footprint still holds it with the hostile 10 tiles out; nothing is crushed', function()
   local units = S.fort_units()
   units[#units + 1] = S.cit(7, 51, 40)
