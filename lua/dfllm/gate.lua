@@ -122,11 +122,12 @@ M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with 
 M.APPROACH_NEAR, M.APPROACH_HOLD, M.APPROACH_CLOSE = 30, 300, 12
 -- BUG-775 (Run 16a i1 Basementflew y544 aut d82: GATE_FORCED B1 'a hostile 22 tiles from it and closing, held 506-569 ticks (approach_near 30)':
 -- four citizens stood beside B1 for 500+ ticks while a cave dragon and goblins came from 22 tiles out, B1 rose with them next to it and they
--- were killed at the bridge, 41,101,129): the hold of a raise for citizens merely beside the footprint ends at once when a hostile is within
--- APPROACH_NOW tiles (cfg gate.approach_now, 0 = off), closing or not, held long or not. Why 20: a citizen walks ~RACE_CIV_TPT (24) ticks a
--- tile, a hostile ~RACE_FOE_TPT (8), the pull takes the lever latency (100-250 ticks) and the bridge ~100 ticks to move: from 20 tiles the
--- hostile is at the footprint in ~160 ticks, no citizen beside it gets across and away in that time, so the citizen is locked out (he may live:
--- the cave dragon needs a door) rather than the whole fort breached (pop 52 -> 7). Only a unit ON the footprint still holds the raise.
+-- were killed at the bridge, 41,101,129): the hold of a raise for citizens STANDING beside the footprint (STILL_NOW below) ends at once when a
+-- hostile is within APPROACH_NOW tiles (cfg gate.approach_now, 0 = off), closing or not, held long or not. Why 20: a citizen walks ~RACE_CIV_TPT
+-- (24) ticks a tile, a hostile ~RACE_FOE_TPT (8), the pull takes the lever latency (100-250 ticks) and the bridge ~100 ticks to move: from 20
+-- tiles the hostile is at the footprint in ~160 ticks, no citizen beside it gets across and away in that time, so the citizen is locked out
+-- (he may live: the cave dragon needs a door) rather than the whole fort breached (pop 52 -> 7). A unit ON the footprint, one walking onto it
+-- (crossers) and one beside it that keeps moving still hold the raise (tests/lua/test_bug380_siege_traffic.lua: a walker crushed otherwise).
 M.APPROACH_NOW = 20
 M.STILL_NOW = 60           -- ... for the units beside the footprint that have stood on one tile this many ticks (a walker beside it is no stander)
 M.CLOSING_TILES, M.CLOSING_AGE, M.CLOSING_KEEP = 4, 150, 900
