@@ -852,11 +852,20 @@ local function rescue_step(K, a, g, now)
                           sp.job and (', job ' .. sp.job) or '')
       d.sep, d.job = {sp.pos[1], sp.pos[2], sp.pos[3]}, sp.job
     end
+    -- BUG-769 (Run 16d i4 Pagedsculpture y407: a citizen on a one-level drop, thirst 51,860, 'no rescue' and no way back dug): in quiet
+    -- PEACE a safe ramp is designated beside the drop (seal.rescue_dig); the text says what was done or why not
+    local ramp
+    local okr, rr = K.call('seal', 'rescue_dig', e.pos, calm)
+    if okr and type(rr) == 'table' and type(rr.txt) == 'string' then
+      ramp = rr.txt
+      d.ramp, d.ramp_state = rr.txt, rr.state
+      if rr.pos then d.ramp_at = {rr.pos[1], rr.pos[2], rr.pos[3]} end
+    end
     local eids, etoks = episode(e)                         -- BUG-661: one alarm per episode, unless it is worse
     table.insert(etoks, 1, why)
     table.insert(etoks, 1, 'refused')
-    stranded(K, 'refused', string.format('%s: no rescue (%s)%s%s', base, why, sep and ('; cut off by ' .. sep) or '',
-             fix and ('; fix: ' .. fix) or ''), d, eids, etoks)
+    stranded(K, 'refused', string.format('%s: no rescue (%s)%s%s%s', base, why, sep and ('; cut off by ' .. sep) or '',
+             ramp and ('; ' .. ramp) or '', fix and ('; fix: ' .. fix) or ''), d, eids, etoks)
     -- BUG-417: no bridge brings it (drink or food), or the bridge rescue is refused while they are past the fight mark
     if (e.need.drink or e.need.food) and (not bs or e.thirst >= M.FIGHT_THIRST or e.hunger >= M.FIGHT_HUNGER) then
       dry_decision(K, e, now)

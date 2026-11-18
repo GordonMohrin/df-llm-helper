@@ -1215,6 +1215,35 @@ local function impls(state)
     return true, n
   end
 
+  -- BUG-769 (Run 16d i4 Pagedsculpture y407: a citizen stranded on a one-level drop with no way back, thirst past 50,000): ONE ramp
+  -- designated (quickfort dig mode key `r`, priority 2) on the wall tile pos, the way back from the drop. The caller (seal.rescue_dig)
+  -- picked a revealed natural wall tile beside the two walk groups, with no liquid, aquifer or open shaft within 3 tiles; act reads no
+  -- tiles. Returns ok, designated tiles (0 = quickfort skipped the tile: refused).
+  function I.rescue_ramp(pos)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    local ok, stats = I.quickfort({mode = 'dig', data = {[0] = {[0] = {[0] = 'r'}}}, pos = {x, y, z}, priority = 2})
+    if not ok then return false, stats end
+    local n = type(stats) == 'table' and int(stats.dig_designated) or nil
+    if n == 0 then return false, 'quickfort designated no ramp there' end
+    return true, n or 1
+  end
+
+  -- BUG-769 (verifier): outdoors, where no wall exists to dig, ONE ramp BUILT (quickfort build mode key `Cr`, a construction) on the open floor
+  -- tile pos, the way back up to a citizen on a tree crown one level above. The caller (seal.rescue_build) checked the tile; a Mason needs a
+  -- boulder or block. Returns ok, designated buildings (0 = quickfort skipped the tile: refused).
+  function I.rescue_ramp_build(pos)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    local ok, stats = I.quickfort({mode = 'build', data = {[0] = {[0] = {[0] = 'Cr'}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local n = type(stats) == 'table' and int(stats.build_designated) or nil
+    if n == 0 then return false, 'quickfort designated no ramp there' end
+    return true, n or 1
+  end
+
   -- zones screen > add zone > Water Source (BUG-324, Run 15 Inkintense/Earthboat: the water scan found deep water with a
   -- reachable bank or a reachable floor beside the open tile above it, nobody zoned it, so no water was accepted and the
   -- hospital waited for years): a 1x1 Water Source zone named dfllm-water on the water tile pos, quickfort zone mode

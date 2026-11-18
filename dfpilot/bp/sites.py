@@ -223,7 +223,7 @@ def _near_point(cands: list, tpl: str, near, within: int | None, at) -> list:
 
 def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None = None,
          n: int = 3, water: dict | None = None, near=None, within: int | None = None, at=None,
-         free=None, carry: bool | None = None) -> list[dict]:
+         free=None, carry: bool | None = None, calm: bool = True) -> list[dict]:
     """Top `n` sites, best first: [{id:'S1'.., anchor:[x,y,z], rot, score:int, why:str}].
     Room templates need `manifest` (the fort manifest, `inspect manifest`) with zones.Z4.
     `water` (BUG-040, WATER_TPLS only): {src: [[x,y,z]..] accepted sources, near, lbl?: labels parallel to src,
@@ -234,7 +234,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     candidate -> bool (cmd: no clash with a placed project); only free candidates are kept, ValueError when none is."""
     if tpl == "hospital" and carry is None and water is not None and not (params or {}).get("surface") \
             and not (params or {}).get("furnish"):
-        return _rank_hospital(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-763: compact room, water carrier route
+        return _rank_hospital(snap, tpl, params, manifest, n, water, near, within, at, free, calm)      # BUG-763: compact room, water carrier route
     if tpl in mine.BUILD and "depth" not in (params or {}):
         return _rank_depths(snap, tpl, params, manifest, n, water, near, within, at, free)      # BUG-553: a smaller depth when 12 has none
     if tpl in mine.BUILD and "arm" not in (params or {}):
@@ -600,14 +600,21 @@ def _near_water(cands: list, tpl: str, p: dict, water: dict, carry: bool = False
     return out
 
 
-def _rank_hospital(snap, tpl, params, manifest, n, water, near, within, at, free) -> list[dict]:
+def _rank_hospital(snap, tpl, params, manifest, n, water, near, within, at, free, calm=True) -> list[dict]:
     """BUG-763 (Run 16a i1 Basementflew y530-y534: 'no valid site (1201 anchors, 4804 placements: 3842 no open door tile, 962 room meets rock,
     0 fit; nearest water zone 23 tiles from Tiefe+)', patient 27129 died of thirst with the water 91 tiles away): when the 7x5 room has no
     site (no room fits the rock round the core, or none lies within water.near of accepted water) the ladder goes on: the compact 5x4
     room (up to 5 beds; p.compact given is the player's and stays); with p.carry = 1 (asked for, `bp sites hospital carry=1`: plan check and the
     kernel's `served` keep their 30 tiles) also a site up to HOSPITAL_CARRY_MAX tiles from accepted water with a water carrier route
     (`water.carry`). Order: room near water, compact near water, room with carriers, compact with carriers. A compact
-    site carries `compact` = 1 (cmd.site_params puts it into the document). All empty: the first error, with the others after it."""
+    site carries `compact` = 1 (cmd.site_params puts it into the document). All empty: the first error, with the others after it.
+    BUG-770 (Run 16a i1 Basementflew y540: 'no valid site (3965 no door tile, 1015 rock/water, 0 fit)' even with the compact room, two patients dead of
+    thirst, a hospital possible on the open floor beside the fort): when no dug room fits the rock (the funnel finds no placement: "no valid site"), the ladder goes on by itself
+    to the hospital on open surface floor (`surface` = 1, nothing dug, ranked as `bp sites hospital surface=1`; the site carries `surface` = 1
+    and says so in `why`; p.surface = 0 or a given p.compact forbids it). A far carrier route stays the player's call (`carry=1`): the kernel
+    takes a hospital zone more than water.near from accepted water as dry. SIEGE GUARD (BUG-770 verifier): `calm` False (cmd: the kernel's mode is
+    SIEGE / BREACH / RECOVERY now) forbids this last tier: patients lie outside the walls and cannot walk to the refuge, so the open floor is offered
+    in quiet PEACE only; the error says so."""
     base = dict(params or {})
     compacts = [base["compact"]] if "compact" in base else [0, 1]
     first, notes = None, []
@@ -632,10 +639,21 @@ def _rank_hospital(snap, tpl, params, manifest, n, water, near, within, at, free
                 tag = ("compact room 5x4, up to 5 beds (no 7x5 room fits" + (" near accepted water" if not carry else "")
                        + "; BUG-763)") if auto else ""
                 return [{**x, **({"compact": 1} if auto else {}), "why": x["why"] + ("; " + tag if tag else "")} for x in got]
+    if first is not None and "no valid site" in str(first) and not calm and "surface" not in base and "compact" not in base:
+        notes.append("open surface floor: not offered during a siege / breach / recovery (the patients would lie outside the walls; ask again in quiet peace)")
+    if first is not None and calm and "no valid site" in str(first) and "surface" not in base and "compact" not in base and not base.get("furnish"):
+        try:                                                    # BUG-770: the last tier, the open floor beside the fort
+            got = rank(snap, tpl, {**base, "surface": 1}, manifest, n, water, near, within, at, free)
+        except ValueError as e:
+            notes.append("open surface floor: " + str(e).split(": ", 1)[-1][:160])
+        else:
+            if got:
+                return [{**x, "surface": 1, "why": x["why"] + "; HOSPITAL ON OPEN SURFACE FLOOR (nothing dug: no dug room fits the rock round the core; "
+                         "the patients lie outside the walls, exposed in a siege; `surface=0` forbids it; BUG-770)"} for x in got]
     if first is None:
         return []
-    hint = "" if base.get("carry") else (f"; `hospital carry=1` also ranks sites up to {HOSPITAL_CARRY_MAX} tiles from accepted water with a "
-                                         "water carrier route")
+    hint = "" if "carry" in base else (f"; `hospital carry=1` also ranks sites up to {HOSPITAL_CARRY_MAX} tiles from accepted water with a "
+                                       "water carrier route")
     if notes:
         raise ValueError(f"{first} (also tried: " + "; ".join(notes[:3]) + f"{hint})") from None
     raise ValueError(f"{first} (the compact 5x4 room was tried too{hint})") from None

@@ -97,7 +97,7 @@ def test_a_dead_end_names_the_nearest_miss(fort, monkeypatch):
     man = copy.deepcopy(man)
     monkeypatch.setattr(sites, "_check", lambda *a, **k: None)                        # nothing fits, compact included
     with pytest.raises(ValueError) as e:
-        sites.rank(snap, "hospital", manifest=man, water={"src": [WELL], "near": 30})
+        sites.rank(snap, "hospital", {"surface": 0}, manifest=man, water={"src": [WELL], "near": 30})     # BUG-770: the open floor is forbidden
     msg = str(e.value)
     assert "nearest miss: anchor " in msg and "blocked tile(s) in its room" in msg, msg
     assert "compact 5x4 room was tried too" in msg or "also tried" in msg, msg

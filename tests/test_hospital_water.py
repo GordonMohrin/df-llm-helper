@@ -86,7 +86,7 @@ def test_water_config_mirrors_water_lua_and_validates(tmp_path):
     cfg = json.loads((ROOT / "config" / "baseline.json").read_text(encoding="utf-8"))
     assert cfg["water"] == {"patient_thirst": 25000, "hosp_remove": True, "remove_per_run": 8,
                             # BUG-054: the caregivers' scaling and the death-risk line
-                            "carers_per_patient": 1, "carers_min": 2, "carers_max": 8, "carers_urgent": 2,
+                            "carers_per_patient": 1, "carers_min": 2, "carers_max": 8, "carers_urgent": 2, "carers_far": 2,
                             "carers_per_run": 2, "carers_hold_days": 14, "dying_thirst": 60000,
                             "dying_every": 2400,
                             "give_stuck_days": 2,

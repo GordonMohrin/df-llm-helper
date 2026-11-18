@@ -150,6 +150,11 @@ M.DEFAULTS = {
   -- why=patient_water (at most every request_every, none while a cistern project is pending) and the GiveWater verdict names the
   -- distance. 0 = off
   patient_far = 40,
+  -- BUG-771 (Run 16a i1 Basementflew y534-y538: patients 27129 and 31512 over thirst 30,000 with 'GiveWater job running' and the nearest accepted
+  -- water 46-117 tiles away, both dead; the kernel only asked for a cistern every 28 days): a patient over thirst_watch farther than patient_far from
+  -- accepted water gets (1) a Water Source zone on the scan's nearest safe water that lies at least wz_gain tiles nearer to him than the accepted
+  -- source (wz_cadence applies), and (2) carers_far more caregivers (at most carers_max). 0 = off
+  wz_gain = 15, carers_far = 2,
   -- BUG-708 (Run 16b i2 Whirledrampart y430: a 200-day SIEGE lockdown, both core wells dry, the only accepted water a zone outside the
   -- walls, ~20 patients dead of thirst under 'hospital ok'): in a lockdown a source outside Kern+/the refuge/the alert burrows is
   -- no water for the hospital (it is dry: the zones go, patients drink from the stock), and with no source inside at all
@@ -1537,7 +1542,7 @@ function M.zone_cands(ws)
 end
 
 -- one run: nil, or {at, up, ok, txt} when a zone was painted (or refused) now
-function M.zone_found(K, c, r, p, now)
+function M.zone_found(K, c, r, p, now, near)
   if c.wz == false or not M.can('water_zone') or not st.ws then return nil end
   local mode = K.mode()
   if mode == 'BREACH' then return nil end
@@ -1559,7 +1564,20 @@ function M.zone_found(K, c, r, p, now)
   end
   local free = mode == 'PEACE' or mode == 'RECOVERY'
   local best
-  for _, cd in ipairs(M.zone_cands(st.ws)) do
+  local cands = M.zone_cands(st.ws)
+  if near then          -- BUG-771: only water that lies nearer to the patient than the accepted source by near.gain, nearest to him first
+    local keepc = {}
+    for _, cd in ipairs(cands) do
+      cd.pd = math.max(math.abs(cd.wt[1] - near.x), math.abs(cd.wt[2] - near.y), math.abs(cd.wt[3] - near.z))
+      if cd.pd <= near.limit then keepc[#keepc + 1] = cd end
+    end
+    table.sort(keepc, function(a, b)
+      if a.pd ~= b.pd then return a.pd < b.pd end
+      return k3(a.wt[1], a.wt[2], a.wt[3]) < k3(b.wt[1], b.wt[2], b.wt[3])
+    end)
+    cands = keepc
+  end
+  for _, cd in ipairs(cands) do
     local key = k3(cd.wt[1], cd.wt[2], cd.wt[3])
     if not tried[key] and not zoned(cd.wt) and not M.on_attack_path(K, cd.stand) and not M.on_attack_path(K, cd.wt) then
       local oko, sky = K.call('snapshot', 'outside_near', {cd.stand}, 0)
@@ -1579,13 +1597,34 @@ function M.zone_found(K, c, r, p, now)
   local out = {at = w, up = best.up, ok = ok and 1 or 0}
   if ok then
     out.txt = 'Water Source zone dfllm-water painted at ' .. where .. ': accepted after the next water run'
-    K.log('info', 'water: %s (no accepted water; %s)', out.txt, mode)
+    if near then
+      out.txt = trunc(string.format('Water Source zone dfllm-water painted at %s, %d tiles from patient %d (accepted water %s tiles): accepted '
+                                    .. 'after the next water run', where, best.pd, near.id, tostring(near.accepted or 'none')), 200)
+    end
+    K.log('info', 'water: %s (%s; %s)', out.txt, near and 'a patient far from accepted water' or 'no accepted water', mode)
   else
     out.txt = trunc(string.format('Water Source zone at %d,%d,%d refused: %s', w[1], w[2], w[3], tostring(n)), 100)
     K.log('warn', 'water: %s', out.txt)
   end
   p.wz = {at = json.array{w[1], w[2], w[3]}, up = best.up and 1 or 0, t = now, ok = out.ok}
   return out
+end
+
+-- BUG-771: the patient over thirst_watch farthest from accepted water (more than patient_far tiles, or none at all): {x, y, z, id, d, thirst},
+-- nil when none. `d` is nil when no source is accepted
+function M.far_patient(c, r)
+  local pf = math.tointeger(c.patient_far) or 0
+  if pf <= 0 then return nil end
+  local worst
+  for _, pt in ipairs(r.patients or {}) do
+    if pt.x and pt.thirst >= c.thirst_watch then
+      local d = M.source_dist(r, pt)
+      if not d or d > pf then
+        if not worst or pt.thirst > worst.thirst then worst = {x = pt.x, y = pt.y, z = pt.z, id = pt.id, d = d, thirst = pt.thirst} end
+      end
+    end
+  end
+  return worst
 end
 
 local function scan_done(K, c, sc, p)
@@ -3049,13 +3088,14 @@ end
 -- the plan of one run: {have, want, idle, added = {ids}, dropped = {ids}, err}. `over` = a patient is over thirst_alarm.
 -- Adds through act.work_detail (water must be an owner of it: feature detection) and only the kernel's own additions
 -- (p.cw: id -> tick) ever leave again
-function M.carers(K, c, r, p, now, over)
+function M.carers(K, c, r, p, now, over, far)
   p.cw = json.object(type(p.cw) == 'table' and p.cw or {})
   local np, have = #r.patients, #r.carers
   local want = 0
   if np > 0 and c.carers_max > 0 then
     want = math.max(c.carers_min, np * c.carers_per_patient)
     if over then want = want + c.carers_urgent end
+    if far then want = want + (math.tointeger(c.carers_far) or 0) end        -- BUG-771: the water is far, the round trip is long
     want = math.min(want, c.carers_max)
   end
   local out = {have = have, want = want, idle = r.carers_idle, added = {}, dropped = {}}
@@ -3710,6 +3750,14 @@ local function finish(K, c, r, p)
     if s.wet then wet = wet + 1 end
   end
   local wz = wet == 0 and M.zone_found(K, c, r, p, now) or nil      -- BUG-324: zone the water the scan found
+  -- BUG-771: a thirsty patient far from the accepted water: a nearer zone on scanned water, and more carers (below)
+  local far = M.far_patient(c, r)
+  if far and (not st.ws or now - st.ws.tick >= c.ws_every) and not st.scan then st.ws_want = true end      -- the water to zone comes from a scan
+  if not wz and far and wet > 0 and (math.tointeger(c.wz_gain) or 0) > 0 then
+    local lim = (far.d or 1000) - c.wz_gain
+    local okz, zz = pcall(M.zone_found, K, c, r, p, now, {x = far.x, y = far.y, z = far.z, id = far.id, limit = lim, accepted = far.d})
+    if okz then wz = zz else K.log('warn', 'water: zone near patient failed: %s', tostring(zz)) end
+  end
   -- buckets: the hospital's own wish, at least buckets_min, one more per patient
   local want = c.buckets_min
   for _, h in ipairs(r.hosp) do if h.want and h.want > want then want = h.want end end
@@ -3719,7 +3767,7 @@ local function finish(K, c, r, p)
   -- BUG-054: caregivers scale with the patients (before the cause text: it names what was added)
   local over_alarm = false
   for _, pt in ipairs(r.patients) do if pt.thirst > c.thirst_alarm then over_alarm = true end end
-  local cs = M.carers(K, c, r, p, now, over_alarm)
+  local cs = M.carers(K, c, r, p, now, over_alarm, far ~= nil)
   local after = cs.have_after or cs.have
   -- BUG-104: the game's GiveWater jobs, read once a run while a patient lies in a bed (their age is kept from the first
   -- run on, so 'stuck' is known when the alarm sounds); the diagnosis only when a patient is over the alarm

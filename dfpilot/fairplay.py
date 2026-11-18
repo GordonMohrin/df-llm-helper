@@ -319,7 +319,7 @@ WATER_LIM: dict = {
     "brook_min": (0, 7), "drink_far": (0, 400), "drink_far_d": (0, 400), "ws_redo": _TICKS,
     # BUG-054: caregivers (Orderlies) per patient, the bounds, the urgent extra, the additions a run, the hold in days;
     # the death-risk line of PATIENT_DYING and its cadence
-    "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20),
+    "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20), "carers_far": (0, 20), "wz_gain": (0, 200),
     "carers_per_run": (0, 20), "carers_hold_days": (0, 400), "dying_thirst": _THIRST, "dying_every": _TICKS,
     # BUG-104: a GiveWater job open (no worker) this many game days is 'stuck' in the patient_thirst / PATIENT_DYING cause
     "give_stuck_days": (1, 400),

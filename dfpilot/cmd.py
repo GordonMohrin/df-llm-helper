@@ -394,7 +394,7 @@ def _digest(doc) -> str:
 
 
 def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | None, water: dict | None = None,
-          where: dict | None = None, free=None) -> list:
+          where: dict | None = None, free=None, calm: bool = True) -> list:
     fn = load_bp("sites").rank
     try:
         names = inspect.signature(fn).parameters    # WP3 extensions; CONTRACTS §15 has rank(snap, tpl, params)
@@ -407,6 +407,8 @@ def _rank(snap: dict, tpl: str, params: dict | None, n: int, manifest: dict | No
         kw["water"] = water
     if "free" in names and free is not None:            # BUG-292: only sites free of placed projects
         kw["free"] = free
+    if "calm" in names and not calm:                    # BUG-770: no open-floor hospital while the fort is in SIEGE / BREACH / RECOVERY
+        kw["calm"] = False
     for k, v in (where or {}).items():                  # FR-78: near / within / at (bp.sites.rank extensions)
         if k in names and v is not None:
             kw[k] = v
@@ -502,8 +504,15 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
     manifest = manifest if manifest is not None else fort_manifest(save_dir)
     water = water_ctx(save_dir, tpl)
     free = _free_of_projects(save_dir, tpl, params)
+    calm = True
+    if tpl == HOSPITAL_TPL:
+        try:
+            from . import plan as _plan                      # plan imports this module: late, at call time
+            calm = (files.read_state(save_dir) or {}).get("mode") not in _plan.SIEGE_MODES
+        except (ImportError, OSError, ValueError, AttributeError):
+            calm = True
     try:
-        sites = _rank(snap, tpl, params, n, manifest, water, where, free)
+        sites = _rank(snap, tpl, params, n, manifest, water, where, free, calm)
     except BpError as e:
         sites = _aq_open_sites(save_dir, tpl, params, snap, manifest, n, where, free)      # BUG-602
         if not sites:
@@ -2808,6 +2817,8 @@ def site_params(tpl: str, params: dict | None, site: dict) -> dict | None:
         out = {**(out or {}), "arm": site["arm"]}
     if tpl == HOSPITAL_TPL and site.get("compact") == 1 and "compact" not in (params or {}):        # BUG-763: the compact room the site was ranked for
         out = {**(out or {}), "compact": 1}
+    if tpl == HOSPITAL_TPL and site.get("surface") == 1 and "surface" not in (params or {}):        # BUG-770: the open-floor hospital the site was ranked for
+        out = {**(out or {}), "surface": 1}
     return out
 
 
