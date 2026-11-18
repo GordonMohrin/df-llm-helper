@@ -124,8 +124,39 @@ def fmt_params(params: dict | None) -> str:
     return "".join(f" {k}={files.dumps(v) if not isinstance(v, str) else v}" for k, v in sorted((params or {}).items()))
 
 
+_SNAP_PIN: dict[str, str] = {}
+
+
+def pin_snapshot(save_dir: Path, sid: str | None) -> None:
+    """BUG-773: site ranking uses the snapshot `sid` (while it is still on disk) instead of the newest one; None releases the pin."""
+    if sid:
+        _SNAP_PIN[str(save_dir)] = sid
+    else:
+        _SNAP_PIN.pop(str(save_dir), None)
+
+
+def snapshot_by_id(save_dir: Path, sid: str) -> dict | None:
+    """The snapshot with this id still on disk (a file named for it, else a scan of snap/), None when it was pruned."""
+    for p in files.snap_paths(save_dir):
+        if sid in p.stem:
+            doc = files.read_snapshot(p)
+            if doc is not None and doc.get("id") == sid:
+                return doc
+    for p in files.snap_paths(save_dir):
+        doc = files.read_snapshot(p)
+        if doc is not None and doc.get("id") == sid:
+            return doc
+    return None
+
+
 def sites_snapshot(save_dir: Path) -> dict | None:
-    """The snapshot site ranking uses: the newest valid 'sites' snapshot, else the newest of any purpose."""
+    """The snapshot site ranking uses: the newest valid 'sites' snapshot, else the newest of any purpose. BUG-773: a pinned one
+    (pin_snapshot: `plan check` / `plan apply` rank on the snapshot `plan propose` ranked on) while it is on disk."""
+    pin = _SNAP_PIN.get(str(save_dir))
+    if pin:
+        doc = snapshot_by_id(save_dir, pin)
+        if doc is not None:
+            return doc
     first = None
     for p in files.snap_paths(save_dir):
         doc = files.read_snapshot(p)

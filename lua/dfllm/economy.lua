@@ -309,6 +309,10 @@ M.DEFAULTS = {
   barrels = {tag = 'dfllm:barrel', min_empty = 4, drink_pct = 150, cit_pct = 50, min_total = 8, max_total = 30,
              grow_total = 80, nofloor_days = 30, max_jobs = 4, brew_wait = 30, ws = {'workshop:Carpenters'},
              spec = {job = 'MakeBarrel', material_category = {'wood'}}},
+  -- BUG-772 (Run 16c i3 Lancemoment: no tree, barrels and bins wood only, brewing 'no empty barrel'): a treeless fort makes large pots of rock at the
+  -- Craftsdwarf's (they hold drink like barrels); max_total pots at most, max_jobs at a time
+  pots = {tag = 'dfllm:pot', max_total = 24, max_jobs = 4, ws = {'workshop:Craftsdwarfs'},
+          spec = {job = 'MakeTool', item_subtype = 'ITEM_TOOL_LARGE_POT', material = 'INORGANIC'}},
   bins = {tag = 'dfllm:bin', min_empty = 1, cit_pct = 25, min_total = 4, max_total = 20, max_jobs = 2,
           ws = {'workshop:Carpenters'}, spec = {job = 'ConstructBin', material_category = {'wood'}}},
   -- Run 10 (Handlelock): no tannery stood and a fey mood died for two leather. Without a tanner's shop, while hides lie
@@ -635,7 +639,7 @@ end
 local CATS = {'DRINK', 'FOOD', 'MEAT', 'FISH', 'FISH_RAW', 'CHEESE', 'EGG', 'PLANT', 'PLANT_GROWTH', 'CLOTH', 'SKIN_TANNED',
               'CORPSEPIECE', 'SMALLGEM', 'ROUGH', 'BAR', 'AMMO', 'WOOD', 'BARREL', 'BIN', 'BOULDER', 'THREAD',
               'SEEDS', 'WEAPON', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'QUIVER', 'BAG',
-              'DOOR', 'HATCH_COVER', 'GRATE', 'BLOCKS', 'CHAIR', 'TABLE'}
+              'DOOR', 'HATCH_COVER', 'GRATE', 'BLOCKS', 'CHAIR', 'TABLE', 'TOOL'}
 local SKIP = {'trader', 'garbage_collect', 'removed', 'dump', 'hostile', 'in_building', 'construction', 'rotten'}
 -- FR-62 (Run 9: 18.7k items, economy 12-14 ms/s): one read of the flag word (bitfield `whole`) against the mask of
 -- the SKIP bits instead of eight bitfield reads per item. The first M.MASK_CHECK items of a boot are cross-checked
@@ -720,6 +724,19 @@ function M.df_refuses(idx)
 end
 
 -- an inorganic boulder material: ore (token, metal tokens) and flux; raws only (the item is in the fort)
+-- BUG-772: a tool item whose definition lists the use FOOD_STORAGE (the large pot; raws ITEM_TOOL_LARGE_POT)
+function M.is_pot(it)
+  local ok, yes = pcall(function()
+    local def = dfhack.items.getSubtypeDef(it:getType(), it:getSubtype())
+    if def and def.id == 'ITEM_TOOL_LARGE_POT' then return true end
+    for _, u in ipairs(def.tool_use) do
+      if u == 'FOOD_STORAGE' or df.tool_uses[u] == 'FOOD_STORAGE' then return true end
+    end
+    return false
+  end)
+  return ok and yes == true
+end
+M.freed = {}                  -- BUG-772: mat_index -> true, flux stones freed for furniture and blocks (persisted: m.economy `freed`)
 local function ore_of(idx)
   local r = orec[idx]
   if r then return r end
@@ -735,6 +752,9 @@ local function ore_of(idx)
       for _, m in ipairs(v) do r.metals[#r.metals + 1] = mat_token(0, m) or '' end
     end
     for _, rc in ipairs(mi.material.reaction_class) do if rc.value == 'FLUX' then r.flux = true end end
+    -- BUG-772: a flux stone the fort freed for furniture (stone.use, or the treeless / no-ore fort's own decision) is a plain building stone
+    -- again: the census counts it for the masons (Lancemoment: limestone 36 boulders, 'stone free 0' after stone.use limestone)
+    if r.flux and M.freed[idx] and not r.metals then r.flux, r.freed = nil, true end
     -- live L6: masons cancel rock furniture for "non-economic hard stone"; economic stone (DF's stone use
     -- setting) and soft stone (chalk: no ITEMS_HARD) are no furniture stone
     local es = df.global.plotinfo.economic_stone
@@ -1159,6 +1179,12 @@ local function classify(it, a, cat)
       -- apart (`blocks_busy`), so the wall stock names the claimed ones instead of showing a bare 0
       a.blocks_busy = a.blocks_busy + n
     end
+  elseif cat == 'TOOL' then
+    -- BUG-772: a large pot (rock, clay or any material) holds drink and brews like a barrel: a treeless fort brews in pots
+    if M.is_pot(it) and not f.in_job then
+      a.pots = a.pots + 1
+      if #dfhack.items.getContainedItems(it) == 0 then a.pots_empty = a.pots_empty + 1 end
+    end
   elseif cat == 'BARREL' or cat == 'BIN' then  -- live L1b: brewing stalled for want of an empty barrel
     local empty = #dfhack.items.getContainedItems(it) == 0
     if cat == 'BARREL' then
@@ -1278,7 +1304,7 @@ local function classify(it, a, cat)
 end
 
 local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'gems', 'bars', 'bolts', 'wood', 'fuel',
-              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'rock', 'ore', 'rock_bad',
+              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'bins', 'bins_empty', 'pots', 'pots_empty', 'rock', 'ore', 'rock_bad',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'gm_body', 'gm_head', 'gm_pants', 'gm_gloves', 'gm_shoes', 'g_unusable', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
@@ -1846,8 +1872,19 @@ end
 -- survival: below the drink target the barrel cap is max_total (food stockpiles fill barrels too, and a full set
 -- of barrels must not stall the stills), and below nofloor_days of drink the barrels may take the logs of
 -- economy's own wood floor (care's forbidden mood logs stay untouched either way)
+function M.plan_pots(K, c, r, want)
+  local b = c.pots
+  if type(b) ~= 'table' or open(r, b.tag) or not ws_any(r.f, b.ws) then return end
+  local have = r.inv.pots or 0
+  local free = stone_free(c, r) - (r.planned.rock or 0)
+  local n = math.min(want, (b.max_total or 24) - have, b.max_jobs or 4, free)
+  add(r, {tag = b.tag, spec = copy(b.spec), n = n, uses = {rock = 1}, why = 'pots for drink (no logs for barrels)'})
+end
+
 local function plan_containers(K, c, r, which)
   local b = c[which]
+  st.cont_short = st.cont_short or {}
+  st.cont_short[which] = nil
   if type(b) ~= 'table' or open(r, b.tag) or not ws_any(r.f, b.ws) then return end
   local inv = r.inv
   local short, dry = false, false
@@ -1879,6 +1916,12 @@ local function plan_containers(K, c, r, which)
   -- dry: other open wood orders hold no claim on the logs either (the first job takes them)
   local wood = dry and math.max(0, (inv.wood or 0) - (r.planned.wood or 0)) or left(c, r, 'wood')
   local n = math.min(want, wood, b.max_jobs or 4)
+  -- BUG-772: barrels and bins are wood only (DF has no rock or clay barrel or bin): in a treeless fort they wait for logs, the caravans bring
+  -- them (supply_wants) and the drink goes into large pots of rock meanwhile
+  if want > 0 and wood <= 0 and M.treeless(c, r) then
+    st.cont_short[which] = want
+    if which == 'barrels' then M.plan_pots(K, c, r, want) end
+  end
   local spec = wood_spec(c, r, b.spec)
   if dry then spec.item_conditions = {cond(1, 'WOOD')} end
   if add(r, {tag = b.tag, spec = spec, n = n, uses = {wood = 1}, why = which}) and dry then
@@ -5790,7 +5833,7 @@ function M.drink_block(K, c, r, inv)
     end
     put('plants', w)
   end
-  if (inv.barrels_empty or 0) == 0 then put('barrels', 'no empty barrel') end
+  if (inv.barrels_empty or 0) + (inv.pots_empty or 0) == 0 then put('barrels', 'no empty barrel or pot') end
   if not M.labor_holder(K, 'BREWER') then put('brewer', 'nobody brews (Brewing on no citizen)') end
   -- BUG-760 (Run 16b i2 Whirledrampart y443-445: drink 176 -> 0 days, DECISION 'auto: brew' with 8 brews ordered that never ran):
   -- 'auto: brew' is said only with a Still the citizens reach and open brews that moved in the last 7 days (their count fell or the
@@ -8336,9 +8379,10 @@ function M.supply_wants(K)
     if type(e) == 'table' and type(e.buy) == 'string' then w[#w + 1] = {buy = e.buy, n = e.n, why = e.why} end
   end
   -- BUG-607: a treeless fort whose beds (wood only) or wood pieces wait for logs: the caravans bring logs
-  local ws = math.tointeger(st.wood_short) or 0
+  local cs = type(st.cont_short) == 'table' and st.cont_short or {}
+  local ws = (math.tointeger(st.wood_short) or 0) + (math.tointeger(cs.barrels) or 0) + (math.tointeger(cs.bins) or 0)    -- BUG-772
   if ws > 0 then
-    w[#w + 1] = {buy = 'wood', n = math.min(60, ws * 4), why = string.format('treeless fort: %d wood-only pieces (beds) wait for logs', ws)}
+    w[#w + 1] = {buy = 'wood', n = math.min(60, ws * 4), why = string.format('treeless fort: %d wood-only pieces (beds, barrels, bins) wait for logs', ws)}
   end
   -- BUG-624 (Run 16d i4 Trumpetrealms y426-y428: the steel DECISION named flux but the want list never held it, `trade.want flux` was
   -- accepted by hand only): orders wait for steel bars and the chain (plan_steel) lacks flux stone, the smelting of pig iron and steel
@@ -8487,6 +8531,13 @@ function T.jmake(K, c, r)
           end
         end
       end
+    end
+  end
+  for _, which in ipairs({'barrels', 'bins'}) do                 -- BUG-772: barrels and bins are wood only
+    local n = math.tointeger((st.cont_short or {})[which])
+    if n and n > 0 then
+      short[#short + 1] = {kind = which == 'barrels' and 'barrel' or 'bin', n = n,
+                           why = 'wood only (no rock or clay variant), trade.want wood' .. (which == 'barrels' and ', pots hold the drink' or '')}
     end
   end
   M.short_report(K, c, r, short)
@@ -8667,7 +8718,7 @@ function M.stone_unmark(K)
     local o = ore_of(m.idx)
     m.tok, m.econ, m.hard = o.token or ('mat ' .. tostring(m.idx)), o.econ == true, o.soft ~= true
     m.ore, m.flux = o.metals ~= nil, o.flux == true
-    seen[#seen + 1] = {tok = m.tok, n = m.n, hard = m.hard, econ = m.econ, ore = m.ore, flux = m.flux, refused = o.refused == true}
+    seen[#seen + 1] = {idx = m.idx, tok = m.tok, n = m.n, hard = m.hard, econ = m.econ, ore = m.ore, flux = m.flux, refused = o.refused == true}
     if m.econ and m.hard and not m.ore and not m.flux then
       local ok, done = pcall(K.act.stone_economic, m.idx, false)
       if ok and done then
@@ -8751,6 +8802,26 @@ function M.hard_report(K, c, r, cancels)
           'non-economic hard stone"): the mark is cleared, the Masons take it again', table.concat(names, ', '), n)
     K.persist.touch('m.economy')
     return
+  end
+  -- BUG-772 (Run 16c i3 Lancemoment y372: an embark of limestone only, 36 boulders 'flux', doors / coffins / tables waited for the player's stone.use,
+  -- then the census still called the freed stone flux): with no ore in the fort a flux stone is no smelter reserve (steel needs ore); the fort
+  -- frees its biggest hard flux stone itself, once, and the masons take it at the next census
+  if d.cause == 'none' and (math.tointeger(r.inv.ore) or 0) == 0 and okc and type(seen) == 'table' then
+    local best
+    for _, m in ipairs(seen) do
+      if m.hard and m.flux and not m.ore and not m.refused and not M.freed[m.idx or -1] and (not best or m.n > best.n) then best = m end
+    end
+    if best then
+      local oka, done = pcall(K.act.stone_economic, best.idx, false)
+      if oka and done then
+        M.free_flux(K, best.idx, true)
+        st.hard = nil
+        local nm = (best.tok:gsub('^INORGANIC:', '')):lower()
+        K.log('warn', 'economy: no hard stone but %s (flux, %d boulders) and no ore in the fort: %s freed for doors, coffins, tables, chairs and ' ..
+              'blocks (the same as stone.use %s)', nm, best.n, nm, nm)
+        return
+      end
+    end
   end
   local sticky = type(st.hard) == 'table' and (math.tointeger(st.hard.eps) or 1) >= M.HARD.sticky
   if sticky and p.hard_ann_eps == M.HARD.sticky then return end        -- BUG-610: reported once, then quiet until boulders come
@@ -14666,6 +14737,13 @@ function M.init(K)
   st = {census = nil, run = nil, rate = {}, cancels = {}, looped = {}, backoff = {}, bars_by = {}, ores = {},
         seeds = {}, f = {}}
   orec, wdef, adef = {}, {}, {}
+  M.freed = {}
+  pcall(function()                             -- BUG-772: the flux stones freed for furniture before the reload
+    local p0 = K.persist.get('m.economy')
+    for _, i in ipairs(type(p0) == 'table' and type(p0.freed) == 'table' and p0.freed or {}) do
+      if math.tointeger(i) then M.freed[math.tointeger(i)] = true end
+    end
+  end)
   M.act = K.act
   rcache, pinfo, pidx, ecache, plugins = {}, {}, nil, {}, {}
   skip_mask, mask_check, mask_bad = make_skip_mask(), M.MASK_CHECK, nil
@@ -14755,6 +14833,13 @@ function M.state(K)
     if st.rock then
       r.stock.rock, r.stock.rock_need = math.max(0, st.rock.free or 0), math.max(0, st.rock.need or 0)
       if st.rock.soil then r.stock.rsoil = 1 end       -- BUG-438: the stone digs found only soil (plan propose digs deeper)
+    end
+    do                                                 -- BUG-772: a treeless fort (no log for treeless_days, or no tree on the map): the plan drafts the farm early
+      local okt, tl = pcall(function()
+        local c = M.conf(K)
+        return M.treeless(c, {inv = inv, p = pstate(K), now = K.now().tick})
+      end)
+      if okt and tl then r.stock.nowood = 1 end
     end
     do                                                 -- BUG-677: the wall material a ring / plug can use (bp sites / bp.place aqshaft refuse without it)
       local okw, ws = pcall(M.wall_stock, K)
@@ -14943,6 +15028,19 @@ M.verbs['orders.cancel'] = function(K, args, cmd)
          {removed = #gone, kept = #kept, ids = json.array({table.unpack(gone, 1, math.min(#gone, 40))})}
 end
 
+-- BUG-772: remember (persisted) that a flux stone type is freed for furniture and blocks, or forget it (economic again)
+function M.free_flux(K, idx, on)
+  if math.tointeger(idx) == nil then return end
+  M.freed[idx] = on and true or nil
+  local p = pstate(K)
+  local list = {}
+  for i in pairs(M.freed) do list[#list + 1] = i end
+  table.sort(list)
+  p.freed = list
+  orec[idx] = nil
+  K.persist.touch('m.economy')
+end
+
 -- BUG-734: stone.use {mat, economic?} -- the stone-use screen for one stone type the fort holds as boulders: economic false (the default)
 -- frees it for furniture and blocks (the masons may use it up; an ore or a flux stone is then no reserve), true marks it economic again.
 -- The player's own decision when no plain hard stone exists (the DECISION no_hard_stone names the command); any mode.
@@ -14971,6 +15069,7 @@ M.verbs['stone.use'] = function(K, args, cmd)
   if o.soft and not eco then return false, string.format('stone.use: %s is soft stone (no furniture or blocks from it): the game refuses it, not the stone-use screen', nm) end
   local ok, done, how = pcall(K.act.stone_economic, idx, eco)
   if not ok or done ~= true then return false, 'stone.use: ' .. tostring(ok and how or done) end
+  M.free_flux(K, idx, not eco)                           -- BUG-772: a flux stone freed is a plain building stone for the census
   orec[idx] = nil                                        -- the census reads the raws and the mark afresh
   st.hard = nil                                          -- the denial memory goes with it (BUG-648)
   K.persist.touch('m.economy')
