@@ -1244,6 +1244,21 @@ local function impls(state)
     return true, n or 1
   end
 
+  -- BUG-774 (Run 16a i1 Basementflew y544: B1's levers lay outside Kern+, nobody inside the walls could pull them): ONE lever BUILT
+  -- (quickfort build mode key `Tl`, a lever building waiting for a mechanism) on the open floor tile pos inside Kern+ (gate.lever_home picked
+  -- it: revealed plain floor, nothing built or designated on it, clear of the bridge footprint). gate links it to its bridge once it stands.
+  -- act reads no tiles. Returns ok, designated buildings (0 = quickfort skipped the tile: refused).
+  function I.lever_build(pos)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    local ok, stats = I.quickfort({mode = 'build', data = {[0] = {[0] = {[0] = 'Tl'}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local n = type(stats) == 'table' and int(stats.build_designated) or nil
+    if n == 0 then return false, 'quickfort designated no lever there' end
+    return true, n or 1
+  end
+
   -- zones screen > add zone > Water Source (BUG-324, Run 15 Inkintense/Earthboat: the water scan found deep water with a
   -- reachable bank or a reachable floor beside the open tile above it, nobody zoned it, so no water was accepted and the
   -- hospital waited for years): a 1x1 Water Source zone named dfllm-water on the water tile pos, quickfort zone mode

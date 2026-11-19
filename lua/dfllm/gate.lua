@@ -120,6 +120,16 @@ M.FORCE_NEAR = 3           -- BUG-027: SIEGE/BREACH raise onto a unit only with 
 -- A parked army is no approach (Run 15 BUG-492: 25 tiles out, a walker 8 steps from B1 was crushed when a hold was dropped): within
 -- APPROACH_NEAR tiles the hostile must be CLOSING (4 tiles nearer than 150-900 ticks ago), within APPROACH_CLOSE tiles it need not.
 M.APPROACH_NEAR, M.APPROACH_HOLD, M.APPROACH_CLOSE = 30, 300, 12
+-- BUG-775 (Run 16a i1 Basementflew y544 aut d82: GATE_FORCED B1 'a hostile 22 tiles from it and closing, held 506-569 ticks (approach_near 30)':
+-- four citizens stood beside B1 for 500+ ticks while a cave dragon and goblins came from 22 tiles out, B1 rose with them next to it and they
+-- were killed at the bridge, 41,101,129): the hold of a raise for citizens STANDING beside the footprint (STILL_NOW below) ends at once when a
+-- hostile is within APPROACH_NOW tiles (cfg gate.approach_now, 0 = off), closing or not, held long or not. Why 20: a citizen walks ~RACE_CIV_TPT
+-- (24) ticks a tile, a hostile ~RACE_FOE_TPT (8), the pull takes the lever latency (100-250 ticks) and the bridge ~100 ticks to move: from 20
+-- tiles the hostile is at the footprint in ~160 ticks, no citizen beside it gets across and away in that time, so the citizen is locked out
+-- (he may live: the cave dragon needs a door) rather than the whole fort breached (pop 52 -> 7). A unit ON the footprint, one walking onto it
+-- (crossers) and one beside it that keeps moving still hold the raise (tests/lua/test_bug380_siege_traffic.lua: a walker crushed otherwise).
+M.APPROACH_NOW = 20
+M.STILL_NOW = 60           -- ... for the units beside the footprint that have stood on one tile this many ticks (a walker beside it is no stander)
 M.CLOSING_TILES, M.CLOSING_AGE, M.CLOSING_KEEP = 4, 150, 900
 -- BUG-621: a raise forced by an approach stays forced this many ticks after the hostile last qualified (it may step out of view or halt while
 -- the slow lever pull is under way); a unit ON the footprint still holds it
@@ -603,12 +613,32 @@ local function refuge_covers(K, rm)
   return true
 end
 
+-- BUG-774: a lever room that lies OUTSIDE Kern+ and the refuge while every bridge of it has a linked lever on a tile of Kern+ or the refuge: the
+-- pulls go to those (order(): the alert's burrow first); nobody is sent out to the room's levers (the y544 pullers walked 60 tiles to the
+-- attack side) and the room stays out of the civ alert
+local function home_covers(K, rm)
+  local kn, rn = core_burrows(K.manifest())
+  local kb, rb = burrow(kn), burrow(rn)
+  if not kb or not rm.c then return false end
+  if on_tile(kb, rm.c.x, rm.c.y, rm.c.z) or on_tile(rb, rm.c.x, rm.c.y, rm.c.z) then return false end
+  for bn in pairs(rm.bridges) do
+    local r, ok = rt[bn], false
+    for _, lid in ipairs(r and r.levers or {}) do
+      local p = r.pos[lid]
+      if r.linked[lid] and type(p) == 'table' and (on_tile(kb, p[1], p[2], p[3]) or on_tile(rb, p[1], p[2], p[3])) then ok = true; break end
+    end
+    if not ok then return false end
+  end
+  return true
+end
+
 -- BREACH: rooms behind the core seal only, and only while the refuge lacks a linked lever of their bridges (the
 -- B2 landing lies next to B2, which may still be down while attackers are inside Kern+)
 local function allowed(K, rm, mode)
   local live = false                            -- BUG-030: a room whose bridges are all destroyed has no duty
   for bn in pairs(rm.bridges) do if not st.gone[bn] then live = true; break end end
   if not live then return false end
+  if home_covers(K, rm) then return false end    -- BUG-774
   if mode ~= 'BREACH' then return true end
   return rm.roles.core == true and not rm.roles.outer and not rm.roles.inner and not refuge_covers(K, rm)
 end
@@ -938,6 +968,198 @@ function M.refuge_gaps(K)
     if spec and not st.gone[name] and any_linked(r) and not lever_in(r, {b}) then out[#out + 1] = name end
   end
   table.sort(out)
+  return out
+end
+
+-- BUG-774 (Run 16a i1 Basementflew y544 aut d82 / win d2, kern 87b10464: B1's two levers lay 5-6 tiles west of its footprint, outside Kern+; the
+-- surprise siege found 35 of 52 citizens outside, the nearest pullers 60 tiles from the levers, B1 up 1,650 ticks late once, then 'B1 not up after
+-- 909 ticks (no worker: its levers lie outside the alert burrow Kern+)' -> BREACH, pop 52 -> 7): a bridge whose linked levers ALL lie outside Kern+
+-- and the refuge cannot be raised in time by anyone the alert keeps inside the walls (BUG-765 only judges the race and leaves the bridge down when it
+-- is lost). gate.lever_outside names such bridges ({[bridge] = {n linked levers, at = the first one}}, as of the last pass; a bridge with no linked
+-- lever is the R0 `levers:` blocker's and not listed); readiness raises R0 `lever_outside` and the DECISION_NEEDED `lever_outside` for it (PEACE),
+-- and gate's home_step builds ONE lever of its own on a free Kern+ floor tile near the bridge (quickfort Tl through act.lever_build, listed in the
+-- manifest by runner.add_levers, linked by gate's own link pass like any manifest lever: 1 + 2 mechanisms), in PEACE only. With that lever linked
+-- the bridge leaves the list and every pull picks it first (order(): a lever on the alert burrow comes first).
+function M.lever_outside(K)
+  local out = {}
+  local man = K.manifest()
+  local kn, rn = core_burrows(man)
+  local kb, rb = burrow(kn), burrow(rn)
+  if not kb then return out end                       -- no Kern+ burrow: nothing to judge by (R0 no_kern)
+  for _, name in ipairs(bridge_names(man)) do
+    local spec, r = man.bridges[name], rt[name]
+    if r and valid_spec(spec) and not st.gone[name] and any_linked(r) then
+      local n, inside, first = 0, false, nil
+      for _, lid in ipairs(r.levers) do
+        local p = r.pos[lid]
+        if r.linked[lid] and type(p) == 'table' and p[1] and p[2] and p[3] then
+          n = n + 1
+          first = first or {p[1], p[2], p[3]}
+          if on_tile(kb, p[1], p[2], p[3]) or on_tile(rb, p[1], p[2], p[3]) then inside = true end
+        end
+      end
+      if n > 0 and not inside then out[name] = {n = n, at = first} end
+    end
+  end
+  return out
+end
+
+M.HOME_EVERY = 600         -- ticks between looks at the bridges whose levers all lie outside (PEACE)
+M.HOME_REDO = 14400        -- a lever designated inside and still not on its tile (no site, no lever) after 12 game days is designated again
+M.HOME_N = 1               -- levers inside Kern+ per bridge (each costs 1 mechanism, its link 2: mechanisms are scarce)
+M.HOME_R = 20              -- the tile is searched this many tiles around the footprint and the old levers
+M.HOME_MARGIN = 4          -- ... at least this far from every bridge footprint (MARGIN 1 + the walkers around a lever)
+M.HOME_READS = 400         -- tile reads per look
+local hm = {}              -- runtime: {t = last look, [bridge] = {cause, at, redo, retry, why}}
+
+-- up to `want` free floor tiles of Kern+ on the bridge's level, nearest to its first old lever first (a lever links across any distance: the
+-- tile need not lie near the bridge, the pullers stand in Kern+ anyway): revealed plain floor (snapshot.tile '.'), nothing built, no designation,
+-- no liquid, not a manifest lever tile, at least 3 of its 4 neighbours plain floor too (a corridor tile or a door passage is no place for a
+-- building), HOME_MARGIN or more tiles from EVERY bridge footprint on the level. nil, why when none
+local function home_tiles(K, man, spec, kb, taken, want, ref)
+  local fp = spec.fp
+  local R, M0 = M.HOME_R, M.HOME_MARGIN
+  local x0, y0, x1, y1 = fp[1], fp[2], fp[4], fp[5]
+  for _, p in ipairs(type(spec.levers) == 'table' and spec.levers or {}) do
+    x0, y0, x1, y1 = math.min(x0, p[1]), math.min(y0, p[2]), math.max(x1, p[1]), math.max(y1, p[2])
+  end
+  local fps = {}
+  for _, b in pairs(type(man.bridges) == 'table' and man.bridges or {}) do
+    if type(b) == 'table' and type(b.fp) == 'table' and b.fp[3] == fp[3] then fps[#fps + 1] = b.fp end
+  end
+  local function clear(x, y)
+    for _, f in ipairs(fps) do
+      if math.max(f[1] - x, 0, x - f[4], f[2] - y, 0, y - f[5]) < M0 then return false end
+    end
+    return true
+  end
+  local cand = {}
+  for x = x0 - R, x1 + R do
+    for y = y0 - R, y1 + R do
+      if clear(x, y) and on_tile(kb, x, y, fp[3]) and not taken[x .. ',' .. y .. ',' .. fp[3]] then
+        cand[#cand + 1] = {x = x, y = y, g = math.max(math.abs(x - ref[1]), math.abs(y - ref[2]))}
+      end
+    end
+  end
+  if #cand == 0 then return nil, 'no Kern+ tile within ' .. R .. ' tiles of the bridge and its levers on their level' end
+  table.sort(cand, function(a, b)
+    if a.g ~= b.g then return a.g < b.g end
+    if a.x ~= b.x then return a.x < b.x end
+    return a.y < b.y
+  end)
+  local reads, out = 0, {}
+  local function plain(x, y)
+    reads = reads + 1
+    local ok, t = K.call('snapshot', 'tile', x, y, fp[3])
+    return ok and type(t) == 'table' and t.c == '.' and (t.bld or '') == '' and (t.dig or '') == ''
+           and (math.tointeger(t.flow) or 0) == 0 and (math.tointeger(t.occ) or 0) == 0
+  end
+  for _, c in ipairs(cand) do
+    if reads >= M.HOME_READS then break end
+    if plain(c.x, c.y) then
+      local nb = 0
+      for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do if plain(c.x + d[1], c.y + d[2]) then nb = nb + 1 end end
+      if nb >= 3 then
+        out[#out + 1] = {c.x, c.y, fp[3]}
+        taken[c.x .. ',' .. c.y .. ',' .. fp[3]] = true
+        if #out >= want then break end
+      end
+    end
+  end
+  if #out == 0 then return nil, string.format('no free floor tile in Kern+ near the bridge (%d tiles read)', reads) end
+  return out
+end
+
+-- PEACE: HOME_N lever(s) inside Kern+ for every bridge in lever_outside (see above)
+local function home_step(K, now)
+  if K.mode() ~= 'PEACE' then return end
+  if hm.t and now >= hm.t and now - hm.t < M.HOME_EVERY then return end
+  hm.t = now
+  local build = rawget(K.act, 'lever_build')
+  local man = K.manifest()
+  local kn, rn = core_burrows(man)
+  local kb, rb = burrow(kn), burrow(rn)
+  if not kb then return end
+  local lo = M.lever_outside(K)
+  local names = {}
+  for name in pairs(lo) do names[#names + 1] = name end
+  table.sort(names)
+  for name in pairs(hm) do if name ~= 't' and not lo[name] then hm[name] = nil end end      -- linked inside: the case is closed
+  local taken
+  for _, name in ipairs(names) do
+    local spec, r = man.bridges[name], rt[name]
+    local h = hm[name] or {}
+    hm[name] = h
+    local rep = r and r.lr
+    if not rep then h.cause = h.cause or 'unread'
+    elseif not build then h.cause = 'no_act'
+    else
+      local have, missing = 0, {}
+      for _, e in ipairs(rep.list) do
+        if on_tile(kb, e.p[1], e.p[2], e.p[3]) or on_tile(rb, e.p[1], e.p[2], e.p[3]) then
+          have = have + 1
+          if e.st == 'none' then missing[#missing + 1] = e end
+        end
+      end
+      if have >= M.HOME_N then
+        h.cause = 'designated'
+        for _, e in ipairs(missing) do      -- a designation DF dropped: once more after HOME_REDO ticks
+          if now - e.t >= M.HOME_REDO and now >= (h.redo or 0) then
+            h.redo = now + M.HOME_REDO
+            local _, res = build(e.p)
+            K.log('info', 'gate: %s lever tile %d,%d,%d inside Kern+ designated again (%s)', name, e.p[1], e.p[2], e.p[3], tostring(res))
+          end
+        end
+      elseif now >= (h.retry or 0) then
+        if not taken then
+          taken = {}
+          for _, b in pairs(man.bridges) do
+            for _, p in ipairs(type(b) == 'table' and type(b.levers) == 'table' and b.levers or {}) do
+              taken[p[1] .. ',' .. p[2] .. ',' .. p[3]] = true
+            end
+          end
+        end
+        local tiles, why = home_tiles(K, man, spec, kb, taken, M.HOME_N - have, lo[name].at)
+        if not tiles then
+          h.cause, h.why, h.retry = 'no_tile', why, now + 4 * M.HOME_EVERY
+          if not h.warned then
+            h.warned = true
+            K.log('warn', 'gate: %s: all its levers lie outside Kern+ (first at %s) and %s', name, table.concat(lo[name].at, ','), tostring(why))
+          end
+        else
+          local done = {}
+          for _, p in ipairs(tiles) do
+            local ok, res = build(p)
+            if ok then done[#done + 1] = p
+            else
+              h.why = tostring(res):sub(1, 80)
+              K.log('warn', 'gate: %s lever at %d,%d,%d refused: %s', name, p[1], p[2], p[3], tostring(res))
+            end
+          end
+          if #done > 0 then
+            local okr, nadd = K.call('runner', 'add_levers', name, done)
+            h.cause, h.at, h.why, h.warned = 'designated', now, nil, nil
+            K.log('info', 'gate: %s: all %d linked lever(s) lie outside Kern+ (first at %s): a lever designated inside Kern+ at %s (manifest +%s)',
+                  name, lo[name].n, table.concat(lo[name].at, ','), table.concat(done[1], ','), okr and tostring(nadd) or 'not listed')
+          else
+            h.cause, h.retry = 'refused', now + 4 * M.HOME_EVERY
+          end
+        end
+      end
+    end
+  end
+end
+
+-- public (readiness): per bridge in lever_outside what the kernel does about it: {cause, why?, age?, n, at}; cause 'designated' (a lever inside
+-- Kern+ is designated or built and waits for a mechanism, its link for 2 more), 'no_tile' (no free floor tile found), 'refused' (quickfort refused
+-- every tile), 'no_act' (act.lever_build missing), 'unread' (the levers are not read yet)
+function M.lever_home(K)
+  local out = {}
+  local now = K.now().tick
+  for name, e in pairs(M.lever_outside(K)) do
+    local h = hm[name] or {}
+    out[name] = {cause = h.cause or 'unread', why = h.why, age = h.at and now - h.at or nil, n = e.n, at = e.at}
+  end
   return out
 end
 
@@ -1368,10 +1590,12 @@ end
 function M.approach_cfg(K)
   local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
   local n, h, c = math.tointeger(r.approach_near), math.tointeger(r.approach_hold), math.tointeger(r.approach_close)
+  local w = math.tointeger(r.approach_now)
   if not n or n < 0 or n > 80 then n = M.APPROACH_NEAR end
   if not h or h < 0 or h > 3000 then h = M.APPROACH_HOLD end
   if not c or c < 0 or c > 80 then c = M.APPROACH_CLOSE end
-  return n, h, c
+  if not w or w < 0 or w > 80 then w = M.APPROACH_NOW end
+  return n, h, c, w
 end
 
 -- BUG-587: is the nearest hostile of bridge runtime `rr` (distance d now) closing? Samples every 30 ticks, kept CLOSING_KEEP ticks
@@ -1654,6 +1878,7 @@ end
 -- (returns the holders, the hostile's distance and the units beside it). BUG-310: a unit ON the footprint holds a forced
 -- raise too ('next to' is not 'on'). An unknown census (hold.unknown) holds every pull, forced or not.
 local function holders(K, name, fp, sc, dir)
+  local near_now, drop = false, nil              -- BUG-775: the hold of the units standing beside the footprint ends (below)
   local hold = within(sc, M.MARGIN)
   if not sc then hold.unknown = true end
   -- BUG-335: a unit walking onto the footprint holds it like one on it (forced or not)
@@ -1670,16 +1895,31 @@ local function holders(K, name, fp, sc, dir)
     local d = fn > 0 and hostile_dist(K, name, fp) or -1
     local rr = rt[name]
     if rr then rr.fz_b = nil end
+    local nowt = K.now().tick
+    if rr then                                     -- BUG-775: where each unit beside the footprint stands, and since when
+      local old, new = rr.bst or {}, {}
+      for _, e in ipairs(hold) do
+        local key = string.format('%s,%s,%s', tostring(e.x), tostring(e.y), tostring(e.z))
+        local o = old[e.id]
+        new[e.id] = (o and o.p == key) and o or {p = key, t = nowt}
+      end
+      rr.bst = new
+    end
     -- BUG-587: a hostile approaching (within approach_near) and the raise held for approach_hold ticks: forced like one at the gate
     if fn > 0 and d >= 0 and rr then
       local now = K.now().tick
       local cl = closing(rr, d, now)
       if d > fn then
-        local an, ah, ac = M.approach_cfg(K)
+        local an, ah, ac, aw = M.approach_cfg(K)
         local held = (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
         if held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl)) then
           fn, rr.fz_b = d, held
           rr.fz_until, rr.fz_d = now + M.APPROACH_STICKY, d
+        elseif aw > 0 and d <= aw then
+          -- BUG-775: a hostile within approach_now tiles ends the hold of the units STANDING beside the footprint (STILL_NOW ticks on one
+          -- tile: they cannot cross and get away in the ~160 ticks he needs) whatever the wait so far and whether he closes; a unit ON it, one
+          -- walking onto it (the crossers: CROSS_REACH steps) or one beside it that keeps moving still holds the raise, so nobody is crushed
+          near_now, rr.fz_b = true, held
         end
       end
     end
@@ -1695,6 +1935,15 @@ local function holders(K, name, fp, sc, dir)
       else
         rr.fz_until, rr.fz_d = nil, nil
       end
+    end
+    if near_now and not (d >= 0 and d <= fn) then
+      local keep = {unknown = hold.unknown}
+      drop = {}
+      for _, e in ipairs(hold) do
+        local o = rr and rr.bst and rr.bst[e.id]
+        if e.d == 0 or cby[e.id] or not (o and nowt - o.t >= M.STILL_NOW) then keep[#keep + 1] = e else drop[#drop + 1] = e end
+      end
+      hold = keep
     end
     if d >= 0 and d <= fn then
       local on, beside, seen = {unknown = hold.unknown}, {}, {}
@@ -1762,6 +2011,8 @@ local function holders(K, name, fp, sc, dir)
       if walk or not lim or (e.path or 0) <= lim then hold[#hold + 1] = e end
     end
   end
+  -- BUG-775: the raise goes ahead past the citizens beside the footprint (GATE_FORCED names them once the pull has a worker)
+  if drop and #drop > 0 and #hold == 0 and not hold.unknown then return hold, hostile_dist(K, name, fp), drop end
   return hold, nil
 end
 
@@ -2065,8 +2316,13 @@ local function forced_event(K, name, fp, hold, hd, job)
   local txt = string.format('%s raised with %s: a hostile %d tiles from it (force_near %d)', name, who(hold, fp), hd,
                             (gcfg(K)))
   if r.fz_b then          -- BUG-587: the bounded hold of an approaching hostile
+    local an, _, _, aw = M.approach_cfg(K)
     txt = string.format('%s raised with %s: a hostile %d tiles from it and closing, held %d ticks (approach_near %d)', name,
-                        who(hold, fp), hd, r.fz_b, (M.approach_cfg(K)))
+                        who(hold, fp), hd, r.fz_b, an)
+    if aw > 0 and hd <= aw then       -- BUG-775: the hold ended because the hostile came within approach_now
+      txt = string.format('%s raised with %s: a hostile %d tiles from it (approach_now %d), held %d ticks', name,
+                          who(hold, fp), hd, aw, r.fz_b)
+    end
   end
   K.emit('GATE_FORCED', 'A', cut(txt, 200), {bridge = name, units = ids_of(hold), hostile = hd,
                                              pos = {hold[1].x, hold[1].y, hold[1].z}, job = job})
@@ -2784,6 +3040,8 @@ local function check_fail(K, name, now, mode)
   elseif why == FAIL_WHY.no_worker then               -- BUG-342: how many pulls nobody took, and where the pullers are
     txt = string.format('no_worker: %d pull(s) not taken in %d ticks; %s', r.nw, M.NO_WORKER, puller_note(K, name, now))
   end
+  -- BUG-774: a bridge whose linked levers all lie outside Kern+ (readiness R0 lever_outside) says so
+  if (why == FAIL_WHY.no_worker or why == FAIL_WHY.outside or why == FAIL_WHY.slow) and M.lever_outside(K)[name] then txt = txt .. '; its levers lie outside Kern+ (R0 lever_outside)' end
   local d = {bridge = name, want = 'up', why = why}
   if why == FAIL_WHY.cancelled then                   -- BUG-342: the pulls the units walking toward it cancelled
     local e = r.ap_last
@@ -3191,6 +3449,7 @@ function M.step(K, budget, ctx)
   end
   last_pass = now
   pass(K, false)
+  home_step(K, now)                              -- BUG-774: PEACE only, its own cadence
 end
 
 -- public (CONTRACTS §7): request a bridge state. 'up' is honoured except in PEACE without a lockdown while the player's
@@ -3729,7 +3988,7 @@ function M.force_near(K) return (gcfg(K)) end
 
 -- public (BUG-587, siege): the tiles a hostile must be within and the ticks a raise must have been held before the hold is bounded
 -- (gate.approach_near / approach_hold; 0 tiles = no bounded hold)
-function M.approach_range(K) return M.approach_cfg(K) end   -- near, hold, close
+function M.approach_range(K) return M.approach_cfg(K) end   -- near, hold, close, now (BUG-775)
 
 -- public (BUG-543, drill): why bridge `name`'s raise was dropped at T+900 when units kept it from rising ("citizen 5 on the
 -- footprint, soldier 7 moving 3 tiles from it"), nil when none did (cleared by reset_kpi: the drill's start and settle)

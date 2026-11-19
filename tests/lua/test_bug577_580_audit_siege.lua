@@ -168,6 +168,7 @@ end
 T.test('BUG-577 (1) / BUG-587: SIEGE, a citizen next to B1 for ~1000 ticks, a hostile 8 tiles from it: the hold for him is bounded (old: B1 waited ' ..
        'for him), B1 is raised past him after gate.approach_hold ticks (GATE_FORCED names him), no BREACH, nobody is crushed', function()
   local W = siege_world{walkers = {stander(830, 115)}}
+  W.K.cfg.reflex = {v = 2, gate = {approach_now = 0}}          -- BUG-775: this is the BUG-587 rule alone (approach_now 20 raises past a standing citizen at once)
   run(W, 3600)
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
   T.ok(not modes(W):find('BREACH', 1, true), 'no BREACH for a bridge held for a citizen: ' .. modes(W))
@@ -179,6 +180,20 @@ T.test('BUG-577 (1) / BUG-587: SIEGE, a citizen next to B1 for ~1000 ticks, a ho
   T.eq(S.bstate(W, 'B1'), 'up')
   local f = W.find_events('GATE_FORCED')
   T.ok(#f >= 1 and tostring(f[1].msg):find('citizen 830', 1, true) and tostring(f[1].msg):find('approach_near', 1, true), T.show(f))
+end)
+
+T.test('BUG-775 (the same world, approach_now 20): a citizen STANDING next to B1 and a hostile 8 tiles out: B1 is raised past him without the approach hold, ' ..
+       'GATE_FORCED names him, no BREACH, nobody crushed', function()
+  local W = siege_world{walkers = {stander(833, 115)}}
+  run(W, 3600)
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
+  T.eq(#W.find_events('BREACH'), 0)
+  local up = flips_to(W, 'B1', 'up')
+  T.eq(#up, 1, 'B1 rose once')
+  local hold = require('dfllm.gate').APPROACH_HOLD
+  T.ok(up[1] < hold, 'before the approach hold ' .. hold .. ' (+' .. tostring(up[1]) .. ')')
+  local f = W.find_events('GATE_FORCED')
+  T.ok(#f >= 1 and tostring(f[1].msg):find('citizen 833', 1, true) and tostring(f[1].msg):find('approach_now', 1, true), T.show(f))
 end)
 
 T.test('BUG-577 (2) / BUG-587: SIEGE, a citizen who never leaves and the army 110 tiles out (not approaching): nobody crushed, B1 stays down (a hold ' ..
