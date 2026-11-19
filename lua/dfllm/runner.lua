@@ -7905,12 +7905,77 @@ function Q.sw_stage(label, mode, p, key)
   return {label = label, mode = mode, orders = 0, defense = 1, chunks = {{pos = {p[1], p[2], p[3]}, cells = {{0, 0, 0, key}}}}}
 end
 
+-- BUG-777 (Run 16d i4 Pagedsculpture y416-y417: P6 turned caverns.sweep on, the sweep took the top wall of shaft 131,122,137 away,
+-- the stair never got a builder, the shaft with no lower wall stood open, a troglodyte came through, the plug was 'refused'): a
+-- shaft is opened only when it can be closed again: (1) a lower wall closes it while the top is rebuilt (no s1: the top wall
+-- going leaves the cavern joined to the fort), (2) a tile beside the top to build from, (3) stone/wood for the stair, the
+-- hatch and the plug walls, (4) a citizen with the hatch labor and no job who reaches the top, (5) no seal/plug of the kernel
+-- stands failed or unbuilt. Unreadable parts (no economy, no census) do not hold it back; readable and bad do. nil = ready, else why
+Q.SW_ITEMS = {'BLOCKS', 'BOULDER', 'WOOD'}
+Q.SW_NEED = 4                                   -- the top stair, the hatch, the lower stair, one wall
+function Q.sweep_ready(K, id, r)
+  local s0, s1 = r.s0, (type(r.s1) == 'table' and not r.s1x) and r.s1 or nil
+  if not s1 then return 'no lower wall under the top: the shaft would stand open while the top is rebuilt' end
+  local okb, boxed = K.call('economy', 'boxed_in', s0[1], s0[2], s0[3])
+  if okb and boxed == true then return 'no tile beside the top to build from (walled in on its level)' end
+  local n, readable = 0, false
+  pcall(function()
+    local other = df.global.world.items.other
+    for _, k in ipairs(Q.SW_ITEMS) do
+      for _, it in ipairs(other[k]) do
+        readable = true
+        local f = it.flags
+        if not (f.forbid or f.in_job or f.trader or f.removed or f.garbage_collect or f.dump or f.hostile or f.in_building)
+           and f.on_ground then n = n + 1 end
+      end
+    end
+  end)
+  if readable and n < Q.SW_NEED then return string.format('only %d free stone/wood items (%d needed for stairs, hatch, wall)', n, Q.SW_NEED) end
+  local okh, hd = K.call('economy', 'hands', {kind = 'Hatch', rect = {x1 = s0[1], y1 = s0[2], z = s0[3]}})
+  if okh and type(hd) == 'table' then
+    if hd.holders == 0 then return 'no citizen has the hatch labor (furniture hauling)' end
+    if hd.idle == 0 then return string.format('all %d hatch builders busy', hd.holders) end
+    if hd.reach == 0 then return 'no idle hatch builder on the walk group of the shaft top' end
+  end
+  for oid, rr in pairs(S.rt and S.rt.cav or {}) do
+    if oid ~= id and type(rr) == 'table' and (rr.st == 'failed' or rr.st == 'sweep') then
+      return 'shaft ' .. tostring(oid) .. ' stands ' .. tostring(rr.st)
+    end
+  end
+  return nil
+end
+
+-- BUG-777: the unplug project's planned stair / hatch on the shaft tiles, taken back now (quickfort undo, as the player's
+-- remove building on a planned one). The snapshot does not see a PLANNED building (occupancy Planned): sw_keys read the tile
+-- as bare floor, the plug's wall was then refused by quickfort (build_unsuitable) and seal_failed ended the sweep. true when none
+-- stands any more
+function Q.sw_unplan(K, r)
+  local find = dfhack.buildings and dfhack.buildings.findAtTile
+  if not find then return true end
+  local clean = true
+  for _, pc in ipairs({{r.s0, {'Cd', 'H'}}, {(type(r.s1) == 'table' and not r.s1x) and r.s1 or false, {'Cx', 'Cd'}}}) do
+    local p = pc[1]
+    if type(p) == 'table' then
+      for _, key in ipairs(pc[2]) do
+        local ok, b = pcall(find, p[1], p[2], p[3])
+        if not (ok and b and not built(b)) then break end
+        K.act.quickfort({mode = 'build', data = {[0] = {[0] = {[0] = key}}}, pos = {p[1], p[2], p[3]}, command = 'undo'})
+      end
+      local ok, b = pcall(find, p[1], p[2], p[3])
+      if ok and b and not built(b) then clean = false end
+    end
+  end
+  return clean
+end
+
 -- public (cavern.lua): queue the unplug project of a plugged shaft; ok, project id
 function M.sweep_open(K, id)
   local r = S.rt and S.rt.cav and S.rt.cav[id]
   if type(r) ~= 'table' or r.st ~= 'done' or type(r.s0) ~= 'table' or not CAVERN[r.why] then
     return false, 'no plugged cavern shaft ' .. tostring(id)
   end
+  local why = Q.sweep_ready(K, id, r)
+  if why then return false, 'not closable: ' .. why end
   local s0, s1 = r.s0, (type(r.s1) == 'table' and not r.s1x) and r.s1 or nil
   -- the top first: its wall goes, a down stair and the hatch take its place while the lower wall still closes the shaft;
   -- then the lower wall goes and an up/down stair joins the shaft below (nothing climbs into the open tile before it)
@@ -7964,6 +8029,7 @@ function M.sweep_close(K, id)
     end
     cancel(K, U, false)
   end
+  if not Q.sw_unplan(K, r) then return false, 'pending: a planned building still stands on the shaft' end
   local stages = {}
   for _, pc in ipairs({{'p1', (type(r.s1) == 'table' and not r.s1x) and r.s1 or false}, {'p0', r.s0}}) do
     local p = pc[2]

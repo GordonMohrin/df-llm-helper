@@ -30,6 +30,7 @@ local function world(o)
   W.cav = 'open'
   W.worn = o.worn or 90
   local runner = {name = 'runner', every = {ticks = 600}}
+  W.runner_mod = runner
   function runner.cav_sealed()             -- as runner: only the plugged ones (done) and those a sweep opened
     local r = {}
     for _, a in ipairs(W.acc) do if a.st == 'done' or a.st == 'sweep' then r[#r + 1] = a end end
@@ -288,6 +289,63 @@ T.test('FR-98 review: the phase gate compares numbers (P10 is past P6)', functio
   local W = world{phase = 'P10'}
   W.run(1300, {skip = 50})
   T.eq(W.rec.open, 1)
+end)
+
+-- BUG-777 (Run 16d i4 Pagedsculpture y416-y417): the shaft stood open for days without a hatch (nobody built the stair) and a
+-- troglodyte came through: a shaft that is being opened closes at once on a new beast, at a beast beside the shaft, or when the
+-- unplug project makes no progress; a plug that cannot start yet ('pending': a planned stair stands) is asked again.
+T.test('BUG-777: a cavern invader (a beast not in sight at the start) closes the shaft that is being opened', function()
+  local W = world()
+  W.run(1300, {skip = 50})
+  T.eq(cav(W).st, 'open')
+  W.add_unit{id = 301, danger = true, pos = {20, 14, 92}}      -- the troglodyte of Pagedsculpture: new in the box
+  W.run(300, {skip = 50})
+  T.eq({W.rec.close, cav(W).st}, {1, 'close'})
+  W.cav = 'done'
+  W.run(100, {skip = 50})
+  local e = W.find_events('CAVERN_SWEEP_END')[1]
+  T.eq({e.d.why, e.d.sealed, e.d.killed}, {'hostile', 1, 0})
+end)
+
+T.test('BUG-777: a beast beside the shaft column closes the opening shaft even if it was in sight at the start', function()
+  local W = world()
+  W.run(1300, {skip = 50})
+  W.move(201, 11, 11, 95)
+  W.run(300, {skip = 50})
+  T.eq({W.rec.close, cav(W).st}, {1, 'close'})
+end)
+
+T.test('BUG-777: an unplug project that makes no progress for six days closes the shaft (a stair nobody builds)', function()
+  local W = world()
+  W.run(1300, {skip = 50})
+  W.proj.stage, W.proj.chunk, W.proj.pct, W.proj.blocked = 1, 0, 33, 'stalled'
+  W.run(5 * 1200, {skip = 50})
+  T.eq({W.rec.close, cav(W).st}, {0, 'open'}, 'five days: still waiting')
+  W.proj.pct = 40                                              -- progress resets the clock
+  W.run(5 * 1200, {skip = 50})
+  T.eq({W.rec.close, cav(W).st}, {0, 'open'})
+  W.run(2 * 1200, {skip = 50})
+  T.eq({W.rec.close, cav(W).st}, {1, 'close'})
+  W.cav = 'done'
+  W.run(100, {skip = 50})
+  T.eq(W.find_events('CAVERN_SWEEP_END')[1].d.why, 'stalled')
+end)
+
+T.test('BUG-777: a pending plug (planned stair not removed yet) is asked again, not ended as seal_failed', function()
+  local W = world()
+  local calls = 0
+  local real = W.runner_mod.sweep_close
+  W.runner_mod.sweep_close = function(K, id)
+    calls = calls + 1
+    if calls < 3 then return false, 'pending: a planned building still stands on the shaft' end
+    return real(K, id)
+  end
+  W.run(1300, {skip = 50})
+  W.K.set_mode('SIEGE', 'test')
+  W.run(1500, {skip = 50})
+  T.ok(calls >= 3, 'asked again: ' .. calls)
+  T.eq({W.rec.close, cav(W).st}, {1, 'close'})
+  T.eq(#W.find_events('CAVERN_SWEEP_END'), 0, 'no seal_failed')
 end)
 
 T.done()
