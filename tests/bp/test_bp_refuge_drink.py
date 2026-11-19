@@ -128,6 +128,9 @@ def test_no_site_says_why_and_names_a_smaller_store_that_fits(fort):
         bp.rank(_ring(snap, man, 3), "refuge_drink", {"n": 11}, manifest=man)
     assert "not even a 3x1 store (2 barrels)" in str(e.value), str(e.value)
     assert "a well or cistern of its own" in str(e.value)
+    # BUG-782: with no refuge but a Kern+ fortcore room the store is dug off that room (tests/test_bug782_kern_store.py); with
+    # neither it is refused
     no_ref = {k: v for k, v in man.items() if k != "refuge"}
+    no_ref["rooms"] = [r for r in no_ref.get("rooms", []) if r.get("tpl") != "fortcore"]
     with pytest.raises(ValueError, match="no refuge in the fort manifest"):
         bp.rank(snap, "refuge_drink", {}, manifest=no_ref)

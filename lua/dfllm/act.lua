@@ -1301,6 +1301,27 @@ local function impls(state)
     return true, n or 1
   end
 
+  -- BUG-782 (Run 16b i2 Whirledrampart y451: the refuge stood dry for good, no cistern route, no refuge room to dig a store from; Run 16a
+  -- i1 y543 refuge_drink refused 'no refuge in manifest'): the refuge's drink store without a dig: a w x h stockpile named dfllm-drink
+  -- (seal.CFG.store) on revealed plain floor of the refuge burrow, a drink-only food pile (quickfort `f` with `:=booze`, the cell
+  -- dfpilot/bp/rooms.py refuge_drink writes), `barrels` containers, taking from the stockpile `take` by name (default dfllm-stock; a name
+  -- no pile has only prints a quickfort error, the pile is made anyway). The caller read the tiles (act reads none) and keeps the
+  -- digging away from water: nothing is dug here. Returns ok, stockpiles designated (0 = quickfort skipped the tiles: refused).
+  function I.drink_pile(pos, w, h, barrels, take)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    w, h = math.max(1, math.min(int(w) or 3, 5)), math.max(1, math.min(int(h) or 2, 8))
+    local n = math.max(1, math.min(int(barrels) or w * h, w * h))
+    local tk = type(take) == 'string' and take:match('^[%w_+-]+$') and #take <= 20 and take or 'dfllm-stock'
+    local cell = string.format('f{name=dfllm-drink barrels=%d take_from=%s}:=booze(%dx%d)', n, tk, w, h)
+    local ok, stats = I.quickfort({mode = 'place', data = {[0] = {[0] = {[0] = cell}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local d = type(stats) == 'table' and int(stats.place_designated) or nil
+    if d == 0 then return false, 'quickfort designated no stockpile there' end
+    return true, d or 1
+  end
+
   -- zones screen > add zone (FR-78, Run 14 note 65: a pen and a pit had to be built by hand with constructBuilding): ONE
   -- zone from a one-cell quickfort zone blueprint (zonelib builds `spec.cell`, e.g. 'n{name=pasture}(4x3)', and `spec.pos`,
   -- its north-west corner; the caller read the tiles: revealed floor, no conflicting zone, act reads none). The zones that

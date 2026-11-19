@@ -475,7 +475,10 @@ def _no_store(snap, p, manifest, bad, hid, mk, wet) -> str:
     (the refuge room's walls hold rooms, sumps, stairs and levers; a cramped refuge leaves rock only for a small one)."""
     if not manifest.get("refuge"):
         return ("refuge_drink: no refuge in the fort manifest (fortcore stage 3 digs the refuge room the store is dug "
-                "from)")
+                "from)" + ("; no Kern+ fortcore room has rock beside it for a store either (BUG-782)" if kern_rooms(manifest) else
+                           "; no Kern+ fortcore room is in the manifest either (BUG-782)")
+                + ". The kernel puts a dfllm-drink pile on the refuge burrow's floor by itself after 10 days of refuge_dry "
+                  "(no dig), or trade.want barrels / `bp.place cistern level=core` with water")
     where = ", ".join(f"{b[0]}-{b[3]},{b[1]}-{b[4]} z{b[2]}" for b in refuge_rooms(manifest)[:2])
     shape = rooms.drink_room(p["n"])
     head = f"refuge_drink: no site for {p['n']} barrels ({shape[0]}x{shape[1]}) beside the refuge room {where}"
@@ -832,6 +835,20 @@ def refuge_rooms(m: dict) -> list[list[int]]:
 REFUGE_EXT_PEN = 20
 
 
+def kern_rooms(m: dict) -> list[list[int]]:
+    """BUG-782: bboxes of the fortcore rooms that are not the refuge room (the Kern+ rooms)."""
+    return [r["bbox"] for r in m.get("rooms", []) if isinstance(r, dict) and r.get("tpl") == "fortcore"
+            and not str(r.get("id", "")).endswith("_refuge") and isinstance(r.get("bbox"), list) and len(r["bbox"]) == 6]
+
+
+def kern_store(tpl: str, m: dict) -> bool:
+    """BUG-782 (Run 16a i1 y543: refuge_drink refused 'no refuge in manifest', the pop ceiling held on refuge_dry for years; Run 16b i2:
+    no cistern route): a refuge drink store with no refuge room in the manifest is dug off a Kern+ fortcore room instead (place it with
+    p.burrow=Kern+: it joins the core, Z4, and its drink pile feeds the Kern+ burrow; the kernel's own pile on the refuge burrow's floor,
+    economy T.drinkpile, covers the refuge itself)."""
+    return tpl == "refuge_drink" and not m.get("refuge") and bool(kern_rooms(m))
+
+
 def refuge_ext(m: dict) -> list[list[int]]:
     """BUG-319: bboxes of the manifest's refuge-level rooms (rooms.REFUGE_LEVEL templates) on the refuge anchor's level."""
     ref = m.get("refuge")
@@ -938,6 +955,10 @@ def _anchor_tiles(g: Graph, tpl: str, p: dict, manifest: dict) -> list[int]:
     of a refuge-level room dug off it (no lever tile). BUG-157: never a tile of a civilian stair column (the refuge's hatch tile among them): a room opens next to
     the stair, its door never on the citizens' stair or where the seal puts the hatch."""
     stair = civ_stair_tiles(manifest)
+    if kern_store(tpl, manifest):                                      # BUG-782: no refuge room: the Kern+ rooms' floor
+        m = g.mask(kern_rooms(manifest))
+        levers = _lever_tiles(manifest)
+        return [i for i, c in enumerate(g.t) if m[i] and c in ".X" and g.pos(i) not in levers and g.pos(i) not in stair]
     if on_refuge(tpl, p):
         m = g.mask(refuge_rooms(manifest) + refuge_ext(manifest))     # BUG-319: and off its own rooms
         levers = _lever_tiles(manifest)
@@ -1150,7 +1171,7 @@ def _rooms(snap, tpl, p, rects, bad, hid, mk, manifest, wet=None):
     cis = rooms.cistern_layout(p) if tpl == "cistern" else None
     intake = bool(cis and cis["intake"])
     refuge_level = on_refuge(tpl, p)
-    own = g.mask(refuge_rooms(manifest)) if refuge_level else None      # BUG-319: anchors off it rank after
+    own = g.mask(refuge_rooms(manifest)) if refuge_level and not kern_store(tpl, manifest) else None   # BUG-319: anchors off it rank after
     core_rects = footprint("cistern", {**p, "path": ""}) if intake else rects
     at = _At(snap)
     if farm:

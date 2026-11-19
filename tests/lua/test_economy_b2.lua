@@ -379,7 +379,9 @@ T.test('BUG-060: no carpenters or logs: a simple order is made again (the new on
   days(W2, 25)
   T.eq(#acts(W2, 'order_material'), 0)
   T.eq(#acts(W2, 'workorder', 'dfllm:redo_'), 0)
-  T.eq(#acts(W2, 'order_remove'), 0)
+  -- BUG-781: after orders.dead_days (14) of 'no rock' with no usable boulder at all the order is removed (it cannot ever run), once
+  T.eq(#acts(W2, 'order_remove'), 1)
+  T.eq(#stuck(W2, 'order(s) removed: rock'), 1)
   -- 0 boulders: the order itself is blocked ("no rock"), ORDER_STUCK's, not stale
   T.eq(#stuck(W2, 'stale'), 0)
 end)

@@ -421,6 +421,28 @@ T.test('tool_pile: a w x h dfllm-tools weapons stockpile (quickfort place key p)
   T.ok(#calls[5].data[0][0][0] <= 64)
 end)
 
+-- BUG-782: the refuge's drink store without a dig: a dfllm-drink food pile (booze preset) through quickfort place mode (economy only)
+T.test('drink_pile: a w x h dfllm-drink pile cell with barrels and take_from at the position; economy only', function()
+  local W = H.world{tag = 'dp'}
+  local calls = {}
+  local n = 1
+  W.scripts['quickfort'] = {apply_blueprint = function(p)
+    calls[#calls + 1] = p
+    return {place_designated = {label = 'Stockpiles designated', value = n}}
+  end}
+  local env = mk('economy')
+  T.eq({env.api.drink_pile({60, 40, 5}, 3, 4, 12)}, {true, 1})
+  T.eq({calls[1].mode, calls[1].command, calls[1].pos}, {'place', 'run', {x = 60, y = 40, z = 5}})
+  T.eq(calls[1].data[0][0][0], 'f{name=dfllm-drink barrels=12 take_from=dfllm-stock}:=booze(3x4)')
+  T.ok(#calls[1].data[0][0][0] <= 64)
+  T.eq({env.api.drink_pile({60, 40, 5}, 9, 30, 99, 'my pile; x')}, {true, 1})
+  T.eq(calls[2].data[0][0][0], 'f{name=dfllm-drink barrels=40 take_from=dfllm-stock}:=booze(5x8)', 'capped, bad take name replaced')
+  T.eq((mk('runner').api.drink_pile({60, 40, 5}, 3, 2, 2)), false, 'not owner')
+  T.eq((env.api.drink_pile({60, 40}, 3, 2, 2)), false, 'bad position')
+  n = 0
+  T.eq({env.api.drink_pile({61, 40, 5}, 3, 2, 2)}, {false, 'quickfort designated no stockpile there'})
+end)
+
 T.test('order_top (Run 11 siege 8, seal first): the named orders move to the top in the given order (runner only)',
        function()
   H.world{tag = 'otop'}

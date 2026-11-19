@@ -430,7 +430,8 @@ M.DEFAULTS = {
   -- DECISION_NEEDED manager_stuck with the facts about him and the commands that look further (M.mgr_stuck)
   orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2,
             bypass_days = 5, bypass_max = 4, bypass_open = 8, cap = 120, prune_days = 30, prune_per_day = 30,
-            mgr_stuck_days = 5},      -- BUG-585: 14 -> 5 (Run 16b i2 Brotherarrow y406: the warning came after 24 days)
+            mgr_stuck_days = 5,
+            dead_days = 14, dead_backoff_days = 30, dead_report_days = 30},      -- BUG-585: 14 -> 5 (Run 16b i2 Brotherarrow y406: the warning came after 24 days)
   -- BUG-042: the manager's Office zone needs a chair (and a table: the live fix was both) to validate work orders; a
   -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
   -- item) at most every retry_days; zones larger than max_tiles are searched only that far. BUG-232: `zone` = with no
@@ -12004,6 +12005,105 @@ function M.order_prune(K, c, p, now, oq)
   return #gone
 end
 
+-- BUG-781 (Run 16b i2 Whirledrampart y451, STAND 20:10: '60 Orders stuck no rock / no bars STEEL' for 24-43 days; 20 x ConstructArmorStand
+-- 'no rock' (the rockstock library), 14 x MakeShield 'no bars:INORGANIC:STEEL', 15 x MakeAmmo 'no bars:INORGANIC:IRON'): the prune (BUG-315)
+-- keeps one of each kind, the pieces and the standing orders, so an order for a material THE FORT DOES NOT HAVE stayed for ever and filled the
+-- queue. M.mat_dead says whether the missing input cannot come at all: rock when no usable boulder exists (M.usable_n 0 or DF's own refusal),
+-- a pure metal's bars when there are neither bars nor ore of it, steel when plan_steel names a missing input (st.steel.missing); alloys other
+-- than steel are not judged. M.order_dead removes the orders stuck on such an input for orders.dead_days (kind input only; never an order a tag
+-- of M.PRUNE_KEEP_TAG owns: moods, pieces, the dead, the hospital), one-time and standing alike, at most prune_per_day a day together with the prune.
+-- A kernel-owned one waits dead_backoff_days before it is entered again. ONE ORDER_STUCK (B, kind dead_material) per material and report_days
+-- (p.deadmat) names the material and what gives it (trade.want, stone.use, dig)
+M.ALLOYS = {STEEL = true, BRONZE = true, BISMUTH_BRONZE = true, BLACK_BRONZE = true, BRASS = true, PIG_IRON = true,
+            ROSE_GOLD = true, STERLING_SILVER = true, ADAMANTINE = true}
+function M.mat_dead(c, r, key)
+  if key == 'rock' then
+    local inv = r.inv or {}
+    if M.hard_denied(inv, r.now) then return true, 'no usable rock (DF refuses every boulder of the fort)' end
+    if M.usable_n(inv) <= 0 then return true, 'no usable rock' end
+    return false
+  end
+  local tok = key:match('^bars:(.+)$')
+  if not tok then return false end
+  local metal = tok:gsub('^INORGANIC:', '')
+  if stock_of(r, key) > 0 then return false end
+  if metal == 'STEEL' then
+    local miss = type(st.steel) == 'table' and st.steel.missing
+    if type(miss) == 'table' and #miss > 0 then return true, 'no steel (missing ' .. table.concat(miss, ', ') .. ')' end
+    return false
+  end
+  if M.ALLOYS[metal] then return false end
+  for t, o in pairs(st.ores or {}) do
+    for _, m in ipairs(o.metals or {}) do
+      if m == tok and (o.n or 0) > 0 then return false end
+    end
+  end
+  return true, 'no ' .. metal:lower() .. ' (no bars, no ore)'
+end
+
+function M.order_dead(K, c, r, oq)
+  local oc = c.orders or M.DEFAULTS.orders
+  local p, now = r.p, r.now
+  local dd = math.tointeger(oc.dead_days) or 14
+  if dd <= 0 then return 0 end
+  local per = math.tointeger(oc.prune_per_day) or 30
+  local day = now // DAY
+  if p.prune_day ~= day then p.prune_day, p.prune_n = day, 0 end
+  if type(p.deadmat) ~= 'table' then p.deadmat = json.object{} end
+  local tag_of, keep_id = {}, {}
+  for tag, id in pairs(p.orders) do
+    tag_of[id] = tag
+    for _, pre in ipairs(M.PRUNE_KEEP_TAG) do
+      if tostring(tag):sub(1, #pre) == pre then keep_id[id] = true; break end
+    end
+  end
+  local verdict, by_mat, gone = {}, {}, {}
+  for _, o in ipairs(orders_all()) do
+    if (p.prune_n or 0) >= per then break end
+    local rec = p.ostuck[tostring(o.id)]
+    if type(rec) == 'table' and rec.kind == 'input' and not keep_id[o.id] and (math.tointeger(o.amount_left) or 0) > 0
+       and (now - (math.tointeger(rec.since) or now)) // DAY >= dd then
+      local key = tostring(rec.why):match('^no (bars:[%w_:]+)') or (tostring(rec.why):match('^no rock') and 'rock') or nil
+      if key then
+        local v = verdict[key]
+        if v == nil then
+          local dead, why = M.mat_dead(c, r, key)
+          v = {dead = dead, why = why}
+          verdict[key] = v
+        end
+        if v.dead and K.act.order_remove(o.id) then
+          p.prune_n = (p.prune_n or 0) + 1
+          p.ostuck[tostring(o.id)] = nil
+          local tag = tag_of[o.id]
+          if tag then p.orders[tag], st.backoff[tag] = nil, now + (oc.dead_backoff_days or 30) * DAY end
+          gone[#gone + 1] = string.format('%d %s', o.id, tostring(rec.job))
+          by_mat[key] = (by_mat[key] or 0) + 1
+        end
+      end
+    end
+  end
+  if #gone == 0 then return 0 end
+  local keys = {}
+  for key in pairs(by_mat) do keys[#keys + 1] = key end
+  table.sort(keys)
+  local rd = (math.tointeger(oc.dead_report_days) or 30) * DAY
+  for _, key in ipairs(keys) do
+    local last = math.tointeger(p.deadmat[key])
+    local msg = string.format('%d order(s) removed: %s (%s); the kernel does not enter them again for %d days. Get it first: %s',
+                              by_mat[key], key, verdict[key].why, oc.dead_backoff_days or 30,
+                              key == 'rock' and 'stone.use (a flux or soft stone), dig for hard stone, or trade.want wood' or
+                              ('trade.want add "bar:' .. key:gsub('^bars:INORGANIC:', ''):lower() .. '", or dig for ore'))
+    K.log('warn', '%s', msg)
+    if not last or now - last >= rd then
+      p.deadmat[key] = now
+      K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = math.tointeger(tonumber(gone[1]:match('^%d+'))) or 0, job = 'dead_material',
+             why = ('dead material: ' .. key):sub(1, 80), dropped = by_mat[key], kind = 'dead_material', n = by_mat[key]})
+    end
+  end
+  K.persist.touch('m.economy')
+  return #gone
+end
+
 -- FR-01 (daily): orders that cannot run (workshop, input on the citizens' walk group, worker) for stuck_days;
 -- sliced: ORDER_SLICE orders per frame
 local ORDER_SLICE = 50
@@ -12075,6 +12175,8 @@ function T.ocheck(K, c, r)
   if not okm then K.log('warn', 'missing workshops: %s', tostring(errm)) end
   local okp, errp = pcall(M.order_prune, K, c, p, r.now, oq)   -- BUG-315: stuck duplicates and the queue above its cap; BUG-515: jam culprits
   if not okp then K.log('warn', 'order prune: %s', tostring(errp)) end
+  local okd, errd = pcall(M.order_dead, K, c, r, oq)   -- BUG-781: orders for a material the fort does not have
+  if not okd then K.log('warn', 'order dead: %s', tostring(errd)) end
   st.jobord = oq.shops and oq.shops.by_order or st.jobord   -- BUG-315: the orders whose jobs are out (scan_orders)
   local wl = {}
   for label, n in pairs(oq.wsn) do wl[#wl + 1] = {label, n} end
@@ -14364,6 +14466,7 @@ function M.pile_site(K, tc, q)
     local ok, t = K.call('snapshot', 'tile', x, y, cz)
     local good = ok and type(t) == 'table' and t.c == '.' and (t.bld == nil or t.bld == '') and (t.dig == nil or t.dig == '')
                  and not t.cav and not far(K, x, y, cz) and not M.attack_path(K, {x, y, cz})
+                 and (q.ok == nil or q.ok(x, y, cz) == true)       -- BUG-782: e.g. only tiles of the refuge burrow
     seen[key] = good == true
     return seen[key]
   end
@@ -14460,6 +14563,93 @@ function T.toolpile(K, c, r)
     K.log(warn and 'warn' or 'debug', 'tool pile: no site: %s', tostring(why))
   end
   p.tpile = json.object(out)
+  return true
+end
+
+-- BUG-782 (Run 16b i2 Whirledrampart y451: 'bp sites cistern ... no pipe route', the refuge dry for weeks, refuge_dry the one R0 blocker for
+-- good; Run 16a i1 y543: refuge_drink refused 'no refuge in manifest' and the pop ceiling stayed on refuge_dry; BUG-766 only asks a DECISION):
+-- when no well or cistern can come, the refuge gets a drink store WITHOUT a dig: after M.DRINKPILE.days days of readiness's refuge_dry with
+-- no store standing (seal.refuge_drink store) and no refuge_drink / cistern project under way, a w x h stockpile `dfllm-drink` (act.drink_pile,
+-- barrels as sized like dfpilot/bp/rooms.py refuge_drink_n, taking from dfllm-stock) goes on revealed plain floor of the refuge burrow
+-- (pile_site with the burrow as filter: the pile touches only tiles the burrow already holds, nothing is dug, so never near water). The
+-- haulers fill it with drink; seal's audit counts the pile's drink on the burrow tiles, so readiness's refuge_dry ends by itself, and
+-- the pile is named in its fix text ('its drink store (n tiles) waits for barrels'). Smaller sizes are tried when none fits; a refused or
+-- site-less try is repeated after retry_days. One REFUGE_STOCK-free log line (kern.log) per placement
+M.DRINKPILE = {days = 10, retry_days = 3, place_days = 30, per_unit = 5, breach_days = 7, milli = 53, max = 24, r = 12, reads = 700}
+function M.drinkpile_n(need)
+  local D = M.DRINKPILE
+  need = math.max(0, math.tointeger(need) or 0)
+  local units = math.max(need, -(-need * D.breach_days * D.milli // 1000))
+  return math.min(D.max, math.max(2, -(-units // D.per_unit)))
+end
+function T.drinkpile(K, c, r)
+  if not r.day or not HUNT_MODES[K.mode()] or type(K.act.drink_pile) ~= 'function' then return true end
+  local D, p = M.DRINKPILE, r.p
+  local okr, dry = K.call('readiness', 'refuge_dry')
+  if not (okr and type(dry) == 'string' and dry ~= '') then p.dpile_dry = nil; return true end
+  if not p.dpile_dry then p.dpile_dry = r.now end
+  if r.now - p.dpile_dry < D.days * DAY then return true end
+  local okd, rd = K.call('seal', 'refuge_drink')
+  if not (okd and type(rd) == 'table' and rd.exists == true and type(rd.box) == 'table') then return true end
+  if type(rd.store) == 'table' and (math.tointeger(rd.store.tiles) or 0) > 0 then return true end      -- a store stands
+  for _, tpl in ipairs({'refuge_drink', 'cistern'}) do
+    local okp, np = K.call('runner', 'pending', tpl)
+    if okp and (math.tointeger(np) or 0) > 0 then return true end                                      -- a project is under way
+  end
+  local rec = type(p.dpile) == 'table' and p.dpile or {}
+  -- a placed pile waits place_days for seal's audit to see its tiles (the store check above) before another is tried
+  local wait = rec.state == 'placed' and D.place_days or D.retry_days
+  if rec.t and r.now - rec.t < wait * DAY then return true end
+  local burrow = dfhack.burrows and dfhack.burrows.findByName(tostring(rd.name))
+  if not burrow then return true end
+  local P = {x = 0, y = 0, z = 0}
+  local function inb(x, y, z)
+    P.x, P.y, P.z = x, y, z
+    local ok, v = pcall(dfhack.burrows.isAssignedTile, burrow, P)
+    return ok and v == true
+  end
+  local b = rd.box
+  local cx, cy = (b[1] + b[4]) // 2, (b[2] + b[5]) // 2
+  local nz = type(rd.near) == 'table' and math.tointeger(rd.near[3]) or nil
+  local zs = {}
+  if nz then zs[1] = nz end
+  for z = b[3], b[6] do if z ~= nz then zs[#zs + 1] = z end end
+  local tc = {pile_r = D.r, pile_reads = D.reads}
+  local n0 = M.drinkpile_n(rd.need)
+  local sizes, seen = {}, {}
+  for _, n in ipairs({n0, 9, 6, 4, 2}) do
+    if n <= n0 and not seen[n] then seen[n] = true; sizes[#sizes + 1] = n end
+  end
+  local site, w, h, nb, why
+  for _, n in ipairs(sizes) do
+    local ww = n <= 9 and 3 or 5
+    local hh = -(-n // ww)
+    tc.pile_w, tc.pile_h = ww, hh
+    for _, z in ipairs(zs) do
+      local s, wy = M.pile_site(K, tc, {at = {cx, cy, z}, by = 'refuge', ok = inb})
+      if s then site, w, h, nb = s, ww, hh, n; break end
+      why = wy
+    end
+    if site then break end
+  end
+  r.cmds = r.cmds + 1
+  local out = {t = r.now}
+  if site then
+    local ok, n = K.act.drink_pile(site, w, h, nb, 'dfllm-stock')
+    if ok then
+      out.state, out.at, out.w, out.h, out.n = 'placed', json.array(site), w, h, nb
+      K.log('info', 'drink pile: dfllm-drink %dx%d (%d barrels) at %d,%d,%d in %s: no cistern or refuge room, the refuge held %d of %d drinks',
+            w, h, nb, site[1], site[2], site[3], tostring(rd.name), math.tointeger(rd.drink) or 0, math.tointeger(rd.need) or 0)
+    else
+      out.state, out.why = 'refused', tostring(n):sub(1, 60)
+      K.log('warn', 'drink pile: dfllm-drink at %d,%d,%d refused: %s', site[1], site[2], site[3], tostring(n))
+    end
+  else
+    out.state, out.why = 'nosite', tostring(why or 'no level'):sub(1, 120)
+    K.log('debug', 'drink pile: no site in %s: %s', tostring(rd.name), tostring(why))
+  end
+  p.dpile = json.object(out)
+  K.persist.touch('m.economy')
   return true
 end
 
@@ -14606,7 +14796,7 @@ function T.finish(K, c, r)
 end
 
 local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'gather', 'watch', 'cmdq', 'engine', 'labor_fix',
-              'scan', 'slabs', 'slotnow', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'cover', 'fcrew', 'starve', 'forbid', 'toolpile',
+              'scan', 'slabs', 'slotnow', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'cover', 'fcrew', 'starve', 'forbid', 'toolpile', 'drinkpile',
               'jobs', 'jsite', 'jmat', 'stale', 'jmake', 'jfree', 'jresume',
               'jcheck', 'boost', 'jmove', 'pb', 'orders', 'stand', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}

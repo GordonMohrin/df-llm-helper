@@ -904,7 +904,9 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      "orders": {"unval_days": (1, 60), "mgr_stuck_days": (0, 400), "bypass_days": (0, 112), "bypass_max": (0, 20),
                                 "bypass_open": (0, 40),
                                 # BUG-315: cap 0 = no cap (duplicates still go); prune_per_day 0 = the prune is off
-                                "cap": (0, 2000), "prune_days": (1, 1000), "prune_per_day": (0, 200)},
+                                "cap": (0, 2000), "prune_days": (1, 1000), "prune_per_day": (0, 200),
+                                # BUG-781: dead_days 0 = orders for a material the fort does not have stay
+                                "dead_days": (0, 400), "dead_backoff_days": (1, 400), "dead_report_days": (1, 400)},
                      # BUG-232: zone = an Office zone over a lone chair when the fort has none
                      "office": {"table": "bool", "retry_days": (1, 112), "max_tiles": (1, 10000), "zone": "bool"},
                      # B2: BUG-061 slab pass, BUG-060 stale orders, FR-73 standing orders (list, frequency: checked below)

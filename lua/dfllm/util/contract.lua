@@ -326,6 +326,7 @@ C.ACT = {
   hospital_restore = {'water'},                    -- BUG-539: the removed hospital zone drawn again at its old location
   water_zone = {'water'},                          -- BUG-324: a Water Source zone on the water the scan found reachable
   sand_zone = {'economy'}, fish_zone = {'economy'},
+  drink_pile = {'economy'},                        -- BUG-782: the refuge's drink store without a dig
   tool_pile = {'economy'},                         -- BUG-053: a weapons stockpile for the miners' picks near the mines
   zone_place = {'runner', 'economy'},              -- FR-78: the verb zone.place (zonelib); BUG-232: the manager's office zone
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
