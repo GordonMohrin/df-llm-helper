@@ -29,7 +29,7 @@ def test_patient_dying_is_a_class_a_event_with_the_caregivers_state():
     assert schema.validate("event", dict(e, cls="B")) != []
     assert any("carers: missing" in x for x in schema.validate("event", dict(e, d={"units": [1], "n": 1})))
     assert any("hosp" in x for x in schema.validate("event", dict(e, d=dict(e["d"], hosp=3))))
-    assert schema.ACT["work_detail"] == ["economy", "water"]
+    assert schema.ACT["work_detail"] == ["economy", "water", "player"]
 
 
 def test_rules_names_patient_dying_and_stays_within_300_lines():

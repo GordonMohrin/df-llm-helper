@@ -24,6 +24,8 @@ end
 for fn, owners in pairs(C.ACT) do out.act[fn] = owners end
 for _, m in ipairs(C.MODULES) do out.modules[#out.modules + 1] = {m.name, m.wp, m.critical == true, m.every} end
 for k, e in pairs(C.PERSIST) do out.persist[k] = {e.key, e.owner} end
+out.verb_emg = sorted_keys(C.VERB_EMG)      -- NEU1 P7
+out.verb_hold = sorted_keys(C.VERB_HOLD)
 out.verb_by = {}
 for v, set in pairs(C.VERB_BY) do out.verb_by[v] = sorted_keys(set) end
 out.kern = C.KERN

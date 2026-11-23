@@ -1063,7 +1063,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "resume": ("arbiter", None, False),
     "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
     "squad.sortie": ("military", ["PEACE", "ALERT", "SIEGE", "BREACH", "RECOVERY"], True),     # BUG-675: PEACE for one wild animal inside
-    "lever": ("gate", None, False), "inspect": ("kern", None, False),     # NEU1 P7: PEACE, or up while the emergency exit is open (gate)
+    "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),     # NEU1 P7: any mode (up only) while the emergency exit is open
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),
     "tombs.repair": ("care", None, False),
     "ack": ("reflex", None, False),

@@ -1038,6 +1038,14 @@ local function kern_verb(st, verb, args, cmd)
   end
 end
 
+-- NEU1 P7: the player module says the emergency exit is open (no module, disabled or a fault: closed)
+local function emg_open(st)
+  local pm = st.mods.player
+  if not (pm and not pm.disabled and type(pm.M.open) == 'function') then return false end
+  local ok, open = st.call_in(pm, 'open', pm.M.open)
+  return ok == true and open == true
+end
+
 local function handle_inbox(st, name)
   local path = st.paths.inbox .. '/' .. name
   local fid = name:match('^[0-9]+%-([A-Za-z0-9_%-]+)%.json$')
@@ -1080,7 +1088,9 @@ local function handle_inbox(st, name)
   if not M.BY[doc.by] then return reply(st, cmd, false, 'bad by', nil, args) end
   local vb = C.VERB_BY[doc.verb]               -- `by` is a label; a few verbs only from these origins (§9.5)
   if vb and not vb[doc.by] then return reply(st, cmd, false, cmd.verb .. ' not accepted from ' .. tostring(doc.by), nil, args) end
-  if spec.modes and not spec.modes[st.mode] then return reply(st, cmd, false, cmd.verb .. ' not allowed in ' .. st.mode, nil, args) end
+  if spec.modes and not spec.modes[st.mode] and not (C.VERB_EMG[cmd.verb] and emg_open(st)) then   -- NEU1 P7: the exit lifts it
+    return reply(st, cmd, false, cmd.verb .. ' not allowed in ' .. st.mode, nil, args)
+  end
   if spec.approve and args.approve ~= true then return reply(st, cmd, false, 'approval required', nil, args) end
   if spec.mod == 'kern' then
     local prev = st.current

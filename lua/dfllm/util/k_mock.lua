@@ -954,7 +954,9 @@ function M.new(opts)
     if not spec then return reply(false, 'unknown verb') end
     if type(args) ~= 'table' then return reply(false, 'args must be an object') end
     if C.VERB_BY[verb] and not C.VERB_BY[verb][cmd.by] then return reply(false, verb .. ' not accepted from ' .. tostring(cmd.by)) end
-    if spec.modes and not spec.modes[W.mode] then return reply(false, verb .. ' not allowed in ' .. W.mode) end
+    local pm = W.mods.player             -- NEU1 P7: the emergency exit lifts the mode list of C.VERB_EMG (as kern)
+    local emg = C.VERB_EMG[verb] and pm and not pm.disabled and type(pm.M.open) == 'function' and select(2, call_in(pm, 'open', pm.M.open)) == true
+    if spec.modes and not spec.modes[W.mode] and not emg then return reply(false, verb .. ' not allowed in ' .. W.mode) end
     if spec.approve and args.approve ~= true then return reply(false, 'approval required') end
     if spec.mod == 'kern' then
       local ok, msg, data = kern_verbs[verb](args)

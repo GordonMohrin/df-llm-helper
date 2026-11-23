@@ -440,6 +440,10 @@ def alarm_items(ctx: Ctx) -> list[tuple[int, str]]:
     parts for the status (the lockdown with its cause, the unacked interrupts and the ETA are rank 2 and stay when the
     clock, the doors, the recall, the far invaders and the lever latency (rank 3) are cut); the brief joins them."""
     s, out = ctx.s, []
+    em = s.get("emg")
+    if isinstance(em, dict) and em.get("o"):          # NEU1 P7: the emergency exit is open (rank 1: the status always keeps it)
+        out.append((1, f"NOTAUSGANG open ({em.get('why') or '?'}, {em.get('left', 0)} d left): lever up in any mode, "
+                       "squad.station, squad.sortie, burrow.unit, door.lock"))
     c = s.get("clock")
     if c:
         if c["held"] or (c["orig"] and c["cap"] < c["orig"]):

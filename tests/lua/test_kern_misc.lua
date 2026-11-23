@@ -64,9 +64,9 @@ T.test('real loader: contract order, missing and broken modules skipped and logg
   local names = {}
   for _, m in ipairs(kern.status().modules) do names[#names + 1] = m.name end
   T.eq(names, {'sense', 'threat', 'siege', 'gate', 'reflex', 'military', 'drill', 'readiness', 'arbiter', 'snapshot',
-               'seal', 'water', 'traps', 'baseline', 'perf', 'selftest', 'cavern'})          -- FR-98: cavern last
+               'seal', 'water', 'traps', 'baseline', 'perf', 'selftest', 'cavern', 'player'})   -- FR-98: cavern; NEU1 P7: player last
   T.eq(seen, {'sense', 'threat', 'siege', 'gate', 'reflex', 'military', 'drill', 'readiness', 'snapshot', 'seal', 'water',
-              'traps', 'baseline', 'cavern'})
+              'traps', 'baseline', 'cavern', 'player'})
   kern.stop()
   local log = H.read(W.sd .. '/kern.log')
   T.ok(log:find('syntax-ish error in care', 1, true), 'load error logged')

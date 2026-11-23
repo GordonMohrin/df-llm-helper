@@ -43,8 +43,8 @@ Tactical verbs (`schema.VERB_EMG`, refused with `only while the emergency exit i
 
 | verb | what (the screen a human clicks) | act |
 |---|---|---|
-| `lever bridge=B want=up` | any mode while open (down still PEACE only: a sortie opens the gate itself) | gate's own pull |
-| `squad.station squad=A pos=x,y,z` (`release=true`) | squads screen > station | `military.hold_order` (tag `player`) |
+| `lever bridge=B want=up` | any mode while open: kern lifts the contract mode list of `VERB_EMG` verbs while `player.open()`; gate's verb then takes only `up` (down stays PEACE: a sortie opens its own gate) | gate's own pull |
+| `squad.station squad=A pos=[x,y,z]` (`release=true`) | squads screen > station | `military.hold_order` (tag `player`) |
 | `squad.sortie` | unchanged (already any mode but DRILL) | - |
 | `burrow.unit burrow=N unit=U on=true` | burrows screen > units | `act.burrow_units` |
 | `door.lock door=ID on=true` | door sheet > forbid | `act.door_forbid` |
@@ -101,8 +101,10 @@ No free digging, no item creation, no `dfhack lua`: every verb is one click of a
 - **No pause.** The window clamps the clock; the dead-man pause is P3's.
 - **No new sortie rule.** `squad.sortie` keeps its armour/odds refusal (P4 changes the sortie).
 - **Lever down outside PEACE stays refused**, also in the window (fail safe; the sortie lowers its own gate).
-- **Holds are in-memory in the area sense only for footprints of `quickfort` origins**: a kernel blueprint whose
-  origin lies outside a removed footprint but covers it is not stopped.
+- **A removed footprint stops only creators whose origin tile lies in it** (`tile:` of the quickfort / zone `pos`): a
+  kernel blueprint whose origin lies outside the footprint but covers it is not stopped.
+- Holds live in the player module's site data (`m.player`, at most 200, oldest dropped); a disabled or missing player
+  module holds nothing and opens nothing (the kernel then behaves as before).
 - `furniture.place` holds nothing (the kernel does not remove furniture); no material choice (quickfort's default).
 - No free dig, no channel, no item or unit edit, no new `run` allowlist entry.
 - `military.release` frees a squad on close only while its order is still the player's (siege's own hold stays).

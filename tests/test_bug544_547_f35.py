@@ -45,9 +45,9 @@ def test_lint_removejob_allowed_in_cancel_link_job_and_cancel_own_lever_job_only
 
 def test_the_new_acts_are_owned_and_mirror_the_contract():
     assert schema.ACT["cancel_link_job"] == ["gate"]
-    assert schema.ACT["labor_set"] == ["economy", "seal"]
+    assert schema.ACT["labor_set"] == ["economy", "seal", "player"]
     lua = (ROOT / "lua" / "dfllm" / "util" / "contract.lua").read_text(encoding="utf-8")
-    assert "cancel_link_job = {'gate'}" in lua and "labor_set = {'economy', 'seal'}" in lua
+    assert "cancel_link_job = {'gate'}" in lua and "labor_set = {'economy', 'seal', 'player'}" in lua
 
 
 def test_the_real_act_lua_passes_the_lint():

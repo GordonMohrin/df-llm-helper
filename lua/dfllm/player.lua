@@ -333,7 +333,7 @@ M.verbs['squad.station'] = function(K, args)
     if not ok then return false, 'squad.station: ' .. tostring(res) end
     return true, 'squad ' .. key .. ' back to the kernel'
   end
-  if type(args.pos) ~= 'table' then return false, 'squad.station needs pos=x,y,z (or release=true)' end
+  if type(args.pos) ~= 'table' then return false, 'squad.station needs pos=[x,y,z] (or release=true)' end
   local okc, ok, res = K.call('military', 'hold_order', key, {kind = 'station', pos = args.pos}, 'player')
   if not okc then return false, 'squad.station: military: ' .. tostring(ok) end
   if not ok then return false, 'squad.station: ' .. tostring(res) end

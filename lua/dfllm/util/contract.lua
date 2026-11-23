@@ -262,8 +262,8 @@ C.VERBS = {
   -- BUG-675: PEACE too, for one wild animal inside the fort (the verb's own rule: military.peace_sortie)
   ['squad.sortie'] = {mod = 'military', approve = true,
                       modes = {PEACE = true, ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}},
-  -- NEU1 P7: PEACE, or any mode while the emergency exit is open and only `up` there (gate's verb checks it: player.open)
-  ['lever']        = {mod = 'gate'},
+  -- NEU1 P7: in another mode while the emergency exit is open (C.VERB_EMG lifts the mode list; gate's verb takes only `up` there)
+  ['lever']        = {mod = 'gate', modes = {PEACE = true}},
   ['inspect']      = {mod = 'kern'},
   ['selftest']     = {mod = 'selftest'},
   ['module.enable'] = {mod = 'kern'},
@@ -315,7 +315,8 @@ C.VERBS = {
   -- NEU1 P7 tactical verbs: only while the emergency exit is open (player.open; C.VERB_EMG)
   ['squad.station'] = {mod = 'player'}, ['burrow.unit'] = {mod = 'player'}, ['door.lock'] = {mod = 'player'},
 }
--- NEU1 P7: the verbs the emergency exit unlocks (refused outside it) and the verbs whose act calls hold their objects against
+-- NEU1 P7: the verbs the emergency exit unlocks (kern and k_mock lift their mode list while player.open() is true; the player's own
+-- tactical verbs refuse themselves outside it) and the verbs whose act calls hold their objects against
 -- the kernel's own calls (util/hold.lua; kern notes the calls while the verb runs, player.hold_acts keeps them)
 C.VERB_EMG = {lever = true, ['squad.station'] = true, ['burrow.unit'] = true, ['door.lock'] = true}
 C.VERB_HOLD = {['zone.remove'] = true, ['building.remove'] = true, ['labor.set'] = true, ['workdetail.set'] = true,

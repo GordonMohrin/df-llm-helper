@@ -787,6 +787,40 @@ def view_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# NEU1 P7 (lua/dfllm/player.lua M.DEF / M.LIM): config/baseline.json "player": the emergency exit (exit, exit_days, grace_days,
+# thirst, deaths_n, deaths_days, slow), the player's stage-1 verbs (verbs) and the holds against the kernel (hold, hold_days).
+# The module keeps its default for a value of another type or out of range; lint --config refuses it.
+PLAYER_LIM: dict = {"exit": "bool", "exit_days": (0, 30), "grace_days": (0, 60), "thirst": (10000, 200000),
+                    "deaths_n": (1, 20), "deaths_days": (1, 120), "slow": "bool", "verbs": "bool", "hold": "bool",
+                    "hold_days": (1, 400)}
+
+
+def player_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "player" part of config/baseline.json (NEU1 P7). A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("player", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: player must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = PLAYER_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: player.{k}: unknown key")
+        elif lim == "bool":
+            if not isinstance(v, bool):
+                errs.append(f"{name}: player.{k}: true or false expected, got {v!r}")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: player.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
+
 # BUG-069 (dfpilot/save.py limits()): config/baseline.json "save": the wait for a quicksave folder when DF shows no sign of
 # writing, the longest wait while it writes save/current, and the age below which a verified autosave counts as the save.
 # save.py keeps its default for a value of another type or out of range; lint --config refuses it.
