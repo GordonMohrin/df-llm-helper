@@ -174,10 +174,15 @@ def scan_status_lines(bugs_dir: Path) -> list[Hit]:
     return hits
 
 
+# a verdict word right after a re-checked bug's number in a Found line ("BUG-128d PARTIAL", "BUG-130 FAIL")
+_FOUND_VERDICT = re.compile(r"\b(PARTIAL|FAIL(?:ED|S)?|failed|did not|didn't|does not work|wirkt nicht)\b")
+
+
 def scan_found_lines(bugs_dir: Path, conf: dict | None = None) -> list[Hit]:
-    """A bug file whose `Found:` line is a live test that re-checked an earlier bug ("live test round 2 (BUG-130
-    PARTIAL ...)", "retest of BUG-170"): the live check of that earlier fix found this new defect -> refuted (at least
-    in part), the new bug named as the follow-up. A "side note" is uncertain."""
+    """A bug file whose `Found:` line is a live test that re-checked an earlier bug. Fail closed: such a match is
+    uncertain (the re-check may only have found an adjacent new defect). It refutes the earlier fix only when the
+    text right after that bug's mention, up to the next ',', ';' or ')', holds an explicit verdict word ("BUG-130
+    PARTIAL", "BUG-128d PARTIAL"). Any other refutation needs a curated `add` entry citing a line that says so."""
     hits = []
     for p in sorted(bugs_dir.glob("BUG-[0-9][0-9][0-9]-*.md")):
         me = int(p.name[4:7])
@@ -185,12 +190,14 @@ def scan_found_lines(bugs_dir: Path, conf: dict | None = None) -> list[Hit]:
             if not (line.startswith("Found:") and re.search(r"\blive test", line, re.I)):
                 continue
             for m in _FOUND_MENTION.finditer(line):     # BUG-131b: item b of the re-check of BUG-131
+                after = re.sub(r"^[a-z](?![a-z])", "", re.split(r"[,;)]", line[m.end():], maxsplit=1)[0])
+                neg = bool(_FOUND_VERDICT.search(after))
                 for n in numbers(m, (conf or DEFAULTS).get("ranges", True)):
                     if n == me:
                         continue
-                    side = re.search(r"side note", line[m.end():m.end() + 20])
-                    hits.append(Hit(n, f"bugs/{p.name}", i, "unc" if side else "neg", line.strip()[:200],
-                                    f"live re-check found BUG-{me:03d}" + (" (side note)" if side else "")))
+                    why = (f"live re-check found BUG-{me:03d}, verdict '{after.strip()}'" if neg else
+                           f"live re-check found BUG-{me:03d}; no verdict word on the earlier fix (uncertain)")
+                    hits.append(Hit(n, f"bugs/{p.name}", i, "neg" if neg else "unc", line.strip()[:200], why))
     return hits
 
 

@@ -103,6 +103,20 @@
     "line": 8,
     "verdict": "neg",
     "why": "Run 15c y374-y376: the BUG-274 re-place ('removed and placed again (once)') did not help"
+   },
+   {
+    "bug": 142,
+    "file": "bugs/BUG-170-squad-station-on-another-walk-group-than-its-soldiers.md",
+    "line": 1,
+    "verdict": "neg",
+    "why": "the BUG-142 retest: 'the BUG-142 move put b2 behind the raised B2, on_station 0 of 8' (the fix itself caused it)"
+   },
+   {
+    "bug": 170,
+    "file": "bugs/BUG-214-whole-station-chain-fails-no-order-or-unreachable-kept.md",
+    "line": 12,
+    "verdict": "neg",
+    "why": "retest of BUG-170: a station on walk group 1507, the soldiers on 1, was 'kept', 5 of 8 could not follow (the BUG-170 symptom)"
    }
   ]
  },

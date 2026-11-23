@@ -9,54 +9,30 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | Status | Bugs |
 |---|---|
 | live bestaetigt | 34 |
-| live widerlegt | 25 |
+| live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 686 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **62** von 748 |
-| davon wirkt nicht (widerlegt + gemischt) | 28 |
-| genannt, aber ohne klares Urteil (bleiben offen) | 67 |
+| offen, nie live gesehen | 697 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 748 |
+| davon wirkt nicht (widerlegt + gemischt) | 17 |
+| genannt, aber ohne klares Urteil (bleiben offen) | 78 |
 
 Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
 
 - Spieler-Logs Run 15/16 (STAND.md, FR-BUGS.md): 33 Bugs
-- Live-Nachprüfungen Okt. 2026 in Bugdateien (Status-, Found-Zeile, Live check): 23 Bugs
+- Live-Nachprüfungen Okt. 2026 in Bugdateien (Status-, Found-Zeile, Live check): 12 Bugs
 - Live-Berichte in docs/v2 (STATUS.md, POSTMORTEM): 7 Bugs
 
 ## Widerlegt
 
-- **BUG-116**
-  - **wirkt nicht** `bugs/BUG-154-status-drops-the-care-first-line-and-the-mood-ws-command-under-a-long-r0-line.md:4` (live re-check found BUG-154): Found: 2026-10-28, live test i4 (M6-BUG-116, M6-BUG-117, new bug 2), reproduced offline by the verifier
-- **BUG-117**
-  - **wirkt nicht** `bugs/BUG-154-status-drops-the-care-first-line-and-the-mood-ws-command-under-a-long-r0-line.md:4` (live re-check found BUG-154): Found: 2026-10-28, live test i4 (M6-BUG-116, M6-BUG-117, new bug 2), reproduced offline by the verifier
-- **BUG-127**
-  - **wirkt nicht** `bugs/BUG-158-coffin-provisioner-counts-zones-df-re-gives-as-free-and-inspect-tombs-header-disagrees.md:4` (live re-check found BUG-158): Found: 2026-10-28, live test i4 (BUG-127 note, new bug 6): header '555 coffins, 0 free, 80 unburied ... (rebuilt now ...); freed 20' with
 - **BUG-128**
-  - **wirkt nicht** `bugs/BUG-187-long-term-patient-blocks-the-tool-detail.md:4` (live re-check found BUG-187): Found: 2026-10-29, live test round 2, instance i4 (BUG-128d PARTIAL, NEW2), confirmed by the skeptic re-check
-  - **wirkt nicht** `bugs/BUG-188-tool-pile-site-search-runs-out-of-reads-at-a-rock-shaft.md:4` (live re-check found BUG-188): Found: 2026-10-29, live test round 2, instance i4 (BUG-128e PARTIAL, NEW6), confirmed by the skeptic re-check
+  - **wirkt nicht** `bugs/BUG-187-long-term-patient-blocks-the-tool-detail.md:4` (live re-check found BUG-187, verdict 'PARTIAL'): Found: 2026-10-29, live test round 2, instance i4 (BUG-128d PARTIAL, NEW2), confirmed by the skeptic re-check
+  - **wirkt nicht** `bugs/BUG-188-tool-pile-site-search-runs-out-of-reads-at-a-rock-shaft.md:4` (live re-check found BUG-188, verdict 'PARTIAL'): Found: 2026-10-29, live test round 2, instance i4 (BUG-128e PARTIAL, NEW6), confirmed by the skeptic re-check
 - **BUG-130**
-  - **wirkt nicht** `bugs/BUG-163-fortcore-resite-drafts-only-the-stopped-anchors-stages.md:4` (live re-check found BUG-163): Found: 2026-10-29, live test round 2 instance i3 (BUG-130 PARTIAL, finding NEW3, confirmed by the skeptic): with bp files y707s0b1 (stage 1)
-- **BUG-131**
-  - **wirkt nicht** `bugs/BUG-159-brief-trims-the-timeline-reset-and-status-the-hospital-retire-hint.md:4` (live re-check found BUG-159): Found: 2026-10-29, live test round 2, instance i1 (Trussroads y721-y722), items NEW7 and BUG-131b, both confirmed by the skeptic
-- **BUG-133**
-  - **wirkt nicht** `bugs/BUG-179-tomb-repair-frees-zones-of-dead-buried-in-another-units-tomb-every-run.md:4` (live re-check found BUG-179): Found: 2026-10-29, live test round 2 instance i4 (BUG-133c, NEW3; skeptic confirmed)
-  - **wirkt nicht** `bugs/BUG-181-a-pending-workshops-project-suppresses-requests-for-types-it-does-not-build.md:4` (live re-check found BUG-181): Found: 2026-10-29, live test round 2 instance i4 (BUG-133d, NEW4; skeptic reproduced with skip=Masons)
-  - **wirkt nicht** `bugs/BUG-182-no-masons-reason-hidden-by-a-standing-constructslab-order.md:4` (live re-check found BUG-182): Found: 2026-10-29, live test round 2 instance i4 (BUG-133d part 2; skeptic confirmed)
+  - **wirkt nicht** `bugs/BUG-163-fortcore-resite-drafts-only-the-stopped-anchors-stages.md:4` (live re-check found BUG-163, verdict 'PARTIAL'): Found: 2026-10-29, live test round 2 instance i3 (BUG-130 PARTIAL, finding NEW3, confirmed by the skeptic): with bp files y707s0b1 (stage 1)
 - **BUG-142**
-  - **wirkt nicht** `bugs/BUG-170-squad-station-on-another-walk-group-than-its-soldiers.md:4` (live re-check found BUG-170): Found: 2026-10-29, live test round 2 instance i3 (E:/DF-test3, region2-site90 Trussroads y722), confirmed by the skeptic (BUG-142 retest, NEW1)
-- **BUG-162**
-  - **wirkt nicht** `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
-- **BUG-163**
-  - **wirkt nicht** `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
-- **BUG-164**
-  - **wirkt nicht** `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
+  - **wirkt nicht** `bugs/BUG-170-squad-station-on-another-walk-group-than-its-soldiers.md:1` (curated: the BUG-142 retest: 'the BUG-142 move put b2 behind the raised B2, on_station 0 of 8' (the fix itself caused it)): # BUG-170 A squad station on another walk group than its soldiers: the BUG-142 move put b2 behind the raised B2, on_station 0 of 8
 - **BUG-170**
-  - **wirkt nicht** `bugs/BUG-214-whole-station-chain-fails-no-order-or-unreachable-kept.md:4` (live re-check found BUG-214): Found: 2026-10-29, live test round 4 (E:/DF-test4, region2-site90 Trussroads y732-733), retest of BUG-170, confirmed by the skeptic
-- **BUG-173**
-  - **wirkt nicht** `bugs/BUG-207-inspect-unit-by-nickname.md:4` (live re-check found BUG-207): Found: 2026-10-29, live test round 3 (BUG-173b re-check), kernel bd27973
-- **BUG-174**
-  - **wirkt nicht** `bugs/BUG-208-curse-kill-grown-set-inside-gate.md:4` (live re-check found BUG-208): Found: 2026-10-29, live test round 3 (BUG-174c re-check), kernel bd27973
-- **BUG-177**
-  - **wirkt nicht** `bugs/BUG-199-stock-line-lost-after-back-to-back-reloads.md:4` (live re-check found BUG-199): Found: 2026-10-29, live test round 3 i1 (BUG-177a-stock; skeptic confirmed)
+  - **wirkt nicht** `bugs/BUG-214-whole-station-chain-fails-no-order-or-unreachable-kept.md:12` (curated: retest of BUG-170: a station on walk group 1507, the soldiers on 1, was 'kept', 5 of 8 could not follow (the BUG-170 symptom)): walk group 1507, the soldiers on 1 (no way there): ... kept' (an order 5 of 8 soldiers could not follow, on_station 3 of 8 in SIEGE).
 - **BUG-231**
   - **wirkt nicht** `runs/run-16a/FR-BUGS.md:438` (griff nicht): uen seit y478. Wunsch: Kernel legt das Buero selbst neu an (BUG-231 Bypass griff nicht, 1-Kachel-Raum);
 - **BUG-274**
@@ -228,11 +204,27 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-040 `runs/run-15d-drillchamber/FR-BUGS.md:370` (no verdict word): one 18276 (87,82,141) fuellen lassen / Brunnen-Fuellquelle (BUG-040) automatisch bauen;
 - BUG-043 `docs/v2/STATUS.md:1171` (no verdict word): ox' the box is the manifest geometry plus a 16/16/2 margin (BUG-043: the fort's pieces, an audit's
 - BUG-043 `docs/v2/STATUS.md:1174` (no verdict word): - at most 250,000 tiles (BUG-043: 400,000, config 'snapshot.max_tiles');
-- BUG-118 `bugs/BUG-155-bp-preview-refuses-only-for-workshops.md:4` (live re-check found BUG-155 (side note)): Found: 2026-10-28, live test i4 (M6-BUG-118 side note, new bug 3)
+- BUG-116 `bugs/BUG-154-status-drops-the-care-first-line-and-the-mood-ws-command-under-a-long-r0-line.md:4` (live re-check found BUG-154; no verdict word on the earlier fix (uncertain)): Found: 2026-10-28, live test i4 (M6-BUG-116, M6-BUG-117, new bug 2), reproduced offline by the verifier
+- BUG-117 `bugs/BUG-154-status-drops-the-care-first-line-and-the-mood-ws-command-under-a-long-r0-line.md:4` (live re-check found BUG-154; no verdict word on the earlier fix (uncertain)): Found: 2026-10-28, live test i4 (M6-BUG-116, M6-BUG-117, new bug 2), reproduced offline by the verifier
+- BUG-118 `bugs/BUG-155-bp-preview-refuses-only-for-workshops.md:4` (live re-check found BUG-155; no verdict word on the earlier fix (uncertain)): Found: 2026-10-28, live test i4 (M6-BUG-118 side note, new bug 3)
+- BUG-127 `bugs/BUG-158-coffin-provisioner-counts-zones-df-re-gives-as-free-and-inspect-tombs-header-disagrees.md:4` (live re-check found BUG-158; no verdict word on the earlier fix (uncertain)): Found: 2026-10-28, live test i4 (BUG-127 note, new bug 6): header '555 coffins, 0 free, 80 unburied ... (rebuilt now ...); freed 20' with
 - BUG-130 `runs/run-16a/FR-BUGS.md:197` (no verdict word): Das Wort steht in den eigenen auto-generierten notes (BUG-130-Text);
 - BUG-130 `runs/run-16c/FR-BUGS.md:74` (curated: 'plan check OK' is the player's own check after a workaround, no verdict on the fix): re@S1 (depth 2, [76,34,127]) statt surfacecore: Draft nennt BUG-130 (c1a1a797 stoppte an heavy aquifer), ERROR verlangt bp.cancel, danach plan check OK.
 - BUG-130 `runs/run-16c/FR-BUGS.md:91` (no verdict word): Warnung im Plan-Check: harmlos, kommt aus dem Entwurfstext (BUG-130 Notiz) und nicht aus mir.
+- BUG-131 `bugs/BUG-159-brief-trims-the-timeline-reset-and-status-the-hospital-retire-hint.md:4` (live re-check found BUG-159; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 2, instance i1 (Trussroads y721-y722), items NEW7 and BUG-131b, both confirmed by the skeptic
+- BUG-133 `bugs/BUG-179-tomb-repair-frees-zones-of-dead-buried-in-another-units-tomb-every-run.md:4` (live re-check found BUG-179; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 2 instance i4 (BUG-133c, NEW3; skeptic confirmed)
+- BUG-133 `bugs/BUG-181-a-pending-workshops-project-suppresses-requests-for-types-it-does-not-build.md:4` (live re-check found BUG-181; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 2 instance i4 (BUG-133d, NEW4; skeptic reproduced with skip=Masons)
+- BUG-133 `bugs/BUG-182-no-masons-reason-hidden-by-a-standing-constructslab-order.md:4` (live re-check found BUG-182; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 2 instance i4 (BUG-133d part 2; skeptic confirmed)
+- BUG-142 `bugs/BUG-170-squad-station-on-another-walk-group-than-its-soldiers.md:4` (live re-check found BUG-170; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 2 instance i3 (E:/DF-test3, region2-site90 Trussroads y722), confirmed by the skeptic (BUG-142 retest, NEW1)
+- BUG-162 `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
+- BUG-163 `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
 - BUG-164 `runs/run-16a/FR-BUGS.md:48` (no verdict word): ieferte seasons[2] fortcore st3 vor seasons[3] st2 -> ERROR BUG-164;
+- BUG-164 `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
+- BUG-170 `bugs/BUG-214-whole-station-chain-fails-no-order-or-unreachable-kept.md:4` (live re-check found BUG-214; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 4 (E:/DF-test4, region2-site90 Trussroads y732-733), retest of BUG-170, confirmed by the skeptic
+- BUG-171 `bugs/BUG-215-release-waits-for-stations-that-do-not-exist.md:4` (live re-check found BUG-215; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 4 (E:/DF-test4, Trussroads), the tester's BUG-171 check, confirmed by the skeptic
+- BUG-173 `bugs/BUG-207-inspect-unit-by-nickname.md:4` (live re-check found BUG-207; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 3 (BUG-173b re-check), kernel bd27973
+- BUG-174 `bugs/BUG-208-curse-kill-grown-set-inside-gate.md:4` (live re-check found BUG-208; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 3 (BUG-174c re-check), kernel bd27973
+- BUG-177 `bugs/BUG-199-stock-line-lost-after-back-to-back-reloads.md:4` (live re-check found BUG-199; no verdict word on the earlier fix (uncertain)): Found: 2026-10-29, live test round 3 i1 (BUG-177a-stock; skeptic confirmed)
 - BUG-197 `runs/run-15-guildcleans/FR-BUGS.md:3` (no verdict word): an-Template (P1) und im Jahr-1-Plan (fortcore Stufe 1 only, BUG-197) nicht dabei.
 - BUG-228 `runs/run-15d-drillchamber/FR-BUGS.md:18` (no verdict word): Vermutung: der Regelkreis lernt k aus Fehlversuchen weiter (BUG-020/228), obwohl 'tracking_on' in diesem Zustand
 - BUG-228 `runs/run-16c/FR-BUGS.md:10` (scheint): ,591] fuer DF-test3), die Kalibrierung gilt fuer 1716x1000. BUG-228-Fix (tracking_on=1 im Injector) scheint hier nicht zu reichen;

@@ -105,16 +105,39 @@ def test_collect_with_curated_drop_and_add(tmp_path):
     assert "`runs/run-16x/FR-BUGS.md:2`" in rep and "BUG-003" in rep.split("## Unsichere Fundstellen")[1]
 
 
-def test_found_line_of_a_live_recheck_refutes_the_earlier_fix(tmp_path):
+def test_found_line_without_a_verdict_word_is_uncertain(tmp_path):
     b = tmp_path / "bugs"
     b.mkdir()
-    (b / "BUG-170-x.md").write_text("# BUG-170 x\nStatus: fixed\nSeverity: high\nFound: 2026-10-29, live test round 2 "
-                                    "(BUG-142 retest, NEW1), BUG-131b\n", encoding="utf-8")
+    (b / "BUG-208-x.md").write_text("# BUG-208 x\nStatus: fixed\nFound: 2026-10-29, live test round 3 (BUG-174c "
+                                    "re-check), kernel bd27973\n", encoding="utf-8")
+    (b / "BUG-170-x.md").write_text("# BUG-170 x\nFound: 2026-10-29, live test round 2 (BUG-142 retest, NEW1), "
+                                    "BUG-131b\n", encoding="utf-8")
+    (b / "BUG-154-x.md").write_text("# BUG-154\nFound: live test i4 (M6-BUG-116, M6-BUG-117, new bug 2)\n",
+                                    encoding="utf-8")
+    (b / "BUG-195-x.md").write_text("# BUG-195\nFound: live test round 3 (finding BUG-162..164-live, skeptic)\n",
+                                    encoding="utf-8")
     (b / "BUG-155-y.md").write_text("# BUG-155\nFound: live test i4 (M6-BUG-118 side note, new bug 3)\n",
                                     encoding="utf-8")
     (b / "BUG-072-z.md").write_text("# BUG-072\nFound: Run 11 y451 (BUG-039)\n", encoding="utf-8")
+    hits = L.scan_found_lines(b)
+    assert {(h.bug, h.verdict) for h in hits} == {(174, "unc"), (142, "unc"), (131, "unc"), (116, "unc"),
+                                                  (117, "unc"), (162, "unc"), (163, "unc"), (164, "unc"),
+                                                  (118, "unc")}
+    st = L.statuses(hits, [174, 142, 116])
+    assert set(st.values()) == {L.OPEN}, "an uncertain Found line never changes a status (fail closed)"
+
+
+def test_found_line_with_a_verdict_word_refutes(tmp_path):
+    b = tmp_path / "bugs"
+    b.mkdir()
+    (b / "BUG-187-x.md").write_text("# BUG-187\nFound: 2026-10-29, live test round 2, instance i4 (BUG-128d PARTIAL, "
+                                    "NEW2), confirmed by the skeptic re-check\n", encoding="utf-8")
+    (b / "BUG-163-x.md").write_text("# BUG-163\nFound: 2026-10-29, live test round 2 instance i3 (BUG-130 PARTIAL, "
+                                    "finding NEW3, confirmed by the skeptic)\n", encoding="utf-8")
+    (b / "BUG-300-x.md").write_text("# BUG-300\nFound: live test (BUG-201 retest, NEW1 failed later)\n",
+                                    encoding="utf-8")
     got = {(h.bug, h.verdict) for h in L.scan_found_lines(b)}
-    assert got == {(142, "neg"), (131, "neg"), (118, "unc")}
+    assert got == {(128, "neg"), (130, "neg"), (201, "unc")}, "the verdict word must follow that bug's own mention"
 
 
 def test_status_line_counts_only_a_confirmed_fix(tmp_path):
