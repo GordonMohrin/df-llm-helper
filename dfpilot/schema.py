@@ -808,7 +808,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # the command raised error(nil)
     "ACT_FAIL": ("B", "kern", _d("fn:s", "err:s module:s cmd:s")),
     # BUG-059: kind = workshop (a mandatory workshop is missing), worker (nobody holds the labor), input
-    "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f kind:s")),
+    "ORDER_STUCK": ("B", "economy", _d("order:i job:s why:s", "n:i days:i dropped:f kind:s cause:s")),   # NEU1 P8: cause = jobwhy
     "JOBS_SUSPENDED": ("B", "economy", _d(opt="suspended:i released:i kept:i planned:i why:s resuspended:i "
                                               "forbidden:i other:i unforbidden:i missing:s blocked:i")),
     "TRADE_LEDGER": ("B", "trade", _d(opt="civ:s ok:f ratio:i sold:i sold_v:i bought:i bought_v:i unmet:sa")),
@@ -956,7 +956,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
-                                          "offices", "curse", "unit", "items", "cavern", "manager", "military"])},
+                                          "offices", "curse", "unit", "items", "cavern", "manager", "military", "why"])},
                    # BUG-137: `key=39052` arrives as an int from the CLI (cmd.parse_kv); a unit id or a name
                    opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),

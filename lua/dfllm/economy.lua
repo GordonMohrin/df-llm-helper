@@ -98,6 +98,7 @@ local CAD = require('dfllm.util.cadence')   -- BUG-008: when a standing class-A 
 local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspect = {}, MASK_CHECK = 300,
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
                       CANCEL_JOB = true}}
+M.JW = require('dfllm.jobwhy')     -- NEU1 P8: 'why is this job not running' (a library, a field: economy sits at the locals limit)
 M.OF = require('dfllm.orderfix')   -- B2: slab census, workshop job lists, the stale-order rules (a library, a field: no new local)
 M.citizen = require('dfllm.util.who').citizen    -- BUG-103: a citizen of the player (a field: economy sits at the 200-locals limit)
 local DAY = C.TICKS.DAY
@@ -483,6 +484,9 @@ M.DEFAULTS = {
   -- access_d drink days down, with no reachable water and no brewable plant, no_water also asks PROJECT_REQUEST cistern why=no_water with
   -- the nearest water tile (follow places the piped cistern with its sealed intake when the planner finds a safe one); 0 = never
   drink = {low_d = 60, access_d = 400},
+  -- NEU1 P8 (docs/v2/NEU1-jobfrage.md): the job query (lua/dfllm/jobwhy.lua). stall = the brew / fish / stale-order stalls carry the
+  -- cause it reads off the game (false: the old texts); items_max = item records looked at per missing job item
+  jobwhy = {stall = true, items_max = 4000},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -10890,6 +10894,36 @@ function M.brew_spec(r, e)
   return e.spec
 end
 
+-- NEU1 P8 (docs/v2/NEU1-jobfrage.md): the job query of lua/dfllm/jobwhy.lua with economy's facts (the census, the manager's facts for an
+-- unvalidated order). M.jw_ask(K, c, key, stall) -> result or nil, error; nil without asking when economy.jobwhy.stall is false and
+-- `stall` is set (a stall watch asks; the inspect verb always answers). Read only.
+function M.jw_ctx(K, c)
+  c = c or M.conf(K)
+  local jc = type(c.jobwhy) == 'table' and c.jobwhy or M.DEFAULTS.jobwhy
+  return {census = K.census.u, items_max = math.tointeger(jc.items_max) or M.JW.ITEMS_MAX,
+          manager = function() return M.manager_facts(K, pstate(K), c) end}
+end
+
+function M.jw_ask(K, c, key, stall)
+  c = type(c) == 'table' and c or M.conf(K)
+  local jc = type(c.jobwhy) == 'table' and c.jobwhy or M.DEFAULTS.jobwhy
+  if stall and jc.stall == false then return nil, 'off' end
+  local ok, r, err = pcall(M.JW.find, K, key, M.jw_ctx(K, c))
+  if not ok then return nil, 'jobwhy: ' .. tostring(r):sub(1, 120) end
+  return r, err
+end
+
+-- `inspect what=why key=<ws:id | order:id | job:id | id | brew | fish | cook | job type>`: the blocking cause, read off the game
+M.inspect.why = function(K, args)
+  local key = type(args) == 'table' and args.key or nil
+  local r, err = M.jw_ask(K, M.conf(K), key)
+  if not r then return false, tostring(err or 'no answer') end
+  return true, M.JW.line(r):sub(1, 1000), M.JW.data(r)
+end
+
+-- the brew stall's causes that were guesses (BUG-767): the query's cause replaces their text
+M.BREW_GUESS = {untaken = true, nojob = true, suspended = true}
+
 function M.brew_watch(K, c, r)
   if not r.day then return end
   local p, inv = r.p, r.inv or {}
@@ -10957,11 +10991,18 @@ function M.brew_watch(K, c, r)
                     or 'the next brew orders have no item condition'
   end
   bw.told, bw.d = r.now, 0
+  -- NEU1 P8: what the game says about the stalled brews (jobwhy); a guessed cause takes the query's text, the cures above stay as they were
+  local jw = M.jw_ask(K, c, 'brew', true)
+  if jw then
+    K.log('info', 'jobwhy brew: %s', M.JW.line(jw):sub(1, 600))
+    if M.BREW_GUESS[id] and M.JW.proven(jw) then text = jw.cause .. ': ' .. tostring(jw.text) end
+    st.brewx.text, st.brewx.cause = text, jw.cause
+  end
   local msg = string.format('brewing stalled %d days: Still stands, %d plants, %d empty barrels, %d brews open: %s%s', need, plants, inv.barrels_empty or 0, b.left,
                             text, #act > 0 and ('; ' .. table.concat(act, '; ')) or '')
   K.log('warn', '%s', msg)
   K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = 'BrewDrink', n = b.left, days = need, why = ('brew stall: ' .. text):sub(1, 100), dropped = 0,
-         kind = (id == 'nobrewer' or id == 'busy' or id == 'untaken') and 'worker' or 'input'})
+         kind = (id == 'nobrewer' or id == 'busy' or id == 'untaken') and 'worker' or 'input', cause = jw and jw.cause or nil})
 end
 
 -- BUG-716 (Run 16c i3 Wallfree y423-y426: 965 -> 2,616 raw fish uncleaned, Fishery 'jobs 1, working 0', 17 of 33 adults idle, food 618 -> 183 days):
@@ -11384,16 +11425,25 @@ function M.fish_watch(K, c, r)
     if how == 'set' then act[#act + 1] = 'every Fish cleaning holder is busy: the labor on for unit ' .. tostring(uid) end
   end
   if not left or left <= 0 then act[#act + 1] = 'no PrepareRawFish order is open' end
-  if #act == 0 then act[#act + 1] = 'the fishery is slower than the catch' end
+  local guess = #act == 0
+  if guess then act[#act + 1] = 'the fishery is slower than the catch' end
   st.fishw = {d = fw.d, raw = raw, text = table.concat(act, '; '):sub(1, 100)}
   if r.now - (math.tointeger(fw.told) or -M.FISH_STALL.again) >= M.FISH_STALL.again then
     fw.told = r.now
+    -- NEU1 P8: what the game says about the fish cleaning (jobwhy); it replaces the guess 'slower than the catch'
+    local jw = M.jw_ask(K, c, 'fish', true)
+    if jw then
+      K.log('info', 'jobwhy fish: %s', M.JW.line(jw):sub(1, 600))
+      if guess and M.JW.proven(jw) then act[1] = jw.cause .. ': ' .. tostring(jw.text) end
+      st.fishw.text, st.fishw.cause = table.concat(act, '; '):sub(1, 100), jw.cause
+    end
     local msg = string.format('raw fish not cleaned for %d days: %d raw fish, fishery built, Fish cleaning %s, order %s, adults idle %d%%: %s',
                               fw.d, raw, holder and 'held' or 'on nobody', left and ('x' .. left .. ' open') or 'none open', st.idle or 0,
                               table.concat(act, '; '))
     K.log('warn', '%s', msg)
     K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = o and o.id or 0, job = 'PrepareRawFish', n = left or 0, days = fw.d,
-           why = ('fish stall: ' .. table.concat(act, '; ')):sub(1, 100), dropped = 0, kind = holder and 'input' or 'worker'})
+           why = ('fish stall: ' .. table.concat(act, '; ')):sub(1, 100), dropped = 0, kind = holder and 'input' or 'worker',
+           cause = jw and jw.cause or nil})
   end
 end
 
@@ -12670,6 +12720,7 @@ function T.stale(K, c, r)
       for _, pe in pairs(M.PIECES) do if pe.job == e.job then def = pe.def == true end end
       local why = M.stale_reason(c, r, oq, o, e.job, e.mc, e.days)
       if e.job == 'ConstructMechanisms' then why = (why .. M.mech_labor_note(K)):sub(1, 150) end     -- BUG-730
+      if rec.told ~= 1 then e.jw = M.jw_ask(K, c, 'order:' .. tostring(e.id), true) end              -- NEU1 P8
       local act, dropped = nil, 0
       if rec.sw ~= 1 and e.mc == 'rock' and wj[e.job] and (r.f or {})['workshop:Carpenters']
          and M.wood_left(c, r, def) >= e.left and K.act.order_material(e.id, 'wood') then
@@ -12719,11 +12770,14 @@ function T.stale(K, c, r)
         p.stale_n = (p.stale_n or 0) + 1
         rec.told = 1
         local verb = act == 'wood' and 're-entered in wood' or (act and ('made ' .. act) or 'only reported')
-        K.log('warn', 'order %d %s x%d: no job for %d days (%s): %s', e.id, e.job, e.left, e.days, why, verb)
+        -- NEU1 P8: the order's blocking cause read off the game (jobwhy), asked before the order was made again
+        local jw = e.jw
+        K.log('warn', 'order %d %s x%d: no job for %d days (%s): %s%s', e.id, e.job, e.left, e.days, why, verb,
+              jw and (' | jobwhy: ' .. M.JW.line(jw):sub(1, 400)) or '')
         K.emit('ORDER_STUCK', 'B', string.format('order %d %s x%d stale: no job for %d days (%s): %s', e.id, e.job, e.left,
                                                  e.days, why, verb):sub(1, 200),
                {order = e.id, job = e.job, why = ('stale: ' .. why):sub(1, 100), n = e.left, days = e.days,
-                dropped = dropped})
+                dropped = dropped, cause = jw and jw.cause or nil})
       end
     end
   end

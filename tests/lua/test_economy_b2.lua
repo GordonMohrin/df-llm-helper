@@ -339,6 +339,20 @@ T.test('BUG-060: stone door orders with no job for stale.days are re-entered in 
   T.eq(#acts(W, 'order_material'), 11, 'a wood order is not switched again')
 end)
 
+T.test('NEU1 P8: a stale order carries the job query cause (ORDER_STUCK cause, kern.log jobwhy); economy.jobwhy.stall false: none', function()
+  local W = world{boulders = 40, wood = 80, setup = function(W) doors(W, 2) end}
+  days(W, 11)
+  local ev = stuck(W, 'stale')
+  T.ok(#ev >= 1)
+  T.eq(type(ev[1].d.cause), 'string', 'a cause from jobwhy')
+  T.ok(logged(W, '| jobwhy: order'), 'kern.log carries the query line')
+  local W2 = world{boulders = 40, wood = 80, eco = {jobwhy = {stall = false, items_max = 4000}}, setup = function(W) doors(W, 2) end}
+  days(W2, 11)
+  local ev2 = stuck(W2, 'stale')
+  T.ok(#ev2 >= 1)
+  T.eq(ev2[1].d.cause, nil, 'switched off')
+end)
+
 T.test('BUG-060: an order with a job in a workshop, a changing amount, conditions or another frequency is never stale', function()
   local W, ctl = world{boulders = 40, wood = 40, setup = function(W)
     doors(W, 1)                                          -- 1: has a job

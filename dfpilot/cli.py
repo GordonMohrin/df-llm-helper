@@ -49,6 +49,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("paths", nargs="*")
     p.add_argument("--cmd", help="check one command line")
     p.add_argument("--hook", action="store_true", help="read a PreToolUse hook payload from stdin")
+    # NEU1 P8: why a workshop / order / job does not run (inspect what=why, read only)
+    p = sub.add_parser("why", help="NEU1 P8: why a job does not run: ws:<id> | order:<id> | job:<id> | <id> | brew | fish | cook | <JobType>")
+    p.add_argument("key", help="ws:<id>, order:<id>, job:<id>, a bare id (order, workshop, job), brew, fish, cook or a job type name")
+    p.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the kernel's answer")
+    p.add_argument("--json", action="store_true", help="print the record as JSON")
     p = sub.add_parser("gamelog", help="BUG-249: lines of <DF>/gamelog.txt, optionally only since this fort's embark")
     p.add_argument("--since-embark", action="store_true",
                    help="only lines after the last embark line (an older fort in the same gamelog is skipped)")
@@ -110,6 +115,58 @@ def run_gamelog(args) -> int:
         print(f"{len(hits)} line(s) match {pat!r}" + (" since the embark" if args.since_embark and mark else ""))
     for n, s in hits[-max(0, args.tail):] if args.tail > 0 else []:
         print(f"{n}: {s}")
+    return 0
+
+
+# ---------------------------------------------------------------- why (NEU1 P8)
+WHY_ORDER = ("free", "busy", "unavailable", "profile", "burrow", "far", "soldier", "mood")
+
+
+def why_lines(d: dict) -> list[str]:
+    """The record of `inspect what=why` (lua/dfllm/jobwhy.lua J.data) as indented lines: workers by status, the
+    missing inputs, then the nested job / order one level down."""
+    out = []
+    w = d.get("workers")
+    if isinstance(w, dict):
+        by = w.get("by") or {}
+        parts = [f"{by[k]} {k}" for k in WHY_ORDER if by.get(k)]
+        out.append(f"  workers ({w.get('labor', '?')}): {w.get('n', 0)} holder(s): {', '.join(parts) or 'none'}")
+        for e in w.get("who") or []:
+            out.append(f"    {e.get('name', '?')} {e.get('id')}: {e.get('st')}" + (f" ({e['det']})" if e.get("det") else ""))
+    for e in d.get("inputs") or []:
+        bits = [f"{e.get(k, 0)} {k}" for k in ("match", "free", "forbid", "claimed", "far")]
+        if e.get("inb") is not None:
+            bits.append(f"{e['inb']} inside the free holders' burrows")
+        out.append(f"  input {e.get('what', '?')} x{e.get('need', 1)}: {', '.join(bits)}"
+                   + (" (first records only)" if e.get("clipped") else "") + (" (approximate)" if e.get("approx") else ""))
+    sub = d.get("sub")
+    if isinstance(sub, dict):
+        out.append(f"  -> {sub.get('kind')} {sub.get('id')} {sub.get('job')}: {sub.get('cause')}")
+        out += ["  " + ln for ln in why_lines(sub)]
+    return out
+
+
+def run_why(args, save_dir: Path) -> int:
+    from . import files
+    from .cmd import fmt_reply, send
+    try:
+        cmd_id, reply = send(save_dir, "inspect", {"what": "why", "key": args.key}, by="cli", wait_s=args.wait)
+    except Exception as e:                       # schema refusal: nothing was sent
+        print(f"refused (not sent): {e}")
+        return 2
+    if reply is None:
+        print(fmt_reply(cmd_id, "inspect", None, save_dir))
+        return 3
+    if not reply.get("ok"):
+        print(f"why {args.key}: {reply.get('msg', '')}")
+        return 1
+    d = reply.get("data") or {}
+    if args.json:
+        print(files.dumps(d))
+        return 0
+    print(f"why {args.key}: {reply.get('msg', '')}")
+    for ln in why_lines(d):
+        print(ln)
     return 0
 
 
@@ -463,6 +520,8 @@ def main(argv: list[str] | None = None) -> int:
         return run(args, save_dir)
     if c == "bp":
         return run_bp(args, save_dir)
+    if c == "why":
+        return run_why(args, save_dir)
     return 2
 
 
