@@ -1,0 +1,365 @@
+# Live-Status der Bugs (P2 Live-Rückmeldung, Neuausrichtung 1)
+
+Erzeugt von `python tools/live_status.py --write` (nicht von Hand ändern; Kuratierung in `config/process.json` `live_status.drop` / `add`). Regeln: `docs/v2/PROCESS.md`, Entwurf: `docs/v2/NEU1-rueckmeldung.md`.
+
+Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/STATUS.md`, `docs/v2/POSTMORTEM-*.md`, `Status:`-Zeilen der Bugdateien.
+
+## Zählung
+
+| Status | Bugs |
+|---|---|
+| live bestaetigt | 34 |
+| live widerlegt | 25 |
+| live gemischt | 3 |
+| offen, nie live gesehen | 686 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **62** von 748 |
+| davon wirkt nicht (widerlegt + gemischt) | 28 |
+| genannt, aber ohne klares Urteil (bleiben offen) | 67 |
+
+Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
+
+- Spieler-Logs Run 15/16 (STAND.md, FR-BUGS.md): 33 Bugs
+- Live-Nachprüfungen Okt. 2026 in Bugdateien (Status-, Found-Zeile, Live check): 23 Bugs
+- Live-Berichte in docs/v2 (STATUS.md, POSTMORTEM): 7 Bugs
+
+## Widerlegt
+
+- **BUG-116**
+  - **wirkt nicht** `bugs/BUG-154-status-drops-the-care-first-line-and-the-mood-ws-command-under-a-long-r0-line.md:4` (live re-check found BUG-154): Found: 2026-10-28, live test i4 (M6-BUG-116, M6-BUG-117, new bug 2), reproduced offline by the verifier
+- **BUG-117**
+  - **wirkt nicht** `bugs/BUG-154-status-drops-the-care-first-line-and-the-mood-ws-command-under-a-long-r0-line.md:4` (live re-check found BUG-154): Found: 2026-10-28, live test i4 (M6-BUG-116, M6-BUG-117, new bug 2), reproduced offline by the verifier
+- **BUG-127**
+  - **wirkt nicht** `bugs/BUG-158-coffin-provisioner-counts-zones-df-re-gives-as-free-and-inspect-tombs-header-disagrees.md:4` (live re-check found BUG-158): Found: 2026-10-28, live test i4 (BUG-127 note, new bug 6): header '555 coffins, 0 free, 80 unburied ... (rebuilt now ...); freed 20' with
+- **BUG-128**
+  - **wirkt nicht** `bugs/BUG-187-long-term-patient-blocks-the-tool-detail.md:4` (live re-check found BUG-187): Found: 2026-10-29, live test round 2, instance i4 (BUG-128d PARTIAL, NEW2), confirmed by the skeptic re-check
+  - **wirkt nicht** `bugs/BUG-188-tool-pile-site-search-runs-out-of-reads-at-a-rock-shaft.md:4` (live re-check found BUG-188): Found: 2026-10-29, live test round 2, instance i4 (BUG-128e PARTIAL, NEW6), confirmed by the skeptic re-check
+- **BUG-130**
+  - **wirkt nicht** `bugs/BUG-163-fortcore-resite-drafts-only-the-stopped-anchors-stages.md:4` (live re-check found BUG-163): Found: 2026-10-29, live test round 2 instance i3 (BUG-130 PARTIAL, finding NEW3, confirmed by the skeptic): with bp files y707s0b1 (stage 1)
+- **BUG-131**
+  - **wirkt nicht** `bugs/BUG-159-brief-trims-the-timeline-reset-and-status-the-hospital-retire-hint.md:4` (live re-check found BUG-159): Found: 2026-10-29, live test round 2, instance i1 (Trussroads y721-y722), items NEW7 and BUG-131b, both confirmed by the skeptic
+- **BUG-133**
+  - **wirkt nicht** `bugs/BUG-179-tomb-repair-frees-zones-of-dead-buried-in-another-units-tomb-every-run.md:4` (live re-check found BUG-179): Found: 2026-10-29, live test round 2 instance i4 (BUG-133c, NEW3; skeptic confirmed)
+  - **wirkt nicht** `bugs/BUG-181-a-pending-workshops-project-suppresses-requests-for-types-it-does-not-build.md:4` (live re-check found BUG-181): Found: 2026-10-29, live test round 2 instance i4 (BUG-133d, NEW4; skeptic reproduced with skip=Masons)
+  - **wirkt nicht** `bugs/BUG-182-no-masons-reason-hidden-by-a-standing-constructslab-order.md:4` (live re-check found BUG-182): Found: 2026-10-29, live test round 2 instance i4 (BUG-133d part 2; skeptic confirmed)
+- **BUG-142**
+  - **wirkt nicht** `bugs/BUG-170-squad-station-on-another-walk-group-than-its-soldiers.md:4` (live re-check found BUG-170): Found: 2026-10-29, live test round 2 instance i3 (E:/DF-test3, region2-site90 Trussroads y722), confirmed by the skeptic (BUG-142 retest, NEW1)
+- **BUG-162**
+  - **wirkt nicht** `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
+- **BUG-163**
+  - **wirkt nicht** `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
+- **BUG-164**
+  - **wirkt nicht** `bugs/BUG-195-propose-drafts-a-fortcore-stage-check-refuses.md:4` (live re-check found BUG-195): Found: 2026-10-29, live test round 3, Trussroads y728 (finding BUG-162..164-live, skeptic re-check); also Earthboat (F5, second propose)
+- **BUG-170**
+  - **wirkt nicht** `bugs/BUG-214-whole-station-chain-fails-no-order-or-unreachable-kept.md:4` (live re-check found BUG-214): Found: 2026-10-29, live test round 4 (E:/DF-test4, region2-site90 Trussroads y732-733), retest of BUG-170, confirmed by the skeptic
+- **BUG-173**
+  - **wirkt nicht** `bugs/BUG-207-inspect-unit-by-nickname.md:4` (live re-check found BUG-207): Found: 2026-10-29, live test round 3 (BUG-173b re-check), kernel bd27973
+- **BUG-174**
+  - **wirkt nicht** `bugs/BUG-208-curse-kill-grown-set-inside-gate.md:4` (live re-check found BUG-208): Found: 2026-10-29, live test round 3 (BUG-174c re-check), kernel bd27973
+- **BUG-177**
+  - **wirkt nicht** `bugs/BUG-199-stock-line-lost-after-back-to-back-reloads.md:4` (live re-check found BUG-199): Found: 2026-10-29, live test round 3 i1 (BUG-177a-stock; skeptic confirmed)
+- **BUG-231**
+  - **wirkt nicht** `runs/run-16a/FR-BUGS.md:438` (griff nicht): uen seit y478. Wunsch: Kernel legt das Buero selbst neu an (BUG-231 Bypass griff nicht, 1-Kachel-Raum);
+- **BUG-274**
+  - **wirkt nicht** `bugs/BUG-298-seal-door-outside-the-builders-burrow-untaken.md:8` (curated: Run 15c y374-y376: the BUG-274 re-place ('removed and placed again (once)') did not help): Run 15c Inkintense y374-y376: SEAL_STUCK #1487 / PROJECT_BLOCKED #1500 'door 92,99,133: job 94401/95916 not suspended, no builder has taken it', also in round 1, with 8-10 idle dwarves; the door lies 
+- **BUG-297**
+  - **wirkt nicht** `runs/run-15c-inkintense/FR-BUGS.md:333` (FAIL): - BUG-297 Oberflächen-Farm: **FAIL (teilweise)*
+- **BUG-303**
+  - **wirkt nicht** `runs/run-15d-drillchamber/FR-BUGS.md:334` (FAIL): - Sandzone (BUG-303): FAIL/ungeprüft.
+- **BUG-442**
+  - **wirkt nicht** `runs/run-16b/FR-BUGS.md:198` (nur halb): ## OBS BUG-442 nur halb: bp/y372s0b0.json liegt weiter da (y397)
+- **BUG-532**
+  - **wirkt nicht** `runs/run-16b/FR-BUGS.md:475` (curated: the BUG-532 rule (a plant eater inside Kern+ always counts) held 6 mammoths as hostiles, B1 down refused (also STAND.md:331)): B1 (112,131-133,z140) trennt die Innen-Gruppe 1097 (27 Buerger, Essen 1885 inkl. 1167 Mahlzeiten, Trinken 692, 48 Betten, Brunnen, Aexte, Holz/Steine) von der Aussen-Gruppe 36 (30 Buerger, 20 Essen, 3
+- **BUG-570**
+  - **wirkt nicht** `runs/run-16b/FR-BUGS.md:488` (curated: the starve_lockdown widening flapped on a cleared mammoth calf while 4 citizens starved): DECISION_NEEDED starve_lockdown #9421/#9424: "NOT widened to Kern+: a hostile 20-25 tiles from the fort (near 25) ... attack: squad.sortie target [105,149,137] unit 29274" - 29274 ist ein Wollmammut-K
+- **BUG-581**
+  - **wirkt nicht** `runs/run-16a/FR-BUGS.md:348` (NICHT): - BUG alter Hospital-Run: das Q.OPTIONAL-Verhalten (BUG-581) rettete das bestehende Projekt NICHT (weiter build_lost nach "stage goes on without them");
+- **BUG-721**
+  - **wirkt nicht** `runs/run-16d/FR-BUGS.md:668` (nicht selbst geloest): 9ef (Perimeter y389) 263 d 'set aside' -> bp.resume noetig (BUG-721 veraltete Projekte hat das nicht selbst geloest).
+- **BUG-736**
+  - **wirkt nicht** `runs/run-16c/FR-BUGS.md:440` (nicht rechtzeitig): Die Holz-Ringwand (BUG-736) wurde nicht rechtzeitig gebaut: PROJECT_BLOCKED 'ring wall 75,91,140 designated and nobody builds it' 2 d, danach brac
+
+## Gemischt (wirkte einmal, versagte oder kam wieder)
+
+- **BUG-399**
+  - **wirkt nicht** `runs/run-16b/STAND.md:34` (Fehlalarm): warfs,Glass, surface) queued. surfacecore nicht im Entwurf (BUG-399-Guard Fehlalarm).
+  - **wirkt** `runs/run-16c/FR-BUGS.md:101` (curated: after the reload the guard is gone: 'BUG-399-Guard weg: bp sites surfacecore laeuft jetzt ohne Fehler'): - follow --takeover neu gestartet. BUG-399-Guard weg: 'bp sites surfacecore' laeuft jetzt ohne Fehler, liefert aber 0 Plaetze (kein flacher 21x21-Block freier Oberflaeche auf der Walk-Gruppe; Bewuchs/
+- **BUG-523**
+  - **wirkt nicht** `runs/run-16a/FR-BUGS.md:303` (wirkt hier NICHT): he refuge" (fortcore st3); check lehnt auch P4 und P3 ab -> BUG-523 (Phasen ohne Fortkern) wirkt hier NICHT, P2 bleibt.
+  - **wirkt** `runs/run-16a/FR-BUGS.md:326` (wirkt): de 35: plan check akzeptiert phase_target P5 ohne Fortkern (BUG-523-Fix wirkt, y430);
+  - **wirkt** `runs/run-16a/FR-BUGS.md:329` (wirkt): 5 (ceiling 25) und plan check akzeptiert ihn ohne Fortkern (BUG-523 wirkt).
+  - **wirkt nicht** `runs/run-16a/FR-BUGS.md:375` (wieder weg): tanding" (vorher y449-y454 P5 akzeptiert); nur P2 geht. Das BUG-523-Verhalten (Phasen ohne Fortkern) ist durch Runde 39 wieder weg.
+- **BUG-562**
+  - **wirkt** `runs/run-16d/STAND.md:370` (ok): _ws Jewelers -> bp.place workshops only=Jewelers rebuild=1 (BUG-562) ok
+  - **wirkt nicht** `runs/run-16a/FR-BUGS.md:407` (ins Leere): Der Kernel-Hinweis (BUG-562) "bp.place workshops only=<Typ> rebuild=1 baut sie dort neu" laeuft ins Leere, wenn der alte Standort von einem fertige
+  - **wirkt** `runs/run-16d/FR-BUGS.md:625` (klappt): :{only:Jewelers}}: refused (0 free sites). Mit p.rebuild=1 (BUG-562) klappt es.
+
+## Bestätigt
+
+- **BUG-001**
+  - **wirkt** `docs/v2/STATUS.md:104` (confirmed): 4. *Stock and perimeter:* 'inspect reach' drink 1115 (BUG-001 confirmed);
+- **BUG-004**
+  - **wirkt** `docs/v2/STATUS.md:98` (confirmed): d 46, 'prov.pct 5'). 'resuspended 0' in 'inspect workload'. BUG-004/005/009 confirmed for the old sites.
+- **BUG-005**
+  - **wirkt** `docs/v2/STATUS.md:98` (confirmed): d 46, 'prov.pct 5'). 'resuspended 0' in 'inspect workload'. BUG-004/005/009 confirmed for the old sites.
+- **BUG-007**
+  - **wirkt** `docs/v2/STATUS.md:103` (confirmed): heck line; 'selftest full': 9 pass, 0 fail (budget passes). BUG-007 confirmed.
+- **BUG-009**
+  - **wirkt** `docs/v2/STATUS.md:98` (confirmed): d 46, 'prov.pct 5'). 'resuspended 0' in 'inspect workload'. BUG-004/005/009 confirmed for the old sites.
+- **BUG-011**
+  - **wirkt** `bugs/BUG-011-civ-alert-flips-on-then-off.md:73` (curated: live check 95fe16d: civ_alert=1 in every probe sample until LOCKDOWN_END, no flip-flop): ## Live check 95fe16d (17:06-17:16, test fort y372)
+- **BUG-012**
+  - **wirkt** `bugs/BUG-012-entrance-door-not-recognised.md:96` (curated: live check 95fe16d: ARRIVAL 'doors 1 forbidden', act.door_forbid [16970,true] at the trigger tick (the flag reset is BUG-015)): ## Live check 95fe16d (17:06-17:16, test fort y372)
+- **BUG-013**
+  - **wirkt** `bugs/BUG-013-lever-pulls-blocked-by-civil-alert.md:104` (curated: live check 95fe16d: all four bridges up within 701 ticks, confined citizens took the pulls with Hebel+ listed): ## Live check 95fe16d (17:06-17:16, test fort y372, all four bridges down, popup injected)
+- **BUG-014**
+  - **wirkt** `bugs/BUG-014-autolabor-legacy-false-failure.md:59` (curated: live check 95fe16d: set to monitor (read back: monitor), no new AUTOLABOR_LEGACY): ## Live check 95fe16d (17:15)
+- **BUG-025**
+  - **wirkt** `docs/v2/POSTMORTEM-run10-siege-y421.md:35` (works): - Wins on the way: BUG-025/026/027/028 found and fixed with the dev session, the trade works, the kernel survived two sieges without a crush after the fixes.
+  - **wirkt** `bugs/BUG-025-trade-looks-at-the-wrong-depot.md:2` (Status: confirmed live): Status: fixed and confirmed live (2026-10-16, Catten y415: depot 17590 chosen, 135 goods listed, traded ratio 1.68)
+- **BUG-027**
+  - **wirkt** `docs/v2/POSTMORTEM-run10-siege-y421.md:35` (works): - Wins on the way: BUG-025/026/027/028 found and fixed with the dev session, the trade works, the kernel survived two sieges without a crush after the fixes.
+- **BUG-033**
+  - **wirkt** `bugs/BUG-033-snapshot-queue-full-for-months.md:2` (Status: confirmed live): Status: fixed in bfad790, confirmed live (Run 11 y439 autumn d70, 9089d54): a K.call is the caller's cost; the snapshot queue (who asked, joins, inbox
+- **BUG-041**
+  - **wirkt** `bugs/BUG-041-seal-clear-waits-on-an-ungathered-shrub.md:49` (curated: Live confirmed Run 11 y465: DF built the door on the shrub, the seal hung 1500 days is done): ## Live confirmed (Run 11, y465/466, kernel b873eb6)
+- **BUG-292**
+  - **wirkt** `runs/run-15c-inkintense/FR-BUGS.md:337` (OK): - BUG-288..292 Aquifer: 'bp sites aqshaft' rankt 12 Sites (S1 68,50,128 score 952) **OK**;
+- **BUG-293**
+  - **wirkt** `runs/run-15c-inkintense/FR-BUGS.md:331` (OK): - BUG-293 popcap-Hold: gate bleibt 25 ("ceiling player 25 until popcap.raise"), cap 50 durch Bestand: **geprüft OK** (bisher kein
+- **BUG-294**
+  - **wirkt** `runs/run-15c-inkintense/FR-BUGS.md:332` (OK): - BUG-294/295 kein Auto-Drill bei Hungersnot / Jäger: Auto-Drill y376 d58-66 "auto: supply: food 1 d" blockiert, **OK*
+- **BUG-295**
+  - **wirkt** `runs/run-15c-inkintense/FR-BUGS.md:332` (OK): - BUG-294/295 kein Auto-Drill bei Hungersnot / Jäger: Auto-Drill y376 d58-66 "auto: supply: food 1 d" blockiert, **OK*
+- **BUG-296**
+  - **wirkt** `runs/run-15c-inkintense/FR-BUGS.md:330` (OK): - BUG-296 Fischen an Rampenkanten: **geprüft OK*
+- **BUG-300**
+  - **wirkt** `runs/run-15b-earthboat/FR-BUGS.md:110` (OK): - Phase-Fortschritt (BUG-300..302): OK sichtbar: 'phase P5: waits for drill, ready 1, stock_drink_d>=170'.
+  - **wirkt** `runs/run-15c-inkintense/FR-BUGS.md:347` (OK): - BUG-300 Waiver: **OK*
+  - **wirkt** `runs/run-15d-drillchamber/FR-BUGS.md:333` (OK): - Phase aus P0 (BUG-300..302): OK.
+- **BUG-301**
+  - **wirkt** `runs/run-15b-earthboat/FR-BUGS.md:110` (OK): - Phase-Fortschritt (BUG-300..302): OK sichtbar: 'phase P5: waits for drill, ready 1, stock_drink_d>=170'.
+  - **wirkt** `runs/run-15d-drillchamber/FR-BUGS.md:333` (OK): - Phase aus P0 (BUG-300..302): OK.
+- **BUG-304**
+  - **wirkt** `runs/run-15d-drillchamber/FR-BUGS.md:336` (OK): - Plan y378b (propose/check/apply) ohne 'plant'-Fehler: BUG-304 OK (propose-Handel enthält jetzt cloth:silk, thread:silk).
+- **BUG-310**
+  - **wirkt** `runs/run-15b-earthboat/FR-BUGS.md:108` (OK): - Brücken-Hochzwingen (BUG-310..312): OK in dieser Belagerung.
+- **BUG-311**
+  - **wirkt** `runs/run-15b-earthboat/FR-BUGS.md:108` (OK): - Brücken-Hochzwingen (BUG-310..312): OK in dieser Belagerung.
+- **BUG-313**
+  - **wirkt** `runs/run-16a/FR-BUGS.md:80` (funktioniert): et aside), seal at=refuge: Hatch auf 94,117,154 verschoben (BUG-313-Pfad funktioniert), coffins 'no material' (hard stone 0, logs 22 keep 20).
+  - **wirkt** `runs/run-16a/FR-BUGS.md:142` (wirkt): seal","p":{"at":"last"}} wurde akzeptiert). Hatch-Verlegung BUG-313 wirkt (warn "hatch moved").
+  - **wirkt** `runs/run-16b/FR-BUGS.md:214` (wirkt): ## OBS seal at=refuge (y399): BUG-313-Hatch-Umsetzung wirkt: "hatch moved to 88,106,110 (same stair, first level with a floor beside it)".
+  - **wirkt** `runs/run-16b/FR-BUGS.md:224` (ok): Erste Platzierung verlegte den Hatch auf 88,106,110 (BUG-313-Fix, OBS ok), dort "job suspended by DF";
+  - **wirkt** `runs/run-16d/FR-BUGS.md:39` (wirkt): rwartbar). Neu: refuge-Warnung 'hatch moved to 78,115,134' (BUG-313-Fix wirkt).
+- **BUG-316**
+  - **wirkt** `runs/run-15c-inkintense/FR-BUGS.md:346` (OK): - BUG-316/297b Oberflächen-Farm: **OK*
+  - **wirkt** `runs/run-15d-drillchamber/FR-BUGS.md:349` (funktioniert): farms@S1' auf Außenfläche vor (121,54,144, plots 1 statt 2, BUG-316) und 'refuge_beds': Farm-Bau-Pfad funktioniert jetzt;
+- **BUG-328**
+  - **wirkt** `runs/run-15-guildcleans/FR-BUGS.md:103` (wirken): - BUG-328/329 wirken sichtbar: brief zeigt jetzt "set aside (no progress): 3 ...
+- **BUG-329**
+  - **wirkt** `runs/run-15-guildcleans/FR-BUGS.md:103` (wirken): - BUG-328/329 wirken sichtbar: brief zeigt jetzt "set aside (no progress): 3 ...
+- **BUG-457**
+  - **wirkt** `runs/run-16b/FR-BUGS.md:196` (behoben): traps.at-Crash mehr; propose liefert Entwurf mit Warnungen (BUG-457 behoben).
+- **BUG-488**
+  - **wirkt** `runs/run-16a/STAND.md:140` (wirkt): (16 Sol), Plan y402 angewendet, 0 Tote; Karawane GEHANDELT (BUG-488 wirkt: Totems -> Cloth, kein Stein);
+  - **wirkt** `runs/run-16a/FR-BUGS.md:252` (WIRKT): - BUG-488 WIRKT: Karawane y402 Herbst d16 (Catten otthat) erstmals gehandelt: verkauft 27 TOTEM (1350), gekauft 20 Cloth (595), r
+- **BUG-517**
+  - **wirkt** `runs/run-16d/FR-BUGS.md:377` (wirkt): zeigt kein 'PERIMETER OPEN' mehr, R0 nur noch 'levers:O1' (BUG-517 wirkt: Wand 84,72,139 zaehlt als zu;
+- **BUG-543**
+  - **wirkt** `runs/run-16d/STAND.md:226` (wirkt): 10:41 y416 sum d75: DRILL_RESULT #12000 'occupied:B1' (BUG-543-Fix wirkt: Bruecke nicht hochgezogen, keine Tote);
+  - **wirkt** `runs/run-16c/FR-BUGS.md:273` (wirkt): down), DRILL_RESULT 'failed: slow:B1, worn<90', 0 Tote. Fix BUG-543 wirkt in dieser Lage (keine BRIDGE_CRUSH an Buergern, Pop 51).
+  - **wirkt** `runs/run-16c/FR-BUGS.md:275` (wirkt): call 25 Buerger in 1080 t, keine BRIDGE_CRUSH, keine Toten (BUG-543 Fix wirkt).
+  - **wirkt** `runs/run-16c/FR-BUGS.md:285` (wirkt): OBS Drill y418 Herbst d34: 'drill failed ... occupied:B1' (BUG-543 Fix wirkt)
+  - **wirkt** `runs/run-16d/FR-BUGS.md:420` (ok): .want bar:steel/flux gesetzt. Drill-Ergebnis 'occupied:B1' (BUG-543-Fix) ok.
+- **BUG-602**
+  - **wirkt** `runs/run-16b/FR-BUGS.md:398` (curated: 'bp sites aqshaft --fresh liefert jetzt S1-S3', bp.place worked (the shaft stalled later on the ring)): - aqshaft-Ausweich-Sites (BUG-602): 'bp sites aqshaft --fresh' liefert jetzt S1-S3 (68,85/91/93, depth 17); bp.place klappte, Schacht kam bis z135 (l5.dig 29%), stalled dann wieder "the ring has not m
+- **BUG-732**
+  - **wirkt** `runs/run-16a/FR-BUGS.md:470` (wirkt): - OBS Runde 47 (c9306a79, 12:42): BUG-732 wirkt: 'bp.place tpl=explore site=S1' -> queued c1a1ca697e56920101 (vorher "5 projects hold them").
+- **BUG-755**
+  - **wirkt** `runs/run-16b/STAND.md:407` (wirkt): .out15), Plan y445 angewendet (farms, hospital furnish x3 = BUG-755 wirkt, Betten);
+
+## Unsichere Fundstellen (ändern keinen Status)
+
+Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, wird beobachtet, ...), auch bei Bugs, die anderswo ein Urteil haben.
+
+- BUG-001 `docs/v2/STATUS.md:93` (no verdict word): and 'civ_alert=0' in every probe sample (BUG-011, with BUG-001 behind the refuge refusal).
+- BUG-001 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-001 `docs/v2/POSTMORTEM-run9-test-siege-2026-10-15.md:23` (no verdict word): flag resets, BUG-015). Claude saw and documented the leaks (BUG-001/-002/-012) but did not close them while playing.
+- BUG-002 `docs/v2/STATUS.md:126` (no verdict word): eeds a way to spawn units), PERIMETER_BROKEN after a siege (BUG-002), HOSPITAL_DRY, MOOD_RISK, embark panel.
+- BUG-002 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-003 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-004 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-005 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-006 `docs/v2/STATUS.md:105` (not confirmed): terpart (down stair at 30,66,109)' with 'age 128265' ticks (BUG-006 not confirmed: stale snapshot).
+- BUG-006 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-007 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-008 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-009 `docs/v2/STATUS.md:75` (no verdict word): unforbidden (BUG-009);
+- BUG-009 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-010 `docs/v2/STATUS.md:76` (no verdict word): autolabor' was found enabled in legacy mode after the load (BUG-010).
+- BUG-010 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-011 `docs/v2/STATUS.md:93` (no verdict word): and 'civ_alert=0' in every probe sample (BUG-011, with
+- BUG-011 `docs/v2/STATUS.md:115` (no verdict word): **Retest 2 after BUG-011..014 / FR-64 (main 95fe16d, 17:00-17:16;
+- BUG-011 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-012 `docs/v2/STATUS.md:92` (no verdict word): the lockdown forbade **0 doors** although the fort has 62 (BUG-012, "0 entrances");
+- BUG-012 `docs/v2/STATUS.md:115` (no verdict word): **Retest 2 after BUG-011..014 / FR-64 (main 95fe16d, 17:00-17:16;
+- BUG-012 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-013 `docs/v2/STATUS.md:113` (no verdict word): ert confines everybody to Kern+ and the levers lie outside (BUG-013).
+- BUG-013 `docs/v2/STATUS.md:115` (no verdict word): **Retest 2 after BUG-011..014 / FR-64 (main 95fe16d, 17:00-17:16;
+- BUG-013 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-014 `docs/v2/STATUS.md:100` (no verdict word): OLABOR_LEGACY (A) says 'mode monitor failed, still legacy' (BUG-014).
+- BUG-014 `docs/v2/STATUS.md:115` (no verdict word): **Retest 2 after BUG-011..014 / FR-64 (main 95fe16d, 17:00-17:16;
+- BUG-014 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-015 `docs/v2/STATUS.md:120` (no verdict word): e** (probe 0/62 throughout, 'LOCKDOWN_END 0 doors opened'): BUG-015 (three other doors keep the flag).
+- BUG-015 `docs/v2/STATUS.md:128` (no verdict word): **Problems found (one file per bug in 'bugs/', BUG-001..BUG-015, index 'bugs/README.md';
+- BUG-015 `docs/v2/POSTMORTEM-run9-test-siege-2026-10-15.md:23` (no verdict word): e east one has a door (74,70,117, whose forbid flag resets, BUG-015).
+- BUG-018 `docs/v2/POSTMORTEM-run9-test-siege-2026-10-15.md:38` (no verdict word): - **BUG-018** audit passes 'Kern+' although it contains the entrances;
+- BUG-019 `docs/v2/POSTMORTEM-run9-test-siege-2026-10-15.md:38` (no verdict word): audit passes 'Kern+' although it contains the entrances; **BUG-019** 'REFUGE_FAIL' blocks the only reachable emergency burrow.
+- BUG-020 `runs/run-15d-drillchamber/FR-BUGS.md:18` (no verdict word): Vermutung: der Regelkreis lernt k aus Fehlversuchen weiter (BUG-020/228), obwohl 'tracking_on' in diesem Zustand
+- BUG-026 `docs/v2/POSTMORTEM-run10-siege-y421.md:35` (curated: 'the trade works' does not show the ui_timeout retry): - Wins on the way: BUG-025/026/027/028 found and fixed with the dev session, the trade works, the kernel survived two sieges without a crush after the fixes.
+- BUG-028 `docs/v2/POSTMORTEM-run10-siege-y421.md:35` (curated: 'the trade works' says nothing on BREACH and thirst): - Wins on the way: BUG-025/026/027/028 found and fixed with the dev session, the trade works, the kernel survived two sieges without a crush after the fixes.
+- BUG-031 `runs/run-15b-earthboat/FR-BUGS.md:74` (no verdict word): ck verlangen die Refuge-Seal 55,82,133 erneut (ERROR refuge BUG-031), obwohl sie zweimal hängen blieb;
+- BUG-032 `docs/v2/POSTMORTEM-run11-siege8-y441.md:8` (no verdict word): ' unsuitable ohne Wandnachbar), B2 durch Station blockiert (BUG-032), O1-Hebel no_worker, leere Squads.
+- BUG-033 `docs/v2/POSTMORTEM-run11-siege8-y441.md:18` (no verdict word): deckung vorbereitet (audit FAIL 113 t), Planungen und Stau (BUG-033) kosteten Monate.
+- BUG-034 `runs/run-15c-inkintense/FR-BUGS.md:61` (no verdict word): ## FR Krankenhaus ohne Bach: hospital held back (BUG-034), Wasser nur über Zisterne (y373)
+- BUG-034 `runs/run-15c-inkintense/FR-BUGS.md:62` (no verdict word): Draft-Notiz: 'hospital held back (BUG-034): no accepted water in the fort'.
+- BUG-034 `runs/run-15d-drillchamber/FR-BUGS.md:63` (no verdict word): ites hospital' verweigert: "no accepted water in the fort" (BUG-034) -> G3 rot.
+- BUG-034 `runs/run-15d-drillchamber/FR-BUGS.md:72` (no verdict word): rink 0 d, kein akzeptiertes Wasser, Krankenhaus "held back (BUG-034)") legte 'cistern@S1'
+- BUG-040 `runs/run-15d-drillchamber/FR-BUGS.md:370` (no verdict word): one 18276 (87,82,141) fuellen lassen / Brunnen-Fuellquelle (BUG-040) automatisch bauen;
+- BUG-043 `docs/v2/STATUS.md:1171` (no verdict word): ox' the box is the manifest geometry plus a 16/16/2 margin (BUG-043: the fort's pieces, an audit's
+- BUG-043 `docs/v2/STATUS.md:1174` (no verdict word): - at most 250,000 tiles (BUG-043: 400,000, config 'snapshot.max_tiles');
+- BUG-118 `bugs/BUG-155-bp-preview-refuses-only-for-workshops.md:4` (live re-check found BUG-155 (side note)): Found: 2026-10-28, live test i4 (M6-BUG-118 side note, new bug 3)
+- BUG-130 `runs/run-16a/FR-BUGS.md:197` (no verdict word): Das Wort steht in den eigenen auto-generierten notes (BUG-130-Text);
+- BUG-130 `runs/run-16c/FR-BUGS.md:74` (curated: 'plan check OK' is the player's own check after a workaround, no verdict on the fix): re@S1 (depth 2, [76,34,127]) statt surfacecore: Draft nennt BUG-130 (c1a1a797 stoppte an heavy aquifer), ERROR verlangt bp.cancel, danach plan check OK.
+- BUG-130 `runs/run-16c/FR-BUGS.md:91` (no verdict word): Warnung im Plan-Check: harmlos, kommt aus dem Entwurfstext (BUG-130 Notiz) und nicht aus mir.
+- BUG-164 `runs/run-16a/FR-BUGS.md:48` (no verdict word): ieferte seasons[2] fortcore st3 vor seasons[3] st2 -> ERROR BUG-164;
+- BUG-197 `runs/run-15-guildcleans/FR-BUGS.md:3` (no verdict word): an-Template (P1) und im Jahr-1-Plan (fortcore Stufe 1 only, BUG-197) nicht dabei.
+- BUG-228 `runs/run-15d-drillchamber/FR-BUGS.md:18` (no verdict word): Vermutung: der Regelkreis lernt k aus Fehlversuchen weiter (BUG-020/228), obwohl 'tracking_on' in diesem Zustand
+- BUG-228 `runs/run-16c/FR-BUGS.md:10` (scheint): ,591] fuer DF-test3), die Kalibrierung gilt fuer 1716x1000. BUG-228-Fix (tracking_on=1 im Injector) scheint hier nicht zu reichen;
+- BUG-230 `runs/run-15c-inkintense/FR-BUGS.md:8` (no verdict word): ewgame --world-folder region1 [--portable]' wie bei 'load' (BUG-230), Zeile über Folder-/Portable-Text der zweiten Zeile wählen.
+- BUG-230 `runs/run-15d-drillchamber/FR-BUGS.md:9` (no verdict word): ewgame --world-folder region1 [--portable]' wie bei 'load' (BUG-230): Zeile mit "Folder: <name>" bzw.
+- BUG-242 `runs/run-15d-drillchamber/FR-BUGS.md:143` (no verdict word): übernahm ihn (BUG-242-Notiz), dann 'ERROR fair play: $.trade.want[1] mentions 'plant'' und 'warn fair play: $.notes mentions
+- BUG-243 `runs/run-15c-inkintense/FR-BUGS.md:229` (no verdict word): erirdisch (Nadelwald hat Erde), kein Hinweis im Plan-Draft (BUG-243 "no water or food build left to draft").
+- BUG-243 `runs/run-15c-inkintense/FR-BUGS.md:288` (no verdict word): 0 farm tiles for 50 citizens" ohne Weg. plan propose y376: "BUG-243: no water or food build left to draft".
+- BUG-288 `runs/run-15c-inkintense/FR-BUGS.md:337` (curated: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand): - BUG-288..292 Aquifer: 'bp sites aqshaft' rankt 12 Sites (S1 68,50,128 score 952) **OK**;
+- BUG-289 `runs/run-15c-inkintense/FR-BUGS.md:337` (curated: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand): - BUG-288..292 Aquifer: 'bp sites aqshaft' rankt 12 Sites (S1 68,50,128 score 952) **OK**;
+- BUG-290 `runs/run-15c-inkintense/FR-BUGS.md:337` (curated: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand): - BUG-288..292 Aquifer: 'bp sites aqshaft' rankt 12 Sites (S1 68,50,128 score 952) **OK**;
+- BUG-291 `runs/run-15c-inkintense/FR-BUGS.md:337` (curated: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand): - BUG-288..292 Aquifer: 'bp sites aqshaft' rankt 12 Sites (S1 68,50,128 score 952) **OK**;
+- BUG-294 `runs/run-15c-inkintense/FR-BUGS.md:341` (wirkt nur): Details (WORK_DETAIL #1717-#1722), Drill failed (worn 17%). BUG-294 Schwelle wirkt nur bei < ~30 d;
+- BUG-301 `runs/run-15c-inkintense/FR-BUGS.md:350` (nicht prüfbar): g (P3 ist Sperre durch open_perimeter + orders_rockstock) - BUG-301/302 (P5-Fortschritt) damit nicht prüfbar.
+- BUG-302 `runs/run-15b-earthboat/FR-BUGS.md:110` (curated: BUG-302 is the farms draft with 0 sites, the line shows the phase status (BUG-300/301)): - Phase-Fortschritt (BUG-300..302): OK sichtbar: 'phase P5: waits for drill, ready 1, stock_drink_d>=170'.
+- BUG-302 `runs/run-15c-inkintense/FR-BUGS.md:350` (nicht prüfbar): g (P3 ist Sperre durch open_perimeter + orders_rockstock) - BUG-301/302 (P5-Fortschritt) damit nicht prüfbar.
+- BUG-302 `runs/run-15d-drillchamber/FR-BUGS.md:333` (curated: the player names the status line BUG-302, it is BUG-301's; the farms draft is not shown): - Phase aus P0 (BUG-300..302): OK.
+- BUG-302 `runs/run-15d-drillchamber/FR-BUGS.md:333` (curated: the player names the status line BUG-302, it is BUG-301's; the farms draft is not shown): P5: waits for drill, stock_drink_d>=170, stock_food_d>=60' (BUG-302 Statuszeile ok).
+- BUG-305 `runs/run-15c-inkintense/FR-BUGS.md:351` (nicht prüfbar): - BUG-305 Handel-Klick: nicht prüfbar, Karawane y377 sum: "trade: O1 down for the caravan: down refused: lockdown" (Lockdown verh
+- BUG-306 `runs/run-15d-drillchamber/FR-BUGS.md:344` (no verdict word): omon): ok, kein Fenster-Hänger. Trinknische/Tage aus Durst (BUG-306..309): bei 0 drink kein Test möglich;
+- BUG-307 `runs/run-15d-drillchamber/FR-BUGS.md:344` (no verdict word): omon): ok, kein Fenster-Hänger. Trinknische/Tage aus Durst (BUG-306..309): bei 0 drink kein Test möglich;
+- BUG-308 `runs/run-15d-drillchamber/FR-BUGS.md:344` (no verdict word): omon): ok, kein Fenster-Hänger. Trinknische/Tage aus Durst (BUG-306..309): bei 0 drink kein Test möglich;
+- BUG-309 `runs/run-15d-drillchamber/FR-BUGS.md:344` (no verdict word): omon): ok, kein Fenster-Hänger. Trinknische/Tage aus Durst (BUG-306..309): bei 0 drink kein Test möglich;
+- BUG-312 `runs/run-15b-earthboat/FR-BUGS.md:108` (curated: BUG-312 is the automatic drill with a dry refuge, the line is about bridge raises): - Brücken-Hochzwingen (BUG-310..312): OK in dieser Belagerung.
+- BUG-313 `runs/run-15b-earthboat/FR-BUGS.md:109` (nicht auslösbar): - Refuge-Luke (BUG-313), bp.cancel (314), Auftragsschlange (315), Mood (306..309), Handel-Klick (305): nicht auslösbar/nicht beobachtet (keine
+- BUG-313 `runs/run-15b-earthboat/FR-BUGS.md:133` (no verdict word): 911 d ("job 205434 not suspended, no builder has taken it", BUG-313-Bereich: Schacht ringsum zu, kein Bauplatz).
+- BUG-313 `runs/run-15c-inkintense/FR-BUGS.md:354` (curated: FarmPlot jobs are outside the refuge-hatch fix; the range is shorthand): ob 152960 not suspended, no builder has taken it" (#2321) - BUG-313..315 für FarmPlot-Jobs **FAIL**, Farm weiter 0 %.
+- BUG-313 `runs/run-16d/STAND.md:460` (no verdict word): win d54 Pop 14 Tote 0: seal hatch 131,122,137 ohne Builder (BUG-313-Muster), FR-BUGS;
+- BUG-313 `runs/run-16d/FR-BUGS.md:371` (no verdict word): rkennt vor dem Platzieren, dass der Hatch nicht baubar ist (BUG-313-Pruefung wie beim Refuge-Hatch: auf naechste Ebene mit Boden ausweichen) und meldet die Oeffnung nicht als way in, wenn
+- BUG-313 `runs/run-16d/FR-BUGS.md:704` (no verdict word): vermutlich 1-breiter Schacht ohne begehbare Nachbarkachel (BUG-313: das Refuge-Hatch wird eine Ebene verlegt, seal tut das nicht).
+- BUG-314 `runs/run-15c-inkintense/FR-BUGS.md:354` (curated: BUG-314 is bp.cancel, not the FarmPlot builder): ob 152960 not suspended, no builder has taken it" (#2321) - BUG-313..315 für FarmPlot-Jobs **FAIL**, Farm weiter 0 %.
+- BUG-315 `runs/run-15c-inkintense/FR-BUGS.md:354` (curated: BUG-315 is the order queue cap, not the FarmPlot builder): ob 152960 not suspended, no builder has taken it" (#2321) - BUG-313..315 für FarmPlot-Jobs **FAIL**, Farm weiter 0 %.
+- BUG-316 `runs/run-15d-drillchamber/STAND.md:37` (no verdict word): (seal, explore, refuge_beds, farms plots=1 auf Außenfläche, BUG-316).
+- BUG-316 `runs/run-15c-inkintense/FR-BUGS.md:346` (no verdict word): berflächen-Farm: **OK**. 'bp sites farms surface=1' meldet "BUG-316: fewer plots fit, plots=1" mit 2 Sites;
+- BUG-316 `runs/run-16d/FR-BUGS.md:245` (no verdict word): S1 [94,74,138] "surface farm on soil floor, 35 plot tiles" (BUG-316-Fallback).
+- BUG-327 `runs/run-15-guildcleans/FR-BUGS.md:106` (scheint): - Pop 87 (14 Soldaten): BUG-327 Militaer scheint zu wirken (8 -> 14 sol).
+- BUG-340 `runs/run-15d-drillchamber/FR-BUGS.md:380` (?): . Wunsch: farms-Template mit Fallback auf Oberflaechenfarm (BUG-340 erwaehnt das, hier nicht gegriffen) oder Grund nennen, warum farms 0 Sites hat (Erde? Z4?).
+- BUG-340 `runs/run-15d-drillchamber/FR-BUGS.md:393` (?): ms 0 Sites: Surface-Farm/Oberflaechen-Fallback automatisch (BUG-340 greift nicht?).
+- BUG-370 `runs/run-16a/FR-BUGS.md:83` (no verdict word): ropose' lieferte bei einem Fort ohne Sites fuer 9 Vorlagen (BUG-370-Zeilen) ein 'notes' von 2110 Bytes und danach selbst 'ERROR $.notes: longer than 2000 bytes'.
+- BUG-370 `runs/run-16a/FR-BUGS.md:83` (no verdict word): Notes per Hand gekuerzt. Wunsch: propose kuerzt/kuerzt die BUG-370-Aufzaehlung selbst (z.
+- BUG-370 `runs/run-16b/FR-BUGS.md:541` (no verdict word): kshops","only":"Smelter","rebuild":1}', 'plan check' meldet BUG-370 "unknown types ['Smelter'];
+- BUG-370 `runs/run-16d/FR-BUGS.md:72` (no verdict word): uge schon in s1 setzen, wenn phase_target >= P3. Ausserdem: BUG-370 'walk group the citizens cannot reach' lies stockroom, dining, tavern, temple, furnaces weg (alle 53-80 Sites), obwohl
+- BUG-370 `runs/run-16d/FR-BUGS.md:437` (no verdict word): no_table: hospital furnish=1 drafted in seasons[0]', danach BUG-370: 'only 0 free site(s) ...
+- BUG-377 `runs/run-16c/FR-BUGS.md:237` (no verdict word): ose/check warnt jedes Jahr 'traps 0: add fortcore stage 4' (BUG-377), obwohl fortcore st4 (y386s0b0, y388s0b0 je 100 %) schon gebaut ist.
+- BUG-399 `runs/run-16b/STAND.md:35` (no verdict word): Leiche blockiert) abgebrochen, seal queued. Bedrooms blockt BUG-399-Guard.
+- BUG-399 `runs/run-16c/STAND.md:39` (no verdict word): [76,34,127]); c1a1a797/y377s0b0/b1 bp.cancel; surfacecore: BUG-399 no valid site;
+- BUG-399 `runs/run-16c/STAND.md:41` (no verdict word): gecancelt (heavy aquifer zum 2. Mal), surfacecore blockiert BUG-399 (Kernel nicht neu geladen), Mood Possessed (Gems fehlen), pop 76
+- BUG-399 `runs/run-16c/STAND.md:48` (no verdict word): rink 55d (Farm ohne Saat), seal at=last, surfacecore weiter BUG-399
+- BUG-399 `runs/run-16b/FR-BUGS.md:67` (no verdict word): ## BUG surfacecore/workshops-surface "no valid site": BUG-399-Guard feuert, obwohl die Oberflaeche bei z131 liegt (y396-397, R3 21:50)
+- BUG-399 `runs/run-16b/FR-BUGS.md:68` (no verdict word): ds 1865 floor tiles but no level above it to show open sky (BUG-399 ...;
+- BUG-399 `runs/run-16b/FR-BUGS.md:78` (no verdict word): ## BUG bedrooms/dining/tavern surface=1: gleicher BUG-399-Guard blockt 'bp.place' (y397 win d49, R3 22:10)
+- BUG-399 `runs/run-16b/FR-BUGS.md:79` (no verdict word): ... top level z138 ... no level above it to show open sky (BUG-399 ...)".
+- BUG-399 `runs/run-16b/FR-BUGS.md:86` (no verdict word): ecore gedacht ist, aber 'bp sites surfacecore' scheitert am BUG-399-Guard (siehe oben).
+- BUG-399 `runs/run-16b/FR-BUGS.md:87` (no verdict word): ## OBS Workaround Guard: explizites Anker-Label umgeht BUG-399-Guard
+- BUG-399 `runs/run-16b/FR-BUGS.md:98` (no verdict word): - Wunsch (hoch): (1) BUG-399-Guard fixen, damit surfacecore im Plan steht;
+- BUG-399 `runs/run-16b/FR-BUGS.md:102` (no verdict word): 'bp sites fortcore' nur nasse Sites, surfacecore wird wegen BUG-399-Guard (top level z138 = Berggipfel, nicht Oberflaeche z131) nie gezeichnet;
+- BUG-399 `runs/run-16c/FR-BUGS.md:75` (no verdict word): sh': "no valid site ... no level above it to show open sky (BUG-399: sites export from an older kernel ends at the surface;
+- BUG-399 `runs/run-16c/FR-BUGS.md:83` (no verdict word): s surfacecore --fresh' meldet weiter "no level above it ... BUG-399 older kernel: dfllm reload".
+- BUG-399 `runs/run-16c/FR-BUGS.md:90` (no verdict word): ore 2, captives'). surfacecore-Export weiter nicht nutzbar (BUG-399).
+- BUG-399 `runs/run-16c/FR-BUGS.md:95` (no verdict word): in Aquifer-Welt abgebrochen), surfacecore nicht ableitbar (BUG-399, Kernel nicht neu geladen).
+- BUG-399 `runs/run-16c/FR-BUGS.md:101` (no verdict word): - follow --takeover neu gestartet. BUG-399-Guard weg: 'bp sites surfacecore' laeuft jetzt ohne Fehler, liefert aber 0 Plaetze (kein flacher 21x21-Block freier Obe
+- BUG-412 `runs/run-16a/FR-BUGS.md:230` (?): zu cancelen; der follow-Cancel braucht ein Event mit Grund (BUG-412-Wache?).
+- BUG-412 `runs/run-16c/FR-BUGS.md:116` (no verdict word): (plan-y407b.json): Entwurf unveraendert leer, Notiz weiter BUG-415/412 'no fortcore site with a safe shaft column below the aquifer ([20,62,127]: aqshaft beside the...)'.
+- BUG-415 `runs/run-16c/FR-BUGS.md:116` (no verdict word): (plan-y407b.json): Entwurf unveraendert leer, Notiz weiter BUG-415/412 'no fortcore site with a safe shaft column below the aquifer ([20,62,127]: aqshaft beside the...)'.
+- BUG-427 `docs/v2/STATUS.md:1038` (no verdict word): e_flags' are 'raised/raising/lowering' (lever.lua:39-41, v1 BUG-427), not
+- BUG-437 `runs/run-16d/STAND.md:124` (no verdict word): refuge_beds, dining, furnaces; Fallen erst s2 wegen Warnung BUG-437 Wasser)
+- BUG-437 `runs/run-16d/STAND.md:132` (no verdict word): st4, traps bridges, explore x4); Entscheidung: Fallen trotz BUG-437-Warnung, da drink 405d/food 60-75d innen
+- BUG-438 `runs/run-16a/STAND.md:91` (no verdict word): escheitert, beide bp.cancel (Entscheidung); explore-Projekt BUG-438 laeuft;
+- BUG-438 `runs/run-16d/FR-BUGS.md:561` (no verdict word): r probes'. Seit y446 liefert jeder Probe nur Mudstone/Soil (BUG-438).
+- BUG-445 `runs/run-16a/FR-BUGS.md:231` (no verdict word): LES, Boden darunter nicht erreichbar); surfacecore ist laut BUG-445 gesperrt (und braucht Cw-Waende = Stein, 0).
+- BUG-450 `runs/run-16b/FR-BUGS.md:340` (no verdict word): ,120,131,86,122,131]' im Refuge-Raum (zone 18786) angelegt (BUG-450 SIEGE-Pfad);
+- BUG-453 `runs/run-16c/STAND.md:125` (no verdict word): (traps + fortcore st4) angewendet, explore y375 gecancelt (BUG-453 Bypass Stair 54,132,137 bleibt: audit_fail/bypass), hospital kein Wasser;
+- BUG-453 `runs/run-16c/FR-BUGS.md:237` (no verdict word): 88s0b0 je 100 %) schon gebaut ist. Stair-Bypass 54,132,137 (BUG-453) entwertet die ganze Fallenhalle fuer die Zaehlung und blockiert so R1 und das Pop-Ceiling-Wachstum.
+- BUG-458 `runs/run-16b/FR-BUGS.md:213` (no verdict word): dit-Bypass-Wall 60,99,121 floor schneidet einen Buerger ab (BUG-458), also bleibt Bypass offen.
+- BUG-458 `runs/run-16b/FR-BUGS.md:227` (no verdict word): e main walk group (citizen 60,99,121) ... close with doors (BUG-458)").
+- BUG-458 `runs/run-16b/FR-BUGS.md:227` (no verdict word): oden. Ich habe den Plan y401 selbst angewendet (Fehler: die BUG-458-Verweigerung vom Vorjahr haette mich warnen muessen;
+- BUG-469 `runs/run-16b/STAND.md:157` (no verdict word): sache trockener Brunnen 82,119,134 (FR); cistern abgelehnt (BUG-469), refuge_drink S1 87,118,131 platziert;
+- BUG-469 `runs/run-16b/STAND.md:346` (no verdict word): elle nur ausserhalb im Lockdown); cistern bp.place refused (BUG-469, kein Bach erreichbar, path braeuchte Waypoints = Frei-Graben an Wasser -> nicht gemacht);
+- BUG-469 `runs/run-16b/STAND.md:362` (no verdict word): Patienten-Wasser per Traeger 34 Tiles ok; cistern refused (BUG-469, kein Freigraben an Wasser)
+- BUG-469 `runs/run-16b/STAND.md:411` (no verdict word): 9817 (STRUCK_DOWN), starb selbst; Cistern: bp.place refused BUG-469, sites cistern core/refuge: 'no pipe route' (Wasser 82,89,141 / 82,171,141 zu weit) -> kein Brunnen moeglich, Trinken b
+- BUG-469 `runs/run-16b/FR-BUGS.md:297` (no verdict word): der (2) dfpilot muss den Brunnen speisen (cistern lehnt ab: BUG-469 Wasser 78 Schritte entfernt), (3) Hospital-Vorlage mit eigener Wasserzone IM Raum.
+- BUG-469 `runs/run-16b/FR-BUGS.md:334` (no verdict word): (accepted 0), 'bp.place tpl=cistern' am Hospital abgelehnt (BUG-469: kein Fluss/Aquifer erreichbar).
+- BUG-469 `runs/run-16b/FR-BUGS.md:338` (no verdict word): 00. Hospital-Brunnen 97,101,133 trocken, cistern abgelehnt (BUG-469).
+- BUG-469 `runs/run-16b/FR-BUGS.md:485` (no verdict word): ueber 30000. 'bp.place tpl=cistern site=A108_106_137_1' -> BUG-469 refused (kein erreichbarer Bach >= 8 Tiles);
+- BUG-469 `runs/run-16b/FR-BUGS.md:535` (no verdict word): er, Meldung nennt das ('barrels wanted'). cistern: bp.place BUG-469 refused, 'bp.sites cistern core/refuge' 'no pipe route' (Wasser 40+ Tiles;
+- BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
+- BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
+- BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);
+- BUG-488 `runs/run-16a/FR-BUGS.md:274` (no verdict word): inzige Karawane-Zivilisation fuehrt sie nicht). Damit loest BUG-488 das Stein-Problem nicht: Hospital (TractionBench braucht Mechanismus) und Altar bleiben unmoeglich.
+- BUG-500 `runs/run-16a/FR-BUGS.md:276` (no verdict word): Soil-Fort bekam nie Stein. Wunsch: wenn Stein dauerhaft 0 (BUG-500) und Fallen unmoeglich: Holzfallen/Kaefigfallen aus Holz (Cage traps brauchen Mechanismen: nein) bzw.
+- BUG-510 `runs/run-16b/FR-BUGS.md:434` (no verdict word): , body armor 2; free: 2 melee weapons, 0 body armors ...)" (BUG-510-Sperre).
+- BUG-513 `runs/run-16d/FR-BUGS.md:377` (curated: 'bisher', ten minutes after the reload: provisional): r weiter unverknuepft: O1 17813/17829, B2 17828 'linked 0' (BUG-513 hat bisher nichts verknuepft, Stand ~10 min nach Reload).
+- BUG-517 `runs/run-16d/STAND.md:198` (no verdict word): 01 sum d6 Pop 39: Runde 32: follow neu, PERIMETER OPEN weg (BUG-517), levers:O1 bleibt;
+- BUG-527 `runs/run-16b/FR-BUGS.md:318` (no verdict word): xplore 98,136,137; workshops 97,107,134 r1, Kitchen-Warnung BUG-527).
+- BUG-530 `runs/run-16c/STAND.md:357` (no verdict word): u (main 534411e); Plan y374 (bedrooms+dining surface, Draft BUG-530: aqshaft/explore finden keinen Standort;
+- BUG-530 `runs/run-16c/FR-BUGS.md:415` (no verdict word): kein Hartstein ("0 usable", 36-52 out of reach), Plan-Draft BUG-530 bietet nur Oberflaechen-bedrooms/dining.
+- BUG-530 `runs/run-16d/FR-BUGS.md:428` (no verdict word): del' als Zustand mit Ziel (trade.want) statt PLAN_EXHAUSTED/BUG-530.
+- BUG-531 `runs/run-16b/FR-BUGS.md:389` (no verdict word): aquifer, span ~4" -- real 8 Ebenen mit heavy. Hinweis fuer BUG-531: die Panel-Klasse "light" kann 8 Ebenen bedeuten.
+- BUG-532 `runs/run-16b/STAND.md:331` (no verdict word): lever B1 down refused hostile<30 (6 Mammuts INNEN in Kern+, BUG-532 zaehlt Pflanzenfresser in Kern+ immer);
+- BUG-532 `runs/run-16b/FR-BUGS.md:475` (no verdict word): 37, Kern+ 119,151 / 120,132 / 113,140 ...): sense.lua ~688 "BUG-532: inside Kern+ or past B1 a plant eater always counts" -> sie zaehlen als Hostile und bleiben immer in <30 Tiles, weil B
+- BUG-539 `runs/run-16a/FR-BUGS.md:312` (no verdict word): - Hospital (BUG-539..542): 'bp sites hospital surface=1' bot S1 98,94,131 an;
+- BUG-540 `runs/run-16a/FR-BUGS.md:312` (no verdict word): - Hospital (BUG-539..542): 'bp sites hospital surface=1' bot S1 98,94,131 an;
+- BUG-541 `runs/run-16a/FR-BUGS.md:312` (no verdict word): - Hospital (BUG-539..542): 'bp sites hospital surface=1' bot S1 98,94,131 an;
+- BUG-542 `runs/run-16a/FR-BUGS.md:312` (no verdict word): - Hospital (BUG-539..542): 'bp sites hospital surface=1' bot S1 98,94,131 an;
+- BUG-543 `runs/run-16c/STAND.md:172` (no verdict word): 7:22 y410 spr: Hinweis Koordinator befolgt: kein cmd drill (BUG-543);
+- BUG-543 `runs/run-16d/STAND.md:214` (no verdict word): 08:20 y409 win d52 Pop 42: Hinweis BUG-543 beachtet (kein manuelles drill;
+- BUG-543 `runs/run-16b/FR-BUGS.md:354` (no verdict word): Heben Bruecken-Tiles + Nachbarn auf Einheiten pruefen (wie BUG-543 beim Drill) auch im BREACH-Pfad.
+- BUG-543 `runs/run-16c/FR-BUGS.md:266` (beobachte): Modus aktiv ohne mein Zutun; Pop 48, keine Toten bis jetzt (BUG-543 beobachtet)
+- BUG-543 `runs/run-16c/FR-BUGS.md:268` (no verdict word): er Zwerg durch Drill-Bruecke (nach 26591 an B1 y406). Siehe BUG-543;
+- BUG-543 `runs/run-16c/FR-BUGS.md:284` (no verdict word): SIEGE_END killed=0 lost=0. Das Bruecken-Warten auf Buerger (BUG-543) fuehrt zu BREACH-Zeile mit gate_fail, obwohl niemand stirbt: Wunsch: BREACH-Text unterscheidet 'Bruecke bleibt unten,
+- BUG-543 `runs/run-16d/FR-BUGS.md:399` (no verdict word): ## OBS Drill / Bruecken-Quetschung (Hinweis BUG-543, y409)
+- BUG-543 `runs/run-16d/FR-BUGS.md:400` (no verdict word): o-Drill laeuft weiter, solange R0 nicht erreicht ist; falls BUG-543 live ist, bitte pruefen, ob der Auto-Drill dasselbe Risiko hat.
+- BUG-543 `runs/run-16d/FR-BUGS.md:407` (no verdict word): l: kein manueller Drill, Auto-Drill y412 ohne Zwischenfall (BUG-543)
+- BUG-544 `runs/run-16c/FR-BUGS.md:426` (no verdict word): er Flux/Erz-Boulder bauen, wenn kein harter Stein frei ist (BUG-544 setzt logs nur bei 'stone behind water'), und vor dem Plug die im Schacht liegenden Conglomerate-Boulder heraustragen l
+- BUG-562 `runs/run-16b/FR-BUGS.md:541` (no verdict word): 'plan propose' (BUG-562) entwirft '{"tpl":"workshops","only":"Smelter","rebuild":1}', 'plan check' meldet
+- BUG-562 `runs/run-16b/FR-BUGS.md:541` (no verdict word): naces site=S1' (c1a1ef2db0f6671c01) selbst gesetzt. Wunsch: BUG-562-Entwurf soll tpl=furnaces statt workshops nennen.
+- BUG-562 `runs/run-16d/FR-BUGS.md:480` (no verdict word): usgang offen; naechster Spieler pruefen: deaths, O1-Neubau (BUG-562/Keeper).
+- BUG-569 `runs/run-16b/FR-BUGS.md:343` (no verdict word): te (grep): Essen im Refuge nicht einlagerbar. Hungertod-Bug BUG-569..572 offen;
+- BUG-570 `runs/run-16b/FR-BUGS.md:343` (no verdict word): te (grep): Essen im Refuge nicht einlagerbar. Hungertod-Bug BUG-569..572 offen;
+- BUG-570 `runs/run-16b/FR-BUGS.md:488` (no verdict word): nsch: geklaerte Pflanzenfresser im 'near'-Abstandscheck von BUG-570 ignorieren (Muster: BUG Runde 44 lever/down_guard), die echte Goblin-Armee steht 80 Tiles weg.
+- BUG-571 `runs/run-16b/FR-BUGS.md:343` (no verdict word): te (grep): Essen im Refuge nicht einlagerbar. Hungertod-Bug BUG-569..572 offen;
+- BUG-572 `runs/run-16b/FR-BUGS.md:343` (no verdict word): te (grep): Essen im Refuge nicht einlagerbar. Hungertod-Bug BUG-569..572 offen;
+- BUG-581 `runs/run-16d/FR-BUGS.md:436` (no verdict word): ## BUG Hospital-Tisch (BUG-581) wird gedraftet, aber 'hospital furnish=1 left out: 0 free sites' (y426)
+- BUG-602 `runs/run-16b/STAND.md:248` (no verdict word): - 21:21 y374 aut d62 aqshaft-Ausweich-Site S1 68,85,140 (BUG-602, R39) per bp.place gesetzt
+- BUG-602 `runs/run-16b/FR-BUGS.md:398` (no verdict word): - aqshaft-Ausweich-Sites (BUG-602): 'bp sites aqshaft --fresh' liefert jetzt S1-S3 (68,85/91/93, depth 17);
+- BUG-618 `runs/run-16b/STAND.md:267` (no verdict word): Muboomon kam. Food 0-24 d zyklisch (Kohlblatt ungeniessbar BUG-618 bekannt)
+- BUG-686 `runs/run-16a/FR-BUGS.md:442` (ungesehen): elbst gesiegelt, nur per 'seal at=last close=door' von mir (BUG-686 'seal at=ents selbst' ungesehen).
+- BUG-736 `runs/run-16b/FR-BUGS.md:518` (no verdict word): ei Stein 0 / 501 Logs: noch kein sichtbarer Holzbau-Effekt (BUG-736) - Projekte weiter 'no builder took it'.
+- BUG-751 `runs/run-16c/FR-BUGS.md:441` (beobachte): Zone verblutet/verdurstet). Wirkung der Auftragsstreichung (BUG-751) wird in der Restzeit beobachtet;
+- BUG-755 `runs/run-16b/FR-BUGS.md:529` (no verdict word): ut15). 'plan propose' entwirft jetzt hospital furnish=2 x3 (BUG-755 sichtbar) und farms;

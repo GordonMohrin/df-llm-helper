@@ -3,7 +3,8 @@
     lua(paths) -> [{file, line, rule, msg}]     # token based: comments and strings never match code rules
     lua_source(src, name) -> same, for one source text (role from the name: dfllm/act.lua, ...)
     cmd(text) -> (allowed, reason)              # shell text (hook) or one DFHack command line
-    main(argv)                                  # python -m dfpilot.lint [PATH ...] | --cmd STR | --config
+    main(argv)                                  # python -m dfpilot.lint [PATH ...] | --cmd STR | --config | --bugs
+    bug_files() -> same                         # bug files from BUG-783 on need a `Live-Erwartung` section (E9)
 
 Roles (CONTRACTS §1.4): only dfllm/act.lua writes df.* / DF vectors and calls mutating APIs or commands;
 only dfllm/sense.lua and dfllm/snapshot.lua iterate units or read tiles (dfllm/seal.lua reads tiles too); only
@@ -1556,6 +1557,50 @@ def cmd(text: str, dev: bool | None = None, cwd: str | None = None, shell: bool 
     return True, "; ".join(reasons)
 
 
+# ================================================================ bug files (NEU1 P2, decision E9)
+PROCESS_PATH = fairplay.REPO / "config" / "process.json"
+_LIVE_EXP = re.compile(r"^(?:#{1,4}\s*Live-Erwartung\b|Live-Erwartung\s*:)", re.M)
+
+
+def process_conf(path: Path | None = None) -> dict:
+    """The "lint" part of config/process.json; a missing or broken file keeps the check on (fail closed)."""
+    conf = {"live_expectation": True, "live_expectation_from": 783}
+    try:
+        conf.update(json.loads(Path(path or PROCESS_PATH).read_text(encoding="utf-8")).get("lint") or {})
+    except (OSError, ValueError):
+        pass
+    return conf
+
+
+def bug_files(bugs_dir: Path | None = None, conf: dict | None = None) -> list[dict]:
+    """Bug files from `live_expectation_from` (783) on without a `Live-Erwartung` section (heading or a line
+    `Live-Erwartung:`): "fixed" needs a checkable expectation for the live logs (docs/v2/PROCESS.md)."""
+    conf = conf or process_conf()
+    if not conf.get("live_expectation", True):
+        return []
+    lo = int(conf.get("live_expectation_from", 783))
+    out = []
+    for p in sorted(Path(bugs_dir or fairplay.REPO / "bugs").glob("BUG-[0-9][0-9][0-9]*-*.md")):
+        m = re.match(r"BUG-(\d+)-", p.name)
+        if m and int(m.group(1)) >= lo and not _LIVE_EXP.search(p.read_text(encoding="utf-8", errors="replace")):
+            out.append({"file": f"bugs/{p.name}", "line": 1, "rule": "live_expectation",
+                        "msg": "no 'Live-Erwartung' section (2-5 checkable expectations for the live logs)"})
+    return out
+
+
+def process_errors(path: Path | None = None) -> list[str]:
+    """config/process.json problems (tools/live_status.py config_errors), for `lint --config`."""
+    tool = fairplay.REPO / "tools" / "live_status.py"
+    if not tool.is_file():
+        return []
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_live_status", tool)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod                        # dataclasses look their module up
+    spec.loader.exec_module(mod)
+    return mod.config_errors(Path(path or PROCESS_PATH))
+
+
 # ================================================================ CLI
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -1575,7 +1620,7 @@ def main(argv: list[str] | None = None) -> int:
                 + fairplay.economy_errors() + fairplay.snapshot_errors() + fairplay.care_errors()
                 + fairplay.military_errors() + fairplay.offices_errors() + fairplay.zones_errors()
                 + fairplay.save_errors() + fairplay.perf_errors() + fairplay.burrow_errors()
-                + fairplay.plan_errors() + fairplay.view_errors())
+                + fairplay.plan_errors() + fairplay.view_errors() + process_errors())
         try:
             fairplay.allowlist()
         except Exception as e:                               # noqa: BLE001 - report any invalid file
@@ -1583,11 +1628,15 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(errs) or "config ok")
         return 1 if errs else 0
     as_json = "--json" in argv
-    paths = [a for a in argv if a != "--json"] or [str(fairplay.REPO / "lua" / "dfllm")]
+    only_bugs = "--bugs" in argv
+    given = [a for a in argv if a not in ("--json", "--bugs")]
+    paths = given or [str(fairplay.REPO / "lua" / "dfllm")]
     if any(a.startswith("-") for a in paths):
         print(__doc__)
         return 2
-    found = lua(paths)
+    found = [] if only_bugs else lua(paths)
+    if only_bugs or not given:                            # the default run checks the bug files too (NEU1 P2)
+        found += bug_files()
     if as_json:
         print(json.dumps(found, indent=1))
     else:
