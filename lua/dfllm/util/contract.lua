@@ -65,6 +65,7 @@ C.EVENTS = {
   -- drink_low (drink = days; block: still, brew, unvalidated, plants, barrels, brewer; auto: brew, office, barrels,
   -- gather) and manager_office (unvalidated orders older than orders.unval_days, with the reason)
   PERF_DEGRADED = {cls = 'A', by = 'perf'}, DECISION_NEEDED = {cls = 'A', by = 'any'},
+  DEADMAN_PAUSE = {cls = 'A', by = 'arbiter'},    -- Neuausrichtung 1 / P3: no live session for deadman.timeout_s: paused
   PAUSED_BY_DF = {cls = 'A', by = 'arbiter'},     -- FR-94: the game stood paused by DF (a load, a popup) for resume.wake_min minutes
   -- PROJECT_BLOCKED (and PROJECT_DONE) d.walled, Run 11: the seal doors quickfort refused, planned as walls ('x,y,z');
   -- BUG-037 d.park: the days a project blocked for good stood before it was parked (msg: its bp.cancel command)
@@ -253,6 +254,7 @@ C.VERBS = {
   ['tempo.lower']  = {mod = 'arbiter'},
   ['pause']        = {mod = 'arbiter'},
   ['unpause']      = {mod = 'arbiter'},
+  ['park']         = {mod = 'arbiter'},       -- Neuausrichtung 1 / P3: pause on purpose (owner park), resume ends it
   ['resume']       = {mod = 'arbiter'},       -- FR-94: releases a pause DF set (pause:df, pause:popup) with the pause key
   ['trade.want']   = {mod = 'trade'},
   ['trade.retry']  = {mod = 'trade', modes = {PEACE = true}},   -- a second trade in the same visit (Run 10 y418)
@@ -568,7 +570,7 @@ C.STATE_SPEC = obj({
                     pk = NAT,
                     ip = obj({n = NAT, by = arr({t = 'tup', items = {str(nil, nil, 'id'), str(16), NAT}}, 0, 8)})}),
   bridges = obj(nil, nil, str(nil, {'up', 'down', 'moving', 'unknown', 'destroyed', 'replaced'}), 'bridge'),   -- BUG-030, BUG-048
-  owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df'})}},
+  owners = obj({pause = {t = 'any', of = {{t = 'null'}, str(nil, {'inbox', 'gordon', 'popup', 'df', 'deadman', 'park'})}},
                 tempo = str(nil, {'mode', 'inbox', 'brake', 'clock'})}),
   mil = obj({squads = NAT, soldiers = NAT, worn = PCT, cv = NAT, metal_pct = PCT, on_station = NAT},
             {free = obj(nil, {weapon = NAT, body = NAT, head = NAT, pants = NAT, gloves = NAT, shoes = NAT,

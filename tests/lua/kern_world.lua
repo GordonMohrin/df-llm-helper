@@ -96,7 +96,14 @@ function H.kern() return require('dfllm.kern') end
 
 function H.boot(W, opts)
   opts = opts or {}
-  return H.kern().boot{repo = opts.repo or W.dir, modules = opts.modules, strict = opts.strict ~= false}
+  local ok, msg = H.kern().boot{repo = opts.repo or W.dir, modules = opts.modules, strict = opts.strict ~= false}
+  -- Neuausrichtung 1 / P3: a live player session (the arbiter's dead-man switch pauses a fort without one), written once
+  -- the kernel made the save folder (an unmarked save gets none); opts.session = false boots without it, a number is the
+  -- heartbeat's age in real seconds
+  if ok and opts.session ~= false and luahost.isdir(W.sd) then
+    H.write(W.sd .. '/session.json', json.encode({v = 2, wall = os.time() - (tonumber(opts.session) or 0), by = 'test'}))
+  end
+  return ok, msg
 end
 
 -- one frame: dt game ticks (0 or paused = none), ms real milliseconds

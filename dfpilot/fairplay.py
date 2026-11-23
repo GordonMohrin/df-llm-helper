@@ -230,7 +230,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
                       ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM),
                       ("breach", BREACH_LIM), ("resume", RESUME_LIM), ("siege_long", SIEGE_LONG_LIM),
-                      ("siege_starve", SIEGE_STARVE_LIM)):
+                      ("siege_starve", SIEGE_STARVE_LIM), ("deadman", DEADMAN_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -252,6 +252,42 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# Neuausrichtung 1 / P3 (docs/v2/NEU1-wecken.md): config/wake.json (dfpilot/session.py LIMITS; a bad key = its default)
+WAKE_PATH = REPO / "config" / "wake.json"
+
+
+def wake_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of config/wake.json (wait list, session heartbeat, follow memory bound); a missing file is fine."""
+    from . import session
+    p = Path(path or WAKE_PATH)
+    if not p.exists():
+        return []
+    name = "config/wake.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    if not isinstance(doc, dict) or doc.get("v") != 2:
+        return [f"{name}: needs an object with v: 2"]
+    errs = [f"{name}: unknown key {k!r}" for k in doc if k not in ("v", "about") and k not in session.LIMITS]
+    for blk, lims in session.LIMITS.items():
+        sec = doc.get(blk, {})
+        if not isinstance(sec, dict):
+            errs.append(f"{name}: {blk} must be an object")
+            continue
+        for k, v in sec.items():
+            lim = lims.get(k)
+            if lim is None:
+                errs.append(f"{name}: {blk}.{k}: unknown key")
+            elif not session._ok(v, lim):
+                errs.append(f"{name}: {blk}.{k}: {lim if isinstance(lim, str) else 'int %d..%d' % lim} expected, got {v!r}")
+            elif lim == "types":
+                bad = [t for t in v if schema.EVENTS.get(t, ("?",))[0] != "A"]
+                if bad:
+                    errs.append(f"{name}: {blk}.{k}: not class-A event types: {', '.join(bad[:5])}")
+    return errs
+
+
 # BUG-065 / FR-75: the confinement limit and the popup knobs of config/reflex.json (lua/dfllm/reflex.lua `cfg`,
 # lua/dfllm/arbiter.lua `popup_cfg`; a bad value = the default)
 CONFINE_LIM: dict = {"max_days": (0, 365), "harmless_size": (0, 5000000), "lone_max": (1, 10), "offer_days": (0, 365),
@@ -270,7 +306,9 @@ SIEGE_LONG_LIM: dict = {"on": "bool", "days": (1, 336), "near": (5, 200)}
 SIEGE_STARVE_LIM: dict = {"on": "bool", "min": (1, 100), "mark": (25000, 100000), "near": (5, 200), "death_days": (0, 336)}
 # FR-94 (Run 14 note 100): arbiter.lua resume_cfg: real minutes a pause by DF may stand before the wake PAUSED_BY_DF (0 = no wake)
 RESUME_LIM: dict = {"wake_min": (0, 240)}
-REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve")
+# Neuausrichtung 1 / P3: arbiter.lua deadman_cfg: the dead-man pause when no live session wrote <save>/session.json
+DEADMAN_LIM: dict = {"on": "bool", "timeout_s": (60, 86400), "check_s": (1, 300), "grace_s": (0, 3600)}
+REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve", "deadman")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)
