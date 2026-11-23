@@ -65,6 +65,18 @@ M.PERIM_LIM = {escalate_days = {0, 30}, escalate_every = {1, 30}, hold_pop = {0,
 -- UNSAFE.hold_pop citizens or more keeps max-pop where it is (ceiling why 'unsafe'); the hold ends when the blockers are gone
 M.UNSAFE = {hold_pop = 30, outside = 10, share = 25}
 local UNSAFE_FLAGS = {refuge_dry = true, audit_fail = true, lever_outside = true}
+-- NEU1 P4 (decision E1, growth follows safety; GRUNDSATZ-REVIEW: the wipe-outs came at pop 77-100 with R0 and 0-46 % armour worn): the growth
+-- ladder, one more limit of the ceiling (why 'growth'). Cap `base` until the first melee squad has `armed_min`+ members, all with a real weapon,
+-- and `drink_d` days of drink lie inside Kern+/the refuge (seal alert.core_d); `armed_cap` until `full_ready` soldiers are fully equipped (all
+-- armour slots + a real weapon), `share` % of all soldiers are, R0 is passed (level >= 1) and a linked lever stands inside the core
+-- (gate.core_lever when gate has it, else a bridge with its levers linked and not all outside Kern+); `ready_cap` until `full_top` of them wear
+-- metal body armour; then no ladder limit. The halt is the first failing condition of the next step (POPCAP halt, GROWTH_HALT, ready.gh,
+-- pop.hold). Missing data fails the condition (fail closed); a step is given up only after `drop_days` game days lower; the freeze in
+-- apply_cap never puts max-pop under the citizens (nobody is evicted, migrants stop). config/reflex.json growth; no section = no ladder
+M.GROWTH = {on = true, base = 30, armed_cap = 50, ready_cap = 80, top_cap = 100, armed_min = 3, full_ready = 6, full_top = 10, share = 70,
+            drink_d = 30, drop_days = 5}
+M.GROWTH_LIM = {base = {1, 250}, armed_cap = {1, 250}, ready_cap = {1, 250}, top_cap = {1, 250}, armed_min = {1, 30}, full_ready = {0, 100},
+                full_top = {0, 100}, share = {0, 100}, drink_d = {0, 365}, drop_days = {0, 60}}
 M.PERIM_WALL_S = 300
 M.MIN_LEVERS, M.TRAPS, M.METAL, M.R2_SOLDIERS = 2, 30, 20, 8
 M.STOCK_HYST = 90        -- % of a stock minimum that keeps R2 once reached (no flapping)
@@ -596,6 +608,96 @@ function M.perim_now(pw, open)
   return #parts > 0 and cut(table.concat(parts, '; '), 60) or nil
 end
 
+---------------------------------------------------------------- NEU1 P4: the growth ladder
+function M.growth_conf(K)
+  local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.growth or nil
+  local c = {on = type(r) == 'table' and r.on ~= false}
+  for k, lim in pairs(M.GROWTH_LIM) do
+    local v = type(r) == 'table' and int(r[k]) or nil
+    c[k] = (v and v >= lim[1] and v <= lim[2]) and v or M.GROWTH[k]
+  end
+  return c
+end
+
+-- pure: x = {n soldiers, fullr, metal, sq_n, sq_w (first melee squad, members with a real weapon), lvl, lever (bool), drink_d (days or nil)},
+-- c = growth_conf. Returns {tier 0..3, cap (nil at tier 3), next (the cap the halt keeps closed), halt (key), need (text)}
+function M.growth_ladder(x, c)
+  local n, fullr, metal = int(x.n) or 0, int(x.fullr) or 0, int(x.metal) or 0
+  local sq_n, sq_w, dd = int(x.sq_n) or 0, int(x.sq_w) or 0, int(x.drink_d)
+  local share_ok = n > 0 and fullr * 100 >= c.share * n
+  local share_txt = string.format('%d of %d soldiers fully equipped (%d %% < %d %%)', fullr, n, n > 0 and fullr * 100 // n or 0, c.share)
+  local steps = {
+    {cap = c.base, conds = {
+      {'squad', sq_n >= c.armed_min and sq_w >= sq_n,
+       string.format('first squad: %d of %d members hold a real weapon (need %d+, all armed)', sq_w, sq_n, c.armed_min)},
+      {'drink', dd ~= nil and dd >= c.drink_d,
+       string.format('drink inside the core %s d < %d d', dd and tostring(dd) or '?', c.drink_d)}}},
+    {cap = c.armed_cap, conds = {
+      {'full', fullr >= c.full_ready, string.format('%d soldiers fully equipped < %d', fullr, c.full_ready)},
+      {'share', share_ok, share_txt},
+      {'r0', (int(x.lvl) or 0) >= 1, 'readiness R0 not passed (see ready.fail)'},
+      {'lever', x.lever == true, 'no linked lever inside the core'}}},
+    {cap = c.ready_cap, conds = {
+      {'metal', metal >= c.full_top, string.format('%d soldiers fully equipped in metal < %d', metal, c.full_top)},
+      {'share', share_ok, share_txt}}},
+  }
+  for i, s in ipairs(steps) do
+    for _, cd in ipairs(s.conds) do
+      if not cd[2] then
+        return {tier = i - 1, cap = s.cap, next = steps[i + 1] and steps[i + 1].cap or c.top_cap, halt = cd[1], need = cut(cd[3], 100)}
+      end
+    end
+  end
+  return {tier = #steps, cap = nil}
+end
+
+-- the lever condition: gate's own answer (package P5: gate.core_lever -> boolean) or, until gate has it, a manifest bridge whose
+-- >= MIN_LEVERS linked levers readiness saw (check_levers good) and that is not in lever_outside (all its levers outside Kern+)
+local function core_lever(K)
+  local ok, v = K.call('gate', 'core_lever')
+  if ok and type(v) == 'boolean' then return v end
+  local out = {}
+  for _, b in ipairs(rt.lo or {}) do out[b] = true end
+  for _, b in ipairs(rt.lev and rt.lev.good or {}) do if not out[b] then return true end end
+  return false
+end
+
+local function growth(K, lvl, now)
+  local c = M.growth_conf(K)
+  if not c.on then
+    rt.gcap, rt.gh = nil, nil
+    if st.gr then st.gr, dirty = nil, true end
+    return
+  end
+  local okk, kit = K.call('military', 'kit_stats')
+  kit = okk and type(kit) == 'table' and kit or {}
+  local al = K.view().alert
+  local g = M.growth_ladder({n = kit.n, fullr = kit.fullr, metal = kit.metal, sq_n = kit.sq_n, sq_w = kit.sq_w, lvl = lvl,
+                             lever = core_lever(K), drink_d = type(al) == 'table' and al.core_d or nil}, c)
+  local gr = st.gr
+  local tier = g.tier
+  if gr and int(gr.t) and tier < gr.t then                      -- a step is given up only after drop_days lower
+    if not gr.lo then gr.lo, dirty = now, true end
+    if now - gr.lo < c.drop_days * 1200 and now >= gr.lo then tier = gr.t else gr.t, gr.lo, dirty = tier, nil, true end
+  else
+    if not gr then gr = {}; st.gr = gr end
+    if gr.t ~= tier or gr.lo then gr.t, gr.lo, dirty = tier, nil, true end
+  end
+  local caps = {[0] = c.base, [1] = c.armed_cap, [2] = c.ready_cap}
+  rt.gcap = caps[tier]
+  rt.gh = g.halt and {cap = rt.gcap or c.top_cap, next = g.next, halt = g.halt, need = g.need} or nil
+  local sig = string.format('%s:%s', tostring(rt.gcap), tostring(g.halt))
+  if gr.h ~= sig then
+    gr.h, dirty = sig, true
+    if g.halt then
+      K.emit('GROWTH_HALT', 'B', cut(string.format('growth ladder: cap %d, %d held by %s: %s', rt.gcap or c.top_cap, g.next, g.halt, g.need), 200),
+             {cap = rt.gcap or c.top_cap, next = g.next, halt = g.halt, need = g.need})
+    else
+      K.emit('GROWTH_HALT', 'B', 'growth ladder: every step passed, no ladder limit', {cap = c.top_cap, next = c.top_cap, halt = 'none', need = ''})
+    end
+  end
+end
+
 local function evaluate(K, why)
   local now = K.now().tick
   local man = K.manifest()
@@ -965,6 +1067,7 @@ local function evaluate(K, why)
   rt.dref = okf and int(nref) and int(nref) > 0 and int(nref) or nil
   local route = route_of(st.audit)
   rt.route = route and cut(route, 60) or nil
+  growth(K, lvl, now)                                             -- NEU1 P4
   if lvl ~= st.lvl then
     local from = st.lvl or 0
     st.lvl, dirty = lvl, true
@@ -1048,7 +1151,9 @@ function M.hold_text(K)
   -- (rt.gate_cap, set with cap_why), not st.cap, the max-pop last written, which is the old one until the next apply_cap
   local w = rt and rt.cap_why
   local n = rt and rt.gate_cap or st.cap
-  if (w == 'plan' or w == 'open_perimeter' or w == 'defense_short' or w == 'unsafe') and n then
+  if rt and rt.gate_why == 'growth' and rt.gate_cap and rt.gh then        -- NEU1 P4: the ladder binds (also under a freeze): its halt
+    parts[#parts + 1] = string.format('growth %d (%s)', rt.gate_cap, rt.gh.halt)
+  elseif (w == 'plan' or w == 'open_perimeter' or w == 'defense_short' or w == 'unsafe') and n then
     parts[#parts + 1] = string.format('%s %d%s', w, n, ((w == 'open_perimeter' and rt.psoft) or (w == 'defense_short' and rt.dsoft)) and '+' or '')
   end
   return #parts > 0 and cut(table.concat(parts, ', '), 40) or nil
@@ -1064,6 +1169,7 @@ function M.ceiling(K, lvl)
   local ib = inbox_cap(K)
   if ib and ib < c then c, why = ib, 'inbox' end
   if st.fam and st.fam.cap < c then c, why = st.fam.cap, 'famine' end     -- BUG-293
+  if rt and rt.gcap and rt.gcap < c then c, why = rt.gcap, 'growth' end   -- NEU1 P4: the growth ladder
   local c0 = c
   if rt and rt.phold and rt.phold < c then c, why = rt.phold, 'open_perimeter' end     -- FR-70
   if rt and rt.dhold_pop and rt.dhold_pop < c then c, why = rt.dhold_pop, 'defense_short' end   -- BUG-481
@@ -1097,7 +1203,11 @@ local function apply_cap(K)
   rt.applied = true
   if c ~= last then
     st.cap, dirty = c, true
-    K.emit('POPCAP', 'B', string.format('max-pop %d (%s)', c, why), {cap = c, why = why})
+    -- NEU1 P4: the ladder's halt rides along whenever the ladder is the binding ceiling (also under a freeze)
+    local gh = rt.gate_why == 'growth' and rt.gh or nil
+    K.emit('POPCAP', 'B', cut(string.format('max-pop %d (%s)%s', c, why, gh and string.format('; growth %d held by %s: %s', gh.cap, gh.halt,
+                                                                                            gh.need) or ''), 200),
+           {cap = c, why = why, halt = gh and gh.halt or nil, need = gh and gh.need or nil})
   end
 end
 
@@ -1381,6 +1491,9 @@ function M.init(K)
   st.llq = int(p.llq)                                         -- BUG-712: the last bridge_levers question
   st.loq = int(p.loq)                                         -- BUG-774: the last lever_outside question
   st.uh = int(p.uh)                                           -- BUG-776: the population max-pop is held at (R0 blocked, citizens outside)
+  if type(p.gr) == 'table' and int(p.gr.t) then                -- NEU1 P4: the ladder step, lower since, the last halt said
+    st.gr = {t = int(p.gr.t), lo = int(p.gr.lo), h = type(p.gr.h) == 'string' and p.gr.h:sub(1, 40) or nil}
+  end
   st.rdt, st.rdq = int(p.rdt), int(p.rdq)                     -- BUG-766: refuge_dry seen since, the last refuge_dry question
   st.pw = type(p.pw) == 'string' and p.pw:sub(1, 60) or nil
   st.nt, st.wn = int(p.nt), int(p.wn)                         -- review fix merge16: the newest opening, ways in counted
@@ -1718,6 +1831,7 @@ function M.state(K)
   if rt.llg then r.ll = rt.llg end                            -- BUG-712: the bridges without any linked lever (R0 `levers:`)
   if rt.lo then r.lo = rt.lo end                              -- BUG-774: the bridges whose linked levers all lie outside Kern+ (R0 `lever_outside`)
   if rt.uhold then r.uh = rt.uhold end                        -- BUG-776: max-pop held at this population (R0 blocked, citizens outside)
+  if rt.gh then r.gh = rt.gh end                              -- NEU1 P4: the growth ladder {cap, next, halt, need}
   return {ready = r, pop = {cap = M.cap(K), gate_cap = rt.gate_cap or M.CAPS[0], hold = M.hold_text(K)}}
 end
 

@@ -3103,7 +3103,8 @@ local function so_begin(K, key, s, order, meta)
   rt.so[key] = {cmd = tostring(meta.cmd or '?'), by = meta.by or 'verb', t0 = old and old.t0 or now, last = now, kind = order.kind,
                 ids = order.units, tgt = order.pos or (old and old.tgt), keep = meta.keep == true, adj = 0, re = 0,
                 arrived = old and old.arrived or false, unseen = 0, mode = K.mode(), w0 = nil,
-                pe = meta.pe == true or (old and old.pe == true) or nil}      -- BUG-675: a sortie of the PEACE (one wild animal) outlives the mode
+                pe = meta.pe == true or (old and old.pe == true) or nil,      -- BUG-675: a sortie of the PEACE (one wild animal) outlives the mode
+                small = meta.small == true or (old and old.small == true) or nil}  -- NEU1 P4: a small fight is not ended for worn
   if order.kind == 'kill' then
     rt.so[key].tgt = rt.so[key].tgt or unit_xyz(order.units[1])
     -- BUG-169: every target of the kill order (so.ids keeps the living ones), for the end event; a new kill order on the
@@ -3185,7 +3186,7 @@ local function sortie_pass(K, now)
       elseif now - so.t0 >= c.hold_ticks then
         so_end(K, key, 'abort', 'timeout', string.format('sortie %s ended after %d ticks: %s', key, now - so.t0,
                so.arrived and 'arrived, the target is still there' or 'the squad has not arrived'))
-      elseif so.keep and info.worn < c.worn then
+      elseif so.keep and not so.small and info.worn < c.worn then
         so_end(K, key, 'abort', 'worn', string.format('sortie %s ended: worn %d%% < %d%%', key, info.worn, c.worn))
       elseif so.keep and not lone and (lwhy == 'group' or lwhy == 'dangerous' or (lwhy ~= 'none' and (so.nolone or 0) + 1 >= 2)) then
         so_end(K, key, 'abort', 'more_hostiles', 'sortie ' .. key .. ' ended: the picture is no lone harmless intruder any more')
@@ -3355,6 +3356,69 @@ function M.inside_override(K, harmless)
   return pic
 end
 
+---------------------------------------------------------------- NEU1 P4 (E1 b): a small fight is never refused for armour
+-- Run 16d i4 Trumpetrealms y461 (one goblin killed 49 of 69 while every sortie said 'not equipped' / 'worn 0 % < 80 %'), Run 16c i3 y379 (a lone
+-- snatcher: 'no sortie, worn 62 % < 80 %'), Run 16a i1 y396 (one Megalania: 'worn 54 % < 80 %'): against at most SMALL.max visible hostiles in all
+-- (census fresh and not cut; no great danger, undead or building destroyer; threat's siege flag not invaders / great / undead) a squad of which
+-- at least SMALL.armed members hold a real weapon may go, whatever its armour: squad.sortie skips the BUG-510 refusal (kill orders on those
+-- hostiles only), kill_lone skips `worn < sortie.worn` and the unfit test, a kept sortie is not ended for worn, sortie_advice recommends it
+-- unless the odds are hopeless. The gate sortie (siege.sortie), intake waves and stations keep their armour rules. config/reflex.json
+-- small_fight {on, max, armed}; a config without the section keeps the old rules
+M.SMALL = {on = true, max = 3, armed = 2}
+M.SMALL_LIM = {max = {1, 10}, armed = {1, 20}}
+function M.small_conf(K)
+  local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.small_fight or nil
+  if type(r) ~= 'table' then return {on = false, max = M.SMALL.max, armed = M.SMALL.armed} end
+  local c = {on = r.on ~= false}
+  for k, lim in pairs(M.SMALL_LIM) do
+    local v = int(r[k])
+    c[k] = (v and v >= lim[1] and v <= lim[2]) and v or M.SMALL[k]
+  end
+  return c
+end
+
+-- members of squad `key` holding a real weapon (no training weapon), and the members
+function M.armed_count(K, key)
+  local e = type(key) == 'string' and st.sq[key]
+  local s = e and squad(e.id)
+  if not s then return 0, 0 end
+  local n, a = 0, 0
+  for _, m in ipairs(members(s)) do
+    n = n + 1
+    local x = M.KIT.soldier(m.p, m.unit, roles(), nil)
+    if x.weapon and not x.wood then a = a + 1 end
+  end
+  return a, n
+end
+
+-- the small fight of squad `key` now: {ids (sorted), set, n, armed, soldiers, small = true} or nil, why (fail closed: no fresh census = no)
+function M.small_fight(K, key)
+  local c = M.small_conf(K)
+  if not c.on then return nil, 'small_fight off' end
+  local h = K.census.h
+  if type(h) ~= 'table' or type(h.list) ~= 'table' or now_tick(K) - (int(h.tick) or -1e9) > 200 then return nil, 'no fresh census' end
+  if (int(h.vis) or 0) > #h.list then return nil, 'the census list is cut' end
+  if #h.list == 0 then return nil, 'no hostile in sight' end
+  if #h.list > c.max then return nil, string.format('%d hostiles in sight (more than %d)', #h.list, c.max) end
+  if (int(h.great) or 0) > 0 or (int(h.undead) or 0) > 0 or (int(h.bd) or 0) > 0 then
+    return nil, 'a great danger, an undead or a building destroyer is counted'
+  end
+  local ids, set = {}, {}
+  for _, e in ipairs(h.list) do
+    if e.k == 'great' or e.k == 'undead' or e.bd == 1 then return nil, 'a great danger, an undead or a building destroyer is counted' end
+    ids[#ids + 1], set[e.id] = e.id, true
+  end
+  local okt, a = K.call('threat', 'assess')
+  local sg = okt and type(a) == 'table' and a.siege or nil
+  if sg == 'invaders' or sg == 'great' or sg == 'undead' then return nil, 'a siege (' .. tostring(sg) .. ')' end
+  local armed, n = M.armed_count(K, key)
+  if armed < c.armed then
+    return nil, string.format('squad %s: %d of %d soldiers hold a real weapon (fewer than %d)', tostring(key), armed, n, c.armed)
+  end
+  table.sort(ids)
+  return {ids = ids, set = set, n = #ids, armed = armed, soldiers = n, small = true}
+end
+
 -- public (reflex, the DEATHS_3PLUS default and the BREACH step): every squad with members goes against the hostiles inside, equipped or
 -- not (BUG-692). Returns true, text (started or running) or false, why
 function M.kill_inside(K, by)
@@ -3426,7 +3490,13 @@ function M.kill_lone(K, ids, by)
     for _, id in ipairs(ids or {}) do if not ov.set[id] then ov = nil; break end end
     if ov and info.n < M.INSIDE_RATIO * ov.n then ov = nil end    -- one squad goes: it must outnumber them itself
   end
+  -- NEU1 P4: a small fight (at most small_fight.max hostiles, a squad with armed members) is not refused for armour
+  local sm
   if not ov then
+    sm = M.small_fight(K, key)
+    if sm then for _, id in ipairs(ids or {}) do if not sm.set[id] then sm = nil; break end end end
+  end
+  if not ov and not sm then
     if info.worn < c.worn then return false, string.format('squad %s worn %d%% < %d%%', key, info.worn, c.worn) end
     local unfit = M.unfit_text(K, key)                            -- BUG-510
     if unfit then return false, unfit end
@@ -3446,12 +3516,13 @@ function M.kill_lone(K, ids, by)
   if why then return false, why end
   -- keep = the sortie is held against the posture and ended by 'worn < sortie.worn' / 'no longer a lone harmless picture'; the
   -- BUG-692 exception (unequipped, outnumbering) is held by its own order instead (rt.order 'sortie:', see apply_squad)
-  local ok, err = so_begin(K, key, s, {kind = 'kill', units = vis}, {cmd = 'kernel', by = by or 'reflex', keep = not ov})
+  local ok, err = so_begin(K, key, s, {kind = 'kill', units = vis}, {cmd = 'kernel', by = by or 'reflex', keep = not ov, small = sm ~= nil})
   if not ok then return false, err end
   rt.so[key].tgt = p
-  so_event(K, key, 'go', string.format('sortie %s: the kernel orders a kill on %s %s inside the fort (%d soldiers)', key,
-           #vis == 1 and 'the lone harmless intruder' or 'the harmless intruders', so_ids_txt(vis), info.n),
-           {units = vis, why = 'kill', pos = p and {p.x, p.y, p.z} or nil, n = info.n, worn = info.worn})
+  so_event(K, key, 'go', string.format('sortie %s: the kernel orders a kill on %s %s inside the fort (%d soldiers%s)', key,
+           #vis == 1 and 'the lone harmless intruder' or 'the harmless intruders', so_ids_txt(vis), info.n,
+           sm and string.format(', %d armed; small fight: armour not required', sm.armed) or ''),
+           {units = vis, why = 'kill', pos = p and {p.x, p.y, p.z} or nil, n = info.n, worn = info.worn, small = sm and 1 or nil})
   return true, 'kill order on ' .. so_ids_txt(vis)
 end
 
@@ -3519,16 +3590,19 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   -- BUG-692: unless it is against the few hostiles INSIDE Kern+ (a killer, or citizens dying) that the squads outnumber 3 to 1: then the
   -- unequipped squad goes too, and only against those (checked on the order below)
   local ov = unfit and M.inside_override(K, false) or nil
+  -- NEU1 P4: or against a small group (at most small_fight.max hostiles in sight) with armed soldiers: a kill order on those only
+  if unfit and not ov then ov = M.small_fight(K, k) end
   if unfit and not ov then return false, 'sortie refused: ' .. unfit end
+  local where = ov and ov.small and 'in sight (a small fight)' or 'inside Kern+'
   local function inside_only(order)
     if not ov then return nil end
     if order.kind ~= 'kill' then
-      return 'sortie refused: ' .. unfit .. ' (an unequipped squad goes only on a kill order against the hostiles inside Kern+)'
+      return 'sortie refused: ' .. unfit .. ' (an unequipped squad goes only on a kill order against the hostiles ' .. where .. ')'
     end
     for _, id in ipairs(order.units or {}) do
       if not ov.set[id] then
-        return string.format('sortie refused: %s (an unequipped squad goes only against the hostiles inside Kern+: unit %s is not one of %s)',
-                             unfit, tostring(id), so_ids_txt(ov.ids))
+        return string.format('sortie refused: %s (an unequipped squad goes only against the hostiles %s: unit %s is not one of %s)',
+                             unfit, where, tostring(id), so_ids_txt(ov.ids))
       end
     end
     return nil
@@ -3647,12 +3721,15 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
   local blocked = inside_only(order)
   if blocked then return false, blocked end
   local keep = false
-  if order.kind == 'kill' and not ov then keep = M.lone_of(K, order.units) ~= nil end
+  if order.kind == 'kill' and not (ov and not ov.small) then keep = M.lone_of(K, order.units) ~= nil end
+  -- NEU1 P4: a sortie against a small group never ends for worn (also when the squad was not unfit: worn < sortie.worn)
+  local sm = ov and ov.small and ov or (order.kind == 'kill' and M.small_fight(K, k)) or nil
+  if sm and sm ~= ov then for _, id in ipairs(order.units or {}) do if not sm.set[id] then sm = nil; break end end end
   if peace and not (order.kind == 'kill' and #order.units == 1 and order.units[1] == int(args.unit)) then
     return false, 'squad.sortie not allowed in PEACE (only for one wild animal inside the fort): the order would not be a kill order on unit ' ..
                   tostring(args.unit)
   end
-  local ok, err = so_begin(K, k, s, order, {cmd = cmd and cmd.id, by = 'verb', keep = keep, pe = peace})
+  local ok, err = so_begin(K, k, s, order, {cmd = cmd and cmd.id, by = 'verb', keep = keep, pe = peace, small = sm ~= nil})
   if not ok then return false, err end
   rt.so[k].tgt = pos_target or rt.so[k].tgt
   so_event(K, k, 'go', string.format('sortie %s: %s%s', k, what, keep and '; kept against the posture while the squad is worn >= ' ..
@@ -4194,6 +4271,20 @@ function M.sortie_advice(K, key, foes)
              txt = rec and string.format('sortie recommended: worn %d%% >= %d%%', w, need)
                    or string.format('sortie not recommended: worn %d%% < %d%%', w, need)}
   local o = type(foes) == 'table' and foe_odds(K, info, foes) or nil
+  -- NEU1 P4: against a small group with armed soldiers the armour is no reason to hold back, and neither are the odds (the combat value counts
+  -- the armour and the skills of untrained recruits: 'hopeless' for three armed dwarves against one goblin); the odds stay in the text
+  local sm = type(foes) == 'table' and #foes > 0 and M.small_fight(K, key) or nil
+  if sm then for _, id in ipairs(foes) do if not sm.set[id] then sm = nil; break end end end
+  if sm then
+    r.small, r.rec = true, true
+    r.txt = string.format('sortie recommended: small fight (%d hostile%s), %d of %d soldiers armed, armour not required (worn %d%%)',
+                          sm.n, sm.n == 1 and '' or 's', sm.armed, sm.soldiers, w)
+    if o then
+      r.ours, r.est, r.foes, r.odds = o.ours, o.est, o.foes, o.odds
+      r.txt = r.txt .. string.format(', odds %s (cv %d vs ~%d)', o.odds, o.ours, o.est)
+    end
+    return r
+  end
   if o then
     local weak = o.odds == 'poor' or o.odds == 'hopeless'
     r.ours, r.est, r.foes, r.odds = o.ours, o.est, o.foes, o.odds
@@ -4417,7 +4508,10 @@ M.KIT_TTL = 1200
 function M.kit_stats(K)
   local now = now_tick(K)
   if rt.kit and rt.kit_t and now >= rt.kit_t and now - rt.kit_t < M.KIT_TTL then return rt.kit end
-  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads()}
+  -- NEU1 P4 (readiness.growth_ladder): fullr = armor and a real weapon (no training weapon), metal = fullr with metal body armor,
+  -- sq_n / sq_w = the members of the first melee squad and those of them holding a real weapon
+  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0}
+  local first = first_melee_key()
   for _, sp in ipairs(M.SQUADS) do
     local e = st.sq[sp.key]
     local s = e and squad(e.id)
@@ -4428,6 +4522,15 @@ function M.kit_stats(K)
       if x.weapon then t.weapon = t.weapon + 1 end
       if x.wood then t.wood = t.wood + 1 end
       if x.armor and x.weapon then t.full = t.full + 1 end
+      local real = x.weapon and not x.wood
+      if x.armor and real then
+        t.fullr = t.fullr + 1
+        if not (x.soft and x.soft.body) then t.metal = t.metal + 1 end
+      end
+      if sp.key == first then
+        t.sq_n = t.sq_n + 1
+        if real then t.sq_w = t.sq_w + 1 end
+      end
     end
   end
   rt.kit, rt.kit_t = t, now
