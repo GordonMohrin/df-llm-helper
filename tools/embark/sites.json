@@ -1,0 +1,6 @@
+{
+ "v": 1,
+ "about": "NEU1 (decision E3, docs/v2/NEU1-startset.md): the vetted embark sites of the current world. Filled only by `embark.py sites add ID WX,WY,LX,LY --note TEXT` (refused unless the newest scan read that rectangle ok under the hard site policy of rules.json); `embark.py sites` lists them, `embark.py embark --site ID` embarks there. Clear the list for a new world.",
+ "world": null,
+ "sites": []
+}

@@ -45,6 +45,14 @@ HARD_REJECT = {"stone": "no hard stone within reach: a failed stone criterion ca
 ACCEPT_LOG = "accept.log"
 # BUG-248: criteria a new fort may waive or accept only with --explore-first (= checklist.lua C.NEEDS_PLAN)
 NEEDS_PLAN = ("stone",)
+# NEU1 (decision E3, docs/v2/NEU1-startset.md): the hard site policy of rules.json (= checklist.lua C.DEFAULT strict/accept_only/
+# hard_waive). strict: only accept_only may be accepted although it FAILED; hard_waive may not be waived. An unreadable rules.json
+# fails closed to these defaults.
+RULES_PATH = HERE / "rules.json"
+POLICY_DEFAULT = {"strict": True, "accept_only": ["dark_fortress"], "hard_waive": ["aquifer", "trees", "water", "stone"]}
+# NEU1: the vetted sites of the current world (embark.py sites / sites add / embark --site ID)
+SITES_PATH = HERE / "sites.json"
+SITE_ID_RE = r"^[a-z0-9][a-z0-9_-]{0,23}$"
 # BUG-250: a save folder name save-as types key by key (STRING_A<code>)
 SAVE_NAME_RE = r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$"
 PRIOR_FILES, PRIOR_ROWS = 30, 200      # embark --here: the newest result files and rows passed as spec.prior
@@ -151,7 +159,8 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
               tiles: bool | None = None, now: float | None = None, save: str | None = None,
               entry: str | None = None, stock: bool = True, world_folder: str | None = None,
               portable: bool | None = None, hover: bool = False, here: bool = False,
-              explore_first: str | None = None, prior=None, name: str | None = None, sweep: int | None = None) -> dict:
+              explore_first: str | None = None, prior=None, name: str | None = None, sweep: int | None = None,
+              rules: dict | None = None) -> dict:
     spec = {"v": 2, "id": run_id or f"{mode}{int(now if now is not None else time.time())}", "mode": mode}
     if mode == "embark" and here:
         mode = spec["mode"] = "here"           # BUG-250: the rectangle on the screen, gated on earlier reads
@@ -220,6 +229,9 @@ def make_spec(mode: str, *, run_id: str | None = None, world: str | None = None,
         hard = sorted(set(accept) & set(HARD_REJECT))
         if hard:                                      # BUG-465
             raise ValueError(f"cannot accept {hard}: {'; '.join(HARD_REJECT[h] for h in hard)}")
+        errs = policy_errors(waive, accept, rules)    # NEU1 (E3): refused before any DF call
+        if errs:
+            raise ValueError("; ".join(errs))
         plan = " ".join(str(explore_first or "").split())
         need = sorted((set(waive) | set(accept)) & set(NEEDS_PLAN))
         if need and len(plan) < 10:
@@ -280,6 +292,144 @@ def log_accept(spec: dict, out: Path, now: float | None = None) -> Path | None:
         for a in spec["accept"]:
             f.write(f"{stamp}\t{spec['id']}\t{site}\t{a['id']}\t{a['why']}{plan if a['id'] in NEEDS_PLAN else ''}\n")
     return path
+
+
+def policy(rules: dict | None = None, path: Path | None = None) -> dict:
+    """NEU1 (E3): strict, accept_only, hard_waive of RULES (default: rules.json); missing or unreadable keys fail closed to
+    POLICY_DEFAULT (strict)."""
+    if rules is None:
+        try:
+            rules = json.loads((path or RULES_PATH).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            rules = {}
+    rules = rules if isinstance(rules, dict) else {}
+    pol = dict(POLICY_DEFAULT)
+    if rules.get("strict") is False:
+        pol["strict"] = False
+    for k in ("accept_only", "hard_waive"):
+        if isinstance(rules.get(k), list) and all(isinstance(x, str) for x in rules[k]):
+            pol[k] = list(rules[k])
+    return pol
+
+
+def policy_errors(waive=(), accept=(), rules: dict | None = None) -> list[str]:
+    """NEU1 (E3): why the hard site policy refuses these waivers and acceptances ([] = allowed or strict off)."""
+    pol = policy(rules)
+    if not pol["strict"]:
+        return []
+    errs = []
+    bad = sorted(set(accept) - set(pol["accept_only"]))
+    if bad:
+        errs.append(f"cannot accept {bad}: hard site policy (rules.json strict) accepts only {pol['accept_only']}; "
+                    "choose another site (embark.py sites lists the vetted ones)")
+    bad = sorted(set(waive) & set(pol["hard_waive"]))
+    if bad:
+        errs.append(f"cannot waive {bad}: hard site policy (rules.json strict), missing data fails closed; scan the rectangle "
+                    "again (scan --tiles / --hover)")
+    return errs
+
+
+def row_vetted(r: dict, rules: dict | None = None) -> str | None:
+    """NEU1 (E3): None when a scan row passes the policy (verdict ok, or every fail acceptable and every unknown waivable),
+    else why not."""
+    pol = policy(rules)
+    if not isinstance(r, dict) or not _box(r) or not isinstance(r.get("world"), list):
+        return "no scanned rectangle"
+    if r.get("verdict") == "ok":
+        return None
+    fails, unk = list(r.get("fails") or []), list(r.get("unknown") or [])
+    ok_a = set(pol["accept_only"]) if pol["strict"] else set(ACCEPTABLE)
+    ok_w = set(WAIVABLE) - (set(pol["hard_waive"]) if pol["strict"] else set())
+    bad = [f for f in fails if f not in ok_a or f in HARD_REJECT] + [u for u in unk if u not in ok_w]
+    if bad or r.get("verdict") not in ("review", "reject"):
+        return f"verdict {r.get('verdict')}, fails {','.join(fails) or '-'}, unknown {','.join(unk) or '-'}"
+    return None
+
+
+def load_sites(path: Path | None = None) -> dict:
+    """NEU1: the vetted site list {"v":1, "world", "sites":[{id, site:[WX,WY,LX,LY], verdict, score, added, note}]};
+    an unreadable file is an empty list."""
+    try:
+        doc = json.loads((path or SITES_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        doc = {}
+    doc = doc if isinstance(doc, dict) else {}
+    sites = [s for s in doc.get("sites") or [] if isinstance(s, dict) and isinstance(s.get("id"), str)
+             and isinstance(s.get("site"), list) and len(s["site"]) == 4]
+    return {**doc, "v": 1, "sites": sites}
+
+
+def find_site(site_id: str, path: Path | None = None) -> list[int]:
+    """NEU1: embark --site ID -> [WX,WY,LX,LY]; ValueError when ID is not vetted."""
+    doc = load_sites(path)
+    for s in doc["sites"]:
+        if s["id"] == site_id:
+            return [int(x) for x in s["site"]]
+    raise ValueError(f"no vetted site {site_id!r} in {(path or SITES_PATH).name}; known: {[s['id'] for s in doc['sites']]}")
+
+
+def site_lines(path: Path | None = None) -> list[str]:
+    """NEU1: `embark.py sites`: every vetted site with its embark command."""
+    doc = load_sites(path)
+    if not doc["sites"]:
+        return ["  no vetted sites (add one with: sites add ID WX,WY,LX,LY --note TEXT, after a scan read it ok)"]
+    head = [f"  vetted sites{' of ' + str(doc['world']) if doc.get('world') else ''}:"]
+    return head + [f"  {s['id']}: {','.join(str(x) for x in s['site'])} {s.get('verdict', '?')} score {s.get('score', '?')}"
+                   f"{' - ' + s['note'] if s.get('note') else ''}: embark --site {s['id']}" for s in doc["sites"]]
+
+
+def scan_rows(out: Path, files: int = PRIOR_FILES) -> list[dict]:
+    """NEU1: the whole non-sweep rows (verdict, fails, unknown, world, emb, size, score) of the newest result files, newest first."""
+    try:
+        paths = sorted(out.glob("result-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:files]
+    except OSError:
+        return []
+    got: list[dict] = []
+    for p in paths:
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        res = doc.get("results") if isinstance(doc, dict) else None
+        got += [r for r in (res if isinstance(res, list) else []) if isinstance(r, dict) and not r.get("sweep")]
+    return got
+
+
+def add_site(site_id: str, site: list[int], out: Path, note: str | None = None, path: Path | None = None,
+             rules: dict | None = None, now: float | None = None) -> dict:
+    """NEU1: add a vetted site only when the newest scan row of exactly this rectangle passes the hard site policy (fail
+    closed: no row = refused). ValueError with the reason."""
+    if not re.match(SITE_ID_RE, str(site_id or "")):
+        raise ValueError(f"site id must be lower-case letters, digits, _ or - (24 at most): {site_id!r}")
+    if len(site) != 4:
+        raise ValueError("a vetted site needs the whole rectangle WX,WY,LX,LY")
+    where = ",".join(map(str, site))
+    row = None
+    for r in scan_rows(out):
+        b, w = _box(r), r.get("world")
+        if b and isinstance(w, list) and len(w) == 2 and [w[0], w[1], b[0] - 16 * w[0], b[1] - 16 * w[1]] == list(site):
+            row = r
+            break
+    if row is None:
+        raise ValueError(f"no scan result holds rectangle {where}: scan it first (scan {where} --tiles)")
+    why = row_vetted(row, rules)
+    if why:
+        raise ValueError(f"rectangle {where} is not a vetted site under the hard site policy: {why}")
+    p = path or SITES_PATH
+    doc = load_sites(p)
+    doc["sites"] = [s for s in doc["sites"] if s["id"] != site_id]
+    ent = {"id": site_id, "site": list(site), "verdict": row.get("verdict"), "score": row.get("score"),
+           "added": time.strftime("%Y-%m-%d", time.localtime(now if now is not None else time.time()))}
+    if row.get("fails"):
+        ent["fails"] = list(row["fails"])
+    nt = " ".join(str(note or "").split())[:120]
+    if nt:
+        ent["note"] = nt
+    doc["sites"].append(ent)
+    tmp = p.with_name("." + p.name + ".tmp")
+    tmp.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8")
+    os.replace(tmp, p)
+    return ent
 
 
 def write_spec(spec: dict, out: Path) -> Path:
@@ -484,16 +634,15 @@ def variant_lines(r: dict) -> list[str]:
             f"scan {w[0]},{w[1]},{best[1]},{best[2]} --hover   (the tiles beyond the hovered 4x4 are unread)"]
 
 
-def best_compromise(rows: list[dict]) -> str | None:
+def best_compromise(rows: list[dict], rules: dict | None = None) -> str | None:
     """BUG-250 (Run 15c: 14 rectangles scanned by hand): with no 'ok' rectangle, the one with the fewest failed
     criteria that FR-08 can accept (then the highest score), as the embark line to run."""
     if not rows or any(r.get("verdict") == "ok" for r in rows):
         return None
     cands = [r for r in rows if _box(r) and isinstance(r.get("world"), list)
-             and all(f in ACCEPTABLE for f in r.get("fails") or [])
-             and all(u in WAIVABLE for u in r.get("unknown") or [])]
+             and row_vetted(r, rules) is None]                # NEU1 (E3): only what the policy accepts or waives
     if not cands:
-        return "  best compromise: none (every rectangle fails a criterion that cannot be accepted)"
+        return "  best compromise: none (every rectangle fails a criterion that cannot be accepted, or misses one that cannot be waived)"
     r = min(cands, key=lambda x: (len(x.get("fails") or []), len(x.get("unknown") or []), -(x.get("score") or 0)))
     w, b = r["world"], _box(r)
     cmd = f"embark {w[0]},{w[1]},{b[0] - 16 * w[0]},{b[1] - 16 * w[1]}"
@@ -778,6 +927,12 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--budget", type=float, default=RANK_BUDGET,
                     help="BUG-427: seconds to wait, then print the partial pre-rank (the sweep goes on in DF); 0 = wait "
                          "for the whole sweep (default %(default)s, below em.sh's 590 s)")
+    sp = sub.add_parser("sites", help="NEU1: the vetted sites of this world (tools/embark/sites.json); "
+                                      "'sites add ID WX,WY,LX,LY' adds a rectangle a scan read ok under the hard site policy")
+    sp.add_argument("action", nargs="?", choices=("list", "add"), default="list")
+    sp.add_argument("id", nargs="?")
+    sp.add_argument("rect", nargs="?", type=parse_site)
+    sp.add_argument("--note", help="why this site (shown in the list)")
     sp = sub.add_parser("save-as", help="BUG-250: Esc menu > 'Save and continue playing' under the name NAME")
     sp.add_argument("name", help="the new save folder name (letters, digits, space, _ -)")
     sp.add_argument("--no-post", action="store_true", help="do not post the Esc key to DF's window (press it yourself)")
@@ -785,6 +940,7 @@ def main(argv: list[str] | None = None) -> int:
         sp = sub.add_parser(name)
         if name == "embark":
             sp.add_argument("site", type=parse_site, nargs="?")
+            sp.add_argument("--site", dest="vetted", metavar="ID", help="NEU1: a vetted site of sites.json (embark.py sites)")
             sp.add_argument("--here", action="store_true",
                             help="BUG-250: the rectangle on the screen (its Confirm popup open), gated on the panels "
                                  "earlier scan/embark runs read")
@@ -794,7 +950,8 @@ def main(argv: list[str] | None = None) -> int:
                             help="accept this one criterion although the panel did not show it (checked by eye); "
                                  "repeatable; " + ", ".join(WAIVABLE))
             sp.add_argument("--accept", action="append", default=[], choices=ACCEPTABLE + tuple(HARD_REJECT), metavar="ID",
-                            help="FR-08: embark although this criterion FAILED (a known trade-off); repeatable, "
+                            help="FR-08: embark although this criterion FAILED (a known trade-off; NEU1: under rules.json strict only "
+                                 "accept_only = dark_fortress); repeatable, "
                                  "needs --reason; logged to dfllm-runtime/embark/accept.log; " + ", ".join(ACCEPTABLE))
             sp.add_argument("--reason", help="why the accepted criteria are acceptable (logged with the run)")
             sp.add_argument("--no-tiles", action="store_true", help="read only the hovered tile's panel")
@@ -805,6 +962,25 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--no-wait", action="store_true")
     a = ap.parse_args(argv)
     out = out_dir()
+    if a.cmd == "sites":   # NEU1: no DF call
+        if a.action == "add":
+            if not a.id or not a.rect:
+                ap.error("sites add needs ID WX,WY,LX,LY")
+            try:
+                ent = add_site(a.id, a.rect, out, note=a.note)
+            except ValueError as e:
+                ap.error(str(e))
+            print(f"  vetted site {ent['id']} added: embark --site {ent['id']}")
+            return 0
+        print("\n".join(site_lines()))
+        return 0
+    if getattr(a, "vetted", None):   # NEU1: embark --site ID
+        if a.site or getattr(a, "here", False):
+            ap.error("--site ID replaces WX,WY[,LX,LY] and --here")
+        try:
+            a.site = find_site(a.vetted)
+        except ValueError as e:
+            ap.error(str(e))
     if a.cmd in ("state", "check", "status", "stop"):
         print(call([a.cmd]).strip())
         return 0

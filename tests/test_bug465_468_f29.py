@@ -29,8 +29,8 @@ def test_bug465_stone_is_not_acceptable_and_has_a_reason():
     assert "stone" not in drv.ACCEPTABLE and "stone" in drv.WAIVABLE and "stone" in drv.HARD_REJECT
     with pytest.raises(ValueError, match=r"cannot accept \['stone'\].*hard stone within reach"):
         drv.make_spec("embark", site=[7, 23], accept=["stone"], reason="deep soil", explore_first="shaft to stone in spring")
-    # the unknown depth is waived with a plan, as before
-    e = drv.make_spec("embark", site=[7, 23], waive=["stone"], explore_first="shaft to stone in spring")
+    # the unknown depth is waived with a plan, as before (NEU1: only with rules.json strict off)
+    e = drv.make_spec("embark", site=[7, 23], waive=["stone"], explore_first="shaft to stone in spring", rules={"strict": False})
     assert e["waive"] == ["stone"]
     # a stone fail leaves no compromise (the best compromise names the criteria that can be accepted)
     out = drv.best_compromise([_row((4, 10), fails=["stone"], emb=[70, 166])])

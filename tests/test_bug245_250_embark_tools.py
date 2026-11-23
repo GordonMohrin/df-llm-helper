@@ -16,6 +16,17 @@ sys.path.insert(0, str(EMB))
 import embark as drv  # noqa: E402
 
 
+# NEU1 (E3): these FR-08 tests run with the hard site policy off (rules.json strict false restores the old acceptances and waivers);
+# the strict policy is tested in tests/test_neu1_site_policy.py
+LEGACY = {"strict": False}
+
+
+def _legacy(monkeypatch, tmp_path):
+    p = tmp_path / "rules-legacy.json"
+    p.write_text('{"strict": false}', encoding="utf-8")
+    monkeypatch.setattr(drv, "RULES_PATH", p)
+
+
 def _calls(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setenv("DFLLM_DF", str(tmp_path))
@@ -62,6 +73,7 @@ def test_bug247_scan_hover_spec(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- BUG-248
 def test_bug248_stone_needs_an_explore_first_plan(tmp_path, monkeypatch):
+    _legacy(monkeypatch, tmp_path)
     for kw in ({"waive": ["stone"]}, {"waive": ["stone"], "explore_first": "dig"}):
         with pytest.raises(ValueError, match="explore-first"):
             drv.make_spec("embark", site=[7, 23], **kw)
@@ -91,6 +103,7 @@ def _result(out: Path, rid: str, rows, mtime: float):
 
 
 def test_bug250_embark_here_passes_the_earlier_reads(tmp_path, monkeypatch):
+    _legacy(monkeypatch, tmp_path)
     out = tmp_path / "dfllm-runtime" / "embark"
     old = {"tag": "s1-1", "emb": [134, 486], "size": [4, 4], "rec": {"read": 5, "water": "brook"}, "verdict": "ok"}
     new = {"tag": "h2-1", "emb": [150, 118], "hover": True, "rec": {"read": 6},
@@ -115,7 +128,8 @@ def test_bug250_embark_here_passes_the_earlier_reads(tmp_path, monkeypatch):
         drv.main(["embark", "--no-wait"])
 
 
-def test_bug250_summary_brook_distance_and_best_compromise():
+def test_bug250_summary_brook_distance_and_best_compromise(tmp_path, monkeypatch):
+    _legacy(monkeypatch, tmp_path)
     rows = [
         {"tag": "a", "world": [7, 10], "emb": [122, 166], "size": [4, 4], "verdict": "reject", "score": 34,
          "fails": ["dark_fortress", "water"], "warns": [], "unknown": [], "rec": {"tiles": {"n": 16}}},

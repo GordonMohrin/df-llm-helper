@@ -426,15 +426,24 @@ T.test('runner (FR-08): a failed criterion passes the gate only when accepted by
   T.eq(run.state, 'failed'); T.ok(run.msg:find('site rejected (fails: ore)', 1, true), run.msg)
   T.eq(D.pressed.Confirm, nil)
   D = F.new({screen = 'world', sites = nometal})
-  run = start(D, {v = 2, id = 'a2', mode = 'embark', site = {8, 30}, accept = {{id = 'ore'}}})
+  local legacy = {}                                   -- NEU1 (E3): rules.json strict = false, the FR-08 acceptances
+  for k, v in pairs(RULES or {}) do legacy[k] = v end
+  legacy.strict = false
+  run = start(D, {v = 2, id = 'a2', mode = 'embark', site = {8, 30}, accept = {{id = 'ore'}}}, legacy)
   T.eq(run.state, 'failed'); T.ok(run.msg:find('accepting ore needs a reason', 1, true), run.msg)
   D = F.new({screen = 'world', sites = nometal})
   run = start(D, {v = 2, id = 'a3', mode = 'embark', site = {8, 30}, accept = {{id = 'panel', why = 'x x x'}}})
   T.eq(run.state, 'failed'); T.ok(run.msg:find('cannot accept panel', 1, true), run.msg)
+  -- NEU1 (E3): the strict policy (default) refuses accepting ore; strict = false restores FR-08
+  D = F.new({screen = 'world', sites = nometal})
+  run = start(D, {v = 2, id = 'a4s', mode = 'embark', site = {8, 30}, play_now = true,
+                  accept = {{id = 'ore', why = 'bars by trade, iron from the second caravan'}}})
+  T.eq(run.state, 'failed'); T.ok(run.msg:find('cannot accept ore: hard site policy', 1, true), run.msg)
+  T.eq(D.pressed.Confirm, nil)
   D = F.new({screen = 'world', sites = nometal})
   local ctx
   run, _, ctx = start(D, {v = 2, id = 'a4', mode = 'embark', site = {8, 30}, play_now = true,
-                          accept = {{id = 'ore', why = 'bars by trade, iron from the second caravan'}}})
+                          accept = {{id = 'ore', why = 'bars by trade, iron from the second caravan'}}}, legacy)
   T.eq(run.state, 'done', run.msg); T.eq(D.screen, 'fort')
   T.eq(ctx.warnings, {'site.gate: accepted ore (bars by trade, iron from the second caravan)'})
 end)

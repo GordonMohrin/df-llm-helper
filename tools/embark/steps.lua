@@ -886,10 +886,14 @@ function S.gate(waive, accept, plan)
     act = function(ui, v, ctx)
       for id in pairs(named) do
         if not checklist.WAIVABLE_SET[id] then return 'fail', 'cannot waive ' .. tostring(id) end
+        local okw, ww = checklist.can_waive(id, ctx.rules)          -- NEU1 (E3): missing site-killer data fails closed
+        if not okw then return 'fail', 'cannot waive ' .. id .. ': ' .. ww end
       end
       for id in pairs(took) do
         if checklist.HARD_REJECT[id] then return 'fail', 'cannot accept ' .. id .. ': ' .. checklist.HARD_REJECT[id] end   -- BUG-465
         if not checklist.ACCEPTABLE_SET[id] then return 'fail', 'cannot accept ' .. tostring(id) end
+        local oka, wa = checklist.can_accept(id, ctx.rules)         -- NEU1 (E3): only goblin distance may be accepted
+        if not oka then return 'fail', 'cannot accept ' .. id .. ': ' .. wa end
         if type(why[id]) ~= 'string' or #why[id]:gsub('^[ \t]+', '') < 3 then
           return 'fail', 'accepting ' .. id .. ' needs a reason'
         end

@@ -25,7 +25,7 @@ def test_bug690_timber_is_a_hard_reject_in_both_lists():
 
 def test_bug690_accepting_trees_alone_is_still_a_spec_but_the_gate_refuses_the_site():
     """the spec is valid (trees is acceptable); site.gate refuses it because the 'timber' fail is not in `accept` (tests/lua)"""
-    spec = drv.make_spec("embark", site=[28, 13], accept=["trees"], reason="bad trees")
+    spec = drv.make_spec("embark", site=[28, 13], accept=["trees"], reason="bad trees", rules={"strict": False})   # NEU1: strict off
     assert [a["id"] for a in spec["accept"]] == ["trees"]
 
 

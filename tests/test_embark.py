@@ -15,6 +15,17 @@ sys.path.insert(0, str(ROOT / "tools"))
 import embark as drv  # noqa: E402
 import luahost  # noqa: E402
 
+
+# NEU1 (E3): these FR-08 tests run with the hard site policy off (rules.json strict false restores the old acceptances and waivers);
+# the strict policy is tested in tests/test_neu1_site_policy.py
+LEGACY = {"strict": False}
+
+
+def _legacy(monkeypatch, tmp_path):
+    p = tmp_path / "rules-legacy.json"
+    p.write_text('{"strict": false}', encoding="utf-8")
+    monkeypatch.setattr(drv, "RULES_PATH", p)
+
 DFHACK_DLL = Path(r"E:\Program Files (x86)\Steam\steamapps\common\Dwarf Fortress\hack\dfhack.dll")
 
 
@@ -235,7 +246,8 @@ def test_rules_json_requires_metal_and_stone():
     assert "lesson 1" in r["stone_note"] and "--accept" in r["stone_note"]
 
 
-def test_make_spec_accept_needs_a_reason(tmp_path):
+def test_make_spec_accept_needs_a_reason(tmp_path, monkeypatch):
+    _legacy(monkeypatch, tmp_path)
     e = drv.make_spec("embark", site=[7, 23], accept=["ore", "ore"], reason="  bars by   trade ", now=3)
     assert e["accept"] == [{"id": "ore", "why": "bars by trade"}]
     assert "accept" not in drv.make_spec("embark", site=[7, 23], now=3)
@@ -253,6 +265,7 @@ def test_main_embark_passes_named_waivers_only(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setenv("DFLLM_DF", str(tmp_path))
     monkeypatch.setattr(drv, "call", lambda args, df=None, timeout=60: calls.append(args) or "started")
+    _legacy(monkeypatch, tmp_path)
     assert drv.main(["embark", "7,23,6,6", "--waive", "dark_fortress", "--no-wait"]) == 0
     spec = json.loads(Path(calls[0][1]).read_text(encoding="utf-8"))
     assert spec["mode"] == "embark" and spec["site"] == [7, 23, 6, 6] and spec["waive"] == ["dark_fortress"]

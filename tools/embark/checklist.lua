@@ -40,6 +40,11 @@ C.DEFAULT = {
     'water_mountain'},
   warn_popups = {'light_aquifer', 'dead_civ', 'narrow', 'smallest', 'large', 'very_large', 'largest', 'hard',
     'few_resources', 'unpleasant', 'wildlife'},
+  -- NEU1 (decision E3, docs/v2/NEU1-startset.md): the hard site policy. strict = a FAILED criterion can be accepted only when it is in
+  -- accept_only (goblin distance: most tiles of a goblin-dense world are near goblins); every other fail is a hard reject (heavy
+  -- aquifer, no trees, no water, no hard stone, no ore, ...). hard_waive = criteria that may not be waived when the panel did not
+  -- show them (missing data fails closed: scan the rectangle again). strict = false restores FR-08's acceptances and waivers.
+  strict = true, accept_only = {'dark_fortress'}, hard_waive = {'aquifer', 'trees', 'water', 'stone'},
 }
 
 local function set(list)
@@ -66,6 +71,26 @@ C.HARD_REJECT = {stone = 'no hard stone within reach: a failed stone criterion c
   -- BUG-690 (Run 16b i2 Rocksblush: --accept trees on a site with no trees and its hard stone 5 levels down: 0 logs, 0 stone, 0 blocks, every
   -- workshop and the depot waited, depot6 build_lost): 'trees' may be accepted only while stone lies near the surface
   timber = 'no trees and no stone near the surface: nothing to build the first workshop from, accepting trees cannot fix it, choose another site'}
+-- NEU1 (E3): may id be accepted (FAILED) / waived (unknown) under these rules? (nil, why) when not
+function C.can_accept(id, rules)
+  rules = C.rules(rules)
+  if C.HARD_REJECT[id] then return nil, C.HARD_REJECT[id] end
+  if not C.ACCEPTABLE_SET[id] then return nil, 'not acceptable' end
+  if rules.strict ~= false and not set(rules.accept_only)[id] then
+    return nil, 'hard site policy (rules.json strict): only ' .. table.concat(rules.accept_only or {}, ', ') ..
+      ' may be accepted, choose another site'
+  end
+  return true
+end
+function C.can_waive(id, rules)
+  rules = C.rules(rules)
+  if not C.WAIVABLE_SET[id] then return nil, 'not waivable' end
+  if rules.strict ~= false and set(rules.hard_waive)[id] then
+    return nil, 'hard site policy (rules.json strict): an unknown ' .. id .. ' is not waived, scan the rectangle again (--tiles/--hover)'
+  end
+  return true
+end
+
 -- warning popups judged by their own criterion, not by 'popup' ("difficult to obtain stone" is the stone rule)
 C.POPUP_OWNER = {no_stone = 'stone', water_mountain = 'terrain'}
 -- BUG-248 (Run 15 Guildcleans 'stone free 0', Earthboat 'no hard stone' for mechanisms): criteria a new fort may
