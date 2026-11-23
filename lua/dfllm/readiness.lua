@@ -653,8 +653,10 @@ end
 
 -- the lever condition: gate's own answer (package P5: gate.core_lever -> boolean) or, until gate has it, a manifest bridge whose
 -- >= MIN_LEVERS linked levers readiness saw (check_levers good) and that is not in lever_outside (all its levers outside Kern+)
+-- (the name sits in a variable: gate.core_lever does not exist before P5 is merged, K.call then answers false, 'no function')
+local CORE_LEVER_FN = 'core_lever'
 local function core_lever(K)
-  local ok, v = K.call('gate', 'core_lever')
+  local ok, v = K.call('gate', CORE_LEVER_FN)
   if ok and type(v) == 'boolean' then return v end
   local out = {}
   for _, b in ipairs(rt.lo or {}) do out[b] = true end

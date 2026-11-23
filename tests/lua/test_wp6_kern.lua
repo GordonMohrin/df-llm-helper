@@ -99,10 +99,12 @@ T.test('real act: popcap runs pop-control set max-pop; squads from the UI are fi
   T.eq(X.members(X.squad_of(W, 'A')) + X.members(X.squad_of(W, 'B')) + X.members(X.squad_of(W, 'C')), 8)
   local found = false
   for _, c in ipairs(W.commands) do
-    if c[1] == 'pop-control' and c[2] == 'set' and c[3] == 'max-pop' and c[4] == '100' then found = true end
+    if c[1] == 'pop-control' and c[2] == 'set' and c[3] == 'max-pop' and c[4] == '30' then found = true end
   end
-  T.ok(found, 'pop-control set max-pop 100 (no plan yet: the D-01 = B ceiling, BUG-132)')
-  T.eq(df.global.d_init.dwarf.population_cap, 100)
+  -- NEU1 P4: the shipped config/reflex.json has the growth ladder on: a fresh fort without an armed squad gets cap 30 (was 100, the D-01 = B
+  -- ceiling of BUG-132)
+  T.ok(found, 'pop-control set max-pop 30 (no plan yet, the growth ladder: no armed squad)')
+  T.eq(df.global.d_init.dwarf.population_cap, 30)
   H.run(W, 3700, {skip = 9})                            -- the next upkeep: uniform-unstick (allowlisted)
   local un = false
   for _, c in ipairs(W.commands) do
@@ -113,7 +115,8 @@ T.test('real act: popcap runs pop-control set max-pop; squads from the UI are fi
   for _, e in ipairs(H.events(W)) do T.ok(e.type ~= 'ACT_FAIL' and e.type ~= 'KERN_FAULT', e.msg) end
   local s = H.state(W)
   T.eq(s.mil.soldiers, 8)
-  T.eq(s.pop.cap, 100)
+  T.eq(s.pop.cap, 30)                                   -- NEU1 P4: the growth ladder (the soldiers hold no weapon)
+  T.eq(s.ready.gh and s.ready.gh.halt, 'squad')
   H.kern().stop('test')
 end)
 
