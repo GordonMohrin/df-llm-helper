@@ -1,0 +1,7 @@
+{
+ "v": 2,
+ "about": "NEU1 P1 (docs/v2/NEU1-wertung.md): dfpilot wertung (score per fort) and dfpilot leiter (Engpass-Leiter). Python only; python -m dfpilot.lint --config checks the keys.",
+ "wertung": {"on": true, "series": true},
+ "leiter": {"on": true, "brief": true, "records": true, "locks": true, "gates": true,
+            "ruestung_metal_pct": 50, "blocked_hours": 6, "run_key_re": "^(r\\d+[a-z]?)\\d*-"}
+}

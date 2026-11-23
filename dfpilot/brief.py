@@ -1313,6 +1313,8 @@ def status_text(save_dir: Path) -> str:
                   (4, line_snap(ctx)),
                   (4, line_rooms(ctx)),                              # FR-102/103 (G15)
                   (5, _join(extra))]                                 # J3: the army's detail is the first line to go
+        from .leiter import status_line            # NEU1 P1: the ladder's first line, last (the lines above keep their places)
+        lines.append((4, status_line(save_dir, ctx.state)))
     return fit_ranked(lines, STATUS_TOKENS)
 
 
@@ -1463,6 +1465,9 @@ def brief_text(save_dir: Path, budget: int = BRIEF_TOKENS) -> str:
                              line_sched(ctx), line_proj(ctx, 8), line_rooms(ctx, done=True), line_kern(ctx), line_snap(ctx),
                              _join(extra)) if x]
     sections = [head]
+    if ctx.state is not None:                      # NEU1 P1: LEITER / NAECHST / OFFEN-GESPERRT right after the head, no title:
+        from .leiter import brief_lines            # the head keeps its trim order, the ladder goes before the plan
+        sections.append(brief_lines(save_dir, ctx.state))
     for title, lines in (("## plan", sec_plan(ctx)), ("## decisions open (ask Gordon)", sec_decisions(ctx)),
                          ("## curse (recipe)", sec_curse(ctx)),
                          ("## class A, newest first", sec_class_a(ctx)),
