@@ -3938,9 +3938,11 @@ function M.hold_order(K, key, order, tag)
   return true, 'ordered'
 end
 
--- public (siege): the held squad gets its posture orders again
-function M.release(K, key)
+-- public (siege): the held squad gets its posture orders again. NEU1 P7: with `tag` (the player module) only while the hold is
+-- still that tag's own (a later siege hold of the squad stays)
+function M.release(K, key, tag)
   if not rt.held[key] then return true end
+  if tag ~= nil and not tostring(rt.order[key] or ''):find('hold:' .. tostring(tag) .. ':', 1, true) then return true, 'not ' .. tostring(tag) .. "'s" end
   rt.held[key], rt.order[key] = nil, nil
   rt.kpi = nil
   return apply_squad(K, key, true)

@@ -1643,6 +1643,33 @@ local function impls(state)
     end)
     return ok and r
   end
+  -- NEU1 P7 (verbs zone.remove / building.remove, the player's own remove; Run 16: 'kein Befehl' for a dead zone or workshop): ONE
+  -- building or zone by id, the way the building sheet's / zones screen's remove does it (dfhack.buildings.deconstruct: a zone goes at
+  -- once, a building gets a Remove Building job). kind 'zone' takes civzones only, kind 'building' everything else; a bridge, a lever or
+  -- the trade depot only with `force` (the player's approve:true: a gate or its lever is the fort's defence). Returns ok,
+  -- {how = 'gone' | 'queued', rect = {x1, y1, x2, y2, z}, type = name} or false, why. [live-untested]
+  A.REMOVE_GUARDED = {Bridge = true, TradeDepot = true}
+  function I.building_remove(id, kind, force)
+    id = int(id)
+    if not id then return false, 'bad building id' end
+    local b = df.building.find(id)
+    if not b then return false, 'no building ' .. id end
+    local okz, zone = pcall(function() return df.building_civzonest:is_instance(b) end)
+    zone = okz and zone == true
+    if kind == 'zone' and not zone then return false, 'building ' .. id .. ' is not a zone' end
+    if kind ~= 'zone' and zone then return false, 'building ' .. id .. ' is a zone: use zone.remove' end
+    local okt, tname = pcall(function() return df.building_type[b:getType()] end)
+    tname = okt and tostring(tname) or '?'
+    if not zone and force ~= true and (A.REMOVE_GUARDED[tname] or is_lever(b)) then
+      return false, (is_lever(b) and 'Lever' or tname) .. ' ' .. id .. ' is part of the defence or the trade: approve:true removes it'
+    end
+    local rect = {int(b.x1), int(b.y1), int(b.x2), int(b.y2), int(b.z)}
+    if dfhack.buildings.deconstruct(b) then return true, {how = 'gone', rect = rect, type = tname} end
+    local okm, marked = pcall(function() return dfhack.buildings.markedForRemoval(b) end)
+    if okm and marked then return true, {how = 'queued', rect = rect, type = tname} end
+    return false, 'deconstruct refused'
+  end
+
   function I.pull(lever_id)
     local lever = df.building.find(lever_id)
     if not lever then return false, 'no building ' .. tostring(lever_id) end
@@ -2395,10 +2422,11 @@ local function impls(state)
   -- labors screen, one labor of one citizen (BUG-546 Run 16d i4 Trumpetrealms: the refuge levers' link jobs waited 1000 days and nobody was
   -- known to hold the Mechanics labor; BUG-547: the manager worked as a farmer and validated no order for 14 days): `which` = mechanic
   -- (only on) or farm (only off), A.LABOR_SETS; a citizen who is no living adult cannot take a labor
-  function I.labor_set(unit_id, which, on)
+  -- NEU1 P7: `any` (the player's verb labor.set) switches the named labor either way
+  function I.labor_set(unit_id, which, on, any)
     local spec = A.LABOR_SETS[tostring(which)]
     if not spec then return false, 'which must be mechanic, farm, cook, brew, clean_fish, furniture, herb, burn or hunt' end
-    if (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
+    if any ~= true and (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
     local u = df.unit.find(int(unit_id) or -1)
     if not u then return false, 'no unit ' .. tostring(unit_id) end
     if on and (not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) or dfhack.units.isDead(u)) then
@@ -2700,6 +2728,8 @@ end
 -- env = {who = fn() -> module|nil, tick = fn() -> abs tick, allowlist = fn() -> doc,
 --        log_cmd = fn(origin, what, args_json, result), fail = fn(fn, err, module),
 --        optional: clock = fn() -> ms (the cost clock), on_cost = fn(fn, ms, args) after each call (BUG-039);
+--        held = fn(fn, args) -> verb | nil (NEU1 P7: the call touches an object a player verb holds: refused, no ACT_FAIL),
+--        note = fn(fn, args, res) after each successful call (NEU1 P7: kern notes the calls of a running hold verb);
 --        fail's 4th argument (BUG-068) is the command line of a failed `run`}
 function A.new(env)
   local state = {own_jobs = {}, who = env.who, allowlist = env.allowlist}
@@ -2717,11 +2747,15 @@ function A.new(env)
     api[fn] = function(...)
       local who = env.who()
       local args = table.pack(...)
-      local ok, res, cost
+      local ok, res, cost, quiet
+      -- NEU1 P7: an object a player verb changed is held against the kernel's own calls (env.held names the verb; util/hold.lua)
+      local held = f and env.held and env.held(fn, args) or nil
       if who ~= nil and who ~= 'kern' and not owners[fn][who] then
         ok, res = false, 'not owner'
       elseif not f then
         ok, res = false, 'not implemented'
+      elseif held then
+        ok, res, quiet = false, 'held by the player (' .. tostring(held) .. ')', true     -- a kernel loop retrying it is no failure
       else
         local c0 = clock()
         local pok, a, b = pcall(f, ...)
@@ -2730,12 +2764,13 @@ function A.new(env)
         -- reason; say so, and ACT_FAIL names the command line (below)
         if not pok then ok, res = false, a == nil and 'raised an error without a message' or tostring(a)
         else ok, res = a and true or false, b end
+        if ok and env.note then pcall(env.note, fn, args, res) end      -- NEU1 P7: the act calls of a running player verb
       end
       local result = ok and 'ok' or ('ERR ' .. tostring(res))
       -- BUG-039: kern keeps the slowest act call of the running module call (its huge-step line names it)
       if cost and env.on_cost then pcall(env.on_cost, fn, cost, args) end
       env.log_cmd(who or 'kern', 'act.' .. fn, describe(fn, args, cost), result)
-      if not ok then
+      if not ok and not quiet then
         -- BUG-068: the command line of a failed `run` (<= 80 bytes), so the ACT_FAIL says which command it was
         local what
         if fn == 'run' then

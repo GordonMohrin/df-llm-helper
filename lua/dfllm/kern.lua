@@ -16,6 +16,7 @@ local fio = require('dfllm.io')
 local persistlib = require('dfllm.persist')
 local actlib = require('dfllm.act')
 local guard = require('dfllm.guard')         -- FR-68: what `dfllm stop` leaves running in a dangerous mode
+local holdlib = require('dfllm.util.hold')    -- NEU1 P7: the objects a player verb changed, held against the kernel's own calls
 
 local M = {}
 M.KEY = 'dfllm'
@@ -427,6 +428,21 @@ local function build(o)
     allowlist = function() return st.cfg and st.cfg.allowlist or actlib.BUILTIN_ALLOWLIST end,
     log_cmd = log_cmd,
     clock = cost_ms, on_cost = st.on_act_cost,      -- BUG-039: the slowest act call of a huge step
+    -- NEU1 P7: outside a player verb, an act call on an object a hold verb changed is refused (the player module keeps the holds);
+    -- inside one, its successful act calls are noted for player.hold_acts. No player module (or a fault): nothing is held.
+    held = function(fn, args)
+      if st.in_verb then return nil end
+      local p = st.mods.player
+      if not (p and not p.disabled and type(p.M.held) == 'function') then return nil end
+      local keys = holdlib.keys(fn, args)
+      if #keys == 0 then return nil end
+      local ok, v = pcall(p.M.held, keys, st.now and st.now.tick or 0)
+      return ok and v or nil
+    end,
+    note = function(fn, args, res)
+      local l = st.in_verb and st.verb_acts
+      if l and #l < 20 then l[#l + 1] = {fn = fn, args = args, res = res} end
+    end,
     fail = function(fn, err, module, what)
       local key = 'ACT_FAIL' .. fn .. module .. err .. tostring(what or '')       -- BUG-068: per command line too
       local last = st.once[key]
@@ -1079,8 +1095,15 @@ local function handle_inbox(st, name)
   if e.disabled then return reply(st, cmd, false, 'module disabled', nil, args) end
   local h = e.M.verbs and e.M.verbs[cmd.verb]
   if type(h) ~= 'function' then return reply(st, cmd, false, 'no handler for ' .. cmd.verb, nil, args) end
+  st.in_verb, st.verb_acts = cmd.verb, {}              -- NEU1 P7: the player's act calls are never held, and noted
   local r = table.pack(st.call_in(e, 'verb ' .. cmd.verb, h, args, cmd))
+  local acts = st.verb_acts
+  st.in_verb, st.verb_acts = nil, nil
   if not r[1] then return reply(st, cmd, false, 'handler error', nil, args) end
+  local pm = st.mods.player
+  if r[2] and C.VERB_HOLD[cmd.verb] and #acts > 0 and pm and not pm.disabled and type(pm.M.hold_acts) == 'function' then
+    st.call_in(pm, 'hold', pm.M.hold_acts, acts, cmd.verb)
+  end
   return reply(st, cmd, r[2], r[3], r[4], args)
 end
 

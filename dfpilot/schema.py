@@ -61,6 +61,7 @@ MODULES = [
     ("trade", "WP9", False, {"ticks": 100}), ("baseline", "WP8", False, {"ticks": 33600}),
     ("perf", "WP1", False, {"ms": 1000}), ("selftest", "WP1", False, {"ms": 60000}),
     ("cavern", "WP6", False, {"ticks": 100}),      # FR-98: the military clears the caverns (G16)
+    ("player", "NEU1", False, {"ticks": 1200}),    # NEU1 P7: the emergency exit, the player's verbs and their holds
 ]
 
 DECISIONS = {
@@ -89,29 +90,30 @@ ACT = {
     "mood_task": ["care"],                         # BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
     "drink_pile": ["economy"],                     # BUG-782: the refuge's drink store on existing floor, no dig
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
-    "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate"], "burrow_units": ["gate"],
+    "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate", "player"], "burrow_units": ["gate", "player"],
+    "building_remove": ["player"],                 # NEU1 P7: the verbs zone.remove / building.remove
     "cancel_link_job": ["gate"],                   # BUG-546: the kernel's own unworked link job of a lever, taken down to link again
     "rescue_ramp_build": ["seal"],                 # BUG-769: outdoors the ramp is built (quickfort `Cr`) on the landing floor under a tree-crown stand
     "lever_build": ["gate"],                       # BUG-774: one lever (quickfort `Tl`) on a Kern+ floor tile for a bridge whose levers all lie outside
     "rescue_ramp": ["seal"],                       # BUG-769: one ramp dug on a plain wall tile beside a one-level drop with stranded citizens
     "cancel_stray_job": ["seal"],                  # BUG-751: one outdoor errand of a citizen whose target lies on a walk group with no drink and food
-    "labor_set": ["economy", "seal"],                      # BUG-546/547: Mechanic labor on for one citizen, farming off for the manager
+    "labor_set": ["economy", "seal", "player"],                      # BUG-546/547: Mechanic labor on for one citizen, farming off for the manager
     "construction_remove": ["seal"],              # BUG-479: the refuge plug's walls come down in PEACE
-    "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
+    "door_forbid": ["reflex", "cavern", "player"],          # FR-98: the sweep's hatch over the cavern shaft
     "burrow_tiles": ["seal", "runner", "water"],  # BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
                                                   # water paints its care burrow Pflege+ (exact)
     "popcap": ["readiness"],
-    "quickfort": ["runner"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
+    "quickfort": ["runner", "player"], "order_top": ["runner"],     # Run 11 siege 8: a seal's manager orders to the top
     "orders_import": ["economy"], "orders": ["economy"], "workorder": ["economy", "water", "care", "traps"],
     "order_suspend": ["economy"], "engrave_order": ["economy"], "kitchen_exclude": ["economy"], "appoint": ["economy"],
     "kitchen_include": ["economy"],                       # BUG-345: lift a Cook exclusion
     "stone_economic": ["economy"],                        # BUG-648: clear the stone-use screen's economic mark of a building stone
     "mat_refused": ["economy"],                           # BUG-665: the game's verdict on a boulder material (read only)
-    "work_detail": ["economy", "water"], "order_material": ["economy"], "order_remove": ["economy"],
+    "work_detail": ["economy", "water", "player"], "order_material": ["economy"], "order_remove": ["economy"],
     "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
     "work_detail_prune": ["economy"],
     "item_flag": ["care", "water", "economy", "military", "seal"],
-    "zone_assign": ["care"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
+    "zone_assign": ["care", "player"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
     "slab_place": ["care"],                        # BUG-133: Build > Furniture > Slab with a ghost's engraved slab
     "trade": ["trade"],
     "run": ["baseline", "economy", "care", "military", "trade", "arbiter", "selftest", "runner"],
@@ -134,6 +136,7 @@ STATE_OWNERS = {
     "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water", "stale.*": "kern",
     "traps.*": "traps",
     "cav.*": "cavern",                                                     # FR-98
+    "emg": "player",                                                       # NEU1 P7: the open emergency exit
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -902,6 +905,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "CMD": ("C", "kern", _d("id:s verb:s ok:f")),
     "BOOT": ("C", "kern", _d(opt="save:s v:i boots:i")),
     "UNLOAD": ("C", "kern", _d()),
+    # NEU1 P7 (decision E5): the emergency exit opens (a critical state held player.exit_days: why = its causes, verbs = what it
+    # unlocks, until = the abs tick it ends unless the state goes on, days = how long the oldest cause held) and closes
+    "EMERGENCY": ("A", "player", _d("why:s verbs:sa until:i", "days:i causes:sa")),
+    "EMERGENCY_END": ("C", "player", _d("why:s", "days:i")),
 }
 
 # FR-79: one squad's militia rotation line in state mil.rot (military.lua M.state)
@@ -919,6 +926,12 @@ EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=[
 # FR-39: make-item jobs whose manager order must name the item def (lua/dfllm/orderlib.lua O.SUBTYPE_JOBS)
 SUBTYPE_JOBS = frozenset({"MakeArmor", "MakePants", "MakeShoes", "MakeGloves", "MakeHelm", "MakeWeapon", "MakeAmmo",
                           "MakeShield", "MakeTrapComponent", "MakeTool", "MakeToy"})
+# NEU1 P7: act.LABOR_SETS names, act.TOOL_DETAILS, the quickfort build keys of furniture.place (lua/dfllm/player.lua M.FURNITURE)
+LABOR_SETS = ["mechanic", "farm", "cook", "brew", "herb", "burn", "furniture", "clean_fish", "hunt"]
+WORK_DETAILS = ["Miners", "Woodcutters", "Hunters", "Fisherdwarves", "Planters", "Plant gatherers", "Gatherers", "Herbalists",
+                "Orderlies", "Cooks", "Cooking", "Cook", "Brewers", "Brewing", "Brewer"]
+FURNITURE = {"bed": "b", "table": "t", "chair": "c", "door": "d", "cabinet": "f", "chest": "h", "coffin": "n",
+             "weapon_rack": "r", "armor_stand": "a", "statue": "s", "hatch": "H"}
 VIEW_TARGET = named("view_target", AnyOf(NAT, POS, Str(r"^[^\x00-\x1f]{1,60}$")))
 VERB_ARGS: dict[str, Obj] = {
     "plan.reload": Obj(opt={"phases": Bool()}),
@@ -1023,6 +1036,21 @@ VERB_ARGS: dict[str, Obj] = {
     # BUG-734 (Run 16c i3 Doorwings: chalk 36 and magnetite 25 in the fort, no plain hard stone, the masons refuse them): the stone-use screen's
     # economic mark of one stone type the fort holds as boulders; economic=false (the default) frees it for furniture and blocks
     "stone.use": Obj(req={"mat": Str(pattern=r"^[A-Za-z_:]{2,48}$")}, opt={"economic": Bool()}),
+    # NEU1 P7 stage 1 (decision E5, Run 16 'kein Befehl moeglich'): existing kernel functions as the player's verbs (player module).
+    # The kernel does not undo them: their objects are held (VERB_HOLD) for player.hold_days.
+    "zone.remove": Obj(req={"id": NAT}),                                  # zones screen > remove
+    "building.remove": Obj(req={"id": NAT}, opt={"approve": Bool()}),     # building sheet > remove (bridge, lever, depot: approve)
+    "labor.set": Obj(req={"unit": NAT, "labor": Str(enum=LABOR_SETS), "on": Bool()}),     # labors screen, one labor
+    "workdetail.set": Obj(req={"detail": Str(enum=WORK_DETAILS), "unit": NAT, "on": Bool()}),   # work details screen
+    "lever.link": Checked(Obj(req={"lever": NAT}, opt={"target": NAT, "bridge": BRIDGE}),
+                          lambda a: None if ("target" in a) != ("bridge" in a) else "give either target=<building> or bridge=<name>",
+                          "exactly one of target and bridge"),
+    "furniture.place": Obj(req={"kind": Str(enum=list(FURNITURE)), "pos": POS}),    # build > furniture, one tile
+    "room.assign": Obj(req={"zone": NAT, "unit": NAT}),                  # zone sheet > assign
+    # NEU1 P7 tactical verbs (VERB_EMG): only while the emergency exit is open
+    "squad.station": Obj(req={"squad": Str(enum=["A", "B", "C"])}, opt={"pos": POS, "release": Const(True)}),
+    "burrow.unit": Obj(req={"burrow": Str(r"^[\w+ -]{1,40}$"), "unit": NAT, "on": Bool()}),
+    "door.lock": Obj(req={"door": NAT, "on": Bool()}),
 }
 # verb -> (handler module, allowed modes or None, needs approve)
 VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
@@ -1035,7 +1063,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "resume": ("arbiter", None, False),
     "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
     "squad.sortie": ("military", ["PEACE", "ALERT", "SIEGE", "BREACH", "RECOVERY"], True),     # BUG-675: PEACE for one wild animal inside
-    "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),
+    "lever": ("gate", None, False), "inspect": ("kern", None, False),     # NEU1 P7: PEACE, or up while the emergency exit is open (gate)
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),
     "tombs.repair": ("care", None, False),
     "ack": ("reflex", None, False),
@@ -1055,7 +1083,18 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "well.retire": ("water", None, False),              # BUG-541: any mode (a dying patient does not wait)
     "hospital.restore": ("water", None, False),         # BUG-539: any mode (the patients lie there)
     "stone.use": ("economy", None, False),              # BUG-734: any mode (a setting of the stone-use screen, nothing moves)
+    # NEU1 P7: the player's verbs (player module, any mode; the tactical ones check the emergency exit themselves)
+    "zone.remove": ("player", None, False), "building.remove": ("player", None, False),
+    "labor.set": ("player", None, False), "workdetail.set": ("player", None, False),
+    "lever.link": ("player", None, False), "furniture.place": ("player", None, False),
+    "room.assign": ("player", None, False),
+    "squad.station": ("player", None, False), "burrow.unit": ("player", None, False), "door.lock": ("player", None, False),
 }
+# NEU1 P7 (contract.VERB_EMG / VERB_HOLD): the verbs the emergency exit unlocks (refused outside it; `lever` outside PEACE
+# only up) and the verbs whose act calls hold their objects against the kernel's own calls (lua/dfllm/util/hold.lua)
+VERB_EMG = ["lever", "squad.station", "burrow.unit", "door.lock"]
+VERB_HOLD = ["zone.remove", "building.remove", "labor.set", "workdetail.set", "lever.link", "appoint", "room.assign",
+             "burrow.unit", "door.lock"]
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
 
@@ -1243,6 +1282,8 @@ STATE = Obj(
                       opt={"nb": Arr(Str(maxbytes=24), hi=5), "stale": NAT}),
          # FR-51 clock governor (arbiter): the vanilla FPS cap it drives, the captured original, timestream fps
          "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),
+         # NEU1 P7: the emergency exit while open: its causes (inside, gate, thirst, deaths:<cause>), whole game days left
+         "emg": Obj(req={"o": FLAG, "why": Str(maxbytes=60), "left": NAT}),
          # FR-53 interrupt channel (reflex): DEFCON 1 (worst) .. 5, unacked interrupts, last/acked event n
          "alarm": Obj(req={"defcon": Int(1, 5), "unacked": NAT, "last": NAT, "ack": NAT, "lock": FLAG,
                            "why": Str(maxbytes=24)}, opt={"eta": Int(-1), "doors": NAT, "dwait": NAT, "dout": NAT,

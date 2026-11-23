@@ -49,6 +49,7 @@ C.MODULES = {
   {name = 'perf',      wp = 'WP1', every = {ms = 1000}},
   {name = 'selftest',  wp = 'WP1', every = {ms = 60000}},
   {name = 'cavern',    wp = 'WP6', every = {ticks = 100}},     -- FR-98: the military clears the caverns (G16)
+  {name = 'player',    wp = 'NEU1', every = {ticks = 1200}},   -- NEU1 P7: the emergency exit, the player's verbs, holds
 }
 
 -- Event registry (§12): class fixed per type; by = emitting module ('any' = every module).
@@ -229,6 +230,8 @@ C.EVENTS = {
   GATE = {cls = 'C', by = 'gate'}, LEVER = {cls = 'C', by = 'gate'},
   SNAPSHOT_READY = {cls = 'C', by = 'snapshot'}, CMD = {cls = 'C', by = 'kern'},
   BOOT = {cls = 'C', by = 'kern'}, UNLOAD = {cls = 'C', by = 'kern'},
+  -- NEU1 P7: the emergency exit opens (A: wakes the player; the tactical verbs work) and closes
+  EMERGENCY = {cls = 'A', by = 'player'}, EMERGENCY_END = {cls = 'C', by = 'player'},
 }
 
 -- Interrupt types (FR-53): a class-A subset that goes to <save>/alarm.txt at once and waits for the
@@ -259,7 +262,8 @@ C.VERBS = {
   -- BUG-675: PEACE too, for one wild animal inside the fort (the verb's own rule: military.peace_sortie)
   ['squad.sortie'] = {mod = 'military', approve = true,
                       modes = {PEACE = true, ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}},
-  ['lever']        = {mod = 'gate', modes = {PEACE = true}},
+  -- NEU1 P7: PEACE, or any mode while the emergency exit is open and only `up` there (gate's verb checks it: player.open)
+  ['lever']        = {mod = 'gate'},
   ['inspect']      = {mod = 'kern'},
   ['selftest']     = {mod = 'selftest'},
   ['module.enable'] = {mod = 'kern'},
@@ -304,7 +308,18 @@ C.VERBS = {
   -- BUG-734 (Run 16c i3 Doorwings: no plain hard stone, chalk and magnetite held, the masons refuse them): the stone-use screen's economic
   -- mark of one stone type the fort holds (the player's decision, the DECISION no_hard_stone names it)
   ['stone.use'] = {mod = 'economy'},
+  -- NEU1 P7 stage 1 (decision E5): existing kernel functions as the player's verbs, any mode (player module; config player.verbs)
+  ['zone.remove'] = {mod = 'player'}, ['building.remove'] = {mod = 'player'}, ['labor.set'] = {mod = 'player'},
+  ['workdetail.set'] = {mod = 'player'}, ['lever.link'] = {mod = 'player'}, ['furniture.place'] = {mod = 'player'},
+  ['room.assign'] = {mod = 'player'},
+  -- NEU1 P7 tactical verbs: only while the emergency exit is open (player.open; C.VERB_EMG)
+  ['squad.station'] = {mod = 'player'}, ['burrow.unit'] = {mod = 'player'}, ['door.lock'] = {mod = 'player'},
 }
+-- NEU1 P7: the verbs the emergency exit unlocks (refused outside it) and the verbs whose act calls hold their objects against
+-- the kernel's own calls (util/hold.lua; kern notes the calls while the verb runs, player.hold_acts keeps them)
+C.VERB_EMG = {lever = true, ['squad.station'] = true, ['burrow.unit'] = true, ['door.lock'] = true}
+C.VERB_HOLD = {['zone.remove'] = true, ['building.remove'] = true, ['labor.set'] = true, ['workdetail.set'] = true,
+               ['lever.link'] = true, appoint = true, ['room.assign'] = true, ['burrow.unit'] = true, ['door.lock'] = true}
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
 C.VERB_BY = {audit = {follow = true, test = true}}
@@ -331,26 +346,27 @@ C.ACT = {
   zone_place = {'runner', 'economy'},              -- FR-78: the verb zone.place (zonelib); BUG-232: the manager's office zone
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
-  pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate'}, burrow_units = {'gate'},
+  pull = {'gate'}, cancel_own_lever_job = {'gate'}, link_lever = {'gate', 'player'}, burrow_units = {'gate', 'player'},
+  building_remove = {'player'},                    -- NEU1 P7: the verbs zone.remove / building.remove
   rescue_ramp_build = {'seal'},                    -- BUG-769: outdoors the ramp is built (quickfort Cr) on the landing floor
   lever_build = {'gate'},                         -- BUG-774: one lever (quickfort Tl) on a Kern+ floor tile for a bridge whose levers all lie outside
   rescue_ramp = {'seal'},                          -- BUG-769: one ramp on a plain wall tile beside a one-level drop with stranded citizens
   cancel_stray_job = {'seal'},                     -- BUG-751: an outdoor errand whose target has no way back to drink and food
-  cancel_link_job = {'gate'}, labor_set = {'economy', 'seal'},        -- BUG-546, BUG-547
+  cancel_link_job = {'gate'}, labor_set = {'economy', 'seal', 'player'},        -- BUG-546, BUG-547; NEU1 P7 labor.set
   construction_remove = {'seal'},                  -- BUG-479: the refuge plug's walls come down in PEACE
-  door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
+  door_forbid = {'reflex', 'cavern', 'player'},    -- FR-98: the sweep's hatch over the cavern shaft; NEU1 P7 door.lock
   burrow_tiles = {'seal', 'runner', 'water'},     -- BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
                                                   -- water paints its care burrow Pflege+ (exact)
   popcap = {'readiness'},
-  quickfort = {'runner'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first)
+  quickfort = {'runner', 'player'}, order_top = {'runner'},  -- Run 11 siege 8: a seal's manager orders to the top (seal first); NEU1 P7 furniture.place
   orders_import = {'economy'}, orders = {'economy'}, workorder = {'economy', 'water', 'care', 'traps'},
-  order_suspend = {'economy'}, engrave_order = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy', 'water'},
+  order_suspend = {'economy'}, engrave_order = {'economy'}, kitchen_exclude = {'economy'}, appoint = {'economy'}, work_detail = {'economy', 'water', 'player'},
   stone_economic = {'economy'},                    -- BUG-648: clear the stone-use screen's economic mark of a building stone
   mat_refused = {'economy'},                       -- BUG-665: the game's verdict on a boulder material as non-economic hard stone (read only)
   kitchen_include = {'economy'},                   -- BUG-345: lift a Cook exclusion (seedwatch leftovers, D-09 in a famine)
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
   plant_gather = {'economy'}, plant_ungather = {'economy'}, work_detail_prune = {'economy'},
-  item_flag = {'care', 'water', 'economy', 'military', 'seal'}, zone_assign = {'care'},   -- BUG-651: seal keeps the last plug wall's block back
+  item_flag = {'care', 'water', 'economy', 'military', 'seal'}, zone_assign = {'care', 'player'},   -- BUG-651: seal keeps the last plug wall's block back
   tomb_zone = {'care'}, medic = {'care'}, hospital_post = {'care'},
   slab_place = {'care'},                           -- BUG-133: Build > Furniture > Slab with a ghost's engraved slab
   trade = {'trade'},
@@ -376,6 +392,7 @@ C.STATE_OWNERS = {
   ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot', ['water.*'] = 'water', ['stale.*'] = 'kern',
   ['traps.*'] = 'traps',
   ['cav.*'] = 'cavern',                            -- FR-98
+  ['emg'] = 'player',                              -- NEU1 P7: the open emergency exit
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -581,6 +598,7 @@ C.STATE_SPEC = obj({
              rot = obj(nil, {A = ROT_ONE, B = ROT_ONE, C = ROT_ONE})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}, {nb = arr(str(24), 0, 5), stale = NAT}),   -- BUG-534: wants no caravan ever had; BUG-642: stale Leaving caravans
   clock = obj({cap = NAT, orig = NAT, ts = int(-1, 1000), held = FLAG, why = str(24)}),
+  emg = obj({o = FLAG, why = str(60), left = NAT}),    -- NEU1 P7: the emergency exit while open (its causes, whole days left)
   alarm = obj({defcon = int(1, 5), unacked = NAT, last = NAT, ack = NAT, lock = FLAG, why = str(24)},
               {eta = int(-1), doors = NAT, dwait = NAT, dout = NAT, dref = NAT, far = NAT,
                -- BUG-035: the open recall: called, still out of rto, left since, cannot come
