@@ -2,10 +2,12 @@
 -- inspect verb (economy `inspect what=why`) and the stall events that carry its cause (brew_watch, fish_watch).
 -- Brew and fish stalls were "fixed" several times on guesses (BUG-716 'slower than the catch', BUG-767 'DF did not
 -- assign it (path or burrow?)'); these worlds give each real blocker once and check that it, and only it, is named.
--- The fake fields used here are the real DF 53 names (checked against hack/dfhack.dll strings): workshop_profile
--- permitted_workers / min_level / max_level / max_general_orders / blocked_labors, burrow flags.limit_workshops,
--- job job_items / items (job_item_idx), job_item item_type / vector_id / flags1.empty / flags1.unrotten /
--- has_material_reaction_product, manager_order status.validated / workshop_id / item_conditions, job.order_id.
+-- The fake fields used here follow DF 53 (names checked against hack/dfhack.dll strings, shapes against the DFHack scripts
+-- under hack/scripts and this repo's own readers): workshop_profile permitted_workers / min_level / max_level /
+-- max_general_orders / blocked_labors, burrow flags.limit_workshops, job.job_items as a job_item_vector struct with its
+-- list in `.elements` (BUG-817: the first fakes used a flat vector, a shape the game does not have), job.items
+-- (job_item_idx), job_item item_type / vector_id / flags1.empty / flags1.unrotten / has_material_reaction_product,
+-- manager_order status.validated / workshop_id / item_conditions, job.order_id.
 local T = require('testlib')
 local F = require('wp8_world')
 local kmock = require('dfllm.util.k_mock')
@@ -70,12 +72,12 @@ local function still(W, o)
   return b
 end
 
-local BREW_ITEMS = function()
-  return kmock.vec{
+local BREW_ITEMS = function()                   -- DF 53: job.job_items is a job_item_vector struct, the list in .elements
+  return {elements = kmock.vec{
     {item_type = df.item_type.PLANT, item_subtype = -1, mat_type = -1, mat_index = -1, quantity = 1, vector_id = -1,
      flags1 = {unrotten = true}, has_material_reaction_product = 'DRINK_MAT', reaction_class = ''},
     {item_type = -1, item_subtype = -1, mat_type = -1, mat_index = -1, quantity = 1, vector_id = df.items_other_id.FOOD_STORAGE,
-     flags1 = {empty = true}, has_material_reaction_product = '', reaction_class = ''}}
+     flags1 = {empty = true}, has_material_reaction_product = '', reaction_class = ''}}}
 end
 
 local function brew_job(W, b, o)
@@ -106,16 +108,22 @@ local JW = fresh('jobwhy')
 local function ask(W, key, ctx) return JW.find(W.K, key, ctx or {}) end
 
 T.test('NEU1 P8: an untaken brew job whose only brewers stand in burrows without the Still is named burrow, not "path or burrow?"', function()
-  local W = world{brewers = {1, 2, 3}}
+  local W = world{brewers = {1, 2, 3, 4}}
   local b = still(W)
   brew_job(W, b)
   plant(W); barrel(W)
   local bx = W.burrow('Farm', {0, 0, 100, 15, 15, 100})
-  for _, id in ipairs({1, 2}) do W.unit(id).burrows = kmock.vec{bx.id} end
-  W.unit(3).job = {current_job = {id = 9, job_type = df.job_type.Drink}}
+  W.unit(1).burrows = kmock.vec{bx.id}
+  for _, id in ipairs({2, 3, 4}) do W.unit(id).job = {current_job = {id = 9, job_type = df.job_type.Drink}} end
   local r = ask(W, 'ws:' .. b.id)
-  T.eq(r.cause, 'busy', 'one eligible holder is busy: busy comes first')
-  W.unit(3).status.labors[BREWER] = nil
+  T.eq(r.cause, 'busy', 'three of four holders are busy, one kept out: busy (they come free)')
+  T.ok(r.text:find('1 kept out by burrows', 1, true), 'the text names the burrow too: ' .. r.text)
+  W.unit(2).burrows = kmock.vec{bx.id}
+  W.unit(2).job = {current_job = nil}
+  r = ask(W, 'ws:' .. b.id)
+  T.eq(r.cause, 'burrow', 'half the holders kept out by burrows outranks the busy ones: ' .. r.text)
+  T.ok(r.text:find('2 busy', 1, true), r.text)
+  for _, id in ipairs({3, 4}) do W.unit(id).status.labors[BREWER] = nil end
   r = ask(W, 'brew')
   T.eq(r.cause, 'burrow', r.text)
   T.ok(r.text:find('2 BREWER holders: 2 kept out by burrows', 1, true), r.text)
@@ -290,6 +298,27 @@ T.test('NEU1 P8: keys: a bare id is an order, then a workshop, then a job; unkno
   T.eq(JW.data(r).kind, 'job')
 end)
 
+T.test('NEU1 P8 BUG-817: job_items unreadable (absent, erroring, a struct without its list): the cause stays unknown, no free-input claim', function()
+  local W = world{brewers = {1}}
+  local b = still(W)
+  local j = brew_job(W, b)
+  T.eq(ask(W, 'job:' .. j.id).cause, 'no_input', 'the .elements list is read: no plant, no barrel')
+  T.eq(#JW.job_items(j), 2)
+  for _, case in ipairs({'absent', 'erroring', 'struct'}) do
+    if case == 'absent' then j.job_items = nil
+    elseif case == 'erroring' then j.job_items = setmetatable({}, {__index = function() error('no field') end})
+    else j.job_items = setmetatable({flags = {}}, {__index = function(_, k) error('Cannot read field job_item_vector.' .. tostring(k)) end}) end
+    T.eq(JW.job_items(j), nil, case .. ': no list')
+    local r = ask(W, 'job:' .. j.id)
+    T.eq(r.cause, 'unknown', case .. ': ' .. r.text)
+    T.ok(r.text:find('its inputs not read', 1, true), r.text)
+    T.ok(not r.text:find('lie free', 1, true), case .. ': no claim on unread inputs: ' .. r.text)
+    T.eq(r.inputs, nil)
+  end
+  j.job_items = kmock.vec{}                        -- an old build: the vector itself (act.lua reads it so too)
+  T.eq(#JW.job_items(j), 0)
+end)
+
 -- economy: the inspect verb and the stall watches
 local function econ_world(o)
   local W = world(o)
@@ -361,7 +390,7 @@ T.test('NEU1 P8: a fish stall with a holder carries the real cause instead of "t
   fy.x1, fy.y1, fy.x2, fy.y2, fy.z = 30, 30, 32, 32, 100
   fy.profile = {max_general_orders = 10, permitted_workers = kmock.vec{}, min_level = 0, max_level = 3000}
   fy.jobs = kmock.vec{{id = 801, job_type = df.job_type.PrepareRawFish, mat_type = -1, mat_index = -1, flags = {}, _holder = fy,
-                       job_items = kmock.vec{}, items = kmock.vec{}}}
+                       job_items = {elements = kmock.vec{}}, items = kmock.vec{}}}
   W.unit(2).status.labors[CLEAN_FISH] = true
   W.unit(2)._m.avail = false
   local econ = require('dfllm.economy')
@@ -378,6 +407,55 @@ T.test('NEU1 P8: a fish stall with a holder carries the real cause instead of "t
   T.eq(ev[1].d.cause, 'busy')
   T.ok(ev[1].d.why:find('fish stall: busy: 1 CLEAN_FISH holder: 1 not looking for work', 1, true), ev[1].d.why)
   T.ok(not ev[1].msg:find('slower than the catch', 1, true), ev[1].msg)
+end)
+
+T.test('NEU1 P8 BUG-818: a "nojob" brew stall (the guess "DF counts items its own way") carries the order-level cause read before the cure', function()
+  local W = econ_world{brewers = {1}}
+  still(W)
+  plant(W); barrel(W)
+  W.act_result('order_remove', function(id)
+    local all = df.global.world.manager_orders.all
+    for i = #all - 1, 0, -1 do if all[i].id == id then all:erase(i); return true, 'removed' end end
+    return false, 'no order'
+  end)
+  local o = F.order(W, {job_type = df.job_type.CustomReaction, reaction_name = 'BREW_DRINK_FROM_PLANT', amount_left = 5, amount_total = 5,
+                        mat_type = -1, mat_index = -1, workshop_id = -1, item_conditions = kmock.vec{{}, {}}, status = {validated = true}})
+  local p = W.K.persist.get('m.economy')
+  p.orders = p.orders or {}
+  p.orders['dfllm:drink'] = o.id
+  local ev = brew_stall(W, 8)
+  T.eq(#ev, 1)
+  T.ok(ev[1].msg:find('the manager gave no Still a job', 1, true), 'the old cause is nojob: ' .. ev[1].msg)
+  local cured = false
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('1 brew order taken down', 1, true) then cured = true end end
+  T.ok(cured, 'the cure still runs')
+  T.eq(ev[1].d.cause, 'conditions', 'the query saw the order before it was taken down (not none_open)')
+  T.eq(#df.global.world.manager_orders.all, 0, 'the order is gone after the cure')
+  local found = false
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('jobwhy brew: order ' .. o.id, 1, true) then found = true end end
+  T.ok(found, 'kern.log carries the order-level query line')
+end)
+
+T.test('NEU1 P8: the fish stall asks before the labor cure: the cause is the state before the cure sets the labor', function()
+  local W = econ_world{brewers = {}}
+  local fy = F.workshop(W, 'Fishery')
+  fy.x1, fy.y1, fy.x2, fy.y2, fy.z = 30, 30, 32, 32, 100
+  fy.profile = {max_general_orders = 10, permitted_workers = kmock.vec{}, min_level = 0, max_level = 3000}
+  fy.jobs = kmock.vec{{id = 802, job_type = df.job_type.PrepareRawFish, mat_type = -1, mat_index = -1, flags = {}, _holder = fy,
+                       job_items = {elements = kmock.vec{}}, items = kmock.vec{}}}
+  local econ = require('dfllm.economy')
+  local set, old = {}, econ.fish_labor
+  econ.fish_labor = function() W.unit(1).status.labors[CLEAN_FISH] = true; set[#set + 1] = 1; return 'set', 1 end
+  local p = W.K.persist.get('m.economy')
+  p.orders = p.orders or {}
+  p.fishw = {base = 120, d = 9, day = 100}
+  econ.fish_watch(W.K, W.K.cfg.baseline.economy, {day = true, now = 101 * DAYT, p = p, inv = {fish_raw = 120}, f = {['workshop:Fishery'] = true}})
+  econ.fish_labor = old
+  local ev = {}
+  for _, e in ipairs(W.find_events('ORDER_STUCK')) do if tostring(e.msg):find('raw fish not cleaned', 1, true) then ev[#ev + 1] = e end end
+  T.eq(#ev, 1)
+  T.eq(#set, 1, 'the labor cure ran')
+  T.eq(ev[1].d.cause, 'no_labor', 'the cause is the state before the cure')
 end)
 
 T.done()

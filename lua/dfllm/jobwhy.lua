@@ -300,11 +300,14 @@ function J.worker_cause(w, labors)
   if not w then return nil end
   if w.n == 0 then return 'no_labor', string.format('nobody holds the %s labor', labor_names(labors)) end
   if w.free > 0 then return nil end
-  if (w.by.busy or 0) + (w.by.unavailable or 0) > 0 then return 'busy', J.workers_text(w, labors) end
   local best, bn = nil, 0
   for _, k in ipairs(J.BLOCK) do
     if (w.by[k] or 0) > bn then best, bn = k, w.by[k] end
   end
+  -- a structural blocker (profile, burrow, walk group, ...) that holds at least half the holders outranks busy: the holders
+  -- that are busy now come free, the ones kept out never do (the text lists both)
+  local nb = (w.by.busy or 0) + (w.by.unavailable or 0)
+  if nb > 0 and not (best and 2 * bn >= w.n) then return 'busy', J.workers_text(w, labors) end
   if best then return best, J.workers_text(w, labors) end
   return nil
 end
@@ -370,10 +373,26 @@ end
 local SKIP = {'garbage_collect', 'removed', 'in_building', 'construction', 'trader', 'hostile', 'spider_web'}
 
 -- the job items `job` still lacks: {{idx, what, need, match, free, forbid, claimed, far, container, approx, clipped}}; nil = unknown
+-- DF 50+ (53): job.job_items is a job_item_vector struct, the list is its `.elements` (act.lua, care.lua read it so too); an old
+-- build: the vector itself. A list that cannot be read is nil (unknown), never {} ("nothing missing" would be a claim on unread data).
+local function list_of(v)
+  if v == nil or type(v) == 'string' or type(v) == 'number' or type(v) == 'boolean' then return nil end
+  local out = {}
+  if not pcall(function() for _, x in ipairs(v) do out[#out + 1] = x end end) then return nil end
+  return out
+end
+function J.job_items(job)
+  local l = list_of(pget(function() return job.job_items.elements end))
+  if l == nil then
+    local v = pget(function() return job.job_items end)
+    if v ~= nil and pget(function() return v.elements end) == nil then l = list_of(v) end   -- a struct without a list is no list
+  end
+  return l
+end
+
 function J.inputs(K, job, s, ctx)
-  local jis = pget(function() return job.job_items end)
-  if jis == nil then return nil end
-  local list = each(jis)
+  local list = J.job_items(job)
+  if list == nil then return nil end
   local filled = {}
   for _, ref in ipairs(each(pget(function() return job.items end))) do
     local k = int(pget(function() return ref.job_item_idx end))
@@ -528,9 +547,15 @@ function J.job(K, j, ctx, s)
   elseif wc then r.cause, r.text = wc, wt .. (ic and ('; ' .. it) or '')
   elseif ic then r.cause, r.text = ic, it .. (wk and ('; ' .. J.workers_text(wk, labors)) or '')
   else
+    -- unknown: say only what was read (BUG-817: an unread job_items list once read as 'the inputs lie free')
+    local sure = ins ~= nil
+    for _, e in ipairs(ins or {}) do if e.unknown or e.clipped then sure = false end end
+    local who = not wk and 'the labor this job needs is not known'
+                or (wk.free or 0) > 0 and 'a free holder reaches it' or 'no holder is named as blocked'
+    local what = ins == nil and 'its inputs not read' or not sure and 'its inputs not fully read'
+                 or 'the inputs lie free: DF has not given it out (cooldown, path cost?)'
     r.cause = 'unknown'
-    r.text = (wk and 'a free holder reaches it and the inputs lie free: DF has not given it out (cooldown, path cost?)'
-              or 'the labor this job needs is not known') .. (#facts > 0 and ('; ' .. table.concat(facts, '; ')) or '')
+    r.text = who .. '; ' .. what .. (#facts > 0 and ('; ' .. table.concat(facts, '; ')) or '')
   end
   return r
 end

@@ -10965,6 +10965,14 @@ function M.brew_watch(K, c, r)
     K.persist.touch('m.economy')
   end
   if bw.told and r.now - (math.tointeger(bw.told) or 0) < M.BREW_STALL.again then return end
+  -- NEU1 P8 (BUG-818): what the game says about the stalled brews (jobwhy), asked BEFORE the cures below change the state it reads
+  -- (a 'nojob' cure takes the brew orders down: asked after it, the query only finds none open); a guessed cause takes its text
+  local jw = M.jw_ask(K, c, 'brew', true)
+  if jw then
+    K.log('info', 'jobwhy brew: %s', M.JW.line(jw):sub(1, 600))
+    if M.BREW_GUESS[id] and M.JW.proven(jw) then text = jw.cause .. ': ' .. tostring(jw.text) end
+    st.brewx.text, st.brewx.cause = text, jw.cause
+  end
   local act = {}
   if fix == 'profile' and still then
     local ok, how = K.act.ws_profile_open(still)
@@ -10991,13 +10999,6 @@ function M.brew_watch(K, c, r)
                     or 'the next brew orders have no item condition'
   end
   bw.told, bw.d = r.now, 0
-  -- NEU1 P8: what the game says about the stalled brews (jobwhy); a guessed cause takes the query's text, the cures above stay as they were
-  local jw = M.jw_ask(K, c, 'brew', true)
-  if jw then
-    K.log('info', 'jobwhy brew: %s', M.JW.line(jw):sub(1, 600))
-    if M.BREW_GUESS[id] and M.JW.proven(jw) then text = jw.cause .. ': ' .. tostring(jw.text) end
-    st.brewx.text, st.brewx.cause = text, jw.cause
-  end
   local msg = string.format('brewing stalled %d days: Still stands, %d plants, %d empty barrels, %d brews open: %s%s', need, plants, inv.barrels_empty or 0, b.left,
                             text, #act > 0 and ('; ' .. table.concat(act, '; ')) or '')
   K.log('warn', '%s', msg)
@@ -11416,6 +11417,9 @@ function M.fish_watch(K, c, r)
   local holder = M.labor_holder(K, 'CLEAN_FISH')
   local o = order_by_id(p.orders[F.tag or 'dfllm:fish'])
   local left = o and math.tointeger(o.amount_left) or nil
+  local due = r.now - (math.tointeger(fw.told) or -M.FISH_STALL.again) >= M.FISH_STALL.again
+  -- NEU1 P8: what the game says about the fish cleaning (jobwhy), asked before the labor cure below changes the holders it reads
+  local jw = due and M.jw_ask(K, c, 'fish', true) or nil
   local act = {}
   if not holder then
     local how, uid = M.fish_labor(K)
@@ -11428,10 +11432,9 @@ function M.fish_watch(K, c, r)
   local guess = #act == 0
   if guess then act[#act + 1] = 'the fishery is slower than the catch' end
   st.fishw = {d = fw.d, raw = raw, text = table.concat(act, '; '):sub(1, 100)}
-  if r.now - (math.tointeger(fw.told) or -M.FISH_STALL.again) >= M.FISH_STALL.again then
+  if due then
     fw.told = r.now
-    -- NEU1 P8: what the game says about the fish cleaning (jobwhy); it replaces the guess 'slower than the catch'
-    local jw = M.jw_ask(K, c, 'fish', true)
+    -- its cause replaces the guess 'slower than the catch'
     if jw then
       K.log('info', 'jobwhy fish: %s', M.JW.line(jw):sub(1, 600))
       if guess and M.JW.proven(jw) then act[1] = jw.cause .. ': ' .. tostring(jw.text) end
