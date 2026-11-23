@@ -1015,6 +1015,8 @@ T.test('BUG-054: hysteresis: the kernel\'s own additions leave one a run, carers
     W.unit(id).status.labors[FEED] = on
     return true, on and 'added' or 'removed'
   end)
+  W.K.cfg.baseline.water = W.K.cfg.baseline.water or {}
+  W.K.cfg.baseline.water.carers_standing = false                    -- the old rule (NEU1 P9: test_neu1_pflege.lua)
   day(W, 3)
   T.eq(M.kpi(W.K).carers, 4)
   local n = #details(W)

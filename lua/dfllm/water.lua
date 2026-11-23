@@ -140,6 +140,7 @@ M.DEFAULTS = {
   -- any patient (hysteresis). A patient over dying_thirst (60,000: death follows at ~75,000) is PATIENT_DYING (A), again
   -- only for news and not before dying_every ticks. carers_max 0 switches the scaling off.
   carers_per_patient = 1, carers_min = 2, carers_max = 8, carers_urgent = 2, carers_per_run = 2, carers_hold_days = 14,
+  carers_standing = true,                        -- NEU1 P9: carers_min caregivers while a hospital zone stands, patient or not
   dying_thirst = 60000, dying_every = 2 * DAY,
   -- BUG-104: a GiveWater job that stood open (no worker) this many days is "stuck" in the cause text
   give_stuck_days = 2,
@@ -3092,14 +3093,17 @@ function M.carers(K, c, r, p, now, over, far)
   p.cw = json.object(type(p.cw) == 'table' and p.cw or {})
   local np, have = #r.patients, #r.carers
   local want = 0
-  if np > 0 and c.carers_max > 0 then
+  -- NEU1 P9 (Run 16: patients died of thirst; the carriers came only after a patient lay in bed): while a hospital zone stands,
+  -- carers_min caregivers are a standing precondition (carers_standing), patient or not
+  local standing = c.carers_standing ~= false and #(r.hosp or {}) > 0
+  if (np > 0 or standing) and c.carers_max > 0 then
     want = math.max(c.carers_min, np * c.carers_per_patient)
     if over then want = want + c.carers_urgent end
     if far then want = want + (math.tointeger(c.carers_far) or 0) end        -- BUG-771: the water is far, the round trip is long
     want = math.min(want, c.carers_max)
   end
   local out = {have = have, want = want, idle = r.carers_idle, added = {}, dropped = {}}
-  if np > 0 then p.cw_t = now end
+  if np > 0 then p.cw_t = now end                                 -- the hold counts from the last patient
   local mine = 0
   for sid in pairs(p.cw) do                                       -- a unit that died or left is forgotten
     local u = df.unit.find(math.tointeger(tonumber(sid)) or -1)
@@ -3138,7 +3142,7 @@ function M.carers(K, c, r, p, now, over, far)
         end
       end
     end
-  elseif np == 0 and next(p.cw) and now - (math.tointeger(p.cw_t) or now) >= c.carers_hold_days * DAY then
+  elseif np == 0 and (not standing or have > want) and next(p.cw) and now - (math.tointeger(p.cw_t) or now) >= c.carers_hold_days * DAY then
     local sids = {}
     for sid in pairs(p.cw) do sids[#sids + 1] = sid end
     table.sort(sids)

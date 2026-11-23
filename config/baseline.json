@@ -330,7 +330,15 @@
   "death_recheck": 100800,
   "death_thirst": 50000,
   "death_hunger": 75000,
-  "death_reports": 400
+  "death_reports": 400,
+  "hosp_min": true,
+  "mem_early": true,
+  "mem_wait_days": 7,
+  "coffin_stone_first": true,
+  "coffin_spare": 3,
+  "mood_contain": true,
+  "mood_contain_days": 3,
+  "mood_contain_max": 200
  },
  "water": {
   "patient_thirst": 25000,
@@ -343,6 +351,7 @@
   "carers_far": 2,
   "carers_per_run": 2,
   "carers_hold_days": 14,
+  "carers_standing": true,
   "dying_thirst": 60000,
   "dying_every": 2400,
   "give_stuck_days": 2,

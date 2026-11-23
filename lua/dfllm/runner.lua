@@ -878,8 +878,10 @@ Q.DOOR_KEEP = {seal = true, plug = true, repair = true}
 -- planned one nobody can build yet is not awaited, a missing one (quickfort refused it, its tile is empty) does not count as lost; the
 -- rest of the room is built and the project is done. The bench stays on the map where it was placed and DF builds it once a mechanism
 -- exists. Keys of the stage's cells (the build key of the template: R = traction bench).
-Q.OPTIONAL = {hospital = {R = true}}
-Q.OPT_TYPE = {hospital = {TractionBench = true}}
+-- NEU1 P9 (docs/v2/NEU1-pflege.md): a hospital is its zone and ONE bed; the table, the chests and the well are upgrades too (h = chest,
+-- t = table, l = well), never awaited
+Q.OPTIONAL = {hospital = {R = true, h = true, t = true, l = true}}
+Q.OPT_TYPE = {hospital = {TractionBench = true, Box = true, Table = true, Well = true}}
 function Q.optional_missing(K, P, d)
   local opt = Q.OPTIONAL[P.tpl]
   local st = opt and d and d.stages and d.stages[P.stage + 1]

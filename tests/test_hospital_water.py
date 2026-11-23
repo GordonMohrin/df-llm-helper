@@ -87,7 +87,7 @@ def test_water_config_mirrors_water_lua_and_validates(tmp_path):
     assert cfg["water"] == {"patient_thirst": 25000, "hosp_remove": True, "remove_per_run": 8,
                             # BUG-054: the caregivers' scaling and the death-risk line
                             "carers_per_patient": 1, "carers_min": 2, "carers_max": 8, "carers_urgent": 2, "carers_far": 2,
-                            "carers_per_run": 2, "carers_hold_days": 14, "dying_thirst": 60000,
+                            "carers_per_run": 2, "carers_hold_days": 14, "carers_standing": True, "dying_thirst": 60000,
                             "dying_every": 2400,
                             "give_stuck_days": 2,
                             "restale": True, "restale_every": 2400, "restale_max": 2}   # BUG-383; audit I4: the file carries every first-pass key; BUG-104

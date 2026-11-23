@@ -111,7 +111,7 @@ local function world(o)
       if o.setup then o.setup(W) end
       df.global.building_next_id = #df.global.world.buildings.all + 1
     end}
-  W.K.cfg.baseline.care = o.care
+  W.K.cfg.baseline.care = CW.legacy_coffins(o.care)
   return W, Cm
 end
 
@@ -450,7 +450,7 @@ local function stale_scene(o)
   local mo = df.global.world.manager_orders
   for i = #mo.all - 1, 0, -1 do mo.all:erase(i) end                 -- the order vanished
   for _ = 1, 13 do F.item(W, 'COFFIN', {_pos = {30, 30, 5}}) end    -- coffins stand in stock, unused
-  W.K.cfg.baseline.care = {coffin_reserve = 20}                      -- more wanted: short 10
+  W.K.cfg.baseline.care = CW.legacy_coffins({coffin_reserve = 20})   -- more wanted: short 10
   return W, P
 end
 
@@ -558,6 +558,24 @@ T.test('BUG-126: a rock order that cannot run is shown as stuck and the coffins 
   T.ok(r.msg:find('4 stuck', 1, true), r.msg)
   T.eq(r.data.prov.stuck, 4)
   T.eq(coffin_orders(W), {{11, 'wood', 'dfllm:coffin'}})
+end)
+
+T.test('NEU1 P9: stone first (13 short, 30 hard stone, 25 logs: all in rock); spare stone coffins in stock with nobody waiting', function()
+  local W = world{floor = {}, carpenters = true, census_i = {rock = 30, wood = 25}, care = {coffin_stone_first = true, coffin_spare = 0},
+                  setup = function(W) for _, id in ipairs({4, 5, 6}) do dead(W, id); corpse(W, id) end end}
+  W.run(300)
+  T.eq(coffin_orders(W), {{13, 'INORGANIC', 'dfllm:coffin'}}, 'the logs stay for beds, buckets and doors')
+  -- nobody dead, free coffins enough (10 tombs = the reserve): only the spare 3 in stone, once
+  local W2 = world{care = {coffin_stone_first = true, coffin_spare = 3},
+                   setup = function(W) for i = 1, 10 do CW.tomb(W, 40 + i, 10, 5) end end}
+  W2.run(120)
+  T.eq(coffin_orders(W2), {{3, 'INORGANIC', 'dfllm:coffin'}})
+  CW.day(W2, 2)
+  T.eq(#coffin_orders(W2), 1, 'the open order covers them')
+  local W3 = world{care = {coffin_stone_first = true, coffin_spare = 3}, census_i = {rock = 0, wood = 40},
+                   setup = function(W) for i = 1, 10 do CW.tomb(W, 40 + i, 10, 5) end end}
+  W3.run(120)
+  T.eq(coffin_orders(W3), {}, 'no hard stone: no spare (never in wood)')
 end)
 
 T.done()

@@ -163,6 +163,13 @@ M.DEFAULTS = {
   coffin_stale = 15 * DAY,                         -- BUG-126: a coffin project without progress this long (PEACE) is dropped
   death_window = 33600, death_same = 2, death_any = 3, death_every = 1200, death_recheck = 100800,
   death_thirst = 50000, death_hunger = 75000, death_reports = 400,
+  -- NEU1 P9 (docs/v2/NEU1-pflege.md): hosp_min = a 1x1 hospital zone over one free bed near accepted water when no hospital
+  -- zone holds a bed (care.HM), and the standing preconditions in state care.hosp; mem_early = a memorial slab before the ghost for
+  -- a dead citizen whose body is missing or in another walk group, or who lies mem_wait_days without a coffin; coffin_stone_first =
+  -- stone coffins before wood, coffin_spare finished stone coffins kept in stock; mood_contain = the doors of a failing mood's
+  -- room locked mood_contain_days before insanity (or while he is berserk), mood_contain_max tiles read for the room at most
+  hosp_min = true, mem_early = true, mem_wait_days = 7, coffin_stone_first = true, coffin_spare = 3,
+  mood_contain = true, mood_contain_days = 3, mood_contain_max = 200,
 }
 -- the doctor labors (act.medic switches the same three) and the hospital posts (df.occupation_type names)
 M.MEDIC = {'DIAGNOSE', 'SURGERY', 'BONE_SETTING'}
@@ -220,7 +227,7 @@ local function pstate(K)
     p = {v = 2, dead = {}, deaths = {}, petitions = {}}
     K.persist.set('m.care', p)
   end
-  for _, k in ipairs({'moods', 'captives', 'corpses', 'burial', 'nook'}) do
+  for _, k in ipairs({'moods', 'captives', 'corpses', 'burial', 'nook', 'cont'}) do     -- cont: NEU1 P9, the locked mood rooms
     p[k] = json.object(type(p[k]) == 'table' and p[k] or {})
   end
   for _, rec in pairs(p.moods) do rec.needs = json.object(type(rec.needs) == 'table' and rec.needs or {}) end
@@ -752,6 +759,8 @@ function M.mood_emergency(K, c, p, u, rec, kind, job, ws)
   local name = MD.short_name(uname(u))
   local line = MD.line{name = name, unit = u.id, kind = kind, sl = open_slots(job, rec), miss = miss, ws = ws, shop = shop,
                        left = left, src = lsrc}
+  local okct, errct = pcall(M.CT.step, K, c, p, u, rec, kind, ws, job, miss, left)       -- NEU1 P9 (E8): contain, not rescue
+  if not okct then K.log('warn', 'care mood contain %s: %s', sid, tostring(errct)) end
   local reasons = MD.reasons(c, {now = now, ws = ws, shop = shop, left = left, nosrc = rec.nosrc, since = rec.since,
                                  far = rec.far,
                                  unres_since = type(rec.unres) == 'table' and math.tointeger(rec.unres.since) or nil})
@@ -890,8 +899,9 @@ function M.mood_deadline(K, c, u, rec, kind, name, days, reasons, miss, types, w
     local okh, hint, impossible = K.call('economy', 'mood_hint', cls)
     if okh and impossible == true and type(hint) == 'string' and #imp < 3 then imp[#imp + 1] = trunc(cls .. ': ' .. hint, 160) end
   end
-  local q = string.format('%s %s: %d d to insanity, still short: %s; if it fails he turns on others: send these, the squad is the last line',
-                          M.MD.short_name(name), kind or '?', days, table.concat(lack, ', '))
+  local q = string.format('%s %s: %d d to insanity, still short: %s; if it fails he turns on others: send these (care locks his room %d d before)',
+                          M.MD.short_name(name), kind or '?', days, table.concat(lack, ', '),
+                          math.tointeger(tonumber(c.mood_contain_days)) or 3)
   if #imp > 0 then q = string.format('%s %s: %d d, IMPOSSIBLE here: %s', M.MD.short_name(name), kind or '?', days, imp[1]) end
   K.emit('DECISION_NEEDED', 'A', trunc('strange mood deadline: ' .. q, 200),
          {id = 'mood_deadline', q = trunc(q, 200), cmds = #cmds > 0 and cmds or nil, opts = #opts > 0 and opts or nil,
@@ -1177,11 +1187,13 @@ local function phase_units(K, c, r, p)
   end
   if r.idx < #r.ids then return false end
   -- moods that ended (mood cleared, failed into insanity, or the unit died)
+  local berserk = {}
   for sid, rec in pairs(p.moods) do
     if not r.moody[sid] then
       local u = df.unit.find(math.tointeger(tonumber(sid)))
       local mood = u and df.mood_type[u.mood]
       local alive = u and not dfhack.units.isDead(u)
+      if alive and mood == 'Berserk' then berserk[#berserk + 1] = u end       -- NEU1 P9: contained where he stands
       if not (alive and M.STRANGE[mood]) then
         local ok = (alive and not M.FAILED[mood]) and 1 or 0
         p.moods[sid] = nil
@@ -1194,6 +1206,8 @@ local function phase_units(K, c, r, p)
       end
     end
   end
+  local okct, errct = pcall(M.CT.after, K, c, p, berserk)          -- NEU1 P9: berserk contained, released rooms unlocked
+  if not okct then K.log('warn', 'care mood contain: %s', tostring(errct)) end
   return true
 end
 
@@ -2766,15 +2780,31 @@ local function coffin_order(K, c, r, p, q, cs)
   local items = math.max(0, math.min(q.want - q.free - q.idle, q.planned + extra))
   local make = math.min(c.coffin_batch, math.max(0, items - q.stock - q.order))
   q.items, q.make = items, make
-  if make <= 0 then return end
+  -- NEU1 P9 (Run 16a i1: 74 bodies no_coffin, ghosts 42): coffin_spare finished coffins in stock ahead of the deaths, in stone only
+  -- (a mason and hard stone beyond what the open rock orders and this run's need take; logs stay for beds, buckets and doors)
+  local spare = 0
+  if (num(c.coffin_spare) or 0) > 0 and q.masons then
+    spare = math.max(0, math.min(num(c.coffin_spare) - q.stock - q.order - make, q.stone - q.order_by.rock - make))
+  end
+  if make <= 0 and spare <= 0 then return end
   -- the boulders and logs the open coffin orders will take are spoken for; wood first (beyond the keep), then hard stone
   -- BUG-466 (Run 16d i4 Mazelanterns: 17 ghosts, 95 bodies without a coffin, no stone: the 20 logs kept for the economy stayed unspent):
   -- a fort with no hard stone and bodies lying about spends the logs down to coffin_wood_floor
   local keep = c.coffin_wood_keep
   if q.stone <= 0 and q.open > 0 then keep = math.min(keep, c.coffin_wood_floor or 5) end
-  local wood = q.carp and math.max(0, math.min(make, q.wood - keep - q.order_by.wood)) or 0
-  local rock = q.masons and math.max(0, math.min(make - wood, q.stone - q.order_by.rock)) or 0
+  local wood, rock
+  if c.coffin_stone_first ~= false then
+    -- NEU1 P9: stone first (a slab and a coffin are what stone buys; logs are the scarcer stuff of beds, buckets and doors), the
+    -- rest in wood beyond the keep
+    rock = q.masons and math.max(0, math.min(make, q.stone - q.order_by.rock)) or 0
+    wood = q.carp and math.max(0, math.min(make - rock, q.wood - keep - q.order_by.wood)) or 0
+  else
+    wood = q.carp and math.max(0, math.min(make, q.wood - keep - q.order_by.wood)) or 0
+    rock = q.masons and math.max(0, math.min(make - wood, q.stone - q.order_by.rock)) or 0
+  end
   q.missing = make - rock - wood
+  rock = rock + spare
+  q.spare = spare > 0 and spare or nil
   -- BUG-466: the caravans bring what the coffins lack (economy.supply_wants reads M.coffin_wants)
   M.cof_miss = q.missing > 0 and {n = q.missing, carp = q.carp == true, masons = q.masons == true, wood = q.wood, stone = q.stone,
                                   open = q.open} or nil
@@ -2799,8 +2829,13 @@ local function coffin_order(K, c, r, p, q, cs)
   end
   -- the game takes wood as a material_category; stone only as `material` (any rock, mat_type 0): material_category has
   -- no stone bit ("Invalid material_category value for manager order: stone")
-  order(wood, {material_category = {'wood'}}, 'wood')
-  order(rock, {material = 'INORGANIC'}, 'rock')
+  if c.coffin_stone_first ~= false then
+    order(rock, {material = 'INORGANIC'}, 'rock')
+    order(wood, {material_category = {'wood'}}, 'wood')
+  else
+    order(wood, {material_category = {'wood'}}, 'wood')
+    order(rock, {material = 'INORGANIC'}, 'rock')
+  end
   if #mats > 0 then p.cof.mat = table.concat(mats, '+') end
 end
 
@@ -3174,6 +3209,39 @@ function MEM.unreach(r)
   return out
 end
 
+-- NEU1 P9 (Run 16a i1 Basementflew y548-y557: ghosts 14 -> 42, 74 bodies 'no_coffin' for want of wood; a slab is stone only and
+-- lays a ghost to rest as a coffin does): mem_early gives a memorial slab BEFORE the ghost, as BUG-518 does for the bodies nobody can
+-- path to, also to the dead citizens with a historical figure (the incident discovered) whose body lies in another walk group
+-- (corpse_far: no coffin helps), whose body was not found mem_wait_days after the death (no_body: eaten, burnt, lost; deaths of the
+-- last season) or who have lain mem_wait_days unburied for want of a coffin, a zone or a free tomb (no_coffin, no_zone, zone_locked).
+-- The same way as the ghosts: care.unreach_ids -> economy orders the blank slab and the engraving -> care places it. Sorted ids.
+function MEM.early(K, c, r, p, now)
+  local out, seen = {}, {}
+  if c.mem_early == false then return out end
+  local wait = (num(c.mem_wait_days) or 7) * DAY
+  local function add(uid)
+    if not uid or seen[uid] then return end
+    seen[uid] = true
+    local u = df.unit.find(uid)
+    if u and (num(u.hist_figure_id) or -1) >= 0 and not undiscovered(uid) then out[#out + 1] = uid end
+  end
+  for uid in pairs(r.far or {}) do add(uid) end
+  local WAIT_CAUSE = {no_coffin = true, no_zone = true, zone_locked = true}
+  for sid, t0 in pairs(p.corpses or {}) do
+    local uid = num(tonumber(sid))
+    local cs = uid and r.causes and r.causes[uid]
+    if cs and now - (num(t0) or now) >= wait then
+      for _, k in ipairs(cs) do if WAIT_CAUSE[k] then add(uid); break end end
+    end
+  end
+  for _, e in ipairs(type(p.died) == 'table' and p.died or {}) do
+    local uid = type(e) == 'table' and num(e.u) or nil
+    if uid and now - (num(e.t) or now) >= wait and not r.bodies[uid] and not r.held_by[uid] then add(uid) end
+  end
+  table.sort(out)
+  return out
+end
+
 local function phase_memorials_run(K, c, r, p)
   local now = K.now().tick
   local mem = {by = {}, n = {}}
@@ -3182,9 +3250,14 @@ local function phase_memorials_run(K, c, r, p)
   local ids = MEM.ghosts(K, p, now)
   local unr = MEM.unreach(r)
   st.unr_ids = unr
-  local have = {}
+  local have, want = {}, {}
   for _, id in ipairs(ids) do have[id] = true end
-  for _, id in ipairs(unr) do if not have[id] then ids[#ids + 1] = id end end
+  for _, id in ipairs(unr) do if not have[id] then ids[#ids + 1] = id end; have[id] = true; want[#want + 1] = id end
+  for _, id in ipairs(MEM.early(K, c, r, p, now)) do       -- NEU1 P9: the slab before the ghost (a ghost is census.g's)
+    if not have[id] then ids[#ids + 1] = id; have[id] = true; want[#want + 1] = id end
+  end
+  table.sort(want)
+  st.mem_ids = want
   local ukey = table.concat(unr, ',')
   if ukey ~= '' and ukey ~= p.unr_key then
     p.unr_key = ukey
@@ -4415,7 +4488,269 @@ end
 -- needs after corpses and zones (citizen remains, coffins), the reserve after the needs (moods first)
 -- tombs after corpses and zones (bodies, interments), doctors after the units (moods, patients)
 -- coffins last: its space search reads tiles over several frames and must not hold up the moods
-local PHASES = {phase_units, phase_doctors, phase_corpses, phase_zones, phase_tombs, phase_memorials, phase_captives,
+---------------------------------------------------------------- NEU1 P9: the hospital minimum (docs/v2/NEU1-pflege.md)
+-- Run 16a i1 Basementflew y423-y558: no hospital for 135 years; every `bp.place hospital` (4 beds, bench, table, chests, its own
+-- well) ended build_lost, and the zone came last, so a missing piece meant no hospital at all, while beds stood in the fort and
+-- patients died of thirst. The rule now: a hospital is a hospital zone over ONE bed with accepted water near it (water.near, the
+-- measure water.served and remove_dry use, so the zone is never taken away again as dry). While no hospital zone holds a bed,
+-- care draws a 1x1 hospital zone (act.hospital_zone) over the free bed nearest accepted water: built, in no hospital zone, in no
+-- bedroom zone with an owner, on the citizens' walk group. At most one try a day. Fail closed: no accepted water known (water has
+-- not run or does not answer), no bed that qualifies: no zone, the gap is named. The standing preconditions of the hospital
+-- (state care.hosp, HOSPITAL_MIN B on change): no_zone, no_bed (a zone without a bed), no_water (no accepted source within near of
+-- the zone's bed), no_bucket (water: no free bucket), no_carer (water: nobody holds the caregiver labor), unknown (water has no run
+-- yet). Table, traction bench, chests, soap are upgrades of the bp template and never block the zone.
+M.HM = {GAPS = {'no_zone', 'no_bed', 'no_water', 'no_bucket', 'no_carer', 'unknown'}}
+
+-- the hospital zone (id) and the owned bedroom over a tile
+function M.HM.zones_at(x, y, z, hz)
+  local out = {}
+  local ok, zs = pcall(dfhack.buildings.findCivzonesAt, {x = x, y = y, z = z})      -- Lua API.txt:2488
+  local bedroom = df.civzone_type and df.civzone_type.Bedroom
+  for _, zn in ipairs(ok and zs or {}) do
+    if hz[zn.id] then out.hosp = zn.id end
+    if bedroom ~= nil and zn.type == bedroom and (num(zn.assigned_unit_id) or -1) >= 0 then out.owned = true end
+  end
+  return out
+end
+
+-- accepted water near a tile: d (Chebyshev, z included) to the nearest accepted source (-1: water knows none) and water's near;
+-- nil, nil while water does not answer
+function M.HM.water(K, x, y, z)
+  local okc, wc = K.call('water', 'conf')
+  local near = okc and type(wc) == 'table' and num(wc.near) or nil
+  if not near then return nil, nil end
+  local okk, kpi = K.call('water', 'kpi')
+  if not (okk and type(kpi) == 'table') then return nil, near end   -- no water run yet: nothing judged
+  local ok, d = K.call('water', 'src_dist', x, y, z)
+  if not ok then return nil, near end
+  return type(d) == 'table' and num(d.d) or -1, near
+end
+
+-- the hospital zones, the bed one of them holds (ready) and the free beds (candidates for a new zone)
+function M.HM.scan()
+  local hz, nz = {}, 0
+  for _, zn in ipairs(vec(hospital_zones)) do hz[zn.id], nz = true, nz + 1 end
+  local ready, free = nil, {}
+  for _, b in ipairs(vec(function() return df.global.world.buildings.other.BED end)) do
+    if built(b) then
+      local x, y, z = num(b.x1), num(b.y1), num(b.z)
+      if x and y and z then
+        local za = M.HM.zones_at(x, y, z, hz)
+        if za.hosp then ready = ready or {zone = za.hosp, bed = b.id, x = x, y = y, z = z}
+        elseif not za.owned then free[#free + 1] = {bed = b.id, x = x, y = y, z = z} end
+      end
+    end
+  end
+  return nz, ready, free
+end
+
+-- one free bed: the nearest to accepted water within near, on the citizens' walk group (nil, why)
+function M.HM.pick(K, free)
+  local cu = K.census.u
+  local anchor = unit_pos(df.unit.find(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids[1] or -1))
+  local best, why = nil, #free == 0 and 'no free bed (every bed is in a hospital zone or an owned bedroom, or none stands)' or nil
+  for _, b in ipairs(free) do
+    local d, near = M.HM.water(K, b.x, b.y, b.z)
+    if not near or not d then why = why or 'water has not judged the sources yet'
+    elseif d < 0 then why = 'no accepted water in the fort'
+    elseif d > near then why = why or string.format('no free bed within %d tiles of accepted water (bed %d: %d)', near, b.bed, d)
+    elseif not reach_ok(K, {x = b.x, y = b.y, z = b.z}, anchor) then why = why or string.format('bed %d: off the walk group', b.bed)
+    elseif not best or d < best.d or (d == best.d and b.bed < best.bed) then best = {bed = b.bed, x = b.x, y = b.y, z = b.z, d = d} end
+  end
+  return best, best == nil and why or nil
+end
+
+-- the contract lets care call this act (feature detection: an older contract has no such owner)
+function M.can_act(fn)
+  for _, o in ipairs(C.ACT[fn] or {}) do if o == 'care' then return true end end
+  return false
+end
+
+function M.HM.phase(K, c, r, p)
+  if c.hosp_min == false then st.hosp = nil; return true end
+  local ok, err = pcall(function()
+    local now = K.now().tick
+    p.hm = json.object(type(p.hm) == 'table' and p.hm or {})
+    local hm = p.hm
+    local nz, ready, free = M.HM.scan()
+    local made
+    if not ready and now - (num(hm.t) or -DAY) >= DAY and M.can_act('hospital_zone') then
+      hm.t = now
+      local b, why = M.HM.pick(K, free)
+      if b then
+        local okz, res = K.act.hospital_zone({x = b.x, y = b.y, z = b.z})
+        if okz then
+          local zid = type(res) == 'table' and type(res.ids) == 'table' and num(res.ids[1]) or nil
+          ready, made = {zone = zid or -1, bed = b.bed, x = b.x, y = b.y, z = b.z}, b
+          hm.zone, hm.bed, hm.why = zid, b.bed, nil
+          K.log('warn', 'care: hospital zone %s drawn over bed %d at %d,%d,%d (accepted water %d tiles; NEU1 P9)', tostring(zid),
+                b.bed, b.x, b.y, b.z, b.d)
+        else hm.why = trunc('hospital_zone refused: ' .. tostring(res), 80) end
+      else hm.why = trunc(why or '?', 80) end
+    end
+    local gaps = {}
+    local okw, kpi = K.call('water', 'kpi')
+    kpi = okw and type(kpi) == 'table' and kpi or nil
+    if not ready then gaps[#gaps + 1] = nz > 0 and 'no_bed' or 'no_zone'
+    else
+      local d, near = M.HM.water(K, ready.x, ready.y, ready.z)
+      if not near or not d or d < 0 or d > near then gaps[#gaps + 1] = 'no_water' end
+    end
+    if not kpi then gaps[#gaps + 1] = 'unknown'
+    else
+      if (num(kpi.buckets_free) or 0) <= 0 then gaps[#gaps + 1] = 'no_bucket' end
+      if (num(kpi.carers) or 0) <= 0 then gaps[#gaps + 1] = 'no_carer' end
+    end
+    st.hosp = {ok = #gaps == 0 and 1 or 0, gaps = gaps, zone = ready and ready.zone >= 0 and ready.zone or nil,
+               bed = ready and ready.bed or nil, why = not ready and hm.why or nil}
+    local key = table.concat(gaps, ',')
+    local pat = kpi and num(kpi.patients) or nil
+    if made then
+      K.emit('HOSPITAL_MIN', 'B', trunc(string.format('hospital: zone %s over bed %d at %d,%d,%d, accepted water %d tiles%s',
+                                                      tostring(ready.zone), made.bed, made.x, made.y, made.z, made.d,
+                                                      #gaps > 0 and ('; still missing ' .. key) or ''), 200),
+             {op = 'zone', ok = #gaps == 0 and 1 or 0, gaps = gaps, zone = ready.zone >= 0 and ready.zone or nil, bed = made.bed,
+              pos = {made.x, made.y, made.z}, d = made.d, patients = pat})
+    elseif key ~= (hm.key or '') then
+      K.emit('HOSPITAL_MIN', 'B', trunc(#gaps == 0 and 'hospital: zone, bed, water, bucket and caregiver stand'
+                                        or ('hospital: missing ' .. key .. (hm.why and not ready and ('; ' .. hm.why) or '')), 200),
+             {op = 'gaps', ok = #gaps == 0 and 1 or 0, gaps = gaps, zone = st.hosp.zone, bed = st.hosp.bed, patients = pat})
+    end
+    hm.key = key
+  end)
+  if not ok then K.log('warn', 'care hospital minimum: %s', tostring(err)) end
+  return true
+end
+
+---------------------------------------------------------------- NEU1 P9 (E8): contain a failing mood instead of rescuing it
+-- Run 16c i3 / 16d i4: 9 and 24 strange-mood dwarves died of thirst at their shops, failed moods went berserk and killed others;
+-- MOOD_RISK, MOOD_CRITICAL, mood_thirst and mood_deadline said a lot, and mood_deadline itself said 'no verb confines one dwarf'.
+-- The report stays as it is (the missing class read from the mood job's own filters, the cheap supply ways: caravans, the shop
+-- request, the stone dig, the webs). New, and nothing more: when the dwarf has claimed a workshop, a material is still missing and
+-- DF's insanity line is mood_contain_days away or less, care locks the room round the shop (the doors forbidden and closed,
+-- act.door_forbid), so that a berserk or raving dwarf harms nobody. Only a closed room: a flood fill on the shop's level over
+-- walkable tiles from the shop's tiles, walls and doors stop it; a stair, ramp, hatch, open air, deep water, magma, a hidden tile
+-- or more than mood_contain_max tiles mean it is not closed (MOOD_CONTAIN op=open, why; nothing is locked, nothing is walled). A
+-- citizen inside other than the dwarf: op=busy, tried again a day later; the dwarf himself outside the room: the same. A room
+-- with no door: op=sealed. A dwarf who leaves the mood berserk is contained the same way round where he stands. The doors care
+-- locked (and only those that were not forbidden before) are unlocked once the dwarf is dead or neither in a mood nor berserk
+-- (op=released). p.cont[sid] = {d = {{door id, old}}, t}.
+M.CT = {WALL = {['#'] = true, S = true, C = true, F = true, T = true, B = true, H = true},
+        LEAK = {['<'] = 'stair', ['>'] = 'stair', X = 'stair', r = 'ramp', v = 'ramp', _ = 'open air', ['~'] = 'deep water',
+                ['%'] = 'magma'}}
+
+-- the closed room round a box {x1, y1, x2, y2, z}: {doors = {{x, y, z}}, seen = {key3 = true}, n = tiles}, or nil, why
+function M.CT.room(K, box, max)
+  local z, seen, queue, doors = box.z, {}, {}, {}
+  for x = box.x1, box.x2 do
+    for y = box.y1, box.y2 do seen[key3(x, y, z)] = true; queue[#queue + 1] = {x, y} end
+  end
+  local head = 1
+  while head <= #queue do
+    local q = queue[head]
+    head = head + 1
+    if head - 1 > max then return nil, string.format('more than %d tiles', max) end
+    for dy = -1, 1 do
+      for dx = -1, 1 do
+        local x, y = q[1] + dx, q[2] + dy
+        local k = key3(x, y, z)
+        if not seen[k] then
+          seen[k] = true
+          local ok, t = K.call('snapshot', 'tile', x, y, z)
+          if not ok then return nil, 'no tile reader' end
+          if type(t) ~= 'table' then return nil, string.format('hidden tile %d,%d,%d', x, y, z) end
+          local leak = M.CT.LEAK[t.c] or (t.bld == 'Hatch' and 'hatch') or nil
+          if t.bld == 'Door' then doors[#doors + 1] = {x, y, z}
+          elseif leak then return nil, string.format('%s at %d,%d,%d', leak, x, y, z)
+          elseif not M.CT.WALL[t.c] then queue[#queue + 1] = {x, y} end
+        end
+      end
+    end
+  end
+  return {doors = doors, seen = seen, n = #queue}
+end
+
+-- lock the room round `box` for unit u (sid); returns op ('locked', 'sealed', 'open', 'busy'), why, the door ids
+function M.CT.lock(K, c, p, u, box, left, kind)
+  local sid = fmt(u.id)
+  local rm, why = M.CT.room(K, box, num(c.mood_contain_max) or 200)
+  local op, ids = nil, {}
+  if not rm then op = 'open'
+  else
+    local up = unit_pos(u)
+    if not (up and up.z == box.z and rm.seen[key3(up.x, up.y, up.z)]) then op, why = 'busy', 'the dwarf is outside the room' end
+    local cu = K.census.u
+    for _, id in ipairs(op == nil and type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+      local o = id ~= u.id and unit_pos(df.unit.find(id)) or nil
+      if o and o.z == box.z and rm.seen[key3(o.x, o.y, o.z)] then op, why = 'busy', string.format('citizen %d is inside', id); break end
+    end
+    if op == nil and #rm.doors == 0 then op, why = 'sealed', 'a closed room with no door' end
+    if op == nil then
+      local rec = {d = {}, t = K.now().tick}
+      for _, d in ipairs(rm.doors) do
+        local okb, b = pcall(dfhack.buildings.findAtTile, d[1], d[2], d[3])      -- Lua API.txt:2484
+        local bid = okb and b and num(b.id) or nil
+        if bid then
+          local okf, old = K.act.door_forbid(bid, true, true)
+          if okf then rec.d[#rec.d + 1] = {bid, old == true}; ids[#ids + 1] = bid end
+        end
+      end
+      if #ids == 0 then op, why = 'open', 'no door could be locked' else op = 'locked'; p.cont[sid] = rec end
+    end
+  end
+  K.emit('MOOD_CONTAIN', 'B', trunc(string.format('mood unit %d (%s): room %s%s%s', u.id, kind or '?', op,
+                                                  #ids > 0 and (' (doors ' .. table.concat(ids, ',') .. ')') or '',
+                                                  why and (': ' .. why) or ''), 200),
+         {unit = u.id, op = op, doors = #ids > 0 and ids or nil, why = why and trunc(why, 120) or nil, left = left, kind = kind,
+          pos = {box.x1, box.y1, box.z}, n = rm and rm.n or nil})
+  return op
+end
+
+-- a strange mood (from M.mood_emergency): contain once a material is missing and insanity is mood_contain_days away
+function M.CT.step(K, c, p, u, rec, kind, ws, job, miss, left)
+  if c.mood_contain == false or not ws or #(miss or {}) == 0 or not left then return end
+  local sid = fmt(u.id)
+  if p.cont[sid] then return end
+  local days = left // DAY
+  if days > (num(c.mood_contain_days) or 3) then return end
+  local now = K.now().tick
+  if now - (num(rec.ct) or -DAY) < DAY then return end
+  rec.ct = now
+  local box
+  pcall(function()
+    local b = dfhack.job.getHolder(job)
+    box = {x1 = num(b.x1), y1 = num(b.y1), x2 = num(b.x2), y2 = num(b.y2), z = num(b.z)}
+  end)
+  if not (box and box.x1 and box.y1 and box.x2 and box.y2 and box.z) then return end
+  M.CT.lock(K, c, p, u, box, days, kind)
+end
+
+-- after the moods were looked at: a dwarf who left his mood berserk is contained where he stands; the rooms of the dwarves dead or
+-- out of both are unlocked (only the doors care locked, only those that were open before)
+function M.CT.after(K, c, p, berserk)
+  for _, u in ipairs(berserk or {}) do
+    local pos = unit_pos(u)
+    if c.mood_contain ~= false and pos and not p.cont[fmt(u.id)] then
+      M.CT.lock(K, c, p, u, {x1 = pos.x, y1 = pos.y, x2 = pos.x, y2 = pos.y, z = pos.z}, -1, 'Berserk')
+    end
+  end
+  for sid, rec in pairs(p.cont) do
+    local u = df.unit.find(num(tonumber(sid)) or -1)
+    local mood = u and df.mood_type[u.mood]
+    if not (u and not dfhack.units.isDead(u) and (M.STRANGE[mood] or mood == 'Berserk')) then
+      local ids = {}
+      for _, d in ipairs(type(rec) == 'table' and type(rec.d) == 'table' and rec.d or {}) do
+        if d[2] ~= true and K.act.door_forbid(d[1], false) then ids[#ids + 1] = d[1] end
+      end
+      p.cont[sid] = nil
+      K.emit('MOOD_CONTAIN', 'B', trunc(string.format('mood unit %s: room released (doors %s)', sid,
+                                                      #ids > 0 and table.concat(ids, ',') or 'none'), 200),
+             {unit = num(tonumber(sid)) or -1, op = 'released', doors = #ids > 0 and ids or nil})
+    end
+  end
+end
+
+local PHASES = {phase_units, phase_doctors, phase_corpses, phase_zones, M.HM.phase, phase_tombs, phase_memorials, phase_captives,
                 phase_barrels, phase_needs, phase_reserve, phase_tools, phase_coffins}
 
 local function new_run(K, c, p)
@@ -5556,9 +5891,11 @@ M.verbs['tombs.repair'] = function(K, args, cmd)
 end
 
 -- BUG-518 (economy's slab pass): the ids of the dead whose bodies nobody can walk to, with a historical figure (care's last run)
+-- public (economy's slab pass): the dead citizens who want a memorial slab before (or without) a ghost: BUG-518's bodies nobody can
+-- path to and, NEU1 P9 (mem_early), the missing, far and long-unburied ones (MEM.early); the ghosts themselves are census.g
 function M.unreach_ids(K)
   local out = {}
-  for i, id in ipairs(st.unr_ids or {}) do out[i] = id end
+  for i, id in ipairs(st.mem_ids or st.unr_ids or {}) do out[i] = id end
   return out
 end
 
@@ -5612,6 +5949,10 @@ function M.state(K)
     -- BUG-126: orders that cannot run, days the project has made no progress (only when > 0)
     if v.stuck > 0 then care.coffins.stuck = v.stuck end
     if v.proj ~= '' and v.stale > 0 then care.coffins.stale = v.stale end
+  end
+  local hs = st.hosp
+  if hs then                                  -- NEU1 P9: the hospital's standing preconditions
+    care.hosp = {ok = hs.ok, gaps = #hs.gaps > 0 and hs.gaps or nil, zone = hs.zone, bed = hs.bed}
   end
   if st.died and next(st.died) then          -- FR-64: citizen deaths of the last season by cause
     local died = json.object{}

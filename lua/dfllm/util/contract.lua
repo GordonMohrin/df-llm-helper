@@ -169,6 +169,8 @@ C.EVENTS = {
   BUILDING_TOPPLED = {cls = 'B', by = 'care'},  -- BUG-064: a building fell to a stressed citizen or a ghost (culprit, stress)
   STRESS_HIGH = {cls = 'B', by = 'care'},       -- FR-74: stress at stress_high for stress_days; the sources named
   MOOD_END = {cls = 'B', by = 'care'}, CARAVAN = {cls = 'B', by = 'trade'},
+  -- NEU1 P9: the hospital's standing preconditions changed (zone drawn over a bed, gaps); a failing mood's room locked / released
+  HOSPITAL_MIN = {cls = 'B', by = 'care'}, MOOD_CONTAIN = {cls = 'B', by = 'care'},
   MIGRANTS = {cls = 'B', by = 'economy'}, PETITION = {cls = 'B', by = 'care'},
   STOCK_LOW = {cls = 'B', by = 'economy'}, CANCEL_LOOP = {cls = 'B', by = 'economy'},
   LABOR_STARVED = {cls = 'B', by = 'economy'}, WORK_DETAIL = {cls = 'B', by = 'economy'},
@@ -324,6 +326,7 @@ C.ACT = {
   workshop_retire = {'economy'},                  -- BUG-715: a workshop no citizen can reach, beside a reachable one of its type
   well_remove = {'water'},                         -- BUG-541: the dry well the GiveWater carriers stand at (well.retire)
   hospital_restore = {'water'},                    -- BUG-539: the removed hospital zone drawn again at its old location
+  hospital_zone = {'care'},                        -- NEU1 P9: a 1x1 hospital zone over one standing bed near water (care.hosp_min)
   water_zone = {'water'},                          -- BUG-324: a Water Source zone on the water the scan found reachable
   sand_zone = {'economy'}, fish_zone = {'economy'},
   drink_pile = {'economy'},                        -- BUG-782: the refuge's drink store without a dig
@@ -338,7 +341,7 @@ C.ACT = {
   cancel_stray_job = {'seal'},                     -- BUG-751: an outdoor errand whose target has no way back to drink and food
   cancel_link_job = {'gate'}, labor_set = {'economy', 'seal'},        -- BUG-546, BUG-547
   construction_remove = {'seal'},                  -- BUG-479: the refuge plug's walls come down in PEACE
-  door_forbid = {'reflex', 'cavern'},              -- FR-98: the sweep's hatch over the cavern shaft
+  door_forbid = {'reflex', 'cavern', 'care'},      -- FR-98: the sweep's hatch over the cavern shaft; NEU1 P9: a failing mood's room
   burrow_tiles = {'seal', 'runner', 'water'},     -- BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
                                                   -- water paints its care burrow Pflege+ (exact)
   popcap = {'readiness'},
@@ -528,7 +531,9 @@ C.STATE_SPEC = obj({
               src = obj(nil, nil, NAT), died_y = obj(nil, nil, NAT),
               pop = obj({kids = NAT, res = NAT, peak = NAT, dy = NAT, waves = NAT, mig = NAT, lastw = int(-1)}),
               -- FR-83: citizens at stress category 0 (the worst): how many, the first ids and their names
-              s0 = obj({n = NAT}, {ids = arr(NAT, 0, 6), nm = arr(str(28), 0, 6)})}),
+              s0 = obj({n = NAT}, {ids = arr(NAT, 0, 6), nm = arr(str(28), 0, 6)}),
+              -- NEU1 P9: the hospital's standing preconditions (ok, gaps), the zone care drew over a bed and that bed
+              hosp = obj({ok = FLAG}, {gaps = arr(str(16), 0, 6), zone = NAT, bed = NAT})}),
   -- BUG-115: cursed citizens alive (n), of them in were-form now (tf), the first ids (the transformed first), the next full
   -- moon (mo = day of the year, 1-based; mi = whole days until it) and the cursed who died (dead)
   curse = obj({n = NAT, tf = NAT}, {ids = arr(NAT, 0, 8), mo = int(1, 400), mi = NAT, dead = NAT}),

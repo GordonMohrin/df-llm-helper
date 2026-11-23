@@ -38,16 +38,15 @@
    }
   },
   "materials": {
-   "bed": 4,
+   "bed": 1,
    "chest": 2,
    "door": 1,
    "table": 1,
-   "traction_bench": 1,
    "well": 1
   },
   "params": {
-   "beds": 4,
-   "bench": 1,
+   "beds": 1,
+   "bench": 0,
    "burrow": "Kern+",
    "carry": 0,
    "compact": 0,
@@ -152,30 +151,6 @@
        ],
        [
         0,
-        3,
-        0,
-        "R"
-       ],
-       [
-        0,
-        5,
-        0,
-        "b"
-       ],
-       [
-        1,
-        5,
-        0,
-        "b"
-       ],
-       [
-        2,
-        5,
-        0,
-        "b"
-       ],
-       [
-        3,
         5,
         0,
         "b"

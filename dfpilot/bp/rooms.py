@@ -53,7 +53,9 @@ PARAMS = {
     # ONE table inside a hospital room that stands (no beds, no dig, no zone): the room of an older template had no table
     # BUG-755: furnish = 2 is ONE bed inside such a room (more patients than beds: Run 16b i2 Whirledrampart, 10 patients, 4 beds)
     # BUG-763: compact = 1 is the 5x4 room (up to 5 beds) when no 7x5 room fits the rock round the core; sites.rank falls back to it by itself; carry = 1 also ranks sites up to 80 tiles from accepted water (a water carrier route)
-    "hospital": {"beds": (4, 1, 10), "surface": (0, 0, 1), "bench": (1, 0, 1), "furnish": (0, 0, 2), "compact": (0, 0, 1), "carry": (0, 0, 1)},
+    # NEU1 P9 (docs/v2/NEU1-pflege.md; Run 16a i1: every hospital ended build_lost on its beds, bench and chests): ONE bed and no
+    # traction bench by default; more beds and the bench are upgrades (beds=4 bench=1); the zone comes before the furniture
+    "hospital": {"beds": (1, 1, 10), "surface": (0, 0, 1), "bench": (0, 0, 1), "furnish": (0, 0, 2), "compact": (0, 0, 1), "carry": (0, 0, 1)},
     "temple": {"size": (7, 5, 11), "tier": (2000, 0, 100000)},
     "tavern": {"seats": (12, 4, 40), "surface": (0, 0, 1)},
     # BUG-356: surface = 1 is the startup set: the shops stand on open surface floor beside the wagon, no dig, no door, no burrow
@@ -227,7 +229,9 @@ HOSPITAL_COMPACT = (5, 4)             # BUG-763: width, height of the compact ho
 
 
 def hospital(p: dict) -> Plan:
-    """Beds, traction bench, a table, chests and its own well spot (well + pond hole over a sump below)."""
+    """Beds, traction bench, a table, chests and its own well spot (well + pond hole over a sump below). NEU1 P9: the hospital
+    zone is drawn right after the dig, before any furniture, so a bed, bench or chest that cannot be built never keeps the fort
+    without a hospital (runner Q.OPTIONAL: bench, table, chests and well are not awaited)."""
     P = Plan("hospital", "living")
     if p.get("furnish"):
         return _furnish_hospital(P, p)
@@ -238,6 +242,7 @@ def hospital(p: dict) -> Plan:
     u0, v0, u1, v1 = box
     wl = u1 - 1                                     # the well column (2 in the 7x5 room), its pond one tile east (3)
     P.stage("dig", "dig").tile(wl, v0 + 1, 0, "h").tile(u1, v0 + 1, 0, "h")
+    P.stage("zone", "zone").ent(u0, v0, u1, v1, 0, "m", "location=hospital name=Hospital allow=residents")    # NEU1 P9: first
     b = P.stage("build", "build", orders=1)
     for i in range(min(p["beds"], W if p.get("compact") else 10)):
         b.tile(u0 + i if i < W else u0 + i - W, v1 if i < W else v1 - 1, 0, "b")
@@ -246,7 +251,7 @@ def hospital(p: dict) -> Plan:
     b.tile(u0, v0, 0, "h").tile(u0 + 1, v0, 0, "h").tile(wl, v0 + 1, 0, "l")
     b.tile(u1, v0, 0, "t")                         # BUG-537: the table of surgery and suturing (inspect hospital: no_table)
     P.stage("zone", "zone").ent(u1, v0 + 1, u1, v0 + 1, 0, "p", "pond=true")
-    _finish(P, p, box, "m", "location=hospital name=Hospital allow=residents")
+    _finish(P, p, box)
     return P
 
 
@@ -268,6 +273,7 @@ def _surface_hospital(P: Plan, p: dict) -> Plan:
     the dug hospital); beds in the bottom rows, the traction bench and chests as in the dug one, the meeting zone
     location=hospital over the whole block. The manifest lists it as a hospital room."""
     W, H = HOSPITAL_SURFACE
+    P.stage("zone", "zone").ent(0, 0, W - 1, H - 1, 0, "m", "location=hospital name=Hospital allow=residents")   # NEU1 P9: first
     b = P.stage("build", "build", orders=1)
     for i in range(p["beds"]):
         b.tile(i if i < 7 else i - 7, H - 1 if i < 7 else H - 2, 0, "b")
@@ -275,7 +281,6 @@ def _surface_hospital(P: Plan, p: dict) -> Plan:
         b.tile(0, 2, 0, "R")
     b.tile(0, 0, 0, "h").tile(1, 0, 0, "h")
     b.tile(W - 1, 0, 0, "t")                       # BUG-537: the table of surgery and suturing
-    P.stage("zone", "zone").ent(0, 0, W - 1, H - 1, 0, "m", "location=hospital name=Hospital allow=residents")
     P.room("", "hospital", USE.get("hospital", "utility"), (0, 0, 0, W - 1, H - 1, 0), 0)
     return P
 

@@ -1525,6 +1525,19 @@ local function impls(state)
     return true, {ids = res.ids}
   end
 
+  -- NEU1 P9 (Run 16a i1 Basementflew y423-y558: no hospital for 135 years, every `bp.place hospital` ended build_lost on its
+  -- beds, bench and chests while beds stood in the fort): zones screen > add zone > Meeting Area > location Hospital, drawn
+  -- over ONE bed that stands (quickfort zone mode, `m{location=hospital name=Hospital allow=residents}`, as the bp template
+  -- writes it): spec = {x, y, z} the bed's tile, a 1x1 zone. The caller (care.hosp_min) picked a built bed that no hospital
+  -- zone covers, that no bedroom owner holds and that lies near accepted water (act reads no tiles). Returns ok, {ids}
+  -- (ok false: quickfort designated no zone there). [live-untested]
+  function I.hospital_zone(spec)
+    if type(spec) ~= 'table' then return false, 'spec must be a table' end
+    local x, y, z = int(spec.x), int(spec.y), int(spec.z)
+    if not (x and y and z) then return false, 'spec needs x, y, z' end
+    return I.zone_place({cell = 'm{location=hospital name=Hospital allow=residents}(1x1)', pos = {x, y, z}})
+  end
+
   -- live L6 (reclaimed Paddletribes): the office zone had no owner, so the manager validated no order
   -- (117 of 118 waiting, the stills idle, drink 0). Assigns an unowned Office zone to the manager, as the
   -- zone sheet's "Assign" does (dfhack.buildings.setOwner). Never takes an office someone owns.
