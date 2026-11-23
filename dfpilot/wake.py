@@ -85,6 +85,7 @@ PRIO = ["BREACH", "SIEGE_START", "INVASION", "INTRUDER", "ARRIVAL", "PREDATOR", 
         "NEEDS_CLICK",                        # K2: no fort runs at all; nothing else in the burst can be acted on first
         "PATIENT_DYING", "PATIENTS_OUT", "MOOD_CRITICAL",     # I1: a patient or a mood dwarf at the death line comes before the housekeeping types
         "DEATHS_PREVENTABLE", "KERN_FAULT", "HB_STALE", "TICK_STALL", "SUPERVISE", "QUICKSAVE_FAILED",
+        "DEADMAN_PAUSE",                      # P3: no live session: the kernel paused the fort; `dfllm cmd resume`
         "PAUSED_BY_DF",                       # FR-94: the game stands (a load, a popup); one `dfllm cmd resume` runs it again
         "SIEGE_END",
         "DRILL_FAIL", "BURROW_SHRUNK", "SIEGE_UNREADY", "PERF_DEGRADED", "DECISION_NEEDED", "SEAL_STUCK",
@@ -107,6 +108,8 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
         # FR-94 (Run 14 note 100): the pause key, once per 60 s, only pause:df / pause:popup; the reply names the popups it read
         "PAUSED_BY_DF": "dfllm cmd resume (the reply names what it released and every popup it read); then dfllm status",
         "DECISION_NEEDED": "ask Gordon in chat, then config/decisions.yaml", "KERN_FAULT": "dfllm doctor",
+        # Neuausrichtung 1 / P3: the dead-man switch paused the fort (no session for deadman.timeout_s)
+        "DEADMAN_PAUSE": "dfllm cmd resume (a live session runs the game again); then dfllm brief",
         "PERF_DEGRADED": "dfllm doctor", "HB_STALE": "dfllm doctor", "AUTO_FAIL": "dfllm doctor",
         # BUG-475: the clock stands with the kernel alive; the line says whether `resume` can release it
         "TICK_STALL": "dfllm status; pause:df / pause:popup: dfllm cmd resume (refuses threat or curse popups); else tell Gordon "
@@ -2442,12 +2445,111 @@ class _Lock:
             sys.stderr.write(f"follow: dup check: {type(e).__name__}: {e}\n")
 
 
+# Neuausrichtung 1 / P3 (BUG-791, BUG-793; docs/v2/NEU1-wecken.md): follow never dies in its sleep and stays bounded in
+# memory: above config/wake.json follow.max_rss_mb or after follow.max_hours it starts a copy of itself and exits
+MEM_EVERY_S = 60.0                 # how often the working set is read
+SLEEP_ERR_S = 5.0                  # BUG-791: the pause after a sleep that raised (WinError 1450: the machine is out of resources)
+RESPAWN_RETRY_S = 3600.0           # a copy that could not be started is tried (and logged) again after this long
+
+
+def rss_mb() -> float | None:
+    """The working set of this process in MB (Windows GetProcessMemoryInfo, POSIX /proc/self/statm); None if unknown."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            class PMC(ctypes.Structure):
+                _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                            ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                            ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+            pmc = PMC()
+            pmc.cb = ctypes.sizeof(PMC)
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.GetCurrentProcess.restype = wintypes.HANDLE
+            fn = getattr(k32, "K32GetProcessMemoryInfo", None) or ctypes.WinDLL("psapi").GetProcessMemoryInfo
+            fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+            if not fn(k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
+                return None
+            return pmc.WorkingSetSize / (1 << 20)
+        with open("/proc/self/statm", encoding="ascii") as fh:
+            return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / (1 << 20)
+    except Exception:                  # noqa: BLE001 - unknown is None, never a fault
+        return None
+
+
+def restart_why(cfg: dict, up_s: float, rss: float | None) -> str | None:
+    """BUG-793: why a long-running follow should start a copy of itself now (None = it goes on)."""
+    if not cfg.get("restart"):
+        return None
+    if rss is not None and rss > cfg["max_rss_mb"]:
+        return f"working set {int(rss)} MB > {cfg['max_rss_mb']} MB"
+    if up_s >= cfg["max_hours"] * 3600:
+        return f"running {up_s / 3600:.1f} h >= {cfg['max_hours']} h"
+    return None
+
+
+def respawn_argv(args) -> list[str]:
+    """The command line of the copy: the same arguments (dfllm ... follow ...) plus --takeover."""
+    argv = [a for a in (getattr(args, "argv", None) or ["follow"])]
+    if "--takeover" not in argv:
+        argv.append("--takeover")
+    return [sys.executable, "-m", "dfpilot", *argv]
+
+
+def spawn(argv: list[str]) -> bool:
+    """Start the copy with this process's stdout/stderr (the player's follow.log keeps growing); False if it failed."""
+    import subprocess
+    try:
+        kw: dict = {"stdin": subprocess.DEVNULL, "close_fds": True}
+        for name in ("stdout", "stderr"):
+            stream = getattr(sys, name)
+            try:
+                stream.flush()
+                stream.fileno()
+                kw[name] = stream
+            except (AttributeError, OSError, ValueError):
+                kw[name] = subprocess.DEVNULL
+        if os.name == "nt":
+            kw["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        subprocess.Popen(argv, **kw)
+        return True
+    except (OSError, ValueError) as e:
+        sys.stderr.write(f"follow: restart failed: {type(e).__name__}: {e}\n")
+        return False
+
+
+def _sleep(secs: float, errors: list[int]) -> None:
+    """BUG-791 (Run 16a i1 y555, follow.log: `OSError: [WinError 1450] Insufficient system resources` in time.sleep, the
+    follow died, the fort ran overnight unattended): a sleep that raises is logged and tried once more after SLEEP_ERR_S."""
+    try:
+        time.sleep(secs)
+        errors[0] = 0
+    except (OSError, MemoryError) as e:
+        errors[0] += 1
+        if errors[0] == 1 or errors[0] % 60 == 0:
+            try:
+                sys.stderr.write(f"follow: sleep error {errors[0]}: {type(e).__name__}: {e}\n")
+            except Exception:          # noqa: BLE001
+                pass
+        try:
+            time.sleep(SLEEP_ERR_S)
+        except (OSError, MemoryError):
+            pass
+
+
 def run(args) -> int:
     f = Follower(save=args.save_pin, since=args.since, auto=not args.no_auto,
                  audit=not getattr(args, "no_audit", False))
     t0, errors, last_err = time.monotonic(), 0, -1e18
+    one_shot = bool(getattr(args, "once", False) or getattr(args, "max_s", None))
     lock = _Lock(bool(getattr(args, "takeover", False)),          # BUG-238
-                 auto=not (getattr(args, "once", False) or getattr(args, "max_s", None)))   # BUG-334 review fix
+                 auto=not one_shot)                                # BUG-334 review fix
+    from . import session as session_mod
+    fcfg = session_mod.config()["follow"]
+    mem_t, spawn_t, sleep_err = t0, -1e18, [0]
     try:
         while True:
             try:
@@ -2470,7 +2572,25 @@ def run(args) -> int:
                     pass
             if args.once or (args.max_s and time.monotonic() - t0 >= args.max_s):
                 return 0
-            time.sleep(args.interval)
+            now = time.monotonic()
+            if not one_shot and now - mem_t >= MEM_EVERY_S and now - spawn_t >= RESPAWN_RETRY_S:
+                mem_t = now
+                why = restart_why(fcfg, now - t0, rss_mb())
+                if why:                        # BUG-793: hand over to a fresh copy of this follow
+                    spawn_t = now
+                    msg = f"follow: restart (pid {os.getpid()}): {why}; a fresh copy takes over (--takeover)"
+                    f.save_state()
+                    d = lock.dir
+                    release_lock(d)
+                    if spawn(respawn_argv(args)):
+                        print(msg, flush=True)
+                        files.log_cli(d, "follow", "restart", {"why": why}, msg)
+                        lock.dir = None
+                        f.dir = None           # the copy owns .follow.json now
+                        return 0
+                    lock.dir = None            # re-acquired at the next poll (lock.step sees a new save dir)
+                    files.log_cli(d, "follow", "restart", {"why": why}, "the copy did not start: this follow goes on")
+            _sleep(args.interval, sleep_err)
     except KeyboardInterrupt:
         return 0
     finally:

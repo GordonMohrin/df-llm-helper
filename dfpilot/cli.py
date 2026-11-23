@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import paths
+from . import paths, session
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -405,6 +405,7 @@ def main(argv: list[str] | None = None) -> int:
     args.extra = extra
     paths.set_overrides(df=args.df, runtime=args.runtime, save=args.save)
     args.save_pin = args.save
+    args.argv = list(sys.argv[1:] if argv is None else argv)      # P3: a follow that restarts itself starts these again
     c = args.command
     if c == "follow":
         from . import wake
@@ -428,6 +429,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
         print(f"dfllm: {e}")
         return 2
+    if c in session.SESSION_CMDS:                      # P3: the live session's heartbeat (the kernel's dead-man switch)
+        session.touch(save_dir, c)
     if c == "status":
         from .brief import run_status
         return run_status(args, save_dir)
