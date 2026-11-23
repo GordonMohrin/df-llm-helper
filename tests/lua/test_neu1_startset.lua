@@ -168,4 +168,89 @@ T.test('switch off: idle, the deliverable passes', function()
   T.eq(#reqs(W), 0); T.eq(W.state().ss, nil); T.eq(S.done(W.K), true)
 end)
 
+-- NEU1 retry (verifier): the escalation is total. Every part that stays not ok, whatever the reason, raises DECISION_NEEDED
+-- startset once after giveup_days (default max_tries * retry_days = 21), so phase 0 can never hold silently.
+local function dn(W) return W.find_events('DECISION_NEEDED') end
+
+T.test('total: an office planned (chair and table wait for items) for 30 days raises DECISION_NEEDED once, cause named', function()
+  local W = world()
+  local S = fresh()
+  shop(W, 'Still'); shop(W, 'Carpenters'); plot(W); pile(W)
+  office(W, false, false)                               -- both pieces placed, never built (buildingplan waits)
+  W.load(S)
+  for _ = 1, 20 do day(W) end
+  T.eq(#dn(W), 0, 'not before giveup_days')
+  for _ = 1, 10 do day(W) end
+  local e = dn(W)
+  T.eq(#e, 1); T.eq(e[1].d.id, 'startset')
+  T.ok(e[1].d.q:find('office: planned but not built (materials?)', 1, true) ~= nil, e[1].d.q)
+  T.eq(e[1].d.why, 'office: planned but not built (materials?)')
+  T.eq(#reqs(W), 0, 'never asked while under construction')
+  T.eq(W.state().ss.f, {'office'}); T.eq(S.escalated(), true); T.eq(S.done(W.K), false)
+  for _ = 1, 30 do day(W) end
+  T.eq(#dn(W), 1, 'once')
+end)
+
+T.test('total: water known as unreachable, no tile to pipe from, for 30 days raises DECISION_NEEDED once', function()
+  local W = world{water = {known = true, ok = false, near = nil}}
+  local S = fresh()
+  full_set(W)
+  W.load(S)
+  for _ = 1, 30 do day(W) end
+  local e = dn(W)
+  T.eq(#e, 1); T.eq(e[1].d.why, 'water: no tile to pipe from / not scanned')
+  T.eq(#reqs(W), 0, 'no cistern without a tile')
+  T.eq(W.state().ss.f, {'water'})
+  for _ = 1, 10 do day(W) end
+  T.eq(#dn(W), 1)
+end)
+
+T.test('total: water never scanned for 30 days raises DECISION_NEEDED once; a water module absent too', function()
+  local W = world{water = {known = false}}
+  local S = fresh()
+  full_set(W)
+  W.load(S)
+  for _ = 1, 30 do day(W) end
+  local e = dn(W)
+  T.eq(#e, 1); T.eq(e[1].d.why, 'water: no tile to pipe from / not scanned')
+  T.eq(W.state().ss.m, {'water?'}); T.eq(W.state().ss.f, {'water'})
+  local W2 = world()
+  W2.water = nil                                        -- drink_access answers nothing
+  local S2 = fresh()
+  full_set(W2)
+  W2.load(S2)
+  for _ = 1, 30 do day(W2) end
+  T.eq(#dn(W2), 1)
+end)
+
+T.test('total: a read that fails every day for 30 days still escalates (fail closed), once', function()
+  local W = world()
+  local S = fresh()
+  S.read = function() error('df gone') end
+  W.load(S)
+  for _ = 1, 30 do day(W) end
+  local e = dn(W)
+  T.eq(#e, 1)
+  T.eq(#W.state().ss.f, 5, 'every part escalated in the one decision')
+  T.ok(e[1].d.why:find('shops: missing after requests', 1, true) ~= nil and e[1].d.why:find('water: no tile', 1, true) ~= nil, e[1].d.why)
+  T.eq(#e[1].d.cmds, 5, 'a command per part')
+  T.eq(#reqs(W), 12, 'shops, farm, pile, office asked max_tries (3) times each, water never (no tile)')
+end)
+
+T.test('total: a part ok again resets its clock; lost again it gets the full giveup_days', function()
+  local W = world{cfg = {giveup_days = 5, parts = {'farm'}}}
+  local S = fresh()
+  plot(W, false)
+  W.load(S)
+  for _ = 1, 3 do day(W) end
+  df.global.world.buildings.other.FARM_PLOT:erase(0); plot(W)      -- built on day 3
+  day(W)
+  T.eq(W.K.persist.get('m.startset').r.farm.s, nil)
+  df.global.world.buildings.other.FARM_PLOT:erase(0); plot(W, false)
+  for _ = 1, 4 do day(W) end
+  T.eq(#dn(W), 0)
+  for _ = 1, 2 do day(W) end
+  T.eq(#dn(W), 1)
+end)
+
 T.done()

@@ -36,11 +36,21 @@ Parts (config `startset.parts`, all on by default):
 | `office` | an Office zone holds a BUILT chair AND a BUILT table (zone alone or planned furniture = under construction, not delivered) | `office` | `office` p.surface=1 without a core (the BUG-413 gate is lifted for the start set), the dug one with a core |
 | `water` | `water.drink_access`: an accepted source or a bank the citizens reach | `cistern` why=`no_water` with `at` = the nearest water (the existing BUG-424 route: piped cistern, safe plans only) | unchanged (never free digging within 3 tiles of water) |
 
-- **Fail closed.** A read that fails counts the part as missing. Unknown water (no scan yet) is missing but not requested (no tile
-  to pipe from); it shows as `water?`.
-- **Bounded.** A part is requested at most `startset.max_tries` (3) times, `startset.retry_days` (7) apart; while it is under
-  construction it is not requested again. After the last try the module raises DECISION_NEEDED `startset` (A) once with the parts
-  and the commands that place them by hand (`bp sites <tpl> surface=1 --fresh`), so the player is woken instead of a silent loop.
+- **Fail closed.** A read that fails counts every part as missing (nothing is handed over). Unknown water (no scan yet, or the
+  water module answers nothing) is missing but not requested (no tile to pipe from); it shows as `water?`.
+- **Bounded requests.** A missing part is requested at most `startset.max_tries` (3) times, `startset.retry_days` (7) apart; while
+  it is under construction it is not requested again.
+- **Total escalation (no silent hold).** For every part the module keeps since when it is not ok (persist `m.startset.r[part].s`,
+  the first day seen not ok, whatever the reason; cleared when the part stands). A part not ok for `startset.giveup_days` (default
+  `max_tries * retry_days` = 21) days raises DECISION_NEEDED `startset` (A) once (latch `r.g`, cleared only when the part stands
+  again) with `q`, `cmds` (`bp sites <tpl> surface=1 --fresh`, `inspect what=water_sources`) and `why` naming the cause per part:
+  `missing after requests`, `planned but not built (materials?)` (e.g. an office whose chair/table wait for buildingplan items, a
+  Still with no wood), `water: no tile to pipe from / not scanned`. A failing read for that long escalates every part. The state
+  `ss.f` lists the escalated parts.
+- **Auto-waiver.** `startset` is not plan-driven, so PLAN_EXHAUSTED never fires for it. Once the set escalated
+  (`startset.escalated()`) and fortcore stage 1 exists (runner `proj_reached`), runner's `Q.auto_waive` waives the P0 deliverable
+  with a logged reason (`by kernel`) and P0 goes on (mood reserve, leather, the follow starter). Without a core the
+  DECISION_NEEDED is the signal and P0 holds until the player places the part or runs `phase.waive startset`.
 - **Phase 0.** `plans/year1.json` P0 lists `{"k": "startset"}` first; runner's phase check asks `startset.done()` (true when the
   set is complete or handed over, or the switch is off; an absent module skips it as before). The status line shows what it waits
   for (`startset shops,office`).
@@ -77,6 +87,7 @@ Parts (config `startset.parts`, all on by default):
 | `startset.parts` | `["shops","farm","pile","office","water"]` | a part left out is neither checked nor requested |
 | `startset.shops` | `["Still","Carpenters"]` | the workshop types of part `shops` |
 | `startset.retry_days` / `max_tries` | 7 / 3 | request cadence and bound |
+| `startset.giveup_days` | 21 | days any part may stay not ok before the one-time DECISION_NEEDED `startset` (1..360) |
 | `tools/embark/rules.json` `strict` | true | the old FR-08 acceptances and waivers |
 | `rules.json` `accept_only` | `["dark_fortress"]` | ids that may still be accepted under `strict` |
 | `rules.json` `hard_waive` | `["aquifer","trees","water","stone"]` | ids that may not be waived under `strict` |
@@ -93,6 +104,13 @@ Parts (config `startset.parts`, all on by default):
 - No change to manager order handling (P8), the population cap (P4), gates (P5) or the drink-in-the-core rule (P4).
 - The surface set is outside the walls: in a siege it is lost like any surface building. It is meant for year 1; the core's
   stage 1 brings the inner still.
+- No siege or mode gate in the module itself: runner already freezes infra projects in SIEGE, and the placements are prio 1
+  surface builds.
+- The hand-over does not move the set inside: it only stops asking once the core exists and every part stands (also when those are
+  the surface pieces). A later loss of the surface still or office is economy's (BUG-396/527) and the P0/P1 workshops' business.
+- In a running mid-game fort the set also runs until hand-over; with a core and a missing part it places the core's office or
+  workshops up to `max_tries` times, which can overlap economy's BUG-042/BUG-396 office repair (the dedupe of `cmd._place` keeps
+  it from doubling buildings).
 - No automatic world search: the vetted list is filled by hand after one `rank`/`scan` pass on the fresh world (Leitung step 3).
 
 ## 5. Live-Erwartung
@@ -101,10 +119,13 @@ Parts (config `startset.parts`, all on by default):
    `why":"startset"` for `workshops` (types Still/Carpenters), `farms`, `foodpile`, `office`; `cli.log` shows `auto:startset_*`
    placements within minutes, without any `plan apply`.
 2. Within the first season (before fortcore stage 1 is dug) a Still, a farm plot, a `dfllm-start` food pile and an Office zone with a
-   built chair and table stand on the surface; `status` phase line no longer shows `startset ...` and `ss.m` is empty.
-3. The first `BrewDrink` job runs before the core is finished; no fort records a thirst or hunger death (`DEATH` cause thirst /
-   starvation) in years 1-3.
-4. After fortcore stage 1 is done `state.ss.d` = 1 and no further `why":"startset"` request appears for that fort, even if a surface
-   piece is destroyed later.
-5. `embark.py embark X,Y --accept water --reason ...` (or trees/aquifer/stone/ore) is refused before any DF call; `accept.log` holds
-   only `dark_fortress` lines; with a filled `sites.json` an embark takes one `embark --site ID` call (< 10 minutes).
+   built chair and table stand on the surface; the `status` phase line no longer shows `startset ...` and `ss.m` is empty; the first
+   `BrewDrink` job runs before the core is finished; no thirst or starvation `DEATH` in years 1-3.
+3. No silent P0 hold: whenever `status` shows `startset <part>` for more than ~21 game days, `events.jsonl` holds exactly one
+   `DECISION_NEEDED` with `"id":"startset"` and a `why` naming that part's cause (`planned but not built (materials?)`,
+   `water: no tile to pipe from / not scanned`, `missing after requests`), and `ss.f` names the part.
+4. If fortcore stage 1 exists when that happens, the phase line shows the waiver `startset: start set escalated, fortcore stage 1
+   stands ...` (`kernel.log` `phase P0: startset cannot be made ... by kernel`) and the phase moves to P1 within a game day.
+5. After the hand-over (core Z4 and every part standing) `state.ss.d` = 1 and no further `why":"startset"` request appears for that
+   fort. `embark.py embark X,Y --accept water --reason ...` (or trees/aquifer/stone/ore) is refused before any DF call; with a
+   filled `sites.json` an embark takes one `embark --site ID` call (< 10 minutes).

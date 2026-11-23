@@ -753,10 +753,12 @@ def plan_errors(path: str | Path | None = None) -> list[str]:
 
 # NEU1 (E4, lua/dfllm/startset.lua M.conf): config/baseline.json "startset": on = the survival start set of week 1 (phase 0) is
 # requested (false: the module is idle and the P0 deliverable passes); parts = which of shops, farm, pile, office, water; shops = the
-# workshop types of part shops; retry_days / max_tries = request cadence and bound. startset.lua keeps its default for a bad value;
+# workshop types of part shops; retry_days / max_tries = request cadence and bound; giveup_days = days a part may stay not ok
+# (any reason) before the one-time DECISION_NEEDED startset (default max_tries * retry_days). startset.lua keeps its default for a bad value;
 # lint --config refuses it.
 STARTSET_PARTS = ("shops", "farm", "pile", "office", "water")
-STARTSET_LIM: dict = {"on": "bool", "parts": "parts", "shops": "shops", "retry_days": (1, 120), "max_tries": (1, 20)}
+STARTSET_LIM: dict = {"on": "bool", "parts": "parts", "shops": "shops", "retry_days": (1, 120), "max_tries": (1, 20),
+                       "giveup_days": (1, 360)}
 
 
 def startset_errors(path: str | Path | None = None) -> list[str]:

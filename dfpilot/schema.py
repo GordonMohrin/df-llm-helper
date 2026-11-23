@@ -1360,7 +1360,7 @@ STATE = Obj(
          "cav": Obj(req={"st": Str(enum=["off", "wait", "open", "muster", "kill", "recall", "close"])},
                     opt={"why": Str(maxbytes=60), "n": NAT, "k": NAT, "l": NAT, "acc": NAT, "clr": FLAG}),
          # NEU1 (E4, startset.lua): the survival start set: d = 1 handed over to the core, m = the parts not standing (shops, farm,
-         # pile, office, water; 'water?' = not scanned yet), f = the parts given up after max_tries requests
+         # pile, office, water; 'water?' = not scanned yet), f = the parts escalated (DECISION_NEEDED startset)
          "ss": Obj(req={"d": FLAG}, opt={"m": Arr(Str(maxbytes=8), 0, 5), "f": Arr(Str(maxbytes=8), 0, 5)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,

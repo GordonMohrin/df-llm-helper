@@ -660,7 +660,7 @@ C.STATE_SPEC = obj({
   cav = obj({st = str(nil, {'off', 'wait', 'open', 'muster', 'kill', 'recall', 'close'})},
             {why = str(60), n = NAT, k = NAT, l = NAT, acc = NAT, clr = FLAG}),
   -- NEU1 (E4, startset.lua): the survival start set: d = 1 handed over to the core (idle for good), m = the parts not standing
-  -- (shops, farm, pile, office, water; 'water?' = not scanned yet), f = the parts given up after max_tries requests
+  -- (shops, farm, pile, office, water; 'water?' = not scanned yet), f = the parts escalated (not ok for giveup_days, DECISION_NEEDED startset)
   ss = obj({d = FLAG}, {m = arr(str(8), 0, 5), f = arr(str(8), 0, 5)}),
 })
 

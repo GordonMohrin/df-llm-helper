@@ -12,7 +12,11 @@
 -- water (water.drink_access: an accepted source or a bank the citizens reach; missing -> the existing BUG-424 cistern request
 -- with the nearest water tile, never free digging). Fail closed: a read that fails counts the part as missing; unknown water is
 -- missing but not requested. Bounded: a part is asked at most max_tries times, retry_days apart, never while it is under
--- construction; after the last try DECISION_NEEDED startset (A) once. runner's P0 deliverable `startset` asks M.done.
+-- construction. Total escalation (verifier, NEU1 retry): EVERY part that is not ok, whatever the reason (missing after its
+-- tries, planned but never built, water with no tile to pipe from, water never scanned, a failing read), raises
+-- DECISION_NEEDED startset (A) once after giveup_days (default max_tries * retry_days) days not ok, with the cause; so phase 0
+-- can never hold silently. runner's P0 deliverable `startset` asks M.done; runner auto-waives it once the set escalated and
+-- fortcore stage 1 exists (M.escalated).
 -- Fair play: read-only (buildings, zones, the water module); every placement is follow's bp.place, a player's blueprint.
 local M = {name = 'startset', every = {ticks = 1200}, verbs = {}, on = {}}
 
@@ -23,7 +27,8 @@ M.DEFAULTS = {on = true, parts = M.PARTS, shops = {'Still', 'Carpenters'}, retry
 M.TPL = {shops = 'workshops', farm = 'farms', pile = 'foodpile', office = 'office', water = 'cistern'}
 M.FOOD_PILES = {['dfllm-start'] = true, ['dfllm-stock'] = true, ['dfllm-drink'] = true}
 
-local st      -- persisted m.startset {v, d (1 handed over), t (tick of the hand-over), r = {part -> {n tries, t last}}, ask (1 asked)}
+local st      -- persisted m.startset {v, d (1 handed over), t (tick of the hand-over), r = {part -> {n tries, t last, s first tick
+              -- seen not ok, g 1 escalated}}}
 local pub     -- the state key ss
 local last    -- the last facts (tests, inspect)
 
@@ -54,6 +59,8 @@ function M.conf(K)
   local rd, mt = int(b.retry_days), int(b.max_tries)
   if rd and rd >= 1 and rd <= 120 then c.retry_days = rd end
   if mt and mt >= 1 and mt <= 20 then c.max_tries = mt end
+  local gd = int(b.giveup_days)
+  if gd and gd >= 1 and gd <= 360 then c.giveup_days = gd end
   return c
 end
 
@@ -145,29 +152,51 @@ function M.judge(f, c)
   return out, types
 end
 
--- what to do now: {req = {{part, tpl, types?, at?}}, gave_up = {parts newly given up}, done = bool (hand over)}
+-- the cause a part is not ok, for the escalation text
+M.CAUSE = {wip = 'planned but not built (materials?)', water = 'no tile to pipe from / not scanned',
+           miss = 'missing after requests'}
+
+-- days a part may stay not ok before the one-time escalation
+function M.giveup_days(c) return int(c.giveup_days) or (c.max_tries * c.retry_days) end
+
+-- what to do now: {req = {{part, tpl, types?, at?}}, gave_up = {parts newly given up}, why = {part -> cause}, done = bool
+-- (hand over), dirty = the state changed (persist)}. Total: every part not ok, for any reason, escalates once after giveup_days.
 function M.decide(f, s, c, now)
   local res, types = M.judge(f, c)
-  local out = {req = {}, gave_up = {}, res = res, types = types}
+  local out = {req = {}, gave_up = {}, why = {}, res = res, types = types}
   local all = true
   for _, p in ipairs(c.parts) do if res[p] ~= 'ok' then all = false end end
   if all and f.core then out.done = true; return out end
   s.r = type(s.r) == 'table' and s.r or {}
+  local gd = M.giveup_days(c) * M.DAY
   for _, p in ipairs(c.parts) do
     local r = type(s.r[p]) == 'table' and s.r[p] or {n = 0}
     s.r[p] = r
-    if res[p] == 'ok' then r.n, r.t, r.g = 0, nil, nil   -- a part that stands again may be asked afresh if it is lost
-    elseif res[p] == 'miss' and not (p == 'water' and not f.near) then
-      local n, t = int(r.n) or 0, int(r.t)
-      if n < c.max_tries then
-        if not t or now - t >= c.retry_days * M.DAY then
-          r.n, r.t = n + 1, now
-          out.req[#out.req + 1] = {part = p, tpl = M.TPL[p], types = p == 'shops' and types or nil,
-                                   at = p == 'water' and f.near or nil}
+    if res[p] == 'ok' then                               -- a part that stands again may be asked afresh if it is lost
+      if r.s or r.g or (int(r.n) or 0) > 0 then out.dirty = true end
+      r.n, r.t, r.g, r.s = 0, nil, nil, nil
+    else
+      local since = int(r.s)
+      if not since then since = now; r.s = now; out.dirty = true end
+      local can_ask = res[p] == 'miss' and not (p == 'water' and not f.near)
+      local cause = (res[p] == 'wip' and M.CAUSE.wip) or ((p == 'water' and not can_ask) and M.CAUSE.water) or M.CAUSE.miss
+      local tries_over = false
+      if can_ask then
+        local n, t = int(r.n) or 0, int(r.t)
+        if n < c.max_tries then
+          if not t or now - t >= c.retry_days * M.DAY then
+            r.n, r.t = n + 1, now
+            out.req[#out.req + 1] = {part = p, tpl = M.TPL[p], types = p == 'shops' and types or nil,
+                                     at = p == 'water' and f.near or nil}
+          end
+        elseif t and now - t >= c.retry_days * M.DAY then
+          tries_over = true
         end
-      elseif not r.g and t and now - t >= c.retry_days * M.DAY then
+      end
+      if not r.g and (tries_over or now - since >= gd) then
         r.g = 1
         out.gave_up[#out.gave_up + 1] = p
+        out.why[p] = cause
       end
     end
   end
@@ -222,13 +251,14 @@ function M.step(K)
   end
   if #d.gave_up > 0 then
     local cmds, parts = {}, {}
-    for _, p in ipairs(d.gave_up) do parts[#parts + 1] = p; cmds[#cmds + 1] = 'dfllm ' .. HINT[p] end
-    local q = string.format('start set: %s still missing after %d requests (no site, refused or never built): place by hand ' ..
-                            '(d.cmds) or phase.waive startset', table.concat(parts, ','), c.max_tries)
+    for _, p in ipairs(d.gave_up) do parts[#parts + 1] = p .. ': ' .. d.why[p]; cmds[#cmds + 1] = 'dfllm ' .. HINT[p] end
+    local why = table.concat(parts, '; ')               -- schema DECISION_NEEDED why:s: 'office: planned but not built (materials?)'
+    local q = string.format('start set not ok for %d days: %s. Place by hand (d.cmds) or phase.waive startset',
+                            M.giveup_days(c), table.concat(parts, '; '))
     K.log('warn', '%s', q)
-    K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'startset', q = q:sub(1, 200), cmds = cmds})
+    K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'startset', q = q:sub(1, 200), cmds = cmds, why = why:sub(1, 200)})
   end
-  if #d.req > 0 or #d.gave_up > 0 then save(K) end
+  if #d.req > 0 or #d.gave_up > 0 or d.dirty then save(K) end
   local m, g = {}, {}
   for _, p in ipairs(c.parts) do
     if d.res[p] ~= 'ok' then m[#m + 1] = d.res[p] == 'unknown' and (p .. '?') or p end
@@ -246,6 +276,11 @@ function M.done(K)
   if not c.on or (st and st.d == 1) then return true end
   if type(pub) ~= 'table' then return false end     -- no pass yet: fail closed
   return #(pub.m or {}) == 0
+end
+
+-- public (runner's auto-waiver of the P0 deliverable): a part that is still not ok was escalated (DECISION_NEEDED startset)
+function M.escalated()
+  return type(pub) == 'table' and type(pub.f) == 'table' and #pub.f > 0
 end
 
 -- public (runner's status text): the parts the set waits for, e.g. 'shops,office'

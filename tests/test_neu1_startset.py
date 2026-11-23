@@ -137,6 +137,12 @@ def test_lint_config_checks_the_startset_section(tmp_path):
     assert fairplay.startset_errors() == [], "the shipped config is valid"
     shipped = json.loads((fairplay.BASELINE_PATH).read_text("utf-8"))["startset"]
     assert shipped["on"] is True and shipped["parts"] == list(fairplay.STARTSET_PARTS)
+    # NEU1 retry: giveup_days (the total escalation) is validated and shipped as max_tries * retry_days
+    assert shipped["giveup_days"] == shipped["max_tries"] * shipped["retry_days"]
+    p.write_text(json.dumps({"startset": {"giveup_days": 0}}), encoding="utf-8")
+    assert len(fairplay.startset_errors(p)) == 1
+    p.write_text(json.dumps({"startset": {"giveup_days": 30}}), encoding="utf-8")
+    assert fairplay.startset_errors(p) == []
 
 
 def test_p0_starts_with_the_start_set_and_the_contract_knows_it():

@@ -5400,6 +5400,16 @@ function Q.add_waive(K, ph, key, why, by)
         trunc(why, 80), trunc(by, 16))
 end
 function Q.auto_waive(K, dv)
+  -- NEU1 retry (verifier): the start set is not plan-driven, so PLAN_EXHAUSTED never fires for it; once it escalated
+  -- (DECISION_NEEDED startset, a part not ok for giveup_days) and the core's fortcore stage 1 exists, P0 goes on with a
+  -- logged waiver instead of stalling (the core brings its own still and rooms)
+  if dv.k == 'startset' then
+    local ok, esc = K.call('startset', 'escalated')
+    if ok and esc == true and proj_reached(K, 'fortcore', 1) then
+      return 'start set escalated, fortcore stage 1 stands: the core takes over'
+    end
+    return nil
+  end
   if dv.k ~= 'proj' or dv.tpl ~= 'farms' or dv.stage then return nil end
   local n = M.lost(K, 'farms')
   if (n or 0) == 0 then return nil end
