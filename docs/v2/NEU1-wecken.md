@@ -96,13 +96,34 @@ repeat rule; the repeat rule caps a chronic re-emit (patient_thirst x486 in Whir
 
 ## 4. Deliberately not done
 
-* No leak was proven by measurement in follow's own data structures (see the probe below); the memory bound is the
-  guarantee, not a proof of absence. The machine-wide exhaustion (four DF instances) is not follow's to fix.
+* Memory probe (offline, a copy of the Basementflew runtime, 7 MB of events, Follower.poll with a fake clock of 5 s per
+  poll, auto on, 2,000 polls = 2.8 h of follow time, 2,000 events replayed): the working set stayed flat at 59-61 MB
+  (59.3 MB after 100 polls, 60.1 MB after 2,000); follow's own containers (Follower,
+  WakeGate, _Lock, EventTail, the module caches `files._DISCARDED`, `cmd._ROCK_CACHE`, `cmd.SEAL_NOTES`,
+  `cmd.PLACE_NOTES`, `fairplay._AL_CACHE`) are bounded or keyed by save / project. No leak was proven; the memory
+  bound is the guarantee, not a proof of absence. The machine-wide exhaustion (four DF instances, 446 MB free of
+  32 GB) is not follow's to fix.
+* The heavy part found by the probe is a log RE-READ, not growth: one YEAR_REVIEW wake runs `plan.review_note` ->
+  `fort_facts`, which walks the whole events.jsonl + events.1.jsonl several times (`iter_events_rev`, ~800,000 parsed
+  lines, 35 s CPU, +30 MB transient on Basementflew). It lives in plan.py (other packages' scope) and is left as an open
+  risk; under memory pressure this is the call most likely to raise MemoryError (it is inside follow's error guard).
 * follow's own synthetic wakes (AUTO_FAIL, QUICKSAVE_FAILED, NEEDS_CLICK, SUPERVISE, PLAN_AUTO, PROJECT_STALE) are not
   routed into `wait`; only the three listed above are checked by `wait` itself. follow's stdout rate limits stay.
 * The dead-man never unpauses; the session must `dfllm cmd resume`. No auto-resume when a session comes back.
 * The playloop/PLAYBOOK text (Leitung's job) is not changed here; it should say: after a wake, act on the named line;
   `dfllm cmd resume` after DEADMAN; `dfllm cmd park` before a deliberate stop.
+
+## Tests
+
+* `tests/lua/test_neu1_deadman.lua` (11): stale / fresh / missing heartbeat, `on` false, resume by a live session, inbox
+  resume re-arms, a human unpause is not fought, load pause (df) left alone, Gordon's pause left alone, inbox TTL hold
+  taken over, whitelisted popup does not unpause, park (15 min without any wake) and resume.
+* `tests/test_neu1_wecken.py` (21): session heartbeat and switches, which commands write it, config/lint, contract,
+  class list (every class-A type is waking or quiet), wake within a second, quiet types/decisions, cursor between waits,
+  repeat rule, cursor far behind, DEADMAN / FOLLOW_OFF / KERNEL_STALE, CLI line + cli.log, `act` false, bounded cursor,
+  status lines, sleep error (BUG-791), restart_why / rss, hand-over to a copy and failed copy (BUG-793).
+* Test harness: `tests/lua/kern_world.lua H.boot` writes a fresh session.json (a live session); `k_mock` turns the
+  dead-man off unless a test sets `reflex.deadman`.
 
 ## 5. Live-Erwartung
 
