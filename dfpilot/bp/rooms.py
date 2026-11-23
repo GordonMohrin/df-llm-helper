@@ -61,6 +61,7 @@ PARAMS = {
     "workshops": {"skip": ("", None, None), "add": ("", None, None), "surface": (0, 0, 1), "rebuild": (0, 0, 1)},
     "depot": {},                      # BUG-368: SURFACE, not BUILD: no room (nothing dug, no Z4, no burrow)
     "tradepost": {},                  # BUG-488: SURFACE too: the trade pile beside the depot (no fortcore needed)
+    "foodpile": {},                   # NEU1 (E4): SURFACE too: the start set's food and drink pile beside the wagon
     # BUG-297: surface = 1 builds the plots on soil floor that stands already (no dig, no door, no burrow): sites.rank
     # offers such sites on soil-marked floor inside the fort or next to its entrance when no room site lies on soil
     # BUG-696: size = the plot's size step of a surface farm (PLOT_SIZES: 0 = 5x7, 1 = 5x4, 2 = 4x4, 3 = 3x3, 4 = 2x2)
@@ -412,6 +413,21 @@ def tradepost(p: dict) -> Plan:
     # sites.rank offers open surface floor beside the manifest depot; autotrade=true, and baseline registers it by name (logistics add trade).
     P = Plan("tradepost", "infra")
     P.stage("place", "place").ent(0, 0, TRADEPOST[0] - 1, TRADEPOST[1] - 1, 0, "g", "name=dfllm-trade autotrade=true")
+    return P
+
+
+FOODPILE = (5, 3)        # NEU1 (E4): the start set's food pile block (width, height)
+FOODPILE_NAME = "dfllm-start"
+
+
+def foodpile(p: dict) -> Plan:
+    """Food stockpile (5x3, drink included) on open surface floor beside the wagon, no fortcore needed (NEU1, decision E4)."""
+    # NEU1 (Run 16a i1 Manorsubtle, Bachwald, Mansionlauded: the first year's stockpiles came with fortcore stage 1; a fort whose core
+    # dig stalled kept its food and drink on the wagon's ground): the start set's pile alone. Nothing dug, no door, no burrow; sites.rank
+    # offers open surface floor on the citizens' walk group (the middle of the snapshot = the wagon). The kernel's start set counts
+    # any food stockpile; the name lets it recognise this one when the settings cannot be read.
+    P = Plan("foodpile", "infra")
+    P.stage("place", "place").ent(0, 0, FOODPILE[0] - 1, FOODPILE[1] - 1, 0, "f", f"name={FOODPILE_NAME}")
     return P
 
 
@@ -904,7 +920,7 @@ BUILD = {"dining": dining, "bedrooms": bedrooms, "tombs": tombs, "hospital": hos
          "captives": captives, "cistern": cistern, "hall": hall, "guildhall": guildhall, "barracks": barracks,
          "stockroom": stockroom, "refuge_beds": refuge_beds, "refuge_drink": refuge_drink}
 
-SURFACE = {"depot": depot, "tradepost": tradepost}            # BUG-368: templates that build on open surface floor and join no room set
+SURFACE = {"depot": depot, "tradepost": tradepost, "foodpile": foodpile}            # BUG-368: templates that build on open surface floor and join no room set
 
 
 def plot_rects(p: dict) -> list[tuple[int, int, int, int, int]]:

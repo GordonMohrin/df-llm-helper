@@ -41,7 +41,7 @@ def test_year1_validates_and_covers_p0_to_p7():
     ids = [p["id"] for p in doc["phases"]]
     assert ids == [f"P{i}" for i in range(8)]
     assert [p["approve"] for p in doc["phases"]] == [False] * 6 + [True, True]  # ★ = P6, P7
-    assert doc["phases"][0]["deliver"][0] == {"k": "baseline"}
+    assert doc["phases"][0]["deliver"][:2] == [{"k": "startset"}, {"k": "baseline"}]   # NEU1 (E4): the survival start set first
 
 
 def test_year1_deliverables_are_meaningful():

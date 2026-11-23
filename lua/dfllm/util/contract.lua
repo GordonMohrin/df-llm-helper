@@ -49,6 +49,7 @@ C.MODULES = {
   {name = 'perf',      wp = 'WP1', every = {ms = 1000}},
   {name = 'selftest',  wp = 'WP1', every = {ms = 60000}},
   {name = 'cavern',    wp = 'WP6', every = {ticks = 100}},     -- FR-98: the military clears the caverns (G16)
+  {name = 'startset',  wp = 'NEU1', every = {ticks = 1200}},   -- NEU1 (E4): the survival start set of week 1 (phase 0)
 }
 
 -- Event registry (§12): class fixed per type; by = emitting module ('any' = every module).
@@ -376,6 +377,7 @@ C.STATE_OWNERS = {
   ['alert.*'] = 'seal', ['wave.*'] = 'siege', ['snap.*'] = 'snapshot', ['water.*'] = 'water', ['stale.*'] = 'kern',
   ['traps.*'] = 'traps',
   ['cav.*'] = 'cavern',                            -- FR-98
+  ['ss.*'] = 'startset',                           -- NEU1 (E4): the survival start set
 }
 
 -- Persistent site-data keys (§10). Stored as dfhack.persistent site strings encoded with util/json.
@@ -657,6 +659,9 @@ C.STATE_SPEC = obj({
   -- plugged cavern shafts, clr = 1 the caverns count as clear (the P6 deliverable sweep)
   cav = obj({st = str(nil, {'off', 'wait', 'open', 'muster', 'kill', 'recall', 'close'})},
             {why = str(60), n = NAT, k = NAT, l = NAT, acc = NAT, clr = FLAG}),
+  -- NEU1 (E4, startset.lua): the survival start set: d = 1 handed over to the core (idle for good), m = the parts not standing
+  -- (shops, farm, pile, office, water; 'water?' = not scanned yet), f = the parts given up after max_tries requests
+  ss = obj({d = FLAG}, {m = arr(str(8), 0, 5), f = arr(str(8), 0, 5)}),
 })
 
 -- string formats (§1.1); explicit byte ranges, so LC_CTYPE cannot change them

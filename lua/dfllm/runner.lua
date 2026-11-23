@@ -199,7 +199,8 @@ M.MOODABLE = {'Carpenters', 'Masons', 'Craftsdwarfs', 'Jewelers', 'MetalsmithsFo
 local OWNER = {baseline = 'baseline', squads = 'military', metal = 'military', drill = 'readiness',
                ready = 'readiness', stock = 'economy', orders = 'economy', bolts = 'economy', trade = 'trade',
                sweep = 'cavern',     -- FR-99: the P6 cavern sweep (cavern.cleared)
-               kit = 'military'}                                                         -- FR-100
+               kit = 'military',                                                         -- FR-100
+               startset = 'startset'}                     -- NEU1 (E4): the survival start set of phase 0 (startset.done)
 local PLAN_DRIVEN = {proj = true, workshops = true}
 
 local S = {}   -- module state, rebuilt by init (persist docs + caches)
@@ -3667,7 +3668,8 @@ end
 -- rebuild policy paused the workshops project while 41 ghosts waited for slabs and 69 bodies for coffins): a workshops
 -- project of Masons and/or Carpenters only (`tomb_shops`: every other moodable type skipped, nothing added; follow's
 -- why=slabs / why=mandatory placement) runs too while care reports ghosts, old bodies or short coffins.
-local SUPPLY = {farms = true, cistern = true, stockroom = true, refuge_drink = true}     -- FR-69: the refuge's store
+local SUPPLY = {farms = true, cistern = true, stockroom = true, refuge_drink = true,     -- FR-69: the refuge's store
+                foodpile = true}                                                  -- NEU1 (E4): the start set's food pile
 local BEDS = {bedrooms = true, refuge_beds = true}
 local FOOD_SHOPS = {Still = true, Kitchen = true, Butchers = true, Fishery = true}
 local SEAL_PAUSES = {work = true, beds = true, supply = true}
@@ -5313,6 +5315,8 @@ local CHECK = {
     return type(t) == 'table' and (t.n or 0) > 0 and 100 * (t.full or 0) >= (dv.pct or 100) * t.n
   end,
   workshops = function(K, dv) return #Q.ws_missing(K, dv) == 0 end,
+  -- NEU1 (E4): the survival start set stands (or was handed over to the core, or is switched off)
+  startset = function(K) local ok, v = K.call('startset', 'done'); return ok and v == true end,
 }
 
 -- the workshop types of a `workshops` deliverable that no workshop of the manifest or the map has (BUG-301: the status
@@ -5362,6 +5366,10 @@ function Q.dv_text(K, dv)
     return trunc(k .. ' ' .. table.concat(m, ',', 1, math.min(#m, 4)) .. (#m > 4 and ('+' .. (#m - 4)) or ''), 40)
   end
   if dv.k == 'stock' then return trunc(string.format('%s>=%s', k, tostring(dv.min)), 40) end
+  if dv.k == 'startset' then                 -- NEU1: the parts it waits for ('startset shops,office')
+    local ok, w = K.call('startset', 'waiting')
+    return trunc(k .. ((ok and type(w) == 'string' and w ~= '') and (' ' .. w) or ''), 40)
+  end
   if dv.k == 'orders' then   -- BUG-524: the library's stage gate says what is missing (economy.held_why)
     local ok, why = K.call('economy', 'held_why', dv.lib)
     return trunc(k .. ((ok and type(why) == 'string' and why ~= '') and (' ' .. why) or ''), 40)

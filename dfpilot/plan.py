@@ -80,6 +80,15 @@ def surface_core_on() -> bool:
     return v if isinstance(v, bool) else SURFACE_CORE_DEF
 
 
+def startset_on() -> bool:
+    """NEU1 (E4): config/baseline.json startset.on (default true): the kernel's survival start set is requested and follow places it
+    (lua/dfllm/startset.lua). A missing or bad value keeps the default (lint --config reports it)."""
+    doc = files.read_json(paths.config_dir() / "baseline.json", retry=False)
+    sec = doc.get("startset") if isinstance(doc, dict) else None
+    v = sec.get("on") if isinstance(sec, dict) else None
+    return v if isinstance(v, bool) else True
+
+
 def surface_need(sf: dict | None) -> bool:
     """BUG-413: the fort's core goes on the surface (surface_facts.need) and the player's config allows it."""
     return bool((sf or {}).get("need")) and surface_core_on()
@@ -109,7 +118,7 @@ CISTERN_AQ = {"tpl": "cistern", "site": "S1", "p": {"water": "aquifer"}}    # BU
 # it runs only seal, tombs, food/drink, beds and the depot (runner.lua kind_of; this mirrors it for the plan builds)
 SEAL = "seal"
 DEFENSE_TPLS = ("seal", "barracks", "captives", GALLERY, "traps")  # defense class: never paused (fortcore stage >= 2 too)
-SUPPLY_TPLS = ("farms", "cistern", STOCKROOM, REFUGE_DRINK)        # food/water/drink (and a food/drink-only workshops)
+SUPPLY_TPLS = ("farms", "cistern", STOCKROOM, REFUGE_DRINK, "foodpile")   # food/water/drink (and a food/drink-only workshops); NEU1: foodpile
 BEDS_TPLS = ("bedrooms", REFUGE_BEDS)
 FOOD_SHOPS = {"Still", "Kitchen", "Butchers", "Fishery"}
 SEAL_PAUSES = {"work", "beds", "supply"}                           # paused while a seal is open (supply: not in need)

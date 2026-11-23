@@ -373,6 +373,8 @@
  "perf": {"quiet_s": 60, "carry_days": 28},
  "plan": {"stale_apply_years": 2, "surface_core": false},
  "view": {"on": true, "default_ttl_s": 300, "max_ttl_s": 900},
+ "startset": {"on": true, "parts": ["shops", "farm", "pile", "office", "water"], "shops": ["Still", "Carpenters"],
+              "retry_days": 7, "max_tries": 3},
  "burrow": {"guard": {"on": true, "shrink_pct": 30, "repair_per_day": 2000, "settle_days": 14, "every_s": 120}},
  "reserve": {
   "from_phase": "P1",

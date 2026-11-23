@@ -231,7 +231,9 @@ PLACE_KEYS = ("tombs", "workshops", "starter", "mood_rock", "rock", "farms", "se
               # BUG-654 (Run 16a i1 Basementflew): the workshops requests are keyed by their `why` (_on_event), and these six were not listed:
               # their snapshot came, `_on_snapshot` matched no job and nothing was ever placed (BUG-231 manager, BUG-267 missing, BUG-270 gear,
               # well, BUG-473 masonry, BUG-630 trade); cut = BUG-654's own, the shop types no citizen can walk to
-              "manager", "missing", "gear", "well", "masonry", "trade", "cut")
+              "manager", "missing", "gear", "well", "masonry", "trade", "cut",
+              # NEU1 (E4): the survival start set's parts (startset.lua, PROJECT_REQUEST why=startset)
+              "startset_shops", "startset_farm", "startset_pile", "startset_office")
 SEAL_HINT = ("dfllm cmd bp.place tpl=seal site=S1 at=audit (walls the audit's bypass; follow places it itself "
              "unless --no-auto); then dfllm audit")
 AUTO_REQUESTS = ("tombs", "workshops")            # PROJECT_REQUEST templates follow places itself
@@ -1099,6 +1101,8 @@ class Follower:
         try:                                   # one bad event must not lose the rest of the batch
             if t == "SNAPSHOT_READY":
                 self._on_snapshot(d, now)
+            elif t == "PROJECT_REQUEST" and d.get("why") == "startset":
+                self._request_startset(d, now)     # NEU1 (E4): before the generic workshops/office handlers
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "tombs":
                 self._request_tombs(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "bedrooms" and d.get("why") in ("mood_rock", "rock"):
@@ -1612,6 +1616,35 @@ class Follower:
             self.jobs[key]["need"] = list(need)
         return True
 
+    def _request_startset(self, d: dict, now: float) -> None:
+        """NEU1 (decision E4; Run 16a i1 Manorsubtle, Bachwald, Mansionlauded: no still, office or farm while the core dig stalled,
+        thirst): the kernel's start set asks for a missing part (lua/dfllm/startset.lua). The part goes on the surface beside the wagon
+        while the fort has no core to hang it on (no Z4), into the core when one exists; plan.surface_core (BUG-413) does not hold the
+        start set back. Shops: only the missing types (`need`: kept although the manifest lists a lost one). Off with
+        config/baseline.json startset.on = false."""
+        from .plan import _has_z4, startset_on
+        if not startset_on():
+            return
+        tpl, z4 = d.get("tpl"), _has_z4(self.dir)
+        if tpl == "workshops":
+            from .cmd import _extra_shops, _moodable
+            mood, extra = _moodable(), set(_extra_shops())
+            want = [x for x in d.get("types") or [] if isinstance(x, str) and (x in mood or x in extra)]
+            if not want:
+                return
+            params: dict = {"skip": ",".join(x for x in mood if x not in want)}
+            if any(x in extra for x in want):
+                params["add"] = ",".join(x for x in want if x in extra)
+            if not z4:
+                params["surface"] = 1
+            self._request_place("startset_shops", "workshops", params, "S1", now, prio=1, need=want)
+        elif tpl == "farms":
+            self._request_place("startset_farm", "farms", {"plots": 1} if z4 else {"plots": 1, "surface": 1}, "S1", now, prio=1)
+        elif tpl == "foodpile":
+            self._request_place("startset_pile", "foodpile", {}, "S1", now, prio=1)
+        elif tpl == "office":
+            self._request_place("startset_office", "office", {} if z4 else {"surface": 1}, "S1", now, prio=1)
+
     def _request_access(self, d: dict, now: float) -> None:
         """BUG-424 (Run 16a i1 Manorsubtle: the brook lay in a rock gully 8 tiles from the start room, 13 of 15 died of thirst, the
         player could not dig there by the water rule): economy's PROJECT_REQUEST cistern why=no_water carries the water tile nearest
@@ -1839,7 +1872,7 @@ class Follower:
                         prev = files.read_json(_placed(self.dir, tpl))
                         files.log_cli(self.dir, "follow", "auto:probe", args, gate["why"] + "; " + pwhy)
             if tpl == "farms":
-                cid = self._place_farms(args, now, snap)
+                cid = self._place_farms(args, now, snap, urgent=key == "startset_farm")
             elif tpl == "workshops" and key != "starter":
                 cid = self._place_workshops(args, now, snap, need)
             else:
@@ -1884,7 +1917,7 @@ class Follower:
             raise BpError(f"{first}; BUG-394: surface=1 too: {last}")
         raise first if first else BpError("workshops: nothing to try")
 
-    def _place_farms(self, args: dict, now: float, snap: dict) -> str:
+    def _place_farms(self, args: dict, now: float, snap: dict, urgent: bool = False) -> str:
         """BUG-340 (Run 15d Drillchamber y379-y382: 220 AUTO_FAIL `only 0 free site(s) for farms plots=2` while food fell to
         0 days; the plans placed three surface farms plots=1 that fed the fort, one a year): economy's farms request tries
         the farms room at its plots, then fewer plots (farm_tries), then in PEACE a surface farm on soil floor (cmd.place
@@ -1892,7 +1925,7 @@ class Follower:
         from .cmd import BpError
         st = files.read_state(self.dir) or {}
         first = None
-        for p in farm_tries(args.get("p") or {}, st.get("mode"), urgent=food_urgent(st)):
+        for p in farm_tries(args.get("p") or {}, st.get("mode"), urgent=urgent or food_urgent(st)):   # NEU1: the start set's farm
             try:
                 cid = self._send("bp.place", {**args, "p": p}, "farms", now, snap=snap)
             except BpError as e:

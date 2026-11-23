@@ -61,6 +61,7 @@ MODULES = [
     ("trade", "WP9", False, {"ticks": 100}), ("baseline", "WP8", False, {"ticks": 33600}),
     ("perf", "WP1", False, {"ms": 1000}), ("selftest", "WP1", False, {"ms": 60000}),
     ("cavern", "WP6", False, {"ticks": 100}),      # FR-98: the military clears the caverns (G16)
+    ("startset", "NEU1", False, {"ticks": 1200}),  # NEU1 (E4): the survival start set of week 1 (phase 0)
 ]
 
 DECISIONS = {
@@ -134,6 +135,7 @@ STATE_OWNERS = {
     "alert.*": "seal", "wave.*": "siege", "snap.*": "snapshot", "water.*": "water", "stale.*": "kern",
     "traps.*": "traps",
     "cav.*": "cavern",                                                     # FR-98
+    "ss.*": "startset",                                                    # NEU1 (E4): the survival start set
 }
 
 # kernel fault and slowness rules (CONTRACTS §3.3.5-3.3.6), mirrors contract.KERN
@@ -1356,7 +1358,10 @@ STATE = Obj(
          # plugged shafts, k/l = kills and losses of the running (else the last) sweep, acc = plugged cavern shafts, clr = 1
          # the caverns count as clear (the P6 deliverable `sweep`)
          "cav": Obj(req={"st": Str(enum=["off", "wait", "open", "muster", "kill", "recall", "close"])},
-                    opt={"why": Str(maxbytes=60), "n": NAT, "k": NAT, "l": NAT, "acc": NAT, "clr": FLAG})})
+                    opt={"why": Str(maxbytes=60), "n": NAT, "k": NAT, "l": NAT, "acc": NAT, "clr": FLAG}),
+         # NEU1 (E4, startset.lua): the survival start set: d = 1 handed over to the core, m = the parts not standing (shops, farm,
+         # pile, office, water; 'water?' = not scanned yet), f = the parts given up after max_tries requests
+         "ss": Obj(req={"d": FLAG}, opt={"m": Arr(Str(maxbytes=8), 0, 5), "f": Arr(Str(maxbytes=8), 0, 5)})})
 
 HEARTBEAT = Obj(req={"v": Const(V), "wall": NAT, "frame": NAT, "tick": TICK, "paused": Bool(), "mode": MODE,
                      "seq": NAT})
@@ -1388,7 +1393,8 @@ PLAN_DEFAULTS = {"military": {"pct": 15, "squads": {"melee": 2, "xbow": 1}, "cv_
 DELIVER_KEYS = {"baseline": [], "proj": ["tpl"], "squads": ["n"], "drill": [], "workshops": ["types"],
                 "stock": ["key", "min"], "orders": ["lib"], "trade": ["n"], "ready": ["lvl"],
                 "metal": ["pct"], "bolts": ["n"], "kit": ["pct"],   # FR-100: kit = soldiers fully equipped %
-                "sweep": []}                                         # FR-99: sweep = the caverns cleared (cavern.cleared)
+                "sweep": [],                                         # FR-99: sweep = the caverns cleared (cavern.cleared)
+                "startset": []}                                      # NEU1 (E4): the survival start set stands (startset.done)
 
 
 def _deliver_check(d):
