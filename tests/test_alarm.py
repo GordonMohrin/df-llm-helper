@@ -130,14 +130,15 @@ def test_reflex_events_validate():
 
 def test_decision_d14_peace_gates(tmp_path):
     from dfpilot import fairplay
-    assert schema.DECISIONS["D-14"] == "down"
+    assert schema.DECISIONS["D-14"] == "inner"                                # NEU1 (E2): the inner gate up in PEACE
     p = tmp_path / "decisions.yaml"
-    p.write_text("D-14: up  # answered\n", encoding="utf-8")
-    assert fairplay.decision_errors(p) == [] and fairplay.get_decision("D-14", p) == "up"
+    for v in ("up", "down", "inner"):
+        p.write_text(f"D-14: {v}  # answered\n", encoding="utf-8")
+        assert fairplay.decision_errors(p) == [] and fairplay.get_decision("D-14", p) == v
     p.write_text("D-14: open\n", encoding="utf-8")
-    assert fairplay.decision_errors(p) and fairplay.get_decision("D-14", p) == "down"
+    assert fairplay.decision_errors(p) and fairplay.get_decision("D-14", p) == "inner"
     shipped = fairplay.parse_decision_lines((fairplay.REPO / "config" / "decisions.yaml").read_text(encoding="utf-8"))
-    assert shipped["D-14"][0] == "down" and shipped["D-14"][1].startswith("answered 2026-10-15 by Gordon")
+    assert shipped["D-14"][0] == "inner" and shipped["D-14"][1].startswith("answered 2026-11-23 by Leitung")
 
 
 def test_reflex_config_validation(tmp_path):

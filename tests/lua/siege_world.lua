@@ -149,8 +149,24 @@ function S.install(W, opts)
   return W
 end
 
+-- NEU1 (P5 Tore): the gate rules before Neuausrichtung 1 (D-14 down: every gate down in PEACE; straggler holds; no fail-closed
+-- check, no drink rule, no return window). Tests written for those rules pass `legacy = true` (or merge S.legacy() into cfg).
+function S.legacy(cfg)
+  cfg = cfg or {}
+  cfg.decisions = cfg.decisions or {}
+  if cfg.decisions['D-14'] == nil then cfg.decisions['D-14'] = 'down' end
+  cfg.reflex = cfg.reflex or {v = 2}
+  cfg.reflex.gate = cfg.reflex.gate or {}
+  local g = cfg.reflex.gate
+  for k, v in pairs({close_at_once = false, fail_closed = false, drink_inside = false, return_every = 0}) do
+    if g[k] == nil then g[k] = v end
+  end
+  return cfg
+end
+
 function S.world(opts)
   opts = opts or {}
+  if opts.legacy then opts.cfg = S.legacy(opts.cfg) end
   local persist = opts.persist or {}
   if persist.manifest == nil and opts.manifest ~= false then persist.manifest = opts.manifest or S.manifest() end
   local W = kmock.new{units = opts.units, mode = opts.mode, persist = persist, strict = opts.strict ~= false,

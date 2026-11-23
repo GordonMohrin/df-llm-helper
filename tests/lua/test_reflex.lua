@@ -1,6 +1,7 @@
 -- reflex (FR-36/49/51/52/53/58): the arrival lockdown and the interrupt channel on the siege world (k_mock, strict
 -- contract checks). Run 9: an army walked in over lowered drawbridges the kernel did not know (no manifest); the
 -- kernel woke the operator only at BREACH and its seal failed closed.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local S = require('siege_world')
 local H = require('kern_world')

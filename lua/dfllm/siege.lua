@@ -22,7 +22,9 @@
 -- action (an arrival announcement, INVASION, the first armed hostile in sight), the civ alert is wanted in every mode,
 -- PEACE included; reflex kicks it in the same step (siege.hold_alert). BUG-011: the kick and the step share one
 -- decision (alert_plan: seal chooses the burrow, the interior one kept for a lockdown) and nothing switches the alert
--- off while the lockdown holds it, so siege stays the one owner of its state. With peace_gates (D-14) up, RECOVERY
+-- off while the lockdown holds it, so siege stays the one owner of its state. NEU1: with D-14 inner (the default) RECOVERY keeps
+-- the inner gates up too, and with gate.close_at_once a SIEGE raises outer and inner at T0 (no RAISE_BY / cut hold for citizens
+-- outside while a hostile is in sight). With peace_gates (D-14) up, RECOVERY
 -- lowers only the core seal (outer/inner stay up). Without manifest outer/inner bridges sealed_ticks counts the time
 -- gate.sealed() holds (the unmanaged bridges a lockdown raised), so a fort without fortcore reports its seal too.
 -- Intake waves, the sortie through O1 and the inner station (Gordon 2026-10-16, BUG-029): see that section below.
@@ -1431,6 +1433,11 @@ local function raise(K, g, now)
   -- BUG-338: civilians in the killing field (Kern+ may cover it) or outside are no "nobody outside" for an inner bridge
   local atk = type(cu) == 'table' and (cu.tick or -1) >= st.t0 and int(cu.atk) or -1
   local nb = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge or {}
+  -- NEU1 (P5 Tore, E2, gate.close_at_once): with a hostile on the map nobody outside is waited for: the gates close at once
+  -- (the crush rules of gate still hold; siege's STRANDED rescue and stranded_drink look after those shut out)
+  local okc, ncfg = K.call('gate', 'neu_cfg')
+  local now_close = okc and type(ncfg) == 'table' and ncfg.close_at_once and K.mode() ~= 'DRILL'
+                    and type(h) == 'table' and (int(h.vis) or 0) - (int(h.vpp) or 0) > 0
   local whys, fresh = {}, {}
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
@@ -1438,7 +1445,8 @@ local function raise(K, g, now)
       if wave_skip(b, now) or gate_state(K, b) == 'destroyed' then why = nil      -- BUG-030: nothing to raise
       elseif not why then
         local d = nb[b]
-        if outside == 0 and (list ~= g.inner or atk <= 0) then why = 'inside'
+        if now_close then why = 'hostile'
+        elseif outside == 0 and (list ~= g.inner or atk <= 0) then why = 'inside'
         elseif t >= M.RAISE_BY then why = 'timer'
         elseif d and d >= 0 and d <= M.NEAR_RAISE then why = 'hostile_near' end
         if why and gate_state(K, b) ~= 'up' and not rescuing(b) then fresh[#fresh + 1] = b end
@@ -1446,8 +1454,9 @@ local function raise(K, g, now)
       whys[b] = why
     end
   end
-  -- BUG-028 (c): a first raise that would cut citizens off from drink or food waits (until a hostile is near)
-  local held = #fresh > 0 and cut_holds(K, g, fresh, now) or {}
+  -- BUG-028 (c): a first raise that would cut citizens off from drink or food waits (until a hostile is near); NEU1: not
+  -- with close_at_once and a hostile on the map
+  local held = #fresh > 0 and not now_close and cut_holds(K, g, fresh, now) or {}
   for _, list in ipairs({g.outer, g.inner}) do
     for _, b in ipairs(list) do
       local why = whys[b]
@@ -1464,7 +1473,9 @@ end
 local function lower(K, g)
   local q = st.rq
   local low = false
-  local keep = tostring(K.cfg.decisions and K.cfg.decisions['D-14'] or 'down') == 'up'
+  local pm = tostring(K.cfg.decisions and K.cfg.decisions['D-14'] or 'inner')
+  local keep = pm == 'up'
+  local keep_inner = keep or pm ~= 'down'          -- NEU1 (D-14 inner, the default; an unknown value too): B1 stays up
   if q >= M.REC_INNER then
     local cores = true
     local function open(b)                    -- BUG-030: a destroyed bridge is an open way, as good as lowered
@@ -1476,7 +1487,7 @@ local function lower(K, g)
       if not open(b) then cores = false end
     end
     low = cores
-    if cores and not keep then
+    if cores and not keep_inner then
       for _, b in ipairs(g.inner) do
         want(K, b, 'down', 'recovery')
         if not open(b) then low = false end
@@ -2689,7 +2700,11 @@ local function apply(K, a, g, now)
       if s == 'destroyed' then gone[b] = true
       elseif not rescuing(b) and s ~= 'up' then fresh[#fresh + 1] = b end
     end
-    local held = #fresh > 0 and cut_holds(K, g, fresh, now) or {}
+    local okc, ncfg = K.call('gate', 'neu_cfg')        -- NEU1: close_at_once: no cut hold with a hostile on the map
+    local h = K.census.h
+    local close = okc and type(ncfg) == 'table' and ncfg.close_at_once and type(h) == 'table'
+                  and (int(h.vis) or 0) - (int(h.vpp) or 0) + (int(h.inside) or 0) > 0
+    local held = #fresh > 0 and not close and cut_holds(K, g, fresh, now) or {}
     for _, b in ipairs(g.all) do
       if not held[b] and not rescuing(b) and not gone[b] then want(K, b, 'up', 'breach', st.tb + M.BREACH_AT) end
     end

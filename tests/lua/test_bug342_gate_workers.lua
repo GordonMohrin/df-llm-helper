@@ -5,6 +5,7 @@
 -- the reason. And fortcore's B2 landing room 'dfllm-levers-b2' lies 1-3 tiles from B2's footprint: a lever puller waiting
 -- there held his own bridge ('B2 up waits for citizen 27079 next to it', 27079 a puller of dfllm-levers-b2).
 -- Fixture: the siege world (k_mock, the lever simulator) with a lever room beside O1 and act.burrow_units.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local S = require('siege_world')
 local C = require('dfllm.util.contract')

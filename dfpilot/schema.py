@@ -66,7 +66,7 @@ MODULES = [
 DECISIONS = {
     "D-01": "B", "D-02": "unchanged", "D-03": "rule", "D-04": "off", "D-05": "off", "D-06": "off",
     "D-07": "unchanged", "D-08": "dropped", "D-09": "no", "D-10": "off", "D-11": "accepted",
-    "D-12": "15/20", "D-13": "no", "D-14": "down",
+    "D-12": "15/20", "D-13": "no", "D-14": "inner",
 }
 
 ACT = {
@@ -891,7 +891,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # it (the player's click looks the same): n popups gone, text = the front one as last seen, kind = the arbiter's class
     "POPUP_GONE": ("C", "arbiter", _d("n:i", "text:s kind:s")),
     "MODE": ("C", "kern", _d("from:s to:s", "why:s")),
-    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia")),
+    # NEU1 (P5 Tore): state fail_closed (missing = what is missing to raise it again, why = the refused lowering) | return
+    # (n = civilians outside the raised inner gate in PEACE, units = their ids)
+    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =
     # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`); BUG-129: regions =

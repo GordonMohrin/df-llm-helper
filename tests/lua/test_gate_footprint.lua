@@ -5,6 +5,7 @@
 -- and raised after 300 ticks onto whoever stood there. Here: the real sense, threat, siege and gate on the siege world
 -- without a fort manifest, so the bridges are unmanaged (X1 = O1's building, X2 = B1's, X3 = B2's) as in a fort
 -- without fortcore, plus the manifest variant of the Run 10 corridor.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local S = require('siege_world')
 local Z = S.Z

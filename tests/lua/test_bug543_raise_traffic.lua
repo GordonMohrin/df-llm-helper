@@ -14,6 +14,7 @@
 --   (4) BREACH, citizens and soldiers walking over O1, B1 and B2 (a stream with gaps, the army far away): nobody on a footprint when it moves,
 --       all three rise (the emergency rules are unchanged);
 --   (5) a soldier standing at his station / a tame animal walking 3 tiles out do not hold a DRILL raise (the drill does not stall on them).
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local S = require('siege_world')
 local kmock = require('dfllm.util.k_mock')

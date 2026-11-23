@@ -2,6 +2,7 @@
 -- readiness on k_mock (strict) and the lever/bridge simulator: real pulls, KPIs at T+1,200, PEACE
 -- lowers again, pass/fail rules, DRILL_FAIL on the 2nd failure, refusals, aborts, automatic drills,
 -- reload mid-drill. Invariants every run: one pending pull per bridge, 0 double toggles.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local X = require('wp6_world')
 local json = require('dfllm.util.json')
