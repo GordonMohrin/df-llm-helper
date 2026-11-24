@@ -42,6 +42,17 @@ Measurable goal of the plan: loss per siege under 10 %, at most one lost caravan
    `down_guard` (so `gate.want`, the PEACE pass and every queued lowering pull): the bridge stays up and GATE (C) state
    `fail_closed` says `missing` and the refused `why` (once a game day per bridge, again when the cause changes). Exempt: the
    player's `lever`, siege's `rescue` (lives), `intake` and `sortie` (SIEGE, own checks).
+   **Both ways (BUG-802, verifier retry).** The quiet PEACE raise itself is fail-closed: `peace_want` does not raise a manifest
+   bridge that is not up while `gate.missing` names something; it stays DOWN (why `cannot_close_again`) and GATE (C) state
+   `fail_closed` (`why` `cannot_close_again`, `missing` e.g. `no linked lever inside Kern+ or the refuge`, text `B1 stays down
+   in PEACE (fail closed, not raised): ...`, once a game day or on a changed cause, silent before the first lever resolve).
+   Otherwise a B1 with every lever in the bailey would send a puller out, rise, and then refuse every caravan / migrant /
+   return window for good (run-16a y544 and run-16c have exactly that layout). Readiness R0 `lever_outside` / BUG-774's
+   `lever_build` keep pushing the inside lever; once it is linked the next pass raises B1. A bridge the kernel ITSELF raised in
+   quiet PEACE (why `peace_gates`; marked in the persisted `m.gate.pup`, set on the observed raise, cleared on a down) stays
+   lowerable by the PEACE windows when a gap opens later (census stale, the inside lever gone): `fail_closed` exempts it in
+   PEACE without a lockdown; it is then not raised again until nothing is missing. A raise by a lockdown, SIEGE or the player
+   is unchanged: it is not lowered while something is missing.
 6. **RECOVERY** (siege `lower`): with D-14 `inner` B2 comes down, B1 stays up, O1 comes down at +2,400.
 7. **Lever in the core from stage 1.** fortcore already paints Kern+ over the Z3 lever strip in stage 1 and builds B1 (stage 2),
    O1 and B2 (stage 3) with their levers inside it; a test now pins this (`tests/test_neu1_tore.py`). For other forts BUG-774's
@@ -92,4 +103,7 @@ tantrums ("toppled by Tholtig, Farmer"), which a raised gate does not prevent ei
    `up held: N civilians on its attack side` lines, no STRANDED `raising ... held` lines; BRIDGE_CRUSH 0.
 4. Wertung (P1): loss per siege under 10 % for forts on D-14 `inner` versus the `down` instances.
 5. If a lever or puller is missing: GATE `... stays up (fail closed, window down refused): <missing>` instead of an open
-   gate; never a GATE_FAIL `no_lever` on a bridge that was lowered by the kernel in PEACE.
+   gate after a lockdown / siege raise; never a GATE_FAIL `no_lever` on a bridge that was lowered by the kernel in PEACE.
+6. BUG-802: a fort whose B1 levers all lie outside Kern+ (run-16a Basementflew before BUG-774's lever) shows GATE `B1 stays
+   down in PEACE (fail closed, not raised): no linked lever inside Kern+ or the refuge` at most once a game day, no B1 pull in
+   PEACE, and B1 `up` within a pass or two after the inside lever is linked; no caravan visit with B1 `up` the whole time.

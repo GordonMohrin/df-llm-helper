@@ -2112,6 +2112,9 @@ local function fail_closed(K, name, w)
   if not valid_spec(spec) then return nil end           -- an unmanaged bridge: no Kern+ / role to judge by
   local r = rt[name]
   if not (r and r.last == 'up') then return nil end     -- nothing to keep closed
+  -- BUG-802: a bridge the kernel itself raised in quiet PEACE (peace_gates, st.pup) stays lowerable by the PEACE windows
+  -- (caravan, migrants, return, peace): peace_want raises it only while nothing is missing, a later gap must not seal it
+  if (st.pup or {})[name] and K.mode() == 'PEACE' and not lock_why(K) then return nil end
   local miss = M.missing(K, name)
   if not miss then return nil end
   local now = K.now().tick
@@ -2339,9 +2342,17 @@ local function observe(K, name, r, s, now, fp, prev, cur)
     end
     K.emit('GATE', 'C', name .. ' ' .. s, d)
   end
+  local was = r.last
   r.last = s
   if s == 'moving' or s == 'unknown' then return end
   local br = st.br[name]
+  -- BUG-802: remember whether this raise was the kernel's quiet PEACE raise (peace_gates); a down clears it, a first read
+  -- (load) keeps the persisted mark
+  st.pup = st.pup or {}
+  local pu
+  if s == 'up' and was ~= nil then pu = (br and br.want == 'up' and br.why == 'peace_gates') or nil
+  elseif s == 'up' then pu = st.pup[name] end
+  if st.pup[name] ~= pu then st.pup[name], dirty = pu, true end
   -- double toggle: the bridge reached the wanted state in this epoch and left it again
   if br and br.want and r.settled == br.want and s ~= br.want and (r.settled_at or -1) >= br.since then
     st.kpi.dbl = st.kpi.dbl + 1
@@ -3217,6 +3228,24 @@ local function peace_want(K, name, role, now)
   if lock_why(K) then return 'up', 'lockdown' end
   if peace_keeps(K, role) then
     if window_open(K, name, now) then return 'down', 'window' end
+    -- BUG-802 (fail closed both ways): never raise in quiet PEACE what the kernel could not lower and raise again; a
+    -- lockdown / SIEGE raise is not this path. Readiness R0 lever_outside / BUG-774 keep pushing the inside lever.
+    local spec = (K.manifest().bridges or {})[name]
+    local r0 = rt[name]
+    if M.neu_cfg(K).fail_closed and valid_spec(spec) and not (r0 and r0.last == 'up') then
+      local miss = M.missing(K, name)
+      if miss then
+        local r = runtime(name)
+        -- not resolved yet (the load): silent, the next pass after resolve() decides and says it
+        if r.resolved and (now - (r.pd_ev or -1e9) >= M.FAIL_REPEAT or r.pd_miss ~= miss) then
+          r.pd_ev, r.pd_miss = now, miss
+          K.emit('GATE', 'C', cut(string.format('%s stays down in PEACE (fail closed, not raised): %s', name, miss), 200),
+                 {bridge = name, state = 'fail_closed', missing = miss, why = 'cannot_close_again'})
+          K.log('warn', 'gate: %s stays down in PEACE: %s (gate.fail_closed, cannot_close_again)', name, miss)
+        end
+        return 'down', 'cannot_close_again'
+      end
+    end
     if peace_mode(K) == 'inner' then
       local dry = kern_dry(K)
       if dry then
@@ -3458,7 +3487,7 @@ function M.init(K)
       end
     end
   end
-  st.ex, st.winb, st.seen, st.gone, st.lost, st.hold = {}, {}, {}, {}, {}, {}
+  st.ex, st.winb, st.seen, st.gone, st.lost, st.hold, st.pup = {}, {}, {}, {}, {}, {}, {}
   M.K = K                                         -- BUG-236: set_want names a replaced player want in kern.log
   if type(p) == 'table' then
     local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
@@ -3515,6 +3544,9 @@ function M.init(K)
     end
     for name, t in pairs(type(p.winb) == 'table' and p.winb or {}) do
       if type(name) == 'string' and int(t) then st.winb[name] = int(t) end
+    end
+    for name, v in pairs(type(p.pup) == 'table' and p.pup or {}) do     -- BUG-802: the kernel's PEACE raises
+      if type(name) == 'string' and v == true then st.pup[name] = true end
     end
   end
   rt, rt_ex, pub, dirty, PULL, last_pass, bds = {}, nil, nil, false, nil, nil, nil

@@ -181,22 +181,69 @@ T.test('caravan: the arrival report opens B1 (no hostile in sight); a goblin in 
 end)
 
 ---------------------------------------------------------------- fail closed
-T.test('fail closed: B1 levers all outside Kern+: the caravan window is refused, B1 stays up, GATE fail_closed says what is missing', function()
+-- BUG-802 (verifier, n1-tore retry): fail closed both ways. A quiet PEACE raise of B1 whose levers all lie outside Kern+ would
+-- send a puller out into the bailey and then be refused every lowering (caravan, migrants, return): a permanent seal. So it is
+-- never raised; once an inside lever is linked it rises, and the windows lower and raise it normally.
+T.test('fail closed (BUG-802): B1 levers all outside Kern+: NOT raised in PEACE (GATE names the lever), nobody walks out; an ' ..
+       'inside lever linked: B1 rises, the caravan window lowers it and it rises again', function()
   local m = S.manifest()
   m.bridges.B1.levers = {{54, 34, Z}, {55, 34, Z}}       -- the attack side, outside Kern+ (y >= 41)
   local W = world{manifest = m}
   run(W, 1200)
-  T.eq(S.bstate(W, 'B1'), 'up', 'raised in PEACE (someone walks out to the lever)')
-  W.event('REPORT', {type = 'CARAVAN_ARRIVAL', text = 'A caravan from the hills has arrived.'})
-  run(W, 1200)
-  T.eq(S.bstate(W, 'B1'), 'up', 'not lowered: nobody inside could raise it again')
+  T.eq(S.bstate(W, 'B1'), 'down', 'not raised in PEACE')
+  T.eq(#S.pulls(W, 'B1'), 0, 'no pull: nobody sent out to the lever')
   local ev = gate_ev(W, 'fail_closed')
   T.ok(#ev >= 1, 'GATE fail_closed')
-  T.ok(ev[1] and ev[1].d.missing:find('inside Kern+', 1, true), ev[1] and ev[1].msg)
-  T.eq(ev[1] and ev[1].d.why, 'window')
+  T.ok(ev[1] and ev[1].d.missing:find('no linked lever inside Kern+', 1, true), ev[1] and ev[1].msg)
+  T.eq(ev[1] and ev[1].d.why, 'cannot_close_again')
+  T.ok(ev[1] and ev[1].msg:find('B1 stays down in PEACE', 1, true), ev[1] and ev[1].msg)
+  T.eq(#gate_ev(W, 'fail_closed'), 1, 'once (rate-limited), not every pass')
+  for _, u in ipairs(S.fort_units()) do
+    local x = W.unit(u.id)
+    T.ok(in_kern(x._m.x, x._m.y), 'unit ' .. u.id .. ' still inside Kern+')
+  end
   T.eq(#W.find_events('GATE_FAIL'), 0)
   local ok, miss = W.K.call('gate', 'missing', 'O1')
   T.eq(miss, nil, 'O1 has its levers inside: nothing missing')
+  -- BUG-774's lever work lands: a lever inside Kern+ is built and linked, the manifest lists it
+  local lv = S.add_lever(W, 'B1', {56, 46, Z}, 23)
+  m.bridges.B1.levers[#m.bridges.B1.levers + 1] = {56, 46, Z}
+  W.K.persist.set('manifest', m)
+  local t1 = S.abs_now()
+  run(W, 1200)
+  T.eq(S.bstate(W, 'B1'), 'up', 'raised once it can be closed again')
+  local p = S.pulls(W, 'B1')
+  T.ok(#p >= 1 and p[#p].lever == lv.id, 'pulled at the inside lever: ' .. tostring(p[#p] and p[#p].lever))
+  T.eq(#ups_after(W, 'B1', t1), 1)
+  W.event('REPORT', {type = 'CARAVAN_ARRIVAL', text = 'A caravan from the hills has arrived.'})
+  run(W, 900)
+  T.eq(S.bstate(W, 'B1'), 'down', 'the caravan window lowers it')
+  run(W, 5400)
+  T.eq(S.bstate(W, 'B1'), 'up', 'up again after the caravan window')
+  T.eq(#W.crushed, 0)
+  T.eq(#W.find_events('GATE_FAIL'), 0)
+end)
+
+T.test('fail closed (BUG-802): a B1 the kernel raised in PEACE stays lowerable by the windows when a gap opens later (inside ' ..
+       'lever gone); it is then not raised again', function()
+  local W = world{}
+  run(W, 1200)
+  T.eq(S.bstate(W, 'B1'), 'up')
+  local m = W.K.manifest()
+  m.bridges.B1.levers = {{54, 34, Z}}                    -- the inside levers vanish from the list (deconstructed)
+  for _, id in ipairs(S.LEVERS.B1) do W.buildings[id].linked_mechanisms = kmock.vec{} end
+  S.add_lever(W, 'B1', {54, 34, Z}, 24)
+  W.K.persist.set('manifest', m)
+  run(W, 600)
+  local ok, miss = W.K.call('gate', 'missing', 'B1')
+  T.ok(miss ~= nil, 'something is missing now: ' .. tostring(miss))
+  W.event('REPORT', {type = 'CARAVAN_ARRIVAL', text = 'A caravan from the hills has arrived.'})
+  run(W, 900)
+  T.eq(S.bstate(W, 'B1'), 'down', "the caravan window still lowers the kernel's own PEACE raise")
+  run(W, 5400)
+  T.eq(S.bstate(W, 'B1'), 'down', 'not raised again while it could not be closed again')
+  local fc = gate_ev(W, 'fail_closed')
+  T.ok(#fc >= 1 and fc[#fc].d.why == 'cannot_close_again', fc[#fc] and fc[#fc].msg)
 end)
 
 T.test('fail closed: no civilian inside Kern+ to pull: the window lowering is refused; fail_closed false lowers it', function()

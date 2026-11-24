@@ -769,6 +769,7 @@ Related: FR-xx, BUG-xx
 | [BUG-780](BUG-780-militia-captain-hunts-vermin-far-away.md) | fixed (offline, live-untested) | high | Run 16c i3 Lancemoment y380: militia captain 26415 on HuntVermin 90 tiles into the cavern level, stranded, dead | `lua/dfllm/seal.lua` (`hunt_errands`, `hunt_job_of`, `job_stray`) |
 | [BUG-781](BUG-781-orders-for-a-material-the-fort-does-not-have.md) | fixed (offline, live-untested) | medium | Run 16b i2 Whirledrampart y451: 60 orders stuck 24-64 days on 'no rock' / 'no bars STEEL / IRON' (library imports for a material the fort never had) | `lua/dfllm/economy.lua` (`M.order_dead`, `M.mat_dead`), config `orders.dead_*` |
 | [BUG-782](BUG-782-refuge-drink-without-cistern-or-refuge-room.md) | fixed (offline, live-untested) | high | Run 16b i2 y451 / Run 16a i1 y543: refuge_dry for good with no cistern route and `refuge_drink` refused 'no refuge in manifest' | `lua/dfllm/economy.lua` (`T.drinkpile`), `lua/dfllm/act.lua` (`drink_pile`), `dfpilot/bp/sites.py` (`kern_store`) |
+| [BUG-802](BUG-802-peace-raise-seals-gate-fail-closed.md) | fixed (offline, live-untested) | high | NEU1 P5 review: the quiet PEACE raise of B1 (D-14 inner) with every lever outside Kern+ sent a puller out, then fail_closed refused every later lowering (caravan, migrants, return): a permanent seal | `lua/dfllm/gate.lua` (`peace_want`, `fail_closed`, `observe`, `st.pup`) |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

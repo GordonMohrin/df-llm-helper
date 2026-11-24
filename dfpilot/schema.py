@@ -891,7 +891,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # it (the player's click looks the same): n popups gone, text = the front one as last seen, kind = the arbiter's class
     "POPUP_GONE": ("C", "arbiter", _d("n:i", "text:s kind:s")),
     "MODE": ("C", "kern", _d("from:s to:s", "why:s")),
-    # NEU1 (P5 Tore): state fail_closed (missing = what is missing to raise it again, why = the refused lowering) | return
+    # NEU1 (P5 Tore): state fail_closed (missing = what is missing to raise it again, why = the refused lowering, or
+    # cannot_close_again = BUG-802: the quiet PEACE raise not made) | return
     # (n = civilians outside the raised inner gate in PEACE, units = their ids)
     "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
