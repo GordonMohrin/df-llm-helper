@@ -606,7 +606,7 @@ C.STATE_SPEC = obj({
              cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT}),     -- Run 11: melee follows the gear
              rel = obj({n = NAT, why = str(24), t = NAT, sq = str(8)}),          -- BUG-327: the last release
              -- FR-100 (G18): soldiers, fully equipped, armor, weapon in hand, training weapon in hand, squads on the policy
-             kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}),
+             kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}, {sq = NAT, sqw = NAT, wb = NAT}),   -- BUG-827
              -- FR-79: the militia rotation per squad key (schema.py _ROT)
              rot = obj(nil, {A = ROT_ONE, B = ROT_ONE, C = ROT_ONE})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}, {nb = arr(str(24), 0, 5), stale = NAT}),   -- BUG-534: wants no caravan ever had; BUG-642: stale Leaving caravans

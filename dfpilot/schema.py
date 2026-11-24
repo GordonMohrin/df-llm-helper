@@ -1298,7 +1298,10 @@ STATE = Obj(
                          "rel": Obj(req={"n": NAT, "why": Str(maxbytes=24), "t": NAT, "sq": Str(maxbytes=8)}),
                          # FR-100 (G18): n soldiers, full = armor + a weapon, armor = every armor slot worn, weapon = a
                          # weapon in hand, wood = a training weapon in hand, tr = squads on the training policy
-                         "kit": Obj(req={"n": NAT, "full": NAT, "armor": NAT, "weapon": NAT, "wood": NAT, "tr": NAT}),
+                         "kit": Obj(req={"n": NAT, "full": NAT, "armor": NAT, "weapon": NAT, "wood": NAT, "tr": NAT},
+                                    # BUG-827: sq = members of the first melee squad, sqw = of them armed (the growth ladder's 'squad'
+                                    # step), wb = wooden hands counted armed by a real weapon waiting
+                                    opt={"sq": NAT, "sqw": NAT, "wb": NAT}),
                          # FR-79: the militia rotation per squad key: w = window months, on = 1 inside the window, n = members
                          # now, z = squad target, e = eligible citizens, lo/hi = windows served by the eligible, nx = game days
                          # to the next close (0 = the turnover is due), rt = turnovers done, mv = members swapped in all, why =

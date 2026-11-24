@@ -677,6 +677,18 @@ end
 -- position (or the census does not know it): {sets, melee, want, xbow, fill = {key = n}, parts}: `per` stays the demand
 -- (economy orders the gear for it), `fill` is what the squads are filled to, `xbow` the crossbow positions added to
 -- the demand while metal is short
+-- BUG-827 (Run 17 i1/i3/i4, 24.11.: 'first squad: 0 of 2 members hold a real weapon (need 3+)' at pop 30 for good): the growth ladder's
+-- first step (readiness.growth_ladder 'squad') needs growth.armed_min members in the first melee squad, but at pop 30 (15 % = 5 soldiers, 2
+-- of them crossbows) the even split gave squad A 2 seats and the gear floor capped it at GEAR_FLOOR 2: the step the kernel's own squad
+-- setup could not reach, so the cap 30 never lifted. The seats the first melee squad needs: growth.armed_min once the fort stands at
+-- 2/3 of growth.base adults (below that the ladder holds nothing yet), else 0. Fail closed stays: the seats do not arm anybody
+function M.armed_floor(K, adults)
+  local ok, c = K.call('readiness', 'growth_conf')
+  if not (ok and type(c) == 'table' and c.on and int(c.armed_min) and int(c.base)) then return 0 end
+  if (adults or 0) < (c.base * 2) // 3 then return 0 end
+  return c.armed_min
+end
+
 function M.targets(K)
   local cu = K.census.u
   local adults, cit = type(cu) == 'table' and cu.adults or 0, type(cu) == 'table' and cu.cit or 0
@@ -695,10 +707,12 @@ function M.targets(K)
   -- picks in all now.
   local ci = K.census.i
   if type(ci) == 'table' and ((ci.w_axe or 0) < M.TOOLS_MIN or (ci.w_pick or 0) < M.TOOLS_MIN) then short = true end
-  n = math.min(n, M.SIZE * #act)
   local per = {}
   local melee, xbow = {}, nil
   for _, s in ipairs(act) do per[s.key] = 0; if s.kind == 'melee' then melee[#melee + 1] = s.key else xbow = s.key end end
+  local af = #melee > 0 and M.armed_floor(K, adults) or 0
+  if af > 0 then n = math.max(n, math.min(adults, af + (xbow and 2 or 0))) end     -- BUG-827: room for the first squad's seats
+  n = math.min(n, M.SIZE * #act)
   if #act == 0 then return 0, per, zero, short end
   if n == 0 then return 0, per, zero, short end
   local nx = 0
@@ -711,6 +725,7 @@ function M.targets(K)
   local left = n - nx
   for i, k in ipairs(melee) do
     local share = math.min(M.SIZE, (left + (#melee - i)) // (#melee - i + 1))
+    if i == 1 then share = math.min(M.SIZE, left, math.max(share, af)) end          -- BUG-827: the first squad first
     per[k] = share
     left = left - share
   end
@@ -1167,9 +1182,13 @@ function M.gear_fill(K, per, act)
   end
   local fill, avail, got = {}, math.max(sets, M.GEAR_FLOOR), 0
   for k, v in pairs(per) do fill[k] = v end
-  for _, k in ipairs(melee) do
-    local f = math.min(per[k] or 0, avail)
-    fill[k], avail, got = f, avail - f, got + f
+  local cu = K.census.u
+  local af = M.armed_floor(K, type(cu) == 'table' and cu.adults or 0)
+  for i, k in ipairs(melee) do
+    local a = avail
+    if i == 1 then a = math.max(a, math.min(af, per[k] or 0)) end                   -- BUG-827: the first squad keeps armed_min seats
+    local f = math.min(per[k] or 0, a)
+    fill[k], avail, got = f, math.max(0, avail - f), got + f
   end
   if got >= want then return nil end
   local g = {sets = sets, melee = got, want = want, xbow = 0, fill = fill, parts = parts}
@@ -5476,7 +5495,8 @@ function M.state(K)
   if rl then mil.rel = {n = rl.n, why = rl.why, t = rl.t, sq = rl.sq} end
   local kt = M.kit_stats(K)                          -- FR-100 (G18): soldiers fully equipped, squads on wooden weapons
   if kt.n > 0 then
-    mil.kit = {n = kt.n, full = kt.full, armor = kt.armor, weapon = kt.weapon, wood = kt.wood, tr = kt.tr}
+    mil.kit = {n = kt.n, full = kt.full, armor = kt.armor, weapon = kt.weapon, wood = kt.wood, tr = kt.tr,
+               sq = kt.sq_n, sqw = kt.sq_w, wb = kt.wb}      -- BUG-827: the first melee squad's members / armed ones, wooden ones backed
   end
   for key, info in pairs(rt.rot) do                  -- FR-79: the militia rotation per squad (counts, no names)
     local r = {}

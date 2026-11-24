@@ -293,7 +293,17 @@ def blocked_evidence(save_dir: Path, s: dict, evs: list[dict], now: int, key: st
     kind, _, what = key.partition(":")
     if kind == "free":                                  # the gear lies in the stock and the soldiers do not take it
         fr = _i(_o(_o(s.get("mil")).get("free")).get(what)) or 0
-        return f"{fr} freie {what} im Lager, die Soldaten tragen sie nicht (state mil.free)" if fr else ""
+        if not fr:
+            return ""
+        # BUG-828: mil.free counts every free metal item of the class (picks, axes, forbidden, reserved, far ones), not what a soldier can
+        # take: say so, and name the real binder (the growth gate's first-squad step) when it is the one that holds
+        txt = f"{fr} freie {what} im Lager (state mil.free: mit Hacken/Spitzhacken, gesperrten und reservierten)"
+        gh = _o(_o(s.get("ready")).get("gh"))
+        if what == "weapon" and gh.get("halt") == "squad":
+            kit = _o(_o(s.get("mil")).get("kit"))
+            sq = f", Trupp A {kit['sqw']} von {kit['sq']} bewaffnet" if "sq" in kit and "sqw" in kit else ""
+            txt += f"; Wachstums-Tor squad: {gh.get('need', '?')}{sq}"
+        return txt
     if kind == "trade":
         nb = _o(s.get("trade")).get("nb") or []
         if what in nb or what.split(":")[0] in nb:
