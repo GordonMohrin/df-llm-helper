@@ -481,3 +481,16 @@ def test_hook_blocks_shell_writes_to_the_ladder_files(text, blocked):
     from dfpilot import lint
     ok, why = lint.cmd(text, shell=True)
     assert ok is not blocked, why
+
+
+def test_blocked_evidence_free_weapon_truthful(tmp_path, cfg_dir):
+    """BUG-828: the 'free weapons' hint names the squad gate's need and does not claim the soldiers could take them all."""
+    now = (Y + 2) * YEAR
+    d = run_dir(tmp_path, evs=[])
+    lz = leiter.compute(d, state(ready={"lvl": 0, "fail": ["no_outer"], "gh": {"cap": 30, "next": 50, "halt": "squad",
+                                         "need": "first squad: 0 of 3 members hold a real weapon (need 3+, all armed)"}},
+                                 mil={"kit": {"n": 8, "full": 8, "armor": 8, "weapon": 3, "wood": 0, "tr": 0, "sq": 3, "sqw": 0},
+                                      "free": {"weapon": 40}}))
+    txt = lz["tracks"]["ruestung"]["blocked"]
+    assert txt.startswith("40 freie weapon") and "die Soldaten tragen sie nicht" not in txt
+    assert "Wachstums-Tor squad: first squad: 0 of 3" in txt and "Trupp A 0 von 3" in txt

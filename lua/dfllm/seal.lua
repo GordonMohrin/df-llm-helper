@@ -1297,7 +1297,9 @@ local function supply_check(K, R)
     local inside = math.min(total, kb[cls] + ((rb and rb.exists and refuge ~= kern) and rb[cls] or 0))
     local days = int(stock[e[2]])
     local c = {total = total, inside = inside, pct = total > 0 and (100 * inside // total) or 100,
-               days = (days and total > 0) and math.min(9999, days * inside // total) or nil}
+               -- BUG-829 (Run 17 i2: 'drink inside the core ? d'): no drink in the fort at all (total 0) with a known stock day count is
+               -- 0 days inside, not 'unknown': the growth ladder's drink step then names the real shortage
+               days = days and (total > 0 and math.min(9999, days * inside // total) or 0) or nil}
     res[cls] = c
     if total >= CFG.sup_min and 100 - c.pct > CFG.sup_out_pct then bad[#bad + 1] = cls; toks[#toks + 1] = cls end
   end

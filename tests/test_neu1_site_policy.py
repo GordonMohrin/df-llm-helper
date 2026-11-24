@@ -122,9 +122,31 @@ def test_sites_add_only_a_rectangle_a_scan_read_ok(tmp_path):
     assert lines[-1].endswith(": embark --site brook") and "goblins near" in lines[1]
 
 
-def test_shipped_sites_file_is_a_valid_site_list():
-    # the shipped file holds the vetted sites of the live world (players fill it with `sites add`): check its shape, not that it is empty
+def test_shipped_sites_file_is_wellformed():
+    """The shipped file is live data (the players add vetted sites to it): only its shape is tested, never its content."""
     doc = json.loads((EMB / "sites.json").read_text(encoding="utf-8"))
     assert doc["v"] == 1 and isinstance(doc["sites"], list) and "sites add" in doc["about"]
-    assert all(isinstance(s.get("id"), str) and len(s.get("site", [])) == 4 for s in doc["sites"])
-    assert drv.site_lines()
+    for ent in doc["sites"]:
+        assert ent["id"] and len(ent["site"]) == 4 and ent["verdict"] in ("ok", "reject")
+    assert drv.site_lines(EMB / "sites_missing.json")[0].startswith("  no vetted sites")
+
+
+def test_main_sites_and_embark_site(tmp_path, monkeypatch, capsys):
+    calls = _calls(monkeypatch, tmp_path)
+    sites = tmp_path / "sites.json"
+    monkeypatch.setattr(drv, "SITES_PATH", sites)
+    out = tmp_path / "dfllm-runtime" / "embark"
+    _result(out, "s1", [_row((7, 10), (2, 2))], time.time())
+    assert drv.main(["sites", "add", "brook", "7,10,2,2", "--note", "brook, trees"]) == 0
+    assert drv.main(["sites"]) == 0
+    assert "embark --site brook" in capsys.readouterr().out
+    assert calls == [], "sites makes no DF call"
+    assert drv.main(["embark", "--site", "brook", "--no-wait"]) == 0
+    spec = json.loads(Path(calls[0][1]).read_text(encoding="utf-8"))
+    assert spec["mode"] == "embark" and spec["site"] == [7, 10, 2, 2]
+    for bad in (["--site", "none"], ["7,10", "--site", "brook"], ["--here", "--site", "brook"]):
+        with pytest.raises(SystemExit):
+            drv.main(["embark", "--no-wait", *bad])
+    with pytest.raises(SystemExit):
+        drv.main(["sites", "add", "dry", "8,10,1,1"])
+    assert len(calls) == 1
