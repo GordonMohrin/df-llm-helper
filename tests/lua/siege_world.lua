@@ -80,6 +80,9 @@ function S.install(W, opts)
   df.trap_type = {Lever = 1, PressurePlate = 2}
   df.job_type = {PullLever = 223, Other = 1}
   df.general_ref_type = {BUILDING_HOLDER = 6}
+  -- squad 1 (the soldier of S.fort_units) stands at its station 4 tiles inside B1 (fortcore's melee station): gate's quiet PEACE raise
+  -- (BUG-831) ignores a soldier at his own station; opts.station = true installs it (S.world{station = true})
+  if opts.station then df.squad = {find = function(id) if id == 1 then return {orders = {{pos = {x = 51, y = 44, z = Z}}}} end end} end
   df.building_trapst = {is_instance = function(_, b) return type(b) == 'table' and b._kind == 'trap' end}
   -- insane citizens: unit spec insane=true (k_mock: isCitizen/isResident/getCitizens honour
   -- include_insane like Lua API.txt:1464-1470, :1696)

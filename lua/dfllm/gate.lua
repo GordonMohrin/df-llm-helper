@@ -317,14 +317,29 @@ end
 -- return window of return_open ticks once they stood there return_every ticks; 0 = off), gate.drink_inside (D-14 inner: the
 -- inner gate stays down in PEACE while Kern+ is known to hold no drink and no wet well). Bad values: the defaults below.
 M.RETURN_EVERY, M.RETURN_OPEN = 1200, 600
+-- Neuausrichtung 2 (BUG-831, Run 17d i4 Girderroots y374: the kernel's own quiet PEACE raise of B1 crushed 3 citizens; 9 of its 45 raises
+-- had a unit step onto the footprint while it moved, 536 ticks after the pull was queued): a raise in quiet PEACE (why peace_gates) is
+-- pulled only after PEACE_CLEAR ticks (at least the measured lever latency) in which no unit (standing or walking, but a soldier at his
+-- station) was within PEACE_R tiles of the footprint; while it is pending any such unit cancels the pull; a GATE_CRUSH_RISK of such a
+-- raise keeps the bridge down in PEACE for PEACE_LOCK_DAYS game days, doubled per further risk up to 28 (st.pq). SIEGE/BREACH raises
+-- are not touched.
+M.PEACE_R, M.PEACE_CLEAR, M.PEACE_LOCK_DAYS = 20, 600, 3
 function M.neu_cfg(K)
   local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
   local function flag(v) if type(v) == 'boolean' then return v end return true end
   local every, open = math.tointeger(r.return_every), math.tointeger(r.return_open)
   if not every or every < 0 or every > 24000 then every = M.RETURN_EVERY end
   if not open or open < 100 or open > 4800 then open = M.RETURN_OPEN end
+  -- Neuausrichtung 2 (BUG-831): the quiet PEACE raise of an inner gate (peace_raise false = no raise in PEACE at all: the pre-NEU1
+  -- D-14 down behaviour), the tiles around the footprint and the ticks they must stay free of walkers before it is pulled, the
+  -- game days a crush risk of such a raise keeps the bridge down in PEACE (0 = no lock)
+  local pr, pc, pl = math.tointeger(r.peace_clear_r), math.tointeger(r.peace_clear), math.tointeger(r.peace_lock_days)
+  if not pr or pr < 2 or pr > M.PATH_R then pr = M.PEACE_R end
+  if not pc or pc < 0 or pc > 4800 then pc = M.PEACE_CLEAR end
+  if not pl or pl < 0 or pl > 28 then pl = M.PEACE_LOCK_DAYS end
   return {close_at_once = flag(r.close_at_once), fail_closed = flag(r.fail_closed), drink_inside = flag(r.drink_inside),
-          return_every = every, return_open = open}
+          return_every = every, return_open = open, peace_raise = flag(r.peace_raise), peace_clear_r = pr, peace_clear = pc,
+          peace_lock_days = pl}
 end
 
 ---------------------------------------------------------------- DF reads (buildings, jobs)
@@ -1678,6 +1693,7 @@ end
 -- PEACE (a threat, a drill) or `lever up` ends it (kern.log names why), and it ends by itself at its tick (st.hold =
 -- {<b> = {u = until, by, t = since}}, persisted)
 M.HOLD_DAYS = 3
+M.HOLD_MAX = 120           -- BUG-833: the most game days a `lever` down with days=N holds a bridge down (config lever_hold_days: 0..28)
 function M.hold_cfg(K)
   local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
   local n = math.tointeger(r.lever_hold_days)
@@ -2186,6 +2202,7 @@ local function set_want(name, w, why, deadline, now)
   local r = runtime(name)
   r.bad, r.nw, r.block_since, r.lat0, r.nw_out, r.ap, r.ap_last, r.ap_ask = {}, 0, nil, nil, nil, 0, nil, nil
   r.esc = nil
+  r.pq_t0, r.pq_busy, r.pq_who, r.pq_ev = nil, nil, nil, nil          -- BUG-831: the quiet PEACE raise looks again
   r.block, r.block_ev, r.hold_log, r.forced_ev, r.hold_seen = nil, nil, nil, nil, nil
   r.held_sum, r.fail_at, r.switch, r.want_ms = nil, nil, nil, nil
   r.qd, r.qw, r.qlog, r.qnote, r.qref = nil, nil, nil, nil, nil   -- BUG-251: the quiet window of a lowering
@@ -2272,6 +2289,77 @@ local function unblock(r, now)
 end
 local function allow() return math.max(M.PULL_ALLOW, st.lat and st.lat.t or 0) end
 
+-- Neuausrichtung 2 (BUG-831): is `name`'s raise a quiet PEACE one (the kernel's own peace_gates raise: PEACE, no lockdown)? Only those
+-- wait for a quiet footprint and lock the bridge down after a crush risk; SIEGE, BREACH, a lockdown, a window's end and the player's
+-- lever are timed or manual and keep their own rules.
+function M.quiet_raise(K, name)
+  local br = st.br[name]
+  return br ~= nil and br.want == 'up' and br.why == 'peace_gates' and K.mode() == 'PEACE' and not lock_why(K)
+         and M.neu_cfg(K).peace_raise
+end
+
+-- the game days that keep `name` down in PEACE after a crush risk of its quiet raise, or nil (st.pq[name] = {n risks, u until, t last})
+function M.peace_locked(name, now)
+  local q = st and st.pq and st.pq[name]
+  if q and now < q.u then return q end
+end
+
+-- a unit stood on the footprint of a quiet PEACE raise while it moved (or died on it): the bridge is not raised in PEACE for
+-- peace_lock_days game days, doubled per further risk (28 at most); the kernel's own raise is not worth a citizen. `m` = the move
+function M.peace_lock(K, name, m, e)
+  if m.locked then return end
+  m.locked = true
+  local c = M.neu_cfg(K)
+  if c.peace_lock_days <= 0 then return end
+  local now = K.now().tick
+  local q = st.pq[name] or {n = 0, u = 0, t = 0}
+  q.n = q.n + 1
+  local days = math.min(28, c.peace_lock_days * (2 ^ math.min(q.n - 1, 5)))
+  q.u, q.t = now + math.tointeger(days) * 1200, now
+  st.pq[name], dirty = q, true
+  local txt = string.format('%s stays down in PEACE for %d days: %s %s stood on it while the kernel raised it (risk %d)', name,
+                            math.tointeger(days), tostring(e and e.k or 'unit'), tostring(e and e.id or '?'), q.n)
+  K.emit('GATE', 'C', txt:sub(1, 200), {bridge = name, state = 'peace_traffic', days = math.tointeger(days), n = q.n,
+                                      unit = e and e.id or nil, why = 'crush_risk'})
+  K.log('warn', 'gate: %s (gate.peace_lock_days %d)', txt, c.peace_lock_days)
+  flush(K)
+end
+
+-- the first unit that makes a quiet PEACE raise of `name` unsafe now: any living unit that is not hostile within gate.peace_clear_r
+-- tiles of the footprint (citizens, children, pets, visitors and merchants of the census; standing, working or walking: a dwarf needs
+-- ~9 ticks a tile and the pull-to-up window is the measured lever latency, so no unit that near is safe), except a soldier standing at
+-- his own squad station (fortcore's melee station lies 2 tiles from B1). `skip` = {[id] = true}: the job's worker and the bridge's
+-- pullers in their room. The near list is re-read every frame, the wide census pass (PATH_R tiles) every FAST ticks.
+function M.peace_busy(K, name, r, sc, now, skip)
+  if not sc then return nil end
+  local R, hit = M.neu_cfg(K).peace_clear_r, nil
+  for _, e in ipairs(sc.far or sc.list or {}) do
+    if not (skip and skip[e.id]) and e.d <= R and not M.at_station(e) and (not hit or e.d < hit.d) then hit = e end
+  end
+  return hit
+end
+
+-- the quiet PEACE raise waits until no walker was near the footprint for the whole lever latency window (max(gate.peace_clear, the
+-- measured queue-to-up ticks)); GATE says why once a game day. Returns true while it waits. A pending pull is cancelled by the caller.
+function M.peace_wait(K, name, r, sc, now, skip)
+  r.pq_t0 = r.pq_t0 or now
+  local e = M.peace_busy(K, name, r, sc, now, skip)
+  if e then r.pq_busy, r.pq_who = now, e end
+  local need = math.max(M.neu_cfg(K).peace_clear, st.lat and st.lat.t or 0)
+  local since = math.max(r.pq_t0, r.pq_busy or -1e9)
+  if not e and now - since >= need then return false end
+  if not r.pq_ev or now - r.pq_ev >= M.FAIL_REPEAT then
+    r.pq_ev = now
+    local w = e or r.pq_who
+    local txt = w and string.format('%s up waits in PEACE: %s %d %d tiles from it, no walker near it for %d ticks needed (lever latency window)',
+                                    name, tostring(w.k), w.id, w.d, need)
+                or string.format('%s up waits in PEACE: no walker near it for %d ticks needed (lever latency window)', name, need)
+    K.emit('GATE', 'C', txt:sub(1, 200), {bridge = name, state = 'peace_wait', need = need, unit = w and w.id or nil})
+    K.log('info', 'gate: %s', txt)
+  end
+  return true
+end
+
 -- BUG-027: units seen near the footprint while the bridge is pulled or moves, the closest sighting per unit
 local function mv_note(m, list, now)
   for _, e in ipairs(list or {}) do
@@ -2299,7 +2387,8 @@ end
 local function mv_open(K, name, r, s, now, fp, prev, cur)
   local to = s == 'moving' and (r.settled == 'up' and 'down' or 'up') or s
   local m = {t = now, b = name, bid = r.bid, fp = fp and {fp[1], fp[2], fp[3], fp[4], fp[5], fp[6]} or nil, to = to,
-             pull = r.job and r.job.queued or -1, lever = r.job and r.job.lever or -1, seen = {}, by = {}}
+             pull = r.job and r.job.queued or -1, lever = r.job and r.job.lever or -1, seen = {}, by = {},
+             q = to == 'up' and M.quiet_raise(K, name) or nil}      -- BUG-831: a raise in quiet PEACE (its risk locks the bridge)
   if prev and now - prev.t <= 2 * M.FAST then mv_note(m, prev.list, prev.t) end
   if cur then mv_note(m, cur.list, now) end
   mvl.list[#mvl.list + 1] = m
@@ -2320,6 +2409,7 @@ function M.crush_risk(K, name, m, sc, fp)
       K.emit('GATE_CRUSH_RISK', 'B', txt:sub(1, 200), {bridge = name, unit = e.id, k = e.k, to = tostring(m.to),
                                                         pull = m.pull, pos = {e.x, e.y, e.z}})
       K.log('warn', 'gate: %s', txt)
+      if m.q then M.peace_lock(K, name, m, e) end                -- BUG-831
       return
     end
   end
@@ -2703,7 +2793,20 @@ local function control(K, name, spec, now)
         end
         local own = dir == 'up' and own_pullers(K, name, now) or {}
         if dir == 'up' then hold = drop_own(hold, own) end   -- BUG-342: nor its pullers in their room
-        if #hold > 0 then                             -- BUG-310: a unit on the footprint cancels a forced raise too
+        -- BUG-831: a quiet PEACE raise is cancelled for any walker near the footprint while it is pending (not a 'blocked' cancel:
+        -- no give-up count, no gate_traffic question); the next pull waits for a whole quiet latency window again
+        local pbusy
+        if dir == 'up' and #hold == 0 and not hold.unknown and M.quiet_raise(K, name) then
+          local skip = {}
+          for id in pairs(own) do skip[id] = true end
+          if wid then skip[wid] = true end
+          pbusy = M.peace_busy(K, name, r, sc, now, skip)
+        end
+        if pbusy then
+          stale = 'peace'
+          r.pq_busy, r.pq_who, r.pq_ev = now, pbusy, nil
+          K.log('info', 'gate: %s up pull cancelled in PEACE: %s %d %d tiles from it', name, pbusy.k, pbusy.id, pbusy.d)
+        elseif #hold > 0 then                         -- BUG-310: a unit on the footprint cancels a forced raise too
           stale = 'blocked'
           r.block_since = r.block_since or now
           note_hold(K, name, spec.fp, dir, hold, now)
@@ -2811,6 +2914,7 @@ local function control(K, name, spec, now)
   end
   r.fj = nil
   if w == nil or w == s then
+    r.pq_t0, r.pq_busy, r.pq_who, r.pq_ev, r.pq_pos, r.pq_nt = nil, nil, nil, nil, nil, nil     -- BUG-831
     unblock(r, now); r.block_ev = nil
     r.fz_until, r.fz_d = nil, nil                   -- BUG-621: the approach force ends with the want
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
@@ -2837,6 +2941,11 @@ local function control(K, name, spec, now)
     return s
   end
   unblock(r, now)
+  -- BUG-831: a quiet PEACE raise is pulled only after a whole lever latency window without a walker near the footprint
+  if w == 'up' and M.quiet_raise(K, name) and M.peace_wait(K, name, r, sc, now, own_pullers(K, name, now)) then
+    r.stuck = 'peace_wait'
+    return s
+  end
   -- BUG-251: a lowering waits for its quiet window (nobody within MARGIN_DOWN tiles for QUIET_DOWN ticks)
   if w == 'down' and M.quiet_wait(K, name, r, br, sc, now) then r.stuck = 'quiet'; return s end
   local lid, why = pick(K, r, now, hd ~= nil)
@@ -3213,7 +3322,8 @@ local function return_window(K, name, now)
   r.ret = r.ret or now
   if now - r.ret < c.return_every then return end
   r.ret = nil
-  st.winb[name], dirty = now + c.return_open, true
+  -- BUG-831: the window counts from the bridge being down: the lowering pull takes the measured lever latency first
+  st.winb[name], dirty = now + c.return_open + (st.lat and st.lat.t or 0), true
   K.emit('GATE', 'C', cut(string.format('%s opens for %d ticks: %d civilians outside it in PEACE (return window)', name,
          c.return_open, atk), 200), {bridge = name, state = 'return', n = atk,
          units = type(cu.atk_ids) == 'table' and cu.atk_ids or {}})
@@ -3227,7 +3337,21 @@ local function peace_want(K, name, role, now)
   if not GATE_ROLES[role] and role ~= 'extra' then return 'down', 'peace' end
   if lock_why(K) then return 'up', 'lockdown' end
   if peace_keeps(K, role) then
+    if not M.neu_cfg(K).peace_raise then return 'down', 'peace' end     -- BUG-831: gate.peace_raise false: the pre-NEU1 D-14 down
     if window_open(K, name, now) then return 'down', 'window' end
+    -- BUG-831: a crush risk of the kernel's own PEACE raise keeps the bridge down (a bridge that is up stays: the windows lower it)
+    local q = M.peace_locked(name, now)
+    if q and not (rt[name] and rt[name].last == 'up') then
+      local r = runtime(name)
+      if not r.pt_ev or now - r.pt_ev >= M.FAIL_REPEAT then
+        r.pt_ev = now
+        local txt = string.format('%s stays down in PEACE: its last raise put a unit on the footprint (risk %d), %d more ticks',
+                                  name, q.n, q.u - now)
+        K.emit('GATE', 'C', txt:sub(1, 200), {bridge = name, state = 'peace_traffic', n = q.n, left = q.u - now, why = 'crush_risk'})
+        K.log('info', 'gate: %s', txt)
+      end
+      return 'down', 'peace_traffic'
+    end
     -- BUG-802 (fail closed both ways): never raise in quiet PEACE what the kernel could not lower and raise again; a
     -- lockdown / SIEGE raise is not this path. Readiness R0 lever_outside / BUG-774 keep pushing the inside lever.
     local spec = (K.manifest().bridges or {})[name]
@@ -3487,7 +3611,7 @@ function M.init(K)
       end
     end
   end
-  st.ex, st.winb, st.seen, st.gone, st.lost, st.hold, st.pup = {}, {}, {}, {}, {}, {}, {}
+  st.ex, st.winb, st.seen, st.gone, st.lost, st.hold, st.pup, st.pq = {}, {}, {}, {}, {}, {}, {}, {}
   M.K = K                                         -- BUG-236: set_want names a replaced player want in kern.log
   if type(p) == 'table' then
     local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
@@ -3547,6 +3671,11 @@ function M.init(K)
     end
     for name, v in pairs(type(p.pup) == 'table' and p.pup or {}) do     -- BUG-802: the kernel's PEACE raises
       if type(name) == 'string' and v == true then st.pup[name] = true end
+    end
+    for name, x in pairs(type(p.pq) == 'table' and p.pq or {}) do       -- BUG-831: the crush risks of quiet PEACE raises
+      if type(name) == 'string' and type(x) == 'table' and int(x.n) and int(x.u) then
+        st.pq[name] = {n = int(x.n), u = int(x.u), t = int(x.t) or 0}
+      end
     end
   end
   rt, rt_ex, pub, dirty, PULL, last_pass, bds = {}, nil, nil, false, nil, nil, nil
@@ -3979,6 +4108,9 @@ local function unit_death(K, ev)
   local cat = ic and ic.cause and DT.TYPE[ic.cause]
   if cat and cat ~= 'crushed' and m.d ~= 0 then return end
   mvl.crushed[id] = true
+  for _, e in ipairs(mvl.list) do      -- BUG-831: the crush of a quiet PEACE raise keeps the bridge down in PEACE (once per move)
+    if e.q and e.b == m.b and e.t == m.t then M.peace_lock(K, tostring(m.b), e, {k = m.k or 'unit', id = id}); break end
+  end
   local who_k = m.k or 'unit'
   local txt = string.format('%s %d crushed: %s', who_k, id, DT.bridge_why(m))
   local d = {bridge = tostring(m.b), unit = id, bid = m.bid, pull = m.pull, t = m.t, to = m.to, how = m.how, k = m.k}
@@ -4044,6 +4176,13 @@ M.on = {
 M.verbs.lever = function(K, args, cmd)
   local b, w = args.bridge, args.want
   if type(b) ~= 'string' or (w ~= 'up' and w ~= 'down') then return false, 'need bridge and want up|down' end
+  -- BUG-833: `days` = how long a `lever` down holds the bridge down, in game days (1..HOLD_MAX); without it gate.lever_hold_days
+  local days
+  if args.days ~= nil then
+    days = type(args.days) == 'number' and math.tointeger(args.days) or nil
+    if w ~= 'down' then return false, 'days belongs to want down (the hold)' end
+    if not days or days < 1 or days > M.HOLD_MAX then return false, string.format('days must be 1..%d game days', M.HOLD_MAX) end
+  end
   local mode = K.mode()
   if mode ~= 'PEACE' then
     local okc, open = K.call('player', 'open')
@@ -4061,7 +4200,7 @@ M.verbs.lever = function(K, args, cmd)
   local now = K.now().tick
   if w == 'up' then M.hold_end(K, b, 'lever up')
   else
-    local days = M.hold_cfg(K)
+    days = days or M.hold_cfg(K)
     if days > 0 then
       st.hold[b], dirty = {u = now + days * 1200, t = now, by = by:sub(1, 24)}, true
       hold = string.format('; held down %d days', days)

@@ -177,7 +177,7 @@ end)
 T.test('peace_gates up on a manifest fort: O1/B1 up in PEACE; a caravan or migrants open a window', function()
   local trade = {name = 'trade', every = {ticks = 100}, caravan = 0}
   function trade.state(K) return {trade = {caravan = trade.caravan, ratio = 0, done = 0}} end
-  local W = setup{tag = 'peaceup', cfg = {decisions = {['D-14'] = 'up'}}, extra = {trade}}
+  local W = setup{tag = 'peaceup', cfg = {decisions = {['D-14'] = 'up'}, reflex = {v = 2, gate = {peace_clear = 0, peace_clear_r = 2}}}, extra = {trade}}   -- BUG-831: no quiet window
   S.run(W, 700)
   T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), S.bstate(W, 'B2')}, {'up', 'up', 'down'})
   trade.caravan = 1

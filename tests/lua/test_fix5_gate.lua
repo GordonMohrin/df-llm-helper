@@ -151,6 +151,7 @@ T.test('BUG-235: PEACE, no enemy: citizens cut off from food behind a raised bri
   -- O1 is up (its lever pulled by hand), the zone between O1 and B1: citizens on the field outside O1 have no food
   local W = fort{up = {O1 = true}, units = {S.cit(11, 10, 15, Z)}}
   W.K.cfg.decisions['D-14'] = 'up'                    -- the peace gates keep O1 up: only the rescue lowers it
+  W.K.cfg.reflex = {v = 2, gate = {peace_clear = 0, peace_clear_r = 2}}  -- BUG-831: no quiet window before the PEACE raise (the subject here is the rescue)
   W.unit(11).counters2 = {thirst_timer = 0, hunger_timer = 55000}
   local rescue
   local n = 0

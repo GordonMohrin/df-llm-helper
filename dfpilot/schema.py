@@ -915,7 +915,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # NEU1 (P5 Tore): state fail_closed (missing = what is missing to raise it again, why = the refused lowering, or
     # cannot_close_again = BUG-802: the quiet PEACE raise not made) | return
     # (n = civilians outside the raised inner gate in PEACE, units = their ids)
-    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i")),
+    # BUG-831: state peace_wait (unit = the walker that makes a quiet PEACE raise wait, need = the quiet ticks needed) | peace_traffic
+    # (a risk of the kernel raise locks the bridge down in PEACE: days, left ticks, n risks, unit)
+    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i need:i unit:i days:i left:i")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =
     # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`); BUG-129: regions =
@@ -988,7 +990,8 @@ VERB_ARGS: dict[str, Obj] = {
                              "approve": Const(True)},
                       # BUG-519: unit = the hostile to follow (the INTRUDER's id); move = walk to an empty place anyway
                       opt={"gate": BRIDGE, "unit": NAT, "move": Bool()}),
-    "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}),
+    # BUG-833: days = game days a `down` holds the bridge down (1..120; without it gate.lever_hold_days, 3)
+    "lever": Obj(req={"bridge": BRIDGE, "want": Str(enum=["up", "down"])}, opt={"days": Int(1, 120)}),
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
