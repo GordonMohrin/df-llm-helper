@@ -354,3 +354,5 @@ T.test('BUG-848 raw dumps: pile:<id> dumps a stockpile, ws:<id> takes a stockpil
   local q = W.inbox('inspect', {what = 'why', key = 'ws:41'})
   T.ok(q.ok == false and tostring(q.msg):find('is a stockpile, not a workshop', 1, true), T.show(q.msg))
 end)
+
+T.done()

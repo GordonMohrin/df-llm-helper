@@ -271,10 +271,10 @@ T.test('NEU3 stall line: an order stall and a build stall carry their raw discri
   local W, _, ord = world{left = 6}
   local econ = require('dfllm.economy')
   local l = econ.stall_log(W.K, 'order', ord.id, ord.id)
-  T.ok(l and l:find('raw stall order: DF: no cancel reason seen | order ' .. ord.id, 1, true) and l:find('shop 1 stage 1/1 jobs=0 maxgen=10', 1, true) and l:find('holders=2 [free=2]', 1, true), tostring(l))
+  T.ok(l and l:find('raw stall order: DF: no cancel reason seen | DF cancel lines seen in window: 0 (source report', 1, true) and l:find(' | order ' .. ord.id, 1, true) and l:find('shop 1 stage 1/1 jobs=0 maxgen=10', 1, true) and l:find('holders=2 [free=2]', 1, true), tostring(l))
   T.eq(econ.stall_log(W.K, 'order', 4242, 4242), nil, 'no such order: no line')
   local b = econ.stall_log(W.K, 'build', '17', {at = '12,12,100', pos = {12, 12, 100}, labor = 'CARPENTER'})
-  T.ok(b and b:find('raw stall build: DF: no cancel reason seen | site 12,12,100', 1, true) and b:find('builders=0 []', 1, true), tostring(b))
+  T.ok(b and b:find('raw stall build: DF: no cancel reason seen | DF cancel lines seen in window: 0', 1, true) and b:find(' | site 12,12,100', 1, true) and b:find('builders=0 []', 1, true), tostring(b))
 end)
 
 -- 6. the cures are switches, default off ----------------------------------------------------------------------------------------------
