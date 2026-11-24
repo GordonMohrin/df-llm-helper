@@ -342,6 +342,7 @@ C.ACT = {
   squad_routine = {'military'}, squad_order = {'military'}, squad_uniform = {'military'},
   squad_unequip = {'military'}, squad_release = {'military'}, animal_slaughter = {'economy'}, zone_remove = {'runner'}, manager_office = {'economy'}, pond_remove = {'water'},
   hospital_remove = {'water'},                     -- BUG-034: a dry hospital's zones; BUG-131: hospital.retire
+  pile_barrels = {'economy'},                     -- BUG-834: the plant stockpiles' barrel limit frozen while a brew lacks an empty barrel
   ws_profile_open = {'economy'},                  -- BUG-767: a Still whose profile keeps the manager's brew jobs away
   workshop_retire = {'economy'},                  -- BUG-715: a workshop no citizen can reach, beside a reachable one of its type
   well_remove = {'water'},                         -- BUG-541: the dry well the GiveWater carriers stand at (well.retire)

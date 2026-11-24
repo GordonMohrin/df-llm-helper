@@ -35,7 +35,13 @@ A.LABOR_SETS = {mechanic = {name = 'MECHANIC', on = true}, farm = {name = 'PLANT
                 herb = {name = 'HERBALIST', on = false}, burn = {name = 'BURN_WOOD', on = false},    -- BUG-768: a dedicated digger / builder
                 furniture = {name = 'HAUL_FURNITURE', on = true},   -- BUG-768: a door, hatch, bed... job and nobody holds Furniture hauling
                 clean_fish = {name = 'CLEAN_FISH', on = true},      -- BUG-716: raw fish uncleaned, nobody holds Fish cleaning
-                hunt = {name = 'HUNT', on = false}}                  -- BUG-740: a soldier or captain walks out to hunt and dies there
+                hunt = {name = 'HUNT', on = false},                  -- BUG-740: a soldier or captain walks out to hunt and dies there
+                -- BUG-835 (Run 17 i2 Whirledrampart y485: MakeBarrel x40 'the labor this job needs is not known', nobody held Carpentry that the kernel
+                -- could name): the container labors (barrels and bins at the Carpenter's, rock pots at the Craftsdwarf's) and the manager's own
+                -- chores that keep him from the office (BUG-837)
+                carpenter = {name = 'CARPENTER', on = true}, stonecraft = {name = 'STONE_CRAFT', on = true},
+                spin = {name = 'SPINNER', on = false}, process = {name = 'PROCESS_PLANT', on = false},
+                feed_water = {name = 'FEED_WATER_CIVILIANS', on = false}}
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
@@ -44,6 +50,7 @@ A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = t
                ConstructBlocks = true}      -- BUG-736: wooden blocks (the carpenters)
 -- BUG-231: the workshop tasks act.ws_task adds (the Carpenter's 'wood' / the Mason's 'rock' variant), and DF's queue limit
 A.WS_TASK = {ConstructThrone = {wood = true, rock = true}, ConstructTable = {wood = true, rock = true},
+             MakeBarrel = {wood = true},        -- BUG-835: a barrel for a brew without the manager (economy cx_direct)
              ConstructDoor = {wood = true, rock = true}, ConstructBed = {wood = true}, ConstructBlocks = {rock = true}}
 A.WS_TASK_MAX = 10
 -- BUG-284: the mood tasks act.mood_task adds and the shop that offers each
@@ -1421,6 +1428,52 @@ local function impls(state)
     return false, 'no such workshop'
   end
 
+  -- BUG-834 (Run 17 i1 Diedplank y380, i2 Whirledrampart y485: 'brews ordered, none ran', 3 / 7 empty barrels that never change, 321 barrels, plants everywhere):
+  -- every barrel a new MakeBarrel made was filled with plants by the haulers of the food stockpiles (StoreItemInBarrel) before a Still took it. The
+  -- stockpile sheet's barrel limit (max_barrels) of the PLANT stockpiles: `freeze` lowers it to the barrels that lie in the pile now (no new empty
+  -- barrel is hauled in; the full ones stay), `restore` puts the old values back ({id = old}). A pile that also takes drink is left alone unless
+  -- `mixed` (the drink emergency): its barrels hold the drink. No item moves. Returns ok, {{id, old, new, name}} or false, why. [live-untested: the field]
+  function I.pile_barrels(mode, arg)
+    local out = {}
+    if mode == 'restore' then
+      for id, old in pairs(type(arg) == 'table' and arg or {}) do
+        local sp = df.building.find(math.tointeger(tonumber(id)) or -1)
+        local v = math.tointeger(old)
+        if sp and v and pcall(function() sp.max_barrels = v end) then out[#out + 1] = {id = sp.id, new = v} end
+      end
+      return true, out
+    end
+    if mode ~= 'freeze' then return false, 'mode must be freeze or restore' end
+    local mixed = type(arg) == 'table' and arg.mixed == true
+    local okp = pcall(function()
+      for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+        local name = dfhack.df2utf(sp.name or '')
+        local fl = sp.settings and sp.settings.flags
+        local food = fl and fl.food == true
+        local drink = false
+        pcall(function()
+          for _, k in ipairs({'drink_plant', 'drink_animal'}) do
+            for _, v in ipairs(sp.settings.food[k]) do if v then drink = true end end
+          end
+        end)
+        if food and name ~= 'dfllm-drink' and (mixed or not drink) then
+          local here = 0
+          for _, it in ipairs(df.global.world.items.other.BARREL) do
+            local p = it.pos
+            if p and p.z == sp.z and p.x >= sp.x1 and p.x <= sp.x2 and p.y >= sp.y1 and p.y <= sp.y2 then here = here + 1 end
+          end
+          local old = sp.max_barrels
+          if type(old) == 'number' and (old < 0 or old > here) then
+            sp.max_barrels = here
+            out[#out + 1] = {id = sp.id, old = old, new = here, name = name}
+          end
+        end
+      end
+    end)
+    if not okp then return false, 'stockpiles unreadable' end
+    return true, out
+  end
+
   -- BUG-767 (Run 16b i2 Whirledrampart y449: 5 brew orders, a Still, 3,882 plants, 12 empty barrels and no brew for 74 days): the workshop sheet of
   -- ONE Still: its general orders (max_general_orders 0 = the manager gives it no job; the BUG-715 retire sets it), its permitted workers
   -- (a list that holds no brewer) and its skill window are opened so the manager's brew orders can reach it. No job, no order, no building
@@ -2439,7 +2492,7 @@ local function impls(state)
   -- NEU1 P7: `any` (the player's verb labor.set) switches the named labor either way
   function I.labor_set(unit_id, which, on, any)
     local spec = A.LABOR_SETS[tostring(which)]
-    if not spec then return false, 'which must be mechanic, farm, cook, brew, clean_fish, furniture, herb, burn or hunt' end
+    if not spec then return false, 'which must be mechanic, farm, cook, brew, clean_fish, furniture, herb, burn, hunt, carpenter, stonecraft, spin, process or feed_water' end
     if any ~= true and (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
     local u = df.unit.find(int(unit_id) or -1)
     if not u then return false, 'no unit ' .. tostring(unit_id) end

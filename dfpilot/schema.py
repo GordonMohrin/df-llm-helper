@@ -81,6 +81,7 @@ ACT = {
     "squad_routine": ["military"], "squad_order": ["military"], "squad_uniform": ["military"],
     "squad_unequip": ["military"], "squad_release": ["military"], "animal_slaughter": ["economy"], "zone_remove": ["runner"], "manager_office": ["economy"], "pond_remove": ["water"],
     "hospital_remove": ["water"],                  # BUG-034: the zones of a dry hospital while a patient is thirsty
+    "pile_barrels": ["economy"],                   # BUG-834: the plant stockpiles' barrel limit frozen while a brew lacks an empty barrel
     "ws_profile_open": ["economy"],                # BUG-767: a Still whose profile keeps the manager's brew jobs away
     "workshop_retire": ["economy"],                # BUG-715: a workshop no citizen can reach, beside a reachable one of its type
     "well_remove": ["water"],                      # BUG-541: the dry well the GiveWater carriers stand at (well.retire)
@@ -950,7 +951,7 @@ EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=[
 SUBTYPE_JOBS = frozenset({"MakeArmor", "MakePants", "MakeShoes", "MakeGloves", "MakeHelm", "MakeWeapon", "MakeAmmo",
                           "MakeShield", "MakeTrapComponent", "MakeTool", "MakeToy"})
 # NEU1 P7: act.LABOR_SETS names, act.TOOL_DETAILS, the quickfort build keys of furniture.place (lua/dfllm/player.lua M.FURNITURE)
-LABOR_SETS = ["mechanic", "farm", "cook", "brew", "herb", "burn", "furniture", "clean_fish", "hunt"]
+LABOR_SETS = ["mechanic", "farm", "cook", "brew", "herb", "burn", "furniture", "clean_fish", "hunt", "carpenter", "stonecraft", "spin", "process", "feed_water"]
 WORK_DETAILS = ["Miners", "Woodcutters", "Hunters", "Fisherdwarves", "Planters", "Plant gatherers", "Gatherers", "Herbalists",
                 "Orderlies", "Cooks", "Cooking", "Cook", "Brewers", "Brewing", "Brewer"]
 FURNITURE = {"bed": "b", "table": "t", "chair": "c", "door": "d", "cabinet": "f", "chest": "h", "coffin": "n",

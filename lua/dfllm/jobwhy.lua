@@ -97,7 +97,7 @@ local function mat_class(mt, mi)
 end
 
 -- labor ids (any of them) and the skill id for a job / order of type `jt`; nil labors = unknown
-function J.labors(jt, rname, mt, mi)
+function J.labors(jt, rname, mt, mi, skey)
   local tn = ename(df.job_type, jt)
   local skills = {}
   if tn == 'CustomReaction' then
@@ -125,7 +125,10 @@ function J.labors(jt, rname, mt, mi)
   end
   if #labors == 0 and tn then                          -- orderlib's table (FR-01) as the fallback
     local mc = mat_class(mt, mi)
-    for _, ln in ipairs(O.labors(tn, mc or 'any', O.workshops(tn, mc or 'any')) or {}) do
+    local ws = O.workshops(tn, mc or 'any')
+    -- BUG-835 (Run 17 i2: MakeBarrel 'the labor this job needs is not known'): a job whose material arrives as a category has no class; its shop names it
+    if ws == nil and skey then ws, mc = {skey}, mc or (skey == 'workshop:Craftsdwarfs' and 'rock' or nil) end
+    for _, ln in ipairs(O.labors(tn, mc or 'any', ws) or {}) do
       local l = df.unit_labor and df.unit_labor[ln]
       if int(l) and not seen[l] then seen[l] = true; labors[#labors + 1] = l end
     end
@@ -453,10 +456,22 @@ function J.inputs(K, job, s, ctx)
           end
         end
       end
+      -- BUG-836 (Run 17 i2: 'plant (DRINK_MAT) x1: 0 match' beside 6,932 plants in the census): a scan that finds none where the census holds many
+      e.cens = J.census_count(ctx and ctx.inv, e)
       out[#out + 1] = e
     end
   end
   return out
+end
+
+-- the census count of the item a job item asks for (economy's keys), nil when there is no key for it
+function J.census_count(inv, e)
+  if type(inv) ~= 'table' then return nil end
+  local w = tostring(e.what or '')
+  if w:find('^plant') and w:find('DRINK_MAT', 1, true) then return (int(inv.brew_p) or 0) + (int(inv.brew_g) or 0) end
+  if w:find('^fish') then return int(inv.fish_raw) end
+  if w:find('^empty barrel') then return int(inv.barrels_empty) end
+  return nil
 end
 
 function J.input_text(e)
@@ -495,6 +510,9 @@ function J.input_cause(ins)
       return 'input_burrow', J.input_text(e) .. ': none inside the burrows the free holders are held to'
     end
     if not e.unknown and not e.clipped and e.free == 0 then
+      if e.match == 0 and (e.cens or 0) >= 10 then
+        return 'scan_unreliable', string.format('census holds %d, the scan found none: %s (the scan may be wrong: not a proven cause)', e.cens, J.input_text(e))
+      end
       if e.match == 0 then                           -- a looser match (approx) finding none is still none
         return e.container and 'no_container' or 'no_input', 'none: ' .. J.input_text(e)
       end
@@ -530,7 +548,7 @@ function J.job(K, j, ctx, s)
     return r
   end
   local labors, sk = J.labors(j.job_type, pget(function() return j.reaction_name end), pget(function() return j.mat_type end),
-                              pget(function() return j.mat_index end))
+                              pget(function() return j.mat_index end), s and s.key)
   local wk = labors and J.workers(K, labors, sk, s, ctx) or nil
   local ins = J.inputs(K, j, s, ctx)
   if wk then r.workers = {n = wk.n, free = wk.free, by = wk.by, who = wk.who, labor = labor_names(labors)} end
@@ -597,6 +615,44 @@ function J.shop_keys(tn, rn, mt, mi)
   return O.workshops(tn, mc or 'any') or (mc == nil and O.workshops(tn, 'rock')) or nil
 end
 
+-- BUG-836: the manager order's item conditions read like the job items (same field names): {text, met} per condition; met = nil when the
+-- count could not be made. Counted over the item vector, not by rotten / hostile / building items (SKIP); DF's own count can differ.
+local CMP = {AtLeast = function(n, v) return n >= v end, AtMost = function(n, v) return n <= v end, GreaterThan = function(n, v) return n > v end,
+             LessThan = function(n, v) return n < v end, Exactly = function(n, v) return n == v end, NotExactly = function(n, v) return n ~= v end}
+function J.conditions(o, ctx)
+  local out = {}
+  local cap = math.max(100, int(ctx and ctx.items_max) or J.ITEMS_MAX)
+  for _, c in ipairs(each(pget(function() return o.item_conditions end))) do
+    local cmp = pget(function() return c.compare_type end) or pget(function() return c.condition end)
+    cmp = tostring(cmp or 'AtLeast')
+    local val = int(pget(function() return c.compare_val end)) or int(pget(function() return c.value end)) or 0
+    local it = pget(function() return c.item_type end)
+    if type(it) == 'string' then it = df.item_type[it] end
+    it = int(it) or -1
+    local what = it >= 0 and ename(df.item_type, it) or nil
+    local rp = pget(function() return c.has_material_reaction_product end)
+    local e = {text = string.format('%s %d %s%s', cmp, val, what and what:lower() or 'any item', (rp and tostring(rp) ~= '') and (' (' .. tostring(rp) .. ')') or '')}
+    local vec = what and pget(function() return df.global.world.items.other[what] end)
+    local f = CMP[cmp]
+    if vec and f then
+      local n = 0
+      local okscan = pcall(function()
+        local seen = 0
+        for _, item in ipairs(vec) do
+          seen = seen + 1
+          if seen > cap then error('clipped') end
+          local skip = false
+          for _, k in ipairs(SKIP) do if item.flags[k] == true then skip = true; break end end
+          if not skip and item_fits(c, item) then n = n + (int(pget(function() return item:getStackSize() end)) or 1) end
+        end
+      end)
+      if okscan then e.n, e.met = n, f(n, val); e.text = e.text .. string.format(': %d found', n) end
+    end
+    out[#out + 1] = e
+  end
+  return out
+end
+
 function J.order(K, o, ctx)
   local tn = ename(df.job_type, o.job_type) or '?'
   local rn = pget(function() return o.reaction_name end)
@@ -606,6 +662,7 @@ function J.order(K, o, ctx)
   if pget(function() return o.status.validated end) == false then
     local mf = ctx and ctx.manager and pget(ctx.manager) or nil
     local why = mf and mf.causes and mf.causes[1]
+    if mf and not why and mf.job and mf.job ~= 'none' then why = 'the manager works as ' .. tostring(mf.job) .. ', not at his office' end     -- BUG-837
     if mf and not mf.unit then r.cause = 'no_manager'
     else r.cause = 'not_validated' end
     r.text = 'the manager has not validated it' .. (why and (': ' .. tostring(why)) or (mf and '' or ' (manager not read)'))
@@ -662,14 +719,30 @@ function J.order(K, o, ctx)
     end
   end
   local nc = #each(pget(function() return o.item_conditions end))
-  local labors, sk = J.labors(o.job_type, rn, pget(function() return o.mat_type end), pget(function() return o.mat_index end))
+  local labors, sk = J.labors(o.job_type, rn, pget(function() return o.mat_type end), pget(function() return o.mat_index end), cand[1] and cand[1].key)
   local wk = labors and J.workers(K, labors, sk, cand[1], ctx) or nil
   local wtxt = wk and ('; ' .. J.workers_text(wk, labors)) or ''
   if wk then r.workers = {n = wk.n, free = wk.free, by = wk.by, who = wk.who, labor = labor_names(labors)} end
+  -- BUG-836: nobody holds the labor: that is the cause, whatever else the order lacks
+  local wc, wct = J.worker_cause(wk, labors)
   if nc > 0 then
-    r.cause, r.text = 'conditions', string.format('no job made: %d item %s DF checks itself (not read here)%s', nc, plural(nc, 'condition'), wtxt)
+    local cl = J.conditions(o, ctx)
+    local unmet = {}
+    for _, e in ipairs(cl) do if e.met == false then unmet[#unmet + 1] = e.text end end
+    if #unmet > 0 then
+      r.cause = 'cond_unmet'
+      r.text = string.format('no job made: item condition not met: %s%s', table.concat(unmet, '; '):sub(1, 300), wtxt)
+    elseif wc == 'no_labor' then r.cause, r.text = wc, wct
+    else
+      local all = {}
+      for _, e in ipairs(cl) do all[#all + 1] = e.text end
+      r.cause = 'conditions'
+      r.text = string.format('no job made: %d item %s by my count met (%s), DF counts items its own way%s', nc, plural(nc, 'condition'),
+                             table.concat(all, '; '):sub(1, 300), wtxt)
+    end
     return r
   end
+  if wc == 'no_labor' then r.cause, r.text = wc, wct; return r end
   r.cause, r.text = 'unknown', 'validated, a workshop has room, no condition, no job yet (the manager makes jobs on his own pace)' .. wtxt
   return r
 end
@@ -745,7 +818,7 @@ function J.kind(K, key, ctx)
 end
 
 -- causes read off the game that name a blocker (the others: running, nothing open, or not proven)
-J.NOT_PROVEN = {unknown = true, working = true, conditions = true, none_open = true, done = true}
+J.NOT_PROVEN = {unknown = true, working = true, conditions = true, none_open = true, done = true, scan_unreliable = true}
 function J.proven(r) return type(r) == 'table' and r.cause ~= nil and not J.NOT_PROVEN[r.cause] end
 
 local function find_job(id)
