@@ -71,7 +71,7 @@ def test_state_slots_validate(run):
         assert schema.validate("state", d) == [], d
         assert len(json.dumps(d, separators=(",", ":"))) <= 4096
     best = max(docs, key=lambda d: d["seq"])
-    assert best["bridges"] == {"O1": "up", "B1": "down", "B2": "down"}
+    assert best["bridges"] == {"O1": "up", "B1": "up", "B2": "down"}      # NEU1 (P5 Tore): D-14 inner keeps B1 up in PEACE
     assert best["threat"] == {"vis": 0, "armed": 0}
     assert best["pop"] == {"cit": 5, "adults": 4, "soldiers": 1}
 
