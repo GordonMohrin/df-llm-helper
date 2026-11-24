@@ -59,3 +59,5 @@ T.test('BUG-829: state mil.kit names the first squad (sq members, sqw armed, wb 
   T.eq(s.ready.gh.halt, 'squad')
   T.ok(s.ready.gh.need:find('first squad: 0 of ' .. s.mil.kit.sq, 1, true), s.ready.gh.need)
 end)
+
+T.done()
