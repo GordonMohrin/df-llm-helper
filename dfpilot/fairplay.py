@@ -485,7 +485,8 @@ CARE_LIM: dict = {
     # NEU1 P9 (docs/v2/NEU1-pflege.md): the hospital minimum, memorial slabs before the ghost, stone coffins first and in stock,
     # a failing mood's room locked (days before insanity, tiles read for the room)
     "hosp_min": "bool", "mem_early": "bool", "mem_wait_days": (0, 400), "coffin_stone_first": "bool", "coffin_spare": (0, 30),
-    "mood_contain": "bool", "mood_contain_days": (0, 60), "mood_contain_max": (10, 2000)}
+    "mood_contain": "bool", "mood_contain_days": (0, 60), "mood_contain_max": (10, 2000),
+    "mood_contain_reach": (50, 20000)}
 
 
 def care_errors(path: str | Path | None = None) -> list[str]:

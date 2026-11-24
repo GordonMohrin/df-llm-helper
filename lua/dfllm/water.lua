@@ -4514,6 +4514,47 @@ function M.src_dist(K, x, y, z)
   return best
 end
 
+-- public (NEU1 P9, care's hospital minimum; BUG-823): would this module accept a hospital zone over x,y,z as served? The same test
+-- as remove_dry (served: a wet, non-emergency source within near, BUG-708: none outside the lockdown), so care never draws a
+-- zone this module would remove as dry. {ok = true|false, d = distance to the nearest accepted source (-1: none), near};
+-- nil before the first run (nothing judged: the caller fails closed)
+function M.would_serve(K, x, y, z)
+  local r = st.last
+  if not (r and type(r.sources) == 'table') then return nil end
+  x, y, z = math.tointeger(x), math.tointeger(y), math.tointeger(z)
+  if not (x and y and z) then return nil end
+  local c = M.conf(K)
+  local ok, best = served(K, c, r, {x1 = x, y1 = y, x2 = x, y2 = y, z = z})
+  return {ok = ok == true, d = best and best.d or -1, near = c.near}
+end
+
+-- public (NEU1 P9, BUG-823): may care draw a new hospital zone now? A reason (string) while this module holds the hospital back:
+-- a zone it removed (remove_dry / stall_hospital, p.hrm) or a removal (p.rm) younger than hrm_expire -- hospital.restore draws
+-- those again, care must not undo the remedy (BUG-034/541: without the zone the thirsty patient fetches his own drink) -- or a
+-- patient over patient_thirst now; also before the first run (fail closed). nil: free
+function M.hosp_hold(K)
+  local c, p, now = M.conf(K), pstate(K), K.now().tick
+  for _, e in ipairs(type(p.hrm) == 'table' and p.hrm or {}) do
+    local t = math.tointeger(e.t)
+    if t and now - t < c.hrm_expire then
+      return string.format('water removed hospital zone %s (%s) %d d ago; hospital.restore draws it again', tostring(e.id),
+                           tostring(e.why), (now - t) // DAY)
+    end
+  end
+  local rm = type(p.rm) == 'table' and math.tointeger(p.rm.t) or nil
+  if rm and now - rm < c.hrm_expire then
+    return string.format('water removed hospital zones %d d ago', (now - rm) // DAY)
+  end
+  local r = st.last
+  if not r then return 'no water run yet' end
+  for _, pt in ipairs(r.patients or {}) do
+    if (pt.thirst or 0) > c.patient_thirst then
+      return string.format('patient %s over thirst %d', tostring(pt.id), c.patient_thirst)
+    end
+  end
+  return nil
+end
+
 -- public (BUG-616, siege's STRANDED / stranded_drink): the concrete way to drink for citizens standing at `pos` on a walk group no
 -- bridge serves, from the last run and scan only (no tile reads): the nearest accepted source and how far it is, else the nearest
 -- scan body with a bank, else the cistern. Returns one line (<= 200 bytes), nil before the first run. Report only

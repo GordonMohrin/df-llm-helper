@@ -14,10 +14,13 @@ local function water_mod(W, o)
           conf = function() return {near = 30} end,
           kpi = function() if o.kpi == false then return nil end
             return o.kpi or {buckets_free = 2, carers = 3, patients = 0} end,
-          src_dist = function(_, x, y, z)
-            if o.dry then return nil end
-            return {d = math.abs(x - 40), id = 1, kind = 'well'}
-          end})
+          -- BUG-823: water's own verdict (served, the lockdown included) and its hold after a removal
+          would_serve = function(_, x, y, z)
+            if o.dry then return {ok = false, d = -1, near = 30} end
+            local d = math.abs(x - 40)
+            return {ok = d <= 30, d = d, near = 30}
+          end,
+          hosp_hold = function() return o.hold end})
 end
 
 local function hosp_world(o)
@@ -64,11 +67,11 @@ T.test('hosp_min: no hospital zone, a free bed 15 tiles from accepted water: a 1
   T.eq(#acts(W, 'hospital_zone'), 1, 'a bed in a hospital zone: nothing more')
 end)
 
-T.test('hosp_min fails closed: water does not answer -> no zone, gaps no_zone + unknown; a bed 60 tiles out or owned is no candidate', function()
+T.test('hosp_min fails closed: water does not answer -> no zone, gaps no_zone + held_by_water + unknown; a bed 60 tiles out or owned is no candidate', function()
   local W, Cm = hosp_world{water = false, beds = {{55, 10, 5}}}
   CW.day(W, 1)
   T.eq(#acts(W, 'hospital_zone'), 0)
-  T.eq(Cm.state(W.K).care.hosp.gaps, {'no_zone', 'unknown'})
+  T.eq(Cm.state(W.K).care.hosp.gaps, {'no_zone', 'held_by_water', 'unknown'}, 'BUG-823: no answer from water is a hold')
   local W2, Cm2 = hosp_world{beds = {{100, 10, 5}, {45, 10, 5, owner = 3}}}
   CW.day(W2, 1)
   T.eq(#acts(W2, 'hospital_zone'), 0)
@@ -178,7 +181,12 @@ local function mood_world(o)
     for id = 2, 4 do W.move(id, 30, 30, 5) end
     if o.inside then W.move(2, 3, 3, 5) end
     local door = F.building(W, 'DOOR', {id = 777, x1 = 9, y1 = 5, z = 5})
-    dfhack.buildings.findAtTile = function(x, y, z) if x == 9 and y == 5 and z == 5 then return door end end
+    local door2 = o.door2 and F.building(W, 'DOOR', {id = 778, x1 = 1, y1 = 5, z = 5}) or nil
+    W.door = door
+    dfhack.buildings.findAtTile = function(x, y, z)
+      if x == 9 and y == 5 and z == 5 then return door end
+      if door2 and x == 1 and y == 5 and z == 5 then return door2 end
+    end
     W.act_result('door_forbid', function(id, on, close) return true, false end)
   end}
 end
@@ -218,6 +226,59 @@ T.test('mood_contain: 10 days left: not yet; a citizen inside: busy, no lock; a 
   T.eq(contain(W3), {'open'})
   T.ok(W3.find_events('MOOD_CONTAIN')[1].d.why:find('stair at 7,7,5', 1, true))
   T.eq(#acts(W3, 'door_forbid'), 0)
+end)
+
+-- BUG-824: a second door at 1,5; ring = the outer ring x/y 0 or 10 is floor (the ways beyond both doors join), else only the tile
+-- beyond each door is floor (a corridor piece: locking would split the fort)
+local function two_doors(ring)
+  return function(x, y)
+    if x == 1 and y == 5 then return {c = '+', dig = '', bld = 'Door'} end
+    if ring and x >= 0 and x <= 10 and y >= 0 and y <= 10 and (x == 0 or x == 10 or y == 0 or y == 10) then
+      return {c = '.', dig = '', bld = ''}
+    end
+    if not ring and y == 5 and (x == 0 or x == 10) then return {c = '.', dig = '', bld = ''} end
+  end
+end
+
+T.test('BUG-824: two doors whose outsides join only through the room: not locked (op open, split); joined round it: locked', function()
+  local W = mood_world{door2 = true, over = two_doors(false)}
+  CW.day(W, 1)
+  T.eq(contain(W), {'open'})
+  T.ok(W.find_events('MOOD_CONTAIN')[1].d.why:find('split', 1, true), W.find_events('MOOD_CONTAIN')[1].d.why)
+  T.eq(#acts(W, 'door_forbid'), 0)
+  local W2 = mood_world{door2 = true, over = two_doors(true)}
+  CW.day(W2, 1)
+  T.eq(contain(W2), {'locked'})
+  local ds = W2.find_events('MOOD_CONTAIN')[1].d.doors
+  table.sort(ds)
+  T.eq(ds, {777, 778})
+end)
+
+T.test('BUG-824: the mood ends berserk with a citizen in the room: busy, tried again later; locked once he is out', function()
+  local W = mood_world{days = 10}
+  CW.day(W, 1)
+  T.eq(contain(W), {})
+  W.unit(1).mood = df.mood_type.Berserk
+  W.move(2, 3, 3, 5)
+  CW.day(W, 1)
+  T.eq(contain(W), {'busy'})
+  W.move(2, 30, 30, 5)
+  CW.day(W, 1)
+  T.eq(contain(W)[#contain(W)], 'locked', 'tried again while he stays berserk')
+end)
+
+T.test('BUG-824: contained: a door someone else unforbade is locked again; mood_deadline no longer asks for deliveries', function()
+  local W = mood_world()
+  CW.day(W, 1)
+  T.eq(contain(W), {'locked'})
+  W.door.door_flags = {forbidden = false}
+  CW.day(W, 1)
+  local a = acts(W, 'door_forbid')
+  T.eq(a[#a], {777, true, true, n = 3}, 'held')
+  local dl
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'mood_deadline' then dl = e end end
+  T.ok(dl and dl.d.q:find('locked', 1, true) and not dl.d.q:find('send these', 1, true), dl and dl.d.q)
+  T.eq(dl.d.cmds, nil)
 end)
 
 T.done()

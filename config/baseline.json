@@ -338,7 +338,8 @@
   "coffin_spare": 3,
   "mood_contain": true,
   "mood_contain_days": 3,
-  "mood_contain_max": 200
+  "mood_contain_max": 200,
+  "mood_contain_reach": 1500
  },
  "water": {
   "patient_thirst": 25000,
