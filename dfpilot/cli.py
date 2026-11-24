@@ -59,7 +59,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="print the record as JSON")
     p.add_argument("--page", type=int, default=1, help="NEU4: page of a --raw dump that is longer than one reply (pages of 6000 bytes)")
     p.add_argument("--raw", action="store_true",
-                   help="NEU3: the game's own fields without interpretation (inspect what=raw): order:<id> | brew | job:<id> | items:<logs|plants|barrels|VECTOR> | manager | ws:<id>")
+                   help="NEU3: the game's own fields without interpretation (inspect what=raw): order:<id> | brew | job:<id> | items:<logs|plants|barrels|VECTOR> | manager | ws:<id> | pile:<stockpile id>")
     p = sub.add_parser("gamelog", help="BUG-249: lines of <DF>/gamelog.txt, optionally only since this fort's embark")
     p.add_argument("--since-embark", action="store_true",
                    help="only lines after the last embark line (an older fort in the same gamelog is skipped)")
@@ -519,6 +519,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if c in session.SESSION_CMDS:                      # P3: the live session's heartbeat (the kernel's dead-man switch)
         session.touch(save_dir, c)
+    with session.keepalive(save_dir, c):               # NEU5 BUG-849: a long-running call keeps the heartbeat fresh while it runs
+        return _dispatch(args, save_dir, c)
+
+
+def _dispatch(args, save_dir: Path, c: str) -> int:
     if c == "status":
         from .brief import run_status
         return run_status(args, save_dir)

@@ -1437,16 +1437,18 @@ local function impls(state)
   -- `mixed` (the drink emergency): its barrels hold the drink. No item moves. Returns ok, {{id, old, new, name}} or false, why. [live-untested: the field]
   function I.pile_barrels(mode, arg)
     local out = {}
+    local PL = require('dfllm.pilelib')       -- NEU5 BUG-848: the barrel limit field of this DFHack (storage.max_barrels, else max_barrels)
     if mode == 'restore' then
       for id, old in pairs(type(arg) == 'table' and arg or {}) do
         local sp = df.building.find(math.tointeger(tonumber(id)) or -1)
         local v = math.tointeger(old)
-        if sp and v and pcall(function() sp.max_barrels = v end) then out[#out + 1] = {id = sp.id, new = v} end
+        if sp and v and PL.set(sp, v) then out[#out + 1] = {id = sp.id, new = v} end
       end
       return true, out
     end
     if mode ~= 'freeze' then return false, 'mode must be freeze or restore' end
     local mixed = type(arg) == 'table' and arg.mixed == true
+    local seen, answered = 0, 0
     local okp = pcall(function()
       for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
         local name = dfhack.df2utf(sp.name or '')
@@ -1464,16 +1466,18 @@ local function impls(state)
             local p = it.pos
             if p and p.z == sp.z and p.x >= sp.x1 and p.x <= sp.x2 and p.y >= sp.y1 and p.y <= sp.y2 then here = here + 1 end
           end
-          local old = sp.max_barrels
+          local old, cand = PL.get(sp)            -- NEU5 BUG-848: storage.max_barrels on DFHack 53 (version tolerant, pilelib)
+          seen = seen + 1
+          if old then answered = answered + 1 end
           -- NEU4: a pile that holds no barrel is never frozen at 0 (its food would have no container)
-          if type(old) == 'number' and here > 0 and (old < 0 or old > here) then
-            sp.max_barrels = here
-            out[#out + 1] = {id = sp.id, old = old, new = here, name = name}
+          if old and here > 0 and (old < 0 or old > here) and PL.set(sp, here) then
+            out[#out + 1] = {id = sp.id, old = old, new = here, name = name, field = cand}
           end
         end
       end
     end)
     if not okp then return false, 'stockpiles unreadable' end
+    if seen > 0 and answered == 0 then return false, 'no barrel limit field on ' .. seen .. ' food stockpiles (tried ' .. PL.tried() .. ')' end
     return true, out
   end
 

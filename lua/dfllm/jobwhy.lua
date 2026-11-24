@@ -905,6 +905,10 @@ function J.attach_df(r, ctx)
     r.text = (e.text or '') .. ' | ' .. (r.text or '')
     if r.cause == nil or J.NOT_PROVEN[r.cause] and r.cause ~= 'working' and r.cause ~= 'done' and r.cause ~= 'none_open' then r.cause = 'df_reason' end
   end
+  if not (e and (e.n or 0) > 0) and type(ctx.health) == 'function' then     -- NEU5 BUG-847: no reason: say whether the reader sees anything at all
+    local h = pget(ctx.health)
+    if type(h) == 'string' and h ~= '' then r.dfh = h end
+  end
   if type(r.sub) == 'table' then J.attach_df(r.sub, ctx) end
   return r
 end
@@ -924,7 +928,15 @@ function J.find0(K, key, ctx)
     pre = pre:lower()
     if pre == 'ws' or pre == 'bld' or pre == 'shop' then
       local b = find_shop(id)
-      if not b then return nil, 'no workshop or furnace ' .. tostring(id) end
+      if not b then
+        -- NEU5 BUG-848: a stockpile id is no workshop: say so and name the dump that takes it
+        for _, sp in ipairs(each(pget(function() return df.global.world.buildings.other.STOCKPILE end))) do
+          if pget(function() return sp.id end) == id then
+            return nil, 'building ' .. tostring(id) .. ' is a stockpile, not a workshop: why ' .. tostring(id) .. ' --raw (key pile:' .. tostring(id) .. ') dumps it'
+          end
+        end
+        return nil, 'no workshop or furnace ' .. tostring(id)
+      end
       return J.workshop(K, b, ctx)
     elseif pre == 'order' then
       local o = find_order(id)
@@ -952,8 +964,17 @@ end
 
 -- one line: '<kind> <id> <job>: <cause>: <text>'
 function J.line(r)
-  return string.format('%s %s %s%s: %s: %s', r.kind, tostring(r.id), tostring(r.job), r.at and (' at ' .. at_text(r.at)) or '', r.cause,
-                       r.text or '')
+  local text = r.text or ''
+  local lead = ''
+  -- NEU5 BUG-847: DF's own reason is the first thing of the line (attach_df put it first in the text; the kind / id / cause follow)
+  local dt = type(r.df) == 'table' and r.df.text
+  if type(dt) == 'string' and dt ~= '' then
+    if text:sub(1, #dt + 3) == dt .. ' | ' then text = text:sub(#dt + 4) elseif text == dt then text = '' end
+    lead = dt .. ' | '
+  end
+  local tail = (not dt and type(r.dfh) == 'string') and (' | ' .. r.dfh) or ''
+  return lead .. string.format('%s %s %s%s: %s: %s', r.kind, tostring(r.id), tostring(r.job), r.at and (' at ' .. at_text(r.at)) or '', r.cause,
+                               text) .. tail
 end
 
 local function ins_data(ins)
@@ -971,7 +992,7 @@ end
 function J.data(r)
   local function flat(x)
     return {kind = x.kind, id = x.id, job = x.job, cause = x.cause, text = (x.text or ''):sub(1, 400), shop = x.shop, at = x.at,
-            left = x.left, workers = x.workers, inputs = ins_data(x.inputs), guess = x.guess, df = x.df}
+            left = x.left, workers = x.workers, inputs = ins_data(x.inputs), guess = x.guess, df = x.df, dfh = x.dfh}
   end
   local d = flat(r)
   if r.sub then d.sub = flat(r.sub) end

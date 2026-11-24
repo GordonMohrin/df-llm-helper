@@ -9,6 +9,7 @@
 -- up even where a name below is wrong. Output is bounded: R.MAX_LINES lines of R.LINE characters, vectors shown with their first few elements.
 local JW = require('dfllm.jobwhy')
 local json = require('dfllm.util.json')
+local PL = require('dfllm.pilelib')      -- NEU5 BUG-848: the barrel limit field, version tolerant
 local U = JW.util
 local int, pget, ename, each, uname = U.int, U.pget, U.ename, U.each, U.uname
 
@@ -621,7 +622,7 @@ function R.sample_item(K, it, q, why, spec)
       end
     end)
     if sp then
-      parts[#parts + 1] = 'stockpile=#' .. tostring(N(function() return sp.id end)) .. '(' .. tostring(pget(function() return dfhack.df2utf(sp.name or '') end) or '') .. ' max_barrels=' .. V(function() return sp.max_barrels end) .. ')'
+      parts[#parts + 1] = 'stockpile=#' .. tostring(N(function() return sp.id end)) .. '(' .. tostring(pget(function() return dfhack.df2utf(sp.name or '') end) or '') .. ' max_barrels=' .. (function() local v, c = PL.get(sp); return v and (tostring(v) .. '@' .. c) or '? (no field of ' .. PL.tried() .. ' reads)' end)() .. ')'
     end
     parts[#parts + 1] = 'group=' .. tostring(q.g == nil and '?' or q.g)
   end
@@ -742,6 +743,55 @@ function R.manager(K, ctx)
   return b
 end
 
+---------------------------------------------------------------- the stockpile (NEU5 BUG-848)
+-- a stockpile building by id (nil when the id is no stockpile)
+function R.find_pile(id)
+  local b = pget(df.building.find, id)
+  if not b then return nil end
+  local isp = pget(function() return df.building_type[b:getType()] == 'Stockpile' end)
+  if isp then return b end
+  for _, sp in ipairs(each(pget(function() return df.global.world.buildings.other.STOCKPILE end))) do
+    if pget(function() return sp.id end) == id then return sp end
+  end
+end
+
+-- `pile:<id>`: every field of a stockpile building, generically (the real names), with its storage / container settings and its links
+function R.pile(K, sp)
+  local b = buf()
+  local id = N(function() return sp.id end)
+  local v, cand = PL.get(sp)
+  add(b, string.format('pile %s %s at %s barrel limit %s (field %s; candidates %s) number=%s', tostring(id), tostring(pget(function() return dfhack.df2utf(sp.name or '') end) or ''),
+                       posb(sp), v and tostring(v) or '?', cand or 'NOT READABLE', PL.tried(), V(function() return sp.stockpile_number end)))
+  add(b, '  building flags=' .. V(function() return FL(sp.flags) end))
+  dump_struct(b, '  storage', pget(function() return sp.storage end), 4)
+  dump_struct(b, '  stockpile_flag', pget(function() return sp.stockpile_flag end), 2)
+  local fl = pget(function() return sp.settings.flags end)
+  add(b, '  settings.flags=' .. (fl ~= nil and FL(fl) or '?') .. ' (the item groups this pile takes)')
+  local links = pget(function() return sp.links end)
+  if links ~= nil then
+    local e = entries(links, 20) or {}
+    table.sort(e, function(x, y) return tostring(x[1]) < tostring(y[1]) end)
+    for _, kv in ipairs(e) do
+      local ids = {}
+      for _, x in ipairs(each(kv[2])) do ids[#ids + 1] = tostring(pget(function() return x.id end) or '?') end
+      add(b, string.format('  link %s: %s', tostring(kv[1]), #ids > 0 and table.concat(ids, ',') or 'none'))
+    end
+  else add(b, '  links: ?') end
+  local here, full, empty = 0, 0, 0
+  for _, it in ipairs(each(pget(function() return df.global.world.items.other.BARREL end))) do
+    local p = pget(function() return it.pos end)
+    local x1, x2, y1, y2, z = N(function() return sp.x1 end), N(function() return sp.x2 end), N(function() return sp.y1 end), N(function() return sp.y2 end), N(function() return sp.z end)
+    if p and z and p.z == z and p.x >= x1 and p.x <= x2 and p.y >= y1 and p.y <= y2 then
+      here = here + 1
+      local inside = pget(dfhack.items.getContainedItems, it)
+      if inside and #each(inside) > 0 then full = full + 1 else empty = empty + 1 end
+    end
+  end
+  add(b, string.format('  barrels lying in the pile: %d (%d with contents, %d empty)', here, full, empty))
+  dump_struct(b, '  fields', sp, 6)
+  return b
+end
+
 ---------------------------------------------------------------- the entry
 -- key: order:<id> | brew | job:<id> | items:<name> | manager | ws:<id>  ->  ok, text (first line), {kind, key, lines, clipped}
 -- NEU4 BUG-846: the lines cut into pages of at most R.PAGE_BYTES encoded bytes: lines of page `page`, the page used, the number of pages
@@ -766,6 +816,12 @@ function R.find(K, key, ctx, page)
   local b, kind
   if low == 'brew' then b, kind = R.brew(K, ctx), 'brew'
   elseif low == 'manager' then b, kind = R.manager(K, ctx), 'manager'
+  elseif pre == 'pile' then
+    local id = int(rest)
+    if not id then return false, 'key pile:<stockpile id>' end
+    local sp = R.find_pile(id)
+    if not sp then return false, 'no stockpile ' .. id end
+    b, kind = R.pile(K, sp), 'pile'
   elseif pre == 'order' or pre == 'job' or pre == 'ws' then
     local id = int(rest)
     if not id then return false, 'key ' .. pre .. ':<number>' end
@@ -779,8 +835,13 @@ function R.find(K, key, ctx, page)
       b, kind = R.job(K, j, ctx), 'job'
     else
       local bld = U.find_shop(id)
-      if not bld then return false, 'no workshop or furnace ' .. id end
-      b = buf(); R.shop(K, b, bld, true); kind = 'ws'
+      if not bld then
+        local sp = R.find_pile(id)             -- NEU5: ws:<id> takes a stockpile id too
+        if not sp then return false, 'no workshop, furnace or stockpile ' .. id end
+        b, kind = R.pile(K, sp), 'pile'
+      else
+        b = buf(); R.shop(K, b, bld, true); kind = 'ws'
+      end
     end
   elseif pre == 'items' then
     local ok
@@ -788,7 +849,7 @@ function R.find(K, key, ctx, page)
     if not ok then return false, b.l[1] end
     kind = 'items'
   else
-    return false, 'key: order:<id>, brew, job:<id>, items:<logs|plants|barrels|VECTOR>, manager or ws:<id>'
+    return false, 'key: order:<id>, brew, job:<id>, items:<logs|plants|barrels|VECTOR>, manager, ws:<id> or pile:<stockpile id>'
   end
   if b.clipped then b.l[#b.l + 1] = '... (output clipped at ' .. R.MAX_LINES .. ' lines)' end
   local lines, pg, pages = R.paginate(b.l, page)
@@ -841,6 +902,13 @@ function R.stall_line(K, kind, arg, ctx)
       end
     end
     put('stills=' .. (#stills > 0 and table.concat(stills, ' ') or 'none'))
+    -- NEU5 BUG-848: the stockpile barrel limit field, never silent: which candidate answers, or that none does
+    local piles = each(pget(function() return df.global.world.buildings.other.STOCKPILE end))
+    if #piles > 0 then
+      local pr = PL.probe(piles)
+      put(pr.ok > 0 and string.format('pile limit field=%s (%d of %d piles read)', pr.cand, pr.ok, pr.n)
+                    or string.format('pile limit field UNREADABLE on %d piles (tried %s): the barrel cure cannot act', pr.n, pr.tried))
+    end
     for _, id in ipairs(pinned) do
       local pb = pget(df.building.find, tonumber(id))
       if not pb then put('pin ' .. id .. ' missing') end
@@ -907,7 +975,10 @@ function R.stall_line(K, kind, arg, ctx)
     local e = m and pget(ctx.df, m)
     lead = e and e.text or nil
   end
-  return ('raw stall %s: %s%s'):format(kind, lead and ('DF: ' .. lead .. ' | ') or 'DF: no cancel reason seen | ', table.concat(parts, ' | ')):sub(1, 900)
+  -- NEU5 BUG-847: the cancel reader's health beside it (an empty tally is not a blind reader): "DF cancel lines seen in window: N (source gamelog|report ...)"
+  local health = type(ctx) == 'table' and type(ctx.health) == 'function' and pget(ctx.health) or nil
+  return ('raw stall %s: %s%s%s'):format(kind, 'DF: ' .. (lead or 'no cancel reason seen') .. ' | ', type(health) == 'string' and (health .. ' | ') or '',
+                                         table.concat(parts, ' | ')):sub(1, 900)
 end
 
 return R

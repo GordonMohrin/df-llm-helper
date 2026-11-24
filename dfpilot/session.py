@@ -7,8 +7,10 @@ ack, plan, next) write it; the kernel's arbiter pauses the game when it is older
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -17,6 +19,13 @@ from . import files, paths
 SESSION_FILE = "session.json"
 SESSION_CMDS = ("wait", "brief", "cmd", "ack", "plan", "next")
 NO_SESSION_ENV = "DFLLM_NO_SESSION"
+# NEU5 BUG-849: calls that block for a while refresh the heartbeat every KEEPALIVE_S while they run (the dead-man's tick bound fires once the
+# heartbeat is deadman.min_s = 45 s old; at 600-900 ticks/s a 24000-tick bound is 27-40 s). SESSION_CMDS always beat; the long CLI calls of the
+# other commands (bp sites --fresh, audit, why) only EXTEND a session that beat within EXTEND_MAX_AGE_S before they started: a supervisor's
+# look never creates a heartbeat. The refresh runs on a daemon thread: when the process is gone the heartbeat stops with it (dead sessions stay dead).
+KEEPALIVE_S = 15.0
+EXTEND_MAX_AGE_S = 120.0
+KEEPALIVE_CMDS = SESSION_CMDS + ("bp", "audit", "why")
 
 # config/wake.json defaults (a missing or bad file / key = these; fairplay.wake_errors lints the file)
 QUIET_TYPES = ("AQ_HEAVY", "AQ_RING_STOP", "AUTOLABOR_LEGACY", "CAVERN_PLUG", "CAVERN_SWEEP_END", "DEPOT_MISSING",
@@ -90,3 +99,63 @@ def read(save_dir: Path, now: float | None = None) -> tuple[dict | None, float |
     if not isinstance(w, int) or isinstance(w, bool):
         return None, None
     return doc, max(0.0, (time.time() if now is None else now) - w)
+
+
+class Keepalive:
+    """Refreshes <save>/session.json every `every` seconds of `clock` while the process runs (tick() is the testable step, start() runs it on a
+    daemon thread every min(1 s, every/3)). `extend_only`: beat only when a heartbeat younger than EXTEND_MAX_AGE_S stood at the start."""
+
+    def __init__(self, save_dir: Path | None, by: str, every: float = KEEPALIVE_S, extend_only: bool = False,
+                 clock=time.monotonic, wall=time.time, cfg: dict | None = None):
+        self.save_dir, self.by, self.every, self.clock, self.wall, self.cfg = save_dir, by, every, clock, wall, cfg
+        self.beats = 0
+        self.last = clock()
+        self.alive = True
+        if extend_only:
+            _doc, age = read(save_dir, wall()) if save_dir is not None else (None, None)
+            self.alive = age is not None and age <= EXTEND_MAX_AGE_S
+        self.step = max(0.02, min(1.0, every / 3.0))
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def tick(self) -> bool:
+        """One look: touch when `every` seconds have passed since the last beat. True when a beat was written."""
+        if not self.alive or self.clock() - self.last < self.every:
+            return False
+        self.last = self.clock()
+        if touch(self.save_dir, self.by, self.wall(), self.cfg):
+            self.beats += 1
+            return True
+        return False
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.step):
+            try:
+                self.tick()
+            except Exception:                                  # noqa: BLE001 - a heartbeat must never take the command down
+                pass
+
+    def start(self) -> "Keepalive":
+        if self.alive and self._thread is None:
+            self._thread = threading.Thread(target=self._run, name="dfpilot-keepalive", daemon=True)
+            self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+    def __enter__(self) -> "Keepalive":
+        return self.start()
+
+    def __exit__(self, *exc) -> None:
+        self.stop()
+
+
+def keepalive(save_dir: Path | None, cmd: str):
+    """The context of one CLI command: a started Keepalive for the commands that may block (KEEPALIVE_CMDS), else a no-op."""
+    if save_dir is None or cmd not in KEEPALIVE_CMDS or not enabled():
+        return contextlib.nullcontext()
+    return Keepalive(save_dir, cmd, extend_only=cmd not in SESSION_CMDS)
