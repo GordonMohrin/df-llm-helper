@@ -230,7 +230,8 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
                       ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM),
                       ("breach", BREACH_LIM), ("resume", RESUME_LIM), ("siege_long", SIEGE_LONG_LIM),
-                      ("siege_starve", SIEGE_STARVE_LIM), ("growth", GROWTH_LIM), ("small_fight", SMALL_FIGHT_LIM)):
+                      ("siege_starve", SIEGE_STARVE_LIM), ("growth", GROWTH_LIM), ("small_fight", SMALL_FIGHT_LIM),
+                      ("deadman", DEADMAN_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -254,6 +255,52 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         caps = [gr.get(k, d) for k, d in (("base", 30), ("armed_cap", 50), ("ready_cap", 80), ("top_cap", 100))]
         if all(isinstance(c, int) for c in caps) and not caps[0] <= caps[1] <= caps[2] <= caps[3]:
             errs.append(f"{name}: growth: base <= armed_cap <= ready_cap <= top_cap expected, got {caps}")
+    return errs
+
+
+# Neuausrichtung 1 / P3 (docs/v2/NEU1-wecken.md): config/wake.json (dfpilot/session.py LIMITS; a bad key = its default)
+WAKE_PATH = REPO / "config" / "wake.json"
+
+
+def wake_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of config/wake.json (wait list, session heartbeat, follow memory bound); a missing file is fine."""
+    from . import session
+    p = Path(path or WAKE_PATH)
+    if not p.exists():
+        return []
+    name = "config/wake.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    if not isinstance(doc, dict) or doc.get("v") != 2:
+        return [f"{name}: needs an object with v: 2"]
+    errs = [f"{name}: unknown key {k!r}" for k in doc if k not in ("v", "about") and k not in session.LIMITS]
+    for blk, lims in session.LIMITS.items():
+        sec = doc.get(blk, {})
+        if not isinstance(sec, dict):
+            errs.append(f"{name}: {blk} must be an object")
+            continue
+        for k, v in sec.items():
+            lim = lims.get(k)
+            if lim is None:
+                errs.append(f"{name}: {blk}.{k}: unknown key")
+            elif not session._ok(v, lim):
+                errs.append(f"{name}: {blk}.{k}: {lim if isinstance(lim, str) else 'int %d..%d' % lim} expected, got {v!r}")
+            elif lim == "types":
+                bad = [t for t in v if schema.EVENTS.get(t, ("?",))[0] != "A"]
+                if bad:
+                    errs.append(f"{name}: {blk}.{k}: not class-A event types: {', '.join(bad[:5])}")
+    # P3 conflict: no session heartbeat while the kernel's dead-man switch is on = every live session gets paused
+    sess = doc.get("session")
+    if isinstance(sess, dict) and sess.get("on") is False:
+        try:
+            dm = json.loads(_read(p.parent / "reflex.json")).get("deadman", {})
+        except (OSError, ValueError, AttributeError):
+            dm = {}
+        if not isinstance(dm, dict) or dm.get("on", True) is not False:
+            errs.append(f"{name}: session.on false while config/reflex.json deadman.on is true: no heartbeat is written, "
+                        "so the dead-man pauses every live session (set deadman.on false too)")
     return errs
 
 
@@ -281,7 +328,10 @@ GROWTH_LIM: dict = {"on": "bool", "base": (1, 250), "armed_cap": (1, 250), "read
                     "armed_min": (1, 30), "full_ready": (0, 100), "full_top": (0, 100), "share": (0, 100), "drink_d": (0, 365),
                     "drop_days": (0, 60), "wood": "bool"}
 SMALL_FIGHT_LIM: dict = {"on": "bool", "max": (1, 10), "armed": (1, 20), "gate": "bool"}
-REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve", "growth", "small_fight")
+# Neuausrichtung 1 / P3: arbiter.lua deadman_cfg: the dead-man pause when no live session wrote <save>/session.json
+DEADMAN_LIM: dict = {"on": "bool", "timeout_s": (60, 86400), "max_ticks": (0, 403200), "check_s": (1, 300),
+                     "grace_s": (0, 3600)}
+REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve", "growth", "small_fight", "deadman")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)

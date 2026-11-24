@@ -1,7 +1,9 @@
 -- arbiter (WP1, critical, 500 ms): sole writer of pause, timestream fps and runtime settings
 -- (DESIGN §3 actuator table, §10 runtime profile; CONTRACTS §9.13 restore.json).
---   * never pauses on its own; holds an inbox pause until its TTL; honours a pause by Gordon
---     (DECISION_NEEDED after 10 min); unpauses only whitelisted popups, which it dismisses.
+--   * pauses on its own only as the dead-man switch (Neuausrichtung 1, docs/v2/NEU1-wecken.md: no live session wrote
+--     <save>/session.json for deadman.timeout_s; owner `deadman`, never unpaused by the kernel) and for the verb `park`;
+--     holds an inbox pause until its TTL; honours a pause by Gordon (DECISION_NEEDED after 10 min); unpauses only
+--     whitelisted popups, which it dismisses.
 --   * timestream fps from the mode table, lowered by inbox tempo.lower (TTL), applied idempotently.
 --   * supply brake (live L1: a year idled at 500 ticks/s, two dwarves died of hunger and thirst): while
 --     the fort is in phase P0 or economy.alarm() reports a supply problem, tempo and the vanilla FPS cap
@@ -104,6 +106,15 @@ M.PU_MAX = 64              -- texts of unclassified popups remembered for the lo
 -- a popup) may stand before the wake comes (config/reflex.json `resume`, 0 = no wake); gap_s = real seconds between two uses of
 -- the verb; max_popups = popups one use may read and dismiss
 M.RESUME = {wake_min = 5, gap_s = 60, max_popups = 8}
+-- Neuausrichtung 1 / P3 (config/reflex.json `deadman`): on = pause the game when the session heartbeat (<save>/session.json
+-- `wall`, written by dfllm wait/brief/cmd/ack/plan/next) is older than timeout_s real seconds, or the game ran more than
+-- max_ticks game ticks since `wall` last changed (0 = no game-time bound), or the file is missing or dated more than
+-- FUTURE_S s in the future (bad data: fail closed); read every check_s s; nothing fires in the first grace_s s after the
+-- module started (a session that just loaded the save)
+M.DEADMAN = {on = true, timeout_s = 180, max_ticks = 24000, check_s = 5, grace_s = 60}
+M.DEADMAN_LIM = {timeout_s = {60, 86400}, max_ticks = {0, 403200}, check_s = {1, 300}, grace_s = {0, 3600}}
+M.DEADMAN_FUTURE_S = 60
+M.SESSION_FILE = 'session.json'
 M.DEPOT_POPUP = 'need a trade depot'   -- a caravan popup that is also the NO_DEPOT interrupt (FR-43/53)
 M.FALLBACK_TICKS = 4800
 M.ASK_AFTER_MS = 600000            -- foreign pause older than this -> DECISION_NEEDED
@@ -504,6 +515,17 @@ local function resume_cfg(K)
   return {wake_min = (w and w >= 0 and w <= 240) and w or M.RESUME.wake_min}
 end
 
+local function deadman_cfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.deadman) == 'table' and K.cfg.reflex.deadman or {}
+  local c = {on = M.DEADMAN.on}
+  if type(r.on) == 'boolean' then c.on = r.on end
+  for k, lim in pairs(M.DEADMAN_LIM) do
+    local v = int(r[k])
+    c[k] = (v and v >= lim[1] and v <= lim[2]) and v or M.DEADMAN[k]
+  end
+  return c
+end
+
 -- the text of the front popup (nil: none, unreadable)
 local function front_text()
   local ok, text = pcall(function() return dfhack.df2utf(df.global.world.status.popups[0].text) end)
@@ -692,7 +714,11 @@ local function track_pause(K)
   -- live L6 (Perplexrooms): adopt paused the fort, the arrival popup came on top and was then held as
   -- Gordon's pause; with pause_state off, only the popup holds the clock, so a whitelisted one goes too
   local popup_only = popup_count() > 0 and df.global.pause_state ~= true and not st.hold
-  if st.pause_by == 'popup' or popup_only or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0) then
+  -- BUG-794: under the kernel's own deadman / park pause a whitelisted popup is acknowledged too (the game stays paused),
+  -- else it stands in front of a threat popup queued behind it and that threat is never handed to the reflex
+  local own = st.pause_by == 'deadman' or st.pause_by == 'park'
+  if st.pause_by == 'popup' or popup_only or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0)
+     or (own and popup_count() > 0) then
     local kind, text = popup_kind()
     if not kind then kind, text = other_popup(K) end            -- FR-75: unknown text, only with popups.other
     if kind and K.act.dismiss_popup(kind) then
@@ -702,11 +728,11 @@ local function track_pause(K)
                {id = 'berserk', q = text:sub(1, 120) .. ' The fort runs on; citizens and soldiers deal with it. ' ..
                                     'Bury the body at once (ghost risk).'})
       end
-      if popup_count() == 0 then K.act.set_paused(false) end
+      if popup_count() == 0 and not own then K.act.set_paused(false) end
     end
   end
   paused_by_df(K, now)
-  if st.pause_by ~= 'inbox' and not st.asked and now.ms - st.pause_since >= M.ASK_AFTER_MS then
+  if not M.OWN_PAUSE[st.pause_by] and not st.asked and now.ms - st.pause_since >= M.ASK_AFTER_MS then
     st.asked = true
     local what = st.pause_by == 'popup' and front_text()          -- FR-75: say which popup it is
     local df_set = st.pause_by == 'df' or st.pause_by == 'popup'  -- FR-94: `resume` releases these (not a threat popup)
@@ -717,9 +743,71 @@ local function track_pause(K)
   end
 end
 
+-- pauses the kernel holds on purpose: no 10-minute question about them (the dead-man's event and the park verb say why)
+M.OWN_PAUSE = {inbox = true, deadman = true, park = true}
+
+-- Neuausrichtung 1 / P3: the dead-man switch. Pause only: never unpauses, never saves, never kills. A pause another owner
+-- holds (df after a load, a popup, Gordon, park) is left alone and not claimed; the inbox's TTL hold is taken over (its
+-- expiry would unpause). One fire per heartbeat: a human who unpauses the dead-man pause in DF is not fought.
+local function deadman(K, now)
+  local c = deadman_cfg(K)
+  if not c.on then return end
+  if st.dm_read and now.ms >= st.dm_read and now.ms - st.dm_read < c.check_s * 1000 then return end
+  st.dm_read = now.ms
+  if now.ms - (st.dm_boot or now.ms) < c.grace_s * 1000 then return end
+  local save = K.cfg.paths and K.cfg.paths.save
+  local doc = save and fio.read_json(save .. '/' .. M.SESSION_FILE)
+  local wall = type(doc) == 'table' and int(doc.wall) or nil
+  local age = wall and (now.wall - wall) or nil
+  if wall ~= st.dm_wall or not st.dm_tick or now.tick < st.dm_tick then   -- a new heartbeat (or an older save loaded)
+    st.dm_wall, st.dm_tick = wall, now.tick
+  end
+  local ran = now.tick - st.dm_tick                       -- game ticks since `wall` last changed
+  local why
+  if not wall then why = 'missing'
+  elseif age < -M.DEADMAN_FUTURE_S then why = 'future'    -- a clock skew or a bad writer: no proof of life
+  elseif age > c.timeout_s then why = 'wall'
+  elseif c.max_ticks > 0 and ran > c.max_ticks then why = 'ticks'
+  end
+  if not why then st.dm_fired = nil; return end
+  local key = wall or -1
+  if st.dm_fired == key then return end                   -- fired for this heartbeat already
+  local paused = observe(K)
+  if paused and st.pause_by ~= 'inbox' then return end     -- somebody else's pause stands: keep it, fire when it ends
+  local took = paused and st.pause_by or nil
+  st.hold = nil
+  if not paused then
+    local ok, err = K.act.set_paused(true)
+    if not ok then
+      K.log('error', 'dead-man pause failed: %s', tostring(err))
+      return
+    end
+  end
+  st.dm_fired = key
+  st.pause_by, st.pause_since, st.asked, st.pdf_told = 'deadman', now.ms, false, nil
+  pause_event(K, true, 'deadman')
+  local d = {age = age and int(age) or -1, timeout = c.timeout_s, mode = K.mode(), why = why, ticks = int(ran),
+             max_ticks = c.max_ticks}
+  if type(doc) == 'table' and type(doc.by) == 'string' then d.by = doc.by:sub(1, 24) end
+  if took then d.took = took end
+  local msg
+  if why == 'missing' then
+    msg = string.format('dead-man pause: no live session since the kernel started (> %d s)', c.timeout_s)
+  elseif why == 'future' then
+    msg = string.format('dead-man pause: session heartbeat dated %d s in the future (bad clock or writer)', -int(age))
+  elseif why == 'ticks' then
+    msg = string.format('dead-man pause: the game ran %d ticks (> %d, %d game days) without a new session heartbeat',
+                        int(ran), c.max_ticks, c.max_ticks // 1200)
+  else
+    msg = string.format('dead-man pause: no live session for %d s (> %d s)', int(age), c.timeout_s)
+  end
+  K.emit('DEADMAN_PAUSE', 'A', msg .. ': dfllm cmd resume', d)
+end
+
 ---------------------------------------------------------------- module
 function M.init(K)
   st = {}
+  st.dm_boot = K.now().ms
   M.heal(K, {marked = true})
   local ok, err = pcall(apply_profile, K)
   if not ok then K.log('error', 'runtime profile: %s', tostring(err)) end
@@ -734,6 +822,8 @@ function M.step(K)
   local okw, errw = pcall(popup_watch, K)                  -- FR-87: evidence only, never a fault of the clock owner
   if not okw then K.log('warn', 'popup watch: %s', tostring(errw)) end
   track_pause(K)
+  local okd, errd = pcall(deadman, K, K.now())             -- P3: never a fault of the clock owner
+  if not okd then K.log('warn', 'dead-man: %s', tostring(errd)) end
   M.apply(K)
   local okv, errv = pcall(VL.step, K, st)                  -- FR-88: keep a followed camera going
   if not okv then
@@ -820,16 +910,18 @@ end
 -- and the player read those); once per M.RESUME.gap_s real seconds, a key that did not take counts too. Every popup read is
 -- named in the reply (an unknown one is dismissed like a click on "OK" after its text is read: never silent).
 local function resume_refuse(msg, data) return false, 'resume: ' .. msg, data end
+-- P3: the owners `resume` releases (the dead-man's and the park's pause too: the session that calls it is alive)
+M.RESUMABLE = {df = true, popup = true, deadman = true, park = true}
 
 M.verbs.resume = function(K, args, cmd)
   local now = K.now()
   if not observe(K) then return resume_refuse('the game is not paused (nothing to release)') end
   local by = st.pause_by or 'gordon'
-  if by ~= 'df' and by ~= 'popup' then
+  if not M.RESUMABLE[by] then
     if by == 'inbox' then
-      return resume_refuse('paused by inbox; unpause releases it (resume releases only pause:df and pause:popup)')
+      return resume_refuse('paused by inbox; unpause releases it (resume releases only pause:df and pause:popup, deadman, park)')
     end
-    return resume_refuse('paused by ' .. by .. ", the player's own pause; resume releases only pause:df and pause:popup")
+    return resume_refuse('paused by ' .. by .. ", the player's own pause; resume releases only pause:df and pause:popup (and the kernel's deadman / park)")
   end
   for _, text in ipairs(popup_texts()) do
     local _, threat = M.classify(text)
@@ -877,7 +969,26 @@ M.verbs.resume = function(K, args, cmd)
     return resume_refuse(string.format('was %s, still paused (%s) after the pause key%s%s', was, state,
                                        key_err and (' (' .. key_err .. ')') or '', shown), data)
   end
+  st.dm_fired = nil      -- P3: an inbox resume re-arms the dead-man (only a human's unpause in DF is left alone)
   return true, string.format('resumed: was %s, now %s%s', was, state, shown), data
+end
+
+-- Neuausrichtung 1 / P3: pause on purpose (a supervisor leaves the fort): owner `park` from any owner, nothing wakes for
+-- it (no PAUSED_BY_DF, no pause question, no dead-man event); `resume` ends it
+M.verbs.park = function(K, args, cmd)
+  local paused = observe(K)
+  if paused and st.pause_by == 'park' then return true, 'already parked' end
+  local was = paused and st.pause_by or 'running'
+  if df.global.pause_state ~= true then
+    local ok, err = K.act.set_paused(true)
+    if not ok then return false, 'park failed: ' .. tostring(err) end
+  end
+  st.hold = nil
+  st.pause_by, st.pause_since, st.asked, st.pdf_told = 'park', K.now().ms, false, nil
+  pause_event(K, true, 'park')
+  local why = type(args.why) == 'string' and args.why:sub(1, 120) or ''
+  K.log('info', 'parked (was %s)%s', was, why ~= '' and (': ' .. why) or '')
+  return true, string.format('parked: was %s; dfllm cmd resume runs the game again', was), {was = was}
 end
 
 -- FR-88 (Run 14 note 95): the camera; the arbiter hosts it because it owns what the player sees of the clock (lua/dfllm/viewlib.lua)

@@ -1,0 +1,62 @@
+{
+ "v": 2,
+ "about": "Neuausrichtung 1 / P3 (docs/v2/NEU1-wecken.md); read by dfpilot (session.config), a missing file or a bad key = the default shown here. wait: act = `dfllm wait` returns on every class-A event (not only the FR-53 interrupts) except quiet_types and DECISION_NEEDED ids in quiet_decisions (unknown types and ids wake: fail closed), plus DEADMAN (the kernel paused: no live session), FOLLOW_OFF (follow does not beat) and KERNEL_STALE (kernel heartbeat older than kernel_stale_s); false = the old interrupts-only wait. One key (type, decision id) wakes at most once per repeat_s real seconds; a cursor (<save>/.wait.json) more than backlog events behind starts at the end of the log. follow_check = the FOLLOW_OFF reason. session: on = wait, brief, cmd, ack, plan and next write <save>/session.json, the heartbeat the kernel's dead-man switch (config/reflex.json deadman) reads; DFLLM_NO_SESSION=1 suppresses it per process. follow: restart = a follow whose working set passes max_rss_mb MB or that ran max_hours hours starts a copy of itself (--takeover, same output) and exits.",
+ "wait": {
+  "act": true,
+  "repeat_s": 300,
+  "backlog": 2000,
+  "kernel_stale_s": 120,
+  "follow_check": true,
+  "quiet_types": [
+   "AQ_HEAVY",
+   "AQ_RING_STOP",
+   "AUTOLABOR_LEGACY",
+   "CAVERN_PLUG",
+   "CAVERN_SWEEP_END",
+   "DEPOT_MISSING",
+   "DRILL_FAIL",
+   "GATE_FORCED",
+   "GHOSTS",
+   "KERN_FAULT",
+   "LOCKDOWN_PARTIAL",
+   "ORDER_BAD",
+   "PERF_DEGRADED",
+   "PROJECT_BLOCKED",
+   "SEAL_STUCK",
+   "SIEGE_END",
+   "SIEGE_UNREADY",
+   "TOOL_BLOCKED"
+  ],
+  "quiet_decisions": [
+   "seal_stalled",
+   "no_hard_stone",
+   "metal",
+   "steel",
+   "defense_gap",
+   "refuge_dry",
+   "refuge_levers",
+   "bridge_levers",
+   "project_released",
+   "caravan_stale",
+   "manager_office",
+   "manager_absent",
+   "trade_screen",
+   "coffin_space",
+   "coffin_material",
+   "squads",
+   "preventblocking",
+   "trap_friendly",
+   "piece_missing",
+   "gate_traffic",
+   "berserk"
+  ]
+ },
+ "session": {
+  "on": true
+ },
+ "follow": {
+  "restart": true,
+  "max_rss_mb": 400,
+  "max_hours": 12
+ }
+}

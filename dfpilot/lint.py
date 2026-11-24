@@ -1628,7 +1628,7 @@ def main(argv: list[str] | None = None) -> int:
                 + fairplay.military_errors() + fairplay.offices_errors() + fairplay.zones_errors()
                 + fairplay.save_errors() + fairplay.perf_errors() + fairplay.burrow_errors()
                 + fairplay.plan_errors() + fairplay.view_errors() + process_errors()
-                + fairplay.startset_errors())
+                + fairplay.startset_errors() + fairplay.wake_errors())
         errs += fairplay.wertung_errors()                    # NEU1 P1: config/wertung.json
         try:
             fairplay.allowlist()

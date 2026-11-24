@@ -133,10 +133,15 @@ def line_paused(ctx: Ctx) -> str:
     """BUG-614 (Run 16 i1/i2/i4: after a DF restart the kernel stays pause:df and nothing in `status` said what runs the game
     again): the game stands paused by DF (a load, a restart) or by a popup -> the command. '' for the player's own pause."""
     own = (ctx.s.get("owners") or {}).get("pause")
-    if own not in ("df", "popup"):
+    if own not in ("df", "popup", "deadman", "park"):
         return ""
     if not ((ctx.s.get("t") or {}).get("paused") or (ctx.hb or {}).get("paused")):
         return ""
+    if own == "deadman":          # P3 (docs/v2/NEU1-wecken.md): the kernel's dead-man switch
+        return ("PAUSED by deadman: no live session wrote session.json for reflex.json deadman.timeout_s (or deadman.max_ticks game ticks); the game stands "
+                "until a session runs `dfllm cmd resume`")
+    if own == "park":
+        return "PARKED: paused on purpose (`dfllm cmd park`); `dfllm cmd resume` runs the game again"
     return (f"PAUSED by {own}: the game stands, nothing runs (a DF restart or a load leaves it so): run `dfllm cmd resume`"
             + (" (it reads the popup and refuses threat or curse words)" if own == "popup" else ""))
 

@@ -547,12 +547,17 @@ function M.new(opts)
   K.plan = with_defaults(opts.plan)
   function W.set_plan(plan) K.plan = with_defaults(plan) end
   local cfg = opts.cfg or {}
+  -- Neuausrichtung 1 / P3: the mock world has no player session file; the arbiter's dead-man switch is off here unless a
+  -- test sets reflex.deadman itself (tests/lua/test_neu1_deadman.lua runs it on the real kernel)
+  local reflex = {}
+  for k, v in pairs(cfg.reflex or {v = 2}) do reflex[k] = v end
+  if reflex.deadman == nil then reflex.deadman = {on = false} end
   local decisions = {}
   for k, v in pairs(C.DECISIONS) do decisions[k] = v end
   for k, v in pairs(cfg.decisions or {}) do decisions[k] = v end
   K.cfg = {decisions = decisions,
            allowlist = cfg.allowlist or {v = 2, commands = {}, blocked = {}, armok_exceptions = {}},
-           baseline = cfg.baseline or {v = 2}, reflex = cfg.reflex or {v = 2},
+           baseline = cfg.baseline or {v = 2}, reflex = reflex,
            paths = {df = W.dfpath, runtime = W.dfpath .. '/dfllm-runtime', save = W.dfpath .. '/dfllm-runtime/' .. W.save,
                     repo = cfg.repo or '.'},
            save = W.save, dev = cfg.dev == true, acceptance = cfg.acceptance == true}

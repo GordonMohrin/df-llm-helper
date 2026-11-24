@@ -507,6 +507,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
     # when it carries a threat or curse word (`resume` refuses it, the player clicks it away)
     "PAUSED_BY_DF": ("A", "arbiter", _d("by:s min:i", "popup:s deny:i")),
+    # Neuausrichtung 1 / P3 (docs/v2/NEU1-wecken.md): the dead-man switch paused the game: no live session wrote
+    # <save>/session.json for `age` real seconds (-1: none since the kernel booted) > reflex.json deadman.timeout_s, or the
+    # game ran `ticks` ticks without a new heartbeat > max_ticks; why = wall | ticks | missing | future (dated > 60 s ahead);
+    # by = the command that wrote the last heartbeat, took = the owner of the pause it took over (inbox)
+    "DEADMAN_PAUSE": ("A", "arbiter", _d("age:i timeout:i", "by:s mode:s took:s why:s ticks:i max_ticks:i")),
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
     # BUG-037: park = days a project blocked for good stood before it was parked (its cancel command is in msg)
@@ -949,6 +954,8 @@ VERB_ARGS: dict[str, Obj] = {
     # FR-94 (Run 14 note 100): release a pause DF set (pause:df, pause:popup) with the pause key; the reply names the old
     # reason and the new state (data.was / data.now) and every popup it read (data.popups)
     "resume": Obj(opt={"why": Str(maxbytes=200)}),
+    # Neuausrichtung 1 / P3: pause on purpose (owner park): no PAUSED_BY_DF, no pause question, no dead-man; `resume` ends it
+    "park": Obj(opt={"why": Str(maxbytes=200)}),
     # BUG-440: want / sell REPLACE a list; add (put in front of the current list), remove, sell_add, sell_remove change it
     "trade.want": Obj(opt={"want": Arr(TOKEN, hi=40), "sell": Arr(TOKEN, hi=40), "add": Arr(TOKEN, hi=40),
                            "remove": Arr(TOKEN, hi=40), "sell_add": Arr(TOKEN, hi=40), "sell_remove": Arr(TOKEN, hi=40)}),
@@ -1038,7 +1045,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "popcap.lower": ("readiness", None, False), "tempo.lower": ("arbiter", None, False),
     "popcap.raise": ("readiness", None, False), "popcap.set": ("readiness", None, False),     # BUG-293
     "pause": ("arbiter", None, False), "unpause": ("arbiter", None, False),
-    "resume": ("arbiter", None, False),
+    "resume": ("arbiter", None, False), "park": ("arbiter", None, False),
     "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
     "squad.sortie": ("military", ["PEACE", "ALERT", "SIEGE", "BREACH", "RECOVERY"], True),     # BUG-675: PEACE for one wild animal inside
     "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),
@@ -1225,7 +1232,7 @@ STATE = Obj(
                            # BUG-328: the projects set aside for want of progress (runner queue.idle_days)
                            "ip": Obj(req={"n": NAT, "by": Arr(Tup([ID, Str(maxbytes=16), NAT]), hi=8)})}),
          "bridges": Obj(extra=Str(enum=BRIDGE_STATES), keys=BRIDGE_RE),
-         "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df"])),
+         "owners": Obj(req={"pause": AnyOf(Null(), Str(enum=["inbox", "gordon", "popup", "df", "deadman", "park"])),
                             "tempo": Str(enum=["mode", "inbox", "brake", "clock"])}),
          "mil": Obj(req={"squads": NAT, "soldiers": NAT, "worn": PCT, "cv": NAT, "metal_pct": PCT,
                          "on_station": NAT},
