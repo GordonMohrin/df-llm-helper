@@ -120,4 +120,40 @@ T.test('BUG-830: the live i3 picture (one holds a wooden axe, the others have em
   T.ok(w == 0 and r >= 2 and r + none == 3, 'no wooden spec: wood ' .. w .. ' real ' .. r .. ' none ' .. none)
 end)
 
+T.test('BUG-830 / Z5: once the ladder squad step is passed first_real ends: A goes back to the wooden training weapons (drill stays wooden)', function()
+  local W = X.world{units = X.citizens(30, 1, {skills = {AXE = 6}}), training = true}
+  W.K.cfg.decisions['D-01'] = 'A'
+  X.load(W, {'military', 'readiness'}, {X.economy(), X.snapshot(), X.runner('P5')}, {'sense', 'threat', 'siege', 'gate'})
+  W.set_census('i', {tick = 0, g_weapon = 15, g_body = 2, g_shield = 14, w_axe = 4, w_pick = 4})
+  W.K.cfg.reflex = {v = 2, growth = {on = true, armed_min = 2}}
+  for _ = 1, 12 do X.weapon(W, 'ITEM_WEAPON_SWORD_SHORT') end
+  for _ = 1, 4 do X.weapon(W, 'ITEM_WEAPON_AXE_TRAINING') end                     -- wooden weapons for everybody
+  W.K.set_mode('PEACE', 'test')
+  W.run(1200 * 3, {skip = 9})
+  local A = X.squad_of(W, 'A')
+  local uids = {}
+  for i = 0, 9 do
+    if A.positions[i].occupant >= 0 then
+      local uid = W.hfs[A.positions[i].occupant].unit_id
+      if #uids < 2 then uids[#uids + 1] = uid else X.unseat(W, A, uid) end
+    end
+  end
+  T.eq(#uids, 2, 'squad A has two soldiers')
+  W.run(1200 * 2, {skip = 9})
+  local wood0, real0 = specs(A)
+  T.ok(wood0 == 0 and real0 == 2, 'step open (nobody holds a weapon): A on real specs, wood ' .. wood0 .. ' real ' .. real0)
+  for _, uid in ipairs(uids) do                                                    -- both hold a real weapon: the step is passed
+    local w = X.weapon(W, 'ITEM_WEAPON_SWORD_SHORT')
+    w.flags.in_inventory = true
+    W.unit(uid).inventory:insert('#', {item = w, mode = df.inv_item_role_type.Weapon})
+  end
+  W.run(1200 * 3, {skip = 9}); W.state()
+  W.run(1200 * 6, {skip = 9})
+  local st = W.state()
+  T.eq({st.mil.kit.sq, st.mil.kit.sqw}, {2, 2}, T.show(st.mil.kit))
+  T.ok(logged(W, 'first squad A fully armed (2 of 2'), 'the latch is logged')
+  local wood, real = specs(A)
+  T.ok(wood == 2 and real == 0, 'back on the training policy: wood ' .. wood .. ' real ' .. real)
+end)
+
 T.done()

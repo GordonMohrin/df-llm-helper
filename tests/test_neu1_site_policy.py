@@ -122,10 +122,13 @@ def test_sites_add_only_a_rectangle_a_scan_read_ok(tmp_path):
     assert lines[-1].endswith(": embark --site brook") and "goblins near" in lines[1]
 
 
-def test_shipped_sites_file_is_an_empty_list():
+def test_shipped_sites_file_is_wellformed():
+    """The shipped file is live data (the players add vetted sites to it): only its shape is tested, never its content."""
     doc = json.loads((EMB / "sites.json").read_text(encoding="utf-8"))
-    assert doc["v"] == 1 and doc["sites"] == [] and "sites add" in doc["about"]
-    assert drv.site_lines()[0].startswith("  no vetted sites")
+    assert doc["v"] == 1 and isinstance(doc["sites"], list) and "sites add" in doc["about"]
+    for ent in doc["sites"]:
+        assert ent["id"] and len(ent["site"]) == 4 and ent["verdict"] in ("ok", "reject")
+    assert drv.site_lines(EMB / "sites_missing.json")[0].startswith("  no vetted sites")
 
 
 def test_main_sites_and_embark_site(tmp_path, monkeypatch, capsys):

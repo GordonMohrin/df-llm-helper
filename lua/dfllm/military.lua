@@ -2201,9 +2201,12 @@ end
 -- walks off for the new one, and the wooden weapon the squads share is gone by then): the first melee squad is the one the growth ladder's
 -- 'squad' step reads (readiness.growth_ladder: armed_min members, ALL armed). While the ladder is on and the fort owns real melee weapons
 -- for every seat of it (census g_weapon, at least armed_min), that squad is not put on the wooden training weapons: it takes real free
--- weapons at once, in PEACE and in an alert alike. The training policy stays for every other squad (and for this one without the weapons)
+-- weapons at once, in PEACE and in an alert alike. The training policy stays for every other squad (and for this one without the weapons).
+-- Z5 (drill stays wooden): this holds ONLY until the ladder's 'squad' step has been passed once (kit_stats sets rt.fr_pass = the squad's key,
+-- a latch, so the squad does not flip back to real and out of the step again): from then on it is on the training policy like every other
+-- squad, and a wooden weapon in hand counts as armed while a real one waits for the soldier (back_rows)
 function M.first_real(K, key)
-  if key ~= first_melee_key() then return false end
+  if key ~= first_melee_key() or rt.fr_pass == key then return false end
   local ok, c = K.call('readiness', 'growth_conf')
   if not (ok and type(c) == 'table' and c.on and int(c.armed_min)) then return false end
   local ci = K.census and K.census.i
@@ -4616,6 +4619,14 @@ function M.kit_stats(K)
     end
   end
   rt.kit, rt.kit_t = t, now
+  if first and t.sq_n > 0 and rt.fr_pass ~= first then              -- BUG-830: the ladder's squad step passed once: first_real ends (Z5)
+    local okc, c = K.call('readiness', 'growth_conf')
+    if okc and type(c) == 'table' and int(c.armed_min) and t.sq_n >= c.armed_min and t.sq_w >= t.sq_n then
+      rt.fr_pass = first
+      K.log('info', 'military: first squad %s fully armed (%d of %d, %d backed by a waiting weapon): back on the training policy', first,
+            t.sq_w, t.sq_n, t.wb)
+    end
+  end
   M.trace_first(K, rows, first, t)
   return t
 end
