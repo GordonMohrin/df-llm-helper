@@ -6,6 +6,7 @@
 -- y32-39, K1 y25-31 (the gallery above it at z+1, reached from the gatehouse as in fortcore), B1 y=40, Z3 gatehouse
 -- (Kern+, the melee station 51,44), B2 y=60, Z4 core (the b2 station 51,63). Soldiers walk to their squad's station
 -- order (teleport) only where no bridge between is up; goblins step into the field one per frame while O1 is down.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local S = require('siege_world')
 local X = require('wp6_world')

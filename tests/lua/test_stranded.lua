@@ -6,6 +6,7 @@
 -- again once the citizens are through (or a hostile comes near: abort); no rescue with O1 down; (b) BREACH falls back
 -- to SIEGE once the fort is sealed again; (c) a raise that would cut citizens off from drink and food waits (no BREACH)
 -- until a hostile is near, then STRANDED forced; (d) SUPPLY_OUTSIDE and the core days.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local SW = require('seal_world')
 local S = require('siege_world')

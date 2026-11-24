@@ -6,6 +6,7 @@
 -- Siege's rescue lowering (BUG-028) and a soldier at his own station 2 tiles away hold nothing beyond the 1-tile margin.
 -- The world of test_fix5_gate.lua (real sense, threat, siege, gate, seal): O1 at 30,15 (outer), B1 at 40,15 (inner), B2 at
 -- 45,15 (core), the core x46-60; a pull is taken 30 ticks after queueing (worker unit 1), done 30 later, the bridge moves 20.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local SW = require('seal_world')
 local S = require('siege_world')

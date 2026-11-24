@@ -25,7 +25,7 @@ Gordon answers each decision once. The answer goes into `config/decisions.yaml` 
 | D-11 | timestream | `accepted`, `rejected` | `accepted` | arbiter, baseline | rejected: arbiter never calls `act.timestream` (game runs at FPS_CAP), baseline does not enable timestream |
 | D-12 | Army share | `<low>/<high>` in % | `15/20` | military, readiness | low share applies at pop ≤55, high share from 60 |
 | D-13 | Automatic beauty pause at high wealth | `no`, `yes` | `no` | runner | yes: beauty projects pause above a wealth threshold (to be defined); without it, wealth is only logged with every threat event |
-| D-14 | `peace_gates`: state of the gate bridges in PEACE (FR-49/55) | `down`, `up` | `down` | gate, siege | up: in PEACE the manifest outer/inner bridges stay up, and so do the lever-linked bridges a lockdown raised; they open only for a window (a caravan on the map, migrants arriving, an inbox `lever` down for that bridge), each while no hostile is visible, and close 600 ticks after it; RECOVERY lowers only the core seal |
+| D-14 | `peace_gates`: state of the gate bridges in PEACE (FR-49/55; NEU1 E2) | `inner`, `down`, `up` | `inner` | gate, siege | inner (default since 2026-11-23, docs/v2/NEU1-tore.md): in PEACE the inner (B1) bridges stay up, outer and core down; B1 opens only for a window (caravan, migrants, `lever` down, the return window for citizens outside), each while no hostile is visible; RECOVERY keeps B1 up. down: every gate down in PEACE.  up: in PEACE the manifest outer/inner bridges stay up, and so do the lever-linked bridges a lockdown raised; they open only for a window (a caravan on the map, migrants arriving, an inbox `lever` down for that bridge), each while no hostile is visible, and close 600 ticks after it; RECOVERY lowers only the core seal |
 
 ### Decided by the development session (2026-10-23, delegated by Gordon: "triff du selber die entscheidungen")
 Design questions that stood open between the dev session and the game session. They are not `config/decisions.yaml`
@@ -133,7 +133,12 @@ decided:
 - **Hospital water (`water.zone_below`):** a Water Source zone above water one level down (a brook bed) stays not
   counted until a live test shows that the game accepts it.
 
-### D-14 peace_gates: why the default is `down`
+### D-14 peace_gates: the default is `inner` since 2026-11-23 (NEU1 E2)
+Gordon handed the decisions to the Leitung on 2026-11-23; GRUNDSATZ-REVIEW found every gate failure left the fort open and the
+arrival race lost too often. `inner` keeps B1 up in PEACE (the depot lies in the bailey, so trade needs only O1 down), with the
+windows of `up`, a return window and the drink rule; see docs/v2/NEU1-tore.md. The text below is the old reasoning for `down`.
+
+#### (old) why the default was `down`
 Run 9 (14.10.2026) lost 39 of 48 citizens to an army that walked in over four lowered bridges, and FR-49/55 ask for
 gates that are closed in PEACE. The default stays `down` (the PEACE row of the DESIGN §3 mode table, "unchanged" like
 every other default here) because closed gates break things the fort lives on, while the danger they guard against

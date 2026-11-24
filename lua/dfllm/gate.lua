@@ -36,6 +36,10 @@
 -- needed (fail-open), the same single-pending-pull invariant, footprint and GATE_FAIL rules. SIEGE/BREACH raise those
 -- unmanaged bridges too, with or without the reflex module. 'down' is refused while the lockdown holds. Afterwards
 -- an unmanaged bridge the lockdown raised is lowered again in PEACE (peace_gates D-14 = down) or kept up (D-14 = up).
+-- NEU1 (P5 Tore, E2, docs/v2/NEU1-tore.md): D-14 = inner (the default) keeps only the inner bridges up in PEACE (outer and core
+-- down: the depot lies in the bailey), with the windows below plus a return window for civilians outside it and the drink rule;
+-- gate.close_at_once ends the straggler holds once a hostile is on the map; gate.fail_closed refuses a lowering of a raised
+-- manifest bridge nobody could raise again (gate.missing); the quiet PEACE raises never become GATE_FAIL.
 -- Peace gates (FR-55, D-14 = up): in PEACE the manifest outer/inner bridges (and kept unmanaged ones) stay up;
 -- they open only for a window: a caravan on the map (trade state, or its arrival report), migrants arriving, an
 -- inbox `lever` down (that bridge), each while no hostile is visible, and close WIN_CLOSE ticks after the reason ends.
@@ -290,9 +294,37 @@ local function lock_why(K)
   if ok and type(why) == 'string' and why ~= '' then return why end
 end
 
--- peace_gates (D-14): 'up' keeps the gates up in PEACE (FR-55), 'down' (default) is the PEACE mode table
-local function peace_up(K)
-  return tostring(K.cfg.decisions and K.cfg.decisions['D-14'] or 'down') == 'up'
+-- peace_gates (D-14): 'up' keeps the outer and inner gates up in PEACE (FR-55), 'down' is the old PEACE mode table (every gate
+-- down), 'inner' (NEU1 E2, the default) keeps the inner gates up and the outer ones down (the depot lies in the bailey between
+-- them: trade needs no open inner gate). An unknown value is 'inner' (fail closed).
+local PEACE_MODES = {down = true, up = true, inner = true}
+local function peace_mode(K)
+  local v = tostring(K.cfg.decisions and K.cfg.decisions['D-14'] or 'inner')
+  return PEACE_MODES[v] and v or 'inner'
+end
+local function peace_up(K) return peace_mode(K) == 'up' end
+-- does the PEACE mode keep this role up outside a window? (extra = an unmanaged bridge a lockdown raised: only 'up' keeps it)
+local function peace_keeps(K, role)
+  local pm = peace_mode(K)
+  if pm == 'up' then return GATE_ROLES[role] == true or role == 'extra' end
+  return pm == 'inner' and role == 'inner'
+end
+
+-- NEU1 (P5 Tore, E2): config/reflex.json gate.close_at_once (true: no hold of a raise for citizens still outside once a
+-- hostile is on the map; crush safety stays), gate.fail_closed (true: an automatic lowering of a manifest bridge waits while
+-- it could not be raised again: no linked lever, every linked lever outside Kern+ and the refuge, nobody inside to pull),
+-- gate.return_every / gate.return_open (D-14 inner: citizens on the attack side of a raised inner gate in quiet PEACE get a
+-- return window of return_open ticks once they stood there return_every ticks; 0 = off), gate.drink_inside (D-14 inner: the
+-- inner gate stays down in PEACE while Kern+ is known to hold no drink and no wet well). Bad values: the defaults below.
+M.RETURN_EVERY, M.RETURN_OPEN = 1200, 600
+function M.neu_cfg(K)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+  local function flag(v) if type(v) == 'boolean' then return v end return true end
+  local every, open = math.tointeger(r.return_every), math.tointeger(r.return_open)
+  if not every or every < 0 or every > 24000 then every = M.RETURN_EVERY end
+  if not open or open < 100 or open > 4800 then open = M.RETURN_OPEN end
+  return {close_at_once = flag(r.close_at_once), fail_closed = flag(r.fail_closed), drink_inside = flag(r.drink_inside),
+          return_every = every, return_open = open}
 end
 
 ---------------------------------------------------------------- DF reads (buildings, jobs)
@@ -1996,6 +2028,13 @@ local function holders(K, name, fp, sc, dir)
     -- station stepped onto the moving bridge and was crushed): a soldier moving within RAISE_R tiles still holds the raise then; only the
     -- citizens' recall stream (BUG-587) is let go
     hold = M.raise_movers(K, name, sc, hold, hd0 >= 0 and hd0 <= math.max(an, ac))       -- BUG-543
+  elseif dir == 'up' and M.neu_cfg(K).close_at_once then
+    -- NEU1 (close_at_once): a SIEGE/BREACH raise is wanted at T0 now, while the squads still march to their stations over the
+    -- bridges (no straggler timer gives them time any more): a SOLDIER moving within RAISE_R tiles holds it (BUG-543/758, the
+    -- soldier with no readable path) until a hostile is within approach_close tiles of the footprint; civilians do not
+    local _, _, ac = M.approach_cfg(K)
+    local hd0 = hostile_dist(K, name, fp)
+    if not (hd0 >= 0 and hd0 <= ac) then hold = M.raise_movers(K, name, sc, hold, true) end
   end
   for i, e in ipairs(hold) do
     seen[e.id] = true
@@ -2039,6 +2078,55 @@ local function airlock(K, name, role)
   return nil
 end
 
+-- NEU1 (P5 Tore, gate.fail_closed): what is missing to raise manifest bridge `name` again, or nil when it could be: a linked
+-- lever (the mechanisms of the link), one of them on a tile of Kern+ or the refuge (BUG-774: an outside lever is a race over
+-- the open ground), a civilian inside Kern+ / the refuge to pull it (a fresh census). Missing data counts as missing.
+function M.missing(K, name)
+  local man = K.manifest()
+  local r = rt[name]
+  if not (r and any_linked(r)) then return 'no linked lever (lever or link mechanisms missing)' end
+  local kn, rn = core_burrows(man)
+  local kb, rb = burrow(kn), burrow(rn)
+  if not kb then return 'no Kern+ burrow to judge its levers by' end
+  local inside = false
+  for _, lid in ipairs(r.levers) do
+    local p = r.pos[lid]
+    if r.linked[lid] and type(p) == 'table' and p[1] and p[2] and p[3]
+       and (on_tile(kb, p[1], p[2], p[3]) or on_tile(rb, p[1], p[2], p[3])) then inside = true; break end
+  end
+  if not inside then return 'no linked lever inside Kern+ or the refuge' end
+  local cu = K.census.u
+  if type(cu) ~= 'table' or K.now().tick - (math.tointeger(cu.tick) or -1e9) > M.INNER_FRESH then return 'no fresh census of the pullers' end
+  local civ = (math.tointeger(cu.cit) or 0) - (math.tointeger(cu.soldiers) or 0) - math.max(math.tointeger(cu.outside) or 0, 0)
+  if (math.tointeger(cu.outside) or -1) < 0 or civ < 1 then return 'no civilian inside Kern+ to pull a lever' end
+  return nil
+end
+
+-- the whys a fail-closed check never holds: the player's own lever, siege's rescue (lives) and its intake / sortie (SIEGE, own checks)
+local CLOSED_FREE = {rescue = true, intake = true, sortie = true}
+local function fail_closed(K, name, w)
+  if not M.neu_cfg(K).fail_closed then return nil end
+  w = tostring(w or '')
+  if CLOSED_FREE[w] or w:find('^lever:') then return nil end
+  local spec = (K.manifest().bridges or {})[name]
+  if not valid_spec(spec) then return nil end           -- an unmanaged bridge: no Kern+ / role to judge by
+  local r = rt[name]
+  if not (r and r.last == 'up') then return nil end     -- nothing to keep closed
+  -- BUG-802: a bridge the kernel itself raised in quiet PEACE (peace_gates, st.pup) stays lowerable by the PEACE windows
+  -- (caravan, migrants, return, peace): peace_want raises it only while nothing is missing, a later gap must not seal it
+  if (st.pup or {})[name] and K.mode() == 'PEACE' and not lock_why(K) then return nil end
+  local miss = M.missing(K, name)
+  if not miss then return nil end
+  local now = K.now().tick
+  if now - (r.fc_ev or -1e9) >= M.FAIL_REPEAT or r.fc_miss ~= miss then
+    r.fc_ev, r.fc_miss = now, miss
+    K.emit('GATE', 'C', string.format('%s stays up (fail closed, %s down refused): %s', name, w, miss):sub(1, 200),
+           {bridge = name, state = 'fail_closed', missing = miss, why = w})
+    K.log('warn', 'gate: %s stays up: %s down refused, %s (gate.fail_closed)', name, w, miss)
+  end
+  return 'down refused: fail closed: ' .. miss
+end
+
 local function down_guard(K, name, why)
   local m = K.mode()
   -- BUG-028: siege's rescue (citizens without drink or food behind our raised gates, the outside sealed) lowers an
@@ -2060,7 +2148,7 @@ local function down_guard(K, name, why)
   local d = type(h) == 'table' and type(h.near_bridge) == 'table' and h.near_bridge[name]
   if d == nil and rt[name] and rt[name].fp then d = list_dist(h, rt[name].fp) end
   if d and d >= 0 and d <= M.DOWN_GUARD then return 'down refused: hostile within ' .. M.DOWN_GUARD .. ' tiles' end
-  return nil
+  return fail_closed(K, name, w)                                   -- NEU1: never open what could not be closed again
 end
 
 -- our pull left the queue and the bridge moved: how long the job waited for its worker (live L3 KPI)
@@ -2254,9 +2342,17 @@ local function observe(K, name, r, s, now, fp, prev, cur)
     end
     K.emit('GATE', 'C', name .. ' ' .. s, d)
   end
+  local was = r.last
   r.last = s
   if s == 'moving' or s == 'unknown' then return end
   local br = st.br[name]
+  -- BUG-802: remember whether this raise was the kernel's quiet PEACE raise (peace_gates); a down clears it, a first read
+  -- (load) keeps the persisted mark
+  st.pup = st.pup or {}
+  local pu
+  if s == 'up' and was ~= nil then pu = (br and br.want == 'up' and br.why == 'peace_gates') or nil
+  elseif s == 'up' then pu = st.pup[name] end
+  if st.pup[name] ~= pu then st.pup[name], dirty = pu, true end
   -- double toggle: the bridge reached the wanted state in this epoch and left it again
   if br and br.want and r.settled == br.want and s ~= br.want and (r.settled_at or -1) >= br.since then
     st.kpi.dbl = st.kpi.dbl + 1
@@ -2988,9 +3084,14 @@ local function links(K, name, spec, r, now)
   end
 end
 
+-- NEU1: the quiet raises of the PEACE gates (D-14 inner/up, a window's end) are no emergency: no GATE_FAIL (class A) for them; a
+-- bridge that cannot rise is readiness' R0 (levers, lever_outside), a crowd at it only waits (kern.log names it)
+local QUIET_UP = {peace_gates = true, window_end = true}
+
 local function check_fail(K, name, now, mode)
   local br = st.br[name]
   if not (br and br.want == 'up' and not br.failed and br.deadline and now >= br.deadline) then return end
+  if QUIET_UP[br.why] and (mode or K.mode()) == 'PEACE' then return end   -- mode: the epoch's own (a MODE change settles it)
   local r = runtime(name)
   if r.last == 'up' then return end
   local slow
@@ -3088,13 +3189,74 @@ local function window_open(K, name, now)
   return st.win_last ~= nil and now >= st.win_last and now - st.win_last < M.WIN_CLOSE
 end
 
--- the PEACE want of a gate bridge (manifest outer/inner, or an unmanaged one kept up): lockdown up; D-14 up: up
--- unless a window is open; D-14 down: down (the mode table)
+-- NEU1 (D-14 inner, gate.drink_inside): Kern+ is KNOWN to hold no drink (seal's last audit: no drink item, no wet well)? Unknown
+-- (no audit yet, no Kern+) is not dry: the gate stays up (fail closed); siege's STRANDED rescue still lowers it for the thirsty
+local function kern_dry(K)
+  if not M.neu_cfg(K).drink_inside then return nil end
+  local ok, a = K.call('seal', 'refuge_drink', 'kern')
+  if not (ok and type(a) == 'table' and a.exists) then return nil end
+  if (math.tointeger(a.drink) or 0) > 0 or ((math.tointeger(a.wells) or 0) > 0 and a.wet == true) then return nil end
+  return string.format('Kern+ holds no drink (%d items, %d wells, none wet)', math.tointeger(a.drink) or 0,
+                       math.tointeger(a.wells) or 0)
+end
+
+-- NEU1 (D-14 inner): civilians on the attack side (census.u.atk: outside Kern+ and the refuge, or in the bailey / trap hall /
+-- killing field) of a RAISED inner gate in quiet PEACE: once they stood there return_every ticks the gate opens for
+-- return_open ticks (st.winb, the per-bridge window; window_open still needs no visible hostile). Runtime only (r.ret).
+local function return_window(K, name, now)
+  local c = M.neu_cfg(K)
+  local r = runtime(name)
+  local cu = K.census.u
+  local atk = type(cu) == 'table' and math.tointeger(cu.atk) or -1
+  local fresh = type(cu) == 'table' and now - (math.tointeger(cu.tick) or -1e9) <= M.INNER_FRESH
+  if c.return_every <= 0 or not fresh or atk <= 0 or r.last ~= 'up' or lock_why(K) then r.ret = nil; return end
+  r.ret = r.ret or now
+  if now - r.ret < c.return_every then return end
+  r.ret = nil
+  st.winb[name], dirty = now + c.return_open, true
+  K.emit('GATE', 'C', cut(string.format('%s opens for %d ticks: %d civilians outside it in PEACE (return window)', name,
+         c.return_open, atk), 200), {bridge = name, state = 'return', n = atk,
+         units = type(cu.atk_ids) == 'table' and cu.atk_ids or {}})
+  K.log('info', 'gate: %s return window (%d ticks) for %d civilians on its attack side', name, c.return_open, atk)
+end
+
+-- the PEACE want of a gate bridge (manifest outer/inner, or an unmanaged one kept up): lockdown up; a role the D-14 mode
+-- keeps up (up: outer, inner, extra; inner: inner) is up unless a window is open; everything else down (the mode table).
+-- D-14 inner: an inner gate stays down while Kern+ is known to hold no drink (why 'no_drink_inside', kern.log once a day)
 local function peace_want(K, name, role, now)
   if not GATE_ROLES[role] and role ~= 'extra' then return 'down', 'peace' end
   if lock_why(K) then return 'up', 'lockdown' end
-  if peace_up(K) then
+  if peace_keeps(K, role) then
     if window_open(K, name, now) then return 'down', 'window' end
+    -- BUG-802 (fail closed both ways): never raise in quiet PEACE what the kernel could not lower and raise again; a
+    -- lockdown / SIEGE raise is not this path. Readiness R0 lever_outside / BUG-774 keep pushing the inside lever.
+    local spec = (K.manifest().bridges or {})[name]
+    local r0 = rt[name]
+    if M.neu_cfg(K).fail_closed and valid_spec(spec) and not (r0 and r0.last == 'up') then
+      local miss = M.missing(K, name)
+      if miss then
+        local r = runtime(name)
+        -- not resolved yet (the load): silent, the next pass after resolve() decides and says it
+        if r.resolved and (now - (r.pd_ev or -1e9) >= M.FAIL_REPEAT or r.pd_miss ~= miss) then
+          r.pd_ev, r.pd_miss = now, miss
+          K.emit('GATE', 'C', cut(string.format('%s stays down in PEACE (fail closed, not raised): %s', name, miss), 200),
+                 {bridge = name, state = 'fail_closed', missing = miss, why = 'cannot_close_again'})
+          K.log('warn', 'gate: %s stays down in PEACE: %s (gate.fail_closed, cannot_close_again)', name, miss)
+        end
+        return 'down', 'cannot_close_again'
+      end
+    end
+    if peace_mode(K) == 'inner' then
+      local dry = kern_dry(K)
+      if dry then
+        local r = runtime(name)
+        if now - (r.dry_log or -1e9) >= M.FAIL_REPEAT then
+          r.dry_log = now
+          K.log('warn', 'gate: %s stays down in PEACE: %s (gate.drink_inside)', name, dry)
+        end
+        return 'down', 'no_drink_inside'
+      end
+    end
     return 'up', 'peace_gates'
   end
   return 'down', 'peace'
@@ -3127,6 +3289,7 @@ end
 -- decide alone only in an ALERT lockdown
 local function inner_wait(K, man, name, mode, br, now)
   if mode == 'BREACH' or (br and br.want == 'up') then return nil end
+  if M.neu_cfg(K).close_at_once then return nil end   -- NEU1 (E2): no hold for stragglers once a lockdown holds (gate.close_at_once)
   local r = runtime(name)
   if r.iwx and now - r.iwx < M.INNER_REST then return nil end      -- Hotfix: a spent hold does not come back at once
   if r.iw and now - r.iw > M.INNER_MAX then
@@ -3188,9 +3351,12 @@ local function manifest_pass(K, man, now)
       local n = role == 'inner' and inner_wait(K, man, name, mode, br, now) or nil      -- BUG-338
       note_inner(K, name, n, now)
       if not n then w, why = 'up', 'lockdown' end
-    elseif mode == 'PEACE' and GATE_ROLES[role] and (peace_up(K) or (br and br.why == 'lockdown')) then
+    elseif mode == 'PEACE' and GATE_ROLES[role] and (peace_keeps(K, role) or (br and br.why == 'lockdown')) then
+      if peace_mode(K) == 'inner' and role == 'inner' then return_window(K, name, now) end   -- NEU1
       w, why = peace_want(K, name, role, now)
       if w == 'up' and M.held_down(K, name, now) then w = nil end     -- BUG-236: the player's lever hold
+    elseif mode ~= 'PEACE' and GATE_ROLES[role] and br and br.want == 'down' and br.why == 'window' then
+      w, why = 'up', 'window_end'     -- NEU1: a peace window (caravan, return) ends with PEACE (ALERT has no other raise for B1)
     end
     if w and not (br and br.want == w) then set_want(name, w, why, nil, now) end
   end
@@ -3321,7 +3487,7 @@ function M.init(K)
       end
     end
   end
-  st.ex, st.winb, st.seen, st.gone, st.lost, st.hold = {}, {}, {}, {}, {}, {}
+  st.ex, st.winb, st.seen, st.gone, st.lost, st.hold, st.pup = {}, {}, {}, {}, {}, {}, {}
   M.K = K                                         -- BUG-236: set_want names a replaced player want in kern.log
   if type(p) == 'table' then
     local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
@@ -3378,6 +3544,9 @@ function M.init(K)
     end
     for name, t in pairs(type(p.winb) == 'table' and p.winb or {}) do
       if type(name) == 'string' and int(t) then st.winb[name] = int(t) end
+    end
+    for name, v in pairs(type(p.pup) == 'table' and p.pup or {}) do     -- BUG-802: the kernel's PEACE raises
+      if type(name) == 'string' and v == true then st.pup[name] = true end
     end
   end
   rt, rt_ex, pub, dirty, PULL, last_pass, bds = {}, nil, nil, false, nil, nil, nil
@@ -3824,7 +3993,7 @@ M.on = {
   REPORT = function(K, ev)
     local now = K.now().tick
     local add = (ev.type == 'CARAVAN_ARRIVAL' or ev.type == 'FIRST_CARAVAN_ARRIVAL') and M.WIN_CARAVAN or M.WIN_MIGRANTS
-    if peace_up(K) and now + add > (st.win or -1) then
+    if peace_mode(K) ~= 'down' and now + add > (st.win or -1) then    -- NEU1: D-14 inner opens the inner gate for them
       st.win, dirty = now + add, true
       K.log('info', 'gate: peace gates open for %s (%d ticks)', ev.type, add)
     end
@@ -3874,7 +4043,7 @@ M.on = {
 M.verbs.lever = function(K, args, cmd)
   local b, w = args.bridge, args.want
   if type(b) ~= 'string' or (w ~= 'up' and w ~= 'down') then return false, 'need bridge and want up|down' end
-  if w == 'down' and peace_up(K) then    -- D-14 up: the operator's planned opening is a window for this bridge
+  if w == 'down' and peace_mode(K) ~= 'down' then    -- D-14 up/inner: the operator's planned opening is a window for this bridge
     st.winb[b], dirty = K.now().tick + M.WIN_LEVER, true
   end
   local by = tostring(cmd and cmd.by or '?')

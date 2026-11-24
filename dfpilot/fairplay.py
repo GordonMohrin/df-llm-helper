@@ -37,7 +37,7 @@ CHOICES: dict[str, list[str] | str] = {
     "D-11": ["accepted", "rejected"],
     "D-12": r"^\d{1,2}/\d{1,2}$",
     "D-13": ["no", "yes"],
-    "D-14": ["down", "up"],                     # peace_gates: PEACE state of the gate bridges (FR-55)
+    "D-14": ["inner", "down", "up"],            # peace_gates: PEACE state of the gate bridges (FR-55; NEU1 E2: inner first = default)
 }
 
 _DECISION_LINE = re.compile(r"^(D-\d\d)\s*:\s*([^#]*?)\s*(#.*)?$")   # CONTRACTS §9.16
@@ -219,6 +219,15 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif k == "lever_hold_days":           # BUG-236: game days a player's `lever` down holds the bridge down
                 if not is_int(v, 0, 28):
                     errs.append(f"{name}: gate.lever_hold_days: int 0..28 expected, got {v!r}")
+            elif k in ("close_at_once", "fail_closed", "drink_inside"):   # NEU1 (P5 Tore): switches, default true
+                if not isinstance(v, bool):
+                    errs.append(f"{name}: gate.{k}: true or false expected, got {v!r}")
+            elif k == "return_every":              # NEU1: ticks civilians stand outside a raised inner gate before it opens (0 = off)
+                if not is_int(v, 0, 24000):
+                    errs.append(f"{name}: gate.return_every: int 0..24000 expected, got {v!r}")
+            elif k == "return_open":               # NEU1: ticks the inner gate's return window stays open
+                if not is_int(v, 100, 4800):
+                    errs.append(f"{name}: gate.return_open: int 100..4800 expected, got {v!r}")
             elif k == "manual":
                 if not isinstance(v, list) or len(v) > 32 or any(
                         not (is_int(x, 0, 2**31 - 1) or (isinstance(x, str) and re.match(schema.BRIDGE_RE, x)))

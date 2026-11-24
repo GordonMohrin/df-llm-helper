@@ -19,7 +19,7 @@ import luahost  # noqa: E402
 def test_decisions_file_holds_the_design_defaults_and_gordons_answers():
     assert F.load_decisions() == S.DECISIONS
     assert S.parse_decisions(F.DECISIONS_PATH.read_text(encoding="utf-8")) == S.DECISIONS
-    assert F.pending() == [d for d in S.DECISIONS if d not in ("D-01", "D-14")]   # D-14 answered 2026-10-15 (= default), D-01 answered B 2026-10-24
+    assert F.pending() == [d for d in S.DECISIONS if d not in ("D-01", "D-14")]   # D-14 answered 2026-11-23 by Leitung (NEU1 E2, = default), D-01 answered B 2026-10-24
     assert F.decision_errors() == []
     assert F.get_decision("D-12") == "15/20" and F.decisions.get("D-01") == "B"
     assert F.decisions.all() == S.DECISIONS

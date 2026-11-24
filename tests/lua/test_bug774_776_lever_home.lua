@@ -77,7 +77,7 @@ end
 local function setup(o)
   C.ACT.burrow_units = {'gate'}
   local W = S.world{units = o.units or S.fort_units(), manifest = manifest(o.outside), mode = o.mode,
-                    lever_default = {worker = 150, pull = 40}, move = o.move}
+                    lever_default = {worker = 150, pull = 40}, move = o.move, legacy = o.legacy}
   if not o.noroom then W.burrow('dfllm-levers', o.outside and ROOM or {54, 45, Z, 56, 46, Z}) end
   W.walk, W.crushed, W.t0, W.walkers = {}, {}, nil, o.walkers or {}
   W.act_result('burrow_units', function(name, ids)
@@ -191,7 +191,8 @@ end)
 ---------------------------------------------------------------- gate.lever_outside
 T.test('BUG-774: gate.lever_outside names the bridges whose linked levers ALL lie outside Kern+ and the refuge (a lever inside, even one of two, ' ..
        'clears it)', function()
-  local W = setup{outside = true, mode = 'PEACE'}
+  -- NEU1: legacy gates (D-14 down): with B1 raised in PEACE (D-14 inner) gate's faster pass builds the inner lever within these 300 ticks
+  local W = setup{outside = true, mode = 'PEACE', legacy = true}
   run(W, 300)
   local lo = outside(W)
   T.eq(names(lo), {'B1', 'O1'}, T.show(lo))

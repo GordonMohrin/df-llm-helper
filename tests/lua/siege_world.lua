@@ -60,6 +60,19 @@ function S.army(n, x, y, first)
 end
 
 ---------------------------------------------------------------- DF fakes
+-- a lever at p linked to bridge `name` (built and linked; NEU1 BUG-802 tests add one mid-run)
+function S.add_lever(W, name, p, id)
+  local b = W.bridges[name]
+  local lv = W.add_building{id = id or (200 + #W.levers), _kind = 'trap',
+                            trap_type = df.trap_type.Lever, x1 = p[1], y1 = p[2], x2 = p[1], y2 = p[2], z = p[3],
+                            centerx = p[1], centery = p[2], state = 0, bridge = name}
+  lv.jobs = kmock.vec{}
+  lv.linked_mechanisms = kmock.vec{{_ref = {getBuilding = function() return b end}}}
+  W.levers[#W.levers + 1] = lv
+  df.global.world.buildings.other.TRAP:insert('#', lv)
+  return lv
+end
+
 function S.install(W, opts)
   opts = opts or {}
   local g = df.global
@@ -91,16 +104,7 @@ function S.install(W, opts)
     b.jobs = kmock.vec{}
     W.bridges[name] = b
     g.world.buildings.other.BRIDGE:insert('#', b)
-    for i, p in ipairs(spec.levers or {}) do
-      local lv = W.add_building{id = (S.LEVERS[name] or {})[i] or (200 + #W.levers), _kind = 'trap',
-                                trap_type = df.trap_type.Lever, x1 = p[1], y1 = p[2], x2 = p[1], y2 = p[2], z = p[3],
-                                centerx = p[1], centery = p[2], state = 0, bridge = name}
-      lv.jobs = kmock.vec{}
-      local target = b
-      lv.linked_mechanisms = kmock.vec{{_ref = {getBuilding = function() return target end}}}
-      W.levers[#W.levers + 1] = lv
-      g.world.buildings.other.TRAP:insert('#', lv)
-    end
+    for i, p in ipairs(spec.levers or {}) do S.add_lever(W, name, p, (S.LEVERS[name] or {})[i]) end
   end
   table.sort(W.levers, function(a, b) return a.id < b.id end)
   dfhack.buildings = {findAtTile = function(x, y, z)
@@ -149,8 +153,24 @@ function S.install(W, opts)
   return W
 end
 
+-- NEU1 (P5 Tore): the gate rules before Neuausrichtung 1 (D-14 down: every gate down in PEACE; straggler holds; no fail-closed
+-- check, no drink rule, no return window). Tests written for those rules pass `legacy = true` (or merge S.legacy() into cfg).
+function S.legacy(cfg)
+  cfg = cfg or {}
+  cfg.decisions = cfg.decisions or {}
+  if cfg.decisions['D-14'] == nil then cfg.decisions['D-14'] = 'down' end
+  cfg.reflex = cfg.reflex or {v = 2}
+  cfg.reflex.gate = cfg.reflex.gate or {}
+  local g = cfg.reflex.gate
+  for k, v in pairs({close_at_once = false, fail_closed = false, drink_inside = false, return_every = 0}) do
+    if g[k] == nil then g[k] = v end
+  end
+  return cfg
+end
+
 function S.world(opts)
   opts = opts or {}
+  if opts.legacy then opts.cfg = S.legacy(opts.cfg) end
   local persist = opts.persist or {}
   if persist.manifest == nil and opts.manifest ~= false then persist.manifest = opts.manifest or S.manifest() end
   local W = kmock.new{units = opts.units, mode = opts.mode, persist = persist, strict = opts.strict ~= false,

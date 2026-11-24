@@ -5,6 +5,7 @@
 -- Reach model: a lever job gets a worker only while the lever lies in the civ-alert area (no alert: anywhere);
 -- a worker comes after lever_default.worker ticks (150: live L3 took 156-243), at once from a lever puller
 -- standing in the lever's room.
+KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
 local T = require('testlib')
 local S = require('siege_world')
 local C = require('dfllm.util.contract')

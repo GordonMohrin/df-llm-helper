@@ -554,6 +554,16 @@ function M.new(opts)
   if reflex.deadman == nil then reflex.deadman = {on = false} end
   local decisions = {}
   for k, v in pairs(C.DECISIONS) do decisions[k] = v end
+  -- NEU1 (P5 Tore): a test file written for the gate rules before Neuausrichtung 1 sets KMOCK_LEGACY_GATES = true: D-14 down and the
+  -- gate switches off (close_at_once, fail_closed, drink_inside, return window) unless its own cfg says otherwise
+  if rawget(_G, 'KMOCK_LEGACY_GATES') then
+    decisions['D-14'] = 'down'
+    cfg.reflex = cfg.reflex or {v = 2}
+    cfg.reflex.gate = cfg.reflex.gate or {}
+    for k, v in pairs({close_at_once = false, fail_closed = false, drink_inside = false, return_every = 0}) do
+      if cfg.reflex.gate[k] == nil then cfg.reflex.gate[k] = v end
+    end
+  end
   for k, v in pairs(cfg.decisions or {}) do decisions[k] = v end
   K.cfg = {decisions = decisions,
            allowlist = cfg.allowlist or {v = 2, commands = {}, blocked = {}, armok_exceptions = {}},
