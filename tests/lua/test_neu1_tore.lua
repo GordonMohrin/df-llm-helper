@@ -29,6 +29,8 @@ end
 local function world(o)
   o = o or {}
   local units = o.units or S.fort_units()
+  -- BUG-831 retry: a soldier at his station near B1 keeps B1 down in PEACE; these tests want the quiet raise, so he stands far inside
+  if not o.units then for _, u in ipairs(units) do if u.id == 5 then u.pos = {60, 85, Z} end end end
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     local u = S.cit(w.id, w.route[1][1], w.route[1][2], Z, w.kind == 'soldier' and {squad = 1} or nil)

@@ -24,10 +24,18 @@ local function route(x, y0, y1)
   return r
 end
 
+-- the fixture soldier (unit 5, squad 1) stands at fortcore's melee station 4 tiles inside B1; since the BUG-831 retry a soldier at his
+-- station counts like anybody else near the footprint, so by default he stands far inside Kern+ (o.at_station keeps him at the station)
+local function fort_units(at_station)
+  local units = S.fort_units()
+  if not at_station then for _, u in ipairs(units) do if u.id == 5 then u.pos = {60, 85, Z} end end end
+  return units
+end
+
 -- o.units, o.walkers ({id, route, start, kind}), o.cfg, o.seal (refuge_drink answer, false = no seal module), o.manifest, o.reflex
 local function world(o)
   o = o or {}
-  local units = o.units or S.fort_units()
+  local units = o.units or fort_units(o.at_station)
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     local u = S.cit(w.id, w.route[1][1], w.route[1][2], Z, w.kind == 'soldier' and {squad = 1} or nil)
@@ -122,7 +130,7 @@ end
 -- like world() but with the i4 lever timing: a worker takes the pull after 60 ticks and pulls 175 ticks later, the bridge moves 300 ticks
 local function slow_world(o)
   o = o or {}
-  local units = S.fort_units()
+  local units = fort_units(o.at_station)
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     units[#units + 1] = S.cit(w.id, w.route[1][1], w.route[1][2], Z)
@@ -132,6 +140,23 @@ local function slow_world(o)
   W.walkers, W.crushed, W.t0 = walkers, {}, nil
   S.load(W, {S.military(), seal_fake({exists = true, drink = 40, wells = 0, wet = false})})
   return W
+end
+
+-- units that stay as they are (the soldier at his station) and step onto the footprint when o.jump_at ticks after the lever
+local function soldier_jump(W, t)
+  W.sj = W.sj or {}
+  if S.bstate(W, 'B1') == 'moving' and not W.sj.jumped then
+    W.sj.jumped = true
+    W.sj.crush = W.sj.crush or {}
+    W.move(5, 51, 40, Z)                                  -- the stationed soldier steps onto the moving footprint
+  end
+  if W.sj.jumped and not W.sj.back and S.bstate(W, 'B1') ~= 'moving' then
+    W.sj.back = true
+  end
+  if S.bstate(W, 'B1') == 'moving' and W.sj.jumped then
+    local u = W.unit(5)
+    if on_fp('B1', u._m.x, u._m.y) then W.crushed[#W.crushed + 1] = 'soldier 5 on B1' end
+  end
 end
 
 -- walkers with when_moving start walking the moment B1 moves (the lever is pulled: nothing can cancel it any more)
@@ -227,6 +252,27 @@ T.test('lever days (BUG-833): lever down with days=N holds B1 down N game days; 
   T.eq(S.bstate(W, 'B1'), 'down', 'held beyond the default 3 days (12,000 ticks = 10 days)')
   run2(W, 9000)
   T.eq(S.bstate(W, 'B1'), 'up', 'raised again after the hold, in the quiet')
+end)
+
+T.test('PEACE TRAFFIC (BUG-831 retry, i4 #1441): a soldier at his station 4 tiles from B1 (squad station order) is NOT exempt: ' ..
+       'B1 is never pulled in PEACE, so he is not crushed when he steps onto the footprint; GATE names him', function()
+  local W = slow_world{at_station = true}
+  W.crushed, W.walkers = {}, {}
+  local list = {}
+  for t = 0, 4000, 9 do list[#list + 1] = {t, soldier_jump} end
+  S.run(W, 4000, {at = list})
+  T.eq(S.bstate(W, 'B1'), 'down', 'stays down with a soldier at the station')
+  T.eq(#S.pulls(W, 'B1'), 0, 'no pull queued')
+  T.eq(#W.crushed, 0, 'crushed: ' .. table.concat(W.crushed, '; '))
+  local ev = gate_ev(W, 'peace_wait')
+  T.ok(#ev >= 1 and ev[1].d.unit == 5, ev[1] and ev[1].msg)
+end)
+
+T.test('PEACE TRAFFIC fail closed: while the census is unknown the quiet raise waits', function()
+  local W = slow_world{}
+  local g = require('dfllm.gate')
+  local hit = g.peace_busy(W.K, 'B1', {}, nil, 0, nil)
+  T.ok(hit ~= nil and hit.k == 'unknown', 'peace_busy without a census reports a blocker')
 end)
 
 ---------------------------------------------------------------- SIEGE TRAFFIC (fix_common.md)

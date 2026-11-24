@@ -2327,14 +2327,16 @@ end
 
 -- the first unit that makes a quiet PEACE raise of `name` unsafe now: any living unit that is not hostile within gate.peace_clear_r
 -- tiles of the footprint (citizens, children, pets, visitors and merchants of the census; standing, working or walking: a dwarf needs
--- ~9 ticks a tile and the pull-to-up window is the measured lever latency, so no unit that near is safe), except a soldier standing at
--- his own squad station (fortcore's melee station lies 2 tiles from B1). `skip` = {[id] = true}: the job's worker and the bridge's
+-- ~9 ticks a tile and the pull-to-up window is the measured lever latency, so no unit that near is safe), soldiers at their station
+-- included (fortcore's melee station lies 2 tiles from B1: one step puts him on it while the bridge moves, #1441; with such a
+-- station B1 stays down in PEACE, the pre-NEU1 D-14 behaviour). `skip` = {[id] = true}: the job's worker and the bridge's
 -- pullers in their room. The near list is re-read every frame, the wide census pass (PATH_R tiles) every FAST ticks.
 function M.peace_busy(K, name, r, sc, now, skip)
-  if not sc then return nil end
+  -- fail closed: without a census nobody can say who is near, so the quiet raise waits (BUG-831 retry)
+  if not sc then return {k = 'unknown', id = 0, d = 0} end
   local R, hit = M.neu_cfg(K).peace_clear_r, nil
   for _, e in ipairs(sc.far or sc.list or {}) do
-    if not (skip and skip[e.id]) and e.d <= R and not M.at_station(e) and (not hit or e.d < hit.d) then hit = e end
+    if not (skip and skip[e.id]) and e.d <= R and (not hit or e.d < hit.d) then hit = e end
   end
   return hit
 end
