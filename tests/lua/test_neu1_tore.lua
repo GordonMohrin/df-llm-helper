@@ -29,6 +29,8 @@ end
 local function world(o)
   o = o or {}
   local units = o.units or S.fort_units()
+  -- BUG-831 retry: a soldier at his station near B1 keeps B1 down in PEACE; these tests want the quiet raise, so he stands far inside
+  if not o.units then for _, u in ipairs(units) do if u.id == 5 then u.pos = {60, 85, Z} end end end
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     local u = S.cit(w.id, w.route[1][1], w.route[1][2], Z, w.kind == 'soldier' and {squad = 1} or nil)
@@ -36,7 +38,7 @@ local function world(o)
     walkers[#walkers + 1] = {id = w.id, route = w.route, start = w.start or 0, i = 1}
   end
   for _, u in ipairs(o.army or {}) do units[#units + 1] = u end
-  local W = S.world{units = units, mode = o.mode, move = 100, lever_default = {worker = 30, pull = 40}, manifest = o.manifest,
+  local W = S.world{station = true, units = units, mode = o.mode, move = 100, lever_default = {worker = 30, pull = 40}, manifest = o.manifest,
                     cfg = o.cfg}
   W.walkers, W.crushed, W.t0 = walkers, {}, nil
   local extra = {S.military()}
@@ -121,39 +123,39 @@ end
 T.test('D-14 inner (the default): in PEACE B1 rises, O1 and B2 stay down; nobody crushed', function()
   T.eq(require('dfllm.util.contract').DECISIONS['D-14'], 'inner', 'the shipped default')
   local W = world{}
-  run(W, 1200)
+  run(W, 2400)
   T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), S.bstate(W, 'B2')}, {'down', 'up', 'down'})
   T.eq(#W.crushed, 0)
 end)
 
 T.test('D-14 down (legacy switch): in PEACE every gate stays down', function()
   local W = world{cfg = S.legacy()}
-  run(W, 1200)
+  run(W, 2400)
   T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), S.bstate(W, 'B2')}, {'down', 'down', 'down'})
 end)
 
 T.test('drink_inside: Kern+ KNOWN dry keeps B1 down in PEACE (kern.log says why); an unknown audit keeps it up (fail closed)', function()
   local W = world{seal = {exists = true, drink = 0, wells = 1, wet = false}}
-  run(W, 1200)
+  run(W, 2400)
   T.eq(S.bstate(W, 'B1'), 'down', 'dry Kern+: B1 not raised')
   local hit = false
   for _, l in ipairs(W.logs) do if l.msg:find('B1 stays down in PEACE: Kern+ holds no drink', 1, true) then hit = true end end
   T.ok(hit, 'kern.log names the dry Kern+')
   local W2 = world{seal = false}
-  run(W2, 1200)
+  run(W2, 2400)
   T.eq(S.bstate(W2, 'B1'), 'up', 'no audit: up')
   local W3 = world{seal = {exists = true, drink = 0, wells = 1, wet = false},
                    cfg = {reflex = {v = 2, gate = {drink_inside = false}}}}
-  run(W3, 1200)
+  run(W3, 2400)
   T.eq(S.bstate(W3, 'B1'), 'up', 'drink_inside off: up')
 end)
 
 T.test('return window: a citizen outside the raised B1 in quiet PEACE is let in after return_every; B1 closes again', function()
-  local W = world{walkers = {{id = 60, route = route(51, 20, 50), start = math.huge}}}
-  run(W, 1200)
+  local W = world{walkers = {{id = 60, route = route(51, 10, 75), start = math.huge}}}   -- 30 tiles out: beyond gate.peace_clear_r
+  run(W, 2400)
   T.eq(S.bstate(W, 'B1'), 'up')
   W.walkers[1].start = 0                                -- he walks home now (relative to the step clock: from the start)
-  run(W, 3600)
+  run(W, 7200)
   local ev = gate_ev(W, 'return')
   T.ok(#ev >= 1, 'GATE return')
   local t_up = S.flips(W, 'B1')[1].tick
@@ -167,7 +169,7 @@ end)
 
 T.test('caravan: the arrival report opens B1 (no hostile in sight); a goblin in sight closes it at once', function()
   local W = world{}
-  run(W, 1200)
+  run(W, 2400)
   W.event('REPORT', {type = 'CARAVAN_ARRIVAL', text = 'A caravan from the hills has arrived.'})
   run(W, 600)
   T.eq(S.bstate(W, 'B1'), 'down', 'open for the caravan')
@@ -210,7 +212,7 @@ T.test('fail closed (BUG-802): B1 levers all outside Kern+: NOT raised in PEACE 
   m.bridges.B1.levers[#m.bridges.B1.levers + 1] = {56, 46, Z}
   W.K.persist.set('manifest', m)
   local t1 = S.abs_now()
-  run(W, 1200)
+  run(W, 2400)
   T.eq(S.bstate(W, 'B1'), 'up', 'raised once it can be closed again')
   local p = S.pulls(W, 'B1')
   T.ok(#p >= 1 and p[#p].lever == lv.id, 'pulled at the inside lever: ' .. tostring(p[#p] and p[#p].lever))
@@ -227,7 +229,7 @@ end)
 T.test('fail closed (BUG-802): a B1 the kernel raised in PEACE stays lowerable by the windows when a gap opens later (inside ' ..
        'lever gone); it is then not raised again', function()
   local W = world{}
-  run(W, 1200)
+  run(W, 2400)
   T.eq(S.bstate(W, 'B1'), 'up')
   local m = W.K.manifest()
   m.bridges.B1.levers = {{54, 34, Z}}                    -- the inside levers vanish from the list (deconstructed)
@@ -280,7 +282,7 @@ end
 T.test('SIEGE TRAFFIC: attackers arrive with civilians outside: O1 rises at once (no T+450 wait, no hold for them), B1 stays up, nobody ' ..
        'crushed, no GATE_FAIL / BREACH; once the army is gone the return window lets the shut-out in (not walled out of drink)', function()
   local W = siege_world()
-  run(W, 1200)
+  run(W, 2400)
   T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'down', 'up'})
   for _, w in ipairs(W.walkers) do w.start = 0 end       -- everybody heads home now
   local army = S.army(6, 20, 0, 500)
@@ -323,7 +325,7 @@ end)
 T.test('SIEGE TRAFFIC, recall case (reflex lockdown on an arrival announcement): O1 up at once, B1 held up, no GATE "up held", nobody ' ..
        'crushed; the walkers on O1\'s way hold its pull only while they can reach the footprint', function()
   local W = siege_world{reflex = true}
-  run(W, 1200)
+  run(W, 2400)
   for _, w in ipairs(W.walkers) do w.start = 0 end
   local t0 = S.abs_now()
   local army = S.army(4, 20, 0, 600)
@@ -338,7 +340,7 @@ end)
 
 T.test('SIEGE TRAFFIC, caravan case: B1 open for a caravan when the army comes: B1 and O1 rise at once, nobody crushed, no BREACH', function()
   local W = siege_world()
-  run(W, 1200)
+  run(W, 2400)
   W.event('REPORT', {type = 'CARAVAN_ARRIVAL', text = 'A caravan from the hills has arrived.'})
   run(W, 900)
   T.eq(S.bstate(W, 'B1'), 'down', 'open for the caravan')
@@ -358,12 +360,12 @@ end)
 
 T.test('close_at_once false (legacy switch): the SIEGE raise of O1 waits for the civilians outside until T+450', function()
   local W = siege_world{cfg = {reflex = {v = 2, gate = {close_at_once = false}}}}
-  run(W, 1200)
+  run(W, 2400)
   for _, w in ipairs(W.walkers) do w.start = 0 end
   for _, u in ipairs(S.army(6, 20, 0, 500)) do W.add_unit(u) end
   local t0 = S.abs_now()
   W.event('INVASION', {id = 501})
-  run(W, 1200)
+  run(W, 2400)
   local p = S.pulls(W, 'O1')
   T.ok(#p >= 1 and p[1].tick - t0 >= 400, 'O1 pulled at the timer: +' .. tostring(p[1] and p[1].tick - t0))
 end)

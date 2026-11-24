@@ -141,7 +141,8 @@ local function army(W, n) for _, u in ipairs(goblins(n or 6)) do W.add_unit(u) e
 T.test('NEU1 defaults: SIEGE, B1 up since PEACE, O1 up at once; two shut-out citizens over the thirst mark get the rescue ' ..
        'lowering of B1 (O1 stays up), B1 up again once they are through; nobody waited for at the raise', function()
   local W = fort{}
-  run(W, 1200)                                     -- PEACE on D-14 inner: B1 up, O1 down
+  W.K.cfg.reflex = {v = 2, gate = {peace_clear = 0, peace_clear_r = 2}}   -- BUG-831: a compact fixture, every unit within 20 tiles of B1
+  run(W, 2400)                                     -- PEACE on D-14 inner: B1 up (after the BUG-831 quiet window), O1 down
   T.eq({up(W, 'O1'), up(W, 'B1')}, {false, true}, 'PEACE: O1 down for trade, B1 up')
   army(W)
   run(W, 400)

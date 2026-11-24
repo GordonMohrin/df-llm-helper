@@ -219,7 +219,16 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif k == "lever_hold_days":           # BUG-236: game days a player's `lever` down holds the bridge down
                 if not is_int(v, 0, 28):
                     errs.append(f"{name}: gate.lever_hold_days: int 0..28 expected, got {v!r}")
-            elif k in ("close_at_once", "fail_closed", "drink_inside"):   # NEU1 (P5 Tore): switches, default true
+            elif k == "peace_clear_r":             # BUG-831: tiles around a footprint that must be free of walkers before a PEACE raise
+                if not is_int(v, 2, 24):
+                    errs.append(f"{name}: gate.peace_clear_r: int 2..24 expected, got {v!r}")
+            elif k == "peace_clear":               # BUG-831: ticks of quiet before a PEACE raise (at least the lever latency)
+                if not is_int(v, 0, 4800):
+                    errs.append(f"{name}: gate.peace_clear: int 0..4800 expected, got {v!r}")
+            elif k == "peace_lock_days":           # BUG-831: game days a crush risk keeps the bridge down in PEACE (0 = no lock)
+                if not is_int(v, 0, 28):
+                    errs.append(f"{name}: gate.peace_lock_days: int 0..28 expected, got {v!r}")
+            elif k in ("close_at_once", "fail_closed", "drink_inside", "peace_raise"):   # NEU1 (P5 Tore) / BUG-831: switches, default true
                 if not isinstance(v, bool):
                     errs.append(f"{name}: gate.{k}: true or false expected, got {v!r}")
             elif k == "return_every":              # NEU1: ticks civilians stand outside a raised inner gate before it opens (0 = off)
