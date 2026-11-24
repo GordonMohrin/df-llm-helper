@@ -113,7 +113,8 @@ Gordon's own history.
 | `loadsave.lua` | K2: load a saved fort from the title screen by clicks (§9); pure text functions + the two steps of mode `load` |
 | `steps.lua` | the procedure (§4) and run specs (`newgame`, `scan`, `embark`, `here`, `prep`, `saveas`) |
 | `embark.py` | Python driver: writes a spec, ONE `dfhack-run` call, then only reads `status.json` |
-| `ui.json` | calibration (§5); `rules.json` checklist thresholds; `loadout.json` skills and buys |
+| `ui.json` | calibration (§5); `rules.json` checklist thresholds and the hard site policy (NEU1); `loadout.json` skills and buys |
+| `sites.json` | NEU1: the vetted sites of the current world (`sites`, `sites add`, `embark --site ID`) |
 | `fixtures/` | synthetic screen dumps and `fake_df.lua` for the offline tests |
 
 Output: `<DF>/dfllm-runtime/embark/` with `status.json` (rewritten in place), `result-<id>.json`,
@@ -139,8 +140,10 @@ python tools/embark/embark.py rank --box 14,18,20,24 --top 6   # BUG-410: pre-ra
 python tools/embark/embark.py rank --last --top 12         # BUG-410: rank the newest finished sweep again (no DF call)
 python tools/embark/embark.py embark 7,23,6,6              # read -> gate -> confirm -> prepare -> Embark!
 python tools/embark/embark.py embark 7,23,6,6 --waive dark_fortress   # one criterion checked by eye
-python tools/embark/embark.py embark 7,23,6,6 --accept ore --reason "copper/tin listed, iron by trade"   # FR-08
-python tools/embark/embark.py embark 7,23 --waive stone --explore-first "shaft to stone in spring"   # only for an UNKNOWN soil depth (BUG-465: a failed stone is never accepted)
+python tools/embark/embark.py embark 7,23,6,6 --accept dark_fortress --reason "goblin world"   # FR-08; NEU1 strict: the only acceptable fail
+python tools/embark/embark.py sites                         # NEU1: the vetted sites of this world (no DF call)
+python tools/embark/embark.py sites add brook1 7,23,6,6 --note "brook, trees, stone 3 down"   # only a rectangle a scan read ok
+python tools/embark/embark.py embark --site brook1          # NEU1: embark on a vetted site
 python tools/embark/embark.py embark --here --play-now     # BUG-250: the rectangle placed by hand, popup open
 python tools/embark/embark.py save-as r15d-drillchamber    # BUG-250: Esc menu > Save and continue playing as NAME
 python tools/embark/embark.py state | check | screen NAME | status | stop
@@ -186,6 +189,16 @@ nearby, scarce trees, no iron), one id at a time, never `panel` or a failing war
 savage, necromancer, early invasion). The reason is required; `embark.py` appends one line per accepted id to
 `<DF>/dfllm-runtime/embark/accept.log` (time, run id, site, id, reason) and the gate writes
 `site.gate: accepted ID (reason)` into the run's warnings.
+
+**Hard site policy (NEU1, decision E3, docs/v2/NEU1-startset.md).** `rules.json` `strict: true` (default): a FAILED
+criterion can be accepted only when it is in `accept_only` (`dark_fortress`, goblin distance); heavy aquifer, no trees, no
+water source, no hard stone (and ore, evil, savagery, temperature, size, old sites) are hard rejects. `hard_waive`
+(`aquifer`, `trees`, `water`, `stone`) may not be waived when the panel did not show them: scan again with `--tiles`/`--hover`
+(missing data fails closed). `embark.py` refuses before any DF call, `site.gate` refuses in game, `best compromise` offers only
+what the policy allows. `strict: false` restores the FR-08 acceptances and waivers above.
+**Vetted sites.** `sites.json` lists a world's good rectangles; `sites add ID WX,WY,LX,LY [--note TEXT]` adds one only when the
+newest scan row of exactly that rectangle is `ok` (or its fails/unknowns are all allowed by the policy); `embark --site ID` embarks
+there (the gate still reads it live). Clear the list for a new world.
 
 ## 4. Procedure
 | Step | UI action | Done when | Live |

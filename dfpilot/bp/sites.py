@@ -264,7 +264,7 @@ def rank(snap: dict, tpl: str, params: dict | None = None, manifest: dict | None
     # BUG-387: the surface core and the surface variants of dining, bedrooms, tavern and office need none either
     rebuild = tpl == "workshops" and bool(p.get("rebuild"))       # BUG-562: the old place of a shop manifest.gone lists
     surface_shops = (tpl in ("workshops", "hospital", *rooms.SURFACE_ROOMS) and bool(p.get("surface")) and not rebuild) \
-        or tpl in ("depot", "tradepost", "surfacecore")
+        or tpl in ("depot", "tradepost", "surfacecore", "foodpile")
     surface_farm = tpl == "farms" and bool(p.get("surface"))      # BUG-407: needs no fort manifest either (ground anywhere)
     if tpl != "fortcore" and not surface_shops and not surface_farm and not rebuild and not furnish \
             and not ((manifest or {}).get("zones") or {}).get("Z4"):
@@ -1492,6 +1492,9 @@ def _surface_shops(snap: dict, p: dict, manifest: dict, tpl: str = "workshops") 
     elif tpl == "tradepost":                 # BUG-488: the trade pile beside the depot (4x2 open surface floor)
         W, H = rooms.TRADEPOST
         what = "the trade pile"
+    elif tpl == "foodpile":                  # NEU1 (E4): the start set's food pile beside the wagon (5x3 open surface floor)
+        W, H = rooms.FOODPILE
+        what = "the start set's food pile"
     elif tpl == "surfacecore":               # BUG-387: the walled compound, depot apron included
         W, H = surfacecore.block(p)
         what = "the surface core"

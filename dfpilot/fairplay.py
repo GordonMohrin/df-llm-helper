@@ -751,6 +751,51 @@ def plan_errors(path: str | Path | None = None) -> list[str]:
     return errs
 
 
+# NEU1 (E4, lua/dfllm/startset.lua M.conf): config/baseline.json "startset": on = the survival start set of week 1 (phase 0) is
+# requested (false: the module is idle and the P0 deliverable passes); parts = which of shops, farm, pile, office, water; shops = the
+# workshop types of part shops; retry_days / max_tries = request cadence and bound; giveup_days = days a part may stay not ok
+# (any reason) before the one-time DECISION_NEEDED startset (default max_tries * retry_days). startset.lua keeps its default for a bad value;
+# lint --config refuses it.
+STARTSET_PARTS = ("shops", "farm", "pile", "office", "water")
+STARTSET_LIM: dict = {"on": "bool", "parts": "parts", "shops": "shops", "retry_days": (1, 120), "max_tries": (1, 20),
+                       "giveup_days": (1, 360)}
+
+
+def startset_errors(path: str | Path | None = None) -> list[str]:
+    """Problems of the optional "startset" part of config/baseline.json (NEU1): unknown keys, unknown parts or shop types, values
+    startset.lua ignores. A missing file or part is fine."""
+    p = Path(path or BASELINE_PATH)
+    if not p.exists():
+        return []
+    name = "config/baseline.json"
+    try:
+        doc = json.loads(_read(p))
+    except ValueError as e:
+        return [f"{name}: not JSON ({e})"]
+    sec = doc.get("startset", {}) if isinstance(doc, dict) else {}
+    if not isinstance(sec, dict):
+        return [f"{name}: startset must be an object"]
+    errs = []
+    for k, v in sec.items():
+        lim = STARTSET_LIM.get(k)
+        if lim is None:
+            errs.append(f"{name}: startset.{k}: unknown key")
+        elif lim == "bool":
+            if not isinstance(v, bool):
+                errs.append(f"{name}: startset.{k}: true or false expected, got {v!r}")
+        elif lim == "parts":
+            if not isinstance(v, list) or any(x not in STARTSET_PARTS for x in v):
+                errs.append(f"{name}: startset.{k}: a list of {', '.join(STARTSET_PARTS)} expected, got {v!r}")
+        elif lim == "shops":
+            from .bp import rooms
+            known = set(rooms.MOODABLE_TYPES) | set(rooms.EXTRA_TYPES)
+            if not isinstance(v, list) or not v or any(x not in known for x in v):
+                errs.append(f"{name}: startset.{k}: a non-empty list of workshop types expected, got {v!r}")
+        elif not (isinstance(v, int) and not isinstance(v, bool) and lim[0] <= v <= lim[1]):
+            errs.append(f"{name}: startset.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    return errs
+
+
 # FR-88 (lua/dfllm/viewlib.lua V.cfg): config/baseline.json "view": on = the verb `view` works (false refuses it),
 # default_ttl_s / max_ttl_s = the follow time when ttl_s is left out / its ceiling. viewlib keeps its default for a value of
 # another type or out of range; lint --config refuses it.
