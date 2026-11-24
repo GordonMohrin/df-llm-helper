@@ -34,7 +34,19 @@ def test_bug_table_has_one_complete_row_per_file_in_order():
     assert set(nums) == set(files), "a row for every bug file and a file for every row"
     for n, target, cols in rows:
         assert target == files[n], f"BUG-{n:03d}: the link points at the file"
-        assert cols == 5, f"BUG-{n:03d}: ID | Status | Severity | Title | Module (the row has {cols} columns)"
+        assert cols == 6, f"BUG-{n:03d}: ID | Status | Live | Severity | Title | Module (the row has {cols} columns)"
+
+
+def test_bug_table_live_column_holds_a_known_status():
+    """NEU1 P2: the `Live` column (tools/live_status.py --write) holds one of four values; after a merge that added
+    5-cell rows, `python tools/live_status.py --write` fills them in."""
+    known = {"live bestaetigt", "live widerlegt", "live gemischt", "offen, nie live gesehen"}
+    text = read("bugs/README.md")
+    assert "| ID | Status | Live | Severity | Title | Module |" in text
+    for line in text.splitlines():
+        if line.startswith("| [BUG-"):
+            live = re.split(r"(?<!\\)\|", line)[3].strip()
+            assert live in known, f"{line[:40]}: Live cell {live!r}"
 
 
 def test_first_pass_numbers_are_all_there():

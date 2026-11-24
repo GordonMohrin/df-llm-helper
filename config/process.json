@@ -1,0 +1,127 @@
+{
+ "v": 1,
+ "live_status": {
+  "on": true,
+  "ranges": true,
+  "status_line": true,
+  "found_line": true,
+  "runs": "dwarf-fortress-v2/runs",
+  "logs": [
+   "run-15*/STAND.md",
+   "run-15*/FR-BUGS.md",
+   "run-16*/STAND.md",
+   "run-16*/FR-BUGS.md"
+  ],
+  "docs": [
+   "docs/v2/STATUS.md",
+   "docs/v2/POSTMORTEM-*.md"
+  ],
+  "window": 120,
+  "drop": [
+   "runs/run-16c/FR-BUGS.md:74:BUG-130: 'plan check OK' is the player's own check after a workaround, no verdict on the fix",
+   "runs/run-15c-inkintense/FR-BUGS.md:337:BUG-288: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand",
+   "runs/run-15c-inkintense/FR-BUGS.md:337:BUG-289: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand",
+   "runs/run-15c-inkintense/FR-BUGS.md:337:BUG-290: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand",
+   "runs/run-15c-inkintense/FR-BUGS.md:337:BUG-291: the line confirms the aqshaft ranking (BUG-292) only; the range is shorthand",
+   "runs/run-15b-earthboat/FR-BUGS.md:110:BUG-302: BUG-302 is the farms draft with 0 sites, the line shows the phase status (BUG-300/301)",
+   "runs/run-15d-drillchamber/FR-BUGS.md:333:BUG-302: the player names the status line BUG-302, it is BUG-301's; the farms draft is not shown",
+   "runs/run-15b-earthboat/FR-BUGS.md:108:BUG-312: BUG-312 is the automatic drill with a dry refuge, the line is about bridge raises",
+   "runs/run-15c-inkintense/FR-BUGS.md:354:BUG-313: FarmPlot jobs are outside the refuge-hatch fix; the range is shorthand",
+   "runs/run-15c-inkintense/FR-BUGS.md:354:BUG-314: BUG-314 is bp.cancel, not the FarmPlot builder",
+   "runs/run-15c-inkintense/FR-BUGS.md:354:BUG-315: BUG-315 is the order queue cap, not the FarmPlot builder",
+   "docs/v2/POSTMORTEM-run10-siege-y421.md:35:BUG-026: 'the trade works' does not show the ui_timeout retry",
+   "docs/v2/POSTMORTEM-run10-siege-y421.md:35:BUG-028: 'the trade works' says nothing on BREACH and thirst",
+   "runs/run-16d/FR-BUGS.md:377:BUG-513: 'bisher', ten minutes after the reload: provisional"
+  ],
+  "add": [
+   {
+    "bug": 399,
+    "file": "runs/run-16c/FR-BUGS.md",
+    "line": 101,
+    "verdict": "pos",
+    "why": "after the reload the guard is gone: 'BUG-399-Guard weg: bp sites surfacecore laeuft jetzt ohne Fehler'"
+   },
+   {
+    "bug": 602,
+    "file": "runs/run-16b/FR-BUGS.md",
+    "line": 398,
+    "verdict": "pos",
+    "why": "'bp sites aqshaft --fresh liefert jetzt S1-S3', bp.place worked (the shaft stalled later on the ring)"
+   },
+   {
+    "bug": 532,
+    "file": "runs/run-16b/FR-BUGS.md",
+    "line": 475,
+    "verdict": "neg",
+    "why": "the BUG-532 rule (a plant eater inside Kern+ always counts) held 6 mammoths as hostiles, B1 down refused (also STAND.md:331)"
+   },
+   {
+    "bug": 570,
+    "file": "runs/run-16b/FR-BUGS.md",
+    "line": 488,
+    "verdict": "neg",
+    "why": "the starve_lockdown widening flapped on a cleared mammoth calf while 4 citizens starved"
+   },
+   {
+    "bug": 11,
+    "file": "bugs/BUG-011-civ-alert-flips-on-then-off.md",
+    "line": 73,
+    "verdict": "pos",
+    "why": "live check 95fe16d: civ_alert=1 in every probe sample until LOCKDOWN_END, no flip-flop"
+   },
+   {
+    "bug": 12,
+    "file": "bugs/BUG-012-entrance-door-not-recognised.md",
+    "line": 96,
+    "verdict": "pos",
+    "why": "live check 95fe16d: ARRIVAL 'doors 1 forbidden', act.door_forbid [16970,true] at the trigger tick (the flag reset is BUG-015)"
+   },
+   {
+    "bug": 13,
+    "file": "bugs/BUG-013-lever-pulls-blocked-by-civil-alert.md",
+    "line": 104,
+    "verdict": "pos",
+    "why": "live check 95fe16d: all four bridges up within 701 ticks, confined citizens took the pulls with Hebel+ listed"
+   },
+   {
+    "bug": 14,
+    "file": "bugs/BUG-014-autolabor-legacy-false-failure.md",
+    "line": 59,
+    "verdict": "pos",
+    "why": "live check 95fe16d: set to monitor (read back: monitor), no new AUTOLABOR_LEGACY"
+   },
+   {
+    "bug": 41,
+    "file": "bugs/BUG-041-seal-clear-waits-on-an-ungathered-shrub.md",
+    "line": 49,
+    "verdict": "pos",
+    "why": "Live confirmed Run 11 y465: DF built the door on the shrub, the seal hung 1500 days is done"
+   },
+   {
+    "bug": 274,
+    "file": "bugs/BUG-298-seal-door-outside-the-builders-burrow-untaken.md",
+    "line": 8,
+    "verdict": "neg",
+    "why": "Run 15c y374-y376: the BUG-274 re-place ('removed and placed again (once)') did not help"
+   },
+   {
+    "bug": 142,
+    "file": "bugs/BUG-170-squad-station-on-another-walk-group-than-its-soldiers.md",
+    "line": 1,
+    "verdict": "neg",
+    "why": "the BUG-142 retest: 'the BUG-142 move put b2 behind the raised B2, on_station 0 of 8' (the fix itself caused it)"
+   },
+   {
+    "bug": 170,
+    "file": "bugs/BUG-214-whole-station-chain-fails-no-order-or-unreachable-kept.md",
+    "line": 12,
+    "verdict": "neg",
+    "why": "retest of BUG-170: a station on walk group 1507, the soldiers on 1, was 'kept', 5 of 8 could not follow (the BUG-170 symptom)"
+   }
+  ]
+ },
+ "lint": {
+  "live_expectation": true,
+  "live_expectation_from": 783
+ }
+}
