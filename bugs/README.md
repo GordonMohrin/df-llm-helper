@@ -811,6 +811,12 @@ Related: FR-xx, BUG-xx
 | [BUG-838](BUG-838-brew-order-bound-to-one-still.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | a second Still is never used: the brew order stays bound to the first | lua/dfllm/economy.lua |
 | [BUG-839](BUG-839-raw-dumps-and-stall-line.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | forts die of thirst and nobody can read why: no raw view of the game's own order / job / item / manager state, no stall line | lua/dfllm/dfraw.lua, lua/dfllm/economy.lua |
 | [BUG-840](BUG-840-cures-behind-switches.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | the cures of the fass round act on a guessed cause: config switches economy.diag, default off | lua/dfllm/economy.lua, config/baseline.json |
+| [BUG-841](BUG-841-df-cancel-reason-tally.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | DF's own cancel reason was never read: the kernel judged stalls by 'no job yet' and guessed the cause | `lua/dfllm/cancelwhy.lua`, `lua/dfllm/economy.lua` |
+| [BUG-842](BUG-842-census-counts-what-df-can-use.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | the census counted stock DF cannot use as free (183 logs on unwalkable tiles, 7 phantom barrels) | `lua/dfllm/economy.lua`, BARREL |
+| [BUG-843](BUG-843-items-dump-sample.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | the raw items dump counted but never showed an item: the 198 logs and the 7 phantom barrels stayed unexplained | `lua/dfllm/dfraw.lua`, `R.sample_item` |
+| [BUG-844](BUG-844-container-cures-gated-by-df-reason.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | the container cures were off (guessed cause); now on, but only while DF's own reason names the shortage | `lua/dfllm/economy.lua`, `cx_expire` |
+| [BUG-845](BUG-845-needs-logs-wood-supply.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | 'Needs logs' on a fort with 204 logs: no way to see why they lie where nobody walks, no way to give the Woodcutting labor | `lua/dfllm/act.lua`, `dfpilot/schema.py` |
+| [BUG-846](BUG-846-raw-dump-cli-and-size.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | `why <key> --raw` printed nothing and `inspect what=raw key=brew` exceeded 8 KB | `lua/dfllm/dfraw.lua`, `R.paginate` |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

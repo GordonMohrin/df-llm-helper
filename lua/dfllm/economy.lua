@@ -99,6 +99,7 @@ local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspec
            reports = {MIGRANT_ARRIVAL = true, MIGRANT_ARRIVAL_NAMED = true, D_MIGRANTS_ARRIVAL = true,
                       CANCEL_JOB = true}}
 M.RAW = require('dfllm.dfraw')     -- NEU3: the raw field dumps (inspect what=raw) and the stall line (docs/v2/NEU3-diagnose.md)
+M.CW = require('dfllm.cancelwhy')   -- NEU4 BUG-841: DF's own cancel reasons, a rolling tally (a library, a field)
 M.JW = require('dfllm.jobwhy')     -- NEU1 P8: 'why is this job not running' (a library, a field: economy sits at the locals limit)
 M.OF = require('dfllm.orderfix')   -- B2: slab census, workshop job lists, the stale-order rules (a library, a field: no new local)
 M.citizen = require('dfllm.util.who').citizen    -- BUG-103: a citizen of the player (a field: economy sits at the 200-locals limit)
@@ -492,7 +493,11 @@ M.DEFAULTS = {
   -- (inspect what=raw, kern.log 'stall line') names the cause: cx_cure = the container reserve / phantom verdict, the plant piles' barrel limit
   -- frozen, the Carpentry / Stone crafting labors held, direct MakeBarrel tasks (BUG-834/835); mgr_chores = the manager's other chores switched off
   -- (BUG-837); still_pin = the 'order bound to one Still' verdict and its re-make (BUG-838). stall_line = one raw line per stall and game week.
-  diag = {cx_cure = false, mgr_chores = false, still_pin = false, stall_line = true},
+  -- NEU4 (BUG-844): cx_cure is ON, but it acts only while DF's own cancel reason within `cancel.days` days names the container shortage
+  -- ("Needs empty food storage item", at least cx_min_n cancels; M.cx_gate): no reason, no cure. `cx_pile_days` = the longest the plant piles' barrel
+  -- limit stays frozen without a fresh reason (then it is given back), `cx_keep` = containers kept free for the brews (a quarter of the brews open at most). cancel.cx_min_n = cancels in the window that make the reason count.
+  diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -1048,8 +1053,14 @@ local function classify(it, a, cat)
       mask_check = mask_check - 1
       if skip ~= skipped(f) then skip_mask, mask_bad, skip = nil, true, skipped(f) end
     end
-    if skip then return end
-  elseif skipped(f) then return end
+    if skip then
+      if cat == 'WOOD' then a.wood_skip = a.wood_skip + (math.tointeger(it.stack_size) or 1) end     -- NEU4: in a building, a trader's, rotten ...: no usable log
+      return
+    end
+  elseif skipped(f) then
+    if cat == 'WOOD' then a.wood_skip = a.wood_skip + (math.tointeger(it.stack_size) or 1) end
+    return
+  end
   local n = math.tointeger(it.stack_size) or 1
   if cat == 'DRINK' or cat == 'SEEDS' or a.food_set[cat] then
     -- FR-50 (Run 9: 1392 drinks in forbidden TOOL pots read as "0 days"): a forbidden container of any item type
@@ -1181,7 +1192,15 @@ local function classify(it, a, cat)
     -- mood unit's own scan said 'none reachable [210/210/0]'): a log on another walk group than the citizens' is no log for any job (DF's
     -- job picker takes only an item a worker can walk to); it is counted apart (wood_far) and is not `wood`, so floors, orders, treeless
     -- and the caravans' wood want see the fort's real stock
-    if not f.in_inventory and a.far and a.far(it) then a.wood_far = a.wood_far + n
+    -- NEU4 BUG-842 (Run 17 i1 Diedplank: census wood 183 beside 198 of 204 logs on tiles with NO walk group, DF 'Needs logs' for hundreds of jobs): the
+    -- plain far read calls a tile without a walkable group near; logs ask strict, and a log a job holds is no free log either
+    local fr, why = false, nil
+    if not f.in_inventory and a.far then fr, why = a.far(it, true) end
+    if fr then
+      a.wood_far = a.wood_far + n
+      if why == 'nowalk' then a.wood_nw = a.wood_nw + n end
+    elseif not f.in_inventory and ((math.type(a.fw) == 'integer' and M.JOB_BIT and a.fw & M.JOB_BIT ~= 0) or (not (math.type(a.fw) == 'integer' and M.JOB_BIT) and f.in_job == true)) then
+      a.wood_busy = a.wood_busy + n
     else a.wood = a.wood + n; reach_mark(a, it, 'wood') end
   elseif M.PIECE_INV[cat] then
     -- Run 11: free doors, hatch covers, grates and blocks (not built in, not taken by a job): what a seal piece or a
@@ -1204,7 +1223,7 @@ local function classify(it, a, cat)
       a.pots = a.pots + 1
       if #dfhack.items.getContainedItems(it) == 0 then
         a.pots_empty = a.pots_empty + 1
-        if not (a.far and a.far(it)) then a.cont_free = a.cont_free + 1 end     -- BUG-779
+        if not (a.far and a.far(it, true)) then a.cont_free = a.cont_free + 1 end     -- BUG-779; NEU4: strict (no walk group = out of reach)
       end
     end
   elseif cat == 'BARREL' or cat == 'BIN' then  -- live L1b: brewing stalled for want of an empty barrel
@@ -1215,7 +1234,7 @@ local function classify(it, a, cat)
         a.barrels_empty = a.barrels_empty + 1
         -- BUG-779 (Run 16c i3 Lancemoment y379: 'Needs empty food storage item' beside 48 barrels): an empty barrel a job holds or no citizen can walk to
         -- is no container DF gives a Still job (`barrels_empty` counts it, `cont_free` does not)
-        if not f.in_job and not (a.far and a.far(it)) then a.cont_free = a.cont_free + 1 end
+        if not f.in_job and not (a.far and a.far(it, true)) then a.cont_free = a.cont_free + 1 end     -- NEU4 BUG-842: strict far
       end
     else
       a.bins = a.bins + 1
@@ -1344,7 +1363,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'rock_busy',   -- BUG-665
               'rock_nouse',  -- BUG-733: boulders no mason may take (ore, flux, economic, soft, refused): each counted once
               'blocks_busy', -- BUG-736
-              'wood_far', 'wood_forb'}   -- BUG-705
+              'wood_far', 'wood_forb',   -- BUG-705
+              'wood_nw', 'wood_busy', 'wood_skip'}   -- NEU4 BUG-842: logs on tiles with no walk group, logs a job holds, logs DF skips (in a building ...)
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -1911,7 +1931,7 @@ end
 -- BUG-834: the plant stockpiles' barrel limit frozen while a brew lacks a container (state p.pilecap = {pile id = old limit}); the old limits come back
 -- when the stall is over. Emergency (drink below CX_EMERGENCY_D days): the piles that also take drink are frozen too.
 M.CX_EMERGENCY_D = 10
-function M.cx_freeze(K, p, emergency)
+function M.cx_freeze(K, p, emergency, now)
   if type(K.act.pile_barrels) ~= 'function' then return end
   local ok, res = K.act.pile_barrels('freeze', {mixed = emergency == true})
   if not (ok and type(res) == 'table') then
@@ -1919,6 +1939,7 @@ function M.cx_freeze(K, p, emergency)
     return
   end
   local n = 0
+  if type(p.pilecap) ~= 'table' then p.pilet = now or K.now().tick end        -- NEU4: the freeze is time limited (M.cx_expire)
   p.pilecap = type(p.pilecap) == 'table' and p.pilecap or {}
   for _, e in ipairs(res) do
     if p.pilecap[tostring(e.id)] == nil then p.pilecap[tostring(e.id)] = e.old end
@@ -1926,6 +1947,17 @@ function M.cx_freeze(K, p, emergency)
     K.log('warn', 'brew stall: stockpile %s (%s) takes no new barrel: limit %s -> %s', tostring(e.id), tostring(e.name), tostring(e.old), tostring(e.new))
   end
   if n > 0 then K.persist.touch('m.economy') end
+end
+-- NEU4 BUG-844: the plant piles' barrel limit comes back when DF's reason is gone (fewer than cx_min_n cancels in the window) or after cx_pile_days days
+function M.cx_expire(K, c, p, now)
+  if type(p.pilecap) ~= 'table' then return end
+  local why
+  if not M.cx_gate(K, c, now) then why = 'DF no longer cancels brews for want of a container (or the cure is off)'
+  elseif now - (math.tointeger(p.pilet) or now) >= (math.tointeger((c.cancel or {}).cx_pile_days) or 14) * DAY then why, p.pilex = 'the freeze ran its time', now end
+  if why then
+    K.log('warn', 'brew stall: stockpile barrel limits given back: %s', why)
+    M.cx_end(K, p, true)
+  end
 end
 function M.cx_end(K, p, keep)
   local ch = false
@@ -1961,7 +1993,7 @@ end
 -- somebody holds it (Run 17 i2: 'MakeBarrel at 141,129,140: the labor this job needs is not known' for 54 days). Holders of `labor` among the adult
 -- citizens who are no soldiers: below CX_HOLDERS one more is switched on (labor_assign: idle first, best skill, once a day)
 M.CX_HOLDERS = 3
-function M.cx_labor(K, o)
+function M.cx_labor(K, o, want)
   local n = 0
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return 'none' end
@@ -1971,7 +2003,7 @@ function M.cx_labor(K, o)
       n = n + 1
     end
   end
-  if n >= M.CX_HOLDERS then return 'have', n end
+  if n >= (want or M.CX_HOLDERS) then return 'have', n end
   local how, uid = M.labor_assign(K, o, n > 0)
   return how == 'have' and 'have' or how, uid
 end
@@ -2010,12 +2042,14 @@ function M.plan_contx(K, c, r)
   if type(b) ~= 'table' or not M.cx_active(r.p, r.now, r.inv) then return false end
   local tag = b.tag .. 'x'
   local cxd = r.p.contx.lday ~= r.now // DAY
-  if cxd and not M.diag_on(K, 'cx_cure') then r.p.contx.lday, cxd = r.now // DAY, false end     -- NEU3: the labor holds and direct tasks are off
+  local gate = M.cx_gate(K, c, r.now)                                  -- NEU4 BUG-844: the cures act with DF's reason only
+  if cxd and not gate then r.p.contx.lday, cxd = r.now // DAY, false end
   if cxd then                                                          -- BUG-835: somebody must hold the labor, and the manager may be dead
     r.p.contx.lday = r.now // DAY
     local lo = M.CX_LABORS.barrels
     local okl, err = pcall(function()
-      M.cx_labor(K, lo)
+      local left = math.tointeger((r.s.brew or {}).left) or 0
+      M.cx_labor(K, lo, math.max(M.CX_HOLDERS, math.min(6, 2 + (left + 9) // 10)))
       M.cx_direct(K, c, r)
     end)
     if not okl then K.log('warn', 'container labor: %s', tostring(err)) end
@@ -2036,6 +2070,12 @@ function M.plan_contx(K, c, r)
   spec.item_conditions = {cond(1, 'WOOD')}
   if add(r, {tag = tag, spec = spec, n = n, uses = {wood = 1}, why = 'barrels: no empty barrel for a brew'}) then
     K.log('warn', 'brew stall: %d barrels at once (%d free of %d empty, %d logs)', n, inv.cont_free or 0, inv.barrels_empty or 0, inv.wood or 0)
+  end
+  -- NEU4 BUG-844 (the ONE relief for a fort with drink 0): rock pots beside the barrels while DF names the containers: the plant piles take barrels,
+  -- never a large pot, no food is dumped or cooked, the order path exists (BUG-772), and pots need no logs
+  if gate then
+    if cxd then pcall(M.cx_labor, K, M.CX_LABORS.pots, 2) end
+    M.plan_pots(K, c, r, math.min(want, 6))
   end
   return true
 end
@@ -3284,6 +3324,80 @@ function M.cancels_of(K, key)
   return r.n, r.why
 end
 
+-- NEU4 BUG-841: DF's own cancel reasons ("<unit> cancels <job>: <reason>.", the CANCEL_JOB announcements eventful delivers) as a rolling tally per job kind and
+-- reason (lua/dfllm/cancelwhy.lua, persisted m.economy `cw`, the last economy.cancel_days days). The source of truth for why / brew_watch / ORDER_STUCK /
+-- the stall line / the drink cause; the cures of BUG-844 act only on it.
+function M.cw_tally(K)
+  if not st.cw then
+    local p = pstate(K)
+    p.cw = M.CW.norm(p.cw)
+    st.cw = p.cw
+  end
+  return st.cw
+end
+function M.cw_note(K, key, why, tick)
+  if not M.CW.note(M.cw_tally(K), key, why, tick or K.now().tick) then return end
+  local day = (tick or K.now().tick) // DAY
+  if st.cwday ~= day then st.cwday = day; K.persist.touch('m.economy') end    -- once a game day
+end
+function M.cw_days(K, c)
+  return math.max(1, math.min(M.CW.KEEP, math.tointeger(((c or M.conf(K)).cancel or {}).days) or M.CW.DAYS))
+end
+-- DF's top reason for the job kinds `match` (a kind, a list of kind prefixes, a function) within the window: {kind, why, n, last, days, kinds, text} or nil
+function M.df_reason(K, match, c, now)
+  now = now or K.now().tick
+  local ok, e = pcall(function() return M.CW.top(M.cw_tally(K), now, M.cw_days(K, c), match) end)
+  if not ok or not e then return nil end
+  e.text = M.CW.text(e, now)
+  return e
+end
+-- the cancels of the kinds `match` whose reason holds `needle` within the window: n, last tick
+function M.df_count(K, match, needle, c, now)
+  local ok, n, last = pcall(function() return M.CW.count(M.cw_tally(K), now or K.now().tick, M.cw_days(K, c), match, needle) end)
+  if ok then return n or 0, last end
+  return 0, nil
+end
+M.BREW_KINDS = {'brew '}
+M.BUILD_KINDS = {'construct', 'build'}
+-- DF's top reason for a family of jobs as one short text, or nil (< 3 cancels in the window): K.call('economy', 'df_text', 'build' | 'brew' | {prefixes})
+function M.df_text(K, what)
+  local m = what == 'build' and M.BUILD_KINDS or what == 'brew' and M.BREW_KINDS or what
+  local e = M.df_reason(K, m)
+  if e and e.n >= 3 then return e.text end
+  return nil
+end
+M.CX_REASON = 'empty food storage'     -- DF: "Needs empty food storage item" (a Still job finds no empty barrel or pot it may use)
+M.CX_WHY = {nobarrel = {'empty food storage', 'empty barrel', 'empty pot', 'empty container'}}
+-- a stall verdict `id` is PROVEN only when DF's reason supports it (BUG-841): true / false
+function M.df_supports(id, why)
+  local words = M.CX_WHY[id]
+  if not words then return false end
+  local w = tostring(why or ''):lower()
+  for _, x in ipairs(words) do if w:find(x, 1, true) then return true end end
+  return false
+end
+-- the container shortage DF names: n cancels within the window (at least economy.cx_min_n) -> {n, last, text}; else nil
+function M.cx_reason(K, c, now)
+  c = c or M.conf(K)
+  now = now or K.now().tick
+  local n, last = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
+  if n < (math.tointeger((c.cancel or {}).cx_min_n) or 5) then return nil end
+  local e = M.df_reason(K, M.BREW_KINDS, c, now)
+  local txt = string.format('DF cancelled Brew %dx in %d d: Needs empty food storage item', n, M.cw_days(K, c))
+  if last then
+    local d = (now - last) // DAY
+    txt = txt .. (d <= 0 and ' (last today)' or string.format(' (last %d d ago)', d))
+  end
+  return {n = n, last = last, text = txt, top = e}
+end
+-- BUG-844: the container cures act only with DF's reason (and the switch economy.diag.cx_cure): n, last | false
+function M.cx_gate(K, c, now)
+  c = c or M.conf(K)
+  if not M.diag_on(K, 'cx_cure', c) then return false end
+  local x = M.cx_reason(K, c, now)
+  return x and x.n or false
+end
+
 local function cancel(K, ev)
   local c = M.conf(K)
   local job, why = OL.cancel_parts(ev.text)
@@ -3310,6 +3424,8 @@ local function cancel(K, ev)
     if not oks then K.log('warn', 'sand cancel: %s', tostring(errs)) end
   end
   M.cancel_note(key, wk, ev.tick)                 -- BUG-308: every cancel of a job kind since the load (care's webs)
+  local okn, errn = pcall(M.cw_note, K, key, wk, ev.tick)     -- NEU4 BUG-841: DF's reason, a persisted rolling tally
+  if not okn then K.log('warn', 'cancel tally: %s', tostring(errn):sub(1, 120)) end
   if M.hard_words(why) then                       -- BUG-545: "Needs non-economic hard stone boulders"
     local okh, errh = pcall(M.hard_cancel, K, c, job, ev.tick or K.now().tick)
     if not okh then K.log('warn', 'hard stone cancel: %s', tostring(errh)) end
@@ -6045,6 +6161,15 @@ function M.drink_why(K, c, r)
   if d >= (math.tointeger((K.plan.supply or {}).drink_d) or 170) and not st.nowater then return nil end     -- BUG-401
   local bl = M.drink_block(K, c, r, r.inv or {})
   local w = bl[1] and bl[1][2] or nil
+  -- NEU4 BUG-841: DF's own reason leads (state stock.dwhy, the ladder's NAECHST text); dcx = DF names the containers, not a missing Still
+  local okx, dx = pcall(M.cx_reason, K, c, r.now)
+  st.dcx = okx and dx and true or nil
+  local okd, dfr = pcall(M.df_reason, K, M.BREW_KINDS, c, r.now)
+  if okx and dx then
+    w = string.format('DF cancels Brew %dx in %d d: Needs empty food storage item', dx.n, M.cw_days(K, c)) .. (w and ('; ' .. w) or '')
+  elseif okd and dfr and dfr.n >= (math.tointeger((c.cancel or {}).cx_min_n) or 5) then
+    w = string.format('DF cancels Brew %dx in %d d: %s', dfr.n, M.cw_days(K, c), dfr.why) .. (w and ('; ' .. w) or '')
+  end
   if st.nowater then w = 'no reachable water' .. (w and ('; ' .. w) or '') end            -- BUG-401
   -- BUG-259: below the thirst line with nobody thirsty the status names it (the citizens drink water)
   if st.water then w = (w and (w .. '; ') or '') .. 'nobody thirsty: they drink water' end
@@ -8831,9 +8956,13 @@ function M.wood_cancel(K, job, why, tick)
   st.wood_note = tick
   local inv = K.census.i or {}
   local free, far, forb = math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_far) or 0, math.tointeger(inv.wood_forb) or 0
+  local nw, busy, skip = math.tointeger(inv.wood_nw) or 0, math.tointeger(inv.wood_busy) or 0, math.tointeger(inv.wood_skip) or 0
   local cause
-  if free > 0 then cause = 'DF refuses logs the census counts usable (reachable, not forbidden)'
-  elseif far > 0 then cause = 'every log lies on another walk group than the citizens (open the way, bring them in, or cut trees)'
+  if free > 0 then cause = 'DF refuses logs the census counts usable (reachable, not forbidden, in no job)'
+  elseif far > 0 then
+    -- NEU4 BUG-845: where they lie is read per item (why items:logs --raw, the sample): tile type, liquid, building, stockpile
+    cause = string.format('every log lies on another walk group than the citizens or on a tile without walk group (%d without, %d on another group), %d more held by a job, %d in buildings or otherwise skipped by DF; '
+                          .. 'why items:logs --raw shows where they lie (the Woodcutters need trees inside the walls; trade.want wood meanwhile)', nw, far - nw, busy, skip)
   elseif forb > 0 then cause = 'every log is forbidden (the mood reserve forbids some; unforbid the rest on the items screen)'
   else cause = 'the fort holds no log (cut trees: the Woodcutters need an axe, or ask the caravans: trade.want wood)' end
   local okp, probe = pcall(M.wood_probe, K)
@@ -10877,7 +11006,7 @@ function M.brew_diag(K, inv, cx)
   if type(inv) == 'table' and inv.cont_free ~= nil then
     d.conts = {free = inv.cont_free or 0, barrels = inv.barrels or 0, empty = (inv.barrels_empty or 0) + (inv.pots_empty or 0), pots = inv.pots or 0}
     -- BUG-834: cx = {res = reserve, ph = days the free count stood still beside a stalled brew}
-    if type(cx) == 'table' then d.conts.res, d.conts.ph = cx.res, cx.ph end
+    if type(cx) == 'table' then d.conts.res, d.conts.ph, d.conts.dfx = cx.res, cx.ph, cx.dfx end
   end
   d.pin_ok = type(cx) == 'table' and cx.pin == true        -- NEU3: the 'bound to one Still' verdict acts (re-makes the orders): a switch
   local sid = df.job_skill and df.job_skill.BREWING
@@ -10994,11 +11123,12 @@ function M.brew_cause(d)
   -- MakeBarrel by hand): no empty barrel or pot a job can take, wherever the brews stand
   -- BUG-834: the reserve follows the brews open (cx_reserve), and a free count that never moved while the brews stood is no free container (phantom)
   local ph = d.conts and (math.tointeger(d.conts.ph) or 0) >= M.CX_PHANTOM_D
-  if d.conts and ((ph and d.conts.free > 0) or d.conts.free < (d.conts.res or M.CX_FREE)) then
+  if d.conts and (d.conts.dfx or (ph and d.conts.free > 0) or d.conts.free < (d.conts.res or M.CX_FREE)) then
     local fr = ph and d.conts.free > 0 and string.format('%d free by the census, unchanged for %d days: DF takes none of them', d.conts.free, d.conts.ph)
                or string.format('%d free', d.conts.free)
-    return 'nobarrel', string.format('no empty barrel or pot for a brew (%d barrels, %d pots; %d empty, %s: the rest hold food or drink, a job or lie out of reach): '
-                                     .. 'DF says "Needs empty food storage item"', d.conts.barrels, d.conts.pots, d.conts.empty, fr), 'barrels'
+    -- NEU4: DF's own words only when DF said them (the cancel tally); else the census count is a guess
+    return 'nobarrel', string.format('no empty barrel or pot for a brew (%d barrels, %d pots; %d empty, %s: the rest hold food or drink, a job or lie out of reach)%s',
+                                     d.conts.barrels, d.conts.pots, d.conts.empty, fr, d.conts.dfx and ('; ' .. d.conts.dfx) or ''), 'barrels'
   end
   if jobs > 0 and susp == jobs then
     return 'suspended', string.format('the Still at %s holds %d brew job%s, all suspended (a missing item, a cancelled hauling job)', at, jobs, jobs == 1 and '' or 's'), nil
@@ -11047,7 +11177,8 @@ function M.jw_ctx(K, c)
   c = c or M.conf(K)
   local jc = type(c.jobwhy) == 'table' and c.jobwhy or M.DEFAULTS.jobwhy
   return {census = K.census.u, inv = K.census.i, items_max = math.tointeger(jc.items_max) or M.JW.ITEMS_MAX,
-          manager = function() return M.manager_facts(K, pstate(K), c) end}
+          manager = function() return M.manager_facts(K, pstate(K), c) end,
+          df = function(match) return M.df_reason(K, match, c) end}      -- NEU4 BUG-841: DF's own cancel reason within the window
 end
 
 function M.jw_ask(K, c, key, stall)
@@ -11071,7 +11202,7 @@ end
 -- (lua/dfllm/dfraw.lua), read only. Reply: msg = the first line, data {kind, key, lines, n, clipped}.
 M.inspect.raw = function(K, args)
   local key = type(args) == 'table' and args.key or nil
-  local okp, ok, msg, data = pcall(M.RAW.find, K, key, M.jw_ctx(K, M.conf(K)))
+  local okp, ok, msg, data = pcall(M.RAW.find, K, key, M.jw_ctx(K, M.conf(K)), type(args) == 'table' and args.page or nil)
   if not okp then return false, 'raw: ' .. tostring(ok):sub(1, 160) end
   return ok == true, tostring(msg or ''):sub(1, 300), data
 end
@@ -11102,6 +11233,7 @@ M.BREW_GUESS = {untaken = true, nojob = true, suspended = true}
 function M.brew_watch(K, c, r)
   if not r.day then return end
   local p, inv = r.p, r.inv or {}
+  M.cx_expire(K, c, p, r.now)
   local f = M.facts_now(K, r)
   local b = M.brew_orders()
   local plants = (inv.brew_p or 0) + (inv.brew_g or 0)
@@ -11133,12 +11265,21 @@ function M.brew_watch(K, c, r)
     if not bw.told then st.brewx = nil end                    -- a told stall keeps its cause for the decisions until the order moves
     return
   end
-  local cure = M.diag_on(K, 'cx_cure', c)
-  local res = cure and M.cx_reserve(b.left) or M.CX_FREE       -- NEU3: off = the constant reserve of BUG-779, no phantom verdict
-  if not cure and p.pilecap then M.cx_end(K, p, true) end     -- switched off while frozen: the limits come back
-  local d = M.brew_diag(K, inv, {res = res, ph = cure and bw.fd or 0, pin = M.diag_on(K, 'still_pin', c)})
+  -- NEU4 BUG-841/844: DF's own reason decides. With it (>= cx_min_n cancels "Needs empty food storage item" in the window) the container verdict is
+  -- proven and the census' free count is not trusted (a barrel DF does not take is no container); without it the old count verdict stays a guess
+  local dfx = M.cx_reason(K, c, r.now)
+  local cure = M.cx_gate(K, c, r.now) ~= false
+  local dfr = M.df_reason(K, M.BREW_KINDS, c, r.now)
+  local res = cure and M.cx_reserve(b.left) or M.CX_FREE       -- no DF reason: the constant reserve of BUG-779, no phantom verdict
+  if not cure and p.pilecap then M.cx_end(K, p, true) end
+  local d = M.brew_diag(K, inv, {res = res, ph = dfx and M.CX_PHANTOM_D or 0, pin = M.diag_on(K, 'still_pin', c), dfx = dfx and dfx.text})
   local id, text, fix, still = M.brew_cause(d)
-  st.brewx = {d = bw.d, id = id, text = text}
+  -- DF's last word on the brews: it replaces a guessed cause's text and is appended to a verdict it does not support
+  if dfr and id ~= 'working' then
+    if M.BREW_GUESS[id] then text = dfr.text
+    elseif not (id == 'nobarrel' and M.df_supports(id, dfr.why)) then text = text .. ' | ' .. dfr.text end
+  end
+  st.brewx = {d = bw.d, id = id, text = text, df = dfr and dfr.text or nil}
   if id == 'working' then return end
   M.stall_log(K, 'brew', 'brew')                              -- NEU3: the raw discriminators, once a game week, before any cure changes them
   -- BUG-779: renewed every day while it holds: plan_containers orders barrels (pots without logs) past its caps
@@ -11149,7 +11290,9 @@ function M.brew_watch(K, c, r)
     p.contx = {untl = r.now + (need + 2) * DAY, want = math.min(M.CX_BATCH, math.max(8, b.n)), res = res, ph = d.conts and d.conts.ph and d.conts.ph >= M.CX_PHANTOM_D or nil,
                since = type(x) == 'table' and math.tointeger(x.since) or r.now}
     K.persist.touch('m.economy')
-    if cure then M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D) end
+    if cure and r.now - (math.tointeger(p.pilex) or -1e12) >= (math.tointeger((c.cancel or {}).cx_pile_days) or 14) * DAY then     -- NEU4: not again right after the time ran out
+      M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D, r.now)
+    end
   else
     M.cx_end(K, p)
   end
@@ -11160,7 +11303,7 @@ function M.brew_watch(K, c, r)
   if jw then
     K.log('info', 'jobwhy brew: %s', M.JW.line(jw):sub(1, 600))
     if M.BREW_GUESS[id] and M.JW.proven(jw) then text = jw.cause .. ': ' .. tostring(jw.text) end
-    if id == 'nobarrel' and not text:find('by my count', 1, true) then text = 'by my count: ' .. text end     -- the container cause is a hypothesis (BUG-834 retry)
+    if id == 'nobarrel' and not dfx and not text:find('by my count', 1, true) then text = 'by my count: ' .. text end     -- a hypothesis without DF's reason (BUG-834 retry)
     st.brewx.text, st.brewx.cause = text, jw.cause
   end
   local act = {}
@@ -11203,6 +11346,16 @@ function M.fish_labor(K, extra)
                             why = 'a fishery stands, raw fish lie there uncleaned and nobody had the labor'}, extra)
 end
 
+-- NEU4: does the unit stand on a walk group other than the citizens' (it cannot reach the fort's shops)?
+function M.unit_far(K, u)
+  local ok, okc, far = pcall(function()
+    local x, y, z = dfhack.units.getPosition(u)
+    if not x then return true, false end
+    return K.call('snapshot', 'far', x, y, z, true)
+  end)
+  return ok and okc == true and far == true
+end
+
 -- the labor `o.labor` (act.labor_set `o.which`) on the best candidate: idle first, then the skill `o.skill`, no soldier, patient, moody or noble;
 -- at most once a day (p[o.stamp]). `extra` adds one beside the holders (the holders are left out of the candidates then).
 -- Returns 'have' (+ unit id), 'set' (+ unit id), 'none' or 'wait'
@@ -11217,7 +11370,7 @@ function M.labor_assign(K, o, extra)
        and (u.mood or -1) < 0 then
       if M.labor_flag(u, o.labor) then
         if not extra then return 'have', id end
-      elseif not M.patient(u) and not noble(u) then
+      elseif not M.patient(u) and not noble(u) and not M.unit_far(K, u) then       -- NEU4: a citizen off the main walk group is no worker
         cands[#cands + 1] = {id = id, idle = (u.job == nil or u.job.current_job == nil) and 1 or 0,
                              sk = sid and dfhack.units.getNominalSkill(u, sid, true) or 0}
       end
@@ -12915,6 +13068,7 @@ function T.stale(K, c, r)
       if e.job == 'ConstructMechanisms' then why = (why .. M.mech_labor_note(K)):sub(1, 150) end     -- BUG-730
       M.stall_log(K, 'order', e.id, e.id)                                                              -- NEU3: raw discriminators, once a game week
       if rec.told ~= 1 then e.jw = M.jw_ask(K, c, 'order:' .. tostring(e.id), true) end              -- NEU1 P8
+      if e.jw and e.jw.df then why = (e.jw.df.text .. '; ' .. tostring(why)):sub(1, 150) end         -- NEU4 BUG-841: DF's own reason leads
       local act, dropped = nil, 0
       if rec.sw ~= 1 and e.mc == 'rock' and wj[e.job] and (r.f or {})['workshop:Carpenters']
          and M.wood_left(c, r, def) >= e.left and K.act.order_material(e.id, 'wood') then
@@ -15272,7 +15426,13 @@ function M.step(K, budget, ctx)
       local x, y, z = dfhack.items.getPosition(it)
       if not x then return false end
       local ok, far = K.call('snapshot', 'far', x, y, z, strict == true or nil)   -- BUG-665: strict = no walkable group counts as far
-      return ok == true and far == true
+      if not (ok == true and far == true) then return false end
+      -- NEU4: strict far but not plainly far = a tile with no walkable group (the plain read calls it near): the reason 'nowalk'
+      if strict == true then
+        local ok2, plain = K.call('snapshot', 'far', x, y, z)
+        if ok2 == true and plain ~= true then return true, 'nowalk' end
+      end
+      return true
     end
     mcache, tcache, bolt_sub = {}, {}, {}
     if (M.every.ticks or EVERY) ~= EVERY then M.every = {ticks = EVERY} end   -- the rush run is this one
@@ -15366,6 +15526,15 @@ function M.state(K)
     -- BUG-042: why the stills do not brew while drink is below the target ('no validated brew order: manager office
     -- 18631 has no chair')
     if st.dwhy then r.stock.dwhy = tostring(st.dwhy):sub(1, 80) end
+    if st.dwhy and st.dcx then r.stock.dcx = 1 end                  -- NEU4: DF says the stills lack a container (the ladder names containers, not a Still)
+    do                                                              -- NEU4 BUG-842: usable vs total where they differ ('wood 0 usable of 204')
+      local wd = math.max(0, math.tointeger(inv.wood) or 0)
+      local wt = wd + (math.tointeger(inv.wood_far) or 0) + (math.tointeger(inv.wood_busy) or 0) + (math.tointeger(inv.wood_forb) or 0) + (math.tointeger(inv.wood_skip) or 0)
+      if wt > wd then r.stock.wood, r.stock.woodt = wd, wt end
+      local ce = (math.tointeger(inv.barrels_empty) or 0) + (math.tointeger(inv.pots_empty) or 0)
+      local cf = math.max(0, math.tointeger(inv.cont_free) or 0)
+      if ce > cf then r.stock.cont, r.stock.contt = cf, ce end
+    end
     if st.bshort then r.stock.bshort = 1 end      -- BUG-382: the runner's gather zone follows the brewable plants too
     -- FR-76: drink and food units the census counts as forbidden (a reclaimed fort's stock: the status says so)
     if (math.tointeger(inv.drink_forb) or 0) > 0 then r.stock.dforb = math.tointeger(inv.drink_forb) end

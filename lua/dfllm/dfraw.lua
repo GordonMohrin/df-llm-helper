@@ -8,6 +8,7 @@
 -- an unreadable field prints "?" (never 0, never an error), and each struct is also dumped generically (`pairs`) so that the real field names show
 -- up even where a name below is wrong. Output is bounded: R.MAX_LINES lines of R.LINE characters, vectors shown with their first few elements.
 local JW = require('dfllm.jobwhy')
+local json = require('dfllm.util.json')
 local U = JW.util
 local int, pget, ename, each, uname = U.int, U.pget, U.ename, U.each, U.uname
 
@@ -19,7 +20,10 @@ R.POS_MAX = 3000              -- items whose tile is checked (walk group, hidden
 R.HOLDERS_MAX = 30            -- holders listed one by one
 R.SHOPS_MAX = 6               -- workshops dumped per order / kind
 R.JOBS_MAX = 12               -- jobs listed per workshop
-R.ORDERS_MAX = 8              -- orders dumped in detail by `brew`
+R.ORDERS_MAX = 8              -- orders dumped by `brew`
+R.ORDERS_DETAIL = 2           -- NEU4 BUG-846: of them in full (shops and holders); the rest one compact block, the shops summarized
+R.PAGE_BYTES = 6000           -- NEU4 BUG-846: one reply page (the kernel sends no data over 8 KB: the page stays well under)
+R.SAMPLE_MAX = 10             -- NEU4 BUG-843: items of an items dump described one by one
 
 ---------------------------------------------------------------- values
 local function clip(s, n) s = tostring(s); return #s > n and (s:sub(1, n - 1) .. '~') or s end
@@ -340,9 +344,18 @@ local function order_shops(o)
   return out, keys, pin
 end
 
-function R.order(K, o, ctx, b, shown)
+function R.order(K, o, ctx, b, shown, compact, max_full)
   b = b or buf()
   shown = shown or {}
+  if compact then                                    -- NEU4: the head in one line, the shops by id only
+    local jt = N(function() return o.job_type end)
+    local _, keys, pin = order_shops(o)
+    add(b, string.format('order %s %s reaction=%s left=%s/%s status=%s workshop_id=%s conditions=%d shops=%s', V(function() return o.id end), E(df.job_type, function() return o.job_type end),
+                         V(function() return o.reaction_name end), V(function() return o.amount_left end), V(function() return o.amount_total end),
+                         V(function() return FL(o.status) end), V(function() return o.workshop_id end), #each(pget(function() return o.item_conditions end)),
+                         keys and table.concat(keys, '|') or '?'))
+    return b
+  end
   order_head(b, o)
   local shops, keys, pin = order_shops(o)
   add(b, string.format('  shops for this order: %s%s', keys and table.concat(keys, '|') or '? (job type not in the kernel table)', pin and pin >= 0 and (' ; pinned to workshop ' .. pin) or ''))
@@ -353,11 +366,13 @@ function R.order(K, o, ctx, b, shown)
     if shown[id] then add(b, '  ws ' .. tostring(id) .. ' (shown above)')
     else
       shown[id] = true
+      if max_full and i > max_full then R.shop(K, b, bld, false); goto next_shop end      -- NEU4 BUG-846: the other shops one line each
       local s = R.shop(K, b, bld, true)
       local jt = N(function() return o.job_type end)
       local labors, sk = JW.labors(jt, pget(function() return o.reaction_name end), pget(function() return o.mat_type end), pget(function() return o.mat_index end), s and s.key)
       if labors then holders_head(b, labors, R.holders(K, labors, sk, s, ctx), s) end
     end
+    ::next_shop::
   end
   return b
 end
@@ -375,15 +390,19 @@ function R.brew(K, ctx)
   local shown = {}
   for i, o in ipairs(orders) do
     if i > R.ORDERS_MAX then add(b, '... ' .. (#orders - R.ORDERS_MAX) .. ' more orders'); break end
-    R.order(K, o, ctx, b, shown)
+    R.order(K, o, ctx, b, shown, i > R.ORDERS_DETAIL, 1)
   end
+  -- NEU4 BUG-846: the Stills after the orders, one line each (`why ws:<id> --raw` is the full sheet of one)
   local stills = 0
   for _, bld in ipairs(U.shops_all()) do
     local s = pget(JW.shop, bld, nil)
     if s and s.key == 'workshop:Still' then
       stills = stills + 1
       local id = N(function() return bld.id end)
-      if not shown[id] and stills <= R.SHOPS_MAX then shown[id] = true; add(b, 'a Still no order lists:'); R.shop(K, b, bld, true) end
+      if not shown[id] and stills <= R.SHOPS_MAX * 3 then
+        local njobs = #each(pget(function() return bld.jobs end))
+        add(b, string.format('still %s at %s jobs=%d maxgen=%s (full sheet: why ws:%s --raw)', tostring(id), posb(bld), njobs, V(function() return bld.profile.max_general_orders end), tostring(id)))
+      end
     end
   end
   add(b, 'stills: ' .. stills)
@@ -549,14 +568,77 @@ function R.itemscan(K, spec, ctx)
     else
       r.nopos = (r.nopos or 0) + 1
     end
+    r.whys = r.whys or {}
+    r.whys[i] = why
     if #why == 0 then r.ok = r.ok + 1 else r.first[why[1]] = (r.first[why[1]] or 0) + 1 end
     for _, w in ipairs(why) do r.hits[w] = (r.hits[w] or 0) + 1 end
+  end
+  -- NEU4 BUG-843: up to SAMPLE_MAX items described one by one: the excluded ones (a few of each first reason) and the ones with no exclusion
+  r.sample = {}
+  local per, taken = {}, {}
+  -- pass 1: up to 2 of every first reason (3 of the free ones) so that each kind of exclusion shows; pass 2 fills up to SAMPLE_MAX
+  for pass = 1, 2 do
+    for i, it in ipairs(recs) do
+      if #r.sample >= R.SAMPLE_MAX then break end
+      local why = r.whys and r.whys[i] or {}
+      local key = why[1] or 'ok'
+      local lim = pass == 1 and (key == 'ok' and 3 or 2) or 4
+      if not taken[i] and (per[key] or 0) < lim then
+        per[key], taken[i] = (per[key] or 0) + 1, true
+        r.sample[#r.sample + 1] = R.sample_item(K, it, rec[i], why, spec)
+      end
+    end
   end
   local inv = K.census and K.census.i
   if type(inv) == 'table' then
     for _, k in ipairs(spec.cen or {}) do r.cen[k] = inv[k] end
   end
   return r
+end
+
+-- one sampled item: id, tile, what the tile is, the container, the stockpile, the item's flags, the reasons
+function R.sample_item(K, it, q, why, spec)
+  local id = N(function() return it.id end)
+  local x, y, z = nil, nil, nil
+  if q and q.p then x, y, z = q.p[1], q.p[2], q.p[3] end
+  local parts = {'#' .. tostring(id or '?'), (x and string.format('at %d,%d,%d', x, y, z) or 'no tile')}
+  if x then
+    -- the tile through snapshot (the one reader of the map): legend char, shape, material, liquid depth, magma, building type, occupancy; nil = hidden
+    local okp, okk, t2 = pcall(K.call, 'snapshot', 'tile', x, y, z)
+    local ti2 = okp and okk and type(t2) == 'table' and t2 or nil
+    if ti2 then
+      parts[#parts + 1] = string.format('tile=%s/%s/%s', tostring(ti2.c), tostring(ti2.shape or '?'), tostring(ti2.mat or '?'))
+      if (ti2.flow or 0) > 0 then parts[#parts + 1] = 'liquid=' .. (ti2.magma and 'magma' or 'water') .. tostring(ti2.flow) end
+      if ti2.bld and ti2.bld ~= '' then parts[#parts + 1] = 'building=' .. tostring(ti2.bld) end
+      if ti2.cav then parts[#parts + 1] = 'cavern' end
+    else
+      parts[#parts + 1] = 'tile=? (hidden or unread)'
+    end
+    local sp
+    pcall(function()
+      for _, s in ipairs(df.global.world.buildings.other.STOCKPILE) do
+        if s.z == z and x >= s.x1 and x <= s.x2 and y >= s.y1 and y <= s.y2 then sp = s; break end
+      end
+    end)
+    if sp then
+      parts[#parts + 1] = 'stockpile=#' .. tostring(N(function() return sp.id end)) .. '(' .. tostring(pget(function() return dfhack.df2utf(sp.name or '') end) or '') .. ' max_barrels=' .. V(function() return sp.max_barrels end) .. ')'
+    end
+    parts[#parts + 1] = 'group=' .. tostring(q.g == nil and '?' or q.g)
+  end
+  local c = pget(dfhack.items.getContainer, it)
+  if c then parts[#parts + 1] = 'in ' .. tostring(ename(df.item_type, pget(function() return c:getType() end) or -1) or '?') .. '#' .. tostring(N(function() return c.id end)) end
+  if spec and spec.empty then
+    local inside = pget(dfhack.items.getContainedItems, it)
+    parts[#parts + 1] = 'contents=' .. tostring(inside and #each(inside) or '?')
+  end
+  parts[#parts + 1] = 'flags=' .. V(function() return FL(it.flags) end)
+  parts[#parts + 1] = 'refs=' .. V(function()
+    local out = {}
+    for _, ref in ipairs(each(it.general_refs)) do out[#out + 1] = tostring(ename(df.general_ref_type, ref:getType()) or '?') end
+    return #out > 0 and table.concat(out, ',') or 'none'
+  end)
+  parts[#parts + 1] = 'reason=' .. (#why > 0 and table.concat(why, '+') or 'none (free as DF sees it)')
+  return table.concat(parts, ' ')
 end
 
 local function counts_text(t, order)
@@ -600,6 +682,10 @@ function R.items(K, key, ctx)
   for k, v in pairs(r.cen) do cen[#cen + 1] = k .. '=' .. tostring(v) end
   table.sort(cen)
   add(b, '  census says: ' .. (#cen > 0 and table.concat(cen, ' ') or '(no census key for this vector)'))
+  if r.sample and #r.sample > 0 then
+    add(b, '  sample (' .. #r.sample .. ' items; excluded first, then free ones):')
+    for _, ln in ipairs(r.sample) do add(b, '    ' .. ln) end
+  end
   return b, true, r
 end
 
@@ -658,7 +744,21 @@ end
 
 ---------------------------------------------------------------- the entry
 -- key: order:<id> | brew | job:<id> | items:<name> | manager | ws:<id>  ->  ok, text (first line), {kind, key, lines, clipped}
-function R.find(K, key, ctx)
+-- NEU4 BUG-846: the lines cut into pages of at most R.PAGE_BYTES encoded bytes: lines of page `page`, the page used, the number of pages
+function R.paginate(lines, page)
+  local pages, cur, size = {}, {}, 0
+  for _, ln in ipairs(lines) do
+    local n = #json.encode(ln) + 2
+    if #cur > 0 and size + n > R.PAGE_BYTES then pages[#pages + 1] = cur; cur, size = {}, 0 end
+    cur[#cur + 1] = ln
+    size = size + n
+  end
+  pages[#pages + 1] = cur
+  page = math.max(1, math.min(#pages, math.tointeger(tonumber(page)) or 1))
+  return pages[page], page, #pages
+end
+
+function R.find(K, key, ctx, page)
   local s = tostring(key or ''):gsub('^%s+', ''):gsub('%s+$', '')
   local low = s:lower()
   local pre, rest = s:match('^(%a+):(.+)$')
@@ -691,7 +791,10 @@ function R.find(K, key, ctx)
     return false, 'key: order:<id>, brew, job:<id>, items:<logs|plants|barrels|VECTOR>, manager or ws:<id>'
   end
   if b.clipped then b.l[#b.l + 1] = '... (output clipped at ' .. R.MAX_LINES .. ' lines)' end
-  return true, b.l[1] or (kind .. ': nothing'), {kind = kind, key = s, lines = b.l, n = #b.l, clipped = b.clipped or false}
+  local lines, pg, pages = R.paginate(b.l, page)
+  local msg = b.l[1] or (kind .. ': nothing')
+  if pages > 1 then msg = string.format('page %d of %d (--page N for the others): %s', pg, pages, msg) end
+  return true, msg, {kind = kind, key = s, lines = lines, n = #b.l, page = pg, pages = pages, clipped = b.clipped or false}
 end
 
 ---------------------------------------------------------------- the stall line
@@ -792,7 +895,19 @@ function R.stall_line(K, kind, arg, ctx)
   else
     return nil
   end
-  return ('raw stall %s: %s'):format(kind, table.concat(parts, ' | ')):sub(1, 900)
+  -- NEU4 BUG-841: DF's own reason leads the line (the weekly raw stall line): what DF cancelled and why, from the cancel tally
+  local lead
+  if type(ctx) == 'table' and type(ctx.df) == 'function' then
+    local m
+    if kind == 'brew' then m = {'brew '}
+    elseif kind == 'order' then
+      local o = type(arg) == 'string' and arg:match('^order:(%d+)$') and U.find_order(int(arg:match('%d+')))
+      m = o and JW.df_match({job = ename(df.job_type, N(function() return o.job_type end) or -1) or '?'}) or nil
+    elseif kind == 'build' then m = function(k) return k:sub(1, 9) == 'construct' or k:sub(1, 5) == 'build' end end
+    local e = m and pget(ctx.df, m)
+    lead = e and e.text or nil
+  end
+  return ('raw stall %s: %s%s'):format(kind, lead and ('DF: ' .. lead .. ' | ') or 'DF: no cancel reason seen | ', table.concat(parts, ' | ')):sub(1, 900)
 end
 
 return R

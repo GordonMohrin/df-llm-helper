@@ -6903,6 +6903,10 @@ function Q.idle_scan(K, c, t)
         local okp, parts = pcall(Q.parts, K, P, d)
         if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 110) end
       end
+      do                                     -- NEU4 BUG-841: DF's own reason for its construction jobs leads the wait text
+        local okd, dft = K.call('economy', 'df_text', 'build')
+        if okd and type(dft) == 'string' then wait = trunc(dft .. (wait and (' | ' .. wait) or ''), 170) end
+      end
       S.rt.ip[P.id] = {t = t, ps = ps, si = P.stage, why = why}
       dirty()
       -- BUG-748 (Run 16b i2 Whirledrampart: 'set aside, no runner slot' beside runner slots 4-6 and 8 free idle adults): the set-aside is the runner's
@@ -6939,6 +6943,10 @@ function Q.stale_scan(K, c, t)
       if d then
         local okp, parts = pcall(Q.parts, K, P, d)
         if okp and type(parts) == 'table' and #parts > 0 then wait = trunc(parts[1], 110) end
+      end
+      do                                     -- NEU4 BUG-841: DF's own reason for its construction jobs leads the wait text
+        local okd, dft = K.call('economy', 'df_text', 'build')
+        if okd and type(dft) == 'string' then wait = trunc(dft .. (wait and (' | ' .. wait) or ''), 170) end
       end
       local days = (t - ps) // DAY
       local cmds = string.format("dfllm cmd bp.cancel '{\"proj\":\"%s\"}', then dfllm plan propose (follow cancels traps, tombs and "

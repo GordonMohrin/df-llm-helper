@@ -1121,8 +1121,10 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      # NEU1 P8: the job query (lua/dfllm/jobwhy.lua): stall = the brew / fish / stale-order stalls carry its cause
                      "jobwhy": {"stall": "bool", "items_max": (100, 50000)},
                      # NEU3 (docs/v2/NEU3-diagnose.md): diagnostics first; the acting cures of the 'fass' round default OFF
-                     "diag": {"cx_cure": "bool", "mgr_chores": "bool", "still_pin": "bool", "stall_line": "bool"}}
-ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale", "jobwhy", "diag")   # parts whose every key is listed above
+                     "diag": {"cx_cure": "bool", "mgr_chores": "bool", "still_pin": "bool", "stall_line": "bool"},
+                     # NEU4 (BUG-841/844): DF's cancel tally window (game days), cancels that make a reason count, longest pile-limit freeze
+                     "cancel": {"days": (1, 14), "cx_min_n": (1, 1000), "cx_pile_days": (1, 112)}}
+ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale", "jobwhy", "diag", "cancel")   # parts whose every key is listed above
 _PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
 _JOB_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,40}$")

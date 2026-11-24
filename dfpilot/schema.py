@@ -131,7 +131,7 @@ STATE_OWNERS = {
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.wall": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.nowood": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy", "stock.mfar": "economy",
     "stock.picks": "economy",
-    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.bshort": "economy",
+    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.wood": "economy", "stock.woodt": "economy", "stock.cont": "economy", "stock.contt": "economy", "stock.dcx": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
     "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "mood": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
@@ -951,7 +951,7 @@ EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=[
 SUBTYPE_JOBS = frozenset({"MakeArmor", "MakePants", "MakeShoes", "MakeGloves", "MakeHelm", "MakeWeapon", "MakeAmmo",
                           "MakeShield", "MakeTrapComponent", "MakeTool", "MakeToy"})
 # NEU1 P7: act.LABOR_SETS names, act.TOOL_DETAILS, the quickfort build keys of furniture.place (lua/dfllm/player.lua M.FURNITURE)
-LABOR_SETS = ["mechanic", "farm", "cook", "brew", "herb", "burn", "furniture", "clean_fish", "hunt", "carpenter", "stonecraft", "spin", "process", "feed_water"]
+LABOR_SETS = ["mechanic", "farm", "cook", "brew", "herb", "burn", "furniture", "clean_fish", "hunt", "carpenter", "stonecraft", "spin", "process", "feed_water", "woodcutter"]
 WORK_DETAILS = ["Miners", "Woodcutters", "Hunters", "Fisherdwarves", "Planters", "Plant gatherers", "Gatherers", "Herbalists",
                 "Orderlies", "Cooks", "Cooking", "Cook", "Brewers", "Brewing", "Brewer"]
 FURNITURE = {"bed": "b", "table": "t", "chair": "c", "door": "d", "cabinet": "f", "chest": "h", "coffin": "n",
@@ -998,7 +998,8 @@ VERB_ARGS: dict[str, Obj] = {
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
                                           "offices", "curse", "unit", "items", "cavern", "manager", "military", "why", "raw"])},   # NEU3: raw = the game's own fields (dfraw.lua)
                    # BUG-137: `key=39052` arrives as an int from the CLI (cmd.parse_kv); a unit id or a name
-                   opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
+                   opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$"),
+                        "page": Int(1, 50)}),     # NEU4 BUG-846: page of an `inspect what=raw` dump (pages of <= 6000 bytes)
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),
     "module.enable": Obj(req={"module": MODULE}),
     "tombs.repair": Obj(),
@@ -1203,6 +1204,8 @@ STATE = Obj(
                            "mshort": FLAG, "melt": NAT,
                            # BUG-042: why the stills do not brew while drink is below the plan's target
                            "dwhy": Str(maxbytes=80),
+                           # NEU4 BUG-842/841: usable logs / all logs and usable / all empty containers (only where they differ); DF cancels the brews for want of a container
+                           "wood": NAT, "woodt": NAT, "cont": NAT, "contt": NAT, "dcx": FLAG,
                            # BUG-382: drink below gather.drink_d and too few brewable plants: the runner's gather zone follows it
                            "bshort": FLAG,
                            # BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)

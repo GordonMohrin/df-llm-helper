@@ -68,6 +68,10 @@ def t_versorgung(s: dict, mem: dict, now: int) -> tuple:
         return 0, "keine Vorratszahlen (state stock)", "dfllm status", None, True
     dcmd, dkey = ((want("drink"), "trade:drink") if st.get("bshort")
                   else (place("workshops", "only=Still"), "tpl:workshops"))
+    if st.get("dcx"):
+        # NEU4 BUG-841: DF itself cancels the brews 'Needs empty food storage item' (state stock.dcx): the Still stands, the containers are the
+        # gap. No "build a Still" then: barrels (or pots without logs) and a worker for them (the kernel orders them itself; this is the player's way)
+        dcmd, dkey = ("dfllm cmd order.add '{\"job\":\"MakeBarrel\",\"amount\":10,\"mat\":\"wood\"}'", "order:barrel")
     if food < FOOD_I or drink < DRINK_I:
         if drink < DRINK_I:
             return 0, f"Trinken {drink}/{DRINK_I} d" + (f" ({st['dwhy']})" if st.get("dwhy") else ""), dcmd, dkey, False

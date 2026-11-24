@@ -1,6 +1,6 @@
 # NEU3 diagnostics: forts die of thirst with thousands of brewable plants (BUG-839, BUG-840)
 
-Status: offline, live-untested. Branch `neu3-fass`. Decision of the lead: stop guessing, diagnostics first, so that one live look names the cause.
+Status: offline, live-untested. Branch `neu3-fass`. **NEU4 (docs/v2/NEU4-ursache.md) supersedes the switch table: `cx_cure` is now ON, gated by DF's own cancel reason; the stall line leads with it.** Decision of the lead: stop guessing, diagnostics first, so that one live look names the cause.
 
 ## Situation
 

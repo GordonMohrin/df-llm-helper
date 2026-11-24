@@ -41,7 +41,9 @@ A.LABOR_SETS = {mechanic = {name = 'MECHANIC', on = true}, farm = {name = 'PLANT
                 -- chores that keep him from the office (BUG-837)
                 carpenter = {name = 'CARPENTER', on = true}, stonecraft = {name = 'STONE_CRAFT', on = true},
                 spin = {name = 'SPINNER', on = false}, process = {name = 'PROCESS_PLANT', on = false},
-                feed_water = {name = 'FEED_WATER_CIVILIANS', on = false}}
+                feed_water = {name = 'FEED_WATER_CIVILIANS', on = false},
+                -- NEU4 BUG-845: the players could not give anybody the wood chopping labor (Run 17 i1: 'labor.set knew no woodcutter'): Wood cutting
+                woodcutter = {name = 'CUTWOOD', on = true}}
 A.HOSPITAL_POSTS = {DOCTOR = true, DIAGNOSTICIAN = true, SURGEON = true, BONE_DOCTOR = true}
 -- one-time furniture orders act.order_material may re-enter in wood (carpenter's variants of the mason jobs)
 A.WOOD_JOBS = {ConstructDoor = true, ConstructCabinet = true, ConstructChest = true, ConstructCoffin = true,
@@ -1463,7 +1465,8 @@ local function impls(state)
             if p and p.z == sp.z and p.x >= sp.x1 and p.x <= sp.x2 and p.y >= sp.y1 and p.y <= sp.y2 then here = here + 1 end
           end
           local old = sp.max_barrels
-          if type(old) == 'number' and (old < 0 or old > here) then
+          -- NEU4: a pile that holds no barrel is never frozen at 0 (its food would have no container)
+          if type(old) == 'number' and here > 0 and (old < 0 or old > here) then
             sp.max_barrels = here
             out[#out + 1] = {id = sp.id, old = old, new = here, name = name}
           end
@@ -2492,7 +2495,7 @@ local function impls(state)
   -- NEU1 P7: `any` (the player's verb labor.set) switches the named labor either way
   function I.labor_set(unit_id, which, on, any)
     local spec = A.LABOR_SETS[tostring(which)]
-    if not spec then return false, 'which must be mechanic, farm, cook, brew, clean_fish, furniture, herb, burn, hunt, carpenter, stonecraft, spin, process or feed_water' end
+    if not spec then return false, 'which must be mechanic, farm, cook, brew, clean_fish, furniture, herb, burn, hunt, carpenter, stonecraft, spin, process, feed_water or woodcutter' end
     if any ~= true and (on == true) ~= spec.on then return false, which .. ' can only be switched ' .. (spec.on and 'on' or 'off') end
     local u = df.unit.find(int(unit_id) or -1)
     if not u then return false, 'no unit ' .. tostring(unit_id) end

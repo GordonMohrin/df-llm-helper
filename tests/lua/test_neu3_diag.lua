@@ -271,14 +271,14 @@ T.test('NEU3 stall line: an order stall and a build stall carry their raw discri
   local W, _, ord = world{left = 6}
   local econ = require('dfllm.economy')
   local l = econ.stall_log(W.K, 'order', ord.id, ord.id)
-  T.ok(l and l:find('raw stall order: order ' .. ord.id, 1, true) and l:find('shop 1 stage 1/1 jobs=0 maxgen=10', 1, true) and l:find('holders=2 [free=2]', 1, true), tostring(l))
+  T.ok(l and l:find('raw stall order: DF: no cancel reason seen | order ' .. ord.id, 1, true) and l:find('shop 1 stage 1/1 jobs=0 maxgen=10', 1, true) and l:find('holders=2 [free=2]', 1, true), tostring(l))
   T.eq(econ.stall_log(W.K, 'order', 4242, 4242), nil, 'no such order: no line')
   local b = econ.stall_log(W.K, 'build', '17', {at = '12,12,100', pos = {12, 12, 100}, labor = 'CARPENTER'})
-  T.ok(b and b:find('raw stall build: site 12,12,100', 1, true) and b:find('builders=0 []', 1, true), tostring(b))
+  T.ok(b and b:find('raw stall build: DF: no cancel reason seen | site 12,12,100', 1, true) and b:find('builders=0 []', 1, true), tostring(b))
 end)
 
 -- 6. the cures are switches, default off ----------------------------------------------------------------------------------------------
-T.test('NEU3 default: the container cures are OFF (no pile freeze, no labor holds, no MakeBarrel tasks, constant reserve), the barrels order of BUG-779 stays', function()
+T.test('NEU3/NEU4 default: with no DF reason the container cures stay OFF (no pile freeze, no labor holds, no MakeBarrel tasks, constant reserve), the barrels order of BUG-779 stays', function()
   local W, _, ord = world{left = 32}
   W.act_result('pile_barrels', function() return true, {{id = 41, old = -1, new = 9, name = 'x'}} end)
   F.workshop(W, 'Carpenters')
@@ -303,11 +303,11 @@ T.test('NEU3 switches: economy.diag defaults and a partial section', function()
   local W = world{}
   local econ = require('dfllm.economy')
   T.eq(econ.diag_on(W.K, 'mgr_chores'), false)
-  T.eq(econ.diag_on(W.K, 'cx_cure'), false)
+  T.eq(econ.diag_on(W.K, 'cx_cure'), true, 'NEU4: on by default, gated by DF reason')
   T.eq(econ.diag_on(W.K, 'still_pin'), false)
   T.eq(econ.diag_on(W.K, 'stall_line'), true)
-  local W2 = world{diag = {cx_cure = true}}
-  T.eq(require('dfllm.economy').diag_on(W2.K, 'cx_cure'), true)
+  local W2 = world{diag = {cx_cure = false}}
+  T.eq(require('dfllm.economy').diag_on(W2.K, 'cx_cure'), false)
   T.eq(require('dfllm.economy').diag_on(W2.K, 'mgr_chores'), false)
 end)
 

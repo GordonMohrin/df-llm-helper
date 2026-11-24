@@ -929,6 +929,9 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
                + (" METAL SHORT" if st.get("mshort") else "") + (f" melt {st['melt']}" if st.get("melt") else "")
                if "ore" in st else "")
             + (f" leather {st['leather']}" if "leather" in st else "")
+            # NEU4 BUG-842: what the fort holds is not what a job can use: usable of all, only where they differ
+            + (f" wood {st.get('wood', 0)} usable of {st['woodt']}" if st.get("woodt") else "")
+            + (f" containers {st.get('cont', 0)} usable of {st['contt']} empty" if st.get("contt") else "")
             + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else "")
             + stale_note(s, "stock")))
         # BUG-042: why the stills do not brew while drink is below the target (the kernel's own cause)

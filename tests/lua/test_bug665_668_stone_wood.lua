@@ -167,14 +167,14 @@ T.test('BUG-665: with the one-word flag mask the in_job bit comes from the same 
   T.ok(without - with >= 18, string.format('one flag read less per boulder: %d with the bit, %d without', with, without))
 end)
 
-T.test('BUG-665: the plain far read keeps group 0 near (snapshot.far without strict): logs and food are not judged by it', function()
+T.test('BUG-665 / NEU4 BUG-842: the plain far read keeps group 0 near (food is not judged by it); logs ask strict now: a log on a tile with no walkable group is no log', function()
   local seen = {}
   local W = world{boulders = 2, logs = 3, setup = function(W)
     F.item(W, 'WOOD', {mat_type = 420, mat_index = 0, _pos = {6, 6, 38}})
   end}
   days(W, 1)
   local i = W.K.census.i
-  T.eq(i.wood, 4, 'the log on the no-group tile stays a log (plain far)')
+  T.eq({i.wood, i.wood_far, i.wood_nw}, {3, 1, 1}, 'NEU4: the log on the no-group tile is no usable log (strict far), counted as no-walk')
   T.eq(i.rock, 2)
 end)
 

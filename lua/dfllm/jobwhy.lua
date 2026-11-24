@@ -877,9 +877,46 @@ local function find_shop(id)
   end
 end
 
+-- NEU4 BUG-841: DF's own reason. The job kinds DF names in "<unit> cancels <job>: <reason>": brew -> every 'brew ...'; a job type -> its caption
+-- ('Make barrel' matches 'make wooden barrel': first and last word); a workshop -> the jobs of its type (not matched: no job type)
+function J.df_match(r)
+  local job = tostring(r.job or '')
+  if J.KINDS.brew(nil, job) or job == 'BrewDrink' or job == 'brew' then return {'brew '} end
+  if job == 'fish' then return {'prepare raw fish', 'clean fish'} end
+  if job == 'cook' then return {'prepare '} end
+  local cap
+  local jt = pget(function() return df.job_type[job] end)
+  if type(jt) == 'number' then cap = pget(function() return df.job_type.attrs[jt].caption end) end
+  if type(cap) ~= 'string' or cap == '' then cap = job:gsub('(%l)(%u)', '%1 %2') end
+  cap = cap:lower()
+  local first, last = cap:match('^(%S+)'), cap:match('(%S+)$')
+  if not first then return nil end
+  return function(kind) return kind:sub(1, #first) == first and kind:sub(-#last) == last end
+end
+
+-- the result r (and its sub) carries DF's reason when the cancel tally has one: r.df = {why, n, days, last, text}; a cause that is only a guess
+-- (unknown, conditions, ...) becomes 'df_reason' with DF's words first
+function J.attach_df(r, ctx)
+  if type(r) ~= 'table' or type(ctx) ~= 'table' or type(ctx.df) ~= 'function' then return r end
+  local m = J.df_match(r)
+  local e = m and pget(ctx.df, m)
+  if e and (e.n or 0) > 0 then
+    r.df = {why = e.why, n = e.n, days = e.days, last = e.last, text = e.text}
+    r.text = (e.text or '') .. ' | ' .. (r.text or '')
+    if r.cause == nil or J.NOT_PROVEN[r.cause] and r.cause ~= 'working' and r.cause ~= 'done' and r.cause ~= 'none_open' then r.cause = 'df_reason' end
+  end
+  if type(r.sub) == 'table' then J.attach_df(r.sub, ctx) end
+  return r
+end
+
 -- key: 'ws:<id>' | 'bld:<id>' | 'shop:<id>' | 'order:<id>' | 'job:<id>' | <id> (order, then workshop, then job) | a kind
 -- -> result or nil, error
 function J.find(K, key, ctx)
+  local r, err = J.find0(K, key, ctx)
+  if r and r.kind ~= 'workshop' then J.attach_df(r, ctx) end
+  return r, err
+end
+function J.find0(K, key, ctx)
   local s = tostring(key or ''):gsub('^%s+', ''):gsub('%s+$', '')
   local pre, num = s:match('^(%a+):(%d+)$')
   local id = int(num) or int(s:match('^(%d+)$'))
@@ -934,7 +971,7 @@ end
 function J.data(r)
   local function flat(x)
     return {kind = x.kind, id = x.id, job = x.job, cause = x.cause, text = (x.text or ''):sub(1, 400), shop = x.shop, at = x.at,
-            left = x.left, workers = x.workers, inputs = ins_data(x.inputs), guess = x.guess}
+            left = x.left, workers = x.workers, inputs = ins_data(x.inputs), guess = x.guess, df = x.df}
   end
   local d = flat(r)
   if r.sub then d.sub = flat(r.sub) end

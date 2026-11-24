@@ -393,7 +393,7 @@ C.STATE_OWNERS = {
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.wall'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy', ['stock.rhard'] = 'economy', ['stock.nowood'] = 'economy', ['stock.mfree'] = 'economy', ['stock.mroute'] = 'economy', ['stock.mtp'] = 'economy', ['stock.mfar'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
-  ['stock.dwhy'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy', ['stock.dfd'] = 'economy', ['stock.dfwhy'] = 'economy',
+  ['stock.dwhy'] = 'economy', ['stock.wood'] = 'economy', ['stock.woodt'] = 'economy', ['stock.cont'] = 'economy', ['stock.contt'] = 'economy', ['stock.dcx'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy', ['stock.dfd'] = 'economy', ['stock.dfwhy'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
@@ -541,7 +541,10 @@ C.STATE_SPEC = obj({
                     mfree = NAT, mfar = NAT, mroute = str(16), mtp = NAT,   -- BUG-611: free mechanisms and plan_mech's route (plan: no traps without parts)
                     rsoil = FLAG,                   -- BUG-438: the stone digs found only soil (plan propose digs down to hard stone)
                     pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
-                    dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target
+                    dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target (NEU4: DF's own cancel reason leads)
+                    wood = NAT, woodt = NAT,        -- NEU4 BUG-842: usable logs / all logs, only when they differ ('wood 0 usable of 204')
+                    cont = NAT, contt = NAT,        -- NEU4 BUG-842: usable / all empty containers (barrels + pots), only when they differ
+                    dcx = FLAG,                     -- NEU4 BUG-841: DF cancels brews 'Needs empty food storage item' (the stills lack a container, not a Still)
                     bshort = FLAG,                  -- BUG-382: drink below gather.drink_d and too few brewable plants (runner's gather zone)
                     hungry = NAT,                   -- BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
                     dforb = NAT, fforb = NAT,       -- FR-76: drink / food units the census counts as forbidden

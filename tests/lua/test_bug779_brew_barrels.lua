@@ -82,7 +82,7 @@ T.test('BUG-779: every barrel full (none free): the stall names it, barrels are 
   local ev = stuck(W)
   T.eq(#ev, 1, 'told once')
   T.ok(ev[1].full:find('no empty barrel or pot for a brew (48 barrels, 0 pots; 0 empty, 0 free', 1, true), ev[1].full)
-  T.ok(ev[1].full:find('Needs empty food storage item', 1, true), ev[1].full)
+  T.ok(ev[1].full:find('by my count', 1, true) and not ev[1].full:find('Needs empty food storage item', 1, true), 'NEU4: no DF reason seen: a count, not DF words: ' .. ev[1].full)
   T.eq(ev[1].d.kind, 'input')
   T.eq(#W.find_acts('order_remove'), 0, 'the brew orders are not taken down')
   T.eq(#W.find_acts('labor_set'), 0)

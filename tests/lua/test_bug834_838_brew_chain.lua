@@ -56,13 +56,21 @@ local function world(o)
   return W, b, ord, b2
 end
 
--- days of brew_watch; `inv` may be a function(day) -> inventory
-local function econ_run(W, ord, n, inv, drink_d)
+-- NEU4: DF's own reason: `n` cancels "Needs empty food storage item" at `tick` (the CANCEL_JOB announcement economy tallies)
+local function feed(econ, K, n, tick, why)
+  for _ = 1, n do
+    econ.on.REPORT(K, {type = 'CANCEL_JOB', tick = tick, text = 'Urist McBrew cancels Brew drink from plant: ' .. (why or 'Needs empty food storage item') .. '.'})
+  end
+end
+
+-- days of brew_watch; `inv` may be a function(day) -> inventory; `df` = DF cancels the brews 'Needs empty food storage item' (3 a day)
+local function econ_run(W, ord, n, inv, drink_d, df)
   local econ = require('dfllm.economy')
   local p = W.K.persist.get('m.economy')
   p.orders = p.orders or {}
   p.orders['dfllm:drink'] = ord.id
   for i = 1, n do
+    if df then feed(econ, W.K, 3, (100 + i) * DAYT) end
     local r = {day = true, now = (100 + i) * DAYT, p = p, inv = type(inv) == 'function' and inv(i) or inv, days = {drink_d = drink_d or 40}, cit = 6}
     econ.brew_watch(W.K, W.K.cfg.baseline.economy, r)
   end
@@ -91,7 +99,7 @@ T.test('BUG-834 i1 Diedplank: 3 free containers beside 32 brews open is a contai
     if mode == 'freeze' then return true, {{id = 41, old = -1, new = 9, name = 'dfllm-stock'}} end
     return true, {}
   end)
-  local _, p = econ_run(W, ord, 8, I1)
+  local _, p = econ_run(W, ord, 8, I1, nil, true)
   local ev = stuck(W)
   T.eq(#ev, 1, 'told once')
   T.ok(ev[1].full:find('no empty barrel or pot for a brew', 1, true), 'the container verdict, not "the manager gave no Still a job": ' .. ev[1].full)
@@ -108,7 +116,7 @@ T.test('BUG-834: 3 free beside 5 brews stays no stall (reserve 3); a drink emerg
   T.eq(p.contx, nil)
   T.eq(#W.find_acts('pile_barrels'), 0)
   local W2, _, ord2 = world{left = 32}
-  econ_run(W2, ord2, 8, I1, 3)
+  econ_run(W2, ord2, 8, I1, 3, true)
   T.eq(W2.find_acts('pile_barrels')[1].args[2].mixed, true, 'drink 3 days: emergency')
 end)
 
@@ -119,9 +127,9 @@ T.test('BUG-834 i2 Whirledrampart: 7 "free" barrels that never change for 12 day
   local W2, _, ord2 = world{left = 6}
   W2.act_result('pile_barrels', function(mode) return true, {} end)
   W2.K.persist.get('m.economy').brewx = {relax = 1, n = 1}          -- the first cure (the orders made again) has run
-  local _, p2 = econ_run(W2, ord2, 45, I2)
+  local _, p2 = econ_run(W2, ord2, 45, I2, nil, true)
   local ev = stuck(W2)
-  T.ok(#ev >= 2 and ev[2].full:find('unchanged for', 1, true) and ev[2].full:find('DF takes none of them', 1, true), ev[2] and ev[2].full or 'no 2nd report')
+  T.ok(#ev >= 2 and ev[2].full:find('DF takes none of them', 1, true) and ev[2].full:find('DF cancelled Brew', 1, true), ev[2] and ev[2].full or 'no 2nd report')
   T.ok(p2.contx and p2.contx.ph == true, 'wanted: ' .. T.show(p2.contx))
   -- a moving count is no phantom
   local W3, _, ord3 = world{left = 6}
@@ -137,7 +145,7 @@ T.test('BUG-834: the stall is over (the brews moved): the stockpile limits come 
     back = arg
     return true, {{id = 41, new = 12}}
   end)
-  local _, p = econ_run(W, ord, 8, I1)
+  local _, p = econ_run(W, ord, 8, I1, nil, true)
   T.ok(p.pilecap and p.pilecap['41'] == 12)
   ord.amount_left = 20                                             -- the brewers work: the order fell
   local econ = require('dfllm.economy')
@@ -180,6 +188,7 @@ T.test('BUG-835: a container stall puts the Carpentry labor on citizens (3 holde
   W.act_result('labor_set', function(id, which, on) sets[#sets + 1] = {id, which, on}; W.unit(id).status.labors[CARPENTER] = true; return true, 'enabled' end)
   local p = W.K.persist.get('m.economy')
   p.contx = {untl = 1e12, want = 15, res = 8, since = 0}           -- the stall is 2+ days old
+  feed(require('dfllm.economy'), W.K, 8, W.K.now().tick)           -- NEU4: and DF says so
   for _ = 1, 3 do W.run(1200, {skip = 100}); for _ = 1, 40 do W.run(1) end end
   local carp = 0
   for _, s in ipairs(sets) do if s[2] == 'carpenter' and s[3] == true then carp = carp + 1 end end
