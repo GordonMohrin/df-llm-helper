@@ -950,8 +950,10 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      # after the last SIEGE / BREACH day loose forbidden food is unforbidden too
                      "forbid": {"per_day": (0, 5000), "burst_per_day": (0, 5000), "burst_min": (0, 100000), "after_days": (0, 365)},
                      # BUG-607: days without a log before a fort counts as treeless (0 = never; the part's other keys: the mirror test)
-                     "pieces": {"treeless_days": (0, 400)}}
-ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale")   # parts whose every key is listed above
+                     "pieces": {"treeless_days": (0, 400)},
+                     # NEU1 P8: the job query (lua/dfllm/jobwhy.lua): stall = the brew / fish / stale-order stalls carry its cause
+                     "jobwhy": {"stall": "bool", "items_max": (100, 50000)}}
+ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale", "jobwhy")   # parts whose every key is listed above
 _PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
 _JOB_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,40}$")
