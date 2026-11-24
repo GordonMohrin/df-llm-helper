@@ -29,7 +29,7 @@ from . import files, schema, session
 ALARM = "alarm.txt"
 WAIT_TIMEOUT_S = 15.0
 CURSOR = ".wait.json"              # P3: {v, n: newest event n a wait has looked at, said: {key: wall}} (Python-private)
-SESSION_EVERY_S = 30.0             # P3: a session blocked in `wait` is alive
+SESSION_EVERY_S = 10.0             # P3: a session blocked in `wait` is alive (<< deadman.max_ticks at 1000 t/s)
 SYS_EVERY_S = 2.0                  # P3: how often the follow / kernel / pause checks run while waiting
 SAID_KEEP_S = 86400                # P3: keys older than this leave the cursor (bounded file)
 MAX_LINES = 8
@@ -113,11 +113,17 @@ def acts(e: dict, cfg: dict) -> bool:
 
 
 def wake_key(e: dict) -> str:
-    """The repeat key: the type, for a decision the type and its id."""
+    """The repeat key: the type, for a decision the type and its id; plus the units the event names (d.unit / d.units), so a
+    second patient or thirsty dwarf within repeat_s wakes again while the same unit's repeat does not."""
     d = e.get("d") if isinstance(e.get("d"), dict) else {}
+    k = str(e.get("type"))
     if e.get("type") == "DECISION_NEEDED" and isinstance(d.get("id"), str):
-        return f"DECISION_NEEDED:{d['id']}"
-    return str(e.get("type"))
+        k = f"DECISION_NEEDED:{d['id']}"
+    units = d.get("units") if isinstance(d.get("units"), list) else [d.get("unit")]
+    ids = sorted({u for u in units if isinstance(u, int) and not isinstance(u, bool)})
+    if ids:
+        k += "@" + ",".join(str(u) for u in ids[:8])
+    return k
 
 
 def read_cursor(save_dir: Path) -> dict:

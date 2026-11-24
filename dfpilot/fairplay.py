@@ -285,6 +285,16 @@ def wake_errors(path: str | Path | None = None) -> list[str]:
                 bad = [t for t in v if schema.EVENTS.get(t, ("?",))[0] != "A"]
                 if bad:
                     errs.append(f"{name}: {blk}.{k}: not class-A event types: {', '.join(bad[:5])}")
+    # P3 conflict: no session heartbeat while the kernel's dead-man switch is on = every live session gets paused
+    sess = doc.get("session")
+    if isinstance(sess, dict) and sess.get("on") is False:
+        try:
+            dm = json.loads(_read(p.parent / "reflex.json")).get("deadman", {})
+        except (OSError, ValueError, AttributeError):
+            dm = {}
+        if not isinstance(dm, dict) or dm.get("on", True) is not False:
+            errs.append(f"{name}: session.on false while config/reflex.json deadman.on is true: no heartbeat is written, "
+                        "so the dead-man pauses every live session (set deadman.on false too)")
     return errs
 
 
@@ -307,7 +317,8 @@ SIEGE_STARVE_LIM: dict = {"on": "bool", "min": (1, 100), "mark": (25000, 100000)
 # FR-94 (Run 14 note 100): arbiter.lua resume_cfg: real minutes a pause by DF may stand before the wake PAUSED_BY_DF (0 = no wake)
 RESUME_LIM: dict = {"wake_min": (0, 240)}
 # Neuausrichtung 1 / P3: arbiter.lua deadman_cfg: the dead-man pause when no live session wrote <save>/session.json
-DEADMAN_LIM: dict = {"on": "bool", "timeout_s": (60, 86400), "check_s": (1, 300), "grace_s": (0, 3600)}
+DEADMAN_LIM: dict = {"on": "bool", "timeout_s": (60, 86400), "max_ticks": (0, 403200), "check_s": (1, 300),
+                     "grace_s": (0, 3600)}
 REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve", "deadman")
 
 

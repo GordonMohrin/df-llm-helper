@@ -78,7 +78,31 @@ def test_config_defaults_and_bad_values(tmp_path):
 def test_reflex_deadman_block_is_linted():
     assert fairplay.reflex_errors() == []
     doc = json.loads(fairplay.REFLEX_PATH.read_text(encoding="utf-8"))
-    assert doc["deadman"] == {"on": True, "timeout_s": 600, "check_s": 5, "grace_s": 60}
+    assert doc["deadman"] == {"on": True, "timeout_s": 180, "max_ticks": 24000, "check_s": 5, "grace_s": 60}
+    assert fairplay.DEADMAN_LIM["max_ticks"] == (0, 403200) and fairplay.DEADMAN_LIM["timeout_s"][0] == 60
+    lua = (fairplay.REPO / "lua" / "dfllm" / "arbiter.lua").read_text(encoding="utf-8")
+    assert "M.DEADMAN = {on = true, timeout_s = 180, max_ticks = 24000, check_s = 5, grace_s = 60}" in lua
+    assert "max_ticks = {0, 403200}" in lua
+
+
+def test_reflex_deadman_max_ticks_range_is_linted(tmp_path):
+    doc = json.loads(fairplay.REFLEX_PATH.read_text(encoding="utf-8"))
+    doc["deadman"]["max_ticks"] = 500000
+    p = tmp_path / "reflex.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    assert any("deadman.max_ticks" in e for e in fairplay.reflex_errors(p))
+
+
+def test_wake_lint_flags_session_off_with_deadman_on(tmp_path):
+    w = tmp_path / "wake.json"
+    w.write_text(json.dumps({"v": 2, "session": {"on": False}}), encoding="utf-8")
+    r = tmp_path / "reflex.json"
+    r.write_text(json.dumps({"v": 2, "deadman": {"on": True}}), encoding="utf-8")
+    assert any("session.on false" in e for e in fairplay.wake_errors(w))
+    r.write_text(json.dumps({"v": 2}), encoding="utf-8")          # deadman missing = default ON: still a conflict
+    assert any("session.on false" in e for e in fairplay.wake_errors(w))
+    r.write_text(json.dumps({"v": 2, "deadman": {"on": False}}), encoding="utf-8")
+    assert fairplay.wake_errors(w) == []
 
 
 def test_contract_knows_the_dead_man():
@@ -142,6 +166,19 @@ def test_one_key_wakes_once_per_repeat_s(save):
     (save / alarm.CURSOR).write_text(json.dumps(cur), encoding="utf-8")
     append_events(save, [ev(9005, "DECISION_NEEDED", "t", {"id": "thirst_unit", "q": "?"})])
     assert [i["n"] for i in alarm.wait_wake(save, timeout=0, cfg=FAST)[0]] == [9005]
+
+
+def test_repeat_key_names_the_units_a_second_patient_wakes(save):
+    assert alarm.wake_key(ev(1, "PATIENT_DYING", "p", {"units": [7, 3]})) == "PATIENT_DYING@3,7"
+    assert alarm.wake_key(ev(1, "DECISION_NEEDED", "t", {"id": "thirst_unit", "units": [5]})) == "DECISION_NEEDED:thirst_unit@5"
+    assert alarm.wake_key(ev(1, "SIEGE_START", "s", {})) == "SIEGE_START"
+    append_events(save, [ev(9101, "SEASON", "s")])
+    alarm.wait_wake(save, timeout=0, cfg=FAST)
+    append_events(save, [ev(9102, "PATIENT_DYING", "a", {"units": [11], "n": 1})])
+    assert [i["n"] for i in alarm.wait_wake(save, timeout=0, cfg=FAST)[0]] == [9102]
+    append_events(save, [ev(9103, "PATIENT_DYING", "a", {"units": [11], "n": 1}),
+                         ev(9104, "PATIENT_DYING", "b", {"units": [12], "n": 1})])
+    assert [i["n"] for i in alarm.wait_wake(save, timeout=0, cfg=FAST)[0]] == [9104], "another unit wakes, the same is quiet"
 
 
 def test_cursor_far_behind_or_beyond_the_log_starts_at_the_end(save):

@@ -102,6 +102,9 @@ function H.boot(W, opts)
   -- heartbeat's age in real seconds
   if ok and opts.session ~= false and luahost.isdir(W.sd) then
     H.write(W.sd .. '/session.json', json.encode({v = 2, wall = os.time() - (tonumber(opts.session) or 0), by = 'test'}))
+    -- the live session keeps beating while the game runs (deadman.max_ticks counts game ticks since `wall` changed);
+    -- a test that writes its own heartbeats sets W.hb_auto = false
+    W.hb_auto, W.hb_ticks = W.hb_auto ~= false, 0
   end
   return ok, msg
 end
@@ -113,6 +116,13 @@ function H.frame(W, dt, ms)
   if dt > 0 and not g.pause_state then
     g.cur_year_tick = g.cur_year_tick + dt
     while g.cur_year_tick >= 403200 do g.cur_year_tick = g.cur_year_tick - 403200; g.cur_year = g.cur_year + 1 end
+    if W.hb_auto then
+      W.hb_ticks = W.hb_ticks + dt
+      if W.hb_ticks >= 6000 then                 -- a new `wall` (cycling over 30 s: the real clock may not have moved)
+        W.hb_ticks, W.hb_n = 0, ((W.hb_n or 0) + 1) % 30
+        H.write(W.sd .. '/session.json', json.encode({v = 2, wall = os.time() - W.hb_n, by = 'test'}))
+      end
+    end
   end
   W.ms = W.ms + (ms or W.ms_per_frame)
   local r = W.repeats and W.repeats.dfllm

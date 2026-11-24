@@ -12,12 +12,13 @@ arbiter.PROFILE.overlays = true
 
 local W, K
 
-local DM = {v = 2, deadman = {on = true, timeout_s = 600, check_s = 1, grace_s = 0}}
+local DM = {v = 2, deadman = {on = true, timeout_s = 600, max_ticks = 0, check_s = 1, grace_s = 0}}
 
 -- opts: session (false = none, a number = its age in s), paused (a save loaded paused), reflex (K.cfg.reflex)
 local function world(opts)
   opts = opts or {}
   W = H.world{tag = opts.tag or 'deadman', ms_per_frame = 1000}
+  W.hb_auto = false                                   -- this suite writes every heartbeat itself
   dfhack.gui = dfhack.gui or {}
   dfhack.gui.getDFViewscreen = function() return 'df_main' end
   package.loaded.gui = {simulateInput = function(_, key)
@@ -186,6 +187,73 @@ T.test('a whitelisted popup does not unpause the dead-man pause; a threat popup 
   H.run(W, 20, {paused = true})
   T.eq(df.global.pause_state, true)
   T.eq(owner(), 'deadman')
+  T.eq(#ev('ARRIVAL'), 0, 'a migrant notice is no threat')
+  T.eq(#df.global.world.status.popups, 0, 'BUG-794: acknowledged under the deadman pause, the game stays paused')
+  local popups = df.global.world.status.popups
+  popups:insert('#', {text = 'Some migrants have arrived.'})            -- a notice in front of a threat behind it
+  popups:insert('#', {text = 'A vile force of darkness has arrived!'})
+  H.run(W, 20, {paused = true})
+  local a = ev('ARRIVAL')
+  T.eq(#a, 1, 'the threat popup is handed on (no reflex module here: the arbiter fallback emits ARRIVAL)')
+  T.eq(a[1].d.src, 'popup')
+  T.eq(#popups, 0, 'handed on first, then acknowledged like under pause:popup (FR-36 order)')
+  T.eq(df.global.pause_state, true, 'and the game stays paused')
+  T.eq(owner(), 'deadman')
+  kern.stop()
+end)
+
+T.test('the default switch: timeout_s 180 s, max_ticks 24000 (20 game days)', function()
+  T.eq({arbiter.DEADMAN.timeout_s, arbiter.DEADMAN.max_ticks}, {180, 24000})
+  world{session = 100, reflex = {v = 2, deadman = {check_s = 1, grace_s = 0}}}
+  H.run(W, 5)
+  T.eq(owner(), nil, '100 s < 180 s and few ticks')
+  session(200)
+  H.run(W, 5)
+  T.eq(owner(), 'deadman')
+  T.eq(ev('DEADMAN_PAUSE')[1].d.why, 'wall')
+  kern.stop()
+end)
+
+T.test('game-time bound: a fast clock trips max_ticks long before timeout_s; a new heartbeat resets it', function()
+  world{session = 0, reflex = {v = 2, deadman = {timeout_s = 600, max_ticks = 12000, check_s = 1, grace_s = 0}}}
+  H.run(W, 10000, {skip = 500})                       -- 20 frames = 20 real s at 500 ticks/s
+  T.eq(owner(), nil, '10000 ticks <= 12000')
+  session(-1)                                         -- the live session refreshes (a new `wall`): the count starts again
+  H.run(W, 10000, {skip = 500})
+  T.eq(owner(), nil, 'a new wall resets the game-time bound')
+  T.eq(#ev('DEADMAN_PAUSE'), 0)
+  H.run(W, 3000, {skip = 500})                        -- 13000 ticks since the last heartbeat, < 30 real s
+  T.eq(df.global.pause_state, true)
+  T.eq(owner(), 'deadman')
+  local d = ev('DEADMAN_PAUSE')
+  T.eq(#d, 1)
+  T.eq({d[1].d.why, d[1].d.max_ticks}, {'ticks', 12000})
+  T.ok(d[1].d.ticks > 12000 and d[1].d.ticks <= 12500, tostring(d[1].d.ticks))
+  T.ok(d[1].d.age < 600, 'the wall clock bound alone would not have fired')
+  T.ok(d[1].msg:find('10 game days', 1, true), d[1].msg)
+  kern.stop()
+end)
+
+T.test('max_ticks 0: no game-time bound (the wall bound alone)', function()
+  world{session = 0, reflex = {v = 2, deadman = {timeout_s = 600, max_ticks = 0, check_s = 1, grace_s = 0}}}
+  H.run(W, 50000, {skip = 500})
+  T.eq(owner(), nil)
+  kern.stop()
+end)
+
+T.test('a heartbeat dated in the future is no proof of life (fail closed); a small skew is tolerated', function()
+  world{session = -30}                                -- 30 s ahead: tolerated
+  H.run(W, 5)
+  T.eq(owner(), nil)
+  session(-3600)                                      -- an hour ahead: bad clock or writer
+  H.run(W, 5)
+  T.eq(df.global.pause_state, true)
+  T.eq(owner(), 'deadman')
+  local d = ev('DEADMAN_PAUSE')
+  T.eq(#d, 1)
+  T.eq(d[1].d.why, 'future')
+  T.ok(d[1].d.age <= -3590, tostring(d[1].d.age))
+  T.ok(d[1].msg:find('in the future', 1, true), d[1].msg)
   kern.stop()
 end)
 

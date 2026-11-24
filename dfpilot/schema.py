@@ -506,9 +506,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # when it carries a threat or curse word (`resume` refuses it, the player clicks it away)
     "PAUSED_BY_DF": ("A", "arbiter", _d("by:s min:i", "popup:s deny:i")),
     # Neuausrichtung 1 / P3 (docs/v2/NEU1-wecken.md): the dead-man switch paused the game: no live session wrote
-    # <save>/session.json for `age` real seconds (-1: none since the kernel booted) > reflex.json deadman.timeout_s;
+    # <save>/session.json for `age` real seconds (-1: none since the kernel booted) > reflex.json deadman.timeout_s, or the
+    # game ran `ticks` ticks without a new heartbeat > max_ticks; why = wall | ticks | missing | future (dated > 60 s ahead);
     # by = the command that wrote the last heartbeat, took = the owner of the pause it took over (inbox)
-    "DEADMAN_PAUSE": ("A", "arbiter", _d("age:i timeout:i", "by:s mode:s took:s")),
+    "DEADMAN_PAUSE": ("A", "arbiter", _d("age:i timeout:i", "by:s mode:s took:s why:s ticks:i max_ticks:i")),
     # Run 11: mat = why economy cannot make a seal's missing pieces ('no material for door: no rock, no logs');
     # walled = the seal doors quickfort refused (no wall beside them) that the runner planned as walls ('x,y,z')
     # BUG-037: park = days a project blocked for good stood before it was parked (its cancel command is in msg)

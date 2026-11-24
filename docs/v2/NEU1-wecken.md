@@ -2,7 +2,8 @@
 
 Plan: `leitung/PLAN-NEUAUSRICHTUNG.md` P3, success measure "0 game days without a session; a wake under 60 s".
 BUG numbers: BUG-791 (follow died on an OSError in its sleep), BUG-792 (`wait` woke only on interrupts),
-BUG-793 (follow had no memory bound).
+BUG-793 (follow had no memory bound), BUG-794 (under a kernel-owned pause a whitelisted popup hid a threat popup
+queued behind it from the reflex).
 
 ## 1. Old decision
 
@@ -30,15 +31,18 @@ their FR-53 path unchanged (alarm.txt, unacked items).
   the player is busy between two waits is reported at the next call (not lost, not after a timeout). First use, a
   cursor beyond the log (an older save loaded) or a cursor more than `wait.backlog` events behind starts at the end of
   the log (no replay of history).
-* One key (`type`, plus `d.id` of a decision) wakes at most once per `wait.repeat_s` (300 s = one play-loop timeout):
-  a standing emergency the kernel re-emits wakes as often as a timeout would, never in a busy loop.
+* One key (`type`, plus `d.id` of a decision, plus the sorted unit ids of `d.units` / `d.unit`) wakes at most once per
+  `wait.repeat_s` (300 s = one play-loop timeout): a standing emergency the kernel re-emits for the same unit wakes as
+  often as a timeout would, never in a busy loop; a second PATIENT_DYING or thirst_unit for ANOTHER unit within 5 min
+  wakes at once (round 2 fix: before, the per-type key swallowed it).
 * Synthetic wake reasons, checked at every poll (same repeat rule):
   `DEADMAN` (the kernel paused the game because no session lived: the reply is `dfllm cmd resume`),
   `FOLLOW_OFF` (follow does not beat for this save: restart it), `KERNEL_STALE` (the kernel heartbeat is older than
   `wait.kernel_stale_s`: DF hangs or is closed).
 * Output: one line per wake reason (at most 8, then `+N more: dfllm events --cls A --since X`), each with the
   `next:` hint follow uses (`wake.next_hint`), exit 0; a timeout prints the old line and exits 1.
-* `wait` writes the session heartbeat at start and every 30 s while it blocks (a session inside `wait` is alive).
+* `wait` writes the session heartbeat at start and every 10 s while it blocks (a session inside `wait` is alive; 10 s
+  is at most 10,000 ticks even at 1,000 ticks/s, well under `deadman.max_ticks`).
 
 Wake classes before / after (class A types of `schema.EVENTS`):
 
@@ -56,9 +60,14 @@ repeat rule; the repeat rule caps a chronic re-emit (patient_thirst x486 in Whir
   `{v:2, wall, by, pid}` (`dfpilot/session.py touch`). Not written by `follow`, `supervise`, `status`, `events`,
   `doctor` (background processes and a supervisor's look must not keep a fort alive) and never with
   `DFLLM_NO_SESSION=1`.
-* **Kernel:** the arbiter (sole writer of pause) reads the file every `deadman.check_s` (5 s). Session age >
-  `deadman.timeout_s` (600 s; a missing file counts as stale, after a boot grace of `deadman.grace_s` 60 s) and the game
-  runs (or only the inbox's own TTL pause holds it) -> pause, owner `deadman`, DEADMAN_PAUSE (class A, once per stale
+* **Kernel:** the arbiter (sole writer of pause) reads the file every `deadman.check_s` (5 s). The session counts as
+  dead (`why` in DEADMAN_PAUSE) when: its age > `deadman.timeout_s` (180 s real, `wall`); or the game ran more than
+  `deadman.max_ticks` (24,000 = 20 game days) since the kernel last saw `wall` change (`ticks`: the bound in GAME time,
+  independent of the speed: at 500 ticks/s it fires after 48 s, at 50 ticks/s the 180 s fire first after 9,000 ticks);
+  or the file is missing (`missing`, after a boot grace of `deadman.grace_s` 60 s); or `wall` lies more than 60 s in
+  the future (`future`: clock skew or a bad writer is no proof of life, fail closed; a negative age used to count as
+  live forever). The tick count restarts when an older save is loaded (tick goes backwards). When that holds and the
+  game runs (or only the inbox's own TTL pause holds it) -> pause, owner `deadman`, DEADMAN_PAUSE (class A, once per stale
   heartbeat). **Pause only:** it never unpauses, never saves, never kills. A pause somebody else owns (`df` after a
   load, `popup`, `gordon`) is left as it is and not claimed; when that pause ends while the session is still dead the
   dead-man pauses then. After a dead-man pause the next fire needs a newer heartbeat: if a human unpauses the
@@ -70,9 +79,10 @@ repeat rule; the repeat rule caps a chronic re-emit (patient_thirst x486 in Whir
 * **Interactions (analysed, tested):** load pause (`df`, set in `init`): the dead-man does nothing while it stands;
   `resume` (a session) releases it. Siege: there is no siege pause in the kernel (the reflex lowers the clock only);
   the dead-man pause also holds in SIEGE/BREACH (a paused siege kills nobody). Inbox `pause` TTL: a dead-man fire takes
-  the hold over (the TTL expiry would otherwise unpause). Popups: while `deadman`/`park` own the pause,
-  pause_state is true, so whitelisted popups are not dismissed-and-unpaused; threat popups are still announced to the
-  reflex. follow's TICK_STALL / PAUSED_BY_DF treat `deadman` and `park` like the player's own pause (no wake);
+  the hold over (the TTL expiry would otherwise unpause). Popups (BUG-794): while `deadman`/`park` own the pause, a whitelisted popup is acknowledged
+  but the game is NOT unpaused (before, it stayed on the screen and hid a threat popup queued behind it from the
+  reflex); a threat popup is handed to the reflex first (FR-36 order; without the reflex module the arbiter's fallback
+  emits ARRIVAL) and the pause stays `deadman`. follow's TICK_STALL / PAUSED_BY_DF treat `deadman` and `park` like the player's own pause (no wake);
   `supervise` honours any pause (no restart while paused), unchanged.
 
 ### 2c. Bounded follow (`dfpilot/wake.py run`, config `config/wake.json` `follow`)
@@ -90,9 +100,13 @@ repeat rule; the repeat rule caps a chronic re-emit (patient_thirst x486 in Whir
 
 * `config/wake.json` `wait`: `act` (true; false = the old interrupts-only wait), `repeat_s` (300), `backlog` (2000),
   `kernel_stale_s` (120), `follow_check` (true), `quiet_types`, `quiet_decisions`.
-* `config/wake.json` `session`: `on` (true; false = no session.json written).
+* `config/wake.json` `session`: `on` (true; false = no session.json written). `lint --config` (fairplay.wake_errors)
+  reports `session.on` false while `reflex.json deadman.on` is true (or missing = default on): that pair pauses every
+  live session.
 * `config/wake.json` `follow`: `restart` (true), `max_rss_mb` (400), `max_hours` (12).
-* `config/reflex.json` `deadman`: `on` (true), `timeout_s` (600), `check_s` (5), `grace_s` (60).
+* `config/reflex.json` `deadman`: `on` (true), `timeout_s` (180, 60-86400), `max_ticks` (24000, 0-403200; 0 = no
+  game-time bound), `check_s` (5), `grace_s` (60). Same limits in `arbiter.lua M.DEADMAN_LIM` and
+  `fairplay.DEADMAN_LIM`.
 
 ## 4. Deliberately not done
 
@@ -110,31 +124,43 @@ repeat rule; the repeat rule caps a chronic re-emit (patient_thirst x486 in Whir
 * follow's own synthetic wakes (AUTO_FAIL, QUICKSAVE_FAILED, NEEDS_CLICK, SUPERVISE, PLAN_AUTO, PROJECT_STALE) are not
   routed into `wait`; only the three listed above are checked by `wait` itself. follow's stdout rate limits stay.
 * The dead-man never unpauses; the session must `dfllm cmd resume`. No auto-resume when a session comes back.
+* `max_ticks` is 24,000 (20 days), not the 12,000 (10 days) the verifier suggested: a live player between two dfllm
+  calls (thinking, writing a plan file) is not inside `wait`, and at 500 ticks/s 12,000 ticks are 24 s, which would
+  pause most live turns of a small fast fort. 20 days is 48 s at 500 ticks/s; such a pause is harmless (`wait` names it,
+  `dfllm cmd resume`). Tune it in reflex.json once live logs show the real gap between calls.
 * The playloop/PLAYBOOK text (Leitung's job) is not changed here; it should say: after a wake, act on the named line;
   `dfllm cmd resume` after DEADMAN; `dfllm cmd park` before a deliberate stop.
 
 ## Tests
 
-* `tests/lua/test_neu1_deadman.lua` (11): stale / fresh / missing heartbeat, `on` false, resume by a live session, inbox
+* `tests/lua/test_neu1_deadman.lua` (15): stale / fresh / missing heartbeat, `on` false, resume by a live session, inbox
   resume re-arms, a human unpause is not fought, load pause (df) left alone, Gordon's pause left alone, inbox TTL hold
-  taken over, whitelisted popup does not unpause, park (15 min without any wake) and resume.
-* `tests/test_neu1_wecken.py` (21): session heartbeat and switches, which commands write it, config/lint, contract,
+  taken over, whitelisted popup acknowledged without unpause and a threat popup behind it handed on (ARRIVAL, BUG-794),
+  park (15 min without any wake) and resume; round 2: the defaults (180 s / 24000), the game-time bound (a 500 ticks/s
+  clock trips max_ticks 12000 in < 30 real s, a new `wall` resets it), max_ticks 0, a future-dated heartbeat (60 s
+  tolerated, an hour ahead fires `why` future).
+* `tests/test_neu1_wecken.py` (24; round 2: deadman defaults Lua = JSON = fairplay, max_ticks lint, session/deadman
+  conflict lint, unit-aware repeat key): session heartbeat and switches, which commands write it, config/lint, contract,
   class list (every class-A type is waking or quiet), wake within a second, quiet types/decisions, cursor between waits,
   repeat rule, cursor far behind, DEADMAN / FOLLOW_OFF / KERNEL_STALE, CLI line + cli.log, `act` false, bounded cursor,
   status lines, sleep error (BUG-791), restart_why / rss, hand-over to a copy and failed copy (BUG-793).
-* Test harness: `tests/lua/kern_world.lua H.boot` writes a fresh session.json (a live session); `k_mock` turns the
+* Test harness: `tests/lua/kern_world.lua H.boot` writes a fresh session.json (a live session) and `H.frame` writes a new `wall` every 6,000 game ticks (`W.hb_auto`, off in the dead-man suite); `k_mock` turns the
   dead-man off unless a test sets `reflex.deadman`.
 
 ## 5. Live-Erwartung
 
-1. After a session ends (no `wait`/`brief`/`cmd` for 10 real minutes) `events --type DEADMAN_PAUSE` shows one event and
-   the heartbeat says `paused` with `owners.pause` `deadman`; the game tick does not move until a `dfllm cmd resume`.
-   Overnight runs show 0 game days between the last session command and the dead-man pause beyond ~10 min of play.
+1. After a session ends, `events --type DEADMAN_PAUSE` shows one event within 180 real s or 24,000 game ticks of the
+   last session command, whichever comes first (`d.why` wall or ticks, `d.ticks` <= 24,000 + check_s x ticks/s, i.e.
+   at most ~22 game days at 500 ticks/s); the heartbeat says `paused` with `owners.pause` `deadman`; the game tick does
+   not move until a `dfllm cmd resume`. Overnight runs: the tick of DEADMAN_PAUSE minus the tick of the last cli.log
+   session command is below 26,500 (22 game days); no death in that gap beyond what was already dying.
 2. A MOOD_CRITICAL / PATIENT_DYING / DECISION_NEEDED thirst_unit event in events.jsonl is followed by a `wait` return
    naming it within seconds (cli.log `wait` line with the event n); the player's STAND/commands show the reaction in
    the same minute, not 5 minutes later.
 3. `wait` does not return more than once per 5 minutes for the same key (no wait storms in cli.log).
 4. A follow running more than 12 h restarts itself (`follow: restart` in cli.log and follow.log) instead of dying with
    MemoryError / WinError 1450; `status` never shows `follow: OFF` for longer than a minute because of it.
-5. `dfllm cmd park` leaves the fort paused (owner `park`) for hours with no PAUSED_BY_DF, no DECISION_NEEDED pause and no
+5. A live player who loops in `wait` gets no DEADMAN_PAUSE with `why` ticks while waiting (session.json `wall` moves
+   every 10 s); DEADMAN_PAUSE during play comes only after a gap between dfllm calls, and `why` future never appears.
+6. `dfllm cmd park` leaves the fort paused (owner `park`) for hours with no PAUSED_BY_DF, no DECISION_NEEDED pause and no
    DEADMAN_PAUSE; `dfllm cmd resume` runs it again.

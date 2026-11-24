@@ -107,10 +107,13 @@ M.PU_MAX = 64              -- texts of unclassified popups remembered for the lo
 -- the verb; max_popups = popups one use may read and dismiss
 M.RESUME = {wake_min = 5, gap_s = 60, max_popups = 8}
 -- Neuausrichtung 1 / P3 (config/reflex.json `deadman`): on = pause the game when the session heartbeat (<save>/session.json
--- `wall`, written by dfllm wait/brief/cmd/ack/plan/next) is older than timeout_s real seconds or missing; read every check_s
--- s; nothing fires in the first grace_s s after the module started (a session that just loaded the save)
-M.DEADMAN = {on = true, timeout_s = 600, check_s = 5, grace_s = 60}
-M.DEADMAN_LIM = {timeout_s = {60, 86400}, check_s = {1, 300}, grace_s = {0, 3600}}
+-- `wall`, written by dfllm wait/brief/cmd/ack/plan/next) is older than timeout_s real seconds, or the game ran more than
+-- max_ticks game ticks since `wall` last changed (0 = no game-time bound), or the file is missing or dated more than
+-- FUTURE_S s in the future (bad data: fail closed); read every check_s s; nothing fires in the first grace_s s after the
+-- module started (a session that just loaded the save)
+M.DEADMAN = {on = true, timeout_s = 180, max_ticks = 24000, check_s = 5, grace_s = 60}
+M.DEADMAN_LIM = {timeout_s = {60, 86400}, max_ticks = {0, 403200}, check_s = {1, 300}, grace_s = {0, 3600}}
+M.DEADMAN_FUTURE_S = 60
 M.SESSION_FILE = 'session.json'
 M.DEPOT_POPUP = 'need a trade depot'   -- a caravan popup that is also the NO_DEPOT interrupt (FR-43/53)
 M.FALLBACK_TICKS = 4800
@@ -711,7 +714,11 @@ local function track_pause(K)
   -- live L6 (Perplexrooms): adopt paused the fort, the arrival popup came on top and was then held as
   -- Gordon's pause; with pause_state off, only the popup holds the clock, so a whitelisted one goes too
   local popup_only = popup_count() > 0 and df.global.pause_state ~= true and not st.hold
-  if st.pause_by == 'popup' or popup_only or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0) then
+  -- BUG-794: under the kernel's own deadman / park pause a whitelisted popup is acknowledged too (the game stays paused),
+  -- else it stands in front of a threat popup queued behind it and that threat is never handed to the reflex
+  local own = st.pause_by == 'deadman' or st.pause_by == 'park'
+  if st.pause_by == 'popup' or popup_only or (st.pause_by == 'inbox' and not st.hold and popup_count() > 0)
+     or (own and popup_count() > 0) then
     local kind, text = popup_kind()
     if not kind then kind, text = other_popup(K) end            -- FR-75: unknown text, only with popups.other
     if kind and K.act.dismiss_popup(kind) then
@@ -721,7 +728,7 @@ local function track_pause(K)
                {id = 'berserk', q = text:sub(1, 120) .. ' The fort runs on; citizens and soldiers deal with it. ' ..
                                     'Bury the body at once (ghost risk).'})
       end
-      if popup_count() == 0 then K.act.set_paused(false) end
+      if popup_count() == 0 and not own then K.act.set_paused(false) end
     end
   end
   paused_by_df(K, now)
@@ -752,7 +759,17 @@ local function deadman(K, now)
   local doc = save and fio.read_json(save .. '/' .. M.SESSION_FILE)
   local wall = type(doc) == 'table' and int(doc.wall) or nil
   local age = wall and (now.wall - wall) or nil
-  if age and age <= c.timeout_s then st.dm_fired = nil; return end
+  if wall ~= st.dm_wall or not st.dm_tick or now.tick < st.dm_tick then   -- a new heartbeat (or an older save loaded)
+    st.dm_wall, st.dm_tick = wall, now.tick
+  end
+  local ran = now.tick - st.dm_tick                       -- game ticks since `wall` last changed
+  local why
+  if not wall then why = 'missing'
+  elseif age < -M.DEADMAN_FUTURE_S then why = 'future'    -- a clock skew or a bad writer: no proof of life
+  elseif age > c.timeout_s then why = 'wall'
+  elseif c.max_ticks > 0 and ran > c.max_ticks then why = 'ticks'
+  end
+  if not why then st.dm_fired = nil; return end
   local key = wall or -1
   if st.dm_fired == key then return end                   -- fired for this heartbeat already
   local paused = observe(K)
@@ -769,12 +786,22 @@ local function deadman(K, now)
   st.dm_fired = key
   st.pause_by, st.pause_since, st.asked, st.pdf_told = 'deadman', now.ms, false, nil
   pause_event(K, true, 'deadman')
-  local d = {age = age and int(age) or -1, timeout = c.timeout_s, mode = K.mode()}
+  local d = {age = age and int(age) or -1, timeout = c.timeout_s, mode = K.mode(), why = why, ticks = int(ran),
+             max_ticks = c.max_ticks}
   if type(doc) == 'table' and type(doc.by) == 'string' then d.by = doc.by:sub(1, 24) end
   if took then d.took = took end
-  K.emit('DEADMAN_PAUSE', 'A', age and string.format('dead-man pause: no live session for %d s (> %d s): dfllm cmd resume',
-         int(age), c.timeout_s) or string.format('dead-man pause: no live session since the kernel started (> %d s): '
-         .. 'dfllm cmd resume', c.timeout_s), d)
+  local msg
+  if why == 'missing' then
+    msg = string.format('dead-man pause: no live session since the kernel started (> %d s)', c.timeout_s)
+  elseif why == 'future' then
+    msg = string.format('dead-man pause: session heartbeat dated %d s in the future (bad clock or writer)', -int(age))
+  elseif why == 'ticks' then
+    msg = string.format('dead-man pause: the game ran %d ticks (> %d, %d game days) without a new session heartbeat',
+                        int(ran), c.max_ticks, c.max_ticks // 1200)
+  else
+    msg = string.format('dead-man pause: no live session for %d s (> %d s)', int(age), c.timeout_s)
+  end
+  K.emit('DEADMAN_PAUSE', 'A', msg .. ': dfllm cmd resume', d)
 end
 
 ---------------------------------------------------------------- module
