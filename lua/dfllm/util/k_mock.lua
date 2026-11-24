@@ -547,11 +547,6 @@ function M.new(opts)
   K.plan = with_defaults(opts.plan)
   function W.set_plan(plan) K.plan = with_defaults(plan) end
   local cfg = opts.cfg or {}
-  -- Neuausrichtung 1 / P3: the mock world has no player session file; the arbiter's dead-man switch is off here unless a
-  -- test sets reflex.deadman itself (tests/lua/test_neu1_deadman.lua runs it on the real kernel)
-  local reflex = {}
-  for k, v in pairs(cfg.reflex or {v = 2}) do reflex[k] = v end
-  if reflex.deadman == nil then reflex.deadman = {on = false} end
   local decisions = {}
   for k, v in pairs(C.DECISIONS) do decisions[k] = v end
   -- NEU1 (P5 Tore): a test file written for the gate rules before Neuausrichtung 1 sets KMOCK_LEGACY_GATES = true: D-14 down and the
@@ -565,6 +560,12 @@ function M.new(opts)
     end
   end
   for k, v in pairs(cfg.decisions or {}) do decisions[k] = v end
+  -- Neuausrichtung 1 / P3: the mock world has no player session file; the arbiter's dead-man switch is off here unless a
+  -- test sets reflex.deadman itself (tests/lua/test_neu1_deadman.lua runs it on the real kernel);
+  -- copied after the P5 legacy-gate block above, which may create cfg.reflex itself
+  local reflex = {}
+  for k, v in pairs(cfg.reflex or {v = 2}) do reflex[k] = v end
+  if reflex.deadman == nil then reflex.deadman = {on = false} end
   K.cfg = {decisions = decisions,
            allowlist = cfg.allowlist or {v = 2, commands = {}, blocked = {}, armok_exceptions = {}},
            baseline = cfg.baseline or {v = 2}, reflex = reflex,
