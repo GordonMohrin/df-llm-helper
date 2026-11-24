@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 714 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 765 |
+| offen, nie live gesehen | 712 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 763 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
@@ -310,7 +310,6 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/FR-BUGS.md:338` (no verdict word): 00. Hospital-Brunnen 97,101,133 trocken, cistern abgelehnt (BUG-469).
 - BUG-469 `runs/run-16b/FR-BUGS.md:485` (no verdict word): ueber 30000. 'bp.place tpl=cistern site=A108_106_137_1' -> BUG-469 refused (kein erreichbarer Bach >= 8 Tiles);
 - BUG-469 `runs/run-16b/FR-BUGS.md:535` (no verdict word): er, Meldung nennt das ('barrels wanted'). cistern: bp.place BUG-469 refused, 'bp.sites cistern core/refuge' 'no pipe route' (Wasser 40+ Tiles;
-- BUG-469 `runs/run-16b/FR-BUGS.md:581` (no verdict word): '. Trinken bleibt 0 d. bp.place cistern site=S3 abgelehnt: 'BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core ...
 - BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
 - BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
 - BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);
@@ -353,7 +352,6 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-602 `runs/run-16b/FR-BUGS.md:398` (no verdict word): - aqshaft-Ausweich-Sites (BUG-602): 'bp sites aqshaft --fresh' liefert jetzt S1-S3 (68,85/91/93, depth 17);
 - BUG-618 `runs/run-16b/STAND.md:267` (no verdict word): Muboomon kam. Food 0-24 d zyklisch (Kohlblatt ungeniessbar BUG-618 bekannt)
 - BUG-682 `runs/run-16b/FR-BUGS.md:549` (no verdict word): 0 unerreichbare Tote -> Gedenkplatten; 'plan propose' nennt BUG-682 (O1/B1 durch Wand+Tür ersetzt, no_inner/no_outer per Plan nicht behebbar).
-- BUG-682 `runs/run-16b/FR-BUGS.md:573` (no verdict word): fortcore vorn)', aber inspect defense: B1/B2/O1 'replaced' (BUG-682, rebuild how=none, stop_after 2), fortcore st4 haengt 'build_lost at s4.build, missing trap x41' (#23874 y480s0b0, #233
 - BUG-686 `runs/run-16a/FR-BUGS.md:442` (ungesehen): elbst gesiegelt, nur per 'seal at=last close=door' von mir (BUG-686 'seal at=ents selbst' ungesehen).
 - BUG-736 `runs/run-16b/FR-BUGS.md:518` (no verdict word): ei Stein 0 / 501 Logs: noch kein sichtbarer Holzbau-Effekt (BUG-736) - Projekte weiter 'no builder took it'.
 - BUG-751 `runs/run-16c/FR-BUGS.md:441` (beobachte): Zone verblutet/verdurstet). Wirkung der Auftragsstreichung (BUG-751) wird in der Restzeit beobachtet;

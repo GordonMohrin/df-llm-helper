@@ -1312,7 +1312,9 @@ STATE = Obj(
                       # past trade.LEAVE_STALE (their visit is over, `caravan` does not count them)
                       opt={"nb": Arr(Str(maxbytes=24), hi=5), "stale": NAT}),
          # FR-51 clock governor (arbiter): the vanilla FPS cap it drives, the captured original, timestream fps
-         "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)}),
+         "clock": Obj(req={"cap": NAT, "orig": NAT, "ts": Int(-1, 1000), "held": FLAG, "why": Str(maxbytes=24)},
+                      # Neuausrichtung 2: the graphics frame rate now (enabler.gfps, 0 = profile not applied) and the quiet-PEACE target
+                      opt={"gfps": Int(0, 1000), "pt": Int(0, 1000)}),
          # NEU1 P7: the emergency exit while open: its causes (inside, gate, thirst, deaths:<cause>), whole game days left
          "emg": Obj(req={"o": FLAG, "why": Str(maxbytes=60), "left": NAT}),
          # FR-53 interrupt channel (reflex): DEFCON 1 (worst) .. 5, unacked interrupts, last/acked event n

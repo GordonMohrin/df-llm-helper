@@ -145,10 +145,11 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         errs.append(f"{name}: clock must be an object")
     else:
         for k, v in clock.items():
-            if k not in ("siege_cap", "alert_cap", "trade_cap"):
+            lo, hi = CLOCK_LIM.get(k, (None, None))
+            if lo is None:
                 errs.append(f"{name}: clock.{k}: unknown key")
-            elif not is_int(v, 10, 1000):
-                errs.append(f"{name}: clock.{k}: int 10..1000 expected, got {v!r}")
+            elif not is_int(v, lo, hi):
+                errs.append(f"{name}: clock.{k}: int {lo}..{hi} expected, got {v!r}")
     if "hold_quiet_days" in doc and not is_int(doc["hold_quiet_days"], 0, 30):
         errs.append(f"{name}: hold_quiet_days: int 0..30 expected")
     if "predator_near" in doc and not is_int(doc["predator_near"], 0, 400):
@@ -348,7 +349,10 @@ GROWTH_LIM: dict = {"on": "bool", "base": (1, 250), "armed_cap": (1, 250), "read
 SMALL_FIGHT_LIM: dict = {"on": "bool", "max": (1, 10), "armed": (1, 20), "gate": "bool"}
 # Neuausrichtung 1 / P3: arbiter.lua deadman_cfg: the dead-man pause when no live session wrote <save>/session.json
 DEADMAN_LIM: dict = {"on": "bool", "timeout_s": (60, 86400), "max_ticks": (0, 403200), "check_s": (1, 300),
-                     "grace_s": (0, 3600)}
+                     "grace_s": (0, 3600), "min_s": (0, 3600)}
+# arbiter.lua M.CLOCK_LIM (Neuausrichtung 2: gfps and peace_fps join the three caps; invalid = the built-in default)
+CLOCK_LIM: dict = {"siege_cap": (10, 1000), "alert_cap": (10, 1000), "trade_cap": (10, 1000), "gfps": (1, 100),
+                   "peace_fps": (100, 1000)}
 REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve", "growth", "small_fight", "deadman")
 
 
