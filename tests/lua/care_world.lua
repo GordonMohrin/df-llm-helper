@@ -127,6 +127,14 @@ function CW.day(W, n)
   end
 end
 
+-- NEU1 P9: the coffin tests of FR-61 / BUG-126 / BUG-466 test the material rule as it was (wood first, no spare coffins in
+-- stock): they run with coffin_stone_first false and coffin_spare 0 unless they set them (test_neu1_pflege.lua tests the new rule)
+function CW.legacy_coffins(care)
+  local c = {coffin_stone_first = false, coffin_spare = 0}
+  for k, v in pairs(care or {}) do c[k] = v end
+  return c
+end
+
 -- item_flag acts as {id, flag, on}, sorted by id then flag
 function CW.flags(W, flag)
   local r = {}

@@ -39,8 +39,9 @@ def _snap(far=(), sid="s384") -> dict:
 
 
 def test_surface_hospital_template_digs_nothing_and_lists_a_hospital_room():
-    doc = bp.emit("hospital", {"surface": 1}, {"id": "S1", "anchor": [110, 110, Z], "rot": 0})
-    assert [st["mode"] for st in doc["stages"]] == ["build", "zone"] and doc["class"] == "living"
+    doc = bp.emit("hospital", {"surface": 1, "beds": 4}, {"id": "S1", "anchor": [110, 110, Z], "rot": 0})
+    # NEU1 P9: the zone comes first (a piece that cannot be built never keeps the fort without a hospital)
+    assert [st["mode"] for st in doc["stages"]] == ["zone", "build"] and doc["class"] == "living"
     cells = [c for st in doc["stages"] for ch in st["chunks"] for c in ch["cells"]]
     assert [c[3] for c in cells].count("b") == 4 and any("location=hospital" in str(c[3]) for c in cells)
     assert "zones" not in doc["manifest"], "no Z4: nothing is dug"

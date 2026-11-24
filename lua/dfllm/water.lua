@@ -140,6 +140,7 @@ M.DEFAULTS = {
   -- any patient (hysteresis). A patient over dying_thirst (60,000: death follows at ~75,000) is PATIENT_DYING (A), again
   -- only for news and not before dying_every ticks. carers_max 0 switches the scaling off.
   carers_per_patient = 1, carers_min = 2, carers_max = 8, carers_urgent = 2, carers_per_run = 2, carers_hold_days = 14,
+  carers_standing = true,                        -- NEU1 P9: carers_min caregivers while a hospital zone stands, patient or not
   dying_thirst = 60000, dying_every = 2 * DAY,
   -- BUG-104: a GiveWater job that stood open (no worker) this many days is "stuck" in the cause text
   give_stuck_days = 2,
@@ -3092,14 +3093,17 @@ function M.carers(K, c, r, p, now, over, far)
   p.cw = json.object(type(p.cw) == 'table' and p.cw or {})
   local np, have = #r.patients, #r.carers
   local want = 0
-  if np > 0 and c.carers_max > 0 then
+  -- NEU1 P9 (Run 16: patients died of thirst; the carriers came only after a patient lay in bed): while a hospital zone stands,
+  -- carers_min caregivers are a standing precondition (carers_standing), patient or not
+  local standing = c.carers_standing ~= false and #(r.hosp or {}) > 0
+  if (np > 0 or standing) and c.carers_max > 0 then
     want = math.max(c.carers_min, np * c.carers_per_patient)
     if over then want = want + c.carers_urgent end
     if far then want = want + (math.tointeger(c.carers_far) or 0) end        -- BUG-771: the water is far, the round trip is long
     want = math.min(want, c.carers_max)
   end
   local out = {have = have, want = want, idle = r.carers_idle, added = {}, dropped = {}}
-  if np > 0 then p.cw_t = now end
+  if np > 0 then p.cw_t = now end                                 -- the hold counts from the last patient
   local mine = 0
   for sid in pairs(p.cw) do                                       -- a unit that died or left is forgotten
     local u = df.unit.find(math.tointeger(tonumber(sid)) or -1)
@@ -3138,7 +3142,7 @@ function M.carers(K, c, r, p, now, over, far)
         end
       end
     end
-  elseif np == 0 and next(p.cw) and now - (math.tointeger(p.cw_t) or now) >= c.carers_hold_days * DAY then
+  elseif np == 0 and (not standing or have > want) and next(p.cw) and now - (math.tointeger(p.cw_t) or now) >= c.carers_hold_days * DAY then
     local sids = {}
     for sid in pairs(p.cw) do sids[#sids + 1] = sid end
     table.sort(sids)
@@ -4508,6 +4512,47 @@ function M.src_dist(K, x, y, z)
     end
   end
   return best
+end
+
+-- public (NEU1 P9, care's hospital minimum; BUG-823): would this module accept a hospital zone over x,y,z as served? The same test
+-- as remove_dry (served: a wet, non-emergency source within near, BUG-708: none outside the lockdown), so care never draws a
+-- zone this module would remove as dry. {ok = true|false, d = distance to the nearest accepted source (-1: none), near};
+-- nil before the first run (nothing judged: the caller fails closed)
+function M.would_serve(K, x, y, z)
+  local r = st.last
+  if not (r and type(r.sources) == 'table') then return nil end
+  x, y, z = math.tointeger(x), math.tointeger(y), math.tointeger(z)
+  if not (x and y and z) then return nil end
+  local c = M.conf(K)
+  local ok, best = served(K, c, r, {x1 = x, y1 = y, x2 = x, y2 = y, z = z})
+  return {ok = ok == true, d = best and best.d or -1, near = c.near}
+end
+
+-- public (NEU1 P9, BUG-823): may care draw a new hospital zone now? A reason (string) while this module holds the hospital back:
+-- a zone it removed (remove_dry / stall_hospital, p.hrm) or a removal (p.rm) younger than hrm_expire -- hospital.restore draws
+-- those again, care must not undo the remedy (BUG-034/541: without the zone the thirsty patient fetches his own drink) -- or a
+-- patient over patient_thirst now; also before the first run (fail closed). nil: free
+function M.hosp_hold(K)
+  local c, p, now = M.conf(K), pstate(K), K.now().tick
+  for _, e in ipairs(type(p.hrm) == 'table' and p.hrm or {}) do
+    local t = math.tointeger(e.t)
+    if t and now - t < c.hrm_expire then
+      return string.format('water removed hospital zone %s (%s) %d d ago; hospital.restore draws it again', tostring(e.id),
+                           tostring(e.why), (now - t) // DAY)
+    end
+  end
+  local rm = type(p.rm) == 'table' and math.tointeger(p.rm.t) or nil
+  if rm and now - rm < c.hrm_expire then
+    return string.format('water removed hospital zones %d d ago', (now - rm) // DAY)
+  end
+  local r = st.last
+  if not r then return 'no water run yet' end
+  for _, pt in ipairs(r.patients or {}) do
+    if (pt.thirst or 0) > c.patient_thirst then
+      return string.format('patient %s over thirst %d', tostring(pt.id), c.patient_thirst)
+    end
+  end
+  return nil
 end
 
 -- public (BUG-616, siege's STRANDED / stranded_drink): the concrete way to drink for citizens standing at `pos` on a walk group no

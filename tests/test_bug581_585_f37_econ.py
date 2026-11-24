@@ -33,7 +33,7 @@ def _man(**kw) -> dict:
 
 # ---------------------------------------------------------------- BUG-581
 def test_hospital_without_a_bench_has_no_traction_bench_and_keeps_the_rest():
-    full = bp.emit("hospital", {}, {"id": "S1", "anchor": [95, 100, Z], "rot": 0})
+    full = bp.emit("hospital", {"bench": 1}, {"id": "S1", "anchor": [95, 100, Z], "rot": 0})     # NEU1 P9: bench 0 by default
     lean = bp.emit("hospital", {"bench": 0}, {"id": "S1", "anchor": [95, 100, Z], "rot": 0})
 
     def keys(d):

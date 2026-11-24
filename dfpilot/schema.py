@@ -84,6 +84,7 @@ ACT = {
     "workshop_retire": ["economy"],                # BUG-715: a workshop no citizen can reach, beside a reachable one of its type
     "well_remove": ["water"],                      # BUG-541: the dry well the GiveWater carriers stand at (well.retire)
     "hospital_restore": ["water"],                 # BUG-539: the removed hospital zone drawn again at its old location
+    "hospital_zone": ["care"],                     # NEU1 P9: a 1x1 hospital zone over one standing bed near water (care.hosp_min)
     "water_zone": ["water"],                       # BUG-324: a Water Source zone on the water the scan found reachable
     "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
     "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager
@@ -98,7 +99,7 @@ ACT = {
     "cancel_stray_job": ["seal"],                  # BUG-751: one outdoor errand of a citizen whose target lies on a walk group with no drink and food
     "labor_set": ["economy", "seal"],                      # BUG-546/547: Mechanic labor on for one citizen, farming off for the manager
     "construction_remove": ["seal"],              # BUG-479: the refuge plug's walls come down in PEACE
-    "door_forbid": ["reflex", "cavern"],          # FR-98: the sweep's hatch over the cavern shaft
+    "door_forbid": ["reflex", "cavern", "care"],  # FR-98: the sweep's hatch over the cavern shaft; NEU1 P9: a failing mood's room
     "burrow_tiles": ["seal", "runner", "water"],  # BUG-298: runner widens a burrow for a seal piece outside it; BUG-330:
                                                   # water paints its care burrow Pflege+ (exact)
     "popcap": ["readiness"],
@@ -770,6 +771,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "MOOD_START": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
     "MOOD_NEED": ("B", "care", _d(opt="unit:i kind:s need:s ok:f slots:sa")),
     "MOOD_END": ("B", "care", _d(opt="unit:i kind:s need:s ok:f")),
+    # NEU1 P9: op zone (care drew a 1x1 hospital zone over bed `bed` at pos, `d` tiles from accepted water) | gaps (the standing
+    # preconditions changed: gaps = no_zone no_bed no_water no_bucket no_carer, ok 1 = none); patients now
+    "HOSPITAL_MIN": ("B", "care", _d("op:s", "ok:f gaps:sa zone:i bed:i pos:p d:i patients:i")),
+    # NEU1 P9: a failing strange mood's room: op locked (doors forbidden and closed) | sealed (no door, closed room) | open (not
+    # enclosed: why) | busy (other citizens inside) | released (the doors care locked, unlocked again); left = days to insanity
+    "MOOD_CONTAIN": ("B", "care", _d("unit:i op:s", "doors:ia why:s left:i pos:p kind:s n:i")),
     # BUG-016/026: why (failure reason), focus (blocked), ph/ph_ms/ph_act/ph_runs (the phase that ended the attempt: real
     # ms, ms on the module's own clock, runs), left (ticks the caravan still stays, -1 unknown)
     "CARAVAN": ("B", "trade", _d(opt="phase:s ratio:i civ:s why:s focus:s ph:s ph_ms:i ph_act:i ph_runs:i left:i")),
@@ -1179,7 +1186,10 @@ STATE = Obj(
                           "pop": Obj(req={"kids": NAT, "res": NAT, "peak": NAT, "dy": NAT, "waves": NAT, "mig": NAT,
                                           "lastw": Int(-1)}),
                           # FR-83: citizens at stress category 0 (the worst): how many, the first ids and their names
-                          "s0": Obj(req={"n": NAT}, opt={"ids": Arr(NAT, hi=6), "nm": Arr(Str(maxbytes=28), hi=6)})}),
+                          "s0": Obj(req={"n": NAT}, opt={"ids": Arr(NAT, hi=6), "nm": Arr(Str(maxbytes=28), hi=6)}),
+                          # NEU1 P9: the hospital's standing preconditions (ok 1 = none missing; gaps no_zone no_bed no_water
+                          # no_bucket no_carer), the zone care drew over a bed and that bed
+                          "hosp": Obj(req={"ok": FLAG}, opt={"gaps": Arr(Str(maxbytes=16), hi=6), "zone": NAT, "bed": NAT})}),
          # BUG-115: cursed citizens alive (n), of them in were-form now (tf), the first ids (the transformed first), the next
          # full moon (mo = day of the year, 1-based; mi = whole days until it), the cursed who died (dead)
          "curse": Obj(req={"n": NAT, "tf": NAT},

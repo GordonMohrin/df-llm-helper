@@ -384,7 +384,7 @@ WATER_LIM: dict = {
     # BUG-054: caregivers (Orderlies) per patient, the bounds, the urgent extra, the additions a run, the hold in days;
     # the death-risk line of PATIENT_DYING and its cadence
     "carers_per_patient": (0, 10), "carers_min": (0, 20), "carers_max": (0, 40), "carers_urgent": (0, 20), "carers_far": (0, 20), "wz_gain": (0, 200),
-    "carers_per_run": (0, 20), "carers_hold_days": (0, 400), "dying_thirst": _THIRST, "dying_every": _TICKS,
+    "carers_per_run": (0, 20), "carers_hold_days": (0, 400), "carers_standing": "bool", "dying_thirst": _THIRST, "dying_every": _TICKS,
     # BUG-104: a GiveWater job open (no worker) this many game days is 'stuck' in the patient_thirst / PATIENT_DYING cause
     "give_stuck_days": (1, 400),
     # BUG-383: a `noeffect` GiveWater verdict takes up to restale_max carriers off the Orderlies detail for a run, again after restale_every
@@ -542,7 +542,12 @@ CARE_LIM: dict = {
     "stress_high": (1, 100), "stress_days": (1, 400), "stress_every": _TICKS,
     # BUG-115 / FR-83: curses and transformations (lua/dfllm/curse.lua)
     "curse": "bool", "curse_every": _TICKS, "curse_keep": (1, 200), "curse_ids": (1, 8), "curse_moon_cycles": (1, 40),
-    "curse_moon_lead": (0, 30), "curse_trig_win": _TICKS, "s0_ids": (0, 6)}
+    "curse_moon_lead": (0, 30), "curse_trig_win": _TICKS, "s0_ids": (0, 6),
+    # NEU1 P9 (docs/v2/NEU1-pflege.md): the hospital minimum, memorial slabs before the ghost, stone coffins first and in stock,
+    # a failing mood's room locked (days before insanity, tiles read for the room)
+    "hosp_min": "bool", "mem_early": "bool", "mem_wait_days": (0, 400), "coffin_stone_first": "bool", "coffin_spare": (0, 30),
+    "mood_contain": "bool", "mood_contain_days": (0, 60), "mood_contain_max": (10, 2000),
+    "mood_contain_reach": (50, 20000)}
 
 
 def care_errors(path: str | Path | None = None) -> list[str]:
