@@ -75,7 +75,7 @@ T.test('contract: reflex module, door_forbid, ack verb, interrupts are class A, 
   local names = {}
   for _, m in ipairs(C.MODULES) do names[#names + 1] = m.name end
   T.eq({names[4], names[5]}, {'gate', 'reflex'})
-  T.eq(C.ACT.door_forbid, {'reflex', 'cavern', 'care'})   -- FR-98: the cavern sweep's hatch; NEU1 P9: a mood room
+  T.eq(C.ACT.door_forbid, {'reflex', 'cavern', 'care', 'player'})   -- FR-98: the cavern sweep's hatch; NEU1 P9: a mood room; NEU1 P7: door.lock
   T.eq(C.VERBS.ack.mod, 'reflex')
   for t in pairs(C.INTERRUPTS) do T.eq(C.EVENTS[t].cls, 'A', t) end
   T.eq({C.EVENTS.SIEGE_START.cls, C.EVENTS.INVASION.cls}, {'A', 'A'})

@@ -4039,10 +4039,17 @@ M.on = {
   end,
 }
 
--- inbox `lever` (PEACE only, checked by kern): {bridge, want}
+-- inbox `lever`: {bridge, want}. PEACE; NEU1 P7: in any other mode only while the emergency exit is open (player.open) and
+-- only up (a raise never opens the fort; squad.sortie lowers its own gate). Without the player module: PEACE only (fail closed).
 M.verbs.lever = function(K, args, cmd)
   local b, w = args.bridge, args.want
   if type(b) ~= 'string' or (w ~= 'up' and w ~= 'down') then return false, 'need bridge and want up|down' end
+  local mode = K.mode()
+  if mode ~= 'PEACE' then
+    local okc, open = K.call('player', 'open')
+    if not (okc and open == true) then return false, 'lever not allowed in ' .. mode .. ' (outside PEACE only while the emergency exit is open)' end
+    if w ~= 'up' then return false, 'lever down not allowed in ' .. mode .. ' (the emergency exit opens lever up only; squad.sortie lowers its own gate)' end
+  end
   if w == 'down' and peace_mode(K) ~= 'down' then    -- D-14 up/inner: the operator's planned opening is a window for this bridge
     st.winb[b], dirty = K.now().tick + M.WIN_LEVER, true
   end

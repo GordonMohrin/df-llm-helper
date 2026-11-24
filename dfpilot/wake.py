@@ -196,6 +196,12 @@ NEXT = {"YEAR_REVIEW": "dfllm plan propose y.json, fix its ERROR lines, plan che
                       "the door item is missing; suspendmanager: jobs.release preventblocking=false; DF: the cancel "
                       "reason), a door still unbuilt 2 days later is replaced by a wall (SEAL_WALLED) when the citizens "
                       "keep another way"}
+# NEU1 P7 (decision E5): the emergency exit is open: a critical state held a game day; the tactical verbs work until it ends + grace
+NEXT["EMERGENCY"] = ("act now, the emergency exit is open (d.why; d.until = the abs tick it ends unless the state goes on): "
+                     "dfllm cmd lever bridge=<B> want=up (any mode); squad.station squad=A pos=[x,y,z] (release=true gives it back); "
+                     "squad.sortie; burrow.unit burrow=<name> unit=<id> on=true|false; door.lock door=<id> on=true|false; "
+                     "thirst: water.unstick / well.retire; the kernel does not undo these (holds); then dfllm status")
+URGENT = URGENT | {"EMERGENCY"}
 # FR-86: follow applied a minimal plan itself after plan.stale_apply_years years without a `plan apply`
 NEXT["PLAN_AUTO"] = ("tell Gordon (nobody approved a plan for years; follow applied the minimal one: seal, tombs, hospital, "
                      "food/drink, refuge, no star phase; after each quiet year one phase more, BUG-132; `ERROR held back` "

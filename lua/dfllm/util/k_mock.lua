@@ -6,6 +6,7 @@
 local json = require('dfllm.util.json')
 local C = require('dfllm.util.contract')
 local sched = require('dfllm.util.sched')   -- demotion hysteresis, pacing, fort-size load (shared with kern)
+local holdlib = require('dfllm.util.hold')  -- NEU1 P7: the holds of the player's verbs (as kern's act env)
 
 local M = {}
 local YEAR, SEASON = C.TICKS.YEAR, C.TICKS.SEASON
@@ -488,6 +489,16 @@ function M.new(opts)
       end
       local rec = {fn = fn, args = packn(...), by = current, tick = now.tick, mode = W.mode}
       W.acts[#W.acts + 1] = rec
+      -- NEU1 P7 (as kern's act env): outside a player verb a held object is refused; inside one the successful calls are noted
+      local pm = W.mods.player
+      if not W.in_verb and pm and not pm.disabled and type(pm.M.held) == 'function' then
+        local keys = holdlib.query(fn, rec.args)
+        local v = #keys > 0 and pm.M.held(keys, now.tick) or nil
+        if v then
+          rec.ok, rec.res, rec.held = false, 'held by the player (' .. tostring(v) .. ')', v
+          return false, rec.res
+        end
+      end
       local f = W.act_results[fn]
       local ok, res
       if f then ok, res = f(...)
@@ -495,6 +506,7 @@ function M.new(opts)
       elseif effects[fn] then ok, res = effects[fn](...)
       else ok = true end
       rec.ok, rec.res = ok, res
+      if ok and W.in_verb and W.verb_acts and #W.verb_acts < 20 then W.verb_acts[#W.verb_acts + 1] = {fn = fn, args = rec.args, res = res} end
       return ok, res
     end
   end
@@ -958,7 +970,9 @@ function M.new(opts)
     if not spec then return reply(false, 'unknown verb') end
     if type(args) ~= 'table' then return reply(false, 'args must be an object') end
     if C.VERB_BY[verb] and not C.VERB_BY[verb][cmd.by] then return reply(false, verb .. ' not accepted from ' .. tostring(cmd.by)) end
-    if spec.modes and not spec.modes[W.mode] then return reply(false, verb .. ' not allowed in ' .. W.mode) end
+    local pm = W.mods.player             -- NEU1 P7: the emergency exit lifts the mode list of C.VERB_EMG (as kern)
+    local emg = C.VERB_EMG[verb] and pm and not pm.disabled and type(pm.M.open) == 'function' and select(2, call_in(pm, 'open', pm.M.open)) == true
+    if spec.modes and not spec.modes[W.mode] and not emg then return reply(false, verb .. ' not allowed in ' .. W.mode) end
     if spec.approve and args.approve ~= true then return reply(false, 'approval required') end
     if spec.mod == 'kern' then
       local ok, msg, data = kern_verbs[verb](args)
@@ -970,8 +984,15 @@ function M.new(opts)
     local h = e.M.verbs and e.M.verbs[verb]
     if not h then return reply(false, 'no handler for ' .. verb) end
     local nf = #W.faults
+    W.in_verb, W.verb_acts = verb, {}
     local r = packn(call_in(e, 'verb ' .. verb, h, args, cmd))
+    local acts = W.verb_acts
+    W.in_verb, W.verb_acts = nil, nil
     if #W.faults > nf then return reply(false, 'handler error') end
+    local pm = W.mods.player
+    if r[2] and C.VERB_HOLD[verb] and #acts > 0 and pm and not pm.disabled and type(pm.M.hold_acts) == 'function' then
+      call_in(pm, 'hold', pm.M.hold_acts, acts, verb)
+    end
     return reply(r[2], r[3], r[4]) -- r[1] is the pcall status
   end
 

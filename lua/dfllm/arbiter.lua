@@ -347,6 +347,8 @@ M.clock_cfg = clock_cfg
 local function clamp_why(K)
   local ok, why = K.call('reflex', 'holding', 'clock')
   if ok and type(why) == 'string' and why ~= '' then return why end
+  local okp, pwhy = K.call('player', 'clock')       -- NEU1 P7: the emergency exit is open (config player.slow)
+  if okp and type(pwhy) == 'string' and pwhy ~= '' then return pwhy end
   local fb = st.fb                     -- fail-open: a threat popup while the reflex module was unavailable
   if fb and K.now().tick < fb.until_tick and K.now().tick >= fb.since then return fb.why end
 end

@@ -426,6 +426,10 @@ end
 -- public (runner.cavern_open, readiness): a sweep runs on record id
 function M.running(K, id) return M.RUN[st.ph] == true and st.ph ~= 'close' and st.acc == id end
 
+-- public (K.call; NEU1 P7 BUG-812, player.lua): a running sweep owns its hatch (the player's door.lock never unlocks it then,
+-- and the player module's undo leaves it to the sweep)
+function M.owns_door(K, id) return M.RUN[st.ph] == true and st.hatch ~= nil and st.hatch == id end
+
 -- public (runner's P6 deliverable `sweep`, FR-99): the caverns count as clear (no plugged shaft known, or no beast in sight
 -- at any at the last look, or (review fix) a clean sweep ended once, and no sweep running)
 function M.cleared(K) return not M.RUN[st.ph] and (rt.clr == 1 or st.ok == 1) end
