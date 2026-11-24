@@ -57,6 +57,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("key", help="ws:<id>, order:<id>, job:<id>, a bare id (order, workshop, job), brew, fish, cook or a job type name")
     p.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the kernel's answer")
     p.add_argument("--json", action="store_true", help="print the record as JSON")
+    p.add_argument("--raw", action="store_true",
+                   help="NEU3: the game's own fields without interpretation (inspect what=raw): order:<id> | brew | job:<id> | items:<logs|plants|barrels|VECTOR> | manager | ws:<id>")
     p = sub.add_parser("gamelog", help="BUG-249: lines of <DF>/gamelog.txt, optionally only since this fort's embark")
     p.add_argument("--since-embark", action="store_true",
                    help="only lines after the last embark line (an older fort in the same gamelog is skipped)")
@@ -149,11 +151,18 @@ def why_lines(d: dict) -> list[str]:
     return out
 
 
+def raw_lines(d: dict) -> list[str]:
+    """NEU3: the record of `inspect what=raw` ({kind, key, lines, n, clipped}) as printed lines."""
+    lines = d.get("lines")
+    return [str(x) for x in lines] if isinstance(lines, list) else []
+
+
 def run_why(args, save_dir: Path) -> int:
     from . import files
     from .cmd import fmt_reply, send
+    raw = bool(getattr(args, "raw", False))
     try:
-        cmd_id, reply = send(save_dir, "inspect", {"what": "why", "key": args.key}, by="cli", wait_s=args.wait)
+        cmd_id, reply = send(save_dir, "inspect", {"what": "raw" if raw else "why", "key": args.key}, by="cli", wait_s=args.wait)
     except Exception as e:                       # schema refusal: nothing was sent
         print(f"refused (not sent): {e}")
         return 2
@@ -166,6 +175,10 @@ def run_why(args, save_dir: Path) -> int:
     d = reply.get("data") or {}
     if args.json:
         print(files.dumps(d))
+        return 0
+    if raw:                                  # NEU3: the lines as the kernel printed them, nothing added
+        for ln in raw_lines(d):
+            print(ln)
         return 0
     print(f"why {args.key}: {reply.get('msg', '')}")
     for ln in why_lines(d):

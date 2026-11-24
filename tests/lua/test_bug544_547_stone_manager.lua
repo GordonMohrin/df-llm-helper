@@ -49,7 +49,9 @@ local function world(opts)
   local ctl = {labor = {}}
   local units = {}
   for i = 1, 20 do units[i] = {id = i, citizen = true, name = 'Urist ' .. i} end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units}
+  local base = F.cfg()
+  if opts.diag then base.economy.diag = opts.diag end                -- NEU3: the manager's other chores are a switch (economy.diag.mgr_chores)
+  local W = F.world{cfg = {baseline = base}, units = units}
   add_jobs({'ConstructBuilding', 'Dig', 'MakeWeapon', 'HarvestPlants'})
   df.unit_labor = {PLANT = 7, MECHANIC = 8, [7] = 'PLANT', [8] = 'MECHANIC'}
   local ids = {}
@@ -293,6 +295,29 @@ T.test('BUG-648: soft stone (no ITEMS_HARD) stays out: the question comes, the f
   days(W, 1)
   T.eq(#decisions(W, 'no_hard_stone'), 1)
   T.eq(tonumber(df.global.plotinfo.economic_stone[7]), 1)
+end)
+
+T.test('BUG-837 (Run 17 i1 Diedplank, i2 Whirledrampart: the manager spun, processed plants and carried water): every chore that keeps him from the office ' ..
+       'goes off with the unvalidated orders, once a day', function()
+  local W, ctl = world{unval = 3, logs = 30, diag = {mgr_chores = true}}
+  df.unit_labor.SPINNER, df.unit_labor[9] = 9, 'SPINNER'
+  df.unit_labor.PROCESS_PLANT, df.unit_labor[10] = 10, 'PROCESS_PLANT'
+  df.unit_labor.FEED_WATER_CIVILIANS, df.unit_labor[11] = 11, 'FEED_WATER_CIVILIANS'
+  W.act_result('labor_set', function(id, which, on)
+    ctl.labor[#ctl.labor + 1] = {id = id, which = which, on = on}
+    local l = {farm = 7, spin = 9, process = 10, feed_water = 11}
+    if l[which] then W.unit(id).status.labors[l[which]] = false end
+    return true, on and 'enabled' or 'disabled'
+  end)
+  for _, l in ipairs({9, 10, 11}) do W.unit(2).status.labors[l] = true end
+  days(W, 3)
+  local got = {}
+  for _, e in ipairs(ctl.labor) do got[e.which] = true; T.eq(e.id, 2); T.eq(e.on, false) end
+  T.ok(got.farm and got.spin and got.process and got.feed_water, T.show(ctl.labor))
+  -- inspect manager names any other chore
+  W.unit(2).job = {current_job = {id = 78, job_type = df.job_type.Dig}}
+  local r = W.inbox('inspect', {what = 'manager'})
+  T.ok(r.ok and tostring(r.msg):find('he works as Dig while', 1, true) ~= nil, T.show(r))
 end)
 
 T.done()
