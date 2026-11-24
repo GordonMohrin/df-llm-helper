@@ -646,7 +646,30 @@ function J.conditions(o, ctx)
           if not skip and item_fits(c, item) then n = n + (int(pget(function() return item:getStackSize() end)) or 1) end
         end
       end)
-      if okscan then e.n, e.met = n, f(n, val); e.text = e.text .. string.format(': %d found', n) end
+      if okscan then
+        e.n, e.met = n, f(n, val); e.text = e.text .. string.format(': %d found', n)
+        -- BUG-836 retry: a scan that finds none where the census holds many is not a proof (Run 17: 'plant (DRINK_MAT) x1: 0 match' beside 6,932)
+        local cens = J.census_count(ctx and ctx.inv, {what = what:lower() .. (rp and tostring(rp):find('DRINK_MAT', 1, true) and ' DRINK_MAT' or '')})
+        if n == 0 and (cens or 0) >= 10 then
+          e.met, e.cens = nil, cens
+          e.text = e.text .. string.format(' (census holds %d: the scan may be wrong)', cens)
+        end
+      end
+    elseif it < 0 then
+      -- 'empty food_storage' (the kernel's own brew condition has no item_type): read against the census empties
+      local f1, f3 = pget(function() return c.flags1 end), pget(function() return c.flags3 end)
+      local empty = f1 and pget(function() return f1.empty end) == true
+      local store = f3 and pget(function() return f3.food_storage end) == true
+      local inv = ctx and ctx.inv
+      if empty and store and f and type(inv) == 'table' then
+        local ce = int(inv.cont_free) or int(inv.barrels_empty)
+        if ce then
+          e.text = 'AtLeast ' .. tostring(val) .. ' empty food storage item'
+          e.cens = ce
+          -- the census count is what we have; DF counts its own way, so it is a hint, never a met / unmet verdict
+          e.text = e.text .. string.format(': %d empty by the census (DF counts its own way)', ce)
+        end
+      end
     end
     out[#out + 1] = e
   end

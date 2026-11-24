@@ -273,6 +273,28 @@ T.test('BUG-836 i2: a scan that finds 0 plants where the census holds 6932 says 
   T.eq(r.cause, 'no_input', 'without a census the old answer')
 end)
 
+T.test('BUG-836 retry: a condition counted 0 by the scan while the census holds 6978 is not proven; empty food_storage is read against the census', function()
+  local W = jw_world()
+  local b = F.workshop(W, 'Still')
+  b.x1, b.y1, b.x2, b.y2, b.z, b.centerx, b.centery = 20, 20, 22, 22, 100, 21, 21
+  b.jobs = kmock.vec{}
+  b.profile = {max_general_orders = 10, permitted_workers = kmock.vec{}, min_level = 0, max_level = 3000}
+  W.unit(1).status.labors[BREWER] = true
+  local o = F.order(W, {job_type = df.job_type.CustomReaction, reaction_name = 'BREW_DRINK_FROM_PLANT', amount_left = 5, amount_total = 5, mat_type = -1,
+                        mat_index = -1, workshop_id = -1,
+                        item_conditions = kmock.vec{{compare_type = 'AtLeast', compare_val = 2, item_type = df.item_type.PLANT, flags1 = {unrotten = true},
+                                                     has_material_reaction_product = 'DRINK_MAT'},
+                                                    {compare_type = 'AtLeast', compare_val = 1, item_type = -1, flags1 = {empty = true}, flags3 = {food_storage = true}}}})
+  local JW = fresh('jobwhy')
+  local r = JW.find(W.K, 'order:' .. o.id, {inv = I2})
+  T.ok(r.cause ~= 'cond_unmet', 'the scan found 0, the census 6978: ' .. r.text)
+  T.ok(not JW.proven(r), 'not a proven cause: ' .. r.text)
+  T.ok(r.text:find('census holds 6978', 1, true), r.text)
+  T.ok(r.text:find('empty by the census', 1, true), 'the empty storage condition is read: ' .. r.text)
+  r = JW.find(W.K, 'order:' .. o.id, {})
+  T.eq(r.cause, 'cond_unmet', 'without a census the scan counts: ' .. r.text)
+end)
+
 T.test('BUG-837: an unvalidated order names what the manager does (a carer), whatever his chore', function()
   local W = jw_world()
   local b = F.workshop(W, 'Still')

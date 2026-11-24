@@ -19,3 +19,6 @@ Module: `lua/dfllm/jobwhy.lua` (`J.labors`, `J.conditions`, `J.census_count`, `J
 1. `dfpilot why order:ID` for a MakeBarrel order names `nobody holds the CARPENTER labor` or the holder states (free / busy / burrow).
 2. `dfpilot why brew` on an i2-like state: either `scan_unreliable` (the scan is wrong: fix `item_fits` / SKIP next) or a real blocker with counts.
 3. A brew order with a condition names the unmet one with the number found.
+
+## Hypothese, nicht bewiesen (Retry)
+Die Container-Ursache (zu wenige freie leere Faesser; Lebendstand: i2 7 leere, i1 3) ist eine Hypothese. DFs eigene Zaehlung der leeren Lagerstuecke ist in keinem Log zu sehen; ob max_barrels die Plant-Piles wirklich trifft und ob neue Faesser frei bleiben, ist live ungeprueft. jobwhy liest Bedingungen gegen den Zensus und meldet "Scan kann falsch liegen" statt einer bewiesenen Ursache, wenn der Scan 0 findet und der Zensus >=10 hat. Die Stall-Zeile sagt "by my count".

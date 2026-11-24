@@ -20,3 +20,6 @@ Confirmed from the live logs: (1) BUG-779's verdict `nobarrel` needs `cont_free 
 1. On a fort like i1/i2 the next brew stall line says `no empty barrel or pot for a brew (... unchanged for N days: DF takes none of them)` instead of `the manager gave no Still a job`, and kern.log has `brew stall: stockpile N (name) takes no new barrel: limit A -> B` (that line also tells the live `max_barrels` semantics).
 2. Within 10 game days after that line `cont_free` (census / `inspect census`) rises to at least the reserve (8 for 32 brews) and stays (empty barrels are no longer refilled with plants); `drink_d` rises.
 3. If after 10 days the freeze line exists but empties still do not stay: `max_barrels` is not the lever; read the pile with `dfpilot why brew` and the jobwhy facts (BUG-836).
+
+## Hypothese, nicht bewiesen (Retry)
+Die Container-Ursache (zu wenige freie leere Faesser; Lebendstand: i2 7 leere, i1 3) ist eine Hypothese. DFs eigene Zaehlung der leeren Lagerstuecke ist in keinem Log zu sehen; ob max_barrels die Plant-Piles wirklich trifft und ob neue Faesser frei bleiben, ist live ungeprueft. jobwhy liest Bedingungen gegen den Zensus und meldet "Scan kann falsch liegen" statt einer bewiesenen Ursache, wenn der Scan 0 findet und der Zensus >=10 hat. Die Stall-Zeile sagt "by my count".

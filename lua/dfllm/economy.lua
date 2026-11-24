@@ -11111,6 +11111,7 @@ function M.brew_watch(K, c, r)
   if jw then
     K.log('info', 'jobwhy brew: %s', M.JW.line(jw):sub(1, 600))
     if M.BREW_GUESS[id] and M.JW.proven(jw) then text = jw.cause .. ': ' .. tostring(jw.text) end
+    if id == 'nobarrel' and not text:find('by my count', 1, true) then text = 'by my count: ' .. text end     -- the container cause is a hypothesis (BUG-834 retry)
     st.brewx.text, st.brewx.cause = text, jw.cause
   end
   local act = {}
