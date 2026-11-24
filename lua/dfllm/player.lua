@@ -10,6 +10,11 @@
 --     undone (BUG-812/814): every door door.lock locked that was open before is unlocked, every burrow member burrow.unit added or
 --     dropped gets its old membership back. Nothing the exit unlocked outlives it. A missing reading counts as not critical
 --     (fail closed: nothing is unlocked without data).
+--     FAIL CLOSED (BUG-812, second verification): a door is the kernel's while it may need it shut. The undo runs only in PEACE,
+--     with no reflex lockdown (reflex.holding; an unreadable reflex counts as one) and the exit closed; until then it waits in
+--     st.und and is retried every step (EMERGENCY_END d.kept). A hatch a running cavern sweep owns (cavern.owns_door) is left
+--     to the sweep. door.lock on=false is refused under the same conditions (the player never overrides a lockdown); a lock
+--     is always allowed. A door has no hold (util/hold.lua): the kernel may always lock one.
 --  2. HOLDS. The act calls of a hold verb (contract.VERB_HOLD) leave holds on the objects they touched (util/hold.lua keys); kern
 --     refuses the kernel's own act calls on a held object (no ACT_FAIL) for player.hold_days (tactical ones: until the exit closes).
 -- Stage-1 verbs (any mode, player.verbs): zone.remove, building.remove, labor.set, workdetail.set, lever.link, furniture.place,
@@ -38,7 +43,8 @@ local function int(v) return type(v) == 'number' and math.tointeger(v) or nil en
 
 local st            -- persisted m.player: {v = 1, holds = {{k, u, v, e}}, crit = {cond = since}, dl = {cause = n}, dt = {cause = {ticks}},
                     --  emg = {since, last, why = {conds}, sq = {key = true}, dr = {{id, o}} (doors: state before the first
-                    --  door.lock, o 1 locked / 0 open), bu = {{b, u, o}} (burrow members before the first burrow.unit)} | nil}
+                    --  door.lock, o 1 locked / 0 open), bu = {{b, u, o}} (burrow members before the first burrow.unit)} | nil,
+                    --  und = {dr, bu} | nil (BUG-812: the undo of a closed exit that waits until it is safe)}
 local cfg = nil     -- the knobs of the last step (M.held runs outside a module call)
 
 -- the knobs of config/baseline.json `player`; a value of another type or out of range keeps its default (fairplay.player_errors)
@@ -64,6 +70,7 @@ function M.init(K)
   st = type(p) == 'table' and p or fresh()
   for _, k in ipairs({'holds', 'crit', 'dl', 'dt'}) do if type(st[k]) ~= 'table' then st[k] = {} end end
   if type(st.emg) ~= 'table' then st.emg = nil end
+  if type(st.und) ~= 'table' then st.und = nil end
   conf(K)
 end
 
@@ -174,16 +181,43 @@ local function living(id)
   return ok and r == true
 end
 
--- BUG-812/814: the exit closes: the player's tactical changes go back (doors he locked that were open, burrow members he moved).
--- A door that was locked before his first door.lock is left to whoever locked it (reflex opens its own after quiet; an unlock is
--- never held). Returns doors unlocked, burrows restored.
-local function undo(K, e)
+-- BUG-812 (second verification): why the kernel may need its doors shut now (the undo waits, door.lock on=false is refused), or
+-- nil. Fail closed: a mode other than PEACE, a reflex lockdown, a reflex that cannot be asked (fault backoff) all count.
+local function unsafe(K)
+  local mode = K.mode()
+  if mode ~= 'PEACE' then return 'mode ' .. tostring(mode) end
+  local ok, why = K.call('reflex', 'holding')
+  if ok == true then
+    if why ~= nil then return 'kernel lockdown (' .. tostring(why) .. ')' end
+  elseif why ~= 'no module' then return 'reflex unreadable (' .. tostring(why) .. ')' end
+  return nil
+end
+
+-- the kernel's claim on one door now (unsafe, or a running cavern sweep's hatch), or nil
+local function door_owner(K, id)
+  local why = unsafe(K)
+  if why then return why end
+  local ok, own = K.call('cavern', 'owns_door', id)
+  if ok == true and own == true then return 'the cavern sweep (hatch ' .. tostring(id) .. ')' end
+  return nil
+end
+
+-- BUG-812/814: the player's tactical changes go back (doors he locked that were open, burrow members he moved), only when it is
+-- safe (unsafe, door_owner). A door that was locked before his first door.lock is left to whoever locked it (reflex opens its own
+-- after quiet; a door has no hold). Returns doors unlocked, burrows restored, the undo still waiting {dr, bu} or nil.
+local function undo(K, u)
   local nd, nb = 0, 0
-  for _, d in ipairs(type(e.dr) == 'table' and e.dr or {}) do
-    if int(d.id) and d.o == 0 and K.act.door_forbid(d.id, false) then nd = nd + 1 end
+  local shut = {}                  -- only the doors he locked that were open come back (unlocked)
+  for _, d in ipairs(type(u.dr) == 'table' and u.dr or {}) do if int(d.id) and d.o == 0 then shut[#shut + 1] = d end end
+  local bu = type(u.bu) == 'table' and u.bu or {}
+  if unsafe(K) then return nd, nb, (#shut + #bu > 0) and {dr = shut, bu = bu} or nil end
+  local wait = {}
+  for _, d in ipairs(shut) do
+    if door_owner(K, d.id) then wait[#wait + 1] = d
+    elseif K.act.door_forbid(d.id, false) then nd = nd + 1 end
   end
   local by, order = {}, {}
-  for _, m in ipairs(type(e.bu) == 'table' and e.bu or {}) do
+  for _, m in ipairs(bu) do
     if type(m.b) == 'string' and int(m.u) then
       if not by[m.b] then by[m.b] = {}; order[#order + 1] = m.b end
       by[m.b][m.u] = m.o == 1
@@ -203,7 +237,28 @@ local function undo(K, e)
       if K.act.burrow_units(name, list) then nb = nb + 1 end
     end
   end
-  return nd, nb
+  return nd, nb, #wait > 0 and {dr = wait, bu = {}} or nil
+end
+
+-- the undo of the exit that closes joins the one still waiting (the first state of a door / member wins)
+local function merge(a, b)
+  local out = {dr = {}, bu = {}}
+  local sd, sb = {}, {}
+  for _, u in ipairs({a or {}, b or {}}) do
+    for _, d in ipairs(type(u.dr) == 'table' and u.dr or {}) do
+      if int(d.id) and not sd[d.id] and #out.dr < 100 then sd[d.id] = true; out.dr[#out.dr + 1] = d end
+    end
+    for _, m in ipairs(type(u.bu) == 'table' and u.bu or {}) do
+      local k = tostring(m.b) .. ':' .. tostring(m.u)
+      if not sb[k] and #out.bu < 100 then sb[k] = true; out.bu[#out.bu + 1] = m end
+    end
+  end
+  return out
+end
+
+local function nkept(u)
+  if not u then return 0 end
+  return #(type(u.dr) == 'table' and u.dr or {}) + #(type(u.bu) == 'table' and u.bu or {})
 end
 
 local function close(K, why)
@@ -213,12 +268,24 @@ local function close(K, why)
   local keep = {}
   for _, h in ipairs(st.holds) do if h.e ~= 1 then keep[#keep + 1] = h end end
   st.holds = keep
-  local nd, nb = undo(K, e)
-  local days = (K.now().tick - (int(e.since) or K.now().tick)) // DAY
   st.emg = nil
+  local nd, nb, wait = undo(K, merge(st.und, {dr = e.dr, bu = e.bu}))
+  st.und = wait
+  local kept = nkept(wait)
+  local days = (K.now().tick - (int(e.since) or K.now().tick)) // DAY
+  local ks = kept > 0 and string.format('; %d change(s) kept until it is safe (%s): the doors stay locked', kept,
+                                        tostring(unsafe(K) or 'a kernel claim')) or ''
   K.emit('EMERGENCY_END', 'C', string.format('emergency exit closed (%s) after %d days; tactical verbs locked again; ' ..
-                                             '%d door(s) unlocked, %d burrow(s) restored', why, days, nd, nb),
-         {why = why, days = days, doors = nd, burrows = nb})
+                                             '%d door(s) unlocked, %d burrow(s) restored%s', why, days, nd, nb, ks),
+         {why = why, days = days, doors = nd, burrows = nb, kept = kept})
+end
+
+-- BUG-812: the waiting undo of a closed exit, every step until it is safe
+local function retry_undo(K)
+  if not st.und or st.emg then return end
+  local nd, nb, wait = undo(K, st.und)
+  if nd + nb > 0 then K.log('info', 'player: the kept undo ran: %d door(s) unlocked, %d burrow(s) restored', nd, nb) end
+  st.und = wait
 end
 
 function M.step(K)
@@ -229,6 +296,7 @@ function M.step(K)
   st.holds = keep
   if not c.exit then
     if st.emg then close(K, 'exit off') end
+    retry_undo(K)
     st.crit = {}
     save(K)
     return
@@ -255,6 +323,7 @@ function M.step(K)
   elseif st.emg and now >= until_tick(c) then
     close(K, 'quiet ' .. c.grace_days .. ' days')
   end
+  retry_undo(K)
   save(K)
 end
 
@@ -435,6 +504,11 @@ end
 
 M.verbs['door.lock'] = function(K, args)
   local no = tactical(K, 'door.lock'); if no then return false, no end
+  -- BUG-812 (second verification): an unlock never overrides the kernel (a lockdown, a siege, a sweep's hatch); a lock always goes
+  if args.on ~= true then
+    local own = door_owner(K, args.door)
+    if own then return false, string.format('door.lock: door %d stays locked: %s owns the doors now', args.door, own) end
+  end
   local ok, res = K.act.door_forbid(args.door, args.on == true, args.on == true)
   if not ok then return false, 'door.lock: ' .. tostring(res) end
   -- BUG-812: the door's state before the player's first door.lock; a door he locked that was open is unlocked when the exit closes
@@ -443,9 +517,8 @@ M.verbs['door.lock'] = function(K, args)
   for _, d in ipairs(st.emg.dr) do if d.id == args.door then seen = true end end
   if not seen and #st.emg.dr < 100 then st.emg.dr[#st.emg.dr + 1] = {id = args.door, o = res == true and 1 or 0} end
   save(K)
-  return true, string.format('door %d %s (was %s)%s; unlocked again when the exit closes', args.door,
-                             args.on and 'locked' or 'unlocked', res and 'locked' or 'open',
-                             args.on and held_note(K, 'door.lock') or ' (an unlock is never held)')
+  return true, string.format('door %d %s (was %s)%s', args.door, args.on and 'locked' or 'unlocked', res and 'locked' or 'open',
+                             args.on and '; unlocked again after the exit closes, once PEACE holds without a lockdown' or '')
 end
 
 return M

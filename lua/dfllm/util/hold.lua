@@ -2,8 +2,9 @@
 -- not undone by a kernel loop. Pure (no DF): kern / k_mock pass the act call (fn, its arguments, its result) in.
 --   H.keys(fn, args, res) -> list of keys ('bld:<id>', 'zone:<id>', 'labor:<unit>:<labor>', 'wd:<unit>:<detail>',
 --                            'office:<code>', 'area:z:x1:y1:x2:y2' (a removed footprint, recorded only), 'tile:x,y,z' (queried only))
---   H.query(fn, args) -> the keys a kernel call is checked against: H.keys, except that an unlock (door_forbid on=false) is never
---                        refused (fail safe: a hold may keep a door open, never shut)
+--   H.query(fn, args) -> the keys a kernel call is checked against (H.keys). A door has no key at all (BUG-812, second
+--                        verification): the kernel may always lock a door (a lockdown is never refused) and unlock its own; the
+--                        player module undoes its own door.lock when the exit closes, and only when that is safe (player.lua)
 -- The keys are per object AND per labor / detail (BUG-813): a player labor.set of one labor does not stop care's doctor or water's
 -- Orderlies on the same unit. burrow_units has no key (BUG-814): gate's level-triggered lever-room pullers must win in BREACH, and
 -- the player module restores its own burrow changes when the exit closes.
@@ -51,7 +52,6 @@ H.KEYS = {
   appoint = function(a) return type(a[1]) == 'string' and {'office:' .. a[1]} or {} end,
   link_lever = function(a) return one('bld:', int(a[1])) end,
   cancel_link_job = function(a) return one('bld:', int(a[1])) end,
-  door_forbid = function(a) return one('bld:', int(a[1])) end,
   -- creators: refused on a footprint the player removed (query only)
   quickfort = function(a) local p = type(a[1]) == 'table' and a[1] or {}; return {tile(xyz(p.pos))} end,
   zone_place = function(a) local p = type(a[1]) == 'table' and a[1] or {}; return {tile(xyz(p.pos))} end,
@@ -76,10 +76,7 @@ function H.keys(fn, a, res)
   return out
 end
 
-function H.query(fn, a)
-  if fn == 'door_forbid' and type(a) == 'table' and a[2] ~= true then return {} end
-  return H.keys(fn, a)
-end
+function H.query(fn, a) return H.keys(fn, a) end
 
 -- keys a player verb leaves held (tile keys are queries, never holds)
 function H.recorded(keys)

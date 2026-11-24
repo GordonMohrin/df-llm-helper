@@ -41,6 +41,13 @@ A missing key counts as not critical (fail closed: nothing is unlocked on missin
   and the player's tactical changes are **undone** (BUG-812/814): every door `door.lock` locked that was open before his
   first `door.lock` is unlocked; every burrow member `burrow.unit` added or dropped gets its membership from before his
   first change back (other members, e.g. pullers gate added meanwhile, are kept). Nothing the window unlocked outlives it.
+- **fail closed (BUG-812, retry 2):** the undo runs only when it is safe: mode `PEACE`, no reflex lockdown
+  (`reflex.holding`; a reflex that cannot be asked counts as a lockdown) and the window closed. Otherwise the player's
+  locks **stay** (`EMERGENCY_END d.kept` = the changes still waiting) and the undo is retried every `player.step` until
+  it is safe; a hatch a running cavern sweep owns (`cavern.owns_door`) is left to the sweep. `door.lock on=false` is
+  refused under the same conditions (`door.lock: door N stays locked: <owner> owns the doors now`): the player never
+  overrides a kernel lockdown; a lock always goes through. A door has **no hold** at all: the kernel may always lock a
+  door, and reflex unlocks only its own.
 
 Tactical verbs (`schema.VERB_EMG`, refused with `only while the emergency exit is open` otherwise):
 
@@ -50,7 +57,7 @@ Tactical verbs (`schema.VERB_EMG`, refused with `only while the emergency exit i
 | `squad.station squad=A pos=[x,y,z]` (`release=true`) | squads screen > station | `military.hold_order` (tag `player`) |
 | `squad.sortie` | unchanged (already any mode but DRILL) | - |
 | `burrow.unit burrow=N unit=U on=true` | burrows screen > units (no hold, restored on close) | `act.burrow_units` |
-| `door.lock door=ID on=true` | door sheet > forbid (lock held until close, unlocked on close) | `act.door_forbid` |
+| `door.lock door=ID on=true` | door sheet > forbid (no hold; unlocked after the close once PEACE holds without a lockdown; `on=false` refused outside PEACE, under a lockdown or on a sweep's hatch) | `act.door_forbid` |
 
 ### Rule 2: the kernel never undoes a player verb (holds)
 
@@ -67,7 +74,7 @@ noted; after a successful hold verb `player.hold_acts` records the keys of those
 | `work_detail` | `wd:<unit>:<detail>` (BUG-813: per detail) |
 | `appoint` | `office:<code>` |
 | `link_lever`, `cancel_link_job` | `bld:<lever>` |
-| `door_forbid` | `bld:<door>`; a kernel **unlock** (`on=false`) is never refused (`H.query`, BUG-812) |
+| `door_forbid` | none (BUG-812 retry 2: the kernel may always lock a door; the player module undoes its own locks when safe) |
 | `burrow_units` | none (BUG-814: gate's level-triggered lever-room pullers must win in BREACH) |
 | `quickfort`, `zone_place`, `sand_zone`, `fish_zone`, `water_zone`, `drink_pile`, `tool_pile`, `hospital_restore` | `tile:x,y,z` (query only: refused inside a held `area`) |
 
@@ -75,11 +82,10 @@ Every act call outside a verb asks `player.held(keys)`; a held object is refused
 one commands.log line, **no ACT_FAIL** (a kernel loop retrying it is no failure). This one gate replaces finding every
 reconcile loop; the loops it stops are: economy's work-detail staffing and labor switches (only the held labor /
 detail of that unit), water's Orderlies ladder (only if the player set that unit's Orderlies), its zone/hospital
-redraw, economy's office replace (BUG-458), gate's stale-link cancel (BUG-546), reflex's lockdown **forbid** of a door
-the player set, care's room assignment, runner/economy zone and quickfort placements on a removed footprint. Stage-1
+redraw, economy's office replace (BUG-458), gate's stale-link cancel (BUG-546), care's room assignment, runner/economy zone and quickfort placements on a removed footprint. Stage-1
 holds last `player.hold_days` (28) game days; tactical ones last until the window closes (BUG-816: not a fixed tick
 computed at the verb's time, which ran out while the exit was still open; bound `M.EMG_HOLD_MAX` = 400 days).
-Fail safe: a hold may keep a door open, it never keeps one shut (unlocks pass), and it never stops gate's pullers.
+Fail safe: no hold touches a door (a lockdown always locks) and no hold stops gate's pullers.
 The lever is not held by act: gate's own lever hold (BUG-236) already keeps a player's `down` in PEACE and ends it
 on a threat (raising is never blocked).
 
@@ -127,13 +133,36 @@ No free digging, no item creation, no `dfhack lua`: every verb is one click of a
 | BUG-815 | `building.remove` of a door/hatch in any mode, area hold then kept seal/runner from re-placing it for 28 days | door and hatch need `approve:true` (`A.REMOVE_GUARDED`); a removed Door/Hatch leaves no `area` hold | test_neu1_notausgang util/hold test |
 | BUG-816 | (found by the new door test) a tactical hold ended at the grace end seen at the verb's time, i.e. 3 days later even while the exit stayed open | e=1 holds last until close (bound 400 days) | test_neu1_door_restore (the door stays held through the lockdown) |
 
+## Verification fixes (retry 2, BUG-812 fail closed)
+
+The second adversarial verification found the retry-1 undo fail-open: `player.lua` `undo()` unlocked every door the
+player had locked on `EMERGENCY_END` without looking at the mode or at a reflex lockdown. Symptom (offline): the exit
+opens for a thirsty patient, the player locks an inner door, an army arrives late in the grace window; reflex leaves the
+already forbidden door alone (not in its `st.doors`), the window closes while the lockdown holds and the undo unlocks
+the door in the middle of the siege. Two more fail-open paths of the same kind: `door.lock on=false` unlocked a door the
+lockdown had forbidden (the player overrode the kernel), and the `bld:<door>` hold a player **unlock** left made a later
+lockdown's `door_forbid(id,true)` refused quietly (the door stayed open through the next siege).
+
+| cause | change | test |
+|---|---|---|
+| `lua/dfllm/player.lua` `undo` (retry 1: unconditional `door_forbid(id,false)`) | `unsafe(K)`: not PEACE, a reflex lockdown, or reflex unreadable; `door_owner(K,id)` adds the cavern sweep's hatch. The undo waits in `st.und` (persisted, merged with a later window's, first state wins) and is retried every step once the window is closed; `EMERGENCY_END d.kept` | test_neu1_door_restore (real reflex: the window closes under the lockdown, door kept, unlocked after LOCKDOWN_END); test_neu1_notausgang (SIEGE close, PEACE undo once) |
+| `player.lua` verb `door.lock` (`on=false` unchecked) | refused while `door_owner` names an owner; a lock is always allowed | test_neu1_door_restore, test_neu1_notausgang (BREACH, reflex stand-in, cavern stand-in) |
+| `lua/dfllm/util/hold.lua` `door_forbid` key `bld:<door>` | no door key at all; `door.lock` left `VERB_HOLD` (contract.lua, schema.py) | test_neu1_notausgang (kernel lock after a player unlock and lock passes; util/hold keys) |
+| `lua/dfllm/cavern.lua` | new public `M.owns_door(K,id)`: a running sweep's hatch | test_neu1_notausgang (stand-in) |
+
 ## Open risks
 
 - The `gate` condition (manifest bridge `down` in SIEGE/BREACH for a day) also fires on long intake waves and sortie
   lowerings, and a chronically thirsty patient keeps the window (and the clock clamp) open without an upper bound.
   Both are noise (a class A wake, a slower clock), not unsafe; `player.exit_days` / `player.slow` are the knobs.
-- A door the player **unlocked** during the window that someone else had locked stays unlocked after the close
-  (fail open on purpose: an entrance must never end up shut; reflex re-forbids it at the next lockdown).
+- A door the player **unlocked** during the window that someone else had locked stays unlocked after the close (his
+  own action, not undone). He can only unlock in PEACE without a lockdown, and a door has no hold, so the next lockdown
+  forbids it again.
+- Fail closed means a door the player locked can stay locked longer than the window: until the mode is PEACE and no
+  lockdown holds (a long siege, a reflex in fault backoff). Citizens may be shut in or out meanwhile; the
+  `EMERGENCY_END` text names it (`kept until it is safe`) and kern.log says when the kept undo ran.
+- `door.lock on=false` is refused in every mode but PEACE: during an exit opened by BREACH the player cannot open a
+  door to let a citizen in (by design: the kernel's lockdown and recall own the doors then).
 - `burrow.unit` on a gate lever room is overwritten by gate's next pullers step (by design: the pullers win).
 - Live-untested; the restore runs in `player.step` (once a game day), so it lags the close by at most a day.
 
@@ -151,8 +180,13 @@ No free digging, no item creation, no `dfhack lua`: every verb is one click of a
 4. `zone.remove id=<z>` on a zone the kernel drew (dfllm-sand, a water zone) is not drawn again on that place within
    28 days (no new zone of the kind there in `inspect what=water_sources` / the zones screen).
 5. Across a run with the exit on, no player log line says "kein Befehl moeglich" next to a DEATH / PATIENT_DYING.
-6. Every `EMERGENCY_END` after a `door.lock on=true` shows `d.doors` >= 1 and the door sheet of that door reads not
-   forbidden afterwards; after a lockdown that ended while the exit was open, commands.log has `act.door_forbid ... false`
-   by reflex with result `ok` (never `held by the player`).
+6. Every `EMERGENCY_END` after a `door.lock on=true` in PEACE without a lockdown shows `d.doors` >= 1 and the door
+   sheet of that door reads not forbidden afterwards; after a lockdown that ended while the exit was open, commands.log
+   has `act.door_forbid ... false` by reflex with result `ok` (never `held by the player`).
+8. An `EMERGENCY_END` while a lockdown holds or the mode is SIEGE/BREACH shows `d.doors` = 0 and `d.kept` >= 1, the
+   player's door stays forbidden on its door sheet until `LOCKDOWN_END` / PEACE, and then kern.log has `player: the
+   kept undo ran` with commands.log `act.door_forbid <id> false` by player within a game day. No `act.door_forbid`
+   `on=true` by reflex ever answers `held by the player`; a `door.lock on=false` during a lockdown answers `stays
+   locked: kernel lockdown`.
 7. While a player `labor.set` hold is active on a unit, care's `act.medic` and water's `act.work_detail Orderlies` on that
    unit appear in commands.log with `ok`, not `held by the player`.

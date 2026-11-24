@@ -320,7 +320,7 @@ C.VERBS = {
 -- the kernel's own calls (util/hold.lua; kern notes the calls while the verb runs, player.hold_acts keeps them)
 C.VERB_EMG = {lever = true, ['squad.station'] = true, ['burrow.unit'] = true, ['door.lock'] = true}
 C.VERB_HOLD = {['zone.remove'] = true, ['building.remove'] = true, ['labor.set'] = true, ['workdetail.set'] = true,
-               ['lever.link'] = true, appoint = true, ['room.assign'] = true, ['door.lock'] = true}   -- BUG-814: burrow.unit no hold
+               ['lever.link'] = true, appoint = true, ['room.assign'] = true}   -- BUG-814/812: burrow.unit, door.lock no hold
 -- Verbs accepted only from these `by` origins (§9.5). `by` is a label, not authentication: the
 -- hook (WP4) keeps the LLM from writing these origins; this check is the second line.
 C.VERB_BY = {audit = {follow = true, test = true}}

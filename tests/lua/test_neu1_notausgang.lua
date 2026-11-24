@@ -235,9 +235,8 @@ T.test('util/hold: keys, recorded keys, an area covers its tiles only, an expire
   T.eq(HOLD.keys('work_detail', table.pack('Miners', 7, true)), {'wd:7:Miners'})
   T.eq(HOLD.keys('medic', table.pack(7, true)), {'labor:7:medic'})
   T.eq(HOLD.keys('burrow_units', table.pack('Kern+', {5})), {}, 'BUG-814: no burrow hold')
-  T.eq(HOLD.keys('door_forbid', table.pack(77, false)), {'bld:77'}, 'a player unlock is recorded')
-  T.eq(HOLD.query('door_forbid', table.pack(77, false)), {}, 'BUG-812: a kernel unlock is never refused')
-  T.eq(HOLD.query('door_forbid', table.pack(77, true)), {'bld:77'})
+  T.eq(HOLD.keys('door_forbid', table.pack(77, false)), {}, 'BUG-812: a door has no hold (the kernel may always lock or unlock it)')
+  T.eq(HOLD.query('door_forbid', table.pack(77, true)), {})
   T.eq(HOLD.keys('building_remove', table.pack(3), {rect = {1, 2, 3, 4, 5}, type = 'Door'}), {'bld:3'},
        'BUG-815: a removed door leaves no area hold')
   T.eq(HOLD.keys('building_remove', table.pack(3), {rect = {1, 2, 3, 4, 5}}), {'bld:3', 'area:5:1:2:3:4'})
@@ -250,6 +249,90 @@ T.test('util/hold: keys, recorded keys, an area covers its tiles only, an expire
   T.eq(HOLD.match(holds, {'labor:7:farm'}, 10).v, 'labor.set')
   T.eq(HOLD.match(holds, {'labor:7:medic'}, 10), nil)
   T.eq(HOLD.match(holds, {'labor:7:farm'}, 60), nil)
+end)
+
+-- the doors of a k_mock world: door_forbid flips W.doors[id] and returns the old state (act.lua)
+local function doors(W, init)
+  W.doors = init
+  W.act_result('door_forbid', function(id, on)
+    if W.doors[id] == nil then return false, 'not a door' end
+    local old = W.doors[id]
+    W.doors[id] = on == true
+    return true, old
+  end)
+end
+
+T.test('second verification (BUG-812): the exit closing in SIEGE leaves the player\'s lock on; the undo runs once the mode ' ..
+       'is PEACE again; a door verb leaves no hold (the kernel may always lock and unlock a door)', function()
+  local W = world{water = {1, 61000}, cfg = {exit_days = 0}}
+  doors(W, {[77] = false, [78] = true})
+  W.run(2 * DAY, {skip = 100})
+  T.eq(#W.find_events('EMERGENCY'), 1)
+  W.inbox('door.lock', {door = 77, on = true})
+  T.eq(last_reply(W).ok, true, last_reply(W).msg)
+  W.inbox('door.lock', {door = 78, on = false})
+  T.eq(last_reply(W).ok, true, last_reply(W).msg)
+  -- no door hold: a kernel lock of the door the player unlocked and of the one he locked both go through
+  -- (test code outside a verb stands for reflex's lockdown, the owner of door_forbid)
+  T.eq({W.K.act.door_forbid(78, true)}, {true, false}, 'the kernel can lock a door the player unlocked')
+  T.eq({W.K.act.door_forbid(77, true)}, {true, true})
+  -- a siege begins, the patient drinks: the exit closes in SIEGE, the player's lock stays
+  W.mode = 'SIEGE'
+  W.read.water = {0, 0}
+  W.run(5 * DAY, {skip = 100})
+  local ev = W.find_events('EMERGENCY_END')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.doors, ev[1].d.kept}, {0, 1})
+  T.eq(W.doors[77], true, 'fail closed: no unlock in SIEGE')
+  W.run(2 * DAY, {skip = 100})
+  T.eq(W.doors[77], true, 'still locked while the siege lasts')
+  W.mode = 'PEACE'
+  W.run(DAY, {skip = 100})
+  T.eq(W.doors[77], false, 'the kept undo runs in PEACE without a lockdown')
+  W.run(DAY, {skip = 100})
+  local un = 0
+  for _, a in ipairs(W.find_acts('door_forbid')) do if a.args[1] == 77 and a.args[2] == false then un = un + 1 end end
+  T.eq(un, 1, 'once')
+end)
+
+T.test('second verification (BUG-812): door.lock on=false is refused in SIEGE/BREACH and on a door a kernel lockdown ' ..
+       'or the cavern sweep owns; the close of an exit opened in BREACH keeps the lock', function()
+  local W = world{mode = 'BREACH', water = {1, 61000}, cfg = {exit_days = 0}}
+  doors(W, {[77] = true, [79] = false})
+  W.run(2 * DAY, {skip = 100})
+  T.ok(#W.find_events('EMERGENCY') >= 1)
+  W.inbox('door.lock', {door = 77, on = false})
+  T.eq(last_reply(W).ok, false, last_reply(W).msg)
+  T.ok(last_reply(W).msg:find('BREACH', 1, true), last_reply(W).msg)
+  T.eq(W.doors[77], true)
+  W.inbox('door.lock', {door = 79, on = true})
+  T.eq(last_reply(W).ok, true, 'locking is always allowed: ' .. last_reply(W).msg)
+  -- a kernel lockdown (reflex stand-in) owns the doors even in PEACE
+  W.mode = 'PEACE'
+  W.lock = 'arrival'
+  local rf = {name = 'reflex', every = {ticks = 100000}}
+  function rf.holding(K, what) return W.lock end
+  W.load(rf)
+  W.inbox('door.lock', {door = 77, on = false})
+  T.eq(last_reply(W).ok, false)
+  T.ok(last_reply(W).msg:find('lockdown', 1, true), last_reply(W).msg)
+  -- the cavern sweep's hatch
+  W.lock = nil
+  local cv = {name = 'cavern', every = {ticks = 100000}}
+  function cv.owns_door(K, id) return id == 77 end
+  W.load(cv)
+  W.inbox('door.lock', {door = 77, on = false})
+  T.eq(last_reply(W).ok, false)
+  T.ok(last_reply(W).msg:find('cavern', 1, true), last_reply(W).msg)
+  -- close with the lockdown back: door 79 stays locked; it opens once the lockdown is gone
+  W.lock = 'arrival'
+  W.read.water = {0, 0}
+  W.run(5 * DAY, {skip = 100})
+  T.eq(#W.find_events('EMERGENCY_END'), 1)
+  T.eq(W.doors[79], true, 'kept under the lockdown')
+  W.lock = nil
+  W.run(DAY, {skip = 100})
+  T.eq(W.doors[79], false)
 end)
 
 T.test('config: player.conf keeps the defaults for bad values', function()

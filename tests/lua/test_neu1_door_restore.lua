@@ -101,4 +101,51 @@ T.test('BUG-812: a door the lockdown forbade and the player locked is unlocked b
   T.eq(last_reply(W).ok, false)
 end)
 
+T.test('second verification (BUG-812): the exit closing under a kernel lockdown leaves the player\'s lock on (fail closed); ' ..
+       'the undo waits for PEACE without a lockdown; the player\'s unlock never overrides the lockdown', function()
+  local W = setup('doorfailclosed')
+  S.run(W, 2 * DAY, {skip = 50})
+  T.eq(#events(W, 'EMERGENCY'), 1, 'the thirsty patient opened the exit')
+  W.inbox('door.lock', {door = 502, on = true})
+  T.eq(last_reply(W).ok, true, last_reply(W).msg)
+  T.eq(W.doors.inner.door_flags.forbidden, true)
+  -- the patient drinks; late in the grace (3 days) an army arrives: the lockdown outlasts the exit
+  W.thirst = nil
+  S.run(W, 2 * DAY + DAY // 2, {skip = 50})
+  T.eq(#events(W, 'EMERGENCY_END'), 0, 'still in the grace')
+  df.global.world.status.popups:insert('#', {text = 'A vile force of darkness has arrived!'})
+  df.global.pause_state = false
+  S.run(W, 400)
+  T.eq(#events(W, 'ARRIVAL'), 1)
+  T.eq(W.doors.entrance.door_flags.forbidden, true, 'the lockdown forbade the entrance')
+  local okh, why = W.K.call('reflex', 'holding')
+  T.ok(okh == true and why ~= nil, 'the lockdown holds')
+  -- the player's unlock of a door during a kernel lockdown is refused: the lockdown owns the doors
+  W.inbox('door.lock', {door = 501, on = false})
+  T.eq(last_reply(W).ok, false, last_reply(W).msg)
+  T.ok(last_reply(W).msg:find('lockdown', 1, true), last_reply(W).msg)
+  T.eq(W.doors.entrance.door_flags.forbidden, true, 'still forbidden')
+  W.inbox('door.lock', {door = 502, on = false})
+  T.eq(last_reply(W).ok, false, 'not even his own lock comes off under the lockdown')
+  T.eq(W.doors.inner.door_flags.forbidden, true)
+  -- the grace ends while the lockdown still holds: EMERGENCY_END must not unlock door 502
+  for _ = 1, 40 do
+    if #events(W, 'EMERGENCY_END') > 0 then break end
+    S.run(W, 120, {skip = 50})
+  end
+  T.eq(#events(W, 'LOCKDOWN_END'), 0, 'the lockdown still holds')
+  local ev = events(W, 'EMERGENCY_END')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.doors, 0, 'nothing unlocked under the lockdown')
+  T.eq(ev[1].d.kept, 1, 'one door kept locked until it is safe')
+  T.ok(ev[1].msg:find('kernel lockdown', 1, true), ev[1].msg)
+  T.eq({W.doors.entrance.door_flags.forbidden, W.doors.inner.door_flags.forbidden}, {true, true})
+  -- the lockdown ends: reflex opens its own door, the player module then undoes the player's lock (nothing stays forbidden)
+  W.inbox('ack', {})
+  S.run(W, 5200, {skip = 50})
+  T.eq(#events(W, 'LOCKDOWN_END'), 1)
+  S.run(W, 2 * DAY, {skip = 50})
+  T.eq({W.doors.entrance.door_flags.forbidden, W.doors.inner.door_flags.forbidden}, {false, false})
+end)
+
 T.done()
