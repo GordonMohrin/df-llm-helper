@@ -287,6 +287,77 @@ def test_lock_siege_only_on_r0(tmp_path, cfg_dir):
     assert not leiter.compute(d2, state(ready={"lvl": 0, "fail": ["no_inner"]}))["locks"]
 
 
+def test_siege_lock_on_r0_names_the_wehr_command(tmp_path, cfg_dir):
+    """BUG-783: a siege death on R0 locks Volk; NAECHST is the Wehr command that lifts it, not Volk's time-only one."""
+    now = (Y + 2) * YEAR
+    evs = [ev(1, "SIEGE_START", now - 56 * DAY, {"inv": 30}, "A"),
+           ev(2, "DEATH", now - 55 * DAY, {"unit": 3, "citizen": 1, "cause": "killed", "by": "goblin"}),
+           ev(3, "SIEGE_END", now - 50 * DAY, {}, "A")]
+    d = run_dir(tmp_path, evs=evs)
+    lz = leiter.compute(d, state(ready={"lvl": 0, "fail": ["no_inner", "traps_short"]}))
+    assert [x["track"] for x in lz["locks"]] == ["volk"] and lz["tracks"]["volk"]["time"]
+    out = leiter.lines(lz)
+    assert out[1].startswith("NAECHST Wehr II: ") and "-> dfllm " in out[1] and "(hebt Sperre Volk)" in out[1]
+    assert "GESPERRT Volk (Belagerung" in out[2] and "NAECHST Volk" not in out[1]
+    # acute: the floor wins, the lock stays in line 3
+    out = leiter.lines(leiter.compute(d, state(mode="SIEGE", ready={"lvl": 0, "fail": ["no_inner"]})))
+    assert out[1].startswith("NAECHST Pflicht: SIEGE") and "GESPERRT Volk (Belagerung" in out[2]
+
+
+def test_mood_lock_with_stress_clock_keeps_a_command(tmp_path, cfg_dir):
+    """BUG-783: a mood death locks Wohl, which only time lifts (stress clock); NAECHST goes to another track."""
+    now = (Y + 2) * YEAR
+    evs = [ev(1, "DEATH", now - 10 * DAY, {"unit": 5, "citizen": 1, "cause": "mood", "mood": "Fey"})]
+    d = run_dir(tmp_path, evs=evs)
+    lz = leiter.compute(d, state(mil={"kit": {"n": 8, "full": 2, "armor": 2, "weapon": 8, "wood": 0, "tr": 0}}))
+    assert [x["cls"] for x in lz["locks"]] == ["stimmung"] and lz["tracks"]["wohl"]["time"]
+    out = leiter.lines(lz)
+    assert out[1].startswith("NAECHST Ruestung II: ") and "-> dfllm cmd trade.want" in out[1]
+    assert "GESPERRT Wohl (Stimmung" in out[2] and "gesperrt" not in out[1]
+    # every lock a track would show must carry a command in NAECHST, never a bare fix text
+    for x in lz["locks"]:
+        assert leiter.lock_cmd(lz, x) is None
+
+
+def test_time_only_lock_never_names_naechst_or_offen(tmp_path, cfg_dir):
+    """BUG-783: a locked track (capped eff, raw need text) is no NAECHST / OFFEN candidate; it names NAECHST only when
+    its own command lifts the lock (thirst, patient)."""
+    now = (Y + 2) * YEAR
+    d = run_dir(tmp_path, evs=[ev(1, "DEATH", now - 10 * DAY, {"unit": 5, "citizen": 1, "cause": "mood", "mood": "Fey"})])
+    lz = leiter.compute(d, state(care={"stressed_pct": 40, "moods": 1}))
+    tr = lz["tracks"]
+    assert tr["wohl"]["lock"] and not tr["wohl"]["time"] and tr["wohl"]["eff"] < tr["wohl"]["raw"]
+    assert "wohl" not in lz["cands"]
+    out = leiter.lines(lz)
+    assert out[1].startswith("NAECHST Ruestung III: ") and "Wohl" not in out[1] and "-> dfllm " in out[1]
+    assert "GESPERRT Wohl (Stimmung" in out[2] and "OFFEN Wohl" not in out[2]
+    # a drowning at P3 locks Ausbau; another unlocked actionable track takes NAECHST
+    d2 = run_dir(tmp_path, name="r16x4-fort-site1",
+                 evs=[ev(1, "DEATH", now - 10 * DAY, {"unit": 5, "citizen": 1, "cause": "drowned", "dtype": "DROWN"})])
+    lz = leiter.compute(d2, state(phase="P3"))
+    assert [x["track"] for x in lz["locks"]] == ["ausbau"] and "ausbau" not in lz["cands"]
+    out = leiter.lines(lz)
+    assert out[1].startswith("NAECHST ") and "Ausbau" not in out[1] and "-> dfllm " in out[1]
+    assert "GESPERRT Ausbau (Graben/Wasser" in out[2] and "OFFEN Ausbau" not in out[2]
+
+
+def test_session_skips_deaths_reported_before_start(tmp_path, cfg_dir):
+    """BUG-784: a 'found dead' revision during the session of a death reported before it is no session death."""
+    now = (Y + 2) * YEAR
+    # the first report lies more than a season before the start: missing dwarves are often found much later
+    d = run_dir(tmp_path, evs=[ev(1, "BOOT", now - YEAR, {}, "C"),
+                               ev(2, "DEATH", now - 3 * leiter.SEASON, {"unit": 4, "citizen": 1, "cause": "unknown",
+                                                                       "found": 0})])
+    (d / "state.a.json").write_text(json.dumps({"v": 2, "seq": 1, "ev": 2, "k": {"ms_s": 0, "gap_max_ms": 0, "slow": [],
+                                                                                "faults": 0}, **state()}))
+    assert leiter.start_session(d).startswith("SITZUNG Start")
+    with open(d / "events.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(ev(3, "DEATH", now, {"unit": 4, "citizen": 1, "cause": "killed", "by": "goblin"})) + "\n")
+        f.write(json.dumps(ev(4, "DEATH", now, {"unit": 6, "citizen": 1, "cause": "old_age"})) + "\n")
+    lines, rc = leiter.session_lines(d)
+    assert rc == 0 and "Tote 1 (Alter 1)" in lines[0]
+
+
 def test_lock_switch_off(tmp_path, cfg_dir):
     (cfg_dir / "wertung.json").write_text(json.dumps({"v": 2, "leiter": {"locks": False, "gates": False,
                                                                           "records": False}}))

@@ -36,6 +36,9 @@ THIRST_DRINK_D, THIRST_DYING = 3, 50000   # as brief.thirst_items (BUG-402)
 # avoidable death class -> the track it locks (old age never locks; siege only when the fort stood on R0)
 LOCKS = {"durst_hunger": "versorgung", "patient": "wohl", "stimmung": "wohl", "graben_wasser": "ausbau",
          "belagerung": "volk"}
+# lock class -> the track whose command lifts the lock; a class missing here is lifted by time only (a mood, a digging /
+# water death) and never takes the NAECHST line (BUG-783)
+LOCK_FIX = {"durst_hunger": "versorgung", "patient": "wohl", "belagerung": "wehr"}
 # the templates whose `breach:*` block or empty `bp sites` blocks a track's next step
 SITE_TPLS = ("seal", "fortcore", "traps", "farms", "workshops", "hospital", "tombs", "cistern", "refuge_drink")
 
@@ -114,8 +117,8 @@ def t_wehr(s: dict, mem: dict, now: int) -> tuple:
         cmd, key = wehr_cmd(r)
         return 1, "fehlt " + (",".join(fails[:4]) or "R0"), cmd, key, False
     short = [f for f in fails if f == "traps_short" or f.startswith("traps<")]
-    if short or r.get("ts"):
-        return 2, str(r.get("ts") or ",".join(short))[:80], place("traps"), "tpl:traps", False
+    if short:
+        return 2, ",".join(short)[:80], place("traps"), "tpl:traps", False
     return 3, "", "", None, False
 
 
@@ -431,8 +434,10 @@ def compute(save_dir: Path, state: dict | None = None, evs: list[dict] | None = 
             tr[k]["blocked"] = blocked_evidence(save_dir, s, evs, now, tr[k]["key"], cfg["blocked_hours"])
     total = sum(tr[k]["eff"] for k in TRACKS)
     ac = acute(s, evs, now)
-    cands = sorted((k for k in TRACKS if tr[k]["eff"] < 3 and not tr[k]["blocked"] and not tr[k]["gate"]),
-                   key=lambda k: (tr[k]["time"], tr[k]["eff"], PRIO.index(k)))
+    # a locked track is no NAECHST / OFFEN candidate: it names NAECHST only through lock_cmd, when its own command
+    # lifts the lock (thirst -> Versorgung, patient -> Wohl); its capped eff + its raw need text would mislabel (BUG-783)
+    cands = sorted((k for k in TRACKS if tr[k]["eff"] < 3 and not tr[k]["blocked"] and not tr[k]["gate"]
+                    and not tr[k]["lock"]), key=lambda k: (tr[k]["time"], tr[k]["eff"], PRIO.index(k)))
     weakest = min((k for k in TRACKS if not tr[k]["blocked"]), key=lambda k: (tr[k]["eff"], PRIO.index(k)), default=None)
     # records
     y = _i(t.get("y")) or now // YEAR
@@ -467,6 +472,16 @@ def _lvl(k: str, tr: dict) -> str:
     return f"{NAME[k]} {ROMAN[tr[k]['eff']]}"
 
 
+def lock_cmd(lz: dict, x: dict) -> str | None:
+    """The track whose command lifts lock x now (LOCK_FIX), None when only time lifts it or that track has no
+    actionable command (time-only, blocked, gated, already III)."""
+    k = LOCK_FIX.get(x["cls"])
+    t = lz["tracks"].get(k) if k else None
+    if not t or not t["cmd"] or t["time"] or t["blocked"] or t["gate"] or t["eff"] >= 3:
+        return None
+    return k
+
+
 def lines(lz: dict) -> list[str]:
     """LEITER / NAECHST / OFFEN-GESPERRT."""
     if not lz.get("ok"):
@@ -481,26 +496,35 @@ def lines(lz: dict) -> list[str]:
         l1 += " | VERLOREN " + ", ".join(f"{NAME[k]} {ROMAN[lz['best']['lv'][k]]}" for k in lz["lost"])
     if lz.get("prev"):
         l1 += f" | Vorfort {wertung.fort_key(lz['prev'][0])} fiel auf {lz['prev'][1]}"
+    # a lock takes NAECHST only with a command that lifts it; a lock lifted by time stays a GESPERRT entry (BUG-783)
+    head, first = None, None
+    if not lz["acute"]:
+        for x in lz["locks"]:
+            if lock_cmd(lz, x):
+                head = x
+                break
     if lz["acute"]:
         l2 = f"NAECHST Pflicht: {lz['acute'][0]} -> {lz['acute'][1]}"
-    elif lz["locks"]:
-        x = lz["locks"][0]
-        k = x["track"]
-        l2 = (f"NAECHST {NAME[k]} gesperrt ({wertung.LABEL[x['cls']]} {fmt_tick(x['tick'])}): {x['fix']}"
-              + (f" -> {tr[k]['cmd']}" if tr[k]["cmd"] and not tr[k]["time"] else ""))
-    elif lz["cands"]:
-        k = lz["cands"][0]
-        l2 = f"NAECHST {NAME[k]} {ROMAN[tr[k]['eff'] + 1]}: {tr[k]['need']} -> {tr[k]['cmd']}"
+    elif head is not None and lock_cmd(lz, head) == head["track"]:
+        k = head["track"]
+        l2 = (f"NAECHST {NAME[k]} gesperrt ({wertung.LABEL[head['cls']]} {fmt_tick(head['tick'])}): {head['fix']}"
+              f" -> {tr[k]['cmd']}")
+    elif head is not None or lz["cands"]:              # a lock lifted by another track (siege on R0 -> Wehr)
+        first = lock_cmd(lz, head) if head is not None else lz["cands"][0]
+        k = first
+        l2 = (f"NAECHST {NAME[k]} {ROMAN[tr[k]['eff'] + 1]}: {tr[k]['need']} -> {tr[k]['cmd']}"
+              + (f" (hebt Sperre {NAME[head['track']]})" if head is not None else ""))
+        if head is not None and head["track"] != k:
+            head = None                               # its GESPERRT entry goes to line 3
     else:
         l2 = "NAECHST -: jede Spur auf III, blockiert oder gesperrt"
     parts = []
-    first = lz["cands"][0] if not lz["acute"] and not lz["locks"] and lz["cands"] else None
     rest = [k for k in lz["cands"] if k != first and not tr[k]["time"]]
     if rest:
         k = rest[0]
         parts.append(f"OFFEN {NAME[k]} {ROMAN[tr[k]['eff'] + 1]}: {tr[k]['need']} -> {tr[k]['cmd']}")
     for k in TRACKS:
-        if tr[k]["lock"] and not (lz["locks"] and lz["locks"][0]["track"] == k and not lz["acute"]):
+        if tr[k]["lock"] and not (head is not None and head["track"] == k):
             parts.append(f"GESPERRT {NAME[k]} ({wertung.LABEL[tr[k]['lock']['cls']]}: {tr[k]['lock']['fix']})")
         if tr[k]["gate"]:
             parts.append(f"GESPERRT {NAME[k]} {ROMAN[tr[k]['eff'] + 1]} ({tr[k]['gate']})")
@@ -567,7 +591,12 @@ def session_lines(save_dir: Path) -> tuple[list[str], int]:
     if f0 != f1:
         ch.append(f"Ruestung {f0}/{RUESTUNG_FULL[0]}->{f1}/{RUESTUNG_FULL[0]}")
     evs = wertung.load_events(save_dir, ss["n"])
-    ds = wertung.classified(evs, wertung.sieges(wertung.load_events(save_dir, 0, ss["t"] - SEASON), lz["now"]))
+    back = wertung.load_events(save_dir, 0, ss["t"] - SEASON)
+    # a unit already reported dead before the session (its 'found dead' revision may come seasons later) is no session
+    # death: every DEATH up to the start n, without a tick floor (BUG-784)
+    pre = {_i(_o(e.get("d")).get("unit")) for e in wertung.load_events(save_dir, 0)
+           if e.get("type") == "DEATH" and (_i(e.get("n")) or 0) <= ss["n"]}
+    ds = [x for x in wertung.classified(evs, wertung.sieges(back, lz["now"])) if x["unit"] not in pre]
     by: dict[str, int] = {}
     for x in ds:
         by[x["cls"]] = by.get(x["cls"], 0) + 1

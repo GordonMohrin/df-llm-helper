@@ -70,7 +70,12 @@ Six tracks with three levels each (EHRGEIZ-MECHANIK 2), from the kernel state (`
   sites <tpl>` with 0 ranked sites in the last 6 real hours (now logged to cli.log by `bp sites`);
   `stock.mroute == "no stone"` (Wehr III traps); `stock.metal == "explore"` with ore 0 (Ruestung III). The track is
   skipped for NAECHST and listed as BLOCKIERT with the evidence and "-> FR".
-- **NAECHST**: the acute duty; else the first locked track's fix; else the weakest track (lowest effective level, ties
+- **NAECHST**: the acute duty; else the first lock that a command lifts (BUG-783): `durst_hunger` -> `NAECHST
+  Versorgung gesperrt (...): <fix> -> <Versorgung command>`, `patient` -> the Wohl command, `belagerung` on R0 ->
+  `NAECHST Wehr <n>: ... -> <Wehr command> (hebt Sperre Volk)`; a lock only time lifts (mood, digging/water) or whose
+  lifting track has no actionable command never takes NAECHST and shows as `GESPERRT <Spur> (<Ursache>: <fix>)` in
+  line 3; a locked track is never a NAECHST or OFFEN candidate (its capped level and its raw need text would
+  mislabel the step); else the weakest unlocked track (lowest effective level, ties
   Wehr, Versorgung, Ruestung, Wohl, Ausbau, Volk) not blocked and below III, with ONE command (allowed: plan content,
   `bp.place` templates, `trade.want`, `bp.resume`, `dfllm audit`; never drill, sortie, caverns or aquifer work).
 - **Records**: `<save>/leiter.json` (tool file, kind `leiter`, CONTRACTS 9.21) holds the fort's best sum and per-track
@@ -99,6 +104,22 @@ Six tracks with three levels each (EHRGEIZ-MECHANIK 2), from the kernel state (`
 written), `leiter.locks` (true: per-cause locks), `leiter.gates` (true), `leiter.ruestung_metal_pct` (50),
 `leiter.blocked_hours` (6).
 
+## Bugs fixed on the way (verifier round)
+
+- **BUG-783**: any active lock took the NAECHST line, also when only time lifts it: an R0 fort with one siege death
+  printed `NAECHST Volk gesperrt (...): R1` without a command for up to a game year, the actionable Wehr step pushed
+  to OFFEN (same for a mood death on Wohl II). Now `leiter.lock_cmd` (table `LOCK_FIX`) decides; tests
+  `test_siege_lock_on_r0_names_the_wehr_command`, `test_mood_lock_with_stress_clock_keeps_a_command`. Second verifier
+  pass: a locked track stayed in `cands` with its eff capped, so a skipped time-only lock let NAECHST fall back to the
+  locked track itself (`NAECHST Wohl II: Stress 40 % ...` beside `GESPERRT Wohl`); `compute` now leaves every locked
+  track out of `cands` (`test_time_only_lock_never_names_naechst_or_offen`, mood at Wohl II and drowning at P3).
+- **BUG-784**: `--sitzung` counted a death reported before the session start again when its 'found dead' revision came
+  during the session; `session_lines` drops units with any DEATH at n <= the start n, read from the whole event log
+  without a tick floor (the first report may lie seasons back; `test_session_skips_deaths_reported_before_start`,
+  first report three seasons before the start).
+- `t_wehr` no longer reads `ready.ts` (never published by readiness.lua); Wehr III rests on the `traps_short` /
+  `traps<N` fail tokens.
+
 ## Deliberately not done
 
 - `plan propose` does not put the weakest track's build first and does not raise phase_target (later round).
@@ -108,6 +129,8 @@ written), `leiter.locks` (true: per-cause locks), `leiter.gates` (true), `leiter
 - No death ledger: if the kernel ever rotates events.jsonl twice, older deaths are gone (every Run 15/16 fort still has
   its full log in events.1.jsonl + events.jsonl).
 - PLAYBOOK / playloop text (Leitung).
+- Wohl keeps two commands outside the build list (`dfllm cmd tombs.repair` with free tombs, `dfllm cmd inspect
+  what=water_sources` for a hospital without water): both are harmless and name the actual fix.
 
 ## Retrospective result (docs/v2/WERTUNG-rueckblick.md, 29 fort folders of Run 15/16)
 
@@ -121,9 +144,14 @@ Basementflew, Whirledrampart, Trumpetrealms and Pagedsculpture rests partly on S
 1. `dfpilot brief` of every running fort shows three consecutive lines starting `LEITER `, `NAECHST ` and
    `OFFEN`/`GESPERRT`/`BLOCKIERT` after the head block; `dfpilot status` ends with the `LEITER` line in PEACE.
 2. In SIEGE/BREACH or with a citizen dying of thirst the NAECHST line starts `NAECHST Pflicht:` and names no build.
-3. After a dehydration death while drink or food is below 60 d the LEITER output shows `GESPERRT Versorgung` until
-   both stand at 60 d again.
+3. After a dehydration death while drink or food is below 60 d (PEACE, no acute duty) the line reads `NAECHST
+   Versorgung gesperrt (Durst/Hunger ...): ... -> dfllm ...` until both stand at 60 d again. After a siege death on R0
+   it reads `NAECHST Wehr ... -> dfllm ... (hebt Sperre Volk)` with `GESPERRT Volk (Belagerung ...)` in line 3; after
+   a mood death `GESPERRT Wohl (Stimmung ...)` stands in line 3 and NAECHST names another track's `dfllm` command,
+   never `NAECHST Wohl`; after a digging/water death the same holds for Ausbau. A NAECHST line outside `Pflicht:` and
+   `-:` never lacks a `-> ` command, and no track appears as both `GESPERRT <Spur> (` and `NAECHST`/`OFFEN <Spur>`
+   (except `NAECHST <Spur> gesperrt` for thirst / patient locks).
 4. `dfpilot wertung` in a running fort prints one WERTUNG line whose death count equals the distinct citizen DEATH
    units of `dfpilot events --type DEATH --limit 0`.
 5. `dfpilot leiter --start` at the session start and `--sitzung` at its end print a SITZUNG line whose deaths equal the
-   DEATH events of that span.
+   DEATH events of that span (a unit first reported dead before `--start` does not count, BUG-784).
