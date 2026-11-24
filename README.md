@@ -27,7 +27,7 @@ A Lua kernel runs inside DFHack on every frame. It watches the fort, raises the 
 Dwarf Fortress 53.x + DFHack
 ├─ DFHack natives, set up by `baseline`: buildingplan, suspendmanager, labormanager (monitor), autochop,
 │  autofarm, autobutcher, tailor, logistics, burial/preserve-tombs, pop-control, timestream, orders library ...
-└─ lua/dfllm kernel: ONE frame dispatcher + 22 modules, budget 25 ms per real second
+└─ lua/dfllm kernel: ONE frame dispatcher + 23 modules, budget 25 ms per real second
      SENSE   sense, snapshot        visible units and revealed tiles only
      DECIDE  reflex, siege, threat, gate, seal, military, drill, readiness, runner, economy, care, water, traps, cavern, trade, baseline
      ACT     arbiter (pause, tempo) + act.lua, the only writer; every act function is a UI action
@@ -86,7 +86,7 @@ Sources: `docs/v2/ASIS-ANALYSIS.md` (v1) and the KPI tables in `docs/v2/STATUS.m
    - `python tools/migrate_v2.py --revert` undoes it.
 4. Offline check: `python -m dfpilot lint` prints `0 finding(s)`.
 5. Start DF through DFHack. `"<DF>/hack/dfhack-run.exe" dfllm selftest --mock` reports `0 fail`.
-6. Load or embark a fort, then once: `dfhack-run dfllm adopt`. This writes the `dfllm` marker into the save, loads the phases of `plans/year1.json` and boots the 22 modules. Check `dfhack-run dfllm status` (no module `DISABLED`) and `dfhack-run dfllm selftest full`.
+6. Load or embark a fort, then once: `dfhack-run dfllm adopt`. This writes the `dfllm` marker into the save, loads the phases of `plans/year1.json` and boots the 23 modules. Check `dfhack-run dfllm status` (no module `DISABLED`) and `dfhack-run dfllm selftest full`.
 7. `python -m dfpilot doctor` and `python -m dfpilot status`. Unpause DF yourself: the kernel never releases a pause by you or by DF (a loaded save starts paused).
 8. Keep `python -m dfpilot follow` running (a terminal, or the agent's Monitor) and make the year plan: `plan propose <file>`, edit, `plan check <file>`, `plan apply <file>`.
 
@@ -166,7 +166,7 @@ python -m dfpilot.lint --config             # config files: config ok
 
 ```
 RULES.md          the LLM's always-read rules (<= 300 lines)
-lua/dfllm.lua     in-game entry; lua/dfllm/ kernel, 22 modules, util/ (json, contract, k_mock)
+lua/dfllm.lua     in-game entry; lua/dfllm/ kernel, 23 modules, util/ (json, contract, k_mock)
 dfpilot/    Python CLI (stdlib) and bp/ (templates, emitter, path audit, site ranking)
 plans/ config/    year-1 phases; allowlist, baseline, decisions
 tools/            migrate_v2.py, embark/, luahost.py, win/
