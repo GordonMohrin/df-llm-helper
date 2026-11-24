@@ -44,7 +44,7 @@ local function fort(opts)
     W.bridge[n], W.lever[n] = b, lv
   end
   SW.regroup(W)
-  SW.item(W, 'DRINK', 55, 20, Z, 40)
+  if not opts.no_drink then SW.item(W, 'DRINK', 55, 20, Z, 40) end
   SW.item(W, 'FOOD', 56, 20, Z, 40)
   if opts.stock_out then SW.item(W, 'DRINK', 10, 20, Z, 200) end
   for i, p in ipairs({{50, 15}, {51, 16}, {52, 17}}) do
@@ -84,7 +84,7 @@ local function fort(opts)
     return false, 'job no longer pending'
   end)
   dfhack.job = {getWorker = function(j) return j._worker end}
-  local mods = {S.military(), SW.fake('economy', {state = function() return {stock = {drink_d = 100, food_d = 100}} end})}
+  local mods = {S.military(), SW.fake('economy', {state = function() return {stock = {drink_d = opts.drink_d or 100, food_d = 100}} end})}
   package.loaded['dfllm.seal'] = nil
   mods[#mods + 1] = require('dfllm.seal')
   S.load(W, mods)
@@ -280,6 +280,14 @@ T.test('BUG-028 (d): most of the drink lies on the field: SUPPLY_OUTSIDE (A) wit
   T.eq(#evs(W, 'SUPPLY_OUTSIDE'), 1, 'no news: not again')
   local al = W.state().alert
   T.eq({al.core_d, al.core_f}, {16, 100})
+end)
+
+T.test('BUG-829: no drink in the fort at all (stock days known 0): the core days read 0, not unknown (Run 17 i2 "drink inside the core ? d")', function()
+  local W = fort{no_drink = true, drink_d = 0}
+  run(W, 1500)
+  local al = W.state().alert
+  T.eq(al.core_d, 0, 'core_d ' .. T.show(al))
+  T.eq(al.core_f, 100)
 end)
 
 ---------------------------------------------------------------- BUG-030: a destroyed bridge

@@ -11,12 +11,13 @@ The ladder step 'squad' (readiness.growth_ladder) needs `growth.armed_min` (3) m
 `M.armed_floor(K, adults)`: `growth.armed_min` when the growth ladder is on and the fort has at least 2/3 of `growth.base` adults (20 at base 30), else 0. `M.targets`: the soldier total is at least armed_min + 2 crossbows (never more than the adults), and the first melee squad takes `max(even share, armed_floor)` seats before the second one. `M.gear_fill`: the first melee squad keeps armed_floor seats beyond the gear floor. The condition itself is NOT relaxed: a seat arms nobody (fail closed); the squad still needs `armed_min` real weapons in hand (or backed by the census). Growth off, or a fort below 2/3 of the base cap: unchanged split.
 
 ## Open
-A fort without a real melee weapon (i3: census g_weapon 0, "weapon 0/3 no bars"; i4 "weapon 1/2 no fuel"; i1 "weapon 0/2 no bars") still holds at 30 until the economy forges 3 weapons: that is a metal/fuel supply question (economy), not the squad setup. Which of A's soldiers lacks the weapon on i2 and why is not logged per soldier.
+A fort without a real melee weapon (i3: census g_weapon 0, "weapon 0/3 no bars"; i4 "weapon 1/2 no fuel"; i1 "weapon 0/2 no bars") still holds at 30 until the economy forges 3 weapons: that is a metal/fuel supply question (economy), not the squad setup. Why a member holds no weapon: BUG-830 (i3 confirmed, i2 not proven; logged per soldier since).
 
 ## Tests
 `tests/lua/test_bug827_first_squad_seats.lua` (reproduces `{A=2,B=1,C=2}` before the fix; growth off and a pop-12 fort unchanged).
 
 ## Live-Erwartung
+Partial: this fix only removes the seat ceiling ("of 2"). It does NOT arm anybody and does not promise that the cap lifts: why a member holds no weapon is BUG-830.
 1. On i3/i4/i1 after a kernel reload and once the fort has 20+ adults: `mil.kit.sq` (state) and the `ready.gh.need` text read "first squad: x of 3+" (not "of 2" / "of 1") within one game day of the next target pass; `inspect military` shows `A 3`.
 2. kern.log no longer prints "melee filled to 2 of 3" while body armor is 2: the fill for squad A is at least 3.
-3. The halt leaves "(squad)" (to "drink" or "full") within a game day of the third real weapon reaching squad A; as long as the fort has 0-2 real melee weapons the halt stays "squad" with `mil.kit.sqw` below `sq` (fail closed, as designed).
+3. As long as a member has no weapon the halt stays "squad" (fail closed, as designed); what lacks is named per soldier in kern.log (BUG-830).

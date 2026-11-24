@@ -1543,7 +1543,7 @@ local function ensure_weapons(K, k, s)
   -- training weapon get individual choice (or a planned real weapon while guarded) back below, and the wooden ones are put on
   -- again once PEACE returns: a squad never meets an army with wooden weapons
   local mode = K.mode()
-  local trn = e.tr == 1 and (mode == 'PEACE' or mode == 'DRILL')
+  local trn = e.tr == 1 and (mode == 'PEACE' or mode == 'DRILL') and not M.first_real(K, k)   -- BUG-830: the ladder's squad keeps real weapons
   local unfilled = {}
   if trn then
     local tr = M.train_apply(K, s, nil, M.train_pool(K, k))        -- BUG-598: only as many wooden specs as wooden weapons exist
@@ -2193,6 +2193,24 @@ local function first_melee_key()
     local s = e and sp.kind == 'melee' and squad(e.id)
     if s and #members(s) > 0 then return sp.key end
   end
+end
+
+-- BUG-830 (Run 17 i3 Orangering y375: 'first squad: 1 of 2 members hold a real weapon' beside 12 free melee weapons and census g_weapon 5;
+-- commands.log: position 0 of squad A flipped real weapon -> training weapon -> real weapon -> training ... every 1-3 game days, each time
+-- with 'keep a real weapon: the fort holds no free training weapon' in kern.log; a soldier whose spec changes drops the weapon in hand and
+-- walks off for the new one, and the wooden weapon the squads share is gone by then): the first melee squad is the one the growth ladder's
+-- 'squad' step reads (readiness.growth_ladder: armed_min members, ALL armed). While the ladder is on and the fort owns real melee weapons
+-- for every seat of it (census g_weapon, at least armed_min), that squad is not put on the wooden training weapons: it takes real free
+-- weapons at once, in PEACE and in an alert alike. The training policy stays for every other squad (and for this one without the weapons)
+function M.first_real(K, key)
+  if key ~= first_melee_key() then return false end
+  local ok, c = K.call('readiness', 'growth_conf')
+  if not (ok and type(c) == 'table' and c.on and int(c.armed_min)) then return false end
+  local ci = K.census and K.census.i
+  local have = type(ci) == 'table' and int(ci.g_weapon) or 0
+  local e = st.sq[key]
+  local s = e and squad(e.id)
+  return have >= math.max(c.armed_min, s and #members(s) or 0)
 end
 
 local function posp(p)
@@ -3391,7 +3409,7 @@ function M.kit_rows(metal)
         local e = st.sq[sp.key]
         local s = e and squad(e.id)
         for _, m in ipairs(s and members(s) or {}) do
-          rows[#rows + 1] = {key = sp.key, x = M.KIT.soldier(m.p, m.unit, roles(), metal), xb = e.kind == 'xbow',
+          rows[#rows + 1] = {key = sp.key, pos = m.pos, p = m.p, x = M.KIT.soldier(m.p, m.unit, roles(), metal), xb = e.kind == 'xbow',
                              tr = e.kind ~= 'xbow' and (e.tr == 1 or e.un == 1)}
         end
       end
@@ -4598,7 +4616,41 @@ function M.kit_stats(K)
     end
   end
   rt.kit, rt.kit_t = t, now
+  M.trace_first(K, rows, first, t)
   return t
+end
+
+-- BUG-830: the first melee squad's soldiers one by one while the ladder's 'squad' step is open (not every member armed): position, the
+-- weapon in hand (real / wood / none), the weapon spec of the position, backed by a real weapon waiting. One kern.log line when the
+-- picture changes and at most once a game day, so a live run shows WHICH member lacks the weapon and why (spec but nothing in hand =
+-- unfetched, no spec = empty position, wood = the training policy). Read-only
+function M.trace_first(K, rows, first, t)
+  if not first or t.sq_n == 0 or t.sq_w >= t.sq_n then rt.trace_sig = nil; return end
+  local parts = {}
+  for _, r in ipairs(rows) do
+    if r.key == first then
+      local hand = 'none'
+      if r.x.weapon then
+        hand = r.x.wood and 'wood' or 'real'
+        local w = r.x.hand and r.x.hand[1] and r.x.hand[1] >= 0 and weapon_kind(r.x.hand[1])
+        if w then hand = hand .. ':' .. tostring(w.token):gsub('^ITEM_WEAPON_', '') end
+      end
+      local spec = {}
+      for _, sub in ipairs(r.p and weapon_specs(r.p) or {}) do
+        local w = sub >= 0 and weapon_kind(sub)
+        spec[#spec + 1] = w and (tostring(w.token):gsub('^ITEM_WEAPON_', '')) or 'any'
+      end
+      parts[#parts + 1] = string.format('pos %d hand %s spec %s%s', r.pos or -1, hand, #spec > 0 and table.concat(spec, '+') or 'none',
+                                        r.backed and ' (backed)' or (r.real and '' or ' (not armed)'))
+    end
+  end
+  local sig = table.concat(parts, '; ')
+  local now = now_tick(K)
+  if sig ~= rt.trace_sig or now - (rt.trace_t or -1e9) >= 1200 then
+    K.log('info', 'military: first squad %s %d of %d armed (census melee weapons %s): %s', first, t.sq_w, t.sq_n,
+          tostring(type(K.census.i) == 'table' and K.census.i.g_weapon or '?'), sig)
+    rt.trace_sig, rt.trace_t = sig, now
+  end
 end
 
 local function compute(K)

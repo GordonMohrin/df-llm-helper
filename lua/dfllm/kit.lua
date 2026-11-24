@@ -95,6 +95,8 @@ function KIT.soldier(p, u, R, is_metal)
     for _, it in pairs(on) do
       if it:getType() == W then
         r.weapon = true
+        r.hand = r.hand or {}
+        r.hand[#r.hand + 1] = try(function() return it:getSubtype() end) or -1       -- BUG-830: which weapon (the first squad's trace)
         if KIT.is_training(it) then r.wood = true end
       end
     end
