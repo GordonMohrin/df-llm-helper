@@ -29,6 +29,9 @@ def _parser() -> argparse.ArgumentParser:
     cmd.add_parser(sub)
     alarm.add_parsers(sub)
     guide.add_parser(sub)
+    from . import leiter, wertung                     # NEU1 P1: score per fort, Engpass-Leiter
+    wertung.add_parser(sub)
+    leiter.add_parser(sub)
     p = sub.add_parser("bp", help="blueprints: list | preview <tpl> | sites <tpl>")
     p.add_argument("action", choices=["list", "preview", "sites"])
     p.add_argument("tpl", nargs="?")
@@ -266,6 +269,8 @@ def run_bp(args, save_dir: Path | None) -> int:
         for s in sites:
             lbl = f" label {s['label']}" if s.get("label") else ""
             print(f"  {s.get('id')} anchor {s.get('anchor')} rot {s.get('rot')} score {s.get('score')}{lbl}: {s.get('why', '')}")
+        # NEU1 P1: the ladder takes 'free 0' as tool evidence that the template's track is blocked (leiter.blocked_evidence)
+        files.log_cli(save_dir, "cli", "bp.sites", {"tpl": args.tpl}, f"ranked {ranked} free {len(sites)}")
         if not sites:
             from .cmd import box_hint, no_site_hint
             why = no_site_hint(save_dir, args.tpl, snap_id, ranked, sorted(set(held)), params)      # BUG-067
@@ -415,6 +420,9 @@ def main(argv: list[str] | None = None) -> int:
         return run_lint(args)
     if c == "gamelog":                                 # BUG-249: needs no fort runtime, only the DF folder
         return run_gamelog(args)
+    if c == "wertung" and (args.dir or args.alle):     # NEU1 P1: old forts by folder, no current save needed
+        from .wertung import run as run_wertung
+        return run_wertung(args, None)
     try:
         save_dir = paths.save_dir()
     except paths.NoSave as e:
@@ -463,6 +471,12 @@ def main(argv: list[str] | None = None) -> int:
         return run(args, save_dir)
     if c == "bp":
         return run_bp(args, save_dir)
+    if c == "wertung":
+        from .wertung import run as run_wertung
+        return run_wertung(args, save_dir)
+    if c == "leiter":
+        from .leiter import run as run_leiter
+        return run_leiter(args, save_dir)
     return 2
 
 

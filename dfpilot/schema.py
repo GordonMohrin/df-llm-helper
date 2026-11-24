@@ -1575,6 +1575,19 @@ PERSIST_BURROWS = Obj(req={"v": Const(V), "ad": TICK,
                                                          "ep": _BURROW_EP}),
                                           keys=r"^.{1,40}$"))})
 
+# NEU1 P1 (docs/v2/NEU1-wertung.md; Python only, tool files the player cannot write): <save>/wertung.json = the population
+# series [[tick, citizens], ...] that `dfpilot wertung` folds from perf.csv (one sample per 14 game days or 3 citizens);
+# <save>/leiter.json = the Engpass-Leiter's memory: h = the one-year hold clocks (drink >= 170 d, stress < 10 %: since
+# tick or null), ht = the last sample tick, best / last = the fort's best and last ladder sum (lv = best level per
+# track), born = wall of the first write, t0 = the first tick under the ladder, sess = the session start (`leiter --start`)
+_LV = Obj(extra=Int(0, 3))
+WERTUNG = Obj(req={"v": Const(V), "s": Arr(Tup([TICK, NAT]), hi=20000)}, opt={"wall": NAT})
+LEITER = Obj(req={"v": Const(V)},
+             opt={"h": Obj(opt={"drink": AnyOf(Null(), TICK), "stress": AnyOf(Null(), TICK)}), "ht": TICK,
+                  "best": Obj(req={"sum": Int(0, 18), "t": TICK, "y": NAT}, opt={"lv": _LV}),
+                  "last": Obj(req={"sum": Int(0, 18), "t": TICK, "wall": NAT}), "born": NAT, "t0": TICK,
+                  "sess": Obj(req={"t": TICK, "n": NAT, "wall": NAT, "sum": Int(0, 18), "lv": _LV, "full": NAT})})
+
 SCHEMAS: dict[str, Spec] = {
     "state": STATE, "heartbeat": HEARTBEAT, "event": EVENT, "inbox": INBOX, "outbox": OUTBOX,
     "plan": PLAN, "phases": PHASES, "bp": BP, "manifest": MANIFEST, "snapshot": SNAPSHOT,
@@ -1582,6 +1595,7 @@ SCHEMAS: dict[str, Spec] = {
     "persist.marker": PERSIST_MARKER, "persist.projects": PERSIST_PROJECTS, "persist.plan": PERSIST_PLAN,
     "persist.phase": PERSIST_PHASE, "persist.mode": PERSIST_MODE, "persist.drill": PERSIST_DRILL,
     "persist.kern": PERSIST_KERN, "persist.burrows": PERSIST_BURROWS,
+    "wertung": WERTUNG, "leiter": LEITER,
 }
 KINDS = list(SCHEMAS)
 

@@ -1149,3 +1149,10 @@ def armok_problems(armok_cmds: set[str], al: dict | None = None) -> list[str]:
     that are not listed in armok_exceptions."""
     al = al or allowlist()
     return sorted(c for c in al["commands"] if c in armok_cmds and c not in al["armok_exceptions"])
+
+
+# NEU1 P1 (docs/v2/NEU1-wertung.md): config/wertung.json, sections wertung (score) and leiter (Engpass-Leiter); the limits
+# live in dfpilot/wertung.py LIM (one source for the check and the reader, which keeps the default for a bad value)
+def wertung_errors(path: str | Path | None = None) -> list[str]:
+    from . import wertung
+    return wertung.config_errors(path)

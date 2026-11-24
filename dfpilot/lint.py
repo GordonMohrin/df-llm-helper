@@ -1443,6 +1443,10 @@ def dfhack_line(toks: list[str], dev: bool = False, cwd: str | None = None, al: 
 # kernel snapshot; `dfllm audit` takes no result args, so it stays allowed), no hand-written inbox JSON with "by".
 TRUST_BY = frozenset({"llm", "cli"})
 _RUNTIME = re.compile(r"dfllm-runtime[\\/]", re.I)
+# NEU1 P1: the tool files of the ladder and the score in a save folder (not config/wertung.json) and a shell write to them
+_LADDER_FILE = re.compile(r"(?<![cC]onfig[\\/])\b(leiter|wertung)\.json\b")
+_WRITE_OP = re.compile(r">\s*[\"']?[^\s|;&]*\b(leiter|wertung)\.json|\b(tee|cp|mv|rm|del|Set-Content|Add-Content|Out-File|"
+                       r"Remove-Item|Copy-Item|Move-Item|New-Item)\b|sed\s+-i|write_text|json\.dump|write_json", re.I)
 _PY = ("python", "python3", "py", "pythonw")
 # the package and its old name df_llm_helper (2026-10-02 .. 10-15; a forwarding package keeps running setups working)
 _PKG_MODS = ("dfpilot", "dfpilot.cli", "dfpilot.__main__", "df_llm_helper", "df_llm_helper.cli", "df_llm_helper.__main__")
@@ -1507,6 +1511,9 @@ def trust_violation(text: str) -> str | None:
         return why
     if _RUNTIME.search(text) and re.search(r"inbox", text, re.I) and re.search(r"[\"']by[\"']\s*:", text):
         return "inbox JSON with \"by\" written by hand: use dfllm cmd (CONTRACTS §13)"
+    if _LADDER_FILE.search(text) and _WRITE_OP.search(text):
+        return ("leiter.json / wertung.json are the ladder's and the score's memory: only dfpilot writes them "
+                "(NEU1 P1, docs/v2/NEU1-wertung.md)")
     return None
 
 
@@ -1621,6 +1628,7 @@ def main(argv: list[str] | None = None) -> int:
                 + fairplay.military_errors() + fairplay.offices_errors() + fairplay.zones_errors()
                 + fairplay.save_errors() + fairplay.perf_errors() + fairplay.burrow_errors()
                 + fairplay.plan_errors() + fairplay.view_errors() + process_errors())
+        errs += fairplay.wertung_errors()                    # NEU1 P1: config/wertung.json
         try:
             fairplay.allowlist()
         except Exception as e:                               # noqa: BLE001 - report any invalid file
