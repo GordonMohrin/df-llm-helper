@@ -1646,9 +1646,10 @@ local function impls(state)
   -- NEU1 P7 (verbs zone.remove / building.remove, the player's own remove; Run 16: 'kein Befehl' for a dead zone or workshop): ONE
   -- building or zone by id, the way the building sheet's / zones screen's remove does it (dfhack.buildings.deconstruct: a zone goes at
   -- once, a building gets a Remove Building job). kind 'zone' takes civzones only, kind 'building' everything else; a bridge, a lever or
-  -- the trade depot only with `force` (the player's approve:true: a gate or its lever is the fort's defence). Returns ok,
+  -- the trade depot (BUG-815: a door, a hatch) only with `force` (the player's approve:true: a gate, its lever, a door is the
+  -- fort's defence). Returns ok,
   -- {how = 'gone' | 'queued', rect = {x1, y1, x2, y2, z}, type = name} or false, why. [live-untested]
-  A.REMOVE_GUARDED = {Bridge = true, TradeDepot = true}
+  A.REMOVE_GUARDED = {Bridge = true, TradeDepot = true, Door = true, Hatch = true}   -- BUG-815: a door or hatch is the perimeter
   function I.building_remove(id, kind, force)
     id = int(id)
     if not id then return false, 'bad building id' end

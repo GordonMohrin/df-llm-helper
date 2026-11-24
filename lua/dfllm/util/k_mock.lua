@@ -492,7 +492,7 @@ function M.new(opts)
       -- NEU1 P7 (as kern's act env): outside a player verb a held object is refused; inside one the successful calls are noted
       local pm = W.mods.player
       if not W.in_verb and pm and not pm.disabled and type(pm.M.held) == 'function' then
-        local keys = holdlib.keys(fn, rec.args)
+        local keys = holdlib.query(fn, rec.args)
         local v = #keys > 0 and pm.M.held(keys, now.tick) or nil
         if v then
           rec.ok, rec.res, rec.held = false, 'held by the player (' .. tostring(v) .. ')', v

@@ -6,7 +6,9 @@
 --     deaths:<cause>: player.deaths_n citizens of one cause within player.deaths_days) held player.exit_days game days (deaths at once)
 --     opens the exit: EMERGENCY (A) wakes the player, the arbiter clamps the clock (M.clock), the tactical verbs (contract.VERB_EMG:
 --     lever up in any mode, squad.station, burrow.unit, door.lock) work. It closes player.grace_days after the last critical day
---     (EMERGENCY_END, C): the stationed squads go back to the kernel, the tactical holds end. A missing reading counts as not critical
+--     (EMERGENCY_END, C): the stationed squads go back to the kernel, the tactical holds end, and the player's tactical changes are
+--     undone (BUG-812/814): every door door.lock locked that was open before is unlocked, every burrow member burrow.unit added or
+--     dropped gets its old membership back. Nothing the exit unlocked outlives it. A missing reading counts as not critical
 --     (fail closed: nothing is unlocked without data).
 --  2. HOLDS. The act calls of a hold verb (contract.VERB_HOLD) leave holds on the objects they touched (util/hold.lua keys); kern
 --     refuses the kernel's own act calls on a held object (no ACT_FAIL) for player.hold_days (tactical ones: until the exit closes).
@@ -26,6 +28,7 @@ M.LIM = {exit_days = {0, 30}, grace_days = {0, 60}, thirst = {10000, 200000}, de
 M.BOOLS = {exit = true, slow = true, verbs = true, hold = true}
 M.IGNORE = {old_age = true, other = true}       -- care died_y keys that are no avoidable cause (old age, the rest of the top 5)
 M.HOLDS_MAX = 200
+M.EMG_HOLD_MAX = 400 * DAY   -- a tactical hold's bound (close ends it first)
 -- furniture.place: the quickfort build key of one piece (schema.FURNITURE)
 M.FURNITURE = {bed = 'b', table = 't', chair = 'c', door = 'd', cabinet = 'f', chest = 'h', coffin = 'n', weapon_rack = 'r',
                armor_stand = 'a', statue = 's', hatch = 'H'}
@@ -34,7 +37,8 @@ M.EMG_VERBS = {'lever (up, any mode)', 'squad.station', 'squad.sortie', 'burrow.
 local function int(v) return type(v) == 'number' and math.tointeger(v) or nil end
 
 local st            -- persisted m.player: {v = 1, holds = {{k, u, v, e}}, crit = {cond = since}, dl = {cause = n}, dt = {cause = {ticks}},
-                    --  emg = {since, last, why = {conds}, sq = {key = true}} | nil}
+                    --  emg = {since, last, why = {conds}, sq = {key = true}, dr = {{id, o}} (doors: state before the first
+                    --  door.lock, o 1 locked / 0 open), bu = {{b, u, o}} (burrow members before the first burrow.unit)} | nil}
 local cfg = nil     -- the knobs of the last step (M.held runs outside a module call)
 
 -- the knobs of config/baseline.json `player`; a value of another type or out of range keeps its default (fairplay.player_errors)
@@ -145,6 +149,63 @@ local function emit_open(K, c, now, added)
           causes = json.array(e.why)})
 end
 
+-- the burrow's living citizens now (the act takes the whole list), or nil, why
+local function members(name)
+  local ok, r = pcall(function()
+    local b = dfhack.burrows.findByName(name)
+    if not b then return nil end
+    local ids = {}
+    for _, id in ipairs(b.units) do
+      local u = df.unit.find(id)
+      if u and dfhack.units.isCitizen(u) and not dfhack.units.isDead(u) then ids[#ids + 1] = id end
+    end
+    return ids
+  end)
+  if not ok then return nil, tostring(r) end
+  if not r then return nil, 'no burrow ' .. name end
+  return r
+end
+
+local function living(id)
+  local ok, r = pcall(function()
+    local u = df.unit.find(id)
+    return u ~= nil and dfhack.units.isCitizen(u) and not dfhack.units.isDead(u)
+  end)
+  return ok and r == true
+end
+
+-- BUG-812/814: the exit closes: the player's tactical changes go back (doors he locked that were open, burrow members he moved).
+-- A door that was locked before his first door.lock is left to whoever locked it (reflex opens its own after quiet; an unlock is
+-- never held). Returns doors unlocked, burrows restored.
+local function undo(K, e)
+  local nd, nb = 0, 0
+  for _, d in ipairs(type(e.dr) == 'table' and e.dr or {}) do
+    if int(d.id) and d.o == 0 and K.act.door_forbid(d.id, false) then nd = nd + 1 end
+  end
+  local by, order = {}, {}
+  for _, m in ipairs(type(e.bu) == 'table' and e.bu or {}) do
+    if type(m.b) == 'string' and int(m.u) then
+      if not by[m.b] then by[m.b] = {}; order[#order + 1] = m.b end
+      by[m.b][m.u] = m.o == 1
+    end
+  end
+  for _, name in ipairs(order) do
+    local want = by[name]
+    local ids = members(name)
+    if ids then
+      local list, has = {}, {}
+      for _, id in ipairs(ids) do
+        has[id] = true
+        if want[id] ~= false then list[#list + 1] = id end
+      end
+      for id, w in pairs(want) do if w and not has[id] and living(id) then list[#list + 1] = id end end
+      table.sort(list)
+      if K.act.burrow_units(name, list) then nb = nb + 1 end
+    end
+  end
+  return nd, nb
+end
+
 local function close(K, why)
   local e = st.emg
   if not e then return end
@@ -152,10 +213,12 @@ local function close(K, why)
   local keep = {}
   for _, h in ipairs(st.holds) do if h.e ~= 1 then keep[#keep + 1] = h end end
   st.holds = keep
+  local nd, nb = undo(K, e)
   local days = (K.now().tick - (int(e.since) or K.now().tick)) // DAY
   st.emg = nil
-  K.emit('EMERGENCY_END', 'C', string.format('emergency exit closed (%s) after %d days; tactical verbs locked again', why, days),
-         {why = why, days = days})
+  K.emit('EMERGENCY_END', 'C', string.format('emergency exit closed (%s) after %d days; tactical verbs locked again; ' ..
+                                             '%d door(s) unlocked, %d burrow(s) restored', why, days, nd, nb),
+         {why = why, days = days, doors = nd, burrows = nb})
 end
 
 function M.step(K)
@@ -216,7 +279,9 @@ function M.hold_acts(K, acts, verb)
   if not c.hold then return 0 end
   local now = K.now().tick
   local emg = C.VERB_EMG[verb] == true and st.emg ~= nil
-  local u = emg and until_tick(c) or now + c.hold_days * DAY
+  -- BUG-816: a tactical hold lasts until the exit closes (close drops every e=1 hold), not until the grace end seen at the verb's
+  -- time (the exit stays open while a condition holds, the old fixed end ran out under it); M.EMG_HOLD_MAX bounds it if close never runs
+  local u = emg and (now + M.EMG_HOLD_MAX) or now + c.hold_days * DAY
   local n = 0
   for _, a in ipairs(type(acts) == 'table' and acts or {}) do
     for _, k in ipairs(HOLD.recorded(HOLD.keys(a.fn, a.args, a.res))) do
@@ -345,23 +410,6 @@ M.verbs['squad.station'] = function(K, args)
                              tostring(res))
 end
 
--- the burrow's living citizens now (the act takes the whole list), or nil, why
-local function members(name)
-  local ok, r = pcall(function()
-    local b = dfhack.burrows.findByName(name)
-    if not b then return nil end
-    local ids = {}
-    for _, id in ipairs(b.units) do
-      local u = df.unit.find(id)
-      if u and dfhack.units.isCitizen(u) and not dfhack.units.isDead(u) then ids[#ids + 1] = id end
-    end
-    return ids
-  end)
-  if not ok then return nil, tostring(r) end
-  if not r then return nil, 'no burrow ' .. name end
-  return r
-end
-
 M.verbs['burrow.unit'] = function(K, args)
   local no = tactical(K, 'burrow.unit'); if no then return false, no end
   local ids, why = members(args.burrow)
@@ -374,16 +422,30 @@ M.verbs['burrow.unit'] = function(K, args)
   if args.on and not had then list[#list + 1] = args.unit end
   local ok, res = K.act.burrow_units(args.burrow, list)
   if not ok then return false, 'burrow.unit: ' .. tostring(res) end
-  return true, string.format('unit %d %s burrow %s (%d members)%s', args.unit, args.on and 'in' or 'out of', args.burrow, #list,
-                             held_note(K, 'burrow.unit'))
+  -- BUG-814: the membership before the player's first change of this unit in this burrow comes back when the exit closes (no hold:
+  -- gate's lever-room pullers are level-triggered and must win in BREACH)
+  st.emg.bu = type(st.emg.bu) == 'table' and st.emg.bu or {}
+  local seen = false
+  for _, m in ipairs(st.emg.bu) do if m.b == args.burrow and m.u == args.unit then seen = true end end
+  if not seen and #st.emg.bu < 100 then st.emg.bu[#st.emg.bu + 1] = {b = args.burrow, u = args.unit, o = had and 1 or 0} end
+  save(K)
+  return true, string.format('unit %d %s burrow %s (%d members); restored when the exit closes', args.unit,
+                             args.on and 'in' or 'out of', args.burrow, #list)
 end
 
 M.verbs['door.lock'] = function(K, args)
   local no = tactical(K, 'door.lock'); if no then return false, no end
   local ok, res = K.act.door_forbid(args.door, args.on == true, args.on == true)
   if not ok then return false, 'door.lock: ' .. tostring(res) end
-  return true, string.format('door %d %s (was %s)%s', args.door, args.on and 'locked' or 'unlocked', res and 'locked' or 'open',
-                             held_note(K, 'door.lock'))
+  -- BUG-812: the door's state before the player's first door.lock; a door he locked that was open is unlocked when the exit closes
+  st.emg.dr = type(st.emg.dr) == 'table' and st.emg.dr or {}
+  local seen = false
+  for _, d in ipairs(st.emg.dr) do if d.id == args.door then seen = true end end
+  if not seen and #st.emg.dr < 100 then st.emg.dr[#st.emg.dr + 1] = {id = args.door, o = res == true and 1 or 0} end
+  save(K)
+  return true, string.format('door %d %s (was %s)%s; unlocked again when the exit closes', args.door,
+                             args.on and 'locked' or 'unlocked', res and 'locked' or 'open',
+                             args.on and held_note(K, 'door.lock') or ' (an unlock is never held)')
 end
 
 return M

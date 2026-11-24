@@ -434,7 +434,7 @@ local function build(o)
       if st.in_verb then return nil end
       local p = st.mods.player
       if not (p and not p.disabled and type(p.M.held) == 'function') then return nil end
-      local keys = holdlib.keys(fn, args)
+      local keys = holdlib.query(fn, args)
       if #keys == 0 then return nil end
       local ok, v = pcall(p.M.held, keys, st.now and st.now.tick or 0)
       return ok and v or nil

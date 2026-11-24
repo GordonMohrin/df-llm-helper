@@ -75,16 +75,21 @@ T.test('act env: a held call is refused without a fail and without running; a su
   T.eq(seen, {'labor_set'})
 end)
 
-T.test('kern: labor.set through the inbox is held; economy\'s later switch is refused (no ACT_FAIL), another unit is not', function()
+T.test('kern: labor.set through the inbox is held; economy\'s later switch is refused (no ACT_FAIL), another unit is not; ' ..
+       'BUG-813: care\'s medic on the same unit goes through (the hold is per labor)', function()
   local W = H.world{tag = 'kernhold', units = {{id = 41, citizen = true}, {id = 42, citizen = true}}, ms_per_frame = 100}
-  df.unit_labor = {PLANT = 1}
-  W.unit(41).status.labors = {[1] = false}
+  df.unit_labor = {PLANT = 1, DIAGNOSE = 2, SURGERY = 3, BONE_SETTING = 4}
+  W.unit(41).status.labors = {[1] = false, [2] = false, [3] = false, [4] = false}
   W.unit(42).status.labors = {[1] = true}
   local eco = {name = 'economy', every = {ticks = 100}}
   function eco.step(K)
     if W.go then W.res = {{K.act.labor_set(41, 'farm', false)}, {K.act.labor_set(42, 'farm', false)}} end
   end
-  local ok, msg = H.boot(W, {modules = {require('dfllm.player'), eco}})
+  local care = {name = 'care', every = {ticks = 100}}
+  function care.step(K)
+    if W.go then W.med = {K.act.medic(41, true)} end
+  end
+  local ok, msg = H.boot(W, {modules = {require('dfllm.player'), eco, care}})
   T.ok(ok, msg)
   H.run(W, 20, {skip = 10})
   H.inbox(W, 'c1', 'labor.set', {unit = 41, labor = 'farm', on = true})
@@ -99,6 +104,8 @@ T.test('kern: labor.set through the inbox is held; economy\'s later switch is re
   T.eq(W.res[2][1], true)
   T.eq(W.unit(42).status.labors[1], false, 'an unheld unit is switched')
   T.eq(W.unit(41).status.labors[1], true, 'the player\'s labor stays')
+  T.eq(W.med[1], true, 'BUG-813: a doctor on a unit whose farm labor the player holds')
+  T.eq({W.unit(41).status.labors[2], W.unit(41).status.labors[3]}, {true, true})
   T.eq(#H.find(H.events(W), 'ACT_FAIL'), 0)
   require('dfllm.kern').stop()
 end)

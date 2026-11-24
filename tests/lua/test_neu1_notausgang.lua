@@ -107,17 +107,29 @@ T.test('a missing reading opens nothing (fail closed), and player.exit=false kee
   T.ok(last_reply(W2).msg:find('config player.exit is off', 1, true), last_reply(W2).msg)
 end)
 
-T.test('labor.set holds the unit: the kernel loop that switches it back is refused (no ACT_FAIL) until hold_days, another unit is not held', function()
+T.test('labor.set holds the unit\'s labor: the kernel loop that switches it back is refused (no ACT_FAIL) until hold_days; ' ..
+       'BUG-813: another labor, a work detail (water\'s Orderlies), a medic and another unit are not held', function()
   local W = world{}
   W.inbox('labor.set', {unit = 41, labor = 'farm', on = true})
   T.eq(last_reply(W).ok, true, last_reply(W).msg)
   local a = W.find_acts('labor_set')
   T.eq({a[1].args[1], a[1].args[2], a[1].args[3], a[1].args[4], a[1].by}, {41, 'farm', true, true, 'player'})
-  W.eco = {{'labor_set', 41, 'farm', false}, {'labor_set', 42, 'farm', false}, {'work_detail', 'Planters', 41, false}}
+  W.eco = {{'labor_set', 41, 'farm', false}, {'labor_set', 42, 'farm', false}, {'work_detail', 'Orderlies', 41, true},
+           {'labor_set', 41, 'hunt', false}}
   W.run(DAY, {skip = 100})
   T.eq(W.eco_res[1], {false, 'held by the player (labor.set)'})
   T.eq(W.eco_res[2], {true, nil})
-  T.eq(W.eco_res[3], {false, 'held by the player (labor.set)'})
+  T.eq(W.eco_res[3], {true, nil}, 'water\'s Orderlies on the unit')
+  T.eq(W.eco_res[4], {true, nil}, 'another labor of the unit (care medic: test_neu1_acts.lua, real kern)')
+  -- workdetail.set holds that detail of that unit only
+  W.inbox('workdetail.set', {detail = 'Orderlies', unit = 43, on = false})
+  T.eq(last_reply(W).ok, true, last_reply(W).msg)
+  W.eco = {{'work_detail', 'Orderlies', 43, true}, {'work_detail', 'Miners', 43, true}, {'labor_set', 43, 'farm', false}}
+  W.run(DAY, {skip = 100})
+  T.eq(W.eco_res[1], {false, 'held by the player (workdetail.set)'})
+  T.eq(W.eco_res[2], {true, nil})
+  T.eq(W.eco_res[3], {true, nil})
+  W.eco = {{'labor_set', 41, 'farm', false}}
   T.eq(#W.find_events('ACT_FAIL'), 0)
   W.run(28 * DAY, {skip = 600})
   T.eq(W.eco_res[1], {true, nil}, 'the hold ends after player.hold_days')
@@ -168,7 +180,8 @@ T.test('furniture.place designates one quickfort build cell of the piece; nothin
   T.eq(last_reply(W).ok, false)
 end)
 
-T.test('burrow.unit adds and drops one member while the exit is open; the burrow is held until the exit closes', function()
+T.test('burrow.unit adds and drops one member while the exit is open; BUG-814: no hold (gate\'s pullers win), the old ' ..
+       'membership comes back when the exit closes', function()
   local W = world{water = {1, 61000}, cfg = {exit_days = 0},
                   units = {{id = 5, citizen = true}, {id = 6, citizen = true}, {id = 7, citizen = true}, {id = 8, citizen = true, dead = true}}}
   local b = W.burrow('Kern+', {0, 0, 0, 10, 10, 10})
@@ -180,12 +193,22 @@ T.test('burrow.unit adds and drops one member while the exit is open; the burrow
   T.eq(W.find_acts('burrow_units')[1].args[2], {5, 6, 7}, 'the dead member is left out, the new one joins')
   W.inbox('burrow.unit', {burrow = 'Kern+', unit = 5, on = false})
   T.eq(W.find_acts('burrow_units')[2].args[2], {6})
-  -- the kernel (here: test code outside a verb) may not rewrite the held burrow while the exit is open
-  T.eq({W.K.act.burrow_units('Kern+', {5})}, {false, 'held by the player (burrow.unit)'})
+  -- the kernel (gate's lever-room pullers, here test code outside a verb) is never refused on a burrow
+  T.eq(W.K.act.burrow_units('LeverRoom', {6}), true)
+  W.inbox('burrow.unit', {burrow = 'Kern+', unit = 7, on = true})          -- a second change of unit 7 keeps its first old state
+  W.inbox('burrow.unit', {burrow = 'Kern+', unit = 7, on = false})
+  local n0 = #W.find_acts('burrow_units')
+  -- what DF holds now: 6 (the player's list) plus 8 (a member the kernel added meanwhile)
+  b.units = kmock.vec{6, 8}
   W.read.water = {0, 0}
   W.run(5 * DAY, {skip = 100})
-  T.eq(#W.find_events('EMERGENCY_END'), 1)
-  T.eq(W.K.act.burrow_units('Kern+', {5}), true, 'the tactical hold ended with the exit')
+  local ev = W.find_events('EMERGENCY_END')
+  T.eq(#ev, 1)
+  T.eq(ev[1].d.burrows, 1)
+  local acts = W.find_acts('burrow_units')
+  T.eq(#acts, n0 + 1, 'one restore call on close')
+  T.eq({acts[#acts].args[1], acts[#acts].args[2], acts[#acts].by}, {'Kern+', {5, 6}, 'player'},
+       'unit 5 back in, 7 out again (it was out), 6 kept, the dead 8 left out')
 end)
 
 T.test('gate lever outside PEACE: refused without the exit, only up while it is open, PEACE unchanged', function()
@@ -208,17 +231,25 @@ T.test('gate lever outside PEACE: refused without the exit, only up while it is 
 end)
 
 T.test('util/hold: keys, recorded keys, an area covers its tiles only, an expired hold covers nothing', function()
-  T.eq(HOLD.keys('labor_set', table.pack(41, 'farm', true)), {'labor:41'})
-  T.eq(HOLD.keys('work_detail', table.pack('Miners', 7, true)), {'labor:7'})
+  T.eq(HOLD.keys('labor_set', table.pack(41, 'farm', true)), {'labor:41:farm'})
+  T.eq(HOLD.keys('work_detail', table.pack('Miners', 7, true)), {'wd:7:Miners'})
+  T.eq(HOLD.keys('medic', table.pack(7, true)), {'labor:7:medic'})
+  T.eq(HOLD.keys('burrow_units', table.pack('Kern+', {5})), {}, 'BUG-814: no burrow hold')
+  T.eq(HOLD.keys('door_forbid', table.pack(77, false)), {'bld:77'}, 'a player unlock is recorded')
+  T.eq(HOLD.query('door_forbid', table.pack(77, false)), {}, 'BUG-812: a kernel unlock is never refused')
+  T.eq(HOLD.query('door_forbid', table.pack(77, true)), {'bld:77'})
+  T.eq(HOLD.keys('building_remove', table.pack(3), {rect = {1, 2, 3, 4, 5}, type = 'Door'}), {'bld:3'},
+       'BUG-815: a removed door leaves no area hold')
   T.eq(HOLD.keys('building_remove', table.pack(3), {rect = {1, 2, 3, 4, 5}}), {'bld:3', 'area:5:1:2:3:4'})
   T.eq(HOLD.keys('quickfort', table.pack({pos = {1, 2, 3}})), {'tile:1,2,3'})
   T.eq(HOLD.keys('pull', table.pack(5)), {}, 'gate keeps its own lever hold')
   T.eq(HOLD.recorded({'bld:3', 'tile:1,2,3'}), {'bld:3'})
-  local holds = {{k = 'area:5:1:2:3:4', u = 100, v = 'zone.remove'}, {k = 'labor:7', u = 50, v = 'labor.set'}}
+  local holds = {{k = 'area:5:1:2:3:4', u = 100, v = 'zone.remove'}, {k = 'labor:7:farm', u = 50, v = 'labor.set'}}
   T.eq(HOLD.match(holds, {'tile:2,3,5'}, 10).v, 'zone.remove')
   T.eq(HOLD.match(holds, {'tile:4,3,5'}, 10), nil)
-  T.eq(HOLD.match(holds, {'labor:7'}, 10).v, 'labor.set')
-  T.eq(HOLD.match(holds, {'labor:7'}, 60), nil)
+  T.eq(HOLD.match(holds, {'labor:7:farm'}, 10).v, 'labor.set')
+  T.eq(HOLD.match(holds, {'labor:7:medic'}, 10), nil)
+  T.eq(HOLD.match(holds, {'labor:7:farm'}, 60), nil)
 end)
 
 T.test('config: player.conf keeps the defaults for bad values', function()

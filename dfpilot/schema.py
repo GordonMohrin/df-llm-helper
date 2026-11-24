@@ -908,7 +908,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # NEU1 P7 (decision E5): the emergency exit opens (a critical state held player.exit_days: why = its causes, verbs = what it
     # unlocks, until = the abs tick it ends unless the state goes on, days = how long the oldest cause held) and closes
     "EMERGENCY": ("A", "player", _d("why:s verbs:sa until:i", "days:i causes:sa")),
-    "EMERGENCY_END": ("C", "player", _d("why:s", "days:i")),
+    "EMERGENCY_END": ("C", "player", _d("why:s", "days:i doors:i burrows:i")),   # BUG-812/814: what the close undid
 }
 
 # FR-79: one squad's militia rotation line in state mil.rot (military.lua M.state)
@@ -1094,7 +1094,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
 # only up) and the verbs whose act calls hold their objects against the kernel's own calls (lua/dfllm/util/hold.lua)
 VERB_EMG = ["lever", "squad.station", "burrow.unit", "door.lock"]
 VERB_HOLD = ["zone.remove", "building.remove", "labor.set", "workdetail.set", "lever.link", "appoint", "room.assign",
-             "burrow.unit", "door.lock"]
+             "door.lock"]   # BUG-814: burrow.unit holds nothing (gate's pullers win), the exit's close restores it
 # verbs accepted only from these `by` origins (CONTRACTS §9.5; `by` is a label, the hook is the guard)
 VERB_BY: dict[str, list[str]] = {"audit": ["follow", "test"]}
 
