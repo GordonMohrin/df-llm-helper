@@ -230,7 +230,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     for blk, lims in (("intake", INTAKE_LIM), ("sortie", SORTIE_LIM), ("stations", STATIONS_LIM),
                       ("perimeter", PERIMETER_LIM), ("confine", CONFINE_LIM), ("popups", POPUPS_LIM),
                       ("breach", BREACH_LIM), ("resume", RESUME_LIM), ("siege_long", SIEGE_LONG_LIM),
-                      ("siege_starve", SIEGE_STARVE_LIM)):
+                      ("siege_starve", SIEGE_STARVE_LIM), ("growth", GROWTH_LIM), ("small_fight", SMALL_FIGHT_LIM)):
         sec = doc.get(blk, {})
         if not isinstance(sec, dict):
             errs.append(f"{name}: {blk} must be an object")
@@ -249,6 +249,11 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
                     errs.append(f"{name}: {blk}.{k}: true or false expected, got {v!r}")
             elif not is_int(v, *lim):
                 errs.append(f"{name}: {blk}.{k}: int {lim[0]}..{lim[1]} expected, got {v!r}")
+    gr = doc.get("growth")                       # NEU1 P4: the ladder's caps must rise
+    if isinstance(gr, dict):
+        caps = [gr.get(k, d) for k, d in (("base", 30), ("armed_cap", 50), ("ready_cap", 80), ("top_cap", 100))]
+        if all(isinstance(c, int) for c in caps) and not caps[0] <= caps[1] <= caps[2] <= caps[3]:
+            errs.append(f"{name}: growth: base <= armed_cap <= ready_cap <= top_cap expected, got {caps}")
     return errs
 
 
@@ -270,7 +275,13 @@ SIEGE_LONG_LIM: dict = {"on": "bool", "days": (1, 336), "near": (5, 200)}
 SIEGE_STARVE_LIM: dict = {"on": "bool", "min": (1, 100), "mark": (25000, 100000), "near": (5, 200), "death_days": (0, 336)}
 # FR-94 (Run 14 note 100): arbiter.lua resume_cfg: real minutes a pause by DF may stand before the wake PAUSED_BY_DF (0 = no wake)
 RESUME_LIM: dict = {"wake_min": (0, 240)}
-REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve")
+# NEU1 P4 (decision E1): readiness.lua M.GROWTH_LIM (the growth ladder) and military.lua M.SMALL_LIM (a sortie against a small group is never
+# refused for armour); a missing section = the old rule
+GROWTH_LIM: dict = {"on": "bool", "base": (1, 250), "armed_cap": (1, 250), "ready_cap": (1, 250), "top_cap": (1, 250),
+                    "armed_min": (1, 30), "full_ready": (0, 100), "full_top": (0, 100), "share": (0, 100), "drink_d": (0, 365),
+                    "drop_days": (0, 60), "wood": "bool"}
+SMALL_FIGHT_LIM: dict = {"on": "bool", "max": (1, 10), "armed": (1, 20), "gate": "bool"}
+REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve", "growth", "small_fight")
 
 
 # the kernel's limits for config/reflex.json intake / sortie (siege.lua M.IK_LIM, M.SO_LIM; a bad value = the default)

@@ -180,6 +180,7 @@ C.EVENTS = {
   KERNEL_SLOW = {cls = 'B', by = 'kern'}, WEALTH = {cls = 'B', by = 'siege'},
   DRILL_RESULT = {cls = 'B', by = 'drill'}, READY_CHANGE = {cls = 'B', by = 'readiness'},
   POPCAP = {cls = 'B', by = 'readiness'}, AUDIT = {cls = 'B', by = 'readiness'},
+  GROWTH_HALT = {cls = 'B', by = 'readiness'},          -- NEU1 P4: the growth ladder's step or halt changed
   PROJECT_DONE = {cls = 'B', by = 'runner'}, PROJECT_REQUEST = {cls = 'B', by = 'any'},
   PROJECTS_REQUEUED = {cls = 'B', by = 'runner'},       -- BUG-521: an older save was loaded; the projects of the discarded timeline placed again
   PHASE = {cls = 'B', by = 'runner'}, PAUSE = {cls = 'B', by = 'arbiter'},
@@ -503,6 +504,8 @@ C.STATE_SPEC = obj({
                ll = arr(str(24), 0, 8),    -- BUG-712: the bridges with no linked lever at all (R0 `levers:<B>`)
                lo = arr(str(24), 0, 8),    -- BUG-774: the bridges whose linked levers all lie outside Kern+ and the refuge (R0 `lever_outside`)
                uh = NAT,                   -- BUG-776: max-pop held at this population (R0 blocked on a deadly blocker, citizens outside Kern+)
+               -- NEU1 P4: the growth ladder: the step's cap, the cap the halt keeps closed, the halt key, what is missing
+               gh = obj({cap = NAT, next = NAT, halt = str(12)}, {need = str(100)}),
                as = str(120),              -- BUG-601: the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                lw = str(200),              -- BUG-634: what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
                rp = str(120)}),            -- BUG-653: the refuge has no pre-plug (no R0 blocker): not trusted against building destroyers

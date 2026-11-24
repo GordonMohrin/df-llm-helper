@@ -399,6 +399,31 @@ T.test('sortie through O1: a hostile at the gate raises O1 with a member outside
   T.eq(W.both_down, 0)
 end)
 
+-- NEU1 P4 (decision E1 b; Run 16c i3 y379 a lone snatcher outside, Run 16a i1 y396 one Megalania outside Kern+): against one hostile outside
+-- an armed squad without armour goes out through O1 (old: 'not in uniform: worn 0% < 80%'); small_fight.gate = false: the old refusal
+T.test('NEU1 P4: sortie through O1 against one hostile with an armed squad in no armour: goes (small fight); gate=false: refused', function()
+  local function go(sf)
+    local W = world{skills = {AXE = 5, SHIELD = 3}, army = 0, units = {S.inv(450, 70, 3, Z)}, equip = false}
+    W.flow = false
+    W.K.cfg.reflex = {v = 2, intake = {on = false}, small_fight = sf}
+    for _, p in ipairs(X.squad_of(W, 'A').positions) do
+      if p.occupant >= 0 then
+        W.unit(W.hfs[p.occupant].unit_id).inventory:insert('#', {item = X.item(W, 'WEAPON'), mode = df.inv_item_role_type.Weapon})
+      end
+    end
+    for _ = 1, 12 do W.K.set_mode('SIEGE', 'test'); run(W, 25) end   -- (the gate raises the bridges of SIEGE)
+    W.K.set_mode('SIEGE', 'test')
+    return W, W.inbox('squad.sortie', {squad = 'A', target = {70, 3, Z}, approve = true, gate = 'O1'})
+  end
+  local W, r = go({on = true})
+  T.ok(r.ok, r.msg)
+  T.ok(r.msg:find('small fight: 1 hostile', 1, true) and r.msg:find('armour not required', 1, true), r.msg)
+  T.ok(r.msg:find('gathering in the bailey', 1, true), r.msg)
+  local _, r2 = go({on = true, gate = false})
+  T.ok(not r2.ok and r2.msg:find('not in uniform: worn 0% < 80%', 1, true), r2.msg)
+  T.eq(W.both_down, 0)
+end)
+
 T.test('gate airlock: an intake/sortie down of O1 is refused while B1 is not up; another reason in SIEGE refused',
        function()
   local W = world{}

@@ -791,7 +791,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
     "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f settle:i retries:i")),
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
-    "POPCAP": ("B", "readiness", _d("cap:i", "why:s")),
+    # NEU1 P4: halt / need = the growth ladder's first failing condition while the ladder is the binding ceiling (why growth or a freeze)
+    "POPCAP": ("B", "readiness", _d("cap:i", "why:s halt:s need:s")),
+    # NEU1 P4 (decision E1): the growth ladder changed its step or its halt: cap = the step's pop cap, next = the cap the halt keeps
+    # closed, halt = squad | drink | full | share | r0 | lever | metal | none (every step passed), need = what is missing
+    "GROWTH_HALT": ("B", "readiness", _d("cap:i next:i halt:s", "need:s")),
     "AUDIT": ("B", "readiness", _d(opt="ok:f fails:sa min_traps:i")),
     # FR-76: pre = the stage before this one that never ran (a follow-up stage finished without its predecessor: not
     # counted as delivered)
@@ -825,7 +829,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # timeout, mode, gone, not_attackable, order_dropped, more_hostiles, no_squad). BUG-169: a kill sortie's dead names
     # every target in units; any other end lists the targets that died before it in dead
     "SORTIE": ("B", "any", _d("phase:s", "squad:s why:s units:ia n:i cv:i foes:i est:i worn:i lost:i pos:p "
-                                         "ticks:i dead:ia")),
+                                         "ticks:i dead:ia small:i")),        # NEU1 P4: small = a small fight, armour not required
     # BUG-032 (Run 11: a squad stationed next to B2 held its BREACH raise): military moved a squad station off a bridge
     # footprint and its ring (gate margin + stations.spread): why bridge (to the nearest revealed floor on the inner
     # side), chain (the next station of the posture's chain), none (nothing clear: kept), hold (soldiers at their
@@ -1103,6 +1107,8 @@ STATE = Obj(
                            # BUG-774: lo = the bridges whose linked levers all lie outside Kern+ and the refuge (R0 `lever_outside`);
                            # BUG-776: uh = max-pop held at this population (R0 blocked, citizens outside Kern+)
                            "lo": Arr(Str(maxbytes=24), hi=8), "uh": NAT,
+                           # NEU1 P4: gh = the growth ladder: the step's cap, the cap the halt keeps closed, the halt key, what is missing
+                           "gh": Obj(req={"cap": NAT, "next": NAT, "halt": Str(maxbytes=12)}, opt={"need": Str(maxbytes=100)}),
                            # BUG-601: as = the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                            "as": Str(maxbytes=120),
                            # BUG-634: lw = what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
