@@ -35,10 +35,12 @@ function C.prune(t, day)
   t.pruned = day
 end
 
--- one cancel: kind (DF's job name, any case), reason (DF's words), tick
-function C.note(t, kind, why, tick)
+-- one cancel (or `n` of the same kind and reason, NEU6: a look of the gamelog reader groups its lines first): kind (DF's job name, any case), reason (DF's
+-- words), tick
+function C.note(t, kind, why, tick, n)
   kind, why, tick = tostring(kind or ''):lower():sub(1, 60), tostring(why or ''):gsub('%.$', ''):sub(1, 60), int(tick)
-  if kind == '' or not tick then return false end
+  n = int(n) or 1
+  if kind == '' or not tick or n < 1 then return false end
   if why == '' then why = '?' end
   local day = tick // DAY
   if t.pruned ~= day then C.prune(t, day) end
@@ -57,7 +59,7 @@ function C.note(t, kind, why, tick)
     for _ in pairs(k) do nr = nr + 1 end
     if nr >= C.MAX_REASONS then why = C.OTHER end
   end
-  k[why] = (k[why] or 0) + 1
+  k[why] = (k[why] or 0) + n
   local l = t.last[kind]
   if type(l) ~= 'table' then
     local nl = 0

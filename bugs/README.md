@@ -821,6 +821,9 @@ Related: FR-xx, BUG-xx
 | [BUG-848](BUG-848-stockpile-barrel-limit-field.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | `sp.max_barrels` unreadable on DFHack 53 (the field is `storage.max_barrels`): the pile freeze failed silently; `pile:<id>` dump, loud error | `lua/dfllm/pilelib.lua`, `act.lua` `I.pile_barrels` |
 | [BUG-849](BUG-849-keepalive-long-calls.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | long CLI calls (`cmd --wait`, `bp sites --fresh`, `audit`) beat the session heartbeat only at their start: the dead-man could pause the game under an active player | `dfpilot/session.py` `Keepalive`, `cli.py` |
 | [BUG-850](BUG-850-why-line-df-first.md) | fixed (offline, live-untested) | offen, nie live gesehen | low | `why` did not lead with DF's reason; `why ws:<id>` knew no stockpile | `lua/dfllm/jobwhy.lua` `J.line` |
+| [BUG-851](BUG-851-gamelog-look-cadence.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | the gamelog reader looked once per fresh economy run (10-20 game days apart at 530-860 t/s), its source fell back to `report` after 3 days and the container gate never fired | `lua/dfllm/economy.lua` `M.watch`, `M.gl_poll`, `M.cw_source` |
+| [BUG-852](BUG-852-container-cure-lines.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | the container cure logged nothing when its gate opened or closed or when the pile limit was written or refused | `lua/dfllm/economy.lua` `M.cx_log`, `M.cx_freeze` |
+| [BUG-853](BUG-853-drink-well-dry-text.md) | fixed (offline, live-untested) | offen, nie live gesehen | low | DF's `cancels Drink: Well dry.` (1500 of 3000 gamelog lines live) was not in the drink stall text | `lua/dfllm/economy.lua` `M.drink_why` |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

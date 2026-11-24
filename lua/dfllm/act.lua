@@ -1470,8 +1470,13 @@ local function impls(state)
           seen = seen + 1
           if old then answered = answered + 1 end
           -- NEU4: a pile that holds no barrel is never frozen at 0 (its food would have no container)
-          if old and here > 0 and (old < 0 or old > here) and PL.set(sp, here) then
-            out[#out + 1] = {id = sp.id, old = old, new = here, name = name, field = cand}
+          -- NEU6 BUG-852: out.failed = the piles whose limit could not be written, out.kept = the readable ones left alone (and why): the caller logs both
+          if old and here > 0 and (old < 0 or old > here) then
+            if PL.set(sp, here) then out[#out + 1] = {id = sp.id, old = old, new = here, name = name, field = cand}
+            else out.failed = out.failed or {}; out.failed[#out.failed + 1] = {id = sp.id, old = old, here = here, name = name} end
+          elseif old then
+            out.kept = out.kept or {}
+            out.kept[#out.kept + 1] = {id = sp.id, old = old, here = here, name = name, why = here == 0 and 'no barrel inside' or 'limit already low'}
           end
         end
       end

@@ -30,7 +30,7 @@ def test_the_acting_cures_default_and_the_switches_are_linted(tmp_path):
     doc = json.loads((ROOT / "config" / "baseline.json").read_text("utf-8"))
     # NEU4 (BUG-844): the container cure is on, gated by DF's own cancel reason (economy.cancel); the other two stay off
     assert doc["economy"]["diag"] == {"cx_cure": True, "mgr_chores": False, "still_pin": False, "stall_line": True}
-    assert doc["economy"]["cancel"] == {"days": 7, "cx_min_n": 5, "cx_pile_days": 14, "gamelog": True, "gamelog_bytes": 131072}
+    assert doc["economy"]["cancel"] == {"days": 7, "cx_min_n": 5, "cx_pile_days": 14, "gamelog": True, "gamelog_bytes": 131072, "gamelog_chunks": 8}
     assert fairplay.economy_errors(ROOT / "config" / "baseline.json") == []
     doc["economy"]["diag"] = {"cx_cure": "yes", "bogus": 1}
     p = tmp_path / "baseline.json"

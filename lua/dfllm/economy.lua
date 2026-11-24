@@ -500,7 +500,7 @@ M.DEFAULTS = {
   diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
   -- NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source of the tally (the eventful reports stay the fallback), gamelog_bytes = at most
   -- that many bytes per look
-  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, gamelog = true, gamelog_bytes = 131072},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -1950,10 +1950,26 @@ function M.cx_freeze(K, p, emergency, now)
   local n = 0
   if type(p.pilecap) ~= 'table' then p.pilet = now or K.now().tick end        -- NEU4: the freeze is time limited (M.cx_expire)
   p.pilecap = type(p.pilecap) == 'table' and p.pilecap or {}
+  local wrote = {}
   for _, e in ipairs(res) do
     if p.pilecap[tostring(e.id)] == nil then p.pilecap[tostring(e.id)] = e.old end
     n = n + 1
+    wrote[#wrote + 1] = string.format('%s %s -> %s', tostring(e.id), tostring(e.old), tostring(e.new))
     K.log('warn', 'brew stall: stockpile %s (%s) takes no new barrel: limit %s -> %s', tostring(e.id), tostring(e.name), tostring(e.old), tostring(e.new))
+  end
+  -- NEU6 BUG-852: ONE summary line of what the cure did to the piles (which, old -> new), what it could not write and what it left alone and why
+  local fail = {}
+  for _, f in ipairs(res.failed or {}) do fail[#fail + 1] = string.format('%s (limit %s, %d barrels in it)', tostring(f.id), tostring(f.old), f.here or 0) end
+  local left = {}
+  for _, f in ipairs(res.kept or {}) do left[#left + 1] = string.format('%s (limit %s, %d barrels: %s)', tostring(f.id), tostring(f.old), f.here or 0, tostring(f.why)) end
+  local line = string.format('container cure: pile barrel limit %s%s%s',
+                             n > 0 and ('written on ' .. n .. ' piles: ' .. table.concat(wrote, ', ')) or 'written on no pile',
+                             #fail > 0 and ('; CANNOT WRITE ' .. #fail .. ': ' .. table.concat(fail, ', ')) or '',
+                             #left > 0 and ('; left alone: ' .. table.concat(left, ', ', 1, math.min(#left, 6))) or '')
+  local t = now or K.now().tick
+  if st.pilesig ~= line or t - (st.pilesigt or -1e12) >= 7 * DAY then      -- the same words again only once a game week
+    st.pilesig, st.pilesigt = line, t
+    K.log(#fail > 0 and 'warn' or 'info', '%s', line)
   end
   if n > 0 then K.persist.touch('m.economy') end
 end
@@ -3344,8 +3360,8 @@ function M.cw_tally(K)
   end
   return st.cw
 end
-function M.cw_note(K, key, why, tick)
-  if not M.CW.note(M.cw_tally(K), key, why, tick or K.now().tick) then return end
+function M.cw_note(K, key, why, tick, n)
+  if not M.CW.note(M.cw_tally(K), key, why, tick or K.now().tick, n) then return end
   local day = (tick or K.now().tick) // DAY
   if st.cwday ~= day then st.cwday = day; K.persist.touch('m.economy') end    -- once a game day
 end
@@ -3353,10 +3369,14 @@ function M.cw_days(K, c)
   return math.max(1, math.min(M.CW.KEEP, math.tointeger(((c or M.conf(K)).cancel or {}).days) or M.CW.DAYS))
 end
 -- NEU5 BUG-847: the gamelog reader (lua/dfllm/gamelog.lua). DF prints EVERY cancel into <DF>/gamelog.txt; the eventful report queue is lossy (live i4: 25 game days,
--- empty tally, 219 cancel lines in the last 400 gamelog lines). Looked at once per economy run: at most economy.cancel.gamelog_bytes bytes, from the end of the file
--- at the first look (a persisted offset resumes after a reload), only complete lines, rotation / truncation / the new-game marker handled in the library.
--- The tally has ONE source at a time: 'gamelog' while the file is readable and new lines arrived within GL_FRESH ticks, else 'report' (the eventful path).
-M.GL_FRESH = 3 * DAY
+-- empty tally, 219 cancel lines in the last 400 gamelog lines). From the end of the file at the first look (a persisted offset resumes after a reload), only
+-- complete lines, rotation / truncation / the new-game marker handled in the library.
+-- NEU6 (BUG-851): looked at from M.watch (kern runs it every GL_LOOK game ticks at any speed: never paced, demoted or stretched), NOT once per economy run: live
+-- (i4, 530-860 t/s) two fresh economy runs lay 10-20 game days apart and the window held almost nothing. Per look: up to economy.cancel.gamelog_chunks reads of
+-- gamelog_bytes, only " cancels " lines parsed, the lines of a look grouped by kind and reason before they enter the tally (stamped with the game tick of the look).
+-- The tally has ONE source at a time: 'gamelog' while the file is readable (a quiet log is no reason to leave it), else 'report' (the eventful path).
+M.GL_LOOK = 600                       -- game ticks between two looks (half a game day), at any speed
+M.watch_every = {ticks = M.GL_LOOK}
 function M.gl_poll(K, c)
   c = c or M.conf(K)
   local cc = c.cancel or {}
@@ -3372,7 +3392,7 @@ function M.gl_poll(K, c)
   end
   local now = K.now().tick
   local before = g.s.lines
-  local list = M.GL.poll(g.s, {max = math.tointeger(cc.gamelog_bytes) or M.GL.MAX})
+  local list = M.GL.poll(g.s, {max = math.tointeger(cc.gamelog_bytes) or M.GL.MAX, chunks = math.tointeger(cc.gamelog_chunks) or 8})
   if g.s.state == 'ok' then g.ok = now end
   if g.s.lines > before then g.line = now end
   if g.s.state ~= g.last_state then
@@ -3380,11 +3400,21 @@ function M.gl_poll(K, c)
     if g.s.state == 'ok' then K.log('info', 'gamelog reader: %s (offset %s of %s bytes)', g.s.path, tostring(g.s.off), tostring(g.s.size))
     else K.log('warn', 'gamelog reader: %s: %s (the cancel tally falls back to the eventful reports)', g.s.path, tostring(g.s.err)) end
   end
-  for _, e in ipairs(list) do
-    local ok, err = pcall(M.cw_note, K, e[1], e[2], now)
-    if not ok then K.log('warn', 'cancel tally (gamelog): %s', tostring(err):sub(1, 120)); break end
+  if #list > 0 then                                -- grouped: one tally write per kind and reason, not per line
+    local by, order = {}, {}
+    for _, e in ipairs(list) do
+      local key = e[1] .. '\0' .. e[2]
+      local x = by[key]
+      if not x then x = {e[1], e[2], 0}; by[key] = x; order[#order + 1] = x end
+      x[3] = x[3] + 1
+    end
+    for _, x in ipairs(order) do
+      local ok, err = pcall(M.cw_note, K, x[1], x[2], now, x[3])
+      if not ok then K.log('warn', 'cancel tally (gamelog): %s', tostring(err):sub(1, 120)); break end
+    end
   end
   g.n = g.n + #list
+  g.newc = (g.newc or 0) + #list
   local day = now // DAY
   if g.saved ~= day then                          -- the offset is persisted once per game day
     g.saved = day
@@ -3394,14 +3424,26 @@ function M.gl_poll(K, c)
   end
   return #list
 end
--- 'gamelog' while its reader sees new lines, else 'report'
+-- NEU6: the kernel's guaranteed pass (watch_every): the look, then the container gate's ON / OFF line. Cheap: one file open and a bounded read.
+function M.watch(K)
+  local c = M.conf(K)
+  local okg, errg = pcall(M.gl_poll, K, c)
+  if not okg then K.log('warn', 'gamelog reader: %s', tostring(errg):sub(1, 160)) end
+  local okc, errc = pcall(M.cx_log, K, c, K.now().tick)
+  if not okc then K.log('warn', 'container cure line: %s', tostring(errc):sub(1, 160)) end
+end
+-- 'gamelog' while its file is readable, else 'report'
 function M.cw_source(K, now)
   local g = st.gl
-  if g and g.s.state == 'ok' and g.line and (now or K.now().tick) - g.line <= M.GL_FRESH then return 'gamelog' end
+  if g and g.s.state == 'ok' then return 'gamelog' end
   return 'report'
 end
+function M.kb(n)
+  n = math.tointeger(n) or 0
+  return n >= 10240 and string.format('%d KB', n // 1024) or string.format('%d B', n)
+end
 -- the reader's health for a stall line / why: {n = cancel lines of the window, source, text}; N = 0 with a healthy source means DF cancelled nothing, N = 0 with
--- an unreadable gamelog and no reports means a blind reader
+-- an unreadable gamelog and no reports means a blind reader. NEU6: the looks made and the bytes still behind say whether the reader keeps up.
 function M.cw_health(K, c, now)
   c = c or M.conf(K)
   now = now or K.now().tick
@@ -3413,13 +3455,18 @@ function M.cw_health(K, c, now)
   local extra = ''
   if (c.cancel or {}).gamelog == false then extra = '; gamelog reader off'
   elseif not g then extra = '; gamelog reader not started'
-  elseif g.s.state ~= 'ok' then extra = string.format('; gamelog %s: %s', tostring(g.s.state), tostring(g.s.err))
-  elseif src == 'report' then extra = string.format('; gamelog readable but no new line for %d d', g.line and (now - g.line) // DAY or -1)
-  else extra = string.format('; %d gamelog lines read, %d cancels', g.s.lines, g.n) end
+  elseif g.s.state ~= 'ok' then extra = string.format('; gamelog %s: %s; %d looks', tostring(g.s.state), tostring(g.s.err), g.s.looks)
+  else
+    extra = string.format('; %d looks, %s behind, %d lines read, %d cancels', g.s.looks, M.kb(g.s.behind), g.s.lines, g.n)
+    if not g.line or now - g.line > M.GL_QUIET then
+      extra = extra .. string.format('; the log is quiet (no new line for %s)', g.line and string.format('%d d', (now - g.line) // DAY) or 'this load')
+    end
+  end
   if src == 'report' then extra = extra .. string.format('; %d reports since load', st.repn or 0) end
   if g and g.s.skipped > 0 then extra = extra .. string.format('; %d KB skipped', g.s.skipped // 1024) end
   return {n = n, source = src, text = string.format('DF cancel lines seen in window: %d (source %s%s)', n, src, extra)}
 end
+M.GL_QUIET = 3 * DAY                  -- a log without a new line for so long is called quiet in the health text (information only, never a source switch)
 -- DF's top reason for the job kinds `match` (a kind, a list of kind prefixes, a function) within the window: {kind, why, n, last, days, kinds, text} or nil
 function M.df_reason(K, match, c, now)
   now = now or K.now().tick
@@ -3473,6 +3520,28 @@ function M.cx_gate(K, c, now)
   if not M.diag_on(K, 'cx_cure', c) then return false end
   local x = M.cx_reason(K, c, now)
   return x and x.n or false
+end
+
+-- NEU6 (BUG-852): the gate's own kern.log line when it opens or closes, from the kernel's guaranteed look (M.watch) and never more than one line per game day
+-- (a count that hovers at the threshold must not write a line per look). State st.cxon / st.cxlogt.
+function M.cx_log(K, c, now)
+  c = c or M.conf(K)
+  now = now or K.now().tick
+  local min = math.tointeger((c.cancel or {}).cx_min_n) or 5
+  local days = M.cw_days(K, c)
+  local n = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
+  local sw = M.diag_on(K, 'cx_cure', c)
+  local on = sw and n >= min
+  if on == (st.cxon == true) then return end
+  if st.cxlogt and now >= st.cxlogt and now - st.cxlogt < DAY then return end
+  st.cxon, st.cxlogt = on, now
+  if on then
+    K.log('info', 'container cure ON: DF cancelled brew %dx in %d d: Needs empty food storage item (>= %d)', n, days, min)
+  elseif not sw and n >= min then
+    K.log('info', 'container cure OFF: switch economy.diag.cx_cure is off (DF cancelled brew %dx in %d d: Needs empty food storage item)', n, days)
+  else
+    K.log('info', 'container cure OFF: DF cancelled brew %dx in %d d: Needs empty food storage item (< %d)', n, days, min)
+  end
 end
 
 local function cancel(K, ev)
@@ -6249,6 +6318,11 @@ function M.drink_why(K, c, r)
     w = string.format('DF cancels Brew %dx in %d d: Needs empty food storage item', dx.n, M.cw_days(K, c)) .. (w and ('; ' .. w) or '')
   elseif okd and dfr and dfr.n >= (math.tointeger((c.cancel or {}).cx_min_n) or 5) then
     w = string.format('DF cancels Brew %dx in %d d: %s', dfr.n, M.cw_days(K, c), dfr.why) .. (w and ('; ' .. w) or '')
+  end
+  -- NEU6 BUG-853 (live i4: 1500 'cancels Drink: Well dry.' in 3000 gamelog lines): DF's own words for the drinkers' job lead, reporting only
+  local okw, dd = pcall(M.df_reason, K, 'drink', c, r.now)
+  if okw and dd and dd.n >= (math.tointeger((c.cancel or {}).cx_min_n) or 5) then
+    w = string.format('DF cancelled Drink %dx in %d d: %s', dd.n, M.cw_days(K, c), dd.why) .. (w and ('; ' .. w) or '')
   end
   if st.nowater then w = 'no reachable water' .. (w and ('; ' .. w) or '') end            -- BUG-401
   -- BUG-259: below the thirst line with nobody thirsty the status names it (the citizens drink water)
@@ -15496,10 +15570,6 @@ end
 
 function M.step(K, budget, ctx)
   local c = M.conf(K)
-  if not (ctx and ctx.cont) then                  -- NEU5 BUG-847: DF's own cancel lines, once per run
-    local okg, errg = pcall(M.gl_poll, K, c)
-    if not okg then K.log('warn', 'gamelog reader: %s', tostring(errg):sub(1, 160)) end
-  end
   M.first_boost(K)
   if not (ctx and ctx.cont) or not (st.census or st.run) then
     st.census, st.run = {acc = new_acc(c), ci = 1, idx = 0, errs = 0, start = K.now().tick}, nil

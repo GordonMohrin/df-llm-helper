@@ -208,7 +208,9 @@ T.test('BUG-847 economy: the gamelog is the tally source, the reports are then n
   T.ok(econ.cx_gate(W.K, nil, now) == 110, 'the cure gate opens on the gamelog lines')
   feed(econ, W.K, 7, now)                                            -- the same cancels also arrive as reports: counted once
   T.eq(econ.cw_health(W.K, nil, now).n, 219)
-  T.ok(econ.cw_health(W.K, nil, now + 4 * DAYT).source == 'report', 'no new gamelog line for 3 days: the reports count again')
+  -- NEU6 (BUG-851): a quiet log is no reason to leave it (the source falls back only when the file is unreadable)
+  local hq = econ.cw_health(W.K, nil, now + 4 * DAYT)
+  T.ok(hq.source == 'gamelog' and hq.text:find('the log is quiet (no new line for ', 1, true), hq.text)
   local l = econ.stall_log(W.K, 'brew', 'brew')
   T.ok(l and l:find('DF cancel lines seen in window: 219 (source gamelog', 1, true), tostring(l))
 end)
@@ -353,6 +355,51 @@ T.test('BUG-848 raw dumps: pile:<id> dumps a stockpile, ws:<id> takes a stockpil
   T.ok(r4.ok == false and tostring(r4.msg):find('no stockpile 99', 1, true), T.show(r4))
   local q = W.inbox('inspect', {what = 'why', key = 'ws:41'})
   T.ok(q.ok == false and tostring(q.msg):find('is a stockpile, not a workshop', 1, true), T.show(q.msg))
+end)
+
+-- BUG-851..853 (NEU6) ------------------------------------------------------------------------------------------------------------------------
+T.test('BUG-852 economy: the pile cure writes ONE summary line (which piles, old -> new), names a pile it cannot write and the ones it leaves alone', function()
+  local W = world{left = 30}
+  local sp = piles()
+  local econ = require('dfllm.economy')
+  local p = W.K.persist.get('m.economy')
+  W.K.act.pile_barrels = api().pile_barrels
+  local now = W.K.now().tick
+  econ.cx_freeze(W.K, p, false, now)
+  local l = logged(W, 'container cure: pile barrel limit written on 2 piles: 41 -1 -> 1, 42 -1 -> 2')
+  T.ok(l, 'summary line with old -> new per pile: ' .. tostring(logged(W, 'container cure')))
+  T.eq({sp[1].storage.max_barrels, sp[2].max_barrels}, {1, 2})
+  local n0 = #W.logs
+  econ.cx_freeze(W.K, p, false, now + DAYT)                             -- again: nothing new to write; the same words only once a week
+  local again = 0
+  for i = n0 + 1, #W.logs do if tostring(W.logs[i].msg):find('container cure: pile barrel limit', 1, true) then again = again + 1 end end
+  T.ok(again <= 1, 'at most one more line: ' .. again)
+  -- a pile whose limit field reads but does not take the write
+  local W2 = world{left = 30}
+  local sp2 = piles()
+  sp2[1].storage = setmetatable({max_bins = -1, max_wheelbarrows = 0}, {__index = function(_, k) if k == 'max_barrels' then return -1 end end,
+                                                                         __newindex = function(t, k, v) if k ~= 'max_barrels' then rawset(t, k, v) end end})
+  local econ2 = require('dfllm.economy')
+  local p2 = W2.K.persist.get('m.economy')
+  W2.K.act.pile_barrels = api().pile_barrels
+  econ2.cx_freeze(W2.K, p2, false, W2.K.now().tick)
+  local ll
+  for _, x in ipairs(W2.logs) do if tostring(x.msg):find('CANNOT WRITE 1: 41', 1, true) then ll = x end end
+  T.ok(ll and ll.level == 'warn', 'a pile that cannot be written is named: ' .. tostring(logged(W2, 'container cure')))
+  T.ok(logged(W2, 'written on 1 piles: 42 -1 -> 2'), 'the other pile was written')
+end)
+
+T.test('BUG-853 economy: "cancels Drink: Well dry." leads the drink cause (reporting only: no new cure)', function()
+  local W = world{left = 6}
+  local econ = require('dfllm.economy')
+  local now = W.K.now().tick
+  for _ = 1, 1500 do econ.cw_note(W.K, 'drink', 'Well dry', now) end
+  local c = W.K.cfg.baseline.economy
+  local r = {days = {drink_d = 3}, inv = {}, now = now, p = W.K.persist.get('m.economy')}
+  local ok, w = pcall(econ.drink_why, W.K, c, r)
+  T.ok(ok and type(w) == 'string' and w:find('DF cancelled Drink 1500x in 7 d: Well dry', 1, true), tostring(w))
+  local e = econ.df_reason(W.K, 'drink')
+  T.ok(e and e.n == 1500 and e.why == 'Well dry', T.show(e))
 end)
 
 T.done()

@@ -115,7 +115,7 @@ return M
 - `M.watch(K)` (BUG-136, live i2: care's curse logic lived in its full run, which pacing and demotion stretched to 10-31 game
   days): a cheap pass on its own tick clock, every `watch_every.ticks` game ticks (not while paused), run before the step check
   of the same frame and also while the module has a run in hand; it is never paced, never demoted and not stretched by the
-  fort-size load (its cost is still booked and charged to the module). care uses it for the daily curse pass.
+  fort-size load (its cost is still booked and charged to the module). care uses it for the daily curse pass. economy (NEU6, BUG-851) uses it for the half-day look into DF's gamelog.txt (`watch_every = {ticks = 600}`), so that the cancel tally does not depend on how often a fresh economy run starts.
 
 ### 3.3 Scheduling semantics (kern and k_mock implement exactly this)
 1. Each frame (`repeat-util` 1 frame), kern computes `now`, delivers queued events (§4.1), then runs modules in `contract.MODULES` order.
