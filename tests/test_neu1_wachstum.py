@@ -19,13 +19,15 @@ def test_config_ships_both_switches_on_and_valid(tmp_path):
     assert ("M.GROWTH = {on = true, base = 30, armed_cap = 50, ready_cap = 80, top_cap = 100, armed_min = 3, full_ready = 6, "
             "full_top = 10, share = 70,") in lua
     mil = (ROOT / "lua" / "dfllm" / "military.lua").read_text("utf-8")
-    assert "M.SMALL = {on = true, max = 3, armed = 2}" in mil
-    bad = dict(doc, growth=dict(doc["growth"], share=101, on="yes"), small_fight={"max": 0, "x": 1})
+    assert "M.SMALL = {on = true, max = 3, armed = 2, gate = true}" in mil
+    assert doc["growth"]["wood"] is True and doc["small_fight"]["gate"] is True
+    bad = dict(doc, growth=dict(doc["growth"], share=101, on="yes"), small_fight={"max": 0, "x": 1, "gate": 1})
     p = tmp_path / "reflex.json"
     p.write_text(json.dumps(bad), "utf-8")
     errs = fairplay.reflex_errors(p)
     assert any("growth.share" in e for e in errs) and any("growth.on" in e for e in errs)
     assert any("small_fight.max" in e for e in errs) and any("small_fight.x: unknown key" in e for e in errs)
+    assert any("small_fight.gate" in e for e in errs)
     p.write_text(json.dumps(dict(doc, growth=dict(doc["growth"], armed_cap=90))), "utf-8")
     assert any("base <= armed_cap <= ready_cap <= top_cap" in e for e in fairplay.reflex_errors(p))
 

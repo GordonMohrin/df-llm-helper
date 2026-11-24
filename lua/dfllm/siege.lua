@@ -2209,12 +2209,30 @@ function M.sortie(K, args, cmd_id)
   local f = foes(K, tgt, c.near)
   local est = #f * c.foe_cv
   local cmp = string.format('cv %d vs ~%d hostiles x %d = %d, worn %d%%', info.cv or 0, #f, c.foe_cv, est, info.worn or 0)
-  if (info.worn or 0) < c.worn then
-    return false, string.format('squad %s not in uniform: worn %d%% < %d%% (%s)', key, info.worn or 0, c.worn, cmp)
-  end
+  -- NEU1 P4 (decision E1 b; Run 16c i3 y379 a lone snatcher outside, Run 16a i1 y396 one Megalania outside Kern+): against a small group (at
+  -- most small_fight.max hostiles in sight in all, no great danger, undead, building destroyer or invader siege; military.small_fight) with
+  -- small_fight.armed+ armed members the squad goes out whatever its armour: the worn, unfit and combat-value refusals (the combat value counts
+  -- the armour) are skipped; every check above (zones, dangerous hostiles in sight, civilians, the bridges) stays. small_fight.gate = false:
+  -- the old rules
+  local sm
   local okf, unfit = K.call('military', 'unfit_text', key)        -- BUG-510: unequipped soldiers do not go out
-  if okf and type(unfit) == 'string' then return false, unfit end
-  if (info.cv or 0) < est then return false, string.format('squad %s too weak: %s', key, cmp) end
+  unfit = okf and type(unfit) == 'string' and unfit or nil
+  if (info.worn or 0) < c.worn or unfit or (info.cv or 0) < est then
+    local okc, sc = K.call('military', 'small_conf')
+    local oks, s2 = K.call('military', 'small_fight', key)
+    sm = okc and type(sc) == 'table' and sc.gate and oks and type(s2) == 'table' and s2 or nil
+    if sm then for _, id in ipairs(f) do if not sm.set[id] then sm = nil; break end end end
+  end
+  if sm then
+    cmp = cmp .. string.format('; small fight: %d hostile%s, %d of %d soldiers armed, armour not required', sm.n, sm.n == 1 and '' or 's',
+                               sm.armed, sm.soldiers)
+  else
+    if (info.worn or 0) < c.worn then
+      return false, string.format('squad %s not in uniform: worn %d%% < %d%% (%s)', key, info.worn or 0, c.worn, cmp)
+    end
+    if unfit then return false, unfit end
+    if (info.cv or 0) < est then return false, string.format('squad %s too weak: %s', key, cmp) end
+  end
   st.so = {sq = key, gate = gname, ph = 'gather', t = now, t0 = now, tgt = tgt, at = at, cmd = tostring(cmd_id or '?'),
            lost0 = st.ep and st.ep.lost or 0, killed0 = st.ep and st.ep.killed or 0}
   dirty = true

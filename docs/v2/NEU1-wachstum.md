@@ -23,9 +23,9 @@ A fixed ladder of four pop caps. Each step needs every condition of all the step
 
 | Cap | Needed to go higher (Halt key) |
 |---|---|
-| 30 (`base`) | `squad`: the first melee squad has `armed_min` (3) or more members and every one of them holds a real weapon (not a training weapon); `drink`: at least `drink_d` (30) days of drink inside Kern+/the refuge (seal's `alert.core_d`) |
+| 30 (`base`) | `squad`: the first melee squad has `armed_min` (3) or more members and every one of them is armed (a real weapon in hand, or a training weapon while a real one waits for him, see below); `drink`: at least `drink_d` (30) days of drink inside Kern+/the refuge (seal's `alert.core_d`) |
 | 50 (`armed_cap`) | `full`: `full_ready` (6) soldiers fully equipped (all five armour slots of the uniform worn + a real weapon); `share`: at least `share` (70) % of ALL soldiers fully equipped; `r0`: readiness level >= 1 (R0 passed); `lever`: a linked lever inside the core |
-| 80 (`ready_cap`) | `metal`: `full_top` (10) soldiers fully equipped with metal body armour; `share` still holds |
+| 80 (`ready_cap`) | `metal`: `full_top` (10) soldiers fully equipped with metal armour in every slot; `share` still holds |
 | 100 (`top_cap`) | none: the ladder does not hold; the level cap (`readiness.CAPS`, 250 at R3) applies |
 
 - The halt is the FIRST failing condition of the next step, in the order of the table. It goes to `POPCAP` (`halt`, `need`),
@@ -42,8 +42,27 @@ A fixed ladder of four pop caps. Each step needs every condition of all the step
   from readiness' own lever check: a manifest bridge with >= 2 linked levers (`check_levers` good) that is not in
   `lever_outside` (all its levers outside Kern+).
 - The armour share is counted by `military.kit_stats` (per soldier via `dfllm.kit.soldier`): new fields `fullr` (all armour +
-  a real weapon), `metal` (fullr with metal body armour), `sq_n` / `sq_w` (members of the first melee squad / those with a
-  real weapon).
+  armed), `metal` (fullr with every armour piece of metal), `sq_n` / `sq_w` (members of the first melee squad / those armed),
+  `wb` (soldiers armed by a waiting real weapon).
+
+### Armed under the training policy (verifier round)
+
+The shipped training policy (FR-89/FR-100, `military.training.on`) puts a wooden training weapon in every melee hand in PEACE
+and DRILL and gives the real ones back in any alert (`ensure_weapons`). The first round counted only real weapons in hand, so a
+calm fort never cleared `squad` and sat at 30 for good (max-pop rises only in PEACE). Now one rule, in `military.kit_rows` /
+`military.back_rows`, used by the ladder and by the small fight alike:
+
+- a soldier of a melee squad on the policy (`tr = 1`, or `un = 1` while the wooden specs are being taken back) who holds a
+  training weapon counts as armed while a real melee weapon of the fort waits for him;
+- the waiting weapons are census.i `g_weapon` (economy: metal melee weapons, free or held by soldiers; no picks, axes or
+  training weapons) minus the real weapons the melee soldiers hold now, handed out one per such soldier, the first melee squad
+  first;
+- fail closed: no census reading or no real weapon = a wooden weapon arms nobody. Conservative on purpose: battle axes (the
+  woodcutters' tools) and non-metal weapons are not counted as waiting.
+- `growth.wood = false` returns to "real weapon in hand only".
+
+This holds in every mode, so an alert longer than `drop_days` does not pull the step back while the soldiers swap, and a small
+fight in the first ticks of a BREACH is not refused while the swap is pending.
 
 ### (b) Small fights (`military.small_fight`)
 
@@ -55,14 +74,19 @@ A sortie against a small group is never refused for armour when a squad with wea
 
 Then: `squad.sortie` skips the BUG-510 `unfit` refusal (kill orders on those hostiles only), `military.kill_lone` skips
 `worn < sortie.worn` and `unfit`, a kept sortie is not ended for `worn`, and `sortie_advice` recommends it (armour and
-the odds not counted: the combat value counts armour, three untrained armed dwarves read `hopeless` against one goblin; the odds stay in the text). The gate sortie (`siege.sortie`, SIEGE through O1), the intake waves and the
-stations keep their armour rules: sieges and megabeasts are refused as before.
+the odds not counted: the combat value counts armour, three untrained armed dwarves read `hopeless` against one goblin; the
+odds stay in the text). The gate sortie (`siege.sortie`, SIEGE through O1) skips its `worn < sortie.worn`, `unfit` and
+combat-value refusals for a small fight too (`small_fight.gate`; the evidence Run 16c i3 y379 and 16a i1 y396 were hostiles
+OUTSIDE the gate); every other check there stays: hostiles past B1 / in the bailey, trap hall or field (`zin`), dangerous
+hostiles in sight (`dz`), civilians in the zones, the airlock bridges. The intake waves and the stations keep their armour
+rules: sieges and megabeasts are refused as before.
 
 ## Config switches (config/reflex.json)
 
 - `growth`: `on` (true), `base` 30, `armed_cap` 50, `ready_cap` 80, `top_cap` 100, `armed_min` 3, `full_ready` 6,
   `full_top` 10, `share` 70, `drink_d` 30, `drop_days` 5. `on: false` = the old rule (no ladder).
-- `small_fight`: `on` (true), `max` 3, `armed` 2. `on: false` = the old refusals.
+- `growth.wood` (true): a training weapon with a real one waiting counts as armed; false = real in hand only.
+- `small_fight`: `on` (true), `max` 3, `armed` 2, `gate` (true: the gate sortie too). `on: false` = the old refusals.
 - A config without the section keeps the old behaviour (the unit-test harness's bare config); the shipped config has both on.
 
 ## Deliberately not done
@@ -70,7 +94,9 @@ stations keep their armour rules: sieges and megabeasts are refused as before.
 - No new lever, no gate code (P5). No change of the R0..R3 levels, `CAPS`, the other holds or plan propose's ceiling.
 - No eviction, no lowering of max-pop below the population.
 - Squads are not re-staffed or re-equipped here; the ladder only names what is missing.
-- The gate sortie (through O1), intake waves and the siege's station rules keep the 80 % / 60 % armour rules.
+- Intake waves and the siege's station rules keep the 80 % / 60 % armour rules (they open the gate to an army).
+- No per-position record of the real weapon each wooden position gave up (`nw_set` marks positions without a weapon, not
+  the weapon): the fort-wide stock count is simpler and fails closed.
 - No Python mirror of the ladder in `plan check` (the kernel publishes it in the state; package P1 shows it in the ladder line).
 
 ## Live-Erwartung
@@ -83,5 +109,8 @@ stations keep their armour rules: sieges and megabeasts are refused as before.
    success criterion): every pop > 50 line in the logs has `ready.gh.cap >= 80` or a population that was above 50 before.
 4. A lone goblin / snatcher / wild animal (<= 3 hostiles in sight) in SIEGE, BREACH or PEACE: `squad.sortie` and the kernel's
    kill order start (`SORTIE phase go`) with worn under 80 %, no `not equipped` / `worn N % < 80 %` refusal while a squad has
-   2+ armed members.
-5. A real siege (more than 3 visible, or a building destroyer / great danger) is still refused with the old texts.
+   2+ armed members (the gate sortie through O1 included: `small fight: 1 hostile` in its reply); a real siege (more than 3
+   visible, or a building destroyer / great danger) is still refused with the old texts.
+5. In a calm fort on the shipped training policy (state `mil.kit.wood` > 0, `mil.kit.tr` >= 1) with real weapons in stock,
+   `ready.gh.halt` moves past `squad` (to `drink` or later) and `GROWTH_HALT cap 50` appears once the core holds 30 drink days; a cap
+   that stays at 30 with `halt=squad` while `g_weapon` >= the first squad's size is a bug.

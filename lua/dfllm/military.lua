@@ -3356,20 +3356,63 @@ function M.inside_override(K, harmless)
   return pic
 end
 
+-- NEU1 P4 (verifier of the first P4 round): the training policy (FR-89/FR-100, military.training.on, shipped ON) puts a wooden training weapon
+-- in every melee hand in PEACE and DRILL and gives the real ones back in any alert (ensure_weapons). Counting only real weapons in hand held
+-- every calm fort at the ladder's first step for good. So: a soldier of a melee squad on the policy (tr = 1, or un = 1 while the wooden specs
+-- are being taken back) who holds a training weapon counts as armed while a real melee weapon of the fort waits for him: census.i g_weapon
+-- (economy: metal melee weapons, free or held by soldiers; no picks, axes or training weapons) minus the real weapons the melee soldiers hold, handed
+-- out one per such soldier, the first melee squad first. Fail closed: no census reading (or 0 real weapons) = nobody is armed by a wooden one.
+-- rows = {{key, x = KIT.soldier, tr}} of every squad member, the first melee squad first; sets r.real (a real weapon in hand or waiting) and
+-- r.backed (a wooden one with a real one waiting); returns the number backed. config/reflex.json growth.wood (true): false = real in hand only
+function M.kit_rows(metal)
+  local rows, first = {}, first_melee_key()
+  for pass = 1, 2 do
+    for _, sp in ipairs(M.SQUADS) do
+      if (sp.key == first) == (pass == 1) then
+        local e = st.sq[sp.key]
+        local s = e and squad(e.id)
+        for _, m in ipairs(s and members(s) or {}) do
+          rows[#rows + 1] = {key = sp.key, x = M.KIT.soldier(m.p, m.unit, roles(), metal), xb = e.kind == 'xbow',
+                             tr = e.kind ~= 'xbow' and (e.tr == 1 or e.un == 1)}
+        end
+      end
+    end
+  end
+  return rows, first
+end
+
+function M.back_rows(K, rows)
+  local held = 0
+  for _, r in ipairs(rows) do
+    r.real = r.x.weapon and not r.x.wood
+    if r.real and not r.xb then held = held + 1 end                -- (a crossbow is no melee weapon of g_weapon)
+  end
+  local gw = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.growth or nil
+  if type(gw) == 'table' and gw.wood == false then return 0 end
+  local ci = K.census and K.census.i
+  local spare = math.max(0, (type(ci) == 'table' and int(ci.g_weapon) or 0) - held)
+  local backed = 0
+  for _, r in ipairs(rows) do
+    if not r.real and r.x.wood and r.tr and spare > 0 then r.real, r.backed, spare, backed = true, true, spare - 1, backed + 1 end
+  end
+  return backed
+end
+
 ---------------------------------------------------------------- NEU1 P4 (E1 b): a small fight is never refused for armour
 -- Run 16d i4 Trumpetrealms y461 (one goblin killed 49 of 69 while every sortie said 'not equipped' / 'worn 0 % < 80 %'), Run 16c i3 y379 (a lone
 -- snatcher: 'no sortie, worn 62 % < 80 %'), Run 16a i1 y396 (one Megalania: 'worn 54 % < 80 %'): against at most SMALL.max visible hostiles in all
 -- (census fresh and not cut; no great danger, undead or building destroyer; threat's siege flag not invaders / great / undead) a squad of which
 -- at least SMALL.armed members hold a real weapon may go, whatever its armour: squad.sortie skips the BUG-510 refusal (kill orders on those
 -- hostiles only), kill_lone skips `worn < sortie.worn` and the unfit test, a kept sortie is not ended for worn, sortie_advice recommends it
--- unless the odds are hopeless. The gate sortie (siege.sortie), intake waves and stations keep their armour rules. config/reflex.json
--- small_fight {on, max, armed}; a config without the section keeps the old rules
-M.SMALL = {on = true, max = 3, armed = 2}
+-- whatever the odds (they count the armour; they stay in the text), and the gate sortie (siege.sortie) skips its worn, unfit and combat-value
+-- refusals (small_fight.gate; its zone, danger and civilian checks stay). Intake waves and stations keep their armour rules. config/reflex.json
+-- small_fight {on, max, armed, gate}; a config without the section keeps the old rules
+M.SMALL = {on = true, max = 3, armed = 2, gate = true}
 M.SMALL_LIM = {max = {1, 10}, armed = {1, 20}}
 function M.small_conf(K)
   local r = type(K.cfg) == 'table' and type(K.cfg.reflex) == 'table' and K.cfg.reflex.small_fight or nil
-  if type(r) ~= 'table' then return {on = false, max = M.SMALL.max, armed = M.SMALL.armed} end
-  local c = {on = r.on ~= false}
+  if type(r) ~= 'table' then return {on = false, gate = false, max = M.SMALL.max, armed = M.SMALL.armed} end
+  local c = {on = r.on ~= false, gate = r.gate ~= false}
   for k, lim in pairs(M.SMALL_LIM) do
     local v = int(r[k])
     c[k] = (v and v >= lim[1] and v <= lim[2]) and v or M.SMALL[k]
@@ -3377,16 +3420,19 @@ function M.small_conf(K)
   return c
 end
 
--- members of squad `key` holding a real weapon (no training weapon), and the members
+-- members of squad `key` holding a real weapon, or a training weapon while a real one waits for them (the training policy: kit_rows /
+-- back_rows; the first ticks of an alert, before the soldiers fetched the real ones), and the members
 function M.armed_count(K, key)
   local e = type(key) == 'string' and st.sq[key]
-  local s = e and squad(e.id)
-  if not s then return 0, 0 end
+  if not (e and squad(e.id)) then return 0, 0 end
+  local rows = M.kit_rows(nil)
+  M.back_rows(K, rows)
   local n, a = 0, 0
-  for _, m in ipairs(members(s)) do
-    n = n + 1
-    local x = M.KIT.soldier(m.p, m.unit, roles(), nil)
-    if x.weapon and not x.wood then a = a + 1 end
+  for _, r in ipairs(rows) do
+    if r.key == key then
+      n = n + 1
+      if r.real then a = a + 1 end
+    end
   end
   return a, n
 end
@@ -4508,29 +4554,26 @@ M.KIT_TTL = 1200
 function M.kit_stats(K)
   local now = now_tick(K)
   if rt.kit and rt.kit_t and now >= rt.kit_t and now - rt.kit_t < M.KIT_TTL then return rt.kit end
-  -- NEU1 P4 (readiness.growth_ladder): fullr = armor and a real weapon (no training weapon), metal = fullr with metal body armor,
-  -- sq_n / sq_w = the members of the first melee squad and those of them holding a real weapon
-  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0}
-  local first = first_melee_key()
-  for _, sp in ipairs(M.SQUADS) do
-    local e = st.sq[sp.key]
-    local s = e and squad(e.id)
-    for _, m in ipairs(s and members(s) or {}) do
-      local x = M.KIT.soldier(m.p, m.unit, roles(), is_metal)
-      t.n = t.n + 1
-      if x.armor then t.armor = t.armor + 1 end
-      if x.weapon then t.weapon = t.weapon + 1 end
-      if x.wood then t.wood = t.wood + 1 end
-      if x.armor and x.weapon then t.full = t.full + 1 end
-      local real = x.weapon and not x.wood
-      if x.armor and real then
-        t.fullr = t.fullr + 1
-        if not (x.soft and x.soft.body) then t.metal = t.metal + 1 end
-      end
-      if sp.key == first then
-        t.sq_n = t.sq_n + 1
-        if real then t.sq_w = t.sq_w + 1 end
-      end
+  -- NEU1 P4 (readiness.growth_ladder): fullr = armor and a real weapon (in hand, or waiting for a soldier on the training policy: kit_rows),
+  -- metal = fullr with every armor piece of metal, sq_n / sq_w = the members of the first melee squad and those of them armed so,
+  -- wb = soldiers counted armed by a waiting real weapon
+  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0, wb = 0}
+  local rows, first = M.kit_rows(is_metal)
+  t.wb = M.back_rows(K, rows)
+  for _, r in ipairs(rows) do
+    local x = r.x
+    t.n = t.n + 1
+    if x.armor then t.armor = t.armor + 1 end
+    if x.weapon then t.weapon = t.weapon + 1 end
+    if x.wood then t.wood = t.wood + 1 end
+    if x.armor and x.weapon then t.full = t.full + 1 end
+    if x.armor and r.real then
+      t.fullr = t.fullr + 1
+      if not next(x.soft or {}) then t.metal = t.metal + 1 end
+    end
+    if r.key == first then
+      t.sq_n = t.sq_n + 1
+      if r.real then t.sq_w = t.sq_w + 1 end
     end
   end
   rt.kit, rt.kit_t = t, now

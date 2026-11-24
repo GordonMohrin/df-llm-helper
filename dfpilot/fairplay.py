@@ -279,8 +279,8 @@ RESUME_LIM: dict = {"wake_min": (0, 240)}
 # refused for armour); a missing section = the old rule
 GROWTH_LIM: dict = {"on": "bool", "base": (1, 250), "armed_cap": (1, 250), "ready_cap": (1, 250), "top_cap": (1, 250),
                     "armed_min": (1, 30), "full_ready": (0, 100), "full_top": (0, 100), "share": (0, 100), "drink_d": (0, 365),
-                    "drop_days": (0, 60)}
-SMALL_FIGHT_LIM: dict = {"on": "bool", "max": (1, 10), "armed": (1, 20)}
+                    "drop_days": (0, 60), "wood": "bool"}
+SMALL_FIGHT_LIM: dict = {"on": "bool", "max": (1, 10), "armed": (1, 20), "gate": "bool"}
 REFLEX_EXTRA = ("confine", "popups", "breach", "resume", "siege_long", "siege_starve", "growth", "small_fight")
 
 

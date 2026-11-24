@@ -58,7 +58,7 @@ T.test('NEU1 P4: the success criterion: no input with fewer than 70 % fully equi
 end)
 
 ---------------------------------------------------------------- (b) kit counts from fake units
-T.test('NEU1 P4: military.kit_stats counts fullr (all armour + a real weapon), metal (metal body armour) and the first squad', function()
+T.test('NEU1 P4: military.kit_stats counts fullr (all armour + a real weapon), metal (every armour piece metal) and the first squad', function()
   local W = X.world{n = 50, training = false}
   X.load(W, {'military'}, {X.runner('P5')}, {'sense'})
   W.state()
@@ -207,12 +207,13 @@ local function stubs()
   function ca.deaths_recent(K) return 0 end
   return {sg, rf, ca}
 end
--- units: the hostiles; armed: members of A that get a real weapon (no armour); small: the small_fight config (nil = on)
+-- units: the hostiles; armed: members of A that get a real weapon (no armour); small: the small_fight config (nil = on); wood: the shipped
+-- training policy, the armed members hold a wooden training weapon and the census counts g_weapon real ones
 local function msetup(units, o)
   o = o or {}
   local u = X.citizens(50)
   for _, x in ipairs(units or {}) do u[#u + 1] = x end
-  local W = X.world{units = u}
+  local W = X.world{units = u, training = o.wood and true or nil}
   local mods = stubs()
   local snap = X.snapshot()
   snap.groups = function(K, pts) local r = {}; for i in ipairs(pts) do r[i] = 1 end; return r end
@@ -228,10 +229,11 @@ local function msetup(units, o)
     local oc = A.positions[i].occupant
     if oc >= 0 and n < (o.armed or 3) then
       n = n + 1
-      local it = X.item(W, 'WEAPON')
+      local it = o.wood and X.weapon(W, 'ITEM_WEAPON_AXE_TRAINING') or X.item(W, 'WEAPON')
       W.unit(W.hfs[oc].unit_id).inventory:insert('#', {item = it, mode = df.inv_item_role_type.Weapon})
     end
   end
+  if o.wood then W.set_census('i', {tick = 0, g_weapon = o.g_weapon or 0}) end
   W.K.set_mode('SIEGE', 'test')
   if o.mode ~= 'SIEGE' then W.K.set_mode('BREACH', 'test') end
   W.run(60, {skip = 9})
@@ -256,6 +258,21 @@ T.test('NEU1 P4: BREACH, one goblin outside Kern+, squad A armed but without arm
   r = W2.inbox('squad.sortie', {squad = 'A', target = {150, 150, 150}, unit = 150, approve = true})
   T.eq(r.ok, false)
   T.ok(tostring(r.msg):find('sortie refused: squad A is not equipped', 1, true), tostring(r.msg))
+end)
+
+T.test('NEU1 P4: the first ticks of a BREACH: a training-policy squad still holds wooden weapons; real ones in the fort: squad.sortie goes, ' ..
+       'none: refused', function()
+  local W = msetup({X.S.inv(150, 150, 150, Z)}, {wood = true, g_weapon = 10})
+  local a, n = X.call(W, 'military', 'armed_count', 'A')
+  T.ok(a >= 3 and n >= 3, string.format('%d of %d armed (wooden in hand, real ones waiting)', a, n))
+  local r = W.inbox('squad.sortie', {squad = 'A', target = {150, 150, 150}, unit = 150, approve = true})
+  T.ok(r.ok, tostring(r.msg))
+  T.eq(order(W, 'A').units, {150})
+  local W2 = msetup({X.S.inv(150, 150, 150, Z)}, {wood = true, g_weapon = 0})
+  a = X.call(W2, 'military', 'armed_count', 'A')
+  T.eq(a, 0, 'no real weapon in the fort: a wooden one arms nobody')
+  r = W2.inbox('squad.sortie', {squad = 'A', target = {150, 150, 150}, unit = 150, approve = true})
+  T.eq(r.ok, false, tostring(r.msg))
 end)
 
 T.test('NEU1 P4: refused as before with 4 hostiles in sight, a great danger, or fewer than 2 armed members', function()

@@ -66,11 +66,12 @@ M.PERIM_LIM = {escalate_days = {0, 30}, escalate_every = {1, 30}, hold_pop = {0,
 M.UNSAFE = {hold_pop = 30, outside = 10, share = 25}
 local UNSAFE_FLAGS = {refuge_dry = true, audit_fail = true, lever_outside = true}
 -- NEU1 P4 (decision E1, growth follows safety; GRUNDSATZ-REVIEW: the wipe-outs came at pop 77-100 with R0 and 0-46 % armour worn): the growth
--- ladder, one more limit of the ceiling (why 'growth'). Cap `base` until the first melee squad has `armed_min`+ members, all with a real weapon,
+-- ladder, one more limit of the ceiling (why 'growth'). Cap `base` until the first melee squad has `armed_min`+ members, all with a real weapon
+-- (in hand, or under the training policy a wooden one with a real one of the fort waiting: military.kit_rows),
 -- and `drink_d` days of drink lie inside Kern+/the refuge (seal alert.core_d); `armed_cap` until `full_ready` soldiers are fully equipped (all
 -- armour slots + a real weapon), `share` % of all soldiers are, R0 is passed (level >= 1) and a linked lever stands inside the core
 -- (gate.core_lever when gate has it, else a bridge with its levers linked and not all outside Kern+); `ready_cap` until `full_top` of them wear
--- metal body armour; then no ladder limit. The halt is the first failing condition of the next step (POPCAP halt, GROWTH_HALT, ready.gh,
+-- metal armour in every slot; then no ladder limit. The halt is the first failing condition of the next step (POPCAP halt, GROWTH_HALT, ready.gh,
 -- pop.hold). Missing data fails the condition (fail closed); a step is given up only after `drop_days` game days lower; the freeze in
 -- apply_cap never puts max-pop under the citizens (nobody is evicted, migrants stop). config/reflex.json growth; no section = no ladder
 M.GROWTH = {on = true, base = 30, armed_cap = 50, ready_cap = 80, top_cap = 100, armed_min = 3, full_ready = 6, full_top = 10, share = 70,
