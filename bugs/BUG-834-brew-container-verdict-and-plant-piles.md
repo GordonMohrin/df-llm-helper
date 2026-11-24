@@ -23,3 +23,6 @@ Confirmed from the live logs: (1) BUG-779's verdict `nobarrel` needs `cont_free 
 
 ## Hypothese, nicht bewiesen (Retry)
 Die Container-Ursache (zu wenige freie leere Faesser; Lebendstand: i2 7 leere, i1 3) ist eine Hypothese. DFs eigene Zaehlung der leeren Lagerstuecke ist in keinem Log zu sehen; ob max_barrels die Plant-Piles wirklich trifft und ob neue Faesser frei bleiben, ist live ungeprueft. jobwhy liest Bedingungen gegen den Zensus und meldet "Scan kann falsch liegen" statt einer bewiesenen Ursache, wenn der Scan 0 findet und der Zensus >=10 hat. Die Stall-Zeile sagt "by my count".
+
+## NEU3 (diagnostics first)
+This cure acts on a cause that was never confirmed live (two verifiers rejected it). It is now behind `economy.diag.cx_cure` (default **false**, config/baseline.json): with the switch off the fort behaves as before this bug (constant reserve 3 as BUG-779, no phantom verdict, no pile freeze). The reporting part (texts, `dfpilot why`) stays on. Turn it on only after `inspect what=raw` / the kern.log stall line named this cause (docs/v2/NEU3-diagnose.md, BUG-839, BUG-840).

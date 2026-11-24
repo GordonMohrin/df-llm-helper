@@ -19,3 +19,6 @@ Confirmed: the act `labor_set` had no Carpentry (`furniture` = HAUL_FURNITURE) a
 1. After a container stall line, kern.log `Carpentry labor on for unit N` (up to 3 holders) and `N MakeBarrel tasks on the Carpenters sheet at ID`.
 2. Within 5 game days a MakeBarrel job at the Carpenters has a worker (`dfpilot why order:ID` says working) and `barrels` in the census rises.
 3. If tasks are added but never worked, `dfpilot why job:ID` names the holders (BUG-836): that is the next blocker (burrow / busy / 'Needs logs').
+
+## NEU3 (diagnostics first)
+This cure acts on a cause that was never confirmed live (two verifiers rejected it). It is now behind `economy.diag.cx_cure` (default **false**, config/baseline.json): with the switch off the fort behaves as before this bug (no labor held for the container jobs, no direct MakeBarrel tasks; the act verbs and `labor.set carpenter` stay available to the player). The reporting part (texts, `dfpilot why`) stays on. Turn it on only after `inspect what=raw` / the kern.log stall line named this cause (docs/v2/NEU3-diagnose.md, BUG-839, BUG-840).

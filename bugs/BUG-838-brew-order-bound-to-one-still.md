@@ -16,3 +16,6 @@ Module: `lua/dfllm/economy.lua` (`M.brew_diag` `orders.pin_still`, `M.brew_cause
 ## Live-Erwartung
 1. The brew stall line names `bound to Still A while Still B holds no job` and kern.log shows the brew orders taken down and made again; the second Still gets a job within 3 days (`why ws:ID`).
 2. If the order is not the kernel's it stays: the line is still printed and the player removes it by hand.
+
+## NEU3 (diagnostics first)
+This cure acts on a cause that was never confirmed live (two verifiers rejected it). It is now behind `economy.diag.still_pin` (default **false**, config/baseline.json): with the switch off the fort behaves as before this bug (no `pinned to one Still` verdict and no re-make of the orders; the orders bound to a Still show in the raw dumps). The reporting part (texts, `dfpilot why`) stays on. Turn it on only after `inspect what=raw` / the kern.log stall line named this cause (docs/v2/NEU3-diagnose.md, BUG-839, BUG-840).

@@ -996,7 +996,7 @@ VERB_ARGS: dict[str, Obj] = {
     "inspect": Obj(req={"what": Str(enum=["state", "modules", "census", "manifest", "projects", "persist",
                                           "perf", "mode", "plan", "tombs", "water_sources", "hospital", "orders",
                                           "workload", "trade", "reach", "entrances", "defense", "perimeter", "refuge",
-                                          "offices", "curse", "unit", "items", "cavern", "manager", "military", "why"])},
+                                          "offices", "curse", "unit", "items", "cavern", "manager", "military", "why", "raw"])},   # NEU3: raw = the game's own fields (dfraw.lua)
                    # BUG-137: `key=39052` arrives as an int from the CLI (cmd.parse_kv); a unit id or a name
                    opt={"key": AnyOf(NAT, Str(maxbytes=80)), "field": Str(r"^[A-Za-z0-9_]{1,40}$")}),
     "selftest": Obj(opt={"suite": Str(enum=["quick", "full"])}),

@@ -17,7 +17,9 @@ local function world(o)
   o = o or {}
   local units, ids = {}, {}
   for i = 1, o.n or 6 do units[i] = {id = i, citizen = true, name = 'Urist ' .. i, pos = {10 + i, 10, 100}}; ids[i] = i end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units}
+  local base = F.cfg()
+  if o.cures ~= false then base.economy.diag = {cx_cure = true, mgr_chores = true, still_pin = true, stall_line = true} end   -- NEU3: the cures are switches, default off
+  local W = F.world{cfg = {baseline = base}, units = units}
   if df.job_type.Dig == nil then df.job_type.Dig = 990; df.job_type[990] = 'Dig' end
   df.unit_labor = {BREWER = BREWER, [BREWER] = 'BREWER', CARPENTER = CARPENTER, [CARPENTER] = 'CARPENTER'}
   df.job_skill = df.job_skill or {}

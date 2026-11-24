@@ -618,6 +618,24 @@ function M.groups(K, pts, near, prefer)
   return out
 end
 
+-- NEU3 (inspect what=raw items): per point true when the tile is hidden (unrevealed), false when revealed, nil when invalid or a fault. Read only,
+-- at most M.CFG.group_pts points a call.
+function M.hidden(K, pts)
+  local out, lim = {}, M.CFG.group_pts or 4000
+  for i, p in ipairs(type(pts) == 'table' and pts or {}) do
+    local v
+    if i <= lim and type(p) == 'table' then
+      local x, y, z = int(p.x or p[1]), int(p.y or p[2]), int(p.z or p[3])
+      if x and y and z then
+        local ok, des = pcall(dfhack.maps.getTileFlags, x, y, z)
+        if ok and des then v = des.hidden == true end
+      end
+    end
+    out[i] = v == nil and -1 or v
+  end
+  return out
+end
+
 -- occupied(K, pts): FR-90 (trash view: which loose items lie on a building or stockpile tile). pts = array of {x, y, z}; per
 -- point the tile's building occupancy value (tile_building_occ, 0 = none; a stockpile, workshop or planned building is > 0),
 -- -1 for a hidden or invalid tile or a fault (callers count -1 as open floor). At most M.CFG.group_pts points a call (the rest

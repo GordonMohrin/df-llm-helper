@@ -49,7 +49,9 @@ local function world(opts)
   local ctl = {labor = {}}
   local units = {}
   for i = 1, 20 do units[i] = {id = i, citizen = true, name = 'Urist ' .. i} end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units}
+  local base = F.cfg()
+  if opts.diag then base.economy.diag = opts.diag end                -- NEU3: the manager's other chores are a switch (economy.diag.mgr_chores)
+  local W = F.world{cfg = {baseline = base}, units = units}
   add_jobs({'ConstructBuilding', 'Dig', 'MakeWeapon', 'HarvestPlants'})
   df.unit_labor = {PLANT = 7, MECHANIC = 8, [7] = 'PLANT', [8] = 'MECHANIC'}
   local ids = {}
@@ -297,7 +299,7 @@ end)
 
 T.test('BUG-837 (Run 17 i1 Diedplank, i2 Whirledrampart: the manager spun, processed plants and carried water): every chore that keeps him from the office ' ..
        'goes off with the unvalidated orders, once a day', function()
-  local W, ctl = world{unval = 3, logs = 30}
+  local W, ctl = world{unval = 3, logs = 30, diag = {mgr_chores = true}}
   df.unit_labor.SPINNER, df.unit_labor[9] = 9, 'SPINNER'
   df.unit_labor.PROCESS_PLANT, df.unit_labor[10] = 10, 'PROCESS_PLANT'
   df.unit_labor.FEED_WATER_CIVILIANS, df.unit_labor[11] = 11, 'FEED_WATER_CIVILIANS'

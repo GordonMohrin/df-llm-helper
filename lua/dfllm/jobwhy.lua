@@ -128,6 +128,13 @@ function J.labors(jt, rname, mt, mi, skey)
     local ws = O.workshops(tn, mc or 'any')
     -- BUG-835 (Run 17 i2: MakeBarrel 'the labor this job needs is not known'): a job whose material arrives as a category has no class; its shop names it
     if ws == nil and skey then ws, mc = {skey}, mc or (skey == 'workshop:Craftsdwarfs' and 'rock' or nil) end
+    -- NEU3: a job with no material class and no workshop known (a bare job record): the material the kernel makes it in first (wood, then rock)
+    if ws == nil and mc == nil then
+      for _, c2 in ipairs({'wood', 'rock'}) do
+        local w2 = O.workshops(tn, c2)
+        if w2 then ws, mc = w2, c2; break end
+      end
+    end
     for _, ln in ipairs(O.labors(tn, mc or 'any', ws) or {}) do
       local l = df.unit_labor and df.unit_labor[ln]
       if int(l) and not seen[l] then seen[l] = true; labors[#labors + 1] = l end
@@ -933,5 +940,9 @@ function J.data(r)
   if r.sub then d.sub = flat(r.sub) end
   return d
 end
+
+-- NEU3: the helpers dfraw.lua (inspect what=raw) shares, so that both read the game the same way
+J.util = {int = int, pget = pget, ename = ename, each = each, uname = uname, walk_groups = walk_groups, in_burrows = in_burrows, civ_burrows = civ_burrows,
+          shops_all = shops_all, find_job = find_job, find_order = find_order, find_shop = find_shop, built = built, at_text = at_text}
 
 return J

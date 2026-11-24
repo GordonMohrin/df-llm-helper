@@ -16,3 +16,6 @@ BUG-547 switched off only Farming; i1's manager spun thread and processed plants
 ## Live-Erwartung
 1. kern.log `manager NAME (unit N): labors off (...)` when orders wait; `why order:ID` on an unvalidated order names the manager's job.
 2. New supply orders (MakeBarrel) are validated within 2 game days (`inspect manager` unval 0).
+
+## NEU3 (diagnostics first)
+This cure acts on a cause that was never confirmed live (two verifiers rejected it). It is now behind `economy.diag.mgr_chores` (default **false**, config/baseline.json): with the switch off the fort behaves as before this bug (only the Farming labor goes off for the manager; the query still names his chore). The reporting part (texts, `dfpilot why`) stays on. Turn it on only after `inspect what=raw` / the kern.log stall line named this cause (docs/v2/NEU3-diagnose.md, BUG-839, BUG-840).

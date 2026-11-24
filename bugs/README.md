@@ -805,6 +805,8 @@ Related: FR-xx, BUG-xx
 | [BUG-836](BUG-836-jobwhy-labor-conditions-scan.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | dfpilot why answered 'unknown' / 'labor not known' / '0 match' for MakeBarrel, item-conditioned brews and plants in barrels | lua/dfllm/jobwhy.lua, lua/dfllm/economy.lua |
 | [BUG-837](BUG-837-manager-chores.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | the manager spins, processes plants or carries water instead of validating; why says 'no cause found' | lua/dfllm/economy.lua, lua/dfllm/jobwhy.lua |
 | [BUG-838](BUG-838-brew-order-bound-to-one-still.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | a second Still is never used: the brew order stays bound to the first | lua/dfllm/economy.lua |
+| [BUG-839](BUG-839-raw-dumps-and-stall-line.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | forts die of thirst and nobody can read why: no raw view of the game's own order / job / item / manager state, no stall line | lua/dfllm/dfraw.lua, lua/dfllm/economy.lua |
+| [BUG-840](BUG-840-cures-behind-switches.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | the cures of the fass round act on a guessed cause: config switches economy.diag, default off | lua/dfllm/economy.lua, config/baseline.json |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
