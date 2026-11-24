@@ -215,10 +215,10 @@ T.test('the default switch: timeout_s 180 s, max_ticks 24000 (20 game days)', fu
 end)
 
 T.test('game-time bound: a fast clock trips max_ticks long before timeout_s; a new heartbeat resets it', function()
-  world{session = 0, reflex = {v = 2, deadman = {timeout_s = 600, max_ticks = 12000, check_s = 1, grace_s = 0}}}
+  world{session = 0, reflex = {v = 2, deadman = {timeout_s = 600, max_ticks = 12000, check_s = 1, grace_s = 0, min_s = 0}}}
   H.run(W, 10000, {skip = 500})                       -- 20 frames = 20 real s at 500 ticks/s
   T.eq(owner(), nil, '10000 ticks <= 12000')
-  session(-1)                                         -- the live session refreshes (a new `wall`): the count starts again
+  session(7)                                          -- the live session refreshes (a new `wall`): the count starts again
   H.run(W, 10000, {skip = 500})
   T.eq(owner(), nil, 'a new wall resets the game-time bound')
   T.eq(#ev('DEADMAN_PAUSE'), 0)
@@ -277,6 +277,45 @@ T.test('park: owner park from a running game or the dead-man; nothing wakes for 
   r = verb('k3', 'park')
   T.ok(r.ok and r.msg:find('was deadman', 1, true), r.msg)
   T.eq(owner(), 'park')
+  kern.stop()
+end)
+
+T.test('BUG-826 min_s: the tick bound waits for a heartbeat that is min_s (default 45) real seconds old; timeout_s stays the primary bound', function()
+  T.eq(arbiter.DEADMAN.min_s, 45)
+  -- a fast clock (60 real s at 500 ticks/s = 30000 ticks > 24000) but the heartbeat is only 10 s old: no pause
+  world{session = 10, reflex = {v = 2, deadman = {check_s = 1, grace_s = 0}}}
+  H.run(W, 30000, {skip = 500})
+  T.eq(owner(), nil, '30000 ticks > max_ticks but 10 s < min_s')
+  T.eq(#ev('DEADMAN_PAUSE'), 0)
+  kern.stop()
+  -- the same ticks with a 50 s old heartbeat (< timeout_s 180): the tick bound fires
+  world{session = 50, reflex = {v = 2, deadman = {check_s = 1, grace_s = 0}}}
+  H.run(W, 30000, {skip = 500})
+  T.eq(owner(), 'deadman')
+  local d = ev('DEADMAN_PAUSE')
+  T.eq({#d, d[1].d.why, d[1].d.max_ticks}, {1, 'ticks', 24000})
+  T.ok(d[1].d.age >= 45 and d[1].d.age < 180, tostring(d[1].d.age))
+  kern.stop()
+end)
+
+T.test('BUG-826 min_s: out of range = 45; 0 = the old behaviour; the wall bound is not delayed by it', function()
+  world{session = 30, reflex = {v = 2, deadman = {check_s = 1, grace_s = 0, min_s = 99999}}}
+  H.run(W, 30000, {skip = 500})
+  T.eq(owner(), nil, 'min_s 99999 is invalid: the default 45 applies, 30 s is too young')
+  kern.stop()
+  world{session = 30, reflex = {v = 2, deadman = {check_s = 1, grace_s = 0, min_s = -5}}}
+  H.run(W, 30000, {skip = 500})
+  T.eq(owner(), nil, 'min_s -5 is invalid too')
+  kern.stop()
+  world{session = 0, reflex = {v = 2, deadman = {check_s = 1, grace_s = 0, min_s = 0}}}
+  session(7)
+  H.run(W, 30000, {skip = 500})
+  T.eq(owner(), 'deadman', 'min_s 0: the tick bound alone, as before')
+  kern.stop()
+  world{session = 400, reflex = {v = 2, deadman = {check_s = 1, grace_s = 0, max_ticks = 403200, min_s = 3600}}}
+  H.run(W, 5)
+  T.eq(owner(), 'deadman', 'timeout_s (wall) fires at once whatever min_s says')
+  T.eq(ev('DEADMAN_PAUSE')[1].d.why, 'wall')
   kern.stop()
 end)
 

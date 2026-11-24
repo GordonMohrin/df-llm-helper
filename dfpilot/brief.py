@@ -440,6 +440,11 @@ def lockdown_text(al: dict) -> str:
     return txt
 
 
+def _gfps_text(c: dict) -> str:
+    """Neuausrichtung 2: the graphics frame rate the arbiter set (0 or missing = the profile is not applied: say nothing)."""
+    return f", gfps {c['gfps']}" if c.get("gfps") else ""
+
+
 def alarm_items(ctx: Ctx) -> list[tuple[int, str]]:
     """FR-51/53/55/58: the clock governor, the lockdown, unacked interrupts, lever latency and the arrival ETA. I1: ranked
     parts for the status (the lockdown with its cause, the unacked interrupts and the ETA are rank 2 and stay when the
@@ -452,9 +457,9 @@ def alarm_items(ctx: Ctx) -> list[tuple[int, str]]:
     c = s.get("clock")
     if c:
         if c["held"] or (c["orig"] and c["cap"] < c["orig"]):
-            out.append((3, f"clock: held {c['cap']} t/s, reason {c['why'] or '?'}"))
+            out.append((3, f"clock: held {c['cap']} t/s, reason {c['why'] or '?'}" + _gfps_text(c)))
         else:
-            out.append((3, f"clock: free (cap {c['cap'] or '?'}" + (f", timestream {c['ts']}" if c["ts"] > 0 else "") + ")"))
+            out.append((3, f"clock: free (cap {c['cap'] or '?'}" + (f", timestream {c['ts']}" if c["ts"] > 0 else "") + _gfps_text(c) + ")"))
     al = s.get("alarm")
     if al:
         if al["lock"]:

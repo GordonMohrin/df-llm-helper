@@ -90,13 +90,13 @@ end
 T.test('a 10-minute inbox tempo.lower is not PERF_DEGRADED (baseline per mode and target)', function()
   local W = H.world{tag = 'tlower'}
   H.boot(W, {modules = {arbiter, perf}})
-  T.eq(W.ts_fps, 500)
-  run_ts(W, 330)                                  -- 11 rows at 500 ticks/s: baseline PEACE:500
+  T.eq(W.ts_fps, 1000)
+  run_ts(W, 330)                                  -- 11 rows at 1000 ticks/s: baseline PEACE:1000
   H.inbox(W, 'tl', 'tempo.lower', {fps = 100, ttl_s = 600})
   run_ts(W, 2)
   T.eq(W.ts_fps, 100)
   run_ts(W, 600)                                  -- 10 min at 100 ticks/s
-  T.eq(W.ts_fps, 500, 'TTL over')
+  T.eq(W.ts_fps, 1000, 'TTL over')
   run_ts(W, 120)
   kern.stop()
   T.eq(H.outbox(W, 'tl').ok, true)

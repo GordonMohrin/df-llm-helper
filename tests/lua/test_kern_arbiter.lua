@@ -30,7 +30,7 @@ T.test('boot: originals written to restore.json before the profile is applied; u
   T.eq({r.v, r.save, r.active}, {2, 'region1', 1})
   T.eq(r.orig, {gfps = 250, fps_cap = 250, autosave = 'SEASONAL', population_cap = 75, timestream_fps = 250,
                 overlays = {['hotkeys.menu'] = true, ['unsuspend.overlay'] = true}})
-  T.eq({g.enabler.gfps, g.d_init.feature.autosave, W.ts_fps}, {30, df.d_init_autosave.YEARLY, 500})
+  T.eq({g.enabler.gfps, g.d_init.feature.autosave, W.ts_fps}, {10, df.d_init_autosave.YEARLY, 1000})
   T.eq({W.ov['hotkeys.menu'].enabled, W.ov['unsuspend.overlay'].enabled, W.ov['notify.panel'].enabled}, {false, false, true})
   T.eq(g.d_init.dwarf.visitor_cap, 300, 'D-07 default: unchanged')
   g.d_init.dwarf.population_cap = 55     -- pop-control wrote the global cap meanwhile
@@ -80,7 +80,7 @@ T.test("timestream original is the save's own (persisted at its first boot), not
                     persist = {restore = {v = 2, save = 'region1', wall = 1, active = 1, orig = {timestream_fps = 120}}}}
   boot(W)
   T.eq(H.json(W.rt .. '/restore.json').orig.timestream_fps, 120)
-  T.eq(W.ts_fps, 500)
+  T.eq(W.ts_fps, 1000)
   kern.stop()
   T.eq(W.ts_fps, 120)
 end)
@@ -99,23 +99,23 @@ end)
 T.test('tempo follows the mode in the same call (on.MODE), writes only on change', function()
   local W = H.world{tag = 'tempo'}
   local K = boot(W)
-  T.eq(ts_cmds(W), {'500'})
+  T.eq(ts_cmds(W), {'1000'})
   H.run(W, 300)                          -- ~5 s: no re-writes
-  T.eq(ts_cmds(W), {'500'})
+  T.eq(ts_cmds(W), {'1000'})
   K.set_mode('ALERT', 'test')
   -- FR-51: ALERT caps the vanilla FPS at 100; timestream 250 would skip ticks past that cap, so it is off
   T.eq({W.ts_fps, math.floor(df.global.enabler.fps)}, {-1, 100})
   K.set_mode('SIEGE', 'test')
   T.eq({W.ts_fps, math.floor(df.global.enabler.fps)}, {-1, 30})
   H.run(W, 300)
-  T.eq(ts_cmds(W), {'500', '-1'})
+  T.eq(ts_cmds(W), {'1000', '-1'})
   K.set_mode('RECOVERY', 'test')
   T.eq(math.floor(df.global.enabler.fps), 250, 'RECOVERY: the captured original cap')
   K.set_mode('PEACE', 'test')
-  T.eq(ts_cmds(W), {'500', '-1', '250', '500'})
+  T.eq(ts_cmds(W), {'1000', '-1', '250', '1000'})
   W.ts_fps = 100                         -- someone else changed it: re-asserted within 60 s
   H.run(W, 4000, {ms = 20})
-  T.eq(W.ts_fps, 500)
+  T.eq(W.ts_fps, 1000)
   kern.stop()
 end)
 
@@ -143,10 +143,10 @@ T.test('tempo.lower: lowers below the mode value for its TTL, never above, owner
   T.eq(H.state(W).owners, {pause = nil, tempo = 'inbox'})
   T.eq(json.decode(H.read(W.sd .. '/state.' .. (H.state(W).seq % 2 == 1 and 'a' or 'b') .. '.json')).owners.tempo, 'inbox')
   H.run(W, 35)
-  T.eq(W.ts_fps, 500, 'TTL expired')
+  T.eq(W.ts_fps, 1000, 'TTL expired')
   H.inbox(W, 't2', 'tempo.lower', {fps = 900, ttl_s = 60})
   H.run(W, 6)
-  T.eq(W.ts_fps, 500, 'never above the mode value')
+  T.eq(W.ts_fps, 900, 'below the mode value (1000) it is followed; 1000 is the top of the tempo range')
   K.set_mode('SIEGE', 'x')
   H.inbox(W, 't3', 'tempo.lower', {fps = 100, ttl_s = 60})
   H.run(W, 6)
@@ -357,8 +357,8 @@ T.test('crash heal on another marked save: globals healed before the new capture
   boot(W)
   local r = H.json(W.rt .. '/restore.json')
   T.eq({r.save, r.active, r.orig.gfps, r.orig.timestream_fps, r.orig.population_cap}, {'region1', 1, 200, 250, 75})
-  T.eq(ts_cmds(W), {'500'}, "the other save's timestream value is never written here")
-  T.eq(df.global.enabler.gfps, 30)
+  T.eq(ts_cmds(W), {'1000'}, "the other save's timestream value is never written here")
+  T.eq(df.global.enabler.gfps, 10, "healed from the trade value 30, then the profile gfps")
   kern.stop()
   T.eq({df.global.enabler.gfps, W.ts_fps}, {200, 250})
 end)
@@ -370,7 +370,7 @@ T.test('crash heal on the same marked save: timestream restored, pop cap origina
                                                 orig = {gfps = 200, timestream_fps = 100, population_cap = 66}}))
   df.global.d_init.dwarf.population_cap = 52           -- pop-control's value for this fort
   boot(W)
-  T.eq(ts_cmds(W), {'100', '500'}, 'original first, then the mode value')
+  T.eq(ts_cmds(W), {'100', '1000'}, 'original first, then the mode value')
   T.eq(df.global.d_init.dwarf.population_cap, 52, "heal does not overwrite pop-control's cap")
   local r = H.json(W.rt .. '/restore.json')
   T.eq({r.active, r.orig.timestream_fps, r.orig.population_cap}, {1, 100, 66}, 'no prefs file: carried original')
@@ -418,7 +418,7 @@ T.test('supply brake: economy.alarm or phase P0 hold tempo and FPS cap at BRAKE_
   T.eq(W.state().owners.tempo, 'brake')
   alarm = nil
   W.run(40, {paused = true})
-  T.eq(last('timestream').args[1], 500)
+  T.eq(last('timestream').args[1], 1000)
   T.eq(last('setting', 'fps_cap').args[2], 250, 'the captured original cap')
   T.eq(W.state().owners.tempo, 'mode')
   -- SIEGE: timestream is off anyway, no brake
@@ -443,12 +443,12 @@ T.test('FR-51 clock governor: mode caps, the reflex clamp, config override, rest
   W.settings.fps_cap = nil
   local function capv() return W.settings.fps_cap end
   T.eq(capv(), nil, 'PEACE: no cap write')
-  T.eq(W.state().clock, {cap = 250, orig = 250, ts = 500, held = 0, why = ''})
+  T.eq(W.state().clock, {cap = 250, orig = 250, ts = 1000, held = 0, why = '', gfps = 10, pt = 1000})
   W.K.set_mode('ALERT', 'test')
   T.eq({capv(), W.timestream_fps}, {100, -1}, 'alert_cap out of range (5000): the default 100')
   W.K.set_mode('SIEGE', 'test')
   T.eq(capv(), 20, 'config/reflex.json clock.siege_cap')
-  T.eq(W.state().clock, {cap = 20, orig = 250, ts = -1, held = 0, why = 'siege'})
+  T.eq(W.state().clock, {cap = 20, orig = 250, ts = -1, held = 0, why = 'siege', gfps = 10, pt = 1000})
   W.K.set_mode('RECOVERY', 'test')
   T.eq({capv(), W.timestream_fps}, {250, 250})
   why = 'arrival:siege'                         -- the lockdown holds: same step through arbiter.hold
@@ -485,7 +485,7 @@ T.test('BUG-026 trade clock: trade.clock() caps the FPS at clock.trade_cap, neve
   why = 'trade'
   W.run(40, {paused = true})
   T.eq({W.settings.fps_cap, W.timestream_fps}, {80, -1}, 'clock.trade_cap; timestream above it goes off')
-  T.eq(W.state().clock, {cap = 80, orig = 250, ts = -1, held = 0, why = 'trade'})
+  T.eq(W.state().clock, {cap = 80, orig = 250, ts = -1, held = 0, why = 'trade', gfps = 30, pt = 1000})
   W.K.set_mode('SIEGE', 'test')                 -- a lower mode cap wins
   T.eq(W.settings.fps_cap, 30)
   W.K.set_mode('RECOVERY', 'test')
@@ -493,7 +493,7 @@ T.test('BUG-026 trade clock: trade.clock() caps the FPS at clock.trade_cap, neve
   T.eq(W.settings.fps_cap, 80)
   why = nil
   W.run(40, {paused = true})
-  T.eq({W.settings.fps_cap, W.timestream_fps}, {250, 500}, 'released: the original cap and the mode tempo')
+  T.eq({W.settings.fps_cap, W.timestream_fps}, {250, 1000}, 'released: the original cap and the mode tempo')
   local logged
   for _, l in ipairs(W.logs) do if l.msg:find('trade clock on: FPS cap 80', 1, true) then logged = true end end
   T.ok(logged, 'logged')
@@ -528,7 +528,7 @@ T.test('arbiter on the reference k_mock K (strict contract checks)', function()
   W.load(arbiter)
   local acts = {}
   for _, a in ipairs(W.acts) do acts[#acts + 1] = a.fn .. ':' .. tostring(a.args[1]) end
-  T.eq(acts, {'setting:gfps', 'setting:autosave', 'timestream:500'})
+  T.eq(acts, {'setting:gfps', 'setting:autosave', 'timestream:1000'})
   W.K.set_mode('SIEGE', 'army')
   T.eq(W.find_acts('timestream')[2].args[1], -1)
   W.run(100, {skip = 9})

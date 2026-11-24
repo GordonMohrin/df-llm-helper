@@ -11,10 +11,10 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 711 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 762 |
+| offen, nie live gesehen | 712 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 763 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
-| genannt, aber ohne klares Urteil (bleiben offen) | 78 |
+| genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
 Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
 
@@ -351,6 +351,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-602 `runs/run-16b/STAND.md:248` (no verdict word): - 21:21 y374 aut d62 aqshaft-Ausweich-Site S1 68,85,140 (BUG-602, R39) per bp.place gesetzt
 - BUG-602 `runs/run-16b/FR-BUGS.md:398` (no verdict word): - aqshaft-Ausweich-Sites (BUG-602): 'bp sites aqshaft --fresh' liefert jetzt S1-S3 (68,85/91/93, depth 17);
 - BUG-618 `runs/run-16b/STAND.md:267` (no verdict word): Muboomon kam. Food 0-24 d zyklisch (Kohlblatt ungeniessbar BUG-618 bekannt)
+- BUG-682 `runs/run-16b/FR-BUGS.md:549` (no verdict word): 0 unerreichbare Tote -> Gedenkplatten; 'plan propose' nennt BUG-682 (O1/B1 durch Wand+Tür ersetzt, no_inner/no_outer per Plan nicht behebbar).
 - BUG-686 `runs/run-16a/FR-BUGS.md:442` (ungesehen): elbst gesiegelt, nur per 'seal at=last close=door' von mir (BUG-686 'seal at=ents selbst' ungesehen).
 - BUG-736 `runs/run-16b/FR-BUGS.md:518` (no verdict word): ei Stein 0 / 501 Logs: noch kein sichtbarer Holzbau-Effekt (BUG-736) - Projekte weiter 'no builder took it'.
 - BUG-751 `runs/run-16c/FR-BUGS.md:441` (beobachte): Zone verblutet/verdurstet). Wirkung der Auftragsstreichung (BUG-751) wird in der Restzeit beobachtet;

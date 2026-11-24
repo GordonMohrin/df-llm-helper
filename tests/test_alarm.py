@@ -145,7 +145,7 @@ def test_reflex_config_validation(tmp_path):
     from dfpilot import fairplay
     assert fairplay.reflex_errors() == []                                    # the shipped config/reflex.json
     shipped = json.loads((fairplay.REPO / "config" / "reflex.json").read_text(encoding="utf-8"))
-    assert shipped["clock"] == {"siege_cap": 30, "alert_cap": 100, "trade_cap": 100} and shipped["ack_timeout_s"] == 60
+    assert shipped["clock"] == {"siege_cap": 30, "alert_cap": 100, "trade_cap": 100, "gfps": 10, "peace_fps": 1000} and shipped["ack_timeout_s"] == 60
     assert sorted(shipped["defaults"]) == sorted(schema.INTERRUPTS)
     p = tmp_path / "reflex.json"
     assert fairplay.reflex_errors(p) == []                                   # missing: all defaults

@@ -134,7 +134,7 @@ T.test('fort without a manifest: the arrival popup locks down at once (gates, do
   T.eq(W.doors.own.door_flags.forbidden, true, 'never opens a door it did not forbid')
   S.run(W, 400)
   T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), S.bstate(W, 'B2')}, {'down', 'down', 'down'})
-  T.eq({cap(W), W.timestream_fps}, {250, 500})
+  T.eq({cap(W), W.timestream_fps}, {250, 1000})
   T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0)
   st = W.state()
   T.eq({st.alarm.defcon, st.alarm.lock, st.clock.held}, {5, 0, 0})
@@ -573,7 +573,7 @@ T.test('Run 11: an ELK_BIRD invader (a mount: no CAN_LEARN/CAN_SPEAK) 130 tiles 
   T.ok(e[1].msg:find('lockdown over (arrival:ambush): threat 0 for 2 days, 1 far: animal 28188 ELK_BIRD', 1, true),
        e[1].msg)
   T.eq(W.doors.entrance.door_flags.forbidden, false, 'its doors open again')
-  T.eq({W.state().alarm.lock, cap(W), W.timestream_fps}, {0, 250, 500})
+  T.eq({W.state().alarm.lock, cap(W), W.timestream_fps}, {0, 250, 1000})
   T.eq(#events(W, 'ARRIVAL'), 1, 'never an arrival of its own')
   -- a woodcutter outside meets it on a roofed tile: the predator rules (PREDATOR, ALERT), still no arrival lockdown
   W.move(2, 100, 20, Z)
@@ -748,7 +748,7 @@ T.test('BUG-065: a lone small intruder near a citizen holds the lockdown only fo
   T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0, 'civ_alert off and not sounded again')
   S.run(W, 1700)
   T.eq(W.K.mode(), 'PEACE', 'ALERT ends with it')
-  T.eq({cap(W), W.timestream_fps}, {250, 500}, 'the clock is back to the normal cap')
+  T.eq({cap(W), W.timestream_fps}, {250, 1000}, 'the clock is back to the normal cap')
   T.eq(df.global.plotinfo.alerts.civ_alert_idx, 0)
   S.run(W, 4000)
   T.eq({#events(W, 'ARRIVAL'), #events(W, 'LOCKDOWN'), W.state().alarm.lock}, {1, 0, 0}, 'no re-arm while it stays')

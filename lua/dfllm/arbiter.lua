@@ -28,13 +28,19 @@ local VL = require('dfllm.viewlib')     -- FR-88: the verb `view` (the camera)
 
 local M = {name = 'arbiter', every = {ms = 500}, critical = true, on = {}, verbs = {}}
 
-M.MODE_FPS = {PEACE = 500, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
+M.MODE_FPS = {PEACE = 1000, ALERT = 250, SIEGE = -1, BREACH = -1, RECOVERY = 250, DRILL = -1}
 M.CLOCK = {siege_cap = 30, alert_cap = 100,   -- FR-51 defaults; config/reflex.json `clock` overrides them
-           trade_cap = 100}                   -- BUG-026: while trade holds the clock (trade.clock)
+           trade_cap = 100,                   -- BUG-026: while trade holds the clock (trade.clock)
+           -- Neuausrichtung 2 (docs/v2/NEU2-tempo.md): the graphics frame rate (enabler.gfps) and the timestream target of
+           -- quiet PEACE; every other mode keeps its MODE_FPS / cap, so only the quiet clock gets faster
+           gfps = 10, peace_fps = 1000}
+M.CLOCK_LIM = {siege_cap = {10, 1000}, alert_cap = {10, 1000}, trade_cap = {10, 1000}, gfps = {1, 100},
+               peace_fps = {100, 1000}}
+M.TRADE_GFPS = 30                  -- while trade holds the clock the UI waits (CLICK_MS 100) need a render every <= 34 ms
 M.MODE_CAP = {SIEGE = 'siege_cap', BREACH = 'siege_cap', DRILL = 'siege_cap', ALERT = 'alert_cap'}
 M.BRAKE_FPS = 150                  -- tempo and FPS cap while the supply brake holds
 M.P0_SAFE_DAYS = 60                -- P0 brakes only while drink or food is below this
-M.PROFILE = {gfps = 30, autosave = 'YEARLY', overlays = false, visitor_cap = 30}
+M.PROFILE = {autosave = 'YEARLY', overlays = false, visitor_cap = 30}
 M.KEEP_OVERLAY = 'notify'          -- headless overlay profile keeps widgets whose name contains this
 -- kind -> {plain text markers}: dismissed + unpaused. Live L0 (DF 53.16): an announcement popup
 -- (world.status.popups) halts the game while pause_state stays false; the only one seen so far is
@@ -110,9 +116,11 @@ M.RESUME = {wake_min = 5, gap_s = 60, max_popups = 8}
 -- `wall`, written by dfllm wait/brief/cmd/ack/plan/next) is older than timeout_s real seconds, or the game ran more than
 -- max_ticks game ticks since `wall` last changed (0 = no game-time bound), or the file is missing or dated more than
 -- FUTURE_S s in the future (bad data: fail closed); read every check_s s; nothing fires in the first grace_s s after the
--- module started (a session that just loaded the save)
-M.DEADMAN = {on = true, timeout_s = 180, max_ticks = 24000, check_s = 5, grace_s = 60}
-M.DEADMAN_LIM = {timeout_s = {60, 86400}, max_ticks = {0, 403200}, check_s = {1, 300}, grace_s = {0, 3600}}
+-- module started (a session that just loaded the save). Neuausrichtung 2: the tick bound only fires once the heartbeat is
+-- also min_s real seconds old (at 1000 ticks/s 24000 ticks are 24 s, less than a player thinks between two commands), so
+-- timeout_s stays the primary bound; docs/v2/NEU2-tempo.md has the worst case in game days
+M.DEADMAN = {on = true, timeout_s = 180, max_ticks = 24000, check_s = 5, grace_s = 60, min_s = 45}
+M.DEADMAN_LIM = {timeout_s = {60, 86400}, max_ticks = {0, 403200}, check_s = {1, 300}, grace_s = {0, 3600}, min_s = {0, 3600}}
 M.DEADMAN_FUTURE_S = 60
 M.SESSION_FILE = 'session.json'
 M.DEPOT_POPUP = 'need a trade depot'   -- a caravan popup that is also the NO_DEPOT interrupt (FR-43/53)
@@ -202,8 +210,9 @@ local LIVE = {
   visitor_cap = function() return df.global.d_init.dwarf.visitor_cap end,
   weather = function() return df.global.d_init.feature.flags.WEATHER == true end,
 }
-local function profile_value(k)
+local function profile_value(K, k)
   if k == 'weather' then return false end
+  if k == 'gfps' then return M.clock_cfg(K).gfps end
   if k == 'fps_cap' then return M.BRAKE_FPS end      -- only the brake writes the cap
   return M.PROFILE[k]
 end
@@ -229,7 +238,7 @@ function M.heal(K, opts)
       local ok, live = pcall(LIVE[k])
       -- the arbiter only ever lowers the FPS cap (brake, mode caps, clamp, tempo.lower): a live cap below the
       -- original is ours; after a process crash DF has reloaded the prefs value and there is nothing to undo
-      local ours = ok and (live == profile_value(k) or (k == 'fps_cap' and math.type(live) == 'integer'
+      local ours = ok and (live == profile_value(K, k) or (k == 'gfps' and live == M.TRADE_GFPS) or (k == 'fps_cap' and math.type(live) == 'integer'
                                                          and math.type(orig[k]) == 'integer' and live < orig[k]))
       if ours then
         K.act.setting(k, orig[k]); done[#done + 1] = k
@@ -307,7 +316,8 @@ local function apply_profile(K)
   end
   st.orig = orig
   write_restore(K, {v = 2, save = tostring(K.cfg.save or ''), wall = os.time(), active = 1, orig = orig})
-  if P.gfps then K.act.setting('gfps', P.gfps) end
+  local gf = M.clock_cfg(K).gfps
+  if K.act.setting('gfps', gf) then st.gfps = gf end
   if P.autosave then K.act.setting('autosave', P.autosave) end
   if visitor then K.act.setting('visitor_cap', P.visitor_cap) end
   if weather_off then K.act.setting('weather', false) end
@@ -331,13 +341,13 @@ function M.brake_why(K)
   if ok and type(why) == 'string' and why ~= '' then return why end
 end
 
--- clock knobs: M.CLOCK, overridden by config/reflex.json `clock` (ints 10..1000)
+-- clock knobs: M.CLOCK, overridden by config/reflex.json `clock` (ints within M.CLOCK_LIM; anything else = the default)
 local function clock_cfg(K)
-  local c = {siege_cap = M.CLOCK.siege_cap, alert_cap = M.CLOCK.alert_cap, trade_cap = M.CLOCK.trade_cap}
+  local c = {}
   local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.clock) == 'table' and K.cfg.reflex.clock or {}
-  for k in pairs(c) do
+  for k, lim in pairs(M.CLOCK_LIM) do
     local v = int(r[k])
-    if v and v >= 10 and v <= 1000 then c[k] = v end
+    c[k] = (v and v >= lim[1] and v <= lim[2]) and v or M.CLOCK[k]
   end
   return c
 end
@@ -362,10 +372,10 @@ end
 -- desired timestream fps and its owner, plus the FPS cap to drive (nil = the original) and why
 local function desired(K)
   local mode = K.mode()
-  local base = M.MODE_FPS[mode] or 250
+  local cc = clock_cfg(K)
+  local base = mode == 'PEACE' and cc.peace_fps or M.MODE_FPS[mode] or 250
   local t = st.tempo
   if t and K.now().ms >= t.until_ms then st.tempo, t = nil, nil end
-  local cc = clock_cfg(K)
   local cap, cwhy
   if M.MODE_CAP[mode] then cap, cwhy = cc[M.MODE_CAP[mode]], mode:lower() end
   local clamp = st.clamp
@@ -404,6 +414,16 @@ local function apply_cap(K, cap, why)
   end
 end
 
+-- Neuausrichtung 2: the graphics frame rate is the configured clock.gfps (default 10: few renders, the game thread gets the
+-- time); while trade holds the clock it rises to TRADE_GFPS (the trade UI clicks wait for a render), and falls back after
+local function apply_gfps(K)
+  if not st.orig or st.orig.gfps == nil then return end       -- no profile applied: no original to restore
+  local want = M.clock_cfg(K).gfps
+  if st.trade and want < M.TRADE_GFPS then want = M.TRADE_GFPS end
+  if st.gfps == want then return end
+  if K.act.setting('gfps', want) then st.gfps = want end
+end
+
 -- idempotent: write timestream only when the desired value changed (or the live value drifted);
 -- timestream only when Gordon's D-11 is 'accepted' (the default). The FPS cap (a vanilla setting) follows the
 -- mode and the reflex clamp either way; the supply brake only where timestream runs.
@@ -427,6 +447,7 @@ function M.apply(K)
   end
   local fps, by, cap, cwhy = desired(K)
   apply_cap(K, cap, cwhy)
+  apply_gfps(K)
   st.cap_why, st.ts_want = cwhy, fps
   if not acc then st.tempo_by = 'mode'; return false end
   st.tempo_by = by
@@ -769,7 +790,7 @@ local function deadman(K, now)
   if not wall then why = 'missing'
   elseif age < -M.DEADMAN_FUTURE_S then why = 'future'    -- a clock skew or a bad writer: no proof of life
   elseif age > c.timeout_s then why = 'wall'
-  elseif c.max_ticks > 0 and ran > c.max_ticks then why = 'ticks'
+  elseif c.max_ticks > 0 and ran > c.max_ticks and age >= c.min_s then why = 'ticks'
   end
   if not why then st.dm_fired = nil; return end
   local key = wall or -1
@@ -870,8 +891,9 @@ function M.state(K)
   local cap = st.cap or orig
   local lowered = cap < orig or st.clamp ~= nil
   return {owners = {pause = st.pause_by or json.null, tempo = st.tempo_by or 'mode'},
-          clock = {cap = cap, orig = orig, ts = st.ts_want or -1, held = st.clamp and 1 or 0,
-                   why = lowered and tostring(st.cap_why or st.clamp or ''):sub(1, 24) or ''}}
+          clock = {cap = cap, orig = orig, ts = ts_accepted(K) and st.ts_want or -1, held = st.clamp and 1 or 0,
+                   why = lowered and tostring(st.cap_why or st.clamp or ''):sub(1, 24) or '',
+                   gfps = st.gfps or 0, pt = M.clock_cfg(K).peace_fps}}
 end
 
 M.verbs['tempo.lower'] = function(K, args, cmd)

@@ -78,10 +78,11 @@ def test_config_defaults_and_bad_values(tmp_path):
 def test_reflex_deadman_block_is_linted():
     assert fairplay.reflex_errors() == []
     doc = json.loads(fairplay.REFLEX_PATH.read_text(encoding="utf-8"))
-    assert doc["deadman"] == {"on": True, "timeout_s": 180, "max_ticks": 24000, "check_s": 5, "grace_s": 60}
+    assert doc["deadman"] == {"on": True, "timeout_s": 180, "max_ticks": 24000, "check_s": 5, "grace_s": 60,
+                           "min_s": 45}
     assert fairplay.DEADMAN_LIM["max_ticks"] == (0, 403200) and fairplay.DEADMAN_LIM["timeout_s"][0] == 60
     lua = (fairplay.REPO / "lua" / "dfllm" / "arbiter.lua").read_text(encoding="utf-8")
-    assert "M.DEADMAN = {on = true, timeout_s = 180, max_ticks = 24000, check_s = 5, grace_s = 60}" in lua
+    assert "M.DEADMAN = {on = true, timeout_s = 180, max_ticks = 24000, check_s = 5, grace_s = 60, min_s = 45}" in lua
     assert "max_ticks = {0, 403200}" in lua
 
 
