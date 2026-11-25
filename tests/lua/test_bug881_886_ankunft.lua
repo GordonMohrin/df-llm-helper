@@ -55,7 +55,7 @@ local function step(W, t)
     if not w.dead then W.unit(w.id).path = (rel >= w.start) and path_of(w) or nil end
   end
   for _, f in ipairs(W.foes) do
-    local k = math.min(math.floor(rel / 9), math.abs(f.y1 - f.y0))
+    local k = math.min(math.floor(rel / (W.foe_tpt or 9)), math.abs(f.y1 - f.y0))
     W.move(f.id, f.x, f.y0 + k, Z)
   end
   for _, w in ipairs(W.walkers) do
@@ -83,22 +83,22 @@ end
 
 -- 22 citizens out in the bailey north of O1 (y -2 .. -20), each walks in over O1 and B1 to Kern+ one after the other (a free footprint
 -- now and then: 60 ticks apart)
-local function recall(n, gap)
+local function recall(n, gap, y0)
   local ws = {}
   for k = 0, n - 1 do
-    ws[#ws + 1] = {id = 400 + k, kind = 'citizen', route = route(50 + k % 3, -4 - k, 80), start = 20 + gap * k}
+    ws[#ws + 1] = {id = 400 + k, kind = 'citizen', route = route(50 + k % 3, (y0 or -4) - k, 80), start = (y0 and 0 or 20) + gap * k}
   end
   return ws
 end
 
 T.test('BUG-881 arrival traffic (runners): the same on the run (9 ticks a tile) -> nobody is crushed by the TIMED force (the walkers are held by ' ..
-       'their measured speed); a crush is the accepted BUG-587 approach risk only, once the army is within 30 tiles (+468)', function()
+       'their measured speed) while there is time to wait for a gap; a crush is the accepted risk only once the army is CLOSE_NEED ticks from the bridge (+428)', function()
   local W = build{walkers = recall(22, 60), army = S.army(6, 50, -82), y1 = 38}
   W.fast = true
   run(W, 2600)
   for _, c in ipairs(W.crushed) do
     local at = tonumber(c:match('at %+(%d+)'))
-    T.ok(at >= 468, 'crushed before the army is within 30 tiles: ' .. c)
+    T.ok(at >= 420, 'crushed while there was time to wait for a gap: ' .. c)
   end
   T.eq(#W.find_events('BREACH'), 0, 'no BREACH')
   local o1 = up_at(W, 'O1')
@@ -137,6 +137,70 @@ T.test('BUG-881 arrival traffic: PEACE, 22 citizens streaming over O1/B1, an arm
   T.ok(pulls <= 6, 'the pulls are kept, not re-queued: ' .. pulls)
 end)
 
+
+local function dbg(W)
+  if not os.getenv('DBG') then return end
+  for _, b in ipairs({'O1','B1','B2'}) do for _, f in ipairs(S.flips(W, b)) do print(b, f.to, f.tick - W.t_start) end end
+  for _, e in ipairs(W.find_events('GATE_FORCED')) do print('FORCED', e.tick - W.t_start, e.text) end
+  for _, e in ipairs(W.find_events('MODE')) do print('MODE', e.tick - W.t_start, e.d.from, e.d.to, e.d.why) end
+  for _, a in ipairs(W.find_acts('pull')) do print('pull', a.tick - W.t_start, a.args[1]) end
+  for _, c in ipairs(W.crushed) do print('crushed', c) end
+end
+
+-- Review round 2 (the stream is AT the footprints when the arrival comes: citizens 1-13 steps from O1/B1 at +0, one more every 87 ticks, a
+-- walker is near a footprint all the time, 27 ticks a tile; the army 92 tiles out, 9 ticks a tile -> at O1 after 828 ticks)
+T.test('BUG-881 arrival traffic (gapless stream at the footprints from +0): O1 and B1 up before the army, no BREACH, the timed hold ends ' ..
+       'while there is still time (a stream with no gap cannot keep the raise pending for ever)', function()
+  local W = build{walkers = recall(22, 87, 8), army = S.army(6, 50, -82), y1 = 38}
+  run(W, 2600)
+  dbg(W)
+  local o1, b1 = up_at(W, 'O1'), up_at(W, 'B1')
+  T.ok(o1 ~= nil and o1 + W.move_ticks <= 828, 'O1 closed before the army is at it (828): ' .. tostring(o1))
+  T.ok(b1 ~= nil and b1 + W.move_ticks <= 1098, 'B1 closed before the army is at it (1098): ' .. tostring(b1))
+  T.eq(#W.find_events('BREACH'), 0, 'no BREACH')
+  T.eq(#W.find_events('GATE_FAIL'), 0, 'no GATE_FAIL')
+  T.ok(#S.pulls(W, 'O1') + #S.pulls(W, 'B1') <= 6, 'the pulls are kept: ' .. (#S.pulls(W, 'O1') + #S.pulls(W, 'B1')))
+  -- a stream without a gap longer than the bridge move: the walkers are held while there is time to spare, then let go: at most
+  -- one crushed walker per bridge, none before the hold has run (the army is nowhere near)
+  T.ok(#W.crushed <= 2, 'crushed: ' .. table.concat(W.crushed, '; '))
+  for _, c in ipairs(W.crushed) do
+    T.ok(tonumber(c:match('at %+(%d+)')) >= 420, 'crushed while there was time to wait for a gap: ' .. c)
+  end
+  -- the citizens who had not crossed when O1 went up are LOCKED OUT (the accepted BUG-775 price, documented in BUG-881): they stay outside
+  -- alive (not crushed, not moved) and the raise does not wait for them
+  local out = 0
+  for _, w in ipairs(W.walkers) do if not w.dead and w.route[w.i][2] < 10 then out = out + 1 end end
+  T.ok(out >= 10 and out <= 21, 'citizens left outside the raised O1: ' .. out)
+end)
+
+-- the i4 dragons were measured at 12.7 ticks a tile (92 tiles took 1167 ticks), not 8-9: the force is timed by the measured speed, so the
+-- walkers get the longer wait for a gap and the raise is still done before the army
+T.test('BUG-881 arrival traffic (slow army, 13 ticks a tile, gapless stream): O1 up before the army (1196), no BREACH, the citizens were ' ..
+       'given time to cross first', function()
+  local W = build{walkers = recall(22, 87, 8), army = S.army(6, 50, -82), y1 = 38}
+  W.foe_tpt = 13
+  run(W, 3000)
+  dbg(W)
+  local o1 = up_at(W, 'O1')
+  T.ok(o1 ~= nil and o1 + W.move_ticks <= 1196, 'O1 closed before the army is at it (1196): ' .. tostring(o1))
+  T.eq(#W.find_events('BREACH'), 0, 'no BREACH')
+  T.ok(o1 >= 700, 'the raise waited for a gap in the stream first (+700 at least): ' .. tostring(o1))
+  local across = 0
+  for _, w in ipairs(W.walkers) do if not w.dead and w.route[w.i][2] >= 10 then across = across + 1 end end
+  T.ok(across >= 5, 'citizens crossed O1 while it waited: ' .. across)
+  T.ok(#W.crushed <= 2, 'crushed: ' .. table.concat(W.crushed, '; '))
+  for _, c in ipairs(W.crushed) do T.ok(tonumber(c:match('at %+(%d+)')) >= 790, 'crushed while there was time to wait: ' .. c) end
+end)
+
+-- Building destroyers alone (the i4 cave dragons): no timed force (the bridges are no barrier, raising only locks the citizens out)
+T.test('BUG-881 barrier_foe: building destroyers alone get no timed force, any other hostile in sight does', function()
+  local G = package.loaded['dfllm.gate']
+  local function K(list) return {census = {h = {list = list}}} end
+  T.eq(G.barrier_foe(K({{id = 1, bd = 1}, {id = 2, bd = 1}})), false, 'two cave dragons')
+  T.eq(G.barrier_foe(K({{id = 1, bd = 1}, {id = 3}})), true, 'dragon and a goblin')
+  T.eq(G.barrier_foe(K({})), true, 'no list: unknown = a timed force')
+  T.eq(G.barrier_foe({census = {}}), true, 'no census')
+end)
 
 -- BUG-882: BREACH only because a bridge failed (hostiles outside, nothing inside Kern+): the pullers of O1's lever room stay on duty
 T.test('BUG-882: BREACH with the hostiles outside keeps the pullers of the O1 lever room and O1 rises', function()

@@ -1680,14 +1680,20 @@ end
 -- citizens in the bailey; the raises waited 'walking onto it in 1-13 steps' for the recall stream until a hostile was within approach_near 30
 -- tiles and the hold had run APPROACH_HOLD ticks (+452): too late, the lever pull and the move take longer than a hostile needs for the
 -- last 60-100 tiles): a SIEGE/BREACH raise is forced like an approach as soon as the nearest visible hostile CLOSES in (2 tiles in 60
--- ticks) and needs no longer than the pull and the move take: d * RACE_FOE_TPT <= max(CLOSE_BUDGET, the measured lever latency + CLOSE_MOVE).
--- Forced = only a unit ON the footprint (or its path's first step) still holds it, GATE_FORCED names the rest.
-M.CLOSE_BUDGET, M.CLOSE_AGE, M.CLOSE_TILES = 640, 60, 2
+-- ticks) and its trip is not longer than CLOSE_BUDGET ticks, by the speed he was MEASURED at (ticks a tile between two looks; the i4 dragons
+-- needed 12.7, not the 8 of RACE_FOE_TPT). Forced = only a unit ON the footprint (or its path's first step) still holds it, GATE_FORCED names the rest.
+-- Review round 2: while his trip is longer than CLOSE_NEED (the lever worker's walk, the pull and the move take ~250-350 ticks, y413 live: taken 58 ticks after queueing) the force
+-- WAITS for a gap in the stream (the walkers who can be on the footprint while it moves hold it); a stream that has no gap cannot keep it
+-- pending for ever: from CLOSE_NEED ticks before the hostile arrives only units ON the footprint hold, the citizens still crossing are
+-- the accepted BUG-587/775 risk (a crush now and then, or locked out). Building destroyers alone (cave dragons: 'the bridges are no
+-- barrier', SIEGE_DEEP) get no timed force: raising for them would only lock the citizens out, the plain approach rules stay.
+M.CLOSE_BUDGET, M.CLOSE_NEED, M.CLOSE_AGE, M.CLOSE_TILES = 1500, 400, 60, 2
+M.CLOSE_TPT_MAX = 30
 -- BUG-881: the pull is COMMITTED while its worker is far from the lever (or nobody took it yet): only the last LATE_R tiles of his walk
 -- count, a unit on the footprint cancels it then (the bridge moves the moment he is done), not 8-25 ticks after every queueing
 M.LATE_R = 4
--- BUG-881: a TIMED force still holds the pull for the walkers who can be on the footprint before the bridge has finished moving, by
--- the speed each was MEASURED at (ticks a tile between two looks, smoothed; unknown = TIMED_RUN, a dwarf on the run: BUG-380) and the
+-- BUG-881: a TIMED force still holds the pull for the walkers who can be on the footprint before the bridge has finished moving, by the
+-- speed each was MEASURED at (ticks a tile between two looks, smoothed; unknown = TIMED_RUN, a dwarf on the run: BUG-380) and the
 -- TIMED_WIN ticks the bridge needs to move and settle: a citizen at 27 ticks a tile holds from 4 steps out, a runner at 9 from 12
 M.TIMED_WIN, M.TIMED_RUN, M.TIMED_NEAR = 110, 9, 2
 local function track(rr, cross, now)
@@ -1710,10 +1716,21 @@ local function can_reach(rr, e)
   local o = rr.sp and rr.sp[e.id]
   return (e.path or 99) * ((o and o.tpt) or M.TIMED_RUN) <= M.TIMED_WIN
 end
-local function closing_fast(rr, d, now)
+-- BUG-881: ticks a tile the nearest hostile was measured at while closing in (the oldest look at least CLOSE_AGE ticks back that is
+-- CLOSE_TILES nearer now), nil = not closing; never faster than RACE_FOE_TPT, never slower than CLOSE_TPT_MAX
+local function closing_tpt(rr, d, now)
   for _, x in ipairs(rr.hs or {}) do
-    if now - x.t >= M.CLOSE_AGE and x.d - d >= M.CLOSE_TILES then return true end
+    if now - x.t >= M.CLOSE_AGE and x.d - d >= M.CLOSE_TILES then
+      return math.min(M.CLOSE_TPT_MAX, math.max(M.RACE_FOE_TPT, (now - x.t) / (x.d - d)))
+    end
   end
+  return nil
+end
+-- BUG-881: is a hostile in sight that is not a building destroyer (no timed force for destroyers alone)
+function M.barrier_foe(K)
+  local h = K.census.h
+  if type(h) ~= 'table' or type(h.list) ~= 'table' or #h.list == 0 then return true end
+  for _, e in ipairs(h.list) do if type(e) == 'table' and e.bd ~= 1 then return true end end
   return false
 end
 
@@ -2030,11 +2047,14 @@ local function holders(K, name, fp, sc, dir)
       if d > fn then
         local an, ah, ac, aw = M.approach_cfg(K)
         local held = (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
-        local budget = M.CLOSE_BUDGET
-        local timed = d * M.RACE_FOE_TPT <= budget and closing_fast(rr, d, now)          -- BUG-881: the pull no longer fits in his trip
+        local tpt = closing_tpt(rr, d, now)
+        local eta = tpt and d * tpt
+        local timed = eta ~= nil and eta <= M.CLOSE_BUDGET and (an > 0 or ac > 0) and M.barrier_foe(K)        -- BUG-881: the pull no longer fits in his trip
         local appr = held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl))
         if timed or appr then
-          rr.fz_t = (timed and not appr) or nil          -- the plain approach (BUG-587) lets the standers beside it go, the timed one not
+          -- the plain approach (BUG-587) lets the standers beside it go, the timed one waits for a gap while there is time (CLOSE_NEED)
+          rr.fz_t = (timed and not appr and eta > M.CLOSE_NEED) or nil
+          rr.fz_c = (timed and not appr and eta <= M.CLOSE_NEED) or nil       -- BUG-881: no time left: the pull is kept whoever is on the footprint
           fn, rr.fz_b = d, held
           rr.fz_until, rr.fz_d = now + M.APPROACH_STICKY, d
         elseif aw > 0 and d <= aw then
@@ -2053,9 +2073,10 @@ local function holders(K, name, fp, sc, dir)
       local now = K.now().tick
       if now < rr.fz_until and rr.fz_until - now <= M.APPROACH_STICKY then
         d = math.max(0, rr.fz_d or 0)
+        rr.fz_t, rr.fz_c = nil, nil                      -- BUG-881: out of sight: no timed wait for a gap, no commit
         fn, rr.fz_b = math.max(fn, d), (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
       else
-        rr.fz_until, rr.fz_d, rr.fz_t = nil, nil, nil
+        rr.fz_until, rr.fz_d, rr.fz_t, rr.fz_c = nil, nil, nil, nil
       end
     end
     if near_now and not (d >= 0 and d <= fn) then
@@ -2354,7 +2375,7 @@ end
 local function new_epoch(r)
   r.nw, r.nw_out, r.bad, r.fail_at, r.switch, r.held_sum, r.block_since = 0, nil, {}, nil, nil, nil, nil
   r.ap, r.ap_last, r.ap_ask = 0, nil, nil            -- BUG-342: the pulls cancelled for a unit walking toward it
-  r.esc, r.fz_until, r.fz_d, r.fz_t = nil, nil, nil, nil          -- BUG-621: the approach force of the old epoch
+  r.esc, r.fz_until, r.fz_d, r.fz_t, r.fz_c = nil, nil, nil, nil, nil          -- BUG-621: the approach force of the old epoch
 end
 
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
@@ -2873,7 +2894,7 @@ local function control(K, name, spec, now)
         if dir == 'up' then hold = drop_own(hold, own) end   -- BUG-342: nor its pullers in their room
         -- BUG-881: a forced raise (hd) keeps its pull while the worker is still on his way (or nobody took it): a unit on the footprint
         -- now has left it long before the bridge moves; only the last LATE_R tiles of his walk (position unknown = late) can still cancel it
-        if hd and #hold > 0 and not hold.unknown and not M.pull_late(r, w0) then
+        if hd and #hold > 0 and not hold.unknown and (r.fz_c or not M.pull_late(r, w0)) then
           r.commit = (r.commit or 0) + 1
           hold = {}
         end
@@ -3000,7 +3021,7 @@ local function control(K, name, spec, now)
   if w == nil or w == s then
     r.pq_t0, r.pq_busy, r.pq_who, r.pq_ev, r.pq_pos, r.pq_nt = nil, nil, nil, nil, nil, nil     -- BUG-831
     unblock(r, now); r.block_ev = nil
-    r.fz_until, r.fz_d, r.fz_t = nil, nil, nil       -- BUG-621: the approach force ends with the want
+    r.fz_until, r.fz_d, r.fz_t, r.fz_c = nil, nil, nil, nil       -- BUG-621: the approach force ends with the want
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
     r.bpark = nil
     r.nec, r.bc = nil, nil                            -- BUG-141: the blocked-cancel count of the want ends too
