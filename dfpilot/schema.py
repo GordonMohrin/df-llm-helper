@@ -577,6 +577,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-875: a kernel-painted (dfllm-water) Water Source zone outside the fort removed: zone = its id, inside = accepted sources inside
     "WATER_OUTSIDE_RETIRED": ("B", "water", _d("zone:i", "inside:i")),
     "WATER_OUTSIDE_RESTORED": ("B", "water", _d("pos:p")),
+    # NEU13 BUG-887 round 3: DF cancelled a brew for want of an empty food storage item; once per game day at most, read only. stills/jobs = Stills and brew jobs in them, empties = empty barrels,
+    # free/forb/job/haul/trader/far/other/out = how many of them are free, forbidden, held by a job (haul: a hauling/fetch job), a trader's, out of reach, skipped by the census flags, free on the surface;
+    # pots/pots_free = empty large pots; cancels/done = DF cancels and completed brews in the window (done absent without the gamelog); plants/fruit = free brewable plants / fruit; still = the Still looked at;
+    # near/dz = distance and z offset of the nearest free empty; filter = the second job_item (the container) of one brew job
+    "BREW_CANCEL_SNAPSHOT": ("B", "economy", _d("stills:i jobs:i empties:i free:i", "forb:i job:i haul:i trader:i far:i other:i out:i pots:i pots_free:i cancels:i done:i plants:i fruit:i still:i near:i dz:i filter:s")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,

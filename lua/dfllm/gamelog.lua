@@ -31,7 +31,7 @@ end
 -- a reader state; `off`/`sig` may come from a persisted copy (G.save / G.resume)
 function G.new(path)
   return {path = path, off = nil, sig = nil, size = 0, state = 'new', err = nil, lines = 0, cancels = 0, bytes = 0, resets = 0, restarts = 0,
-          skipped = 0, looks = 0, behind = 0}
+          skipped = 0, looks = 0, behind = 0, done = 0}
 end
 
 -- the persisted part: the offset and the first bytes of the file as hex (a CP437 byte is no valid JSON text)
@@ -53,6 +53,14 @@ end
 -- cheap prefilter (only lines holding " cancels " reach the parser; a custom `parse` sees every line, as before). s.behind = the bytes still unread after the
 -- look (the size seen at its start minus the offset), s.lastlook = {lines, cancels, bytes} of the last look.
 G.CANCELS = ' cancels '
+G.DONE = ' has been completed'
+-- "Brew drink from plant (30) has been completed." -> 30 (1 without a count); nil for any other completed order
+function G.brew_done(line)
+  local n = tostring(line or ''):match('[Bb]rew [^%(]-%s*%((%d+)%) has been completed')
+  if n then return math.tointeger(tonumber(n)) or 1 end
+  if tostring(line or ''):match('[Bb]rew [%a ]+ has been completed') then return 1 end
+  return nil
+end
 function G.poll(s, o)
   o = o or {}
   local max, backlog = math.tointeger(o.max) or G.MAX, math.tointeger(o.backlog) or G.BACKLOG
@@ -60,7 +68,7 @@ function G.poll(s, o)
   local parse = o.parse or G.parse
   local prefilter = o.parse == nil
   s.looks = s.looks + 1
-  s.lastlook = {lines = 0, cancels = 0, bytes = 0}
+  s.lastlook = {lines = 0, cancels = 0, bytes = 0, done = 0}
   local f, oerr = (o.open or function(p) return io.open(p, 'rb') end)(s.path)
   if not f then s.state, s.err = 'missing', tostring(oerr or 'cannot open'):sub(1, 120); return {} end
   local out = {}
@@ -106,6 +114,9 @@ function G.poll(s, o)
           s.lastlook.lines = s.lastlook.lines + 1
           if line:find(G.MARK, 1, true) then
             out, s.restarts = {}, s.restarts + 1
+          elseif prefilter and line:find(G.DONE, 1, true) then
+            local n = G.brew_done(line)                  -- NEU13 BUG-887 round 3: a finished brew order ("Brew drink from plant (30) has been completed.")
+            if n then s.done, s.lastlook.done = s.done + n, s.lastlook.done + n end
           elseif not prefilter or line:find(G.CANCELS, 1, true) then
             local kind, why = parse(line)
             if kind then out[#out + 1] = {kind, why} end

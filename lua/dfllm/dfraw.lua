@@ -407,6 +407,10 @@ function R.brew(K, ctx)
     end
   end
   add(b, 'stills: ' .. stills)
+  -- NEU13 BUG-887 round 3: the cancel snapshot (read only, economy.snap_lines): empties by state, nearest free one, the brew job's filter
+  local okp, oks, sl = pcall(K.call, 'economy', 'snap_lines')
+  oks = okp and oks
+  if oks and type(sl) == 'table' then for _, l in ipairs(sl) do add(b, l) end end
   return b
 end
 

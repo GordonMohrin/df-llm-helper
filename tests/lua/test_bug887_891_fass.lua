@@ -33,7 +33,7 @@ local function census_world(setup)
   return W
 end
 
-T.test("BUG-887 i2 y509: 418 barrels, 42 empty by the census: 20 a trader's, 10 in the mood pile, 5 held by a job: 7 usable, 3 forbidden named", function()
+T.test("BUG-887 i2 y509: 418 barrels, 42 empty by the census: 20 a trader's, 5 held by a job: 17 usable (10 of them in the mood pile, still usable), 3 forbidden named", function()
   local TB
   local W = census_world(function(W)
     df.general_ref_type = df.general_ref_type or kmock.enum({'UNIT_TRADEBRINGER', 'CONTAINS_ITEM'})
@@ -49,11 +49,11 @@ T.test("BUG-887 i2 y509: 418 barrels, 42 empty by the census: 20 a trader's, 10 
   end)
   settle(W)
   local i = W.K.census.i
-  T.eq({i.barrels, i.barrels_empty, i.cont_free}, {418, 42, 7}, 'barrels, empty, usable')
-  T.eq({i.barrels_trader, i.barrels_mood, i.barrels_busy, i.barrels_forb}, {20, 10, 5, 3})
+  T.eq({i.barrels, i.barrels_empty, i.cont_free}, {418, 42, 17}, 'barrels, empty, usable (mood pile barrels count)')
+  T.eq({i.barrels_trader, i.barrels_mood, i.barrels_busy, i.barrels_forb}, {20, 10, 5, 3}, 'barrels_mood is information only')
   local econ = require('dfllm.economy')
-  T.eq(econ.cont_words(i), "20 a trader's, 10 in a mood pile, 5 held by a job, 3 forbidden (not counted)")
-  T.ok(econ.cont_text(i):find("7 usable of 42 empty barrels or pots (20 a trader's", 1, true), econ.cont_text(i))
+  T.eq(econ.cont_words(i), "20 a trader's, 5 held by a job, 3 forbidden (not counted)")
+  T.ok(econ.cont_text(i):find("17 usable of 42 empty barrels or pots (20 a trader's", 1, true), econ.cont_text(i))
 end)
 
 ---------------------------------------------------------------- BUG-888: the standing cap
@@ -101,7 +101,8 @@ T.test('BUG-888 i2: the food piles take no more barrels than they hold, with no 
             settings = {flags = {food = true}, food = {drink_plant = kmock.vec{drink}, drink_animal = kmock.vec{false}}}}
   end
   local plants, plants2, drinkp, store, bare = sp(41, 'plants', 0, false, 40), sp(42, 'stock', 10, false, 30), sp(43, 'mixed', 20, true, 40), sp(44, 'dfllm-drink', 30, true, 40), sp(45, 'bare', 40, false, 40)
-  local all = {plants, plants2, drinkp, store, bare}
+  local pure = sp(46, 'pure drinks', 50, true, 40)         -- a pure drink pile that is not dfllm-drink
+  local all = {plants, plants2, drinkp, store, bare, pure}
   df.global.world.buildings.other.STOCKPILE = kmock.vec(all)
   df.building.find = function(id) for _, s in ipairs(all) do if s.id == id then return s end end end
   local items = {}
@@ -126,14 +127,23 @@ T.test('BUG-888 i2: the food piles take no more barrels than they hold, with no 
   feed(econ, W.K, 12, 101 * DAYT)
   watch(101)
   T.eq(p.pilestand, true, 'DF cancels for want of a container: the cap starts')
-  T.eq({plants.max_barrels, plants2.max_barrels, drinkp.max_barrels, store.max_barrels, bare.max_barrels}, {10, 6, 7, 40, 2},
-       'food piles at what they hold; the mixed pile at what it holds + 3; the drink store free; a pile without barrels at the floor of 2 (not open, not shut)')
+  T.eq({plants.max_barrels, plants2.max_barrels, drinkp.max_barrels, store.max_barrels, bare.max_barrels, pure.max_barrels}, {10, 6, 40, 40, 2, 40},
+       'food piles at what they hold; every pile that takes drink (mixed, pure, dfllm-drink) left completely open; a pile without barrels at the floor of 2')
+  -- round 3 (verifier): a second day on which the mixed pile's barrel count GROWS: it is not shut (no ratchet), the pure food piles stay capped
+  for _ = 1, 5 do items[#items + 1] = {pos = {x = 21, y = 1, z = 5}} end
+  rawset(df.global.world.items.other, 'BARREL', kmock.vec(items))
+  watch(102)
+  T.eq({drinkp.max_barrels, pure.max_barrels, plants.max_barrels}, {40, 40, 10}, 'day 2: the mixed pile holds 9 barrels, its limit is still 40')
+  items[#items + 1] = {pos = {x = 21, y = 1, z = 5}}
+  rawset(df.global.world.items.other, 'BARREL', kmock.vec(items))
+  api.pile_barrels('freeze', {mixed = true, floor = 2})          -- the drink emergency in standing mode does not cap drink piles either
+  T.eq(drinkp.max_barrels, 40, 'day 3: still open, also in the drink emergency')
   T.ok(log_has(W, 'container stand: the food piles take no more barrels'), 'one kern.log line')
   -- 200 game days later: DF's cancels are long gone, the cap stands (the old freeze was given back after 14 days / 130 days)
   watch(300)
   watch(301)
   T.eq({p.pilestand, plants.max_barrels, plants2.max_barrels}, {true, 10, 6}, 'a short calm (1 day) gives nothing back')
-  T.ok(p.pilecap and p.pilecap['41'] == 40 and p.pilecap['45'] == 40 and p.pilecap['43'] == 40, 'the old limits are kept for the end')
+  T.ok(p.pilecap and p.pilecap['41'] == 40 and p.pilecap['45'] == 40 and p.pilecap['43'] == nil, 'the old limits are kept for the end (the mixed pile was never touched)')
   -- a barrel leaves a pile (hauled to the drink pile): the cap follows it down at the next look, never up
   items[1].pos = {x = 21, y = 1, z = 5}
   rawset(df.global.world.items.other, 'BARREL', kmock.vec(items))
@@ -171,10 +181,10 @@ T.test('BUG-888 round 2: a pile whose barrels all leave keeps a floor of 2 (neve
   local items = {{pos = {x = 1, y = 1, z = 5}}, {pos = {x = 2, y = 1, z = 5}}, {pos = {x = 2, y = 2, z = 5}}, {pos = {x = 21, y = 1, z = 5}}}
   rawset(df.global.world.items.other, 'BARREL', kmock.vec(items))
   local api = actlib.new{who = function() return 'economy' end, allowlist = function() return actlib.BUILTIN_ALLOWLIST end, log_cmd = function() end, fail = function() end}
-  api.pile_barrels('freeze', {floor = 2, room = 3})
+  api.pile_barrels('freeze', {floor = 2})
   T.eq({a.max_barrels, b.max_barrels, c.max_barrels}, {3, 1, 2}, 'a holds 3, b keeps its own 1, c holds 1 and gets the floor 2')
   rawset(df.global.world.items.other, 'BARREL', kmock.vec{})          -- every barrel leaves
-  api.pile_barrels('freeze', {floor = 2, room = 3})
+  api.pile_barrels('freeze', {floor = 2})
   T.eq({a.max_barrels, b.max_barrels, c.max_barrels}, {2, 1, 2}, 'all gone: the limit stops at the floor, a pile can always take 2 barrels for its food')
 end)
 
@@ -352,13 +362,13 @@ end)
 T.test('BUG-891: the stall line, the ladder and the status name usable of empty with the reasons', function()
   local W = rworld()
   local econ = require('dfllm.economy')
-  local inv = {barrels = 418, barrels_empty = 42, pots_empty = 0, cont_free = 0, barrels_trader = 30, barrels_mood = 12}
-  T.eq(econ.cont_text(inv), "0 usable of 42 empty barrels or pots (30 a trader's, 12 in a mood pile)")
+  local inv = {barrels = 418, barrels_empty = 42, pots_empty = 0, cont_free = 0, barrels_trader = 30, barrels_far = 12}
+  T.eq(econ.cont_text(inv), "0 usable of 42 empty barrels or pots (30 a trader's, 12 out of reach)")
   local d = econ.brew_diag(W.K, inv, {res = 3, ph = 0, dfx = 'DF cancelled Brew 40x in 7 d'})
-  T.eq(d.conts.words, "30 a trader's, 12 in a mood pile")
+  T.eq(d.conts.words, "30 a trader's, 12 out of reach")
   local id, text = econ.brew_cause({stills = {{id = 1, at = {1, 1, 1}, jobs = 0, taken = 0, susp = 0}}, brewers = {n = 2, idle = 1, who = {}}, orders = {n = 1, valid = 1}, conts = d.conts})
   T.eq(id, 'nobarrel')
-  T.ok(text:find("not usable: 30 a trader's, 12 in a mood pile", 1, true), text)
+  T.ok(text:find("not usable: 30 a trader's, 12 out of reach", 1, true), text)
 end)
 
 T.done()

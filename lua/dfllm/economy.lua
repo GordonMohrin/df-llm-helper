@@ -100,6 +100,7 @@ local M = {name = 'economy', every = {ticks = 1200}, on = {}, verbs = {}, inspec
                       CANCEL_JOB = true}}
 M.RAW = require('dfllm.dfraw')     -- NEU3: the raw field dumps (inspect what=raw) and the stall line (docs/v2/NEU3-diagnose.md)
 M.CW = require('dfllm.cancelwhy')   -- NEU4 BUG-841: DF's own cancel reasons, a rolling tally (a library, a field)
+M.BS = require('dfllm.brewsnap')   -- NEU13 BUG-887 round 3: the read-only brew cancel snapshot
 M.GL = require('dfllm.gamelog')     -- NEU5 BUG-847: the incremental reader of DF's gamelog.txt, the primary source of that tally
 M.JW = require('dfllm.jobwhy')     -- NEU1 P8: 'why is this job not running' (a library, a field: economy sits at the locals limit)
 M.OF = require('dfllm.orderfix')   -- B2: slab census, workshop job lists, the stale-order rules (a library, a field: no new local)
@@ -500,7 +501,7 @@ M.DEFAULTS = {
   diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
   -- NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source of the tally (the eventful reports stay the fallback), gamelog_bytes = at most
   -- that many bytes per look
-  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, stand = true, stand_quit_d = 30, stand_calm_d = 30, stand_floor = 2, stand_mixed_room = 3, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, stand = true, stand_quit_d = 30, stand_calm_d = 30, stand_floor = 2, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
   -- NEU7 (BUG-854): the standing container reserve (M.plan_reserve): batch = brews open / brews_per, min_batch..max_batch, again while DF still cancels after the
   -- batch (grace_days, repeat_days apart, max_repeats in a row then every 14 days), then a trickle of trickle_n every trickle_days days (below trickle_free free
   -- containers); rock barrels when boulders >= batch + rock_plenty or wood is short; total_cap containers in all
@@ -1285,10 +1286,11 @@ local function classify(it, a, cat)
         -- BUG-779 (Run 16c i3 Lancemoment y379: 'Needs empty food storage item' beside 48 barrels): an empty barrel a job holds or no citizen can walk to
         -- is no container DF gives a Still job (`barrels_empty` counts it, `cont_free` does not)
         -- NEU13 BUG-887 (Run 17 i1/i2: 27-42 'empty' barrels beside DF's 'Needs empty food storage item' for a year): a trader's barrel (ref UNIT_TRADEBRINGER
-        -- without the trader flag) and one in a mood pile (dfllm-mood, one barrel kept for the mood unit's drink) are no container for a brew either; each empty
-        -- barrel is counted ONCE, under the first reason that holds (trader, mood, job, far), else it is usable (`cont_free`)
+        -- without the trader flag) is no container for a brew; each empty barrel is counted ONCE, under the first reason that holds (trader, job, far), else it is usable
+        -- (`cont_free`). Round 3 (verifier): a barrel in a mood pile (dfllm-mood) is NOT excluded (live samples show them 'free as DF sees it', nothing shows DF skips
+        -- them); `barrels_mood` only counts how many of the usable ones lie there (information, not subtracted).
+        if M.mood_pile_at(a, it) then a.barrels_mood = a.barrels_mood + 1 end
         if M.barrel_trader_ref(it) then a.barrels_trader = a.barrels_trader + 1
-        elseif M.mood_pile_at(a, it) then a.barrels_mood = a.barrels_mood + 1
         elseif f.in_job then a.barrels_busy = a.barrels_busy + 1
         elseif a.far and a.far(it, true) then a.barrels_far = a.barrels_far + 1         -- NEU4 BUG-842: strict far
         else a.cont_free = a.cont_free + 1 end
@@ -2027,9 +2029,8 @@ M.CX_EMERGENCY_D = 10
 -- come back only when the fort has stopped brewing (no Still or no brewable plant for stand_quit_d days) or the switch is off. State p.pilestand = true, p.standq.
 M.STAND_QUIT_D = 30
 -- NEU13 BUG-888 round 2 (verifier): the standing cap has a floor and an exit. STAND_FLOOR = barrels every food pile may always hold (a pile whose barrels all left is capped at the
--- floor: food keeps a container, the pile cannot swallow a whole batch), STAND_MIXED_ROOM = what a food+drink pile may hold above the barrels it has (so it does not eat a batch
--- either, and its drink barrels can still come and go), STAND_CALM_D = days of DF cancelling less than cx_min_n (the gate closed) before the old limits go back.
-M.STAND_FLOOR, M.STAND_MIXED_ROOM, M.STAND_CALM_D = 2, 3, 30
+-- floor: food keeps a container, the pile cannot swallow a whole batch), every pile that accepts any drink (pure or mixed) is NOT capped in standing mode (round 3), STAND_CALM_D = days of DF cancelling less than cx_min_n (the gate closed) before the old limits go back.
+M.STAND_FLOOR, M.STAND_CALM_D = 2, 30
 function M.stand_end(K, p, why)
   p.pilestand, p.standq = nil, nil
   K.log('warn', 'container stand over: %s; the stockpile barrel limits go back', why)
@@ -2069,11 +2070,11 @@ function M.pile_standing(K, c, r, f, b)
     if now - p.standcalm >= calm * DAY then M.stand_end(K, p, 'DF has not cancelled a brew for want of a container for ' .. ((now - p.standcalm) // DAY) .. ' days'); return end
     K.persist.touch('m.economy')
   end
-  M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D, now, {floor = math.tointeger(cc.stand_floor) or M.STAND_FLOOR, room = math.tointeger(cc.stand_mixed_room) or M.STAND_MIXED_ROOM})
+  M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D, now, {floor = math.tointeger(cc.stand_floor) or M.STAND_FLOOR})
 end
 function M.cx_freeze(K, p, emergency, now, stand)
   if type(K.act.pile_barrels) ~= 'function' then return end
-  local ok, res = K.act.pile_barrels('freeze', {mixed = emergency == true, floor = stand and stand.floor or nil, room = stand and stand.room or nil})
+  local ok, res = K.act.pile_barrels('freeze', {mixed = emergency == true, floor = stand and stand.floor or nil})
   if not (ok and type(res) == 'table') then
     -- NEU5 BUG-848: never silent: ONE loud line per load names the field problem (the stall line carries 'pile limit field' too); the others stay warns
     if tostring(res):find('no barrel limit field', 1, true) and not st.pilebad then
@@ -3333,11 +3334,11 @@ function M.usable_n(inv)
   return math.max(0, rock - no)
 end
 
--- NEU13 BUG-887: why empty barrels are no container for a brew, in words: 'trader 3, mood pile 2, in a job 4, out of reach 1, forbidden 5' (nil = none of them)
+-- NEU13 BUG-887: why empty barrels are no container for a brew, in words: 'trader 3, in a job 4, out of reach 1, forbidden 5' (nil = none of them)
 function M.cont_words(inv)
   local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
   local out = {}
-  for _, e in ipairs({{'barrels_trader', "a trader's"}, {'barrels_mood', 'in a mood pile'}, {'barrels_busy', 'held by a job'}, {'barrels_far', 'out of reach'}}) do
+  for _, e in ipairs({{'barrels_trader', "a trader's"}, {'barrels_busy', 'held by a job'}, {'barrels_far', 'out of reach'}}) do
     if g(e[1]) > 0 then out[#out + 1] = g(e[1]) .. ' ' .. e[2] end
   end
   if g('barrels_forb') > 0 then out[#out + 1] = g('barrels_forb') .. ' forbidden (not counted)' end
@@ -3811,6 +3812,17 @@ function M.gl_poll(K, c)
     if g.s.state == 'ok' then K.log('info', 'gamelog reader: %s (offset %s of %s bytes)', g.s.path, tostring(g.s.off), tostring(g.s.size))
     else K.log('warn', 'gamelog reader: %s: %s (the cancel tally falls back to the eventful reports)', g.s.path, tostring(g.s.err)) end
   end
+  -- NEU13 BUG-887 round 3: brews DF finished (completions) and container cancels seen in this look, for the cancel snapshot
+  local dn = math.tointeger(g.s.lastlook and g.s.lastlook.done) or 0
+  if dn > 0 then
+    st.bdone = type(st.bdone) == 'table' and st.bdone or {}
+    st.bdone[#st.bdone + 1] = {now, dn}
+    local keep = M.cw_days(K, c) * DAY
+    while #st.bdone > 0 and now - st.bdone[1][1] > keep do table.remove(st.bdone, 1) end
+  end
+  for _, e in ipairs(list) do
+    if tostring(e[1]):lower():find('^brew') and tostring(e[2]):lower():find(M.CX_REASON, 1, true) then st.cxseen = (st.cxseen or 0) + 1 end
+  end
   if #list > 0 then                                -- grouped: one tally write per kind and reason, not per line
     local by, order = {}, {}
     for _, e in ipairs(list) do
@@ -3835,11 +3847,64 @@ function M.gl_poll(K, c)
   end
   return #list
 end
+-- NEU13 BUG-887 round 3 (the cause of "Needs empty food storage item" beside free empty barrels is NOT confirmed after seven rounds): the measurement. The readers of
+-- brewsnap.lua with economy's own predicates (the census' skip flags, trader ref, large pot, strict far). Read only: no job, order, item or setting is touched.
+function M.snap_env(K, c, now)
+  c = c or M.conf(K)
+  now = now or K.now().tick
+  local inv = (K.census or {}).i or {}
+  local days = M.cw_days(K, c)
+  local cancels = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
+  local done
+  if st.gl and st.gl.s and st.gl.s.state == 'ok' then
+    done = 0
+    for _, e in ipairs(st.bdone or {}) do if now - e[1] <= days * DAY then done = done + e[2] end end
+  end
+  return {skipped = skipped, trader = M.barrel_trader_ref, pot = M.is_pot, inv = inv, cancels = cancels, done = done, days = days, now = now,
+          far = function(it)
+            local x, y, z = dfhack.items.getPosition(it)
+            if not x then return false end
+            local ok, far = K.call('snapshot', 'far', x, y, z, true)
+            return ok == true and far == true
+          end,
+          surface = function(x, y, z)                    -- under the open sky (snapshot.plot_under false)
+            local ok, v = K.call('snapshot', 'plot_under', x, y, z)
+            return ok == true and v == false
+          end,
+          is_brew = function(tn, rn)
+            local ok, yes = pcall(function() return M.JW.KINDS.brew(tn, rn) end)
+            return (ok and yes) or tn == 'BrewDrink'
+          end,
+          job_items = function(j) local ok, l = pcall(M.JW.job_items, j); return ok and l or nil end}
+end
+function M.brew_snapshot(K, c, now)
+  return M.BS.collect(M.snap_env(K, c, now))
+end
+-- `why brew --raw` (dfraw) asks for the lines: K.call('economy', 'snap_lines')
+function M.snap_lines(K)
+  local ok, s = pcall(M.brew_snapshot, K)
+  if not ok then return {'brew cancel snapshot: not readable: ' .. tostring(s):sub(1, 120)} end
+  return M.BS.lines(s)
+end
+-- at most one line and one event per game day, when DF cancelled a brew for want of a container since the last one (a look of the gamelog saw it)
+function M.snap_maybe(K, c, now)
+  if (st.cxseen or 0) <= 0 then return false end
+  local day = now // DAY
+  if st.snapday == day then return false end
+  st.snapday, st.cxseen = day, 0
+  local s = M.brew_snapshot(K, c, now)
+  local f = M.BS.fields(s)
+  K.log('info', '%s', M.BS.line(s))
+  K.emit('BREW_CANCEL_SNAPSHOT', 'B', M.BS.line(s):sub(1, 200), f)
+  return true
+end
 -- NEU6: the kernel's guaranteed pass (watch_every): the look, then the container gate's ON / OFF line. Cheap: one file open and a bounded read.
 function M.watch(K)
   local c = M.conf(K)
   local okg, errg = pcall(M.gl_poll, K, c)
   if not okg then K.log('warn', 'gamelog reader: %s', tostring(errg):sub(1, 160)) end
+  local oks, errs = pcall(M.snap_maybe, K, c, K.now().tick)
+  if not oks then K.log('warn', 'brew cancel snapshot: %s', tostring(errs):sub(1, 160)) end
   local okc, errc = pcall(M.cx_log, K, c, K.now().tick)
   if not okc then K.log('warn', 'container cure line: %s', tostring(errc):sub(1, 160)) end
 end

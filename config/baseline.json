@@ -223,7 +223,7 @@
   "drink": {"low_d": 60, "access_d": 400},
   "jobwhy": {"stall": true, "items_max": 4000},
   "diag": {"cx_cure": true, "mgr_chores": false, "still_pin": false, "stall_line": true},
-  "cancel": {"days": 7, "cx_min_n": 5, "cx_pile_days": 14, "cx_off_n": 2, "cx_off_days": 14, "stand": true, "stand_quit_d": 30, "stand_calm_d": 30, "stand_floor": 2, "stand_mixed_room": 3, "fruit_off_n": 10, "fruit_hold_d": 30, "gamelog": true, "gamelog_bytes": 131072, "gamelog_chunks": 8},
+  "cancel": {"days": 7, "cx_min_n": 5, "cx_pile_days": 14, "cx_off_n": 2, "cx_off_days": 14, "stand": true, "stand_quit_d": 30, "stand_calm_d": 30, "stand_floor": 2, "fruit_off_n": 10, "fruit_hold_d": 30, "gamelog": true, "gamelog_bytes": 131072, "gamelog_chunks": 8},
   "wguard": {"on": true, "low": 40, "high": 80, "stone_min": 8},
   "creserve": {"on": true, "min_batch": 10, "max_batch": 30, "brews_per": 5, "grace_days": 2, "repeat_days": 3, "max_repeats": 4, "trickle_days": 20,
               "trickle_n": 1, "trickle_free": 20, "rock_plenty": 20, "total_cap": 200, "dead_n": 10, "dead_days": 3},
