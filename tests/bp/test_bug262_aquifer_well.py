@@ -64,9 +64,12 @@ def test_aquifer_cistern_sites_put_the_basin_on_an_aquifer_level(fort):
 def test_a_heavy_aquifer_is_refused_and_damp_marks_count(fort):
     snap, man = fort
     z = bp.rank(snap, "cistern", {}, manifest=man)[0]["anchor"][2]
-    heavy = {**man, "aquifer_levels": [z - 1], "breaches": [{"pos": [10, 10, z - 1], "why": "heavy_aquifer"}]}
-    with pytest.raises(ValueError, match=r"heavy \(refused\): z%d" % (z - 1)):
+    # BUG-872: heavy is a place, not a level: a stop at the sites refuses them, a stop 40 tiles off does not
+    heavy = {**man, "aquifer_levels": [z - 1], "breaches": [{"pos": [50, 65, z - 1], "why": "heavy_aquifer"}]}
+    with pytest.raises(ValueError, match=r"heavy aquifer stop within 10 tiles.*\(refused\): z%d" % (z - 1)):
         bp.rank(snap, "cistern", {"water": "aquifer"}, manifest=heavy)
+    far = {**man, "aquifer_levels": [z - 1], "breaches": [{"pos": [10, 10, z - 1], "why": "heavy_aquifer"}]}
+    assert bp.rank(snap, "cistern", {"water": "aquifer"}, manifest=far)
     damp = {**snap, "marks": {**(snap.get("marks") or {}), "damp": [[0, 0, z - 1]]}}
     assert bp.rank(damp, "cistern", {"water": "aquifer"}, manifest=man)
 

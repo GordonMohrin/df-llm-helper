@@ -1128,6 +1128,7 @@ def cavern_keep(cands: list, tpl: str, snap: dict, manifest: dict | None) -> lis
     return out
 
 
+HEAVY_NEAR = 10                      # BUG-872: a basin keeps this far (tiles, per level) from a recorded heavy aquifer stop
 HEAVY_WHY = ("heavy_aquifer", "water")      # BUG-262: breach stops that show a heavy aquifer (visible water, not damp)
 
 
@@ -1145,17 +1146,29 @@ def aquifer_well(cands: list, snap: dict, manifest: dict | None) -> list:
     if not aq:
         raise ValueError("cistern water=aquifer: no aquifer level known (no manifest aquifer_levels, no damp mark on the "
                          "snapshot): an aqshaft or a dig that met damp stone shows one first")
-    heavy = {int(b["pos"][2]) for b in (manifest or {}).get("breaches") or []
-             if isinstance(b, dict) and b.get("why") in HEAVY_WHY and isinstance(b.get("pos"), (list, tuple))
-             and len(b["pos"]) == 3}
+    # BUG-872 (Run 17 i1 Diedplank: three single-tile heavy_aquifer stops on z135/z136/z138 refused EVERY z138 basin of the fort,
+    # 47 sites 27+ tiles from the nearest stop): heavy is a place, not a level; a basin is refused within HEAVY_NEAR tiles
+    # (Chebyshev, on the basin level) of a recorded heavy stop, every other basin on the level stays
+    heavy_pts = [(int(b["pos"][0]), int(b["pos"][1]), int(b["pos"][2])) for b in (manifest or {}).get("breaches") or []
+                 if isinstance(b, dict) and b.get("why") in HEAVY_WHY and isinstance(b.get("pos"), (list, tuple))
+                 and len(b["pos"]) == 3]
+    heavy = {q[2] for q in heavy_pts}
     out = []
+    near_heavy = 0
     for c in cands:
         z = c["anchor"][2]
-        if z - 1 in aq and z not in aq and z + 1 not in aq and z - 1 not in heavy:
+        if z - 1 in aq and z not in aq and z + 1 not in aq:
+            bx = c.get("box") or (c["anchor"][0], c["anchor"][1], z, c["anchor"][0], c["anchor"][1], z)
+            bx0, by0, bx1, by1 = bx[0], bx[1], bx[3], bx[4]
+            if any(q[2] == z - 1 and bx0 - HEAVY_NEAR <= q[0] <= bx1 + HEAVY_NEAR and by0 - HEAVY_NEAR <= q[1] <= by1 + HEAVY_NEAR
+                   for q in heavy_pts):
+                near_heavy += 1
+                continue
             out.append({**c, "why": c["why"] + f", basin on aquifer level z{z - 1}"})
     if not out:
         lv = ",".join(f"z{z}" for z in sorted(aq))
-        hv = f"; heavy (refused): {','.join(f'z{z}' for z in sorted(heavy))}" if heavy else ""
+        hv = (f"; heavy aquifer stop within {HEAVY_NEAR} tiles of {near_heavy} basin site(s) (refused): "
+              f"{','.join(f'z{z}' for z in sorted(heavy))}") if near_heavy else ""
         raise ValueError(f"cistern water=aquifer: no site with its basin on an aquifer level ({lv}) under a dry room level"
                          f"{hv}: the room level must lie right above an aquifer level and be dry itself")
     return out

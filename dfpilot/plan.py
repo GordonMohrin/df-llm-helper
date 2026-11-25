@@ -126,7 +126,8 @@ EMERGENCY_D = 30              # BUG-243: drink or food days below this (or no ac
 FOOD_DRAFT_D = 60             # BUG-297: food below this: a farms build is drafted when no farms project is under way
 FOOD_EARLY_D = 150           # BUG-772: a treeless fort (state stock.nowood: no log, no crossbow, no wood for anything) calls for the farm below this
 DRINK_DRAFT_D = 30            # BUG-605: drink below this (no brewable plants: the still has nothing to brew) counts the same
-CISTERN_WHY = ("no_water", "patient_water")     # BUG-434: the PROJECT_REQUEST cistern reasons follow and propose answer
+CISTERN_WHY = ("no_water", "patient_water", "hospital_water", "inside_water")     # BUG-434/873: the PROJECT_REQUEST cistern reasons follow and propose answer
+CISTERN_NOTILE = ("patient_water", "hospital_water", "inside_water")     # BUG-873: asks that need no water tile (the fort's own water, no pipe)
 AQWELL = "aqwell"             # BUG-243: the aquifer well template (fix6-water), drafted only when the bp package has it
 STUCK_SHORT_D = 28            # BUG-041: a seal stuck this long (a game month) gets one short plan check line
 REBUILD_KINDS = {"seal", "tombs", "supply", "beds", "depot", "repair"}
@@ -4580,7 +4581,7 @@ def request_facts(save_dir: Path, state: dict | None = None) -> list[dict]:
                                  "tick": tick}
             elif tpl == CISTERN["tpl"] and d.get("why") in CISTERN_WHY and (
                     (isinstance(d.get("at"), list) and len(d["at"]) == 3 and all(_nat(v) for v in d["at"]))
-                    or d.get("why") == "patient_water"):
+                    or d.get("why") in CISTERN_NOTILE):
                 at = d["at"] if isinstance(d.get("at"), list) and len(d["at"]) == 3 and all(_nat(v) for v in d["at"]) else None
                 # BUG-424: the water nearest to the fort, newest first; BUG-434: patient_water has no tile when no body is known
                 reqs.setdefault(tpl, {"tpl": tpl, "why": d["why"], "at": at, "n": d.get("n") if _nat(d.get("n")) else None,
@@ -4675,7 +4676,15 @@ def request_drafts(s: dict | None, fort: dict | None, done: set, builds: list[di
                 if not have(b):
                     out.append(b)
                     why.append(f"cistern piped from the water at {at}" + (" (sealed rock intake)" if acc.get("rock") else ""))
-            elif r.get("why") == "patient_water" and (_cistern_due(fort, done, [*builds, *out], info)
+            elif r.get("why") in ("inside_water", "no_water") and _inside_cistern(fort, [*builds, *out], info):
+                # BUG-873 (Run 17 i1: the only accepted water outside for years, the request found no site and no answer): the fort's own
+                # water is a standing precondition; a cistern applied before does not stop it (the old ones ran dry or were retired).
+                # The aquifer cistern when an aquifer level is known (it worked live on i4), else the bucket-fed one with a fill source
+                b = copy.deepcopy(_inside_cistern(fort, [*builds, *out], info))
+                out.append(b)
+                why.append("cistern for water inside the fort" + (" (aquifer basin)" if b.get("p") else "")
+                           + (f"; no safe pipe from the water at {at}: {_cut(str(acc.get('why') or 'no route'))}" if at else ""))
+            elif r.get("why") in ("patient_water", "hospital_water") and (_cistern_due(fort, done, [*builds, *out], info)
                                                       or _aq_cistern_due(fort, done, [*builds, *out], info)):
                 # BUG-434: patients lie far from any accepted water (GiveWater needs water, not a hospital zone): the cistern the
                 # fort can fill (a brook within reach), else the aquifer basin
@@ -5477,6 +5486,22 @@ def _cistern_due(fort: dict | None, done: set, builds: list, info: dict | None) 
     fill = hosp.get("fill") if isinstance(hosp.get("fill"), dict) else {}
     return not hosp.get("cistern") and fill.get("ok") is not False and not fill.get("far")         and (CISTERN["tpl"], None) not in done \
         and (info is None or CISTERN["tpl"] in info) and all(x["tpl"] != CISTERN["tpl"] for x in builds)
+
+
+def _inside_cistern(fort: dict | None, builds: list, info: dict | None) -> dict | None:
+    """BUG-873: the cistern build that answers PROJECT_REQUEST cistern why=inside_water, or None: the aquifer cistern when an aquifer level
+    is known (fort.hosp.aq), else the bucket-fed one when the sites snapshot has a fill source (fill.ok, not far). Not while another cistern
+    build is drafted, and not without the template. Unlike _cistern_due / _aq_cistern_due a cistern applied before does not stop it: the
+    kernel asks only while the fort has no accepted water inside and no cistern project is pending."""
+    if (info is not None and CISTERN["tpl"] not in info) or any(x["tpl"] == CISTERN["tpl"] for x in builds):
+        return None
+    hosp = (fort or {}).get("hosp") or {}
+    fill = hosp.get("fill") if isinstance(hosp.get("fill"), dict) else {}
+    if hosp.get("aq"):
+        return CISTERN_AQ
+    if fill.get("ok") is not False and not fill.get("far"):
+        return CISTERN
+    return None
 
 
 def _aq_cistern_due(fort: dict | None, done: set, builds: list, info: dict | None) -> bool:

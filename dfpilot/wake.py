@@ -227,6 +227,7 @@ AUTO_TIMEOUT_S = 60
 # ... (sites, 168480 tiles, by inbox:follow) written 1 min / 2 min / 3 min after the request'): the sites export of a default box takes one to
 # three minutes on a busy kernel (it paces itself, waits for the yearly autosave), AUTO_TIMEOUT_S gave up after 60 s and asked again, so the
 # queue held a request nobody waited for. A job that waits for its snapshot waits AUTO_SNAP_TIMEOUT_S (cmd.SNAP_WAIT_MAX_S).
+WATER_INSIDE_MAX = 3          # BUG-873: cistern projects (aquifer or piped) one fort places for its inside water; then the LLM decides
 AUTO_SNAP_TIMEOUT_S = 300
 TOMBS_COOLDOWN_S = 600
 WAIVE_COOLDOWN_S = 3600                         # BUG-300: one phase.waive farms per hour of follow at most
@@ -1132,7 +1133,7 @@ class Follower:
                 if d.get("why") == "drink_surface":
                     fp["surface"] = 1
                 self._request_place("farms", "farms", fp, "S1", now, prio=1)
-            elif t == "PROJECT_REQUEST" and d.get("tpl") == "cistern" and d.get("why") in ("no_water", "patient_water"):
+            elif t == "PROJECT_REQUEST" and d.get("tpl") == "cistern" and d.get("why") in ("no_water", "patient_water", "hospital_water", "inside_water"):
                 self._request_access(d, now)
             elif t == "PROJECT_REQUEST" and d.get("tpl") == "workshops" and d.get("why") == "fishery":
                 # Run 11: 883-4532 raw fish lay uncleaned with no fishery and food fell to 5 days: the fishery alone
@@ -1661,22 +1662,44 @@ class Follower:
         snapshot decides the route in `_place` (sites.cistern_access)."""
         at = d.get("at")
         has_at = isinstance(at, list) and len(at) == 3 and all(isinstance(v, int) and not isinstance(v, bool) for v in at)
-        if not has_at and d.get("why") != "patient_water":
+        why = d.get("why")
+        inside = why in ("inside_water", "hospital_water")        # BUG-873: the fort has no accepted water inside / near the hospital
+        if not has_at and why not in ("patient_water", "hospital_water", "inside_water"):
             return
         from .cmd import bp_files
+        from .plan import done_projects
+        fin = done_projects(self.dir) if inside else set()
+        n_cis = 0
         for f in bp_files(self.dir):
             doc = files.read_json(f)
             prm = doc.get("params") if isinstance(doc, dict) and isinstance(doc.get("params"), dict) else {}
             if isinstance(doc, dict) and doc.get("tpl") == "cistern" and (prm.get("path") or prm.get("water") == "aquifer"):
-                return                       # BUG-448: an aquifer cistern (no pipe) brings its own water as well
-        if not has_at:
+                if not inside:
+                    return                   # BUG-448: an aquifer cistern (no pipe) brings its own water as well
+                # BUG-873 (Run 17 i1: the cisterns applied before ran dry or were retired, the fort drank at the river): the kernel asks only
+                # while NO accepted source stands inside and no cistern project is pending; a finished one does not answer it. One still
+                # under way does, and at most WATER_INSIDE_MAX of them per fort
+                n_cis += 1
+                if f.stem not in fin or n_cis >= WATER_INSIDE_MAX:
+                    return
+        if not has_at or (inside and self._aq_known()):
             # BUG-469 (Run 16d i4: PROJECT_REQUEST cistern why=patient_water carried no tile, nothing was placed, the mayor died of thirst
             # beside 4899 d of barrel drink): no water body to pipe from; the aquifer cistern (cmd.cistern_fill_guard refuses it
-            # without a known aquifer level, and the plain one when no water lies within reach)
+            # without a known aquifer level, and the plain one when no water lies within reach). BUG-873: with an aquifer level known the
+            # inside_water ask takes it first (it worked live on i4; the piped route runs to the river and needs a safe intake)
             self._request_place("cistern_water", "cistern", {"water": "aquifer"}, "S1", now, prio=1)
             return
         if self._request_place("cistern_water", "cistern", {}, "S1", now, prio=1):
             self.jobs["cistern_water"].update(access=True, at=at)
+
+    def _aq_known(self) -> bool:
+        """BUG-873: an aquifer level is known (manifest aquifer_levels, the sites snapshot's aquifer marks, a recorded breach)."""
+        try:
+            from .cmd import fort_manifest, load_bp, sites_snapshot
+            snap = sites_snapshot(self.dir)
+            return bool(snap is not None and load_bp("sites").known_aquifer(snap, fort_manifest(self.dir)))
+        except Exception:                    # noqa: BLE001 - no snapshot, an older bp package: the piped route as before
+            return False
 
     def _request_seal(self, now: float) -> None:
         """Run 10: the audit named the bypass for months and nobody walled it. In PEACE, the walls of the newest audit

@@ -542,8 +542,11 @@ def rank_sites(save_dir: Path, tpl: str, params: dict | None = None, snap: dict 
             calm = (files.read_state(save_dir) or {}).get("mode") not in _plan.SIEGE_MODES
         except (ImportError, OSError, ValueError, AttributeError):
             calm = True
+    rp = params
+    if tpl == "cistern" and not (params or {}).get("water"):           # BUG-872: the default call ranks the aquifer cistern when the plain one has no site
+        rp = cistern_aq_fallback(save_dir, params, snap, manifest) or params
     try:
-        sites = _rank(snap, tpl, params, n, manifest, water, where, free, calm)
+        sites = _rank(snap, tpl, rp, n, manifest, water, where, free, calm)
     except BpError as e:
         sites = _aq_open_sites(save_dir, tpl, params, snap, manifest, n, where, free)      # BUG-602
         if not sites:
@@ -2604,6 +2607,38 @@ def _stage_param(params) -> int:
     return st if isinstance(st, int) and not isinstance(st, bool) else 1
 
 
+AQ_DEFAULT_ERR = "lie on or right under a known aquifer level"
+
+
+def cistern_aq_fallback(save_dir: Path, params: dict | None, snap: dict | None, manifest: dict | None = None) -> dict | None:
+    """BUG-872 (Run 17 i1 Diedplank: `bp sites cistern` -> 'all 79 candidate site(s) lie on or right under a known aquifer level
+    (z135-z138)' for years, the only accepted water 14 tiles out on the river, five citizens drowned fetching it; i4 placed the same
+    cistern with water=aquifer at once): a default cistern (no path, no water) whose every site the aquifer levels rule out is
+    ranked as an aquifer cistern (p.water=aquifer: the basin on the aquifer level, the aquifer fills it, no pond, no carriers).
+    Returns the params with water=aquifer when that ranking has a site, else None (the caller keeps its own error)."""
+    p = dict(params or {})
+    if p.get("path") or p.get("water"):
+        return None
+    snap = snap or sites_snapshot(save_dir)
+    if snap is None:
+        return None
+    try:
+        sm = load_bp("sites")
+        man = manifest if manifest is not None else fort_manifest(save_dir)
+        try:
+            sm.rank(snap, "cistern", p or None, man, n=1)
+            return None                                    # the default ranking has a site: nothing to change
+        except ValueError as e:
+            if AQ_DEFAULT_ERR not in str(e):
+                return None
+        q = {**p, "water": "aquifer"}
+        if sm.rank(snap, "cistern", q, man, n=1):
+            return q
+    except (BpUnavailable, BpError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return None
+
+
 def cistern_fill_guard(save_dir: Path, params: dict | None, snap: dict | None, bp_id: str = "") -> dict:
     """BUG-469 (Run 16d i4 Mazelanterns y403/y404, 16c i3: the cisterns were built bucket-fed 87-106 tiles from the pond zone, the
     wells stayed dry for 30 days, patients died of thirst): a cistern without a pipe (p.path) and not p.water=aquifer is filled by
@@ -2616,6 +2651,11 @@ def cistern_fill_guard(save_dir: Path, params: dict | None, snap: dict | None, b
     snap = snap or sites_snapshot(save_dir)
     if snap is None:
         return params
+    aqp = cistern_aq_fallback(save_dir, params, snap)              # BUG-872: every default site is on / under an aquifer level
+    if aqp is not None:
+        PLACE_NOTES[bp_id] = ("BUG-872: every bucket-fed site lies on or under a known aquifer level: placed p.water=aquifer (the basin "
+                              "on the aquifer level, the aquifer fills it)")
+        return aqp
     try:
         sm, man = load_bp("sites"), fort_manifest(save_dir)
         fill = sm.fill_source(snap, man)

@@ -97,7 +97,7 @@ M.DEFAULTS = {
   -- the water, a stale job: gv.key not 'run'); and the same patient with the same verdict is announced again only after alarm_repeat. A patient is out of
   -- the episode only when his thirst fell alarm_clear under the line (he drank), not when a number dips under 30,000
   alarm_grace = 2 * DAY, alarm_margin = 5000, alarm_clear = 5000, alarm_repeat = 28 * DAY,
-  hosp_every = 7 * DAY, request_every = 28 * DAY, flood_every = 2 * DAY, flood_tiles = 2,
+  hosp_every = 7 * DAY, request_every = 28 * DAY, inside_every = 7 * DAY, retire_days = 3, outside_retire = true, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
   deep = 4, zone_below = false, gate_every = 28 * DAY, wake_wall_s = 600,
   -- BUG-537 (Run 16c i3 Sealcertain: HOSPITAL_DRY ~10 times a year beside a well that read 3/7 and 1/7 in turn): the dry episode ends
@@ -389,6 +389,20 @@ local function on_burrow(b, x, y, z)
   return ok and yes == true
 end
 
+-- BUG-874: a tile inside one of the fort's own Z4 boxes (manifest zones.Z4 {x1,y1,z1,x2,y2,z2}); the burrow test alone called a source
+-- 'outside' that lay in the pit of the fort core (i1 zone 18189 at 63,104,141 in the Tiefe+ box, no such burrow in the manifest)
+function M.in_fort_box(K, x, y, z)
+  if not x then return false end
+  local ok, man = pcall(function() return K.manifest() end)
+  local z4 = ok and type(man) == 'table' and type(man.zones) == 'table' and man.zones.Z4 or nil
+  for _, b in ipairs(type(z4) == 'table' and z4 or {}) do
+    if type(b) == 'table' and #b >= 6 and x >= b[1] and x <= b[4] and y >= b[2] and y <= b[5] and z >= b[3] and z <= b[6] then
+      return true
+    end
+  end
+  return false
+end
+
 local function dist_box(x, y, z, b)            -- Chebyshev distance from a tile to a zone rect (b.z only)
   local dx = x < b.x1 and b.x1 - x or (x > b.x2 and x - b.x2 or 0)
   local dy = y < b.y1 and b.y1 - y or (y > b.y2 and y - b.y2 or 0)
@@ -562,7 +576,7 @@ local function phase_sites(K, c, r)
     pcall(function() active = zn.spec_sub_flag.active end)
     if active then
       r.sources[#r.sources + 1] = {kind = 'zone', id = zn.id, x = (zn.x1 + zn.x2) // 2, y = (zn.y1 + zn.y2) // 2,
-                                   z = zn.z, wet = zone_wet(K, c, zn), box = {x1 = zn.x1, y1 = zn.y1, x2 = zn.x2,
+                                   z = zn.z, wet = zone_wet(K, c, zn), name = (function() local ok, n = pcall(function() return dfhack.df2utf(zn.name or '') end); return ok and n or '' end)(), box = {x1 = zn.x1, y1 = zn.y1, x2 = zn.x2,
                                                                                 y2 = zn.y2, z = zn.z}}
     end
   end
@@ -2601,6 +2615,17 @@ function M.trap_well(c, r, e)
   return best and best.s
 end
 
+-- BUG-871: the built well of a cistern room (manifest rooms tpl cistern) within pond_near + 1 tiles of the pond zone, or nil. Such a pond is
+-- the cistern's fill (the carriers pour it into the basin): no ladder step removes it
+function M.pond_feeds_cistern(K, r, pd, c)
+  for _, s in ipairs(r.sources or {}) do
+    if s.kind == 'well' and s.x and dist_box(s.x, s.y, s.z, pd) <= ((c and c.pond_near) or 3) + 1 and M.cistern_room(K, s) then
+      return s
+    end
+  end
+  return nil
+end
+
 -- the ladder for one stalled worker; returns the list of what was done
 local function unstick(K, c, r, p, e)
   local done = {}
@@ -2622,9 +2647,16 @@ local function unstick(K, c, r, p, e)
     for _, pd in ipairs(r.ponds or {}) do
       -- BUG-615 (Wallfree: two Pond zones beside the well, the first removal left the second, the next FillPond worker stood again):
       -- every Pond zone within reach goes, at most pond_per_run
-      if n < (c.pond_per_run or 2) and dist_box(e.x, e.y, e.z, pd) <= (c.pond_near or 3) + 1 and K.act.pond_remove(pd.id) then
-        done[#done + 1] = string.format('pond zone %d removed', pd.id)
-        n = n + 1
+      if n < (c.pond_per_run or 2) and dist_box(e.x, e.y, e.z, pd) <= (c.pond_near or 3) + 1 then
+        local feeds = M.pond_feeds_cistern(K, r, pd, c)
+        if feeds then
+          -- BUG-871 (Run 17 i1 Diedplank: all three pond-fed cisterns lost their pond to this ladder a few days after CISTERN_DRY, their wells
+          -- were retired, the fort drank outside): the pond of a cistern room is its only fill; a stalled worker never takes it away
+          done[#done + 1] = string.format("pond zone %d kept (it fills the cistern room's well %d)", pd.id, feeds.id)
+        elseif K.act.pond_remove(pd.id) then
+          done[#done + 1] = string.format('pond zone %d removed', pd.id)
+          n = n + 1
+        end
       end
     end
   end
@@ -3742,7 +3774,7 @@ local function finish(K, c, r, p)
   local refuge_ok, rwells, rwet = false, 0, 0          -- BUG-035: the wells in the refuge and the wet ones of them
   for _, s in ipairs(r.sources) do
     -- BUG-040: the burrow each source stands on (Kern+ first, else the refuge): state water.src_l, M.label
-    s.inn = on_burrow(kern, s.x, s.y, s.z) and kname or (on_burrow(refuge, s.x, s.y, s.z) and rname or nil)
+    s.inn = on_burrow(kern, s.x, s.y, s.z) and kname or (on_burrow(refuge, s.x, s.y, s.z) and rname or (M.in_fort_box(K, s.x, s.y, s.z) and 'fort' or nil))
     if s.kind == 'well' and on_burrow(refuge, s.x, s.y, s.z) then
       rwells = rwells + 1
       if s.water then rwet, refuge_ok = rwet + 1, true end         -- BUG-263: a stored drink counts for the refuge
@@ -4083,6 +4115,7 @@ local function finish(K, c, r, p)
     hosp_ok = hosp_ok and nh > 0
   end
   local srcs, slbl, s1 = src_list(r)
+  local inw, outn = M.inside_water(K, r, p, c, now)         -- BUG-873: the standing precondition, water inside before anything else
   -- BUG-263: the nearest accepted source is remembered until another one is accepted: when none is left, HOSPITAL_DRY
   -- names the one the hospital was placed by and why it dropped out (M.dry_causes)
   if s1 then p.slast = {k = s1.kind, id = s1.id, at = json.array{s1.x, s1.y, s1.z}, t = now} end
@@ -4091,7 +4124,7 @@ local function finish(K, c, r, p)
                buckets_free = r.free + fixed, buckets_full = r.full, buckets_want = want, unforbid = fixed,
                ordered = ordered, missing = math.max(0, missing), carers = after, gate = gate and 1 or 0,
                hosp = nh, give = r.give, removed = removed and #removed.zones or 0, src = srcs, src_l = slbl,
-               rwells = rwells, rwet = rwet, hosp_out = ho.n}
+               rwells = rwells, rwet = rwet, hosp_out = ho.n, inw = inw, wout = outn}
   -- BUG-056 (Run 11: 8 HOSPITAL locations stayed after their zones were deleted): a hospital is a location with a zone;
   -- every count here (r.hosp, hosp, hosp_out, the dry gate, the removal) goes by zones, a zoneless location is only counted
   local live_locs, nlive = {}, 0
@@ -4262,6 +4295,81 @@ function M.step(K, budget, ctx)
   if st.scan then return 'more' end
 end
 
+-- BUG-873 (Run 17 i1 Diedplank / i4 Girderroots: the only accepted water lay outside for years, 7 citizens drowned at the river fetching a
+-- drink, 13 died 'unknown' far out): water INSIDE the fort is a standing precondition. The accepted, wet, non-emergency sources that stand
+-- inside the fort (Kern+, the refuge or a Z4 box: `inn`) are counted; with none while citizens live, a PROJECT_REQUEST cistern
+-- why='inside_water' goes out every `inside_every` (none while a cistern project is pending: the aquifer cistern when an aquifer level is
+-- known, plan.request_drafts), and state water.wout carries the citizens standing outside (the status line says 'water only outside').
+-- Returns (inside sources, citizens outside or nil); the request only when the fort has a core (manifest Z4).
+function M.inside_water(K, r, p, c, now)
+  local inw = 0
+  for _, s in ipairs(r.sources or {}) do
+    if s.wet and not s.emerg and s.inn then inw = inw + 1 end
+  end
+  st.inw = inw
+  local cu = K.census and K.census.u
+  local outn = cu and math.tointeger(cu.outside) or nil
+  if outn and outn < 0 then outn = nil end
+  local cit = cu and math.tointeger(cu.cit) or 0
+  if inw > 0 then
+    p.iwq = nil
+    M.retire_outside(K, r, p, c, now)
+    return inw, nil
+  end
+  p.iwok = nil
+  if cit == 0 then return inw, nil end
+  local okm, man = pcall(function() return K.manifest() end)
+  local z4 = okm and type(man) == 'table' and type(man.zones) == 'table' and man.zones.Z4 or nil
+  if type(z4) ~= 'table' or #z4 == 0 then return inw, outn end
+  p.iwq = p.iwq or now                                     -- the first run without an inside source: the ask goes out at once
+  local okq, pend = K.call('runner', 'pending', 'cistern')
+  local every = math.tointeger(c.inside_every) or 7 * DAY
+  if not (okq and type(pend) == 'number' and pend > 0) and now - (p.ireq or -every) >= every then
+    p.ireq = now
+    local msg = string.format('cistern: no accepted water inside the fort (%d accepted source(s), all outside; %s citizen(s) outside)',
+                              #(r.sources or {}), tostring(outn or '?'))
+    K.emit('PROJECT_REQUEST', 'B', trunc(msg, 200), {tpl = 'cistern', n = 1, why = 'inside_water'})
+    K.log('warn', 'water: %s: the citizens walk out for every drink', msg)
+  end
+  return inw, outn
+end
+
+-- BUG-875 (Run 17 i1: Drink jobs went to the Water Source zone painted on the river, 7 citizens drowned at the bank): once the fort holds an
+-- accepted source inside for retire_days in a row, every hospital zone is served by one of them, a Water Source zone the KERNEL painted
+-- (dfllm-water) that stands outside the fort is removed, one per run (the player's own zones stay). Returns the id removed or nil.
+function M.retire_outside(K, r, p, c, now)
+  if c.outside_retire == false or not M.can('water_zone_remove') then return nil end
+  p.iwok = p.iwok or now
+  if now - p.iwok < (math.tointeger(c.retire_days) or 3) * DAY then return nil end
+  local inside = {}
+  for _, s in ipairs(r.sources or {}) do
+    if s.wet and not s.emerg and s.inn and s.x then inside[#inside + 1] = s end
+  end
+  for _, h in ipairs(r.hosp or {}) do          -- the hospital keeps its water: an inside source within `near` of every zone
+    local ok = false
+    for _, s in ipairs(inside) do
+      if dist_box(s.x, s.y, s.z, h) <= c.near then ok = true; break end
+    end
+    if not ok then return nil end
+  end
+  for i, s in ipairs(r.sources or {}) do
+    if s.kind == 'zone' and not s.inn and s.name == 'dfllm-water' and not M.in_fort_box(K, s.x, s.y, s.z) then
+      local ok, why = K.act.water_zone_remove(s.id)
+      if ok then
+        table.remove(r.sources, i)
+        K.log('info', 'water: Water Source zone %d at %d,%d,%d retired: %d accepted source(s) stand inside the fort, the citizens drink there (BUG-875)',
+              s.id, s.x, s.y, s.z, #inside)
+        K.emit('WATER_OUTSIDE_RETIRED', 'B', trunc(string.format('Water Source zone %d at %d,%d,%d outside the fort retired: water stands inside',
+                                                                 s.id, s.x, s.y, s.z), 200), {zone = s.id, inside = #inside})
+        return s.id
+      end
+      K.log('warn', 'water: Water Source zone %d outside not retired: %s', s.id, tostring(why))
+      return nil
+    end
+  end
+  return nil
+end
+
 -- inspect what=water_sources (kern routes it here; FR-47): the last scan (bodies of water >= deep per level with
 -- an accepted zone or well, a reachable bank or the shortest dig), the sources of the last run; a scan older than
 -- ws_every (or none) is queued for the next water run
@@ -4368,7 +4476,7 @@ function M.state(K)
   end
   local w = {patients = o.patients, thirst_max = o.thirst_max, hosp_ok = o.hosp_ok, refuge_ok = o.refuge_ok,
              buckets_free = o.buckets_free, hosp = o.hosp, src = o.src or json.array{}, hosp_out = o.hosp_out,
-             src_l = o.src_l}
+             src_l = o.src_l, inw = o.inw, wout = o.wout}      -- BUG-873: accepted sources inside the fort; citizens outside while none
   -- BUG-131: the first blocking hospital zone outside the core (z, its centre, ok 1 = a finished hospital inside exists, pat =
   -- the patients lying in it): status/brief name it and the verb hospital.retire
   local ho = st.hout

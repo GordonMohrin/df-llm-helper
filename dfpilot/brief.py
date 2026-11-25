@@ -841,7 +841,9 @@ def _hospital(s: dict, st: dict) -> str:
     w = s.get("water")
     if isinstance(w, dict):
         h = "none" if not w["hosp"] else ("ok" if w["hosp_ok"] else "DRY")
-        return (f" hospital {h} src {len(w['src'])}"
+        # BUG-873: no accepted source inside the fort: say it first (the citizens walk out for every drink); the cistern request is open
+        only = f" WATER ONLY OUTSIDE: {w['wout']} citizens outside, cistern asked;" if w.get("inw") == 0 and w.get("wout") is not None             else (" WATER ONLY OUTSIDE (cistern asked);" if w.get("inw") == 0 else "")
+        return (only + f" hospital {h} src {len(w['src'])}"
                 + (f" ({src_name(w, 0)})" if w["src"] and w.get("src_l") else "")       # BUG-040: which and where
                 + (f" patients {w['patients']} (thirst {w['thirst_max']})" if w["patients"] else ""))
     return f" water {'ok' if st['hosp_water'] else 'NO'}" if "hosp_water" in st else ""

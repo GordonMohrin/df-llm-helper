@@ -2076,18 +2076,33 @@ function M.missing_watch(K, t, cits, good)
   return #rows
 end
 
+-- BUG-877: what the away watch last saw of a citizen (care's death record): {pos, job, since, why} or nil
+function M.away_of(id)
+  local a = mem.away and mem.away[id]
+  if not a then return nil end
+  return {pos = a.pos, job = a.job, since = a.since, why = a.why}
+end
+
 function M.job_stray(K)
   local t = now_t(K)
   mem.stray_t = t
   local R = mem.reach
   if not R then return end
-  local cits, _, _, by = reread_cut(K, R)
+  local cits, _, main, by = reread_cut(K, R)
   local good = {}
   local nd, nf = 0, 0
   for _ in pairs(by.drink or {}) do nd = nd + 1 end
   for _ in pairs(by.food or {}) do nf = nf + 1 end
-  if nd == 0 or nf == 0 then return end                    -- no stock to measure against
-  for g in pairs(by.drink) do if by.food[g] then good[g] = true end end
+  if nd == 0 or nf == 0 then
+    -- BUG-876 (Run 17 i1 Diedplank: drink stock 0 for years, `classes.drink groups []`: this guard returned here, so no errand was cancelled,
+    -- no hunt stopped and MISSING never sounded while 6 citizens vanished far out and 7 drowned at the river): with no group holding drink
+    -- or food the citizens' main walk group (the one most of them stand on) is the one to measure against
+    if not main or main == 0 then return end
+    good[main] = true
+    mem.stray_main = (mem.stray_main or 0) + 1
+  else
+    for g in pairs(by.drink) do if by.food[g] then good[g] = true end end
+  end
   if next(good) == nil then return end
   M.stray_errands(K, t, cits, good)
   M.hunt_errands(K, t, cits, good)

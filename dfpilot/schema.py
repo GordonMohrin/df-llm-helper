@@ -573,6 +573,8 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # built well stood dry for water.cistern_dry_days, once per dry spell: room, project, well (id, pos), days, fill
     # (pond: bucket-fed with its pond zone; pond_removed: water removed that pond as a loop; pipe: its floodgate lever;
     # none), pond (zone id), src/d (the nearest accepted water to carry from, tiles)
+    # BUG-875: a kernel-painted (dfllm-water) Water Source zone outside the fort removed: zone = its id, inside = accepted sources inside
+    "WATER_OUTSIDE_RETIRED": ("B", "water", _d("zone:i", "inside:i")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,
@@ -824,7 +826,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "PHASE": ("B", "runner", _d(opt="from:s to:s")),
     "PAUSE": ("B", "arbiter", _d("on:f", "by:s ttl:i")),
     "DEATH": ("B", "care", _d(opt="unit:i citizen:f cause:s src:s why:s found:f dtype:s by:s killer:i mood:s "
-                                  "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s fight:s dig:sa")),   # BUG-522: dig = digs near a CAVEIN
+                                  "thirst:i hunger:i patient:f pos:p job:s revised:f bridge:s fight:s dig:sa out:f haz:s")),   # BUG-522: dig = digs near a CAVEIN; BUG-877: out = was outside the fort, haz = the water at the last position
     "DEATH_CLUSTER": ("B", "care", _CLUSTER),
     # BUG-068: cmd = the command line of a failed act.run (<= 80 bytes), err 'raised an error without a message' when
     # the command raised error(nil)
@@ -1423,6 +1425,8 @@ STATE = Obj(
                       # BUG-288/289/290: wst = the tick the water scan last finished, wsc = the best way to water it
                       # found at any distance (a bank, a well spot over a flooded pit, a dig; bp sites hospital names it)
                       opt={"hosp_out": NAT, "src_l": Arr(Str(maxbytes=32), hi=8), "gaps": Arr(Str(maxbytes=16), hi=8),
+                           # BUG-873: inw = accepted sources inside the fort (0: the water is outside), wout = citizens outside then
+                           "inw": NAT, "wout": NAT,
                            "hout": Obj(req={"z": NAT, "at": Tup([NAT, NAT, NAT]), "ok": FLAG}, opt={"pat": NAT}),
                            "wst": NAT, "wsc": Str(maxbytes=96),
                            # BUG-539: removed hospital zones waiting to be drawn again (hospital.restore)

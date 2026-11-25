@@ -1385,6 +1385,25 @@ local function impls(state)
     return false, 'no such zone'
   end
 
+  -- BUG-875: removes ONE Water Source zone by id, only one the kernel painted itself (name dfllm-water, act.water_zone); water.lua retires the
+  -- outside ones once the fort has accepted water inside. Never the zones of the player, never a zone the zone sheet has open.
+  function I.water_zone_remove(id)
+    id = math.tointeger(id)
+    if not id then return false, 'bad zone id' end
+    local wst = df.civzone_type.WaterSource
+    for _, z in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
+      if z.id == id then
+        if z.type ~= wst then return false, 'not a Water Source zone' end
+        if dfhack.df2utf(z.name or '') ~= 'dfllm-water' then return false, 'not a dfllm-water zone' end
+        local sel = dfhack.gui and dfhack.gui.getSelectedCivZone and dfhack.gui.getSelectedCivZone(true) or nil
+        if sel == z then return false, 'zone sheet open' end
+        if dfhack.buildings.deconstruct(z) then return true, 1 end
+        return false, 'deconstruct refused'
+      end
+    end
+    return false, 'no such zone'
+  end
+
   -- BUG-541 (Run 16b i2 / Run 16d i4: GiveWater carriers stood for weeks at a DRY well, 3 patients died): the building screen's
   -- remove for ONE well by id (dfhack.buildings.deconstruct, as pond_remove does for a zone). The caller (water's well.retire)
   -- has checked that it is dry. Returns ok, 1 (gone at once) or ok, 'queued' (BUG-617). [live-untested]

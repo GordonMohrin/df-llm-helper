@@ -90,6 +90,8 @@ C.EVENTS = {
   PATIENTS_OUT = {cls = 'A', by = 'water'},        -- M3 (note 94 c): a class-A wake with a recipe (once per fight)
   -- BUG-040: a done cistern whose well stood dry for water.cistern_dry_days (once per dry spell, with what fills it)
   CISTERN_DRY = {cls = 'B', by = 'water'},
+  -- BUG-875: a Water Source zone the kernel painted outside the fort, removed once accepted water stands inside
+  WATER_OUTSIDE_RETIRED = {cls = 'B', by = 'water'},
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
   SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},
   -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)
@@ -348,6 +350,7 @@ C.ACT = {
   well_remove = {'water'},                         -- BUG-541: the dry well the GiveWater carriers stand at (well.retire)
   hospital_restore = {'water'},                    -- BUG-539: the removed hospital zone drawn again at its old location
   hospital_zone = {'care'},                        -- NEU1 P9: a 1x1 hospital zone over one standing bed near water (care.hosp_min)
+  water_zone_remove = {'water'},                   -- BUG-875: ONE kernel-painted (dfllm-water) Water Source zone outside, once water stands inside
   water_zone = {'water'},                          -- BUG-324: a Water Source zone on the water the scan found reachable
   sand_zone = {'economy'}, fish_zone = {'economy'},
   drink_pile = {'economy'},                        -- BUG-782: the refuge's drink store without a dig
@@ -674,7 +677,7 @@ C.STATE_SPEC = obj({
                src = arr({t = 'tup', items = {NAT, NAT, NAT}}, 0, 8)},
               -- BUG-036: hospital zones with tiles outside Kern+ and the refuge; BUG-040: a label per src ('well 19098
               -- in Kern+')
-              {hosp_out = NAT, src_l = arr(str(32), 0, 8),
+              {hosp_out = NAT, src_l = arr(str(32), 0, 8), inw = NAT, wout = NAT,   -- BUG-873: inside accepted sources; citizens outside while none
                -- BUG-106: the tokens of the hospital's gaps (no_table, no_thread, ...), the first eight; inspect what=hospital
                gaps = arr(str(16), 0, 8),
                -- BUG-131: the first blocking hospital zone outside the core: id, centre, ok 1 = a finished hospital inside

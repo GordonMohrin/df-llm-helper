@@ -5001,6 +5001,30 @@ end
 
 -- the cause of one citizen's death (dfllm.deaths.classify); `since` = the death tick (a report up to half a day
 -- older counts: eventful delivers UNIT_DEATH up to 100 ticks late); groups = the announcement log, read once
+-- BUG-877 (Run 17 i1 Diedplank: 13 citizens 'unknown, missing in the unit list', 7 drowned at the river): a citizen who vanished
+-- outside gets what the kernel knew into the death record: the last position, job and since when (seal's away watch), whether the
+-- census had him outside, and the nearest hazard at the position (water there or beside it, sense.water_at: 'water 5/7'). Fills the
+-- gaps of `res` only; the cause stays open
+function M.vanished(K, id, res)
+  local okw, away = K.call('seal', 'away_of', id)
+  if okw and type(away) == 'table' then
+    if not res.pos and type(away.pos) == 'table' then res.pos = {away.pos[1], away.pos[2], away.pos[3]} end
+    if not res.job and away.job then res.job = away.job end
+    res.why[#res.why + 1] = string.format('last away since tick %s (%s)', tostring(away.since), tostring(away.why))
+  end
+  local cu = K.census and K.census.u
+  for _, oid in ipairs(type(cu) == 'table' and type(cu.outside_ids) == 'table' and cu.outside_ids or {}) do
+    if oid == id then res.out = 1; res.why[#res.why + 1] = 'was outside the fort'; break end
+  end
+  if type(res.pos) == 'table' and math.type(res.pos[1]) == 'integer' then
+    local ok, kind, stream = K.call('sense', 'water_at', res.pos[1], res.pos[2], res.pos[3])
+    if ok and kind then
+      res.haz = trunc(tostring(kind) .. (stream and (', ' .. tostring(stream)) or ''), 40)
+      res.why[#res.why + 1] = 'hazard at the position: ' .. res.haz
+    end
+  end
+end
+
 local function classify0(K, c, p, id, since, groups)
   local okm, mv = K.call('gate', 'moves')          -- BUG-027: the bridge moves (a citizen crushed by a bridge)
   mv = okm and type(mv) == 'table' and mv or nil
@@ -5009,7 +5033,10 @@ local function classify0(K, c, p, id, since, groups)
   local ok, res = pcall(DT.classify, u, {mood = mood_of(p, id), since = since and since - DAY // 2, groups = groups,
                                          reports = c.death_reports, thirst = c.death_thirst, hunger = c.death_hunger,
                                          died = since, bridges = mv})
-  if ok and type(res) == 'table' then return res end
+  if ok and type(res) == 'table' then
+    if res.found == false then pcall(M.vanished, K, id, res) end
+    return res
+  end
   K.log('warn', 'care: death cause of %d unreadable: %s', id, tostring(res))
   return {cause = 'unknown', src = 'none', why = {'unreadable'}, found = true}
 end
@@ -5077,6 +5104,8 @@ local function death_d(id, res, revised)
   if res.job then d.job = res.job end
   if res.bridge then d.bridge = trunc(tostring(res.bridge), 20) end
   if res.fight then d.fight = res.fight end                  -- BUG-379
+  if res.out then d.out = 1 end                              -- BUG-877: the census had him outside the fort
+  if res.haz then d.haz = res.haz end                        -- BUG-877: the water at his last position
   if revised then d.revised = 1 end
   return d
 end

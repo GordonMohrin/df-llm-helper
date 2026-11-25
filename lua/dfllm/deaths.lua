@@ -366,6 +366,12 @@ function D.classify(u, o)
     if m then return bridge_result(r, m, 'missing in the unit list') end
     r.found = false
     r.why = {'not found yet, missing in the unit list'}
+    -- BUG-877 (Run 17 i1 Diedplank: 13 of 37 citizens died 'unknown', no position, no thirst): the unit object still answers
+    -- for its position, its timers and its last job; they go into the event, the cause stays open (found false)
+    local th0, hu0 = timers(u)
+    r.thirst, r.hunger, r.pos, r.job = th0, hu0, pos_of(u), last_job(u)
+    if th0 and th0 >= D.LINES.thirsty then r.why[#r.why + 1] = 'thirst ' .. th0 end
+    if hu0 and hu0 >= D.LINES.hunger then r.why[#r.why + 1] = 'hunger ' .. hu0 end
     return r
   end
   local th, hu = timers(u)
