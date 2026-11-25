@@ -43,7 +43,7 @@ def test_status_names_the_reasons_beside_usable_of_empty():
 def test_new_cancel_keys_are_linted_and_shipped(tmp_path):
     doc = json.loads(open(fairplay.BASELINE_PATH, encoding="utf-8").read())
     cc = doc["economy"]["cancel"]
-    assert cc["stand"] is True and cc["stand_quit_d"] == 30 and cc["fruit_off_n"] == 10 and cc["fruit_hold_d"] == 30
+    assert cc["stand"] is True and cc["stand_quit_d"] == 30 and cc["stand_calm_d"] == 30 and cc["stand_floor"] == 2 and cc["fruit_off_n"] == 10 and cc["fruit_hold_d"] == 30
     assert fairplay.economy_errors() == []
     p = tmp_path / "baseline.json"
     bad = copy.deepcopy(doc)

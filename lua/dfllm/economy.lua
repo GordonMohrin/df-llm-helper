@@ -500,7 +500,7 @@ M.DEFAULTS = {
   diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
   -- NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source of the tally (the eventful reports stay the fallback), gamelog_bytes = at most
   -- that many bytes per look
-  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, stand = true, stand_quit_d = 30, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, stand = true, stand_quit_d = 30, stand_calm_d = 30, stand_floor = 2, stand_mixed_room = 3, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
   -- NEU7 (BUG-854): the standing container reserve (M.plan_reserve): batch = brews open / brews_per, min_batch..max_batch, again while DF still cancels after the
   -- batch (grace_days, repeat_days apart, max_repeats in a row then every 14 days), then a trickle of trickle_n every trickle_days days (below trickle_free free
   -- containers); rock barrels when boulders >= batch + rock_plenty or wood is short; total_cap containers in all
@@ -2026,6 +2026,10 @@ M.CX_EMERGENCY_D = 10
 -- down, never up); a pile without a barrel and the drink piles are left alone (food keeps a container, the drink piles take barrels freely). The old limits
 -- come back only when the fort has stopped brewing (no Still or no brewable plant for stand_quit_d days) or the switch is off. State p.pilestand = true, p.standq.
 M.STAND_QUIT_D = 30
+-- NEU13 BUG-888 round 2 (verifier): the standing cap has a floor and an exit. STAND_FLOOR = barrels every food pile may always hold (a pile whose barrels all left is capped at the
+-- floor: food keeps a container, the pile cannot swallow a whole batch), STAND_MIXED_ROOM = what a food+drink pile may hold above the barrels it has (so it does not eat a batch
+-- either, and its drink barrels can still come and go), STAND_CALM_D = days of DF cancelling less than cx_min_n (the gate closed) before the old limits go back.
+M.STAND_FLOOR, M.STAND_MIXED_ROOM, M.STAND_CALM_D = 2, 3, 30
 function M.stand_end(K, p, why)
   p.pilestand, p.standq = nil, nil
   K.log('warn', 'container stand over: %s; the stockpile barrel limits go back', why)
@@ -2049,18 +2053,27 @@ function M.pile_standing(K, c, r, f, b)
     return
   end
   if p.standq then p.standq = nil; K.persist.touch('m.economy') end
+  local x = M.cx_gate(K, c, now)                                    -- the cures act only on DF's own reason (BUG-844)
   if not p.pilestand then
-    local x = M.cx_gate(K, c, now)                                  -- the cures act only on DF's own reason (BUG-844)
     if not x then return end
-    p.pilestand = true
+    p.pilestand, p.standcalm = true, nil
     K.persist.touch('m.economy')
     K.log('warn', 'container stand: the food piles take no more barrels than they hold from now on (DF cancelled brews %dx for want of a container; %s)', x, M.cont_text(inv))
+  elseif x then
+    if p.standcalm then p.standcalm = nil; K.persist.touch('m.economy') end
+  else
+    -- NEU13 BUG-888 round 2: the exit. DF's container cancels below cx_min_n for stand_calm_d days (the cap works, or the barrels are enough): the old limits go back;
+    -- if the cancels return the cap starts again from the gate (a short loop is the price of never leaving the piles capped for good)
+    p.standcalm = p.standcalm or now
+    local calm = math.tointeger(cc.stand_calm_d) or M.STAND_CALM_D
+    if now - p.standcalm >= calm * DAY then M.stand_end(K, p, 'DF has not cancelled a brew for want of a container for ' .. ((now - p.standcalm) // DAY) .. ' days'); return end
+    K.persist.touch('m.economy')
   end
-  M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D, now)      -- the drink emergency freezes the piles that hold drink too
+  M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D, now, {floor = math.tointeger(cc.stand_floor) or M.STAND_FLOOR, room = math.tointeger(cc.stand_mixed_room) or M.STAND_MIXED_ROOM})
 end
-function M.cx_freeze(K, p, emergency, now)
+function M.cx_freeze(K, p, emergency, now, stand)
   if type(K.act.pile_barrels) ~= 'function' then return end
-  local ok, res = K.act.pile_barrels('freeze', {mixed = emergency == true})
+  local ok, res = K.act.pile_barrels('freeze', {mixed = emergency == true, floor = stand and stand.floor or nil, room = stand and stand.room or nil})
   if not (ok and type(res) == 'table') then
     -- NEU5 BUG-848: never silent: ONE loud line per load names the field problem (the stall line carries 'pile limit field' too); the others stay warns
     if tostring(res):find('no barrel limit field', 1, true) and not st.pilebad then

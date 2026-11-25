@@ -126,14 +126,14 @@ T.test('BUG-888 i2: the food piles take no more barrels than they hold, with no 
   feed(econ, W.K, 12, 101 * DAYT)
   watch(101)
   T.eq(p.pilestand, true, 'DF cancels for want of a container: the cap starts')
-  T.eq({plants.max_barrels, plants2.max_barrels, drinkp.max_barrels, store.max_barrels, bare.max_barrels}, {10, 6, 40, 40, 40},
-       'food piles at what they hold; drink piles and a pile without barrels free')
+  T.eq({plants.max_barrels, plants2.max_barrels, drinkp.max_barrels, store.max_barrels, bare.max_barrels}, {10, 6, 7, 40, 2},
+       'food piles at what they hold; the mixed pile at what it holds + 3; the drink store free; a pile without barrels at the floor of 2 (not open, not shut)')
   T.ok(log_has(W, 'container stand: the food piles take no more barrels'), 'one kern.log line')
   -- 200 game days later: DF's cancels are long gone, the cap stands (the old freeze was given back after 14 days / 130 days)
   watch(300)
   watch(301)
-  T.eq({p.pilestand, plants.max_barrels, plants2.max_barrels}, {true, 10, 6}, 'no timer, no give-back on a gone reason')
-  T.ok(p.pilecap and p.pilecap['41'] == 40, 'the old limit is kept for the end')
+  T.eq({p.pilestand, plants.max_barrels, plants2.max_barrels}, {true, 10, 6}, 'a short calm (1 day) gives nothing back')
+  T.ok(p.pilecap and p.pilecap['41'] == 40 and p.pilecap['45'] == 40 and p.pilecap['43'] == 40, 'the old limits are kept for the end')
   -- a barrel leaves a pile (hauled to the drink pile): the cap follows it down at the next look, never up
   items[1].pos = {x = 21, y = 1, z = 5}
   rawset(df.global.world.items.other, 'BARREL', kmock.vec(items))
@@ -158,6 +158,54 @@ T.test('BUG-888: the switch cancel.stand = false leaves the timed freeze of BUG-
   econ.brew_watch(W.K, W.K.cfg.baseline.economy, {day = true, now = 101 * DAYT, p = p, inv = {brew_p = 100, barrels = 20, barrels_empty = 4, cont_free = 0}, days = {drink_d = 40}, cit = 6})
   T.eq(p.pilestand, nil)
   T.eq(#W.find_acts('pile_barrels'), 0, 'the stand never froze a pile (the verdict path needs its stall days)')
+end)
+
+T.test('BUG-888 round 2: a pile whose barrels all leave keeps a floor of 2 (never 0), a pile with a limit under the floor is not raised', function()
+  local actlib = require('dfllm.act')
+  local sp = function(id, name, x1, drink, max)
+    return {id = id, name = name, x1 = x1, y1 = 0, x2 = x1 + 2, y2 = 2, z = 5, max_barrels = max,
+            settings = {flags = {food = true}, food = {drink_plant = kmock.vec{drink}, drink_animal = kmock.vec{false}}}}
+  end
+  local a, b, c = sp(1, 'a', 0, false, 40), sp(2, 'b', 10, false, 1), sp(3, 'c', 20, false, 40)
+  df.global.world.buildings.other.STOCKPILE = kmock.vec{a, b, c}
+  local items = {{pos = {x = 1, y = 1, z = 5}}, {pos = {x = 2, y = 1, z = 5}}, {pos = {x = 2, y = 2, z = 5}}, {pos = {x = 21, y = 1, z = 5}}}
+  rawset(df.global.world.items.other, 'BARREL', kmock.vec(items))
+  local api = actlib.new{who = function() return 'economy' end, allowlist = function() return actlib.BUILTIN_ALLOWLIST end, log_cmd = function() end, fail = function() end}
+  api.pile_barrels('freeze', {floor = 2, room = 3})
+  T.eq({a.max_barrels, b.max_barrels, c.max_barrels}, {3, 1, 2}, 'a holds 3, b keeps its own 1, c holds 1 and gets the floor 2')
+  rawset(df.global.world.items.other, 'BARREL', kmock.vec{})          -- every barrel leaves
+  api.pile_barrels('freeze', {floor = 2, room = 3})
+  T.eq({a.max_barrels, b.max_barrels, c.max_barrels}, {2, 1, 2}, 'all gone: the limit stops at the floor, a pile can always take 2 barrels for its food')
+end)
+
+T.test('BUG-888 round 2: the cap is lifted when DF has not cancelled for stand_calm_d days, and starts again when the cancels return', function()
+  local W, still, ord = brew_world()
+  local plants = {id = 41, name = 'plants', x1 = 0, y1 = 0, x2 = 2, y2 = 2, z = 5, max_barrels = 40,
+                  settings = {flags = {food = true}, food = {drink_plant = kmock.vec{false}, drink_animal = kmock.vec{false}}}}
+  df.global.world.buildings.other.STOCKPILE = kmock.vec{plants}
+  df.building.find = function(id) if id == 41 then return plants end end
+  local items = {}
+  for _ = 1, 10 do items[#items + 1] = {pos = {x = 1, y = 1, z = 5}} end
+  rawset(df.global.world.items.other, 'BARREL', kmock.vec(items))
+  local actlib = require('dfllm.act')
+  local api = actlib.new{who = function() return 'economy' end, allowlist = function() return actlib.BUILTIN_ALLOWLIST end, log_cmd = function() end, fail = function() end}
+  W.act_result('pile_barrels', function(mode, arg) return api.pile_barrels(mode, arg) end)
+  local econ = require('dfllm.economy')
+  local p = W.K.persist.get('m.economy')
+  p.orders = {['dfllm:drink'] = ord.id}
+  local inv = {brew_p = 6978, barrels = 20, barrels_empty = 4, cont_free = 0}
+  local function watch(day) econ.brew_watch(W.K, W.K.cfg.baseline.economy, {day = true, now = day * DAYT, p = p, inv = inv, days = {drink_d = 40}, cit = 6}) end
+  feed(econ, W.K, 12, 101 * DAYT)
+  watch(101)
+  T.eq({p.pilestand, plants.max_barrels}, {true, 10}, 'capped')
+  for d = 110, 135, 5 do watch(d) end                            -- the 7-day window is empty from day 109 on; the gate closes after 14 more days
+  T.eq({p.pilestand, plants.max_barrels}, {true, 10}, 'calm for less than 30 days: the cap stands')
+  watch(160)                                                     -- the gate itself closes 14 days after the window is empty (cx_off_days), then 30 calm days
+  T.eq({p.pilestand, p.pilecap, plants.max_barrels}, {nil, nil, 40}, 'calm for 30+ days: the limits are back')
+  T.ok(log_has(W, 'has not cancelled a brew for want of a container'), 'said')
+  feed(econ, W.K, 12, 161 * DAYT)
+  watch(161)
+  T.eq({p.pilestand, plants.max_barrels}, {true, 10}, 'the cancels came back: the cap starts again')
 end)
 
 ---------------------------------------------------------------- BUG-889: the reserve cap is a rate; the statement names where the boulders are

@@ -1479,7 +1479,11 @@ local function impls(state)
             for _, v in ipairs(sp.settings.food[k]) do if v then drink = true end end
           end
         end)
-        if food and name ~= 'dfllm-drink' and (mixed or not drink) then
+        -- NEU13 BUG-888: arg.floor = the standing cap: every food pile keeps room for `floor` barrels at least (a pile whose barrels all left is capped at the
+        -- floor, not left open and not shut), arg.room = what a mixed food+drink pile may hold above the barrels it has (its drink barrels come and go)
+        local floor = math.tointeger(type(arg) == 'table' and arg.floor or nil)
+        local room = math.tointeger(type(arg) == 'table' and arg.room or nil) or 0
+        if food and name ~= 'dfllm-drink' and (mixed or not drink or (floor and room > 0)) then
           local here = 0
           for _, it in ipairs(df.global.world.items.other.BARREL) do
             local p = it.pos
@@ -1490,12 +1494,14 @@ local function impls(state)
           if old then answered = answered + 1 end
           -- NEU4: a pile that holds no barrel is never frozen at 0 (its food would have no container)
           -- NEU6 BUG-852: out.failed = the piles whose limit could not be written, out.kept = the readable ones left alone (and why): the caller logs both
-          if old and here > 0 and (old < 0 or old > here) then
-            if PL.set(sp, here) then out[#out + 1] = {id = sp.id, old = old, new = here, name = name, field = cand}
+          local target = here
+          if floor then target = math.max(here + ((drink and not mixed) and room or 0), floor) end
+          if old and (here > 0 or floor) and target > 0 and (old < 0 or old > target) then
+            if PL.set(sp, target) then out[#out + 1] = {id = sp.id, old = old, new = target, name = name, field = cand}
             else out.failed = out.failed or {}; out.failed[#out.failed + 1] = {id = sp.id, old = old, here = here, name = name} end
           elseif old then
             out.kept = out.kept or {}
-            out.kept[#out.kept + 1] = {id = sp.id, old = old, here = here, name = name, why = here == 0 and 'no barrel inside' or 'limit already low'}
+            out.kept[#out.kept + 1] = {id = sp.id, old = old, here = here, name = name, why = (here == 0 and not floor) and 'no barrel inside' or 'limit already low'}
           end
         end
       end
