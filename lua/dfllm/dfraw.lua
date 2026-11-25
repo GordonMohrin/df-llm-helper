@@ -380,6 +380,10 @@ end
 
 function R.brew(K, ctx)
   local b = buf()
+  -- NEU13 BUG-887 round 5: the cancel snapshot comes FIRST (page 1), before the order and workshop sheets (read only, economy.snap_lines)
+  local okp, oks, sl = pcall(K.call, 'economy', 'snap_lines')
+  oks = okp and oks
+  if oks and type(sl) == 'table' then for _, l in ipairs(sl) do add(b, l) end end
   local orders = {}
   for _, o in ipairs(each(pget(function() return df.global.world.manager_orders.all end))) do
     local tn = ename(df.job_type, N(function() return o.job_type end) or -1) or '?'
@@ -407,10 +411,6 @@ function R.brew(K, ctx)
     end
   end
   add(b, 'stills: ' .. stills)
-  -- NEU13 BUG-887 round 3: the cancel snapshot (read only, economy.snap_lines): empties by state, nearest free one, the brew job's filter
-  local okp, oks, sl = pcall(K.call, 'economy', 'snap_lines')
-  oks = okp and oks
-  if oks and type(sl) == 'table' then for _, l in ipairs(sl) do add(b, l) end end
   return b
 end
 

@@ -3820,8 +3820,13 @@ function M.gl_poll(K, c)
     local keep = M.cw_days(K, c) * DAY
     while #st.bdone > 0 and now - st.bdone[1][1] > keep do table.remove(st.bdone, 1) end
   end
+  local cxnow = 0
   for _, e in ipairs(list) do
-    if tostring(e[1]):lower():find('^brew') and tostring(e[2]):lower():find(M.CX_REASON, 1, true) then st.cxseen = (st.cxseen or 0) + 1 end
+    if tostring(e[1]):lower():find('^brew') and tostring(e[2]):lower():find(M.CX_REASON, 1, true) then st.cxseen = (st.cxseen or 0) + 1; cxnow = cxnow + 1 end
+  end
+  if cxnow > 0 then                                -- BUG-887 round 5: the cancel moment (Stills' job lists only, no item scan)
+    local okm, errm = pcall(M.brew_moment, K, c, now, cxnow)
+    if not okm then K.log('warn', 'brew cancel moment: %s', tostring(errm):sub(1, 120)) end
   end
   if #list > 0 then                                -- grouped: one tally write per kind and reason, not per line
     local by, order = {}, {}
@@ -3897,9 +3902,15 @@ function M.snap_maybe(K, c, now)
   local s = M.brew_snapshot(K, c, now)
   local f = M.BS.fields(s)
   K.log('info', '%s', M.BS.line(s))
-  K.emit('BREW_CANCEL_SNAPSHOT', 'B', M.BS.line(s):sub(1, 200), f)
+  K.emit('BREW_CANCEL_SNAPSHOT', 'B', M.BS.headline(s), f)
   K.persist.touch('m.economy')
   return true
+end
+-- BUG-887 round 5: the moment the gamelog reader sees a container cancel: brew jobs / barrels held / plants held in all Stills, kept (last 20) in the accumulator
+function M.brew_moment(K, c, now, n)
+  local env = M.snap_env(K, c, now)
+  M.BS.moment(env, env.acc, now, n)
+  K.persist.touch('m.economy')
 end
 -- the sampler (BUG-887 round 4): brew jobs live about a second, so a daily snapshot nearly never sees an attached barrel. While DF's container reason is active in the
 -- window, every M.watch pass (600 ticks) walks the Stills' job lists only (no item scan) and adds each attached barrel to the persisted accumulator `bacc`.

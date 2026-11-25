@@ -583,7 +583,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # near/dz = distance and z offset of the nearest free empty; filter = the second job_item (the container) of one brew job;
     # round 3b flag census: fcs/fcc = free empties with the container flag set / clear, acs/acc = the same for all empties, combo/combo_all = histogram of item flag combinations (free / all), refs/refs_all = general_ref types,
     # taken = id, flags, refs of the barrel(s) DF attached to the brew job's container job_item (job_item_idx 1)
-    "BREW_CANCEL_SNAPSHOT": ("B", "economy", _d("stills:i jobs:i empties:i free:i", "forb:i job:i haul:i trader:i far:i other:i out:i pots:i pots_free:i cancels:i done:i plants:i fruit:i still:i near:i dz:i filter:s fcs:i fcc:i acs:i acc:i combo:s combo_all:s refs:s refs_all:s taken:s")),
+    # round 5 (text = a short headline, the full block is `why brew --raw`, first page): vid/vname/vsrc = vector id of the brew job's container job_item, its items_other_id name and where the id came from,
+    # vn = items in that vector, vfree/vfreen = free empties in it / free empties, vtk/vtkn = taken barrels in it / taken barrels; matf/matt = material histogram of free / taken; loc/locz = free empties by pile tag / z,
+    # locb = free empties on a tile with a building other than a stockpile; cxn/cxj/cxb/cxp = cancel moments kept, median brew jobs / jobs holding a barrel / jobs holding a plant at those moments; drinku = DRINK units now
+    "BREW_CANCEL_SNAPSHOT": ("B", "economy", _d("stills:i jobs:i empties:i free:i", "forb:i job:i haul:i trader:i far:i other:i out:i pots:i pots_free:i cancels:i done:i plants:i fruit:i still:i near:i dz:i filter:s fcs:i fcc:i acs:i acc:i combo:s combo_all:s refs:s refs_all:s taken:s vid:i vname:s vsrc:s vn:i vfree:i vfreen:i vtk:i vtkn:i matf:s matt:s loc:s locz:s locb:i cxn:i cxj:i cxb:i cxp:i drinku:i")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,

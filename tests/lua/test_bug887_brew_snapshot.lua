@@ -327,4 +327,169 @@ T.test('BUG-887 round 4: the free empties carry the extra state counts (ref coun
   T.ok(all:find('general_refs by type ENTITY_ITEMOWNER:2', 1, true) and all:find('1 items carry specific_refs (2 refs)', 1, true) and all:find('flag set + nothing inside 2 vs flag clear 2', 1, true), all)
 end)
 
+-- BUG-887 round 5: vector membership, material / location, cancel timing, completions label, headline, block first on page 1
+local function vec130(W)
+  local e = df.items_other_id
+  e.FOOD_STORAGE, e[130] = 130, 'FOOD_STORAGE'
+  rawset(df.global.world.items.other, 'FOOD_STORAGE', kmock.vec{})
+  return df.global.world.items.other.FOOD_STORAGE
+end
+local function with_mat(it, m) it._mat = m; return it end
+
+T.test('BUG-887 round 5: vector membership of the free and the taken barrels in the vector the job_item names (130 = FOOD_STORAGE here)', function()
+  local W, b = world('vec5')
+  local fs = vec130(W)
+  local saved = dfhack.matinfo
+  dfhack.matinfo = {decode = function(it) return {getToken = function() return it._mat or '?' end} end}
+  local inv = {}
+  for i = 1, 4 do inv[i] = with_mat(barrel(W, {pos = {21, 30 + i, 100}}), i <= 3 and 'INORGANIC:CLAYSTONE' or 'PLANT:WILLOW:WOOD') end
+  for i = 1, 3 do fs:insert('#', inv[i]) end                                  -- 3 of the 4 free empties are members of vector 130
+  local taken = with_mat(barrel(W, {pos = {21, 40, 100}, flags = {in_job = true}}), 'INORGANIC:CLAYSTONE')
+  fs:insert('#', taken)
+  b.jobs[0].items[#b.jobs[0].items + 1] = {job_item_idx = 1, item = taken}
+  local econ = require('dfllm.economy')
+  local acts0 = #W.acts
+  local env = econ.snap_env(W.K)
+  env.surface = function() return false end
+  env.far = function() return false end
+  local s = econ.BS.collect(env)
+  dfhack.matinfo = saved
+  T.eq({s.vec.vid, s.vec.name, s.vec.free_in, s.vec.free_n, s.vec.taken_in, s.vec.taken_n, s.vec.n}, {130, 'FOOD_STORAGE', 3, 4, 1, 1, 4}, T.show(s.vec))
+  T.ok(s.vec.src:find('job_item of a live brew job', 1, true), s.vec.src)
+  T.eq({s.matf['INORGANIC:CLAYSTONE'], s.matf['PLANT:WILLOW:WOOD'], s.taken_mat['INORGANIC:CLAYSTONE']}, {3, 1, 1}, T.show(s.matf))
+  T.eq(env.acc.vid, 130, 'the id is remembered in the accumulator')
+  local all = table.concat(econ.BS.lines(s), '\n')
+  T.ok(all:find('in vector 130 (FOOD_STORAGE; id from job_item of a live brew job; 4 items): free 3 of 4, taken 1 of 1', 1, true), all)
+  T.ok(all:find('material: free empties', 1, true) and all:find('INORGANIC:CLAYSTONE=3', 1, true), all)
+  T.eq(#W.acts, acts0, 'read only')
+  local f = econ.BS.fields(s)
+  T.eq({f.vid, f.vname, f.vfree, f.vfreen, f.vtk, f.vtkn}, {130, 'FOOD_STORAGE', 3, 4, 1, 1})
+end)
+
+T.test('BUG-887 round 5: no brew job now -> the vector id comes from the accumulator, else from a candidate enum name (labelled GUESS); none -> not measurable', function()
+  local W, b = world('vec5b')
+  vec130(W)
+  barrel(W, {pos = {21, 30, 100}})
+  local econ = require('dfllm.economy')
+  b.jobs = kmock.vec{}                                               -- no brew job at the moment
+  local env = econ.snap_env(W.K)
+  env.acc = econ.BS.acc_new()
+  local s = econ.BS.collect(env)
+  T.ok(s.vec and s.vec.vid == 130 and s.vec.src:find('GUESS: enum name FOOD_STORAGE', 1, true), T.show(s.vec))
+  env.acc.vid, env.acc.vname = 77, 'WOOD'
+  s = econ.BS.collect(env)
+  T.eq({s.vec.vid, s.vec.name}, {77, 'WOOD'})
+  T.ok(s.vec.src:find('last seen', 1, true), s.vec.src)
+  df.items_other_id = kmock.enum({'IN_PLAY'})
+  env.acc = econ.BS.acc_new()
+  s = econ.BS.collect(env)
+  T.eq(s.vec, nil)
+  T.ok(table.concat(econ.BS.lines(s), '\n'):find('vector membership: not measurable', 1, true))
+end)
+
+T.test('BUG-887 round 5: location of the free empties (pile tag, z, a building other than a stockpile)', function()
+  local W = world('loc5')
+  df.building_type.Stockpile = 77; df.building_type[77] = 'Stockpile'
+  rawset(df.global.world.buildings.other, 'STOCKPILE', kmock.vec{{name = 'dfllm-drink', x1 = 21, y1 = 30, x2 = 21, y2 = 31, z = 100},
+                                                                  {name = 'dfllm-mood', x1 = 25, y1 = 30, x2 = 25, y2 = 30, z = 100}})
+  barrel(W, {pos = {21, 30, 100}}); barrel(W, {pos = {21, 31, 100}}); barrel(W, {pos = {25, 30, 100}}); barrel(W, {pos = {30, 30, 101}}); barrel(W, {pos = {31, 30, 101}})
+  local saved = dfhack.buildings.findAtTile
+  dfhack.buildings.findAtTile = function(x, y, z)
+    if x == 21 then return {getType = function() return df.building_type.Stockpile end} end     -- a stockpile: not 'a building other than'
+    if x == 31 then return {getType = function() return df.building_type.Door end} end
+    return nil
+  end
+  local econ = require('dfllm.economy')
+  local env = econ.snap_env(W.K)
+  env.surface = function() return false end
+  env.far = function() return false end
+  local s = econ.BS.collect(env)
+  dfhack.buildings.findAtTile = saved
+  T.eq({s.loc['dfllm-drink'], s.loc['dfllm-mood'], s.loc['none'], s.locz['100'], s.locz['101'], s.locn, s.locb['Door']}, {2, 1, 2, 3, 2, 1, 1}, T.show(s))
+  T.ok(table.concat(econ.BS.lines(s), '\n'):find('1 lie on a tile with a building other than a stockpile (Door=1)', 1, true))
+end)
+
+T.test('BUG-887 round 5: cancel moments (jobs, barrels held, plants held, Stills) are kept at the gamelog look, last 20, min / median / max, jobs per free empty', function()
+  local W, b, path = world('moment5')
+  local j1 = b.jobs[0]
+  add_job(b, 2, {{job_item_idx = 0}, {job_item_idx = 1}})
+  add_job(b, 3, {})
+  j1.items[#j1.items + 1] = {job_item_idx = 1}
+  for _ = 1, 4 do barrel(W, {pos = {21, 30, 100}}) end
+  local econ = require('dfllm.economy')
+  econ.watch(W.K)
+  local acts0 = #W.acts
+  put(path, PLANT)
+  econ.watch(W.K)
+  local p = W.K.persist.get('m.economy')
+  local m = p.bacc.moments
+  T.eq(#m, 1, T.show(p.bacc))
+  T.eq({m[1].st, m[1].j, m[1].b, m[1].p}, {1, 3, 2, 2}, 'three jobs, two hold a barrel, two hold a plant, one Still')
+  T.eq(#W.find_events('BREW_CANCEL_SNAPSHOT'), 1)
+  put(path, PLANT)
+  econ.watch(W.K)                                                    -- the same game day: no second snapshot, but a second moment
+  p = W.K.persist.get('m.economy')
+  m = p.bacc.moments
+  T.eq(#m, 2)
+  T.eq(m[2].f, 4, 'the free empties of the last snapshot')
+  for _ = 1, 30 do econ.BS.moment(econ.snap_env(W.K), p.bacc, 5, 1) end
+  T.eq(#p.bacc.moments, econ.BS.MOMENTS, 'capped at 20')
+  local txt = table.concat(econ.BS.moment_lines(p.bacc), '\n')
+  T.ok(txt:find('cancel timing (20 moments; min / median / max): brew jobs in all Stills 3 / 3 / 3', 1, true) and txt:find('Stills 1 / 1 / 1', 1, true), txt)
+  T.ok(txt:find('brew jobs per free empty (free from the last snapshot) 0.8 / 0.8 / 0.8', 1, true), txt)
+  T.eq(#W.acts, acts0, 'read only')
+end)
+
+T.test('BUG-887 round 5: the event text is a short headline under 200 characters with the pointer; completions are labelled "not measurable"', function()
+  local W, b, path = world('head5')
+  vec130(W)
+  for i = 1, 4 do barrel(W, {pos = {21, 30 + i, 100}}) end
+  local econ = require('dfllm.economy')
+  econ.watch(W.K)
+  for _ = 1, 40 do put(path, PLANT) end
+  put(path, DONE)
+  econ.watch(W.K)
+  local ev = W.find_events('BREW_CANCEL_SNAPSHOT')
+  T.eq(#ev, 1)
+  local msg = ev[1].msg
+  T.ok(#msg < 200 and msg:find('full block: why brew --raw (first page)', 1, true), msg)
+  T.ok(msg:find('brew cancels 40/7d', 1, true) and msg:find('free empties 4', 1, true) and msg:find('vec130 FOOD_STORAGE free 0/4 taken 0/0', 1, true) and msg:find('jobs@cancel med 1', 1, true), msg)
+  T.eq(ev[1].d.vid, 130)
+  T.eq(ev[1].d.trunc, nil, 'the event data was not dropped as oversized')
+  local all = table.concat(econ.snap_lines(W.K), '\n')
+  T.ok(all:find('completions: not measurable', 1, true) and all:find('Drink stock instead: 20000 units in 1 stacks', 1, true), all)
+  -- a long headline keeps its pointer
+  local s = econ.brew_snapshot(W.K)
+  s.vec.name = string.rep('X', 300)
+  local h = econ.BS.headline(s)
+  T.ok(#h <= 199 and h:find('full block: why brew --raw (first page)', 1, true), h)
+  -- the next look sees the stock delta
+  F.item(W, 'DRINK', {stack_size = 5})
+  local s2 = econ.brew_snapshot(W.K)
+  T.ok(table.concat(econ.BS.lines(s2), '\n'):find('+5 units since the last snapshot', 1, true), table.concat(econ.BS.lines(s2), '\n'))
+end)
+
+T.test('BUG-887 round 5: why brew --raw prints the snapshot block FIRST', function()
+  local W = world('first5')
+  barrel(W, {pos = {21, 23, 100}})
+  local raw = require('dfllm.dfraw')
+  local res = raw.brew(W.K, {})
+  local l = type(res) == 'table' and (res.l or res) or {}
+  T.ok(tostring(l[1]):find('brew cancel snapshot:', 1, true), tostring(l[1]))
+  local seen_orders
+  for i, x in ipairs(l) do if tostring(x):find('^brew: %d+ order') then seen_orders = i end end
+  T.ok(seen_orders and seen_orders > 1, 'the order sheets come after the block')
+end)
+
+T.test('BUG-887 round 5: the event data fits the 1024 byte / 200 byte-per-string limits of the event layer (the least decisive fields are shed)', function()
+  local BS = require('dfllm.brewsnap')
+  local json = require('dfllm.util.json')
+  local f = {vid = 130, vname = 'FOOD_STORAGE', vfree = 58, vfreen = 64, vtk = 5, vtkn = 6, matf = string.rep('m', 160), cxj = 37, loc = string.rep('l', 160), stills = 37, free = 64}
+  for _, k in ipairs({'combo_all', 'refs_all', 'rcnt', 'filter', 'trefs', 'brefs', 'tcombo', 'bcombo', 'taken', 'refs', 'combo', 'locz', 'matt'}) do f[k] = string.rep('x', 300) end
+  f = BS.fit(f)
+  T.ok(#json.encode(f) <= 1024, #json.encode(f))
+  for k, v in pairs(f) do T.ok(type(v) ~= 'string' or #v <= 200, k) end
+  T.eq({f.vid, f.vname, f.vfree, f.vtkn, f.cxj}, {130, 'FOOD_STORAGE', 58, 6, 37}, 'the decisive fields stay')
+end)
+
 T.done()
