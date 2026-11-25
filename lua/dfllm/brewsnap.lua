@@ -200,13 +200,13 @@ function B.acc_lines(acc)
   local out = {string.format('taken-accumulator: %d distinct attached barrels (with the container flag %d, nothing inside %d, wear > 0 %d); flag combos %s; refs %s', acc.n, acc.set or 0, acc.nc0 or 0, acc.wear or 0, hist_text(acc.combo), hist_text(acc.refs))}
   out[#out + 1] = '  taken-accumulator materials: ' .. hist_text(acc.mat)
   if acc.vmn then
-    out[#out + 1] = string.format('  taken-accumulator vector membership (%s, %s): in vector %d, not in it %d (counted when each barrel was first seen)', tostring(acc.vmn), tostring(acc.vsrc), acc.vin or 0, acc.vout or 0)
+    out[#out + 1] = string.format('  taken-accumulator vector membership (%s, %s): in vector %d, not in it %d (of the remembered ids, counted at the last daily snapshot)', tostring(acc.vmn), tostring(acc.vsrc), acc.vin or 0, acc.vout or 0)
   end
   for _, r in ipairs(acc.last or {}) do out[#out + 1] = '  taken: ' .. rec_text(r) .. (r.t and (' seen tick ' .. tostring(r.t)) or '') end
   return out
 end
 
--- the cheap sampler: only a walk over the Stills' job lists, no item-vector scan. Adds every attached barrel not yet known to acc; returns the number added
+-- the cheap sampler: only a walk over the Stills' job lists, no item-vector scan (membership of accumulator barrels is counted in B.collect, from its one vector pass). Adds every attached barrel not yet known to acc; returns the number added
 function B.sample(env, acc, now)
   local st = B.stills(env)
   local added, fresh = 0, {}
@@ -215,17 +215,6 @@ function B.sample(env, acc, now)
     if ok and B.acc_add(acc, r, now) then added = added + 1; fresh[#fresh + 1] = r.id end
   end
   acc.passes = (acc.passes or 0) + 1
-  if added > 0 then
-    pcall(function()
-      local v = B.vector_id(env, st, acc)
-      if not v then return end
-      local set = B.vector_set(v)
-      acc.vmn, acc.vsrc = v.vid .. ' ' .. v.name, v.src
-      for _, id in ipairs(fresh) do
-        if set[id] then acc.vin = (acc.vin or 0) + 1 else acc.vout = (acc.vout or 0) + 1 end
-      end
-    end)
-  end
   return added
 end
 
@@ -374,17 +363,11 @@ function B.moment_lines(acc)
     '  burst reading: with about one job per Still posted at once, each job beyond the free empties finds them reserved; ratio >= 1 supports a burst artefact, ratio << 1 refutes it'}
 end
 
--- the DRINK stock: units and stacks (one capped pass); the delta since the last snapshot is NET of drinking, no brew count
+-- the DRINK stock: the number of stacks only (the vector length, no item pass); the delta since the last snapshot is NET of drinking, no brew count
 function B.drink_stock()
-  local u, n = 0, 0
-  local ok = pcall(function()
-    for _, it in ipairs(vec('DRINK') or {}) do
-      if n >= B.ITEMS_MAX then break end
-      n = n + 1
-      u = u + (math.tointeger(it.stack_size) or 0)
-    end
-  end)
-  return ok and {u = u, n = n} or nil
+  local n
+  local ok = pcall(function() n = #(vec('DRINK') or {}) end)
+  return ok and n and {n = n} or nil
 end
 
 -- the Stills: count, brew jobs, the first Still that holds a brew job (the cancelling Still is not named by DF's log line), one brew job's filter
@@ -529,7 +512,9 @@ function B.collect(env)
     vset = set
     s.vec = {vid = v.vid, name = v.name, src = v.src, n = n, capped = capped, free_in = 0, free_n = #s.cen.fids, taken_in = 0, taken_n = 0}
     for _, x in ipairs(s.cen.fids) do if set[x[1]] then s.vec.free_in = s.vec.free_in + 1 end end
-    if env.acc then env.acc.vmn, env.acc.vsrc = v.vid .. ' ' .. v.name, v.src end
+    if env.acc then
+      env.acc.vmn, env.acc.vsrc = v.vid .. ' ' .. v.name, v.src
+    end
   end
   s.cen.fids = nil
   -- ALL brew jobs of ALL Stills: the barrels DF attached (job_item_idx 1) now, a histogram of all of them and a full description of at most ATTACHED_MAX
@@ -548,14 +533,20 @@ function B.collect(env)
       if env.acc then B.acc_add(env.acc, r, env.now) end
     end
   end
+  if env.acc and vset then
+    env.acc.vin, env.acc.vout = 0, 0
+    for _, id in ipairs(type(env.acc.ids) == 'table' and env.acc.ids or {}) do
+      if vset[id] then env.acc.vin = env.acc.vin + 1 else env.acc.vout = env.acc.vout + 1 end
+    end
+  end
   s.acc = env.acc
   s.free_all = (E.barrel.free or 0) + (E.pot.free or 0)
   s.drink = B.drink_stock()
   if env.acc then
     env.acc.free = s.free_all
     if s.drink then
-      s.drink.prev_u, s.drink.prev_t = env.acc.drink_u, env.acc.drink_t
-      env.acc.drink_u, env.acc.drink_t = s.drink.u, env.now
+      s.drink.prev_n, s.drink.prev_t = env.acc.drink_n, env.acc.drink_t
+      env.acc.drink_n, env.acc.drink_t = s.drink.n, env.now
     end
   end
   return s
@@ -636,7 +627,7 @@ function B.fields(s)
   local ms = B.moment_stats(s.acc)
   f.cxn = ms.n
   if ms.n > 0 then f.cxj, f.cxb, f.cxp = median(ms.j), median(ms.b), median(ms.p) end
-  if s.drink then f.drinku = s.drink.u end
+  if s.drink then f.drinkn = s.drink.n end
   if s.still then f.still = s.still.id end
   if s.near then f.near = s.near.d; f.dz = s.near.dz end
   if s.filter and s.filter[2] then f.filter = s.filter[2]:sub(1, 200) end
@@ -686,8 +677,8 @@ function B.lines(s)
   out[#out + 1] = string.format('  location of free empties: by pile %s; by z %s; %d lie on a tile with a building other than a stockpile (%s)', hist_text(s.loc), hist_text(s.locz), s.locn, hist_text(s.locb))
   for _, l in ipairs(B.moment_lines(s.acc)) do out[#out + 1] = '  ' .. l end
   if s.drink then
-    local d = s.drink.prev_u and string.format('; %+d units since the last snapshot (tick %s), NET of drinking, not a brew count', s.drink.u - s.drink.prev_u, tostring(s.drink.prev_t)) or '; no earlier snapshot to compare'
-    out[#out + 1] = string.format('  completions: not measurable (the gamelog "has been completed" count %s is per manager order, not per job). Drink stock instead: %d units in %d stacks%s', tostring(s.done == nil and '?' or s.done), s.drink.u, s.drink.n, d)
+    local d = s.drink.prev_n and string.format('; %+d stacks since the last snapshot (tick %s), NET of drinking, not a brew count', s.drink.n - s.drink.prev_n, tostring(s.drink.prev_t)) or '; no earlier snapshot to compare'
+    out[#out + 1] = string.format('  completions: not measurable (the gamelog "has been completed" count %s is per manager order, not per job). Drink stock instead: %d stacks (units not counted, no item pass)%s', tostring(s.done == nil and '?' or s.done), s.drink.n, d)
   else
     out[#out + 1] = '  completions: not measurable'
   end

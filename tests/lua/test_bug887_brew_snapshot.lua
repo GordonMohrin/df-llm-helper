@@ -457,16 +457,16 @@ T.test('BUG-887 round 5: the event text is a short headline under 200 characters
   T.eq(ev[1].d.vid, 130)
   T.eq(ev[1].d.trunc, nil, 'the event data was not dropped as oversized')
   local all = table.concat(econ.snap_lines(W.K), '\n')
-  T.ok(all:find('completions: not measurable', 1, true) and all:find('Drink stock instead: 20000 units in 1 stacks', 1, true), all)
+  T.ok(all:find('completions: not measurable', 1, true) and all:find('Drink stock instead: 1 stacks (units not counted, no item pass)', 1, true), all)
   -- a long headline keeps its pointer
   local s = econ.brew_snapshot(W.K)
   s.vec.name = string.rep('X', 300)
   local h = econ.BS.headline(s)
   T.ok(#h <= 199 and h:find('full block: why brew --raw (first page)', 1, true), h)
   -- the next look sees the stock delta
-  F.item(W, 'DRINK', {stack_size = 5})
+  F.item(W, 'DRINK', {stack_size = 5})   -- one more stack
   local s2 = econ.brew_snapshot(W.K)
-  T.ok(table.concat(econ.BS.lines(s2), '\n'):find('+5 units since the last snapshot', 1, true), table.concat(econ.BS.lines(s2), '\n'))
+  T.ok(table.concat(econ.BS.lines(s2), '\n'):find('+1 stacks since the last snapshot', 1, true), table.concat(econ.BS.lines(s2), '\n'))
 end)
 
 T.test('BUG-887 round 5: why brew --raw prints the snapshot block FIRST', function()
@@ -490,6 +490,37 @@ T.test('BUG-887 round 5: the event data fits the 1024 byte / 200 byte-per-string
   T.ok(#json.encode(f) <= 1024, #json.encode(f))
   for k, v in pairs(f) do T.ok(type(v) ~= 'string' or #v <= 200, k) end
   T.eq({f.vid, f.vname, f.vfree, f.vtkn, f.cxj}, {130, 'FOOD_STORAGE', 58, 6, 37}, 'the decisive fields stay')
+end)
+
+T.test('BUG-887 round 5: cost - one snapshot reads the job_item vector once, the sampler never; the DRINK stock is no item pass', function()
+  local W, b = world('cost5')
+  local fs = vec130(W)
+  local inv = {}
+  for i = 1, 3 do inv[i] = barrel(W, {pos = {21, 30 + i, 100}}); fs:insert('#', inv[i]) end
+  local taken = barrel(W, {pos = {21, 40, 100}, flags = {in_job = true}})
+  fs:insert('#', taken)
+  b.jobs[0].items[#b.jobs[0].items + 1] = {job_item_idx = 1, item = taken}
+  local econ = require('dfllm.economy')
+  local items = df.global.world.items
+  local real = items.other
+  local reads = {}
+  local proxy = setmetatable({}, {__index = function(_, k) reads[tostring(k)] = (reads[tostring(k)] or 0) + 1; return real[k] end})
+  rawset(items, 'other', proxy)
+  local ok, err = pcall(function()
+    local env = econ.snap_env(W.K)
+    env.surface = function() return false end
+    env.far = function() return false end
+    local s = econ.BS.collect(env)
+    T.eq((reads.FOOD_STORAGE or 0) + (reads[130] or 0), 1, 'one pass over the job_item vector per snapshot: ' .. T.show(reads))
+    T.eq(env.acc.vin, 1, 'accumulator membership comes from that same pass')
+    T.eq(type(s.drink and s.drink.n), 'number', 'the DRINK stock is the vector length')
+    -- the 600-tick sampler: no read of the vector at all
+    reads = {}
+    local n = econ.BS.sample(econ.snap_env(W.K), env.acc, 99999)
+    T.eq((reads.FOOD_STORAGE or 0) + (reads[130] or 0) + (reads.DRINK or 0) + (reads.BARREL or 0) + (reads.TOOL or 0), 0, 'sampler reads no item vector: ' .. T.show(reads) .. ' n=' .. tostring(n))
+  end)
+  rawset(items, 'other', real)
+  if not ok then error(err, 0) end
 end)
 
 T.done()
