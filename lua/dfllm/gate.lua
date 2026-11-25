@@ -1685,8 +1685,9 @@ end
 -- Review round 2: while his trip is longer than CLOSE_NEED (the lever worker's walk, the pull and the move take ~250-350 ticks, y413 live: taken 58 ticks after queueing) the force
 -- WAITS for a gap in the stream (the walkers who can be on the footprint while it moves hold it); a stream that has no gap cannot keep it
 -- pending for ever: from CLOSE_NEED ticks before the hostile arrives only units ON the footprint hold, the citizens still crossing are
--- the accepted BUG-587/775 risk (a crush now and then, or locked out). Building destroyers alone (cave dragons: 'the bridges are no
--- barrier', SIEGE_DEEP) get no timed force: raising for them would only lock the citizens out, the plain approach rules stay.
+-- the accepted BUG-587/775 risk (a crush now and then, or locked out). Building destroyers alone (cave dragons) get no timed force: a raised
+-- bridge is no barrier to them (BUG-462 trolls broke O1/B2 while UP, BUG-030 BRIDGE_DESTROYED 'last up', Run 11 site98 five sieges), the plain approach rules stay.
+-- Round 3: the crush is bounded (M.crush_late): a unit ON the footprint holds until the eta <= measured latency + TIMED_WIN + CRUSH_MARGIN.
 M.CLOSE_BUDGET, M.CLOSE_NEED, M.CLOSE_AGE, M.CLOSE_TILES = 1500, 400, 60, 2
 M.CLOSE_TPT_MAX = 30
 -- BUG-881: the pull is COMMITTED while its worker is far from the lever (or nobody took it yet): only the last LATE_R tiles of his walk
@@ -2055,6 +2056,7 @@ local function holders(K, name, fp, sc, dir)
           -- the plain approach (BUG-587) lets the standers beside it go, the timed one waits for a gap while there is time (CLOSE_NEED)
           rr.fz_t = (timed and not appr and eta > M.CLOSE_NEED) or nil
           rr.fz_c = (timed and not appr and eta <= M.CLOSE_NEED) or nil       -- BUG-881: no time left: the pull is kept whoever is on the footprint
+          rr.fz_eta, rr.fz_at = (timed and not appr) and eta or nil, now         -- round 3: the hostile's trip, for the bounded crush (M.crush_late)
           fn, rr.fz_b = d, held
           rr.fz_until, rr.fz_d = now + M.APPROACH_STICKY, d
         elseif aw > 0 and d <= aw then
@@ -2073,10 +2075,10 @@ local function holders(K, name, fp, sc, dir)
       local now = K.now().tick
       if now < rr.fz_until and rr.fz_until - now <= M.APPROACH_STICKY then
         d = math.max(0, rr.fz_d or 0)
-        rr.fz_t, rr.fz_c = nil, nil                      -- BUG-881: out of sight: no timed wait for a gap, no commit
+        rr.fz_t, rr.fz_c, rr.fz_eta = nil, nil, nil      -- BUG-881: out of sight: no timed wait for a gap, no commit
         fn, rr.fz_b = math.max(fn, d), (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
       else
-        rr.fz_until, rr.fz_d, rr.fz_t, rr.fz_c = nil, nil, nil, nil
+        rr.fz_until, rr.fz_d, rr.fz_t, rr.fz_c, rr.fz_eta = nil, nil, nil, nil, nil
       end
     end
     if near_now and not (d >= 0 and d <= fn) then
@@ -2375,7 +2377,7 @@ end
 local function new_epoch(r)
   r.nw, r.nw_out, r.bad, r.fail_at, r.switch, r.held_sum, r.block_since = 0, nil, {}, nil, nil, nil, nil
   r.ap, r.ap_last, r.ap_ask = 0, nil, nil            -- BUG-342: the pulls cancelled for a unit walking toward it
-  r.esc, r.fz_until, r.fz_d, r.fz_t, r.fz_c = nil, nil, nil, nil, nil          -- BUG-621: the approach force of the old epoch
+  r.esc, r.fz_until, r.fz_d, r.fz_t, r.fz_c, r.fz_eta = nil, nil, nil, nil, nil, nil          -- BUG-621: the approach force of the old epoch
 end
 
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
@@ -2496,6 +2498,35 @@ local function mv_open(K, name, r, s, now, fp, prev, cur)
   return m
 end
 
+-- Round 3 (BUG-881): ticks the hostile still needs to the footprint (the trip measured at the last look, less the time since)
+function M.eta_now(r, now)
+  if not (r and r.fz_eta and r.fz_at) then return nil end
+  return math.floor(math.max(0, r.fz_eta - (now - r.fz_at)))
+end
+-- the last moment a raise can still succeed: his trip is not longer than the lever latency (measured pull -> up, else CLOSE_NEED) and a margin
+M.CRUSH_MARGIN = 60
+function M.crush_late(K, r, now)
+  local eta = M.eta_now(r, now)
+  if not eta then return false end
+  local lat = st.lat and st.lat.t and st.lat.t > 0 and st.lat.t or M.CLOSE_NEED
+  return eta <= lat + M.TIMED_WIN + M.CRUSH_MARGIN        -- the measured latency ends when the pull is done; the bridge then still moves TIMED_WIN ticks
+end
+-- a raise that goes ahead with a unit ON the footprint (the bounded crush): GATE_CRUSH_RISK with the unit and the eta, once per pull
+function M.crush_forced(K, name, r, hold, now)
+  local jid = r.job and r.job.id or -1
+  if r.cr_job == jid then return end
+  local e
+  for _, x in ipairs(hold) do if x.d == 0 then e = x; break end end
+  if not e then return end
+  r.cr_job = jid
+  local eta = M.eta_now(r, now) or -1
+  local txt = string.format('%s up goes ahead with %s %d on the footprint: the hostile is %d ticks away, the raise cannot wait any longer',
+                            name, tostring(e.k), e.id, eta)
+  K.emit('GATE_CRUSH_RISK', 'B', txt:sub(1, 200), {bridge = name, unit = e.id, k = e.k, to = 'up', pull = r.job and r.job.queued or -1, eta = eta, forced = 1,
+                                                    pos = {e.x, e.y, e.z}})
+  K.log('warn', 'gate: %s', txt)
+end
+
 -- BUG-253: a unit on the footprint of a bridge that is moving now (raising flings, lowering crushes): GATE_CRUSH_RISK (B),
 -- once per move record m, naming the first such unit (the death itself stays BRIDGE_CRUSH, A)
 function M.crush_risk(K, name, m, sc, fp)
@@ -2505,8 +2536,10 @@ function M.crush_risk(K, name, m, sc, fp)
       m.risk = e.id
       local txt = string.format('%s moving %s with %s %d on the footprint at %d,%d,%d', name, tostring(m.to), e.k, e.id,
                                 e.x, e.y, e.z)
+      local rr = rt[name]
       K.emit('GATE_CRUSH_RISK', 'B', txt:sub(1, 200), {bridge = name, unit = e.id, k = e.k, to = tostring(m.to),
-                                                        pull = m.pull, pos = {e.x, e.y, e.z}})
+                                                        pull = m.pull, pos = {e.x, e.y, e.z},
+                                                        eta = rr and rr.fz_c and M.eta_now(rr, K.now().tick) or nil})
       K.log('warn', 'gate: %s', txt)
       if m.q then M.peace_lock(K, name, m, e) end                -- BUG-831
       return
@@ -2894,8 +2927,12 @@ local function control(K, name, spec, now)
         if dir == 'up' then hold = drop_own(hold, own) end   -- BUG-342: nor its pullers in their room
         -- BUG-881: a forced raise (hd) keeps its pull while the worker is still on his way (or nobody took it): a unit on the footprint
         -- now has left it long before the bridge moves; only the last LATE_R tiles of his walk (position unknown = late) can still cancel it
-        if hd and #hold > 0 and not hold.unknown and (r.fz_c or not M.pull_late(r, w0)) then
+        -- Round 3: the deliberate crush is bounded: a unit ON the footprint keeps its hold while the bridge can still be up before the
+        -- hostile arrives; it ends only at the last moment a raise can still succeed (M.crush_late), and GATE_CRUSH_RISK names it
+        local late = r.fz_c and M.crush_late(K, r, now)
+        if hd and #hold > 0 and not hold.unknown and (late or (not r.fz_c and not M.pull_late(r, w0))) then
           r.commit = (r.commit or 0) + 1
+          if late then M.crush_forced(K, name, r, hold, now) end
           hold = {}
         end
         -- BUG-831: a quiet PEACE raise is cancelled for any walker near the footprint while it is pending (not a 'blocked' cancel:
@@ -3021,7 +3058,7 @@ local function control(K, name, spec, now)
   if w == nil or w == s then
     r.pq_t0, r.pq_busy, r.pq_who, r.pq_ev, r.pq_pos, r.pq_nt = nil, nil, nil, nil, nil, nil     -- BUG-831
     unblock(r, now); r.block_ev = nil
-    r.fz_until, r.fz_d, r.fz_t, r.fz_c = nil, nil, nil, nil       -- BUG-621: the approach force ends with the want
+    r.fz_until, r.fz_d, r.fz_t, r.fz_c, r.fz_eta = nil, nil, nil, nil, nil       -- BUG-621: the approach force ends with the want
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
     r.bpark = nil
     r.nec, r.bc = nil, nil                            -- BUG-141: the blocked-cancel count of the want ends too
