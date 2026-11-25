@@ -586,7 +586,13 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # round 5 (text = a short headline, the full block is `why brew --raw`, first page): vid/vname/vsrc = vector id of the brew job's container job_item, its items_other_id name and where the id came from,
     # vn = items in that vector, vfree/vfreen = free empties in it / free empties, vtk/vtkn = taken barrels in it / taken barrels; matf/matt = material histogram of free / taken; loc/locz = free empties by pile tag / z,
     # locb = free empties on a tile with a building other than a stockpile; cxn/cxj/cxb/cxp = cancel moments kept, median brew jobs / jobs holding a barrel / jobs holding a plant at those moments; drinkn = DRINK stacks now
-    "BREW_CANCEL_SNAPSHOT": ("B", "economy", _d("stills:i jobs:i empties:i free:i", "forb:i job:i haul:i trader:i far:i other:i out:i pots:i pots_free:i cancels:i done:i plants:i fruit:i still:i near:i dz:i filter:s fcs:i fcc:i acs:i acc:i combo:s combo_all:s refs:s refs_all:s taken:s vid:i vname:s vsrc:s vn:i vfree:i vfreen:i vtk:i vtkn:i matf:s matt:s loc:s locz:s locb:i cxn:i cxj:i cxb:i cxp:i drinkn:i")),
+    "BREW_CANCEL_SNAPSHOT": ("B", "economy", _d("stills:i jobs:i empties:i free:i", "forb:i job:i haul:i trader:i far:i other:i out:i pots:i pots_free:i cancels:i done:i plants:i fruit:i still:i near:i dz:i filter:s fcs:i fcc:i acs:i acc:i combo:s combo_all:s refs:s refs_all:s taken:s vid:i vname:s vsrc:s vn:i vfree:i vfreen:i vtk:i vtkn:i matf:s matt:s loc:s locz:s locb:i cxn:i cxj:i cxb:i cxp:i drinkn:i rgf:i rgfn:i rga:i rgan:i rgb:i rgbn:i rgt:i rgtn:i rgh:s")),
+    # BUG-887 round 6: pile-registered empties: rgf/rgfn = free empties registered in a stockpile's storage.container_item_id / free empties, rga/rgan = the same for the taken-accumulator ids,
+    # rgb/rgbn = forbidden empties, rgt/rgtn = barrels attached to brew jobs right now, rgh = the registering piles by tag and barrel limit (`dfllm-mood(max 1)=3`)
+    # BUG-887 round 6: PILE_BARREL_RELEASE = the kernel lowered the barrel limit of a kernel food pile that holds registered EMPTY barrels (phase lowered) and measured it 1 and 7 game days later:
+    # pile, before/after = limit, reg0/reg1/reg7 = registered empty barrels of the pile at the lowering / after 1 d / after 7 d, cx0/cx7 = DF brew cancels in the window then / after 7 d, verdict
+    # (`DF kept the registration (...)` | `the registration fell`)
+    "PILE_BARREL_RELEASE": ("B", "economy", _d("pile:i before:i after:i reg0:i phase:s", "reg1:i reg7:i cx0:i cx7:i verdict:s")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,

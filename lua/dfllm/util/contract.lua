@@ -93,6 +93,7 @@ C.EVENTS = {
   -- BUG-875: a Water Source zone the kernel painted outside the fort, removed once accepted water stands inside
   WATER_OUTSIDE_RETIRED = {cls = 'B', by = 'water'},
   WATER_OUTSIDE_RESTORED = {cls = 'B', by = 'water'},   -- BUG-875: the retired zone painted again once no strong inside source stands
+  PILE_BARREL_RELEASE = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 6: a kernel food pile's barrel limit lowered because it holds registered empty barrels; measured 1 and 7 game days later
   BREW_CANCEL_SNAPSHOT = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 3: once per game day when DF cancels a brew for want of an empty food storage item: the empties by state, read only
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
   SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},

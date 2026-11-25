@@ -189,7 +189,9 @@ T.test('BUG-844 i2: 400 DF cancels "Needs empty food storage item" prove the con
   T.ok(full:find('DF cancelled Brew 420x in 7 d: ' .. BREWWHY, 1, true), full)
   T.ok(not full:find('by my count', 1, true), 'proven by DF, not a count: ' .. full)
   T.ok(p.contx and p.contx.ph == true, 'the 7 free barrels DF never takes count as 0: ' .. T.show(p.contx))
-  T.eq(W.find_acts('pile_barrels')[1].args[1], 'freeze')
+  local first
+  for _, a in ipairs(W.find_acts('pile_barrels')) do if a.args[1] ~= 'zero_mood' then first = first or a end end   -- round 6: the mood piles' one-off call is no freeze
+  T.eq(first.args[1], 'freeze')
   T.ok(p.pilecap and p.pilecap['41'] == -1 and p.pilet, 'frozen with a stamp')
   W.K.persist.get('m.economy').contx.since, W.K.persist.get('m.economy').contx.untl = 0, 1e12     -- the daily run at the test clock's own time
   feed(require('dfllm.economy'), W.K, 8, W.K.now().tick)

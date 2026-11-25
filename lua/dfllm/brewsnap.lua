@@ -304,6 +304,53 @@ function B.pile_at(piles, x, y, z)
   end
   return 'none'
 end
+-- NEU13 BUG-887 round 6: the item ids every stockpile keeps as its own storage containers (storage.container_item_id). Live (i2, 25.11.): 3 of 3 checked 'free' empty
+-- barrels were registered there, in piles with a barrel allowance (dfllm-mood max 1, dfllm-stock max 54, dfllm-drink max 12). DF's job picker does not give a barrel a
+-- stockpile holds as its container to a Still (hypothesis, measured here). -> {set = {item id = pile record}, byid = {pile id = record}, piles = {{id, tag, max, n}}, n = ids}.
+-- detail = true: one more pass over the BARREL vector: per pile `empty` / `full` = registered barrels with nothing / something inside, R.eset = {id = true} of the registered empties.
+-- Read only.
+function B.registered(detail)
+  local R = {set = {}, byid = {}, eset = {}, piles = {}, n = 0}
+  pcall(function()
+    local PL = require('dfllm.pilelib')
+    for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+      local nm = sp.name or ''
+      local okd, u = pcall(function() return dfhack.df2utf(nm) end)
+      if okd and type(u) == 'string' then nm = u end
+      local tag = nm:match('^(dfllm%-[%w_]+)') or (nm == '' and 'unnamed pile' or 'other pile')
+      local rec = {id = sp.id, tag = tag, max = (PL.get(sp)), n = 0, empty = 0, full = 0}
+      pcall(function()
+        for _, id in ipairs(sp.storage.container_item_id) do
+          if math.type(id) == 'integer' or math.tointeger(id) then
+            id = math.tointeger(id)
+            rec.n = rec.n + 1
+            if R.set[id] == nil then R.set[id] = rec end
+          end
+        end
+      end)
+      if rec.n > 0 then R.piles[#R.piles + 1] = rec; R.n = R.n + rec.n; R.byid[sp.id] = rec end
+    end
+  end)
+  if detail and R.n > 0 then
+    pcall(function()
+      for _, it in ipairs(vec('BARREL') or {}) do
+        local rec = R.set[it.id]
+        if rec then
+          local okc, nc = pcall(function() return #dfhack.items.getContainedItems(it) end)
+          if okc and nc == 0 then rec.empty = rec.empty + 1; R.eset[it.id] = true
+          elseif okc then rec.full = rec.full + 1 end
+        end
+      end
+    end)
+  end
+  return R
+end
+-- 'dfllm-mood(max 1)=3;dfllm-stock(max 54)=1': the registering piles by tag and barrel limit (n piles each)
+function B.reg_hist(R)
+  local h = {}
+  for _, p in ipairs(R and R.piles or {}) do bump(h, p.tag .. '(max ' .. tostring(p.max == nil and '?' or p.max) .. ')') end
+  return hist_text(h)
+end
 -- the building other than a stockpile on a tile -> its type name, or nil
 function B.bld_at(x, y, z)
   local ok, b = pcall(dfhack.buildings.findAtTile, x, y, z)
@@ -433,6 +480,9 @@ function B.collect(env)
   s.cen = {all = {}, free = {}, refs_all = {}, refs_free = {}, free_set = 0, free_clear = 0, all_set = 0, all_clear = 0,
                 rc_free = {}, spec_items = 0, spec_total = 0, wear_free = 0, fids = {}}
   local seen, near = 0, nil
+  local reg = B.registered()
+  s.reg = reg
+  s.rg = {free = 0, free_n = 0, forb = 0, forb_n = 0, taken = 0, taken_n = 0, acc = 0, acc_n = 0}
   local function look(it, kind)
     seen = seen + 1
     local e = E[kind]
@@ -445,7 +495,12 @@ function B.collect(env)
       local cset = f.container == true
       bump(s.cen.all, cb); bump(s.cen.refs_all, rn)
       if cset then s.cen.all_set = s.cen.all_set + 1 else s.cen.all_clear = s.cen.all_clear + 1 end
-      if f.forbid then e.forb = e.forb + 1; return end
+      if f.forbid then
+        e.forb = e.forb + 1
+        s.rg.forb_n = s.rg.forb_n + 1
+        if reg.set[it.id] then s.rg.forb = s.rg.forb + 1 end
+        return
+      end
       if env.skipped and env.skipped(f) then e.other = e.other + 1; return end
       if kind == 'barrel' and env.trader and env.trader(it) then e.trader = e.trader + 1; return end
       if f.in_job then
@@ -457,6 +512,8 @@ function B.collect(env)
       end
       if env.far and env.far(it) then e.far = e.far + 1; return end
       e.free = e.free + 1
+      s.rg.free_n = s.rg.free_n + 1
+      if reg.set[it.id] then s.rg.free = s.rg.free + 1 end
       bump(s.cen.free, cb); bump(s.cen.refs_free, rn)
       if cset then s.cen.free_set = s.cen.free_set + 1 else s.cen.free_clear = s.cen.free_clear + 1 end
       for k, n in pairs(ref_counts(it)) do s.cen.rc_free[k] = (s.cen.rc_free[k] or 0) + n end
@@ -523,6 +580,8 @@ function B.collect(env)
   for _, a in ipairs(att) do
     local ok, r = pcall(record, a.it, {st = a.still and a.still.id})
     if ok then
+      s.rg.taken_n = s.rg.taken_n + 1
+      if reg.set[r.id] then s.rg.taken = s.rg.taken + 1 end
       bump(s.taken_combo, r.c); bump(s.taken_refs, r.r); bump(s.taken_mat, tostring(r.m or '?'))
       if s.vec then
         s.vec.taken_n = s.vec.taken_n + 1
@@ -540,6 +599,10 @@ function B.collect(env)
     end
   end
   s.acc = env.acc
+  for _, id in ipairs(env.acc and type(env.acc.ids) == 'table' and env.acc.ids or {}) do
+    s.rg.acc_n = s.rg.acc_n + 1
+    if reg.set[id] then s.rg.acc = s.rg.acc + 1 end
+  end
   s.free_all = (E.barrel.free or 0) + (E.pot.free or 0)
   s.drink = B.drink_stock()
   if env.acc then
@@ -567,7 +630,7 @@ end
 -- the compact kern.log line
 function B.line(s)
   local b, p = s.e.barrel, s.e.pot
-  return string.format('brew cancel snapshot: DF cancelled Brew %s x in %s d, completed %s; %d Stills, %d brew jobs in them%s; empty barrels %d (free %d, forbidden %d, in a job %d [hauling %d], trader %d, far %d, other %d, outside %d), empty pots %d (free %d); plants %s, fruit %s; nearest free %s; free empties with container flag %d / without %d; free flag combos %s; free refs %s; flag set + nothing inside %d vs clear %d; age old %d (set %d) / new %d (set %d); wear>0 %d; specific refs on %d items; taken by DF now: %d barrels, combos %s, refs %s; accumulator %s',
+  return string.format('brew cancel snapshot: DF cancelled Brew %s x in %s d, completed %s; %d Stills, %d brew jobs in them%s; empty barrels %d (free %d, forbidden %d, in a job %d [hauling %d], trader %d, far %d, other %d, outside %d), empty pots %d (free %d); plants %s, fruit %s; nearest free %s; free empties with container flag %d / without %d; free flag combos %s; free refs %s; flag set + nothing inside %d vs clear %d; age old %d (set %d) / new %d (set %d); wear>0 %d; specific refs on %d items; taken by DF now: %d barrels, combos %s, refs %s; accumulator %s; %s',
     tostring(s.cancels or '?'), tostring(s.days or '?'), tostring(s.done == nil and '?' or s.done), s.stills or 0, s.brewjobs or 0,
     s.still and string.format(' (Still %d at %d,%d,%d%s)', s.still.id, s.still.x, s.still.y, s.still.z, s.still.named and ', holds a brew job' or ', first') or '',
     b.empty, b.free, b.forb, b.job, b.haul, b.trader, b.far, b.other, b.out, p.empty, p.free,
@@ -576,7 +639,13 @@ function B.line(s)
     s.cen.free_set, s.cen.free_clear, hist_text(s.cen.free), hist_text(s.cen.refs_free),
     s.cen.free_set, s.cen.free_clear, s.cen.old or 0, s.cen.old_set or 0, s.cen.new or 0, s.cen.new_set or 0, s.cen.wear_free or 0, s.cen.spec_items or 0,
     s.taken_n or 0, hist_text(s.taken_combo), hist_text(s.taken_refs),
-    (s.acc and (s.acc.n or 0) > 0) and string.format('%d barrels combos %s refs %s', s.acc.n, hist_text(s.acc.combo), hist_text(s.acc.refs)) or 'EMPTY (undecided)')
+    (s.acc and (s.acc.n or 0) > 0) and string.format('%d barrels combos %s refs %s', s.acc.n, hist_text(s.acc.combo), hist_text(s.acc.refs)) or 'EMPTY (undecided)',
+    B.reg_text(s))
+end
+-- 'pile-registered: free empties R of N, taken-accumulator K of L, forbidden empties F2 of F'
+function B.reg_text(s)
+  local g = s.rg or {}
+  return string.format('pile-registered: free empties %d of %d, taken-accumulator %d of %d, forbidden empties %d of %d', g.free or 0, g.free_n or 0, g.acc or 0, g.acc_n or 0, g.forb or 0, g.forb_n or 0)
 end
 
 -- the event text (the event layer cuts at 200 characters): a short headline that keeps its pointer to the full block
@@ -586,6 +655,7 @@ function B.headline(s)
   local ms = B.moment_stats(s.acc)
   local parts = {string.format('brew cancels %s/%sd', tostring(s.cancels or '?'), tostring(s.days or '?')),
                  string.format('free empties %d', s.free_all or ((s.e.barrel.free or 0) + (s.e.pot.free or 0))),
+                 string.format('pile-reg free %d/%d taken-acc %d/%d', (s.rg or {}).free or 0, (s.rg or {}).free_n or 0, (s.rg or {}).acc or 0, (s.rg or {}).acc_n or 0),
                  string.format('taken-acc %d', s.acc and s.acc.n or 0)}
   if s.vec then
     parts[#parts + 1] = string.format('vec%d %s free %d/%d taken %d/%d%s', s.vec.vid, s.vec.name, s.vec.free_in, s.vec.free_n, s.vec.taken_in, s.vec.taken_n, s.vec.src:find('^GUESS') and ' (guess)' or '')
@@ -617,6 +687,10 @@ function B.fields(s)
   f.spec, f.spect, f.wearf = s.cen.spec_items, s.cen.spec_total, s.cen.wear_free
   f.old, f.olds, f.new, f.news, f.med = s.cen.old, s.cen.old_set, s.cen.new, s.cen.new_set, s.cen.median
   f.bn = s.acc and s.acc.n or 0
+  if s.rg then
+    f.rgf, f.rgfn, f.rga, f.rgan, f.rgb, f.rgbn, f.rgt, f.rgtn = s.rg.free, s.rg.free_n, s.rg.acc, s.rg.acc_n, s.rg.forb, s.rg.forb_n, s.rg.taken, s.rg.taken_n
+    f.rgh = B.reg_hist(s.reg):sub(1, 160)
+  end
   if s.acc and (s.acc.n or 0) > 0 then f.bcombo, f.brefs = hist_text(s.acc.combo):sub(1, 200), hist_text(s.acc.refs):sub(1, 120) end
   if s.vec then
     f.vid, f.vname, f.vsrc = s.vec.vid, s.vec.name, s.vec.src:sub(1, 60)
@@ -636,7 +710,7 @@ end
 
 -- the event layer drops the whole data object when it encodes to more than 1024 bytes (and rejects a string over 200): shed the least decisive fields until it fits
 B.FIELDS_MAX = 1000
-B.SHED = {'combo_all', 'refs_all', 'rcnt', 'filter', 'trefs', 'brefs', 'tcombo', 'bcombo', 'taken', 'refs', 'combo', 'locz', 'matt'}
+B.SHED = {'combo_all', 'refs_all', 'rcnt', 'filter', 'trefs', 'brefs', 'tcombo', 'bcombo', 'taken', 'refs', 'combo', 'locz', 'matt', 'rgh'}
 function B.fit(f)
   for k, v in pairs(f) do if type(v) == 'string' and #v > 200 then f[k] = v:sub(1, 200) end end
   local okj, json = pcall(require, 'dfllm.util.json')
@@ -673,6 +747,9 @@ function B.lines(s)
   else
     out[#out + 1] = '  vector membership: not measurable (no job_item vector id, none remembered, no candidate enum name)'
   end
+  -- BUG-887 round 6: the stockpile-container registry
+  out[#out + 1] = '  ' .. B.reg_text(s) .. string.format('; taken right now %d of %d', (s.rg or {}).taken or 0, (s.rg or {}).taken_n or 0)
+  out[#out + 1] = string.format('  registering piles by tag (max_barrels): %s; %d item ids registered in all stockpiles', B.reg_hist(s.reg), (s.reg or {}).n or 0)
   out[#out + 1] = string.format('  material: free empties %s; taken %s', hist_text(s.matf), hist_text(s.taken_mat))
   out[#out + 1] = string.format('  location of free empties: by pile %s; by z %s; %d lie on a tile with a building other than a stockpile (%s)', hist_text(s.loc), hist_text(s.locz), s.locn, hist_text(s.locb))
   for _, l in ipairs(B.moment_lines(s.acc)) do out[#out + 1] = '  ' .. l end

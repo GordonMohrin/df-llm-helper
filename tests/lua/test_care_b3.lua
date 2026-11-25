@@ -360,7 +360,7 @@ T.test('BUG-063: from 40,000 a one-barrel drink stockpile is queued beside the c
   local d = W.K.persist.get('bp.' .. P.id)
   T.eq(d.stages[1].mode, 'place')
   local c = d.stages[1].chunks[1]
-  T.eq({c.pos, c.cells[1][4]}, {{22, 21, 5}, 'f{name=dfllm-mood barrels=1 take_from=dfllm-stock}:=booze(1x1)'})
+  T.eq({c.pos, c.cells[1][4]}, {{22, 21, 5}, 'f{name=dfllm-mood barrels=0 take_from=dfllm-stock}:=booze(1x1)'})
   T.ok(#c.cells[1][4] <= 64)
   -- once per mood: not again, whatever the thirst does
   W.unit(2).counters2.thirst_timer = 52000

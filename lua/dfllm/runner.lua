@@ -7885,14 +7885,18 @@ end
 -- beside the workshop. Nothing is given to the dwarf and no job is made for him. tile = {x, y, z}; take = the pile it
 -- takes from ('' none). Returns ok, project id. Cell text is at most 64 bytes (check_doc): the source pile is dropped
 -- when its name does not fit.
+-- NEU13 BUG-887 round 6 (live i2, 25.11.: the empty barrels #1703356, #1707415, #1707530 lay in `dfllm-mood` piles of max_barrels=1 and were registered in the pile's
+-- storage.container_item_id, i.e. held by the pile as ITS container): a mood pile must not keep a barrel, so its barrel limit is 0 (CFG.mood_barrels). Piles made before are set to 0 once by economy.mood_piles_zero.
+M.CFG.mood_barrels = 0
 function M.mooddrink(K, tile, take, why)
   local x, y, z
   if type(tile) == 'table' then x, y, z = int(tile[1] or tile.x), int(tile[2] or tile.y), int(tile[3] or tile.z) end
   if not (x and y and z) or not on_map(x, y, z) then return false, 'bad tile' end
-  local props = 'name=dfllm-mood barrels=1'
+  local mb = math.tointeger(M.CFG.mood_barrels) or 0
+  local props = 'name=dfllm-mood barrels=' .. mb
   if type(take) == 'string' and take:match('^[%w_%-]+$') and #take <= 20 then props = props .. ' take_from=' .. take end
   local cell = 'f{' .. props .. '}:=booze(1x1)'
-  if #cell > 64 then cell = 'f{name=dfllm-mood barrels=1}:=booze(1x1)' end
+  if #cell > 64 then cell = 'f{name=dfllm-mood barrels=' .. mb .. '}:=booze(1x1)' end
   local id = new_id(K, 'mdr')
   local d = {v = 2, tpl = 'mood_drink', site = 'care', class = 'living', params = obj{n = 1}, rot = 0,
              anchor = {x, y, z}, manifest = {v = 2}, materials = obj{},

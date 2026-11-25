@@ -104,7 +104,8 @@ T.test('BUG-834 i1 Diedplank: 3 free containers beside 32 brews open is a contai
   T.eq(#ev, 1, 'told once')
   T.ok(ev[1].full:find('no empty barrel or pot for a brew', 1, true), 'the container verdict, not "the manager gave no Still a job": ' .. ev[1].full)
   T.ok(p.contx and p.contx.res == 8, 'reserve = a quarter of 32 brews: ' .. T.show(p.contx))
-  local fr = W.find_acts('pile_barrels')
+  local fr = {}
+  for _, a in ipairs(W.find_acts('pile_barrels')) do if a.args[1] == 'freeze' then fr[#fr + 1] = a end end     -- round 6: the one-off 'zero_mood' call of the mood piles comes first
   T.ok(#fr >= 1 and fr[1].args[1] == 'freeze', 'the plant piles take no new barrel')
   T.eq(fr[1].args[2].mixed, false, 'drink 40 days: piles that hold drink are left alone')
   T.eq(p.pilecap and p.pilecap['41'], -1, 'the old limit is kept for the restore')
@@ -117,7 +118,9 @@ T.test('BUG-834: 3 free beside 5 brews stays no stall (reserve 3); a drink emerg
   T.eq(#W.find_acts('pile_barrels'), 0)
   local W2, _, ord2 = world{left = 32}
   econ_run(W2, ord2, 8, I1, 3, true)
-  T.eq(W2.find_acts('pile_barrels')[1].args[2].mixed, true, 'drink 3 days: emergency')
+  local fz
+  for _, x in ipairs(W2.find_acts('pile_barrels')) do if x.args[1] == 'freeze' then fz = fz or x end end     -- round 6: the one-off zero_mood call comes first
+  T.eq(fz.args[2].mixed, true, 'drink 3 days: emergency')
 end)
 
 T.test('BUG-834 i2 Whirledrampart: 7 "free" barrels that never change for 12 days beside stalled brews are no free containers (phantom)', function()

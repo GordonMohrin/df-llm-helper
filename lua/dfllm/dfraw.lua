@@ -557,6 +557,14 @@ function R.itemscan(K, spec, ctx)
     end
   end
   r.pos_checked = #pts
+  -- NEU13 BUG-887 round 6: empty barrels a stockpile keeps as its own container (storage.container_item_id) are only NOTED (`pile_container=#<pile>`), not an exclusion here
+  if spec.empty then
+    local okr, R6 = pcall(function() return require('dfllm.brewsnap').registered() end)
+    if okr and type(R6) == 'table' then
+      r.reg, spec._reg, r.regn = R6, R6, 0
+      for _, it in ipairs(recs) do if R6.set[N(function() return it.id end)] then r.regn = r.regn + 1 end end
+    end
+  end
   local grp = U.walk_groups(K, pts) or {}
   local okc, okh, hid = pcall(K.call, 'snapshot', 'hidden', pts)
   local hidden = okc and okh and type(hid) == 'table' and hid or {}
@@ -672,6 +680,10 @@ function R.sample_item(K, it, q, why, spec)
     local si = R.stone_info(it)
     parts[#parts + 1] = string.format('mat=%s hard=%s economic=%s mason_filter=%s', si.tok, tostring(si.hard), tostring(si.econ), si.pass and 'pass' or 'fail')
   end
+  if spec and spec._reg then
+    local pc = spec._reg.set[id]
+    if pc then parts[#parts + 1] = 'pile_container=#' .. tostring(pc.id) end
+  end
   parts[#parts + 1] = 'flags=' .. V(function() return FL(it.flags) end)
   parts[#parts + 1] = 'refs=' .. V(function()
     local out = {}
@@ -719,6 +731,9 @@ function R.items(K, key, ctx)
   add(b, string.format('items %s (vector %s): %d records, %d looked at%s%s; skipped as not a candidate (%s): %d', name, r.vec, r.total, r.scanned, r.clipped and ' (clipped)' or '',
                        r.nopos and (' (' .. r.nopos .. ' without a tile)') or '', spec.brew and 'no DRINK_MAT' or spec.empty and 'not empty' or 'none', r.skipped))
   add(b, string.format('  no exclusion (free as DF sees it): %d', r.ok))
+  if r.regn ~= nil then
+    add(b, string.format('  pile_container: %d of %d empties are registered in the storage.container_item_id of a stockpile (noted per sample line as pile_container=#<pile id>, NOT an exclusion here; `why brew --raw` has the measured comparison with the taken barrels)', r.regn, r.scanned))
+  end
   if spec.stone then                                              -- NEU14 BUG-896
     local sf = r.stone or {free = 0, pass = 0, by = {}}
     add(b, string.format('  boulders: %d free, of them %d hard non-economic (a mason job takes only those: flags2 non_economic, flags3 hard)', sf.free, sf.pass))

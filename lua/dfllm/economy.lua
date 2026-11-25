@@ -1085,6 +1085,15 @@ function M.mood_pile_at(a, it)
   end)
   return ok and hit == true
 end
+-- NEU13 BUG-887 round 6: the stockpile that keeps the item as one of its own storage containers (storage.container_item_id; the live reading of i2: free empties lie there, taken ones
+-- do not). The registry is read once per census (brewsnap.registered). nil = registered nowhere.
+function M.pile_registered(a, it)
+  if a.regset == nil then
+    local ok, R = pcall(M.BS.registered)
+    a.regset = ok and type(R) == 'table' and R or {set = {}, piles = {}, n = 0}
+  end
+  return a.regset.set[it.id]
+end
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
@@ -1293,6 +1302,7 @@ local function classify(it, a, cat)
         if M.barrel_trader_ref(it) then a.barrels_trader = a.barrels_trader + 1
         elseif f.in_job then a.barrels_busy = a.barrels_busy + 1
         elseif a.far and a.far(it, true) then a.barrels_far = a.barrels_far + 1         -- NEU4 BUG-842: strict far
+        elseif M.pile_registered(a, it) then a.barrels_reg = a.barrels_reg + 1         -- NEU13 BUG-887 round 6: a stockpile's own container: DF gives it to no Still (measured: why brew --raw)
         else a.cont_free = a.cont_free + 1 end
       end
     else
@@ -1409,7 +1419,7 @@ local function classify(it, a, cat)
 end
 
 local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'gems', 'bars', 'bolts', 'wood', 'fuel',
-              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'cont_free', 'barrels_trader', 'barrels_mood', 'barrels_busy', 'barrels_far', 'barrels_forb', 'bins', 'bins_empty', 'pots', 'pots_empty', 'rock', 'ore', 'rock_bad',
+              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'cont_free', 'barrels_trader', 'barrels_mood', 'barrels_reg', 'barrels_busy', 'barrels_far', 'barrels_forb', 'bins', 'bins_empty', 'pots', 'pots_empty', 'rock', 'ore', 'rock_bad',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'gm_body', 'gm_head', 'gm_pants', 'gm_gloves', 'gm_shoes', 'g_unusable', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
@@ -2071,6 +2081,104 @@ function M.pile_standing(K, c, r, f, b)
     K.persist.touch('m.economy')
   end
   M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D, now, {floor = math.tointeger(cc.stand_floor) or M.STAND_FLOOR})
+end
+-- NEU13 BUG-887 round 6 (live i2 25.11.: 3 of 3 checked 'free' empty barrels were registered in the storage.container_item_id of a stockpile with a barrel allowance: the pile keeps them as
+-- ITS containers, so no Still gets them; 111-275 container cancels a week, drink 0 for 3 game years):
+-- (C) a `dfllm-mood` pile must not hold a barrel: its limit goes to 0 once (runner.mooddrink makes new ones with barrels=0);
+-- (D) while DF's container reason is active, the kernel's food piles that accept no drink and hold registered EMPTY barrels get their limit lowered to the registered barrels with
+--     contents (act.pile_barrels 'release': the stockpile panel's own field, never an item or the registry); old limits go back through p.pilecap (the standing cap's exit);
+-- the effect is MEASURED: PILE_BARREL_RELEASE one and seven game days after each lowering (registered empties before / after, brew cancels before / after). If the registered empties
+-- did not fall after 7 days, p.relstop: DF kept the registration, nothing is lowered further.
+M.REL_D1, M.REL_D7 = 1, 7
+function M.mood_piles_zero(K, p, c, now)
+  if type(K.act.pile_barrels) ~= 'function' then return end
+  now = now or K.now().tick
+  if not M.cx_gate(K, c, now) then return end                                       -- like every container cure: only with DF's own reason (BUG-844); a fort without the cancels is not touched
+  if st.moodt and now >= st.moodt and now - st.moodt < 30 * DAY then return end     -- once after a load, then every 30 game days (new mood piles are made with 0)
+  st.moodt = now
+  p.moodz = type(p.moodz) == 'table' and p.moodz or {}
+  local ok, res = K.act.pile_barrels('zero_mood', {done = p.moodz})
+  if not (ok and type(res) == 'table') then return end
+  local n = 0
+  for _, id in ipairs(res.seen or {}) do p.moodz[tostring(id)] = true; n = n + 1 end
+  for _, e in ipairs(res) do K.log('warn', 'mood pile %s: the barrel limit %s -> 0 (a mood pile must not keep a barrel as its own container, BUG-887 round 6)', tostring(e.id), tostring(e.old)) end
+  if #(res.failed or {}) > 0 then K.log('warn', 'mood pile barrel limit: %d piles could not be set to 0', #res.failed) end
+  local cnt = 0
+  for _ in pairs(p.moodz) do cnt = cnt + 1 end
+  if cnt > 300 then p.moodz = {} end
+  if n > 0 then K.persist.touch('m.economy') end
+end
+function M.release_emit(K, e, phase, reg, cx, verdict)
+  local f = {pile = e.id, before = e.old, after = e.new, reg0 = e.r0, phase = phase, cx0 = e.cx0}
+  if e.r1 ~= nil then f.reg1 = e.r1 end
+  if phase == 'd7' then f.reg7 = reg; f.cx7 = cx end
+  if phase == 'd1' then f.reg1 = reg end
+  if verdict then f.verdict = verdict end
+  local txt = string.format('pile %s barrel limit %s -> %s: registered empties %s%s%s%s; brew cancels in the window %s%s',
+    tostring(e.id), tostring(e.old), tostring(e.new), tostring(e.r0), e.r1 ~= nil and phase == 'd7' and (' -> ' .. tostring(e.r1) .. ' (1 d)') or '',
+    phase == 'd1' and (' -> ' .. tostring(reg) .. ' (1 d)') or '', phase == 'd7' and (' -> ' .. tostring(reg) .. ' (7 d)') or '',
+    tostring(e.cx0), phase == 'd7' and (' -> ' .. tostring(cx)) or '')
+  if verdict then txt = txt .. '; ' .. verdict end
+  K.emit('PILE_BARREL_RELEASE', 'B', txt:sub(1, 199), f)
+  K.log('warn', 'pile barrel release (%s): %s', phase, txt)
+end
+function M.release_measure(K, c, p, now)
+  if type(p.relmeas) ~= 'table' then return end
+  local due = false
+  for _, e in pairs(p.relmeas) do
+    if now - e.t >= M.REL_D1 * DAY and (e.st or 0) < 2 then due = true end
+  end
+  if not due then return end
+  local R = M.BS.registered(true)
+  local cx = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
+  for id, e in pairs(p.relmeas) do
+    local rec = R.byid[math.tointeger(tonumber(id)) or -1]
+    local reg = rec and rec.empty or 0
+    local el = now - e.t
+    if el >= M.REL_D7 * DAY then
+      local kept = reg >= (e.r0 or 0)
+      if kept then p.relstop = true end
+      M.release_emit(K, e, 'd7', reg, cx, kept and 'DF kept the registration (no further pile is lowered)' or 'the registration fell')
+      p.relmeas[id] = nil
+      K.persist.touch('m.economy')
+    elseif el >= M.REL_D1 * DAY and (e.st or 0) < 1 then
+      e.st, e.r1 = 1, reg
+      M.release_emit(K, e, 'd1', reg, cx)
+      K.persist.touch('m.economy')
+    end
+  end
+end
+function M.pile_release(K, c, r)
+  local p, inv, now = r.p, r.inv or {}, r.now
+  local cc = c.cancel or {}
+  M.release_measure(K, c, p, now)
+  if cc.release == false or p.relstop or type(K.act.pile_barrels) ~= 'function' then return end
+  if not M.cx_gate(K, c, now) then return end                       -- only with DF's own reason (BUG-844)
+  if (math.tointeger(inv.barrels_reg) or 0) <= 0 then return end   -- no registered empty barrel in the census
+  local ok, res = K.act.pile_barrels('release', {})
+  if not (ok and type(res) == 'table') then
+    K.log('warn', 'pile barrel release: %s', tostring(res))
+    return
+  end
+  local cx = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
+  p.relmeas = type(p.relmeas) == 'table' and p.relmeas or {}
+  for _, e in ipairs(res) do
+    if p.relmeas[tostring(e.id)] == nil then
+      p.relmeas[tostring(e.id)] = {id = e.id, old = e.old, new = e.new, r0 = e.reg_empty or 0, cx0 = cx, t = now, st = 0}
+    end
+    if type(p.pilecap) ~= 'table' then p.pilet = now; p.pilecap = {} end
+    if p.pilecap[tostring(e.id)] == nil then p.pilecap[tostring(e.id)] = e.old end
+    K.log('warn', 'pile barrel release: stockpile %s (%s) barrel limit %s -> %s (%s registered empty barrels kept as its containers, %s with contents); DF cancelled brews %dx', tostring(e.id), tostring(e.name),
+          tostring(e.old), tostring(e.new), tostring(e.reg_empty), tostring(e.reg_full), cx)
+    M.release_emit(K, p.relmeas[tostring(e.id)], 'lowered', e.reg_empty or 0, cx)
+  end
+  for _, k in ipairs(res.kept or {}) do
+    if k.why == 'accepts drink: not changed in this round' and st.relkeep ~= now // DAY then
+      st.relkeep = now // DAY
+      K.log('info', 'pile barrel release: stockpile %s (%s) holds %s registered empty barrels and accepts drink: not changed', tostring(k.id), tostring(k.name), tostring(k.here))
+    end
+  end
+  if #res > 0 then K.persist.touch('m.economy') end
 end
 function M.cx_freeze(K, p, emergency, now, stand)
   if type(K.act.pile_barrels) ~= 'function' then return end
@@ -3341,6 +3449,7 @@ function M.cont_words(inv)
   for _, e in ipairs({{'barrels_trader', "a trader's"}, {'barrels_busy', 'held by a job'}, {'barrels_far', 'out of reach'}}) do
     if g(e[1]) > 0 then out[#out + 1] = g(e[1]) .. ' ' .. e[2] end
   end
+  if g('barrels_reg') > 0 then out[#out + 1] = g('barrels_reg') .. ' held by stockpiles as their containers' end
   if g('barrels_forb') > 0 then out[#out + 1] = g('barrels_forb') .. ' forbidden (not counted)' end
   return #out > 0 and table.concat(out, ', ') or nil
 end
@@ -11994,6 +12103,10 @@ function M.brew_watch(K, c, r)
   M.cx_expire(K, c, p, r.now)
   local f = M.facts_now(K, r)
   local b = M.brew_orders()
+  local okmz, errmz = pcall(M.mood_piles_zero, K, p, c, r.now)                   -- NEU13 BUG-887 round 6 (C)
+  if not okmz then K.log('warn', 'mood pile limit: %s', tostring(errmz)) end
+  local okrl, errrl = pcall(M.pile_release, K, c, r)                   -- NEU13 BUG-887 round 6 (D): before the standing cap (whose floor of 2 would hide the lowering from the measurement)
+  if not okrl then K.log('warn', 'pile barrel release: %s', tostring(errrl)) end
   local okst, errst = pcall(M.pile_standing, K, c, r, f, b)           -- NEU13 BUG-888: before any early return below
   if not okst then K.log('warn', 'container stand: %s', tostring(errst)) end
   local plants = (inv.brew_p or 0) + (inv.brew_g or 0)

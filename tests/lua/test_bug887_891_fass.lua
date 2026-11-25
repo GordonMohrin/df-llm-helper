@@ -167,7 +167,9 @@ T.test('BUG-888: the switch cancel.stand = false leaves the timed freeze of BUG-
   feed(econ, W.K, 12, 101 * DAYT)
   econ.brew_watch(W.K, W.K.cfg.baseline.economy, {day = true, now = 101 * DAYT, p = p, inv = {brew_p = 100, barrels = 20, barrels_empty = 4, cont_free = 0}, days = {drink_d = 40}, cit = 6})
   T.eq(p.pilestand, nil)
-  T.eq(#W.find_acts('pile_barrels'), 0, 'the stand never froze a pile (the verdict path needs its stall days)')
+  local froze = 0
+  for _, a in ipairs(W.find_acts('pile_barrels')) do if a.args[1] == 'freeze' then froze = froze + 1 end end    -- round 6: the mood piles' one-off 'zero_mood' call is not a freeze
+  T.eq(froze, 0, 'the stand never froze a pile (the verdict path needs its stall days)')
 end)
 
 T.test('BUG-888 round 2: a pile whose barrels all leave keeps a floor of 2 (never 0), a pile with a limit under the floor is not raised', function()

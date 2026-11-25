@@ -523,4 +523,69 @@ T.test('BUG-887 round 5: cost - one snapshot reads the job_item vector once, the
   if not ok then error(err, 0) end
 end)
 
+---------------------------------------------------------------- BUG-887 round 6: the stockpile-container registry (live i2 25.11.: 3 of 3 free empties registered in a pile's storage.container_item_id)
+local function piles6(W, regs)
+  -- regs = {{id, name, max, ids}}: stockpiles with their registry vector
+  local rows = {}
+  for _, r in ipairs(regs) do
+    rows[#rows + 1] = {id = r[1], name = r[2], x1 = 0, y1 = 0, x2 = 0, y2 = 0, z = 1, max_barrels = r[3], storage = {container_item_id = kmock.vec(r[4])}}
+  end
+  df.global.world.buildings.other.STOCKPILE = kmock.vec(rows)
+  return rows
+end
+
+T.test('BUG-887 round 6: the snapshot counts free / taken / forbidden empties that a stockpile keeps as its own container, by pile tag and barrel limit; headline and fields carry it', function()
+  local W, b, path = world('reg')
+  local free, regd = {}, {}
+  for i = 1, 5 do free[i] = barrel(W, {pos = {21, 30 + i, 100}}) end
+  local forb1, forb2 = barrel(W, {flags = {forbid = true}}), barrel(W, {flags = {forbid = true}})
+  local taken1, taken2 = barrel(W, {pos = {21, 40, 100}, flags = {in_job = true}}), barrel(W, {pos = {21, 41, 100}, flags = {in_job = true}})
+  piles6(W, {{19788, 'dfllm-mood', 1, {free[1].id}}, {19727, 'dfllm-mood', 1, {free[2].id, forb1.id}}, {19387, 'dfllm-stock', 54, {free[3].id, 999999}}, {19846, 'dfllm-drink', 12, {}}})
+  local bj = b.jobs[0]
+  bj.items[#bj.items + 1] = {job_item_idx = 1, item = taken1}
+  local acc_ids = {taken1.id, taken2.id, free[4].id}
+  local acts0 = #W.acts
+  local econ = require('dfllm.economy')
+  local env = econ.snap_env(W.K)
+  env.surface = function() return false end
+  env.far = function() return false end
+  env.acc.ids = acc_ids
+  local s = econ.BS.collect(env)
+  T.eq({s.rg.free, s.rg.free_n}, {3, 5}, 'three of the five free empties are registered')
+  T.eq({s.rg.forb, s.rg.forb_n}, {1, 2}, 'one of the two forbidden empties')
+  T.eq({s.rg.acc, s.rg.acc_n}, {0, 3}, 'the accumulator ids: none of them registered')
+  T.eq({s.rg.taken, s.rg.taken_n}, {0, 1})
+  T.ok(econ.BS.reg_hist(s.reg):find('dfllm-mood(max 1)=2', 1, true) and econ.BS.reg_hist(s.reg):find('dfllm-stock(max 54)=1', 1, true), econ.BS.reg_hist(s.reg))
+  local line = econ.BS.line(s)
+  T.ok(line:find('pile-registered: free empties 3 of 5, taken-accumulator 0 of 3, forbidden empties 1 of 2', 1, true), line)
+  local all = table.concat(econ.BS.lines(s), '\n')
+  T.ok(all:find('registering piles by tag (max_barrels): ', 1, true) and all:find('dfllm-mood(max 1)=2', 1, true), all)
+  local head = econ.BS.headline(s)
+  T.ok(head:find('pile-reg free 3/5 taken-acc 0/3', 1, true) and #head <= 199, head)
+  local f = econ.BS.fields(s)
+  T.eq({f.rgf, f.rgfn, f.rga, f.rgan, f.rgb, f.rgbn}, {3, 5, 0, 3, 1, 2})
+  T.ok(f.rgh:find('dfllm-stock(max 54)=1', 1, true), T.show(f))
+  -- the taken ones ARE registered: accumulator K of L
+  piles6(W, {{1, 'dfllm-drink', 12, {taken1.id, taken2.id}}})
+  env.acc.ids = acc_ids
+  s = econ.BS.collect(env)
+  T.eq({s.rg.acc, s.rg.acc_n, s.rg.taken}, {2, 3, 1})
+  T.eq(#W.acts, acts0, 'read only: no act')
+end)
+
+T.test('BUG-887 round 6: `why items:barrels --raw` notes pile_container=#<pile> per sample line and counts the registered empties; it is no exclusion', function()
+  local W = world('rawitems')
+  local a = barrel(W, {pos = {21, 30, 100}})
+  local c = barrel(W, {pos = {21, 31, 100}})
+  piles6(W, {{19788, 'dfllm-mood', 1, {a.id}}})
+  df.global.world.buildings.other.STOCKPILE[0].x1, df.global.world.buildings.other.STOCKPILE[0].x2 = 21, 21
+  local raw = require('dfllm.dfraw')
+  local ok, res = pcall(function() return raw.items(W.K, 'barrels', {}) end)
+  if not ok or res == nil then ok, res = pcall(function() return raw.R.items and raw.R.items(W.K, 'barrels', {}) end) end
+  local txt = type(res) == 'table' and table.concat(res.l or res, '\n') or tostring(res)
+  T.ok(txt:find('pile_container=#19788', 1, true), txt:sub(1, 1500))
+  T.ok(txt:find('1 of 2 empties are registered', 1, true) or txt:find('1 of', 1, true), txt:sub(1, 1500))
+  T.ok(not txt:find('reason=pile_container', 1, true), 'no exclusion')
+end)
+
 T.done()

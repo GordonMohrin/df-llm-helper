@@ -1466,7 +1466,72 @@ local function impls(state)
       end
       return true, out
     end
-    if mode ~= 'freeze' then return false, 'mode must be freeze or restore' end
+    -- NEU13 BUG-887 round 6 (measured live on i2: free empty barrels are registered in storage.container_item_id of stockpiles with a barrel allowance, the pile keeps them as ITS containers
+    -- and DF gives them to no Still): `zero_mood` sets the barrel limit of the `dfllm-mood` piles to 0 (a mood pile must not hold a barrel; arg.done = {pile id = true} are left alone,
+    -- out.seen = every mood pile looked at); `release` lowers the barrel limit of each KERNEL food pile (name dfllm-..., not dfllm-drink) that accepts no drink and holds registered EMPTY
+    -- barrels to the number of its registered barrels with contents (floor 0), the same thing a player does in the stockpile panel. NEVER an item or storage.container_item_id is written.
+    if mode == 'zero_mood' then
+      local done = type(arg) == 'table' and type(arg.done) == 'table' and arg.done or {}
+      out.seen = {}
+      local okm = pcall(function()
+        for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+          if dfhack.df2utf(sp.name or '') == 'dfllm-mood' and not done[tostring(sp.id)] then
+            local old, cand = PL.get(sp)
+            if old ~= nil then
+              out.seen[#out.seen + 1] = sp.id
+              if old ~= 0 then
+                if PL.set(sp, 0) then out[#out + 1] = {id = sp.id, old = old, new = 0, name = 'dfllm-mood', field = cand}
+                else out.failed = out.failed or {}; out.failed[#out.failed + 1] = {id = sp.id, old = old} end
+              end
+            end
+          end
+        end
+      end)
+      if not okm then return false, 'stockpiles unreadable' end
+      return true, out
+    end
+    if mode == 'release' then
+      local B = require('dfllm.brewsnap')
+      local reg = B.registered(true)
+      local seen, answered = 0, 0
+      local okr = pcall(function()
+        for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+          local rec = reg.byid[sp.id]
+          if rec and rec.empty > 0 then
+            local name = dfhack.df2utf(sp.name or '')
+            local fl = sp.settings and sp.settings.flags
+            local drink = false
+            pcall(function()
+              for _, k in ipairs({'drink_plant', 'drink_animal'}) do
+                for _, v in ipairs(sp.settings.food[k]) do if v then drink = true end end
+              end
+            end)
+            local old, cand = PL.get(sp)
+            seen = seen + 1
+            if old then answered = answered + 1 end
+            local kernel = name:find('^dfllm%-') ~= nil and name ~= 'dfllm-drink' and name ~= 'dfllm-mood'
+            out.kept = out.kept or {}
+            if not (fl and fl.food == true) then
+              out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'not a food pile'}
+            elseif drink then
+              out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'accepts drink: not changed in this round'}
+            elseif not kernel then
+              out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'not a kernel food pile'}
+            elseif old and (old < 0 or old > rec.full) then
+              if PL.set(sp, rec.full) then out[#out + 1] = {id = sp.id, old = old, new = rec.full, name = name, field = cand, reg_empty = rec.empty, reg_full = rec.full}
+              else out.failed = out.failed or {}; out.failed[#out.failed + 1] = {id = sp.id, old = old, here = rec.empty, name = name} end
+            elseif old then
+              out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'limit already low'}
+            end
+          end
+        end
+      end)
+      if not okr then return false, 'stockpiles unreadable' end
+      if seen > 0 and answered == 0 then return false, 'no barrel limit field on ' .. seen .. ' stockpiles (tried ' .. PL.tried() .. ')' end
+      return true, out
+    end
+    if mode ~= 'freeze' then return false, 'mode must be freeze, restore, release or zero_mood' end
+    local reg0 = require('dfllm.brewsnap').registered(true)      -- NEU13 BUG-887 round 6: a barrel the pile keeps as its container while it is EMPTY is no barrel the cap protects
     local mixed = type(arg) == 'table' and arg.mixed == true
     local seen, answered = 0, 0
     local okp = pcall(function()
@@ -1489,7 +1554,7 @@ local function impls(state)
           local here = 0
           for _, it in ipairs(df.global.world.items.other.BARREL) do
             local p = it.pos
-            if p and p.z == sp.z and p.x >= sp.x1 and p.x <= sp.x2 and p.y >= sp.y1 and p.y <= sp.y2 then here = here + 1 end
+            if p and p.z == sp.z and p.x >= sp.x1 and p.x <= sp.x2 and p.y >= sp.y1 and p.y <= sp.y2 and not reg0.eset[it.id] then here = here + 1 end
           end
           local old, cand = PL.get(sp)            -- NEU5 BUG-848: storage.max_barrels on DFHack 53 (version tolerant, pilelib)
           seen = seen + 1
