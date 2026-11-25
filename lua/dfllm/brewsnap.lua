@@ -39,6 +39,70 @@ local function job_of(it)
   return ok and name or nil
 end
 
+-- the flag census (BUG-887 round 3b): which item flags / general_ref types do the empties carry? H1 'phantom empties' says: free by our scan, rejected by DF through a flag
+B.CENSUS_FLAGS = {'container', 'foreign', 'in_inventory', 'artifact', 'spider_web', 'dead_dwarf', 'on_ground', 'owned', 'in_building', 'hostile', 'trader', 'melt', 'dump', 'rotten', 'encased', 'in_job'}
+B.COMBO_MAX = 12          -- distinct flag combinations kept per histogram
+B.ATTACHED_MAX = 3        -- attached barrels (job_item_idx 1) described
+
+-- the census flags an item carries, sorted, joined by '+' ('-' = none)
+local function combo(f)
+  local out = {}
+  for _, k in ipairs(B.CENSUS_FLAGS) do
+    local ok, v = pcall(function() return f[k] end)
+    if ok and v == true then out[#out + 1] = k end
+  end
+  return #out > 0 and table.concat(out, '+') or '-'
+end
+B.combo = combo
+
+-- the general_ref type names of an item, sorted, joined by '+' ('-' = none)
+local function ref_names(it)
+  local out, seen = {}, {}
+  pcall(function()
+    for _, r in ipairs(it.general_refs) do
+      local okt, t = pcall(function() return r:getType() end)
+      local n = okt and enum_name(df.general_ref_type, t) or '?'
+      if not seen[n] then seen[n] = true; out[#out + 1] = n end
+    end
+  end)
+  table.sort(out)
+  return #out > 0 and table.concat(out, '+') or '-'
+end
+B.ref_names = ref_names
+
+local function bump(t, k) t[k] = (t[k] or 0) + 1 end
+
+-- a histogram {key = n} -> 'a=3;b=1' (largest first, at most COMBO_MAX)
+local function hist_text(h)
+  local ks = {}
+  for k in pairs(h or {}) do ks[#ks + 1] = k end
+  table.sort(ks, function(a, b) if h[a] ~= h[b] then return h[a] > h[b] end return a < b end)
+  local out = {}
+  for i, k in ipairs(ks) do
+    if i > B.COMBO_MAX then out[#out + 1] = '...'; break end
+    out[#out + 1] = k .. '=' .. h[k]
+  end
+  return #out > 0 and table.concat(out, ';') or '-'
+end
+B.hist_text = hist_text
+
+-- the barrels DF attached to a brew job for the container job_item (job_item_idx 1): id, ALL flags that are set, refs, contents, in_job -> {text, ...}
+function B.attached(env, j)
+  local out = {}
+  if not j then return out end
+  pcall(function()
+    for _, ref in ipairs(j.items) do
+      if ref.job_item_idx == 1 and ref.item and #out < B.ATTACHED_MAX then
+        local it = ref.item
+        local nc = 0
+        pcall(function() nc = #dfhack.items.getContainedItems(it) end)
+        out[#out + 1] = string.format('#%s flags=[%s] census=%s refs=%s contents=%d', tostring(it.id), names(it.flags), combo(it.flags), ref_names(it), nc)
+      end
+    end
+  end)
+  return out
+end
+
 -- the Stills: count, brew jobs, the first Still that holds a brew job (the cancelling Still is not named by DF's log line), one brew job's filter
 function B.stills(env)
   local r = {n = 0, jobs = 0, list = {}}
@@ -95,6 +159,8 @@ function B.collect(env)
   local E = {}
   for _, k in ipairs({'barrel', 'pot'}) do E[k] = {total = 0, empty = 0, free = 0, forb = 0, job = 0, haul = 0, trader = 0, far = 0, other = 0, out = 0} end
   s.jobs = {}
+  -- flag census over ALL empties and over the free ones (container set vs clear), and the general_ref types
+  s.cen = {all = {}, free = {}, refs_all = {}, refs_free = {}, free_set = 0, free_clear = 0, all_set = 0, all_clear = 0}
   local seen, near = 0, nil
   local function look(it, kind)
     seen = seen + 1
@@ -104,6 +170,10 @@ function B.collect(env)
       if #dfhack.items.getContainedItems(it) ~= 0 then return end
       e.empty = e.empty + 1
       local f = it.flags
+      local cb, rn = combo(f), ref_names(it)
+      local cset = f.container == true
+      bump(s.cen.all, cb); bump(s.cen.refs_all, rn)
+      if cset then s.cen.all_set = s.cen.all_set + 1 else s.cen.all_clear = s.cen.all_clear + 1 end
       if f.forbid then e.forb = e.forb + 1; return end
       if env.skipped and env.skipped(f) then e.other = e.other + 1; return end
       if kind == 'barrel' and env.trader and env.trader(it) then e.trader = e.trader + 1; return end
@@ -116,6 +186,8 @@ function B.collect(env)
       end
       if env.far and env.far(it) then e.far = e.far + 1; return end
       e.free = e.free + 1
+      bump(s.cen.free, cb); bump(s.cen.refs_free, rn)
+      if cset then s.cen.free_set = s.cen.free_set + 1 else s.cen.free_clear = s.cen.free_clear + 1 end
       local x, y, z = dfhack.items.getPosition(it)
       if x then
         if env.surface and env.surface(x, y, z) then e.out = e.out + 1 end
@@ -137,6 +209,7 @@ function B.collect(env)
   end
   s.e, s.near = E, near
   s.filter = B.filter(env, st.job)
+  s.taken = B.attached(env, st.job)
   return s
 end
 
@@ -155,12 +228,14 @@ end
 -- the compact kern.log line
 function B.line(s)
   local b, p = s.e.barrel, s.e.pot
-  return string.format('brew cancel snapshot: DF cancelled Brew %s x in %s d, completed %s; %d Stills, %d brew jobs in them%s; empty barrels %d (free %d, forbidden %d, in a job %d [hauling %d], trader %d, far %d, other %d, outside %d), empty pots %d (free %d); plants %s, fruit %s; nearest free %s',
+  return string.format('brew cancel snapshot: DF cancelled Brew %s x in %s d, completed %s; %d Stills, %d brew jobs in them%s; empty barrels %d (free %d, forbidden %d, in a job %d [hauling %d], trader %d, far %d, other %d, outside %d), empty pots %d (free %d); plants %s, fruit %s; nearest free %s; free empties with container flag %d / without %d; free flag combos %s; free refs %s; taken by DF %s',
     tostring(s.cancels or '?'), tostring(s.days or '?'), tostring(s.done == nil and '?' or s.done), s.stills or 0, s.brewjobs or 0,
     s.still and string.format(' (Still %d at %d,%d,%d%s)', s.still.id, s.still.x, s.still.y, s.still.z, s.still.named and ', holds a brew job' or ', first') or '',
     b.empty, b.free, b.forb, b.job, b.haul, b.trader, b.far, b.other, b.out, p.empty, p.free,
     tostring(s.inv.brew_p or '?'), tostring(s.inv.brew_g or '?'),
-    s.near and string.format('%s at %d,%d,%d dist %d dz %d', s.near.kind, s.near.x, s.near.y, s.near.z, s.near.d, s.near.dz) or 'none')
+    s.near and string.format('%s at %d,%d,%d dist %d dz %d', s.near.kind, s.near.x, s.near.y, s.near.z, s.near.d, s.near.dz) or 'none',
+    s.cen.free_set, s.cen.free_clear, hist_text(s.cen.free), hist_text(s.cen.refs_free),
+    #s.taken > 0 and (#s.taken .. ' attached (' .. table.concat(s.taken, ' / ') .. ')') or 'none attached')
 end
 
 -- the event fields (JSON-able, nil dropped)
@@ -169,6 +244,13 @@ function B.fields(s)
   local f = {stills = s.stills or 0, jobs = s.brewjobs or 0, empties = b.empty, free = b.free, forb = b.forb, job = b.job, haul = b.haul, trader = b.trader,
              far = b.far, other = b.other, out = b.out, pots = p.empty, pots_free = p.free, cancels = s.cancels, done = s.done,
              plants = s.inv.brew_p, fruit = s.inv.brew_g}
+  f.fcs, f.fcc = s.cen.free_set, s.cen.free_clear
+  f.acs, f.acc = s.cen.all_set, s.cen.all_clear
+  f.combo = hist_text(s.cen.free):sub(1, 200)
+  f.combo_all = hist_text(s.cen.all):sub(1, 200)
+  f.refs = hist_text(s.cen.refs_free):sub(1, 120)
+  f.refs_all = hist_text(s.cen.refs_all):sub(1, 120)
+  f.taken = #s.taken > 0 and table.concat(s.taken, ' / '):sub(1, 300) or 'none'
   if s.still then f.still = s.still.id end
   if s.near then f.near = s.near.d; f.dz = s.near.dz end
   if s.filter and s.filter[2] then f.filter = s.filter[2]:sub(1, 200) end
@@ -181,6 +263,10 @@ function B.lines(s)
   out[#out + 1] = string.format('  barrels: total %d empty %d free %d forbidden %d held-by-job %d (hauling/fetch %d) trader %d far %d other %d outside %d; pots: empty %d free %d forbidden %d held-by-job %d far %d',
     s.e.barrel.total, s.e.barrel.empty, s.e.barrel.free, s.e.barrel.forb, s.e.barrel.job, s.e.barrel.haul, s.e.barrel.trader, s.e.barrel.far, s.e.barrel.other, s.e.barrel.out,
     s.e.pot.empty, s.e.pot.free, s.e.pot.forb, s.e.pot.job, s.e.pot.far)
+  out[#out + 1] = string.format('  flag census, free empties: container set %d, clear %d; combos %s; refs %s', s.cen.free_set, s.cen.free_clear, hist_text(s.cen.free), hist_text(s.cen.refs_free))
+  out[#out + 1] = string.format('  flag census, ALL empties: container set %d, clear %d; combos %s; refs %s', s.cen.all_set, s.cen.all_clear, hist_text(s.cen.all), hist_text(s.cen.refs_all))
+  if #s.taken == 0 then out[#out + 1] = '  no barrel attached to a brew job (job_item_idx 1) now: nothing taken to compare'
+  else for _, l in ipairs(s.taken) do out[#out + 1] = '  attached to the brew job: ' .. l end end
   local jt = jobs_text(s)
   if jt ~= '' then out[#out + 1] = '  jobs that hold an empty: ' .. jt end
   if s.capped then out[#out + 1] = '  (scan capped at ' .. B.ITEMS_MAX .. ' items)' end

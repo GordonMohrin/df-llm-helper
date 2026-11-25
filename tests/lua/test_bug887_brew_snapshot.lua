@@ -169,4 +169,57 @@ T.test('BUG-887 round 3: why brew --raw prints the snapshot block', function()
   T.ok(txt:find('brew cancel snapshot:', 1, true) and txt:find('nearest free empty barrel at 21,23,100', 1, true), txt:sub(1, 600))
 end)
 
+T.test('BUG-887 round 3b: the flag census of the empties (container set vs clear, refs) and the barrel DF attached to the brew job decide H1 from the snapshot alone', function()
+  local W, b, path = world('census')
+  df.general_ref_type = df.general_ref_type or kmock.enum({'UNIT_TRADEBRINGER', 'CONTAINS_ITEM'})
+  df.general_ref_type.ENTITY_ITEMOWNER = df.general_ref_type.ENTITY_ITEMOWNER or 77; df.general_ref_type[77] = 'ENTITY_ITEMOWNER'
+  local TB, EO = df.general_ref_type.UNIT_TRADEBRINGER, df.general_ref_type.ENTITY_ITEMOWNER
+  for _ = 1, 3 do barrel(W, {pos = {21, 30, 100}, flags = {container = true}}) end                        -- free phantoms: container set
+  barrel(W, {pos = {21, 31, 100}, flags = {container = true, foreign = true}, refs = {{getType = function() return EO end}}})                 -- free, foreign + an item-owner ref
+  barrel(W, {pos = {21, 32, 100}, flags = {container = true}, refs = {{getType = function() return EO end}, {getType = function() return TB end}}})         -- a trader's: counted in 'all', not free
+  for _ = 1, 2 do barrel(W, {pos = {21, 33, 100}}) end                                                    -- free, container clear
+  barrel(W, {flags = {forbid = true, container = true}})                                                 -- empty but forbidden: in 'all', not in 'free'
+  barrel(W, {full = true, flags = {container = true}})                                                    -- full: not an empty at all
+  local taken = barrel(W, {pos = {21, 34, 100}, flags = {in_job = true, artifact = true}, refs = {{getType = function() return EO end}}})
+  local bj; for _, x in ipairs(b.jobs) do bj = x end
+  bj.items[#bj.items + 1] = {job_item_idx = 1, item = taken}
+  local acts0 = #W.acts
+  local econ = require('dfllm.economy')
+  local env = econ.snap_env(W.K)
+  env.surface = function() return false end
+  env.far = function() return false end
+  local s = econ.BS.collect(env)
+  T.eq({s.cen.free_set, s.cen.free_clear, s.cen.all_set, s.cen.all_clear}, {4, 2, 6, 3}, 'container set vs clear: free and all')
+  T.eq({s.cen.free['container'], s.cen.free['-'], s.cen.free['container+foreign'], s.cen.all['artifact+in_job']}, {3, 2, 1, 1}, T.show(s.cen))
+  T.eq({s.cen.refs_free['-'], s.cen.refs_free['ENTITY_ITEMOWNER'], s.cen.refs_all['ENTITY_ITEMOWNER+UNIT_TRADEBRINGER']}, {5, 1, 1}, T.show(s.cen.refs_free))
+  T.eq(#s.taken, 1, 'one attached barrel')
+  T.ok(s.taken[1]:find('#' .. tostring(taken.id), 1, true) and s.taken[1]:find('artifact', 1, true) and s.taken[1]:find('in_job', 1, true) and s.taken[1]:find('refs=ENTITY_ITEMOWNER', 1, true), s.taken[1])
+  T.eq(#W.acts, acts0, 'read only')
+  local f = econ.BS.fields(s)
+  T.eq({f.fcs, f.fcc, f.acs, f.acc}, {4, 2, 6, 3})
+  T.ok(f.combo:find('container=3', 1, true) and f.combo:find('-=2', 1, true) and f.refs:find('ENTITY_ITEMOWNER=1', 1, true) and f.taken:find('artifact', 1, true), T.show(f))
+  local all = table.concat(econ.BS.lines(s), '\n')
+  T.ok(all:find('flag census, free empties: container set 4, clear 2', 1, true) and all:find('flag census, ALL empties: container set 6, clear 3', 1, true), all)
+  T.ok(all:find('attached to the brew job: #' .. tostring(taken.id), 1, true), all)
+  T.ok(econ.BS.line(s):find('free empties with container flag 4 / without 2', 1, true), econ.BS.line(s))
+  -- the event carries the census, no second scan: the same single pass
+  econ.watch(W.K)
+  put(path, PLANT)
+  econ.watch(W.K)
+  local ev = W.find_events('BREW_CANCEL_SNAPSHOT')
+  T.eq(#ev, 1)
+  T.eq({ev[1].d.fcs, ev[1].d.fcc}, {4, 2})
+  T.ok(tostring(ev[1].d.taken):find('artifact', 1, true), T.show(ev[1].d))
+end)
+
+T.test('BUG-887 round 3b: no brew job attached barrel -> the census still prints, "nothing taken to compare"', function()
+  local W = world('notaken')
+  barrel(W, {pos = {21, 23, 100}, flags = {container = true}})
+  local econ = require('dfllm.economy')
+  local s = econ.brew_snapshot(W.K)
+  T.eq({#s.taken, s.cen.free_set}, {0, 1})
+  local all = table.concat(econ.snap_lines(W.K), '\n')
+  T.ok(all:find('nothing taken to compare', 1, true) and all:find('taken by DF none attached', 1, true), all)
+end)
+
 T.done()

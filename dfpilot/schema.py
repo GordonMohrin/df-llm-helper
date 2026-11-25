@@ -580,8 +580,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # NEU13 BUG-887 round 3: DF cancelled a brew for want of an empty food storage item; once per game day at most, read only. stills/jobs = Stills and brew jobs in them, empties = empty barrels,
     # free/forb/job/haul/trader/far/other/out = how many of them are free, forbidden, held by a job (haul: a hauling/fetch job), a trader's, out of reach, skipped by the census flags, free on the surface;
     # pots/pots_free = empty large pots; cancels/done = DF cancels and completed brews in the window (done absent without the gamelog); plants/fruit = free brewable plants / fruit; still = the Still looked at;
-    # near/dz = distance and z offset of the nearest free empty; filter = the second job_item (the container) of one brew job
-    "BREW_CANCEL_SNAPSHOT": ("B", "economy", _d("stills:i jobs:i empties:i free:i", "forb:i job:i haul:i trader:i far:i other:i out:i pots:i pots_free:i cancels:i done:i plants:i fruit:i still:i near:i dz:i filter:s")),
+    # near/dz = distance and z offset of the nearest free empty; filter = the second job_item (the container) of one brew job;
+    # round 3b flag census: fcs/fcc = free empties with the container flag set / clear, acs/acc = the same for all empties, combo/combo_all = histogram of item flag combinations (free / all), refs/refs_all = general_ref types,
+    # taken = id, flags, refs of the barrel(s) DF attached to the brew job's container job_item (job_item_idx 1)
+    "BREW_CANCEL_SNAPSHOT": ("B", "economy", _d("stills:i jobs:i empties:i free:i", "forb:i job:i haul:i trader:i far:i other:i out:i pots:i pots_free:i cancels:i done:i plants:i fruit:i still:i near:i dz:i filter:s fcs:i fcc:i acs:i acc:i combo:s combo_all:s refs:s refs_all:s taken:s")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,
