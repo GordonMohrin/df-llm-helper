@@ -3957,6 +3957,37 @@ def noparts_reason(s: dict | None) -> str:
     return ""
 
 
+INSIDE_FILE = ".inside-water.json"          # BUG-873: follow's note on the cistern asks: first-seen ticks of pending projects, the parts gate
+INSIDE_STALL_T = 90 * 1200                 # BUG-873: a cistern project pending this long (game ticks) no longer counts as under way
+
+
+def well_parts_why(save_dir: Path, state: dict | None) -> tuple[str, list[str]]:
+    """BUG-873 (verifier: the follow path placed a cistern without looking at what its well needs): (why, trade tokens). A cistern, aquifer
+    or piped, builds a well: a block, a mechanism, a bucket and a chain or rope. why is '' when the parts can be had; else the named
+    cause (stone out of reach BUG-500 / no mechanism and none can be made BUG-611) and the trade.want tokens that would change it. The
+    bucket (logs) and the chain/rope (BUG-264) are only named: stock.nowood (no log) is a hint in the text, it does not block."""
+    famine = material_famine(save_dir, state)
+    stock = (state or {}).get("stock") or {}
+    ns, mp = nostone_reason(state, famine), noparts_reason(state)
+    why = ns or mp
+    if not why:
+        return "", []
+    toks = ["stone", "block"] if ns else []
+    toks.append("mechanism")
+    mf = stock.get("mfree")
+    txt = (f"well parts missing: {why} (free mechanisms {mf if _nat(mf) else '?'}, route {stock.get('mroute') or 'none'}, "
+           f"stone {stock.get('rock', '?')}")
+    if stock.get("nowood") == 1:
+        txt += ", no logs for the well's bucket"
+        toks.append("wood")
+    return txt + ")", toks
+
+
+def inside_note(save_dir: Path) -> dict:
+    d = files.read_json(Path(save_dir) / INSIDE_FILE)
+    return d if isinstance(d, dict) else {}
+
+
 def _gate_why(fort: dict | None, tpl: str) -> str:
     """BUG-611: why a NEEDS_STONE template cannot be built now: stone out of reach (BUG-500) or, for the traps, no trap parts (BUG-611)."""
     why = (fort or {}).get("nostone") or ""

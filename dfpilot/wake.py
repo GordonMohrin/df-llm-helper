@@ -1670,6 +1670,12 @@ class Follower:
         from .plan import done_projects
         fin = done_projects(self.dir) if inside else set()
         n_cis = 0
+        st0 = files.read_state(self.dir) or {}
+        t0 = st0.get("t") if isinstance(st0.get("t"), dict) else {}
+        tick = t0.get("abs", t0["y"] * schema.TICKS["YEAR"] + t0["tick"]) if t0 and "tick" in t0 and ("abs" in t0 or "y" in t0) else None
+        note = plan_mod.inside_note(self.dir)
+        seen = dict(note.get("seen") or {}) if isinstance(note.get("seen"), dict) else {}
+        stalled: list[str] = []
         for f in bp_files(self.dir):
             doc = files.read_json(f)
             prm = doc.get("params") if isinstance(doc, dict) and isinstance(doc.get("params"), dict) else {}
@@ -1680,8 +1686,23 @@ class Follower:
                 # while NO accepted source stands inside and no cistern project is pending; a finished one does not answer it. One still
                 # under way does, and at most WATER_INSIDE_MAX of them per fort
                 n_cis += 1
+                if f.stem not in fin and tick is not None:
+                    # BUG-873 (verifier: a stalled cistern project counted as pending for good, nothing said so): a project pending longer than
+                    # INSIDE_STALL_T game ticks (first seen by this ask, kept in .inside-water.json) no longer answers the request; it is named
+                    first = seen.setdefault(f.stem, tick)
+                    if tick - first >= plan_mod.INSIDE_STALL_T:
+                        stalled.append(f.stem)
+                        continue
                 if f.stem not in fin or n_cis >= WATER_INSIDE_MAX:
+                    self._inside_report(note, seen, stalled, "", now, tick)       # the first-seen tick must outlive this early return
                     return
+        why_parts, toks = plan_mod.well_parts_why(self.dir, st0)
+        self._inside_report(note, seen, stalled, why_parts, now, tick, toks)
+        if why_parts:
+            # BUG-873 (verifier: the follow path never read fort.nostone / noparts): a cistern builds a well (block, mechanism, bucket, chain):
+            # without them the project would hang at 37 % and the ask would count it as pending. Not placed; the cause is named (AUTO_FAIL,
+            # brief, .inside-water.json) and the parts are asked of the caravans
+            return
         if not has_at or (inside and self._aq_known()):
             # BUG-469 (Run 16d i4: PROJECT_REQUEST cistern why=patient_water carried no tile, nothing was placed, the mayor died of thirst
             # beside 4899 d of barrel drink): no water body to pipe from; the aquifer cistern (cmd.cistern_fill_guard refuses it
@@ -1691,6 +1712,29 @@ class Follower:
             return
         if self._request_place("cistern_water", "cistern", {}, "S1", now, prio=1):
             self.jobs["cistern_water"].update(access=True, at=at)
+
+    def _inside_report(self, note: dict, seen: dict, stalled: list, why_parts: str, now: float, tick, toks: list | None = None) -> None:
+        """BUG-873: persist the follow's view of the inside-water ask (.inside-water.json: first-seen ticks, stalled project ids, the parts
+        cause) for the brief, say a new cause once (AUTO_FAIL: a class-A wake), and ask the caravans for the missing parts (trade.want add)."""
+        prev_parts, prev_stalled = note.get("parts") or "", set(note.get("stalled") or [])
+        new = {"seen": seen, "stalled": sorted(stalled), "parts": why_parts, "tick": tick}
+        try:
+            if {k: v for k, v in new.items() if k != "tick"} != {k: note.get(k) for k in ("seen", "stalled", "parts")}:
+                files.write_json_atomic(self.dir / plan_mod.INSIDE_FILE, new)
+        except OSError as e:
+            self._fail("inside water note", e, now)
+        if why_parts and why_parts != prev_parts:
+            self._synth("AUTO_FAIL", f"inside water: cistern not placed, {why_parts}; trade.want {','.join(toks or [])} asked, the well "
+                        "waits for them (dig stone, buy mechanisms or blocks, or place by hand once they exist)", now)
+            try:
+                if toks:
+                    self._send("trade.want", {"add": list(toks)}, "trade.want well parts", now)
+            except Exception as e:             # noqa: BLE001
+                self._fail("trade.want well parts", e, now)
+        for sid in sorted(set(stalled) - prev_stalled):
+            self._synth("AUTO_FAIL", f"inside water: cistern project {sid} has waited {plan_mod.INSIDE_STALL_T // 1200} game days unfinished "
+                        "(no PROJECT_DONE): it no longer counts as under way, the request asks again; check `dfllm plan show` for its "
+                        "missing part (mechanism, block, bucket, chain)", now)
 
     def _aq_known(self) -> bool:
         """BUG-873: an aquifer level is known (manifest aquifer_levels, the sites snapshot's aquifer marks, a recorded breach)."""

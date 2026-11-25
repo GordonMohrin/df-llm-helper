@@ -943,6 +943,15 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
         # BUG-042: why the stills do not brew while drink is below the target (the kernel's own cause)
         if st.get("dwhy"):
             out.append((1, f"drink: {st['dwhy']}"))
+        # BUG-873: the follow's inside-water ask: a cistern it could not place (well parts) or a project that stalled
+        try:
+            iw = files.read_json(ctx.dir / ".inside-water.json") if getattr(ctx, "dir", None) else None
+        except (OSError, ValueError):
+            iw = None
+        if isinstance(iw, dict) and (iw.get("parts") or iw.get("stalled")):
+            out.append((1, "INSIDE WATER BLOCKED: " + (f"no cistern placed, {iw['parts']}" if iw.get("parts") else "")
+                        + (f"{'; ' if iw.get('parts') else ''}cistern project(s) {','.join(iw['stalled'])} stalled (no PROJECT_DONE)"
+                           if iw.get("stalled") else "")))
         # FR-76 (Run 12 Trussroads, reclaimed: 3026 of 3058 drinks forbidden, "drink 46d!"): the forbidden stock the days
         # above do not count, and what the kernel does about it
         if st.get("dforb") or st.get("fforb"):

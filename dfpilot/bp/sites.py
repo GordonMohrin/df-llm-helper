@@ -1128,8 +1128,25 @@ def cavern_keep(cands: list, tpl: str, snap: dict, manifest: dict | None) -> lis
     return out
 
 
-HEAVY_NEAR = 10                      # BUG-872: a basin keeps this far (tiles, per level) from a recorded heavy aquifer stop
 HEAVY_WHY = ("heavy_aquifer", "water")      # BUG-262: breach stops that show a heavy aquifer (visible water, not damp)
+AQ_KEEP = 3      # BUG-872: no open water / drop within this many tiles of a basin site
+
+
+def _aq_hazard(at, c: dict) -> str | None:
+    """BUG-872 (hard rule: no digging within 3 tiles of open water, waterfalls or drops): the reason when open water, magma or open
+    space (a drop: no floor) lies within AQ_KEEP tiles (x/y) of the site's box on the basin level, the room level or the level above
+    the room; None when it is clear. An aquifer cistern digs a basin and a well hole: it never opens beside either."""
+    bx = c.get("box") or (c["anchor"][0], c["anchor"][1], c["anchor"][2], c["anchor"][0], c["anchor"][1], c["anchor"][2])
+    x0, y0, x1, y1, z = bx[0], bx[1], bx[3], bx[4], c["anchor"][2]
+    for lz in (z - 1, z, z + 1):
+        for y in range(y0 - AQ_KEEP, y1 + AQ_KEEP + 1):
+            for x in range(x0 - AQ_KEEP, x1 + AQ_KEEP + 1):
+                ch = at(x, y, lz)
+                if ch in WET:
+                    return f"open water at {x},{y} z{lz}"
+                if ch == "_" and lz < z + 1:
+                    return f"a drop (open space) at {x},{y} z{lz}"
+    return None
 
 
 def aquifer_well(cands: list, snap: dict, manifest: dict | None) -> list:
@@ -1137,8 +1154,10 @@ def aquifer_well(cands: list, snap: dict, manifest: dict | None) -> list:
     sites of a cistern with p.water = aquifer, whose basin (one level below the well room) is dug into an aquifer level so
     the aquifer seeps into it under the well. The aquifer levels are the manifest's `aquifer_levels` and the levels of the
     snapshot's damp marks (revealed tiles only). A site counts when its basin level is one of them, its room level and the
-    level above the room are none (no drip into the room), and no heavy aquifer was recorded on the basin level (a breach
-    stop with visible water: manifest `breaches` why heavy_aquifer/water). ValueError with the reason when none is left."""
+    level above the room are none (no drip into the room), no heavy aquifer was recorded on the basin level (a breach
+    stop with visible water: manifest `breaches` why heavy_aquifer/water; a level is heavy as a whole: a stop is only where one
+    dig met visible water, a level with no stop 11 tiles away is untested, not light), and (BUG-872) no open water, magma or drop
+    lies within 3 tiles of the site. ValueError with the reason when none is left."""
     aq = aquifer_levels(manifest)
     for q in (snap.get("marks") or {}).get("damp", []):
         if isinstance(q, (list, tuple)) and len(q) == 3:
@@ -1146,31 +1165,28 @@ def aquifer_well(cands: list, snap: dict, manifest: dict | None) -> list:
     if not aq:
         raise ValueError("cistern water=aquifer: no aquifer level known (no manifest aquifer_levels, no damp mark on the "
                          "snapshot): an aqshaft or a dig that met damp stone shows one first")
-    # BUG-872 (Run 17 i1 Diedplank: three single-tile heavy_aquifer stops on z135/z136/z138 refused EVERY z138 basin of the fort,
-    # 47 sites 27+ tiles from the nearest stop): heavy is a place, not a level; a basin is refused within HEAVY_NEAR tiles
-    # (Chebyshev, on the basin level) of a recorded heavy stop, every other basin on the level stays
-    heavy_pts = [(int(b["pos"][0]), int(b["pos"][1]), int(b["pos"][2])) for b in (manifest or {}).get("breaches") or []
-                 if isinstance(b, dict) and b.get("why") in HEAVY_WHY and isinstance(b.get("pos"), (list, tuple))
-                 and len(b["pos"]) == 3]
-    heavy = {q[2] for q in heavy_pts}
+    heavy = {int(b["pos"][2]) for b in (manifest or {}).get("breaches") or []
+             if isinstance(b, dict) and b.get("why") in HEAVY_WHY and isinstance(b.get("pos"), (list, tuple))
+             and len(b["pos"]) == 3}
+    at = _At(snap) if snap.get("bbox") and snap.get("rows") else None       # a bare marks-only snapshot has no tiles to read
     out = []
-    near_heavy = 0
+    n_hazard = 0
+    hz_ex = ""
     for c in cands:
         z = c["anchor"][2]
-        if z - 1 in aq and z not in aq and z + 1 not in aq:
-            bx = c.get("box") or (c["anchor"][0], c["anchor"][1], z, c["anchor"][0], c["anchor"][1], z)
-            bx0, by0, bx1, by1 = bx[0], bx[1], bx[3], bx[4]
-            if any(q[2] == z - 1 and bx0 - HEAVY_NEAR <= q[0] <= bx1 + HEAVY_NEAR and by0 - HEAVY_NEAR <= q[1] <= by1 + HEAVY_NEAR
-                   for q in heavy_pts):
-                near_heavy += 1
+        if z - 1 in aq and z not in aq and z + 1 not in aq and z - 1 not in heavy:
+            hz = _aq_hazard(at, c) if at is not None else None
+            if hz:
+                n_hazard += 1
+                hz_ex = hz_ex or f"{c['anchor'][0]},{c['anchor'][1]},{z}: {hz}"
                 continue
             out.append({**c, "why": c["why"] + f", basin on aquifer level z{z - 1}"})
     if not out:
         lv = ",".join(f"z{z}" for z in sorted(aq))
-        hv = (f"; heavy aquifer stop within {HEAVY_NEAR} tiles of {near_heavy} basin site(s) (refused): "
-              f"{','.join(f'z{z}' for z in sorted(heavy))}") if near_heavy else ""
+        hv = f"; heavy (refused, a level is heavy as a whole): {','.join(f'z{z}' for z in sorted(heavy))}" if heavy else ""
+        wz = (f"; {n_hazard} site(s) refused for open water or a drop within {AQ_KEEP} tiles (e.g. {hz_ex})") if n_hazard else ""
         raise ValueError(f"cistern water=aquifer: no site with its basin on an aquifer level ({lv}) under a dry room level"
-                         f"{hv}: the room level must lie right above an aquifer level and be dry itself")
+                         f"{hv}{wz}: the room level must lie right above an aquifer level and be dry itself")
     return out
 
 

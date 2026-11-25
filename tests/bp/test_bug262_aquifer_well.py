@@ -64,14 +64,51 @@ def test_aquifer_cistern_sites_put_the_basin_on_an_aquifer_level(fort):
 def test_a_heavy_aquifer_is_refused_and_damp_marks_count(fort):
     snap, man = fort
     z = bp.rank(snap, "cistern", {}, manifest=man)[0]["anchor"][2]
-    # BUG-872: heavy is a place, not a level: a stop at the sites refuses them, a stop 40 tiles off does not
-    heavy = {**man, "aquifer_levels": [z - 1], "breaches": [{"pos": [50, 65, z - 1], "why": "heavy_aquifer"}]}
-    with pytest.raises(ValueError, match=r"heavy aquifer stop within 10 tiles.*\(refused\): z%d" % (z - 1)):
-        bp.rank(snap, "cistern", {"water": "aquifer"}, manifest=heavy)
-    far = {**man, "aquifer_levels": [z - 1], "breaches": [{"pos": [10, 10, z - 1], "why": "heavy_aquifer"}]}
-    assert bp.rank(snap, "cistern", {"water": "aquifer"}, manifest=far)
+    # BUG-872 verifier: a heavy stop is where ONE dig met visible water; a level with no stop nearby is untested, not light: the level is
+    # refused as a whole, near or far from the stop
+    for pos in ([50, 65, z - 1], [10, 10, z - 1], [200, 200, z - 1]):
+        heavy = {**man, "aquifer_levels": [z - 1], "breaches": [{"pos": pos, "why": "heavy_aquifer"}]}
+        with pytest.raises(ValueError, match=r"heavy \(refused, a level is heavy as a whole\): z%d" % (z - 1)):
+            bp.rank(snap, "cistern", {"water": "aquifer"}, manifest=heavy)
+    other = {**man, "aquifer_levels": [z - 1], "breaches": [{"pos": [10, 10, z - 3], "why": "heavy_aquifer"}]}
+    assert bp.rank(snap, "cistern", {"water": "aquifer"}, manifest=other)       # a heavy stop on another level does not matter
     damp = {**snap, "marks": {**(snap.get("marks") or {}), "damp": [[0, 0, z - 1]]}}
     assert bp.rank(damp, "cistern", {"water": "aquifer"}, manifest=man)
+
+
+def _with_tile(snap, x, y, z, ch):
+    rows = {k: list(v) for k, v in snap["rows"].items()}
+    r = rows[f"z{z}"]
+    yy, xx = y - snap["bbox"][1], x - snap["bbox"][0]
+    r[yy] = r[yy][:xx] + ch + r[yy][xx + 1:]
+    return {**snap, "rows": rows}
+
+
+@pytest.mark.parametrize("ch", ["~", "w", "%", "_"])
+def test_aquifer_cistern_keeps_three_tiles_from_open_water_magma_and_drops(fort, ch):
+    """hard rule: no digging within 3 tiles of open water, waterfalls or drops: water, magma and open space (a drop) within 3 tiles of the
+    site refuse it (basin level or room level); 5 tiles off they do not."""
+    snap, man = fort
+    m = {**man, "aquifer_levels": [bp.rank(snap, "cistern", {}, manifest=man)[0]["anchor"][2] - 1]}
+    best = bp.rank(snap, "cistern", {"water": "aquifer"}, manifest=m, n=50)[0]
+    z = best["anchor"][2]
+    ax, ay = best["anchor"][0], best["anchor"][1]
+    for lz in (z - 1, z):                      # the anchor lies in the footprint: a tile 2 off it is within 3 tiles of the box
+        near = _with_tile(snap, ax + 2, ay, lz, ch)
+        got = bp.rank(near, "cistern", {"water": "aquifer"}, manifest=m, n=50)
+        assert all(s["anchor"] != best["anchor"] or s["rot"] != best["rot"] for s in got), (ch, lz)
+    far = _with_tile(snap, ax + 30, ay, z - 1, ch)
+    got = bp.rank(far, "cistern", {"water": "aquifer"}, manifest=m, n=50)
+    assert any(s["anchor"] == best["anchor"] and s["rot"] == best["rot"] for s in got)
+
+
+def test_aquifer_well_error_names_the_hazard(fort):
+    snap, man = fort
+    z = bp.rank(snap, "cistern", {}, manifest=man)[0]["anchor"][2]
+    cands = [{"anchor": [50, 50, z], "box": (50, 50, z, 52, 52, z), "why": "x", "rot": 0}]
+    tile = _with_tile(snap, 53, 51, z - 1, "~")
+    with pytest.raises(ValueError, match=r"1 site\(s\) refused for open water or a drop within 3 tiles"):
+        sites.aquifer_well(cands, tile, {**man, "aquifer_levels": [z - 1]})
 
 
 def test_no_accepted_water_names_the_aquifer_well():
