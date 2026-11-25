@@ -111,7 +111,7 @@ T.test('BUG-555: the refusal names what the soldiers lack and the free pieces; t
   T.eq(r.ok, false)
   local msg = tostring(r.msg)
   T.ok(msg:find('sortie refused: squad A is not equipped: 0 of 3 soldiers', 1, true), msg)
-  T.ok(msg:find('missing: weapon 3, body armor 3; free: 17 melee weapons, 18 body armors; the pieces lie free but are not worn', 1, true),
+  T.ok(msg:find('missing: weapon 3, body armor 3; free: 17 melee weapons, 18 body armors; cause: ', 1, true),
        msg)
   M.stock_mats, M.free_weapons = real_sm, real_fw
 end)

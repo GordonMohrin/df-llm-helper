@@ -1165,11 +1165,14 @@ function M.hold_text(K)
   local w = rt and rt.cap_why
   local n = rt and rt.gate_cap or st.cap
   if rt and rt.gate_why == 'growth' and rt.gate_cap and rt.gh then        -- NEU1 P4: the ladder binds (also under a freeze): its halt
-    parts[#parts + 1] = string.format('growth %d (%s%s)', rt.gate_cap, rt.gh.halt, rt.gh.inj and string.format(', %d injured', rt.gh.inj) or '')
+    -- BUG-868 (Run 17 i2: '(drink)' beside 249 drink days in the fort): the drink halt counts the drink INSIDE the core; the line says so
+    local hk = rt.gh.halt
+    if hk == 'drink' and type(rt.gh.need) == 'string' then hk = (rt.gh.need:gsub('inside the core', 'in core')) end
+    parts[#parts + 1] = string.format('growth %d (%s%s)', rt.gate_cap, hk, rt.gh.inj and string.format(', %d injured', rt.gh.inj) or '')
   elseif (w == 'plan' or w == 'open_perimeter' or w == 'defense_short' or w == 'unsafe') and n then
     parts[#parts + 1] = string.format('%s %d%s', w, n, ((w == 'open_perimeter' and rt.psoft) or (w == 'defense_short' and rt.dsoft)) and '+' or '')
   end
-  return #parts > 0 and cut(table.concat(parts, ', '), 40) or nil
+  return #parts > 0 and cut(table.concat(parts, ', '), 64) or nil
 end
 
 -- readiness ceiling for a level and the binding limit

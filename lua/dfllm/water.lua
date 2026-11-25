@@ -4338,6 +4338,64 @@ end
 -- fixed vocabulary, each with its counts, then the rooms (beds, tables, traction benches per hospital zone), the doctors
 -- (adult citizens outside the squads with each wound care labor on, and with a skill), the supplies the hospital location
 -- asks for / holds / needs, the caregivers and the last GiveWater verdict (BUG-104). <= 8 KB; reads nothing itself.
+-- BUG-869 (Run 17 i2 Whirledrampart: 14 patients with one closed wound each rest for years, 'DiagnosePatient' postings unclaimed 2.5M ticks beside
+-- doctors with the labor on): what each treatment posting waits for, read only: per treatment job type the postings in the world, how many a
+-- worker holds, the patients of the unclaimed ones, and what the units with a doctor labor are doing now. {types = {Name = {posted, taken}},
+-- patients = {unit ids waiting}, doctors = {n, jobs = {name = n}}}
+M.TREAT_JOBS = {'DiagnosePatient', 'Surgery', 'SetBone', 'Suture', 'DressWound', 'ApplyCast', 'PlaceInTraction', 'CleanPatient'}
+function M.treat_waits(K)
+  local want = {}
+  for _, n in ipairs(M.TREAT_JOBS) do local v = df.job_type and df.job_type[n]; if v ~= nil then want[v] = n end end
+  local out = {types = {}, patients = {}, doctors = {n = 0, jobs = {}}}
+  pcall(function()
+    local link, i = df.global.world.jobs.list.next, 0
+    while link and i < 30000 do
+      local j = link.item
+      local nm = j and want[j.job_type]
+      if nm then
+        local t = out.types[nm] or {posted = 0, taken = 0}
+        out.types[nm] = t
+        t.posted = t.posted + 1
+        local w = dfhack.job.getWorker(j)
+        if w then t.taken = t.taken + 1
+        elseif #out.patients < 12 then
+          local okp, pid = pcall(function()
+            local ref = dfhack.job.getGeneralRef(j, df.general_ref_type.UNIT_PATIENT)
+            return ref and ref.unit_id
+          end)
+          if okp and math.tointeger(pid) then out.patients[#out.patients + 1] = pid end
+        end
+      end
+      link, i = link.next, i + 1
+    end
+  end)
+  pcall(function()
+    local cu = K.census.u
+    for _, id in ipairs(type(cu) == 'table' and type(cu.ids) == 'table' and cu.ids or {}) do
+      local u = df.unit.find(id)
+      if u and u.status.labors.DIAGNOSE then
+        out.doctors.n = out.doctors.n + 1
+        local jn = u.job and u.job.current_job and df.job_type[u.job.current_job.job_type] or 'none'
+        out.doctors.jobs[jn] = (out.doctors.jobs[jn] or 0) + 1
+      end
+    end
+  end)
+  return out
+end
+function M.treat_text(tw)
+  local parts = {}
+  for _, n in ipairs(M.TREAT_JOBS) do
+    local t = tw.types[n]
+    if t then parts[#parts + 1] = string.format('%s %d posted, %d taken', n, t.posted, t.taken) end
+  end
+  local jobs = {}
+  for k, v in pairs(tw.doctors.jobs) do jobs[#jobs + 1] = string.format('%s %d', k, v) end
+  table.sort(jobs)
+  local txt = #parts > 0 and table.concat(parts, '; ') or 'no treatment job is posted'
+  if tw.doctors.n > 0 then txt = txt .. string.format('; %d doctors (DIAGNOSE on) now: %s', tw.doctors.n, table.concat(jobs, ', ')) end
+  return txt
+end
+
 function M.inspect_hospital(K)
   local a = st.audit
   local now = K.now().tick
@@ -4346,7 +4404,10 @@ function M.inspect_hospital(K)
   for i, g in ipairs(a.gaps) do toks[i] = g.tok end
   local msg = #toks == 0 and string.format('hospital: no gaps (%d zones, %d patients)', a.zones, a.patients)
               or string.format('hospital: %d gap%s: %s', #toks, #toks == 1 and '' or 's', table.concat(toks, ', '))
-  local d = {tick = a.tick, age = now - a.tick, zones = a.zones, patients = a.patients, gaps = a.gaps, rooms = a.rooms,
+  local tw = M.treat_waits(K)
+  local wtxt = M.treat_text(tw)
+  if next(tw.types) then msg = trunc(trunc(msg, 90) .. '; waits: ' .. wtxt, 200) end
+  local d = {tick = a.tick, age = now - a.tick, zones = a.zones, patients = a.patients, gaps = a.gaps, rooms = a.rooms, waits = tw, waits_text = wtxt,
              doctors = a.doc, supplies = a.sup, carers = a.carers, give = a.give, outsiders = a.outsiders,
              note = 'gaps: no_zone outside dry no_bed no_table no_traction no_diag no_surgery no_bone no_suture no_dress '
                     .. 'no_splints no_thread no_cloth no_crutches no_plaster no_soap no_buckets supply_unknown no_carers; '

@@ -71,4 +71,16 @@ T.test('FR-46: no loot in SIEGE (soldiers and haulers stay inside); free metal s
   T.eq(W.state().mil.free.weapon, 1)
 end)
 
+T.test('BUG-865: forbidden leather armor of the dead (gloves, body) is unforbidden too; a wooden shield and held pieces stay', function()
+  local W, l = world('PEACE', function(W, l)
+    l.gloves = gear(W, 'GLOVES', 'LEATHER', {forbid = true}, {10, 10, 100})
+    l.body = gear(W, 'ARMOR', 'LEATHER', {forbid = true}, {11, 10, 100})
+    l.shield = gear(W, 'SHIELD', 'WOOD', {forbid = true}, {12, 10, 100})
+    l.held = gear(W, 'SHOES', 'LEATHER', {forbid = true, in_inventory = true}, {13, 10, 100})
+  end)
+  W.run(9, {skip = 9})
+  T.eq({l.gloves.flags.forbid, l.body.flags.forbid}, {false, false})
+  T.eq({l.shield.flags.forbid, l.held.flags.forbid}, {true, true})
+end)
+
 T.done()

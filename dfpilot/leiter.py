@@ -299,6 +299,7 @@ REFUSAL = re.compile(r"refused|not repairable|nothing to close|no site|cannot|no
 CMD_RE = re.compile(r"^dfllm cmd (\S+)(.*)$")
 
 
+TERRAIN = re.compile(r"aquifer|water|damp|magma|cavern", re.I)       # BUG-868
 OK_REFUSAL = re.compile(r"not repairable", re.I)           # an 'ok queued ...' reply that still says the work cannot be done (tombs.repair); no other ok reply counts
 RETRY_S = 1800                                              # a refusal hides the step for 30 real minutes at most, then the ladder may propose it again (a new try, a new reply)
 VOLATILE = {"count", "n", "id", "qty", "amount", "num", "at"}
@@ -441,11 +442,15 @@ def _state_blocked(save_dir: Path, s: dict, evs: list[dict], now: int, key: str 
                 if len(f) < 5 or f[2] != "bp.sites":
                     continue
                 try:
-                    if int(f[0]) < cut:
-                        break
+                    wall = int(f[0])
                     tpl = json.loads(f[3]).get("tpl")
                 except (ValueError, AttributeError):
                     continue
+                # BUG-868: a block by terrain (water within 4 tiles, a heavy aquifer) does not go away in hours: it holds four times as long
+                if wall < time.time() - hours * 3600 * (4 if TERRAIN.search(f[4]) else 1):
+                    break
+                if wall < cut and not TERRAIN.search(f[4]):
+                    break
                 if tpl == what:
                     if re.search(r"\bfree 0\b", f[4]):
                         return f"bp sites {what}: {f[4]}"

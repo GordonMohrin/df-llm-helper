@@ -500,7 +500,7 @@ M.DEFAULTS = {
   diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
   -- NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source of the tally (the eventful reports stay the fallback), gamelog_bytes = at most
   -- that many bytes per look
-  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
   -- NEU7 (BUG-854): the standing container reserve (M.plan_reserve): batch = brews open / brews_per, min_batch..max_batch, again while DF still cancels after the
   -- batch (grace_days, repeat_days apart, max_repeats in a row then every 14 days), then a trickle of trickle_n every trickle_days days (below trickle_free free
   -- containers); rock barrels when boulders >= batch + rock_plenty or wood is short; total_cap containers in all
@@ -2188,7 +2188,7 @@ function M.plan_reserve(K, c, r)
   if brews <= 0 then return false end
   local made = rs and math.tointeger(rs.made) or 0
   local cap = math.tointeger(M.rv(c, 'total_cap')) or 200
-  local x = M.cx_reason(K, c, now)
+  local x = M.cx_reason(K, c, now, true)
   if made >= cap then
     -- DF still names the containers but the reserve made its total: no other path (the old x15 batch, rock pots) orders more behind it; said once a game week
     if x and (st.rsvcap == nil or now - st.rsvcap >= 7 * DAY) then
@@ -2220,9 +2220,23 @@ function M.plan_reserve(K, c, r)
   if not mat then
     st.cont_short = st.cont_short or {}
     st.cont_short.barrels = want
-    if st.rsvnone ~= now // DAY then
+    -- BUG-867 (Run 17 i1: the same line every look for two game years): once a game week, with the way out the fort has
+    if st.rsvnone == nil or now // DAY - st.rsvnone >= 7 then
       st.rsvnone = now // DAY
-      K.log('warn', 'container reserve: %d containers wanted (%s) and nothing to make them of: %d usable logs, %d free boulders', want, why, wood, rock)
+      local inv = r.inv
+      local way = {}
+      if M.hard_denied(inv, now) then
+        way[#way + 1] = string.format('%d boulders lie in the fort but DF refuses them for rock jobs (stone use / economic stone): `inspect what=stone`',
+                                      math.tointeger(inv.boulders) or 0)
+      elseif (math.tointeger(inv.boulders) or 0) > 0 and rock <= 0 then
+        way[#way + 1] = string.format('%d boulders exist but none is free (held by a job, out of reach or reserved)', math.tointeger(inv.boulders) or 0)
+      else
+        local picks = math.tointeger(inv.picks) or 0
+        way[#way + 1] = string.format('dig for stone (%s)', picks > 0 and (picks .. ' picks, miners need the dig designation: plan dig / bp') or 'no pick: tools first')
+      end
+      way[#way + 1] = 'trade.want barrels or logs at the next caravan'
+      K.log('warn', 'container reserve: %d containers wanted (%s) and nothing to make them of: %d usable logs, %d free boulders; way out: %s (said once a week)',
+            want, why, wood, rock, table.concat(way, '; '))
     end
     return false
   end
@@ -3643,11 +3657,30 @@ function M.df_supports(id, why)
   return false
 end
 -- the container shortage DF names: n cancels within the window (at least economy.cx_min_n) -> {n, last, text}; else nil
-function M.cx_reason(K, c, now)
+function M.cx_reason(K, c, now, raw)
   c = c or M.conf(K)
   now = now or K.now().tick
   local n, last = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
-  if n < (math.tointeger((c.cancel or {}).cx_min_n) or 5) then return nil end
+  local cc = c.cancel or {}
+  local min = math.tointeger(cc.cx_min_n) or 5
+  -- BUG-867 (Run 17 i1, i2, i4: 'container cure OFF ... 4x in 7 d (< 5)' then 'ON ... 6x' every game day or two): hysteresis. ON at
+  -- >= cx_min_n cancels in the window; OFF only after the count stayed under cx_off_n (2) for cx_off_days (14) game days, so a count that
+  -- hovers at the threshold keeps the cure (and the pile limits) steady. The latch is st.cxh = {t = first tick under the off count}
+  local offn = math.tointeger(cc.cx_off_n) or 2
+  local offd = math.tointeger(cc.cx_off_days) or 14
+  local h = st.cxh
+  if raw then                                   -- the reserve has its own repeat state machine: the plain count
+    if n < min then return nil end
+  elseif n >= min then
+    if not h then st.cxh = {t = false}; K.persist.touch('m.economy') elseif h.t then h.t = false end
+  elseif h then
+    if n >= offn or offn <= 0 then
+      if h.t then h.t = false end
+    elseif not h.t then h.t = now
+    elseif now - h.t >= offd * DAY then st.cxh = nil; K.persist.touch('m.economy'); return nil end
+  else
+    return nil
+  end
   local e = M.df_reason(K, M.BREW_KINDS, c, now)
   local txt = string.format('DF cancelled Brew %dx in %d d: Needs empty food storage item', n, M.cw_days(K, c))
   if last then
@@ -3673,7 +3706,8 @@ function M.cx_log(K, c, now)
   local days = M.cw_days(K, c)
   local n = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
   local sw = M.diag_on(K, 'cx_cure', c)
-  local on = sw and n >= min
+  pcall(M.cx_reason, K, c, now)                       -- BUG-867: moves the latch
+  local on = sw and (n >= min or st.cxh ~= nil)       -- BUG-867: the hysteresis latch (M.cx_reason) keeps it on
   if on == (st.cxon == true) then return end
   if st.cxlogt and now >= st.cxlogt and now - st.cxlogt < DAY then return end
   st.cxon, st.cxlogt = on, now
@@ -3682,7 +3716,8 @@ function M.cx_log(K, c, now)
   elseif not sw and n >= min then
     K.log('info', 'container cure OFF: switch economy.diag.cx_cure is off (DF cancelled brew %dx in %d d: Needs empty food storage item)', n, days)
   else
-    K.log('info', 'container cure OFF: DF cancelled brew %dx in %d d: Needs empty food storage item (< %d)', n, days, min)
+    K.log('info', 'container cure OFF: DF cancelled brew %dx in %d d: Needs empty food storage item (under %d for %d d)', n,
+          days, math.tointeger((c.cancel or {}).cx_off_n) or 2, math.tointeger((c.cancel or {}).cx_off_days) or 14)
   end
 end
 
@@ -4452,9 +4487,11 @@ function M.manager_facts(K, p, c)
   end)
   if #f.causes == 0 and f.orders.n > 0 then
     local rq = f.office.required
-    f.causes[1] = 'nothing the kernel can read is wrong' .. (rq and rq > 0 and string.format(' (DF asks the office for room value %d: a bigger, '
-                  .. 'furnished office zone, dfllm cmd zone.place type=office)', rq) or '')
-    f.next[#f.next + 1] = 'dfllm cmd zone.place type=office'
+    -- BUG-866 (Run 17 i4: a 5x5 office changed nothing): DF asks the post for room value `rq` (vanilla MANAGER: 1, any chair-and-table office
+    -- is far above it); a bigger office is NOT the cure. What the kernel measured of him is the answer
+    local ob = type(p) == 'table' and p.mgr_obs
+    f.causes[1] = 'the office meets what DF asks' .. (rq and rq > 0 and string.format(' (room value %d)', rq) or '')
+                  .. (type(ob) == 'table' and (ob.n or 0) > 0 and ('; ' .. M.mgr_obs_text(ob)) or '; he is not seen at the office: see the job log of the next days')
   end
   f.next[#f.next + 1] = 'dfllm cmd inspect what=orders'
   return f
@@ -4514,6 +4551,7 @@ function M.mgr_stuck(K, p, c, days, n, why)
       end
     end
   end
+  if type(p.mgr_obs) == 'table' and (p.mgr_obs.n or 0) > 0 then facts[#facts + 1] = M.mgr_obs_text(p.mgr_obs) end
   local q = string.format('manager %s validates nothing for %d days (%d orders, brews %s) with a complete office: %s%s', mg.name, days, n,
                           (st.brew or {}).unval and tostring(st.brew.unval) or '?', table.concat(facts, ', '),
                           best and ('; acting manager candidate unit ' .. best) or '')
@@ -4541,6 +4579,40 @@ function M.mgr_stuck(K, p, c, days, n, why)
   K.persist.touch('m.economy')
 end
 
+-- BUG-866: what the manager does while orders wait, one sample a game day: p.mgr_obs = {n days sampled, at days at his office zone, jobs
+-- {name = days}}; `inspect what=manager` and the stuck question print it ('3 of 12 days at the office, jobs: StoreItemInBin 5, none 4, ...')
+function M.mgr_obs_text(ob)
+  local names = {}
+  for k, v in pairs(ob.jobs or {}) do names[#names + 1] = {k, v} end
+  table.sort(names, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
+  local parts = {}
+  for i = 1, math.min(5, #names) do parts[#parts + 1] = string.format('%s %d', names[i][1], names[i][2]) end
+  return string.format('seen %d game days with orders waiting: %d at his office zone, %d on a ManageWorkOrders job; jobs: %s', ob.n or 0,
+                       ob.at or 0, (ob.jobs or {}).ManageWorkOrders or 0, #parts > 0 and table.concat(parts, ', ') or '-')
+end
+function M.mgr_sample(K, p)
+  local mg = M.manager_state(K)
+  if type(mg) ~= 'table' or not mg.unit then return end
+  local now = K.now().tick
+  local ob = type(p.mgr_obs) == 'table' and p.mgr_obs or {n = 0, at = 0, jobs = {}, t = -DAY}
+  if now - (math.tointeger(ob.t) or -DAY) < DAY then return end
+  local u = df.unit.find(mg.unit)
+  if not u then return end
+  ob.t, ob.n = now, (ob.n or 0) + 1
+  local okj, jn = pcall(function()
+    local j = u.job and u.job.current_job
+    return j and df.job_type[j.job_type] or 'none'
+  end)
+  jn = okj and jn or 'none'
+  ob.jobs = type(ob.jobs) == 'table' and ob.jobs or {}
+  ob.jobs[jn] = (ob.jobs[jn] or 0) + 1
+  local rec = M.office_of(K, mg.unit)
+  local okz, inz = pcall(function() return rec and M.in_zone(rec.zobj, u.pos.x, u.pos.y, u.pos.z) end)
+  if okz and inz then ob.at = (ob.at or 0) + 1 end
+  p.mgr_obs = ob
+  K.persist.touch('m.economy')
+end
+
 -- BUG-547 (Run 16d i4 Trumpetrealms y397: the manager worked as HarvestPlants, "ConstructDoor unvalidated 14 days", the mechanisms and doors
 -- of the refuge waited behind him): the orders are unvalidated past orders.unval_days and the manager (able, not a patient or in a mood) has
 -- the Farming labor on: it goes off for him (act.labor_set, the labors screen), at most once a day; the work details give it back to the
@@ -4556,13 +4628,15 @@ end
 -- BUG-837 (Run 17 i1 Diedplank: the manager spun thread, farmed and ate, order 457 unvalidated for 21 days; i2: he worked as a carer): the chores that take
 -- the manager from his office go off for him, not only farming: Farming, Herbalism, Spinning, plant processing, giving water (the other citizens keep them)
 M.MGR_OFF = {{'PLANT', 'farm'}, {'HERBALIST', 'herb'}, {'SPINNER', 'spin'}, {'PROCESS_PLANT', 'process'}, {'FEED_WATER_CIVILIANS', 'feed_water'}}
-function M.manager_farm_off(K, p)
+function M.manager_farm_off(K, p, all)
   local mg = M.manager_state(K)
   if type(mg) ~= 'table' or not mg.unit or mg.why then return end
   local u = df.unit.find(mg.unit)
   if not u then return end
   local todo = {}
-  local only = not M.diag_on(K, 'mgr_chores')                 -- NEU3: off = Farming only, as before BUG-837
+  -- BUG-866: past orders.mgr_stuck_days the chores go off too whatever the diag switch says (i4: ConstructBuilding, StoreItemInBin and
+  -- CustomReaction jobs for 75-220 days while his office was complete)
+  local only = not (all or M.diag_on(K, 'mgr_chores'))                 -- NEU3: off = Farming only, as before BUG-837
   for _, e in ipairs(M.MGR_OFF) do if (not only or e[2] == 'farm') and M.labor_flag(u, e[1]) then todo[#todo + 1] = e[2] end end
   if #todo == 0 then return end
   local now = K.now().tick
@@ -4606,6 +4680,7 @@ function M.unval_watch(K, p, c)
       K.log('info', 'manager orders validated again')
     end
     st.unval = nil
+    p.mgr_obs = nil
     if type(p.unval_ann) == 'table' then p.unval_ann = CAD.quiet(p.unval_ann) end
     return
   end
@@ -4614,7 +4689,9 @@ function M.unval_watch(K, p, c)
   if days < (oc.unval_days or 2) then return end
   local okv, vac = pcall(positions)
   if not okv or type(vac) ~= 'table' or vac.MANAGER then return end   -- no manager yet: appoint first
-  local okf, errf = pcall(M.manager_farm_off, K, p)                    -- BUG-547: a manager at the fields validates nothing
+  pcall(M.mgr_sample, K, p)                                            -- BUG-866
+  local stuck_lim = math.tointeger(oc.mgr_stuck_days) or 5
+  local okf, errf = pcall(M.manager_farm_off, K, p, stuck_lim > 0 and days >= stuck_lim)   -- BUG-547: a manager at the fields validates nothing
   if not okf then K.log('warn', 'manager farm labor: %s', tostring(errf)) end
   local why, fix = M.unval_why(K)
   st.unval.why = why

@@ -337,6 +337,7 @@ T.test('seasons (Gordon 11.10.): the elite is free in months 9-11 and the militi
   df.global.cur_year_tick = 10 * 33600
   local W = setup(50)
   df.global.cur_year_tick = 10 * 33600
+  W.K.cfg.baseline.military = {militia = {B = {9, 10, 11}}, free_months = {9, 10, 11}, elite_off = true}   -- BUG-864: the elite's rest is opt-in now
   local M = mil()
   M.posture(W.K, 'TRAIN', true)
   local last = {}

@@ -354,6 +354,8 @@ def run_bp(args, save_dir: Path | None) -> int:
         if not sites:
             from .cmd import box_hint, no_site_hint
             why = no_site_hint(save_dir, args.tpl, snap_id, ranked, sorted(set(held)), params)      # BUG-067
+            # BUG-868: the tool's own words go to cli.log too (the ladder prints them as BLOCKIERT: 'no fortcore site: heavy aquifer ...')
+            files.log_cli(save_dir, "cli", "bp.sites", {"tpl": args.tpl}, f"ranked {ranked} free 0: no {args.tpl} site: {why or 'none ranked'}"[:300])
             bh = box_hint(snap or files.latest_snapshot(save_dir, "sites"), args.tpl)                # BUG-366
             print(f"  none ({ranked} ranked, {len(set(held))} project(s) hold them): try --fresh" + (f"; {why}" if why else "")
                   + (f"; {bh}" if bh else ""))

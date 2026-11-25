@@ -141,18 +141,20 @@ local function routines_for(W, month, posture)
   return {A = last[X.squad_of(W, 'A').id], B = last[X.squad_of(W, 'B').id], C = last[X.squad_of(W, 'C').id]}
 end
 
-T.test('FR-71: the default config keeps the old behaviour: B trains in months 9-11, A and C are free then', function()
+T.test('FR-71 / BUG-864: the default config: B trains in months 9-11, A and C stay on duty (DF strips an off-duty soldier); elite_off restores the rest', function()
   local W = setup(50)
   local c = mil().conf(W.K)
   T.eq(c.militia, {B = {[9] = true, [10] = true, [11] = true}}, 'M.MILITIA is a table squad key -> months')
   T.eq(c.free, {[9] = true, [10] = true, [11] = true})
-  T.eq(routines_for(W, 10), {A = 'Off duty', B = 'Constant training', C = 'Off duty'})
+  T.eq(routines_for(W, 10), {A = 'Constant training', B = 'Constant training', C = 'Constant training'}, 'BUG-864: the elite is not put off duty')
   T.eq(routines_for(W, 2), {A = 'Constant training', B = 'Off duty', C = 'Constant training'})
+  W.K.cfg.baseline.military = {militia = {B = {9, 10, 11}}, free_months = {9, 10, 11}, elite_off = true}
+  T.eq(routines_for(W, 10), {A = 'Off duty', B = 'Constant training', C = 'Off duty'}, 'elite_off = true: the old rest')
 end)
 
 T.test('FR-71: two militia squads rotate in their own windows (B in months 9-11, C in months 3-5)', function()
   local W = setup(50)
-  W.K.cfg.baseline.military = {militia = {B = {9, 10, 11}, C = {3, 4, 5}}, free_months = {9, 10, 11}}
+  W.K.cfg.baseline.military = {militia = {B = {9, 10, 11}, C = {3, 4, 5}}, free_months = {9, 10, 11}, elite_off = true}
   T.eq(routines_for(W, 10), {A = 'Off duty', B = 'Constant training', C = 'Off duty'}, 'window of B')
   T.eq(routines_for(W, 4), {A = 'Constant training', B = 'Off duty', C = 'Constant training'}, 'window of C')
   T.eq(routines_for(W, 1), {A = 'Constant training', B = 'Off duty', C = 'Off duty'}, 'nobody of the militia')
@@ -161,7 +163,7 @@ end)
 
 T.test('FR-71: without free_months the elite is free in the union of the militia windows', function()
   local W = setup(50)
-  W.K.cfg.baseline.military = {militia = {B = {9, 10, 11}, C = {3, 4, 5}}}
+  W.K.cfg.baseline.military = {militia = {B = {9, 10, 11}, C = {3, 4, 5}}, elite_off = true}
   T.eq(routines_for(W, 4), {A = 'Off duty', B = 'Off duty', C = 'Constant training'})
   T.eq(routines_for(W, 7), {A = 'Constant training', B = 'Off duty', C = 'Off duty'})
   T.eq(routines_for(W, 10), {A = 'Off duty', B = 'Constant training', C = 'Off duty'})
@@ -169,9 +171,9 @@ end)
 
 T.test('FR-71: a bad militia table falls back to the default; an empty one makes every squad elite', function()
   local W = setup(50)
-  W.K.cfg.baseline.military = {militia = {B = {9, 99}}, free_months = 'x'}
+  W.K.cfg.baseline.military = {militia = {B = {9, 99}}, free_months = 'x', elite_off = true}
   T.eq(routines_for(W, 10), {A = 'Off duty', B = 'Constant training', C = 'Off duty'}, 'defaults')
-  W.K.cfg.baseline.military = {militia = {}, free_months = {9, 10, 11}}
+  W.K.cfg.baseline.military = {militia = {}, free_months = {9, 10, 11}, elite_off = true}
   T.eq(routines_for(W, 10), {A = 'Off duty', B = 'Off duty', C = 'Off duty'}, 'all elite: free in 9-11')
   T.eq(routines_for(W, 2), {A = 'Constant training', B = 'Constant training', C = 'Constant training'})
 end)
