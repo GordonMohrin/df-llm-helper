@@ -4,6 +4,7 @@
 -- the nearest free one, the Stills and their brew jobs, one brew job's job_item filter, and the cancel / completion counts of the window. It never writes a game
 -- field, never creates a job, never moves an item. A library like cancelwhy / gamelog: the game readers are parameters (env), the tests hand mocks.
 local B = {}
+local NUM = require('dfllm.util.num')   -- BUG-143: decimals without the locale's comma
 
 B.ITEMS_MAX = 6000        -- barrels + tools looked at per snapshot (one per game day at most)
 B.FILTER_MAX = 4          -- job_item lines kept
@@ -350,7 +351,7 @@ local function mm(t)
   local lo, hi = t[1], t[1]
   for _, v in ipairs(t) do if v < lo then lo = v end; if v > hi then hi = v end end
   local md = median(t)
-  local function fmt(v) return v == math.floor(v) and string.format('%d', v) or string.format('%.1f', v) end
+  local function fmt(v) return NUM.num(v, 1) end
   return string.format('%s / %s / %s', fmt(lo), fmt(md), fmt(hi))
 end
 
