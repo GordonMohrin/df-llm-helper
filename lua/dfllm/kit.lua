@@ -101,7 +101,9 @@ function KIT.soldier(p, u, R, is_metal)
       end
     end
   end)
-  if next(r.empty) then r.armor = false end
+  -- BUG-865: gloves do not decide 'armor' (Run 17 i4: every glove of the fort was forbidden loot or a civilian's, 'gloves 0 usable (72
+  -- forbidden)', so 'armor 0' stood for ever beside a worn body armor); the other four categories do
+  for c in pairs(r.empty) do if c ~= 'gloves' then r.armor = false end end
   return r
 end
 

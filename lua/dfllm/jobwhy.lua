@@ -482,7 +482,10 @@ function J.census_count(inv, e)
 end
 
 function J.input_text(e)
-  local parts = {string.format('%d match', e.match)}
+  -- BUG-868 (Run 17 i2 'plant (DRINK_MAT) x1: 0 match' beside 'items:plants 936 free, 923 in a container'): plants in a container are DF's normal
+  -- case and count as input; a scan that finds none while the census holds some says so instead of claiming none
+  local parts = {(e.match == 0 and (e.cens or 0) > 0) and string.format('0 match by the scan, the census holds %d usable (plants inside containers count as input)', e.cens)
+                 or string.format('%d match', e.match)}
   for _, k in ipairs({'free', 'forbid', 'claimed', 'far'}) do
     if k == 'free' or (e[k] or 0) > 0 then parts[#parts + 1] = string.format('%d %s', e[k], k == 'claimed' and 'held by another job' or
                                                                               k == 'far' and 'off its walk group' or k == 'forbid' and 'forbidden' or k) end

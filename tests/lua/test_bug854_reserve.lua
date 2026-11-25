@@ -198,4 +198,35 @@ T.test('BUG-854 i2: plan_pots no longer calls a nil global (the plan run survive
   T.ok(r.cands[1].n >= 1)
 end)
 
+T.test('BUG-867: the cure gate has a hysteresis: ON at 5 cancels in the window, a count of 4 or 3 keeps it, OFF only after 14 game days under 2; the way-out line comes once a week', function()
+  local W = world()
+  local econ = require('dfllm.economy')
+  local c = econ.conf(W.K)
+  local t0 = 200 * DAYT
+  feed(econ, W.K, 6, t0)
+  T.ok(econ.cx_gate(W.K, c, t0 + 10), 'ON at 6 (>= 5)')
+  local t1 = t0 + 7 * DAYT + 100                                   -- the 6 left the 7-day window; 4 new ones
+  feed(econ, W.K, 4, t1)
+  T.ok(econ.cx_gate(W.K, c, t1 + 10), 'a count of 4 (< 5) keeps the cure ON: no flap')
+  feed(econ, W.K, 1, t1 + DAYT)
+  local t2 = t1 + 8 * DAYT                                          -- all quiet now (0 in the window)
+  T.ok(econ.cx_gate(W.K, c, t2), 'quiet for the first day: still ON')
+  T.ok(econ.cx_gate(W.K, c, t2 + 10 * DAYT), '10 quiet days: still ON')
+  T.ok(not econ.cx_gate(W.K, c, t2 + 15 * DAYT), '14 quiet days under 2: OFF')
+  feed(econ, W.K, 5, t2 + 16 * DAYT)
+  T.ok(econ.cx_gate(W.K, c, t2 + 16 * DAYT + 10), 'ON again at 5')
+  -- the way out, once a week
+  local W3 = world()
+  feed(require('dfllm.economy'), W3.K, 40, 200 * DAYT)
+  local inv = {wood = 0, boulders = 0, rock = 0, barrels = 9, picks = 4}
+  run(W3, {now = 201 * DAYT, inv = inv, brews = 30})
+  run(W3, {now = 203 * DAYT, inv = inv, brews = 30})
+  feed(require('dfllm.economy'), W3.K, 40, 208 * DAYT)
+  run(W3, {now = 209 * DAYT, inv = inv, brews = 30})
+  local n, way = 0, nil
+  for _, l in ipairs(W3.logs) do if tostring(l.msg):find('nothing to make them of', 1, true) then n = n + 1; way = l.msg end end
+  T.eq(n, 2, 'day 201 and day 209, not day 203')
+  T.ok(way:find('way out: dig for stone (4 picks', 1, true) and way:find('trade.want barrels or logs', 1, true), way)
+end)
+
 T.done()

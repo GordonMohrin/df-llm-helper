@@ -99,7 +99,7 @@ T.test('BUG-851 + BUG-852: 800 ticks/s, economy runs 10 game days apart, a growi
   local started = false
   local f = 0
   local gate_seen
-  while b.K.now().tick < t0 + 60 * DAYT do
+  while b.K.now().tick < t0 + 80 * DAYT do
     local now = b.K.now().tick
     if now >= start and now < stop then
       started = true
@@ -120,7 +120,7 @@ T.test('BUG-851 + BUG-852: 800 ticks/s, economy runs 10 game days apart, a growi
   local off = logs_with(W, 'container cure OFF: DF cancelled brew')
   T.eq(#off, 1, 'one OFF line: ' .. table.concat(off, ' / '))
   local toff = tonumber(off[1]:match('^%d+%s+(%d+)'))
-  T.ok(toff and toff > stop and toff - stop <= 8 * DAYT, 'OFF within a week of the last cancel: ' .. tostring(toff and (toff - stop) / DAYT))
+  T.ok(toff and toff > stop and toff - stop <= 24 * DAYT, 'BUG-867: OFF after the window (7 d) and 14 quiet game days: ' .. tostring(toff and (toff - stop) / DAYT))
   -- the economy's own runs were 10 game days apart: the first run after DF started saw an open gate (the old reader looked only there)
   local gaps = {}
   for i = 2, #b.runs do gaps[#gaps + 1] = (b.runs[i].tick - b.runs[i - 1].tick) / DAYT end

@@ -260,6 +260,24 @@ T.test('BUG-547 (Trumpetrealms): 3 orders unvalidated for 3 days, the manager ha
   T.eq(#ctl3.labor, 0)
 end)
 
+T.test('BUG-866: a manager with a complete office who is unvalidated past mgr_stuck_days loses his other chores too; his daily job is counted and named', function()
+  local W, ctl = world{unval = 3, logs = 30}
+  W.unit(2).status.labors.SPINNER = true
+  W.unit(2).job = {current_job = {id = 78, job_type = df.job_type.ConstructBuilding}}
+  days(W, 3)
+  local spin = false
+  for _, a in ipairs(ctl.labor) do if a.which == 'spin' then spin = true end end
+  T.ok(not spin, 'before mgr_stuck_days only farming goes off')
+  days(W, 5)
+  for _, a in ipairs(ctl.labor) do if a.which == 'spin' then spin = true end end
+  T.ok(spin, 'past mgr_stuck_days the chores go off too: ' .. T.show(ctl.labor))
+  local r = W.inbox('inspect', {what = 'manager'})
+  local ob = W.K.persist.get('m.economy').mgr_obs
+  T.ok(ob and ob.n >= 5 and ob.jobs.ConstructBuilding >= 5, 'the daily samples: ' .. T.show(ob))
+  T.ok(require('dfllm.economy').mgr_obs_text(ob):find('jobs: ConstructBuilding', 1, true), 'the text names the job')
+  T.ok(not tostring(r.msg):find('bigger', 1, true), 'no more "a bigger office" lead')
+end)
+
 T.test('BUG-546: economy.mechanic_labor: nobody has the Mechanics labor: the best candidate (idle first; no soldier, no patient, no noble) ' ..
        'gets it through act.labor_set, once a day; a holder is enough', function()
   local W, ctl = world{unval = 0}

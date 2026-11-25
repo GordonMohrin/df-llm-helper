@@ -205,6 +205,7 @@ function M.conf(K)
     end
   end
   c.militia, c.free = mil, free
+  c.elite_off = b.elite_off == true               -- BUG-864: default false: an elite squad is never put off duty (DF strips an off-duty soldier)
   local ep = int(b.early_pop)
   c.early_pop = (ep and ep >= M.EARLY_LIM[1] and ep <= M.EARLY_LIM[2]) and ep or M.EARLY_POP
   local sr = int(b.station_r)
@@ -2647,6 +2648,10 @@ local function off_season(K, k)
   local c = M.conf(K)
   local win = c.militia[k]
   if win then return win[month] ~= true end    -- militia: on duty only in its own window
+  -- BUG-864 (Run 17 i4 Girderroots: 54 'Off duty' acts of A and C, all in months 9-11, worn 60-80 % -> 8-23 % every winter for 7 years):
+  -- DF's off-duty soldier fetches no kit and drops what he wears, so the elite stood unequipped exactly when it was asked to act. The
+  -- elite stays on 'Constant training' in the free months (the wooden drill, Z5); baseline military.elite_off = true restores the old rest
+  if not c.elite_off then return false end
   return c.free[month] == true
 end
 
@@ -2706,8 +2711,44 @@ end
 -- BUG-555: what the unequipped soldiers of squad `key` lack and what lies free in the fort, as a suffix for the refusal and the
 -- stand-down line: ' (missing: weapon 3, wooden weapon only 2, body armor 6; free: 17 melee weapons, 18 body armors: ...)'; '' when
 -- nothing can be read
-M.KIT_HINT = 'the pieces lie free but are not worn: the uniform specs do not match them or nobody fetched them; military re-specs '
-             .. 'the empty slots (refit) once a game day, `uniform-unstick --all --free` can hand them out'
+M.KIT_HINT = 'the pieces lie free but are not worn; military re-specs the empty slots (refit) once a game day, '
+             .. '`uniform-unstick --all --free` can hand them out'
+-- BUG-865 (Run 17 i4 Girderroots: 'the uniform specs do not match them' was boilerplate, the player chased a spec problem nobody proved):
+-- the cause measured on the squad: its routine, the pieces DF assigned to its positions that no soldier wears, the empty slots and the
+-- free pieces no spec holds. Returns a short text
+function M.kit_cause(K, key, s, mems)
+  local parts = {}
+  local off = (rt.order and rt.order[key] == 'off') or (order_count(s) == 0 and rt.station and rt.station[key] == nil
+              and rt.order and rt.order[key] ~= nil and rt.order[key] ~= 'train')
+  local ridx = routine_idx(s)
+  local rname = try(function() return dfhack.df2utf(df.global.plotinfo.alerts.routines[ridx].name) end)
+  if off or (type(rname) == 'string' and rname:lower():find('off duty', 1, true)) then
+    parts[#parts + 1] = 'the squad is OFF DUTY (DF soldiers off duty fetch no kit and drop what they wear)'
+  end
+  local assigned, specless = 0, 0
+  for _, m in ipairs(mems) do
+    local on = {}
+    try(function()
+      local R = roles()
+      for _, inv in ipairs(m.unit.inventory) do if R[inv.mode] and inv.item then on[inv.item.id] = true end end
+    end)
+    for _, c in ipairs(UNIFORM_CATS) do
+      local specs = try(function() return m.p.equipment.uniform[c] end) or {}
+      if c ~= 'shield' and #specs == 0 then specless = specless + 1 end
+      for _, sp in ipairs(specs) do
+        for _, id in ipairs(try(function() return sp.assigned end) or {}) do if not on[id] then assigned = assigned + 1 end end
+      end
+    end
+  end
+  if assigned > 0 then
+    parts[#parts + 1] = string.format('DF assigned %d pieces to its positions and no soldier wears them yet (the soldiers fetch them only on duty; kern.log gives them back after %d ticks)',
+                                      assigned, M.PEND_MAX or 2400)
+  else
+    parts[#parts + 1] = 'DF has assigned NO piece to its positions (specs empty or not fillable by the free pieces: material class, forbidden, owned, another walk group)'
+  end
+  if specless > 0 then parts[#parts + 1] = string.format('%d uniform categories have no spec at all', specless) end
+  return table.concat(parts, '; ')
+end
 function M.free_weapons()
   local n = 0
   try(function()
@@ -2768,7 +2809,10 @@ function M.kit_missing(K, key)
   if nobody > 0 then miss[#miss + 1] = 'body armor ' .. nobody end
   if #miss == 0 then return '' end
   local fw, fb = M.free_weapons(), M.stock_mats('body').any
-  local hint = ((nowpn + wood > 0 and fw > 0) or (nobody > 0 and fb > 0)) and ('; ' .. M.KIT_HINT) or ''
+  local hint = ''
+  if (nowpn + wood > 0 and fw > 0) or (nobody > 0 and fb > 0) then
+    hint = '; cause: ' .. M.kit_cause(K, key, s, members(s)) .. '; ' .. M.KIT_HINT
+  end
   -- BUG-591: what the free pieces are that do not fill the slots (clothes, forbidden, owned; tools held back for the workers)
   local det = {}
   if nowpn + wood > 0 then
@@ -4102,7 +4146,17 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
   -- a soldier wears now stays as it is; only the unfilled categories (and vacant positions) are re-specced, with the material the
   -- free stock can fill (best_mats of the positions to fill, not of the whole squad)
   local filled = {}
-  for _, m in ipairs(members(s)) do filled[m.pos] = filled_cats(m.p, m.unit) end
+  local swapped = 0
+  local real_waits = (kind ~= 'xbow' and not guarded) and (M.free_weapons() > 0)
+  for _, m in ipairs(members(s)) do
+    filled[m.pos] = filled_cats(m.p, m.unit)
+    -- BUG-870 (Run 17 i3 Orangering: a wooden spear in hand, a real one assigned for 6 game years, 'kept worn specs' every time): a wooden
+    -- weapon in hand is no filled weapon slot when a real melee weapon exists or is assigned: the weapon spec is replaced, DF re-equips
+    if kind ~= 'xbow' and not guarded and filled[m.pos].weapon then
+      local x = M.KIT.soldier(m.p, m.unit, roles(), nil)
+      if x.wood and (real_waits or M.assigned_real(K, m.p, m.unit)) then filled[m.pos].weapon = nil; swapped = swapped + 1 end
+    end
+  end
   local groups, order, todo, kept, keptpos = {}, {}, 0, 0, 0
   try(function()
     for i, p in ipairs(s.positions) do
@@ -4149,6 +4203,7 @@ M.verbs['squad.uniform'] = function(K, args, cmd)
   if kind ~= 'xbow' then e.tr, e.td = 0, nil end   -- FR-89: a metal kind ends the training policy (FR-100: for good)
   rt.kpi = nil
   local msg = string.format('squad %s: %s uniform on %d positions', key, kind, todo)
+  if swapped > 0 then msg = msg .. string.format('; %d soldiers hold a wooden weapon: the weapon spec is replaced by a real one', swapped) end
   if kept > 0 then
     msg = msg .. string.format('; kept %d worn specs on %d positions (squad.uniform never takes off what a soldier wears; the rest '
                                .. 'is specced for the material the free stock can fill)', kept, keptpos)
@@ -4588,7 +4643,9 @@ local function loot_item(K, it, cat, loot, budget)
   end
   if not loot or budget <= 0 or f.in_inventory then return 0 end
   for _, k in ipairs(LOOT_SKIP) do if f[k] then return 0 end end
-  if not is_metal(it) then return 0 end
+  -- BUG-865 (Run 17 i4: 'gloves 0 usable (72 forbidden ...)' for ever: DF forbids the dead's items and the sweep took metal only): leather,
+  -- bone and cloth true armor of the armor categories (a piece a dwarf can wear: not made by another race) is unforbidden too
+  if not is_metal(it) and not (CAT_ITEMS[cat] and cat ~= 'shield' and true_armor(cat, it) and not alien_make(it)) then return 0 end
   local x, y, z = dfhack.items.getPosition(it)
   if x and reachable_tile(K, x, y, z) and K.act.item_flag(it.id, 'forbid', false) then return units, true end
   return 0
@@ -4621,7 +4678,7 @@ local function loot(K)
   local go = mode == 'PEACE' or (mode == 'RECOVERY' and quiet)
   local free, n = loot_pass(K, go)
   rt.free = free
-  if n > 0 then K.log('info', 'loot: %d forbidden metal weapons, armor and ammo unforbidden for the armory', n) end
+  if n > 0 then K.log('info', 'loot: %d forbidden metal weapons, metal and leather armor and ammo unforbidden for the armory', n) end
 end
 
 ---------------------------------------------------------------- BUG-050: the monthly uniform-unstick

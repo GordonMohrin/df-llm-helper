@@ -14,7 +14,7 @@ def test_config_military_defaults_and_validation(tmp_path):
     doc = json.loads(fairplay.BASELINE_PATH.read_text("utf-8"))
     assert doc["military"] == {
         "unstick": {"on": True, "drop": False, "every": 33600, "below": 100, "drop_after": 2},
-        "militia": {"B": [9, 10, 11]}, "free_months": [9, 10, 11],
+        "militia": {"B": [9, 10, 11]}, "free_months": [9, 10, 11], "elite_off": False,
         "rotation": {"on": True, "per_day": 3, "worn_min": 40}, "early_pop": 40, "station_r": 3,
         "training": {"on": True, "fallback": "SPEAR", "refit_days": 7}}                          # FR-100/101
     p = tmp_path / "baseline.json"

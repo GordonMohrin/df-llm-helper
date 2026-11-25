@@ -375,7 +375,7 @@ T.test('BUG-450/585: a manager with a complete office who validates nothing for 
   T.ok(dn[1].d.cmds[1]:find('inspect what=manager', 1, true) and dn[1].d.cmds[2]:find('inspect what=unit key=', 1, true)
        and #dn[1].d.cmds == 4, table.concat(dn[1].d.cmds, '|'))     -- BUG-499: the manager's facts first
   T.ok(dn[1].d.days >= 5 and dn[1].d.n >= 1, 'BUG-585: after 5 days, not 14')
-  T.ok(tostring(dn[1].d.cause):find('nothing the kernel can read is wrong', 1, true), 'BUG-499: ' .. tostring(dn[1].d.cause))
+  T.ok(tostring(dn[1].d.cause):find('the office meets what DF asks', 1, true), 'BUG-499: ' .. tostring(dn[1].d.cause))
   days(W, 4)
   T.eq(#decisions(W, 'manager_stuck'), 1, 'once per mgr_stuck_days (util/cadence)')
   local W2 = world{chair = {128, 74}, table = {127, 74}, plants = 40, mgr_stuck_days = 0}
@@ -393,7 +393,7 @@ T.test('BUG-499: inspect what=manager: the facts of a manager who validates noth
   T.ok(r.msg:find('manager Astesh unit 2', 1, true) and r.msg:find('office zone', 1, true), r.msg)
   T.eq({r.data.office.chair, r.data.office.table}, {1, 1})
   T.ok(r.data.orders.n >= 1 and r.data.orders.d >= 14, 'the unvalidated orders and their age')
-  T.ok(r.data.causes[1]:find('nothing the kernel can read is wrong', 1, true), r.data.causes[1])
+  T.ok(r.data.causes[1]:find('the office meets what DF asks', 1, true), r.data.causes[1])
   T.ok(#r.data.next >= 1)
   -- a manager in a squad: the cause names it
   local W2 = world{chair = {128, 74}, table = {127, 74}, plants = 40}

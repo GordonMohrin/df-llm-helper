@@ -702,6 +702,9 @@ def military_errors(path: str | Path | None = None) -> list[str]:
         elif k == "free_months":
             if not months(v):
                 errs.append(f"{name}: military.free_months: a list of months 0..11 expected, got {v!r}")
+        elif k == "elite_off":                                      # BUG-864
+            if not isinstance(v, bool):
+                errs.append(f"{name}: military.elite_off: true or false expected, got {v!r}")
         elif k == "rotation":
             if not isinstance(v, dict):
                 errs.append(f"{name}: military.rotation must be an object")
@@ -1124,14 +1127,14 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      "diag": {"cx_cure": "bool", "mgr_chores": "bool", "still_pin": "bool", "stall_line": "bool"},
                      # NEU4 (BUG-841/844): DF's cancel tally window (game days), cancels that make a reason count, longest pile-limit freeze;
                      # NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source, gamelog_bytes = bytes per read, NEU6 (BUG-851): gamelog_chunks = reads per look
-                     "cancel": {"days": (1, 14), "cx_min_n": (1, 1000), "cx_pile_days": (1, 112), "gamelog": "bool",
+                     "cancel": {"days": (1, 14), "cx_min_n": (1, 1000), "cx_pile_days": (1, 112), "cx_off_n": (0, 1000), "cx_off_days": (1, 112), "gamelog": "bool",
                                 "gamelog_bytes": (4096, 4194304), "gamelog_chunks": (1, 64)},
                      # NEU7 (BUG-854): the standing container reserve (economy.plan_reserve)
                      # NEU7 (BUG-855): buildingplan logs off while usable wood is short and stone is free
                      "wguard": {"on": "bool", "low": (0, 1000), "high": (1, 2000), "stone_min": (1, 500)},
                      "creserve": {"on": "bool", "min_batch": (1, 100), "max_batch": (1, 100), "brews_per": (1, 100), "grace_days": (0, 14),
                                  "repeat_days": (1, 60), "max_repeats": (1, 50), "trickle_days": (1, 400), "trickle_n": (1, 20),
-                                 "trickle_free": (1, 500), "rock_plenty": (0, 500), "total_cap": (1, 2000)}}
+                                 "trickle_free": (1, 500), "rock_plenty": (0, 500), "total_cap": (1, 2000), "dead_n": (1, 1000), "dead_days": (1, 30)}}
 ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale", "jobwhy", "diag", "cancel", "creserve", "wguard")   # parts whose every key is listed above
 _PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
