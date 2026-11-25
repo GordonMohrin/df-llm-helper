@@ -620,19 +620,25 @@ function M.growth_conf(K)
   return c
 end
 
--- pure: x = {n soldiers, fullr, metal, sq_n, sq_w (first melee squad, members with a real weapon), lvl, lever (bool), drink_d (days or nil)},
--- c = growth_conf. Returns {tier 0..3, cap (nil at tier 3), next (the cap the halt keeps closed), halt (key), need (text)}
+-- pure: x = {n soldiers, fullr, metal, sq_n, sq_f, sq_a, sq_w, sq_ok, lvl, lever (bool), drink_d (days or nil)}, c = growth_conf.
+-- NEU8 (BUG-860): the first-squad step reads ONE test, military.squad_ready (kit_stats: sq_n members of the first melee squad, sq_f of them
+-- fit, sq_a with a usable real weapon in hand / assigned / waiting, sq_w fit AND armed = ready; sq_ok = the latch of the test, which a wooden
+-- drill weapon in PEACE does not release). Without sq_ok (a caller that has no latch) the step is sq_w >= armed_min. Returns {tier 0..3, cap
+-- (nil at tier 3), next (the cap the halt keeps closed), halt (key), need (text)}
 function M.growth_ladder(x, c)
   local n, fullr, metal = int(x.n) or 0, int(x.fullr) or 0, int(x.metal) or 0
   local sq_n, sq_w, dd = int(x.sq_n) or 0, int(x.sq_w) or 0, int(x.drink_d)
-  local sq_u = math.min(int(x.sq_u) or 0, math.max(0, sq_n - sq_w))     -- NEU7 BUG-858: of the unarmed ones, hurt or unfit (reporting only: the gate rule is unchanged)
+  local sq_f = int(x.sq_f) or sq_n
+  local sq_a = int(x.sq_a) or sq_w
+  local sq_u = math.min(int(x.sq_u) or math.max(0, sq_n - sq_f), sq_n)       -- the members that are not fit (hurt, unconscious, starving)
+  local sq_ok = x.sq_ok
+  if sq_ok == nil then sq_ok = sq_n >= c.armed_min and sq_w >= c.armed_min end
   local share_ok = n > 0 and fullr * 100 >= c.share * n
   local share_txt = string.format('%d of %d soldiers fully equipped (%d %% < %d %%)', fullr, n, n > 0 and fullr * 100 // n or 0, c.share)
   local steps = {
     {cap = c.base, conds = {
-      {'squad', sq_n >= c.armed_min and sq_w >= sq_n,
-       string.format('first squad: %d of %d members hold a real weapon (need %d+, all armed%s)', sq_w, sq_n, c.armed_min,
-                     sq_u > 0 and string.format('; %d injured', sq_u) or '')},
+      {'squad', sq_ok == true,
+       string.format('first squad: %d of %d fit; a real weapon usable for %d of %d (need %d+ ready)', sq_f, sq_n, sq_a, sq_n, c.armed_min)},
       {'drink', dd ~= nil and dd >= c.drink_d,
        string.format('drink inside the core %s d < %d d', dd and tostring(dd) or '?', c.drink_d)}}},
     {cap = c.armed_cap, conds = {
@@ -678,7 +684,8 @@ local function growth(K, lvl, now)
   local okk, kit = K.call('military', 'kit_stats')
   kit = okk and type(kit) == 'table' and kit or {}
   local al = K.view().alert
-  local g = M.growth_ladder({n = kit.n, fullr = kit.fullr, metal = kit.metal, sq_n = kit.sq_n, sq_w = kit.sq_w, sq_u = kit.sq_u, lvl = lvl,
+  local g = M.growth_ladder({n = kit.n, fullr = kit.fullr, metal = kit.metal, sq_n = kit.sq_n, sq_w = kit.sq_w, sq_u = kit.sq_u, sq_f = kit.sq_f,
+                             sq_a = kit.sq_a, sq_ok = kit.sq_ok, lvl = lvl,
                              lever = core_lever(K), drink_d = type(al) == 'table' and al.core_d or nil}, c)
   local gr = st.gr
   local tier = g.tier

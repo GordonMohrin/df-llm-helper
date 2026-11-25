@@ -1573,6 +1573,14 @@ local function ensure_weapons(K, k, s)
   end
   local need, marked = {}, {}
   local untrain, wooden = e.tr == 1 or e.un == 1, 0          -- FR-100 un: the default policy was withdrawn
+  -- NEU8 (BUG-861, Run 17 i3 Orangering y376: `squad.uniform kind=melee` set tr = 0 and 'kept worn specs' - a position that wore a wooden
+  -- weapon kept its SPEAR_TRAINING spec, and with tr = 0 nothing ever took it out: the soldier drilled wooden in PEACE and met an alert
+  -- the same way): a squad the player took off the policy (tr = 0) gets real weapons for its wooden specs while the fort owns real
+  -- melee weapons (census g_weapon), exactly as a squad on the policy does outside PEACE/DRILL
+  if e.tr == 0 and not untrain then
+    local ci = K.census and K.census.i
+    untrain = type(ci) == 'table' and (int(ci.g_weapon) or 0) > 0
+  end
   for _, m in ipairs(members(s)) do
     local ws = weapon_specs(m.p)
     local bad = #ws == 0 and (g ~= nil or nw_has(e, m.pos))
@@ -1683,6 +1691,36 @@ local function ensure_uniform(K, k, s, want)
   if e.uni ~= uni then e.uni, dirty = uni, true end
 end
 
+-- NEU8 (BUG-862, Run 17 i1: squad A empty while the soldiers sat in B and C; squad.add said 'no leader: squad.leader first', squad.leader
+-- said 'unit is in a squad'; no recruit was left, so the kernel's own seat_leader stood for good): a soldier of another squad the first squad
+-- may take: the best healthy member of B (melee first), then C, never a squad's leader (position 0) and never one passed over lately
+-- (rt.add_bad). Returns {uid, sid, key} or nil
+local function first_seat_key()
+  for _, sp in ipairs(M.SQUADS) do if sp.kind == 'melee' then return sp.key end end
+end
+M.first_seat_key = first_seat_key
+
+function M.borrow(K, k)
+  local now = now_tick(K)
+  local best
+  for _, sp in ipairs(M.SQUADS) do
+    local e = sp.key ~= k and st.sq[sp.key]
+    local s = e and squad(e.id)
+    if s then
+      for _, m in ipairs(members(s)) do
+        if m.pos ~= 0 and (rt.add_bad[m.unit.id] or 0) <= now and healthy(m.unit) then
+          local melee = sp.kind == 'melee' and 1 or 0
+          local cv = M.cv(m.unit)
+          if best == nil or melee > best.melee or (melee == best.melee and cv > best.cv) then
+            best = {uid = m.unit.id, sid = s.id, key = sp.key, melee = melee, cv = cv}
+          end
+        end
+      end
+    end
+  end
+  return best
+end
+
 -- the squads screen's "choose leader" for a squad without one (act.squad_leader [S2, live L2]): the best
 -- recruit takes the squad's commander/captain assignment and position 0. A refusal backs off and names
 -- the UI action once (stuck).
@@ -1697,16 +1735,22 @@ function seat_leader(K, k, s, recruits)
   end
   local uid, from_squad = best and best.unit.id, best ~= nil
   if not uid then uid = recruits()[1] end
+  local other                                        -- NEU8 (BUG-862): no member, no recruit: a soldier of another squad
+  if not uid and k == first_seat_key() then other = M.borrow(K, k); uid = other and other.uid end   -- BUG-862
   if not uid then stuck(K); return end
   local ok, err
-  if from_squad then
+  if other then
+    ok, err = K.act.squad_remove(other.sid, uid)
+    if ok then ok, err = K.act.squad_leader(s.id, uid) end
+    if ok then K.log('info', 'military: squad %s: leader taken from squad %s (no member, no recruit)', k, other.key) end
+  elseif from_squad then
     ok, err = K.act.squad_remove(s.id, uid)
     if ok then ok, err = K.act.squad_leader(s.id, uid) end
   else
     ok, err = K.act.squad_leader(s.id, uid)
   end
   if ok and leader_set(s) then
-    if not from_squad then table.remove(recruits(), 1) end
+    if not from_squad and not other then table.remove(recruits(), 1) end
     cleared('lead' .. k)
     K.log('info', 'military: squad %s (id %d) led by unit %d%s', k, s.id, uid, from_squad and ' (promoted)' or '')
     return
@@ -1786,6 +1830,35 @@ local function fill(K, k, s, want, recruits, siege, rot)
       released(K, 1, rot and 'rotation' or 'over_target', {k})                        -- BUG-327
     end
   end
+end
+
+-- NEU8 (BUG-862): the first melee squad is filled first. fill() seats recruits (citizens in no squad); when none is left and the squad
+-- still has fewer than min(growth.armed_min, its target) members, members of the other squads (M.borrow: never a leader) move into it, so
+-- that squad A has its armed_min before B and C hold more than their leaders. PEACE-like modes only (a siege refills from the civilians),
+-- ADD_PER_STEP a step, a refusal backs off. Returns the number moved
+function M.first_fill(K, k, s, want, siege)
+  if siege or k ~= first_seat_key() or not leader_set(s) then return 0 end
+  local okc, c = K.call('readiness', 'growth_conf')
+  local amin = okc and type(c) == 'table' and c.on and int(c.armed_min) or nil
+  if not amin then return 0 end
+  local goal, n, moved = math.min(amin, want or 0), #members(s), 0
+  if n >= goal or not retry_ok(K, 'first' .. k) then return 0 end
+  while n < goal and moved < M.ADD_PER_STEP do
+    local b = M.borrow(K, k)
+    if not b then break end
+    local ok, err = K.act.squad_remove(b.sid, b.uid)
+    if ok then ok, err = K.act.squad_add(s.id, b.uid) end
+    if not ok then
+      rt.add_bad[b.uid] = now_tick(K) + M.ADD_BAD
+      K.log('warn', 'military: squad %s: unit %d of squad %s was not moved in (%s)', k, b.uid, b.key, tostring(err))
+      backoff(K, 'first' .. k)
+      break
+    end
+    n, moved = n + 1, moved + 1
+    K.log('info', 'military: squad %s: unit %d moved in from squad %s (%d of %d: the first squad is filled first)', k, b.uid, b.key, n, goal)
+  end
+  if moved > 0 then cleared('first' .. k); rt.kpi, rt.kit = nil, nil end
+  return moved
 end
 
 ---------------------------------------------------------------- FR-79: the militia rotation
@@ -3438,6 +3511,79 @@ function M.back_rows(K, rows)
   return backed
 end
 
+-- NEU8 (BUG-860): a real melee weapon DF assigned to the soldier's position (the weapon uniform spec's item or assigned list) that he can
+-- take at once: it exists, is no training weapon, and nothing blocks it (forbidden, marked for melting or dumping, owned, in a building,
+-- carried by another, in a forbidden bin, on another walk group than the soldier: item_block). Unreadable = false (fail closed)
+function M.assigned_real(K, p, u)
+  local ok, res = pcall(function()
+    for _, sp in ipairs(p.equipment.uniform.weapon) do
+      local ids = {}
+      if (int(sp.item) or -1) >= 0 then ids[#ids + 1] = sp.item end
+      for _, id in ipairs(sp.assigned or {}) do ids[#ids + 1] = id end
+      for _, id in ipairs(ids) do
+        local it = df.item.find(id)
+        if it and it:getType() == df.item_type.WEAPON then
+          local w = weapon_kind(it:getSubtype())
+          if w and w.k == 'melee' and not tostring(w.token):find('_TRAINING$') and #M.item_block(K, it, u) == 0 then return true end
+        end
+      end
+    end
+    return false
+  end)
+  return ok and res == true
+end
+
+-- NEU8 (BUG-860, Run 17 i3 Orangering y375-y376: the growth cap stayed 30 '(squad)' for good although three soldiers had real weapons
+-- assigned or in hand): ONE test for "the first melee squad is READY" (the ladder's 'squad' step, the latch below, the ladder text, inspect
+-- military): at least growth.armed_min members that are fit (healthy: no wound that needs treatment, awake, not starving) and each of them
+-- with a real melee weapon in hand, assigned and usable (assigned_real), or waiting for him on the training policy (back_rows): the squad
+-- takes real weapons at once when an alert switches the uniform. A wooden weapon in hand in PEACE (Z5: drill stays wooden) does not
+-- un-pass it. kit_stats counts; this is the rule. pure: n_ready, armed_min -> bool
+function M.squad_ready(n_ready, armed_min)
+  return int(n_ready) ~= nil and int(armed_min) ~= nil and n_ready >= armed_min
+end
+
+-- the latch of the rule: passes once ready, releases when the squad has fewer members than armed_min, or fewer than armed_min members
+-- with a usable real weapon (fit or not: a wound heals) for SQ_RELEASE ticks (5 game days), or the first squad is another one. State rt.sq
+-- {key, pass, lo}; rt.fr_pass = the squad key while it holds (BUG-830 first_real). Returns the pass as a boolean. Fail closed: no readable
+-- armed_min = not passed
+M.SQ_RELEASE = 6000
+function M.sq_latch(K, first, t)
+  local okc, c = K.call('readiness', 'growth_conf')
+  local amin = okc and type(c) == 'table' and int(c.armed_min) or nil
+  local q = rt.sq
+  if not q or q.key ~= first then q = {key = first}; rt.sq = q end
+  local now = now_tick(K)
+  if not (first and amin and t.sq_n > 0) then
+    if q.pass then K.log('info', 'military: first squad ready latch released: no squad or no readable armed_min') end
+    q.pass, q.lo, rt.fr_pass = false, nil, nil
+    return false
+  end
+  if not q.pass then
+    if M.squad_ready(t.sq_w, amin) then
+      q.pass, q.lo, rt.fr_pass = true, nil, first
+      K.log('info', 'military: first squad %s ready: %d of %d fit, a real weapon usable for %d of %d (%d assigned, %d waiting): back on the '
+            .. 'training policy; the alert path swaps wood for the real weapon', first, t.sq_f, t.sq_n, t.sq_a, t.sq_n, t.sq_as, t.sq_b)
+    end
+  else
+    local short = t.sq_n < amin or t.sq_a < amin
+    if t.sq_n < amin then
+      q.pass, q.lo, rt.fr_pass = false, nil, nil
+      K.log('info', 'military: first squad %s ready latch released: %d members (need %d+)', first, t.sq_n, amin)
+    elseif short then
+      q.lo = q.lo or now
+      if now < q.lo or now - q.lo >= M.SQ_RELEASE then
+        q.pass, q.lo, rt.fr_pass = false, nil, nil
+        K.log('info', 'military: first squad %s ready latch released: a real weapon usable for only %d of %d members (need %d+) for %d days',
+              first, t.sq_a, t.sq_n, amin, M.SQ_RELEASE // 1200)
+      end
+    else
+      q.lo = nil
+    end
+  end
+  return q.pass == true
+end
+
 ---------------------------------------------------------------- NEU1 P4 (E1 b): a small fight is never refused for armour
 -- Run 16d i4 Trumpetrealms y461 (one goblin killed 49 of 69 while every sortie said 'not equipped' / 'worn 0 % < 80 %'), Run 16c i3 y379 (a lone
 -- snatcher: 'no sortie, worn 62 % < 80 %'), Run 16a i1 y396 (one Megalania: 'worn 54 % < 80 %'): against at most SMALL.max visible hostiles in all
@@ -3872,15 +4018,30 @@ M.verbs['squad.create'] = function(K, args, cmd)
                              led and '' or ', no leader yet: squad.leader'), {squad = id, leader = led}
 end
 
+-- NEU8 (BUG-862): the squads screen's "choose leader" for a unit that sits in another squad: he leaves it first (never as that squad's own
+-- leader: it would be left without one), then takes the vacant leader position. Returns ok, res
+function M.seat_leader_verb(K, s, uid)
+  local u = df.unit.find(int(uid) or -1)
+  local sid = u and int(u.military.squad_id) or -1
+  if sid ~= -1 and sid ~= s.id then
+    if (int(u.military.squad_position) or -1) == 0 then
+      return false, string.format('unit %d leads squad %d: give that squad another leader first', uid, sid)
+    end
+    local ok, err = K.act.squad_remove(sid, uid)
+    if not ok then return false, 'unit ' .. tostring(uid) .. ' could not leave squad ' .. tostring(sid) .. ': ' .. tostring(err) end
+  end
+  return K.act.squad_leader(s.id, uid)
+end
+
 M.verbs['squad.leader'] = function(K, args, cmd)
   local no, why = M.fight_free(K, 'squad.leader')
   if no == false then return false, why end
   if not int(args.unit) then return false, 'squad.leader needs {squad, unit}' end
   local s = squad_arg(args.squad)
   if not s then return false, 'no squad ' .. tostring(args.squad) end
-  local ok, res = K.act.squad_leader(s.id, args.unit)
+  local ok, res = M.seat_leader_verb(K, s, args.unit)
   if not ok then return false, 'squad.leader: ' .. tostring(res) end
-  rt.kpi = nil
+  rt.kpi, rt.kit = nil, nil
   return true, string.format('unit %d leads squad %d (%s)', args.unit, s.id, tostring(res)), {squad = s.id}
 end
 
@@ -3890,11 +4051,26 @@ M.verbs['squad.add'] = function(K, args, cmd)
   if not int(args.unit) then return false, 'squad.add needs {squad, unit}' end
   local s = squad_arg(args.squad)
   if not s then return false, 'no squad ' .. tostring(args.squad) end
-  if not leader_set(s) then return false, 'squad ' .. s.id .. ' has no leader: squad.leader first' end
   -- audit I4 (fair play: the squads screen lists living adult citizens only; addToSquad itself takes any figure)
   local u = df.unit.find(int(args.unit))
   if not u or dfhack.units.isDead(u) or not dfhack.units.isCitizen(u) or not dfhack.units.isAdult(u) then
     return false, 'unit ' .. tostring(args.unit) .. ' is not an adult living citizen'
+  end
+  -- NEU8 (BUG-862, Run 17 i1: squad A empty, squad.add 'no leader: squad.leader first', squad.leader 'unit is in a squad'): the first unit
+  -- added to a squad without a leader becomes its leader (the squads screen's first seat IS the leader's); a unit of another squad leaves it
+  if not leader_set(s) then
+    local okl, resl = M.seat_leader_verb(K, s, args.unit)
+    if not okl then return false, 'squad.add: squad ' .. s.id .. ' has no leader and ' .. tostring(resl) end
+    rt.kpi, rt.kit = nil, nil
+    return true, string.format('unit %d joined squad %d as its leader (it had none)', args.unit, s.id), {squad = s.id, leader = true}
+  end
+  local usq = int(u.military.squad_id) or -1
+  if usq ~= -1 and usq ~= s.id then
+    if (int(u.military.squad_position) or -1) == 0 then
+      return false, string.format('unit %d leads squad %d: give that squad another leader first', args.unit, usq)
+    end
+    local okr, errr = K.act.squad_remove(usq, args.unit)
+    if not okr then return false, string.format('squad.add: unit %d could not leave squad %d: %s', args.unit, usq, tostring(errr)) end
   end
   local ok, res = K.act.squad_add(s.id, args.unit)
   if not ok then return false, 'squad.add: ' .. tostring(res) end
@@ -4599,7 +4775,10 @@ function M.kit_stats(K)
   -- NEU1 P4 (readiness.growth_ladder): fullr = armor and a real weapon (in hand, or waiting for a soldier on the training policy: kit_rows),
   -- metal = fullr with every armor piece of metal, sq_n / sq_w = the members of the first melee squad and those of them armed so,
   -- wb = soldiers counted armed by a waiting real weapon
-  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0, sq_u = 0, wb = 0}
+  -- NEU8 (BUG-860): the first squad's READY rule (M.squad_ready): sq_n members, sq_f fit ones, sq_a with a usable real weapon (hand, assigned,
+  -- waiting), sq_w fit AND armed = ready, sq_as of the armed ones by an assigned piece, sq_u not fit; sq_ok = the latch
+  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0, sq_u = 0, wb = 0,
+             sq_f = 0, sq_a = 0, sq_as = 0, sq_b = 0, sq_ok = false}
   local rows, first = M.kit_rows(is_metal)
   t.wb = M.back_rows(K, rows)
   for _, r in ipairs(rows) do
@@ -4615,19 +4794,18 @@ function M.kit_stats(K)
     end
     if r.key == first then
       t.sq_n = t.sq_n + 1
-      if r.real then t.sq_w = t.sq_w + 1
-      elseif r.u and not healthy(r.u) then t.sq_u = t.sq_u + 1 end      -- NEU7 BUG-858: counted unarmed, but hurt / unconscious / starving (reporting only)
+      r.fit = r.u ~= nil and try(function() return healthy(r.u) end) == true
+      r.asg = not (r.x.weapon and not r.x.wood) and M.assigned_real(K, r.p, r.u)       -- (no real weapon in hand: one assigned and usable)
+      r.arm = (r.real or r.asg) and true or false
+      if r.fit then t.sq_f = t.sq_f + 1 else t.sq_u = t.sq_u + 1 end
+      if r.arm then t.sq_a = t.sq_a + 1 end
+      if r.asg then t.sq_as = t.sq_as + 1 end
+      if r.backed and not r.asg then t.sq_b = t.sq_b + 1 end
+      if r.fit and r.arm then t.sq_w = t.sq_w + 1 end
     end
   end
+  t.sq_ok = M.sq_latch(K, first, t)
   rt.kit, rt.kit_t = t, now
-  if first and t.sq_n > 0 and rt.fr_pass ~= first then              -- BUG-830: the ladder's squad step passed once: first_real ends (Z5)
-    local okc, c = K.call('readiness', 'growth_conf')
-    if okc and type(c) == 'table' and int(c.armed_min) and t.sq_n >= c.armed_min and t.sq_w >= t.sq_n then
-      rt.fr_pass = first
-      K.log('info', 'military: first squad %s fully armed (%d of %d, %d backed by a waiting weapon): back on the training policy', first,
-            t.sq_w, t.sq_n, t.wb)
-    end
-  end
   M.trace_first(K, rows, first, t)
   return t
 end
@@ -4637,7 +4815,7 @@ end
 -- picture changes and at most once a game day, so a live run shows WHICH member lacks the weapon and why (spec but nothing in hand =
 -- unfetched, no spec = empty position, wood = the training policy). Read-only
 function M.trace_first(K, rows, first, t)
-  if not first or t.sq_n == 0 or t.sq_w >= t.sq_n then rt.trace_sig = nil; return end
+  if not first or t.sq_n == 0 or t.sq_ok then rt.trace_sig = nil; return end
   local parts = {}
   for _, r in ipairs(rows) do
     if r.key == first then
@@ -4652,14 +4830,15 @@ function M.trace_first(K, rows, first, t)
         local w = sub >= 0 and weapon_kind(sub)
         spec[#spec + 1] = w and (tostring(w.token):gsub('^ITEM_WEAPON_', '')) or 'any'
       end
-      parts[#parts + 1] = string.format('pos %d hand %s spec %s%s', r.pos or -1, hand, #spec > 0 and table.concat(spec, '+') or 'none',
-                                        r.backed and ' (backed)' or (r.real and '' or ' (not armed)'))
+      local tag = r.asg and ' (assigned)' or (r.backed and ' (backed)' or (r.real and '' or ' (not armed)'))
+      if r.fit == false then tag = tag .. ' (not fit)' end
+      parts[#parts + 1] = string.format('pos %d hand %s spec %s%s', r.pos or -1, hand, #spec > 0 and table.concat(spec, '+') or 'none', tag)
     end
   end
   local sig = table.concat(parts, '; ')
   local now = now_tick(K)
   if sig ~= rt.trace_sig or now - (rt.trace_t or -1e9) >= 1200 then
-    K.log('info', 'military: first squad %s %d of %d armed (census melee weapons %s): %s', first, t.sq_w, t.sq_n,
+    K.log('info', 'military: first squad %s %d of %d ready (census melee weapons %s): %s', first, t.sq_w, t.sq_n,
           tostring(type(K.census.i) == 'table' and K.census.i.g_weapon or '?'), sig)
     rt.trace_sig, rt.trace_t = sig, now
   end
@@ -5056,7 +5235,7 @@ end
 
 M.ITEM_WHY = {{'forbid', 'forbidden'}, {'owned', 'owned by a dwarf'}, {'in_building', 'in a building'}, {'melt', 'marked for melting'},
                   {'dump', 'marked for dumping'}, {'trader', "a merchant's"}}
-function M.item_why(K, it, unit)
+function M.item_block(K, it, unit)
   local f, w = it.flags, {}
   for _, x in ipairs(M.ITEM_WHY) do if f[x[1]] then w[#w + 1] = x[2] end end
   local h = f.in_inventory and try(function() return dfhack.items.getHolderUnit(it) end) or nil
@@ -5067,6 +5246,11 @@ function M.item_why(K, it, unit)
   local gs, gp = M.unit_piece_groups(K, it, unit)
   if gs and gp and gs ~= gp then w[#w + 1] = string.format('the soldier stands on walk group %d, the piece lies on %d: he cannot reach it', gs, gp) end
   if alien_make(it) then w[#w + 1] = 'made by another race' end
+  return w
+end
+-- (the reasons a piece cannot be used, plus the two that only describe its wait: claimed by several positions, unfetched for N ticks)
+function M.item_why(K, it, unit)
+  local w = M.item_block(K, it, unit)
   local r = reservations()[it.id]
   if r and (r.occ or 0) + (r.vac or 0) > 1 then w[#w + 1] = string.format('claimed by %d positions', (r.occ or 0) + (r.vac or 0)) end
   local rec = rt.pend and rt.pend[it.id]
@@ -5408,6 +5592,7 @@ function M.step(K, budget, ctx)
         else rot_idle(K, sp.key, 'target 0') end
         local own = rot and not siege                                      -- (in a siege the fill rules stay as they were)
         fill(K, sp.key, s, want, own and M.rot_source(K, s, want) or recruits, siege, own)
+        M.first_fill(K, sp.key, s, want, siege)                            -- NEU8 (BUG-862): the first squad before B and C
         ensure_uniform(K, sp.key, s, want)                                 -- BUG-688: the recruits just seated have no specs yet
         if own and list then drop_seated(list) end
         if siege then siege_short(K, sp.key, s, want, recruits, why) end
@@ -5560,7 +5745,8 @@ function M.state(K)
   local kt = M.kit_stats(K)                          -- FR-100 (G18): soldiers fully equipped, squads on wooden weapons
   if kt.n > 0 then
     mil.kit = {n = kt.n, full = kt.full, armor = kt.armor, weapon = kt.weapon, wood = kt.wood, tr = kt.tr,
-               sq = kt.sq_n, sqw = kt.sq_w, wb = kt.wb}      -- BUG-827: the first melee squad's members / armed ones, wooden ones backed
+               sq = kt.sq_n, sqw = kt.sq_w, wb = kt.wb,      -- BUG-827: the first melee squad's members / ready ones (BUG-860), wooden ones backed
+               sqf = kt.sq_f, sqa = kt.sq_a, sqok = kt.sq_ok and 1 or 0}   -- BUG-860: fit ones, with a usable real weapon, the ready latch
   end
   for key, info in pairs(rt.rot) do                  -- FR-79: the militia rotation per squad (counts, no names)
     local r = {}

@@ -1169,7 +1169,7 @@ STATE = Obj(
                            # BUG-776: uh = max-pop held at this population (R0 blocked, citizens outside Kern+)
                            "lo": Arr(Str(maxbytes=24), hi=8), "uh": NAT,
                            # NEU1 P4: gh = the growth ladder: the step's cap, the cap the halt keeps closed, the halt key, what is missing
-                           "gh": Obj(req={"cap": NAT, "next": NAT, "halt": Str(maxbytes=12)}, opt={"need": Str(maxbytes=100)}),
+                           "gh": Obj(req={"cap": NAT, "next": NAT, "halt": Str(maxbytes=12)}, opt={"need": Str(maxbytes=100), "inj": NAT}),   # BUG-860: inj = unfit members of the first squad
                            # BUG-601: as = the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                            "as": Str(maxbytes=120),
                            # BUG-634: lw = what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
@@ -1306,9 +1306,10 @@ STATE = Obj(
                          # FR-100 (G18): n soldiers, full = armor + a weapon, armor = every armor slot worn, weapon = a
                          # weapon in hand, wood = a training weapon in hand, tr = squads on the training policy
                          "kit": Obj(req={"n": NAT, "full": NAT, "armor": NAT, "weapon": NAT, "wood": NAT, "tr": NAT},
-                                    # BUG-827: sq = members of the first melee squad, sqw = of them armed (the growth ladder's 'squad'
-                                    # step), wb = wooden hands counted armed by a real weapon waiting
-                                    opt={"sq": NAT, "sqw": NAT, "wb": NAT}),
+                                    # BUG-827: sq = members of the first melee squad, sqw = of them READY (BUG-860: fit and a real
+                                    # weapon usable; the growth ladder's 'squad' step), wb = wooden hands counted armed by a real weapon
+                                    # waiting; sqf = fit members, sqa = with a usable real weapon, sqok = the ready latch (0/1)
+                                    opt={"sq": NAT, "sqw": NAT, "wb": NAT, "sqf": NAT, "sqa": NAT, "sqok": NAT}),
                          # FR-79: the militia rotation per squad key: w = window months, on = 1 inside the window, n = members
                          # now, z = squad target, e = eligible citizens, lo/hi = windows served by the eligible, nx = game days
                          # to the next close (0 = the turnover is due), rt = turnovers done, mv = members swapped in all, why =

@@ -529,7 +529,7 @@ C.STATE_SPEC = obj({
                lo = arr(str(24), 0, 8),    -- BUG-774: the bridges whose linked levers all lie outside Kern+ and the refuge (R0 `lever_outside`)
                uh = NAT,                   -- BUG-776: max-pop held at this population (R0 blocked on a deadly blocker, citizens outside Kern+)
                -- NEU1 P4: the growth ladder: the step's cap, the cap the halt keeps closed, the halt key, what is missing
-               gh = obj({cap = NAT, next = NAT, halt = str(12)}, {need = str(100)}),
+               gh = obj({cap = NAT, next = NAT, halt = str(12)}, {need = str(100), inj = NAT}),
                as = str(120),              -- BUG-601: the armor shortfall that holds max-pop (soldiers wear under DEF.worn_pct %)
                lw = str(200),              -- BUG-634: what the levers of an R0 `levers:<B>` blocker wait for (gate.lever_why)
                rp = str(120)}),            -- BUG-653: the refuge has no pre-plug (no R0 blocker): not trusted against building destroyers
@@ -610,7 +610,7 @@ C.STATE_SPEC = obj({
              cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT}),     -- Run 11: melee follows the gear
              rel = obj({n = NAT, why = str(24), t = NAT, sq = str(8)}),          -- BUG-327: the last release
              -- FR-100 (G18): soldiers, fully equipped, armor, weapon in hand, training weapon in hand, squads on the policy
-             kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}, {sq = NAT, sqw = NAT, wb = NAT}),   -- BUG-827
+             kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}, {sq = NAT, sqw = NAT, wb = NAT, sqf = NAT, sqa = NAT, sqok = NAT}),   -- BUG-827, BUG-860
              -- FR-79: the militia rotation per squad key (schema.py _ROT)
              rot = obj(nil, {A = ROT_ONE, B = ROT_ONE, C = ROT_ONE})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}, {nb = arr(str(24), 0, 5), stale = NAT}),   -- BUG-534: wants no caravan ever had; BUG-642: stale Leaving caravans

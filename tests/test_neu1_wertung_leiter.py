@@ -488,9 +488,21 @@ def test_blocked_evidence_free_weapon_truthful(tmp_path, cfg_dir):
     now = (Y + 2) * YEAR
     d = run_dir(tmp_path, evs=[])
     lz = leiter.compute(d, state(ready={"lvl": 0, "fail": ["no_outer"], "gh": {"cap": 30, "next": 50, "halt": "squad",
-                                         "need": "first squad: 0 of 3 members hold a real weapon (need 3+, all armed)"}},
-                                 mil={"kit": {"n": 8, "full": 8, "armor": 8, "weapon": 3, "wood": 0, "tr": 0, "sq": 3, "sqw": 0},
+                                         "need": "first squad: 3 of 3 fit; a real weapon usable for 0 of 3 (need 3+ ready)"}},
+                                 mil={"kit": {"n": 8, "full": 8, "armor": 8, "weapon": 3, "wood": 0, "tr": 0, "sq": 3, "sqw": 0,
+                                              "sqf": 3, "sqa": 0, "sqok": 0},
                                       "free": {"weapon": 40}}))
     txt = lz["tracks"]["ruestung"]["blocked"]
     assert txt.startswith("40 freie weapon") and "die Soldaten tragen sie nicht" not in txt
-    assert "Wachstums-Tor squad: first squad: 0 of 3" in txt and "Trupp A 0 von 3" in txt
+    assert "Wachstums-Tor squad: first squad: 3 of 3 fit; a real weapon usable for 0 of 3" in txt and "Trupp A 0 von 3 bereit (3 fit, Waffe nutzbar fuer 0)" in txt
+
+
+def test_blocked_evidence_free_weapon_silent_when_first_squad_ready(tmp_path, cfg_dir):
+    """BUG-860: with the first squad READY by the kernel's rule (mil.kit sqok 1, no 'squad' halt) the free weapons are no evidence that the soldiers do not take them."""
+    d = run_dir(tmp_path, evs=[])
+    lz = leiter.compute(d, state(ready={"lvl": 0, "fail": ["no_outer"], "gh": {"cap": 50, "next": 80, "halt": "full", "need": "2 soldiers fully equipped < 6"}},
+                                 mil={"kit": {"n": 8, "full": 8, "armor": 8, "weapon": 3, "wood": 3, "tr": 1, "sq": 3, "sqw": 3,
+                                              "sqf": 3, "sqa": 3, "sqok": 1},
+                                      "free": {"weapon": 40}}))
+    txt = lz["tracks"]["ruestung"].get("blocked") or ""
+    assert "freie weapon" not in txt and "Trupp A" not in txt

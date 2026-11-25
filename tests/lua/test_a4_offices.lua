@@ -189,11 +189,10 @@ T.test('BUG-055: verbs squad.create / squad.leader / squad.add / squad.uniform: 
   T.eq(r.data.leader, false)
   T.ok(r.msg:find('no leader yet: squad.leader', 1, true), r.msg)
   local rid = r.data.squad
+  -- NEU8 (BUG-860): squad.add into a squad without a leader seats the unit AS its leader (no deadlock with squad.leader)
   r = W.inbox('squad.add', {squad = rid, unit = 44})
-  T.eq({r.ok, r.msg}, {false, 'squad ' .. rid .. ' has no leader: squad.leader first'})
-  r = W.inbox('squad.leader', {squad = rid, unit = 45})
-  T.ok(r.ok, r.msg)
-  r = W.inbox('squad.add', {squad = rid, unit = 44})
+  T.ok(r.ok and r.data.leader == true and r.msg:find('as its leader', 1, true), r.msg)
+  r = W.inbox('squad.add', {squad = rid, unit = 45})
   T.ok(r.ok, r.msg)
   -- the creation refused by the game: the act's text comes back
   W.create_mode = 'fail'

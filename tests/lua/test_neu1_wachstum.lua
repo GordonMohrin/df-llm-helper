@@ -22,9 +22,11 @@ T.test('NEU1 P4: growth_ladder steps and halts in the documented order (fail clo
   T.eq({g.tier, g.cap, g.next, g.halt}, {0, 30, 50, 'squad'}, 'nothing known: cap 30, the squad holds it')
   g = L({sq_n = 2, sq_w = 2, drink_d = 99})
   T.eq(g.halt, 'squad', 'two members are no squad (armed_min 3)')
-  g = L({sq_n = 4, sq_w = 3, drink_d = 99})
-  T.eq(g.halt, 'squad', 'one member without a weapon')
-  T.ok(g.need:find('3 of 4', 1, true), g.need)
+  g = L({sq_n = 4, sq_w = 2, drink_d = 99})
+  T.eq(g.halt, 'squad', 'two members without a weapon: 2 ready of the 3 needed')
+  T.ok(g.need:find('usable for 2 of 4', 1, true), g.need)
+  g = L({sq_n = 4, sq_w = 3, drink_d = 99})                                -- BUG-860: armed_min ready members pass, a fourth need not be armed
+  T.ok(g.halt ~= 'squad', 'three ready of four pass')
   g = L({sq_n = 4, sq_w = 4})
   T.eq({g.cap, g.halt}, {30, 'drink'}, 'no drink reading: fail closed')
   g = L({sq_n = 4, sq_w = 4, drink_d = 29})
@@ -164,7 +166,7 @@ end)
 T.test('NEU1 P4: a step is given up only after drop_days lower; a small fort grows to the step, not further', function()
   local W = rworld{n = 20, kit = {n = 4, fullr = 0, metal = 0, sq_n = 4, sq_w = 4}, core_d = 45}
   T.eq(W.state().pop.cap, 50)
-  W.kit = {n = 4, fullr = 0, metal = 0, sq_n = 4, sq_w = 3}              -- one soldier lost his weapon
+  W.kit = {n = 4, fullr = 0, metal = 0, sq_n = 4, sq_w = 2}              -- two soldiers lost their weapon
   day(W, 2)
   local s = W.state()
   T.eq({s.pop.gate_cap, s.ready.gh.halt}, {50, 'squad'}, 'two days lower: the step holds, the halt is named')

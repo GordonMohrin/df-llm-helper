@@ -57,7 +57,7 @@ T.test('BUG-829: state mil.kit names the first squad (sq members, sqw armed, wb 
   T.ok(s.mil and s.mil.kit, 'mil.kit ' .. T.show(s.mil))
   T.ok(s.mil.kit.sq >= 3 and s.mil.kit.sqw == 0 and s.mil.kit.wb == 0, T.show(s.mil.kit))
   T.eq(s.ready.gh.halt, 'squad')
-  T.ok(s.ready.gh.need:find('first squad: 0 of ' .. s.mil.kit.sq, 1, true), s.ready.gh.need)
+  T.ok(s.ready.gh.need:find('a real weapon usable for 0 of ' .. s.mil.kit.sq, 1, true), s.ready.gh.need)
 end)
 
 T.done()

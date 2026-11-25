@@ -398,9 +398,17 @@ def _state_blocked(save_dir: Path, s: dict, evs: list[dict], now: int, key: str 
         # take: say so, and name the real binder (the growth gate's first-squad step) when it is the one that holds
         txt = f"{fr} freie {what} im Lager (state mil.free: mit Hacken/Spitzhacken, gesperrten und reservierten)"
         gh = _o(_o(s.get("ready")).get("gh"))
+        kit = _o(_o(s.get("mil")).get("kit"))
+        if what == "weapon" and kit.get("sqok") == 1 and gh.get("halt") != "squad":
+            # BUG-860: the first squad is READY by the kernel's one rule (>= armed_min fit members, each with a real weapon in hand, assigned or
+            # waiting; wooden drill in PEACE does not count against it): the free weapons are no sign that the soldiers do not take them
+            return ""
         if what == "weapon" and gh.get("halt") == "squad":
-            kit = _o(_o(s.get("mil")).get("kit"))
-            sq = f", Trupp A {kit['sqw']} von {kit['sq']} bewaffnet" if "sq" in kit and "sqw" in kit else ""
+            sq = ""
+            if "sq" in kit and "sqw" in kit:
+                sq = f", Trupp A {kit['sqw']} von {kit['sq']} bereit"
+                if "sqf" in kit and "sqa" in kit:
+                    sq += f" ({kit['sqf']} fit, Waffe nutzbar fuer {kit['sqa']})"
             txt += f"; Wachstums-Tor squad: {gh.get('need', '?')}{sq}"
         return txt
     if kind == "trade":

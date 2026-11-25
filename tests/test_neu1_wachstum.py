@@ -44,7 +44,7 @@ def test_event_and_state_contracts():
     so = {"n": 6, "tick": 9, "type": "SORTIE", "cls": "B", "msg": "sortie A: kill", "d": {"phase": "go", "small": 1}}
     assert schema.validate("event", so) == []
     gh = schema.STATE.opt["ready"].opt["gh"]
-    assert set(gh.req) == {"cap", "next", "halt"} and "need" in gh.opt
+    assert set(gh.req) == {"cap", "next", "halt"} and "need" in gh.opt and "inj" in gh.opt
     lua = (ROOT / "lua" / "dfllm" / "util" / "contract.lua").read_text("utf-8")
     assert "GROWTH_HALT = {cls = 'B', by = 'readiness'}" in lua
-    assert "gh = obj({cap = NAT, next = NAT, halt = str(12)}, {need = str(100)})" in lua
+    assert "gh = obj({cap = NAT, next = NAT, halt = str(12)}, {need = str(100), inj = NAT})" in lua

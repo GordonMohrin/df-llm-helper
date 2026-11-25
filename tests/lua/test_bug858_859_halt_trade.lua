@@ -5,23 +5,23 @@ local F = require('trade_world')
 
 local function fresh(mod) package.loaded['dfllm.' .. mod] = nil; return require('dfllm.' .. mod) end
 
-T.test('BUG-858: first squad 2 of 3 armed, 1 of the unarmed injured: the halt stays "squad", the need text and inj name the injured one', function()
+T.test('BUG-858 / BUG-860: first squad 2 of 3 ready, the third not fit: the halt stays "squad", the need text and inj name the unfit one', function()
   local R = fresh('readiness')
   local c = {}
   for k, v in pairs(R.GROWTH) do c[k] = v end
   c.on = true
-  local g = R.growth_ladder({n = 3, fullr = 2, metal = 0, sq_n = 3, sq_w = 2, sq_u = 1, lvl = 1, lever = true, drink_d = 100}, c)
-  T.eq(g.halt, 'squad', 'the rule is unchanged: 2 of 3 armed halts')
+  local g = R.growth_ladder({n = 3, fullr = 2, metal = 0, sq_n = 3, sq_f = 2, sq_a = 3, sq_w = 2, sq_u = 1, lvl = 1, lever = true, drink_d = 100}, c)
+  T.eq(g.halt, 'squad', '2 ready of 3 (armed_min 3) halts')
   T.eq(g.inj, 1)
-  T.ok(g.need:find('; 1 injured)', 1, true), g.need)
-  local g2 = R.growth_ladder({n = 3, fullr = 2, metal = 0, sq_n = 3, sq_w = 2, sq_u = 0, lvl = 1, lever = true, drink_d = 100}, c)
+  T.ok(g.need:find('first squad: 2 of 3 fit; a real weapon usable for 3 of 3 (need 3+ ready)', 1, true), g.need)
+  local g2 = R.growth_ladder({n = 3, fullr = 2, metal = 0, sq_n = 3, sq_f = 3, sq_a = 2, sq_w = 2, sq_u = 0, lvl = 1, lever = true, drink_d = 100}, c)
   T.eq(g2.halt, 'squad')
   T.eq(g2.inj, nil)
-  T.ok(not g2.need:find('injured', 1, true), g2.need)
-  local g3 = R.growth_ladder({n = 3, fullr = 1, metal = 0, sq_n = 3, sq_w = 3, sq_u = 5, lvl = 1, lever = true, drink_d = 100}, c)
+  T.ok(g2.need:find('3 of 3 fit; a real weapon usable for 2 of 3', 1, true), g2.need)
+  local g3 = R.growth_ladder({n = 3, fullr = 1, metal = 0, sq_n = 3, sq_w = 3, sq_ok = true, sq_u = 5, lvl = 1, lever = true, drink_d = 100}, c)
   T.ok(g3.halt ~= 'squad' and g3.inj == nil, 'a halt other than squad never carries the injured count')
   local g4 = R.growth_ladder({n = 3, fullr = 1, metal = 0, sq_n = 3, sq_w = 2, sq_u = 9, lvl = 1, lever = true, drink_d = 100}, c)
-  T.eq(g4.inj, 1, 'never more injured than unarmed')
+  T.eq(g4.inj, 3, 'never more unfit than members')
 end)
 
 local PLAN = {v = 2, year = 3, phase_target = 'P4', seasons = {{build = {}}, {build = {}}, {build = {}}, {build = {}}},
