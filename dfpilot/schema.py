@@ -94,6 +94,7 @@ ACT = {
     "mood_task": ["care"],                         # BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
     "drink_pile": ["economy"],                     # BUG-782: the refuge's drink store on existing floor, no dig
     "tool_pile": ["economy"],                      # BUG-053: a weapons stockpile for the miners' picks near the mines
+    "wood_pile": ["economy"],                      # NEU16 BUG-913: a wood stockpile dfllm-wood beside the Carpenter's workshop (quickfort key w)
     "pull": ["gate"], "cancel_own_lever_job": ["gate"], "link_lever": ["gate", "player"], "burrow_units": ["gate", "player"],
     "building_remove": ["player"],                 # NEU1 P7: the verbs zone.remove / building.remove
     "cancel_link_job": ["gate"],                   # BUG-546: the kernel's own unworked link job of a lever, taken down to link again
@@ -132,7 +133,7 @@ STATE_OWNERS = {
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.wall": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.nowood": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy", "stock.mfar": "economy",
     "stock.picks": "economy",
-    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.wood": "economy", "stock.woodt": "economy", "stock.woodb": "economy", "stock.cont": "economy", "stock.contt": "economy", "stock.contw": "economy", "stock.dcx": "economy", "stock.rsv": "economy", "stock.bshort": "economy",
+    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.wood": "economy", "stock.woodt": "economy", "stock.woodb": "economy", "stock.woodf": "economy", "stock.woodd": "economy", "stock.cont": "economy", "stock.contt": "economy", "stock.contw": "economy", "stock.dcx": "economy", "stock.rsv": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.dfar": "economy", "stock.dall": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
     "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "mood": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
@@ -592,6 +593,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-887 round 6: PILE_BARREL_RELEASE = the kernel lowered the barrel limit of a kernel food pile that holds registered EMPTY barrels (phase lowered) and measured it 1 and 7 game days later:
     # pile, before/after = limit, reg0/reg1/reg7 = registered empty barrels of the pile at the lowering / after 1 d / after 7 d, cx0/cx7 = DF brew cancels in the window then / after 7 d, verdict
     # (`DF kept the registration (...)` | `the registration fell`)
+    # NEU16 BUG-911: WOOD_DISBELIEVED = DF cancelled `n` wood jobs ('Needs logs': barrel, bed, charcoal, ...) within 7 game days while the kernel counted `w` usable (near) logs: for `d` game days
+    # autochop and the status texts count 0 usable logs (the count is not what DF can use)
+    "WOOD_DISBELIEVED": ("B", "economy", _d("n:i w:i d:i")),
     "PILE_BARREL_RELEASE": ("B", "economy", _d("pile:i before:i after:i reg0:i phase:s", "reg1:i reg7:i cx0:i cx7:i verdict:s")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
@@ -1226,7 +1230,7 @@ STATE = Obj(
                            # BUG-042: why the stills do not brew while drink is below the plan's target
                            "dwhy": Str(maxbytes=80),
                            # NEU4 BUG-842/841: usable logs / all logs and usable / all empty containers (only where they differ); DF cancels the brews for want of a container
-                           "wood": NAT, "woodt": NAT, "woodb": NAT, "cont": NAT, "contt": NAT, "contw": Str(maxbytes=90), "dcx": FLAG,
+                           "wood": NAT, "woodt": NAT, "woodb": NAT, "woodf": NAT, "woodd": NAT, "cont": NAT, "contt": NAT, "contw": Str(maxbytes=90), "dcx": FLAG,
                            # NEU11 BUG-880: 1 = the standing container reserve orders the containers itself (a batch stands or was ordered < 3 game days ago and a material exists)
                            "rsv": FLAG,
                            # BUG-382: drink below gather.drink_d and too few brewable plants: the runner's gather zone follows it

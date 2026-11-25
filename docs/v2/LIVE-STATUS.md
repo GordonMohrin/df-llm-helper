@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 779 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 830 |
+| offen, nie live gesehen | 785 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 836 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
@@ -294,9 +294,13 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-437 `runs/run-16b/STAND.md:496` (no verdict word): y491 Plan: P5, Bau farms@S1 (fortcore st4 weggelassen wegen BUG-437), Spur Versorgung: kein Bau-Schritt, Kernel-Cure laeuft.
 - BUG-437 `runs/run-16b/STAND.md:508` (no verdict word): (Spur Wehr II: fortcore st4 in s1, jetzt wo Trinken 117 d, BUG-437-Warnung entfaellt), LEITER 7/18
 - BUG-437 `runs/run-16b/STAND.md:587` (no verdict word): lan y524: Phase P5, Bauten stockroom@S1 (fortcore abgelehnt/BUG-437 Warnung), Spur Wehr;
+- BUG-437 `runs/run-16b/STAND.md:604` (no verdict word): Plan y532: Phase P5, Bau fortcore st4 versehentlich in s1 (BUG-437 warn), s1b0 nach Start per bp.cancel streichen;
+- BUG-437 `runs/run-16b/STAND.md:606` (no verdict word): G-530: keine Stelle; fortcore st4 bewusst weggelassen wegen BUG-437 bei Trinken 0), Spur Versorgung: Schritt = Fassbestellung 6936 (3 von 40 gebaut).
 - BUG-437 `runs/run-16d/STAND.md:124` (no verdict word): refuge_beds, dining, furnaces; Fallen erst s2 wegen Warnung BUG-437 Wasser)
 - BUG-437 `runs/run-16d/STAND.md:132` (no verdict word): st4, traps bridges, explore x4); Entscheidung: Fallen trotz BUG-437-Warnung, da drink 405d/food 60-75d innen
 - BUG-437 `runs/run-16b/FR-BUGS.md:927` (no verdict word): tone-fall traps on the way out of the fort while drink 0 d (BUG-437: they kill the citizens who walk it): drop it until drink and food stand inside' -> nicht aufgenommen.
+- BUG-437 `runs/run-16b/FR-BUGS.md:1153` (no verdict word): ## FR Plan y532 (i2): fortcore stage 4 gegen BUG-437
+- BUG-437 `runs/run-16b/FR-BUGS.md:1154` (no verdict word): tone-fall traps on the way out of the fort while drink 0 d (BUG-437: they kill the citizens who walk it): drop it".
 - BUG-438 `runs/run-16a/STAND.md:91` (no verdict word): escheitert, beide bp.cancel (Entscheidung); explore-Projekt BUG-438 laeuft;
 - BUG-438 `runs/run-16d/FR-BUGS.md:561` (no verdict word): r probes'. Seit y446 liefert jeder Probe nur Mudstone/Soil (BUG-438).
 - BUG-445 `runs/run-16a/FR-BUGS.md:231` (no verdict word): LES, Boden darunter nicht erreichbar); surfacecore ist laut BUG-445 gesperrt (und braucht Cw-Waende = Stein, 0).
@@ -319,6 +323,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/FR-BUGS.md:581` (no verdict word): '. Trinken bleibt 0 d. bp.place cistern site=S3 abgelehnt: 'BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core ...
 - BUG-469 `runs/run-16b/FR-BUGS.md:673` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40: too far f
 - BUG-469 `runs/run-16b/FR-BUGS.md:833` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40) ...
+- BUG-469 `runs/run-16b/FR-BUGS.md:1095` (no verdict word): ace tpl=cistern site=A101_176_137_1 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps ...
 - BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
 - BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
 - BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);
@@ -329,6 +334,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-517 `runs/run-16d/STAND.md:198` (no verdict word): 01 sum d6 Pop 39: Runde 32: follow neu, PERIMETER OPEN weg (BUG-517), levers:O1 bleibt;
 - BUG-527 `runs/run-16b/FR-BUGS.md:318` (no verdict word): xplore 98,136,137; workshops 97,107,134 r1, Kitchen-Warnung BUG-527).
 - BUG-530 `runs/run-16b/STAND.md:570` (no verdict word): 6 Plan y519: P5, nur fortcore st4 (Draft fand keine Raeume: BUG-530);
+- BUG-530 `runs/run-16b/STAND.md:606` (no verdict word): 23:49 y533 spr d1 Plan y533: Phase P5, 0 Bauten (BUG-530: keine Stelle;
 - BUG-530 `runs/run-16c/STAND.md:357` (no verdict word): u (main 534411e); Plan y374 (bedrooms+dining surface, Draft BUG-530: aqshaft/explore finden keinen Standort;
 - BUG-530 `runs/run-16c/FR-BUGS.md:415` (no verdict word): kein Hartstein ("0 usable", 36-52 out of reach), Plan-Draft BUG-530 bietet nur Oberflaechen-bedrooms/dining.
 - BUG-530 `runs/run-16d/FR-BUGS.md:428` (no verdict word): del' als Zustand mit Ziel (trade.want) statt PLAN_EXHAUSTED/BUG-530.
@@ -361,7 +367,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-602 `runs/run-16b/STAND.md:248` (no verdict word): - 21:21 y374 aut d62 aqshaft-Ausweich-Site S1 68,85,140 (BUG-602, R39) per bp.place gesetzt
 - BUG-602 `runs/run-16b/FR-BUGS.md:398` (no verdict word): - aqshaft-Ausweich-Sites (BUG-602): 'bp sites aqshaft --fresh' liefert jetzt S1-S3 (68,85/91/93, depth 17);
 - BUG-618 `runs/run-16b/STAND.md:267` (no verdict word): Muboomon kam. Food 0-24 d zyklisch (Kohlblatt ungeniessbar BUG-618 bekannt)
-- BUG-682 `runs/run-16b/FR-BUGS.md:549` (no verdict word): 0 unerreichbare Tote -> Gedenkplatten; 'plan propose' nennt BUG-682 (O1/B1 durch Wand+Tür ersetzt, no_inner/no_outer per Plan nicht behebbar).
+- BUG-682 `runs/run-16b/FR-BUGS.md:549` (no verdict word): 0 unerreichbare Tote -> Gedenkplatten; 'plan propose' nennt BUG-682 (O1/B1 durch Wand+TÃ¼r ersetzt, no_inner/no_outer per Plan nicht behebbar).
 - BUG-682 `runs/run-16b/FR-BUGS.md:573` (no verdict word): fortcore vorn)', aber inspect defense: B1/B2/O1 'replaced' (BUG-682, rebuild how=none, stop_after 2), fortcore st4 haengt 'build_lost at s4.build, missing trap x41' (#23874 y480s0b0, #233
 - BUG-686 `runs/run-16a/FR-BUGS.md:442` (ungesehen): elbst gesiegelt, nur per 'seal at=last close=door' von mir (BUG-686 'seal at=ents selbst' ungesehen).
 - BUG-736 `runs/run-16b/FR-BUGS.md:518` (no verdict word): ei Stein 0 / 501 Logs: noch kein sichtbarer Holzbau-Effekt (BUG-736) - Projekte weiter 'no builder took it'.
