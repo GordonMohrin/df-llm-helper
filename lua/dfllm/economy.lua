@@ -2090,6 +2090,31 @@ end
 -- the effect is MEASURED: PILE_BARREL_RELEASE one and seven game days after each lowering (registered empties before / after, brew cancels before / after). If the registered empties
 -- did not fall after 7 days, p.relstop: DF kept the registration, nothing is lowered further.
 M.REL_D1, M.REL_D7 = 1, 7
+-- (verifier) a lowering made by the release is never left to the standing cap's exit (which never comes while DF keeps cancelling): when the d7 verdict is 'DF kept the registration' the old
+-- limits go back AT ONCE, and in any case after REL_MAX_D game days; then the release pauses REL_PAUSE_D days. 0 is allowed as a new limit only for a pile with no barrel with contents.
+M.REL_MAX_D, M.REL_PAUSE_D = 14, 30
+function M.release_restore(K, p, now, why, only)
+  if type(p.relpiles) ~= 'table' then return 0 end
+  local back, ids = {}, {}
+  for id, e in pairs(p.relpiles) do
+    if only == nil or only == id then
+      local old = type(p.pilecap) == 'table' and p.pilecap[id] or nil
+      back[id] = math.tointeger(old) or math.tointeger(e.old)
+      ids[#ids + 1] = id
+    end
+  end
+  if #ids == 0 then return 0 end
+  local ok = type(K.act.pile_barrels) == 'function' and K.act.pile_barrels('restore', back)
+  for _, id in ipairs(ids) do
+    p.relpiles[id] = nil
+    if type(p.pilecap) == 'table' then p.pilecap[id] = nil end
+  end
+  if type(p.pilecap) == 'table' and next(p.pilecap) == nil then p.pilecap, p.pilet = nil, nil end
+  if next(p.relpiles) == nil then p.relpiles = nil end
+  K.log('warn', 'pile barrel release over (%s): the barrel limits of %d piles are back at once%s', why, #ids, ok and '' or ' (the write failed)')
+  K.persist.touch('m.economy')
+  return #ids
+end
 function M.mood_piles_zero(K, p, c, now)
   if type(K.act.pile_barrels) ~= 'function' then return end
   now = now or K.now().tick
@@ -2138,8 +2163,9 @@ function M.release_measure(K, c, p, now)
     if el >= M.REL_D7 * DAY then
       local kept = reg >= (e.r0 or 0)
       if kept then p.relstop = true end
-      M.release_emit(K, e, 'd7', reg, cx, kept and 'DF kept the registration (no further pile is lowered)' or 'the registration fell')
+      M.release_emit(K, e, 'd7', reg, cx, kept and 'DF kept the registration (no further pile is lowered, the old limit goes back now)' or 'the registration fell')
       p.relmeas[id] = nil
+      if kept then M.release_restore(K, p, now, 'DF kept the registration', id) end
       K.persist.touch('m.economy')
     elseif el >= M.REL_D1 * DAY and (e.st or 0) < 1 then
       e.st, e.r1 = 1, reg
@@ -2152,7 +2178,15 @@ function M.pile_release(K, c, r)
   local p, inv, now = r.p, r.inv or {}, r.now
   local cc = c.cancel or {}
   M.release_measure(K, c, p, now)
-  if cc.release == false or p.relstop or type(K.act.pile_barrels) ~= 'function' then return end
+  if type(p.relpiles) == 'table' then
+    for id, e in pairs(p.relpiles) do
+      if now - (math.tointeger(e.t) or now) >= M.REL_MAX_D * DAY then
+        p.relnext = now + M.REL_PAUSE_D * DAY
+        M.release_restore(K, p, now, 'time bound of ' .. M.REL_MAX_D .. ' days', id)
+      end
+    end
+  end
+  if cc.release == false or p.relstop or (p.relnext and now < p.relnext) or type(K.act.pile_barrels) ~= 'function' then return end
   if not M.cx_gate(K, c, now) then return end                       -- only with DF's own reason (BUG-844)
   if (math.tointeger(inv.barrels_reg) or 0) <= 0 then return end   -- no registered empty barrel in the census
   local ok, res = K.act.pile_barrels('release', {})
@@ -2168,6 +2202,8 @@ function M.pile_release(K, c, r)
     end
     if type(p.pilecap) ~= 'table' then p.pilet = now; p.pilecap = {} end
     if p.pilecap[tostring(e.id)] == nil then p.pilecap[tostring(e.id)] = e.old end
+    p.relpiles = type(p.relpiles) == 'table' and p.relpiles or {}
+    if p.relpiles[tostring(e.id)] == nil then p.relpiles[tostring(e.id)] = {old = e.old, t = now} end
     K.log('warn', 'pile barrel release: stockpile %s (%s) barrel limit %s -> %s (%s registered empty barrels kept as its containers, %s with contents); DF cancelled brews %dx', tostring(e.id), tostring(e.name),
           tostring(e.old), tostring(e.new), tostring(e.reg_empty), tostring(e.reg_full), cx)
     M.release_emit(K, p.relmeas[tostring(e.id)], 'lowered', e.reg_empty or 0, cx)

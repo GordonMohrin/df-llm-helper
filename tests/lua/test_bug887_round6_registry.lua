@@ -214,6 +214,7 @@ T.test('BUG-887 round 6 D: if the registered empties did not fall after 7 days t
   local p = W.K.persist.get('m.economy')
   p.orders = {['dfllm:drink'] = ord.id}
   local inv = {brew_p = 6978, barrels = 20, barrels_empty = 4, cont_free = 0, barrels_reg = 4}
+  W.K.cfg.baseline.economy.cancel.stand = false              -- the standing cap is its own cure with its own exit; it would lower the pile again in the same run
   local function watch(day) econ.brew_watch(W.K, W.K.cfg.baseline.economy, {day = true, now = day * DAYT, p = p, inv = inv, days = {drink_d = 40}, cit = 6}) end
   feed(econ, W.K, 12, 101 * DAYT)
   watch(101)
@@ -225,10 +226,41 @@ T.test('BUG-887 round 6 D: if the registered empties did not fall after 7 days t
   T.ok(ev[3].d.verdict:find('DF kept the registration', 1, true), ev[3].d.verdict)
   T.eq(p.relstop, true)
   T.ok(ev[3].msg:find('DF kept the registration', 1, true), ev[3].text)
-  P[1].max_barrels = 54                                          -- put back by hand: the release does not lower it again
+  -- (verifier) the failed cure gives the limit back AT ONCE, not at the standing cap's exit: the old limit is back and p.pilecap no longer holds the entry
+  T.eq(P[1].max_barrels, 54, 'the old limit is back after the d7 kept verdict')
+  T.ok(p.pilecap == nil or p.pilecap['41'] == nil, 'p.pilecap no longer holds the pile')
+  T.eq(p.relpiles, nil)
+  T.ok(log_has(W, 'pile barrel release over (DF kept the registration)'), 'logged')
   feed(econ, W.K, 12, 109 * DAYT)
   watch(109)
+  T.eq(P[1].max_barrels, 54, 'not lowered again')
   T.eq(#W.find_events('PILE_BARREL_RELEASE'), 3)
+end)
+
+T.test('BUG-887 round 6 D: a release lowering is given back after 14 game days even when the cancels go on, then the release pauses', function()
+  local W, ord, P, reg1 = release_world()
+  local econ = require('dfllm.economy')
+  local p = W.K.persist.get('m.economy')
+  p.orders = {['dfllm:drink'] = ord.id}
+  W.K.cfg.baseline.economy.cancel.stand = false
+  local inv = {brew_p = 6978, barrels = 20, barrels_empty = 4, cont_free = 0, barrels_reg = 4}
+  local function watch(day) econ.brew_watch(W.K, W.K.cfg.baseline.economy, {day = true, now = day * DAYT, p = p, inv = inv, days = {drink_d = 40}, cit = 6}) end
+  feed(econ, W.K, 12, 101 * DAYT)
+  watch(101)
+  T.eq(P[1].max_barrels, 2)
+  P[1].storage.container_item_id = kmock.vec{reg1[2].id, reg1[3].id, reg1[4].id}      -- the registration fell: the cure works, the cancels go on
+  watch(102)
+  watch(108)
+  T.eq(p.relstop, nil)
+  T.eq(P[1].max_barrels, 2, 'still lowered on day 108')
+  feed(econ, W.K, 12, 115 * DAYT)
+  watch(115)
+  T.eq(P[1].max_barrels, 54, 'time bound: back after 14 days')
+  T.ok(p.pilecap == nil or p.pilecap['41'] == nil, 'p.pilecap no longer holds the pile')
+  T.ok(p.relnext ~= nil, 'a pause follows')
+  feed(econ, W.K, 12, 116 * DAYT)
+  watch(116)
+  T.eq(P[1].max_barrels, 54, 'paused: not lowered again at once')
 end)
 
 T.test('BUG-887 round 6 D: without a registered empty in the census, or with the switch off, nothing is lowered', function()
