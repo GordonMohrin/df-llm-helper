@@ -884,8 +884,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # for `wait` ticks; worker = how many of those pulls a worker took (0: DF dropped every job unclaimed)
     "LEVER_NOEFFECT": ("B", "gate", _d("bridge:s lever:i", "pulls:i state:s wait:i worker:i")),
     # BUG-253: a unit stood on the footprint of a bridge while it moved (to = up|down; pull = the tick our pull was queued,
-    # -1 a foreign one); once per move, the death itself is BRIDGE_CRUSH
-    "GATE_CRUSH_RISK": ("B", "gate", _d("bridge:s unit:i", "k:s to:s pull:i pos:p")),
+    # -1 a foreign one); once per move, the death itself is BRIDGE_CRUSH.
+    # BUG-881: eta = ticks the nearest hostile still needs (a forced raise), forced = 1: it went ahead with the unit ON the footprint
+    "GATE_CRUSH_RISK": ("B", "gate", _d("bridge:s unit:i", "k:s to:s pull:i pos:p eta:i forced:i")),
     # BUG-121 (Run 14 note 101): boot found the game clock (tick_neu) before the last tick the runtime folder saw (tick_alt): an
     # older save was loaded. n_alt = the last event number of the discarded timeline (numbers continue after it); readers drop
     # events before this marker whose tick is later than tick_neu. BUG-165: kind clock (the above) | foreign (the save's

@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 771 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 822 |
+| offen, nie live gesehen | 769 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 820 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
@@ -308,6 +308,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/STAND.md:346` (no verdict word): elle nur ausserhalb im Lockdown); cistern bp.place refused (BUG-469, kein Bach erreichbar, path braeuchte Waypoints = Frei-Graben an Wasser -> nicht gemacht);
 - BUG-469 `runs/run-16b/STAND.md:362` (no verdict word): Patienten-Wasser per Traeger 34 Tiles ok; cistern refused (BUG-469, kein Freigraben an Wasser)
 - BUG-469 `runs/run-16b/STAND.md:411` (no verdict word): 9817 (STRUCK_DOWN), starb selbst; Cistern: bp.place refused BUG-469, sites cistern core/refuge: 'no pipe route' (Wasser 82,89,141 / 82,171,141 zu weit) -> kein Brunnen moeglich, Trinken b
+- BUG-469 `runs/run-16b/STAND.md:578` (no verdict word): 12:23 y521 aut d4 Trinken 0 d, Zisterne abgelehnt (BUG-469), keine neuen Tote ausser Alter (29123)
 - BUG-469 `runs/run-16b/FR-BUGS.md:297` (no verdict word): der (2) dfpilot muss den Brunnen speisen (cistern lehnt ab: BUG-469 Wasser 78 Schritte entfernt), (3) Hospital-Vorlage mit eigener Wasserzone IM Raum.
 - BUG-469 `runs/run-16b/FR-BUGS.md:334` (no verdict word): (accepted 0), 'bp.place tpl=cistern' am Hospital abgelehnt (BUG-469: kein Fluss/Aquifer erreichbar).
 - BUG-469 `runs/run-16b/FR-BUGS.md:338` (no verdict word): 00. Hospital-Brunnen 97,101,133 trocken, cistern abgelehnt (BUG-469).
@@ -315,6 +316,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/FR-BUGS.md:535` (no verdict word): er, Meldung nennt das ('barrels wanted'). cistern: bp.place BUG-469 refused, 'bp.sites cistern core/refuge' 'no pipe route' (Wasser 40+ Tiles;
 - BUG-469 `runs/run-16b/FR-BUGS.md:581` (no verdict word): '. Trinken bleibt 0 d. bp.place cistern site=S3 abgelehnt: 'BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core ...
 - BUG-469 `runs/run-16b/FR-BUGS.md:673` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40: too far f
+- BUG-469 `runs/run-16b/FR-BUGS.md:833` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40) ...
 - BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
 - BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
 - BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);

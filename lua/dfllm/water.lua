@@ -2058,9 +2058,39 @@ local function hospital_out(r, kern, refuge, kname, rname)
   return {n = #zones, total = #r.hosp, zones = zones, kern = kname, refuge = rname}
 end
 
+-- BUG-883 (Run 17d i4 Girderroots y418: 7 of the 18 dead were patients, lying or walking outside Kern+ and the refuge, east of O1; the zone
+-- at 83,96,144 was 'superseded' by BUG-131 and R0 hospital_out stayed silent): in PEACE, with a hospital zone outside Kern+/Tiefe+ (idle or
+-- superseded ones too) and patients on tiles of neither, PATIENTS_OUT says so once per PEACE_OUT_EVERY ticks (a season), before the siege
+M.PEACE_OUT_EVERY = 100800
+local function peace_out(K, r, kern, refuge, kname, rname, ho)
+  local zones = ho.n + #(ho.ign or {})
+  local now = K.now().tick
+  if zones == 0 or #r.patients == 0 or (st.pout_peace and now - st.pout_peace < M.PEACE_OUT_EVERY) then return end
+  local ids = {}
+  local nout = 0
+  for _, pt in ipairs(r.patients) do
+    if not (on_burrow(kern, pt.x, pt.y, pt.z) or on_burrow(refuge, pt.x, pt.y, pt.z)) then
+      nout = nout + 1
+      if #ids < 20 then ids[#ids + 1] = pt.id end
+    end
+  end
+  if nout == 0 then return end
+  st.pout_peace = now
+  local msg = string.format('PEACE: %d of %d patients lie outside %s/%s and %d hospital zone(s) lie outside them too: in a siege they cannot '
+                            .. 'walk in (Run 17d i4: 7 of 18 dead were patients); plan the hospital inside %s (hospital.retire the old zone)',
+                            nout, #r.patients, kname, rname, zones, kname)
+  K.emit('PATIENTS_OUT', 'B', trunc(msg, 200), {n = nout, patients = #r.patients, burrow = trunc(kname .. '/' .. rname, 60), units = ids,
+                                                mode = 'PEACE', hosp_out = zones})
+  K.log('warn', 'water: %s', msg)
+end
+
 local function patients_out(K, r, kern, refuge, kname, rname, ho)
   local mode = K.mode()
-  if not FIGHT[mode] then st.pout = nil; st.pdec = nil; return end
+  if not FIGHT[mode] then
+    st.pout = nil; st.pdec = nil
+    if mode == 'PEACE' then peace_out(K, r, kern, refuge, kname, rname, ho) end
+    return
+  end
   if #r.patients == 0 then return end
   local okn, names = K.call('siege', 'alert_names')
   names = okn and type(names) == 'table' and names or {}
