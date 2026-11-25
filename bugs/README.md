@@ -851,6 +851,9 @@ Related: FR-xx, BUG-xx
 | [BUG-878](BUG-878-reserve-dead-wooden-order.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | Container reserve kept a dead wooden MakeBarrel order for ever and never read DF's cancels of its own job | `lua/dfllm/economy.lua` |
 | [BUG-879](BUG-879-reserve-free-boulders.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Reserve's 'free boulders' did not match what DF can use | `lua/dfllm/economy.lua` |
 | [BUG-880](BUG-880-ladder-reserve-flag.md) | fixed (offline, live-untested) | offen, nie live gesehen | low | Ladder named order.add MakeBarrel although the reserve orders the containers itself | `lua/dfllm/economy.lua` |
+| [BUG-881](BUG-881-arrival-timed-force.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | A raise waits for the recall stream until the hostile is 30 tiles out; its pull is cancelled for walkers right after queueing | `lua/dfllm/gate.lua` |
+| [BUG-882](BUG-882-breach-pullers.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | BREACH after a failed bridge with the hostiles outside takes the pullers of the O1/B1 lever room away | `lua/dfllm/gate.lua` |
+| [BUG-883](BUG-883-peace-patients-out.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Patients outside Kern+/Tiefe+ are reported only in a fight; a superseded hospital zone outside keeps R0 silent | `lua/dfllm/water.lua` |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

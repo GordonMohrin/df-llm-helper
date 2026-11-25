@@ -679,22 +679,41 @@ local function home_covers(K, rm)
   return true
 end
 
+-- BUG-882 (Run 17d i4 Girderroots y418: 'O1 not up at T+900' with the hostiles OUTSIDE took the pullers of the O1/B1 lever room away
+-- at once, nobody could pull them, O1 rose 1,300 ticks later, B1 1,900): a BREACH that is only a failed bridge (nothing inside Kern+, a
+-- fresh census) keeps the pullers of a room whose bridge is still to be raised, while no hostile is within BREACH_LEVER_NEAR tiles of it
+M.BREACH_LEVER_NEAR = 6
+local function breach_pulls(K, rm)
+  local h = K.census.h
+  if type(h) ~= 'table' or K.now().tick - (h.tick or -1e9) > 200 or (h.inside or 0) > 0 or not rm.c then return false end
+  local want = false
+  for bn in pairs(rm.bridges) do
+    local br, r = st.br[bn], rt[bn]
+    if br and br.want == 'up' and r and r.last ~= 'up' and not st.gone[bn] then want = true; break end
+  end
+  if not want then return false end
+  local d = foe_gap(K, rm.c.x, rm.c.y, rm.c.z)
+  return d == nil or d > M.BREACH_LEVER_NEAR
+end
+
 -- BREACH: rooms behind the core seal only, and only while the refuge lacks a linked lever of their bridges (the
--- B2 landing lies next to B2, which may still be down while attackers are inside Kern+)
+-- B2 landing lies next to B2, which may still be down while attackers are inside Kern+); BUG-882: and the rooms of a bridge that failed
+-- while nothing is inside (breach_pulls)
 local function allowed(K, rm, mode)
   local live = false                            -- BUG-030: a room whose bridges are all destroyed has no duty
   for bn in pairs(rm.bridges) do if not st.gone[bn] then live = true; break end end
   if not live then return false end
   if home_covers(K, rm) then return false end    -- BUG-774
   if mode ~= 'BREACH' then return true end
-  return rm.roles.core == true and not rm.roles.outer and not rm.roles.inner and not refuge_covers(K, rm)
+  if rm.roles.core == true and not rm.roles.outer and not rm.roles.inner and not refuge_covers(K, rm) then return true end
+  return breach_pulls(K, rm)
 end
 
 local function duty(K, rm, mode)
   local want = PULL_ROLES[mode]
   if not want or not allowed(K, rm, mode) then return false end
   for role in pairs(rm.roles) do if want[role] then return true end end
-  return false
+  return mode == 'BREACH' and breach_pulls(K, rm)
 end
 
 local function room_state(name)
@@ -1657,6 +1676,47 @@ local function closing(rr, d, now)
   return false
 end
 
+-- BUG-881 (Neuausrichtung 12, Run 17d i4 Girderroots y418 spring d39: ARRIVAL with two cave dragons 92 tiles from O1, both bridges down, 22
+-- citizens in the bailey; the raises waited 'walking onto it in 1-13 steps' for the recall stream until a hostile was within approach_near 30
+-- tiles and the hold had run APPROACH_HOLD ticks (+452): too late, the lever pull and the move take longer than a hostile needs for the
+-- last 60-100 tiles): a SIEGE/BREACH raise is forced like an approach as soon as the nearest visible hostile CLOSES in (2 tiles in 60
+-- ticks) and needs no longer than the pull and the move take: d * RACE_FOE_TPT <= max(CLOSE_BUDGET, the measured lever latency + CLOSE_MOVE).
+-- Forced = only a unit ON the footprint (or its path's first step) still holds it, GATE_FORCED names the rest.
+M.CLOSE_BUDGET, M.CLOSE_AGE, M.CLOSE_TILES = 640, 60, 2
+-- BUG-881: the pull is COMMITTED while its worker is far from the lever (or nobody took it yet): only the last LATE_R tiles of his walk
+-- count, a unit on the footprint cancels it then (the bridge moves the moment he is done), not 8-25 ticks after every queueing
+M.LATE_R = 4
+-- BUG-881: a TIMED force still holds the pull for the walkers who can be on the footprint before the bridge has finished moving, by
+-- the speed each was MEASURED at (ticks a tile between two looks, smoothed; unknown = TIMED_RUN, a dwarf on the run: BUG-380) and the
+-- TIMED_WIN ticks the bridge needs to move and settle: a citizen at 27 ticks a tile holds from 4 steps out, a runner at 9 from 12
+M.TIMED_WIN, M.TIMED_RUN, M.TIMED_NEAR = 110, 9, 2
+local function track(rr, cross, now)
+  local old, new = rr.sp or {}, {}
+  for _, e in ipairs(cross) do
+    local o, tpt = old[e.id], nil
+    if o and now > o.t and e.x and o.x then
+      local mv = math.max(math.abs(e.x - o.x), math.abs(e.y - o.y))
+      if mv > 0 then
+        local inst = (now - o.t) / mv
+        tpt = o.tpt and (o.tpt + inst) / 2 or inst
+      else tpt = o.tpt end
+    end
+    if o and o.x == e.x and o.y == e.y then new[e.id] = o else new[e.id] = {x = e.x, y = e.y, t = now, tpt = tpt or (o and o.tpt)} end
+  end
+  rr.sp = new
+end
+local function can_reach(rr, e)
+  if (e.path or 99) <= M.TIMED_NEAR then return true end
+  local o = rr.sp and rr.sp[e.id]
+  return (e.path or 99) * ((o and o.tpt) or M.TIMED_RUN) <= M.TIMED_WIN
+end
+local function closing_fast(rr, d, now)
+  for _, x in ipairs(rr.hs or {}) do
+    if now - x.t >= M.CLOSE_AGE and x.d - d >= M.CLOSE_TILES then return true end
+  end
+  return false
+end
+
 local function manual(K, name, bid)
   local _, list = gcfg(K)
   for _, v in ipairs(list) do
@@ -1921,6 +1981,15 @@ function M.raise_movers(K, name, sc, hold, soldiers)
   return out or hold
 end
 
+-- BUG-881: is the worker of our pending pull at the lever (within LATE_R tiles, or his position unknown)? No worker yet = not late
+function M.pull_late(r, w0)
+  if not w0 then return false end
+  local x, y, z = unit_pos(w0)
+  local p = r.job and r.pos[r.job.lever]
+  if not (x and type(p) == 'table' and p[1]) then return true end
+  return math.max(math.abs(x - p[1]), math.abs(y - p[2])) <= M.LATE_R and math.abs((z or p[3]) - (p[3] or z or 0)) <= 1
+end
+
 -- BUG-027: who holds a pull of `name` toward `dir` now: {units within MARGIN} (empty = clear), and the force: a raise
 -- in SIEGE/BREACH with a visible hostile within force_near tiles goes ahead past the units next to the footprint
 -- (returns the holders, the hostile's distance and the units beside it). BUG-310: a unit ON the footprint holds a forced
@@ -1944,6 +2013,7 @@ local function holders(K, name, fp, sc, dir)
     local rr = rt[name]
     if rr then rr.fz_b = nil end
     local nowt = K.now().tick
+    if rr then track(rr, cross, nowt) end                  -- BUG-881: how fast each walker onto the footprint really walks
     if rr then                                     -- BUG-775: where each unit beside the footprint stands, and since when
       local old, new = rr.bst or {}, {}
       for _, e in ipairs(hold) do
@@ -1960,7 +2030,11 @@ local function holders(K, name, fp, sc, dir)
       if d > fn then
         local an, ah, ac, aw = M.approach_cfg(K)
         local held = (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
-        if held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl)) then
+        local budget = M.CLOSE_BUDGET
+        local timed = d * M.RACE_FOE_TPT <= budget and closing_fast(rr, d, now)          -- BUG-881: the pull no longer fits in his trip
+        local appr = held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl))
+        if timed or appr then
+          rr.fz_t = (timed and not appr) or nil          -- the plain approach (BUG-587) lets the standers beside it go, the timed one not
           fn, rr.fz_b = d, held
           rr.fz_until, rr.fz_d = now + M.APPROACH_STICKY, d
         elseif aw > 0 and d <= aw then
@@ -1981,7 +2055,7 @@ local function holders(K, name, fp, sc, dir)
         d = math.max(0, rr.fz_d or 0)
         fn, rr.fz_b = math.max(fn, d), (rr.held_sum or 0) + (rr.block_since and math.max(0, now - rr.block_since) or 0)
       else
-        rr.fz_until, rr.fz_d = nil, nil
+        rr.fz_until, rr.fz_d, rr.fz_t = nil, nil, nil
       end
     end
     if near_now and not (d >= 0 and d <= fn) then
@@ -1997,11 +2071,13 @@ local function holders(K, name, fp, sc, dir)
       local on, beside, seen = {unknown = hold.unknown}, {}, {}
       for _, e in ipairs(hold) do
         seen[e.id] = true
-        if e.d == 0 or (cby[e.id] and cby[e.id].path == 0) then on[#on + 1] = cby[e.id] or e
+        if e.d == 0 or (cby[e.id] and cby[e.id].path == 0) or (rr and rr.fz_t) then on[#on + 1] = cby[e.id] or e   -- BUG-881: a TIMED force keeps the units beside it (BUG-587)
         else beside[#beside + 1] = e end
       end
       -- Hotfix: a forced raise waits only for units ON the footprint (walkers are let go, as before BUG-335)
-      for _, e in ipairs(cross) do if not seen[e.id] and e.path == 0 then on[#on + 1] = e end end
+      for _, e in ipairs(cross) do
+        if not seen[e.id] and (e.path == 0 or (rr and rr.fz_t and can_reach(rr, e))) then on[#on + 1] = e end   -- BUG-881
+      end
       return on, d, beside
     end
   end
@@ -2278,7 +2354,7 @@ end
 local function new_epoch(r)
   r.nw, r.nw_out, r.bad, r.fail_at, r.switch, r.held_sum, r.block_since = 0, nil, {}, nil, nil, nil, nil
   r.ap, r.ap_last, r.ap_ask = 0, nil, nil            -- BUG-342: the pulls cancelled for a unit walking toward it
-  r.esc, r.fz_until, r.fz_d = nil, nil, nil          -- BUG-621: the approach force of the old epoch
+  r.esc, r.fz_until, r.fz_d, r.fz_t = nil, nil, nil, nil          -- BUG-621: the approach force of the old epoch
 end
 
 -- BUG-027: the ticks this epoch waited for units on the footprint (they do not count toward the deadline)
@@ -2795,6 +2871,12 @@ local function control(K, name, spec, now)
         end
         local own = dir == 'up' and own_pullers(K, name, now) or {}
         if dir == 'up' then hold = drop_own(hold, own) end   -- BUG-342: nor its pullers in their room
+        -- BUG-881: a forced raise (hd) keeps its pull while the worker is still on his way (or nobody took it): a unit on the footprint
+        -- now has left it long before the bridge moves; only the last LATE_R tiles of his walk (position unknown = late) can still cancel it
+        if hd and #hold > 0 and not hold.unknown and not M.pull_late(r, w0) then
+          r.commit = (r.commit or 0) + 1
+          hold = {}
+        end
         -- BUG-831: a quiet PEACE raise is cancelled for any walker near the footprint while it is pending (not a 'blocked' cancel:
         -- no give-up count, no gate_traffic question); the next pull waits for a whole quiet latency window again
         local pbusy
@@ -2918,7 +3000,7 @@ local function control(K, name, spec, now)
   if w == nil or w == s then
     r.pq_t0, r.pq_busy, r.pq_who, r.pq_ev, r.pq_pos, r.pq_nt = nil, nil, nil, nil, nil, nil     -- BUG-831
     unblock(r, now); r.block_ev = nil
-    r.fz_until, r.fz_d = nil, nil                   -- BUG-621: the approach force ends with the want
+    r.fz_until, r.fz_d, r.fz_t = nil, nil, nil       -- BUG-621: the approach force ends with the want
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
     r.bpark = nil
     r.nec, r.bc = nil, nil                            -- BUG-141: the blocked-cancel count of the want ends too

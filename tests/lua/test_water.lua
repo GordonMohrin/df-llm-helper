@@ -465,11 +465,19 @@ T.test('BUG-036: in a fight (SIEGE/BREACH) the patients outside the burrow the a
                                alert_names = function() return W.alert_names or {} end})
                      end}
   day(W)
-  T.eq(#W.find_events('PATIENTS_OUT'), 0, 'PEACE: nothing')
+  local function fights() local n = 0; for _, e in ipairs(W.find_events('PATIENTS_OUT')) do if e.d.mode ~= 'PEACE' then n = n + 1 end end; return n end
+  -- BUG-883: PEACE says it once (a hospital zone and a patient outside Kern+/Tiefe+), not again within a season
+  local pe = W.find_events('PATIENTS_OUT')
+  T.eq(#pe, 1, 'PEACE: the one standing report')
+  T.eq({pe[1].d.mode, pe[1].d.n, pe[1].d.hosp_out}, {'PEACE', 1, 1})
+  T.ok(pe[1].msg:find('PEACE: 1 of 2 patients lie outside Kern+/Tiefe+', 1, true), pe[1].msg)
+  day(W, 3)
+  T.eq(#W.find_events('PATIENTS_OUT'), 1, 'not again within a season')
   W.alert_names = {'Tiefe+'}
   W.set_mode('BREACH')
   day(W)
-  local po = W.find_events('PATIENTS_OUT')
+  local po = {}
+  for _, e in ipairs(W.find_events('PATIENTS_OUT')) do if e.d.mode ~= 'PEACE' then po[#po + 1] = e end end
   T.eq(#po, 1)
   T.eq(po[1].cls, 'A')
   T.eq({po[1].d.n, po[1].d.patients, po[1].d.burrow, po[1].d.units, po[1].d.mode, po[1].d.hosp_out},
@@ -477,12 +485,12 @@ T.test('BUG-036: in a fight (SIEGE/BREACH) the patients outside the burrow the a
   T.ok(po[1].msg:find('BREACH: 1 of 2 patients lie outside the alert burrow Tiefe+ (2 at 72,71,5)', 1, true), po[1].msg)
   T.ok(po[1].msg:find('only a rescue moves them', 1, true), po[1].msg)
   day(W, 2)
-  T.eq(#W.find_events('PATIENTS_OUT'), 1, 'once per fight')
+  T.eq(fights(), 1, 'once per fight')
   W.set_mode('PEACE')
   day(W)
   W.set_mode('SIEGE')
   day(W)
-  T.eq(#W.find_events('PATIENTS_OUT'), 2, 'the next fight again')
+  T.eq(fights(), 2, 'the next fight again')
   -- the alert silent: measured against Kern+ and Tiefe+
   W.alert_names = {}
   W.set_mode('PEACE')
