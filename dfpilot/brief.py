@@ -930,7 +930,11 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
                if "ore" in st else "")
             + (f" leather {st['leather']}" if "leather" in st else "")
             # NEU4 BUG-842: what the fort holds is not what a job can use: usable of all, only where they differ
-            + (f" wood {st.get('wood', 0)} usable of {st['woodt']}" if st.get("woodt") else "")
+            # NEU7 BUG-855: logs built into walls and buildings are no stock: shown apart ("wood 0 (25 loose unusable; 336 built in)")
+            + (f" wood {st.get('wood', 0)} ({max(0, st.get('woodt', 0) - st.get('wood', 0))} loose unusable; {st['woodb']} built in)"
+               if st.get("woodb") and st.get("woodt", 0) > st.get("wood", 0) else
+               f" wood {st.get('wood', 0)} ({st['woodb']} built in)" if st.get("woodb") else
+               f" wood {st.get('wood', 0)} usable of {st['woodt']}" if st.get("woodt") else "")
             + (f" containers {st.get('cont', 0)} usable of {st['contt']} empty" if st.get("contt") else "")
             + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else "")
             + stale_note(s, "stock")))

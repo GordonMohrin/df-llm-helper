@@ -291,10 +291,10 @@ T.test('BUG-842 i1 Diedplank: 204 logs, 198 on tiles with no walk group, 5 in bu
   end)
   days(W, 1)
   local i = W.K.census.i
-  T.eq({i.wood, i.wood_far, i.wood_nw, i.wood_skip}, {0, 199, 198, 5}, 'census: usable 0')
+  T.eq({i.wood, i.wood_far, i.wood_nw, i.wood_skip, i.wood_built}, {0, 199, 198, 0, 5}, 'census: usable 0; the 5 logs in buildings are built in (NEU7 BUG-855), not skipped stock')
   local st = W.K.call('economy', 'state')
   local stock = select(2, W.K.call('economy', 'state')).stock
-  T.eq({stock.wood, stock.woodt}, {0, 204}, 'state: wood 0 usable of 204')
+  T.eq({stock.wood, stock.woodt, stock.woodb}, {0, 199, 5}, 'state: wood 0 usable of 199 loose, 5 built in')
   for _ = 1, 30 do W.event('REPORT', {type = 'CANCEL_JOB', text = 'Urist McX, Carpenter cancels Make wooden door: Needs logs.'}) end
   settle(W)
   local l = logged(W, 'DF cancels')

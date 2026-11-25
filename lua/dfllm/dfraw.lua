@@ -482,7 +482,7 @@ R.ITEMS = {
 }
 
 -- the reasons DF may skip an item, in the order the first is counted as THE reason
-R.REASONS = {'gone', 'forbid', 'dump', 'in_job', 'in_building', 'on_fire', 'rotten', 'owned', 'trader', 'melt', 'hostile', 'in_claimed_container', 'outside_civ_burrow',
+R.REASONS = {'gone', 'forbid', 'dump', 'in_job', 'in_building', 'built', 'on_fire', 'rotten', 'owned', 'trader', 'melt', 'hostile', 'in_claimed_container', 'outside_civ_burrow',
              'other_walk_group', 'unwalkable_tile', 'hidden_tile'}
 
 -- counts of the items of `spec` by exclusion reason: {total, scanned, clipped, ok, first = {}, hits = {}, unread = {}, pos_checked, cen = {}}
@@ -548,6 +548,8 @@ function R.itemscan(K, spec, ctx)
     if flag(it, 'dump') then hit('dump') end
     if flag(it, 'in_job') then hit('in_job') end
     if flag(it, 'in_building') then hit('in_building') end
+    -- NEU7 BUG-855 (Run 17 i4: 336 of 365 logs 'unwalkable_tile', every sample flags=[construction]): a log built into a wall is no stock, not a walk problem
+    if flag(it, 'construction') then hit('built') end
     if flag(it, 'on_fire') then hit('on_fire') end
     if flag(it, 'rotten') then hit('rotten') end
     if flag(it, 'owned') then hit('owned') end
@@ -563,7 +565,7 @@ function R.itemscan(K, spec, ctx)
     if q then
       if civ and U.in_burrows(civ, q.p) == false then hit('outside_civ_burrow') end
       if int(q.g) and main then
-        if q.g == 0 then hit('unwalkable_tile') elseif q.g > 0 and q.g ~= main.group then hit('other_walk_group') end
+        if q.g == 0 and not flag(it, 'construction') then hit('unwalkable_tile') elseif q.g > 0 and q.g ~= main.group then hit('other_walk_group') end
       end
       if q.h == true then hit('hidden_tile') end
     else
@@ -573,6 +575,7 @@ function R.itemscan(K, spec, ctx)
     r.whys[i] = why
     if #why == 0 then r.ok = r.ok + 1 else r.first[why[1]] = (r.first[why[1]] or 0) + 1 end
     for _, w in ipairs(why) do r.hits[w] = (r.hits[w] or 0) + 1 end
+    for _, w in ipairs(why) do if w == 'built' or w == 'in_building' then r.builtn = (r.builtn or 0) + 1; break end end
   end
   -- NEU4 BUG-843: up to SAMPLE_MAX items described one by one: the excluded ones (a few of each first reason) and the ones with no exclusion
   r.sample = {}
@@ -674,6 +677,10 @@ function R.items(K, key, ctx)
   add(b, string.format('  no exclusion (free as DF sees it): %d', r.ok))
   add(b, '  excluded, first reason only: ' .. counts_text(r.first, R.REASONS))
   add(b, '  hit counts (an item may hit several): ' .. counts_text(r.hits, R.REASONS))
+  -- NEU7 BUG-855: items built into constructions or buildings are no stock; shown apart (their tile is a wall: not a walk problem)
+  if (r.hits.built or 0) + (r.hits.in_building or 0) > 0 then
+    add(b, string.format('  built into constructions or buildings: %d (no stock: built %d, in a building %d)', r.builtn or 0, r.hits.built or 0, r.hits.in_building or 0))
+  end
   add(b, string.format('  in a container: %d; tiles checked: %d; citizens\' main walk group %s; civ alert burrows %s', r.in_container or 0, r.pos_checked,
                        r.main and (r.main.group .. ' (' .. r.main.n .. '/' .. r.main.of .. ')') or '?', r.civ and table.concat(r.civ, ',') or 'off'))
   local un = {}
