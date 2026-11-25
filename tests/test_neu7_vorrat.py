@@ -168,3 +168,36 @@ def test_live_trade_keeps_add_and_remove_and_the_draft_applies_them(tmp_path):
         if live.get(k + "_ops"):
             doc_trade[k] = plan.apply_trade_ops(doc_trade.get(k) or [], live[k + "_ops"])
     assert doc_trade["want"][0] == "seeds"
+
+
+def test_refusal_is_narrow_and_releasable(tmp_path, cfg_dir):  # noqa: F811
+    d = run_dir(tmp_path)
+    rf = leiter.refusal_evidence
+    # another material / site is not the refused command
+    _refuse(d, "order.add", {"job": "MakeBarrel", "mat": "wood", "count": 10}, "Invalid material")
+    assert "abgelehnt" in rf(d, "dfllm cmd order.add job=MakeBarrel mat=wood count=12", 6)
+    assert rf(d, "dfllm cmd order.add job=MakeBarrel mat=rock count=10", 6) == ""
+    _refuse(d, "bp.place", {"tpl": "seal", "site": "S1"}, "refused: seal: nothing to close", cid="c9")
+    assert "abgelehnt" in rf(d, "dfllm cmd bp.place tpl=seal site=S1", 6)
+    assert rf(d, "dfllm cmd bp.place tpl=seal site=S2", 6) == ""
+    # a verb without tpl/job (trade.want) is matched by its args, not wholesale
+    _refuse(d, "trade.want", {"add": "wood"}, "ERR bad", cid="c8")
+    assert rf(d, "dfllm cmd trade.want add=cloth", 6) == ""
+    # a later ok reply of the same command releases it
+    now = time.time()
+    _cli(d, now, "verb:bp.place", {"tpl": "seal", "site": "S1"}, "sent c10")
+    _cli(d, now + 1, "reply:bp.place", {"id": "c10"}, "ok placed")
+    assert rf(d, "dfllm cmd bp.place tpl=seal site=S1", 6) == ""
+    # an ok reply that only contains 'cannot' does not block
+    _cli(d, now + 2, "verb:x.y", {}, "sent c11")
+    _cli(d, now + 3, "reply:x.y", {"id": "c11"}, "ok queued; players cannot see it")
+    assert rf(d, "dfllm cmd x.y", 6) == ""
+
+
+def test_refusal_releases_after_the_retry_window(tmp_path, cfg_dir):  # noqa: F811
+    d = run_dir(tmp_path)
+    _refuse(d, "bp.place", {"tpl": "seal", "site": "S1"}, "refused: seal: nothing to close", ago=600)
+    assert "abgelehnt" in leiter.refusal_evidence(d, "dfllm cmd bp.place tpl=seal site=S1", 6)
+    d2 = run_dir(tmp_path, "r16x5-fort-site3")
+    _refuse(d2, "bp.place", {"tpl": "seal", "site": "S1"}, "refused: seal: nothing to close", ago=3600)
+    assert leiter.refusal_evidence(d2, "dfllm cmd bp.place tpl=seal site=S1", 6) == "", "older than the 30 min retry window"

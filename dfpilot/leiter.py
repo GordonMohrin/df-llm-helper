@@ -299,20 +299,51 @@ REFUSAL = re.compile(r"refused|not repairable|nothing to close|no site|cannot|no
 CMD_RE = re.compile(r"^dfllm cmd (\S+)(.*)$")
 
 
+OK_REFUSAL = re.compile(r"not repairable", re.I)           # an 'ok queued ...' reply that still says the work cannot be done (tombs.repair); no other ok reply counts
+RETRY_S = 1800                                              # a refusal hides the step for 30 real minutes at most, then the ladder may propose it again (a new try, a new reply)
+VOLATILE = {"count", "n", "id", "qty", "amount", "num", "at"}
+
+
+def _cmd_args(rest: str) -> dict:
+    """Identity args of a `dfllm cmd` line: key=value tokens and an optional JSON tail, flattened (the 'p' dict merged), volatile counters dropped."""
+    a: dict = {}
+    for k, v in re.findall(r"(\w+)=(\S+)", rest):
+        a[k] = v
+    j = re.search(r"\{.*\}", rest)
+    if j:
+        try:
+            d = json.loads(j.group(0))
+        except ValueError:
+            d = {}
+        if isinstance(d, dict):
+            a.update(d)
+    return _flat(a)
+
+
+def _flat(a: dict) -> dict:
+    out = {}
+    for k, v in a.items():
+        if isinstance(v, dict):
+            out.update(_flat(v))
+        elif k not in VOLATILE:
+            out[str(k)] = str(v)
+    return out
+
+
 def refusal_evidence(save_dir: Path, cmd: str | None, hours: int) -> str:
-    """The newest reply to the command's verb (and template / job) when it was a refusal with a reason: 'verb: reason (cli.log, N h ago)'; '' when the
-    newest reply was an ok, none is in the window, or the command is no `dfllm cmd` line."""
+    """The newest reply to this exact command (verb and all identity args: template, job, material, site, ...) when it was a refusal with a reason:
+    'verb: reason (cli.log, N min ago)'; '' when the newest reply was an ok, none is within the retry window (30 min, at most `hours`), the args
+    differ (another material / site) or the command is no `dfllm cmd` line."""
     m = CMD_RE.match(cmd or "")
     if not m or hours <= 0:
         return ""
     verb, rest = m.group(1), m.group(2)
-    tpl = re.search(r"tpl=(\w+)", rest) or re.search(r'"tpl"\s*:\s*"(\w+)"', rest)
-    job = re.search(r'"job"\s*:\s*"(\w+)"', rest)
+    want = _cmd_args(rest)
     try:
         lines = (Path(save_dir) / "cli.log").read_text(encoding="utf-8", errors="replace").splitlines()[-900:]
     except OSError:
         return ""
-    cut = time.time() - hours * 3600
+    cut = time.time() - min(hours * 3600, RETRY_S)
     sent: dict[str, dict] = {}
     replies: list[tuple[int, str, str]] = []
     for ln in lines:
@@ -322,8 +353,6 @@ def refusal_evidence(save_dir: Path, cmd: str | None, hours: int) -> str:
         try:
             wall = int(f[0])
         except ValueError:
-            continue
-        if wall < cut:
             continue
         if f[2] == "verb:" + verb:
             try:
@@ -339,15 +368,15 @@ def refusal_evidence(save_dir: Path, cmd: str | None, hours: int) -> str:
                 cid = ""
             replies.append((wall, cid, f[4]))
     for wall, cid, res in reversed(replies):
-        a = sent.get(cid, {})
-        if tpl and (a.get("tpl") or _o(a.get("p")).get("tpl")) not in (None, tpl.group(1)):
-            continue
-        if job and a.get("job") not in (None, job.group(1)):
-            continue
-        if res.startswith("ERR") or REFUSAL.search(res):
+        if cid not in sent or _flat(sent[cid]) != want:
+            continue                                        # another command of the verb (other material, site, template)
+        if wall < cut:
+            return ""                                       # the newest matching reply is older than the retry window: try again
+        if res.startswith("ERR") or (REFUSAL.search(res) if not res.startswith("ok") else OK_REFUSAL.search(res)):
             ago = max(0, int((time.time() - wall) // 60))
-            return f"{verb}{' ' + tpl.group(1) if tpl else ''} abgelehnt: {res[:110]} (cli.log, vor {ago} min)"
-        return ""                                      # the newest reply of this command was an ok: not blocked
+            tpl = want.get("tpl")
+            return f"{verb}{' ' + tpl if tpl else ''} abgelehnt: {res[:110]} (cli.log, vor {ago} min)"
+        return ""                                           # the newest reply of this command was an ok: not blocked
     return ""
 
 

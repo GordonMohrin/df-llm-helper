@@ -2145,7 +2145,7 @@ end
 function M.reserve_mat(c, r, n)
   local b = c.barrels or {}
   local wood = ws_any(r.f, b.ws) and math.max(0, (math.tointeger(r.inv.wood) or 0) - (r.planned.wood or 0)) or 0
-  local rock = ws_any(r.f, M.RESERVE_ROCK_WS) and math.max(0, M.stone_free(c, r) - (r.planned.rock or 0)) or 0
+  local rock = ws_any(r.f, M.RESERVE_ROCK_WS) and math.max(0, M.stone_free(c, r) - (r.planned.rock or 0) - ((r.s.used or {}).rock or 0)) or 0   -- NEU7: also minus the rock open orders already hold
   if rock >= n + (math.tointeger(M.rv(c, 'rock_plenty')) or 20) then return 'rock', n, wood, rock end
   if wood >= n then return 'wood', n, wood, rock end
   if rock > 0 and rock >= wood then return 'rock', math.min(n, rock), wood, rock end
