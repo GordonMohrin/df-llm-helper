@@ -74,6 +74,10 @@ def t_versorgung(s: dict, mem: dict, now: int) -> tuple:
         # NEU7 BUG-857: the material the players' working command used: rock barrels when no usable log is left (state stock.wood 0 / nowood)
         mat = "rock" if (st.get("wood") == 0 or st.get("nowood")) else "wood"
         dcmd, dkey = ("dfllm cmd order.add '{\"job\":\"MakeBarrel\",\"amount\":15,\"mat\":\"" + mat + "\"}'", "order:barrel")
+        if st.get("rsv"):
+            # NEU11 BUG-880: the kernel's container reserve orders the barrels itself (state stock.rsv): no player command to repeat; the order.add above
+            # is named only when the reserve cannot do it (no material, material refused by DF: stock.rsv is absent then)
+            dcmd, dkey = "dfllm status (die Behaelter-Reserve bestellt selbst: kern.log 'container reserve')", None
     if food < FOOD_I or drink < DRINK_I:
         if drink < DRINK_I:
             return 0, f"Trinken {drink}/{DRINK_I} d" + (f" ({st['dwhy']})" if st.get("dwhy") else ""), dcmd, dkey, False

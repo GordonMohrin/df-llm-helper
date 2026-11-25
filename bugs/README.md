@@ -841,6 +841,9 @@ Related: FR-xx, BUG-xx
 | [BUG-868](BUG-868-texts-halt-drink-brew-scan-ladder-terrain.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Texts that misled the players: halt (drink), ladder terrain block, why-brew scan | `lua/dfllm/readiness.lua` (status line `growth N (...)`) |
 | [BUG-869](BUG-869-hospital-treatment-waits.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | inspect hospital never said what the patients wait for | `lua/dfllm/water.lua` (`M.treat_waits` |
 | [BUG-870](BUG-870-uniform-replaces-worn-wooden-weapon.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | squad.uniform kept a worn wooden weapon for good | `lua/dfllm/military.lua` (verb `squad.uniform`) |
+| [BUG-878](BUG-878-reserve-dead-wooden-order.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | Container reserve kept a dead wooden MakeBarrel order for ever and never read DF's cancels of its own job | `lua/dfllm/economy.lua` |
+| [BUG-879](BUG-879-reserve-free-boulders.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Reserve's 'free boulders' did not match what DF can use | `lua/dfllm/economy.lua` |
+| [BUG-880](BUG-880-ladder-reserve-flag.md) | fixed (offline, live-untested) | offen, nie live gesehen | low | Ladder named order.add MakeBarrel although the reserve orders the containers itself | `lua/dfllm/economy.lua` |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

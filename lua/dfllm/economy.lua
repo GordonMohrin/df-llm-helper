@@ -507,7 +507,7 @@ M.DEFAULTS = {
   -- NEU7 (BUG-855): buildingplan's logs go off while usable wood < low and stone or blocks >= stone_min are free; on again at high
   wguard = {on = true, low = 40, high = 80, stone_min = 8},
   creserve = {on = true, min_batch = 10, max_batch = 30, brews_per = 5, grace_days = 2, repeat_days = 3, max_repeats = 4, trickle_days = 20, trickle_n = 1,
-             trickle_free = 20, rock_plenty = 20, total_cap = 200},
+             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -2133,7 +2133,7 @@ end
 --    batch or boulders are plentiful (batch + rock_plenty), else wood (the Carpenters, Carpentry labor). Both are real BARREL items.
 -- Everything is bounded by total_cap (containers the reserve ordered in all). State p.rsv = {t0, at, done, open, mat, n, made, rep, lday}.
 M.RESERVE = {on = true, min_batch = 10, max_batch = 30, brews_per = 5, grace_days = 2, repeat_days = 3, max_repeats = 4, trickle_days = 20, trickle_n = 1,
-             trickle_free = 20, rock_plenty = 20, total_cap = 200}
+             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3}
 M.RESERVE_ROCK = {job = 'MakeBarrel', material = 'INORGANIC'}
 M.RESERVE_ROCK_WS = {'workshop:Craftsdwarfs'}
 function M.rv(c, k)
@@ -2141,16 +2141,96 @@ function M.rv(c, k)
   if t[k] ~= nil then return t[k] end
   return M.RESERVE[k]
 end
--- which material and how many: rock when wood cannot carry the batch or boulders are plentiful, else wood; nil = neither (nothing to make containers of)
-function M.reserve_mat(c, r, n)
+-- NEU11 BUG-878 (Run 17 i1 Diedplank: DF cancelled 'Make wooden barrel: Needs logs' 476x in the last 3000 gamelog lines while the reserve counted its batches
+-- as 'ordered'; MakeBarrel is in KEEP_JOBS, so no cancel count ever removed a dead wooden order, and `open(r, tag)` kept the reserve waiting on it): the reserve
+-- reads DF's own cancels of ITS job (the gamelog tally: kind 'make wooden barrel' reason 'needs logs'; rock 'make rock barrel' 'needs ...').
+M.RESERVE_KIND = {wood = {'make wooden barrel'}, rock = {'make rock barrel', 'make stone barrel'}}
+M.RESERVE_NEEDLE = {wood = 'needs logs', rock = 'needs'}
+M.RESERVE_JOB = {wood = 'Make wooden barrel', rock = 'Make rock barrel'}
+-- DF's cancels of the job of material `mat` within `days` game days: n, last tick
+function M.reserve_cancels(K, c, mat, now, days)
+  local ok, n, last = pcall(function()
+    return M.CW.count(M.cw_tally(K), now, math.max(1, math.min(M.CW.KEEP, days or M.cw_days(K, c))), M.RESERVE_KIND[mat], M.RESERVE_NEEDLE[mat])
+  end)
+  if ok then return n or 0, last end
+  return 0, nil
+end
+-- the materials DF refuses now: nothing to make containers of although the census may say otherwise. DF's words win over the census (as for the brew
+-- cancels): dead_n cancels of the job within the last 2 game days, or a batch of this material was taken back less than dead_days ago
+function M.reserve_out(K, c, rs, now)
+  local out, why = {}, {}
+  local need = math.tointeger(M.rv(c, 'dead_n')) or 10
+  local hold = (math.tointeger(M.rv(c, 'dead_days')) or 3) * DAY
+  for _, m in ipairs({'wood', 'rock'}) do
+    local n, last = M.reserve_cancels(K, c, m, now, 2)
+    if n >= need and last and now - last <= 2 * DAY then
+      out[m], why[m] = true, string.format('DF cancels %s "%s" %dx in 2 d', M.RESERVE_JOB[m], M.RESERVE_NEEDLE[m], n)
+    elseif type(rs) == 'table' and type(rs.out) == 'table' and math.tointeger(rs.out[m]) and now - rs.out[m] < hold then
+      out[m], why[m] = true, string.format('the %s batch was taken back %d d ago (DF cancelled its job)', m, (now - rs.out[m]) // DAY)
+    end
+  end
+  return out, why
+end
+-- the boulders DF can give a container job, named step by step (the census total counts boulders in buildings, forbidden, out of reach and held by jobs too):
+-- the reserve does NOT keep the stone floor back (the drink is the emergency), but takes off what open rock orders hold and ore / flux / economic / soft stone
+function M.reserve_stone(c, r)
+  local inv = r.inv
+  local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
+  local denied = M.hard_denied(inv, r.now)
+  local usable = denied and 0 or M.usable_n(inv)
+  local held = (r.planned.rock or 0) + ((r.s.used or {}).rock or 0)
+  local free = math.max(0, usable - held)
+  local all, far, busy, rock = g('boulders'), g('rock_far'), g('rock_busy'), g('rock')
+  local skipped = math.max(0, all - far - busy - rock)
+  local text = string.format('%d boulders in the census: %d out of reach, %d held by jobs, %d in buildings / forbidden / dumped, %d ore, flux, economic or soft%s; %d usable, %d held by open rock orders -> %d free',
+                             all, far, busy, skipped, math.max(0, rock - M.usable_n(inv)), denied and ', DF refused them' or '', usable, held, free)
+  return free, text
+end
+-- which material and how many: rock when wood cannot carry the batch or boulders are plentiful, else wood; nil = neither (nothing to make containers of).
+-- `out` (BUG-878) = materials DF refuses now ({wood = true}): never chosen. 5th result: the boulder count in words
+function M.reserve_mat(c, r, n, out)
+  out = out or {}
   local b = c.barrels or {}
-  local wood = ws_any(r.f, b.ws) and math.max(0, (math.tointeger(r.inv.wood) or 0) - (r.planned.wood or 0)) or 0
-  local rock = ws_any(r.f, M.RESERVE_ROCK_WS) and math.max(0, M.stone_free(c, r) - (r.planned.rock or 0) - ((r.s.used or {}).rock or 0)) or 0   -- NEU7: also minus the rock open orders already hold
-  if rock >= n + (math.tointeger(M.rv(c, 'rock_plenty')) or 20) then return 'rock', n, wood, rock end
-  if wood >= n then return 'wood', n, wood, rock end
-  if rock > 0 and rock >= wood then return 'rock', math.min(n, rock), wood, rock end
-  if wood > 0 then return 'wood', math.min(n, wood), wood, rock end
-  return nil, 0, wood, rock
+  local wood = (not out.wood and ws_any(r.f, b.ws)) and math.max(0, (math.tointeger(r.inv.wood) or 0) - (r.planned.wood or 0) - ((r.s.used or {}).wood or 0)) or 0
+  local rock, rtext = 0, nil
+  if ws_any(r.f, M.RESERVE_ROCK_WS) then rock, rtext = M.reserve_stone(c, r) else rtext = "no Craftsdwarf's workshop" end
+  if out.rock then rock = 0 end
+  if rock >= n + (math.tointeger(M.rv(c, 'rock_plenty')) or 20) then return 'rock', n, wood, rock, rtext end
+  if wood >= n then return 'wood', n, wood, rock, rtext end
+  if rock > 0 and rock >= wood then return 'rock', math.min(n, rock), wood, rock, rtext end
+  if wood > 0 then return 'wood', math.min(n, wood), wood, rock, rtext end
+  return nil, 0, wood, rock, rtext
+end
+-- BUG-878: the standing batch is dead when DF cancelled its job (own kind and reason) dead_n times since the batch was ordered: the order goes (the work
+-- orders screen's remove), the containers not yet made leave the `made` count, the material is out for dead_days. true = the batch was taken back
+function M.rsv_works(K, now)
+  local rs = pstate(K).rsv
+  if type(rs) ~= 'table' or st.rsvstuck then return false end
+  return rs.open == true or (math.tointeger(rs.at) ~= nil and now - rs.at < 3 * DAY)
+end
+function M.reserve_dead(K, c, r, rs, tag)
+  if type(rs) ~= 'table' or not rs.mat or not rs.at or not M.RESERVE_KIND[rs.mat] then return false end
+  local now = r.now
+  local need = math.tointeger(M.rv(c, 'dead_n')) or 10
+  local n, last = M.reserve_cancels(K, c, rs.mat, now, (now - rs.at) // DAY + 1)
+  if n < need or not last or last < rs.at then return false end
+  local oid = r.p.orders and r.p.orders[tag]
+  local o = oid and order_by_id(oid)
+  local left = o and math.max(0, math.tointeger(o.amount_left) or 0) or 0
+  if o and not K.act.order_remove(oid) then return false end
+  if r.p.orders then r.p.orders[tag] = nil end
+  r.s.live[tag] = nil
+  rs.out = type(rs.out) == 'table' and rs.out or {}
+  rs.out[rs.mat] = now
+  rs.made = math.max(0, (math.tointeger(rs.made) or 0) - left)
+  local mat = rs.mat
+  rs.open, rs.done, rs.at = nil, nil, nil                     -- no repeat gap, no grace: the other material orders at once while DF still cancels brews
+  K.persist.touch('m.economy')
+  local inv = r.inv
+  K.log('warn', 'container reserve: DF cancelled %s "%s" %dx since the %s batch of %d was ordered (%d of them not made): the order is taken back; %s is out for %d d (census logs free %d, on another walk group %d; %d free boulders)',
+        M.RESERVE_JOB[mat], M.RESERVE_NEEDLE[mat], n, mat, rs.n or 0, left, mat, math.tointeger(M.rv(c, 'dead_days')) or 3,
+        math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_far) or 0, (M.reserve_stone(c, r)))
+  return true
 end
 -- somebody must hold the labor of the batch's material (once a game day): Carpentry for wood, Stone crafting for rock; the manager-less MakeBarrel tasks
 -- (cx_direct) only for wood and only while a container stall is told (p.contx)
@@ -2180,6 +2260,7 @@ function M.plan_reserve(K, c, r)
       K.log('info', 'container reserve: the batch of %d %s barrels is made (%d ordered in all)', rs.n or 0, tostring(rs.mat), rs.made or 0)
     end
   end
+  if open(r, tag) and M.reserve_dead(K, c, r, rs, tag) then rs = p.rsv end   -- BUG-878: a batch DF cancels for want of its material is taken back
   if open(r, tag) then
     if rs then M.reserve_labor(K, c, r, rs) end
     return true
@@ -2216,7 +2297,9 @@ function M.plan_reserve(K, c, r)
     end
   end
   if not want then return x ~= nil end              -- DF still cancels but the last batch has not had its effect yet (grace / gap): nothing else orders meanwhile
-  local mat, n, wood, rock = M.reserve_mat(c, r, want)
+  local out, outwhy = M.reserve_out(K, c, p.rsv, now)           -- BUG-878: DF's own cancels of the reserve's jobs say which material is dead
+  local mat, n, wood, rock, rtext = M.reserve_mat(c, r, want, out)
+  st.rsvstuck = mat == nil or nil
   if not mat then
     st.cont_short = st.cont_short or {}
     st.cont_short.barrels = want
@@ -2235,8 +2318,10 @@ function M.plan_reserve(K, c, r)
         way[#way + 1] = string.format('dig for stone (%s)', picks > 0 and (picks .. ' picks, miners need the dig designation: plan dig / bp') or 'no pick: tools first')
       end
       way[#way + 1] = 'trade.want barrels or logs at the next caravan'
-      K.log('warn', 'container reserve: %d containers wanted (%s) and nothing to make them of: %d usable logs, %d free boulders; way out: %s (said once a week)',
-            want, why, wood, rock, table.concat(way, '; '))
+      local dfw = {}
+      for _, m in ipairs({'wood', 'rock'}) do if outwhy[m] then dfw[#dfw + 1] = m .. ': ' .. outwhy[m] end end
+      K.log('warn', 'container reserve: %d containers wanted (%s) and nothing to make them of: %d usable logs, %d free boulders (%s)%s; way out: %s (said once a week)',
+            want, why, wood, rock, tostring(rtext), #dfw > 0 and ('; ' .. table.concat(dfw, '; ')) or '', table.concat(way, '; '))
     end
     return false
   end
@@ -2254,7 +2339,8 @@ function M.plan_reserve(K, c, r)
   rs.t0 = rs.t0 or now
   rs.at, rs.mat, rs.n, rs.made, rs.lday = now, mat, n, made + n, nil
   K.persist.touch('m.economy')
-  K.log('warn', 'container reserve: %d %s barrels ordered (%s; %d brews open; %d usable logs, %d free boulders; %d ordered in all)', n, mat, why, brews, wood, rock, rs.made)
+  K.log('warn', 'container reserve: %d %s barrels ordered (%s; %d brews open; %d usable logs, %d free boulders (%s); %d ordered in all)%s', n, mat, why, brews, wood, rock,
+        tostring(rtext), rs.made, (out.wood or out.rock) and ('; ' .. tostring(out.wood and outwhy.wood or outwhy.rock) .. ': the other material') or '')
   M.reserve_labor(K, c, r, rs)
   return true
 end
@@ -3442,10 +3528,20 @@ local function keep_order(o)
   return rn:sub(1, 5) == 'BREW_'
 end
 
+-- NEU11 BUG-878: a WOODEN MakeBarrel order DF cancels 'Needs logs' while the census holds no usable log is dead (nothing makes it run; KEEP_JOBS kept it for ever,
+-- Run 17 i1: 476 cancels in 3000 gamelog lines): it is no kept supply order then. A rock barrel order or a fort with logs keeps the old rule.
+function M.dead_wood_barrel(K, o, why)
+  local okj, job = pcall(function() return df.job_type[o.job_type] end)
+  if not (okj and job == 'MakeBarrel') or not M.logs_words(why) then return false end
+  local okm, wood = pcall(function() return o.material_category.wood == true end)
+  if not (okm and wood) then return false end
+  return (math.tointeger((K.census.i or {}).wood) or 0) <= 0
+end
+
 local function needs_cancel(K, c, oid, job, why)
   local oc = c.orders or M.DEFAULTS.orders
   local o = order_by_id(oid)
-  if not o or keep_order(o) then return end
+  if not o or (keep_order(o) and not M.dead_wood_barrel(K, o, why)) then return end
   local p = pstate(K)
   local now = K.now().tick
   local key = tostring(oid)
@@ -15936,6 +16032,10 @@ function M.state(K)
     -- 18631 has no chair')
     if st.dwhy then r.stock.dwhy = tostring(st.dwhy):sub(1, 80) end
     if st.dwhy and st.dcx then r.stock.dcx = 1 end                  -- NEU4: DF says the stills lack a container (the ladder names containers, not a Still)
+    do                                                              -- NEU11 BUG-880: 1 = the standing reserve orders the containers itself (a batch stands or was ordered < 3 d ago, material found)
+      local okr, rw = pcall(M.rsv_works, K, K.now().tick)
+      if okr and rw then r.stock.rsv = 1 end
+    end
     do                                                              -- NEU4 BUG-842: usable vs total where they differ ('wood 0 usable of 204')
       local wd = math.max(0, math.tointeger(inv.wood) or 0)
       local wt = wd + (math.tointeger(inv.wood_far) or 0) + (math.tointeger(inv.wood_busy) or 0) + (math.tointeger(inv.wood_forb) or 0) + (math.tointeger(inv.wood_skip) or 0)

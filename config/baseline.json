@@ -226,7 +226,7 @@
   "cancel": {"days": 7, "cx_min_n": 5, "cx_pile_days": 14, "cx_off_n": 2, "cx_off_days": 14, "gamelog": true, "gamelog_bytes": 131072, "gamelog_chunks": 8},
   "wguard": {"on": true, "low": 40, "high": 80, "stone_min": 8},
   "creserve": {"on": true, "min_batch": 10, "max_batch": 30, "brews_per": 5, "grace_days": 2, "repeat_days": 3, "max_repeats": 4, "trickle_days": 20,
-              "trickle_n": 1, "trickle_free": 20, "rock_plenty": 20, "total_cap": 200},
+              "trickle_n": 1, "trickle_free": 20, "rock_plenty": 20, "total_cap": 200, "dead_n": 10, "dead_days": 3},
   "jobs": {"release_per_day": 20, "held_days": 3, "preventblocking": "keep", "sites_per_day": 40, "unforbid_per_day": 60,
            "mat_scan": 2000, "fail_alarm": 3, "depot_move_after": 5, "move_days": 28, "move_r": 12, "move_dz": 2,
            "move_gap": 3, "move_probes": 150},
