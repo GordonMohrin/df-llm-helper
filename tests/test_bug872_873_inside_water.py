@@ -229,3 +229,105 @@ def test_a_stalled_cistern_project_no_longer_counts_as_pending(save, monkeypatch
     assert "cistern_water" in f.jobs, "stalled for 90+ game days: the ask places the next one"
     assert any("y1s0b0" in m and "waited 90 game days" in m for _, m in synth), synth
     assert plan.inside_note(save)["stalled"] == ["y1s0b0"]
+
+
+# ---------------------------------------------------------------- BUG-873 (verifier round 2): every aquifer site refused (i1: heavy z135/136/138)
+def _bperr(msg):
+    from dfpilot.cmd import BpError
+    return BpError(msg)
+
+
+def _place_follower(save, monkeypatch, results, aq=True):
+    """a follower whose bp.place answers `results` in order (an Exception is raised, a str is the command id)"""
+    f, sent = _follower(save, monkeypatch, aq)
+    calls = []
+
+    def send(verb, args, what, now, **k):
+        calls.append((verb, args))
+        r = results.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    monkeypatch.setattr(f, "_send", send)
+    monkeypatch.setattr(wake.files, "read_snapshot", lambda p: {"id": "s"})
+    monkeypatch.setattr(wake.files, "log_cli", lambda *a, **k: None)
+    synth = []
+    monkeypatch.setattr(f, "_synth", lambda t, m, now: synth.append((t, m)))
+    return f, calls, synth
+
+
+def test_inside_water_falls_through_to_the_bucket_fed_cistern_when_every_aquifer_site_is_refused(save, monkeypatch):
+    _state(save, {"mfree": 4, "rock": 9})
+    f, calls, synth = _place_follower(save, monkeypatch, [_bperr("cistern water=aquifer: no site (heavy z135,z136,z138)"), "c9"])
+    f.jobs["cistern_water"] = {"snap": "s1", "since": 1000.0, "params": {"water": "aquifer"}, "tpl": "cistern", "site": "S1",
+                               "ready": 1000.0, "path": "snap/s1.json", "inside": True, "tries": [{"water": "aquifer"}, {}], "prio": 1}
+    f._place("cistern_water", f.jobs["cistern_water"], 1001.0)
+    assert [c[1]["p"] for c in calls] == [{"water": "aquifer"}, {}], calls
+    assert f.jobs["cistern_water"]["placed"] == "c9" and not synth, "the bucket-fed route placed: nothing to complain about"
+
+
+def test_every_route_refused_is_said_plainly_once_a_week_and_not_asked_again(save, monkeypatch):
+    _state(save, {"mfree": 4, "rock": 9}, tick=200 * 1200)
+    f, calls, synth = _place_follower(save, monkeypatch, [_bperr("cistern water=aquifer: no site (heavy z135,z136,z138)"),
+                                                          _bperr("cistern: no fill source on the snapshot")])
+    f.jobs["cistern_water"] = {"snap": "s1", "since": 1000.0, "params": {"water": "aquifer"}, "tpl": "cistern", "site": "S1",
+                               "ready": 1000.0, "path": "snap/s1.json", "inside": True, "tries": [{"water": "aquifer"}, {}], "prio": 1}
+    f._place("cistern_water", f.jobs["cistern_water"], 1001.0)
+    assert "cistern_water" not in f.jobs
+    assert len(synth) == 1 and "no site for a cistern inside the fort" in synth[0][1] and "heavy z135" in synth[0][1]
+    assert "container reserve" in synth[0][1] and "trade.want" in synth[0][1]
+    ns = plan.inside_note(save)["nosite"]
+    assert ns["tick"] == 200 * 1200 and "bucket-fed" in ns["why"]
+    from dfpilot import brief
+    assert any("NO INSIDE WATER SITE" in t and "heavy z135" in t for _, t in brief.supply_items(brief.Ctx(save)))
+    # the kernel asks again every week: held, no snapshot, no placement; the plain cause once per 7 days
+    n_sent = len(calls)
+    synth.clear()
+    snaps = []
+    monkeypatch.setattr(f, "_request_place", lambda *a, **k: snaps.append(a) or True)
+    for day, say in ((3, 0), (7, 1), (10, 0), (14, 1), (21, 1), (27, 0)):
+        _state(save, {"mfree": 4, "rock": 9}, tick=(200 + day) * 1200)
+        synth.clear()
+        f._request_access({"tpl": "cistern", "why": "inside_water", "n": 1}, 2000.0 + day)
+        assert len(synth) == say, (day, synth)
+    assert not snaps and len(calls) == n_sent, "no failing request repeated inside 28 days"
+    _state(save, {"mfree": 4, "rock": 9}, tick=(200 + 29) * 1200)
+    f._request_access({"tpl": "cistern", "why": "inside_water", "n": 1}, 3000.0)
+    assert len(snaps) == 1, "after 28 days it tries again"
+    assert plan.inside_note(save)["nosite"]["tick"] == 200 * 1200       # the report of other causes keeps the record
+
+
+def test_follow_inside_job_carries_the_route_tries(save, monkeypatch):
+    f, _ = _follower(save, monkeypatch, True)
+    f._request_access({"tpl": "cistern", "why": "inside_water", "n": 1}, 1000.0)
+    assert f.jobs["cistern_water"]["tries"] == [{"water": "aquifer"}, {}] and f.jobs["cistern_water"]["inside"] is True
+    f2, _ = _follower(save, monkeypatch, False)
+    f2._request_access({"tpl": "cistern", "why": "inside_water", "n": 1}, 1000.0)
+    assert f2.jobs["cistern_water"]["tries"][0] == {}, "no aquifer level known: the bucket-fed cistern first"
+
+
+# ---------------------------------------------------------------- hard rule: exactly 3 tiles
+def test_aquifer_site_exactly_three_tiles_from_open_water_is_refused_four_is_not(fort):
+    snap, man = fort
+    z = bp.rank(snap, "cistern", {}, manifest=man)[0]["anchor"][2]
+    from dfpilot.bp import sites
+    m = {**man, "aquifer_levels": [z - 1]}
+    cands = [{"anchor": [50, 50, z], "box": (50, 50, z, 52, 52, z), "why": "x", "rot": 0}]
+    for lz in (z - 1, z):
+        three = _with_tile_t(snap, 55, 51, lz, "~")          # box x2 = 52: 55 is exactly 3 tiles off
+        with pytest.raises(ValueError, match="within 3 tiles"):
+            sites.aquifer_well(cands, three, m)
+        three_y = _with_tile_t(snap, 51, 47, lz, "~")        # box y1 = 50: 47 is exactly 3 tiles off
+        with pytest.raises(ValueError, match="within 3 tiles"):
+            sites.aquifer_well(cands, three_y, m)
+        four = _with_tile_t(snap, 56, 51, lz, "~")
+        assert sites.aquifer_well(cands, four, m), "4 tiles off: clear"
+        assert sites.aquifer_well(cands, _with_tile_t(snap, 51, 46, lz, "~"), m)
+
+
+def _with_tile_t(snap, x, y, z, ch):
+    rows = {k: list(v) for k, v in snap["rows"].items()}
+    r = rows[f"z{z}"]
+    yy, xx = y - snap["bbox"][1], x - snap["bbox"][0]
+    r[yy] = r[yy][:xx] + ch + r[yy][xx + 1:]
+    return {**snap, "rows": rows}

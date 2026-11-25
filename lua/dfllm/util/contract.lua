@@ -92,6 +92,7 @@ C.EVENTS = {
   CISTERN_DRY = {cls = 'B', by = 'water'},
   -- BUG-875: a Water Source zone the kernel painted outside the fort, removed once accepted water stands inside
   WATER_OUTSIDE_RETIRED = {cls = 'B', by = 'water'},
+  WATER_OUTSIDE_RESTORED = {cls = 'B', by = 'water'},   -- BUG-875: the retired zone painted again once no strong inside source stands
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
   SIEGE_START = {cls = 'A', by = 'siege'}, INVASION = {cls = 'A', by = 'threat'},
   -- A, reflex (FR-36/49/51-53): arrival announcements and the interrupt channel (C.INTERRUPTS)

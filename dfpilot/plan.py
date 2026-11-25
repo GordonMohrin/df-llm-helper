@@ -3958,6 +3958,8 @@ def noparts_reason(s: dict | None) -> str:
 
 
 INSIDE_FILE = ".inside-water.json"          # BUG-873: follow's note on the cistern asks: first-seen ticks of pending projects, the parts gate
+INSIDE_RETRY_T = 28 * 1200                 # BUG-873 (verifier round 2): after every route was refused no new placement is tried for this long (game ticks)
+INSIDE_SAY_T = 7 * 1200                    # BUG-873: ... and the 'no inside site' cause is said (AUTO_FAIL) once per this long
 INSIDE_STALL_T = 90 * 1200                 # BUG-873: a cistern project pending this long (game ticks) no longer counts as under way
 
 

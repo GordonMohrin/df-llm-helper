@@ -576,6 +576,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # none), pond (zone id), src/d (the nearest accepted water to carry from, tiles)
     # BUG-875: a kernel-painted (dfllm-water) Water Source zone outside the fort removed: zone = its id, inside = accepted sources inside
     "WATER_OUTSIDE_RETIRED": ("B", "water", _d("zone:i", "inside:i")),
+    "WATER_OUTSIDE_RESTORED": ("B", "water", _d("pos:p")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,

@@ -386,7 +386,7 @@ WATER_LIM: dict = {
     "unforbid_per_run": (0, 100), "alarm_every": _TICKS,
     # BUG-744: a crossing of thirst_alarm is news after alarm_grace ticks over it / alarm_margin past it / a verdict that nobody gives water;
     # a patient leaves the episode alarm_clear under the line; the same patient and verdict again after alarm_repeat
-    "alarm_grace": _TICKS, "alarm_margin": _THIRST, "alarm_clear": _THIRST, "alarm_repeat": _TICKS, "hosp_every": _TICKS, "request_every": _TICKS, "inside_every": _TICKS, "retire_days": (0, 400), "outside_retire": "bool",
+    "alarm_grace": _TICKS, "alarm_margin": _THIRST, "alarm_clear": _THIRST, "alarm_repeat": _TICKS, "hosp_every": _TICKS, "request_every": _TICKS, "inside_every": _TICKS, "retire_days": (0, 400), "retire_depth": (1, 7), "restore_days": (0, 400), "outside_retire": "bool",
     "flood_every": _TICKS, "flood_tiles": (1, 100), "units_per_slice": (1, 1000), "items_per_slice": (1, 10000),
     "zone_tiles": (1, 10000), "order_backoff": _TICKS, "deep": (1, 7), "zone_below": "bool", "gate_every": _TICKS,
     "wake_wall_s": (0, 86400), "ws_dz": (0, 20), "ws_tiles": (1, 100000), "ws_every": _TICKS, "ws_bodies": (1, 100),

@@ -97,7 +97,7 @@ M.DEFAULTS = {
   -- the water, a stale job: gv.key not 'run'); and the same patient with the same verdict is announced again only after alarm_repeat. A patient is out of
   -- the episode only when his thirst fell alarm_clear under the line (he drank), not when a number dips under 30,000
   alarm_grace = 2 * DAY, alarm_margin = 5000, alarm_clear = 5000, alarm_repeat = 28 * DAY,
-  hosp_every = 7 * DAY, request_every = 28 * DAY, inside_every = 7 * DAY, retire_days = 3, outside_retire = true, flood_every = 2 * DAY, flood_tiles = 2,
+  hosp_every = 7 * DAY, request_every = 28 * DAY, inside_every = 7 * DAY, retire_days = 28, retire_depth = 2, restore_days = 2, outside_retire = true, flood_every = 2 * DAY, flood_tiles = 2,
   units_per_slice = 40, items_per_slice = 200, zone_tiles = 25, order_backoff = 3 * DAY,
   deep = 4, zone_below = false, gate_every = 28 * DAY, wake_wall_s = 600,
   -- BUG-537 (Run 16c i3 Sealcertain: HOSPITAL_DRY ~10 times a year beside a well that read 3/7 and 1/7 in turn): the dry episode ends
@@ -390,7 +390,8 @@ local function on_burrow(b, x, y, z)
 end
 
 -- BUG-874: a tile inside one of the fort's own Z4 boxes (manifest zones.Z4 {x1,y1,z1,x2,y2,z2}); the burrow test alone called a source
--- 'outside' that lay in the pit of the fort core (i1 zone 18189 at 63,104,141 in the Tiefe+ box, no such burrow in the manifest)
+-- 'outside' that lay in a room of the fort core on no burrow. (Verified against the live i1 manifest: its zone 18189 at 63,104,141 lies in
+-- NO Z4 box, so it stays outside there.)
 function M.in_fort_box(K, x, y, z)
   if not x then return false end
   local ok, man = pcall(function() return K.manifest() end)
@@ -4311,6 +4312,7 @@ function M.inside_water(K, r, p, c, now)
   local outn = cu and math.tointeger(cu.outside) or nil
   if outn and outn < 0 then outn = nil end
   local cit = cu and math.tointeger(cu.cit) or 0
+  M.restore_outside(K, r, p, c, now)                      -- BUG-875: a retired outside zone comes back when the inside water goes
   if inw > 0 then
     p.iwq = nil
     M.retire_outside(K, r, p, c, now)
@@ -4334,18 +4336,39 @@ function M.inside_water(K, r, p, c, now)
   return inw, outn
 end
 
--- BUG-875 (Run 17 i1: Drink jobs went to the Water Source zone painted on the river, 7 citizens drowned at the bank): once the fort holds an
--- accepted source inside for retire_days in a row, every hospital zone is served by one of them, a Water Source zone the KERNEL painted
--- (dfllm-water) that stands outside the fort is removed, one per run (the player's own zones stay). Returns the id removed or nil.
+-- BUG-875 (Run 17 i1: Drink jobs went to the Water Source zone painted on the river, 7 citizens drowned at the bank). FAIL-SAFE (verifier
+-- round 2): an outside zone the KERNEL painted (dfllm-water) is taken away only when a STRONG inside source has stood for `retire_days`
+-- (28) in a row. Strong = accepted, wet, not an emergency well, inside the fort (`inn`), water under a well >= `retire_depth` (2) of 7 and
+-- the tile on the citizens' main walk group (snapshot.far strict: a stranded group or a tile nobody reaches is none). One run without
+-- a strong source (shallow spell, dry, unreachable) starts the clock again. When in doubt the outside zone stays.
+function M.strong_inside(K, c, r)
+  local out = {}
+  local depth = math.tointeger(c.retire_depth) or 2
+  for _, s in ipairs(r.sources or {}) do
+    if s.wet and not s.emerg and s.inn and s.x then
+      local deep = true
+      if s.kind == 'well' then
+        local fl = s.below and math.tointeger(s.below.flow)
+        deep = fl ~= nil and fl >= depth
+      end
+      if deep then
+        local okc, far = K.call('snapshot', 'far', s.x, s.y, s.z, true)
+        if okc and far == false then out[#out + 1] = s end
+      end
+    end
+  end
+  return out
+end
+
+-- once per run while citizens live: removes ONE kernel-painted outside zone per run when it is safe (see above), remembers its tile in
+-- p.rz so M.restore_outside can paint it again. Returns the id removed or nil.
 function M.retire_outside(K, r, p, c, now)
   if c.outside_retire == false or not M.can('water_zone_remove') then return nil end
+  local inside = M.strong_inside(K, c, r)
+  if #inside == 0 then p.iwok = nil; return nil end
   p.iwok = p.iwok or now
-  if now - p.iwok < (math.tointeger(c.retire_days) or 3) * DAY then return nil end
-  local inside = {}
-  for _, s in ipairs(r.sources or {}) do
-    if s.wet and not s.emerg and s.inn and s.x then inside[#inside + 1] = s end
-  end
-  for _, h in ipairs(r.hosp or {}) do          -- the hospital keeps its water: an inside source within `near` of every zone
+  if now - p.iwok < (math.tointeger(c.retire_days) or 28) * DAY then return nil end
+  for _, h in ipairs(r.hosp or {}) do          -- the hospital keeps its water: a strong inside source within `near` of every zone
     local ok = false
     for _, s in ipairs(inside) do
       if dist_box(s.x, s.y, s.z, h) <= c.near then ok = true; break end
@@ -4357,8 +4380,10 @@ function M.retire_outside(K, r, p, c, now)
       local ok, why = K.act.water_zone_remove(s.id)
       if ok then
         table.remove(r.sources, i)
-        K.log('info', 'water: Water Source zone %d at %d,%d,%d retired: %d accepted source(s) stand inside the fort, the citizens drink there (BUG-875)',
-              s.id, s.x, s.y, s.z, #inside)
+        p.rz = json.array(type(p.rz) == 'table' and p.rz or {})
+        p.rz[#p.rz + 1] = json.object{x = s.x, y = s.y, z = s.z}
+        K.log('info', 'water: Water Source zone %d at %d,%d,%d retired: %d strong source(s) stand inside the fort for %d days, the citizens drink there (BUG-875)',
+              s.id, s.x, s.y, s.z, #inside, (math.tointeger(c.retire_days) or 28))
         K.emit('WATER_OUTSIDE_RETIRED', 'B', trunc(string.format('Water Source zone %d at %d,%d,%d outside the fort retired: water stands inside',
                                                                  s.id, s.x, s.y, s.z), 200), {zone = s.id, inside = #inside})
         return s.id
@@ -4368,6 +4393,38 @@ function M.retire_outside(K, r, p, c, now)
     end
   end
   return nil
+end
+
+-- BUG-875 (verifier round 2): the way back. A zone retired by M.retire_outside is painted again (one per run, the same tile) once no strong
+-- inside source has stood for `restore_days` (2): the inside water went shallow, dry or out of the citizens' reach. Nothing to do when
+-- none was retired. Returns true when a zone was painted.
+function M.restore_outside(K, r, p, c, now)
+  local list = type(p.rz) == 'table' and p.rz or nil
+  if not list or #list == 0 then p.rzlost = nil; return false end
+  if #M.strong_inside(K, c, r) > 0 then p.rzlost = nil; return false end
+  p.rzlost = p.rzlost or now
+  if now - p.rzlost < (math.tointeger(c.restore_days) or 2) * DAY then return false end
+  if not M.can('water_zone') or K.mode() == 'BREACH' then return false end
+  if now - (math.tointeger(p.rzt) or -DAY) < DAY then return false end
+  p.rzt = now
+  local e = list[1]
+  local have = false
+  for _, s in ipairs(r.sources or {}) do
+    local bx = s.kind == 'zone' and s.box
+    if bx and bx.z == e.z and e.x >= bx.x1 and e.x <= bx.x2 and e.y >= bx.y1 and e.y <= bx.y2 then have = true end
+  end
+  local ok, n = true, nil
+  if not have then ok, n = K.act.water_zone({e.x, e.y, e.z}, false) end
+  if ok then
+    table.remove(list, 1)
+    K.log('warn', 'water: Water Source zone at %d,%d,%d painted again: no strong inside source for %d days (BUG-875)', e.x, e.y, e.z,
+          math.tointeger(c.restore_days) or 2)
+    K.emit('WATER_OUTSIDE_RESTORED', 'B', trunc(string.format('Water Source zone at %d,%d,%d painted again: the inside water is gone or out of reach',
+                                                              e.x, e.y, e.z), 200), {pos = json.array{e.x, e.y, e.z}})
+    return true
+  end
+  K.log('warn', 'water: Water Source zone at %d,%d,%d not painted again: %s', e.x, e.y, e.z, tostring(n))
+  return false
 end
 
 -- inspect what=water_sources (kern routes it here; FR-47): the last scan (bodies of water >= deep per level with

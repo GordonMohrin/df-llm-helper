@@ -948,6 +948,11 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
             iw = files.read_json(ctx.dir / ".inside-water.json") if getattr(ctx, "dir", None) else None
         except (OSError, ValueError):
             iw = None
+        ns = iw.get("nosite") if isinstance(iw, dict) else None
+        if isinstance(ns, dict) and ns.get("why"):
+            # BUG-873 (verifier round 2): every route for an inside cistern was refused (i1: heavy aquifer levels): said plainly, with what the fort can do
+            out.append((1, "NO INSIDE WATER SITE: " + str(ns["why"])[:160] + "; keep drink stocked (the container reserve orders barrels, stock.rsv; "
+                        "trade.want add drink) or dig a site by hand; asked again every 28 game days"))
         if isinstance(iw, dict) and (iw.get("parts") or iw.get("stalled")):
             out.append((1, "INSIDE WATER BLOCKED: " + (f"no cistern placed, {iw['parts']}" if iw.get("parts") else "")
                         + (f"{'; ' if iw.get('parts') else ''}cistern project(s) {','.join(iw['stalled'])} stalled (no PROJECT_DONE)"

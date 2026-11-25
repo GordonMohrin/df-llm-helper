@@ -1698,6 +1698,8 @@ class Follower:
                     return
         why_parts, toks = plan_mod.well_parts_why(self.dir, st0)
         self._inside_report(note, seen, stalled, why_parts, now, tick, toks)
+        if inside and self._inside_hold(note, tick, now):
+            return
         if why_parts:
             # BUG-873 (verifier: the follow path never read fort.nostone / noparts): a cistern builds a well (block, mechanism, bucket, chain):
             # without them the project would hang at 37 % and the ask would count it as pending. Not placed; the cause is named (AUTO_FAIL,
@@ -1708,18 +1710,25 @@ class Follower:
             # beside 4899 d of barrel drink): no water body to pipe from; the aquifer cistern (cmd.cistern_fill_guard refuses it
             # without a known aquifer level, and the plain one when no water lies within reach). BUG-873: with an aquifer level known the
             # inside_water ask takes it first (it worked live on i4; the piped route runs to the river and needs a safe intake)
-            self._request_place("cistern_water", "cistern", {"water": "aquifer"}, "S1", now, prio=1)
+            if self._request_place("cistern_water", "cistern", {"water": "aquifer"}, "S1", now, prio=1) and inside and "cistern_water" in self.jobs:
+                # BUG-873 (verifier round 2, i1: every aquifer basin refused, heavy z135/136/138): the other routes the code has follow on
+                # the same snapshot: the bucket-fed cistern (a fill source on the snapshot, within its own limits); none: said plainly
+                self.jobs["cistern_water"].update(inside=True, tries=[{"water": "aquifer"}, {}] if self._aq_known() else [{}, {"water": "aquifer"}])
             return
         if self._request_place("cistern_water", "cistern", {}, "S1", now, prio=1):
             self.jobs["cistern_water"].update(access=True, at=at)
+            if inside:
+                self.jobs["cistern_water"]["inside"] = True
 
     def _inside_report(self, note: dict, seen: dict, stalled: list, why_parts: str, now: float, tick, toks: list | None = None) -> None:
         """BUG-873: persist the follow's view of the inside-water ask (.inside-water.json: first-seen ticks, stalled project ids, the parts
         cause) for the brief, say a new cause once (AUTO_FAIL: a class-A wake), and ask the caravans for the missing parts (trade.want add)."""
         prev_parts, prev_stalled = note.get("parts") or "", set(note.get("stalled") or [])
         new = {"seen": seen, "stalled": sorted(stalled), "parts": why_parts, "tick": tick}
+        if isinstance(note.get("nosite"), dict):
+            new["nosite"] = note["nosite"]               # BUG-873: the 'no inside site' record outlives the report of the other causes
         try:
-            if {k: v for k, v in new.items() if k != "tick"} != {k: note.get(k) for k in ("seen", "stalled", "parts")}:
+            if {k: v for k, v in new.items() if k != "tick"} != {k: note.get(k) for k in ("seen", "stalled", "parts", "nosite") if k in note or k in new}:
                 files.write_json_atomic(self.dir / plan_mod.INSIDE_FILE, new)
         except OSError as e:
             self._fail("inside water note", e, now)
@@ -1735,6 +1744,47 @@ class Follower:
             self._synth("AUTO_FAIL", f"inside water: cistern project {sid} has waited {plan_mod.INSIDE_STALL_T // 1200} game days unfinished "
                         "(no PROJECT_DONE): it no longer counts as under way, the request asks again; check `dfllm plan show` for its "
                         "missing part (mechanism, block, bucket, chain)", now)
+
+    def _inside_hold(self, note: dict, tick, now: float) -> bool:
+        """BUG-873 (verifier round 2): every route for an inside cistern was refused lately (aquifer basins all refused, no bucket-fed site):
+        the request is NOT placed again (no failing request every week) until INSIDE_RETRY_T game ticks passed; the plain cause is said once
+        per INSIDE_SAY_T (AUTO_FAIL) and stays in the brief (.inside-water.json nosite). True = hold."""
+        ns = note.get("nosite")
+        if not isinstance(ns, dict) or tick is None or not isinstance(ns.get("tick"), int) or tick - ns["tick"] >= plan_mod.INSIDE_RETRY_T:
+            return False
+        said = ns.get("said") if isinstance(ns.get("said"), int) else ns["tick"]
+        if tick - said >= plan_mod.INSIDE_SAY_T:
+            ns["said"] = tick
+            self._synth("AUTO_FAIL", self._nosite_text(ns.get("why") or "", tick - ns["tick"]), now)
+            try:
+                files.write_json_atomic(self.dir / plan_mod.INSIDE_FILE, {**note, "nosite": ns})
+            except OSError as e:
+                self._fail("inside water note", e, now)
+        return True
+
+    @staticmethod
+    def _nosite_text(why: str, age: int) -> str:
+        days = age // 1200
+        return (f"inside water: no site for a cistern inside the fort ({why}); refused {days} game days ago, asked again every "
+                f"{plan_mod.INSIDE_RETRY_T // 1200} days. The fort can keep its drink stocked instead: the container reserve orders barrels for the "
+                "stills itself (state stock.rsv), `trade.want add drink` and plants, or dig toward a light aquifer level or a safe brook by hand")
+
+    def _inside_nosite(self, err, now: float) -> None:
+        """BUG-873 (verifier round 2): record that no route placed an inside cistern (cause, tick), say it once, brief reads the file."""
+        st0 = files.read_state(self.dir) or {}
+        t0 = st0.get("t") if isinstance(st0.get("t"), dict) else {}
+        tick = t0.get("abs", t0["y"] * schema.TICKS["YEAR"] + t0["tick"]) if t0 and "tick" in t0 and ("abs" in t0 or "y" in t0) else None
+        why = str(err).replace("\n", " ")[:300]
+        if tick is None:
+            self._synth("AUTO_FAIL", self._nosite_text(why, 0), now)
+            return
+        note = plan_mod.inside_note(self.dir)
+        ns = {"tick": tick, "said": tick, "why": why}
+        try:
+            files.write_json_atomic(self.dir / plan_mod.INSIDE_FILE, {**note, "nosite": ns})
+        except OSError as e:
+            self._fail("inside water note", e, now)
+        self._synth("AUTO_FAIL", self._nosite_text(why, 0), now)
 
     def _aq_known(self) -> bool:
         """BUG-873: an aquifer level is known (manifest aquifer_levels, the sites snapshot's aquifer marks, a recorded breach)."""
@@ -1951,8 +2001,14 @@ class Follower:
                 cid = self._place_farms(args, now, snap, urgent=key == "startset_farm")
             elif tpl == "workshops" and key != "starter":
                 cid = self._place_workshops(args, now, snap, need)
+            elif key == "cistern_water" and job.get("inside") and isinstance(job.get("tries"), list):
+                cid = self._place_inside(args, job["tries"], now, snap, need)
             else:
                 cid = self._send("bp.place", args, tpl, now, snap=snap, need=need)
+        except _NoInsideSite as e:             # BUG-873: every route refused: one plain statement, no new request until INSIDE_RETRY_T
+            self.jobs.pop(key, None)
+            self._inside_nosite(e, now)
+            return
         except Exception as e:                 # noqa: BLE001 - WP3 bugs included: one AUTO_FAIL, job dropped
             self.jobs.pop(key, None)
             if key == "perim" and isinstance(e, SealClosed):
@@ -1966,6 +2022,24 @@ class Follower:
         job.update(placed=cid, since=now, prev=prev if isinstance(prev, dict) else None)
         files.log_cli(self.dir, "follow", f"auto:{key}", args, f"placed {cid}")
 
+
+    def _place_inside(self, args: dict, tries: list, now: float, snap: dict, need: list | None) -> str:
+        """BUG-873 (verifier round 2, Run 17 i1: every aquifer basin refused, heavy z135/z136/z138, and the ask repeated for ever): the inside
+        cistern tries its routes in order on one snapshot (the aquifer basin, the bucket-fed cistern with its fill source: each within its own
+        limits, the hazard and heavy-level refusals untouched). The first that places is sent; none: _NoInsideSite with every cause."""
+        from .cmd import BpError
+        causes: list[str] = []
+        for p in tries:
+            try:
+                cid = self._send("bp.place", {**args, "p": p}, "cistern", now, snap=snap, need=need)
+            except BpError as e:
+                causes.append(f"{'aquifer' if p.get('water') == 'aquifer' else 'bucket-fed'}: {str(e).splitlines()[0][:180]}")
+                continue
+            if causes:
+                files.log_cli(self.dir, "follow", "auto:cistern_water", {"p": p}, f"BUG-873: earlier routes refused ({'; '.join(causes)}): placed with {p}")
+            args["p"] = p
+            return cid
+        raise _NoInsideSite("; ".join(causes) or "no route")
 
     def _place_workshops(self, args: dict, now: float, snap: dict, need: list | None) -> str:
         """BUG-394 (Run 16a i1 Bachwald: a Possessed dwarf waited for 'no Craftsdwarfs' until the shop was placed by hand, the
@@ -2039,6 +2113,10 @@ class Follower:
             return self._fail("phase.waive farms", e, now)
         files.log_cli(self.dir, "follow", "auto:waive", {"tpl": "farms", "phase": st.get("phase")},
                       f"no farm site at all: deliverable farms of {st.get('phase')} waived")
+
+
+class _NoInsideSite(RuntimeError):
+    """BUG-873: every route for the inside cistern was refused (the message carries each cause)."""
 
 
 def workshop_tries(params: dict, mode: str | None) -> list[dict]:

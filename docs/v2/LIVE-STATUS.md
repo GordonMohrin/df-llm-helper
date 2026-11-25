@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 759 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 810 |
+| offen, nie live gesehen | 766 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 817 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
@@ -314,6 +314,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/FR-BUGS.md:485` (no verdict word): ueber 30000. 'bp.place tpl=cistern site=A108_106_137_1' -> BUG-469 refused (kein erreichbarer Bach >= 8 Tiles);
 - BUG-469 `runs/run-16b/FR-BUGS.md:535` (no verdict word): er, Meldung nennt das ('barrels wanted'). cistern: bp.place BUG-469 refused, 'bp.sites cistern core/refuge' 'no pipe route' (Wasser 40+ Tiles;
 - BUG-469 `runs/run-16b/FR-BUGS.md:581` (no verdict word): '. Trinken bleibt 0 d. bp.place cistern site=S3 abgelehnt: 'BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core ...
+- BUG-469 `runs/run-16b/FR-BUGS.md:673` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40: too far f
 - BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
 - BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
 - BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);
@@ -323,6 +324,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-513 `runs/run-16d/FR-BUGS.md:377` (curated: 'bisher', ten minutes after the reload: provisional): r weiter unverknuepft: O1 17813/17829, B2 17828 'linked 0' (BUG-513 hat bisher nichts verknuepft, Stand ~10 min nach Reload).
 - BUG-517 `runs/run-16d/STAND.md:198` (no verdict word): 01 sum d6 Pop 39: Runde 32: follow neu, PERIMETER OPEN weg (BUG-517), levers:O1 bleibt;
 - BUG-527 `runs/run-16b/FR-BUGS.md:318` (no verdict word): xplore 98,136,137; workshops 97,107,134 r1, Kitchen-Warnung BUG-527).
+- BUG-530 `runs/run-16b/STAND.md:570` (no verdict word): 6 Plan y519: P5, nur fortcore st4 (Draft fand keine Raeume: BUG-530);
 - BUG-530 `runs/run-16c/STAND.md:357` (no verdict word): u (main 534411e); Plan y374 (bedrooms+dining surface, Draft BUG-530: aqshaft/explore finden keinen Standort;
 - BUG-530 `runs/run-16c/FR-BUGS.md:415` (no verdict word): kein Hartstein ("0 usable", 36-52 out of reach), Plan-Draft BUG-530 bietet nur Oberflaechen-bedrooms/dining.
 - BUG-530 `runs/run-16d/FR-BUGS.md:428` (no verdict word): del' als Zustand mit Ziel (trade.want) statt PLAN_EXHAUSTED/BUG-530.
