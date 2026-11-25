@@ -21,6 +21,14 @@ local function manifest()
   return m
 end
 
+-- BUG-906 (Neuausrichtung 15): the station clearance is now gate.RAISE_R + spread = 4 (stations.clear); this suite is written for the
+-- BUG-032 clearance margin + spread = 2 of the shared fixture (melee 4 tiles from B1, b2 3 tiles from B2): it pins stations.clear = 2
+local function lc(r)
+  r.stations = r.stations or {}
+  if r.stations.clear == nil then r.stations.clear = 2 end
+  return r
+end
+
 -- opts: reflex (config/reflex.json table), units (extra), skills (every citizen's), equip (false: no gear),
 -- army (n goblins at the gate), traps ({n, armed} for the snapshot fake), manifest
 local function world(o)
@@ -31,7 +39,7 @@ local function world(o)
   for _, u in ipairs(S.army(o.army or 12, 51, 0)) do units[#units + 1] = u end
   for _, u in ipairs(o.units or {}) do units[#units + 1] = u end
   local W = S.world{units = units, manifest = o.manifest or manifest(), dfpath = dir, kern = o.kern,
-                    cfg = {reflex = o.reflex or {v = 2}}}
+                    cfg = {reflex = lc(o.reflex or {v = 2})}}
   X.install(W, {})
   df.global.world.status.popups = kmock.vec{}
   package.loaded['plugins.timestream'] = {timestream_getFps = function() return W.timestream_fps end}
@@ -336,7 +344,7 @@ T.test('sortie through O1: refused below the thresholds, then gather in the bail
   local W = world{skills = {AXE = 5, SHIELD = 3, ARMOR = 2},
                   units = {S.inv(450, 70, 3, Z), S.inv(451, 71, 3, Z)}}
   W.flow = false
-  local reflex = {v = 2, intake = {on = false}}
+  local reflex = lc{v = 2, intake = {on = false}}
   W.K.cfg.reflex = reflex
   T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end))
   run(W, 300)
@@ -377,7 +385,7 @@ T.test('sortie through O1: a hostile at the gate raises O1 with a member outside
   local W = world{skills = {AXE = 5, SHIELD = 3, ARMOR = 2}, army = 0, units = {S.inv(450, 70, 3, Z)}}
   W.goblins = {450}
   W.flow = false
-  W.K.cfg.reflex = {v = 2, intake = {on = false}}
+  W.K.cfg.reflex = lc{v = 2, intake = {on = false}}
   for i = 1, 6 do W.add_unit(S.inv(460 + i, 80 + i, 2, Z)) end   -- the siege: in sight, far from the gate
   T.ok(until_(W, 600, function() return W.K.mode() == 'SIEGE' end))
   run(W, 300)
@@ -406,7 +414,7 @@ T.test('NEU1 P4: sortie through O1 against one hostile with an armed squad in no
   local function go(sf)
     local W = world{skills = {AXE = 5, SHIELD = 3}, army = 0, units = {S.inv(450, 70, 3, Z)}, equip = false}
     W.flow = false
-    W.K.cfg.reflex = {v = 2, intake = {on = false}, small_fight = sf}
+    W.K.cfg.reflex = lc{v = 2, intake = {on = false}, small_fight = sf}
     for _, p in ipairs(X.squad_of(W, 'A').positions) do
       if p.occupant >= 0 then
         W.unit(W.hfs[p.occupant].unit_id).inventory:insert('#', {item = X.item(W, 'WEAPON'), mode = df.inv_item_role_type.Weapon})

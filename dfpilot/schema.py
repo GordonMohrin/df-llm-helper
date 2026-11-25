@@ -874,8 +874,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-170 why unreachable (the station on walk group grp, the squad's soldiers on home); BUG-214 why fallback (the
     # whole chain failed: via wide = a floor on home within 3 * SEARCH_R of the first entry, kern = a Kern+ floor on
     # home), tried = each failed entry and why ('b2 wall, core group 0, z4 none, melee group 1507')
+    # BUG-906: why none with standby 1 = no tile clear of the bridge (clear = the clearance, stations.clear) on its inner side: tiles = how many were
+    # tried; the squad's soldiers at their station stand by order and hold the raise only on the footprint (once per alarm)
     "STATION_MOVED": ("B", "military", _d("why:s", "station:s first:s from:p to:p bridge:s d:i squad:i key:s units:ia "
-                                                  "grp:i home:i via:s tried:s")),
+                                                  "grp:i home:i via:s tried:s tiles:i clear:i standby:f")),
     # FR-79 (note 67): the kernel swapped members of the militia squad `squad` (A, B, C) for the next cohort at the close of
     # its window: out/into = members swapped in this batch (at most military.rotation.per_day), size = the squad's target,
     # eligible = citizens who may sit in it, lo/hi = militia windows served by the eligible (counts, no names), win = the
@@ -939,7 +941,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # (n = civilians outside the raised inner gate in PEACE, units = their ids)
     # BUG-831: state peace_wait (unit = the walker that makes a quiet PEACE raise wait, need = the quiet ticks needed) | peace_traffic
     # (a risk of the kernel raise locks the bridge down in PEACE: days, left ticks, n risks, unit)
-    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i need:i unit:i days:i left:i")),
+    # Neuausrichtung 15 (BUG-905..909): state peace_stuck (a bridge wanted up in PEACE for a game day: n = the units that keep it down, units, ticks
+    # wanted, why) | bounded (an ALERT / RECOVERY / lockdown raise stopped waiting for walkers: stage 1 = only units beside it or within 2 steps hold
+    # it, 2 = only units on the footprint, waited ticks, mode) | return_wait (the return window did not open: blockers = units that would keep it
+    # down afterwards, n = civilians outside) | return_end (the window ended when the last civilian was in)
+    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i need:i unit:i days:i left:i stage:i waited:i mode:s ticks:i blockers:i")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =
     # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`); BUG-129: regions =
