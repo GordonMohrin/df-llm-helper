@@ -1324,6 +1324,8 @@ function M.plan_changed(K)
 end
 -- public (BUG-035): the refuge_dry text of the last evaluation (nil while the refuge has drink or a wet well)
 function M.refuge_dry(K) return rt.rdry end
+-- public (NEU14 BUG-894, runner.idle_keep): the days the perimeter has stood open (0 for today), with what is open; nil when it is closed
+function M.perim_open(K) return rt and rt.pd or nil, rt and rt.pw or nil end
 -- public (BUG-049, seal.refuge_trust): what the last Python audit said about the refuge's separation in the worst case
 -- (a hatch is no barrier there): {sep = 1|0, age = ticks since that audit}, nil before the first audit
 function M.refuge_audit(K)

@@ -560,6 +560,7 @@ C.STATE_SPEC = obj({
                             {stuck = NAT, stale = NAT}),     -- BUG-126: orders that cannot run; days the project stands still
               died = obj(nil, nil, NAT), tombs_locked = NAT,
               corpses_unreach = NAT,       -- BUG-105: citizen bodies on a tile nobody can path to (apart from corpses_old)
+              corpses_far = NAT, corpses_far_mem = NAT,    -- NEU14 BUG-895: of corpses_old the out-of-reach ones; the out-of-reach ones whose memorial slab stands (not in corpses_old)
               -- FR-74: stressed citizens by source (ghosts, deaths, beds, drink, food, rooms, toppled), the population
               -- split and record (kids = children and babies, res = residents, peak, deaths and migrant waves in the last
               -- year, days since the last wave or -1) and the deaths of the last year by cause

@@ -96,9 +96,19 @@ local function mat_class(mt, mi)
   return nil
 end
 
+-- NEU14 BUG-893: the labor of a ConstructBuilding job whose holder is no workshop: a wall / floor construction is built with Building construction (BUG-009, BUG-745),
+-- a road with Road building. The other building kinds: economy.BUILD_LABOR (the kernel's own table); unknown = nil
+J.BUILD_LABOR = {Construction = 'BUILD_CONSTRUCTION', Road = 'BUILD_ROAD'}
+
 -- labor ids (any of them) and the skill id for a job / order of type `jt`; nil labors = unknown
 function J.labors(jt, rname, mt, mi, skey)
   local tn = ename(df.job_type, jt)
+  local bk = type(skey) == 'string' and skey:match('^building:(.+)$')
+  if bk then                                           -- NEU14 BUG-893: a building that is no workshop (a wall, a floor): not 'workshop:Farmers'
+    local l = J.BUILD_LABOR[bk] and df.unit_labor and df.unit_labor[J.BUILD_LABOR[bk]]
+    if tn == 'ConstructBuilding' and int(l) then return {l}, nil end
+    return nil, nil
+  end
   local skills = {}
   if tn == 'CustomReaction' then
     local rx = J.reaction(rname)
@@ -149,7 +159,12 @@ function J.shop(b, K)
   local s = {id = int(b.id), b = b, njobs = #each(pget(function() return b.jobs end))}
   local bt = pget(function() return b:getType() end)
   local sub = pget(function() return b:getSubtype() end) or b.type
-  if bt == (df.building_type and df.building_type.Furnace) then
+  if bt ~= nil and df.building_type and df.building_type.Workshop ~= nil and bt ~= df.building_type.Workshop and bt ~= df.building_type.Furnace then
+    -- NEU14 BUG-893 (Run 17d i4: 'why job:1733178' read a wall construction as 'ws 19342 workshop:Farmers ... derived labor PROCESS_PLANT': the construction type
+    -- number was taken for a workshop type): a building that is no workshop or furnace is named by its own type
+    s.kind = ename(df.building_type, bt)
+    s.key = s.kind and ('building:' .. s.kind)
+  elseif bt == (df.building_type and df.building_type.Furnace) then
     s.type = ename(df.furnace_type, sub); s.key = s.type and ('furnace:' .. s.type)
   else
     s.type = ename(df.workshop_type, sub); s.key = s.type and ('workshop:' .. s.type)
@@ -419,6 +434,7 @@ function J.inputs(K, job, s, ctx)
       local vname = (vid >= 0 and ename(df.items_other_id, vid)) or (it >= 0 and ename(df.item_type, it)) or 'IN_PLAY'
       e.what = (it >= 0 and ename(df.item_type, it) or vname):lower()
       local f1 = pget(function() return ji.flags1 end)
+      e.bfilter = vname == 'BOULDER' and pget(function() return ji.flags2.non_economic end) == true and pget(function() return ji.flags3.hard end) == true or nil
       if f1 and pget(function() return f1.empty end) == true then e.container = true; e.what = 'empty ' .. e.what end
       local rp = pget(function() return ji.has_material_reaction_product end)
       if rp and tostring(rp) ~= '' then e.what = e.what .. ' (' .. tostring(rp) .. ')' end
@@ -433,6 +449,7 @@ function J.inputs(K, job, s, ctx)
             local fl, skip = item.flags, false            -- item_flags names (DF 53); a missing one ends the scan: unknown
             for _, k in ipairs(SKIP) do if fl[k] == true then skip = true; break end end
             if not skip then
+              if vname == 'BOULDER' and not (item.flags.forbid or item.flags.dump or item.flags.in_job) then e.btot = (e.btot or 0) + 1 end   -- NEU14 BUG-896
               local fit, approx = item_fits(ji, item)
               if fit then
                 if approx then e.approx = true end
@@ -491,6 +508,8 @@ function J.input_text(e)
                                                                               k == 'far' and 'off its walk group' or k == 'forbid' and 'forbidden' or k) end
   end
   if e.inb then parts[#parts + 1] = string.format('%d inside the free holders burrows', e.inb) end
+  -- NEU14 BUG-896: a mason's boulder: of all the free boulders the ones its stone filter (non_economic, hard) takes
+  if e.btot then parts[#parts + 1] = string.format('%d of %d free boulders are %s', (e.free or 0) + (e.far or 0), e.btot, e.bfilter and 'hard non-economic stone' or 'taken by this job') end
   return string.format('%s x%d: %s%s%s', e.what, e.need, table.concat(parts, ', '), e.clipped and ' (first records only)' or '',
                        e.approx and ' (approximate match)' or '')
 end

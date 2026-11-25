@@ -963,7 +963,7 @@ EVENT = Obj(req={"n": NAT, "tick": TICK, "type": Str(TYPE_RE), "cls": Str(enum=[
 SUBTYPE_JOBS = frozenset({"MakeArmor", "MakePants", "MakeShoes", "MakeGloves", "MakeHelm", "MakeWeapon", "MakeAmmo",
                           "MakeShield", "MakeTrapComponent", "MakeTool", "MakeToy"})
 # NEU1 P7: act.LABOR_SETS names, act.TOOL_DETAILS, the quickfort build keys of furniture.place (lua/dfllm/player.lua M.FURNITURE)
-LABOR_SETS = ["mechanic", "farm", "cook", "brew", "herb", "burn", "furniture", "clean_fish", "hunt", "carpenter", "stonecraft", "spin", "process", "feed_water", "woodcutter"]
+LABOR_SETS = ["mechanic", "farm", "cook", "brew", "herb", "burn", "furniture", "clean_fish", "hunt", "carpenter", "stonecraft", "spin", "process", "feed_water", "woodcutter", "construction"]
 WORK_DETAILS = ["Miners", "Woodcutters", "Hunters", "Fisherdwarves", "Planters", "Plant gatherers", "Gatherers", "Herbalists",
                 "Orderlies", "Cooks", "Cooking", "Cook", "Brewers", "Brewing", "Brewer"]
 FURNITURE = {"bed": "b", "table": "t", "chair": "c", "door": "d", "cabinet": "f", "chest": "h", "coffin": "n",
@@ -1242,6 +1242,9 @@ STATE = Obj(
                           # BUG-105: citizen bodies on a tile nobody can path to (tree crown, no walk group), apart from
                           # corpses_old (only when > 0)
                           "corpses_unreach": NAT,
+                          # NEU14 BUG-895: of corpses_old the bodies in another walk group (corpse_far: tombs.repair cannot reach them), and the
+                          # out-of-reach ones whose memorial slab stands (not counted in corpses_old)
+                          "corpses_far": NAT, "corpses_far_mem": NAT,
                           # FR-74: stressed citizens by source, deaths of the last year by cause, the population split
                           # and record (kids: children and babies; res: residents; waves/mig/dy: the last year; lastw:
                           # days since the last migrant wave, -1 none seen)

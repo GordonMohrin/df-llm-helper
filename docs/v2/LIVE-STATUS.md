@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 774 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 825 |
+| offen, nie live gesehen | 779 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 830 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
@@ -293,8 +293,10 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-437 `runs/run-16b/STAND.md:493` (no verdict word): 490 Plan: Phase P5, Bau farms@S1 (fortcore st4 weggelassen: BUG-437 Fallen toeten bei drink 0), Spur Versorgung: kein Bau-Schritt moeglich, Kernel-Abhilfe (Fass-Cure) laeuft.
 - BUG-437 `runs/run-16b/STAND.md:496` (no verdict word): y491 Plan: P5, Bau farms@S1 (fortcore st4 weggelassen wegen BUG-437), Spur Versorgung: kein Bau-Schritt, Kernel-Cure laeuft.
 - BUG-437 `runs/run-16b/STAND.md:508` (no verdict word): (Spur Wehr II: fortcore st4 in s1, jetzt wo Trinken 117 d, BUG-437-Warnung entfaellt), LEITER 7/18
+- BUG-437 `runs/run-16b/STAND.md:587` (no verdict word): lan y524: Phase P5, Bauten stockroom@S1 (fortcore abgelehnt/BUG-437 Warnung), Spur Wehr;
 - BUG-437 `runs/run-16d/STAND.md:124` (no verdict word): refuge_beds, dining, furnaces; Fallen erst s2 wegen Warnung BUG-437 Wasser)
 - BUG-437 `runs/run-16d/STAND.md:132` (no verdict word): st4, traps bridges, explore x4); Entscheidung: Fallen trotz BUG-437-Warnung, da drink 405d/food 60-75d innen
+- BUG-437 `runs/run-16b/FR-BUGS.md:927` (no verdict word): tone-fall traps on the way out of the fort while drink 0 d (BUG-437: they kill the citizens who walk it): drop it until drink and food stand inside' -> nicht aufgenommen.
 - BUG-438 `runs/run-16a/STAND.md:91` (no verdict word): escheitert, beide bp.cancel (Entscheidung); explore-Projekt BUG-438 laeuft;
 - BUG-438 `runs/run-16d/FR-BUGS.md:561` (no verdict word): r probes'. Seit y446 liefert jeder Probe nur Mudstone/Soil (BUG-438).
 - BUG-445 `runs/run-16a/FR-BUGS.md:231` (no verdict word): LES, Boden darunter nicht erreichbar); surfacecore ist laut BUG-445 gesperrt (und braucht Cw-Waende = Stein, 0).
