@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 779 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 830 |
+| offen, nie live gesehen | 784 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 835 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
@@ -294,9 +294,12 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-437 `runs/run-16b/STAND.md:496` (no verdict word): y491 Plan: P5, Bau farms@S1 (fortcore st4 weggelassen wegen BUG-437), Spur Versorgung: kein Bau-Schritt, Kernel-Cure laeuft.
 - BUG-437 `runs/run-16b/STAND.md:508` (no verdict word): (Spur Wehr II: fortcore st4 in s1, jetzt wo Trinken 117 d, BUG-437-Warnung entfaellt), LEITER 7/18
 - BUG-437 `runs/run-16b/STAND.md:587` (no verdict word): lan y524: Phase P5, Bauten stockroom@S1 (fortcore abgelehnt/BUG-437 Warnung), Spur Wehr;
+- BUG-437 `runs/run-16b/STAND.md:604` (no verdict word): Plan y532: Phase P5, Bau fortcore st4 versehentlich in s1 (BUG-437 warn), s1b0 nach Start per bp.cancel streichen;
 - BUG-437 `runs/run-16d/STAND.md:124` (no verdict word): refuge_beds, dining, furnaces; Fallen erst s2 wegen Warnung BUG-437 Wasser)
 - BUG-437 `runs/run-16d/STAND.md:132` (no verdict word): st4, traps bridges, explore x4); Entscheidung: Fallen trotz BUG-437-Warnung, da drink 405d/food 60-75d innen
 - BUG-437 `runs/run-16b/FR-BUGS.md:927` (no verdict word): tone-fall traps on the way out of the fort while drink 0 d (BUG-437: they kill the citizens who walk it): drop it until drink and food stand inside' -> nicht aufgenommen.
+- BUG-437 `runs/run-16b/FR-BUGS.md:1153` (no verdict word): ## FR Plan y532 (i2): fortcore stage 4 gegen BUG-437
+- BUG-437 `runs/run-16b/FR-BUGS.md:1154` (no verdict word): tone-fall traps on the way out of the fort while drink 0 d (BUG-437: they kill the citizens who walk it): drop it".
 - BUG-438 `runs/run-16a/STAND.md:91` (no verdict word): escheitert, beide bp.cancel (Entscheidung); explore-Projekt BUG-438 laeuft;
 - BUG-438 `runs/run-16d/FR-BUGS.md:561` (no verdict word): r probes'. Seit y446 liefert jeder Probe nur Mudstone/Soil (BUG-438).
 - BUG-445 `runs/run-16a/FR-BUGS.md:231` (no verdict word): LES, Boden darunter nicht erreichbar); surfacecore ist laut BUG-445 gesperrt (und braucht Cw-Waende = Stein, 0).
@@ -319,6 +322,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/FR-BUGS.md:581` (no verdict word): '. Trinken bleibt 0 d. bp.place cistern site=S3 abgelehnt: 'BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core ...
 - BUG-469 `runs/run-16b/FR-BUGS.md:673` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40: too far f
 - BUG-469 `runs/run-16b/FR-BUGS.md:833` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40) ...
+- BUG-469 `runs/run-16b/FR-BUGS.md:1095` (no verdict word): ace tpl=cistern site=A101_176_137_1 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps ...
 - BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
 - BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
 - BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);
