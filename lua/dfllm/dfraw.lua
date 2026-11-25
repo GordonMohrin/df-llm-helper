@@ -224,7 +224,7 @@ local UNIT_FLAG_WORDS = {inactive = true, caged = true, chained = true, left = t
 -- the citizens holding any of `labors` at workshop `s`: {n, by = {status = n}, lines = {...}}
 function R.holders(K, labors, sk, s, ctx)
   local cu = citizens(K)
-  local out = {n = 0, by = {}, lines = {}, known = cu ~= nil}
+  local out = {n = 0, by = {}, lines = {}, known = cu ~= nil, total = cu and #cu.ids or nil}
   if not cu then return out end
   local sold = {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
@@ -298,8 +298,8 @@ local function holders_head(b, labors, w, s)
   local parts = {}
   for k, n in pairs(w.by) do parts[#parts + 1] = k .. '=' .. n end
   table.sort(parts)
-  add(b, string.format('labor %s: %d holder(s) [%s]; citizens\' main walk group %s; civ alert burrows %s', #names > 0 and table.concat(names, '|') or '? (no labor derived)', w.n,
-                       table.concat(parts, ' '), w.main and (w.main.group .. ' (' .. w.main.n .. '/' .. w.main.of .. ' sampled)') or '?',
+  add(b, string.format('labor %s: %d holder(s)%s [%s]; citizens\' main walk group %s; civ alert burrows %s', #names > 0 and table.concat(names, '|') or '? (no labor derived)', w.n,
+                       w.total and string.format(' of %d citizens', w.total) or '', table.concat(parts, ' '), w.main and (w.main.group .. ' (' .. w.main.n .. '/' .. w.main.of .. ' sampled)') or '?',
                        w.civ and table.concat(w.civ, ',') or 'off'))
   for _, l in ipairs(w.lines) do add(b, l) end
   if w.n > #w.lines then add(b, '  ... ' .. (w.n - #w.lines) .. ' more holders') end
@@ -435,6 +435,10 @@ function R.job(K, j, ctx)
   local lnames = {}
   for _, l in ipairs(labors or {}) do lnames[#lnames + 1] = ename(df.unit_labor, l) or tostring(l) end
   add(b, string.format('  derived labor: %s skill: %s', #lnames > 0 and table.concat(lnames, '|') or '? (none derived)', sk and (ename(df.job_skill, sk) or tostring(sk)) or '?'))
+  if s and s.kind then              -- NEU14 BUG-893: the holder is a wall, a floor, a door ...: no workshop, and the labor it needs is named
+    add(b, string.format('  holder building is a %s, not a workshop: DF needs the labor %s to build it (holders below)', s.kind,
+                         #lnames > 0 and table.concat(lnames, '|') or '? (not known for this building type)'))
+  end
   -- the job items
   local list = JW.job_items(j)
   local filled = {}
@@ -484,6 +488,20 @@ R.ITEMS = {
 -- the reasons DF may skip an item, in the order the first is counted as THE reason
 R.REASONS = {'gone', 'forbid', 'dump', 'in_job', 'in_building', 'built', 'on_fire', 'rotten', 'owned', 'trader', 'melt', 'hostile', 'in_claimed_container', 'outside_civ_burrow',
              'other_walk_group', 'unwalkable_tile', 'hidden_tile'}
+
+-- NEU14 BUG-896 (Run 17d i4: 'why ConstructCoffin: boulder x1: 0 match' beside 'items:BOULDER: no exclusion 53'; the sample showed no material): a boulder's material and
+-- whether a mason job's stone filter (job item flags2 non_economic, flags3 hard) would take it: {tok, hard, econ, pass}. econ = the stone-use screen's economic mark
+-- (plotinfo.economic_stone[mat_index]); hard = the material's ITEMS_HARD; pass = hard and not economic (ore and flux are economic by default)
+function R.stone_info(it)
+  local mt, mi = pget(function() return it.mat_type end), pget(function() return it.mat_index end)
+  local m = mt and pget(dfhack.matinfo.decode, mt, mi or -1)
+  local mat = m and pget(function() return m.material end)
+  local tok = m and pget(function() return m:getToken() end)
+  local hard = mat ~= nil and pget(function() return mat.flags.ITEMS_HARD end) == true
+  local es = mi and pget(function() return df.global.plotinfo.economic_stone[mi] end)
+  local econ = es ~= nil and es ~= 0 and es ~= false
+  return {tok = tostring(tok or ('mat ' .. tostring(mt) .. ',' .. tostring(mi))):gsub('^INORGANIC:', ''), hard = hard, econ = econ, pass = hard and not econ}
+end
 
 -- counts of the items of `spec` by exclusion reason: {total, scanned, clipped, ok, first = {}, hits = {}, unread = {}, pos_checked, cen = {}}
 function R.itemscan(K, spec, ctx)
@@ -573,7 +591,18 @@ function R.itemscan(K, spec, ctx)
     end
     r.whys = r.whys or {}
     r.whys[i] = why
-    if #why == 0 then r.ok = r.ok + 1 else r.first[why[1]] = (r.first[why[1]] or 0) + 1 end
+    if #why == 0 then
+      r.ok = r.ok + 1
+      if spec.stone then                                          -- NEU14 BUG-896: of the free boulders, the ones a mason's stone filter takes
+        local si = R.stone_info(recs[i])
+        r.stone = r.stone or {free = 0, pass = 0, by = {}}
+        r.stone.free = r.stone.free + 1
+        if si.pass then r.stone.pass = r.stone.pass + 1 end
+        local e = r.stone.by[si.tok] or {n = 0, hard = si.hard, econ = si.econ}
+        e.n = e.n + 1
+        r.stone.by[si.tok] = e
+      end
+    else r.first[why[1]] = (r.first[why[1]] or 0) + 1 end
     for _, w in ipairs(why) do r.hits[w] = (r.hits[w] or 0) + 1 end
     for _, w in ipairs(why) do if w == 'built' or w == 'in_building' then r.builtn = (r.builtn or 0) + 1; break end end
   end
@@ -635,6 +664,10 @@ function R.sample_item(K, it, q, why, spec)
     local inside = pget(dfhack.items.getContainedItems, it)
     parts[#parts + 1] = 'contents=' .. tostring(inside and #each(inside) or '?')
   end
+  if spec and spec.stone then                                     -- NEU14 BUG-896
+    local si = R.stone_info(it)
+    parts[#parts + 1] = string.format('mat=%s hard=%s economic=%s mason_filter=%s', si.tok, tostring(si.hard), tostring(si.econ), si.pass and 'pass' or 'fail')
+  end
   parts[#parts + 1] = 'flags=' .. V(function() return FL(it.flags) end)
   parts[#parts + 1] = 'refs=' .. V(function()
     local out = {}
@@ -656,11 +689,18 @@ local function counts_text(t, order)
   return #parts > 0 and table.concat(parts, ' ') or 'none'
 end
 
+-- NEU14 BUG-896: item vectors by the names a player says (`why items:door --raw`), and the census keys that count them
+R.ALIAS = {door = 'DOOR', doors = 'DOOR', bed = 'BED', beds = 'BED', cabinet = 'CABINET', box = 'BOX', chest = 'BOX', coffin = 'COFFIN', table = 'TABLE',
+           chair = 'CHAIR', throne = 'THRONE', hatch = 'HATCH_COVER', grate = 'GRATE', floodgate = 'FLOODGATE', slab = 'SLAB', boulder = 'BOULDER',
+           boulders = 'BOULDER', block = 'BLOCKS', blocks = 'BLOCKS', barrel = 'BARREL'}
+R.CEN = {DOOR = {'doors'}, BOULDER = {'rock', 'rock_bad', 'rock_far', 'boulders'}, BLOCKS = {'blocks_free'}, HATCH_COVER = {'hatches'}, GRATE = {'grates'}}
 local function spec_of(key)
   local name = tostring(key or ''):lower()
   if R.ITEMS[name] then return R.ITEMS[name], name end
-  local vn = tostring(key or ''):upper()
-  if vn ~= '' and vn:match('^[A-Z_]+$') and pget(function() return df.global.world.items.other[vn] end) ~= nil then return {vec = {vn}, cen = {}}, vn:lower() end
+  local vn = R.ALIAS[name] or tostring(key or ''):upper()
+  if vn ~= '' and vn:match('^[A-Z_]+$') and pget(function() return df.global.world.items.other[vn] end) ~= nil then
+    return {vec = {vn}, cen = R.CEN[vn] or {}, stone = vn == 'BOULDER' or nil}, vn:lower()
+  end
   return nil
 end
 
@@ -675,6 +715,19 @@ function R.items(K, key, ctx)
   add(b, string.format('items %s (vector %s): %d records, %d looked at%s%s; skipped as not a candidate (%s): %d', name, r.vec, r.total, r.scanned, r.clipped and ' (clipped)' or '',
                        r.nopos and (' (' .. r.nopos .. ' without a tile)') or '', spec.brew and 'no DRINK_MAT' or spec.empty and 'not empty' or 'none', r.skipped))
   add(b, string.format('  no exclusion (free as DF sees it): %d', r.ok))
+  if spec.stone then                                              -- NEU14 BUG-896
+    local sf = r.stone or {free = 0, pass = 0, by = {}}
+    add(b, string.format('  boulders: %d free, of them %d hard non-economic (a mason job takes only those: flags2 non_economic, flags3 hard)', sf.free, sf.pass))
+    local mats = {}
+    for tok, e in pairs(sf.by) do mats[#mats + 1] = {tok, e} end
+    table.sort(mats, function(x, y) if x[2].n ~= y[2].n then return x[2].n > y[2].n end return x[1] < y[1] end)
+    local out = {}
+    for i, m in ipairs(mats) do
+      if i > 6 then break end
+      out[#out + 1] = string.format('%s x%d (%s%s)', m[1], m[2].n, m[2].hard and 'hard' or 'soft', m[2].econ and ', economic' or '')
+    end
+    if #out > 0 then add(b, '  free boulders by material: ' .. table.concat(out, '; ')) end
+  end
   add(b, '  excluded, first reason only: ' .. counts_text(r.first, R.REASONS))
   add(b, '  hit counts (an item may hit several): ' .. counts_text(r.hits, R.REASONS))
   -- NEU7 BUG-855: items built into constructions or buildings are no stock; shown apart (their tile is a wall: not a walk problem)

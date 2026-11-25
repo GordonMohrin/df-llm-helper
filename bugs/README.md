@@ -854,6 +854,11 @@ Related: FR-xx, BUG-xx
 | [BUG-881](BUG-881-arrival-timed-force.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | A raise waits for the recall stream until the hostile is 30 tiles out; its pull is cancelled for walkers right after queueing | `lua/dfllm/gate.lua` |
 | [BUG-882](BUG-882-breach-pullers.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | BREACH after a failed bridge with the hostiles outside takes the pullers of the O1/B1 lever room away | `lua/dfllm/gate.lua` |
 | [BUG-883](BUG-883-peace-patients-out.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Patients outside Kern+/Tiefe+ are reported only in a fight; a superseded hospital zone outside keeps R0 silent | `lua/dfllm/water.lua` |
+| [BUG-892](BUG-892-boost-defence-first.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | T.boost raised the oldest untaken jobs first: the seal's wall job stayed untaken 600 game days beside 30 dig jobs | `lua/dfllm/economy.lua` |
+| [BUG-893](BUG-893-construction-labor.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | A wall construction has no labor in the kernel ('12 idle holders', 'labor unread', 'why job:' reads it as a Farmers workshop, 'no item' with an item attached) | `lua/dfllm/economy.lua`, `lua/dfllm/jobwhy.lua` |
+| [BUG-894](BUG-894-seal-never-set-aside-open.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | A seal is set aside in PEACE while the perimeter stands open; a new seal on a planned wall is cancelled after 3 days and placed again | `lua/dfllm/runner.lua` |
+| [BUG-895](BUG-895-corpse-far-honest-hint.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Unburied dead out of reach (corpse_far): the ladder and tombs.repair promise work that cannot happen | `lua/dfllm/care.lua`, `dfpilot/leiter.py` |
+| [BUG-896](BUG-896-raw-stone-and-furniture.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Raw fields for the next diagnosis: free boulders vs the mason filter, items:DOOR, the labor of a construction | `lua/dfllm/dfraw.lua`, `lua/dfllm/jobwhy.lua` |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

@@ -75,7 +75,7 @@ local function world(o)
   o = o or {}
   local floor = floor_of(o.floor or {{20, 20, 26, 26, 5}})
   local W, Cm = CW.world{
-    cit = o.cit or 8, census_i = {rock = 50, wood = 40}, pending = {},
+    cit = o.cit or 8, census_i = {rock = 50, wood = 40}, pending = {}, reach = o.reach,
     tile = function(x, y, z) return {c = floor[key(x, y, z)] and '.' or '#', dig = '', bld = ''} end,
     snap = {
       outside_near = function(K, pts)
@@ -252,6 +252,42 @@ T.test('BUG-133: assignments have their own budget ahead of removals and frees (
   end
   T.eq(assigned, 3)
   T.ok(removed >= 17, 'the removals follow on their own budget: ' .. removed)
+end)
+
+---------------------------------------------------------------- NEU14 BUG-895: bodies out of reach
+-- Run 17c i3 Orangering y459: two citizens died on a wall top in another walk group (corpse_far at 88,83,145); coffins, zones and tombs.repair cannot help; the ladder said
+-- 'NAECHST Wohl I: 2 Tote unbestattet -> tombs.repair' for 40 days and tombs.repair answered 'queued'
+local function far_world(o)
+  o = o or {}
+  return world{cit = 8, reach = function(a, b) return not (a.x >= 100 or b.x >= 100) end, setup = function(W)
+    for i, uid in ipairs({7, 8}) do
+      W.unit(uid).hist_figure_id = 7000 + uid
+      dead(W, uid)
+      corpse(W, uid, {129 + i, 83, 145})
+    end
+    if o.placed then memorial(W, 7007, {12, 12, 5}, {in_building = true}) end
+  end}
+end
+
+T.test('BUG-895: two far bodies, no slab yet: they stay in corpses_old, corpses_far says 2 of them are out of reach; tombs.repair does not promise work', function()
+  local W = far_world()
+  CW.day(W, 4)
+  local c = W.state().care
+  T.eq({c.corpses_old, c.corpses_far, c.corpses_far_mem}, {2, 2, nil})
+  local r = W.inbox('tombs.repair', {})
+  T.ok(r.ok, r.msg)
+  T.ok(r.msg:find('2 corpses out of reach', 1, true), r.msg)
+  T.ok(r.msg:find('tombs.repair cannot reach them', 1, true), r.msg)
+  T.ok(r.msg:find('memorial slab is their burial', 1, true), r.msg)
+  T.ok(r.msg:find('unit 7 at 130,83,145', 1, true), r.msg)
+  T.eq(r.data.far_n, 2)
+end)
+
+T.test('BUG-895: a far body whose memorial slab stands is laid to rest: not in corpses_old, counted in corpses_far_mem; the other stays old and far', function()
+  local W = far_world{placed = true}
+  CW.day(W, 4)
+  local c = W.state().care
+  T.eq({c.corpses_old, c.corpses_far, c.corpses_far_mem}, {1, 1, 1})
 end)
 
 ---------------------------------------------------------------- the ghost count

@@ -13425,7 +13425,9 @@ function M.stale_reason(c, r, oq, o, job, mc, days)
     parts[#parts + 1] = string.format('%s: %d shop%s, %d jobs (%d working), none from this order', key:match(':(.+)$') or key,
                                       e.shops, e.shops == 1 and '' or 's', e.jobs, e.working)
   end
-  if mc == 'rock' then parts[#parts + 1] = string.format('%d free boulders', stone_free(c, r))
+  if mc == 'rock' then        -- NEU14 BUG-896: of the free boulders, the ones a mason's stone filter takes (not '26 free boulders' beside 0 usable)
+    local tot = math.max(0, math.tointeger(r.inv.rock) or 0)
+    parts[#parts + 1] = string.format('%d of %d free boulders are hard non-economic stone', math.min(stone_free(c, r), tot), tot)
   elseif mc == 'wood' then parts[#parts + 1] = string.format('%d logs', r.inv.wood or 0) end
   return table.concat(parts, '; '):sub(1, 110)
 end
@@ -13977,14 +13979,17 @@ end
 -- hatches Furniture hauling, farm plots Farming, traps and mechanisms Mechanics; workshops and constructions by material,
 -- not checked here). Read-only.
 M.BUILD_LABOR = {FarmPlot = 'PLANT', Hive = 'BEEKEEPING', Trap = 'MECHANIC', GearAssembly = 'MECHANIC',
-                 AxleHorizontal = 'MECHANIC', AxleVertical = 'MECHANIC', Rollers = 'MECHANIC'}
+                 AxleHorizontal = 'MECHANIC', AxleVertical = 'MECHANIC', Rollers = 'MECHANIC',
+                 -- NEU14 BUG-893: a wall / floor construction (and a road) is built with the Building Construction labor (DF's labor list 'Construction',
+                 -- BUG-009 / BUG-745: every adult had BUILD_CONSTRUCTION on); before this a Construction had no key and every adult counted as a holder
+                 Construction = 'BUILD_CONSTRUCTION', Road = 'BUILD_ROAD'}
 for _, k in ipairs({'Chair', 'Bed', 'Table', 'Coffin', 'Door', 'Floodgate', 'Box', 'Weaponrack', 'Armorstand', 'Cabinet',
                     'Statue', 'WindowGlass', 'WindowGem', 'Cage', 'NestBox', 'TractionBench', 'Slab', 'Chain', 'GrateFloor',
                     'GrateWall', 'Hatch', 'BarsFloor', 'BarsVertical', 'Bookcase', 'Instrument', 'DisplayFurniture'}) do
   M.BUILD_LABOR[k] = 'HAUL_FURNITURE'
 end
 M.LABOR_WORD = {PLANT = 'Farming (fields)', HAUL_FURNITURE = 'Furniture hauling', MECHANIC = 'Mechanics',
-                BEEKEEPING = 'Beekeeping'}
+                BEEKEEPING = 'Beekeeping', BUILD_CONSTRUCTION = 'Building construction (walls, floors)', BUILD_ROAD = 'Road building'}
 -- the reasons a job nobody takes may have, as far as they are readable: {'no free adult citizen has the labor ...', ...};
 -- sets rec.labor = {labor, with it, free adults}, rec.nolabor (none has it), rec.item_bad (an attached item forbidden or
 -- off the citizens' walk group: snapshot.far), rec.unposted (DF's job board holds it not: posting_index < 0)
@@ -14053,7 +14058,7 @@ function M.hands(K, rec)
   local li = ln and df.unit_labor and df.unit_labor[ln]
   local sold = {}
   for _, id in ipairs(cu.soldier_ids or {}) do sold[id] = true end
-  local h = {holders = 0, idle = 0, reach = 0, busy = {}, idle_who = {}, busy_who = {}}
+  local h = {holders = 0, idle = 0, reach = 0, busy = {}, idle_who = {}, busy_who = {}, unknown = type(li) ~= 'number' or nil}     -- NEU14 BUG-893: unknown = the labor is not known, every adult is counted
   local pts = {}
   for _, id in ipairs(cu.ids) do
     local u = not sold[id] and df.unit.find(id) or nil
@@ -14193,16 +14198,17 @@ function M.build_state(K, x, y, z)
         cause[#cause + 1] = string.format('%s %d stands on the site tile', occ.name, occ.id)
       end
       local tail
+      local hw = hd and hd.unknown and 'adult' or 'holder'          -- NEU14 BUG-893: no 'holder' of a labor nobody read
       if hd and hd.idle > 0 and hd.reach == 0 then
-        cause[#cause + 1] = string.format('%d idle holder%s of the labor, none on its walk group', hd.idle, hd.idle == 1 and '' or 's')
+        cause[#cause + 1] = string.format('%d idle %s%s%s, none on its walk group', hd.idle, hw, hd.idle == 1 and '' or 's', hd.unknown and ' (its labor is not known)' or ' of the labor')
       elseif hd and hd.reach > 0 then
-        tail = string.format('%d idle holder%s reach%s it, DF did not assign it%s%s', hd.reach, hd.reach == 1 and '' or 's',
+        tail = string.format('%d idle %s%s reach%s it, DF did not assign it%s%s', hd.reach, hw, hd.reach == 1 and '' or 's',
                              hd.reach == 1 and 'es' or '', rec.boost and string.format(' (priority raised %d d ago)', rec.boost) or
                              rec.do_now and ' (priority raised)' or '', M.who_text(hd.idle_who, false))
       elseif hd then
         local top, tn = nil, 0
         for k, n in pairs(hd.busy) do if n > tn or (n == tn and top and k < top) then top, tn = k, n end end
-        tail = string.format('all %d holder%s busy%s%s', hd.holders, hd.holders == 1 and '' or 's', top and string.format(' (%d at %s)', tn, top) or '',
+        tail = string.format('all %d %s%s busy%s%s', hd.holders, hw, hd.holders == 1 and '' or 's', top and string.format(' (%d at %s)', tn, top) or '',
                              M.who_text(hd.busy_who, true))
       end
       if tail then rec.line = rec.line .. '; ' .. tail end
@@ -14696,12 +14702,45 @@ end
 -- The live numbers say it is not idleness: `inspect workload` '0 of 31 adults without a job, 128 unclaimed jobs' (i2), '0 of 14 ..., 26 unclaimed' (i4): the labor
 -- holders are busy with other jobs and the kernel's pieces wait at the end of DF's list.
 -- Only in PEACE and RECOVERY (no ALERT, SIEGE or BREACH: the siege code keeps its own order of work). st.nb[job id] = the tick it was first seen untaken; st.nbs[job id] = {t, k, x, y, z} for a job the kernel raised.
-M.BOOST = {days = 3, per_day = 4, max = 8, scan = 20000}
+M.BOOST = {days = 3, per_day = 4, max = 8, scan = 20000, seal_max = 4}
+-- NEU14 BUG-892 (Run 17d i4 Girderroots y448-y460: the seal's wall job 1733178 at 98,86,143, ConstructBuilding flags=[], no worker, its block attached, not suspended, the
+-- perimeter open 600+ days beside 30 untaken dig jobs: the oldest-first quota of 4 a day went to dig jobs and to older builds): defence first. The order of raising is
+-- class 1 (a wall / door of a seal or plug project, or a job on a way in of the entrance check: raised AT ONCE, no 3 day wait, outside the per-day cap, at most
+-- BOOST.seal_max raised and untaken), class 2 (the other defence buildings: bridges, levers and traps, their gears: after the 3 days, oldest first), class 3 (the rest
+-- as before). Only a job that is not suspended and has its items attached (a job whose items list cannot be read counts as attached).
+M.DEF_KINDS = {Bridge = true, Trap = true, Weapon = true, GearAssembly = true, AxleHorizontal = true, AxleVertical = true, Rollers = true}
+-- the tiles a seal / plug project still has to build (the runner) and the ways in of the entrance check (seal): set 'x,y,z' -> true
+function M.boost_tiles(K)
+  local set = {}
+  local ok, t = K.call('runner', 'seal_tiles')
+  if ok and type(t) == 'table' then for k in pairs(t) do set[k] = true end end
+  local ok2, list = K.call('seal', 'entrances')
+  if ok2 and type(list) == 'table' then
+    for _, p in ipairs(list) do
+      if type(p) == 'table' and int(p[1]) and int(p[2]) and int(p[3]) then set[string.format('%d,%d,%d', p[1], p[2], p[3])] = true end
+    end
+  end
+  return set
+end
+-- 1 | 2 | 3 as above for an untaken, unsuspended ConstructBuilding job
+function M.boost_class(j, set)
+  local okn, n = pcall(function() return #j.items end)
+  if okn and int(n) == 0 then return 3 end                       -- no item attached: DF cannot start it, no priority helps
+  local okp, x, y, z = pcall(function() return j.pos.x, j.pos.y, j.pos.z end)
+  if okp and int(x) and int(y) and int(z) and set and set[string.format('%d,%d,%d', x, y, z)] then return 1 end
+  local okb, b = pcall(dfhack.job.getHolder, j)
+  if okb and b then
+    local okt, tn = pcall(function() return df.building_type[b:getType()] end)
+    if okt and M.DEF_KINDS[tn] then return 2 end
+  end
+  return 3
+end
 function T.boost(K, c, r)
   local B = M.BOOST
   local now = K.now().tick
   st.nb, st.nbs = type(st.nb) == 'table' and st.nb or {}, type(st.nbs) == 'table' and st.nbs or {}
-  local seen, alive, cand, live = {}, {}, {}, 0
+  local seen, alive, cand, live, slive = {}, {}, {}, 0, 0
+  local tset
   pcall(function()
     local link, i = df.global.world.jobs.list.next, 0
     while link and i < B.scan do
@@ -14716,8 +14755,17 @@ function T.boost(K, c, r)
           seen[jid] = true
           local first = st.nb[jid]
           if not first then first = now; st.nb[jid] = now end
-          if st.nbs[jid] then live = live + 1
-          elseif not j.flags.do_now and now - first >= B.days * DAY then cand[#cand + 1] = {j = j, first = first, kind = kind} end
+          if st.nbs[jid] then
+            live = live + 1
+            if st.nbs[jid].cl == 1 then slive = slive + 1 end
+          elseif not j.flags.do_now then
+            local cl = 3
+            if kind == 'build' then
+              tset = tset or M.boost_tiles(K)
+              cl = M.boost_class(j, tset)
+            end
+            if cl == 1 or now - first >= B.days * DAY then cand[#cand + 1] = {j = j, first = first, kind = kind, cl = cl} end
+          end
         end
       end
       link, i = link.next, i + 1
@@ -14728,26 +14776,51 @@ function T.boost(K, c, r)
   st.boost_live = live
   if HUNT_MODES[K.mode()] and next(st.nbs) ~= nil then pcall(M.dedicate, K, now) end      -- BUG-768
   if #cand == 0 or not HUNT_MODES[K.mode()] then return true end       -- PEACE and RECOVERY only: no builder is sent toward a threat
-  table.sort(cand, function(a, b) if a.first ~= b.first then return a.first < b.first end return a.j.id < b.j.id end)
+  table.sort(cand, function(a, b)
+    if a.cl ~= b.cl then return a.cl < b.cl end
+    if a.first ~= b.first then return a.first < b.first end
+    return a.j.id < b.j.id end)
   local day = now // DAY
   if st.boost_day ~= day then st.boost_day, st.boost_n = day, 0 end
-  local n, names = 0, {}
+  local n, names, ns, snames = 0, {}, 0, {}
   for _, e in ipairs(cand) do
-    if live + n >= B.max or st.boost_n >= B.per_day then break end
+    local room
+    if e.cl == 1 then room = slive + ns < B.seal_max            -- own small cap, no per-day cap, no wait
+    else room = (live - slive) + (n - ns) < B.max and st.boost_n < B.per_day end
+    if not room then
+      if e.cl ~= 1 then break end
+      goto next_cand
+    end
+    do
     local ok = pcall(function() e.j.flags.do_now = true end)
     if ok then
       local okp, x, y, z = pcall(function() return e.j.pos.x, e.j.pos.y, e.j.pos.z end)
       okp = okp and math.tointeger(x) ~= nil and math.tointeger(y) ~= nil and math.tointeger(z) ~= nil
-      st.nbs[e.j.id] = {t = now, k = e.kind, x = okp and x or nil, y = okp and y or nil, z = okp and z or nil, lab = e.kind == 'build' and M.job_labor(e.j) or nil}
-      n, st.boost_n = n + 1, st.boost_n + 1
-      names[#names + 1] = string.format('%s %s%s', e.kind, tostring(df.job_type[e.j.job_type] or '?'),
-                                        okp and string.format(' %d,%d,%d', x, y, z) or '')
+      st.nbs[e.j.id] = {t = now, k = e.kind, x = okp and x or nil, y = okp and y or nil, z = okp and z or nil, lab = e.kind == 'build' and M.job_labor(e.j) or nil,
+                        cl = e.cl}
+      n = n + 1
+      local nm = string.format('%s %s%s', e.kind, tostring(df.job_type[e.j.job_type] or '?'), okp and string.format(' %d,%d,%d', x, y, z) or '')
+      if e.cl == 1 then
+        ns = ns + 1
+        snames[#snames + 1] = string.format('job %d %s', e.j.id, nm)
+      else
+        st.boost_n = st.boost_n + 1
+        names[#names + 1] = nm
+      end
     end
+    end
+    ::next_cand::
   end
+  if ns > 0 then
+    K.log('warn', 'jobs: %d seal / perimeter construction job%s raised to top priority at once (no 3 day wait, %d of %d such raised and untaken now): %s', ns,
+          ns == 1 and '' or 's', slive + ns, B.seal_max, table.concat(snames, '; '):sub(1, 200))
+  end
+  n = n - ns
+  st.boost_total = (st.boost_total or 0) + ns
   if n > 0 then
     st.boost_total = (st.boost_total or 0) + n
     K.log('info', 'jobs: %d untaken job%s raised to top priority (do_now) after %d d without a worker (%d raised and still untaken now): %s', n,
-          n == 1 and '' or 's', B.days, live + n, table.concat(names, '; '):sub(1, 200))
+          n == 1 and '' or 's', B.days, live - slive + n, table.concat(names, '; '):sub(1, 200))
   end
   return true
 end
@@ -14761,7 +14834,10 @@ end
 -- ORDER_STUCK (kind worker). An idle holder who reaches the job (DF refused it) and holders at hauling or rest are only named (M.hands, M.dig_wait).
 M.DEDICATE = {days = 3, per_day = 1}
 M.JOB_OFF = {MakeCharcoal = {'burn', 'BURN_WOOD'}, HarvestPlants = {'farm', 'PLANT'}, PlantSeeds = {'farm', 'PLANT'}, GatherPlants = {'herb', 'HERBALIST'}}
-M.LABOR_ON = {HAUL_FURNITURE = 'furniture', MECHANIC = 'mechanic'}
+M.LABOR_ON = {HAUL_FURNITURE = 'furniture', MECHANIC = 'mechanic', BUILD_CONSTRUCTION = 'construction'}
+-- NEU14 BUG-893: holders of a labor below which the raised job's labor goes on for one more idle adult a day (default 1; a wall needs a hand, not three,
+-- but a fort whose only builders are busy or away walls nothing: three)
+M.LABOR_MIN = {BUILD_CONSTRUCTION = 3}
 
 -- the labor of a ConstructBuilding job's building (M.BUILD_LABOR), nil when unknown
 function M.job_labor(j)
@@ -14790,8 +14866,10 @@ function M.dedicate(K, now)
   if st.ded_n >= B.per_day then return end
   local pick
   for jid, e in pairs(st.nbs) do
-    if type(e) == 'table' and st.nb[jid] ~= nil and now - (math.tointeger(e.t) or now) >= B.days * DAY then
-      if not pick or e.t < pick.e.t or (e.t == pick.e.t and jid < pick.jid) then pick = {jid = jid, e = e} end
+    -- NEU14 BUG-892: a seal / perimeter job (cl 1) is not waited for and goes first
+    if type(e) == 'table' and st.nb[jid] ~= nil and (e.cl == 1 or now - (math.tointeger(e.t) or now) >= B.days * DAY) then
+      local ec, pc = e.cl or 3, pick and (pick.e.cl or 3)
+      if not pick or ec < pc or (ec == pc and (e.t < pick.e.t or (e.t == pick.e.t and jid < pick.jid))) then pick = {jid = jid, e = e} end
     end
   end
   if not pick then return end
@@ -14819,15 +14897,18 @@ function M.dedicate(K, now)
       local oka, adult = pcall(function() return dfhack.units.isAdult(u) end)
       if u and oka and adult and type(li) == 'number' and labor_on(u, li) then hold[#hold + 1] = u end
     end
-    if #hold == 0 and M.LABOR_ON[e.lab] then
+    local lmin = M.LABOR_MIN[e.lab] or 1
+    if #hold < lmin and M.LABOR_ON[e.lab] then
       local how, uid = M.labor_assign(K, {labor = e.lab, which = M.LABOR_ON[e.lab], skill = nil, stamp = 'buildl', text = 'Labor ' .. e.lab,
-                                          why = 'a raised building job waits and nobody holds the labor'})
+                                          why = #hold == 0 and 'a raised building job waits and nobody holds the labor'
+                                                or string.format('a raised building job waits and only %d hold the labor (%d wanted)', #hold, lmin)}, #hold > 0 or nil)
       if how == 'set' then
         st.ded_n = st.ded_n + 1
-        K.emit('ORDER_STUCK', 'B', string.format('job %d at %s,%s,%s untaken %d days: nobody held %s: labor on for unit %d', pick.jid, tostring(e.x), tostring(e.y),
-               tostring(e.z), B.days, e.lab, uid), {order = 0, job = 'ConstructBuilding', why = ('nobody held ' .. e.lab):sub(1, 100), n = 1, days = B.days, kind = 'worker'})
+        local wh = #hold == 0 and ('nobody held ' .. e.lab) or string.format('only %d held %s', #hold, e.lab)
+        K.emit('ORDER_STUCK', 'B', string.format('job %d at %s,%s,%s untaken: %s: labor on for unit %d', pick.jid, tostring(e.x), tostring(e.y),
+               tostring(e.z), wh, uid), {order = 0, job = 'ConstructBuilding', why = wh:sub(1, 100), n = 1, days = B.days, kind = 'worker'})
       end
-      return
+      if #hold == 0 or how == 'set' then return end
     end
   end
   for _, u in ipairs(hold) do
@@ -16676,10 +16757,14 @@ M.inspect.workload = function(K, args)
   -- BUG-747: the jobs the kernel raised to top priority (T.boost): construction and dig jobs untaken for boost days
   local raised = {}
   for jid, e in pairs(st.nbs or {}) do
-    raised[#raised + 1] = {job = jid, kind = e.k, x = e.x, y = e.y, z = e.z,
+    raised[#raised + 1] = {job = jid, kind = e.k, x = e.x, y = e.y, z = e.z, cl = e.cl,
                            days = math.max(0, (K.now().tick - (math.tointeger(e.t) or K.now().tick)) // DAY)}
   end
-  table.sort(raised, function(a, b) return a.job < b.job end)
+  -- NEU14 BUG-892: the seal / perimeter jobs (cl 1) first, so that the 8 listed are the ones that matter
+  table.sort(raised, function(a, b)
+    local ca, cb = a.cl or 3, b.cl or 3
+    if ca ~= cb then return ca < cb end
+    return a.job < b.job end)
   data.boost = {live = st.boost_live or 0, total = st.boost_total or 0, max = M.BOOST.max, after_days = M.BOOST.days,
                 raised = json.array({table.unpack(raised, 1, math.min(8, #raised))})}
   -- BUG-654: workshop types no citizen can walk to (p.cutws, M.cut_scan) and the jobs posted at them: the reason of an 'unreachable
