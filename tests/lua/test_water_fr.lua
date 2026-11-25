@@ -228,7 +228,9 @@ T.test('BUG-031: a dry cistern beside the hospital: HOSPITAL_DRY names it, its w
   T.ok(hd[1].msg:find('its well 77 stands over 0/7 (dry)', 1, true), hd[1].msg)
   T.ok(hd[1].d.why:find('cistern cistern20_12_5r0: its well 77 stands over 0/7', 1, true), hd[1].d.why)
   T.eq(hd[1].d.cistern:sub(1, 23), 'cistern cistern20_12_5r')
-  T.eq(W.find_events('PROJECT_REQUEST'), {}, 'the cistern needs water, not a second cistern')
+  local rq = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.why ~= 'inside_water' then rq[#rq + 1] = e end end      -- BUG-873: its own ask
+  T.eq(rq, {}, 'the cistern needs water, not a second cistern')
 end)
 
 T.test('BUG-031: a wet cistern 47 tiles from the hospital does not serve it: HOSPITAL_DRY says how far; a well with ' ..

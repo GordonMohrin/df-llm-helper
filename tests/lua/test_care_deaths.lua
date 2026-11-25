@@ -157,8 +157,8 @@ T.test('fair play: a death the unit list shows as missing has no cause until fou
   W.run(1)
   local d = W.find_events('DEATH')
   T.eq(#d, 1)
-  T.eq({d[1].d.cause, d[1].d.found, d[1].d.src, d[1].d.dtype, d[1].d.thirst}, {'unknown', 0, 'none', nil, nil},
-       'nothing of the incident or the timers leaks')
+  T.eq({d[1].d.cause, d[1].d.found, d[1].d.src, d[1].d.dtype, d[1].d.thirst}, {'unknown', 0, 'none', nil, 18879},
+       'nothing of the incident leaks; BUG-877: the unit object answers for its timers, position and job (the cause stays open)')
   T.eq(d[1].msg, 'citizen 2 died: unknown (not found yet, missing in the unit list)')
   CW.day(W, 2)
   T.eq(#W.find_events('DEATH'), 1, 'still missing: asked again, nothing new')

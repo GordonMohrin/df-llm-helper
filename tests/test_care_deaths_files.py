@@ -159,7 +159,7 @@ def test_death_causes_and_evidence(run):
         (5, "dehydrated", 1), (6, "unknown", 0), (6, "dehydrated", 1), (4, "mood", 1)]
     assert deaths[0]["msg"] == "citizen 5 died: dehydrated (incident THIRST; thirst 18879; patient)"
     assert deaths[1]["msg"] == "citizen 6 died: unknown (not found yet, missing in the unit list)"
-    assert "thirst" not in deaths[1]["d"] and "dtype" not in deaths[1]["d"], "a missing dwarf's cause stays hidden"
+    assert "dtype" not in deaths[1]["d"] and deaths[1]["d"]["src"] == "none", "a missing dwarf's cause stays hidden (BUG-877: its timers and position are recorded)"
     assert deaths[2]["d"]["revised"] == 1 and deaths[2]["msg"].startswith("citizen 6 found dead: dehydrated")
     assert deaths[3]["msg"] == "citizen 4 died: mood (in a Fey mood; incident THIRST; thirst 75004)"
     assert all("NONE" not in e["msg"] for e in deaths), "Run 9: 'died (NONE) [cause=NONE]'"

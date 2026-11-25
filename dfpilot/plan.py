@@ -4676,7 +4676,8 @@ def request_drafts(s: dict | None, fort: dict | None, done: set, builds: list[di
                 if not have(b):
                     out.append(b)
                     why.append(f"cistern piped from the water at {at}" + (" (sealed rock intake)" if acc.get("rock") else ""))
-            elif r.get("why") in ("inside_water", "no_water") and _inside_cistern(fort, [*builds, *out], info):
+            elif (r.get("why") == "inside_water" or (r.get("why") == "no_water" and (fort.get("hosp") or {}).get("aq"))) \
+                    and _inside_cistern(fort, [*builds, *out], info):
                 # BUG-873 (Run 17 i1: the only accepted water outside for years, the request found no site and no answer): the fort's own
                 # water is a standing precondition; a cistern applied before does not stop it (the old ones ran dry or were retired).
                 # The aquifer cistern when an aquifer level is known (it worked live on i4), else the bucket-fed one with a fill source

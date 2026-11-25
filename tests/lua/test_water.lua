@@ -98,7 +98,8 @@ T.test('a bedridden patient over 30k thirst without water: patient_thirst (A) wi
   T.ok(pt[1].d.q:find('delete the hospital zone', 1, true), pt[1].d.q)  -- FR-34 recipe
   T.ok(#pt[1].d.q <= 200 and #pt[1].msg <= 200)
   T.eq(#W.find_events('HOSPITAL_DRY'), 0)                     -- patient_thirst already names the dry hospital
-  local req = W.find_events('PROJECT_REQUEST')
+  local req = {}
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.why ~= 'inside_water' then req[#req + 1] = e end end     -- BUG-873: its own ask
   T.eq(#req, 1)
   T.eq(req[1].d.tpl, 'cistern')
   local k = M.kpi(W.K)
@@ -111,7 +112,9 @@ T.test('a bedridden patient over 30k thirst without water: patient_thirst (A) wi
   day(W)
   T.eq(#needed(W, 'patient_thirst'), 2)
   T.eq(#W.find_events('HOSPITAL_DRY'), 0)
-  T.eq(#W.find_events('PROJECT_REQUEST'), 1)                   -- monthly
+  local n = 0
+  for _, e in ipairs(W.find_events('PROJECT_REQUEST')) do if e.d.why ~= 'inside_water' then n = n + 1 end end
+  T.eq(n, 1)                                                   -- monthly (BUG-873's inside_water ask is weekly and counted apart)
 end)
 
 T.test('one patient_thirst line for all patients; a patient crossing the alarm wakes at once', function()
@@ -855,6 +858,7 @@ T.test('BUG-040: every accepted source is labelled with the burrow it stands on 
        'the burrow and where the refuge lies', function()
   local W, M = world{tiles = {['20,20,1'] = '~', ['45,45,1'] = '.', ['80,80,1'] = '~'}, setup = function(W)
     W.burrow('Kern+', {0, 0, 0, 30, 30, 20})               -- Kern+ x0-30, Tiefe+ x40-60 z2
+    W.K.manifest().zones.Z4 = {{0, 0, 0, 30, 30, 20}}      -- BUG-874: a Z4 box counts as inside too
     W.w1, W.w2, W.w3 = well(W, 20, 20, 2).id, well(W, 45, 45, 2).id, well(W, 80, 80, 2).id
     W.load({name = 'seal', every = {ticks = 100000}, refuge_drink = function(K)
       return {name = 'Tiefe+', exists = true, drink = 0, need = 4, wells = 1, wet = false, wwet = 0,

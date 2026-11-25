@@ -87,6 +87,7 @@ ACT = {
     "well_remove": ["water"],                      # BUG-541: the dry well the GiveWater carriers stand at (well.retire)
     "hospital_restore": ["water"],                 # BUG-539: the removed hospital zone drawn again at its old location
     "hospital_zone": ["care"],                     # NEU1 P9: a 1x1 hospital zone over one standing bed near water (care.hosp_min)
+    "water_zone_remove": ["water"],                # BUG-875: ONE kernel-painted (dfllm-water) Water Source zone outside, once water stands inside
     "water_zone": ["water"],                       # BUG-324: a Water Source zone on the water the scan found reachable
     "sand_zone": ["economy"], "fish_zone": ["economy"], "zone_place": ["runner", "economy"],
     "ws_task": ["economy"],                        # BUG-231: workshop sheet > add task without the manager

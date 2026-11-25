@@ -253,6 +253,7 @@ T.test('BUG-616: the thirst question says the only accepted water lies OUTSIDE t
   T.ok(txt:find('accepted water:', 1, true) and not txt:find('OUTSIDE', 1, true), txt)
   -- the same well, Kern+ moved away from it: the water lies outside the core
   W.burrow('Kern+', {60, 60, 0, 99, 99, 20})
+  W.K.manifest().zones.Z4 = {{60, 60, 0, 99, 99, 20}}        -- BUG-874: a Z4 box holds a source too; the fort moved away from the well
   W.ms = W.ms + 300000; W.run(1200, {skip = 100})
   local txt2, cmds = M.drink_fix(W.K)
   T.ok(txt2:find('lies OUTSIDE the core', 1, true) and txt2:find('bp sites cistern --near 20,12,5 --fresh', 1, true), txt2)
