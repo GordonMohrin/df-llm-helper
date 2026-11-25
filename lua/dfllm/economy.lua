@@ -3860,7 +3860,9 @@ function M.snap_env(K, c, now)
     done = 0
     for _, e in ipairs(st.bdone or {}) do if now - e[1] <= days * DAY then done = done + e[2] end end
   end
-  return {skipped = skipped, trader = M.barrel_trader_ref, pot = M.is_pot, inv = inv, cancels = cancels, done = done, days = days, now = now,
+  local p = pstate(K)
+  if type(p.bacc) ~= 'table' then p.bacc = M.BS.acc_new() end
+  return {acc = p.bacc, skipped = skipped, trader = M.barrel_trader_ref, pot = M.is_pot, inv = inv, cancels = cancels, done = done, days = days, now = now,
           far = function(it)
             local x, y, z = dfhack.items.getPosition(it)
             if not x then return false end
@@ -3896,13 +3898,27 @@ function M.snap_maybe(K, c, now)
   local f = M.BS.fields(s)
   K.log('info', '%s', M.BS.line(s))
   K.emit('BREW_CANCEL_SNAPSHOT', 'B', M.BS.line(s):sub(1, 200), f)
+  K.persist.touch('m.economy')
   return true
+end
+-- the sampler (BUG-887 round 4): brew jobs live about a second, so a daily snapshot nearly never sees an attached barrel. While DF's container reason is active in the
+-- window, every M.watch pass (600 ticks) walks the Stills' job lists only (no item scan) and adds each attached barrel to the persisted accumulator `bacc`.
+function M.brew_sample(K, c, now)
+  c = c or M.conf(K)
+  now = now or K.now().tick
+  if (st.cxseen or 0) <= 0 and M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now) <= 0 then return 0 end
+  local env = M.snap_env(K, c, now)
+  local n = M.BS.sample(env, env.acc, now)
+  if n > 0 then K.persist.touch('m.economy') end
+  return n
 end
 -- NEU6: the kernel's guaranteed pass (watch_every): the look, then the container gate's ON / OFF line. Cheap: one file open and a bounded read.
 function M.watch(K)
   local c = M.conf(K)
   local okg, errg = pcall(M.gl_poll, K, c)
   if not okg then K.log('warn', 'gamelog reader: %s', tostring(errg):sub(1, 160)) end
+  local okb, errb = pcall(M.brew_sample, K, c, K.now().tick)
+  if not okb then K.log('warn', 'brew sampler: %s', tostring(errb):sub(1, 160)) end
   local oks, errs = pcall(M.snap_maybe, K, c, K.now().tick)
   if not oks then K.log('warn', 'brew cancel snapshot: %s', tostring(errs):sub(1, 160)) end
   local okc, errc = pcall(M.cx_log, K, c, K.now().tick)

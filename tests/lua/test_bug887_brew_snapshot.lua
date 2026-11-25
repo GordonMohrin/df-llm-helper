@@ -200,7 +200,7 @@ T.test('BUG-887 round 3b: the flag census of the empties (container set vs clear
   T.ok(f.combo:find('container=3', 1, true) and f.combo:find('-=2', 1, true) and f.refs:find('ENTITY_ITEMOWNER=1', 1, true) and f.taken:find('artifact', 1, true), T.show(f))
   local all = table.concat(econ.BS.lines(s), '\n')
   T.ok(all:find('flag census, free empties: container set 4, clear 2', 1, true) and all:find('flag census, ALL empties: container set 6, clear 3', 1, true), all)
-  T.ok(all:find('attached to the brew job: #' .. tostring(taken.id), 1, true), all)
+  T.ok(all:find('attached to a brew job: #' .. tostring(taken.id), 1, true), all)
   T.ok(econ.BS.line(s):find('free empties with container flag 4 / without 2', 1, true), econ.BS.line(s))
   -- the event carries the census, no second scan: the same single pass
   econ.watch(W.K)
@@ -219,7 +219,112 @@ T.test('BUG-887 round 3b: no brew job attached barrel -> the census still prints
   local s = econ.brew_snapshot(W.K)
   T.eq({#s.taken, s.cen.free_set}, {0, 1})
   local all = table.concat(econ.snap_lines(W.K), '\n')
-  T.ok(all:find('nothing taken to compare', 1, true) and all:find('taken by DF none attached', 1, true), all)
+  T.ok(all:find('nothing taken to compare', 1, true) and all:find('taken by DF now: 0 barrels', 1, true), all)
+end)
+
+local function add_job(b, id, items)
+  local j = {id = id, job_type = df.job_type.CustomReaction, reaction_name = 'BREW_DRINK_FROM_PLANT', items = items or {}}
+  b.jobs:insert('#', j)
+  return j
+end
+
+T.test('BUG-887 round 4: the attached barrels of ALL brew jobs of ALL Stills are counted (histogram) and at most 8 described', function()
+  local W, b = world('all')
+  df.general_ref_type = df.general_ref_type or kmock.enum({'UNIT_TRADEBRINGER', 'CONTAINS_ITEM'})
+  local b2 = F.workshop(W, 'Still')
+  b2.x1, b2.y1, b2.x2, b2.y2, b2.z, b2.centerx, b2.centery = 30, 20, 32, 22, 100, 31, 21
+  b2.flags = {}
+  b2.jobs = kmock.vec{}
+  local j1 = b.jobs[0]
+  local second = add_job(b, 2, {})                                    -- a second brew job in the first Still
+  local j3 = add_job(b2, 3, {})                                       -- a job in the second Still
+  local function att(j, o) local it = barrel(W, o); j.items[#j.items + 1] = {job_item_idx = 1, item = it}; return it end
+  att(j1, {flags = {container = true}})                               -- (the first job of the first Still: the old code saw only this)
+  for _ = 1, 4 do att(second, {flags = {container = true, foreign = true}}) end
+  for _ = 1, 6 do att(j3, {flags = {artifact = true}}) end
+  local dup = att(j3, {})
+  second.items[#second.items + 1] = {job_item_idx = 1, item = dup}   -- the same barrel in two jobs: counted once
+  second.items[#second.items + 1] = {job_item_idx = 0, item = dup}   -- other job_item: ignored
+  local econ = require('dfllm.economy')
+  local s = econ.BS.collect(econ.snap_env(W.K))
+  T.eq({s.stills, s.brewjobs, s.taken_n, #s.taken}, {2, 3, 12, 8}, 'twelve attached barrels in two Stills, eight described')
+  T.eq({s.taken_combo['container'], s.taken_combo['container+foreign'], s.taken_combo['artifact'], s.taken_combo['-']}, {1, 4, 6, 1}, T.show(s.taken_combo))
+  local all = table.concat(econ.BS.lines(s), '\n')
+  T.ok(all:find('attached now: 12 barrels', 1, true) and all:find('4 more attached barrels only in the histogram', 1, true), all)
+  T.ok(s.taken[1]:find('refcount=', 1, true) and s.taken[1]:find('specific=', 1, true) and s.taken[1]:find('still=', 1, true), s.taken[1])
+  T.eq(econ.BS.fields(s).tn, 12)
+end)
+
+T.test('BUG-887 round 4: the accumulator dedups by id, caps ids / keys / last, and survives a JSON round trip', function()
+  local BS = require('dfllm.brewsnap')
+  local json = require('dfllm.util.json')
+  local acc = BS.acc_new()
+  T.ok(BS.acc_add(acc, {id = 1, c = 'container', r = '-', nc = 0, w = 0}, 10))
+  T.ok(not BS.acc_add(acc, {id = 1, c = 'container', r = '-', nc = 0, w = 0}, 20), 'same id: not again')
+  T.ok(BS.acc_add(acc, {id = 2, c = 'artifact', r = 'ENTITY_ITEMOWNER', nc = 0, w = 3}, 30))
+  T.eq({acc.n, acc.set, acc.nc0, acc.wear, acc.combo.container, acc.combo.artifact}, {2, 1, 2, 1, 1, 1})
+  for i = 10, 10 + BS.ACC_IDS + 20 do BS.acc_add(acc, {id = i, c = 'k' .. i, r = 'r' .. i, nc = 0}, 40) end
+  T.eq(#acc.ids, BS.ACC_IDS, 'id ring capped')
+  T.eq(#acc.last, BS.ACC_LAST, 'last capped')
+  local keys = 0
+  for _ in pairs(acc.combo) do keys = keys + 1 end
+  T.ok(keys <= BS.ACC_KEYS + 1 and acc.combo['(other)'] and acc.combo['(other)'] > 0, 'histogram keys capped, rest in (other)')
+  local back = json.decode(json.encode(acc))
+  T.eq({back.n, #back.ids, #back.last, back.combo['(other)'], back.set}, {acc.n, #acc.ids, #acc.last, acc.combo['(other)'], acc.set})
+  T.ok(not BS.acc_add(back, {id = acc.ids[#acc.ids], c = 'x', r = 'y'}, 50), 'dedup survives the round trip')
+  T.ok(BS.acc_lines(acc)[1]:find('distinct attached barrels', 1, true) and BS.acc_lines(BS.acc_new())[1]:find('EMPTY', 1, true) and BS.acc_lines(BS.acc_new())[1]:find('no refutation', 1, true))
+end)
+
+T.test('BUG-887 round 4: M.watch samples the Stills while the container reason is active, persists the accumulator and the snapshot prints it', function()
+  local W, b, path = world('sampler')
+  local econ = require('dfllm.economy')
+  econ.watch(W.K)
+  local j = b.jobs[0]
+  local it = barrel(W, {pos = {21, 30, 100}, flags = {container = true}})
+  j.items[#j.items + 1] = {job_item_idx = 1, item = it}
+  econ.watch(W.K)
+  local p = W.K.persist.get('m.economy')
+  T.eq(p.bacc and p.bacc.n or 0, 0, 'no container cancel seen yet: the sampler is idle')
+  put(path, PLANT)
+  econ.watch(W.K)                                                    -- the cancel is seen, the same pass samples
+  p = W.K.persist.get('m.economy')
+  T.eq({p.bacc.n, p.bacc.combo.container, p.bacc.last[1].id}, {1, 1, it.id}, T.show(p.bacc))
+  j.items = {}                                                       -- the job ends (about a second): the barrel is gone from the job list
+  local it2 = barrel(W, {pos = {21, 31, 100}, flags = {artifact = true}})
+  j.items[#j.items + 1] = {job_item_idx = 1, item = it2}
+  econ.watch(W.K)
+  econ.watch(W.K)
+  p = W.K.persist.get('m.economy')
+  T.eq({p.bacc.n, p.bacc.combo.artifact}, {2, 1}, 'a later pass adds the next barrel; a repeated pass adds nothing')
+  local acts0 = #W.acts
+  local txt = table.concat(econ.snap_lines(W.K), '\n')
+  T.ok(txt:find('taken-accumulator: 2 distinct attached barrels', 1, true), txt)
+  T.eq(#W.acts, acts0, 'read only')
+  local f = econ.BS.fields(econ.brew_snapshot(W.K))
+  T.eq(f.bn, 2)
+end)
+
+T.test('BUG-887 round 4: the free empties carry the extra state counts (ref counts, specific refs, flag set + nothing inside, age split)', function()
+  local W = world('extra')
+  df.general_ref_type = df.general_ref_type or kmock.enum({'UNIT_TRADEBRINGER', 'CONTAINS_ITEM'})
+  df.general_ref_type.ENTITY_ITEMOWNER = df.general_ref_type.ENTITY_ITEMOWNER or 77; df.general_ref_type[77] = 'ENTITY_ITEMOWNER'
+  local TB = df.general_ref_type.ENTITY_ITEMOWNER
+  local a = barrel(W, {pos = {21, 30, 100}, flags = {container = true}, refs = {{getType = function() return TB end}, {getType = function() return TB end}}})
+  a.specific_refs = {{}, {}}
+  a.wear = 2
+  barrel(W, {pos = {21, 31, 100}, flags = {container = true}})
+  barrel(W, {pos = {21, 32, 100}})
+  barrel(W, {pos = {21, 33, 100}})
+  local econ = require('dfllm.economy')
+  local env = econ.snap_env(W.K)
+  env.surface = function() return false end
+  env.far = function() return false end
+  local s = econ.BS.collect(env)
+  T.eq({s.cen.rc_free.ENTITY_ITEMOWNER, s.cen.spec_items, s.cen.spec_total, s.cen.wear_free}, {2, 1, 2, 1}, T.show(s.cen))
+  T.eq({s.cen.free_set, s.cen.free_clear, s.cen.old + s.cen.new, s.cen.old_set + s.cen.new_set}, {2, 2, 4, 2})
+  T.ok(s.cen.old >= 1 and s.cen.new >= 1, 'both halves of the age split are filled')
+  local all = table.concat(econ.BS.lines(s), '\n')
+  T.ok(all:find('general_refs by type ENTITY_ITEMOWNER:2', 1, true) and all:find('1 items carry specific_refs (2 refs)', 1, true) and all:find('flag set + nothing inside 2 vs flag clear 2', 1, true), all)
 end)
 
 T.done()
