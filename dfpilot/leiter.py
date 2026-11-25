@@ -68,10 +68,12 @@ def t_versorgung(s: dict, mem: dict, now: int) -> tuple:
         return 0, "keine Vorratszahlen (state stock)", "dfllm status", None, True
     dcmd, dkey = ((want("drink"), "trade:drink") if st.get("bshort")
                   else (place("workshops", "only=Still"), "tpl:workshops"))
-    if st.get("dcx"):
+    if st.get("dcx") or "empty food storage" in str(st.get("dwhy") or ""):
         # NEU4 BUG-841: DF itself cancels the brews 'Needs empty food storage item' (state stock.dcx): the Still stands, the containers are the
-        # gap. No "build a Still" then: barrels (or pots without logs) and a worker for them (the kernel orders them itself; this is the player's way)
-        dcmd, dkey = ("dfllm cmd order.add '{\"job\":\"MakeBarrel\",\"amount\":10,\"mat\":\"wood\"}'", "order:barrel")
+        # gap. No "build a Still" then: barrels and a worker for them (the kernel orders them itself; this is the player's way).
+        # NEU7 BUG-857: the material the players' working command used: rock barrels when no usable log is left (state stock.wood 0 / nowood)
+        mat = "rock" if (st.get("wood") == 0 or st.get("nowood")) else "wood"
+        dcmd, dkey = ("dfllm cmd order.add '{\"job\":\"MakeBarrel\",\"amount\":15,\"mat\":\"" + mat + "\"}'", "order:barrel")
     if food < FOOD_I or drink < DRINK_I:
         if drink < DRINK_I:
             return 0, f"Trinken {drink}/{DRINK_I} d" + (f" ({st['dwhy']})" if st.get("dwhy") else ""), dcmd, dkey, False
@@ -290,7 +292,71 @@ def locks(s: dict, evs: list[dict], now: int, raw: dict, series: list[list[int]]
     return [out[t] for t in PRIO if t in out]
 
 
-def blocked_evidence(save_dir: Path, s: dict, evs: list[dict], now: int, key: str | None, hours: int) -> str:
+# NEU7 BUG-857 (Run 17 round 4: the ladder printed tombs.repair (unreachable corpses: 'not repairable: memorial slab'), bp.place seal ('nothing to close'),
+# bp.place refuge_drink ('no site') and a Still (DF says containers are missing) again and again): a command the tool or the kernel REFUSED with a reason
+# is no next step. The tool's own cli.log holds every verb and its reply (`verb:<v>` with the args and the command id, `reply:<v>` with `ok ...` / `ERR ...`).
+REFUSAL = re.compile(r"refused|not repairable|nothing to close|no site|cannot|not possible|no free site|unknown kind", re.I)
+CMD_RE = re.compile(r"^dfllm cmd (\S+)(.*)$")
+
+
+def refusal_evidence(save_dir: Path, cmd: str | None, hours: int) -> str:
+    """The newest reply to the command's verb (and template / job) when it was a refusal with a reason: 'verb: reason (cli.log, N h ago)'; '' when the
+    newest reply was an ok, none is in the window, or the command is no `dfllm cmd` line."""
+    m = CMD_RE.match(cmd or "")
+    if not m or hours <= 0:
+        return ""
+    verb, rest = m.group(1), m.group(2)
+    tpl = re.search(r"tpl=(\w+)", rest) or re.search(r'"tpl"\s*:\s*"(\w+)"', rest)
+    job = re.search(r'"job"\s*:\s*"(\w+)"', rest)
+    try:
+        lines = (Path(save_dir) / "cli.log").read_text(encoding="utf-8", errors="replace").splitlines()[-900:]
+    except OSError:
+        return ""
+    cut = time.time() - hours * 3600
+    sent: dict[str, dict] = {}
+    replies: list[tuple[int, str, str]] = []
+    for ln in lines:
+        f = ln.split("\t")
+        if len(f) < 5:
+            continue
+        try:
+            wall = int(f[0])
+        except ValueError:
+            continue
+        if wall < cut:
+            continue
+        if f[2] == "verb:" + verb:
+            try:
+                a = json.loads(f[3])
+            except ValueError:
+                a = {}
+            cid = f[4].split()[-1] if f[4].startswith("sent ") else ""
+            sent[cid] = a if isinstance(a, dict) else {}
+        elif f[2] == "reply:" + verb:
+            try:
+                cid = str(json.loads(f[3]).get("id", ""))
+            except (ValueError, AttributeError):
+                cid = ""
+            replies.append((wall, cid, f[4]))
+    for wall, cid, res in reversed(replies):
+        a = sent.get(cid, {})
+        if tpl and (a.get("tpl") or _o(a.get("p")).get("tpl")) not in (None, tpl.group(1)):
+            continue
+        if job and a.get("job") not in (None, job.group(1)):
+            continue
+        if res.startswith("ERR") or REFUSAL.search(res):
+            ago = max(0, int((time.time() - wall) // 60))
+            return f"{verb}{' ' + tpl.group(1) if tpl else ''} abgelehnt: {res[:110]} (cli.log, vor {ago} min)"
+        return ""                                      # the newest reply of this command was an ok: not blocked
+    return ""
+
+
+def blocked_evidence(save_dir: Path, s: dict, evs: list[dict], now: int, key: str | None, hours: int, cmd: str | None = None) -> str:
+    """Tool evidence that the command's template / trade token cannot work now, '' without evidence."""
+    return _state_blocked(save_dir, s, evs, now, key, hours) or refusal_evidence(save_dir, cmd, hours)
+
+
+def _state_blocked(save_dir: Path, s: dict, evs: list[dict], now: int, key: str | None, hours: int) -> str:
     """Tool evidence that the command's template / trade token cannot work now, '' without evidence."""
     if not key:
         return ""
@@ -445,7 +511,7 @@ def compute(save_dir: Path, state: dict | None = None, evs: list[dict] | None = 
         tr[x["track"]]["eff"] = min(tr[x["track"]]["eff"], x["cap"])
     for k in TRACKS:
         if tr[k]["eff"] < 3:
-            tr[k]["blocked"] = blocked_evidence(save_dir, s, evs, now, tr[k]["key"], cfg["blocked_hours"])
+            tr[k]["blocked"] = blocked_evidence(save_dir, s, evs, now, tr[k]["key"], cfg["blocked_hours"], tr[k]["cmd"])
     total = sum(tr[k]["eff"] for k in TRACKS)
     ac = acute(s, evs, now)
     # a locked track is no NAECHST / OFFEN candidate: it names NAECHST only through lock_cmd, when its own command

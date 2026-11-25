@@ -3412,7 +3412,7 @@ function M.kit_rows(metal)
         local e = st.sq[sp.key]
         local s = e and squad(e.id)
         for _, m in ipairs(s and members(s) or {}) do
-          rows[#rows + 1] = {key = sp.key, pos = m.pos, p = m.p, x = M.KIT.soldier(m.p, m.unit, roles(), metal), xb = e.kind == 'xbow',
+          rows[#rows + 1] = {key = sp.key, pos = m.pos, p = m.p, u = m.unit, x = M.KIT.soldier(m.p, m.unit, roles(), metal), xb = e.kind == 'xbow',
                              tr = e.kind ~= 'xbow' and (e.tr == 1 or e.un == 1)}
         end
       end
@@ -4599,7 +4599,7 @@ function M.kit_stats(K)
   -- NEU1 P4 (readiness.growth_ladder): fullr = armor and a real weapon (in hand, or waiting for a soldier on the training policy: kit_rows),
   -- metal = fullr with every armor piece of metal, sq_n / sq_w = the members of the first melee squad and those of them armed so,
   -- wb = soldiers counted armed by a waiting real weapon
-  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0, wb = 0}
+  local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0, sq_u = 0, wb = 0}
   local rows, first = M.kit_rows(is_metal)
   t.wb = M.back_rows(K, rows)
   for _, r in ipairs(rows) do
@@ -4615,7 +4615,8 @@ function M.kit_stats(K)
     end
     if r.key == first then
       t.sq_n = t.sq_n + 1
-      if r.real then t.sq_w = t.sq_w + 1 end
+      if r.real then t.sq_w = t.sq_w + 1
+      elseif r.u and not healthy(r.u) then t.sq_u = t.sq_u + 1 end      -- NEU7 BUG-858: counted unarmed, but hurt / unconscious / starving (reporting only)
     end
   end
   rt.kit, rt.kit_t = t, now

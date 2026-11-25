@@ -132,7 +132,7 @@ STATE_OWNERS = {
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.wall": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.nowood": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy", "stock.mfar": "economy",
     "stock.picks": "economy",
     "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.wood": "economy", "stock.woodt": "economy", "stock.woodb": "economy", "stock.cont": "economy", "stock.contt": "economy", "stock.dcx": "economy", "stock.bshort": "economy",
-    "stock.dforb": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
+    "stock.dforb": "economy", "stock.dfar": "economy", "stock.dall": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
     "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "mood": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
     "clock.*": "arbiter", "alarm.*": "reflex", "lever.*": "gate",
@@ -1211,7 +1211,7 @@ STATE = Obj(
                            # BUG-059: citizens past DF's "hungry" line (hunger_timer >= starve.hunger)
                            "hungry": NAT,
                            # FR-76: drink / food units the census counts as forbidden (a reclaimed fort's stock)
-                           "dforb": NAT, "fforb": NAT,
+                           "dforb": NAT, "fforb": NAT, "dfar": NAT, "dall": NAT,
                            # BUG-506: daily runs that forbidden stock stood, and what held the unforbid back
                            "dfd": NAT, "dfwhy": Str(maxbytes=40)}),
          "care": Obj(req={"stressed_pct": PCT, "naked": NAT, "ghosts": NAT, "corpses_old": NAT,

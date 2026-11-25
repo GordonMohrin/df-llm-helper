@@ -4438,15 +4438,43 @@ def live_trade(save_dir: Path) -> dict | None:
         except ValueError:
             continue
         cid = f[4].removeprefix("sent ").strip()
-        tr = {k: [str(x) for x in args[k]][:40] for k in ("want", "sell") if isinstance(args, dict)
-              and isinstance(args.get(k), list)}
+        tr = {k: [str(x) for x in args[k]][:40] for k in ("want", "sell", "add", "remove", "sell_add", "sell_remove")
+              if isinstance(args, dict) and isinstance(args.get(k), list)}
         if tr:
             sent.append((cid, tr))
     out: dict = {}
+    ops: dict[str, list] = {"want": [], "sell": []}
     for cid, tr in sent:                                  # as trade.lua's override: a list left out stays
-        if cid not in bad:
-            out.update(tr)
+        if cid in bad:
+            continue
+        # NEU7 BUG-859 (Run 17 round 4: `trade.want add` was read as 'replaces the list': the next plan apply set the draft's own list and the
+        # tokens the player added were gone): add / remove / sell_add / sell_remove change the list the kernel runs by (trade.lua patch); they are
+        # kept in order, after the last replacement of their list, and propose applies them to the draft's list
+        for k, lst in (("want", "want"), ("sell", "sell")):
+            if k in tr:
+                out[k] = tr[k]
+                ops[lst] = []
+        if "add" in tr or "remove" in tr:
+            ops["want"].append({"add": tr.get("add", []), "remove": tr.get("remove", [])})
+        if "sell_add" in tr or "sell_remove" in tr:
+            ops["sell"].append({"add": tr.get("sell_add", []), "remove": tr.get("sell_remove", [])})
+    for k in ("want", "sell"):
+        if ops[k]:
+            out[k + "_ops"] = ops[k]
     return out or None
+
+
+def apply_trade_ops(base: list, ops: list[dict]) -> list:
+    """trade.lua's patch: each op puts its `add` tokens in front (priority = list order), takes its `remove` out, no doubles, at most 40."""
+    cur = [str(x) for x in base]
+    for op in ops or []:
+        drop = set(op.get("remove") or [])
+        out: list[str] = []
+        for t in list(op.get("add") or []) + cur:
+            if t not in out and t not in drop and len(out) < 40:
+                out.append(t)
+        cur = out
+    return cur
 
 
 def no_core_route(fort: dict | None, s: dict | None, done: set) -> str:
@@ -5269,6 +5297,9 @@ def propose(state: dict | None, phases: dict | None, prev: dict | None, decision
     }
     if live:                                     # BUG-242: the running cmd trade.want, not the old plan's list
         doc["trade"].update({k: list(v) for k, v in live.items() if k in ("want", "sell")})
+        for k in ("want", "sell"):                   # NEU7 BUG-859: the running add / remove changes stay in the draft
+            if live.get(k + "_ops"):
+                doc["trade"][k] = apply_trade_ops(doc["trade"].get(k) or [], live[k + "_ops"])
         doc["notes"] += "; BUG-242: trade.want kept from the running cmd trade.want: " + ",".join(
             doc["trade"]["want"][:8]) + ("..." if len(doc["trade"]["want"]) > 8 else "")
     if famine.get("short") and (famine.get("rock0") or famine.get("logs0")):

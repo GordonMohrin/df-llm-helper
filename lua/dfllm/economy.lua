@@ -1106,6 +1106,7 @@ local function classify(it, a, cat)
   -- 42 dwarves starved. Food and drink on another walkable group than the citizens' feed nobody.
   if (cat == 'DRINK' or a.food_set[cat]) and not f.in_inventory and a.far and a.far(it) then
     a.unreach = (a.unreach or 0) + n
+    if cat == 'DRINK' then a.drink_far = a.drink_far + n end       -- NEU7 BUG-856: drink units out of reach, counted apart
     if cat ~= 'DRINK' then a.food_far = a.food_far + n end     -- Run 11: the kitchen's view (M.cook_why)
     return
   end
@@ -1381,7 +1382,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'rock_nouse',  -- BUG-733: boulders no mason may take (ore, flux, economic, soft, refused): each counted once
               'blocks_busy', -- BUG-736
               'wood_far', 'wood_forb',   -- BUG-705
-              'wood_nw', 'wood_busy', 'wood_skip', 'wood_built'}   -- NEU4 BUG-842: logs on tiles with no walk group, logs a job holds, logs DF skips (in a building ...)
+              'wood_nw', 'wood_busy', 'wood_skip', 'wood_built', 'drink_far'}   -- NEU4 BUG-842: logs on tiles with no walk group, logs a job holds, logs DF skips (in a building ...)
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -2187,8 +2188,15 @@ function M.plan_reserve(K, c, r)
   if brews <= 0 then return false end
   local made = rs and math.tointeger(rs.made) or 0
   local cap = math.tointeger(M.rv(c, 'total_cap')) or 200
-  if made >= cap then return false end
   local x = M.cx_reason(K, c, now)
+  if made >= cap then
+    -- DF still names the containers but the reserve made its total: no other path (the old x15 batch, rock pots) orders more behind it; said once a game week
+    if x and (st.rsvcap == nil or now - st.rsvcap >= 7 * DAY) then
+      st.rsvcap = now
+      K.log('warn', 'container reserve: total_cap %d reached (%d ordered), DF still cancels brews for want of a container: the containers made are not taken or used up; nothing more is ordered', cap, made)
+    end
+    return x ~= nil
+  end
   local want, why
   if x then
     local grace, win = (math.tointeger(M.rv(c, 'grace_days')) or 2) * DAY, M.cw_days(K, c) * DAY
@@ -2207,7 +2215,7 @@ function M.plan_reserve(K, c, r)
       want, why = math.max(1, math.tointeger(M.rv(c, 'trickle_n')) or 1), 'trickle'
     end
   end
-  if not want then return false end
+  if not want then return x ~= nil end              -- DF still cancels but the last batch has not had its effect yet (grace / gap): nothing else orders meanwhile
   local mat, n, wood, rock = M.reserve_mat(c, r, want)
   if not mat then
     st.cont_short = st.cont_short or {}
@@ -15865,6 +15873,16 @@ function M.state(K)
     if st.bshort then r.stock.bshort = 1 end      -- BUG-382: the runner's gather zone follows the brewable plants too
     -- FR-76: drink and food units the census counts as forbidden (a reclaimed fort's stock: the status says so)
     if (math.tointeger(inv.drink_forb) or 0) > 0 then r.stock.dforb = math.tointeger(inv.drink_forb) end
+    -- NEU7 BUG-856 (Run 17 i4 y394: status 'drink 0d' beside 74 drink units in the census and an alert of 32 d): ONE rule, `drink_d` counts the usable units (reachable,
+    -- not forbidden); the others are named (dforb forbidden, dfar out of reach) and `dall` = the days the same rate gives with every unit counted (74 units at the
+    -- seeded rate = 32 d), so a second number never stands without its name
+    do
+      local far, forb = math.max(0, math.tointeger(inv.drink_far) or 0), math.max(0, math.tointeger(inv.drink_forb) or 0)
+      local use = math.max(0, math.tointeger(inv.drink) or 0)
+      if far > 0 then r.stock.dfar = far end
+      local hist = pstate(K).hist.drink
+      if far + forb > 0 and type(hist) == 'table' and #hist > 0 then r.stock.dall = M.days(use + far + forb, hist) end
+    end
     if (math.tointeger(inv.food_forb) or 0) > 0 then r.stock.fforb = math.tointeger(inv.food_forb) end
     -- BUG-506: how many daily runs the forbidden stock has stood and what held the unforbid back
     if (st.dfd or 0) > 0 and (r.stock.dforb or r.stock.fforb) then

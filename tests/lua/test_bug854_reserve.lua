@@ -66,8 +66,9 @@ T.test('BUG-854 i4: wood 0 usable, DF cancels: a ROCK batch of MakeBarrel materi
   T.eq(cd.n, 10, 'min batch 10 for 30 brews / 5 = 6')
   T.eq(cd.uses.rock, 1)
   local l = r.s.brew.left
-  local _, r2 = run(W, {now = t0 + 2 * DAYT, inv = I4, brews = 200, live = {}})
+  local acted2, r2 = run(W, {now = t0 + 2 * DAYT, inv = I4, brews = 200, live = {}})
   T.ok(r2.cands[1] == nil, 'a plan run two days later (the order not yet made, repeat gap 3 days) adds nothing again')
+  T.ok(acted2, 'and the reserve still owns the barrel planning (no old x15 batch or pots behind it)')
   T.eq(l, 30)
 end)
 

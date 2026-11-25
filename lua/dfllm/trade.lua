@@ -2435,6 +2435,17 @@ local function patch(base, put, add, rm)
   end
   return out
 end
+-- NEU7 BUG-859 (Run 17 round 4: `trade.want add` read as 'replaces the list'): what a change took OUT of a list that the player did not name in `remove`
+-- (a `want` / `sell` replacement drops the old tokens, a full list drops its tail); the reply says them
+local function lost(old, new, rm)
+  local keep, gone = {}, {}
+  for _, t in ipairs(new or {}) do keep[t] = true end
+  for _, t in ipairs(rm or {}) do keep[t] = true end
+  for _, t in ipairs(old or {}) do
+    if not keep[t] then gone[#gone + 1] = t; keep[t] = true end
+  end
+  return gone
+end
 
 -- the trade.want override (until the next plan.reload)
 local function override(K, args)
@@ -2456,6 +2467,9 @@ local function override(K, args)
   end
   st.ov = {want = want, sell = sell, noauto = noauto, loaded = type(pp) == 'table' and int(pp.loaded) or 0}
   dirty = true
+  local dw = (args.want ~= nil or args.add ~= nil or args.remove ~= nil) and lost(w, want, args.remove) or {}
+  local ds = (args.sell ~= nil or args.sell_add ~= nil or args.sell_remove ~= nil) and lost(s, sell, args.sell_remove) or {}
+  return dw, ds
 end
 
 local BAD_TOKENS = 'want/sell/add/remove must be token lists (cloth/thread subs: plant, silk, yarn)'
@@ -2481,12 +2495,14 @@ M.verbs['trade.want'] = function(K, args, cmd)
   for _, k in ipairs({'want', 'sell', 'add', 'remove', 'sell_add', 'sell_remove'}) do
     if not valid_tokens(args[k]) then return false, BAD_TOKENS end
   end
-  override(K, args)
+  local dw, ds = override(K, args)
   save(K)
   local want, sell = wants(K)
   local ign = ignored_tokens(K)
   return true, string.format('want %d, sell %d', #want, #sell) ..
-                 (#ign > 0 and ('; ignored (no item type): ' .. table.concat(ign, ',')) or ''),
+                 (#ign > 0 and ('; ignored (no item type): ' .. table.concat(ign, ',')) or '') ..
+                 ((dw and #dw > 0) and ('; dropped from the want list: ' .. table.concat(dw, ',')) or '') ..
+                 ((ds and #ds > 0) and ('; dropped from the sell list: ' .. table.concat(ds, ',')) or ''),
          {want = srcs(want), sell = srcs(sell), ignored = #ign > 0 and json.array(ign) or nil}
 end
 

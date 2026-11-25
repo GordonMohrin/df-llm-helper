@@ -625,12 +625,14 @@ end
 function M.growth_ladder(x, c)
   local n, fullr, metal = int(x.n) or 0, int(x.fullr) or 0, int(x.metal) or 0
   local sq_n, sq_w, dd = int(x.sq_n) or 0, int(x.sq_w) or 0, int(x.drink_d)
+  local sq_u = math.min(int(x.sq_u) or 0, math.max(0, sq_n - sq_w))     -- NEU7 BUG-858: of the unarmed ones, hurt or unfit (reporting only: the gate rule is unchanged)
   local share_ok = n > 0 and fullr * 100 >= c.share * n
   local share_txt = string.format('%d of %d soldiers fully equipped (%d %% < %d %%)', fullr, n, n > 0 and fullr * 100 // n or 0, c.share)
   local steps = {
     {cap = c.base, conds = {
       {'squad', sq_n >= c.armed_min and sq_w >= sq_n,
-       string.format('first squad: %d of %d members hold a real weapon (need %d+, all armed)', sq_w, sq_n, c.armed_min)},
+       string.format('first squad: %d of %d members hold a real weapon (need %d+, all armed%s)', sq_w, sq_n, c.armed_min,
+                     sq_u > 0 and string.format('; %d injured', sq_u) or '')},
       {'drink', dd ~= nil and dd >= c.drink_d,
        string.format('drink inside the core %s d < %d d', dd and tostring(dd) or '?', c.drink_d)}}},
     {cap = c.armed_cap, conds = {
@@ -645,7 +647,8 @@ function M.growth_ladder(x, c)
   for i, s in ipairs(steps) do
     for _, cd in ipairs(s.conds) do
       if not cd[2] then
-        return {tier = i - 1, cap = s.cap, next = steps[i + 1] and steps[i + 1].cap or c.top_cap, halt = cd[1], need = cut(cd[3], 100)}
+        return {tier = i - 1, cap = s.cap, next = steps[i + 1] and steps[i + 1].cap or c.top_cap, halt = cd[1], need = cut(cd[3], 100),
+                inj = cd[1] == 'squad' and sq_u > 0 and sq_u or nil}
       end
     end
   end
@@ -675,7 +678,7 @@ local function growth(K, lvl, now)
   local okk, kit = K.call('military', 'kit_stats')
   kit = okk and type(kit) == 'table' and kit or {}
   local al = K.view().alert
-  local g = M.growth_ladder({n = kit.n, fullr = kit.fullr, metal = kit.metal, sq_n = kit.sq_n, sq_w = kit.sq_w, lvl = lvl,
+  local g = M.growth_ladder({n = kit.n, fullr = kit.fullr, metal = kit.metal, sq_n = kit.sq_n, sq_w = kit.sq_w, sq_u = kit.sq_u, lvl = lvl,
                              lever = core_lever(K), drink_d = type(al) == 'table' and al.core_d or nil}, c)
   local gr = st.gr
   local tier = g.tier
@@ -688,7 +691,7 @@ local function growth(K, lvl, now)
   end
   local caps = {[0] = c.base, [1] = c.armed_cap, [2] = c.ready_cap}
   rt.gcap = caps[tier]
-  rt.gh = g.halt and {cap = rt.gcap or c.top_cap, next = g.next, halt = g.halt, need = g.need} or nil
+  rt.gh = g.halt and {cap = rt.gcap or c.top_cap, next = g.next, halt = g.halt, need = g.need, inj = g.inj} or nil
   local sig = string.format('%s:%s', tostring(rt.gcap), tostring(g.halt))
   if gr.h ~= sig then
     gr.h, dirty = sig, true
@@ -1155,7 +1158,7 @@ function M.hold_text(K)
   local w = rt and rt.cap_why
   local n = rt and rt.gate_cap or st.cap
   if rt and rt.gate_why == 'growth' and rt.gate_cap and rt.gh then        -- NEU1 P4: the ladder binds (also under a freeze): its halt
-    parts[#parts + 1] = string.format('growth %d (%s)', rt.gate_cap, rt.gh.halt)
+    parts[#parts + 1] = string.format('growth %d (%s%s)', rt.gate_cap, rt.gh.halt, rt.gh.inj and string.format(', %d injured', rt.gh.inj) or '')
   elseif (w == 'plan' or w == 'open_perimeter' or w == 'defense_short' or w == 'unsafe') and n then
     parts[#parts + 1] = string.format('%s %d%s', w, n, ((w == 'open_perimeter' and rt.psoft) or (w == 'defense_short' and rt.dsoft)) and '+' or '')
   end

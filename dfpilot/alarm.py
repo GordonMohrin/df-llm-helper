@@ -144,6 +144,22 @@ def write_cursor(save_dir: Path, cur: dict, now: float) -> None:
         pass
 
 
+_POPUP_SEEN: dict[str, float] = {}      # NEU7 BUG-859: save dir -> wall time this process first saw the popup pause
+
+
+def _popup_text(save_dir: Path) -> str:
+    """The newest popup text the kernel logged (PAUSED_BY_DF / POPUP_GONE), '' when none (a courtesy to the wake line)."""
+    try:
+        for e in reversed(files.tail_events(save_dir, 0, limit=3, types={"PAUSED_BY_DF", "POPUP_GONE"})):
+            d = e.get("d") if isinstance(e.get("d"), dict) else {}
+            t = d.get("popup") or d.get("text")
+            if isinstance(t, str) and t:
+                return f': "{t[:60]}"'
+    except Exception:                                      # noqa: BLE001
+        pass
+    return ""
+
+
 def sys_reasons(save_dir: Path, cfg: dict, now: float) -> list[dict]:
     """P3: the wake reasons `wait` sees itself (not kernel events): KERNEL_STALE (the kernel heartbeat is old: DF hangs or is
     closed), DEADMAN (the game stands paused by the dead-man switch), FOLLOW_OFF (follow does not beat for this save)."""
@@ -158,6 +174,16 @@ def sys_reasons(save_dir: Path, cfg: dict, now: float) -> list[dict]:
     if owners.get("pause") == "deadman" and (hb or {}).get("paused"):
         out.append({"type": "DEADMAN", "key": "DEADMAN", "n": 0,
                     "msg": "the game stands paused by the dead-man switch (no live session for a while)"})
+    # NEU7 BUG-859 (Run 17 i2: a noble-claim popup paused the game for 3 real minutes and `wait` slept on): the game stands paused by a POPUP
+    # (state owners.pause == popup) for popup_s real seconds in this process -> one POPUP_PAUSE wake (0 = at once; popup_s from config wake.json)
+    key = str(save_dir)
+    if owners.get("pause") == "popup" and (hb or {}).get("paused"):
+        since = _POPUP_SEEN.setdefault(key, now)
+        if now - since >= cfg.get("popup_s", 20):
+            out.append({"type": "POPUP_PAUSE", "key": "POPUP_PAUSE", "n": 0,
+                        "msg": f"the game stands paused by a popup ({int(now - since)} s seen)" + _popup_text(save_dir)})
+    else:
+        _POPUP_SEEN.pop(key, None)
     if cfg["follow_check"]:
         off = files.follow_off(save_dir, now)
         if off and "OFF" in off:
@@ -165,7 +191,8 @@ def sys_reasons(save_dir: Path, cfg: dict, now: float) -> list[dict]:
     return out
 
 
-SYS_NEXT = {"DEADMAN": "dfllm cmd resume; then dfllm brief", "KERNEL_STALE": "dfllm doctor",
+SYS_NEXT = {"DEADMAN": "dfllm cmd resume; then dfllm brief",
+            "POPUP_PAUSE": "dfllm cmd resume (the reply names the popup it read; it refuses threat or curse popups: then tell Gordon); then dfllm status", "KERNEL_STALE": "dfllm doctor",
             "FOLLOW_OFF": "dfllm follow --takeover (in the background); then dfllm status"}
 
 

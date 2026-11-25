@@ -36,7 +36,7 @@ QUIET_DECISIONS = ("seal_stalled", "no_hard_stone", "metal", "steel", "defense_g
                    "trade_screen", "coffin_space", "coffin_material", "squads", "preventblocking", "trap_friendly",
                    "piece_missing", "gate_traffic", "berserk")
 DEFAULTS: dict = {
-    "wait": {"act": True, "repeat_s": 300, "backlog": 2000, "kernel_stale_s": 120, "follow_check": True,
+    "wait": {"act": True, "repeat_s": 300, "backlog": 2000, "kernel_stale_s": 120, "follow_check": True, "popup_s": 20,
              "quiet_types": list(QUIET_TYPES), "quiet_decisions": list(QUIET_DECISIONS)},
     "session": {"on": True},
     "follow": {"restart": True, "max_rss_mb": 400, "max_hours": 12},
@@ -44,7 +44,7 @@ DEFAULTS: dict = {
 # key -> (lo, hi) for ints, "bool", "types" / "ids" for the lists
 LIMITS: dict = {
     "wait": {"act": "bool", "repeat_s": (0, 86400), "backlog": (10, 1000000), "kernel_stale_s": (30, 86400),
-             "follow_check": "bool", "quiet_types": "types", "quiet_decisions": "ids"},
+             "follow_check": "bool", "popup_s": (0, 3600), "quiet_types": "types", "quiet_decisions": "ids"},
     "session": {"on": "bool"},
     "follow": {"restart": "bool", "max_rss_mb": (50, 64000), "max_hours": (1, 720)},
 }

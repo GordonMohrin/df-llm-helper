@@ -953,6 +953,11 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
                 tail = (f" for {age} days, NOT in the days above (the drink days understate the stock)"
                         + (f"; the unforbid is held back: {why}" if why else "; the kernel has not freed them"))
             out.append((1, ", ".join(parts) + tail + ("!" if age and age >= 3 else "")))
+    # NEU7 BUG-856: the drink line has ONE rule (usable units: reachable and not forbidden); the units it does not count are named, with the days they would add
+    if st and st.get("dfar"):
+        bits = [f"{st[k]} {name}" for k, name in (("dfar", "out of reach (another walk group or no walk tile)"), ("dforb", "forbidden")) if st.get(k)]
+        out.append((1, f"drink {st.get('drink_d', '?')}d counts only usable units; not counted: " + ", ".join(bits)
+                    + (f" (all of them at the same rate would be {st['dall']} d)" if st.get("dall") else "")))
     ad = adopt_line(s)
     if ad:
         fort.append(ad)

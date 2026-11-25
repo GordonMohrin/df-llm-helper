@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 34 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 739 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 790 |
+| offen, nie live gesehen | 745 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 796 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
@@ -290,6 +290,9 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-412 `runs/run-16c/FR-BUGS.md:116` (no verdict word): (plan-y407b.json): Entwurf unveraendert leer, Notiz weiter BUG-415/412 'no fortcore site with a safe shaft column below the aquifer ([20,62,127]: aqshaft beside the...)'.
 - BUG-415 `runs/run-16c/FR-BUGS.md:116` (no verdict word): (plan-y407b.json): Entwurf unveraendert leer, Notiz weiter BUG-415/412 'no fortcore site with a safe shaft column below the aquifer ([20,62,127]: aqshaft beside the...)'.
 - BUG-427 `docs/v2/STATUS.md:1038` (no verdict word): e_flags' are 'raised/raising/lowering' (lever.lua:39-41, v1 BUG-427), not
+- BUG-437 `runs/run-16b/STAND.md:493` (no verdict word): 490 Plan: Phase P5, Bau farms@S1 (fortcore st4 weggelassen: BUG-437 Fallen toeten bei drink 0), Spur Versorgung: kein Bau-Schritt moeglich, Kernel-Abhilfe (Fass-Cure) laeuft.
+- BUG-437 `runs/run-16b/STAND.md:496` (no verdict word): y491 Plan: P5, Bau farms@S1 (fortcore st4 weggelassen wegen BUG-437), Spur Versorgung: kein Bau-Schritt, Kernel-Cure laeuft.
+- BUG-437 `runs/run-16b/STAND.md:508` (no verdict word): (Spur Wehr II: fortcore st4 in s1, jetzt wo Trinken 117 d, BUG-437-Warnung entfaellt), LEITER 7/18
 - BUG-437 `runs/run-16d/STAND.md:124` (no verdict word): refuge_beds, dining, furnaces; Fallen erst s2 wegen Warnung BUG-437 Wasser)
 - BUG-437 `runs/run-16d/STAND.md:132` (no verdict word): st4, traps bridges, explore x4); Entscheidung: Fallen trotz BUG-437-Warnung, da drink 405d/food 60-75d innen
 - BUG-438 `runs/run-16a/STAND.md:91` (no verdict word): escheitert, beide bp.cancel (Entscheidung); explore-Projekt BUG-438 laeuft;
