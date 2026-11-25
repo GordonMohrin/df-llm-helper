@@ -5434,6 +5434,8 @@ local function finish(K, c, r, p)
   -- open citizen corpses: first seen -> age
   for sid in pairs(p.corpses) do if not r.open[sid] then p.corpses[sid] = nil end end
   local open, old, old_ids, unreach = 0, 0, {}, 0
+  local far_old, far_mem, far_list = 0, 0, {}                -- NEU14 BUG-895: old bodies out of reach (corpse_far), and the ones a memorial slab stands for
+  local mby = r.mem and r.mem.by or {}
   for sid in pairs(r.open) do
     p.corpses[sid] = p.corpses[sid] or now
     open = open + 1
@@ -5441,9 +5443,18 @@ local function finish(K, c, r, p)
     if r.unr and r.unr[uid] then
       -- BUG-105: a body on a tile nobody can path to is no goal of the burial work (Z7) and no GHOSTS wake of its own
       unreach = unreach + 1
+    elseif r.far and r.far[uid] and mby[uid] == 'placed' then
+      -- NEU14 BUG-895 (Run 17c i3 Orangering y459: two corpses corpse_far at 88,83,145, tombs.repair 'queued' and nothing happened for 40 days): a body in another walk
+      -- group no coffin can reach, whose memorial slab stands, is laid to rest as a ghost is: it is no unburied body against the Wohl track
+      far_mem = far_mem + 1
     elseif now - p.corpses[sid] >= c.corpse_old then
       old = old + 1
       old_ids[#old_ids + 1] = uid
+      if r.far and r.far[uid] then far_old = far_old + 1 end
+    end
+    if r.far and r.far[uid] and not (r.unr and r.unr[uid]) and #far_list < 12 then
+      local b = r.bodies and r.bodies[uid]
+      far_list[#far_list + 1] = {uid, b and b.pos and {b.pos.x, b.pos.y, b.pos.z} or nil, mby[uid] or 'none'}
     end
   end
   table.sort(old_ids)
@@ -5516,10 +5527,12 @@ local function finish(K, c, r, p)
   end
   local prev = st.out or {}
   local a = r.acc
+  table.sort(far_list, function(x, y) return x[1] < y[1] end)
+  st.far_list, st.far_old, st.far_mem = far_list, far_old, far_mem
   st.out = {stressed_pct = r.have_units and (a.n > 0 and a.stressed * 100 // a.n or 0) or (prev.stressed_pct or 0),
             naked = r.have_units and a.naked or (prev.naked or 0), ghosts = ghosts, corpses_old = old, corpses_unreach = unreach,
             tombs_free = r.tombs_free or 0, tombs_locked = r.tombs_locked or 0, moods = count(p.moods),
-            hosp_water = r.hosp_water or 0}
+            hosp_water = r.hosp_water or 0, corpses_far = far_old, corpses_far_mem = far_mem}
   -- FR-64: deaths still missing, a cluster that grew while its cadence held it back, the season's tally
   death_recheck(K, c, p)
   died_prune(c, p, now)
@@ -6025,6 +6038,24 @@ M.verbs['tombs.repair'] = function(K, args, cmd)
                                table.concat((function() local t = {} for i = 1, math.min(5, #unr) do t[i] = tostring(unr[i]) end return t end)(), ','),
                                MEM.text(n))
   end
+  -- NEU14 BUG-895: bodies in another walk group (corpse_far, on a floor: a stair or a dug way would reach them) are no burial work either: the answer says where they
+  -- lie and what ends it (the memorial slab, which care orders and places by itself: mem_early), instead of promising work that cannot happen
+  local fl, fn = {}, {}
+  for _, e in ipairs(st.far_list or {}) do
+    fl[#fl + 1] = e
+    fn[e[3]] = (fn[e[3]] or 0) + 1
+  end
+  if #fl > 0 then
+    local where = {}
+    for i = 1, math.min(3, #fl) do
+      local e = fl[i]
+      where[#where + 1] = string.format('unit %d%s', e[1], e[2] and string.format(' at %d,%d,%d', e[2][1], e[2][2], e[2][3]) or '')
+    end
+    d.far, d.far_n = fl, #fl
+    msg = msg .. string.format('; %d corpse%s out of reach (another walk group, %s): tombs.repair cannot reach %s, a memorial slab is their burial (slabs: %s; ' ..
+                               'care orders and places it itself, `dfllm cmd inspect what=tombs` shows its state)', #fl, #fl == 1 and '' or 's',
+                               table.concat(where, ', '), #fl == 1 and 'it' or 'them', MEM.text(fn))
+  end
   return true, trunc(msg, 400), d
 end
 
@@ -6058,6 +6089,8 @@ function M.state(K)
   local care = {stressed_pct = math.max(0, math.min(100, o.stressed_pct)), naked = o.naked, ghosts = o.ghosts,
                 corpses_old = o.corpses_old, tombs_free = o.tombs_free, moods = o.moods}
   if (o.corpses_unreach or 0) > 0 then care.corpses_unreach = o.corpses_unreach end     -- BUG-105: apart from corpses_old
+  if (o.corpses_far or 0) > 0 then care.corpses_far = o.corpses_far end                 -- NEU14 BUG-895: of corpses_old, the ones out of reach (tombs.repair cannot help)
+  if (o.corpses_far_mem or 0) > 0 then care.corpses_far_mem = o.corpses_far_mem end     -- and the out-of-reach ones whose memorial slab stands (not in corpses_old)
   if (o.tombs_locked or 0) > 0 then care.tombs_locked = o.tombs_locked end      -- BUG-062: closed zones left
   if st.pop then                              -- FR-74: stress sources and the population diagnosis
     care.pop = {kids = st.pop.kids, res = st.pop.res, peak = st.pop.peak, dy = st.pop.dy, waves = st.pop.waves,

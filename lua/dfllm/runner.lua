@@ -1652,6 +1652,73 @@ function Q.seal_mismatch(P, cell_key, b, c)
   if want == 'Construction' and Q.SNAP_NAME[c] then return Q.SNAP_NAME[c] end
   return nil
 end
+-- NEU14 BUG-894: the tiles (set 'x,y,z' -> true) the seal and plug projects not done have still to build (this stage on): the economy raises their construction
+-- jobs first (T.boost class 1)
+function M.seal_tiles(K)
+  local set = {}
+  for _, P in ipairs(S.pd and S.pd.list or {}) do
+    if SEALS[P.tpl] and P.done ~= 1 and P.blocked ~= 'cancel' then
+      local d = doc(K, P.id)
+      for si = P.stage, #(d and d.stages or {}) - 1 do
+        local st = d.stages[si + 1]
+        if st and st.mode == 'build' then
+          local tiles = stage_tiles(P.id, d, si)
+          for ci = 1, #tiles do
+            for _, t in ipairs(tiles[ci]) do set[string.format('%d,%d,%d', t[1], t[2], t[3])] = true end
+          end
+        end
+      end
+    end
+  end
+  return set
+end
+
+-- NEU14 BUG-894 (Run 17d i4: a new seal for 98,86,143 adopted the planned wall of the seal before it ('occupied'), was cancelled after 3 days, and the player placed it
+-- again): bp.place of a seal whose every wall cell lies on a wall that another seal / plug project not done plans already is not queued; the answer names that project,
+-- the job and its state. nil: place it
+function Q.dup_planned(K, d)
+  if d.tpl ~= 'seal' then return nil end
+  local mine = {}
+  for _, st in ipairs(d.stages or {}) do
+    if st.mode == 'build' then
+      for _, ch in ipairs(st.chunks or {}) do
+        for _, cell in ipairs(ch.cells or {}) do
+          if type(cell[4]) == 'string' and cell[4]:match('^[^{(:/]*') == 'Cw' then cell_tiles(ch, cell, mine) end
+        end
+      end
+    end
+  end
+  if #mine == 0 then return nil end
+  local owner = {}
+  for _, P in ipairs(S.pd and S.pd.list or {}) do
+    local od = SEALS[P.tpl] and P.done ~= 1 and P.blocked ~= 'cancel' and doc(K, P.id)
+    if od then
+      for si = P.stage, #od.stages - 1 do
+        local st = od.stages[si + 1]
+        if st and st.mode == 'build' then
+          local tiles = stage_tiles(P.id, od, si)
+          for ci = 1, #tiles do
+            for _, t in ipairs(tiles[ci]) do
+              if t[4] == 'Cw' then owner[tkey(t[1], t[2], t[3])] = owner[tkey(t[1], t[2], t[3])] or P end
+            end
+          end
+        end
+      end
+    end
+  end
+  local P, at
+  for _, t in ipairs(mine) do
+    local o = owner[tkey(t[1], t[2], t[3])]
+    if not o then return nil end
+    P, at = P or o, at or t
+  end
+  local ok, bs = K.call('economy', 'build_state', at[1], at[2], at[3])
+  if not (ok and type(bs) == 'table' and int(bs.job) and not bs.built) then return nil end        -- no planned wall (yet) / already built: the normal path
+  return string.format('refused: already planned by project %s (%s), job %s, state %s%s at %d,%d,%d: %s; placing it again only adopts that wall and the copy is cancelled; ' ..
+                       'resume or cancel %s, see dfllm cmd inspect what=workload', P.id, P.tpl, tostring(bs.job), Q.cls_of(bs) or '?',
+                       Q.idle(P) and ' (project set aside)' or '', at[1], at[2], at[3], trunc(bs.line or '', 120), P.id)
+end
+
 local function pre_occupied(K, ch, R, P)
   local tiles, n, seen = {}, 0, {}
   for _, cell in ipairs(ch.cells) do cell_tiles(ch, cell, tiles) end
@@ -4108,7 +4175,8 @@ function Q.cls_of(bs)
   if type(bs) ~= 'table' then return nil end
   if bs.none then return 'not placed' end
   if not int(bs.job) then return nil end
-  if bs.susp then return bs.who == 'buildingplan' and 'no item' or 'suspended' end
+  -- NEU14 BUG-893: 'no item' only when nothing is attached: a job with its item (a block on the wall) waits for something else
+  if bs.susp then return (bs.who == 'buildingplan' and (int(bs.items) or 0) == 0) and 'no item' or 'suspended' end
   if not bs.work and bs.boxed then return 'boxed' end   -- BUG-313: walled in on its level, a re-place there is no help
   if not bs.work and bs.nolabor then return 'no labor' end   -- BUG-329: nobody has its labor on: a re-place is no help
   return bs.work and 'building' or 'no builder'
@@ -6857,6 +6925,12 @@ function Q.idle_keep(K, P)
   if P.tpl == 'refuge_drink' then return 'the refuge drink' end
   local m = K.mode()
   if SEALS[P.tpl] and (m == 'SIEGE' or m == 'BREACH') then return 'a seal in ' .. m end
+  -- NEU14 BUG-894 (Run 17d i4 Girderroots: three seal projects for 98,86,143 'set aside' 186 / 333 / 714 days beside 'PERIMETER OPEN 625 days'): in any mode, a
+  -- seal or plug is the work that closes the perimeter: it is never set aside while the perimeter stands open
+  if SEALS[P.tpl] then
+    local okp, pd = K.call('readiness', 'perim_open')
+    if okp and math.type(pd) == 'integer' then return 'a seal while the perimeter is open (' .. pd .. ' d)' end
+  end
   if P.tpl == 'seal' and Q.refuge_seal(K, P) then return 'the refuge seal' end       -- BUG-336: it escalates instead
   local f = S.focus
   if SUPPLY[P.tpl] and type(f) == 'table' and f.emerg then return tostring(f.emerg) end
@@ -8406,6 +8480,8 @@ M.verbs = {
     if walls then return false, walls end
     local phantom = Q.phantom_doc(K, d)                                                  -- BUG-638: no seal onto solid rock
     if phantom then return false, phantom end
+    local dup = Q.dup_planned(K, d)                                                      -- NEU14 BUG-894: the wall is planned by another seal already
+    if dup then return false, dup end
     -- FR-27: never a second tomb zone on a tile (Run 9: up to 3 stacked on one coffin)
     local cut, total, at = tomb_dups(d)
     if total > 0 and cut == total then

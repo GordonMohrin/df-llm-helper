@@ -176,6 +176,13 @@ def t_wohl(s: dict, mem: dict, now: int) -> tuple:
     if not isinstance(c, dict) or _i(c.get("ghosts")) is None or _i(c.get("corpses_old")) is None:
         return 0, "keine Pflegezahlen (state care)", "dfllm status", None, True
     g, co = c["ghosts"], c["corpses_old"]
+    far = _i(c.get("corpses_far")) or 0
+    if co and far >= co:
+        # NEU14 BUG-895: every unburied body lies out of reach (another walk group): coffins, zones and tombs.repair cannot help it; the memorial slab is its burial
+        gt = f"{g} Geister, " if g else ""
+        return (0, f"{gt}{co} Tote ausser Reichweite (corpse_far, andere Wegegruppe): kein Grab moeglich, "
+                   "Gedenkplatte ist die Bestattung (der Kern bestellt und setzt sie selbst)",
+                "dfllm cmd inspect what=tombs", None, False)
     if g or co:
         free = _i(c.get("tombs_free")) or 0
         return (0, f"{g} Geister, {co} Tote unbestattet", "dfllm cmd tombs.repair" if free else place("tombs"),
