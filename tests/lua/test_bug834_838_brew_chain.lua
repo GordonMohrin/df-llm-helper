@@ -139,6 +139,7 @@ end)
 
 T.test('BUG-834: the stall is over (the brews moved): the stockpile limits come back, contx is cleared', function()
   local W, _, ord = world{left = 32}
+  W.K.cfg.baseline.economy.cancel.stand = false          -- NEU13 BUG-888: the standing cap (tests/lua/test_bug887_891_fass.lua) never gives back on a moved stall; this is the timed freeze
   local back
   W.act_result('pile_barrels', function(mode, arg)
     if mode == 'freeze' then return true, {{id = 41, old = 12, new = 9, name = 'dfllm-stock'}} end

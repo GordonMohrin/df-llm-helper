@@ -222,6 +222,7 @@ end)
 
 T.test('BUG-844: the pile freeze is given back when DF stops cancelling, and after cx_pile_days it is not frozen again at once', function()
   local W, _, ord = world{left = 30}
+  W.K.cfg.baseline.economy.cancel.stand = false          -- NEU13 BUG-888: the standing cap has no timer and no give-back on a gone reason; this tests the timed freeze
   local back
   W.act_result('pile_barrels', function(mode, arg)
     if mode == 'freeze' then return true, {{id = 41, old = 12, new = 9, name = 'plants'}} end
@@ -235,6 +236,7 @@ T.test('BUG-844: the pile freeze is given back when DF stops cancelling, and aft
   T.eq(back and back['41'], 12, 'the old limit came back when the reason disappeared')
   T.eq(p.pilecap, nil)
   local W2, _, ord2 = world{left = 30}
+  W2.K.cfg.baseline.economy.cancel.stand = false
   local frz, rest = 0, 0
   W2.act_result('pile_barrels', function(mode)
     if mode == 'freeze' then frz = frz + 1; return true, {{id = 41, old = 12, new = 9, name = 'plants'}} end

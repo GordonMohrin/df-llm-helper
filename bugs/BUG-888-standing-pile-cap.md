@@ -1,0 +1,17 @@
+# BUG-888 Food piles swallow every new empty barrel: the cap was a 14-day verdict, not a standing rule
+Status: fixed (offline, live-untested)
+Severity: high
+Found: Run 17 i1 / i2 / i3 / i4: every batch of barrels lifts drink for about a game year, then the same stall returns. i2 y522: 483 barrels, 40 'empty', 457 of 488 not empty, 433 of them in 56 plant/food piles whose summed limits (885) left room for 450 more; the one freeze fired at tick 210736512 and was given back 130 days later (cx_pile_days is 14); gamelog 'Needs empty food storage item' stayed 3000-3040 per half year across it.
+Module: `lua/dfllm/economy.lua` (`M.pile_standing`, `M.cx_freeze`, `M.cx_expire`, `M.cx_end`, `brew_watch`), `lua/dfllm/act.lua` (`pile_barrels`, unchanged)
+
+## Root cause
+CONFIRMED on i2 (C1, C3): the haulers of the food piles fill each new empty barrel with plants (StoreItemInBarrel) until the pile's barrel limit is reached; the limit was only lowered while a stall verdict held, for at most 14 days, and only from the full economy run's `watch` task. After the time ran out or the reason faded the limits came back, the piles took the next batch of barrels, and the stall returned. The freeze is a one-shot reaction to a symptom; the cause (limits above what the piles need) is permanent.
+
+## Fix
+`M.pile_standing` (daily from `brew_watch`, before any early return): from the first time DF's own reason opens the cure gate (>= cx_min_n cancels 'Needs empty food storage item'), `p.pilestand = true` and every day `act.pile_barrels('freeze')` writes the limit of each food pile that holds barrels down to the barrels it holds (never up; follows the barrels down; a pile without a barrel and the drink piles are left alone so food always has a container and drink may use barrels; the drink emergency still freezes mixed piles too). No timer: `cx_expire` returns for a standing cap, `cx_end` refuses without `force`. It ends only through `M.stand_end`: the switch `economy.cancel.stand=false`, or no Still / no brewable plant for `stand_quit_d` (30) days; then the old limits are restored. Config keys `economy.cancel.stand`, `stand_quit_d`. kern.log: 'container stand: ...', 'container stand over: ...'.
+
+## Tests
+`tests/lua/test_bug887_891_fass.lua` (piles 40/30 limits holding 10/6 barrels -> 10/6; drink piles and a barrel-less pile untouched; still 10/6 after 200 days without cancels; follows a barrel leaving to 9; restored after 31 days without brewable plants; switch off). Older timed-freeze tests set `cancel.stand=false` (test_bug834_838, test_neu4_cancel).
+
+## Live-Erwartung
+i2 (and i1/i3/i4 once DF cancels for containers): within one game year of the first stall the empty-barrel count stops being eaten by the piles; drink does not fall to 0 again after each barrel batch; the cancels 'Needs empty food storage item' per 7 d fall below 5 within 60 game days if barrels exist. NOT promised: the ~30 dead empties (BUG-887 unknown); a pile whose barrels leave faster than once a day takes some back (the cap follows once a day); food spoilage risk: a capped pile stores its overflow in bins, pots or on the floor (food keeps its barrels in the pile, new food has bins/ground).

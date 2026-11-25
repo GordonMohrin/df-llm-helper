@@ -132,7 +132,7 @@ STATE_OWNERS = {
     "stock.ore": "economy", "stock.bars": "economy", "stock.leather": "economy", "stock.metal": "economy",
     "stock.hungry": "economy", "stock.mood_miss": "economy", "stock.rock": "economy", "stock.wall": "economy", "stock.rock_need": "economy", "stock.rsoil": "economy", "stock.rhard": "economy", "stock.nowood": "economy", "stock.mfree": "economy", "stock.mroute": "economy", "stock.mtp": "economy", "stock.mfar": "economy",
     "stock.picks": "economy",
-    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.wood": "economy", "stock.woodt": "economy", "stock.woodb": "economy", "stock.cont": "economy", "stock.contt": "economy", "stock.dcx": "economy", "stock.rsv": "economy", "stock.bshort": "economy",
+    "stock.pick_want": "economy", "stock.mshort": "economy", "stock.melt": "economy", "stock.dwhy": "economy", "stock.wood": "economy", "stock.woodt": "economy", "stock.woodb": "economy", "stock.cont": "economy", "stock.contt": "economy", "stock.contw": "economy", "stock.dcx": "economy", "stock.rsv": "economy", "stock.bshort": "economy",
     "stock.dforb": "economy", "stock.dfar": "economy", "stock.dall": "economy", "stock.fforb": "economy", "stock.dfd": "economy", "stock.dfwhy": "economy",
     "stock.hosp_water": "care", "care.*": "care", "curse.*": "care", "mood": "care", "labor.*": "economy", "orders.*": "economy",
     "threat.*": "threat", "bridges": "gate", "owners.*": "arbiter", "mil.*": "military", "trade.*": "trade",
@@ -1209,7 +1209,7 @@ STATE = Obj(
                            # BUG-042: why the stills do not brew while drink is below the plan's target
                            "dwhy": Str(maxbytes=80),
                            # NEU4 BUG-842/841: usable logs / all logs and usable / all empty containers (only where they differ); DF cancels the brews for want of a container
-                           "wood": NAT, "woodt": NAT, "woodb": NAT, "cont": NAT, "contt": NAT, "dcx": FLAG,
+                           "wood": NAT, "woodt": NAT, "woodb": NAT, "cont": NAT, "contt": NAT, "contw": Str(maxbytes=90), "dcx": FLAG,
                            # NEU11 BUG-880: 1 = the standing container reserve orders the containers itself (a batch stands or was ordered < 3 game days ago and a material exists)
                            "rsv": FLAG,
                            # BUG-382: drink below gather.drink_d and too few brewable plants: the runner's gather zone follows it

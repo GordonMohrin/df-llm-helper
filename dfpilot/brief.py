@@ -937,7 +937,7 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
                if st.get("woodb") and st.get("woodt", 0) > st.get("wood", 0) else
                f" wood {st.get('wood', 0)} ({st['woodb']} built in)" if st.get("woodb") else
                f" wood {st.get('wood', 0)} usable of {st['woodt']}" if st.get("woodt") else "")
-            + (f" containers {st.get('cont', 0)} usable of {st['contt']} empty" if st.get("contt") else "")
+            + (f" containers {st.get('cont', 0)} usable of {st['contt']} empty" + (f" ({st['contw']})" if st.get("contw") else "") if st.get("contt") else "")
             + (f" moods missed {','.join(st['mood_miss'])}" if st.get("mood_miss") else "")
             + stale_note(s, "stock")))
         # BUG-042: why the stills do not brew while drink is below the target (the kernel's own cause)

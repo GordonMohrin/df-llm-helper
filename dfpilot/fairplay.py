@@ -1127,7 +1127,7 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      "diag": {"cx_cure": "bool", "mgr_chores": "bool", "still_pin": "bool", "stall_line": "bool"},
                      # NEU4 (BUG-841/844): DF's cancel tally window (game days), cancels that make a reason count, longest pile-limit freeze;
                      # NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source, gamelog_bytes = bytes per read, NEU6 (BUG-851): gamelog_chunks = reads per look
-                     "cancel": {"days": (1, 14), "cx_min_n": (1, 1000), "cx_pile_days": (1, 112), "cx_off_n": (0, 1000), "cx_off_days": (1, 112), "gamelog": "bool",
+                     "cancel": {"days": (1, 14), "cx_min_n": (1, 1000), "cx_pile_days": (1, 112), "cx_off_n": (0, 1000), "cx_off_days": (1, 112), "stand": "bool", "stand_quit_d": (1, 400), "fruit_off_n": (0, 1000), "fruit_hold_d": (1, 400), "gamelog": "bool",
                                 "gamelog_bytes": (4096, 4194304), "gamelog_chunks": (1, 64)},
                      # NEU7 (BUG-854): the standing container reserve (economy.plan_reserve)
                      # NEU7 (BUG-855): buildingplan logs off while usable wood is short and stone is free

@@ -500,7 +500,7 @@ M.DEFAULTS = {
   diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
   -- NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source of the tally (the eventful reports stay the fallback), gamelog_bytes = at most
   -- that many bytes per look
-  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, stand = true, stand_quit_d = 30, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
   -- NEU7 (BUG-854): the standing container reserve (M.plan_reserve): batch = brews open / brews_per, min_batch..max_batch, again while DF still cancels after the
   -- batch (grace_days, repeat_days apart, max_repeats in a row then every 14 days), then a trickle of trickle_n every trickle_days days (below trickle_free free
   -- containers); rock barrels when boulders >= batch + rock_plenty or wood is short; total_cap containers in all
@@ -1053,6 +1053,37 @@ function M.melt_mark(a, it)
   local mf = mat_flags(it)
   if mf and mf.IS_METAL then a.melt = a.melt + 1 end
 end
+-- NEU13 BUG-887: the item's owner is a merchant (general ref UNIT_TRADEBRINGER): DF's job picker leaves it alone though the `trader` flag is not set
+function M.barrel_trader_ref(it)
+  local ok, r = pcall(function()
+    local t = df.general_ref_type and df.general_ref_type.UNIT_TRADEBRINGER
+    if t == nil or it.general_refs == nil then return false end
+    for _, ref in ipairs(it.general_refs) do if ref:getType() == t then return true end end
+    return false
+  end)
+  return ok and r == true
+end
+-- NEU13 BUG-887: the item lies in a mood pile (name dfllm-mood, barrels=1: the one barrel the mood unit's drink uses); the pile rectangles are read once per census
+function M.mood_pile_at(a, it)
+  if a.moodr == nil then
+    a.moodr = {}
+    pcall(function()
+      for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+        if dfhack.df2utf(sp.name or '') == 'dfllm-mood' then a.moodr[#a.moodr + 1] = {sp.x1, sp.y1, sp.x2, sp.y2, sp.z} end
+      end
+    end)
+  end
+  if #a.moodr == 0 then return false end
+  local ok, hit = pcall(function()
+    local p = it.pos
+    if not p then return false end
+    for _, q in ipairs(a.moodr) do
+      if p.z == q[5] and p.x >= q[1] and p.x <= q[3] and p.y >= q[2] and p.y <= q[4] then return true end
+    end
+    return false
+  end)
+  return ok and hit == true
+end
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
@@ -1098,6 +1129,7 @@ local function classify(it, a, cat)
     end
   elseif f.forbid then
     if cat == 'WEAPON' then M.tool_forb(a, it)
+    elseif cat == 'BARREL' then a.barrels_forb = a.barrels_forb + 1      -- NEU13 BUG-887: a forbidden barrel is no container (counted apart, never `barrels`)
     elseif cat == 'WOOD' then a.wood_forb = a.wood_forb + n end     -- BUG-705: forbidden logs, counted apart (not `wood`)
     return
   end
@@ -1252,7 +1284,14 @@ local function classify(it, a, cat)
         a.barrels_empty = a.barrels_empty + 1
         -- BUG-779 (Run 16c i3 Lancemoment y379: 'Needs empty food storage item' beside 48 barrels): an empty barrel a job holds or no citizen can walk to
         -- is no container DF gives a Still job (`barrels_empty` counts it, `cont_free` does not)
-        if not f.in_job and not (a.far and a.far(it, true)) then a.cont_free = a.cont_free + 1 end     -- NEU4 BUG-842: strict far
+        -- NEU13 BUG-887 (Run 17 i1/i2: 27-42 'empty' barrels beside DF's 'Needs empty food storage item' for a year): a trader's barrel (ref UNIT_TRADEBRINGER
+        -- without the trader flag) and one in a mood pile (dfllm-mood, one barrel kept for the mood unit's drink) are no container for a brew either; each empty
+        -- barrel is counted ONCE, under the first reason that holds (trader, mood, job, far), else it is usable (`cont_free`)
+        if M.barrel_trader_ref(it) then a.barrels_trader = a.barrels_trader + 1
+        elseif M.mood_pile_at(a, it) then a.barrels_mood = a.barrels_mood + 1
+        elseif f.in_job then a.barrels_busy = a.barrels_busy + 1
+        elseif a.far and a.far(it, true) then a.barrels_far = a.barrels_far + 1         -- NEU4 BUG-842: strict far
+        else a.cont_free = a.cont_free + 1 end
       end
     else
       a.bins = a.bins + 1
@@ -1368,7 +1407,7 @@ local function classify(it, a, cat)
 end
 
 local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'gems', 'bars', 'bolts', 'wood', 'fuel',
-              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'cont_free', 'bins', 'bins_empty', 'pots', 'pots_empty', 'rock', 'ore', 'rock_bad',
+              'drink_forb', 'food_forb', 'cookable', 'barrels', 'barrels_empty', 'cont_free', 'barrels_trader', 'barrels_mood', 'barrels_busy', 'barrels_far', 'barrels_forb', 'bins', 'bins_empty', 'pots', 'pots_empty', 'rock', 'ore', 'rock_bad',
               'flux', 'hides', 'thread', 'thread_plant', 'thread_silk', 'thread_yarn', 'bolts_free', 'w_pick', 'w_axe',
               'w_xbow', 'w_bow', 'g_body', 'g_head', 'g_pants', 'g_gloves', 'g_shoes', 'g_shield', 'g_weapon', 'g_xbow',
               'g_quiver', 'g_metal', 'gm_body', 'gm_head', 'gm_pants', 'gm_gloves', 'gm_shoes', 'g_unusable', 'fish_raw', 'food_nocook', 'seeds_ok', 'seeds_forb', 'w_pick_free', 'w_axe_free',
@@ -1857,9 +1896,32 @@ end
 -- BUG-042: the part of the drink deficit's brew jobs one brew order takes (e.src: the census key of its brewable
 -- plants): split by the brew_p / brew_g stock, at most one job a plant; with neither in the fort the plant order takes
 -- it all (DF's item condition waits for plants, drink_low names them missing)
+-- NEU13 BUG-890 (Run 17 i3/i4: DF cancelled 'Brew drink from fruit: Needs unrotten fermentable leaf or fruit' 100-180x a week beside 12000-16000 plant items; the
+-- census counted PLANT_GROWTH it calls brewable, DF's job finder found none, and the BREW_ order was exempt from every cancel-based removal): DF's own words decide. With
+-- fruit_off_n (10) such cancels in the cancel window the fruit brew order is taken down and not made again for fruit_hold_d (30) days; the plant order takes the whole
+-- brew share meanwhile. After the hold one order is made again; if DF still cancels it, it goes for another hold. State p.fruitoff = tick.
+M.FRUIT_KINDS = {'brew drink from fruit'}
+M.FRUIT_NEEDLE = 'unrotten'
+function M.fruit_off(K, c, p, now)
+  local cc = type(c) == 'table' and c.cancel or {}
+  local hold = (math.tointeger(cc.fruit_hold_d) or 30) * DAY
+  if p.fruitoff ~= nil and now - p.fruitoff < hold then return true end
+  if cc.fruit_off_n == 0 then return false end
+  local n = M.df_count(K, M.FRUIT_KINDS, M.FRUIT_NEEDLE, c, now)
+  if n >= (math.tointeger(cc.fruit_off_n) or 10) then
+    p.fruitoff = now
+    K.persist.touch('m.economy')
+    K.log('warn', 'fruit brew off: DF cancelled "Brew drink from fruit: Needs unrotten fermentable leaf or fruit" %dx in %d d (census fruit for brewing %d): the fruit order is taken down, the plant order brews for %d d',
+          n, M.cw_days(K, c), math.tointeger((K.census.i or {}).brew_g) or 0, hold // DAY)
+    return true
+  end
+  if p.fruitoff ~= nil then p.fruitoff = nil; K.persist.touch('m.economy') end
+  return false
+end
 function M.brew_share(r, e, jobs)
   if jobs <= 0 then return 0 end
   local bp, bg = math.tointeger(r.inv.brew_p) or 0, math.tointeger(r.inv.brew_g) or 0
+  if r.p and r.p.fruitoff ~= nil then bg = 0 end        -- NEU13 BUG-890: no fruit order meanwhile
   if bp + bg <= 0 then return e.src == 'brew_p' and jobs or 0 end
   local mine = e.src == 'brew_g' and bg or bp
   return math.min(mine, (jobs * mine + bp + bg - 1) // (bp + bg))
@@ -1914,8 +1976,17 @@ end
 local function plan_supply(K, c, r)
   plan_fish(K, c, r)
   local sup = K.plan.supply or {}
+  local fruit_off = M.fruit_off(K, c, r.p, r.now)                      -- NEU13 BUG-890
   for _, e in ipairs(c.supply or {}) do
-    if phase_ok(K, e.from_phase) and not open(r, e.tag) then
+    if e.src == 'brew_g' and fruit_off then
+      local oid = r.p.orders and r.p.orders[e.tag]
+      local o = oid and order_by_id(oid)
+      if o and (math.tointeger(o.amount_left) or 0) > 0 and K.act.order_remove(o.id) then
+        r.p.orders[e.tag], st.backoff[e.tag] = nil, nil
+        r.s.live[e.tag] = nil
+        K.log('warn', 'fruit brew order %d taken down: DF finds no unrotten fruit to brew', o.id)
+      end
+    elseif phase_ok(K, e.from_phase) and not open(r, e.tag) then
       local jobs = 0
       if r.days[e.key] then
         local tgt, d = math.tointeger(sup[e.key]) or 0, r.days[e.key]
@@ -1949,6 +2020,44 @@ end
 -- BUG-834: the plant stockpiles' barrel limit frozen while a brew lacks a container (state p.pilecap = {pile id = old limit}); the old limits come back
 -- when the stall is over. Emergency (drink below CX_EMERGENCY_D days): the piles that also take drink are frozen too.
 M.CX_EMERGENCY_D = 10
+-- NEU13 BUG-888 (Run 17 i1/i2: 'each batch of barrels lifts the drink for a game year, then the same stall': the food piles' haulers fill every new empty barrel with
+-- plants (i2: 457 of 488 barrels not empty, 433 in piles whose summed limits left room for 885, the 14-day freeze given back after 130 days and no better for it):
+-- the cap is STANDING, not a verdict with a timer. From the first container stall (DF's 'Needs empty food storage item', at least cx_min_n cancels: the cure gate) every day the kernel's food piles that hold barrels take no more of them than they hold now (act.pile_barrels freeze: the limit follows the barrels
+-- down, never up); a pile without a barrel and the drink piles are left alone (food keeps a container, the drink piles take barrels freely). The old limits
+-- come back only when the fort has stopped brewing (no Still or no brewable plant for stand_quit_d days) or the switch is off. State p.pilestand = true, p.standq.
+M.STAND_QUIT_D = 30
+function M.stand_end(K, p, why)
+  p.pilestand, p.standq = nil, nil
+  K.log('warn', 'container stand over: %s; the stockpile barrel limits go back', why)
+  M.cx_end(K, p, true, true)
+  K.persist.touch('m.economy')
+end
+function M.pile_standing(K, c, r, f, b)
+  local p, inv, now = r.p, r.inv or {}, r.now
+  local cc = c.cancel or {}
+  if cc.stand == false or not M.diag_on(K, 'cx_cure', c) then
+    if p.pilestand then M.stand_end(K, p, 'the standing cap is switched off') end
+    return
+  end
+  local plants = (inv.brew_p or 0) + (inv.brew_g or 0)
+  local brewing = ws_any(f, {'workshop:Still'}) and plants > 0
+  if not brewing then
+    if p.pilestand then
+      p.standq = p.standq or now
+      if now - p.standq >= (math.tointeger(cc.stand_quit_d) or M.STAND_QUIT_D) * DAY then M.stand_end(K, p, 'no Still or no brewable plant for ' .. ((now - p.standq) // DAY) .. ' days') end
+    end
+    return
+  end
+  if p.standq then p.standq = nil; K.persist.touch('m.economy') end
+  if not p.pilestand then
+    local x = M.cx_gate(K, c, now)                                  -- the cures act only on DF's own reason (BUG-844)
+    if not x then return end
+    p.pilestand = true
+    K.persist.touch('m.economy')
+    K.log('warn', 'container stand: the food piles take no more barrels than they hold from now on (DF cancelled brews %dx for want of a container; %s)', x, M.cont_text(inv))
+  end
+  M.cx_freeze(K, p, ((r.days or {}).drink_d or 0) < M.CX_EMERGENCY_D, now)      -- the drink emergency freezes the piles that hold drink too
+end
 function M.cx_freeze(K, p, emergency, now)
   if type(K.act.pile_barrels) ~= 'function' then return end
   local ok, res = K.act.pile_barrels('freeze', {mixed = emergency == true})
@@ -1990,7 +2099,7 @@ function M.cx_freeze(K, p, emergency, now)
 end
 -- NEU4 BUG-844: the plant piles' barrel limit comes back when DF's reason is gone (fewer than cx_min_n cancels in the window) or after cx_pile_days days
 function M.cx_expire(K, c, p, now)
-  if type(p.pilecap) ~= 'table' then return end
+  if type(p.pilecap) ~= 'table' or p.pilestand then return end     -- NEU13 BUG-888: a standing cap has no timer (M.pile_standing ends it)
   local why
   if not M.cx_gate(K, c, now) then why = 'DF no longer cancels brews for want of a container (or the cure is off)'
   elseif now - (math.tointeger(p.pilet) or now) >= (math.tointeger((c.cancel or {}).cx_pile_days) or 14) * DAY then why, p.pilex = 'the freeze ran its time', now end
@@ -1999,7 +2108,8 @@ function M.cx_expire(K, c, p, now)
     M.cx_end(K, p, true)
   end
 end
-function M.cx_end(K, p, keep)
+function M.cx_end(K, p, keep, force)
+  if p.pilestand and not force then return end                    -- NEU13 BUG-888: the standing cap is given back only by M.stand_end
   local ch = false
   if p.contx and not keep then p.contx, ch = nil, true end
   if type(p.pilecap) == 'table' then
@@ -2223,6 +2333,7 @@ function M.reserve_dead(K, c, r, rs, tag)
   rs.out = type(rs.out) == 'table' and rs.out or {}
   rs.out[rs.mat] = now
   rs.made = math.max(0, (math.tointeger(rs.made) or 0) - left)
+  rs.wn = math.max(0, (math.tointeger(rs.wn) or 0) - left)
   local mat = rs.mat
   rs.open, rs.done, rs.at = nil, nil, nil                     -- no repeat gap, no grace: the other material orders at once while DF still cancels brews
   K.persist.touch('m.economy')
@@ -2231,6 +2342,15 @@ function M.reserve_dead(K, c, r, rs, tag)
         M.RESERVE_JOB[mat], M.RESERVE_NEEDLE[mat], n, mat, rs.n or 0, left, mat, math.tointeger(M.rv(c, 'dead_days')) or 3,
         math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_far) or 0, (M.reserve_stone(c, r)))
   return true
+end
+-- NEU13 BUG-889 (Run 17 i3/i4: 'container reserve: total_cap 200 reached (201 ordered) ... nothing more is ordered' while DF still cancelled the brews: the cap
+-- switched the reserve off for good): total_cap is a RATE, containers ordered per game year. The count (rs.wn) starts at the first look with this code (the old
+-- cumulative `made` stays for the log) and starts over a game year (RESERVE_YEAR_D days) after its start. Returns the containers ordered in the current year.
+M.RESERVE_YEAR_D = 336
+function M.rsv_year(rs, now)
+  if type(rs) ~= 'table' then return 0 end
+  if rs.wt == nil or now - rs.wt >= M.RESERVE_YEAR_D * DAY then rs.wt, rs.wn = now, 0 end
+  return math.max(0, math.tointeger(rs.wn) or 0)
 end
 -- somebody must hold the labor of the batch's material (once a game day): Carpentry for wood, Stone crafting for rock; the manager-less MakeBarrel tasks
 -- (cx_direct) only for wood and only while a container stall is told (p.contx)
@@ -2270,11 +2390,13 @@ function M.plan_reserve(K, c, r)
   local made = rs and math.tointeger(rs.made) or 0
   local cap = math.tointeger(M.rv(c, 'total_cap')) or 200
   local x = M.cx_reason(K, c, now, true)
-  if made >= cap then
+  local year = M.rsv_year(rs, now)                                      -- NEU13 BUG-889: the cap is per game year
+  if year >= cap then
     -- DF still names the containers but the reserve made its total: no other path (the old x15 batch, rock pots) orders more behind it; said once a game week
     if x and (st.rsvcap == nil or now - st.rsvcap >= 7 * DAY) then
       st.rsvcap = now
-      K.log('warn', 'container reserve: total_cap %d reached (%d ordered), DF still cancels brews for want of a container: the containers made are not taken or used up; nothing more is ordered', cap, made)
+      K.log('warn', 'container reserve: %d containers ordered in this game year (cap %d a year, %d in all), DF still cancels brews for want of a container: the containers made are not taken or used up; nothing more is ordered until day %d of the cap year',
+            year, cap, made, M.RESERVE_YEAR_D)
     end
     return x ~= nil
   end
@@ -2312,12 +2434,16 @@ function M.plan_reserve(K, c, r)
         way[#way + 1] = string.format('%d boulders lie in the fort but DF refuses them for rock jobs (stone use / economic stone): `inspect what=stone`',
                                       math.tointeger(inv.boulders) or 0)
       elseif (math.tointeger(inv.boulders) or 0) > 0 and rock <= 0 then
-        way[#way + 1] = string.format('%d boulders exist but none is free (held by a job, out of reach or reserved)', math.tointeger(inv.boulders) or 0)
+        -- NEU13 BUG-889: which of the five places holds them (Run 17 i1: 33 boulders, every one in a building)
+        local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
+        local nb = math.max(0, g('boulders') - g('rock_far') - g('rock_busy') - g('rock'))
+        way[#way + 1] = string.format('%d boulders exist but none is free: %d built into buildings or stockpile-forbidden or dumped, %d out of reach, %d held by jobs, %d ore, flux, economic or soft stone',
+                                      g('boulders'), nb, g('rock_far'), g('rock_busy'), math.max(0, g('rock') - M.usable_n(inv)))
       else
         local picks = math.tointeger(inv.picks) or 0
         way[#way + 1] = string.format('dig for stone (%s)', picks > 0 and (picks .. ' picks, miners need the dig designation: plan dig / bp') or 'no pick: tools first')
       end
-      way[#way + 1] = 'trade.want barrels or logs at the next caravan'
+      way[#way + 1] = 'trade.want wood at the next caravan (the fort asks for it itself: stock.want, barrels are wood), or finished barrels / large pots by hand'
       local dfw = {}
       for _, m in ipairs({'wood', 'rock'}) do if outwhy[m] then dfw[#dfw + 1] = m .. ': ' .. outwhy[m] end end
       K.log('warn', 'container reserve: %d containers wanted (%s) and nothing to make them of: %d usable logs, %d free boulders (%s)%s; way out: %s (said once a week)',
@@ -2338,6 +2464,8 @@ function M.plan_reserve(K, c, r)
   if x then rs.rep = (math.tointeger(rs.rep) or 0) + (rs.t0 and 1 or 0) end
   rs.t0 = rs.t0 or now
   rs.at, rs.mat, rs.n, rs.made, rs.lday = now, mat, n, made + n, nil
+  rs.wt = rs.wt or now
+  rs.wn = (math.tointeger(rs.wn) or 0) + n
   K.persist.touch('m.economy')
   K.log('warn', 'container reserve: %d %s barrels ordered (%s; %d brews open; %d usable logs, %d free boulders (%s); %d ordered in all)%s', n, mat, why, brews, wood, rock,
         tostring(rtext), rs.made, (out.wood or out.rock) and ('; ' .. tostring(out.wood and outwhy.wood or outwhy.rock) .. ': the other material') or '')
@@ -3190,6 +3318,24 @@ function M.usable_n(inv)
   local no = math.tointeger(inv.rock_nouse)
   if no == nil then no = math.max((math.tointeger(inv.ore) or 0) + (math.tointeger(inv.flux) or 0), math.tointeger(inv.rock_bad) or 0) end
   return math.max(0, rock - no)
+end
+
+-- NEU13 BUG-887: why empty barrels are no container for a brew, in words: 'trader 3, mood pile 2, in a job 4, out of reach 1, forbidden 5' (nil = none of them)
+function M.cont_words(inv)
+  local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
+  local out = {}
+  for _, e in ipairs({{'barrels_trader', "a trader's"}, {'barrels_mood', 'in a mood pile'}, {'barrels_busy', 'held by a job'}, {'barrels_far', 'out of reach'}}) do
+    if g(e[1]) > 0 then out[#out + 1] = g(e[1]) .. ' ' .. e[2] end
+  end
+  if g('barrels_forb') > 0 then out[#out + 1] = g('barrels_forb') .. ' forbidden (not counted)' end
+  return #out > 0 and table.concat(out, ', ') or nil
+end
+-- 'N usable of M empty' + the reasons, for the stall, ladder and brief texts
+function M.cont_text(inv)
+  local ce = (math.tointeger(inv.barrels_empty) or 0) + (math.tointeger(inv.pots_empty) or 0)
+  local cf = math.max(0, math.tointeger(inv.cont_free) or ce)
+  local w = M.cont_words(inv)
+  return string.format('%d usable of %d empty barrels or pots%s', cf, ce, w and (' (' .. w .. ')') or '')
 end
 
 -- free boulders a mason may take: ores and flux are economic stone (DF's default stone use settings keep them
@@ -6587,7 +6733,8 @@ function M.drink_block(K, c, r, inv)
     end
     put('plants', w)
   end
-  if (inv.barrels_empty or 0) + (inv.pots_empty or 0) == 0 then put('barrels', 'no empty barrel or pot') end
+  if (inv.barrels_empty or 0) + (inv.pots_empty or 0) == 0 then put('barrels', 'no empty barrel or pot')
+  elseif inv.cont_free ~= nil and (inv.cont_free or 0) <= 0 then put('barrels', 'no usable empty barrel or pot: ' .. M.cont_text(inv)) end     -- NEU13 BUG-887: the same truth as the brew stall
   if not M.labor_holder(K, 'BREWER') then put('brewer', 'nobody brews (Brewing on no citizen)') end
   -- BUG-760 (Run 16b i2 Whirledrampart y443-445: drink 176 -> 0 days, DECISION 'auto: brew' with 8 brews ordered that never ran):
   -- 'auto: brew' is said only with a Still the citizens reach and open brews that moved in the last 7 days (their count fell or the
@@ -6603,7 +6750,7 @@ function M.drink_block(K, c, r, inv)
     bs = st.bstall
     if now - bs.t >= 7 * DAY then
       put('brewstall', string.format('%d brews ordered, none ran for %d days (still %s, plants %d, empty barrels %d)%s', b.left,
-                                     (now - bs.t) // DAY, f['workshop:Still'] and 'stands' or 'missing', plants, inv.barrels_empty or 0,
+                                     (now - bs.t) // DAY, f['workshop:Still'] and 'stands' or 'missing', plants, inv.cont_free or inv.barrels_empty or 0,
                                      (type(st.brewx) == 'table' and st.brewx.text) and ('; cause: ' .. st.brewx.text) or ''))   -- BUG-767
     elseif not noshop then
       auto[#auto + 1] = {'brew', string.format('%d brews ordered', b.left)}
@@ -6858,8 +7005,8 @@ function M.drink_low(K, c, r)
   for _, x in ipairs(bl) do parts[#parts + 1] = x[2]:sub(1, 90) end
   for _, x in ipairs(auto) do au[#au + 1] = x[2]:sub(1, 50) end
   local ap = #au > 0 and ('; auto: ' .. table.concat(au, ', ')) or ''
-  local q = string.format('drink %d d (%d cit, %d brewable plants, %d empty barrels)', dd, r.cit or 0,
-                          (r.inv.brew_p or 0) + (r.inv.brew_g or 0), r.inv.barrels_empty or 0) ..
+  local q = string.format('drink %d d (%d cit, %d brewable plants, %d usable empty barrels of %d)', dd, r.cit or 0,
+                          (r.inv.brew_p or 0) + (r.inv.brew_g or 0), r.inv.cont_free or r.inv.barrels_empty or 0, r.inv.barrels_empty or 0) ..
             (#parts > 0 and (': ' .. table.concat(parts, '; ')) or '')
   if #q + #ap > 200 then q = q:sub(1, math.max(40, 197 - #ap)) .. '...' end
   K.emit('DECISION_NEEDED', 'A', string.format('drink low: %d drink days (thirst alarm below %d)%s', dd,
@@ -11508,7 +11655,7 @@ function M.brew_diag(K, inv, cx)
   local d = {stills = {}, brewers = {n = 0, idle = 0, who = {}}, orders = {n = 0, valid = 0, pinned = 0, conds = 0}}
   -- BUG-779: the containers a Still job can take (empty, no job, reachable); nil when the census is not at hand (no verdict then)
   if type(inv) == 'table' and inv.cont_free ~= nil then
-    d.conts = {free = inv.cont_free or 0, barrels = inv.barrels or 0, empty = (inv.barrels_empty or 0) + (inv.pots_empty or 0), pots = inv.pots or 0}
+    d.conts = {free = inv.cont_free or 0, barrels = inv.barrels or 0, empty = (inv.barrels_empty or 0) + (inv.pots_empty or 0), pots = inv.pots or 0, words = M.cont_words(inv)}
     -- BUG-834: cx = {res = reserve, ph = days the free count stood still beside a stalled brew}
     if type(cx) == 'table' then d.conts.res, d.conts.ph, d.conts.dfx = cx.res, cx.ph, cx.dfx end
   end
@@ -11631,8 +11778,9 @@ function M.brew_cause(d)
     local fr = ph and d.conts.free > 0 and string.format('%d free by the census, unchanged for %d days: DF takes none of them', d.conts.free, d.conts.ph)
                or string.format('%d free', d.conts.free)
     -- NEU4: DF's own words only when DF said them (the cancel tally); else the census count is a guess
-    return 'nobarrel', string.format('no empty barrel or pot for a brew (%d barrels, %d pots; %d empty, %s: the rest hold food or drink, a job or lie out of reach)%s',
-                                     d.conts.barrels, d.conts.pots, d.conts.empty, fr, d.conts.dfx and ('; ' .. d.conts.dfx) or ''), 'barrels'
+    return 'nobarrel', string.format('no empty barrel or pot for a brew (%d barrels, %d pots; %d empty, %s: the rest hold food or drink, a job or lie out of reach%s)%s',
+                                     d.conts.barrels, d.conts.pots, d.conts.empty, fr, d.conts.words and ('; not usable: ' .. d.conts.words) or '',
+                                     d.conts.dfx and ('; ' .. d.conts.dfx) or ''), 'barrels'
   end
   if jobs > 0 and susp == jobs then
     return 'suspended', string.format('the Still at %s holds %d brew job%s, all suspended (a missing item, a cancelled hauling job)', at, jobs, jobs == 1 and '' or 's'), nil
@@ -11741,6 +11889,8 @@ function M.brew_watch(K, c, r)
   M.cx_expire(K, c, p, r.now)
   local f = M.facts_now(K, r)
   local b = M.brew_orders()
+  local okst, errst = pcall(M.pile_standing, K, c, r, f, b)           -- NEU13 BUG-888: before any early return below
+  if not okst then K.log('warn', 'container stand: %s', tostring(errst)) end
   local plants = (inv.brew_p or 0) + (inv.brew_g or 0)
   local bw = type(p.brewb) == 'table' and p.brewb or nil
   local bx = type(p.brewx) == 'table' and p.brewx or nil
@@ -11837,7 +11987,7 @@ function M.brew_watch(K, c, r)
                     or 'the next brew orders have no item condition'
   end
   bw.told, bw.d = r.now, 0
-  local msg = string.format('brewing stalled %d days: Still stands, %d plants, %d empty barrels, %d brews open: %s%s', need, plants, inv.barrels_empty or 0, b.left,
+  local msg = string.format('brewing stalled %d days: Still stands, %d plants, %s, %d brews open: %s%s', need, plants, M.cont_text(inv), b.left,
                             text, #act > 0 and ('; ' .. table.concat(act, '; ')) or '')
   K.log('warn', '%s', msg)
   K.emit('ORDER_STUCK', 'B', msg:sub(1, 200), {order = 0, job = 'BrewDrink', n = b.left, days = need, why = ('brew stall: ' .. text):sub(1, 100), dropped = 0,
@@ -16045,7 +16195,11 @@ function M.state(K)
       if wb > 0 then r.stock.wood, r.stock.woodt, r.stock.woodb = wd, wt, wb end
       local ce = (math.tointeger(inv.barrels_empty) or 0) + (math.tointeger(inv.pots_empty) or 0)
       local cf = math.max(0, math.tointeger(inv.cont_free) or 0)
-      if ce > cf then r.stock.cont, r.stock.contt = cf, ce end
+      if ce > cf then
+        r.stock.cont, r.stock.contt = cf, ce
+        local cw = M.cont_words(inv)                                  -- NEU13 BUG-887: and why the others do not count
+        if cw then r.stock.contw = cw:sub(1, 90) end
+      end
     end
     if st.bshort then r.stock.bshort = 1 end      -- BUG-382: the runner's gather zone follows the brewable plants too
     -- FR-76: drink and food units the census counts as forbidden (a reclaimed fort's stock: the status says so)

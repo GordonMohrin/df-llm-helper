@@ -166,7 +166,7 @@ T.test('BUG-854: the reserve is bounded by total_cap and the repeats slow down a
   local _, r4 = run(W, {now = t + 17 * DAYT + 10, inv = I4})
   T.eq(#r4.cands, 1, '14 days later it orders again')
   T.eq(p.rsv.made, 20)
-  p.rsv.made = 25
+  p.rsv.made, p.rsv.wn = 25, 25                 -- NEU13 BUG-889: the cap counts the containers ordered in the current game year (rs.wn)
   p.rsv.at = 0
   local _, r5 = run(W, {now = t + 40 * DAYT, inv = I4})
   T.eq(#r5.cands, 0, 'total_cap reached')
@@ -226,7 +226,7 @@ T.test('BUG-867: the cure gate has a hysteresis: ON at 5 cancels in the window, 
   local n, way = 0, nil
   for _, l in ipairs(W3.logs) do if tostring(l.msg):find('nothing to make them of', 1, true) then n = n + 1; way = l.msg end end
   T.eq(n, 2, 'day 201 and day 209, not day 203')
-  T.ok(way:find('way out: dig for stone (4 picks', 1, true) and way:find('trade.want barrels or logs', 1, true), way)
+  T.ok(way:find('way out: dig for stone (4 picks', 1, true) and way:find('trade.want wood', 1, true), way)
 end)
 
 T.done()

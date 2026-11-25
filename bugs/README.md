@@ -851,6 +851,11 @@ Related: FR-xx, BUG-xx
 | [BUG-878](BUG-878-reserve-dead-wooden-order.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | Container reserve kept a dead wooden MakeBarrel order for ever and never read DF's cancels of its own job | `lua/dfllm/economy.lua` |
 | [BUG-879](BUG-879-reserve-free-boulders.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | Reserve's 'free boulders' did not match what DF can use | `lua/dfllm/economy.lua` |
 | [BUG-880](BUG-880-ladder-reserve-flag.md) | fixed (offline, live-untested) | offen, nie live gesehen | low | Ladder named order.add MakeBarrel although the reserve orders the containers itself | `lua/dfllm/economy.lua` |
+| [BUG-887](BUG-887-usable-empty-barrels.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | BUG-887 Empty barrels counted as free that no brew can take | `lua/dfllm/economy.lua` |
+| [BUG-888](BUG-888-standing-pile-cap.md) | fixed (offline, live-untested) | offen, nie live gesehen | high | BUG-888 Food piles swallow every new empty barrel: the cap was a 14-day verdict, not a standing rule | `lua/dfllm/economy.lua` |
+| [BUG-889](BUG-889-reserve-rate-and-statement.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | BUG-889 Container reserve switched off for good at total_cap; the way-out text did not say where the stone is | `lua/dfllm/economy.lua` |
+| [BUG-890](BUG-890-fruit-brew-order.md) | fixed (offline, live-untested) | offen, nie live gesehen | medium | BUG-890 Fruit brew orders without fruit stay for ever and fill the Stills and the cancel tally | `lua/dfllm/economy.lua` |
+| [BUG-891](BUG-891-container-texts.md) | fixed (offline, live-untested) | offen, nie live gesehen | low | BUG-891 Ladder and brew stall texts said empty barrels, the fort had none usable | `lua/dfllm/economy.lua` |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.
