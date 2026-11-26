@@ -115,7 +115,7 @@ ACT = {
     "stone_economic": ["economy"],                        # BUG-648: clear the stone-use screen's economic mark of a building stone
     "mat_refused": ["economy"],                           # BUG-665: the game's verdict on a boulder material (read only)
     "work_detail": ["economy", "water", "player"], "order_material": ["economy"], "order_remove": ["economy"],
-    "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"],
+    "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"], "tree_unmark": ["economy"],
     "work_detail_prune": ["economy"],
     "item_flag": ["care", "water", "economy", "military", "seal"],
     "zone_assign": ["care", "player"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
@@ -599,6 +599,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # NEU16b BUG-916: WOOD_STUCK = the zero-count counterpart: no usable log for `d` game days while `nw` of `loose` loose logs lie on tiles with no walk group and/or all `fo` open FellTree jobs
     # (`ff` of them) lie off the citizens' walk group; new/newnw = logs newer than the previous census reading / of those on a tile with no walk group
     "WOOD_STUCK": ("B", "economy", _d("nw:i loose:i fo:i ff:i d:i", "new:i newnw:i mode:s")),
+    # NEU16c BUG-917: WOOD_UNMARK = while WOOD_STUCK holds with every open FellTree job off the walk group the kernel takes down the fell designations of the trees that lie off the citizens' walk group
+    # (autochop's `expected logs` of them keep it from designating reachable ones). ph `did`: n = designations removed, off = marked trees read off the walk group, des = marked trees before,
+    # sample = first positions, band = the autochop band the kernel set (`min-max`), run = which removal of the episode; ph `result` (after the next readings): des = marked trees now, new = logs
+    # newer than the removal, newnw = of those on a tile with no walk group, trees = trees on the map before-after delta (felled); ph `stop`: the removal stopped (why)
+    "WOOD_UNMARK": ("B", "economy", _d("ph:s", "n:i off:i des:i sample:s band:s run:i new:i newnw:i trees:i days:i why:s")),
     "PILE_BARREL_RELEASE": ("B", "economy", _d("pile:i before:i after:i reg0:i phase:s", "reg1:i reg7:i cx0:i cx7:i verdict:s")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the

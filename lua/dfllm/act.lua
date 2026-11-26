@@ -2396,6 +2396,35 @@ local function impls(state)
     return true, done
   end
 
+  -- NEU16c BUG-917 (Run 17 i1/i4: autochop's `designated trees` 6-7 never felled, `expected logs` above the max so it designates no more): the fell designation of the TREES at
+  -- these positions is cancelled (dfhack.designations.unmarkPlant, what the plugin's own `autochop undesignate` and the designation screen's cancel do). Only a tree that is
+  -- marked now; positions are the plants' own (plant.pos). Nothing is designated, dug or built. positions = {{x,y,z}} (<= 200). Returns ok, withdrawn.
+  function I.tree_unmark(positions)
+    if type(positions) ~= 'table' then return false, 'positions required' end
+    local want, n = {}, 0
+    for i, p in ipairs(positions) do
+      if i > 200 then break end
+      local x, y, z = xyz(p)
+      x, y, z = int(x), int(y), int(z)
+      if x and y and z then want[string.format('%d,%d,%d', x, y, z)] = true; n = n + 1 end
+    end
+    if n == 0 then return true, 0 end
+    local des = dfhack.designations
+    local done = 0
+    for _, vn in ipairs({'tree_dry', 'tree_wet'}) do
+      local okv, vec = pcall(function() return df.global.world.plants[vn] end)
+      for _, pl in ipairs(okv and vec or {}) do
+        local p = pl.pos
+        local k = string.format('%d,%d,%d', p.x, p.y, p.z)
+        if want[k] then
+          want[k] = nil
+          if des.isPlantMarked(pl) and des.unmarkPlant(pl) then done = done + 1 end
+        end
+      end
+    end
+    return true, done
+  end
+
   -- kitchen screen (Lua API.txt:2650-2660); idempotent
   function I.kitchen_exclude(item_type, subtype, mat_type, mat_index, what)
     if what ~= 'Cook' and what ~= 'Brew' then return false, "what must be 'Cook' or 'Brew'" end

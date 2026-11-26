@@ -305,7 +305,9 @@ M.DEFAULTS = {
   -- Run 10: a fey mood needed two leather and died with none in the fort; economy's leather gear keeps two back
   reserve = {wood = 20, rock = 0, bone = 0, shell = 0, leather = 2, cloth = 0, thread = 0, bars = 0, gems = 0,
              fuel = 0},
-  wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10},
+  -- NEU16c BUG-917: unmark = false switches the removal of unreachable fell designations off; unmark_days = days between removals, unmark_max = trees per removal, unmark_runs = removals per episode,
+  -- unmark_measure = game days until the measurement
+  wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10, unmark_days = 7, unmark_max = 120, unmark_runs = 3, unmark_measure = 2},
   -- live L1b: brewing stalled without empty barrels; then dfllm:barrel made 34 barrels (logs 183 -> 66). Below the
   -- drink target the cap is max_total, below nofloor_days of drink barrels may use the wood floor
   -- live L6: while drink is short and fewer than min_empty barrels are empty, the cap grows up to grow_total
@@ -4022,6 +4024,7 @@ function M.wood_stuck(K, c, now, inv)
   if not rd then
     st.wstuck = nil
     if p.wstuck ~= nil then p.wstuck = nil; K.persist.touch('m.economy') end
+    if type(p.wunmark) == 'table' and not p.wunmark.pend then p.wunmark = nil; K.persist.touch('m.economy') end    -- NEU16c BUG-917: the episode is over
     return false
   end
   local rec = type(p.wstuck) == 'table' and p.wstuck or {}
@@ -4031,6 +4034,8 @@ function M.wood_stuck(K, c, now, inv)
   end
   if now - rec.t0 < (math.tointeger((c.wood or {}).stuck_days) or W.days) * DAY then return false end
   st.wstuck = rd
+  local oku, erru = pcall(M.wood_unmark, K, c, now, rd, inv)        -- NEU16c BUG-917
+  if not oku then K.log('warn', 'wood unmark: %s', tostring(erru):sub(1, 120)) end
   if math.tointeger(rec.ev) and now - rec.ev < W.every * DAY then return true end
   rec.ev = now
   p.wstuck = json.object(rec); K.persist.touch('m.economy')
@@ -4038,10 +4043,115 @@ function M.wood_stuck(K, c, now, inv)
   local parts = {}
   if rd.logs then parts[#parts + 1] = string.format('%d of %d loose logs lie on tiles with no walk group', rd.nw, rd.loose) end
   if rd.trees then parts[#parts + 1] = string.format('all %d open FellTree jobs lie off the citizens\' walk group', rd.fo) end
-  local txt = string.format('no usable log for %d game days: %s; felling brings none (new logs %d, %d of them unwalkable); trade.want wood meanwhile', days, table.concat(parts, ', '), rd.new, rd.newnw)
+  -- worded by cause: logs that lie where nobody walks, designated trees nobody can reach; what felling dropped lately only where the census saw new logs
+  local tail = rd.new > 0 and string.format('; %d new logs since the last reading, %d of them on tiles with no walk group', rd.new, rd.newnw) or ''
+  local txt = string.format('no usable log for %d game days: %s%s; trade.want wood meanwhile', days, table.concat(parts, ', '), tail)
   K.log('warn', 'economy: wood stuck: %s (near %d, far %d, mode %s, autochop %s)', txt, math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_dist) or 0, tostring(K.mode()),
         st.chop and (st.chop[2] .. ' ' .. st.chop[1]) or 'unset')
   K.emit('WOOD_STUCK', 'B', txt:sub(1, 199), {nw = rd.nw, loose = rd.loose, fo = rd.fo, ff = rd.ff, d = days, new = rd.new, newnw = rd.newnw, mode = tostring(K.mode())})
+  return true
+end
+
+-- NEU16c BUG-917 (Run 17 i4 Girderroots / i1 Diedplank, 26.11.: autochop status 'designated trees 6-7, expected logs 220 / 246' above the max 199 / 179, accessible trees 1032 / 1035, total
+-- trees harvested 62 / 33 unchanged for 8 game years; every open FellTree job off the citizens' walk group; counter-example i2 where wood works: designated 1, expected 3). DFHack's autochop
+-- (docs/tools/autochop.txt) designates trees 'when stocks are low'; its source is not on this machine, so that it stops at expected >= max is the plugin's documented intent, not read code:
+-- the live numbers fit it, nothing more is proven. While WOOD_STUCK holds with every open FellTree job off the walk group the kernel takes down exactly the fell designations of the trees
+-- that are marked and lie off the citizens' walk group (pts_far; a tree of unknown group stays), so the plugin's expected count drops and it may mark reachable trees (never by the kernel).
+-- Only in PEACE / RECOVERY, once per `unmark_days` (7), at most `unmark_max` trees, `unmark_runs` (3) removals per episode; after `unmark_measure` (2) game days one measurement (marked trees now,
+-- trees felled, new logs and how many of them unwalkable); if the new logs again lie on tiles with no walk group the removal STOPS for the episode (WOOD_UNMARK ph stop), no further cure is guessed.
+-- Nothing is designated, dug, built, no burrow, bridge or gate is touched. Persisted m.economy `wunmark` {t, runs, pend {t, n, des0, trees0, hi, new, newnw}, stop}.
+function M.marked_trees(cap)
+  local list, des = {}, 0
+  pcall(function()
+    local pl = df.global.world.plants
+    for _, vn in ipairs({'tree_dry', 'tree_wet'}) do
+      for _, t in ipairs(pl[vn]) do
+        if dfhack.designations.isPlantMarked(t) then
+          des = des + 1
+          if #list < cap then list[#list + 1] = {t.pos.x, t.pos.y, t.pos.z} end
+        end
+      end
+    end
+  end)
+  return list, des
+end
+function M.wood_unmark(K, c, now, rd, inv)
+  local wc = c.wood or {}
+  if wc.unmark == false or not rd or not rd.trees or not HUNT_MODES[K.mode()] or type(K.act.tree_unmark) ~= 'function' then return false end
+  local p = pstate(K)
+  local rec = type(p.wunmark) == 'table' and p.wunmark or {}
+  p.wunmark = rec
+  if rec.stop or type(rec.pend) == 'table' then return false end
+  if math.tointeger(rec.t) and now >= rec.t and now - rec.t < (math.tointeger(wc.unmark_days) or 7) * DAY then return false end
+  local runs = math.tointeger(rec.runs) or 0
+  if runs >= (math.tointeger(wc.unmark_runs) or 3) then
+    rec.stop = true
+    K.persist.touch('m.economy')
+    local txt = string.format('fell designations off the walk group taken down %d times and still no usable log: stopped for this episode, no further cure is guessed', runs)
+    K.log('warn', 'economy: wood unmark stop: %s', txt)
+    K.emit('WOOD_UNMARK', 'B', txt:sub(1, 199), {ph = 'stop', run = runs, why = 'runs'})
+    return false
+  end
+  rec.t = now
+  K.persist.touch('m.economy')
+  local list, des = M.marked_trees(300)
+  if #list == 0 then return false end
+  local far, nf = M.pts_far(K, list)
+  if not far or nf == 0 then return false end              -- the groups are unreadable, or every marked tree is reachable: nothing to take down
+  local out, sample = {}, {}
+  for k = 1, #list do
+    if far[k] and #out < (math.tointeger(wc.unmark_max) or 120) then
+      out[#out + 1] = list[k]
+      if #sample < 5 then sample[#sample + 1] = table.concat(list[k], ',') end
+    end
+  end
+  local ok, n = K.act.tree_unmark(out)
+  n = ok and math.tointeger(n) or 0
+  if n <= 0 then return false end
+  rec.runs = runs + 1
+  rec.pend = json.object{t = now, n = n, des0 = des, trees0 = math.tointeger(M.count_trees()) or 0, hi = math.tointeger(inv.wood_hi) or 0, new = 0, newnw = 0}
+  K.persist.touch('m.economy')
+  local band = st.chop and string.format('%d-%d', st.chop[1], st.chop[2]) or 'unset'
+  local txt = string.format("%d fell designations off the citizens' walk group taken down (of %d marked trees; e.g. %s) so autochop can designate reachable trees; autochop band %s", n, des, table.concat(sample, ' '), band)
+  K.log('warn', 'economy: wood unmark: %s (near %d, far %d, run %d; the plugin own numbers: autochop status)', txt, math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_dist) or 0, rec.runs)
+  K.emit('WOOD_UNMARK', 'B', txt:sub(1, 199), {ph = 'did', n = n, off = nf, des = des, sample = table.concat(sample, ' '), band = band, run = rec.runs})
+  return true
+end
+
+-- the measurement line after the next readings (any mode): marked trees now, trees felled, new logs and how many of them on tiles with no walk group; logs that again land unwalkable stop the removal
+function M.wood_unmark_follow(K, c, now, inv)
+  local p = pstate(K)
+  local rec = type(p.wunmark) == 'table' and p.wunmark or nil
+  local pend = rec and type(rec.pend) == 'table' and rec.pend or nil
+  if not pend then return false end
+  local hi = math.tointeger(inv.wood_hi) or 0
+  if hi ~= (math.tointeger(pend.hi) or 0) then          -- one reading counted once: its newest log id moved
+    pend.new = (math.tointeger(pend.new) or 0) + math.max(0, math.tointeger(inv.wood_new) or 0)
+    pend.newnw = (math.tointeger(pend.newnw) or 0) + math.max(0, math.tointeger(inv.wood_new_nw) or 0)
+    pend.hi = hi
+    K.persist.touch('m.economy')
+  end
+  local t0 = math.tointeger(pend.t) or now
+  local days = (now - t0) // DAY
+  if now >= t0 and days < (math.tointeger((c.wood or {}).unmark_measure) or 2) then return false end
+  local _, des = M.marked_trees(0)
+  local felled = (math.tointeger(pend.trees0) or 0) - (math.tointeger(M.count_trees()) or 0)
+  local new, nnw = math.tointeger(pend.new) or 0, math.tointeger(pend.newnw) or 0
+  local n0 = math.tointeger(pend.n) or 0
+  local des0 = math.tointeger(pend.des0) or 0
+  rec.pend = nil
+  K.persist.touch('m.economy')
+  local txt = string.format('%d game days after taking down %d fell designations: marked trees %d (before %d), trees felled %d, new logs %d (%d usable, %d on tiles with no walk group), usable logs now %d near %d far',
+                            days, n0, des, des0, math.max(0, felled), new, new - nnw, nnw, math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_dist) or 0)
+  K.log('info', 'economy: wood unmark result: %s', txt)
+  K.emit('WOOD_UNMARK', 'B', txt:sub(1, 199), {ph = 'result', n = n0, des = des, trees = math.max(0, felled), new = new, newnw = nnw, days = days})
+  if new > 0 and nnw * 2 >= new then
+    rec.stop = true
+    K.persist.touch('m.economy')
+    local st2 = string.format('the logs felled after the removal again lie on tiles with no walk group (%d of %d): removal stopped for this episode, no further cure is guessed', nnw, new)
+    K.log('warn', 'economy: wood unmark stop: %s', st2)
+    K.emit('WOOD_UNMARK', 'B', st2:sub(1, 199), {ph = 'stop', new = new, newnw = nnw, why = 'unwalkable'})
+  end
   return true
 end
 
@@ -11159,11 +11269,9 @@ function M.home_groups(K, cg)
   return home
 end
 
--- open jobs of a kind the citizens can walk to: (reachable open, off the walk group, the sampled positions' flags)
-function M.cv_reach(K, jc, kind)
-  local open = math.tointeger(jc[kind .. '_open']) or 0
-  local pts = jc[kind .. '_pts'] or {}
-  if open == 0 or #pts == 0 then return open, 0, {} end
+-- NEU16c BUG-917: the positions (trees: they answer the citizens' group when they touch it, BUG-390) that lie OFF the citizens' walk group: flags {[k] = true}, count; nil when the
+-- groups cannot be read (no citizen group, no module): the caller then claims nothing. A position whose group is unknown (-1) is never off.
+function M.pts_far(K, pts)
   local cpts = {}
   for _, id in ipairs((K.census.u or {}).ids or {}) do
     local u = df.unit.find(id)
@@ -11171,16 +11279,26 @@ function M.cv_reach(K, jc, kind)
     if u and okp and math.tointeger(x) then cpts[#cpts + 1] = {x, y, z} end
   end
   local okc, cg = K.call('snapshot', 'groups', cpts, false)
-  if not (okc and type(cg) == 'table') then return open, 0, {} end
+  if not (okc and type(cg) == 'table') then return nil end
   local home = M.home_groups(K, cg)
   local okj, jg = K.call('snapshot', 'groups', pts, true, home)      -- BUG-390: a tree answers the citizens' group when it touches it
-  if not (okj and type(jg) == 'table') then return open, 0, {} end
-  if next(home) == nil then return open, 0, {} end
+  if not (okj and type(jg) == 'table') then return nil end
+  if next(home) == nil then return nil end
   local far, nf = {}, 0
   for k = 1, #pts do
     local g = math.tointeger(jg[k]) or -1
     if g >= 0 and not home[g] then far[k], nf = true, nf + 1 end
   end
+  return far, nf
+end
+
+-- open jobs of a kind the citizens can walk to: (reachable open, off the walk group, the sampled positions' flags)
+function M.cv_reach(K, jc, kind)
+  local open = math.tointeger(jc[kind .. '_open']) or 0
+  local pts = jc[kind .. '_pts'] or {}
+  if open == 0 or #pts == 0 then return open, 0, {} end
+  local far, nf = M.pts_far(K, pts)
+  if not far then return open, 0, {} end
   local off = math.min(open, nf * open // #pts)
   return open - off, off, far
 end
@@ -13029,6 +13147,8 @@ function T.chop(K, c, r)
   local inv = r.inv or K.census.i or {}
   local okb, errb = pcall(M.wood_belief, K, c, r.now or K.now().tick, inv)
   if not okb then K.log('warn', 'wood belief: %s', tostring(errb):sub(1, 120)) end
+  local okf, errf = pcall(M.wood_unmark_follow, K, c, r.now or K.now().tick, inv)   -- NEU16c BUG-917
+  if not okf then K.log('warn', 'wood unmark follow: %s', tostring(errf):sub(1, 120)) end
   local oks, errs = pcall(M.wood_stuck, K, c, r.now or K.now().tick, inv)         -- NEU16b BUG-916
   if not oks then K.log('warn', 'wood stuck: %s', tostring(errs):sub(1, 120)) end
   if not HUNT_MODES[K.mode()] then return true end         -- NEU16 BUG-912: SIEGE / ALERT / BREACH: the target stays as it is, nothing sends woodcutters out
