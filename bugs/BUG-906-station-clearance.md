@@ -1,0 +1,24 @@
+# BUG-906 A squad station 4 tiles from a footprint is 'kept' although its soldiers (3 tiles out) hold every ALERT raise; no word when no tile is clear
+Status: fixed (offline, live-untested)
+Severity: high
+Found: Run 17 i3 Orangering, squads 99/100, station 86,60,142 (4 tiles north of B1 85-87,64,142): STATION_MOVED `no station clear of it on its inner side (crowd 2 tiles): kept` (#33025/#33026/#33031, #34055, #34260, #34587), GATE_FAIL #33041 / #34056 / #34261 `soldier 26632 next to it (squad 99 on its way to its station)` at 3 tiles. Diagnosis `leitung/neu10/DIAGNOSE-B1-2026-11-25.md`.
+Module: `lua/dfllm/military.lua` (`clearance`, `restation_one`, `M.standing`, `reloc`/`pick`), `lua/dfllm/stations.lua` (`relocate` tile count), `lua/dfllm/gate.lua` (`M.stand_by`, `M.drop_standers`, `M.raise_movers`, `M.raise_r`), `config/reflex.json` (`stations.clear`)
+
+## Cause
+The station clearance was `gate.MARGIN + stations.spread` = 2 tiles, the radius within which a moving unit holds a non-forced raise is `gate.RAISE_R` = 3 (BUG-543/758): a station 4 tiles out is 'clear' (4 > 2), its soldiers stand at 3-5 tiles and every step holds the raise for 60 ticks. `restation` computes `need = max(clear, margin + crowd)` = 2, finds the station clear and reports 'kept' (a no-op, never says why the raise still waits). Where no tile clear of the bridge exists, nothing told the gate that these soldiers stand there by order.
+
+## Fix
+`military.clearance` = `max(gate.margin + spread, stations.clear)`, `stations.clear` (config/reflex.json, 2..12, default `M.CLEAR` 4 = `gate.RAISE_R` + `spread`, `gate.raise_r()`), so a station whose crowd can hold its own bridge is moved (STATION_MOVED `hold`) to the nearest revealed floor on the inner side that is more than 4 tiles out. When `restation_one` finds NO such tile (not 'the station is clear already'): STATION_MOVED `none` ONCE per alarm (mode episode; a quiet PEACE hold repeats at most every `NOTE_EVERY`) with `standby 1`, `tiles` (tiles tried, counted in `stations.relocate`), `clear`, `tried` (the chain entries and why), text 'no tile clear of B1 (clearance 4, 578 tiles tried) for its station ...: kept, its soldiers stand by order and hold the raise only ON the footprint'; `rt.stand[squad]` marks the squad for this mode episode and `military.standing(id, x, y, z)` answers true for its soldiers within spread + 1 of the station. Gate: `M.stand_by(e)` (a soldier, not ON the footprint, that answers true) is dropped from the units within the margin (`drop_standers`, every 'up') and skipped by `raise_movers`. A unit ON the footprint always holds. The 'kept' text for a station that is clear already now says so ('the station lies clear of it already, its soldiers are still on their way').
+
+## Cost
+Soldiers standing by order next to a footprint (within 1 tile when the station itself lies there) are no obstacle: a soldier who steps onto the footprint while it moves is crushed (they stand still by order; the margin of 1 tile is no longer held for them in that case, only for crossing units). Existing forts: stations 3-4 tiles from a footprint are moved to 5+ (STATION_MOVED once); a fort without a revealed floor on the inner side keeps them (and now says so). Nobody is locked out. `tests/lua/test_intake.lua` / `test_stations.lua` (fixture stations 3-4 tiles out) pin `stations.clear = 2` (their `lc()` helper).
+
+## Tests
+`test_bug905_909_b1.lua` (real military `restation`/`standing` on a mutable squad fake, real sense/threat/siege/gate; ALERT, ONE hostile 25 tiles out, station 51,44, four soldiers pacing at 3 and 4 tiles):
+- the first hold at +9, STATION_MOVED `hold` at +36 (to 51,45), B1 up at +171 (flip), 0 crushed, no GATE_FAIL;
+- hidden tiles (nothing clear): STATION_MOVED `none` once, `standby` 1, 578 tiles tried, B1 up at +117 past the pacers, 0 crushed; a soldier ON the footprint: stays down, GATE_FAIL names `soldier 110 on the footprint`;
+- `stations.clear = 2` = the old behaviour: no STATION_MOVED, B1 up only when the BUG-907 bound lets the pacers go (>= +450).
+`tests/test_alarm.py` (config/limits/default of `stations.clear` agree with `M.CLEAR`/`M.CLEAR_LIM`/`STATIONS_LIM`). On main the first two tests fail (B1 never up, 'kept').
+
+## Live-Erwartung
+In an ALERT/RECOVERY with a lone hostile and B1 wanted up (i3 squads 99/100): `STATION_MOVED ... re-stationed at X,Y,142` instead of 'kept' within a few hundred ticks of the first `B1 up waits: soldier N moving 3 tiles from it`, and B1 up within ~800 ticks without a GATE_FAIL naming the squad's soldiers. Where no clear tile exists: one `STATION_MOVED none` per alarm saying `N tiles tried ... stand by order`, and B1 rises past those soldiers. NOT promised: that the soldiers' new station is a good place (nearest revealed floor on the inner side) or that they stay out of the footprint by themselves.

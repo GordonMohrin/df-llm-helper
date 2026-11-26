@@ -24,6 +24,14 @@ local function manifest(st)
   return m
 end
 
+-- BUG-906 (Neuausrichtung 15): the station clearance is now gate.RAISE_R + spread = 4 (stations.clear); this suite is written for the
+-- BUG-032 clearance margin + spread = 2 of the shared fixture (melee 4 tiles from B1, b2 3 tiles from B2): it pins stations.clear = 2
+local function lc(r)
+  r.stations = r.stations or {}
+  if r.stations.clear == nil then r.stations.clear = 2 end
+  return r
+end
+
 -- opts: manifest, tiles ({'x,y,z' = char | false (hidden)}), reflex, units
 local function world(o)
   o = o or {}
@@ -33,7 +41,7 @@ local function world(o)
   for _, u in ipairs(S.army(12, 51, 0)) do units[#units + 1] = u end
   for _, u in ipairs(o.units or {}) do units[#units + 1] = u end
   local W = S.world{units = units, manifest = o.manifest or manifest(), dfpath = dir,
-                    cfg = {reflex = o.reflex or {v = 2, intake = {on = false}}}}
+                    cfg = {reflex = lc(o.reflex or {v = 2, intake = {on = false}})}}
   X.install(W, {})
   df.global.world.status.popups = kmock.vec{}
   package.loaded['plugins.timestream'] = {timestream_getFps = function() return W.timestream_fps end}

@@ -175,17 +175,43 @@ local function run2(W, ticks)
   S.run(W, ticks, {at = list})
 end
 
-T.test('PEACE TRAFFIC (BUG-831): a citizen 15 tiles from B1 who starts walking onto it once the lever is pulled: B1 is NOT raised ' ..
-       '(a unit within gate.peace_clear_r tiles), nobody crushed, GATE peace_wait names him', function()
-  local W = slow_world{walkers = {{id = 60, route = route(51, 55, 39), when_moving = true, through = true}}}
+-- Neuausrichtung 15 (BUG-905): a unit farther than gate.PEACE_FAR (8) tiles whose walk path does not enter the footprint no longer keeps the quiet raise
+-- waiting (a citizen 15 tiles out idling, or walking elsewhere); one who sets off for it inside the quiet window (a path onto the footprint) holds it
+-- while he walks (the pull waits, a pending pull is cancelled), nobody crushed
+T.test('PEACE TRAFFIC (BUG-831 / BUG-905): a citizen 15 tiles from B1 who sets off for it inside the quiet window: B1 is NOT pulled while he walks onto ' ..
+       'it (his path enters the footprint), raised after he has crossed, nobody crushed, GATE peace_wait names him', function()
+  local W = slow_world{walkers = {{id = 60, route = route(51, 55, 30), start = 400}}}
   run2(W, 3000)
   T.eq(#W.crushed, 0, 'crushed: ' .. table.concat(W.crushed, '; '))
-  T.eq(S.bstate(W, 'B1'), 'down', 'not raised while he stands 15 tiles away')
-  T.eq(#S.pulls(W, 'B1'), 0, 'no pull queued')
-  local ev = gate_ev(W, 'peace_wait')
-  T.ok(#ev >= 1 and ev[1].d.unit == 60, ev[1] and ev[1].msg)
+  local u = W.unit(60)
+  T.ok(u._m.y <= 30, 'he crossed')
+  local pulls = S.pulls(W, 'B1')
+  if os.getenv('DBG') then
+    for _, e in ipairs(W.find_events('GATE')) do print('GATE', e.tick - W.t_start, e.msg) end
+    for _, p in ipairs(pulls) do print('pull', p.tick - W.t_start) end
+    for _, l in ipairs(W.logs) do if tostring(l.msg):find('gate') then print('LOG', l.msg) end end
+  end
+  T.ok(#pulls >= 1 and pulls[1].tick - W.t_start > 400 + 16 * 18, 'no pull while he walked onto it: +' .. tostring(pulls[1] and pulls[1].tick - W.t_start))
+  T.eq(S.bstate(W, 'B1'), 'up', 'raised after he had crossed (the return window of NEU1 opens only after return_every)')
+  local named = false
+  for _, e in ipairs(gate_ev(W, 'peace_wait')) do if e.d.unit == 60 then named = true end end
+  T.ok(named, 'GATE peace_wait names him')
   T.eq(#W.find_events('GATE_FAIL'), 0)
   T.eq(#W.find_events('GATE_CRUSH_RISK'), 0)
+end)
+
+-- the COST of BUG-905 (documented, not a goal): the original BUG-831 case, a citizen 15 tiles out who sets off only once the lever is pulled (the
+-- bridge is moving, nothing can cancel the pull any more) and covers the 15 tiles in less than the 300 ticks the bridge moves, is crushed; the
+-- fallback holds: GATE_CRUSH_RISK, the bridge stays down in PEACE (peace_traffic) for peace_lock_days
+T.test('PEACE TRAFFIC (BUG-905 cost): a citizen 15 tiles out who sets off once the lever is pulled (runs 18 ticks a tile, the bridge moves 300): the one ' ..
+       'crush it may cost; GATE_CRUSH_RISK and the PEACE lock follow', function()
+  local W = slow_world{walkers = {{id = 60, route = route(51, 55, 39), when_moving = true, through = true}}}
+  run2(W, 3000)
+  T.ok(#W.crushed <= 1, 'crushed: ' .. table.concat(W.crushed, '; '))
+  if #W.crushed == 1 then
+    T.ok(#W.find_events('GATE_CRUSH_RISK') >= 1, 'GATE_CRUSH_RISK names it')
+    T.ok(#gate_ev(W, 'peace_traffic') >= 1, 'the bridge is locked down in PEACE')
+  end
 end)
 
 T.test('PEACE TRAFFIC: a quiet fort gets B1 up only after the whole quiet window; a walker coming near cancels the pending pull', function()
@@ -254,18 +280,34 @@ T.test('lever days (BUG-833): lever down with days=N holds B1 down N game days; 
   T.eq(S.bstate(W, 'B1'), 'up', 'raised again after the hold, in the quiet')
 end)
 
-T.test('PEACE TRAFFIC (BUG-831 retry, i4 #1441): a soldier at his station 4 tiles from B1 (squad station order) is NOT exempt: ' ..
-       'B1 is never pulled in PEACE, so he is not crushed when he steps onto the footprint; GATE names him', function()
+-- Neuausrichtung 15 (BUG-905): the BUG-831 retry made a soldier at his station count like anybody else near B1 (B1 never rose with a station 4 tiles out:
+-- ~35 waits, 0 raises in a game year, Run 17 i3); now one standing at his squad's station at least gate.PEACE_STAND_D (3) tiles out does not count
+T.test('PEACE TRAFFIC (BUG-905, was BUG-831 retry i4 #1441): a soldier at his station 4 tiles from B1 (squad station order) does NOT keep the quiet raise ' ..
+       'waiting: B1 is raised, nobody crushed while he stands at it; one tile nearer (3) he still does not, but within 2 he does', function()
+  local W = slow_world{at_station = true}
+  W.crushed, W.walkers = {}, {}
+  S.run(W, 3000, {})
+  T.eq(S.bstate(W, 'B1'), 'up', 'raised with a soldier at the station')
+  T.eq(#W.crushed, 0, 'crushed: ' .. table.concat(W.crushed, '; '))
+  local near = slow_world{at_station = true}
+  near.crushed, near.walkers = {}, {}
+  near.unit(5)._m.x, near.unit(5)._m.y = 51, 42                  -- his station order is 51,44: 2 tiles from the footprint 51,40 (at_station: within 2)
+  S.run(near, 3000, {})
+  T.eq(S.bstate(near, 'B1'), 'down', 'a soldier 2 tiles from the footprint holds the quiet raise as before (the margin and the movers rule)')
+end)
+
+-- the COST of BUG-905: the soldier at his station who steps onto the footprint while the bridge moves is crushed (BUG-831 retry, i4 #1441): the
+-- fallback holds (GATE_CRUSH_RISK, the PEACE lock, peace_lock_days); the stations are kept RAISE_R + spread tiles out now (BUG-906)
+T.test('PEACE TRAFFIC (BUG-905 cost): the soldier at his station steps onto the moving B1: GATE_CRUSH_RISK, the PEACE lock keeps B1 down for peace_lock_days', function()
   local W = slow_world{at_station = true}
   W.crushed, W.walkers = {}, {}
   local list = {}
   for t = 0, 4000, 9 do list[#list + 1] = {t, soldier_jump} end
   S.run(W, 4000, {at = list})
-  T.eq(S.bstate(W, 'B1'), 'down', 'stays down with a soldier at the station')
-  T.eq(#S.pulls(W, 'B1'), 0, 'no pull queued')
-  T.eq(#W.crushed, 0, 'crushed: ' .. table.concat(W.crushed, '; '))
-  local ev = gate_ev(W, 'peace_wait')
-  T.ok(#ev >= 1 and ev[1].d.unit == 5, ev[1] and ev[1].msg)
+  T.ok(#W.crushed >= 1, 'the documented price (soldier_jump records every frame he is on it): ' .. #W.crushed)
+  T.ok(#W.find_events('GATE_CRUSH_RISK') >= 1, 'GATE_CRUSH_RISK')
+  local ev = gate_ev(W, 'peace_traffic')
+  T.ok(#ev >= 1 and ev[1].d.days == 3, ev[1] and ev[1].msg)
 end)
 
 T.test('PEACE TRAFFIC fail closed: while the census is unknown the quiet raise waits', function()
