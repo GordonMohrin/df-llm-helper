@@ -2204,6 +2204,7 @@ M.REL_D1, M.REL_D7 = 1, 7
 -- (verifier) a lowering made by the release is never left to the standing cap's exit (which never comes while DF keeps cancelling): when the d7 verdict is 'DF kept the registration' the old
 -- limits go back AT ONCE, and in any case after REL_MAX_D game days; then the release pauses REL_PAUSE_D days. 0 is allowed as a new limit only for a pile with no barrel with contents.
 M.REL_MAX_D, M.REL_PAUSE_D = 14, 30
+M.REL_IDLE_D = 7        -- NEU17 BUG-918: a release call that lowered no pile is not repeated (nor its registry scan) for this many game days
 function M.release_restore(K, p, now, why, only)
   if type(p.relpiles) ~= 'table' then return 0 end
   local back, ids = {}, {}
@@ -2306,6 +2307,7 @@ function M.pile_release(K, c, r)
   if cc.release == false or p.relstop or (p.relnext and now < p.relnext) or type(K.act.pile_barrels) ~= 'function' then return end
   if not M.cx_gate(K, c, now) then return end                       -- only with DF's own reason (BUG-844)
   if (math.tointeger(inv.barrels_reg) or 0) <= 0 then return end   -- no registered empty barrel in the census
+  if st.relidle and now < st.relidle and st.relidle - now <= M.REL_IDLE_D * DAY then return end   -- NEU17 BUG-918: the last call lowered nothing: not again before the idle week is over
   local ok, res = K.act.pile_barrels('release', {})
   if not (ok and type(res) == 'table') then
     K.log('warn', 'pile barrel release: %s', tostring(res))
@@ -2325,28 +2327,33 @@ function M.pile_release(K, c, r)
           tostring(e.old), tostring(e.new), tostring(e.reg_empty), tostring(e.reg_full), cx)
     M.release_emit(K, p.relmeas[tostring(e.id)], 'lowered', e.reg_empty or 0, cx)
   end
-  for _, k in ipairs(res.kept or {}) do
-    if k.why == 'accepts drink: not changed in this round' and st.relkeep ~= now // DAY then
-      st.relkeep = now // DAY
-      K.log('info', 'pile barrel release: stockpile %s (%s) holds %s registered empty barrels and accepts drink: not changed', tostring(k.id), tostring(k.name), tostring(k.here))
-    end
-  end
+  if #res > 0 then st.relidle = nil end
   if #res > 0 then K.persist.touch('m.economy') end
   -- NEU17 BUG-918 (i4 Girderroots y491: 115 of 121 empties registered in stockpiles, the container reason ON, and no PILE_BARREL_RELEASE ever: a call that lowered nothing said nothing, so the
   -- live run could not tell 'no pile qualified' from 'the write failed'): a release that lowered no pile is NOTED, once per game week, with the numbers and the reasons per pile
-  if #res == 0 and p.relpiles == nil and (type(p.relmeas) ~= 'table' or next(p.relmeas) == nil) then M.release_none(K, p, inv, now, res, cx) end   -- not while a lowering is being measured
+  if #res == 0 and p.relpiles == nil and (type(p.relmeas) ~= 'table' or next(p.relmeas) == nil) then   -- not while a lowering is being measured
+    M.release_none(K, p, inv, now, res, cx)
+    st.relidle = now + M.REL_IDLE_D * DAY        -- NEU17 BUG-918: nothing qualified: no daily registry scan (act.pile_barrels release) for a game week
+  end
 end
 function M.release_none(K, p, inv, now, res, cx)
   if st.relnone and now >= st.relnone and now - st.relnone < 7 * DAY then return end
   st.relnone = now
-  local why, nk = {}, 0
+  local why, emp, nk = {}, {}, 0
+  local lines, cur = {}, {}
   for _, k in ipairs(res.kept or {}) do
     nk = nk + 1
     local w = tostring(k.why):gsub(':.*$', '')
     why[w] = (why[w] or 0) + 1
+    emp[w] = (emp[w] or 0) + (math.tointeger(k.here) or 0)
+    -- every pile with its own reason, not only the first one of a kind: ten piles to a kern.log line, five lines at most (the counts per reason are in the event text)
+    cur[#cur + 1] = string.format('%s %s limit %s empties %s: %s', tostring(k.id), tostring(k.name), tostring(k.old), tostring(k.here), tostring(w))
+    if #cur >= 10 then lines[#lines + 1] = table.concat(cur, '; '); cur = {} end
   end
+  if #cur > 0 then lines[#lines + 1] = table.concat(cur, '; ') end
+  for i = 1, math.min(#lines, 5) do K.log('info', 'pile barrel release kept (%d/%d): %s', i, #lines, lines[i]) end
   local parts = {}
-  for w, n in pairs(why) do parts[#parts + 1] = string.format('%d %s', n, w) end
+  for w, n in pairs(why) do parts[#parts + 1] = string.format('%d %s (%d empties)', n, w, emp[w] or 0) end
   table.sort(parts)
   local nf = #(res.failed or {})
   local reg, free = math.tointeger(inv.barrels_reg) or 0, math.tointeger(inv.cont_free) or 0
@@ -2430,6 +2437,18 @@ function M.cx_end(K, p, keep, force)
     local ok = type(K.act.pile_barrels) == 'function' and K.act.pile_barrels('restore', back)
     p.pilecap, ch = nil, true
     if ok then K.log('info', 'brew stall over: the stockpile barrel limits are back') end
+    -- NEU17 BUG-918: the release's lowerings live in p.pilecap too: what this call put back is no lowering any more. Without this p.relpiles stayed, the next daily look
+    -- (M.release_watch) lowered the same piles again, cx_end restored them the day after: a lowered / restored cycle every game day (no brew order, or the containers back, while DF's 7-day window still counts cancels).
+    -- The measurement of a restored pile is void (its limit is not the lowered one), and the release rests one cancel window before it may lower again.
+    if type(p.relpiles) == 'table' then
+      for id in pairs(back) do
+        p.relpiles[id] = nil
+        if type(p.relmeas) == 'table' then p.relmeas[id] = nil end
+      end
+      if next(p.relpiles) == nil then p.relpiles = nil end
+      if type(p.relmeas) == 'table' and next(p.relmeas) == nil then p.relmeas = nil end
+      p.relnext = K.now().tick + M.REL_IDLE_D * DAY
+    end
   end
   if ch then K.persist.touch('m.economy') end
 end
@@ -4449,6 +4468,8 @@ function M.watch(K)
   if not okc then K.log('warn', 'container cure line: %s', tostring(errc):sub(1, 160)) end
   local okr, errr = pcall(M.release_watch, K, c)                 -- NEU17 BUG-918
   if not okr then K.log('warn', 'pile barrel release (look): %s', tostring(errr):sub(1, 160)) end
+  local okw, errw = pcall(M.wood_look, K, c)                     -- NEU17 BUG-919
+  if not okw then K.log('warn', 'wood look: %s', tostring(errw):sub(1, 160)) end
 end
 -- 'gamelog' while its file is readable, else 'report'
 function M.cw_source(K, now)
@@ -13213,6 +13234,15 @@ function M.wood_watch(K, c, inv)
   if not okf then K.log('warn', 'wood unmark follow: %s', tostring(errf):sub(1, 120)) end
   local oks, errs = pcall(M.wood_stuck, K, c, now, inv)         -- NEU16b BUG-916
   if not oks then K.log('warn', 'wood stuck: %s', tostring(errs):sub(1, 120)) end
+end
+-- the kernel's guaranteed look (M.watch): the wood clocks once per game day at the REAL tick on the last census, whatever the pace of the economy run (a run that lies 100+ game days behind
+-- its census reached T.chop and the end of the census only that rarely): the first removal comes `stuck_days` after the logs ran out, not a run later
+function M.wood_look(K, c)
+  local now = K.now().tick
+  if st.woodday == now // DAY then return end
+  st.woodday = now // DAY
+  if not (K.census and K.census.i) then return end
+  M.wood_watch(K, c, K.census.i)
 end
 function T.chop(K, c, r)
   local w = c.wood or M.DEFAULTS.wood

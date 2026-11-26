@@ -126,4 +126,38 @@ T.test('BUG-919: the highest log id of a reading is persisted (a reload counts t
   T.ok(math.tointeger(p.wood_mark) and p.wood_mark > 0, 'wood_mark persisted: ' .. tostring(p.wood_mark))
 end)
 
+-- the i4 shape: a SLOW economy (the census of a run takes ~100 game days, the run's tasks come at its end) beside a kernel look that runs every day. The economy entry is switched off here; the
+-- test drives M.step every 25 game days (4 items a slice) and M.watch every day, as the kernel does.
+T.test('BUG-919: a census that started ~100 game days before its chop task: the first removal and its result use the REAL days', function()
+  local W = world(STUCK)
+  local econ = require('dfllm.economy')
+  W.mods.economy.disabled = true
+  W.K.cfg.baseline.economy.per_slice = 4
+  local DAY = 1200
+  local t_pub, t_did, t_res, res
+  local base = W.K.now().tick
+  for day = 1, 330 do
+    W.run(DAY, {skip = 100})
+    if day % 25 == 1 then econ.step(W.K, 1, {cont = true}) end
+    econ.watch(W.K)
+    if not t_pub and W.K.census.i and next(W.K.census.i) then
+      local okf, fr = pcall(econ.fell_reach, W.K)
+      if okf and fr and (fr.open or 0) > 0 and (fr.far or 0) >= fr.open then t_pub = W.K.now().tick end   -- the day the stuck state can be read: a census AND the fell read of a run
+    end
+    if not t_did and #W.unmarked > 0 then t_did = W.K.now().tick end
+    if not res then
+      for _, e in ipairs(W.find_events('WOOD_UNMARK')) do if e.d.ph == 'result' then res, t_res = e, W.K.now().tick end end
+    end
+  end
+  T.ok(t_pub, 'the stuck state became readable')
+  T.ok(t_did, 'the fell designations were taken down')
+  local late = (t_did - t_pub) // DAY
+  print(string.format('BUG-919 slow census: stuck state readable from day %d, first removal day %d (%d days later)', (t_pub - base) // DAY, (t_did - base) // DAY, late))
+  T.ok(late <= 5, 'the first removal comes stuck_days (3) after the stuck state is readable, not a run later: ' .. late)
+  T.ok(res, 'result event')
+  local real = (t_res - t_did) // DAY
+  print(string.format('BUG-919 slow census: result says %d game days, real %d', res.d.days, real))
+  T.ok(math.abs(res.d.days - real) <= 1, string.format('result days %d vs real %d', res.d.days, real))
+end)
+
 T.done()
