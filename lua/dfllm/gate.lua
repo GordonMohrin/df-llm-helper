@@ -2110,6 +2110,11 @@ function M.reach_day(K, name, r, now, hold)
   for _, h in ipairs(hold) do if h.reach then e = e or h; n = n + 1 end end
   if not e then return end
   r.rdy = br.since
+  -- BUG-928: ONE question per alert (O1 and B1 held for the same people, or a want set again within one alert, ask once); PEACE (step) forgets it
+  if K.mode() ~= 'PEACE' then
+    if M.rdn_alert then return end
+    M.rdn_alert = now
+  end
   local q = string.format('%s stays down: %d units can reach it before it has moved (nearest %s %d, %d tiles, %d ticks; the window is %d ticks) and a raise would crush them: ' ..
                           'reroute them, move the station or the levers, or pull it by hand', name, n, tostring(e.k), e.id, e.d, e.reach, M.reach_ticks())
   K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'gate_reach_traffic', q = q:sub(1, 200), bridge = name, n = n, unit = e.id, d = e.d, need = M.reach_ticks(),
@@ -3610,12 +3615,36 @@ end
 -- bridge that cannot rise is readiness' R0 (levers, lever_outside), a crowd at it only waits (kern.log names it)
 local QUIET_UP = {peace_gates = true, window_end = true}
 
+-- BUG-928 (Run 17 i3: 'B1 not up after 40825 / 799475 ticks' in an ALERT with a wild plant eater 19-20 tiles from a citizen, the want peace_gates carried the PEACE age; and GATE_FAIL
+-- 'blocked ... can reach it in N ticks' for a bridge the kernel itself keeps down under the reach rule): a bridge the kernel deliberately holds down outside SIEGE / BREACH is no
+-- failure. EVENT WORDING ONLY (no raise or lower decision changes here): a hold whose every holder in r.block is one the reach rule added (they carry `reach`) is named in ONE GATE
+-- `reach_hold` line per FAIL_REPEAT (the 'GATE reach' wait line) and M.reach_day asks the ONE DECISION_NEEDED gate_reach_traffic per alert; a leftover quiet want (peace_gates /
+-- window_end) in an ALERT / RECOVERY without lockdown carries the age of the PEACE it came from: no GATE_FAIL for it either.
+function M.reach_held(K, r, mode)
+  if not (M.REACH_MODES[mode] and mode ~= 'DRILL' and M.neu_cfg(K).reach and type(r.block) == 'table') then return false end
+  if #r.block == 0 then return false end
+  for _, e in ipairs(r.block) do if not e.reach then return false end end       -- a unit ON / beside the footprint is the older hold: GATE_FAIL says it
+  return true
+end
+
 local function check_fail(K, name, now, mode)
   local br = st.br[name]
   if not (br and br.want == 'up' and not br.failed and br.deadline and now >= br.deadline) then return end
-  if QUIET_UP[br.why] and (mode or K.mode()) == 'PEACE' then return end   -- mode: the epoch's own (a MODE change settles it)
+  local m0 = mode or K.mode()
+  if QUIET_UP[br.why] and m0 == 'PEACE' then return end   -- mode: the epoch's own (a MODE change settles it)
+  if QUIET_UP[br.why] and (m0 == 'ALERT' or m0 == 'RECOVERY') and not lock_why(K) then return end    -- BUG-928: the PEACE age of a leftover quiet want
   local r = runtime(name)
   if r.last == 'up' then return end
+  if r.stuck == 'blocked' and r.block_since and now - r.block_since >= M.DEADLINE and M.reach_held(K, r, m0) then
+    -- BUG-928: the reach rule holds it down on purpose: said as a GATE line, never a class A failure (SIEGE / BREACH / DRILL are not here)
+    if not r.rh_ev or now - r.rh_ev >= M.FAIL_REPEAT then
+      r.rh_ev = now
+      local txt = string.format('%s not up after %d ticks, held down by the reach rule on purpose: %s', name, now - br.since, who(r.block, r.foot))
+      K.emit('GATE', 'C', cut(txt, 200), {bridge = name, state = 'reach_hold', units = ids_of(r.block), ticks = now - br.since, n = #r.block})
+      K.log('info', 'gate: %s', txt)
+    end
+    return
+  end
   local slow
   if r.stuck == 'blocked' and r.block_since then
     -- BUG-027: waiting for units on the footprint is no timeout: GATE_FAIL blocked after DEADLINE ticks of it on end
@@ -4203,6 +4232,7 @@ function M.step(K, budget, ctx)
     return pending_pass(K, now)
   end
   last_pass = now
+  if K.mode() == 'PEACE' then M.rdn_alert = nil end        -- BUG-928: the next alert may ask its one gate_reach_traffic question again
   pass(K, false)
   home_step(K, now)                              -- BUG-774: PEACE only, its own cadence
 end

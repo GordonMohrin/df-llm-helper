@@ -1388,8 +1388,11 @@ def open_seals(save_dir: Path, state: dict | None = None) -> list[dict]:
     live = {r[0] for r in rows if isinstance(r, list) and r and not str(r[-1] if len(r) > 3 else "").startswith(
         "parked:")} if isinstance(rows, list) else None
     done = done_projects(save_dir)
+    marked = _cmd.read_orphans(save_dir)         # BUG-927: the kernel said 'no project' for these files: no seal is open because of them
     for p in bp_files(save_dir):
         if p.stem in done or (live is not None and p.stem not in live) or any(x["proj"] == p.stem for x in out):
+            continue
+        if p.stem in marked and not (live is not None and p.stem in live):
             continue
         doc = files.read_json(p)
         if isinstance(doc, dict) and doc.get("tpl") == SEAL:

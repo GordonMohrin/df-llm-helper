@@ -178,14 +178,14 @@ T.test('BUG-911: no usable logs counted, or fewer than 3 cancels: nothing is dis
   T.eq(#W2.find_events('WOOD_DISBELIEVED'), 0, 'no near log counted: the count is no claim')
 end)
 
-T.test('BUG-913: no stockpile takes wood, a Carpenter stands, wood is wanted: dfllm-wood 3x2 beside the shop (no dig); once it stands nothing more', function()
+T.test('BUG-913: no stockpile takes wood, a Carpenter stands, wood is wanted: dfllm-wood 5x5 beside the shop (no dig; BUG-926: 5x5 from wood.pile_w / pile_h); once it stands nothing more', function()
   local W = world{shop = SHOP, setup = function(W)
     for _ = 1, 10 do F.item(W, 'WOOD', {_pos = {300, 10, 1}}) end
   end}
   days(W, 1)
   T.eq(#W.piles, 1, 'one pile')
   local p = W.piles[1]
-  T.eq({p.w, p.h}, {3, 2})
+  T.eq({p.w, p.h}, {5, 5})
   T.ok(math.abs(p.pos[1] - 10) <= 12 and math.abs(p.pos[2] - 10) <= 12 and p.pos[3] == 1, 'beside the shop: ' .. T.show(p.pos))
   days(W, 30)
   T.eq(#W.piles, 1, 'a wood pile stands: no second one')
@@ -202,7 +202,7 @@ T.test('BUG-913: no site (no floor within 12 tiles) and a refused placement: DEC
   for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'wood_pile' then ev[#ev + 1] = e end end
   T.eq(#ev, 1)
   T.eq(ev[1].d.cmds, {[[dfllm cmd trade.want '{"add":["wood"]}']]})
-  T.ok(ev[1].d.q:find('no stockpile takes wood', 1, true), ev[1].d.q)
+  T.ok(ev[1].d.q:find('no stockpile with room takes wood', 1, true), ev[1].d.q)      -- BUG-926 wording
   days(W, 5)
   local n = 0
   for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'wood_pile' then n = n + 1 end end

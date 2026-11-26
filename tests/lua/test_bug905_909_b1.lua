@@ -99,7 +99,7 @@ end
 
 T.test('F2 ALERT (BUG-906): a lone hostile 25 tiles out, the station 4 tiles from B1 and its soldiers pacing at 3 tiles: the station is MOVED ' ..
        '(STATION_MOVED, not kept) within 300 ticks; the soldiers still hold the ALERT raise (15b: a soldier at his station can reach the footprint): B1 stays down, ' ..
-       'GATE_FAIL says who; nobody crushed', function()
+       'a GATE reach_hold line says who (BUG-928: no GATE_FAIL); nobody crushed', function()
   local W = alert_world()
   B.run(W, 2400)
   local sm = B.events(W, 'STATION_MOVED', 'hold')
@@ -112,10 +112,14 @@ T.test('F2 ALERT (BUG-906): a lone hostile 25 tiles out, the station 4 tiles fro
   T.eq(S.bstate(W, 'B1'), 'down', 'the soldiers at their station can reach it: not raised')
   T.eq(#B.pulls(W, 'B1'), 0, 'no pull')
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
-  local f = W.find_events('GATE_FAIL')
+  -- NEU19 BUG-928: a hold the reach rule keeps ON PURPOSE is no GATE_FAIL (class A) any more: the GATE `reach_hold` line says who can reach it
   local text
-  for _, e in ipairs(f) do if e.d.bridge == 'B1' then text = e.msg end end
-  T.ok(text and text:find('soldier', 1, true) and text:find('can reach it in', 1, true), text)
+  for _, e in ipairs(W.find_events('GATE_FAIL')) do if e.d.bridge == 'B1' then text = e.msg end end
+  T.eq(text, nil, 'no GATE_FAIL for a deliberate hold')
+  local rh = B.events(W, 'GATE', 'reach_hold')
+  local rtext
+  for _, e in ipairs(rh) do if e.d.bridge == 'B1' then rtext = e.msg end end
+  T.ok(rtext and rtext:find('soldier', 1, true) and rtext:find('can reach it in', 1, true), rtext)
 end)
 
 T.test('F2 SIEGE (BUG-906): no tile clear of B1 can be found (nothing revealed): STATION_MOVED none says so ONCE with the tiles tried; in SIEGE the soldiers stand ' ..

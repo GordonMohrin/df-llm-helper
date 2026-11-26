@@ -4875,8 +4875,10 @@ function M.kit_stats(K)
   -- NEU8 (BUG-860): the first squad's READY rule (M.squad_ready): sq_n members, sq_f fit ones, sq_a with a usable real weapon (hand, assigned,
   -- waiting), sq_w fit AND armed = ready, sq_as of the armed ones by an assigned piece, sq_u not fit; sq_ok = the latch
   local t = {n = 0, full = 0, armor = 0, weapon = 0, wood = 0, tr = M.train_squads(), fullr = 0, metal = 0, sq_n = 0, sq_w = 0, sq_u = 0, wb = 0,
-             sq_f = 0, sq_a = 0, sq_as = 0, sq_b = 0, sq_ok = false}
+             sq_f = 0, sq_a = 0, sq_as = 0, sq_b = 0, sq_ok = false,
+             off = 0, nd = 0, fulld = 0}                 -- BUG-929: soldiers of squads off duty now (DF strips them: BUG-864) / on duty / of those fully equipped
   local rows, first = M.kit_rows(is_metal)
+  local offk = {}
   t.wb = M.back_rows(K, rows)
   for _, r in ipairs(rows) do
     local x = r.x
@@ -4885,6 +4887,12 @@ function M.kit_stats(K)
     if x.weapon then t.weapon = t.weapon + 1 end
     if x.wood then t.wood = t.wood + 1 end
     if x.armor and x.weapon then t.full = t.full + 1 end
+    if offk[r.key] == nil then offk[r.key] = off_season(K, r.key) == true end
+    if offk[r.key] then t.off = t.off + 1
+    else
+      t.nd = t.nd + 1
+      if x.armor and x.weapon then t.fulld = t.fulld + 1 end
+    end
     if x.armor and r.real then
       t.fullr = t.fullr + 1
       if not next(x.soft or {}) then t.metal = t.metal + 1 end
@@ -5843,7 +5851,8 @@ function M.state(K)
   if kt.n > 0 then
     mil.kit = {n = kt.n, full = kt.full, armor = kt.armor, weapon = kt.weapon, wood = kt.wood, tr = kt.tr,
                sq = kt.sq_n, sqw = kt.sq_w, wb = kt.wb,      -- BUG-827: the first melee squad's members / ready ones (BUG-860), wooden ones backed
-               sqf = kt.sq_f, sqa = kt.sq_a, sqok = kt.sq_ok and 1 or 0}   -- BUG-860: fit ones, with a usable real weapon, the ready latch
+               sqf = kt.sq_f, sqa = kt.sq_a, sqok = kt.sq_ok and 1 or 0,   -- BUG-860: fit ones, with a usable real weapon, the ready latch
+               off = kt.off, nd = kt.nd, fulld = kt.fulld}                 -- BUG-929: off-duty soldiers, on-duty soldiers, on-duty ones fully equipped
   end
   for key, info in pairs(rt.rot) do                  -- FR-79: the militia rotation per squad (counts, no names)
     local r = {}
