@@ -1470,7 +1470,7 @@ end
 -- the mother's position, dfhack.units.getPosition), insane ones), the fort's tame
 -- animals (census.a) and the friendly units sense lists near the footprints gate watches (census.h.friends).
 -- {n, on, list = {{id, k, d, x, y, z}} sorted by distance (d = 0: on the footprint)}; nil while the census is unknown.
-local function around(K, fp, rad)
+local function around(K, fp, rad, anyz)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return nil end
   local res, seen = {n = 0, on = 0, list = {}, xz = {}}, {}
@@ -1484,7 +1484,7 @@ local function around(K, fp, rad)
     local d = fp_dist(fp, x, y, z)
     if not d then                        -- BUG-335 review: on a stair/ramp level near it: a walker for crossers only
       local dz = type(x) == 'number' and (z < fp[3] and fp[3] - z or z - fp[6]) or nil
-      local dxy = dz and dz <= M.PATH_Z and fp_dist({fp[1], fp[2], z, fp[4], fp[5], z}, x, y, z)
+      local dxy = dz and (anyz or dz <= M.PATH_Z) and fp_dist({fp[1], fp[2], z, fp[4], fp[5], z}, x, y, z)
       if dxy and dxy <= rad then
         if k == 'citizen' and u.military and u.military.squad_id >= 0 then k = 'soldier' end
         res.xz[#res.xz + 1] = {id = id, k = k, d = math.max(dxy, dz), x = x, y = y, z = z}
@@ -2023,9 +2023,42 @@ function M.reach_hold(K, name, sc, hold, cby)
   local T = M.reach_ticks()
   local have = {}
   for _, e in ipairs(hold) do have[e.id] = true end
+  -- BUG-907 (second review): the census scan `sc` sees PATH_R tiles; the window REACH_TICKS / REACH_TPT steps is wider (latency 1000: 123 tiles), so a walker
+  -- 25..123 tiles out can reach the footprint before the bridge has moved. The whole fort census is looked at out to that range, on any level (a lower
+  -- bound of a walk is the larger of the xy and z distance). Past PATH_R a unit holds only while it is MOVING (not on the same tile for RAISE_STILL ticks,
+  -- seen for the first time counts as moving): a fort of idlers 30 tiles out would otherwise keep the bridge down for ever. A standing unit that starts to
+  -- walk is seen at the next pass (FAST ticks) and cancels a pull that is still queued. The scan can not be made: the raise waits (fail closed).
+  local far = sc.far
+  local steps_max, far_scan = math.ceil(T / M.REACH_TPT), false
+  local spec = (K.manifest().bridges or {})[name]
+  local r = rt[name]
+  local now = K.now().tick
+  if steps_max > M.PATH_R and valid_spec(spec) and r then
+    local wide = around(K, spec.fp, steps_max, true)
+    if not wide then
+      hold.unknown = true
+      return hold
+    end
+    far, far_scan = {}, true
+    for _, e in ipairs(wide.list) do far[#far + 1] = e end
+    for _, e in ipairs(wide.xz or {}) do far[#far + 1] = e end
+  else
+    steps_max = M.PATH_R
+  end
+  local pm, pn = r and r.rf or {}, {}
   local add
-  for _, e in ipairs(sc.far) do
-    if not have[e.id] and (e.d or 99) <= M.PATH_R and not (e.k == 'animal' and not cby[e.id]) then
+  for _, e in ipairs(far) do
+    local moving = true
+    if far_scan and (e.d or 99) > M.PATH_R then
+      local p = string.format('%d,%d,%d', e.x or -1, e.y or -1, e.z or -1)
+      local o = pm[e.id]
+      -- o.m = the tick of its last step seen; first seen = standing (nothing to compare with: else every unit would hold for RAISE_STILL ticks after
+      -- each pull is wanted), the next pass finds it walking if it is
+      if not o then o = {p = p, m = -1e9} elseif o.p ~= p then o = {p = p, m = now} end
+      pn[e.id] = o
+      moving = now - o.m < M.RAISE_STILL
+    end
+    if moving and not have[e.id] and (e.d or 99) <= steps_max and not (e.k == 'animal' and not cby[e.id]) then
       local steps = cby[e.id] and cby[e.id].path or e.d
       local t = steps * M.REACH_TPT
       if t <= T then
@@ -2035,6 +2068,7 @@ function M.reach_hold(K, name, sc, hold, cby)
       end
     end
   end
+  if r then r.rf = pn end
   if not add then return hold end
   table.sort(add, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.id < b.id end)
   local out = {unknown = hold.unknown}

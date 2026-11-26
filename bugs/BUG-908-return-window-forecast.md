@@ -4,6 +4,10 @@ Severity: medium
 Found: Run 17 i3 Orangering y467 spring d32 ... y469 win d41: `GATE B1 opens for 600 ticks: 1 civilians outside it in PEACE (return window)` seven times, each followed by `B1 up waits in PEACE` lines and no raise; the want stood 132905 ticks before the first alarm named it. Diagnosis `leitung/neu10/DIAGNOSE-B1-2026-11-25.md`.
 Module: `lua/dfllm/gate.lua` (`return_window`, new `M.return_forecast`, `M.peace_day`)
 
+## Live events (region1-site97, kernel 7f3706e5, read from events.jsonl)
+- #38061 t190923369 CUTOFF: `7 citizens cut off from drink: bridge at 86,64,142; citizen 26394 at 92,46,144 on group 308, drink at 83,44,139 on group 3597` (B1 down since the crush, #38050 `B1 moving` t190919721).
+- #38075 t190936024 GATE `return`: `B1 opens for 600 ticks: 6 civilians outside it in PEACE (return window)` (units 26394, 26956, 27180, 27460, 28606, 29813); afterwards the bridge stood down with no raise (see Second round).
+
 ## Cause
 `return_window` (NEU1 D-14 inner) lowers the inner gate for `return_open` + lever latency ticks as soon as civilians stood outside it `return_every` ticks; whether the quiet re-raise (BUG-831/905) would then be possible was not asked, and the window ran its whole length although the last civilian was in long before. A bridge wanted up in quiet PEACE has no GATE_FAIL (suppressed): the wait line named only the nearest unit once a day.
 

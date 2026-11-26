@@ -4,6 +4,11 @@ Severity: medium
 Found: Run 17 i3 Orangering y469 winter d26-29: ARRIVAL siege #34608, a cave dragon 84-92 tiles away (building destroyer, no timed force by design: BUG-881 round 3 decision A, BUG-462/030), `B1 up` pull #34628, GATE_FAIL #34641 `blocked: citizen 29043 next to it, never raised onto them`, held 1739+ ticks until the player's lever in the emergency exit. Diagnosis `leitung/neu10/DIAGNOSE-B1-2026-11-25.md` (claim D).
 Module: `lua/dfllm/gate.lua` (`holders` FORCE branch: `bdo`, `near_now`, `rr.fz_bd`, `forced_event`)
 
+## Live events (region1-site97, y469 winter, read from events.jsonl)
+- #34608 t189434004 ARRIVAL siege (popup): `siege (popup) -> clock 30 t/s, alert: Kern+, recall: 10 outside Kern+ ... gates: 0 of 2 up` (goblin army, cave dragon 84-92 tiles out).
+- #34628 t189434683 LEVER: `pull B1 up` (job 1026834, lever 18259).
+- #34641 t189435755 GATE_FAIL: `B1 not up after 1739 ticks, 723 s (blocked: citizen 29043 next to it, never raised onto them)` at 85,63,142 (unit 29043, want up, why blocked).
+
 ## Cause
 With only building destroyers in sight `barrier_foe` is false: no timed force. The plain approach rule (BUG-587) forces the raise at `approach_near` 30 tiles / `approach_hold` 300 ticks and BUG-775's release of the units STANDING beside the footprint comes only within `approach_now` 20 tiles: ~300 ticks before the destroyer is at the bridge, less than the pull and the move need; the deadline escape of `holders` restricts only crossers, not units within the margin.
 

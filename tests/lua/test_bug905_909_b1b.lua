@@ -64,23 +64,48 @@ T.test('(i) ALERT, one hostile 20 tiles out, a soldier ON the footprint, a citiz
   T.ok(text and (text:find('can reach it in', 1, true) or text:find('on the footprint', 1, true)), text)
 end)
 
-T.test('(i) the live ambush: citizen 29043 steps onto B1 as the pull is done; with the reach rule no pull is queued in the first place (round 15: stage 2 of the bounded ' ..
-       'wait cancelled only for a unit ON the footprint)', function()
-  local acts = {{id = 27354, kind = 'soldier', pos = {51, 41}, still = true, nopath = true},
-                {id = 29043, kind = 'citizen', pos = {51, 37}, nopath = true,
-                 fn = function(W, rel, a)                     -- when the lever worker has had the pull for 36 of its 40 ticks he steps onto the footprint
-                   for _, l in ipairs(W.levers) do
-                     for i = 0, #l.jobs - 1 do
-                       local j = l.jobs[i]
-                       if j._w and l.bridge == 'B1' and S.abs_now() - j._w >= 36 and not a.stepped then a.stepped = true; W.move(a.id, 51, 40, Z) end
-                     end
-                   end
-                 end}}
-  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, actors = acts, army = {S.inv(250, 51, 20, Z)}}
+-- the live crush (Run 17 i3, BRIDGE_CRUSH #38052): the pull is queued at T, the lever work is done and the bridge starts to move at T+117 (events #38047 / #38052),
+-- and a citizen who stood a few tiles out steps onto the footprint inside that window. The mock lever: a worker after 77 ticks, the pull 40 ticks, so the bridge
+-- moves 117 ticks after the job was queued; the citizen steps onto the footprint 4 ticks before it moves (one gate pass is FAST = 25 ticks: nobody sees him).
+local function ambush(W_id)
+  return {{id = 27354, kind = 'soldier', pos = {51, 41}, still = true, nopath = true},
+          {id = W_id, kind = 'citizen', pos = {51, 37}, nopath = true,
+           fn = function(W, rel, a)
+             -- the lever job of B1 is queued: remember it; the frame its work is done (no job left, the bridge starts to move) is the one he steps onto the footprint in
+             for _, l in ipairs(W.levers) do
+               if l.bridge == 'B1' and #l.jobs > 0 then a.job_seen = true end
+             end
+             if a.job_seen and not a.stepped and S.bstate(W, 'B1') == 'moving' then a.stepped = true; W.move(a.id, 51, 40, Z) end
+           end}}
+end
+
+T.test('(i) the live ambush (pull at T, bridge moves at T+117, citizen 29043 steps onto B1 inside the window): zero crush on HEAD, then no pull at all; round 15 ' ..
+       '(65eca7bd) pulled and crushed him', function()
+  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, actors = ambush(29043), army = {S.inv(250, 51, 20, Z)}, lever = {worker = 77, pull = 40}}
   B.run(W, 4000)
-  T.eq(#B.pulls(W, 'B1'), 0, 'never pulled with him 3 tiles out')
-  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+  if os.getenv('DBG') then print('pulls', table.concat(B.pulls(W, 'B1'), ','), 'crushed', #W.crushed, names(W)) end
+  T.eq(#W.crushed, 0, 'BRIDGE_CRUSH: ' .. names(W))
+  T.eq(#B.pulls(W, 'B1'), 0, 'never pulled with a citizen 3 tiles out: ' .. table.concat(B.pulls(W, 'B1'), ','))
   T.eq(S.bstate(W, 'B1'), 'down')
+end)
+
+-- beyond the census scan (PATH_R = 24 tiles): at latency 1000 the bridge needs ~1,110 ticks (pull + its own movement), a walker 25..40 tiles out covers that in
+-- 123 steps: no path inside the census, but he can be on the footprint when it moves. The reach rule looks at the whole fort census out to REACH_TICKS / REACH_TPT.
+T.test('(i) a walker 25..40 tiles out (outside the 24-tile census scan, no path DF shows), lever latency 1000: the pull is cancelled when he walks toward it, B1 does not move while he can reach it, nobody is crushed', function()
+  -- a walker on a straight road toward B1 (no path DF shows, 9 ticks a tile), 40 / 35 tiles out and walking from the start: the first pass queues the pull (it sees him
+  -- for the first time, standing for all it knows), the next pass (25 ticks later) sees him walk and cancels it, long before the job is done (~80 ticks). The old
+  -- scan (24 tiles) saw nobody: the lever job was done and B1 up at ~+90 although he reaches the footprint ~360 / 315 ticks later, while it still moves (movement
+  -- 380 ticks, the longest live one).
+  for _, y0 in ipairs({0, 5}) do
+    local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, actors = {{id = 800, kind = 'citizen', route = B.route(51, y0, 70), start = 0, tpt = 9, nopath = true}},
+                      army = {S.inv(250, 51, 20, Z)}, move = 380}
+    B.run(W, 1700)
+    local ups = B.flips(W, 'B1', 'up')
+    if os.getenv('DBG') then print(y0, 'pulls', table.concat(B.pulls(W, 'B1'), ','), 'ups', table.concat(ups, ','), 'crushed', #W.crushed, names(W)) end
+    T.eq(#W.crushed, 0, 'start y=' .. y0 .. ' crushed: ' .. names(W))
+    -- the mock keeps a walker off a moving bridge, so a crush cannot be shown: the proof is that the bridge does not move while he walks toward it
+    T.ok(ups[1] == nil or ups[1] > (40 - y0) * 9 + 20, 'start y=' .. y0 .. ': B1 not moved before he had passed the footprint: up at +' .. tostring(ups[1]))
+  end
 end)
 
 T.test('(ii) ALERT, one hostile 20 tiles out, a clear approach (nobody within 24 tiles of B1), lever latency 1000: B1 is pulled and up, nobody crushed', function()
