@@ -1623,7 +1623,7 @@ def main(argv: list[str] | None = None) -> int:
         print(("allowed: " if ok else "BLOCKED: ") + why)
         return 0 if ok else 1
     if argv[:1] == ["--config"]:
-        errs = (fairplay.decision_errors() + fairplay.reflex_errors() + fairplay.water_errors() + fairplay.runner_errors()
+        errs = (fairplay.decision_errors() + fairplay.reflex_errors() + fairplay.reflex_required() + fairplay.water_errors() + fairplay.runner_errors()
                 + fairplay.economy_errors() + fairplay.snapshot_errors() + fairplay.care_errors()
                 + fairplay.military_errors() + fairplay.offices_errors() + fairplay.zones_errors()
                 + fairplay.save_errors() + fairplay.perf_errors() + fairplay.burrow_errors()

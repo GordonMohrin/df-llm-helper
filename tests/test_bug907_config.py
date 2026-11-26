@@ -42,10 +42,12 @@ def test_switch_validation(tmp_path):
 
 
 def test_lint_config_requires_the_switches(tmp_path):
+    assert fairplay.reflex_required() == []
     doc = _doc()
     for k in ("reach", "player_lever", "station_clear"):
         d = json.loads(json.dumps(doc))
         del d["gate"][k]
         p = tmp_path / "reflex.json"
         p.write_text(json.dumps(d), encoding="utf-8")
-        assert any(f"gate.{k}: required" in e for e in fairplay.reflex_errors(p)), k
+        assert any(f"gate.{k}: required" in e for e in fairplay.reflex_required(p)), k
+        assert fairplay.reflex_errors(p) == [], "the plain validator accepts a config without the key (the kernel's default is ON)"

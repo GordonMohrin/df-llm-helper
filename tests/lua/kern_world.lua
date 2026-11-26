@@ -103,7 +103,7 @@ function H.boot(W, opts)
     cfg.reflex = type(cfg.reflex) == 'table' and cfg.reflex or {v = 2}
     cfg.reflex.gate = type(cfg.reflex.gate) == 'table' and cfg.reflex.gate or {}
     for k, v in pairs({reach = false, player_lever = false, station_clear = 2}) do
-      if cfg.reflex.gate[k] == nil then cfg.reflex.gate[k] = v end
+      cfg.reflex.gate[k] = v                              -- over the repo's config too (the shipped one names the keys: true, true, 4)
     end
   end
   -- Neuausrichtung 1 / P3: a live player session (the arbiter's dead-man switch pauses a fort without one), written once

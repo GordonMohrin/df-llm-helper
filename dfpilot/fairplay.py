@@ -189,10 +189,6 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     if not isinstance(gate, dict):
         errs.append(f"{name}: gate must be an object")
     else:
-        # Neuausrichtung 15b (BUG-907): the safety switches are ON in the code when the key is absent, but the shipped file must say so (lint --config requires them)
-        for k, what in (("reach", "true"), ("player_lever", "true"), ("station_clear", "4")):
-            if k not in gate:
-                errs.append(f"{name}: gate.{k}: required (shipped value {what}); an absent key is ON in the kernel, a config that does not name it hides the safety rule")
         for k, v in gate.items():
             if k == "force_near":
                 if not is_int(v, 0, 30):
@@ -285,6 +281,25 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         if all(isinstance(c, int) for c in caps) and not caps[0] <= caps[1] <= caps[2] <= caps[3]:
             errs.append(f"{name}: growth: base <= armed_cap <= ready_cap <= top_cap expected, got {caps}")
     return errs
+
+
+# Neuausrichtung 15b (BUG-907): the safety switches gate.reach / player_lever / station_clear are ON in the kernel when the key is absent, but the SHIPPED
+# config/reflex.json must name them (`lint --config` requires them: a config that does not say so hides the safety rule)
+REFLEX_REQUIRED = (("reach", "true"), ("player_lever", "true"), ("station_clear", "4"))
+
+
+def reflex_required(path: str | Path | None = None) -> list[str]:
+    """The required gate keys config/reflex.json lacks (empty when it is missing: reflex_errors says so)."""
+    p = Path(path or REFLEX_PATH)
+    if not p.exists():
+        return []
+    try:
+        gate = json.loads(_read(p)).get("gate", {})
+    except ValueError:
+        return []
+    gate = gate if isinstance(gate, dict) else {}
+    return [f"config/reflex.json: gate.{k}: required (shipped value {what}); an absent key is ON in the kernel, a config that does not name it hides the safety rule"
+            for k, what in REFLEX_REQUIRED if k not in gate]
 
 
 # Neuausrichtung 1 / P3 (docs/v2/NEU1-wecken.md): config/wake.json (dfpilot/session.py LIMITS; a bad key = its default)
