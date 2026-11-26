@@ -166,22 +166,22 @@ T.test('BUG-758 (1): ALERT, one wild animal within 30 tiles of O1 and a soldier 
   T.eq(S.bstate(W, 'O1'), 'down')
 end)
 
-T.test('BUG-758 (2) / 15b: ALERT, an invader within 30 tiles of O1, a soldier pacing 3 tiles from it who steps on when it moves: held while he paces AND while he stands (3 tiles = 27 ticks away: ' ..
-       'he can reach it, gate.reach_hold; round 15b withdrew the raise-once-he-stands), nobody crushed', function()
+T.test('BUG-758 (2): ALERT, an invader within 30 tiles of O1, a soldier pacing 3 tiles from it who steps on when it moves: held while he paces, raised once he stands, nobody crushed', function()
   local W = world{army = {S.inv(250, 51, 30, Z)}, walkers = {pacer(811, 'soldier', 60, 49, true)}}
   run2(W, 2400)
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
-  T.eq(#flips_to(W, 'O1', 'up'), 0, 'O1 not raised while a soldier can reach it')
-  T.eq(S.bstate(W, 'O1'), 'down')
+  local up = flips_to(W, 'O1', 'up')
+  T.eq(#up, 1, 'O1 rose once')
+  T.ok(up[1] >= 60 * 9, 'not while he paced: +' .. tostring(up[1]))
+  T.eq(S.bstate(W, 'O1'), 'up')
 end)
 
-T.test('BUG-758 (3) / 15b: ALERT, an invader within 30 tiles of O1 and a CITIZEN pacing 3 tiles from it: the old BUG-587 release of the recall stream is withdrawn outside SIEGE / BREACH ' ..
-       '(he can reach the footprint before the bridge has moved): O1 is not raised, nobody crushed', function()
+T.test('BUG-758 (3): ALERT, an invader within 30 tiles of O1 and a CITIZEN pacing 3 tiles from it: the recall stream does not hold the raise (BUG-587)', function()
   local W = world{army = {S.inv(250, 51, 30, Z)}, walkers = {pacer(812, 'citizen', 400, 49, false)}}
   run2(W, 1500)
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
-  T.eq(#flips_to(W, 'O1', 'up'), 0, 'O1 not raised past the citizen')
-  T.eq(S.bstate(W, 'O1'), 'down')
+  T.eq(#flips_to(W, 'O1', 'up'), 1, 'O1 rose past the citizen')
+  T.eq(S.bstate(W, 'O1'), 'up')
 end)
 
 T.test('BUG-758 (4): SIEGE traffic, invaders closing in, a stream over O1, B1 and B2 and a soldier pacing beside O1: nobody crushed, O1 and B1 up before T+900', function()

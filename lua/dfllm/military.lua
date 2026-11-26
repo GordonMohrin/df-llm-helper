@@ -67,9 +67,9 @@ M.STATION_R = 3             -- a soldier within 3 tiles (same z) of the station 
 M.SPREAD = 1                -- BUG-032: tiles around its station point DF stands a squad on (cfg stations.spread)
 M.SPREAD_LIM = {0, 5}
 -- BUG-906 (Run 17 i3 B1: the station lay 4 tiles from the footprint, gate's RAISE_R is 3: soldiers pacing about it at 3 tiles held every ALERT /
--- RECOVERY raise, and restation said 'kept' because 4 > 1 + spread): the clearance of a station is at least gate.RAISE_R + spread (cfg stations.clear,
+-- RECOVERY raise, and restation said 'kept' because 4 > 1 + spread): the clearance of a station is at least gate.RAISE_R + spread (cfg gate.station_clear,
 -- default CLEAR = 3 + 1 = 4; never below gate's margin + spread), so a station whose crowd can hold its own bridge is moved
-M.CLEAR = 4
+M.CLEAR = 0                  -- 15b: absent key = the margin + spread clearance of main; the shipped config/reflex.json sets gate.station_clear 4
 M.CLEAR_LIM = {2, 12}
 M.RELOC_TTL = 6000          -- BUG-032: ticks a station's replacement is kept (revealed tiles change slowly)
 M.NOTE_EVERY = 2400         -- BUG-032: a squad with no station clear of a bridge it holds is told at most this often
@@ -2317,8 +2317,8 @@ end
 local function clearance(K)
   local ok, m = K.call('gate', 'margin')
   m = ok and int(m) or 1
-  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.stations) == 'table' and K.cfg.reflex.stations or {}
-  local c = int(r.clear)
+  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}      -- 15b: reflex.json gate.station_clear (not `stations`: that block is main's)
+  local c = int(r.station_clear)
   if not c or c < M.CLEAR_LIM[1] or c > M.CLEAR_LIM[2] then c = M.CLEAR end
   return math.max(m + spread(K), c), m
 end

@@ -110,7 +110,7 @@ T.test('kern: labor.set through the inbox is held; economy\'s later switch is re
   require('dfllm.kern').stop()
 end)
 
-T.test('kern: the open exit lifts the mode list of the VERB_EMG verbs only (lever in DRILL), a closed or missing one does not', function()
+T.test('kern: the open exit lifts the mode list of the VERB_EMG verbs only (lever in SIEGE), a closed or missing one does not', function()
   local W = H.world{tag = 'kernemg', ms_per_frame = 100}
   local gate = {name = 'gate', every = {ticks = 25}, verbs = {}}
   gate.verbs.lever = function(K, args) return true, 'queued ' .. args.bridge end
@@ -118,16 +118,16 @@ T.test('kern: the open exit lifts the mode list of the VERB_EMG verbs only (leve
   function pl.open() return pl.is end
   local ok, msg = H.boot(W, {modules = {gate, pl}})
   T.ok(ok, msg)
-  require('dfllm.kern').K().set_mode('DRILL', 'test')       -- (15b: lever is in the contract mode list of ALERT and SIEGE too, for the inner bridges)
+  require('dfllm.kern').K().set_mode('SIEGE', 'test')
   H.inbox(W, 'l1', 'lever', {bridge = 'O1', want = 'up'})
   H.run(W, 100, {skip = 10})
-  T.eq(H.outbox(W, 'l1').msg, 'lever not allowed in DRILL')
+  T.eq(H.outbox(W, 'l1').msg, 'lever not allowed in SIEGE')
   pl.is = true
   H.inbox(W, 'l2', 'lever', {bridge = 'O1', want = 'up'})
   H.inbox(W, 'd1', 'drill', {})
   H.run(W, 100, {skip = 10})
   T.eq(H.outbox(W, 'l2').msg, 'queued O1')
-  T.eq(H.outbox(W, 'd1').msg, 'drill not allowed in DRILL', 'a verb outside VERB_EMG keeps its modes')
+  T.eq(H.outbox(W, 'd1').msg, 'drill not allowed in SIEGE', 'a verb outside VERB_EMG keeps its modes')
   require('dfllm.kern').stop()
 end)
 

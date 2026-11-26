@@ -41,7 +41,7 @@ T.test('a citizen walking home at T+1,200 still counts as outside (fails the dri
 end)
 
 T.test('a citizen locked out at the raised O1 is reported as walking and still counts', function()
-  local W = world{X.cit(99, {pos = {20, 10, Z}})}       -- far from O1 while it rises (round 15b: a unit in reach holds the raise); steps to 4 tiles outside it at T+700
+  local W = world{X.cit(99, {pos = {51, 6, Z}})}       -- 4 tiles outside O1 (y 10), off the footprint margin
   start(W)
   X.run(W, 2500, {at = {{700, function(W) W.move(99, 51, 8, Z) end}}})   -- to the raised gate
   local ev = result(W)
@@ -54,7 +54,7 @@ end)
 T.test('a citizen who headed home and stopped where the raised gate cut the path is reported as walking', function()
   local W = world{X.cit(99, {pos = {20, 20, Z}})}                         -- 31 tiles from B1 at T0
   start(W)
-  X.run(W, 2500, {at = {{1000, function(W) W.move(99, 36, 30, Z) end}}})   -- 15 closer by T+1000 (after the raise), then still
+  X.run(W, 2500, {at = {{500, function(W) W.move(99, 36, 30, Z) end}}})   -- 15 closer by T+500, then still
   local ev = result(W)
   T.eq({ev.d.pass, ev.d.outside, ev.d.walking}, {0, 1, 1}, ev.msg)
 end)

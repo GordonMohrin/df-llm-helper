@@ -306,8 +306,7 @@ T.test('BUG-235 (review): a lockdown raises an outer bridge a quiet-PEACE rescue
   T.eq(up(W, 'O1'), false, 'lowered for the rescue')
   T.eq(W.K.mode(), 'PEACE')
   lock.v = 'test lockdown'
-  W.move(11, 59, 28, Z)                                -- nobody on the footprint nor within reach of it (15b: 25+ tiles from O1): the raise may go
-  for i = 1, 3 do W.move(i, 55 + i, 15, Z) end         -- the core's citizens too
+  W.move(11, 50, 18, Z)                                -- nobody on the footprint: the raise may go
   run(W, 1200)
   T.eq(up(W, 'O1'), true, 'the lockdown raised O1')
   T.ok(logged(W, 'gate: O1 rescue want released, now up (lockdown)') or logged(W, 'O1 up'), 'by the lockdown')

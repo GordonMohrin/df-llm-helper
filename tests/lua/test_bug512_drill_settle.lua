@@ -21,7 +21,7 @@ end
 
 -- walkers: {id, kind = 'soldier'|'citizen'|'animal', route, start (ticks), ghost}; the stepper moves them one tile per frame
 local function build(o)
-  local units = S.far_units()      -- round 15b: everybody 25+ tiles from the footprints (a unit in reach holds a raise); the test adds its own walkers
+  local units = S.fort_units()
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     local x, y = w.route[1][1], w.route[1][2]
@@ -122,11 +122,11 @@ local function drill_world(o)
   return W, drill
 end
 
--- the citizens outside walk in over B1 (one every 150 ticks), a squad of 3 marches over it too, to a station 30 tiles past it (round 15b: a station within reach holds the raise)
+-- the citizens outside walk in over B1 (one every 150 ticks), a squad of 3 marches over it too
 local function recall(n)
   local ws = {}
-  for k = 0, n - 1 do ws[#ws + 1] = {id = 600 + k, kind = 'citizen', route = route(51, 20, 90), start = 150 * k} end
-  for k = 0, 2 do ws[#ws + 1] = {id = 640 + k, kind = 'soldier', route = route(50 + k, 30, 70), start = 60 * k} end
+  for k = 0, n - 1 do ws[#ws + 1] = {id = 600 + k, kind = 'citizen', route = route(51, 20, 60), start = 150 * k} end
+  for k = 0, 2 do ws[#ws + 1] = {id = 640 + k, kind = 'soldier', route = route(50 + k, 30, 46), start = 60 * k} end
   return ws
 end
 

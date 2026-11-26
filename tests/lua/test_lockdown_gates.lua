@@ -46,8 +46,7 @@ local function fort(opts)
   SW.regroup(W)
   SW.item(W, 'DRINK', 5, 6, Z, 20)
   SW.item(W, 'FOOD', 6, 6, Z, 20)
-  -- Neuausrichtung 15b: the citizens stand 25+ tiles from every bridge (the census sees 24: gate.reach_hold keeps the kernel's raises off a footprint a unit can reach)
-  for _, c in ipairs({{1, 2, 8}, {2, 3, 9}, {3, 4, 10}, {4, 5, 11}}) do
+  for _, c in ipairs({{1, 5, 8}, {2, 6, 9}, {3, 7, 10}, {4, 8, 11}}) do
     W.add_unit{id = c[1], pos = {c[2], c[3], Z}, citizen = true, adult = true}
   end
   for _, u in ipairs(opts.units or {}) do W.add_unit(u) end
@@ -193,10 +192,9 @@ end)
 
 T.test('BUG-013: a hostile near a citizen sounds the alert at once; every pull is done with the alert on, the alert ' ..
        'list holds Hebel+ with the lever tiles while pulls are pending, and only then', function()
-  -- a woodcutter on the field at 3,22 (15b: 27+ tiles from every bridge, the reach rule would hold the pulls for one nearer); a goblin comes into sight at
-  -- 3,18 (4 tiles from him)
-  local W = fort{units = {{id = 9, pos = {3, 22, Z + 1}, citizen = true, adult = true},
-                          S.inv(300, 3, 18, Z + 1, {hidden = true})}}
+  -- a woodcutter on the field at 24,9; a goblin comes into sight at 24,13 (4 tiles from him)
+  local W = fort{units = {{id = 9, pos = {24, 9, Z + 1}, citizen = true, adult = true},
+                          S.inv(300, 24, 13, Z + 1, {hidden = true})}}
   settle(W)
   W.unit(300)._m.hidden = false
   run(W, 30)
@@ -205,7 +203,7 @@ T.test('BUG-013: a hostile near a citizen sounds the alert at once; every pull i
   W.inbox('ack', {})
   local t0 = arr[1].tick
   -- Run 11: the woodcutter outside is the recall, named right after the alert
-  T.ok(arr[1].msg:find('alert: Kern+, recall: 1 outside Kern+, doors 0 forbidden, 1 waiting for 1 citizen outside, gates: 0 of 4 up, 4 pulls pending ' ..
+  T.ok(arr[1].msg:find('alert: Kern+, recall: 1 outside Kern+, doors 1 forbidden, gates: 0 of 4 up, 4 pulls pending ' ..
        '(levers in Hebel+)', 1, true), arr[1].msg)
   T.eq({arr[1].d.raised, arr[1].d.up, arr[1].d.left, arr[1].d.blocked}, {4, 0, 4, 0})
   T.eq(idx(), 1, 'a hostile near a citizen: the alert at once')
@@ -321,7 +319,7 @@ T.test('Run 11 recall (siege 8 y441: 16 citizens outside Kern+ at the arrival, 7
        'citizen outside sounds the alert at once although the pulls are pending (old: it waited for the pulls, ~T+400 ' ..
        'here); the pulls go on under it with Hebel+; the door waits for him RECALL_MAX ticks after the alert (old: 450); ' ..
        'RECALL (B) late, then done with the ticks he took', function()
-  local W = fort{units = {{id = 9, pos = {3, 22, Z + 1}, citizen = true, adult = true}}}      -- 15b: out of reach of every bridge
+  local W = fort{units = {{id = 9, pos = {24, 9, Z + 1}, citizen = true, adult = true}}}
   settle(W)
   local door = W.dyn[SW.key(19, 10, Z)]
   W.busy_until = W.K.now().tick + 300           -- nobody takes a pull before T+300

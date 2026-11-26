@@ -159,10 +159,7 @@ T.test('BUG-027 order at an arrival: a unit next to a bridge the lockdown wants 
        'them in first), the bridge rises once he is inside; the other pulls do not hold the alert back', function()
   local kmock = require('dfllm.util.k_mock')
   -- no fort manifest (unmanaged X1..X3); the X1/X3 pulls are slow, so the deferred alert would wait for them
-  local far = S.far_units()                                  -- Neuausrichtung 15b: the rest of the fort is out of reach of every footprint
-  for _, u in ipairs(far_army()) do far[#far + 1] = u end
-  far[#far + 1] = S.cit(26099, 51, 39)
-  local W = S.world{manifest = false, units = far,
+  local W = S.world{manifest = false, units = cast({S.cit(26099, 51, 39)}),
                     lever_cfg = {[11] = {worker = 400}, [12] = {worker = 400}, [31] = {worker = 400}, [32] = {worker = 400}}}
   df.global.world.status.popups = kmock.vec{}
   local snap = {name = 'snapshot', every = {ticks = 100}}
@@ -183,7 +180,7 @@ T.test('BUG-027 order at an arrival: a unit next to a bridge the lockdown wants 
   for _, l in ipairs(W.logs) do if l.msg:find('(units on a bridge)', 1, true) then said = true end end
   T.ok(said, 'kern.log says why the alert did not wait')
   T.eq(#S.pulls(W, 'B1'), 0, 'X2 waits for him')
-  W.move(26099, 51, 88, Z)                                   -- the alert called him in (15b: out of reach of every footprint)
+  W.move(26099, 51, 44, Z)                                   -- the alert called him in
   S.run(W, 200)
   T.eq(S.bstate(W, 'B1'), 'up')
 end)

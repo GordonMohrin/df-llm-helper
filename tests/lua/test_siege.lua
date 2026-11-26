@@ -253,7 +253,7 @@ add{name = 'DRILL: a soldier on the footprint blocks the raise until he steps of
     r[5].pos = {51, 40, Z}
     return r
   end,
-  at = {{100, function(W) W.K.call('drill', 'start') end}, {1100, function(W) W.move(5, 51, 70, Z) end}},
+  at = {{100, function(W) W.K.call('drill', 'start') end}, {1100, function(W) W.move(5, 51, 44, Z) end}},
   run = 2000, modes = {'PEACE>DRILL', 'DRILL>PEACE'},
   check = function(W)
     local b1 = S.pulls(W, 'B1')
@@ -263,22 +263,21 @@ add{name = 'DRILL: a soldier on the footprint blocks the raise until he steps of
     T.eq(W.drill.kpi.fails, {'B1:blocked'})
   end}
 
-add{name = 'DRILL (live L4): a soldier next to the B1 footprint holds the raise; far away (round 15b: two tiles away holds it too, the reach rule) he does not',
+add{name = 'DRILL (live L4): a soldier next to the B1 footprint holds the raise; two tiles away he does not (once he has stood still RAISE_STILL ticks, BUG-543)',
   units = function()
     local r = S.fort_units()
     r[5].pos = {51, 41, Z}                                       -- adjacent to the footprint (y 40)
     return r
   end,
-  at = {{100, function(W) W.K.call('drill', 'start') end}, {900, function(W) W.move(5, 51, 70, Z) end}},
+  at = {{100, function(W) W.K.call('drill', 'start') end}, {900, function(W) W.move(5, 51, 42, Z) end}},
   run = 2000, modes = {'PEACE>DRILL', 'DRILL>PEACE'},
   check = function(W)
     local b1 = S.pulls(W, 'B1')
-    between(rel(W, b1[1].tick), 900, 1000, 'B1 pull once he is far')
+    between(rel(W, b1[1].tick), 900, 1000, 'B1 pull once he stands two tiles off')
     T.eq(#evs(W, 'GATE_FAIL') + #evs(W, 'BREACH'), 0)
   end}
 
 add{name = 'DRILL (live L4): a pending raise is cancelled when a citizen steps next to the footprint',
-  units = function() return S.far_units() end,
   lever_cfg = {[21] = {worker = 150}, [22] = {worker = 150}},
   at = {{100, function(W) W.K.call('drill', 'start') end}, {120, function(W) W.move(1, 51, 41, Z) end},
         {700, function(W) W.move(1, 60, 70, Z) end}},
@@ -438,7 +437,6 @@ add{name = 'BREACH without a Tiefe+ burrow uses Kern+ and never asks for the mis
   end}
 
 add{name = 'DRILL: real pulls, KPIs at T+1,200, then lowered in PEACE; no siege events',
-  units = function() return S.far_units() end,
   at = {{100, function(W) W.K.call('drill', 'start') end}}, run = 2500,
   modes = {'PEACE>DRILL', 'DRILL>PEACE'},
   check = function(W)
@@ -460,7 +458,6 @@ add{name = 'DRILL: real pulls, KPIs at T+1,200, then lowered in PEACE; no siege 
   end}
 
 add{name = 'DRILL with dead levers: no BREACH, no GATE_FAIL; the failures are in gate.kpi',
-  units = function() return S.far_units() end,
   lever_default = {},
   at = {{100, function(W) W.K.call('drill', 'start') end}}, run = 1500,
   modes = {'PEACE>DRILL', 'DRILL>PEACE'},
@@ -911,7 +908,6 @@ add{name = 'a lever unlinked after the last resolve is skipped: the pull goes to
   end}
 
 add{name = 'footprint after a DRILL: B1 is not lowered while a citizen stands on it (no forcing)',
-  units = function() return S.far_units() end,
   at = {{100, function(W) W.K.call('drill', 'start') end}, {500, mv(1, 51, 40)}, {2000, mv(1, 60, 70)}},
   run = 2600, modes = {'PEACE>DRILL', 'DRILL>PEACE'},
   check = function(W)
@@ -927,7 +923,6 @@ add{name = 'footprint after a DRILL: B1 is not lowered while a citizen stands on
   end}
 
 add{name = 'footprint: our pending lowering pull is cancelled when a citizen steps on; re-queued later',
-  units = function() return S.far_units() end,
   lever_cfg = {[21] = {worker = 150}, [22] = {worker = 150}},
   at = {{100, function(W) W.K.call('drill', 'start') end}, {1420, mv(1, 51, 40)}, {1800, mv(1, 60, 70)}},   -- BUG-251: queued ~1,360
   run = 2400, modes = {'PEACE>DRILL', 'DRILL>PEACE'},

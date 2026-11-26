@@ -55,7 +55,14 @@ function B.build(o)
   for _, f in ipairs(o.foes or {}) do foes[#foes + 1] = f end
   local persist = {}
   if o.lat then persist['m.gate'] = {lat = {s = (o.lat + 50) // 100, t = o.lat}} end
-  local W = S.world{units = units, mode = o.mode, move = o.move or 100, lever_default = o.lever or {worker = 30, pull = 40}, cfg = o.cfg,
+  -- the shipped switches of config/reflex.json (the code's own defaults are the legacy gate of main): the reach rule, the player's lever, the station clearance
+  local cfg = o.cfg or {}
+  cfg.reflex = cfg.reflex or {v = 2}
+  cfg.reflex.gate = cfg.reflex.gate or {}
+  if cfg.reflex.gate.reach == nil then cfg.reflex.gate.reach = o.reach ~= false end
+  if cfg.reflex.gate.player_lever == nil then cfg.reflex.gate.player_lever = true end
+  if cfg.reflex.gate.station_clear == nil then cfg.reflex.gate.station_clear = 4 end
+  local W = S.world{units = units, mode = o.mode, move = o.move or 100, lever_default = o.lever or {worker = 30, pull = 40}, cfg = cfg,
                     persist = persist}
   W.actors, W.foes, W.crushed, W.t0 = actors, foes, {}, nil
   -- the squad: one fake squad 1 whose station order the military module (the real one: o.real_mil) may move

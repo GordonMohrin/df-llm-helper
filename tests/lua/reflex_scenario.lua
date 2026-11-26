@@ -12,7 +12,7 @@ local kern = require('dfllm.kern')
 
 local outdir = assert(arg[1], 'usage: reflex_scenario.lua <outdir>')
 local Z = S.Z
-local units = S.far_units()          -- 15b: out of reach of every footprint (gate.reach_hold)
+local units = S.fort_units()
 for _, u in ipairs(S.army(6, 51, 0)) do u.hidden = true; units[#units + 1] = u end
 local W = H.world{dfpath = (outdir:gsub('\\', '/')), units = units, ms_per_frame = 50}
 S.install(W)                                          -- bridges and linked levers exist; no manifest is persisted

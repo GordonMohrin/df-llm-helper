@@ -348,9 +348,17 @@ function M.neu_cfg(K)
   if not pr or pr < 2 or pr > M.PATH_R then pr = M.PEACE_R end
   if not pc or pc < 0 or pc > 4800 then pc = M.PEACE_CLEAR end
   if not pl or pl < 0 or pl > 28 then pl = M.PEACE_LOCK_DAYS end
+  -- Neuausrichtung 15b: `reach` (the reach rule, M.reach_hold) and `player_lever` (the player's lever up of an inner bridge in ALERT / SIEGE, kern.lua) are
+  -- switches that are OFF when the key is absent (the gate of main, which the pre-15b tests describe) and ON in the shipped config/reflex.json: a config
+  -- without the key is the legacy gate, and the kernel says so once (kern.log)
+  local reach = r.reach == true
+  if not reach and M.reach_said ~= K then
+    M.reach_said = K
+    K.log('info', 'gate: the reach rule is OFF (reflex.json gate.reach is not true): legacy raise rules, a unit that can reach a footprint does not hold an ALERT / RECOVERY / DRILL raise')
+  end
   return {close_at_once = flag(r.close_at_once), fail_closed = flag(r.fail_closed), drink_inside = flag(r.drink_inside),
           return_every = every, return_open = open, peace_raise = flag(r.peace_raise), peace_clear_r = pr, peace_clear = pc,
-          peace_lock_days = pl}
+          peace_lock_days = pl, reach = reach}
 end
 
 ---------------------------------------------------------------- DF reads (buildings, jobs)
@@ -1983,7 +1991,7 @@ function M.drop_animals(list, all)
 end
 
 -- Neuausrichtung 15 (BUG-906, Run 17 i3 B1: the squad's station lay 4 tiles from the footprint, its soldiers paced about it at 3 tiles and held every
--- raise; military's restation answered 'kept'): when military found no tile on the inner side that is clear of the bridge (stations.clear) it says so
+-- raise; military's restation answered 'kept'): when military found no tile on the inner side that is clear of the bridge (gate.station_clear) it says so
 -- (military.standing: the squad's soldiers at their station stand by order for this alarm). Neuausrichtung 15b: that exemption holds ONLY in SIEGE /
 -- BREACH, where the raise is forced anyway (a soldier at his station, not ON the footprint, holds nothing there). In ALERT / RECOVERY / PEACE / DRILL a
 -- soldier at his station is a unit that can reach the footprint like any other (M.reach_hold): the exemption is withdrawn there.
@@ -2013,12 +2021,45 @@ function M.reach_ticks()
 end
 M.REACH_MODES = {ALERT = true, RECOVERY = true, PEACE = true, DRILL = true}      -- everything outside SIEGE / BREACH (round 15b, second review: the drill's timed rules left a gap beyond CROSS_REACH)
 function M.reach_applies(K, name)
-  if not M.REACH_MODES[K.mode()] then return false end
+  if not M.REACH_MODES[K.mode()] or not M.neu_cfg(K).reach then return false end
   local br = st.br[name]
   if br and type(br.why) == 'string' and (br.why:find('^lever') or br.why == 'drill_end') then return false end
   return not M.quiet_raise(K, name)
 end
+-- The residual the rule cannot close (BUG-907): a unit that STANDS beyond the census scan (more than PATH_R tiles out) when the pull is queued and starts to walk after
+-- the lever job has vanished can be on the footprint while the bridge still moves (100 to 380 ticks, nothing stops a moving bridge). Holding every standing unit
+-- within reach_ticks / REACH_TPT tiles would keep the bridge down on every busy fort for good, so they do not hold; instead the kernel SAYS so when it queues the pull
+-- (M.reach_resid: GATE state reach_resid + kern.log): how many stood out there, how far the nearest was.
+function M.reach_resid(K, name, r, now, from)
+  local q = r.rres
+  r.rres = nil
+  if not q or q.n <= 0 then return end
+  local txt = string.format('%s pulled up with %d unit%s %d..%d tiles out (past the %s): one that is not walking when the pull is queued and starts to walk after the lever job is done can still reach the footprint ' ..
+                            'while it moves; the reach rule cannot see a walk before it starts', name, q.n, q.n == 1 and '' or 's', q.d, math.ceil(M.reach_ticks() / M.REACH_TPT),
+                            from and string.format('%d tiles the quiet PEACE raise looks at', from) or 'census scan, standing there')
+  K.emit('GATE', 'C', txt:sub(1, 200), {bridge = name, state = 'reach_resid', n = q.n, units = q.ids, need = M.reach_ticks()})
+  K.log('info', 'gate: %s', txt)
+end
+-- the same for the quiet PEACE raise, whose own window (peace_wait) looks at PEACE_R (20) tiles only: the units farther out than that, up to the reach window
+function M.peace_resid(K, name, spec)
+  local R = M.neu_cfg(K).peace_clear_r
+  local steps = math.ceil(M.reach_ticks() / M.REACH_TPT)
+  local wide = valid_spec(spec) and around(K, spec.fp, steps, true)
+  if not wide then return end
+  local n, d, ids = 0, 1e9, {}
+  for _, l in ipairs({wide.list, wide.xz or {}}) do
+    for _, e in ipairs(l) do
+      if (e.d or 0) > R and e.k ~= 'animal' then
+        n = n + 1
+        d = math.min(d, e.d)
+        if #ids < 20 then ids[#ids + 1] = e.id end
+      end
+    end
+  end
+  if n > 0 then M.reach_resid(K, name, {rres = {n = n, d = d, ids = ids}}, nil, R) end
+end
 function M.reach_hold(K, name, sc, hold, cby)
+  if rt[name] then rt[name].rres = nil end
   if not (sc and sc.far) then return hold end
   local T = M.reach_ticks()
   local have = {}
@@ -2033,32 +2074,50 @@ function M.reach_hold(K, name, sc, hold, cby)
   local spec = (K.manifest().bridges or {})[name]
   local r = rt[name]
   local now = K.now().tick
+  local mv, resid = {}, nil                  -- mv[id] = the unit moves (or is inside the census scan); resid = units that stand beyond it and do not hold
   if steps_max > M.PATH_R and valid_spec(spec) and r then
-    local wide = around(K, spec.fp, steps_max, true)
-    if not wide then
-      hold.unknown = true
-      return hold
+    -- the whole-census scan costs a pass over every unit of the fort: it is made once per FAST ticks (the cadence of the walking test below too: the
+    -- sc.far refresh of a FAST tick), the passes in between (a DRILL / SIEGE frame is 9 ticks) reuse its result
+    local rc = r.rc
+    if rc and rc.steps == steps_max and now >= rc.t and now - rc.t < M.FAST then
+      far, mv, resid = rc.far, rc.mv, rc.resid
+    else
+      local wide = around(K, spec.fp, steps_max, true)
+      if not wide then
+        hold.unknown = true
+        return hold
+      end
+      far, far_scan = {}, true
+      for _, e in ipairs(wide.list) do far[#far + 1] = e end
+      for _, e in ipairs(wide.xz or {}) do far[#far + 1] = e end
+      local pm, pn = r.rf or {}, {}
+      for _, e in ipairs(far) do
+        local moving = true
+        if (e.d or 99) > M.PATH_R then
+          local p = string.format('%d,%d,%d', e.x or -1, e.y or -1, e.z or -1)
+          local o = pm[e.id]
+          -- o.m = the tick of its last step seen; first seen = standing (nothing to compare with: else every unit would hold for RAISE_STILL ticks after
+          -- each pull is wanted), the next pass finds it walking if it is
+          if not o then o = {p = p, m = -1e9} elseif o.p ~= p then o = {p = p, m = now} end
+          pn[e.id] = o
+          moving = now - o.m < M.RAISE_STILL
+          if not moving and e.k ~= 'animal' and (e.d or 99) <= steps_max then
+            resid = resid or {n = 0, d = e.d, ids = {}}
+            resid.n = resid.n + 1
+            if #resid.ids < 20 then resid.ids[#resid.ids + 1] = e.id end
+            resid.d = math.min(resid.d, e.d)
+          end
+        end
+        mv[e.id] = moving
+      end
+      r.rf, r.rc = pn, {t = now, steps = steps_max, far = far, mv = mv, resid = resid}
     end
-    far, far_scan = {}, true
-    for _, e in ipairs(wide.list) do far[#far + 1] = e end
-    for _, e in ipairs(wide.xz or {}) do far[#far + 1] = e end
   else
     steps_max = M.PATH_R
   end
-  local pm, pn = r and r.rf or {}, {}
   local add
   for _, e in ipairs(far) do
-    local moving = true
-    if far_scan and (e.d or 99) > M.PATH_R then
-      local p = string.format('%d,%d,%d', e.x or -1, e.y or -1, e.z or -1)
-      local o = pm[e.id]
-      -- o.m = the tick of its last step seen; first seen = standing (nothing to compare with: else every unit would hold for RAISE_STILL ticks after
-      -- each pull is wanted), the next pass finds it walking if it is
-      if not o then o = {p = p, m = -1e9} elseif o.p ~= p then o = {p = p, m = now} end
-      pn[e.id] = o
-      moving = now - o.m < M.RAISE_STILL
-    end
-    if moving and not have[e.id] and (e.d or 99) <= steps_max and not (e.k == 'animal' and not cby[e.id]) then
+    if mv[e.id] ~= false and not have[e.id] and (e.d or 99) <= steps_max and not (e.k == 'animal' and not cby[e.id]) then
       local steps = cby[e.id] and cby[e.id].path or e.d
       local t = steps * M.REACH_TPT
       if t <= T then
@@ -2068,7 +2127,7 @@ function M.reach_hold(K, name, sc, hold, cby)
       end
     end
   end
-  if r then r.rf = pn end
+  if r then r.rres = resid end
   if not add then return hold end
   table.sort(add, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.id < b.id end)
   local out = {unknown = hold.unknown}
@@ -3321,6 +3380,8 @@ local function control(K, name, spec, now)
     return s
   end
   r.job = {id = job, lever = lid, queued = now, before = s, qms = K.now().ms}
+  if w == 'up' and r.rres then M.reach_resid(K, name, r, now)              -- BUG-907: what the reach rule could not see
+  elseif w == 'up' and M.neu_cfg(K).reach and M.quiet_raise(K, name) then M.peace_resid(K, name, spec) end
   if not (r.lat0 and r.lat0.want == w) then r.lat0 = {tick = now, ms = K.now().ms, want = w} end
   st.kpi.pulls, dirty = st.kpi.pulls + 1, true
   K.emit('LEVER', 'C', 'pull ' .. name .. ' ' .. w, {bridge = name, lever = lid, job = job})

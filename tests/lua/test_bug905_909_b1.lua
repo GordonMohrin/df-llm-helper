@@ -129,12 +129,13 @@ T.test('F2 SIEGE (BUG-906): no tile clear of B1 can be found (nothing revealed):
   T.eq(#W3.crushed, 0)
 end)
 
-T.test('F2 military.clearance: stations.clear (default 4 = RAISE_R + spread, never below margin + spread); 2 = the old BUG-032 clearance', function()
+T.test('F2 military.clearance: gate.station_clear (the shipped config sets 4 = RAISE_R + spread, absent = the margin + spread clearance of main); 2 = the old BUG-032 clearance', function()
   local W = alert_world()
   local mil = package.loaded['dfllm.military']
   local G = package.loaded['dfllm.gate']
-  T.eq(mil.CLEAR, G.RAISE_R + mil.SPREAD, 'default clearance = RAISE_R + spread')
-  local W2 = B.build{mode = 'ALERT', lock = 'lockdown', real_mil = true, cfg = {reflex = {v = 2, stations = {clear = 2}}},
+  T.eq(mil.CLEAR, 0, 'absent key: the clearance of main (margin + spread)')
+  T.eq(W.K.cfg.reflex.gate.station_clear, G.RAISE_R + mil.SPREAD, 'the shipped config / the fixture: RAISE_R + spread')
+  local W2 = B.build{mode = 'ALERT', lock = 'lockdown', real_mil = true, cfg = {reflex = {v = 2, gate = {station_clear = 2}}},
                      actors = soldiers({5, 101, 102, 103}, PACE3), army = {S.inv(250, 51, 15, Z)}}
   B.run(W2, 1200)
   T.eq(#B.events(W2, 'STATION_MOVED', 'hold'), 0, 'clear = 2: not moved')

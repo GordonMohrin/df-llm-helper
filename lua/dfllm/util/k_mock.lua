@@ -571,6 +571,15 @@ function M.new(opts)
       if cfg.reflex.gate[k] == nil then cfg.reflex.gate[k] = v end
     end
   end
+  -- Neuausrichtung 15b: a test file that sets KMOCK_NEU15B = true runs under the switches of the shipped config/reflex.json (gate.reach, gate.player_lever,
+  -- gate.station_clear 4); the code's own defaults without them are the gate of main
+  if rawget(_G, 'KMOCK_NEU15B') then
+    cfg.reflex = cfg.reflex or {v = 2}
+    cfg.reflex.gate = cfg.reflex.gate or {}
+    for k, v in pairs({reach = true, player_lever = true, station_clear = 4}) do
+      if cfg.reflex.gate[k] == nil then cfg.reflex.gate[k] = v end
+    end
+  end
   for k, v in pairs(cfg.decisions or {}) do decisions[k] = v end
   -- Neuausrichtung 1 / P3: the mock world has no player session file; the arbiter's dead-man switch is off here unless a
   -- test sets reflex.deadman itself (tests/lua/test_neu1_deadman.lua runs it on the real kernel);
@@ -972,7 +981,9 @@ function M.new(opts)
     if C.VERB_BY[verb] and not C.VERB_BY[verb][cmd.by] then return reply(false, verb .. ' not accepted from ' .. tostring(cmd.by)) end
     local pm = W.mods.player             -- NEU1 P7: the emergency exit lifts the mode list of C.VERB_EMG (as kern)
     local emg = C.VERB_EMG[verb] and pm and not pm.disabled and type(pm.M.open) == 'function' and select(2, call_in(pm, 'open', pm.M.open)) == true
-    if spec.modes and not spec.modes[W.mode] and not emg then return reply(false, verb .. ' not allowed in ' .. W.mode) end
+    local cm = C.VERB_CFG_MODES[verb]          -- Neuausrichtung 15b (as kern): the modes of reflex.gate.<key> while the switch is true
+    local cfgm = cm and cm.modes[W.mode] and type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate[cm.key] == true
+    if spec.modes and not spec.modes[W.mode] and not emg and not cfgm then return reply(false, verb .. ' not allowed in ' .. W.mode) end
     if spec.approve and args.approve ~= true then return reply(false, 'approval required') end
     if spec.mod == 'kern' then
       local ok, msg, data = kern_verbs[verb](args)

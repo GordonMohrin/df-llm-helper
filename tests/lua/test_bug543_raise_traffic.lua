@@ -31,7 +31,7 @@ end
 -- walkers: {id, kind = 'soldier'|'citizen'|'animal', route, start, nopath = true (no readable path ever), react = {bridge, to = {x, y}}
 -- (while the route lasts: steps onto `to` the tick that bridge moves)}
 local function build(o)
-  local units = S.far_units()      -- round 15b: everybody 25+ tiles from the footprints (a unit in reach holds a raise); the test adds its own walkers
+  local units = S.fort_units()
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     local x, y = w.route[1][1], w.route[1][2]
@@ -132,12 +132,10 @@ local function logged(W, s)
 end
 
 -- a soldier pacing along y = 42 (2 tiles from B1's footprint row 40), n steps, then standing; he steps onto (51, 40) when B1 moves
--- leave (round 15b): after pacing he walks off to a spot 30 tiles from B1 (a unit that stands in reach holds the raise for good)
-local function pacer(id, n, react, leave)
+local function pacer(id, n, react)
   local r = {}
   local xs = {48, 50, 49, 50, 48}                       -- a period of 5 frames: never in step with the 25-tick look of gate
   for i = 1, n do r[#r + 1] = {xs[i % 5 + 1], 42} end
-  if leave then r[#r + 1] = {60, 70} end
   return {id = id, kind = 'soldier', route = r, start = 0, nopath = true, react = react and {bridge = 'B1', to = {51, 40}} or nil}
 end
 
@@ -157,7 +155,7 @@ end
 
 T.test('BUG-543 (1): DRILL, a soldier with no path paces 2 tiles from B1 (and would step on it the moment it moves), then stands: ' ..
        'B1 is not pulled while he paces, nobody is crushed, B1 rises after he stands still, the drill passes the mechanics', function()
-  local W = drill_world{walkers = {pacer(800, 60, true, true)}}
+  local W = drill_world{walkers = {pacer(800, 60, true)}}
   local ok, msg = W.K.call('drill', 'start', 'test')
   T.ok(ok, tostring(msg))
   run(W, 3800)
@@ -240,8 +238,7 @@ T.test('BUG-543 (4): BREACH, citizens and soldiers walking over O1, B1 and B2: n
   for _, b in ipairs({'O1', 'B1', 'B2'}) do T.eq(S.bstate(W, b), 'up', b .. ' up') end
 end)
 
-T.test('BUG-543 (5): a tame animal 3 tiles out does not hold the drill raise; a soldier standing 2 tiles from B1 for good does (round 15b: the reach rule withdraws the ' ..
-       'old release): B1 is never raised, the drill reports occupied:B1, nobody is crushed', function()
+T.test('BUG-543 (5): a tame animal 3 tiles out and a soldier standing 2 tiles from B1 for good do not stall the drill raise', function()
   local stand = {id = 820, kind = 'soldier', route = {{48, 42}}, start = 0, nopath = true}
   local pet = {id = 821, kind = 'animal', route = {{51, 43}}, start = 0, nopath = true}
   local W = drill_world{walkers = {stand, pet}}
@@ -251,9 +248,8 @@ T.test('BUG-543 (5): a tame animal 3 tiles out does not hold the drill raise; a 
   local r = result(W)
   T.ok(r, 'DRILL_RESULT')
   local fails = table.concat(r.d.fails or {}, ',')
-  T.ok(fails:find('occupied:B1', 1, true), 'occupied: ' .. fails)
-  T.eq(#flips_to(W, 'B1', 'up'), 0, 'B1 never raised')
-  T.eq(S.bstate(W, 'B1'), 'down')
+  T.ok(not fails:find('occupied', 1, true) and not fails:find('up:', 1, true), 'raised: ' .. fails)
+  T.eq(S.bstate(W, 'B1'), 'down', 'lowered again by the end')
 end)
 
 T.done()
