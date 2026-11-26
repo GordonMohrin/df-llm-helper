@@ -17,7 +17,7 @@ local function world(opts)
   opts = opts or {}
   local units = {}
   for i = 1, 10 do units[i] = {id = i, citizen = true} end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units}
+  local W = F.world{cfg = {baseline = F.cfg()}, units = units, mode = opts.mode}
   local ids = {}
   for i = 1, 10 do ids[i] = i; W.unit(i).job = {current_job = {id = 900 + i}} end
   W.set_census('u', F.census_u(ids))
@@ -117,6 +117,19 @@ T.test('BUG-912 i2: 192 free logs far from the shop, 0 near, 80 ordered: autocho
   local inv = W.K.census.i
   T.eq({inv.wood, inv.wood_dist}, {0, 192})
 end)
+
+for _, md in ipairs({'SIEGE', 'ALERT'}) do
+  T.test('BUG-912: mode ' .. md .. ': 192 far logs, 80 on order: no autochop target is sent (never above the plugin count in an alarm)', function()
+    local W = world{mode = md, shop = SHOP, setup = function(W)
+      for _ = 1, 192 do F.item(W, 'WOOD', {_pos = {300, 10, 1}}) end
+      order_wood(W, 80)
+    end}
+    days(W, 1)
+    local mx, mn = chop_line(W)
+    T.ok(mn == nil, 'no autochop command in ' .. md .. ': ' .. tostring(mn))
+    T.eq(F.bad_runs(W), {})
+  end)
+end
 
 T.test('BUG-912: enough NEAR logs: the old absolute target stays (no relative felling)', function()
   local W = world{shop = SHOP, setup = function(W)

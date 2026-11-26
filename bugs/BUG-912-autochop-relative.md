@@ -10,6 +10,9 @@ Module: `lua/dfllm/economy.lua` (`T.chop` l.12957, `M.chop_count` l.12953)
 ## Fix
 `T.chop`: need = floor + wood on order + margin (as before); gap = need - near usable logs (`M.wood_usable`, 0 while disbelieved). With a gap and the plugin seeing more logs than the kernel counts near (`M.chop_count(inv) > near`): min = plugin count + gap, max = min + band (90), capped by `chop_cap`; otherwise the old absolute target (floor + ordered + margin, clamped 60..cap). The reapply step (10) is the old one. The area is unchanged: the kernel never sets `autochop chop <burrow>`, so the plugin takes the accessible trees of the whole map (DF's own rules for the woodcutters and the civ alert burrow stay); no new outside rule, no new risk rule.
 
+## Alarm
+`T.chop` returns before any target change unless the mode is PEACE or RECOVERY (`HUNT_MODES`, as `T.woodpile`): in SIEGE, ALERT and BREACH the autochop target is left as it is, so the relative boost never sends woodcutters outside in an alarm. Test: SIEGE and ALERT with 192 far logs and 80 on order send no autochop command.
+
 ## Tests
 `tests/lua/test_bug910_915_holz.lua`: i2 numbers (192 far logs, 80 ordered: min 312 > 192), enough near logs (no command), disbelieved (min = count + gap); `test_economy_chains.lua` target tests unchanged and green.
 

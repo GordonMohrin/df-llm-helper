@@ -12961,6 +12961,7 @@ function T.chop(K, c, r)
   local inv = r.inv or K.census.i or {}
   local okb, errb = pcall(M.wood_belief, K, c, r.now or K.now().tick, inv)
   if not okb then K.log('warn', 'wood belief: %s', tostring(errb):sub(1, 120)) end
+  if not HUNT_MODES[K.mode()] then return true end         -- NEU16 BUG-912: SIEGE / ALERT / BREACH: the target stays as it is, nothing sends woodcutters out
   local near = M.wood_usable(K, inv)
   local need = floor_of(c, r.p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (w.margin or 20)
   local mn = clamp(need, w.chop_min or 60, (w.cap or 400) - (w.band or 90))
