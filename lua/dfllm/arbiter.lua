@@ -112,7 +112,8 @@ M.PU_MAX = 64              -- texts of unclassified popups remembered for the lo
 -- a popup) may stand before the wake comes (config/reflex.json `resume`, 0 = no wake); gap_s = real seconds between two uses of
 -- the verb; max_popups = popups one use may read and dismiss
 M.RESUME = {wake_min = 5, gap_s = 60, max_popups = 8,
-            gap_retry_s = 5, retry_after_ms = 2000, retry_window_s = 30}      -- BUG-923: one key retry after a frame gap
+            gap_retry_s = 5, retry_after_ms = 2000, retry_window_s = 180,     -- BUG-923 / BUG-936: key retries after a frame gap
+            retry_max = 3, retry_quiet_s = 8}                                 -- BUG-936: attempts, regular frames before one
 -- Neuausrichtung 1 / P3 (config/reflex.json `deadman`): on = pause the game when the session heartbeat (<save>/session.json
 -- `wall`, written by dfllm wait/brief/cmd/ack/plan/next) is older than timeout_s real seconds, or the game ran more than
 -- max_ticks game ticks since `wall` last changed (0 = no game-time bound), or the file is missing or dated more than
@@ -536,7 +537,10 @@ end
 local function resume_cfg(K)
   local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.resume) == 'table' and K.cfg.reflex.resume or {}
   local w = int(r.wake_min)
-  return {wake_min = (w and w >= 0 and w <= 240) and w or M.RESUME.wake_min}
+  local rm, rq = int(r.retry_max), int(r.retry_quiet_s)       -- BUG-936
+  return {wake_min = (w and w >= 0 and w <= 240) and w or M.RESUME.wake_min,
+          retry_max = (rm and rm >= 1 and rm <= 10) and rm or M.RESUME.retry_max,
+          retry_quiet_s = (rq and rq >= 1 and rq <= 60) and rq or M.RESUME.retry_quiet_s}
 end
 
 local function deadman_cfg(K)
@@ -848,32 +852,53 @@ function M.init(K)
   end
 end
 
--- BUG-923: the one retry of a resume whose pause key did not take right after a frame gap. Only while the same pause (owner and
--- start) still stands and no popup is open; a park / pause / unpause / resume that came after clears it (st.resume_retry = nil).
+-- BUG-923 / BUG-936: the retries of a resume whose pause key did not take right after a frame gap, or that the 60 s rate limit
+-- refused (kind 'rate'). Only while the same pause (owner and start) still stands and no popup is open; a park / pause / unpause /
+-- resume that came after clears it (st.resume_retry = nil). BUG-936 (Run 17 i3 14:16: the retry pressed 2 s after the gap, DF froze
+-- 27 s more, the key was lost, the game stayed parked ~60 s): a press waits until no frame gap ended within `retry_quiet_s` real
+-- seconds (a paused game has no ticks to watch, the gaps of the kernel's own ring are the evidence), and up to `retry_max` presses
+-- are made, `retry_after_ms` apart, while the window `retry_window_s` lasts.
 function M.retry_resume(K)
   local r = st.resume_retry
   if not r then return end
   local now = K.now()
-  if now.ms >= r.until_ms or st.pause_by ~= r.by or st.pause_since ~= r.since or df.global.pause_state ~= true
-     or popup_count() > 0 then
+  if now.ms >= r.until_ms or st.pause_by ~= r.by or st.pause_since ~= r.since or popup_count() > 0 then
     st.resume_retry = nil
     return
   end
+  if df.global.pause_state ~= true then
+    st.resume_retry = nil
+    if (r.n or 0) > 0 then          -- a key of ours took effect a frame late (DF was still busy when it was pressed)
+      observe(K)
+      st.dm_fired = nil
+      K.log('info', 'resume retry (cmd %s): resumed, the key of attempt %d took effect late, was pause:%s', tostring(r.cmd), r.n, tostring(r.by))
+    end
+    return
+  end
   if now.ms < r.at_ms then return end
-  st.resume_retry = nil
+  local rc = resume_cfg(K)
+  local gp = K.last_gap and K.last_gap()
+  if gp and gp.end_ms and now.ms - gp.end_ms < rc.retry_quiet_s * 1000 then return end   -- DF is still in or between gaps
   local c = deadman_cfg(K)
   if c.on and now.ms - (st.dm_boot or now.ms) >= c.grace_s * 1000 and deadman_why(K, c, now) then
+    st.resume_retry = nil
     return          -- a dead-man pause is due: it wins, the key would only open a gap before it
   end
+  r.n = (r.n or 0) + 1
+  if r.kind == 'rate' then st.resume_ms = now.ms end
   local ok, res = K.act.press_pause()
   local paused = observe(K)
   if paused then
-    K.log('warn', 'resume retry after the frame gap (cmd %s): pause key %s, still paused (%s)', tostring(r.cmd),
-          ok and 'sent' or ('failed: ' .. tostring(res)), tostring(st.pause_by))
+    K.log('warn', 'resume retry %d of %d after the %s (cmd %s): pause key %s, still paused (%s)', r.n, rc.retry_max,
+          r.kind == 'rate' and 'rate limit' or 'frame gap', tostring(r.cmd), ok and 'sent' or ('failed: ' .. tostring(res)),
+          tostring(st.pause_by))
+    if r.n >= rc.retry_max then st.resume_retry = nil else r.at_ms = now.ms + M.RESUME.retry_after_ms end
     return
   end
+  st.resume_retry = nil
   st.dm_fired = nil
-  K.log('info', 'resume retry after the frame gap (cmd %s): resumed, was pause:%s', tostring(r.cmd), tostring(r.by))
+  K.log('info', 'resume retry %d after the %s (cmd %s): resumed, was pause:%s', r.n, r.kind == 'rate' and 'rate limit' or 'frame gap',
+        tostring(r.cmd), tostring(r.by))
 end
 
 function M.step(K)
@@ -996,8 +1021,14 @@ M.verbs.resume = function(K, args, cmd)
   end
   local gap = M.RESUME.gap_s * 1000
   if st.resume_ms and now.ms >= st.resume_ms and now.ms - st.resume_ms < gap then
-    return resume_refuse(string.format('once per %d s; wait %d more s', M.RESUME.gap_s,
-                                       math.ceil((gap - (now.ms - st.resume_ms)) / 1000)))
+    -- BUG-936 (Run 17 i4: 'once per 60 s; wait 33 more s' after a test park, the game stayed parked): the refusal is only the rate
+    -- limit; when it ends the kernel presses the key itself if the same pause still stands (the same guards as the frame-gap retry)
+    local wait_s = math.ceil((gap - (now.ms - st.resume_ms)) / 1000)
+    local at = st.resume_ms + gap
+    st.resume_retry = {kind = 'rate', at_ms = at, until_ms = at + M.RESUME.retry_window_s * 1000, by = by, since = st.pause_since,
+                       cmd = cmd and cmd.id}
+    return resume_refuse(string.format('once per %d s; wait %d more s; refused only by the rate limit: the kernel presses the key itself when it ends if nothing else paused the game meanwhile (dfllm status shows the result)',
+                                       M.RESUME.gap_s, wait_s), {was = 'pause:' .. by, retry = 1, wait_s = wait_s, rate = 1})
   end
   st.resume_ms = now.ms
   local was, seen = 'pause:' .. by, {}
@@ -1036,7 +1067,7 @@ M.verbs.resume = function(K, args, cmd)
     local after_gap = gp and gp.end_ms and now.ms - gp.end_ms < M.RESUME.gap_retry_s * 1000 and not key_err
     local tail = ''
     if after_gap and st.pause_by == by and popup_count() == 0 then
-      st.resume_retry = {at_ms = now.ms + M.RESUME.retry_after_ms, until_ms = now.ms + M.RESUME.retry_window_s * 1000,
+      st.resume_retry = {kind = 'gap', at_ms = now.ms + M.RESUME.retry_after_ms, until_ms = now.ms + M.RESUME.retry_window_s * 1000,
                          by = by, since = st.pause_since, cmd = cmd and cmd.id}
       data.retry = 1
       tail = '; the frame gap just ended: the kernel presses the key once more a moment later (dfllm status shows the result)'

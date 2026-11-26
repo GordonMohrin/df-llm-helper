@@ -2887,6 +2887,10 @@ local function pred_close(K, u)
   if not u or type(h) ~= 'table' or K.now().tick - (h.tick or -1e9) > M.FRESH then return false end
   for _, e in ipairs(h.list or {}) do
     if e.id == u then
+      -- BUG-937 (Run 17 i3 y500, #53454: a megacerops, sense hb = big plant eater that never killed, 9 tiles from the nearest citizen; the
+      -- player's ack came ~22 s after the event, the 10 s default had already clamped the clock and recalled everybody): the quick default
+      -- is for animals that can kill (BUG-729 smilodon); a plant eater that has not killed waits the full ack_timeout_s (60 s)
+      if e.hb == 1 and e.kl ~= 1 then return false end
       local dc, da = int(e.dc) or -1, int(e.da) or -1
       return (e.zn or 0) == 2 or (dc >= 0 and dc <= M.PRED_NEAR) or (da >= 0 and da <= M.PRED_NEAR)
     end

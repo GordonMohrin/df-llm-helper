@@ -4015,7 +4015,18 @@ M.verbs['squad.sortie'] = function(K, args, cmd)
     return false, 'squad.sortie not allowed in PEACE (only for one wild animal inside the fort): the order would not be a kill order on unit ' ..
                   tostring(args.unit)
   end
-  local ok, err = so_begin(K, k, s, order, {cmd = cmd and cmd.id, by = 'verb', keep = keep, pe = peace, small = sm ~= nil})
+  -- BUG-937 (Run 17 i3 y500: a megacerops inside the fort, the sortie began in ALERT, the animal was cleared as passive, the mode fell to PEACE
+  -- and 'sortie A ended: the mode is PEACE' while it still lived): a kill sortie in ALERT / RECOVERY against ONE wild animal (census k danger,
+  -- no building destroyer) outlives the mode like one begun in PEACE; SIEGE / BREACH sorties and groups keep the old rule
+  local lone_animal = false
+  local mnow = K.mode()
+  if not peace and (mnow == 'ALERT' or mnow == 'RECOVERY') and order.kind == 'kill' and #order.units == 1 and int(args.unit) == order.units[1] then
+    local h = K.census.h
+    for _, e in ipairs(type(h) == 'table' and type(h.list) == 'table' and h.list or {}) do
+      if e.id == order.units[1] then lone_animal = e.k == 'danger' and e.bd ~= 1 end
+    end
+  end
+  local ok, err = so_begin(K, k, s, order, {cmd = cmd and cmd.id, by = 'verb', keep = keep, pe = peace or lone_animal, small = sm ~= nil})
   if not ok then return false, err end
   rt.so[k].tgt = pos_target or rt.so[k].tgt
   so_event(K, k, 'go', string.format('sortie %s: %s%s', k, what, keep and '; kept against the posture while the squad is worn >= ' ..

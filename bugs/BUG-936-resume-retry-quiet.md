@@ -1,0 +1,26 @@
+# BUG-936 BUG-923's retry fired while DF was still between two parts of the frame gap, and a resume refused only by the 60 s rate limit was lost
+Status: fixed (offline, live-untested)
+Severity: medium (the game stays pause:park for 1-2.5 real minutes until the player notices and sends a second resume)
+Found: Run 17 i3 Orangering (run-17c, "Runde 16", 26.11.) 14:15:53-14:17:52 y500 win d84 -> y501 spr d1; i4 Girderroots (run-17d) a test park at the year change, `ERR resume: once per 60 s; wait 33 more s`; run-17c 16:30:18 a resume sent into the freeze ("no reply yet") that never ran. Notes: `runs/run-17c/FR-BUGS.md` (Runde 16, "Messziel 1c", "Ziel 4"), `runs/run-17d/FR-BUGS.md`.
+Module: `lua/dfllm/arbiter.lua` (`M.retry_resume`, `M.verbs.resume`, `M.RESUME`, `resume_cfg`), `config/reflex.json` `resume`, `dfpilot/fairplay.py` `RESUME_LIM`
+
+## Symptom (live)
+- i3 14:15:53 `park`, 1 s later `resume`; reply `ERR resume: was pause:park, still paused (pause:park) after the pause key; the frame gap just ended: the kernel presses the key once more a moment later` (`retry:1`); kern.log `arbiter resume retry after the frame gap (cmd c1a217ff...): pause key sent, still paused (park)`, then `frame gap 27578 ms (blame external)` (14:16:42); the game stayed parked ~60 s (status 14:16:56 `paused pause:park hb 15s`), only the player's second resume after the freeze ran (14:17:52 running). On i2 the same retry worked (r16b7 kern.log of E:/DF-test2: gaps 6.7, 7.4, 4.8, 5.7, 25, 50.6 s, then `resume retry after the frame gap ...: resumed`).
+- i4: after a test park `ERR resume: once per 60 s; wait 33 more s`; nothing carried it out, the game stayed parked.
+
+## Cause (the first from the live kern.log lines plus the code path, the second from the code path)
+1. `M.retry_resume` pressed the key `retry_after_ms` (2 s) after the resume was handled, once, whatever DF did meanwhile. The freeze of the yearly autosave arrives as a SERIES of gaps (i2: 6.7 / 7.4 / 4.8 / 5.7 s, then 25 s and 50 s, each only 0-3 s of regular frames apart; i3: 3.4 / 4.0 / 3.3 / 5.1 / 21.6 / 49.3 s): the kernel ran in a short window between two parts, pressed the key, DF froze again for 27.6 s and the key was lost; the retry was spent (`st.resume_retry = nil` before the press).
+2. `M.verbs.resume` returned the rate-limit refusal (`once per 60 s`) without remembering the request: the refusal was final although nothing but the limit stood in the way.
+INFERRED (not shown by a log line): that the key is lost rather than processed late; the kern.log shows only 'still paused' right after the press and the park standing ~60 s later. The i3 kern.log lines of that minute were no longer on disk (rotated); the numbers come from the player's notes and the i2 log.
+
+## Change
+- `M.RESUME`: `retry_window_s` 30 -> 180, `retry_max = 3`, `retry_quiet_s = 8` (config/reflex.json `resume.retry_max` 1-10, `resume.retry_quiet_s` 1-60, shipped 3 / 8; `lint --config`).
+- `M.retry_resume` presses only when no frame gap (`K.last_gap().end_ms`) ended within `retry_quiet_s` real seconds (a paused game has no ticks to watch; the gap ring is the evidence), at most `retry_max` times, `retry_after_ms` apart, while the window lasts. Guards unchanged: the same pause (owner and start), no popup (a siege popup wins), a later park / pause / unpause / resume clears it, a due dead-man pause cancels it. A key that took effect a frame late (`pause_state` false at the next look after an attempt) is logged `took effect late` and ends it. kern.log: `resume retry N of M after the frame gap|rate limit (cmd ...)`.
+- The rate-limit refusal now says `refused only by the rate limit: the kernel presses the key itself when it ends if nothing else paused the game meanwhile`, data `rate 1`, `retry 1`, `wait_s`, and registers a retry (kind `rate`, due when the limit ends, same guards, owner and start of the pause captured at the refusal, so a park that came after the refusal wins) that the same machinery carries out; `st.resume_ms` is set at its press.
+- RULES.md verb row for `resume`.
+
+## Tests
+`tests/lua/test_bug936_resume_retries.lua` (6): a second gap holds the retry back until the frames are regular; a key lost twice is pressed a third time and a working one stops it; `retry_max` from config; a later park / a popup still win; the rate-limited resume is honoured after the limit (and not before); a later park (new pause) drops it. `tests/lua/test_bug923_resume_frame_gap.lua` (adapted: 1 + 3 presses at most, nothing before the quiet span), `tests/lua/test_resume.lua`, `tests/test_fr94_resume.py` (config keys).
+
+## Live-Erwartung
+Park in the year-change freeze, `resume` at once: the reply says ERR with 'presses the key once more'; kern.log shows no `resume retry` line while the gaps go on, then (about 8 s after the last gap) `resume retry 1 of 3 after the frame gap ...: resumed`; `status` shows running without a second resume. A resume within 60 s of another: the reply says it is refused only by the limit, `status` shows running when the limit ended (kern.log `resume retry 1 after the rate limit`). A new park / pause / popup between: nothing is pressed. Not proven: that D_PAUSE works one frame after the last gap; if the key is lost three times kern.log says so and the player resumes again.
