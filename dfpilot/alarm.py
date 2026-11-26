@@ -186,9 +186,9 @@ def sys_reasons(save_dir: Path, cfg: dict, now: float) -> list[dict]:
         _POPUP_SEEN.pop(key, None)
     if cfg["follow_check"]:
         off = files.follow_off(save_dir, now)
-        if off and "OFF" in off:
+        if off and off.startswith("follow: OFF"):
             out.append({"type": "FOLLOW_OFF", "key": "FOLLOW_OFF", "n": 0, "msg": off})
-        elif off and "STUCK" in off:           # BUG-921: alive but silent for FOLLOW_STUCK_S; SLOW (alive, late) wakes nobody
+        elif off and off.startswith("follow: STUCK"):           # BUG-921: alive but silent for FOLLOW_STUCK_S; SLOW (alive, late) wakes nobody
             out.append({"type": "FOLLOW_STUCK", "key": "FOLLOW_STUCK", "n": 0, "msg": off})
     return out
 

@@ -95,3 +95,5 @@ T.test('BUG-923: no frame gap, no retry (the refusal stays as it was)', function
   T.eq(df.global.pause_state, true)
   kern.stop()
 end)
+
+T.done()

@@ -123,3 +123,17 @@ def test_short_steps_are_not_logged_and_poll_still_beats(save):
     log = (save / "cli.log").read_text("utf-8") if (save / "cli.log").exists() else ""
     assert "slow_step" not in log
     assert files.read_follow_hb(save)[0]["pid"] == os.getpid()
+
+
+@pytest.mark.parametrize("step", ["event WOOD_STUCK", "event MANAGER_OFFICE"])
+def test_step_names_containing_off_or_stuck_do_not_wake(save, monkeypatch, step):
+    """The step name is free text in the beat line: classify by the line's prefix, never by a substring."""
+    now = time.time()
+    monkeypatch.setattr(wake, "pid_alive", lambda pid: pid == 4711)
+    monkeypatch.setattr(files, "read_heartbeat", lambda d, n: ({"paused": False}, 1.0))
+    monkeypatch.setattr(files, "read_state", lambda d: {})
+    _beat(save, now, 2, pid=4711, step=step, step_s=70)                      # fresh beat, busy step
+    assert [r for r in alarm.sys_reasons(save, _cfg(), now) if r["type"].startswith("FOLLOW")] == []
+    _beat(save, now, 90, pid=4711, step=step, step_s=70)                     # SLOW with that step in the line
+    assert files.follow_off(save, now).startswith("follow: SLOW")
+    assert [r for r in alarm.sys_reasons(save, _cfg(), now) if r["type"].startswith("FOLLOW")] == []

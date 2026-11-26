@@ -56,3 +56,5 @@ T.test('BUG-924: with enough empty containers the same condition is met; without
   T.eq(cl[1].met, nil)
   T.ok(cl[1].text:find(', not counted', 1, true), cl[1].text)
 end)
+
+T.done()
