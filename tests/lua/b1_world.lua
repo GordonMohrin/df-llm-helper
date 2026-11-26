@@ -65,7 +65,7 @@ function B.build(o)
   if cfg.reflex.gate.player_lever == nil then cfg.reflex.gate.player_lever = true end
   if cfg.reflex.gate.station_clear == nil then cfg.reflex.gate.station_clear = 4 end
   local W = S.world{units = units, mode = o.mode, move = o.move or 100, lever_default = o.lever or {worker = 30, pull = 40}, cfg = cfg,
-                    persist = persist, kern = o.deep and {40, 41, Z - 2, 200, 300, Z} or nil}
+                    persist = persist, manifest = o.manifest, kern = o.deep and {40, 41, Z - 2, 200, 300, Z} or nil}
   W.actors, W.foes, W.crushed, W.t0 = actors, foes, {}, nil
   -- the squad: one fake squad 1 whose station order the military module (the real one: o.real_mil) may move
   local st = o.station or {51, 44}

@@ -767,15 +767,33 @@ end
 -- 'B2 up waits for citizen 27079 next to it' with 27079 one of its pullers): the assigned pullers of a room that holds
 -- a lever of `name`, standing on a tile of that room now, {[id] = true}. They wait there to pull it; like the job's own
 -- worker (BUG-141) they hold the bridge only when they stand on its footprint.
+-- Neuausrichtung 15b (verifier round): where the reach rule runs (M.reach_strict) the exemption is narrowed to the puller who is AT the lever (on a tile next
+-- to a linked lever of `name`, same level) while the pull job of `name` is live; every other puller (idle in the lever room, a job worker still on his way, a unit
+-- without a map position) is a reach unit like any other. Elsewhere (SIEGE / BREACH, reach off, a lever want, a drill's end) the whole lever room is exempt as before.
+function M.reach_strict(K, name)
+  if not M.REACH_MODES[K.mode()] or not M.neu_cfg(K).reach then return false end
+  local br = st.br[name]
+  return not (br and type(br.why) == 'string' and (br.why:find('^lever') or br.why == 'drill_end'))
+end
+local function at_lever(name, x, y, z)
+  local r = rt[name]
+  if not (r and r.job and x ~= nil) then return false end
+  local lid = r.job.lever
+  local p = lid and r.pos[lid]
+  return type(p) == 'table' and p[3] == z and math.abs(p[1] - x) <= 1 and math.abs(p[2] - y) <= 1
+end
+M.at_lever = at_lever
 local function own_pullers(K, name, now)
   local set = {}
   if not pl then return set end
+  local strict = M.reach_strict(K, name)
   for _, rm in ipairs(room_list(K, now)) do
     local p = pl.rooms[rm.name]
     if rm.bridges[name] and p and #p.ids > 0 then
       local b = burrow(rm.name)
       for _, id in ipairs(p.ids) do
-        if on_tile(b, unit_pos(df.unit.find(id))) then set[id] = true end
+        local x, y, z = unit_pos(df.unit.find(id))
+        if on_tile(b, x, y, z) and (not strict or at_lever(name, x, y, z)) then set[id] = true end
       end
     end
   end
@@ -3160,9 +3178,14 @@ local function control(K, name, spec, now)
         -- BUG-141 (live i3: lever 25729 two tiles from X25718's footprint): the job's own worker has to stand at the
         -- lever; next to the footprint (not on it) he holds nothing, else we cancel our own pull for ever
         local wid = (w0 and unit_id(w0)) or r.job.wid
+        local wat_q = true                            -- 15b: under the reach rule (up) the worker is exempt only AT the lever
+        if wid and dir == 'up' and M.reach_strict(K, name) then
+          local wx, wy, wz = unit_pos(df.unit.find(wid))
+          wat_q = at_lever(name, wx, wy, wz)
+        end
         if wid and #hold > 0 then
           local keep = {unknown = hold.unknown}
-          for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 then keep[#keep + 1] = e end end
+          for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 or not wat_q then keep[#keep + 1] = e end end
           if #keep < #hold then hold = keep end
         end
         local own = dir == 'up' and own_pullers(K, name, now) or {}
@@ -3183,7 +3206,7 @@ local function control(K, name, spec, now)
         if dir == 'up' and #hold == 0 and not hold.unknown and M.quiet_raise(K, name) then
           local skip = {}
           for id in pairs(own) do skip[id] = true end
-          if wid then skip[wid] = true end
+          if wid and wat_q then skip[wid] = true end   -- 15b: under the reach rule only the worker AT the lever
           pbusy = M.peace_busy(K, name, r, sc, now, skip)
         end
         if pbusy then
