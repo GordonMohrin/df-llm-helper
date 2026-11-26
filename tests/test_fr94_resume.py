@@ -62,7 +62,7 @@ def test_the_kernel_uses_the_key_and_no_state_write():
 
 def test_config_knob_and_its_lint():
     shipped = json.loads((ROOT / "config" / "reflex.json").read_text("utf-8"))
-    assert shipped["resume"] == {"wake_min": 5}
+    assert shipped["resume"] == {"wake_min": 5, "retry_max": 3, "retry_quiet_s": 8}
     assert fairplay.reflex_errors() == []
 
 

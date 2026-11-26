@@ -365,7 +365,7 @@ SIEGE_LONG_LIM: dict = {"on": "bool", "days": (1, 336), "near": (5, 200)}
 # drink unforbidden, DECISION_NEEDED starve_lockdown; on false = off
 SIEGE_STARVE_LIM: dict = {"on": "bool", "min": (1, 100), "mark": (25000, 100000), "near": (5, 200), "death_days": (0, 336)}
 # FR-94 (Run 14 note 100): arbiter.lua resume_cfg: real minutes a pause by DF may stand before the wake PAUSED_BY_DF (0 = no wake)
-RESUME_LIM: dict = {"wake_min": (0, 240)}
+RESUME_LIM: dict = {"wake_min": (0, 240), "retry_max": (1, 10), "retry_quiet_s": (1, 60)}
 # NEU1 P4 (decision E1): readiness.lua M.GROWTH_LIM (the growth ladder) and military.lua M.SMALL_LIM (a sortie against a small group is never
 # refused for armour); a missing section = the old rule
 GROWTH_LIM: dict = {"on": "bool", "base": (1, 250), "armed_cap": (1, 250), "ready_cap": (1, 250), "top_cap": (1, 250),

@@ -127,11 +127,11 @@ T.test('FR-94 rate limit: once per 60 real seconds, a key that did not take coun
   r = resume('t2')
   T.ok(not r.ok and r.msg:find('once per 60 s', 1, true), r.msg)
   T.eq(#keys, 1, 'the second call pressed nothing')
-  H.run(W, 61, {paused = true})
   key_works = true
-  r = resume('t3')
-  T.ok(r.ok, r.msg)
+  H.run(W, 61, {paused = true})                      -- BUG-936: the kernel itself presses the key when the limit ends
   T.eq({#keys, df.global.pause_state}, {2, false})
+  r = resume('t3')
+  T.ok(not r.ok and r.msg:find('nothing to release', 1, true), r.msg)
   kern.stop()
 end)
 
@@ -231,7 +231,8 @@ end)
 
 T.test('FR-94: config/reflex.json carries resume.wake_min next to the other knobs (the kernel default is 5)', function()
   local F = require('wp8_world')
-  T.eq(F.read_json('config/reflex.json').resume, {wake_min = arbiter.RESUME.wake_min})
+  T.eq(F.read_json('config/reflex.json').resume, {wake_min = arbiter.RESUME.wake_min, retry_max = arbiter.RESUME.retry_max,
+                                                  retry_quiet_s = arbiter.RESUME.retry_quiet_s})
   T.eq(arbiter.RESUME.wake_min, 5)
 end)
 
