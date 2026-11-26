@@ -232,6 +232,12 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif k in ("close_at_once", "fail_closed", "drink_inside", "peace_raise"):   # NEU1 (P5 Tore) / BUG-831: switches, default true
                 if not isinstance(v, bool):
                     errs.append(f"{name}: gate.{k}: true or false expected, got {v!r}")
+            elif k == "station_clear":              # Neuausrichtung 15b (BUG-906): the clearance of a squad station (lua/dfllm/military.lua M.CLEAR_LIM); absent = margin + spread
+                if not is_int(v, 2, 12):
+                    errs.append(f"{name}: gate.station_clear: int 2..12 expected, got {v!r}")
+            elif k in ("reach", "player_lever"):   # Neuausrichtung 15b: safety switches, absent = on in the code, the shipped config sets them
+                if not isinstance(v, bool):
+                    errs.append(f"{name}: gate.{k}: true or false expected, got {v!r}")
             elif k == "return_every":              # NEU1: ticks civilians stand outside a raised inner gate before it opens (0 = off)
                 if not is_int(v, 0, 24000):
                     errs.append(f"{name}: gate.return_every: int 0..24000 expected, got {v!r}")
@@ -275,6 +281,25 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
         if all(isinstance(c, int) for c in caps) and not caps[0] <= caps[1] <= caps[2] <= caps[3]:
             errs.append(f"{name}: growth: base <= armed_cap <= ready_cap <= top_cap expected, got {caps}")
     return errs
+
+
+# Neuausrichtung 15b (BUG-907): the safety switches gate.reach / player_lever / station_clear are ON in the kernel when the key is absent, but the SHIPPED
+# config/reflex.json must name them (`lint --config` requires them: a config that does not say so hides the safety rule)
+REFLEX_REQUIRED = (("reach", "true"), ("player_lever", "true"), ("station_clear", "4"))
+
+
+def reflex_required(path: str | Path | None = None) -> list[str]:
+    """The required gate keys config/reflex.json lacks (empty when it is missing: reflex_errors says so)."""
+    p = Path(path or REFLEX_PATH)
+    if not p.exists():
+        return []
+    try:
+        gate = json.loads(_read(p)).get("gate", {})
+    except ValueError:
+        return []
+    gate = gate if isinstance(gate, dict) else {}
+    return [f"config/reflex.json: gate.{k}: required (shipped value {what}); an absent key is ON in the kernel, a config that does not name it hides the safety rule"
+            for k, what in REFLEX_REQUIRED if k not in gate]
 
 
 # Neuausrichtung 1 / P3 (docs/v2/NEU1-wecken.md): config/wake.json (dfpilot/session.py LIMITS; a bad key = its default)

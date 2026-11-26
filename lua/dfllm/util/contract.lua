@@ -277,6 +277,7 @@ C.VERBS = {
   ['squad.sortie'] = {mod = 'military', approve = true,
                       modes = {PEACE = true, ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}},
   -- NEU1 P7: in another mode while the emergency exit is open (C.VERB_EMG lifts the mode list; gate's verb takes only `up` there)
+  -- Neuausrichtung 15b: ALERT and SIEGE too, for the inner bridges, up (gate's verb refuses the rest and a unit on the footprint)
   ['lever']        = {mod = 'gate', modes = {PEACE = true}},
   ['inspect']      = {mod = 'kern'},
   ['selftest']     = {mod = 'selftest'},
@@ -332,6 +333,9 @@ C.VERBS = {
 -- NEU1 P7: the verbs the emergency exit unlocks (kern and k_mock lift their mode list while player.open() is true; the player's own
 -- tactical verbs refuse themselves outside it) and the verbs whose act calls hold their objects against
 -- the kernel's own calls (util/hold.lua; kern notes the calls while the verb runs, player.hold_acts keeps them)
+-- Neuausrichtung 15b (BUG-907): modes a verb is also allowed in unless reflex.json gate.<key> is false (the player's lever up of an inner bridge in ALERT / SIEGE; the
+-- verb of gate refuses the rest); with the key absent the extra modes are ON
+C.VERB_CFG_MODES = {lever = {key = 'player_lever', modes = {ALERT = true, SIEGE = true}}}
 C.VERB_EMG = {lever = true, ['squad.station'] = true, ['burrow.unit'] = true, ['door.lock'] = true}
 C.VERB_HOLD = {['zone.remove'] = true, ['building.remove'] = true, ['labor.set'] = true, ['workdetail.set'] = true,
                ['lever.link'] = true, appoint = true, ['room.assign'] = true}   -- BUG-814/812: burrow.unit, door.lock no hold

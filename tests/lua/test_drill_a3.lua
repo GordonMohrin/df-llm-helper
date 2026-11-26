@@ -1,6 +1,7 @@
 -- BUG-051 (Run 13 cause 2, note 2): the drill is refused only for danger (a mode other than PEACE, a lockdown, a hostile in
 -- sight), not for traders and not for the runner's phase; it may start once barracks and squads exist. Early squads:
 -- a fort of 40+ citizens with a barracks that never left P0/P1 (Run 13: pop 47-59 at P0 for twenty years) staffs them.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local X = require('wp6_world')
 local kmock = require('dfllm.util.k_mock')

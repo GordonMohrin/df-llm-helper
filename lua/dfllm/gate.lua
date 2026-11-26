@@ -319,11 +319,24 @@ end
 M.RETURN_EVERY, M.RETURN_OPEN = 1200, 600
 -- Neuausrichtung 2 (BUG-831, Run 17d i4 Girderroots y374: the kernel's own quiet PEACE raise of B1 crushed 3 citizens; 9 of its 45 raises
 -- had a unit step onto the footprint while it moved, 536 ticks after the pull was queued): a raise in quiet PEACE (why peace_gates) is
--- pulled only after PEACE_CLEAR ticks (at least the measured lever latency) in which no unit (standing or walking, but a soldier at his
--- station) was within PEACE_R tiles of the footprint; while it is pending any such unit cancels the pull; a GATE_CRUSH_RISK of such a
+-- pulled only after PEACE_CLEAR ticks (at least the measured lever latency) in which no unit (standing or walking, a soldier at his
+-- station too: Neuausrichtung 15b) was within PEACE_R tiles of the footprint; while it is pending any such unit cancels the pull; a GATE_CRUSH_RISK of such a
 -- raise keeps the bridge down in PEACE for PEACE_LOCK_DAYS game days, doubled per further risk up to 28 (st.pq). SIEGE/BREACH raises
 -- are not touched.
+-- Neuausrichtung 15b (BUG-905..909, second round; round 15 killed citizen 29043 in ALERT, BRIDGE_CRUSH #38052, leitung/neu10/DIAGNOSE-B1-2026-11-25.md and
+-- the round-15 diagnosis in bugs/BUG-907). FINAL RULE (option A, lead decision: safety beats availability): outside SIEGE/BREACH a bridge is pulled, and a pull is kept,
+-- only while the footprint is provably clear for the whole window W = max(measured lever latency st.lat, REACH_FLOOR) + TIMED_WIN from the pull to the end of the
+-- movement. REACH (M.reach_hold / M.reach_units): every non-animal unit of a fresh fort census (standing or walking, any level, a soldier at his station and a unit
+-- ON the footprint too) whose steps to the footprint (the path DF shows, else the tiles between: unknown holds) times REACH_TPT ticks a tile are within W holds the
+-- raise (ALERT, RECOVERY, PEACE with the quiet raise's peace_blockers, DRILL); a missing or stale census holds. The bounded wait of round 15 (the cause of the crush),
+-- the exemptions of round 15 and the 'only while it moves' exemption of the third review (the post-job gap) are withdrawn. On a busy fort the bridge stays down: GATE
+-- wait line / GATE_FAIL name the nearest unit, after REACH_DAY ticks ONE DECISION_NEEDED gate_reach_traffic says so (M.reach_day).
+-- Kept: the quiet PEACE wait of BUG-831 (any unit within PEACE_R for the whole latency window), now with traffic numbers: a bridge wanted up for
+-- PEACE_DAY ticks says once who keeps it down and asks DECISION_NEEDED gate_peace_traffic (the layout is the player's to change); the return window does not
+-- lower an inner bridge that could not be raised again (RETURN_MIN, return_forecast).
 M.PEACE_R, M.PEACE_CLEAR, M.PEACE_LOCK_DAYS = 20, 600, 3
+M.PEACE_DAY, M.RETURN_MIN = 1200, 300
+M.REACH_TPT, M.REACH_FLOOR = 9, 600
 function M.neu_cfg(K)
   local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
   local function flag(v) if type(v) == 'boolean' then return v end return true end
@@ -337,9 +350,17 @@ function M.neu_cfg(K)
   if not pr or pr < 2 or pr > M.PATH_R then pr = M.PEACE_R end
   if not pc or pc < 0 or pc > 4800 then pc = M.PEACE_CLEAR end
   if not pl or pl < 0 or pl > 28 then pl = M.PEACE_LOCK_DAYS end
+  -- Neuausrichtung 15b: `reach` (the reach rule, M.reach_hold), `player_lever` (the player's lever up of an inner bridge in ALERT / SIEGE, kern.lua) and
+  -- `station_clear` (military.lua) are safety switches that are ON when the key is absent; only an explicit false (reach / player_lever) turns the rule off,
+  -- and the kernel says so once (kern.log). The shipped config/reflex.json sets all three, `lint --config` requires them
+  local reach = r.reach ~= false
+  if not reach and M.reach_said ~= K then
+    M.reach_said = K
+    K.log('warn', 'gate: the reach rule is OFF (reflex.json gate.reach is false): a unit that can reach a footprint does not hold an ALERT / RECOVERY / PEACE / DRILL raise (it can be crushed)')
+  end
   return {close_at_once = flag(r.close_at_once), fail_closed = flag(r.fail_closed), drink_inside = flag(r.drink_inside),
           return_every = every, return_open = open, peace_raise = flag(r.peace_raise), peace_clear_r = pr, peace_clear = pc,
-          peace_lock_days = pl}
+          peace_lock_days = pl, reach = reach}
 end
 
 ---------------------------------------------------------------- DF reads (buildings, jobs)
@@ -746,15 +767,33 @@ end
 -- 'B2 up waits for citizen 27079 next to it' with 27079 one of its pullers): the assigned pullers of a room that holds
 -- a lever of `name`, standing on a tile of that room now, {[id] = true}. They wait there to pull it; like the job's own
 -- worker (BUG-141) they hold the bridge only when they stand on its footprint.
+-- Neuausrichtung 15b (verifier round): where the reach rule runs (M.reach_strict) the exemption is narrowed to the puller who is AT the lever (on a tile next
+-- to a linked lever of `name`, same level) while the pull job of `name` is live; every other puller (idle in the lever room, a job worker still on his way, a unit
+-- without a map position) is a reach unit like any other. Elsewhere (SIEGE / BREACH, reach off, a lever want, a drill's end) the whole lever room is exempt as before.
+function M.reach_strict(K, name)
+  if not M.REACH_MODES[K.mode()] or not M.neu_cfg(K).reach then return false end
+  local br = st.br[name]
+  return not (br and type(br.why) == 'string' and (br.why:find('^lever') or br.why == 'drill_end'))
+end
+local function at_lever(name, x, y, z)
+  local r = rt[name]
+  if not (r and r.job and x ~= nil) then return false end
+  local lid = r.job.lever
+  local p = lid and r.pos[lid]
+  return type(p) == 'table' and p[3] == z and math.abs(p[1] - x) <= 1 and math.abs(p[2] - y) <= 1
+end
+M.at_lever = at_lever
 local function own_pullers(K, name, now)
   local set = {}
   if not pl then return set end
+  local strict = M.reach_strict(K, name)
   for _, rm in ipairs(room_list(K, now)) do
     local p = pl.rooms[rm.name]
     if rm.bridges[name] and p and #p.ids > 0 then
       local b = burrow(rm.name)
       for _, id in ipairs(p.ids) do
-        if on_tile(b, unit_pos(df.unit.find(id))) then set[id] = true end
+        local x, y, z = unit_pos(df.unit.find(id))
+        if on_tile(b, x, y, z) and (not strict or at_lever(name, x, y, z)) then set[id] = true end
       end
     end
   end
@@ -1459,7 +1498,7 @@ end
 -- the mother's position, dfhack.units.getPosition), insane ones), the fort's tame
 -- animals (census.a) and the friendly units sense lists near the footprints gate watches (census.h.friends).
 -- {n, on, list = {{id, k, d, x, y, z}} sorted by distance (d = 0: on the footprint)}; nil while the census is unknown.
-local function around(K, fp, rad)
+local function around(K, fp, rad, anyz)
   local cu = K.census.u
   if type(cu) ~= 'table' or type(cu.ids) ~= 'table' then return nil end
   local res, seen = {n = 0, on = 0, list = {}, xz = {}}, {}
@@ -1473,7 +1512,7 @@ local function around(K, fp, rad)
     local d = fp_dist(fp, x, y, z)
     if not d then                        -- BUG-335 review: on a stair/ramp level near it: a walker for crossers only
       local dz = type(x) == 'number' and (z < fp[3] and fp[3] - z or z - fp[6]) or nil
-      local dxy = dz and dz <= M.PATH_Z and fp_dist({fp[1], fp[2], z, fp[4], fp[5], z}, x, y, z)
+      local dxy = dz and (anyz or dz <= M.PATH_Z) and fp_dist({fp[1], fp[2], z, fp[4], fp[5], z}, x, y, z)
       if dxy and dxy <= rad then
         if k == 'citizen' and u.military and u.military.squad_id >= 0 then k = 'soldier' end
         res.xz[#res.xz + 1] = {id = id, k = k, d = math.max(dxy, dz), x = x, y = y, z = z}
@@ -1629,6 +1668,7 @@ local function who(list, fp)
     if i > M.NAME_MAX then parts[#parts + 1] = string.format('+%d more', #list - M.NAME_MAX); break end
     local s = string.format('%s %d %s', e.k, e.id, e.d == 0 and 'on the footprint'
                             or (e.path and string.format('walking onto it in %d steps', e.path))
+                            or (e.reach and string.format('%d tiles away, can reach it in %d ticks', e.d, e.reach))
                             or (e.d > M.MARGIN and string.format('moving %d tiles from it', e.d)) or 'next to it')
     local q = e.k == 'soldier' and fp and squad_note(e.id, fp, e)
     parts[#parts + 1] = q and (s .. ' (' .. q .. ')') or s
@@ -1970,6 +2010,113 @@ function M.drop_animals(list, all)
   return n > 0 and keep or list
 end
 
+-- Neuausrichtung 15 (BUG-906, Run 17 i3 B1: the squad's station lay 4 tiles from the footprint, its soldiers paced about it at 3 tiles and held every
+-- raise; military's restation answered 'kept'): when military found no tile on the inner side that is clear of the bridge (gate.station_clear) it says so
+-- (military.standing: the squad's soldiers at their station stand by order for this alarm). Neuausrichtung 15b: that exemption holds ONLY in SIEGE /
+-- BREACH, where the raise is forced anyway (a soldier at his station, not ON the footprint, holds nothing there). In ALERT / RECOVERY / PEACE / DRILL a
+-- soldier at his station is a unit that can reach the footprint like any other (M.reach_hold): the exemption is withdrawn there.
+function M.stand_by(K, e)
+  if not FORCE_MODES[K.mode()] then return false end
+  if type(e) ~= 'table' or e.k ~= 'soldier' or (e.d or 0) == 0 then return false end
+  local ok, v = K.call('military', 'standing', e.id, e.x, e.y, e.z)
+  return ok and v == true
+end
+function M.drop_standers(K, list)
+  local keep, n = {unknown = list.unknown}, 0
+  for _, e in ipairs(list) do
+    if M.stand_by(K, e) then n = n + 1 else keep[#keep + 1] = e end
+  end
+  return n > 0 and keep or list
+end
+
+-- Neuausrichtung 15b: the window of the reach rule (see the FINAL RULE below and bugs/BUG-907): REACH_TICKS = max(the measured lever latency, REACH_FLOOR) + TIMED_WIN
+-- (the bridge's own movement); a unit that needs steps x REACH_TPT <= REACH_TICKS holds the raise (a DRILL counts like ALERT: its raise that finds a unit in reach waits,
+-- and the drill's T+900 drop reports it as occupied). Tame animals do not hold unless their path enters the footprint. Not for the player's own `lever:` want or a drill's end.
+function M.reach_ticks()
+  return math.max(st.lat and st.lat.t or 0, M.REACH_FLOOR) + M.TIMED_WIN
+end
+M.REACH_MODES = {ALERT = true, RECOVERY = true, PEACE = true, DRILL = true}      -- everything outside SIEGE / BREACH (round 15b, second review: the drill's timed rules left a gap beyond CROSS_REACH)
+function M.reach_applies(K, name)
+  if not M.REACH_MODES[K.mode()] or not M.neu_cfg(K).reach then return false end
+  local br = st.br[name]
+  if br and type(br.why) == 'string' and (br.why:find('^lever') or br.why == 'drill_end') then return false end
+  return not M.quiet_raise(K, name)
+end
+-- BUG-907 (final rule, option A): the window W = REACH_TICKS (the lever latency, at least REACH_FLOOR, plus the bridge's own movement TIMED_WIN) is a time in which
+-- ANY unit that is not an animal can walk onto the footprint, standing or walking: nothing stops a moving bridge. So a raise outside SIEGE / BREACH is pulled
+-- (and a pending pull is kept) only while the footprint is PROVABLY clear for the whole window: every non-animal unit of the fort census, on any level, whose
+-- steps to the footprint (the path DF shows, else the tiles between: a lower bound, so an unknown path holds) x REACH_TPT <= W holds it; a missing or stale
+-- census holds too. Nobody is exempt (soldier at his station, a unit standing 40 tiles out that starts to walk after the lever job has vanished). On a busy fort
+-- the bridge then stays down; the hold is reported (GATE wait / GATE_FAIL with the nearest unit) and, after REACH_DAY ticks, one DECISION_NEEDED
+-- gate_reach_traffic says why. The limits that remain: BUG-907 (units that enter the map inside the window, a unit faster than REACH_TPT, a lever latency longer than measured).
+M.REACH_FRESH, M.REACH_DAY = 600, 1200
+-- the census units that can be within reach of `name`'s footprint, nearest first ({id, k, d, x, y, z}, every level), or nil = unknown (no or a stale census, no
+-- footprint): the caller waits. The pass over the fort is made once per FAST ticks per bridge (the frames in between reuse it; the window is widened by the
+-- tiles a unit walks in FAST ticks)
+function M.reach_census(K, name)
+  local cu = K.census.u
+  local now = K.now().tick
+  if type(cu) ~= 'table' or now - (math.tointeger(cu.tick) or -1e9) > M.REACH_FRESH then return nil end
+  local spec = (K.manifest().bridges or {})[name]
+  if not valid_spec(spec) then return nil end
+  local steps = math.ceil(M.reach_ticks() / M.REACH_TPT) + math.ceil(M.FAST / M.REACH_TPT)
+  local r = rt[name]
+  local rc = r and r.rc
+  if rc and rc.steps == steps and now >= rc.t and now - rc.t < M.FAST then return rc.far end
+  local wide = around(K, spec.fp, steps, true)
+  if not wide then return nil end
+  local far = {}
+  for _, e in ipairs(wide.list) do far[#far + 1] = e end
+  for _, e in ipairs(wide.xz or {}) do far[#far + 1] = e end
+  table.sort(far, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.id < b.id end)
+  if r then r.rc = {t = now, steps = steps, far = far} end
+  return far
+end
+-- the units of the census that hold a raise of `name` (reach rule), copies with `reach` = the ticks they need; `have` = ids to skip, `cby` = crossers (their
+-- path), `skip` = ids that do not count (the bridge's own pullers). nil = unknown census
+function M.reach_units(K, name, have, cby, skip)
+  local far = M.reach_census(K, name)
+  if not far then return nil end
+  local T = M.reach_ticks()
+  local out = {}
+  for _, e in ipairs(far) do
+    if not (have and have[e.id]) and not (skip and skip[e.id]) and not (e.k == 'animal' and not (cby and cby[e.id])) then
+      local steps = cby and cby[e.id] and cby[e.id].path or e.d
+      local t = steps * M.REACH_TPT
+      if t <= T then out[#out + 1] = {id = e.id, k = e.k, d = e.d, x = e.x, y = e.y, z = e.z, reach = t} end
+    end
+  end
+  return out
+end
+function M.reach_hold(K, name, sc, hold, cby)
+  local have = {}
+  for _, e in ipairs(hold) do have[e.id] = true end
+  local add = M.reach_units(K, name, have, cby)
+  if not add then
+    hold.unknown = true                                   -- fail closed: nobody can say who can reach it
+    return hold
+  end
+  if #add == 0 then return hold end
+  local out = {unknown = hold.unknown}
+  for _, e in ipairs(hold) do out[#out + 1] = e end
+  for _, e in ipairs(add) do out[#out + 1] = e end
+  return out
+end
+-- the raise of `name` has been held by the reach rule for REACH_DAY ticks: ONE DECISION_NEEDED per want says that the bridge stays down because of traffic
+function M.reach_day(K, name, r, now, hold)
+  local br = st.br[name]
+  if not (br and br.want == 'up' and br.since and now - br.since >= M.REACH_DAY and r.rdy ~= br.since) then return end
+  local e, n = nil, 0
+  for _, h in ipairs(hold) do if h.reach then e = e or h; n = n + 1 end end
+  if not e then return end
+  r.rdy = br.since
+  local q = string.format('%s stays down: %d units can reach it before it has moved (nearest %s %d, %d tiles, %d ticks; the window is %d ticks) and a raise would crush them: ' ..
+                          'reroute them, move the station or the levers, or pull it by hand', name, n, tostring(e.k), e.id, e.d, e.reach, M.reach_ticks())
+  K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'gate_reach_traffic', q = q:sub(1, 200), bridge = name, n = n, unit = e.id, d = e.d, need = M.reach_ticks(),
+                                               ticks = now - br.since, opts = {'reroute', 'relocate', 'lever'}})
+  K.log('warn', 'gate: %s', q)
+end
+
 -- BUG-543: `hold` plus the units within RAISE_R tiles of the footprint (scan `sc`) that are not standing still: not on the same
 -- tile for RAISE_STILL ticks (a unit seen for the first time counts as moving), no tame animal. A soldier standing at his squad
 -- station holds nothing (he stands), one who shuffles about it holds for RAISE_STILL ticks after each step.
@@ -1981,7 +2128,7 @@ function M.raise_movers(K, name, sc, hold, soldiers)
   local pm, pn, have, out = r.rq or {}, {}, {}, nil
   for _, e in ipairs(hold) do have[e.id] = true end
   for _, e in ipairs(sc.list or {}) do
-    if (e.d or 99) <= M.RAISE_R and e.k ~= 'animal' and (not soldiers or e.k == 'soldier') then
+    if (e.d or 99) <= M.RAISE_R and e.k ~= 'animal' and (not soldiers or e.k == 'soldier') and not M.stand_by(K, e) then
       local p = string.format('%d,%d,%d', e.x or -1, e.y or -1, e.z or -1)
       local o = pm[e.id]
       if not (o and o.p == p) then o = {p = p, t = now} end
@@ -2016,6 +2163,7 @@ local function holders(K, name, fp, sc, dir)
   local near_now, drop = false, nil              -- BUG-775: the hold of the units standing beside the footprint ends (below)
   local hold = within(sc, M.MARGIN)
   if not sc then hold.unknown = true end
+  if dir == 'up' then hold = M.drop_standers(K, hold) end       -- BUG-906: soldiers standing by order in SIEGE / BREACH (no clear station) hold nothing
   -- BUG-335: a unit walking onto the footprint holds it like one on it (forced or not)
   local cross, cby = sc and M.crossers(fp, sc.far) or {}, {}
   -- BUG-510 (Run 16a i1 Basementflew y406: B1 held 1,242 ticks by ONE animal 'walking onto it in 13 steps' / '3 tiles from it and
@@ -2029,7 +2177,7 @@ local function holders(K, name, fp, sc, dir)
     local fn = gcfg(K)
     local d = fn > 0 and hostile_dist(K, name, fp) or -1
     local rr = rt[name]
-    if rr then rr.fz_b = nil end
+    if rr then rr.fz_b, rr.fz_bd = nil, nil end
     local nowt = K.now().tick
     if rr then track(rr, cross, nowt) end                  -- BUG-881: how fast each walker onto the footprint really walks
     if rr then                                     -- BUG-775: where each unit beside the footprint stands, and since when
@@ -2052,6 +2200,7 @@ local function holders(K, name, fp, sc, dir)
         local eta = tpt and d * tpt
         local timed = eta ~= nil and eta <= M.CLOSE_BUDGET and (an > 0 or ac > 0) and M.barrier_foe(K)        -- BUG-881: the pull no longer fits in his trip
         local appr = held >= ah and ((ac > 0 and d <= ac) or (an > 0 and d <= an and cl))
+        local bdo = eta ~= nil and eta <= M.CLOSE_BUDGET and (an > 0 or ac > 0) and not M.barrier_foe(K)
         if timed or appr then
           -- the plain approach (BUG-587) lets the standers beside it go, the timed one waits for a gap while there is time (CLOSE_NEED)
           rr.fz_t = (timed and not appr and eta > M.CLOSE_NEED) or nil
@@ -2059,11 +2208,14 @@ local function holders(K, name, fp, sc, dir)
           rr.fz_eta, rr.fz_at = (timed and not appr) and eta or nil, now         -- round 3: the hostile's trip, for the bounded crush (M.crush_late)
           fn, rr.fz_b = d, held
           rr.fz_until, rr.fz_d = now + M.APPROACH_STICKY, d
-        elseif aw > 0 and d <= aw then
+        elseif (aw > 0 and d <= aw) or bdo then
           -- BUG-775: a hostile within approach_now tiles ends the hold of the units STANDING beside the footprint (STILL_NOW ticks on one
           -- tile: they cannot cross and get away in the ~160 ticks he needs) whatever the wait so far and whether he closes; a unit ON it, one
           -- walking onto it (the crossers: CROSS_REACH steps) or one beside it that keeps moving still holds the raise, so nobody is crushed
+          -- BUG-909 (Run 17 i3 y469 win: a cave dragon 84 tiles out, a citizen beside B1 held the raise 1739+ ticks): building destroyers
+          -- alone get no timed force (BUG-881), so the same release comes from their eta: closing and within CLOSE_BUDGET ticks
           near_now, rr.fz_b = true, held
+          rr.fz_bd = (not (aw > 0 and d <= aw)) and math.floor(eta) or nil
         end
       end
     end
@@ -2165,6 +2317,8 @@ local function holders(K, name, fp, sc, dir)
       if walk or not lim or (e.path or 0) <= lim then hold[#hold + 1] = e end
     end
   end
+  -- Neuausrichtung 15b: outside SIEGE / BREACH every unit that can reach the footprint before the bridge has moved holds the raise
+  if dir == 'up' and M.reach_applies(K, name) then hold = M.reach_hold(K, name, sc, hold, cby) end
   -- BUG-775: the raise goes ahead past the citizens beside the footprint (GATE_FORCED names them once the pull has a worker)
   if drop and #drop > 0 and #hold == 0 and not hold.unknown then return hold, hostile_dist(K, name, fp), drop end
   return hold, nil
@@ -2426,26 +2580,107 @@ end
 
 -- the first unit that makes a quiet PEACE raise of `name` unsafe now: any living unit that is not hostile within gate.peace_clear_r
 -- tiles of the footprint (citizens, children, pets, visitors and merchants of the census; standing, working or walking: a dwarf needs
--- ~9 ticks a tile and the pull-to-up window is the measured lever latency, so no unit that near is safe), soldiers at their station
--- included (fortcore's melee station lies 2 tiles from B1: one step puts him on it while the bridge moves, #1441; with such a
--- station B1 stays down in PEACE, the pre-NEU1 D-14 behaviour). `skip` = {[id] = true}: the job's worker and the bridge's
--- pullers in their room. The near list is re-read every frame, the wide census pass (PATH_R tiles) every FAST ticks.
+-- ~9 ticks a tile and the pull-to-up window is the measured lever latency, so no unit that near is safe). `skip` = {[id] = true}: the
+-- job's worker and the bridge's pullers in their room. The near list is re-read every frame, the wide census pass (PATH_R tiles) every
+-- FAST ticks.
+-- Neuausrichtung 15 (BUG-905, Run 17 i3 B1: the squad's station lies 4 tiles from the footprint, its soldiers and the passers-by within 20 tiles kept
+-- every quiet raise waiting: ~35 waits, 0 raises in a game year, B1 was down at every alarm) exempted soldiers at their station and units farther than
+-- 8 tiles. Neuausrichtung 15b: WITHDRAWN. A walker covers a tile per 9 ticks, the pull-to-up window is 100 to 1600 ticks: any unit within PEACE_R tiles,
+-- a soldier at his station included, can be on the footprint before it has moved (#38047 .. #38052). What stays is the REPORT: peace_blockers lists
+-- who keeps it down, nearest first (peace_day, the traffic numbers and the question of BUG-905).
+-- every unit that makes a quiet PEACE raise of `name` unsafe now (see peace_busy), nearest first
+function M.peace_blockers(K, name, r, sc, now, skip)
+  if not sc then return {{k = 'unknown', id = 0, d = 0}} end
+  local R = M.neu_cfg(K).peace_clear_r
+  local out = {}
+  local have = {}
+  for _, e in ipairs(sc.far or sc.list or {}) do
+    if not (skip and skip[e.id]) and e.d <= R then out[#out + 1] = e; have[e.id] = true end
+  end
+  -- BUG-907 (final rule): and every other non-animal unit that can reach the footprint within the whole window (M.reach_units), standing or not
+  if M.neu_cfg(K).reach then
+    local add = M.reach_units(K, name, have, nil, skip)
+    if not add then return {{k = 'unknown', id = 0, d = 0}} end
+    for _, e in ipairs(add) do out[#out + 1] = e end
+  end
+  table.sort(out, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.id < b.id end)
+  return out
+end
+
 function M.peace_busy(K, name, r, sc, now, skip)
   -- fail closed: without a census nobody can say who is near, so the quiet raise waits (BUG-831 retry)
-  if not sc then return {k = 'unknown', id = 0, d = 0} end
-  local R, hit = M.neu_cfg(K).peace_clear_r, nil
-  for _, e in ipairs(sc.far or sc.list or {}) do
-    if not (skip and skip[e.id]) and e.d <= R and (not hit or e.d < hit.d) then hit = e end
+  return M.peace_blockers(K, name, r, sc, now, skip)[1]
+end
+
+-- Neuausrichtung 15b: the traffic past a bridge that is wanted up in quiet PEACE, counted every pass: r.pt = {t0 first look, n units that came within PEACE_R
+-- (a unit not seen for 300 ticks counts again), x units walking onto the footprint (path = a crossing), seen = {[id] = last tick seen}, gap = the longest
+-- stretch without anybody within PEACE_R, last = the tick of the last sighting}
+local PT_AGAIN = 300
+function M.peace_traffic(K, name, r, sc, now, list)
+  local pt = r.pt
+  if not pt then pt = {t0 = now, n = 0, x = 0, seen = {}, xs = {}, gap = 0}; r.pt = pt end
+  if #list == 0 then return end
+  if pt.last and now - pt.last > pt.gap then pt.gap = now - pt.last end
+  pt.last = now
+  for _, e in ipairs(list) do
+    if e.id and e.id > 0 then
+      if not pt.seen[e.id] or now - pt.seen[e.id] > PT_AGAIN then pt.n = pt.n + 1 end
+      pt.seen[e.id] = now
+    end
   end
-  return hit
+  local fp = r.foot
+  if fp then
+    for _, c in ipairs(M.crossers(fp, sc and sc.far or {})) do
+      if c.path and c.path > 0 and (not pt.xs[c.id] or now - pt.xs[c.id] > PT_AGAIN) then pt.x = pt.x + 1 end
+      if c.path then pt.xs[c.id] = now end
+    end
+  end
+end
+
+-- BUG-908 (Run 17 i3: 'B1 not up after 132905 ticks' surfaced only at the first alarm, the quiet PEACE wait said it once a day and
+-- only named the nearest unit): a bridge wanted up in PEACE for PEACE_DAY ticks says ONCE per want who keeps it down, by kind and
+-- distance (`list` = the units, nearest first). Neuausrichtung 15b: and asks DECISION_NEEDED gate_peace_traffic with the numbers (units that came
+-- within PEACE_R, crossings of the footprint per 1000 ticks, the longest quiet gap against the lever latency window it needs): that is a layout problem
+-- (a route over the bridge, a station, levers or workshops beside it) the kernel cannot raise its way out of; the bridge stays down and says so
+function M.peace_day(K, name, r, now, list, why)
+  local br = st.br[name]
+  if not (br and br.want == 'up' and br.since and now - br.since >= M.PEACE_DAY and type(list) == 'table' and #list > 0) then return end
+  if r.pdy == br.since then return end
+  r.pdy = br.since
+  local parts, ids = {}, {}
+  for i, e in ipairs(list) do
+    if i <= M.NAME_MAX + 2 then parts[#parts + 1] = string.format('%s %d (%d tile%s)', tostring(e.k), e.id or 0, e.d or 0, (e.d or 0) == 1 and '' or 's') end
+    if #ids < 20 then ids[#ids + 1] = e.id end
+  end
+  local txt = string.format('%s has been wanted up in PEACE for %d ticks (%d game days) and is still down: %s%s%s', name, now - br.since,
+                            (now - br.since) // 1200, table.concat(parts, ', '), #list > #parts and string.format(', +%d more', #list - #parts) or '',
+                            why and (' (' .. why .. ')') or '')
+  K.emit('GATE', 'C', txt:sub(1, 200), {bridge = name, state = 'peace_stuck', n = #list, units = ids, ticks = now - br.since, why = why})
+  K.log('warn', 'gate: %s', txt)
+  local pt = r.pt
+  if pt and now - pt.t0 > 0 then
+    local span = now - pt.t0
+    local need = math.max(M.neu_cfg(K).peace_clear, st.lat and st.lat.t or 0)
+    local per = function(n) return math.floor(n * 1000 * 10 / span + 0.5) / 10 end
+    local q = string.format('%s stays down: %d units within %d tiles in %d ticks (%s per 1000), %d onto it (%s per 1000), longest quiet gap %d of %d needed ' ..
+                            '(lever latency %d): reroute, move station/levers or pull by hand',
+                            name, pt.n, M.neu_cfg(K).peace_clear_r, span, tostring(per(pt.n)), pt.x, tostring(per(pt.x)), pt.gap, need,
+                            st.lat and st.lat.t or -1)
+    K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'gate_peace_traffic', q = q:sub(1, 200), bridge = name, n = pt.n, crossings = pt.x, ticks = span,
+                                                 gap = pt.gap, need = need, lat = st.lat and st.lat.t or -1,
+                                                 opts = {'reroute', 'relocate', 'lever'}})
+    K.log('warn', 'gate: %s', q)
+  end
 end
 
 -- the quiet PEACE raise waits until no walker was near the footprint for the whole lever latency window (max(gate.peace_clear, the
 -- measured queue-to-up ticks)); GATE says why once a game day. Returns true while it waits. A pending pull is cancelled by the caller.
 function M.peace_wait(K, name, r, sc, now, skip)
   r.pq_t0 = r.pq_t0 or now
-  local e = M.peace_busy(K, name, r, sc, now, skip)
-  if e then r.pq_busy, r.pq_who = now, e end
+  local list = M.peace_blockers(K, name, r, sc, now, skip)
+  local e = list[1]
+  M.peace_traffic(K, name, r, sc, now, list)
+  if e then r.pq_busy, r.pq_who = now, e; M.peace_day(K, name, r, now, list, 'units near it') end
   local need = math.max(M.neu_cfg(K).peace_clear, st.lat and st.lat.t or 0)
   local since = math.max(r.pq_t0, r.pq_busy or -1e9)
   if not e and now - since >= need then return false end
@@ -2512,39 +2747,60 @@ function M.crush_late(K, r, now)
   return eta <= lat + M.TIMED_WIN + M.CRUSH_MARGIN        -- the measured latency ends when the pull is done; the bridge then still moves TIMED_WIN ticks
 end
 -- a raise that goes ahead with a unit ON the footprint (the bounded crush): GATE_CRUSH_RISK with the unit and the eta, once per pull
+-- Neuausrichtung 15b (live y472 #37124/#37135/#37139: GATE_CRUSH_RISK said 'k=citizen' for a bridge that crushed a SOLDIER: the event named only the FIRST
+-- unit on the footprint, once per pull, and the soldier stepped on later): every unit ON the footprint is named, each once per pull, the ones that came
+-- later in a further event; units/kinds carry all of the event's units
 function M.crush_forced(K, name, r, hold, now)
   local jid = r.job and r.job.id or -1
-  if r.cr_job == jid then return end
-  local e
-  for _, x in ipairs(hold) do if x.d == 0 then e = x; break end end
-  if not e then return end
-  r.cr_job = jid
+  if r.cr_job ~= jid then r.cr_job, r.cr_ids = jid, {} end
+  local new, all = {}, {}
+  for _, x in ipairs(hold) do
+    if x.d == 0 then
+      all[#all + 1] = x
+      if not r.cr_ids[x.id] then new[#new + 1] = x; r.cr_ids[x.id] = true end
+    end
+  end
+  if #new == 0 then return end
+  local e = new[1]
   local eta = M.eta_now(r, now) or -1
-  local txt = string.format('%s up goes ahead with %s %d on the footprint: the hostile is %d ticks away, the raise cannot wait any longer',
-                            name, tostring(e.k), e.id, eta)
+  local parts, ids, kinds = {}, {}, {}
+  for i, x in ipairs(new) do
+    if i <= M.NAME_MAX then parts[#parts + 1] = string.format('%s %d', tostring(x.k), x.id) end
+    if #ids < 20 then ids[#ids + 1], kinds[#kinds + 1] = x.id, tostring(x.k) end
+  end
+  local txt = string.format('%s up goes ahead with %s on the footprint: the hostile is %d ticks away, the raise cannot wait any longer', name,
+                            table.concat(parts, ', ') .. (#new > #parts and string.format(', +%d more', #new - #parts) or ''), eta)
   K.emit('GATE_CRUSH_RISK', 'B', txt:sub(1, 200), {bridge = name, unit = e.id, k = e.k, to = 'up', pull = r.job and r.job.queued or -1, eta = eta, forced = 1,
-                                                    pos = {e.x, e.y, e.z}})
+                                                    pos = {e.x, e.y, e.z}, units = ids, kinds = kinds})
   K.log('warn', 'gate: %s', txt)
 end
 
 -- BUG-253: a unit on the footprint of a bridge that is moving now (raising flings, lowering crushes): GATE_CRUSH_RISK (B),
 -- once per move record m, naming the first such unit (the death itself stays BRIDGE_CRUSH, A)
 function M.crush_risk(K, name, m, sc, fp)
-  if m.risk then return end
+  m.risks = m.risks or {}
+  local new = {}
   for _, e in ipairs(sc.list or {}) do
-    if e.d == 0 then
-      m.risk = e.id
-      local txt = string.format('%s moving %s with %s %d on the footprint at %d,%d,%d', name, tostring(m.to), e.k, e.id,
-                                e.x, e.y, e.z)
-      local rr = rt[name]
-      K.emit('GATE_CRUSH_RISK', 'B', txt:sub(1, 200), {bridge = name, unit = e.id, k = e.k, to = tostring(m.to),
-                                                        pull = m.pull, pos = {e.x, e.y, e.z},
-                                                        eta = rr and rr.fz_c and M.eta_now(rr, K.now().tick) or nil})
-      K.log('warn', 'gate: %s', txt)
-      if m.q then M.peace_lock(K, name, m, e) end                -- BUG-831
-      return
-    end
+    if e.d == 0 and not m.risks[e.id] then new[#new + 1] = e; m.risks[e.id] = true end
   end
+  if #new == 0 then return end
+  local e = new[1]
+  local first = not m.risk
+  m.risk = m.risk or e.id
+  local parts, ids, kinds = {}, {}, {}
+  for i, x in ipairs(new) do
+    if i <= M.NAME_MAX then parts[#parts + 1] = string.format('%s %d', tostring(x.k), x.id) end
+    if #ids < 20 then ids[#ids + 1], kinds[#kinds + 1] = x.id, tostring(x.k) end
+  end
+  -- Neuausrichtung 15b: every unit on the footprint is named (the first one in the unit / k fields, all of them in units / kinds), a later one in a further event
+  local txt = string.format('%s moving %s with %s on the footprint at %d,%d,%d', name, tostring(m.to), table.concat(parts, ', ') ..
+                            (#new > #parts and string.format(', +%d more', #new - #parts) or ''), e.x, e.y, e.z)
+  local rr = rt[name]
+  K.emit('GATE_CRUSH_RISK', 'B', txt:sub(1, 200), {bridge = name, unit = e.id, k = e.k, to = tostring(m.to),
+                                                    pull = m.pull, pos = {e.x, e.y, e.z},
+                                                    eta = rr and rr.fz_c and M.eta_now(rr, K.now().tick) or nil, units = ids, kinds = kinds})
+  K.log('warn', 'gate: %s', txt)
+  if m.q and first then M.peace_lock(K, name, m, e) end                -- BUG-831
 end
 
 local function observe(K, name, r, s, now, fp, prev, cur)
@@ -2640,6 +2896,10 @@ local function forced_event(K, name, fp, hold, hd, job)
     if aw > 0 and hd <= aw then       -- BUG-775: the hold ended because the hostile came within approach_now
       txt = string.format('%s raised with %s: a hostile %d tiles from it (approach_now %d), held %d ticks', name,
                           who(hold, fp), hd, aw, r.fz_b)
+    end
+    if r.fz_bd then                    -- BUG-909: building destroyers alone, closing: the hold ended by his eta
+      txt = string.format('%s raised with %s: a building destroyer %d tiles from it closes in %d ticks (within the %d-tick budget), held %d ticks',
+                          name, who(hold, fp), hd, r.fz_bd, M.CLOSE_BUDGET, r.fz_b)
     end
   end
   K.emit('GATE_FORCED', 'A', cut(txt, 200), {bridge = name, units = ids_of(hold), hostile = hd,
@@ -2918,9 +3178,14 @@ local function control(K, name, spec, now)
         -- BUG-141 (live i3: lever 25729 two tiles from X25718's footprint): the job's own worker has to stand at the
         -- lever; next to the footprint (not on it) he holds nothing, else we cancel our own pull for ever
         local wid = (w0 and unit_id(w0)) or r.job.wid
+        local wat_q = true                            -- 15b: under the reach rule (up) the worker is exempt only AT the lever
+        if wid and dir == 'up' and M.reach_strict(K, name) then
+          local wx, wy, wz = unit_pos(df.unit.find(wid))
+          wat_q = at_lever(name, wx, wy, wz)
+        end
         if wid and #hold > 0 then
           local keep = {unknown = hold.unknown}
-          for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 then keep[#keep + 1] = e end end
+          for _, e in ipairs(hold) do if e.id ~= wid or e.d == 0 or not wat_q then keep[#keep + 1] = e end end
           if #keep < #hold then hold = keep end
         end
         local own = dir == 'up' and own_pullers(K, name, now) or {}
@@ -2941,7 +3206,7 @@ local function control(K, name, spec, now)
         if dir == 'up' and #hold == 0 and not hold.unknown and M.quiet_raise(K, name) then
           local skip = {}
           for id in pairs(own) do skip[id] = true end
-          if wid then skip[wid] = true end
+          if wid and wat_q then skip[wid] = true end   -- 15b: under the reach rule only the worker AT the lever
           pbusy = M.peace_busy(K, name, r, sc, now, skip)
         end
         if pbusy then
@@ -3057,6 +3322,7 @@ local function control(K, name, spec, now)
   r.fj = nil
   if w == nil or w == s then
     r.pq_t0, r.pq_busy, r.pq_who, r.pq_ev, r.pq_pos, r.pq_nt = nil, nil, nil, nil, nil, nil     -- BUG-831
+    r.pdy, r.pt, r.rdy = nil, nil, nil                -- BUG-908 / BUG-907
     unblock(r, now); r.block_ev = nil
     r.fz_until, r.fz_d, r.fz_t, r.fz_c, r.fz_eta = nil, nil, nil, nil, nil       -- BUG-621: the approach force ends with the want
     if r.ne or r.park then for _, lid in ipairs(r.levers) do M.ne_clear(r, lid) end; r.ne, r.park = nil, nil end   -- BUG-068
@@ -3079,6 +3345,11 @@ local function control(K, name, spec, now)
   if #hold > 0 then                                -- BUG-310: forced or not, never onto a unit on the footprint
     r.block_since = r.block_since or now
     note_hold(K, name, spec.fp, w, hold, now)
+    if w == 'up' and M.quiet_raise(K, name) then
+      M.peace_traffic(K, name, r, sc, now, hold)
+      M.peace_day(K, name, r, now, hold, 'on or beside it, or moving near it')                                       -- BUG-908
+    end
+    if w == 'up' and not M.quiet_raise(K, name) then M.reach_day(K, name, r, now, hold) end      -- BUG-907: the traffic question
     r.stuck, r.qd = 'blocked', now
     return s
   end
@@ -3454,18 +3725,62 @@ end
 -- NEU1 (D-14 inner): civilians on the attack side (census.u.atk: outside Kern+ and the refuge, or in the bailey / trap hall /
 -- killing field) of a RAISED inner gate in quiet PEACE: once they stood there return_every ticks the gate opens for
 -- return_open ticks (st.winb, the per-bridge window; window_open still needs no visible hostile). Runtime only (r.ret).
+-- BUG-908: the units that would keep `name` from being raised again once its attack-side civilians are in (peace_blockers without them)
+function M.return_forecast(K, name, now)
+  local spec = (K.manifest().bridges or {})[name]
+  if not valid_spec(spec) then return nil end
+  local wide = around(K, spec.fp, M.PATH_R)
+  if not wide then return nil end
+  local sc = narrow(wide, M.SCAN_R)
+  local skip, cu = {}, K.census.u
+  for _, id in ipairs(type(cu) == 'table' and type(cu.atk_ids) == 'table' and cu.atk_ids or {}) do skip[id] = true end
+  return M.peace_blockers(K, name, {foot = spec.fp}, sc, now, skip)
+end
+
 local function return_window(K, name, now)
   local c = M.neu_cfg(K)
   local r = runtime(name)
   local cu = K.census.u
   local atk = type(cu) == 'table' and math.tointeger(cu.atk) or -1
   local fresh = type(cu) == 'table' and now - (math.tointeger(cu.tick) or -1e9) <= M.INNER_FRESH
+  -- BUG-908: a return window ends as soon as the last civilian is in (nobody on the attack side, a fresh census, M.RETURN_MIN ticks after it
+  -- opened: the lowering takes its time): the bridge is wanted up at once and the quiet re-raise (BUG-905) starts, instead of the window
+  -- running its whole return_open + lever latency with nobody left to let in
+  local wb = st.winb[name]
+  if r.rw and wb and now < wb and fresh and atk == 0 and now - r.rw >= M.RETURN_MIN then
+    st.winb[name], r.rw, dirty = now, nil, true
+    K.emit('GATE', 'C', cut(string.format('%s closes its return window early: nobody is left outside it', name), 200), {bridge = name, state = 'return_end'})
+    K.log('info', 'gate: %s return window ended early: no civilian left on its attack side', name)
+  elseif r.rw and not (wb and now < wb) then r.rw = nil end
   if c.return_every <= 0 or not fresh or atk <= 0 or r.last ~= 'up' or lock_why(K) then r.ret = nil; return end
   r.ret = r.ret or now
   if now - r.ret < c.return_every then return end
+  -- BUG-908 (Run 17 i3: the window lowered B1 and the quiet re-raise never came): an inner bridge is lowered for the returning civilians only when
+  -- the raise afterwards is possible by the same rule (peace_busy), the returners themselves aside; else it says so once a game day and tries again
+  local fc = M.return_forecast(K, name, now)
+  if not fc then
+    -- Neuausrichtung 15b (second review): no census, no forecast: fail closed, the bridge stays up and the next pass asks again
+    if not r.rf_ev or now - r.rf_ev >= M.FAIL_REPEAT then
+      r.rf_ev = now
+      K.log('info', 'gate: %s return window waits: no census around it, so no forecast that it could be raised again', name)
+    end
+    return
+  end
+  if #fc > 0 then
+    if not r.rf_ev or now - r.rf_ev >= M.FAIL_REPEAT then
+      r.rf_ev = now
+      local parts = {}
+      for i, e in ipairs(fc) do if i <= M.NAME_MAX then parts[#parts + 1] = string.format('%s %d (%d tiles)', tostring(e.k), e.id or 0, e.d or 0) end end
+      K.emit('GATE', 'C', cut(string.format('%s stays up: no return window for %d civilians outside it, it could not be raised again: %s', name, atk,
+             table.concat(parts, ', ')), 200), {bridge = name, state = 'return_wait', n = atk, blockers = #fc})
+      K.log('info', 'gate: %s return window waits: %d units would keep it down afterwards', name, #fc)
+    end
+    return
+  end
   r.ret = nil
   -- BUG-831: the window counts from the bridge being down: the lowering pull takes the measured lever latency first
   st.winb[name], dirty = now + c.return_open + (st.lat and st.lat.t or 0), true
+  r.rw = now
   K.emit('GATE', 'C', cut(string.format('%s opens for %d ticks: %d civilians outside it in PEACE (return window)', name,
          c.return_open, atk), 200), {bridge = name, state = 'return', n = atk,
          units = type(cu.atk_ids) == 'table' and cu.atk_ids or {}})
@@ -4013,6 +4328,9 @@ end
 -- farther away than this plus the spread of a squad around its station)
 function M.margin(K) return M.MARGIN end
 
+-- public (BUG-906, military): the radius within which a moving unit holds a raise (military keeps a station RAISE_R + spread tiles from a footprint)
+function M.raise_r(K) return M.RAISE_R end
+
 -- public (BUG-032, siege -> military.restation): the bridges whose pull waits for units on or next to the footprint now
 -- (as of the last pass): {{bridge, want, fp = {x0, y0, z0, x1, y1, z1}, since, units = {{id, k, d, x, y, z}}}}, sorted
 -- by bridge; k as in the GATE text (citizen, soldier, child, animal, ...), d = tiles from the footprint
@@ -4315,6 +4633,19 @@ M.on = {
 
 -- inbox `lever`: {bridge, want}. PEACE; NEU1 P7: in any other mode only while the emergency exit is open (player.open) and
 -- only up (a raise never opens the fort; squad.sortie lowers its own gate). Without the player module: PEACE only (fail closed).
+-- Neuausrichtung 15b (Run 17 i3 #34646 'lever not allowed in SIEGE', the kernel could not raise B1 and the player could not either): in ALERT and
+-- SIEGE the player's `lever up` of an INNER bridge is allowed without the exit (a raise of an inner bridge shuts the fort, it never opens it), with the
+-- kernel's own refusal: a unit ON the footprint right now refuses it at once (naming him); the wanted raise then waits for units on or beside the
+-- footprint and the walkers onto it like every pull, but not for the reach rule (M.reach_hold) that holds the kernel's own raises: the player decides.
+M.LEVER_MODES = {ALERT = true, SIEGE = true}
+function M.lever_on_footprint(K, spec)
+  local wide = around(K, spec.fp, M.SCAN_R)
+  if not wide then return nil, 'no census yet: nobody can say who stands on the footprint' end
+  local on = {}
+  for _, e in ipairs(wide.list) do if e.d == 0 then on[#on + 1] = e end end
+  if #on == 0 then return true end
+  return false, string.format('%s on the footprint', who(on, spec.fp))
+end
 M.verbs.lever = function(K, args, cmd)
   local b, w = args.bridge, args.want
   if type(b) ~= 'string' or (w ~= 'up' and w ~= 'down') then return false, 'need bridge and want up|down' end
@@ -4328,8 +4659,21 @@ M.verbs.lever = function(K, args, cmd)
   local mode = K.mode()
   if mode ~= 'PEACE' then
     local okc, open = K.call('player', 'open')
-    if not (okc and open == true) then return false, 'lever not allowed in ' .. mode .. ' (outside PEACE only while the emergency exit is open)' end
-    if w ~= 'up' then return false, 'lever down not allowed in ' .. mode .. ' (the emergency exit opens lever up only; squad.sortie lowers its own gate)' end
+    local man = K.manifest()
+    local spec = type(man.bridges) == 'table' and man.bridges[b]
+    if okc and open == true then
+      if w ~= 'up' then return false, 'lever down not allowed in ' .. mode .. ' (the emergency exit opens lever up only; squad.sortie lowers its own gate)' end
+    elseif M.LEVER_MODES[mode] and valid_spec(spec) and spec.role == 'inner' then
+      if w ~= 'up' then return false, 'lever down not allowed in ' .. mode .. ' (only lever up of an inner bridge; squad.sortie lowers its own gate)' end
+    elseif M.LEVER_MODES[mode] then
+      return false, 'lever not allowed in ' .. mode .. ' for ' .. b .. ' (outside PEACE only the inner bridges, up, or while the emergency exit is open)'
+    else
+      return false, 'lever not allowed in ' .. mode .. ' (outside PEACE only while the emergency exit is open)'
+    end
+    if w == 'up' and valid_spec(spec) then       -- the kernel's own refusal: never raised onto a unit
+      local ok, why = M.lever_on_footprint(K, spec)
+      if not ok then return false, 'lever up ' .. b .. ' refused: ' .. why .. ' (a raise would crush him; the want is not set, try again when the footprint is clear)' end
+    end
   end
   if w == 'down' and peace_mode(K) ~= 'down' then    -- D-14 up/inner: the operator's planned opening is a window for this bridge
     st.winb[b], dirty = K.now().tick + M.WIN_LEVER, true

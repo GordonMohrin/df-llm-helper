@@ -3,6 +3,7 @@
 -- sense / threat / siege / gate (+ reflex) on one k_mock world (tests/lua/siege_world.lua), walkers that walk, a raised bridge cannot
 -- be walked, a unit on a moving bridge is crushed; attackers arrive while civilians are outside, the bridges go up and stay up,
 -- nobody is crushed, those shut out are let in once it is quiet (not walled out of drink for good), the caravan and the recall cases.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local S = require('siege_world')
 local kmock = require('dfllm.util.k_mock')

@@ -1,4 +1,5 @@
 -- WP1 kernel files: state a/b slots, events rotation, inbox -> outbox, heartbeat, logs, plan.reload.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local H = require('kern_world')
 local json = require('dfllm.util.json')

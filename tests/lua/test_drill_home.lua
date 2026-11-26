@@ -4,6 +4,7 @@
 -- and a passed drill raises the pop cap (R2). DRILL_RESULT reports those as `walking` (diagnostic only), plus the
 -- outer bridge's raise time, the lever-job take and the pullers (gate.kpi).
 -- Real drill on the WP5 reflex + WP6 military/readiness on k_mock (strict), like test_drill.lua.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local X = require('wp6_world')
 local S = X.S

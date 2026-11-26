@@ -5,6 +5,7 @@
 -- DRILL_RESULT then says how long it took (d.restore, -1 not down) and why the drill ran (d.why). A bridge not up and not
 -- being pulled at T+900 is dropped (no late raise). The real drill on the WP5 reflex + WP6 military/readiness (k_mock).
 KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local X = require('wp6_world')
 local S = X.S

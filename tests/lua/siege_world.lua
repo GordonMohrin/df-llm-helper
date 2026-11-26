@@ -53,6 +53,11 @@ function S.fort_units()
   return {S.cit(1, 60, 70), S.cit(2, 61, 70), S.cit(3, 62, 71), S.cit(4, 63, 72, Z, {adult = false}),
           S.cit(5, 51, 44, Z, {squad = 1})}
 end
+-- Neuausrichtung 15b: the same fort with everybody 25+ tiles from every footprint (O1 y=10, B1 y=40, B2 y=60; the census sees 24 tiles): for the tests of the
+-- lockdown / alert plumbing, where the kernel's own raises must not wait for the people the reach rule (gate.reach_hold) keeps off a footprint
+function S.far_units()
+  return {S.cit(1, 60, 88), S.cit(2, 61, 88), S.cit(3, 62, 89), S.cit(4, 63, 90, Z, {adult = false}), S.cit(5, 51, 92, Z, {squad = 1})}
+end
 function S.army(n, x, y, first)
   local r = {}
   for i = 1, n do r[i] = S.inv((first or 200) + i, x + (i - 1) % 3, y + (i - 1) // 3) end

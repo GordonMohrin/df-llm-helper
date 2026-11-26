@@ -1,6 +1,7 @@
 -- BUG-730 (Run 16d i4 Trumpetrealms y374: DRILL_FAIL 'worn<90, outside:1/8' several times in a row, the clock held at 30 t/s each time, the plan's
 -- projects stalled behind it): an automatic drill is not repeated while the gear alone failed the last one and has not improved
 -- (drill.gear_hold), and does not start while a citizen stands outside Kern+ (drill.outside_hold, at most OUT_FORCE ticks).
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local X = require('wp6_world')
 

@@ -11,8 +11,8 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 35 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 786 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **52** von 838 |
+| offen, nie live gesehen | 791 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **52** von 843 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 78 |
 

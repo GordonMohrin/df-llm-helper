@@ -6,6 +6,7 @@
 --       mechanics (no up:/slow: failure), nobody is crushed, DRILL_RESULT carries `settle`;
 --   (2) a citizen who stays outside for good: the settle cap (SETTLE_MAX) ends the settle, the drill measures `outside:1` as before;
 --   (3) SETTLE_MAX 0 keeps the old clock (T0): the control that the recall stream makes the old drill miss B1.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local S = require('siege_world')
 local kmock = require('dfllm.util.k_mock')

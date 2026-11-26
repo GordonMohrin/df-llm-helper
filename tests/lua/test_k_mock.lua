@@ -1,4 +1,5 @@
 -- k_mock: the reference semantics of CONTRACTS §3.3/§4 (scheduling, events, modes, act, persist, inbox).
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local kmock = require('dfllm.util.k_mock')
 local json = require('dfllm.util.json')

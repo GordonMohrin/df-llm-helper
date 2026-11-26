@@ -97,6 +97,15 @@ function H.kern() return require('dfllm.kern') end
 function H.boot(W, opts)
   opts = opts or {}
   local ok, msg = H.kern().boot{repo = opts.repo or W.dir, modules = opts.modules, strict = opts.strict ~= false}
+  -- Neuausrichtung 15b: a test written for the gate of main (KMOCK_LEGACY_15B = true, as for k_mock) runs the real kernel with the safety switches set off through the config keys
+  if ok and rawget(_G, 'KMOCK_LEGACY_15B') then
+    local cfg = H.kern().K().cfg
+    cfg.reflex = type(cfg.reflex) == 'table' and cfg.reflex or {v = 2}
+    cfg.reflex.gate = type(cfg.reflex.gate) == 'table' and cfg.reflex.gate or {}
+    for k, v in pairs({reach = false, player_lever = false, station_clear = 2}) do
+      cfg.reflex.gate[k] = v                              -- over the repo's config too (the shipped one names the keys: true, true, 4)
+    end
+  end
   -- Neuausrichtung 1 / P3: a live player session (the arbiter's dead-man switch pauses a fort without one), written once
   -- the kernel made the save folder (an unmarked save gets none); opts.session = false boots without it, a number is the
   -- heartbeat's age in real seconds

@@ -4,6 +4,7 @@
 -- act.squad_add; then audit, plan.reload, two drills, popcap.lower, a siege with kill orders and a
 -- sortie, RECOVERY and PEACE, all through inbox files. Python validates every file written.
 --   python tools/luahost.py --path tests/lua tests/lua/wp6_scenario.lua <outdir>
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this scenario sets them off (k_mock / kern_world)
 local H = require('kern_world')
 local S = require('siege_world')
 local X = require('wp6_world')

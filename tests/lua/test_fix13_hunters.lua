@@ -3,6 +3,7 @@
 -- (#1583/#1584). Now no automatic drill below 60 food or drink days or while that stock falls (below 120 d), and the
 -- hunters and fishers keep their detail in every mode except a real siege, after which they return at once.
 -- Every test fails on 1d17c7e.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local X = require('wp6_world')
 local F = require('wp8_world')

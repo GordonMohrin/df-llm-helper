@@ -8,6 +8,7 @@
 -- zones of test_intake: O1 y=10, Z1 y11-15, K1 y25-31, B1 y=40, Z3 y41-59 (melee 51,44), B2 y=60, Z4 y61-95. Soldiers
 -- walk to their squad's station order (teleport, the 3x3 around it) only where no bridge between is up.
 KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down: B1 down in PEACE counts its station tile reads); see tests/lua/test_neu1_tore.lua
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local S = require('siege_world')
 local X = require('wp6_world')

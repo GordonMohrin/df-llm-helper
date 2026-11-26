@@ -1,0 +1,261 @@
+-- Neuausrichtung 15b (BUG-905..909, second round; Run 17 i3 Orangering, kernel 7f3706e5): the live crush of citizen 29043 by B1 in ALERT (BRIDGE_CRUSH #38052:
+-- soldier 27323 on the footprint, a stream of walkers, the pull of round 15's bounded wait queued at stage 2 and done 117 ticks later) and the rule that replaces
+-- the bounded wait: outside SIEGE / BREACH no pull is made, and none is kept, while any unit can reach the footprint before the bridge has moved
+-- (gate.reach_hold). SIEGE TRAFFIC tests (b1_world.lua: real sense / threat / siege / gate, walkers with a path DF shows, a hostile that walks, a raised
+-- bridge cannot be walked, a unit ON a moving bridge is crushed and recorded). B1 = 3x1 footprint 50..52,40 of the siege world, squad station 51,44, O1 at y=10.
+--   (i)   ALERT, one hostile, a soldier ON the footprint, a citizen stream, lever latency 1000: no pull while they can reach it, zero crush, the refusal is said
+--   (ii)  the same with a clear approach: B1 is up
+--   (iii) PEACE with a crossing every ~300 ticks and latency 1000: no pull ever, ONE DECISION_NEEDED with the numbers
+--   (iv)  the return window with the forecast negative (test_bug905_909_b1.lua F4: the squad's soldiers can reach it): B1 stays up
+--   (v)   the player's lever in ALERT / SIEGE: inner bridges, up; refused with a unit ON the footprint, queued without
+--   (vi)  GATE_CRUSH_RISK names every unit on the footprint (the soldier crushed at O1 was reported as k=citizen)
+local T = require('testlib')
+local S = require('siege_world')
+local B = require('b1_world')
+local Z = S.Z
+
+local function cat(...)
+  local r = {}
+  for _, l in ipairs({...}) do for _, v in ipairs(l) do r[#r + 1] = v end end
+  return r
+end
+local function names(W) return table.concat(W.crushed, '; ') end
+local function soldiers(ids, pace)
+  local r = {}
+  for _, id in ipairs(ids) do r[#r + 1] = {id = id, kind = 'soldier', pos = {51, 44}, pace = pace, nopath = true} end
+  return r
+end
+local SHUF = {{0, 0}, {1, 0}, {0, 1}, {1, 1}}
+
+-- a stream of citizens walking over B1 from far out on the attack side (9 ticks a tile: a walker covers a tile per 9 ticks), one every `gap` ticks
+local function stream(first, n, gap, id0, y0, y1)
+  local acts = {}
+  for k = 0, n - 1 do acts[#acts + 1] = {id = (id0 or 200) + k, kind = 'citizen', route = B.route(50 + k % 3, y0 or 4, y1 or 70), start = first + gap * k, tpt = 9} end
+  return acts
+end
+
+---------------------------------------------------------------- (i) / (ii): ALERT
+-- the live ALERT case: a soldier standing ON the footprint (leaves it at +900), one beside it, a citizen stream walking onto it (one every 150 ticks),
+-- citizen 29043 standing 3 tiles out, ONE hostile 20 tiles out and the measured lever latency 1000
+local function alert_stream(o)
+  o = o or {}
+  local acts = {{id = 27323, kind = 'soldier', pos = {51, 40}, nopath = true,
+                 fn = function(W, rel, a) if rel >= 900 and not a.left then a.left = true; W.move(a.id, 51, 44, Z) end end},
+                {id = 27354, kind = 'soldier', pos = {51, 41}, still = true, nopath = true},
+                {id = 29043, kind = 'citizen', pos = {51, 37}, still = true, nopath = true}}
+  return B.build{mode = o.mode or 'ALERT', lock = 'lockdown', lat = 1000, actors = cat(acts, stream(300, 30, 150)), army = {S.inv(250, 51, 20, Z)}}
+end
+
+T.test('(i) ALERT, one hostile 20 tiles out, a soldier ON the footprint, a citizen stream walking onto it, lever latency 1000: no pull while anybody can reach ' ..
+       'it, zero crush, B1 stays down, GATE_FAIL names who can reach it', function()
+  local W = alert_stream()
+  B.run(W, 5200)
+  local pulls = B.pulls(W, 'B1')
+  if os.getenv('DBG') then
+    print('pulls', table.concat(pulls, ','), 'ups', table.concat(B.flips(W, 'B1', 'up'), ','), 'crushed', #W.crushed)
+    for _, e in ipairs(W.find_events('GATE_FAIL')) do print('GATE_FAIL', e.tick - W.t_start, e.msg) end
+  end
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+  T.eq(#W.find_events('GATE_CRUSH_RISK'), 0, 'no crush risk')
+  T.eq(#pulls, 0, 'no pull while a unit can reach the footprint: ' .. table.concat(pulls, ','))
+  T.eq(S.bstate(W, 'B1'), 'down')
+  local text
+  for _, e in ipairs(W.find_events('GATE_FAIL')) do if e.d.bridge == 'B1' then text = text or e.msg end end
+  T.ok(text and (text:find('can reach it in', 1, true) or text:find('on the footprint', 1, true)), text)
+end)
+
+-- the live crush (Run 17 i3, BRIDGE_CRUSH #38052): the pull is queued at T, the lever work is done and the bridge starts to move at T+117 (events #38047 / #38052),
+-- and a citizen who stood a few tiles out steps onto the footprint inside that window. The mock lever: a worker after 77 ticks, the pull 40 ticks, so the bridge
+-- moves 117 ticks after the job was queued; the citizen steps onto the footprint 4 ticks before it moves (one gate pass is FAST = 25 ticks: nobody sees him).
+local function ambush(W_id)
+  return {{id = 27354, kind = 'soldier', pos = {51, 41}, still = true, nopath = true},
+          {id = W_id, kind = 'citizen', pos = {51, 37}, nopath = true,
+           fn = function(W, rel, a)
+             -- the lever job of B1 is queued: remember it; the frame its work is done (no job left, the bridge starts to move) is the one he steps onto the footprint in
+             for _, l in ipairs(W.levers) do
+               if l.bridge == 'B1' and #l.jobs > 0 then a.job_seen = true end
+             end
+             if a.job_seen and not a.stepped and S.bstate(W, 'B1') == 'moving' then a.stepped = true; W.move(a.id, 51, 40, Z) end
+           end}}
+end
+
+T.test('(i) the live ambush (pull at T, bridge moves at T+117, citizen 29043 steps onto B1 inside the window): zero crush on HEAD, then no pull at all; round 15 ' ..
+       '(65eca7bd) pulled and crushed him', function()
+  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, actors = ambush(29043), army = {S.inv(250, 51, 20, Z)}, lever = {worker = 77, pull = 40}}
+  B.run(W, 4000)
+  if os.getenv('DBG') then print('pulls', table.concat(B.pulls(W, 'B1'), ','), 'crushed', #W.crushed, names(W)) end
+  T.eq(#W.crushed, 0, 'BRIDGE_CRUSH: ' .. names(W))
+  T.eq(#B.pulls(W, 'B1'), 0, 'never pulled with a citizen 3 tiles out: ' .. table.concat(B.pulls(W, 'B1'), ','))
+  T.eq(S.bstate(W, 'B1'), 'down')
+end)
+
+-- beyond the census scan (PATH_R = 24 tiles): at latency 1000 the bridge needs ~1,110 ticks (pull + its own movement), a walker 25..40 tiles out covers that in
+-- 123 steps: no path inside the census, but he can be on the footprint when it moves. The reach rule looks at the whole fort census out to REACH_TICKS / REACH_TPT.
+T.test('(i) a walker 25..40 tiles out (outside the 24-tile census scan, no path DF shows), lever latency 1000: the pull is cancelled when he walks toward it, B1 does not move while he can reach it, nobody is crushed', function()
+  -- a walker on a straight road toward B1 (no path DF shows, 9 ticks a tile), 40 / 35 tiles out and walking from the start: the first pass queues the pull (it sees him
+  -- for the first time, standing for all it knows), the next pass (25 ticks later) sees him walk and cancels it, long before the job is done (~80 ticks). The old
+  -- scan (24 tiles) saw nobody: the lever job was done and B1 up at ~+90 although he reaches the footprint ~360 / 315 ticks later, while it still moves (movement
+  -- 380 ticks, the longest live one).
+  for _, y0 in ipairs({0, 5}) do
+    local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, actors = {{id = 800, kind = 'citizen', route = B.route(51, y0, 70), start = 0, tpt = 9, nopath = true}},
+                      army = {S.inv(250, 51, 20, Z)}, move = 380}
+    B.run(W, 1700)
+    local ups = B.flips(W, 'B1', 'up')
+    if os.getenv('DBG') then print(y0, 'pulls', table.concat(B.pulls(W, 'B1'), ','), 'ups', table.concat(ups, ','), 'crushed', #W.crushed, names(W)) end
+    T.eq(#W.crushed, 0, 'start y=' .. y0 .. ' crushed: ' .. names(W))
+    -- the mock keeps a walker off a moving bridge, so a crush cannot be shown: the proof is that the bridge does not move while he walks toward it
+    T.ok(ups[1] == nil or ups[1] > (40 - y0) * 9 + 20, 'start y=' .. y0 .. ': B1 not moved before he had passed the footprint: up at +' .. tostring(ups[1]))
+  end
+end)
+
+T.test('(ii) ALERT, one hostile 20 tiles out, a clear approach (nobody of the fort within 126 tiles, the reach window of latency 1000 + the move): B1 is pulled and up, nobody crushed', function()
+  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, deep = true, army = {S.inv(250, 51, 20, Z)}}
+  B.run(W, 1500)
+  local ups = B.flips(W, 'B1', 'up')
+  if os.getenv('DBG') then print('pulls', table.concat(B.pulls(W, 'B1'), ','), 'ups', table.concat(ups, ',')) end
+  T.ok(ups[1] ~= nil and ups[1] <= 900, 'B1 up within 900 ticks: +' .. tostring(ups[1]))
+  T.eq(S.bstate(W, 'B1'), 'up')
+  T.eq(#W.crushed, 0)
+  T.eq(#W.find_events('GATE_FAIL'), 0, 'no refusal')
+end)
+
+T.test('(ii) the stream passes: four walkers stand 20 tiles out and walk over B1 and on to 160 tiles (one every 150 ticks); B1 is pulled only once the last one is out of the reach window ' ..
+       '(126 tiles), and is then up', function()
+  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, deep = true, actors = stream(0, 4, 150, 200, 20, 200), army = {S.inv(250, 51, 20, Z)}}
+  B.run(W, 4800)
+  local pulls, ups = B.pulls(W, 'B1'), B.flips(W, 'B1', 'up')
+  if os.getenv('DBG') then print('pulls', table.concat(pulls, ','), 'ups', table.concat(ups, ',')) end
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+  -- the last walker (start 450, 9 ticks a tile) is 126 tiles past the footprint (y=166) after 450 + 146 x 9 = ~1760
+  T.ok(pulls[1] ~= nil and pulls[1] >= 1700, 'first pull only after the last walker had left the window: +' .. tostring(pulls[1]))
+  T.ok(ups[1] ~= nil, 'then up')
+end)
+
+---------------------------------------------------------------- (iii) PEACE traffic
+T.test('(iii) PEACE with a walker crossing the footprint every ~300 ticks and lever latency 1000: B1 is never pulled and never moves, nobody is crushed; after a game ' ..
+       'day ONE peace_stuck and ONE DECISION_NEEDED gate_peace_traffic with the numbers (units, crossings per 1000 ticks, quiet gap, latency)', function()
+  local W = B.build{lat = 1000, actors = stream(0, 14, 300)}
+  B.run(W, 4800)
+  T.eq(#B.pulls(W, 'B1'), 0, 'never pulled')
+  T.eq(S.bstate(W, 'B1'), 'down')
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+  local dn = {}
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'gate_peace_traffic' then dn[#dn + 1] = e end end
+  if os.getenv('DBG') then for _, e in ipairs(dn) do print('DECISION', e.tick - W.t_start, e.msg) end end
+  T.eq(#dn, 1, 'ONE decision')
+  local d = dn[1] and dn[1].d or {}
+  T.ok(d.bridge == 'B1' and d.lat == 1000 and d.need == 1000 and d.n >= 4 and d.crossings >= 3 and d.gap < 1000 and d.ticks >= 1200, dn[1] and dn[1].msg)
+  T.ok(dn[1] and dn[1].msg:find('per 1000', 1, true) and dn[1].msg:find('lever latency 1000', 1, true) and dn[1].msg:find('quiet gap', 1, true), dn[1] and dn[1].msg)
+  T.eq(#B.events(W, 'GATE', 'peace_stuck'), 1, 'one peace_stuck')
+end)
+
+---------------------------------------------------------------- (v) the player's lever
+local function reply(W) return W.replies[#W.replies] end
+
+T.test('(v) the player\'s lever in ALERT: an inner bridge, up: refused with a unit ON the footprint (naming him, no want set), queued without; the soldiers at their ' ..
+       'station that hold the kernel\'s own raise do not hold the player\'s; the outer bridge and lever down stay refused', function()
+  local W = B.build{mode = 'ALERT', lat = 1000, actors = cat(soldiers({5, 101, 102}, SHUF),
+                    {{id = 90, kind = 'citizen', pos = {51, 40}, nopath = true,
+                      fn = function(w, rel, a) if rel >= 1500 and not a.left then a.left = true; w.move(a.id, 51, 47, Z) end end}}),
+                    army = {S.inv(250, 51, 15, Z)}}                                    -- NO lockdown: the kernel wants nothing up by itself
+  B.run(W, 60)
+  W.inbox('lever', {bridge = 'B1', want = 'up'})
+  T.eq(reply(W).ok, false, 'refused with a citizen ON the footprint')
+  T.ok(reply(W).msg:find('citizen 90 on the footprint', 1, true), reply(W).msg)
+  T.eq(#B.pulls(W, 'B1'), 0)
+  W.inbox('lever', {bridge = 'O1', want = 'up'})
+  T.eq(reply(W).ok, false, 'the outer bridge is refused')
+  T.ok(reply(W).msg:find('for O1', 1, true) and reply(W).msg:find('inner', 1, true), reply(W).msg)
+  W.inbox('lever', {bridge = 'B1', want = 'down'})
+  T.eq(reply(W).ok, false, 'lever down is refused')
+  T.ok(reply(W).msg:find('lever down not allowed in ALERT', 1, true), reply(W).msg)
+  B.run(W, 1600)                                                                       -- he leaves the footprint at +1500
+  W.inbox('lever', {bridge = 'B1', want = 'up'})
+  T.eq(reply(W).ok, true, 'queued without a unit on the footprint: ' .. tostring(reply(W).msg))
+  B.run(W, 900)
+  T.eq(S.bstate(W, 'B1'), 'up', 'B1 up although the soldiers at their station could reach it (the player decides)')
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+end)
+
+T.test('(v) the player\'s lever in SIEGE: the inner bridge, up: refused with a unit on the footprint, queued without; BREACH keeps the emergency-exit rule', function()
+  local W = B.build{mode = 'SIEGE', lat = 1000, base = false, actors = {{id = 91, kind = 'citizen', pos = {51, 40}, still = true, nopath = true}},
+                    army = {S.inv(250, 51, -40, Z)}, closed = {}, lever = {worker = 30, pull = 40}}
+  W.bridges.B1.gate_flags.closed = false
+  B.run(W, 20)
+  W.inbox('lever', {bridge = 'B1', want = 'up'})
+  T.ok(reply(W).ok == false and reply(W).msg:find('citizen 91 on the footprint', 1, true), reply(W).msg)
+  W.move(91, 51, 47, Z)
+  W.inbox('lever', {bridge = 'B1', want = 'up'})
+  T.eq(reply(W).ok, true, tostring(reply(W).msg))
+end)
+
+---------------------------------------------------------------- (vi) the report of a crush names every unit
+T.test('(vi) GATE_CRUSH_RISK (forced raise, round 3 bounded crush) names every unit ON the footprint, a later one in a further event; the moving one too', function()
+  local W = B.build{mode = 'SIEGE', army = {S.inv(250, 51, -40, Z)}}
+  local G = package.loaded['dfllm.gate']
+  local K = W.K
+  local r = {job = {id = 77, queued = 100}}
+  local now = K.now().tick
+  local cit = {id = 26276, k = 'citizen', d = 0, x = 86, y = 91, z = 142}
+  local sol = {id = 27055, k = 'soldier', d = 0, x = 87, y = 91, z = 142}
+  G.crush_forced(K, 'O1', r, {cit}, now)
+  G.crush_forced(K, 'O1', r, {cit}, now)                         -- the same unit again: nothing
+  G.crush_forced(K, 'O1', r, {cit, sol}, now)                    -- the soldier stepped on later: a second event naming HIM
+  local ev = W.find_events('GATE_CRUSH_RISK')
+  T.eq(#ev, 2, 'two events')
+  T.eq(ev[1].d.k, 'citizen')
+  T.eq(ev[2].d.k, 'soldier')
+  T.eq(ev[2].d.unit, 27055)
+  T.ok(ev[2].msg:find('soldier 27055', 1, true) and not ev[2].msg:find('citizen', 1, true), ev[2].msg)
+  local r2 = {job = {id = 78, queued = 100}}
+  G.crush_forced(K, 'O1', r2, {cit, sol}, now)                   -- both at once: both named
+  ev = W.find_events('GATE_CRUSH_RISK')
+  T.eq(#ev, 3)
+  T.ok(ev[3].msg:find('citizen 26276, soldier 27055', 1, true), ev[3].msg)
+  T.eq(ev[3].d.kinds, {'citizen', 'soldier'})
+  T.eq(ev[3].d.units, {26276, 27055})
+  -- crush_risk of the moving bridge: both named in one event, a third unit later in another
+  local m = {to = 'up', pull = 5}
+  G.crush_risk(K, 'O1', m, {list = {cit, sol}}, nil)
+  local third = {id = 30001, k = 'child', d = 0, x = 86, y = 91, z = 142}
+  G.crush_risk(K, 'O1', m, {list = {cit, sol, third}}, nil)
+  ev = W.find_events('GATE_CRUSH_RISK')
+  T.eq(#ev, 5)
+  T.eq(ev[4].d.kinds, {'citizen', 'soldier'})
+  T.ok(ev[5].d.k == 'child' and ev[5].d.unit == 30001, ev[5].msg)
+end)
+
+---------------------------------------------------------------- (vii) DRILL (second review of 15b: the drill's timed rules left a gap beyond CROSS_REACH)
+-- the drill is outside SIEGE / BREACH like ALERT: a walker 14+ steps out (past CROSS_REACH = 13, so the old drill rule let the pull stand) can step onto the footprint
+-- during a measured lever latency of 1000 ticks, so no pull is made and none is kept. B1 = footprint 50..52,40; the drill module ends the drill at T+1200+
+-- (the restore), so the checks look at the first 1100 ticks.
+local function drill_world(actors, deep)
+  local W = B.build{mode = 'DRILL', lat = 1000, actors = actors, deep = deep}
+  W.load(S.drill())
+  return W
+end
+
+T.test('(vii) DRILL, lever latency 1000, a citizen standing 15 tiles out (no path DF shows: not a crosser, not beside the footprint): no pull, B1 stays down, nobody ' ..
+       'crushed; the old drill rule pulled', function()
+  local W = drill_world({{id = 700, kind = 'citizen', pos = {51, 25}, still = true, nopath = true}})
+  B.run(W, 1100)
+  T.eq(#B.pulls(W, 'B1'), 0, 'no pull with a unit 15 tiles out: ' .. table.concat(B.pulls(W, 'B1'), ','))
+  T.eq(S.bstate(W, 'B1'), 'down')
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+end)
+
+T.test('(vii) DRILL, lever latency 1000, the recall streams over B1 from 14..20 steps out (a walker on a path): no pull while one can reach it, nobody crushed', function()
+  local W = drill_world(stream(0, 6, 150, 200, 20))
+  B.run(W, 1100)
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+  T.eq(#B.pulls(W, 'B1'), 0, 'no pull while the stream runs: ' .. table.concat(B.pulls(W, 'B1'), ','))
+end)
+
+T.test('(vii) DRILL, a clear approach (nobody within 126 tiles), lever latency 1000: B1 is pulled and up, nobody crushed', function()
+  local W = drill_world({{id = 700, kind = 'citizen', pos = {51, 240}, still = true, nopath = true}}, true)
+  B.run(W, 1100)
+  T.ok(B.flips(W, 'B1', 'up')[1] ~= nil, 'B1 up')
+  T.eq(#W.crushed, 0)
+end)
+
+T.done()

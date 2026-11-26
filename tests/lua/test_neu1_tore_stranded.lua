@@ -2,6 +2,7 @@
 -- fail_closed; no KMOCK_LEGACY_GATES pin). B1 is already up in PEACE; the army comes, O1 rises at once and two citizens are shut out
 -- in the zone between O1 and B1 over the thirst mark: siege's rescue lowers B1 (never O1) during the SIEGE and raises it again
 -- once they are through. The fort and the lever simulator are tests/lua/test_stranded.lua's (copied: they are local there).
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local SW = require('seal_world')
 local S = require('siege_world')

@@ -4,6 +4,7 @@
 -- INTRUDER), an ack, the army dies, RECOVERY, PEACE + SIEGE_END, then an unacked DEATHS_3PLUS (ack timeout ->
 -- LOCKDOWN). Python validates every file and runs `dfllm wait` / `status` on the result.
 --   python tools/luahost.py --path tests/lua tests/lua/reflex_scenario.lua <outdir>
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this scenario sets them off (k_mock / kern_world)
 local H = require('kern_world')
 local S = require('siege_world')
 local json = require('dfllm.util.json')

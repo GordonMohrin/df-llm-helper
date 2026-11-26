@@ -571,6 +571,27 @@ function M.new(opts)
       if cfg.reflex.gate[k] == nil then cfg.reflex.gate[k] = v end
     end
   end
+  -- Neuausrichtung 15b: the safety switches gate.reach, gate.player_lever and gate.station_clear are ON when the key is absent (the code's defaults). A test file
+  -- that sets KMOCK_NEU15B = true runs under the shipped config/reflex.json explicitly (all three on); one that sets KMOCK_LEGACY_15B = true is a test of the gate of main
+  -- (written before the reach rule) and runs with the three switched off through the config keys (reach / player_lever false, station_clear 2 = margin + spread only)
+  -- KMOCK_REACH_OFF = true: only the reach rule is off (a test of the plumbing around a raise, built on a fort whose people stand within the reach window of a footprint,
+  -- where a kernel raise now correctly waits; the rule has its own tests)
+  local forced15b = rawget(_G, 'KMOCK_LEGACY_15B') and {reach = false, player_lever = false, station_clear = 2}
+                    or (rawget(_G, 'KMOCK_REACH_OFF') and {reach = false}) or nil
+  if forced15b then
+    cfg.reflex = cfg.reflex or {v = 2}
+    cfg.reflex.gate = cfg.reflex.gate or {}
+    for k, v in pairs(forced15b) do
+      if cfg.reflex.gate[k] == nil then cfg.reflex.gate[k] = v end
+    end
+  end
+  if rawget(_G, 'KMOCK_NEU15B') then
+    cfg.reflex = cfg.reflex or {v = 2}
+    cfg.reflex.gate = cfg.reflex.gate or {}
+    for k, v in pairs({reach = true, player_lever = true, station_clear = 4}) do
+      if cfg.reflex.gate[k] == nil then cfg.reflex.gate[k] = v end
+    end
+  end
   for k, v in pairs(cfg.decisions or {}) do decisions[k] = v end
   -- Neuausrichtung 1 / P3: the mock world has no player session file; the arbiter's dead-man switch is off here unless a
   -- test sets reflex.deadman itself (tests/lua/test_neu1_deadman.lua runs it on the real kernel);
@@ -584,6 +605,19 @@ function M.new(opts)
            paths = {df = W.dfpath, runtime = W.dfpath .. '/dfllm-runtime', save = W.dfpath .. '/dfllm-runtime/' .. W.save,
                     repo = cfg.repo or '.'},
            save = W.save, dev = cfg.dev == true, acceptance = cfg.acceptance == true}
+  -- a test that replaces K.cfg.reflex later (W.K.cfg.reflex = {...}) keeps those switches off too
+  if forced15b then
+    local real = K.cfg
+    K.cfg = setmetatable({}, {__index = real, __newindex = function(_, k, v)
+      if k == 'reflex' and type(v) == 'table' then
+        v.gate = type(v.gate) == 'table' and v.gate or {}
+        for kk, vv in pairs(forced15b) do
+          if v.gate[kk] == nil then v.gate[kk] = vv end
+        end
+      end
+      real[k] = v
+    end, __pairs = function() return pairs(real) end})
+  end
   local LEVELS = {debug = true, info = true, warn = true, error = true}
   function K.log(level, fmt, ...)
     if not LEVELS[level] then return violation('bad log level ' .. tostring(level)) end
@@ -972,7 +1006,10 @@ function M.new(opts)
     if C.VERB_BY[verb] and not C.VERB_BY[verb][cmd.by] then return reply(false, verb .. ' not accepted from ' .. tostring(cmd.by)) end
     local pm = W.mods.player             -- NEU1 P7: the emergency exit lifts the mode list of C.VERB_EMG (as kern)
     local emg = C.VERB_EMG[verb] and pm and not pm.disabled and type(pm.M.open) == 'function' and select(2, call_in(pm, 'open', pm.M.open)) == true
-    if spec.modes and not spec.modes[W.mode] and not emg then return reply(false, verb .. ' not allowed in ' .. W.mode) end
+    local cm = C.VERB_CFG_MODES[verb]          -- Neuausrichtung 15b (as kern): the modes of reflex.gate.<key> unless the switch is false (absent = on)
+    local gcf = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.gate) == 'table' and K.cfg.reflex.gate or {}
+    local cfgm = cm and cm.modes[W.mode] and gcf[cm.key] ~= false
+    if spec.modes and not spec.modes[W.mode] and not emg and not cfgm then return reply(false, verb .. ' not allowed in ' .. W.mode) end
     if spec.approve and args.approve ~= true then return reply(false, 'approval required') end
     if spec.mod == 'kern' then
       local ok, msg, data = kern_verbs[verb](args)

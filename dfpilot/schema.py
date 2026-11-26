@@ -508,7 +508,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     # BUG-487: locked_out reop = the walls of ours the kernel took down itself (quickfort undo; a door goes there)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i cause:s why:s")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i cause:s why:s crossings:i ticks:i gap:i need:i lat:i unit:i d:i")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -886,8 +886,10 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-170 why unreachable (the station on walk group grp, the squad's soldiers on home); BUG-214 why fallback (the
     # whole chain failed: via wide = a floor on home within 3 * SEARCH_R of the first entry, kern = a Kern+ floor on
     # home), tried = each failed entry and why ('b2 wall, core group 0, z4 none, melee group 1507')
+    # BUG-906: why none with standby 1 = no tile clear of the bridge (clear = the clearance, gate.station_clear) on its inner side: tiles = how many were
+    # tried; the squad's soldiers at their station stand by order and hold the raise only on the footprint (once per alarm)
     "STATION_MOVED": ("B", "military", _d("why:s", "station:s first:s from:p to:p bridge:s d:i squad:i key:s units:ia "
-                                                  "grp:i home:i via:s tried:s")),
+                                                  "grp:i home:i via:s tried:s tiles:i clear:i standby:f")),
     # FR-79 (note 67): the kernel swapped members of the militia squad `squad` (A, B, C) for the next cohort at the close of
     # its window: out/into = members swapped in this batch (at most military.rotation.per_day), size = the squad's target,
     # eligible = citizens who may sit in it, lo/hi = militia windows served by the eligible (counts, no names), win = the
@@ -914,7 +916,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-253: a unit stood on the footprint of a bridge while it moved (to = up|down; pull = the tick our pull was queued,
     # -1 a foreign one); once per move, the death itself is BRIDGE_CRUSH.
     # BUG-881: eta = ticks the nearest hostile still needs (a forced raise), forced = 1: it went ahead with the unit ON the footprint
-    "GATE_CRUSH_RISK": ("B", "gate", _d("bridge:s unit:i", "k:s to:s pull:i pos:p eta:i forced:i")),
+    "GATE_CRUSH_RISK": ("B", "gate", _d("bridge:s unit:i", "k:s to:s pull:i pos:p eta:i forced:i units:ia kinds:sa")),
     # BUG-121 (Run 14 note 101): boot found the game clock (tick_neu) before the last tick the runtime folder saw (tick_alt): an
     # older save was loaded. n_alt = the last event number of the discarded timeline (numbers continue after it); readers drop
     # events before this marker whose tick is later than tick_neu. BUG-165: kind clock (the above) | foreign (the save's
@@ -951,7 +953,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # (n = civilians outside the raised inner gate in PEACE, units = their ids)
     # BUG-831: state peace_wait (unit = the walker that makes a quiet PEACE raise wait, need = the quiet ticks needed) | peace_traffic
     # (a risk of the kernel raise locks the bridge down in PEACE: days, left ticks, n risks, unit)
-    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i need:i unit:i days:i left:i")),
+    # Neuausrichtung 15 / 15b (BUG-905..909): state peace_stuck (a bridge wanted up in PEACE for a game day: n = the units that keep it down, units, ticks
+    # wanted, why; DECISION_NEEDED gate_peace_traffic follows with the traffic numbers) | return_wait (the return window did not open: blockers = units
+    # that would keep it down afterwards, n = civilians outside) | return_end (the window ended when the last civilian was in) | (the old state reach_resid is gone: the final reach rule holds every unit
+    # within the window, BUG-907). DECISION_NEEDED gate_reach_traffic (BUG-907): a raise outside SIEGE / BREACH held for 1,200 ticks by units that can reach the footprint
+    # within the window (unit/d = the nearest, n = how many, need = the window in ticks, ticks = how long it has been wanted): the bridge stays down because of traffic
+    "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i need:i unit:i days:i left:i ticks:i blockers:i")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =
     # the fort pieces an explicit audit box left out (readiness fails such an audit: `coverage: ...`); BUG-129: regions =
@@ -1124,7 +1131,7 @@ VERBS: dict[str, tuple[str, list[str] | None, bool]] = {
     "resume": ("arbiter", None, False), "park": ("arbiter", None, False),
     "trade.want": ("trade", None, False), "trade.retry": ("trade", ["PEACE"], False),
     "squad.sortie": ("military", ["PEACE", "ALERT", "SIEGE", "BREACH", "RECOVERY"], True),     # BUG-675: PEACE for one wild animal inside
-    "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),     # NEU1 P7: any mode (up only) while the emergency exit is open
+    "lever": ("gate", ["PEACE"], False), "inspect": ("kern", None, False),     # NEU1 P7: any mode (up only) while the emergency exit is open; 15b: ALERT / SIEGE (inner bridge, up) while reflex.json gate.player_lever is true
     "selftest": ("selftest", None, False), "module.enable": ("kern", None, False),
     "tombs.repair": ("care", None, False),
     "ack": ("reflex", None, False),

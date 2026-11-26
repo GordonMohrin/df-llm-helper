@@ -1088,7 +1088,11 @@ local function handle_inbox(st, name)
   if not M.BY[doc.by] then return reply(st, cmd, false, 'bad by', nil, args) end
   local vb = C.VERB_BY[doc.verb]               -- `by` is a label; a few verbs only from these origins (§9.5)
   if vb and not vb[doc.by] then return reply(st, cmd, false, cmd.verb .. ' not accepted from ' .. tostring(doc.by), nil, args) end
-  if spec.modes and not spec.modes[st.mode] and not (C.VERB_EMG[cmd.verb] and emg_open(st)) then   -- NEU1 P7: the exit lifts it
+  -- Neuausrichtung 15b: C.VERB_CFG_MODES (lever: ALERT, SIEGE) lifts the list unless the switch reflex.gate.<key> is false (shipped config: true; absent = on)
+  local cm = C.VERB_CFG_MODES[cmd.verb]
+  local gcf = type(st.K.cfg.reflex) == "table" and type(st.K.cfg.reflex.gate) == "table" and st.K.cfg.reflex.gate or {}
+  local cfgm = cm and cm.modes[st.mode] and gcf[cm.key] ~= false
+  if spec.modes and not spec.modes[st.mode] and not cfgm and not (C.VERB_EMG[cmd.verb] and emg_open(st)) then   -- NEU1 P7: the exit lifts it
     return reply(st, cmd, false, cmd.verb .. ' not allowed in ' .. st.mode, nil, args)
   end
   if spec.approve and args.approve ~= true then return reply(st, cmd, false, 'approval required', nil, args) end
