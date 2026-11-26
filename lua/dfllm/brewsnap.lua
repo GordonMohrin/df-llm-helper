@@ -654,7 +654,7 @@ B.POINTER = 'full block: why brew --raw (first page)'
 function B.headline(s)
   local ms = B.moment_stats(s.acc)
   local parts = {string.format('brew cancels %s/%sd', tostring(s.cancels or '?'), tostring(s.days or '?')),
-                 string.format('free empties %d', s.free_all or ((s.e.barrel.free or 0) + (s.e.pot.free or 0))),
+                 string.format('free empties %d (incl. pile-reg)', s.free_all or ((s.e.barrel.free or 0) + (s.e.pot.free or 0))),   -- NEU20a BUG-935: this count does not subtract the stockpile registrations
                  string.format('pile-reg free %d/%d taken-acc %d/%d', (s.rg or {}).free or 0, (s.rg or {}).free_n or 0, (s.rg or {}).acc or 0, (s.rg or {}).acc_n or 0),
                  string.format('taken-acc %d', s.acc and s.acc.n or 0)}
   if s.vec then

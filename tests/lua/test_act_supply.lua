@@ -152,6 +152,22 @@ T.test('tree_unmark (BUG-917): only the marked trees at the positions lose their
   T.eq((mk('military').api.tree_unmark({{1, 2, 3}})), false, 'only economy')
 end)
 
+T.test('tree_mark (BUG-931): only the unmarked trees at the positions get the fell designation, a tree markPlant refuses is not counted (economy only)', function()
+  H.world{tag = 'tm'}
+  local mk_ = {}
+  local function tree(x) return {pos = {x = x, y = 2, z = 3}} end
+  local a, b, c, d = tree(1), tree(2), tree(3), tree(4)
+  df.global.world.plants = {tree_dry = kmock.vec{a, b, d}, tree_wet = kmock.vec{c}, shrub_dry = kmock.vec{tree(9)}}
+  dfhack.designations = {isPlantMarked = function(p) return p == b end,
+                         markPlant = function(p) if p == d then return false end mk_[#mk_ + 1] = p.pos.x; return true end}
+  local env = mk('economy')
+  T.eq({env.api.tree_mark({{1, 2, 3}, {2, 2, 3}, {3, 2, 3}, {4, 2, 3}, {9, 2, 3}, {9, 9, 9}})}, {true, 2})
+  T.eq(mk_, {1, 3}, 'a marked tree, a refused one (sapling) and a shrub are left alone')
+  T.eq({env.api.tree_mark({})}, {true, 0})
+  T.eq((env.api.tree_mark('x')), false)
+  T.eq((mk('military').api.tree_mark({{1, 2, 3}})), false, 'only economy')
+end)
+
 T.test('work_detail_prune: ids of dead or departed units leave every detail; insane citizens stay', function()
   local W = H.world{tag = 'wdp', units = {{id = 1, citizen = true}, {id = 2, citizen = true, dead = true},
                                           {id = 3, citizen = true, insane = true}}}

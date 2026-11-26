@@ -194,7 +194,7 @@ T.test('BUG-913: no stockpile takes wood, a Carpenter stands, wood is wanted: df
 end)
 
 T.test('BUG-913: no site (no floor within 12 tiles) and a refused placement: DECISION_NEEDED wood_pile with the trade.want command, once per 28 days', function()
-  local W = world{shop = {70, 70, 72, 72, 1}, setup = function(W)
+  local W = world{shop = {100, 100, 102, 102, 1}, setup = function(W)       -- NEU20a BUG-934: the search widens to 24 tiles and tries smaller piles, so the floor (x <= 60) must lie farther away than that
     for _ = 1, 10 do F.item(W, 'WOOD', {_pos = {300, 10, 1}}) end
   end}
   days(W, 1)

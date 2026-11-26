@@ -308,7 +308,10 @@ M.DEFAULTS = {
   -- NEU16c BUG-917: unmark = false switches the removal of unreachable fell designations off; unmark_days = days between removals, unmark_max = trees per removal, unmark_runs = removals per episode,
   -- unmark_measure = game days until the measurement
   wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10, unmark_days = 7, unmark_max = 120, unmark_runs = 3, unmark_measure = 2,
-          pile_w = 5, pile_h = 5, pile_max = 3, pile_measure = 7},       -- BUG-926: the kernel's own dfllm-wood pile beside a Carpenter (w x h, at most pile_max, measured after pile_measure days)
+          pile_w = 5, pile_h = 5, pile_max = 3, pile_measure = 7,
+          pile_min = 2, pile_r2 = 24,        -- NEU20a BUG-934: smaller piles (down to pile_min x pile_min) and a wider search (pile_r2 tiles) before giving up
+          fell = true, fell_n = 6, fell_season = 36, fell_days = 3, fell_measure = 7, fell_clear = 3, fell_reads = 600},   -- NEU20a BUG-931: the kernel itself marks reachable trees (fell_n a pass, fell_season in 84 days, a pass every fell_days, measured after fell_measure days, fell_clear tiles from water / drops, fell_reads tile reads a pass)
+          -- BUG-926: the kernel's own dfllm-wood pile beside a Carpenter (w x h, at most pile_max, measured after pile_measure days)
   -- live L1b: brewing stalled without empty barrels; then dfllm:barrel made 34 barrels (logs 183 -> 66). Below the
   -- drink target the cap is max_total, below nofloor_days of drink barrels may use the wood floor
   -- live L6: while drink is short and fewer than min_empty barrels are empty, the cap grows up to grow_total
@@ -505,14 +508,15 @@ M.DEFAULTS = {
   diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
   -- NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source of the tally (the eventful reports stay the fallback), gamelog_bytes = at most
   -- that many bytes per look
-  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, give_target = 20, give_days = 28, give_step = 3, give_every_d = 7, stand = true, stand_quit_d = 30, stand_calm_d = 30, stand_floor = 2, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, give_target = 20, give_days = 28, give_step = 3, give_every_d = 7, hold_warn_d = 672, stand = true, stand_quit_d = 30, stand_calm_d = 30, stand_floor = 2, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
   -- NEU7 (BUG-854): the standing container reserve (M.plan_reserve): batch = brews open / brews_per, min_batch..max_batch, again while DF still cancels after the
   -- batch (grace_days, repeat_days apart, max_repeats in a row then every 14 days), then a trickle of trickle_n every trickle_days days (below trickle_free free
   -- containers); rock barrels when boulders >= batch + rock_plenty or wood is short; total_cap containers in all
   -- NEU7 (BUG-855): buildingplan's logs go off while usable wood < low and stone or blocks >= stone_min are free; on again at high
   wguard = {on = true, low = 40, high = 80, stone_min = 8},
   creserve = {on = true, min_batch = 10, max_batch = 30, brews_per = 5, grace_days = 2, repeat_days = 3, max_repeats = 4, trickle_days = 20, trickle_n = 1,
-             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3, blocker_days = 5},
+             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3, blocker_days = 5,
+             fill = true, fill_free = 20, fill_batch = 20, fill_gap_d = 3, fill_season = 60, fill_per_cit = 30, fill_stale_d = 28},   -- NEU20a BUG-932: the free-empties target (fill_free) the standing order is sized to,
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -1821,12 +1825,15 @@ local function scan_orders(p)
           s.used.wood = (s.used.wood or 0) + left
           s.xwood = (s.xwood or 0) + left                -- BUG-497: wood other owners' orders want (a seal door goes before them)
         end
+        if df.job_type[o.job_type] == 'MakeBarrel' then s.xbarrel = (s.xbarrel or 0) + left end      -- NEU20a BUG-932: barrels other owners (the player's own order.add) already ordered
       end
     end
   end
   for tag in pairs(p.meta) do if not s.live[tag] then p.meta[tag] = nil end end
   return s
 end
+
+M.scan_orders = scan_orders                         -- NEU20a BUG-932 (tests)
 
 -- BUG-042: the open brew orders (CustomReaction BREW_*, any owner): {n, left (brews they still want), valid (validated
 -- ones), unval (their brews waiting for the manager)}
@@ -2381,6 +2388,18 @@ end
 -- line and the events use) stayed >= cancel.give_target for cancel.give_days game days with no DF container reason; then +cancel.give_step per pile every cancel.give_every_d days
 -- (never above the old limit). DF's container reason during the steps (the gate) -> back to the full-barrel count at once (the return value 'relower' lets M.pile_release lower again).
 M.GIVE_TARGET, M.GIVE_DAYS, M.GIVE_STEP, M.GIVE_EVERY_D = 20, 28, 3, 7
+M.GIVE_FAIL_DROP = 3        -- NEU20a BUG-935: failed give-back writes in a row before a held pile leaves the hold
+-- NEU20a BUG-935: a hold that has lasted longer than cancel.hold_warn_d (672 = 2 game years) with the usable empties still under the give-back target is SAID once a game week; nothing is given back by it
+function M.hold_warn(K, c, h, free, target, now)
+  local span = (math.tointeger((c.cancel or {}).hold_warn_d) or 672) * DAY
+  if not (type(h) == 'table' and math.tointeger(h.t) and now >= h.t and now - h.t > span and free ~= nil and free < target) then return end
+  if st.holdwarn and now >= st.holdwarn and now - st.holdwarn < 7 * DAY then return end
+  st.holdwarn = now
+  local held = 0
+  for _ in pairs(type(K.persist.get('m.economy').relpiles) == 'table' and K.persist.get('m.economy').relpiles or {}) do held = held + 1 end
+  K.log('warn', 'pile barrel release: %d piles have held their barrel limit lowered for %d game days and the usable empties are still %d of the %d wanted: the limits are NOT given back by this (only after %d days at the target); economy.cancel.release = false hands them all back at once',
+        held, (now - h.t) // DAY, free, target, math.tointeger((c.cancel or {}).give_days) or M.GIVE_DAYS)
+end
 function M.release_giveback(K, c, p, inv, now)
   local rp = p.relpiles
   if type(rp) ~= 'table' or next(rp) == nil then
@@ -2390,6 +2409,8 @@ function M.release_giveback(K, c, p, inv, now)
   local cc = c.cancel or {}
   local h = type(p.hold) == 'table' and p.hold or nil
   if not h then h = {t = now}; p.hold = h; K.persist.touch('m.economy') end
+  local okw, errw = pcall(M.hold_warn, K, c, h, M.cont_free_of(K, inv), math.tointeger(cc.give_target) or M.GIVE_TARGET, now)      -- NEU20a BUG-935
+  if not okw then K.log('warn', 'hold warn: %s', tostring(errw):sub(1, 120)) end
   if M.cx_gate(K, c, now) then
     local was = h.stepping
     if h.ok or h.step or was then h.ok, h.step, h.stepping = nil, nil, nil; K.persist.touch('m.economy') end
@@ -2426,6 +2447,26 @@ function M.release_giveback(K, c, p, inv, now)
   h.step, h.stepping = now, true
   local done, n = {}, 0
   for _, w in ipairs(type(res) == 'table' and res or {}) do done[tostring(w.id)] = math.tointeger(w.new) end
+  -- NEU20a BUG-935 (17c verifier): an entry whose pile is gone, or whose write fails FAIL_DROP steps in a row, leaves the hold (else it never ends: `held` never reaches 0); an entry with no
+  -- readable old limit cannot be given back at all. Each is said once, never dropped silently.
+  local gone = {}
+  for id, e in pairs(rp) do
+    if math.tointeger(e.old) == nil then gone[#gone + 1] = id .. ' (no old limit)'; rp[id] = nil
+    elseif done[id] == nil and back[id] ~= nil then
+      local why = 'write failed'
+      for _, mrec in ipairs(type(res) == 'table' and res.missing or {}) do if tostring(mrec.id) == id then why = tostring(mrec.why) end end
+      if why == 'gone' then gone[#gone + 1] = id .. ' (pile gone)'; rp[id] = nil
+      else
+        e.fail = (math.tointeger(e.fail) or 0) + 1
+        if e.fail >= M.GIVE_FAIL_DROP then gone[#gone + 1] = string.format('%s (%s %d steps in a row)', id, why, e.fail); rp[id] = nil end
+      end
+    elseif done[id] ~= nil and e.fail then e.fail = nil end
+    if rp[id] == nil and type(p.relmeas) == 'table' then p.relmeas[id] = nil end
+  end
+  if #gone > 0 then
+    table.sort(gone)
+    K.log('warn', 'pile barrel release: %d held piles leave the hold, their limit cannot be given back: %s', #gone, table.concat(gone, ', ', 1, math.min(#gone, 8)))
+  end
   local reg = math.tointeger(inv.barrels_reg) or 0
   local cx = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
   for id, nw in pairs(done) do
@@ -2682,7 +2723,8 @@ end
 --    batch or boulders are plentiful (batch + rock_plenty), else wood (the Carpenters, Carpentry labor). Both are real BARREL items.
 -- Everything is bounded by total_cap (containers the reserve ordered in all). State p.rsv = {t0, at, done, open, mat, n, made, rep, lday}.
 M.RESERVE = {on = true, min_batch = 10, max_batch = 30, brews_per = 5, grace_days = 2, repeat_days = 3, max_repeats = 4, trickle_days = 20, trickle_n = 1,
-             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3, blocker_days = 5}
+             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3, blocker_days = 5,
+             fill = true, fill_free = 20, fill_batch = 20, fill_gap_d = 3, fill_season = 60, fill_per_cit = 30, fill_stale_d = 28}   -- NEU20a BUG-932: the free-empties target (fill_free) the standing order is sized to
 M.RESERVE_ROCK = {job = 'MakeBarrel', material = 'INORGANIC'}
 M.RESERVE_ROCK_WS = {'workshop:Craftsdwarfs'}
 function M.rv(c, k)
@@ -2814,7 +2856,7 @@ function M.reserve_blocker(K, c, r, rs, tag)
   local days = math.tointeger(M.rv(c, 'blocker_days')) or 5
   if now - rs.at < days * DAY then return end
   if (math.tointeger(o.amount_left) or 0) < (math.tointeger(rs.n) or 1) then return end      -- something was made
-  if not M.cx_gate(K, c, now) then return end
+  if not (M.cx_gate(K, c, now) or M.fill_short(K, c, r.inv)) then return end       -- NEU20a BUG-932: also while the free empties are under the standing target
   if st.rsvblkt and now >= st.rsvblkt and now - st.rsvblkt < 7 * DAY then return end
   st.rsvblkt = now
   local jw = M.jw_ask(K, c, 'order:' .. tostring(oid))
@@ -2822,6 +2864,90 @@ function M.reserve_blocker(K, c, r, rs, tag)
   local free = math.tointeger((K.census.i or {}).cont_free)
   st.rsvblk = {t = now, text = string.format('barrel order %s open %d d, 0 of %d made: %s', tostring(oid), (now - rs.at) // DAY, math.tointeger(rs.n) or 0, txt)}
   K.log('warn', 'container reserve: %s (free containers %s, %s logs usable; said once a week)', st.rsvblk.text, tostring(free), tostring(math.tointeger(r.inv.wood) or 0))
+end
+-- NEU20a BUG-932 (Run 17 i3 region1-site97 y499-y505: ~750 barrels, almost all full, 4-6 empty; the player's own `MakeBarrel x20` lifted the drink from 14 to 241 days, the kernel ordered ONE x10 batch
+-- and nothing after it: the batch order stayed open (carpenters busy, 'none worked'), and while `open(r, tag)` stands only DF's cancel count (reserve_dead) could end the wait; when the container gate
+-- fell OFF the cancels were 0, the batch path (x) needs a fresh cancel, the trickle gave ONE barrel per 20 days and was never reached behind the open order): the STANDING FILL. Once the cure has run in
+-- this fort (p.rsv.t0) or DF names the shortage (x), and brews are open, a wood barrel order is sized to the shortfall of FREE EMPTY containers against `creserve.fill_free` (20), minus the barrels
+-- other owners' MakeBarrel orders still owe (s.xbarrel), at most `fill_batch` (20) per order, `fill_season` (60) per 84 game days, never when the barrels already number `fill_per_cit` (30) per citizen,
+-- `fill_gap_d` (3) days after the last batch. Wood only and only with a usable log; independent of DF's cancel count. Every refusal is one line a game week (kern.log), the order that stands unworked
+-- is explained once a week by M.reserve_blocker (jobwhy's real blocker: no worker, no logs, no shop). Bounded also by creserve.total_cap per game year (plan_reserve).
+function M.fill_short(K, c, inv)
+  if M.rv(c, 'fill') == false then return false end
+  local free = math.tointeger((inv or K.census.i or {}).cont_free)
+  return free ~= nil and free < (math.tointeger(M.rv(c, 'fill_free')) or 20)
+end
+function M.fill_say(K, now, key, fmt, ...)
+  st.fillsay = st.fillsay or {}
+  local t = st.fillsay[key]
+  if t and now >= t and now - t < 7 * DAY then return end
+  st.fillsay[key] = now
+  K.log('warn', 'container reserve (standing fill): ' .. fmt, ...)
+end
+-- n barrels wanted and why, or nil
+function M.reserve_fill(K, c, r, rs, now)
+  if M.rv(c, 'fill') == false then return nil, 'off' end
+  if type(rs) ~= 'table' or not M.fill_short(K, c, r.inv) then return nil, 'ok' end
+  local inv = r.inv
+  local free = math.tointeger(inv.cont_free) or 0
+  local target = math.tointeger(M.rv(c, 'fill_free')) or 20
+  local b = c.barrels or {}
+  local cit = math.max(1, math.tointeger(r.cit) or 1)
+  local per = math.tointeger(M.rv(c, 'fill_per_cit')) or 30
+  local have = math.tointeger(inv.barrels) or 0
+  if have >= per * cit then
+    M.fill_say(K, now, 'pop', '%d barrels already stand for %d citizens (cap %d a citizen): no more are ordered, %d free empties of the %d wanted; the barrels hold the food and drink of the piles, see `why pile`', have, cit, per, free, target)
+    return nil, 'cap'
+  end
+  if rs.fst == nil or now < rs.fst or now - rs.fst >= M.FELL_SEASON_D * DAY then rs.fst, rs.fsn = now, 0 end
+  local left = (math.tointeger(M.rv(c, 'fill_season')) or 60) - (math.tointeger(rs.fsn) or 0)
+  if left <= 0 then
+    M.fill_say(K, now, 'season', '%d barrels ordered in this season (cap %d in %d game days), %d free empties of the %d wanted: nothing more is ordered until the season is over',
+             math.tointeger(rs.fsn) or 0, math.tointeger(M.rv(c, 'fill_season')) or 60, M.FELL_SEASON_D, free, target)
+    return nil, 'cap'
+  end
+  if rs.at and now >= rs.at and now - rs.at < (math.tointeger(M.rv(c, 'fill_gap_d')) or 3) * DAY then return nil end
+  if not ws_any(r.f, b.ws) then
+    M.fill_say(K, now, 'shop', "no Carpenter's workshop stands: %d free empties of the %d wanted and no barrel can be made", free, target)
+    return nil, 'nowood'
+  end
+  local wood = math.max(0, (math.tointeger(inv.wood) or 0) - floor_of(c, r.p, r, 'wood') - (r.planned.wood or 0) - ((r.s.used or {}).wood or 0))      -- the wood floor stays for the other consumers
+  if wood <= 0 then
+    M.fill_say(K, now, 'wood', 'no usable log (near %d, far %d, %d on order): %d free empties of the %d wanted and nothing to make barrels of; the wood cures (WOOD_UNMARK / WOOD_FELL_MARK, trade.want wood) come first',
+             math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_dist) or 0, (r.s.used or {}).wood or 0, free, target)
+    return nil, 'nowood'
+  end
+  local pending = math.max(0, math.tointeger((r.s or {}).xbarrel) or 0)
+  local short = target - free - pending
+  if short <= 0 then return nil end                         -- the barrels already ordered by others cover it
+  local n = math.min(short, math.tointeger(M.rv(c, 'fill_batch')) or 20, left, wood)
+  if n <= 0 then return nil end
+  return n, string.format('standing fill: %d free empties, %d wanted%s', free, target, pending > 0 and string.format(', %d more already ordered by others', pending) or '')
+end
+-- NEU20a BUG-932: the reserve's WOOD order that stands `creserve.fill_stale_d` (28) game days with nothing made (amount_left still the whole batch), while logs are usable and the free
+-- empties are under the target, is taken back ONCE (act.order_remove, the work orders screen's remove; the containers not made leave the count) and every wood order after it carries no item
+-- condition (rs.nocond). An order that was already condition-free is never taken back (the blocker is another: workers, shop; M.reserve_blocker says which, once a week).
+function M.reserve_stale(K, c, r, rs, tag)
+  if M.rv(c, 'fill') == false or rs.nocond or rs.mat ~= 'wood' or not rs.at then return false end
+  local now = r.now
+  if now - rs.at < (math.tointeger(M.rv(c, 'fill_stale_d')) or 28) * DAY then return false end
+  if not M.fill_short(K, c, r.inv) or (math.tointeger(r.inv.wood) or 0) <= 0 then return false end
+  local oid = r.p.orders and r.p.orders[tag]
+  local o = oid and order_by_id(oid)
+  if not o then return false end
+  local left = math.max(0, math.tointeger(o.amount_left) or 0)
+  if left < (math.tointeger(rs.n) or 1) then return false end                     -- something was made: it is worked
+  if not K.act.order_remove(oid) then return false end
+  r.p.orders[tag] = nil
+  r.s.live[tag] = nil
+  rs.made = math.max(0, (math.tointeger(rs.made) or 0) - left)
+  rs.wn = math.max(0, (math.tointeger(rs.wn) or 0) - left)
+  local age = (now - rs.at) // DAY
+  rs.open, rs.at, rs.nocond = nil, nil, true
+  K.persist.touch('m.economy')
+  K.log('warn', 'container reserve: barrel order %s stood %d d with 0 of %d made (%d usable logs, %s free empties of the %d wanted): taken back, the next one carries no item condition (a condition-free MakeBarrel order beside it was worked)',
+        tostring(oid), age, left, math.tointeger(r.inv.wood) or 0, tostring(math.tointeger(r.inv.cont_free)), math.tointeger(M.rv(c, 'fill_free')) or 20)
+  return true
 end
 -- true = the reserve owns this run's barrel planning (a batch stands or was planned now)
 function M.plan_reserve(K, c, r)
@@ -2840,6 +2966,7 @@ function M.plan_reserve(K, c, r)
     end
   end
   if open(r, tag) and M.reserve_dead(K, c, r, rs, tag) then rs = p.rsv end   -- BUG-878: a batch DF cancels for want of its material is taken back
+  if open(r, tag) and rs and M.reserve_stale(K, c, r, rs, tag) then rs = p.rsv end   -- NEU20a BUG-932: a conditioned batch nobody worked for fill_stale_d days is replaced by a condition-free one
   if open(r, tag) then
     if rs then
       M.reserve_labor(K, c, r, rs)
@@ -2881,8 +3008,16 @@ function M.plan_reserve(K, c, r)
       want, why = math.max(1, math.tointeger(M.rv(c, 'trickle_n')) or 1), 'trickle'
     end
   end
+  -- NEU20a BUG-932: no DF-cancel batch is due (no cancels, or the last batch has not had its effect yet): the standing fill sizes an order to the shortfall of free empties
+  local isfill = false
+  if (not want or why == 'trickle') and rs and (rs.t0 or x) then
+    local fn, fwhy = M.reserve_fill(K, c, r, rs, now)
+    if fn then want, why, isfill = fn, fwhy, true
+    elseif why == 'trickle' and fwhy ~= 'nowood' and fwhy ~= 'off' then want, why = nil, nil end         -- the fill's own caps / the barrels others ordered hold the old one-a-20-days trickle back too; it stays only where the fill has no log (rock) or is off
+  end
   if not want then return x ~= nil end              -- DF still cancels but the last batch has not had its effect yet (grace / gap): nothing else orders meanwhile
   local out, outwhy = M.reserve_out(K, c, p.rsv, now)           -- BUG-878: DF's own cancels of the reserve's jobs say which material is dead
+  if isfill then out = {wood = out.wood, rock = true} end         -- NEU20a BUG-932: the standing fill is a wood order (reserve_fill checked the logs)
   local mat, n, wood, rock, rtext = M.reserve_mat(c, r, want, out)
   st.rsvstuck = mat == nil or nil
   if not mat then
@@ -2918,13 +3053,16 @@ function M.plan_reserve(K, c, r)
   if mat == 'rock' then spec, uses = copy(M.RESERVE_ROCK), {rock = 1}
   else
     spec = wood_spec(c, r, b.spec)
-    spec.item_conditions = {cond(1, 'WOOD')}
+    -- NEU20a BUG-932 (i3 live: the kernel's order 2877 with the item condition 'at least 1 WOOD' stood 420 game days with 0 of 10 made while the player's own condition-free order 2876 beside it
+    -- went 30 -> 13): the standing fill, and every wood order after a stale one was taken back, carry NO item condition (the cause is INFERRED from that difference, not read from DF)
+    if isfill or (rs and rs.nocond) then spec.item_conditions = nil else spec.item_conditions = {cond(1, 'WOOD')} end
     uses = {wood = 1}
   end
   if not add(r, {tag = tag, spec = spec, n = n, uses = uses, why = 'container reserve: ' .. why}) then return false end
   rs = type(p.rsv) == 'table' and p.rsv or {}
   p.rsv = rs
-  if x then rs.rep = (math.tointeger(rs.rep) or 0) + (rs.t0 and 1 or 0) end
+  if x and not isfill then rs.rep = (math.tointeger(rs.rep) or 0) + (rs.t0 and 1 or 0) end
+  if isfill then rs.fsn = (math.tointeger(rs.fsn) or 0) + n end
   rs.t0 = rs.t0 or now
   rs.at, rs.mat, rs.n, rs.made, rs.lday = now, mat, n, made + n, nil
   rs.wt = rs.wt or now
@@ -3790,7 +3928,7 @@ function M.cont_words(inv)
   for _, e in ipairs({{'barrels_trader', "a trader's"}, {'barrels_busy', 'held by a job'}, {'barrels_far', 'out of reach'}}) do
     if g(e[1]) > 0 then out[#out + 1] = g(e[1]) .. ' ' .. e[2] end
   end
-  if g('barrels_reg') > 0 then out[#out + 1] = g('barrels_reg') .. ' held by stockpiles as their containers' end
+  if g('barrels_reg') > 0 then out[#out + 1] = g('barrels_reg') .. " held by stockpiles as their containers (DF's own use of them is not proven)" end    -- NEU20a BUG-935
   if g('barrels_forb') > 0 then out[#out + 1] = g('barrels_forb') .. ' forbidden (not counted)' end
   return #out > 0 and table.concat(out, ', ') or nil
 end
@@ -4223,6 +4361,7 @@ function M.wood_stuck(K, c, now, inv)
     st.wstuck = nil
     if p.wstuck ~= nil then p.wstuck = nil; K.persist.touch('m.economy') end
     if type(p.wunmark) == 'table' and not p.wunmark.pend then p.wunmark = nil; K.persist.touch('m.economy') end    -- NEU16c BUG-917: the episode is over
+    if type(p.wfell) == 'table' and (p.wfell.stop or p.wfell.runs) and not p.wfell.pend then p.wfell.stop, p.wfell.runs = nil, nil; K.persist.touch('m.economy') end    -- NEU20a BUG-931: the episode is over (the season count stays)
     return false
   end
   local rec = type(p.wstuck) == 'table' and p.wstuck or {}
@@ -4234,6 +4373,8 @@ function M.wood_stuck(K, c, now, inv)
   st.wstuck = rd
   local oku, erru = pcall(M.wood_unmark, K, c, now, rd, inv)        -- NEU16c BUG-917
   if not oku then K.log('warn', 'wood unmark: %s', tostring(erru):sub(1, 120)) end
+  local okm, errm = pcall(M.wood_fell_mark, K, c, now, rd, inv)      -- NEU20a BUG-931
+  if not okm then K.log('warn', 'wood fell mark: %s', tostring(errm):sub(1, 120)) end
   if math.tointeger(rec.ev) and now - rec.ev < W.every * DAY then return true end
   rec.ev = now
   p.wstuck = json.object(rec); K.persist.touch('m.economy')
@@ -4358,6 +4499,224 @@ function M.wood_unmark_follow(K, c, now, inv)
     local st2 = string.format('the logs felled after the removal again lie on tiles with no walk group (%d of %d): removal stopped for this episode, no further cure is guessed', nnw, new)
     K.log('warn', 'economy: wood unmark stop: %s', st2)
     K.emit('WOOD_UNMARK', 'B', st2:sub(1, 199), {ph = 'stop', new = new, newnw = nnw, why = 'unwalkable'})
+  end
+  return true
+end
+
+-- NEU20a BUG-931 (Run 17 i1 Diedplank y435: WOOD_UNMARK took 7 fell designations off the walk group down, autochop marked the SAME unreachable trees again after each removal (#16628, #16643),
+-- after 3 runs 'stopped for this episode, no further cure is guessed', >1000 reachable trees stood and 6 dwarves died for want of drink; autochop counts 1485 accessible trees, 0 inaccessible: it
+-- does not know the citizens' walk group): once the removal has done its part (WOOD_UNMARK stopped, or ran and was measured, or is switched off) and still no usable log exists, the KERNEL marks
+-- a few REACHABLE trees itself (act.tree_mark, dfhack.designations.markPlant: the call quickfort's dig_chop makes). Choice: the trees nearest to a built Carpenter's workshop (within
+-- wood.near_d), whose tile touches the citizens' walk group (snapshot groups, positive answer only), with no water tile and no open-air drop of 2+ levels within wood.fell_clear (3) tiles on
+-- the tree's level (fail closed on an unreadable tree tile), at most wood.fell_n (6) a pass, a pass every wood.fell_days (3) days, wood.fell_season (36) trees in 84 game days; PEACE /
+-- RECOVERY only (the mode of the removal). After wood.fell_measure (7) game days WOOD_FELL_MARK `result`: how many of the marked trees are felled / still stand, the new logs and how many of
+-- them on tiles with no walk group; none felled -> `stop` (why not_felled, the open FellTree jobs said), new logs unwalkable -> `stop` (why unwalkable), the season cap -> `stop` (why cap).
+-- Excluding the unreachable trees from autochop (`autochop chop <burrow>` restricts it to burrows, docs/tools/autochop.txt) was read and NOT used: it needs a burrow of reachable trees the kernel
+-- would have to build and keep, and that the plugin honours the walk groups inside such a burrow is not shown. Persisted m.economy `wfell` {t, st, sn, runs, pend, stop}.
+M.FELL_SEASON_D = 84
+function M.pts_home(K, pts)
+  local cpts = {}
+  for _, id in ipairs((K.census.u or {}).ids or {}) do
+    local u = df.unit.find(id)
+    local okp, x, y, z = pcall(function() return u.pos.x, u.pos.y, u.pos.z end)
+    if u and okp and math.tointeger(x) then cpts[#cpts + 1] = {x, y, z} end
+  end
+  local okc, cg = K.call('snapshot', 'groups', cpts, false)
+  if not (okc and type(cg) == 'table') then return nil end
+  local home = M.home_groups(K, cg)
+  if next(home) == nil then return nil end
+  local okj, jg = K.call('snapshot', 'groups', pts, true, home)
+  if not (okj and type(jg) == 'table') then return nil end
+  local ok = {}
+  for k = 1, #pts do
+    local g = math.tointeger(jg[k]) or -1
+    if g >= 0 and home[g] then ok[k] = true end
+  end
+  return ok
+end
+-- the trees (not marked now) as {x, y, z, d =, shop =} sorted by distance to the nearest built Carpenter's workshop within `near` (at most cap entries)
+function M.fell_candidates(near, cap)
+  local A = M.wood_anchors(near)
+  local out = {}
+  if #A.shops == 0 then return out, A end
+  pcall(function()
+    local pl = df.global.world.plants
+    for _, vn in ipairs({'tree_dry', 'tree_wet'}) do
+      for _, t in ipairs(pl[vn]) do
+        local x, y, z = t.pos.x, t.pos.y, t.pos.z
+        local best, bs
+        for _, sh in ipairs(A.shops) do
+          local d = M.wood_rect_dist(sh, x, y, z)
+          if not best or d < best then best, bs = d, sh end
+        end
+        if best and best <= near and not dfhack.designations.isPlantMarked(t) then out[#out + 1] = {x, y, z, d = best, shop = bs} end
+      end
+    end
+  end)
+  table.sort(out, function(a, b) if a.d ~= b.d then return a.d < b.d end if a[1] ~= b[1] then return a[1] < b[1] end return a[2] < b[2] end)
+  while #out > cap do out[#out] = nil end
+  return out, A
+end
+-- a tree tile is a safe felling place when no tile within `clear` of it on its level holds water and none is open air over open air (a drop of 2+ levels): ok, why, tile reads
+function M.fell_safe(K, x, y, z, clear, budget)
+  local reads = 0
+  local function tile(tx, ty, tz)
+    reads = reads + 1
+    local ok, t = K.call('snapshot', 'tile', tx, ty, tz)
+    if ok and type(t) == 'table' then return t end
+    return nil
+  end
+  local own = tile(x, y, z)
+  if not own then return false, 'tile unreadable', reads end
+  for dx = -clear, clear do
+    for dy = -clear, clear do
+      if reads >= budget then return false, 'tile reads spent', reads end
+      local t = (dx == 0 and dy == 0) and own or tile(x + dx, y + dy, z)
+      if t then
+        if (math.tointeger(t.flow) or 0) > 0 and t.magma ~= true then return false, string.format('water %d tiles away', math.max(math.abs(dx), math.abs(dy))), reads end
+        if t.shape == 'EMPTY' then
+          local b = tile(x + dx, y + dy, z - 1)
+          if b == nil or b.shape == 'EMPTY' then return false, string.format('a drop of 2+ levels %d tiles away', math.max(math.abs(dx), math.abs(dy))), reads end
+        end
+      end
+    end
+  end
+  return true, nil, reads
+end
+function M.wood_fell_mark(K, c, now, rd, inv)
+  local wc = c.wood or {}
+  if wc.fell == false or not rd or not HUNT_MODES[K.mode()] or type(K.act.tree_mark) ~= 'function' then return false end
+  local p = pstate(K)
+  local um = type(p.wunmark) == 'table' and p.wunmark or {}
+  -- the removal first: it has stopped (runs, unwalkable), or a run was made, or it is switched off; never while its measurement is pending
+  if type(um.pend) == 'table' then return false end
+  if not (um.stop or (math.tointeger(um.runs) or 0) >= 1 or wc.unmark == false) then return false end
+  local rec = type(p.wfell) == 'table' and p.wfell or {}
+  p.wfell = rec
+  if rec.stop or type(rec.pend) == 'table' then return false end
+  local every = (math.tointeger(wc.fell_days) or 3) * DAY
+  if math.tointeger(rec.t) and now >= rec.t and now - rec.t < every then return false end
+  if math.tointeger(rec.try) and now >= rec.try and now - rec.try < DAY then return false end
+  rec.try = now
+  if not math.tointeger(rec.st) or now < rec.st or now - rec.st >= M.FELL_SEASON_D * DAY then rec.st, rec.sn = now, 0 end
+  local cap = math.tointeger(wc.fell_season) or 36
+  local left = cap - (math.tointeger(rec.sn) or 0)
+  K.persist.touch('m.economy')
+  if left <= 0 then
+    rec.stop = true
+    local txt = string.format('%d trees marked in this season (cap %d in %d game days), still no usable log: the kernel marks no more this episode', math.tointeger(rec.sn) or 0, cap, M.FELL_SEASON_D)
+    K.log('warn', 'economy: wood fell mark stop: %s', txt)
+    K.emit('WOOD_FELL_MARK', 'B', txt:sub(1, 199), {ph = 'stop', why = 'cap', season = math.tointeger(rec.sn) or 0})
+    return false
+  end
+  local want = math.max(1, math.min(left, math.tointeger(wc.fell_n) or 6))
+  local near = math.tointeger(wc.near_d) or M.WOOD_NEAR_D
+  local cands, A = M.fell_candidates(near, 120)
+  if #A.shops == 0 or #cands == 0 then
+    if st.fellnone == nil or now - st.fellnone >= 7 * DAY then
+      st.fellnone = now
+      K.log('warn', 'economy: wood fell mark: %s', #A.shops == 0 and "no built Carpenter's workshop to choose trees beside" or string.format("no unmarked tree within %d tiles of a Carpenter's workshop", near))
+    end
+    return false
+  end
+  local home = M.pts_home(K, cands)
+  if not home then return false end                        -- the groups are unreadable: nothing is marked on a guess
+  local clear = math.max(1, math.tointeger(wc.fell_clear) or 3)
+  local budget, reads, out, sample, rej = math.tointeger(wc.fell_reads) or 600, 0, {}, {}, {}
+  local shop
+  for k = 1, #cands do
+    if #out >= want or reads >= budget then break end
+    if home[k] then
+      local t = cands[k]
+      local ok, why, n = M.fell_safe(K, t[1], t[2], t[3], clear, budget - reads)
+      reads = reads + n
+      if ok then
+        out[#out + 1] = {t[1], t[2], t[3]}
+        shop = shop or t.shop
+        if #sample < 6 then sample[#sample + 1] = string.format('%d,%d,%d', t[1], t[2], t[3]) end
+      else rej[why] = (rej[why] or 0) + 1 end
+    else rej['off the walk group'] = (rej['off the walk group'] or 0) + 1 end
+  end
+  if #out == 0 then
+    if st.fellnone == nil or now - st.fellnone >= 7 * DAY then
+      st.fellnone = now
+      local parts = {}
+      for w, n in pairs(rej) do parts[#parts + 1] = string.format('%d %s', n, w) end
+      table.sort(parts)
+      K.log('warn', 'economy: wood fell mark: none of the %d nearest trees qualifies (%s)', #cands, table.concat(parts, ', '))
+    end
+    return false
+  end
+  local ok, n = K.act.tree_mark(out)
+  n = ok and math.tointeger(n) or 0
+  rec.t = now
+  if n <= 0 then
+    K.log('warn', 'economy: wood fell mark: %d trees chosen, the game marked none', #out)
+    return false
+  end
+  rec.runs = (math.tointeger(rec.runs) or 0) + 1
+  rec.sn = (math.tointeger(rec.sn) or 0) + n
+  local pos = {}
+  for _, t in ipairs(out) do pos[#pos + 1] = table.concat(t, ',') end
+  rec.pend = json.object{t = now, n = n, trees0 = math.tointeger(M.count_trees()) or 0, hi = math.tointeger(inv.wood_hi) or 0, new = 0, newnw = 0, pos = table.concat(pos, ';'):sub(1, 400)}
+  K.persist.touch('m.economy')
+  local sh = shop and string.format('%d,%d,%d', shop[1], shop[2], shop[5]) or '?'
+  local txt = string.format("no usable log: %d reachable trees marked for felling nearest the Carpenter's workshop at %s (e.g. %s; %d asked; season %d of %d)", n, sh, table.concat(sample, ' '), #out, rec.sn, cap)
+  K.log('warn', 'economy: wood fell mark: %s (run %d; near logs %d, far %d)', txt, rec.runs, math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_dist) or 0)
+  K.emit('WOOD_FELL_MARK', 'B', txt:sub(1, 199), {ph = 'did', n = n, asked = #out, sample = table.concat(sample, ' '), shop = sh, why = 'stuck', season = rec.sn, runs = rec.runs})
+  return true
+end
+-- the measurement after wood.fell_measure game days: marked trees felled / still standing, the new logs (and unwalkable ones); nothing felled or unwalkable logs stop the marking for the episode
+function M.wood_fell_follow(K, c, now, inv)
+  local p = pstate(K)
+  local rec = type(p.wfell) == 'table' and p.wfell or nil
+  local pend = rec and type(rec.pend) == 'table' and rec.pend or nil
+  if not pend then return false end
+  local hi = math.tointeger(inv.wood_hi) or 0
+  if hi ~= (math.tointeger(pend.hi) or 0) then
+    pend.new = (math.tointeger(pend.new) or 0) + math.max(0, math.tointeger(inv.wood_new) or 0)
+    pend.newnw = (math.tointeger(pend.newnw) or 0) + math.max(0, math.tointeger(inv.wood_new_nw) or 0)
+    pend.hi = hi
+    K.persist.touch('m.economy')
+  end
+  local t0 = math.tointeger(pend.t) or now
+  if now < t0 then pend.t = now; K.persist.touch('m.economy'); return false end
+  local days = (now - t0) // DAY
+  if days < (math.tointeger((c.wood or {}).fell_measure) or 7) then return false end
+  local still = 0
+  pcall(function()
+    local want = {}
+    for s in tostring(pend.pos or ''):gmatch('[^;]+') do want[s] = true end
+    for _, vn in ipairs({'tree_dry', 'tree_wet'}) do
+      for _, t in ipairs(df.global.world.plants[vn]) do
+        if want[string.format('%d,%d,%d', t.pos.x, t.pos.y, t.pos.z)] then still = still + 1 end
+      end
+    end
+  end)
+  local n0 = math.tointeger(pend.n) or 0
+  local felled = math.max(0, n0 - still)
+  local new, nnw = math.tointeger(pend.new) or 0, math.tointeger(pend.newnw) or 0
+  rec.pend = nil
+  K.persist.touch('m.economy')
+  local txt = string.format('%d game days after marking %d reachable trees: %d felled, %d still stand, new logs %d (%d usable, %d on tiles with no walk group), usable logs now %d near %d far',
+                            days, n0, felled, still, new, new - nnw, nnw, math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_dist) or 0)
+  K.log('info', 'economy: wood fell mark result: %s', txt)
+  K.emit('WOOD_FELL_MARK', 'B', txt:sub(1, 199), {ph = 'result', n = n0, trees = felled, still = still, new = new, newnw = nnw, days = days})
+  local why, st2
+  if felled == 0 and n0 > 0 then
+    local okf, fr = pcall(M.fell_reach, K)
+    fr = okf and fr or nil
+    why = 'not_felled'
+    st2 = string.format('none of the %d marked trees was felled in %d game days%s: the marking stops for this episode, no further cure is guessed', n0, days,
+                        fr and string.format(' (open FellTree jobs %d, %d off the walk group)', fr.open or 0, fr.far or 0) or '')
+  elseif new > 0 and nnw * 2 >= new then
+    why = 'unwalkable'
+    st2 = string.format('the logs felled after the marking lie on tiles with no walk group (%d of %d): the marking stops for this episode, no further cure is guessed', nnw, new)
+  end
+  if why then
+    rec.stop = true
+    K.log('warn', 'economy: wood fell mark stop: %s', st2)
+    K.emit('WOOD_FELL_MARK', 'B', st2:sub(1, 199), {ph = 'stop', why = why, trees = felled, still = still, new = new, newnw = nnw})
   end
   return true
 end
@@ -13557,6 +13916,8 @@ end
 -- from the end of the census too (M.step), not only from the run's chop task.
 function M.wood_watch(K, c, inv)
   local now = K.now().tick
+  local okg, errg = pcall(M.wood_fell_follow, K, c, now, inv)     -- NEU20a BUG-931
+  if not okg then K.log('warn', 'wood fell follow: %s', tostring(errg):sub(1, 120)) end
   local okf, errf = pcall(M.wood_unmark_follow, K, c, now, inv)   -- NEU16c BUG-917
   if not okf then K.log('warn', 'wood unmark follow: %s', tostring(errf):sub(1, 120)) end
   local oks, errs = pcall(M.wood_stuck, K, c, now, inv)         -- NEU16b BUG-916
@@ -13721,32 +14082,60 @@ function T.woodpile(K, c, r)
     end
     return true
   end
-  for _, s in ipairs(lack) do
-    local cx, cy = (s[1] + s[3]) // 2, (s[2] + s[4]) // 2
-    local st1, wy = M.pile_site(K, tc, {at = {cx, cy, s[5]}, by = 'carpenter', indoor = true, dry = true, ok = free_tile})
-    if st1 then site, at = st1, {cx, cy, s[5]}; break end
-    whys[#whys + 1] = tostring(wy)
-    at = at or {cx, cy, s[5]}
+  -- NEU20a BUG-934 (Run 17 i1 Diedplank: 'no 5x5 plain floor within 12 tiles of carpenter 94,96,144', the wood pile never came): the same safety rules (indoor, dry, plain floor, no
+  -- overlap, nothing dug), but smaller piles are tried before giving up (w x h down to wood.pile_min x pile_min, one tile a step) and the search widens to wood.pile_r2 (24) tiles once per
+  -- `every` days; the tiles read are shared between the sizes. The first size that fits wins (the biggest at the nearest ring).
+  local pmin = math.max(1, math.min(math.tointeger(wc.pile_min) or 2, pw, ph))
+  local sizes = {}
+  do
+    local w1, h1 = pw, ph
+    while true do
+      sizes[#sizes + 1] = {w1, h1}
+      if w1 <= pmin and h1 <= pmin then break end
+      w1, h1 = math.max(pmin, w1 - 1), math.max(pmin, h1 - 1)
+    end
   end
+  local r2 = math.max(W.r, math.min(math.tointeger(wc.pile_r2) or 24, 40))
+  local radii = {W.r}
+  local wide = r2 > W.r and (not math.tointeger(rec.wide) or r.now < rec.wide or r.now - rec.wide >= W.every * DAY)
+  if wide then radii[2] = r2 end
+  local sw, sh = pw, ph
+  local caches = {}
+  for ri, R in ipairs(radii) do
+    for _, sz in ipairs(sizes) do
+      for k, s in ipairs(lack) do
+        local cx, cy = (s[1] + s[3]) // 2, (s[2] + s[4]) // 2
+        caches[k] = caches[k] or {}
+        local tc2 = {pile_w = sz[1], pile_h = sz[2], pile_r = R, pile_reads = W.reads}
+        local st1, wy = M.pile_site(K, tc2, {at = {cx, cy, s[5]}, by = 'carpenter', indoor = true, dry = true, ok = free_tile, cache = caches[k]})
+        if st1 then site, at, sw, sh = st1, {cx, cy, s[5]}, sz[1], sz[2]; break end
+        if ri == #radii and sz == sizes[#sizes] then whys[#whys + 1] = tostring(wy) end
+        at = at or {cx, cy, s[5]}
+      end
+      if site then break end
+    end
+    if site then break end
+  end
+  if wide then rec.wide = r.now end
   local why = table.concat(whys, '; ')
   r.cmds = r.cmds + 1
-  local out = {t = r.now, dn = math.tointeger(rec.dn), meas = rec.meas}
+  local out = {t = r.now, dn = math.tointeger(rec.dn), meas = rec.meas, wide = math.tointeger(rec.wide)}
   local failed
   if #bad > 0 and not site then bad = {} end                        -- nothing else is free: the refused ones may be tried again
   out.bad = json.array(bad)
   if site then
-    local ok, n = K.act.wood_pile(site, pw, ph)
+    local ok, n = K.act.wood_pile(site, sw, sh)
     if ok then
-      out.state, out.at, out.w, out.h = 'placed', json.array(site), pw, ph
+      out.state, out.at, out.w, out.h = 'placed', json.array(site), sw, sh
       out.meas = json.object{t = r.now, near = math.tointeger(inv.wood) or 0, dist = math.tointeger(inv.wood_dist) or 0}
       local txt = string.format('wood pile: dfllm-wood %dx%d at %d,%d,%d beside the Carpenter\'s workshop at %d,%d,%d (no stockpile near it takes wood with room; near logs %d of %d wanted, %d far)',
-                                pw, ph, site[1], site[2], site[3], at[1], at[2], at[3], math.tointeger(inv.wood) or 0, need, math.tointeger(inv.wood_dist) or 0)
+                                sw, sh, site[1], site[2], site[3], at[1], at[2], at[3], math.tointeger(inv.wood) or 0, need, math.tointeger(inv.wood_dist) or 0)
       K.log('info', '%s', txt)
-      K.emit('WOOD_PILE', 'B', txt:sub(1, 200), {ph = 'placed', pos = json.array(site), w = pw, h = ph, shop = json.array(at),
+      K.emit('WOOD_PILE', 'B', txt:sub(1, 200), {ph = 'placed', pos = json.array(site), w = sw, h = sh, shop = json.array(at),
              near0 = math.tointeger(inv.wood) or 0, far0 = math.tointeger(inv.wood_dist) or 0, need = need, piles = #piles})
     else
       out.state, out.why = 'refused', tostring(n):sub(1, 60)
-      bad[#bad + 1] = {site[1], site[2], site[1] + pw - 1, site[2] + ph - 1, site[3]}
+      bad[#bad + 1] = {site[1], site[2], site[1] + sw - 1, site[2] + sh - 1, site[3]}
       while #bad > 8 do table.remove(bad, 1) end
       out.bad = json.array(bad)
       failed = 'quickfort refused it at ' .. table.concat(site, ',') .. ': ' .. tostring(n)
@@ -13760,7 +14149,7 @@ function T.woodpile(K, c, r)
   if failed and (not out.dn or r.now - out.dn >= W.season * DAY) then       -- one honest question per season
     out.dn = r.now
     local q = string.format('no stockpile with room takes wood within %d tiles of the Carpenter\'s workshop at %s and none could be placed (%s): the haulers cannot bring felled logs in; free a %dx%d indoor floor beside the shop, meanwhile ask the caravans',
-                            A.d, at and table.concat(at, ',') or '?', failed:sub(1, 70), pw, ph)
+                            A.d, at and table.concat(at, ',') or '?', failed:sub(1, 70), pmin, pmin)
     K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'wood_pile', q = q:sub(1, 200), cmds = {[[dfllm cmd trade.want '{"add":["wood"]}']]}})
   end
   p.wpile = json.object(out)
@@ -16805,7 +17194,7 @@ function M.pile_site(K, tc, q)
   local R = tc.pile_r or 12
   local budget = math.max(tc.pile_reads or 300, (2 * R + w) * (2 * R + h))
   local cx, cy, cz = q.at[1], q.at[2], q.at[3]
-  local reads, seen = 0, {}
+  local reads, seen = 0, q.cache or {}                  -- NEU20a BUG-934: q.cache = tiles read by an earlier call for the same centre / filters (smaller sizes, a wider radius)
   local function floor_at(x, y)
     local key = x * 100000 + y
     if seen[key] ~= nil then return seen[key] end
@@ -17591,6 +17980,19 @@ M.verbs['order.add'] = function(K, args, cmd)
     if args.mat ~= 'wood' and args.mat ~= 'rock' then return false, 'mat must be wood or rock' end
     if args.material ~= nil or args.material_category ~= nil then return false, 'mat replaces material and material_category: give one of them' end
     if args.mat == 'wood' then spec.material_category = {'wood'} else spec.material = 'INORGANIC' end
+    -- NEU20a BUG-933 (Run 17 i1 Diedplank orders 709 / 710 / 1399 `MakeBarrel mat=rock`: 'no_input ... boulder x1: 0 match, 0 free', DF 'Needs non-economic hard stone boulders'): a rock barrel needs a free
+    -- boulder DF lets a job take; when the census holds none the order would only wait for years (and the ladder had named it). Refused with the reason; `material=INORGANIC` still orders it by hand.
+    if args.mat == 'rock' and job == 'MakeBarrel' then
+      local inv = K.census.i
+      if type(inv) == 'table' and inv.rock ~= nil then
+        local now = K.now().tick
+        local okn, none = pcall(function() return M.stone_none(inv, now) or M.usable_n(inv) <= 0 end)
+        if okn and none then
+          return false, string.format('order.add MakeBarrel mat=rock: no boulder a rock barrel may take (%d boulders, %d usable): it would only wait; dig stone (plan propose) or mat=wood / trade.want wood; material=INORGANIC forces it',
+                                      math.max(0, math.tointeger(inv.boulders) or 0), M.usable_n(inv))
+        end
+      end
+    end
   end
   if args.material_category ~= nil then
     if type(args.material_category) ~= 'table' or #args.material_category == 0 then return false, 'material_category must be a list' end

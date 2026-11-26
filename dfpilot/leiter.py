@@ -74,6 +74,10 @@ def t_versorgung(s: dict, mem: dict, now: int) -> tuple:
         # NEU7 BUG-857: the material the players' working command used: rock barrels when no usable log is left (state stock.wood 0 / nowood)
         mat = "rock" if (st.get("wood") == 0 or st.get("nowood")) else "wood"
         dcmd, dkey = ("dfllm cmd order.add '{\"job\":\"MakeBarrel\",\"amount\":15,\"mat\":\"" + mat + "\"}'", "order:barrel")
+        # NEU20a BUG-933: a rock barrel needs a free boulder DF lets a job take (state stock.rock = free usable stone, stock.rhard = DF refuses the rock jobs); without one the kernel's
+        # order.add refuses `mat=rock`, so the ladder does not name it: wood from the caravans (and a stone dig) is the way
+        if mat == "rock" and (("rock" in st and not _i(st.get("rock"))) or st.get("rhard")):
+            dcmd, dkey = want("wood"), "trade:wood"
         if st.get("rsv"):
             # NEU11 BUG-880: the kernel's container reserve orders the barrels itself (state stock.rsv): no player command to repeat; the order.add above
             # is named only when the reserve cannot do it (no material, material refused by DF: stock.rsv is absent then)

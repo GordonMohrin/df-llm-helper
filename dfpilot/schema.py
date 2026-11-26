@@ -115,7 +115,7 @@ ACT = {
     "stone_economic": ["economy"],                        # BUG-648: clear the stone-use screen's economic mark of a building stone
     "mat_refused": ["economy"],                           # BUG-665: the game's verdict on a boulder material (read only)
     "work_detail": ["economy", "water", "player"], "order_material": ["economy"], "order_remove": ["economy"],
-    "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"], "tree_unmark": ["economy"],
+    "job_resume": ["economy"], "farm_crop": ["economy"], "plant_gather": ["economy"], "plant_ungather": ["economy"], "tree_unmark": ["economy"], "tree_mark": ["economy"],
     "work_detail_prune": ["economy"],
     "item_flag": ["care", "water", "economy", "military", "seal"],
     "zone_assign": ["care", "player"], "tomb_zone": ["care"], "medic": ["care"], "hospital_post": ["care"],
@@ -604,6 +604,11 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # sample = first positions, band = the autochop band the kernel set (`min-max`), run = which removal of the episode; ph `result` (after the next readings): des = marked trees now, new = logs
     # newer than the removal, newnw = of those on a tile with no walk group, trees = trees on the map before-after delta (felled); ph `stop`: the removal stopped (why)
     "WOOD_UNMARK": ("B", "economy", _d("ph:s", "n:i off:i des:i sample:s band:s run:i new:i newnw:i trees:i days:i why:s")),
+    # NEU20a BUG-931: WOOD_FELL_MARK = no usable log, the removal of WOOD_UNMARK stopped (or ran): the kernel itself marks `n` REACHABLE trees for felling (nearest a built Carpenter's workshop, on the
+    # citizens' walk group, >= 3 tiles from water / a drop of 2+ levels, PEACE / RECOVERY only). ph `did`: n = marked, asked = positions given to the act, sample = first positions, shop = the workshop,
+    # why = reason, season = trees marked in the 84-day season, runs = passes of the episode; ph `result` (after fell_measure days): n marked then, trees = of them felled, still = still standing,
+    # new / newnw = logs newer than the marking / of those on a tile with no walk group, days; ph `stop`: why `not_felled` / `unwalkable` / `cap`
+    "WOOD_FELL_MARK": ("B", "economy", _d("ph:s", "n:i asked:i sample:s shop:s why:s season:i runs:i trees:i still:i new:i newnw:i days:i")),
     # NEU17b BUG-918 (lead decisions D2/D3): the lowering covers every kernel food pile (dfllm-..., not dfllm-drink / dfllm-mood) whether or not its settings accept drink (`drink` 1/0 = what the
     # pile's drink_plant/drink_animal flags read at the lowering; the claim that the stock piles accept drink is INFERRED, not shown); the event repeats at once (`lowered`), after 1 d and 7 d with
     # registered empties reg0/reg1/reg7, free empties free0/free1/free7, DF's brew cancels cx0/cx1/cx7 and brew jobs finished in the window done0/done1/done7 (gamelog, absent when its reader is off);

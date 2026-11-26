@@ -767,6 +767,10 @@ function J.order(K, o, ctx)
   local rn = pget(function() return o.reaction_name end)
   local r = {kind = 'order', id = int(o.id), job = (tn == 'CustomReaction' and type(rn) == 'string' and rn ~= '') and rn or tn,
              left = int(o.amount_left) or 0}
+  -- NEU20a BUG-933 (Run 17 i1 Diedplank order 1399 MakeBarrel mat=rock: commands.log shows material INORGANIC went to act.workorder, but `why order:1399` led with DF's tally of 'make wooden barrel:
+  -- Needs logs' and the player read it as 'mat ignored'): the order's own material class, so DF's cancel tally is matched against the kind of THIS order (wooden / rock), not every barrel job
+  if pget(function() return o.material_category.wood end) == true then r.mat = 'wood'
+  elseif int(pget(function() return o.mat_type end)) == 0 then r.mat = 'rock' end
   if r.left <= 0 then r.cause, r.text = 'done', 'nothing left to make'; return r end
   if pget(function() return o.status.validated end) == false then
     local mf = ctx and ctx.manager and pget(ctx.manager) or nil
@@ -971,7 +975,14 @@ function J.df_match(r)
   cap = cap:lower()
   local first, last = cap:match('^(%S+)'), cap:match('(%S+)$')
   if not first then return nil end
-  return function(kind) return kind:sub(1, #first) == first and kind:sub(-#last) == last end
+  -- NEU20a BUG-933: an order of a known material (r.mat) only matches DF's cancels of its own kind: 'make wooden barrel' for wood, 'make rock / stone barrel' for rock
+  local mat = r.mat
+  return function(kind)
+    if not (kind:sub(1, #first) == first and kind:sub(-#last) == last) then return false end
+    if mat == 'wood' then return kind:find('wood', 1, true) ~= nil end
+    if mat == 'rock' then return kind:find('rock', 1, true) ~= nil or kind:find('stone', 1, true) ~= nil end
+    return true
+  end
 end
 
 -- the result r (and its sub) carries DF's reason when the cancel tally has one: r.df = {why, n, days, last, text}; a cause that is only a guess
@@ -989,7 +1000,10 @@ function J.attach_df(r, ctx)
     local h = pget(ctx.health)
     if type(h) == 'string' and h ~= '' then r.dfh = h end
   end
-  if type(r.sub) == 'table' then J.attach_df(r.sub, ctx) end
+  if type(r.sub) == 'table' then
+    if r.sub.mat == nil then r.sub.mat = r.mat end            -- NEU20a BUG-933: the job of an order has the order's material
+    J.attach_df(r.sub, ctx)
+  end
   return r
 end
 

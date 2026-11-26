@@ -1478,7 +1478,11 @@ local function impls(state)
       for id, old in pairs(type(arg) == 'table' and arg or {}) do
         local sp = df.building.find(math.tointeger(tonumber(id)) or -1)
         local v = math.tointeger(old)
-        if sp and v and PL.set(sp, v) then out[#out + 1] = {id = sp.id, new = v} end
+        if sp and v and PL.set(sp, v) then out[#out + 1] = {id = sp.id, new = v}
+        else                                    -- NEU20a BUG-935: said, not dropped silently: the pile is gone, or the write failed
+          out.missing = out.missing or {}
+          out.missing[#out.missing + 1] = {id = tostring(id), why = (not sp) and 'gone' or (v and 'write failed' or 'no limit')}
+        end
       end
       return true, out
     end
@@ -2344,7 +2348,7 @@ local function impls(state)
   end
 
   -- designations > gather plants (FR-25): the shrubs at these positions get the player's gather designation
-  -- (dfhack.designations.markPlant; trees are never marked here). The caller passes revealed, reachable
+  -- (dfhack.designations.markPlant; trees are marked only by I.tree_mark). The caller passes revealed, reachable
   -- positions only (snapshot). positions = {{x,y,z}} (<= 200). Returns ok, marked.
   function I.plant_gather(positions)
     if type(positions) ~= 'table' then return false, 'positions required' end
@@ -2424,6 +2428,36 @@ local function impls(state)
         if want[k] then
           want[k] = nil
           if des.isPlantMarked(pl) and des.unmarkPlant(pl) then done = done + 1 end
+        end
+      end
+    end
+    return true, done
+  end
+
+  -- NEU20a BUG-931 (Run 17 i1 Diedplank: WOOD_UNMARK took 7 unreachable fell designations down three times, autochop marked the same trees again, 6 dwarves died for want of drink beside
+  -- >1000 reachable trees): the fell designation of the TREES at these positions is SET (dfhack.designations.markPlant, what quickfort's dig_chop and the designation screen do; the plugin's
+  -- own `autochop designate` marks the same way). The caller (economy.wood_fell_mark) has chosen reachable trees near a Carpenter's workshop, away from water and drops. Only a tree that is
+  -- not marked yet; markPlant answers false for what it cannot mark (a sapling): not counted. Nothing is dug or built. positions = {{x,y,z}} (<= 24). Returns ok, marked.
+  function I.tree_mark(positions)
+    if type(positions) ~= 'table' then return false, 'positions required' end
+    local want, n = {}, 0
+    for i, p in ipairs(positions) do
+      if i > 24 then break end
+      local x, y, z = xyz(p)
+      x, y, z = int(x), int(y), int(z)
+      if x and y and z then want[string.format('%d,%d,%d', x, y, z)] = true; n = n + 1 end
+    end
+    if n == 0 then return true, 0 end
+    local des = dfhack.designations
+    local done = 0
+    for _, vn in ipairs({'tree_dry', 'tree_wet'}) do
+      local okv, vec = pcall(function() return df.global.world.plants[vn] end)
+      for _, pl in ipairs(okv and vec or {}) do
+        local p = pl.pos
+        local k = string.format('%d,%d,%d', p.x, p.y, p.z)
+        if want[k] then
+          want[k] = nil
+          if not des.isPlantMarked(pl) and des.markPlant(pl) then done = done + 1 end
         end
       end
     end

@@ -95,6 +95,7 @@ C.EVENTS = {
   WATER_OUTSIDE_RESTORED = {cls = 'B', by = 'water'},   -- BUG-875: the retired zone painted again once no strong inside source stands
   WOOD_STUCK = {cls = 'B', by = 'economy'},   -- NEU16b BUG-916: no usable log for 3 game days, the loose logs on tiles with no walk group and / or every open FellTree job off the walk group
   WOOD_UNMARK = {cls = 'B', by = 'economy'},   -- NEU16c BUG-917: fell designations off the citizens' walk group taken down (ph did), the measurement after the next readings (ph result), the stop (ph stop)
+  WOOD_FELL_MARK = {cls = 'B', by = 'economy'},   -- NEU20a BUG-931: the kernel marks reachable trees for felling near a Carpenter's workshop (ph did), measures after 7 game days (ph result), stops (ph stop)
   WOOD_DISBELIEVED = {cls = 'B', by = 'economy'},   -- NEU16 BUG-911: DF cancelled 'Needs logs' beside a positive near-log count: autochop and the texts count 0 usable for 28 game days
   PILE_BARREL_RELEASE = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 6: a kernel food pile's barrel limit lowered because it holds registered empty barrels; measured 1 and 7 game days later
   BREW_CANCEL_SNAPSHOT = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 3: once per game day when DF cancels a brew for want of an empty food storage item: the empties by state, read only
@@ -390,7 +391,7 @@ C.ACT = {
   mat_refused = {'economy'},                       -- BUG-665: the game's verdict on a boulder material as non-economic hard stone (read only)
   kitchen_include = {'economy'},                   -- BUG-345: lift a Cook exclusion (seedwatch leftovers, D-09 in a famine)
   order_material = {'economy'}, order_remove = {'economy'}, job_resume = {'economy'}, farm_crop = {'economy'},
-  plant_gather = {'economy'}, plant_ungather = {'economy'}, tree_unmark = {'economy'}, work_detail_prune = {'economy'},
+  plant_gather = {'economy'}, plant_ungather = {'economy'}, tree_unmark = {'economy'}, tree_mark = {'economy'}, work_detail_prune = {'economy'},
   item_flag = {'care', 'water', 'economy', 'military', 'seal'}, zone_assign = {'care', 'player'},   -- BUG-651: seal keeps the last plug wall's block back
   tomb_zone = {'care'}, medic = {'care'}, hospital_post = {'care'},
   slab_place = {'care'},                           -- BUG-133: Build > Furniture > Slab with a ghost's engraved slab
