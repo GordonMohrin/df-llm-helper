@@ -3632,7 +3632,10 @@ local function check_fail(K, name, now, mode)
   if not (br and br.want == 'up' and not br.failed and br.deadline and now >= br.deadline) then return end
   local m0 = mode or K.mode()
   if QUIET_UP[br.why] and m0 == 'PEACE' then return end   -- mode: the epoch's own (a MODE change settles it)
-  if QUIET_UP[br.why] and (m0 == 'ALERT' or m0 == 'RECOVERY') and not lock_why(K) then return end    -- BUG-928: the PEACE age of a leftover quiet want
+  if QUIET_UP[br.why] and (m0 == 'ALERT' or m0 == 'RECOVERY') and not lock_why(K) then
+    br.failed, dirty = true, true       -- BUG-928: the PEACE age of a leftover quiet want: no GATE_FAIL, but `failed` as before (siege's failed_bridge / breach_stuck read it)
+    return
+  end
   local r = runtime(name)
   if r.last == 'up' then return end
   if r.stuck == 'blocked' and r.block_since and now - r.block_since >= M.DEADLINE and M.reach_held(K, r, m0) then
@@ -3643,6 +3646,7 @@ local function check_fail(K, name, now, mode)
       K.emit('GATE', 'C', cut(txt, 200), {bridge = name, state = 'reach_hold', units = ids_of(r.block), ticks = now - br.since, n = #r.block})
       K.log('info', 'gate: %s', txt)
     end
+    br.failed, dirty = true, true       -- BUG-928: as before the wording change the bridge counts as failed for siege (failed_bridge, breach_stuck); only the A event is gone
     return
   end
   local slow

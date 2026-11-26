@@ -17,8 +17,13 @@ Module: `lua/dfllm/economy.lua` (`T.woodpile`, `M.rect_gap`, `M.logs_in_rect`, `
 - The fill test counts every free log on the pile's tiles (1 per tile); the real capacity per tile of a log stockpile was not measured.
 - A near but full pile is not enlarged; a further kernel pile is placed beside the shop (up to `pile_max`).
 
+## Verifier round (NEU19)
+- `M.covered_boxes()` reads `buildings.other.STOCKPILE`, `ACTIVITY_ZONE` and `ANY_ZONE`; `T.woodpile` passes `q.ok` to `M.pile_site` so no tile of an existing stockpile or zone is chosen (bounding boxes: conservative).
+- A site quickfort refused (`state 'refused'`) is stored in `p.wpile.bad` (at most 8 boxes) and excluded on the next attempt; with nothing else free the list is dropped and the search starts again.
+- The indoor check fails closed: `snapshot.plot_under` unreadable (call fails) or `false` rejects the tile (`nil` = roofed, not subterranean: accepted).
+
 ## Tests
-`tests/lua/test_bug926_wood_pile.lua` (6); `tests/lua/test_bug910_915_holz.lua` (two expectations moved: 5x5, wording), `tests/test_bug910_915_holz.py` (the decision is not quiet any more).
+`tests/lua/test_bug926_wood_pile.lua` (9: + no overlap with an existing stockpile / zone, a site quickfort refused is not tried again (the next attempt takes another, `p.wpile.bad`), an unreadable roof fails closed); `tests/lua/test_bug910_915_holz.lua` (two expectations moved: 5x5, wording), `tests/test_bug910_915_holz.py` (the decision is not quiet any more).
 
 ## Live-Erwartung
 i3: within a game day of the next PEACE look kern.log `wood pile: dfllm-wood 5x5 at x,y,z beside the Carpenter's workshop at 79,55,139 (no stockpile near it takes wood with room; near logs 88 of 82 wanted, 508 far)`, event WOOD_PILE `placed`; 7 game days later `result` with usable near logs 88 -> N. i2: one pile per Carpenter lacking one, up to 3. Without floor beside the shop: one DECISION_NEEDED per season, not hidden in the briefing.

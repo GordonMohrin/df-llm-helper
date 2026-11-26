@@ -15,7 +15,9 @@ local function world(opts)
   opts = opts or {}
   local units = {}
   for i = 1, 8 do units[i] = {id = i, citizen = true} end
-  local W = F.world{cfg = {baseline = F.cfg()}, units = units}
+  local base = F.cfg()
+  if opts.manager_days then base.economy = base.economy or {}; base.economy.orders = base.economy.orders or {}; base.economy.orders.manager_days = opts.manager_days end
+  local W = F.world{cfg = {baseline = base}, units = units}
   df.job_skill.ORGANIZATION, df.job_skill[44] = 44, 'ORGANIZATION'
   local jt, n = df.job_type, 0
   for _, v in pairs(jt) do if type(v) == 'number' and v > n then n = v end end
@@ -143,6 +145,15 @@ T.test('BUG-925: verb appoint replace:true takes a manager who cannot work after
   local r2 = W2.inbox('appoint', {code = 'MANAGER', unit = 8, replace = true})
   T.eq(r2.ok, false)
   T.ok(r2.msg:find('lives and stands among the citizens', 1, true), r2.msg)
+end)
+
+T.test('BUG-925: the pass that replaces the manager emits no manager_absent for the old one and leaves no absence clock (p.mabs)', function()
+  local W = world{manager_days = 30}                                   -- the question would fall due in the very pass that replaces him
+  days(W, 32)
+  T.eq(#W.calls, 1, 'replaced')
+  local n = 0
+  for _, e in ipairs(W.find_events('DECISION_NEEDED')) do if e.d.id == 'manager_absent' then n = n + 1 end end
+  T.eq(n, 0, 'no manager_absent after a successful replacement')
 end)
 
 T.done()

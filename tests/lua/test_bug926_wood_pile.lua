@@ -22,7 +22,7 @@ local function world(opts)
           tile = opts.tile or function(K, x, y, z)
             if z == 1 and x >= 0 and x <= 60 and y >= 0 and y <= 60 then return {c = '.', dig = '', bld = ''} end
           end,
-          plot_under = opts.plot_under,
+          plot_under = (not opts.no_roof) and (opts.plot_under or function() return true end) or nil,
           far = function() return false end,
           groups = function(K, pts) local g = {}; for i = 1, #pts do g[i] = 1 end; return g end})
   for _ = 1, 8 do F.item(W, 'BARREL', {}) end
@@ -130,6 +130,48 @@ T.test('BUG-926: no site: one honest DECISION_NEEDED wood_pile per season (84 ga
   T.eq(decisions(W), 1, 'not before a season has passed')
   days(W, 30)
   T.eq(decisions(W), 2, 'a season later: again')
+end)
+
+T.test('BUG-926: the site never overlaps an existing stockpile or zone (the shop surroundings are covered: the pile lands beside them)', function()
+  local W = world{setup = function(W)
+    -- a non-wood stockpile and a zone cover the ring right around the shop
+    F.building(W, 'STOCKPILE', {name = 'stone', x1 = 5, y1 = 5, x2 = 16, y2 = 16, z = 1, settings = {flags = {stone = true}}})
+    F.building(W, 'ACTIVITY_ZONE', {type = df.civzone_type.Office, x1 = 17, y1 = 5, x2 = 22, y2 = 22, z = 1})
+    far_logs(W, 10)
+  end}
+  days(W, 1)
+  T.eq(#W.piles, 1)
+  local p = W.piles[1].pos
+  local over1 = p[1] <= 16 and p[1] + 4 >= 5 and p[2] <= 16 and p[2] + 4 >= 5
+  local over2 = p[1] <= 22 and p[1] + 4 >= 17 and p[2] <= 22 and p[2] + 4 >= 5
+  T.ok(not over1 and not over2, 'no overlap: ' .. T.show(p))
+end)
+
+T.test('BUG-926: a site quickfort refused is not repeated: the next attempt takes another', function()
+  local W = world{setup = function(W)
+    far_logs(W, 10)
+    W.act_result('wood_pile', function(pos, w, h)
+      W.piles[#W.piles + 1] = {pos = pos, w = w, h = h}
+      if #W.piles == 1 then return false, 'refused' end
+      F.building(W, 'STOCKPILE', {name = 'dfllm-wood', x1 = pos[1], y1 = pos[2], x2 = pos[1] + w - 1, y2 = pos[2] + h - 1, z = pos[3], settings = {flags = {wood = true}}})
+      return true, 1
+    end)
+  end}
+  days(W, 1)
+  T.eq(#W.piles, 1)
+  days(W, 30)
+  T.eq(#W.piles, 2, 'a second try after the wait')
+  local a, b = W.piles[1].pos, W.piles[2].pos
+  T.ok(a[1] ~= b[1] or a[2] ~= b[2], 'another site: ' .. T.show(a) .. ' then ' .. T.show(b))
+  local over = a[1] <= b[1] + 4 and b[1] <= a[1] + 4 and a[2] <= b[2] + 4 and b[2] <= a[2] + 4
+  T.ok(not over, 'not overlapping the refused one')
+end)
+
+T.test('BUG-926: an unreadable roof (plot_under cannot be read) is no indoor floor: no site, the honest question', function()
+  local W = world{no_roof = true, setup = function(W) far_logs(W, 10) end}
+  days(W, 2)
+  T.eq(#W.piles, 0)
+  T.eq(decisions(W), 1)
 end)
 
 T.done()

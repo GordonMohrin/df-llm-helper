@@ -20,7 +20,7 @@ Module: `lua/dfllm/economy.lua` (`M.manager_watch`, `M.manager_replace`, `M.mgr_
 - That the new holder walks to an office zone and validates (`M.office_check` assigns one) is the path of any vacant appointment, not measured here.
 
 ## Tests
-`tests/lua/test_bug925_manager_replace.lua` (4): replace after 30 days with the ranking (soldier, child, patient, moody skipped), bounded per span, no candidate, healthy manager, off switch, the verb before / after the span and its refusals.
+`tests/lua/test_bug925_manager_replace.lua` (5): after a replacement `manager_watch` returns at once: no `manager_absent` question and no absence clock (`p.mabs`) for the old holder (verifier round); replace after 30 days with the ranking (soldier, child, patient, moody skipped), bounded per span, no candidate, healthy manager, off switch, the verb before / after the span and its refusals.
 
 ## Live-Erwartung
 On a fort with a long-time patient manager and unvalidated orders: after 30 game days (`manager_replace_days`) kern.log `MANAGER replaced (kernel): unit 29240 could not work for 30 days (resting/injured), unit N appointed`, event MANAGER_REPLACED with `old 29240`, `new N`; `inspect what=manager` names the new unit and orders validate within days (`inspect what=orders` `valid 1`). With `appoint {"code":"MANAGER","unit":29544,"replace":true}` before the span: the refusal names the days.

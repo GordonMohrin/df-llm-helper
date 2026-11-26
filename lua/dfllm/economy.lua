@@ -6149,6 +6149,10 @@ function M.manager_watch(K, p, c)
   if days < (((c or {}).orders or M.DEFAULTS.orders).manager_days or 3) then return true end
   local okrp, rpl = pcall(M.manager_replace, K, p, c, mg, days, un)       -- BUG-925: a manager unable to work for long is replaced
   if not okrp then K.log('warn', 'manager replace: %s', tostring(rpl)) end
+  if okrp and rpl == true then
+    p.mabs = nil                                     -- a new manager sits: no absence clock and no manager_absent question for the old one
+    return true
+  end
   if CAD.due(rec.ann, now, {mg.hf}, {mg.why}) then
     rec.ann = CAD.mark(now, {mg.hf}, {mg.why})
     p.mabs = json.object(rec)
@@ -13557,6 +13561,18 @@ function M.logs_in_rect(r)
   end)
   return n
 end
+-- BUG-926 (verifier): the boxes of every stockpile and activity zone (pcall-safe), so a new pile never lands on a tile that already belongs to one
+function M.covered_boxes()
+  local out = {}
+  for _, cat in ipairs({'STOCKPILE', 'ACTIVITY_ZONE', 'ANY_ZONE'}) do
+    pcall(function()
+      for _, b in ipairs(df.global.world.buildings.other[cat]) do
+        if b.x1 and b.y1 and b.x2 and b.y2 and b.z then out[#out + 1] = {b.x1, b.y1, b.x2, b.y2, b.z} end
+      end
+    end)
+  end
+  return out
+end
 -- the stockpile rects that take wood with their names, and how many are the kernel's dfllm-wood
 function M.wood_piles()
   local out, kern = {}, 0
@@ -13621,9 +13637,22 @@ function T.woodpile(K, c, r)
   local tc = {pile_w = pw, pile_h = ph, pile_r = W.r, pile_reads = W.reads}
   local site, at
   local whys = {}
+  -- BUG-926: no tile of an existing stockpile or zone, none of a site quickfort refused before (the next try takes another)
+  local boxes = M.covered_boxes()
+  local bad = {}
+  for _, b in ipairs(type(rec.bad) == 'table' and rec.bad or {}) do
+    if type(b) == 'table' and b[5] then bad[#bad + 1] = {b[1], b[2], b[3], b[4], b[5]} end
+  end
+  for _, b in ipairs(bad) do boxes[#boxes + 1] = b end
+  local function free_tile(x, y, z)
+    for _, b in ipairs(boxes) do
+      if z == b[5] and x >= b[1] and x <= b[3] and y >= b[2] and y <= b[4] then return false end
+    end
+    return true
+  end
   for _, s in ipairs(lack) do
     local cx, cy = (s[1] + s[3]) // 2, (s[2] + s[4]) // 2
-    local st1, wy = M.pile_site(K, tc, {at = {cx, cy, s[5]}, by = 'carpenter', indoor = true, dry = true})
+    local st1, wy = M.pile_site(K, tc, {at = {cx, cy, s[5]}, by = 'carpenter', indoor = true, dry = true, ok = free_tile})
     if st1 then site, at = st1, {cx, cy, s[5]}; break end
     whys[#whys + 1] = tostring(wy)
     at = at or {cx, cy, s[5]}
@@ -13632,6 +13661,8 @@ function T.woodpile(K, c, r)
   r.cmds = r.cmds + 1
   local out = {t = r.now, dn = math.tointeger(rec.dn), meas = rec.meas}
   local failed
+  if #bad > 0 and not site then bad = {} end                        -- nothing else is free: the refused ones may be tried again
+  out.bad = json.array(bad)
   if site then
     local ok, n = K.act.wood_pile(site, pw, ph)
     if ok then
@@ -13644,6 +13675,9 @@ function T.woodpile(K, c, r)
              near0 = math.tointeger(inv.wood) or 0, far0 = math.tointeger(inv.wood_dist) or 0, need = need, piles = #piles})
     else
       out.state, out.why = 'refused', tostring(n):sub(1, 60)
+      bad[#bad + 1] = {site[1], site[2], site[1] + pw - 1, site[2] + ph - 1, site[3]}
+      while #bad > 8 do table.remove(bad, 1) end
+      out.bad = json.array(bad)
       failed = 'quickfort refused it at ' .. table.concat(site, ',') .. ': ' .. tostring(n)
       K.log('warn', 'wood pile: dfllm-wood at %d,%d,%d refused: %s', site[1], site[2], site[3], tostring(n))
     end
@@ -16713,7 +16747,7 @@ function M.pile_site(K, tc, q)
     if good and q.dry then good = (t.flow or 0) == 0 and t.magma ~= true and t.ice ~= true end
     if good and q.indoor then
       local oku, under = K.call('snapshot', 'plot_under', x, y, cz)
-      if oku and under == false then good = false end
+      if not oku or under == false then good = false end      -- BUG-926: fails closed: an unreadable roof is no indoor floor
     end
     seen[key] = good == true
     return seen[key]

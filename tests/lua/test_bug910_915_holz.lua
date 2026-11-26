@@ -27,6 +27,7 @@ local function world(opts)
           tile = function(K, x, y, z)
             if z == 1 and x >= 0 and x <= 60 and y >= 0 and y <= 60 then return {c = '.', dig = '', bld = ''} end
           end,
+          plot_under = function() return true end,
           far = function() return false end,
           groups = function(K, pts) local g = {}; for i = 1, #pts do g[i] = 1 end; return g end})
   for _ = 1, 8 do F.item(W, 'BARREL', {}) end

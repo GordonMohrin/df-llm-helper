@@ -20,6 +20,9 @@ Module: `lua/dfllm/drill.lua` (`measure`, `finish`), `lua/dfllm/gate.lua` (`M.re
 - The alert itself (a plant eater 19-20 tiles from a standing citizen holds ALERT for 84,900 ticks, `calm` needs `wide == 0`): `threat.lua` / `siege.lua` / `sense.lua` untouched; the cause of the long alert is code-read, not measured on i3's logs. Which jobs the civ alert stops in that time is not checked.
 - The 799,475-tick GATE_FAIL ages come from `since` kept across modes; fixed only as far as the QUIET_UP wants.
 
+## Verifier round (NEU19)
+The two new early returns of `gate.check_fail` (the reach hold; the leftover quiet want in an ALERT / RECOVERY without lockdown) set `br.failed` as the GATE_FAIL path did, only the A event is gone: `gate.not_up` reports `failed = true` as before, so `siege.failed_bridge` / `breach_stuck` read the same. Test: the ALERT -> SIEGE switch with a reach-held bridge was measured identical on 0f4f08a4 (before BUG-928), the first BUG-928 commit and this one (SIEGE raises B1 with one pull, nobody crushed).
+
 ## Tests
 `tests/lua/test_bug928_drill_held.lua`, `tests/lua/test_bug928_gate_reach_hold.lua` (SIEGE TRAFFIC fixtures of `b1_world`: soldiers pacing at the station under a real hostile, nobody crushed, B1 still down); older tests that pinned the GATE_FAIL text for a reach hold now read the `reach_hold` line.
 

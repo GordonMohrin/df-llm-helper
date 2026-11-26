@@ -104,3 +104,38 @@ def test_bp_resume_no_project_marks_the_file(world, monkeypatch):
     monkeypatch.setattr(files, "read_outbox", lambda d, cid, timeout_s=0: {"ok": False, "msg": "bp.resume: no project c1a1resume"})
     cmd.send(save, "bp.resume", {"proj": "c1a1resume"}, by="cli", wait_s=1.0)
     assert p.is_file() and "c1a1resume" in cmd.read_orphans(save)
+
+
+def test_a_finished_seal_whose_done_event_rotated_out_is_not_marked(world):
+    save, box = world
+    (save / "events.1.jsonl").write_text("", encoding="utf-8")            # the log rotated: PROJECT_DONE may be gone
+    x0, y0, z0, x1, y1, z1 = box["snap"]["bbox"]
+    at = (x0 + 5, y0 + 5, z1 - 1)
+    p = _bp(save, "c1a1fin", "seal", params={"at": "%d,%d,%d floor" % at}, age=OLD)
+    pc = cmd.load_bp("defense").seal_pieces({"at": "%d,%d,%d floor" % at})[0]
+    px, py, pz = pc["at"]
+    row = list(box["snap"]["rows"][f"z{pz}"][py - y0])
+    row[px - x0] = "+"                                                    # its door stands on the map
+    box["snap"]["rows"][f"z{pz}"][py - y0] = "".join(row)
+    assert cmd.settle_orphan(save, "c1a1fin", "cli") == "kept"
+    assert "c1a1fin" not in cmd.read_orphans(save) and p.is_file()
+    row[px - x0] = "."                                                    # the opening is still open: nothing was built
+    box["snap"]["rows"][f"z{pz}"][py - y0] = "".join(row)
+    assert cmd.settle_orphan(save, "c1a1fin", "cli") == "marked"
+
+
+def test_seal_records_read_a_marked_file_again_when_the_kernel_lists_it_and_the_mark_is_cleared(world):
+    save, _ = world
+    _bp(save, "c1a1back", "seal", params={"at": "79,131,141 floor"}, age=OLD)
+    cmd.mark_orphan(save, "c1a1back", "cli")
+    assert cmd.seal_records(save) == {}
+    st = dict(files.read_state(save), proj=[["c1a1back", "seal.build", 10, ""]])
+    assert cmd.seal_records(save) == {}, "the state read from disk lists no such row yet"
+    import dfpilot.files as F
+    orig = F.read_state
+    try:
+        F.read_state = lambda d: st
+        assert cmd.seal_records(save), "listed again: counts"
+    finally:
+        F.read_state = orig
+    assert "c1a1back" not in cmd.read_orphans(save), "mark cleared"

@@ -70,4 +70,22 @@ T.test('BUG-928: a leftover quiet want (peace_gates) in an ALERT without lockdow
   T.eq(G.reach_held(W.K, {}, 'ALERT'), false)
 end)
 
+T.test('BUG-928 (verifier): the reach_hold return still marks the bridge failed (no GATE_FAIL) so the ALERT -> SIEGE switch with a reach-held bridge behaves as before: B1 stays down, nobody is crushed, not_up reports failed', function()
+  local W = alert_world()
+  B.run(W, 4800)
+  T.eq(#b1_fails(W), 0, 'no GATE_FAIL in the ALERT')
+  local G = package.loaded['dfllm.gate']
+  local nb
+  for _, x in ipairs(G.not_up(W.K) or {}) do if x.bridge == 'B1' then nb = x end end
+  T.ok(nb ~= nil and nb.failed == true, 'failed as before: siege failed_bridge / breach_stuck read it: ' .. T.show(nb))
+  W.K.set_mode('SIEGE', 'test: the plant eater turned out to be a siege')
+  B.run(W, 2400)
+  T.ok(W.K.mode() == 'SIEGE' or W.K.mode() == 'BREACH', 'mode ' .. tostring(W.K.mode()))
+  -- measured identical on 0f4f08a4 (before BUG-928), the first BUG-928 commit and this one: the SIEGE raises B1 with one pull, nobody is crushed
+  T.eq(S.bstate(W, 'B1'), 'up', 'SIEGE raises it as before')
+  T.eq(#B.pulls(W, 'B1'), 1, 'one pull, as before')
+  T.eq(#W.crushed, 0)
+  T.eq(#b1_fails(W), 0, 'no GATE_FAIL for it')
+end)
+
 T.done()

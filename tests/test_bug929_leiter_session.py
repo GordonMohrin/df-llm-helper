@@ -47,7 +47,7 @@ def test_off_duty_gear_stripped_is_no_change_in_the_on_duty_count(tmp_path, cfg_
     d = start(tmp_path, cfg_dir, n=9, full=9, nd=4, fulld=4, off=5)
     put_kit(d, n=9, full=4, nd=4, fulld=4, off=5)           # the off-duty five took their armor off: the count of those on duty did not move
     lines, _ = leiter.session_lines(d)
-    assert "im Dienst voll" not in lines[0], lines[0]      # (the ladder track itself still reads kit.full: not part of this fix)
+    assert "im Dienst voll" not in lines[0], lines[0]      
 
 
 def test_old_state_without_the_new_keys_still_reads(tmp_path, cfg_dir):
@@ -69,3 +69,16 @@ def test_state_schema_takes_the_new_kit_keys(tmp_path, monkeypatch):
         assert schema.validate("state", st) != []
     finally:
         reset_paths()
+
+
+def test_ladder_track_judges_the_squads_on_duty_only():
+    base = {"squads": 2, "free": {}, "metal_pct": 100}
+    kit_off = {"n": 9, "full": 0, "armor": 0, "weapon": 0, "nd": 4, "fulld": 4, "off": 5}
+    lvl, why, *_ = leiter.t_ruestung({"mil": dict(base, kit=kit_off)}, {}, 0)
+    assert lvl >= 2, (lvl, why)                       # the 4 on duty are all fully equipped: the 5 stripped off-duty soldiers lower nothing
+    kit_bad = dict(kit_off, fulld=2)
+    lvl2, why2, *_ = leiter.t_ruestung({"mil": dict(base, kit=kit_bad)}, {}, 0)
+    assert lvl2 == 1 and "2/4 voll" in why2, (lvl2, why2)   # an on-duty soldier without armor still counts
+    old = {"n": 9, "full": 2, "armor": 2, "weapon": 9}
+    lvl3, why3, *_ = leiter.t_ruestung({"mil": dict(base, kit=old)}, {}, 0)
+    assert lvl3 == 1 and "2/6 voll" in why3, (lvl3, why3)    # an older state without the keys reads as before

@@ -154,17 +154,25 @@ def t_ruestung(s: dict, mem: dict, now: int, metal_min: int = 50) -> tuple:
     if sq < 1 or n < 1:
         return 0, "kein Trupp mit Soldaten", "dfllm plan propose (Phase stellt die Trupps)", None, False
     free = _o(m.get("free"))
+    # BUG-929 (verifier): squads off duty are stripped by DF (BUG-864): their soldiers count neither as unarmed nor as unarmoured. With some off duty
+    # (kit.off > 0, kit.nd > 0) only the squads on duty are judged: fulld of nd, thresholds at most nd (all on duty equipped is enough); a kernel
+    # without the keys, or none on duty, reads as before.
+    thr = list(RUESTUNG_FULL)
+    fd_nd = kit_duty(kit)
+    if (_i(kit.get("nd")) or 0) > 0 and fd_nd[2] > 0:
+        full, n, wpn = fd_nd[0], fd_nd[1], fd_nd[1]
+        thr = [min(t, n) for t in thr]
     if wpn < n:
         fw = _i(free.get("weapon")) or 0
         return (0, f"{wpn}/{n} Soldaten mit Waffe" + (f", {fw} freie Waffen im Lager" if fw else ""), want("weapon"),
                 "free:weapon" if fw >= n - wpn else "trade:weapon", False)
-    if full < RUESTUNG_FULL[0]:
+    if full < thr[0]:
         fb = _i(free.get("body")) or 0
-        return (1, f"{full}/{RUESTUNG_FULL[0]} voll ({n} Soldaten" + (f", {fb} freie Panzer im Lager)" if fb else ")"),
-                want("armor"), "free:body" if fb >= min(n, RUESTUNG_FULL[0]) - full > 0 else "trade:armor", False)
+        return (1, f"{full}/{thr[0]} voll ({n} Soldaten" + (f", {fb} freie Panzer im Lager)" if fb else ")"),
+                want("armor"), "free:body" if fb >= min(n, thr[0]) - full > 0 else "trade:armor", False)
     metal = _i(m.get("metal_pct")) or 0
-    if full < RUESTUNG_FULL[1] or metal < metal_min:
-        return (2, f"{full}/{RUESTUNG_FULL[1]} voll, Metall {metal}/{metal_min} %", want("armor:metal"),
+    if full < thr[1] or metal < metal_min:
+        return (2, f"{full}/{thr[1]} voll, Metall {metal}/{metal_min} %", want("armor:metal"),
                 "trade:armor:metal", False)
     return 3, "", "", None, False
 
