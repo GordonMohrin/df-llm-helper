@@ -2291,7 +2291,7 @@ function M.release_measure(K, c, p, now)
   end
 end
 function M.pile_release(K, c, r)
-  -- NEU17 BUG-918: the caller's clock: M.release_watch passes the REAL tick (r.now of a daily run is the start of the census the run belongs to: on i4 a run took up to 350 game days, the release looked at stale days and ran once per run); `p` and the
+  -- NEU17 BUG-918: the caller's clock: M.release_watch passes the REAL tick (r.now of a daily run is the start of the census the run belongs to: on i4 a run is inferred to have taken hundreds of game days, the release looked at stale days and ran once per run); `p` and the
   -- census are the kernel's own, so the release can also be driven from the kernel's guaranteed look (M.watch, M.release_watch)
   local p, inv, now = r.p, r.inv or K.census.i or {}, math.tointeger(r.now) or K.now().tick
   local cc = c.cancel or {}
@@ -2307,6 +2307,7 @@ function M.pile_release(K, c, r)
   if cc.release == false or p.relstop or (p.relnext and now < p.relnext) or type(K.act.pile_barrels) ~= 'function' then return end
   if not M.cx_gate(K, c, now) then return end                       -- only with DF's own reason (BUG-844)
   if (math.tointeger(inv.barrels_reg) or 0) <= 0 then return end   -- no registered empty barrel in the census
+  if st.relhold and now >= st.relhold and now - st.relhold < 30 * DAY then return end   -- NEU17 BUG-918: brew_watch found no brew that could run: nothing to free barrels for
   if st.relidle and now < st.relidle and st.relidle - now <= M.REL_IDLE_D * DAY then return end   -- NEU17 BUG-918: the last call lowered nothing: not again before the idle week is over
   local ok, res = K.act.pile_barrels('release', {})
   if not (ok and type(res) == 'table') then
@@ -12551,7 +12552,7 @@ function M.brew_watch(K, c, r)
   local okmz, errmz = pcall(M.mood_piles_zero, K, p, c, r.now)                   -- NEU13 BUG-887 round 6 (C)
   if not okmz then K.log('warn', 'mood pile limit: %s', tostring(errmz)) end
   -- NEU13 BUG-887 round 6 (D): before the standing cap (whose floor of 2 would hide the lowering from the measurement)
-  -- NEU17 BUG-918: once the kernel look drives the release (M.release_watch, the real tick) the run's clock (its census start, up to 350 game days old) is not used for it
+  -- NEU17 BUG-918: once the kernel look drives the release (M.release_watch, the real tick) the run's clock (its census start, possibly hundreds of game days old) is not used for it
   local okrl, errrl = true, nil
   if not st.relwatch then okrl, errrl = pcall(M.pile_release, K, c, r) end
   if not okrl then K.log('warn', 'pile barrel release: %s', tostring(errrl)) end
@@ -12565,9 +12566,11 @@ function M.brew_watch(K, c, r)
   if not (ws_any(f, {'workshop:Still'}) and b.valid > 0 and plants > 0 and ((inv.barrels_empty or 0) > 0 or inv.cont_free ~= nil)) then
     if bw then p.brewb = nil; K.persist.touch('m.economy') end
     M.cx_end(K, p, true)
+    st.relhold = K.now().tick     -- NEU17 BUG-918: no brew can run (no Still, order or plant): no barrel limit is lowered for it (M.pile_release), for 30 game days at most
     st.brewx = nil
     return
   end
+  st.relhold = nil
   local today = r.now // DAY
   if not bw then bw = {left = b.left, d = 0, day = today}; p.brewb = bw end
   if bw.day ~= today then
@@ -13225,7 +13228,7 @@ function M.chop_count(inv)
   return g('wood') + g('wood_dist') + math.max(0, g('wood_far') - g('wood_nw')) + g('wood_busy')
 end
 -- NEU17 BUG-919 (i4 Girderroots y484-y491: WOOD_STUCK 'd' 911 -> 1649 over 133 real days, the first WOOD_UNMARK 377 game days after the reload, its result '552 game days' for 199): the stuck / unmark / follow
--- clocks ran on `r.now`, the tick the CENSUS of the run started at. A run on that fort lay up to ~350 game days between its census and its T.chop (the first run after a reload, a sliced and demoted
+-- clocks ran on `r.now`, the tick the CENSUS of the run started at. A run on that fort may have lain hundreds of game days (inferred) between its census and its T.chop (the first run after a reload, a sliced and demoted
 -- economy), so t0, rec.t, pend.t and every day count were stamped with a tick far in the past and the first call came only when a run reached T.chop. They run on the REAL tick now, and
 -- from the end of the census too (M.step), not only from the run's chop task.
 function M.wood_watch(K, c, inv)
