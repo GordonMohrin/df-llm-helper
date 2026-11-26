@@ -11,10 +11,10 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 35 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 791 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **52** von 843 |
+| offen, nie live gesehen | 794 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **52** von 846 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
-| genannt, aber ohne klares Urteil (bleiben offen) | 78 |
+| genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
 Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
 
@@ -334,6 +334,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/FR-BUGS.md:1526` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> "refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core ...
 - BUG-469 `runs/run-16b/FR-BUGS.md:1751` (no verdict word): pshot wartete 136 s). Entscheidung: keine Zisterne gesetzt (BUG-469: bucket-fed cistern bleibt trocken;
 - BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
+- BUG-475 `runs/run-16b/FR-BUGS.md:1974` (no verdict word): _DEGRADED frame freeze 20-38 s je Jahreswechsel; TICK_STALL BUG-475 'tick 224179210 static 120 s' in y556 aut d21).
 - BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
 - BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);
 - BUG-488 `runs/run-16a/FR-BUGS.md:274` (no verdict word): inzige Karawane-Zivilisation fuehrt sie nicht). Damit loest BUG-488 das Stein-Problem nicht: Hospital (TractionBench braucht Mechanismus) und Altar bleiben unmoeglich.

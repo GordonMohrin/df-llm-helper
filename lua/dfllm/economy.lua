@@ -1598,7 +1598,11 @@ local function publish(K, c, a, errs)
   end
   if st.farm then i.farm_plots, i.farm_empty = st.farm.plots, st.farm.empty end   -- FR-17 (T.farmslots)
   K.census.i = i
-  if (a.wood_hi or 0) > 0 then st.wood_mark = a.wood_hi end      -- NEU16b BUG-916
+  if (a.wood_hi or 0) > 0 then                       -- NEU16b BUG-916
+    st.wood_mark = a.wood_hi
+    local pw = pstate(K)                              -- NEU17 BUG-919: persisted, a reload no longer counts the logs felled before the first reading as none
+    if pw.wood_mark ~= a.wood_hi then pw.wood_mark = a.wood_hi; K.persist.touch('m.economy') end
+  end
   st.bars_by, st.ores, st.seeds = a.bars_by, a.ores, a.seeds
   st.seeds_known = true                              -- BUG-256: st.seeds is the census' now (init holds an empty one)
   st.fix, st.reach, st.food_pos, st.unreach = a.fix, a.reach, a.food_pos, a.unreach or 0
@@ -2242,13 +2246,17 @@ function M.mood_piles_zero(K, p, c, now)
 end
 function M.release_emit(K, e, phase, reg, cx, verdict)
   local f = {pile = e.id, before = e.old, after = e.new, reg0 = e.r0, phase = phase, cx0 = e.cx0}
+  -- NEU17 BUG-918: the free empties (census cont_free) before / after, beside the registered ones and the cancels: the live run proves or refutes the lowering by them
+  local free = math.tointeger((K.census.i or {}).cont_free)
+  if e.free0 ~= nil then f.free0 = e.free0 end
   if e.r1 ~= nil then f.reg1 = e.r1 end
-  if phase == 'd7' then f.reg7 = reg; f.cx7 = cx end
-  if phase == 'd1' then f.reg1 = reg end
+  if phase == 'd7' then f.reg7 = reg; f.cx7 = cx; f.free7 = free end
+  if phase == 'd1' then f.reg1 = reg; f.free1 = free end
   if verdict then f.verdict = verdict end
-  local txt = string.format('pile %s barrel limit %s -> %s: registered empties %s%s%s%s; brew cancels in the window %s%s',
+  local txt = string.format('pile %s barrel limit %s -> %s: registered empties %s%s%s%s; free empties %s%s; brew cancels in the window %s%s',
     tostring(e.id), tostring(e.old), tostring(e.new), tostring(e.r0), e.r1 ~= nil and phase == 'd7' and (' -> ' .. tostring(e.r1) .. ' (1 d)') or '',
     phase == 'd1' and (' -> ' .. tostring(reg) .. ' (1 d)') or '', phase == 'd7' and (' -> ' .. tostring(reg) .. ' (7 d)') or '',
+    tostring(e.free0), (phase == 'd1' or phase == 'd7') and (' -> ' .. tostring(free)) or '',
     tostring(e.cx0), phase == 'd7' and (' -> ' .. tostring(cx)) or '')
   if verdict then txt = txt .. '; ' .. verdict end
   K.emit('PILE_BARREL_RELEASE', 'B', txt:sub(1, 199), f)
@@ -2282,7 +2290,9 @@ function M.release_measure(K, c, p, now)
   end
 end
 function M.pile_release(K, c, r)
-  local p, inv, now = r.p, r.inv or {}, r.now
+  -- NEU17 BUG-918: the caller's clock: M.release_watch passes the REAL tick (r.now of a daily run is the start of the census the run belongs to: on i4 a run took up to 350 game days, the release looked at stale days and ran once per run); `p` and the
+  -- census are the kernel's own, so the release can also be driven from the kernel's guaranteed look (M.watch, M.release_watch)
+  local p, inv, now = r.p, r.inv or K.census.i or {}, math.tointeger(r.now) or K.now().tick
   local cc = c.cancel or {}
   M.release_measure(K, c, p, now)
   if type(p.relpiles) == 'table' then
@@ -2305,7 +2315,7 @@ function M.pile_release(K, c, r)
   p.relmeas = type(p.relmeas) == 'table' and p.relmeas or {}
   for _, e in ipairs(res) do
     if p.relmeas[tostring(e.id)] == nil then
-      p.relmeas[tostring(e.id)] = {id = e.id, old = e.old, new = e.new, r0 = e.reg_empty or 0, cx0 = cx, t = now, st = 0}
+      p.relmeas[tostring(e.id)] = {id = e.id, old = e.old, new = e.new, r0 = e.reg_empty or 0, cx0 = cx, t = now, st = 0, free0 = math.tointeger(inv.cont_free) or 0}
     end
     if type(p.pilecap) ~= 'table' then p.pilet = now; p.pilecap = {} end
     if p.pilecap[tostring(e.id)] == nil then p.pilecap[tostring(e.id)] = e.old end
@@ -2322,6 +2332,43 @@ function M.pile_release(K, c, r)
     end
   end
   if #res > 0 then K.persist.touch('m.economy') end
+  -- NEU17 BUG-918 (i4 Girderroots y491: 115 of 121 empties registered in stockpiles, the container reason ON, and no PILE_BARREL_RELEASE ever: a call that lowered nothing said nothing, so the
+  -- live run could not tell 'no pile qualified' from 'the write failed'): a release that lowered no pile is NOTED, once per game week, with the numbers and the reasons per pile
+  if #res == 0 and p.relpiles == nil and (type(p.relmeas) ~= 'table' or next(p.relmeas) == nil) then M.release_none(K, p, inv, now, res, cx) end   -- not while a lowering is being measured
+end
+function M.release_none(K, p, inv, now, res, cx)
+  if st.relnone and now >= st.relnone and now - st.relnone < 7 * DAY then return end
+  st.relnone = now
+  local why, nk = {}, 0
+  for _, k in ipairs(res.kept or {}) do
+    nk = nk + 1
+    local w = tostring(k.why):gsub(':.*$', '')
+    why[w] = (why[w] or 0) + 1
+  end
+  local parts = {}
+  for w, n in pairs(why) do parts[#parts + 1] = string.format('%d %s', n, w) end
+  table.sort(parts)
+  local nf = #(res.failed or {})
+  local reg, free = math.tointeger(inv.barrels_reg) or 0, math.tointeger(inv.cont_free) or 0
+  if nf > 0 then
+    local ids = {}
+    for i = 1, math.min(nf, 5) do ids[#ids + 1] = tostring(res.failed[i].id) end
+    parts[#parts + 1] = string.format('%d limit writes failed (%s)', nf, table.concat(ids, ' '))
+    K.log('warn', 'pile barrel release: the barrel limit could not be written on %d piles (%s)', nf, table.concat(ids, ' '))
+  end
+  local txt = string.format('no pile lowered: %d registered empty barrels, %d free empties, %d piles looked at (%s); brew cancels in the window %d',
+                            reg, free, nk + nf, #parts > 0 and table.concat(parts, ', ') or 'none holds a registered empty', cx or 0)
+  K.log('info', 'pile barrel release: %s', txt)
+  K.emit('PILE_BARREL_RELEASE', 'B', txt:sub(1, 199), {pile = 0, before = 0, after = 0, reg0 = reg, phase = 'none', free0 = free, cx0 = cx or 0, kept = nk, failed = nf})
+end
+-- the kernel's guaranteed look (M.watch): the release once per game day at the REAL tick, not only in the daily run (which can lie hundreds of game days apart)
+function M.release_watch(K, c)
+  local now = K.now().tick
+  if st.relday == now // DAY then return end
+  st.relday = now // DAY
+  if not (K.census and K.census.i) then return end
+  st.relwatch = true                                  -- from now on the release has ONE clock: this one
+  M.pile_release(K, c, {p = pstate(K), inv = K.census.i, now = now})
 end
 function M.cx_freeze(K, p, emergency, now, stand)
   if type(K.act.pile_barrels) ~= 'function' then return end
@@ -4092,7 +4139,10 @@ function M.wood_unmark(K, c, now, rd, inv)
     K.emit('WOOD_UNMARK', 'B', txt:sub(1, 199), {ph = 'stop', run = runs, why = 'runs'})
     return false
   end
-  rec.t = now
+  -- NEU17 BUG-919: a look that finds nothing to take down (no marked tree, the groups unreadable, every marked tree reachable) is retried after one game day (rec.try), it no longer burns the
+  -- unmark_days window (rec.t is set only by a removal): the first removal comes `stuck_days` after WOOD_STUCK holds, not a week of silent misses later
+  if math.tointeger(rec.try) and now >= rec.try and now - rec.try < DAY then return false end
+  rec.try = now
   K.persist.touch('m.economy')
   local list, des = M.marked_trees(300)
   if #list == 0 then return false end
@@ -4108,6 +4158,7 @@ function M.wood_unmark(K, c, now, rd, inv)
   local ok, n = K.act.tree_unmark(out)
   n = ok and math.tointeger(n) or 0
   if n <= 0 then return false end
+  rec.t = now
   rec.runs = runs + 1
   rec.pend = json.object{t = now, n = n, des0 = des, trees0 = math.tointeger(M.count_trees()) or 0, hi = math.tointeger(inv.wood_hi) or 0, new = 0, newnw = 0}
   K.persist.touch('m.economy')
@@ -4132,8 +4183,13 @@ function M.wood_unmark_follow(K, c, now, inv)
     K.persist.touch('m.economy')
   end
   local t0 = math.tointeger(pend.t) or now
+  if now < t0 then                                      -- NEU17 BUG-919: a save from before the removal was loaded: the removal is dated again, the days count from now
+    pend.t = now
+    K.persist.touch('m.economy')
+    return false
+  end
   local days = (now - t0) // DAY
-  if now >= t0 and days < (math.tointeger((c.wood or {}).unmark_measure) or 2) then return false end
+  if days < (math.tointeger((c.wood or {}).unmark_measure) or 2) then return false end
   local _, des = M.marked_trees(0)
   local felled = (math.tointeger(pend.trees0) or 0) - (math.tointeger(M.count_trees()) or 0)
   local new, nnw = math.tointeger(pend.new) or 0, math.tointeger(pend.newnw) or 0
@@ -4391,6 +4447,8 @@ function M.watch(K)
   if not oks then K.log('warn', 'brew cancel snapshot: %s', tostring(errs):sub(1, 160)) end
   local okc, errc = pcall(M.cx_log, K, c, K.now().tick)
   if not okc then K.log('warn', 'container cure line: %s', tostring(errc):sub(1, 160)) end
+  local okr, errr = pcall(M.release_watch, K, c)                 -- NEU17 BUG-918
+  if not okr then K.log('warn', 'pile barrel release (look): %s', tostring(errr):sub(1, 160)) end
 end
 -- 'gamelog' while its file is readable, else 'report'
 function M.cw_source(K, now)
@@ -12471,7 +12529,10 @@ function M.brew_watch(K, c, r)
   local b = M.brew_orders()
   local okmz, errmz = pcall(M.mood_piles_zero, K, p, c, r.now)                   -- NEU13 BUG-887 round 6 (C)
   if not okmz then K.log('warn', 'mood pile limit: %s', tostring(errmz)) end
-  local okrl, errrl = pcall(M.pile_release, K, c, r)                   -- NEU13 BUG-887 round 6 (D): before the standing cap (whose floor of 2 would hide the lowering from the measurement)
+  -- NEU13 BUG-887 round 6 (D): before the standing cap (whose floor of 2 would hide the lowering from the measurement)
+  -- NEU17 BUG-918: once the kernel look drives the release (M.release_watch, the real tick) the run's clock (its census start, up to 350 game days old) is not used for it
+  local okrl, errrl = true, nil
+  if not st.relwatch then okrl, errrl = pcall(M.pile_release, K, c, r) end
   if not okrl then K.log('warn', 'pile barrel release: %s', tostring(errrl)) end
   local okst, errst = pcall(M.pile_standing, K, c, r, f, b)           -- NEU13 BUG-888: before any early return below
   if not okst then K.log('warn', 'container stand: %s', tostring(errst)) end
@@ -13142,15 +13203,23 @@ function M.chop_count(inv)
   local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
   return g('wood') + g('wood_dist') + math.max(0, g('wood_far') - g('wood_nw')) + g('wood_busy')
 end
+-- NEU17 BUG-919 (i4 Girderroots y484-y491: WOOD_STUCK 'd' 911 -> 1649 over 133 real days, the first WOOD_UNMARK 377 game days after the reload, its result '552 game days' for 199): the stuck / unmark / follow
+-- clocks ran on `r.now`, the tick the CENSUS of the run started at. A run on that fort lay up to ~350 game days between its census and its T.chop (the first run after a reload, a sliced and demoted
+-- economy), so t0, rec.t, pend.t and every day count were stamped with a tick far in the past and the first call came only when a run reached T.chop. They run on the REAL tick now, and
+-- from the end of the census too (M.step), not only from the run's chop task.
+function M.wood_watch(K, c, inv)
+  local now = K.now().tick
+  local okf, errf = pcall(M.wood_unmark_follow, K, c, now, inv)   -- NEU16c BUG-917
+  if not okf then K.log('warn', 'wood unmark follow: %s', tostring(errf):sub(1, 120)) end
+  local oks, errs = pcall(M.wood_stuck, K, c, now, inv)         -- NEU16b BUG-916
+  if not oks then K.log('warn', 'wood stuck: %s', tostring(errs):sub(1, 120)) end
+end
 function T.chop(K, c, r)
   local w = c.wood or M.DEFAULTS.wood
   local inv = r.inv or K.census.i or {}
   local okb, errb = pcall(M.wood_belief, K, c, r.now or K.now().tick, inv)
   if not okb then K.log('warn', 'wood belief: %s', tostring(errb):sub(1, 120)) end
-  local okf, errf = pcall(M.wood_unmark_follow, K, c, r.now or K.now().tick, inv)   -- NEU16c BUG-917
-  if not okf then K.log('warn', 'wood unmark follow: %s', tostring(errf):sub(1, 120)) end
-  local oks, errs = pcall(M.wood_stuck, K, c, r.now or K.now().tick, inv)         -- NEU16b BUG-916
-  if not oks then K.log('warn', 'wood stuck: %s', tostring(errs):sub(1, 120)) end
+  M.wood_watch(K, c, inv)
   if not HUNT_MODES[K.mode()] then return true end         -- NEU16 BUG-912: SIEGE / ALERT / BREACH: the target stays as it is, nothing sends woodcutters out
   local near = M.wood_usable(K, inv)
   local need = floor_of(c, r.p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (w.margin or 20)
@@ -16831,6 +16900,7 @@ function M.step(K, budget, ctx)
   local c = M.conf(K)
   M.first_boost(K)
   if not (ctx and ctx.cont) or not (st.census or st.run) then
+    if st.wood_mark == nil then st.wood_mark = math.tointeger(pstate(K).wood_mark) end    -- NEU17 BUG-919 (new_acc reads it)
     st.census, st.run = {acc = new_acc(c), ci = 1, idx = 0, errs = 0, start = K.now().tick}, nil
     do                                             -- BUG-743: the gear pieces military wrote off
       local okk, ids = K.call('military', 'stuck_ids')
@@ -16861,6 +16931,7 @@ function M.step(K, budget, ctx)
       K.log('warn', 'census: the item flag mask disagreed with the flag reads; reading flags one by one')
     end
     publish(K, c, cs.acc, cs.errs)
+    M.wood_watch(K, c, K.census.i)                   -- NEU17 BUG-919: at the census' end at the real tick, not when a long run reaches its chop task
     st.run = new_run(K, c, cs.start)
   end
   if not run_slice(K, c) then return 'more' end
