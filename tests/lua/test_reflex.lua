@@ -24,7 +24,7 @@ local function setup(opts)
   opts = opts or {}
   local dir = H.tmpdir(opts.tag or 'r')
   luahost.mkdir_recursive(dir .. '/dfllm-runtime/mock')
-  local W = S.world{manifest = opts.manifest, units = opts.units or S.fort_units(), dfpath = dir, cfg = opts.cfg,
+  local W = S.world{manifest = opts.manifest, units = opts.units or S.far_units(), dfpath = dir, cfg = opts.cfg,
                     ms_per_frame = opts.ms_per_frame, tiefe = opts.tiefe, kern = opts.kern, mode = opts.mode,
                     persist = opts.persist}
   W.dir = dir
@@ -195,7 +195,7 @@ T.test('peace_gates up on a manifest fort: O1/B1 up in PEACE; a caravan or migra
 end)
 
 T.test('the first armed hostile in sight locks down; INTRUDER on the citizens walkable group; ETA', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.inv(300, 51, 0)              -- at the map edge north of O1
   local W = setup{tag = 'sighting', manifest = false, units = units}
   S.run(W, 120)
@@ -213,7 +213,7 @@ T.test('the first armed hostile in sight locks down; INTRUDER on the citizens wa
 end)
 
 T.test('PREDATOR: a wild danger on a roofed tile of the citizens group; none on the open surface', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 45, 7)           -- outside (open sky row y=7)
   local W = setup{tag = 'predator', manifest = false, units = units}
   S.run(W, 200)
@@ -226,7 +226,7 @@ T.test('PREDATOR: a wild danger on a roofed tile of the citizens group; none on 
 end)
 
 T.test('Run 10: a roofed wild danger far from every citizen is PREDATOR_FAR (B), no lockdown; one near a citizen is PREDATOR', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 150, 30)         -- the map edge, 70+ tiles from Kern+, no citizen outside Kern+
   local W = setup{tag = 'predfar', manifest = false, units = units}
   S.run(W, 200)
@@ -246,7 +246,7 @@ end)
 -- BUG-554 (Run 16a i1 Basementflew y416-y422: a wild stegosaurus, BENIGN plant eater of 342,595 cm3, 14 PREDATOR interrupts, each a Kern+
 -- lockdown with the clock at 30 t/s): a big wild plant eater (sense hb) outside Kern+ is PREDATOR_FAR (B) however near a citizen it walks
 T.test('BUG-554: a big wild plant eater beside a woodcutter outside Kern+ is PREDATOR_FAR (hb), no PREDATOR, no lockdown; the facts name dc/zn', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 150, 30, Z, {race = 'STEGOSAURUS'})
   local W = setup{tag = 'herbfar', manifest = false, units = units}
   W.unit(400).body = {size_info = {size_cur = 342595}}
@@ -271,7 +271,7 @@ end)
 
 T.test('BUG-495: PREDATOR and INTRUDER name race, size, reach and offer the sortie command (Run 16c i3: no species, no size)',
        function()
-  local units = S.fort_units()
+  local units = S.far_units()
   local pred = S.danger(400, 45, 7, Z, {race = 'MAMMOTH'})        -- outside (open sky row y=7)
   units[#units + 1] = pred
   local W = setup{tag = 'predfacts', manifest = false, units = units, sortie = 'A'}
@@ -283,7 +283,7 @@ T.test('BUG-495: PREDATOR and INTRUDER name race, size, reach and offer the sort
   T.eq({#p, p[1].d.id, p[1].d.race, p[1].d.sz, p[1].d.reach}, {1, 400, 'MAMMOTH', 4000000, 1})
   T.ok(p[1].d.cmd:find('squad.sortie', 1, true) and p[1].d.cmd:find('"target":[62,72,10]', 1, true), tostring(p[1].d.cmd))
   T.ok(p[1].msg:find('[MAMMOTH, 4000000 cm3, reachable]', 1, true), p[1].msg)
-  local W2 = setup{tag = 'intfacts', manifest = false, sortie = 'A', units = S.fort_units()}
+  local W2 = setup{tag = 'intfacts', manifest = false, sortie = 'A', units = S.far_units()}
   dfhack.maps.getWalkableGroup = function() return 7 end
   for _, u in ipairs(S.army(3, 51, 8)) do W2.add_unit(u) end
   S.run(W2, 300)
@@ -294,7 +294,7 @@ T.test('BUG-495: PREDATOR and INTRUDER name race, size, reach and offer the sort
 end)
 
 T.test('Run 10: reflex.predator_near 0 keeps the old rule (any roofed wild danger on the citizens group)', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 150, 30)
   local W = setup{tag = 'prednear0', manifest = false, units = units, cfg = {reflex = {v = 2, predator_near = 0}}}
   S.run(W, 200)
@@ -324,7 +324,7 @@ T.test('BUG-115: CURSED and TRANSFORM are interrupts (alarm.txt); unacked, a cur
 end)
 
 T.test('ack timeout: an unacked DEATHS_3PLUS gets its default (clock) and LOCKDOWN says so; acked ones do not', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 45, 7)           -- BUG-108: a visible hostile (at threat 0 the default is skipped)
   local W = setup{tag = 'acktimeout', manifest = false, ms_per_frame = 500, units = units}
   W.K.emit('DEATHS_3PLUS', 'A', '3 citizens died today', {n = 3, ids = {1, 2, 3}})
@@ -437,7 +437,7 @@ end)
 T.test('BUG-013: the deferred alert waits for the pulls up to its deadline (900 ticks before a lever latency was ' ..
        'measured, else 2x it, 450..1500), and not at all for a citizen outside (Run 11: the recall) or a hostile near ' ..
        'one', function()
-  local units = S.fort_units()                       -- everybody in Kern+ (the soldier does not count)
+  local units = S.far_units()                       -- everybody in Kern+ (the soldier does not count)
   local W = setup{tag = 'alertnear', manifest = false, units = units}
   W.lever_default = {}                               -- nobody takes the pulls: the gates never rise
   W.event('INVASION', {id = 3})
@@ -457,7 +457,7 @@ T.test('BUG-013: the deferred alert waits for the pulls up to its deadline (900 
     if l.msg:find(want, 1, true) then said = true end
   end
   T.ok(said, 'kern.log names the deadline and the pulls left')
-  local units2 = S.fort_units()
+  local units2 = S.far_units()
   units2[#units2 + 1] = S.cit(9, 45, 9)              -- a woodcutter outside Kern+
   local W2 = setup{tag = 'alertnear2', manifest = false, units = units2}
   W2.lever_default = {}
@@ -497,7 +497,7 @@ T.test('a reload mid-lockdown keeps it (persisted hold, doors, interrupts)', fun
 end)
 
 T.test('a siege on a fort without a manifest: SIEGE_START is class A, the seal is counted (no more sealed 0 ticks)', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   for _, u in ipairs(S.army(8, 50, 0)) do units[#units + 1] = u end
   local W = setup{tag = 'siege', manifest = false, units = units}
   S.run(W, 120)
@@ -643,7 +643,7 @@ T.test('Run 11: an invader within lockdown_near keeps the lockdown; lockdown_nea
   W2.inbox('ack', {})
   S.run(W2, 6000)
   T.eq(#events(W2, 'LOCKDOWN_END'), 0, 'lockdown_near 0: threat 0 only')
-  local units = S.fort_units()
+  local units = S.far_units()
   for _, u in ipairs(S.army(6, 150, 30)) do units[#units + 1] = u end
   local W3 = setup{tag = 'farsiege', manifest = false, units = units}
   S.run(W3, 60)
@@ -1014,7 +1014,7 @@ end)
 -- building destroyer is never far near the fort (within BD_NEAR of a bridge on its levels, in the intake area or past
 -- B1, or walking into it: its path ends there); far from all of that the Run 10 PREDATOR_FAR rule holds
 T.test('BUG-338: a wild building destroyer far from the fort is PREDATOR_FAR; near a bridge it is PREDATOR', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   local W = setup{tag = 'cavedragon', units = units}
   dragon_raws()
   add(W, S.danger(400, 150, 30), DRAGON)              -- 98 tiles from every bridge, 87 from every civilian
@@ -1029,7 +1029,7 @@ end)
 
 T.test('BUG-338: a wild building destroyer whose path ends inside the fort is PREDATOR; in a cavern below it is not',
        function()
-  local units = S.fort_units()
+  local units = S.far_units()
   local W = setup{tag = 'cavedest', units = units}
   dragon_raws()
   add(W, S.danger(400, 150, 30), DRAGON)
@@ -1039,7 +1039,7 @@ T.test('BUG-338: a wild building destroyer whose path ends inside the fort is PR
   T.eq(#events(W, 'PREDATOR'), 1, 'walking into the fort')
   -- a cavern 20 levels below the bridges, right under Kern+ (xy next to the citizens): no civilian on its levels, no
   -- bridge on its levels, its path stays in the cavern
-  local W2 = setup{tag = 'cavedeep', units = S.fort_units()}
+  local W2 = setup{tag = 'cavedeep', units = S.far_units()}
   dragon_raws()
   add(W2, S.danger(401, 61, 69, Z - 20), DRAGON)
   W2.unit(401).path = {dest = {x = 70, y = 69, z = Z - 20}}
@@ -1051,7 +1051,7 @@ end)
 -- BUG-338 (Run 15c y379: PREDATOR_FAR "nearest citizen 63 tiles" while the dragon killed the civilians it stood next to in
 -- the killing field, a part of Kern+ there): the predator distance counts every civilian, Kern+ ones too
 T.test('BUG-338: a wild danger next to civilians inside Kern+ is PREDATOR, not PREDATOR_FAR', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 60, 108)         -- 38 tiles from citizen 1 (60,70) in Kern+, roofed
   local W = setup{tag = 'predkern', manifest = false, units = units, cfg = {reflex = {v = 2, predator_near = 40}}}
   S.run(W, 200)
@@ -1071,7 +1071,7 @@ end
 
 T.test('BUG-338: Kern+ over the killing field: B1 waits for the civilians in it, O1 rises; a hostile near B1 raises it',
        function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.cit(6, 51, 28)                -- in the killbox K1, on Kern+ (old rule: inside, B1 rises at once)
   local W = setup{tag = 'atkfield', units = units, kern = {40, 20, Z - 2, 80, 95, Z}}
   S.run(W, 120)                                       -- the census is there before the news
@@ -1079,25 +1079,26 @@ T.test('BUG-338: Kern+ over the killing field: B1 waits for the civilians in it,
   S.run(W, 400)
   T.eq(W.K.census.u.outside, 0, 'Kern+ covers the field: nobody outside Kern+')
   T.eq({W.K.census.u.atk, W.K.census.u.atk_ids}, {1, {6}})
-  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'up', 'down'}, 'the way in stays open for citizen 6')
+  -- Neuausrichtung 15b: citizen 6 (18 tiles from O1, 12 from B1) can reach both footprints before a pull has moved them (gate.reach_hold): neither rises
+  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'down', 'down'}, 'the way in stays open for citizen 6')
   local g = gate_held(W)
   T.eq({#g, g[1] and g[1].d.bridge, g[1] and g[1].d.units}, {1, 'B1', {6}})
-  -- an invader comes within INNER_NEAR (30) of B1: it rises
+  -- an invader comes within INNER_NEAR (30) of B1: reflex's own hold ends, the reach rule of the gate still holds it (SIEGE's timed force takes over once the mode is SIEGE)
   add(W, S.inv(700, 51, 12), nil)                     -- 28 tiles from B1 (y 40)
   S.run(W, 300)
-  T.eq(S.bstate(W, 'B1'), 'up')
+  T.eq(S.bstate(W, 'B1'), 'up', 'the invader within 30 tiles: the mode is a siege, the timed force of its raise goes ahead (not the reach rule)')
 end)
 
 T.test('BUG-338: B1 rises once the civilians are past it; a census of nobody on the attack side never holds it', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.cit(6, 51, 20)                -- in the bailey, outside Kern+
   local W = setup{tag = 'atkin', units = units}
   S.run(W, 120)                                       -- the census is there before the news
   W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
   S.run(W, 300)
-  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'up', 'down'})
-  W.move(6, 60, 72, Z)                                -- walked in
-  S.run(W, 300)
+  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'down', 'down'}, '15b: citizen 6 can reach both footprints')
+  W.move(6, 60, 88, Z)                                -- walked in (out of reach of every footprint)
+  S.run(W, 600)
   T.eq(S.bstate(W, 'B1'), 'up')
   T.ok(logged(W, 'B1 up no longer held') ~= nil, 'kern.log says the hold ended')
   -- the plain fort: no civilian outside, the lockdown raises both at once (unchanged)
@@ -1114,19 +1115,22 @@ T.test('Hotfix (live BREACH): the inner hold ends after INNER_MAX (900) ticks wi
        'lockdown within INNER_REST raises B1 without a new hold', function()
   local G = require('dfllm.gate')
   T.eq({G.INNER_MAX, G.INNER_REST}, {900, 12000})
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.cit(6, 51, 20)                -- in the bailey, outside Kern+, never walks in
   local W = setup{tag = 'atkmax', units = units}
   S.run(W, 120)                                       -- the census is there before the news
   W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
   S.run(W, 700)
-  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), #gate_held(W)}, {'up', 'down', 1}, 'held for citizen 6')
+  T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1'), #gate_held(W)}, {'down', 'down', 1}, 'held for citizen 6 (15b: and O1 too: he can reach it)')
   S.run(W, 500)
-  T.eq(S.bstate(W, 'B1'), 'up', 'old: held as long as citizen 6 stood outside')
+  T.eq(S.bstate(W, 'B1'), 'down', 'Neuausrichtung 15b: reflex let go after INNER_MAX, the reach rule of the gate keeps B1 down while he stands in the bailey')
   local m = logged(W, 'B1 up no longer held')
   T.ok(m ~= nil, 'kern.log says the hold ended')
   local n = tonumber(m:match('after (%d+) ticks'))
-  T.ok(n and n > 900 and n <= 1000, 'ended after INNER_MAX: ' .. tostring(m))
+  T.ok(n and n > 900 and n <= 1100, 'ended after INNER_MAX: ' .. tostring(m))
+  W.move(6, 60, 88, Z)                                -- he walks in, out of reach of every footprint
+  S.run(W, 600)
+  T.eq(S.bstate(W, 'B1'), 'up', 'it rises once nobody can reach it')
   -- the lockdown lifts (B1 goes back down for PEACE) and comes again: no second hold, B1 rises at once
   local R = W.mods.reflex.M
   local hold = R.holding
@@ -1139,7 +1143,7 @@ T.test('Hotfix (live BREACH): the inner hold ends after INNER_MAX (900) ticks wi
 end)
 
 T.test('BUG-338: a building destroyer in the intake area raises B1 at once, civilians outside or not', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.cit(6, 80, 20)                -- outside Kern+
   local W = setup{tag = 'atkbd', units = units}
   dragon_raws()
@@ -1156,7 +1160,7 @@ end)
 T.test('BUG-338: threat counts a building destroyer in Z3 off Kern+ as inside (BREACH), never cleared as far', function()
   local man = S.manifest()
   man.zones = {Z3 = {{60, 30, Z, 70, 38, Z}}}         -- off Kern+ (Kern+ starts at y 41)
-  local W = setup{tag = 'bdz3', persist = {manifest = man}, units = S.fort_units()}
+  local W = setup{tag = 'bdz3', persist = {manifest = man}, units = S.far_units()}
   dragon_raws()
   add(W, S.danger(702, 65, 34), DRAGON)
   S.run(W, 60)
@@ -1171,7 +1175,7 @@ end)
 
 -- BUG-671 (Run 16a i1 Basementflew y460: PREDATOR offers 'not in sight' when sent; a lockdown for wild animals held the clock at 30 t/s for days)
 T.test('BUG-671: the PREDATOR offer is made for a unit in reach only and carries exp; out of reach none; last_seen answers for the verb', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 45, 7)
   local W = setup{tag = 'predoffer', manifest = false, units = units, sortie = 'A'}
   dfhack.maps.getWalkableGroup = function() return 7 end
@@ -1186,7 +1190,7 @@ T.test('BUG-671: the PREDATOR offer is made for a unit in reach only and carries
   local ok2, none = W.K.call('reflex', 'last_seen', 12345)
   T.eq({ok2, none}, {true, nil})
   -- out of reach (a walk group of its own): PREDATOR without an offer
-  local units2 = S.fort_units()
+  local units2 = S.far_units()
   units2[#units2 + 1] = S.danger(400, 150, 30)
   local W2 = setup{tag = 'predoffer0', manifest = false, units = units2, sortie = 'A', cfg = {reflex = {v = 2, predator_near = 0}}}
   dfhack.maps.getWalkableGroup = function(q) return q.x >= 100 and 9 or 7 end
@@ -1197,7 +1201,7 @@ T.test('BUG-671: the PREDATOR offer is made for a unit in reach only and carries
 end)
 
 T.test('BUG-671: a PREDATOR lockdown releases its clock after PRED_CLOCK_DAYS with nothing inside Kern+; a new default of it brings the alert only', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 150, 30)
   local W = setup{tag = 'predclock', manifest = false, ms_per_frame = 500, units = units, cfg = {reflex = {v = 2, ack_timeout_s = 10, hold_quiet_days = 30}}}
   W.move(2, 138, 30, Z)                              -- a woodcutter 12 tiles from it: PREDATOR
@@ -1230,7 +1234,7 @@ T.test('BUG-671: a PREDATOR lockdown releases its clock after PRED_CLOCK_DAYS wi
 end)
 
 T.test('BUG-671: a hostile inside Kern+ keeps the clock clamp of a PREDATOR lockdown', function()
-  local units = S.fort_units()
+  local units = S.far_units()
   units[#units + 1] = S.danger(400, 62, 72)           -- inside the fort, beside a citizen in Kern+
   local W = setup{tag = 'predclock2', manifest = false, ms_per_frame = 500, units = units}
   S.run(W, 200)

@@ -49,6 +49,7 @@
    "trap_friendly",
    "piece_missing",
    "gate_traffic",
+   "gate_peace_traffic",
    "berserk"
   ]
  },

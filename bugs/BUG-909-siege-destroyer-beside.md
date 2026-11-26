@@ -1,5 +1,5 @@
 # BUG-909 SIEGE against building destroyers alone: a citizen beside the footprint holds the raise without bound (cave dragon 84 tiles out, 1739+ ticks)
-Status: fixed (offline, live-untested)
+Status: fixed (offline, live-untested); second round (15b): unchanged (SIEGE / BREACH only, no part of the ALERT crush)
 Severity: medium
 Found: Run 17 i3 Orangering y469 winter d26-29: ARRIVAL siege #34608, a cave dragon 84-92 tiles away (building destroyer, no timed force by design: BUG-881 round 3 decision A, BUG-462/030), `B1 up` pull #34628, GATE_FAIL #34641 `blocked: citizen 29043 next to it, never raised onto them`, held 1739+ ticks until the player's lever in the emergency exit. Diagnosis `leitung/neu10/DIAGNOSE-B1-2026-11-25.md` (claim D).
 Module: `lua/dfllm/gate.lua` (`holders` FORCE branch: `bdo`, `near_now`, `rr.fz_bd`, `forced_event`)
@@ -9,6 +9,9 @@ With only building destroyers in sight `barrier_foe` is false: no timed force. T
 
 ## Fix
 In the SIEGE/BREACH force branch (`d > force_near`): `bdo` = the hostile closes (`closing_tpt`), its eta `d x tpt` <= `CLOSE_BUDGET` (1500) ticks and `barrier_foe` is false. Then the BUG-775 release applies like within `approach_now`: units standing beside the footprint (`STILL_NOW` 60 ticks on one tile) no longer hold; a unit ON the footprint, one walking onto it (crossers) and one beside it that keeps moving still hold. GATE_FORCED names them with the reason ('a building destroyer D tiles from it closes in E ticks (within the 1500-tick budget)', `rr.fz_bd`). A destroyer that does not close (parked) releases nobody. No timed force, no deliberate crush.
+
+## Second round (15b)
+Not implicated in the live failures of round 15 (kernel 7f3706e5; no building destroyer in the ALERT of #38027..#38061) and kept as it is: the release applies only in SIEGE / BREACH (`FORCE_MODES`), where rounds 3 and 12 accept a bounded crush and a unit ON the footprint always holds. The 15b safety rule (BUG-907 reach rule) never applies there.
 
 ## Cost
 A citizen standing beside the footprint when the raise goes ahead is not crushed (he stands beside it) but is locked out (the BUG-775 price, now from the destroyer's eta instead of 20 tiles); a unit that walks onto it as it moves is a crush risk exactly as in BUG-775. Nobody ON the footprint is touched.

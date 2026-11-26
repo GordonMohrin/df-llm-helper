@@ -1,5 +1,5 @@
 # BUG-908 The return window lowers B1 without a way to raise it again; a bridge wanted up for days says nothing in PEACE
-Status: fixed (offline, live-untested)
+Status: fixed (offline, live-untested); second round (15b): the forecast is now exactly the quiet raise of BUG-905 (no exemptions), so the window opens only when the bridge can be raised again
 Severity: medium
 Found: Run 17 i3 Orangering y467 spring d32 ... y469 win d41: `GATE B1 opens for 600 ticks: 1 civilians outside it in PEACE (return window)` seven times, each followed by `B1 up waits in PEACE` lines and no raise; the want stood 132905 ticks before the first alarm named it. Diagnosis `leitung/neu10/DIAGNOSE-B1-2026-11-25.md`.
 Module: `lua/dfllm/gate.lua` (`return_window`, new `M.return_forecast`, `M.peace_day`)
@@ -10,14 +10,18 @@ Module: `lua/dfllm/gate.lua` (`return_window`, new `M.return_forecast`, `M.peace
 ## Fix
 `M.return_forecast(K, name, now)`: a census (`around` PATH_R) of the footprint as the quiet raise would see it, the civilians outside it (`census.u.atk_ids`) aside, through `M.peace_blockers` (the same function as BUG-905). `return_window` opens the window only when the forecast is empty; else GATE `state return_wait` (`n` civilians outside, `blockers`) once a game day, the bridge stays up and the check repeats each pass. The window ends early when nobody is left outside (`census.u.atk == 0`, fresh census, at least `M.RETURN_MIN` 300 ticks after it opened): GATE `return_end`, `st.winb` closed, the re-raise is wanted at once (`peace_gates`) and uses BUG-905. `M.peace_day` (BUG-905): GATE `peace_stuck` once per want after a game day, naming the blockers by kind and distance.
 
+## Second round (15b): live (kernel 7f3706e5) and the check against diagnosis C
+After round 15 `B1 stays up: no return window ...` (`return_wait`) and `return_end` were seen to work as designed in the harness, but live the return window #38075 lowered B1 (CUTOFF #38061: 7 citizens cut off from drink until then) and the bridge stood down for 130000-197000 ticks afterwards: the forecast evidently saw no blocker (inferred: the events do not log it) because its `peace_blockers` carried the round-15 exemptions (soldiers at their station, units farther than 8 tiles); the real traffic (47 of 54 `peace_wait` events at 3-4 tiles) was never empty. With the exemptions withdrawn (BUG-905) `return_forecast` lists every unit within `peace_clear_r` of the footprint except the civilians waiting outside: whenever the quiet re-raise would wait, the window is not opened and the bridge STAYS UP (GATE `return_wait`, once a game day, naming who). The after-siege rule (3b) therefore holds: a bridge that is UP after an alarm stays up until the forecast allows a safe cycle. Cost: civilians on the attack side of a raised inner gate wait for their window as long as the inner traffic never pauses (the 7 cut-off citizens of #38061 are the case this accepts instead of a down bridge nobody can raise); the player's `lever` down (PEACE) and DECISION `gate_peace_traffic` are the way out.
+
 ## Cost
 Civilians outside a raised inner gate wait longer for their window while somebody (not exempt under BUG-905: a citizen within 8 tiles, a soldier within 2 tiles of the footprint, a unit walking onto it) stands near it inside; they stay locked out only as long as that unit stays (the question is asked again every pass). The early end shortens the open time of the inner gate; nobody outside is cut off by it (checked against `atk`). No crush risk added.
 
 ## Tests
 `test_bug905_909_b1.lua` (B1 up, lever latency 645, four soldiers at the station, two civilians at 30 and 32 outside):
-- window opens +1242, B1 down +1323, both civilians in at +1773, window ends early +2043 (GATE `return_end`), B1 up +2745 = 972 ticks after the last return (limit 1500), 0 crushed;
+- (no soldiers) window opens +1242, B1 down +1323, both civilians in at +1773, window ends early +2043 (GATE `return_end`), B1 up +2745 = 972 ticks after the last return (limit 1500), 0 crushed;
+- (15b, forecast negative) the squad's four soldiers at the station 4 tiles inside B1 (they can reach the footprint): NO window in 4800 ticks, B1 never leaves its raised state, no lowering pull, GATE `return_wait` `soldier 5 (4 tiles), soldier 101 (4 tiles), ... could not be raised again`, 0 crushed;
 - a citizen idling 7 tiles inside B1: B1 stays up until he leaves at +3000, GATE `return_wait` names `citizen 80` (twice in 3000 ticks: once a game day), window opens +3051, both get home, B1 up +4554, 0 crushed.
-On main both fail (the soldiers at the station keep the re-raise waiting for ever / the window opens at +1242 with the idler in place).
+On main the window tests fail (the window opens at +1242 with the idler in place).
 
 ## Live-Erwartung
 After `B1 opens for 600 ticks ... (return window)` and the civilians' return, `GATE B1 closes its return window early: nobody is left outside it`, then `B1 up waits ...` and B1 up within ~1000-1500 ticks of the last return; with a unit that would keep it down, `B1 stays up: no return window for N civilians outside it, it could not be raised again: citizen N (d tiles)` once a day instead of the window. A bridge still down after a game day of want says `B1 has been wanted up in PEACE for N ticks ... is still down: soldier N (d tiles), ...` once. NOT promised: that civilians outside always get in (they wait while the blocker stays).

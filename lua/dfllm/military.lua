@@ -4427,7 +4427,7 @@ local function restation_one(K, man, stations, bname, fp, q, clear, margin)
   if q.cross then d.why = 'cross' end
   if not r.pos or (r.pos.x == q.p.x and r.pos.y == q.p.y and r.pos.z == q.p.z) then
     -- BUG-906: no tile clear of the bridge on its inner side (r.pos nil, not 'the station is clear already'): the squad's soldiers stand by order
-    -- for this alarm (gate: a soldier at his station, not ON the footprint, holds no raise: military.standing); said ONCE per alarm (mode
+    -- for this alarm (gate, SIEGE / BREACH only since 15b: a soldier at his station, not ON the footprint, holds no raise: military.standing); said ONCE per alarm (mode
     -- episode) with the tiles tried; a quiet PEACE wait repeats it at most every NOTE_EVERY ticks
     local stand = not r.pos and not q.cross
     if stand then
@@ -4444,7 +4444,7 @@ local function restation_one(K, man, stations, bname, fp, q, clear, margin)
     if stand then
       d.tiles, d.clear, d.standby = r.ntiles or 0, clear, true
       d.tried = r.tried and #r.tried > 0 and table.concat(r.tried, ', '):sub(1, 80) or nil
-      txt = string.format('%s: no tile clear of %s (clearance %d, %d tiles tried) for its station %s: kept, its soldiers stand by order and hold the raise only ON the footprint',
+      txt = string.format('%s: no tile clear of %s (clearance %d, %d tiles tried) for its station %s: kept; in SIEGE/BREACH its soldiers stand by order and hold the raise only ON the footprint, in ALERT/RECOVERY/PEACE they still hold it',
                           label, bname, need, r.ntiles or 0, pstr(q.p))
       K.log('warn', 'military: %s (%s; %s)', head, r.tried and #r.tried > 0 and table.concat(r.tried, ', ') or 'no entry', 'stand by order')
     else

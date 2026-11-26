@@ -24,7 +24,7 @@ def test_the_verbs_are_in_the_registry_with_the_player_module():
     for v in NEW:
         assert schema.VERBS[v] == ("player", None, False), v
         assert v in schema.VERB_ARGS
-    assert schema.VERBS["lever"] == ("gate", ["PEACE"], False)     # the open exit lifts the mode list (kern), gate takes only up
+    assert schema.VERBS["lever"] == ("gate", ["PEACE", "ALERT", "SIEGE"], False)     # the open exit lifts the mode list (kern), gate takes only up; 15b: ALERT / SIEGE for the inner bridges
     assert set(schema.VERB_EMG) <= set(schema.VERBS) and set(schema.VERB_HOLD) <= set(schema.VERBS)
     assert "appoint" in schema.VERB_HOLD and "lever" in schema.VERB_EMG
     assert schema.ACT["building_remove"] == ["player"]

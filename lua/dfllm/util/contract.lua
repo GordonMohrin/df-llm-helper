@@ -274,7 +274,8 @@ C.VERBS = {
   ['squad.sortie'] = {mod = 'military', approve = true,
                       modes = {PEACE = true, ALERT = true, SIEGE = true, BREACH = true, RECOVERY = true}},
   -- NEU1 P7: in another mode while the emergency exit is open (C.VERB_EMG lifts the mode list; gate's verb takes only `up` there)
-  ['lever']        = {mod = 'gate', modes = {PEACE = true}},
+  -- Neuausrichtung 15b: ALERT and SIEGE too, for the inner bridges, up (gate's verb refuses the rest and a unit on the footprint)
+  ['lever']        = {mod = 'gate', modes = {PEACE = true, ALERT = true, SIEGE = true}},
   ['inspect']      = {mod = 'kern'},
   ['selftest']     = {mod = 'selftest'},
   ['module.enable'] = {mod = 'kern'},
