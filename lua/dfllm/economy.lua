@@ -4505,7 +4505,7 @@ end
 
 -- NEU20a BUG-931 (Run 17 i1 Diedplank y435: WOOD_UNMARK took 7 fell designations off the walk group down, autochop marked the SAME unreachable trees again after each removal (#16628, #16643),
 -- after 3 runs 'stopped for this episode, no further cure is guessed', >1000 reachable trees stood and 6 dwarves died for want of drink; autochop counts 1485 accessible trees, 0 inaccessible: it
--- does not know the citizens' walk group): once the removal has done its part (WOOD_UNMARK stopped, or ran and was measured, or is switched off) and still no usable log exists, the KERNEL marks
+-- does not know the citizens' walk group): once the removal has done its part (WOOD_UNMARK stopped, or ran and was measured, or is switched off, or cannot apply: no open FellTree job off the walk group = a logs-only episode, or its look found no marked tree to take down) and still no usable log exists, the KERNEL marks
 -- a few REACHABLE trees itself (act.tree_mark, dfhack.designations.markPlant: the call quickfort's dig_chop makes). Choice: the trees nearest to a built Carpenter's workshop (within
 -- wood.near_d), whose tile touches the citizens' walk group (snapshot groups, positive answer only), with no water tile and no open-air drop of 2+ levels within wood.fell_clear (3) tiles on
 -- the tree's level (fail closed on an unreadable tree tile), at most wood.fell_n (6) a pass, a pass every wood.fell_days (3) days, wood.fell_season (36) trees in 84 game days; PEACE /
@@ -4557,7 +4557,10 @@ function M.fell_candidates(near, cap)
   while #out > cap do out[#out] = nil end
   return out, A
 end
--- a tree tile is a safe felling place when no tile within `clear` of it on its level holds water and none is open air over open air (a drop of 2+ levels): ok, why, tile reads
+-- a tree tile is a safe felling place when no READABLE tile within `clear` of it on its level holds water and none is open air over open air (a drop of 2+ levels): ok, why, tile reads.
+-- Fails closed on the tree's own tile and on the tile below an open-air tile; a HIDDEN neighbour tile (snapshot.tile answers nil) is skipped, the same convention as the water scans (no unrevealed
+-- water is known), so the check is only as good as what is revealed: an unrevealed pond or cliff beside a tree is NOT excluded. No zone, burrow or fruit-tree check is made either (the tree
+-- may stand in a garden or gather zone, or be a fruit tree): felling is bounded by fell_n / fell_season instead.
 function M.fell_safe(K, x, y, z, clear, budget)
   local reads = 0
   local function tile(tx, ty, tz)
@@ -4590,7 +4593,10 @@ function M.wood_fell_mark(K, c, now, rd, inv)
   local um = type(p.wunmark) == 'table' and p.wunmark or {}
   -- the removal first: it has stopped (runs, unwalkable), or a run was made, or it is switched off; never while its measurement is pending
   if type(um.pend) == 'table' then return false end
-  if not (um.stop or (math.tointeger(um.runs) or 0) >= 1 or wc.unmark == false) then return false end
+  -- the removal is "done" when it stopped, ran, is switched off or cannot apply: no open FellTree job lies off the walk group (rd.trees false: a logs-only episode), or its look found nothing
+  -- to take down (rec.try set by M.wood_unmark, no run: no marked tree, the groups unreadable, every marked tree reachable), or the act is missing
+  local um_na = not rd.trees or type(K.act.tree_unmark) ~= 'function' or (math.tointeger(um.try) ~= nil and (math.tointeger(um.runs) or 0) == 0)
+  if not (um.stop or (math.tointeger(um.runs) or 0) >= 1 or wc.unmark == false or um_na) then return false end
   local rec = type(p.wfell) == 'table' and p.wfell or {}
   p.wfell = rec
   if rec.stop or type(rec.pend) == 'table' then return false end

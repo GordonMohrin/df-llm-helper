@@ -214,4 +214,21 @@ T.test('BUG-931: the tile read budget per pass bounds the work (fell_reads)', fu
   until_mark(W, 14)
   T.eq(#W.marked, 1, 'a tree costs 49 tile reads, the 60 of the pass buy one')
 end)
+
+T.test('BUG-931: a logs-only episode (no open FellTree job, nothing marked to take down) does not wait for a removal that cannot run: the kernel marks reachable trees', function()
+  local W = world{trees = {{12, false}, {13, false}}, fells = {}, setup = function(W) for _ = 1, 30 do F.item(W, 'WOOD', {_pos = {600, 10, 1}}) end end}
+  until_mark(W, 14)
+  T.eq(W.marked, {12, 13}, 'logs-only stuck: marked although WOOD_UNMARK never ran')
+  T.eq(#W.unmarked, 0, 'no removal was needed')
+  T.eq(#fell_events(W, 'did'), 1)
+end)
+
+T.test('BUG-931: documented limit: a HIDDEN neighbour tile is skipped (only revealed water / drops exclude a tree); the tree tile and the tile below an open-air tile fail closed', function()
+  local W = world{trees = base{{12, false}}, hidden = {['13,10,1'] = true, ['11,11,1'] = true}}
+  until_mark(W, 12)
+  T.eq(W.marked, {12}, 'hidden neighbours do not exclude the tree')
+  local W2 = world{trees = base{{12, false}}, drops = {{13, 10}}, hidden = {['13,10,0'] = true}}
+  days(W2, 12)
+  T.eq(W2.marked, {}, 'open air over an unreadable tile below: excluded')
+end)
 T.done()
