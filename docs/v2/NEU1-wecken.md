@@ -37,7 +37,7 @@ their FR-53 path unchanged (alarm.txt, unacked items).
   wakes at once (round 2 fix: before, the per-type key swallowed it).
 * Synthetic wake reasons, checked at every poll (same repeat rule):
   `DEADMAN` (the kernel paused the game because no session lived: the reply is `dfllm cmd resume`),
-  `FOLLOW_OFF` (follow does not beat for this save: restart it), `KERNEL_STALE` (the kernel heartbeat is older than
+  `FOLLOW_OFF` (follow does not beat for this save and its pid is dead: restart it; a live pid with a late beat is `SLOW`, no wake, BUG-921), `FOLLOW_STUCK` (pid alive, no beat for 300 s: BUG-921), `KERNEL_STALE` (the kernel heartbeat is older than
   `wait.kernel_stale_s`: DF hangs or is closed).
 * Output: one line per wake reason (at most 8, then `+N more: dfllm events --cls A --since X`), each with the
   `next:` hint follow uses (`wake.next_hint`), exit 0; a timeout prints the old line and exits 1.

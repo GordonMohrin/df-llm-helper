@@ -575,7 +575,7 @@ Mode-driven duties (no call needed): arbiter applies tempo and the FPS cap per m
 | `<save>/commands.log`, `kern.log` | kern | §9.12; rotated at 1 MB to `.1` |
 | `<save>/guard.json` | kern (`dfllm.guard`) | FR-68 stop guard: `{v:2, on:flag, mode, cap, ts_off:flag, why, since:wall, wall, n, kinds:{<popup kind>:n}, last:str}`; written at install, on every dismissed popup, every 5 s while it runs (`wall`) and with `on:0` when it is removed; `status`/`brief` print a `GUARD …` line while `on` is 1 and `wall` is younger than 60 s |
 | `<save>/quicksave.json` | Python (`dfllm save`) | §9.19, the last quicksave attempt; `dfllm follow` wakes QUICKSAVE_FAILED on a new one with `ok` 0 |
-| `<save>/.follow.hb` | Python (`dfllm follow`) | `{v:2, wall, last_n}` rewritten every 10 s; `status` prints `follow: OFF (last heartbeat …)` and `doctor` warns when it is older than 60 s (FR-29) |
+| `<save>/.follow.hb` | Python (`dfllm follow`) | `{v:2, wall, last_n, pid, code, auto, step?, step_s?}` rewritten every 10 s by a beat thread beside the poll loop (BUG-922: only while a poll step started or ended within 240 s; `step` / `step_s` name the running step); `status` prints `follow: OFF (last heartbeat …)` when it is older than 60 s and its pid is dead or unknown (FR-29), `follow: SLOW (… pid N alive)` when the pid lives (no wake), `follow: STUCK` after 300 s (wake FOLLOW_STUCK) (BUG-921) |
 
 **Write rules.** Lua never renames onto an existing file (Windows `os.rename` fails with "File exists"). New files (outbox, snap) are written to `<name>.tmp` and renamed to a name that does not exist; if it exists, use `<id>-<n>.json`. Python writes inbox/plan/bp files to `.<name>.tmp` in the same folder and `os.replace`s them. Readers retry a failed parse once after 50 ms.
 

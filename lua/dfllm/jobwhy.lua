@@ -689,19 +689,33 @@ end
 -- count could not be made. Counted over the item vector, not by rotten / hostile / building items (SKIP); DF's own count can differ.
 local CMP = {AtLeast = function(n, v) return n >= v end, AtMost = function(n, v) return n <= v end, GreaterThan = function(n, v) return n > v end,
              LessThan = function(n, v) return n < v end, Exactly = function(n, v) return n == v end, NotExactly = function(n, v) return n ~= v end}
+-- BUG-924 (Run 17 i3: "0 15 plant (DRINK_MAT)", the 0 was the compare TYPE): DF gives compare_type as a number (the enum
+-- manager_order_condition_item.T_compare_type: 0 AtLeast, 1 AtMost, 2 GreaterThan, 3 LessThan, 4 Exactly, 5 NotExactly); the table
+-- above is keyed by name, so a numeric type found no comparator, nothing was counted and the number was printed as text.
+J.CMP_NAMES = {[0] = 'AtLeast', 'AtMost', 'GreaterThan', 'LessThan', 'Exactly', 'NotExactly'}
+J.CMP_WORDS = {AtLeast = 'at least', AtMost = 'at most', GreaterThan = 'more than', LessThan = 'fewer than', Exactly = 'exactly',
+               NotExactly = 'not exactly'}
+function J.cmp_name(c)
+  if math.type(c) == 'integer' then return J.CMP_NAMES[c] or ('compare#' .. c) end
+  if type(c) == 'number' then return J.CMP_NAMES[math.floor(c)] or ('compare#' .. tostring(c)) end
+  return tostring(c or 'AtLeast')
+end
+local function met_word(met) return met == true and 'met' or met == false and 'unmet' or 'not counted' end
+
 function J.conditions(o, ctx)
   local out = {}
   local cap = math.max(100, int(ctx and ctx.items_max) or J.ITEMS_MAX)
   for _, c in ipairs(each(pget(function() return o.item_conditions end))) do
     local cmp = pget(function() return c.compare_type end) or pget(function() return c.condition end)
-    cmp = tostring(cmp or 'AtLeast')
+    cmp = J.cmp_name(cmp)
     local val = int(pget(function() return c.compare_val end)) or int(pget(function() return c.value end)) or 0
     local it = pget(function() return c.item_type end)
     if type(it) == 'string' then it = df.item_type[it] end
     it = int(it) or -1
     local what = it >= 0 and ename(df.item_type, it) or nil
     local rp = pget(function() return c.has_material_reaction_product end)
-    local e = {text = string.format('%s %d %s%s', cmp, val, what and what:lower() or 'any item', (rp and tostring(rp) ~= '') and (' (' .. tostring(rp) .. ')') or '')}
+    local e = {cmp = cmp, val = val,
+               text = string.format('%s %d %s%s', J.CMP_WORDS[cmp] or cmp, val, what and what:lower() or 'any item', (rp and tostring(rp) ~= '') and (' (' .. tostring(rp) .. ')') or '')}
     local vec = what and pget(function() return df.global.world.items.other[what] end)
     local f = CMP[cmp]
     if vec and f then
@@ -717,7 +731,7 @@ function J.conditions(o, ctx)
         end
       end)
       if okscan then
-        e.n, e.met = n, f(n, val); e.text = e.text .. string.format(': %d found', n)
+        e.n, e.met = n, f(n, val); e.text = e.text .. string.format(': %d found', n)     -- the verdict word is added below
         -- BUG-836 retry: a scan that finds none where the census holds many is not a proof (Run 17: 'plant (DRINK_MAT) x1: 0 match' beside 6,932)
         local cens = J.census_count(ctx and ctx.inv, {what = what:lower() .. (rp and tostring(rp):find('DRINK_MAT', 1, true) and ' DRINK_MAT' or '')})
         if n == 0 and (cens or 0) >= 10 then
@@ -734,13 +748,15 @@ function J.conditions(o, ctx)
       if empty and store and f and type(inv) == 'table' then
         local ce = int(inv.cont_free) or int(inv.barrels_empty)
         if ce then
-          e.text = 'AtLeast ' .. tostring(val) .. ' empty food storage item'
-          e.cens = ce
-          -- the census count is what we have; DF counts its own way, so it is a hint, never a met / unmet verdict
-          e.text = e.text .. string.format(': %d empty by the census (DF counts its own way)', ce)
+          e.text = string.format('%s %d empty food storage %s', J.CMP_WORDS[cmp] or cmp, val, plural(val, 'container'))
+          e.cens, e.n = ce, ce
+          -- BUG-924: the census empties are the kernel's own count (Run 17 i3: 0 free beside 'at least 5'): a verdict, DF may count a few differently
+          e.met = f(ce, val)
+          e.text = e.text .. string.format(': %d free by the census (DF counts its own way)', ce)
         end
       end
     end
+    e.text = e.text .. ', ' .. met_word(e.met)       -- BUG-924: every condition says met / unmet / not counted
     out[#out + 1] = e
   end
   return out
@@ -827,10 +843,11 @@ function J.order(K, o, ctx)
       r.text = string.format('no job made: item condition not met: %s%s', table.concat(unmet, '; '):sub(1, 300), wtxt)
     elseif wc == 'no_labor' then r.cause, r.text = wc, wct
     else
-      local all = {}
-      for _, e in ipairs(cl) do all[#all + 1] = e.text end
+      local all, nmet = {}, 0
+      for _, e in ipairs(cl) do all[#all + 1] = e.text; if e.met == true then nmet = nmet + 1 end end
       r.cause = 'conditions'
-      r.text = string.format('no job made: %d item %s by my count met (%s), DF counts items its own way%s', nc, plural(nc, 'condition'),
+      -- BUG-924: 'N conditions met' counted every condition; now only those the count proved (the rest says 'not counted' in the list)
+      r.text = string.format('no job made: %d of %d item %s met by my count (%s), DF counts items its own way%s', nmet, nc, plural(nc, 'condition'),
                              table.concat(all, '; '):sub(1, 300), wtxt)
     end
     return r

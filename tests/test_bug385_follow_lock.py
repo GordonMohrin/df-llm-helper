@@ -75,7 +75,8 @@ def test_bug385_old_code_takeover_obeys_the_cool_down_too(save, monkeypatch, cap
     assert "does not take it back" in capsys.readouterr().out
 
 
-def test_bug385_status_and_doctor_name_the_owner(save):
+def test_bug385_status_and_doctor_name_the_owner(save, monkeypatch):
+    monkeypatch.setattr(wake, "pid_alive", lambda pid: False)       # BUG-921: a live pid with a late beat is SLOW; this case is the dead one
     now = time.time()
     put(save, 4711, took=99, took_at=int(now) - 17)
     files.write_follow_hb(save, {"v": 2, "wall": int(now), "last_n": 0, "code": files.code_stamp(), "auto": 1, "pid": 4711})

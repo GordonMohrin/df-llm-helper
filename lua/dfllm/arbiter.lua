@@ -111,7 +111,8 @@ M.PU_MAX = 64              -- texts of unclassified popups remembered for the lo
 -- FR-94 (Run 14 note 100): the verb `resume` and the wake PAUSED_BY_DF. wake_min = real minutes a pause by DF (a load, a restart,
 -- a popup) may stand before the wake comes (config/reflex.json `resume`, 0 = no wake); gap_s = real seconds between two uses of
 -- the verb; max_popups = popups one use may read and dismiss
-M.RESUME = {wake_min = 5, gap_s = 60, max_popups = 8}
+M.RESUME = {wake_min = 5, gap_s = 60, max_popups = 8,
+            gap_retry_s = 5, retry_after_ms = 2000, retry_window_s = 30}      -- BUG-923: one key retry after a frame gap
 -- Neuausrichtung 1 / P3 (config/reflex.json `deadman`): on = pause the game when the session heartbeat (<save>/session.json
 -- `wall`, written by dfllm wait/brief/cmd/ack/plan/next) is older than timeout_s real seconds, or the game ran more than
 -- max_ticks game ticks since `wall` last changed (0 = no game-time bound), or the file is missing or dated more than
@@ -841,7 +842,33 @@ function M.init(K)
   end
 end
 
+-- BUG-923: the one retry of a resume whose pause key did not take right after a frame gap. Only while the same pause (owner and
+-- start) still stands and no popup is open; a park / pause / unpause / resume that came after clears it (st.resume_retry = nil).
+function M.retry_resume(K)
+  local r = st.resume_retry
+  if not r then return end
+  local now = K.now()
+  if now.ms >= r.until_ms or st.pause_by ~= r.by or st.pause_since ~= r.since or df.global.pause_state ~= true
+     or popup_count() > 0 then
+    st.resume_retry = nil
+    return
+  end
+  if now.ms < r.at_ms then return end
+  st.resume_retry = nil
+  local ok, res = K.act.press_pause()
+  local paused = observe(K)
+  if paused then
+    K.log('warn', 'resume retry after the frame gap (cmd %s): pause key %s, still paused (%s)', tostring(r.cmd),
+          ok and 'sent' or ('failed: ' .. tostring(res)), tostring(st.pause_by))
+    return
+  end
+  st.dm_fired = nil
+  K.log('info', 'resume retry after the frame gap (cmd %s): resumed, was pause:%s', tostring(r.cmd), tostring(r.by))
+end
+
 function M.step(K)
+  local okr, errr = pcall(M.retry_resume, K)               -- BUG-923
+  if not okr then K.log('warn', 'resume retry: %s', tostring(errr)) end
   local okw, errw = pcall(popup_watch, K)                  -- FR-87: evidence only, never a fault of the clock owner
   if not okw then K.log('warn', 'popup watch: %s', tostring(errw)) end
   track_pause(K)
@@ -912,6 +939,7 @@ M.verbs['tempo.lower'] = function(K, args, cmd)
 end
 
 M.verbs.pause = function(K, args, cmd)
+  st.resume_retry = nil                      -- BUG-923
   local ttl = int(args.ttl_s)
   if not ttl or ttl < 1 or ttl > 600 then return false, 'ttl_s must be 1..600' end
   local now = K.now()
@@ -939,6 +967,7 @@ M.RESUMABLE = {df = true, popup = true, deadman = true, park = true}
 
 M.verbs.resume = function(K, args, cmd)
   local now = K.now()
+  st.resume_retry = nil                      -- BUG-923: a newer resume replaces a pending retry
   if not observe(K) then return resume_refuse('the game is not paused (nothing to release)') end
   local by = st.pause_by or 'gordon'
   if not M.RESUMABLE[by] then
@@ -990,9 +1019,22 @@ M.verbs.resume = function(K, args, cmd)
     shown = string.format('; dismissed popup%s %s', #seen > 1 and 's' or '', table.concat(q, ' | '))
   end
   if paused then
-    return resume_refuse(string.format('was %s, still paused (%s) after the pause key%s%s', was, state,
-                                       key_err and (' (' .. key_err .. ')') or '', shown), data)
+    -- BUG-923 (Run 17 i3 y?: a resume sent in the yearly autosave frame gap was handled when the gap ended and refused, the game
+    -- stayed pause:park, the CLI only said 'no reply yet'): a key that did not take right after a frame gap is pressed ONCE more
+    -- a frame later (M.retry_resume), unless a park / pause / unpause came in between
+    local gp = K.last_gap and K.last_gap()
+    local after_gap = gp and gp.end_ms and now.ms - gp.end_ms < M.RESUME.gap_retry_s * 1000 and not key_err
+    local tail = ''
+    if after_gap and st.pause_by == by and popup_count() == 0 then
+      st.resume_retry = {at_ms = now.ms + M.RESUME.retry_after_ms, until_ms = now.ms + M.RESUME.retry_window_s * 1000,
+                         by = by, since = st.pause_since, cmd = cmd and cmd.id}
+      data.retry = 1
+      tail = '; the frame gap just ended: the kernel presses the key once more a moment later (dfllm status shows the result)'
+    end
+    return resume_refuse(string.format('was %s, still paused (%s) after the pause key%s%s%s', was, state,
+                                       key_err and (' (' .. key_err .. ')') or '', shown, tail), data)
   end
+  st.resume_retry = nil
   st.dm_fired = nil      -- P3: an inbox resume re-arms the dead-man (only a human's unpause in DF is left alone)
   return true, string.format('resumed: was %s, now %s%s', was, state, shown), data
 end
@@ -1000,6 +1042,7 @@ end
 -- Neuausrichtung 1 / P3: pause on purpose (a supervisor leaves the fort): owner `park` from any owner, nothing wakes for
 -- it (no PAUSED_BY_DF, no pause question, no dead-man event); `resume` ends it
 M.verbs.park = function(K, args, cmd)
+  st.resume_retry = nil                      -- BUG-923: a later park wins over a pending resume retry
   local paused = observe(K)
   if paused and st.pause_by == 'park' then return true, 'already parked' end
   local was = paused and st.pause_by or 'running'
@@ -1021,6 +1064,7 @@ M.verbs.view = function(K, args, cmd) return VL.verb(K, st, args, cmd) end
 -- CONTRACTS §13 (R6): `by` is a label, so the inbox releases only its own hold; a pause owned by
 -- gordon, df (a save loaded paused) or a popup is released in the game, whatever `by` says
 M.verbs.unpause = function(K, args, cmd)
+  st.resume_retry = nil                      -- BUG-923
   local paused = observe(K)
   if not paused then st.hold = nil; return true, 'not paused' end
   local by = st.pause_by or 'gordon'

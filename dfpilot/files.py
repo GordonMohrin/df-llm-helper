@@ -142,6 +142,10 @@ def read_heartbeat(save_dir: Path, now: float | None = None) -> tuple[dict | Non
 # must never look like "all is well" when it is simply not running
 FOLLOW_HB = ".follow.hb"
 FOLLOW_STALE_S = 60
+# BUG-921: a beat older than FOLLOW_STALE_S with a LIVE pid is "SLOW" (a long audit / autosave stall, Run 17 i3: 7 false OFF in 3 h);
+# older than FOLLOW_STUCK_S it is "STUCK" (alive but not progressing): its own wake, a dead pid stays OFF at once
+FOLLOW_STUCK_S = 300
+FOLLOW_BUSY_SHOW_S = 30        # BUG-922: a beat that says the loop sits in one step for this long is shown as 'busy in <step>'
 
 
 def write_follow_hb(save_dir: Path, doc: dict) -> None:
@@ -191,8 +195,22 @@ def code_stamp() -> str:
     return h.hexdigest()[:12]
 
 
+def _pid_alive(pid) -> bool:
+    from .wake import pid_alive          # lazy: wake imports files
+    return pid_alive(pid)
+
+
+def _busy_text(doc: dict | None) -> str:
+    """BUG-922: ', busy in audit 70 s' from the beat's `step` / `step_s` (what follow's poll loop was doing when it beat last)."""
+    step, sec = (doc or {}).get("step"), (doc or {}).get("step_s")
+    if isinstance(step, str) and step and isinstance(sec, (int, float)) and not isinstance(sec, bool):
+        return f", busy in {step[:40]} {int(sec)} s"
+    return ""
+
+
 def follow_off(save_dir: Path, now: float | None = None) -> str | None:
-    """'follow: OFF (last heartbeat 3h ago)' when follow is not beating for this save; BUG-042: 'follow: OLD CODE ...'
+    """'follow: OFF (last heartbeat 3h ago)' when follow is not beating for this save (BUG-921: a LIVE pid with a late beat is
+    'follow: SLOW (...)', beyond FOLLOW_STUCK_S 'follow: STUCK (...)'); BUG-042: 'follow: OLD CODE ...'
     when the running follow imported other dfpilot code than lies on disk now (a pull it never saw); else None."""
     from .events import fmt_age
     doc, age = read_follow_hb(save_dir, now)
@@ -201,10 +219,19 @@ def follow_off(save_dir: Path, now: float | None = None) -> str | None:
     pid = (doc or {}).get("pid")
     who = f" pid {pid}" if isinstance(pid, int) and not isinstance(pid, bool) else ""       # BUG-385: the owner
     if age > FOLLOW_STALE_S:
+        if who and _pid_alive(pid):          # BUG-921: the process lives: slow, not off
+            busy = _busy_text(doc)
+            if age > FOLLOW_STUCK_S:
+                return (f"follow: STUCK (heartbeat {fmt_age(age)} old, pid {pid} alive but not progressing{busy}: "
+                        f"dfllm follow --takeover only if it stays so)")
+            return f"follow: SLOW (heartbeat {fmt_age(age)} old, pid {pid} alive{busy}; no restart needed)"
         return f"follow: OFF (last heartbeat {fmt_age(age)} ago{', was' + who if who else ''})"
     code = (doc or {}).get("code")
     if isinstance(code, str) and code != code_stamp():
         return f"follow{who}: OLD CODE (dfpilot changed on disk since it started): restart dfllm follow"
+    sec = (doc or {}).get("step_s")
+    if isinstance(sec, (int, float)) and not isinstance(sec, bool) and sec >= FOLLOW_BUSY_SHOW_S and _busy_text(doc):
+        return f"follow: {_busy_text(doc)[2:]} (alive, beating{who}; no restart needed)"     # BUG-922
     return None
 
 

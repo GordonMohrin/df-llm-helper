@@ -264,7 +264,7 @@ T.test('BUG-836: an order with an item condition that is not met names it with t
   local JW = fresh('jobwhy')
   local r = JW.find(W.K, 'order:' .. o.id, {})
   T.eq(r.cause, 'cond_unmet', r.text)
-  T.ok(r.text:find('AtLeast 10 plant: 3 found', 1, true), r.text)
+  T.ok(r.text:find('at least 10 plant: 3 found, unmet', 1, true), r.text)
   T.ok(JW.proven(r), 'a named blocker')
 end)
 
@@ -305,7 +305,7 @@ T.test('BUG-836 retry: a condition counted 0 by the scan while the census holds 
   T.ok(r.cause ~= 'cond_unmet', 'the scan found 0, the census 6978: ' .. r.text)
   T.ok(not JW.proven(r), 'not a proven cause: ' .. r.text)
   T.ok(r.text:find('census holds 6978', 1, true), r.text)
-  T.ok(r.text:find('empty by the census', 1, true), 'the empty storage condition is read: ' .. r.text)
+  T.ok(r.text:find('free by the census', 1, true), 'the empty storage condition is read: ' .. r.text)
   r = JW.find(W.K, 'order:' .. o.id, {})
   T.eq(r.cause, 'cond_unmet', 'without a census the scan counts: ' .. r.text)
 end)

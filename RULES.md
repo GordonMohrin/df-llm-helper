@@ -292,7 +292,7 @@ FPS cap 30; no Lua quicksaves (only `dfllm save`, verified); DF autosave yearly.
 ## 12. Token budget
 ≤ 3 M input tokens and ≤ 30k output tokens per real hour (alarm at 5 M). ≤ 6 wakes per hour. Brief ≤ 1.5k, status ≤ 300, wake line ≤ 150. If a wake needs more than 5 tool calls, stop, write one line for the player and wait for the next wake.
 ## 13. When something looks wrong
-- `dfllm status` says `follow: OFF` (or `follow: OLD CODE`: restart it after a pull, BUG-042): start `Monitor` on `dfllm follow` again; silence from a dead follow is not "all is well".
+- `dfllm status` says `follow: OFF` (or `follow: OLD CODE`: restart it after a pull, BUG-042): start `Monitor` on `dfllm follow` again; silence from a dead follow is not "all is well". `follow: SLOW (heartbeat Ns old, pid N alive ...)` and `follow: busy in <step> N s` mean follow LIVES (a long audit or the yearly autosave): do not restart it (BUG-921/922). Only `follow: STUCK` (wake FOLLOW_STUCK: alive, no beat for 300 s) may need `dfllm follow --takeover`.
 - `dfllm status` stale or no heartbeat for 120 s: read `dfllm supervise --once --dry-run` and tell
   the player (a scheduled supervisor, if set up, handles it); do not restart DF by hand.
 - A command was refused: read the outbox `msg`, fix the args; never retry with another verb to get around it.

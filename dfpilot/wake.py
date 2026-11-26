@@ -61,10 +61,12 @@ still refuses a hand-written `dfllm cmd audit`); it prints the result and the ke
 """
 from __future__ import annotations
 
+import contextlib
 import inspect
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -222,6 +224,11 @@ CLICK_KEY = "needs_click"                      # supervise.CLICK_KEY (K2): the a
 CLICK_PASS_S = 600                             # a standing needs_click wakes a follow that starts late if supervise ran this recently
 HB_STALE_S = 300
 FOLLOW_HB_EVERY_S = 10                         # FR-29: follow's own heartbeat (<save>/.follow.hb)
+# BUG-922 (Run 17 i3: 7 FOLLOW_OFF, the beat came only from poll() in the thread that also ran a 70-75 s audit): a daemon thread beats
+# beside the poll loop, but only while the loop PROGRESSES: every poll step start/end stamps it, and a step that runs longer than
+# FOLLOW_BUSY_MAX_S stops the beats (a hung loop must look hung: status turns SLOW, then STUCK). The beat names the running step.
+FOLLOW_BUSY_MAX_S = 240
+FOLLOW_STEP_LOG_S = 20                         # a poll step longer than this is written to cli.log (follow/slow_step): the measurement
 AUTO_TIMEOUT_S = 60
 # BUG-639 (Run 16b i2 Valleyhame y375-y378: `AUTO_FAIL farms / tombs / bedrooms: no sites snapshot` over and over while kern.log said 'snapshot:
 # ... (sites, 168480 tiles, by inbox:follow) written 1 min / 2 min / 3 min after the request'): the sites export of a default box takes one to
@@ -950,6 +957,12 @@ class Follower:
         self._core_site_read = 0.0                   # BUG-441: wall of the last core-site look
         self._core_site_tried: dict[str, float] = {}     # BUG-441: project id -> wall of the last re-site cancel
         self._beat = -1e18
+        self.mono: Callable[[], float] = time.monotonic     # BUG-922: real seconds of loop progress (a test replaces it)
+        self._loop_mono = self.mono()                       # last step start/end; the beat thread beats only while this is young
+        self._step_name: str | None = None
+        self._step_mono = 0.0
+        self._hb_lock = threading.Lock()
+        self._hb_stop = threading.Event()
         self._stall: dict = {}                       # BUG-475: tick (heartbeat), since (wall it was first seen), told (wall of the wake)
         self._pdf: dict = {}                         # BUG-614: owner (df / popup), since (wall follow first saw the pause), told
 
@@ -1052,25 +1065,26 @@ class Follower:
         if d != self.dir:
             self._attach(d)
         printed: list[str] = []
+        self._loop_mono = self.mono()
         for e in self.tail.poll():
-            self._on_event(e, now)
+            with self._step(f"event {e.get('type')}"):
+                self._on_event(e, now)
         self._heartbeat(now)
-        self._check_heartbeat(now)
-        self._check_stall(now)
-        self._check_paused(now)
-        self._check_supervise(now)
-        self._check_quicksave(now)
-        self._check_plan(now)
-        self._check_perimeter(now)
-        self._check_stale(now)
-        self._check_ceiling(now)
-        self._sweep_orphans(now)
-        self._check_core_site(now)
+        for name, fn in (("check_heartbeat", self._check_heartbeat), ("check_stall", self._check_stall),
+                         ("check_paused", self._check_paused), ("check_supervise", self._check_supervise),
+                         ("check_quicksave", self._check_quicksave), ("check_plan", self._check_plan),
+                         ("check_perimeter", self._check_perimeter), ("check_stale", self._check_stale),
+                         ("check_ceiling", self._check_ceiling), ("sweep_orphans", self._sweep_orphans),
+                         ("check_core_site", self._check_core_site)):
+            with self._step(name):
+                fn(now)
         if self.auto or self.audit:
-            self._run_jobs(now)
+            with self._step("run_jobs"):
+                self._run_jobs(now)
         if now - self._pruned >= PRUNE_EVERY_S:
             self._pruned = now
-            files.prune_outbox(self.dir)
+            with self._step("prune_outbox"):
+                files.prune_outbox(self.dir)
         burst = self.gate.flush(now, tick=lambda: files.current_tick(self.dir))     # BUG-240: game time
         if not burst and self.gate.pending:
             held = self.gate.held_note(now, lambda: files.read_state(self.dir))
@@ -1205,13 +1219,65 @@ class Follower:
         if now - self._beat < FOLLOW_HB_EVERY_S or self.dir is None:
             return
         self._beat = now
+        self._write_beat(now)
+
+    @contextlib.contextmanager
+    def _step(self, name: str):
+        """BUG-922: one poll step: stamps loop progress (the beat thread beats only while this is young), names the step in the
+        beat, and a step longer than FOLLOW_STEP_LOG_S real seconds goes to cli.log (follow/slow_step) with its duration."""
+        t0 = self.mono()
+        self._step_name, self._step_mono, self._loop_mono = name, t0, t0
         try:
-            files.write_follow_hb(self.dir, {"v": 2, "wall": int(now), "last_n": self.tail.last_n if self.tail else 0,
-                                             "code": CODE,        # BUG-042: status names a follow on old code
-                                             "pid": os.getpid(),  # BUG-385: status names the owner
-                                             "auto": 1 if self.auto else 0})   # DECISIONS 2: --no-auto places nothing
+            yield
+        finally:
+            t1 = self.mono()
+            self._step_name, self._loop_mono = None, t1
+            if t1 - t0 > FOLLOW_STEP_LOG_S and self.dir is not None:
+                try:
+                    files.log_cli(self.dir, "follow", "slow_step", {"step": name, "s": round(t1 - t0, 1)},
+                                  f"poll step '{name}' took {t1 - t0:.0f} s (> {FOLLOW_STEP_LOG_S} s)")
+                except Exception:          # noqa: BLE001 - a measurement must never stop the follower
+                    pass
+
+    def _write_beat(self, now: float) -> None:
+        d = self.dir
+        if d is None:
+            return
+        doc = {"v": 2, "wall": int(now), "last_n": self.tail.last_n if self.tail else 0,
+               "code": CODE,        # BUG-042: status names a follow on old code
+               "pid": os.getpid(),  # BUG-385: status names the owner
+               "auto": 1 if self.auto else 0}   # DECISIONS 2: --no-auto places nothing
+        step = self._step_name
+        if step:                    # BUG-922: what the loop does right now ("busy in audit 70 s")
+            doc["step"], doc["step_s"] = step, int(max(0.0, self.mono() - self._step_mono))
+        try:
+            with self._hb_lock:
+                files.write_follow_hb(d, doc)
         except OSError as e:
             sys.stderr.write(f"follow: cannot write heartbeat: {e}\n")
+
+    def beat_thread_tick(self, wall: float | None = None) -> bool:
+        """BUG-922: one tick of the beat thread: beats when FOLLOW_HB_EVERY_S passed since the last beat AND the poll loop made
+        progress (a step started or ended) within FOLLOW_BUSY_MAX_S; a loop stuck in one step longer than that gets no beat."""
+        wall = time.time() if wall is None else wall
+        if self.dir is None or wall - self._beat < FOLLOW_HB_EVERY_S:
+            return False
+        if self.mono() - self._loop_mono > FOLLOW_BUSY_MAX_S:
+            return False
+        self._beat = wall
+        self._write_beat(wall)
+        return True
+
+    def start_beat_thread(self) -> threading.Thread:
+        def loop() -> None:
+            while not self._hb_stop.wait(1.0):
+                try:
+                    self.beat_thread_tick()
+                except Exception as e:     # noqa: BLE001 - never die silently into a false OFF
+                    sys.stderr.write(f"follow: beat thread: {type(e).__name__}: {e}\n")
+        t = threading.Thread(target=loop, name="follow-beat", daemon=True)
+        t.start()
+        return t
 
     def _check_heartbeat(self, now: float) -> None:
         if paths.active_save() != self.dir.name:
@@ -2734,6 +2800,8 @@ def run(args) -> int:
     from . import session as session_mod
     fcfg = session_mod.config()["follow"]
     mem_t, spawn_t, sleep_err = t0, -1e18, [0]
+    if not one_shot:
+        f.start_beat_thread()                  # BUG-922: the beat does not wait for an audit
     try:
         while True:
             try:
@@ -2778,6 +2846,7 @@ def run(args) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
+        f._hb_stop.set()
         f.save_state()
         release_lock(lock.dir)
 

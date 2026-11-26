@@ -188,12 +188,15 @@ def sys_reasons(save_dir: Path, cfg: dict, now: float) -> list[dict]:
         off = files.follow_off(save_dir, now)
         if off and "OFF" in off:
             out.append({"type": "FOLLOW_OFF", "key": "FOLLOW_OFF", "n": 0, "msg": off})
+        elif off and "STUCK" in off:           # BUG-921: alive but silent for FOLLOW_STUCK_S; SLOW (alive, late) wakes nobody
+            out.append({"type": "FOLLOW_STUCK", "key": "FOLLOW_STUCK", "n": 0, "msg": off})
     return out
 
 
 SYS_NEXT = {"DEADMAN": "dfllm cmd resume; then dfllm brief",
             "POPUP_PAUSE": "dfllm cmd resume (the reply names the popup it read; it refuses threat or curse popups: then tell Gordon); then dfllm status", "KERNEL_STALE": "dfllm doctor",
-            "FOLLOW_OFF": "dfllm follow --takeover (in the background); then dfllm status"}
+            "FOLLOW_OFF": "dfllm follow --takeover (in the background); then dfllm status",
+            "FOLLOW_STUCK": "dfllm status (the line names the step it hangs in); only if the beat stays old: dfllm follow --takeover"}
 
 
 def wait_wake(save_dir: Path, timeout: float = WAIT_TIMEOUT_S, poll: float = 0.2, since: int | None = None,

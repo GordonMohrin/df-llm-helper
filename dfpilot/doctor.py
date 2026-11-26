@@ -378,7 +378,8 @@ def diagnose(save_dir: Path) -> tuple[list[str], list[str]]:
         out.append("perf.csv: no rows")
     off = files.follow_off(d)
     if off:                                    # FR-29: a silent follow is not "all is well"
-        (bad if active == d.name else out).append(off + ("" if active == d.name else " (DF not running this save)"))
+        (bad if active == d.name and not off.startswith("follow: busy") and not off.startswith("follow: SLOW")
+         else out).append(off + ("" if active == d.name else " (DF not running this save)"))   # BUG-921/922: busy and slow are alive
     own = files.follow_owner(d)                # BUG-385: which pid holds the instance (two writers are a problem)
     if own:
         (bad if "two follows" in own else out).append(own)

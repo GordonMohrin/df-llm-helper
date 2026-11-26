@@ -496,6 +496,9 @@ local function build(o)
     if st.now.ms < st.quiet_until and st.mode == 'PEACE' then return 'save', st.quiet_why end   -- BUG-070: PEACE only
     return nil
   end
+  -- BUG-923: the newest frame gap >= CAD.gap_ms ({wall, tick, ms, cause, end_ms}) or nil: a command handled right after it
+  -- (arbiter resume) knows its DF frame may not have processed a key yet
+  function K.last_gap() return st.gaps[#st.gaps] end
   function K.emit(etype, cls, msg, d) return emit_as(st.current, etype, cls, msg, d) end
   function K.mode() return st.mode end
   function K.mode_since() return st.mode_since end
@@ -1275,7 +1278,7 @@ function M.note_gap(st, gap, prev_cost, prev_year)
   p.gapby[cause], p.gapn[cause] = (p.gapby[cause] or 0) + gap, (p.gapn[cause] or 0) + 1
   if gap > p.gap_max then p.gap_max, p.gap_cause = gap, cause end
   local ring = st.gaps
-  ring[#ring + 1] = {wall = now.wall, tick = now.tick, ms = gap, cause = cause, task = st.prev_task and trunc(st.prev_task, 40) or nil}
+  ring[#ring + 1] = {wall = now.wall, tick = now.tick, ms = gap, end_ms = now.ms, cause = cause, task = st.prev_task and trunc(st.prev_task, 40) or nil}
   if #ring > 12 then table.remove(ring, 1) end
   st.log_as('kern', 'warn', string.format('frame gap %d ms (blame %s)%s', gap, cause, extra))
   if cause == 'save' then M.quiet(st, 'after a DF save') end
