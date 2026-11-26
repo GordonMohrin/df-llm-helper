@@ -128,7 +128,7 @@ for _, drink in ipairs({true, false}) do
     T.ok(d7[1].d.reg7 ~= nil and d7[1].d.free7 ~= nil and d7[1].d.cx7 ~= nil)
   end)
 
-  T.test('BUG-918b D3 (i4 numbers, ' .. label .. '): nothing is freed after 7 days (registration kept, cont_free 0): the event says so, the old limits go back, the release rests', function()
+  T.test('BUG-918b D3 (i4 numbers, ' .. label .. '): nothing is freed after 7 days (registration kept, cont_free 0): the event says so, the limits stay (BUG-930), the release rests', function()
     local W, ord, P, c = i4_world(drink)
     local econ = require('dfllm.economy')
     c.cancel.stand = false
@@ -140,15 +140,15 @@ for _, drink in ipairs({true, false}) do
     local d7 = ev_of(W, 'd7')
     T.eq(#d7, 4)
     T.ok(d7[1].d.verdict:find('DF kept the registration', 1, true) and d7[1].d.verdict:find('cont_free did not rise (0 -> 0)', 1, true), d7[1].d.verdict)
-    T.eq(limits(P), {9, 9, 9, 27, 3, 15}, 'the old limits are back')
-    T.eq(p.relstop, true)
+    T.eq(limits(P), {0, 0, 0, 1, 3, 15}, 'NEU17c BUG-930: the limits STAY lowered (the old build gave them back here)')
+    T.eq(p.relstop, nil)
     local n = #W.find_events('PILE_BARREL_RELEASE')
     day(W, econ, c, 20, 12)
     T.eq(#W.find_events('PILE_BARREL_RELEASE'), n, 'no loop: nothing is lowered again')
-    T.eq(limits(P), {9, 9, 9, 27, 3, 15})
+    T.eq(limits(P), {0, 0, 0, 1, 3, 15}, 'still held after the old 14-day bound')
   end)
 
-  T.test('BUG-918b D2/D3 (i4 numbers, ' .. label .. '): the registration falls and cont_free rises: the verdict says so, the limits stay until the cure ends, then they go back', function()
+  T.test('BUG-918b D2/D3 (i4 numbers, ' .. label .. '): the registration falls and cont_free rises: the verdict says so, the limits stay (held) also when the cure ends', function()
     local W, ord, P, c = i4_world(drink)
     local econ = require('dfllm.economy')
     c.cancel.stand = false
@@ -164,11 +164,11 @@ for _, drink in ipairs({true, false}) do
     T.eq(d7[1].d.verdict, 'the registration fell')
     T.eq(d7[1].d.free7, 110)
     T.eq(limits(P), {0, 0, 0, 1, 3, 15}, 'still lowered')
-    -- the cure ends (containers back, no cancels for the hysteresis days): the brew_watch exit gives them back
+    -- the cure ends (containers back, no cancels for the hysteresis days): NEU17c BUG-930: cx_end no longer gives a held limit back
     local pst = W.K.persist.get('m.economy')
-    T.ok(pst.pilecap ~= nil, 'the old limits are remembered')
+    T.ok(pst.relpiles ~= nil and pst.relpiles['61'].old == 9, 'the old limits are remembered in the hold')
     econ.cx_end(W.K, pst, true)
-    T.eq(limits(P), {9, 9, 9, 27, 3, 15}, 'restored at the cure end')
+    T.eq(limits(P), {0, 0, 0, 1, 3, 15}, 'held at the cure end')
   end)
 end
 
@@ -239,7 +239,7 @@ T.test('BUG-918b D1 (reload): ON, economy re-required, 40+ days with 0 cancels a
     if d == 3 then
       econ2.cx_expire(W.K, c, p, now + d * DAYT)     -- inside the freeze's own 14-day bound: only the gate could end it
       T.eq(limits(P), {0, 0, 0, 1, 3, 15}, 'cx_expire after the reload: limits NOT given back (gate held by p.cxb)')
-      T.ok(type(p.pilecap) == 'table')
+      T.ok(type(p.relpiles) == 'table')
     end
   end
   T.eq(econ2.df_count(W.K, econ2.BREW_KINDS, econ2.CX_REASON, c, now + 45 * DAYT), 0)
@@ -248,7 +248,7 @@ T.test('BUG-918b D1 (reload): ON, economy re-required, 40+ days with 0 cancels a
   T.ok(p.cxb == nil, 'cont_free >= N clears the persisted hold')
 end)
 
-T.test('BUG-918b D1: with the gate held by the order condition the release lowers, and the cure end restores the limits', function()
+T.test('BUG-918b D1: with the gate held by the order condition the release lowers, and the cure end keeps the limits (BUG-930)', function()
   local W, ord, P, c = i4_world(false)
   local econ = require('dfllm.economy')
   c.cancel.stand = false
@@ -264,7 +264,7 @@ T.test('BUG-918b D1: with the gate held by the order condition the release lower
   local now = W.K.now().tick
   for d = 1, 15 do econ.cx_gate(W.K, c, now + d * DAYT) end
   econ.cx_expire(W.K, c, p, now + 16 * DAYT)
-  T.eq(limits(P), {9, 9, 9, 27, 3, 15}, 'cx_expire -> cx_end: restored')
+  T.eq(limits(P), {0, 0, 0, 1, 3, 15}, 'cx_expire -> cx_end: held (BUG-930)')
 end)
 
 -- D4: the reserve's barrel order is open, nothing made: the blocker from jobwhy, once a week

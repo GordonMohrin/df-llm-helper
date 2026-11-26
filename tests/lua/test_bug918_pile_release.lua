@@ -108,7 +108,7 @@ T.test('BUG-918: the measurement events carry the free empties before / after', 
   watch(102)
   ev = W.find_events('PILE_BARREL_RELEASE')
   T.eq({ev[2].d.phase, ev[2].d.free0, ev[2].d.free1}, {'d1', 3, 9})
-  T.ok(ev[2].msg:find('free empties 3 -> 9', 1, true), ev[2].msg)
+  T.ok(ev[2].msg:find('usable empties (cont_free, registered ones not counted) 3 -> 9', 1, true), ev[2].msg)
 end)
 
 T.test('BUG-918: a release that lowers no pile says so once per game week, with the reasons; nothing is lowered or written', function()
@@ -230,11 +230,11 @@ T.test('BUG-918: release_watch beside brew_watch cx_end (no brew order): no lowe
   for _, e in ipairs(W.find_events('PILE_BARREL_RELEASE')) do if e.d.phase == 'lowered' then lowered = lowered + 1 end end
   print('BUG-918 cycle: lowered events in 9 days: ' .. lowered)
   T.eq(lowered, 1, 'lowered once, not every game day')
-  T.eq(P[1].max_barrels, 54, 'the old limit is back and stays')
-  T.eq(p.relpiles, nil)
+  T.eq(P[1].max_barrels, 2, 'BUG-930: the lowered limit is held (cx_end gives nothing back)')
+  T.ok(p.relpiles ~= nil and p.relpiles['41'].old == 54, 'the old limit is remembered for the give-back')
 end)
 
-T.test('BUG-918: cx_end (containers back) gives the released limits back and forgets them: no lowering for the rest week, none measured', function()
+T.test('BUG-918 / BUG-930: cx_end (containers back) does NOT give a held limit back: it stays, the measurement goes on', function()
   local W, ord, P = release_world()
   local econ = require('dfllm.economy')
   W.mods.economy.disabled = true
@@ -247,11 +247,13 @@ T.test('BUG-918: cx_end (containers back) gives the released limits back and for
   T.eq(P[1].max_barrels, 2)
   T.ok(p.relpiles and p.relmeas, 'a lowering is measured')
   econ.cx_end(W.K, p)
-  T.eq(P[1].max_barrels, 54, 'restored')
-  T.eq({p.relpiles, p.relmeas}, {nil, nil})
+  T.eq(P[1].max_barrels, 2, 'held')
+  T.ok(p.relpiles ~= nil and p.relmeas ~= nil, 'still held and measured')
   for _ = 1, 5 do W.run(DAYT, {skip = 100}); feed(econ, W.K, 12, W.K.now().tick); econ.release_watch(W.K, c) end
-  T.eq(P[1].max_barrels, 54, 'not lowered again inside the week')
-  for _, e in ipairs(W.find_events('PILE_BARREL_RELEASE')) do T.ok(e.d.phase ~= 'd1' and e.d.phase ~= 'd7', 'no verdict on a restored pile') end
+  T.eq(P[1].max_barrels, 2, 'still held')
+  local lowered = 0
+  for _, e in ipairs(W.find_events('PILE_BARREL_RELEASE')) do if e.d.phase == 'lowered' then lowered = lowered + 1 end end
+  T.eq(lowered, 1, 'lowered once')
 end)
 
 T.done()

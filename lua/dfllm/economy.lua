@@ -503,7 +503,7 @@ M.DEFAULTS = {
   diag = {cx_cure = true, mgr_chores = false, still_pin = false, stall_line = true},
   -- NEU5 (BUG-847): gamelog = read DF's gamelog.txt as the primary source of the tally (the eventful reports stay the fallback), gamelog_bytes = at most
   -- that many bytes per look
-  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, stand = true, stand_quit_d = 30, stand_calm_d = 30, stand_floor = 2, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
+  cancel = {days = 7, cx_min_n = 5, cx_pile_days = 14, cx_off_n = 2, cx_off_days = 14, give_target = 20, give_days = 28, give_step = 3, give_every_d = 7, stand = true, stand_quit_d = 30, stand_calm_d = 30, stand_floor = 2, fruit_off_n = 10, fruit_hold_d = 30, gamelog = true, gamelog_bytes = 131072, gamelog_chunks = 8},
   -- NEU7 (BUG-854): the standing container reserve (M.plan_reserve): batch = brews open / brews_per, min_batch..max_batch, again while DF still cancels after the
   -- batch (grace_days, repeat_days apart, max_repeats in a row then every 14 days), then a trickle of trickle_n every trickle_days days (below trickle_free free
   -- containers); rock barrels when boulders >= batch + rock_plenty or wood is short; total_cap containers in all
@@ -2199,11 +2199,11 @@ end
 -- (D) while DF's container reason is active, the kernel's food piles that accept no drink and hold registered EMPTY barrels get their limit lowered to the registered barrels with
 --     contents (act.pile_barrels 'release': the stockpile panel's own field, never an item or the registry); old limits go back through p.pilecap (the standing cap's exit);
 -- the effect is MEASURED: PILE_BARREL_RELEASE one and seven game days after each lowering (registered empties before / after, brew cancels before / after). If the registered empties
--- did not fall after 7 days, p.relstop: DF kept the registration, nothing is lowered further.
+-- did not fall after 7 days the event says so (NEU17c BUG-930: no p.relstop, no restore: the limit is HELD, M.release_giveback hands it back).
 M.REL_D1, M.REL_D7 = 1, 7
 -- (verifier) a lowering made by the release is never left to the standing cap's exit (which never comes while DF keeps cancelling): when the d7 verdict is 'DF kept the registration' the old
 -- limits go back AT ONCE, and in any case after REL_MAX_D game days; then the release pauses REL_PAUSE_D days. 0 is allowed as a new limit only for a pile with no barrel with contents.
-M.REL_MAX_D, M.REL_PAUSE_D = 14, 30
+M.REL_MAX_D, M.REL_PAUSE_D = 14, 30          -- REL_MAX_D: unused since NEU17c BUG-930 (no time bound); REL_PAUSE_D: rest before a NEW pile is lowered
 M.REL_IDLE_D = 7        -- NEU17 BUG-918: a release call that lowered no pile is not repeated (nor its registry scan) for this many game days
 function M.release_restore(K, p, now, why, only)
   if type(p.relpiles) ~= 'table' then return 0 end
@@ -2222,7 +2222,7 @@ function M.release_restore(K, p, now, why, only)
     if type(p.pilecap) == 'table' then p.pilecap[id] = nil end
   end
   if type(p.pilecap) == 'table' and next(p.pilecap) == nil then p.pilecap, p.pilet = nil, nil end
-  if next(p.relpiles) == nil then p.relpiles = nil end
+  if next(p.relpiles) == nil then p.relpiles, p.hold = nil, nil end
   K.log('warn', 'pile barrel release over (%s): the barrel limits of %d piles are back at once%s', why, #ids, ok and '' or ' (the write failed)')
   K.persist.touch('m.economy')
   return #ids
@@ -2271,7 +2271,7 @@ function M.release_emit(K, e, phase, reg, cx, verdict, done, free)
   if phase == 'd7' then f.reg7 = reg; f.cx7 = cx; f.free7 = free; f.done7 = done end
   if phase == 'd1' then f.reg1 = reg; f.free1 = free; f.cx1 = cx; f.done1 = done end
   if verdict then f.verdict = verdict end
-  local txt = string.format('pile %s barrel limit %s -> %s: registered empties %s%s%s%s; free empties %s%s; brew cancels in the window %s%s%s%s',
+  local txt = string.format('pile %s barrel limit %s -> %s: registered empties %s%s%s%s; usable empties (cont_free, registered ones not counted) %s%s; brew cancels in the window %s%s%s%s',
     tostring(e.id), tostring(e.old), tostring(e.new), tostring(e.r0), e.r1 ~= nil and phase == 'd7' and (' -> ' .. tostring(e.r1) .. ' (1 d)') or '',
     phase == 'd1' and (' -> ' .. tostring(reg) .. ' (1 d)') or '', phase == 'd7' and (' -> ' .. tostring(reg) .. ' (7 d)') or '',
     tostring(e.free0), (phase == 'd1' or phase == 'd7') and (' -> ' .. tostring(free)) or '',
@@ -2302,14 +2302,12 @@ function M.release_measure(K, c, p, now, inv)
       -- NEU17b D3: the verdict is read off the free empties too. Nothing freed (cont_free did not rise in 7 days): the event says so and the release RESTS (no loop): the old limit goes back when
       -- DF kept the registration; when the registration fell but the free count did not rise (the barrels were taken at once) the limit stays until the cure ends.
       local v
-      if kept then v = 'DF kept the registration (no further pile is lowered, the old limit goes back now)'
+      if kept then v = 'DF kept the registration of this pile (BUG-930: the limit stays lowered, it goes back only by the stepwise give-back)'
       else v = 'the registration fell' end
       if not rose then v = v .. string.format('; cont_free did not rise (%s -> %s): the release rests for %d days', tostring(e.free0), tostring(free), M.REL_PAUSE_D) end
-      if not rose or kept then p.relnext = now + M.REL_PAUSE_D * DAY end
-      if kept then p.relstop = true end
+      if not rose or kept then p.relnext = now + M.REL_PAUSE_D * DAY end      -- the rest only keeps NEW piles from being lowered; nothing is given back here (BUG-930)
       M.release_emit(K, e, 'd7', reg, cx, v, done, free)
       p.relmeas[id] = nil
-      if kept then M.release_restore(K, p, now, 'DF kept the registration', id) end
       K.persist.touch('m.economy')
     elseif el >= M.REL_D1 * DAY and (e.st or 0) < 1 then
       e.st, e.r1 = 1, reg
@@ -2324,19 +2322,16 @@ function M.pile_release(K, c, r)
   local p, inv, now = r.p, r.inv or K.census.i or {}, math.tointeger(r.now) or K.now().tick
   local cc = c.cancel or {}
   M.release_measure(K, c, p, now, inv)
-  if type(p.relpiles) == 'table' then
-    for id, e in pairs(p.relpiles) do
-      if now - (math.tointeger(e.t) or now) >= M.REL_MAX_D * DAY then
-        p.relnext = now + M.REL_PAUSE_D * DAY
-        M.release_restore(K, p, now, 'time bound of ' .. M.REL_MAX_D .. ' days', id)
-      end
-    end
-  end
-  if cc.release == false or p.relstop or (p.relnext and now < p.relnext) or type(K.act.pile_barrels) ~= 'function' then return end
+  -- NEU17c BUG-930: no time bound, no 'DF kept the registration' restore, no p.relstop: a lowered limit is HELD (M.release_giveback hands it back in steps once the usable empties stay
+  -- plentiful). A p.relstop persisted by the older code is dropped here (i4 had it set by the d7 verdict of 14 of 108 piles, which switched the release off for good).
+  if p.relstop then p.relstop = nil; K.persist.touch('m.economy') end
+  if cc.release == false then M.release_restore(K, p, now, 'the release is switched off'); p.hold = nil; return end
+  local relower = M.release_giveback(K, c, p, inv, now)
+  if (p.relnext and now < p.relnext and not relower) or type(K.act.pile_barrels) ~= 'function' then return end
   if not M.cx_gate(K, c, now) then return end                       -- only with DF's own reason (BUG-844)
   if (math.tointeger(inv.barrels_reg) or 0) <= 0 then return end   -- no registered empty barrel in the census
   if st.relhold and now >= st.relhold and now - st.relhold < 30 * DAY then return end   -- NEU17 BUG-918: brew_watch found no brew that could run: nothing to free barrels for
-  if st.relidle and now < st.relidle and st.relidle - now <= M.REL_IDLE_D * DAY then return end   -- NEU17 BUG-918: the last call lowered nothing: not again before the idle week is over
+  if not relower and st.relidle and now < st.relidle and st.relidle - now <= M.REL_IDLE_D * DAY then return end   -- NEU17 BUG-918: the last call lowered nothing: not again before the idle week is over
   local ok, res = K.act.pile_barrels('release', {})
   if not (ok and type(res) == 'table') then
     K.log('warn', 'pile barrel release: %s', tostring(res))
@@ -2348,10 +2343,16 @@ function M.pile_release(K, c, r)
     if p.relmeas[tostring(e.id)] == nil then
       p.relmeas[tostring(e.id)] = {id = e.id, old = e.old, new = e.new, r0 = e.reg_empty or 0, cx0 = cx, t = now, st = 0, free0 = math.tointeger(inv.cont_free), done0 = M.brew_done_n(K, c, now), drink = e.drink}
     end
-    if type(p.pilecap) ~= 'table' then p.pilet = now; p.pilecap = {} end
-    if p.pilecap[tostring(e.id)] == nil then p.pilecap[tostring(e.id)] = e.old end
+    -- NEU17c BUG-930: the held limit lives in p.relpiles only ({old = the limit before the FIRST lowering, cur = the limit written now}); a lowering of an already raised pile keeps `old`.
+    -- Nothing goes into p.pilecap (the freeze's own bookkeeping, handed back by cx_end / cx_expire), so the cure's end can no longer give a held limit back.
     p.relpiles = type(p.relpiles) == 'table' and p.relpiles or {}
-    if p.relpiles[tostring(e.id)] == nil then p.relpiles[tostring(e.id)] = {old = e.old, t = now} end
+    local rid = tostring(e.id)
+    if p.relpiles[rid] == nil then
+      local was = type(p.pilecap) == 'table' and math.tointeger(p.pilecap[rid]) or nil     -- a freeze lowered it before: the limit before THAT is the old one
+      p.relpiles[rid] = {old = was or e.old, t = now, cur = e.new}
+    else p.relpiles[rid].cur = e.new end
+    if type(p.pilecap) == 'table' then p.pilecap[rid] = nil; if next(p.pilecap) == nil then p.pilecap, p.pilet = nil, nil end end
+    p.hold = type(p.hold) == 'table' and p.hold or {t = now}
     K.log('warn', 'pile barrel release: stockpile %s (%s) barrel limit %s -> %s (%s registered empty barrels kept as its containers, %s with contents); DF cancelled brews %dx', tostring(e.id), tostring(e.name),
           tostring(e.old), tostring(e.new), tostring(e.reg_empty), tostring(e.reg_full), cx)
     M.release_emit(K, p.relmeas[tostring(e.id)], 'lowered', e.reg_empty or 0, cx)
@@ -2365,12 +2366,91 @@ function M.pile_release(K, c, r)
   end
   if #res > 0 then st.relidle = nil end
   if #res > 0 then K.persist.touch('m.economy') end
+  if relower then p.relnext = nil end
   -- NEU17 BUG-918 (i4 Girderroots y491: 115 of 121 empties registered in stockpiles, the container reason ON, and no PILE_BARREL_RELEASE ever: a call that lowered nothing said nothing, so the
   -- live run could not tell 'no pile qualified' from 'the write failed'): a release that lowered no pile is NOTED, once per game week, with the numbers and the reasons per pile
   if #res == 0 and p.relpiles == nil and (type(p.relmeas) ~= 'table' or next(p.relmeas) == nil) then   -- not while a lowering is being measured
     M.release_none(K, p, inv, now, res, cx)
     st.relidle = now + M.REL_IDLE_D * DAY        -- NEU17 BUG-918: nothing qualified: no daily registry scan (act.pile_barrels release) for a game week
   end
+end
+-- NEU17c BUG-930 (i4 Girderroots y501-y504: the 14-day bound and the 'DF kept the registration' verdict of 14 of 108 piles gave every limit back, the cancels were back within 6 days, p.relstop
+-- then kept the release off for good and the drink fell 387 -> 0 d): the lowered limits are HELD. Give-back only when the usable empties (census cont_free, the one counter the gate, the status
+-- line and the events use) stayed >= cancel.give_target for cancel.give_days game days with no DF container reason; then +cancel.give_step per pile every cancel.give_every_d days
+-- (never above the old limit). DF's container reason during the steps (the gate) -> back to the full-barrel count at once (the return value 'relower' lets M.pile_release lower again).
+M.GIVE_TARGET, M.GIVE_DAYS, M.GIVE_STEP, M.GIVE_EVERY_D = 20, 28, 3, 7
+function M.release_giveback(K, c, p, inv, now)
+  local rp = p.relpiles
+  if type(rp) ~= 'table' or next(rp) == nil then
+    if p.hold ~= nil then p.hold = nil; K.persist.touch('m.economy') end
+    return false
+  end
+  local cc = c.cancel or {}
+  local h = type(p.hold) == 'table' and p.hold or nil
+  if not h then h = {t = now}; p.hold = h; K.persist.touch('m.economy') end
+  if M.cx_gate(K, c, now) then
+    local was = h.stepping
+    if h.ok or h.step or was then h.ok, h.step, h.stepping = nil, nil, nil; K.persist.touch('m.economy') end
+    if was then K.log('warn', 'pile barrel release: DF cancels brews for want of a container again while the limits were given back in steps: the piles are lowered again at once') end
+    return was == true
+  end
+  local free = M.cont_free_of(K, inv)
+  local target = math.tointeger(cc.give_target) or M.GIVE_TARGET
+  if free == nil then return false end
+  if free < target then
+    if h.ok or h.stepping or h.step then h.ok, h.step, h.stepping = nil, nil, nil; K.persist.touch('m.economy') end
+    return false
+  end
+  if not h.ok then h.ok = now; K.persist.touch('m.economy') end
+  local span = (math.tointeger(cc.give_days) or M.GIVE_DAYS) * DAY
+  if now - h.ok < span then return false end
+  local every = (math.tointeger(cc.give_every_d) or M.GIVE_EVERY_D) * DAY
+  if h.step and now >= h.step and now - h.step < every then return false end
+  if type(K.act.pile_barrels) ~= 'function' then return false end
+  local stepn = math.max(1, math.tointeger(cc.give_step) or M.GIVE_STEP)
+  local back, from = {}, {}
+  for id, e in pairs(rp) do
+    local old = math.tointeger(e.old)
+    local cur = math.tointeger(e.cur)
+    if cur == nil and type(p.relmeas) == 'table' and p.relmeas[id] then cur = math.tointeger(p.relmeas[id].new) end
+    if old ~= nil then
+      cur = cur or 0
+      from[id] = cur
+      back[id] = math.min(old, cur + stepn)
+    end
+  end
+  local ok, res = K.act.pile_barrels('restore', back)
+  if not ok then K.log('warn', 'pile barrel release: the stepwise give-back could not be written'); return false end
+  h.step, h.stepping = now, true
+  local done, n = {}, 0
+  for _, w in ipairs(type(res) == 'table' and res or {}) do done[tostring(w.id)] = math.tointeger(w.new) end
+  local reg = math.tointeger(inv.barrels_reg) or 0
+  local cx = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
+  for id, nw in pairs(done) do
+    local e = rp[id]
+    if e then
+      n = n + 1
+      local before = from[id]
+      e.cur = nw
+      K.emit('PILE_BARREL_RELEASE', 'B', string.format('pile %s barrel limit %s -> %s: give-back step (old limit %s); usable empties (cont_free) %s >= %d for %d d; brew cancels in the window %d',
+             id, tostring(before), tostring(nw), tostring(e.old), tostring(free), target, (now - h.ok) // DAY, cx):sub(1, 199),
+             {pile = math.tointeger(tonumber(id)) or 0, before = before or 0, after = nw, reg0 = reg, phase = 'giveback', free0 = free, cx0 = cx})
+      if nw >= (math.tointeger(e.old) or 0) then
+        rp[id] = nil
+        if type(p.relmeas) == 'table' then p.relmeas[id] = nil end
+      end
+    end
+  end
+  local held = 0
+  for _ in pairs(rp) do held = held + 1 end
+  K.log('warn', 'pile barrel release: stepwise give-back: %d piles raised by %d (usable empties %d >= %d for %d d), %d still held', n, stepn, free, target, (now - h.ok) // DAY, held)
+  if next(rp) == nil then
+    p.relpiles, p.hold = nil, nil
+    if type(p.relmeas) == 'table' and next(p.relmeas) == nil then p.relmeas = nil end
+    K.log('warn', 'pile barrel release over: every held limit is back at its old value')
+  end
+  K.persist.touch('m.economy')
+  return false
 end
 function M.release_none(K, p, inv, now, res, cx)
   if st.relnone and now >= st.relnone and now - st.relnone < 7 * DAY then return end
@@ -2399,7 +2479,7 @@ function M.release_none(K, p, inv, now, res, cx)
     parts[#parts + 1] = string.format('%d limit writes failed (%s)', nf, table.concat(ids, ' '))
     K.log('warn', 'pile barrel release: the barrel limit could not be written on %d piles (%s)', nf, table.concat(ids, ' '))
   end
-  local txt = string.format('no pile lowered: %d registered empty barrels, %d free empties, %d piles looked at (%s); brew cancels in the window %d',
+  local txt = string.format('no pile lowered: %d registered empty barrels, %d usable empties (cont_free), %d piles looked at (%s); brew cancels in the window %d',
                             reg, free, nk + nf, #parts > 0 and table.concat(parts, ', ') or 'none holds a registered empty', cx or 0)
   K.log('info', 'pile barrel release: %s', txt)
   K.emit('PILE_BARREL_RELEASE', 'B', txt:sub(1, 199), {pile = 0, before = 0, after = 0, reg0 = reg, phase = 'none', free0 = free, cx0 = cx or 0, kept = nk, failed = nf})
@@ -2469,22 +2549,12 @@ function M.cx_end(K, p, keep, force)
   if p.contx and not keep then p.contx, ch = nil, true end
   if type(p.pilecap) == 'table' then
     local back = {}
-    for id, old in pairs(p.pilecap) do back[id] = old end
+    for id, old in pairs(p.pilecap) do
+      if not (type(p.relpiles) == 'table' and p.relpiles[id]) then back[id] = old end      -- NEU17c BUG-930: a HELD limit is given back only by M.release_giveback
+    end
     local ok = type(K.act.pile_barrels) == 'function' and K.act.pile_barrels('restore', back)
     p.pilecap, ch = nil, true
     if ok then K.log('info', 'brew stall over: the stockpile barrel limits are back') end
-    -- NEU17 BUG-918: the release's lowerings live in p.pilecap too: what this call put back is no lowering any more. Without this p.relpiles stayed, the next daily look
-    -- (M.release_watch) lowered the same piles again, cx_end restored them the day after: a lowered / restored cycle every game day (no brew order, or the containers back, while DF's 7-day window still counts cancels).
-    -- The measurement of a restored pile is void (its limit is not the lowered one), and the release rests one cancel window before it may lower again.
-    if type(p.relpiles) == 'table' then
-      for id in pairs(back) do
-        p.relpiles[id] = nil
-        if type(p.relmeas) == 'table' then p.relmeas[id] = nil end
-      end
-      if next(p.relpiles) == nil then p.relpiles = nil end
-      if type(p.relmeas) == 'table' and next(p.relmeas) == nil then p.relmeas = nil end
-      p.relnext = K.now().tick + M.REL_IDLE_D * DAY
-    end
   end
   if ch then K.persist.touch('m.economy') end
 end
@@ -4653,7 +4723,7 @@ function M.cx_cond(K, c, now, last)
   local span = (math.tointeger(cc.cx_off_days) or 14) * DAY
   if last then p.cxlast = last end
   local seen = math.tointeger(p.cxlast)
-  if not (held or st.cxh ~= nil or (seen and now >= seen and now - seen <= span)) then return nil end
+  if not (held or p.cxh ~= nil or (seen and now >= seen and now - seen <= span)) then return nil end
   if not held or p.cxb.n ~= nmin or p.cxb.o ~= orders or p.cxb.f ~= free then
     p.cxb = {t = held and p.cxb.t or now, n = nmin, o = orders, f = free}
     K.persist.touch('m.economy')
@@ -4672,21 +4742,22 @@ function M.cx_reason(K, c, now, raw)
   -- hovers at the threshold keeps the cure (and the pile limits) steady. The latch is st.cxh = {t = first tick under the off count}
   local offn = math.tointeger(cc.cx_off_n) or 2
   local offd = math.tointeger(cc.cx_off_days) or 14
-  local h = st.cxh
-  if last then pstate(K).cxlast = last end
+  local pp = pstate(K)
+  local h = pp.cxh                               -- NEU17c BUG-930 (E3): the hysteresis latch is PERSISTED (it was session-only: a reload forgot it)
+  if last then pp.cxlast = last end
   local cnd = M.cx_cond(K, c, now, last)
   if raw then                                   -- the reserve has its own repeat state machine: the plain count (and DF's own order condition, NEU17b D1)
     if n < min and not cnd then return nil end
   elseif n >= min then
-    if not h then st.cxh = {t = false}; K.persist.touch('m.economy') elseif h.t then h.t = false end
+    if not h then pp.cxh = {t = false}; K.persist.touch('m.economy') elseif h.t then h.t = false end
   elseif cnd then
     -- NEU17b D1 (b): the order condition is unmet by the kernel's own count: the cure stays (or comes) on while DF's cancels fall; the OFF clock starts only once the condition is met
-    if not h then st.cxh = {t = false, b = true}; K.persist.touch('m.economy') elseif h.t then h.t = false end
+    if not h then pp.cxh = {t = false, b = true}; K.persist.touch('m.economy') elseif h.t then h.t = false end
   elseif h then
     if n >= offn or offn <= 0 then
       if h.t then h.t = false end
     elseif not h.t then h.t = now
-    elseif now - h.t >= offd * DAY then st.cxh = nil; K.persist.touch('m.economy'); return nil end
+    elseif now - h.t >= offd * DAY then pp.cxh = nil; K.persist.touch('m.economy'); return nil end
   else
     return nil
   end
@@ -4719,7 +4790,7 @@ function M.cx_log(K, c, now)
   local n = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
   local sw = M.diag_on(K, 'cx_cure', c)
   pcall(M.cx_reason, K, c, now)                       -- BUG-867: moves the latch
-  local on = sw and (n >= min or st.cxh ~= nil)       -- BUG-867: the hysteresis latch (M.cx_reason) keeps it on
+  local on = sw and (n >= min or pstate(K).cxh ~= nil)       -- BUG-867: the hysteresis latch (M.cx_reason) keeps it on
   if on == (st.cxon == true) then return end
   if st.cxlogt and now >= st.cxlogt and now - st.cxlogt < DAY then return end
   st.cxon, st.cxlogt = on, now

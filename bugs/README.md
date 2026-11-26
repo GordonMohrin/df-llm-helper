@@ -884,6 +884,7 @@ Related: FR-xx, BUG-xx
 | [BUG-922](BUG-922-follow-heartbeat-starved.md) | fixed (offline, live-untested) | live bestaetigt | medium | follow beats from its own thread while the poll loop progresses (stops after 240 s in one step), the beat names the step, poll steps > 20 s are logged (`slow_step`) | `dfpilot/wake.py`, `dfpilot/files.py` |
 | [BUG-923](BUG-923-resume-in-frame-gap.md) | fixed (offline, live-untested) | live bestaetigt | medium | A resume refused right after a frame gap ("still paused after the pause key") is retried once by the kernel; a later park / pause wins | `lua/dfllm/arbiter.lua`, `lua/dfllm/kern.lua` |
 | [BUG-924](BUG-924-why-order-conditions.md) | fixed (offline, live-untested) | live bestaetigt | low | why prints order item conditions with the comparator in words, the count and met / unmet per condition; empty containers read against the census | `lua/dfllm/jobwhy.lua` |
+| [BUG-930](BUG-930-barrel-hold.md) | fixed (offline, live-untested) | offen, nie live gesehen | offen, nie live gesehen | high | Lowered pile barrel limits are HELD (no 14-day bound, no relstop, no restore on the d7 verdict, cx_end keeps them) and given back in steps (+3 per pile per week) only after cont_free >= 20 for 28 days; re-lowered at once when DF cancels return; hold and hysteresis latch persisted |
 
 Not bugs but gaps: no coffin provisioning (FR-61), derive the perimeter without a manifest (FR-60), hospital water
 (FR-47). Live test report with raw outputs: `docs/v2/STATUS.md` §0h.

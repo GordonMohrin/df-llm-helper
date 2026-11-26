@@ -592,7 +592,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # rgb/rgbn = forbidden empties, rgt/rgtn = barrels attached to brew jobs right now, rgh = the registering piles by tag and barrel limit (`dfllm-mood(max 1)=3`)
     # BUG-887 round 6: PILE_BARREL_RELEASE = the kernel lowered the barrel limit of a kernel food pile that holds registered EMPTY barrels (phase lowered) and measured it 1 and 7 game days later:
     # pile, before/after = limit, reg0/reg1/reg7 = registered empty barrels of the pile at the lowering / after 1 d / after 7 d, cx0/cx7 = DF brew cancels in the window then / after 7 d, verdict
-    # (`DF kept the registration (...)` | `the registration fell`)
+    # (`DF kept the registration (...)` | `the registration fell`); NEU17c BUG-930: phase `giveback` = one step of the stepwise give-back of a HELD limit (before -> after, free0 = usable empties cont_free, cx0 = cancels)
     # NEU16 BUG-911: WOOD_DISBELIEVED = DF cancelled `n` wood jobs ('Needs logs': barrel, bed, charcoal, ...) within 7 game days while the kernel counted `w` usable (near) logs: for `d` game days
     # autochop and the status texts count 0 usable logs (the count is not what DF can use)
     "WOOD_DISBELIEVED": ("B", "economy", _d("n:i w:i d:i")),
