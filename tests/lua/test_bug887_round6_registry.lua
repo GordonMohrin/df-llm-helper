@@ -130,11 +130,11 @@ local function release_world()
   end
   local reg1 = {barrel(1, false), barrel(1, false), barrel(1, true), barrel(1, true)}       -- pile 41 'dfllm-stock': 2 registered empties, 2 registered full
   local reg2 = {barrel(11, false)}                                                           -- pile 42 'dfllm-drink' pure drink pile: a registered empty, not changed
-  local reg3 = {barrel(21, false), barrel(21, true)}                                         -- pile 43 kernel pile that accepts drink: not changed
+  local reg3 = {barrel(21, false), barrel(21, true)}                                         -- pile 43 player pile that accepts drink: not changed (a kernel pile that accepts drink IS lowered since NEU17b D2)
   local reg4 = {barrel(31, false)}                                                           -- pile 44 player pile: not a kernel pile
   local ids = function(t) local o = {}; for _, it in ipairs(t) do o[#o + 1] = it.id end; return o end
   local p41, p42, p43, p44 = pile(41, 'dfllm-stock', 0, {max = 54, reg = ids(reg1)}), pile(42, 'dfllm-drink', 10, {max = 12, drink = true, reg = ids(reg2)}),
-                             pile(43, 'dfllm-mixed', 20, {max = 20, drink = true, reg = ids(reg3)}), pile(44, 'plants', 30, {max = 20, reg = ids(reg4)})
+                             pile(43, 'mixed', 20, {max = 20, drink = true, reg = ids(reg3)}), pile(44, 'plants', 30, {max = 20, reg = ids(reg4)})
   local all = {p41, p42, p43, p44}
   df.global.world.buildings.other.STOCKPILE = kmock.vec(all)
   df.building.find = function(id) for _, s in ipairs(all) do if s.id == id then return s end end end
@@ -151,8 +151,8 @@ T.test('BUG-887 round 6 D: act.pile_barrels release lowers a kernel food pile wi
   T.eq({P[1].max_barrels, P[2].max_barrels, P[3].max_barrels, P[4].max_barrels}, {2, 12, 20, 20}, 'drink piles, mixed piles and a player pile are not changed')
   local why = {}
   for _, k in ipairs(res.kept or {}) do why[k.id] = k.why end
-  T.eq(why[42], 'accepts drink: not changed in this round')
-  T.eq(why[43], 'accepts drink: not changed in this round')
+  T.eq(why[42], 'dedicated drink pile: not changed')
+  T.eq(why[43], 'not a kernel food pile')
   T.eq(why[44], 'not a kernel food pile')
   T.eq(#P[1].storage.container_item_id, 4, 'the registry is never written')
   ok, res = api.pile_barrels('release', {})
@@ -204,7 +204,10 @@ T.test('BUG-887 round 6 D: economy lowers the piles on DF\'s reason, measures af
   watch(108)
   ev = W.find_events('PILE_BARREL_RELEASE')
   T.eq(#ev, 3)
-  T.eq({ev[3].d.phase, ev[3].d.reg7, ev[3].d.before, ev[3].d.after, ev[3].d.verdict}, {'d7', 1, 54, 2, 'the registration fell'})
+  T.eq({ev[3].d.phase, ev[3].d.reg7, ev[3].d.before, ev[3].d.after}, {'d7', 1, 54, 2})
+  -- NEU17b D3: cont_free stood at 0 (0 -> 0): the event says so and the release rests (the lowered limit stays until the cure ends)
+  T.ok(ev[3].d.verdict:find('the registration fell; cont_free did not rise (0 -> 0)', 1, true), ev[3].d.verdict)
+  T.ok(p.relnext ~= nil, 'the release rests')
   T.eq(p.relstop, nil)
 end)
 

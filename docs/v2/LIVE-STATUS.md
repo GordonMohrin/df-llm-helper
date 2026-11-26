@@ -8,17 +8,17 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 
 | Status | Bugs |
 |---|---|
-| live bestaetigt | 35 |
+| live bestaetigt | 39 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 795 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **52** von 847 |
+| offen, nie live gesehen | 794 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **56** von 850 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
 | genannt, aber ohne klares Urteil (bleiben offen) | 79 |
 
 Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
 
-- Spieler-Logs Run 15/16 (STAND.md, FR-BUGS.md): 34 Bugs
+- Spieler-Logs Run 15/16 (STAND.md, FR-BUGS.md): 38 Bugs
 - Live-Nachprüfungen Okt. 2026 in Bugdateien (Status-, Found-Zeile, Live check): 12 Bugs
 - Live-Berichte in docs/v2 (STATUS.md, POSTMORTEM): 7 Bugs
 
@@ -156,6 +156,14 @@ Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
   - **wirkt** `runs/run-16a/FR-BUGS.md:470` (wirkt): - OBS Runde 47 (c9306a79, 12:42): BUG-732 wirkt: 'bp.place tpl=explore site=S1' -> queued c1a1ca697e56920101 (vorher "5 projects hold them").
 - **BUG-755**
   - **wirkt** `runs/run-16b/STAND.md:407` (wirkt): .out15), Plan y445 angewendet (farms, hospital furnish x3 = BUG-755 wirkt, Betten);
+- **BUG-921**
+  - **wirkt** `runs/run-16b/FR-BUGS.md:2037` (wirkt): - 12:49 BUG-921..924 (4) 'why brew' wirkt: "why brew: order 78 BREW_DRINK_FROM_PLANT at 142,141,140: cond_unmet: no job made: item condition
+- **BUG-922**
+  - **wirkt** `runs/run-16b/FR-BUGS.md:2037` (wirkt): - 12:49 BUG-921..924 (4) 'why brew' wirkt: "why brew: order 78 BREW_DRINK_FROM_PLANT at 142,141,140: cond_unmet: no job made: item condition
+- **BUG-923**
+  - **wirkt** `runs/run-16b/FR-BUGS.md:2037` (wirkt): - 12:49 BUG-921..924 (4) 'why brew' wirkt: "why brew: order 78 BREW_DRINK_FROM_PLANT at 142,141,140: cond_unmet: no job made: item condition
+- **BUG-924**
+  - **wirkt** `runs/run-16b/FR-BUGS.md:2037` (wirkt): - 12:49 BUG-921..924 (4) 'why brew' wirkt: "why brew: order 78 BREW_DRINK_FROM_PLANT at 142,141,140: cond_unmet: no job made: item condition
 
 ## Unsichere Fundstellen (ändern keinen Status)
 
@@ -315,6 +323,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-458 `runs/run-16b/FR-BUGS.md:213` (no verdict word): dit-Bypass-Wall 60,99,121 floor schneidet einen Buerger ab (BUG-458), also bleibt Bypass offen.
 - BUG-458 `runs/run-16b/FR-BUGS.md:227` (no verdict word): e main walk group (citizen 60,99,121) ... close with doors (BUG-458)").
 - BUG-458 `runs/run-16b/FR-BUGS.md:227` (no verdict word): oden. Ich habe den Plan y401 selbst angewendet (Fehler: die BUG-458-Verweigerung vom Vorjahr haette mich warnen muessen;
+- BUG-458 `runs/run-16b/FR-BUGS.md:2048` (no verdict word): estore, room.assign ..., kein dismiss/noble/office.vacate). BUG-458/CHANGELOG: replace gilt nur fuer einen Manager AUSSERHALB des Forts (manager_stuck out).
 - BUG-469 `runs/run-16b/STAND.md:157` (no verdict word): sache trockener Brunnen 82,119,134 (FR); cistern abgelehnt (BUG-469), refuge_drink S1 87,118,131 platziert;
 - BUG-469 `runs/run-16b/STAND.md:346` (no verdict word): elle nur ausserhalb im Lockdown); cistern bp.place refused (BUG-469, kein Bach erreichbar, path braeuchte Waypoints = Frei-Graben an Wasser -> nicht gemacht);
 - BUG-469 `runs/run-16b/STAND.md:362` (no verdict word): Patienten-Wasser per Traeger 34 Tiles ok; cistern refused (BUG-469, kein Freigraben an Wasser)

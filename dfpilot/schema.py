@@ -604,7 +604,13 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # sample = first positions, band = the autochop band the kernel set (`min-max`), run = which removal of the episode; ph `result` (after the next readings): des = marked trees now, new = logs
     # newer than the removal, newnw = of those on a tile with no walk group, trees = trees on the map before-after delta (felled); ph `stop`: the removal stopped (why)
     "WOOD_UNMARK": ("B", "economy", _d("ph:s", "n:i off:i des:i sample:s band:s run:i new:i newnw:i trees:i days:i why:s")),
-    "PILE_BARREL_RELEASE": ("B", "economy", _d("pile:i before:i after:i reg0:i phase:s", "reg1:i reg7:i cx0:i cx7:i verdict:s")),
+    # NEU17b BUG-918 (lead decisions D2/D3): the lowering covers every kernel food pile (dfllm-..., not dfllm-drink / dfllm-mood) whether or not its settings accept drink (`drink` 1/0 = what the
+    # pile's drink_plant/drink_animal flags read at the lowering; the claim that the stock piles accept drink is INFERRED, not shown); the event repeats at once (`lowered`), after 1 d and 7 d with
+    # registered empties reg0/reg1/reg7, free empties free0/free1/free7, DF's brew cancels cx0/cx1/cx7 and brew jobs finished in the window done0/done1/done7 (gamelog, absent when its reader is off);
+    # a d7 where cont_free did not rise says so in `verdict` and the release rests 30 d
+    # NEU17 BUG-918: free0/free1/free7 = free empty containers (census cont_free) at the lowering / after 1 d / after 7 d; phase `none` = the release ran with the container reason on and lowered NO pile
+    # (once per game week; pile/before/after are 0, reg0 = registered empties, free0 = free empties, cx0 = brew cancels in the window, kept = piles looked at and left alone, failed = limit writes that failed)
+    "PILE_BARREL_RELEASE": ("B", "economy", _d("pile:i before:i after:i reg0:i phase:s", "reg1:i reg7:i cx0:i cx1:i cx7:i verdict:s free0:i free1:i free7:i kept:i failed:i done0:i done1:i done7:i drink:i")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
     # drink stockpile the kernel queued beside it or why none). BUG-102 / FR-82: why none is 'no nook within 6: 9 occupied,

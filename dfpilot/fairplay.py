@@ -1159,7 +1159,7 @@ ECONOMY_LIM: dict = {"drink": {"low_d": (0, 400), "access_d": (0, 400)},   # BUG
                      "wguard": {"on": "bool", "low": (0, 1000), "high": (1, 2000), "stone_min": (1, 500)},
                      "creserve": {"on": "bool", "min_batch": (1, 100), "max_batch": (1, 100), "brews_per": (1, 100), "grace_days": (0, 14),
                                  "repeat_days": (1, 60), "max_repeats": (1, 50), "trickle_days": (1, 400), "trickle_n": (1, 20),
-                                 "trickle_free": (1, 500), "rock_plenty": (0, 500), "total_cap": (1, 2000), "dead_n": (1, 1000), "dead_days": (1, 30)}}
+                                 "trickle_free": (1, 500), "rock_plenty": (0, 500), "total_cap": (1, 2000), "dead_n": (1, 1000), "dead_days": (1, 30), "blocker_days": (1, 60)}}
 ECONOMY_OWN = ("drink", "office", "farms", "cover", "famine_crew", "slabs", "stale", "jobwhy", "diag", "cancel", "creserve", "wguard")   # parts whose every key is listed above
 _PHASE_RE = re.compile(r"^P[0-7]$")
 _LABOR_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,40}$")
