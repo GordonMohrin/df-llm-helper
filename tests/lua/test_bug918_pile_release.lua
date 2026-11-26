@@ -72,11 +72,11 @@ local function release_world()
   end
   local reg1 = {barrel(1, false), barrel(1, false), barrel(1, true), barrel(1, true)}       -- pile 41 'dfllm-stock': 2 registered empties, 2 registered full
   local reg2 = {barrel(11, false)}                                                           -- pile 42 'dfllm-drink' pure drink pile: a registered empty, not changed
-  local reg3 = {barrel(21, false), barrel(21, true)}                                         -- pile 43 kernel pile that accepts drink: not changed
+  local reg3 = {barrel(21, false), barrel(21, true)}                                         -- pile 43 player pile that accepts drink: not changed (a kernel pile that accepts drink IS lowered since NEU17b D2)
   local reg4 = {barrel(31, false)}                                                           -- pile 44 player pile: not a kernel pile
   local ids = function(t) local o = {}; for _, it in ipairs(t) do o[#o + 1] = it.id end; return o end
   local p41, p42, p43, p44 = pile(41, 'dfllm-stock', 0, {max = 54, reg = ids(reg1)}), pile(42, 'dfllm-drink', 10, {max = 12, drink = true, reg = ids(reg2)}),
-                             pile(43, 'dfllm-mixed', 20, {max = 20, drink = true, reg = ids(reg3)}), pile(44, 'plants', 30, {max = 20, reg = ids(reg4)})
+                             pile(43, 'mixed', 20, {max = 20, drink = true, reg = ids(reg3)}), pile(44, 'plants', 30, {max = 20, reg = ids(reg4)})
   local all = {p41, p42, p43, p44}
   df.global.world.buildings.other.STOCKPILE = kmock.vec(all)
   df.building.find = function(id) for _, s in ipairs(all) do if s.id == id then return s end end end
@@ -163,13 +163,13 @@ T.test('BUG-918: the release runs from the kernel look (M.release_watch) at the 
 end)
 
 -- i4 Girderroots y491: every pile that holds a registered empty is a kernel `dfllm-stock` pile that ALSO accepts drink (115 of 121 empties registered, cont_free 0, DF's reason on)
-local function i4_world()
+local function i4_world(o)
   local W, still, ord = brew_world()
   local ids, all = {}, {}
   for n = 1, 3 do
     local reg = {}
     for k = 1, (n == 3 and 39 or 38) do reg[#reg + 1] = F.item(W, 'BARREL', {pos = {x = n * 10, y = 1, z = 5}, _contents = nil}).id end
-    all[n] = pile(50 + n, 'dfllm-stock', n * 10, {max = 9, drink = true, reg = reg})
+    all[n] = pile(50 + n, 'dfllm-stock', n * 10, {max = o and o.max or 9, drink = true, reg = reg})
   end
   df.global.world.buildings.other.STOCKPILE = kmock.vec(all)
   df.building.find = function(id) for _, sp in ipairs(all) do if sp.id == id then return sp end end end
@@ -179,8 +179,9 @@ local function i4_world()
   return W, ord, all, calls
 end
 
-T.test('BUG-918 (i4 shape): dfllm-stock piles that accept drink hold 115 registered empties: nothing is written, the event and the kern.log say why per pile, the registry scan is not repeated daily', function()
-  local W, ord, P, calls = i4_world()
+-- NEU17b D2: a kernel pile that accepts drink IS lowered now (test_bug918b_fass_release.lua); what is left to say 'none' is a pile whose limit is already at its full-barrel count
+T.test('BUG-918 (i4 shape, limits already low): dfllm-stock piles hold 115 registered empties: nothing is written, the event and the kern.log say why per pile, the registry scan is not repeated daily', function()
+  local W, ord, P, calls = i4_world({max = 0})
   local econ = require('dfllm.economy')
   W.mods.economy.disabled = true                        -- only the calls below drive it
   local p = econ_p(W, ord)
@@ -192,12 +193,12 @@ T.test('BUG-918 (i4 shape): dfllm-stock piles that accept drink hold 115 registe
   local ev = W.find_events('PILE_BARREL_RELEASE')
   T.eq(#ev, 1)
   T.eq({ev[1].d.phase, ev[1].d.reg0, ev[1].d.free0, ev[1].d.kept, ev[1].d.pile}, {'none', 115, 0, 3, 0})
-  T.ok(ev[1].msg:find('3 accepts drink (115 empties)', 1, true), ev[1].msg)
-  for _, sp in ipairs(P) do T.eq(sp.max_barrels, 9, 'no limit written on pile ' .. sp.id) end
+  T.ok(ev[1].msg:find('3 limit already low (115 empties)', 1, true), ev[1].msg)
+  for _, sp in ipairs(P) do T.eq(sp.max_barrels, 0, 'no limit written on pile ' .. sp.id) end
   local seen = 0
   for _, l in ipairs(W.logs) do
     if tostring(l.msg):find('pile barrel release kept', 1, true) then
-      for _, sp in ipairs(P) do if l.msg:find(tostring(sp.id) .. ' dfllm-stock limit 9 empties', 1, true) then seen = seen + 1 end end
+      for _, sp in ipairs(P) do if l.msg:find(tostring(sp.id) .. ' dfllm-stock limit 0 empties', 1, true) then seen = seen + 1 end end
     end
   end
   T.eq(seen, 3, 'every pile is named with its own reason')

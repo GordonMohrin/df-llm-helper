@@ -510,7 +510,7 @@ M.DEFAULTS = {
   -- NEU7 (BUG-855): buildingplan's logs go off while usable wood < low and stone or blocks >= stone_min are free; on again at high
   wguard = {on = true, low = 40, high = 80, stone_min = 8},
   creserve = {on = true, min_batch = 10, max_batch = 30, brews_per = 5, grace_days = 2, repeat_days = 3, max_repeats = 4, trickle_days = 20, trickle_n = 1,
-             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3},
+             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3, blocker_days = 5},
   -- FR-16: resumed per day; a job kept suspended held_days asks for the preventblocking decision;
   -- preventblocking 'keep' leaves suspendmanager's own setting until jobs.release decides
   -- BUG-009/004/005: footprints scanned and items unforbidden per day, items read per missing class, failed resumes
@@ -2245,25 +2245,43 @@ function M.mood_piles_zero(K, p, c, now)
   if cnt > 300 then p.moodz = {} end
   if n > 0 then K.persist.touch('m.economy') end
 end
-function M.release_emit(K, e, phase, reg, cx, verdict)
+-- NEU17b BUG-918 (D3): brew jobs finished in the cancel window (the gamelog's 'has been completed' tally, nil when the gamelog reader is not running)
+function M.brew_done_n(K, c, now)
+  if st.gl and st.gl.s and st.gl.s.state == 'ok' then
+    local days, done = M.cw_days(K, c), 0
+    for _, e in ipairs(st.bdone or {}) do if now - e[1] <= days * DAY then done = done + e[2] end end
+    return done
+  end
+  return nil
+end
+function M.cont_free_of(K, inv)
+  local ci = (K.census or {}).i
+  local v = type(ci) == 'table' and math.tointeger(ci.cont_free) or nil
+  if v == nil and type(inv) == 'table' then v = math.tointeger(inv.cont_free) end
+  return v
+end
+function M.release_emit(K, e, phase, reg, cx, verdict, done, free)
   local f = {pile = e.id, before = e.old, after = e.new, reg0 = e.r0, phase = phase, cx0 = e.cx0}
   -- NEU17 BUG-918: the free empties (census cont_free) before / after, beside the registered ones and the cancels: the live run proves or refutes the lowering by them
-  local free = math.tointeger((K.census.i or {}).cont_free)
+  if free == nil then free = M.cont_free_of(K) end
   if e.free0 ~= nil then f.free0 = e.free0 end
   if e.r1 ~= nil then f.reg1 = e.r1 end
-  if phase == 'd7' then f.reg7 = reg; f.cx7 = cx; f.free7 = free end
-  if phase == 'd1' then f.reg1 = reg; f.free1 = free end
+  if e.done0 ~= nil then f.done0 = e.done0 end
+  if e.drink ~= nil then f.drink = e.drink and 1 or 0 end
+  if phase == 'd7' then f.reg7 = reg; f.cx7 = cx; f.free7 = free; f.done7 = done end
+  if phase == 'd1' then f.reg1 = reg; f.free1 = free; f.cx1 = cx; f.done1 = done end
   if verdict then f.verdict = verdict end
-  local txt = string.format('pile %s barrel limit %s -> %s: registered empties %s%s%s%s; free empties %s%s; brew cancels in the window %s%s',
+  local txt = string.format('pile %s barrel limit %s -> %s: registered empties %s%s%s%s; free empties %s%s; brew cancels in the window %s%s%s%s',
     tostring(e.id), tostring(e.old), tostring(e.new), tostring(e.r0), e.r1 ~= nil and phase == 'd7' and (' -> ' .. tostring(e.r1) .. ' (1 d)') or '',
     phase == 'd1' and (' -> ' .. tostring(reg) .. ' (1 d)') or '', phase == 'd7' and (' -> ' .. tostring(reg) .. ' (7 d)') or '',
     tostring(e.free0), (phase == 'd1' or phase == 'd7') and (' -> ' .. tostring(free)) or '',
-    tostring(e.cx0), phase == 'd7' and (' -> ' .. tostring(cx)) or '')
+    tostring(e.cx0), (phase == 'd1' or phase == 'd7') and (' -> ' .. tostring(cx)) or '',
+    e.done0 ~= nil and ('; brew jobs done in the window ' .. tostring(e.done0)) or '', (phase == 'd1' or phase == 'd7') and done ~= nil and (' -> ' .. tostring(done)) or '')
   if verdict then txt = txt .. '; ' .. verdict end
   K.emit('PILE_BARREL_RELEASE', 'B', txt:sub(1, 199), f)
   K.log('warn', 'pile barrel release (%s): %s', phase, txt)
 end
-function M.release_measure(K, c, p, now)
+function M.release_measure(K, c, p, now, inv)
   if type(p.relmeas) ~= 'table' then return end
   local due = false
   for _, e in pairs(p.relmeas) do
@@ -2272,20 +2290,30 @@ function M.release_measure(K, c, p, now)
   if not due then return end
   local R = M.BS.registered(true)
   local cx = M.df_count(K, M.BREW_KINDS, M.CX_REASON, c, now)
+  local done = M.brew_done_n(K, c, now)
+  local free = M.cont_free_of(K, inv)
   for id, e in pairs(p.relmeas) do
     local rec = R.byid[math.tointeger(tonumber(id)) or -1]
     local reg = rec and rec.empty or 0
     local el = now - e.t
     if el >= M.REL_D7 * DAY then
       local kept = reg >= (e.r0 or 0)
+      local rose = free == nil or e.free0 == nil or free > e.free0       -- an unknown count is no proof of 'nothing freed'
+      -- NEU17b D3: the verdict is read off the free empties too. Nothing freed (cont_free did not rise in 7 days): the event says so and the release RESTS (no loop): the old limit goes back when
+      -- DF kept the registration; when the registration fell but the free count did not rise (the barrels were taken at once) the limit stays until the cure ends.
+      local v
+      if kept then v = 'DF kept the registration (no further pile is lowered, the old limit goes back now)'
+      else v = 'the registration fell' end
+      if not rose then v = v .. string.format('; cont_free did not rise (%s -> %s): the release rests for %d days', tostring(e.free0), tostring(free), M.REL_PAUSE_D) end
+      if not rose or kept then p.relnext = now + M.REL_PAUSE_D * DAY end
       if kept then p.relstop = true end
-      M.release_emit(K, e, 'd7', reg, cx, kept and 'DF kept the registration (no further pile is lowered, the old limit goes back now)' or 'the registration fell')
+      M.release_emit(K, e, 'd7', reg, cx, v, done, free)
       p.relmeas[id] = nil
       if kept then M.release_restore(K, p, now, 'DF kept the registration', id) end
       K.persist.touch('m.economy')
     elseif el >= M.REL_D1 * DAY and (e.st or 0) < 1 then
       e.st, e.r1 = 1, reg
-      M.release_emit(K, e, 'd1', reg, cx)
+      M.release_emit(K, e, 'd1', reg, cx, nil, done, free)
       K.persist.touch('m.economy')
     end
   end
@@ -2295,7 +2323,7 @@ function M.pile_release(K, c, r)
   -- census are the kernel's own, so the release can also be driven from the kernel's guaranteed look (M.watch, M.release_watch)
   local p, inv, now = r.p, r.inv or K.census.i or {}, math.tointeger(r.now) or K.now().tick
   local cc = c.cancel or {}
-  M.release_measure(K, c, p, now)
+  M.release_measure(K, c, p, now, inv)
   if type(p.relpiles) == 'table' then
     for id, e in pairs(p.relpiles) do
       if now - (math.tointeger(e.t) or now) >= M.REL_MAX_D * DAY then
@@ -2318,7 +2346,7 @@ function M.pile_release(K, c, r)
   p.relmeas = type(p.relmeas) == 'table' and p.relmeas or {}
   for _, e in ipairs(res) do
     if p.relmeas[tostring(e.id)] == nil then
-      p.relmeas[tostring(e.id)] = {id = e.id, old = e.old, new = e.new, r0 = e.reg_empty or 0, cx0 = cx, t = now, st = 0, free0 = math.tointeger(inv.cont_free) or 0}
+      p.relmeas[tostring(e.id)] = {id = e.id, old = e.old, new = e.new, r0 = e.reg_empty or 0, cx0 = cx, t = now, st = 0, free0 = math.tointeger(inv.cont_free), done0 = M.brew_done_n(K, c, now), drink = e.drink}
     end
     if type(p.pilecap) ~= 'table' then p.pilet = now; p.pilecap = {} end
     if p.pilecap[tostring(e.id)] == nil then p.pilecap[tostring(e.id)] = e.old end
@@ -2327,6 +2355,13 @@ function M.pile_release(K, c, r)
     K.log('warn', 'pile barrel release: stockpile %s (%s) barrel limit %s -> %s (%s registered empty barrels kept as its containers, %s with contents); DF cancelled brews %dx', tostring(e.id), tostring(e.name),
           tostring(e.old), tostring(e.new), tostring(e.reg_empty), tostring(e.reg_full), cx)
     M.release_emit(K, p.relmeas[tostring(e.id)], 'lowered', e.reg_empty or 0, cx)
+  end
+  if #res > 0 then
+    -- NEU17b D2: what was NOT lowered is said too (unreadable limit fields, failed writes), never dropped silently
+    local bad = {}
+    for _, k in ipairs(res.kept or {}) do if tostring(k.why):find('unreadable', 1, true) then bad[#bad + 1] = tostring(k.id) .. ' ' .. tostring(k.name) end end
+    for _, k in ipairs(res.failed or {}) do bad[#bad + 1] = tostring(k.id) .. ' ' .. tostring(k.name) .. ' (write failed)' end
+    if #bad > 0 then K.log('warn', 'pile barrel release: %d piles not lowered: %s', #bad, table.concat(bad, ', ', 1, math.min(#bad, 8))) end
   end
   if #res > 0 then st.relidle = nil end
   if #res > 0 then K.persist.touch('m.economy') end
@@ -2575,7 +2610,7 @@ end
 --    batch or boulders are plentiful (batch + rock_plenty), else wood (the Carpenters, Carpentry labor). Both are real BARREL items.
 -- Everything is bounded by total_cap (containers the reserve ordered in all). State p.rsv = {t0, at, done, open, mat, n, made, rep, lday}.
 M.RESERVE = {on = true, min_batch = 10, max_batch = 30, brews_per = 5, grace_days = 2, repeat_days = 3, max_repeats = 4, trickle_days = 20, trickle_n = 1,
-             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3}
+             trickle_free = 20, rock_plenty = 20, total_cap = 200, dead_n = 10, dead_days = 3, blocker_days = 5}
 M.RESERVE_ROCK = {job = 'MakeBarrel', material = 'INORGANIC'}
 M.RESERVE_ROCK_WS = {'workshop:Craftsdwarfs'}
 function M.rv(c, k)
@@ -2696,6 +2731,26 @@ function M.reserve_labor(K, c, r, rs)
   end)
   if not okl then K.log('warn', 'container labor: %s', tostring(err)) end
 end
+-- NEU17b BUG-918 (D4): the reserve's barrel order must not stay open for good with nobody taking it. Open for more than creserve.blocker_days game days, nothing of it made
+-- (amount_left still the whole batch) while the container gate is on: ONCE A GAME WEEK the real blocker from jobwhy (no worker, no logs, no shop...) goes to kern.log and
+-- st.rsvblk (read by M.drink_why, so the status 'why' line carries it). Read only: nothing is ordered, taken back or changed here.
+function M.reserve_blocker(K, c, r, rs, tag)
+  local now = r.now
+  local oid = r.p.orders and r.p.orders[tag]
+  local o = oid and order_by_id(oid)
+  if not o or not rs.at then return end
+  local days = math.tointeger(M.rv(c, 'blocker_days')) or 5
+  if now - rs.at < days * DAY then return end
+  if (math.tointeger(o.amount_left) or 0) < (math.tointeger(rs.n) or 1) then return end      -- something was made
+  if not M.cx_gate(K, c, now) then return end
+  if st.rsvblkt and now >= st.rsvblkt and now - st.rsvblkt < 7 * DAY then return end
+  st.rsvblkt = now
+  local jw = M.jw_ask(K, c, 'order:' .. tostring(oid))
+  local txt = jw and M.JW.line(jw):sub(1, 300) or 'jobwhy gave no answer'
+  local free = math.tointeger((K.census.i or {}).cont_free)
+  st.rsvblk = {t = now, text = string.format('barrel order %s open %d d, 0 of %d made: %s', tostring(oid), (now - rs.at) // DAY, math.tointeger(rs.n) or 0, txt)}
+  K.log('warn', 'container reserve: %s (free containers %s, %s logs usable; said once a week)', st.rsvblk.text, tostring(free), tostring(math.tointeger(r.inv.wood) or 0))
+end
 -- true = the reserve owns this run's barrel planning (a batch stands or was planned now)
 function M.plan_reserve(K, c, r)
   local b = c.barrels
@@ -2714,7 +2769,11 @@ function M.plan_reserve(K, c, r)
   end
   if open(r, tag) and M.reserve_dead(K, c, r, rs, tag) then rs = p.rsv end   -- BUG-878: a batch DF cancels for want of its material is taken back
   if open(r, tag) then
-    if rs then M.reserve_labor(K, c, r, rs) end
+    if rs then
+      M.reserve_labor(K, c, r, rs)
+      local okb, errb = pcall(M.reserve_blocker, K, c, r, rs, tag)
+      if not okb then K.log('warn', 'container reserve blocker: %s', tostring(errb):sub(1, 160)) end
+    end
     return true
   end
   local brews = math.tointeger((r.s.brew or {}).left) or 0
@@ -4540,7 +4599,54 @@ function M.df_supports(id, why)
   for _, x in ipairs(words) do if w:find(x, 1, true) then return true end end
   return false
 end
--- the container shortage DF names: n cancels within the window (at least economy.cx_min_n) -> {n, last, text}; else nil
+-- NEU17b BUG-918 (lead decision D1, reason (b)): DF's OWN order condition. A brew manager order (BREW_*, open, validated) carries the item condition `empty + food_storage, at least N`
+-- (flags1.empty + flags3.food_storage; the kernel's own brew orders carry N = 1, a fort's default orders N = 5): the manager makes no brew job while it is unmet, so the DF cancels
+-- the cure was switched on by fall to 0 although the shortage stays (i3 Orangering: ON only while DF reports >= 5 cancels in 7 d; read DIAGNOSE-i3-fasskur). Returns the largest such N
+-- among the open brew orders and the number of orders, or nil. Read only; not a counting of DF's own items (the kernel's cont_free is what is compared, see M.cx_cond).
+function M.cx_cond_n(K)
+  local nmax, orders = nil, 0
+  local ok = pcall(function()
+    for _, o in ipairs(orders_all()) do
+      local okv, valid = pcall(function() return o.status.validated end)
+      if (math.tointeger(o.amount_left) or 0) > 0 and tostring(o.reaction_name or ''):sub(1, 5) == 'BREW_' and not (okv and valid == false) then
+        local mine = nil
+        for _, cn in ipairs(o.item_conditions or {}) do
+          local f1, f3 = cn.flags1, cn.flags3
+          local cmp = cn.compare_type
+          if cmp == nil then cmp = cn.condition end
+          local atleast = cmp == nil or cmp == 0 or tostring(cmp) == 'AtLeast'
+          local it = cn.item_type
+          if atleast and (it == nil or it == -1 or tostring(it) == 'NONE') and f1 and f1.empty == true and f3 and f3.food_storage == true then
+            local v = math.tointeger(cn.compare_val)
+            if v == nil then v = math.tointeger(cn.value) end
+            v = v or 1
+            if mine == nil or v > mine then mine = v end
+          end
+        end
+        if mine then orders = orders + 1; nmax = (nmax == nil or mine > nmax) and mine or nmax end
+      end
+    end
+  end)
+  if not ok or nmax == nil then return nil end
+  return nmax, orders
+end
+-- (b) holds: such an order exists, the kernel's own count of free empty containers is below its N, and DF's container cancel was seen since the cure last switched on (the latch st.cxh) or within
+-- the hysteresis span cx_off_days. Returns {n = N, orders, free, since} or nil. Reason (b) is DF's own order condition plus a DF cancel, so BUG-844 (act only with DF's reason) holds.
+function M.cx_cond(K, c, now, last)
+  local inv = (K.census or {}).i
+  local free = type(inv) == 'table' and math.tointeger(inv.cont_free) or nil
+  if free == nil then return nil end
+  local nmin, orders = M.cx_cond_n(K)
+  if not nmin or free >= nmin then return nil end
+  local cc = (c or {}).cancel or {}
+  local span = (math.tointeger(cc.cx_off_days) or 14) * DAY
+  local p = pstate(K)
+  if last then p.cxlast = last end
+  local seen = math.tointeger(p.cxlast)
+  if not (st.cxh ~= nil or (seen and now >= seen and now - seen <= span)) then return nil end
+  return {n = nmin, orders = orders, free = free, last = seen}
+end
+-- the container shortage DF names: n cancels within the window (at least economy.cx_min_n) -> {n, last, text}; else nil. NEU17b D1: or DF's own order condition (M.cx_cond) keeps it on
 function M.cx_reason(K, c, now, raw)
   c = c or M.conf(K)
   now = now or K.now().tick
@@ -4553,10 +4659,15 @@ function M.cx_reason(K, c, now, raw)
   local offn = math.tointeger(cc.cx_off_n) or 2
   local offd = math.tointeger(cc.cx_off_days) or 14
   local h = st.cxh
-  if raw then                                   -- the reserve has its own repeat state machine: the plain count
-    if n < min then return nil end
+  if last then pstate(K).cxlast = last end
+  local cnd = M.cx_cond(K, c, now, last)
+  if raw then                                   -- the reserve has its own repeat state machine: the plain count (and DF's own order condition, NEU17b D1)
+    if n < min and not cnd then return nil end
   elseif n >= min then
     if not h then st.cxh = {t = false}; K.persist.touch('m.economy') elseif h.t then h.t = false end
+  elseif cnd then
+    -- NEU17b D1 (b): the order condition is unmet by the kernel's own count: the cure stays (or comes) on while DF's cancels fall; the OFF clock starts only once the condition is met
+    if not h then st.cxh = {t = false, b = true}; K.persist.touch('m.economy') elseif h.t then h.t = false end
   elseif h then
     if n >= offn or offn <= 0 then
       if h.t then h.t = false end
@@ -4571,7 +4682,10 @@ function M.cx_reason(K, c, now, raw)
     local d = (now - last) // DAY
     txt = txt .. (d <= 0 and ' (last today)' or string.format(' (last %d d ago)', d))
   end
-  return {n = n, last = last, text = txt, top = e}
+  if n < min and cnd then
+    txt = txt .. string.format('; DF order condition unmet: %d brew order(s) need at least %d empty food storage items, the kernel counts %d free', cnd.orders or 1, cnd.n, cnd.free)
+  end
+  return {n = n, last = last, text = txt, top = e, cond = cnd and n < min or nil}
 end
 -- BUG-844: the container cures act only with DF's reason (and the switch economy.diag.cx_cure): n, last | false
 function M.cx_gate(K, c, now)
@@ -4595,7 +4709,11 @@ function M.cx_log(K, c, now)
   if on == (st.cxon == true) then return end
   if st.cxlogt and now >= st.cxlogt and now - st.cxlogt < DAY then return end
   st.cxon, st.cxlogt = on, now
-  if on then
+  if on and n < min then
+    local cnd = M.cx_cond(K, c, now)
+    K.log('info', 'container cure ON: DF cancelled brew %dx in %d d: Needs empty food storage item (< %d), and %s (NEU17b BUG-918: DF own order condition)', n, days, min,
+          cnd and string.format('%d brew order(s) need at least %d empty food storage items while the kernel counts %d free', cnd.orders or 1, cnd.n, cnd.free) or 'the cure is held by its hysteresis')
+  elseif on then
     K.log('info', 'container cure ON: DF cancelled brew %dx in %d d: Needs empty food storage item (>= %d)', n, days, min)
   elseif not sw and n >= min then
     K.log('info', 'container cure OFF: switch economy.diag.cx_cure is off (DF cancelled brew %dx in %d d: Needs empty food storage item)', n, days)
@@ -7428,6 +7546,7 @@ function M.drink_why(K, c, r)
   if okw and dd and dd.n >= (math.tointeger((c.cancel or {}).cx_min_n) or 5) then
     w = string.format('DF cancelled Drink %dx in %d d: %s', dd.n, M.cw_days(K, c), dd.why) .. (w and ('; ' .. w) or '')
   end
+  if st.rsvblk and r.now >= st.rsvblk.t and r.now - st.rsvblk.t < 14 * DAY then w = st.rsvblk.text:sub(1, 160) .. (w and ('; ' .. w) or '') end    -- NEU17b BUG-918 D4
   if st.nowater then w = 'no reachable water' .. (w and ('; ' .. w) or '') end            -- BUG-401
   -- BUG-259: below the thirst line with nobody thirsty the status names it (the citizens drink water)
   if st.water then w = (w and (w .. '; ') or '') .. 'nobody thirsty: they drink water' end

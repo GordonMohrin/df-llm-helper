@@ -1525,18 +1525,23 @@ local function impls(state)
             local old, cand = PL.get(sp)
             seen = seen + 1
             if old then answered = answered + 1 end
+            -- NEU17b BUG-918 (lead decision D2): every kernel-named (dfllm-*) food pile except the dedicated drink pile(s) (dfllm-drink) and the mood piles (their own cure) is lowered to the
+            -- number of barrels with contents registered in it (never below), WHETHER OR NOT its settings accept drink: whether the stock piles accept drink is not readable from `why pile`
+            -- (inferred, not shown), and a pile that cannot be read says so instead of being dropped. Player piles (any name not dfllm-...) are never changed. `drink` is only reported.
             local kernel = name:find('^dfllm%-') ~= nil and name ~= 'dfllm-drink' and name ~= 'dfllm-mood'
             out.kept = out.kept or {}
             if not (fl and fl.food == true) then
               out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'not a food pile'}
-            elseif drink then
-              out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'accepts drink: not changed in this round'}
+            elseif name == 'dfllm-drink' then
+              out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'dedicated drink pile: not changed'}
             elseif not kernel then
               out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'not a kernel food pile'}
-            elseif old and (old < 0 or old > rec.full) then
-              if PL.set(sp, rec.full) then out[#out + 1] = {id = sp.id, old = old, new = rec.full, name = name, field = cand, reg_empty = rec.empty, reg_full = rec.full}
+            elseif old == nil then
+              out.kept[#out.kept + 1] = {id = sp.id, old = nil, here = rec.empty, name = name, why = 'limit field unreadable (tried ' .. PL.tried() .. ')'}
+            elseif old < 0 or old > rec.full then
+              if PL.set(sp, rec.full) then out[#out + 1] = {id = sp.id, old = old, new = rec.full, name = name, field = cand, reg_empty = rec.empty, reg_full = rec.full, drink = drink}
               else out.failed = out.failed or {}; out.failed[#out.failed + 1] = {id = sp.id, old = old, here = rec.empty, name = name} end
-            elseif old then
+            else
               out.kept[#out.kept + 1] = {id = sp.id, old = old, here = rec.empty, name = name, why = 'limit already low'}
             end
           end
