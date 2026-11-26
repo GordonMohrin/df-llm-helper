@@ -1,5 +1,6 @@
-"""Neuausrichtung 15b (BUG-907): the switches of the third review. reach / player_lever / station_clear are off in the code when the key is absent (the gate of main)
-and set in the shipped config/reflex.json; the old tests keep their assertions for the gate of main (test_alarm.py, test_neu1_notausgang.py)."""
+"""Neuausrichtung 15b (BUG-907, final rule): reach / player_lever / station_clear are safety switches that are ON in the code when the key is absent; the shipped
+config/reflex.json names them and `lint --config` requires them. The old tests of the gate of main run with the keys switched off through the mock flag
+KMOCK_LEGACY_15B (their assertions are unchanged)."""
 import json
 import re
 
@@ -18,11 +19,11 @@ def test_shipped_config_sets_the_switches():
     assert fairplay.reflex_errors(fairplay.REPO / "config" / "reflex.json") == []
 
 
-def test_code_defaults_are_the_gate_of_main():
+def test_code_defaults_are_the_safe_ones():
     mil = (fairplay.REPO / "lua" / "dfllm" / "military.lua").read_text(encoding="utf-8")
-    assert int(re.search(r"^M\.CLEAR = (\d+)", mil, re.M).group(1)) == 0
+    assert int(re.search(r"^M\.CLEAR = (\d+)", mil, re.M).group(1)) == 4
     gate = (fairplay.REPO / "lua" / "dfllm" / "gate.lua").read_text(encoding="utf-8")
-    assert "local reach = r.reach == true" in gate
+    assert "local reach = r.reach ~= false" in gate and "r.reach == true" not in gate
     assert schema.VERBS["lever"] == ("gate", ["PEACE"], False)
     con = (fairplay.REPO / "lua" / "dfllm" / "util" / "contract.lua").read_text(encoding="utf-8")
     assert "C.VERB_CFG_MODES = {lever = {key = 'player_lever', modes = {ALERT = true, SIEGE = true}}}" in con
@@ -38,3 +39,13 @@ def test_switch_validation(tmp_path):
     doc["gate"].update({"reach": False, "player_lever": False, "station_clear": 12})
     p.write_text(json.dumps(doc), encoding="utf-8")
     assert fairplay.reflex_errors(p) == []
+
+
+def test_lint_config_requires_the_switches(tmp_path):
+    doc = _doc()
+    for k in ("reach", "player_lever", "station_clear"):
+        d = json.loads(json.dumps(doc))
+        del d["gate"][k]
+        p = tmp_path / "reflex.json"
+        p.write_text(json.dumps(d), encoding="utf-8")
+        assert any(f"gate.{k}: required" in e for e in fairplay.reflex_errors(p)), k

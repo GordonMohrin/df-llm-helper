@@ -69,7 +69,7 @@ M.SPREAD_LIM = {0, 5}
 -- BUG-906 (Run 17 i3 B1: the station lay 4 tiles from the footprint, gate's RAISE_R is 3: soldiers pacing about it at 3 tiles held every ALERT /
 -- RECOVERY raise, and restation said 'kept' because 4 > 1 + spread): the clearance of a station is at least gate.RAISE_R + spread (cfg gate.station_clear,
 -- default CLEAR = 3 + 1 = 4; never below gate's margin + spread), so a station whose crowd can hold its own bridge is moved
-M.CLEAR = 0                  -- 15b: absent key = the margin + spread clearance of main; the shipped config/reflex.json sets gate.station_clear 4
+M.CLEAR = 4                  -- 15b: absent key = 4 (gate's RAISE_R 3 + spread 1); the shipped config/reflex.json sets gate.station_clear 4
 M.CLEAR_LIM = {2, 12}
 M.RELOC_TTL = 6000          -- BUG-032: ticks a station's replacement is kept (revealed tiles change slowly)
 M.NOTE_EVERY = 2400         -- BUG-032: a squad with no station clear of a bridge it holds is told at most this often

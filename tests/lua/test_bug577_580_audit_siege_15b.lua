@@ -228,6 +228,7 @@ end)
 T.test('BUG-580 (4): DRILL, a pacer beside B1 at T+900: the clock restarts instead of occupied:B1, B1 rises when he stops, the result carries ' ..
        'retries, the mechanics pass', function()
   local W = drill_world{walkers = {pacer(840, 200, true, true)}}
+  W.K.cfg.reflex.gate.reach = false                    -- final rule: the fort's people and the pacer stand within the reach window of the footprints for good (a kernel raise would wait forever); this test is about the drill's own clock
   local ok, msg = W.K.call('drill', 'start', 'test')
   T.ok(ok, tostring(msg))
   run(W, 5400)

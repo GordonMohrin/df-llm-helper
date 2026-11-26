@@ -10,6 +10,7 @@
 --       mechanics pass and no failure streak; (5) DRILL, a pacer who never stops: `occupied:B1` after OCC_RETRIES restarts, that failure
 --       counts for no streak (no DRILL_FAIL, retry after RETRY_OCC), nobody crushed; (6) traffic_only.
 KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local S = require('siege_world')
 local kmock = require('dfllm.util.k_mock')

@@ -2,6 +2,7 @@
 -- PEACE traffic test: a citizen starts for the footprint right after the lever was pulled and the bridge moves ~300 ticks (i4: 536
 -- ticks queue-to-up). On main B1 rose at once and he was crushed; now the raise waits for a quiet footprint, a risk locks the bridge
 -- down in PEACE, the player's `lever` down takes `days`, and the SIEGE TRAFFIC test still holds. (helpers as in test_neu1_tore.lua)
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local S = require('siege_world')
 local kmock = require('dfllm.util.k_mock')

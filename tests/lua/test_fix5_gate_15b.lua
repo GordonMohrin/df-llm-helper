@@ -9,6 +9,7 @@ KMOCK_NEU15B = true
 -- The real sense, threat, siege and gate (and seal for the walk groups) on the k_mock world of test_stranded.lua: O1 at
 -- 30,15 (outer), B1 at 40,15 (inner), B2 at 45,15 (core), food and drink in the core x46-60, a zone x31-39 between O1 and B1.
 KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
+KMOCK_REACH_OFF = true   -- 15b final rule: a test of the plumbing around a raise on a fort whose people stand within the reach window of a footprint; the reach rule itself is tested in test_bug905_909_b1*.lua, test_bug907_*.lua
 local T = require('testlib')
 local SW = require('seal_world')
 local S = require('siege_world')

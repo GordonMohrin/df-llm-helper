@@ -28,9 +28,9 @@ end
 local SHUF = {{0, 0}, {1, 0}, {0, 1}, {1, 1}}
 
 -- a stream of citizens walking over B1 from far out on the attack side (9 ticks a tile: a walker covers a tile per 9 ticks), one every `gap` ticks
-local function stream(first, n, gap, id0, y0)
+local function stream(first, n, gap, id0, y0, y1)
   local acts = {}
-  for k = 0, n - 1 do acts[#acts + 1] = {id = (id0 or 200) + k, kind = 'citizen', route = B.route(50 + k % 3, y0 or 4, 70), start = first + gap * k, tpt = 9} end
+  for k = 0, n - 1 do acts[#acts + 1] = {id = (id0 or 200) + k, kind = 'citizen', route = B.route(50 + k % 3, y0 or 4, y1 or 70), start = first + gap * k, tpt = 9} end
   return acts
 end
 
@@ -108,8 +108,8 @@ T.test('(i) a walker 25..40 tiles out (outside the 24-tile census scan, no path 
   end
 end)
 
-T.test('(ii) ALERT, one hostile 20 tiles out, a clear approach (nobody within 24 tiles of B1), lever latency 1000: B1 is pulled and up, nobody crushed', function()
-  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, army = {S.inv(250, 51, 20, Z)}}
+T.test('(ii) ALERT, one hostile 20 tiles out, a clear approach (nobody of the fort within 126 tiles, the reach window of latency 1000 + the move): B1 is pulled and up, nobody crushed', function()
+  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, deep = true, army = {S.inv(250, 51, 20, Z)}}
   B.run(W, 1500)
   local ups = B.flips(W, 'B1', 'up')
   if os.getenv('DBG') then print('pulls', table.concat(B.pulls(W, 'B1'), ','), 'ups', table.concat(ups, ',')) end
@@ -119,15 +119,15 @@ T.test('(ii) ALERT, one hostile 20 tiles out, a clear approach (nobody within 24
   T.eq(#W.find_events('GATE_FAIL'), 0, 'no refusal')
 end)
 
-T.test('(ii) the stream passes: four walkers stand 20 tiles out and walk over B1 (one every 150 ticks); B1 is pulled only once the last one has left the 24 tiles the ' ..
-       'census sees, and is then up', function()
-  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, actors = stream(0, 4, 150, 200, 20), army = {S.inv(250, 51, 20, Z)}}
-  B.run(W, 3600)
+T.test('(ii) the stream passes: four walkers stand 20 tiles out and walk over B1 and on to 160 tiles (one every 150 ticks); B1 is pulled only once the last one is out of the reach window ' ..
+       '(126 tiles), and is then up', function()
+  local W = B.build{mode = 'ALERT', lock = 'lockdown', lat = 1000, deep = true, actors = stream(0, 4, 150, 200, 20, 200), army = {S.inv(250, 51, 20, Z)}}
+  B.run(W, 4800)
   local pulls, ups = B.pulls(W, 'B1'), B.flips(W, 'B1', 'up')
   if os.getenv('DBG') then print('pulls', table.concat(pulls, ','), 'ups', table.concat(ups, ',')) end
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
-  -- the last walker (start 450, 9 ticks a tile) is 24 tiles past the footprint (y=64) after 450 + 44 x 9 = ~850
-  T.ok(pulls[1] ~= nil and pulls[1] >= 800, 'first pull only after the last walker had left: +' .. tostring(pulls[1]))
+  -- the last walker (start 450, 9 ticks a tile) is 126 tiles past the footprint (y=166) after 450 + 146 x 9 = ~1760
+  T.ok(pulls[1] ~= nil and pulls[1] >= 1700, 'first pull only after the last walker had left the window: +' .. tostring(pulls[1]))
   T.ok(ups[1] ~= nil, 'then up')
 end)
 
@@ -229,8 +229,8 @@ end)
 -- the drill is outside SIEGE / BREACH like ALERT: a walker 14+ steps out (past CROSS_REACH = 13, so the old drill rule let the pull stand) can step onto the footprint
 -- during a measured lever latency of 1000 ticks, so no pull is made and none is kept. B1 = footprint 50..52,40; the drill module ends the drill at T+1200+
 -- (the restore), so the checks look at the first 1100 ticks.
-local function drill_world(actors)
-  local W = B.build{mode = 'DRILL', lat = 1000, actors = actors}
+local function drill_world(actors, deep)
+  local W = B.build{mode = 'DRILL', lat = 1000, actors = actors, deep = deep}
   W.load(S.drill())
   return W
 end
@@ -251,8 +251,8 @@ T.test('(vii) DRILL, lever latency 1000, the recall streams over B1 from 14..20 
   T.eq(#B.pulls(W, 'B1'), 0, 'no pull while the stream runs: ' .. table.concat(B.pulls(W, 'B1'), ','))
 end)
 
-T.test('(vii) DRILL, a clear approach (nobody within 24 tiles), lever latency 1000: B1 is pulled and up, nobody crushed', function()
-  local W = drill_world({{id = 700, kind = 'citizen', pos = {51, 90}, still = true, nopath = true}})
+T.test('(vii) DRILL, a clear approach (nobody within 126 tiles), lever latency 1000: B1 is pulled and up, nobody crushed', function()
+  local W = drill_world({{id = 700, kind = 'citizen', pos = {51, 240}, still = true, nopath = true}}, true)
   B.run(W, 1100)
   T.ok(B.flips(W, 'B1', 'up')[1] ~= nil, 'B1 up')
   T.eq(#W.crushed, 0)

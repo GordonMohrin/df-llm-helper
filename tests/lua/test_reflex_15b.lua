@@ -6,6 +6,7 @@ KMOCK_NEU15B = true
 -- contract checks). Run 9: an army walked in over lowered drawbridges the kernel did not know (no manifest); the
 -- kernel woke the operator only at BREACH and its seal failed closed.
 KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
+KMOCK_REACH_OFF = true   -- 15b final rule: a test of the plumbing around a raise on a fort whose people stand within the reach window of a footprint; the reach rule itself is tested in test_bug905_909_b1*.lua, test_bug907_*.lua
 local T = require('testlib')
 local S = require('siege_world')
 local H = require('kern_world')
@@ -1078,6 +1079,7 @@ T.test('BUG-338: Kern+ over the killing field: B1 waits for the civilians in it,
   local units = S.far_units()
   units[#units + 1] = S.cit(6, 51, 28)                -- in the killbox K1, on Kern+ (old rule: inside, B1 rises at once)
   local W = setup{tag = 'atkfield', units = units, kern = {40, 20, Z - 2, 80, 95, Z}}
+  W.K.cfg.reflex.gate.reach = true                    -- (the file runs with the reach rule off, KMOCK_REACH_OFF; this test is about it)
   S.run(W, 120)                                       -- the census is there before the news
   W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
   S.run(W, 400)
@@ -1097,11 +1099,13 @@ T.test('BUG-338: B1 rises once the civilians are past it; a census of nobody on 
   local units = S.far_units()
   units[#units + 1] = S.cit(6, 51, 20)                -- in the bailey, outside Kern+
   local W = setup{tag = 'atkin', units = units}
+  W.K.cfg.reflex.gate.reach = true                    -- (the file runs with the reach rule off, KMOCK_REACH_OFF; this test is about it)
   S.run(W, 120)                                       -- the census is there before the news
   W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
   S.run(W, 300)
   T.eq({S.bstate(W, 'O1'), S.bstate(W, 'B1')}, {'down', 'down'}, '15b: citizen 6 can reach both footprints')
-  W.move(6, 60, 88, Z)                                -- walked in (out of reach of every footprint)
+  W.move(6, 60, 88, Z)                                -- walked in
+  W.K.cfg.reflex.gate.reach = false                   -- final rule: everybody inside Kern+ of this fort is within the reach window of B1 for good (a busy fort keeps it down); the rest of the test is about reflex's inner hold
   S.run(W, 600)
   T.eq(S.bstate(W, 'B1'), 'up')
   T.ok(logged(W, 'B1 up no longer held') ~= nil, 'kern.log says the hold ended')
@@ -1122,6 +1126,7 @@ T.test('Hotfix (live BREACH): the inner hold ends after INNER_MAX (900) ticks wi
   local units = S.far_units()
   units[#units + 1] = S.cit(6, 51, 20)                -- in the bailey, outside Kern+, never walks in
   local W = setup{tag = 'atkmax', units = units}
+  W.K.cfg.reflex.gate.reach = true                    -- (the file runs with the reach rule off, KMOCK_REACH_OFF; this test is about it)
   S.run(W, 120)                                       -- the census is there before the news
   W.event('REPORT', {type = 'AMBUSH_SNATCHER', text = 'Snatcher! Protect the children!'})
   S.run(W, 700)
@@ -1132,7 +1137,8 @@ T.test('Hotfix (live BREACH): the inner hold ends after INNER_MAX (900) ticks wi
   T.ok(m ~= nil, 'kern.log says the hold ended')
   local n = tonumber(m:match('after (%d+) ticks'))
   T.ok(n and n > 900 and n <= 1100, 'ended after INNER_MAX: ' .. tostring(m))
-  W.move(6, 60, 88, Z)                                -- he walks in, out of reach of every footprint
+  W.move(6, 60, 88, Z)                                -- he walks in
+  W.K.cfg.reflex.gate.reach = false                   -- final rule: everybody inside Kern+ of this fort is within the reach window of B1 for good; the rest of the test is about reflex's inner hold
   S.run(W, 600)
   T.eq(S.bstate(W, 'B1'), 'up', 'it rises once nobody can reach it')
   -- the lockdown lifts (B1 goes back down for PEACE) and comes again: no second hold, B1 rises at once

@@ -2,6 +2,7 @@
 -- station clearance 4; KMOCK_NEU15B below), with the expectations of the reach rule (a unit that can reach a footprint holds an ALERT / RECOVERY / DRILL raise;
 -- fixtures with far units). The original file keeps its original assertions for the gate of main (the switches are off there).
 KMOCK_NEU15B = true
+KMOCK_REACH_OFF = true   -- 15b final rule: a test of the plumbing around a raise on a fort whose people stand within the reach window of a footprint; the reach rule itself is tested in test_bug905_909_b1*.lua, test_bug907_*.lua
 -- BUG-013 (Run 9 forced arrival on 677bc3e: the civ alert held every civilian in Kern+ within 6 s of the popup, the
 -- four gate levers lay outside Kern+, their PullLever jobs stayed unclaimed for minutes, 1-3 of 4 bridges rose): the
 -- real sense, threat, siege, gate, reflex and seal on one k_mock world without a fort manifest

@@ -2,6 +2,7 @@
 -- station clearance 4; KMOCK_NEU15B below), with the expectations of the reach rule (a unit that can reach a footprint holds an ALERT / RECOVERY / DRILL raise;
 -- fixtures with far units). The original file keeps its original assertions for the gate of main (the switches are off there).
 KMOCK_NEU15B = true
+KMOCK_REACH_OFF = true   -- 15b final rule: a test of the plumbing around a raise on a fort whose people stand within the reach window of a footprint; the reach rule itself is tested in test_bug905_909_b1*.lua, test_bug907_*.lua
 -- Live L3 drill KPI 'outside at T+1,200' (DESIGN §11 R2, §14): every citizen outside Kern+ at T+1,200 counts,
 -- also one still walking home (2 tiles closer to the entry than at T+1,100, 10 closer than at T0) or waiting at a
 -- raised outer/inner bridge: in a real siege O1 rises at T+450 and that citizen stands outside with the attackers,

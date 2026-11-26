@@ -8,6 +8,7 @@
 -- Hebel+) only while pulls are pending, the alert waits for the pulls or its deadline (2x the lever latency,
 -- 450..1500 ticks, 900 unmeasured) and sounds at once with a hostile near a citizen, the texts say what holds, a
 -- door waits for a citizen outside from the alert on, and LOCKDOWN_END lowers the bridges after the alert.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local SW = require('seal_world')
 local S = require('siege_world')

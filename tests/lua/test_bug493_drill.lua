@@ -4,6 +4,7 @@
 -- ready.drill_mech_age and the phase deliverable 'drill' (P5) is met by a drill whose bridges worked. The R2 pass (drill_age) is
 -- unchanged: worn >= 90 still. The bridge side (the recall streaming over B1, the restore timeout) is
 -- tests/lua/test_bug492_493_traffic.lua.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local X = require('wp6_world')
 

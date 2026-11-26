@@ -162,6 +162,7 @@ end
 T.test('BUG-543 (1): DRILL, a soldier with no path paces 2 tiles from B1 (and would step on it the moment it moves), then stands: ' ..
        'B1 is not pulled while he paces, nobody is crushed, B1 rises after he stands still, the drill passes the mechanics', function()
   local W = drill_world{walkers = {pacer(800, 60, true, true)}}
+  W.K.cfg.reflex.gate.reach = false                    -- final rule: the fort's people and the pacer stand within the reach window of the footprints for good (a kernel raise would wait forever); this test is about the drill's own clock
   local ok, msg = W.K.call('drill', 'start', 'test')
   T.ok(ok, tostring(msg))
   run(W, 3800)

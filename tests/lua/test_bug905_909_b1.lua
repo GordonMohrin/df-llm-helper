@@ -9,6 +9,9 @@
 --   F2 (BUG-906) the station clearance is RAISE_R + spread: ALERT with soldiers pacing at 3 tiles -> STATION_MOVED; the stand-by order holds in SIEGE only
 --   F4 (BUG-908) the return window is only opened when the re-raise is possible; a bridge wanted up for a game day names who holds it
 --   F5 (BUG-909) SIEGE against building destroyers only: a unit standing beside the footprint does not hold it while the destroyer closes
+-- Final rule (BUG-907, option A): a raise outside SIEGE / BREACH is pulled only when NO non-animal unit of the census can reach the footprint within the whole window
+-- (lever latency + the bridge's movement, 80 tiles and more): the busy fort of the fixtures (people 30 tiles out) keeps B1 down for good, so the cases that need a raise
+-- use B.build{deep = true} (the fort's people 110 tiles out) and walkers that leave the window (100 tiles out).
 -- (F3, the bounded wait of BUG-907, is withdrawn in 15b: test_bug905_909_b1b.lua pins the reach rule that replaces it.)
 local T = require('testlib')
 local S = require('siege_world')
@@ -51,30 +54,38 @@ T.test('F1 PEACE (BUG-905/15b): four soldiers shuffling at the station 4 tiles i
 end)
 
 T.test('F1 PEACE (BUG-905/15b): a citizen 4 tiles from B1 walking onto it: no pull while he does and a whole quiet window after; nobody crushed', function()
-  local W = B.build{lat = 645, actors = {{id = 61, kind = 'citizen', route = B.route(51, 36, 70), start = 1000}}}   -- he sets off at +1000, inside the quiet window
-  local cross_t
+  local W = B.build{deep = true, lat = 645, actors = {{id = 61, kind = 'citizen', route = B.route(51, 36, 140), start = 1000, tpt = 9}}}   -- he sets off at +1000, inside the quiet window
+  local cross_t, gone_t
   local at = {}
-  for t = 0, 3600, 9 do
+  for t = 0, 6000, 9 do
     at[#at + 1] = {t, function(w, now)
       B.step(w, now)
-      if not cross_t then local _, y = B.at(w, 61); if y >= 41 then cross_t = now - (w.t0 or now) end end
+      local _, y = B.at(w, 61)
+      if not cross_t and y >= 41 then cross_t = now - (w.t0 or now) end
+      if not gone_t and y >= 130 then gone_t = now - (w.t0 or now) end         -- 90 tiles out: past the window (lever latency 645 + the move: ~85 tiles)
     end}
   end
-  S.run(W, 3600, {at = at})
+  S.run(W, 6000, {at = at})
   local pulls, ups = B.pulls(W, 'B1'), B.flips(W, 'B1', 'up')
-  T.ok(cross_t ~= nil, 'he crossed')
+  T.ok(cross_t ~= nil and gone_t ~= nil, 'he crossed and went on')
   T.ok(pulls[1] ~= nil and pulls[1] > cross_t + 600, 'no pull while he walks onto it and a whole quiet window after (crossed at +' .. tostring(cross_t) .. '), first pull +' .. tostring(pulls[1]))
-  T.ok(ups[1] ~= nil, 'raised after he has gone (he walks on to 30 tiles out)')
+  T.ok(pulls[1] ~= nil and pulls[1] >= gone_t, 'no pull while he is anywhere within reach of the footprint (out of reach at +' .. tostring(gone_t) .. '), first pull +' .. tostring(pulls[1]))
+  T.ok(ups[1] ~= nil, 'raised after he has gone (he walks on to 100 tiles out)')
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
 end)
 
-T.test('F1 PEACE (BUG-905/15b): a unit standing 14 tiles out holds the raise (a walker covers it in ~130 ticks), one standing 22 tiles out (past PEACE_R 20) does not', function()
-  local W = B.build{lat = 645, actors = {{id = 63, kind = 'citizen', pos = {51, 54}, still = true, nopath = true}}}
-  B.run(W, 2300)
-  T.eq(S.bstate(W, 'B1'), 'down', 'not raised with a unit 14 tiles away')
-  local W2 = B.build{lat = 645, actors = {{id = 64, kind = 'citizen', pos = {51, 62}, still = true, nopath = true}}}
+T.test('F1 PEACE (BUG-905/907 final): a unit STANDING 14, 22, 40 or 70 tiles out holds the quiet raise (a walker covers it within the window: 645 + the move); one standing 100 tiles out ' ..
+       '(past the window) does not; animals never hold it', function()
+  for _, d in ipairs({14, 22, 40, 70}) do
+    local W = B.build{deep = true, lat = 645, actors = {{id = 63, kind = 'citizen', pos = {51, 40 + d}, still = true, nopath = true}}}
+    B.run(W, 2300)
+    T.eq(S.bstate(W, 'B1'), 'down', 'not raised with a unit ' .. d .. ' tiles away')
+    T.eq(#B.pulls(W, 'B1'), 0, 'no pull with a unit ' .. d .. ' tiles away')
+    T.eq(#W.crushed, 0)
+  end
+  local W2 = B.build{deep = true, lat = 645, actors = {{id = 64, kind = 'citizen', pos = {51, 140}, still = true, nopath = true}}}
   B.run(W2, 2300)
-  T.eq(S.bstate(W2, 'B1'), 'up', 'raised with a unit 22 tiles away')
+  T.eq(S.bstate(W2, 'B1'), 'up', 'raised with a unit 100 tiles away')
   T.eq(#W2.crushed, 0)
 end)
 
@@ -129,11 +140,11 @@ T.test('F2 SIEGE (BUG-906): no tile clear of B1 can be found (nothing revealed):
   T.eq(#W3.crushed, 0)
 end)
 
-T.test('F2 military.clearance: gate.station_clear (the shipped config sets 4 = RAISE_R + spread, absent = the margin + spread clearance of main); 2 = the old BUG-032 clearance', function()
+T.test('F2 military.clearance: gate.station_clear (the shipped config sets 4 = RAISE_R + spread, absent = 4 too); 2 = the old BUG-032 clearance', function()
   local W = alert_world()
   local mil = package.loaded['dfllm.military']
   local G = package.loaded['dfllm.gate']
-  T.eq(mil.CLEAR, 0, 'absent key: the clearance of main (margin + spread)')
+  T.eq(mil.CLEAR, G.RAISE_R + mil.SPREAD, 'absent key: RAISE_R + spread (the safe default, final rule)')
   T.eq(W.K.cfg.reflex.gate.station_clear, G.RAISE_R + mil.SPREAD, 'the shipped config / the fixture: RAISE_R + spread')
   local W2 = B.build{mode = 'ALERT', lock = 'lockdown', real_mil = true, cfg = {reflex = {v = 2, gate = {station_clear = 2}}},
                      actors = soldiers({5, 101, 102, 103}, PACE3), army = {S.inv(250, 51, 15, Z)}}
@@ -208,10 +219,10 @@ end)
 local function returners(o)
   local acts = {}
   for k, y in ipairs({30, 32}) do
-    acts[#acts + 1] = {id = 70 + k, kind = 'citizen', route = B.route(50 + k, y, 75), start = math.huge}
+    acts[#acts + 1] = {id = 70 + k, kind = 'citizen', route = B.route(50 + k, y, 140), start = math.huge, tpt = 9}      -- home over B1 and on, past the reach window
   end
   for _, a in ipairs(o and o.actors or {}) do acts[#acts + 1] = a end
-  local W = B.build{closed = {B1 = true}, lat = 645, actors = cat(o and o.soldiers and soldiers({5, 101, 102, 103}) or {}, acts)}
+  local W = B.build{deep = true, closed = {B1 = true}, lat = 645, actors = cat(o and o.soldiers and soldiers({5, 101, 102, 103}) or {}, acts)}
   W.hook = function(w, rel)                                      -- they set off when B1 is down (the window)
     if S.bstate(w, 'B1') == 'down' then
       for _, a in ipairs(w.actors) do if a.start == math.huge then a.start = rel + (a.id - 70) * 60 end end
@@ -224,9 +235,9 @@ end
 T.test('F4 PEACE (BUG-908): the return window opens for two civilians outside B1, they walk home, the window ends when they are in, B1 is up again ' ..
        'within 1500 ticks of the last return; nobody crushed', function()
   local W = returners()
-  local last_in
+  local last_in, gone
   local at = {}
-  for t = 0, 6000, 9 do
+  for t = 0, 8000, 9 do
     at[#at + 1] = {t, function(w, now)
       B.step(w, now)
       if not last_in then
@@ -234,9 +245,14 @@ T.test('F4 PEACE (BUG-908): the return window opens for two civilians outside B1
         for _, id in ipairs({71, 72}) do local _, y = B.at(w, id); if y >= 41 then n = n + 1 end end
         if n == 2 then last_in = now - (w.t0 or now) end
       end
+      if not gone then
+        local n = 0
+        for _, id in ipairs({71, 72}) do local _, y = B.at(w, id); if y >= 130 then n = n + 1 end end
+        if n == 2 then gone = now - (w.t0 or now) end
+      end
     end}
   end
-  S.run(W, 6000, {at = at})
+  S.run(W, 8000, {at = at})
   local win, ups = B.events(W, 'GATE', 'return'), B.flips(W, 'B1', 'up')
   local end_ev = B.events(W, 'GATE', 'return_end')
   if os.getenv('DBG') then
@@ -245,7 +261,8 @@ T.test('F4 PEACE (BUG-908): the return window opens for two civilians outside B1
   T.eq(#win, 1, 'one return window')
   T.ok(last_in ~= nil, 'both are in')
   T.eq(#end_ev, 1, 'the window ended early: nobody left outside')
-  T.ok(ups[1] ~= nil and ups[1] > last_in and ups[1] - last_in <= 1500, 'B1 up within 1500 ticks of the last return (+' .. tostring(last_in) .. '): +' .. tostring(ups[1]))
+  T.ok(gone ~= nil and ups[1] ~= nil and ups[1] > last_in and ups[1] >= gone and ups[1] - gone <= 1500,
+       'B1 up within 1500 ticks of the moment the last of them is out of reach (+' .. tostring(gone) .. ', home at +' .. tostring(last_in) .. '): +' .. tostring(ups[1]))
   T.eq(S.bstate(W, 'B1'), 'up')
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
 end)
@@ -273,7 +290,7 @@ end)
 T.test('F4 PEACE (BUG-908): a citizen idling 7 tiles inside B1 would keep the re-raise waiting: the return window does NOT open (B1 stays up, GATE ' ..
        'return_wait names him once); when he has gone the window opens and they come home', function()
   local W = returners{actors = {{id = 80, kind = 'citizen', pos = {56, 47}, nopath = true,
-                                 fn = function(w, rel, a) if rel >= 3000 and not a.gone then a.gone = true; w.move(a.id, 70, 70, Z) end end}}}
+                                 fn = function(w, rel, a) if rel >= 3000 and not a.gone then a.gone = true; w.move(a.id, 70, 200, Z) end end}}}
   local down_early = false
   local at = {}
   for t = 0, 6600, 9 do

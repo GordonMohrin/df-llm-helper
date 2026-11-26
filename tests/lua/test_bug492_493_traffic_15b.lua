@@ -204,6 +204,7 @@ T.test('BUG-493 (5): the drill lowers a bridge after QUIET_DRILL ticks of a busy
   for i = 1, 200 do r[#r + 1] = {i % 2 == 0 and 48 or 49, 42} end
   -- (BUG-543: the pacer starts after B1 is up: a unit moving within 3 tiles of the footprint holds a raise, not a lowering's 1-tile margin)
   local W = build{far = true, walkers = {{id = 700, kind = 'citizen', route = r, start = 380}}}
+  W.K.cfg.reflex.gate.reach = false                    -- final rule: the fort's people stand within the reach window of B1 for good, a kernel raise would wait; this test is about the drill's lowering
   W.load(S.drill())                                    -- siege ends a DRILL at once without a drill module
   W.K.set_mode('DRILL', 'test drill')
   run(W, 400)

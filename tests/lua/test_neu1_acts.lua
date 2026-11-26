@@ -1,6 +1,7 @@
 -- NEU1 P7: the real act.lua (building_remove, labor_set both ways for the player, the held / note env) and the real kern's hold
 -- gate: a player verb's act calls are noted and held (player.hold_acts), a kernel module's later call on the held object is refused
 -- without ACT_FAIL. docs/v2/NEU1-notausgang.md.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local H = require('kern_world')
 local kmock = require('dfllm.util.k_mock')

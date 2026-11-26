@@ -2,6 +2,7 @@
 -- station clearance 4; KMOCK_NEU15B below), with the expectations of the reach rule (a unit that can reach a footprint holds an ALERT / RECOVERY / DRILL raise;
 -- fixtures with far units). The original file keeps its original assertions for the gate of main (the switches are off there).
 KMOCK_NEU15B = true
+KMOCK_REACH_OFF = true   -- 15b final rule: a test of the plumbing around a raise on a fort whose people stand within the reach window of a footprint; the reach rule itself is tested in test_bug905_909_b1*.lua, test_bug907_*.lua
 -- BUG-512 drill traffic test (Run 16d i4 Trumpetrealms y389-y395: 40 DRILL_RESULT 'up:B1, slow:O1, worn<90'; the drill started its clock at
 -- T0, the tick the alert sends everybody home and the squads to their stations over B1, so the raise waited for the march and the
 -- measurement missed). The world of test_bug510_513_siege with the REAL drill module (military stands in: 8 soldiers, 7 on station):

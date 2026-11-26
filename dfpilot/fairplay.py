@@ -189,6 +189,10 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
     if not isinstance(gate, dict):
         errs.append(f"{name}: gate must be an object")
     else:
+        # Neuausrichtung 15b (BUG-907): the safety switches are ON in the code when the key is absent, but the shipped file must say so (lint --config requires them)
+        for k, what in (("reach", "true"), ("player_lever", "true"), ("station_clear", "4")):
+            if k not in gate:
+                errs.append(f"{name}: gate.{k}: required (shipped value {what}); an absent key is ON in the kernel, a config that does not name it hides the safety rule")
         for k, v in gate.items():
             if k == "force_near":
                 if not is_int(v, 0, 30):
@@ -235,7 +239,7 @@ def reflex_errors(path: str | Path | None = None) -> list[str]:
             elif k == "station_clear":              # Neuausrichtung 15b (BUG-906): the clearance of a squad station (lua/dfllm/military.lua M.CLEAR_LIM); absent = margin + spread
                 if not is_int(v, 2, 12):
                     errs.append(f"{name}: gate.station_clear: int 2..12 expected, got {v!r}")
-            elif k in ("reach", "player_lever"):   # Neuausrichtung 15b: switches, absent = off in the code, true in the shipped config
+            elif k in ("reach", "player_lever"):   # Neuausrichtung 15b: safety switches, absent = on in the code, the shipped config sets them
                 if not isinstance(v, bool):
                     errs.append(f"{name}: gate.{k}: true or false expected, got {v!r}")
             elif k == "return_every":              # NEU1: ticks civilians stand outside a raised inner gate before it opens (0 = off)

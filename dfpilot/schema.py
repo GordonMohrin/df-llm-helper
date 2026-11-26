@@ -507,7 +507,7 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # trade = the caravans are asked for food and seeds (economy.fd_wants)
     # BUG-487: locked_out reop = the walls of ours the kernel took down itself (quickfort undo; a door goes there)
     "DECISION_NEEDED": ("A", "any", _d("id:s", "q:s food:i drink:i block:sa opts:sa auto:sa bridge:s n:i bd:i reb:i "
-                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i cause:s why:s crossings:i ticks:i gap:i need:i lat:i")),
+                                               "items:i mat:s links:i races:sa years:ia stop:i screen:s cmds:ca water:ca near:ia nd:i reop:i cause:s why:s crossings:i ticks:i gap:i need:i lat:i unit:i d:i")),
     "PLAN_EXHAUSTED": ("A", "runner", _d(opt="phase:s year:i")),
     # FR-94 (Run 14 note 100): the game stood paused by DF (a save loaded paused, a restart, an unknown popup) for `min`
     # real minutes (reflex.json resume.wake_min): by = df | popup; popup = the text that stands (<= 100 bytes), deny = 1
@@ -943,8 +943,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # (a risk of the kernel raise locks the bridge down in PEACE: days, left ticks, n risks, unit)
     # Neuausrichtung 15 / 15b (BUG-905..909): state peace_stuck (a bridge wanted up in PEACE for a game day: n = the units that keep it down, units, ticks
     # wanted, why; DECISION_NEEDED gate_peace_traffic follows with the traffic numbers) | return_wait (the return window did not open: blockers = units
-    # that would keep it down afterwards, n = civilians outside) | return_end (the window ended when the last civilian was in) | reach_resid (a raise was pulled with n units standing past the reach rule's census scan,
-    # or past the 20 tiles of the quiet PEACE raise: one that starts to walk after the lever job is done can still reach the footprint; units, need = the reach ticks)
+    # that would keep it down afterwards, n = civilians outside) | return_end (the window ended when the last civilian was in) | (the old state reach_resid is gone: the final reach rule holds every unit
+    # within the window, BUG-907). DECISION_NEEDED gate_reach_traffic (BUG-907): a raise outside SIEGE / BREACH held for 1,200 ticks by units that can reach the footprint
+    # within the window (unit/d = the nearest, n = how many, need = the window in ticks, ticks = how long it has been wanted): the bridge stays down because of traffic
     "GATE": ("C", "gate", _d("bridge:s", "state:s units:ia missing:s why:s n:i need:i unit:i days:i left:i ticks:i blockers:i")),
     "LEVER": ("C", "gate", _d("bridge:s", "lever:i job:i")),
     # BUG-043: margin = a default box's margin when it shrank ('8,8,1'), cols = its explore shaft columns, out/first =

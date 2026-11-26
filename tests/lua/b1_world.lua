@@ -39,10 +39,12 @@ end
 -- o.army = hostile units (S.inv...); o.foes = {{id, x, y0, y1, tpt}} walkers among them; o.mode; o.lock (the reflex lockdown reason, nil = none);
 -- o.lever ({worker, pull}); o.move; o.lat (the measured lever latency to start with); o.closed = {B1 = true} (up at the start);
 -- o.real_mil (real military restation / standing); o.hidden (the snapshot knows no tile: a station can not be moved); o.station = {x, y};
--- o.cfg; o.base = false (no citizens inside Kern+)
+-- o.cfg; o.base = false (no citizens inside Kern+); o.deep = true (final rule of BUG-907: the base citizens live 190+ tiles from every footprint (past the window of a measured latency of 1000: 126 tiles), in a Kern+ that reaches there, so that
+-- nobody of the base is within the reach window of a bridge and a kernel raise is possible at all)
 function B.build(o)
   o = o or {}
-  local units = o.base == false and {} or {S.cit(1, 60, 70), S.cit(2, 61, 70), S.cit(3, 62, 71), S.cit(4, 63, 72, Z, {adult = false})}
+  local units = o.base == false and {} or (o.deep and {S.cit(1, 60, 250), S.cit(2, 61, 250), S.cit(3, 62, 251), S.cit(4, 63, 252, Z, {adult = false})}
+                                          or {S.cit(1, 60, 70), S.cit(2, 61, 70), S.cit(3, 62, 71), S.cit(4, 63, 72, Z, {adult = false})})
   local actors = {}
   for _, a in ipairs(o.actors or {}) do
     local x, y = a.pos and a.pos[1] or a.route[1][1], a.pos and a.pos[2] or a.route[1][2]
@@ -63,7 +65,7 @@ function B.build(o)
   if cfg.reflex.gate.player_lever == nil then cfg.reflex.gate.player_lever = true end
   if cfg.reflex.gate.station_clear == nil then cfg.reflex.gate.station_clear = 4 end
   local W = S.world{units = units, mode = o.mode, move = o.move or 100, lever_default = o.lever or {worker = 30, pull = 40}, cfg = cfg,
-                    persist = persist}
+                    persist = persist, kern = o.deep and {40, 41, Z - 2, 200, 300, Z} or nil}
   W.actors, W.foes, W.crushed, W.t0 = actors, foes, {}, nil
   -- the squad: one fake squad 1 whose station order the military module (the real one: o.real_mil) may move
   local st = o.station or {51, 44}

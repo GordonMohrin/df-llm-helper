@@ -10,6 +10,7 @@ KMOCK_NEU15B = true
 -- a worker comes after lever_default.worker ticks (150: live L3 took 156-243), at once from a lever puller
 -- standing in the lever's room.
 KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
+KMOCK_REACH_OFF = true   -- 15b final rule: a test of the plumbing around a raise on a fort whose people stand within the reach window of a footprint; the reach rule itself is tested in test_bug905_909_b1*.lua, test_bug907_*.lua
 local T = require('testlib')
 local S = require('siege_world')
 local C = require('dfllm.util.contract')

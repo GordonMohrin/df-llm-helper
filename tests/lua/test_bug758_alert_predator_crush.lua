@@ -12,6 +12,7 @@
 --   (3) ALERT, the same with a CITIZEN pacing (the recall stream, BUG-587): the raise is not held for him;
 --   (4) SIEGE traffic: real invaders closing in, a stream of citizens and soldiers over O1, B1 and B2 and a soldier pacing beside O1: nobody
 --       crushed, O1 and B1 up in time (before T+900), the stream is not locked out (a unit that crossed before the raise stands inside).
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local S = require('siege_world')
 local kmock = require('dfllm.util.k_mock')

@@ -10,6 +10,7 @@ KMOCK_NEU15B = true
 -- without a fort manifest, so the bridges are unmanaged (X1 = O1's building, X2 = B1's, X3 = B2's) as in a fort
 -- without fortcore, plus the manifest variant of the Run 10 corridor.
 KMOCK_LEGACY_GATES = true   -- NEU1 (P5 Tore): written for the gate rules before Neuausrichtung 1 (D-14 down, straggler holds); see tests/lua/test_neu1_tore.lua
+KMOCK_REACH_OFF = true   -- 15b final rule: a test of the plumbing around a raise on a fort whose people stand within the reach window of a footprint; the reach rule itself is tested in test_bug905_909_b1*.lua, test_bug907_*.lua
 local T = require('testlib')
 local S = require('siege_world')
 local Z = S.Z

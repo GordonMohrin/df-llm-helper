@@ -8,6 +8,7 @@
 --   (4) DRILL, the recall streams over B1 (14..20 steps out): B1 is up by T+900 (the old rule held it for every unit within 20
 --       path steps for the whole drill: 'up:B1/O1' in 42 of 45 drills of Run 16d i4), nobody crushed;
 --   (5) the drill's end lowers the bridges within the quiet window cap (gate.QUIET_DRILL), not after 2400 ticks.
+KMOCK_LEGACY_15B = true   -- Neuausrichtung 15b: written for the gate of main; the safety switches gate.reach / player_lever / station_clear are ON when absent, this test sets them off (k_mock)
 local T = require('testlib')
 local S = require('siege_world')
 local kmock = require('dfllm.util.k_mock')
