@@ -93,6 +93,7 @@ C.EVENTS = {
   -- BUG-875: a Water Source zone the kernel painted outside the fort, removed once accepted water stands inside
   WATER_OUTSIDE_RETIRED = {cls = 'B', by = 'water'},
   WATER_OUTSIDE_RESTORED = {cls = 'B', by = 'water'},   -- BUG-875: the retired zone painted again once no strong inside source stands
+  WOOD_STUCK = {cls = 'B', by = 'economy'},   -- NEU16b BUG-916: no usable log for 3 game days, the loose logs on tiles with no walk group and / or every open FellTree job off the walk group
   WOOD_DISBELIEVED = {cls = 'B', by = 'economy'},   -- NEU16 BUG-911: DF cancelled 'Needs logs' beside a positive near-log count: autochop and the texts count 0 usable for 28 game days
   PILE_BARREL_RELEASE = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 6: a kernel food pile's barrel limit lowered because it holds registered empty barrels; measured 1 and 7 game days later
   BREW_CANCEL_SNAPSHOT = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 3: once per game day when DF cancels a brew for want of an empty food storage item: the empties by state, read only

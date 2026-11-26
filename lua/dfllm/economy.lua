@@ -1304,6 +1304,14 @@ local function classify(it, a, cat)
     -- plain far read calls a tile without a walkable group near; logs ask strict, and a log a job holds is no free log either
     local fr, why = false, nil
     if not f.in_inventory and a.far then fr, why = a.far(it, true) end
+    local lid = math.tointeger(it.id)                          -- NEU16b BUG-916: do the logs felled since the last reading land where nobody can walk?
+    if lid then
+      if lid > a.wood_hi then a.wood_hi = lid end
+      if a.wood_mark and lid > a.wood_mark then
+        a.wood_new = a.wood_new + n
+        if fr and why == 'nowalk' then a.wood_new_nw = a.wood_new_nw + n end
+      end
+    end
     if fr then
       a.wood_far = a.wood_far + n
       if why == 'nowalk' then a.wood_nw = a.wood_nw + n end
@@ -1483,6 +1491,7 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'blocks_busy', -- BUG-736
               'wood_far', 'wood_forb',   -- BUG-705
               'wood_nw', 'wood_busy', 'wood_skip', 'wood_built', 'drink_far',
+              'wood_new', 'wood_new_nw', 'wood_hi',   -- NEU16b BUG-916: logs newer than the previous reading / of those on a tile with no walk group; the highest log id
               'wood_dist'}   -- NEU16 BUG-910: loose logs on the citizens' walk group that lie farther from every Carpenter's workshop and wood pile than wood.near_d (counted apart, not `wood`)   -- NEU4 BUG-842: logs on tiles with no walk group, logs a job holds, logs DF skips (in a building ...)
 local function new_acc(c)
   local fs = {}
@@ -1496,6 +1505,7 @@ local function new_acc(c)
              bc = {}, kx = {}, cban = {}}
   for _, k in ipairs(ZERO) do a[k] = 0 end
   a.wood_d = math.tointeger((c.wood or {}).near_d)          -- NEU16 BUG-910
+  a.wood_mark = math.tointeger(st.wood_mark)                -- NEU16b BUG-916: the highest log id of the previous complete reading (nil: first reading, no 'new' count)
   -- BUG-023: weapons a squad uniform reserved (equipment screen; DF hands no reserved pick or axe out as a work tool)
   pcall(function()
     for _, id in ipairs(df.global.plotinfo.equipment.items_assigned.WEAPON) do a.res[id] = true end
@@ -1586,6 +1596,7 @@ local function publish(K, c, a, errs)
   end
   if st.farm then i.farm_plots, i.farm_empty = st.farm.plots, st.farm.empty end   -- FR-17 (T.farmslots)
   K.census.i = i
+  if (a.wood_hi or 0) > 0 then st.wood_mark = a.wood_hi end      -- NEU16b BUG-916
   st.bars_by, st.ores, st.seeds = a.bars_by, a.ores, a.seeds
   st.seeds_known = true                              -- BUG-256: st.seeds is the census' now (init holds an empty one)
   st.fix, st.reach, st.food_pos, st.unreach = a.fix, a.reach, a.food_pos, a.unreach or 0
@@ -3977,6 +3988,60 @@ function M.wood_belief(K, c, now, inv)
   K.log('warn', 'economy: %s; wood disbelieved for %d game days (autochop and the texts count 0 usable logs; near %d, far %d, loose unusable %d)', txt, D.hold, w,
         math.tointeger(inv.wood_dist) or 0, (math.tointeger(inv.wood_far) or 0) + (math.tointeger(inv.wood_busy) or 0) + (math.tointeger(inv.wood_skip) or 0))
   K.emit('WOOD_DISBELIEVED', 'B', txt:sub(1, 199), {n = n, w = w, d = D.hold})
+  return true
+end
+
+-- NEU16b BUG-916 (Run 17 i1 Diedplank, i4 Girderroots y475: census wood 0, 264 / 351 loose logs all on tiles with no walk group (river ramp, water7), autochop 'designating' 6-7 trees that
+-- the kernel's own FellTree read calls 'unreachable', DF 'Needs logs' for every wood job, and no event: BUG-911's WOOD_DISBELIEVED starts only beside a POSITIVE near count, BUG-912's
+-- relative target is a no-op when the plugin sees ~1-6 logs): the ZERO-count counterpart. No usable log (near + far-from-shops) while the loose logs lie mostly on tiles without a walk
+-- group (logs) or every open FellTree job lies off the citizens' walk group (trees), held `days` (3) game days: WOOD_STUCK once per `every` (28) days with the numbers (and, measured
+-- apart, how many logs are newer than the previous reading and how many of those are unwalkable: whether felling STILL drops logs where nobody can walk). It claims no cause for
+-- the trees (their tiles are not readable); the one action: the caravans' wood want (supply_wants, st.wstuck) and the text. Nothing is dug, no bridge, gate or citizen is touched.
+M.WOODSTUCK = {days = 3, every = 28, min_nw = 5}
+function M.wood_stuck_read(inv, fr)
+  local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
+  if g('wood') + g('wood_dist') > 0 then return nil end
+  local nw, loose = g('wood_nw'), g('wood_far') + g('wood_busy') + g('wood_forb') + g('wood_skip')
+  local fo = type(fr) == 'table' and (math.tointeger(fr.open) or 0) or 0
+  local ff = type(fr) == 'table' and (math.tointeger(fr.far) or 0) or 0
+  local logs = nw >= M.WOODSTUCK.min_nw and nw * 2 >= loose
+  local trees = fo > 0 and ff >= fo
+  if not (logs or trees) then return nil end
+  return {nw = nw, loose = loose, fo = fo, ff = ff, new = g('wood_new'), newnw = g('wood_new_nw'), logs = logs, trees = trees}
+end
+function M.wood_stuck(K, c, now, inv)
+  now = now or K.now().tick
+  inv = inv or K.census.i or {}
+  local p = pstate(K)
+  local W = M.WOODSTUCK
+  local rd
+  if (c.wood or {}).stuck ~= false and (math.max(0, math.tointeger(inv.wood) or 0) + math.max(0, math.tointeger(inv.wood_dist) or 0)) <= 0 then
+    local okf, fr = pcall(M.fell_reach, K)
+    rd = M.wood_stuck_read(inv, okf and fr or nil)
+  end
+  if not rd then
+    st.wstuck = nil
+    if p.wstuck ~= nil then p.wstuck = nil; K.persist.touch('m.economy') end
+    return false
+  end
+  local rec = type(p.wstuck) == 'table' and p.wstuck or {}
+  if not math.tointeger(rec.t0) or now < rec.t0 then
+    rec.t0 = now
+    p.wstuck = json.object(rec); K.persist.touch('m.economy')
+  end
+  if now - rec.t0 < (math.tointeger((c.wood or {}).stuck_days) or W.days) * DAY then return false end
+  st.wstuck = rd
+  if math.tointeger(rec.ev) and now - rec.ev < W.every * DAY then return true end
+  rec.ev = now
+  p.wstuck = json.object(rec); K.persist.touch('m.economy')
+  local days = (now - rec.t0) // DAY
+  local parts = {}
+  if rd.logs then parts[#parts + 1] = string.format('%d of %d loose logs lie on tiles with no walk group', rd.nw, rd.loose) end
+  if rd.trees then parts[#parts + 1] = string.format('all %d open FellTree jobs lie off the citizens\' walk group', rd.fo) end
+  local txt = string.format('no usable log for %d game days: %s; felling brings none (new logs %d, %d of them unwalkable); trade.want wood meanwhile', days, table.concat(parts, ', '), rd.new, rd.newnw)
+  K.log('warn', 'economy: wood stuck: %s (near %d, far %d, mode %s, autochop %s)', txt, math.tointeger(inv.wood) or 0, math.tointeger(inv.wood_dist) or 0, tostring(K.mode()),
+        st.chop and (st.chop[2] .. ' ' .. st.chop[1]) or 'unset')
+  K.emit('WOOD_STUCK', 'B', txt:sub(1, 199), {nw = rd.nw, loose = rd.loose, fo = rd.fo, ff = rd.ff, d = days, new = rd.new, newnw = rd.newnw, mode = tostring(K.mode())})
   return true
 end
 
@@ -8939,7 +9004,8 @@ function M.piece_route(c, r, e, n)
   end
   local why = {}
   if not e.wood then why[#why + 1] = free >= n and 'no Masons' or 'no rock' end
-  why[#why + 1] = wood >= n and 'no Carpenters' or (M.treeless(c, r) and 'no logs, the fort has no trees' or 'no logs')
+  local trees = M.treeless(c, r) and (math.tointeger(M.count_trees()) or 0) or 0       -- NEU16b BUG-916: trees stand (the plugin counted 1460): the logs are out of reach, not absent
+  why[#why + 1] = wood >= n and 'no Carpenters' or (M.treeless(c, r) and (trees > 0 and string.format('no usable logs, %d trees stand but none was felled for use', trees) or 'no logs, the fort has no trees') or 'no logs')
   if e.wood and M.treeless(c, r) then why[#why + 1] = 'a bed is wood only: trade.want wood' end
   return nil, string.format('no material for %s: %s', e.kind, table.concat(why, ', '))
 end
@@ -9685,6 +9751,8 @@ function M.supply_wants(K)
   local ws = (math.tointeger(st.wood_short) or 0) + (math.tointeger(cs.barrels) or 0) + (math.tointeger(cs.bins) or 0)    -- BUG-772
   if ws > 0 then
     w[#w + 1] = {buy = 'wood', n = math.min(60, ws * 4), why = string.format('treeless fort: %d wood-only pieces (beds, barrels, bins) wait for logs', ws)}
+  elseif type(st.wstuck) == 'table' then          -- NEU16b BUG-916: felling brings no usable log (WOOD_STUCK): the caravans do
+    w[#w + 1] = {buy = 'wood', n = 40, why = string.format('no usable log: %d loose logs on unwalkable tiles, %d of %d FellTree jobs off the walk group', st.wstuck.nw or 0, st.wstuck.ff or 0, st.wstuck.fo or 0)}
   end
   -- BUG-624 (Run 16d i4 Trumpetrealms y426-y428: the steel DECISION named flux but the want list never held it, `trade.want flux` was
   -- accepted by hand only): orders wait for steel bars and the chain (plan_steel) lacks flux stone, the smelting of pig iron and steel
@@ -12961,6 +13029,8 @@ function T.chop(K, c, r)
   local inv = r.inv or K.census.i or {}
   local okb, errb = pcall(M.wood_belief, K, c, r.now or K.now().tick, inv)
   if not okb then K.log('warn', 'wood belief: %s', tostring(errb):sub(1, 120)) end
+  local oks, errs = pcall(M.wood_stuck, K, c, r.now or K.now().tick, inv)         -- NEU16b BUG-916
+  if not oks then K.log('warn', 'wood stuck: %s', tostring(errs):sub(1, 120)) end
   if not HUNT_MODES[K.mode()] then return true end         -- NEU16 BUG-912: SIEGE / ALERT / BREACH: the target stays as it is, nothing sends woodcutters out
   local near = M.wood_usable(K, inv)
   local need = floor_of(c, r.p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (w.margin or 20)

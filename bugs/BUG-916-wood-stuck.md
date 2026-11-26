@@ -1,0 +1,21 @@
+# BUG-916 Zero usable logs, every log unwalkable, designated trees unreachable: no event, no word (WOOD_STUCK)
+Status: fixed (offline, live-untested)
+Severity: high (3 forts without wood for game years, silent)
+Found: Run 17 after round 16, three forts. i1 Diedplank (parked): census `wood 0`, 264 loose logs, 263 of them `unwalkable_tile` (river ramp / pool, water5, z143), `autochop` 'designated trees 7, expected logs 246' (above max 179), `inspect workload` 'unreachable FellTree x7', DF 'Needs logs' every ~30-100 s, no event. i4 Girderroots y475: `wood 0`, 342 of 351 loose logs on group-0 tiles (river ramp, water7), 6 designated trees, 'unreachable FellTree x6', events 'no material for chest, cabinet, door: no rock, no logs, the fort has no trees' (the plugin counts 1460 trees). i3: early phase 381 of 706 logs without walk group. BUG-911's WOOD_DISBELIEVED needs a POSITIVE near count (`economy.lua` `M.wood_belief`: `w <= 0` returns), BUG-912's relative target is a no-op when the plugin sees ~1-6 logs (the band stays within `step`), BUG-913's pile gathers nothing when no log is free.
+Module: `lua/dfllm/economy.lua` (`M.WOODSTUCK`, `M.wood_stuck_read`, `M.wood_stuck`, `T.chop`, census WOOD branch / `ZERO`, `M.supply_wants`, `M.piece_route`), `dfpilot/schema.py`, `lua/dfllm/util/contract.lua`, `docs/v2/CONTRACTS.md`
+
+## Proven by the diagnoses
+Census wood 0 with almost all loose logs on tiles without a walk group (i1 263/264, i4 342/351); the designated trees yield FellTree jobs flagged unreachable (kernel read, `M.cv_reach`); the kernel said nothing (0 events). The chain 'felling a tree beside water drops its logs unwalkable' is NOT proven: the sample of the raw `why` is 10 old items, tree tiles are not readable.
+
+## Fix
+1. `M.wood_stuck` (each `T.chop` run, any mode): no usable log (`wood` + `wood_dist` = 0) and either `wood_nw` >= 5 and at least half of the loose logs (`wood_far + wood_busy + wood_forb + wood_skip`) lie on tiles with no walk group, or every open FellTree job lies off the citizens' walk group (`M.fell_reach`), for 3 game days (`economy.wood.stuck_days`; `economy.wood.stuck=false` switches it off): event WOOD_STUCK once per 28 days (`nw`, `loose`, `fo`, `ff`, `d`, `new`, `newnw`, `mode`) and one kern.log warn line with the autochop band. State persisted in `m.economy` `wstuck {t0, ev}`, ends by itself the first run a log is usable.
+2. Telemetry that answers the unproven link: the census counts logs newer than the previous complete reading (`wood_new`) and of those the ones on a tile with no walk group (`wood_new_nw`), and `wood_hi` (highest id). The first reading after a reload has no mark (0). WOOD_STUCK carries `new` / `newnw`: if `newnw` stays high, felling still drops logs where nobody can walk.
+3. The one action: while WOOD_STUCK holds, `M.supply_wants` asks the caravans for 40 wood (`trade.want`), unless the treeless want is already there.
+4. `M.piece_route`: when trees stand (`M.count_trees() > 0`) the 'no material' text says 'no usable logs, N trees stand but none was felled for use' instead of 'the fort has no trees'. Decisions unchanged.
+Not done (unproven, no guess-fix): un-designating unreachable trees, `autochop chop <burrow>`, a felling distance from water; no digging, no bridge / gate, no citizen sent anywhere.
+
+## Tests
+`tests/lua/test_bug916_wood_stuck.lua` (WOOD_STUCK after 3 days once with numbers and the wood want; usable near logs / fewer than 5 unwalkable: nothing; new-log counters; the pure read for logs / trees), `tests/test_bug916_wood_stuck.py` (schema, contract).
+
+## Live-Erwartung
+i1 / i4: 3 game days after the reload, with `wood 0` and the logs still unwalkable (i1 263/264) the event WOOD_STUCK appears once ('no usable log for N game days: 263 of 264 loose logs lie on tiles with no walk group, all 7 open FellTree jobs lie off the citizens' walk group; felling brings none (new logs A, B of them unwalkable); trade.want wood meanwhile'), kern.log 'wood stuck: ...', the want list holds `wood` 40. Read `newnw` against `new` after the next fellings. If `new` > 0 and `newnw` = 0 the fresh logs are walkable (then the old logs alone hold the count). i3: no event while near wood is above 0. Not promised: that wood arrives (only the caravans' want and the honest line).

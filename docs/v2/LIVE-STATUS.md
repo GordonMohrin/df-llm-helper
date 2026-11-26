@@ -8,17 +8,17 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 
 | Status | Bugs |
 |---|---|
-| live bestaetigt | 34 |
+| live bestaetigt | 35 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
 | offen, nie live gesehen | 785 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **51** von 836 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **52** von 837 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
-| genannt, aber ohne klares Urteil (bleiben offen) | 79 |
+| genannt, aber ohne klares Urteil (bleiben offen) | 78 |
 
 Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
 
-- Spieler-Logs Run 15/16 (STAND.md, FR-BUGS.md): 33 Bugs
+- Spieler-Logs Run 15/16 (STAND.md, FR-BUGS.md): 34 Bugs
 - Live-Nachprüfungen Okt. 2026 in Bugdateien (Status-, Found-Zeile, Live check): 12 Bugs
 - Live-Berichte in docs/v2 (STATUS.md, POSTMORTEM): 7 Bugs
 
@@ -134,6 +134,9 @@ Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
   - **wirkt** `runs/run-15-guildcleans/FR-BUGS.md:103` (wirken): - BUG-328/329 wirken sichtbar: brief zeigt jetzt "set aside (no progress): 3 ...
 - **BUG-329**
   - **wirkt** `runs/run-15-guildcleans/FR-BUGS.md:103` (wirken): - BUG-328/329 wirken sichtbar: brief zeigt jetzt "set aside (no progress): 3 ...
+- **BUG-437**
+  - **wirkt** `runs/run-16b/STAND.md:620` (OK): Holz/Fass-Kette laeuft; fortcore Stage 4 NICHT angewandt wg BUG-437), plan check OK
+  - **wirkt** `runs/run-16b/STAND.md:633` (OK): 0 Bauten, Spur Wehr/Versorgung, kein fortcore Stage 4 wegen BUG-437), plan check OK
 - **BUG-457**
   - **wirkt** `runs/run-16b/FR-BUGS.md:196` (behoben): traps.at-Crash mehr; propose liefert Entwurf mit Warnungen (BUG-457 behoben).
 - **BUG-488**
@@ -296,6 +299,8 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-437 `runs/run-16b/STAND.md:587` (no verdict word): lan y524: Phase P5, Bauten stockroom@S1 (fortcore abgelehnt/BUG-437 Warnung), Spur Wehr;
 - BUG-437 `runs/run-16b/STAND.md:604` (no verdict word): Plan y532: Phase P5, Bau fortcore st4 versehentlich in s1 (BUG-437 warn), s1b0 nach Start per bp.cancel streichen;
 - BUG-437 `runs/run-16b/STAND.md:606` (no verdict word): G-530: keine Stelle; fortcore st4 bewusst weggelassen wegen BUG-437 bei Trinken 0), Spur Versorgung: Schritt = Fassbestellung 6936 (3 von 40 gebaut).
+- BUG-437 `runs/run-16b/STAND.md:626` (no verdict word): P5, Bauten 0, Spur Versorgung, kein fortcore Stage 4 wegen BUG-437), Trinken status 15d
+- BUG-437 `runs/run-16b/STAND.md:629` (no verdict word): pur Versorgung (Plan check OK, fortcore Stage 4 nicht wegen BUG-437).
 - BUG-437 `runs/run-16d/STAND.md:124` (no verdict word): refuge_beds, dining, furnaces; Fallen erst s2 wegen Warnung BUG-437 Wasser)
 - BUG-437 `runs/run-16d/STAND.md:132` (no verdict word): st4, traps bridges, explore x4); Entscheidung: Fallen trotz BUG-437-Warnung, da drink 405d/food 60-75d innen
 - BUG-437 `runs/run-16b/FR-BUGS.md:927` (no verdict word): tone-fall traps on the way out of the fort while drink 0 d (BUG-437: they kill the citizens who walk it): drop it until drink and food stand inside' -> nicht aufgenommen.
@@ -315,6 +320,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/STAND.md:362` (no verdict word): Patienten-Wasser per Traeger 34 Tiles ok; cistern refused (BUG-469, kein Freigraben an Wasser)
 - BUG-469 `runs/run-16b/STAND.md:411` (no verdict word): 9817 (STRUCK_DOWN), starb selbst; Cistern: bp.place refused BUG-469, sites cistern core/refuge: 'no pipe route' (Wasser 82,89,141 / 82,171,141 zu weit) -> kein Brunnen moeglich, Trinken b
 - BUG-469 `runs/run-16b/STAND.md:578` (no verdict word): 12:23 y521 aut d4 Trinken 0 d, Zisterne abgelehnt (BUG-469), keine neuen Tote ausser Alter (29123)
+- BUG-469 `runs/run-16b/STAND.md:618` (no verdict word): Durst 26261) - Kernel-Vorschlag Cistern: bp.place refused (BUG-469), nichts gegraben;
 - BUG-469 `runs/run-16b/FR-BUGS.md:297` (no verdict word): der (2) dfpilot muss den Brunnen speisen (cistern lehnt ab: BUG-469 Wasser 78 Schritte entfernt), (3) Hospital-Vorlage mit eigener Wasserzone IM Raum.
 - BUG-469 `runs/run-16b/FR-BUGS.md:334` (no verdict word): (accepted 0), 'bp.place tpl=cistern' am Hospital abgelehnt (BUG-469: kein Fluss/Aquifer erreichbar).
 - BUG-469 `runs/run-16b/FR-BUGS.md:338` (no verdict word): 00. Hospital-Brunnen 97,101,133 trocken, cistern abgelehnt (BUG-469).
@@ -324,6 +330,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-469 `runs/run-16b/FR-BUGS.md:673` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40: too far f
 - BUG-469 `runs/run-16b/FR-BUGS.md:833` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core (> 40) ...
 - BUG-469 `runs/run-16b/FR-BUGS.md:1095` (no verdict word): ace tpl=cistern site=A101_176_137_1 -> 'refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps ...
+- BUG-469 `runs/run-16b/FR-BUGS.md:1526` (no verdict word): lace tpl=cistern site=A86_121_137_2 -> "refused (not sent): BUG-469: a bucket-fed cistern (no p.path) would stay dry: revealed water at 77,131,142, 73 steps from the core ...
 - BUG-469 `runs/run-16c/FR-BUGS.md:345` (no verdict word): r 94,51,146) wurde angenommen, p.water=aquifer automatisch (BUG-469), proj c1a1c20625ec7ba701.
 - BUG-481 `runs/run-16c/FR-BUGS.md:261` (no verdict word): ate 40' obwohl plan ceiling 100: readiness.lua:615-617/822 (BUG-481 dhold, why defense_short) friert max-pop bei trap_shortfall ein;
 - BUG-488 `runs/run-16a/STAND.md:138` (no verdict word): Plan y401b angewendet (seal, explore, tradepost@94,102 NEU BUG-488);

@@ -596,6 +596,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # NEU16 BUG-911: WOOD_DISBELIEVED = DF cancelled `n` wood jobs ('Needs logs': barrel, bed, charcoal, ...) within 7 game days while the kernel counted `w` usable (near) logs: for `d` game days
     # autochop and the status texts count 0 usable logs (the count is not what DF can use)
     "WOOD_DISBELIEVED": ("B", "economy", _d("n:i w:i d:i")),
+    # NEU16b BUG-916: WOOD_STUCK = the zero-count counterpart: no usable log for `d` game days while `nw` of `loose` loose logs lie on tiles with no walk group and/or all `fo` open FellTree jobs
+    # (`ff` of them) lie off the citizens' walk group; new/newnw = logs newer than the previous census reading / of those on a tile with no walk group
+    "WOOD_STUCK": ("B", "economy", _d("nw:i loose:i fo:i ff:i d:i", "new:i newnw:i mode:s")),
     "PILE_BARREL_RELEASE": ("B", "economy", _d("pile:i before:i after:i reg0:i phase:s", "reg1:i reg7:i cx0:i cx7:i verdict:s")),
     "CISTERN_DRY": ("B", "water", _d("room:s days:i fill:s", "proj:s well:i pos:p pond:i src:p d:i")),
     # BUG-063: ws = the workshop type the mood claimed (-> MOOD_CRITICAL: pos = its first tile, name = the dwarf, nook = the
