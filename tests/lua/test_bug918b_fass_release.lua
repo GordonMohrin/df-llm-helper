@@ -219,6 +219,35 @@ T.test('BUG-918b D1 (i3 loop): the cancels fall to 0 because the order condition
   T.eq(gate(176), false, 'OFF stays OFF without a fresh DF cancel')
 end)
 
+-- NEU17c verifier: the hold of reason (b) is persisted (p.cxb), not a session latch
+T.test('BUG-918b D1 (reload): ON, economy re-required, 40+ days with 0 cancels and cont_free < N: the gate is still ON and cx_expire does not give the limits back', function()
+  local W, ord, P, c = i4_world(false)
+  local econ = require('dfllm.economy')
+  c.cancel.stand = false
+  ord.item_conditions = kmock.vec{{compare_type = 0, compare_val = 5, flags1 = {empty = true}, flags3 = {food_storage = true}, item_type = -1}}
+  feed(econ, W.K, 12, W.K.now().tick)
+  econ.release_watch(W.K, c)
+  T.eq(limits(P), {0, 0, 0, 1, 3, 15})
+  W.run(DAYT * 9, {skip = 100})
+  T.ok(econ.cx_gate(W.K, c, W.K.now().tick), 'held on the order condition')
+  local p = W.K.persist.get('m.economy')
+  T.ok(type(p.cxb) == 'table', 'the hold is in the persisted state')
+  local econ2 = fresh('economy')                 -- reload: the session tables (st.cxh) are gone, the persisted state stays
+  local now = W.K.now().tick
+  for d = 1, 45 do
+    T.ok(econ2.cx_gate(W.K, c, now + d * DAYT), 'day +' .. d .. ': 0 cancels, cont_free < N: still ON')
+    if d == 3 then
+      econ2.cx_expire(W.K, c, p, now + d * DAYT)     -- inside the freeze's own 14-day bound: only the gate could end it
+      T.eq(limits(P), {0, 0, 0, 1, 3, 15}, 'cx_expire after the reload: limits NOT given back (gate held by p.cxb)')
+      T.ok(type(p.pilecap) == 'table')
+    end
+  end
+  T.eq(econ2.df_count(W.K, econ2.BREW_KINDS, econ2.CX_REASON, c, now + 45 * DAYT), 0)
+  W.K.census.i.cont_free = 40
+  econ2.cx_gate(W.K, c, now + 46 * DAYT)
+  T.ok(p.cxb == nil, 'cont_free >= N clears the persisted hold')
+end)
+
 T.test('BUG-918b D1: with the gate held by the order condition the release lowers, and the cure end restores the limits', function()
   local W, ord, P, c = i4_world(false)
   local econ = require('dfllm.economy')

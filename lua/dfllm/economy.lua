@@ -4627,7 +4627,8 @@ function M.cx_cond_n(K)
       end
     end
   end)
-  if not ok or nmax == nil then return nil end
+  if not ok then return nil, 0, true end                -- NEU17c: a failed read is not 'no such order' (the persisted hold p.cxb must not be cleared by it)
+  if nmax == nil then return nil end
   return nmax, orders
 end
 -- (b) holds: such an order exists, the kernel's own count of free empty containers is below its N, and DF's container cancel was seen since the cure last switched on (the latch st.cxh) or within
@@ -4635,15 +4636,28 @@ end
 function M.cx_cond(K, c, now, last)
   local inv = (K.census or {}).i
   local free = type(inv) == 'table' and math.tointeger(inv.cont_free) or nil
-  if free == nil then return nil end
-  local nmin, orders = M.cx_cond_n(K)
-  if not nmin or free >= nmin then return nil end
+  local p = pstate(K)
+  local nmin, orders, failed = M.cx_cond_n(K)
+  -- NEU17c BUG-918 (verifier): the hold of reason (b) is PERSISTED (p.cxb = {t, n, f}): set while (b) holds, cleared only when cont_free >= N or no such order exists (a failed
+  -- read or a missing census keeps it), then the BUG-867 hysteresis. Before, the latch lived in the session table st.cxh: a reload with the cancels at 0 dropped the gate and cx_expire gave the limits back.
+  local held = type(p.cxb) == 'table'
+  if failed or (free == nil and nmin ~= nil) then
+    if held then return {n = math.tointeger(p.cxb.n) or 1, orders = math.tointeger(p.cxb.o) or 1, free = math.tointeger(p.cxb.f) or 0, last = math.tointeger(p.cxlast), held = true} end
+    return nil
+  end
+  if not nmin or free == nil or free >= nmin then
+    if held then p.cxb = nil; K.persist.touch('m.economy') end
+    return nil
+  end
   local cc = (c or {}).cancel or {}
   local span = (math.tointeger(cc.cx_off_days) or 14) * DAY
-  local p = pstate(K)
   if last then p.cxlast = last end
   local seen = math.tointeger(p.cxlast)
-  if not (st.cxh ~= nil or (seen and now >= seen and now - seen <= span)) then return nil end
+  if not (held or st.cxh ~= nil or (seen and now >= seen and now - seen <= span)) then return nil end
+  if not held or p.cxb.n ~= nmin or p.cxb.o ~= orders or p.cxb.f ~= free then
+    p.cxb = {t = held and p.cxb.t or now, n = nmin, o = orders, f = free}
+    K.persist.touch('m.economy')
+  end
   return {n = nmin, orders = orders, free = free, last = seen}
 end
 -- the container shortage DF names: n cancels within the window (at least economy.cx_min_n) -> {n, last, text}; else nil. NEU17b D1: or DF's own order condition (M.cx_cond) keeps it on
