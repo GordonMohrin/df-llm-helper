@@ -217,7 +217,6 @@ function S.relocate(man, brs, p, blk, o)
   if o.side then sides[#sides + 1] = o.side end
   local cols = stair_cols(man)
   local function ok(x, y, z)
-    if o.stat then o.stat.n = (o.stat.n or 0) + 1 end            -- BUG-906: how many tiles were tried (STATION_MOVED says so)
     for _, b in ipairs(brs) do
       local need = o.need_by and o.need_by[b.name] or o.clear
       local d = S.sdist(b.fp, x, y, z)                     -- BUG-380: a level above or below counts too

@@ -209,14 +209,11 @@ def test_reflex_config_stations(tmp_path):
                 for k, v in re.findall(r"(\w+) = (\{\d+, \d+\}|\d+)", m.group(1))}
     st = dict(shipped["stations"])
     spread = st.pop("spread")                    # BUG-032: military's knob (lua/dfllm/military.lua M.SPREAD)
-    clear = st.pop("clear")                      # BUG-906: military's knob (lua/dfllm/military.lua M.CLEAR)
     assert st == table("ST") == {"core_ratio": 3, "worn": 60, "metal": 0}
     mil = (fairplay.REPO / "lua" / "dfllm" / "military.lua").read_text(encoding="utf-8")
     assert int(re.search(r"^M\.SPREAD = (\d+)", mil, re.M).group(1)) == spread == 1
     lim = tuple(int(x) for x in re.search(r"^M\.SPREAD_LIM = \{(\d+), (\d+)\}", mil, re.M).groups())
-    assert int(re.search(r"^M\.CLEAR = (\d+)", mil, re.M).group(1)) == clear == 4
-    clim = tuple(int(x) for x in re.search(r"^M\.CLEAR_LIM = \{(\d+), (\d+)\}", mil, re.M).groups())
-    assert {**table("ST_LIM"), "spread": lim, "clear": clim} == fairplay.STATIONS_LIM
+    assert {**table("ST_LIM"), "spread": lim} == fairplay.STATIONS_LIM
     p = tmp_path / "reflex.json"
     p.write_text(json.dumps({"v": 2, "stations": {"core_ratio": 0, "worn": 60, "zap": 1, "spread": 6}}), encoding="utf-8")
     errs = fairplay.reflex_errors(p)

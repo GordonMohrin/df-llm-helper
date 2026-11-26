@@ -66,11 +66,6 @@ M.KPI_TTL = 25
 M.STATION_R = 3             -- a soldier within 3 tiles (same z) of the station is on station
 M.SPREAD = 1                -- BUG-032: tiles around its station point DF stands a squad on (cfg stations.spread)
 M.SPREAD_LIM = {0, 5}
--- BUG-906 (Run 17 i3 B1: the station lay 4 tiles from the footprint, gate's RAISE_R is 3: soldiers pacing about it at 3 tiles held every ALERT /
--- RECOVERY raise, and restation said 'kept' because 4 > 1 + spread): the clearance of a station is at least gate.RAISE_R + spread (cfg stations.clear,
--- default CLEAR = 3 + 1 = 4; never below gate's margin + spread), so a station whose crowd can hold its own bridge is moved
-M.CLEAR = 4
-M.CLEAR_LIM = {2, 12}
 M.RELOC_TTL = 6000          -- BUG-032: ticks a station's replacement is kept (revealed tiles change slowly)
 M.NOTE_EVERY = 2400         -- BUG-032: a squad with no station clear of a bridge it holds is told at most this often
 -- Run 11 siege 3 (y432/433: 25 dead, pop 54 -> 29, soldiers 10 -> 5, O1 destroyed): squads A and B emptied and were
@@ -2317,10 +2312,7 @@ end
 local function clearance(K)
   local ok, m = K.call('gate', 'margin')
   m = ok and int(m) or 1
-  local r = type(K.cfg.reflex) == 'table' and type(K.cfg.reflex.stations) == 'table' and K.cfg.reflex.stations or {}
-  local c = int(r.clear)
-  if not c or c < M.CLEAR_LIM[1] or c > M.CLEAR_LIM[2] then c = M.CLEAR end
-  return math.max(m + spread(K), c), m
+  return m + spread(K), m
 end
 
 -- snapshot.tile (revealed tiles only: nil for a hidden one, fair play), nil without the module
@@ -2347,17 +2339,16 @@ local function reloc(K, man, brs, p, blk, clear, o)
   local key = string.format('%s|%d|%s|%s', pstr(p), clear, o.tag or '', tostring(o.group or '-'))
   local c = rt.reloc[key]
   if c and now >= c.t and now - c.t < M.RELOC_TTL and not (c.q and M.off_group(K, c.q, o.group)) then
-    return c.q or nil, c.n
+    return c.q or nil
   end
-  local stat = {}
-  local q = SL.relocate(man, brs, p, blk, {clear = clear, need_by = o.need_by, side = o.side, ring = clear, R = o.R, stat = stat,
+  local q = SL.relocate(man, brs, p, blk, {clear = clear, need_by = o.need_by, side = o.side, ring = clear, R = o.R,
                                            tile = tile_reader(K), group = o.group or nil,
                                            group_of = o.group and function(x, y, z)
                                              return M.group_at(K, {x = x, y = y, z = z})
                                            end or nil})
   q = q and geom.pos(q.x, q.y, q.z) or nil
-  rt.reloc[key] = {t = now, q = q or false, n = stat.n}
-  return q, stat.n
+  rt.reloc[key] = {t = now, q = q or false}
+  return q
 end
 
 -- BUG-142 (live i3: stations.b2 48,40,127 and gallery 64,47,130 were walls on walk group 0; the squads ordered there
@@ -2527,8 +2518,7 @@ local function pick(K, man, stations, chain, o)
         if #blk == 0 and inside and not seek and not wall and not away then r.pos, r.name = p, name; return r end
         if wall and r.first.name == name then r.first.wall = wall end
         if away and r.first.name == name then r.first.away, r.first.home = away, o.group end
-        local q, nt = reloc(K, man, brs, p, blk, clear, o)
-        r.ntiles = (r.ntiles or 0) + (nt or 0)                   -- BUG-906: the tiles tried for the 'none' report
+        local q = reloc(K, man, brs, p, blk, clear, o)
         if q then r.pos, r.name, r.from = q, name, (not seek) and p or nil; r.blk = r.blk or blk[1]; return r end
         r.blk = r.blk or blk[1] or (not inside and {name = o.bridge or '?', d = -1}) or nil
         hard = hard or (wall and true) or (away and true) or false
@@ -4426,35 +4416,16 @@ local function restation_one(K, man, stations, bname, fp, q, clear, margin)
              d = q.d, first = 'station'}
   if q.cross then d.why = 'cross' end
   if not r.pos or (r.pos.x == q.p.x and r.pos.y == q.p.y and r.pos.z == q.p.z) then
-    -- BUG-906: no tile clear of the bridge on its inner side (r.pos nil, not 'the station is clear already'): the squad's soldiers stand by order
-    -- for this alarm (gate: a soldier at his station, not ON the footprint, holds no raise: military.standing); said ONCE per alarm (mode
-    -- episode) with the tiles tried; a quiet PEACE wait repeats it at most every NOTE_EVERY ticks
-    local stand = not r.pos and not q.cross
-    if stand then
-      rt.stand = rt.stand or {}
-      rt.stand[q.sid] = {ms = K.mode_since(), t = now_tick(K), p = pstr(q.p)}
-    end
     rt.rs_note = rt.rs_note or {}
-    local nk, now, ms = q.sid .. ':' .. bname, now_tick(K), K.mode_since()
-    local o = rt.rs_note[nk]
-    if type(o) == 'table' and now >= o.t and o.ms == ms and (K.mode() ~= 'PEACE' or now - o.t < M.NOTE_EVERY) then return false end
-    rt.rs_note[nk] = {t = now, ms = ms}
+    local nk, now = q.sid .. ':' .. bname, now_tick(K)
+    if rt.rs_note[nk] and now >= rt.rs_note[nk] and now - rt.rs_note[nk] < M.NOTE_EVERY then return false end
+    rt.rs_note[nk] = now
     d.why, d.station = 'none', 'station'
-    local txt
-    if stand then
-      d.tiles, d.clear, d.standby = r.ntiles or 0, clear, true
-      d.tried = r.tried and #r.tried > 0 and table.concat(r.tried, ', '):sub(1, 80) or nil
-      txt = string.format('%s: no tile clear of %s (clearance %d, %d tiles tried) for its station %s: kept, its soldiers stand by order and hold the raise only ON the footprint',
-                          label, bname, need, r.ntiles or 0, pstr(q.p))
-      K.log('warn', 'military: %s (%s; %s)', head, r.tried and #r.tried > 0 and table.concat(r.tried, ', ') or 'no entry', 'stand by order')
-    else
-      txt = head .. string.format(': the station lies clear of it already (more than %d tiles), its soldiers are still on their way: kept', need)
-    end
+    local txt = head .. string.format(': no station clear of it on its inner side (crowd %d tiles): kept', need)
     K.emit('STATION_MOVED', 'B', txt:sub(1, 200), d)
     K.log('warn', 'military: %s', txt)
     return false
   end
-  if rt.stand then rt.stand[q.sid] = nil end
   if key then
     local _, _, src = posture_station(K, man, stations, st.posture, st.sq[key].kind, key == first_melee_key(),
                                       squad(st.sq[key].id))
@@ -4527,17 +4498,6 @@ function M.restation(K, holds)
   end
   if n > 0 then save(K) end
   return n
-end
-
--- public (BUG-906, gate): does soldier `id` at x, y, z stand at his squad's station while no tile clear of a bridge was found for it (this alarm)?
--- Then he stands by order and holds no raise unless he is ON the footprint
-function M.standing(K, id, x, y, z)
-  if not rt or type(rt.stand) ~= 'table' then return false end
-  local so = station_order(id)
-  local s = so and rt.stand[so.sid]
-  if not s or s.ms ~= K.mode_since() or s.p ~= pstr(so.p) then return false end      -- the same station order as when no tile was found
-  x, y, z = int(x), int(y), int(z)
-  return x ~= nil and y ~= nil and so.p.z == z and math.max(math.abs(x - so.p.x), math.abs(y - so.p.y)) <= spread(K) + 1
 end
 
 -- public (siege): squad members (alive) of squad `key` (nil = every squad) inside any of `boxes` ({x0,y0,z0,x1,y1,z1}):
