@@ -217,6 +217,8 @@ C.EVENTS = {
   MATERIAL_SHORT = {cls = 'B', by = 'economy'},
   -- BUG-042: the manager's office lacked its chair/table (he validates nothing without them); what economy placed
   MANAGER_OFFICE = {cls = 'B', by = 'economy'},
+  MANAGER_REPLACED = {cls = 'B', by = 'economy'},   -- NEU19 BUG-925: the MANAGER who could not work for orders.manager_replace_days was replaced (kernel, or the player's appoint replace)
+  WOOD_PILE = {cls = 'B', by = 'economy'},          -- NEU19 BUG-926: a dfllm-wood pile placed beside a Carpenter (ph placed) and the measurement 7 game days later (ph result)
   -- BUG-231: manager orders held past orders.bypass_days: the items added as workshop tasks (act.ws_task)
   MANAGER_BYPASS = {cls = 'B', by = 'economy'},
   -- BUG-498: an adult animal marked for slaughter for a strange mood's bone/shell/leather (d.need, animal, race, adult, last)
@@ -627,7 +629,7 @@ C.STATE_SPEC = obj({
              cap = obj({sets = NAT, melee = NAT, want = NAT, xbow = NAT}),     -- Run 11: melee follows the gear
              rel = obj({n = NAT, why = str(24), t = NAT, sq = str(8)}),          -- BUG-327: the last release
              -- FR-100 (G18): soldiers, fully equipped, armor, weapon in hand, training weapon in hand, squads on the policy
-             kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}, {sq = NAT, sqw = NAT, wb = NAT, sqf = NAT, sqa = NAT, sqok = NAT}),   -- BUG-827, BUG-860
+             kit = obj({n = NAT, full = NAT, armor = NAT, weapon = NAT, wood = NAT, tr = NAT}, {sq = NAT, sqw = NAT, wb = NAT, sqf = NAT, sqa = NAT, sqok = NAT, off = NAT, nd = NAT, fulld = NAT}),   -- BUG-827, BUG-860; NEU19 BUG-929: off / on duty / on duty fully equipped
              -- FR-79: the militia rotation per squad key (schema.py _ROT)
              rot = obj(nil, {A = ROT_ONE, B = ROT_ONE, C = ROT_ONE})}),
   trade = obj({caravan = FLAG, ratio = NAT, done = NAT}, {nb = arr(str(24), 0, 5), stale = NAT}),   -- BUG-534: wants no caravan ever had; BUG-642: stale Leaving caravans

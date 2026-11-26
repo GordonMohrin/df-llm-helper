@@ -1119,7 +1119,10 @@ def seal_records(save_dir: Path) -> dict[tuple[int, int, int], tuple[str, dict]]
     piece under its opening, the opening it closes for a neighbour (`for=`) and the tile it stands on."""
     out: dict = {}
     dmod = None
+    marked = live_orphans(save_dir)                          # BUG-927: a seal file the kernel does not know builds nothing (unless it lists it again)
     for p in bp_files(save_dir):
+        if p.stem in marked:
+            continue
         doc = files.read_json(p)
         if not (isinstance(doc, dict) and doc.get("tpl") == "seal" and isinstance(doc.get("params"), dict)):
             continue
@@ -3204,6 +3207,130 @@ def never_finished(save_dir: Path, proj: str, doc: dict | None = None) -> bool:
     return isinstance(d, dict) and untouched_on_snapshot(save_dir, d)
 
 
+ORPHANS_FILE = ".orphans.json"      # BUG-927: bp/.orphans.json = {"ids": {project id: {"t": wall, "by": who}}}: bp files the kernel does not know
+ORPHANS_MAX = 400
+
+
+def read_orphans(save_dir: Path) -> dict[str, dict]:
+    """BUG-927: the bp files marked as orphans (the kernel answered 'none' for `bp.<id>` and they could not be retired as 'never
+    finished'): {id: {t, by}}. A dot file: bp_files() never lists it. Empty when the file is missing or unreadable."""
+    doc = files.read_json(Path(save_dir) / "bp" / ORPHANS_FILE)
+    ids = doc.get("ids") if isinstance(doc, dict) else None
+    return {k: v for k, v in ids.items() if isinstance(k, str) and isinstance(v, dict)} if isinstance(ids, dict) else {}
+
+
+def listed_projects(state: dict | None) -> set[str] | None:
+    """BUG-927: the project ids of the state's list (state.proj rows), None when the state carries no list."""
+    rows = (state or {}).get("proj")
+    if not isinstance(rows, list):
+        return None
+    return {r[0] for r in rows if isinstance(r, list) and r and isinstance(r[0], str)}
+
+
+def live_orphans(save_dir: Path, state: dict | None = None) -> dict[str, dict]:
+    """BUG-927: read_orphans() minus the ids the kernel's project list holds again (as plan.open_seals does); such a mark is cleared in the
+    file as well (the kernel lists the project: it is no orphan)."""
+    marked = read_orphans(save_dir)
+    if not marked:
+        return marked
+    listed = listed_projects(state if state is not None else files.read_state(Path(save_dir)))
+    back = {k for k in marked if listed and k in listed}
+    if back:
+        left = {k: v for k, v in marked.items() if k not in back}
+        try:
+            files.write_json_atomic(Path(save_dir) / "bp" / ORPHANS_FILE, {"v": 1, "ids": left})
+        except OSError:
+            pass
+        return left
+    return marked
+
+
+def seal_built(save_dir: Path, doc: dict) -> bool:
+    """BUG-927: whether the newest snapshot shows a seal piece of this project standing (a door, hatch, grate or wall on its tile): then the
+    project may be a FINISHED one whose PROJECT_DONE rotated out of the events, and its file is never marked as an orphan."""
+    snap = sites_snapshot(save_dir)
+    if not isinstance(snap, dict) or not isinstance(snap.get("bbox"), list) or not isinstance(doc.get("params"), dict):
+        return False
+    try:
+        pcs = load_bp("defense").seal_pieces(doc["params"], doc.get("anchor"))
+    except (BpUnavailable, ValueError, KeyError):
+        return False
+    x0, y0, z0, x1, y1, z1 = snap["bbox"]
+    for pc in pcs:
+        try:
+            x, y, z = pc["at"]
+            if x0 <= x <= x1 and y0 <= y <= y1 and z0 <= z <= z1 and snap["rows"][f"z{z}"][y - y0][x - x0] in "+H#B=":
+                return True
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return False
+
+
+def mark_orphan(save_dir: Path, proj: str, by: str = "cli") -> bool:
+    """BUG-927 (Run 17 i2 Whirledrampart: the dead seal file bp/c1a1c57ffc32132601.json, 'no project' for bp.cancel / bp.resume, kept
+    `plan check` warning 'seal c1a1c57ffc32132601 +6 is open: the runner pauses bedrooms, stockroom' for years; the player may not delete in
+    dfllm-runtime and retire() refuses a file that may be a finished project): record that the kernel does not know this file. The file
+    itself is NOT touched; plan.open_seals() and seal_records() skip a marked id (unless the kernel lists it again). One line in cli.log the
+    first time. True when newly marked."""
+    save_dir = Path(save_dir)
+    cur = read_orphans(save_dir)
+    if proj in cur:
+        return False
+    doc = files.read_json(save_dir / "bp" / f"{proj}.json")
+    if isinstance(doc, dict) and seal_built(save_dir, doc):
+        return False                                           # its pieces stand: it may be a finished project (PROJECT_DONE rotated out)
+    cur[proj] = {"t": int(time.time()), "by": by}
+    if len(cur) > ORPHANS_MAX:                                 # the oldest marks go first
+        for k in sorted(cur, key=lambda k: cur[k].get("t", 0))[:len(cur) - ORPHANS_MAX]:
+            del cur[k]
+    try:
+        files.write_json_atomic(save_dir / "bp" / ORPHANS_FILE, {"v": 1, "ids": cur})
+    except OSError:
+        return False
+    files.log_cli(save_dir, by, "orphan:ignored", {"proj": proj},
+                  "the kernel does not know this project (no project): its bp file is ignored by the seal warnings and the seal first rule")
+    return True
+
+
+def orphan_seal_candidates(save_dir: Path, now: float | None = None, limit: int = 8) -> list[str]:
+    """BUG-927: seal bp files with no PROJECT_DONE that the state's project list does not hold, older than ORPHAN_AGE_S and not marked yet:
+    asked of the kernel like orphan_candidates() (those the kernel does not hold are marked, not retired). At most `limit`, oldest first."""
+    now = time.time() if now is None else now
+    st = files.read_state(Path(save_dir)) or {}
+    rows = {r[0] for r in st.get("proj") or [] if isinstance(r, list) and r and isinstance(r[0], str)}
+    marked = read_orphans(save_dir)
+    done = None
+    out: list[tuple[float, str]] = []
+    for p in bp_files(save_dir):
+        if p.stem in rows or p.stem in marked:
+            continue
+        try:
+            age = now - p.stat().st_mtime
+        except OSError:
+            continue
+        if age < ORPHAN_AGE_S:
+            continue
+        doc = files.read_json(p)
+        if not (isinstance(doc, dict) and doc.get("tpl") == "seal"):
+            continue
+        if done is None:
+            done = {e.get("d", {}).get("proj") for e in files.iter_events_rev(save_dir)
+                    if e.get("type") == "PROJECT_DONE" and isinstance(e.get("d"), dict)}
+        if p.stem in done:
+            continue
+        out.append((p.stat().st_mtime, p.stem))
+    return [i for _, i in sorted(out)[:limit]]
+
+
+def settle_orphan(save_dir: Path, proj: str, by: str = "cli") -> str:
+    """BUG-927: the kernel does not hold `proj`: retire its file when it was provably never finished (BUG-442), else mark it as an orphan
+    (kept on disk, ignored by the seal warnings). Returns 'retired' | 'marked' | 'kept'."""
+    if retire_orphan(save_dir, proj):
+        files.log_cli(save_dir, by, "retire:orphan", {"proj": proj}, "the kernel does not know this project: bp file retired")
+        return "retired"
+    return "marked" if mark_orphan(save_dir, proj, by) else "kept"
+
+
 def retire_orphan(save_dir: Path, proj: str) -> bool:
     """BUG-442: retire() for a bp file the kernel does not know, only when never_finished() proves it was never finished; the
     .placed-<tpl>.json record of a finished project is never touched."""
@@ -3259,13 +3386,14 @@ def retire_orphans(save_dir: Path, wait_s: float = 5.0, by: str = "cli") -> list
     """BUG-442: ask the kernel about every orphan_candidates() bp file and retire (bp/.cancelled) those it does not know. Used
     where the CLI may wait for a reply (plan apply); follow does the same without waiting (wake._sweep_orphans). Returns the ids."""
     gone = []
-    for pid in orphan_candidates(save_dir):
+    cands = orphan_candidates(save_dir)
+    cands += [i for i in orphan_seal_candidates(save_dir) if i not in cands]          # BUG-927: doubtful seal files are asked too (marked, not retired)
+    for pid in cands:
         try:
             _, rep = send(save_dir, "inspect", {"what": "persist", "key": f"bp.{pid}", "field": "tpl"}, by=by, wait_s=wait_s)
         except Exception:                                    # noqa: BLE001 - a sweep never stops the caller
             return gone
-        if kernel_knows(rep) is False and retire_orphan(save_dir, pid):
-            files.log_cli(save_dir, by, "retire:orphan", {"proj": pid}, "the kernel does not know this project: bp file retired")
+        if kernel_knows(rep) is False and settle_orphan(save_dir, pid, by) == "retired":
             gone.append(pid)
     return gone
 
@@ -3327,7 +3455,12 @@ def send(save_dir: Path, verb: str, args: dict, by: str = "cli", wait_s: float =
         if verb == "bp.cancel" and isinstance(args.get("proj"), str) and (reply.get("ok") or no_such_project(reply)):
             # BUG-442: 'no project X' = gone in the kernel: the file goes too, unless the project may have been finished (a pruned
             # finished project answers the same: its file keeps the tile reservations and stage anchors)
-            (retire if reply.get("ok") else retire_orphan)(save_dir, args["proj"])
+            if reply.get("ok"):
+                retire(save_dir, args["proj"])
+            else:
+                settle_orphan(save_dir, args["proj"], by)      # BUG-927: retired when never finished, else marked orphaned (file kept)
+        elif verb == "bp.resume" and isinstance(args.get("proj"), str) and no_such_project(reply):
+            settle_orphan(save_dir, args["proj"], by)          # BUG-927: 'no project X' for a resume: the same dead file
         if verb == "inspect" and args.get("what") == "manifest" and reply.get("ok"):
             cache_manifest(save_dir, reply.get("data"))
     return cmd_id, reply

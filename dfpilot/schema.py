@@ -843,7 +843,9 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     "AQ_PASS_DONE": ("B", "runner", _d("proj:s", "top:i bot:i lv:ia n:i rest:ia")),
     "KERNEL_SLOW": ("B", "kern", _d("module:s", "ms:i factor:i task:s")),
     "WEALTH": ("B", "siege", _d(opt="created:i exported:i imported:i")),
-    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f settle:i retries:i")),
+    # NEU19 BUG-928: word = passed | failed | held (`held`: every failure is `occupied:<bridge>`, a raise the kernel itself forbids while a unit can reach the footprint: nothing was
+    # proven, not counted as a failure), inside = citizens inside Kern+ after `ticks` game ticks of the drill, clear = 1 when no footprint of a bridge that is not up is held by a unit
+    "DRILL_RESULT": ("B", "drill", _d(opt="pass:f raised:i worn:i outside:i dbl:i why:s restore:i fails:sa mech:f settle:i retries:i word:s inside:i clear:f ticks:i")),
     "READY_CHANGE": ("B", "readiness", _d(opt="from:i to:i fail:sa")),
     # NEU1 P4: halt / need = the growth ladder's first failing condition while the ladder is the binding ceiling (why growth or a freeze)
     "POPCAP": ("B", "readiness", _d("cap:i", "why:s halt:s need:s")),
@@ -941,6 +943,12 @@ EVENTS: dict[str, tuple[str, str, Obj]] = {
     # BUG-042: the manager's office zone without its chair/table (he validates no work order): what economy placed
     # (`placed` 'chair at x,y,z, table at x,y,z', the repair project) or why it could not
     "MANAGER_OFFICE": ("B", "economy", _d("zone:i why:s", "chair:i table:i placed:s proj:s")),
+    # NEU19 BUG-925: MANAGER_REPLACED = the holder of `code` could not work (`why` resting/injured) for `days` game days with `orders` unvalidated: old unit unseated (nothing is done to him), new unit
+    # appointed; how = kernel (orders.manager_replace_days, once per span) | verb (the player's appoint replace:true), span = the configured days
+    "MANAGER_REPLACED": ("B", "economy", _d("code:s old:i new:i why:s days:i", "orders:i how:s span:i")),
+    # NEU19 BUG-926: WOOD_PILE ph placed = a dfllm-wood pile w x h at pos beside the Carpenter's workshop shop (near0 / far0 = usable near / far logs now, need = the wanted logs, piles = wood piles read);
+    # ph result = `days` game days later: near0 -> near1, far0 -> far1, on = logs lying on the pile's tiles
+    "WOOD_PILE": ("B", "economy", _d("ph:s", "pos:p w:i h:i shop:p near0:i near1:i far0:i far1:i need:i piles:i on:i days:i")),
     # BUG-231: manager orders held past orders.bypass_days: the workshop tasks the kernel added ('chair (wood) at 412')
     "MANAGER_BYPASS": ("B", "economy", _d("days:i n:i tasks:s", "why:s")),
     # BUG-498: a strange mood needs bone / shell / leather and the fort has none: an adult animal was marked for slaughter (last 1: the
@@ -1360,7 +1368,10 @@ STATE = Obj(
                                     # BUG-827: sq = members of the first melee squad, sqw = of them READY (BUG-860: fit and a real
                                     # weapon usable; the growth ladder's 'squad' step), wb = wooden hands counted armed by a real weapon
                                     # waiting; sqf = fit members, sqa = with a usable real weapon, sqok = the ready latch (0/1)
-                                    opt={"sq": NAT, "sqw": NAT, "wb": NAT, "sqf": NAT, "sqa": NAT, "sqok": NAT}),
+                                    opt={"sq": NAT, "sqw": NAT, "wb": NAT, "sqf": NAT, "sqa": NAT, "sqok": NAT,
+                                         # NEU19 BUG-929: off = soldiers of squads off duty right now (DF strips an off-duty soldier, BUG-864: `full` counts
+                                         # them unequipped), nd = soldiers on duty, fulld = of those fully equipped
+                                         "off": NAT, "nd": NAT, "fulld": NAT}),
                          # FR-79: the militia rotation per squad key: w = window months, on = 1 inside the window, n = members
                          # now, z = squad target, e = eligible citizens, lo/hi = windows served by the eligible, nx = game days
                          # to the next close (0 = the turnover is due), rt = turnovers done, mv = members swapped in all, why =
@@ -1725,7 +1736,8 @@ LEITER = Obj(req={"v": Const(V)},
              opt={"h": Obj(opt={"drink": AnyOf(Null(), TICK), "stress": AnyOf(Null(), TICK)}), "ht": TICK,
                   "best": Obj(req={"sum": Int(0, 18), "t": TICK, "y": NAT}, opt={"lv": _LV}),
                   "last": Obj(req={"sum": Int(0, 18), "t": TICK, "wall": NAT}), "born": NAT, "t0": TICK,
-                  "sess": Obj(req={"t": TICK, "n": NAT, "wall": NAT, "sum": Int(0, 18), "lv": _LV, "full": NAT})})
+                  "sess": Obj(req={"t": TICK, "n": NAT, "wall": NAT, "sum": Int(0, 18), "lv": _LV, "full": NAT},
+                              opt={"fn": NAT})})        # NEU19 BUG-929: fn = soldiers on duty at the start (full = of them fully equipped)
 
 SCHEMAS: dict[str, Spec] = {
     "state": STATE, "heartbeat": HEARTBEAT, "event": EVENT, "inbox": INBOX, "outbox": OUTBOX,

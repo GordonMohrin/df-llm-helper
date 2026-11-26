@@ -132,6 +132,17 @@ def t_wehr(s: dict, mem: dict, now: int) -> tuple:
     return 3, "", "", None, False
 
 
+def kit_duty(kit: dict) -> tuple[int, int, int]:
+    """BUG-929: (fully equipped, soldiers, soldiers off duty not counted) of the squads ON DUTY. DF strips an off-duty soldier (BUG-864, the militia
+    in its free months), so `kit.full` over all soldiers fell to 0 each winter without anyone losing a piece. A kernel without `nd` / `fulld`
+    (older state): the plain counts and no off-duty soldiers."""
+    full, n = _i(kit.get("full")) or 0, _i(kit.get("n")) or 0
+    nd, fd = _i(kit.get("nd")), _i(kit.get("fulld"))
+    if nd is None or fd is None:
+        return full, n, 0
+    return fd, nd, _i(kit.get("off")) or 0
+
+
 def t_ruestung(s: dict, mem: dict, now: int, metal_min: int = 50) -> tuple:
     m = s.get("mil")
     if not isinstance(m, dict):
@@ -143,17 +154,25 @@ def t_ruestung(s: dict, mem: dict, now: int, metal_min: int = 50) -> tuple:
     if sq < 1 or n < 1:
         return 0, "kein Trupp mit Soldaten", "dfllm plan propose (Phase stellt die Trupps)", None, False
     free = _o(m.get("free"))
+    # BUG-929 (verifier): squads off duty are stripped by DF (BUG-864): their soldiers count neither as unarmed nor as unarmoured. With some off duty
+    # (kit.off > 0, kit.nd > 0) only the squads on duty are judged: fulld of nd, thresholds at most nd (all on duty equipped is enough); a kernel
+    # without the keys, or none on duty, reads as before.
+    thr = list(RUESTUNG_FULL)
+    fd_nd = kit_duty(kit)
+    if (_i(kit.get("nd")) or 0) > 0 and fd_nd[2] > 0:
+        full, n, wpn = fd_nd[0], fd_nd[1], fd_nd[1]
+        thr = [min(t, n) for t in thr]
     if wpn < n:
         fw = _i(free.get("weapon")) or 0
         return (0, f"{wpn}/{n} Soldaten mit Waffe" + (f", {fw} freie Waffen im Lager" if fw else ""), want("weapon"),
                 "free:weapon" if fw >= n - wpn else "trade:weapon", False)
-    if full < RUESTUNG_FULL[0]:
+    if full < thr[0]:
         fb = _i(free.get("body")) or 0
-        return (1, f"{full}/{RUESTUNG_FULL[0]} voll ({n} Soldaten" + (f", {fb} freie Panzer im Lager)" if fb else ")"),
-                want("armor"), "free:body" if fb >= min(n, RUESTUNG_FULL[0]) - full > 0 else "trade:armor", False)
+        return (1, f"{full}/{thr[0]} voll ({n} Soldaten" + (f", {fb} freie Panzer im Lager)" if fb else ")"),
+                want("armor"), "free:body" if fb >= min(n, thr[0]) - full > 0 else "trade:armor", False)
     metal = _i(m.get("metal_pct")) or 0
-    if full < RUESTUNG_FULL[1] or metal < metal_min:
-        return (2, f"{full}/{RUESTUNG_FULL[1]} voll, Metall {metal}/{metal_min} %", want("armor:metal"),
+    if full < thr[1] or metal < metal_min:
+        return (2, f"{full}/{thr[1]} voll, Metall {metal}/{metal_min} %", want("armor:metal"),
                 "trade:armor:metal", False)
     return 3, "", "", None, False
 
@@ -701,8 +720,9 @@ def start_session(save_dir: Path) -> str:
         return f"leiter --start: {lz.get('why')}"
     mem = lz["mem"]
     kit = _o(_o((files.read_state(save_dir) or {}).get("mil")).get("kit"))
+    fd, nd, _ = kit_duty(kit)
     mem["sess"] = {"t": lz["now"], "n": files.last_event_n(save_dir), "wall": int(time.time()), "sum": lz["sum"],
-                   "lv": {k: lz["tracks"][k]["eff"] for k in TRACKS}, "full": _i(kit.get("full")) or 0}
+                   "lv": {k: lz["tracks"][k]["eff"] for k in TRACKS}, "full": fd, "fn": nd}      # BUG-929: on-duty squads only, with their count
     mem["v"] = 2
     files.write_json_atomic(Path(save_dir) / LEITER_FILE, mem)
     return f"SITZUNG Start {fmt_tick(lz['now'])}: Leiter {lz['sum']}/{MAX}"
@@ -720,9 +740,11 @@ def session_lines(save_dir: Path) -> tuple[list[str], int]:
     ch = [f"{NAME[k]} {ROMAN[_i(_o(ss.get('lv')).get(k)) or 0]}->{ROMAN[tr[k]['eff']]}" for k in TRACKS
           if (_i(_o(ss.get("lv")).get(k)) or 0) != tr[k]["eff"]]
     kit = _o(_o((files.read_state(save_dir) or {}).get("mil")).get("kit"))
-    f0, f1 = _i(ss.get("full")) or 0, _i(kit.get("full")) or 0
+    f0, (f1, n1, off1) = _i(ss.get("full")) or 0, kit_duty(kit)
+    n0 = _i(ss.get("fn"))                                 # BUG-929: the denominator is the soldiers on duty, not the ladder's threshold (6)
     if f0 != f1:
-        ch.append(f"Ruestung {f0}/{RUESTUNG_FULL[0]}->{f1}/{RUESTUNG_FULL[0]}")
+        ch.append(f"Ruestung {f0}/{n1 if n0 is None else n0}->{f1}/{n1} im Dienst voll"
+                  + (f" ({off1} ausser Dienst nicht gezaehlt)" if off1 else ""))
     evs = wertung.load_events(save_dir, ss["n"])
     back = wertung.load_events(save_dir, 0, ss["t"] - SEASON)
     # a unit already reported dead before the session (its 'found dead' revision may come seasons later) is no session

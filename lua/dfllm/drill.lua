@@ -287,6 +287,7 @@ local function measure(K, now)
   local raise = type(kpi.last_raise_ticks) == 'table' and kpi.last_raise_ticks or {}
   local names = gate_bridges(K.manifest())
   local raised = 0
+  local clear = true                              -- BUG-928: is the footprint of every bridge that is not up free of units (nobody holds it)?
   if #names == 0 then fails[#fails + 1], raised = 'no_bridges', -1 end
   for _, name in ipairs(names) do
     local ok, s = K.call('gate', 'state', name)
@@ -299,6 +300,7 @@ local function measure(K, now)
       -- BUG-543: units kept it from rising (gate waited for them, never raised onto them): `occupied`, not a mechanics failure
       local oko, occ = K.call('gate', 'occupied', name)
       if oko and occ then
+        clear = false
         fails[#fails + 1] = 'occupied:' .. name
         K.log('info', 'drill: %s not raised: occupied by %s', name, tostring(occ))
       else fails[#fails + 1] = 'up:' .. name end
@@ -336,9 +338,13 @@ local function measure(K, now)
   for _, f in ipairs(fails) do
     if not (f:sub(1, 4) == 'worn' or f == 'military?' or f == 'no_soldiers') then mech = 0 end
   end
+  -- BUG-928: what was measured, for the 'held' word: citizens inside after the drill's ticks (the census's own count), whether a footprint was clear
+  local cit, sold = type(cu) == 'table' and int(cu.cit) or -1, type(cu) == 'table' and int(cu.soldiers) or 0
+  local inside = (cit >= 0 and outside >= 0) and math.max(0, cit - sold - outside) or -1
   return {tick = now, pass = #fails == 0 and 1 or 0, raised = raised, worn = math.max(0, math.min(100, worn)),
           outside = math.max(0, outside), dbl = dbl, fails = fails, mech = mech,
-          extra = {walking = walking, outer = outer or -1, take = take, pullers = pullers}}
+          extra = {walking = walking, outer = outer or -1, take = take, pullers = pullers, inside = inside, clear = clear and 1 or 0,
+                   ticks = now - (st.t0 or now)}}
 end
 
 -- BUG-580: a failed drill whose every failure is `occupied:<bridge>` (our own people kept a bridge down, the mechanics never failed)
@@ -360,12 +366,23 @@ local function finish(K, now)
   rec.streak_fail = r.pass == 1 and 0 or (M.traffic_only(r.fails) and rec.streak_fail or rec.streak_fail + 1)   -- BUG-580
   K.persist.set('drill', rec)
   local fl = table.concat(r.fails, ', ')
+  -- BUG-928 (Run 17: 8 of 8 drills 'failed (occupied:B1/O1 ...)' because the reach rule keeps a bridge down while any unit within ~99 steps can reach it - the kernel forbids
+  -- that raise itself): a drill whose only failures are `occupied:*` is no failure of the fort: the word is 'held' (not 'failed'), the message says what was measured
+  -- (citizens inside after N ticks, footprint clear yes / no); `pass` stays 0 (nothing was proven) and the streak does not count it (BUG-580)
+  local held = r.pass == 0 and M.traffic_only(r.fails)
+  local word = r.pass == 1 and 'passed' or (held and 'held' or 'failed')
+  local head
+  if held then
+    head = string.format('drill held (not measured): %s; citizens inside %s after %d ticks, footprint clear %s, outside %d, worn %d%%, dbl %d',
+                         fl, x.inside >= 0 and tostring(x.inside) or '?', x.ticks, x.clear == 1 and 'yes' or 'no', r.outside, r.worn, r.dbl)
+  end
   -- BUG-251: DRILL_RESULT waits for the restore (persisted: a reload mid-restore still reports it)
-  st.res = {msg = string.format('drill %s: raised %d, outer %d (goal %d), worn %d%%, outside %d (%d walking home), dbl %d%s',
-                                r.pass == 1 and 'passed' or 'failed', r.raised, x.outer, M.OUTER_GOAL, r.worn, r.outside,
-                                x.walking, r.dbl, fl ~= '' and (' (' .. fl .. ')') or ''),
+  st.res = {msg = head or string.format('drill %s: raised %d, outer %d (goal %d), worn %d%%, outside %d (%d walking home), dbl %d%s',
+                                        word, r.raised, x.outer, M.OUTER_GOAL, r.worn, r.outside,
+                                        x.walking, r.dbl, fl ~= '' and (' (' .. fl .. ')') or ''),
             d = {pass = r.pass, raised = r.raised, worn = r.worn, outside = r.outside, dbl = r.dbl, why = st.why,
-                 walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers, fails = r.fails, mech = r.mech}}
+                 walking = x.walking, outer = x.outer, take = x.take, pullers = x.pullers, fails = r.fails, mech = r.mech,
+                 word = word, inside = x.inside >= 0 and x.inside or nil, clear = x.clear, ticks = x.ticks}}
   if r.pass == 0 and rec.streak_fail == 2 then st.res.fail = {streak = rec.streak_fail, fails = r.fails, fl = fl} end
   st.res.d.settle = math.max(0, (st.ts1 or st.ts or st.t0 or 0) - (st.t0 or 0))      -- BUG-512
   st.res.d.retries = st.occ or 0                                              -- BUG-580: clock restarts for people beside a bridge

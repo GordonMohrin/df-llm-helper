@@ -19,3 +19,4 @@ def _no_orphan_sweep(request, monkeypatch):
         return
     from dfpilot import cmd
     monkeypatch.setattr(cmd, "orphan_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(cmd, "orphan_seal_candidates", lambda *a, **k: [])      # NEU19 BUG-927: the same for the doubtful seal files

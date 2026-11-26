@@ -307,7 +307,8 @@ M.DEFAULTS = {
              fuel = 0},
   -- NEU16c BUG-917: unmark = false switches the removal of unreachable fell designations off; unmark_days = days between removals, unmark_max = trees per removal, unmark_runs = removals per episode,
   -- unmark_measure = game days until the measurement
-  wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10, unmark_days = 7, unmark_max = 120, unmark_runs = 3, unmark_measure = 2},
+  wood = {chop_min = 60, chop_max = 150, margin = 20, band = 90, cap = 400, step = 10, unmark_days = 7, unmark_max = 120, unmark_runs = 3, unmark_measure = 2,
+          pile_w = 5, pile_h = 5, pile_max = 3, pile_measure = 7},       -- BUG-926: the kernel's own dfllm-wood pile beside a Carpenter (w x h, at most pile_max, measured after pile_measure days)
   -- live L1b: brewing stalled without empty barrels; then dfllm:barrel made 34 barrels (logs 183 -> 66). Below the
   -- drink target the cap is max_total, below nofloor_days of drink barrels may use the wood floor
   -- live L6: while drink is short and fewer than min_empty barrels are empty, the cap grows up to grow_total
@@ -438,6 +439,7 @@ M.DEFAULTS = {
   orders = {stuck_days = 3, needs_drop = 10, backoff_days = 10, report_per_day = 3, manager_days = 3, unval_days = 2,
             bypass_days = 5, bypass_max = 4, bypass_open = 8, cap = 120, prune_days = 30, prune_per_day = 30,
             mgr_stuck_days = 5,
+            manager_replace_days = 30,       -- BUG-925: a manager resting/injured with orders waiting this long is replaced (0 = never)
             dead_days = 14, dead_backoff_days = 30, dead_report_days = 30},      -- BUG-585: 14 -> 5 (Run 16b i2 Brotherarrow y406: the warning came after 24 days)
   -- BUG-042: the manager's Office zone needs a chair (and a table: the live fix was both) to validate work orders; a
   -- missing one is placed on a free floor tile of the zone (runner.repair: quickfort build, buildingplan waits for the
@@ -5069,13 +5071,18 @@ M.verbs.appoint = function(K, args, cmd)
   local replace = nil
   if args.replace ~= nil then
     -- BUG-458: the post is taken from a holder who stands outside the fort (days counted by out_watch), not from a reachable one
-    local okr = M.replace_ok(K, p, args.code)
+    local okr, how = M.replace_ok(K, p, args.code)
     if okr ~= true then return false, 'appoint replace refused: ' .. okr end
     local holder = M.office_holder(K, args.code)
     if holder and holder.id == args.unit then return false, 'appoint replace refused: unit ' .. args.unit .. ' is the holder' end
-    replace = true
+    if how == 'down' then                     -- BUG-925: the new one must be fit to work (never a patient, a soldier, a child)
+      local bad = M.mgr_unfit(K, u)
+      if bad then return false, string.format('appoint replace refused: unit %d %s', args.unit, bad) end
+      replace = 'down'
+    else replace = true end
   end
-  local ok, res = K.act.appoint(args.code, args.unit, replace)
+  local old_holder = replace == 'down' and M.office_holder(K, args.code) or nil
+  local ok, res = K.act.appoint(args.code, args.unit, replace and true or nil)
   if not ok then
     local why = tostring(res)
     if why:find('no vacant assignment', 1, true) and M.OUT_CODES[args.code] then
@@ -5085,7 +5092,9 @@ M.verbs.appoint = function(K, args, cmd)
     end
     return false, 'appoint: ' .. why
   end
-  if replace then
+  if replace == 'down' then
+    M.mgr_seated(K, p, M.conf(K), old_holder and old_holder.id, args.unit, 'verb')
+  elseif replace then
     p.out = nil
     K.log('warn', '%s taken from the holder outside the fort: unit %d appointed (appoint replace)', args.code, args.unit)
   end
@@ -5436,6 +5445,18 @@ end
 function M.replace_ok(K, p, code)
   if not M.OUT_CODES[code] then return 'only MANAGER and BROKER can be replaced' end
   local d, o = M.out_days(K, p, code)
+  if not o and code == 'MANAGER' then
+    -- BUG-925: a manager who lies resting / injured while orders wait is no better than one outside the fort
+    local mg = M.manager_state(K)
+    if M.mgr_cannot_work(mg) then
+      local span, down = M.mgr_replace_span(M.conf(K)), M.mgr_down_days(K, p)
+      if span <= 0 then return 'MANAGER replacement is off (orders.manager_replace_days 0)' end
+      if down < span then
+        return string.format('MANAGER %s has been unable to work for %d of %d days (%s)', mg.name or '?', down, span, mg.why)
+      end
+      return true, 'down'
+    end
+  end
   if not o then return code .. ' lives and stands among the citizens (or his place is not known): nobody is replaced' end
   if d < M.OUT_DAYS then
     return string.format('%s has stood outside for %d of %d days', code, d, M.OUT_DAYS)
@@ -6064,6 +6085,98 @@ function M.manager_state(K)
   return ok and r or nil
 end
 
+-- BUG-925 (Run 17 i2 Whirledrampart: manager Cerol lay in the hospital for 2,900 game days, 66 orders unvalidated, `appoint` said "MANAGER is
+-- alive and among the citizens (no replacement)", the kernel only warned): a manager who cannot work (manager_state: resting / injured) for
+-- orders.manager_replace_days (30; 0 = never) while orders wait unvalidated is replaced by the best free adult citizen (ORGANIZATION skill, as
+-- appoint_vacant ranks): no soldier on duty, no child, no patient, no unit in a mood, nobody who already holds a post. At most one replacement per
+-- span; the old holder is only unseated (his assignment is vacated, nothing is done to him). The player's `appoint replace:true` takes the same case.
+M.MGR_REPLACE_DAYS = 30
+function M.mgr_replace_span(c)
+  local v = math.tointeger((((c or {}).orders) or M.DEFAULTS.orders).manager_replace_days)
+  if v == nil then v = M.MGR_REPLACE_DAYS end
+  return v
+end
+function M.mgr_cannot_work(mg)
+  return type(mg) == 'table' and mg.unit ~= nil and type(mg.why) == 'string' and mg.why:find('resting/injured', 1, true) ~= nil
+end
+-- days the manager has been unable to work with orders waiting (p.mabs.since is kept by manager_watch while both hold)
+function M.mgr_down_days(K, p)
+  local since = type(p.mabs) == 'table' and math.tointeger(p.mabs.since) or nil
+  return since and math.max(0, (K.now().tick - since) // DAY) or 0
+end
+-- nil when unit `v` may take the post, else why not
+function M.mgr_unfit(K, v)
+  local okc, cit = pcall(M.citizen, v)
+  if not (okc and cit) then return 'is no citizen' end
+  if not dfhack.units.isAdult(v) then return 'is a child' end
+  if dfhack.units.isDead(v) then return 'is dead' end
+  if (v.military.squad_id or -1) >= 0 then return 'is a soldier on duty' end
+  if (v.mood or -1) >= 0 then return 'is in a strange mood' end
+  if (v.hist_figure_id or -1) < 0 then return 'has no historical figure' end
+  local okp, pat = pcall(function()
+    if v.health and v.health.flags.needs_healthcare then return true end
+    local j, rest = v.job and v.job.current_job, df.job_type.Rest
+    return j ~= nil and rest ~= nil and j.job_type == rest
+  end)
+  if okp and pat then return 'is a patient or resting' end
+  local x, y, z = dfhack.units.getPosition(v)
+  if x then
+    local okf, far = K.call('snapshot', 'far', x, y, z)
+    if okf and far == true then return 'stands outside the walk group of the citizens' end
+  end
+  return nil
+end
+function M.mgr_candidate(K, skip)
+  local okh, _, held = pcall(positions)
+  held = okh and type(held) == 'table' and held or {}
+  local best, bscore
+  for _, id in ipairs(type(K.census.u) == 'table' and K.census.u.ids or {}) do
+    local v = id ~= skip and df.unit.find(id) or nil
+    if v and not held[v.hist_figure_id or -1] and not M.mgr_unfit(K, v) then
+      local sc = skill_score(v, {'ORGANIZATION'})
+      if not bscore or sc > bscore then best, bscore = id, sc end
+    end
+  end
+  return best
+end
+function M.mgr_seated(K, p, c, old, new, how, days, n)
+  local now = K.now().tick
+  days = days or M.mgr_down_days(K, p)
+  p.mrep = json.object{t = now, old = old, new = new}
+  p.mabs = nil
+  if type(p.vac) == 'table' then p.vac.MANAGER = nil end
+  if st.offices then st.offices.MANAGER = nil end
+  local why = 'resting/injured'
+  K.log('warn', 'MANAGER replaced (%s): unit %s could not work for %d days (%s), unit %d appointed', how, tostring(old), days, why, new)
+  K.emit('MANAGER_REPLACED', 'B', string.format('manager unit %s unable to work for %d days (%s): unit %d appointed (%s)',
+         tostring(old), days, why, new, how), {code = 'MANAGER', old = old, new = new, why = why, days = days, orders = n,
+         how = how, span = M.mgr_replace_span(c)})
+  K.persist.touch('m.economy')
+end
+function M.manager_replace(K, p, c, mg, days, n)
+  local span = M.mgr_replace_span(c)
+  if span <= 0 or days < span or not M.mgr_cannot_work(mg) then return false end
+  local now = K.now().tick
+  local r = type(p.mrep) == 'table' and p.mrep or {}
+  if r.t and now - r.t < span * DAY then return false end                   -- one replacement per position per span
+  if r.try and now - r.try < DAY then return false end                      -- a failed try waits a game day
+  r.try = now
+  p.mrep = json.object(r)
+  K.persist.touch('m.economy')
+  local id = M.mgr_candidate(K, mg.unit)
+  if not id then
+    K.log('warn', 'manager unable to work for %d days (%s) and no free adult citizen can take the post', days, mg.why)
+    return false
+  end
+  local ok, res = K.act.appoint('MANAGER', id, true)
+  if not ok then
+    K.log('warn', 'manager replace: appoint unit %d failed: %s', id, tostring(res))
+    return false
+  end
+  M.mgr_seated(K, p, c, mg.unit, id, 'kernel', days, n)
+  return true
+end
+
 -- Run 11: the manager holds the office but cannot validate (M.manager_state why) while work orders wait unvalidated:
 -- after orders.manager_days a DECISION_NEEDED manager_absent (A, util/cadence: once per manager and reason) asks the
 -- player for an acting manager (the nobles screen: another citizen takes the office; the kernel never replaces a
@@ -6105,6 +6218,12 @@ function M.manager_watch(K, p, c)
   local days = (now.tick - rec.since) // DAY
   p.mabs = json.object(rec)
   if days < (((c or {}).orders or M.DEFAULTS.orders).manager_days or 3) then return true end
+  local okrp, rpl = pcall(M.manager_replace, K, p, c, mg, days, un)       -- BUG-925: a manager unable to work for long is replaced
+  if not okrp then K.log('warn', 'manager replace: %s', tostring(rpl)) end
+  if okrp and rpl == true then
+    p.mabs = nil                                     -- a new manager sits: no absence clock and no manager_absent question for the old one
+    return true
+  end
   if CAD.due(rec.ann, now, {mg.hf}, {mg.why}) then
     rec.ann = CAD.mark(now, {mg.hf}, {mg.why})
     p.mabs = json.object(rec)
@@ -6113,7 +6232,8 @@ function M.manager_watch(K, p, c)
     K.emit('DECISION_NEEDED', 'A', string.format('no manager available (%s) for %d days: %d orders not validated (%s)',
                                                  mg.why, days, un, what):sub(1, 200),
            {id = 'manager_absent', q = string.format('%s: %d orders wait for validation (%s); appoint an acting manager '
-                                                     .. 'on the nobles screen?', mg.why, un, what):sub(1, 200)})
+                                                     .. 'on the nobles screen? (kernel: replaced after %dd; appoint replace:true)', mg.why, un, what,
+                                                     M.mgr_replace_span(c)):sub(1, 200)})
   end
   return true
 end
@@ -13487,45 +13607,148 @@ end
 -- need = floor + wood on order + margin, or free logs lie far from every shop), a w x h wood stockpile `dfllm-wood` (act.wood_pile, quickfort `w`; 3 x 2) goes on revealed plain
 -- floor beside the first shop that has a free site (M.pile_site: same walk group, off the attack path, no building, nothing dug). Every `every` (28) days, `retry` (1) after a try
 -- that found no site. A pile that cannot be placed says so once per `every` days: DECISION_NEEDED wood_pile with the one existing command that helps meanwhile.
-M.WOODPILE = {w = 3, h = 2, r = 12, reads = 700, every = 28, retry = 1}
+-- BUG-926 (Run 17 i3 region1-site97: the embark pile #17792, 15 tiles, unnamed, stood beside the Carpenter's and counted as 'a wood pile exists': no dfllm-wood was
+-- ever placed, 571 logs lay ~130 tiles away, 119 usable; i2: 1,170 far logs, 6 Carpenters): a stockpile that takes wood counts as the shop's pile ONLY when it lies within
+-- `wood.near_d` (40, M.wood_rect_dist's measure, box to box) of THAT built Carpenter's workshop and has room (free logs on its tiles fewer than its tiles). A shop without one gets
+-- its own `dfllm-wood` `wood.pile_w` x `wood.pile_h` (5 x 5) on free indoor dry plain floor beside it (M.pile_site with indoor / dry: no open sky, no water, no ramp, the citizens'
+-- walk group, off the attack path; nothing is dug), at most `wood.pile_max` of them, PEACE only; WOOD_PILE `placed` names position and size and WOOD_PILE `result` reads the usable
+-- near logs `wood.pile_measure` (7) game days later. Without a site: one DECISION_NEEDED wood_pile per season (84 game days), not quiet. Every `every` (28) days, `retry` (1) after
+-- a try that found no site. Unchanged from BUG-913: the wish (near logs below floor + wood on order + margin, or free logs far from every shop) and `wood.pile = false`.
+M.WOODPILE = {w = 5, h = 5, r = 12, reads = 700, every = 28, retry = 1, season = 84, max = 3, measure = 7}
+-- gap between two boxes {x1, y1, x2, y2, z}: max(dx, dy) + 3 |dz| (M.wood_rect_dist's weighting)
+function M.rect_gap(a, b)
+  local dx = math.max(a[1] - b[3], 0, b[1] - a[3])
+  local dy = math.max(a[2] - b[4], 0, b[2] - a[4])
+  return math.max(dx, dy) + 3 * math.abs(a[5] - b[5])
+end
+-- free logs lying on the tiles of box `r` (pcall-safe): a pile is full when it holds as many logs as it has tiles
+function M.logs_in_rect(r)
+  local n = 0
+  pcall(function()
+    for _, it in ipairs(df.global.world.items.other.WOOD) do
+      local x, y, z = dfhack.items.getPosition(it)
+      if x and z == r[5] and x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4] then n = n + 1 end
+    end
+  end)
+  return n
+end
+-- BUG-926 (verifier): the boxes of every stockpile and activity zone (pcall-safe), so a new pile never lands on a tile that already belongs to one
+function M.covered_boxes()
+  local out = {}
+  for _, cat in ipairs({'STOCKPILE', 'ACTIVITY_ZONE', 'ANY_ZONE'}) do
+    pcall(function()
+      for _, b in ipairs(df.global.world.buildings.other[cat]) do
+        if b.x1 and b.y1 and b.x2 and b.y2 and b.z then out[#out + 1] = {b.x1, b.y1, b.x2, b.y2, b.z} end
+      end
+    end)
+  end
+  return out
+end
+-- the stockpile rects that take wood with their names, and how many are the kernel's dfllm-wood
+function M.wood_piles()
+  local out, kern = {}, 0
+  pcall(function()
+    for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+      local okw, wood = pcall(function() return sp.settings.flags.wood == true end)
+      if okw and wood then
+        local nm = dfhack.df2utf(sp.name or '')
+        out[#out + 1] = {sp.x1, sp.y1, sp.x2, sp.y2, sp.z, name = nm, id = sp.id}
+        if nm == 'dfllm-wood' then kern = kern + 1 end
+      end
+    end
+  end)
+  return out, kern
+end
 function T.woodpile(K, c, r)
   local wc = c.wood or M.DEFAULTS.wood
-  if not r.day or not HUNT_MODES[K.mode()] or wc.pile == false or type(K.act.wood_pile) ~= 'function' then return true end
+  if not r.day or wc.pile == false or type(K.act.wood_pile) ~= 'function' then return true end
   local W, p = M.WOODPILE, r.p
+  local pw = math.max(1, math.min(math.tointeger(wc.pile_w) or W.w, 5))
+  local ph = math.max(1, math.min(math.tointeger(wc.pile_h) or W.h, 5))
+  local pmax = math.tointeger(wc.pile_max) or W.max
+  local meas = math.tointeger(wc.pile_measure) or W.measure
   local rec = type(p.wpile) == 'table' and p.wpile or {}
+  local inv = r.inv or {}
+  -- the follow-up of the last placement: usable near logs before / after, and the logs on the pile itself
+  local m = type(rec.meas) == 'table' and rec.meas or nil
+  if m and not m.done and r.now - (math.tointeger(m.t) or r.now) >= meas * DAY then
+    local at = type(rec.at) == 'table' and rec.at or {0, 0, 0}
+    local on = M.logs_in_rect({at[1], at[2], at[1] + (rec.w or pw) - 1, at[2] + (rec.h or ph) - 1, at[3]})
+    m.done = true
+    rec.meas = json.object(m)
+    p.wpile = json.object(rec)
+    K.persist.touch('m.economy')
+    local txt = string.format('wood pile at %d,%d,%d after %d days: usable near logs %d -> %d (far %d -> %d), %d logs lie on the pile', at[1], at[2], at[3], meas,
+                              math.tointeger(m.near) or 0, math.tointeger(inv.wood) or 0, math.tointeger(m.dist) or 0, math.tointeger(inv.wood_dist) or 0, on)
+    K.log('info', '%s', txt)
+    K.emit('WOOD_PILE', 'B', txt:sub(1, 200), {ph = 'result', pos = json.array(at), w = rec.w or pw, h = rec.h or ph, near0 = math.tointeger(m.near) or 0,
+           near1 = math.tointeger(inv.wood) or 0, far0 = math.tointeger(m.dist) or 0, far1 = math.tointeger(inv.wood_dist) or 0, on = on, days = meas})
+  end
+  if K.mode() ~= 'PEACE' then return true end                       -- BUG-926: PEACE only
+  local need = floor_of(c, p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (wc.margin or 20)
+  if (math.tointeger(inv.wood) or 0) >= need and (math.tointeger(inv.wood_dist) or 0) <= 0 then return true end
   local A = M.wood_anchors(wc.near_d)
-  if #A.piles > 0 then                                     -- a pile that takes wood stands (ours or the player's)
+  if #A.shops == 0 then return true end                             -- no Carpenter's workshop to stand beside
+  local piles, nkern = M.wood_piles()
+  local lack = {}                                                   -- the shops with no pile that is near and has room
+  for _, sh in ipairs(A.shops) do
+    local has = false
+    for _, pr in ipairs(piles) do
+      if M.rect_gap(pr, sh) <= A.d and M.logs_in_rect(pr) < (pr[3] - pr[1] + 1) * (pr[4] - pr[2] + 1) then has = true; break end
+    end
+    if not has then lack[#lack + 1] = sh end
+  end
+  if #lack == 0 then
     if rec.state ~= 'placed' and rec.state ~= 'exists' then rec.state = 'exists'; p.wpile = json.object(rec); K.persist.touch('m.economy') end
     return true
   end
-  if #A.shops == 0 then return true end                    -- no Carpenter's workshop to stand beside
-  local inv = r.inv or {}
-  local need = floor_of(c, p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (wc.margin or 20)
-  if (math.tointeger(inv.wood) or 0) >= need and (math.tointeger(inv.wood_dist) or 0) <= 0 then return true end
+  if nkern >= pmax then return true end                             -- the kernel's own piles are at their cap
   local wait = rec.state == 'nosite' and W.retry or W.every
   if rec.t and r.now - rec.t < wait * DAY then return true end
-  local tc = {pile_w = W.w, pile_h = W.h, pile_r = W.r, pile_reads = W.reads}
-  local site, why, at
+  local tc = {pile_w = pw, pile_h = ph, pile_r = W.r, pile_reads = W.reads}
+  local site, at
   local whys = {}
-  for _, s in ipairs(A.shops) do
+  -- BUG-926: no tile of an existing stockpile or zone, none of a site quickfort refused before (the next try takes another)
+  local boxes = M.covered_boxes()
+  local bad = {}
+  for _, b in ipairs(type(rec.bad) == 'table' and rec.bad or {}) do
+    if type(b) == 'table' and b[5] then bad[#bad + 1] = {b[1], b[2], b[3], b[4], b[5]} end
+  end
+  for _, b in ipairs(bad) do boxes[#boxes + 1] = b end
+  local function free_tile(x, y, z)
+    for _, b in ipairs(boxes) do
+      if z == b[5] and x >= b[1] and x <= b[3] and y >= b[2] and y <= b[4] then return false end
+    end
+    return true
+  end
+  for _, s in ipairs(lack) do
     local cx, cy = (s[1] + s[3]) // 2, (s[2] + s[4]) // 2
-    local st1, wy = M.pile_site(K, tc, {at = {cx, cy, s[5]}, by = 'carpenter'})
+    local st1, wy = M.pile_site(K, tc, {at = {cx, cy, s[5]}, by = 'carpenter', indoor = true, dry = true, ok = free_tile})
     if st1 then site, at = st1, {cx, cy, s[5]}; break end
     whys[#whys + 1] = tostring(wy)
     at = at or {cx, cy, s[5]}
   end
-  why = table.concat(whys, '; ')
+  local why = table.concat(whys, '; ')
   r.cmds = r.cmds + 1
-  local out = {t = r.now, dn = math.tointeger(rec.dn)}
+  local out = {t = r.now, dn = math.tointeger(rec.dn), meas = rec.meas}
   local failed
+  if #bad > 0 and not site then bad = {} end                        -- nothing else is free: the refused ones may be tried again
+  out.bad = json.array(bad)
   if site then
-    local ok, n = K.act.wood_pile(site, W.w, W.h)
+    local ok, n = K.act.wood_pile(site, pw, ph)
     if ok then
-      out.state, out.at, out.w, out.h = 'placed', json.array(site), W.w, W.h
-      K.log('info', 'wood pile: dfllm-wood %dx%d at %d,%d,%d beside the Carpenter\'s workshop at %d,%d,%d: no stockpile takes wood (near logs %d of %d wanted, %d far)', W.w, W.h,
-            site[1], site[2], site[3], at[1], at[2], at[3], math.tointeger(inv.wood) or 0, need, math.tointeger(inv.wood_dist) or 0)
+      out.state, out.at, out.w, out.h = 'placed', json.array(site), pw, ph
+      out.meas = json.object{t = r.now, near = math.tointeger(inv.wood) or 0, dist = math.tointeger(inv.wood_dist) or 0}
+      local txt = string.format('wood pile: dfllm-wood %dx%d at %d,%d,%d beside the Carpenter\'s workshop at %d,%d,%d (no stockpile near it takes wood with room; near logs %d of %d wanted, %d far)',
+                                pw, ph, site[1], site[2], site[3], at[1], at[2], at[3], math.tointeger(inv.wood) or 0, need, math.tointeger(inv.wood_dist) or 0)
+      K.log('info', '%s', txt)
+      K.emit('WOOD_PILE', 'B', txt:sub(1, 200), {ph = 'placed', pos = json.array(site), w = pw, h = ph, shop = json.array(at),
+             near0 = math.tointeger(inv.wood) or 0, far0 = math.tointeger(inv.wood_dist) or 0, need = need, piles = #piles})
     else
       out.state, out.why = 'refused', tostring(n):sub(1, 60)
+      bad[#bad + 1] = {site[1], site[2], site[1] + pw - 1, site[2] + ph - 1, site[3]}
+      while #bad > 8 do table.remove(bad, 1) end
+      out.bad = json.array(bad)
       failed = 'quickfort refused it at ' .. table.concat(site, ',') .. ': ' .. tostring(n)
       K.log('warn', 'wood pile: dfllm-wood at %d,%d,%d refused: %s', site[1], site[2], site[3], tostring(n))
     end
@@ -13534,10 +13757,10 @@ function T.woodpile(K, c, r)
     failed = tostring(why)
     K.log('debug', 'wood pile: no site: %s', tostring(why))
   end
-  if failed and (not out.dn or r.now - out.dn >= W.every * DAY) then
+  if failed and (not out.dn or r.now - out.dn >= W.season * DAY) then       -- one honest question per season
     out.dn = r.now
-    local q = string.format('no stockpile takes wood and none could be placed beside the Carpenter\'s workshop at %s (%s): the haulers cannot bring felled logs in; free a %dx%d floor beside the shop, meanwhile ask the caravans',
-                            at and table.concat(at, ',') or '?', failed:sub(1, 90), W.w, W.h)
+    local q = string.format('no stockpile with room takes wood within %d tiles of the Carpenter\'s workshop at %s and none could be placed (%s): the haulers cannot bring felled logs in; free a %dx%d indoor floor beside the shop, meanwhile ask the caravans',
+                            A.d, at and table.concat(at, ',') or '?', failed:sub(1, 70), pw, ph)
     K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'wood_pile', q = q:sub(1, 200), cmds = {[[dfllm cmd trade.want '{"add":["wood"]}']]}})
   end
   p.wpile = json.object(out)
@@ -16591,6 +16814,12 @@ function M.pile_site(K, tc, q)
     local good = ok and type(t) == 'table' and t.c == '.' and (t.bld == nil or t.bld == '') and (t.dig == nil or t.dig == '')
                  and not t.cav and not far(K, x, y, cz) and not M.attack_path(K, {x, y, cz})
                  and (q.ok == nil or q.ok(x, y, cz) == true)       -- BUG-782: e.g. only tiles of the refuge burrow
+    -- BUG-926: a wood pile stands indoors on dry floor: no open sky (snapshot.plot_under false), no water or magma on the tile
+    if good and q.dry then good = (t.flow or 0) == 0 and t.magma ~= true and t.ice ~= true end
+    if good and q.indoor then
+      local oku, under = K.call('snapshot', 'plot_under', x, y, cz)
+      if not oku or under == false then good = false end      -- BUG-926: fails closed: an unreadable roof is no indoor floor
+    end
     seen[key] = good == true
     return seen[key]
   end

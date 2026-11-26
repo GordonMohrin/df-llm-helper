@@ -1650,9 +1650,11 @@ class Follower:
             return
         self._orphan_read = now
         try:
-            from .cmd import orphan_candidates
+            from .cmd import orphan_candidates, orphan_seal_candidates
             asked = {r.get("orphan") for r in (self.jobs.get("replies") or {}).values()}
-            for pid in orphan_candidates(self.dir):
+            cands = orphan_candidates(self.dir)
+            cands += [i for i in orphan_seal_candidates(self.dir) if i not in cands]      # BUG-927: doubtful seal files: marked when unknown
+            for pid in cands:
                 if pid in asked:
                     continue
                 cid = self._send("inspect", {"what": "persist", "key": f"bp.{pid}", "field": "tpl"}, f"orphan check {pid}", now)
@@ -1991,10 +1993,9 @@ class Follower:
             files.log_cli(self.dir, "follow", f"reply:{r['verb']}", {"id": cid},
                           ("ok " if reply.get("ok") else "ERR ") + str(reply.get("msg", "")))
             if r.get("orphan"):                # BUG-442: the kernel's answer to 'do you hold this project?'
-                from .cmd import kernel_knows, retire_orphan
-                if kernel_knows(reply) is False and retire_orphan(self.dir, r["orphan"]):
-                    files.log_cli(self.dir, "follow", "retire:orphan", {"proj": r["orphan"]},
-                                  "the kernel does not know this project: bp file retired")
+                from .cmd import kernel_knows, settle_orphan
+                if kernel_knows(reply) is False:
+                    settle_orphan(self.dir, r["orphan"], "follow")       # BUG-927: retired when never finished, else marked (ignored, kept)
                 continue
             if reply.get("ok"):
                 if r["verb"] == "bp.cancel" and isinstance(r.get("proj"), str):
@@ -2002,8 +2003,8 @@ class Follower:
                     retire(self.dir, r["proj"])
                 continue
             if r["verb"] == "bp.cancel" and isinstance(r.get("proj"), str) and "no project " in str(reply.get("msg", "")):
-                from .cmd import retire_orphan     # BUG-442: the kernel has no such project: the file goes (unless it may be a finished one)
-                retire_orphan(self.dir, r["proj"])
+                from .cmd import settle_orphan     # BUG-442: the kernel has no such project: the file goes (unless it may be a finished one: BUG-927 marks it)
+                settle_orphan(self.dir, r["proj"], "follow")
                 continue
             if r["verb"] == "bp.place" and r.get("tpl"):
                 from .cmd import unplace

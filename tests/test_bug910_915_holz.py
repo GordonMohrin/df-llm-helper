@@ -48,5 +48,6 @@ def test_wood_disbelieved_event_and_stock_fields_are_in_the_schema():
     assert "['stock.woodf'] = 'economy'" in lua and "['stock.woodd'] = 'economy'" in lua
 
 
-def test_wood_pile_decision_is_quiet():
-    assert "wood_pile" in session.QUIET_DECISIONS
+def test_wood_pile_decision_is_not_quiet():
+    # BUG-926: the one honest question per season (no site beside the Carpenter) is not silenced
+    assert "wood_pile" not in session.QUIET_DECISIONS

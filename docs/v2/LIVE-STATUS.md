@@ -11,10 +11,10 @@ Quellen: Spieler-Logs `runs/run-15*, run-16*` (STAND.md, FR-BUGS.md), `docs/v2/S
 | live bestaetigt | 39 |
 | live widerlegt | 14 |
 | live gemischt | 3 |
-| offen, nie live gesehen | 795 |
-| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **56** von 851 |
+| offen, nie live gesehen | 800 |
+| **mit Live-Urteil (bestätigt + widerlegt + gemischt)** | **56** von 856 |
 | davon wirkt nicht (widerlegt + gemischt) | 17 |
-| genannt, aber ohne klares Urteil (bleiben offen) | 79 |
+| genannt, aber ohne klares Urteil (bleiben offen) | 80 |
 
 Herkunft der Urteile (ein Bug kann in mehreren Zeilen stehen):
 
@@ -392,3 +392,4 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-736 `runs/run-16b/FR-BUGS.md:518` (no verdict word): ei Stein 0 / 501 Logs: noch kein sichtbarer Holzbau-Effekt (BUG-736) - Projekte weiter 'no builder took it'.
 - BUG-751 `runs/run-16c/FR-BUGS.md:441` (beobachte): Zone verblutet/verdurstet). Wirkung der Auftragsstreichung (BUG-751) wird in der Restzeit beobachtet;
 - BUG-755 `runs/run-16b/FR-BUGS.md:529` (no verdict word): ut15). 'plan propose' entwirft jetzt hospital furnish=2 x3 (BUG-755 sichtbar) und farms;
+- BUG-930 `runs/run-16b/STAND.md:697` (no verdict word): - 17:12 Reload main 04a21b95 (nur BUG-930), follow --takeover follow.out57
