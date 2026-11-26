@@ -116,13 +116,48 @@ def test_beat_thread_is_silent_when_the_loop_does_not_progress(save):
     assert f.beat_thread_tick(time.time()) is True
 
 
-def test_short_steps_are_not_logged_and_poll_still_beats(save):
+def test_poll_steps_stamp_loop_progress_and_leave_no_step_name(save):
     f = _follower(save)
-    f.mono.t += 1
+    f.mono.t += 7
     f.poll()
-    log = (save / "cli.log").read_text("utf-8") if (save / "cli.log").exists() else ""
-    assert "slow_step" not in log
-    assert files.read_follow_hb(save)[0]["pid"] == os.getpid()
+    assert f._step_name is None and f._loop_mono == f.mono()             # every poll step ended and stamped progress
+    f._beat = -1e18
+    assert f.beat_thread_tick(time.time()) is True                       # a young loop beats
+
+
+def _lock(save, pid, sid=None):
+    doc = {"v": 1, "pid": pid, "start": int(time.time()), "hb": int(time.time()), "code": files.code_stamp()}
+    if sid is not None:
+        doc["sid"] = sid
+    files.write_json_atomic(save / wake.FOLLOW_LOCK, doc)
+
+
+def test_displaced_follow_does_not_beat_from_its_thread(save):
+    f = _follower(save)
+    f._beat = -1e18
+    before = files.read_follow_hb(save)[0]
+    with f._step("audit s2"):
+        _lock(save, os.getpid() + 1)                   # another follow took over during the long step
+        assert f.beat_thread_tick(time.time()) is False
+        assert files.read_follow_hb(save)[0] == before                   # nothing written
+        _lock(save, os.getpid(), wake.start_id())      # the lock is ours again
+        assert f.beat_thread_tick(time.time()) is True
+        assert files.read_follow_hb(save)[0]["pid"] == os.getpid()
+        f._beat = -1e18
+        _lock(save, os.getpid(), "some-other-start")   # same pid number, another start (pid reuse)
+        assert f.beat_thread_tick(time.time()) is False
+
+
+def test_step_snapshot_pairs_name_and_start(save):
+    f = _follower(save)
+    f.mono.t = 2000.0
+    with f._step("audit s1"):
+        f.mono.t = 2060.0
+        f._write_beat(time.time())
+        doc = files.read_follow_hb(save)[0]
+        assert doc["step"] == "audit s1" and doc["step_s"] == 60
+        with f._hb_lock:                               # the beat reads under this lock: a writer holding it is waited for
+            assert (f._step_name, f._step_mono) == ("audit s1", 2000.0)
 
 
 @pytest.mark.parametrize("step", ["event WOOD_STUCK", "event MANAGER_OFFICE"])

@@ -12,8 +12,10 @@ The command is read in the first frame after the gap; the pause key (`act.press_
 - `resume`: when the key did not take (no key error, same owner, no popup) and the gap ended less than `RESUME.gap_retry_s` (5 s) ago, `st.resume_retry` is set; the refusal text adds "the frame gap just ended: the kernel presses the key once more a moment later" and `data.retry = 1`.
 - `M.retry_resume` (every `M.step`): after `retry_after_ms` (2 s: the inbox is read every 0.5 s, so a park sent meanwhile is seen first) presses the key ONCE, only while the same pause (owner and `pause_since`) stands, no popup is open and `retry_window_s` (30 s) has not run out; the result goes to kern.log (`resume retry after the frame gap ...`), the PAUSE event ends as usual when it works. `park`, `pause`, `unpause` and a newer `resume` clear the pending retry, so a later park wins. No gap = no retry (the old refusal).
 
+- Verifier fixes: a dead-man pause that is due (`deadman_why`, the dead-man test extracted from `deadman()`) cancels the retry: without it the retry pressed the key, opened the game for a moment and the dead-man pause came back afterwards. A siege popup (popup open) already cancelled it.
+
 ## Tests
-`tests/lua/test_bug923_resume_frame_gap.lua` (retry works, one retry only, later park wins, no gap no retry).
+`tests/lua/test_bug923_resume_frame_gap.lua` (retry works, one retry only, later park wins, no gap no retry; a SIEGE popup arriving before the retry: no key, stays paused; a due dead-man pause: no key, stays paused).
 
 ## Live-Erwartung
 After a resume in a freeze: the reply says ERR with "kernel presses the key once more"; about 2 s later kern.log `resume retry after the frame gap (cmd ...): resumed` and `status` shows running. If the key still does not take, kern.log says `still paused` and the player resumes again. Unproven: that D_PAUSE works one frame after the gap (if DF is still stuck the retry fails and is logged); the CLI wording for "no reply yet" is unchanged.

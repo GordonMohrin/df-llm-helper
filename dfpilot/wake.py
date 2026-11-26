@@ -1226,12 +1226,14 @@ class Follower:
         """BUG-922: one poll step: stamps loop progress (the beat thread beats only while this is young), names the step in the
         beat, and a step longer than FOLLOW_STEP_LOG_S real seconds goes to cli.log (follow/slow_step) with its duration."""
         t0 = self.mono()
-        self._step_name, self._step_mono, self._loop_mono = name, t0, t0
+        with self._hb_lock:                # BUG-922: name, start and progress change together; the beat thread reads them as one
+            self._step_name, self._step_mono, self._loop_mono = name, t0, t0
         try:
             yield
         finally:
             t1 = self.mono()
-            self._step_name, self._loop_mono = None, t1
+            with self._hb_lock:
+                self._step_name, self._loop_mono = None, t1
             if t1 - t0 > FOLLOW_STEP_LOG_S and self.dir is not None:
                 try:
                     files.log_cli(self.dir, "follow", "slow_step", {"step": name, "s": round(t1 - t0, 1)},
@@ -1247,14 +1249,28 @@ class Follower:
                "code": CODE,        # BUG-042: status names a follow on old code
                "pid": os.getpid(),  # BUG-385: status names the owner
                "auto": 1 if self.auto else 0}   # DECISIONS 2: --no-auto places nothing
-        step = self._step_name
+        with self._hb_lock:         # BUG-922: one consistent snapshot, never a step name with another step's start
+            step, step_mono = self._step_name, self._step_mono
         if step:                    # BUG-922: what the loop does right now ("busy in audit 70 s")
-            doc["step"], doc["step_s"] = step, int(max(0.0, self.mono() - self._step_mono))
+            doc["step"], doc["step_s"] = step, int(max(0.0, self.mono() - step_mono))
         try:
             with self._hb_lock:
                 files.write_follow_hb(d, doc)
         except OSError as e:
             sys.stderr.write(f"follow: cannot write heartbeat: {e}\n")
+
+    @staticmethod
+    def _lock_is_foreign(d: Path) -> bool:
+        """BUG-922: the lock of this save names another process (pid, or this pid with another start id) = this follow was taken
+        over. Read at every beat: lock.step runs only between polls, and a takeover during a 70-240 s step must not leave two pids
+        beating one .follow.hb. No lock at all (a bare Follower, a lock just released) is not foreign."""
+        doc = files.read_json(Path(d) / FOLLOW_LOCK, retry=False)
+        if not isinstance(doc, dict) or doc.get("pid") is None:
+            return False
+        if doc.get("pid") != os.getpid():
+            return True
+        sid = doc.get("sid")
+        return isinstance(sid, str) and sid != start_id()
 
     def beat_thread_tick(self, wall: float | None = None) -> bool:
         """BUG-922: one tick of the beat thread: beats when FOLLOW_HB_EVERY_S passed since the last beat AND the poll loop made
@@ -1262,7 +1278,11 @@ class Follower:
         wall = time.time() if wall is None else wall
         if self.dir is None or wall - self._beat < FOLLOW_HB_EVERY_S:
             return False
-        if self.mono() - self._loop_mono > FOLLOW_BUSY_MAX_S:
+        with self._hb_lock:
+            loop_mono = self._loop_mono
+        if self.mono() - loop_mono > FOLLOW_BUSY_MAX_S:
+            return False
+        if self._lock_is_foreign(self.dir):    # BUG-922: a displaced follow must not beat beside its successor (see below)
             return False
         self._beat = wall
         self._write_beat(wall)

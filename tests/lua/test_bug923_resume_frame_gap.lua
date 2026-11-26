@@ -96,4 +96,38 @@ T.test('BUG-923: no frame gap, no retry (the refusal stays as it was)', function
   kern.stop()
 end)
 
+T.test('BUG-923: a SIEGE popup (safety pause) arriving before the retry wins: no key, the game stays paused', function()
+  world('b923_siege')
+  resume_in_gap('r1')
+  T.eq(#keys, 1)
+  df.global.world.status.popups:insert('#', {text = 'A vile force of darkness has arrived! The siege has begun.'})
+  key_works = true
+  H.run(W, 8, {paused = true})
+  T.eq(#keys, 1, 'no retry key while a siege popup stands')
+  T.eq(df.global.pause_state, true)
+  while #df.global.world.status.popups > 0 do df.global.world.status.popups:erase(0) end   -- whatever the arbiter left of it
+  H.run(W, 40, {paused = true})
+  T.eq(#keys, 1, 'the retry is gone for good, it does not come back once the popup is closed')
+  T.eq(df.global.pause_state, true)
+  kern.stop()
+end)
+
+T.test('BUG-923: a dead-man pause due before the retry wins: no key, the game stays paused', function()
+  world('b923_deadman')
+  K.cfg.reflex = {v = 2, deadman = {on = true, timeout_s = 600, max_ticks = 0, check_s = 1, grace_s = 0}}
+  W.hb_auto = false
+  local json = require('dfllm.util.json')
+  H.write(W.sd .. '/session.json', json.encode({v = 2, wall = os.time(), by = 'wait'}))
+  resume_in_gap('r1')
+  T.eq(#keys, 1)
+  H.write(W.sd .. '/session.json', json.encode({v = 2, wall = os.time() - 1000, by = 'wait'}))   -- the session died meanwhile
+  key_works = true
+  H.run(W, 40, {paused = true})
+  T.eq(#keys, 1, 'no retry key against a dead-man pause')
+  T.eq(df.global.pause_state, true, 'paused at the end')
+  K.flush(); H.frame(W, 0)
+  T.eq(H.state(W).owners.pause, 'park', "the dead-man leaves a standing pause's owner alone")
+  kern.stop()
+end)
+
 T.done()

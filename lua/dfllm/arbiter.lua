@@ -773,12 +773,8 @@ M.OWN_PAUSE = {inbox = true, deadman = true, park = true}
 -- Neuausrichtung 1 / P3: the dead-man switch. Pause only: never unpauses, never saves, never kills. A pause another owner
 -- holds (df after a load, a popup, Gordon, park) is left alone and not claimed; the inbox's TTL hold is taken over (its
 -- expiry would unpause). One fire per heartbeat: a human who unpauses the dead-man pause in DF is not fought.
-local function deadman(K, now)
-  local c = deadman_cfg(K)
-  if not c.on then return end
-  if st.dm_read and now.ms >= st.dm_read and now.ms - st.dm_read < c.check_s * 1000 then return end
-  st.dm_read = now.ms
-  if now.ms - (st.dm_boot or now.ms) < c.grace_s * 1000 then return end
+-- BUG-923: the dead-man test itself (why = missing | future | wall | ticks | nil); the resume retry asks it too
+local function deadman_why(K, c, now)
   local save = K.cfg.paths and K.cfg.paths.save
   local doc = save and fio.read_json(save .. '/' .. M.SESSION_FILE)
   local wall = type(doc) == 'table' and int(doc.wall) or nil
@@ -793,6 +789,16 @@ local function deadman(K, now)
   elseif age > c.timeout_s then why = 'wall'
   elseif c.max_ticks > 0 and ran > c.max_ticks and age >= c.min_s then why = 'ticks'
   end
+  return why, doc, wall, age, ran
+end
+
+local function deadman(K, now)
+  local c = deadman_cfg(K)
+  if not c.on then return end
+  if st.dm_read and now.ms >= st.dm_read and now.ms - st.dm_read < c.check_s * 1000 then return end
+  st.dm_read = now.ms
+  if now.ms - (st.dm_boot or now.ms) < c.grace_s * 1000 then return end
+  local why, doc, wall, age, ran = deadman_why(K, c, now)
   if not why then st.dm_fired = nil; return end
   local key = wall or -1
   if st.dm_fired == key then return end                   -- fired for this heartbeat already
@@ -855,6 +861,10 @@ function M.retry_resume(K)
   end
   if now.ms < r.at_ms then return end
   st.resume_retry = nil
+  local c = deadman_cfg(K)
+  if c.on and now.ms - (st.dm_boot or now.ms) >= c.grace_s * 1000 and deadman_why(K, c, now) then
+    return          -- a dead-man pause is due: it wins, the key would only open a gap before it
+  end
   local ok, res = K.act.press_pause()
   local paused = observe(K)
   if paused then
