@@ -23,7 +23,7 @@ end
 
 -- units: {id, kind = 'soldier'|'citizen', route, start (ticks)}; the stepper moves them one tile per frame
 local function build(o)
-  local units = S.fort_units()
+  local units = o.far and S.far_units() or S.fort_units()      -- o.far (round 15b): the fort's people 25+ tiles from the footprints
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     local x, y = w.route[1][1], w.route[1][2]
@@ -182,25 +182,24 @@ local function recall(n, gap)
   return ws
 end
 
-T.test('BUG-493 (4): DRILL, the recall streams over B1 -> B1 is up by T+900 (walkers 14+ steps out cannot reach it while it ' ..
-       'moves), nobody crushed', function()
+T.test('BUG-493 (4): DRILL, the recall streams over B1 -> (round 15b: the reach rule holds the raise for every walker that can reach the footprint within the ' ..
+       'lever latency, whatever the step count: no pull while the stream runs) nobody crushed', function()
   local W = build{walkers = recall(6, 250)}
   W.load(S.drill())                                    -- siege ends a DRILL at once without a drill module
   W.K.set_mode('DRILL', 'test drill')
   run(W, 1300)
   T.eq(#W.crushed, 0, 'crushed: ' .. names(W.crushed))
   local up = flips_to(W, 'B1', 'up')
-  T.eq(#up >= 1, true, 'B1 rose')
-  T.ok(up[1] + W.move_ticks <= 900, 'B1 up by T+900: ' .. tostring(up[1] and up[1] + W.move_ticks))
+  T.ok(#up == 0 or up[1] >= 1000, 'B1 not raised while the stream runs: ' .. tostring(up[1]))
 end)
 
 T.test('BUG-493 (5): the drill lowers a bridge after QUIET_DRILL ticks of a busy ring, not QUIET_MAX', function()
   -- a unit pacing 2 tiles from B1 keeps the quiet window from opening; the lowering of the drill's end goes ahead after
   -- QUIET_DRILL ticks on the 1-tile margin
-  local r = {}
+  local r = {{60, 70}}                                 -- far away until the pacer starts (round 15b: a unit in reach holds the raise)
   for i = 1, 200 do r[#r + 1] = {i % 2 == 0 and 48 or 49, 42} end
   -- (BUG-543: the pacer starts after B1 is up: a unit moving within 3 tiles of the footprint holds a raise, not a lowering's 1-tile margin)
-  local W = build{walkers = {{id = 700, kind = 'citizen', route = r, start = 380}}}
+  local W = build{far = true, walkers = {{id = 700, kind = 'citizen', route = r, start = 380}}}
   W.load(S.drill())                                    -- siege ends a DRILL at once without a drill module
   W.K.set_mode('DRILL', 'test drill')
   run(W, 400)

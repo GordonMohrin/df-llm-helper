@@ -298,6 +298,7 @@ Nennungen ohne klares Urteilswort oder mit Vorbehalt (scheint, nicht prüfbar, w
 - BUG-437 `runs/run-16b/STAND.md:587` (no verdict word): lan y524: Phase P5, Bauten stockroom@S1 (fortcore abgelehnt/BUG-437 Warnung), Spur Wehr;
 - BUG-437 `runs/run-16b/STAND.md:604` (no verdict word): Plan y532: Phase P5, Bau fortcore st4 versehentlich in s1 (BUG-437 warn), s1b0 nach Start per bp.cancel streichen;
 - BUG-437 `runs/run-16b/STAND.md:606` (no verdict word): G-530: keine Stelle; fortcore st4 bewusst weggelassen wegen BUG-437 bei Trinken 0), Spur Versorgung: Schritt = Fassbestellung 6936 (3 von 40 gebaut).
+- BUG-437 `runs/run-16b/STAND.md:626` (no verdict word): P5, Bauten 0, Spur Versorgung, kein fortcore Stage 4 wegen BUG-437), Trinken status 15d
 - BUG-437 `runs/run-16d/STAND.md:124` (no verdict word): refuge_beds, dining, furnaces; Fallen erst s2 wegen Warnung BUG-437 Wasser)
 - BUG-437 `runs/run-16d/STAND.md:132` (no verdict word): st4, traps bridges, explore x4); Entscheidung: Fallen trotz BUG-437-Warnung, da drink 405d/food 60-75d innen
 - BUG-437 `runs/run-16b/FR-BUGS.md:927` (no verdict word): tone-fall traps on the way out of the fort while drink 0 d (BUG-437: they kill the citizens who walk it): drop it until drink and food stand inside' -> nicht aufgenommen.

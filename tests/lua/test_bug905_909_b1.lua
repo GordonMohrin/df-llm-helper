@@ -294,4 +294,27 @@ T.test('F4 PEACE (BUG-908): a citizen idling 7 tiles inside B1 would keep the re
   T.eq(inside, 2, 'both civilians got home')
 end)
 
+T.test('F4 PEACE (15b, second review): the forecast cannot be made (no census list around B1): the return window fails closed, B1 stays up and never moves, the log says why', function()
+  local W = returners()
+  local G = require('dfllm.gate')                                 -- the forecast cannot be made (around() found no census list): return_forecast answers nil
+  local real = G.return_forecast
+  G.return_forecast = function() return nil end
+  local down_early = false
+  local at = {}
+  for t = 0, 3000, 9 do
+    at[#at + 1] = {t, function(w, now)
+      B.step(w, now)
+      if S.bstate(w, 'B1') ~= 'up' then down_early = true end
+    end}
+  end
+  S.run(W, 3000, {at = at})
+  G.return_forecast = real
+  T.ok(not down_early, 'B1 never left its raised state')
+  T.eq(#B.events(W, 'GATE', 'return'), 0, 'no return window without a forecast')
+  T.eq(#B.flips(W, 'B1', 'down'), 0, 'B1 never moved')
+  local said = false
+  for _, l in ipairs(W.logs) do if tostring(l.msg):find('no census around it', 1, true) then said = true end end
+  T.ok(said, 'kern.log says why')
+end)
+
 T.done()

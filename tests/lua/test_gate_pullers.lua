@@ -40,6 +40,16 @@ local function units(...)
   return r
 end
 
+-- Neuausrichtung 15b (the reach rule holds a drill raise while a unit can reach the footprint): the fort of units() with everybody but the two pullers
+-- 7 and 8 (who are excluded from the census as pullers) 25+ tiles from every footprint; without pullers (o.nopull) they are far too
+local function units_far(o)
+  local r = S.far_units()
+  r[#r + 1] = S.cit(6, 56, 95)
+  r[#r + 1] = o and o.nopull and S.cit(7, 57, 96) or S.cit(7, 57, 48)
+  r[#r + 1] = o and o.nopull and S.cit(8, 58, 97) or S.cit(8, 58, 49)
+  return r
+end
+
 local function burrow_box(name) return dfhack.burrows.findByName(name)._bbox end
 
 local function lever_at(W, p)
@@ -156,10 +166,9 @@ T.test('DRILL: the 2 nearest adult civilians (no soldier, child or moody dwarf) 
 end)
 
 T.test('pullers make the O1 pull fast: taken at once, O1 up by T+600 (without them: T+700, take 160)', function()
-  local out = function() return units(S.cit(9, 100, 100)) end    -- outside: the raise waits for T+450
   local res = {}
   for _, act in ipairs({true, false}) do
-    local W = setup{act = act, units = out}
+    local W = setup{act = act, units = function() local r = units_far{nopull = not act}; r[#r + 1] = S.cit(9, 100, 100); return r end}   -- 9 outside: the raise waits for T+450
     run(W, 1500, {{50, drill}})
     local k = W.drill.kpi
     res[act] = k
@@ -203,7 +212,7 @@ T.test('a puller who never arrives is replaced after 600 ticks, a dead one at on
 end)
 
 T.test('without act.burrow_units: no assignment, one warning, the rooms still in the alert list', function()
-  local W = setup{act = false}
+  local W = setup{act = false, units = function() return units_far{nopull = true} end}
   run(W, 1600, {{50, drill}})
   T.eq(#W.find_acts('burrow_units'), 0)
   local warns = 0

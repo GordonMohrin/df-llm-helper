@@ -200,4 +200,37 @@ T.test('(vi) GATE_CRUSH_RISK (forced raise, round 3 bounded crush) names every u
   T.ok(ev[5].d.k == 'child' and ev[5].d.unit == 30001, ev[5].msg)
 end)
 
+---------------------------------------------------------------- (vii) DRILL (second review of 15b: the drill's timed rules left a gap beyond CROSS_REACH)
+-- the drill is outside SIEGE / BREACH like ALERT: a walker 14+ steps out (past CROSS_REACH = 13, so the old drill rule let the pull stand) can step onto the footprint
+-- during a measured lever latency of 1000 ticks, so no pull is made and none is kept. B1 = footprint 50..52,40; the drill module ends the drill at T+1200+
+-- (the restore), so the checks look at the first 1100 ticks.
+local function drill_world(actors)
+  local W = B.build{mode = 'DRILL', lat = 1000, actors = actors}
+  W.load(S.drill())
+  return W
+end
+
+T.test('(vii) DRILL, lever latency 1000, a citizen standing 15 tiles out (no path DF shows: not a crosser, not beside the footprint): no pull, B1 stays down, nobody ' ..
+       'crushed; the old drill rule pulled', function()
+  local W = drill_world({{id = 700, kind = 'citizen', pos = {51, 25}, still = true, nopath = true}})
+  B.run(W, 1100)
+  T.eq(#B.pulls(W, 'B1'), 0, 'no pull with a unit 15 tiles out: ' .. table.concat(B.pulls(W, 'B1'), ','))
+  T.eq(S.bstate(W, 'B1'), 'down')
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+end)
+
+T.test('(vii) DRILL, lever latency 1000, the recall streams over B1 from 14..20 steps out (a walker on a path): no pull while one can reach it, nobody crushed', function()
+  local W = drill_world(stream(0, 6, 150, 200, 20))
+  B.run(W, 1100)
+  T.eq(#W.crushed, 0, 'crushed: ' .. names(W))
+  T.eq(#B.pulls(W, 'B1'), 0, 'no pull while the stream runs: ' .. table.concat(B.pulls(W, 'B1'), ','))
+end)
+
+T.test('(vii) DRILL, a clear approach (nobody within 24 tiles), lever latency 1000: B1 is pulled and up, nobody crushed', function()
+  local W = drill_world({{id = 700, kind = 'citizen', pos = {51, 90}, still = true, nopath = true}})
+  B.run(W, 1100)
+  T.ok(B.flips(W, 'B1', 'up')[1] ~= nil, 'B1 up')
+  T.eq(#W.crushed, 0)
+end)
+
 T.done()

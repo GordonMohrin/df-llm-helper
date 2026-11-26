@@ -25,3 +25,5 @@ On main the window tests fail (the window opens at +1242 with the idler in place
 
 ## Live-Erwartung
 After `B1 opens for 600 ticks ... (return window)` and the civilians' return, `GATE B1 closes its return window early: nobody is left outside it`, then `B1 up waits ...` and B1 up within ~1000-1500 ticks of the last return; with a unit that would keep it down, `B1 stays up: no return window for N civilians outside it, it could not be raised again: citizen N (d tiles)` once a day instead of the window. A bridge still down after a game day of want says `B1 has been wanted up in PEACE for N ticks ... is still down: soldier N (d tiles), ...` once. NOT promised: that civilians outside always get in (they wait while the blocker stays).
+
+Second review of 15b: `return_forecast` answered nil without a census list and `return_window` took that for 'no blockers', opening the window (fail open). Now it fails closed: the bridge stays up, kern.log says `no census around it`, the next pass asks again. Test: `test_bug905_909_b1.lua` (forecast nil: no return window, B1 never moves).

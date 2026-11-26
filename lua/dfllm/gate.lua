@@ -2002,7 +2002,7 @@ function M.drop_standers(K, list)
 end
 
 -- Neuausrichtung 15b: the units that can reach the footprint of `name` before a raise queued now has moved (outside SIEGE / BREACH, whose rules are
--- the timed force of rounds 3 and 12; a DRILL, where the recall has called everybody in and the squads march to their stations, keeps its own timed rules). A unit of the census scan `sc.far` (PATH_R tiles, the walkers on the levels beside it too) counts when
+-- the timed force of rounds 3 and 12; a DRILL counts like ALERT: its raise that finds a unit in reach waits, and the drill's T+900 drop reports it as occupied). A unit of the census scan `sc.far` (PATH_R tiles, the walkers on the levels beside it too) counts when
 -- steps x REACH_TPT <= REACH_TICKS: steps = the walk path onto the footprint when DF shows one (a crosser), else the tiles between it and the
 -- footprint (a lower bound of its walk); REACH_TICKS = max(the measured lever latency, REACH_FLOOR) + TIMED_WIN (the bridge's own movement).
 -- Standing, working, walking elsewhere, a soldier at his station: all count (a station 4 tiles out is 36 ticks away); tame animals do not unless
@@ -2011,7 +2011,7 @@ end
 function M.reach_ticks()
   return math.max(st.lat and st.lat.t or 0, M.REACH_FLOOR) + M.TIMED_WIN
 end
-M.REACH_MODES = {ALERT = true, RECOVERY = true, PEACE = true}      -- DRILL keeps its own timed rules (CROSS_REACH, the drill's recall and settle): reported as a residual risk
+M.REACH_MODES = {ALERT = true, RECOVERY = true, PEACE = true, DRILL = true}      -- everything outside SIEGE / BREACH (round 15b, second review: the drill's timed rules left a gap beyond CROSS_REACH)
 function M.reach_applies(K, name)
   if not M.REACH_MODES[K.mode()] then return false end
   local br = st.br[name]
@@ -3671,7 +3671,15 @@ local function return_window(K, name, now)
   -- BUG-908 (Run 17 i3: the window lowered B1 and the quiet re-raise never came): an inner bridge is lowered for the returning civilians only when
   -- the raise afterwards is possible by the same rule (peace_busy), the returners themselves aside; else it says so once a game day and tries again
   local fc = M.return_forecast(K, name, now)
-  if fc and #fc > 0 then
+  if not fc then
+    -- Neuausrichtung 15b (second review): no census, no forecast: fail closed, the bridge stays up and the next pass asks again
+    if not r.rf_ev or now - r.rf_ev >= M.FAIL_REPEAT then
+      r.rf_ev = now
+      K.log('info', 'gate: %s return window waits: no census around it, so no forecast that it could be raised again', name)
+    end
+    return
+  end
+  if #fc > 0 then
     if not r.rf_ev or now - r.rf_ev >= M.FAIL_REPEAT then
       r.rf_ev = now
       local parts = {}

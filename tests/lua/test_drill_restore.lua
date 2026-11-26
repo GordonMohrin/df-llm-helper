@@ -63,10 +63,12 @@ end)
 
 T.test('BUG-251: a citizen standing 2 tiles from B1 holds the lowering only for the quiet window (BUG-493: QUIET_DRILL 500 ticks), ' ..
        'then B1 comes down inside RESTORE_MAX and the drill ends in PEACE', function()
-  local W = world{units = {X.cit(99, {pos = {51, 42, Z}})}}            -- inside Kern+, 2 tiles from B1
+  local W = world{units = {X.cit(99, {pos = {150, 150, Z}})}}            -- far while the drill raises (round 15b: a unit within reach holds the raise)
   start(W)
   local t0 = W.K.now().tick
-  X.run(W, 1300)
+  X.run(W, 1100)
+  W.move(99, 51, 42, Z)                                                -- ... then inside Kern+, 2 tiles from B1
+  X.run(W, 200)
   T.eq({W.K.mode(), S.bstate(W, 'B1')}, {'DRILL', 'up'}, 'waits for its quiet window')
   T.eq(X.call(W, 'drill', 'restoring'), true)
   T.eq(X.call(W, 'drill', 'hold'), 'running')
@@ -82,7 +84,7 @@ end)
 
 T.test('BUG-251: a citizen standing NEXT to B1 holds the lowering for good; after RESTORE_MAX PEACE anyway, DRILL_RESULT ' ..
        'restore -1 names it, kern.log warns', function()
-  local W = world{units = {X.cit(99, {pos = {51, 44, Z}})}}            -- inside Kern+
+  local W = world{units = {X.cit(99, {pos = {150, 150, Z}})}}            -- far while the drill raises
   start(W)
   local t0 = W.K.now().tick
   X.run(W, 1100)                                                       -- B1 is up
@@ -141,9 +143,11 @@ end)
 
 T.test('BUG-251: a hostile during the restore: the mode goes on (ALERT), DRILL_RESULT restore -1 names it, no PEACE ' ..
        'from the drill', function()
-  local W = world{units = {X.cit(99, {pos = {51, 42, Z}}), S.danger(300, 150, 150, Z, {hidden = true})}}
+  local W = world{units = {X.cit(99, {pos = {150, 150, Z}}), S.danger(300, 150, 150, Z, {hidden = true})}}
   start(W)
-  X.run(W, 1300)
+  X.run(W, 1100)
+  W.move(99, 51, 42, Z)
+  X.run(W, 200)
   T.eq(X.call(W, 'drill', 'restoring'), true)
   W.unit(300)._m.hidden = false
   X.run(W, 100)
@@ -157,9 +161,11 @@ T.test('BUG-251: a hostile during the restore: the mode goes on (ALERT), DRILL_R
 end)
 
 T.test('BUG-251: a reload mid-restore continues it from persist: one DRILL_RESULT, then PEACE', function()
-  local W = world{units = {X.cit(99, {pos = {51, 42, Z}})}}
+  local W = world{units = {X.cit(99, {pos = {150, 150, Z}})}}
   start(W)
-  X.run(W, 1300)
+  X.run(W, 1100)
+  W.move(99, 51, 42, Z)
+  X.run(W, 200)
   T.eq(X.call(W, 'drill', 'restoring'), true)
   for i, e in ipairs(W.entries) do if e.name == 'drill' then table.remove(W.entries, i) end end
   W.mods.drill = nil

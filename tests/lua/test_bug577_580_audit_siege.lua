@@ -26,7 +26,7 @@ end
 -- walkers: {id, kind = 'soldier'|'citizen'|'animal', route, start, nopath = true (no readable path ever), react = {bridge, to = {x, y}}
 -- (while the route lasts: steps onto `to` the tick that bridge moves)}
 local function build(o)
-  local units = S.fort_units()
+  local units = S.far_units()      -- round 15b: everybody 25+ tiles from the footprints (a unit in reach holds a raise); the test adds its own walkers
   local walkers = {}
   for _, w in ipairs(o.walkers or {}) do
     local x, y = w.route[1][1], w.route[1][2]
@@ -127,10 +127,12 @@ local function logged(W, s)
 end
 
 -- a soldier pacing along y = 42 (2 tiles from B1's footprint row 40), n steps, then standing; he steps onto (51, 40) when B1 moves
-local function pacer(id, n, react)
+-- leave (round 15b): after pacing he walks off to a spot 30 tiles from B1 (a unit that stands in reach holds the raise for good)
+local function pacer(id, n, react, leave)
   local r = {}
   local xs = {48, 50, 49, 50, 48}                       -- a period of 5 frames: never in step with the 25-tick look of gate
   for i = 1, n do r[#r + 1] = {xs[i % 5 + 1], 42} end
+  if leave then r[#r + 1] = {60, 70} end
   return {id = id, kind = 'soldier', route = r, start = 0, nopath = true, react = react and {bridge = 'B1', to = {51, 40}} or nil}
 end
 
@@ -221,7 +223,7 @@ end)
 
 T.test('BUG-580 (4): DRILL, a pacer beside B1 at T+900: the clock restarts instead of occupied:B1, B1 rises when he stops, the result carries ' ..
        'retries, the mechanics pass', function()
-  local W = drill_world{walkers = {pacer(840, 200, true)}}
+  local W = drill_world{walkers = {pacer(840, 200, true, true)}}
   local ok, msg = W.K.call('drill', 'start', 'test')
   T.ok(ok, tostring(msg))
   run(W, 5400)
