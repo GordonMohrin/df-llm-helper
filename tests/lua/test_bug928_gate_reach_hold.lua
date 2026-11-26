@@ -88,4 +88,40 @@ T.test('BUG-928 (verifier): the reach_hold return still marks the bridge failed 
   T.eq(#b1_fails(W), 0, 'no GATE_FAIL for it')
 end)
 
+-- BUG-928 verifier round 2 (SIEGE TRAFFIC): what gate.not_up / gate.kpi.fails / GATE_FAIL / pulls say, measured with these fixtures on main 0f4f08a4's gate.lua (temporary swap, restored)
+-- and on this one; the expected strings ARE the measured main values except gf (main emitted the class A GATE_FAIL of the reach hold: gf=1 in (b) and (c); here the GATE reach_hold line: gf=0).
+local function measure(W)
+  local G = package.loaded['dfllm.gate']
+  local nb
+  for _, x in ipairs(G.not_up(W.K) or {}) do if x.bridge == 'B1' then nb = x end end
+  local fl = {}
+  for _, f in ipairs(G.kpi(W.K).fails or {}) do if f:sub(1, 3) == 'B1:' then fl[#fl + 1] = f end end
+  return {nu = nb ~= nil, failed = nb ~= nil and nb.failed == true, kfails = #fl, kwhy = fl[1] or '-', gf = #b1_fails(W),
+          st = S.bstate(W, 'B1'), pulls = #B.pulls(W, 'B1'), crushed = #W.crushed}
+end
+local function show(m) return string.format('nu=%s failed=%s kfails=%d kwhy=%s gf=%d st=%s pulls=%d crushed=%d', tostring(m.nu), tostring(m.failed), m.kfails, m.kwhy, m.gf, m.st, m.pulls, m.crushed) end
+local MEASURE_ONLY = os.getenv('DF_MEASURE_928')
+local function expect(label, m, want)
+  if MEASURE_ONLY then print('MEASURED ' .. label .. ' ' .. show(m)) return end
+  T.eq(show(m), want, label)
+end
+
+T.test('BUG-928 (verifier 2): (a) a bridge already up in an ALERT (the PEACE peace_gates want carried over): not in not_up, not failed, no kpi fail, no GATE_FAIL; (b) reach-held B1 in ALERT; (c) after set_mode(SIEGE): identical to main 0f4f08a4', function()
+  local up = B.build{mode = 'PEACE', lock = nil, base = false, closed = {B1 = true}, cfg = {decisions = {['D-14'] = 'up'}, reflex = {v = 2, gate = {peace_clear = 0, peace_clear_r = 2}}}, actors = {}, army = {}}
+  B.run(up, 1500)
+  expect('a0 PEACE up', measure(up), 'nu=false failed=false kfails=0 kwhy=- gf=0 st=up pulls=0 crushed=0')
+  up.K.set_mode('ALERT', 'test: a lone plant eater')
+  B.run(up, 4800)
+  expect('a ALERT already up', measure(up), 'nu=false failed=false kfails=0 kwhy=- gf=0 st=up pulls=0 crushed=0')
+  up.K.set_mode('SIEGE', 'test: siege')
+  B.run(up, 2400)
+  expect('a2 SIEGE', measure(up), 'nu=false failed=false kfails=0 kwhy=- gf=0 st=up pulls=0 crushed=0')
+  local W = alert_world()
+  B.run(W, 4800)
+  expect('b ALERT reach-held', measure(W), 'nu=true failed=true kfails=1 kwhy=B1:blocked gf=0 st=down pulls=0 crushed=0')
+  W.K.set_mode('SIEGE', 'test: the plant eater turned out to be a siege')
+  B.run(W, 2400)
+  expect('c SIEGE after reach-held', measure(W), 'nu=false failed=false kfails=1 kwhy=B1:blocked gf=0 st=up pulls=1 crushed=0')
+end)
+
 T.done()

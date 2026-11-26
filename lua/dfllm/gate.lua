@@ -3627,17 +3627,37 @@ function M.reach_held(K, r, mode)
   return true
 end
 
+-- the class of a failed raise (GATE_FAIL `why`, kpi.fails entry)
+local function fail_why(K, r, slow, mode)
+  -- BUG-342: more pulls cancelled for units walking toward it than left without a worker: 'cancelled', not no_worker
+  local ap = r.ap or 0
+  local why = FAIL_WHY[r.stuck] or (slow and FAIL_WHY.slow) or (M.ne_any(r) and FAIL_WHY.no_effect) or
+              (ap > r.nw and FAIL_WHY.cancelled) or (r.nw > 0 and 'no_worker') or 'timeout'
+  if why == 'no_worker' then                          -- BUG-013: nobody may take it while the alert sounds
+    local out = r.nw_out                              -- seen at a no-worker cancel; else now, in a step only (a
+    if out == nil and mode == nil then                -- mode change has just moved the alert to another burrow)
+      local bs = alert_burrows(K)
+      out = bs ~= nil and not lever_in(r, bs)
+    end
+    if out then why = FAIL_WHY.outside end
+  end
+  return why
+end
+
 local function check_fail(K, name, now, mode)
   local br = st.br[name]
   if not (br and br.want == 'up' and not br.failed and br.deadline and now >= br.deadline) then return end
   local m0 = mode or K.mode()
   if QUIET_UP[br.why] and m0 == 'PEACE' then return end   -- mode: the epoch's own (a MODE change settles it)
-  if QUIET_UP[br.why] and (m0 == 'ALERT' or m0 == 'RECOVERY') and not lock_why(K) then
-    br.failed, dirty = true, true       -- BUG-928: the PEACE age of a leftover quiet want: no GATE_FAIL, but `failed` as before (siege's failed_bridge / breach_stuck read it)
-    return
-  end
   local r = runtime(name)
   if r.last == 'up' then return end
+  if QUIET_UP[br.why] and (m0 == 'ALERT' or m0 == 'RECOVERY') and not lock_why(K) then
+    -- BUG-928: the PEACE age of a leftover quiet want: no GATE_FAIL, but `failed` and the kpi.fails entry as before (siege's failed_bridge / breach_stuck, gate.kpi, drill reports)
+    br.failed, dirty = true, true
+    local f = st.kpi.fails
+    if #f < 8 then f[#f + 1] = name .. ':' .. fail_why(K, r, false, mode) end
+    return
+  end
   if r.stuck == 'blocked' and r.block_since and now - r.block_since >= M.DEADLINE and M.reach_held(K, r, m0) then
     -- BUG-928: the reach rule holds it down on purpose: said as a GATE line, never a class A failure (SIEGE / BREACH / DRILL are not here)
     if not r.rh_ev or now - r.rh_ev >= M.FAIL_REPEAT then
@@ -3647,6 +3667,8 @@ local function check_fail(K, name, now, mode)
       K.log('info', 'gate: %s', txt)
     end
     br.failed, dirty = true, true       -- BUG-928: as before the wording change the bridge counts as failed for siege (failed_bridge, breach_stuck); only the A event is gone
+    local f = st.kpi.fails
+    if #f < 8 then f[#f + 1] = name .. ':' .. fail_why(K, r, false, mode) end
     return
   end
   local slow
@@ -3669,18 +3691,8 @@ local function check_fail(K, name, now, mode)
     end
   end
   br.failed, dirty = true, true
-  -- BUG-342: more pulls cancelled for units walking toward it than left without a worker: 'cancelled', not no_worker
   local ap = r.ap or 0
-  local why = FAIL_WHY[r.stuck] or (slow and FAIL_WHY.slow) or (M.ne_any(r) and FAIL_WHY.no_effect) or
-              (ap > r.nw and FAIL_WHY.cancelled) or (r.nw > 0 and 'no_worker') or 'timeout'
-  if why == 'no_worker' then                          -- BUG-013: nobody may take it while the alert sounds
-    local out = r.nw_out                              -- seen at a no-worker cancel; else now, in a step only (a
-    if out == nil and mode == nil then                -- mode change has just moved the alert to another burrow)
-      local bs = alert_burrows(K)
-      out = bs ~= nil and not lever_in(r, bs)
-    end
-    if out then why = FAIL_WHY.outside end
-  end
+  local why = fail_why(K, r, slow, mode)
   local f = st.kpi.fails
   if #f < 8 then f[#f + 1] = name .. ':' .. why end
   if (mode or K.mode()) == 'DRILL' then return end    -- a drill reports through drill.kpi, not A events

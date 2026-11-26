@@ -23,6 +23,9 @@ Module: `lua/dfllm/drill.lua` (`measure`, `finish`), `lua/dfllm/gate.lua` (`M.re
 ## Verifier round (NEU19)
 The two new early returns of `gate.check_fail` (the reach hold; the leftover quiet want in an ALERT / RECOVERY without lockdown) set `br.failed` as the GATE_FAIL path did, only the A event is gone: `gate.not_up` reports `failed = true` as before, so `siege.failed_bridge` / `breach_stuck` read the same. Test: the ALERT -> SIEGE switch with a reach-held bridge was measured identical on 0f4f08a4 (before BUG-928), the first BUG-928 commit and this one (SIEGE raises B1 with one pull, nobody crushed).
 
+## Verifier round 2 (NEU19)
+Two nits of `gate.check_fail` fixed: (1) the `r.last == 'up'` return is first again (as on 0f4f08a4), so the quiet-want and reach-hold returns never mark a raised bridge `failed`; (2) both returns append `name:why` to `st.kpi.fails` as the GATE_FAIL path did (`fail_why` extracted, same classification), so `gate.kpi` and drill reports are unchanged. Test `test_bug928_gate_reach_hold.lua` (last test): (a) bridge up in ALERT, (b) reach-held bridge in ALERT, (c) after `set_mode('SIEGE')`: `not_up` / `failed` / kpi.fails / pulls / crushed asserted equal to the values measured on main's gate.lua by a temporary swap (only difference: no class A GATE_FAIL in (b)/(c), by design).
+
 ## Tests
 `tests/lua/test_bug928_drill_held.lua`, `tests/lua/test_bug928_gate_reach_hold.lua` (SIEGE TRAFFIC fixtures of `b1_world`: soldiers pacing at the station under a real hostile, nobody crushed, B1 still down); older tests that pinned the GATE_FAIL text for a reach hold now read the `reach_hold` line.
 
