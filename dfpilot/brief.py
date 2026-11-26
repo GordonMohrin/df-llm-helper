@@ -834,6 +834,22 @@ def refuge_place(s: dict) -> tuple[str, bool, str]:
     return where + ("; no accepted water in it" if dry else "") + f"; nearest accepted water: {lbl}, {wd} tiles", dry, lbl
 
 
+def _wood_text(st: dict) -> str:
+    """NEU16 BUG-910 / BUG-911: ' wood N usable (F far, M loose unusable; K built in)'. far = free logs farther than the near distance from every
+    Carpenter's workshop and wood pile; loose unusable = the rest of the loose logs (another walk group, held, forbidden, ...; and the count DF's
+    'Needs logs' cancels disbelieved); built in = logs in walls and buildings."""
+    wood, total, far = st.get("wood", 0), st.get("woodt", 0), st.get("woodf", 0)
+    loose = max(0, total - wood - far)
+    parts = [p for p in ((f"{far} far" if far else ""), (f"{loose} loose unusable" if loose else "")) if p]
+    text = f" wood {wood} usable"
+    if parts or st.get("woodb"):
+        text += " (" + ", ".join(parts) + (f"; {st['woodb']} built in" if st.get("woodb") and parts else
+                                             f"{st['woodb']} built in" if st.get("woodb") else "") + ")"
+    if st.get("woodd"):
+        text += f" [DF cancels 'Needs logs': the count of {st['woodd']} is disbelieved]"
+    return text
+
+
 def _hospital(s: dict, st: dict) -> str:
     """BUG-034: the hospital's water as the kernel's water module judges it (state water: an accepted source within
     `near` tiles of every hospital zone; src = accepted sources; the patients), else care's narrower stock.hosp_water
@@ -933,7 +949,11 @@ def supply_items(ctx: Ctx) -> list[tuple[int, str]]:
             + (f" leather {st['leather']}" if "leather" in st else "")
             # NEU4 BUG-842: what the fort holds is not what a job can use: usable of all, only where they differ
             # NEU7 BUG-855: logs built into walls and buildings are no stock: shown apart ("wood 0 (25 loose unusable; 336 built in)")
-            + (f" wood {st.get('wood', 0)} ({max(0, st.get('woodt', 0) - st.get('wood', 0))} loose unusable; {st['woodb']} built in)"
+            # NEU16 BUG-910 / BUG-911: "wood N usable (F far, M loose unusable; K built in)": far = free logs beyond the distance of every Carpenter's workshop and wood pile,
+            # and, when DF cancelled 'Needs logs' beside a positive count, the count that was disbelieved
+            + (_wood_text(st) if st.get("woodf") or st.get("woodd") else "")
+            + ("" if st.get("woodf") or st.get("woodd") else
+               f" wood {st.get('wood', 0)} ({max(0, st.get('woodt', 0) - st.get('wood', 0))} loose unusable; {st['woodb']} built in)"
                if st.get("woodb") and st.get("woodt", 0) > st.get("wood", 0) else
                f" wood {st.get('wood', 0)} ({st['woodb']} built in)" if st.get("woodb") else
                f" wood {st.get('wood', 0)} usable of {st['woodt']}" if st.get("woodt") else "")

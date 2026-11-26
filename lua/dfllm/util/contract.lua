@@ -93,6 +93,7 @@ C.EVENTS = {
   -- BUG-875: a Water Source zone the kernel painted outside the fort, removed once accepted water stands inside
   WATER_OUTSIDE_RETIRED = {cls = 'B', by = 'water'},
   WATER_OUTSIDE_RESTORED = {cls = 'B', by = 'water'},   -- BUG-875: the retired zone painted again once no strong inside source stands
+  WOOD_DISBELIEVED = {cls = 'B', by = 'economy'},   -- NEU16 BUG-911: DF cancelled 'Needs logs' beside a positive near-log count: autochop and the texts count 0 usable for 28 game days
   PILE_BARREL_RELEASE = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 6: a kernel food pile's barrel limit lowered because it holds registered empty barrels; measured 1 and 7 game days later
   BREW_CANCEL_SNAPSHOT = {cls = 'B', by = 'economy'},   -- NEU13 BUG-887 round 3: once per game day when DF cancels a brew for want of an empty food storage item: the empties by state, read only
   -- A since Run 9 (an army walked in while these were digest-only): wake at once
@@ -358,6 +359,7 @@ C.ACT = {
   sand_zone = {'economy'}, fish_zone = {'economy'},
   drink_pile = {'economy'},                        -- BUG-782: the refuge's drink store without a dig
   tool_pile = {'economy'},                         -- BUG-053: a weapons stockpile for the miners' picks near the mines
+  wood_pile = {'economy'},                         -- NEU16 BUG-913: a wood stockpile dfllm-wood beside the Carpenter's workshop (quickfort key w)
   zone_place = {'runner', 'economy'},              -- FR-78: the verb zone.place (zonelib); BUG-232: the manager's office zone
   ws_task = {'economy'},                           -- BUG-231: workshop sheet > add task (chair, table, door, bed, blocks)
   mood_task = {'care'},                            -- BUG-284: the Loom sheet > add task > collect webs (a mood needs silk)
@@ -399,7 +401,7 @@ C.STATE_OWNERS = {
   ['stock.ore'] = 'economy', ['stock.bars'] = 'economy', ['stock.leather'] = 'economy', ['stock.metal'] = 'economy',
   ['stock.mood_miss'] = 'economy', ['stock.rock'] = 'economy', ['stock.wall'] = 'economy', ['stock.rock_need'] = 'economy', ['stock.rsoil'] = 'economy', ['stock.rhard'] = 'economy', ['stock.nowood'] = 'economy', ['stock.mfree'] = 'economy', ['stock.mroute'] = 'economy', ['stock.mtp'] = 'economy', ['stock.mfar'] = 'economy',
   ['stock.picks'] = 'economy', ['stock.pick_want'] = 'economy', ['stock.mshort'] = 'economy', ['stock.melt'] = 'economy',
-  ['stock.dwhy'] = 'economy', ['stock.dfar'] = 'economy', ['stock.dall'] = 'economy', ['stock.wood'] = 'economy', ['stock.woodt'] = 'economy', ['stock.woodb'] = 'economy', ['stock.cont'] = 'economy', ['stock.contt'] = 'economy', ['stock.contw'] = 'economy', ['stock.dcx'] = 'economy', ['stock.rsv'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy', ['stock.dfd'] = 'economy', ['stock.dfwhy'] = 'economy',
+  ['stock.dwhy'] = 'economy', ['stock.dfar'] = 'economy', ['stock.dall'] = 'economy', ['stock.wood'] = 'economy', ['stock.woodt'] = 'economy', ['stock.woodb'] = 'economy', ['stock.woodf'] = 'economy', ['stock.woodd'] = 'economy', ['stock.cont'] = 'economy', ['stock.contt'] = 'economy', ['stock.contw'] = 'economy', ['stock.dcx'] = 'economy', ['stock.rsv'] = 'economy', ['stock.bshort'] = 'economy', ['stock.hungry'] = 'economy', ['stock.dforb'] = 'economy', ['stock.fforb'] = 'economy', ['stock.dfd'] = 'economy', ['stock.dfwhy'] = 'economy',
   ['stock.hosp_water'] = 'care', ['care.*'] = 'care', ['curse.*'] = 'care', ['mood'] = 'care', ['labor.*'] = 'economy', ['orders.*'] = 'economy',
   ['threat.*'] = 'threat', ['bridges'] = 'gate', ['owners.*'] = 'arbiter',
   ['mil.*'] = 'military', ['trade.*'] = 'trade',
@@ -549,6 +551,7 @@ C.STATE_SPEC = obj({
                     pick_want = NAT, mshort = FLAG, melt = NAT,     -- Run 11: metal short, items marked for melting
                     dwhy = str(80),                 -- BUG-042: why the stills do not brew below the drink target (NEU4: DF's own cancel reason leads)
                     wood = NAT, woodt = NAT, woodb = NAT,        -- NEU4 BUG-842: usable logs / all logs, only when they differ ('wood 0 usable of 204')
+                    woodf = NAT, woodd = NAT,                    -- NEU16 BUG-910 / BUG-911: free logs far from every Carpenter's workshop and wood pile (no stock); the count DF's 'Needs logs' cancels disbelieve
                     cont = NAT, contt = NAT, contw = str(90),   -- NEU13 BUG-887: why the others are no container ('3 a trader's, 2 in a mood pile'); NEU4 BUG-842: usable / all empty containers (barrels + pots), only when they differ
                     dcx = FLAG,                     -- NEU4 BUG-841: DF cancels brews 'Needs empty food storage item' (the stills lack a container, not a Still)
                     rsv = FLAG,                     -- NEU11 BUG-880: the standing container reserve orders the containers itself

@@ -196,10 +196,14 @@ T.test('NEU1 P8: a free brewer reaches the Still: the missing inputs are named (
   T.eq(r.cause, 'input_forbidden', r.text)
   p.flags.forbid = false
   p.flags.rotten = true
-  T.eq(ask(W, 'brew').cause, 'no_input', 'a rotten plant does not count (flags1.unrotten)')
+  -- NEU16 BUG-915: items of the type exist but none fits: 'scan unverified', never no_input from the scan alone
+  r = ask(W, 'brew')
+  T.eq(r.cause, 'scan_unreliable', 'a rotten plant does not count (flags1.unrotten), but the scan is no proof: ' .. r.text)
+  T.ok(r.text:find('scan unverified (1 items of that type exist', 1, true), r.text)
+  T.ok(not r.text:find('0 match', 1, true), r.text)
   p.flags.rotten = false
   p.mat_index = 2
-  T.eq(ask(W, 'brew').cause, 'no_input', 'a plant without the DRINK_MAT product does not count')
+  T.eq(ask(W, 'brew').cause, 'scan_unreliable', 'a plant without the DRINK_MAT product does not count: unverified')
   p.mat_index = 1
   T.eq(ask(W, 'brew').cause, 'unknown', 'plant and barrel free: nothing named')
   df.global.world.items.other.FOOD_STORAGE[0]._contents = {{id = 1}}
@@ -434,6 +438,64 @@ T.test('NEU1 P8 BUG-818: a "nojob" brew stall (the guess "DF counts items its ow
   local found = false
   for _, l in ipairs(W.logs) do if tostring(l.msg):find('jobwhy brew: order ' .. o.id, 1, true) then found = true end end
   T.ok(found, 'kern.log carries the order-level query line')
+end)
+
+-- NEU16 BUG-915 (BUG-836 / 868 / 896: '0 match' for every job item with an item_type): the scan walks the vector of the item's TYPE, not the one job_item.vector_id decodes
+-- to (items_other_id vs job_item_vector_id are not proven the same enum); a typed scan that finds none although items of the type exist says 'scan unverified'
+local function wood_job(W, b, ji)
+  local j = {id = 880, job_type = df.job_type.CustomReaction, reaction_name = 'BREW_DRINK_FROM_PLANT', mat_type = -1, mat_index = -1, flags = {},
+             _holder = b, order_id = -1, items = kmock.vec{}, job_items = {elements = kmock.vec{ji}}}
+  b.jobs:insert('#', j)
+  return j
+end
+local function wood(W, n, o)
+  o = o or {}
+  for _ = 1, n do
+    F.item(W, 'WOOD', {mat_type = 420, flags = o.flags or {}, _pos = o.pos or {12, 12, 100}, getSubtype = function() return -1 end,
+                       getMaterial = function() return 420 end, getMaterialIndex = function() return 0 end})
+  end
+end
+T.test('NEU16 BUG-915: a WOOD job item whose vector_id decodes to ANOTHER vector (FISH_RAW) still scans the WOOD vector: 5 free logs match; the mismatch is printed', function()
+  local W = world{brewers = {1}}
+  local b = still(W)
+  wood_job(W, b, {item_type = df.item_type.WOOD, item_subtype = -1, mat_type = -1, mat_index = -1, quantity = 1, vector_id = df.items_other_id.FISH_RAW,
+                  flags1 = {}, has_material_reaction_product = '', reaction_class = ''})
+  wood(W, 5)
+  local r = ask(W, 'job:880')
+  local e = r.inputs[1]
+  T.eq({e.match, e.free, e.vec, e.vec_mismatch}, {5, 5, 'type', 'FISH_RAW'}, require('testlib').show(e))
+  T.ok(not e.unverified)
+  T.ok(r.cause ~= 'no_input' and r.cause ~= 'scan_unreliable', 'logs lie free: ' .. tostring(r.cause) .. ' / ' .. r.text)
+end)
+
+T.test('NEU16 BUG-915: items of the type exist but none fits the filter: "scan unverified (N items of that type exist, K near)", cause scan_unreliable, never no_input / "0 match"', function()
+  local W = world{brewers = {1}, groups = {[200] = 7}}
+  local b = still(W)
+  wood_job(W, b, {item_type = df.item_type.WOOD, item_subtype = -1, mat_type = 999, mat_index = -1, quantity = 1, vector_id = 18,
+                  flags1 = {}, has_material_reaction_product = '', reaction_class = ''})
+  wood(W, 4)
+  wood(W, 3, {pos = {200, 5, 100}})                                  -- another walk group
+  local r = ask(W, 'job:880')
+  local e = r.inputs[1]
+  T.ok(e.unverified, 'unverified')
+  T.eq({e.ntype, e.tnear}, {7, 4})
+  T.eq(r.cause, 'scan_unreliable', r.text)
+  T.ok(r.text:find('scan unverified (7 items of that type exist, 4 near)', 1, true), r.text)
+  T.ok(not r.text:find('0 match', 1, true) and not r.text:find('none:', 1, true), r.text)
+  -- DF's own reason leads: with a cancel on record the cause becomes df_reason with its words first
+  local r2 = JW.find(W.K, 'job:880', {df = function() return {why = 'Needs logs', n = 5, days = 7, last = 1, text = 'DF cancelled Make wooden barrel 5x in 7 d: Needs logs'} end})
+  T.eq(r2.cause, 'df_reason')
+  T.ok(r2.text:find('DF cancelled Make wooden barrel 5x in 7 d: Needs logs |', 1, true), r2.text)
+end)
+
+T.test('NEU16 BUG-915: no item of the type exists at all: the old "0 match" and no_input stay (a proof, not a scan artifact)', function()
+  local W = world{brewers = {1}}
+  local b = still(W)
+  wood_job(W, b, {item_type = df.item_type.WOOD, item_subtype = -1, mat_type = -1, mat_index = -1, quantity = 1, vector_id = 18,
+                  flags1 = {}, has_material_reaction_product = '', reaction_class = ''})
+  local r = ask(W, 'job:880')
+  T.eq(r.cause, 'no_input', r.text)
+  T.ok(r.text:find('wood x1: 0 match', 1, true), r.text)
 end)
 
 T.test('NEU1 P8: the fish stall asks before the labor cure: the cause is the state before the cure sets the labor', function()

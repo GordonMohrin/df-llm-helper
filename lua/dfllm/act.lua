@@ -1311,6 +1311,22 @@ local function impls(state)
     return true, n or 1
   end
 
+  -- NEU16 BUG-913 (Run 17 i1 Diedplank: no wood stockpile, felled logs lay 50 tiles from the Carpenter's): the stockpiles screen > add stockpile > Wood, a w x h stockpile named
+  -- dfllm-wood (quickfort place key `w`, no containers wanted: the wood category has none) on revealed plain floor beside the Carpenter's workshop. The caller read the tiles (act
+  -- reads none); nothing is dug, moved or hauled by the kernel: DF's haulers bring the loose logs. Returns ok, stockpiles designated (0 = quickfort skipped the tiles: refused).
+  function I.wood_pile(pos, w, h)
+    local x, y, z = xyz(pos)
+    x, y, z = int(x), int(y), int(z)
+    if not (x and y and z) then return false, 'pos must be {x,y,z}' end
+    w, h = math.max(1, math.min(int(w) or 3, 5)), math.max(1, math.min(int(h) or 2, 5))
+    local cell = string.format('w{name=dfllm-wood}(%dx%d)', w, h)
+    local ok, stats = I.quickfort({mode = 'place', data = {[0] = {[0] = {[0] = cell}}}, pos = {x, y, z}})
+    if not ok then return false, stats end
+    local n = type(stats) == 'table' and int(stats.place_designated) or nil
+    if n == 0 then return false, 'quickfort designated no stockpile there' end
+    return true, n or 1
+  end
+
   -- BUG-782 (Run 16b i2 Whirledrampart y451: the refuge stood dry for good, no cistern route, no refuge room to dig a store from; Run 16a
   -- i1 y543 refuge_drink refused 'no refuge in manifest'): the refuge's drink store without a dig: a w x h stockpile named dfllm-drink
   -- (seal.CFG.store) on revealed plain floor of the refuge burrow, a drink-only food pile (quickfort `f` with `:=booze`, the cell

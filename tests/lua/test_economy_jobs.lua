@@ -193,7 +193,7 @@ T.test('FR-40: ids of dead or departed citizens leave every work detail; workloa
   T.eq(r.data.tools, {pick = 2, pick_free = 1, pick_bin = 0, pick_res = 0, pick_forb = 0, pick_melt = 0, pick_own = 0,
                       pick_far = 0, pick_use = 1,
                       axe = 1, axe_free = 1, axe_bin = 0, axe_res = 0, axe_forb = 0, axe_melt = 0, axe_own = 0,
-                      axe_far = 0, axe_use = 1})                                                     -- BUG-053: far, use
+                      axe_far = 0, axe_use = 1, errs = 0, kept = 0, age = 0})                              -- BUG-053: far, use; NEU16 BUG-914: errs, kept, age
   T.eq({r.data.unreachable, r.data.idle_noreach, r.data.waiting}, {{}, 0, nil}, 'no snapshot, no job board: all count')
 end)
 

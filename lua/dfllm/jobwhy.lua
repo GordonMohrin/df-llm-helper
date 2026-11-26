@@ -431,7 +431,19 @@ function J.inputs(K, job, s, ctx)
       local e = {_pts = {}, idx = idx, need = int(pget(function() return ji.quantity end)) or 1, match = 0, free = 0, forbid = 0, claimed = 0, far = 0}
       local vid = int(pget(function() return ji.vector_id end)) or -1
       local it = int(pget(function() return ji.item_type end)) or -1
-      local vname = (vid >= 0 and ename(df.items_other_id, vid)) or (it >= 0 and ename(df.item_type, it)) or 'IN_PLAY'
+      -- NEU16 BUG-915 (BUG-836 / BUG-868 / BUG-896: '0 match' for EVERY job item that has an item_type: wood, plant, plant growth; the one text with item_type -1 matched): the vector
+      -- the scan walked came from `ename(df.items_other_id, ji.vector_id)`, while act.lua writes the same field from df.job_item_vector_id (act.ws_task, mood_task) and brewsnap reads
+      -- it as items_other_id too. The live reading 'item_type=5(WOOD) vector_id=18' cannot say that items_other_id[18] is WOOD (the two enums are not proven to share values; not
+      -- decidable offline). A job item with an item_type can only be met by items of that type, and world.items.other has a vector of the same name for the types the scans
+      -- care about: that vector is walked first (e.vec 'type'); the decoded vector_id stays as `vdec` and a name that differs is printed (`vec_mismatch`), so one live reading decides.
+      local vdec = vid >= 0 and ename(df.items_other_id, vid) or nil
+      local tname = it >= 0 and ename(df.item_type, it) or nil
+      local tvec = tname and pget(function() return df.global.world.items.other[tname] end) or nil
+      local vname = (tvec ~= nil and tname) or vdec or tname or 'IN_PLAY'
+      e.vec = (tvec ~= nil and 'type') or (vdec and 'vector_id') or 'type'
+      e.vdec, e.tname = vdec, tname
+      e.vec_mismatch = (tvec ~= nil and vdec and vdec ~= tname) and vdec or nil
+      e.itype = it >= 0 or nil
       e.what = (it >= 0 and ename(df.item_type, it) or vname):lower()
       local f1 = pget(function() return ji.flags1 end)
       e.bfilter = vname == 'BOULDER' and pget(function() return ji.flags2.non_economic end) == true and pget(function() return ji.flags3.hard end) == true or nil
@@ -449,6 +461,13 @@ function J.inputs(K, job, s, ctx)
             local fl, skip = item.flags, false            -- item_flags names (DF 53); a missing one ends the scan: unknown
             for _, k in ipairs(SKIP) do if fl[k] == true then skip = true; break end end
             if not skip then
+              e.ntype = (e.ntype or 0) + 1                  -- NEU16 BUG-915: the items of the scanned vector that DF's job picker could look at (not built in, not a trader's ...)
+              if #(e._tpts or {}) < 200 then
+                e._tpts = e._tpts or {}
+                local tx, ty, tz = pget(dfhack.items.getPosition, item)
+                if type(tx) == 'table' then tx, ty, tz = tx.x, tx.y, tx.z end
+                if int(tx) then e._tpts[#e._tpts + 1] = {tx, ty, tz} end
+              end
               if vname == 'BOULDER' and not (item.flags.forbid or item.flags.dump or item.flags.in_job) then e.btot = (e.btot or 0) + 1 end   -- NEU14 BUG-896
               local fit, approx = item_fits(ji, item)
               if fit then
@@ -480,6 +499,20 @@ function J.inputs(K, job, s, ctx)
           end
         end
       end
+      -- NEU16 BUG-915: a typed scan that matched nothing although items of the type exist is NOT 'none': it says so with the counts (items of the type, those on the workshop's walk
+      -- group among the first 200); no_input is never concluded from it (DF's own cancel reason leads: attach_df)
+      if e.itype and not e.btot and e.match == 0 and (e.ntype or 0) > 0 and not e.unknown and not e.clipped then      -- a boulder item states its own filter (BUG-896 counts)
+        e.unverified = true
+        if s and s.groups and e._tpts and #e._tpts > 0 then
+          local gl = walk_groups(K, e._tpts)
+          if gl then
+            local k = 0
+            for _, g in ipairs(gl) do if int(g) and g > 0 and s.groups[g] then k = k + 1 end end
+            e.tnear = k
+          end
+        end
+      end
+      e._tpts = nil
       -- BUG-836 (Run 17 i2: 'plant (DRINK_MAT) x1: 0 match' beside 6,932 plants in the census): a scan that finds none where the census holds many
       e.cens = J.census_count(ctx and ctx.inv, e)
       out[#out + 1] = e
@@ -499,6 +532,11 @@ function J.census_count(inv, e)
 end
 
 function J.input_text(e)
+  if e.unverified then       -- NEU16 BUG-915: never '0 match, 0 free' for a typed scan while items of that type exist
+    return string.format('%s x%d: scan unverified (%d items of that type exist, %s near)%s%s', e.what, e.need, e.ntype or 0, e.tnear ~= nil and tostring(e.tnear) or '?',
+                         e.vec_mismatch and string.format('; job_item.vector_id decodes as %s, the scan walked the %s vector', e.vec_mismatch, tostring(e.tname)) or '',
+                         e.cens and e.cens > 0 and string.format('; the census holds %d usable', e.cens) or '')
+  end
   -- BUG-868 (Run 17 i2 'plant (DRINK_MAT) x1: 0 match' beside 'items:plants 936 free, 923 in a container'): plants in a container are DF's normal
   -- case and count as input; a scan that finds none while the census holds some says so instead of claiming none
   local parts = {(e.match == 0 and (e.cens or 0) > 0) and string.format('0 match by the scan, the census holds %d usable (plants inside containers count as input)', e.cens)
@@ -539,6 +577,9 @@ function J.input_cause(ins)
       return 'input_burrow', J.input_text(e) .. ': none inside the burrows the free holders are held to'
     end
     if not e.unknown and not e.clipped and e.free == 0 then
+      if e.unverified then
+        return 'scan_unreliable', J.input_text(e) .. ' (the scan may be wrong: not a proven cause; the own cancel reason of DF leads)'
+      end
       if e.match == 0 and (e.cens or 0) >= 10 then
         return 'scan_unreliable', string.format('census holds %d, the scan found none: %s (the scan may be wrong: not a proven cause)', e.cens, J.input_text(e))
       end

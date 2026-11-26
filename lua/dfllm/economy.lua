@@ -1094,6 +1094,54 @@ function M.pile_registered(a, it)
   end
   return a.regset.set[it.id]
 end
+-- NEU16 BUG-910 (Run 17 i2 Whirledrampart y424: 'MakeBarrel x40 wood' built nothing in 1.5 game years, DF 'Needs logs' beside census wood 192 and 202 logs 'free as
+-- DF sees it'; every free log lay at the map edge 15,25,143, ~97 tiles west, 128 north and 6 levels above the Carpenter's): a free log counts as STOCK (`wood`) only when it
+-- lies in a kernel stockpile (name dfllm-...) or within `wood.near_d` (40) of the nearest built Carpenter's workshop or of a stockpile that takes wood; the distance is
+-- max(|dx|, |dy|) + 3 |dz| to the building's box (the weighting of economy's pile centres, M.pile_site's neighbour), no pathfinding. Every other free log is `wood_dist`.
+-- Without a Carpenter's workshop and without a wood pile the rule is off (no anchor: every free log is near, as before).
+M.WOOD_NEAR_D = 40
+function M.wood_anchors(near_d)
+  local A = {shops = {}, piles = {}, kern = {}, d = near_d or M.WOOD_NEAR_D}
+  pcall(function()
+    for _, b in ipairs(df.global.world.buildings.other.WORKSHOP_ANY) do
+      local okb, done = pcall(function() return b:getBuildStage() >= b:getMaxBuildStage() end)
+      if df.workshop_type[b.type] == 'Carpenters' and (not okb or done) and math.tointeger(b.x1) and math.tointeger(b.y1) and math.tointeger(b.z) then
+        A.shops[#A.shops + 1] = {b.x1, b.y1, math.tointeger(b.x2) or b.x1, math.tointeger(b.y2) or b.y1, b.z}
+      end
+    end
+  end)
+  pcall(function()
+    for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+      local rect = {sp.x1, sp.y1, sp.x2, sp.y2, sp.z}
+      local nm = dfhack.df2utf(sp.name or '')
+      if nm:sub(1, 6) == 'dfllm-' then A.kern[#A.kern + 1] = rect end
+      local okw, wood = pcall(function() return sp.settings.flags.wood == true end)
+      if okw and wood then A.piles[#A.piles + 1] = rect end
+    end
+  end)
+  A.on = #A.shops + #A.piles > 0
+  return A
+end
+function M.wood_rect_dist(r, x, y, z)
+  local dx = math.max(r[1] - x, 0, x - r[3])
+  local dy = math.max(r[2] - y, 0, y - r[4])
+  return math.max(dx, dy) + 3 * math.abs(z - r[5])
+end
+-- true when the log `it` is stock (see above); the anchors are read once per census (a.wanch)
+function M.wood_near(a, it)
+  if a.wanch == nil then a.wanch = M.wood_anchors(a.wood_d) end
+  local A = a.wanch
+  if not A.on then return true end
+  local ok, near = pcall(function()
+    local x, y, z = dfhack.items.getPosition(it)
+    if not x then return true end
+    for _, r in ipairs(A.kern) do if z == r[5] and x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4] then return true end end
+    for _, r in ipairs(A.shops) do if M.wood_rect_dist(r, x, y, z) <= A.d then return true end end
+    for _, r in ipairs(A.piles) do if M.wood_rect_dist(r, x, y, z) <= A.d then return true end end
+    return false
+  end)
+  return not ok or near
+end
 local function classify(it, a, cat)
   local f = it.flags
   local w = skip_mask and f.whole
@@ -1261,7 +1309,8 @@ local function classify(it, a, cat)
       if why == 'nowalk' then a.wood_nw = a.wood_nw + n end
     elseif not f.in_inventory and ((math.type(a.fw) == 'integer' and M.JOB_BIT and a.fw & M.JOB_BIT ~= 0) or (not (math.type(a.fw) == 'integer' and M.JOB_BIT) and f.in_job == true)) then
       a.wood_busy = a.wood_busy + n
-    else a.wood = a.wood + n; reach_mark(a, it, 'wood') end
+    elseif M.wood_near(a, it) then a.wood = a.wood + n; reach_mark(a, it, 'wood')
+    else a.wood_dist = a.wood_dist + n; reach_mark(a, it, 'wood') end      -- NEU16 BUG-910: free, reachable and far from every shop and pile: no stock
   elseif M.PIECE_INV[cat] then
     -- Run 11: free doors, hatch covers, grates and blocks (not built in, not taken by a job): what a seal piece or a
     -- planned building can use now (T.jmake, economy.mat_for)
@@ -1433,7 +1482,8 @@ local ZERO = {'drink', 'food', 'meals', 'cloth', 'leather', 'bone', 'shell', 'ge
               'rock_nouse',  -- BUG-733: boulders no mason may take (ore, flux, economic, soft, refused): each counted once
               'blocks_busy', -- BUG-736
               'wood_far', 'wood_forb',   -- BUG-705
-              'wood_nw', 'wood_busy', 'wood_skip', 'wood_built', 'drink_far'}   -- NEU4 BUG-842: logs on tiles with no walk group, logs a job holds, logs DF skips (in a building ...)
+              'wood_nw', 'wood_busy', 'wood_skip', 'wood_built', 'drink_far',
+              'wood_dist'}   -- NEU16 BUG-910: loose logs on the citizens' walk group that lie farther from every Carpenter's workshop and wood pile than wood.near_d (counted apart, not `wood`)   -- NEU4 BUG-842: logs on tiles with no walk group, logs a job holds, logs DF skips (in a building ...)
 local function new_acc(c)
   local fs = {}
   for _, k in ipairs(c.food_cats or {}) do fs[k] = true end
@@ -1445,6 +1495,7 @@ local function new_acc(c)
              reach = {}, food_pos = {}, res = {}, tool_items = {pick = {}, axe = {}}, web_probes = 0, kc = {}, ined = {},
              bc = {}, kx = {}, cban = {}}
   for _, k in ipairs(ZERO) do a[k] = 0 end
+  a.wood_d = math.tointeger((c.wood or {}).near_d)          -- NEU16 BUG-910
   -- BUG-023: weapons a squad uniform reserved (equipment screen; DF hands no reserved pick or axe out as a work tool)
   pcall(function()
     for _, id in ipairs(df.global.plotinfo.equipment.items_assigned.WEAPON) do a.res[id] = true end
@@ -1479,7 +1530,46 @@ local function vlen(cat)
   return ok and n or 0
 end
 
-local function publish(K, c, a)
+-- NEU16 BUG-914 (Run 17 i1 Diedplank: 'axe 0, pick 0' read from the census while 14 axes and 23 picks existed; the census runs in slices under pcall and a read that fails is
+-- only counted (cs.errs), a reload or a partial census then published zeros wholesale): a pick or axe class that reads 0 from a census with unreadable items (errs > 0) or from an
+-- EMPTY tool census (no pick and no axe at all) while the last COMPLETE census (errs 0, persisted: m.economy `toolsl`) held some keeps the last complete reading for at most
+-- M.TOOLS_HOLD_DAYS game days; inv.tools_kept = 1, inv.tools_age = its age in ticks, inv.cerrs = the unreadable items of this census (inspect what=workload key=tools shows all three).
+M.TOOLS_HOLD_DAYS = 3
+function M.tool_key(k) return k:match('^w_pick') or k:match('^w_axe') end
+function M.tools_hold(K, i, a, errs)
+  local now = K.now().tick
+  local p = pstate(K)
+  local last = type(p.toolsl) == 'table' and p.toolsl or nil
+  local empty = (a.w_pick or 0) + (a.w_axe or 0) == 0
+  local kept, age = false, 0
+  if last and type(last.v) == 'table' and (errs > 0 or empty) and now - (math.tointeger(last.t) or 0) <= M.TOOLS_HOLD_DAYS * DAY then
+    for _, cl in ipairs({'pick', 'axe'}) do
+      if (a['w_' .. cl] or 0) == 0 and (math.tointeger(last.v['w_' .. cl]) or 0) > 0 then
+        for k, v in pairs(last.v) do if k == 'w_' .. cl or k:sub(1, #cl + 3) == 'w_' .. cl .. '_' then i[k] = math.tointeger(v) or 0 end end
+        kept, age = true, math.max(age, now - (math.tointeger(last.t) or now))
+      end
+    end
+  end
+  i.cerrs = errs
+  if kept then
+    i.tools_kept, i.tools_age = 1, age
+    if st.tool_items_last then a.tool_items = st.tool_items_last end
+    return
+  end
+  i.tools_kept, i.tools_age = 0, 0
+  if errs == 0 and not empty then
+    local v = {}
+    for _, k in ipairs(ZERO) do if M.tool_key(k) then v[k] = i[k] end end
+    st.tool_items_last = a.tool_items
+    if not last or now - (math.tointeger(last.t) or 0) >= DAY // 4 then
+      p.toolsl = json.object{t = now, v = json.object(v)}
+      K.persist.touch('m.economy')
+    else
+      last.v = json.object(v)
+    end
+  end
+end
+local function publish(K, c, a, errs)
   local kinds = 0
   for _ in pairs(a.kinds) do kinds = kinds + 1 end
   local crafts = 0
@@ -1490,6 +1580,10 @@ local function publish(K, c, a)
   -- built in), what economy may spend
   local i = {tick = K.now().tick, meal_kinds = kinds, boulders = vlen('BOULDER'), blocks = vlen('BLOCKS'), crafts = crafts}
   for _, k in ipairs(ZERO) do i[k] = a[k] end
+  do
+    local okt, errt = pcall(M.tools_hold, K, i, a, math.tointeger(errs) or 0)       -- NEU16 BUG-914
+    if not okt then K.log('warn', 'tools census hold: %s', tostring(errt):sub(1, 120)) end
+  end
   if st.farm then i.farm_plots, i.farm_empty = st.farm.plots, st.farm.empty end   -- FR-17 (T.farmslots)
   K.census.i = i
   st.bars_by, st.ores, st.seeds = a.bars_by, a.ores, a.seeds
@@ -3840,7 +3934,50 @@ function M.dead_wood_barrel(K, o, why)
   if not (okj and job == 'MakeBarrel') or not M.logs_words(why) then return false end
   local okm, wood = pcall(function() return o.material_category.wood == true end)
   if not (okm and wood) then return false end
-  return (math.tointeger((K.census.i or {}).wood) or 0) <= 0
+  local inv = K.census.i or {}
+  return (math.tointeger(inv.wood) or 0) + (math.tointeger(inv.wood_dist) or 0) <= 0       -- NEU16 BUG-910: logs far from every shop are logs the felling can still bring near
+end
+
+-- NEU16 BUG-911 (Run 17 i2: DF cancelled 'Make wooden barrel / Make charcoal: Needs logs' over and over with 192 logs counted and 202 'free as DF sees it'): DF's own cancel is the
+-- proof that the count is not what its job picker can use. At least `n` (3) 'Needs logs' cancels (any job: barrel, bed, charcoal, ...) in `days` (7) game days while the kernel
+-- counts usable (near) logs set the 'wood disbelieved' state for `hold` (28) game days (persisted m.economy `wdis` {t, n, w}): for autochop (M.wood_usable) and for the status / ladder
+-- texts the usable wood is 0 then, and WOOD_DISBELIEVED says so once. Orders and floors still read the census (DF decides what it takes); the state ends by itself.
+M.WOODDIS = {n = 3, days = 7, hold = 28}
+-- the active record {t, n, w} or nil (read only: pstate)
+function M.wood_disbelieved(K, now)
+  local p = K.persist.get('m.economy')
+  local d = type(p) == 'table' and p.wdis or nil
+  if type(d) ~= 'table' then return nil end
+  now = now or K.now().tick
+  local t = math.tointeger(d.t)
+  if not t or now - t >= (M.WOODDIS.hold) * DAY or now < t then return nil end
+  return d
+end
+-- the logs that count as stock for autochop and the texts: the census' near logs, 0 while disbelieved
+function M.wood_usable(K, inv, now)
+  inv = inv or K.census.i or {}
+  if M.wood_disbelieved(K, now) then return 0 end
+  return math.max(0, math.tointeger(inv.wood) or 0)
+end
+-- evaluated by T.chop (each economy run): sets the state, emits WOOD_DISBELIEVED once per episode
+function M.wood_belief(K, c, now, inv)
+  now = now or K.now().tick
+  inv = inv or K.census.i or {}
+  if M.wood_disbelieved(K, now) then return true end
+  local p = pstate(K)
+  if p.wdis ~= nil then p.wdis = nil; K.persist.touch('m.economy') end          -- over: the next episode may start
+  local w = math.max(0, math.tointeger(inv.wood) or 0)
+  if w <= 0 or (c.wood or {}).disbelieve == false then return false end
+  local D = M.WOODDIS
+  local n = M.CW.count(M.cw_tally(K), now, math.tointeger((c.wood or {}).dis_days) or D.days, nil, 'needs logs')
+  if n < (math.tointeger((c.wood or {}).dis_n) or D.n) then return false end
+  p.wdis = json.object{t = now, n = n, w = w}
+  K.persist.touch('m.economy')
+  local txt = string.format('DF cancelled %d wood jobs (Needs logs) although the count is %d: the count is not what DF can use', n, w)
+  K.log('warn', 'economy: %s; wood disbelieved for %d game days (autochop and the texts count 0 usable logs; near %d, far %d, loose unusable %d)', txt, D.hold, w,
+        math.tointeger(inv.wood_dist) or 0, (math.tointeger(inv.wood_far) or 0) + (math.tointeger(inv.wood_busy) or 0) + (math.tointeger(inv.wood_skip) or 0))
+  K.emit('WOOD_DISBELIEVED', 'B', txt:sub(1, 199), {n = n, w = w, d = D.hold})
+  return true
 end
 
 local function needs_cancel(K, c, oid, job, why)
@@ -8116,7 +8253,7 @@ function T.days(K, c, r)
   end
   p.days_t, p.meals = now.tick, math.tointeger((r.inv or {}).meal_kinds)
   -- BUG-607: since when the fort has had no log (M.treeless); no tree on the map at all counts as of the first day
-  if (math.tointeger((r.inv or {}).wood) or 0) > 0 then p.nowood = nil
+  if (math.tointeger((r.inv or {}).wood) or 0) + (math.tointeger((r.inv or {}).wood_dist) or 0) > 0 then p.nowood = nil
   elseif math.tointeger(p.nowood) == nil then
     p.nowood = now.tick
     if M.count_trees() == 0 then p.nowood = now.tick - (math.tointeger((c.pieces or {}).treeless_days) or 20) * DAY end
@@ -8778,7 +8915,7 @@ function M.count_trees()
 end
 function M.treeless(c, r)
   local days = math.tointeger((c.pieces or {}).treeless_days) or 20
-  if days <= 0 or (math.tointeger(r.inv.wood) or 0) > 0 then return false end
+  if days <= 0 or (math.tointeger(r.inv.wood) or 0) + (math.tointeger(r.inv.wood_dist) or 0) > 0 then return false end      -- NEU16: far logs are logs
   local since = math.tointeger(r.p.nowood)
   return since ~= nil and r.now - since >= days * DAY
 end
@@ -9858,7 +9995,14 @@ function M.wood_cancel(K, job, why, tick)
   local nw, busy, skip = math.tointeger(inv.wood_nw) or 0, math.tointeger(inv.wood_busy) or 0, math.tointeger(inv.wood_skip) or 0
   local built = math.tointeger(inv.wood_built) or 0       -- NEU7 BUG-855: logs built into walls and buildings are no stock
   local cause
-  if free > 0 then cause = 'DF refuses logs the census counts usable (reachable, not forbidden, in no job)'
+  local dist = math.tointeger(inv.wood_dist) or 0                                    -- NEU16 BUG-910
+  if free > 0 then
+    cause = 'DF refuses logs the census counts usable (reachable, not forbidden, in no job, near a Carpenter workshop or wood pile)'
+    local dis = M.wood_disbelieved(K, tick)
+    if dis then cause = cause .. string.format('; wood disbelieved since %d d (the count of %d is not what DF can use)', (tick - (math.tointeger(dis.t) or tick)) // DAY, math.tointeger(dis.w) or 0) end
+  elseif dist > 0 then
+    cause = string.format('%d free logs lie farther than %d tiles from every Carpenter workshop and wood pile: no stock (autochop fells relative to the plugin own count, a wood pile gathers the logs)', dist,
+                          math.tointeger((M.conf(K).wood or {}).near_d) or M.WOOD_NEAR_D)
   elseif far > 0 then
     -- NEU4 BUG-845: where they lie is read per item (why items:logs --raw, the sample): tile type, liquid, building, stockpile
     cause = string.format('every log lies on another walk group than the citizens or on a tile without walk group (%d without, %d on another group), %d more held by a job, %d in buildings or otherwise skipped by DF; '
@@ -12796,13 +12940,40 @@ function T.wood(K, c, r)
   if not okw then K.log('warn', 'wood orders: %s', tostring(nw)) end
 end
 
--- autochop target: the free logs economy keeps plus the wood still ordered plus a margin (live L3: logs 82 -> 9
 -- while the furniture fallback ran); applied when it moved by `step` or more
+--
+-- NEU16 BUG-912 (Run 17 i2 Whirledrampart: kern.log 'autochop target 197 107 (floor 5, wood ordered 82)' with 192 logs counted: the plugin never fells while its own log count is
+-- above the min). DFHack's autochop counts ITS OWN stock, not the kernel's: docs/tools/autochop.txt (E:/DF-test4/hack/docs/docs/tools/autochop.txt): "Autochop checks your stock of
+-- logs and designates appropriate trees for chopping once every in-game day. Logs that are forbidden or inaccessible (e.g. in hidden parts of the map, under water, etc.) are not
+-- counted towards your target." So it counts every free, reachable log on the whole map, near the fort or at the map edge, in or out of a stockpile. The kernel's count (`wood`,
+-- the near logs) is smaller: the target must be set relative to the plugin's count. plugin ~ wood + wood_dist + (wood_far - wood_nw: another walk group, accessible to the plugin
+-- as far as the docs say) + wood_busy (held by a job, still loose); forbidden logs (wood_forb) and logs on a tile with no walk group (wood_nw: under water, walled in) are not in
+-- it. An over-count only fells a little more (bounded by chop_cap), an under-count would keep the fort felling nothing, so the unknowns are counted in. The wanted gap is
+-- need (floor + wood on order + margin) minus the NEAR logs that count (0 while the wood is disbelieved, M.wood_belief): min = plugin count + gap, max = min + band. The area
+-- is the one the kernel always allowed: no `autochop chop <burrow>` is ever set, so the plugin takes every accessible tree on the map (DF's own rules for the woodcutters'
+-- burrows and the civ alert stay; BUG-910's near rule changes only what is called stock, never where trees fall).
+function M.chop_count(inv)
+  local function g(k) return math.max(0, math.tointeger(inv[k]) or 0) end
+  return g('wood') + g('wood_dist') + math.max(0, g('wood_far') - g('wood_nw')) + g('wood_busy')
+end
 function T.chop(K, c, r)
   local w = c.wood or M.DEFAULTS.wood
+  local inv = r.inv or K.census.i or {}
+  local okb, errb = pcall(M.wood_belief, K, c, r.now or K.now().tick, inv)
+  if not okb then K.log('warn', 'wood belief: %s', tostring(errb):sub(1, 120)) end
+  if not HUNT_MODES[K.mode()] then return true end         -- NEU16 BUG-912: SIEGE / ALERT / BREACH: the target stays as it is, nothing sends woodcutters out
+  local near = M.wood_usable(K, inv)
   local need = floor_of(c, r.p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (w.margin or 20)
   local mn = clamp(need, w.chop_min or 60, (w.cap or 400) - (w.band or 90))
   local mx = clamp(math.max(w.chop_max or 150, mn + (w.band or 90)), mn + 1, w.cap or 400)
+  local seen = M.chop_count(inv)
+  local gap = math.max(0, need - near)
+  local rel = false
+  if gap > 0 and seen > near then
+    mn = math.min(seen + gap, math.max(w.chop_cap or 1200, w.cap or 400))
+    mx = mn + (w.band or 90)
+    rel = true
+  end
   st.chop = {mn, mx}
   local base = ((K.cfg.baseline or {}).baseline or {}).autochop or {}
   local cur = st.chop_applied or {math.tointeger(base.min) or (w.chop_min or 60), math.tointeger(base.max) or (w.chop_max or 150)}
@@ -12810,9 +12981,72 @@ function T.chop(K, c, r)
   r.cmds = r.cmds + 1
   if K.act.run('autochop', 'target', fmt(mx), fmt(mn)) then
     st.chop_applied = {mn, mx}
-    K.log('info', 'autochop target %d %d (floor %d, wood ordered %d)', mx, mn, floor_of(c, r.p, r, 'wood'),
-          (r.s.used.wood or 0) + (r.planned.wood or 0))
+    K.log('info', 'autochop target %d %d (floor %d, wood ordered %d; near logs %d, plugin sees ~%d%s)', mx, mn, floor_of(c, r.p, r, 'wood'),
+          (r.s.used.wood or 0) + (r.planned.wood or 0), near, seen, rel and (', relative to its count' .. (M.wood_disbelieved(K) and ', wood disbelieved' or '')) or '')
   end
+end
+
+-- NEU16 BUG-913 (Run 17 i1 Diedplank: no wood stockpile, 'registering piles by tag' lists none, the fresh logs lay 50 tiles from the carpenters): DF's haulers carry a loose log only to
+-- a stockpile that takes wood. When the fort has none (no stockpile of any owner with the wood category) but a built Carpenter's workshop and wood is wanted (the near logs are below
+-- need = floor + wood on order + margin, or free logs lie far from every shop), a w x h wood stockpile `dfllm-wood` (act.wood_pile, quickfort `w`; 3 x 2) goes on revealed plain
+-- floor beside the first shop that has a free site (M.pile_site: same walk group, off the attack path, no building, nothing dug). Every `every` (28) days, `retry` (1) after a try
+-- that found no site. A pile that cannot be placed says so once per `every` days: DECISION_NEEDED wood_pile with the one existing command that helps meanwhile.
+M.WOODPILE = {w = 3, h = 2, r = 12, reads = 700, every = 28, retry = 1}
+function T.woodpile(K, c, r)
+  local wc = c.wood or M.DEFAULTS.wood
+  if not r.day or not HUNT_MODES[K.mode()] or wc.pile == false or type(K.act.wood_pile) ~= 'function' then return true end
+  local W, p = M.WOODPILE, r.p
+  local rec = type(p.wpile) == 'table' and p.wpile or {}
+  local A = M.wood_anchors(wc.near_d)
+  if #A.piles > 0 then                                     -- a pile that takes wood stands (ours or the player's)
+    if rec.state ~= 'placed' and rec.state ~= 'exists' then rec.state = 'exists'; p.wpile = json.object(rec); K.persist.touch('m.economy') end
+    return true
+  end
+  if #A.shops == 0 then return true end                    -- no Carpenter's workshop to stand beside
+  local inv = r.inv or {}
+  local need = floor_of(c, p, r, 'wood') + (r.s.used.wood or 0) + (r.planned.wood or 0) + (wc.margin or 20)
+  if (math.tointeger(inv.wood) or 0) >= need and (math.tointeger(inv.wood_dist) or 0) <= 0 then return true end
+  local wait = rec.state == 'nosite' and W.retry or W.every
+  if rec.t and r.now - rec.t < wait * DAY then return true end
+  local tc = {pile_w = W.w, pile_h = W.h, pile_r = W.r, pile_reads = W.reads}
+  local site, why, at
+  local whys = {}
+  for _, s in ipairs(A.shops) do
+    local cx, cy = (s[1] + s[3]) // 2, (s[2] + s[4]) // 2
+    local st1, wy = M.pile_site(K, tc, {at = {cx, cy, s[5]}, by = 'carpenter'})
+    if st1 then site, at = st1, {cx, cy, s[5]}; break end
+    whys[#whys + 1] = tostring(wy)
+    at = at or {cx, cy, s[5]}
+  end
+  why = table.concat(whys, '; ')
+  r.cmds = r.cmds + 1
+  local out = {t = r.now, dn = math.tointeger(rec.dn)}
+  local failed
+  if site then
+    local ok, n = K.act.wood_pile(site, W.w, W.h)
+    if ok then
+      out.state, out.at, out.w, out.h = 'placed', json.array(site), W.w, W.h
+      K.log('info', 'wood pile: dfllm-wood %dx%d at %d,%d,%d beside the Carpenter\'s workshop at %d,%d,%d: no stockpile takes wood (near logs %d of %d wanted, %d far)', W.w, W.h,
+            site[1], site[2], site[3], at[1], at[2], at[3], math.tointeger(inv.wood) or 0, need, math.tointeger(inv.wood_dist) or 0)
+    else
+      out.state, out.why = 'refused', tostring(n):sub(1, 60)
+      failed = 'quickfort refused it at ' .. table.concat(site, ',') .. ': ' .. tostring(n)
+      K.log('warn', 'wood pile: dfllm-wood at %d,%d,%d refused: %s', site[1], site[2], site[3], tostring(n))
+    end
+  else
+    out.state, out.why = 'nosite', tostring(why):sub(1, 120)
+    failed = tostring(why)
+    K.log('debug', 'wood pile: no site: %s', tostring(why))
+  end
+  if failed and (not out.dn or r.now - out.dn >= W.every * DAY) then
+    out.dn = r.now
+    local q = string.format('no stockpile takes wood and none could be placed beside the Carpenter\'s workshop at %s (%s): the haulers cannot bring felled logs in; free a %dx%d floor beside the shop, meanwhile ask the caravans',
+                            at and table.concat(at, ',') or '?', failed:sub(1, 90), W.w, W.h)
+    K.emit('DECISION_NEEDED', 'A', q:sub(1, 200), {id = 'wood_pile', q = q:sub(1, 200), cmds = {[[dfllm cmd trade.want '{"add":["wood"]}']]}})
+  end
+  p.wpile = json.object(out)
+  K.persist.touch('m.economy')
+  return true
 end
 
 -- fiber crops the fort has seeds of: autofarm threshold up while cloth is short (thread comes from them), back to
@@ -16190,7 +16424,7 @@ function T.finish(K, c, r)
 end
 
 local FULL = {'guard', 'days', 'kitchen', 'appoint', 'food', 'fishz', 'gather', 'watch', 'cmdq', 'engine', 'labor_fix',
-              'scan', 'slabs', 'slotnow', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'cover', 'fcrew', 'starve', 'forbid', 'toolpile', 'drinkpile',
+              'scan', 'slabs', 'slotnow', 'ocheck', 'slaughter', 'plan', 'prune', 'tools', 'cover', 'fcrew', 'starve', 'forbid', 'toolpile', 'woodpile', 'drinkpile',
               'jobs', 'jsite', 'jmat', 'stale', 'jmake', 'jfree', 'jresume',
               'jcheck', 'boost', 'jmove', 'pb', 'orders', 'stand', 'wood', 'chop', 'crops',
               'farm', 'farmslots', 'imports', 'piles', 'status', 'idle', 'finish'}
@@ -16436,7 +16670,7 @@ function M.step(K, budget, ctx)
       mask_bad = false
       K.log('warn', 'census: the item flag mask disagreed with the flag reads; reading flags one by one')
     end
-    publish(K, c, cs.acc)
+    publish(K, c, cs.acc, cs.errs)
     st.run = new_run(K, c, cs.start)
   end
   if not run_slice(K, c) then return 'more' end
@@ -16523,8 +16757,13 @@ function M.state(K)
     end
     do                                                              -- NEU4 BUG-842: usable vs total where they differ ('wood 0 usable of 204')
       local wd = math.max(0, math.tointeger(inv.wood) or 0)
-      local wt = wd + (math.tointeger(inv.wood_far) or 0) + (math.tointeger(inv.wood_busy) or 0) + (math.tointeger(inv.wood_forb) or 0) + (math.tointeger(inv.wood_skip) or 0)
+      local wf = math.max(0, math.tointeger(inv.wood_dist) or 0)                -- NEU16 BUG-910: free logs far from every Carpenter's workshop and wood pile
+      local wt = wd + wf + (math.tointeger(inv.wood_far) or 0) + (math.tointeger(inv.wood_busy) or 0) + (math.tointeger(inv.wood_forb) or 0) + (math.tointeger(inv.wood_skip) or 0)
+      local dis = M.wood_disbelieved(K)                                          -- NEU16 BUG-911: DF cancelled 'Needs logs' beside a positive count
+      if dis then wd = 0 end
       if wt > wd then r.stock.wood, r.stock.woodt = wd, wt end
+      if wf > 0 then r.stock.woodf, r.stock.woodt, r.stock.wood = wf, wt, wd end
+      if dis then r.stock.woodd, r.stock.woodt, r.stock.wood = math.max(0, math.tointeger(dis.w) or 0), wt, 0 end
       -- NEU7 BUG-855 (Run 17 i4 y394: 'wood 0 usable of 361', 336 of them built into walls): built-in logs are no stock; shown apart, never in `woodt`
       local wb = math.tointeger(inv.wood_built) or 0
       if wb > 0 then r.stock.wood, r.stock.woodt, r.stock.woodb = wd, wt, wb end
@@ -16881,6 +17120,10 @@ function M.tool_counts(inv)
     t[k] = inv['w_' .. k] or 0
     for _, s in ipairs({'free', 'bin', 'res', 'forb', 'melt', 'own', 'far', 'use'}) do t[k .. '_' .. s] = inv['w_' .. k .. '_' .. s] or 0 end
   end
+  -- NEU16 BUG-914: the census error counter, and whether this is the last complete reading (kept) and how old it is (ticks)
+  t.errs = math.tointeger(inv.cerrs) or 0
+  t.kept = (math.tointeger(inv.tools_kept) or 0) > 0 and 1 or 0
+  t.age = math.tointeger(inv.tools_age) or 0
   return t
 end
 

@@ -34,7 +34,7 @@ QUIET_TYPES = ("AQ_HEAVY", "AQ_RING_STOP", "AUTOLABOR_LEGACY", "CAVERN_PLUG", "C
 QUIET_DECISIONS = ("seal_stalled", "no_hard_stone", "metal", "steel", "defense_gap", "refuge_dry", "refuge_levers",
                    "bridge_levers", "project_released", "caravan_stale", "manager_office", "manager_absent",
                    "trade_screen", "coffin_space", "coffin_material", "squads", "preventblocking", "trap_friendly",
-                   "piece_missing", "gate_traffic", "berserk")
+                   "piece_missing", "gate_traffic", "berserk", "wood_pile")
 DEFAULTS: dict = {
     "wait": {"act": True, "repeat_s": 300, "backlog": 2000, "kernel_stale_s": 120, "follow_check": True, "popup_s": 20,
              "quiet_types": list(QUIET_TYPES), "quiet_decisions": list(QUIET_DECISIONS)},
